@@ -5,7 +5,6 @@ import { ArrowRight01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { InfoHint } from '@/components/patterns/info-hint';
 import { formatPercentDisplay } from '@/lib/format-percent';
 
 import type { DiscountCommissionBand, DiscountScenario } from '../lib/adapt-discount-list';
@@ -44,14 +43,14 @@ export interface DiscountCommissionCellProps {
   current: DiscountScenario;
   /** Discounted-price scenario — supplies the rate actually used + its source. */
   discounted: DiscountScenario;
-  /** Detail-level tariff NAME feeding the band; surfaced in the `band` info hint. */
+  /** Detail-level tariff NAME feeding the band; shown in the bands popover footer. */
   tariffName: string | null;
-  /** Detail-level tariff PERIOD label; surfaced in the `band` info hint. */
+  /** Detail-level tariff PERIOD label; shown in the bands popover footer. */
   periodLabel: string | null;
   /**
    * The item's commission-band ladder (top-down); null when no tariff week resolved bands
-   * for the barcode. When present, the rate line gains a bands popover that marks which band
-   * the current + discounted prices land in.
+   * for the barcode. When present, the WHOLE cell becomes a single popover trigger that marks
+   * which band the current + discounted prices land in and names the source tariff/period.
    */
   commissionBands: readonly DiscountCommissionBand[] | null;
 }
@@ -63,10 +62,14 @@ export interface DiscountCommissionCellProps {
  * renders the transition `current → discounted` with the pre-jump rate muted. A muted secondary
  * line names the source (tariff band / product / category). When the discounted scenario has no
  * resolved commission (not calculable / no commission) the whole cell collapses to a muted
- * em-dash. For a `band` source an {@link InfoHint} sits next to the source label, naming which
- * uploaded tariff FILE + period the rate came from (hover/focus on pointer devices; skipped on
- * touch, where the rate + source label still read on their own). Purely presentational — every
- * figure is backend-computed; this only renders.
+ * em-dash.
+ *
+ * ONE consolidated disclosure: for a `band` source with a ladder the ENTIRE cell (rate line +
+ * source label) is a single click/keyboard popover trigger — a dotted underline under the source
+ * label is the only affordance. The popover shows the band ranges with the current + discounted
+ * prices marked, and a footer naming which uploaded tariff FILE + period the rate came from.
+ * Non-band sources (product / category) are NOT interactive — plain rate + source label, no
+ * underline, no popover. Purely presentational — every figure is backend-computed; this renders.
  */
 export function DiscountCommissionCell({
   current,
@@ -98,16 +101,34 @@ export function DiscountCommissionCell({
   // differently — a genuine band jump, not a sub-display-precision wobble.
   const showTransition = currentRate !== null && currentRate !== discountedRate;
 
-  // The bands popover: shown only when a ladder exists (band-sourced items). It marks which
-  // band the CURRENT price and the DISCOUNTED price each land in — pure comparison over the
-  // 2dp DISPLAY prices already on the row (no money math; every figure is backend-computed).
+  // The rate line (transition or single rate) — identical whether or not the cell is interactive.
+  const rateLine = showTransition ? (
+    <span className="gap-3xs flex items-center text-sm tabular-nums">
+      <span className="text-muted-foreground">{currentRate}</span>
+      <ArrowRight01Icon className="text-muted-foreground size-3 shrink-0" aria-hidden />
+      <span className="text-foreground font-medium">{discountedRate}</span>
+    </span>
+  ) : (
+    <span className="text-foreground text-sm font-medium tabular-nums">{discountedRate}</span>
+  );
+
+  // The disclosure is band-only: a ladder must exist to have ranges to show + prices to mark.
   const showBandsPopover = commissionBands !== null && commissionBands.length > 0;
-  const currentBand = showBandsPopover
-    ? findBandForPrice(commissionBands, new Decimal(current.price))
-    : null;
-  const discountedBand = showBandsPopover
-    ? findBandForPrice(commissionBands, new Decimal(discounted.price))
-    : null;
+
+  // Non-band sources (product / category) have no ladder — a plain, non-interactive cell.
+  if (!showBandsPopover) {
+    return (
+      <div className="gap-3xs flex flex-col items-start">
+        {rateLine}
+        <span className="text-2xs text-muted-foreground">{sourceLabel[source]}</span>
+      </div>
+    );
+  }
+
+  // Mark which band the CURRENT price and the DISCOUNTED price each land in — pure comparison
+  // over the 2dp DISPLAY prices already on the row (no money math; every figure is backend-computed).
+  const currentBand = findBandForPrice(commissionBands, new Decimal(current.price));
+  const discountedBand = findBandForPrice(commissionBands, new Decimal(discounted.price));
   const bandMarks: CommissionBandMark[] = [];
   if (currentBand !== null) {
     bandMarks.push({ band: currentBand, label: tBands('currentMark'), tone: 'neutral' });
@@ -116,44 +137,39 @@ export function DiscountCommissionCell({
     bandMarks.push({ band: discountedBand, label: tBands('discountedMark'), tone: 'primary' });
   }
 
-  // A band rate resolves from one specific uploaded tariff week — name the file + period in an
-  // info hint. Only when both are present (band always has them; the guard keeps the message whole).
-  const tariffHint =
-    source === 'band' &&
-    tariffName !== null &&
-    tariffName !== '' &&
-    periodLabel !== null &&
-    periodLabel !== ''
-      ? {
-          name: tariffName,
-          message: t('tariffTooltip', { tariff: tariffName, period: periodLabel }),
-        }
-      : null;
+  // Popover footer: which uploaded tariff FILE + period fed the band rate (band always carries
+  // both; the guard keeps the footer whole and drops it if the detail lacks a resolved source).
+  const footer =
+    tariffName !== null && tariffName !== '' ? (
+      <div className="gap-3xs flex flex-col">
+        <span className="text-2xs text-foreground font-medium">{tariffName}</span>
+        {periodLabel !== null && periodLabel !== '' ? (
+          <span className="text-2xs text-muted-foreground">{periodLabel}</span>
+        ) : null}
+      </div>
+    ) : undefined;
 
+  // The WHOLE cell is the single popover trigger — a real <button> (keyboard-reachable), with a
+  // dotted underline under the source label as the only affordance. stopPropagation so opening
+  // the disclosure never triggers an enclosing row action.
   return (
-    <div className="gap-3xs flex flex-col items-start">
-      {/* Rate line — the transition (or single rate) plus, when a ladder exists, the bands
-          popover trigger (the same ⓘ affordance the Flash/Advantage cells use). */}
-      <span className="gap-3xs flex items-center">
-        {showTransition ? (
-          <span className="gap-3xs flex items-center text-sm tabular-nums">
-            <span className="text-muted-foreground">{currentRate}</span>
-            <ArrowRight01Icon className="text-muted-foreground size-3 shrink-0" aria-hidden />
-            <span className="text-foreground font-medium">{discountedRate}</span>
+    <CommissionBandsPopover
+      bands={commissionBands}
+      labels={bandLabels}
+      marks={bandMarks}
+      footer={footer}
+      trigger={
+        <button
+          type="button"
+          onClick={(event) => event.stopPropagation()}
+          className="focus-visible:ring-ring gap-3xs flex cursor-pointer flex-col items-start rounded-sm text-left outline-none focus-visible:ring-2"
+        >
+          {rateLine}
+          <span className="text-2xs text-muted-foreground underline decoration-dotted underline-offset-2">
+            {sourceLabel[source]}
           </span>
-        ) : (
-          <span className="text-foreground text-sm font-medium tabular-nums">{discountedRate}</span>
-        )}
-        {showBandsPopover ? (
-          <CommissionBandsPopover bands={commissionBands} labels={bandLabels} marks={bandMarks} />
-        ) : null}
-      </span>
-      <span className="gap-3xs text-2xs text-muted-foreground flex items-center">
-        {sourceLabel[source]}
-        {tariffHint !== null ? (
-          <InfoHint label={tariffHint.name}>{tariffHint.message}</InfoHint>
-        ) : null}
-      </span>
-    </div>
+        </button>
+      }
+    />
   );
 }

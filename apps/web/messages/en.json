@@ -1798,8 +1798,7 @@
         "band": "Commission tariff rate",
         "product": "Product commission rate",
         "category": "Category commission rate"
-      },
-      "tariffTooltip": "Based on the {tariff} file's {period} period."
+      }
     },
     "commissionBands": {
       "title": "Product commission offers",

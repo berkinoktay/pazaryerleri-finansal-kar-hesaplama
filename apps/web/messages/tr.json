@@ -1798,8 +1798,7 @@
         "band": "Komisyon tarifesi oranı",
         "product": "Ürün komisyon oranı",
         "category": "Kategori komisyon oranı"
-      },
-      "tariffTooltip": "Bu oran, {tariff} dosyasının {period} dönemine göre baz alındı."
+      }
     },
     "commissionBands": {
       "title": "Ürün komisyon bantları",

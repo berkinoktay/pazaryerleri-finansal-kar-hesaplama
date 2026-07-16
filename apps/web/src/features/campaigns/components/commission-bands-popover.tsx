@@ -74,6 +74,18 @@ export interface CommissionBandsPopoverProps {
    * Advantage/Flash callers → no chips, unchanged behaviour.
    */
   marks?: readonly CommissionBandMark[];
+  /**
+   * Optional custom trigger. When provided it REPLACES the default ⓘ icon button — rendered
+   * via PopoverTrigger `asChild`, so it MUST be a single focusable element (a `<button>`). The
+   * Discounts cell passes the whole commission cell here so the entire cell is the disclosure
+   * target; the Advantage/Flash callers omit it → the default ⓘ button.
+   */
+  trigger?: React.ReactNode;
+  /**
+   * Optional footer node below the band list, set off by a top divider (e.g. the Discounts
+   * vertical's source tariff name + period). Omitted by the Advantage/Flash callers → no footer.
+   */
+  footer?: React.ReactNode;
 }
 
 /**
@@ -93,18 +105,22 @@ export function CommissionBandsPopover({
   bands,
   labels,
   marks,
+  trigger,
+  footer,
 }: CommissionBandsPopoverProps): React.ReactElement {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label={labels.hint}
-          onClick={(event) => event.stopPropagation()}
-          className="text-muted-foreground-dim hover:text-muted-foreground focus-visible:ring-ring duration-fast ease-out-quart inline-flex shrink-0 cursor-pointer items-center rounded-full align-middle transition-colors outline-none focus-visible:ring-2"
-        >
-          <InformationCircleIcon className="size-icon-xs" />
-        </button>
+        {trigger ?? (
+          <button
+            type="button"
+            aria-label={labels.hint}
+            onClick={(event) => event.stopPropagation()}
+            className="text-muted-foreground-dim hover:text-muted-foreground focus-visible:ring-ring duration-fast ease-out-quart inline-flex shrink-0 cursor-pointer items-center rounded-full align-middle transition-colors outline-none focus-visible:ring-2"
+          >
+            <InformationCircleIcon className="size-icon-xs" />
+          </button>
+        )}
       </PopoverTrigger>
       <PopoverContent align="start" className="w-auto min-w-56">
         <span className="text-foreground mb-xs block text-xs font-semibold">{labels.title}</span>
@@ -145,6 +161,9 @@ export function CommissionBandsPopover({
             );
           })}
         </ul>
+        {footer !== undefined && footer !== null ? (
+          <div className="border-border mt-xs pt-xs border-t">{footer}</div>
+        ) : null}
       </PopoverContent>
     </Popover>
   );
