@@ -211,10 +211,18 @@ async function setupFixture(): Promise<Fixture> {
     },
   });
 
-  // Commission tariff — its active period bands cover the band item (by barcode) only.
+  // Commission tariff — a week that COVERS now (covering-only rule), whose period bands cover
+  // the band item (by barcode) only. Week bounds ±1 day wide are safely clear of the resolver's
+  // İstanbul wall-clock-as-UTC (~3h) normalization.
   const now = Date.now();
   const commissionTariff = await prisma.commissionTariff.create({
-    data: { organizationId: org.id, storeId: store.id, name: 'Temmuz Komisyon Tarifesi' },
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      name: 'Temmuz Komisyon Tarifesi',
+      weekStartsAt: new Date(now - 86_400_000),
+      weekEndsAt: new Date(now + 86_400_000),
+    },
   });
   const period = await prisma.commissionTariffPeriod.create({
     data: {

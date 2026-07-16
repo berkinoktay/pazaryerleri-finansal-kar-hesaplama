@@ -366,13 +366,13 @@ export const DiscountListDetailSchema = z
     ...discountConfigShape,
     exported: z.boolean(),
     // Şeffaflık: bantları besleyen komisyon tarifesi + dönem (kaynak yoksa null).
-    // Gelecekte başlayan kampanyada anchor kuralı kapsayan haftayı çözer.
+    // Bantlar yalnız anchor'ı KAPSAYAN tarife haftasından gelir; kapsayan hafta yoksa null.
     commissionTariffName: z.string().nullable(),
     commissionPeriodLabel: z.string().nullable(),
-    // Çözülen dönem NOW'dan önce bittiyse (yalnız en-iyi-eldeki fallback yolunda mümkün)
-    // true — cari haftanın tarifesi henüz yüklenmemiş demektir. Kaynak yoksa ya da dönem
-    // güncel/gelecekse false.
-    commissionPeriodExpired: z.boolean(),
+    // Mağazanın komisyon tarifesi var ama hiçbiri anchor'ı kapsamıyorsa (yüklemeler bayat ya
+    // da kampanya başlangıcına ulaşmıyor) true — komisyon ürün/kategori oranına düşer ve detay
+    // satıcıyı uyarır. Kapsayan hafta çözüldüyse ya da mağazanın hiç tarifesi yoksa false.
+    commissionTariffOutdated: z.boolean(),
     summary: DiscountListSummarySchema,
     items: z.array(DiscountListDetailItemSchema),
   })

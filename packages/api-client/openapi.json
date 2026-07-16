@@ -7307,7 +7307,7 @@
               "null"
             ]
           },
-          "commissionPeriodExpired": {
+          "commissionTariffOutdated": {
             "type": "boolean"
           },
           "summary": {
@@ -7337,7 +7337,7 @@
           "exported",
           "commissionTariffName",
           "commissionPeriodLabel",
-          "commissionPeriodExpired",
+          "commissionTariffOutdated",
           "summary",
           "items"
         ]
