@@ -1675,7 +1675,7 @@
       "orderLimit": "Sipariş limiti: {count}",
       "dateRange": "{start} – {end}",
       "assumption": "Kâr tahmini, sepetin yalnız bu üründen oluştuğu varsayımına dayanır; çok ürünlü sepetlerde sonuç farklılaşabilir.",
-      "expiredTariffNote": "Bantlar {period} tarife haftasından geliyor — güncel haftanın tarifesi henüz yüklenmedi."
+      "outdatedTariffNote": "PLACEHOLDER (EN, controller writes TR): Your uploaded commission tariffs don't cover this campaign's week — commission falls back to the product's own rate or the category rate."
     },
     "upload": {
       "title": "İndirimler Excel'ini yükleyin",

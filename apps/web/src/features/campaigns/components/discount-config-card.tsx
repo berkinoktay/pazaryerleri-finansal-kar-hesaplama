@@ -76,10 +76,10 @@ export function DiscountConfigCard({ list, onEdit }: DiscountConfigCardProps): R
         <span>{t('assumption')}</span>
       </div>
 
-      {list.commissionPeriodExpired && list.commissionPeriodLabel !== null ? (
+      {list.commissionTariffOutdated ? (
         <div className="gap-2xs text-warning text-2xs flex items-start">
           <Alert02Icon className="size-icon-xs mt-3xs shrink-0" aria-hidden />
-          <span>{t('expiredTariffNote', { period: list.commissionPeriodLabel })}</span>
+          <span>{t('outdatedTariffNote')}</span>
         </div>
       ) : null}
     </div>
