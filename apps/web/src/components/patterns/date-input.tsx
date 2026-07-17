@@ -8,10 +8,15 @@ import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { selectTriggerVariants } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  selectTriggerVariants,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
 /**
@@ -26,12 +31,12 @@ import { cn } from '@/lib/utils';
  * placeholder reads from `t('common.dateInput.placeholder')` — pass
  * the `placeholder` prop to override per-screen.
  *
- * Opt into a time-of-day picker with `withTime`: an `HH:mm` control
- * renders below the calendar, the trigger label gains the time, and the
- * popover stays open on day-select so the seller can confirm/adjust the
- * hour (closes via the "Done" affordance or an outside-click). When
- * `withTime` is omitted the component is byte-identical to the day-only
- * behavior.
+ * Opt into a time-of-day picker with `withTime`: two token-based hour
+ * (00–23) and minute (00–59) `Select`s render below the calendar, the
+ * trigger label gains the time, and the popover stays open on day-select
+ * so the seller can confirm/adjust the hour (closes via the "Done"
+ * affordance or an outside-click). When `withTime` is omitted the
+ * component is byte-identical to the day-only behavior.
  *
  * For range selection use `DateRangePicker`; for inline month grid
  * (no popover trigger) use the raw `Calendar` primitive.
@@ -51,10 +56,10 @@ function pad2(value: number): string {
   return String(value).padStart(2, '0');
 }
 
-/** Formats an {@link TimeOfDay} for the native `type="time"` control (`HH:mm`). */
-function toTimeInputValue(time: TimeOfDay): string {
-  return `${pad2(time.hours)}:${pad2(time.minutes)}`;
-}
+// Zero-padded option lists for the hour / minute Selects, built once. The value string doubles as
+// the visible label (e.g. "08", "00"), so no per-item formatting is needed.
+const HOUR_OPTIONS: readonly string[] = Array.from({ length: 24 }, (_, index) => pad2(index));
+const MINUTE_OPTIONS: readonly string[] = Array.from({ length: 60 }, (_, index) => pad2(index));
 
 export interface DateInputProps {
   /** Controlled value. `null` represents an empty field. */
@@ -94,7 +99,7 @@ export function DateInput({
   defaultTime,
 }: DateInputProps): React.ReactElement {
   const t = useTranslations('common.dateInput');
-  const timeInputId = React.useId();
+  const timeLabelId = React.useId();
   const [open, setOpen] = React.useState(false);
 
   // The hour/minute to apply on the NEXT day-selection while no value carries one yet. Once a
@@ -133,13 +138,10 @@ export function DateInput({
     // Keep the popover open so the seller can confirm/adjust the time.
   };
 
-  const handleTimeChange = (event: React.ChangeEvent<HTMLInputElement>): void => {
-    const raw = event.target.value; // "HH:mm" — empty when the native control is cleared.
-    if (raw === '') return;
-    const [hoursPart, minutesPart] = raw.split(':');
-    const hours = Number(hoursPart);
-    const minutes = Number(minutesPart);
-    if (Number.isNaN(hours) || Number.isNaN(minutes)) return;
+  // Shared H:M writer for both Selects: remembers the pending time (seed for the next day-pick) and,
+  // when a value already exists, emits a fresh Date with the H:M applied — same setHours path the
+  // day carries, so serialization + the tz round-trip are unchanged.
+  const applyTime = (hours: number, minutes: number): void => {
     setPendingTime({ hours, minutes });
     if (value != null) {
       const applied = new Date(value);
@@ -147,6 +149,9 @@ export function DateInput({
       onChange?.(applied);
     }
   };
+
+  const handleHoursChange = (next: string): void => applyTime(Number(next), effectiveTime.minutes);
+  const handleMinutesChange = (next: string): void => applyTime(effectiveTime.hours, Number(next));
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -183,23 +188,44 @@ export function DateInput({
           onSelect={handleSelect}
         />
         {withTime ? (
-          <div className="border-border p-sm gap-sm flex items-end justify-between border-t">
-            <div className="gap-3xs flex flex-col">
-              <Label htmlFor={timeInputId} className="text-2xs text-muted-foreground">
-                {t('timeLabel')}
-              </Label>
-              <Input
-                id={timeInputId}
-                type="time"
-                size="sm"
-                className="w-auto"
-                value={toTimeInputValue(effectiveTime)}
-                onChange={handleTimeChange}
-              />
+          <div className="border-border p-sm gap-sm flex flex-col border-t">
+            <Label id={timeLabelId} className="text-2xs text-muted-foreground">
+              {t('timeLabel')}
+            </Label>
+            <div className="gap-sm flex items-center justify-between">
+              <div className="gap-2xs flex items-center">
+                <Select value={pad2(effectiveTime.hours)} onValueChange={handleHoursChange}>
+                  <SelectTrigger size="sm" className="w-16" aria-labelledby={timeLabelId}>
+                    {pad2(effectiveTime.hours)}
+                  </SelectTrigger>
+                  <SelectContent>
+                    {HOUR_OPTIONS.map((hour) => (
+                      <SelectItem key={hour} value={hour}>
+                        {hour}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <span aria-hidden className="text-muted-foreground">
+                  :
+                </span>
+                <Select value={pad2(effectiveTime.minutes)} onValueChange={handleMinutesChange}>
+                  <SelectTrigger size="sm" className="w-16" aria-labelledby={timeLabelId}>
+                    {pad2(effectiveTime.minutes)}
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MINUTE_OPTIONS.map((minute) => (
+                      <SelectItem key={minute} value={minute}>
+                        {minute}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button type="button" size="sm" onClick={() => setOpen(false)}>
+                {t('done')}
+              </Button>
             </div>
-            <Button type="button" size="sm" onClick={() => setOpen(false)}>
-              {t('done')}
-            </Button>
           </div>
         ) : null}
       </PopoverContent>
