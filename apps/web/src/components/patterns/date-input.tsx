@@ -195,10 +195,13 @@ export function DateInput({
             <div className="gap-sm flex items-center justify-between">
               <div className="gap-2xs flex items-center">
                 <Select value={pad2(effectiveTime.hours)} onValueChange={handleHoursChange}>
-                  <SelectTrigger size="sm" className="w-16" aria-labelledby={timeLabelId}>
+                  <SelectTrigger size="sm" className="w-20" aria-labelledby={timeLabelId}>
                     {pad2(effectiveTime.hours)}
                   </SelectTrigger>
-                  <SelectContent>
+                  {/* Cap the 24-row list so it scrolls in a bounded box instead of filling the
+                      viewport (the primitive's available-height cap grows to full screen near the
+                      top). max-h-72 matches the repo's other dropdown caps. */}
+                  <SelectContent className="max-h-72">
                     {HOUR_OPTIONS.map((hour) => (
                       <SelectItem key={hour} value={hour}>
                         {hour}
@@ -210,10 +213,11 @@ export function DateInput({
                   :
                 </span>
                 <Select value={pad2(effectiveTime.minutes)} onValueChange={handleMinutesChange}>
-                  <SelectTrigger size="sm" className="w-16" aria-labelledby={timeLabelId}>
+                  <SelectTrigger size="sm" className="w-20" aria-labelledby={timeLabelId}>
                     {pad2(effectiveTime.minutes)}
                   </SelectTrigger>
-                  <SelectContent>
+                  {/* Same bounded cap for the 60-row minute list. */}
+                  <SelectContent className="max-h-72">
                     {MINUTE_OPTIONS.map((minute) => (
                       <SelectItem key={minute} value={minute}>
                         {minute}
