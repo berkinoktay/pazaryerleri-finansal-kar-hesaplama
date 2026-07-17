@@ -1,6 +1,5 @@
 'use client';
 
-import { Decimal } from 'decimal.js';
 import { ArrowRight01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
@@ -8,7 +7,7 @@ import * as React from 'react';
 import { formatPercentDisplay } from '@/lib/format-percent';
 
 import type { DiscountCommissionBand, DiscountScenario } from '../lib/adapt-discount-list';
-import { findBandForPrice } from '../lib/commission-band-range';
+import { findBandByCommissionPct } from '../lib/commission-band-range';
 import {
   CommissionBandsPopover,
   type CommissionBandMark,
@@ -124,10 +123,16 @@ export function DiscountCommissionCell({
     );
   }
 
-  // Highlight ONLY the ACTIVE band — the one the DISCOUNTED price lands in (that's the rate the
-  // cell shows as "baz alınan"). Pure comparison over the 2dp DISPLAY price already on the row
-  // (no money math; every figure is backend-computed).
-  const activeBand = findBandForPrice(commissionBands, new Decimal(discounted.price));
+  // Highlight ONLY the ACTIVE band — the one whose RATE the cell actually charges
+  // (discounted.commissionPct, the "baz alınan" rate). Marking by the shown rate (not by the
+  // discounted price) follows the band that drives it even for list-price-anchored discounts
+  // (X-al-Y / Nth-product), where the rate comes from the CURRENT price's band while the
+  // displayed price is the lower effective one. commissionPct is non-null here (source is
+  // 'band'); the guard keeps the mark empty in the impossible null case. No money math.
+  const activeBand =
+    discounted.commissionPct !== null
+      ? findBandByCommissionPct(commissionBands, discounted.commissionPct)
+      : null;
   const bandMarks: CommissionBandMark[] = activeBand !== null ? [{ band: activeBand }] : [];
 
   // Popover footer: which uploaded tariff FILE + period fed the band rate (band always carries

@@ -21,6 +21,7 @@ import { NotFoundError } from '../lib/errors';
 import { resolveCommissionRate } from './commission-rate-resolver';
 import { resolveDiscountCommissionSource } from './discount-commission-source';
 import {
+  commissionBandPrice,
   computeDiscountEstimate,
   effectiveUnitPrice,
   type DiscountCommissionInputs,
@@ -89,6 +90,10 @@ export async function estimateDiscountItem(
   const config = discountConfigFromListRow(item.list);
   const currentPrice = new Decimal(item.currentPrice.toString());
   const price = scenario === 'current' ? currentPrice : effectiveUnitPrice(currentPrice, config);
+  // The band-lookup price: equal to `price` for the current scenario and for genuinely-
+  // cheaper-per-unit types; the CURRENT (list) price for X-al-Y / Nth-product. The matrah
+  // (`price`) is untouched — only which price selects the commission band changes.
+  const bandPrice = commissionBandPrice(currentPrice, price, config);
 
   // Resolve the matched variant + its synced rate + cost + shipping + category rate once
   // (only when the item matched a catalog variant).
@@ -157,7 +162,15 @@ export async function estimateDiscountItem(
   const feeDefs = await prisma.$transaction((tx) => resolveFeeDefs(tx, store.platform));
   const ctx: TariffAssemblyContext = { platform: store.platform, feeDefs };
 
-  const computed = computeDiscountEstimate(ctx, variant, cost, shipping, commission, price);
+  const computed = computeDiscountEstimate(
+    ctx,
+    variant,
+    cost,
+    shipping,
+    commission,
+    price,
+    bandPrice,
+  );
 
   return {
     itemId: item.id,

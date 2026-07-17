@@ -92,7 +92,14 @@ interface Fixture {
   productItemId: string;
   categoryItemId: string;
   noneItemId: string;
+  // A second list of type BUY_X_PAY_Y (4-al-2-öde) carrying the SAME band product, to prove the
+  // list-price band anchor: effective 150 (300×2/4) but the rate comes from the 300 band.
+  buyXListId: string;
+  buyXBandItemId: string;
 }
+
+// 4-al-2-öde @300 → effective 150.00; the band still comes from the 300 (band1 → 19%) list price.
+const BUYX_DISCOUNTED_PRICE = '150.00';
 
 async function setupFixture(): Promise<Fixture> {
   const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
@@ -293,6 +300,33 @@ async function setupFixture(): Promise<Fixture> {
   const categoryItemId = await createItem(CAT_BARCODE, idByBarcode.get(CAT_BARCODE) ?? '');
   const noneItemId = await createItem(NONE_BARCODE, idByBarcode.get(NONE_BARCODE) ?? '');
 
+  // Second list — BUY_X_PAY_Y (4-al-2-öde) — carrying the same band product. Its discounted band
+  // anchors to the CURRENT price (300 → band1 19%), not the effective 150 (which sits in band2).
+  const buyXList = await prisma.discountList.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      name: '4 Al 2 Öde Listesi',
+      discountType: 'BUY_X_PAY_Y',
+      buyQuantity: 4,
+      payQuantity: 2,
+      createdBy: user.id,
+    },
+  });
+  const buyXBandItem = await prisma.discountListItem.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      listId: buyXList.id,
+      productVariantId: idByBarcode.get(BAND_BARCODE) ?? '',
+      barcode: BAND_BARCODE,
+      productTitle: `İndirim Ürünü ${BAND_BARCODE}`,
+      currentPrice: new Decimal(CURRENT_PRICE),
+      included: true,
+      sortOrder: 0,
+    },
+  });
+
   return {
     accessToken: user.accessToken,
     orgId: org.id,
@@ -302,19 +336,22 @@ async function setupFixture(): Promise<Fixture> {
     productItemId,
     categoryItemId,
     noneItemId,
+    buyXListId: buyXList.id,
+    buyXBandItemId: buyXBandItem.id,
   };
 }
 
-function estimateUrl(fx: Fixture, itemId: string): string {
-  return `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}/items/${itemId}/estimate`;
+function estimateUrl(fx: Fixture, itemId: string, listId: string = fx.listId): string {
+  return `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${listId}/items/${itemId}/estimate`;
 }
 
 async function estimate(
   fx: Fixture,
   itemId: string,
   scenario: 'current' | 'discounted',
+  listId: string = fx.listId,
 ): Promise<{ status: number; body: EstimateWire }> {
-  const res = await app.request(estimateUrl(fx, itemId), {
+  const res = await app.request(estimateUrl(fx, itemId, listId), {
     method: 'POST',
     headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
     body: JSON.stringify({ scenario }),
@@ -384,6 +421,46 @@ describe('Discount Lists - item estimate', () => {
     expect(body.commissionSource).toBeNull();
     expect(body.commissionPct).toBeNull();
     expect(body.breakdown).toBeNull();
+  });
+
+  it('BUY_X_PAY_Y resolves the discounted band from the CURRENT price, not the effective price', async () => {
+    const { status, body } = await estimate(fx, fx.buyXBandItemId, 'discounted', fx.buyXListId);
+    expect(status).toBe(200);
+    expect(body.calculable).toBe(true);
+    // Effective unit is 150 (300×2/4) — the matrah/display — but the band comes from the 300
+    // list price → band1 19% (NOT band2 12% that 150 would fall into).
+    expect(body.price).toBe(BUYX_DISCOUNTED_PRICE);
+    expect(body.commissionSource).toBe('band');
+    expect(Number(body.commissionPct)).toBe(BAND_CURRENT_PCT);
+    // Matrah/revenue stays the 150 effective price; commission = 150 × 19%.
+    expect(body.breakdown?.saleGross).toBe(BUYX_DISCOUNTED_PRICE);
+    expect(Number(body.breakdown?.commissionGross)).toBeCloseTo(
+      Number(BUYX_DISCOUNTED_PRICE) * (BAND_CURRENT_PCT / 100),
+      2,
+    );
+  });
+
+  it('NET still resolves the discounted band from the discounted price (band jump preserved)', async () => {
+    const { status, body } = await estimate(fx, fx.bandItemId, 'discounted');
+    expect(status).toBe(200);
+    // Contrast with BUY_X above: NET's every-unit-cheaper discount keeps the discounted-price band.
+    expect(body.price).toBe(DISCOUNTED_PRICE);
+    expect(body.commissionSource).toBe('band');
+    expect(Number(body.commissionPct)).toBe(BAND_DISCOUNTED_PCT);
+  });
+
+  it('the BUY_X detail row agrees with its estimate (band from the current price)', async () => {
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.buyXListId}`,
+      { headers: { Authorization: bearer(fx.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DetailWire;
+    const bandItem = body.items.find((i) => i.id === fx.buyXBandItemId);
+    expect(bandItem?.calculable).toBe(true);
+    expect(bandItem?.discounted.price).toBe(BUYX_DISCOUNTED_PRICE);
+    expect(bandItem?.discounted.commissionSource).toBe('band');
+    expect(Number(bandItem?.discounted.commissionPct)).toBe(BAND_CURRENT_PCT);
   });
 
   it("the detail's discounted.commissionSource uses the same chain as the estimate", async () => {

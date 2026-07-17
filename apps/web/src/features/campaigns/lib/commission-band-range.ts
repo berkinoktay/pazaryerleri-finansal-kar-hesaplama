@@ -23,6 +23,26 @@ export function findBandForPrice(
 }
 
 /**
+ * Finds the band whose commission rate equals `commissionPct` (numeric compare, so any
+ * decimal-string formatting matches). Used to mark the band the cell ACTUALLY charges from:
+ * for list-price-anchored discounts (X-al-Y / Nth-product) the charged rate comes from the
+ * CURRENT price's band, not the displayed discounted price's band, so matching by the shown
+ * rate marks the right band regardless of which price drove it. Bands partition the price
+ * line with distinct rates, so the first match is the charged band. Returns null when no
+ * band carries that rate (e.g. an empty ladder). Pure comparison — no money math.
+ */
+export function findBandByCommissionPct(
+  bands: readonly AdvantageCommissionBand[],
+  commissionPct: string,
+): AdvantageCommissionBand | null {
+  const target = new Decimal(commissionPct);
+  for (const band of bands) {
+    if (new Decimal(band.commissionPct).equals(target)) return band;
+  }
+  return null;
+}
+
+/**
  * The three i18n templates a band range is rendered with, pre-bound to next-intl's
  * `t`. Kept as callbacks so {@link formatBandRange} stays a pure, framework-free
  * function that the unit tests can drive with plain string builders.

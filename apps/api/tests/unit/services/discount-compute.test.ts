@@ -1,7 +1,10 @@
 import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
+import type { EstimateOutcome } from '@pazarsync/profit';
+
 import {
+  commissionBandPrice,
   computeDiscountItem,
   effectiveUnitPrice,
   resolveDiscountCommission,
@@ -12,6 +15,20 @@ import {
 } from '@/services/discount-compute.service';
 import type { StoredBand } from '@/services/commission-tariff.types';
 import { NO_SHIPPING } from '@/services/tariff-compute-commons';
+import type { VariantCostAggregate } from '@/validators/product.validator';
+
+/** An OK cost aggregate + shipping estimate so a scenario resolves to a real breakdown. */
+const OK_COST: VariantCostAggregate = { currentCostTry: '100', profileCount: 1, costStatus: 'OK' };
+const OK_SHIPPING: EstimateOutcome = {
+  ok: true,
+  estimate: {
+    amount: new Decimal('30'),
+    carrierCode: 'SENDEOMP',
+    tariffApplied: 'NORMAL',
+    sourceTariffId: null,
+    baseDesiAtEstimate: new Decimal('1'),
+  },
+};
 
 const d = (v: string | number): Decimal => new Decimal(v);
 const price = (config: DiscountConfig, p: string | number): string =>
@@ -151,6 +168,138 @@ describe('resolveDiscountCommission', () => {
         new Decimal('250'),
       ),
     ).toBeNull();
+  });
+});
+
+describe('commissionBandPrice — which price selects the band per type', () => {
+  const cur = d(1000);
+  const disc = d(500);
+
+  it('returns the CURRENT (list) price for BUY_X_PAY_Y and NTH_PRODUCT', () => {
+    expect(
+      commissionBandPrice(cur, disc, {
+        type: 'BUY_X_PAY_Y',
+        buyQuantity: 4,
+        payQuantity: 2,
+      }).toString(),
+    ).toBe('1000');
+    expect(
+      commissionBandPrice(cur, disc, {
+        type: 'NTH_PRODUCT',
+        valueKind: 'PERCENT',
+        value: d(50),
+        nthIndex: 3,
+      }).toString(),
+    ).toBe('1000');
+  });
+
+  it('returns the DISCOUNTED effective price for NET / CONDITIONAL_* / CODE', () => {
+    expect(
+      commissionBandPrice(cur, disc, {
+        type: 'NET',
+        valueKind: 'PERCENT',
+        value: d(50),
+      }).toString(),
+    ).toBe('500');
+    expect(
+      commissionBandPrice(cur, disc, {
+        type: 'CONDITIONAL_BASKET',
+        valueKind: 'PERCENT',
+        value: d(20),
+        minBasketAmount: d(1000),
+      }).toString(),
+    ).toBe('500');
+    expect(
+      commissionBandPrice(cur, disc, {
+        type: 'CONDITIONAL_QUANTITY',
+        valueKind: 'PERCENT',
+        value: d(10),
+        minQuantity: 3,
+      }).toString(),
+    ).toBe('500');
+    expect(
+      commissionBandPrice(cur, disc, {
+        type: 'CODE',
+        valueKind: 'PERCENT',
+        value: d(15),
+        minBasketAmount: d(500),
+      }).toString(),
+    ).toBe('500');
+  });
+});
+
+describe('computeDiscountItem — discounted-scenario band is anchored per type', () => {
+  const ctx: TariffAssemblyContext = {
+    platform: 'TRENDYOL',
+    feeDefs: {
+      commissionVatRate: new Decimal(20),
+      stoppageRate: new Decimal('0.01'),
+      psfNet: new Decimal('10.99'),
+      psfVatRate: new Decimal(20),
+      shipVatRate: new Decimal(20),
+    },
+  };
+  // A product priced 1000 whose discounted unit falls to 500 — the two prices sit in DIFFERENT
+  // bands: ≥600 → 19% (its list-price segment), <600 → 12%.
+  const variant: TariffVariant = {
+    id: 'v1',
+    stockCode: 'STK-1',
+    barcode: 'BC-1',
+    salePrice: new Decimal('1000'),
+    vatRate: 20,
+    isDigital: false,
+    product: { title: 'Ürün', categoryId: null, brandId: null },
+  };
+  const BANDS: StoredBand[] = [
+    { key: 'high', lowerLimit: '600', upperLimit: null, commissionPct: '19' },
+    { key: 'low', lowerLimit: null, upperLimit: '599.99', commissionPct: '12' },
+  ];
+  const commission: DiscountCommissionInputs = {
+    bands: BANDS,
+    productRate: null,
+    categoryRate: null,
+  };
+
+  it('NET: discounted scenario uses the DISCOUNTED price band — the %19→%12 jump is preserved', () => {
+    const out = computeDiscountItem(ctx, variant, undefined, NO_SHIPPING, commission, d(1000), {
+      type: 'NET',
+      valueKind: 'PERCENT',
+      value: d(50),
+    });
+    // 1000 → high band (19%); effective 500 → low band (12%).
+    expect(out.current.commissionPct).toBe('19.0000');
+    expect(out.discounted.price.toFixed(2)).toBe('500.00');
+    expect(out.discounted.commissionPct).toBe('12.0000');
+  });
+
+  it('BUY_X_PAY_Y (4-al-2-öde @1000): rate from the 1000 band (no jump), matrah stays the 500 effective revenue', () => {
+    // OK cost + shipping so BOTH scenarios resolve a breakdown — needed to compare netProfit.
+    const out = computeDiscountItem(ctx, variant, OK_COST, OK_SHIPPING, commission, d(1000), {
+      type: 'BUY_X_PAY_Y',
+      buyQuantity: 4,
+      payQuantity: 2,
+    });
+    // Effective unit = 1000×2/4 = 500 (the matrah/display), but the band comes from the 1000
+    // list price → 19% (identical to the current scenario, so NO transition arrow).
+    expect(out.discounted.price.toFixed(2)).toBe('500.00');
+    expect(out.current.commissionPct).toBe('19.0000');
+    expect(out.discounted.commissionPct).toBe('19.0000');
+    // Matrah is the LOWER 500 revenue — its netProfit must differ from (be below) the 1000-revenue
+    // current scenario. If the 1000 band price had leaked into the matrah they would be equal.
+    expect(out.discounted.netProfit).not.toBeNull();
+    expect(Number(out.discounted.netProfit)).toBeLessThan(Number(out.current.netProfit));
+  });
+
+  it('NTH_PRODUCT (2. ürün bedava): same 1000-band anchor, matrah still the 500 effective price', () => {
+    const out = computeDiscountItem(ctx, variant, undefined, NO_SHIPPING, commission, d(1000), {
+      type: 'NTH_PRODUCT',
+      valueKind: 'PERCENT',
+      value: d(100),
+      nthIndex: 2,
+    });
+    // 2. ürün %100 indirim → (1000 + 0)/2 = 500 effective; band from the 1000 list price → 19%.
+    expect(out.discounted.price.toFixed(2)).toBe('500.00');
+    expect(out.discounted.commissionPct).toBe('19.0000');
   });
 });
 

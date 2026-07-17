@@ -141,8 +141,8 @@ export interface ResolvedDiscountCommission {
 /**
  * Üç kademeli komisyon zinciri (Berkin kararı 2026-07-14): (1) fiyatı kapsayan
  * komisyon tarifesi bandı, (2) ürünün senkronlanan komisyonu, (3) kategori oranı.
- * Bant çözümü VERİLEN fiyattan yapılır — senaryo indirimliyse matrah indirim-sonrası
- * tutardır, yani indirimli fiyat cari fiyattan FARKLI bir banda düşebilir (spec §5.2).
+ * Bant çözümü VERİLEN fiyattan yapılır — hangi fiyatın banda gireceğini çağıran seçer
+ * ({@link commissionBandPrice}); indirim tipine göre cari ya da indirimli fiyat olur.
  */
 export function resolveDiscountCommission(
   inputs: DiscountCommissionInputs,
@@ -155,6 +155,41 @@ export function resolveDiscountCommission(
   if (inputs.productRate !== null) return { pct: inputs.productRate, source: 'product' };
   if (inputs.categoryRate !== null) return { pct: inputs.categoryRate, source: 'category' };
   return null;
+}
+
+/**
+ * Which price selects the commission BAND for the discounted scenario (Berkin kararı
+ * 2026-07-14). The band is a rate keyed by the product's price segment; the MATRAH (the
+ * revenue the commission + profit are computed on) is always the effective unit price and
+ * is NOT affected by this choice — only the band/rate lookup is.
+ *
+ * - `NET` / `CONDITIONAL_BASKET` / `CONDITIONAL_QUANTITY` / `CODE` → the DISCOUNTED effective
+ *   price: every unit genuinely sells cheaper, so that lower price's band is the real one (a
+ *   band jump, e.g. %19→%12, is meaningful).
+ * - `BUY_X_PAY_Y` / `NTH_PRODUCT` → the CURRENT (list) price: the unit's list price is
+ *   unchanged — some units are free / one unit is discounted — so the product still sits in
+ *   its original commission segment. For 4-al-2-öde @1000 the matrah is 500 but the rate comes
+ *   from the 1000 band: commission = 500 × rate(1000-band).
+ */
+export function commissionBandPrice(
+  currentPrice: Decimal,
+  discountedEffectivePrice: Decimal,
+  config: DiscountConfig,
+): Decimal {
+  switch (config.type) {
+    case 'BUY_X_PAY_Y':
+    case 'NTH_PRODUCT':
+      return currentPrice;
+    case 'NET':
+    case 'CONDITIONAL_BASKET':
+    case 'CONDITIONAL_QUANTITY':
+    case 'CODE':
+      return discountedEffectivePrice;
+    default: {
+      const _exhaustive: never = config;
+      throw new Error(`Unhandled discount config: ${JSON.stringify(_exhaustive)}`);
+    }
+  }
 }
 
 // ─── Per-scenario profit compute ─────────────────────────────────────────────
@@ -185,13 +220,14 @@ interface ScenarioCompute {
 }
 
 /**
- * Resolves the commission AT `price` (the band lookup uses this exact price — the
- * load-bearing subtlety: an item's discounted price may land in a different band than
- * its current price), then assembles the variant's econ and runs the engine. Reason
- * order: variant null → NO_PRODUCT (the true root cause of an UNMATCHED catalog row —
- * gated first so it is never masked by an unresolvable commission), then commission null
- * → NO_COMMISSION, then the cost/shipping gate (deriveReason). A matched row's outcome is
- * unaffected by this ordering — it can never hit the NO_PRODUCT branch.
+ * Resolves the commission at `bandPrice` (the price that SELECTS the band — for list-price-
+ * anchored discounts this is the current price, not the displayed discounted price; see
+ * {@link commissionBandPrice}), then assembles the variant's econ and runs the engine on
+ * `price` (the MATRAH — the effective revenue, always). Reason order: variant null →
+ * NO_PRODUCT (the true root cause of an UNMATCHED catalog row — gated first so it is never
+ * masked by an unresolvable commission), then commission null → NO_COMMISSION, then the
+ * cost/shipping gate (deriveReason). A matched row's outcome is unaffected by this ordering
+ * — it can never hit the NO_PRODUCT branch.
  */
 function priceScenario(
   ctx: TariffAssemblyContext,
@@ -200,11 +236,12 @@ function priceScenario(
   shipping: EstimateOutcome,
   commission: DiscountCommissionInputs,
   price: Decimal,
+  bandPrice: Decimal,
 ): ScenarioCompute {
-  // Resolve the band at the 2dp WIRE price (what the scenario serializes + displays). A
-  // full-precision effectiveUnitPrice (e.g. 299.992 from NET %20 on 374.99) must not slip
-  // through the 0.01 gap between inclusive 2dp band boundaries — chain and display must agree.
-  const resolved = resolveDiscountCommission(commission, price.toDecimalPlaces(2));
+  // Resolve the band at the 2dp band-lookup price. A full-precision value (e.g. 299.992 from
+  // NET %20 on 374.99) must not slip through the 0.01 gap between inclusive 2dp band
+  // boundaries — chain and display must agree. The rate then applies to the matrah `price`.
+  const resolved = resolveDiscountCommission(commission, bandPrice.toDecimalPlaces(2));
   if (variant === null) {
     return { resolved, calculable: false, reason: 'NO_PRODUCT', breakdown: null };
   }
@@ -247,11 +284,12 @@ function toScenario(price: Decimal, c: ScenarioCompute): ComputedDiscountScenari
 }
 
 /**
- * Computes one discount item's TWO scenarios: `current` at `currentPrice` with the
- * chain resolved at that price, and `discounted` at effectiveUnitPrice(currentPrice,
- * config) with the chain RE-resolved at the discounted price (a lower price can land in
- * a lower band). The item's calculability + reason follow the `current` (baseline)
- * scenario — the "do nothing" state the list row shows.
+ * Computes one discount item's TWO scenarios: `current` at `currentPrice` (band + matrah
+ * both the current price), and `discounted` whose MATRAH is effectiveUnitPrice(currentPrice,
+ * config) but whose commission BAND is selected by {@link commissionBandPrice} — the
+ * discounted price for genuinely-cheaper-per-unit types, the current (list) price for
+ * X-al-Y / Nth-product where the list price is unchanged. The item's calculability + reason
+ * follow the `current` (baseline) scenario — the "do nothing" state the list row shows.
  */
 export function computeDiscountItem(
   ctx: TariffAssemblyContext,
@@ -263,8 +301,25 @@ export function computeDiscountItem(
   config: DiscountConfig,
 ): ComputedDiscountItem {
   const discountedPrice = effectiveUnitPrice(currentPrice, config);
-  const current = priceScenario(ctx, variant, cost, shipping, commission, currentPrice);
-  const discounted = priceScenario(ctx, variant, cost, shipping, commission, discountedPrice);
+  const discountedBandPrice = commissionBandPrice(currentPrice, discountedPrice, config);
+  const current = priceScenario(
+    ctx,
+    variant,
+    cost,
+    shipping,
+    commission,
+    currentPrice,
+    currentPrice,
+  );
+  const discounted = priceScenario(
+    ctx,
+    variant,
+    cost,
+    shipping,
+    commission,
+    discountedPrice,
+    discountedBandPrice,
+  );
   return {
     calculable: current.calculable,
     reason: current.reason,
@@ -284,10 +339,12 @@ export interface ComputedDiscountEstimate {
 }
 
 /**
- * Full profit breakdown for ONE discount item at `price` (already chosen by the caller:
- * the current price, or effectiveUnitPrice for the discounted scenario). Resolves the
- * commission chain at that exact price and serializes the breakdown — the same numbers
- * the detail row's matching scenario shows, so the modal never disagrees with the row.
+ * Full profit breakdown for ONE discount item: `price` is the MATRAH (already chosen by the
+ * caller: the current price, or effectiveUnitPrice for the discounted scenario) and
+ * `bandPrice` is the price the commission BAND is selected from (from {@link commissionBandPrice}
+ * — equal to `price` for the current scenario and the genuinely-cheaper types, the current
+ * price for X-al-Y / Nth-product). Serializes the breakdown — the same numbers the detail
+ * row's matching scenario shows, so the modal never disagrees with the row.
  */
 export function computeDiscountEstimate(
   ctx: TariffAssemblyContext,
@@ -296,8 +353,9 @@ export function computeDiscountEstimate(
   shipping: EstimateOutcome,
   commission: DiscountCommissionInputs,
   price: Decimal,
+  bandPrice: Decimal,
 ): ComputedDiscountEstimate {
-  const c = priceScenario(ctx, variant, cost, shipping, commission, price);
+  const c = priceScenario(ctx, variant, cost, shipping, commission, price, bandPrice);
   return {
     calculable: c.calculable,
     reason: c.reason,
