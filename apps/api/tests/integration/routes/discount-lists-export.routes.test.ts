@@ -47,8 +47,14 @@ const BARCODE_FIRST = 'DISC-BC-1';
 const BARCODE_SECOND = 'DISC-BC-2';
 const BARCODE_PREMARKED = 'DISC-BC-4';
 
-// A valid NET config that passes the shared import refinement.
-const NET_CONFIG = { discountType: 'NET', valueKind: 'AMOUNT', value: '50' } as const;
+// A valid NET config that passes the shared import refinement (both dates are required).
+const NET_CONFIG = {
+  discountType: 'NET',
+  valueKind: 'AMOUNT',
+  value: '50',
+  startsAt: '2026-07-21T05:00:00.000Z',
+  endsAt: '2026-07-28T04:59:00.000Z',
+} as const;
 
 interface Ctx {
   accessToken: string;

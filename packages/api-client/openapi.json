@@ -6888,12 +6888,6 @@
               "null"
             ]
           },
-          "orderLimit": {
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
           "startsAt": {
             "type": [
               "string",
@@ -6930,7 +6924,6 @@
           "buyQuantity",
           "payQuantity",
           "nthIndex",
-          "orderLimit",
           "startsAt",
           "endsAt",
           "itemCount",
@@ -7084,10 +7077,6 @@
             "pattern": "^\\d+$"
           },
           "nthIndex": {
-            "type": "string",
-            "pattern": "^\\d+$"
-          },
-          "orderLimit": {
             "type": "string",
             "pattern": "^\\d+$"
           },
@@ -7274,12 +7263,6 @@
               "null"
             ]
           },
-          "orderLimit": {
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
           "startsAt": {
             "type": [
               "string",
@@ -7331,7 +7314,6 @@
           "buyQuantity",
           "payQuantity",
           "nthIndex",
-          "orderLimit",
           "startsAt",
           "endsAt",
           "exported",
@@ -7354,12 +7336,6 @@
           "perOrderCost": {
             "type": "string"
           },
-          "maxTotalCost": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "avgProfitDelta": {
             "type": [
               "string",
@@ -7371,7 +7347,6 @@
           "itemCount",
           "selectedCount",
           "perOrderCost",
-          "maxTotalCost",
           "avgProfitDelta"
         ]
       },
@@ -19510,10 +19485,6 @@
                     "pattern": "^\\d+$"
                   },
                   "nthIndex": {
-                    "type": "string",
-                    "pattern": "^\\d+$"
-                  },
-                  "orderLimit": {
                     "type": "string",
                     "pattern": "^\\d+$"
                   },

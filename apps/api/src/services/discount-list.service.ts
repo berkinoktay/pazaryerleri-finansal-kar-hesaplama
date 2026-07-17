@@ -73,7 +73,6 @@ export async function listDiscountLists(
         buyQuantity: true,
         payQuantity: true,
         nthIndex: true,
-        orderLimit: true,
         startsAt: true,
         endsAt: true,
         exportedAt: true,
@@ -101,7 +100,6 @@ export async function listDiscountLists(
       buyQuantity: list.buyQuantity,
       payQuantity: list.payQuantity,
       nthIndex: list.nthIndex,
-      orderLimit: list.orderLimit,
       startsAt: list.startsAt !== null ? list.startsAt.toISOString() : null,
       endsAt: list.endsAt !== null ? list.endsAt.toISOString() : null,
       itemCount: list.items.length,
@@ -137,8 +135,8 @@ interface DiscountVariantRow {
  * store. Resolves the store's latest commission tariff bands, batch-loads the matched
  * variants + their synced commission + cost + shipping + a category-rate fallback, then
  * runs the three-tier commission chain per item. The summary card (per-order discount
- * cost, max total cost, average profit delta) is aggregated over the included items —
- * all money math is Decimal, serialized at the DTO edge (the frontend never computes).
+ * cost, average profit delta) is aggregated over the included items — all money math is
+ * Decimal, serialized at the DTO edge (the frontend never computes).
  */
 export async function getDiscountListDetail(
   orgId: string,
@@ -161,7 +159,6 @@ export async function getDiscountListDetail(
         buyQuantity: true,
         payQuantity: true,
         nthIndex: true,
-        orderLimit: true,
         startsAt: true,
         endsAt: true,
         exportedAt: true,
@@ -373,7 +370,6 @@ export async function getDiscountListDetail(
     buyQuantity: list.buyQuantity,
     payQuantity: list.payQuantity,
     nthIndex: list.nthIndex,
-    orderLimit: list.orderLimit,
     startsAt: list.startsAt !== null ? list.startsAt.toISOString() : null,
     endsAt: list.endsAt !== null ? list.endsAt.toISOString() : null,
     exported: list.exportedAt !== null,
@@ -387,7 +383,6 @@ export async function getDiscountListDetail(
       itemCount: list.items.length,
       selectedCount,
       perOrderCost: perOrderCost.toFixed(2),
-      maxTotalCost: list.orderLimit !== null ? perOrderCost.mul(list.orderLimit).toFixed(2) : null,
       avgProfitDelta,
     },
     items,
@@ -439,7 +434,6 @@ export async function updateDiscountList(
         buyQuantity: intOrNull(patch.buyQuantity),
         payQuantity: intOrNull(patch.payQuantity),
         nthIndex: intOrNull(patch.nthIndex),
-        orderLimit: intOrNull(patch.orderLimit),
         startsAt: patch.startsAt ?? null,
         endsAt: patch.endsAt ?? null,
         ...(patch.name !== undefined ? { name: patch.name } : {}),

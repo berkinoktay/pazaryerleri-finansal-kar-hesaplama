@@ -38,13 +38,7 @@ const MAX_DECIMAL_VALUE = 9999999999.99;
 const MAX_INT_VALUE = 2000000000;
 
 // The count/int config fields subject to MAX_INT_VALUE — the field name is also the issue path.
-const INT_CONFIG_FIELDS = [
-  'minQuantity',
-  'buyQuantity',
-  'payQuantity',
-  'nthIndex',
-  'orderLimit',
-] as const;
+const INT_CONFIG_FIELDS = ['minQuantity', 'buyQuantity', 'payQuantity', 'nthIndex'] as const;
 
 // Multipart form her alanı STRING taşır; JSON PATCH de aynı string sözleşmesini
 // kullanır ki iki giriş yolu tek doğrulayıcıdan geçsin.
@@ -57,7 +51,6 @@ export const DiscountConfigFieldsSchema = z.object({
   buyQuantity: z.string().regex(INT_RE, 'INVALID_BUY_QUANTITY').optional(),
   payQuantity: z.string().regex(INT_RE, 'INVALID_PAY_QUANTITY').optional(),
   nthIndex: z.string().regex(INT_RE, 'INVALID_NTH_INDEX').optional(),
-  orderLimit: z.string().regex(INT_RE, 'INVALID_ORDER_LIMIT').optional(),
   startsAt: z.string().datetime({ offset: true }).optional(),
   endsAt: z.string().datetime({ offset: true }).optional(),
 });
@@ -117,6 +110,11 @@ export function refineDiscountConfig(
   if (val.valueKind === 'PERCENT' && val.value !== undefined && Number(val.value) > 100) {
     need('value', 'PERCENT_OVER_100');
   }
+  // Both campaign dates are required (Trendyol parity + the start anchors commission
+  // resolution). Enforced only here at the input layer; the DB columns stay nullable so
+  // rows written before this rule remain readable.
+  if (val.startsAt === undefined) need('startsAt', 'START_REQUIRED');
+  if (val.endsAt === undefined) need('endsAt', 'END_REQUIRED');
   if (
     val.startsAt !== undefined &&
     val.endsAt !== undefined &&
@@ -283,7 +281,6 @@ const discountConfigShape = {
   buyQuantity: z.number().int().nullable(),
   payQuantity: z.number().int().nullable(),
   nthIndex: z.number().int().nullable(),
-  orderLimit: z.number().int().nullable(),
   startsAt: z.string().nullable(),
   endsAt: z.string().nullable(),
 };
@@ -378,8 +375,6 @@ export const DiscountListSummarySchema = z
     // Seçili kalemlerde sipariş başına tahmini indirim maliyeti: Σ(current.price −
     // discounted.price). Backend hesaplar — frontend yalnız render eder.
     perOrderCost: z.string(),
-    // orderLimit girilmişse perOrderCost × orderLimit, yoksa null.
-    maxTotalCost: z.string().nullable(),
     // Seçili + hesaplanabilir kalemlerde ortalama kâr farkı (discounted − current).
     avgProfitDelta: z.string().nullable(),
   })

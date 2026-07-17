@@ -1670,9 +1670,6 @@ model DiscountList {
   buyQuantity     Int?              @map("buy_quantity")
   payQuantity     Int?              @map("pay_quantity")
   nthIndex        Int?              @map("nth_index")
-  // Sipariş adedi limiti — hesabı etkilemez; özet karttaki "en fazla toplam maliyet"
-  // tavanı için saklanır (limit × sipariş başına indirim).
-  orderLimit      Int?              @map("order_limit")
   // Kampanya penceresi — yalnız bilgi amaçlı (komisyon HER ZAMAN günceldan çözülür).
   startsAt        DateTime?         @map("starts_at")
   endsAt          DateTime?         @map("ends_at")

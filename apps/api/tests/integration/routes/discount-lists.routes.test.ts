@@ -25,6 +25,12 @@ const app = createApp();
 
 const IMAGE_URL = 'https://cdn.example/disc-1.jpg';
 
+// Both campaign dates are required on every config write (import + PATCH).
+const CAMPAIGN_WINDOW = {
+  startsAt: '2026-07-21T05:00:00.000Z',
+  endsAt: '2026-07-28T04:59:00.000Z',
+} as const;
+
 interface ScenarioWire {
   price: string;
   commissionPct: string | null;
@@ -59,7 +65,6 @@ interface DetailWire {
     itemCount: number;
     selectedCount: number;
     perOrderCost: string;
-    maxTotalCost: string | null;
     avgProfitDelta: string | null;
   };
   items: ItemWire[];
@@ -233,8 +238,6 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
     expect(body.summary.selectedCount).toBe(1);
     // Only the matched item is included: 250.00 − 212.50 (NET -15%) = 37.50.
     expect(body.summary.perOrderCost).toBe('37.50');
-    // No orderLimit on the list → no max-total ceiling.
-    expect(body.summary.maxTotalCost).toBeNull();
     // No included+calculable item → no average profit delta.
     expect(body.summary.avgProfitDelta).toBeNull();
 
@@ -274,6 +277,7 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
           valueKind: 'AMOUNT',
           value: '20',
           minBasketAmount: '150',
+          ...CAMPAIGN_WINDOW,
         }),
       },
     );

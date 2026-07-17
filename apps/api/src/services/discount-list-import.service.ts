@@ -152,7 +152,6 @@ export async function importDiscountList(
           buyQuantity: intOrNull(config.buyQuantity),
           payQuantity: intOrNull(config.payQuantity),
           nthIndex: intOrNull(config.nthIndex),
-          orderLimit: intOrNull(config.orderLimit),
           startsAt: config.startsAt ?? null,
           endsAt: config.endsAt ?? null,
           sourceFilename: input.filename,

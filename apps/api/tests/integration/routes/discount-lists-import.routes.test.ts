@@ -43,8 +43,18 @@ const INCLUDED_BARCODE = 'DISC-BC-4';
 // 0-based grid column of the required "Barkod" header (Excel row 1).
 const COL_BARCODE = 4;
 
+// Both campaign dates are required on every config write.
+const START_AT = '2026-07-21T05:00:00.000Z';
+const END_AT = '2026-07-28T04:59:00.000Z';
+
 // A valid NET config that passes the shared refinement.
-const NET_CONFIG = { discountType: 'NET', valueKind: 'AMOUNT', value: '50' } as const;
+const NET_CONFIG = {
+  discountType: 'NET',
+  valueKind: 'AMOUNT',
+  value: '50',
+  startsAt: START_AT,
+  endsAt: END_AT,
+} as const;
 
 interface ImportWire {
   listId: string;
@@ -182,6 +192,44 @@ describe('POST .../discount-lists/import - rejects invalid input', () => {
     expect(body.code).toBe('VALIDATION_ERROR');
     expect(body.errors).toEqual(
       expect.arrayContaining([expect.objectContaining({ field: 'value', code: 'VALUE_REQUIRED' })]),
+    );
+  });
+
+  it('rejects a config without a start date with 422 START_REQUIRED', async () => {
+    const ctx = await setupStore(false);
+    const res = await app.request(
+      importRequest(ctx, FIXTURE, {
+        discountType: 'NET',
+        valueKind: 'AMOUNT',
+        value: '50',
+        endsAt: END_AT,
+      }),
+    );
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as ProblemWire;
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: 'startsAt', code: 'START_REQUIRED' }),
+      ]),
+    );
+  });
+
+  it('rejects a config without an end date with 422 END_REQUIRED', async () => {
+    const ctx = await setupStore(false);
+    const res = await app.request(
+      importRequest(ctx, FIXTURE, {
+        discountType: 'NET',
+        valueKind: 'AMOUNT',
+        value: '50',
+        startsAt: START_AT,
+      }),
+    );
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as ProblemWire;
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'endsAt', code: 'END_REQUIRED' })]),
     );
   });
 
