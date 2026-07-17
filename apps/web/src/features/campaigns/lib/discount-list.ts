@@ -24,7 +24,6 @@ export interface DiscountListRow {
   buyQuantity: number | null;
   payQuantity: number | null;
   nthIndex: number | null;
-  orderLimit: number | null;
   startsAt: string | null;
   endsAt: string | null;
   /** Product-selection rows in the upload. */
@@ -54,7 +53,6 @@ export function toListRows(items: readonly DiscountListListItem[]): DiscountList
     buyQuantity: item.buyQuantity,
     payQuantity: item.payQuantity,
     nthIndex: item.nthIndex,
-    orderLimit: item.orderLimit,
     startsAt: item.startsAt,
     endsAt: item.endsAt,
     itemCount: item.itemCount,

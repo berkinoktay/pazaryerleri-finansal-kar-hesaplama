@@ -1674,7 +1674,6 @@
     "configCard": {
       "title": "Discount setup",
       "edit": "Edit",
-      "orderLimit": "Order limit: {count}",
       "dateRange": "{start} – {end}",
       "assumption": "Profit is estimated for a single-item basket; multi-item baskets may differ.",
       "outdatedTariffNote": "Your uploaded commission tariffs don't cover this campaign's week — commission falls back to the product's own rate or the category rate."
@@ -1698,7 +1697,6 @@
         "buyQuantity": "Buy quantity",
         "payQuantity": "Pay quantity",
         "nthIndex": "Which item",
-        "orderLimit": "Order limit",
         "dateRange": "Date range",
         "startPlaceholder": "Start date",
         "endPlaceholder": "End date"
@@ -1778,7 +1776,6 @@
       "total": "Products",
       "selected": "Included",
       "perOrderCost": "Per-order discount cost",
-      "maxTotalCost": "Max total cost",
       "avgImpact": "Avg. profit impact"
     },
     "table": {

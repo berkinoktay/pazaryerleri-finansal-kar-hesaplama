@@ -61,13 +61,7 @@ const PERCENT_MAX = 100;
 // (10 integer digits + 2 decimals); the count fields are 32-bit Int, kept below 2^31-1.
 const MAX_DECIMAL_VALUE = 9999999999.99;
 const MAX_INT_VALUE = 2000000000;
-const INT_CONFIG_FIELDS = [
-  'minQuantity',
-  'buyQuantity',
-  'payQuantity',
-  'nthIndex',
-  'orderLimit',
-] as const;
+const INT_CONFIG_FIELDS = ['minQuantity', 'buyQuantity', 'payQuantity', 'nthIndex'] as const;
 
 // Multipart upload + JSON edit both carry every config field as a STRING, so a single object
 // mirrors both entry paths — exactly like the backend's `DiscountConfigFieldsSchema`.
@@ -80,7 +74,6 @@ const discountConfigFieldsSchema = z.object({
   buyQuantity: z.string().regex(INT_RE, 'INVALID_BUY_QUANTITY').optional(),
   payQuantity: z.string().regex(INT_RE, 'INVALID_PAY_QUANTITY').optional(),
   nthIndex: z.string().regex(INT_RE, 'INVALID_NTH_INDEX').optional(),
-  orderLimit: z.string().regex(INT_RE, 'INVALID_ORDER_LIMIT').optional(),
   startsAt: z.string().optional(),
   endsAt: z.string().optional(),
 });
@@ -91,7 +84,7 @@ const discountConfigFieldsSchema = z.object({
  * issue light up the SAME inline message.
  */
 export const discountConfigFormSchema = discountConfigFieldsSchema.superRefine((val, ctx) => {
-  const need = (field: ConfigFieldKey | 'endsAt' | 'orderLimit', code: string): void => {
+  const need = (field: ConfigFieldKey | 'startsAt' | 'endsAt', code: string): void => {
     ctx.addIssue({ code: 'custom', message: code, path: [field] });
   };
 
@@ -143,6 +136,10 @@ export const discountConfigFormSchema = discountConfigFieldsSchema.superRefine((
   if (val.valueKind === 'PERCENT' && val.value !== undefined && Number(val.value) > PERCENT_MAX) {
     need('value', 'PERCENT_OVER_100');
   }
+
+  // Both campaign dates are required (mirror of the backend gate).
+  if (val.startsAt === undefined) need('startsAt', 'START_REQUIRED');
+  if (val.endsAt === undefined) need('endsAt', 'END_REQUIRED');
 
   if (
     val.startsAt !== undefined &&

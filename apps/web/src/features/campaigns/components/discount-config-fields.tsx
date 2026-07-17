@@ -84,7 +84,6 @@ const RHF_FIELD_NAMES = [
   'buyQuantity',
   'payQuantity',
   'nthIndex',
-  'orderLimit',
   'startsAt',
   'endsAt',
 ] as const satisfies readonly (keyof DiscountConfigFormValues)[];
@@ -110,12 +109,13 @@ export function useConfigFieldErrorMessage(): (code: string) => string {
       case 'BUY_QUANTITY_REQUIRED':
       case 'PAY_QUANTITY_REQUIRED':
       case 'NTH_INDEX_REQUIRED':
+      case 'START_REQUIRED':
+      case 'END_REQUIRED':
         return t('required');
       case 'INVALID_MIN_QUANTITY':
       case 'INVALID_BUY_QUANTITY':
       case 'INVALID_PAY_QUANTITY':
       case 'INVALID_NTH_INDEX':
-      case 'INVALID_ORDER_LIMIT':
         return t('integer');
       case 'INVALID_DISCOUNT_VALUE':
       case 'INVALID_MIN_BASKET':
@@ -160,7 +160,7 @@ export interface DiscountConfigFieldsProps {
 /**
  * The shared config section of the İndirimler (Discounts) upload + edit forms: an optional list
  * name, the discount type picker, ONLY the parameters that type uses (rendered from
- * `CONFIG_FIELDS_BY_TYPE`), and an optional order-limit + campaign-window sub-block. Both the
+ * `CONFIG_FIELDS_BY_TYPE`), and the required campaign-window (start + end) date group. Both the
  * upload dialog (which adds the file dropzone above) and the config-edit dialog render it, so the
  * field map + the backend server-error plumbing live in ONE place. MUST be rendered inside a
  * `<Form {...form}>` provider (the caller owns the `<form>` element and submit).
@@ -332,92 +332,65 @@ export function DiscountConfigFields({
         {fields.map((key) => renderConfigField(key))}
       </div>
 
-      <div className="border-border bg-surface-subtle gap-md p-md flex flex-col rounded-lg border">
-        <p className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          {t('optionalSection')}
-        </p>
-
-        <div className="gap-md grid sm:grid-cols-2">
+      <div className="gap-3xs flex flex-col">
+        <Label>{tFields('dateRange')}</Label>
+        <div className="gap-sm grid grid-cols-1 sm:grid-cols-2">
           <FormField
             control={form.control}
-            name="orderLimit"
+            name="startsAt"
             render={({ field, fieldState }) => (
-              <FormItem>
-                <FormLabel>{tFields('orderLimit')}</FormLabel>
-                <FormControl>
-                  <Input
-                    inputMode="numeric"
-                    value={field.value ?? ''}
-                    onChange={(event) =>
-                      field.onChange(event.target.value === '' ? undefined : event.target.value)
-                    }
-                    onBlur={field.onBlur}
-                    name={field.name}
-                    ref={field.ref}
-                    invalid={fieldState.error !== undefined}
-                  />
-                </FormControl>
-                <FormMessage render={configFieldError} />
-              </FormItem>
+              <div className="gap-3xs flex flex-col">
+                <DateInput
+                  className="w-full"
+                  withTime
+                  placeholder={tFields('startPlaceholder')}
+                  // Default to the tariff-week rollover (08:00) so a "21 Temmuz" start lands
+                  // AFTER the week's 08:00 boundary and resolves to the 21–28 week — not the
+                  // previous one, which a 00:00 start would fall into.
+                  defaultTime={{ hours: 8, minutes: 0 }}
+                  value={
+                    field.value !== undefined && field.value !== '' ? new Date(field.value) : null
+                  }
+                  onChange={(date) =>
+                    field.onChange(date !== null ? date.toISOString() : undefined)
+                  }
+                />
+                {fieldState.error !== undefined ? (
+                  <p className="text-2xs text-destructive font-medium">
+                    {configFieldError(String(fieldState.error.message ?? ''))}
+                  </p>
+                ) : null}
+              </div>
             )}
           />
-
-          <div className="gap-3xs flex flex-col">
-            <Label>{tFields('dateRange')}</Label>
-            <div className="gap-sm grid grid-cols-1 sm:grid-cols-2">
-              <FormField
-                control={form.control}
-                name="startsAt"
-                render={({ field }) => (
-                  <DateInput
-                    className="w-full"
-                    withTime
-                    placeholder={tFields('startPlaceholder')}
-                    // Default to the tariff-week rollover (08:00) so a "21 Temmuz" start lands
-                    // AFTER the week's 08:00 boundary and resolves to the 21–28 week — not the
-                    // previous one, which a 00:00 start would fall into.
-                    defaultTime={{ hours: 8, minutes: 0 }}
-                    value={
-                      field.value !== undefined && field.value !== '' ? new Date(field.value) : null
-                    }
-                    onChange={(date) =>
-                      field.onChange(date !== null ? date.toISOString() : undefined)
-                    }
-                  />
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="endsAt"
-                render={({ field, fieldState }) => (
-                  <div className="gap-3xs flex flex-col">
-                    <DateInput
-                      className="w-full"
-                      withTime
-                      placeholder={tFields('endPlaceholder')}
-                      // Default to 07:59 — the last minute before the next tariff-week rollover —
-                      // so a chosen end day stays inside that week rather than spilling into the
-                      // next one.
-                      defaultTime={{ hours: 7, minutes: 59 }}
-                      value={
-                        field.value !== undefined && field.value !== ''
-                          ? new Date(field.value)
-                          : null
-                      }
-                      onChange={(date) =>
-                        field.onChange(date !== null ? date.toISOString() : undefined)
-                      }
-                    />
-                    {fieldState.error !== undefined ? (
-                      <p className="text-2xs text-destructive font-medium">
-                        {configFieldError(String(fieldState.error.message ?? ''))}
-                      </p>
-                    ) : null}
-                  </div>
-                )}
-              />
-            </div>
-          </div>
+          <FormField
+            control={form.control}
+            name="endsAt"
+            render={({ field, fieldState }) => (
+              <div className="gap-3xs flex flex-col">
+                <DateInput
+                  className="w-full"
+                  withTime
+                  placeholder={tFields('endPlaceholder')}
+                  // Default to 07:59 — the last minute before the next tariff-week rollover —
+                  // so a chosen end day stays inside that week rather than spilling into the
+                  // next one.
+                  defaultTime={{ hours: 7, minutes: 59 }}
+                  value={
+                    field.value !== undefined && field.value !== '' ? new Date(field.value) : null
+                  }
+                  onChange={(date) =>
+                    field.onChange(date !== null ? date.toISOString() : undefined)
+                  }
+                />
+                {fieldState.error !== undefined ? (
+                  <p className="text-2xs text-destructive font-medium">
+                    {configFieldError(String(fieldState.error.message ?? ''))}
+                  </p>
+                ) : null}
+              </div>
+            )}
+          />
         </div>
       </div>
     </div>

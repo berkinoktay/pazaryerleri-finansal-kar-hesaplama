@@ -40,8 +40,6 @@ export function DiscountConfigCard({ list, onEdit }: DiscountConfigCardProps): R
         })
       : null;
 
-  const hasMeta = list.orderLimit !== null || windowLabel !== null;
-
   return (
     <div className="border-border bg-card gap-sm p-md flex flex-col rounded-lg border">
       <div className="gap-sm flex flex-wrap items-start justify-between">
@@ -50,12 +48,9 @@ export function DiscountConfigCard({ list, onEdit }: DiscountConfigCardProps): R
             <DiscountTypeBadge type={list.discountType} />
             <span className="text-foreground text-sm font-medium">{describe(list)}</span>
           </div>
-          {hasMeta ? (
+          {windowLabel !== null ? (
             <div className="gap-md text-2xs text-muted-foreground flex flex-wrap tabular-nums">
-              {list.orderLimit !== null ? (
-                <span>{t('orderLimit', { count: list.orderLimit })}</span>
-              ) : null}
-              {windowLabel !== null ? <span>{windowLabel}</span> : null}
+              <span>{windowLabel}</span>
             </div>
           ) : null}
         </div>

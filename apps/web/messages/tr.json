@@ -1674,7 +1674,6 @@
     "configCard": {
       "title": "İndirim ayarları",
       "edit": "Düzenle",
-      "orderLimit": "Sipariş limiti: {count}",
       "dateRange": "{start} – {end}",
       "assumption": "Kâr tahmini, sepetin yalnız bu üründen oluştuğu varsayımına dayanır; çok ürünlü sepetlerde sonuç farklılaşabilir.",
       "outdatedTariffNote": "Yüklü komisyon tarifeleriniz bu kampanyanın haftasını kapsamıyor — komisyon, ürünün kendi oranından ya da kategori oranından çözülüyor."
@@ -1698,7 +1697,6 @@
         "buyQuantity": "Alınacak adet",
         "payQuantity": "Ödenecek adet",
         "nthIndex": "Kaçıncı ürün",
-        "orderLimit": "Sipariş adedi limiti",
         "dateRange": "Tarih aralığı",
         "startPlaceholder": "Başlangıç tarihi",
         "endPlaceholder": "Bitiş tarihi"
@@ -1778,7 +1776,6 @@
       "total": "Ürün",
       "selected": "Dahil edilen",
       "perOrderCost": "Sipariş başına indirim maliyeti",
-      "maxTotalCost": "En fazla toplam maliyet",
       "avgImpact": "Ortalama kâr etkisi"
     },
     "table": {

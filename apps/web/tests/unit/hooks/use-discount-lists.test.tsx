@@ -28,7 +28,6 @@ function listItem(overrides: Partial<Record<string, unknown>> = {}) {
     buyQuantity: null,
     payQuantity: null,
     nthIndex: null,
-    orderLimit: null,
     startsAt: null,
     endsAt: null,
     itemCount: 30,

@@ -38,7 +38,6 @@ function toFormDefaults(list: DiscountListDetail): DiscountConfigFormValues {
     buyQuantity: list.buyQuantity != null ? String(list.buyQuantity) : undefined,
     payQuantity: list.payQuantity != null ? String(list.payQuantity) : undefined,
     nthIndex: list.nthIndex != null ? String(list.nthIndex) : undefined,
-    orderLimit: list.orderLimit != null ? String(list.orderLimit) : undefined,
     startsAt: list.startsAt ?? undefined,
     endsAt: list.endsAt ?? undefined,
   };
