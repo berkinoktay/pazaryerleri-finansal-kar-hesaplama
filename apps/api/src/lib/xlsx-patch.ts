@@ -46,20 +46,29 @@ function xmlEscape(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function cellXml(colIdx: number, rowNum: number, value: XlsxCellValue): string {
+// Real Trendyol worksheets declare a namespace prefix on the root (`<x:worksheet>`),
+// so every emitted cell must mirror that same prefix — an unprefixed `<c>` inside an
+// `<x:...>` document references an undeclared namespace (broken XML). `prefix` is the
+// row's own prefix including the trailing colon (e.g. `"x:"`) or `""` for none.
+function cellXml(prefix: string, colIdx: number, rowNum: number, value: XlsxCellValue): string {
   const ref = `${columnLetter(colIdx)}${rowNum}`;
   return value.kind === 'number'
-    ? `<c r="${ref}"><v>${value.value}</v></c>`
-    : `<c r="${ref}" t="inlineStr"><is><t>${xmlEscape(value.value)}</t></is></c>`;
+    ? `<${prefix}c r="${ref}"><${prefix}v>${value.value}</${prefix}v></${prefix}c>`
+    : `<${prefix}c r="${ref}" t="inlineStr"><${prefix}is><${prefix}t>${xmlEscape(value.value)}</${prefix}t></${prefix}is></${prefix}c>`;
 }
 
 // ─── XML row patching ────────────────────────────────────────────────────────
 
-const CELL_RE = /<c\b[^>]*\/>|<c\b[^>]*>[\s\S]*?<\/c>/g;
+// Tag regexes tolerate an optional `\w+:` namespace prefix so prefixed vendor files
+// (`<x:row>`, `<x:c>`) match too. The `r="..."` attribute is prefix-independent, so
+// CELL_REF_RE / ROW_NUM_RE stay as-is. ROW_PREFIX_RE captures the row's own prefix
+// (with the colon) so patched cells can be emitted under the same namespace.
+const CELL_RE = /<(?:\w+:)?c\b[^>]*\/>|<(?:\w+:)?c\b[^>]*>[\s\S]*?<\/(?:\w+:)?c>/g;
 const CELL_REF_RE = /\br="([A-Z]+)\d+"/;
-const ROW_OPEN_RE = /<row\b[^>]*>/;
-const ROW_RE = /<row\b[^>]*>[\s\S]*?<\/row>/g;
+const ROW_OPEN_RE = /<(?:\w+:)?row\b[^>]*>/;
+const ROW_RE = /<(?:\w+:)?row\b[^>]*>[\s\S]*?<\/(?:\w+:)?row>/g;
 const ROW_NUM_RE = /\br="(\d+)"/;
+const ROW_PREFIX_RE = /<(\w+:)?row\b/;
 
 /** Rewrites one row, replacing the patched cells and keeping the rest verbatim. */
 function patchRow(
@@ -77,16 +86,18 @@ function patchRow(
     byCol.set(columnIndex(ref[1]), xml);
   }
 
+  // Patched cells inherit the row's own namespace prefix so they stay valid XML.
+  const prefix = ROW_PREFIX_RE.exec(rowXml)?.[1] ?? '';
   for (const [colIdx, value] of cells) {
-    byCol.set(colIdx, cellXml(colIdx, rowNum, value));
+    byCol.set(colIdx, cellXml(prefix, colIdx, rowNum, value));
   }
 
-  const openTag = ROW_OPEN_RE.exec(rowXml)?.[0] ?? `<row r="${rowNum}">`;
+  const openTag = ROW_OPEN_RE.exec(rowXml)?.[0] ?? `<${prefix}row r="${rowNum}">`;
   const body = [...byCol.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([, xml]) => xml)
     .join('');
-  return `${openTag}${body}</row>`;
+  return `${openTag}${body}</${prefix}row>`;
 }
 
 /**

@@ -13,6 +13,7 @@
 
 import { readFileSync } from 'node:fs';
 
+import { zipSync, strToU8 } from 'fflate';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
@@ -46,6 +47,91 @@ const INCLUDED_NO = 'Hayır';
 const BARCODE_FIRST = 'DISC-BC-1';
 const BARCODE_SECOND = 'DISC-BC-2';
 const BARCODE_PREMARKED = 'DISC-BC-4';
+
+// ─── Namespace-prefixed fixture (real Trendyol İndirimler shape) ─────────────
+//
+// Real vendor İndirimler exports ship a worksheet whose root declares `xmlns:x`, so
+// every element carries the `x:` prefix (`<x:row>`, `<x:c>`, `<x:is>/<x:t>`). The
+// committed FIXTURE above happens to be UNPREFIXED, which is why the byte patcher's
+// old unprefixed-only regexes passed here while silently patching nothing on the real
+// file. This programmatic fixture (no real seller data) locks the prefixed round-trip.
+
+const SPREADSHEET_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+const REL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const PKG_REL_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
+
+// The 9-column İndirimler header; participation lives at COL_PARTICIPATION (index 8).
+const PREFIXED_HEADERS = [
+  'Trendyol Ürün ID',
+  'Ürün Bilgisi',
+  'Marka',
+  'Renk',
+  'Barkod',
+  'Model Kodu',
+  'Güncel Satış Fiyatı',
+  'Komisyon Oranı',
+  'Kampayaya Dahil Edilsin Mi?',
+] as const;
+
+function prefixedColLetter(index: number): string {
+  let letters = '';
+  let n = index + 1;
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    letters = String.fromCharCode(65 + rem) + letters;
+    n = Math.floor((n - 1) / 26);
+  }
+  return letters;
+}
+
+function prefixedCell(rowNum: number, colIdx: number, text: string): string {
+  const ref = `${prefixedColLetter(colIdx)}${rowNum}`;
+  return `<x:c r="${ref}" t="inlineStr"><x:is><x:t>${text}</x:t></x:is></x:c>`;
+}
+
+function prefixedRow(rowNum: number, values: readonly string[]): string {
+  return `<x:row r="${rowNum}">${values.map((v, i) => prefixedCell(rowNum, i, v)).join('')}</x:row>`;
+}
+
+/** Builds a reader-valid xlsx whose worksheet uses the `x:` namespace prefix throughout. */
+function buildPrefixedDiscountFixture(dataRows: readonly (readonly string[])[]): Buffer {
+  const rowsXml = [
+    prefixedRow(1, PREFIXED_HEADERS),
+    ...dataRows.map((row, i) => prefixedRow(i + 2, row)),
+  ].join('');
+  const sheet =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<x:worksheet xmlns:x="${SPREADSHEET_NS}"><x:sheetData>${rowsXml}</x:sheetData></x:worksheet>`;
+  const workbook =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<workbook xmlns="${SPREADSHEET_NS}" xmlns:r="${REL_NS}">` +
+    `<sheets><sheet name="${SHEET_NAME}" sheetId="1" r:id="rId1"/></sheets></workbook>`;
+  const contentTypes =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+    `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
+    `<Default Extension="xml" ContentType="application/xml"/>` +
+    `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>` +
+    `<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>` +
+    `</Types>`;
+  const rootRels =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Relationships xmlns="${PKG_REL_NS}">` +
+    `<Relationship Id="rId1" Type="${REL_NS}/officeDocument" Target="xl/workbook.xml"/></Relationships>`;
+  const workbookRels =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Relationships xmlns="${PKG_REL_NS}">` +
+    `<Relationship Id="rId1" Type="${REL_NS}/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`;
+  return Buffer.from(
+    zipSync({
+      '[Content_Types].xml': strToU8(contentTypes),
+      '_rels/.rels': strToU8(rootRels),
+      'xl/workbook.xml': strToU8(workbook),
+      'xl/_rels/workbook.xml.rels': strToU8(workbookRels),
+      'xl/worksheets/sheet1.xml': strToU8(sheet),
+    }),
+  );
+}
 
 // A valid NET config that passes the shared import refinement (both dates are required).
 const NET_CONFIG = {
@@ -154,6 +240,47 @@ describe('discount-lists export', () => {
     // The list is now marked exported.
     const listed = await prisma.discountList.findUnique({ where: { id: listId } });
     expect(listed?.exportedAt).not.toBeNull();
+  });
+
+  it('writes "Evet" into included rows of a NAMESPACE-PREFIXED vendor worksheet', async () => {
+    // Real Trendyol İndirimler files are prefixed (`<x:row>`, `<x:c>`). Before the byte
+    // patcher tolerated the prefix, this round-trip left every cell "Hayır" — the seller's
+    // choices never landed. This proves the prefixed file now patches end-to-end.
+    const prefixedFixture = buildPrefixedDiscountFixture([
+      ['1', 'Ürün 1', 'Marka', 'Kırmızı', BARCODE_FIRST, 'M1', '250', '%10', INCLUDED_NO],
+      ['2', 'Ürün 2', 'Marka', 'Mavi', BARCODE_SECOND, 'M2', '250', '%10', INCLUDED_NO],
+      ['3', 'Ürün 3', 'Marka', 'Yeşil', 'DISC-BC-3', 'M3', '250', '%10', INCLUDED_NO],
+      ['4', 'Ürün 4', 'Marka', 'Siyah', BARCODE_PREMARKED, 'M4', '250', '%10', INCLUDED_YES],
+    ]);
+
+    const ctx = await setupStore();
+    const listId = await importFile(ctx, prefixedFixture);
+
+    const items = await prisma.discountListItem.findMany({
+      where: { listId },
+      orderBy: { sortOrder: 'asc' },
+    });
+    expect(items[0]?.barcode).toBe(BARCODE_FIRST);
+    expect(items[1]?.barcode).toBe(BARCODE_SECOND);
+
+    // Include the first two rows (source "Hayır" → they must deviate to "Evet").
+    await patchSelections(ctx, listId, [
+      { itemId: items[0]?.id, included: true },
+      { itemId: items[1]?.id, included: true },
+    ]);
+
+    const res = await app.request(exportRequest(ctx, listId));
+    expect(res.status).toBe(200);
+
+    const out = Buffer.from(await res.arrayBuffer());
+    const grid = await readWorkbookGrid(out, { sheetName: SHEET_NAME });
+
+    // The two included rows now say "Evet"; the excluded row stays "Hayır" and the
+    // pre-marked row stays "Evet" (no deviation). All read back through the prefixed XML.
+    expect(cellText(grid[1] ?? [], COL_PARTICIPATION)).toBe(INCLUDED_YES);
+    expect(cellText(grid[2] ?? [], COL_PARTICIPATION)).toBe(INCLUDED_YES);
+    expect(cellText(grid[3] ?? [], COL_PARTICIPATION)).toBe(INCLUDED_NO);
+    expect(cellText(grid[4] ?? [], COL_PARTICIPATION)).toBe(INCLUDED_YES);
   });
 
   it('writes "Hayır" when a source-"Evet" row is excluded from the selection', async () => {
