@@ -1699,7 +1699,9 @@
         "payQuantity": "Pay quantity",
         "nthIndex": "Which item",
         "orderLimit": "Order limit",
-        "dateRange": "Date range"
+        "dateRange": "Date range",
+        "startPlaceholder": "Start date",
+        "endPlaceholder": "End date"
       },
       "optionalSection": "Optional settings",
       "submit": "Create list",

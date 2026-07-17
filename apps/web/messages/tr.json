@@ -1699,7 +1699,9 @@
         "payQuantity": "Ödenecek adet",
         "nthIndex": "Kaçıncı ürün",
         "orderLimit": "Sipariş adedi limiti",
-        "dateRange": "Tarih aralığı"
+        "dateRange": "Tarih aralığı",
+        "startPlaceholder": "Başlangıç tarihi",
+        "endPlaceholder": "Bitiş tarihi"
       },
       "optionalSection": "İsteğe bağlı ayarlar",
       "submit": "Listeyi oluştur",

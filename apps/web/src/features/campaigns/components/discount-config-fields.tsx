@@ -372,6 +372,7 @@ export function DiscountConfigFields({
                   <DateInput
                     className="w-full"
                     withTime
+                    placeholder={tFields('startPlaceholder')}
                     // Default to the tariff-week rollover (08:00) so a "21 Temmuz" start lands
                     // AFTER the week's 08:00 boundary and resolves to the 21–28 week — not the
                     // previous one, which a 00:00 start would fall into.
@@ -393,6 +394,7 @@ export function DiscountConfigFields({
                     <DateInput
                       className="w-full"
                       withTime
+                      placeholder={tFields('endPlaceholder')}
                       // Default to 07:59 — the last minute before the next tariff-week rollover —
                       // so a chosen end day stays inside that week rather than spilling into the
                       // next one.
