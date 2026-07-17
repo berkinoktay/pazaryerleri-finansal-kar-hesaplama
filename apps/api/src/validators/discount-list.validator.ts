@@ -368,18 +368,6 @@ export const DiscountListDetailItemSchema = z
   })
   .openapi('DiscountListDetailItem');
 
-export const DiscountListSummarySchema = z
-  .object({
-    itemCount: z.number().int(),
-    selectedCount: z.number().int(),
-    // Seçili kalemlerde sipariş başına tahmini indirim maliyeti: Σ(current.price −
-    // discounted.price). Backend hesaplar — frontend yalnız render eder.
-    perOrderCost: z.string(),
-    // Seçili + hesaplanabilir kalemlerde ortalama kâr farkı (discounted − current).
-    avgProfitDelta: z.string().nullable(),
-  })
-  .openapi('DiscountListSummary');
-
 export const DiscountListDetailSchema = z
   .object({
     id: z.string().uuid(),
@@ -394,7 +382,9 @@ export const DiscountListDetailSchema = z
     // da kampanya başlangıcına ulaşmıyor) true — komisyon ürün/kategori oranına düşer ve detay
     // satıcıyı uyarır. Kapsayan hafta çözüldüyse ya da mağazanın hiç tarifesi yoksa false.
     commissionTariffOutdated: z.boolean(),
-    summary: DiscountListSummarySchema,
+    // Seçim artık istemci tarafında geçici (ephemeral) durumdur; toplam ürün sayısı items.length
+    // üzerinden, seçili sayı da yerel durumdan türetilir — bu nedenle sunucu bir summary bloğu
+    // döndürmez. `included` her kalemde son KAYDEDİLEN (indir) seçimini yansıtır.
     items: z.array(DiscountListDetailItemSchema),
   })
   .openapi('DiscountListDetail');

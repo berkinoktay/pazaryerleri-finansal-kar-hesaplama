@@ -61,12 +61,6 @@ interface DetailWire {
   value: string | null;
   minBasketAmount: string | null;
   exported: boolean;
-  summary: {
-    itemCount: number;
-    selectedCount: number;
-    perOrderCost: string;
-    avgProfitDelta: string | null;
-  };
   items: ItemWire[];
 }
 interface ListWire {
@@ -223,23 +217,19 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
     expect(row?.exported).toBe(false);
   });
 
-  it('returns the detail with config, summary and the computed current + discounted scenarios', async () => {
+  it('returns the detail with config and the computed current + discounted scenarios (no summary)', async () => {
     const res = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,
       { headers: { Authorization: bearer(fx.accessToken) } },
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as DetailWire;
+    const body = (await res.json()) as DetailWire & { summary?: unknown };
     expect(body.id).toBe(fx.listId);
     expect(body.discountType).toBe('NET');
     expect(body.valueKind).toBe('PERCENT');
     expect(body.value).toBe('15.00');
-    expect(body.summary.itemCount).toBe(2);
-    expect(body.summary.selectedCount).toBe(1);
-    // Only the matched item is included: 250.00 − 212.50 (NET -15%) = 37.50.
-    expect(body.summary.perOrderCost).toBe('37.50');
-    // No included+calculable item → no average profit delta.
-    expect(body.summary.avgProfitDelta).toBeNull();
+    // Selection is ephemeral client state now — the detail no longer carries a summary card.
+    expect(body.summary).toBeUndefined();
 
     // Items come back in sortOrder.
     expect(body.items.map((i) => i.id)).toEqual([fx.itemMatched, fx.itemUnmatched]);

@@ -134,9 +134,10 @@ interface DiscountVariantRow {
  * SCENARIOS computed on read. Throws `NotFoundError` when it does not belong to this
  * store. Resolves the store's latest commission tariff bands, batch-loads the matched
  * variants + their synced commission + cost + shipping + a category-rate fallback, then
- * runs the three-tier commission chain per item. The summary card (per-order discount
- * cost, average profit delta) is aggregated over the included items — all money math is
- * Decimal, serialized at the DTO edge (the frontend never computes).
+ * runs the three-tier commission chain per item. Selection is EPHEMERAL client state, so
+ * the detail returns no summary card — each item's `included` reflects the last SAVED
+ * (downloaded) selection that the export path reads. Money math is Decimal, serialized at
+ * the DTO edge (the frontend never computes).
  */
 export async function getDiscountListDetail(
   orgId: string,
@@ -267,10 +268,7 @@ export async function getDiscountListDetail(
   const feeDefs = await prisma.$transaction((tx) => resolveFeeDefs(tx, store.platform));
   const ctx: TariffAssemblyContext = { platform: store.platform, feeDefs };
 
-  let selectedCount = 0;
   const items = list.items.map((item): DiscountListDetailItem => {
-    if (item.included) selectedCount += 1;
-
     const variantRow =
       item.productVariantId !== null ? variantMap.get(item.productVariantId) : undefined;
     const variant: TariffVariant | null = variantRow ?? null;
@@ -335,30 +333,10 @@ export async function getDiscountListDetail(
     };
   });
 
-  // ─── Summary card — aggregated over the INCLUDED items (Decimal math) ──────
-  // Aggregation is deliberately over each row's SERIALIZED 2dp price/profit strings (i.current /
-  // i.discounted already went through serializeScenario's toFixed(2)), NOT the full-precision
-  // Decimals. So the summary equals Σ of the numbers the seller actually sees per row — no penny
-  // drift between the card total and the visible rows.
-  const included = items.filter((i) => i.included);
-  let perOrderCost = new Decimal(0);
-  const deltas: Decimal[] = [];
-  for (const i of included) {
-    perOrderCost = perOrderCost.add(
-      new Decimal(i.current.price).sub(new Decimal(i.discounted.price)),
-    );
-    if (i.calculable && i.current.netProfit !== null && i.discounted.netProfit !== null) {
-      deltas.push(new Decimal(i.discounted.netProfit).sub(new Decimal(i.current.netProfit)));
-    }
-  }
-  const avgProfitDelta =
-    deltas.length > 0
-      ? deltas
-          .reduce((acc, d) => acc.add(d), new Decimal(0))
-          .div(deltas.length)
-          .toFixed(2)
-      : null;
-
+  // Selection is now EPHEMERAL client state: the detail returns no summary card. The frontend
+  // derives the total product count from items.length and the selected count from its own local
+  // state; each item's `included` still carries the last SAVED (downloaded) selection, which the
+  // export path reads. So there is no server-side aggregation here.
   return {
     id: list.id,
     name: list.name,
@@ -379,12 +357,6 @@ export async function getDiscountListDetail(
     // True only when the store has commission tariffs but none covers the anchor (uploads are
     // stale or don't reach the campaign start) — the detail warns the seller. See resolver.
     commissionTariffOutdated,
-    summary: {
-      itemCount: list.items.length,
-      selectedCount,
-      perOrderCost: perOrderCost.toFixed(2),
-      avgProfitDelta,
-    },
     items,
   };
 }

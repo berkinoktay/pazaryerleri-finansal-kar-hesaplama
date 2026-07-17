@@ -7293,9 +7293,6 @@
           "commissionTariffOutdated": {
             "type": "boolean"
           },
-          "summary": {
-            "$ref": "#/components/schemas/DiscountListSummary"
-          },
           "items": {
             "type": "array",
             "items": {
@@ -7320,34 +7317,7 @@
           "commissionTariffName",
           "commissionPeriodLabel",
           "commissionTariffOutdated",
-          "summary",
           "items"
-        ]
-      },
-      "DiscountListSummary": {
-        "type": "object",
-        "properties": {
-          "itemCount": {
-            "type": "integer"
-          },
-          "selectedCount": {
-            "type": "integer"
-          },
-          "perOrderCost": {
-            "type": "string"
-          },
-          "avgProfitDelta": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "itemCount",
-          "selectedCount",
-          "perOrderCost",
-          "avgProfitDelta"
         ]
       },
       "DiscountListDetailItem": {
