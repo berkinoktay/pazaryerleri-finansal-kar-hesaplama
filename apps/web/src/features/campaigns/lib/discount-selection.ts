@@ -4,10 +4,10 @@ import type { DiscountRow } from './adapt-discount-list';
 
 /**
  * Pure client-side filtering + smart-select projections for the İndirimler (Discounts) detail
- * table. Selection itself is server-authoritative (each row's `included` is persisted via the
- * selections PATCH); these helpers only decide WHICH visible rows a filter keeps or a
- * "profitable" smart-select targets. The profitable/losing predicates COMPARE two
- * already-backend-computed profit figures (a sign check) — they never compute profit
+ * table. Selection itself is EPHEMERAL client state (a local `Set<itemId>` in the detail client,
+ * flushed to the backend only on "Kaydet ve İndir"); these helpers only decide WHICH visible rows
+ * a filter keeps or a "profitable" smart-select targets. The profitable/losing predicates COMPARE
+ * two already-backend-computed profit figures (a sign check) — they never compute profit
  * themselves, so the no-frontend-financial-calculation rule holds.
  */
 
@@ -65,9 +65,9 @@ export function filterDiscountRows(
 /**
  * The EXCLUSIVE "kârda kalanları seç" projection over the given rows: every row whose DISCOUNTED
  * price still nets a profit maps to `included: true`, and EVERY other row maps to `included: false`
- * — so applying it with mode 'set' both selects the winners and deselects the rest in one shot.
- * Callers pass the currently VISIBLE (filtered) rows, so hidden rows are absent and keep their
- * existing selection.
+ * — so applying it to the local selection set both adds the winners and removes the rest in one
+ * pass. Callers pass the currently VISIBLE (filtered) rows, so hidden rows are absent and keep
+ * their existing selection.
  */
 export function profitableSelections(
   rows: readonly DiscountRow[],

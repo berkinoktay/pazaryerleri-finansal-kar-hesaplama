@@ -1773,9 +1773,7 @@
     },
     "summary": {
       "total": "Ürün",
-      "selected": "Dahil edilen",
-      "perOrderCost": "Sipariş başına indirim maliyeti",
-      "avgImpact": "Ortalama kâr etkisi"
+      "selected": "Dahil edilen"
     },
     "table": {
       "product": "Ürün Bilgisi",
@@ -1837,6 +1835,7 @@
     },
     "actions": {
       "export": "Dışa aktar",
+      "saveAndDownload": "Kaydet ve İndir",
       "exportEmptyHint": "Dışa aktarmadan önce en az bir ürünü kampanyaya dahil edin."
     }
   },

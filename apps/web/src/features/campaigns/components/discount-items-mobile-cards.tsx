@@ -17,6 +17,8 @@ import { ProfitDelta } from './profit-delta';
 
 export interface DiscountItemsMobileCardsProps {
   rows: readonly DiscountRow[];
+  /** The client's EPHEMERAL local selection — drives each card checkbox's checked state. */
+  selectedIds: ReadonlySet<string>;
   /** Detail-level commission tariff NAME feeding the bands — the band tooltip's first part. */
   commissionTariffName: string | null;
   /** Detail-level commission tariff PERIOD label — the band tooltip's second part. */
@@ -35,6 +37,7 @@ export interface DiscountItemsMobileCardsProps {
  */
 export function DiscountItemsMobileCards({
   rows,
+  selectedIds,
   commissionTariffName,
   commissionPeriodLabel,
   selectionsPending,
@@ -60,7 +63,7 @@ export function DiscountItemsMobileCards({
             {/* Identity — checkbox + image + title/meta. */}
             <div className="gap-sm flex min-w-0 items-start">
               <Checkbox
-                checked={row.included}
+                checked={selectedIds.has(row.id)}
                 disabled={selectionsPending}
                 aria-label={t('includeRow')}
                 onCheckedChange={(next) => onToggleInclude(row.id, next === true)}

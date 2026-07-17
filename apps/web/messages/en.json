@@ -1773,9 +1773,7 @@
     },
     "summary": {
       "total": "Products",
-      "selected": "Included",
-      "perOrderCost": "Per-order discount cost",
-      "avgImpact": "Avg. profit impact"
+      "selected": "Included"
     },
     "table": {
       "product": "Product Info",
@@ -1837,6 +1835,7 @@
     },
     "actions": {
       "export": "Export",
+      "saveAndDownload": "Save and download",
       "exportEmptyHint": "Include at least one product before exporting."
     }
   },

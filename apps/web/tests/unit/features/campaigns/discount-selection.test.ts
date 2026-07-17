@@ -50,7 +50,6 @@ function makeRow(
     brand: null,
     color: null,
     imageUrl: null,
-    included: false,
     calculable: true,
     reason: null,
     current: scenario('25.00'),

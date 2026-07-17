@@ -60,12 +60,6 @@ function detailResponse() {
     startsAt: null,
     endsAt: null,
     exported: false,
-    summary: {
-      itemCount: 1,
-      selectedCount: 1,
-      perOrderCost: '20.00',
-      avgProfitDelta: '-15.00',
-    },
     items: [detailItem()],
   };
 }

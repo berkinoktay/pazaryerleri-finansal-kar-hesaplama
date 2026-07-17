@@ -1,16 +1,11 @@
 'use client';
 
-import { ChartLineData01Icon, Coins01Icon, PackageIcon, TaskDone01Icon } from 'hugeicons-react';
+import { PackageIcon, TaskDone01Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { Currency } from '@/components/patterns/currency';
 import { StatStrip, type StatStripItem } from '@/components/patterns/stat-strip';
 import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
-
-import type { DiscountListSummary } from '../api/get-discount-list-detail.api';
-
-const DASH = '—';
 
 const circleIcon = (
   icon: React.ReactNode,
@@ -22,39 +17,34 @@ const circleIcon = (
 );
 
 export interface DiscountItemsSummaryProps {
-  summary: DiscountListSummary;
+  /** Total product count on the list — `rows.length`. */
+  itemCount: number;
+  /** How many the seller has included — the detail client's EPHEMERAL local selection size. */
+  selectedCount: number;
 }
 
 /**
- * Header KPI strip for an open İndirimler list — renders ONLY the backend `summary` block: the
- * product count, how many the seller has included, the per-order discount cost, and the average
- * profit impact of including the discount. Every figure is server-computed (Görev 9); the
- * frontend derives nothing.
+ * Header KPI strip for an open İndirimler list — two counts only: the total product count and how
+ * many the seller has included. Selection is ephemeral client state, so `selectedCount` is the
+ * local selection size (not a server figure) and there are no monetary stats.
  */
-export function DiscountItemsSummary({ summary }: DiscountItemsSummaryProps): React.ReactElement {
+export function DiscountItemsSummary({
+  itemCount,
+  selectedCount,
+}: DiscountItemsSummaryProps): React.ReactElement {
   const t = useTranslations('discountsPage.summary');
   const format = useFormatter();
 
   const items: StatStripItem[] = [
     {
       label: t('total'),
-      value: format.number(summary.itemCount, 'integer'),
+      value: format.number(itemCount, 'integer'),
       icon: circleIcon(<PackageIcon />, 'primary'),
     },
     {
       label: t('selected'),
-      value: format.number(summary.selectedCount, 'integer'),
+      value: format.number(selectedCount, 'integer'),
       icon: circleIcon(<TaskDone01Icon />, 'info'),
-    },
-    {
-      label: t('perOrderCost'),
-      value: <Currency value={summary.perOrderCost} />,
-      icon: circleIcon(<Coins01Icon />, 'warning'),
-    },
-    {
-      label: t('avgImpact'),
-      value: summary.avgProfitDelta === null ? DASH : <Currency value={summary.avgProfitDelta} />,
-      icon: circleIcon(<ChartLineData01Icon />, 'success'),
     },
   ];
 

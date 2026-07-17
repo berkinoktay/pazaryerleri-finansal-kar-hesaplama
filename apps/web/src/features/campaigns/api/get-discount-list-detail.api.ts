@@ -5,7 +5,6 @@ import { throwApiError } from '@/lib/api-error';
 
 export type DiscountListDetail = components['schemas']['DiscountListDetail'];
 export type DiscountListDetailItem = components['schemas']['DiscountListDetailItem'];
-export type DiscountListSummary = components['schemas']['DiscountListSummary'];
 export type DiscountType = components['schemas']['DiscountType'];
 export type DiscountValueKind = components['schemas']['DiscountValueKind'];
 export type DiscountCommissionSource = components['schemas']['DiscountCommissionSource'];
@@ -15,9 +14,9 @@ export type DiscountItemReason = components['schemas']['DiscountItemReason'];
 /**
  * GET /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}
  *
- * Returns one discount list with its configuration, a summary card (item / selected counts,
- * per-order discount cost, max total cost, average profit delta) and every item carrying the
- * `current` and `discounted` price SCENARIOS. Each scenario carries its price, reduced
+ * Returns one discount list with its configuration and every item carrying the `current` and
+ * `discounted` price SCENARIOS (no summary card — selection is ephemeral client state, so the
+ * counts are derived on the client). Each scenario carries its price, reduced
  * commission (with `commissionSource`), and the net profit + margin COMPUTED on read by the
  * profit engine — the reduced commission is RE-resolved on the scenario price (a lower price
  * can land in a different commission band). Money fields are GROSS decimal strings — the

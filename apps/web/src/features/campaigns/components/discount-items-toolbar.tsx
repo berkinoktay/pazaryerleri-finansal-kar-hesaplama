@@ -21,9 +21,9 @@ export interface DiscountItemsToolbarProps {
   onSelectProfitable: () => void;
   /** Exclude the whole list (mode 'none'). */
   onClearSelections: () => void;
-  /** True while a selections mutation is in flight — disables the smart-select actions. */
+  /** True while a save flush is in flight — disables the smart-select actions. */
   selectionsPending: boolean;
-  /** Server-authoritative included count — drives the over-500 warning strip. */
+  /** The client's EPHEMERAL local selection size — drives the over-500 warning strip. */
   selectedCount: number;
 }
 

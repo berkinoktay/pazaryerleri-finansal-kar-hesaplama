@@ -27,21 +27,24 @@ export type DiscountScenarioKey = 'current' | 'discounted';
 /**
  * State the cells need beyond their row data, streamed through CONTEXT rather than baked into the
  * `columns` closure so `columns` stays identity-stable — rebuilding it would remount every cell.
- * Carries the VOLATILE `selectionsPending` (disables the checkbox mid-mutation) plus the
- * detail-level commission tariff name + period (the band tooltip), which are stable for a loaded
- * detail but still live off the row. (`row.included` is NOT closure state — it flows via row data.)
+ * Carries the VOLATILE `selectionsPending` (disables the checkbox during a save flush) and the
+ * ephemeral `selectedIds` set (drives each checkbox's checked state) plus the detail-level
+ * commission tariff name + period (the band tooltip), which are stable for a loaded detail but
+ * still live off the row. Selection is NOT on the row — it lives in the client's local set.
  */
 const DiscountRowStateContext = React.createContext<{
   selectionsPending: boolean;
+  selectedIds: ReadonlySet<string>;
   commissionTariffName: string | null;
   commissionPeriodLabel: string | null;
 }>({
   selectionsPending: false,
+  selectedIds: new Set(),
   commissionTariffName: null,
   commissionPeriodLabel: null,
 });
 
-/** Participation checkbox — reads the pending flag from context, not the column closure. */
+/** Participation checkbox — reads the pending flag + local selection from context, not the row. */
 function IncludeCellSlot({
   row,
   label,
@@ -51,10 +54,10 @@ function IncludeCellSlot({
   label: string;
   onToggle: (itemId: string, included: boolean) => void;
 }): React.ReactElement {
-  const { selectionsPending } = React.useContext(DiscountRowStateContext);
+  const { selectionsPending, selectedIds } = React.useContext(DiscountRowStateContext);
   return (
     <Checkbox
-      checked={row.included}
+      checked={selectedIds.has(row.id)}
       disabled={selectionsPending}
       aria-label={label}
       onCheckedChange={(next) => onToggle(row.id, next === true)}
@@ -82,13 +85,15 @@ function CommissionCellSlot({ row }: { row: DiscountRow }): React.ReactElement {
 
 export interface DiscountItemsTableProps {
   rows: readonly DiscountRow[];
+  /** The client's EPHEMERAL local selection — drives each row checkbox's checked state. */
+  selectedIds: ReadonlySet<string>;
   /** Detail-level commission tariff NAME feeding the bands — the band tooltip's first part. */
   commissionTariffName: string | null;
   /** Detail-level commission tariff PERIOD label — the band tooltip's second part. */
   commissionPeriodLabel: string | null;
-  /** True while a selections mutation is in flight — disables the row checkboxes. */
+  /** True while a save flush is in flight — disables the row checkboxes. */
   selectionsPending: boolean;
-  /** Persists a single row's participation choice (mode 'set'). */
+  /** Toggles a single row's participation in the local selection set. */
   onToggleInclude: (itemId: string, included: boolean) => void;
   /** Opens the profit breakdown modal for a row's scenario. */
   onOpenBreakdown: (row: DiscountRow, scenario: DiscountScenarioKey) => void;
@@ -107,6 +112,7 @@ export interface DiscountItemsTableProps {
  */
 export function DiscountItemsTable({
   rows,
+  selectedIds,
   commissionTariffName,
   commissionPeriodLabel,
   selectionsPending,
@@ -226,8 +232,8 @@ export function DiscountItemsTable({
   }, [t, scale, onToggleInclude, onOpenBreakdown, reasonEmptyLabel]);
 
   const rowState = React.useMemo(
-    () => ({ selectionsPending, commissionTariffName, commissionPeriodLabel }),
-    [selectionsPending, commissionTariffName, commissionPeriodLabel],
+    () => ({ selectionsPending, selectedIds, commissionTariffName, commissionPeriodLabel }),
+    [selectionsPending, selectedIds, commissionTariffName, commissionPeriodLabel],
   );
 
   // Fresh array copy for TanStack (it mutates its own row model), memoized so the reference is

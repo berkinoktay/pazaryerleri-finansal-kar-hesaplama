@@ -4,7 +4,6 @@ import type {
   DiscountItemReason,
   DiscountListDetail,
   DiscountListDetailItem,
-  DiscountListSummary,
 } from '../api/get-discount-list-detail.api';
 
 export type { DiscountCommissionBand };
@@ -30,8 +29,9 @@ export interface DiscountScenario {
 
 /**
  * A Discounts product ROW as the detail table consumes it — one product, two price scenarios.
- * Mirrors the backend `DiscountListDetailItem` field-for-field; `included` is the seller's
- * server-authoritative participation flag.
+ * Mirrors the backend `DiscountListDetailItem` field-for-field EXCEPT the backend `included` flag:
+ * participation is now EPHEMERAL client state (a local `Set<itemId>` in the detail client), so the
+ * row deliberately omits it — the checkbox reads/writes local state, never `row.included`.
  */
 export interface DiscountRow {
   id: string;
@@ -44,7 +44,6 @@ export interface DiscountRow {
   brand: string | null;
   color: string | null;
   imageUrl: string | null;
-  included: boolean;
   calculable: boolean;
   reason: DiscountItemReason;
   /** The seller's current price scenario at its resolved commission. */
@@ -59,9 +58,10 @@ export interface DiscountRow {
 }
 
 /**
- * A saved discount list as the detail screen consumes it. Carries the backend summary card
- * verbatim (item / included counts, per-order cost, max total cost, average profit delta) plus
- * the projected rows. `exported` is server-authoritative.
+ * A saved discount list as the detail screen consumes it. Carries the projected rows plus the
+ * commission-tariff transparency labels. There is NO summary block: the total product count is
+ * `rows.length` and the selected count comes from the detail client's ephemeral local selection.
+ * `exported` is server-authoritative.
  */
 export interface DiscountListView {
   id: string;
@@ -71,11 +71,13 @@ export interface DiscountListView {
   commissionTariffName: string | null;
   /** Period label of that tariff week (e.g. "7 - 14 Temmuz"); null when unresolved. */
   commissionPeriodLabel: string | null;
-  summary: DiscountListSummary;
   rows: readonly DiscountRow[];
 }
 
-/** Flat projection of one backend detail item into the table row shape (identity mapping). */
+/**
+ * Flat projection of one backend detail item into the table row shape (identity mapping). The
+ * backend `included` flag is intentionally NOT carried — participation is ephemeral local state.
+ */
 function toRow(item: DiscountListDetailItem): DiscountRow {
   return {
     id: item.id,
@@ -86,7 +88,6 @@ function toRow(item: DiscountListDetailItem): DiscountRow {
     brand: item.brand,
     color: item.color,
     imageUrl: item.imageUrl,
-    included: item.included,
     calculable: item.calculable,
     reason: item.reason,
     current: item.current,
@@ -97,7 +98,7 @@ function toRow(item: DiscountListDetailItem): DiscountRow {
 
 /**
  * Maps the backend `DiscountListDetail` to the detail screen's `DiscountListView`: renames
- * `items` → `rows` and passes the summary through untouched. No money math — the engine already
+ * `items` → `rows`. No summary (selection is ephemeral) and no money math — the engine already
  * computed every scenario's profit/margin.
  */
 export function toDiscountListView(detail: DiscountListDetail): DiscountListView {
@@ -107,7 +108,6 @@ export function toDiscountListView(detail: DiscountListDetail): DiscountListView
     exported: detail.exported,
     commissionTariffName: detail.commissionTariffName,
     commissionPeriodLabel: detail.commissionPeriodLabel,
-    summary: detail.summary,
     rows: detail.items.map(toRow),
   };
 }

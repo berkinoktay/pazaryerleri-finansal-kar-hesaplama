@@ -45,11 +45,13 @@ interface BreakdownState {
 /**
  * Data-bound DETAIL screen for one saved İndirimler upload. Loads it from the backend (current +
  * discounted profit already computed per row), lets the seller edit the discount kurgu (which
- * recomputes every discounted scenario), pick which products to include (persisted per row), and
- * download the patched Trendyol xlsx. Selection is server-authoritative — each checkbox toggle
- * and each smart-select persists immediately; there is no local buffer and no client-side money
- * math (the profit badges/delta only render backend figures). The breakdown modal calls the
- * estimate endpoint for the clicked scenario.
+ * recomputes every discounted scenario), pick which products to include, and download the patched
+ * Trendyol xlsx. Selection is EPHEMERAL client state — a local `Set<itemId>` that starts EMPTY on
+ * every mount (the backend `included` flag is ignored on read). Checkbox toggles and smart-select
+ * only mutate that Set; nothing persists until the seller clicks "Kaydet ve İndir", which first
+ * flushes the full selection to the backend (mode 'set' over every row) and, on success, streams
+ * the export download. There is no client-side money math (the profit badges/delta only render
+ * backend figures). The breakdown modal calls the estimate endpoint for the clicked scenario.
  */
 export function DiscountDetailClient({
   orgId,
@@ -76,6 +78,11 @@ export function DiscountDetailClient({
 
   const list = detail.data ?? null;
   const view = React.useMemo(() => (list !== null ? toDiscountListView(list) : null), [list]);
+
+  // Selection is EPHEMERAL: a local set of included itemIds that starts EMPTY on every mount and is
+  // NEVER seeded from the backend `included` flag. The checkbox reads/writes this only; nothing
+  // hits the network until "Kaydet ve İndir" flushes the whole set (see onSaveAndDownload).
+  const [selectedIds, setSelectedIds] = React.useState<ReadonlySet<string>>(() => new Set());
 
   // View state (search + the three filter chips) is URL-owned via nuqs: reload / share /
   // back-forward reproduce the exact view. Each chip is a boolean param that drops from the URL
@@ -120,13 +127,16 @@ export function DiscountDetailClient({
   const resetFilters = (): void => void setUrlState({ q: '', profitable: false, losing: false });
 
   // Stable handlers for the table `columns` — a single-row toggle and the breakdown opener never
-  // change identity (the mutate fns are React-Query-stable), so `columns` never rebuilds.
-  const onToggleInclude = React.useCallback(
-    (itemId: string, included: boolean): void => {
-      mutateSelections({ mode: 'set', selections: [{ itemId, included }] });
-    },
-    [mutateSelections],
-  );
+  // change identity, so `columns` never rebuilds. The toggle now only mutates LOCAL state (no
+  // network); the functional update keeps it dependency-free and thus identity-stable.
+  const onToggleInclude = React.useCallback((itemId: string, included: boolean): void => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (included) next.add(itemId);
+      else next.delete(itemId);
+      return next;
+    });
+  }, []);
   const openBreakdown = React.useCallback(
     (row: DiscountRow, scenario: DiscountScenarioKey): void => {
       setBreakdown({ row, scenario });
@@ -199,23 +209,48 @@ export function DiscountDetailClient({
     );
   }
 
-  const summary = view.summary;
+  const itemCount = view.rows.length;
+  const selectedCount = selectedIds.size;
   const hasFilters = hasActiveDiscountFilters(filters);
-  const exportDisabled = summary.selectedCount === 0;
+  const exportDisabled = selectedCount === 0;
+  // Both steps of "Kaydet ve İndir" (flush → download) share one loading state.
+  const savePending = selectionsPending || exportList.isPending;
 
-  const onSelectAll = (): void => mutateSelections({ mode: 'all', selections: [] });
-  const onClearSelections = (): void => mutateSelections({ mode: 'none', selections: [] });
+  // All three smart-selects drive the LOCAL set — no network. "Tümünü seç" adds every row id,
+  // "Temizle" clears, "Kârda kalanları seç" applies the exclusive profitable projection over the
+  // VISIBLE rows only (hidden rows keep their current selection, mirroring the old mode 'set').
+  const onSelectAll = (): void => setSelectedIds(new Set(view.rows.map((row) => row.id)));
+  const onClearSelections = (): void => setSelectedIds(new Set());
   const onSelectProfitable = (): void =>
-    mutateSelections({
-      mode: 'set',
-      selections: profitableSelections(filteredRows),
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const { itemId, included } of profitableSelections(filteredRows)) {
+        if (included) next.add(itemId);
+        else next.delete(itemId);
+      }
+      return next;
     });
 
-  const onExport = (): void => {
-    exportList.mutate(listId, {
-      // Filename comes from the server; fall back to the list name only if the header was absent.
-      onSuccess: (file) => downloadBlob(file.blob, file.filename ?? `${view.name}.xlsx`),
-    });
+  // "Kaydet ve İndir": flush the FULL local selection (mode 'set' over every row, so the DB
+  // fully mirrors local state and any stale prior flush is cleared), THEN — only on flush
+  // success — stream the export download. A flush failure aborts before download; the global
+  // error pipeline already toasts, so no local onError.
+  const onSaveAndDownload = (): void => {
+    const selections = view.rows.map((row) => ({
+      itemId: row.id,
+      included: selectedIds.has(row.id),
+    }));
+    mutateSelections(
+      { mode: 'set', selections },
+      {
+        onSuccess: () => {
+          exportList.mutate(listId, {
+            // Filename comes from the server; fall back to the list name if the header was absent.
+            onSuccess: (file) => downloadBlob(file.blob, file.filename ?? `${view.name}.xlsx`),
+          });
+        },
+      },
+    );
   };
 
   const toolbar = (
@@ -225,20 +260,20 @@ export function DiscountDetailClient({
       onSelectAll={onSelectAll}
       onSelectProfitable={onSelectProfitable}
       onClearSelections={onClearSelections}
-      selectionsPending={selectionsPending}
-      selectedCount={summary.selectedCount}
+      selectionsPending={savePending}
+      selectedCount={selectedCount}
     />
   );
 
   const exportButton = (
     <Button
       size="sm"
-      onClick={onExport}
+      onClick={onSaveAndDownload}
       disabled={exportDisabled}
-      loading={exportList.isPending}
+      loading={savePending}
       leadingIcon={<DownloadCircle01Icon aria-hidden />}
     >
-      {tActions('export')}
+      {tActions('saveAndDownload')}
     </Button>
   );
 
@@ -291,7 +326,7 @@ export function DiscountDetailClient({
             )}
           </div>
         }
-        summary={<DiscountItemsSummary summary={summary} />}
+        summary={<DiscountItemsSummary itemCount={itemCount} selectedCount={selectedCount} />}
       />
 
       <DiscountConfigCard list={list} onEdit={() => setEditOpen(true)} />
@@ -299,9 +334,10 @@ export function DiscountDetailClient({
       <div className="hidden min-w-0 md:block">
         <DiscountItemsTable
           rows={filteredRows}
+          selectedIds={selectedIds}
           commissionTariffName={view.commissionTariffName}
           commissionPeriodLabel={view.commissionPeriodLabel}
-          selectionsPending={selectionsPending}
+          selectionsPending={savePending}
           onToggleInclude={onToggleInclude}
           onOpenBreakdown={openBreakdown}
           toolbar={toolbar}
@@ -313,9 +349,10 @@ export function DiscountDetailClient({
         {toolbar}
         <DiscountItemsMobileCards
           rows={filteredRows}
+          selectedIds={selectedIds}
           commissionTariffName={view.commissionTariffName}
           commissionPeriodLabel={view.commissionPeriodLabel}
-          selectionsPending={selectionsPending}
+          selectionsPending={savePending}
           onToggleInclude={onToggleInclude}
           onOpenBreakdown={openBreakdown}
         />
