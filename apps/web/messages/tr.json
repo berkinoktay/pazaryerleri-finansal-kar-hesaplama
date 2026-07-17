@@ -1834,7 +1834,6 @@
       "notFoundDescription": "Bu liste silinmiş olabilir veya bu mağazaya ait olmayabilir."
     },
     "actions": {
-      "export": "Dışa aktar",
       "saveAndDownload": "Kaydet ve İndir",
       "exportEmptyHint": "Dışa aktarmadan önce en az bir ürünü kampanyaya dahil edin."
     }
