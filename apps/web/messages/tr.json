@@ -1701,7 +1701,6 @@
         "startPlaceholder": "Başlangıç tarihi",
         "endPlaceholder": "Bitiş tarihi"
       },
-      "optionalSection": "İsteğe bağlı ayarlar",
       "submit": "Listeyi oluştur",
       "errors": {
         "notReadable": "Dosya okunamadı — geçerli bir .xlsx dosyası yükleyin.",

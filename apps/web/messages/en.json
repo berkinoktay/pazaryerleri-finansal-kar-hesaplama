@@ -1701,7 +1701,6 @@
         "startPlaceholder": "Start date",
         "endPlaceholder": "End date"
       },
-      "optionalSection": "Optional settings",
       "submit": "Create list",
       "errors": {
         "notReadable": "The file could not be read — upload a valid .xlsx file.",
