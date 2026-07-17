@@ -127,10 +127,11 @@ export function DiscountCommissionCell({
   // (discounted.commissionPct, the "baz alınan" rate). Marking by the shown rate (not by the
   // discounted price) follows the band that drives it even for list-price-anchored discounts
   // (X-al-Y / Nth-product), where the rate comes from the CURRENT price's band while the
-  // displayed price is the lower effective one. commissionPct is non-null here (source is
-  // 'band'); the guard keeps the mark empty in the impossible null case. No money math.
+  // displayed price is the lower effective one. Gated on `source === 'band'`: only a band-
+  // resolved rate may highlight a band row — a product/category rate that coincidentally
+  // equals a band's pct must NOT mark. No money math.
   const activeBand =
-    discounted.commissionPct !== null
+    source === 'band' && discounted.commissionPct !== null
       ? findBandByCommissionPct(commissionBands, discounted.commissionPct)
       : null;
   const bandMarks: CommissionBandMark[] = activeBand !== null ? [{ band: activeBand }] : [];
