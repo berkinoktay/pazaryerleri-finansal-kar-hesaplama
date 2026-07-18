@@ -233,25 +233,6 @@ describe('POST .../discount-lists/import - rejects invalid input', () => {
     );
   });
 
-  it('rejects a BUY_X_PAY_Y config with buy=0/pay=0 (pay >= buy) with 422', async () => {
-    const ctx = await setupStore(false);
-    const res = await app.request(
-      importRequest(ctx, FIXTURE, {
-        discountType: 'BUY_X_PAY_Y',
-        buyQuantity: '0',
-        payQuantity: '0',
-      }),
-    );
-    expect(res.status).toBe(422);
-    const body = (await res.json()) as ProblemWire;
-    expect(body.code).toBe('VALIDATION_ERROR');
-    expect(body.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ field: 'payQuantity', code: 'PAY_MUST_BE_LESS_THAN_BUY' }),
-      ]),
-    );
-  });
-
   it('rejects a file whose header layout is not the İndirimler export with 422 INVALID_DISCOUNT_FORMAT', async () => {
     const ctx = await setupStore(false);
     // Blank the required "Barkod" header so the layout no longer resolves.
@@ -268,5 +249,76 @@ describe('POST .../discount-lists/import - rejects invalid input', () => {
         expect.objectContaining({ field: 'file', code: 'INVALID_DISCOUNT_FORMAT' }),
       ]),
     );
+  });
+});
+
+describe('POST .../discount-lists/import - BUY_X_PAY_Y quantity bounds', () => {
+  const BUY_PAY_BASE = { discountType: 'BUY_X_PAY_Y', startsAt: START_AT, endsAt: END_AT } as const;
+
+  beforeEach(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+  });
+
+  async function importBuyPay(
+    config: Record<string, string>,
+  ): Promise<{ status: number; body: ProblemWire }> {
+    const ctx = await setupStore(false);
+    const res = await app.request(importRequest(ctx, FIXTURE, { ...BUY_PAY_BASE, ...config }));
+    return { status: res.status, body: (await res.json()) as ProblemWire };
+  }
+
+  it('rejects buyQuantity below 2 with 422 BUY_QUANTITY_OUT_OF_RANGE', async () => {
+    const { status, body } = await importBuyPay({ buyQuantity: '1', payQuantity: '1' });
+    expect(status).toBe(422);
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: 'buyQuantity', code: 'BUY_QUANTITY_OUT_OF_RANGE' }),
+      ]),
+    );
+  });
+
+  it('rejects buyQuantity above 5 with 422 BUY_QUANTITY_OUT_OF_RANGE', async () => {
+    const { status, body } = await importBuyPay({ buyQuantity: '6', payQuantity: '1' });
+    expect(status).toBe(422);
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: 'buyQuantity', code: 'BUY_QUANTITY_OUT_OF_RANGE' }),
+      ]),
+    );
+  });
+
+  it('rejects payQuantity below 1 with 422 PAY_QUANTITY_TOO_SMALL', async () => {
+    const { status, body } = await importBuyPay({ buyQuantity: '3', payQuantity: '0' });
+    expect(status).toBe(422);
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: 'payQuantity', code: 'PAY_QUANTITY_TOO_SMALL' }),
+      ]),
+    );
+  });
+
+  it('rejects payQuantity >= buyQuantity with 422 PAY_MUST_BE_LESS_THAN_BUY', async () => {
+    const { status, body } = await importBuyPay({ buyQuantity: '3', payQuantity: '3' });
+    expect(status).toBe(422);
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: 'payQuantity', code: 'PAY_MUST_BE_LESS_THAN_BUY' }),
+      ]),
+    );
+  });
+
+  it('accepts an in-range buy=4/pay=2 config with 201', async () => {
+    const ctx = await setupStore(false);
+    const res = await app.request(
+      importRequest(ctx, FIXTURE, { ...BUY_PAY_BASE, buyQuantity: '4', payQuantity: '2' }),
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as ImportWire;
+    expect(body.itemCount).toBe(TOTAL_ROWS);
   });
 });

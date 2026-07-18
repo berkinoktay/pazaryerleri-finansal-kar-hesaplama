@@ -301,7 +301,7 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
     expect(body.errors.some((e) => e.code === 'FIXED_PRICE_ONLY_FOR_NTH')).toBe(true);
   });
 
-  it('rejects payQuantity 0 on BUY_X_PAY_Y (422 INVALID_PAY_QUANTITY)', async () => {
+  it('rejects payQuantity 0 on BUY_X_PAY_Y (422 PAY_QUANTITY_TOO_SMALL)', async () => {
     const res = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,
       {
@@ -314,7 +314,24 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
     const body = (await res.json()) as { code: string; errors: { field: string; code: string }[] };
     expect(body.code).toBe('VALIDATION_ERROR');
     expect(
-      body.errors.some((e) => e.field === 'payQuantity' && e.code === 'INVALID_PAY_QUANTITY'),
+      body.errors.some((e) => e.field === 'payQuantity' && e.code === 'PAY_QUANTITY_TOO_SMALL'),
+    ).toBe(true);
+  });
+
+  it('rejects buyQuantity above 5 on BUY_X_PAY_Y (422 BUY_QUANTITY_OUT_OF_RANGE)', async () => {
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ discountType: 'BUY_X_PAY_Y', buyQuantity: '6', payQuantity: '1' }),
+      },
+    );
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { code: string; errors: { field: string; code: string }[] };
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(
+      body.errors.some((e) => e.field === 'buyQuantity' && e.code === 'BUY_QUANTITY_OUT_OF_RANGE'),
     ).toBe(true);
   });
 

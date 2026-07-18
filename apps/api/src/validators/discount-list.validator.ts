@@ -31,6 +31,12 @@ export const DiscountValueKindSchema = z.enum(DiscountValueKind).openapi('Discou
 const DECIMAL_RE = /^\d+(\.\d{1,2})?$/;
 const INT_RE = /^\d+$/;
 
+// BUY_X_PAY_Y panel bounds (mirror Trendyol's panel): the buy quantity is 2..5 and the pay
+// quantity is 1..buy-1. Enforced here so an out-of-range value returns a clean 422 even on a
+// direct API call — the frontend Selects already make it impossible to pick one in the UI.
+const BUY_QUANTITY_MIN = 2;
+const BUY_QUANTITY_MAX = 5;
+
 // Magnitude ceilings so an over-large config value returns a clean 422 instead of a DB numeric
 // overflow: `value`/`minBasketAmount` are Decimal(12,2) (10 integer digits + 2 decimals); the
 // count columns are 32-bit Int, kept comfortably below 2^31-1.
@@ -74,9 +80,16 @@ export function refineDiscountConfig(
   if (val.discountType === 'BUY_X_PAY_Y') {
     if (val.buyQuantity === undefined) need('buyQuantity', 'BUY_QUANTITY_REQUIRED');
     if (val.payQuantity === undefined) need('payQuantity', 'PAY_QUANTITY_REQUIRED');
+    // The buy quantity must sit inside the panel bounds [2, 5].
+    if (
+      val.buyQuantity !== undefined &&
+      (Number(val.buyQuantity) < BUY_QUANTITY_MIN || Number(val.buyQuantity) > BUY_QUANTITY_MAX)
+    ) {
+      need('buyQuantity', 'BUY_QUANTITY_OUT_OF_RANGE');
+    }
     // The INT_RE regex accepts '0'; a pay quantity below 1 is meaningless (buy N, pay nothing).
     if (val.payQuantity !== undefined && Number(val.payQuantity) < 1) {
-      need('payQuantity', 'INVALID_PAY_QUANTITY');
+      need('payQuantity', 'PAY_QUANTITY_TOO_SMALL');
     }
     if (
       val.buyQuantity !== undefined &&
