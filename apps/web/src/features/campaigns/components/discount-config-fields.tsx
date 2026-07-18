@@ -46,6 +46,24 @@ const NUMERIC_FIELD_MODE: Record<Exclude<ConfigFieldKey, 'valueKind'>, 'decimal'
   nthIndex: 'numeric',
 };
 
+// BUY_X_PAY_Y panel bounds (mirror Trendyol's panel): the buy quantity is a Select of 2..5 and
+// the pay quantity is a DEPENDENT Select of 1..buy-1. Rendering them as Selects (instead of the
+// generic numeric Input) makes an invalid pair (buy < 2, pay >= buy) impossible to pick.
+const BUY_QUANTITY_MIN = 2;
+const BUY_QUANTITY_MAX = 5;
+
+const BUY_QUANTITY_OPTIONS: readonly number[] = Array.from(
+  { length: BUY_QUANTITY_MAX - BUY_QUANTITY_MIN + 1 },
+  (_, i) => BUY_QUANTITY_MIN + i,
+);
+
+/** Valid pay quantities for a chosen buy quantity: 1 .. buy-1 (empty until buy is picked). */
+function payQuantityOptions(buyQuantity: string | undefined): readonly number[] {
+  const buy = buyQuantity !== undefined ? Number(buyQuantity) : Number.NaN;
+  if (!Number.isInteger(buy) || buy <= 1) return [];
+  return Array.from({ length: buy - 1 }, (_, i) => i + 1);
+}
+
 // The value-kind options. FIXED_PRICE ("X. ürün Y TL") is only valid for the NTH_PRODUCT kurgu,
 // filtered out for every other type below.
 const VALUE_KIND_OPTIONS: readonly DiscountValueKind[] = [
@@ -132,10 +150,14 @@ export function useConfigFieldErrorMessage(): (code: string) => string {
         return t('percentOver100');
       case 'END_BEFORE_START':
         return t('endBeforeStart');
-      // Magnitude-bound codes (backend + client mirror) share the generic "value out of range" copy.
+      // Magnitude-bound + BUY_X_PAY_Y out-of-range codes (backend + client mirror) share the
+      // generic "value out of range" copy — the dependent Selects make these unreachable in the
+      // UI, so they only surface on a raw API 422; a precise per-bound key would be dead weight.
       case 'VALUE_TOO_LARGE':
       case 'MIN_BASKET_TOO_LARGE':
       case 'INT_TOO_LARGE':
+      case 'BUY_QUANTITY_OUT_OF_RANGE':
+      case 'PAY_QUANTITY_TOO_SMALL':
         return t('generic');
       default:
         return t('generic');
@@ -186,6 +208,9 @@ export function DiscountConfigFields({
     name: 'discountType',
     defaultValue: DiscountType.NET,
   });
+  // The pay Select's option list + its snap-back reset both depend on the chosen buy quantity;
+  // watch it (like `currentType`) so the dependent Select re-renders when buy changes.
+  const currentBuyQuantity = useWatch({ control: form.control, name: 'buyQuantity' });
   const fields = visibleConfigFields(currentType);
   const valueKindOptions =
     currentType === DiscountType.NTH_PRODUCT
@@ -241,6 +266,85 @@ export function DiscountConfigFields({
                   {valueKindOptions.map((kind) => (
                     <SelectItem key={kind} value={kind}>
                       {tFields(VALUE_KIND_LABEL_KEY[kind])}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormMessage render={configFieldError} />
+            </FormItem>
+          )}
+        />
+      );
+    }
+
+    if (key === 'buyQuantity') {
+      return (
+        <FormField
+          key={key}
+          control={form.control}
+          name="buyQuantity"
+          render={({ field, fieldState }) => (
+            <FormItem>
+              <FormLabel>{tFields('buyQuantity')}</FormLabel>
+              <Select
+                value={field.value}
+                onValueChange={(value) => {
+                  field.onChange(value);
+                  // Dependent pay: if the current pay is now out of range (> buy-1), snap it to
+                  // the biggest still-valid discount (buy-1). Event-driven, NOT an effect — the
+                  // repo forbids react-hooks/set-state-in-effect.
+                  const maxPay = Number(value) - 1;
+                  const currentPay = form.getValues('payQuantity');
+                  if (currentPay !== undefined && Number(currentPay) > maxPay) {
+                    form.setValue('payQuantity', String(maxPay));
+                    form.clearErrors('payQuantity');
+                  }
+                }}
+              >
+                <FormControl>
+                  <SelectTrigger invalid={fieldState.error !== undefined}>
+                    <SelectValue placeholder={tFields('buyQuantity')} />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  {BUY_QUANTITY_OPTIONS.map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      {String(n)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormMessage render={configFieldError} />
+            </FormItem>
+          )}
+        />
+      );
+    }
+
+    if (key === 'payQuantity') {
+      const payOptions = payQuantityOptions(currentBuyQuantity);
+      return (
+        <FormField
+          key={key}
+          control={form.control}
+          name="payQuantity"
+          render={({ field, fieldState }) => (
+            <FormItem>
+              <FormLabel>{tFields('payQuantity')}</FormLabel>
+              <Select
+                value={field.value}
+                onValueChange={(value) => field.onChange(value)}
+                disabled={payOptions.length === 0}
+              >
+                <FormControl>
+                  <SelectTrigger invalid={fieldState.error !== undefined}>
+                    <SelectValue placeholder={tFields('payQuantity')} />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  {payOptions.map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      {String(n)}
                     </SelectItem>
                   ))}
                 </SelectContent>

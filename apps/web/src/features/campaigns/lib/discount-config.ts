@@ -57,6 +57,12 @@ const NTH_INDEX_MIN = 2;
 const NTH_INDEX_MAX = 4;
 const PERCENT_MAX = 100;
 
+// BUY_X_PAY_Y panel bounds (mirror Trendyol's panel): buy 2..5, pay 1..buy-1. The dependent
+// Selects make an out-of-range value impossible to pick; this mirrors the backend gate so a
+// direct 422 lines up with the same inline copy.
+const BUY_QUANTITY_MIN = 2;
+const BUY_QUANTITY_MAX = 5;
+
 // Magnitude ceilings mirroring the backend gate: `value`/`minBasketAmount` are Decimal(12,2)
 // (10 integer digits + 2 decimals); the count fields are 32-bit Int, kept below 2^31-1.
 const MAX_DECIMAL_VALUE = 9999999999.99;
@@ -95,9 +101,16 @@ export const discountConfigFormSchema = discountConfigFieldsSchema.superRefine((
   if (val.discountType === 'BUY_X_PAY_Y') {
     if (val.buyQuantity === undefined) need('buyQuantity', 'BUY_QUANTITY_REQUIRED');
     if (val.payQuantity === undefined) need('payQuantity', 'PAY_QUANTITY_REQUIRED');
+    // The buy quantity must sit inside the panel bounds [2, 5].
+    if (
+      val.buyQuantity !== undefined &&
+      (Number(val.buyQuantity) < BUY_QUANTITY_MIN || Number(val.buyQuantity) > BUY_QUANTITY_MAX)
+    ) {
+      need('buyQuantity', 'BUY_QUANTITY_OUT_OF_RANGE');
+    }
     // The INT_RE regex accepts '0'; a pay quantity below 1 is meaningless (buy N, pay nothing).
     if (val.payQuantity !== undefined && Number(val.payQuantity) < 1) {
-      need('payQuantity', 'INVALID_PAY_QUANTITY');
+      need('payQuantity', 'PAY_QUANTITY_TOO_SMALL');
     }
     if (
       val.buyQuantity !== undefined &&
