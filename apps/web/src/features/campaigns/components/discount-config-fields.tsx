@@ -18,6 +18,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ApiError } from '@/lib/api-error';
+import {
+  businessZoneIsoToLocalWallClock,
+  localWallClockAsBusinessZoneIso,
+} from '@/lib/business-timezone-date';
 
 import {
   visibleConfigFields,
@@ -452,11 +456,13 @@ export function DiscountConfigFields({
                   // AFTER the week's 08:00 boundary and resolves to the 21–28 week — not the
                   // previous one, which a 00:00 start would fall into.
                   defaultTime={{ hours: 8, minutes: 0 }}
-                  value={
-                    field.value !== undefined && field.value !== '' ? new Date(field.value) : null
-                  }
+                  // Bridge to the business timezone: the picker speaks browser-local wall clock,
+                  // but a campaign bound must mean Istanbul wall clock (single source of tz).
+                  value={field.value ? businessZoneIsoToLocalWallClock(field.value) : null}
                   onChange={(date) =>
-                    field.onChange(date !== null ? date.toISOString() : undefined)
+                    field.onChange(
+                      date !== null ? localWallClockAsBusinessZoneIso(date) : undefined,
+                    )
                   }
                 />
                 {fieldState.error !== undefined ? (
@@ -480,11 +486,13 @@ export function DiscountConfigFields({
                   // so a chosen end day stays inside that week rather than spilling into the
                   // next one.
                   defaultTime={{ hours: 7, minutes: 59 }}
-                  value={
-                    field.value !== undefined && field.value !== '' ? new Date(field.value) : null
-                  }
+                  // Bridge to the business timezone: the picker speaks browser-local wall clock,
+                  // but a campaign bound must mean Istanbul wall clock (single source of tz).
+                  value={field.value ? businessZoneIsoToLocalWallClock(field.value) : null}
                   onChange={(date) =>
-                    field.onChange(date !== null ? date.toISOString() : undefined)
+                    field.onChange(
+                      date !== null ? localWallClockAsBusinessZoneIso(date) : undefined,
+                    )
                   }
                 />
                 {fieldState.error !== undefined ? (

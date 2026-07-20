@@ -15,11 +15,11 @@ import type { DiscountFilterState } from '../lib/discount-selection';
 export interface DiscountItemsToolbarProps {
   filters: DiscountFilterState;
   onFiltersChange: (next: Partial<DiscountFilterState>) => void;
-  /** Include the WHOLE list (mode 'all'). */
+  /** Add every row to the local selection Set. */
   onSelectAll: () => void;
-  /** Include only the visible rows that still net a profit (mode 'set'). */
+  /** Add only the visible rows that still net a profit to the local selection Set. */
   onSelectProfitable: () => void;
-  /** Exclude the whole list (mode 'none'). */
+  /** Empty the local selection Set. */
   onClearSelections: () => void;
   /** True while a save flush is in flight — disables the smart-select actions. */
   selectionsPending: boolean;

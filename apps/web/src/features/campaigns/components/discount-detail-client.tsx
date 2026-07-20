@@ -84,6 +84,24 @@ export function DiscountDetailClient({
   // hits the network until "Kaydet ve İndir" flushes the whole set (see onSaveAndDownload).
   const [selectedIds, setSelectedIds] = React.useState<ReadonlySet<string>>(() => new Set());
 
+  // Guard the ephemeral selection against an ACCIDENTAL unload (refresh / tab close / back). The
+  // design keeps selection reset-on-context-loss — this does NOT persist it, it only makes the loss
+  // deliberate by surfacing the browser's native "leave site?" prompt while unsaved picks exist.
+  // Syncing with an external system (the window) is exactly what useEffect is for; it re-subscribes
+  // only when the boolean flips (0 ⇄ >0), never per toggle. Custom copy is impossible — browsers
+  // ignore returnValue's string and show their own message.
+  const hasUnsavedSelection = selectedIds.size > 0;
+  React.useEffect(() => {
+    if (!hasUnsavedSelection) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+      // Legacy Chrome/Edge still require returnValue to be set for the prompt to appear.
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedSelection]);
+
   // View state (search + the three filter chips) is URL-owned via nuqs: reload / share /
   // back-forward reproduce the exact view. Each chip is a boolean param that drops from the URL
   // at its default (false) and q drops when empty, so a clean view leaves no query string. The

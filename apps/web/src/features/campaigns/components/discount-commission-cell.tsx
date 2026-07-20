@@ -110,8 +110,10 @@ export function DiscountCommissionCell({
     <span className="text-foreground text-sm font-medium tabular-nums">{discountedRate}</span>
   );
 
-  // The disclosure is band-only: a ladder must exist to have ranges to show + prices to mark.
-  const showBandsPopover = commissionBands !== null && commissionBands.length > 0;
+  // The disclosure is band-only: the source must be `band` (product/category rates are NOT
+  // interactive per the docstring) AND a ladder must exist to have ranges to show + prices to mark.
+  const showBandsPopover =
+    source === 'band' && commissionBands !== null && commissionBands.length > 0;
 
   // Non-band sources (product / category) have no ladder — a plain, non-interactive cell.
   if (!showBandsPopover) {

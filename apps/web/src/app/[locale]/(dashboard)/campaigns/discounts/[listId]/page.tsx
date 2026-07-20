@@ -47,6 +47,7 @@ export default async function DiscountDetailPage({
 
   return (
     <DiscountDetailClient
+      key={listId}
       orgId={activeOrgId ?? null}
       storeId={activeStoreId ?? null}
       listId={listId}
