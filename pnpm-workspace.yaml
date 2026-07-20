@@ -7,15 +7,15 @@ packages:
 # keeps every workspace on the same resolved version (no silent drift like
 # vitest 4.1.4 vs 4.1.6 or @types/node 20 vs 25). See issue #256.
 catalog:
-  "@supabase/supabase-js": ^2.105.4
-  "@types/node": ^20.19.41
-  "@vitest/ui": ^4.1.6
+  "@supabase/supabase-js": ^2.110.7
+  "@types/node": ^20.19.43
+  "@vitest/ui": ^4.1.10
   decimal.js: ^10.6.0
   dotenv: ^16.4.0
   eslint: ^9
-  tsx: ^4.21.0
+  tsx: ^4.23.1
   typescript: ^6.0.0
-  vitest: ^4.1.6
+  vitest: ^4.1.10
   zod: ^4.4.3
 
 # Pin the TRANSITIVE @types/node to the same major as the engines field
@@ -23,4 +23,4 @@ catalog:
 # exposing Node-25 lib types to packages the runtime will never run on 25.
 # Keep in sync with the catalog entry above. See issue #256.
 overrides:
-  "@types/node": ^20.19.41
+  "@types/node": ^20.19.43
