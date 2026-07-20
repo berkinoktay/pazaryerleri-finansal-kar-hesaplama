@@ -103,20 +103,41 @@ function patchRow(
 /**
  * Patches every listed row's cells across all worksheets, leaving everything else
  * byte-for-byte intact. Returns the source unchanged when there is nothing to patch.
+ *
+ * Fails LOUD when a requested row is never matched in ANY worksheet: a full or partial
+ * miss (e.g. a tag-regex mismatch that quietly skipped every `<row>`) would otherwise
+ * return unpatched bytes and silently drop the seller's choices — the "all-Hayır export"
+ * class of bug. Callers build `rowPatches` only for rows that exist in the source grid,
+ * so a missed row always means the patch machinery failed, never a bogus request.
  */
 export function patchXlsxCells(source: Buffer, rowPatches: XlsxRowPatches): Buffer {
   if (rowPatches.size === 0) return source;
 
+  // Row numbers actually matched + rewritten, accumulated across ALL worksheets (a
+  // target row may live in only one sheet), so the shortfall check below is global.
+  const matchedRows = new Set<number>();
   const entries = unzipSync(new Uint8Array(source));
   for (const [name, bytes] of Object.entries(entries)) {
     if (!name.startsWith(WORKSHEET_PREFIX) || !name.endsWith('.xml')) continue;
     const xml = strFromU8(bytes).replace(ROW_RE, (rowXml: string) => {
       const rowNum = ROW_NUM_RE.exec(rowXml);
       if (rowNum?.[1] === undefined) return rowXml;
-      const cells = rowPatches.get(Number(rowNum[1]));
-      return cells === undefined ? rowXml : patchRow(rowXml, Number(rowNum[1]), cells);
+      const parsed = Number(rowNum[1]);
+      const cells = rowPatches.get(parsed);
+      if (cells === undefined) return rowXml;
+      matchedRows.add(parsed);
+      return patchRow(rowXml, parsed, cells);
     });
     entries[name] = strToU8(xml);
   }
+
+  const missing = [...rowPatches.keys()].filter((row) => !matchedRows.has(row));
+  if (missing.length > 0) {
+    throw new Error(
+      `xlsx patch matched ${matchedRows.size} of ${rowPatches.size} target rows; ` +
+        `unmatched rows: ${missing.join(', ')}`,
+    );
+  }
+
   return Buffer.from(zipSync(entries));
 }

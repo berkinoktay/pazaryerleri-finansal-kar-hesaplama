@@ -115,4 +115,23 @@ describe('patchXlsxCells — namespace-prefixed worksheets', () => {
     );
     expect(out).toContain('<c r="A2"><v>42</v></c>');
   });
+
+  // A requested row that no worksheet <row> carries means the patch machinery silently
+  // dropped the seller's choice (the "all-Hayır export" bug). The patcher must throw
+  // rather than stream back unpatched bytes.
+  it('throws when a target row is absent from every worksheet (no silent data loss)', () => {
+    expect(() =>
+      patchXlsxCells(toZip(PREFIXED_WS), patches(99, 1, { kind: 'inlineStr', value: 'Evet' })),
+    ).toThrow(/matched 0 of 1 target rows.*unmatched rows: 99/);
+  });
+
+  it('throws on a partial miss even when some rows matched', () => {
+    const rowPatches = new Map([
+      [2, new Map([[1, { kind: 'inlineStr', value: 'Evet' } satisfies XlsxCellValue]])],
+      [7, new Map([[1, { kind: 'inlineStr', value: 'Evet' } satisfies XlsxCellValue]])],
+    ]);
+    expect(() => patchXlsxCells(toZip(PREFIXED_WS), rowPatches)).toThrow(
+      /matched 1 of 2 target rows.*unmatched rows: 7/,
+    );
+  });
 });

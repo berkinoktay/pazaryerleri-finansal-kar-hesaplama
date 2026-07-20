@@ -57,38 +57,51 @@ export async function listDiscountLists(
   orgId: string,
   storeId: string,
 ): Promise<DiscountListListItem[]> {
-  let lists;
+  // Counts stay in the database: `_count` for the total and a `groupBy` for the selected
+  // total per list — no item row ever crosses the ORM boundary just to be counted (the old
+  // O(catalog) over-fetch). Both are store-scoped; the groupBy only returns lists with ≥1
+  // included item, so a list absent from it has zero selected.
+  let result;
   try {
-    lists = await prisma.discountList.findMany({
-      where: { organizationId: orgId, storeId },
-      orderBy: { updatedAt: 'desc' },
-      select: {
-        id: true,
-        name: true,
-        discountType: true,
-        valueKind: true,
-        value: true,
-        minBasketAmount: true,
-        minQuantity: true,
-        buyQuantity: true,
-        payQuantity: true,
-        nthIndex: true,
-        startsAt: true,
-        endsAt: true,
-        exportedAt: true,
-        updatedAt: true,
-        items: { select: { included: true } },
-      },
-    });
+    result = await Promise.all([
+      prisma.discountList.findMany({
+        where: { organizationId: orgId, storeId },
+        orderBy: { updatedAt: 'desc' },
+        select: {
+          id: true,
+          name: true,
+          discountType: true,
+          valueKind: true,
+          value: true,
+          minBasketAmount: true,
+          minQuantity: true,
+          buyQuantity: true,
+          payQuantity: true,
+          nthIndex: true,
+          startsAt: true,
+          endsAt: true,
+          exportedAt: true,
+          updatedAt: true,
+          _count: { select: { items: true } },
+        },
+      }),
+      prisma.discountListItem.groupBy({
+        by: ['listId'],
+        where: { organizationId: orgId, storeId, included: true },
+        _count: true,
+      }),
+    ]);
   } catch (err) {
     mapPrismaError(err);
   }
 
+  const [lists, selectedGroups] = result;
+  const selectedByListId = new Map<string, number>();
+  for (const group of selectedGroups) {
+    selectedByListId.set(group.listId, group._count);
+  }
+
   return lists.map((list): DiscountListListItem => {
-    let selectedCount = 0;
-    for (const item of list.items) {
-      if (item.included) selectedCount += 1;
-    }
     return {
       id: list.id,
       name: list.name,
@@ -102,8 +115,8 @@ export async function listDiscountLists(
       nthIndex: list.nthIndex,
       startsAt: list.startsAt !== null ? list.startsAt.toISOString() : null,
       endsAt: list.endsAt !== null ? list.endsAt.toISOString() : null,
-      itemCount: list.items.length,
-      selectedCount,
+      itemCount: list._count.items,
+      selectedCount: selectedByListId.get(list.id) ?? 0,
       exported: list.exportedAt !== null,
       updatedAt: list.updatedAt.toISOString(),
     };
@@ -443,11 +456,21 @@ export async function updateDiscountSelections(
 
   if (mode === 'all' || mode === 'none') {
     try {
-      const result = await prisma.discountListItem.updateMany({
-        where: { listId, organizationId: orgId, storeId },
-        data: { included: mode === 'all' },
+      const updated = await prisma.$transaction(async (tx) => {
+        const result = await tx.discountListItem.updateMany({
+          where: { listId, organizationId: orgId, storeId },
+          data: { included: mode === 'all' },
+        });
+        // Bump the parent so `listDiscountLists` (ordered by updatedAt desc) floats the
+        // edited list to the top — a selection save otherwise only touches item rows,
+        // leaving the list reading as untouched. Ownership is proven by the findFirst above.
+        await tx.discountList.update({
+          where: { id: listId },
+          data: { updatedAt: new Date() },
+        });
+        return result.count;
       });
-      return { updated: result.count };
+      return { updated };
     } catch (err) {
       mapPrismaError(err);
     }
@@ -465,15 +488,24 @@ export async function updateDiscountSelections(
   );
 
   try {
-    const updated = await prisma.$executeRaw`
-      UPDATE discount_list_items AS i
-      SET included = v.included, updated_at = now()
-      FROM (VALUES ${Prisma.join(rows)}) AS v(id, included)
-      WHERE i.id = v.id
-        AND i.organization_id = ${orgId}::uuid
-        AND i.store_id = ${storeId}::uuid
-        AND i.list_id = ${listId}::uuid
-    `;
+    const updated = await prisma.$transaction(async (tx) => {
+      const count = await tx.$executeRaw`
+        UPDATE discount_list_items AS i
+        SET included = v.included, updated_at = now()
+        FROM (VALUES ${Prisma.join(rows)}) AS v(id, included)
+        WHERE i.id = v.id
+          AND i.organization_id = ${orgId}::uuid
+          AND i.store_id = ${storeId}::uuid
+          AND i.list_id = ${listId}::uuid
+      `;
+      // Same parent bump as the all/none path, so an edited list floats to the top of
+      // `listDiscountLists` (ordered by updatedAt desc) instead of reading as untouched.
+      await tx.discountList.update({
+        where: { id: listId },
+        data: { updatedAt: new Date() },
+      });
+      return count;
+    });
     return { updated };
   } catch (err) {
     mapPrismaError(err);

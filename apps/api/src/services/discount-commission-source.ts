@@ -102,6 +102,10 @@ export async function resolveCommissionSourceCovering(
         weekStartsAt: { not: null },
         weekEndsAt: { not: null },
       },
+      // Deterministic order so `weeks.find(...)` resolves the SAME covering week for both
+      // call sites (detail + estimate) when two weeks happen to cover one anchor: the most
+      // recent week wins, tie-broken by the most recently uploaded tariff.
+      orderBy: [{ weekStartsAt: 'desc' }, { createdAt: 'desc' }],
       select: {
         id: true,
         name: true,
