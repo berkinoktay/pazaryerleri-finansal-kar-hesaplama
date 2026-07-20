@@ -86,7 +86,9 @@
       "placeholder": "Pick a date range"
     },
     "dateInput": {
-      "placeholder": "Pick a date"
+      "placeholder": "Pick a date",
+      "timeLabel": "Time",
+      "done": "Done"
     },
     "combobox": {
       "placeholder": "Select…",
@@ -1623,6 +1625,217 @@
     "noResults": {
       "title": "No matching products",
       "description": "Try changing your search or filters."
+    }
+  },
+  "discountsPage": {
+    "search": "Search product, model or barcode",
+    "noStore": {
+      "title": "Select a store first",
+      "description": "A connected Trendyol store is required to view discounts.",
+      "cta": "Go to stores"
+    },
+    "noResults": {
+      "title": "No matching products",
+      "description": "Try changing your search or filters."
+    },
+    "reason": {
+      "NO_PRODUCT": "Product not matched — this barcode is not in your product catalog.",
+      "NO_COST": "No cost — add a cost profile for this product.",
+      "NO_SHIPPING": "No shipping estimate — the carrier or desi setting is missing.",
+      "NO_COMMISSION": "No commission — no commission rate could be resolved for this product."
+    },
+    "reasonShort": {
+      "NO_PRODUCT": "No product match",
+      "NO_COST": "Enter cost",
+      "NO_SHIPPING": "Add shipping setup",
+      "NO_COMMISSION": "Add commission"
+    },
+    "types": {
+      "NET": "Net discount",
+      "CONDITIONAL_BASKET": "Basket discount",
+      "CONDITIONAL_QUANTITY": "Quantity discount",
+      "BUY_X_PAY_Y": "Buy X pay Y",
+      "NTH_PRODUCT": "Nth item",
+      "CODE": "Discount code"
+    },
+    "configSummary": {
+      "netAmount": "{amount} off",
+      "netPercent": "{percent}% off",
+      "basketAmount": "{amount} off over {min} basket",
+      "basketPercent": "{percent}% off over {min} basket",
+      "quantityAmount": "{amount} off on {qty}+ items",
+      "quantityPercent": "{percent}% off on {qty}+ items",
+      "buyXPayY": "Buy {buy}, pay {pay}",
+      "nthPercent": "{percent}% off on item #{nth}",
+      "nthAmount": "{amount} off on item #{nth}",
+      "nthFixed": "Item #{nth} for {price}",
+      "codePrefix": "With code · "
+    },
+    "configCard": {
+      "title": "Discount setup",
+      "edit": "Edit",
+      "dateRange": "{start} – {end}",
+      "assumption": "Profit is estimated for a single-item basket; multi-item baskets may differ.",
+      "outdatedTariffNote": "Your uploaded commission tariffs don't cover this campaign's week — commission falls back to the product's own rate or the category rate."
+    },
+    "upload": {
+      "title": "Upload the Discounts Excel",
+      "description": "Upload the product-selection file you downloaded from the Trendyol Discounts panel, set the discount, and see your profit at the discounted price.",
+      "prompt": "Drag and drop the Excel file",
+      "hint": "XLSX · up to 5 MB",
+      "cta": "Choose file",
+      "name": "List name (optional)",
+      "typeLabel": "Discount type",
+      "fields": {
+        "valueKind": "Value type",
+        "valueKindAmount": "Amount (₺)",
+        "valueKindPercent": "Percent (%)",
+        "valueKindFixed": "Fixed price",
+        "value": "Value",
+        "minBasketAmount": "Minimum basket amount",
+        "minQuantity": "Minimum quantity",
+        "buyQuantity": "Buy quantity",
+        "payQuantity": "Pay quantity",
+        "nthIndex": "Which item",
+        "dateRange": "Date range",
+        "startPlaceholder": "Start date",
+        "endPlaceholder": "End date"
+      },
+      "submit": "Create list",
+      "errors": {
+        "notReadable": "The file could not be read — upload a valid .xlsx file.",
+        "wrongFormat": "This is not a Trendyol Discounts file or its format was not recognized.",
+        "empty": "No product rows found in the file.",
+        "tooLarge": "The file is too large — upload a smaller file.",
+        "generic": "The file could not be uploaded. Please try again."
+      },
+      "fieldErrors": {
+        "required": "This field is required.",
+        "integer": "Enter a whole number.",
+        "decimal": "Enter a valid amount (up to 2 decimals).",
+        "payLessThanBuy": "The pay quantity must be less than the buy quantity.",
+        "valueNotAllowed": "This discount type does not take a value.",
+        "nthRange": "The target item must be between 2 and 4.",
+        "fixedOnlyNth": "A fixed price is only available for the Nth item discount.",
+        "percentOver100": "The percentage cannot exceed 100.",
+        "endBeforeStart": "The end date must be after the start date.",
+        "generic": "Please check this field."
+      }
+    },
+    "list": {
+      "upload": "Upload Excel File",
+      "search": "Search list…",
+      "lastUpdated": "Last updated: {date}",
+      "filterLabel": "Filter by status",
+      "selectAll": "Select all",
+      "selectRow": "Select row",
+      "listStatus": {
+        "all": "All",
+        "exported": "Downloaded",
+        "pending": "Pending"
+      },
+      "columns": {
+        "name": "List",
+        "type": "Type",
+        "products": "Products",
+        "selected": "Included",
+        "updated": "Updated",
+        "status": "Status"
+      },
+      "summary": {
+        "total": "Total lists",
+        "products": "Products",
+        "selected": "Included",
+        "selectedContext": "rows are included",
+        "noSelected": "no selection yet",
+        "exported": "Exported",
+        "exportedValue": "{count} / {total}",
+        "exportedAllDone": "all exported",
+        "exportedPending": "{count} lists awaiting export"
+      },
+      "empty": {
+        "title": "No discount list yet",
+        "description": "Start by uploading the Discounts Excel you downloaded from the Trendyol panel; set the discount and see your profit at the discounted price.",
+        "cta": "Upload Excel File"
+      },
+      "actions": {
+        "open": "Open",
+        "export": "Download",
+        "delete": "Delete"
+      },
+      "bulk": {
+        "selected": "{count} lists selected",
+        "delete": "Delete selected",
+        "deleteTitle": "Delete selected lists",
+        "deleteDescription": "{count} lists and all of their selections will be permanently deleted. This action cannot be undone.",
+        "deleteConfirm": "Delete lists"
+      }
+    },
+    "summary": {
+      "total": "Products",
+      "selected": "Included"
+    },
+    "table": {
+      "product": "Product Info",
+      "currentPrice": "Current price",
+      "discountedPrice": "Discounted price",
+      "commission": "Commission",
+      "delta": "vs current",
+      "included": "Included",
+      "includeRow": "Include this product",
+      "over500Warning": "More than 500 products are selected — Trendyol processes only the first 500.",
+      "variantNote": "This product has multiple variants; the discount applies to all of them."
+    },
+    "commissionSource": {
+      "band": "Tariff band",
+      "product": "Product commission",
+      "category": "Category rate"
+    },
+    "commissionColumn": {
+      "source": {
+        "band": "Commission tariff rate",
+        "product": "Product commission rate",
+        "category": "Category commission rate"
+      }
+    },
+    "commissionBands": {
+      "title": "Product commission offers",
+      "hint": "Show commission bands",
+      "above": "{price} and above",
+      "range": "{lower}–{upper}",
+      "below": "{price} and below"
+    },
+    "smartSelect": {
+      "label": "Smart Select",
+      "selectAll": "Select all",
+      "selectProfitable": "Only profitable",
+      "clear": "Clear selections"
+    },
+    "filters": {
+      "profitable": "Profitable",
+      "losing": "Loss-making"
+    },
+    "breakdown": {
+      "title": "Profit breakdown",
+      "notCalculable": "Profit cannot be calculated for this product."
+    },
+    "status": {
+      "exported": "Downloaded",
+      "pending": "Pending"
+    },
+    "templates": {
+      "back": "Back to lists",
+      "delete": "Delete List",
+      "deleteTitle": "Delete list",
+      "deleteDescription": "This saved discount list and all of its selections will be permanently deleted. This action cannot be undone.",
+      "deleteConfirm": "Delete list",
+      "detailIntent": "Set the discount, pick the products to include, and see your profit at the discounted price.",
+      "notFoundTitle": "List not found",
+      "notFoundDescription": "This list may have been deleted or may not belong to this store."
+    },
+    "actions": {
+      "saveAndDownload": "Save and download",
+      "exportEmptyHint": "Include at least one product before exporting."
     }
   },
   "featureStatus": {

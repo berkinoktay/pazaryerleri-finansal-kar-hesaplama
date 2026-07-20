@@ -38,6 +38,9 @@ const TENANT_TABLES = [
   // Saved Flash Products lists (store-scoped Trendyol "Flaş Ürünler")
   'flash_product_lists',
   'flash_product_items',
+  // Saved Discounts lists (store-scoped Trendyol "İndirimler")
+  'discount_lists',
+  'discount_list_items',
   // Profit Calculation V1 (PR-1)
   'order_fees',
   'order_claims',

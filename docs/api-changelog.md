@@ -13,6 +13,12 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Discount detail drops the monetary summary; selection now persists only on save** (`GET /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}`). The `summary` object is removed from `DiscountListDetail` entirely — with it the `DiscountListSummary` schema and its `perOrderCost` / `avgProfitDelta` / `itemCount` / `selectedCount` fields. The frontend now treats product selection as ephemeral client state: the total count is derived from `items.length` and the included count from local UI state, so the server no longer aggregates a card. Each item still carries `included` (its last SAVED choice), and the `PATCH .../selections` + `POST .../export` round-trip is unchanged — the export button first flushes the full selection, then downloads. The list screen's `DiscountListListItem.selectedCount`/`exported` are untouched.
+- **Discount order-limit dropped and both campaign dates are now required** (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/import`, `PATCH .../discount-lists/{listId}`, `GET .../discount-lists`, `GET .../discount-lists/{listId}`). The `orderLimit` config field is removed from the import form and config PATCH bodies, from `DiscountListListItem`/`DiscountListDetail`, and the derived `summary.maxTotalCost` is gone (it fed only that weak ceiling metric). Both `startsAt` and `endsAt` are now required on every config write — a missing start returns `422` with field code `START_REQUIRED`, a missing end with `END_REQUIRED` (the existing `END_BEFORE_START` check is unchanged). The DB columns stay nullable, so rows written before this rule remain readable; the requirement is enforced at the input-validation layer only.
+- **Discount detail items now expose their commission-band ladder** (`GET /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}`). `DiscountListDetailItem` gains a nullable `commissionBands` field — an array of `DiscountCommissionBand` (`{ lowerLimit, upperLimit, commissionPct }`, mirroring `AdvantageCommissionBand` / `FlashCommissionBand` on the wire; money at 2 decimals, percent at 4). Populated from the campaign-anchored tariff week already resolved for the per-item compute (no extra query); null when no covering week resolved bands for the barcode (the rate fell to the synced product rate or category rate). Lets the UI show which band the current and discounted prices land in via the shared commission-bands popover.
+- **Discount commission bands are authoritative ONLY from a tariff week that covers the anchor; no covering week means no bands** (`GET /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}` and `POST .../discount-lists/{listId}/items/{itemId}/estimate`). The covering-week lookup runs for EVERY anchor — the anlık `now` path and a future campaign start alike — and an expired tariff week is never used (an expired week's tariff no longer exists for the seller on Trendyol's side). When no week covers the anchor there are no bands at all: the per-item commission chain falls through to the product's synced rate, then the category rate, then NO_COMMISSION. The previous best-available fallback (the latest-uploaded tariff's last-available period) is removed, so both the anlık path with an un-uploaded current week AND a future start whose week is not uploaded now yield no bands. `DiscountListDetail`'s boolean flag is renamed from `commissionPeriodExpired` to `commissionTariffOutdated` — true only when the store has ≥1 commission tariff yet none covers the anchor (uploads are stale or don't reach the campaign start), false when a covering week resolved OR the store has no tariffs at all.
+- **Discount commission bands anchor to a future campaign start, and the resolving tariff period is now exposed** (`GET /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}` and `POST .../discount-lists/{listId}/items/{itemId}/estimate`). When a list's `startsAt` is in the future, the commission tariff bands are resolved from the tariff week that COVERS that start instant (across all of the store's tariffs), not just the latest-created tariff; lists with a past/absent `startsAt` are unchanged. Both `DiscountListDetail` and `EstimateDiscountItemResult` gain two nullable fields — `commissionTariffName` and `commissionPeriodLabel` — describing which tariff and period actually fed the band tier (null when no tariff resolved).
+- **`buyboxStatus` removed from the discount detail item** (`GET /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}`). The `items[].buyboxStatus` field is gone from `DiscountListDetailItem`; the discount vertical no longer surfaces Buybox ownership. The Excel column is still tolerated on import and simply ignored.
 - **Trendyol order webhook becomes a durable queue with a deferred ingest mode**
   (`POST /v1/webhooks/orders/{storeId}`, Paket D). The response semantics and the
   processing model changed; no request/response body shape change:
@@ -52,6 +58,63 @@ section "Versioning" for details.
 
 ### Added
 
+- **Discount list import endpoint**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/import`) — Fifth
+  campaign vertical, for Trendyol's "İndirimler" (Promosyon & Fiyat) product-selection
+  Excel. Multipart: the `.xlsx` `file` + an optional display `name` + the discount
+  configuration as string form fields (`discountType` = `NET` / `CONDITIONAL_BASKET` /
+  `CONDITIONAL_QUANTITY` / `BUY_X_PAY_Y` / `NTH_PRODUCT` / `CODE`, plus the per-type
+  parameters `valueKind` / `value` / `minBasketAmount` / `minQuantity` / `buyQuantity` /
+  `payQuantity` / `nthIndex` and the optional `orderLimit` / `startsAt` / `endsAt`).
+  Per-type requirements are enforced field-level — **422** `VALIDATION_ERROR` with codes
+  such as `VALUE_REQUIRED`, `MIN_BASKET_REQUIRED`, `NTH_INDEX_OUT_OF_RANGE` (2–4),
+  `PAY_MUST_BE_LESS_THAN_BUY`, `FIXED_PRICE_ONLY_FOR_NTH`, `PERCENT_OVER_100`,
+  `END_BEFORE_START`; file rejections use `field:"file"` codes (`EMPTY_DISCOUNT_FILE`,
+  `INVALID_DISCOUNT_FORMAT`, plus the shared upload guards). Columns are resolved by
+  header NAME (Trendyol's own "Kampayaya" typo matched verbatim, corrected spelling
+  accepted as fallback); the "Güncel Satış Fiyatı" TEXT column ("250 ₺" style) is
+  currency-parsed; a row already marked "Evet" imports as included. **201**
+  `{ listId, name, itemCount, matched, unmatched, skippedRows }`; the raw file is kept
+  for the byte-preserving export. `DATA_WRITE` capability.
+- **Discount list read / write endpoints** (İndirimler — `GET`, `PATCH`, `DELETE`
+  under `/v1/organizations/{orgId}/stores/{storeId}/discount-lists`). Siblings of the
+  Flash Products surface, on top of the import upload above:
+  - `GET .../discount-lists` returns `{ data: [...] }`, one row per saved list with its
+    discount configuration (type + per-type parameters), item count, included count and
+    the exported flag. Money fields are GROSS decimal strings, dates ISO.
+  - `GET .../discount-lists/{listId}` returns the list with a summary card and every item
+    carrying a `current` and a `discounted` price scenario, both computed on read and never
+    stored. Each scenario's reduced commission comes from a THREE-TIER chain resolved on
+    that scenario's OWN price: (1) the store's latest commission-tariff band covering the
+    price, else (2) the variant's synced commission, else (3) the category rate — so an
+    item's discounted price can land in a different band than its current price. When
+    nothing in the chain resolves the item is `calculable:false` with `reason:"NO_COMMISSION"`
+    (`NO_PRODUCT` / `NO_COST` / `NO_SHIPPING` cover the other gaps). The summary card reports
+    `perOrderCost` (Σ current − discounted over included items), `maxTotalCost`
+    (`perOrderCost × orderLimit`, or `null`) and `avgProfitDelta` (mean discounted − current
+    net profit over the included, calculable items). Money fields are GROSS decimal strings.
+  - `POST .../discount-lists/{listId}/items/{itemId}/estimate` returns the full profit
+    breakdown (income + commission / shipping / PSF / stoppage / VAT) for ONE item under the
+    `{ "scenario": "current" | "discounted" }` body, reusing the same chain + engine the
+    detail uses — so the breakdown modal never disagrees with the detail row. Read-only
+    (POST only because it carries a body). `DATA_READ` capability. `calculable:false` with a
+    `reason` and a `null` breakdown when the item is unmatched, uncostable or has no
+    resolvable commission; an unknown `scenario` is a **422** `VALIDATION_ERROR`.
+  - `PATCH .../discount-lists/{listId}` full-replaces the discount configuration (the name
+    changes only when provided); the same validator that gates the import gates this body,
+    so an invalid combination is a **422** `VALIDATION_ERROR`. Returns `{ id }`.
+  - `PATCH .../discount-lists/{listId}/selections` toggles item inclusion: `mode:"set"`
+    updates the given `{ itemId, included }` rows (a foreign itemId is silently skipped),
+    `mode:"all"` / `"none"` flip the whole list. An empty `"set"` payload is a **422**
+    `SELECTIONS_REQUIRED`. Returns `{ updated }`.
+  - `DELETE .../discount-lists/{listId}` hard-deletes the list (items cascade); **204**.
+  - `POST .../discount-lists/{listId}/export` returns Trendyol's ORIGINAL uploaded file
+    (`XLSX`, `attachment; filename*=UTF-8''…`) with each row's participation written back
+    into the "Kampayaya Dahil Edilsin Mi?" column — an included row as "Evet", an excluded
+    one as "Hayır". Only cells that DEVIATE from the source are byte-patched, so every other
+    cell is byte-for-byte intact and a list with no changes vs. the original streams back
+    verbatim. Marks the list exported. **409** `CONFLICT` when the list kept no stored source
+    file (or it is unreadable / not a recognizable İndirimler export). `DATA_WRITE` capability.
 - **Generic manual-sync trigger endpoint** (`POST /v1/organizations/{orgId}/stores/{storeId}/syncs`).
   Enqueues a PENDING MANUAL `SyncLog` for the `syncType` chosen in the body
   (`{ "syncType": "ORDERS" | "PRODUCTS" | "SETTLEMENTS" | "CLAIMS" }`) and returns

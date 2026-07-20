@@ -503,6 +503,24 @@ CREATE POLICY flash_product_items_store_read ON flash_product_items
   FOR SELECT TO authenticated
   USING (can_access_store(store_id));
 
+-- ─── discount_lists — store-scoped saved Discounts (Promosyon > İndirimler) ─────
+-- Sibling of flash_product_lists: the seller's uploaded Trendyol "İndirimler"
+-- Excels + the per-list discount configuration + per-product participation picks.
+-- Store-private; both tables carry store_id and gate on can_access_store. Writes
+-- are API-only. Commission is read cross-vertically from commission_tariffs and
+-- product_variants, each covered by its own policy — no extra policy needed here.
+ALTER TABLE discount_lists ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS discount_lists_store_read ON discount_lists;
+CREATE POLICY discount_lists_store_read ON discount_lists
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
+ALTER TABLE discount_list_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS discount_list_items_store_read ON discount_list_items;
+CREATE POLICY discount_list_items_store_read ON discount_list_items
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
 -- ─── Profit Calculation V1 — PR-1 ──────────────────────────────────────
 -- design: docs/plans/2026-05-18-profit-calculation-design.md §3, §8
 -- guide:  docs/plans/2026-05-19-profit-calc-implementation-guide.md

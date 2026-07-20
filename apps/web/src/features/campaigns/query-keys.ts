@@ -58,3 +58,14 @@ export const flashProductKeys = {
   detail: (orgId: string, storeId: string, listId: string) =>
     [...flashProductKeys.details(orgId, storeId), listId] as const,
 };
+
+// İndirim listeleri (Promosyon > İndirimler) kendi saved-upload ailesi.
+export const discountListKeys = {
+  all: ['discount-lists'] as const,
+  lists: (orgId: string, storeId: string) =>
+    [...discountListKeys.all, 'list', orgId, storeId] as const,
+  details: (orgId: string, storeId: string) =>
+    [...discountListKeys.all, 'detail', orgId, storeId] as const,
+  detail: (orgId: string, storeId: string, listId: string) =>
+    [...discountListKeys.details(orgId, storeId), listId] as const,
+};

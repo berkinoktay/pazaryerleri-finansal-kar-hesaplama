@@ -56,6 +56,15 @@ table tr[data-depth='1'] > td:first-child {
   max-height: var(--size-modal-tall);
 }
 
+/* Discounts upload modal — a single-column typed config form (file + discount type +
+   per-type parameters + optional settings) that can grow taller than a short viewport,
+   so it caps its height and scrolls the body internally (header + footer stay fixed).
+   Keeps the default max-w-modal width. Same documented escape hatch as
+   .advantage-upload-modal. */
+.discount-upload-modal {
+  max-height: var(--size-modal-tall);
+}
+
 /* Sidebar visual identity — applied to BOTH the desktop sidebar inner
    AND the BottomDock so they share one continuous surface. Two layered
    treatments give the rail its distinctive PazarSync character:
