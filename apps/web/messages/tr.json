@@ -86,7 +86,9 @@
       "placeholder": "Tarih aralığı seç"
     },
     "dateInput": {
-      "placeholder": "Tarih seç"
+      "placeholder": "Tarih seç",
+      "timeLabel": "Saat",
+      "done": "Tamam"
     },
     "combobox": {
       "placeholder": "Seçim yap…",
@@ -1623,6 +1625,217 @@
     "noResults": {
       "title": "Eşleşen ürün yok",
       "description": "Arama veya filtrelerinizi değiştirmeyi deneyin."
+    }
+  },
+  "discountsPage": {
+    "search": "Ürün, model veya barkod ara",
+    "noStore": {
+      "title": "Önce bir mağaza seçin",
+      "description": "İndirimleri görüntülemek için bağlı bir Trendyol mağazası gerekir.",
+      "cta": "Mağazalara git"
+    },
+    "noResults": {
+      "title": "Eşleşen ürün yok",
+      "description": "Aramanızı veya filtrelerinizi değiştirmeyi deneyin."
+    },
+    "reason": {
+      "NO_PRODUCT": "Ürün eşleşmedi — bu barkod ürün kataloğunuzda yok.",
+      "NO_COST": "Maliyet yok — bu ürün için bir maliyet profili ekleyin.",
+      "NO_SHIPPING": "Kargo tahmini yok — kargo firması veya desi ayarı eksik.",
+      "NO_COMMISSION": "Komisyon yok — bu ürün için komisyon oranı çözülemedi."
+    },
+    "reasonShort": {
+      "NO_PRODUCT": "Ürün eşleşmedi",
+      "NO_COST": "Maliyet girin",
+      "NO_SHIPPING": "Kargo ayarı ekleyin",
+      "NO_COMMISSION": "Komisyon ekleyin"
+    },
+    "types": {
+      "NET": "Net indirim",
+      "CONDITIONAL_BASKET": "Sepet indirimi",
+      "CONDITIONAL_QUANTITY": "Adet indirimi",
+      "BUY_X_PAY_Y": "X Al Y Öde",
+      "NTH_PRODUCT": "X. ürüne indirim",
+      "CODE": "İndirim kodu"
+    },
+    "configSummary": {
+      "netAmount": "{amount} indirim",
+      "netPercent": "%{percent} indirim",
+      "basketAmount": "{min} üzeri sepette {amount} indirim",
+      "basketPercent": "{min} üzeri sepette %{percent} indirim",
+      "quantityAmount": "{qty}+ adette {amount} indirim",
+      "quantityPercent": "{qty}+ adette %{percent} indirim",
+      "buyXPayY": "{buy} al {pay} öde",
+      "nthPercent": "{nth}. ürüne %{percent} indirim",
+      "nthAmount": "{nth}. ürüne {amount} indirim",
+      "nthFixed": "{nth}. ürün {price}",
+      "codePrefix": "Kodla · "
+    },
+    "configCard": {
+      "title": "İndirim ayarları",
+      "edit": "Düzenle",
+      "dateRange": "{start} – {end}",
+      "assumption": "Kâr tahmini, sepetin yalnız bu üründen oluştuğu varsayımına dayanır; çok ürünlü sepetlerde sonuç farklılaşabilir.",
+      "outdatedTariffNote": "Yüklü komisyon tarifeleriniz bu kampanyanın haftasını kapsamıyor — komisyon, ürünün kendi oranından ya da kategori oranından çözülüyor."
+    },
+    "upload": {
+      "title": "İndirimler Excel'ini yükleyin",
+      "description": "Trendyol İndirimler panelinden indirdiğiniz ürün seçim dosyasını yükleyin, indirimi ayarlayın ve indirimli fiyattaki kârınızı görün.",
+      "prompt": "Excel dosyasını sürükleyip bırakın",
+      "hint": "XLSX · en fazla 5 MB",
+      "cta": "Dosya seç",
+      "name": "Liste adı (isteğe bağlı)",
+      "typeLabel": "İndirim türü",
+      "fields": {
+        "valueKind": "Değer türü",
+        "valueKindAmount": "Tutar (₺)",
+        "valueKindPercent": "Yüzde (%)",
+        "valueKindFixed": "Sabit fiyat",
+        "value": "Değer",
+        "minBasketAmount": "Minimum sepet tutarı",
+        "minQuantity": "Minimum ürün adedi",
+        "buyQuantity": "Alınacak adet",
+        "payQuantity": "Ödenecek adet",
+        "nthIndex": "Kaçıncı ürün",
+        "dateRange": "Tarih aralığı",
+        "startPlaceholder": "Başlangıç tarihi",
+        "endPlaceholder": "Bitiş tarihi"
+      },
+      "submit": "Listeyi oluştur",
+      "errors": {
+        "notReadable": "Dosya okunamadı — geçerli bir .xlsx dosyası yükleyin.",
+        "wrongFormat": "Bu bir Trendyol İndirimler dosyası değil veya biçimi tanınamadı.",
+        "empty": "Dosyada ürün satırı bulunamadı.",
+        "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
+        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin."
+      },
+      "fieldErrors": {
+        "required": "Bu alan zorunludur.",
+        "integer": "Tam sayı girin.",
+        "decimal": "Geçerli bir tutar girin (en fazla 2 ondalık).",
+        "payLessThanBuy": "Ödenecek adet, alınacak adetten küçük olmalıdır.",
+        "valueNotAllowed": "Bu indirim türü değer almaz.",
+        "nthRange": "Hedef ürün 2 ile 4 arasında olmalıdır.",
+        "fixedOnlyNth": "Sabit fiyat yalnız X. ürüne indirimde kullanılabilir.",
+        "percentOver100": "Yüzde 100'ü aşamaz.",
+        "endBeforeStart": "Bitiş tarihi başlangıçtan sonra olmalıdır.",
+        "generic": "Lütfen bu alanı kontrol edin."
+      }
+    },
+    "list": {
+      "upload": "Excel Dosyası Yükle",
+      "search": "Listelerde ara…",
+      "lastUpdated": "Son güncelleme: {date}",
+      "filterLabel": "Duruma göre filtrele",
+      "selectAll": "Tümünü seç",
+      "selectRow": "Satırı seç",
+      "listStatus": {
+        "all": "Tümü",
+        "exported": "İndirildi",
+        "pending": "Bekliyor"
+      },
+      "columns": {
+        "name": "Liste",
+        "type": "Tür",
+        "products": "Ürün",
+        "selected": "Dahil",
+        "updated": "Güncellendi",
+        "status": "Durum"
+      },
+      "summary": {
+        "total": "Toplam liste",
+        "products": "Ürün",
+        "selected": "Dahil edilen",
+        "selectedContext": "satır kampanyaya dahil",
+        "noSelected": "henüz seçim yok",
+        "exported": "Dışa aktarılan",
+        "exportedValue": "{count} / {total}",
+        "exportedAllDone": "tümü dışa aktarıldı",
+        "exportedPending": "{count} liste dışa aktarım bekliyor"
+      },
+      "empty": {
+        "title": "Henüz indirim listesi yok",
+        "description": "Trendyol panelinden indirdiğiniz İndirimler Excel'ini yükleyerek başlayın; indirimi ayarlayın ve indirimli fiyattaki kârınızı görün.",
+        "cta": "Excel Dosyası Yükle"
+      },
+      "actions": {
+        "open": "Aç",
+        "export": "İndir",
+        "delete": "Sil"
+      },
+      "bulk": {
+        "selected": "{count} liste seçildi",
+        "delete": "Seçilenleri sil",
+        "deleteTitle": "Seçili listeleri sil",
+        "deleteDescription": "{count} liste ve tüm seçimleri kalıcı olarak silinecek. Bu işlem geri alınamaz.",
+        "deleteConfirm": "Listeleri sil"
+      }
+    },
+    "summary": {
+      "total": "Ürün",
+      "selected": "Dahil edilen"
+    },
+    "table": {
+      "product": "Ürün Bilgisi",
+      "currentPrice": "Güncel fiyat",
+      "discountedPrice": "İndirimli fiyat",
+      "commission": "Komisyon",
+      "delta": "Güncele göre",
+      "included": "Dahil",
+      "includeRow": "Bu ürünü kampanyaya dahil et",
+      "over500Warning": "500'den fazla ürün seçildi — Trendyol yalnız ilk 500 ürünü işler.",
+      "variantNote": "Seçilen barkodun tüm varyantları kampanyaya dahil edilir."
+    },
+    "commissionSource": {
+      "band": "Tarife bandı",
+      "product": "Ürün komisyonu",
+      "category": "Kategori oranı"
+    },
+    "commissionColumn": {
+      "source": {
+        "band": "Komisyon tarifesi oranı",
+        "product": "Ürün komisyon oranı",
+        "category": "Kategori komisyon oranı"
+      }
+    },
+    "commissionBands": {
+      "title": "Ürün komisyon bantları",
+      "hint": "Komisyon bantlarını göster",
+      "above": "{price} ve üzeri",
+      "range": "{lower}–{upper}",
+      "below": "{price} ve altı"
+    },
+    "smartSelect": {
+      "label": "Akıllı Seçim",
+      "selectAll": "Tümünü seç",
+      "selectProfitable": "Kârda kalanları seç",
+      "clear": "Seçimleri temizle"
+    },
+    "filters": {
+      "profitable": "Kârda kalanlar",
+      "losing": "Zarara düşenler"
+    },
+    "breakdown": {
+      "title": "Kâr dökümü",
+      "notCalculable": "Bu ürün için kâr hesaplanamıyor."
+    },
+    "status": {
+      "exported": "İndirildi",
+      "pending": "Bekliyor"
+    },
+    "templates": {
+      "back": "Listelere dön",
+      "delete": "Listeyi Sil",
+      "deleteTitle": "Listeyi sil",
+      "deleteDescription": "Bu kayıtlı indirim listesi ve tüm seçimleri kalıcı olarak silinecek. Bu işlem geri alınamaz.",
+      "deleteConfirm": "Listeyi sil",
+      "detailIntent": "İndirimi ayarlayın, dahil edeceğiniz ürünleri seçin ve indirimli fiyattaki kârınızı görün.",
+      "notFoundTitle": "Liste bulunamadı",
+      "notFoundDescription": "Bu liste silinmiş olabilir veya bu mağazaya ait olmayabilir."
+    },
+    "actions": {
+      "saveAndDownload": "Kaydet ve İndir",
+      "exportEmptyHint": "Dışa aktarmadan önce en az bir ürünü kampanyaya dahil edin."
     }
   },
   "featureStatus": {

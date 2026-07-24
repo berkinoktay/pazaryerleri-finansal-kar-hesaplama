@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { AdvantageCommissionBand } from '@/features/campaigns/api/get-advantage-tariff-detail.api';
 import {
+  findBandByCommissionPct,
   findBandForPrice,
   formatBandRange,
   type BandRangeLabelFns,
@@ -66,6 +67,22 @@ describe('findBandForPrice', () => {
 
   it('returns null for an empty ladder', () => {
     expect(findBandForPrice([], new Decimal('130'))).toBeNull();
+  });
+});
+
+describe('findBandByCommissionPct', () => {
+  it('marks the band carrying the charged rate regardless of decimal formatting', () => {
+    // The cell charges the discounted-scenario rate; matching by that rate marks the right band
+    // even for X-al-Y / Nth where the rate comes from the CURRENT price band, not the shown price.
+    expect(findBandByCommissionPct(LADDER, '19.0000')?.commissionPct).toBe('19.0000');
+    expect(findBandByCommissionPct(LADDER, '10.7000')?.commissionPct).toBe('10.7000');
+    // Numeric compare: an unpadded "6.5" still matches the ladder's "6.5000".
+    expect(findBandByCommissionPct(LADDER, '6.5')?.commissionPct).toBe('6.5000');
+  });
+
+  it('returns null when no band carries the rate, and for an empty ladder', () => {
+    expect(findBandByCommissionPct(LADDER, '99.0000')).toBeNull();
+    expect(findBandByCommissionPct([], '19.0000')).toBeNull();
   });
 });
 

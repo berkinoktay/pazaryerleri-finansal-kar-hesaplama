@@ -2,6 +2,7 @@ export * from './types';
 export * from './constants';
 export * from './errors';
 export { defineColumn } from './define-column';
+export { normalizeDecimalString } from './coerce';
 export { sanitizeCellText } from './sanitize';
 export { exportToXlsx } from './export';
 export { parseXlsx, readWorkbookGrid, type ReadGridOptions } from './parse';

@@ -46,20 +46,29 @@ function xmlEscape(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function cellXml(colIdx: number, rowNum: number, value: XlsxCellValue): string {
+// Real Trendyol worksheets declare a namespace prefix on the root (`<x:worksheet>`),
+// so every emitted cell must mirror that same prefix — an unprefixed `<c>` inside an
+// `<x:...>` document references an undeclared namespace (broken XML). `prefix` is the
+// row's own prefix including the trailing colon (e.g. `"x:"`) or `""` for none.
+function cellXml(prefix: string, colIdx: number, rowNum: number, value: XlsxCellValue): string {
   const ref = `${columnLetter(colIdx)}${rowNum}`;
   return value.kind === 'number'
-    ? `<c r="${ref}"><v>${value.value}</v></c>`
-    : `<c r="${ref}" t="inlineStr"><is><t>${xmlEscape(value.value)}</t></is></c>`;
+    ? `<${prefix}c r="${ref}"><${prefix}v>${value.value}</${prefix}v></${prefix}c>`
+    : `<${prefix}c r="${ref}" t="inlineStr"><${prefix}is><${prefix}t>${xmlEscape(value.value)}</${prefix}t></${prefix}is></${prefix}c>`;
 }
 
 // ─── XML row patching ────────────────────────────────────────────────────────
 
-const CELL_RE = /<c\b[^>]*\/>|<c\b[^>]*>[\s\S]*?<\/c>/g;
+// Tag regexes tolerate an optional `\w+:` namespace prefix so prefixed vendor files
+// (`<x:row>`, `<x:c>`) match too. The `r="..."` attribute is prefix-independent, so
+// CELL_REF_RE / ROW_NUM_RE stay as-is. ROW_PREFIX_RE captures the row's own prefix
+// (with the colon) so patched cells can be emitted under the same namespace.
+const CELL_RE = /<(?:\w+:)?c\b[^>]*\/>|<(?:\w+:)?c\b[^>]*>[\s\S]*?<\/(?:\w+:)?c>/g;
 const CELL_REF_RE = /\br="([A-Z]+)\d+"/;
-const ROW_OPEN_RE = /<row\b[^>]*>/;
-const ROW_RE = /<row\b[^>]*>[\s\S]*?<\/row>/g;
+const ROW_OPEN_RE = /<(?:\w+:)?row\b[^>]*>/;
+const ROW_RE = /<(?:\w+:)?row\b[^>]*>[\s\S]*?<\/(?:\w+:)?row>/g;
 const ROW_NUM_RE = /\br="(\d+)"/;
+const ROW_PREFIX_RE = /<(\w+:)?row\b/;
 
 /** Rewrites one row, replacing the patched cells and keeping the rest verbatim. */
 function patchRow(
@@ -77,35 +86,58 @@ function patchRow(
     byCol.set(columnIndex(ref[1]), xml);
   }
 
+  // Patched cells inherit the row's own namespace prefix so they stay valid XML.
+  const prefix = ROW_PREFIX_RE.exec(rowXml)?.[1] ?? '';
   for (const [colIdx, value] of cells) {
-    byCol.set(colIdx, cellXml(colIdx, rowNum, value));
+    byCol.set(colIdx, cellXml(prefix, colIdx, rowNum, value));
   }
 
-  const openTag = ROW_OPEN_RE.exec(rowXml)?.[0] ?? `<row r="${rowNum}">`;
+  const openTag = ROW_OPEN_RE.exec(rowXml)?.[0] ?? `<${prefix}row r="${rowNum}">`;
   const body = [...byCol.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([, xml]) => xml)
     .join('');
-  return `${openTag}${body}</row>`;
+  return `${openTag}${body}</${prefix}row>`;
 }
 
 /**
  * Patches every listed row's cells across all worksheets, leaving everything else
  * byte-for-byte intact. Returns the source unchanged when there is nothing to patch.
+ *
+ * Fails LOUD when a requested row is never matched in ANY worksheet: a full or partial
+ * miss (e.g. a tag-regex mismatch that quietly skipped every `<row>`) would otherwise
+ * return unpatched bytes and silently drop the seller's choices — the "all-Hayır export"
+ * class of bug. Callers build `rowPatches` only for rows that exist in the source grid,
+ * so a missed row always means the patch machinery failed, never a bogus request.
  */
 export function patchXlsxCells(source: Buffer, rowPatches: XlsxRowPatches): Buffer {
   if (rowPatches.size === 0) return source;
 
+  // Row numbers actually matched + rewritten, accumulated across ALL worksheets (a
+  // target row may live in only one sheet), so the shortfall check below is global.
+  const matchedRows = new Set<number>();
   const entries = unzipSync(new Uint8Array(source));
   for (const [name, bytes] of Object.entries(entries)) {
     if (!name.startsWith(WORKSHEET_PREFIX) || !name.endsWith('.xml')) continue;
     const xml = strFromU8(bytes).replace(ROW_RE, (rowXml: string) => {
       const rowNum = ROW_NUM_RE.exec(rowXml);
       if (rowNum?.[1] === undefined) return rowXml;
-      const cells = rowPatches.get(Number(rowNum[1]));
-      return cells === undefined ? rowXml : patchRow(rowXml, Number(rowNum[1]), cells);
+      const parsed = Number(rowNum[1]);
+      const cells = rowPatches.get(parsed);
+      if (cells === undefined) return rowXml;
+      matchedRows.add(parsed);
+      return patchRow(rowXml, parsed, cells);
     });
     entries[name] = strToU8(xml);
   }
+
+  const missing = [...rowPatches.keys()].filter((row) => !matchedRows.has(row));
+  if (missing.length > 0) {
+    throw new Error(
+      `xlsx patch matched ${matchedRows.size} of ${rowPatches.size} target rows; ` +
+        `unmatched rows: ${missing.join(', ')}`,
+    );
+  }
+
   return Buffer.from(zipSync(entries));
 }

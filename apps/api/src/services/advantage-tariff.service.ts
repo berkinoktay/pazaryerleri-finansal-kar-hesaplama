@@ -56,7 +56,7 @@ function toTierKey(value: string | null): StarTierKey | null {
 
 // ─── Commission source resolution (the cross-vertical read) ──────────────────
 
-interface CommissionSourceResolution {
+export interface CommissionSourceResolution {
   readonly tariffId: string;
   readonly tariffName: string;
   readonly periodLabel: string;

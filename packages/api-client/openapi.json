@@ -6822,6 +6822,681 @@
         ],
         "description": "Flaş penceresinin durumu: aktif / yaklaşan / geçmiş."
       },
+      "DiscountListListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiscountListListItem"
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "DiscountListListItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "discountType": {
+            "$ref": "#/components/schemas/DiscountType"
+          },
+          "valueKind": {
+            "$ref": "#/components/schemas/DiscountValueKind"
+          },
+          "value": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "minBasketAmount": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "minQuantity": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "buyQuantity": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "payQuantity": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "nthIndex": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "startsAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "endsAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "itemCount": {
+            "type": "integer"
+          },
+          "selectedCount": {
+            "type": "integer"
+          },
+          "exported": {
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "discountType",
+          "valueKind",
+          "value",
+          "minBasketAmount",
+          "minQuantity",
+          "buyQuantity",
+          "payQuantity",
+          "nthIndex",
+          "startsAt",
+          "endsAt",
+          "itemCount",
+          "selectedCount",
+          "exported",
+          "updatedAt"
+        ]
+      },
+      "DiscountType": {
+        "type": "string",
+        "enum": [
+          "NET",
+          "CONDITIONAL_BASKET",
+          "CONDITIONAL_QUANTITY",
+          "BUY_X_PAY_Y",
+          "NTH_PRODUCT",
+          "CODE"
+        ],
+        "description": "İndirim kurgusu: NET / CONDITIONAL_BASKET (min sepet) / CONDITIONAL_QUANTITY (N adet) / BUY_X_PAY_Y / NTH_PRODUCT (X. ürüne) / CODE (indirim kodu)."
+      },
+      "DiscountValueKind": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "AMOUNT",
+          "PERCENT",
+          "FIXED_PRICE",
+          null
+        ],
+        "description": "Değer türü: AMOUNT (TL) / PERCENT (%) / FIXED_PRICE (yalnız NTH_PRODUCT)."
+      },
+      "ImportDiscountListResponse": {
+        "type": "object",
+        "properties": {
+          "listId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "itemCount": {
+            "type": "integer"
+          },
+          "matched": {
+            "type": "integer"
+          },
+          "unmatched": {
+            "type": "integer"
+          },
+          "skippedRows": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "listId",
+          "name",
+          "itemCount",
+          "matched",
+          "unmatched",
+          "skippedRows"
+        ]
+      },
+      "UpdateDiscountSelectionsResponse": {
+        "type": "object",
+        "properties": {
+          "updated": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "updated"
+        ]
+      },
+      "UpdateDiscountSelectionsBody": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "set",
+              "all",
+              "none"
+            ],
+            "default": "set"
+          },
+          "selections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "itemId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "included": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "itemId",
+                "included"
+              ]
+            },
+            "maxItems": 5000,
+            "default": []
+          }
+        }
+      },
+      "UpdateDiscountListResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "UpdateDiscountListBody": {
+        "type": "object",
+        "properties": {
+          "discountType": {
+            "$ref": "#/components/schemas/DiscountType"
+          },
+          "valueKind": {
+            "$ref": "#/components/schemas/DiscountValueKind"
+          },
+          "value": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d{1,2})?$"
+          },
+          "minBasketAmount": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d{1,2})?$"
+          },
+          "minQuantity": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          },
+          "buyQuantity": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          },
+          "payQuantity": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          },
+          "nthIndex": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "discountType"
+        ]
+      },
+      "EstimateDiscountItemResult": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scenario": {
+            "type": "string",
+            "enum": [
+              "current",
+              "discounted"
+            ]
+          },
+          "price": {
+            "type": "string"
+          },
+          "commissionPct": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commissionSource": {
+            "$ref": "#/components/schemas/DiscountCommissionSource"
+          },
+          "calculable": {
+            "type": "boolean"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/DiscountItemReason"
+          },
+          "breakdown": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QuoteBreakdown"
+              },
+              {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            ]
+          },
+          "commissionTariffName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commissionPeriodLabel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "itemId",
+          "scenario",
+          "price",
+          "commissionPct",
+          "commissionSource",
+          "calculable",
+          "reason",
+          "breakdown",
+          "commissionTariffName",
+          "commissionPeriodLabel"
+        ]
+      },
+      "DiscountCommissionSource": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "band",
+          "product",
+          "category",
+          null
+        ],
+        "description": "Komisyon nereden geldi: komisyon tarifesi bandı (band) / ürünün senkronlanan komisyonu (product) / kategori oranı (category)."
+      },
+      "DiscountItemReason": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "NO_PRODUCT",
+          "NO_COST",
+          "NO_SHIPPING",
+          "NO_COMMISSION",
+          null
+        ],
+        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon yok."
+      },
+      "EstimateDiscountItemBody": {
+        "type": "object",
+        "properties": {
+          "scenario": {
+            "type": "string",
+            "enum": [
+              "current",
+              "discounted"
+            ],
+            "description": "Hangi senaryonun dökümü: current (cari fiyat) / discounted (indirimli fiyat)."
+          }
+        },
+        "required": [
+          "scenario"
+        ]
+      },
+      "DiscountListDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "discountType": {
+            "$ref": "#/components/schemas/DiscountType"
+          },
+          "valueKind": {
+            "$ref": "#/components/schemas/DiscountValueKind"
+          },
+          "value": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "minBasketAmount": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "minQuantity": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "buyQuantity": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "payQuantity": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "nthIndex": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "startsAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "endsAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exported": {
+            "type": "boolean"
+          },
+          "commissionTariffName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commissionPeriodLabel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commissionTariffOutdated": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiscountListDetailItem"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "discountType",
+          "valueKind",
+          "value",
+          "minBasketAmount",
+          "minQuantity",
+          "buyQuantity",
+          "payQuantity",
+          "nthIndex",
+          "startsAt",
+          "endsAt",
+          "exported",
+          "commissionTariffName",
+          "commissionPeriodLabel",
+          "commissionTariffOutdated",
+          "items"
+        ]
+      },
+      "DiscountListDetailItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "barcode": {
+            "type": "string"
+          },
+          "modelCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "externalId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "productTitle": {
+            "type": "string"
+          },
+          "brand": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "included": {
+            "type": "boolean"
+          },
+          "calculable": {
+            "type": "boolean"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/DiscountItemReason"
+          },
+          "current": {
+            "type": "object",
+            "properties": {
+              "price": {
+                "type": "string"
+              },
+              "commissionPct": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "commissionSource": {
+                "$ref": "#/components/schemas/DiscountCommissionSource"
+              },
+              "netProfit": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "marginPct": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "price",
+              "commissionPct",
+              "commissionSource",
+              "netProfit",
+              "marginPct"
+            ]
+          },
+          "discounted": {
+            "type": "object",
+            "properties": {
+              "price": {
+                "type": "string"
+              },
+              "commissionPct": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "commissionSource": {
+                "$ref": "#/components/schemas/DiscountCommissionSource"
+              },
+              "netProfit": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "marginPct": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "price",
+              "commissionPct",
+              "commissionSource",
+              "netProfit",
+              "marginPct"
+            ]
+          },
+          "commissionBands": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/DiscountCommissionBand"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "barcode",
+          "modelCode",
+          "externalId",
+          "productTitle",
+          "brand",
+          "color",
+          "imageUrl",
+          "included",
+          "calculable",
+          "reason",
+          "current",
+          "discounted",
+          "commissionBands"
+        ]
+      },
+      "DiscountCommissionBand": {
+        "type": "object",
+        "properties": {
+          "lowerLimit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "upperLimit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commissionPct": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "lowerLimit",
+          "upperLimit",
+          "commissionPct"
+        ],
+        "description": "Ürünün komisyon tarifesindeki bir fiyat bandı: [lowerLimit, upperLimit] penceresi ve o pencereye düşen komisyon oranı. Cari + indirimli fiyatın hangi banda düştüğü UI popover’ında bu ladder ile işaretlenir."
+      },
       "ShippingCarrier": {
         "type": "object",
         "properties": {
@@ -18561,6 +19236,1126 @@
           },
           "404": {
             "description": "List or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/discount-lists": {
+      "get": {
+        "tags": [
+          "DiscountLists"
+        ],
+        "summary": "List saved discount lists for a store",
+        "description": "Returns one row per saved discount list for the store, with its discount configuration (type + per-type parameters), the item count, how many rows are already included, the exported flag and the last-updated timestamp. Money fields are GROSS decimal strings, dates ISO. Newest first.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved discount lists for the store",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscountListListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/discount-lists/import": {
+      "post": {
+        "tags": [
+          "DiscountLists"
+        ],
+        "summary": "Import a Trendyol İndirimler Excel",
+        "description": "Uploads Trendyol's İndirimler product-selection .xlsx (multipart `file`) together with the discount configuration fields. Every column is resolved by header name. Trendyol uses the SAME selection sheet for every discount type, so the discount kurgu (NET / min basket / N adet / X al Y öde / X. ürün / indirim kodu) and its parameters ride in on the form and are persisted onto the list row. Each product row is joined to a ProductVariant by barcode and stored as one item; a row already marked \"Evet\" starts as included. Rows with no barcode or no current price are skipped. Returns counts: items, matched/unmatched products, skipped rows. Rejects a file whose header layout does not match the expected İndirimler export (422 VALIDATION_ERROR).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "discountType": {
+                    "$ref": "#/components/schemas/DiscountType"
+                  },
+                  "valueKind": {
+                    "$ref": "#/components/schemas/DiscountValueKind"
+                  },
+                  "value": {
+                    "type": "string",
+                    "pattern": "^\\d+(\\.\\d{1,2})?$"
+                  },
+                  "minBasketAmount": {
+                    "type": "string",
+                    "pattern": "^\\d+(\\.\\d{1,2})?$"
+                  },
+                  "minQuantity": {
+                    "type": "string",
+                    "pattern": "^\\d+$"
+                  },
+                  "buyQuantity": {
+                    "type": "string",
+                    "pattern": "^\\d+$"
+                  },
+                  "payQuantity": {
+                    "type": "string",
+                    "pattern": "^\\d+$"
+                  },
+                  "nthIndex": {
+                    "type": "string",
+                    "pattern": "^\\d+$"
+                  },
+                  "startsAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "endsAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Trendyol İndirimler .xlsx (ürün seçim dosyası)"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "İsteğe bağlı görünen ad; yoksa dosya adı."
+                  }
+                },
+                "required": [
+                  "discountType",
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Discount list imported",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportDiscountListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "File missing/unreadable, config invalid, or not the expected discount format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}/selections": {
+      "patch": {
+        "tags": [
+          "DiscountLists"
+        ],
+        "summary": "Toggle which discount list items are included",
+        "description": "Persists the seller's participation choice per item. mode 'set' updates the given rows one by one (each { itemId, included }); mode 'all' includes and 'none' excludes the WHOLE list in a single statement (so a 500-row list is one request). Items not belonging to this list/store are ignored. Returns how many items were updated.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "listId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDiscountSelectionsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Selections saved",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateDiscountSelectionsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "List or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid selection payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}": {
+      "patch": {
+        "tags": [
+          "DiscountLists"
+        ],
+        "summary": "Update a discount list configuration",
+        "description": "Full-replaces the discount configuration on the list row (discount type + its per-type parameters, campaign window, order limit); the display name changes only when provided. The same config validator that gates the import upload gates this body, so a combination Trendyol wouldn't accept (e.g. a fixed price on a non-Nth discount) is a 422 VALIDATION_ERROR. Items are untouched.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "listId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDiscountListBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Configuration updated",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateDiscountListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "List or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid discount configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "DiscountLists"
+        ],
+        "summary": "Get a saved discount list with per-item current + discounted scenarios",
+        "description": "Returns the full discount list: its configuration, a summary card (item / selected counts, per-order discount cost, max total cost, average profit delta) and every item with the current and discounted price SCENARIOS. Profit is computed on read by the profit engine and never stored, so it always reflects the current cost / fee data. When a row cannot be costed calculable is false, reason explains why and every scenario profit is null. Money fields are GROSS decimal strings.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "listId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The list with per-item current + discounted scenarios",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscountListDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "List or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "DiscountLists"
+        ],
+        "summary": "Delete a saved discount list",
+        "description": "Hard-deletes the list and (via cascade) its items. A list id from another store returns 404, indistinguishable from a missing one.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "listId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "List deleted"
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "List or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}/items/{itemId}/estimate": {
+      "post": {
+        "tags": [
+          "DiscountLists"
+        ],
+        "summary": "Estimate the profit breakdown for a discount list item",
+        "description": "Computes the full profit breakdown (income + every expense line: commission, shipping, PSF, stoppage, VAT) for ONE discount item under the chosen scenario, reusing the same profit engine and resolvers (the three-tier commission chain, cost, shipping, fee definitions) the detail view uses — so the modal never disagrees with the detail row. Pass `scenario: \"current\"` to price the item at its current price, or `scenario: \"discounted\"` to price it at the list discount applied to that price; either way the reduced commission is RE-resolved on the scenario price (a lower price can land in a different commission band). Read-only (POST only because it carries a body); no state changes. When the item is unmatched, uncostable or has no resolvable commission, calculable is false, reason explains why and breakdown is null. Money fields are GROSS decimal strings.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "listId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "itemId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EstimateDiscountItemBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The profit breakdown for the chosen scenario",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EstimateDiscountItemResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Item, list or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid payload — an unknown scenario value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}/export": {
+      "post": {
+        "tags": [
+          "DiscountLists"
+        ],
+        "summary": "Export the discount list as a re-uploadable Trendyol Excel",
+        "description": "Returns Trendyol's ORIGINAL uploaded file with each row's participation written back into the \"Kampayaya Dahil Edilsin Mi?\" column: an included row gets \"Evet\", an excluded row gets \"Hayır\". Only cells that DEVIATE from the source are patched — every other cell is byte-for-byte unchanged, so the file can be re-uploaded to Trendyol verbatim, and a list with no changes vs. the original streams back byte-for-byte identical. Marks the list exported. Returns 409 if the list has no stored source file (or it is unreadable / not a recognizable İndirimler export).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "listId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The patched .xlsx, ready to re-upload to Trendyol",
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "List or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "List has no stored source file to export",
             "content": {
               "application/json": {
                 "schema": {

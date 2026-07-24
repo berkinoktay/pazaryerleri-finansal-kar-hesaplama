@@ -1,6 +1,6 @@
 import { NextIntlClientProvider } from 'next-intl';
 import * as React from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { DateInput } from '@/components/patterns/date-input';
 
@@ -44,6 +44,39 @@ describe('<DateInput>', () => {
     it('disables the trigger when disabled is true', () => {
       renderWithIntl(<DateInput disabled />);
       expect(screen.getByRole('button')).toBeDisabled();
+    });
+  });
+
+  describe('withTime', () => {
+    it('includes the time in the trigger label when withTime is set', () => {
+      // 21 Temmuz 2026 08:00
+      renderWithIntl(<DateInput withTime value={new Date(2026, 6, 21, 8, 0)} />);
+      // date-fns "d MMM yyyy HH:mm" with tr locale → "21 Tem 2026 08:00"
+      expect(screen.getByText(/21\s+Tem\s+2026\s+08:00/)).toBeInTheDocument();
+    });
+
+    it('omits the time from the label when withTime is not set (day-only, unchanged)', () => {
+      renderWithIntl(<DateInput value={new Date(2026, 6, 21, 8, 0)} />);
+      expect(screen.getByText(/21\s+Tem\s+2026$/)).toBeInTheDocument();
+    });
+
+    it('renders the hour/minute Selects seeded from the value inside the open popover', async () => {
+      const { user } = renderWithIntl(<DateInput withTime value={new Date(2026, 6, 21, 8, 0)} />);
+      await user.click(screen.getByRole('button'));
+      // The token-based control is two Radix Selects (role="combobox"), showing the value's H:M.
+      const selects = screen.getAllByRole('combobox');
+      expect(selects).toHaveLength(2);
+      const [hours, minutes] = selects;
+      expect(hours).toHaveTextContent('08');
+      expect(minutes).toHaveTextContent('00');
+    });
+
+    it('does not render the time Selects when withTime is omitted', async () => {
+      const { user } = renderWithIntl(
+        <DateInput value={new Date(2026, 6, 21, 8, 0)} defaultMonth={new Date(2026, 6, 1)} />,
+      );
+      await user.click(screen.getByRole('button'));
+      expect(screen.queryAllByRole('combobox')).toHaveLength(0);
     });
   });
 
