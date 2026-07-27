@@ -113,6 +113,29 @@ describe('<DiscountUploadDialog>', () => {
     expect(screen.queryByRole('option', { name: '4' })).not.toBeInTheDocument();
   });
 
+  it('clears the value-kind display when the discount type changes (no stale selection)', async () => {
+    const { user } = renderDialog();
+
+    // NET + Yüzde (%): pick a value kind under the default type.
+    await user.click(screen.getByLabelText(FIELDS.valueKind));
+    await user.click(await screen.findByRole('option', { name: FIELDS.valueKindPercent }));
+    expect(screen.getByLabelText(FIELDS.valueKind)).toHaveTextContent(FIELDS.valueKindPercent);
+
+    // Switching the kurgu wipes the RHF config state — the Select's DISPLAY must clear with it,
+    // otherwise the trigger keeps showing "Yüzde (%)" while submit fails VALUE_KIND_REQUIRED.
+    await selectDiscountType(user, TYPES.CONDITIONAL_BASKET);
+
+    const trigger = screen.getByLabelText(FIELDS.valueKind);
+    expect(trigger).not.toHaveTextContent(FIELDS.valueKindPercent);
+    // Positive contract: the cleared Select shows its placeholder, not a blank trigger.
+    expect(trigger).toHaveTextContent(FIELDS.valueKind);
+
+    // Reopening proves the old choice is no longer marked selected.
+    await user.click(trigger);
+    const percentOption = await screen.findByRole('option', { name: FIELDS.valueKindPercent });
+    expect(percentOption).toHaveAttribute('aria-selected', 'false');
+  });
+
   it('shows the out-of-range inline error for an NTH_PRODUCT target index outside 2–4', async () => {
     const { user, onSubmit } = renderDialog();
 

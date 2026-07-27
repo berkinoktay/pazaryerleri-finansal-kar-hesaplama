@@ -82,18 +82,6 @@ const VALUE_KIND_LABEL_KEY = {
   FIXED_PRICE: 'valueKindFixed',
 } as const satisfies Record<DiscountValueKind, string>;
 
-// Config fields cleared when the discount type changes, so a value valid for the old kurgu
-// (e.g. FIXED_PRICE picked under NTH_PRODUCT) never lingers into a type that forbids it.
-const CLEARABLE_CONFIG_FIELDS: readonly ConfigFieldKey[] = [
-  'valueKind',
-  'value',
-  'minBasketAmount',
-  'minQuantity',
-  'buyQuantity',
-  'payQuantity',
-  'nthIndex',
-];
-
 // The RHF-backed form fields — a backend VALIDATION_ERROR whose `field` is one of these maps to
 // a `form.setError`; `file` (owned by the upload dialog's errorCode path) and `name` (local
 // state, rendered inline) are handled outside this set so no issue renders twice.
@@ -229,9 +217,19 @@ export function DiscountConfigFields({
     return submitError.problem.errors?.find((issue) => issue.field === 'name')?.code ?? null;
   }, [submitError]);
 
+  // Wipes the per-type parameters when the kurgu changes, so a value valid for the old type
+  // (e.g. FIXED_PRICE under NTH_PRODUCT) never lingers into one that forbids it. Clearing an
+  // OPTIONAL field back to "empty" needs two moves in RHF, because a mounted controller can
+  // never observe undefined — useWatch falls back to its mount-time default (the edit dialog
+  // seeds the saved config), which kept the UI showing the old choice while the submitted
+  // state was empty:
+  //   1. form.reset replaces BOTH _formValues and _defaultValues (setValue(field, undefined)
+  //      only touches the former); only the type and the campaign window survive.
+  //   2. key={currentType} on the parameter grid remounts the controllers so no live useWatch
+  //      keeps serving its captured pre-reset default.
   const resetConfigFields = React.useCallback(() => {
-    for (const key of CLEARABLE_CONFIG_FIELDS) form.setValue(key, undefined);
-    form.clearErrors(CLEARABLE_CONFIG_FIELDS);
+    const { discountType, startsAt, endsAt } = form.getValues();
+    form.reset({ discountType, startsAt, endsAt });
   }, [form]);
 
   // Surface backend VALIDATION_ERROR field issues inline (the global toast pipeline silences
@@ -260,7 +258,10 @@ export function DiscountConfigFields({
           render={({ field, fieldState }) => (
             <FormItem>
               <FormLabel>{tFields('valueKind')}</FormLabel>
-              <Select value={field.value} onValueChange={(value) => field.onChange(value)}>
+              {/* `?? ''` keeps the Select CONTROLLED when the type-change reset wipes the field
+                  to undefined — an undefined value flips Radix to uncontrolled, which keeps
+                  displaying the stale old choice while RHF state is already empty. */}
+              <Select value={field.value ?? ''} onValueChange={(value) => field.onChange(value)}>
                 <FormControl>
                   <SelectTrigger invalid={fieldState.error !== undefined}>
                     <SelectValue placeholder={tFields('valueKind')} />
@@ -291,7 +292,7 @@ export function DiscountConfigFields({
             <FormItem>
               <FormLabel>{tFields('buyQuantity')}</FormLabel>
               <Select
-                value={field.value}
+                value={field.value ?? ''}
                 onValueChange={(value) => {
                   field.onChange(value);
                   // Dependent pay: if the current pay is now out of range (> buy-1), snap it to
@@ -336,7 +337,7 @@ export function DiscountConfigFields({
             <FormItem>
               <FormLabel>{tFields('payQuantity')}</FormLabel>
               <Select
-                value={field.value}
+                value={field.value ?? ''}
                 onValueChange={(value) => field.onChange(value)}
                 disabled={payOptions.length === 0}
               >
@@ -436,7 +437,8 @@ export function DiscountConfigFields({
         )}
       />
 
-      <div className="gap-md grid sm:grid-cols-2">
+      {/* Keyed by type: see resetConfigFields — the remount is half of the type-change wipe. */}
+      <div key={currentType} className="gap-md grid sm:grid-cols-2">
         {fields.map((key) => renderConfigField(key))}
       </div>
 
