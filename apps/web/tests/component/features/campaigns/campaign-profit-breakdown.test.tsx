@@ -102,4 +102,14 @@ describe('CampaignProfitBreakdown', () => {
     renderDialog({ loading: true, breakdown: null });
     expect(screen.getByRole('status')).toHaveAttribute('aria-busy');
   });
+
+  it('renders an optional footer node at the bottom of the dialog when provided', () => {
+    renderDialog({ footer: <div>footer-slot</div> });
+    expect(screen.getByText('footer-slot')).toBeInTheDocument();
+  });
+
+  it('renders no footer artifact when the footer prop is omitted', () => {
+    renderDialog();
+    expect(screen.queryByText('footer-slot')).toBeNull();
+  });
 });

@@ -38,6 +38,13 @@ interface ScenarioWire {
   netProfit: string | null;
   marginPct: string | null;
 }
+interface BasketScenarioWire {
+  assumedQuantity: number;
+  basketTotal: string;
+  basketPaidTotal: string;
+  basketDiscountTotal: string;
+  orderNetProfit: string | null;
+}
 interface ItemWire {
   id: string;
   barcode: string;
@@ -52,6 +59,7 @@ interface ItemWire {
   reason: string | null;
   current: ScenarioWire;
   discounted: ScenarioWire;
+  scenario: BasketScenarioWire | null;
 }
 interface DetailWire {
   id: string;
@@ -249,10 +257,13 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
     expect(matched?.current.netProfit).toBeNull();
     expect(matched?.current.marginPct).toBeNull();
     expect(matched?.discounted.netProfit).toBeNull();
+    // NET has no basket settlement scenario — its showcase price genuinely changes.
+    expect(matched?.scenario).toBeNull();
 
     const unmatched = body.items.find((i) => i.id === fx.itemUnmatched);
     expect(unmatched?.imageUrl).toBeNull();
     expect(unmatched?.included).toBe(false);
+    expect(unmatched?.scenario).toBeNull();
   });
 
   it('full-replaces the config on PATCH and reflects it in the detail', async () => {
@@ -284,6 +295,18 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
     expect(body.valueKind).toBe('AMOUNT');
     expect(body.value).toBe('20.00');
     expect(body.minBasketAmount).toBe('150.00');
+
+    // CONDITIONAL_BASKET now carries the settlement scenario. currentPrice=250, minBasket=150 →
+    // n = ceil(150/250) = 1; discounted unit = 250 − 20/1 = 230. The item is not calculable (no
+    // commission chain resolves), so orderNetProfit stays null.
+    const matched = body.items.find((i) => i.id === fx.itemMatched);
+    expect(matched?.scenario).toEqual({
+      assumedQuantity: 1,
+      basketTotal: '250.00',
+      basketPaidTotal: '230.00',
+      basketDiscountTotal: '20.00',
+      orderNetProfit: null,
+    });
   });
 
   it('rejects an invalid config combination (422 FIXED_PRICE_ONLY_FOR_NTH)', async () => {

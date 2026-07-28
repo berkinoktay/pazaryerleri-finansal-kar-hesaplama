@@ -60,6 +60,13 @@ export interface CampaignProfitBreakdownProps {
   profitLabel?: string;
   /** Current-scenario net profit — the "do nothing" baseline for the "Güncele göre" delta. */
   currentNetProfit?: string | null;
+  /**
+   * Optional slot rendered at the very BOTTOM of the dialog content (below the allocation section).
+   * Kept generic (a node) so the shared dialog stays vertical-agnostic — the caller owns the
+   * footer's content plus its own top divider/spacing. Verticals that omit it render byte-identical
+   * output; İndirimler uses it for the basket settlement-scenario order-level rows.
+   */
+  footer?: React.ReactNode;
 }
 
 const segmentOf = (
@@ -95,6 +102,7 @@ export function CampaignProfitBreakdown({
   loading,
   profitLabel,
   currentNetProfit,
+  footer,
 }: CampaignProfitBreakdownProps): React.ReactElement {
   const t = useTranslations('profitBreakdown');
   const tCommon = useTranslations('common');
@@ -303,6 +311,10 @@ export function CampaignProfitBreakdown({
                 </section>
               </>
             )}
+
+            {/* Optional per-vertical footer slot (e.g. İndirimler's basket settlement scenario).
+                Omitted verticals pass nothing, so this renders no node — byte-identical output. */}
+            {footer}
           </div>
         </div>
       </DialogContent>

@@ -9,14 +9,18 @@ import { ProfitBadge } from '@/components/patterns/profit-badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 
+import type { DiscountListDetail } from '../api/get-discount-list-detail.api';
 import { useDiscountReasonEmptyLabel } from '../hooks/use-discount-reason-label';
 import type { DiscountRow } from '../lib/adapt-discount-list';
 import { DiscountCommissionCell } from './discount-commission-cell';
+import { DiscountScenarioChip } from './discount-scenario-chip';
 import type { DiscountScenarioKey } from './discount-items-table';
 import { ProfitDelta } from './profit-delta';
 
 export interface DiscountItemsMobileCardsProps {
   rows: readonly DiscountRow[];
+  /** The list's discount TYPE — reframes the discounted section label for basket-scoped types. */
+  discountType: DiscountListDetail['discountType'];
   /** The client's EPHEMERAL local selection — drives each card checkbox's checked state. */
   selectedIds: ReadonlySet<string>;
   /** Detail-level commission tariff NAME feeding the bands — the band tooltip's first part. */
@@ -37,6 +41,7 @@ export interface DiscountItemsMobileCardsProps {
  */
 export function DiscountItemsMobileCards({
   rows,
+  discountType,
   selectedIds,
   commissionTariffName,
   commissionPeriodLabel,
@@ -47,6 +52,9 @@ export function DiscountItemsMobileCards({
   const t = useTranslations('discountsPage.table');
   const reasonEmptyLabel = useDiscountReasonEmptyLabel();
   const scale = useMarginColoring();
+  // Basket-scoped types keep the showcase price — the discounted figure is the settlement-basis
+  // unit amount — so it reframes to the `settlementScenario` label; NET keeps `discountedPrice`.
+  const discountedLabel = discountType === 'NET' ? t('discountedPrice') : t('settlementScenario');
 
   return (
     <div className="gap-sm flex flex-col">
@@ -99,11 +107,12 @@ export function DiscountItemsMobileCards({
 
             {/* Discounted scenario — price + profit + "güncele göre" delta. */}
             <div className="border-border pt-md gap-2xs flex flex-col border-t">
-              <span className="text-2xs text-muted-foreground font-medium">
-                {t('discountedPrice')}
-              </span>
+              <span className="text-2xs text-muted-foreground font-medium">{discountedLabel}</span>
               <div className="gap-sm flex items-center justify-between">
-                <Currency value={row.discounted.price} className="text-sm font-medium" />
+                <div className="gap-xs flex items-center">
+                  <Currency value={row.discounted.price} className="text-sm font-medium" />
+                  <DiscountScenarioChip scenario={row.scenario} unitPrice={row.discounted.price} />
+                </div>
                 <ProfitBadge
                   value={row.discounted.netProfit}
                   marginPct={row.discounted.marginPct}

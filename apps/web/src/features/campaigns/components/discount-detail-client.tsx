@@ -352,6 +352,7 @@ export function DiscountDetailClient({
       <div className="hidden min-w-0 md:block">
         <DiscountItemsTable
           rows={filteredRows}
+          discountType={list.discountType}
           selectedIds={selectedIds}
           commissionTariffName={view.commissionTariffName}
           commissionPeriodLabel={view.commissionPeriodLabel}
@@ -367,6 +368,7 @@ export function DiscountDetailClient({
         {toolbar}
         <DiscountItemsMobileCards
           rows={filteredRows}
+          discountType={list.discountType}
           selectedIds={selectedIds}
           commissionTariffName={view.commissionTariffName}
           commissionPeriodLabel={view.commissionPeriodLabel}
@@ -387,6 +389,9 @@ export function DiscountDetailClient({
         result={estimateData ?? null}
         loading={estimatePending}
         currentNetProfit={breakdown?.row.current.netProfit ?? null}
+        // The settlement scenario is an order-level view of the DISCOUNTED price only; the current
+        // scenario (do-nothing baseline) carries no basket assumption, so pass null there.
+        scenario={breakdown?.scenario === 'discounted' ? breakdown.row.scenario : null}
       />
 
       {editOpen ? (

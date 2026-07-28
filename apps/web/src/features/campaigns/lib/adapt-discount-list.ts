@@ -1,4 +1,5 @@
 import type {
+  DiscountBasketScenario,
   DiscountCommissionBand,
   DiscountCommissionSource,
   DiscountItemReason,
@@ -6,7 +7,7 @@ import type {
   DiscountListDetailItem,
 } from '../api/get-discount-list-detail.api';
 
-export type { DiscountCommissionBand };
+export type { DiscountBasketScenario, DiscountCommissionBand };
 
 /**
  * Component-facing shapes for the İndirimler (Discounts) DETAIL screen. Money is a GROSS decimal
@@ -55,6 +56,8 @@ export interface DiscountRow {
    * for the barcode. Feeds the commission cell's bands popover (which band each price lands in).
    */
   commissionBands: readonly DiscountCommissionBand[] | null;
+  /** Single-product-basket settlement scenario for basket-scoped discount types; null for NET. */
+  readonly scenario: DiscountBasketScenario;
 }
 
 /**
@@ -93,6 +96,7 @@ function toRow(item: DiscountListDetailItem): DiscountRow {
     current: item.current,
     discounted: item.discounted,
     commissionBands: item.commissionBands,
+    scenario: item.scenario,
   };
 }
 
