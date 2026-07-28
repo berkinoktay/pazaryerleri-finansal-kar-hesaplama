@@ -8,6 +8,7 @@ import {
   computeDiscountItem,
   effectiveUnitPrice,
   resolveDiscountCommission,
+  type DiscountBasketScenario,
   type DiscountCommissionInputs,
   type DiscountConfig,
   type TariffAssemblyContext,
@@ -407,5 +408,201 @@ describe('computeDiscountItem resolves the commission at the 2dp wire price', ()
     expect(out.discounted.price.toFixed(2)).toBe('299.99');
     expect(out.discounted.commissionSource).toBe('band');
     expect(out.discounted.commissionPct).toBe('12.0000');
+  });
+});
+
+describe('computeDiscountItem — hakediş (basket settlement) scenario', () => {
+  const ctx: TariffAssemblyContext = {
+    platform: 'TRENDYOL',
+    feeDefs: {
+      commissionVatRate: new Decimal(20),
+      stoppageRate: new Decimal('0.01'),
+      psfNet: new Decimal('10.99'),
+      psfVatRate: new Decimal(20),
+      shipVatRate: new Decimal(20),
+    },
+  };
+  const variant: TariffVariant = {
+    id: 'v1',
+    stockCode: 'STK-1',
+    barcode: 'BC-1',
+    salePrice: new Decimal('1000'),
+    vatRate: 20,
+    isDigital: false,
+    product: { title: 'Ürün', categoryId: null, brandId: null },
+  };
+  // No commission + no cost — enough for the basket money math, which needs no breakdown; on
+  // these cases the discounted scenario has no breakdown, so orderNetProfit stays null.
+  const noCommission: DiscountCommissionInputs = {
+    bands: null,
+    productRate: null,
+    categoryRate: null,
+  };
+  // An open band covering every probed price, so the discounted scenario resolves a breakdown
+  // once OK cost + shipping are supplied (the orderNetProfit case below).
+  const openCommission: DiscountCommissionInputs = {
+    bands: [{ key: 'all', lowerLimit: null, upperLimit: null, commissionPct: '15' }],
+    productRate: null,
+    categoryRate: null,
+  };
+
+  const money = (config: DiscountConfig, currentPrice: number): DiscountBasketScenario | null =>
+    computeDiscountItem(ctx, variant, undefined, NO_SHIPPING, noCommission, d(currentPrice), config)
+      .scenario;
+
+  it('CONDITIONAL_BASKET AMOUNT: n = ceil(M/price), paid = n × discounted unit', () => {
+    // M=300, fiyat=199.50, X=50 → n = ceil(300/199.50) = 2; birim = 199.50 − 50/2 = 174.50.
+    expect(
+      money(
+        { type: 'CONDITIONAL_BASKET', valueKind: 'AMOUNT', value: d(50), minBasketAmount: d(300) },
+        199.5,
+      ),
+    ).toEqual({
+      assumedQuantity: 2,
+      basketTotal: '399.00',
+      basketPaidTotal: '349.00',
+      basketDiscountTotal: '50.00',
+      orderNetProfit: null,
+    });
+    // M=1000, fiyat=250, X=100 → n=4; birim = 250 − 100/4 = 225.
+    expect(
+      money(
+        {
+          type: 'CONDITIONAL_BASKET',
+          valueKind: 'AMOUNT',
+          value: d(100),
+          minBasketAmount: d(1000),
+        },
+        250,
+      ),
+    ).toEqual({
+      assumedQuantity: 4,
+      basketTotal: '1000.00',
+      basketPaidTotal: '900.00',
+      basketDiscountTotal: '100.00',
+      orderNetProfit: null,
+    });
+  });
+
+  it('CONDITIONAL_BASKET PERCENT: n still ceil(M/price), paid = n × the flat percent unit', () => {
+    // M=1000, fiyat=250, %20 → n=4; birim = 250 × 0.8 = 200.
+    expect(
+      money(
+        {
+          type: 'CONDITIONAL_BASKET',
+          valueKind: 'PERCENT',
+          value: d(20),
+          minBasketAmount: d(1000),
+        },
+        250,
+      ),
+    ).toEqual({
+      assumedQuantity: 4,
+      basketTotal: '1000.00',
+      basketPaidTotal: '800.00',
+      basketDiscountTotal: '200.00',
+      orderNetProfit: null,
+    });
+  });
+
+  it('CODE mirrors CONDITIONAL_BASKET for the scenario too', () => {
+    expect(
+      money({ type: 'CODE', valueKind: 'AMOUNT', value: d(100), minBasketAmount: d(1000) }, 250),
+    ).toEqual({
+      assumedQuantity: 4,
+      basketTotal: '1000.00',
+      basketPaidTotal: '900.00',
+      basketDiscountTotal: '100.00',
+      orderNetProfit: null,
+    });
+  });
+
+  it('CONDITIONAL_QUANTITY: n = minQuantity', () => {
+    // minQuantity=3, fiyat=100, X=60 → birim = 100 − 60/3 = 80.
+    expect(
+      money(
+        { type: 'CONDITIONAL_QUANTITY', valueKind: 'AMOUNT', value: d(60), minQuantity: 3 },
+        100,
+      ),
+    ).toEqual({
+      assumedQuantity: 3,
+      basketTotal: '300.00',
+      basketPaidTotal: '240.00',
+      basketDiscountTotal: '60.00',
+      orderNetProfit: null,
+    });
+  });
+
+  it('BUY_X_PAY_Y: n = buyQuantity, paid = n × (price × pay/buy)', () => {
+    // 4 al 2 öde @1000 → birim = 1000 × 2/4 = 500; n = 4.
+    expect(money({ type: 'BUY_X_PAY_Y', buyQuantity: 4, payQuantity: 2 }, 1000)).toEqual({
+      assumedQuantity: 4,
+      basketTotal: '4000.00',
+      basketPaidTotal: '2000.00',
+      basketDiscountTotal: '2000.00',
+      orderNetProfit: null,
+    });
+  });
+
+  it('NTH_PRODUCT: n = nthIndex', () => {
+    // 2. ürün %100 @1000 → birim = (1000 + 0)/2 = 500; n = 2.
+    expect(
+      money({ type: 'NTH_PRODUCT', valueKind: 'PERCENT', value: d(100), nthIndex: 2 }, 1000),
+    ).toEqual({
+      assumedQuantity: 2,
+      basketTotal: '2000.00',
+      basketPaidTotal: '1000.00',
+      basketDiscountTotal: '1000.00',
+      orderNetProfit: null,
+    });
+  });
+
+  it('NET has no basket scenario (its showcase price genuinely changes)', () => {
+    expect(money({ type: 'NET', valueKind: 'AMOUNT', value: d(50) }, 200)).toBeNull();
+  });
+
+  it('a non-positive price has no scenario', () => {
+    expect(
+      money(
+        { type: 'CONDITIONAL_BASKET', valueKind: 'AMOUNT', value: d(50), minBasketAmount: d(300) },
+        0,
+      ),
+    ).toBeNull();
+  });
+
+  it('floors the paid basket at zero when the amount discount exceeds the basket', () => {
+    // M=100, fiyat=100, X=500 → n=1; birim = max(100 − 500, 0) = 0.
+    expect(
+      money(
+        { type: 'CONDITIONAL_BASKET', valueKind: 'AMOUNT', value: d(500), minBasketAmount: d(100) },
+        100,
+      ),
+    ).toEqual({
+      assumedQuantity: 1,
+      basketTotal: '100.00',
+      basketPaidTotal: '0.00',
+      basketDiscountTotal: '100.00',
+      orderNetProfit: null,
+    });
+  });
+
+  it('orderNetProfit is EXACTLY the displayed 2dp unit net profit × n (Decimal, no float)', () => {
+    // M=1000, fiyat=250, X=100 → n=4; birim = 225. OK cost + shipping + open band resolve a
+    // discounted breakdown, so orderNetProfit is populated.
+    const out = computeDiscountItem(ctx, variant, OK_COST, OK_SHIPPING, openCommission, d(250), {
+      type: 'CONDITIONAL_BASKET',
+      valueKind: 'AMOUNT',
+      value: d(100),
+      minBasketAmount: d(1000),
+    });
+    const n = 4;
+    expect(out.scenario?.assumedQuantity).toBe(n);
+    expect(out.discounted.netProfit).not.toBeNull();
+    expect(out.scenario?.orderNetProfit).not.toBeNull();
+    // orderNetProfit = the DISPLAYED 2dp unit net profit × n, exactly — so the popover total can
+    // never contradict "shown unit × n". Assert the byte-exact equality (Decimal, never a JS float).
+    expect(out.scenario?.orderNetProfit).toBe(
+      new Decimal(out.discounted.netProfit ?? '0').mul(n).toFixed(2),
+    );
   });
 });

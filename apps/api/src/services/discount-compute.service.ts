@@ -204,11 +204,27 @@ export interface ComputedDiscountScenario {
   readonly marginPct: string | null; // toFixed(2)
 }
 
+/**
+ * Single-product-basket settlement scenario (design §11): assuming the basket is made only of
+ * THIS product at the minimum qualifying quantity `assumedQuantity` (n), the basket's list
+ * total, what the customer pays, the discount, and the order-level net profit. Null for NET
+ * (its showcase price genuinely changes — no basket framing) or a non-positive price. Money
+ * fields are 2dp strings; the profit engine's Decimal drives them, never a float.
+ */
+export interface DiscountBasketScenario {
+  readonly assumedQuantity: number;
+  readonly basketTotal: string; // toFixed(2)
+  readonly basketPaidTotal: string; // toFixed(2)
+  readonly basketDiscountTotal: string; // toFixed(2)
+  readonly orderNetProfit: string | null; // toFixed(2)
+}
+
 export interface ComputedDiscountItem {
   readonly calculable: boolean;
   readonly reason: DiscountItemReason | null;
   readonly current: ComputedDiscountScenario;
   readonly discounted: ComputedDiscountScenario;
+  readonly scenario: DiscountBasketScenario | null;
 }
 
 /** One scenario's resolution: the commission chain result + the assembled breakdown. */
@@ -284,12 +300,70 @@ function toScenario(price: Decimal, c: ScenarioCompute): ComputedDiscountScenari
 }
 
 /**
+ * Builds the single-product-basket settlement scenario (design §11) from the current price,
+ * the discounted effective unit, the config, and the discounted scenario's INNER breakdown.
+ * `assumedQuantity` (n) is the minimum qualifying quantity per type. `basketPaidTotal` uses the
+ * SAME 2dp effective unit the row displays (`unit2dp`), so the popover can never disagree with
+ * the shown unit price. Returns null for NET (its showcase price genuinely changes — no basket
+ * framing) or a non-positive current price. `orderNetProfit` = n × the DISPLAYED 2dp unit net
+ * profit (`netProfit` rounded to 2dp — the exact value the row serializes), NOT n × the full-
+ * precision inner value: the popover must never contradict the row, so multiplying the shown unit
+ * by n is the invariant. Null when the discounted scenario has no breakdown. All arithmetic is
+ * Decimal, read from the inner Decimal and NEVER re-parsed from the serialized string.
+ */
+function buildBasketScenario(
+  currentPrice: Decimal,
+  discountedPrice: Decimal,
+  config: DiscountConfig,
+  discountedBreakdown: ProfitBreakdown | null,
+): DiscountBasketScenario | null {
+  if (config.type === 'NET' || currentPrice.lte(ZERO)) return null;
+
+  let n: number;
+  switch (config.type) {
+    case 'CONDITIONAL_BASKET':
+    case 'CODE':
+      n = qualifyingQuantity(currentPrice, config.minBasketAmount);
+      break;
+    case 'CONDITIONAL_QUANTITY':
+      n = Math.max(config.minQuantity, 1);
+      break;
+    case 'BUY_X_PAY_Y':
+      n = config.buyQuantity;
+      break;
+    case 'NTH_PRODUCT':
+      n = Math.max(config.nthIndex, 1);
+      break;
+    default: {
+      const _exhaustive: never = config;
+      throw new Error(`Unhandled discount config: ${JSON.stringify(_exhaustive)}`);
+    }
+  }
+
+  const unit2dp = discountedPrice.toDecimalPlaces(2);
+  const basketTotal = currentPrice.mul(n);
+  const basketPaidTotal = unit2dp.mul(n);
+  return {
+    assumedQuantity: n,
+    basketTotal: basketTotal.toFixed(2),
+    basketPaidTotal: basketPaidTotal.toFixed(2),
+    basketDiscountTotal: basketTotal.sub(basketPaidTotal).toFixed(2),
+    orderNetProfit:
+      discountedBreakdown !== null
+        ? discountedBreakdown.netProfit.toDecimalPlaces(2).mul(n).toFixed(2)
+        : null,
+  };
+}
+
+/**
  * Computes one discount item's TWO scenarios: `current` at `currentPrice` (band + matrah
  * both the current price), and `discounted` whose MATRAH is effectiveUnitPrice(currentPrice,
  * config) but whose commission BAND is selected by {@link commissionBandPrice} — the
  * discounted price for genuinely-cheaper-per-unit types, the current (list) price for
  * X-al-Y / Nth-product where the list price is unchanged. The item's calculability + reason
- * follow the `current` (baseline) scenario — the "do nothing" state the list row shows.
+ * follow the `current` (baseline) scenario — the "do nothing" state the list row shows. The
+ * basket-scoped `scenario` block ({@link buildBasketScenario}) reframes the discounted unit as
+ * the settlement-basis unit under the single-product-basket assumption (null for NET).
  */
 export function computeDiscountItem(
   ctx: TariffAssemblyContext,
@@ -325,6 +399,7 @@ export function computeDiscountItem(
     reason: current.reason,
     current: toScenario(currentPrice, current),
     discounted: toScenario(discountedPrice, discounted),
+    scenario: buildBasketScenario(currentPrice, discountedPrice, config, discounted.breakdown),
   };
 }
 

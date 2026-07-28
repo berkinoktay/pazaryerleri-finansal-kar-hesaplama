@@ -7452,6 +7452,9 @@
             "items": {
               "$ref": "#/components/schemas/DiscountCommissionBand"
             }
+          },
+          "scenario": {
+            "$ref": "#/components/schemas/DiscountBasketScenario"
           }
         },
         "required": [
@@ -7468,7 +7471,8 @@
           "reason",
           "current",
           "discounted",
-          "commissionBands"
+          "commissionBands",
+          "scenario"
         ]
       },
       "DiscountCommissionBand": {
@@ -7496,6 +7500,45 @@
           "commissionPct"
         ],
         "description": "Ürünün komisyon tarifesindeki bir fiyat bandı: [lowerLimit, upperLimit] penceresi ve o pencereye düşen komisyon oranı. Cari + indirimli fiyatın hangi banda düştüğü UI popover’ında bu ladder ile işaretlenir."
+      },
+      "DiscountBasketScenario": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "assumedQuantity": {
+            "type": "integer",
+            "description": "Assumed basket quantity (n): the minimum quantity of this product whose single-product basket satisfies the discount condition — ceil(minBasket/price) for basket/code, minQuantity for quantity, buyQuantity for X-al-Y, nthIndex for Nth-product."
+          },
+          "basketTotal": {
+            "type": "string",
+            "description": "List-price basket total (n × current price), 2-decimal string."
+          },
+          "basketPaidTotal": {
+            "type": "string",
+            "description": "What the customer pays for the assumed basket (n × the 2dp effective unit price), 2-decimal string — always consistent with the row’s displayed unit price."
+          },
+          "basketDiscountTotal": {
+            "type": "string",
+            "description": "The basket discount (basketTotal − basketPaidTotal), 2-decimal string."
+          },
+          "orderNetProfit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Order-level net profit for the assumed basket (n × the per-unit net profit); null when the discounted scenario is not calculable."
+          }
+        },
+        "required": [
+          "assumedQuantity",
+          "basketTotal",
+          "basketPaidTotal",
+          "basketDiscountTotal",
+          "orderNetProfit"
+        ],
+        "description": "Single-product-basket settlement scenario for basket-scoped discount types. Null for NET (its showcase price genuinely changes) or a non-positive price."
       },
       "ShippingCarrier": {
         "type": "object",

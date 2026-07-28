@@ -9,6 +9,7 @@ export type DiscountType = components['schemas']['DiscountType'];
 export type DiscountValueKind = components['schemas']['DiscountValueKind'];
 export type DiscountCommissionSource = components['schemas']['DiscountCommissionSource'];
 export type DiscountCommissionBand = components['schemas']['DiscountCommissionBand'];
+export type DiscountBasketScenario = components['schemas']['DiscountBasketScenario'];
 export type DiscountItemReason = components['schemas']['DiscountItemReason'];
 
 /**

@@ -356,6 +356,45 @@ export const DiscountCommissionBandSchema = z
       'UI popover’ında bu ladder ile işaretlenir.',
   });
 
+// Single-product-basket settlement scenario for basket-scoped discount types (design §11).
+// Every field is computed on the backend with decimal.js; the frontend only renders.
+export const DiscountBasketScenarioSchema = z
+  .object({
+    assumedQuantity: z
+      .number()
+      .int()
+      .openapi({
+        description:
+          'Assumed basket quantity (n): the minimum quantity of this product whose single-product ' +
+          'basket satisfies the discount condition — ceil(minBasket/price) for basket/code, ' +
+          'minQuantity for quantity, buyQuantity for X-al-Y, nthIndex for Nth-product.',
+      }),
+    basketTotal: z.string().openapi({
+      description: 'List-price basket total (n × current price), 2-decimal string.',
+    }),
+    basketPaidTotal: z.string().openapi({
+      description:
+        'What the customer pays for the assumed basket (n × the 2dp effective unit price), ' +
+        '2-decimal string — always consistent with the row’s displayed unit price.',
+    }),
+    basketDiscountTotal: z.string().openapi({
+      description: 'The basket discount (basketTotal − basketPaidTotal), 2-decimal string.',
+    }),
+    orderNetProfit: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Order-level net profit for the assumed basket (n × the per-unit net profit); null when ' +
+          'the discounted scenario is not calculable.',
+      }),
+  })
+  .openapi('DiscountBasketScenario', {
+    description:
+      'Single-product-basket settlement scenario for basket-scoped discount types. Null for NET ' +
+      '(its showcase price genuinely changes) or a non-positive price.',
+  });
+
 export const DiscountListDetailItemSchema = z
   .object({
     id: z.string().uuid(),
@@ -378,6 +417,12 @@ export const DiscountListDetailItemSchema = z
      * fell to the synced product rate or category rate).
      */
     commissionBands: z.array(DiscountCommissionBandSchema).nullable(),
+    /**
+     * Single-product-basket settlement scenario (design §11): the assumed basket, its paid
+     * total, its discount, and the order-level net profit. Null for NET (its showcase price
+     * genuinely changes) or a non-positive price.
+     */
+    scenario: DiscountBasketScenarioSchema.nullable(),
   })
   .openapi('DiscountListDetailItem');
 
@@ -476,6 +521,7 @@ export type EstimateDiscountItemResult = z.infer<typeof EstimateDiscountItemResu
 
 export type DiscountListListItem = z.infer<typeof DiscountListListItemSchema>;
 export type DiscountCommissionBand = z.infer<typeof DiscountCommissionBandSchema>;
+export type DiscountBasketScenario = z.infer<typeof DiscountBasketScenarioSchema>;
 export type DiscountListDetailItem = z.infer<typeof DiscountListDetailItemSchema>;
 export type DiscountListDetail = z.infer<typeof DiscountListDetailSchema>;
 export type DiscountSelection = z.infer<typeof DiscountSelectionSchema>;

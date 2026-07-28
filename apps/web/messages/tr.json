@@ -1779,12 +1779,25 @@
       "product": "Ürün Bilgisi",
       "currentPrice": "Güncel fiyat",
       "discountedPrice": "İndirimli fiyat",
+      "settlementScenario": "Hakediş senaryosu",
       "commission": "Komisyon",
       "delta": "Güncele göre",
       "included": "Dahil",
       "includeRow": "Bu ürünü kampanyaya dahil et",
       "over500Warning": "500'den fazla ürün seçildi — Trendyol yalnız ilk 500 ürünü işler.",
       "variantNote": "Seçilen barkodun tüm varyantları kampanyaya dahil edilir."
+    },
+    "scenario": {
+      "chip": "×{qty} adet",
+      "chipAria": "{qty} adetlik sepet varsayımının dökümünü aç",
+      "title": "Hakediş senaryosu",
+      "subtitle": "Sepetin yalnız bu üründen, koşulu karşılayan en az adette oluştuğu varsayılır.",
+      "assumedBasket": "Varsayılan sepet ({qty} adet)",
+      "basketDiscount": "Sepet indirimi",
+      "paidTotal": "Müşterinin ödediği",
+      "unitSettlement": "Hakedişe esas birim tutar",
+      "distributionNote": "Trendyol indirimi ürünlere oransal dağıtır; hakediş ve iade ürün bazında bu tutar üzerinden yürür.",
+      "orderProfit": "Sipariş kârı ({qty} adet)"
     },
     "commissionSource": {
       "band": "Tarife bandı",

@@ -343,6 +343,9 @@ export async function getDiscountListDetail(
       current: serializeScenario(computed.current),
       discounted: serializeScenario(computed.discounted),
       commissionBands,
+      // Passthrough: the compute already serialized the settlement scenario to wire strings
+      // (money 2dp, quantity int); null for NET or a non-positive price.
+      scenario: computed.scenario,
     };
   });
 

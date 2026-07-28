@@ -16,13 +16,18 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
+import type { DiscountListDetail } from '../api/get-discount-list-detail.api';
 import { useDiscountReasonEmptyLabel } from '../hooks/use-discount-reason-label';
 import type { DiscountRow } from '../lib/adapt-discount-list';
 import { DiscountCommissionCell } from './discount-commission-cell';
+import { DiscountScenarioChip } from './discount-scenario-chip';
 import { ProfitDelta } from './profit-delta';
 
 /** Which price scenario a profit badge opens in the breakdown modal. */
 export type DiscountScenarioKey = 'current' | 'discounted';
+
+/** The discount type off the loaded detail — drives the discounted column's header framing. */
+type DiscountTypeWire = DiscountListDetail['discountType'];
 
 /**
  * State the cells need beyond their row data, streamed through CONTEXT rather than baked into the
@@ -85,6 +90,8 @@ function CommissionCellSlot({ row }: { row: DiscountRow }): React.ReactElement {
 
 export interface DiscountItemsTableProps {
   rows: readonly DiscountRow[];
+  /** The list's discount TYPE — reframes the discounted column header for basket-scoped types. */
+  discountType: DiscountTypeWire;
   /** The client's EPHEMERAL local selection — drives each row checkbox's checked state. */
   selectedIds: ReadonlySet<string>;
   /** Detail-level commission tariff NAME feeding the bands — the band tooltip's first part. */
@@ -112,6 +119,7 @@ export interface DiscountItemsTableProps {
  */
 export function DiscountItemsTable({
   rows,
+  discountType,
   selectedIds,
   commissionTariffName,
   commissionPeriodLabel,
@@ -185,15 +193,24 @@ export function DiscountItemsTable({
       },
     };
 
+    // Basket-scoped types don't move the showcase price — the discounted figure is the
+    // settlement-basis unit amount, so the header reframes to the `settlementScenario` label. NET
+    // genuinely lowers the price, so it keeps the `discountedPrice` label.
+    const discountedHeader =
+      discountType === 'NET' ? t('discountedPrice') : t('settlementScenario');
+
     const discountedColumn: ColumnDef<DiscountRow> = {
       id: 'discounted',
-      header: t('discountedPrice'),
-      meta: { label: t('discountedPrice') },
+      header: discountedHeader,
+      meta: { label: discountedHeader },
       cell: ({ row }) => {
         const r = row.original;
         return (
           <div className="gap-3xs flex flex-col items-start">
-            <Currency value={r.discounted.price} className="text-sm font-medium" />
+            <div className="gap-xs flex items-center">
+              <Currency value={r.discounted.price} className="text-sm font-medium" />
+              <DiscountScenarioChip scenario={r.scenario} unitPrice={r.discounted.price} />
+            </div>
             <ProfitBadge
               value={r.discounted.netProfit}
               marginPct={r.discounted.marginPct}
@@ -228,8 +245,9 @@ export function DiscountItemsTable({
     // `columns` identity MUST stay STABLE. Every dep is identity-stable: `t` from next-intl,
     // `onToggleInclude`/`onOpenBreakdown` from the parent's useCallback, and `reasonEmptyLabel`
     // (useCallback-stable). `scale` only changes when the seller edits their margin ramp (rare)
-    // and there is no fragile cell input to lose.
-  }, [t, scale, onToggleInclude, onOpenBreakdown, reasonEmptyLabel]);
+    // and there is no fragile cell input to lose. `discountType` is fixed for a loaded detail —
+    // it never changes across the table's lifetime, so it can't churn the header cell.
+  }, [t, scale, discountType, onToggleInclude, onOpenBreakdown, reasonEmptyLabel]);
 
   const rowState = React.useMemo(
     () => ({ selectionsPending, selectedIds, commissionTariffName, commissionPeriodLabel }),
