@@ -1675,7 +1675,7 @@
       "title": "Discount setup",
       "edit": "Edit",
       "dateRange": "{start} – {end}",
-      "assumption": "Profit is estimated for a single-item basket; multi-item baskets may differ.",
+      "assumption": "Profit is estimated for a basket containing only this product at the minimum quantity that meets the condition; the discount is split proportionally across those units. Multi-item baskets may differ.",
       "outdatedTariffNote": "Your uploaded commission tariffs don't cover this campaign's week — commission falls back to the product's own rate or the category rate."
     },
     "upload": {
@@ -1688,14 +1688,14 @@
       "typeLabel": "Discount type",
       "fields": {
         "valueKind": "Value type",
-        "valueKindAmount": "Amount (₺)",
-        "valueKindPercent": "Percent (%)",
-        "valueKindFixed": "Fixed price",
+        "valueKindAmount": "Discount amount (₺)",
+        "valueKindPercent": "Discount percent (%)",
+        "valueKindFixed": "Fixed price (₺)",
         "value": "Value",
         "minBasketAmount": "Minimum basket amount",
         "minQuantity": "Minimum quantity",
-        "buyQuantity": "Buy quantity",
-        "payQuantity": "Pay quantity",
+        "buyQuantity": "Units the customer must buy",
+        "payQuantity": "Units the customer pays for",
         "nthIndex": "Which item",
         "dateRange": "Date range",
         "startPlaceholder": "Start date",
