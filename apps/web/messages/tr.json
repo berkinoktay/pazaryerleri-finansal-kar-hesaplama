@@ -1675,7 +1675,7 @@
       "title": "İndirim ayarları",
       "edit": "Düzenle",
       "dateRange": "{start} – {end}",
-      "assumption": "Kâr tahmini, sepetin yalnız bu üründen oluştuğu varsayımına dayanır; çok ürünlü sepetlerde sonuç farklılaşabilir.",
+      "assumption": "Kâr tahmini, sepetin yalnız bu üründen ve koşulu karşılamaya yetecek en az adette oluştuğu varsayımına dayanır; indirim bu adede oransal dağıtılır. Çok ürünlü sepetlerde sonuç farklılaşabilir.",
       "outdatedTariffNote": "Yüklü komisyon tarifeleriniz bu kampanyanın haftasını kapsamıyor — komisyon, ürünün kendi oranından ya da kategori oranından çözülüyor."
     },
     "upload": {
@@ -1688,14 +1688,14 @@
       "typeLabel": "İndirim türü",
       "fields": {
         "valueKind": "Değer türü",
-        "valueKindAmount": "Tutar (₺)",
-        "valueKindPercent": "Yüzde (%)",
-        "valueKindFixed": "Sabit fiyat",
+        "valueKindAmount": "İndirim tutarı (₺)",
+        "valueKindPercent": "İndirim yüzdesi (%)",
+        "valueKindFixed": "Sabit fiyat (₺)",
         "value": "Değer",
         "minBasketAmount": "Minimum sepet tutarı",
         "minQuantity": "Minimum ürün adedi",
-        "buyQuantity": "Alınacak adet",
-        "payQuantity": "Ödenecek adet",
+        "buyQuantity": "Satın alınması gereken ürün adedi",
+        "payQuantity": "Müşterinin ödeyeceği ürün adedi",
         "nthIndex": "Kaçıncı ürün",
         "dateRange": "Tarih aralığı",
         "startPlaceholder": "Başlangıç tarihi",

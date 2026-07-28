@@ -40,8 +40,9 @@ const TOTAL_ROWS = 4;
 const MATCHED_BARCODE = 'DISC-BC-1';
 const INCLUDED_BARCODE = 'DISC-BC-4';
 
-// 0-based grid column of the required "Barkod" header (Excel row 1).
+// 0-based grid columns of the "Barkod" and "Güncel Satış Fiyatı" headers (Excel row 1).
 const COL_BARCODE = 4;
+const COL_PRICE = 6;
 
 // Both campaign dates are required on every config write.
 const START_AT = '2026-07-21T05:00:00.000Z';
@@ -249,6 +250,31 @@ describe('POST .../discount-lists/import - rejects invalid input', () => {
         expect.objectContaining({ field: 'file', code: 'INVALID_DISCOUNT_FORMAT' }),
       ]),
     );
+  });
+});
+
+describe('POST .../discount-lists/import - skips unparseable rows', () => {
+  beforeEach(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+  });
+
+  it('counts a row with an unparseable price in skippedRows instead of persisting it', async () => {
+    const ctx = await setupStore(true);
+    // Break the SECOND data row's (unmatched DISC-BC-2) price cell — the matched row survives.
+    const broken = patchXlsxCells(
+      FIXTURE,
+      rowPatch(3, [[COL_PRICE, { kind: 'inlineStr', value: 'fiyat yok' }]]),
+    );
+    const imported = await importFile(ctx, broken, { ...NET_CONFIG });
+    expect(imported.skippedRows).toBe(1);
+    expect(imported.itemCount).toBe(TOTAL_ROWS - 1);
+    expect(imported.matched).toBe(1);
+    expect(imported.unmatched).toBe(TOTAL_ROWS - 2);
+    const persisted = await prisma.discountListItem.count({
+      where: { listId: imported.listId, barcode: 'DISC-BC-2' },
+    });
+    expect(persisted).toBe(0);
   });
 });
 

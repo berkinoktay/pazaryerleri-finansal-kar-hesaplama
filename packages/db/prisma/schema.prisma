@@ -1670,7 +1670,9 @@ model DiscountList {
   buyQuantity     Int?              @map("buy_quantity")
   payQuantity     Int?              @map("pay_quantity")
   nthIndex        Int?              @map("nth_index")
-  // Kampanya penceresi — yalnız bilgi amaçlı (komisyon HER ZAMAN günceldan çözülür).
+  // Kampanya penceresi. startsAt komisyon bandı çözümünün ÇAPASIDIR (gelecekteyse çapa =
+  // startsAt, değilse şimdi; kapsayan-hafta kuralı — bkz. discount-commission-source.ts).
+  // endsAt yalnız bilgi amaçlı.
   startsAt        DateTime?         @map("starts_at")
   endsAt          DateTime?         @map("ends_at")
   sourceFilename String?   @map("source_filename")
