@@ -8,7 +8,6 @@ import { render, screen } from '../helpers/render';
 
 const UPLOAD = trMessages.discountsPage.upload;
 const FIELDS = UPLOAD.fields;
-const FIELD_ERRORS = UPLOAD.fieldErrors;
 const TYPES = trMessages.discountsPage.types;
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -136,18 +135,22 @@ describe('<DiscountUploadDialog>', () => {
     expect(percentOption).toHaveAttribute('aria-selected', 'false');
   });
 
-  it('shows the out-of-range inline error for an NTH_PRODUCT target index outside 2–4', async () => {
-    const { user, onSubmit } = renderDialog();
+  it('offers cart-quantity targets 2 through 4 for NTH_PRODUCT (and nothing outside that range)', async () => {
+    const { user } = renderDialog();
 
     await selectDiscountType(user, TYPES.NTH_PRODUCT);
-    await user.type(screen.getByLabelText(FIELDS.nthIndex), '7');
 
-    // A file is required to enable submit — the config is only validated on submit.
-    await user.upload(fileInput(), makeXlsxFile());
-    await user.click(screen.getByRole('button', { name: UPLOAD.submit }));
+    // The "X. ürün" target is now a fixed Select (2..4), not a free-text input — an out-of-range
+    // target (e.g. 7) is impossible to PICK rather than something a submit-time inline error catches.
+    const nthSelect = screen.getByLabelText(FIELDS.nthIndex);
+    expect(nthSelect).toBeInTheDocument();
 
-    expect(await screen.findByText(FIELD_ERRORS.nthRange)).toBeInTheDocument();
-    expect(onSubmit).not.toHaveBeenCalled();
+    await user.click(nthSelect);
+    for (const n of ['2', '3', '4']) {
+      expect(await screen.findByRole('option', { name: n })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole('option', { name: '1' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '5' })).not.toBeInTheDocument();
   });
 
   it('keeps submit disabled until a file is chosen', async () => {
