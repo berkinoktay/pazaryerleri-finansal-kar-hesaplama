@@ -38,7 +38,12 @@ function makeList(): DiscountListDetail {
   };
 }
 
-function renderDialog() {
+/** A saved NTH_PRODUCT list — seeds the fixed 2..4 target Select with a chosen nth index. */
+function makeNthList(): DiscountListDetail {
+  return { ...makeList(), discountType: 'NTH_PRODUCT', value: '15', nthIndex: 3 };
+}
+
+function renderDialog(list: DiscountListDetail = makeList()) {
   return render(
     <DiscountConfigEditDialog
       open
@@ -46,7 +51,7 @@ function renderDialog() {
       orgId={ORG_ID}
       storeId={STORE_ID}
       listId={LIST_ID}
-      list={makeList()}
+      list={list}
     />,
   );
 }
@@ -57,6 +62,22 @@ describe('<DiscountConfigEditDialog>', () => {
 
     expect(screen.getByLabelText(FIELDS.valueKind)).toHaveTextContent(FIELDS.valueKindPercent);
     expect(screen.getByLabelText(FIELDS.value)).toHaveValue('20');
+  });
+
+  it('seeds the saved nth target into its fixed Select and offers only 2..4', async () => {
+    const { user } = renderDialog(makeNthList());
+
+    // The seeded target renders on the Select trigger — proving the number → string seed survives
+    // the RHF + Radix controlled-Select round-trip (the Select value stays the string '3').
+    const nthSelect = screen.getByLabelText(FIELDS.nthIndex);
+    expect(nthSelect).toHaveTextContent('3');
+
+    await user.click(nthSelect);
+    for (const n of ['2', '3', '4']) {
+      expect(await screen.findByRole('option', { name: n })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole('option', { name: '1' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '5' })).not.toBeInTheDocument();
   });
 
   it('clears the SEEDED value kind (display and state) when the discount type changes', async () => {

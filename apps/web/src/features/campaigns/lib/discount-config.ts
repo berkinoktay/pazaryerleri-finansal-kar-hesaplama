@@ -57,6 +57,16 @@ const NTH_INDEX_MIN = 2;
 const NTH_INDEX_MAX = 4;
 const PERCENT_MAX = 100;
 
+/**
+ * The valid "X. ürün" target positions (2nd–4th item), rendered as a fixed Select in the config
+ * form. Derived from the same [NTH_INDEX_MIN, NTH_INDEX_MAX] bounds the validator enforces, so the
+ * picker can never offer a value the gate would reject.
+ */
+export const NTH_INDEX_OPTIONS: readonly number[] = Array.from(
+  { length: NTH_INDEX_MAX - NTH_INDEX_MIN + 1 },
+  (_, i) => NTH_INDEX_MIN + i,
+);
+
 // BUY_X_PAY_Y panel bounds (mirror Trendyol's panel): buy 2..5, pay 1..buy-1. The dependent
 // Selects make an out-of-range value impossible to pick; this mirrors the backend gate so a
 // direct 422 lines up with the same inline copy.

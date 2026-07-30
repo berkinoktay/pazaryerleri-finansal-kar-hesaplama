@@ -24,6 +24,7 @@ import {
 } from '@/lib/business-timezone-date';
 
 import {
+  NTH_INDEX_OPTIONS,
   visibleConfigFields,
   type ConfigFieldKey,
   type DiscountConfigFormValues,
@@ -348,6 +349,39 @@ export function DiscountConfigFields({
                 </FormControl>
                 <SelectContent>
                   {payOptions.map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      {String(n)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormMessage render={configFieldError} />
+            </FormItem>
+          )}
+        />
+      );
+    }
+
+    if (key === 'nthIndex') {
+      // The "X. ürün" target sits in the fixed panel range [2, 4]; a Select makes an out-of-range
+      // target impossible to pick (no dependent field, unlike buyQuantity). The form value stays a
+      // string ('2' | '3' | '4') so the shared string config contract is unchanged.
+      return (
+        <FormField
+          key={key}
+          control={form.control}
+          name="nthIndex"
+          render={({ field, fieldState }) => (
+            <FormItem>
+              <FormLabel>{tFields('nthIndex')}</FormLabel>
+              <Select value={field.value ?? ''} onValueChange={(value) => field.onChange(value)}>
+                <FormControl>
+                  <SelectTrigger invalid={fieldState.error !== undefined}>
+                    <SelectValue placeholder={tFields('nthIndex')} />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  {NTH_INDEX_OPTIONS.map((n) => (
                     <SelectItem key={n} value={String(n)}>
                       {String(n)}
                     </SelectItem>
