@@ -16,18 +16,13 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
-import type { DiscountListDetail } from '../api/get-discount-list-detail.api';
 import { useDiscountReasonEmptyLabel } from '../hooks/use-discount-reason-label';
-import type { DiscountRow } from '../lib/adapt-discount-list';
+import type { DiscountRow, DiscountScenarioPresentation } from '../lib/adapt-discount-list';
 import { DiscountCommissionCell } from './discount-commission-cell';
-import { DiscountScenarioChip } from './discount-scenario-chip';
 import { ProfitDelta } from './profit-delta';
 
 /** Which price scenario a profit badge opens in the breakdown modal. */
 export type DiscountScenarioKey = 'current' | 'discounted';
-
-/** The discount type off the loaded detail — drives the discounted column's header framing. */
-type DiscountTypeWire = DiscountListDetail['discountType'];
 
 /**
  * State the cells need beyond their row data, streamed through CONTEXT rather than baked into the
@@ -90,8 +85,11 @@ function CommissionCellSlot({ row }: { row: DiscountRow }): React.ReactElement {
 
 export interface DiscountItemsTableProps {
   rows: readonly DiscountRow[];
-  /** The list's discount TYPE — reframes the discounted column header for basket-scoped types. */
-  discountType: DiscountTypeWire;
+  /**
+   * The list's discounted-column layout: `UNIT` shows the discounted unit price, `ORDER` reframes
+   * to the whole campaign order (customer-paid basket + order-level profit). Backend-decided.
+   */
+  presentation: DiscountScenarioPresentation;
   /** The client's EPHEMERAL local selection — drives each row checkbox's checked state. */
   selectedIds: ReadonlySet<string>;
   /** Detail-level commission tariff NAME feeding the bands — the band tooltip's first part. */
@@ -119,7 +117,7 @@ export interface DiscountItemsTableProps {
  */
 export function DiscountItemsTable({
   rows,
-  discountType,
+  presentation,
   selectedIds,
   commissionTariffName,
   commissionPeriodLabel,
@@ -131,6 +129,7 @@ export function DiscountItemsTable({
   onClearFilters,
 }: DiscountItemsTableProps): React.ReactElement {
   const t = useTranslations('discountsPage.table');
+  const tScenario = useTranslations('discountsPage.scenario');
   const tNoResults = useTranslations('discountsPage.noResults');
   const reasonEmptyLabel = useDiscountReasonEmptyLabel();
   const scale = useMarginColoring();
@@ -193,24 +192,46 @@ export function DiscountItemsTable({
       },
     };
 
-    // Basket-scoped types don't move the showcase price — the discounted figure is the
-    // settlement-basis unit amount, so the header reframes to the `settlementScenario` label. NET
-    // genuinely lowers the price, so it keeps the `discountedPrice` label.
-    const discountedHeader =
-      discountType === 'NET' ? t('discountedPrice') : t('settlementScenario');
-
+    // ORDER lists reframe the discounted column to the whole campaign order ("Kampanya siparişi"):
+    // the synthetic effective-unit price is a poor showcase, so the seller reads what the customer
+    // pays for the assumed basket plus the order-level profit. UNIT lists keep the discounted-unit
+    // layout (the unit price genuinely drops).
+    const discountedHeader = presentation === 'ORDER' ? t('campaignOrder') : t('discountedPrice');
     const discountedColumn: ColumnDef<DiscountRow> = {
       id: 'discounted',
       header: discountedHeader,
       meta: { label: discountedHeader },
       cell: ({ row }) => {
         const r = row.original;
+        if (presentation === 'ORDER' && r.scenario !== null) {
+          return (
+            <div className="gap-3xs flex flex-col items-start">
+              <div className="gap-2xs flex items-baseline">
+                <Currency value={r.scenario.basketPaidTotal} className="text-sm font-medium" />
+                <span className="text-2xs text-muted-foreground">
+                  {tScenario('rowQty', { qty: r.scenario.assumedQuantity })}
+                </span>
+              </div>
+              <ProfitBadge
+                value={r.scenario.orderNetProfit}
+                marginPct={r.scenario.orderMarginPct}
+                scale={scale}
+                onOpen={() => onOpenBreakdown(r, 'discounted')}
+                emptyLabel={reasonEmptyLabel(r.reason)}
+              />
+              {/* Elmayla elma: the same n units WITHOUT the campaign — so the seller reads the
+                  order-level gain, not a per-unit one. */}
+              <ProfitDelta
+                optionNetProfit={r.scenario.orderNetProfit}
+                currentNetProfit={r.scenario.currentOrderNetProfit}
+                label={tScenario('vsWithoutCampaign', { qty: r.scenario.assumedQuantity })}
+              />
+            </div>
+          );
+        }
         return (
           <div className="gap-3xs flex flex-col items-start">
-            <div className="gap-xs flex items-center">
-              <Currency value={r.discounted.price} className="text-sm font-medium" />
-              <DiscountScenarioChip scenario={r.scenario} unitPrice={r.discounted.price} />
-            </div>
+            <Currency value={r.discounted.price} className="text-sm font-medium" />
             <ProfitBadge
               value={r.discounted.netProfit}
               marginPct={r.discounted.marginPct}
@@ -242,12 +263,12 @@ export function DiscountItemsTable({
     // Commission sits right after the product identity — before the current/discounted price
     // scenarios — so the seller reads "which product · at what commission" before the money.
     return [includeColumn, productColumn, commissionColumn, currentColumn, discountedColumn];
-    // `columns` identity MUST stay STABLE. Every dep is identity-stable: `t` from next-intl,
-    // `onToggleInclude`/`onOpenBreakdown` from the parent's useCallback, and `reasonEmptyLabel`
-    // (useCallback-stable). `scale` only changes when the seller edits their margin ramp (rare)
-    // and there is no fragile cell input to lose. `discountType` is fixed for a loaded detail —
-    // it never changes across the table's lifetime, so it can't churn the header cell.
-  }, [t, scale, discountType, onToggleInclude, onOpenBreakdown, reasonEmptyLabel]);
+    // `columns` identity MUST stay STABLE. Every dep is identity-stable: `t`/`tScenario` from
+    // next-intl, `onToggleInclude`/`onOpenBreakdown` from the parent's useCallback, and
+    // `reasonEmptyLabel` (useCallback-stable). `scale` only changes when the seller edits their
+    // margin ramp (rare). `presentation` is fixed for a loaded detail (a config edit reloads the
+    // whole detail), so it never churns mid-render — and there is no fragile cell input to lose.
+  }, [t, tScenario, scale, presentation, onToggleInclude, onOpenBreakdown, reasonEmptyLabel]);
 
   const rowState = React.useMemo(
     () => ({ selectionsPending, selectedIds, commissionTariffName, commissionPeriodLabel }),

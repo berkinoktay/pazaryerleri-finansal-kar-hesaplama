@@ -1,13 +1,17 @@
 import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
-import type { EstimateOutcome } from '@pazarsync/profit';
+import { computeUnitProfit, type EstimateOutcome } from '@pazarsync/profit';
 
 import {
+  assumedBasketQuantity,
   commissionBandPrice,
+  computeDiscountEstimate,
   computeDiscountItem,
+  computeOrderBreakdown,
   effectiveUnitPrice,
   resolveDiscountCommission,
+  scenarioPresentation,
   type DiscountBasketScenario,
   type DiscountCommissionInputs,
   type DiscountConfig,
@@ -15,7 +19,8 @@ import {
   type TariffVariant,
 } from '@/services/discount-compute.service';
 import type { StoredBand } from '@/services/commission-tariff.types';
-import { NO_SHIPPING } from '@/services/tariff-compute-commons';
+import { assembleUnitEconomics } from '@/services/product-pricing.service';
+import { NO_SHIPPING, tariffCommission } from '@/services/tariff-compute-commons';
 import type { VariantCostAggregate } from '@/validators/product.validator';
 
 /** An OK cost aggregate + shipping estimate so a scenario resolves to a real breakdown. */
@@ -432,14 +437,14 @@ describe('computeDiscountItem — hakediş (basket settlement) scenario', () => 
     product: { title: 'Ürün', categoryId: null, brandId: null },
   };
   // No commission + no cost — enough for the basket money math, which needs no breakdown; on
-  // these cases the discounted scenario has no breakdown, so orderNetProfit stays null.
+  // these cases neither scenario has a breakdown, so all three order-profit fields stay null.
   const noCommission: DiscountCommissionInputs = {
     bands: null,
     productRate: null,
     categoryRate: null,
   };
-  // An open band covering every probed price, so the discounted scenario resolves a breakdown
-  // once OK cost + shipping are supplied (the orderNetProfit case below).
+  // An open band covering every probed price, so BOTH scenarios resolve a breakdown once OK cost +
+  // shipping are supplied (the single-parcel order-profit cases below).
   const openCommission: DiscountCommissionInputs = {
     bands: [{ key: 'all', lowerLimit: null, upperLimit: null, commissionPct: '15' }],
     productRate: null,
@@ -463,6 +468,8 @@ describe('computeDiscountItem — hakediş (basket settlement) scenario', () => 
       basketPaidTotal: '349.00',
       basketDiscountTotal: '50.00',
       orderNetProfit: null,
+      orderMarginPct: null,
+      currentOrderNetProfit: null,
     });
     // M=1000, fiyat=250, X=100 → n=4; birim = 250 − 100/4 = 225.
     expect(
@@ -481,6 +488,8 @@ describe('computeDiscountItem — hakediş (basket settlement) scenario', () => 
       basketPaidTotal: '900.00',
       basketDiscountTotal: '100.00',
       orderNetProfit: null,
+      orderMarginPct: null,
+      currentOrderNetProfit: null,
     });
   });
 
@@ -502,6 +511,8 @@ describe('computeDiscountItem — hakediş (basket settlement) scenario', () => 
       basketPaidTotal: '800.00',
       basketDiscountTotal: '200.00',
       orderNetProfit: null,
+      orderMarginPct: null,
+      currentOrderNetProfit: null,
     });
   });
 
@@ -514,6 +525,8 @@ describe('computeDiscountItem — hakediş (basket settlement) scenario', () => 
       basketPaidTotal: '900.00',
       basketDiscountTotal: '100.00',
       orderNetProfit: null,
+      orderMarginPct: null,
+      currentOrderNetProfit: null,
     });
   });
 
@@ -530,6 +543,8 @@ describe('computeDiscountItem — hakediş (basket settlement) scenario', () => 
       basketPaidTotal: '240.00',
       basketDiscountTotal: '60.00',
       orderNetProfit: null,
+      orderMarginPct: null,
+      currentOrderNetProfit: null,
     });
   });
 
@@ -541,6 +556,8 @@ describe('computeDiscountItem — hakediş (basket settlement) scenario', () => 
       basketPaidTotal: '2000.00',
       basketDiscountTotal: '2000.00',
       orderNetProfit: null,
+      orderMarginPct: null,
+      currentOrderNetProfit: null,
     });
   });
 
@@ -554,6 +571,8 @@ describe('computeDiscountItem — hakediş (basket settlement) scenario', () => 
       basketPaidTotal: '1000.00',
       basketDiscountTotal: '1000.00',
       orderNetProfit: null,
+      orderMarginPct: null,
+      currentOrderNetProfit: null,
     });
   });
 
@@ -583,26 +602,200 @@ describe('computeDiscountItem — hakediş (basket settlement) scenario', () => 
       basketPaidTotal: '0.00',
       basketDiscountTotal: '100.00',
       orderNetProfit: null,
+      orderMarginPct: null,
+      currentOrderNetProfit: null,
     });
   });
 
-  it('orderNetProfit is EXACTLY the displayed 2dp unit net profit × n (Decimal, no float)', () => {
-    // M=1000, fiyat=250, X=100 → n=4; birim = 225. OK cost + shipping + open band resolve a
-    // discounted breakdown, so orderNetProfit is populated.
-    const out = computeDiscountItem(ctx, variant, OK_COST, OK_SHIPPING, openCommission, d(250), {
+  it('runs the real engine over the n-unit order — n× cost, 1× shipping, 1× PSF (PSF no longer counted n times)', () => {
+    // 3 al 1 öde @1000 → effective unit = 1000 × 1/3 = 333.3333… → 2dp 333.33; n = buyQuantity = 3.
+    // OK cost + shipping + open band resolve a breakdown for BOTH scenarios (band anchored to the
+    // 1000 list price → open band 15%). The 2dp effective (333.33) means basketPaidTotal 999.99
+    // ≠ 1000 — the order revenue the oracle also prices, so any rounding drift is covered.
+    const currentPrice = d(1000);
+    const config: DiscountConfig = { type: 'BUY_X_PAY_Y', buyQuantity: 3, payQuantity: 1 };
+    const out = computeDiscountItem(
+      ctx,
+      variant,
+      OK_COST,
+      OK_SHIPPING,
+      openCommission,
+      currentPrice,
+      config,
+    );
+    const n = 3;
+    expect(out.scenario?.assumedQuantity).toBe(n);
+    expect(assumedBasketQuantity(config, currentPrice)).toBe(n);
+
+    // basketPaidTotal = the 2dp effective unit × n = 333.33 × 3 = 999.99; basketTotal = 1000 × 3.
+    const unit2dp = effectiveUnitPrice(currentPrice, config).toDecimalPlaces(2);
+    const basketPaidTotal = unit2dp.mul(n);
+    const basketTotal = currentPrice.mul(n);
+    expect(out.scenario?.basketPaidTotal).toBe('999.99');
+    expect(out.scenario?.basketTotal).toBe('3000.00');
+
+    // Independent oracle: assemble the SAME econ with cost scaled to n and the resolved band rate,
+    // then run the engine at the order revenue. Shipping + PSF are the econ's FIXED fees, so the
+    // engine counts each exactly ONCE — the order model's core claim. This reconstructs the
+    // expected value WITHOUT calling computeOrderBreakdown (the code under test).
+    const resolved = resolveDiscountCommission(openCommission, currentPrice);
+    if (resolved === null) throw new Error('open band should resolve');
+    const scaledCost: VariantCostAggregate = {
+      ...OK_COST,
+      currentCostTry: new Decimal(OK_COST.currentCostTry ?? '0').mul(n).toString(),
+    };
+    const orderEcon = assembleUnitEconomics(ctx, variant, {
+      costAggregate: scaledCost,
+      commission: tariffCommission(resolved.pct),
+      shipping: OK_SHIPPING,
+    });
+    if (orderEcon.econ === null)
+      throw new Error('order econ should assemble with OK cost + shipping');
+    const oracleDiscounted = computeUnitProfit(orderEcon.econ, basketPaidTotal);
+    const oracleCurrent = computeUnitProfit(orderEcon.econ, basketTotal);
+
+    // The scenario's order profits match the independent engine run byte-for-byte (2dp strings).
+    expect(out.scenario?.orderNetProfit).toBe(oracleDiscounted.netProfit.toFixed(2));
+    expect(out.scenario?.orderMarginPct).toBe(
+      oracleDiscounted.saleMarginPct !== null ? oracleDiscounted.saleMarginPct.toFixed(2) : null,
+    );
+    expect(out.scenario?.currentOrderNetProfit).toBe(oracleCurrent.netProfit.toFixed(2));
+
+    // PSF single-counting proof: the ORDER counts the platform service + shipping ONCE per parcel —
+    // the exact single charge a UNIT carries, NOT n× it (the old add-back model triple-counted PSF).
+    // Fixed fees are price-independent, so a unit breakdown at ANY price exposes the single charge.
+    const unitBreakdown = computeDiscountEstimate(
+      ctx,
+      variant,
+      OK_COST,
+      OK_SHIPPING,
+      openCommission,
+      currentPrice,
+      currentPrice,
+    ).breakdown;
+    const orderBreakdown = computeOrderBreakdown(
+      ctx,
+      variant,
+      OK_COST,
+      OK_SHIPPING,
+      resolved,
+      n,
+      basketPaidTotal,
+    );
+    expect(orderBreakdown?.platformServiceGross.toFixed(2)).toBe(
+      unitBreakdown?.platformServiceGross,
+    );
+    expect(orderBreakdown?.shippingGross.toFixed(2)).toBe(unitBreakdown?.shippingGross);
+    // Cost is the ONLY per-unit line that scales: the order costs 3× a single unit's cost.
+    expect(orderBreakdown?.costGross.toFixed(2)).toBe(
+      new Decimal(unitBreakdown?.costGross ?? '0').mul(n).toFixed(2),
+    );
+  });
+
+  it('at n=1 the order equals a single unit — cost×1, one parcel, so order profit is the unit net', () => {
+    // M=100, fiyat=200 → n = ceil(100/200) = 1; effective unit = 200 − 50/1 = 150. At n=1 the order
+    // scales nothing (cost×1, one parcel), so both order-profit fields equal their unit net exactly.
+    const out = computeDiscountItem(ctx, variant, OK_COST, OK_SHIPPING, openCommission, d(200), {
       type: 'CONDITIONAL_BASKET',
       valueKind: 'AMOUNT',
-      value: d(100),
-      minBasketAmount: d(1000),
+      value: d(50),
+      minBasketAmount: d(100),
     });
-    const n = 4;
-    expect(out.scenario?.assumedQuantity).toBe(n);
+    expect(out.scenario?.assumedQuantity).toBe(1);
     expect(out.discounted.netProfit).not.toBeNull();
-    expect(out.scenario?.orderNetProfit).not.toBeNull();
-    // orderNetProfit = the DISPLAYED 2dp unit net profit × n, exactly — so the popover total can
-    // never contradict "shown unit × n". Assert the byte-exact equality (Decimal, never a JS float).
-    expect(out.scenario?.orderNetProfit).toBe(
-      new Decimal(out.discounted.netProfit ?? '0').mul(n).toFixed(2),
+    expect(out.scenario?.orderNetProfit).toBe(out.discounted.netProfit);
+    expect(out.scenario?.currentOrderNetProfit).toBe(out.current.netProfit);
+  });
+
+  it('leaves all three order-profit fields null when a scenario has no breakdown', () => {
+    // noCommission → neither scenario resolves a breakdown; the basket money fields are still
+    // populated but order profit, its margin, and the baseline are all null.
+    const scenario = money({ type: 'BUY_X_PAY_Y', buyQuantity: 3, payQuantity: 1 }, 357);
+    expect(scenario?.orderNetProfit).toBeNull();
+    expect(scenario?.orderMarginPct).toBeNull();
+    expect(scenario?.currentOrderNetProfit).toBeNull();
+  });
+});
+
+describe('scenarioPresentation — UNIT vs ORDER per type/valueKind', () => {
+  it('UNIT for NET (both kinds) and the conditional trio PERCENT variants', () => {
+    expect(scenarioPresentation({ type: 'NET', valueKind: 'AMOUNT', value: d(50) })).toBe('UNIT');
+    expect(scenarioPresentation({ type: 'NET', valueKind: 'PERCENT', value: d(20) })).toBe('UNIT');
+    expect(
+      scenarioPresentation({
+        type: 'CONDITIONAL_BASKET',
+        valueKind: 'PERCENT',
+        value: d(20),
+        minBasketAmount: d(1000),
+      }),
+    ).toBe('UNIT');
+    expect(
+      scenarioPresentation({
+        type: 'CONDITIONAL_QUANTITY',
+        valueKind: 'PERCENT',
+        value: d(10),
+        minQuantity: 3,
+      }),
+    ).toBe('UNIT');
+    expect(
+      scenarioPresentation({
+        type: 'CODE',
+        valueKind: 'PERCENT',
+        value: d(15),
+        minBasketAmount: d(500),
+      }),
+    ).toBe('UNIT');
+  });
+
+  it('ORDER for the conditional trio AMOUNT variants', () => {
+    expect(
+      scenarioPresentation({
+        type: 'CONDITIONAL_BASKET',
+        valueKind: 'AMOUNT',
+        value: d(100),
+        minBasketAmount: d(1000),
+      }),
+    ).toBe('ORDER');
+    expect(
+      scenarioPresentation({
+        type: 'CONDITIONAL_QUANTITY',
+        valueKind: 'AMOUNT',
+        value: d(60),
+        minQuantity: 3,
+      }),
+    ).toBe('ORDER');
+    expect(
+      scenarioPresentation({
+        type: 'CODE',
+        valueKind: 'AMOUNT',
+        value: d(100),
+        minBasketAmount: d(1000),
+      }),
+    ).toBe('ORDER');
+  });
+
+  it('ORDER for BUY_X_PAY_Y and NTH_PRODUCT regardless of valueKind', () => {
+    expect(scenarioPresentation({ type: 'BUY_X_PAY_Y', buyQuantity: 4, payQuantity: 2 })).toBe(
+      'ORDER',
     );
+    expect(
+      scenarioPresentation({
+        type: 'NTH_PRODUCT',
+        valueKind: 'PERCENT',
+        value: d(50),
+        nthIndex: 3,
+      }),
+    ).toBe('ORDER');
+    expect(
+      scenarioPresentation({ type: 'NTH_PRODUCT', valueKind: 'AMOUNT', value: d(30), nthIndex: 2 }),
+    ).toBe('ORDER');
+    expect(
+      scenarioPresentation({
+        type: 'NTH_PRODUCT',
+        valueKind: 'FIXED_PRICE',
+        value: d(10),
+        nthIndex: 4,
+      }),
+    ).toBe('ORDER');
   });
 });

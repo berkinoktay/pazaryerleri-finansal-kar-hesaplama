@@ -33,9 +33,11 @@ const PROFIT_BADGE_LABEL = 'Kâr detayını gör';
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const XLSX_BYTES = new Uint8Array([0x50, 0x4b, 0x03, 0x04]);
 
-// Footer + modal copy comes from tr.json (never hand-typed Turkish) — same pattern the sibling
-// discount-scenario-chip test uses for the settlement labels.
+// Footer + modal copy comes from tr.json (never hand-typed Turkish) — the same source-of-truth
+// pattern used across the campaigns tests for settlement labels.
 const SCENARIO_LABELS = trMessages.discountsPage.scenario;
+const REASON_SHORT = trMessages.discountsPage.reasonShort;
+const TABLE_LABELS = trMessages.discountsPage.table;
 const BREAKDOWN_TITLE = trMessages.discountsPage.breakdown.title;
 
 /** next-intl interpolates `{qty}`; the test rebuilds the same string to match the rendered label. */
@@ -72,6 +74,8 @@ function detailResponse() {
     commissionTariffName: null,
     commissionPeriodLabel: null,
     commissionTariffOutdated: false,
+    // NET moves the showcase price genuinely, so the list presents the discounted UNIT.
+    scenarioPresentation: 'UNIT',
     items: [
       {
         id: ITEM_ID,
@@ -103,34 +107,43 @@ function scenarioBlock() {
     basketPaidTotal: '150.00',
     basketDiscountTotal: '50.00',
     orderNetProfit: '20.00',
+    orderMarginPct: '13.33',
+    currentOrderNetProfit: '45.00',
   };
 }
 
-/** A basket-scoped list: the discounted column reframes to "Hakediş senaryosu" + shows the chip. */
+/**
+ * A basket-scoped, AMOUNT-valued list → ORDER presentation: the discounted column reframes to
+ * "Kampanya siparişi" (customer-paid basket + order-level profit), not the synthetic effective unit.
+ */
 function conditionalBasketResponse() {
   const base = detailResponse();
   return {
     ...base,
     discountType: 'CONDITIONAL_BASKET',
+    valueKind: 'AMOUNT',
+    value: '50',
     minBasketAmount: '150',
+    scenarioPresentation: 'ORDER',
     items: base.items.map((item) => ({ ...item, scenario: scenarioBlock() })),
   };
 }
 
 /**
- * Same basket-scoped list, but the order-level net profit is not calculable — every other scenario
- * field stays populated, only `orderNetProfit` drops to null (the backend emits this when a
- * required input for the order-profit line is missing).
+ * Same ORDER-presentation list, but the order-level net profit is not calculable: the discounted
+ * scenario failed to resolve a commission, so the row carries a `NO_COMMISSION` reason and the
+ * scenario's `orderNetProfit`/`orderMarginPct` drop to null. The ORDER row badge then falls back to
+ * the reason label, and the modal omits the order-profit row + the single-parcel note.
  */
 function conditionalBasketResponseNullProfit() {
-  const base = detailResponse();
+  const base = conditionalBasketResponse();
   return {
     ...base,
-    discountType: 'CONDITIONAL_BASKET',
-    minBasketAmount: '150',
     items: base.items.map((item) => ({
       ...item,
-      scenario: { ...scenarioBlock(), orderNetProfit: null },
+      reason: 'NO_COMMISSION',
+      discounted: { ...item.discounted, netProfit: null, marginPct: null },
+      scenario: { ...scenarioBlock(), orderNetProfit: null, orderMarginPct: null },
     })),
   };
 }
@@ -161,8 +174,15 @@ function estimateBreakdown() {
   };
 }
 
-/** The on-demand estimate for one scenario — a normal calculable 200. */
-function estimateResult(scenarioKey: 'current' | 'discounted') {
+/**
+ * The on-demand estimate for one scenario — a normal calculable 200. `breakdownScope` mirrors the
+ * backend: `unit` per-unit economics (the default, always for the current scenario), `order` the
+ * whole campaign order (returned for the discounted scenario of an ORDER-presentation list).
+ */
+function estimateResult(
+  scenarioKey: 'current' | 'discounted',
+  breakdownScope: 'unit' | 'order' = 'unit',
+) {
   return {
     itemId: ITEM_ID,
     scenario: scenarioKey,
@@ -172,6 +192,7 @@ function estimateResult(scenarioKey: 'current' | 'discounted') {
     calculable: true,
     reason: null,
     breakdown: estimateBreakdown(),
+    breakdownScope,
     commissionTariffName: null,
     commissionPeriodLabel: null,
   };
@@ -284,23 +305,36 @@ describe('DiscountDetailClient — ephemeral selection', () => {
   });
 });
 
-describe('DiscountDetailClient — settlement scenario framing', () => {
-  it('NET keeps the "İndirimli fiyat" column header and shows no scenario chip', async () => {
+describe('DiscountDetailClient — discounted column layout', () => {
+  it('UNIT presentation (NET) labels the column "İndirimli fiyat" and shows the discounted unit', async () => {
     server.use(http.get(DETAIL_URL, () => HttpResponse.json(detailResponse())));
     renderClient();
 
     await waitForLoaded();
-    expect(screen.getAllByText('İndirimli fiyat').length).toBeGreaterThan(0);
-    expect(screen.queryByText('×2 adet')).toBeNull();
+    // NET keeps the discounted-unit layout: the "İndirimli fiyat" header + the "Güncele göre"
+    // delta, and it never reframes to the ORDER column.
+    expect(screen.getAllByText(TABLE_LABELS.discountedPrice).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(TABLE_LABELS.delta).length).toBeGreaterThan(0);
+    expect(screen.queryByText(TABLE_LABELS.campaignOrder)).toBeNull();
   });
 
-  it('basket-scoped types reframe the header to "Hakediş senaryosu" and render the chip', async () => {
+  it('ORDER presentation (basket + AMOUNT) reframes the column to "Kampanya siparişi"', async () => {
     server.use(http.get(DETAIL_URL, () => HttpResponse.json(conditionalBasketResponse())));
     renderClient();
 
     await waitForLoaded();
-    expect(screen.getAllByText('Hakediş senaryosu').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('×2 adet').length).toBeGreaterThan(0);
+    // The synthetic effective unit is a poor showcase, so the ORDER column shows the whole campaign
+    // order: the "Kampanya siparişi" header, the customer-paid basket with its "{qty} adet"
+    // qualifier, the order-level profit badge (₺20,00), and the campaign-free "vs" delta.
+    expect(screen.getAllByText(TABLE_LABELS.campaignOrder).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(withQty(SCENARIO_LABELS.rowQty, 2)).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(withQty(SCENARIO_LABELS.vsWithoutCampaign, 2)).length,
+    ).toBeGreaterThan(0);
+    // The discounted badge now carries the ORDER net profit (₺20,00), not the unit figure.
+    expect(findProfitBadge('20,00')).toBeInTheDocument();
+    // ...and the UNIT header is gone.
+    expect(screen.queryByText(TABLE_LABELS.discountedPrice)).toBeNull();
   });
 });
 
@@ -308,17 +342,26 @@ describe('DiscountDetailClient — settlement scenario in the breakdown footer',
   it('shows the order-level "Sipariş kârı" row when the DISCOUNTED scenario modal opens', async () => {
     server.use(
       http.get(DETAIL_URL, () => HttpResponse.json(conditionalBasketResponse())),
-      http.post(ESTIMATE_URL, () => HttpResponse.json(estimateResult('discounted'))),
+      http.post(ESTIMATE_URL, () => HttpResponse.json(estimateResult('discounted', 'order'))),
     );
     const { user } = renderClient();
     await waitForLoaded();
 
-    // The discounted scenario's badge carries the discounted netProfit (₺10,00); the current one
-    // carries ₺25,00 — the amount distinguishes them among the desktop + mobile badge copies.
-    await user.click(findProfitBadge('10,00'));
+    // In the ORDER layout the discounted badge carries the ORDER net profit (₺20,00); the current
+    // one carries ₺25,00 — the amount distinguishes them among the desktop + mobile badge copies.
+    await user.click(findProfitBadge('20,00'));
 
-    // The footer surfaces the assumed single-product basket's order-level net profit (n = 2).
-    expect(await screen.findByText('Sipariş kârı (2 adet)')).toBeInTheDocument();
+    const modal = within(await screen.findByRole('dialog'));
+    // The ORDER-scope estimate reframes the hero profit eyebrow to the estimated ORDER profit.
+    expect(modal.getByText(withQty(SCENARIO_LABELS.orderProfitLabel, 2))).toBeInTheDocument();
+    // The footer leads with the "Sepet varsayımı" heading + the intro sentence that spells out how
+    // the discount condition is met (the assumed single-product basket of n = 2).
+    expect(modal.getByText(SCENARIO_LABELS.title)).toBeInTheDocument();
+    expect(modal.getByText(withQty(SCENARIO_LABELS.intro, 2))).toBeInTheDocument();
+    // ...surfaces the assumed basket's order-level net profit (n = 2)...
+    expect(modal.getByText(withQty(SCENARIO_LABELS.orderProfit, 2))).toBeInTheDocument();
+    // ...and closes that figure with the single-parcel cargo assumption note.
+    expect(modal.getByText(withQty(SCENARIO_LABELS.singleParcelNote, 2))).toBeInTheDocument();
   });
 
   it('does NOT show the "Sipariş kârı" row when the CURRENT scenario modal opens', async () => {
@@ -331,22 +374,28 @@ describe('DiscountDetailClient — settlement scenario in the breakdown footer',
 
     await user.click(findProfitBadge('25,00'));
 
-    // The modal opens (its title renders), but the current scenario carries no basket assumption,
-    // so no settlement footer.
-    expect(await screen.findByText('Kâr dökümü')).toBeInTheDocument();
-    expect(screen.queryByText('Sipariş kârı (2 adet)')).toBeNull();
+    // The modal opens (its title renders), but the current scenario is unit-scoped with no basket
+    // assumption, so neither the ORDER-profit eyebrow nor the settlement footer appears.
+    expect(await screen.findByText(BREAKDOWN_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(withQty(SCENARIO_LABELS.orderProfitLabel, 2))).toBeNull();
+    expect(screen.queryByText(withQty(SCENARIO_LABELS.orderProfit, 2))).toBeNull();
   });
 
   it('renders the settlement footer WITHOUT the "Sipariş kârı" row when orderNetProfit is null', async () => {
     server.use(
       http.get(DETAIL_URL, () => HttpResponse.json(conditionalBasketResponseNullProfit())),
-      http.post(ESTIMATE_URL, () => HttpResponse.json(estimateResult('discounted'))),
+      http.post(ESTIMATE_URL, () => HttpResponse.json(estimateResult('discounted', 'order'))),
     );
     const { user } = renderClient();
     await waitForLoaded();
 
-    // Open the DISCOUNTED scenario modal — that is the only view the client hands the scenario to.
-    await user.click(findProfitBadge('10,00'));
+    // With a null order profit the ORDER row badge falls back to the reason label instead of an
+    // amount (desktop + mobile copies).
+    expect(screen.getAllByText(REASON_SHORT.NO_COMMISSION).length).toBeGreaterThan(0);
+
+    // Open the DISCOUNTED scenario modal via that fallback badge — the only view the client hands
+    // the scenario to.
+    await user.click(findProfitBadge(REASON_SHORT.NO_COMMISSION));
 
     // Scope to the modal: "Sepet indirimi" is also the CONDITIONAL_BASKET type label on the page,
     // so an unscoped match would be ambiguous.
@@ -355,7 +404,8 @@ describe('DiscountDetailClient — settlement scenario in the breakdown footer',
     expect(modal.getByText(BREAKDOWN_TITLE)).toBeInTheDocument();
     expect(modal.getByText(SCENARIO_LABELS.paidTotal)).toBeInTheDocument();
     expect(modal.getByText(SCENARIO_LABELS.basketDiscount)).toBeInTheDocument();
-    // ...but the order-level profit row is omitted because orderNetProfit is null.
+    // ...but the order-level profit row AND its single-parcel note are omitted (orderNetProfit null).
     expect(modal.queryByText(withQty(SCENARIO_LABELS.orderProfit, 2))).toBeNull();
+    expect(modal.queryByText(withQty(SCENARIO_LABELS.singleParcelNote, 2))).toBeNull();
   });
 });

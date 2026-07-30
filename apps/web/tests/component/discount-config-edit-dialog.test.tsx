@@ -33,6 +33,7 @@ function makeList(): DiscountListDetail {
     commissionTariffName: null,
     commissionPeriodLabel: null,
     commissionTariffOutdated: false,
+    scenarioPresentation: 'UNIT',
     items: [],
   };
 }

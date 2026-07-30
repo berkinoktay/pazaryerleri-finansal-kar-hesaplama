@@ -78,14 +78,28 @@ export function DiscountBreakdown({
       : baseSourceLabel;
   const commissionSourceTitle = source === 'band' ? (result?.commissionTariffName ?? null) : null;
 
+  // The DISCOUNTED scenario of an ORDER-presentation list prices the WHOLE campaign order (an
+  // n-unit single-product basket: customer-paid sale, n× product cost, cargo/PSF once), so relabel
+  // the hero profit as the estimated ORDER profit. Every other case (unit scope, or no basket
+  // scenario) leaves the default "Tahmini kâr" eyebrow untouched.
+  const profitLabel =
+    result?.breakdownScope === 'order' && scenario != null
+      ? tScenario('orderProfitLabel', { qty: scenario.assumedQuantity })
+      : undefined;
+
   // Basket-scoped discounts (scenario passed only for the DISCOUNTED view) append an order-level
-  // settlement block below the breakdown: the assumed single-product basket, its discount, what the
-  // customer pays, and — when calculable — the order's net profit. Every figure is backend-computed
-  // (the row scenario), this only renders. Independent of the chip's popover by design (same visual
-  // language, no shared abstraction — both are small and local).
+  // settlement block below the breakdown: an intro sentence spelling out how the discount condition
+  // is met (the assumed single-product basket of n units), then that basket's list total, its
+  // discount, what the customer pays, and — when calculable — the order's net profit, closing with
+  // the proportional-distribution note. Every figure is backend-computed (the row scenario), this
+  // only renders.
   const footer =
     scenario != null ? (
       <div className="border-border pt-md gap-2xs flex flex-col border-t">
+        <span className="text-foreground text-xs font-medium">{tScenario('title')}</span>
+        <p className="text-2xs text-muted-foreground">
+          {tScenario('intro', { qty: scenario.assumedQuantity })}
+        </p>
         <ScenarioRow label={tScenario('assumedBasket', { qty: scenario.assumedQuantity })}>
           <Currency value={scenario.basketTotal} />
         </ScenarioRow>
@@ -98,10 +112,21 @@ export function DiscountBreakdown({
           <Currency value={scenario.basketPaidTotal} />
         </ScenarioRow>
         {scenario.orderNetProfit !== null ? (
-          <ScenarioRow label={tScenario('orderProfit', { qty: scenario.assumedQuantity })} emphasis>
-            <Currency value={scenario.orderNetProfit} />
-          </ScenarioRow>
+          <>
+            <ScenarioRow
+              label={tScenario('orderProfit', { qty: scenario.assumedQuantity })}
+              emphasis
+            >
+              <Currency value={scenario.orderNetProfit} />
+            </ScenarioRow>
+            {/* The order profit ships the assumed basket as ONE parcel, so cargo is counted once —
+                spell that assumption out right under the figure it drives. */}
+            <p className="text-2xs text-muted-foreground">
+              {tScenario('singleParcelNote', { qty: scenario.assumedQuantity })}
+            </p>
+          </>
         ) : null}
+        <p className="text-2xs text-muted-foreground mt-2xs">{tScenario('distributionNote')}</p>
       </div>
     ) : undefined;
 
@@ -119,6 +144,7 @@ export function DiscountBreakdown({
       commissionSourceTitle={commissionSourceTitle}
       reasonText={result?.reason != null ? reasonLabel(result.reason) : null}
       loading={loading}
+      profitLabel={profitLabel}
       currentNetProfit={currentNetProfit}
       footer={footer}
     />
@@ -128,7 +154,7 @@ export function DiscountBreakdown({
 /**
  * One label → value row of the settlement-scenario footer: muted label on the left, the amount
  * right-aligned with tabular numerics. `emphasis` bumps the value to medium weight (the order
- * profit row). Local to this file — the sibling chip popover keeps its own copy by design.
+ * profit row). Local to this file.
  */
 function ScenarioRow({
   label,

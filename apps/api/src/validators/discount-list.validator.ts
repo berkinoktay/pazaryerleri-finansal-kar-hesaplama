@@ -329,6 +329,15 @@ export const DiscountItemReasonSchema = z
       'Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon yok.',
   });
 
+export const DiscountScenarioPresentationSchema = z
+  .enum(['UNIT', 'ORDER'])
+  .openapi('DiscountScenarioPresentation', {
+    description:
+      "Which row layout the list's config calls for: UNIT (the unit price genuinely drops — show " +
+      'the discounted unit) or ORDER (the effective unit is a synthetic average — show the whole ' +
+      'campaign order).',
+  });
+
 const DiscountScenarioSchema = z.object({
   price: z.string(),
   commissionPct: z.string().nullable(),
@@ -385,8 +394,26 @@ export const DiscountBasketScenarioSchema = z
       .nullable()
       .openapi({
         description:
-          'Order-level net profit for the assumed basket (n × the per-unit net profit); null when ' +
+          'Order net profit for the assumed n-unit basket, from the real profit engine over the ' +
+          'order (n× product cost, 1× shipping, 1× PSF — the platform service and shipping are ' +
+          'per-parcel and a basket of n identical units ships once); 2-decimal string, null when ' +
           'the discounted scenario is not calculable.',
+      }),
+    orderMarginPct: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Order margin (orderNetProfit / basketPaidTotal × 100), 2-decimal string; null when the ' +
+          'discounted scenario is not calculable or the paid basket is zero.',
+      }),
+    currentOrderNetProfit: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Same-basis campaign-free baseline: the order net profit for the same n units at the ' +
+          'current price, 2-decimal string; null when the current scenario is not calculable.',
       }),
   })
   .openapi('DiscountBasketScenario', {
@@ -440,6 +467,9 @@ export const DiscountListDetailSchema = z
     // da kampanya başlangıcına ulaşmıyor) true — komisyon ürün/kategori oranına düşer ve detay
     // satıcıyı uyarır. Kapsayan hafta çözüldüyse ya da mağazanın hiç tarifesi yoksa false.
     commissionTariffOutdated: z.boolean(),
+    // Which row layout the list's config calls for (design §11) — the frontend renders the UNIT
+    // vs ORDER row from this single flag instead of re-deriving it from the config.
+    scenarioPresentation: DiscountScenarioPresentationSchema,
     // Seçim artık istemci tarafında geçici (ephemeral) durumdur; toplam ürün sayısı items.length
     // üzerinden, seçili sayı da yerel durumdan türetilir — bu nedenle sunucu bir summary bloğu
     // döndürmez. `included` her kalemde son KAYDEDİLEN (indir) seçimini yansıtır.
@@ -507,6 +537,14 @@ export const EstimateDiscountItemResultSchema = z
     calculable: z.boolean(),
     reason: DiscountItemReasonSchema.nullable(),
     breakdown: QuoteBreakdownSchema.nullable(),
+    breakdownScope: z.enum(['unit', 'order']).openapi({
+      description:
+        'Scope of `breakdown` and `price`: `unit` = per-unit economics (the default, and always ' +
+        'for the current scenario); `order` = the whole campaign order (an n-unit single-product ' +
+        'basket) — returned only for the discounted scenario of an ORDER-presentation list ' +
+        '(BUY_X_PAY_Y / NTH_PRODUCT / a conditional-AMOUNT discount), where `price` is the order ' +
+        'revenue and `breakdown` is the order-level profit (n× product cost, 1× shipping, 1× PSF).',
+    }),
     // Şeffaflık: bant kademesini besleyen komisyon tarifesi + dönem. Bir kaynak
     // çözüldüyse (kalem product/category'e düşse bile) doludur; yoksa null.
     commissionTariffName: z.string().nullable(),

@@ -27,6 +27,7 @@ import { resolveCommissionRate } from './commission-rate-resolver';
 import { resolveDiscountCommissionSource } from './discount-commission-source';
 import {
   computeDiscountItem,
+  scenarioPresentation,
   type DiscountCommissionInputs,
   type TariffAssemblyContext,
   type TariffVariant,
@@ -373,6 +374,8 @@ export async function getDiscountListDetail(
     // True only when the store has commission tariffs but none covers the anchor (uploads are
     // stale or don't reach the campaign start) — the detail warns the seller. See resolver.
     commissionTariffOutdated,
+    // UNIT vs ORDER row layout the list's config calls for (design §11); computed once for the list.
+    scenarioPresentation: scenarioPresentation(config),
     items,
   };
 }

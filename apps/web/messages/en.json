@@ -1779,7 +1779,7 @@
       "product": "Product Info",
       "currentPrice": "Current price",
       "discountedPrice": "Discounted price",
-      "settlementScenario": "Settlement scenario",
+      "campaignOrder": "Campaign order",
       "commission": "Commission",
       "delta": "vs current",
       "included": "Included",
@@ -1788,16 +1788,18 @@
       "variantNote": "This product has multiple variants; the discount applies to all of them."
     },
     "scenario": {
-      "chip": "×{qty} units",
-      "chipAria": "Open the {qty}-unit basket assumption breakdown",
-      "title": "Settlement scenario",
-      "subtitle": "Assumes a basket of only this product at the minimum qualifying quantity.",
+      "title": "Basket assumption",
+      "intro": "The discount condition is met assuming a basket of {qty} units of only this product.",
       "assumedBasket": "Assumed basket ({qty} units)",
       "basketDiscount": "Basket discount",
       "paidTotal": "Customer pays",
-      "unitSettlement": "Per-unit settlement base",
       "distributionNote": "Trendyol splits the discount across items proportionally; settlement and returns run on this per-unit amount.",
-      "orderProfit": "Order profit ({qty} units)"
+      "orderProfit": "Order profit ({qty} units)",
+      "singleParcelNote": "The order estimate counts shipping and the platform service fee once, as a single shipment ({qty} units ship together); parcel volume is not aggregated, so this is an estimate.",
+      "orderProfitLabel": "Estimated order profit ({qty} units)",
+      "rowQty": "{qty} units",
+      "customerPays": "customer pays",
+      "vsWithoutCampaign": "vs {qty} units without the campaign"
     },
     "commissionSource": {
       "band": "Tariff band",
