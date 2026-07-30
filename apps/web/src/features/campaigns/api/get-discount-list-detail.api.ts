@@ -7,6 +7,7 @@ export type DiscountListDetail = components['schemas']['DiscountListDetail'];
 export type DiscountListDetailItem = components['schemas']['DiscountListDetailItem'];
 export type DiscountType = components['schemas']['DiscountType'];
 export type DiscountValueKind = components['schemas']['DiscountValueKind'];
+export type DiscountScenarioPresentation = components['schemas']['DiscountScenarioPresentation'];
 export type DiscountCommissionSource = components['schemas']['DiscountCommissionSource'];
 export type DiscountCommissionBand = components['schemas']['DiscountCommissionBand'];
 export type DiscountBasketScenario = components['schemas']['DiscountBasketScenario'];

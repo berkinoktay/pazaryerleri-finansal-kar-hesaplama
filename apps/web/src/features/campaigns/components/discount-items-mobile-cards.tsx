@@ -9,18 +9,20 @@ import { ProfitBadge } from '@/components/patterns/profit-badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 
-import type { DiscountListDetail } from '../api/get-discount-list-detail.api';
 import { useDiscountReasonEmptyLabel } from '../hooks/use-discount-reason-label';
-import type { DiscountRow } from '../lib/adapt-discount-list';
+import type { DiscountRow, DiscountScenarioPresentation } from '../lib/adapt-discount-list';
 import { DiscountCommissionCell } from './discount-commission-cell';
-import { DiscountScenarioChip } from './discount-scenario-chip';
 import type { DiscountScenarioKey } from './discount-items-table';
 import { ProfitDelta } from './profit-delta';
 
 export interface DiscountItemsMobileCardsProps {
   rows: readonly DiscountRow[];
-  /** The list's discount TYPE — reframes the discounted section label for basket-scoped types. */
-  discountType: DiscountListDetail['discountType'];
+  /**
+   * The list's discounted-section layout: `UNIT` shows the discounted unit price, `ORDER` reframes
+   * to the whole campaign order (customer-paid basket + order-level profit). Backend-decided; keeps
+   * full parity with the desktop table.
+   */
+  presentation: DiscountScenarioPresentation;
   /** The client's EPHEMERAL local selection — drives each card checkbox's checked state. */
   selectedIds: ReadonlySet<string>;
   /** Detail-level commission tariff NAME feeding the bands — the band tooltip's first part. */
@@ -41,7 +43,7 @@ export interface DiscountItemsMobileCardsProps {
  */
 export function DiscountItemsMobileCards({
   rows,
-  discountType,
+  presentation,
   selectedIds,
   commissionTariffName,
   commissionPeriodLabel,
@@ -50,11 +52,11 @@ export function DiscountItemsMobileCards({
   onOpenBreakdown,
 }: DiscountItemsMobileCardsProps): React.ReactElement {
   const t = useTranslations('discountsPage.table');
+  const tScenario = useTranslations('discountsPage.scenario');
   const reasonEmptyLabel = useDiscountReasonEmptyLabel();
   const scale = useMarginColoring();
-  // Basket-scoped types keep the showcase price — the discounted figure is the settlement-basis
-  // unit amount — so it reframes to the `settlementScenario` label; NET keeps `discountedPrice`.
-  const discountedLabel = discountType === 'NET' ? t('discountedPrice') : t('settlementScenario');
+  // ORDER lists reframe the discounted section to the whole campaign order; UNIT keeps the unit.
+  const discountedHeader = presentation === 'ORDER' ? t('campaignOrder') : t('discountedPrice');
 
   return (
     <div className="gap-sm flex flex-col">
@@ -105,27 +107,56 @@ export function DiscountItemsMobileCards({
               </div>
             </div>
 
-            {/* Discounted scenario — price + profit + "güncele göre" delta. */}
+            {/* Discounted scenario — ORDER reframes to the whole campaign order (customer-paid
+                basket + order-level profit + "kampanyasız N adede göre" delta); UNIT keeps the
+                discounted unit price + "güncele göre" delta. Full parity with the desktop table. */}
             <div className="border-border pt-md gap-2xs flex flex-col border-t">
-              <span className="text-2xs text-muted-foreground font-medium">{discountedLabel}</span>
-              <div className="gap-sm flex items-center justify-between">
-                <div className="gap-xs flex items-center">
-                  <Currency value={row.discounted.price} className="text-sm font-medium" />
-                  <DiscountScenarioChip scenario={row.scenario} unitPrice={row.discounted.price} />
-                </div>
-                <ProfitBadge
-                  value={row.discounted.netProfit}
-                  marginPct={row.discounted.marginPct}
-                  scale={scale}
-                  onOpen={() => onOpenBreakdown(row, 'discounted')}
-                  emptyLabel={emptyLabel}
-                />
-              </div>
-              <ProfitDelta
-                optionNetProfit={row.discounted.netProfit}
-                currentNetProfit={row.current.netProfit}
-                label={t('delta')}
-              />
+              <span className="text-2xs text-muted-foreground font-medium">{discountedHeader}</span>
+              {presentation === 'ORDER' && row.scenario !== null ? (
+                <>
+                  <div className="gap-sm flex items-center justify-between">
+                    <div className="gap-2xs flex items-baseline">
+                      <Currency
+                        value={row.scenario.basketPaidTotal}
+                        className="text-sm font-medium"
+                      />
+                      <span className="text-2xs text-muted-foreground">
+                        {tScenario('rowQty', { qty: row.scenario.assumedQuantity })}
+                      </span>
+                    </div>
+                    <ProfitBadge
+                      value={row.scenario.orderNetProfit}
+                      marginPct={row.scenario.orderMarginPct}
+                      scale={scale}
+                      onOpen={() => onOpenBreakdown(row, 'discounted')}
+                      emptyLabel={emptyLabel}
+                    />
+                  </div>
+                  <ProfitDelta
+                    optionNetProfit={row.scenario.orderNetProfit}
+                    currentNetProfit={row.scenario.currentOrderNetProfit}
+                    label={tScenario('vsWithoutCampaign', { qty: row.scenario.assumedQuantity })}
+                  />
+                </>
+              ) : (
+                <>
+                  <div className="gap-sm flex items-center justify-between">
+                    <Currency value={row.discounted.price} className="text-sm font-medium" />
+                    <ProfitBadge
+                      value={row.discounted.netProfit}
+                      marginPct={row.discounted.marginPct}
+                      scale={scale}
+                      onOpen={() => onOpenBreakdown(row, 'discounted')}
+                      emptyLabel={emptyLabel}
+                    />
+                  </div>
+                  <ProfitDelta
+                    optionNetProfit={row.discounted.netProfit}
+                    currentNetProfit={row.current.netProfit}
+                    label={t('delta')}
+                  />
+                </>
+              )}
             </div>
 
             {/* Commission — the rate used on the discounted price, with the band-jump transition. */}

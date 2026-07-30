@@ -44,6 +44,8 @@ interface BasketScenarioWire {
   basketPaidTotal: string;
   basketDiscountTotal: string;
   orderNetProfit: string | null;
+  orderMarginPct: string | null;
+  currentOrderNetProfit: string | null;
 }
 interface ItemWire {
   id: string;
@@ -69,6 +71,7 @@ interface DetailWire {
   value: string | null;
   minBasketAmount: string | null;
   exported: boolean;
+  scenarioPresentation: string;
   items: ItemWire[];
 }
 interface ListWire {
@@ -236,6 +239,8 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
     expect(body.discountType).toBe('NET');
     expect(body.valueKind).toBe('PERCENT');
     expect(body.value).toBe('15.00');
+    // NET calls for the UNIT row layout (its showcase price genuinely drops).
+    expect(body.scenarioPresentation).toBe('UNIT');
     // Selection is ephemeral client state now — the detail no longer carries a summary card.
     expect(body.summary).toBeUndefined();
 
@@ -296,9 +301,13 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
     expect(body.value).toBe('20.00');
     expect(body.minBasketAmount).toBe('150.00');
 
+    // CONDITIONAL_BASKET AMOUNT calls for the ORDER row layout (the amount is split across the
+    // basket, so the seller reasons about the whole order).
+    expect(body.scenarioPresentation).toBe('ORDER');
+
     // CONDITIONAL_BASKET now carries the settlement scenario. currentPrice=250, minBasket=150 →
     // n = ceil(150/250) = 1; discounted unit = 250 − 20/1 = 230. The item is not calculable (no
-    // commission chain resolves), so orderNetProfit stays null.
+    // commission chain resolves), so the three order-profit fields stay null.
     const matched = body.items.find((i) => i.id === fx.itemMatched);
     expect(matched?.scenario).toEqual({
       assumedQuantity: 1,
@@ -306,6 +315,8 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
       basketPaidTotal: '230.00',
       basketDiscountTotal: '20.00',
       orderNetProfit: null,
+      orderMarginPct: null,
+      currentOrderNetProfit: null,
     });
   });
 

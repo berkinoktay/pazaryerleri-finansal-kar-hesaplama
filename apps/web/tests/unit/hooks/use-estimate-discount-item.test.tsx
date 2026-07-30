@@ -55,6 +55,7 @@ describe('useEstimateDiscountItem', () => {
             calculable: true,
             reason: null,
             breakdown: DISCOUNTED_BREAKDOWN,
+            breakdownScope: 'unit',
           },
           { status: 200 },
         ),
@@ -88,6 +89,7 @@ describe('useEstimateDiscountItem', () => {
             calculable: true,
             reason: null,
             breakdown: { ...DISCOUNTED_BREAKDOWN, netProfit: '25.00' },
+            breakdownScope: 'unit',
           },
           { status: 200 },
         );
@@ -117,6 +119,7 @@ describe('useEstimateDiscountItem', () => {
             calculable: false,
             reason: 'NO_COST',
             breakdown: null,
+            breakdownScope: 'unit',
           },
           { status: 200 },
         ),

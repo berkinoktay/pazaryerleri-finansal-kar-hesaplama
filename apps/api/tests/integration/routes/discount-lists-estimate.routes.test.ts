@@ -76,11 +76,13 @@ interface EstimateWire {
   reason: string | null;
   breakdown: {
     saleGross: string;
+    costGross: string;
     commissionGross: string;
     shippingGross: string;
     netProfit: string;
     saleMarginPct: string | null;
   } | null;
+  breakdownScope: 'unit' | 'order';
 }
 
 interface Fixture {
@@ -375,6 +377,8 @@ describe('Discount Lists - item estimate', () => {
     expect(body.scenario).toBe('discounted');
     expect(body.calculable).toBe(true);
     expect(body.reason).toBeNull();
+    // NET is a UNIT-presentation list, so even the discounted scenario stays a per-unit breakdown.
+    expect(body.breakdownScope).toBe('unit');
     // 300 − 20% = 240, which lands in band2 (12%), read from the commission tariff.
     expect(body.price).toBe(DISCOUNTED_PRICE);
     expect(body.commissionSource).toBe('band');
@@ -423,21 +427,33 @@ describe('Discount Lists - item estimate', () => {
     expect(body.breakdown).toBeNull();
   });
 
-  it('BUY_X_PAY_Y resolves the discounted band from the CURRENT price, not the effective price', async () => {
+  it('BUY_X_PAY_Y discounted returns an ORDER breakdown with the band from the CURRENT price', async () => {
     const { status, body } = await estimate(fx, fx.buyXBandItemId, 'discounted', fx.buyXListId);
     expect(status).toBe(200);
     expect(body.calculable).toBe(true);
-    // Effective unit is 150 (300×2/4) — the matrah/display — but the band comes from the 300
-    // list price → band1 19% (NOT band2 12% that 150 would fall into).
-    expect(body.price).toBe(BUYX_DISCOUNTED_PRICE);
+    // BUY_X_PAY_Y is an ORDER-presentation list, so the discounted scenario is framed as the whole
+    // 4-al-2-öde basket: n = buyQuantity = 4 units, effective unit 150 (300×2/4), order revenue 600.
+    expect(body.breakdownScope).toBe('order');
+    expect(body.price).toBe('600.00');
+    // The band still comes from the 300 list price → band1 19% (NOT band2 12% that 150 sits in).
     expect(body.commissionSource).toBe('band');
     expect(Number(body.commissionPct)).toBe(BAND_CURRENT_PCT);
-    // Matrah/revenue stays the 150 effective price; commission = 150 × 19%.
-    expect(body.breakdown?.saleGross).toBe(BUYX_DISCOUNTED_PRICE);
-    expect(Number(body.breakdown?.commissionGross)).toBeCloseTo(
-      Number(BUYX_DISCOUNTED_PRICE) * (BAND_CURRENT_PCT / 100),
-      2,
-    );
+    // Order-level breakdown: saleGross = basketPaidTotal (150 × 4 = 600), commission = 600 × 19%,
+    // cost = n × the unit COGS (200 × 4 = 800); shipping stays a single per-parcel charge.
+    expect(body.breakdown?.saleGross).toBe('600.00');
+    expect(Number(body.breakdown?.commissionGross)).toBeCloseTo(600 * (BAND_CURRENT_PCT / 100), 2);
+    expect(body.breakdown?.costGross).toBe('800.00');
+  });
+
+  it('BUY_X_PAY_Y current scenario stays a UNIT breakdown at the current price', async () => {
+    const { status, body } = await estimate(fx, fx.buyXBandItemId, 'current', fx.buyXListId);
+    expect(status).toBe(200);
+    // The current ("do nothing") scenario is never order-framed — one unit at the current price.
+    expect(body.breakdownScope).toBe('unit');
+    expect(body.price).toBe(CURRENT_PRICE);
+    expect(body.breakdown?.saleGross).toBe(CURRENT_PRICE);
+    // Single-unit cost — no n× scaling on the unit-scoped scenario.
+    expect(body.breakdown?.costGross).toBe('200.00');
   });
 
   it('NET still resolves the discounted band from the discounted price (band jump preserved)', async () => {

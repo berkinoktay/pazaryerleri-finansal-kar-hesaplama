@@ -1779,7 +1779,7 @@
       "product": "Ürün Bilgisi",
       "currentPrice": "Güncel fiyat",
       "discountedPrice": "İndirimli fiyat",
-      "settlementScenario": "Hakediş senaryosu",
+      "campaignOrder": "Kampanya siparişi",
       "commission": "Komisyon",
       "delta": "Güncele göre",
       "included": "Dahil",
@@ -1788,16 +1788,18 @@
       "variantNote": "Seçilen barkodun tüm varyantları kampanyaya dahil edilir."
     },
     "scenario": {
-      "chip": "×{qty} adet",
-      "chipAria": "{qty} adetlik sepet varsayımının dökümünü aç",
-      "title": "Hakediş senaryosu",
-      "subtitle": "Sepetin yalnız bu üründen, koşulu karşılayan en az adette oluştuğu varsayılır.",
+      "title": "Sepet varsayımı",
+      "intro": "İndirim koşulu, sepetin yalnız bu üründen {qty} adet içerdiği varsayımıyla sağlanır.",
       "assumedBasket": "Varsayılan sepet ({qty} adet)",
       "basketDiscount": "Sepet indirimi",
       "paidTotal": "Müşterinin ödediği",
-      "unitSettlement": "Hakedişe esas birim tutar",
       "distributionNote": "Trendyol indirimi ürünlere oransal dağıtır; hakediş ve iade ürün bazında bu tutar üzerinden yürür.",
-      "orderProfit": "Sipariş kârı ({qty} adet)"
+      "orderProfit": "Sipariş kârı ({qty} adet)",
+      "singleParcelNote": "Sipariş hesabında kargo ve platform hizmet bedeli tek gönderi olarak bir kez sayılır ({qty} adet birlikte gönderilir); koli desisi birleştirilmediği için tahmindir.",
+      "orderProfitLabel": "Tahmini sipariş kârı ({qty} adet)",
+      "rowQty": "{qty} adet",
+      "customerPays": "müşteri ödemesi",
+      "vsWithoutCampaign": "Kampanyasız {qty} adede göre"
     },
     "commissionSource": {
       "band": "Tarife bandı",

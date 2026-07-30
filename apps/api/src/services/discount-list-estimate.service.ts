@@ -21,15 +21,23 @@ import { NotFoundError } from '../lib/errors';
 import { resolveCommissionRate } from './commission-rate-resolver';
 import { resolveDiscountCommissionSource } from './discount-commission-source';
 import {
+  assumedBasketQuantity,
   commissionBandPrice,
   computeDiscountEstimate,
+  computeOrderBreakdown,
   effectiveUnitPrice,
+  resolveDiscountCommission,
+  scenarioPresentation,
   type DiscountCommissionInputs,
   type TariffAssemblyContext,
   type TariffVariant,
 } from './discount-compute.service';
 import { fetchCostAggregates } from './products-list.service';
-import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
+import {
+  batchResolveShipping,
+  resolveFeeDefs,
+  serializeBreakdown,
+} from './product-pricing.service';
 import { NO_SHIPPING } from './tariff-compute-commons';
 import type { VariantCostAggregate } from '../validators/product.validator';
 import {
@@ -172,15 +180,49 @@ export async function estimateDiscountItem(
     bandPrice,
   );
 
+  // ORDER-presentation lists (BUY_X_PAY_Y / NTH_PRODUCT / a conditional-AMOUNT discount) frame the
+  // DISCOUNTED scenario as the whole campaign order, not one unit: the modal then shows the SAME
+  // order breakdown the detail row's settlement scenario is built from — both go through the shared
+  // `computeOrderBreakdown`, so they can never disagree. Every other case keeps the UNIT breakdown.
+  const wantOrder = scenarioPresentation(config) === 'ORDER' && scenario === 'discounted';
+
+  let resultPrice = price;
+  let breakdown = computed.breakdown;
+  let breakdownScope: 'unit' | 'order' = 'unit';
+
+  if (wantOrder) {
+    const n = assumedBasketQuantity(config, currentPrice);
+    // basketPaidTotal — the order revenue — is the SAME n × 2dp effective unit the settlement
+    // scenario pays; the commission RATE is re-resolved at the discounted band price (the very
+    // resolution the unit scenario used), so this order breakdown matches the detail row exactly.
+    const orderRevenue = price.toDecimalPlaces(2).mul(n);
+    const resolved = resolveDiscountCommission(commission, bandPrice.toDecimalPlaces(2));
+    const orderBreakdown = computeOrderBreakdown(
+      ctx,
+      variant,
+      cost,
+      shipping,
+      resolved,
+      n,
+      orderRevenue,
+    );
+    resultPrice = orderRevenue;
+    breakdown = orderBreakdown !== null ? serializeBreakdown(orderBreakdown) : null;
+    breakdownScope = 'order';
+  }
+
   return {
     itemId: item.id,
     scenario,
-    price: price.toFixed(2),
+    price: resultPrice.toFixed(2),
     commissionPct: computed.commissionPct,
     commissionSource: computed.commissionSource,
     calculable: computed.calculable,
     reason: computed.reason,
-    breakdown: computed.breakdown,
+    breakdown,
+    // `unit` = per-unit economics; `order` = the whole n-unit campaign basket (only for the
+    // discounted scenario of an ORDER-presentation list — see `wantOrder`).
+    breakdownScope,
     // Transparency: which tariff/period fed the band tier (from the resolution, when one
     // existed — even if THIS item fell through to product/category; null otherwise).
     commissionTariffName: source?.tariffName ?? null,

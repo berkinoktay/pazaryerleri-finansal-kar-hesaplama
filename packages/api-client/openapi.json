@@ -7142,6 +7142,14 @@
               }
             ]
           },
+          "breakdownScope": {
+            "type": "string",
+            "enum": [
+              "unit",
+              "order"
+            ],
+            "description": "Scope of `breakdown` and `price`: `unit` = per-unit economics (the default, and always for the current scenario); `order` = the whole campaign order (an n-unit single-product basket) — returned only for the discounted scenario of an ORDER-presentation list (BUY_X_PAY_Y / NTH_PRODUCT / a conditional-AMOUNT discount), where `price` is the order revenue and `breakdown` is the order-level profit (n× product cost, 1× shipping, 1× PSF)."
+          },
           "commissionTariffName": {
             "type": [
               "string",
@@ -7164,6 +7172,7 @@
           "calculable",
           "reason",
           "breakdown",
+          "breakdownScope",
           "commissionTariffName",
           "commissionPeriodLabel"
         ]
@@ -7293,6 +7302,9 @@
           "commissionTariffOutdated": {
             "type": "boolean"
           },
+          "scenarioPresentation": {
+            "$ref": "#/components/schemas/DiscountScenarioPresentation"
+          },
           "items": {
             "type": "array",
             "items": {
@@ -7317,8 +7329,17 @@
           "commissionTariffName",
           "commissionPeriodLabel",
           "commissionTariffOutdated",
+          "scenarioPresentation",
           "items"
         ]
+      },
+      "DiscountScenarioPresentation": {
+        "type": "string",
+        "enum": [
+          "UNIT",
+          "ORDER"
+        ],
+        "description": "Which row layout the list's config calls for: UNIT (the unit price genuinely drops — show the discounted unit) or ORDER (the effective unit is a synthetic average — show the whole campaign order)."
       },
       "DiscountListDetailItem": {
         "type": "object",
@@ -7528,7 +7549,21 @@
               "string",
               "null"
             ],
-            "description": "Order-level net profit for the assumed basket (n × the per-unit net profit); null when the discounted scenario is not calculable."
+            "description": "Order net profit for the assumed n-unit basket, from the real profit engine over the order (n× product cost, 1× shipping, 1× PSF — the platform service and shipping are per-parcel and a basket of n identical units ships once); 2-decimal string, null when the discounted scenario is not calculable."
+          },
+          "orderMarginPct": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Order margin (orderNetProfit / basketPaidTotal × 100), 2-decimal string; null when the discounted scenario is not calculable or the paid basket is zero."
+          },
+          "currentOrderNetProfit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Same-basis campaign-free baseline: the order net profit for the same n units at the current price, 2-decimal string; null when the current scenario is not calculable."
           }
         },
         "required": [
@@ -7536,7 +7571,9 @@
           "basketTotal",
           "basketPaidTotal",
           "basketDiscountTotal",
-          "orderNetProfit"
+          "orderNetProfit",
+          "orderMarginPct",
+          "currentOrderNetProfit"
         ],
         "description": "Single-product-basket settlement scenario for basket-scoped discount types. Null for NET (its showcase price genuinely changes) or a non-positive price."
       },

@@ -5,9 +5,10 @@ import type {
   DiscountItemReason,
   DiscountListDetail,
   DiscountListDetailItem,
+  DiscountScenarioPresentation,
 } from '../api/get-discount-list-detail.api';
 
-export type { DiscountBasketScenario, DiscountCommissionBand };
+export type { DiscountBasketScenario, DiscountCommissionBand, DiscountScenarioPresentation };
 
 /**
  * Component-facing shapes for the İndirimler (Discounts) DETAIL screen. Money is a GROSS decimal
@@ -74,6 +75,12 @@ export interface DiscountListView {
   commissionTariffName: string | null;
   /** Period label of that tariff week (e.g. "7 - 14 Temmuz"); null when unresolved. */
   commissionPeriodLabel: string | null;
+  /**
+   * Which discounted-column layout the config calls for: `UNIT` (the unit price genuinely drops,
+   * show the discounted unit) or `ORDER` (the effective unit is a synthetic average, so show the
+   * whole campaign order). Decided by the backend — the row just renders the chosen layout.
+   */
+  scenarioPresentation: DiscountScenarioPresentation;
   rows: readonly DiscountRow[];
 }
 
@@ -112,6 +119,7 @@ export function toDiscountListView(detail: DiscountListDetail): DiscountListView
     exported: detail.exported,
     commissionTariffName: detail.commissionTariffName,
     commissionPeriodLabel: detail.commissionPeriodLabel,
+    scenarioPresentation: detail.scenarioPresentation,
     rows: detail.items.map(toRow),
   };
 }
