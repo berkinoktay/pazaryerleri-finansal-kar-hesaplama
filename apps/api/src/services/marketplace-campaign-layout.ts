@@ -11,9 +11,6 @@
 
 import { findHeader, normalizeHeader } from '../lib/xlsx-grid-cells';
 
-/** Dosya tek sayfa taşır ve adı kampanyaya göre değişir — ilk sayfa okunur. */
-export const MARKETPLACE_CAMPAIGN_SHEET_INDEX = 0;
-
 /** "Ürün Komisyon Tarifesi" kolonunun ürüne tarife bağlı olduğunu belirten değeri. */
 export const CAMPAIGN_TARIFF_FLAG_YES = 'Var';
 

@@ -57,6 +57,12 @@ function parseRow(
   // Excel'in TL hücreleri kuruş hassasiyetinde (2 ondalık); hücre bir tamsayı olarak
   // gelse bile (örn. 249) burada 2 haneye normalize edilir — bilgi kaybı yok, yalnız
   // biçim (Decimal("249").toFixed(2) === "249.00"), "ara değer yuvarlaması" değil.
+  // Bu adım yalnız `parseCampaignRows`'un KENDİ sözleşmesini (ParsedCampaignRow'un
+  // "2 haneli string" belgesi) birim testte tutarlı kılmak için var — veri bütünlüğü
+  // GARANTİSİ zaten hedef kolonda: `MarketplaceCampaignItem.currentPrice/maxPrice`
+  // Prisma'da `Decimal(12,2)` olarak tanımlı, Postgres bu string'i yazsak da yazmasak
+  // da AYNI 2 ondalığa yuvarlar. Yani buradaki toFixed(2) DB'nin zaten yapacağı işi
+  // önden, pure-function seviyesinde görünür kılıyor — gerçek garanti şemada.
   const currentPrice = new Decimal(currentPriceRaw).toFixed(2);
   const maxPrice = new Decimal(maxPriceRaw).toFixed(2);
 
@@ -145,7 +151,12 @@ export async function importMarketplaceCampaign(
 
   let grid: SheetData;
   try {
-    // Sayfa adı kampanyaya göre değişir → ilk sayfa (varsayılan davranış).
+    // Sayfa adı kampanyaya göre değiştiği için `sheetName` BİLİNÇLİ OLARAK verilmez —
+    // `readWorkbookGrid`'in sheetName'siz çağrıldığında ilk sayfayı (konuma göre)
+    // okuması budur; `ReadGridOptions`'ta sayısal bir indeks alanı YOKTUR, o yüzden
+    // "ilk sayfa" seçimi tek başına bu satırın sheetName GEÇMEMESİYLE sağlanır.
+    // İndirimler'in `{ sheetName: DISCOUNT_SHEET_NAME }` (ada göre okuma) yaklaşımından
+    // kasıtlı bir sapmadır — burada isim yok, sıra var.
     grid = await readWorkbookGrid(input.file);
   } catch (err) {
     if (err instanceof SpreadsheetFileError) {
