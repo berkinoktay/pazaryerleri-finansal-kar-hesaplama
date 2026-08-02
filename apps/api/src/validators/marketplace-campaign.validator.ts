@@ -328,7 +328,11 @@ export const CampaignBasketScenarioSchema = z
           'for quantity, buyQuantity for X-al-Y, nthIndex for Nth-product.',
       }),
     basketTotal: z.string().openapi({
-      description: 'List-price basket total (n × current price), 2-decimal string.',
+      description:
+        'Undiscounted basket total (n × the CAMPAIGN price the seller enters — NOT the current ' +
+        'price), 2-decimal string. The campaign promotion runs ON TOP of the campaign price, so ' +
+        'anchoring here keeps basketDiscountTotal to the promotion alone and lets ' +
+        'trendyolFundedTotal reconcile as a share of it.',
     }),
     basketPaidTotal: z.string().openapi({
       description:
@@ -359,8 +363,11 @@ export const CampaignBasketScenarioSchema = z
       .nullable()
       .openapi({
         description:
-          'Order margin (orderNetProfit / basketPaidTotal × 100), 2-decimal string; null when the ' +
-          'priced scenario is not calculable or the paid basket is zero.',
+          "Order margin: orderNetProfit over the SELLER's settlement total for the basket " +
+          '(n × the seller-effective unit price, i.e. what Trendyol pays out), × 100, 2-decimal ' +
+          'string. The denominator is the seller amount — not what the customer paid — because ' +
+          'commission and settlement both run off the seller amount. Null when the priced ' +
+          'scenario is not calculable or the settlement total is zero.',
       }),
     currentOrderNetProfit: z
       .string()
@@ -607,6 +614,17 @@ export type TargetMarginBody = z.infer<typeof TargetMarginBodySchema>;
 export type TargetMarginResult = z.infer<typeof TargetMarginResultSchema>;
 
 // ─── Inferred TS types (consumed by the service + route layers) ──────────────
+
+/**
+ * The five-member discount-type union Kampanyalar exposes on the wire — the narrowed form of
+ * the shared six-member `DiscountType` column. Services reading a persisted row narrow to this
+ * with {@link isCampaignDiscountType} before building a DTO.
+ */
+export type CampaignWireDiscountType = (typeof CAMPAIGN_DISCOUNT_TYPES)[number];
+
+export type UpdateCampaignSelectionsBody = z.infer<typeof UpdateCampaignSelectionsBodySchema>;
+/** One row of the selections payload: the item, its price choice and the custom price. */
+export type CampaignSelection = UpdateCampaignSelectionsBody['selections'][number];
 
 export type MarketplaceCampaignListItem = z.infer<typeof MarketplaceCampaignListItemSchema>;
 export type CampaignCommissionBand = z.infer<typeof CampaignCommissionBandSchema>;

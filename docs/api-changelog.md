@@ -59,6 +59,65 @@ section "Versioning" for details.
 
 ### Added
 
+- **Marketplace campaign (Kampanyalar) endpoints — import, list, detail, config, selections, delete**
+  (`/v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns…`, OpenAPI tag
+  `MarketplaceCampaigns`). Sixth campaign vertical, for the campaigns TRENDYOL designs and
+  the seller opts into (as opposed to `discount-lists`, which the seller designs). Six routes:
+  - `POST .../marketplace-campaigns/import` — multipart upload of Trendyol's campaign
+    product-selection `.xlsx` (`file`, optional display `name`) plus the campaign
+    configuration as string form fields. The configuration reuses the discount vocabulary
+    minus `CODE` (`discountType` = `NET` / `CONDITIONAL_BASKET` / `CONDITIONAL_QUANTITY` /
+    `BUY_X_PAY_Y` / `NTH_PRODUCT`, plus `valueKind` / `value` / `minBasketAmount` /
+    `minQuantity` / `buyQuantity` / `payQuantity` / `nthIndex` and the required `startsAt` /
+    `endsAt`) and adds `trendyolFundingPct` — the share of the campaign discount Trendyol
+    absorbs, percent, default `"0"`, rejected above 100 with field code
+    `FUNDING_PCT_OVER_100`. The sheet's FIRST sheet is read by position (its name changes per
+    campaign) and every column is resolved by header name; each row stores both the current
+    price and Trendyol's "Maksimum Girebileceğin Fiyat" ceiling. Rows missing a barcode, a
+    current price or a maximum price are skipped. **201** →
+    `ImportMarketplaceCampaignResponse` `{ campaignId, name, itemCount, matched, unmatched,
+    skippedRows }`. A file whose header layout is not the campaign export is **422**
+    `VALIDATION_ERROR` (`file` / `INVALID_CAMPAIGN_FORMAT`).
+  - `GET .../marketplace-campaigns` — `MarketplaceCampaignListResponse` `{ data:
+    MarketplaceCampaignListItem[] }`, newest first: the full configuration (including
+    `trendyolFundingPct`), `itemCount`, `selectedCount` (items whose price choice is not
+    `NONE`), `exported`, `updatedAt`.
+  - `GET .../marketplace-campaigns/{campaignId}` — `MarketplaceCampaignDetail`: the
+    configuration, the resolving commission tariff (`commissionTariffName` /
+    `commissionPeriodLabel` / `commissionTariffOutdated`, same covering-week anchor rule as
+    the discount vertical), `scenarioPresentation` (`UNIT` | `ORDER`), and every item as a
+    `MarketplaceCampaignDetailItem`. Each item carries THREE priced scenarios instead of the
+    discount vertical's two — `current` (not participating), `maxScenario` (Trendyol's price
+    ceiling) and `customScenario` (the seller's own price, null when none is saved) — plus its
+    saved `selection` (`NONE` | `MAX` | `CUSTOM`), `customPrice`, `commissionBands` ladder and
+    a nullable `scenario` settlement block (`CampaignBasketScenario`). The campaign scenarios
+    are priced at the SELLER's settlement amount: Trendyol funds `trendyolFundingPct` of the
+    discount, and commission, stoppage, VAT and margin all run off the seller amount, not off
+    what the customer paid. `CampaignBasketScenario` mirrors `DiscountBasketScenario` and adds
+    `trendyolFundedTotal` (the funded share of the basket discount); it is framed on the
+    item's SAVED `selection`, so an item left on `MAX` shows the max-price order even when a
+    custom price is stored. Profit is computed on read and never stored.
+  - `PATCH .../marketplace-campaigns/{campaignId}` — `UpdateMarketplaceCampaignBody` →
+    `{ id }`. **FULL REPLACE**: every configuration column is written on every call, so an
+    omitted field is reset rather than preserved. In particular `trendyolFundingPct` defaults
+    to `"0"`, so omitting it zeroes the seller's funding rate — clients must submit the whole
+    configuration. Same validator as the import form, so an invalid combination is **422**
+    `VALIDATION_ERROR`. Items are untouched; scenarios recompute on the next detail read.
+  - `PATCH .../marketplace-campaigns/{campaignId}/selections` — `UpdateCampaignSelectionsBody`
+    → `{ updated }`. `mode: "set"` writes the given `{ itemId, selection, customPrice }` rows;
+    `mode: "all"` applies the `MAX` option and `mode: "none"` clears participation across the
+    whole campaign in one statement. `customPrice` is stored independently of `selection`
+    (`all` / `none` never discard it). A `customPrice` above the item's maximum is **422**
+    `VALIDATION_ERROR` with field `selections` and code `CUSTOM_PRICE_ABOVE_MAX` (Trendyol
+    refuses such a price on re-upload, and nothing downstream re-checks it). Items outside the
+    campaign are ignored.
+  - `DELETE .../marketplace-campaigns/{campaignId}` — **204**, items cascade.
+
+  All six require `data:read` (list / detail) or `data:write` (the rest) and are store-scoped:
+  a campaign id from another store or organization is **404**, indistinguishable from a
+  missing one. Money is GROSS 2-decimal strings, commission percents 4-decimal, dates ISO
+  8601 UTC. The per-item estimate, target-margin and export routes land separately.
+
 - **Discount list import endpoint**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/import`) — Fifth
   campaign vertical, for Trendyol's "İndirimler" (Promosyon & Fiyat) product-selection
