@@ -345,10 +345,11 @@ export const CampaignBasketScenarioSchema = z
 
 // ─── Detail response DTO ──────────────────────────────────────────────────────
 
-// discountType..endsAt config alanları HEM liste HEM detay yanıtında birebir aynı —
-// tek ortak shape'i iki şemaya da spread ederiz (kopyalama yok). Değerler wire'da
-// string: para Decimal→2 hane, tarih ISO; adet alanları tamsayı. `trendyolFundingPct`
-// bu ortak shape'in DIŞINDA tutulur — detay yanıtında görünür, liste satırında değil.
+// discountType..trendyolFundingPct config alanları HEM liste HEM detay yanıtında
+// birebir aynı — tek ortak shape'i iki şemaya da spread ederiz (kopyalama yok).
+// Değerler wire'da string: para Decimal→2 hane, tarih ISO; adet alanları tamsayı.
+// `trendyolFundingPct` liste satırında da görünür — §7 "Liste ekranı" satır başına
+// karşılama oranı rozetini (sıfırsa gizli) buradan render eder.
 const marketplaceCampaignConfigShape = {
   discountType: CampaignDiscountTypeSchema,
   valueKind: CampaignValueKindSchema.nullable(),
@@ -358,6 +359,9 @@ const marketplaceCampaignConfigShape = {
   buyQuantity: z.number().int().nullable(),
   payQuantity: z.number().int().nullable(),
   nthIndex: z.number().int().nullable(),
+  trendyolFundingPct: z.string().openapi({
+    description: 'Trendyol karşılama oranı (%), 0–100. Varsayılan "0".',
+  }),
   startsAt: z.string().nullable(),
   endsAt: z.string().nullable(),
 };
@@ -429,9 +433,6 @@ export const MarketplaceCampaignDetailSchema = z
     id: z.string().uuid(),
     name: z.string(),
     ...marketplaceCampaignConfigShape,
-    trendyolFundingPct: z.string().openapi({
-      description: 'Trendyol karşılama oranı (%), 0–100. Varsayılan "0".',
-    }),
     exported: z.boolean(),
     // Şeffaflık: bantları besleyen komisyon tarifesi + dönem (kaynak yoksa null).
     // Bantlar yalnız anchor'ı KAPSAYAN tarife haftasından gelir; kapsayan hafta yoksa null.
