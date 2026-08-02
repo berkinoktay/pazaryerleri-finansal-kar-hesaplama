@@ -262,3 +262,143 @@ export function assumedBasketQuantity(config: DiscountConfig, currentPrice: Deci
     }
   }
 }
+
+// ─── Hedef hakediş tutarından kampanya fiyatına geri dönüş ──────────────────
+
+/** Fiyat ızgarasının en küçük anlamlı adımı (1 kuruş) — parça sınırlarını ayırmakta kullanılır. */
+const PRICE_EPSILON = new Decimal('0.01');
+
+/**
+ * `S(P) = k·P + (1 − k)·effectiveUnitPrice(P, config)` bağıntısının DOĞRUSAL kaldığı fiyat
+ * aralıkları, `[minPrice, maxPrice]` penceresine kırpılmış hâlde ve artan sırada.
+ *
+ * Kırılımların kaynağı kurguya göre:
+ *   - TL indirimlerde (`NET`, `CONDITIONAL_QUANTITY`, `NTH_PRODUCT/AMOUNT`) indirimin fiyatı
+ *     aştığı nokta — `max(price − X, 0)` tabanı orada kırılır.
+ *   - `NTH_PRODUCT/FIXED_PRICE` kurgusunda `P = Y` — sabit fiyat cari fiyatın üstündeyken
+ *     `min(price, Y)` kırpması devreye girer.
+ *   - `CONDITIONAL_BASKET` / `CODE` TL varyantında `P = M / n` sınırları; `n` yalnız
+ *     `ceil(M / maxPrice)` ile `ceil(M / minPrice)` arasında değer alabilir, dolayısıyla
+ *     üretilen parça sayısı penceresiyle sınırlıdır.
+ *   - Yüzde varyantlarında ve `BUY_X_PAY_Y`'de kırılım YOKTUR — tek parça.
+ */
+export function campaignPriceSegments(
+  config: DiscountConfig,
+  maxPrice: Decimal,
+  minPrice: Decimal,
+): Array<{ lo: Decimal; hi: Decimal }> {
+  const cuts: Decimal[] = [];
+
+  switch (config.type) {
+    case 'NET':
+    case 'CONDITIONAL_QUANTITY':
+      if (config.valueKind === 'AMOUNT') cuts.push(config.value);
+      break;
+    case 'NTH_PRODUCT':
+      if (config.valueKind !== 'PERCENT') cuts.push(config.value);
+      break;
+    case 'CONDITIONAL_BASKET':
+    case 'CODE': {
+      if (config.valueKind === 'AMOUNT') {
+        const nLo = qualifyingQuantity(maxPrice, config.minBasketAmount);
+        const nHi = qualifyingQuantity(minPrice, config.minBasketAmount);
+        for (let n = nLo; n <= nHi; n += 1) {
+          cuts.push(config.minBasketAmount.div(n));
+        }
+      }
+      break;
+    }
+    case 'BUY_X_PAY_Y':
+      break;
+    default: {
+      const _exhaustive: never = config;
+      throw new Error(`Unhandled discount config: ${JSON.stringify(_exhaustive)}`);
+    }
+  }
+
+  // Kırılımları pencereye kırp, sırala, tekilleştir; ardışık sınırlardan parçalar kur.
+  const bounds = [minPrice, maxPrice, ...cuts]
+    .map((c) => c.toDecimalPlaces(2, Decimal.ROUND_CEIL))
+    .filter((c) => c.gte(minPrice) && c.lte(maxPrice))
+    .sort((a, b) => a.comparedTo(b));
+
+  const segments: Array<{ lo: Decimal; hi: Decimal }> = [];
+  for (let i = 0; i < bounds.length - 1; i += 1) {
+    const lo = bounds[i] as Decimal;
+    const hi = bounds[i + 1] as Decimal;
+    if (hi.gt(lo)) segments.push({ lo, hi });
+  }
+  // Tek noktaya çöken pencere (minPrice === maxPrice) de değerlendirilebilmeli.
+  if (segments.length === 0) segments.push({ lo: minPrice, hi: maxPrice });
+  return segments;
+}
+
+/**
+ * `sellerEffectivePrice(P, config, fundingPct) >= targetSellerPrice` koşulunu sağlayan EN KÜÇÜK
+ * kampanya fiyatı `P` (kuruşa yukarı yuvarlanmış), ya da `[0,01, maxPrice]` penceresinde böyle bir
+ * fiyat yoksa null.
+ *
+ * Neden ikili arama DEĞİL: `S` fiyatta monoton değildir. `CONDITIONAL_BASKET` TL varyantında
+ * `n = ceil(M / P)` sıçraması `S`'yi düşürebilir (M=1000, X=100, karşılama 0: P=333 → S=308,
+ * P=334 → S=300,67). İkili arama bu fonksiyonda sessizce yanlış cevap verir.
+ *
+ * Yöntem: {@link campaignPriceSegments} ile doğrusal parçalara ayrılır; her parçada `S`, parçanın
+ * KENDİ doğrusal dalına ait iki noktada ÖRNEKLENEREK eğim ve kesişim çıkarılır (formül burada
+ * ikinci kez yazılmaz — motorun `solvePriceForTarget` içinde kullandığı numaranın aynısı). Alt uç
+ * doğrudan `seg.lo`'dur; üst örnekleme noktası ise `seg.hi`'nin KENDİSİ değil, ondan 1 kuruş
+ * içeride kalan noktadır — `seg.hi`, kesikli bir kırılımın (CONDITIONAL_BASKET/CODE'un ceil
+ * sıçraması) kuruşa yukarı yuvarlanmış hâli olabilir ve bu durumda artık komşu parçaya ait olur;
+ * doğrudan orada örneklemek iki farklı doğrusal dalın ortalamasını çıkarıp eğimi bozar. Hedef bu
+ * örneklerden kapalı formda çözülür ve kuruşa yukarı yuvarlanır. Sonuç parçanın içinde kalıyorsa
+ * aday olur. Eğimin sıfır olduğu düz parçalarda parçanın alt ucu sınanır. Parça uçlarının
+ * KENDİSİ (`seg.lo`, `seg.hi`) de ayrıca gerçek `sellerEffectivePrice` ile sınanıp adaylığa
+ * eklenir — kapalı-form çözüm parçanın dışına düşse bile uçlar hâlâ doğru değerlendirilir. Tüm
+ * adayların en küçüğü döner.
+ *
+ * Yuvarlama sonrası `S(P) >= hedef` bir kez daha DOĞRULANIR: kuruşa yuvarlama parça sınırını
+ * aşan bir fiyat üretirse (ör. `ceil` bir sonraki adete atlarsa) o aday elenir.
+ */
+export function solveCampaignPriceForTarget(
+  config: DiscountConfig,
+  fundingPct: Decimal,
+  targetSellerPrice: Decimal,
+  maxPrice: Decimal,
+): Decimal | null {
+  const hi = maxPrice.toDecimalPlaces(2, Decimal.ROUND_DOWN);
+  if (hi.lt(PRICE_EPSILON)) return null;
+
+  const candidates: Decimal[] = [];
+  const consider = (candidate: Decimal): void => {
+    if (candidate.lt(PRICE_EPSILON) || candidate.gt(hi)) return;
+    if (sellerEffectivePrice(candidate, config, fundingPct).lt(targetSellerPrice)) return;
+    candidates.push(candidate);
+  };
+
+  for (const seg of campaignPriceSegments(config, hi, PRICE_EPSILON)) {
+    // `seg.hi`, kesikli bir kırılımın (CONDITIONAL_BASKET/CODE'un ceil sıçraması) kuruşa
+    // YUKARI yuvarlanmış hâli olabilir — bu durumda `seg.hi`'nin kendisi artık komşu (bir
+    // sonraki) parçaya ait olur, doğrudan orada örneklemek eğim/kesişimi YANLIŞ hesaplar
+    // (iki farklı doğrusal dalın ortalamasını çıkarır). Eğim örneklemesi bu yüzden `seg.hi`
+    // yerine ondan 1 kuruş içeride kalan bir noktadan yapılır — parçanın KENDİ doğrusal dalı
+    // garanti örneklenir. Parça 1 kuruştan darsa (nadiren) bu nokta `seg.lo`'ya çöker; o durum
+    // aşağıdaki `sHi.eq(sLo)` düz-parça dalına düşer ve zarar vermez.
+    const sampleHi = Decimal.max(seg.hi.sub(PRICE_EPSILON), seg.lo);
+    const sLo = sellerEffectivePrice(seg.lo, config, fundingPct);
+    const sHi = sellerEffectivePrice(sampleHi, config, fundingPct);
+    if (sHi.eq(sLo)) {
+      // Düz parça: fiyat değişimi hakedişi değiştirmiyor → alt uç yeterli.
+      consider(seg.lo);
+      continue;
+    }
+    const slope = sHi.sub(sLo).div(sampleHi.sub(seg.lo));
+    const intercept = sLo.sub(slope.mul(seg.lo));
+    const exact = targetSellerPrice.sub(intercept).div(slope);
+    consider(exact.toDecimalPlaces(2, Decimal.ROUND_CEIL));
+    // Parça uçları da aday: kapalı-form çözüm parçanın DIŞINA düşerse doğru cevap uçta olabilir.
+    consider(seg.lo);
+    consider(seg.hi);
+  }
+
+  if (candidates.length === 0) return null;
+  return candidates.reduce((min, c) => (c.lt(min) ? c : min));
+}
