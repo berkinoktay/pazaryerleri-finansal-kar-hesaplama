@@ -21,17 +21,19 @@ import { NotFoundError } from '../lib/errors';
 import { resolveCommissionRate } from './commission-rate-resolver';
 import { resolveDiscountCommissionSource } from './discount-commission-source';
 import {
-  assumedBasketQuantity,
-  commissionBandPrice,
   computeDiscountEstimate,
   computeOrderBreakdown,
+  type TariffAssemblyContext,
+  type TariffVariant,
+} from './discount-compute.service';
+import {
+  assumedBasketQuantity,
+  commissionBandPrice,
   effectiveUnitPrice,
   resolveDiscountCommission,
   scenarioPresentation,
   type DiscountCommissionInputs,
-  type TariffAssemblyContext,
-  type TariffVariant,
-} from './discount-compute.service';
+} from './discount-math-commons';
 import { fetchCostAggregates } from './products-list.service';
 import {
   batchResolveShipping,

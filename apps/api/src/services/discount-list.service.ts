@@ -27,11 +27,10 @@ import { resolveCommissionRate } from './commission-rate-resolver';
 import { resolveDiscountCommissionSource } from './discount-commission-source';
 import {
   computeDiscountItem,
-  scenarioPresentation,
-  type DiscountCommissionInputs,
   type TariffAssemblyContext,
   type TariffVariant,
 } from './discount-compute.service';
+import { scenarioPresentation, type DiscountCommissionInputs } from './discount-math-commons';
 import { fetchCostAggregates } from './products-list.service';
 import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
 import { NO_SHIPPING } from './tariff-compute-commons';

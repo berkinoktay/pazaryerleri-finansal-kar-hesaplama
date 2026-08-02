@@ -14,7 +14,7 @@ import { Decimal } from 'decimal.js';
 import type { Prisma } from '@pazarsync/db';
 import { DiscountType, DiscountValueKind } from '@pazarsync/db/enums';
 
-import type { DiscountConfig } from '../services/discount-compute.service';
+import type { DiscountConfig } from '../services/discount-math-commons';
 import { QuoteBreakdownSchema } from './product-pricing.validator';
 
 // ─── Shared enums ───────────────────────────────────────────────────────────

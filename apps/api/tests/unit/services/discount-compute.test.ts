@@ -4,20 +4,22 @@ import { describe, expect, it } from 'vitest';
 import { computeUnitProfit, type EstimateOutcome } from '@pazarsync/profit';
 
 import {
-  assumedBasketQuantity,
-  commissionBandPrice,
   computeDiscountEstimate,
   computeDiscountItem,
   computeOrderBreakdown,
-  effectiveUnitPrice,
-  resolveDiscountCommission,
-  scenarioPresentation,
   type DiscountBasketScenario,
-  type DiscountCommissionInputs,
-  type DiscountConfig,
   type TariffAssemblyContext,
   type TariffVariant,
 } from '@/services/discount-compute.service';
+import {
+  assumedBasketQuantity,
+  commissionBandPrice,
+  effectiveUnitPrice,
+  resolveDiscountCommission,
+  scenarioPresentation,
+  type DiscountCommissionInputs,
+  type DiscountConfig,
+} from '@/services/discount-math-commons';
 import type { StoredBand } from '@/services/commission-tariff.types';
 import { assembleUnitEconomics } from '@/services/product-pricing.service';
 import { NO_SHIPPING, tariffCommission } from '@/services/tariff-compute-commons';
