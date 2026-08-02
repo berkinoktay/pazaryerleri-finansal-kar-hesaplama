@@ -335,12 +335,23 @@ export function campaignPriceSegments(
 
 /**
  * `sellerEffectivePrice(P, config, fundingPct) >= targetSellerPrice` koşulunu sağlayan EN KÜÇÜK
- * kampanya fiyatı `P` (kuruşa yukarı yuvarlanmış), ya da `[0,01, maxPrice]` penceresinde böyle bir
- * fiyat yoksa null.
+ * kampanya fiyatı `P` (kuruşa yukarı yuvarlanmış), ya da `[targetSellerPrice, maxPrice]`
+ * penceresinde böyle bir fiyat yoksa null.
  *
  * Neden ikili arama DEĞİL: `S` fiyatta monoton değildir. `CONDITIONAL_BASKET` TL varyantında
  * `n = ceil(M / P)` sıçraması `S`'yi düşürebilir (M=1000, X=100, karşılama 0: P=333 → S=308,
  * P=334 → S=300,67). İkili arama bu fonksiyonda sessizce yanlış cevap verir.
+ *
+ * Arama penceresinin ALT sınırı `targetSellerPrice`'ın kendisidir (kuruş taşmasına karşı en az
+ * `PRICE_EPSILON`). İspat: `S(P) = P − D·(1 − k)` biçimindedir, burada `D = P − effectiveUnitPrice(P,
+ * config) ≥ 0` (bir indirim fiyatı asla YÜKSELTMEZ) ve `(1 − k) ∈ [0, 1]`. Dolayısıyla HER kurgu ve
+ * HER karşılama oranı için `S(P) ≤ P` — hedeften daha düşük bir kampanya fiyatı hedefe asla
+ * ulaşamaz. Bu alt sınır `campaignPriceSegments`'a geçirilen pencereyi daraltır: `CONDITIONAL_BASKET`
+ * / `CODE` TL varyantında kırılım sayısı `ceil(M/maxPrice)`den `ceil(M/targetSellerPrice)`e kadar
+ * sınırlanır (tasarım dokümanı §4.5) — eskiden `PRICE_EPSILON`'a (1 kuruş) kadar inen pencere, 1000
+ * TL'lik bir sepet eşiğinde ~100.000 kırılım üretiyordu; artık hedefin altı hiç taranmıyor. Hedef
+ * `maxPrice`'ın üstündeyse (`S(maxPrice) ≤ maxPrice < targetSellerPrice`) pencere boşa düşer ve
+ * fonksiyon hemen null döner.
  *
  * Yöntem: {@link campaignPriceSegments} ile doğrusal parçalara ayrılır; her parçada `S`, parçanın
  * KENDİ doğrusal dalına ait iki noktada ÖRNEKLENEREK eğim ve kesişim çıkarılır (formül burada
@@ -367,6 +378,11 @@ export function solveCampaignPriceForTarget(
   const hi = maxPrice.toDecimalPlaces(2, Decimal.ROUND_DOWN);
   if (hi.lt(PRICE_EPSILON)) return null;
 
+  // S(P) ≤ P her zaman (yukarıdaki ispat) → hedeften ucuz hiçbir fiyat hedefe ulaşamaz. Pencerenin
+  // alt sınırını hedefe çekmek hem yanlış-negatif üretmez hem de kırılım taramasını daraltır.
+  const searchLo = Decimal.max(targetSellerPrice, PRICE_EPSILON);
+  if (searchLo.gt(hi)) return null;
+
   const candidates: Decimal[] = [];
   const consider = (candidate: Decimal): void => {
     if (candidate.lt(PRICE_EPSILON) || candidate.gt(hi)) return;
@@ -374,7 +390,7 @@ export function solveCampaignPriceForTarget(
     candidates.push(candidate);
   };
 
-  for (const seg of campaignPriceSegments(config, hi, PRICE_EPSILON)) {
+  for (const seg of campaignPriceSegments(config, hi, searchLo)) {
     // `seg.hi`, kesikli bir kırılımın (CONDITIONAL_BASKET/CODE'un ceil sıçraması) kuruşa
     // YUKARI yuvarlanmış hâli olabilir — bu durumda `seg.hi`'nin kendisi artık komşu (bir
     // sonraki) parçaya ait olur, doğrudan orada örneklemek eğim/kesişimi YANLIŞ hesaplar

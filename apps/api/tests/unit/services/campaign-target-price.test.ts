@@ -2,6 +2,7 @@ import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
 import {
+  campaignPriceSegments,
   sellerEffectivePrice,
   solveCampaignPriceForTarget,
   type DiscountConfig,
@@ -103,5 +104,28 @@ describe('solveCampaignPriceForTarget', () => {
       new Decimal(0),
     );
     expect(p).toBeNull();
+  });
+});
+
+describe('campaignPriceSegments — performans sabitlemesi', () => {
+  it('sepet-tutar kurgusunda parça sayısı, hedef tabanlı bir alt sınırla küçük kalır', () => {
+    // Gerçekçi bir sepet eşiği (5.000 TL) ve gerçekçi bir arama penceresi (400 → 240 TL, yani
+    // 1 kuruşa DEĞİL hedefe yakın bir alt sınıra kırpılmış). Kırılım sayısı yalnız
+    // ceil(M/maxPrice)..ceil(M/minPrice) aralığındaki n değerleri kadardır (burada 9). Alt sınır
+    // 1 kuruşa (PRICE_EPSILON) kadar inseydi — solveCampaignPriceForTarget'ın DÜZELTMEDEN ÖNCEKİ
+    // hâli tam olarak buydu — aynı çağrı 1.402 parça üretiyordu; 5.000 TL'den büyük eşiklerde bu
+    // sayı yüz binlere çıkıyordu (ölçülen: minBasketAmount=5000, maxPrice=2000, minPrice=0,01 →
+    // tek bir solveCampaignPriceForTarget çağrısı ~775 ms). Bu test, alt sınırın hedefe
+    // dayandırılmasının (bkz. solveCampaignPriceForTarget'taki `searchLo`) bu patlamayı kalıcı
+    // olarak önlediğini sabitler — üst sınır (20) gerçek sayının (9) üstünde bolluk payı bırakır
+    // ama patlama senaryosunun (1.402) çok altındadır.
+    const config: DiscountConfig = {
+      type: 'CONDITIONAL_BASKET',
+      valueKind: 'AMOUNT',
+      value: new Decimal(300),
+      minBasketAmount: new Decimal(5000),
+    };
+    const segments = campaignPriceSegments(config, new Decimal(400), new Decimal(240));
+    expect(segments.length).toBeLessThan(20);
   });
 });
