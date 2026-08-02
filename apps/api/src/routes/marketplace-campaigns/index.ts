@@ -1,10 +1,10 @@
-// Kampanyalar sub-app. The export route (Görev 10, which owns the export SERVICE) mounts
-// here as it lands — the aggregator is the single place app.ts sees.
+// Kampanyalar sub-app — the single place app.ts sees.
 
 import { createSubApp } from '../../lib/create-hono-app';
 import deleteRoute from './delete.route';
 import detailRoute from './detail.route';
 import estimateRoute from './estimate.route';
+import exportRoute from './export.route';
 import importRoute from './import.route';
 import listRoute from './list.route';
 import selectionsRoute from './selections.route';
@@ -21,5 +21,6 @@ app.route('/', estimateRoute);
 app.route('/', targetMarginRoute);
 app.route('/', detailRoute);
 app.route('/', deleteRoute);
+app.route('/', exportRoute);
 
 export default app;

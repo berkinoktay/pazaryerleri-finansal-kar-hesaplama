@@ -151,7 +151,8 @@ section "Versioning" for details.
   All six require `data:read` (list / detail) or `data:write` (the rest) and are store-scoped:
   a campaign id from another store or organization is **404**, indistinguishable from a
   missing one. Money is GROSS 2-decimal strings, commission percents 4-decimal, dates ISO
-  8601 UTC. The per-item estimate, target-margin and export routes land separately.
+  8601 UTC. The per-item estimate, target-margin and export routes land separately (see the
+  bullets below).
 
 - **Marketplace campaign estimate + target-margin endpoints** (OpenAPI tag
   `MarketplaceCampaigns`). Two read-only compute routes; both require `data:read` and are
@@ -178,6 +179,19 @@ section "Versioning" for details.
     **This endpoint COMPUTES AND RETURNS — it persists nothing**: the client holds the
     suggested prices in its local buffer and they become durable only through the selections
     endpoint, so the seller's choices keep a single source of truth.
+
+- **Marketplace campaign export endpoint**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/export`).
+  The seventh and last Kampanyalar route, byte-preserving sibling of the discount-lists export
+  below: returns Trendyol's ORIGINAL uploaded file (`XLSX`, `attachment; filename*=UTF-8''…`)
+  with each row's chosen price written into the "Kampanyalı Satış Fiyatı" column — `MAX` writes
+  the maximum allowed price, `CUSTOM` writes the seller's own price, `NONE` leaves the cell
+  untouched (the source cell is always already empty, so unlike İndirimler's "Evet"/"Hayır"
+  toggle there is no deviation comparison — only rows with a resolved price are patched). Row
+  alignment zips the campaign's `sortOrder`-ordered items against the file's imported
+  (non-skipped) data rows with a barcode defensive guard. Marks the campaign exported. **409**
+  `CONFLICT` when the campaign kept no stored source file (or it is unreadable / not a
+  recognizable Kampanyalar export). `DATA_WRITE` capability.
 
 - **Discount list import endpoint**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/import`) — Fifth
