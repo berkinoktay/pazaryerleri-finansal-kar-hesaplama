@@ -182,7 +182,8 @@ section "Versioning" for details.
 
 - **Marketplace campaign export endpoint**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/export`).
-  The seventh and last Kampanyalar route, byte-preserving sibling of the discount-lists export
+  The ninth and last Kampanyalar route (list, import, selections, update, estimate,
+  target-margin, detail, delete, export), byte-preserving sibling of the discount-lists export
   below: returns Trendyol's ORIGINAL uploaded file (`XLSX`, `attachment; filename*=UTF-8''…`)
   with each row's chosen price written into the "Kampanyalı Satış Fiyatı" column — `MAX` writes
   the maximum allowed price, `CUSTOM` writes the seller's own price, `NONE` leaves the cell

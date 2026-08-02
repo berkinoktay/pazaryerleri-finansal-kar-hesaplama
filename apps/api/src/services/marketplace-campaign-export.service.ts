@@ -54,9 +54,12 @@ export function resolveCampaignExportPrice(item: {
 /**
  * True when the import kept an item for this data row (so it must consume one item when
  * zipping). Mirrors `marketplace-campaign-import`'s `parseRow` skip rule BİREBİR: barkod +
- * mevcut fiyat + maksimum fiyat okunabilir olmalı. Kept in sync with that contract.
+ * mevcut fiyat + maksimum fiyat okunabilir olmalı. Kept in sync with that contract — a drift
+ * here (e.g. a dropped condition) makes this predicate keep MORE rows than the real import
+ * did, shifting every subsequent row's alignment. Exported so the contract can be pinned by
+ * a direct unit test, independent of the zip loop below.
  */
-function isImportedCampaignRow(
+export function isImportedCampaignRow(
   row: readonly unknown[],
   layout: MarketplaceCampaignLayout,
 ): boolean {
@@ -65,6 +68,53 @@ function isImportedCampaignRow(
     cellCurrencyDecimalString(row, layout.currentPrice) !== null &&
     cellCurrencyDecimalString(row, layout.maxPrice) !== null
   );
+}
+
+/** One saved campaign item, as read for export (the fields `resolveCampaignExportPrice` needs, plus the barcode the alignment guard checks against). */
+export interface CampaignExportItem {
+  readonly barcode: string;
+  readonly selection: 'NONE' | 'MAX' | 'CUSTOM';
+  readonly maxPrice: Prisma.Decimal;
+  readonly customPrice: Prisma.Decimal | null;
+}
+
+/**
+ * The pure core of the export: zips the sortOrder-ordered `items` against the file's
+ * imported (non-skipped) data rows in order — item[k] is the k-th row `isImportedCampaignRow`
+ * keeps — and returns one row-patch per item with a resolved export price. A barcode mismatch
+ * between a zipped item and its row (a `isImportedCampaignRow`/import drift) skips that row
+ * rather than writing the wrong product's price; a `NONE` (or priceless `CUSTOM`) selection
+ * leaves the already-empty source cell untouched. Extracted from `exportMarketplaceCampaign`
+ * so this alignment logic — the highest-risk part of the export — is unit-testable without a
+ * database: it takes only the parsed grid, the resolved layout, and a plain items array.
+ */
+export function buildCampaignRowPatches(
+  grid: SheetData,
+  layout: MarketplaceCampaignLayout,
+  items: readonly CampaignExportItem[],
+): Map<number, Map<number, XlsxCellValue>> {
+  const rowPatches = new Map<number, Map<number, XlsxCellValue>>();
+  let cursor = 0;
+  for (let i = 1; i < grid.length && cursor < items.length; i += 1) {
+    const row = grid[i] ?? [];
+    if (!isImportedCampaignRow(row, layout)) continue;
+
+    const item = items[cursor];
+    cursor += 1;
+    if (item === undefined) break;
+    // Defensive alignment guard: the zipped item's barcode must match this row. If the
+    // kept-row predicate ever drifts from the import, skip rather than write the wrong
+    // product's price.
+    if (cellText(row, layout.barcode) !== item.barcode) continue;
+
+    const price = resolveCampaignExportPrice(item);
+    if (price === null) continue;
+
+    const patch = new Map<number, XlsxCellValue>();
+    patch.set(layout.campaignPrice, { kind: 'number', value: price });
+    rowPatches.set(i + 1, patch);
+  }
+  return rowPatches;
 }
 
 /**
@@ -126,32 +176,7 @@ export async function exportMarketplaceCampaign(
     );
   }
 
-  // Zip the sortOrder-ordered items with the file's imported (non-skipped) data rows in
-  // order: item[k] is the k-th kept row. Only rows with a resolved export price are patched
-  // — a NONE (or priceless CUSTOM) selection leaves the already-empty source cell untouched.
-  // Keyed by the 1-based Excel row.
-  const rowPatches = new Map<number, Map<number, XlsxCellValue>>();
-  let cursor = 0;
-  for (let i = 1; i < grid.length && cursor < campaign.items.length; i += 1) {
-    const row = grid[i] ?? [];
-    if (!isImportedCampaignRow(row, layout)) continue;
-
-    const item = campaign.items[cursor];
-    cursor += 1;
-    if (item === undefined) break;
-    // Defensive alignment guard: the zipped item's barcode must match this row. If the
-    // kept-row predicate ever drifts from the import, skip rather than write the wrong
-    // product's price.
-    if (cellText(row, layout.barcode) !== item.barcode) continue;
-
-    const price = resolveCampaignExportPrice(item);
-    if (price === null) continue;
-
-    const patch = new Map<number, XlsxCellValue>();
-    patch.set(layout.campaignPrice, { kind: 'number', value: price });
-    rowPatches.set(i + 1, patch);
-  }
-
+  const rowPatches = buildCampaignRowPatches(grid, layout, campaign.items);
   const file = patchXlsxCells(source, rowPatches);
 
   try {
