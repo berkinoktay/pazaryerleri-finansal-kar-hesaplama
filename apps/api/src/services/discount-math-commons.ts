@@ -273,10 +273,12 @@ const PRICE_EPSILON = new Decimal('0.01');
  * aralıkları, `[minPrice, maxPrice]` penceresine kırpılmış hâlde ve artan sırada.
  *
  * Kırılımların kaynağı kurguya göre:
- *   - TL indirimlerde (`NET`, `CONDITIONAL_QUANTITY`, `NTH_PRODUCT/AMOUNT`) indirimin fiyatı
- *     aştığı nokta — `max(price − X, 0)` tabanı orada kırılır.
- *   - `NTH_PRODUCT/FIXED_PRICE` kurgusunda `P = Y` — sabit fiyat cari fiyatın üstündeyken
- *     `min(price, Y)` kırpması devreye girer.
+ *   - `NET` / `NTH_PRODUCT` (AMOUNT ya da FIXED_PRICE) TL indirimlerinde indirimin fiyatı aştığı
+ *     nokta `P = X` — `max(price − X, 0)` (ya da FIXED_PRICE'ta `min(price, Y)`) tabanı orada
+ *     kırılır.
+ *   - `CONDITIONAL_QUANTITY/AMOUNT`'ta AYNI taban ama birim indirim `effectiveUnitPrice`'ın kendi
+ *     böldüğü `value / minQuantity`'dir (`minQuantity` sabit, fiyattan bağımsız) — kırılım `value`
+ *     DEĞİL `value / minQuantity`'dedir.
  *   - `CONDITIONAL_BASKET` / `CODE` TL varyantında `P = M / n` sınırları; `n` yalnız
  *     `ceil(M / maxPrice)` ile `ceil(M / minPrice)` arasında değer alabilir, dolayısıyla
  *     üretilen parça sayısı penceresiyle sınırlıdır.
@@ -287,12 +289,27 @@ export function campaignPriceSegments(
   maxPrice: Decimal,
   minPrice: Decimal,
 ): Array<{ lo: Decimal; hi: Decimal }> {
+  // decimal.js `x.div(0)` fırlatmaz, `Infinity` döner. `minPrice <= 0` geçilirse
+  // `qualifyingQuantity(minPrice, config.minBasketAmount)` (aşağıdaki CONDITIONAL_BASKET/CODE
+  // dalında `nHi`) sonsuza gider ve `for (let n = nLo; n <= nHi; n += 1)` hiç bitmeyen bir
+  // döngüye düşer — sessiz bir askıda kalma, istisna DEĞİL. Fonksiyon dışa açık ve imzası
+  // `minPrice` için bir alt sınır zorlamıyor; bu yüzden burada savunmacı kırpma uygulanıyor
+  // (`sellerEffectivePrice`'ın `fundingPct` kırpmasıyla aynı duruş — fırlatmak yerine kırpma,
+  // çünkü bu saf bir matematik commons dosyası ve hiçbir çağıran gerçekten "sıfır ya da negatif
+  // fiyat" DEMEK istemez; en küçük anlamlı fiyat birimine, 1 kuruşa, kırpmak en iyi tanımlı
+  // cevaptır).
+  const safeMinPrice = Decimal.max(minPrice, PRICE_EPSILON);
+
   const cuts: Decimal[] = [];
 
   switch (config.type) {
     case 'NET':
-    case 'CONDITIONAL_QUANTITY':
       if (config.valueKind === 'AMOUNT') cuts.push(config.value);
+      break;
+    case 'CONDITIONAL_QUANTITY':
+      if (config.valueKind === 'AMOUNT') {
+        cuts.push(config.value.div(Math.max(config.minQuantity, 1)));
+      }
       break;
     case 'NTH_PRODUCT':
       if (config.valueKind !== 'PERCENT') cuts.push(config.value);
@@ -301,7 +318,7 @@ export function campaignPriceSegments(
     case 'CODE': {
       if (config.valueKind === 'AMOUNT') {
         const nLo = qualifyingQuantity(maxPrice, config.minBasketAmount);
-        const nHi = qualifyingQuantity(minPrice, config.minBasketAmount);
+        const nHi = qualifyingQuantity(safeMinPrice, config.minBasketAmount);
         for (let n = nLo; n <= nHi; n += 1) {
           cuts.push(config.minBasketAmount.div(n));
         }
@@ -317,41 +334,65 @@ export function campaignPriceSegments(
   }
 
   // Kırılımları pencereye kırp, sırala, tekilleştir; ardışık sınırlardan parçalar kur.
-  const bounds = [minPrice, maxPrice, ...cuts]
+  const bounds = [safeMinPrice, maxPrice, ...cuts]
     .map((c) => c.toDecimalPlaces(2, Decimal.ROUND_CEIL))
-    .filter((c) => c.gte(minPrice) && c.lte(maxPrice))
+    .filter((c) => c.gte(safeMinPrice) && c.lte(maxPrice))
     .sort((a, b) => a.comparedTo(b));
 
   const segments: Array<{ lo: Decimal; hi: Decimal }> = [];
   for (let i = 0; i < bounds.length - 1; i += 1) {
-    const lo = bounds[i] as Decimal;
-    const hi = bounds[i + 1] as Decimal;
+    const lo = bounds[i];
+    const hi = bounds[i + 1];
+    if (lo === undefined || hi === undefined) continue;
     if (hi.gt(lo)) segments.push({ lo, hi });
   }
   // Tek noktaya çöken pencere (minPrice === maxPrice) de değerlendirilebilmeli.
-  if (segments.length === 0) segments.push({ lo: minPrice, hi: maxPrice });
+  if (segments.length === 0) segments.push({ lo: safeMinPrice, hi: maxPrice });
   return segments;
 }
 
 /**
+ * The price window the segment walk searches for a target settlement price.
+ * The lower bound is the TARGET, not a floor epsilon: `sellerEffectivePrice(P) <= P`
+ * for every config (a discount never raises the price, and the funding share is in
+ * [0,1]), so no campaign price below the target can ever reach it. Narrowing here is
+ * what keeps the basket-amount segment count bounded. Returns null when the window
+ * is empty — the target is unreachable at or below `maxPrice`.
+ *
+ * İspat (Türkçe): `S(P) = P − D·(1 − k)` biçimindedir, burada `D = P − effectiveUnitPrice(P,
+ * config) ≥ 0` (bir indirim fiyatı asla YÜKSELTMEZ) ve `(1 − k) ∈ [0, 1]`. Dolayısıyla HER kurgu
+ * ve HER karşılama oranı için `S(P) ≤ P` — hedeften daha düşük bir kampanya fiyatı hedefe asla
+ * ulaşamaz. Bu alt sınır {@link campaignPriceSegments}'a geçirilen pencereyi daraltır:
+ * `CONDITIONAL_BASKET` / `CODE` TL varyantında kırılım sayısı `ceil(M/maxPrice)`den
+ * `ceil(M/targetSellerPrice)`e kadar sınırlanır (tasarım dokümanı §4.5) — eskiden `PRICE_EPSILON`'a
+ * (1 kuruş) kadar inen pencere, 1000 TL'lik bir sepet eşiğinde ~100.000 kırılım üretiyordu; artık
+ * hedefin altı hiç taranmıyor.
+ */
+export function campaignSearchWindow(
+  targetSellerPrice: Decimal,
+  maxPrice: Decimal,
+): { readonly lo: Decimal; readonly hi: Decimal } | null {
+  const hi = maxPrice.toDecimalPlaces(2, Decimal.ROUND_DOWN);
+  if (hi.lt(PRICE_EPSILON)) return null;
+
+  const lo = Decimal.max(targetSellerPrice, PRICE_EPSILON);
+  if (lo.gt(hi)) return null;
+
+  return { lo, hi };
+}
+
+/**
  * `sellerEffectivePrice(P, config, fundingPct) >= targetSellerPrice` koşulunu sağlayan EN KÜÇÜK
- * kampanya fiyatı `P` (kuruşa yukarı yuvarlanmış), ya da `[targetSellerPrice, maxPrice]`
- * penceresinde böyle bir fiyat yoksa null.
+ * kampanya fiyatı `P` (kuruşa yukarı yuvarlanmış), ya da {@link campaignSearchWindow}'ın döndürdüğü
+ * `[targetSellerPrice, maxPrice]` penceresinde böyle bir fiyat yoksa null.
  *
  * Neden ikili arama DEĞİL: `S` fiyatta monoton değildir. `CONDITIONAL_BASKET` TL varyantında
  * `n = ceil(M / P)` sıçraması `S`'yi düşürebilir (M=1000, X=100, karşılama 0: P=333 → S=308,
  * P=334 → S=300,67). İkili arama bu fonksiyonda sessizce yanlış cevap verir.
  *
- * Arama penceresinin ALT sınırı `targetSellerPrice`'ın kendisidir (kuruş taşmasına karşı en az
- * `PRICE_EPSILON`). İspat: `S(P) = P − D·(1 − k)` biçimindedir, burada `D = P − effectiveUnitPrice(P,
- * config) ≥ 0` (bir indirim fiyatı asla YÜKSELTMEZ) ve `(1 − k) ∈ [0, 1]`. Dolayısıyla HER kurgu ve
- * HER karşılama oranı için `S(P) ≤ P` — hedeften daha düşük bir kampanya fiyatı hedefe asla
- * ulaşamaz. Bu alt sınır `campaignPriceSegments`'a geçirilen pencereyi daraltır: `CONDITIONAL_BASKET`
- * / `CODE` TL varyantında kırılım sayısı `ceil(M/maxPrice)`den `ceil(M/targetSellerPrice)`e kadar
- * sınırlanır (tasarım dokümanı §4.5) — eskiden `PRICE_EPSILON`'a (1 kuruş) kadar inen pencere, 1000
- * TL'lik bir sepet eşiğinde ~100.000 kırılım üretiyordu; artık hedefin altı hiç taranmıyor. Hedef
- * `maxPrice`'ın üstündeyse (`S(maxPrice) ≤ maxPrice < targetSellerPrice`) pencere boşa düşer ve
- * fonksiyon hemen null döner.
+ * Arama penceresi {@link campaignSearchWindow} ile hesaplanır — alt sınır `targetSellerPrice`'ın
+ * kendisidir, `PRICE_EPSILON` DEĞİL (ispat orada). Hedef `maxPrice`'ın üstündeyse pencere boşa
+ * düşer ve fonksiyon hemen null döner.
  *
  * Yöntem: {@link campaignPriceSegments} ile doğrusal parçalara ayrılır; her parçada `S`, parçanın
  * KENDİ doğrusal dalına ait iki noktada ÖRNEKLENEREK eğim ve kesişim çıkarılır (formül burada
@@ -375,13 +416,9 @@ export function solveCampaignPriceForTarget(
   targetSellerPrice: Decimal,
   maxPrice: Decimal,
 ): Decimal | null {
-  const hi = maxPrice.toDecimalPlaces(2, Decimal.ROUND_DOWN);
-  if (hi.lt(PRICE_EPSILON)) return null;
-
-  // S(P) ≤ P her zaman (yukarıdaki ispat) → hedeften ucuz hiçbir fiyat hedefe ulaşamaz. Pencerenin
-  // alt sınırını hedefe çekmek hem yanlış-negatif üretmez hem de kırılım taramasını daraltır.
-  const searchLo = Decimal.max(targetSellerPrice, PRICE_EPSILON);
-  if (searchLo.gt(hi)) return null;
+  const window = campaignSearchWindow(targetSellerPrice, maxPrice);
+  if (window === null) return null;
+  const { lo: searchLo, hi } = window;
 
   const candidates: Decimal[] = [];
   const consider = (candidate: Decimal): void => {
