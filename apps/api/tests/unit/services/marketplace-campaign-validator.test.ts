@@ -438,6 +438,49 @@ describe('UpdateCampaignSelectionsBodySchema', () => {
     expect(parsed.success).toBe(true);
   });
 
+  it('CUSTOM seçimi fiyatsız gelirse reddeder ve kusurlu kalemi adlandırır', () => {
+    const itemId = 'a1b2c3d4-e5f6-4890-a234-ef1234567890';
+    const parsed = UpdateCampaignSelectionsBodySchema.safeParse({
+      mode: 'set',
+      selections: [{ itemId, selection: 'CUSTOM', customPrice: null }],
+    });
+    expect(parsed.success).toBe(false);
+    const issue = parsed.error?.issues.find((i) => i.message === 'CUSTOM_PRICE_REQUIRED');
+    expect(issue?.path).toEqual(['selections']);
+    // Arayüz satırı vurgulayabilsin diye kusurlu kalemin kimliği hatayla birlikte gider —
+    // tavan kapısının (CUSTOM_PRICE_ABOVE_MAX) meta.itemId'siyle aynı biçim.
+    expect(issue).toMatchObject({ params: { itemId } });
+  });
+
+  it('fiyatsız CUSTOM yalnız kendi satırını düşürür, MAX satırları kuralı ihlal etmez', () => {
+    const bad = 'a1b2c3d4-e5f6-4890-a234-ef1234567891';
+    const parsed = UpdateCampaignSelectionsBodySchema.safeParse({
+      mode: 'set',
+      selections: [
+        { itemId: 'a1b2c3d4-e5f6-4890-a234-ef1234567890', selection: 'MAX', customPrice: null },
+        { itemId: bad, selection: 'CUSTOM', customPrice: null },
+      ],
+    });
+    expect(parsed.success).toBe(false);
+    const offenders = parsed.error?.issues.filter((i) => i.message === 'CUSTOM_PRICE_REQUIRED');
+    expect(offenders).toHaveLength(1);
+    expect(offenders?.[0]).toMatchObject({ params: { itemId: bad } });
+  });
+
+  it('CUSTOM seçimi fiyatıyla birlikte gelirse kabul eder', () => {
+    const parsed = UpdateCampaignSelectionsBodySchema.safeParse({
+      mode: 'set',
+      selections: [
+        {
+          itemId: 'a1b2c3d4-e5f6-4890-a234-ef1234567890',
+          selection: 'CUSTOM',
+          customPrice: '180.00',
+        },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+  });
+
   it('selections 5000 sınırını aşarsa reddeder', () => {
     const selections = Array.from({ length: 5001 }, (_, i) => ({
       itemId: `a1b2c3d4-e5f6-4890-a234-${String(i).padStart(12, '0')}`,
@@ -468,6 +511,9 @@ describe('EstimateCampaignItemBodySchema / EstimateCampaignItemResultSchema', ()
       itemId: 'a1b2c3d4-e5f6-4890-a234-ef1234567890',
       scenario: 'max',
       price: '120.00',
+      // Satıcının hakedişi (price) = müşterinin ödediği + Trendyol'un karşıladığı.
+      customerPaidUnitPrice: '100.00',
+      trendyolFundedUnitAmount: '20.00',
       commissionPct: '13.10',
       commissionSource: 'band',
       calculable: true,
@@ -478,6 +524,23 @@ describe('EstimateCampaignItemBodySchema / EstimateCampaignItemResultSchema', ()
       commissionPeriodLabel: null,
     });
     expect(parsed.success).toBe(true);
+  });
+
+  it('karşılama alanları olmadan sonucu reddeder — alanlar zorunlu, yalnız değerleri null olabilir', () => {
+    const parsed = EstimateCampaignItemResultSchema.safeParse({
+      itemId: 'a1b2c3d4-e5f6-4890-a234-ef1234567890',
+      scenario: 'current',
+      price: '120.00',
+      commissionPct: '13.10',
+      commissionSource: 'band',
+      calculable: true,
+      reason: null,
+      breakdown: null,
+      breakdownScope: 'unit',
+      commissionTariffName: null,
+      commissionPeriodLabel: null,
+    });
+    expect(parsed.success).toBe(false);
   });
 });
 

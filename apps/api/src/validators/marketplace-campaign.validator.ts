@@ -513,6 +513,22 @@ export const UpdateCampaignSelectionsBodySchema = z
     if (val.mode === 'set' && val.selections.length === 0) {
       ctx.addIssue({ code: 'custom', message: 'SELECTIONS_REQUIRED', path: ['selections'] });
     }
+    // CUSTOM seçimi fiyatsız KALICILAŞAMAZ. Aksi hâlde satıcı satırı "katılıyorum" diye
+    // işaretler, kaydeder, dosyayı indirir ve o satırın fiyat hücresi BOŞ çıkar — Trendyol da
+    // ürünü sessizce yok sayar. Tavan aşımı (CUSTOM_PRICE_ABOVE_MAX) gürültülü hatasının
+    // ayna görüntüsüdür ve satıcı açısından daha tehlikelidir, çünkü hiçbir uyarı vermez.
+    // Kusurlu satırı arayüzün vurgulayabilmesi için tavan kapısıyla AYNI biçimde raporlanır:
+    // alan `selections`, `meta.itemId` kusurlu kalemi adlandırır.
+    for (const entry of val.selections) {
+      if (entry.selection === CampaignPriceSelection.CUSTOM && entry.customPrice === null) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'CUSTOM_PRICE_REQUIRED',
+          path: ['selections'],
+          params: { itemId: entry.itemId },
+        });
+      }
+    }
   })
   .openapi('UpdateCampaignSelectionsBody');
 
@@ -556,7 +572,40 @@ export const EstimateCampaignItemResultSchema = z
   .object({
     itemId: z.string().uuid(),
     scenario: z.enum(['current', 'max', 'custom']),
-    price: z.string(),
+    price: z.string().openapi({
+      description:
+        'What the SELLER earns, 2-decimal string: at `breakdownScope: "unit"` the settlement ' +
+        'price for one unit (the commission base — what Trendyol pays out, funding included); ' +
+        'at `breakdownScope: "order"` the whole assumed basket’s settlement total.',
+    }),
+    // ── Trendyol karşılama payının BİRİM dökümü ────────────────────────────────
+    // `price` satıcının hakedişidir; müşterinin ödediği ondan DÜŞÜKtür ve aradaki farkı
+    // Trendyol karşılar. Sepet bloğu bu ayrımı yalnız sipariş gösterimli kurgularda
+    // gösterebiliyordu (NET ve koşulluların yüzde varyantlarında blok null'dır), oysa canlı
+    // kampanyaların çoğu "Net %X İndirim"dir — yani satıcının Trendyol'un katkısını en çok
+    // görmesi gereken kurgu, tam da göremediği kurguydu. Bu iki alan farkı HER kurguda,
+    // birim başına açık eder. İkisi de `current` senaryosunda null'dır (kampanya yok) ve
+    // karşılama oranı sıfırken `trendyolFundedUnitAmount` "0.00" olur.
+    customerPaidUnitPrice: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'What the CUSTOMER pays for ONE unit under the campaign, 2-decimal string. Always ' +
+          'per-unit, even when `breakdownScope` is "order". Null for the `current` scenario ' +
+          '(no campaign applied).',
+      }),
+    trendyolFundedUnitAmount: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'What Trendyol contributes for ONE unit, 2-decimal string — the difference between ' +
+          'the seller’s unit settlement price and `customerPaidUnitPrice`, so ' +
+          'customerPaidUnitPrice + trendyolFundedUnitAmount closes on the unit settlement ' +
+          'price to the kuruş. "0.00" when the campaign’s funding rate is zero; null for the ' +
+          '`current` scenario.',
+      }),
     commissionPct: z.string().nullable(),
     commissionSource: CampaignCommissionSourceSchema.nullable(),
     calculable: z.boolean(),
@@ -564,11 +613,14 @@ export const EstimateCampaignItemResultSchema = z
     breakdown: QuoteBreakdownSchema.nullable(),
     breakdownScope: z.enum(['unit', 'order']).openapi({
       description:
-        'Scope of `breakdown` and `price`: `unit` = per-unit economics (the default, and always ' +
-        'for the current scenario); `order` = the whole campaign order (an n-unit single-product ' +
-        'basket) — returned for the max/custom scenario of an ORDER-presentation campaign ' +
-        '(BUY_X_PAY_Y / NTH_PRODUCT / a conditional-AMOUNT discount), where `price` is the order ' +
-        'revenue and `breakdown` is the order-level profit (n× product cost, 1× shipping, 1× PSF).',
+        'Scope of `breakdown` and `price`. It follows the CAMPAIGN’s presentation, not the ' +
+        'scenario: an ORDER-presentation campaign (BUY_X_PAY_Y / NTH_PRODUCT / a ' +
+        'conditional-AMOUNT discount) returns `order` for EVERY scenario — including `current`, ' +
+        'whose order is the same assumed basket priced campaign-free — so the modal always ' +
+        'totals to the figure the seller clicked in the row. `order` means the whole n-unit ' +
+        'single-product basket: `price` is the order revenue and `breakdown` is the order-level ' +
+        'profit (n× product cost, 1× shipping, 1× PSF). Everything else is `unit`: per-unit ' +
+        'economics.',
     }),
     // Şeffaflık: bant kademesini besleyen komisyon tarifesi + dönem. Bir kaynak
     // çözüldüyse (kalem product/category'e düşse bile) doludur; yoksa null.

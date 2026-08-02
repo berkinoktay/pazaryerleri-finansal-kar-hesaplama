@@ -594,6 +594,38 @@ describe('Marketplace Campaigns - list / detail / config PATCH / selections / de
     expect(item?.customPrice?.toFixed(2)).toBe(CUSTOM_PRICE);
   });
 
+  it('rejects a CUSTOM selection with no price with 422 CUSTOM_PRICE_REQUIRED', async () => {
+    // The silent twin of CUSTOM_PRICE_ABOVE_MAX: without this gate the row persists as
+    // "participating" with an empty price, the exported sheet's price cell comes out blank
+    // and Trendyol simply skips the product — with no error the seller could ever see.
+    const res = await patchSelections({
+      mode: 'set',
+      selections: [{ itemId: fx.matchedItemId, selection: 'CUSTOM', customPrice: null }],
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as ProblemWire;
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: 'selections',
+          code: 'CUSTOM_PRICE_REQUIRED',
+          // Named so the frontend can highlight the offending row, exactly as the ceiling
+          // guard does.
+          meta: expect.objectContaining({ itemId: fx.matchedItemId }),
+        }),
+      ]),
+    );
+
+    // Nothing was written — the price the seller typed earlier survives untouched.
+    const item = await prisma.marketplaceCampaignItem.findUnique({
+      where: { id: fx.matchedItemId },
+      select: { selection: true, customPrice: true },
+    });
+    expect(item?.selection).toBe('CUSTOM');
+    expect(item?.customPrice?.toFixed(2)).toBe(CUSTOM_PRICE);
+  });
+
   it("mode 'all' selects every item at MAX and 'none' clears them, both keeping custom prices", async () => {
     const all = await patchSelections({ mode: 'all' });
     expect(all.status).toBe(200);

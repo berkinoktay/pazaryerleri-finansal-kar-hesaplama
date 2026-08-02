@@ -7880,6 +7880,209 @@
           "discountType"
         ]
       },
+      "EstimateCampaignItemResult": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scenario": {
+            "type": "string",
+            "enum": [
+              "current",
+              "max",
+              "custom"
+            ]
+          },
+          "price": {
+            "type": "string",
+            "description": "What the SELLER earns, 2-decimal string: at `breakdownScope: \"unit\"` the settlement price for one unit (the commission base — what Trendyol pays out, funding included); at `breakdownScope: \"order\"` the whole assumed basket’s settlement total."
+          },
+          "customerPaidUnitPrice": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the CUSTOMER pays for ONE unit under the campaign, 2-decimal string. Always per-unit, even when `breakdownScope` is \"order\". Null for the `current` scenario (no campaign applied)."
+          },
+          "trendyolFundedUnitAmount": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What Trendyol contributes for ONE unit, 2-decimal string — the difference between the seller’s unit settlement price and `customerPaidUnitPrice`, so customerPaidUnitPrice + trendyolFundedUnitAmount closes on the unit settlement price to the kuruş. \"0.00\" when the campaign’s funding rate is zero; null for the `current` scenario."
+          },
+          "commissionPct": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commissionSource": {
+            "$ref": "#/components/schemas/CampaignCommissionSource"
+          },
+          "calculable": {
+            "type": "boolean"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/CampaignItemReason"
+          },
+          "breakdown": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QuoteBreakdown"
+              },
+              {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            ]
+          },
+          "breakdownScope": {
+            "type": "string",
+            "enum": [
+              "unit",
+              "order"
+            ],
+            "description": "Scope of `breakdown` and `price`. It follows the CAMPAIGN’s presentation, not the scenario: an ORDER-presentation campaign (BUY_X_PAY_Y / NTH_PRODUCT / a conditional-AMOUNT discount) returns `order` for EVERY scenario — including `current`, whose order is the same assumed basket priced campaign-free — so the modal always totals to the figure the seller clicked in the row. `order` means the whole n-unit single-product basket: `price` is the order revenue and `breakdown` is the order-level profit (n× product cost, 1× shipping, 1× PSF). Everything else is `unit`: per-unit economics."
+          },
+          "commissionTariffName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commissionPeriodLabel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "itemId",
+          "scenario",
+          "price",
+          "customerPaidUnitPrice",
+          "trendyolFundedUnitAmount",
+          "commissionPct",
+          "commissionSource",
+          "calculable",
+          "reason",
+          "breakdown",
+          "breakdownScope",
+          "commissionTariffName",
+          "commissionPeriodLabel"
+        ]
+      },
+      "CampaignCommissionSource": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "band",
+          "product",
+          "category",
+          null
+        ],
+        "description": "Komisyon nereden geldi: komisyon tarifesi bandı (band) / ürünün senkronlanan komisyonu (product) / kategori oranı (category)."
+      },
+      "CampaignItemReason": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "NO_PRODUCT",
+          "NO_COST",
+          "NO_SHIPPING",
+          "NO_COMMISSION",
+          null
+        ],
+        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon yok."
+      },
+      "EstimateCampaignItemBody": {
+        "type": "object",
+        "properties": {
+          "scenario": {
+            "type": "string",
+            "enum": [
+              "current",
+              "max",
+              "custom"
+            ],
+            "description": "Hangi senaryonun dökümü: current (mevcut satış fiyatı) / max (maksimum girilebilecek fiyat) / custom (satıcının özel fiyatı)."
+          },
+          "customPrice": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d{1,2})?$",
+            "description": "scenario=custom iken denenecek fiyat; kalemin kayıtlı customPrice’ını geçici olarak geçersiz kılar."
+          }
+        },
+        "required": [
+          "scenario"
+        ]
+      },
+      "TargetMarginResult": {
+        "type": "object",
+        "properties": {
+          "suggestions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "itemId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "price": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Suggested price reaching the target margin; null when reason is set."
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "UNREACHABLE",
+                    "NOT_CALCULABLE",
+                    null
+                  ],
+                  "description": "UNREACHABLE = no price up to maxPrice reaches the target margin. NOT_CALCULABLE = required cost/commission/shipping inputs are missing for this item. Null when `price` is present."
+                }
+              },
+              "required": [
+                "itemId",
+                "price",
+                "reason"
+              ]
+            }
+          }
+        },
+        "required": [
+          "suggestions"
+        ]
+      },
+      "TargetMarginBody": {
+        "type": "object",
+        "properties": {
+          "targetMarginPct": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d{1,2})?$"
+          }
+        },
+        "required": [
+          "targetMarginPct"
+        ]
+      },
       "MarketplaceCampaignDetail": {
         "type": "object",
         "properties": {
@@ -8149,20 +8352,6 @@
           "scenario"
         ]
       },
-      "CampaignItemReason": {
-        "type": [
-          "string",
-          "null"
-        ],
-        "enum": [
-          "NO_PRODUCT",
-          "NO_COST",
-          "NO_SHIPPING",
-          "NO_COMMISSION",
-          null
-        ],
-        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon yok."
-      },
       "CampaignScenario": {
         "type": "object",
         "properties": {
@@ -8199,19 +8388,6 @@
           "marginPct"
         ],
         "description": "One priced scenario for a campaign item (at the current, max, or custom price): the resolved commission and the resulting net profit / margin. commissionPct/commissionSource/netProfit/marginPct are null when the item is not calculable at this price."
-      },
-      "CampaignCommissionSource": {
-        "type": [
-          "string",
-          "null"
-        ],
-        "enum": [
-          "band",
-          "product",
-          "category",
-          null
-        ],
-        "description": "Komisyon nereden geldi: komisyon tarifesi bandı (band) / ürünün senkronlanan komisyonu (product) / kategori oranı (category)."
       },
       "CampaignCommissionBand": {
         "type": "object",
@@ -22008,6 +22184,317 @@
           },
           "404": {
             "description": "Campaign or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/items/{itemId}/estimate": {
+      "post": {
+        "tags": [
+          "MarketplaceCampaigns"
+        ],
+        "summary": "Estimate the profit breakdown for one campaign item under one scenario",
+        "description": "Computes the full profit breakdown (income plus every expense line: commission, shipping, platform service, stoppage, VAT) for ONE campaign item under the chosen scenario, reusing the same profit engine and resolvers the detail view uses — so the modal never disagrees with the row. `scenario: \"current\"` prices the item campaign-free at its current price; `\"max\"` prices it at the maximum Trendyol allows; `\"custom\"` prices the seller's own price, taken from the request body when given (the screen buffers it before saving) and from the stored value otherwise. A custom price above the item's maximum is refused with 422 CUSTOM_PRICE_ABOVE_MAX, and a custom scenario with no price anywhere with 422 CUSTOM_PRICE_REQUIRED. `price` is what the SELLER earns; `customerPaidUnitPrice` and `trendyolFundedUnitAmount` split one unit into what the customer pays and what Trendyol funds (both null for the campaign-free scenario). `breakdownScope` follows the campaign’s presentation — an ORDER-presentation campaign returns the whole assumed basket for EVERY scenario, including `current`. Read-only (POST only because it carries a body); no state changes. Money fields are GROSS decimal strings.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "campaignId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "itemId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EstimateCampaignItemBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The profit breakdown for the chosen scenario",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EstimateCampaignItemResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Item, campaign or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid payload — an unknown scenario, a custom price above the item maximum, or a custom scenario with no price",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/target-margin": {
+      "post": {
+        "tags": [
+          "MarketplaceCampaigns"
+        ],
+        "summary": "Suggest a campaign price per item for a target net margin",
+        "description": "For every item in the campaign, computes the SMALLEST campaign price whose net margin reaches `targetMarginPct`, capped at the item's \"Maksimum Girebileceğin Fiyat\". The commission is anchored on the maximum price’s band, so a suggestion that lands in a cheaper band is optimistic and the row’s own scenario shows the real figure. An item whose target no price reaches comes back with reason UNREACHABLE; one missing cost, shipping or commission with NOT_CALCULABLE. Suggestions arrive in the campaign’s own row order.\n\nThis endpoint COMPUTES AND RETURNS — it writes NOTHING. The client puts the suggested prices into its local buffer and they become persistent only when the seller saves through the selections endpoint, so the seller’s choices keep a single source of truth. POST only because it carries a body. Money fields are GROSS decimal strings.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "campaignId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TargetMarginBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A suggested price (or a reason) per campaign item — nothing was persisted",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetMarginResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Campaign or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid payload — a malformed target margin",
             "content": {
               "application/json": {
                 "schema": {
