@@ -20,6 +20,7 @@
 
 import { Decimal } from 'decimal.js';
 
+import type { CampaignPriceSelection } from '@pazarsync/db/enums';
 import { solvePriceForTarget, type EstimateOutcome } from '@pazarsync/profit';
 
 import {
@@ -87,8 +88,15 @@ export interface ComputeCampaignItemInput {
   readonly currentPrice: Decimal;
   /** "Maksimum Girebileceğin Fiyat" — birinci fiyat seçeneği ve özel fiyatın tavanı. */
   readonly maxPrice: Decimal;
-  /** Satıcının yazdığı özel fiyat; yazılmamışsa null. */
+  /** Satıcının yazdığı özel fiyat; yazılmamışsa null. Seçimden BAĞIMSIZ saklanır (tasarım §3). */
   readonly customPrice: Decimal | null;
+  /**
+   * Satıcının kayıtlı fiyat seçimi. Sepet (sipariş) bloğunun HANGİ fiyattan kurulacağını bu
+   * belirler — `customPrice`'ın dolu olması değil: satıcı bir özel fiyat yazıp karşılaştırdıktan
+   * sonra yine MAX seçeneğinde kalmış olabilir ve o satırda sipariş dökümü seçmediği seçeneğe
+   * ait olamaz.
+   */
+  readonly selection: CampaignPriceSelection;
   readonly config: DiscountConfig;
   /** Trendyol karşılama oranı, yüzde (60 = %60). Karşılama bilinmiyorsa 0. */
   readonly fundingPct: Decimal;
@@ -210,9 +218,20 @@ function buildCampaignBasketScenario(
  * Kalemin hesaplanabilirliği ve gerekçesi MEVCUT senaryodan gelir — listede görünen "bugünkü
  * durum" odur; ürün eşleşmemişse ya da maliyet/komisyon/kargo eksikse üç senaryo da boş kalır.
  *
- * Sepet bloğu ({@link buildCampaignBasketScenario}) satıcının fiilen değerlendirdiği fiyattan
- * kurulur: özel fiyat yazılmışsa ondan, yoksa maksimum fiyattan. `customPrice` seçimden bağımsız
- * saklandığı için (tasarım §3) bir fiyat yazmış satıcı sipariş dökümünü de o fiyattan görür.
+ * Sepet bloğu ({@link buildCampaignBasketScenario}) satıcının SEÇTİĞİ fiyattan kurulur:
+ * `selection === 'CUSTOM'` ise özel fiyat, `MAX` ve `NONE` ise maksimum fiyat. `NONE` (henüz
+ * seçim yok) maksimuma bağlanır çünkü ekranın sunduğu varsayılan seçenek odur.
+ *
+ * Belirleyici olan SEÇİMDİR, `customPrice`'ın dolu olması değil: özel fiyat seçimden bağımsız
+ * saklandığı için (tasarım §3) satıcı bir fiyat yazıp karşılaştırdıktan sonra MAX seçeneğinde
+ * kalmış olabilir; sipariş gösterimli kurgularda (`BUY_X_PAY_Y`, `NTH_PRODUCT`, koşulluların TL
+ * varyantları) bu blok satırın MANŞET rakamıdır ve seçilmeyen seçeneğe ait olamaz.
+ *
+ * Bozuk durum kapısı: `selection === 'CUSTOM'` ama `customPrice === null` ise blok MAKSİMUM
+ * fiyattan kurulur (null fiyatlı sepet üretilmez). Gerekçe: bu satır hâlihazırda dışa
+ * aktarılamaz durumdadır (Görev 10 `resolveCampaignExportPrice` böyle bir satıra fiyat yazmaz),
+ * yani satıcı henüz yazmayı bitirmemiştir; bloğu tamamen boşaltmak satırın manşet rakamını
+ * silerdi, oysa ekran o an zaten maksimum seçeneğini sunuyor.
  */
 export function computeCampaignItem(
   ctx: TariffAssemblyContext,
@@ -222,7 +241,7 @@ export function computeCampaignItem(
   commission: DiscountCommissionInputs,
   input: ComputeCampaignItemInput,
 ): ComputedCampaignItem {
-  const { currentPrice, maxPrice, customPrice, config, fundingPct } = input;
+  const { currentPrice, maxPrice, customPrice, selection, config, fundingPct } = input;
 
   /**
    * Bir KAMPANYA fiyatının senaryosu: matrah + bant türetmesi ve zincir çözümü tek adımda,
@@ -256,8 +275,9 @@ export function computeCampaignItem(
   );
   const max = scenarioAt(maxPrice);
   const custom = customPrice !== null ? scenarioAt(customPrice) : null;
-  // Sepet çerçevesi satıcının değerlendirdiği fiyattan: özel fiyat varsa o, yoksa maksimum.
-  const basket = custom ?? max;
+  // Sepet çerçevesi satıcının SEÇTİĞİ fiyattan (yukarıdaki JSDoc): CUSTOM ise özel fiyat,
+  // MAX/NONE ise maksimum. CUSTOM seçili ama fiyat yazılmamışsa (`custom` null) maksimuma düşer.
+  const basket = selection === 'CUSTOM' && custom !== null ? custom : max;
 
   return {
     calculable: current.calculable,
