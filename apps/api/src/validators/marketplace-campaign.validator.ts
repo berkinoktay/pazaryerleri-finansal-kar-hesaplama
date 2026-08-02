@@ -126,9 +126,29 @@ function nonFixedKind(f: MarketplaceCampaignConfigFields): 'AMOUNT' | 'PERCENT' 
   return f.valueKind === 'PERCENT' ? 'PERCENT' : 'AMOUNT';
 }
 
+/**
+ * Type guard narrowing the FULL six-member `DiscountType` down to the five Kampanyalar
+ * supports. Needed because `MarketplaceCampaignList.discountType` is a Prisma column typed
+ * as the full `DiscountType` (the column is shared with İndirimler's schema shape and can't
+ * express "five of six" at the DB/type level), while `campaignConfigFromFields`'s switch is
+ * only exhaustive over the five-member `CAMPAIGN_DISCOUNT_TYPES` union. A caller reading a
+ * real Prisma row needs a way to narrow the wide column type without an `as` (banned
+ * repo-wide) — this guard is that way.
+ */
+export function isCampaignDiscountType(
+  value: DiscountType,
+): value is (typeof CAMPAIGN_DISCOUNT_TYPES)[number] {
+  return (CAMPAIGN_DISCOUNT_TYPES as readonly string[]).includes(value);
+}
+
 /** Kaydedilmiş liste satırının compute'e ilgili kurgu alanları. */
 export interface MarketplaceCampaignConfigRow {
-  discountType: (typeof CAMPAIGN_DISCOUNT_TYPES)[number];
+  // FULL DiscountType (not the narrowed campaign union) — see isCampaignDiscountType above.
+  // The write path (MarketplaceCampaignConfigFieldsSchema) makes a CODE row unwritable
+  // through this vertical, but the column itself is the shared DiscountType and cannot
+  // enforce that at the type level; campaignConfigFromListRow guards it as defense in depth
+  // against a hand-edited or migrated row.
+  discountType: DiscountType;
   valueKind: (typeof DiscountValueKind)[keyof typeof DiscountValueKind] | null;
   value: Prisma.Decimal | null;
   minBasketAmount: Prisma.Decimal | null;
@@ -142,9 +162,19 @@ export interface MarketplaceCampaignConfigRow {
 /**
  * İkinci köprü: kaydedilmiş satırdan compute'ün DiscountConfig'ini kurar. Satır yazılırken
  * zaten doğrulamadan geçtiği için burada yeniden doğrulama yapılmaz — alanlar string'e
- * indirilip AYNI switch'ten geçirilir (kopya switch yok).
+ * indirilip AYNI switch'ten geçirilir (kopya switch yok). Tek istisna `discountType`: satır
+ * teorik olarak CODE taşıyabileceği için (yukarıya bakın) `campaignConfigFromFields`'a
+ * geçmeden ÖNCE `isCampaignDiscountType` ile daraltılır; CODE görülürse açık bir hata
+ * fırlatılır — sessizce yanlış bir DiscountConfig üretmek yerine.
  */
 export function campaignConfigFromListRow(row: MarketplaceCampaignConfigRow): DiscountConfig {
+  if (!isCampaignDiscountType(row.discountType)) {
+    throw new Error(
+      `Campaign list row carries an unsupported discount type: ${row.discountType}. ` +
+        'Kampanyalar only supports NET, CONDITIONAL_BASKET, CONDITIONAL_QUANTITY, ' +
+        'BUY_X_PAY_Y, NTH_PRODUCT — CODE is İndirimler-only.',
+    );
+  }
   return campaignConfigFromFields({
     discountType: row.discountType,
     valueKind: row.valueKind ?? undefined,
@@ -187,6 +217,10 @@ export const MarketplaceCampaignItemPathSchema = MarketplaceCampaignPathSchema.e
 
 // ─── Import (multipart upload) ──────────────────────────────────────────────
 
+// `.extend()` on a schema that already carries `.superRefine()` PRESERVES that refinement
+// in this Zod version (unlike the sibling's plain-object + refine-applied-per-usage-site
+// pattern) — so this form still inherits BOTH refineDiscountConfig's per-type rules AND the
+// funding>100 check from MarketplaceCampaignConfigFieldsSchema without re-declaring them.
 export const ImportMarketplaceCampaignFormSchema = MarketplaceCampaignConfigFieldsSchema.extend({
   file: z.instanceof(File).openapi({
     type: 'string',
@@ -479,6 +513,9 @@ export const UpdateCampaignSelectionsResponseSchema = z
   .object({ updated: z.number().int() })
   .openapi('UpdateCampaignSelectionsResponse');
 
+// Same inheritance-through-extend as ImportMarketplaceCampaignFormSchema above — this PATCH
+// body still runs refineDiscountConfig + the funding>100 check via the base schema's
+// superRefine; nothing here re-applies them.
 export const UpdateMarketplaceCampaignBodySchema = MarketplaceCampaignConfigFieldsSchema.extend({
   name: z.string().min(1).optional(),
 }).openapi('UpdateMarketplaceCampaignBody');
