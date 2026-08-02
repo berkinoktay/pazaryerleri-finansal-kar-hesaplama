@@ -507,6 +507,34 @@ describe('marketplace-campaigns: route-layer authorization', () => {
       expect(((await res.json()) as ProblemWire).code).toBe('NOT_FOUND');
       await expect(snapshotCampaignState(ungrantedStore.id)).resolves.toBe(before);
     });
+
+    it('a VIEWER on a write route gets the store 404 BEFORE the capability 403', async () => {
+      // The case above cannot pin the ORDER of the two checks: MEMBER holds DATA_WRITE, so it
+      // answers 404 whichever runs first. VIEWER does NOT hold DATA_WRITE, which separates
+      // them — if `assertCapability` ran before `requireStoreAccess`, an ungranted store would
+      // answer 403 and thereby confirm the store exists. Ordering IS the non-disclosure here.
+      const caller = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      const membership = await createMembership(org.id, caller.id, 'VIEWER');
+      const store = await createStore(org.id);
+      const victim = await seedCampaign(org.id, store.id);
+      const deletePath = `/v1/organizations/${org.id}/stores/${store.id}/marketplace-campaigns/${victim.campaignId}`;
+
+      const before = await snapshotCampaignState(store.id);
+      const ungranted = await sendJson('DELETE', deletePath, caller.accessToken);
+      expect(ungranted.status).toBe(404);
+      expect(((await ungranted.json()) as ProblemWire).code).toBe('NOT_FOUND');
+
+      // Control: grant this VIEWER access to the SAME store and the SAME request now answers
+      // 403. That proves two things at once — the role genuinely lacks DATA_WRITE (so the 404
+      // above was not a role that happens to 404), and the store gate ran first.
+      await createMemberStoreAccess(org.id, membership.id, store.id);
+      const granted = await sendJson('DELETE', deletePath, caller.accessToken);
+      expect(granted.status).toBe(403);
+      expect(((await granted.json()) as ProblemWire).code).toBe('FORBIDDEN');
+
+      await expect(snapshotCampaignState(store.id)).resolves.toBe(before);
+    });
   });
 
   // ─── Gate 1 + auth middleware ───────────────────────────────────────────────
@@ -536,6 +564,7 @@ describe('marketplace-campaigns: route-layer authorization', () => {
 
         const anonymous = await endpoint.send(probe);
         expect(anonymous.status).toBe(401);
+        expect(((await anonymous.json()) as ProblemWire).code).toBe('UNAUTHENTICATED');
 
         await expect(snapshotCampaignState(store.id)).resolves.toBe(before);
       },
@@ -630,7 +659,29 @@ describe('marketplace-campaigns: route-layer authorization', () => {
     expect(body).not.toContain(VICTIM_TITLE);
   });
 
-  it("a selections payload naming a foreign itemId writes nothing to the victim's item", async () => {
+  it("estimating a SIBLING store's itemId under the caller's OWN campaign returns 404", async () => {
+    // Same org, so the item's `organizationId` filter alone would NOT reject this row — only
+    // the storeId + listId halves of the item filter do.
+    const caller = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, caller.id);
+    const storeInPath = await createStore(org.id, { name: 'Store In Path' });
+    const siblingStore = await createStore(org.id, { name: 'Sibling Store' });
+    const own = await seedCampaign(org.id, storeInPath.id);
+    const sibling = await seedCampaign(org.id, siblingStore.id);
+
+    const res = await sendJson(
+      'POST',
+      `/v1/organizations/${org.id}/stores/${storeInPath.id}/marketplace-campaigns/${own.campaignId}/items/${sibling.itemId}/estimate`,
+      caller.accessToken,
+      ESTIMATE_BODY,
+    );
+
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as ProblemWire).code).toBe('NOT_FOUND');
+  });
+
+  it('a selections payload naming a foreign itemId writes nothing and leaks no ceiling', async () => {
     const caller = await createAuthenticatedTestUser();
     const org = await createOrganization();
     await createMembership(org.id, caller.id);
@@ -642,23 +693,43 @@ describe('marketplace-campaigns: route-layer authorization', () => {
     const victim = await seedCampaign(victimOrg.id, victimStore.id);
 
     const before = await snapshotCampaignState(victimStore.id);
-    const res = await sendJson(
-      'PATCH',
-      `/v1/organizations/${org.id}/stores/${store.id}/marketplace-campaigns/${own.campaignId}/selections`,
-      caller.accessToken,
-      {
-        mode: 'set',
-        selections: [{ itemId: victim.itemId, selection: 'CUSTOM', customPrice: '1.00' }],
-      },
-    );
+    const selectionsPath = `/v1/organizations/${org.id}/stores/${store.id}/marketplace-campaigns/${own.campaignId}/selections`;
+    // ABOVE the victim's ceiling ON PURPOSE. There IS a disclosure channel on this path:
+    // `assertCustomPricesWithinMax` answers 422 CUSTOM_PRICE_ABOVE_MAX carrying
+    // `meta.maxPrice` — the victim's own number — and it is fed by a findMany scoped on
+    // (id, organizationId, storeId, listId). A price below every conceivable ceiling could
+    // never reach that branch, so it would keep this case green even with the scoping
+    // removed. An over-ceiling price makes it a real probe: correctly scoped the row is
+    // invisible and the check never sees it, so the answer stays 200 / updated 0.
+    const overCeiling = { selection: 'CUSTOM', customPrice: '999.00' } as const;
 
-    // The bulk UPDATE is gated on (organization_id, store_id, list_id), so a foreign itemId is
-    // silently skipped rather than rejected: the request succeeds having changed NOTHING.
-    // That is the documented contract — what matters here is that `updated` is 0 and the
-    // victim's row is untouched, NOT that the caller learns the id was foreign.
+    const res = await sendJson('PATCH', selectionsPath, caller.accessToken, {
+      mode: 'set',
+      selections: [{ itemId: victim.itemId, ...overCeiling }],
+    });
+
+    // The bulk UPDATE is gated on (organization_id, store_id, list_id), so a foreign itemId
+    // matches zero rows and is silently skipped rather than rejected: the request succeeds
+    // having changed NOTHING. That is the documented contract, and it discloses nothing the
+    // attacker did not already supply.
     expect(res.status).toBe(200);
-    expect(((await res.json()) as { updated: number }).updated).toBe(0);
+    const body = await res.text();
+    expect((JSON.parse(body) as { updated: number }).updated).toBe(0);
+    expect(body).not.toContain('CUSTOM_PRICE_ABOVE_MAX');
+    expect(body).not.toContain(VICTIM_MAX_PRICE);
     await expect(snapshotCampaignState(victimStore.id)).resolves.toBe(before);
+
+    // Indistinguishability — the other half of non-disclosure. "The attacker cannot learn the
+    // id was foreign" only holds while a NONEXISTENT id answers identically. Without this,
+    // a future change that 404'd unknown item ids while foreign ones stayed 200 would turn
+    // the endpoint into an existence oracle with the suite still green. Same pin as the
+    // random-campaign-id control below, one level down.
+    const unknown = await sendJson('PATCH', selectionsPath, caller.accessToken, {
+      mode: 'set',
+      selections: [{ itemId: randomUUID(), ...overCeiling }],
+    });
+    expect(unknown.status).toBe(res.status);
+    expect(await unknown.text()).toBe(body);
   });
 
   // ─── The export is a FILE — prove no spreadsheet crosses the boundary ────────
