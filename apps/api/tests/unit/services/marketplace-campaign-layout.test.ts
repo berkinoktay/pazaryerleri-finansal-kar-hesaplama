@@ -39,14 +39,9 @@ describe('resolveMarketplaceCampaignLayout', () => {
     expect(shuffled[layout?.campaignPrice ?? -1]).toBe('Kampanyalı Satış Fiyatı');
   });
 
-  it('zorunlu bir başlık eksikse null döner', () => {
-    const missing = HEADER.filter((h) => h !== 'Maksimum Girebileceğin Fiyat');
-    expect(resolveMarketplaceCampaignLayout(missing)).toBeNull();
-  });
-
-  it('yazma kolonu eksikse null döner', () => {
-    const missing = HEADER.filter((h) => h !== 'Kampanyalı Satış Fiyatı');
-    expect(resolveMarketplaceCampaignLayout(missing)).toBeNull();
+  it.each(HEADER)('zorunlu başlık "%s" eksikse null döner', (missing) => {
+    const withoutOne = HEADER.filter((h) => h !== missing);
+    expect(resolveMarketplaceCampaignLayout(withoutOne)).toBeNull();
   });
 
   it('İndirimler dosyasının başlıklarını kabul etmez', () => {
