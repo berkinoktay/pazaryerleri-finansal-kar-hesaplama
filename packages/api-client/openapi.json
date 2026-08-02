@@ -7904,14 +7904,14 @@
               "string",
               "null"
             ],
-            "description": "What the CUSTOMER pays for ONE unit under the campaign, 2-decimal string. Always per-unit, even when `breakdownScope` is \"order\". Null for the `current` scenario (no campaign applied)."
+            "description": "What the CUSTOMER pays for ONE unit under the campaign, 2-decimal string, alongside the seller’s unit settlement `price`. Null for the `current` scenario (no campaign applied) AND whenever `breakdownScope` is \"order\": at ORDER presentation the per-unit effective price is a synthetic average that describes no real unit (in a 2-al-1-öde the customer pays full price for one unit and nothing for the other), so the split is reported as basket totals on `CampaignBasketScenario` instead."
           },
           "trendyolFundedUnitAmount": {
             "type": [
               "string",
               "null"
             ],
-            "description": "What Trendyol contributes for ONE unit, 2-decimal string — the difference between the seller’s unit settlement price and `customerPaidUnitPrice`, so customerPaidUnitPrice + trendyolFundedUnitAmount closes on the unit settlement price to the kuruş. \"0.00\" when the campaign’s funding rate is zero; null for the `current` scenario."
+            "description": "What Trendyol contributes for ONE unit, 2-decimal string — the difference between the seller’s unit settlement price and `customerPaidUnitPrice`, so customerPaidUnitPrice + trendyolFundedUnitAmount closes on `price` to the kuruş at unit scope. \"0.00\" when the campaign’s funding rate is zero. Null in exactly the same cases as `customerPaidUnitPrice`: the `current` scenario and order scope."
           },
           "commissionPct": {
             "type": [
@@ -22221,7 +22221,7 @@
           "MarketplaceCampaigns"
         ],
         "summary": "Estimate the profit breakdown for one campaign item under one scenario",
-        "description": "Computes the full profit breakdown (income plus every expense line: commission, shipping, platform service, stoppage, VAT) for ONE campaign item under the chosen scenario, reusing the same profit engine and resolvers the detail view uses — so the modal never disagrees with the row. `scenario: \"current\"` prices the item campaign-free at its current price; `\"max\"` prices it at the maximum Trendyol allows; `\"custom\"` prices the seller's own price, taken from the request body when given (the screen buffers it before saving) and from the stored value otherwise. A custom price above the item's maximum is refused with 422 CUSTOM_PRICE_ABOVE_MAX, and a custom scenario with no price anywhere with 422 CUSTOM_PRICE_REQUIRED. `price` is what the SELLER earns; `customerPaidUnitPrice` and `trendyolFundedUnitAmount` split one unit into what the customer pays and what Trendyol funds (both null for the campaign-free scenario). `breakdownScope` follows the campaign’s presentation — an ORDER-presentation campaign returns the whole assumed basket for EVERY scenario, including `current`. Read-only (POST only because it carries a body); no state changes. Money fields are GROSS decimal strings.",
+        "description": "Computes the full profit breakdown (income plus every expense line: commission, shipping, platform service, stoppage, VAT) for ONE campaign item under the chosen scenario, reusing the same profit engine and resolvers the detail view uses — so the modal never disagrees with the row. `scenario: \"current\"` prices the item campaign-free at its current price; `\"max\"` prices it at the maximum Trendyol allows; `\"custom\"` prices the seller's own price, taken from the request body when given (the screen buffers it before saving) and from the stored value otherwise. A custom price above the item's maximum is refused with 422 CUSTOM_PRICE_ABOVE_MAX, and a custom scenario with no price anywhere with 422 CUSTOM_PRICE_REQUIRED. `price` is what the SELLER earns; at unit scope `customerPaidUnitPrice` and `trendyolFundedUnitAmount` split one unit into what the customer pays and what Trendyol funds (both null for the campaign-free scenario and at order scope, where the split is reported as basket totals instead). `breakdownScope` follows the campaign’s presentation — an ORDER-presentation campaign returns the whole assumed basket for EVERY scenario, including `current`. Read-only (POST only because it carries a body); no state changes. Money fields are GROSS decimal strings.",
         "security": [
           {
             "bearerAuth": []

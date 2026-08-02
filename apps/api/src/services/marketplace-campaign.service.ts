@@ -24,21 +24,11 @@ import { Prisma, prisma } from '@pazarsync/db';
 import type { DiscountType, Store as PrismaStore } from '@pazarsync/db';
 import { CampaignPriceSelection } from '@pazarsync/db/enums';
 import { mapPrismaError } from '@pazarsync/sync-core';
-import type { EstimateOutcome } from '@pazarsync/profit';
 
 import { NotFoundError, ValidationError, type ValidationIssue } from '../lib/errors';
-import { resolveCommissionRate } from './commission-rate-resolver';
-import { resolveDiscountCommissionSource } from './discount-commission-source';
-import { scenarioPresentation, type DiscountCommissionInputs } from './discount-math-commons';
-import {
-  computeCampaignItem,
-  type TariffAssemblyContext,
-  type TariffVariant,
-} from './marketplace-campaign-compute.service';
-import { fetchCostAggregates } from './products-list.service';
-import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
-import { NO_SHIPPING } from './tariff-compute-commons';
-import type { VariantCostAggregate } from '../validators/product.validator';
+import { scenarioPresentation } from './discount-math-commons';
+import { computeCampaignItem } from './marketplace-campaign-compute.service';
+import { resolveCampaignEconomics, EMPTY_ITEM_ECONOMICS } from './marketplace-campaign-economics';
 import {
   campaignConfigFromListRow,
   isCampaignDiscountType,
@@ -156,23 +146,6 @@ export async function listMarketplaceCampaigns(
 
 // ─── Detail ───────────────────────────────────────────────────────────────────
 
-/** The variant columns the detail compute reads — TariffVariant + its synced rate + image. */
-interface CampaignVariantRow {
-  id: string;
-  stockCode: string;
-  barcode: string;
-  salePrice: Prisma.Decimal;
-  vatRate: number | null;
-  isDigital: boolean;
-  syncedCommissionRate: Prisma.Decimal | null;
-  product: {
-    title: string;
-    categoryId: bigint | null;
-    brandId: bigint | null;
-    images: { url: string }[];
-  };
-}
-
 /** Serializes a computed scenario (Decimal price) to the wire scenario (money 2dp). */
 function serializeScenario(
   s: ReturnType<typeof computeCampaignItem>['current'],
@@ -262,123 +235,36 @@ export async function getMarketplaceCampaignDetail(
   const config = campaignConfigFromListRow(list);
   const fundingPct = new Decimal(list.trendyolFundingPct.toString());
 
-  // ─── Batch-resolve matched variants + cost + shipping + image once ───────────
-  const variantIds = list.items
-    .map((i) => i.productVariantId)
-    .filter((id): id is string => id !== null);
-
-  const variantMap = new Map<string, CampaignVariantRow>();
-  const imageMap = new Map<string, string | null>();
-  let costMap = new Map<string, VariantCostAggregate>();
-  let shippingMap = new Map<string, EstimateOutcome>();
-
-  if (variantIds.length > 0) {
-    let variants;
-    try {
-      variants = await prisma.productVariant.findMany({
-        where: { id: { in: variantIds }, organizationId: orgId, storeId },
-        select: {
-          id: true,
-          stockCode: true,
-          barcode: true,
-          salePrice: true,
-          vatRate: true,
-          isDigital: true,
-          syncedCommissionRate: true,
-          product: {
-            select: {
-              title: true,
-              categoryId: true,
-              brandId: true,
-              images: { select: { url: true }, orderBy: { position: 'asc' }, take: 1 },
-            },
-          },
-        },
-      });
-    } catch (err) {
-      mapPrismaError(err);
-    }
-    for (const variant of variants) {
-      variantMap.set(variant.id, variant);
-      imageMap.set(variant.id, variant.product.images[0]?.url ?? null);
-    }
-
-    [costMap, shippingMap] = await Promise.all([
-      fetchCostAggregates(orgId, variantIds),
-      batchResolveShipping(orgId, storeId, variantIds),
-    ]);
-  }
-
-  // ─── Resolve the commission tariff bands (1st tier), anchored to the campaign start ──
-  // Bands are authoritative ONLY from a tariff week that COVERS the anchor instant; no
-  // covering week → no bands (the per-item chain falls to the product/category rate).
-  // `outdated` is true only when the store has tariffs but none covers the anchor. The
-  // resolver is the SHARED one — this vertical anchors exactly like İndirimler.
-  const { resolution: source, outdated: commissionTariffOutdated } =
-    await resolveDiscountCommissionSource(orgId, storeId, list.startsAt, new Date());
-
-  // ─── Category-rate fallback cache (3rd tier) — once per distinct (cat, brand) ──
-  const categoryRateByKey = new Map<string, Decimal | null>();
-  const distinctCatKeys = new Map<string, { categoryId: bigint; brandId: bigint | null }>();
-  for (const variant of variantMap.values()) {
-    const { categoryId, brandId } = variant.product;
-    if (categoryId === null) continue;
-    distinctCatKeys.set(`${categoryId}:${brandId ?? 'null'}`, { categoryId, brandId });
-  }
-  await Promise.all(
-    [...distinctCatKeys].map(async ([key, { categoryId, brandId }]) => {
-      const resolved = await resolveCommissionRate({
-        platform: store.platform,
-        categoryId,
-        brandId,
-        sellerSegment: null,
-      });
-      categoryRateByKey.set(key, resolved?.rate ?? null);
-    }),
+  // Every priced input — matched variant, image, cost, shipping and the three commission tiers
+  // anchored to the campaign start — comes from the SHARED resolver, the same one the estimate
+  // and target-margin services call. The detail layers only its own presentation extras (the
+  // band ladder below) on top; it never forks the resolution, so the modal cannot end up on a
+  // different chain than the row.
+  const economics = await resolveCampaignEconomics(
+    orgId,
+    storeId,
+    store,
+    list.startsAt,
+    list.items,
   );
 
-  const feeDefs = await prisma.$transaction((tx) => resolveFeeDefs(tx, store.platform));
-  const ctx: TariffAssemblyContext = { platform: store.platform, feeDefs };
-
   const items = list.items.map((item): MarketplaceCampaignDetailItem => {
-    const variantRow =
-      item.productVariantId !== null ? variantMap.get(item.productVariantId) : undefined;
-    const variant: TariffVariant | null = variantRow ?? null;
-    const cost = item.productVariantId !== null ? costMap.get(item.productVariantId) : undefined;
-    const shipping =
-      item.productVariantId !== null
-        ? (shippingMap.get(item.productVariantId) ?? NO_SHIPPING)
-        : NO_SHIPPING;
+    const inputs = economics.byItemId.get(item.id) ?? EMPTY_ITEM_ECONOMICS;
+    const { variant, cost, shipping, commission } = inputs;
 
-    // Three-tier chain inputs: tariff bands (by barcode) → synced product rate → category.
-    // The item's own `hasCommissionTariff` flag is Trendyol's claim about the SHEET, not about
-    // what this store actually uploaded — the bands map is the truth, so the lookup is not
-    // gated on it. The flag rides to the wire so the UI can warn about the mismatch.
-    const bands = source?.bandsByBarcode.get(item.barcode) ?? null;
     // The band ladder surfaced to the UI popover ("which band does this price land in?").
-    // Reuses the bands ALREADY read for the compute — no extra query. Money at 2 decimals,
+    // Reuses the bands ALREADY resolved for the compute — no extra query. Money at 2 decimals,
     // percent at 4. Null when there is no ladder for the barcode.
     const commissionBands: CampaignCommissionBand[] | null =
-      bands === null
+      commission.bands === null
         ? null
-        : bands.map((band) => ({
+        : commission.bands.map((band) => ({
             lowerLimit: band.lowerLimit !== null ? new Decimal(band.lowerLimit).toFixed(2) : null,
             upperLimit: band.upperLimit !== null ? new Decimal(band.upperLimit).toFixed(2) : null,
             commissionPct: new Decimal(band.commissionPct).toFixed(4),
           }));
-    const productRate =
-      variantRow !== undefined && variantRow.syncedCommissionRate !== null
-        ? new Decimal(variantRow.syncedCommissionRate.toString())
-        : null;
-    const categoryRate =
-      variantRow !== undefined && variantRow.product.categoryId !== null
-        ? (categoryRateByKey.get(
-            `${variantRow.product.categoryId}:${variantRow.product.brandId ?? 'null'}`,
-          ) ?? null)
-        : null;
 
-    const commission: DiscountCommissionInputs = { bands, productRate, categoryRate };
-    const computed = computeCampaignItem(ctx, variant, cost, shipping, commission, {
+    const computed = computeCampaignItem(economics.ctx, variant, cost, shipping, commission, {
       currentPrice: new Decimal(item.currentPrice.toString()),
       maxPrice: new Decimal(item.maxPrice.toString()),
       customPrice: item.customPrice !== null ? new Decimal(item.customPrice.toString()) : null,
@@ -399,8 +285,7 @@ export async function getMarketplaceCampaignDetail(
       size: item.size,
       category: item.category,
       stock: item.stock,
-      imageUrl:
-        item.productVariantId !== null ? (imageMap.get(item.productVariantId) ?? null) : null,
+      imageUrl: inputs.imageUrl,
       currentPrice: item.currentPrice.toFixed(2),
       maxPrice: item.maxPrice.toFixed(2),
       hasCommissionTariff: item.hasCommissionTariff,
@@ -434,10 +319,10 @@ export async function getMarketplaceCampaignDetail(
     endsAt: list.endsAt !== null ? list.endsAt.toISOString() : null,
     exported: list.exportedAt !== null,
     // Transparency: which tariff/period actually fed the bands (null when none resolved).
-    commissionTariffName: source?.tariffName ?? null,
-    commissionPeriodLabel: source?.periodLabel ?? null,
+    commissionTariffName: economics.tariffName,
+    commissionPeriodLabel: economics.periodLabel,
     // True only when the store has commission tariffs but none covers the anchor.
-    commissionTariffOutdated,
+    commissionTariffOutdated: economics.tariffOutdated,
     // UNIT vs ORDER row layout this config calls for; computed once for the campaign.
     scenarioPresentation: scenarioPresentation(config),
     items,

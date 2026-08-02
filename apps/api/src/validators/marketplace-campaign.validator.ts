@@ -583,17 +583,20 @@ export const EstimateCampaignItemResultSchema = z
     // Trendyol karşılar. Sepet bloğu bu ayrımı yalnız sipariş gösterimli kurgularda
     // gösterebiliyordu (NET ve koşulluların yüzde varyantlarında blok null'dır), oysa canlı
     // kampanyaların çoğu "Net %X İndirim"dir — yani satıcının Trendyol'un katkısını en çok
-    // görmesi gereken kurgu, tam da göremediği kurguydu. Bu iki alan farkı HER kurguda,
-    // birim başına açık eder. İkisi de `current` senaryosunda null'dır (kampanya yok) ve
-    // karşılama oranı sıfırken `trendyolFundedUnitAmount` "0.00" olur.
+    // görmesi gereken kurgu, tam da göremediği kurguydu. Bu iki alan o boşluğu BİRİM kapsamda
+    // doldurur; sipariş kapsamında ikisi de null'dır (birim-etkin fiyat orada yapay bir
+    // ortalamadır, aşağıdaki açıklamaya bakın) ve ayrım sepet bloğunun toplamlarından okunur.
     customerPaidUnitPrice: z
       .string()
       .nullable()
       .openapi({
         description:
-          'What the CUSTOMER pays for ONE unit under the campaign, 2-decimal string. Always ' +
-          'per-unit, even when `breakdownScope` is "order". Null for the `current` scenario ' +
-          '(no campaign applied).',
+          'What the CUSTOMER pays for ONE unit under the campaign, 2-decimal string, alongside ' +
+          'the seller’s unit settlement `price`. Null for the `current` scenario (no campaign ' +
+          'applied) AND whenever `breakdownScope` is "order": at ORDER presentation the ' +
+          'per-unit effective price is a synthetic average that describes no real unit (in a ' +
+          '2-al-1-öde the customer pays full price for one unit and nothing for the other), so ' +
+          'the split is reported as basket totals on `CampaignBasketScenario` instead.',
       }),
     trendyolFundedUnitAmount: z
       .string()
@@ -602,9 +605,9 @@ export const EstimateCampaignItemResultSchema = z
         description:
           'What Trendyol contributes for ONE unit, 2-decimal string — the difference between ' +
           'the seller’s unit settlement price and `customerPaidUnitPrice`, so ' +
-          'customerPaidUnitPrice + trendyolFundedUnitAmount closes on the unit settlement ' +
-          'price to the kuruş. "0.00" when the campaign’s funding rate is zero; null for the ' +
-          '`current` scenario.',
+          'customerPaidUnitPrice + trendyolFundedUnitAmount closes on `price` to the kuruş at ' +
+          'unit scope. "0.00" when the campaign’s funding rate is zero. Null in exactly the ' +
+          'same cases as `customerPaidUnitPrice`: the `current` scenario and order scope.',
       }),
     commissionPct: z.string().nullable(),
     commissionSource: CampaignCommissionSourceSchema.nullable(),

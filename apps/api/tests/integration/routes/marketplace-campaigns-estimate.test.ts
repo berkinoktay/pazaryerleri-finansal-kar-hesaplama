@@ -247,6 +247,14 @@ describe('Marketplace Campaigns - estimate + target-margin', () => {
     return (await res.json()) as EstimateWire;
   }
 
+  async function patchSelections(body: unknown): Promise<Response> {
+    return app.request(`${base()}/selections`, {
+      method: 'PATCH',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
   async function updateCampaign(body: Record<string, unknown>): Promise<Response> {
     return app.request(base(), {
       method: 'PATCH',
@@ -261,7 +269,7 @@ describe('Marketplace Campaigns - estimate + target-margin', () => {
 
   // ─── Scope + funding split ──────────────────────────────────────────────────
 
-  it('prices the max scenario as the ORDER and splits the funded amount per unit', async () => {
+  it('prices the max scenario as the whole ORDER, with no per-unit split alongside it', async () => {
     const body = await estimateJson(fx.matchedItemId, { scenario: 'max' });
 
     expect(body.itemId).toBe(fx.matchedItemId);
@@ -277,19 +285,21 @@ describe('Marketplace Campaigns - estimate + target-margin', () => {
     //   → Trendyol funds 240 per unit · order revenue = 2 × 640 = 1280.
     expect(body.breakdownScope).toBe('order');
     expect(body.price).toBe('1280.00');
-    expect(body.customerPaidUnitPrice).toBe('400.00');
-    expect(body.trendyolFundedUnitAmount).toBe('240.00');
     expect(body.breakdown?.saleGross).toBe('1280.00');
+    // No per-unit split at order scope. "400 per unit" would be a synthetic average — in a
+    // 2 al 1 öde the customer pays 800 for one unit and nothing for the other, so no unit
+    // actually costs 400 — and it would sit next to an order-scoped `price` a consumer could
+    // subtract it from. The split is reported as basket totals on the row's scenario block.
+    expect(body.customerPaidUnitPrice).toBeNull();
+    expect(body.trendyolFundedUnitAmount).toBeNull();
     // n× product cost, 1× shipping, 1× platform service (per parcel).
     expect(body.breakdown?.costGross).toBe('40.00');
   });
 
   it('prices the custom scenario from the request body, overriding the stored price', async () => {
     const stored = await estimateJson(fx.matchedItemId, { scenario: 'custom' });
-    // Stored 600 → paid 300, seller 600 − 0.4 × 300 = 480, order 2 × 480 = 960.
+    // Stored 600 → seller settles 600 − 0.4 × 300 = 480 per unit, order 2 × 480 = 960.
     expect(stored.price).toBe('960.00');
-    expect(stored.customerPaidUnitPrice).toBe('300.00');
-    expect(stored.trendyolFundedUnitAmount).toBe('180.00');
 
     // The screen buffers a different price before saving; the modal must price THAT one.
     const buffered = await estimateJson(fx.matchedItemId, {
@@ -297,8 +307,6 @@ describe('Marketplace Campaigns - estimate + target-margin', () => {
       customPrice: '500.00',
     });
     expect(buffered.price).toBe('800.00');
-    expect(buffered.customerPaidUnitPrice).toBe('250.00');
-    expect(buffered.trendyolFundedUnitAmount).toBe('150.00');
     expect(Number(buffered.breakdown?.netProfit)).toBeLessThan(Number(stored.breakdown?.netProfit));
   });
 
@@ -335,10 +343,10 @@ describe('Marketplace Campaigns - estimate + target-margin', () => {
     expect(body.calculable).toBe(false);
     expect(body.reason).toBe('NO_PRODUCT');
     expect(body.breakdown).toBeNull();
-    // The prices are still real — only the profit is unknowable.
+    // The scope is still the campaign's, and order scope carries no per-unit split.
     expect(body.breakdownScope).toBe('order');
-    expect(body.customerPaidUnitPrice).toBe('40.00');
-    expect(body.trendyolFundedUnitAmount).toBe('24.00');
+    expect(body.customerPaidUnitPrice).toBeNull();
+    expect(body.trendyolFundedUnitAmount).toBeNull();
   });
 
   // ─── Gates ──────────────────────────────────────────────────────────────────
@@ -475,6 +483,44 @@ describe('Marketplace Campaigns - estimate + target-margin', () => {
     const body = (await res.json()) as ProblemWire;
     expect(body.code).toBe('VALIDATION_ERROR');
     expect(body.errors?.some((e) => e.code === 'INVALID_TARGET_MARGIN')).toBe(true);
+  });
+
+  // ─── The basket anchor: the ONE thing that makes the current framing subtle ──
+
+  it('anchors the current order on the SAVED price, not the current price', async () => {
+    // Every other ORDER type derives n from a fixed quantity (buyQuantity / nthIndex /
+    // minQuantity), so swapping the anchor changes nothing and a BUY_X_PAY_Y fixture cannot
+    // catch a regression. CONDITIONAL_BASKET/AMOUNT is the only config where n follows the
+    // price — n = ceil(minBasket / price) — so it is the only case that can prove which price
+    // the modal anchored on.
+    //
+    //   saved custom price 250 → n = ceil(1000 / 250) = 4   ← the row's basket
+    //   current price      900 → n = ceil(1000 / 900) = 2   ← what a regressed anchor gives
+    const patch = await updateCampaign({
+      discountType: 'CONDITIONAL_BASKET',
+      valueKind: 'AMOUNT',
+      value: '100',
+      minBasketAmount: '1000',
+      trendyolFundingPct: '60',
+    });
+    expect(patch.status).toBe(200);
+
+    const saved = await patchSelections({
+      mode: 'set',
+      selections: [{ itemId: fx.matchedItemId, selection: 'CUSTOM', customPrice: '250.00' }],
+    });
+    expect(saved.status).toBe(200);
+
+    const row = await matchedRow();
+    expect(row.scenario?.assumedQuantity).toBe(4);
+
+    const body = await estimateJson(fx.matchedItemId, { scenario: 'current' });
+    expect(body.breakdownScope).toBe('order');
+    // 4 × 900. An anchor that drifted to the current price would make this 1800.00.
+    expect(body.price).toBe('3600.00');
+    expect(body.breakdown?.saleGross).toBe('3600.00');
+    // And the number the seller actually clicked in the row.
+    expect(body.breakdown?.netProfit).toBe(row.scenario?.currentOrderNetProfit);
   });
 
   // ─── UNIT-presentation campaign: the split has no basket block to hide behind ──

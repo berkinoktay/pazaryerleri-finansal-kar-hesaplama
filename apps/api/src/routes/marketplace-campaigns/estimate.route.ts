@@ -29,8 +29,9 @@ const estimateCampaignItemRoute = createRoute({
     'request body when given (the screen buffers it before saving) and from the stored value ' +
     "otherwise. A custom price above the item's maximum is refused with 422 CUSTOM_PRICE_ABOVE_MAX, " +
     'and a custom scenario with no price anywhere with 422 CUSTOM_PRICE_REQUIRED. `price` is what ' +
-    'the SELLER earns; `customerPaidUnitPrice` and `trendyolFundedUnitAmount` split one unit into ' +
-    'what the customer pays and what Trendyol funds (both null for the campaign-free scenario). ' +
+    'the SELLER earns; at unit scope `customerPaidUnitPrice` and `trendyolFundedUnitAmount` split ' +
+    'one unit into what the customer pays and what Trendyol funds (both null for the campaign-free ' +
+    'scenario and at order scope, where the split is reported as basket totals instead). ' +
     '`breakdownScope` follows the campaign’s presentation — an ORDER-presentation campaign returns ' +
     'the whole assumed basket for EVERY scenario, including `current`. Read-only (POST only because ' +
     'it carries a body); no state changes. Money fields are GROSS decimal strings.',

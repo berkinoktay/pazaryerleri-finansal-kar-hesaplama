@@ -511,7 +511,9 @@ describe('EstimateCampaignItemBodySchema / EstimateCampaignItemResultSchema', ()
       itemId: 'a1b2c3d4-e5f6-4890-a234-ef1234567890',
       scenario: 'max',
       price: '120.00',
-      // Satıcının hakedişi (price) = müşterinin ödediği + Trendyol'un karşıladığı.
+      // Birim kapsamda satıcının hakedişi (price) = müşterinin ödediği + Trendyol'un
+      // karşıladığı. Sipariş kapsamında iki alan da null döner (birim-etkin fiyat orada
+      // yapay bir ortalamadır) — servis testi o dalı ayrıca doğruluyor.
       customerPaidUnitPrice: '100.00',
       trendyolFundedUnitAmount: '20.00',
       commissionPct: '13.10',

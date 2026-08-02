@@ -1,6 +1,7 @@
 import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
+import { CampaignPriceSelection } from '@pazarsync/db/enums';
 import { computeUnitProfit, type EstimateOutcome } from '@pazarsync/profit';
 
 import { computeDiscountItem } from '@/services/discount-compute.service';
@@ -13,6 +14,7 @@ import {
 } from '@/services/discount-math-commons';
 import type { StoredBand } from '@/services/commission-tariff.types';
 import {
+  campaignBasketAnchorPrice,
   computeCampaignEstimate,
   computeCampaignItem,
   suggestTargetMarginPrices,
@@ -557,17 +559,23 @@ describe('computeCampaignItem — hesaplanabilirlik MEVCUT senaryodan gelir', ()
 // ─── computeCampaignEstimate — tek senaryonun tam dökümü ─────────────────────
 
 describe('computeCampaignEstimate', () => {
-  it('mevcut senaryo kampanyasız birim dökümü döner', () => {
+  it('sipariş gösterimli kurguda MEVCUT senaryo da kampanyasız SİPARİŞ dökümü döner', () => {
+    // Kapsam senaryoyu değil KURGUNUN gösterimini izler: satırın manşet rakamları (kampanyasız
+    // `currentOrderNetProfit` dâhil) sipariş toplamlarıdır, dolayısıyla o rakama tıklayan
+    // satıcıya birim dökümü göstermek toplamı tutmayan bir modal demekti.
     const out = computeCampaignEstimate(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
       price: d(1000),
       config: { type: 'BUY_X_PAY_Y', buyQuantity: 4, payQuantity: 2 },
       fundingPct: d(60),
       applyCampaign: false,
+      basketAnchorPrice: d(800),
     });
-    expect(out.scope).toBe('unit');
-    expect(out.price.toFixed(2)).toBe('1000.00');
-    expect(out.breakdown?.saleGross).toBe('1000.00');
-    expect(out.breakdown?.netProfit).toBe(oracleProfit(d(1000), '15').toFixed(2));
+    expect(out.scope).toBe('order');
+    // Kampanya yok → karşılama da yok → hakediş güncel fiyata eşit: gelir 4 × 1.000.
+    expect(out.price.toFixed(2)).toBe('4000.00');
+    expect(out.breakdown?.saleGross).toBe('4000.00');
+    // Satırın `currentOrderNetProfit`'i ile AYNI oracle — modal satırla çelişemez.
+    expect(out.breakdown?.netProfit).toBe(oracleProfit(d(4000), '15', 4).toFixed(2));
   });
 
   it('birim gösterimli kurguda kampanya senaryosu HAKEDİŞ fiyatının birim dökümüdür', () => {
@@ -576,6 +584,7 @@ describe('computeCampaignEstimate', () => {
       config: { type: 'NET', valueKind: 'PERCENT', value: d(10) },
       fundingPct: d(60),
       applyCampaign: true,
+      basketAnchorPrice: d(1000),
     });
     expect(out.scope).toBe('unit');
     expect(out.price.toFixed(2)).toBe('960.00');
@@ -589,6 +598,7 @@ describe('computeCampaignEstimate', () => {
       config: { type: 'BUY_X_PAY_Y', buyQuantity: 4, payQuantity: 2 },
       fundingPct: d(60),
       applyCampaign: true,
+      basketAnchorPrice: d(1000),
     });
     expect(out.scope).toBe('order');
     // Sipariş geliri = satıcının sepet hakedişi (4 × 800), müşterinin ödediği 2.000 DEĞİL.
@@ -602,17 +612,88 @@ describe('computeCampaignEstimate', () => {
     expect(out.breakdown?.costGross).toBe('400.00');
   });
 
+  it('sepet adedini SENARYO fiyatından değil ÇAPADAN türetir (fiyata duyarlı tek tür)', () => {
+    // `CONDITIONAL_BASKET`/TL, n'in fiyata bağlı olduğu TEK kurgu: n = ceil(minSepet / fiyat).
+    // Mevcut senaryonun çapası satıcının KAYITLI seçiminin fiyatıdır (250 → n = 4), senaryonun
+    // kendi fiyatı (1.000 → n = 1) değil; aksi hâlde modal satırın sepetinden başka bir sepeti
+    // fiyatlar ve iki sayı tutmaz.
+    const config: DiscountConfig = {
+      type: 'CONDITIONAL_BASKET',
+      valueKind: 'AMOUNT',
+      value: d(100),
+      minBasketAmount: d(1000),
+    };
+    const out = computeCampaignEstimate(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
+      price: d(1000),
+      config,
+      fundingPct: d(60),
+      applyCampaign: false,
+      basketAnchorPrice: d(250),
+    });
+    expect(out.scope).toBe('order');
+    expect(out.price.toFixed(2)).toBe('4000.00');
+    expect(out.breakdown?.costGross).toBe('400.00');
+
+    // Çapa senaryo fiyatına kaysaydı sepet tek birime inerdi — ayrımı görünür kılan kontrol.
+    const drifted = computeCampaignEstimate(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
+      price: d(1000),
+      config,
+      fundingPct: d(60),
+      applyCampaign: false,
+      basketAnchorPrice: d(1000),
+    });
+    expect(drifted.price.toFixed(2)).toBe('1000.00');
+  });
+
+  it('pozitif olmayan çapada sepet kurulamaz, birim dökümüne düşer', () => {
+    const out = computeCampaignEstimate(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
+      price: d(1000),
+      config: { type: 'BUY_X_PAY_Y', buyQuantity: 4, payQuantity: 2 },
+      fundingPct: d(60),
+      applyCampaign: false,
+      basketAnchorPrice: d(0),
+    });
+    expect(out.scope).toBe('unit');
+    expect(out.price.toFixed(2)).toBe('1000.00');
+  });
+
   it('hesaplanamayan kalemde döküm null, gerekçe dolu döner', () => {
     const out = computeCampaignEstimate(ctx, variant, OK_COST, OK_SHIPPING, noCommission, {
       price: d(1000),
       config: { type: 'BUY_X_PAY_Y', buyQuantity: 4, payQuantity: 2 },
       fundingPct: d(60),
       applyCampaign: true,
+      basketAnchorPrice: d(1000),
     });
     expect(out.calculable).toBe(false);
     expect(out.reason).toBe('NO_COMMISSION');
     expect(out.breakdown).toBeNull();
     expect(out.scope).toBe('order');
+  });
+});
+
+// ─── campaignBasketAnchorPrice — sepeti çerçeveleyen fiyat ───────────────────
+
+describe('campaignBasketAnchorPrice', () => {
+  it('CUSTOM seçimi ve yazılmış fiyat varsa satıcının kendi fiyatını verir', () => {
+    expect(
+      campaignBasketAnchorPrice(CampaignPriceSelection.CUSTOM, d(180), d(200)).toFixed(2),
+    ).toBe('180.00');
+  });
+
+  it('MAX ve NONE seçimlerinde maksimum fiyatı verir', () => {
+    expect(campaignBasketAnchorPrice(CampaignPriceSelection.MAX, d(180), d(200)).toFixed(2)).toBe(
+      '200.00',
+    );
+    expect(campaignBasketAnchorPrice(CampaignPriceSelection.NONE, null, d(200)).toFixed(2)).toBe(
+      '200.00',
+    );
+  });
+
+  it('CUSTOM seçili ama fiyat yazılmamışsa maksimuma düşer (null fiyatlı sepet üretilmez)', () => {
+    expect(campaignBasketAnchorPrice(CampaignPriceSelection.CUSTOM, null, d(200)).toFixed(2)).toBe(
+      '200.00',
+    );
   });
 });
 
