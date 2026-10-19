@@ -1,8 +1,10 @@
+<!-- Kaynak: https://developers.trendyol.com/docs/cari-hesap-ekstresi-entegrasyonu · Trendyol güncelleme: 2026-09-02 · yerele alındı: 2026-10-19 -->
 
-
-> ## Documentation Index
-> Fetch the complete documentation index at: https://developers.trendyol.com/llms.txt
-> Use this file to discover all available pages before exploring further.
+> **PazarSync notu (2026-10-19):**
+> - Changelog 06.07.2026 duyurusu: CHE servislerinin döndürdüğü `id` ve `paymentOrderId` değerleri 3 Ağustos 2026 itibarıyla **yenilendi**; eski değerlerle eşleştirme ya da filtreleme artık çalışmıyor. Trendyol, ilgili dönemin `startDate`/`endDate`/`transactionType` ile yeniden çekilmesini ve eski kayıtların temizlenmesini istiyor. Aynı duyuru `storeFrontCode` header'ının zorunlu olduğunu söylüyor; ancak canlıda (2026-10-19) TR satıcı için header olmadan da 200 dönüyor.
+> - Bu sayfadaki yenilikler: `payment-order` servisi (PAID ödeme emirleri, sayfa başı en fazla 10), `paymentDate` (yyyy-MM-dd) filtresi ve tarih aralığı olmadan tek başına `paymentOrderId` filtresi. Canlıda doğrulandı: bir ödeme emri id'siyle settlements (Sale/Return/Discount) ve otherfinancials (Ödeme, E-ticaret Stopajı, Platform Hizmet Bedeli, Kargo Fatura, Reklam Bedeli) eksiksiz geliyor.
+> - İşlem türü adları büyük/küçük harf duyarlı: `TYDiscount` → 400, `TyDiscount` → 200 (canlı). `transactionTypes` (çoklu) çalışıyor; yanıtta tür yalnız Türkçe etiketle geliyor ("Satış", "İndirim", "İade").
+> - Canlı satıcıda son 60 günde `Coupon` (40 satır, "Kupon"), `CouponCancel` (1) ve `DiscountCancel` (91, "İndirim İptal") satırları var; `DeliveryFee`, `DeliveryFeeCancel`, `PayByLink` için satır yok.
 
 # Cari Hesap Ekstresi Entegrasyonu
 
@@ -15,11 +17,11 @@
   * transactionType ve transactionTypes beraber girilmesi durumunda transactionTypes için girilen değerler geçerli kabul edilir.
 * paymentOrderId siparişin ödemesi yapıldıktan sonra oluşmaktadır. İstisnalar hariç, her çarşamba, ilgili haftada vadesi gelen siparişler için ödeme emri oluşur.
 * paymentOrderId ile sipariş ve ödemelerinizi eşleştirebilirsiniz.
-* Başlangıç ve bitiş tarihi girilmesi zorunludur ve arasındaki süre **15** günden uzun **olamaz**.
+* Tarih filtresi için **startDate+endDate**, **paymentDate** veya **paymentOrderId** gönderilmelidir. startDate ve endDate arasındaki süre **15** günden uzun **olamaz**. paymentDate (`yyyy-MM-dd`) gönderildiğinde kayıtlar işlem tarihi yerine ödeme/vade tarihine göre filtrelenir.
 * Store bilgileri Marketplace satıcıları için "null" olarak dönecektir.
 * "affiliate" alanı "TRENDYOLTR" yada "TRENDYOLAZJV" dönebilir.
 
-**Kullanılacak olan 2 servis (settlements , otherfinancials) birbirinden ayrı işlem kayıtlarını vermektedir.**
+**Kullanılacak olan servisler (settlements, otherfinancials, payment-order) birbirinden ayrı işlem kayıtlarını vermektedir.**
 
 * "Settlements" servisinden satış, iade, indirim, kupon, provizyon işlemlerinin detaylarına ulaşabilirsiniz.
 
@@ -29,6 +31,8 @@
   * Transaction Type, SellerRevenueNegativeCancel ve CommissionPositiveCancel birlikte değerlendirilmelidir.
 
 * "Other Financial" servisinden ise tedarikçi finansmanı, virman, ödemeler (hakediş), faturalar (Trendyoldan tedarikçiye) , tedarikçi faturaları (Tedarikçiden Trendyola), gelen havale, komisyon mutabakat faturaları işlemlerinin detaylarına ulaşabilirsiniz.
+
+* "Payment Order" servisinden satıcının PAID ödeme emirlerini sayfalı olarak listeleyebilirsiniz. Her sayfada en fazla 10 kayıt döner. Satıcı listeden `id` seçer; bu değer `paymentOrderId` olarak settlements / otherfinancials sorgusunda kullanılır.
 
 ### **GET** settlements
 
@@ -46,18 +50,24 @@
   [https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/settlements?endDate=\{endDate}\&startDate=\{startDate}\&transactionType=\{Type}\&page=0\&size=500](https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/settlements?endDate=\{endDate}\&startDate=\{startDate}\&transactionType=\{Type}\&page=0\&size=500)
 </NoLinkCallout>
 
+veya paymentDate ile:
+
+<NoLinkCallout type="info" title="PROD">
+  [https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/settlements?paymentDate=\{paymentDate}\&transactionType=\{Type}\&page=0\&size=500](https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/settlements?paymentDate=\{paymentDate}\&transactionType=\{Type}\&page=0\&size=500)
+</NoLinkCallout>
+
 <br />
 
-| Parametre                             | Parametre Değer                                                                                                                                                                                                                                                                                                                                                                                                                             | Açıklama                                                                                             | Tip             | Zorunlu |
-| :------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- | --------------- | ------- |
-| transactionType veya transactionTypes | Sale, Return, Discount, DiscountCancel, Coupon, CouponCancel, ProvisionPositive, ProvisionNegative, ManualRefund, ManualRefundCancel, TyDiscount, TyDiscountCancel, TyCoupon, TyCouponCancel, SellerRevenuePositive, SellerRevenueNegative, CommissionPositive, CommissionNegative, SellerRevenuePositiveCancel, SellerRevenueNegativeCancel, CommissionPositiveCancel, CommissionNegativeCancel, DeliveryFee, DeliveryFeeCancel, PayByLink | Finansal işlem türüdür.                                                                              | string          | Evet    |
-| startDate                             |                                                                                                                                                                                                                                                                                                                                                                                                                                             | Belirli bir tarihten sonraki işlem kayıtlarını getirir. Timestamp milisecond olarak gönderilmelidir. | long            | Evet    |
-| endDate                               |                                                                                                                                                                                                                                                                                                                                                                                                                                             | Belirli bir tarihten sonraki işlem kayıtlarını getirir. Timestamp milisecond olarak gönderilmelidir. | long            | Evet    |
-| page                                  |                                                                                                                                                                                                                                                                                                                                                                                                                                             | Sadece belirtilen sayfadaki bilgileri döndürür                                                       | int             | Hayır   |
-| size                                  | 500 ve 1000 değerlerini alabilir. (Default=500)                                                                                                                                                                                                                                                                                                                                                                                             | Bir sayfada listelenecek maksimum adeti belirtir.                                                    | int             | Hayır   |
-| supplierId                            |                                                                                                                                                                                                                                                                                                                                                                                                                                             | İlgili tedarikçinin ID bilgisi gönderilmelidir                                                       | long            | Evet    |
-| paymentDate                           |                                                                                                                                                                                                                                                                                                                                                                                                                                             | Ödemeye girebileceği en erken tarih                                                                  | string          | Hayır   |
-| paymentOrderId                        |                                                                                                                                                                                                                                                                                                                                                                                                                                             | Bu alanla sipariş ve ödemelerinizi eşleştirebilirsiniz.                                              | integer (int64) | Hayır   |
+| Parametre                             | Parametre Değer                                                                                                                                                                                                                                                                                                                                                                                                                             | Açıklama                                                                                                            | Tip             | Zorunlu |
+| :------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- | --------------- | ------- |
+| transactionType veya transactionTypes | Sale, Return, Discount, DiscountCancel, Coupon, CouponCancel, ProvisionPositive, ProvisionNegative, ManualRefund, ManualRefundCancel, TyDiscount, TyDiscountCancel, TyCoupon, TyCouponCancel, SellerRevenuePositive, SellerRevenueNegative, CommissionPositive, CommissionNegative, SellerRevenuePositiveCancel, SellerRevenueNegativeCancel, CommissionPositiveCancel, CommissionNegativeCancel, DeliveryFee, DeliveryFeeCancel, PayByLink | Finansal işlem türüdür.                                                                                             | string          | Evet    |
+| startDate                             |                                                                                                                                                                                                                                                                                                                                                                                                                                             | İşlem tarihi aralığının başlangıcı. Timestamp milisecond olarak gönderilmelidir. paymentDate yoksa zorunludur.      | long            | Hayır   |
+| endDate                               |                                                                                                                                                                                                                                                                                                                                                                                                                                             | İşlem tarihi aralığının bitişi. Timestamp milisecond olarak gönderilmelidir. Aralık 15 günden uzun olamaz.          | long            | Hayır   |
+| page                                  |                                                                                                                                                                                                                                                                                                                                                                                                                                             | Sadece belirtilen sayfadaki bilgileri döndürür                                                                      | int             | Hayır   |
+| size                                  | 500 ve 1000 değerlerini alabilir. (Default=500)                                                                                                                                                                                                                                                                                                                                                                                             | Bir sayfada listelenecek maksimum adeti belirtir.                                                                   | int             | Hayır   |
+| supplierId                            |                                                                                                                                                                                                                                                                                                                                                                                                                                             | İlgili tedarikçinin ID bilgisi gönderilmelidir                                                                      | long            | Evet    |
+| paymentDate                           | yyyy-MM-dd (Europe/Istanbul)                                                                                                                                                                                                                                                                                                                                                                                                                | Ödemeye girebileceği en erken tarih. Gönderildiğinde startDate/endDate yerine ödeme/vade tarihine göre filtreler.   | string          | Hayır   |
+| paymentOrderId                        |                                                                                                                                                                                                                                                                                                                                                                                                                                             | payment-order servisinden dönen id. Hakediş dönemindeki kayıtları startDate/endDate olmadan çekmek için kullanılır. | integer (int64) | Hayır   |
 
 #### **transactionType için kullanılabilecek işlem türlerinin açıklamaları aşağıdaki gibidir**
 
@@ -188,13 +198,13 @@ veya
 | :------------------------------------ | :----------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------------- | :------ |
 | transactionType veya transactionTypes | Stoppage, CashAdvance, WireTransfer, IncomingTransfer, ReturnInvoice, CommissionAgreementInvoice, PaymentOrder, DeductionInvoices, FinancialItem | Finansal işlem türüdür.                                                                                                                                                                                            | string          | Evet    |
 | transactionSubType                    | PlatformServiceFee                                                                                                                               | Platform hizmet bedeli kayıtlarını filtrelemek için kullanılır. Bu parametreyi kullanmak için transactionType=DeductionInvoices ya da transactionTypes içinde DeductionInvoices olacak şekilde istek yapılmalıdır. | string          | Hayır   |
-| startDate                             |                                                                                                                                                  | Belirli bir tarihten sonraki işlem kayıtlarını getirir. Timestamp millisecond olarak gönderilmelidir.                                                                                                              | long            | Evet    |
-| endDate                               |                                                                                                                                                  | Belirli bir tarihten sonraki işlem kayıtlarını getirir. Timestamp millisecond olarak gönderilmelidir.                                                                                                              | long            | Evet    |
+| startDate                             |                                                                                                                                                  | İşlem tarihi aralığının başlangıcı. Timestamp millisecond olarak gönderilmelidir. paymentDate yoksa zorunludur.                                                                                                    | long            | Hayır   |
+| endDate                               |                                                                                                                                                  | İşlem tarihi aralığının bitişi. Timestamp millisecond olarak gönderilmelidir. Aralık 15 günden uzun olamaz.                                                                                                        | long            | Hayır   |
 | page                                  |                                                                                                                                                  | Sadece belirtilen sayfadaki bilgileri döndürür                                                                                                                                                                     | int             | Hayır   |
 | size                                  | 500 ve 1000 değerlerini alabilir. (Default=500)                                                                                                  | Bir sayfada listelenecek maksimum adeti belirtir.                                                                                                                                                                  | int             | Hayır   |
 | supplierId                            |                                                                                                                                                  | İlgili tedarikçinin ID bilgisi gönderilmelidir                                                                                                                                                                     | long            | Evet    |
-| paymentDate                           |                                                                                                                                                  | Ödemeye girebileceği en erken tarih                                                                                                                                                                                | string          | Hayır   |
-| paymentOrderId                        |                                                                                                                                                  | Bu alanla sipariş ve ödemelerinizi eşleştirebilirsiniz.                                                                                                                                                            | integer (int64) | Hayır   |
+| paymentDate                           | yyyy-MM-dd (Europe/Istanbul)                                                                                                                     | Ödemeye girebileceği en erken tarih. Gönderildiğinde startDate/endDate yerine ödeme/vade tarihine göre filtreler.                                                                                                  | string          | Hayır   |
+| paymentOrderId                        |                                                                                                                                                  | payment-order servisinden dönen id. Hakediş dönemindeki kayıtları startDate/endDate olmadan çekmek için kullanılır.                                                                                                | integer (int64) | Hayır   |
 
 #### **transactionType için kullanılabilecek işlem türlerinin açıklamaları aşağıdaki gibidir.**
 
@@ -275,6 +285,89 @@ veya
     ]
 }
 ```
+
+### **GET** payment-order
+
+Satıcının PAID ödeme emirlerini sayfalı listeler. Cevap bir **ödeme emri listesidir**. Listedeki `id`, `settlements` ve `otherfinancials` servislerinde kullanılacak `paymentOrderId` değeridir. Tarih alanı `payoutDate`'tir.
+
+<NoLinkCallout type="info" title="PROD">
+  [https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/payment-order](https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/payment-order)
+</NoLinkCallout>
+
+<NoLinkCallout type="info" title="STAGE">
+  [https://stageapigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/payment-order](https://stageapigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/payment-order)
+</NoLinkCallout>
+
+**Önerilen Endpoint**
+
+<NoLinkCallout type="info" title="PROD">
+  [https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/payment-order?page=0\&size=10](https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/payment-order?page=0\&size=10)
+</NoLinkCallout>
+
+<br />
+
+| Parametre | Parametre Değer | Açıklama                                    | Tip     | Zorunlu |
+| :-------- | :-------------- | :------------------------------------------ | :------ | :------ |
+| sellerId  |                 | İlgili satıcının ID bilgisi                 | long    | Evet    |
+| page      | 0               | Sayfa numarası (0'dan başlar)               | integer | Hayır   |
+| size      | 10              | Sayfa boyutu. Varsayılan ve maksimum **10** | integer | Hayır   |
+
+#### Payment Order List Alımı
+
+```json
+{
+    "page": 0,
+    "size": 10,
+    "totalPages": 1,
+    "totalElements": 1,
+    "content": [
+        {
+            "id": 112360,
+            "status": "PAID",
+            "amount": 8754732.06,
+            "payoutDate": 1736460000000,
+            "paymentType": "PAYMENT",
+            "sellerId": 123456,
+            "regionId": 1,
+            "regionName": "Türkiye",
+            "regionCode": "TR"
+        }
+    ]
+}
+```
+
+Bu örnekteki `id` (112360) değeri, `settlements` ve `otherfinancials` isteklerinde `paymentOrderId=112360` olarak kullanılır.
+
+### Ödeme gününe göre sorgulama
+
+Bir ödeme günündeki muhasebe kayıtlarını çekmek için akış iki adımdır:
+
+1. `payment-order` servisini çağırın (`page`, `size`; varsayılan size=10, maksimum 10). Dönen `content` bir **ödeme emri listesidir**; listedeki `id`**&#x20;alanı&#x20;**`paymentOrderId`**&#x20;değeridir.** Satıcı listeden ilgili kaydı seçer.
+2. Seçilen `id` değerini `settlements` ve `otherfinancials` isteklerinde `paymentOrderId` query parametresi olarak kullanın. `startDate` / `endDate` göndermeniz zorunlu değildir.
+
+Liste birden fazla ödeme emri içerebilir; her `id` için ayrı `settlements` / `otherfinancials` isteği atılmalıdır.
+
+> **Dikkat:** Trendyol tarafından hakediş ödeme emirleriniz oluşturulduktan sonra settlements ve otherfinancials verilerinde güncellemeler zaman alabilir. Önerilen akış: bir sonraki gün `paymentOrderId` ile sorgulayın.
+
+**Önerilen sıralama**
+
+PAID ödeme emirlerini sayfalı listeler.
+
+<NoLinkCallout type="info" title="PROD">
+  [https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/payment-order?page=0\&size=10](https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/payment-order?page=0\&size=10)
+</NoLinkCallout>
+
+Seçilen `paymentOrderId` için satış, iade ve diğer settlement kayıtlarını getirir.
+
+<NoLinkCallout type="info" title="PROD">
+  [https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/settlements?paymentOrderId=\{paymentOrderId}\&transactionType=\{Type}\&page=0\&size=500](https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/settlements?paymentOrderId=\{paymentOrderId}\&transactionType=\{Type}\&page=0\&size=500)
+</NoLinkCallout>
+
+Seçilen `paymentOrderId` için hakediş, fatura ve diğer financial kayıtlarını getirir.
+
+<NoLinkCallout type="info" title="PROD">
+  [https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/otherfinancials?paymentOrderId=\{paymentOrderId}\&transactionType=\{Type}\&page=0\&size=500](https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/otherfinancials?paymentOrderId=\{paymentOrderId}\&transactionType=\{Type}\&page=0\&size=500)
+</NoLinkCallout>
 
 | TransactionType             |  MP | Türkçe                                | ÖdemeTipi  |
 | :-------------------------- | :-: | :------------------------------------ | ---------- |
