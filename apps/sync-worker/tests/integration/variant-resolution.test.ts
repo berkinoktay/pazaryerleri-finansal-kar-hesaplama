@@ -31,6 +31,7 @@ import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fe
 import {
   approvedProductsResponse,
   jsonResponse,
+  queriesBarcode,
 } from '../../../../apps/api/tests/helpers/trendyol-fixtures';
 
 const SANDBOX_BASE = 'https://stageapigw.trendyol.test';
@@ -281,7 +282,7 @@ describe('processVariantResolution', () => {
 
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
-      if (url.startsWith(SANDBOX_BASE) && url.includes('barcode=BC-VENDOR-2')) {
+      if (url.startsWith(SANDBOX_BASE) && queriesBarcode(url, 'BC-VENDOR-2')) {
         return Promise.resolve(jsonResponse(approvedProductsResponse('BC-VENDOR-2', 1)));
       }
       throw new Error(`unexpected fetch in test: ${url}`);
@@ -317,7 +318,7 @@ describe('processVariantResolution', () => {
 
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
-      if (url.startsWith(SANDBOX_BASE) && url.includes('barcode=BC-GONE-3')) {
+      if (url.startsWith(SANDBOX_BASE) && queriesBarcode(url, 'BC-GONE-3')) {
         return Promise.resolve(jsonResponse(approvedProductsResponse('BC-GONE-3', 0)));
       }
       throw new Error(`unexpected fetch in test: ${url}`);
@@ -352,7 +353,7 @@ describe('processVariantResolution', () => {
 
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
-      if (url.startsWith(SANDBOX_BASE) && url.includes('barcode=BC-THROW-3')) {
+      if (url.startsWith(SANDBOX_BASE) && queriesBarcode(url, 'BC-THROW-3')) {
         // 401 → MarketplaceAuthError throw, fail-FAST (no 5xx retry/sleep loop);
         // ensure'un per-barkod catch'i bunu `retriable`'a sınıflar.
         return Promise.resolve(new Response('bad credentials', { status: 401 }));
@@ -460,7 +461,7 @@ describe('processVariantResolution', () => {
 
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
-      if (url.startsWith(SANDBOX_BASE) && url.includes('barcode=BC-BUF-REPAIR')) {
+      if (url.startsWith(SANDBOX_BASE) && queriesBarcode(url, 'BC-BUF-REPAIR')) {
         return Promise.resolve(jsonResponse(approvedProductsResponse('BC-BUF-REPAIR', 1)));
       }
       throw new Error(`beklenmeyen fetch: ${url}`);
@@ -488,7 +489,7 @@ describe('processVariantResolution', () => {
 
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
-      if (url.startsWith(SANDBOX_BASE) && url.includes('barcode=BC-BUF-VM')) {
+      if (url.startsWith(SANDBOX_BASE) && queriesBarcode(url, 'BC-BUF-VM')) {
         // Boş batch → vendorMissing.
         return Promise.resolve(jsonResponse(approvedProductsResponse('BC-BUF-VM', 0)));
       }
@@ -515,7 +516,7 @@ describe('processVariantResolution', () => {
 
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
-      if (url.startsWith(SANDBOX_BASE) && url.includes('barcode=BC-BUF-RT')) {
+      if (url.startsWith(SANDBOX_BASE) && queriesBarcode(url, 'BC-BUF-RT')) {
         // 401 → throw (retriable), fail-FAST (no 5xx sleep loop).
         return Promise.resolve(new Response('bad credentials', { status: 401 }));
       }
@@ -553,7 +554,7 @@ describe('processVariantResolution', () => {
 
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
-      if (url.startsWith(SANDBOX_BASE) && url.includes('barcode=BC-BUF-RES')) {
+      if (url.startsWith(SANDBOX_BASE) && queriesBarcode(url, 'BC-BUF-RES')) {
         return Promise.resolve(jsonResponse(approvedProductsResponse('BC-BUF-RES', 1)));
       }
       throw new Error(`unexpected fetch in test: ${url}`);
@@ -632,7 +633,7 @@ describe('processVariantResolution', () => {
 
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
-      if (url.startsWith(SANDBOX_BASE) && url.includes('barcode=BC-PART-B')) {
+      if (url.startsWith(SANDBOX_BASE) && queriesBarcode(url, 'BC-PART-B')) {
         return Promise.resolve(jsonResponse(approvedProductsResponse('BC-PART-B', 0)));
       }
       throw new Error(`unexpected fetch in test: ${url}`);
@@ -668,12 +669,12 @@ describe('processVariantResolution', () => {
 
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
-      if (url.includes('barcode=BC-BROKEN-X')) {
+      if (queriesBarcode(url, 'BC-BROKEN-X')) {
         // 401 → MarketplaceAuthError: fail-FAST (5xx'in retry+sleep döngüsü
         // test timeout'una çarpar; izolasyon davranışı için throw yeterli).
         return Promise.resolve(new Response('bad credentials', { status: 401 }));
       }
-      if (url.includes('barcode=BC-HEALTHY-Y')) {
+      if (queriesBarcode(url, 'BC-HEALTHY-Y')) {
         return Promise.resolve(jsonResponse(approvedProductsResponse('BC-HEALTHY-Y', 1)));
       }
       throw new Error(`unexpected fetch in test: ${url}`);
@@ -700,7 +701,7 @@ describe('processVariantResolution', () => {
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
-      if (url.startsWith(SANDBOX_BASE) && url.includes('barcode=BC-DUP')) {
+      if (url.startsWith(SANDBOX_BASE) && queriesBarcode(url, 'BC-DUP')) {
         return Promise.resolve(jsonResponse(approvedProductsResponse('BC-DUP', 1)));
       }
       throw new Error(`unexpected fetch in test: ${url}`);

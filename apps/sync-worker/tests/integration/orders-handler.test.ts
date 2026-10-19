@@ -42,7 +42,10 @@ import {
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
 import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
-import { approvedProductsResponse } from '../../../../apps/api/tests/helpers/trendyol-fixtures';
+import {
+  approvedProductsResponse,
+  queriesBarcode,
+} from '../../../../apps/api/tests/helpers/trendyol-fixtures';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const ORIGINAL_ENV = process.env;
@@ -384,7 +387,7 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     // vendor-miss (0 sonuç) → satır eşleşmeden devam eder.
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
-      if (url.includes('/products/approved') && url.includes('barcode=EAN13-UNKNOWN')) {
+      if (queriesBarcode(url, 'EAN13-UNKNOWN')) {
         return Promise.resolve(jsonResponse(approvedProductsResponse('EAN13-UNKNOWN', 0)));
       }
       if (url.includes('/integration/order/')) {
@@ -431,7 +434,7 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
 
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
-      if (url.includes('/products/approved') && url.includes('barcode=EAGER-CRON-1')) {
+      if (queriesBarcode(url, 'EAGER-CRON-1')) {
         return Promise.resolve(jsonResponse(approvedProductsResponse('EAGER-CRON-1', 1)));
       }
       if (url.includes('/integration/order/')) {
