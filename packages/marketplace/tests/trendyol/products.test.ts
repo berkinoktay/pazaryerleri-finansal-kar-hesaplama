@@ -1,10 +1,10 @@
-// fetchProductsByBarcode — targeted single-barcode approved-products query
-// (variant-recovery PR-2). The wire fixture mirrors the apps/api
+// fetchProductsByBarcodes — targeted multi-barcode approved-products query
+// (variant-recovery). The wire fixture mirrors the apps/api
 // products.test.ts shapes (same endpoint, same mapper).
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchProductsByBarcode } from '../../src/trendyol/products';
+import { fetchProductsByBarcodes, MAX_BARCODES_PER_QUERY } from '../../src/trendyol/products';
 import type {
   TrendyolApprovedProductsResponse,
   TrendyolContent,
@@ -80,49 +80,69 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('fetchProductsByBarcode', () => {
-  it('requests the approved endpoint with the barcode param and maps the page', async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse(makePage([makeContent(1, 'BC-123')])));
+describe('fetchProductsByBarcodes', () => {
+  it('sends every barcode in one comma-joined `barcodes` param and maps the page', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(makePage([makeContent(1, 'BC-123'), makeContent(2, 'BC-456')])),
+    );
 
-    const page = await fetchProductsByBarcode({
+    const page = await fetchProductsByBarcodes({
       baseUrl: BASE_URL,
       credentials: CREDENTIALS,
-      barcode: 'BC-123',
+      barcodes: ['BC-123', 'BC-456'],
     });
 
-    const capturedUrl = String(fetchSpy.mock.calls[0]?.[0]);
-    expect(capturedUrl).toContain('/products/approved');
-    expect(capturedUrl).toContain('barcode=BC-123');
-    expect(capturedUrl).toContain(`/sellers/${SUPPLIER_ID}/`);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const capturedUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
+    expect(capturedUrl.pathname).toBe(
+      `/integration/product/sellers/${SUPPLIER_ID}/products/approved`,
+    );
+    expect(capturedUrl.searchParams.get('barcodes')).toBe('BC-123,BC-456');
+    expect(capturedUrl.searchParams.has('barcode')).toBe(false);
+    expect(page.batch.flatMap((p) => p.variants.map((v) => v.barcode))).toEqual([
+      'BC-123',
+      'BC-456',
+    ]);
+  });
+
+  it('returns only the barcodes the vendor knows — absent ones are simply missing', async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(makePage([makeContent(1, 'BC-123')])));
+
+    const page = await fetchProductsByBarcodes({
+      baseUrl: BASE_URL,
+      credentials: CREDENTIALS,
+      barcodes: ['BC-123', 'GONE-404'],
+    });
+
     expect(page.batch).toHaveLength(1);
     expect(page.batch[0]!.variants[0]!.barcode).toBe('BC-123');
   });
 
-  it('returns an empty batch when the vendor knows no such barcode', async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse(makePage([])));
-
-    const page = await fetchProductsByBarcode({
-      baseUrl: BASE_URL,
-      credentials: CREDENTIALS,
-      barcode: 'GONE-404',
-    });
-
-    expect(page.batch).toHaveLength(0);
-  });
-
-  it('treats a 404 (no approved product for barcode) as an empty page, not an error', async () => {
-    // Trendyol's stage /products/approved?barcode=X returns a bodyless 404
-    // when no approved product matches. For a single-barcode lookup that is
-    // "no such product" — a clean empty page, not a thrown error.
+  it('treats a 404 (no approved product for any barcode) as an empty page, not an error', async () => {
+    // Trendyol's stage /products/approved returns a bodyless 404 when no
+    // approved product matches the barcode filter. For a barcode lookup that
+    // is "no such product" — a clean empty page, not a thrown error.
     fetchSpy.mockResolvedValueOnce(new Response('Not Found', { status: 404 }));
 
-    const page = await fetchProductsByBarcode({
+    const page = await fetchProductsByBarcodes({
       baseUrl: BASE_URL,
       credentials: CREDENTIALS,
-      barcode: 'NEVER-APPROVED',
+      barcodes: ['NEVER-APPROVED'],
     });
 
     expect(page.batch).toHaveLength(0);
     expect(page.pageMeta.totalElements).toBe(0);
+  });
+
+  it.each([
+    ['empty', 0],
+    ['over the vendor cap', MAX_BARCODES_PER_QUERY + 1],
+  ])('rejects an %s barcode list before calling the vendor', async (_label, count) => {
+    const barcodes = Array.from({ length: count }, (_, i) => `BC-${i.toString()}`);
+
+    await expect(
+      fetchProductsByBarcodes({ baseUrl: BASE_URL, credentials: CREDENTIALS, barcodes }),
+    ).rejects.toThrow(RangeError);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

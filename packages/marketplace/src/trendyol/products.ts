@@ -63,15 +63,27 @@ function buildUrl(base: string, supplierId: string, req: PageRequest): string {
 }
 
 /**
- * Tekil barkod sorgusu — "Ürün Filtreleme – Onaylı Ürün v2" endpoint'inin
- * `barcode` giriş parametresi (urun-entegrasyonlari-v2.md:91). Tek sayfa,
- * sayfalama yok: bir barkod en fazla bir avuç variant döndürür. Yanıt tam
- * katalog senkronuyla AYNI şekildedir → aynı mapper'dan geçer; çağıran
- * (variant-resolution tick) sonucu products upsert hattına verir.
+ * Trendyol's per-request cap for the approved v2 endpoint's multi-barcode
+ * `barcodes` filter ("maksimum 50 barcode gönderilebilir").
  */
-export async function fetchProductsByBarcode(
-  opts: Omit<FetchApprovedProductsOpts, 'initialCursor'> & { barcode: string },
+export const MAX_BARCODES_PER_QUERY = 50;
+
+/**
+ * Çoklu barkod sorgusu — "Ürün Filtreleme – Onaylı Ürün v2" endpoint'inin
+ * `barcodes` giriş parametresi (virgülle ayrılmış, en fazla 50; canlı ve stage'de
+ * 2026-10-19'da doğrulandı). Tek sayfa, sayfalama yok: 50 barkod en fazla 50
+ * content döndürür, PRODUCTS_PAGE_SIZE (100) içine sığar. Yanıt tam katalog
+ * senkronuyla AYNI şekildedir → aynı mapper'dan geçer. Vendor'da bulunmayan
+ * barkodlar yanıtta yer almaz; hangisinin eksik olduğunu çağıran ayıklar.
+ */
+export async function fetchProductsByBarcodes(
+  opts: Omit<FetchApprovedProductsOpts, 'initialCursor'> & { barcodes: string[] },
 ): Promise<MappedProductsPage> {
+  if (opts.barcodes.length === 0 || opts.barcodes.length > MAX_BARCODES_PER_QUERY) {
+    throw new RangeError(
+      `fetchProductsByBarcodes expects 1–${MAX_BARCODES_PER_QUERY.toString()} barcodes; got ${opts.barcodes.length.toString()}`,
+    );
+  }
   const env = opts.environment ?? 'PRODUCTION';
   const base = opts.baseUrl ?? baseUrlFor(env);
   const deps: FetcherDeps = {
@@ -83,18 +95,18 @@ export async function fetchProductsByBarcode(
   const url = new URL(
     `${base}/integration/product/sellers/${opts.credentials.supplierId}/products/approved`,
   );
-  url.searchParams.set('barcode', opts.barcode);
+  url.searchParams.set('barcodes', opts.barcodes.join(','));
   url.searchParams.set('size', PRODUCTS_PAGE_SIZE.toString());
 
   try {
     const raw = await fetchOnce<TrendyolApprovedProductsResponse>(url.toString(), deps);
     return mapTrendyolApprovedResponse(raw);
   } catch (err) {
-    // Tek-barkod sorgusunda 404, "böyle onaylı ürün yok" demektir — boş
+    // Barkod sorgusunda 404, "böyle onaylı ürün yok" demektir — boş
     // sonuç, hata değil. (Toplu sayfalama senkronunda 404 KASITLI olarak
     // MarketplaceUnreachable'a maplenir; orada "son sayfanın ötesi → 4xx
     // → retry" anlamı taşır. O global mapleme fetch-once.ts'te DURUR; biz
-    // 404'ü yalnızca BURADA, tekil barkod yolunda boş sayfaya çeviririz.)
+    // 404'ü yalnızca BURADA, barkod yolunda boş sayfaya çeviririz.)
     if (err instanceof MarketplaceUnreachable && err.meta.httpStatus === 404) {
       return {
         batch: [],

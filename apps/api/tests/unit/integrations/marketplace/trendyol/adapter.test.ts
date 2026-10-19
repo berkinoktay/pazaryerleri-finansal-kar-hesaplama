@@ -45,7 +45,9 @@ describe('trendyolFactory', () => {
     await adapter.testConnection();
 
     const [url, init] = spy.mock.calls[0]!;
-    expect(String(url)).toContain('apigw.trendyol.com/integration/product/sellers/99999/products');
+    expect(String(url)).toContain(
+      'apigw.trendyol.com/integration/product/sellers/99999/products/approved?page=0&size=1',
+    );
     const headers = (init?.headers ?? {}) as Record<string, string>;
     expect(headers.Authorization).toMatch(/^Basic [A-Za-z0-9+/=]+$/);
     expect(headers['User-Agent']).toBe('99999 - SelfIntegration');
