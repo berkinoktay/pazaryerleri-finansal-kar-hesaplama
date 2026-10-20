@@ -22,24 +22,5 @@ catalog:
 # (Node >=20.19). Without this a dev-tool subtree drags in @types/node@25,
 # exposing Node-25 lib types to packages the runtime will never run on 25.
 # Keep in sync with the catalog entry above. See issue #256.
-#
-# postcss + sharp: SECURITY overrides for high-severity advisories flagged by
-# the CI dependency audit. next 16.2.12 still hard-pins postcss@8.4.31
-# (GHSA arbitrary-file-read + sourcemap path traversal, patched >=8.5.18) and
-# allows sharp@^0.34.5 (libvips CVE-2026-33327, patched >=0.35.0). Drop each
-# override once next's own dependency range covers the patched version.
 overrides:
   "@types/node": ^20.19.41
-  postcss: ^8.5.18
-  sharp: ^0.35.3
-
-# GHSA-mh99-v99m-4gvg (brace-expansion DoS) declares every release <=5.0.7
-# vulnerable and ships NO patched 1.x — the only fix line is >=5.0.8, which
-# minimatch@3 (eslint 9's dependency) cannot take (v5 is an incompatible
-# major). The single finding path is the ESLint toolchain
-# (packages/eslint-config>eslint>minimatch), a dev tool that never runs in
-# production. Ignore EXACTLY this advisory; drop the entry when eslint's
-# minimatch chain moves off brace-expansion 1.x or a patched 1.x ships.
-auditConfig:
-  ignoreGhsas:
-    - GHSA-mh99-v99m-4gvg
