@@ -48,9 +48,10 @@ export {
 } from './trendyol/mapper';
 export {
   APPROVED_PAGE_CAP_ITEMS,
+  MAX_BARCODES_PER_QUERY,
   PRODUCTS_PAGE_SIZE,
   fetchApprovedProducts,
-  fetchProductsByBarcode,
+  fetchProductsByBarcodes,
   type FetchApprovedProductsOpts,
 } from './trendyol/products';
 export {

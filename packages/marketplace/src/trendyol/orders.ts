@@ -56,8 +56,18 @@ interface PageRequest {
   page: number;
 }
 
+/**
+ * getShipmentPackages v2 reachable-record window ("maxQueryWindowResult"):
+ * page × size past 10,000 shipment packages is unreachable on `/v2/orders`
+ * (page 0–49 at size 200). Larger result sets must be split by date range.
+ */
+export const ORDERS_V2_MAX_QUERY_WINDOW = 10_000;
+
+// The pre-v2 `/orders` endpoint was announced deprecated for 15 Oct 2026; v2
+// takes the same query params and returns the same package shape (verified
+// against prod + stage 2026-10-19).
 function buildUrl(base: string, supplierId: string, req: PageRequest): string {
-  const url = new URL(`${base}/integration/order/sellers/${supplierId}/orders`);
+  const url = new URL(`${base}/integration/order/sellers/${supplierId}/v2/orders`);
   url.searchParams.set('startDate', req.startDate.toString());
   url.searchParams.set('endDate', req.endDate.toString());
   url.searchParams.set('orderByField', 'PackageLastModifiedDate');
@@ -439,13 +449,15 @@ export interface FetchShipmentPackagesOpts {
 }
 
 /**
- * Async generator over Trendyol's /orders endpoint within a time window.
+ * Async generator over Trendyol's /v2/orders endpoint within a time window.
  * Yields one page at a time, fully mapped. Caller decides whether to
  * upsert each batch.
  *
  * Pagination: `page=0..N` while `(page+1) × size ≤ totalElements`. Stops
  * when an empty `content[]` is returned or all `totalElements` rows have
- * been streamed.
+ * been streamed. Throws a RangeError up front when the window matches more
+ * than ORDERS_V2_MAX_QUERY_WINDOW packages — v2 cannot page past that, so
+ * the caller must narrow the date range rather than silently get a prefix.
  *
  * Either `baseUrl` or `environment` must be supplied; in app code use
  * `environment` (resolves from env vars). Tests pass `baseUrl` to point
@@ -482,6 +494,12 @@ export async function* fetchShipmentPackages(
     const mapped = mapTrendyolOrdersResponse(raw, opts.commissionVatRate);
 
     if (totalElements === null) totalElements = mapped.pageMeta.totalElements;
+    if (totalElements > ORDERS_V2_MAX_QUERY_WINDOW) {
+      throw new RangeError(
+        `getShipmentPackages v2 window matched ${totalElements.toString()} packages; ` +
+          `only the first ${ORDERS_V2_MAX_QUERY_WINDOW.toString()} are reachable — narrow startDate/endDate`,
+      );
+    }
 
     if (mapped.batch.length === 0) return;
 

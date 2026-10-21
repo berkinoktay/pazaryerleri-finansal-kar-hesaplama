@@ -2,7 +2,7 @@
  * Shared Trendyol wire fixtures for tests that mock `globalThis.fetch`.
  *
  * `approvedProductsResponse` is the REAL approved-products page shape (the one
- * the catalog sync + single-barcode eager repair both map). Lives in apps/api
+ * the catalog sync + barcode eager repair both map). Lives in apps/api
  * helpers because sync-worker tests already import from here (the reverse
  * direction is not allowed).
  *
@@ -47,6 +47,19 @@ export function approvedProductsResponse(barcode: string, count: number): unknow
       ],
     })),
   };
+}
+
+/**
+ * True when a mocked request is the approved-products barcode lookup asking for
+ * `barcode`. The eager repair sends every unknown barcode in one comma-joined
+ * `barcodes` param (fetchProductsByBarcodes), so mocks match on membership
+ * rather than a `barcode=X` substring.
+ */
+export function queriesBarcode(url: string, barcode: string): boolean {
+  const parsed = new URL(url);
+  if (!parsed.pathname.endsWith('/products/approved')) return false;
+  const raw = parsed.searchParams.get('barcodes');
+  return raw !== null && raw.split(',').includes(barcode);
 }
 
 export function jsonResponse(body: unknown): Response {
