@@ -177,9 +177,9 @@ export const NAV_GROUPS: readonly NavGroupConfig[] = [
         icon: Coupon01Icon,
       },
       {
-        key: 'campaign-cart-campaigns',
-        labelKey: 'nav.cartCampaigns',
-        href: '/campaigns/cart-campaigns',
+        key: 'campaign-marketplace-campaigns',
+        labelKey: 'nav.marketplaceCampaigns',
+        href: '/campaigns/marketplace-campaigns',
         icon: Megaphone01Icon,
       },
     ],

@@ -304,7 +304,7 @@
     "flashProducts": "Flash Products",
     "discounts": "Discounts",
     "coupons": "Coupons",
-    "cartCampaigns": "Cart Campaigns",
+    "marketplaceCampaigns": "Campaigns",
     "toggleSidebar": "Toggle sidebar",
     "groups": {
       "overview": "Overview",
@@ -785,9 +785,9 @@
       "title": "Coupons",
       "intent": "Profitability of coupon campaigns"
     },
-    "cartCampaigns": {
-      "title": "Cart Campaigns",
-      "intent": "Profitability of cart campaigns"
+    "marketplaceCampaigns": {
+      "title": "Campaigns",
+      "intent": "Profitability of joining Trendyol campaigns"
     }
   },
   "commissionTariffsPage": {
@@ -1851,6 +1851,75 @@
     "actions": {
       "saveAndDownload": "Save and download",
       "exportEmptyHint": "Include at least one product before exporting."
+    }
+  },
+  "marketplaceCampaignsPage": {
+    "noStore": {
+      "title": "Select a store first",
+      "description": "A connected Trendyol store is required to view campaigns.",
+      "cta": "Go to stores"
+    },
+    "status": {
+      "exported": "Downloaded",
+      "pending": "Pending"
+    },
+    "funding": {
+      "badge": "Trendyol {percent}%",
+      "label": "Trendyol funding rate: {percent}%"
+    },
+    "list": {
+      "search": "Search campaigns…",
+      "lastUpdated": "Last updated: {date}",
+      "filterLabel": "Filter by status",
+      "selectAll": "Select all",
+      "selectRow": "Select row",
+      "dateRange": "{start} – {end}",
+      "listStatus": {
+        "all": "All",
+        "exported": "Downloaded",
+        "pending": "Pending"
+      },
+      "columns": {
+        "name": "Campaign",
+        "type": "Type",
+        "funding": "Funding",
+        "period": "Dates",
+        "products": "Products",
+        "selected": "Joined",
+        "status": "Status"
+      },
+      "summary": {
+        "total": "Total campaigns",
+        "products": "Products",
+        "selected": "Joined products",
+        "selectedContext": "have a campaign price picked",
+        "noSelected": "no selection yet",
+        "exported": "Exported",
+        "exportedValue": "{count} / {total}",
+        "exportedAllDone": "all exported",
+        "exportedPending": "{count} campaigns awaiting export"
+      },
+      "empty": {
+        "title": "No campaign yet",
+        "description": "Download the Excel of the campaign you want to join from the Trendyol panel and upload it here; set the campaign type and see your profit at the campaign price."
+      },
+      "actions": {
+        "open": "Open",
+        "export": "Download",
+        "delete": "Delete"
+      },
+      "bulk": {
+        "selected": "{count} campaigns selected",
+        "delete": "Delete selected",
+        "deleteTitle": "Delete selected campaigns",
+        "deleteDescription": "{count} campaigns and all of their price choices will be permanently deleted. This action cannot be undone.",
+        "deleteConfirm": "Delete campaigns"
+      }
+    },
+    "templates": {
+      "deleteTitle": "Delete campaign",
+      "deleteDescription": "This saved campaign and all of its price choices will be permanently deleted. This action cannot be undone.",
+      "deleteConfirm": "Delete campaign"
     }
   },
   "featureStatus": {

@@ -304,7 +304,7 @@
     "flashProducts": "Flaş Ürünler",
     "discounts": "İndirimler",
     "coupons": "Kuponlar",
-    "cartCampaigns": "Kampanyalar",
+    "marketplaceCampaigns": "Kampanyalar",
     "toggleSidebar": "Kenar çubuğunu aç/kapat",
     "groups": {
       "overview": "Özet",
@@ -785,9 +785,9 @@
       "title": "Kuponlar",
       "intent": "Kupon kampanyalarının kârlılığı"
     },
-    "cartCampaigns": {
+    "marketplaceCampaigns": {
       "title": "Kampanyalar",
-      "intent": "Sepet kampanyalarının kârlılığı"
+      "intent": "Trendyol kampanyalarına katılımın kârlılığı"
     }
   },
   "commissionTariffsPage": {
@@ -1851,6 +1851,75 @@
     "actions": {
       "saveAndDownload": "Kaydet ve İndir",
       "exportEmptyHint": "Dışa aktarmadan önce en az bir ürünü kampanyaya dahil edin."
+    }
+  },
+  "marketplaceCampaignsPage": {
+    "noStore": {
+      "title": "Önce bir mağaza seçin",
+      "description": "Kampanyaları görüntülemek için bağlı bir Trendyol mağazası gerekir.",
+      "cta": "Mağazalara git"
+    },
+    "status": {
+      "exported": "İndirildi",
+      "pending": "Bekliyor"
+    },
+    "funding": {
+      "badge": "Trendyol %{percent}",
+      "label": "Trendyol karşılama oranı: %{percent}"
+    },
+    "list": {
+      "search": "Kampanyalarda ara…",
+      "lastUpdated": "Son güncelleme: {date}",
+      "filterLabel": "Duruma göre filtrele",
+      "selectAll": "Tümünü seç",
+      "selectRow": "Satırı seç",
+      "dateRange": "{start} – {end}",
+      "listStatus": {
+        "all": "Tümü",
+        "exported": "İndirildi",
+        "pending": "Bekliyor"
+      },
+      "columns": {
+        "name": "Kampanya",
+        "type": "Kurgu",
+        "funding": "Karşılama",
+        "period": "Tarih",
+        "products": "Ürün",
+        "selected": "Katılan",
+        "status": "Durum"
+      },
+      "summary": {
+        "total": "Toplam kampanya",
+        "products": "Ürün",
+        "selected": "Katılan ürün",
+        "selectedContext": "kampanya fiyatı seçili",
+        "noSelected": "henüz seçim yok",
+        "exported": "Dışa aktarılan",
+        "exportedValue": "{count} / {total}",
+        "exportedAllDone": "tümü dışa aktarıldı",
+        "exportedPending": "{count} kampanya dışa aktarım bekliyor"
+      },
+      "empty": {
+        "title": "Henüz kampanya yok",
+        "description": "Trendyol panelinde katılmak istediğiniz kampanyanın Excel'ini indirip buraya yükleyin; kampanyanın kurgusunu girin ve kampanya fiyatındaki kârınızı görün."
+      },
+      "actions": {
+        "open": "Aç",
+        "export": "İndir",
+        "delete": "Sil"
+      },
+      "bulk": {
+        "selected": "{count} kampanya seçildi",
+        "delete": "Seçilenleri sil",
+        "deleteTitle": "Seçili kampanyaları sil",
+        "deleteDescription": "{count} kampanya ve tüm fiyat seçimleri kalıcı olarak silinecek. Bu işlem geri alınamaz.",
+        "deleteConfirm": "Kampanyaları sil"
+      }
+    },
+    "templates": {
+      "deleteTitle": "Kampanyayı sil",
+      "deleteDescription": "Bu kayıtlı kampanya ve tüm fiyat seçimleri kalıcı olarak silinecek. Bu işlem geri alınamaz.",
+      "deleteConfirm": "Kampanyayı sil"
     }
   },
   "featureStatus": {
