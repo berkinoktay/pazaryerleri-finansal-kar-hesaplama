@@ -1,5 +1,6 @@
 'use client';
 
+import { CloudUploadIcon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import { parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
@@ -8,6 +9,7 @@ import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { FilterTabs } from '@/components/patterns/filter-tabs';
 import { PageHeader } from '@/components/patterns/page-header';
 import { SearchInput } from '@/components/patterns/search-input';
+import { Button } from '@/components/ui/button';
 
 import type { MarketplaceCampaignListItem } from '../api/list-marketplace-campaigns.api';
 import {
@@ -30,6 +32,8 @@ type StatusFilter = 'all' | 'exported' | 'pending';
 export interface MarketplaceCampaignsListViewProps {
   items: readonly MarketplaceCampaignListItem[];
   onOpen: (id: string) => void;
+  /** Opens the upload dialog (tab-row button + the first-run empty state). */
+  onCreate: () => void;
   onExport: (id: string) => void;
   onDelete: (id: string) => void;
   /**
@@ -50,6 +54,7 @@ export interface MarketplaceCampaignsListViewProps {
 export function MarketplaceCampaignsListView({
   items,
   onOpen,
+  onCreate,
   onExport,
   onDelete,
   loading = false,
@@ -123,18 +128,25 @@ export function MarketplaceCampaignsListView({
     [onDelete],
   );
 
-  const statusTabs = (
-    <FilterTabs
-      value={statusFilter}
-      onValueChange={setStatusFilter}
-      loading={loading}
-      aria-label={tList('filterLabel')}
-      options={[
-        { value: 'all', label: tListStatus('all'), count: statusCounts.all },
-        { value: 'exported', label: tListStatus('exported'), count: statusCounts.exported },
-        { value: 'pending', label: tListStatus('pending'), count: statusCounts.pending },
-      ]}
-    />
+  // The data panel's top row: status tabs on the left, the upload action on the right — so
+  // "Upload Excel" sits next to the data it feeds (it wraps under the tabs on a phone).
+  const tabsRow = (
+    <div className="gap-sm flex flex-wrap items-center justify-between">
+      <FilterTabs
+        value={statusFilter}
+        onValueChange={setStatusFilter}
+        loading={loading}
+        aria-label={tList('filterLabel')}
+        options={[
+          { value: 'all', label: tListStatus('all'), count: statusCounts.all },
+          { value: 'exported', label: tListStatus('exported'), count: statusCounts.exported },
+          { value: 'pending', label: tListStatus('pending'), count: statusCounts.pending },
+        ]}
+      />
+      <Button size="sm" leadingIcon={<CloudUploadIcon aria-hidden />} onClick={onCreate}>
+        {tList('upload')}
+      </Button>
+    </div>
   );
 
   return (
@@ -158,17 +170,18 @@ export function MarketplaceCampaignsListView({
           rows={filtered}
           loading={loading}
           actions={actions}
-          tabsNode={statusTabs}
+          tabsNode={tabsRow}
           searchValue={query}
           onSearchChange={setQuery}
           hasActiveFilters={hasActiveFilters}
           onClearFilters={clearFilters}
           onOpen={onOpen}
+          onUpload={onCreate}
           onDeleteMany={deleteMany}
         />
       </div>
       <div className="gap-sm flex flex-col md:hidden">
-        {statusTabs}
+        {tabsRow}
         <SearchInput
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -181,6 +194,7 @@ export function MarketplaceCampaignsListView({
           loading={loading}
           actions={actions}
           onOpen={onOpen}
+          onUpload={onCreate}
           hasActiveFilters={hasActiveFilters}
           onClearFilters={clearFilters}
         />

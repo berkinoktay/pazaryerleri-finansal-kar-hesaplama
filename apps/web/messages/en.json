@@ -1869,6 +1869,7 @@
     },
     "list": {
       "search": "Search campaigns…",
+      "upload": "Upload Excel File",
       "lastUpdated": "Last updated: {date}",
       "filterLabel": "Filter by status",
       "selectAll": "Select all",
@@ -1901,7 +1902,8 @@
       },
       "empty": {
         "title": "No campaign yet",
-        "description": "Download the Excel of the campaign you want to join from the Trendyol panel and upload it here; set the campaign type and see your profit at the campaign price."
+        "description": "Download the Excel of the campaign you want to join from the Trendyol panel and upload it here; set the campaign type and see your profit at the campaign price.",
+        "cta": "Upload Excel File"
       },
       "actions": {
         "open": "Open",
@@ -1920,6 +1922,29 @@
       "deleteTitle": "Delete campaign",
       "deleteDescription": "This saved campaign and all of its price choices will be permanently deleted. This action cannot be undone.",
       "deleteConfirm": "Delete campaign"
+    },
+    "upload": {
+      "title": "Upload the campaign Excel",
+      "description": "Upload the product file you downloaded from the Trendyol Campaigns panel, set the campaign type and Trendyol's funding rate, and see your profit at the campaign price.",
+      "prompt": "Drag and drop the Excel file",
+      "hint": "XLSX · up to 5 MB",
+      "cta": "Choose file",
+      "name": "Campaign name (optional)",
+      "typeLabel": "Campaign type",
+      "fundingLabel": "Trendyol funding rate (%)",
+      "fundingHint": "The share of the discount Trendyol covers, shown in the campaign's details in the panel. Left empty it counts as 0, meaning you bear the whole discount.",
+      "submit": "Create campaign",
+      "errors": {
+        "notReadable": "The file could not be read — upload a valid .xlsx file.",
+        "wrongFormat": "This is not a Trendyol Campaigns file or its format was not recognized.",
+        "empty": "No product rows found in the file.",
+        "tooLarge": "The file is too large — upload a smaller file.",
+        "generic": "The file could not be uploaded. Please try again."
+      },
+      "fieldErrors": {
+        "fundingDecimal": "Enter a valid rate (up to 2 decimals).",
+        "fundingOver100": "The funding rate cannot exceed 100%."
+      }
     }
   },
   "featureStatus": {

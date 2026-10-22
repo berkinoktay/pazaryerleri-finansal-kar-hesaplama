@@ -13,10 +13,10 @@ export type ImportMarketplaceCampaignResponse =
 
 /**
  * The campaign kurgu + its per-type parameters, Trendyol's funding rate and the campaign
- * window — everything the import form collects alongside the file. Kept local to this API
- * layer (mirrors `ImportDiscountListInput` before the discount vertical grew a dedicated
- * `lib/discount-config.ts`); a future config-editing task may promote this to a shared
- * validated form-values type once the campaign config UI lands.
+ * window — everything the import form collects alongside the file. The wire shape of the
+ * upload; the form's validated output (`CampaignConfigFormValues` in
+ * `lib/marketplace-campaign-config.ts`) is structurally assignable to it, so the form hands
+ * its values over as-is.
  */
 export interface ImportMarketplaceCampaignConfig {
   discountType: CampaignDiscountType;

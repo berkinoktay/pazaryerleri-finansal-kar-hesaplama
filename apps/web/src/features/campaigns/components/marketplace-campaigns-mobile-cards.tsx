@@ -1,6 +1,6 @@
 'use client';
 
-import { Megaphone01Icon } from 'hugeicons-react';
+import { CloudUploadIcon, Megaphone01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -8,6 +8,7 @@ import { DataTableRowActions, type RowAction } from '@/components/patterns/data-
 import { TableNoResultsState } from '@/components/patterns/data-table-states';
 import { DefinitionList } from '@/components/patterns/definition-list';
 import { EmptyState } from '@/components/patterns/empty-state';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
 
@@ -27,6 +28,8 @@ export interface MarketplaceCampaignsMobileCardsProps {
   rows: readonly MarketplaceCampaignListRow[];
   actions: RowAction<MarketplaceCampaignListRow>[];
   onOpen: (id: string) => void;
+  /** The first-run empty state's call to action (opens the upload dialog). */
+  onUpload: () => void;
   /** Parent-computed "any filter active?" — splits no-results from the first-run empty state. */
   hasActiveFilters: boolean;
   onClearFilters: () => void;
@@ -46,6 +49,7 @@ export function MarketplaceCampaignsMobileCards({
   rows,
   actions,
   onOpen,
+  onUpload,
   hasActiveFilters,
   onClearFilters,
   loading = false,
@@ -73,6 +77,11 @@ export function MarketplaceCampaignsMobileCards({
         icon={Megaphone01Icon}
         title={tEmpty('title')}
         description={tEmpty('description')}
+        action={
+          <Button leadingIcon={<CloudUploadIcon aria-hidden />} onClick={onUpload}>
+            {tEmpty('cta')}
+          </Button>
+        }
       />
     );
   }

@@ -9,6 +9,7 @@ import { render, screen, within } from '../../../helpers/render';
 
 const noResults = trMessages.common.dataTable.noResults;
 const emptyTitle = trMessages.marketplaceCampaignsPage.list.empty.title;
+const emptyCta = trMessages.marketplaceCampaignsPage.list.empty.cta;
 
 function makeRow(overrides: Partial<MarketplaceCampaignListRow> = {}): MarketplaceCampaignListRow {
   return {
@@ -37,6 +38,7 @@ function renderCards(
   props: Partial<React.ComponentProps<typeof MarketplaceCampaignsMobileCards>> = {},
 ) {
   const onOpen = vi.fn();
+  const onUpload = vi.fn();
   const onDelete = vi.fn();
   const onClearFilters = vi.fn();
   const actions: RowAction<MarketplaceCampaignListRow>[] = [
@@ -47,12 +49,13 @@ function renderCards(
       rows={[makeRow()]}
       actions={actions}
       onOpen={onOpen}
+      onUpload={onUpload}
       hasActiveFilters={false}
       onClearFilters={onClearFilters}
       {...props}
     />,
   );
-  return { ...result, onOpen, onDelete, onClearFilters };
+  return { ...result, onOpen, onUpload, onDelete, onClearFilters };
 }
 
 describe('MarketplaceCampaignsMobileCards', () => {
@@ -80,10 +83,12 @@ describe('MarketplaceCampaignsMobileCards', () => {
     expect(onClearFilters).toHaveBeenCalled();
   });
 
-  it('shows the first-run empty state when there are no campaigns at all', () => {
-    renderCards({ rows: [] });
+  it('offers the upload from the first-run empty state when there are no campaigns at all', async () => {
+    const { user, onUpload } = renderCards({ rows: [] });
     expect(screen.getByText(emptyTitle)).toBeInTheDocument();
     expect(screen.queryByText(noResults.title)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: emptyCta }));
+    expect(onUpload).toHaveBeenCalled();
   });
 
   it('shows a busy placeholder instead of an empty state while loading', () => {

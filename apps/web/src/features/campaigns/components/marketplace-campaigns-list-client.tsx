@@ -9,16 +9,20 @@ import { Link, useRouter } from '@/i18n/navigation';
 
 import { useDeleteMarketplaceCampaign } from '../hooks/use-delete-marketplace-campaign';
 import { useExportMarketplaceCampaign } from '../hooks/use-export-marketplace-campaign';
+import { useImportMarketplaceCampaign } from '../hooks/use-import-marketplace-campaign';
 import { useMarketplaceCampaigns } from '../hooks/use-marketplace-campaigns';
 import { downloadBlob } from '../lib/download-blob';
+import { extractFileErrorCode } from '../lib/upload-error';
+import { MarketplaceCampaignUploadDialog } from './marketplace-campaign-upload-dialog';
 import { MarketplaceCampaignsListView } from './marketplace-campaigns-list-view';
 
 const DETAIL_BASE = '/campaigns/marketplace-campaigns';
 
 /**
  * Data-bound LIST screen for Kampanyalar. Resolves org/store from the server (passed as props),
- * lists the saved uploads, and drives export (→ download the patched xlsx) and delete through the
- * feature hooks. Opening a row navigates to the `[campaignId]` detail route.
+ * lists the saved uploads, and drives upload (→ navigate to the new campaign), export
+ * (→ download the patched xlsx) and delete through the feature hooks. Opening a row navigates to
+ * the `[campaignId]` detail route.
  */
 export function MarketplaceCampaignsListClient({
   orgId,
@@ -36,12 +40,36 @@ export function MarketplaceCampaignsListClient({
   // cell (closing an open row menu).
   const { mutate: deleteCampaign } = useDeleteMarketplaceCampaign(orgId ?? '', storeId ?? '');
   const { mutate: exportCampaign } = useExportMarketplaceCampaign(orgId ?? '', storeId ?? '');
+  const {
+    mutate: importCampaign,
+    isPending: importing,
+    error: importError,
+    reset: resetImport,
+  } = useImportMarketplaceCampaign(orgId ?? '', storeId ?? '');
+  const [uploadOpen, setUploadOpen] = React.useState(false);
 
   const items = React.useMemo(() => list.data ?? [], [list.data]);
 
   const openDetail = React.useCallback(
     (id: string) => router.push(`${DETAIL_BASE}/${id}`),
     [router],
+  );
+
+  const handleImport = React.useCallback<
+    React.ComponentProps<typeof MarketplaceCampaignUploadDialog>['onSubmit']
+  >(
+    (config, file, name) => {
+      importCampaign(
+        { file, name, config },
+        {
+          onSuccess: (result) => {
+            setUploadOpen(false);
+            openDetail(result.campaignId);
+          },
+        },
+      );
+    },
+    [importCampaign, openDetail],
   );
 
   const handleExport = React.useCallback(
@@ -58,7 +86,8 @@ export function MarketplaceCampaignsListClient({
   const handleDelete = React.useCallback((id: string) => deleteCampaign(id), [deleteCampaign]);
 
   // No store selected: the query is disabled and every action needs a store, so show a
-  // store-selection state instead of the interactive list.
+  // store-selection state instead of the interactive list (whose upload would POST with an
+  // empty scope).
   if (orgId === null || storeId === null) {
     return (
       <EmptyState
@@ -89,12 +118,27 @@ export function MarketplaceCampaignsListClient({
   }
 
   return (
-    <MarketplaceCampaignsListView
-      items={items}
-      loading={list.isLoading}
-      onOpen={openDetail}
-      onExport={handleExport}
-      onDelete={handleDelete}
-    />
+    <>
+      <MarketplaceCampaignsListView
+        items={items}
+        loading={list.isLoading}
+        onOpen={openDetail}
+        onCreate={() => setUploadOpen(true)}
+        onExport={handleExport}
+        onDelete={handleDelete}
+      />
+      <MarketplaceCampaignUploadDialog
+        open={uploadOpen}
+        onOpenChange={(next) => {
+          if (!next) resetImport();
+          setUploadOpen(next);
+        }}
+        onSubmit={handleImport}
+        submitting={importing}
+        errorCode={extractFileErrorCode(importError)}
+        submitError={importError}
+        onResetError={resetImport}
+      />
+    </>
   );
 }

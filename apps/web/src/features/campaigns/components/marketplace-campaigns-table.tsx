@@ -1,7 +1,7 @@
 'use client';
 
 import { type ColumnDef } from '@tanstack/react-table';
-import { Delete02Icon, Megaphone01Icon } from 'hugeicons-react';
+import { CloudUploadIcon, Delete02Icon, Megaphone01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -17,6 +17,7 @@ import {
 import { TableNoResultsState } from '@/components/patterns/data-table-states';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
 import { EmptyState } from '@/components/patterns/empty-state';
+import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
 
@@ -44,6 +45,8 @@ export interface MarketplaceCampaignsTableProps {
   hasActiveFilters: boolean;
   onClearFilters: () => void;
   onOpen: (id: string) => void;
+  /** The first-run empty state's call to action (opens the upload dialog). */
+  onUpload: () => void;
   onDeleteMany: (ids: string[]) => void;
   /** Forwarded to DataTable: skeleton rows while the list query is in flight. */
   loading?: boolean;
@@ -66,6 +69,7 @@ export function MarketplaceCampaignsTable({
   hasActiveFilters,
   onClearFilters,
   onOpen,
+  onUpload,
   onDeleteMany,
   loading = false,
 }: MarketplaceCampaignsTableProps): React.ReactElement {
@@ -249,6 +253,11 @@ export function MarketplaceCampaignsTable({
             icon={Megaphone01Icon}
             title={tEmpty('title')}
             description={tEmpty('description')}
+            action={
+              <Button leadingIcon={<CloudUploadIcon aria-hidden />} onClick={onUpload}>
+                {tEmpty('cta')}
+              </Button>
+            }
           />
         }
       />

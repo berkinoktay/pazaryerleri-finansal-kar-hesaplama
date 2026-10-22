@@ -1869,6 +1869,7 @@
     },
     "list": {
       "search": "Kampanyalarda ara…",
+      "upload": "Excel Dosyası Yükle",
       "lastUpdated": "Son güncelleme: {date}",
       "filterLabel": "Duruma göre filtrele",
       "selectAll": "Tümünü seç",
@@ -1901,7 +1902,8 @@
       },
       "empty": {
         "title": "Henüz kampanya yok",
-        "description": "Trendyol panelinde katılmak istediğiniz kampanyanın Excel'ini indirip buraya yükleyin; kampanyanın kurgusunu girin ve kampanya fiyatındaki kârınızı görün."
+        "description": "Trendyol panelinde katılmak istediğiniz kampanyanın Excel'ini indirip buraya yükleyin; kampanyanın kurgusunu girin ve kampanya fiyatındaki kârınızı görün.",
+        "cta": "Excel Dosyası Yükle"
       },
       "actions": {
         "open": "Aç",
@@ -1920,6 +1922,29 @@
       "deleteTitle": "Kampanyayı sil",
       "deleteDescription": "Bu kayıtlı kampanya ve tüm fiyat seçimleri kalıcı olarak silinecek. Bu işlem geri alınamaz.",
       "deleteConfirm": "Kampanyayı sil"
+    },
+    "upload": {
+      "title": "Kampanya Excel'ini yükleyin",
+      "description": "Trendyol Kampanyalar panelinden indirdiğiniz ürün dosyasını yükleyin; kampanyanın kurgusunu ve Trendyol'un karşılama oranını girin, kampanya fiyatındaki kârınızı görün.",
+      "prompt": "Excel dosyasını sürükleyip bırakın",
+      "hint": "XLSX · en fazla 5 MB",
+      "cta": "Dosya seç",
+      "name": "Kampanya adı (isteğe bağlı)",
+      "typeLabel": "Kampanya kurgusu",
+      "fundingLabel": "Trendyol karşılama oranı (%)",
+      "fundingHint": "Trendyol'un indirimin yüzde kaçını karşıladığı; panelde kampanyanın detayında yazar. Boş bırakırsanız 0 sayılır, yani indirimin tamamını siz üstlenirsiniz.",
+      "submit": "Kampanyayı oluştur",
+      "errors": {
+        "notReadable": "Dosya okunamadı — geçerli bir .xlsx dosyası yükleyin.",
+        "wrongFormat": "Bu bir Trendyol Kampanyalar dosyası değil veya biçimi tanınamadı.",
+        "empty": "Dosyada ürün satırı bulunamadı.",
+        "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
+        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin."
+      },
+      "fieldErrors": {
+        "fundingDecimal": "Geçerli bir oran girin (en fazla 2 ondalık).",
+        "fundingOver100": "Karşılama oranı %100'ü aşamaz."
+      }
     }
   },
   "featureStatus": {

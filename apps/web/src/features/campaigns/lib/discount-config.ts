@@ -49,7 +49,7 @@ export function visibleConfigFields(type: DiscountType): readonly ConfigFieldKey
 // ─── Client-side validation (mirror of the backend gate) ─────────────────────
 
 // Same patterns the backend uses: money is up to 2 decimals; counts are positive integers.
-const DECIMAL_RE = /^\d+(\.\d{1,2})?$/;
+export const DECIMAL_RE = /^\d+(\.\d{1,2})?$/;
 const INT_RE = /^\d+$/;
 
 // Trendyol caps the "X. ürün" target at the 2nd–4th item; percentage discounts can't exceed 100%.
@@ -80,8 +80,10 @@ const MAX_INT_VALUE = 2000000000;
 const INT_CONFIG_FIELDS = ['minQuantity', 'buyQuantity', 'payQuantity', 'nthIndex'] as const;
 
 // Multipart upload + JSON edit both carry every config field as a STRING, so a single object
-// mirrors both entry paths — exactly like the backend's `DiscountConfigFieldsSchema`.
-const discountConfigFieldsSchema = z.object({
+// mirrors both entry paths — exactly like the backend's `DiscountConfigFieldsSchema`. Exported
+// (with {@link refineDiscountConfigForm}) so the Kampanyalar form extends the same fields and
+// reuses the same per-type rules, as the backend validators do.
+export const discountConfigFieldsSchema = z.object({
   discountType: z.enum(DiscountType),
   valueKind: z.enum(DiscountValueKind).optional(),
   value: z.string().regex(DECIMAL_RE, 'INVALID_DISCOUNT_VALUE').optional(),
@@ -99,7 +101,10 @@ const discountConfigFieldsSchema = z.object({
  * same field paths, so a backend 422's `form.setError(field, code)` and the client-side zod
  * issue light up the SAME inline message.
  */
-export const discountConfigFormSchema = discountConfigFieldsSchema.superRefine((val, ctx) => {
+export function refineDiscountConfigForm(
+  val: z.infer<typeof discountConfigFieldsSchema>,
+  ctx: z.RefinementCtx,
+): void {
   const need = (field: ConfigFieldKey | 'startsAt' | 'endsAt', code: string): void => {
     ctx.addIssue({ code: 'custom', message: code, path: [field] });
   };
@@ -183,7 +188,10 @@ export const discountConfigFormSchema = discountConfigFieldsSchema.superRefine((
     const raw = val[field];
     if (raw !== undefined && Number(raw) > MAX_INT_VALUE) need(field, 'INT_TOO_LARGE');
   }
-});
+}
+
+export const discountConfigFormSchema =
+  discountConfigFieldsSchema.superRefine(refineDiscountConfigForm);
 
 /**
  * The discount configuration the upload/edit form produces (re-homed from
