@@ -64,6 +64,18 @@ describe('<DiscountConfigEditDialog>', () => {
     expect(screen.getByLabelText(FIELDS.value)).toHaveValue('20');
   });
 
+  it('lets the seller clear the seeded value and type a new one (no snap-back to "20")', async () => {
+    const { user } = renderDialog();
+    const value = screen.getByLabelText(FIELDS.value);
+
+    // The shipped bug: an emptied seeded field fell back to its mount-time default, so clearing
+    // "20" and typing "35" read "2035".
+    await user.clear(value);
+    expect(value).toHaveValue('');
+    await user.type(value, '35');
+    expect(value).toHaveValue('35');
+  });
+
   it('seeds the saved nth target into its fixed Select and offers only 2..4', async () => {
     const { user } = renderDialog(makeNthList());
 

@@ -419,9 +419,9 @@ export function ConfigParameterGrid(): React.ReactElement {
               <Input
                 inputMode={NUMERIC_FIELD_MODE[key]}
                 value={field.value ?? ''}
-                onChange={(event) =>
-                  field.onChange(event.target.value === '' ? undefined : event.target.value)
-                }
+                // A cleared input keeps '' — `undefined` would snap a seeded field back to its
+                // default (see `clearableTextField`); the schema turns '' into "not given".
+                onChange={(event) => field.onChange(event.target.value)}
                 onBlur={field.onBlur}
                 name={field.name}
                 ref={field.ref}

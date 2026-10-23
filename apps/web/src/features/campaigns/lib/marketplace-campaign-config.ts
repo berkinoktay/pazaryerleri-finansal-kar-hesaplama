@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { DiscountType } from '@pazarsync/db/enums';
 
 import {
+  clearableTextField,
   DECIMAL_RE,
   discountConfigFieldsSchema,
   refineDiscountConfigForm,
@@ -30,14 +31,16 @@ export const CAMPAIGN_DISCOUNT_TYPES = [
 const MAX_FUNDING_PCT = 100;
 
 /**
- * The Kampanyalar config form. An empty funding rate resolves to "0" — the seller bears the whole
- * discount, the pessimistic floor the backend defaults to as well — so a valid submit always
- * carries an explicit rate.
+ * The Kampanyalar config form. An empty funding rate — never typed, or cleared — resolves to "0":
+ * the seller bears the whole discount, the pessimistic floor the backend defaults to as well — so
+ * a valid submit always carries an explicit rate.
  */
 export const campaignConfigFormSchema = discountConfigFieldsSchema
   .extend({
     discountType: z.enum(CAMPAIGN_DISCOUNT_TYPES),
-    trendyolFundingPct: z.string().regex(DECIMAL_RE, 'INVALID_FUNDING_PCT').default('0'),
+    trendyolFundingPct: clearableTextField(DECIMAL_RE, 'INVALID_FUNDING_PCT').transform(
+      (value) => value ?? '0',
+    ),
   })
   .superRefine((val, ctx) => {
     refineDiscountConfigForm(val, ctx);

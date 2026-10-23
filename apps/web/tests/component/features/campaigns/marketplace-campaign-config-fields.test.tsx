@@ -84,6 +84,42 @@ describe('<MarketplaceCampaignConfigFields> seeded like the edit dialog', () => 
     );
   });
 
+  it('lets a seeded value be cleared and retyped — it never snaps back to the saved one', async () => {
+    const { user, onValid } = renderHarness();
+    const value = screen.getByLabelText(FIELDS.value);
+
+    // The regression: an emptied seeded field used to fall back to its mount-time default, so
+    // clearing "20" and typing "35" read "2035".
+    await user.clear(value);
+    expect(value).toHaveValue('');
+    await user.type(value, '35');
+    expect(value).toHaveValue('35');
+
+    await user.click(screen.getByRole('button', { name: SUBMIT_LABEL }));
+    await waitFor(() =>
+      expect(onValid).toHaveBeenCalledWith(
+        expect.objectContaining({ value: '35' }),
+        expect.anything(),
+      ),
+    );
+  });
+
+  it('lets a seeded funding rate be cleared — the emptied rate submits as "0"', async () => {
+    const { user, onValid } = renderHarness({ ...SEEDED, trendyolFundingPct: '60' });
+    const funding = screen.getByLabelText(UPLOAD.fundingLabel);
+
+    await user.clear(funding);
+    expect(funding).toHaveValue('');
+
+    await user.click(screen.getByRole('button', { name: SUBMIT_LABEL }));
+    await waitFor(() =>
+      expect(onValid).toHaveBeenCalledWith(
+        expect.objectContaining({ trendyolFundingPct: '0' }),
+        expect.anything(),
+      ),
+    );
+  });
+
   it('clears a seeded value kind and value when the kurgu changes', async () => {
     const { user } = renderHarness();
     expect(screen.getByLabelText(FIELDS.valueKind)).toHaveTextContent(FIELDS.valueKindPercent);
@@ -101,8 +137,7 @@ describe('<MarketplaceCampaignConfigFields> seeded like the edit dialog', () => 
 
     // Edit the seeded rate first: the funding field stays mounted across a kurgu change, so a
     // reset that dropped it would silently fall back to the mount-time "60" — only an EDITED
-    // rate exposes that. The new value is typed over the selected old one, never via an empty
-    // field (emptying a seeded field is its own known issue, tracked for the edit dialog).
+    // rate exposes that. The new value is typed over the selected old one.
     await user.type(screen.getByLabelText(UPLOAD.fundingLabel), '70', {
       initialSelectionStart: 0,
       initialSelectionEnd: 2,

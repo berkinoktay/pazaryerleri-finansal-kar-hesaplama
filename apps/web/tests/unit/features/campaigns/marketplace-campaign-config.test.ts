@@ -22,6 +22,18 @@ describe('campaignConfigFormSchema', () => {
     expect(campaignConfigFormSchema.parse(BASE).trendyolFundingPct).toBe('0');
   });
 
+  it('reads a CLEARED funding rate (the input keeps "") as "0" as well', () => {
+    expect(
+      campaignConfigFormSchema.parse({ ...BASE, trendyolFundingPct: '' }).trendyolFundingPct,
+    ).toBe('0');
+  });
+
+  it('treats a cleared value as not given — the requirement speaks, not the format', () => {
+    const codes = issueCodes({ ...BASE, value: '' });
+    expect(codes).toContain('VALUE_REQUIRED');
+    expect(codes).not.toContain('INVALID_DISCOUNT_VALUE');
+  });
+
   it('keeps an entered funding rate', () => {
     const parsed = campaignConfigFormSchema.parse({ ...BASE, trendyolFundingPct: '60' });
     expect(parsed.trendyolFundingPct).toBe('60');

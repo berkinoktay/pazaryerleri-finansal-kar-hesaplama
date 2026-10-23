@@ -142,9 +142,9 @@ export function MarketplaceCampaignConfigFields({
               <Input
                 inputMode="decimal"
                 value={field.value ?? ''}
-                onChange={(event) =>
-                  field.onChange(event.target.value === '' ? undefined : event.target.value)
-                }
+                // A cleared input keeps '' (a seeded rate must be clearable); the schema reads an
+                // empty rate as 0.
+                onChange={(event) => field.onChange(event.target.value)}
                 onBlur={field.onBlur}
                 name={field.name}
                 ref={field.ref}
