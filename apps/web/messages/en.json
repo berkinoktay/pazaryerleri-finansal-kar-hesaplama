@@ -1921,7 +1921,12 @@
     "templates": {
       "deleteTitle": "Delete campaign",
       "deleteDescription": "This saved campaign and all of its price choices will be permanently deleted. This action cannot be undone.",
-      "deleteConfirm": "Delete campaign"
+      "deleteConfirm": "Delete campaign",
+      "back": "Back to campaigns",
+      "delete": "Delete Campaign",
+      "detailIntent": "Join with the maximum price or your own price per product, and see your profit at the campaign price, including the share Trendyol funds.",
+      "notFoundTitle": "Campaign not found",
+      "notFoundDescription": "This campaign may have been deleted or may not belong to this store."
     },
     "upload": {
       "title": "Upload the campaign Excel",
@@ -1945,6 +1950,64 @@
         "fundingDecimal": "Enter a valid rate (up to 2 decimals).",
         "fundingOver100": "The funding rate cannot exceed 100%."
       }
+    },
+    "actions": {
+      "saveAndDownload": "Save and Download",
+      "exportEmptyHint": "Choose a campaign price for at least one product before downloading."
+    },
+    "configCard": {
+      "edit": "Edit",
+      "editTitle": "Edit campaign setup",
+      "editDescription": "Changing the setup, the funding rate or the dates recalculates every product's profit; your chosen prices are kept.",
+      "dateRange": "{start} – {end}",
+      "assumption": "Profit is estimated for a basket containing only this product at the minimum quantity that meets the campaign condition; the discount is split proportionally across those units. Multi-item baskets may differ.",
+      "outdatedTariffNote": "Your uploaded commission tariffs don't cover this campaign's week — commission falls back to the product's own rate or the category rate."
+    },
+    "table": {
+      "product": "Product Details",
+      "currentPrice": "Current price",
+      "maxPrice": "Maximum price",
+      "customPrice": "Custom price",
+      "commission": "commission",
+      "calculatedProfit": "Calculated profit",
+      "orderProfit": "Order profit",
+      "vsCurrent": "vs current",
+      "vsWithoutCampaign": "vs the same order without the campaign",
+      "orderQuantity": "{qty}-unit order",
+      "customerPays": "Customer pays: {amount}",
+      "bestOption": "Most profitable",
+      "selectPrice": "Choose this price",
+      "selectMaxAria": "Join at the maximum price — {product}",
+      "selected": "Selected",
+      "enterPrice": "Enter a price",
+      "customPriceAria": "Custom price — {product}",
+      "customPriceCeilingHint": "You can enter up to {price}",
+      "customPriceAboveMax": "Cannot exceed the maximum price ({price})",
+      "customPriceNotPositive": "Enter a price above zero"
+    },
+    "commissionBands": {
+      "title": "Product commission offers",
+      "hint": "Show commission bands",
+      "above": "{price} and above",
+      "range": "{lower}–{upper}",
+      "below": "{price} and below"
+    },
+    "breakdown": {
+      "title": "Profit breakdown",
+      "orderProfitLabel": "Estimated order profit ({qty} units)",
+      "basketTitle": "Basket assumption",
+      "basketIntro": "The campaign condition is met assuming a basket of {qty} units of only this product.",
+      "basketTotal": "Basket total ({qty} units)",
+      "campaignDiscount": "Campaign discount",
+      "customerPaid": "Customer pays",
+      "trendyolFunded": "Funded by Trendyol",
+      "sellerSettlement": "Seller settlement",
+      "orderProfit": "Order profit ({qty} units)",
+      "singleParcelNote": "The order estimate counts shipping and the platform service fee once, as a single shipment ({qty} units ship together); parcel volume is not aggregated, so this is an estimate.",
+      "distributionNote": "Trendyol splits the discount across items proportionally; settlement and returns run on this per-unit amount.",
+      "fundingTitle": "Trendyol funding",
+      "campaignPrice": "Campaign price",
+      "fundingNote": "Commission, stoppage and VAT run off the seller settlement, not off what the customer paid."
     }
   },
   "featureStatus": {

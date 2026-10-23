@@ -80,4 +80,19 @@ export const marketplaceCampaignKeys = {
     [...marketplaceCampaignKeys.all, 'detail', orgId, storeId] as const,
   detail: (orgId: string, storeId: string, campaignId: string) =>
     [...marketplaceCampaignKeys.details(orgId, storeId), campaignId] as const,
+  // Bir özel fiyatın "ne olurdu" tahmini, kampanyanın detay anahtarının ALTINDA: detayı geçersiz
+  // kılan her yazma (ayar düzenleme, seçim kaydı) tahminleri de yeniden fiyatlatır.
+  customEstimate: (
+    orgId: string,
+    storeId: string,
+    campaignId: string,
+    itemId: string,
+    price: string,
+  ) =>
+    [
+      ...marketplaceCampaignKeys.detail(orgId, storeId, campaignId),
+      'custom-estimate',
+      itemId,
+      price,
+    ] as const,
 };
