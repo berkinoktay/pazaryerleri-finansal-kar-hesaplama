@@ -8,17 +8,25 @@ import type {
 } from '@/features/campaigns/lib/adapt-marketplace-campaign';
 import {
   applyCustomPrice,
+  applyTargetMarginSuggestions,
   bestCampaignOption,
   campaignOptionFigures,
   campaignRowBestOption,
+  clearSelections,
+  countCampaignChoices,
   customOptionFigures,
   customPriceStatus,
   estimateOptionFigures,
-  joinedCampaignCount,
+  filterCampaignRows,
+  hasActiveCampaignFilters,
+  hasCommissionTariffWarning,
   seedCampaignChoices,
+  selectAllMax,
+  selectProfitable,
   toCampaignSelectionsPayload,
   toggleCampaignChoice,
   type CampaignChoiceState,
+  type CampaignFilterState,
   type CampaignOptionFigures,
 } from '@/features/campaigns/lib/marketplace-campaign-selection';
 
@@ -177,14 +185,19 @@ describe('toggleCampaignChoice', () => {
   });
 });
 
-describe('joinedCampaignCount', () => {
-  it('counts the rows that join with either option', () => {
-    const rows = [makeRow({ id: 'a' }), makeRow({ id: 'b' }), makeRow({ id: 'c' })];
+describe('countCampaignChoices', () => {
+  it('counts the joining rows per price option; a row without a choice counts for neither', () => {
+    const rows = [
+      makeRow({ id: 'a' }),
+      makeRow({ id: 'b' }),
+      makeRow({ id: 'c' }),
+      makeRow({ id: 'd' }),
+    ];
     const state: CampaignChoiceState = {
-      selection: { a: 'MAX', b: 'CUSTOM', c: null },
+      selection: { a: 'MAX', b: 'CUSTOM', c: null, d: 'MAX' },
       customPrices: { b: '150.00' },
     };
-    expect(joinedCampaignCount(rows, state)).toBe(2);
+    expect(countCampaignChoices(rows, state)).toEqual({ max: 2, custom: 1 });
   });
 });
 
@@ -332,5 +345,205 @@ describe('campaignRowBestOption', () => {
     expect(campaignRowBestOption(row, 'ORDER', '180.00', undefined)).toBe('custom');
     // A different typed price has no figures yet, so the ribbon waits for its estimate.
     expect(campaignRowBestOption(row, 'ORDER', '170.00', undefined)).toBeNull();
+  });
+});
+
+// ─── G16: filters + smart-select ─────────────────────────────────────────────
+
+const NO_FILTERS: CampaignFilterState = {
+  query: '',
+  profitable: false,
+  losing: false,
+  selected: false,
+  tariffWarning: false,
+};
+
+/** Rows whose maximum-price option profits, loses, and cannot be judged (no cost). */
+function profitRows(): MarketplaceCampaignRow[] {
+  return [
+    makeRow({ id: 'win', maxScenario: scenario('200.00', '30.00') }),
+    makeRow({ id: 'loss', maxScenario: scenario('200.00', '-12.50') }),
+    makeRow({
+      id: 'unknown',
+      calculable: false,
+      reason: 'NO_COST',
+      maxScenario: scenario('200.00', null),
+    }),
+  ];
+}
+
+const ids = (rows: readonly MarketplaceCampaignRow[]): string[] => rows.map((row) => row.id);
+
+describe('hasActiveCampaignFilters', () => {
+  it('is off for the default view and a blank search, on for a search or any chip', () => {
+    expect(hasActiveCampaignFilters(NO_FILTERS)).toBe(false);
+    expect(hasActiveCampaignFilters({ ...NO_FILTERS, query: '   ' })).toBe(false);
+    expect(hasActiveCampaignFilters({ ...NO_FILTERS, query: 'lamba' })).toBe(true);
+    expect(hasActiveCampaignFilters({ ...NO_FILTERS, losing: true })).toBe(true);
+    expect(hasActiveCampaignFilters({ ...NO_FILTERS, tariffWarning: true })).toBe(true);
+  });
+});
+
+describe('hasCommissionTariffWarning', () => {
+  it('warns only when the file says "on a tariff" but the commission did not come from a band', () => {
+    expect(hasCommissionTariffWarning(makeRow({ hasCommissionTariff: true }))).toBe(true);
+    expect(
+      hasCommissionTariffWarning(
+        makeRow({
+          hasCommissionTariff: true,
+          maxScenario: { ...scenario('200.00', '30.00'), commissionSource: 'band' },
+        }),
+      ),
+    ).toBe(false);
+    expect(hasCommissionTariffWarning(makeRow({ hasCommissionTariff: false }))).toBe(false);
+  });
+});
+
+describe('filterCampaignRows', () => {
+  it('searches title, barcode and model code with tr lowercasing — and no letter folding', () => {
+    const rows = [
+      makeRow({ id: 'lamp', productTitle: 'IŞIKLI MASA LAMBASI' }),
+      makeRow({ id: 'code', productTitle: 'Kupa', productCode: 'MDL-42' }),
+      makeRow({ id: 'bar', productTitle: 'Tabak', barcode: '869000111' }),
+    ];
+    const find = (query: string): string[] =>
+      ids(filterCampaignRows(rows, {}, { ...NO_FILTERS, query }, 'UNIT'));
+
+    // tr-locale: "I" lowercases to "ı" on BOTH sides, so either casing of the query matches.
+    expect(find('ışıklı')).toEqual(['lamp']);
+    expect(find('IŞIKLI')).toEqual(['lamp']);
+    // Berkin's choice (option A): no Turkish-letter folding, so the ASCII spelling does not match.
+    expect(find('isikli')).toEqual([]);
+    expect(find('mdl-42')).toEqual(['code']);
+    expect(find(' 869000 ')).toEqual(['bar']);
+  });
+
+  it('the profit chips read the maximum option’s sign; a row without a profit matches neither', () => {
+    const rows = profitRows();
+    expect(ids(filterCampaignRows(rows, {}, { ...NO_FILTERS, profitable: true }, 'UNIT'))).toEqual([
+      'win',
+    ]);
+    expect(ids(filterCampaignRows(rows, {}, { ...NO_FILTERS, losing: true }, 'UNIT'))).toEqual([
+      'loss',
+    ]);
+  });
+
+  it('an ORDER campaign judges the order, not the unit', () => {
+    // The unit falls to a loss, yet the assumed order still nets a profit.
+    const row = makeRow({
+      id: 'order',
+      maxScenario: scenario('100.00', '-5.00'),
+      maxBasket: basket(3, '300.00', '10.00'),
+    });
+    const profitable = { ...NO_FILTERS, profitable: true };
+    expect(ids(filterCampaignRows([row], {}, profitable, 'ORDER'))).toEqual(['order']);
+    expect(ids(filterCampaignRows([row], {}, profitable, 'UNIT'))).toEqual([]);
+  });
+
+  it('"Seçililer" follows the buffer and the tariff chip keeps only warned rows', () => {
+    const rows = [makeRow({ id: 'joined' }), makeRow({ id: 'warned', hasCommissionTariff: true })];
+    const state: CampaignChoiceState = { selection: { joined: 'MAX' }, customPrices: {} };
+    expect(
+      ids(filterCampaignRows(rows, state.selection, { ...NO_FILTERS, selected: true }, 'UNIT')),
+    ).toEqual(['joined']);
+    expect(
+      ids(
+        filterCampaignRows(rows, state.selection, { ...NO_FILTERS, tariffWarning: true }, 'UNIT'),
+      ),
+    ).toEqual(['warned']);
+  });
+});
+
+describe('smart-select actions', () => {
+  it('"Tümünü maksimum fiyata çek" joins every given row at the maximum — a losing one too', () => {
+    const [win, loss, unknown] = profitRows();
+    if (win === undefined || loss === undefined || unknown === undefined) throw new Error('rows');
+    const state: CampaignChoiceState = {
+      selection: { win: 'CUSTOM', hidden: 'CUSTOM' },
+      customPrices: { win: '150.00', hidden: '150.00' },
+    };
+
+    const next = selectAllMax([win, loss, unknown], state);
+
+    expect(next.selection).toEqual({ win: 'MAX', loss: 'MAX', unknown: 'MAX', hidden: 'CUSTOM' });
+    // The typed prices stay — they are only a comparison once the row is on the maximum.
+    expect(next.customPrices).toEqual(state.customPrices);
+  });
+
+  it('"Kârda kalanları seç" keeps exactly the profitable rows, leaving a CUSTOM choice alone', () => {
+    const rows = [
+      ...profitRows(),
+      makeRow({ id: 'own', maxScenario: scenario('200.00', '-3.00') }),
+    ];
+    const state: CampaignChoiceState = {
+      selection: { loss: 'MAX', unknown: 'MAX', own: 'CUSTOM', hidden: 'MAX' },
+      customPrices: { own: '190.00' },
+    };
+
+    const next = selectProfitable(rows, state, 'UNIT');
+
+    expect(next.selection).toEqual({
+      win: 'MAX',
+      loss: null,
+      unknown: null,
+      own: 'CUSTOM',
+      hidden: 'MAX',
+    });
+  });
+
+  it('"Seçimi temizle" clears both the choice and the typed price of every given row', () => {
+    const rows = [makeRow({ id: 'a' }), makeRow({ id: 'b' })];
+    const state: CampaignChoiceState = {
+      selection: { a: 'MAX', b: 'CUSTOM', hidden: 'CUSTOM' },
+      customPrices: { a: '120.00', b: '150.00', hidden: '150.00' },
+    };
+
+    expect(clearSelections(rows, state)).toEqual({
+      selection: { a: null, b: null, hidden: 'CUSTOM' },
+      customPrices: { a: null, b: null, hidden: '150.00' },
+    });
+  });
+});
+
+describe('applyTargetMarginSuggestions', () => {
+  const rows = [
+    makeRow({ id: 'priced' }),
+    makeRow({ id: 'unreachable' }),
+    makeRow({ id: 'noCost' }),
+  ];
+  const state: CampaignChoiceState = {
+    selection: { priced: null, unreachable: 'MAX', noCost: 'MAX', hidden: null },
+    customPrices: { unreachable: '150.00' },
+  };
+
+  it('writes a suggested price and joins with it; an UNREACHABLE row is left out and marked', () => {
+    const result = applyTargetMarginSuggestions(rows, state, [
+      { itemId: 'priced', price: '185.40', reason: null },
+      { itemId: 'unreachable', price: null, reason: 'UNREACHABLE' },
+      { itemId: 'noCost', price: null, reason: 'NOT_CALCULABLE' },
+    ]);
+
+    expect(result.state.selection).toEqual({
+      priced: 'CUSTOM',
+      unreachable: null,
+      // NOT_CALCULABLE gives nothing to judge by, so the seller's choice stands.
+      noCost: 'MAX',
+      hidden: null,
+    });
+    expect(result.state.customPrices).toEqual({ priced: '185.40', unreachable: '150.00' });
+    expect(result.marks).toEqual({ unreachable: 'UNREACHABLE', noCost: 'NOT_CALCULABLE' });
+    expect(result.filled).toBe(1);
+  });
+
+  it('touches only the given (visible) rows and never writes a price the save would refuse', () => {
+    const result = applyTargetMarginSuggestions([makeRow({ id: 'priced' })], state, [
+      // Above the 200.00 ceiling — the backend never sends this, but the buffer must not take it.
+      { itemId: 'priced', price: '250.00', reason: null },
+      { itemId: 'hidden', price: '120.00', reason: null },
+    ]);
+
+    expect(result.state).toEqual(state);
+    expect(result.marks).toEqual({});
+    expect(result.filled).toBe(0);
   });
 });

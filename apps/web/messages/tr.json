@@ -1983,7 +1983,11 @@
       "customPriceAria": "Özel fiyat — {product}",
       "customPriceCeilingHint": "En fazla {price} girebilirsiniz",
       "customPriceAboveMax": "Maksimum fiyatı ({price}) aşamaz",
-      "customPriceNotPositive": "Sıfırdan büyük bir fiyat girin"
+      "customPriceNotPositive": "Sıfırdan büyük bir fiyat girin",
+      "tariffWarning": "Komisyon tarifesi bulunamadı",
+      "tariffWarningHint": "Dosyaya göre bu ürün komisyon tarifesinde, ama kampanya haftasını kapsayan tarife yüklü değil; kâr ürünün kendi ya da kategori oranıyla hesaplandı, gerçek oran farklı olabilir.",
+      "targetMarginUnreachable": "Hedef marja maksimum fiyatla bile ulaşılamıyor",
+      "targetMarginNotCalculable": "Hedef marj için maliyet, kargo ya da komisyon bilgisi eksik"
     },
     "commissionBands": {
       "title": "Ürün komisyon teklifleri",
@@ -2008,6 +2012,36 @@
       "fundingTitle": "Trendyol karşılaması",
       "campaignPrice": "Kampanya fiyatı",
       "fundingNote": "Komisyon, stopaj ve KDV müşterinin ödediğinden değil, satıcının hakedişinden hesaplanır."
+    },
+    "search": "Ürün, model veya barkod ara",
+    "filters": {
+      "profitable": "Kârda kalanlar",
+      "losing": "Zarara düşenler",
+      "selected": "Seçililer",
+      "tariffWarning": "Tarife uyarısı olanlar"
+    },
+    "smartSelect": {
+      "label": "Akıllı Seçim",
+      "selectAllMax": "Tümünü maksimum fiyata çek",
+      "selectProfitable": "Kârda kalanları seç",
+      "targetMargin": "Hedef marja göre özel fiyat doldur…",
+      "clear": "Seçimleri temizle",
+      "scopeHint": "Filtre uygulanmışsa yalnız görünen ürünlere uygulanır."
+    },
+    "summary": {
+      "total": "Ürün",
+      "selected": "Seçili",
+      "selectedValue": "{count}/{total}",
+      "selectedContext": "{max} maksimum · {custom} özel fiyatla"
+    },
+    "targetMargin": {
+      "title": "Hedef marja göre özel fiyat doldur",
+      "description": "Her ürün için, kampanya indirimi ve Trendyol'un karşıladığı pay uygulandıktan sonra bu kâr marjını tutturan en düşük kampanya fiyatı özel fiyat olarak yazılır ve ürün o fiyatla seçilir. Maksimum fiyatla bile hedefe ulaşamayan ürünler kampanyadan çıkarılır ve işaretlenir.",
+      "label": "Hedef kâr marjı",
+      "hint": "Yalnız listede görünen ürünlere uygulanır. Hiçbir şey kaydedilmez; seçimler \"Kaydet ve İndir\" ile kalıcı olur.",
+      "tooHigh": "Kâr marjı %100'e ulaşamaz; daha düşük bir hedef girin.",
+      "submit": "Fiyatları doldur",
+      "applied": "{filled, plural, =0 {Hiçbir ürüne fiyat yazılmadı} other {# ürüne fiyat yazıldı}}{unreachable, plural, =0 {.} other {, # ürün hedefe ulaşamıyor.}}"
     }
   },
   "featureStatus": {

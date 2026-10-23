@@ -1,6 +1,7 @@
 'use client';
 
 import { Decimal } from 'decimal.js';
+import { Alert02Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -20,6 +21,7 @@ import {
   customOptionFigures,
   customPriceStatus,
   estimateOptionFigures,
+  type CampaignTargetMarginMark,
 } from '../lib/marketplace-campaign-selection';
 import { MarketplaceCampaignBreakdown } from './marketplace-campaign-breakdown';
 import { CampaignOptionDetails } from './marketplace-campaign-option-details';
@@ -43,6 +45,8 @@ export interface MarketplaceCampaignCustomPriceCellProps {
   onPriceChange: (row: MarketplaceCampaignRow, price: string | null) => void;
   /** Toggles joining with the custom price (re-choosing clears it). */
   onToggle: () => void;
+  /** Why the last target-margin run could not price this row, if it could not. */
+  targetMarginMark?: CampaignTargetMarginMark | null;
 }
 
 /**
@@ -65,6 +69,7 @@ export function MarketplaceCampaignCustomPriceCell({
   selected,
   onPriceChange,
   onToggle,
+  targetMarginMark = null,
 }: MarketplaceCampaignCustomPriceCellProps): React.ReactElement {
   const t = useTranslations('marketplaceCampaignsPage.table');
   const tCommon = useTranslations('common');
@@ -148,6 +153,14 @@ export function MarketplaceCampaignCustomPriceCell({
             {t('customPriceCeilingHint', { price: ceiling })}
           </span>
         )}
+        {targetMarginMark !== null ? (
+          <span className="gap-3xs text-2xs text-warning flex items-start">
+            <Alert02Icon className="size-icon-xs mt-3xs shrink-0" aria-hidden />
+            {targetMarginMark === 'UNREACHABLE'
+              ? t('targetMarginUnreachable')
+              : t('targetMarginNotCalculable')}
+          </span>
+        ) : null}
       </div>
 
       {/* The profit block appears once a valid price is in; an empty card is just the input, the

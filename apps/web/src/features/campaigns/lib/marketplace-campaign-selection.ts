@@ -1,6 +1,7 @@
 import { Decimal } from 'decimal.js';
 
 import type { EstimateCampaignItemResult } from '../api/estimate-campaign-item.api';
+import type { TargetMarginResult } from '../api/suggest-target-margin.api';
 import type { UpdateCampaignSelectionsBody } from '../api/update-campaign-selections.api';
 import type {
   CampaignBasketScenario,
@@ -116,12 +117,22 @@ export function toggleCampaignChoice(
   return { ...state, selection: { ...state.selection, [row.id]: choice } };
 }
 
-/** How many rows join the campaign — gates "Kaydet ve İndir" (an empty export is refused). */
-export function joinedCampaignCount(
+/**
+ * How many rows join the campaign, per price option — the summary strip's counts, and their sum
+ * gates "Kaydet ve İndir" (an empty export is refused).
+ */
+export function countCampaignChoices(
   rows: readonly MarketplaceCampaignRow[],
   state: CampaignChoiceState,
-): number {
-  return rows.filter((row) => (state.selection[row.id] ?? null) !== null).length;
+): { max: number; custom: number } {
+  let max = 0;
+  let custom = 0;
+  for (const row of rows) {
+    const choice = state.selection[row.id] ?? null;
+    if (choice === 'MAX') max += 1;
+    else if (choice === 'CUSTOM') custom += 1;
+  }
+  return { max, custom };
 }
 
 /**
@@ -283,4 +294,168 @@ export function campaignRowBestOption(
     campaignOptionFigures(presentation, row.maxScenario, row.maxBasket, row.current),
     customOptionFigures(row, presentation, bufferedPrice, live),
   );
+}
+
+// ─── Filters ──────────────────────────────────────────────────────────────────
+
+/** The detail toolbar's view state — a search string plus four independent chips. */
+export interface CampaignFilterState {
+  query: string;
+  /** Keep only rows whose maximum-price option still nets a profit (> 0). */
+  profitable: boolean;
+  /** Keep only rows whose maximum-price option makes a loss (< 0). */
+  losing: boolean;
+  /** Keep only rows that join the campaign. */
+  selected: boolean;
+  /** Keep only rows carrying the commission-tariff warning. */
+  tariffWarning: boolean;
+}
+
+/** True when the search box or any chip is active — drives the table's "clear filters" CTA. */
+export function hasActiveCampaignFilters(filters: CampaignFilterState): boolean {
+  return (
+    filters.query.trim() !== '' ||
+    filters.profitable ||
+    filters.losing ||
+    filters.selected ||
+    filters.tariffWarning
+  );
+}
+
+/**
+ * The file marks the product as sitting on a commission tariff ("Ürün Komisyon Tarifesi: Var"), yet
+ * no uploaded tariff week covers the campaign, so its commission fell back to the product's own or
+ * the category rate — the real rate may differ (design §4.3).
+ */
+export function hasCommissionTariffWarning(row: MarketplaceCampaignRow): boolean {
+  return row.hasCommissionTariff && row.maxScenario.commissionSource !== 'band';
+}
+
+const isNegative = (value: string | null): value is string =>
+  value !== null && compareFixedDecimal(value, '0') < 0;
+
+/** The maximum-price option's headline profit — the figure the profit chips and smart-select judge. */
+function maxOptionProfit(
+  row: MarketplaceCampaignRow,
+  presentation: CampaignScenarioPresentation,
+): string | null {
+  return campaignOptionFigures(presentation, row.maxScenario, row.maxBasket, row.current).netProfit;
+}
+
+/**
+ * Applies the search + chip filters (pure). The profit chips read the maximum-price option's sign
+ * on the row's own basis (unit, or the order on an ORDER campaign) — a comparison, never money
+ * math; a not-calculable row matches neither. Search matches title, barcode and model code with the
+ * same tr-locale lowercasing as every other list. Only the selection map is read (the "Seçililer"
+ * chip), so a caller can memo on it alone and typing a custom price never re-runs the filter.
+ */
+export function filterCampaignRows(
+  rows: readonly MarketplaceCampaignRow[],
+  selection: CampaignSelectionMap,
+  filters: CampaignFilterState,
+  presentation: CampaignScenarioPresentation,
+): MarketplaceCampaignRow[] {
+  const needle = filters.query.trim().toLocaleLowerCase('tr');
+  return rows.filter((row) => {
+    if (
+      needle !== '' &&
+      ![row.productTitle, row.barcode, row.productCode].some((field) =>
+        (field ?? '').toLocaleLowerCase('tr').includes(needle),
+      )
+    ) {
+      return false;
+    }
+    if (filters.profitable && !isPositive(maxOptionProfit(row, presentation))) return false;
+    if (filters.losing && !isNegative(maxOptionProfit(row, presentation))) return false;
+    if (filters.selected && (selection[row.id] ?? null) === null) return false;
+    if (filters.tariffWarning && !hasCommissionTariffWarning(row)) return false;
+    return true;
+  });
+}
+
+// ─── Bulk actions (callers pass the VISIBLE rows; hidden rows keep their choice) ─
+
+/** "Tümünü maksimum fiyata çek": every given row joins at the maximum — a row that falls to a loss too. */
+export function selectAllMax(
+  rows: readonly MarketplaceCampaignRow[],
+  state: CampaignChoiceState,
+): CampaignChoiceState {
+  const selection = { ...state.selection };
+  for (const row of rows) selection[row.id] = 'MAX';
+  return { ...state, selection };
+}
+
+/**
+ * "Kârda kalanları seç": a row whose maximum-price option still nets a profit joins at the
+ * maximum, every other row stops participating — the selection becomes exactly the profitable rows.
+ * A row the seller joined with their OWN price is left as it is: that choice is deliberate, and its
+ * profit hangs on a price this projection does not judge.
+ */
+export function selectProfitable(
+  rows: readonly MarketplaceCampaignRow[],
+  state: CampaignChoiceState,
+  presentation: CampaignScenarioPresentation,
+): CampaignChoiceState {
+  const selection = { ...state.selection };
+  for (const row of rows) {
+    if (selection[row.id] === 'CUSTOM') continue;
+    selection[row.id] = isPositive(maxOptionProfit(row, presentation)) ? 'MAX' : null;
+  }
+  return { ...state, selection };
+}
+
+/** "Seçimi temizle": the given rows leave the campaign and their typed custom prices are cleared. */
+export function clearSelections(
+  rows: readonly MarketplaceCampaignRow[],
+  state: CampaignChoiceState,
+): CampaignChoiceState {
+  const selection = { ...state.selection };
+  const customPrices = { ...state.customPrices };
+  for (const row of rows) {
+    selection[row.id] = null;
+    customPrices[row.id] = null;
+  }
+  return { selection, customPrices };
+}
+
+/** Why a target-margin run could not price a row — kept to mark the row's custom card. */
+export type CampaignTargetMarginMark = 'UNREACHABLE' | 'NOT_CALCULABLE';
+
+/**
+ * "Hedef marja göre özel fiyat doldur": applies the backend's suggestions to the given rows. A
+ * suggested price (the backend never suggests above the maximum) becomes the row's custom price and
+ * the row joins with it. An UNREACHABLE row stops participating — no price up to the maximum keeps
+ * the target margin. A NOT_CALCULABLE row keeps its choice: its cost, shipping or commission is
+ * missing, so there is nothing to judge it by. Both come back as marks so the card can say why.
+ */
+export function applyTargetMarginSuggestions(
+  rows: readonly MarketplaceCampaignRow[],
+  state: CampaignChoiceState,
+  suggestions: TargetMarginResult['suggestions'],
+): {
+  state: CampaignChoiceState;
+  marks: Record<string, CampaignTargetMarginMark>;
+  /** How many rows received a suggested price. */
+  filled: number;
+} {
+  const byId = new Map(suggestions.map((suggestion) => [suggestion.itemId, suggestion]));
+  const selection = { ...state.selection };
+  const customPrices = { ...state.customPrices };
+  const marks: Record<string, CampaignTargetMarginMark> = {};
+  let filled = 0;
+  for (const row of rows) {
+    const suggestion = byId.get(row.id);
+    if (suggestion === undefined) continue;
+    if (suggestion.price !== null && customPriceStatus(suggestion.price, row) === 'valid') {
+      customPrices[row.id] = suggestion.price;
+      selection[row.id] = 'CUSTOM';
+      filled += 1;
+    } else if (suggestion.reason === 'UNREACHABLE') {
+      selection[row.id] = null;
+      marks[row.id] = 'UNREACHABLE';
+    } else if (suggestion.reason === 'NOT_CALCULABLE') {
+      marks[row.id] = 'NOT_CALCULABLE';
+    }
+  }
+  return { state: { selection, customPrices }, marks, filled };
 }

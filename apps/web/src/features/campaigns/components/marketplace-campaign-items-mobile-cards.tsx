@@ -3,6 +3,7 @@
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { TableNoResultsState } from '@/components/patterns/data-table-states';
 import { ProductImageCell } from '@/components/patterns/product-image-cell';
 
 import type {
@@ -10,22 +11,29 @@ import type {
   MarketplaceCampaignRow,
 } from '../lib/adapt-marketplace-campaign';
 import {
+  hasCommissionTariffWarning,
   type CampaignCustomPriceMap,
   type CampaignPriceChoice,
   type CampaignSelectionMap,
+  type CampaignTargetMarginMark,
 } from '../lib/marketplace-campaign-selection';
 import { MarketplaceCampaignCurrentCell } from './marketplace-campaign-current-cell';
 import { MarketplaceCampaignCustomPriceCell } from './marketplace-campaign-custom-price-cell';
 import { MarketplaceCampaignMaxPriceCell } from './marketplace-campaign-max-price-cell';
+import { MarketplaceCampaignTariffWarning } from './marketplace-campaign-tariff-warning';
 
 export interface MarketplaceCampaignItemsMobileCardsProps {
   rows: readonly MarketplaceCampaignRow[];
   presentation: CampaignScenarioPresentation;
   selection: CampaignSelectionMap;
   customPrices: CampaignCustomPriceMap;
+  /** Why the last target-margin run could not price a row, per row. */
+  targetMarginMarks: Readonly<Record<string, CampaignTargetMarginMark>>;
   /** Toggles one price option for a row (the row travels so the buffer can check its ceiling). */
   onToggleChoice: (row: MarketplaceCampaignRow, choice: CampaignPriceChoice) => void;
   onCustomPriceChange: (row: MarketplaceCampaignRow, price: string | null) => void;
+  /** Resets the search + chips — the no-results state's "clear filters" action. */
+  onClearFilters: () => void;
 }
 
 /**
@@ -43,10 +51,15 @@ export function MarketplaceCampaignItemsMobileCards({
   presentation,
   selection,
   customPrices,
+  targetMarginMarks,
   onToggleChoice,
   onCustomPriceChange,
+  onClearFilters,
 }: MarketplaceCampaignItemsMobileCardsProps): React.ReactElement {
   const t = useTranslations('marketplaceCampaignsPage.table');
+
+  // A campaign always has products, so an empty list here means the filters hide them all.
+  if (rows.length === 0) return <TableNoResultsState onClearFilters={onClearFilters} />;
 
   return (
     <div className="gap-sm flex flex-col">
@@ -69,6 +82,11 @@ export function MarketplaceCampaignItemsMobileCards({
                   <div className="text-2xs text-muted-foreground mt-3xs tabular-nums">{meta}</div>
                 ) : null}
                 <div className="text-2xs text-muted-foreground tabular-nums">{row.barcode}</div>
+                {hasCommissionTariffWarning(row) ? (
+                  <div className="mt-2xs flex">
+                    <MarketplaceCampaignTariffWarning />
+                  </div>
+                ) : null}
               </div>
             </div>
 
@@ -103,6 +121,7 @@ export function MarketplaceCampaignItemsMobileCards({
                 selected={selection[row.id] === 'CUSTOM'}
                 onPriceChange={onCustomPriceChange}
                 onToggle={() => onToggleChoice(row, 'CUSTOM')}
+                targetMarginMark={targetMarginMarks[row.id] ?? null}
               />
             </div>
           </div>

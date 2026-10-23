@@ -16,13 +16,16 @@ import type {
   MarketplaceCampaignRow,
 } from '../lib/adapt-marketplace-campaign';
 import {
+  hasCommissionTariffWarning,
   type CampaignCustomPriceMap,
   type CampaignPriceChoice,
   type CampaignSelectionMap,
+  type CampaignTargetMarginMark,
 } from '../lib/marketplace-campaign-selection';
 import { MarketplaceCampaignCurrentCell } from './marketplace-campaign-current-cell';
 import { MarketplaceCampaignCustomPriceCell } from './marketplace-campaign-custom-price-cell';
 import { MarketplaceCampaignMaxPriceCell } from './marketplace-campaign-max-price-cell';
+import { MarketplaceCampaignTariffWarning } from './marketplace-campaign-tariff-warning';
 
 /**
  * Per-row VOLATILE state streamed to the cells through CONTEXT rather than baked into the
@@ -34,12 +37,14 @@ interface RowState {
   presentation: CampaignScenarioPresentation;
   selection: CampaignSelectionMap;
   customPrices: CampaignCustomPriceMap;
+  targetMarginMarks: Readonly<Record<string, CampaignTargetMarginMark>>;
 }
 
 const RowStateContext = React.createContext<RowState>({
   presentation: 'UNIT',
   selection: {},
   customPrices: {},
+  targetMarginMarks: {},
 });
 
 function MaxCellSlot({
@@ -70,7 +75,8 @@ function CustomCellSlot({
   onToggle: () => void;
   onPriceChange: (row: MarketplaceCampaignRow, price: string | null) => void;
 }): React.ReactElement {
-  const { presentation, selection, customPrices } = React.useContext(RowStateContext);
+  const { presentation, selection, customPrices, targetMarginMarks } =
+    React.useContext(RowStateContext);
   return (
     <MarketplaceCampaignCustomPriceCell
       row={row}
@@ -79,6 +85,7 @@ function CustomCellSlot({
       selected={selection[row.id] === 'CUSTOM'}
       onPriceChange={onPriceChange}
       onToggle={onToggle}
+      targetMarginMark={targetMarginMarks[row.id] ?? null}
     />
   );
 }
@@ -89,10 +96,14 @@ export interface MarketplaceCampaignItemsTableProps {
   presentation: CampaignScenarioPresentation;
   selection: CampaignSelectionMap;
   customPrices: CampaignCustomPriceMap;
+  /** Why the last target-margin run could not price a row, per row. */
+  targetMarginMarks: Readonly<Record<string, CampaignTargetMarginMark>>;
   /** Toggles one price option for a row (the row travels so the buffer can check its ceiling). */
   onToggleChoice: (row: MarketplaceCampaignRow, choice: CampaignPriceChoice) => void;
   onCustomPriceChange: (row: MarketplaceCampaignRow, price: string | null) => void;
   toolbar?: React.ReactNode;
+  hasActiveFilters: boolean;
+  onClearFilters: () => void;
 }
 
 /**
@@ -105,9 +116,12 @@ export function MarketplaceCampaignItemsTable({
   presentation,
   selection,
   customPrices,
+  targetMarginMarks,
   onToggleChoice,
   onCustomPriceChange,
   toolbar,
+  hasActiveFilters,
+  onClearFilters,
 }: MarketplaceCampaignItemsTableProps): React.ReactElement {
   const t = useTranslations('marketplaceCampaignsPage.table');
   // Local (not persisted): every campaign opens at 100%; the seller can shrink it for the session.
@@ -124,19 +138,27 @@ export function MarketplaceCampaignItemsTable({
             .filter((value): value is string => value !== null && value !== '')
             .join(' · ');
           return (
-            <IdentityCell
-              size="md"
-              titleLines={2}
-              className="max-w-tariff-product"
-              leading={<ProductImageCell url={r.imageUrl} alt={r.productTitle} size="xl" />}
-              title={r.productTitle}
-              meta={
-                <span className="gap-3xs flex flex-col">
-                  {meta !== '' ? <span className="truncate tabular-nums">{meta}</span> : null}
-                  <span className="truncate tabular-nums">{r.barcode}</span>
+            <div className="gap-2xs flex flex-col">
+              <IdentityCell
+                size="md"
+                titleLines={2}
+                className="max-w-tariff-product"
+                leading={<ProductImageCell url={r.imageUrl} alt={r.productTitle} size="xl" />}
+                title={r.productTitle}
+                meta={
+                  <span className="gap-3xs flex flex-col">
+                    {meta !== '' ? <span className="truncate tabular-nums">{meta}</span> : null}
+                    <span className="truncate tabular-nums">{r.barcode}</span>
+                  </span>
+                }
+              />
+              {hasCommissionTariffWarning(r) ? (
+                // Content-width chip under the identity, never stretched to the column.
+                <span className="flex">
+                  <MarketplaceCampaignTariffWarning />
                 </span>
-              }
-            />
+              ) : null}
+            </div>
           );
         },
       },
@@ -174,8 +196,8 @@ export function MarketplaceCampaignItemsTable({
   );
 
   const rowState = React.useMemo<RowState>(
-    () => ({ presentation, selection, customPrices }),
-    [presentation, selection, customPrices],
+    () => ({ presentation, selection, customPrices, targetMarginMarks }),
+    [presentation, selection, customPrices, targetMarginMarks],
   );
   // Fresh array copy for TanStack (it mutates its own row model), stable across unrelated renders.
   const data = React.useMemo(() => [...rows], [rows]);
@@ -187,6 +209,10 @@ export function MarketplaceCampaignItemsTable({
         data={data}
         getRowId={(row) => row.id}
         initialColumnPinning={{ left: ['product'] }}
+        // A campaign always has products, so zero rows means the search / chips hide them all:
+        // DataTable's default no-results state, with its "clear filters" action.
+        hasActiveFilters={hasActiveFilters}
+        onClearFilters={onClearFilters}
         scale={scale}
         toolbar={() => (
           <div className="gap-sm flex flex-wrap items-center justify-between">

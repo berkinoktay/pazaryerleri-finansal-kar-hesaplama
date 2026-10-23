@@ -1983,7 +1983,11 @@
       "customPriceAria": "Custom price — {product}",
       "customPriceCeilingHint": "You can enter up to {price}",
       "customPriceAboveMax": "Cannot exceed the maximum price ({price})",
-      "customPriceNotPositive": "Enter a price above zero"
+      "customPriceNotPositive": "Enter a price above zero",
+      "tariffWarning": "No commission tariff found",
+      "tariffWarningHint": "The file puts this product on a commission tariff, but no uploaded tariff covers the campaign week; profit uses the product's own or the category rate, and the real rate may differ.",
+      "targetMarginUnreachable": "The target margin is out of reach even at the maximum price",
+      "targetMarginNotCalculable": "Cost, shipping or commission data is missing for the target margin"
     },
     "commissionBands": {
       "title": "Product commission offers",
@@ -2008,6 +2012,36 @@
       "fundingTitle": "Trendyol funding",
       "campaignPrice": "Campaign price",
       "fundingNote": "Commission, stoppage and VAT run off the seller settlement, not off what the customer paid."
+    },
+    "search": "Search product, model or barcode",
+    "filters": {
+      "profitable": "Profitable",
+      "losing": "Losing",
+      "selected": "Selected",
+      "tariffWarning": "With tariff warning"
+    },
+    "smartSelect": {
+      "label": "Smart Select",
+      "selectAllMax": "Move all to the maximum price",
+      "selectProfitable": "Select the profitable ones",
+      "targetMargin": "Fill custom prices for a target margin…",
+      "clear": "Clear selections",
+      "scopeHint": "If a filter is applied, only the visible products are affected."
+    },
+    "summary": {
+      "total": "Products",
+      "selected": "Selected",
+      "selectedValue": "{count}/{total}",
+      "selectedContext": "{max} at maximum · {custom} at a custom price"
+    },
+    "targetMargin": {
+      "title": "Fill custom prices for a target margin",
+      "description": "For each product, the lowest campaign price that keeps this profit margin after the campaign discount and Trendyol's funded share is written as the custom price, and the product is selected at it. Products that miss the target even at the maximum price are taken out of the campaign and marked.",
+      "label": "Target profit margin",
+      "hint": "Applies only to the products visible in the list. Nothing is saved; choices persist with \"Save and Download\".",
+      "tooHigh": "A profit margin cannot reach 100%; enter a lower target.",
+      "submit": "Fill prices",
+      "applied": "{filled, plural, =0 {No prices were filled} one {A price was filled for # product} other {Prices were filled for # products}}{unreachable, plural, =0 {.} one {; # product cannot reach the target.} other {; # products cannot reach the target.}}"
     }
   },
   "featureStatus": {

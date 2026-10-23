@@ -16,6 +16,7 @@ import { MarketplaceCampaignDetailClient } from '@/features/campaigns/components
 
 import trMessages from '../../../../messages/tr.json';
 import { HttpResponse, http, server } from '../../../helpers/msw';
+import { NuqsTestHarness } from '../../../helpers/nuqs';
 import { render, screen, waitFor } from '../../../helpers/render';
 
 const ORG_ID = '00000000-0000-0000-0000-000000000099';
@@ -113,7 +114,9 @@ function detailResponse(selection: 'NONE' | 'MAX' = 'MAX') {
 
 function renderClient() {
   return render(
-    <MarketplaceCampaignDetailClient orgId={ORG_ID} storeId={STORE_ID} campaignId={CAMPAIGN_ID} />,
+    <NuqsTestHarness>
+      <MarketplaceCampaignDetailClient orgId={ORG_ID} storeId={STORE_ID} campaignId={CAMPAIGN_ID} />
+    </NuqsTestHarness>,
   );
 }
 
@@ -208,7 +211,8 @@ describe('MarketplaceCampaignDetailClient', () => {
     await user.clear(input);
     await user.type(input, '150');
 
-    await waitFor(() => expect(estimates).toBe(1));
+    // The estimate first waits out the 400 ms debounce.
+    await waitFor(() => expect(estimates).toBe(1), { timeout: 3000 });
     // Every card that shows or races the price shares the same answer…
     await waitFor(() =>
       expect(
@@ -248,4 +252,242 @@ describe('MarketplaceCampaignDetailClient', () => {
     expect(screen.getByRole('button', { name: SAVE_AND_DOWNLOAD })).toBeEnabled();
     expect(saves).toBe(0);
   });
+});
+
+// ─── Toolbar: filters, smart-select, target margin ───────────────────────────
+
+const PAGE = trMessages.marketplaceCampaignsPage;
+const CLEAR_FILTERS = trMessages.common.dataTable.noResults.clearFilters;
+const WIN_ID = 'aaaaaaaa-0000-0000-0000-000000000001';
+const LOSS_ID = 'aaaaaaaa-0000-0000-0000-000000000002';
+const WIN = 'Kârlı Ürün';
+const LOSS = 'Zararlı Ürün';
+
+function unitItem(
+  id: string,
+  productTitle: string,
+  maxNetProfit: string,
+  hasCommissionTariff = false,
+) {
+  return {
+    ...detailResponse().items[0],
+    id,
+    productTitle,
+    // On a tariff per the file, yet the commission came from the product, not a band.
+    hasCommissionTariff,
+    selection: 'NONE',
+    customPrice: null,
+    maxScenario: scenario('200.00', maxNetProfit),
+    customScenario: null,
+    maxBasket: null,
+    customBasket: null,
+  };
+}
+
+/**
+ * A %10 NET campaign (UNIT presentation): one product still profits at the maximum, one loses —
+ * and the losing one carries the commission-tariff warning.
+ */
+function twoRowResponse() {
+  return {
+    ...detailResponse(),
+    discountType: 'NET',
+    valueKind: 'PERCENT',
+    value: '10.00',
+    buyQuantity: null,
+    payQuantity: null,
+    scenarioPresentation: 'UNIT',
+    items: [unitItem(WIN_ID, WIN, '30.00'), unitItem(LOSS_ID, LOSS, '-12.50', true)],
+  };
+}
+
+/** The first of the (desktop + mobile) toolbar copies' controls with this name. */
+function first(name: string): HTMLElement {
+  const [element] = screen.getAllByRole('button', { name });
+  if (element === undefined) throw new Error(`no "${name}" button`);
+  return element;
+}
+
+const selectedContext = (max: number, custom: number): string =>
+  PAGE.summary.selectedContext.replace('{max}', String(max)).replace('{custom}', String(custom));
+
+// These walk the whole screen through several steps: well under 2 s alone, but past the default
+// 5 s cap when the full suite shares a loaded machine — which would fail a correct test.
+const LONG_FLOW_TIMEOUT_MS = 15_000;
+
+describe('MarketplaceCampaignDetailClient — toolbar', () => {
+  beforeEach(() => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+  });
+
+  async function waitForRows(): Promise<void> {
+    await waitFor(() => expect(screen.getAllByText(WIN).length).toBeGreaterThan(0));
+  }
+
+  it(
+    'the chips narrow the rows, and an empty result offers to clear the filters',
+    async () => {
+      server.use(http.get(BASE, () => HttpResponse.json(twoRowResponse())));
+      const { user } = renderClient();
+      await waitForRows();
+
+      await user.click(first(PAGE.filters.losing));
+      expect(screen.queryByText(WIN)).toBeNull();
+      expect(screen.getAllByText(LOSS).length).toBeGreaterThan(0);
+
+      // Nothing is selected yet, so "Seçililer" on top leaves no row at all.
+      await user.click(first(PAGE.filters.selected));
+      expect(screen.queryByText(LOSS)).toBeNull();
+
+      await user.click(first(CLEAR_FILTERS));
+      expect(screen.getAllByText(WIN).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(LOSS).length).toBeGreaterThan(0);
+      expect(first(PAGE.filters.losing)).toHaveAttribute('aria-pressed', 'false');
+    },
+    LONG_FLOW_TIMEOUT_MS,
+  );
+
+  it(
+    'flags the row whose tariff is missing, and its chip keeps only such rows',
+    async () => {
+      server.use(http.get(BASE, () => HttpResponse.json(twoRowResponse())));
+      const { user } = renderClient();
+      await waitForRows();
+
+      // One warned row → its badge renders (desktop + mobile) and the chip is offered.
+      expect(screen.getAllByText(TABLE.tariffWarning).length).toBeGreaterThan(0);
+      await user.click(first(PAGE.filters.tariffWarning));
+
+      expect(screen.queryByText(WIN)).toBeNull();
+      expect(screen.getAllByText(LOSS).length).toBeGreaterThan(0);
+    },
+    LONG_FLOW_TIMEOUT_MS,
+  );
+
+  it('hides the tariff chip when no row carries the warning', async () => {
+    server.use(http.get(BASE, () => HttpResponse.json(detailResponse())));
+    renderClient();
+    await waitForLoaded();
+
+    expect(screen.queryByRole('button', { name: PAGE.filters.tariffWarning })).toBeNull();
+    expect(screen.queryByText(TABLE.tariffWarning)).toBeNull();
+  });
+
+  it(
+    'a smart-select action reaches only the visible rows, and the save carries the result',
+    async () => {
+      let saved: unknown = null;
+      server.use(
+        http.get(BASE, () => HttpResponse.json(twoRowResponse())),
+        http.patch(SELECTIONS_URL, async ({ request }) => {
+          saved = await request.json();
+          return HttpResponse.json({ updated: 2 });
+        }),
+        http.post(EXPORT_URL, () =>
+          HttpResponse.arrayBuffer(XLSX_BYTES.buffer, { headers: { 'content-type': XLSX_TYPE } }),
+        ),
+      );
+      const { user } = renderClient();
+      await waitForRows();
+
+      // Show only the losing row, then pull "everything" to the maximum price.
+      await user.click(first(PAGE.filters.losing));
+      await user.click(first(PAGE.smartSelect.label));
+      await user.click(await screen.findByRole('button', { name: PAGE.smartSelect.selectAllMax }));
+      await user.click(first(PAGE.filters.losing));
+
+      // The hidden profitable row kept its (empty) choice — one joins, at the maximum.
+      expect(screen.getByText(selectedContext(1, 0))).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: SAVE_AND_DOWNLOAD }));
+      await waitFor(() =>
+        expect(saved).toEqual({
+          mode: 'set',
+          selections: [
+            { itemId: WIN_ID, selection: 'NONE', customPrice: null },
+            { itemId: LOSS_ID, selection: 'MAX', customPrice: null },
+          ],
+        }),
+      );
+    },
+    LONG_FLOW_TIMEOUT_MS,
+  );
+
+  it(
+    'the target margin fills custom prices into the buffer and marks the unreachable row',
+    async () => {
+      let saved: unknown = null;
+      server.use(
+        http.get(BASE, () => HttpResponse.json(twoRowResponse())),
+        http.post(`${BASE}/target-margin`, () =>
+          HttpResponse.json({
+            suggestions: [
+              { itemId: WIN_ID, price: '185.40', reason: null },
+              { itemId: LOSS_ID, price: null, reason: 'UNREACHABLE' },
+            ],
+          }),
+        ),
+        // The filled price is a new what-if, so its card asks for an estimate.
+        http.post(`${BASE}/items/${WIN_ID}/estimate`, () =>
+          HttpResponse.json({
+            itemId: WIN_ID,
+            scenario: 'custom',
+            price: '185.40',
+            customerPaidUnitPrice: '166.86',
+            trendyolFundedUnitAmount: null,
+            commissionPct: '18.0000',
+            commissionSource: 'product',
+            calculable: true,
+            reason: null,
+            breakdown: { netProfit: '22.00', saleMarginPct: '13.18' },
+            breakdownScope: 'unit',
+            basket: null,
+            commissionTariffName: null,
+            commissionPeriodLabel: null,
+          }),
+        ),
+        http.patch(SELECTIONS_URL, async ({ request }) => {
+          saved = await request.json();
+          return HttpResponse.json({ updated: 2 });
+        }),
+        http.post(EXPORT_URL, () =>
+          HttpResponse.arrayBuffer(XLSX_BYTES.buffer, { headers: { 'content-type': XLSX_TYPE } }),
+        ),
+      );
+      const { user } = renderClient();
+      await waitForRows();
+
+      await user.click(first(PAGE.smartSelect.label));
+      await user.click(await screen.findByRole('button', { name: PAGE.smartSelect.targetMargin }));
+      await user.type(await screen.findByRole('textbox', { name: PAGE.targetMargin.label }), '10');
+      await user.click(screen.getByRole('button', { name: PAGE.targetMargin.submit }));
+
+      // The suggested price lands in the row's custom input (both layouts; the editing format drops
+      // the trailing zero)…
+      await waitFor(() => {
+        const inputs = screen.getAllByRole('textbox', {
+          name: TABLE.customPriceAria.replace('{product}', WIN),
+        });
+        for (const input of inputs) expect(input).toHaveValue('185,4');
+      });
+      // …the unreachable row says why it was left out, and nothing has been saved yet.
+      expect(screen.getAllByText(TABLE.targetMarginUnreachable).length).toBeGreaterThan(0);
+      expect(screen.getByText(selectedContext(0, 1))).toBeInTheDocument();
+      expect(saved).toBeNull();
+
+      await user.click(screen.getByRole('button', { name: SAVE_AND_DOWNLOAD }));
+      await waitFor(() =>
+        expect(saved).toEqual({
+          mode: 'set',
+          selections: [
+            { itemId: WIN_ID, selection: 'CUSTOM', customPrice: '185.40' },
+            { itemId: LOSS_ID, selection: 'NONE', customPrice: null },
+          ],
+        }),
+      );
+    },
+    LONG_FLOW_TIMEOUT_MS,
+  );
 });
