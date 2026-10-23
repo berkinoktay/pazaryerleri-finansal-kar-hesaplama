@@ -49,6 +49,14 @@ interface BreakdownWire {
   shippingGross: string;
   platformServiceGross: string;
 }
+interface BasketWire {
+  assumedQuantity: number;
+  basketTotal: string;
+  basketPaidTotal: string;
+  trendyolFundedTotal: string;
+  orderNetProfit: string | null;
+  currentOrderNetProfit: string | null;
+}
 interface EstimateWire {
   itemId: string;
   scenario: 'current' | 'max' | 'custom';
@@ -61,6 +69,7 @@ interface EstimateWire {
   reason: string | null;
   breakdown: BreakdownWire | null;
   breakdownScope: 'unit' | 'order';
+  basket: BasketWire | null;
   commissionTariffName: string | null;
   commissionPeriodLabel: string | null;
 }
@@ -73,8 +82,10 @@ interface TargetMarginWire {
 }
 interface DetailItemWire {
   id: string;
+  current: { netProfit: string | null };
   maxScenario: { marginPct: string | null };
-  scenario: { assumedQuantity: number; currentOrderNetProfit: string | null } | null;
+  maxBasket: BasketWire | null;
+  customBasket: BasketWire | null;
 }
 interface ProblemWire {
   code: string;
@@ -289,11 +300,18 @@ describe('Marketplace Campaigns - estimate + target-margin', () => {
     // No per-unit split at order scope. "400 per unit" would be a synthetic average — in a
     // 2 al 1 öde the customer pays 800 for one unit and nothing for the other, so no unit
     // actually costs 400 — and it would sit next to an order-scoped `price` a consumer could
-    // subtract it from. The split is reported as basket totals on the row's scenario block.
+    // subtract it from. The split is reported as basket totals on the result's basket block.
     expect(body.customerPaidUnitPrice).toBeNull();
     expect(body.trendyolFundedUnitAmount).toBeNull();
     // n× product cost, 1× shipping, 1× platform service (per parcel).
     expect(body.breakdown?.costGross).toBe('40.00');
+    // The basket block: customer pays 2 × 400 = 800, Trendyol funds 1280 − 800 = 480, and the
+    // order profit is the breakdown's own — the very block the row's maximum card shows.
+    expect(body.basket?.assumedQuantity).toBe(2);
+    expect(body.basket?.basketPaidTotal).toBe('800.00');
+    expect(body.basket?.trendyolFundedTotal).toBe('480.00');
+    expect(body.basket?.orderNetProfit).toBe(body.breakdown?.netProfit);
+    expect(body.basket).toEqual((await matchedRow()).maxBasket);
   });
 
   it('prices the custom scenario from the request body, overriding the stored price', async () => {
@@ -308,6 +326,8 @@ describe('Marketplace Campaigns - estimate + target-margin', () => {
     });
     expect(buffered.price).toBe('800.00');
     expect(Number(buffered.breakdown?.netProfit)).toBeLessThan(Number(stored.breakdown?.netProfit));
+    // The basket is framed on the buffered price too: 2 × 500.
+    expect(buffered.basket?.basketTotal).toBe('1000.00');
   });
 
   async function matchedRow(): Promise<DetailItemWire> {
@@ -321,18 +341,18 @@ describe('Marketplace Campaigns - estimate + target-margin', () => {
     return row;
   }
 
-  it('frames the CURRENT scenario as the same campaign-free order the row totalled', async () => {
+  it("prices the CURRENT scenario per unit — the figure the row's current cell shows", async () => {
     const row = await matchedRow();
-    expect(row?.scenario?.assumedQuantity).toBe(2);
 
     const body = await estimateJson(fx.matchedItemId, { scenario: 'current' });
-    // ORDER presentation → order scope even though no campaign is applied. Revenue is the
-    // campaign-free basket: 2 × 900.
-    expect(body.breakdownScope).toBe('order');
-    expect(body.price).toBe('1800.00');
-    expect(body.breakdown?.saleGross).toBe('1800.00');
-    // The whole point of the framing: the modal totals to the figure the seller clicked.
-    expect(body.breakdown?.netProfit).toBe(row?.scenario?.currentOrderNetProfit);
+    // Not participating is a one-unit sale today, so even an ORDER-presentation campaign breaks
+    // the current scenario down per unit: the revenue is the current price itself.
+    expect(body.breakdownScope).toBe('unit');
+    expect(body.price).toBe(CURRENT_PRICE);
+    expect(body.breakdown?.saleGross).toBe(CURRENT_PRICE);
+    expect(body.basket).toBeNull();
+    // The modal totals to the figure the seller clicked.
+    expect(body.breakdown?.netProfit).toBe(row.current.netProfit);
     // No campaign, therefore no funding to show.
     expect(body.customerPaidUnitPrice).toBeNull();
     expect(body.trendyolFundedUnitAmount).toBeNull();
@@ -347,6 +367,9 @@ describe('Marketplace Campaigns - estimate + target-margin', () => {
     expect(body.breakdownScope).toBe('order');
     expect(body.customerPaidUnitPrice).toBeNull();
     expect(body.trendyolFundedUnitAmount).toBeNull();
+    // The basket's money still adds up (2 × 80); only its profit is unknown.
+    expect(body.basket?.basketTotal).toBe('160.00');
+    expect(body.basket?.orderNetProfit).toBeNull();
   });
 
   // ─── Gates ──────────────────────────────────────────────────────────────────
@@ -485,17 +508,15 @@ describe('Marketplace Campaigns - estimate + target-margin', () => {
     expect(body.errors?.some((e) => e.code === 'INVALID_TARGET_MARGIN')).toBe(true);
   });
 
-  // ─── The basket anchor: the ONE thing that makes the current framing subtle ──
+  // ─── Price-sensitive n: each basket follows the price it frames ─────────────
 
-  it('anchors the current order on the SAVED price, not the current price', async () => {
+  it('frames each scenario basket on its own price where n follows the price', async () => {
     // Every other ORDER type derives n from a fixed quantity (buyQuantity / nthIndex /
-    // minQuantity), so swapping the anchor changes nothing and a BUY_X_PAY_Y fixture cannot
-    // catch a regression. CONDITIONAL_BASKET/AMOUNT is the only config where n follows the
-    // price — n = ceil(minBasket / price) — so it is the only case that can prove which price
-    // the modal anchored on.
-    //
-    //   saved custom price 250 → n = ceil(1000 / 250) = 4   ← the row's basket
-    //   current price      900 → n = ceil(1000 / 900) = 2   ← what a regressed anchor gives
+    // minQuantity), so a BUY_X_PAY_Y fixture cannot tell which price framed a basket.
+    // CONDITIONAL_BASKET/AMOUNT is the only config where n follows the price —
+    // n = ceil(minBasket / price) — so it is the only case that can prove it:
+    //   max 800    → n = ceil(1000 / 800) = 2
+    //   custom 250 → n = ceil(1000 / 250) = 4
     const patch = await updateCampaign({
       discountType: 'CONDITIONAL_BASKET',
       valueKind: 'AMOUNT',
@@ -505,22 +526,23 @@ describe('Marketplace Campaigns - estimate + target-margin', () => {
     });
     expect(patch.status).toBe(200);
 
+    // The seller stays on MAX but keeps a typed custom price — both blocks must exist.
     const saved = await patchSelections({
       mode: 'set',
-      selections: [{ itemId: fx.matchedItemId, selection: 'CUSTOM', customPrice: '250.00' }],
+      selections: [{ itemId: fx.matchedItemId, selection: 'MAX', customPrice: '250.00' }],
     });
     expect(saved.status).toBe(200);
 
     const row = await matchedRow();
-    expect(row.scenario?.assumedQuantity).toBe(4);
+    expect(row.maxBasket?.assumedQuantity).toBe(2);
+    expect(row.customBasket?.assumedQuantity).toBe(4);
 
-    const body = await estimateJson(fx.matchedItemId, { scenario: 'current' });
-    expect(body.breakdownScope).toBe('order');
-    // 4 × 900. An anchor that drifted to the current price would make this 1800.00.
-    expect(body.price).toBe('3600.00');
-    expect(body.breakdown?.saleGross).toBe('3600.00');
-    // And the number the seller actually clicked in the row.
-    expect(body.breakdown?.netProfit).toBe(row.scenario?.currentOrderNetProfit);
+    // The modal opened from either card reconciles with that card, to the kuruş.
+    const max = await estimateJson(fx.matchedItemId, { scenario: 'max' });
+    expect(max.basket).toEqual(row.maxBasket);
+    const custom = await estimateJson(fx.matchedItemId, { scenario: 'custom' });
+    expect(custom.basket).toEqual(row.customBasket);
+    expect(custom.breakdown?.netProfit).toBe(row.customBasket?.orderNetProfit);
   });
 
   // ─── UNIT-presentation campaign: the split has no basket block to hide behind ──
@@ -544,9 +566,9 @@ describe('Marketplace Campaigns - estimate + target-margin', () => {
     expect(body.trendyolFundedUnitAmount).toBe('96.00');
     expect(body.price).toBe('736.00');
     expect(body.breakdown?.saleGross).toBe('736.00');
+    expect(body.basket).toBeNull();
 
-    // A UNIT campaign keeps the current scenario at unit scope — the row's headline is a
-    // unit figure there, so there is no order total to reconcile with.
+    // The current scenario is unit scope here, as it is everywhere.
     const current = await estimateJson(fx.matchedItemId, { scenario: 'current' });
     expect(current.breakdownScope).toBe('unit');
     expect(current.price).toBe(CURRENT_PRICE);

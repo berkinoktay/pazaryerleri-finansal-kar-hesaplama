@@ -94,7 +94,8 @@ interface ItemWire {
   maxScenario: ScenarioWire;
   customScenario: ScenarioWire | null;
   commissionBands: unknown[] | null;
-  scenario: BasketScenarioWire | null;
+  maxBasket: BasketScenarioWire | null;
+  customBasket: BasketScenarioWire | null;
 }
 interface DetailWire {
   id: string;
@@ -393,8 +394,8 @@ async function setupFixture(): Promise<Fixture> {
       currentPrice: new Decimal(CURRENT_PRICE),
       maxPrice: new Decimal(MAX_PRICE),
       hasCommissionTariff: false,
-      // The seller typed a custom price but is still participating at the MAXIMUM — the
-      // degenerate case the basket framing must get right.
+      // The seller typed a custom price but is still participating at the MAXIMUM — each
+      // option must still carry its own basket block.
       selection: 'MAX',
       customPrice: new Decimal(CUSTOM_PRICE),
       sortOrder: 0,
@@ -527,31 +528,43 @@ describe('Marketplace Campaigns - list / detail / config PATCH / selections / de
       Number(matched?.maxScenario.netProfit),
     );
 
-    // The settlement block is framed on the SAVED selection = MAX (campaign price 200):
+    // Each price option carries its OWN settlement block. The maximum (campaign price 200):
     //   n = buyQuantity = 2 · basket 2 × 200 = 400 · customer pays 2 × 100 = 200
     //   discount 200 · seller settles 2 × 160 = 320 → Trendyol funds 320 − 200 = 120.
-    expect(matched?.scenario?.assumedQuantity).toBe(2);
-    expect(matched?.scenario?.basketTotal).toBe('400.00');
-    expect(matched?.scenario?.basketPaidTotal).toBe('200.00');
-    expect(matched?.scenario?.basketDiscountTotal).toBe('200.00');
-    expect(matched?.scenario?.trendyolFundedTotal).toBe('120.00');
-    expect(matched?.scenario?.orderNetProfit).not.toBeNull();
-    expect(matched?.scenario?.orderMarginPct).not.toBeNull();
-    expect(matched?.scenario?.currentOrderNetProfit).not.toBeNull();
+    expect(matched?.maxBasket?.assumedQuantity).toBe(2);
+    expect(matched?.maxBasket?.basketTotal).toBe('400.00');
+    expect(matched?.maxBasket?.basketPaidTotal).toBe('200.00');
+    expect(matched?.maxBasket?.basketDiscountTotal).toBe('200.00');
+    expect(matched?.maxBasket?.trendyolFundedTotal).toBe('120.00');
+    expect(matched?.maxBasket?.orderNetProfit).not.toBeNull();
+    expect(matched?.maxBasket?.orderMarginPct).not.toBeNull();
+    expect(matched?.maxBasket?.currentOrderNetProfit).not.toBeNull();
+    // The saved custom price (180) has its block too, although MAX is the selection:
+    //   basket 2 × 180 = 360 · customer pays 2 × 90 = 180 · seller 2 × 144 = 288 → funds 108.
+    expect(matched?.customBasket?.assumedQuantity).toBe(2);
+    expect(matched?.customBasket?.basketTotal).toBe('360.00');
+    expect(matched?.customBasket?.basketPaidTotal).toBe('180.00');
+    expect(matched?.customBasket?.trendyolFundedTotal).toBe('108.00');
+    // Same n units campaign-free → the same baseline on both blocks.
+    expect(matched?.customBasket?.currentOrderNetProfit).toBe(
+      matched?.maxBasket?.currentOrderNetProfit,
+    );
 
     const unmatched = body.items.find((i) => i.id === fx.unmatchedItemId);
     expect(unmatched?.imageUrl).toBeNull();
     expect(unmatched?.calculable).toBe(false);
     expect(unmatched?.reason).toBe('NO_PRODUCT');
     expect(unmatched?.customScenario).toBeNull();
-    // NONE still frames the block on the maximum price — that is the option the screen offers.
-    expect(unmatched?.scenario?.basketTotal).toBe('160.00');
-    expect(unmatched?.scenario?.basketPaidTotal).toBe('80.00');
-    expect(unmatched?.scenario?.trendyolFundedTotal).toBe('48.00');
-    expect(unmatched?.scenario?.orderNetProfit).toBeNull();
+    // No selection yet: the maximum price's block is there all the same; with no custom
+    // price there is no custom block.
+    expect(unmatched?.maxBasket?.basketTotal).toBe('160.00');
+    expect(unmatched?.maxBasket?.basketPaidTotal).toBe('80.00');
+    expect(unmatched?.maxBasket?.trendyolFundedTotal).toBe('48.00');
+    expect(unmatched?.maxBasket?.orderNetProfit).toBeNull();
+    expect(unmatched?.customBasket).toBeNull();
   });
 
-  it('reframes the basket block on the CUSTOM price once the seller picks it', async () => {
+  it('keeps each option on its own basket block when the seller switches to CUSTOM', async () => {
     const res = await patchSelections({
       mode: 'set',
       selections: [{ itemId: fx.matchedItemId, selection: 'CUSTOM', customPrice: CUSTOM_PRICE }],
@@ -562,13 +575,14 @@ describe('Marketplace Campaigns - list / detail / config PATCH / selections / de
     const body = await fetchDetail();
     const matched = body.items.find((i) => i.id === fx.matchedItemId);
     expect(matched?.selection).toBe('CUSTOM');
-    // Same item, same custom price as before — only the SELECTION changed, and with it the
-    // whole headline order: 2 × 180 = 360 basket, customer pays 2 × 90 = 180, seller
-    // settles 2 × 144 = 288 → Trendyol funds 108.
-    expect(matched?.scenario?.basketTotal).toBe('360.00');
-    expect(matched?.scenario?.basketPaidTotal).toBe('180.00');
-    expect(matched?.scenario?.basketDiscountTotal).toBe('180.00');
-    expect(matched?.scenario?.trendyolFundedTotal).toBe('108.00');
+    // Same item, same custom price as before — only the SELECTION changed, and it moves
+    // neither block: the custom card still shows 2 × 180 = 360 (customer 180, Trendyol 108)
+    // and the maximum card its own 400 order.
+    expect(matched?.customBasket?.basketTotal).toBe('360.00');
+    expect(matched?.customBasket?.basketPaidTotal).toBe('180.00');
+    expect(matched?.customBasket?.basketDiscountTotal).toBe('180.00');
+    expect(matched?.customBasket?.trendyolFundedTotal).toBe('108.00');
+    expect(matched?.maxBasket?.basketTotal).toBe('400.00');
   });
 
   it('rejects a custom price above the item maximum with 422 CUSTOM_PRICE_ABOVE_MAX', async () => {
@@ -688,14 +702,14 @@ describe('Marketplace Campaigns - list / detail / config PATCH / selections / de
     expect(body.scenarioPresentation).toBe('UNIT');
 
     const matched = body.items.find((i) => i.id === fx.matchedItemId);
-    // Selection is NONE after the previous test, so the block frames on the maximum (200):
+    // The maximum price's block (200) under the new config:
     //   n = ceil(500 / 200) = 3 · basket 3 × 200 = 600 · unit −10% = 180 → paid 3 × 180 = 540.
     //   At funding 0 the seller settles exactly what the customer paid.
-    expect(matched?.scenario?.assumedQuantity).toBe(3);
-    expect(matched?.scenario?.basketTotal).toBe('600.00');
-    expect(matched?.scenario?.basketPaidTotal).toBe('540.00');
-    expect(matched?.scenario?.basketDiscountTotal).toBe('60.00');
-    expect(matched?.scenario?.trendyolFundedTotal).toBe('0.00');
+    expect(matched?.maxBasket?.assumedQuantity).toBe(3);
+    expect(matched?.maxBasket?.basketTotal).toBe('600.00');
+    expect(matched?.maxBasket?.basketPaidTotal).toBe('540.00');
+    expect(matched?.maxBasket?.basketDiscountTotal).toBe('60.00');
+    expect(matched?.maxBasket?.trendyolFundedTotal).toBe('0.00');
     // And the unit scenario is the plain discounted unit again — no funding uplift.
     expect(matched?.maxScenario.price).toBe('180.00');
   });

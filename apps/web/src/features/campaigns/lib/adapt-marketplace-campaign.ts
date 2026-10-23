@@ -79,10 +79,16 @@ export interface MarketplaceCampaignRow {
    */
   commissionBands: readonly CampaignCommissionBand[] | null;
   /**
-   * Single-product-basket settlement scenario for basket-scoped discount types, framed on the
-   * item's SAVED price choice; null for NET or a non-positive price.
+   * Single-product-basket settlement block at the MAXIMUM price for basket-scoped discount
+   * types — the order an ORDER-presentation row's maximum card headlines; null for NET or a
+   * non-positive price.
    */
-  scenario: CampaignBasketScenario | null;
+  maxBasket: CampaignBasketScenario | null;
+  /**
+   * The same block at the saved CUSTOM price; null when no custom price is saved (or for NET).
+   * Each option carries its own block whichever one is selected.
+   */
+  customBasket: CampaignBasketScenario | null;
 }
 
 /**
@@ -146,7 +152,8 @@ function toRow(item: MarketplaceCampaignDetailItem): MarketplaceCampaignRow {
     maxScenario: item.maxScenario,
     customScenario: item.customScenario,
     commissionBands: item.commissionBands,
-    scenario: item.scenario,
+    maxBasket: item.maxBasket,
+    customBasket: item.customBasket,
   };
 }
 

@@ -443,11 +443,17 @@ export const MarketplaceCampaignDetailItemSchema = z
      */
     commissionBands: z.array(CampaignCommissionBandSchema).nullable(),
     /**
-     * Single-product-basket settlement scenario: the assumed basket, its paid total, its
-     * discount, Trendyol's funded share, and the order-level net profit. Null for NET (its
-     * showcase price genuinely changes) or a non-positive price.
+     * Single-product-basket settlement scenario at the MAXIMUM price: the assumed basket, its
+     * paid total, its discount, Trendyol's funded share, and the order-level net profit. Null
+     * for NET (its showcase price genuinely changes) or a non-positive price.
      */
-    scenario: CampaignBasketScenarioSchema.nullable(),
+    maxBasket: CampaignBasketScenarioSchema.nullable(),
+    /**
+     * The same basket block at the seller's saved CUSTOM price; null when no custom price is
+     * saved (or for NET). Each option carries its own block, whichever one is selected — on an
+     * ORDER-presentation row both price cards headline their own order.
+     */
+    customBasket: CampaignBasketScenarioSchema.nullable(),
   })
   .openapi('MarketplaceCampaignDetailItem');
 
@@ -596,7 +602,7 @@ export const EstimateCampaignItemResultSchema = z
           'applied) AND whenever `breakdownScope` is "order": at ORDER presentation the ' +
           'per-unit effective price is a synthetic average that describes no real unit (in a ' +
           '2-al-1-öde the customer pays full price for one unit and nothing for the other), so ' +
-          'the split is reported as basket totals on `CampaignBasketScenario` instead.',
+          'the split is reported as basket totals on `basket` instead.',
       }),
     trendyolFundedUnitAmount: z
       .string()
@@ -616,15 +622,19 @@ export const EstimateCampaignItemResultSchema = z
     breakdown: QuoteBreakdownSchema.nullable(),
     breakdownScope: z.enum(['unit', 'order']).openapi({
       description:
-        'Scope of `breakdown` and `price`. It follows the CAMPAIGN’s presentation, not the ' +
-        'scenario: an ORDER-presentation campaign (BUY_X_PAY_Y / NTH_PRODUCT / a ' +
-        'conditional-AMOUNT discount) returns `order` for EVERY scenario — including `current`, ' +
-        'whose order is the same assumed basket priced campaign-free — so the modal always ' +
-        'totals to the figure the seller clicked in the row. `order` means the whole n-unit ' +
-        'single-product basket: `price` is the order revenue and `breakdown` is the order-level ' +
-        'profit (n× product cost, 1× shipping, 1× PSF). Everything else is `unit`: per-unit ' +
-        'economics.',
+        'Scope of `breakdown` and `price`. An ORDER-presentation campaign (BUY_X_PAY_Y / ' +
+        'NTH_PRODUCT / a conditional-AMOUNT discount) returns `order` for its campaign scenarios ' +
+        '(`max`, `custom`), framed on that scenario’s own price — the same block the row’s price ' +
+        'card headlines. `order` means the whole n-unit single-product basket: `price` is the ' +
+        'order revenue and `breakdown` is the order-level profit (n× product cost, 1× shipping, ' +
+        '1× PSF). The campaign-free `current` scenario and every UNIT-presentation campaign ' +
+        'return `unit`: per-unit economics.',
     }),
+    // The assumed-basket block behind an order-scoped breakdown — quantity, basket total,
+    // discount, Trendyol's funded share, what the customer pays, the order profit and the same
+    // order's campaign-free profit — identical to the row's `maxBasket` / `customBasket` for that
+    // price. Null exactly when `breakdownScope` is "unit".
+    basket: CampaignBasketScenarioSchema.nullable(),
     // Şeffaflık: bant kademesini besleyen komisyon tarifesi + dönem. Bir kaynak
     // çözüldüyse (kalem product/category'e düşse bile) doludur; yoksa null.
     commissionTariffName: z.string().nullable(),

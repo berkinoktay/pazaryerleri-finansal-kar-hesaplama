@@ -341,7 +341,8 @@ describe('MarketplaceCampaignDetailItemSchema', () => {
     },
     customScenario: null,
     commissionBands: null,
-    scenario: null,
+    maxBasket: null,
+    customBasket: null,
   };
 
   it('geçerli bir kalemi kabul eder', () => {
@@ -350,6 +351,11 @@ describe('MarketplaceCampaignDetailItemSchema', () => {
 
   it('customScenario anahtarı tamamen eksikse reddeder — nullable, optional DEĞİLDİR', () => {
     const { customScenario: _customScenario, ...withoutKey } = validItem;
+    expect(MarketplaceCampaignDetailItemSchema.safeParse(withoutKey).success).toBe(false);
+  });
+
+  it('customBasket anahtarı tamamen eksikse reddeder — her seçeneğin sepet bloğu ayrı ve zorunlu', () => {
+    const { customBasket: _customBasket, ...withoutKey } = validItem;
     expect(MarketplaceCampaignDetailItemSchema.safeParse(withoutKey).success).toBe(false);
   });
 
@@ -522,10 +528,30 @@ describe('EstimateCampaignItemBodySchema / EstimateCampaignItemResultSchema', ()
       reason: null,
       breakdown: null,
       breakdownScope: 'unit',
+      basket: null,
       commissionTariffName: null,
       commissionPeriodLabel: null,
     });
     expect(parsed.success).toBe(true);
+  });
+
+  it('sepet bloğu olmadan sonucu reddeder — birim kapsamda bile alan zorunlu, değeri null', () => {
+    const parsed = EstimateCampaignItemResultSchema.safeParse({
+      itemId: 'a1b2c3d4-e5f6-4890-a234-ef1234567890',
+      scenario: 'current',
+      price: '120.00',
+      customerPaidUnitPrice: null,
+      trendyolFundedUnitAmount: null,
+      commissionPct: '13.10',
+      commissionSource: 'band',
+      calculable: true,
+      reason: null,
+      breakdown: null,
+      breakdownScope: 'unit',
+      commissionTariffName: null,
+      commissionPeriodLabel: null,
+    });
+    expect(parsed.success).toBe(false);
   });
 
   it('karşılama alanları olmadan sonucu reddeder — alanlar zorunlu, yalnız değerleri null olabilir', () => {
@@ -539,6 +565,7 @@ describe('EstimateCampaignItemBodySchema / EstimateCampaignItemResultSchema', ()
       reason: null,
       breakdown: null,
       breakdownScope: 'unit',
+      basket: null,
       commissionTariffName: null,
       commissionPeriodLabel: null,
     });

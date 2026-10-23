@@ -20,7 +20,6 @@
 
 import { Decimal } from 'decimal.js';
 
-import { CampaignPriceSelection } from '@pazarsync/db/enums';
 import { solvePriceForTarget, type EstimateOutcome } from '@pazarsync/profit';
 
 import {
@@ -75,11 +74,13 @@ export interface ComputedCampaignItem {
   /** Satıcının yazdığı özel fiyattan katılım senaryosu; fiyat girilmemişse null. */
   readonly customScenario: ComputedCampaignScenario | null;
   /**
-   * Sepet kapsamlı hakediş senaryosu — wire tipi doğrudan doğrulayıcıdan gelir
-   * (`CampaignBasketScenarioSchema`), böylece aynı şekil ikinci kez TANIMLANMAZ ve
-   * detay servisi bu bloğu olduğu gibi geçirebilir.
+   * Maksimum fiyat seçeneğinin sepet kapsamlı hakediş senaryosu — wire tipi doğrudan
+   * doğrulayıcıdan gelir (`CampaignBasketScenarioSchema`), böylece aynı şekil ikinci kez
+   * TANIMLANMAZ ve detay servisi blokları olduğu gibi geçirebilir.
    */
-  readonly scenario: CampaignBasketScenario | null;
+  readonly maxBasket: CampaignBasketScenario | null;
+  /** Özel fiyat seçeneğinin sepet senaryosu; özel fiyat yazılmamışsa null. */
+  readonly customBasket: CampaignBasketScenario | null;
 }
 
 /** `computeCampaignItem`'ın kalem başına girdileri. */
@@ -90,13 +91,6 @@ export interface ComputeCampaignItemInput {
   readonly maxPrice: Decimal;
   /** Satıcının yazdığı özel fiyat; yazılmamışsa null. Seçimden BAĞIMSIZ saklanır (tasarım §3). */
   readonly customPrice: Decimal | null;
-  /**
-   * Satıcının kayıtlı fiyat seçimi. Sepet (sipariş) bloğunun HANGİ fiyattan kurulacağını bu
-   * belirler — `customPrice`'ın dolu olması değil: satıcı bir özel fiyat yazıp karşılaştırdıktan
-   * sonra yine MAX seçeneğinde kalmış olabilir ve o satırda sipariş dökümü seçmediği seçeneğe
-   * ait olamaz.
-   */
-  readonly selection: CampaignPriceSelection;
   readonly config: DiscountConfig;
   /** Trendyol karşılama oranı, yüzde (60 = %60). Karşılama bilinmiyorsa 0. */
   readonly fundingPct: Decimal;
@@ -208,32 +202,7 @@ function buildCampaignBasketScenario(
 }
 
 /**
- * Satırın varsayılan sepetini (dolayısıyla satıcının ekranda TIKLADIĞI sipariş rakamını)
- * çerçeveleyen kampanya fiyatı: satıcı KENDİ fiyatını seçtiyse o fiyat, aksi hâlde maksimum.
- *
- * "Aksi hâl" üç durumu kapsar ve üçü de kasten maksimuma bağlanır: `MAX` seçimi, henüz hiç
- * seçim yapılmamış `NONE` (ekranın sunduğu varsayılan seçenek maksimumdur) ve `CUSTOM` seçili
- * ama fiyat henüz yazılmamış bozuk durum (null fiyatlı sepet üretilmez; satır zaten dışa
- * aktarılamaz hâldedir ve manşet rakamını tamamen silmek satıcıya daha az bilgi verirdi).
- *
- * Kural TEK yerde yaşasın diye dışa açık: hem satırın sepet bloğunu kuran
- * {@link computeCampaignItem} hem de mevcut senaryonun sipariş dökümünü isteyen kâr-dökümü
- * servisi bu fonksiyonu çağırır. İkisi ayrı ayrı yazılsaydı, `CONDITIONAL_BASKET`'in TL
- * varyantında (n = ceil(minSepet / fiyat) — TEK fiyata duyarlı tür) modal satırla sessizce
- * çelişirdi.
- */
-export function campaignBasketAnchorPrice(
-  selection: CampaignPriceSelection,
-  customPrice: Decimal | null,
-  maxPrice: Decimal,
-): Decimal {
-  return selection === CampaignPriceSelection.CUSTOM && customPrice !== null
-    ? customPrice
-    : maxPrice;
-}
-
-/**
- * Bir kampanya kaleminin ÜÇ senaryosunu hesaplar:
+ * Bir kampanya kaleminin ÜÇ senaryosunu ve iki fiyat seçeneğinin sepet çerçevesini hesaplar:
  *
  * - `current`: matrah ve bant `currentPrice` — kampanyaya katılmama hâli.
  * - `maxScenario`: matrah `sellerEffectivePrice(maxPrice, config, fundingPct)`, bant
@@ -243,20 +212,12 @@ export function campaignBasketAnchorPrice(
  * Kalemin hesaplanabilirliği ve gerekçesi MEVCUT senaryodan gelir — listede görünen "bugünkü
  * durum" odur; ürün eşleşmemişse ya da maliyet/komisyon/kargo eksikse üç senaryo da boş kalır.
  *
- * Sepet bloğu ({@link buildCampaignBasketScenario}) satıcının SEÇTİĞİ fiyattan kurulur:
- * `selection === 'CUSTOM'` ise özel fiyat, `MAX` ve `NONE` ise maksimum fiyat. `NONE` (henüz
- * seçim yok) maksimuma bağlanır çünkü ekranın sunduğu varsayılan seçenek odur.
- *
- * Belirleyici olan SEÇİMDİR, `customPrice`'ın dolu olması değil: özel fiyat seçimden bağımsız
- * saklandığı için (tasarım §3) satıcı bir fiyat yazıp karşılaştırdıktan sonra MAX seçeneğinde
- * kalmış olabilir; sipariş gösterimli kurgularda (`BUY_X_PAY_Y`, `NTH_PRODUCT`, koşulluların TL
- * varyantları) bu blok satırın MANŞET rakamıdır ve seçilmeyen seçeneğe ait olamaz.
- *
- * Bozuk durum kapısı: `selection === 'CUSTOM'` ama `customPrice === null` ise blok MAKSİMUM
- * fiyattan kurulur (null fiyatlı sepet üretilmez). Gerekçe: bu satır hâlihazırda dışa
- * aktarılamaz durumdadır (Görev 10 `resolveCampaignExportPrice` böyle bir satıra fiyat yazmaz),
- * yani satıcı henüz yazmayı bitirmemiştir; bloğu tamamen boşaltmak satırın manşet rakamını
- * silerdi, oysa ekran o an zaten maksimum seçeneğini sunuyor.
+ * Sepet blokları ({@link buildCampaignBasketScenario}) HER seçenek için KENDİ fiyatından ayrı
+ * kurulur: `maxBasket` maksimum fiyattan, `customBasket` özel fiyattan (fiyat yoksa null).
+ * Sipariş gösterimli kurgularda (`BUY_X_PAY_Y`, `NTH_PRODUCT`, koşulluların TL varyantları)
+ * satırdaki iki fiyat kartı da kendi siparişini gösterir (Berkin kararı, 2026-10-22); satıcının
+ * hangi seçeneği işaretlediği bu hesaba GİRMEZ — seçim ekranın yerel tamponunda yaşar ve iki
+ * kartın manşet rakamı da işaretlemeden bağımsız olarak kendi fiyatının sepetidir.
  */
 export function computeCampaignItem(
   ctx: TariffAssemblyContext,
@@ -266,7 +227,7 @@ export function computeCampaignItem(
   commission: DiscountCommissionInputs,
   input: ComputeCampaignItemInput,
 ): ComputedCampaignItem {
-  const { currentPrice, maxPrice, customPrice, selection, config, fundingPct } = input;
+  const { currentPrice, maxPrice, customPrice, config, fundingPct } = input;
 
   /**
    * Bir KAMPANYA fiyatının senaryosu: matrah + bant türetmesi ve zincir çözümü tek adımda,
@@ -300,11 +261,24 @@ export function computeCampaignItem(
   );
   const max = scenarioAt(maxPrice);
   const custom = customPrice !== null ? scenarioAt(customPrice) : null;
-  // Sepet çerçevesi satıcının SEÇTİĞİ fiyattan kurulur — kuralın TEK yazılı hâli
-  // {@link campaignBasketAnchorPrice}. Çapa maksimum fiyata eşit çıktığında bu çağrı `max`'ın
-  // hesabını bilerek yeniden üretir: saf, bellek içi bir hesap (ek sorgu yok) ve karşılığında
-  // kural burada İKİNCİ kez yazılmamış olur.
-  const basket = scenarioAt(campaignBasketAnchorPrice(selection, customPrice, maxPrice));
+
+  /**
+   * Bir seçeneğin sepet çerçevesi: kendi kampanya fiyatından kurulur, aynı n birimin
+   * kampanyasız karşılığı ise güncel fiyatın komisyonuyla fiyatlanır.
+   */
+  const basketFor = (priced: ReturnType<typeof scenarioAt>): CampaignBasketScenario | null =>
+    buildCampaignBasketScenario(
+      ctx,
+      variant,
+      cost,
+      shipping,
+      currentPrice,
+      priced.price,
+      config,
+      fundingPct,
+      current.resolved,
+      priced.compute.resolved,
+    );
 
   return {
     calculable: current.calculable,
@@ -312,18 +286,8 @@ export function computeCampaignItem(
     current: toScenario(currentPrice, current),
     maxScenario: toScenario(max.settlementPrice, max.compute),
     customScenario: custom !== null ? toScenario(custom.settlementPrice, custom.compute) : null,
-    scenario: buildCampaignBasketScenario(
-      ctx,
-      variant,
-      cost,
-      shipping,
-      currentPrice,
-      basket.price,
-      config,
-      fundingPct,
-      current.resolved,
-      basket.compute.resolved,
-    ),
+    maxBasket: basketFor(max),
+    customBasket: custom !== null ? basketFor(custom) : null,
   };
 }
 
@@ -333,42 +297,44 @@ export function computeCampaignItem(
 export interface ComputeCampaignEstimateInput {
   /** Senaryonun KAMPANYA fiyatı: `current` için kalemin güncel fiyatı, diğerlerinde max/özel fiyat. */
   readonly price: Decimal;
+  /**
+   * Kalemin güncel ("Mevcut Satış Fiyatı") fiyatı. Sipariş kapsamındaki sepet bloğu aynı n
+   * birimin KAMPANYASIZ karşılığını (`currentOrderNetProfit`) bu fiyattan kurar — modal, satırdaki
+   * kartın "kampanyasız aynı siparişe göre" farkıyla aynı tabanı kullansın diye.
+   */
+  readonly currentPrice: Decimal;
   readonly config: DiscountConfig;
   readonly fundingPct: Decimal;
   /** `current` senaryosunda false: satıcı katılmıyor, promosyon da karşılama da yok. */
   readonly applyCampaign: boolean;
-  /**
-   * Varsayılan sepeti (n) çerçeveleyen fiyat. `max` / `custom` senaryolarında senaryonun KENDİ
-   * fiyatıdır — modal o fiyatın siparişini gösterir. `current` senaryosunda satıcının KAYITLI
-   * seçiminin fiyatıdır ({@link campaignBasketAnchorPrice}), çünkü satıcının tıkladığı sayı
-   * satırın o seçimle kurulmuş sepetinin kampanyasız karşılığıdır.
-   *
-   * Ayrı bir girdi olmasının sebebi: `n`'i senaryo fiyatından türetmek `CONDITIONAL_BASKET`'in
-   * TL varyantında (n = ceil(minSepet / fiyat)) `current` için YANLIŞ sepet üretirdi — güncel
-   * fiyat kampanya fiyatından yüksek olduğu için sepet küçülür ve modal satırla çelişirdi.
-   */
-  readonly basketAnchorPrice: Decimal;
 }
 
 export interface ComputedCampaignEstimate extends ComputedScenarioEstimate {
   /** Dökümün fiyatlandığı tutar: birim kapsamda hakediş fiyatı, sipariş kapsamında sepet hakedişi. */
   readonly price: Decimal;
   readonly scope: 'unit' | 'order';
+  /**
+   * Sipariş kapsamında dökümün sepet çerçevesi — satırdaki kartın `maxBasket` / `customBasket`
+   * bloğuyla AYNI hesap (n, sepet tutarı, müşterinin ödediği, Trendyol'un karşıladığı, sipariş
+   * kârı ve aynı siparişin kampanyasız kârı). Birim kapsamda null.
+   */
+  readonly basket: CampaignBasketScenario | null;
 }
 
 /**
  * Tek senaryonun tam kâr dökümü. Fiyat türetmesi `computeCampaignItem` ile AYNI yoldan geçer
  * ({@link campaignScenarioPrices}), bu yüzden modal satırla asla çelişemez.
  *
- * Kapsam KURGUNUN gösterimini izler, senaryoyu DEĞİL: sipariş gösterimli kurgularda
- * (`BUY_X_PAY_Y` / `NTH_PRODUCT` / koşulluların TL varyantları) HER senaryo — kampanyasız
- * `current` dâhil — SİPARİŞ dökümü döner, çünkü birim-etkin fiyat yapay bir ortalamadır ve
- * satırın manşet rakamları da (kampanyasız `currentOrderNetProfit` dâhil) sipariş toplamlarıdır.
- * `current` sipariş kapsamlı olmasaydı satıcı bir sipariş rakamına tıklayıp toplamı tutmayan bir
- * birim dökümü okurdu. Gelir yine satıcının sepet hakedişidir (müşterinin ödediği değil);
- * `current`'ta karşılama olmadığı için hakediş güncel fiyata eşitlenir ve gelir n × güncel fiyata
- * iner. Birim gösterimli kurgularda her senaryo birim dökümü döner. Hesaplanabilirlik, gerekçe ve
- * komisyon her iki kapsamda da BİRİM çözümünden gelir.
+ * Kapsam kurgunun gösterimini VE senaryoyu birlikte izler. Sipariş gösterimli kurgularda
+ * (`BUY_X_PAY_Y` / `NTH_PRODUCT` / koşulluların TL varyantları) kampanya senaryoları (`max`,
+ * `custom`) SİPARİŞ dökümü döner: birim-etkin fiyat yapay bir ortalamadır ve satırdaki fiyat
+ * kartlarının manşeti de sipariş toplamıdır; sepet o senaryonun KENDİ fiyatından kurulur. Gelir
+ * satıcının sepet hakedişidir (müşterinin ödediği değil).
+ *
+ * Kampanyasız `current` her zaman BİRİM dökümü döner: katılmayan satıcının bugünkü satışı tek
+ * ürünlük bir siparişdir ve satırın mevcut hücresi de birim kârı gösterir, yani modal tıklanan
+ * rakamla aynı tabanda kalır. Birim gösterimli kurgularda her senaryo birim dökümü döner.
+ * Hesaplanabilirlik, gerekçe ve komisyon her iki kapsamda da BİRİM çözümünden gelir.
  */
 export function computeCampaignEstimate(
   ctx: TariffAssemblyContext,
@@ -378,7 +344,7 @@ export function computeCampaignEstimate(
   commission: DiscountCommissionInputs,
   input: ComputeCampaignEstimateInput,
 ): ComputedCampaignEstimate {
-  const { price, config, fundingPct, applyCampaign, basketAnchorPrice } = input;
+  const { price, currentPrice, config, fundingPct, applyCampaign } = input;
   const { settlementPrice, bandPrice } = applyCampaign
     ? campaignScenarioPrices(price, config, fundingPct)
     : { settlementPrice: price, bandPrice: price };
@@ -393,14 +359,19 @@ export function computeCampaignEstimate(
     bandPrice,
   );
 
-  // Pozitif olmayan çapada sepet kurulamaz (n, çapaya bölünerek bulunur) — satırın sepet bloğu
+  // Pozitif olmayan fiyatta sepet kurulamaz (n, fiyata bölünerek bulunur) — satırın sepet bloğu
   // da o durumda null'dır, dolayısıyla birim dökümüne düşmek satırla tutarlıdır.
-  const wantOrder = scenarioPresentation(config) === 'ORDER' && basketAnchorPrice.gt(ZERO);
+  const wantOrder = applyCampaign && scenarioPresentation(config) === 'ORDER' && price.gt(ZERO);
   if (!wantOrder) {
-    return { ...toEstimate(computed, computed.breakdown), price: settlementPrice, scope: 'unit' };
+    return {
+      ...toEstimate(computed, computed.breakdown),
+      price: settlementPrice,
+      scope: 'unit',
+      basket: null,
+    };
   }
 
-  const n = assumedBasketQuantity(config, basketAnchorPrice);
+  const n = assumedBasketQuantity(config, price);
   const orderRevenue = settlementPrice.toDecimalPlaces(2).mul(n);
   const order = computeOrderBreakdown(
     ctx,
@@ -411,7 +382,30 @@ export function computeCampaignEstimate(
     n,
     orderRevenue,
   );
-  return { ...toEstimate(computed, order), price: orderRevenue, scope: 'order' };
+  // Aynı n birimin kampanyasız karşılığı, satırdaki blokta olduğu gibi güncel fiyatın komisyonuyla
+  // fiyatlanır (matrah ve bant güncel fiyattır).
+  const current = priceScenario(
+    ctx,
+    variant,
+    cost,
+    shipping,
+    commission,
+    currentPrice,
+    currentPrice,
+  );
+  const basket = buildCampaignBasketScenario(
+    ctx,
+    variant,
+    cost,
+    shipping,
+    currentPrice,
+    price,
+    config,
+    fundingPct,
+    current.resolved,
+    computed.resolved,
+  );
+  return { ...toEstimate(computed, order), price: orderRevenue, scope: 'order', basket };
 }
 
 // ─── Hedef marja göre fiyat önerisi ─────────────────────────────────────────

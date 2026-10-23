@@ -1,7 +1,6 @@
 import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
-import { CampaignPriceSelection } from '@pazarsync/db/enums';
 import { computeUnitProfit, type EstimateOutcome } from '@pazarsync/profit';
 
 import { computeDiscountItem } from '@/services/discount-compute.service';
@@ -14,7 +13,6 @@ import {
 } from '@/services/discount-math-commons';
 import type { StoredBand } from '@/services/commission-tariff.types';
 import {
-  campaignBasketAnchorPrice,
   computeCampaignEstimate,
   computeCampaignItem,
   suggestTargetMarginPrices,
@@ -124,7 +122,6 @@ describe('computeCampaignItem — Trendyol karşılaması matrahı yükseltir', 
       currentPrice: d(1000),
       maxPrice: d(1000),
       customPrice: null,
-      selection: 'MAX',
       config,
       fundingPct: d(60),
     });
@@ -159,7 +156,6 @@ describe('computeCampaignItem — Trendyol karşılaması matrahı yükseltir', 
       currentPrice: d(1000),
       maxPrice: d(1000),
       customPrice: null,
-      selection: 'MAX',
       config,
       fundingPct: d(60),
     });
@@ -173,7 +169,6 @@ describe('computeCampaignItem — Trendyol karşılaması matrahı yükseltir', 
       currentPrice: d(1000),
       maxPrice: d(1000),
       customPrice: null,
-      selection: 'MAX',
       config,
       fundingPct: d(0),
     });
@@ -187,7 +182,6 @@ describe('computeCampaignItem — Trendyol karşılaması matrahı yükseltir', 
       currentPrice: d(1000),
       maxPrice: d(1000),
       customPrice: null,
-      selection: 'MAX',
       config,
       fundingPct: d(100),
     });
@@ -204,7 +198,6 @@ describe('computeCampaignItem — özel fiyat senaryosu', () => {
       currentPrice: d(1000),
       maxPrice: d(1000),
       customPrice: null,
-      selection: 'MAX',
       config,
       fundingPct: d(60),
     });
@@ -219,7 +212,6 @@ describe('computeCampaignItem — özel fiyat senaryosu', () => {
       currentPrice: d(1000),
       maxPrice: d(1000),
       customPrice: d(800),
-      selection: 'CUSTOM',
       config,
       fundingPct: d(60),
     });
@@ -259,7 +251,6 @@ describe('computeCampaignItem — komisyon BANDI ile MATRAH farklı fiyatlardan 
         currentPrice: d(1000),
         maxPrice: d(1000),
         customPrice: null,
-        selection: 'MAX',
         config: { type: 'BUY_X_PAY_Y', buyQuantity: 4, payQuantity: 2 },
         fundingPct: d(50),
       },
@@ -284,7 +275,6 @@ describe('computeCampaignItem — komisyon BANDI ile MATRAH farklı fiyatlardan 
         currentPrice: d(1000),
         maxPrice: d(1000),
         customPrice: null,
-        selection: 'MAX',
         config: { type: 'NET', valueKind: 'PERCENT', value: d(50) },
         fundingPct: d(60),
       },
@@ -305,7 +295,6 @@ describe('computeCampaignItem — komisyon BANDI ile MATRAH farklı fiyatlardan 
         currentPrice: d(1000),
         maxPrice: d(1000),
         customPrice: null,
-        selection: 'MAX',
         config: { type: 'NET', valueKind: 'PERCENT', value: d(50) },
         fundingPct: d(0),
       },
@@ -325,19 +314,18 @@ describe('computeCampaignItem — sipariş (sepet) senaryosu', () => {
       currentPrice: d(1000),
       maxPrice: d(1000),
       customPrice: null,
-      selection: 'MAX',
       config: buyXPayY,
       fundingPct: d(60),
     });
     // n = buyQuantity = 4; birim ödeme 500 → sepet ödemesi 2.000; sepet tutarı 4 × 1.000 = 4.000;
     // kampanya indirimi 2.000; satıcının birim hakedişi 1000 − 500 × 0,40 = 800 → 3.200;
     // Trendyol'un karşıladığı = 3.200 − 2.000 = 1.200 (= 2.000 × %60).
-    expect(out.scenario).not.toBeNull();
-    expect(out.scenario?.assumedQuantity).toBe(4);
-    expect(out.scenario?.basketTotal).toBe('4000.00');
-    expect(out.scenario?.basketPaidTotal).toBe('2000.00');
-    expect(out.scenario?.basketDiscountTotal).toBe('2000.00');
-    expect(out.scenario?.trendyolFundedTotal).toBe('1200.00');
+    expect(out.maxBasket).not.toBeNull();
+    expect(out.maxBasket?.assumedQuantity).toBe(4);
+    expect(out.maxBasket?.basketTotal).toBe('4000.00');
+    expect(out.maxBasket?.basketPaidTotal).toBe('2000.00');
+    expect(out.maxBasket?.basketDiscountTotal).toBe('2000.00');
+    expect(out.maxBasket?.trendyolFundedTotal).toBe('1200.00');
   });
 
   it('sipariş kârı SATICININ sepet hakedişinden hesaplanır, müşterinin ödediğinden değil', () => {
@@ -345,7 +333,6 @@ describe('computeCampaignItem — sipariş (sepet) senaryosu', () => {
       currentPrice: d(1000),
       maxPrice: d(1000),
       customPrice: null,
-      selection: 'MAX',
       config: buyXPayY,
       fundingPct: d(60),
     });
@@ -355,15 +342,15 @@ describe('computeCampaignItem — sipariş (sepet) senaryosu', () => {
     //   stopaj = (3200 − 533,333…) × 0,01 = 26,666…
     //   netKDV = 533,333… − 66,666… − 80 − 8,198333… = 378,468333…
     //   netKâr = 3200 − 400 − 480 − 49,19 − 26,666… − 378,468333… = 1865,675 → "1865.68"
-    expect(out.scenario?.orderNetProfit).toBe('1865.68');
-    expect(out.scenario?.orderNetProfit).toBe(oracleProfit(d(3200), '15', 4).toFixed(2));
+    expect(out.maxBasket?.orderNetProfit).toBe('1865.68');
+    expect(out.maxBasket?.orderNetProfit).toBe(oracleProfit(d(3200), '15', 4).toFixed(2));
     // Müşterinin ödediği 2.000 üzerinden hesaplanmış olsaydı 1.025,68 çıkardı — 840 TL eksik.
     expect(oracleProfit(d(2000), '15', 4).toFixed(2)).toBe('1025.68');
-    expect(out.scenario?.orderNetProfit).not.toBe('1025.68');
+    expect(out.maxBasket?.orderNetProfit).not.toBe('1025.68');
     // Marj hakediş tutarına göre: 1865,675 / 3.200 × 100 = 58,3023… → "58.30"
-    expect(out.scenario?.orderMarginPct).toBe('58.30');
+    expect(out.maxBasket?.orderMarginPct).toBe('58.30');
     // Kampanyasız taban: aynı 4 birim, güncel fiyattan (4 × 1.000).
-    expect(out.scenario?.currentOrderNetProfit).toBe(oracleProfit(d(4000), '15', 4).toFixed(2));
+    expect(out.maxBasket?.currentOrderNetProfit).toBe(oracleProfit(d(4000), '15', 4).toFixed(2));
   });
 
   it('karşılama %0 iken sipariş senaryosu İndirimler ile birebir aynıdır', () => {
@@ -371,7 +358,6 @@ describe('computeCampaignItem — sipariş (sepet) senaryosu', () => {
       currentPrice: d(1000),
       maxPrice: d(1000),
       customPrice: null,
-      selection: 'MAX',
       config: buyXPayY,
       fundingPct: d(0),
     });
@@ -384,72 +370,59 @@ describe('computeCampaignItem — sipariş (sepet) senaryosu', () => {
       d(1000),
       buyXPayY,
     );
-    expect(campaign.scenario).toEqual({ ...discount.scenario, trendyolFundedTotal: '0.00' });
+    expect(campaign.maxBasket).toEqual({ ...discount.scenario, trendyolFundedTotal: '0.00' });
   });
 
-  it('CUSTOM seçiliyken sepet senaryosu ÖZEL fiyattan kurulur', () => {
+  it('özel fiyat seçeneğinin sepeti ÖZEL fiyattan kurulur', () => {
     const out = computeCampaignItem(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
       currentPrice: d(1000),
       maxPrice: d(1000),
       customPrice: d(600),
-      selection: 'CUSTOM',
       config: buyXPayY,
       fundingPct: d(60),
     });
     // 600 kampanya fiyatı → birim ödeme 300 → sepet 4 × 600 = 2.400, ödeme 1.200,
     // satıcı hakedişi birim 600 − 300 × 0,40 = 480 → 1.920; karşılama 1.920 − 1.200 = 720.
-    expect(out.scenario?.basketTotal).toBe('2400.00');
-    expect(out.scenario?.basketPaidTotal).toBe('1200.00');
-    expect(out.scenario?.trendyolFundedTotal).toBe('720.00');
-    expect(out.scenario?.orderNetProfit).toBe(oracleProfit(d(1920), '15', 4).toFixed(2));
+    expect(out.customBasket?.assumedQuantity).toBe(4);
+    expect(out.customBasket?.basketTotal).toBe('2400.00');
+    expect(out.customBasket?.basketPaidTotal).toBe('1200.00');
+    expect(out.customBasket?.trendyolFundedTotal).toBe('720.00');
+    expect(out.customBasket?.orderNetProfit).toBe(oracleProfit(d(1920), '15', 4).toFixed(2));
+    // Kampanyasız taban: aynı 4 birimin güncel fiyattan siparişi (4 × 1.000).
+    expect(out.customBasket?.currentOrderNetProfit).toBe(oracleProfit(d(4000), '15', 4).toFixed(2));
   });
 
-  it('MAX seçiliyken sepet senaryosu, kayıtlı bir özel fiyat DURSA BİLE maksimumdan kurulur', () => {
-    // Satıcının fiilen yaşayacağı durum: 600'ü yazıp karşılaştırmış, sonra MAX seçeneğinde
-    // kalmış. Özel fiyat satırda kayıtlı durur ama sipariş dökümü seçilen seçeneğe aittir.
+  it('iki seçeneğin sepeti de KENDİ fiyatından kurulur — biri diğerinin yerine geçmez', () => {
+    // Satıcının fiilen yaşayacağı durum: 600'ü yazıp maksimumla karşılaştırıyor. Satırdaki iki
+    // kart da kendi siparişini gösterdiği için maksimum bloğu özel fiyattan etkilenmez.
     const out = computeCampaignItem(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
       currentPrice: d(1000),
       maxPrice: d(1000),
       customPrice: d(600),
-      selection: 'MAX',
       config: buyXPayY,
       fundingPct: d(60),
     });
     // Maksimum fiyattan: sepet 4 × 1.000 = 4.000, ödeme 2.000, hakediş 3.200, karşılama 1.200.
-    expect(out.scenario?.basketTotal).toBe('4000.00');
-    expect(out.scenario?.basketPaidTotal).toBe('2000.00');
-    expect(out.scenario?.trendyolFundedTotal).toBe('1200.00');
-    expect(out.scenario?.orderNetProfit).toBe(oracleProfit(d(3200), '15', 4).toFixed(2));
-    // Özel fiyat senaryosu yine de HESAPLANIR — yalnız sepet çerçevesini o belirlemez.
+    expect(out.maxBasket?.basketTotal).toBe('4000.00');
+    expect(out.maxBasket?.basketPaidTotal).toBe('2000.00');
+    expect(out.maxBasket?.trendyolFundedTotal).toBe('1200.00');
+    expect(out.maxBasket?.orderNetProfit).toBe(oracleProfit(d(3200), '15', 4).toFixed(2));
+    expect(out.customBasket?.basketTotal).toBe('2400.00');
     expect(out.customScenario?.price.toFixed(2)).toBe('480.00');
   });
 
-  it('NONE seçiliyken (henüz seçim yok) sepet senaryosu maksimum fiyattan kurulur', () => {
-    const out = computeCampaignItem(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
-      currentPrice: d(1000),
-      maxPrice: d(1000),
-      customPrice: d(600),
-      selection: 'NONE',
-      config: buyXPayY,
-      fundingPct: d(60),
-    });
-    expect(out.scenario?.basketTotal).toBe('4000.00');
-    expect(out.scenario?.orderNetProfit).toBe(oracleProfit(d(3200), '15', 4).toFixed(2));
-  });
-
-  it('CUSTOM seçili ama özel fiyat yazılmamışsa sepet senaryosu maksimuma düşer (null üretmez)', () => {
+  it('özel fiyat yazılmamışsa yalnız maksimum seçeneğinin sepeti vardır', () => {
     const out = computeCampaignItem(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
       currentPrice: d(1000),
       maxPrice: d(1000),
       customPrice: null,
-      selection: 'CUSTOM',
       config: buyXPayY,
       fundingPct: d(60),
     });
     expect(out.customScenario).toBeNull();
-    expect(out.scenario).not.toBeNull();
-    expect(out.scenario?.basketTotal).toBe('4000.00');
-    expect(out.scenario?.orderNetProfit).toBe(oracleProfit(d(3200), '15', 4).toFixed(2));
+    expect(out.customBasket).toBeNull();
+    expect(out.maxBasket?.basketTotal).toBe('4000.00');
+    expect(out.maxBasket?.orderNetProfit).toBe(oracleProfit(d(3200), '15', 4).toFixed(2));
   });
 
   it('sepet miktarı n kampanya fiyatından türer (ceil(M / P))', () => {
@@ -458,7 +431,6 @@ describe('computeCampaignItem — sipariş (sepet) senaryosu', () => {
       // Maksimum fiyat 250 → n = ceil(1000 / 250) = 4 (güncel fiyat 1000 olsa n = 1 olurdu).
       maxPrice: d(250),
       customPrice: null,
-      selection: 'MAX',
       config: {
         type: 'CONDITIONAL_BASKET',
         valueKind: 'AMOUNT',
@@ -467,31 +439,53 @@ describe('computeCampaignItem — sipariş (sepet) senaryosu', () => {
       },
       fundingPct: d(0),
     });
-    expect(out.scenario?.assumedQuantity).toBe(4);
-    expect(out.scenario?.basketTotal).toBe('1000.00');
-    expect(out.scenario?.basketPaidTotal).toBe('900.00');
+    expect(out.maxBasket?.assumedQuantity).toBe(4);
+    expect(out.maxBasket?.basketTotal).toBe('1000.00');
+    expect(out.maxBasket?.basketPaidTotal).toBe('900.00');
+  });
+
+  it('fiyata duyarlı kurguda her seçeneğin n değeri kendi fiyatından türer', () => {
+    const config: DiscountConfig = {
+      type: 'CONDITIONAL_BASKET',
+      valueKind: 'AMOUNT',
+      value: d(100),
+      minBasketAmount: d(1000),
+    };
+    const out = computeCampaignItem(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
+      currentPrice: d(1000),
+      maxPrice: d(250),
+      customPrice: d(200),
+      config,
+      fundingPct: d(0),
+    });
+    // 250 → n = ceil(1000 / 250) = 4; 200 → n = ceil(1000 / 200) = 5.
+    expect(out.maxBasket?.assumedQuantity).toBe(4);
+    expect(out.customBasket?.assumedQuantity).toBe(5);
+    expect(out.customBasket?.basketTotal).toBe('1000.00');
+    expect(out.customBasket?.basketPaidTotal).toBe(
+      effectiveUnitPrice(d(200), config).toDecimalPlaces(2).mul(5).toFixed(2),
+    );
   });
 
   it('NET kurgusunda ve pozitif olmayan fiyatta sepet senaryosu yoktur', () => {
     const net = computeCampaignItem(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
       currentPrice: d(1000),
       maxPrice: d(1000),
-      customPrice: null,
-      selection: 'MAX',
+      customPrice: d(900),
       config: { type: 'NET', valueKind: 'AMOUNT', value: d(50) },
       fundingPct: d(60),
     });
-    expect(net.scenario).toBeNull();
+    expect(net.maxBasket).toBeNull();
+    expect(net.customBasket).toBeNull();
 
     const zero = computeCampaignItem(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
       currentPrice: d(1000),
       maxPrice: d(0),
       customPrice: null,
-      selection: 'MAX',
       config: buyXPayY,
       fundingPct: d(60),
     });
-    expect(zero.scenario).toBeNull();
+    expect(zero.maxBasket).toBeNull();
   });
 
   it('senaryonun kârı çözülemediğinde sipariş alanları null, para alanları dolu kalır', () => {
@@ -499,14 +493,13 @@ describe('computeCampaignItem — sipariş (sepet) senaryosu', () => {
       currentPrice: d(1000),
       maxPrice: d(1000),
       customPrice: null,
-      selection: 'MAX',
       config: buyXPayY,
       fundingPct: d(60),
     });
-    expect(out.scenario?.trendyolFundedTotal).toBe('1200.00');
-    expect(out.scenario?.orderNetProfit).toBeNull();
-    expect(out.scenario?.orderMarginPct).toBeNull();
-    expect(out.scenario?.currentOrderNetProfit).toBeNull();
+    expect(out.maxBasket?.trendyolFundedTotal).toBe('1200.00');
+    expect(out.maxBasket?.orderNetProfit).toBeNull();
+    expect(out.maxBasket?.orderMarginPct).toBeNull();
+    expect(out.maxBasket?.currentOrderNetProfit).toBeNull();
   });
 });
 
@@ -518,7 +511,6 @@ describe('computeCampaignItem — hesaplanabilirlik MEVCUT senaryodan gelir', ()
       currentPrice: d(1000),
       maxPrice: d(1000),
       customPrice: d(800),
-      selection: 'CUSTOM',
       config,
       fundingPct: d(60),
     });
@@ -534,7 +526,6 @@ describe('computeCampaignItem — hesaplanabilirlik MEVCUT senaryodan gelir', ()
       currentPrice: d(1000),
       maxPrice: d(1000),
       customPrice: null,
-      selection: 'MAX',
       config,
       fundingPct: d(60),
     });
@@ -547,7 +538,6 @@ describe('computeCampaignItem — hesaplanabilirlik MEVCUT senaryodan gelir', ()
       currentPrice: d(1000),
       maxPrice: d(1000),
       customPrice: null,
-      selection: 'MAX',
       config,
       fundingPct: d(60),
     });
@@ -559,34 +549,33 @@ describe('computeCampaignItem — hesaplanabilirlik MEVCUT senaryodan gelir', ()
 // ─── computeCampaignEstimate — tek senaryonun tam dökümü ─────────────────────
 
 describe('computeCampaignEstimate', () => {
-  it('sipariş gösterimli kurguda MEVCUT senaryo da kampanyasız SİPARİŞ dökümü döner', () => {
-    // Kapsam senaryoyu değil KURGUNUN gösterimini izler: satırın manşet rakamları (kampanyasız
-    // `currentOrderNetProfit` dâhil) sipariş toplamlarıdır, dolayısıyla o rakama tıklayan
-    // satıcıya birim dökümü göstermek toplamı tutmayan bir modal demekti.
+  it('MEVCUT senaryo sipariş gösterimli kurguda bile BİRİM dökümü döner', () => {
+    // Katılmayan satıcının bugünkü satışı tek ürünlük bir siparişdir ve satırın mevcut hücresi
+    // birim kârı gösterir — modal tıklanan rakamla aynı tabanda kalır.
     const out = computeCampaignEstimate(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
       price: d(1000),
+      currentPrice: d(1000),
       config: { type: 'BUY_X_PAY_Y', buyQuantity: 4, payQuantity: 2 },
       fundingPct: d(60),
       applyCampaign: false,
-      basketAnchorPrice: d(800),
     });
-    expect(out.scope).toBe('order');
-    // Kampanya yok → karşılama da yok → hakediş güncel fiyata eşit: gelir 4 × 1.000.
-    expect(out.price.toFixed(2)).toBe('4000.00');
-    expect(out.breakdown?.saleGross).toBe('4000.00');
-    // Satırın `currentOrderNetProfit`'i ile AYNI oracle — modal satırla çelişemez.
-    expect(out.breakdown?.netProfit).toBe(oracleProfit(d(4000), '15', 4).toFixed(2));
+    expect(out.scope).toBe('unit');
+    expect(out.basket).toBeNull();
+    // Kampanya yok → karşılama da yok → hakediş güncel fiyata eşit.
+    expect(out.price.toFixed(2)).toBe('1000.00');
+    expect(out.breakdown?.netProfit).toBe(oracleProfit(d(1000), '15').toFixed(2));
   });
 
   it('birim gösterimli kurguda kampanya senaryosu HAKEDİŞ fiyatının birim dökümüdür', () => {
     const out = computeCampaignEstimate(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
       price: d(1000),
+      currentPrice: d(1000),
       config: { type: 'NET', valueKind: 'PERCENT', value: d(10) },
       fundingPct: d(60),
       applyCampaign: true,
-      basketAnchorPrice: d(1000),
     });
     expect(out.scope).toBe('unit');
+    expect(out.basket).toBeNull();
     expect(out.price.toFixed(2)).toBe('960.00');
     expect(out.breakdown?.saleGross).toBe('960.00');
     expect(out.commissionPct).toBe('15.0000');
@@ -595,10 +584,10 @@ describe('computeCampaignEstimate', () => {
   it('sipariş gösterimli kurguda kampanya senaryosu SİPARİŞ dökümüdür (satıcı hakedişi)', () => {
     const out = computeCampaignEstimate(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
       price: d(1000),
+      currentPrice: d(1000),
       config: { type: 'BUY_X_PAY_Y', buyQuantity: 4, payQuantity: 2 },
       fundingPct: d(60),
       applyCampaign: true,
-      basketAnchorPrice: d(1000),
     });
     expect(out.scope).toBe('order');
     // Sipariş geliri = satıcının sepet hakedişi (4 × 800), müşterinin ödediği 2.000 DEĞİL.
@@ -612,88 +601,76 @@ describe('computeCampaignEstimate', () => {
     expect(out.breakdown?.costGross).toBe('400.00');
   });
 
-  it('sepet adedini SENARYO fiyatından değil ÇAPADAN türetir (fiyata duyarlı tek tür)', () => {
-    // `CONDITIONAL_BASKET`/TL, n'in fiyata bağlı olduğu TEK kurgu: n = ceil(minSepet / fiyat).
-    // Mevcut senaryonun çapası satıcının KAYITLI seçiminin fiyatıdır (250 → n = 4), senaryonun
-    // kendi fiyatı (1.000 → n = 1) değil; aksi hâlde modal satırın sepetinden başka bir sepeti
-    // fiyatlar ve iki sayı tutmaz.
-    const config: DiscountConfig = {
-      type: 'CONDITIONAL_BASKET',
-      valueKind: 'AMOUNT',
-      value: d(100),
-      minBasketAmount: d(1000),
-    };
-    const out = computeCampaignEstimate(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
-      price: d(1000),
+  it('sipariş dökümünün sepet bloğu satırdaki kartın bloğuyla AYNIDIR', () => {
+    const config: DiscountConfig = { type: 'BUY_X_PAY_Y', buyQuantity: 4, payQuantity: 2 };
+    const row = computeCampaignItem(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
+      currentPrice: d(1000),
+      maxPrice: d(1000),
+      customPrice: d(600),
       config,
       fundingPct: d(60),
-      applyCampaign: false,
-      basketAnchorPrice: d(250),
+    });
+    const estimateAt = (price: Decimal): ReturnType<typeof computeCampaignEstimate> =>
+      computeCampaignEstimate(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
+        price,
+        currentPrice: d(1000),
+        config,
+        fundingPct: d(60),
+        applyCampaign: true,
+      });
+    const max = estimateAt(d(1000));
+    const custom = estimateAt(d(600));
+    expect(max.basket).toEqual(row.maxBasket);
+    expect(custom.basket).toEqual(row.customBasket);
+    // Modalın manşet kârı bloğun sipariş kârıdır — iki yol aynı rakama çıkar.
+    expect(custom.breakdown?.netProfit).toBe(custom.basket?.orderNetProfit);
+  });
+
+  it('fiyata duyarlı kurguda sepet adedi senaryonun KENDİ fiyatından türer', () => {
+    // `CONDITIONAL_BASKET`/TL, n'in fiyata bağlı olduğu TEK kurgu: n = ceil(minSepet / fiyat).
+    const out = computeCampaignEstimate(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
+      price: d(250),
+      currentPrice: d(1000),
+      config: {
+        type: 'CONDITIONAL_BASKET',
+        valueKind: 'AMOUNT',
+        value: d(100),
+        minBasketAmount: d(1000),
+      },
+      fundingPct: d(0),
+      applyCampaign: true,
     });
     expect(out.scope).toBe('order');
-    expect(out.price.toFixed(2)).toBe('4000.00');
+    expect(out.basket?.assumedQuantity).toBe(4);
     expect(out.breakdown?.costGross).toBe('400.00');
-
-    // Çapa senaryo fiyatına kaysaydı sepet tek birime inerdi — ayrımı görünür kılan kontrol.
-    const drifted = computeCampaignEstimate(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
-      price: d(1000),
-      config,
-      fundingPct: d(60),
-      applyCampaign: false,
-      basketAnchorPrice: d(1000),
-    });
-    expect(drifted.price.toFixed(2)).toBe('1000.00');
   });
 
-  it('pozitif olmayan çapada sepet kurulamaz, birim dökümüne düşer', () => {
+  it('pozitif olmayan fiyatta sepet kurulamaz, birim dökümüne düşer', () => {
     const out = computeCampaignEstimate(ctx, variant, OK_COST, OK_SHIPPING, openCommission, {
-      price: d(1000),
-      config: { type: 'BUY_X_PAY_Y', buyQuantity: 4, payQuantity: 2 },
-      fundingPct: d(60),
-      applyCampaign: false,
-      basketAnchorPrice: d(0),
-    });
-    expect(out.scope).toBe('unit');
-    expect(out.price.toFixed(2)).toBe('1000.00');
-  });
-
-  it('hesaplanamayan kalemde döküm null, gerekçe dolu döner', () => {
-    const out = computeCampaignEstimate(ctx, variant, OK_COST, OK_SHIPPING, noCommission, {
-      price: d(1000),
+      price: d(0),
+      currentPrice: d(1000),
       config: { type: 'BUY_X_PAY_Y', buyQuantity: 4, payQuantity: 2 },
       fundingPct: d(60),
       applyCampaign: true,
-      basketAnchorPrice: d(1000),
+    });
+    expect(out.scope).toBe('unit');
+    expect(out.basket).toBeNull();
+  });
+
+  it('hesaplanamayan kalemde döküm null, gerekçe dolu; sepetin para alanları yine dolar', () => {
+    const out = computeCampaignEstimate(ctx, variant, OK_COST, OK_SHIPPING, noCommission, {
+      price: d(1000),
+      currentPrice: d(1000),
+      config: { type: 'BUY_X_PAY_Y', buyQuantity: 4, payQuantity: 2 },
+      fundingPct: d(60),
+      applyCampaign: true,
     });
     expect(out.calculable).toBe(false);
     expect(out.reason).toBe('NO_COMMISSION');
     expect(out.breakdown).toBeNull();
     expect(out.scope).toBe('order');
-  });
-});
-
-// ─── campaignBasketAnchorPrice — sepeti çerçeveleyen fiyat ───────────────────
-
-describe('campaignBasketAnchorPrice', () => {
-  it('CUSTOM seçimi ve yazılmış fiyat varsa satıcının kendi fiyatını verir', () => {
-    expect(
-      campaignBasketAnchorPrice(CampaignPriceSelection.CUSTOM, d(180), d(200)).toFixed(2),
-    ).toBe('180.00');
-  });
-
-  it('MAX ve NONE seçimlerinde maksimum fiyatı verir', () => {
-    expect(campaignBasketAnchorPrice(CampaignPriceSelection.MAX, d(180), d(200)).toFixed(2)).toBe(
-      '200.00',
-    );
-    expect(campaignBasketAnchorPrice(CampaignPriceSelection.NONE, null, d(200)).toFixed(2)).toBe(
-      '200.00',
-    );
-  });
-
-  it('CUSTOM seçili ama fiyat yazılmamışsa maksimuma düşer (null fiyatlı sepet üretilmez)', () => {
-    expect(campaignBasketAnchorPrice(CampaignPriceSelection.CUSTOM, null, d(200)).toFixed(2)).toBe(
-      '200.00',
-    );
+    expect(out.basket?.trendyolFundedTotal).toBe('1200.00');
+    expect(out.basket?.orderNetProfit).toBeNull();
   });
 });
 
@@ -718,7 +695,6 @@ describe('suggestTargetMarginPrices', () => {
       currentPrice: d(1000),
       maxPrice: d(1000),
       customPrice: price,
-      selection: 'CUSTOM',
       config,
       fundingPct,
     });
@@ -826,7 +802,6 @@ describe('kampanya senaryosu paylaşık matematikten türer', () => {
       currentPrice: d(400),
       maxPrice,
       customPrice: null,
-      selection: 'MAX',
       config,
       fundingPct,
     });
@@ -856,7 +831,6 @@ describe('kampanya senaryosu paylaşık matematikten türer', () => {
         currentPrice: d('374.99'),
         maxPrice: d('374.99'),
         customPrice: null,
-        selection: 'MAX',
         config: { type: 'NET', valueKind: 'PERCENT', value: d(20) },
         fundingPct: d(0),
       },
@@ -876,7 +850,6 @@ describe('kampanya senaryosu paylaşık matematikten türer', () => {
       currentPrice: d(1000),
       maxPrice: d(1000),
       customPrice: null,
-      selection: 'MAX',
       config: { type: 'NET', valueKind: 'PERCENT', value: d(10) },
       fundingPct: d(60),
     });

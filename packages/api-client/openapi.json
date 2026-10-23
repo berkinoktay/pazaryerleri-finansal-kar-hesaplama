@@ -7904,7 +7904,7 @@
               "string",
               "null"
             ],
-            "description": "What the CUSTOMER pays for ONE unit under the campaign, 2-decimal string, alongside the seller’s unit settlement `price`. Null for the `current` scenario (no campaign applied) AND whenever `breakdownScope` is \"order\": at ORDER presentation the per-unit effective price is a synthetic average that describes no real unit (in a 2-al-1-öde the customer pays full price for one unit and nothing for the other), so the split is reported as basket totals on `CampaignBasketScenario` instead."
+            "description": "What the CUSTOMER pays for ONE unit under the campaign, 2-decimal string, alongside the seller’s unit settlement `price`. Null for the `current` scenario (no campaign applied) AND whenever `breakdownScope` is \"order\": at ORDER presentation the per-unit effective price is a synthetic average that describes no real unit (in a 2-al-1-öde the customer pays full price for one unit and nothing for the other), so the split is reported as basket totals on `basket` instead."
           },
           "trendyolFundedUnitAmount": {
             "type": [
@@ -7947,7 +7947,10 @@
               "unit",
               "order"
             ],
-            "description": "Scope of `breakdown` and `price`. It follows the CAMPAIGN’s presentation, not the scenario: an ORDER-presentation campaign (BUY_X_PAY_Y / NTH_PRODUCT / a conditional-AMOUNT discount) returns `order` for EVERY scenario — including `current`, whose order is the same assumed basket priced campaign-free — so the modal always totals to the figure the seller clicked in the row. `order` means the whole n-unit single-product basket: `price` is the order revenue and `breakdown` is the order-level profit (n× product cost, 1× shipping, 1× PSF). Everything else is `unit`: per-unit economics."
+            "description": "Scope of `breakdown` and `price`. An ORDER-presentation campaign (BUY_X_PAY_Y / NTH_PRODUCT / a conditional-AMOUNT discount) returns `order` for its campaign scenarios (`max`, `custom`), framed on that scenario’s own price — the same block the row’s price card headlines. `order` means the whole n-unit single-product basket: `price` is the order revenue and `breakdown` is the order-level profit (n× product cost, 1× shipping, 1× PSF). The campaign-free `current` scenario and every UNIT-presentation campaign return `unit`: per-unit economics."
+          },
+          "basket": {
+            "$ref": "#/components/schemas/CampaignBasketScenario"
           },
           "commissionTariffName": {
             "type": [
@@ -7974,6 +7977,7 @@
           "reason",
           "breakdown",
           "breakdownScope",
+          "basket",
           "commissionTariffName",
           "commissionPeriodLabel"
         ]
@@ -8004,6 +8008,66 @@
           null
         ],
         "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon yok."
+      },
+      "CampaignBasketScenario": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "assumedQuantity": {
+            "type": "integer",
+            "description": "Assumed basket quantity (n): the minimum quantity of this product whose single-product basket satisfies the discount condition — ceil(minBasket/price) for basket, minQuantity for quantity, buyQuantity for X-al-Y, nthIndex for Nth-product."
+          },
+          "basketTotal": {
+            "type": "string",
+            "description": "Undiscounted basket total (n × the CAMPAIGN price the seller enters — NOT the current price), 2-decimal string. The campaign promotion runs ON TOP of the campaign price, so anchoring here keeps basketDiscountTotal to the promotion alone and lets trendyolFundedTotal reconcile as a share of it."
+          },
+          "basketPaidTotal": {
+            "type": "string",
+            "description": "What the customer pays for the assumed basket (n × the 2dp effective unit price), 2-decimal string — always consistent with the row’s displayed unit price."
+          },
+          "basketDiscountTotal": {
+            "type": "string",
+            "description": "The basket discount (basketTotal − basketPaidTotal), 2-decimal string."
+          },
+          "trendyolFundedTotal": {
+            "type": "string",
+            "description": "The share of basketDiscountTotal that Trendyol funds for this assumed basket (basketDiscountTotal × trendyolFundingPct / 100), 2-decimal string. The remainder is absorbed by the seller — at trendyolFundingPct=0 this is \"0.00\"."
+          },
+          "orderNetProfit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Order net profit for the assumed n-unit basket, from the real profit engine over the order (n× product cost, 1× shipping, 1× PSF — the platform service and shipping are per-parcel and a basket of n identical units ships once); 2-decimal string, null when the priced scenario is not calculable."
+          },
+          "orderMarginPct": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Order margin: orderNetProfit over the SELLER's settlement total for the basket (n × the seller-effective unit price, i.e. what Trendyol pays out), × 100, 2-decimal string. The denominator is the seller amount — not what the customer paid — because commission and settlement both run off the seller amount. Null when the priced scenario is not calculable or the settlement total is zero."
+          },
+          "currentOrderNetProfit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Same-basis campaign-free baseline: the order net profit for the same n units at the current price, 2-decimal string; null when the current scenario is not calculable."
+          }
+        },
+        "required": [
+          "assumedQuantity",
+          "basketTotal",
+          "basketPaidTotal",
+          "basketDiscountTotal",
+          "trendyolFundedTotal",
+          "orderNetProfit",
+          "orderMarginPct",
+          "currentOrderNetProfit"
+        ],
+        "description": "Single-product-basket settlement scenario for basket-scoped campaign discount types. Null for NET (its showcase price genuinely changes) or a non-positive price."
       },
       "EstimateCampaignItemBody": {
         "type": "object",
@@ -8322,7 +8386,10 @@
               "$ref": "#/components/schemas/CampaignCommissionBand"
             }
           },
-          "scenario": {
+          "maxBasket": {
+            "$ref": "#/components/schemas/CampaignBasketScenario"
+          },
+          "customBasket": {
             "$ref": "#/components/schemas/CampaignBasketScenario"
           }
         },
@@ -8349,7 +8416,8 @@
           "maxScenario",
           "customScenario",
           "commissionBands",
-          "scenario"
+          "maxBasket",
+          "customBasket"
         ]
       },
       "CampaignScenario": {
@@ -8414,66 +8482,6 @@
           "commissionPct"
         ],
         "description": "Ürünün komisyon tarifesindeki bir fiyat bandı: [lowerLimit, upperLimit] penceresi ve o pencereye düşen komisyon oranı. Cari, maksimum ve özel fiyatın hangi banda düştüğü UI popover’ında bu ladder ile işaretlenir."
-      },
-      "CampaignBasketScenario": {
-        "type": [
-          "object",
-          "null"
-        ],
-        "properties": {
-          "assumedQuantity": {
-            "type": "integer",
-            "description": "Assumed basket quantity (n): the minimum quantity of this product whose single-product basket satisfies the discount condition — ceil(minBasket/price) for basket, minQuantity for quantity, buyQuantity for X-al-Y, nthIndex for Nth-product."
-          },
-          "basketTotal": {
-            "type": "string",
-            "description": "Undiscounted basket total (n × the CAMPAIGN price the seller enters — NOT the current price), 2-decimal string. The campaign promotion runs ON TOP of the campaign price, so anchoring here keeps basketDiscountTotal to the promotion alone and lets trendyolFundedTotal reconcile as a share of it."
-          },
-          "basketPaidTotal": {
-            "type": "string",
-            "description": "What the customer pays for the assumed basket (n × the 2dp effective unit price), 2-decimal string — always consistent with the row’s displayed unit price."
-          },
-          "basketDiscountTotal": {
-            "type": "string",
-            "description": "The basket discount (basketTotal − basketPaidTotal), 2-decimal string."
-          },
-          "trendyolFundedTotal": {
-            "type": "string",
-            "description": "The share of basketDiscountTotal that Trendyol funds for this assumed basket (basketDiscountTotal × trendyolFundingPct / 100), 2-decimal string. The remainder is absorbed by the seller — at trendyolFundingPct=0 this is \"0.00\"."
-          },
-          "orderNetProfit": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Order net profit for the assumed n-unit basket, from the real profit engine over the order (n× product cost, 1× shipping, 1× PSF — the platform service and shipping are per-parcel and a basket of n identical units ships once); 2-decimal string, null when the priced scenario is not calculable."
-          },
-          "orderMarginPct": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Order margin: orderNetProfit over the SELLER's settlement total for the basket (n × the seller-effective unit price, i.e. what Trendyol pays out), × 100, 2-decimal string. The denominator is the seller amount — not what the customer paid — because commission and settlement both run off the seller amount. Null when the priced scenario is not calculable or the settlement total is zero."
-          },
-          "currentOrderNetProfit": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Same-basis campaign-free baseline: the order net profit for the same n units at the current price, 2-decimal string; null when the current scenario is not calculable."
-          }
-        },
-        "required": [
-          "assumedQuantity",
-          "basketTotal",
-          "basketPaidTotal",
-          "basketDiscountTotal",
-          "trendyolFundedTotal",
-          "orderNetProfit",
-          "orderMarginPct",
-          "currentOrderNetProfit"
-        ],
-        "description": "Single-product-basket settlement scenario for basket-scoped campaign discount types. Null for NET (its showcase price genuinely changes) or a non-positive price."
       },
       "ShippingCarrier": {
         "type": "object",

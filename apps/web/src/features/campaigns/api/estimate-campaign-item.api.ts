@@ -29,11 +29,12 @@ export type EstimateCampaignItemResult = Omit<RawEstimateCampaignItemResult, 'br
  * `price` is what the SELLER earns. At unit scope, `customerPaidUnitPrice` and
  * `trendyolFundedUnitAmount` split one unit into what the customer pays and what Trendyol
  * funds; BOTH ARE NULL for the campaign-free `current` scenario AND whenever
- * `breakdownScope` is `"order"` — an order-presentation campaign (BUY_X_PAY_Y / NTH_PRODUCT /
- * a conditional-AMOUNT discount) reports the split as basket totals on the item's
- * `CampaignBasketScenario` instead, because a per-unit average describes no real unit there.
+ * `breakdownScope` is `"order"` — the `max` / `custom` scenarios of an order-presentation
+ * campaign (BUY_X_PAY_Y / NTH_PRODUCT / a conditional-AMOUNT discount) report the split as
+ * basket totals on the result's `basket` instead (the same block as the row's `maxBasket` /
+ * `customBasket` for that price), because a per-unit average describes no real unit there.
  * Do not derive a fallback value for these fields when they are null — null is the correct,
- * final answer at order scope.
+ * final answer at order scope. `current` is always a unit-scope breakdown.
  *
  * A custom price above the item's maximum is refused with 422 CUSTOM_PRICE_ABOVE_MAX, and a
  * custom scenario with no price anywhere with 422 CUSTOM_PRICE_REQUIRED — both flow through

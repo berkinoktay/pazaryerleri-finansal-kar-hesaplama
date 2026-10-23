@@ -53,7 +53,8 @@ function noCustomPriceItem() {
     maxScenario: scenario('80.00', '10.00'),
     customScenario: null,
     commissionBands: null,
-    scenario: null,
+    maxBasket: null,
+    customBasket: null,
   };
 }
 
@@ -82,7 +83,22 @@ function customPriceItem() {
     maxScenario: scenario('150.00', '30.00'),
     customScenario: scenario('120.00', '15.00'),
     commissionBands: null,
-    scenario: null,
+    maxBasket: null,
+    customBasket: null,
+  };
+}
+
+/** The assumed-basket block an ORDER-presentation option carries. */
+function basket(n: number, basketTotal: string, orderNetProfit: string) {
+  return {
+    assumedQuantity: n,
+    basketTotal,
+    basketPaidTotal: basketTotal,
+    basketDiscountTotal: '0.00',
+    trendyolFundedTotal: '0.00',
+    orderNetProfit,
+    orderMarginPct: '10.00',
+    currentOrderNetProfit: '90.00',
   };
 }
 
@@ -155,6 +171,49 @@ describe('useMarketplaceCampaignDetail', () => {
     expect(customRow.current.netProfit).toBe('60.00');
     expect(customRow.maxScenario.netProfit).toBe('30.00');
     expect(customRow.selection).toBe('CUSTOM');
+  });
+
+  it('keeps each price option on its own basket block — the custom block never replaces the maximum one', async () => {
+    const orderItem = {
+      ...customPriceItem(),
+      maxBasket: basket(2, '300.00', '40.00'),
+      customBasket: basket(2, '240.00', '20.00'),
+    };
+    server.use(
+      http.get(ENDPOINT, () =>
+        HttpResponse.json(
+          {
+            ...detailResponse(),
+            discountType: 'BUY_X_PAY_Y',
+            valueKind: null,
+            value: null,
+            buyQuantity: 2,
+            payQuantity: 1,
+            scenarioPresentation: 'ORDER',
+            items: [orderItem],
+          },
+          { status: 200 },
+        ),
+      ),
+    );
+
+    const { result } = renderHook(
+      () => useMarketplaceCampaignDetail(ORG_ID, STORE_ID, CAMPAIGN_ID),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const detail = result.current.data;
+    if (detail === undefined) throw new Error('detail should be loaded');
+
+    const { header, rows } = adaptMarketplaceCampaignDetail(detail);
+    expect(header.scenarioPresentation).toBe('ORDER');
+    const [row] = rows;
+    // The row is CUSTOM-selected, yet the maximum card still reads the maximum's order.
+    expect(row?.selection).toBe('CUSTOM');
+    expect(row?.maxBasket?.basketTotal).toBe('300.00');
+    expect(row?.maxBasket?.orderNetProfit).toBe('40.00');
+    expect(row?.customBasket?.basketTotal).toBe('240.00');
+    expect(row?.customBasket?.orderNetProfit).toBe('20.00');
   });
 
   it('does not fetch when campaignId is null (enabled=false path)', () => {

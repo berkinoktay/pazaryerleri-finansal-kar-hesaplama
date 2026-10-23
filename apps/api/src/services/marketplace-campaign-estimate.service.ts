@@ -31,7 +31,6 @@ import {
   type DiscountConfig,
 } from './discount-math-commons';
 import {
-  campaignBasketAnchorPrice,
   computeCampaignEstimate,
   suggestTargetMarginPrices,
   type CampaignTargetMarginItem,
@@ -115,13 +114,10 @@ function resolveScenarioPrice(
  * when the item does not belong to this campaign/store.
  *
  * Both the framing and the math live in `computeCampaignEstimate`; this function's only job is
- * to decide WHICH price each of its two price inputs carries:
- *
- *  - `price` — the scenario's campaign price (current / max / custom).
- *  - `basketAnchorPrice` — the price framing the assumed basket. For `max` / `custom` that is
- *    the scenario's own price: the modal shows the order for the price being examined. For
- *    `current` it is the SAVED selection's price ({@link campaignBasketAnchorPrice}), because
- *    the number the seller clicked is the row's own basket priced campaign-free.
+ * to decide WHICH campaign price the scenario carries (current / max / custom) and to hand over
+ * the item's current price, which prices the same basket campaign-free. An order-scoped result
+ * frames its basket on the scenario's OWN price — the same block the row's price card shows —
+ * and the campaign-free `current` scenario is always a single-unit breakdown.
  */
 export async function estimateCampaignItem(
   orgId: string,
@@ -141,7 +137,6 @@ export async function estimateCampaignItem(
         barcode: true,
         currentPrice: true,
         maxPrice: true,
-        selection: true,
         customPrice: true,
         list: { select: CAMPAIGN_CONFIG_SELECT },
       },
@@ -180,15 +175,7 @@ export async function estimateCampaignItem(
     inputs.cost,
     inputs.shipping,
     inputs.commission,
-    {
-      price,
-      config,
-      fundingPct,
-      applyCampaign,
-      basketAnchorPrice: applyCampaign
-        ? price
-        : campaignBasketAnchorPrice(item.selection, savedCustomPrice, maxPrice),
-    },
+    { price, currentPrice, config, fundingPct, applyCampaign },
   );
 
   return {
@@ -202,6 +189,7 @@ export async function estimateCampaignItem(
     reason: computed.reason,
     breakdown: computed.breakdown,
     breakdownScope: computed.scope,
+    basket: computed.basket,
     commissionTariffName: economics.tariffName,
     commissionPeriodLabel: economics.periodLabel,
   };
@@ -212,9 +200,9 @@ export async function estimateCampaignItem(
  *
  * `price` on the result is what the SELLER earns; these two open up the gap between that and
  * what the customer actually paid — the whole point of modelling a funding rate. They exist
- * because `CampaignBasketScenario` (which carries the same split as basket totals) is null for
- * `NET` and the conditional PERCENT variants, i.e. for most live campaigns, so without them the
- * seller could not see Trendyol's contribution at all in exactly the configurations where it
+ * because the result's `basket` (which carries the same split as basket totals) is null at unit
+ * scope — `NET` and the conditional PERCENT variants, i.e. most live campaigns — so without them
+ * the seller could not see Trendyol's contribution at all in exactly the configurations where it
  * matters most.
  *
  * Null in two cases, both deliberate:
@@ -224,7 +212,7 @@ export async function estimateCampaignItem(
  *    price per unit" describes no unit that exists). Handing that average back under a
  *    `...UnitPrice` name would re-introduce precisely the reasoning ORDER presentation exists to
  *    prevent, and it would sit next to an order-scoped `price` that a consumer could subtract it
- *    from. ORDER rows surface the split as basket totals through `CampaignBasketScenario`.
+ *    from. ORDER results surface the split as basket totals through their `basket`.
  *
  * The funded amount is the DIFFERENCE of the two 2-decimal figures (never the rate re-applied),
  * so paid + funded closes on the unit settlement price to the kuruş.

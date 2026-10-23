@@ -169,10 +169,9 @@ function serializeScenario(
  * The campaign's `trendyolFundingPct` rides into every scenario: it decides how much of the
  * campaign discount Trendyol absorbs and therefore what the seller's settlement base is.
  *
- * Each item's PERSISTED `selection` is passed into the compute because it decides which price
- * frames the basket/order block — the headline figure on an ORDER-presentation row. A seller
- * who typed a custom price and then stayed on MAX must not see order totals for the option
- * they did not choose.
+ * Each price option carries its OWN basket/order block (`maxBasket`, `customBasket`) — on an
+ * ORDER-presentation row both price cards headline their own order, whichever option the seller
+ * has marked, so the persisted `selection` does not enter the compute.
  *
  * Money math is Decimal, serialized at the DTO edge (the frontend never computes).
  */
@@ -268,8 +267,6 @@ export async function getMarketplaceCampaignDetail(
       currentPrice: new Decimal(item.currentPrice.toString()),
       maxPrice: new Decimal(item.maxPrice.toString()),
       customPrice: item.customPrice !== null ? new Decimal(item.customPrice.toString()) : null,
-      // The PERSISTED choice — never a default. It frames the basket/order block.
-      selection: item.selection,
       config,
       fundingPct,
     });
@@ -298,8 +295,9 @@ export async function getMarketplaceCampaignDetail(
       customScenario:
         computed.customScenario !== null ? serializeScenario(computed.customScenario) : null,
       commissionBands,
-      // Passthrough: the compute already serialized the settlement scenario to wire strings.
-      scenario: computed.scenario,
+      // Passthrough: the compute already serialized both basket blocks to wire strings.
+      maxBasket: computed.maxBasket,
+      customBasket: computed.customBasket,
     };
   });
 
