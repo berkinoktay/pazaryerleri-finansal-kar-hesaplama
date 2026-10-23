@@ -115,12 +115,17 @@ const VICTIM_FUNDING_PCT = '50';
 // The barcode Org A's campaign item and Org B's commission band both carry in the
 // cross-vertical proof — the collision that would leak if the band read were not store-scoped.
 const SHARED_BARCODE = 'CAMP-ISO-SHARED';
-// Commission tariff week bounds are persisted as Istanbul wall-clock-as-UTC; the campaign
-// start (CAMPAIGN_WINDOW.startsAt) sits two days inside it, so the ±3h frame reconciliation
-// cannot move the anchor out of the week.
-const TARIFF_WEEK_START = new Date(Date.UTC(2026, 8, 8, 8, 0));
-const TARIFF_WEEK_END = new Date(Date.UTC(2026, 8, 15, 8, 0));
-const TARIFF_PERIOD_LABEL = '8 Eylul 08.00-15 Eylul 07.59';
+const DAY_MS = 86_400_000;
+// The commission resolver anchors the tariff week on the campaign start only while that start
+// is still ahead; once it passes, the anchor is `now`. Fixed dates would quietly stop proving
+// anything the day they passed, so the cross-vertical proof's campaign starts 30 days after the
+// run. Week bounds are wall-clock-as-UTC, kept ±10 days around that start (as in the discount
+// anchor test) so the resolver's ~3h normalization cannot move the anchor out of the week.
+const TARIFF_CAMPAIGN_START_MS = Date.now() + 30 * DAY_MS;
+const TARIFF_CAMPAIGN_END_MS = TARIFF_CAMPAIGN_START_MS + 4 * DAY_MS;
+const TARIFF_WEEK_START = new Date(TARIFF_CAMPAIGN_START_MS - 10 * DAY_MS);
+const TARIFF_WEEK_END = new Date(TARIFF_CAMPAIGN_START_MS + 10 * DAY_MS);
+const TARIFF_PERIOD_LABEL = 'Kampanyayı kapsayan hafta';
 // Org A's variant carries this as its SYNCED rate — the chain's 2nd tier. With no Org A band
 // for the barcode the item must resolve here ('product'), which is provably NOT a band.
 const SYNCED_COMMISSION_PCT = '19';
@@ -844,8 +849,8 @@ describe('marketplace-campaigns: route-layer authorization', () => {
         valueKind: 'PERCENT',
         value: new Decimal('20'),
         trendyolFundingPct: new Decimal('0'),
-        startsAt: new Date(CAMPAIGN_WINDOW.startsAt),
-        endsAt: new Date(CAMPAIGN_WINDOW.endsAt),
+        startsAt: new Date(TARIFF_CAMPAIGN_START_MS),
+        endsAt: new Date(TARIFF_CAMPAIGN_END_MS),
       },
     });
     const itemA = await prisma.marketplaceCampaignItem.create({
