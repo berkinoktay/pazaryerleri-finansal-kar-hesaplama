@@ -95,6 +95,8 @@ pnpm dev --filter api       # backend only
 
 pnpm db:generate            # regenerate Prisma client
 pnpm db:push                # push schema to dev DB
+pnpm db:migration:new <name> # create the migration for a schema change
+pnpm db:check-drift         # fail if prisma/migrations does not rebuild schema.prisma
 pnpm db:studio              # open Prisma Studio
 
 pnpm api:sync               # regenerate OpenAPI spec + typed client
@@ -102,7 +104,7 @@ pnpm api:sync               # regenerate OpenAPI spec + typed client
 pnpm test:unit              # fast — no DB
 pnpm test                   # full — needs `supabase start`
 pnpm check:all              # pre-commit gate (typecheck + lint + unit + format)
-pnpm check:full             # pre-PR gate  (above + integration tests)
+pnpm check:full             # pre-PR gate  (above + integration tests + migration drift check)
 ```
 
 ---

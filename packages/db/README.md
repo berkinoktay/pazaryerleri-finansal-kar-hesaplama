@@ -53,8 +53,10 @@ From the repo root (or `pnpm --filter @pazarsync/db <script>`):
 
 ```bash
 pnpm db:generate            # regenerate the Prisma client (after schema edits)
+pnpm db:migration:new <name> # create the migration for a schema change (non-interactive, scratch DB)
+pnpm db:check-drift         # fail if replaying prisma/migrations does not rebuild schema.prisma
 pnpm db:push                # push schema to dev DB without creating a migration
-pnpm db:migrate             # create + apply a new migration (dev)
+pnpm db:migrate             # create + apply a new migration interactively (needs a TTY)
 pnpm db:seed                # run prisma/seed.ts
 pnpm db:studio              # open Prisma Studio
 ```

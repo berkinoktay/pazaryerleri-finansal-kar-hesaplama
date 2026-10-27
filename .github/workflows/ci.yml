@@ -286,6 +286,16 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
           DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
 
+      # db:push builds this database straight from schema.prisma, so it cannot
+      # notice a schema change that shipped without a migration. Replay
+      # prisma/migrations into a throwaway database on the same server and fail
+      # the job when the result differs from schema.prisma.
+      - name: Check migration drift
+        run: pnpm db:check-drift
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
       # `--concurrency=1` is load-bearing: every package's integration
       # tests share the same local Supabase DB and call `truncateAll()`
       # in `beforeEach`. With turbo's default parallelism (numCpus),

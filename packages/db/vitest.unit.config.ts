@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config';
 
-// DB-free unit tests for packages/db (currently just src/test-env.test.ts).
+// DB-free unit tests for packages/db (src/**/*.test.ts).
 // Deliberately SEPARATE from vitest.config.ts: that config calls
 // remapDatabaseUrlToTestDb() at load time (the integration path), which both
 // demands TEST_DATABASE_URL and mutates process.env — hostile to a pure
