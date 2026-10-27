@@ -49,7 +49,7 @@ export function visibleConfigFields(type: DiscountType): readonly ConfigFieldKey
 // ─── Client-side validation (mirror of the backend gate) ─────────────────────
 
 // Same patterns the backend uses: money is up to 2 decimals; counts are positive integers.
-const DECIMAL_RE = /^\d+(\.\d{1,2})?$/;
+export const DECIMAL_RE = /^\d+(\.\d{1,2})?$/;
 const INT_RE = /^\d+$/;
 
 // Trendyol caps the "X. ürün" target at the 2nd–4th item; percentage discounts can't exceed 100%.
@@ -79,14 +79,36 @@ const MAX_DECIMAL_VALUE = 9999999999.99;
 const MAX_INT_VALUE = 2000000000;
 const INT_CONFIG_FIELDS = ['minQuantity', 'buyQuantity', 'payQuantity', 'nthIndex'] as const;
 
+/**
+ * A free-text field the seller may clear. A cleared input keeps `''` in the form: handing RHF
+ * `undefined` instead makes a mounted field fall back to its mount-time default, so a SEEDED
+ * value could never be emptied ("20" → clear → type "35" read "2035" in the edit dialog). The
+ * schema, not the input, turns `''` into "not given"; anything else must match `pattern`.
+ * Exported so the Kampanyalar form's funding field follows the same rule.
+ */
+export function clearableTextField(
+  pattern: RegExp,
+  code: string,
+): z.ZodOptional<z.ZodPipe<z.ZodString, z.ZodTransform<string | undefined, string>>> {
+  // `.optional()` LAST keeps the key optional on both the input and the output type.
+  return z
+    .string()
+    .refine((value) => value === '' || pattern.test(value), code)
+    .transform((value) => (value === '' ? undefined : value))
+    .optional();
+}
+
 // Multipart upload + JSON edit both carry every config field as a STRING, so a single object
-// mirrors both entry paths — exactly like the backend's `DiscountConfigFieldsSchema`.
-const discountConfigFieldsSchema = z.object({
+// mirrors both entry paths — exactly like the backend's `DiscountConfigFieldsSchema`. Exported
+// (with {@link refineDiscountConfigForm}) so the Kampanyalar form extends the same fields and
+// reuses the same per-type rules, as the backend validators do. The three typed inputs are
+// clearable; the Select-driven counts never hold `''`.
+export const discountConfigFieldsSchema = z.object({
   discountType: z.enum(DiscountType),
   valueKind: z.enum(DiscountValueKind).optional(),
-  value: z.string().regex(DECIMAL_RE, 'INVALID_DISCOUNT_VALUE').optional(),
-  minBasketAmount: z.string().regex(DECIMAL_RE, 'INVALID_MIN_BASKET').optional(),
-  minQuantity: z.string().regex(INT_RE, 'INVALID_MIN_QUANTITY').optional(),
+  value: clearableTextField(DECIMAL_RE, 'INVALID_DISCOUNT_VALUE'),
+  minBasketAmount: clearableTextField(DECIMAL_RE, 'INVALID_MIN_BASKET'),
+  minQuantity: clearableTextField(INT_RE, 'INVALID_MIN_QUANTITY'),
   buyQuantity: z.string().regex(INT_RE, 'INVALID_BUY_QUANTITY').optional(),
   payQuantity: z.string().regex(INT_RE, 'INVALID_PAY_QUANTITY').optional(),
   nthIndex: z.string().regex(INT_RE, 'INVALID_NTH_INDEX').optional(),
@@ -99,7 +121,10 @@ const discountConfigFieldsSchema = z.object({
  * same field paths, so a backend 422's `form.setError(field, code)` and the client-side zod
  * issue light up the SAME inline message.
  */
-export const discountConfigFormSchema = discountConfigFieldsSchema.superRefine((val, ctx) => {
+export function refineDiscountConfigForm(
+  val: z.infer<typeof discountConfigFieldsSchema>,
+  ctx: z.RefinementCtx,
+): void {
   const need = (field: ConfigFieldKey | 'startsAt' | 'endsAt', code: string): void => {
     ctx.addIssue({ code: 'custom', message: code, path: [field] });
   };
@@ -183,7 +208,10 @@ export const discountConfigFormSchema = discountConfigFieldsSchema.superRefine((
     const raw = val[field];
     if (raw !== undefined && Number(raw) > MAX_INT_VALUE) need(field, 'INT_TOO_LARGE');
   }
-});
+}
+
+export const discountConfigFormSchema =
+  discountConfigFieldsSchema.superRefine(refineDiscountConfigForm);
 
 /**
  * The discount configuration the upload/edit form produces (re-homed from

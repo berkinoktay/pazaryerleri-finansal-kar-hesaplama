@@ -1,4 +1,14 @@
-import { ApiError } from '@/lib/api-error';
+import { ApiError, type ProblemDetails } from '@/lib/api-error';
+
+/**
+ * The field issues of a backend `422 VALIDATION_ERROR` (empty for any other error).
+ * `VALIDATION_ERROR` is silenced by the global toast pipeline, so the upload and
+ * config forms render these issues inline themselves.
+ */
+export function validationIssues(error: unknown): NonNullable<ProblemDetails['errors']> {
+  if (!(error instanceof ApiError) || error.code !== 'VALIDATION_ERROR') return [];
+  return error.problem.errors ?? [];
+}
 
 /**
  * Pulls the tariff-file rejection code out of an import mutation error. The
@@ -9,6 +19,5 @@ import { ApiError } from '@/lib/api-error';
  * dialog surfaces this code itself. Returns null for any non-file error.
  */
 export function extractFileErrorCode(error: unknown): string | null {
-  if (!(error instanceof ApiError) || error.code !== 'VALIDATION_ERROR') return null;
-  return error.problem.errors?.find((issue) => issue.field === 'file')?.code ?? null;
+  return validationIssues(error).find((issue) => issue.field === 'file')?.code ?? null;
 }

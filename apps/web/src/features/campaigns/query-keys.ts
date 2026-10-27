@@ -69,3 +69,30 @@ export const discountListKeys = {
   detail: (orgId: string, storeId: string, listId: string) =>
     [...discountListKeys.details(orgId, storeId), listId] as const,
 };
+
+// Marketplace kampanyaları (Promosyon > Kampanyalar) kendi saved-upload ailesi. Aynı
+// şablon: liste/detay ayrımı, mağaza kapsamı listede, kampanya kimliği detayda.
+export const marketplaceCampaignKeys = {
+  all: ['marketplace-campaigns'] as const,
+  lists: (orgId: string, storeId: string) =>
+    [...marketplaceCampaignKeys.all, 'list', orgId, storeId] as const,
+  details: (orgId: string, storeId: string) =>
+    [...marketplaceCampaignKeys.all, 'detail', orgId, storeId] as const,
+  detail: (orgId: string, storeId: string, campaignId: string) =>
+    [...marketplaceCampaignKeys.details(orgId, storeId), campaignId] as const,
+  // Bir özel fiyatın "ne olurdu" tahmini, kampanyanın detay anahtarının ALTINDA: detayı geçersiz
+  // kılan her yazma (ayar düzenleme, seçim kaydı) tahminleri de yeniden fiyatlatır.
+  customEstimate: (
+    orgId: string,
+    storeId: string,
+    campaignId: string,
+    itemId: string,
+    price: string,
+  ) =>
+    [
+      ...marketplaceCampaignKeys.detail(orgId, storeId, campaignId),
+      'custom-estimate',
+      itemId,
+      price,
+    ] as const,
+};

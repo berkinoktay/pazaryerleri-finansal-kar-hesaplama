@@ -13,6 +13,62 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Each campaign price option now carries its own basket block, the campaign estimate returns
+  that block, and the `current` estimate is per-unit again.** Three changes to the
+  `MarketplaceCampaigns` surface, all inside this Unreleased (the vertical has not shipped):
+  - `MarketplaceCampaignDetailItem.scenario` is replaced by two required-but-nullable
+    `CampaignBasketScenario` blocks: `maxBasket` (the assumed basket at Trendyol's maximum price)
+    and `customBasket` (the same at the saved custom price; null when none is saved). Each is
+    framed on its OWN price whichever option `selection` names, because on an ORDER-presentation
+    row both price cards now headline their own order. The saved `selection` no longer enters
+    the compute.
+  - `EstimateCampaignItemResult` gains a required-but-nullable `basket`
+    (`CampaignBasketScenario`): for an order-scoped breakdown it is the block behind it —
+    identical to the row's `maxBasket` / `customBasket` for that price — so the breakdown modal
+    can show quantity, basket total, discount, Trendyol's funded share and what the customer pays
+    for ANY price, saved or merely typed. Null whenever `breakdownScope` is `unit`.
+  - `breakdownScope` is `order` only for the campaign scenarios (`max`, `custom`) of an
+    ORDER-presentation campaign, framed on the scenario's own price; `current` is `unit` on every
+    campaign (the row's current cell shows the per-unit figure, and not participating is a
+    single-unit sale). This supersedes the order-scoped `current` sub-bullet below, and with it
+    the saved-selection basket anchor.
+
+- **Campaign selections refuse a `CUSTOM` choice with no price, and the campaign estimate
+  exposes the Trendyol-funded split per unit plus an order-scoped `current` scenario.**
+  Three changes to the `MarketplaceCampaigns` surface:
+  - `PATCH .../marketplace-campaigns/{campaignId}/selections` now rejects any entry whose
+    `selection` is `CUSTOM` while `customPrice` is `null` — **422** `VALIDATION_ERROR`, field
+    `selections`, code `CUSTOM_PRICE_REQUIRED`, with `meta.itemId` naming the offending row
+    exactly as the existing `CUSTOM_PRICE_ABOVE_MAX` ceiling guard does. It was previously
+    persistable and failed silently: the row saved as "participating", the exported sheet's
+    price cell came out blank, and Trendyol skipped the product with no error the seller could
+    see. Nothing is written when the guard fires. (Zod-side cross-field refinements can now
+    carry `meta` in general — `params` on a custom issue is merged into `errors[].meta`.)
+  - `EstimateCampaignItemResult` gains two required-but-nullable fields:
+    `customerPaidUnitPrice` (what the customer pays for ONE unit under the campaign) and
+    `trendyolFundedUnitAmount` (what Trendyol contributes for one unit, written as the
+    difference so paid + funded closes on the unit settlement `price` to the kuruş). The funded
+    amount is `"0.00"` when the campaign's funding rate is zero. Both are `null` for the
+    `current` scenario (no campaign to split) and whenever `breakdownScope` is `order`: at
+    ORDER presentation the per-unit effective price is a synthetic average describing no real
+    unit (in a 2-al-1-öde the customer pays full price for one unit and nothing for the other),
+    and ORDER rows already carry the split as basket totals on `CampaignBasketScenario`. The
+    fields exist for `NET` and the conditional PERCENT variants — the majority of live
+    campaigns — where that block is null and the funding was otherwise invisible.
+    `CampaignBasketScenario` itself is unchanged.
+  - `EstimateCampaignItemResult.breakdownScope` now follows the CAMPAIGN's presentation rather
+    than the scenario: an ORDER-presentation campaign (`BUY_X_PAY_Y` / `NTH_PRODUCT` / a
+    conditional-`AMOUNT` discount) returns `order` for EVERY scenario, `current` included,
+    where the order is the same assumed basket priced campaign-free (n × current price). The
+    `current` scenario previously returned a per-unit breakdown there, so a seller clicking the
+    row's order-level campaign-free profit got a modal that did not add up to it. The assumed
+    quantity for the `current` scenario is derived from the item's SAVED price choice — the
+    basket the row totalled — not from the current price, which matters for
+    `CONDITIONAL_BASKET`/`AMOUNT` where n = ceil(minBasket / price). **The `discount-lists`
+    estimate still returns a unit breakdown for its `current` scenario — the two verticals
+    deliberately differ until that back-port lands.** _(Superseded within this Unreleased by the
+    per-option basket entry above: `current` is unit scope again, so the verticals agree.)_
+
 - **Discount detail items now carry a per-product settlement scenario, and the list exposes its row-layout presentation** (`GET /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}`). `DiscountListDetailItem` gains a nullable `scenario` block backed by a new `DiscountBasketScenario` schema (`{ assumedQuantity, basketTotal, basketPaidTotal, basketDiscountTotal, orderNetProfit, orderMarginPct, currentOrderNetProfit }`; money as 2-decimal strings). It reframes the basket-scoped discount types (`CONDITIONAL_BASKET`, `CONDITIONAL_QUANTITY`, `CODE`, `BUY_X_PAY_Y`, `NTH_PRODUCT`) around the "single-product basket at the minimum qualifying quantity" assumption: `assumedQuantity` (n) is that minimum quantity (`ceil(minBasket/price)` for basket/code, `minQuantity` for quantity, `buyQuantity` for X-al-Y, `nthIndex` for Nth-product), `basketTotal` is n × current price, `basketPaidTotal` is n × the 2dp effective unit (so it never disagrees with the row's displayed unit price), and `basketDiscountTotal` is the difference. The three order-profit fields run the REAL profit engine over the whole n-unit order (design §11, profit-formula.md §2.4): the order model is n× product cost with 1× shipping and 1× PSF (the platform service and shipping are per-parcel, and a basket of n identical units ships as a single parcel), so `orderNetProfit` is the engine's net profit for the discounted basket priced at `basketPaidTotal`, `orderMarginPct` = `orderNetProfit / basketPaidTotal × 100`, and `currentOrderNetProfit` is the same engine run for the same n units at the campaign-free `basketTotal` as an apples-to-apples baseline. Commission, stoppage and net VAT follow the engine formula (the net-VAT clamp is handled naturally by the engine), and the platform service is counted ONCE per order rather than once per unit (the earlier add-back model over-counted it). Each is null when its scenario is not calculable (and `orderMarginPct` also when the paid basket is zero). `scenario` is null for `NET` (its showcase price genuinely changes, so the existing discounted-price presentation stays) or a non-positive current price. `DiscountListDetail` also gains a top-level `scenarioPresentation` enum (`UNIT` | `ORDER`, new `DiscountScenarioPresentation` schema) telling the UI which row layout the config calls for: `UNIT` for `NET` and the conditional trio's `PERCENT` variants (the unit price genuinely drops), `ORDER` for `BUY_X_PAY_Y`, `NTH_PRODUCT`, and the conditional trio's `AMOUNT` variants (the effective unit is a synthetic average). Everything is computed on the backend with decimal.js. The estimate endpoint (`POST .../discount-lists/{listId}/items/{itemId}/estimate`) gains a `breakdownScope` enum (`unit` | `order`) on `EstimateDiscountItemResult`: for the discounted scenario of an ORDER-presentation list it now returns the ORDER-level breakdown — the same one the detail row's settlement scenario is built from (both go through the shared order-breakdown compute) — with `price` set to the order revenue (`basketPaidTotal`) and the breakdown carrying n× cost, 1× shipping, 1× PSF; every other case keeps the per-unit breakdown and `breakdownScope: "unit"`.
 - **Discount detail drops the monetary summary; selection now persists only on save** (`GET /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}`). The `summary` object is removed from `DiscountListDetail` entirely — with it the `DiscountListSummary` schema and its `perOrderCost` / `avgProfitDelta` / `itemCount` / `selectedCount` fields. The frontend now treats product selection as ephemeral client state: the total count is derived from `items.length` and the included count from local UI state, so the server no longer aggregates a card. Each item still carries `included` (its last SAVED choice), and the `PATCH .../selections` + `POST .../export` round-trip is unchanged — the export button first flushes the full selection, then downloads. The list screen's `DiscountListListItem.selectedCount`/`exported` are untouched.
 - **Discount order-limit dropped and both campaign dates are now required** (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/import`, `PATCH .../discount-lists/{listId}`, `GET .../discount-lists`, `GET .../discount-lists/{listId}`). The `orderLimit` config field is removed from the import form and config PATCH bodies, from `DiscountListListItem`/`DiscountListDetail`, and the derived `summary.maxTotalCost` is gone (it fed only that weak ceiling metric). Both `startsAt` and `endsAt` are now required on every config write — a missing start returns `422` with field code `START_REQUIRED`, a missing end with `END_REQUIRED` (the existing `END_BEFORE_START` check is unchanged). The DB columns stay nullable, so rows written before this rule remain readable; the requirement is enforced at the input-validation layer only.
@@ -58,6 +114,108 @@ section "Versioning" for details.
   idempotency tuple to key one against.
 
 ### Added
+
+- **Marketplace campaign (Kampanyalar) endpoints — import, list, detail, config, selections, delete**
+  (`/v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns…`, OpenAPI tag
+  `MarketplaceCampaigns`). Sixth campaign vertical, for the campaigns TRENDYOL designs and
+  the seller opts into (as opposed to `discount-lists`, which the seller designs). Six routes:
+  - `POST .../marketplace-campaigns/import` — multipart upload of Trendyol's campaign
+    product-selection `.xlsx` (`file`, optional display `name`) plus the campaign
+    configuration as string form fields. The configuration reuses the discount vocabulary
+    minus `CODE` (`discountType` = `NET` / `CONDITIONAL_BASKET` / `CONDITIONAL_QUANTITY` /
+    `BUY_X_PAY_Y` / `NTH_PRODUCT`, plus `valueKind` / `value` / `minBasketAmount` /
+    `minQuantity` / `buyQuantity` / `payQuantity` / `nthIndex` and the required `startsAt` /
+    `endsAt`) and adds `trendyolFundingPct` — the share of the campaign discount Trendyol
+    absorbs, percent, default `"0"`, rejected above 100 with field code
+    `FUNDING_PCT_OVER_100`. The sheet's FIRST sheet is read by position (its name changes per
+    campaign) and every column is resolved by header name; each row stores both the current
+    price and Trendyol's "Maksimum Girebileceğin Fiyat" ceiling. Rows missing a barcode, a
+    current price or a maximum price are skipped. **201** →
+    `ImportMarketplaceCampaignResponse` `{ campaignId, name, itemCount, matched, unmatched,
+    skippedRows }`. A file whose header layout is not the campaign export is **422**
+    `VALIDATION_ERROR` (`file` / `INVALID_CAMPAIGN_FORMAT`).
+  - `GET .../marketplace-campaigns` — `MarketplaceCampaignListResponse` `{ data:
+    MarketplaceCampaignListItem[] }`, newest first: the full configuration (including
+    `trendyolFundingPct`), `itemCount`, `selectedCount` (items whose price choice is not
+    `NONE`), `exported`, `updatedAt`.
+  - `GET .../marketplace-campaigns/{campaignId}` — `MarketplaceCampaignDetail`: the
+    configuration, the resolving commission tariff (`commissionTariffName` /
+    `commissionPeriodLabel` / `commissionTariffOutdated`, same covering-week anchor rule as
+    the discount vertical), `scenarioPresentation` (`UNIT` | `ORDER`), and every item as a
+    `MarketplaceCampaignDetailItem`. Each item carries THREE priced scenarios instead of the
+    discount vertical's two — `current` (not participating), `maxScenario` (Trendyol's price
+    ceiling) and `customScenario` (the seller's own price, null when none is saved) — plus its
+    saved `selection` (`NONE` | `MAX` | `CUSTOM`), `customPrice`, `commissionBands` ladder and
+    a nullable `scenario` settlement block (`CampaignBasketScenario`). The campaign scenarios
+    are priced at the SELLER's settlement amount: Trendyol funds `trendyolFundingPct` of the
+    discount, and commission, stoppage, VAT and margin all run off the seller amount, not off
+    what the customer paid. `CampaignBasketScenario` mirrors `DiscountBasketScenario` and adds
+    `trendyolFundedTotal` (the funded share of the basket discount); it is framed on the
+    item's SAVED `selection`, so an item left on `MAX` shows the max-price order even when a
+    custom price is stored. Profit is computed on read and never stored. _(The single
+    `scenario` block is replaced within this Unreleased by per-option `maxBasket` /
+    `customBasket` — see the Changed entry above.)_
+  - `PATCH .../marketplace-campaigns/{campaignId}` — `UpdateMarketplaceCampaignBody` →
+    `{ id }`. **FULL REPLACE**: every configuration column is written on every call, so an
+    omitted field is reset rather than preserved. In particular `trendyolFundingPct` defaults
+    to `"0"`, so omitting it zeroes the seller's funding rate — clients must submit the whole
+    configuration. Same validator as the import form, so an invalid combination is **422**
+    `VALIDATION_ERROR`. Items are untouched; scenarios recompute on the next detail read.
+  - `PATCH .../marketplace-campaigns/{campaignId}/selections` — `UpdateCampaignSelectionsBody`
+    → `{ updated }`. `mode: "set"` writes the given `{ itemId, selection, customPrice }` rows;
+    `mode: "all"` applies the `MAX` option and `mode: "none"` clears participation across the
+    whole campaign in one statement. `customPrice` is stored independently of `selection`
+    (`all` / `none` never discard it). A `customPrice` above the item's maximum is **422**
+    `VALIDATION_ERROR` with field `selections` and code `CUSTOM_PRICE_ABOVE_MAX` (Trendyol
+    refuses such a price on re-upload, and nothing downstream re-checks it). Items outside the
+    campaign are ignored.
+  - `DELETE .../marketplace-campaigns/{campaignId}` — **204**, items cascade.
+
+  All six require `data:read` (list / detail) or `data:write` (the rest) and are store-scoped:
+  a campaign id from another store or organization is **404**, indistinguishable from a
+  missing one. Money is GROSS 2-decimal strings, commission percents 4-decimal, dates ISO
+  8601 UTC. The per-item estimate, target-margin and export routes land separately (see the
+  bullets below).
+
+- **Marketplace campaign estimate + target-margin endpoints** (OpenAPI tag
+  `MarketplaceCampaigns`). Two read-only compute routes; both require `data:read` and are
+  store-scoped, so a campaign or item id from another store or organization is **404**.
+  - `POST .../marketplace-campaigns/{campaignId}/items/{itemId}/estimate` —
+    `EstimateCampaignItemBody` `{ scenario, customPrice? }` → `EstimateCampaignItemResult`.
+    The full profit breakdown (income plus commission, shipping, platform service, stoppage
+    and VAT) for ONE item under one of the three scenarios the detail row shows: `current`
+    prices it campaign-free at its current price, `max` at Trendyol's ceiling, `custom` at the
+    seller's own price — taken from the request body when given (the screen buffers a typed
+    price before saving) and from the stored `customPrice` otherwise. It reuses the same
+    engine, commission chain and resolvers the detail view uses, so the modal cannot disagree
+    with the row. A custom price above the item's maximum is **422** `VALIDATION_ERROR` with
+    field `customPrice` and code `CUSTOM_PRICE_ABOVE_MAX` (meta carries `maxPrice`); a custom
+    scenario with no price anywhere is **422** with code `CUSTOM_PRICE_REQUIRED`. `price` is
+    what the SELLER earns. No state changes (POST only because it carries a body).
+  - `POST .../marketplace-campaigns/{campaignId}/target-margin` — `TargetMarginBody`
+    `{ targetMarginPct }` → `TargetMarginResult` `{ suggestions: [{ itemId, price, reason }] }`,
+    in the campaign's own row order. Per item, the SMALLEST campaign price whose net margin
+    reaches the target, capped at that item's maximum; `reason` is `UNREACHABLE` when no price
+    up to the maximum reaches it and `NOT_CALCULABLE` when cost, shipping or commission inputs
+    are missing. The commission is anchored on the maximum price's band, so a suggestion
+    landing in a cheaper band is optimistic and the row's own scenario shows the real figure.
+    **This endpoint COMPUTES AND RETURNS — it persists nothing**: the client holds the
+    suggested prices in its local buffer and they become durable only through the selections
+    endpoint, so the seller's choices keep a single source of truth.
+
+- **Marketplace campaign export endpoint**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/export`).
+  The ninth and last Kampanyalar route (list, import, selections, update, estimate,
+  target-margin, detail, delete, export), byte-preserving sibling of the discount-lists export
+  below: returns Trendyol's ORIGINAL uploaded file (`XLSX`, `attachment; filename*=UTF-8''…`)
+  with each row's chosen price written into the "Kampanyalı Satış Fiyatı" column — `MAX` writes
+  the maximum allowed price, `CUSTOM` writes the seller's own price, `NONE` leaves the cell
+  untouched (the source cell is always already empty, so unlike İndirimler's "Evet"/"Hayır"
+  toggle there is no deviation comparison — only rows with a resolved price are patched). Row
+  alignment zips the campaign's `sortOrder`-ordered items against the file's imported
+  (non-skipped) data rows with a barcode defensive guard. Marks the campaign exported. **409**
+  `CONFLICT` when the campaign kept no stored source file (or it is unreadable / not a
+  recognizable Kampanyalar export). `DATA_WRITE` capability.
 
 - **Discount list import endpoint**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/import`) — Fifth

@@ -14,15 +14,27 @@ import { ValidationError, type ValidationIssue } from './errors';
  * Contract for validator files: set `issue.message` to the SCREAMING_SNAKE_CASE
  * error code (e.g. `"INVALID_NAME_TOO_SHORT"`) — the hook surfaces that as the
  * `code` field in `errors[]`.
+ *
+ * A cross-field refinement that needs to name WHICH element of an array failed
+ * (so the frontend can highlight that row) passes `params` on the issue:
+ * `ctx.addIssue({ code: 'custom', message: 'CUSTOM_PRICE_REQUIRED', path: ['selections'],
+ * params: { itemId } })`. Those keys are merged into `errors[].meta` alongside
+ * `zodCode`, which is the same shape a hand-thrown `ValidationError` produces —
+ * so a Zod-side and a service-side guard on the same field look identical on the wire.
  */
 function validationDefaultHook(result: { success: boolean; error?: { issues: unknown[] } }): void {
   if (!result.success && result.error !== undefined) {
     const issues: ValidationIssue[] = (result.error.issues as unknown[]).map((raw) => {
-      const issue = raw as { code: string; message: string; path: Array<string | number> };
+      const issue = raw as {
+        code: string;
+        message: string;
+        path: Array<string | number>;
+        params?: Record<string, unknown>;
+      };
       return {
         field: issue.path.length === 0 ? '(root)' : issue.path.join('.'),
         code: issue.message,
-        meta: { zodCode: issue.code },
+        meta: { zodCode: issue.code, ...(issue.params ?? {}) },
       };
     });
     throw new ValidationError(issues);

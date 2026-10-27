@@ -534,6 +534,16 @@ export function DataTable<TData, TValue>({
     getSubRows,
   });
 
+  // With autoResetPageIndex off (above), a client-side set that SHRINKS — a feature's search or
+  // filter chips narrowing `data`, a row removed — can leave the current page past the last one:
+  // an empty body that reads as "no matching rows" while the matches sit on earlier pages. Step
+  // back to the last page that exists. Adjusting state during render (guarded, so it settles in
+  // one extra pass) is React's alternative to a fix-up effect and never paints the empty page.
+  const clientPageCount = isPaginationControlled ? 0 : table.getPageCount();
+  if (clientPageCount > 0 && internalPagination.pageIndex >= clientPageCount) {
+    setInternalPagination((prev) => ({ ...prev, pageIndex: clientPageCount - 1 }));
+  }
+
   // Single source for cell-count math: the visible LEAF columns. Drives the
   // empty-state + expanded-row colSpan AND the loading skeleton, so hiding a
   // column can never desync the three against the rendered header/rows.

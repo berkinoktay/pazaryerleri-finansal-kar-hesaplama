@@ -304,7 +304,7 @@
     "flashProducts": "Flash Products",
     "discounts": "Discounts",
     "coupons": "Coupons",
-    "cartCampaigns": "Cart Campaigns",
+    "marketplaceCampaigns": "Campaigns",
     "toggleSidebar": "Toggle sidebar",
     "groups": {
       "overview": "Overview",
@@ -785,9 +785,9 @@
       "title": "Coupons",
       "intent": "Profitability of coupon campaigns"
     },
-    "cartCampaigns": {
-      "title": "Cart Campaigns",
-      "intent": "Profitability of cart campaigns"
+    "marketplaceCampaigns": {
+      "title": "Campaigns",
+      "intent": "Profitability of joining Trendyol campaigns"
     }
   },
   "commissionTariffsPage": {
@@ -1851,6 +1851,197 @@
     "actions": {
       "saveAndDownload": "Save and download",
       "exportEmptyHint": "Include at least one product before exporting."
+    }
+  },
+  "marketplaceCampaignsPage": {
+    "noStore": {
+      "title": "Select a store first",
+      "description": "A connected Trendyol store is required to view campaigns.",
+      "cta": "Go to stores"
+    },
+    "status": {
+      "exported": "Downloaded",
+      "pending": "Pending"
+    },
+    "funding": {
+      "badge": "Trendyol {percent}%",
+      "label": "Trendyol funding rate: {percent}%"
+    },
+    "list": {
+      "search": "Search campaigns…",
+      "upload": "Upload Excel File",
+      "lastUpdated": "Last updated: {date}",
+      "filterLabel": "Filter by status",
+      "selectAll": "Select all",
+      "selectRow": "Select row",
+      "dateRange": "{start} – {end}",
+      "listStatus": {
+        "all": "All",
+        "exported": "Downloaded",
+        "pending": "Pending"
+      },
+      "columns": {
+        "name": "Campaign",
+        "type": "Type",
+        "funding": "Funding",
+        "period": "Dates",
+        "products": "Products",
+        "selected": "Joined",
+        "status": "Status"
+      },
+      "summary": {
+        "total": "Total campaigns",
+        "products": "Products",
+        "selected": "Joined products",
+        "selectedContext": "have a campaign price picked",
+        "noSelected": "no selection yet",
+        "exported": "Exported",
+        "exportedValue": "{count} / {total}",
+        "exportedAllDone": "all exported",
+        "exportedPending": "{count} campaigns awaiting export"
+      },
+      "empty": {
+        "title": "No campaign yet",
+        "description": "Download the Excel of the campaign you want to join from the Trendyol panel and upload it here; set the campaign type and see your profit at the campaign price.",
+        "cta": "Upload Excel File"
+      },
+      "actions": {
+        "open": "Open",
+        "export": "Download",
+        "delete": "Delete"
+      },
+      "bulk": {
+        "selected": "{count} campaigns selected",
+        "delete": "Delete selected",
+        "deleteTitle": "Delete selected campaigns",
+        "deleteDescription": "{count} campaigns and all of their price choices will be permanently deleted. This action cannot be undone.",
+        "deleteConfirm": "Delete campaigns"
+      }
+    },
+    "templates": {
+      "deleteTitle": "Delete campaign",
+      "deleteDescription": "This saved campaign and all of its price choices will be permanently deleted. This action cannot be undone.",
+      "deleteConfirm": "Delete campaign",
+      "back": "Back to campaigns",
+      "delete": "Delete Campaign",
+      "detailIntent": "Join with the maximum price or your own price per product, and see your profit at the campaign price, including the share Trendyol funds.",
+      "notFoundTitle": "Campaign not found",
+      "notFoundDescription": "This campaign may have been deleted or may not belong to this store."
+    },
+    "upload": {
+      "title": "Upload the campaign Excel",
+      "description": "Upload the product file you downloaded from the Trendyol Campaigns panel, set the campaign type and Trendyol's funding rate, and see your profit at the campaign price.",
+      "prompt": "Drag and drop the Excel file",
+      "hint": "XLSX · up to 5 MB",
+      "cta": "Choose file",
+      "name": "Campaign name (optional)",
+      "typeLabel": "Campaign type",
+      "fundingLabel": "Trendyol funding rate (%)",
+      "fundingHint": "The share of the discount Trendyol covers, shown in the campaign's details in the panel. Left empty it counts as 0, meaning you bear the whole discount.",
+      "submit": "Create campaign",
+      "errors": {
+        "notReadable": "The file could not be read — upload a valid .xlsx file.",
+        "wrongFormat": "This is not a Trendyol Campaigns file or its format was not recognized.",
+        "empty": "No product rows found in the file.",
+        "tooLarge": "The file is too large — upload a smaller file.",
+        "generic": "The file could not be uploaded. Please try again."
+      },
+      "fieldErrors": {
+        "fundingDecimal": "Enter a valid rate (up to 2 decimals).",
+        "fundingOver100": "The funding rate cannot exceed 100%."
+      }
+    },
+    "actions": {
+      "saveAndDownload": "Save and Download",
+      "exportEmptyHint": "Choose a campaign price for at least one product before downloading."
+    },
+    "configCard": {
+      "edit": "Edit",
+      "editTitle": "Edit campaign setup",
+      "editDescription": "Changing the setup, the funding rate or the dates recalculates every product's profit; your chosen prices are kept.",
+      "dateRange": "{start} – {end}",
+      "assumption": "Profit is estimated for a basket containing only this product at the minimum quantity that meets the campaign condition; the discount is split proportionally across those units. Multi-item baskets may differ.",
+      "outdatedTariffNote": "Your uploaded commission tariffs don't cover this campaign's week — commission falls back to the product's own rate or the category rate."
+    },
+    "table": {
+      "product": "Product Details",
+      "currentPrice": "Current price",
+      "maxPrice": "Maximum price",
+      "customPrice": "Custom price",
+      "commission": "commission",
+      "calculatedProfit": "Calculated profit",
+      "orderProfit": "Order profit",
+      "vsCurrent": "vs current",
+      "vsWithoutCampaign": "vs the same order without the campaign",
+      "orderQuantity": "{qty}-unit order",
+      "customerPays": "Customer pays: {amount}",
+      "bestOption": "Most profitable",
+      "selectPrice": "Choose this price",
+      "selectMaxAria": "Join at the maximum price — {product}",
+      "selected": "Selected",
+      "enterPrice": "Enter a price",
+      "customPriceAria": "Custom price — {product}",
+      "customPriceCeilingHint": "You can enter up to {price}",
+      "customPriceAboveMax": "Cannot exceed the maximum price ({price})",
+      "customPriceNotPositive": "Enter a price above zero",
+      "tariffWarning": "No commission tariff found",
+      "tariffWarningHint": "The file puts this product on a commission tariff, but no uploaded tariff covers the campaign week; profit uses the product's own or the category rate, and the real rate may differ.",
+      "targetMarginUnreachable": "The target margin is out of reach even at the maximum price",
+      "targetMarginNotCalculable": "Cost, shipping or commission data is missing for the target margin"
+    },
+    "commissionBands": {
+      "title": "Product commission offers",
+      "hint": "Show commission bands",
+      "above": "{price} and above",
+      "range": "{lower}–{upper}",
+      "below": "{price} and below"
+    },
+    "breakdown": {
+      "title": "Profit breakdown",
+      "orderProfitLabel": "Estimated order profit ({qty} units)",
+      "basketTitle": "Basket assumption",
+      "basketIntro": "The campaign condition is met assuming a basket of {qty} units of only this product.",
+      "basketTotal": "Basket total ({qty} units)",
+      "campaignDiscount": "Campaign discount",
+      "customerPaid": "Customer pays",
+      "trendyolFunded": "Funded by Trendyol",
+      "sellerSettlement": "Seller settlement",
+      "orderProfit": "Order profit ({qty} units)",
+      "singleParcelNote": "The order estimate counts shipping and the platform service fee once, as a single shipment ({qty} units ship together); parcel volume is not aggregated, so this is an estimate.",
+      "distributionNote": "Trendyol splits the discount across items proportionally; settlement and returns run on this per-unit amount.",
+      "fundingTitle": "Trendyol funding",
+      "campaignPrice": "Campaign price",
+      "fundingNote": "Commission, stoppage and VAT run off the seller settlement, not off what the customer paid."
+    },
+    "search": "Search product, model or barcode",
+    "filters": {
+      "profitable": "Profitable",
+      "losing": "Losing",
+      "selected": "Selected",
+      "tariffWarning": "With tariff warning"
+    },
+    "smartSelect": {
+      "label": "Smart Select",
+      "selectAllMax": "Move all to the maximum price",
+      "selectProfitable": "Select the profitable ones",
+      "targetMargin": "Fill custom prices for a target margin…",
+      "clear": "Clear selections",
+      "scopeHint": "If a filter is applied, only the visible products are affected."
+    },
+    "summary": {
+      "total": "Products",
+      "selected": "Selected",
+      "selectedValue": "{count}/{total}",
+      "selectedContext": "{max} at maximum · {custom} at a custom price"
+    },
+    "targetMargin": {
+      "title": "Fill custom prices for a target margin",
+      "description": "For each product, the lowest campaign price that keeps this profit margin after the campaign discount and Trendyol's funded share is written as the custom price, and the product is selected at it. Products that miss the target even at the maximum price are taken out of the campaign and marked.",
+      "label": "Target profit margin",
+      "hint": "Applies only to the products visible in the list. Nothing is saved; choices persist with \"Save and Download\".",
+      "tooHigh": "A profit margin cannot reach 100%; enter a lower target.",
+      "submit": "Fill prices",
+      "applied": "{filled, plural, =0 {No prices were filled} one {A price was filled for # product} other {Prices were filled for # products}}{unreachable, plural, =0 {.} one {; # product cannot reach the target.} other {; # products cannot reach the target.}}"
     }
   },
   "featureStatus": {

@@ -521,6 +521,24 @@ CREATE POLICY discount_list_items_store_read ON discount_list_items
   FOR SELECT TO authenticated
   USING (can_access_store(store_id));
 
+-- ─── marketplace_campaign_lists — Trendyol kampanyalarına katılım ───────────
+-- discount_lists'in kardeşi: satıcının yüklediği Trendyol kampanya Excel'leri +
+-- kampanya kurgusu + karşılama oranı + ürün başına fiyat seçimleri. Mağazaya özel;
+-- iki tablo da store_id taşır ve can_access_store ile kapılanır. Yazma yalnız API
+-- üzerinden. Komisyon dikeyler arası okunur (commission_tariffs, product_variants)
+-- ve her biri kendi politikasıyla korunur — burada ek politika gerekmez.
+ALTER TABLE marketplace_campaign_lists ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS marketplace_campaign_lists_store_read ON marketplace_campaign_lists;
+CREATE POLICY marketplace_campaign_lists_store_read ON marketplace_campaign_lists
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
+ALTER TABLE marketplace_campaign_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS marketplace_campaign_items_store_read ON marketplace_campaign_items;
+CREATE POLICY marketplace_campaign_items_store_read ON marketplace_campaign_items
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
 -- ─── Profit Calculation V1 — PR-1 ──────────────────────────────────────
 -- design: docs/plans/2026-05-18-profit-calculation-design.md §3, §8
 -- guide:  docs/plans/2026-05-19-profit-calc-implementation-guide.md

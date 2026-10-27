@@ -41,6 +41,9 @@ const TENANT_TABLES = [
   // Saved Discounts lists (store-scoped Trendyol "İndirimler")
   'discount_lists',
   'discount_list_items',
+  // Saved marketplace campaign lists (store-scoped Trendyol "Kampanyalar")
+  'marketplace_campaign_lists',
+  'marketplace_campaign_items',
   // Profit Calculation V1 (PR-1)
   'order_fees',
   'order_claims',

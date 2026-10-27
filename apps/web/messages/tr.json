@@ -304,7 +304,7 @@
     "flashProducts": "Flaş Ürünler",
     "discounts": "İndirimler",
     "coupons": "Kuponlar",
-    "cartCampaigns": "Kampanyalar",
+    "marketplaceCampaigns": "Kampanyalar",
     "toggleSidebar": "Kenar çubuğunu aç/kapat",
     "groups": {
       "overview": "Özet",
@@ -785,9 +785,9 @@
       "title": "Kuponlar",
       "intent": "Kupon kampanyalarının kârlılığı"
     },
-    "cartCampaigns": {
+    "marketplaceCampaigns": {
       "title": "Kampanyalar",
-      "intent": "Sepet kampanyalarının kârlılığı"
+      "intent": "Trendyol kampanyalarına katılımın kârlılığı"
     }
   },
   "commissionTariffsPage": {
@@ -1851,6 +1851,197 @@
     "actions": {
       "saveAndDownload": "Kaydet ve İndir",
       "exportEmptyHint": "Dışa aktarmadan önce en az bir ürünü kampanyaya dahil edin."
+    }
+  },
+  "marketplaceCampaignsPage": {
+    "noStore": {
+      "title": "Önce bir mağaza seçin",
+      "description": "Kampanyaları görüntülemek için bağlı bir Trendyol mağazası gerekir.",
+      "cta": "Mağazalara git"
+    },
+    "status": {
+      "exported": "İndirildi",
+      "pending": "Bekliyor"
+    },
+    "funding": {
+      "badge": "Trendyol %{percent}",
+      "label": "Trendyol karşılama oranı: %{percent}"
+    },
+    "list": {
+      "search": "Kampanyalarda ara…",
+      "upload": "Excel Dosyası Yükle",
+      "lastUpdated": "Son güncelleme: {date}",
+      "filterLabel": "Duruma göre filtrele",
+      "selectAll": "Tümünü seç",
+      "selectRow": "Satırı seç",
+      "dateRange": "{start} – {end}",
+      "listStatus": {
+        "all": "Tümü",
+        "exported": "İndirildi",
+        "pending": "Bekliyor"
+      },
+      "columns": {
+        "name": "Kampanya",
+        "type": "Kurgu",
+        "funding": "Karşılama",
+        "period": "Tarih",
+        "products": "Ürün",
+        "selected": "Katılan",
+        "status": "Durum"
+      },
+      "summary": {
+        "total": "Toplam kampanya",
+        "products": "Ürün",
+        "selected": "Katılan ürün",
+        "selectedContext": "kampanya fiyatı seçili",
+        "noSelected": "henüz seçim yok",
+        "exported": "Dışa aktarılan",
+        "exportedValue": "{count} / {total}",
+        "exportedAllDone": "tümü dışa aktarıldı",
+        "exportedPending": "{count} kampanya dışa aktarım bekliyor"
+      },
+      "empty": {
+        "title": "Henüz kampanya yok",
+        "description": "Trendyol panelinde katılmak istediğiniz kampanyanın Excel'ini indirip buraya yükleyin; kampanyanın kurgusunu girin ve kampanya fiyatındaki kârınızı görün.",
+        "cta": "Excel Dosyası Yükle"
+      },
+      "actions": {
+        "open": "Aç",
+        "export": "İndir",
+        "delete": "Sil"
+      },
+      "bulk": {
+        "selected": "{count} kampanya seçildi",
+        "delete": "Seçilenleri sil",
+        "deleteTitle": "Seçili kampanyaları sil",
+        "deleteDescription": "{count} kampanya ve tüm fiyat seçimleri kalıcı olarak silinecek. Bu işlem geri alınamaz.",
+        "deleteConfirm": "Kampanyaları sil"
+      }
+    },
+    "templates": {
+      "deleteTitle": "Kampanyayı sil",
+      "deleteDescription": "Bu kayıtlı kampanya ve tüm fiyat seçimleri kalıcı olarak silinecek. Bu işlem geri alınamaz.",
+      "deleteConfirm": "Kampanyayı sil",
+      "back": "Kampanyalara dön",
+      "delete": "Kampanyayı Sil",
+      "detailIntent": "Ürünleri maksimum fiyatla ya da kendi fiyatınızla kampanyaya alın; Trendyol'un karşıladığı payla birlikte kampanya fiyatındaki kârınızı görün.",
+      "notFoundTitle": "Kampanya bulunamadı",
+      "notFoundDescription": "Bu kampanya silinmiş olabilir veya bu mağazaya ait olmayabilir."
+    },
+    "upload": {
+      "title": "Kampanya Excel'ini yükleyin",
+      "description": "Trendyol Kampanyalar panelinden indirdiğiniz ürün dosyasını yükleyin; kampanyanın kurgusunu ve Trendyol'un karşılama oranını girin, kampanya fiyatındaki kârınızı görün.",
+      "prompt": "Excel dosyasını sürükleyip bırakın",
+      "hint": "XLSX · en fazla 5 MB",
+      "cta": "Dosya seç",
+      "name": "Kampanya adı (isteğe bağlı)",
+      "typeLabel": "Kampanya kurgusu",
+      "fundingLabel": "Trendyol karşılama oranı (%)",
+      "fundingHint": "Trendyol'un indirimin yüzde kaçını karşıladığı; panelde kampanyanın detayında yazar. Boş bırakırsanız 0 sayılır, yani indirimin tamamını siz üstlenirsiniz.",
+      "submit": "Kampanyayı oluştur",
+      "errors": {
+        "notReadable": "Dosya okunamadı — geçerli bir .xlsx dosyası yükleyin.",
+        "wrongFormat": "Bu bir Trendyol Kampanyalar dosyası değil veya biçimi tanınamadı.",
+        "empty": "Dosyada ürün satırı bulunamadı.",
+        "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
+        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin."
+      },
+      "fieldErrors": {
+        "fundingDecimal": "Geçerli bir oran girin (en fazla 2 ondalık).",
+        "fundingOver100": "Karşılama oranı %100'ü aşamaz."
+      }
+    },
+    "actions": {
+      "saveAndDownload": "Kaydet ve İndir",
+      "exportEmptyHint": "İndirmeden önce en az bir ürün için kampanya fiyatı seçin."
+    },
+    "configCard": {
+      "edit": "Düzenle",
+      "editTitle": "Kampanya ayarlarını düzenle",
+      "editDescription": "Kurgu, karşılama oranı ya da tarih değişince tüm ürünlerin kârı yeniden hesaplanır; seçtiğiniz fiyatlar korunur.",
+      "dateRange": "{start} – {end}",
+      "assumption": "Kâr tahmini, sepetin yalnız bu üründen ve kampanya koşulunu karşılamaya yetecek en az adette oluştuğu varsayımına dayanır; indirim bu adede oransal dağıtılır. Çok ürünlü sepetlerde sonuç farklılaşabilir.",
+      "outdatedTariffNote": "Yüklü komisyon tarifeleriniz bu kampanyanın haftasını kapsamıyor — komisyon, ürünün kendi oranından ya da kategori oranından çözülüyor."
+    },
+    "table": {
+      "product": "Ürün Bilgileri",
+      "currentPrice": "Mevcut fiyat",
+      "maxPrice": "Maksimum fiyat",
+      "customPrice": "Özel fiyat",
+      "commission": "komisyon",
+      "calculatedProfit": "Hesaplanan kâr",
+      "orderProfit": "Sipariş kârı",
+      "vsCurrent": "Güncele göre",
+      "vsWithoutCampaign": "Kampanyasız aynı siparişe göre",
+      "orderQuantity": "{qty} adetlik sipariş",
+      "customerPays": "Müşteri öder: {amount}",
+      "bestOption": "En kârlı",
+      "selectPrice": "Bu fiyatı seç",
+      "selectMaxAria": "Maksimum fiyatla katıl — {product}",
+      "selected": "Seçildi",
+      "enterPrice": "Fiyat girin",
+      "customPriceAria": "Özel fiyat — {product}",
+      "customPriceCeilingHint": "En fazla {price} girebilirsiniz",
+      "customPriceAboveMax": "Maksimum fiyatı ({price}) aşamaz",
+      "customPriceNotPositive": "Sıfırdan büyük bir fiyat girin",
+      "tariffWarning": "Komisyon tarifesi bulunamadı",
+      "tariffWarningHint": "Dosyaya göre bu ürün komisyon tarifesinde, ama kampanya haftasını kapsayan tarife yüklü değil; kâr ürünün kendi ya da kategori oranıyla hesaplandı, gerçek oran farklı olabilir.",
+      "targetMarginUnreachable": "Hedef marja maksimum fiyatla bile ulaşılamıyor",
+      "targetMarginNotCalculable": "Hedef marj için maliyet, kargo ya da komisyon bilgisi eksik"
+    },
+    "commissionBands": {
+      "title": "Ürün komisyon teklifleri",
+      "hint": "Komisyon bantlarını göster",
+      "above": "{price} ve üzeri",
+      "range": "{lower}–{upper}",
+      "below": "{price} ve altı"
+    },
+    "breakdown": {
+      "title": "Kâr dökümü",
+      "orderProfitLabel": "Tahmini sipariş kârı ({qty} adet)",
+      "basketTitle": "Sepet varsayımı",
+      "basketIntro": "Kampanya koşulu, sepetin yalnız bu üründen {qty} adet içerdiği varsayımıyla sağlanır.",
+      "basketTotal": "Sepet tutarı ({qty} adet)",
+      "campaignDiscount": "Kampanya indirimi",
+      "customerPaid": "Müşterinin ödediği",
+      "trendyolFunded": "Trendyol'un karşıladığı",
+      "sellerSettlement": "Satıcının hakedişi",
+      "orderProfit": "Sipariş kârı ({qty} adet)",
+      "singleParcelNote": "Sipariş hesabında kargo ve platform hizmet bedeli tek gönderi olarak bir kez sayılır ({qty} adet birlikte gönderilir); koli desisi birleştirilmediği için tahmindir.",
+      "distributionNote": "Trendyol indirimi ürünlere oransal dağıtır; hakediş ve iade ürün bazında bu tutar üzerinden yürür.",
+      "fundingTitle": "Trendyol karşılaması",
+      "campaignPrice": "Kampanya fiyatı",
+      "fundingNote": "Komisyon, stopaj ve KDV müşterinin ödediğinden değil, satıcının hakedişinden hesaplanır."
+    },
+    "search": "Ürün, model veya barkod ara",
+    "filters": {
+      "profitable": "Kârda kalanlar",
+      "losing": "Zarara düşenler",
+      "selected": "Seçililer",
+      "tariffWarning": "Tarife uyarısı olanlar"
+    },
+    "smartSelect": {
+      "label": "Akıllı Seçim",
+      "selectAllMax": "Tümünü maksimum fiyata çek",
+      "selectProfitable": "Kârda kalanları seç",
+      "targetMargin": "Hedef marja göre özel fiyat doldur…",
+      "clear": "Seçimleri temizle",
+      "scopeHint": "Filtre uygulanmışsa yalnız görünen ürünlere uygulanır."
+    },
+    "summary": {
+      "total": "Ürün",
+      "selected": "Seçili",
+      "selectedValue": "{count}/{total}",
+      "selectedContext": "{max} maksimum · {custom} özel fiyatla"
+    },
+    "targetMargin": {
+      "title": "Hedef marja göre özel fiyat doldur",
+      "description": "Her ürün için, kampanya indirimi ve Trendyol'un karşıladığı pay uygulandıktan sonra bu kâr marjını tutturan en düşük kampanya fiyatı özel fiyat olarak yazılır ve ürün o fiyatla seçilir. Maksimum fiyatla bile hedefe ulaşamayan ürünler kampanyadan çıkarılır ve işaretlenir.",
+      "label": "Hedef kâr marjı",
+      "hint": "Yalnız listede görünen ürünlere uygulanır. Hiçbir şey kaydedilmez; seçimler \"Kaydet ve İndir\" ile kalıcı olur.",
+      "tooHigh": "Kâr marjı %100'e ulaşamaz; daha düşük bir hedef girin.",
+      "submit": "Fiyatları doldur",
+      "applied": "{filled, plural, =0 {Hiçbir ürüne fiyat yazılmadı} other {# ürüne fiyat yazıldı}}{unreachable, plural, =0 {.} other {, # ürün hedefe ulaşamıyor.}}"
     }
   },
   "featureStatus": {
