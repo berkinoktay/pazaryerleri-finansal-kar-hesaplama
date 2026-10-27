@@ -191,22 +191,37 @@ jobs:
           fi
           exit "$status"
 
+  # The DB-free suites were split out of the integration job (#401) so they run
+  # in parallel with the Supabase-backed job instead of serially in front of it.
+  # Unit and component tests are separate jobs too (#495): back to back they
+  # reached ~14m on a slow runner and the 15m cap cancelled the run.
   unit-tests:
-    name: Unit and component tests
+    name: Unit tests
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # ~4m on a slow runner.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup
         with:
           turbo-cache: 'true'
-      # DB-free suites split out of the integration job (#401): they give first
-      # signal in ~6 minutes and run in parallel with the Supabase-backed job
-      # instead of serially in front of it.
       - name: Run unit tests
         run: pnpm test:unit
+
+  component-tests:
+    name: Component tests
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    # ~10m on a slow runner; the headroom absorbs suite growth.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
+        with:
+          turbo-cache: 'true'
       - name: Run component tests
         run: pnpm test:component
 
@@ -218,8 +233,8 @@ jobs:
     # required checks pending forever.
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    # Only the integration suite runs here now (unit/component moved to the
-    # unit-tests job); on a cold cache Supabase spin-up + db:push + the suite
+    # Only the integration suite runs here now (unit/component moved to their
+    # own jobs); on a cold cache Supabase spin-up + db:push + the suite
     # land around ~18-20m, so 30m keeps headroom without the old 40m slack.
     timeout-minutes: 30
     steps:
@@ -415,6 +430,7 @@ jobs:
         secret-scan,
         deps-audit,
         unit-tests,
+        component-tests,
         test,
         actionlint,
         edge-functions,
