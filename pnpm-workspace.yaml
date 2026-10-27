@@ -16,7 +16,7 @@ catalog:
   tsx: ^4.21.0
   typescript: ^6.0.0
   vitest: ^4.1.6
-  zod: ^4.4.3
+  zod: ^4.6.7
 
 # Pin the TRANSITIVE @types/node to the same major as the engines field
 # (Node >=20.19). Without this a dev-tool subtree drags in @types/node@25,
