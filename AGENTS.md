@@ -72,6 +72,8 @@ pnpm build                       # all apps
 pnpm typecheck                   # type-check every package
 pnpm lint                        # ESLint 9 (flat config)
 pnpm db:push                     # apply Prisma schema to local DB
+pnpm db:migration:new <name>     # create the migration for a schema change (required in the same commit)
+pnpm db:check-drift              # fail if replaying prisma/migrations does not rebuild schema.prisma
 pnpm db:seed                     # seed
 pnpm api:sync                    # regenerate the OpenAPI spec + typed api-client (run after backend route changes)
 
@@ -79,7 +81,7 @@ pnpm test:unit                   # fast, no DB — run on every change
 supabase start && pnpm test:integration   # needs local Postgres (port 54322) + pnpm db:push first
 
 pnpm check:all                   # pre-commit gate — static checks + fast tests + audits, no DB
-pnpm check:full                  # pre-PR gate — check:all plus the integration suite (needs `supabase start`)
+pnpm check:full                  # pre-PR gate — check:all + integration suite + migration drift check (needs `supabase start`)
 ```
 
 ## Before touching a marketplace integration

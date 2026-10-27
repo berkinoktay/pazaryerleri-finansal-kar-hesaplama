@@ -18,6 +18,8 @@
     "deploy": "prisma migrate deploy && pnpm apply-policies",
     "apply-policies": "tsx --env-file-if-exists=../../.env scripts/apply-policies.ts",
     "test-db:setup": "tsx scripts/setup-test-db.ts",
+    "migration:new": "tsx scripts/create-migration.ts",
+    "check-drift": "tsx scripts/check-migration-drift.ts",
     "cutover:v2": "tsx --env-file-if-exists=../../.env scripts/cutover-stale-running.ts",
     "purge-test-users": "tsx --env-file-if-exists=../../.env scripts/purge-test-users.ts",
     "reset-clean": "tsx --env-file-if-exists=../../.env scripts/reset-clean.ts",

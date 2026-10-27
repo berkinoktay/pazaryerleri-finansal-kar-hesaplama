@@ -135,7 +135,9 @@ pnpm build --filter api     # Build backend only
 
 # Database
 pnpm db:generate            # Generate Prisma client
-pnpm db:migrate             # Run migrations (dev)
+pnpm db:migration:new <name> # Create the migration for a schema change (non-interactive, scratch DB)
+pnpm db:check-drift         # Fail if replaying prisma/migrations does not rebuild schema.prisma
+pnpm db:migrate             # Create + apply a migration interactively (needs a TTY)
 pnpm db:push                # Push schema changes (dev)
 pnpm db:test-setup          # Bootstrap the isolated integration-test DB (one-time)
 pnpm db:seed                # Seed database
@@ -151,7 +153,7 @@ pnpm api:sync               # Regenerate OpenAPI spec + typed @pazarsync/api-cli
 
 # Pre-commit / pre-PR gates
 pnpm check:all              # Pre-commit gate — static checks + fast tests + audits, no DB needed
-pnpm check:full             # Pre-PR gate — check:all plus the integration suite (needs `supabase start`)
+pnpm check:full             # Pre-PR gate — check:all + integration suite + migration drift check (needs `supabase start`)
 
 # Supabase (CLI, not a pnpm script)
 supabase start              # Start local Supabase (Postgres on port 54322)
@@ -580,6 +582,8 @@ If you genuinely need a cross-feature edge (e.g. a `dashboard` feature that aggr
 - Credentials stored as encrypted JSON (encryption at application layer)
 - Use composite unique constraints for marketplace entity deduplication
 - `Decimal.js` for monetary calculations, never floating point
+- Every schema change ships its migration in the same commit. Create it with `pnpm db:migration:new <snake_case_name>`: it replays `prisma/migrations` on a scratch database, diffs that against `schema.prisma` and writes the difference as a new migration folder (`prisma migrate dev` needs a TTY, so agents do not use it). Append any data backfill to the generated SQL by hand.
+- Apply a new migration to the dev DB with `pnpm --filter @pazarsync/db exec prisma migrate deploy`, then run `pnpm db:generate`. If the dev DB already has the change (for example from `pnpm db:push`), record it with `pnpm --filter @pazarsync/db exec prisma migrate resolve --applied <folder>` instead. `pnpm db:check-drift` must report no drift; CI enforces it.
 
 ```typescript
 // ❌ Bad — floating point for money
