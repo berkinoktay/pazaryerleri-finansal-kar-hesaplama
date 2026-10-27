@@ -298,6 +298,19 @@ enum CampaignPriceSelection {
   CUSTOM
 }
 
+// Listing status of one ProductVariant (a Trendyol SKU). Mutually exclusive by
+// construction: the catalog sync maps Trendyol's onSale / archived / blacklisted /
+// locked flags with one precedence (ARCHIVED, then BLACKLISTED, then LOCKED, then
+// ON_SALE, otherwise NOT_ON_SALE), so per-status counts add up to the catalog.
+// Absence from the feed is not a status; it is ProductVariant.delistedAt.
+enum ProductVariantStatus {
+  ON_SALE
+  NOT_ON_SALE
+  LOCKED
+  BLACKLISTED
+  ARCHIVED
+}
+
 // ─── Models ──────────────────────────────────────────
 
 model UserProfile {
@@ -562,6 +575,16 @@ model ProductVariant {
   locked                  Boolean  @default(false)
   size                    String?
   attributes              Json     @default("[]")
+  // Listing status, owned by the catalog sync: upsertCatalogBatch
+  // (packages/catalog-sync) writes the value that deriveVariantStatus
+  // (packages/marketplace/src/trendyol/mapper.ts) derives from Trendyol's
+  // flags with the precedence archived -> ARCHIVED, blacklisted -> BLACKLISTED,
+  // locked -> LOCKED, onSale -> ON_SALE, otherwise NOT_ON_SALE. No route or
+  // user action edits it; the product_variant_status migration backfilled it
+  // once. Independent of delistedAt (absence from the feed). statusReason is
+  // Trendyol's lockReason for LOCKED, blacklistReason for BLACKLISTED, else null.
+  status                  ProductVariantStatus @default(ON_SALE)
+  statusReason            String?              @map("status_reason")
   lastSyncedAt            DateTime @default(now()) @map("last_synced_at")
   createdAt               DateTime @default(now()) @map("created_at")
   updatedAt               DateTime @updatedAt @map("updated_at")
@@ -589,6 +612,8 @@ model ProductVariant {
   @@index([storeId, stockCode])
   @@index([storeId, onSale, archived])
   @@index([storeId, delistedAt])
+  // Products page: per-store status filter, per-status counts and the default listing scope.
+  @@index([storeId, status])
   @@map("product_variants")
 }
 
