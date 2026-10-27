@@ -31,8 +31,8 @@ catalogs:
       specifier: ^4.1.6
       version: 4.1.6
     zod:
-      specifier: ^4.4.3
-      version: 4.4.3
+      specifier: ^4.6.7
+      version: 4.6.7
 
 overrides:
   '@types/node': ^20.19.41
@@ -79,10 +79,10 @@ importers:
         version: 1.19.17(hono@4.13.13)
       '@hono/zod-openapi':
         specifier: ^1.4.0
-        version: 1.4.0(hono@4.13.13)(zod@4.4.3)
+        version: 1.4.0(hono@4.13.13)(zod@4.6.7)
       '@hono/zod-validator':
         specifier: ^0.8.0
-        version: 0.8.0(hono@4.13.13)(zod@4.4.3)
+        version: 0.8.0(hono@4.13.13)(zod@4.6.7)
       '@pazarsync/catalog-sync':
         specifier: workspace:*
         version: link:../../packages/catalog-sync
@@ -127,7 +127,7 @@ importers:
         version: 4.13.13
       zod:
         specifier: 'catalog:'
-        version: 4.4.3
+        version: 4.6.7
     devDependencies:
       '@pazarsync/eslint-config':
         specifier: workspace:*
@@ -378,7 +378,7 @@ importers:
         version: 1.1.2(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       zod:
         specifier: 'catalog:'
-        version: 4.4.3
+        version: 4.6.7
     devDependencies:
       '@tailwindcss/postcss':
         specifier: ^4
@@ -689,7 +689,7 @@ importers:
         version: link:../db
       zod:
         specifier: 'catalog:'
-        version: 4.4.3
+        version: 4.6.7
     devDependencies:
       '@pazarsync/eslint-config':
         specifier: workspace:*
@@ -717,7 +717,7 @@ importers:
         version: 10.6.0
       zod:
         specifier: 'catalog:'
-        version: 4.4.3
+        version: 4.6.7
     devDependencies:
       '@pazarsync/eslint-config':
         specifier: workspace:*
@@ -760,7 +760,7 @@ importers:
         version: link:../utils
       zod:
         specifier: 'catalog:'
-        version: 4.4.3
+        version: 4.6.7
     devDependencies:
       '@pazarsync/eslint-config':
         specifier: workspace:*
@@ -6377,8 +6377,8 @@ packages:
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
-  zod@4.4.3:
-    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
 snapshots:
 
@@ -6410,10 +6410,10 @@ snapshots:
   '@asamuzakjp/nwsapi@2.3.9':
     optional: true
 
-  '@asteasolutions/zod-to-openapi@8.5.0(zod@4.4.3)':
+  '@asteasolutions/zod-to-openapi@8.5.0(zod@4.6.7)':
     dependencies:
       openapi3-ts: 4.5.0
-      zod: 4.4.3
+      zod: 4.6.7
 
   '@babel/code-frame@7.29.0':
     dependencies:
@@ -6894,18 +6894,18 @@ snapshots:
     dependencies:
       hono: 4.13.13
 
-  '@hono/zod-openapi@1.4.0(hono@4.13.13)(zod@4.4.3)':
+  '@hono/zod-openapi@1.4.0(hono@4.13.13)(zod@4.6.7)':
     dependencies:
-      '@asteasolutions/zod-to-openapi': 8.5.0(zod@4.4.3)
-      '@hono/zod-validator': 0.8.0(hono@4.13.13)(zod@4.4.3)
+      '@asteasolutions/zod-to-openapi': 8.5.0(zod@4.6.7)
+      '@hono/zod-validator': 0.8.0(hono@4.13.13)(zod@4.6.7)
       hono: 4.13.13
       openapi3-ts: 4.5.0
-      zod: 4.4.3
+      zod: 4.6.7
 
-  '@hono/zod-validator@0.8.0(hono@4.13.13)(zod@4.4.3)':
+  '@hono/zod-validator@0.8.0(hono@4.13.13)(zod@4.6.7)':
     dependencies:
       hono: 4.13.13
-      zod: 4.4.3
+      zod: 4.6.7
 
   '@hookform/resolvers@5.2.2(react-hook-form@7.76.0(react@19.2.6))':
     dependencies:
@@ -8339,7 +8339,7 @@ snapshots:
       '@scalar/helpers': 0.8.0
       nanoid: 5.1.16
       type-fest: 5.6.0
-      zod: 4.4.3
+      zod: 4.6.7
 
   '@scalar/validation@0.5.0': {}
 
@@ -9667,8 +9667,8 @@ snapshots:
       '@babel/parser': 7.29.2
       eslint: 9.39.4(jiti@2.6.1)
       hermes-parser: 0.25.1
-      zod: 4.4.3
-      zod-validation-error: 4.0.2(zod@4.4.3)
+      zod: 4.6.7
+      zod-validation-error: 4.0.2(zod@4.6.7)
     transitivePeerDependencies:
       - supports-color
 
@@ -11962,8 +11962,8 @@ snapshots:
       grammex: 3.1.12
       graphmatch: 1.1.1
 
-  zod-validation-error@4.0.2(zod@4.4.3):
+  zod-validation-error@4.0.2(zod@4.6.7):
     dependencies:
-      zod: 4.4.3
+      zod: 4.6.7
 
-  zod@4.4.3: {}
+  zod@4.6.7: {}
