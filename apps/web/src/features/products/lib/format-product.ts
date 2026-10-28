@@ -1,3 +1,7 @@
+import Decimal from 'decimal.js';
+
+import { formatTrDecimal } from '@/lib/parse-tr-decimal';
+
 import type { ProductWithVariants, VariantSummary } from '../api/list-products.api';
 
 // Aggregations for the parent row when a product has multiple variants.
@@ -30,9 +34,11 @@ export function totalStock(variants: VariantSummary[]): number {
 }
 
 // Aggregate for the parent row's desi column when a product has multiple
-// variants. Mirrors priceRange: returns null when none of the variants
-// have a value yet, otherwise reports the min/max of the effective
-// desi across all variants.
+// variants. Variants the backend flags as missing desi
+// (`isDimensionalWeightMissing`) carry a placeholder "0", not a real desi, so
+// they are skipped: a range of "0 - 2" would read as a real 0-desi variant.
+// Returns null when no variant has a known desi. min/max are display strings
+// in Turkish format ("1,5"); the comparison runs on Decimal values.
 export interface DesiRange {
   min: string;
   max: string;
@@ -41,17 +47,19 @@ export interface DesiRange {
 }
 
 export function desiRange(variants: VariantSummary[]): DesiRange | null {
-  if (variants.length === 0) return null;
-  const values = variants
-    .map((v) => (v.dimensionalWeight !== null ? Number.parseFloat(v.dimensionalWeight) : null))
-    .filter((n): n is number => n !== null && Number.isFinite(n));
-  if (values.length === 0) return null;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const values = variants.flatMap((v) =>
+    v.isDimensionalWeightMissing || v.dimensionalWeight === null
+      ? []
+      : [new Decimal(v.dimensionalWeight)],
+  );
+  const first = values[0];
+  if (first === undefined) return null;
+  const min = Decimal.min(first, ...values);
+  const max = Decimal.max(first, ...values);
   return {
-    min: min.toString(),
-    max: max.toString(),
-    isSingle: min === max,
+    min: formatTrDecimal(min),
+    max: formatTrDecimal(max),
+    isSingle: min.eq(max),
     anyOverridden: variants.some((v) => v.isDimensionalWeightOverridden),
   };
 }

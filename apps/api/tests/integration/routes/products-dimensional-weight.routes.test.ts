@@ -2,7 +2,7 @@
  * Integration tests for PATCH .../variants/:variantId/dimensional-weight.
  *
  * Verifies:
- *   1. Happy path: setting a valid decimal updates ONLY dimensional_weight,
+ *   1. Happy path: setting a valid decimal updates ONLY dimensional_weight_override,
  *      leaves synced_dimensional_weight untouched.
  *   2. Null body clears the override; effective value falls back to synced.
  *   3. Invalid bodies (bad format, out-of-range) → 422 VALIDATION_ERROR.
@@ -105,15 +105,17 @@ describe('PATCH .../variants/:variantId/dimensional-weight', () => {
       dimensionalWeight: string;
       syncedDimensionalWeight: string;
       isDimensionalWeightOverridden: boolean;
+      isDimensionalWeightMissing: boolean;
     };
     expect(body.id).toBe(ctx.variantId);
     expect(body.dimensionalWeight).toBe('2.5');
     expect(body.syncedDimensionalWeight).toBe('1.2');
     expect(body.isDimensionalWeightOverridden).toBe(true);
+    expect(body.isDimensionalWeightMissing).toBe(false);
 
     // DB-level assertion: synced column is the EXACT same row as before.
     const row = await prisma.productVariant.findFirstOrThrow({ where: { id: ctx.variantId } });
-    expect(row.dimensionalWeight?.toString()).toBe('2.5');
+    expect(row.dimensionalWeightOverride?.toString()).toBe('2.5');
     expect(row.syncedDimensionalWeight?.toString()).toBe('1.2');
   });
 
@@ -122,7 +124,7 @@ describe('PATCH .../variants/:variantId/dimensional-weight', () => {
     // First, set an override
     await prisma.productVariant.update({
       where: { id: ctx.variantId },
-      data: { dimensionalWeight: '5.00' },
+      data: { dimensionalWeightOverride: '5.00' },
     });
 
     const res = await patchDesi(ctx, { dimensionalWeight: null });
@@ -130,13 +132,41 @@ describe('PATCH .../variants/:variantId/dimensional-weight', () => {
     const body = (await res.json()) as {
       dimensionalWeight: string;
       isDimensionalWeightOverridden: boolean;
+      isDimensionalWeightMissing: boolean;
     };
     expect(body.dimensionalWeight).toBe('1.2'); // fell back to synced
     expect(body.isDimensionalWeightOverridden).toBe(false);
+    // Trendyol has a desi for this variant, so clearing does not make it missing.
+    expect(body.isDimensionalWeightMissing).toBe(false);
 
     const row = await prisma.productVariant.findFirstOrThrow({ where: { id: ctx.variantId } });
-    expect(row.dimensionalWeight).toBeNull();
+    expect(row.dimensionalWeightOverride).toBeNull();
     expect(row.syncedDimensionalWeight?.toString()).toBe('1.2');
+  });
+
+  it('isDimensionalWeightMissing follows the missing-desi rule on a variant with synced desi 0', async () => {
+    // No synced value: the column default 0 means Trendyol sent no desi.
+    const ctx = await setup();
+
+    // An explicit override of 0 is the seller's choice, so it is not missing.
+    const setZero = await patchDesi(ctx, { dimensionalWeight: '0' });
+    expect(setZero.status).toBe(200);
+    expect(await setZero.json()).toMatchObject({
+      dimensionalWeight: '0',
+      syncedDimensionalWeight: '0',
+      isDimensionalWeightOverridden: true,
+      isDimensionalWeightMissing: false,
+    });
+
+    // Clearing the override puts the variant back into the missing-desi state.
+    const cleared = await patchDesi(ctx, { dimensionalWeight: null });
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toMatchObject({
+      dimensionalWeight: '0',
+      syncedDimensionalWeight: '0',
+      isDimensionalWeightOverridden: false,
+      isDimensionalWeightMissing: true,
+    });
   });
 
   it('returns 422 INVALID_DIMENSIONAL_WEIGHT_FORMAT for a non-decimal string', async () => {
@@ -174,7 +204,7 @@ describe('PATCH .../variants/:variantId/dimensional-weight', () => {
     expect(okBody.dimensionalWeight).toBe('0');
     expect(okBody.isDimensionalWeightOverridden).toBe(true);
     const row = await prisma.productVariant.findFirstOrThrow({ where: { id: ctx.variantId } });
-    expect(row.dimensionalWeight?.toString()).toBe('0');
+    expect(row.dimensionalWeightOverride?.toString()).toBe('0');
 
     // Below 0 is impossible — the format regex admits no minus sign, so a
     // negative is a FORMAT error, never reaching the DB CHECK floor.

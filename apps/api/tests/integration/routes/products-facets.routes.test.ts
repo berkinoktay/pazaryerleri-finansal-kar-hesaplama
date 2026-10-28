@@ -1,8 +1,9 @@
 // GET /products/facets: overrideCounts and the brand/category facets count
 // products over the default listing scope (variants still in Trendyol's feed
 // that are not ARCHIVED). "Missing cost" means no active (non-archived) cost
-// profile is attached. Both counters must equal the totals of the matching
-// list views, which is what the products page shows next to them.
+// profile is attached. "Missing desi" means no seller override and a synced
+// (Trendyol) desi of 0. Every counter must equal the total of the matching
+// list view, which is what the products page shows next to it.
 
 import { prisma } from '@pazarsync/db';
 import type { ProductVariantStatus } from '@pazarsync/db';
@@ -25,7 +26,20 @@ interface VariantSpec {
   status?: ProductVariantStatus;
   delisted?: boolean;
   cost?: 'active' | 'archived';
+  // Omitted: synced 0 and no override, the "missing desi" state.
+  desi?: 'synced' | 'override' | 'override-zero';
 }
+
+// Desi columns written for each VariantSpec.desi value. An explicit override
+// of 0 is the seller's choice, so it is not missing.
+const DESI_COLUMNS: Record<
+  NonNullable<VariantSpec['desi']>,
+  { syncedDimensionalWeight: string; dimensionalWeightOverride: string | null }
+> = {
+  synced: { syncedDimensionalWeight: '2', dimensionalWeightOverride: null },
+  override: { syncedDimensionalWeight: '0', dimensionalWeightOverride: '1.5' },
+  'override-zero': { syncedDimensionalWeight: '0', dimensionalWeightOverride: '0' },
+};
 
 interface ProductSpec {
   key: string;
@@ -43,7 +57,7 @@ interface Ctx {
 interface FacetsBody {
   brands: { id: string; name: string; count: number }[];
   categories: { id: string; name: string; count: number }[];
-  overrideCounts: { missingCost: number; total: number };
+  overrideCounts: { missingCost: number; missingDesi: number; total: number };
 }
 
 const LIVE_BRAND = { id: 2032n, name: 'Live Brand' };
@@ -55,11 +69,17 @@ const GHOST_CATEGORY = { id: 9002n, name: 'Ghost Category' };
 // missingCost counts P1, P3 (its only profile is archived) and P4 (its
 // NOT_ON_SALE variant is in scope and cost-less). P5 and P6 have no in-scope
 // variant at all, and P7's only cost-less variant is ARCHIVED.
+// missingDesi counts P1 and P4 (its NOT_ON_SALE variant has no desi). P2 and
+// P7 carry a synced desi, P3 an override and P4's first variant an override
+// of 0; the desi-less variants of P5, P6 and P7 are out of scope.
 const CATALOG: ProductSpec[] = [
   { key: 'P1-NO-COST', brand: LIVE_BRAND, category: LIVE_CATEGORY, variants: [{}] },
-  { key: 'P2-COSTED', brand: LIVE_BRAND, variants: [{ cost: 'active' }] },
-  { key: 'P3-ARCHIVED-PROFILE', variants: [{ cost: 'archived' }] },
-  { key: 'P4-CLOSED-NO-COST', variants: [{ cost: 'active' }, { status: 'NOT_ON_SALE' }] },
+  { key: 'P2-COSTED', brand: LIVE_BRAND, variants: [{ cost: 'active', desi: 'synced' }] },
+  { key: 'P3-ARCHIVED-PROFILE', variants: [{ cost: 'archived', desi: 'override' }] },
+  {
+    key: 'P4-CLOSED-NO-COST',
+    variants: [{ cost: 'active', desi: 'override-zero' }, { status: 'NOT_ON_SALE' }],
+  },
   {
     key: 'P5-ARCHIVED-ONLY',
     brand: GHOST_BRAND,
@@ -72,7 +92,10 @@ const CATALOG: ProductSpec[] = [
     category: GHOST_CATEGORY,
     variants: [{ delisted: true }],
   },
-  { key: 'P7-COSTED-PLUS-ARCHIVED', variants: [{ cost: 'active' }, { status: 'ARCHIVED' }] },
+  {
+    key: 'P7-COSTED-PLUS-ARCHIVED',
+    variants: [{ cost: 'active', desi: 'synced' }, { status: 'ARCHIVED' }],
+  },
 ];
 
 async function setup(): Promise<Ctx> {
@@ -124,6 +147,7 @@ async function seedCatalog(ctx: Ctx, products: ProductSpec[]): Promise<void> {
           listPrice: '10.00',
           status: variantSpec.status ?? 'ON_SALE',
           delistedAt: variantSpec.delisted === true ? new Date() : null,
+          ...(variantSpec.desi !== undefined ? DESI_COLUMNS[variantSpec.desi] : {}),
         },
       });
       if (variantSpec.cost !== undefined) {
@@ -160,14 +184,14 @@ describe('GET /v1/.../products/facets: default listing scope', () => {
     await truncateAll();
   });
 
-  it('overrideCounts counts in-scope products and products with a cost-less in-scope variant', async () => {
+  it('overrideCounts counts in-scope products and products with a cost-less or desi-less in-scope variant', async () => {
     const ctx = await setup();
     await seedCatalog(ctx, CATALOG);
 
     const { status, body } = await getFacets(ctx);
 
     expect(status).toBe(200);
-    expect(body.overrideCounts).toEqual({ missingCost: 3, total: 5 });
+    expect(body.overrideCounts).toEqual({ missingCost: 3, missingDesi: 2, total: 5 });
   });
 
   it('brand and category facets skip products with no in-scope variant', async () => {
@@ -180,7 +204,7 @@ describe('GET /v1/.../products/facets: default listing scope', () => {
     expect(body.categories).toEqual([{ id: '597', name: 'Live Category', count: 1 }]);
   });
 
-  it('total and missingCost equal the totals of the matching list views', async () => {
+  it('total, missingCost and missingDesi equal the totals of the matching list views', async () => {
     const ctx = await setup();
     await seedCatalog(ctx, CATALOG);
 
@@ -188,6 +212,7 @@ describe('GET /v1/.../products/facets: default listing scope', () => {
 
     expect(await getListTotal(ctx, '')).toBe(body.overrideCounts.total);
     expect(await getListTotal(ctx, '?overrideMissing=cost')).toBe(body.overrideCounts.missingCost);
+    expect(await getListTotal(ctx, '?overrideMissing=desi')).toBe(body.overrideCounts.missingDesi);
   });
 
   it('the missing-cost banner, the cost tab badge and the cost tab list agree', async () => {

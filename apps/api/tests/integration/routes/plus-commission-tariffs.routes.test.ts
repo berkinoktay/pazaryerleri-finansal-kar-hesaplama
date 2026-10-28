@@ -140,7 +140,7 @@ async function setupTariffFixture(): Promise<TariffFixture> {
       salePrice: new Decimal('500.00'),
       listPrice: new Decimal('500.00'),
       vatRate: 20,
-      dimensionalWeight: new Decimal('3.0'),
+      dimensionalWeightOverride: new Decimal('3.0'),
     },
   });
 
@@ -431,7 +431,7 @@ describe('Plus Commission Tariffs - list / detail / delete', () => {
         salePrice: new Decimal('500.00'),
         listPrice: new Decimal('500.00'),
         vatRate: 20,
-        dimensionalWeight: new Decimal('3.0'),
+        dimensionalWeightOverride: new Decimal('3.0'),
       },
     });
     const profile = await prisma.costProfile.create({
@@ -567,7 +567,7 @@ describe('Plus Commission Tariffs - list / detail / delete', () => {
         salePrice: new Decimal('500.00'),
         listPrice: new Decimal('500.00'),
         vatRate: 20,
-        dimensionalWeight: new Decimal('3.0'),
+        dimensionalWeightOverride: new Decimal('3.0'),
       },
     });
     const profile = await prisma.costProfile.create({

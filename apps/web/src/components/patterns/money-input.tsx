@@ -4,6 +4,7 @@ import Decimal from 'decimal.js';
 import * as React from 'react';
 
 import { Input, type InputProps } from '@/components/ui/input';
+import { formatTrDecimal, parseTrDecimal } from '@/lib/parse-tr-decimal';
 import { cn } from '@/lib/utils';
 
 /**
@@ -27,52 +28,27 @@ import { cn } from '@/lib/utils';
  * @useWhen accepting a TRY monetary value as form input (use PercentageInput for %, Input type="number" for raw integers, Currency for read-only display)
  */
 
-const NUMBER_FORMATTER_BY_SCALE = new Map<number, Intl.NumberFormat>();
-
-function getFormatter(scale: number): Intl.NumberFormat {
-  let formatter = NUMBER_FORMATTER_BY_SCALE.get(scale);
-  if (!formatter) {
-    formatter = new Intl.NumberFormat('tr-TR', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: scale,
-      // No thousand separators while editing — they jitter under the caret
-      // and are distracting. Read-only Currency display is where grouping
-      // belongs (it doesn't move while reading).
-      useGrouping: false,
-    });
-    NUMBER_FORMATTER_BY_SCALE.set(scale, formatter);
-  }
-  return formatter;
-}
-
 /**
- * Parse a tr-TR numeric string into a Decimal. Accepts:
- *   "1.234,50" → 1234.50  (with thousand separator)
- *   "1234,50"  → 1234.50  (without)
- *   "1234"     → 1234
- *   "-12,5"    → -12.5
- *   ""         → null
- *   "abc"      → null
+ * Parse a tr-TR money string into a Decimal: "1.234,50" -> 1234.5,
+ * "1234" -> 1234, "-12,5" -> -12.5, "" or "abc" -> null. A thin wrapper over
+ * the shared `parseTrDecimal` (`@/lib/parse-tr-decimal`) in grouping mode,
+ * where '.' is a thousands separator and ',' the decimal separator.
  *
  * Returns `null` for empty / unparseable input so callers can distinguish
  * "user cleared the field" from "user typed 0".
  */
 export function parseTrMoney(input: string): Decimal | null {
-  const trimmed = input.trim();
-  if (trimmed === '' || trimmed === '-' || trimmed === ',' || trimmed === '-,') return null;
-  // Strip thousand separators (.) and convert decimal separator (,) to .
-  const normalized = trimmed.replace(/\./g, '').replace(',', '.');
-  try {
-    const decimal = new Decimal(normalized);
-    return decimal.isNaN() ? null : decimal;
-  } catch {
-    return null;
-  }
+  return parseTrDecimal(input, { grouping: true });
 }
 
-/** Format a Decimal as a tr-TR display string (no thousand separators, no symbol). */
+/**
+ * Format a Decimal as a tr-TR display string (no thousand separators, no
+ * symbol). Thousand separators are left out while editing because they jitter
+ * under the caret; read-only Currency display is where grouping belongs.
+ * Delegates to the shared `formatTrDecimal`; `scale` is the max fraction digits.
+ */
 export function formatTrMoney(value: Decimal, scale = 2): string {
-  return getFormatter(scale).format(value.toNumber());
+  return formatTrDecimal(value, scale);
 }
 
 export interface MoneyInputProps extends Omit<

@@ -23,7 +23,6 @@ import type { ProductFacetsResponse } from '../api/list-product-facets.api';
 import type { ProductWithVariants, VariantSummary } from '../api/list-products.api';
 import {
   computeDeliveryInfo,
-  desiRange,
   dominantDeliveryInfo,
   isMultiVariant,
   priceRange,
@@ -41,6 +40,7 @@ import { DeliveryBadge } from './delivery-badge';
 import { DesiCell } from './desi-cell';
 import { DesiCellPopover } from './desi-cell-popover';
 import { ParentRowCostCell } from './parent-row-cost-cell';
+import { ParentRowDesiCell } from './parent-row-desi-cell';
 import { ProductImageCell } from '@/components/patterns/product-image-cell';
 import { ProductsBulkCostActionBar } from './products-bulk-cost-action-bar';
 import type { ProductRow } from './products-bulk-cost-action-bar.types';
@@ -82,6 +82,9 @@ interface ProductsTableProps {
   storeId: string;
   data: ProductWithVariants[];
   loading?: boolean;
+  /** The list fetch failed with no cached rows: DataTable's error state + retry. */
+  error?: boolean;
+  onRetry?: () => void;
   empty?: React.ReactNode;
   pagination?: { page: number; perPage: number; total: number; totalPages: number };
 
@@ -460,24 +463,15 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
                 </DesiCellPopover>
               );
             }
-            const range = desiRange(p.variants);
-            if (range === null) return <span className="text-muted-foreground">—</span>;
-            if (range.isSingle) {
-              return (
-                <span
-                  className={cn(
-                    'text-sm tabular-nums',
-                    range.anyOverridden ? 'text-primary font-medium' : 'text-foreground',
-                  )}
-                >
-                  {range.min}
-                </span>
-              );
-            }
+            // The known range, or "+ Desi gir" for all variants when none has
+            // a desi (like the cost column's parent-row "Maliyet ekle").
             return (
-              <span className="text-foreground text-sm tabular-nums">
-                {range.min} – {range.max}
-              </span>
+              <ParentRowDesiCell
+                orgId={props.orgId}
+                storeId={props.storeId}
+                product={p}
+                ctaClassName={INTERACTIVE_NUMERIC_CELL_CLASS}
+              />
             );
           }
           const v = row.original.variant;
@@ -543,6 +537,8 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
       columns={columns}
       data={rows}
       loading={props.loading}
+      error={props.error}
+      onRetry={props.onRetry}
       empty={props.empty}
       enableRowSelection
       getRowId={(row) => (row.kind === 'parent' ? `p:${row.product.id}` : `v:${row.variant.id}`)}

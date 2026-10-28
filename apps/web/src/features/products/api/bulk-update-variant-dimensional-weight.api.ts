@@ -10,7 +10,10 @@ export interface BulkUpdateVariantDimensionalWeightArgs {
   orgId: string;
   storeId: string;
   variantIds: string[];
-  /** Decimal string with up to 2 fractional digits, OR null to clear all overrides. */
+  /**
+   * Canonical dot string with up to 2 fractional digits (parseDesiInput's
+   * payload, never raw input such as "1,5"), OR null to clear all overrides.
+   */
   dimensionalWeight: string | null;
 }
 

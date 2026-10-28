@@ -4,7 +4,8 @@ import type { ProductVariant } from '@pazarsync/db';
 import { NotFoundError } from '../lib/errors';
 
 // ─── setDimensionalWeight ──────────────────────────────────────────────
-// User-override mutation. Writes ONLY to the `dimensionalWeight` column.
+// User-override mutation. Writes ONLY to the `dimensionalWeightOverride`
+// column (DB: dimensional_weight_override).
 // The sister column `syncedDimensionalWeight` is never touched here —
 // the sync worker owns it. See packages/db/prisma/schema.prisma
 // (ProductVariant) for the two-column split rationale.
@@ -24,12 +25,12 @@ export async function setDimensionalWeight(opts: {
   storeId: string;
   variantId: string;
   value: string | null;
-}): Promise<Pick<ProductVariant, 'id' | 'dimensionalWeight' | 'syncedDimensionalWeight'>> {
+}): Promise<Pick<ProductVariant, 'id' | 'dimensionalWeightOverride' | 'syncedDimensionalWeight'>> {
   const { organizationId, storeId, variantId, value } = opts;
 
   const result = await prisma.productVariant.updateMany({
     where: { id: variantId, organizationId, storeId },
-    data: { dimensionalWeight: value },
+    data: { dimensionalWeightOverride: value },
   });
 
   if (result.count === 0) {
@@ -41,14 +42,15 @@ export async function setDimensionalWeight(opts: {
   // filter, so a successful update guarantees this read returns a row.
   const updated = await prisma.productVariant.findFirstOrThrow({
     where: { id: variantId, organizationId, storeId },
-    select: { id: true, dimensionalWeight: true, syncedDimensionalWeight: true },
+    select: { id: true, dimensionalWeightOverride: true, syncedDimensionalWeight: true },
   });
   return updated;
 }
 
 // ─── bulkSetDimensionalWeight ──────────────────────────────────────────
 // Applies one user-override value (or null to clear) to every variant in
-// `variantIds`. Same single-column-write invariant as setDimensionalWeight
+// `variantIds`, writing only dimensionalWeightOverride. Same
+// single-column-write invariant as setDimensionalWeight
 // — syncedDimensionalWeight is never touched.
 //
 // Tenant guard: updateMany filters on (organizationId, storeId, id IN
@@ -70,7 +72,7 @@ export async function bulkSetDimensionalWeight(opts: {
 
   const result = await prisma.productVariant.updateMany({
     where: { id: { in: variantIds }, organizationId, storeId },
-    data: { dimensionalWeight: value },
+    data: { dimensionalWeightOverride: value },
   });
 
   return { updated: result.count };

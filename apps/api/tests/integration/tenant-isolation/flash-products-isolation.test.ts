@@ -331,7 +331,7 @@ describe('flash-products: route-layer authorization', () => {
         salePrice: new Decimal('360.00'),
         listPrice: new Decimal('360.00'),
         vatRate: 20,
-        dimensionalWeight: new Decimal('3.0'),
+        dimensionalWeightOverride: new Decimal('3.0'),
       },
     });
     const profileA = await prisma.costProfile.create({

@@ -42,7 +42,7 @@ export interface AllowedCoercion {
 export const ALLOWED: readonly AllowedCoercion[] = [
   {
     file: 'packages/profit/src/shipping/resolve-tariff.ts',
-    line: 68,
+    line: 71,
     reason:
       'desi is a dimensional-weight quantity, NOT money. Math.ceil(desi.toNumber()) yields the ' +
       'integer desi tier for the (own_/shipping_)desi_tariffs Int key lookup. Prisma needs a JS ' +

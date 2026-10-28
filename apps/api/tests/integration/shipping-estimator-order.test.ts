@@ -19,7 +19,8 @@ async function getSendeomp() {
 }
 
 interface OrderFixtureOptions {
-  items: { desi: string; qty: number }[];
+  // desi = the synced (Trendyol) desi; override = the seller's desi override.
+  items: { desi: string; qty: number; override?: string }[];
   grossSubtotalNet: string;
   grossVatTotal: string;
   cargoDeci: string | null;
@@ -83,6 +84,7 @@ async function createOrderFixture(opts: OrderFixtureOptions): Promise<{ orderId:
         salePrice: '100.00',
         listPrice: '100.00',
         syncedDimensionalWeight: it.desi,
+        dimensionalWeightOverride: it.override ?? null,
       },
     });
     await prisma.orderItem.create({
@@ -138,6 +140,56 @@ describe('estimateShippingCostForOrder', () => {
     expect(out.ok).toBe(true);
     if (!out.ok) expect.fail('expected ok');
     expect(out.estimate.baseDesiAtEstimate.toString()).toBe('5');
+  });
+
+  it('uses the seller desi override over the synced desi in the weighted average', async () => {
+    // Item 1: synced 1, override 4 -> 4. Item 2: synced 1, no override -> 1.
+    // (1x4 + 2x1) / 3 = 2 -> SENDEOMP desi-2 = 91.99
+    const { orderId } = await createOrderFixture({
+      items: [
+        { desi: '1', override: '4', qty: 1 },
+        { desi: '1', qty: 2 },
+      ],
+      grossSubtotalNet: '500.00',
+      grossVatTotal: '0.00',
+      cargoDeci: null,
+      fastDelivery: false,
+    });
+    const out = await prisma.$transaction((tx) => estimateShippingCostForOrder(orderId, tx));
+    expect(out.ok).toBe(true);
+    if (!out.ok) expect.fail('expected ok');
+    expect(out.estimate.baseDesiAtEstimate.toString()).toBe('2');
+    expect(out.estimate.amount.toString()).toBe('91.99');
+  });
+
+  it('uses an explicit override of 0 instead of a non-zero synced desi', async () => {
+    const { orderId } = await createOrderFixture({
+      items: [{ desi: '3', override: '0', qty: 1 }],
+      grossSubtotalNet: '500.00',
+      grossVatTotal: '0.00',
+      cargoDeci: null,
+      fastDelivery: false,
+    });
+    const out = await prisma.$transaction((tx) => estimateShippingCostForOrder(orderId, tx));
+    expect(out.ok).toBe(true);
+    if (!out.ok) expect.fail('expected ok');
+    expect(out.estimate.baseDesiAtEstimate.toString()).toBe('0');
+  });
+
+  it('still prices a missing-desi variant (no override, synced 0) at desi 0', async () => {
+    // "Missing desi" is a products-page concept; the estimate keeps the 0 floor.
+    const { orderId } = await createOrderFixture({
+      items: [{ desi: '0', qty: 1 }],
+      grossSubtotalNet: '500.00',
+      grossVatTotal: '0.00',
+      cargoDeci: null,
+      fastDelivery: false,
+    });
+    const out = await prisma.$transaction((tx) => estimateShippingCostForOrder(orderId, tx));
+    expect(out.ok).toBe(true);
+    if (!out.ok) expect.fail('expected ok');
+    expect(out.estimate.tariffApplied).toBe('NORMAL');
+    expect(out.estimate.baseDesiAtEstimate.toString()).toBe('0');
   });
 
   it('applies Barem on the discounted gross order total (<350, fast, ≤10 desi)', async () => {

@@ -8,40 +8,38 @@ import { render, screen } from '../helpers/render';
 // Tab labels come from the real catalog so this file stays ASCII.
 const tabs = trMessages.products.overrideTabs;
 
+const COUNTS = { missingCost: 117, missingDesi: 42, total: 118 };
+
 // Accessible tab names are "<label><count>"; match on the label prefix.
 function named(label: string): (accessibleName: string) => boolean {
   return (accessibleName) => accessibleName.startsWith(label);
 }
 
 describe('ProductsTabStrip', () => {
-  it('renders only the all and missing-cost tabs, each with its formatted count', () => {
-    render(
-      <ProductsTabStrip
-        value="all"
-        counts={{ missingCost: 117, total: 118 }}
-        onChange={() => {}}
-      />,
-    );
-    expect(screen.getAllByRole('tab')).toHaveLength(2);
+  it('renders the all, missing-cost and missing-desi tabs, each with its formatted count', () => {
+    render(<ProductsTabStrip value="all" counts={COUNTS} onChange={() => {}} />);
+    expect(screen.getAllByRole('tab')).toHaveLength(3);
     expect(screen.getByRole('tab', { name: named(tabs.all) })).toHaveTextContent('118');
     expect(screen.getByRole('tab', { name: named(tabs.missingCost) })).toHaveTextContent('117');
+    expect(screen.getByRole('tab', { name: named(tabs.missingDesi) })).toHaveTextContent('42');
   });
 
   it('calls onChange with cost when the missing-cost tab is clicked', async () => {
     const onChange = vi.fn();
-    const { user } = render(
-      <ProductsTabStrip
-        value="all"
-        counts={{ missingCost: 117, total: 118 }}
-        onChange={onChange}
-      />,
-    );
+    const { user } = render(<ProductsTabStrip value="all" counts={COUNTS} onChange={onChange} />);
     await user.click(screen.getByRole('tab', { name: named(tabs.missingCost) }));
     expect(onChange).toHaveBeenCalledWith('cost');
   });
 
-  it('renders both tabs without counts while the facets load', () => {
+  it('calls onChange with desi when the missing-desi tab is clicked', async () => {
+    const onChange = vi.fn();
+    const { user } = render(<ProductsTabStrip value="all" counts={COUNTS} onChange={onChange} />);
+    await user.click(screen.getByRole('tab', { name: named(tabs.missingDesi) }));
+    expect(onChange).toHaveBeenCalledWith('desi');
+  });
+
+  it('renders every tab without counts while the facets load', () => {
     render(<ProductsTabStrip value="all" loading onChange={() => {}} />);
-    expect(screen.getAllByRole('tab')).toHaveLength(2);
+    expect(screen.getAllByRole('tab')).toHaveLength(3);
   });
 });

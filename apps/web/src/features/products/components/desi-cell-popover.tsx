@@ -1,5 +1,6 @@
 'use client';
 
+import Decimal from 'decimal.js';
 import { Refresh01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
@@ -7,6 +8,7 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { formatTrDecimal } from '@/lib/parse-tr-decimal';
 import { cn } from '@/lib/utils';
 
 import type { VariantSummary } from '../api/list-products.api';
@@ -15,6 +17,7 @@ import {
   pickDimensionalWeightErrorCode,
   type DimensionalWeightErrorCode,
 } from '../lib/dimensional-weight-errors';
+import { parseDesiInput } from '../lib/dimensional-weight-input';
 
 export interface DesiCellPopoverProps {
   orgId: string;
@@ -24,14 +27,38 @@ export interface DesiCellPopoverProps {
 }
 
 /**
+ * The editing string the input opens with: empty for a missing-desi variant
+ * (its wire value is a placeholder "0", not a desi to edit), otherwise the
+ * effective value in Turkish format ("1.50" opens as "1,5"). Formatted with
+ * the locale-fixed tr formatter, never next-intl's: the field's convention is
+ * Turkish whatever the UI locale.
+ */
+function initialInputValue(variant: VariantSummary): string {
+  if (variant.isDimensionalWeightMissing || variant.dimensionalWeight === null) return '';
+  return formatTrDecimal(variant.dimensionalWeight);
+}
+
+/** Trendyol's desi when it is a real one (> 0); null when Trendyol has none. */
+function positiveSyncedDesi(variant: VariantSummary): Decimal | null {
+  if (variant.syncedDimensionalWeight === null) return null;
+  const synced = new Decimal(variant.syncedDimensionalWeight);
+  return synced.gt(0) ? synced : null;
+}
+
+/**
  * Popover anchored to the desi cell. Edits the user override only; the
  * synced (marketplace) value is never written by this flow.
  *
- * Open → numeric input pre-filled with the current effective value.
- * Save  → mutation with optimistic cache patch.
- * Reset → same mutation with body { dimensionalWeight: null }, which
- *         clears the override and falls back to the synced value at the
- *         next read.
+ * Open: the input is pre-filled (see initialInputValue). Below it, a note
+ *   says Trendyol has no desi for the product when the synced value is 0;
+ *   otherwise the synced value is shown for reference while the input
+ *   differs from it.
+ * Save: the input is parsed the Turkish way ("1,5" and "1.5" both mean 1.5)
+ *   and validated inline; only a valid value is sent, as the dot string
+ *   "1.5". An empty input clears the override.
+ * Reset: the same mutation with body { dimensionalWeight: null }, which
+ *   clears the override and falls back to the synced value at the next read
+ *   (back to missing desi when Trendyol has none).
  */
 export function DesiCellPopover({
   orgId,
@@ -41,10 +68,8 @@ export function DesiCellPopover({
 }: DesiCellPopoverProps): React.ReactElement {
   const t = useTranslations('products.desiCell.popover');
   const [open, setOpen] = React.useState(false);
-  const [value, setValue] = React.useState<string>(variant.dimensionalWeight ?? '');
-  const [serverErrorCode, setServerErrorCode] = React.useState<DimensionalWeightErrorCode | null>(
-    null,
-  );
+  const [value, setValue] = React.useState<string>(() => initialInputValue(variant));
+  const [errorCode, setErrorCode] = React.useState<DimensionalWeightErrorCode | null>(null);
 
   const mutation = useUpdateVariantDimensionalWeight();
 
@@ -54,21 +79,21 @@ export function DesiCellPopover({
   // "opening" is a discrete event we react to, not state we sync from.
   function handleOpenChange(next: boolean) {
     if (next) {
-      setValue(variant.dimensionalWeight ?? '');
-      setServerErrorCode(null);
+      setValue(initialInputValue(variant));
+      setErrorCode(null);
     }
     setOpen(next);
   }
 
   function commit(nextValue: string | null) {
-    setServerErrorCode(null);
+    setErrorCode(null);
     mutation.mutate(
       { orgId, storeId, variantId: variant.id, dimensionalWeight: nextValue },
       {
         onSuccess: () => setOpen(false),
         onError: (err) => {
           const code = pickDimensionalWeightErrorCode(err);
-          if (code !== null) setServerErrorCode(code);
+          if (code !== null) setErrorCode(code);
         },
       },
     );
@@ -76,16 +101,32 @@ export function DesiCellPopover({
 
   function handleSave(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const trimmed = value.trim();
-    commit(trimmed === '' ? null : trimmed);
+    const parsed = parseDesiInput(value);
+    switch (parsed.kind) {
+      case 'empty':
+        commit(null);
+        return;
+      case 'valid':
+        commit(parsed.payload);
+        return;
+      case 'invalid':
+        setErrorCode(parsed.code);
+        return;
+      default: {
+        const _exhaustive: never = parsed;
+        throw new Error(`Unhandled desi input result: ${JSON.stringify(_exhaustive)}`);
+      }
+    }
   }
 
   function handleReset() {
     commit(null);
   }
 
-  const showSyncedHint =
-    variant.syncedDimensionalWeight !== null && variant.syncedDimensionalWeight !== value.trim();
+  const syncedDesi = positiveSyncedDesi(variant);
+  const parsedInput = parseDesiInput(value);
+  const inputMatchesSynced =
+    syncedDesi !== null && parsedInput.kind === 'valid' && parsedInput.value.eq(syncedDesi);
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
@@ -105,21 +146,23 @@ export function DesiCellPopover({
               value={value}
               onChange={(e) => {
                 setValue(e.target.value);
-                setServerErrorCode(null);
+                setErrorCode(null);
               }}
-              aria-invalid={serverErrorCode !== null}
+              aria-invalid={errorCode !== null}
               className={cn(
                 'tabular-nums',
-                serverErrorCode !== null && 'border-destructive focus-visible:ring-destructive',
+                errorCode !== null && 'border-destructive focus-visible:ring-destructive',
               )}
             />
-            {serverErrorCode !== null ? (
-              <p className="text-destructive text-xs">{t(`errors.${serverErrorCode}`)}</p>
-            ) : showSyncedHint ? (
+            {errorCode !== null ? (
+              <p className="text-destructive text-xs">{t(`errors.${errorCode}`)}</p>
+            ) : syncedDesi === null ? (
+              <p className="text-muted-foreground text-xs">{t('syncedMissing')}</p>
+            ) : inputMatchesSynced ? null : (
               <p className="text-muted-foreground text-xs tabular-nums">
-                {t('syncedHint', { value: variant.syncedDimensionalWeight ?? '' })}
+                {t('syncedHint', { value: formatTrDecimal(syncedDesi) })}
               </p>
-            ) : null}
+            )}
           </div>
 
           <div className="gap-xs flex items-center justify-between">

@@ -159,7 +159,7 @@ async function setupBatchFixture(): Promise<BatchFixture> {
         salePrice: new Decimal('500.00'),
         listPrice: new Decimal('500.00'),
         vatRate: DEFAULT_VAT_RATE,
-        dimensionalWeight: new Decimal('3.0'),
+        dimensionalWeightOverride: new Decimal('3.0'),
       },
     });
     return v.id;

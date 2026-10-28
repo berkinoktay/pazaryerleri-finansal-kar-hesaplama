@@ -21,6 +21,7 @@ import {
   UpdateVariantDimensionalWeightBodySchema,
   VariantDimensionalWeightResponseSchema,
   toSyncLogResponse,
+  toVariantDesiFields,
 } from '../validators/product.validator';
 
 const app = createSubApp<{
@@ -296,7 +297,8 @@ const productFacetsRoute = createRoute({
   summary: 'Distinct brands and categories with row counts',
   description:
     'Brand and category facets plus the tab badge counts, read from the synced products ' +
-    'table with two GROUP BY queries and two counts. Used to populate the product list ' +
+    'table with two GROUP BY queries and three counts (missing cost, missing desi, total). ' +
+    'Used to populate the product list ' +
     'toolbar dropdowns (brand, category) without a separate paginated read. Each entry ' +
     'includes the count of products in that bucket. Sorted by count descending. Every ' +
     'count only includes products with at least one variant in the default listing scope ' +
@@ -356,7 +358,8 @@ const setVariantDimensionalWeightRoute = createRoute({
   tags: ['Products'],
   summary: "Set or clear the user override for a variant's dimensional weight (desi)",
   description:
-    'Writes exclusively to ProductVariant.dimensional_weight (the user-override column). ' +
+    'Writes exclusively to ProductVariant.dimensional_weight_override (the user-override ' +
+    'column). ' +
     "Trendyol's value lives in a sister column that this endpoint never touches — so the " +
     'override survives every subsequent sync. Pass `dimensionalWeight: null` to clear the ' +
     'override and revert the read path to the marketplace-synced value.',
@@ -407,23 +410,9 @@ app.openapi(setVariantDimensionalWeightRoute, async (c) => {
     value: dimensionalWeight,
   });
 
-  return c.json(
-    {
-      id: updated.id,
-      dimensionalWeight:
-        updated.dimensionalWeight !== null
-          ? updated.dimensionalWeight.toString()
-          : updated.syncedDimensionalWeight !== null
-            ? updated.syncedDimensionalWeight.toString()
-            : null,
-      syncedDimensionalWeight:
-        updated.syncedDimensionalWeight !== null
-          ? updated.syncedDimensionalWeight.toString()
-          : null,
-      isDimensionalWeightOverridden: updated.dimensionalWeight !== null,
-    },
-    200,
-  );
+  // Same desi mapper as the products list, so the effective-desi and
+  // missing-desi rules exist once.
+  return c.json({ id: updated.id, ...toVariantDesiFields(updated) }, 200);
 });
 
 // ─── Bulk PATCH variant dimensional weights ────────────────────────────
@@ -435,7 +424,7 @@ const bulkSetVariantDimensionalWeightRoute = createRoute({
   summary: 'Apply one dimensional-weight value (or clear) across many variants',
   description:
     'Same single-column write rule as the per-variant endpoint: only ' +
-    "ProductVariant.dimensional_weight is touched. Variant IDs that don't belong to " +
+    "ProductVariant.dimensional_weight_override is touched. Variant IDs that don't belong to " +
     'the org+store are silently filtered out (not surfaced as an error — the UX is ' +
     '"apply to what you can"). Returns the actual updated count so the UI can warn ' +
     'when the selection went stale between click and submit.',

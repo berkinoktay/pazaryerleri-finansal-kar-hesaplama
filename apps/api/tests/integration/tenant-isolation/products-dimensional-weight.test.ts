@@ -94,7 +94,7 @@ describe('Tenant isolation: PATCH variant dimensional-weight', () => {
 
     // The variant in Org A is unchanged.
     const after = await prisma.productVariant.findFirstOrThrow({ where: { id: variantA.id } });
-    expect(after.dimensionalWeight).toBeNull(); // override never landed
+    expect(after.dimensionalWeightOverride).toBeNull(); // override never landed
     expect(after.syncedDimensionalWeight?.toString()).toBe('1');
   });
 });

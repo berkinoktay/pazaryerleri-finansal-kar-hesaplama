@@ -154,9 +154,10 @@ export interface MappedProductVariant {
   attributes: TrendyolAttribute[];
   // Desi. Trendyol omits it on most products (or sends an uncomputed 0); both
   // collapse to '0' (the mapper applies `?? '0'`) so the value is never null.
-  // Always lands in the syncedDimensionalWeight column — never in
-  // dimensionalWeight, which is exclusively the user's override (see
-  // ProductVariant schema comment).
+  // '0' is the "Trendyol sent no desi" sentinel: with no seller override the
+  // products page counts the variant as missing desi. Always lands in the
+  // syncedDimensionalWeight column, never in dimensionalWeightOverride, which
+  // is exclusively the user's override (see ProductVariant schema comment).
   syncedDimensionalWeight: string;
   // Commission PERCENT synced from Trendyol (7.83 = %7.83). Unlike desi there is no
   // zero-floor: 0/absent both mean "unknown" and collapse to null — a real %0

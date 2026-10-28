@@ -16,11 +16,12 @@ import { useProducts } from '../hooks/use-products';
 import { useProductsFilters } from '../hooks/use-products-filters';
 import { useRefreshProducts } from '../hooks/use-refresh-products';
 import { aggregateMissingShipping } from '../lib/aggregate-missing-shipping';
+import { pageToStepBackTo, resolveProductsEmptyVariant } from '../lib/products-empty-variant';
 import { filtersToListProductsArgs } from '../lib/products-filter-fields';
 
 import { MissingCostWarningBanner } from './missing-cost-warning-banner';
 import { MissingShippingBanner } from './missing-shipping-banner';
-import { ProductsEmptyState, type ProductsEmptyStateVariant } from './products-empty-state';
+import { ProductsEmptyState } from './products-empty-state';
 import { ProductsSummary } from './products-summary';
 import { ProductsTable } from './products-table';
 import { type ProductsOverrideTab } from './products-tab-strip';
@@ -53,7 +54,7 @@ export function ProductsPageClient({
   pageTitle,
   pageIntent,
 }: ProductsPageClientProps): React.ReactElement {
-  const { filters, setFilters } = useProductsFilters();
+  const { filters, setFilters, replacePage } = useProductsFilters();
   const [syncCenterOpen, setSyncCenterOpen] = React.useState(false);
 
   const noStoreSelected = orgId === null || storeId === null;
@@ -68,6 +69,22 @@ export function ProductsPageClient({
   const { activeSyncs, recentSyncs } = useStoreSyncs(storeId);
   const filterFields = useProductFilterFields(facetsQuery.data);
   const refresh = useRefreshProducts(orgId, storeId);
+
+  // A page that came back empty past the new last page (the seller emptied
+  // the last page of an override tab) moves back to that last page. The URL
+  // is the external state being synced, hence an effect; replacePage is
+  // idempotent, so a re-run before the URL settles is harmless.
+  const stepBackPage =
+    productsQuery.data === undefined
+      ? null
+      : pageToStepBackTo({
+          page: filters.page,
+          rowCount: productsQuery.data.data.length,
+          totalPages: productsQuery.data.pagination.totalPages,
+        });
+  React.useEffect(() => {
+    if (stepBackPage !== null) void replacePage(stepBackPage);
+  }, [stepBackPage, replacePage]);
 
   if (noStoreSelected) {
     return (
@@ -96,6 +113,10 @@ export function ProductsPageClient({
 
   const isInitialLoad = productsQuery.isLoading;
   const isEmptyAfterLoad = !isInitialLoad && data.length === 0;
+  // A failed first fetch has no rows to fall back on: the table shows its
+  // error state with a retry instead of an empty-state copy that would claim
+  // the tab is clear. A failed background refetch keeps the cached rows.
+  const listFailed = productsQuery.isError && productsQuery.data === undefined;
   // Advanced-filter chips are the single filter system now (search aside) —
   // status/brand/category all live inside filters.filters.
   const hasActiveSearchOrFilter = filters.q.length > 0 || filters.filters.length > 0;
@@ -103,14 +124,14 @@ export function ProductsPageClient({
   const syncCenterLogs = toSyncCenterLogs(activeSyncs, recentSyncs);
 
   const tabValue: ProductsOverrideTab = filters.overrideMissing ?? 'all';
-  // Tab-aware empty-state variant: an empty missing-cost tab reads as
-  // "you're all set" rather than the generic "no products match" copy.
-  const emptyVariant = ((): ProductsEmptyStateVariant | undefined => {
-    if (!isEmptyAfterLoad) return undefined;
-    if (filters.overrideMissing === 'cost') return 'missing-cost-none';
-    if (hasActiveSearchOrFilter) return 'filtered';
-    return 'no-products';
-  })();
+  // Tab-aware empty-state variant: an empty missing-cost or missing-desi tab
+  // reads as "you're all set", unless a search or filter is what emptied it.
+  const emptyVariant = resolveProductsEmptyVariant({
+    isEmptyAfterLoad,
+    total: pagination.total,
+    overrideMissing: filters.overrideMissing,
+    hasActiveSearchOrFilter,
+  });
 
   return (
     <>
@@ -156,7 +177,10 @@ export function ProductsPageClient({
           orgId={orgId}
           storeId={storeId}
           data={data}
-          loading={isInitialLoad}
+          // The step back to the last page reads as a load, not an empty page.
+          loading={isInitialLoad || stepBackPage !== null}
+          error={listFailed}
+          onRetry={() => void productsQuery.refetch()}
           paginationLeading={<PageSyncFooterTrace pageKey="products" />}
           empty={
             emptyVariant !== undefined ? (

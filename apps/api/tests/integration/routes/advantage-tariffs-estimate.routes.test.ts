@@ -135,7 +135,7 @@ async function setupFixture(): Promise<EstimateFixture> {
       salePrice: new Decimal('360.00'),
       listPrice: new Decimal('360.00'),
       vatRate: 20,
-      dimensionalWeight: new Decimal('3.0'),
+      dimensionalWeightOverride: new Decimal('3.0'),
     },
   });
 
@@ -265,7 +265,7 @@ async function setupFixture(): Promise<EstimateFixture> {
       salePrice: new Decimal('360.00'),
       listPrice: new Decimal('360.00'),
       vatRate: 20,
-      dimensionalWeight: new Decimal('3.0'),
+      dimensionalWeightOverride: new Decimal('3.0'),
     },
   });
   await prisma.productVariantCostProfile.create({

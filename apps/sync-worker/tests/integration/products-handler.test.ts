@@ -635,13 +635,13 @@ describe('processProductsChunk', () => {
       where: { storeId, platformVariantId: BigInt(800_101) },
     });
     expect(variant.syncedDimensionalWeight?.toString()).toBe('1.5');
-    expect(variant.dimensionalWeight).toBeNull();
+    expect(variant.dimensionalWeightOverride).toBeNull();
   });
 
-  it('LOAD-BEARING: re-sync never overwrites the user override (dimensionalWeight column is sacred)', async () => {
+  it('LOAD-BEARING: re-sync never overwrites the user override (dimensionalWeightOverride column is sacred)', async () => {
     // This is the test that proves the two-column architecture works.
     // If this ever fails, somebody has reintroduced a write to
-    // ProductVariant.dimensional_weight from the sync handler — that path
+    // ProductVariant.dimensional_weight_override from the sync handler; that path
     // must never exist.
     const user = await createUserProfile();
     const org = await createOrganization();
@@ -698,7 +698,7 @@ describe('processProductsChunk', () => {
     // Simulate the user editing the value to 5.00.
     await prisma.productVariant.updateMany({
       where: { storeId, platformVariantId: BigInt(800_102) },
-      data: { dimensionalWeight: '5.00' },
+      data: { dimensionalWeightOverride: '5.00' },
     });
 
     // Second sync: Trendyol now reports 2.0 (their pipeline recomputed).
@@ -745,7 +745,7 @@ describe('processProductsChunk', () => {
       where: { storeId, platformVariantId: BigInt(800_102) },
     });
     // User value untouched.
-    expect(variant.dimensionalWeight?.toString()).toBe('5');
+    expect(variant.dimensionalWeightOverride?.toString()).toBe('5');
     // Synced column refreshed.
     expect(variant.syncedDimensionalWeight?.toString()).toBe('2');
   });
@@ -809,6 +809,10 @@ describe('processProductsChunk', () => {
     });
     expect(missing.syncedDimensionalWeight.toString()).toBe('0');
     expect(zero.syncedDimensionalWeight.toString()).toBe('0');
+    // No seller override either: exactly the state the products page's
+    // missing-desi rule (override null AND synced 0) matches after a sync.
+    expect(missing.dimensionalWeightOverride).toBeNull();
+    expect(zero.dimensionalWeightOverride).toBeNull();
   });
 
   it('stores the derived status and the Trendyol reason, and a re-sync rewrites both', async () => {

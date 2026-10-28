@@ -38,11 +38,11 @@
 export const SHIPPING_ESTIMATE_CTE_SQL = `
 WITH variant_with_carrier AS (
   SELECT pv.id, pv.store_id, pv.sale_price, pv.delivery_duration,
-         pv.dimensional_weight, pv.synced_dimensional_weight,
+         pv.dimensional_weight_override, pv.synced_dimensional_weight,
          s.shipping_tariff_source, s.default_shipping_carrier_id,
          sc.code AS carrier_code, sc.supports_barem_destek, sc.max_barem_desi,
          sc.max_barem_eligible_delivery_duration,
-         COALESCE(pv.dimensional_weight, pv.synced_dimensional_weight) AS eff_desi
+         COALESCE(pv.dimensional_weight_override, pv.synced_dimensional_weight) AS eff_desi
   FROM product_variants pv
   JOIN stores s ON s.id = pv.store_id
   LEFT JOIN shipping_carriers sc ON sc.id = s.default_shipping_carrier_id
