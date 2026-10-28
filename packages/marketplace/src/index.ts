@@ -42,6 +42,8 @@ export {
   type MappedOrdersPageMeta,
 } from './trendyol/types';
 export {
+  deriveStatusReason,
+  deriveVariantStatus,
   mapTrendyolApprovedResponse,
   mapTrendyolContent,
   type MappedProductsPage,

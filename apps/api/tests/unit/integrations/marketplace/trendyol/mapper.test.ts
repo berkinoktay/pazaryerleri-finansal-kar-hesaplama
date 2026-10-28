@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
+import { ProductVariantStatus } from '@pazarsync/db/enums';
 import {
+  deriveStatusReason,
+  deriveVariantStatus,
   mapTrendyolApprovedResponse,
   mapTrendyolContent,
   type TrendyolApprovedProductsResponse,
@@ -92,6 +95,9 @@ describe('mapTrendyolContent', () => {
     expect(variant?.barcode).toBe('1231231231');
     expect(variant?.stockCode).toBe('122');
     expect(variant?.size).toBe('210 cm Beden');
+    // onSale=true with every other flag false, and lockReason null on the wire.
+    expect(variant?.status).toBe(ProductVariantStatus.ON_SALE);
+    expect(variant?.statusReason).toBeNull();
     expect(variant?.salePrice).toBe('131231.00');
     expect(variant?.listPrice).toBe('131231.00');
     expect(variant?.quantity).toBe(12312);
@@ -377,5 +383,162 @@ describe('mapTrendyolApprovedResponse', () => {
     };
     const { pageMeta } = mapTrendyolApprovedResponse(wire);
     expect(pageMeta.nextPageToken).toBe('abc-token');
+  });
+});
+
+interface StatusPrecedenceCase {
+  name: string;
+  flags: { onSale?: boolean; archived?: boolean; blacklisted?: boolean; locked?: boolean };
+  expected: ProductVariantStatus;
+}
+
+// Precedence: archived > blacklisted > locked > onSale > not on sale.
+const STATUS_PRECEDENCE_CASES: StatusPrecedenceCase[] = [
+  {
+    name: 'every flag false',
+    flags: { onSale: false, archived: false, blacklisted: false, locked: false },
+    expected: ProductVariantStatus.NOT_ON_SALE,
+  },
+  { name: 'every flag missing', flags: {}, expected: ProductVariantStatus.NOT_ON_SALE },
+  { name: 'onSale only', flags: { onSale: true }, expected: ProductVariantStatus.ON_SALE },
+  { name: 'locked only', flags: { locked: true }, expected: ProductVariantStatus.LOCKED },
+  {
+    name: 'onSale + locked',
+    flags: { onSale: true, locked: true },
+    expected: ProductVariantStatus.LOCKED,
+  },
+  {
+    name: 'blacklisted + locked',
+    flags: { blacklisted: true, locked: true },
+    expected: ProductVariantStatus.BLACKLISTED,
+  },
+  {
+    name: 'onSale + blacklisted',
+    flags: { onSale: true, blacklisted: true },
+    expected: ProductVariantStatus.BLACKLISTED,
+  },
+  {
+    name: 'archived + locked',
+    flags: { archived: true, locked: true },
+    expected: ProductVariantStatus.ARCHIVED,
+  },
+  {
+    name: 'archived + onSale',
+    flags: { archived: true, onSale: true },
+    expected: ProductVariantStatus.ARCHIVED,
+  },
+  {
+    name: 'every flag true',
+    flags: { onSale: true, archived: true, blacklisted: true, locked: true },
+    expected: ProductVariantStatus.ARCHIVED,
+  },
+];
+
+describe('deriveVariantStatus', () => {
+  it.each(STATUS_PRECEDENCE_CASES)('$name -> $expected', ({ flags, expected }) => {
+    expect(deriveVariantStatus(flags)).toBe(expected);
+  });
+});
+
+describe('deriveStatusReason', () => {
+  it('returns the lock reason for a LOCKED variant', () => {
+    expect(
+      deriveStatusReason(ProductVariantStatus.LOCKED, { lockReason: 'CRITICAL_SALE_PRICE_CHANGE' }),
+    ).toBe('CRITICAL_SALE_PRICE_CHANGE');
+  });
+
+  it('returns the blacklist reason for a BLACKLISTED variant', () => {
+    expect(
+      deriveStatusReason(ProductVariantStatus.BLACKLISTED, {
+        blacklistReason: 'UNAPPROVED_BRAND_CATEGORY_SPM',
+      }),
+    ).toBe('UNAPPROVED_BRAND_CATEGORY_SPM');
+  });
+
+  it('returns null for a LOCKED variant without a lock reason', () => {
+    expect(deriveStatusReason(ProductVariantStatus.LOCKED, {})).toBeNull();
+    expect(deriveStatusReason(ProductVariantStatus.LOCKED, { lockReason: null })).toBeNull();
+  });
+
+  it('never borrows the reason that belongs to the other status', () => {
+    expect(
+      deriveStatusReason(ProductVariantStatus.LOCKED, {
+        blacklistReason: 'UNAPPROVED_BRAND_CATEGORY_SPM',
+      }),
+    ).toBeNull();
+    expect(
+      deriveStatusReason(ProductVariantStatus.BLACKLISTED, { lockReason: 'LOW_SALE_PRICING' }),
+    ).toBeNull();
+  });
+
+  it.each([
+    ProductVariantStatus.ON_SALE,
+    ProductVariantStatus.NOT_ON_SALE,
+    ProductVariantStatus.ARCHIVED,
+  ])('returns null for %s even when Trendyol left a reason behind', (status) => {
+    expect(
+      deriveStatusReason(status, {
+        lockReason: 'LOW_SALE_PRICING',
+        blacklistReason: 'UNAPPROVED_BRAND_CATEGORY_SPM',
+      }),
+    ).toBeNull();
+  });
+
+  it('collapses an empty or whitespace-only reason to null', () => {
+    expect(deriveStatusReason(ProductVariantStatus.LOCKED, { lockReason: '' })).toBeNull();
+    expect(
+      deriveStatusReason(ProductVariantStatus.BLACKLISTED, { blacklistReason: '   ' }),
+    ).toBeNull();
+  });
+
+  it('trims the whitespace around a reported reason', () => {
+    expect(
+      deriveStatusReason(ProductVariantStatus.LOCKED, { lockReason: ' UNSUPPLIED_PRODUCT ' }),
+    ).toBe('UNSUPPLIED_PRODUCT');
+  });
+});
+
+describe('mapTrendyolContent: variant status', () => {
+  it('maps a locked variant to LOCKED with its lock reason', () => {
+    const variant = STAGING_SAMPLE_DFSF.variants?.[0];
+    if (variant === undefined) throw new Error('fixture variant missing');
+    const out = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      variants: [{ ...variant, locked: true, lockReason: 'CRITICAL_SALE_PRICE_CHANGE' }],
+    });
+    expect(out.variants[0]?.status).toBe(ProductVariantStatus.LOCKED);
+    expect(out.variants[0]?.statusReason).toBe('CRITICAL_SALE_PRICE_CHANGE');
+  });
+
+  it('maps a blacklisted variant to BLACKLISTED with its blacklist reason', () => {
+    const variant = STAGING_SAMPLE_DFSF.variants?.[0];
+    if (variant === undefined) throw new Error('fixture variant missing');
+    const out = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      variants: [
+        { ...variant, blacklisted: true, blacklistReason: 'UNAPPROVED_BRAND_CATEGORY_SPM' },
+      ],
+    });
+    expect(out.variants[0]?.status).toBe(ProductVariantStatus.BLACKLISTED);
+    expect(out.variants[0]?.statusReason).toBe('UNAPPROVED_BRAND_CATEGORY_SPM');
+  });
+
+  it('maps a variant without any status flag to NOT_ON_SALE', () => {
+    const variant = STAGING_SAMPLE_DFSF.variants?.[0];
+    if (variant === undefined) throw new Error('fixture variant missing');
+    const {
+      onSale: _onSale,
+      archived: _archived,
+      blacklisted: _blacklisted,
+      locked: _locked,
+      ...variantWithoutFlags
+    } = variant;
+    void _onSale;
+    void _archived;
+    void _blacklisted;
+    void _locked;
+    const out = mapTrendyolContent({ ...STAGING_SAMPLE_DFSF, variants: [variantWithoutFlags] });
+    expect(out.variants[0]?.status).toBe(ProductVariantStatus.NOT_ON_SALE);
+    expect(out.variants[0]?.statusReason).toBeNull();
   });
 });

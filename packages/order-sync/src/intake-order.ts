@@ -24,18 +24,14 @@
  * olarak kâr evreninin dışında kalır.
  */
 
+import { refreshProductAggregates } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
 import { Prisma } from '@pazarsync/db';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
 import { getBusinessDate, getBusinessDateAnchor } from '@pazarsync/utils';
 
-import {
-  decrementVariantStock,
-  incrementVariantStock,
-  isOrderOnBusinessToday,
-  recomputeProductsTotalStock,
-} from './stock';
+import { decrementVariantStock, incrementVariantStock, isOrderOnBusinessToday } from './stock';
 import { upsertOrderWithSnapshot } from './upsert-order';
 
 export type OrderIntakeOutcome =
@@ -154,7 +150,7 @@ export async function intakeOrder(args: {
         }
       }
 
-      await recomputeProductsTotalStock(tx, [...affectedProductIds]);
+      await refreshProductAggregates(tx, storeId, [...affectedProductIds]);
 
       const orderDel = await tx.order.deleteMany({
         where: { organizationId, storeId, platformOrderId: mapped.platformOrderId },
@@ -284,7 +280,7 @@ async function decrementBufferedOrderStock(
     await decrementVariantStock(tx, variant.id, line.quantity);
     affectedProductIds.add(variant.productId);
   }
-  await recomputeProductsTotalStock(tx, [...affectedProductIds]);
+  await refreshProductAggregates(tx, storeId, [...affectedProductIds]);
 }
 
 /**

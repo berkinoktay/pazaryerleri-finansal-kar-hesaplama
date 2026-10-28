@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Store } from '@pazarsync/db';
+import { ProductVariantStatus } from '@pazarsync/db/enums';
 import type {
   MappedProduct,
   MappedProductsPage,
@@ -75,6 +76,8 @@ function variant(barcode: string): MappedProductVariant {
     attributes: [],
     syncedDimensionalWeight: '0',
     syncedCommissionRate: null,
+    status: ProductVariantStatus.NOT_ON_SALE,
+    statusReason: null,
   };
 }
 

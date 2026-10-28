@@ -12,9 +12,9 @@
 // (third consumer: the webhook's eager catalog repair). This handler only
 // drives pagination and delegates every write to the package.
 
-import { upsertCatalogBatch } from '@pazarsync/catalog-sync';
+import { refreshProductAggregates, upsertCatalogBatch } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
-import type { SyncLog } from '@pazarsync/db';
+import type { Prisma, SyncLog } from '@pazarsync/db';
 import {
   APPROVED_PAGE_CAP_ITEMS,
   decryptStoreCredentials,
@@ -25,6 +25,7 @@ import {
   parseProductsCursor,
   parseSkippedPages,
   syncLog,
+  syncLogService,
   type ProductsCursor,
   type SkippedPageEntry,
 } from '@pazarsync/sync-core';
@@ -125,6 +126,21 @@ export function shouldRunDelistPass(
   }
 }
 
+// The delist pass stamps and re-aggregates its candidates in chunks of this many
+// variants, one transaction per chunk, so a mass delist (a seller removing
+// thousands of listings at once) never builds one unbounded IN list or one
+// transaction spanning the whole store. Kept small because a chunk holds the
+// row locks of up to this many products (webhook order intakes on them wait)
+// and re-aggregates them with one UPDATE each.
+const DELIST_CHUNK_SIZE = 200;
+
+// Prisma's default interactive-transaction timeout (5s) is too tight for a chunk
+// against a remote database, so the chunk transaction gets an explicit budget.
+// It stays well below the watchdog's 90s stale-claim threshold: the pass
+// heartbeats before its first chunk and after every chunk, so the gap between
+// two heartbeats is one chunk (plus the candidate read, for the first one).
+const DELIST_CHUNK_TX_TIMEOUT_MS = 30_000;
+
 // Absence-from-feed delisting, run right before a complete-done return. Factored
 // out of the multi-done-path handler so every complete branch calls the exact
 // same pass and the truncation branch is the only one that skips it (via the
@@ -144,8 +160,25 @@ export function shouldRunDelistPass(
 // page upserted before the resume stamped lastSyncedAt AFTER startedAt, so the
 // "older than startedAt" comparison still correctly treats those variants as
 // present across the resume.
+//
+// Aggregates: Product.totalStock and the sale-price bounds count only listed
+// variants (LISTED_VARIANT_WHERE in @pazarsync/catalog-sync), so each chunk of
+// stamps is followed, in the same transaction, by a refresh of the stamped
+// variants' products. Without it a product whose variant just left the feed
+// would keep that variant's stock and price in its totals until its next write.
+//
+// Lease: the pass runs inside the final chunk, and the dispatcher only ticks
+// lastTickAt between chunks, so a mass delist could outlast the watchdog's 90s
+// stale-claim threshold and be re-run concurrently by a peer. The pass therefore
+// heartbeats before its first chunk and after every chunk. The heartbeat is
+// fenced on workerId: if the row was reaped, or re-claimed by another worker
+// process, it throws LostLeaseError, which stops this pass and leaves the work
+// to the new owner. The fence compares the per-process worker id, so a re-claim
+// by this same process is not detected; the repeated absence predicate keeps
+// such a concurrent pass idempotent.
 async function runDelistPassIfComplete(
   log: SyncLog,
+  workerId: string,
   doneReason: DelistDoneReason,
   observedTotalElements: number | null,
 ): Promise<void> {
@@ -165,19 +198,50 @@ async function runDelistPassIfComplete(
     return;
   }
 
-  const stamped = await prisma.productVariant.updateMany({
-    where: {
-      storeId: log.storeId,
-      lastSyncedAt: { lt: log.startedAt },
-      delistedAt: null,
-    },
-    data: { delistedAt: new Date() },
+  // Reset the stale-claim clock after the page fetch and upsert, and stop here
+  // if the claim is already gone, before a single variant is stamped.
+  await syncLogService.heartbeat(log.id, workerId);
+
+  // Absent from this complete scan: no page of this run refreshed it, and no
+  // earlier pass has stamped it yet.
+  const absenceWhere = {
+    storeId: log.storeId,
+    lastSyncedAt: { lt: log.startedAt },
+    delistedAt: null,
+  } satisfies Prisma.ProductVariantWhereInput;
+
+  const candidates = await prisma.productVariant.findMany({
+    where: absenceWhere,
+    select: { id: true, productId: true },
   });
+
+  const delistedAt = new Date();
+  let stampedCount = 0;
+  for (let start = 0; start < candidates.length; start += DELIST_CHUNK_SIZE) {
+    const chunk = candidates.slice(start, start + DELIST_CHUNK_SIZE);
+    const stamped = await prisma.$transaction(
+      async (tx) => {
+        // The absence predicate is repeated on the write so a variant that was
+        // re-upserted between the read above and this chunk (e.g. by the
+        // webhook's eager barcode repair) is not stamped by mistake.
+        const result = await tx.productVariant.updateMany({
+          where: { ...absenceWhere, id: { in: chunk.map((variant) => variant.id) } },
+          data: { delistedAt },
+        });
+        const productIds = [...new Set(chunk.map((variant) => variant.productId))];
+        await refreshProductAggregates(tx, log.storeId, productIds);
+        return result.count;
+      },
+      { timeout: DELIST_CHUNK_TX_TIMEOUT_MS },
+    );
+    stampedCount += stamped;
+    await syncLogService.heartbeat(log.id, workerId);
+  }
 
   syncLog.info('products.delisted-by-absence', {
     syncLogId: log.id,
     storeId: log.storeId,
-    count: stamped.count,
+    count: stampedCount,
   });
 }
 
@@ -188,6 +252,7 @@ async function runDelistPassIfComplete(
 // pass is skipped — a truncated scan proves nothing about absence past the cap.
 async function finishTruncatedPastCap(
   log: SyncLog,
+  workerId: string,
   newProgress: number,
   observedTotalElements: number,
 ): Promise<ChunkResult> {
@@ -196,15 +261,16 @@ async function finishTruncatedPastCap(
     storeId: log.storeId,
     progress: newProgress,
   });
-  await runDelistPassIfComplete(log, 'truncated-past-cap', observedTotalElements);
+  await runDelistPassIfComplete(log, workerId, 'truncated-past-cap', observedTotalElements);
   return { kind: 'done', finalCount: newProgress };
 }
 
 export async function processProductsChunk(input: {
   syncLog: SyncLog;
   cursor: unknown | null;
+  workerId: string;
 }): Promise<ChunkResult> {
-  const { syncLog: log } = input;
+  const { syncLog: log, workerId } = input;
   const rawCursor = parseProductsCursor(input.cursor);
 
   // Recovery path for token-stuck rows. If we receive a saved token
@@ -254,14 +320,14 @@ export async function processProductsChunk(input: {
   // delist decision gets observedTotalElements = null and falls back to the
   // progressCurrent > 0 trust check.
   if (done === true || value === undefined) {
-    await runDelistPassIfComplete(log, 'empty-page', null);
+    await runDelistPassIfComplete(log, workerId, 'empty-page', null);
     return { kind: 'done', finalCount: log.progressCurrent };
   }
 
   const { batch, pageMeta } = value;
 
   if (batch.length === 0) {
-    await runDelistPassIfComplete(log, 'empty-batch', pageMeta.totalElements);
+    await runDelistPassIfComplete(log, workerId, 'empty-batch', pageMeta.totalElements);
     return { kind: 'done', finalCount: log.progressCurrent };
   }
 
@@ -290,7 +356,7 @@ export async function processProductsChunk(input: {
     justProcessedPage >= pageMeta.totalPages - 1;
 
   if (newProgress >= pageMeta.totalElements || isLastDocumentedPage) {
-    await runDelistPassIfComplete(log, 'reached-end', pageMeta.totalElements);
+    await runDelistPassIfComplete(log, workerId, 'reached-end', pageMeta.totalElements);
     return { kind: 'done', finalCount: newProgress };
   }
 
@@ -311,7 +377,7 @@ export async function processProductsChunk(input: {
     if (pageMeta.nextPageToken !== null && pageMeta.nextPageToken !== undefined) {
       nextCursor = { kind: 'token', token: pageMeta.nextPageToken };
     } else {
-      return finishTruncatedPastCap(log, newProgress, pageMeta.totalElements);
+      return finishTruncatedPastCap(log, workerId, newProgress, pageMeta.totalElements);
     }
   } else {
     const nextPageN = (cursor === null ? 0 : cursor.n) + 1;
@@ -323,7 +389,7 @@ export async function processProductsChunk(input: {
       if (pageMeta.nextPageToken !== null && pageMeta.nextPageToken !== undefined) {
         nextCursor = { kind: 'token', token: pageMeta.nextPageToken };
       } else {
-        return finishTruncatedPastCap(log, newProgress, pageMeta.totalElements);
+        return finishTruncatedPastCap(log, workerId, newProgress, pageMeta.totalElements);
       }
     } else {
       nextCursor = { kind: 'page', n: nextPageN };

@@ -205,7 +205,7 @@ async function seedCatalog(orgId: string, storeId: string): Promise<void> {
       attemptCount: 1,
     },
   });
-  await processProductsChunk({ syncLog: seedLog, cursor: null });
+  await processProductsChunk({ syncLog: seedLog, cursor: null, workerId: 'worker-test' });
   await prisma.syncLog.update({
     where: { id: seedLog.id },
     data: { status: 'COMPLETED', completedAt: new Date() },
@@ -513,6 +513,68 @@ describe('processProductsDeltaChunk', () => {
     expect(after.lastSyncedAt.getTime()).toBe(lastSyncedBefore.getTime());
     // Stock/price unchanged.
     expect(after.quantity).toBe(10);
+  });
+
+  it('re-counts a variant that reappears in the feed while a still-delisted sibling stays out of the aggregates', async () => {
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const { storeId } = await createTestStore(org.id);
+
+    // The full scan seeds product 7001 with 70011 (qty 10, sale 100) and 70012
+    // (qty 5, sale 200).
+    await seedCatalog(org.id, storeId);
+    const product = await prisma.product.findFirstOrThrow({
+      where: { storeId, platformContentId: BigInt(7001) },
+    });
+
+    // Earlier absence passes delisted 70011 and a third variant 70013 that the
+    // delta feed below does not carry; the product totals hold only 70012.
+    const delistedAt = new Date('2026-01-01T00:00:00.000Z');
+    await prisma.productVariant.updateMany({
+      where: { storeId, platformVariantId: BigInt(70011) },
+      data: { delistedAt },
+    });
+    await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId,
+        productId: product.id,
+        platformVariantId: BigInt(70013),
+        barcode: 'delta-bc-3',
+        stockCode: 'delta-sk-3',
+        salePrice: '10.00',
+        listPrice: '10.00',
+        quantity: 50,
+        delistedAt,
+      },
+    });
+    await prisma.product.update({
+      where: { id: product.id },
+      data: { totalStock: 5, minSalePrice: '200.00', maxSalePrice: '200.00' },
+    });
+
+    // 70011 is back in the feed with unchanged stock and price.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse(
+        inventoryPageOf([{ variantId: 70011, quantity: 10, salePrice: 100, listPrice: 120 }], {
+          totalElements: 1,
+          totalPages: 1,
+          page: 0,
+          nextPageToken: null,
+        }),
+      ),
+    );
+
+    const log = await createDeltaLog(org.id, storeId);
+    const result = await processProductsDeltaChunk({ syncLog: log, cursor: null });
+    expect(result.kind).toBe('done');
+
+    // 70011 (10) counts again next to 70012 (5); 70013 stays delisted and out.
+    const after = await prisma.product.findUniqueOrThrow({ where: { id: product.id } });
+    expect(after.totalStock).toBe(15);
+    expect(after.minSalePrice?.toString()).toBe('100');
+    expect(after.maxSalePrice?.toString()).toBe('200');
   });
 
   it('two stores sharing a platformVariantId: a delta run for store A mutates only A row', async () => {

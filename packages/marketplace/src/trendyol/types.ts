@@ -1,3 +1,5 @@
+import type { ProductVariantStatus } from '@pazarsync/db/enums';
+
 /**
  * In-memory shape of Trendyol API credentials. Persisted only as an
  * AES-256-GCM ciphertext (the stores.credentials JSON column holds the
@@ -85,6 +87,9 @@ export interface TrendyolVariant {
   sellerModifiedDate?: number;
   locked?: boolean;
   lockReason?: string | null;
+  // Not in the documented response; the stage probe (2026-10-27) saw it in live
+  // payloads. The blacklist counterpart of lockReason.
+  blacklistReason?: string | null;
   lockDate?: number | null;
   archived?: boolean;
   archivedDate?: number | null;
@@ -179,6 +184,13 @@ export interface MappedProductVariant {
   // able to tell "synced" from "unknown". Lands in syncedCommissionRate only; there
   // is no user-override twin column (yet).
   syncedCommissionRate: string | null;
+  // One derived status per variant (deriveVariantStatus: archived > blacklisted >
+  // locked > onSale > not on sale) and the Trendyol reason that belongs to it
+  // (deriveStatusReason: lockReason for LOCKED, blacklistReason for BLACKLISTED,
+  // null otherwise). The boolean flags above are still dual-written until their
+  // columns are dropped.
+  status: ProductVariantStatus;
+  statusReason: string | null;
 }
 
 export interface MappedProduct {

@@ -2,6 +2,8 @@
 // shape and our internal MappedProduct DTO. No I/O, no DB. Tested in
 // isolation with the staging Postman samples.
 
+import { ProductVariantStatus } from '@pazarsync/db/enums';
+
 import type {
   MappedProduct,
   MappedProductFastDeliveryOption,
@@ -42,6 +44,60 @@ export function priceToDecimalString(value: number | null | undefined): string {
 function nullableDecimalString(value: number | null | undefined): string | null {
   if (value === null || value === undefined || !Number.isFinite(value) || value === 0) return null;
   return value.toFixed(2);
+}
+
+// One status per variant. Trendyol's four wire flags are independent booleans,
+// so more than one can be true at once; the single precedence archived >
+// blacklisted > locked > onSale keeps the derived statuses mutually exclusive,
+// so per-status counts add up to the catalog. A missing flag counts as false.
+export function deriveVariantStatus(flags: {
+  onSale?: boolean;
+  archived?: boolean;
+  blacklisted?: boolean;
+  locked?: boolean;
+}): ProductVariantStatus {
+  if (flags.archived === true) return ProductVariantStatus.ARCHIVED;
+  if (flags.blacklisted === true) return ProductVariantStatus.BLACKLISTED;
+  if (flags.locked === true) return ProductVariantStatus.LOCKED;
+  if (flags.onSale === true) return ProductVariantStatus.ON_SALE;
+  return ProductVariantStatus.NOT_ON_SALE;
+}
+
+// The raw reason Trendyol reported for the given status: lockReason belongs to
+// LOCKED and blacklistReason to BLACKLISTED. No other status carries a reason;
+// a leftover lockReason on an archived or on-sale variant does not describe its
+// current state.
+function reasonForStatus(
+  status: ProductVariantStatus,
+  reasons: { lockReason?: string | null; blacklistReason?: string | null },
+): string | null | undefined {
+  switch (status) {
+    case ProductVariantStatus.LOCKED:
+      return reasons.lockReason;
+    case ProductVariantStatus.BLACKLISTED:
+      return reasons.blacklistReason;
+    case ProductVariantStatus.ON_SALE:
+    case ProductVariantStatus.NOT_ON_SALE:
+    case ProductVariantStatus.ARCHIVED:
+      return null;
+    default: {
+      const _exhaustive: never = status;
+      throw new Error(`Unhandled variant status: ${_exhaustive}`);
+    }
+  }
+}
+
+// The reason stored next to the derived status (statusReason). An empty or
+// whitespace-only string collapses to null so the UI never shows a blank
+// reason; a real code is returned trimmed.
+export function deriveStatusReason(
+  status: ProductVariantStatus,
+  reasons: { lockReason?: string | null; blacklistReason?: string | null },
+): string | null {
+  const raw = reasonForStatus(status, reasons);
+  if (raw === null || raw === undefined) return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 // Trendyol's panel concatenates every "Renk" attribute with a space — categories
@@ -85,6 +141,7 @@ function mapVariant(variant: TrendyolVariant): MappedProductVariant {
   // completion. Treat each section as optional with sane defaults so
   // a single bad variant doesn't kill the whole sync.
   const variantAttrs = variant.attributes ?? [];
+  const status = deriveVariantStatus(variant);
   return {
     platformVariantId: BigInt(variant.variantId),
     barcode: variant.barcode,
@@ -113,6 +170,8 @@ function mapVariant(variant: TrendyolVariant): MappedProductVariant {
     // imkânsız. `nullableDecimalString` 0/absent → null, `?? '0'` tabana indirir.
     syncedDimensionalWeight: nullableDecimalString(variant.dimensionalWeight) ?? '0',
     syncedCommissionRate: nullableDecimalString(variant.commission),
+    status,
+    statusReason: deriveStatusReason(status, variant),
   };
 }
 

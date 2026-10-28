@@ -29,7 +29,7 @@
 // APPROVED_PAGE_CAP_ITEMS import from the marketplace package — single source
 // of truth so the token->page fallback math stays consistent with the fetcher.
 
-import { computeProductAggregates } from '@pazarsync/catalog-sync';
+import { refreshProductAggregates } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
 import type { SyncLog } from '@pazarsync/db';
 import {
@@ -155,26 +155,13 @@ export async function processProductsDeltaChunk(input: {
         });
       }
 
-      // Recompute the denormalized Product aggregates for the DISTINCT products
-      // whose variants changed. totalStock / min-max sale price span ALL of a
-      // product's variants, so re-read the full variant set (inside the same
-      // transaction, after the writes above) rather than the page subset.
-      for (const productId of changes.affectedProductIds) {
-        const variants = await tx.productVariant.findMany({
-          where: { productId },
-          select: { quantity: true, salePrice: true },
-        });
-        const { totalStock, minSalePrice, maxSalePrice } = computeProductAggregates(
-          variants.map((variant) => ({
-            quantity: variant.quantity,
-            salePrice: variant.salePrice.toString(),
-          })),
-        );
-        await tx.product.update({
-          where: { id: productId },
-          data: { totalStock, minSalePrice, maxSalePrice },
-        });
-      }
+      // Refresh the denormalized Product aggregates for the DISTINCT products
+      // whose variants changed, inside the same transaction and after the
+      // writes above. The helper re-reads each product's in-scope variants
+      // (listed, not archived) rather than the page subset, so a variant this
+      // page re-listed counts again while a still-delisted or archived sibling
+      // stays out.
+      await refreshProductAggregates(tx, log.storeId, changes.affectedProductIds);
     });
   }
 
