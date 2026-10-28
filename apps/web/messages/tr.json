@@ -3534,11 +3534,14 @@
         }
       },
       "banner": {
-        "title": "{count} üründe tahmini kâr hesaplanamıyor",
-        "filterCta": "Etkilenen ürünleri filtrele",
+        "title": "Bu sayfadaki {count} varyantta tahmini kâr hesaplanamıyor",
         "reasonNoDesi": "desi eksik ({count})",
-        "reasonNoCarrier": "kargo firması seçilmemiş ({count})",
-        "reasonOverflow": "yüksek desi ({count})"
+        "reasonOverflow": "yüksek desi ({count})",
+        "storeSetup": {
+          "title": "Kargo ayarı eksik",
+          "description": "Bu mağaza için kargo firması seçilmemiş ya da kendi anlaşma tarifen boş. Bu yüzden ürünlerde kargo maliyeti ve tahmini kâr hesaplanamıyor.",
+          "cta": "Kargo ayarlarını aç"
+        }
       }
     }
   },

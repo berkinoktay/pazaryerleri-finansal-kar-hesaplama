@@ -3469,11 +3469,14 @@
         }
       },
       "banner": {
-        "title": "{count} product can't compute estimated profit",
-        "filterCta": "Filter affected products",
+        "title": "{count, plural, one {# variant} other {# variants}} on this page can't compute estimated profit",
         "reasonNoDesi": "missing desi ({count})",
-        "reasonNoCarrier": "no carrier ({count})",
-        "reasonOverflow": "high desi ({count})"
+        "reasonOverflow": "high desi ({count})",
+        "storeSetup": {
+          "title": "Shipping setup is incomplete",
+          "description": "No carrier is selected for this store, or your own contract tariff is empty, so shipping cost and estimated profit can't be calculated for its products.",
+          "cta": "Open shipping settings"
+        }
       }
     }
   },

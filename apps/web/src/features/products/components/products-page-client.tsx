@@ -150,19 +150,7 @@ export function ProductsPageClient({
           onFilterClick={() => void setFilters({ overrideMissing: 'cost', page: 1 })}
         />
 
-        <MissingShippingBanner
-          counts={shippingCounts}
-          // V1: the API has no `shippingEstimateStatus=NOT_OK` query
-          // parameter yet — the dedicated filter ships in V2. For now
-          // the CTA scrolls the table into view so the seller can
-          // immediately scan the non-OK rows (the yellow/red icons
-          // make each one easy to spot on a fresh page).
-          onFilterApply={() => {
-            if (typeof window !== 'undefined') {
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }
-          }}
-        />
+        <MissingShippingBanner counts={shippingCounts} />
 
         <ProductsTable
           orgId={orgId}

@@ -47,6 +47,12 @@ import type { ProductRow } from './products-bulk-cost-action-bar.types';
 import { ProductsTabStrip, type ProductsOverrideTab } from './products-tab-strip';
 import { VariantStatusBadge } from './variant-status-badge';
 
+// The desi and cost cells are buttons padded by px-2 (8px, --space-xs). Pulling
+// their trigger right by the same amount lines the value up with the column
+// header and with the plain-text values (multi-variant desi ranges) in the
+// same right-aligned column; the hover fill still covers the padding.
+const INTERACTIVE_NUMERIC_CELL_CLASS = '-mr-xs inline-flex';
+
 function projectRows(products: ProductWithVariants[]): ProductRow[] {
   return products.map((p) => ({ kind: 'parent', product: p }));
 }
@@ -450,7 +456,7 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
               if (v === undefined) return <span className="text-muted-foreground">—</span>;
               return (
                 <DesiCellPopover orgId={props.orgId} storeId={props.storeId} variant={v}>
-                  <span>
+                  <span className={INTERACTIVE_NUMERIC_CELL_CLASS}>
                     <DesiCell variant={v} />
                   </span>
                 </DesiCellPopover>
@@ -479,7 +485,7 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
           const v = row.original.variant;
           return (
             <DesiCellPopover orgId={props.orgId} storeId={props.storeId} variant={v}>
-              <span>
+              <span className={INTERACTIVE_NUMERIC_CELL_CLASS}>
                 <DesiCell variant={v} />
               </span>
             </DesiCellPopover>
@@ -499,20 +505,24 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
               if (v === undefined) return <span className="text-muted-foreground">—</span>;
               return (
                 <CostCellPopover orgId={props.orgId} storeId={props.storeId} variantId={v.id}>
-                  <span>
+                  <span className={INTERACTIVE_NUMERIC_CELL_CLASS}>
                     <CostCell variant={v} />
                   </span>
                 </CostCellPopover>
               );
             }
             // Multi-variant parent: aggregate cell (PR 10).
-            return <ParentRowCostCell orgId={props.orgId} storeId={props.storeId} product={p} />;
+            return (
+              <span className={INTERACTIVE_NUMERIC_CELL_CLASS}>
+                <ParentRowCostCell orgId={props.orgId} storeId={props.storeId} product={p} />
+              </span>
+            );
           }
           // Variant sub-row: interactive cost cell.
           const v = row.original.variant;
           return (
             <CostCellPopover orgId={props.orgId} storeId={props.storeId} variantId={v.id}>
-              <span>
+              <span className={INTERACTIVE_NUMERIC_CELL_CLASS}>
                 <CostCell variant={v} />
               </span>
             </CostCellPopover>
