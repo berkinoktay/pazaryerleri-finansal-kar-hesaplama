@@ -42,6 +42,17 @@ const MISSING_COST_VARIANT_WHERE = {
   costProfileLinks: { none: { profile: { archivedAt: null } } },
 } satisfies Prisma.ProductVariantWhereInput;
 
+// A variant "misses desi" when the seller entered no override and Trendyol sent
+// no desi (the catalog mapper stores an absent value as 0). An explicit override
+// of 0 is the seller's choice and is NOT missing. One predicate for the
+// overrideMissing=desi list and the facets missingDesi badge, so the two always
+// agree; toVariantDesiFields (product.validator.ts) applies the same rule to
+// each variant as isDimensionalWeightMissing.
+const MISSING_DESI_VARIANT_WHERE = {
+  dimensionalWeightOverride: null,
+  syncedDimensionalWeight: 0,
+} satisfies Prisma.ProductVariantWhereInput;
+
 function variantStatusWhere(status: ProductListStatusFilter): Prisma.ProductVariantWhereInput {
   // DELISTED ignores the status column (a delisted variant keeps its last
   // status); every other value is "that status AND still listed", so the six
@@ -58,6 +69,8 @@ function variantOverrideMissingWhere(
   switch (missing) {
     case 'cost':
       return MISSING_COST_VARIANT_WHERE;
+    case 'desi':
+      return MISSING_DESI_VARIANT_WHERE;
     default: {
       const _exhaustive: never = missing;
       throw new Error(`Unhandled overrideMissing filter: ${String(_exhaustive)}`);
@@ -478,16 +491,17 @@ export async function facets(opts: {
 
   // Every facet counts over the default listing scope: a product counts when
   // at least one of its variants is in scope. So `total` equals the unfiltered
-  // list's pagination.total, `missingCost` equals the overrideMissing=cost
-  // list's total, and the brand/category options never offer a value whose
-  // products are all archived or delisted.
+  // list's pagination.total, `missingCost` and `missingDesi` equal the
+  // overrideMissing=cost and overrideMissing=desi lists' totals, and the
+  // brand/category options never offer a value whose products are all archived
+  // or delisted.
   const listedProductWhere: Prisma.ProductWhereInput = {
     organizationId,
     storeId,
     variants: { some: LISTED_VARIANT_WHERE },
   };
 
-  const [brandRows, categoryRows, missingCost, total] = await Promise.all([
+  const [brandRows, categoryRows, missingCost, missingDesi, total] = await Promise.all([
     prisma.product.groupBy({
       by: ['brandId', 'brandName'],
       where: { ...listedProductWhere, brandId: { not: null }, brandName: { not: null } },
@@ -505,6 +519,13 @@ export async function facets(opts: {
         organizationId,
         storeId,
         variants: { some: { AND: [LISTED_VARIANT_WHERE, MISSING_COST_VARIANT_WHERE] } },
+      },
+    }),
+    prisma.product.count({
+      where: {
+        organizationId,
+        storeId,
+        variants: { some: { AND: [LISTED_VARIANT_WHERE, MISSING_DESI_VARIANT_WHERE] } },
       },
     }),
     prisma.product.count({ where: listedProductWhere }),
@@ -531,6 +552,6 @@ export async function facets(opts: {
         name: r.categoryName,
         count: r._count._all,
       })),
-    overrideCounts: { missingCost, total },
+    overrideCounts: { missingCost, missingDesi, total },
   };
 }

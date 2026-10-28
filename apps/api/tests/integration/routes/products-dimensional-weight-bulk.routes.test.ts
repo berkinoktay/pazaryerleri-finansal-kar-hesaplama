@@ -38,7 +38,7 @@ async function setupCtx(): Promise<Ctx> {
 
 async function seedVariant(
   ctx: Ctx,
-  opts: { syncedDimensionalWeight?: string; dimensionalWeight?: string | null } = {},
+  opts: { syncedDimensionalWeight?: string; dimensionalWeightOverride?: string | null } = {},
 ): Promise<string> {
   const product = await prisma.product.create({
     data: {
@@ -62,8 +62,8 @@ async function seedVariant(
       ...(opts.syncedDimensionalWeight !== undefined
         ? { syncedDimensionalWeight: opts.syncedDimensionalWeight }
         : {}),
-      ...(opts.dimensionalWeight !== undefined
-        ? { dimensionalWeight: opts.dimensionalWeight }
+      ...(opts.dimensionalWeightOverride !== undefined
+        ? { dimensionalWeightOverride: opts.dimensionalWeightOverride }
         : {}),
     },
   });
@@ -110,7 +110,7 @@ describe('PATCH .../products/variants/dimensional-weight (bulk)', () => {
       orderBy: { syncedDimensionalWeight: 'asc' },
     });
     for (const r of rows) {
-      expect(r.dimensionalWeight?.toString()).toBe('7.5');
+      expect(r.dimensionalWeightOverride?.toString()).toBe('7.5');
     }
     // Synced column untouched.
     expect(rows.map((r) => r.syncedDimensionalWeight?.toString())).toEqual(['1', '2', '3']);
@@ -120,11 +120,11 @@ describe('PATCH .../products/variants/dimensional-weight (bulk)', () => {
     const ctx = await setupCtx();
     const v1 = await seedVariant(ctx, {
       syncedDimensionalWeight: '1.00',
-      dimensionalWeight: '9.00',
+      dimensionalWeightOverride: '9.00',
     });
     const v2 = await seedVariant(ctx, {
       syncedDimensionalWeight: '2.00',
-      dimensionalWeight: '9.00',
+      dimensionalWeightOverride: '9.00',
     });
 
     const res = await bulkPatch(ctx, { variantIds: [v1, v2], dimensionalWeight: null });
@@ -132,7 +132,7 @@ describe('PATCH .../products/variants/dimensional-weight (bulk)', () => {
 
     const rows = await prisma.productVariant.findMany({ where: { id: { in: [v1, v2] } } });
     for (const r of rows) {
-      expect(r.dimensionalWeight).toBeNull();
+      expect(r.dimensionalWeightOverride).toBeNull();
     }
   });
 
@@ -142,7 +142,7 @@ describe('PATCH .../products/variants/dimensional-weight (bulk)', () => {
     const v1A = await seedVariant(ctxA, { syncedDimensionalWeight: '1.00' });
     const v1B = await seedVariant(ctxB, {
       syncedDimensionalWeight: '5.00',
-      dimensionalWeight: null,
+      dimensionalWeightOverride: null,
     });
 
     // Org A submits its own variant + Org B's variant. Only A's should land.
@@ -156,8 +156,8 @@ describe('PATCH .../products/variants/dimensional-weight (bulk)', () => {
 
     const aRow = await prisma.productVariant.findFirstOrThrow({ where: { id: v1A } });
     const bRow = await prisma.productVariant.findFirstOrThrow({ where: { id: v1B } });
-    expect(aRow.dimensionalWeight?.toString()).toBe('4');
-    expect(bRow.dimensionalWeight).toBeNull(); // Org B untouched.
+    expect(aRow.dimensionalWeightOverride?.toString()).toBe('4');
+    expect(bRow.dimensionalWeightOverride).toBeNull(); // Org B untouched.
   });
 
   it('rejects empty variantIds with 422 INVALID_VARIANT_IDS_EMPTY', async () => {

@@ -44,7 +44,7 @@ interface VariantFixtureOptions {
   shippingTariffSource?: 'TRENDYOL_CONTRACT' | 'OWN_CONTRACT';
   defaultShippingCarrierId?: string | null;
   salePrice?: string;
-  dimensionalWeight?: string | null;
+  dimensionalWeightOverride?: string | null;
   syncedDimensionalWeight?: string;
   deliveryDuration?: number | null;
 }
@@ -94,7 +94,7 @@ async function createVariantFixture(opts: VariantFixtureOptions): Promise<Varian
       stockCode: opts.barcode,
       salePrice: opts.salePrice ?? '100.00',
       listPrice: opts.salePrice ?? '100.00',
-      dimensionalWeight: opts.dimensionalWeight ?? null,
+      dimensionalWeightOverride: opts.dimensionalWeightOverride ?? null,
       // Synced desi NON-NULL, floor 0 (marketplace omits it → stored 0).
       syncedDimensionalWeight: opts.syncedDimensionalWeight ?? '0',
       deliveryDuration: opts.deliveryDuration ?? null,
@@ -142,7 +142,7 @@ describe('Equivalence: service fn vs raw SQL CTE', () => {
       barcode: 'eq1',
       defaultShippingCarrierId: carrier.id,
       salePrice: '500.00', // above all Barem ranges → fall through to NORMAL
-      dimensionalWeight: '3.0', // CEIL(3.0) = 3 → SENDEOMP desi-3 = 101.99
+      dimensionalWeightOverride: '3.0', // CEIL(3.0) = 3 → SENDEOMP desi-3 = 101.99
     });
 
     const { fnResult, row } = await runBothPaths(fixture);
@@ -164,7 +164,7 @@ describe('Equivalence: service fn vs raw SQL CTE', () => {
       barcode: 'eq2',
       defaultShippingCarrierId: carrier.id,
       salePrice: '150.00', // inside [0, 200) Barem tier
-      dimensionalWeight: '2.0', // within carrier.maxBaremDesi=10
+      dimensionalWeightOverride: '2.0', // within carrier.maxBaremDesi=10
       deliveryDuration: 1, // within carrier.maxBaremEligibleDeliveryDuration=1
     });
 
@@ -189,7 +189,7 @@ describe('Equivalence: service fn vs raw SQL CTE', () => {
     const fixture = await createVariantFixture({
       barcode: 'eq3',
       defaultShippingCarrierId: carrier.id,
-      dimensionalWeight: null,
+      dimensionalWeightOverride: null,
       syncedDimensionalWeight: '0',
     });
 
@@ -211,7 +211,7 @@ describe('Equivalence: service fn vs raw SQL CTE', () => {
       barcode: 'eq4',
       shippingTariffSource: 'TRENDYOL_CONTRACT',
       defaultShippingCarrierId: null,
-      dimensionalWeight: '1.0',
+      dimensionalWeightOverride: '1.0',
     });
 
     const { fnResult, row } = await runBothPaths(fixture);
@@ -227,7 +227,7 @@ describe('Equivalence: service fn vs raw SQL CTE', () => {
     const fixture = await createVariantFixture({
       barcode: 'eq5',
       shippingTariffSource: 'OWN_CONTRACT',
-      dimensionalWeight: '1.0',
+      dimensionalWeightOverride: '1.0',
     });
 
     const { fnResult, row } = await runBothPaths(fixture);
@@ -244,7 +244,7 @@ describe('Equivalence: service fn vs raw SQL CTE', () => {
       barcode: 'eq6',
       defaultShippingCarrierId: carrier.id,
       salePrice: '1500.00',
-      dimensionalWeight: '20.0', // CEIL(20) = 20 → no SENDEOMP row (seeded up to 12)
+      dimensionalWeightOverride: '20.0', // CEIL(20) = 20 → no SENDEOMP row (seeded up to 12)
     });
 
     const { fnResult, row } = await runBothPaths(fixture);
@@ -265,7 +265,7 @@ describe('Equivalence: service fn vs raw SQL CTE', () => {
       barcode: 'eq7',
       shippingTariffSource: 'OWN_CONTRACT',
       defaultShippingCarrierId: null,
-      dimensionalWeight: null,
+      dimensionalWeightOverride: null,
       syncedDimensionalWeight: '0',
       salePrice: '100.00',
     });
@@ -288,7 +288,7 @@ describe('Equivalence: service fn vs raw SQL CTE', () => {
       barcode: 'eq8',
       defaultShippingCarrierId: carrier.id,
       salePrice: '150.00',
-      dimensionalWeight: '2.0',
+      dimensionalWeightOverride: '2.0',
       deliveryDuration: 0,
     });
 
@@ -309,7 +309,7 @@ describe('Equivalence: service fn vs raw SQL CTE', () => {
       barcode: 'eq9',
       defaultShippingCarrierId: carrier.id,
       salePrice: '150.00',
-      dimensionalWeight: '2.0',
+      dimensionalWeightOverride: '2.0',
       deliveryDuration: null,
     });
 
@@ -330,7 +330,7 @@ describe('Equivalence: service fn vs raw SQL CTE', () => {
       barcode: 'eq10',
       defaultShippingCarrierId: carrier.id,
       salePrice: '150.00',
-      dimensionalWeight: '2.0',
+      dimensionalWeightOverride: '2.0',
       deliveryDuration: 2,
     });
 

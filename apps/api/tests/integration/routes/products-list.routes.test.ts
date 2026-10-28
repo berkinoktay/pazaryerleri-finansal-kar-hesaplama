@@ -20,6 +20,10 @@ interface SeedVariantSpec {
   status?: ProductVariantStatus;
   statusReason?: string | null;
   delistedAt?: Date | null;
+  // Desi state. Defaults match a fresh sync of a product Trendyol sent no desi
+  // for: synced 0 and no seller override (the "missing desi" state).
+  syncedDimensionalWeight?: string;
+  dimensionalWeightOverride?: string | null;
 }
 
 interface SeedProductSpec {
@@ -78,6 +82,8 @@ async function seedProduct(
         status: v.status ?? 'ON_SALE',
         statusReason: v.statusReason ?? null,
         delistedAt: v.delistedAt ?? null,
+        syncedDimensionalWeight: v.syncedDimensionalWeight ?? '0',
+        dimensionalWeightOverride: v.dimensionalWeightOverride ?? null,
       },
     });
   }
@@ -199,6 +205,10 @@ interface ListResponseBody {
       status: string;
       statusReason: string | null;
       delistedAt: string | null;
+      dimensionalWeight: string | null;
+      syncedDimensionalWeight: string | null;
+      isDimensionalWeightOverridden: boolean;
+      isDimensionalWeightMissing: boolean;
     }[];
     variantCount: number;
   }[];
@@ -839,6 +849,220 @@ describe('GET /v1/.../products: overrideMissing=cost', () => {
   });
 });
 
+// --- overrideMissing=desi ---
+// A variant misses desi when the seller has entered no override AND Trendyol
+// sent no desi (synced 0). An explicit override of 0 is the seller's choice and
+// is NOT missing. The filter composes with status (or the default listing
+// scope) via AND, exactly like overrideMissing=cost.
+
+describe('GET /v1/.../products: overrideMissing=desi', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it('returns only products with a variant that has no override and synced desi 0', async () => {
+    const fixtures = await setupBareTenant();
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 5001,
+      productMainId: 'P-MISSING',
+      title: 'No desi anywhere',
+      variants: [{ platformVariantId: 5101, barcode: 'D1', stockCode: 'S1' }],
+    });
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 5002,
+      productMainId: 'P-SYNCED',
+      title: 'Trendyol sent desi',
+      variants: [
+        { platformVariantId: 5102, barcode: 'D2', stockCode: 'S2', syncedDimensionalWeight: '2.5' },
+      ],
+    });
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 5003,
+      productMainId: 'P-OVERRIDE',
+      title: 'Seller entered desi',
+      variants: [
+        {
+          platformVariantId: 5103,
+          barcode: 'D3',
+          stockCode: 'S3',
+          dimensionalWeightOverride: '1.5',
+        },
+      ],
+    });
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 5004,
+      productMainId: 'P-OVERRIDE-ZERO',
+      title: 'Seller entered desi 0',
+      variants: [
+        { platformVariantId: 5104, barcode: 'D4', stockCode: 'S4', dimensionalWeightOverride: '0' },
+      ],
+    });
+
+    const { status, body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      overrideMissing: 'desi',
+    });
+
+    expect(status).toBe(200);
+    expect(barcodesByProduct(body)).toEqual({ 'P-MISSING': ['D1'] });
+    expect(body.pagination.total).toBe(1);
+  });
+
+  it('filters a multi-variant product down to its desi-missing variants', async () => {
+    const fixtures = await setupBareTenant();
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 5005,
+      productMainId: 'P-HALF',
+      title: 'Half measured',
+      variants: [
+        { platformVariantId: 5105, barcode: 'D5', stockCode: 'S5', syncedDimensionalWeight: '3' },
+        { platformVariantId: 5106, barcode: 'D6', stockCode: 'S6' },
+      ],
+    });
+
+    const { body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      overrideMissing: 'desi',
+    });
+
+    expect(barcodesByProduct(body)).toEqual({ 'P-HALF': ['D6'] });
+    expect(body.data[0]?.variantCount).toBe(1);
+  });
+
+  it('without status keeps archived and delisted desi-missing variants out', async () => {
+    const fixtures = await setupBareTenant();
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 5007,
+      productMainId: 'P-OUT-OF-SCOPE',
+      title: 'Out of scope',
+      variants: [
+        { platformVariantId: 5107, barcode: 'D7', stockCode: 'S7', status: 'ARCHIVED' },
+        { platformVariantId: 5108, barcode: 'D8', stockCode: 'S8', delistedAt: DELISTED_AT },
+      ],
+    });
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 5009,
+      productMainId: 'P-CLOSED',
+      title: 'Closed for sale',
+      variants: [
+        { platformVariantId: 5109, barcode: 'D9', stockCode: 'S9', status: 'NOT_ON_SALE' },
+      ],
+    });
+
+    const { body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      overrideMissing: 'desi',
+    });
+
+    expect(barcodesByProduct(body)).toEqual({ 'P-CLOSED': ['D9'] });
+
+    // An explicit status reaches the archived variant, still AND-ed with the
+    // missing-desi predicate (same composition as overrideMissing=cost).
+    const archived = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      overrideMissing: 'desi',
+      status: 'ARCHIVED',
+    });
+    expect(barcodesByProduct(archived.body)).toEqual({ 'P-OUT-OF-SCOPE': ['D7'] });
+  });
+
+  it('AND-composes overrideMissing=desi with status=ON_SALE (variant must satisfy both)', async () => {
+    const fixtures = await setupBareTenant();
+    // P-A: not on sale and missing desi, excluded by status=ON_SALE
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 5010,
+      productMainId: 'P-A',
+      title: 'A',
+      variants: [
+        { platformVariantId: 5110, barcode: 'DA', stockCode: 'SA', status: 'NOT_ON_SALE' },
+      ],
+    });
+    // P-B: on sale with a synced desi, excluded by overrideMissing=desi
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 5011,
+      productMainId: 'P-B',
+      title: 'B',
+      variants: [
+        { platformVariantId: 5111, barcode: 'DB', stockCode: 'SB', syncedDimensionalWeight: '1' },
+      ],
+    });
+    // P-C: on sale and missing desi, matches both
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 5012,
+      productMainId: 'P-C',
+      title: 'C',
+      variants: [{ platformVariantId: 5112, barcode: 'DC', stockCode: 'SC' }],
+    });
+
+    const { status, body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      overrideMissing: 'desi',
+      status: 'ON_SALE',
+    });
+
+    expect(status).toBe(200);
+    expect(body.data.map((p) => p.productMainId)).toEqual(['P-C']);
+  });
+
+  it('reports isDimensionalWeightMissing per variant from the backend rule', async () => {
+    const fixtures = await setupBareTenant();
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 5013,
+      productMainId: 'P-FLAGS',
+      title: 'Every desi state',
+      variants: [
+        { platformVariantId: 5113, barcode: 'F-MISSING', stockCode: 'SF1' },
+        {
+          platformVariantId: 5114,
+          barcode: 'F-SYNCED',
+          stockCode: 'SF2',
+          syncedDimensionalWeight: '1.2',
+        },
+        {
+          platformVariantId: 5115,
+          barcode: 'F-OVERRIDE',
+          stockCode: 'SF3',
+          dimensionalWeightOverride: '4',
+        },
+        {
+          platformVariantId: 5116,
+          barcode: 'F-OVERRIDE-ZERO',
+          stockCode: 'SF4',
+          dimensionalWeightOverride: '0',
+        },
+      ],
+    });
+
+    const { status, body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId);
+
+    expect(status).toBe(200);
+    const byBarcode = new Map(body.data.flatMap((p) => p.variants).map((v) => [v.barcode, v]));
+    expect(byBarcode.get('F-MISSING')).toMatchObject({
+      dimensionalWeight: '0',
+      syncedDimensionalWeight: '0',
+      isDimensionalWeightOverridden: false,
+      isDimensionalWeightMissing: true,
+    });
+    expect(byBarcode.get('F-SYNCED')).toMatchObject({
+      dimensionalWeight: '1.2',
+      syncedDimensionalWeight: '1.2',
+      isDimensionalWeightOverridden: false,
+      isDimensionalWeightMissing: false,
+    });
+    expect(byBarcode.get('F-OVERRIDE')).toMatchObject({
+      dimensionalWeight: '4',
+      syncedDimensionalWeight: '0',
+      isDimensionalWeightOverridden: true,
+      isDimensionalWeightMissing: false,
+    });
+    expect(byBarcode.get('F-OVERRIDE-ZERO')).toMatchObject({
+      dimensionalWeight: '0',
+      syncedDimensionalWeight: '0',
+      isDimensionalWeightOverridden: true,
+      isDimensionalWeightMissing: false,
+    });
+  });
+});
+
 describe('GET /v1/.../products: sort=totalStock', () => {
   beforeAll(async () => {
     await ensureDbReachable();
@@ -1007,7 +1231,7 @@ describe('GET /v1/.../products: shipping estimate fields', () => {
         stockCode: 'SHIP-OK',
         salePrice: '500.00',
         listPrice: '500.00',
-        dimensionalWeight: '3.0',
+        dimensionalWeightOverride: '3.0',
       },
     });
 
@@ -1033,7 +1257,7 @@ describe('GET /v1/.../products: shipping estimate fields', () => {
         stockCode: 'SHIP-NODESI',
         salePrice: '500.00',
         listPrice: '500.00',
-        dimensionalWeight: null,
+        dimensionalWeightOverride: null,
         syncedDimensionalWeight: '0',
       },
     });

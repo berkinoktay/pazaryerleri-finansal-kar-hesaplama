@@ -277,7 +277,9 @@ async function seedStoresProductsOrders(orgs: {
     });
     // Each seed product gets one default variant carrying the barcode; the
     // seed cost doubles as its sale and list price. Costs are attached through
-    // cost profiles, so these variants start under the missing-cost tab.
+    // cost profiles, and no desi is set (synced desi defaults to 0, the
+    // override stays null), so these variants start under both the
+    // missing-cost and the missing-desi tabs.
     // Multi-variant fixtures live in test factories, not the seed.
     await prisma.productVariant.create({
       data: {

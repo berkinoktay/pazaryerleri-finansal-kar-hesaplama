@@ -21,6 +21,7 @@ export function useProductsFilters(): {
   filters: ProductsFilters;
   setFilters: (next: FiltersUpdater) => Promise<URLSearchParams>;
   resetPagination: () => Promise<URLSearchParams>;
+  replacePage: (page: number) => Promise<URLSearchParams>;
 } {
   const [filters, setRaw] = useQueryStates(productsFiltersParsers, { history: 'push' });
 
@@ -41,5 +42,11 @@ export function useProductsFilters(): {
 
   const resetPagination = (): Promise<URLSearchParams> => setRaw({ page: 1 });
 
-  return { filters: filters as FiltersValues, setFilters, resetPagination };
+  // Corrects an out-of-range page in place: the corrected URL takes over the
+  // stale entry's history slot, so Back never returns to the empty page (a
+  // push would bounce Back straight into another correction).
+  const replacePage = (page: number): Promise<URLSearchParams> =>
+    setRaw({ page }, { history: 'replace' });
+
+  return { filters: filters as FiltersValues, setFilters, resetPagination, replacePage };
 }

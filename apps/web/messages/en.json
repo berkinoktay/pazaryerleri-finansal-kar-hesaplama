@@ -2960,7 +2960,8 @@
     },
     "overrideTabs": {
       "all": "All",
-      "missingCost": "Missing cost"
+      "missingCost": "Missing cost",
+      "missingDesi": "Missing desi"
     },
     "columns": {
       "image": "Image",
@@ -3003,7 +3004,8 @@
         "cta": "Sync now"
       },
       "filtered": "No products match the filters.",
-      "missingCostNone": "All products have a cost set."
+      "missingCostNone": "All products have a cost set.",
+      "missingDesiNone": "All products have a desi set."
     },
     "pagination": {
       "showing": "{from}–{to} of {total} products",
@@ -3032,6 +3034,7 @@
       "totalProducts": "Total products",
       "totalContext": "Approved · synced",
       "missingCost": "Missing cost",
+      "missingDesi": "Missing desi",
       "ofCatalog": "Share of catalog: {pct}%",
       "noneMissing": "None missing"
     },
@@ -3053,20 +3056,21 @@
       }
     },
     "desiCell": {
-      "addDesi": "+ Add desi",
+      "addDesi": "Enter desi",
       "overrideAria": "You set this dimensional weight manually.",
       "parentRange": "{min} – {max}",
       "popover": {
         "title": "Dimensional weight",
         "placeholder": "1.5",
         "syncedHint": "Trendyol value: {value}",
+        "syncedMissing": "Trendyol has no desi for this product.",
         "reset": "Reset to Trendyol value",
         "save": "Save",
         "cancel": "Cancel",
         "errors": {
           "INVALID_DIMENSIONAL_WEIGHT_FORMAT": "Enter a valid number (e.g. 1.5).",
-          "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi must be greater than zero.",
-          "INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE": "Desi must be less than 999.99."
+          "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi cannot be below 0.",
+          "INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE": "Desi can be at most 999.99."
         }
       }
     },
@@ -3127,12 +3131,12 @@
       "clearAll": "Reset all to Trendyol value",
       "toast": {
         "applied": "Applied desi {value} to {count} variants",
-        "cleared": "Cleared desi override on {count} variants"
+        "cleared": "Removed the entered desi from {count} variants"
       },
       "errors": {
         "INVALID_DIMENSIONAL_WEIGHT_FORMAT": "Enter a valid number (e.g. 1.5).",
-        "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi must be greater than zero.",
-        "INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE": "Desi must be less than 999.99."
+        "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi cannot be below 0.",
+        "INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE": "Desi can be at most 999.99."
       }
     }
   },
@@ -3449,7 +3453,7 @@
       "states": {
         "NO_DESI": {
           "title": "Desi value missing",
-          "reason": "Shipping estimate needs the product's desi / dimensional weight.",
+          "reason": "Shipping estimate needs the product's desi.",
           "cta": "Add desi to product"
         },
         "NO_CARRIER": {

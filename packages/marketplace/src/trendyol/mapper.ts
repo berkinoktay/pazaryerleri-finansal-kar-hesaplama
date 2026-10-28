@@ -145,13 +145,15 @@ function mapVariant(variant: TrendyolVariant): MappedProductVariant {
     productUrl: variant.productUrl ?? null,
     size: extractVariantLabel(variantAttrs),
     attributes: variantAttrs,
-    // Desi: Trendyol bu alanı çoğu üründe hiç göndermez (ya da hesaplamadan
-    // 0 yollar). İkisi de "bilinmiyor" demek — ama veride null DEĞİL, 0 olarak
-    // saklarız: ürünler sayfası null yerine 0 gösterir. Desi 0 GEÇERLİ bir
-    // tarife kademesidir: kargo ücreti DB tarife tablosundan (kargo firması +
-    // ceil(desi)) eşleştirilir ve tablo desi 0'dan itibaren kapsar — yani
-    // desi-0 ürün de gerçek (en alt kademe) kargo ücretini alır. Negatif zaten
-    // imkânsız. `nullableDecimalString` 0/absent → null, `?? '0'` tabana indirir.
+    // Desi: Trendyol omits this field on most products (or sends an uncomputed
+    // 0). Both mean "unknown", but we store 0, not null. 0 means Trendyol sent
+    // no desi: when the seller has not entered an override, the products page
+    // counts the variant as missing desi and offers "Desi gir". The shipping
+    // estimate still uses the desi 0 tier: desi 0 is a VALID tariff tier (the
+    // cargo fee is matched from the DB tariff table by carrier + ceil(desi),
+    // and the table covers desi 0 onward), so a 0-desi product still gets the
+    // real lowest-tier cargo fee. Negative desi is impossible anyway.
+    // `nullableDecimalString` maps 0/absent to null, `?? '0'` floors it.
     syncedDimensionalWeight: nullableDecimalString(variant.dimensionalWeight) ?? '0',
     syncedCommissionRate: nullableDecimalString(variant.commission),
     status,

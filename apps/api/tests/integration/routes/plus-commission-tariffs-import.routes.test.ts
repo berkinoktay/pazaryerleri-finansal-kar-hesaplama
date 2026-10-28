@@ -86,7 +86,7 @@ async function addVariant(ctx: Ctx, barcode: string): Promise<void> {
       salePrice: new Decimal('472.50'),
       listPrice: new Decimal('472.50'),
       vatRate: 20,
-      dimensionalWeight: new Decimal('3.0'),
+      dimensionalWeightOverride: new Decimal('3.0'),
     },
   });
 }

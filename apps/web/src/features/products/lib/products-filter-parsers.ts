@@ -28,11 +28,11 @@ export function isProductStatusFilter(value: string): value is ProductStatusFilt
   return PRODUCT_STATUS_FILTER_SET.has(value);
 }
 
-// Override tabs offered by the page (the VAT tab was retired: Trendyol sends a
-// VAT rate for every variant). The list request types `overrideMissing` from
-// the generated client, so an entry the backend does not accept fails the
-// typecheck in filtersToListProductsArgs.
-export const PRODUCT_OVERRIDE_MISSING = ['cost'] as const;
+// Override tabs offered by the page: missing cost and missing desi (the VAT tab
+// was retired: Trendyol sends a VAT rate for every variant). The list request
+// types `overrideMissing` from the generated client, so an entry the backend
+// does not accept fails the typecheck in filtersToListProductsArgs.
+export const PRODUCT_OVERRIDE_MISSING = ['cost', 'desi'] as const;
 export type ProductOverrideMissing = (typeof PRODUCT_OVERRIDE_MISSING)[number];
 
 /**

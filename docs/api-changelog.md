@@ -13,6 +13,24 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Products list: missing-desi tab, counter and per-variant flag**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/products`, `GET .../products/facets`,
+  `PATCH .../products/variants/{variantId}/dimensional-weight`,
+  `PATCH .../products/variants/dimensional-weight`). Additive on the wire; the generated types
+  make the new response fields required, and the web client ships the matching change in the
+  same PR. `overrideMissing` accepts `desi`: variants with no seller desi override and a synced
+  (Trendyol) desi of 0; an explicit override of 0 is not missing. It composes via AND with
+  `status`, or with the default listing scope when `status` is omitted, exactly like `cost`.
+  `overrideCounts` gains `missingDesi`, the number of products with at least one in-scope
+  desi-missing variant, equal to `pagination.total` of the `overrideMissing=desi` list.
+  `VariantSummary` gains `isDimensionalWeightMissing: boolean` (the same rule per variant), and
+  `VariantDimensionalWeightResponse` returns it too, so a client can update its row after a
+  save. The PATCH desi endpoints keep their request body (`dimensionalWeight`) and every other
+  response field; only their descriptions now name the renamed seller-override column
+  `dimensional_weight_override` (formerly `dimensional_weight`, an internal rename). The
+  `VariantSummary.dimensionalWeight` and `syncedDimensionalWeight` descriptions now say the
+  value is never null in practice (`"0"` when Trendyol sent no desi). Shipping estimates are
+  unchanged: a desi-missing variant is still priced at desi 0.
 - **Products list: `ProductWithVariants.images` becomes `imageUrls`**
   (`GET /v1/organizations/{orgId}/stores/{storeId}/products`). Breaking; the web client ships
   the matching change in the same PR. Product images now live on the product row as an ordered

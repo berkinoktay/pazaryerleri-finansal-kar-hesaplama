@@ -436,7 +436,10 @@ describe('ProductsTable', () => {
     const product = makeProduct({
       title: 'Stock Tier Product',
       variantCount: 1,
-      variants: [makeVariant({ quantity: 0 })],
+      // A non-zero desi keeps the stock cell the only "0" on the row.
+      variants: [
+        makeVariant({ quantity: 0, dimensionalWeight: '1.20', syncedDimensionalWeight: '1.20' }),
+      ],
     });
     renderTable([product]);
     const cell = screen.getByText('0');
@@ -500,8 +503,9 @@ describe('ProductsTable store switch', () => {
           return HttpResponse.json({
             id: 'v-desi',
             dimensionalWeight: '2',
-            syncedDimensionalWeight: null,
+            syncedDimensionalWeight: '0',
             isDimensionalWeightOverridden: true,
+            isDimensionalWeightMissing: false,
           });
         },
       ),
@@ -510,7 +514,9 @@ describe('ProductsTable store switch', () => {
       makeProduct({
         id: 'p-desi',
         variantCount: 1,
-        variants: [makeVariant({ id: 'v-desi', stockCode: 'STK-DESI' })],
+        variants: [
+          makeVariant({ id: 'v-desi', stockCode: 'STK-DESI', isDimensionalWeightMissing: true }),
+        ],
       }),
     ];
 

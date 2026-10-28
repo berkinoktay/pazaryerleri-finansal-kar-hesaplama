@@ -13,7 +13,22 @@ export type ProductsEmptyStateVariant =
   | 'no-store'
   | 'no-products'
   | 'filtered'
-  | 'missing-cost-none';
+  | 'missing-cost-none'
+  | 'missing-desi-none';
+
+// All-clear title of each override tab's empty state ("every product has a
+// cost / desi"). Shown by resolveProductsEmptyVariant only when no search or
+// filter is active, because only then is the claim true.
+const ALL_CLEAR_TITLE_KEY = {
+  'missing-cost-none': 'missingCostNone',
+  'missing-desi-none': 'missingDesiNone',
+} as const;
+
+function isAllClearVariant(
+  variant: ProductsEmptyStateVariant,
+): variant is keyof typeof ALL_CLEAR_TITLE_KEY {
+  return variant in ALL_CLEAR_TITLE_KEY;
+}
 
 interface ProductsEmptyStateProps {
   variant: ProductsEmptyStateVariant;
@@ -53,8 +68,8 @@ export function ProductsEmptyState({
       />
     );
   }
-  if (variant === 'missing-cost-none') {
-    return <EmptyState embedded title={t('missingCostNone')} />;
+  if (isAllClearVariant(variant)) {
+    return <EmptyState embedded title={t(ALL_CLEAR_TITLE_KEY[variant])} />;
   }
   // Filtered-to-zero → the shared no-results preset (filter-off icon + a real
   // "Clear filters" button), so products gets the same premium no-results

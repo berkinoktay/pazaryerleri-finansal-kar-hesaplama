@@ -4,7 +4,7 @@
  * Desi:
  *   - `order.cargoDeci` doluysa (kargoya verildi, Trendyol ölçtü) onu kullan
  *   - aksi: ürün-ayarı desisinden **adet-ağırlıklı ortalama** = Σ(adet×desi)/Σ(adet)
- *     (`eff_desi = variant.dimensionalWeight ?? variant.syncedDimensionalWeight`, non-null ≥ 0)
+ *     (`eff_desi = variant.dimensionalWeightOverride ?? variant.syncedDimensionalWeight`, non-null >= 0)
  *
  * Barem aralığı: siparişin **effectiveSale brüt** toplamı = `order.saleGross` (GROSS,
  * KDV-dahil; = liste − satıcı indirimi = packageTotalPrice). Trendyol Barem kuralı ile
@@ -51,7 +51,7 @@ export async function estimateShippingCostForOrder(
       // ürünü desi-0'a (en ucuz kademe) çöker, kargoyu olduğundan az gösterir.
       if (variant === null) continue;
       const effDesi = new Decimal(
-        (variant.dimensionalWeight ?? variant.syncedDimensionalWeight).toString(),
+        (variant.dimensionalWeightOverride ?? variant.syncedDimensionalWeight).toString(),
       );
       const qty = new Decimal(item.quantity);
       weightedDesi = weightedDesi.add(effDesi.mul(qty));

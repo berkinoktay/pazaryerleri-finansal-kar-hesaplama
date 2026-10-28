@@ -101,10 +101,11 @@ export async function upsertCatalogBatch(
               statusReason: variant.statusReason,
               lastSyncedAt: new Date(),
             },
-            // The update clause MUST NOT reference `dimensionalWeight`.
-            // That column is the user's override and is sacred — see the
-            // ProductVariant schema comment. Sync writes only the synced
-            // half of the pair.
+            // Neither the create nor the update clause may reference
+            // `dimensionalWeightOverride`. That column is the user's override
+            // and is sacred (see the ProductVariant schema comment): a new
+            // variant starts with a null override, and sync writes only the
+            // synced half of the pair.
             update: {
               // A variant returned by any full-scan page is, by definition,
               // listed again — clear the absence-from-feed stamp. (The create

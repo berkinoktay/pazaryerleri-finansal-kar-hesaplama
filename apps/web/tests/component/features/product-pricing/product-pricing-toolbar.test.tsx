@@ -27,7 +27,7 @@ const EMPTY_PARAMS: PricingAdvancedParams = {
 const FACETS = {
   categories: [{ id: 'c1', name: 'Tişört', count: 4 }],
   brands: [{ id: 'b1', name: 'Koton', count: 9 }],
-  overrideCounts: { missingCost: 0, total: 0 },
+  overrideCounts: { missingCost: 0, missingDesi: 0, total: 0 },
 };
 
 type HarnessProps = Partial<

@@ -82,6 +82,9 @@ interface ProductsTableProps {
   storeId: string;
   data: ProductWithVariants[];
   loading?: boolean;
+  /** The list fetch failed with no cached rows: DataTable's error state + retry. */
+  error?: boolean;
+  onRetry?: () => void;
   empty?: React.ReactNode;
   pagination?: { page: number; perPage: number; total: number; totalPages: number };
 
@@ -543,6 +546,8 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
       columns={columns}
       data={rows}
       loading={props.loading}
+      error={props.error}
+      onRetry={props.onRetry}
       empty={props.empty}
       enableRowSelection
       getRowId={(row) => (row.kind === 'parent' ? `p:${row.product.id}` : `v:${row.variant.id}`)}

@@ -23,7 +23,7 @@ interface VariantFixtureOptions {
   shippingTariffSource?: 'TRENDYOL_CONTRACT' | 'OWN_CONTRACT';
   defaultShippingCarrierId?: string | null;
   salePrice?: string;
-  dimensionalWeight?: string | null;
+  dimensionalWeightOverride?: string | null;
   syncedDimensionalWeight?: string;
   deliveryDuration?: number | null;
 }
@@ -69,7 +69,7 @@ async function createVariantFixture(opts: VariantFixtureOptions = {}) {
       stockCode: `sk-${stamp}`,
       salePrice: opts.salePrice ?? '100.00',
       listPrice: opts.salePrice ?? '100.00',
-      dimensionalWeight: opts.dimensionalWeight ?? null,
+      dimensionalWeightOverride: opts.dimensionalWeightOverride ?? null,
       // Synced desi is NON-NULL with floor 0 (the marketplace omits it on most
       // products → stored 0, never null). Desi 0 is a valid tariff tier.
       syncedDimensionalWeight: opts.syncedDimensionalWeight ?? '0',
@@ -115,7 +115,7 @@ describe('estimateShippingCostForVariant', () => {
     const { variant } = await createVariantFixture({
       shippingTariffSource: 'TRENDYOL_CONTRACT',
       defaultShippingCarrierId: null,
-      dimensionalWeight: '1.0',
+      dimensionalWeightOverride: '1.0',
       deliveryDuration: 1, // Barem-eligible, but the store has no carrier
     });
 
@@ -133,7 +133,7 @@ describe('estimateShippingCostForVariant', () => {
     const carrier = await getSendeomp();
     const { variant } = await createVariantFixture({
       defaultShippingCarrierId: carrier.id,
-      dimensionalWeight: null,
+      dimensionalWeightOverride: null,
       syncedDimensionalWeight: '0',
     });
 
@@ -153,7 +153,7 @@ describe('estimateShippingCostForVariant', () => {
     const { variant } = await createVariantFixture({
       defaultShippingCarrierId: carrier.id,
       salePrice: '500.00', // ≥ 350, above all Barem ranges
-      dimensionalWeight: '3.5', // ceil → 4 → SENDEOMP desi-4 = 112.99 (seed)
+      dimensionalWeightOverride: '3.5', // ceil → 4 → SENDEOMP desi-4 = 112.99 (seed)
       deliveryDuration: 1, // Barem-eligible, but the price falls through to NORMAL
     });
 
@@ -173,7 +173,7 @@ describe('estimateShippingCostForVariant', () => {
     const { variant } = await createVariantFixture({
       defaultShippingCarrierId: carrier.id,
       salePrice: '150.00', // inside [0, 200) → SENDEOMP Barem = 51.24 (seed)
-      dimensionalWeight: '2.0',
+      dimensionalWeightOverride: '2.0',
       deliveryDuration: 1, // within carrier.maxBaremEligibleDeliveryDuration = 1
     });
 
@@ -192,7 +192,7 @@ describe('estimateShippingCostForVariant', () => {
     const { variant } = await createVariantFixture({
       defaultShippingCarrierId: carrier.id,
       salePrice: '400.00', // ≥ 350, above all Barem ranges
-      dimensionalWeight: '2.0', // ceil → 2 → SENDEOMP desi-2 normal tariff
+      dimensionalWeightOverride: '2.0', // ceil → 2 → SENDEOMP desi-2 normal tariff
       deliveryDuration: 1, // Barem-eligible
     });
 
@@ -209,7 +209,7 @@ describe('estimateShippingCostForVariant', () => {
     const { variant } = await createVariantFixture({
       defaultShippingCarrierId: carrier.id,
       salePrice: '1500.00',
-      dimensionalWeight: '20.0',
+      dimensionalWeightOverride: '20.0',
     });
 
     const outcome = await prisma.$transaction((tx) =>
@@ -221,7 +221,7 @@ describe('estimateShippingCostForVariant', () => {
   it('returns OWN_CONTRACT_EMPTY when shippingTariffSource is OWN_CONTRACT and no own tariff rows exist', async () => {
     const { variant } = await createVariantFixture({
       shippingTariffSource: 'OWN_CONTRACT',
-      dimensionalWeight: '1.0',
+      dimensionalWeightOverride: '1.0',
     });
 
     const outcome = await prisma.$transaction((tx) =>
@@ -235,7 +235,7 @@ describe('estimateShippingCostForVariant', () => {
     // seeded for desi 0 the outcome is OWN_CONTRACT_EMPTY, not NO_DESI.
     const { variant } = await createVariantFixture({
       shippingTariffSource: 'OWN_CONTRACT',
-      dimensionalWeight: null,
+      dimensionalWeightOverride: null,
       syncedDimensionalWeight: '0',
     });
 
@@ -250,7 +250,7 @@ describe('estimateShippingCostForVariant', () => {
     const { variant } = await createVariantFixture({
       defaultShippingCarrierId: carrier.id,
       salePrice: '150.00', // would be inside a Barem tier on a Barem-eligible carrier
-      dimensionalWeight: '1.0', // ceil → 1 → CEVAMP desi-1 = 651.74 (seed)
+      dimensionalWeightOverride: '1.0', // ceil → 1 → CEVAMP desi-1 = 651.74 (seed)
       deliveryDuration: 1, // fast delivery is set up, but carrier still blocks Barem
     });
 
@@ -269,7 +269,7 @@ describe('estimateShippingCostForVariant', () => {
     const { variant } = await createVariantFixture({
       defaultShippingCarrierId: carrier.id,
       salePrice: '150.00', // inside [0, 200) Barem range
-      dimensionalWeight: '1.0', // ceil → 1, within maxBaremDesi
+      dimensionalWeightOverride: '1.0', // ceil → 1, within maxBaremDesi
       deliveryDuration: 2, // one day above carrier.maxBaremEligibleDeliveryDuration = 1
     });
 
@@ -288,7 +288,7 @@ describe('estimateShippingCostForVariant', () => {
     const { variant } = await createVariantFixture({
       defaultShippingCarrierId: carrier.id,
       salePrice: '150.00', // inside the SENDEOMP Barem range [0, 199.99] = 51.24 (seed)
-      dimensionalWeight: '2.0',
+      dimensionalWeightOverride: '2.0',
       deliveryDuration: 0, // ships today, inside carrier.maxBaremEligibleDeliveryDuration = 1
     });
 
@@ -307,7 +307,7 @@ describe('estimateShippingCostForVariant', () => {
     const { variant } = await createVariantFixture({
       defaultShippingCarrierId: carrier.id,
       salePrice: '150.00', // inside the SENDEOMP Barem range [0, 199.99]
-      dimensionalWeight: '1.0', // ceil 1 -> SENDEOMP desi-1 = 91.99 (seed)
+      dimensionalWeightOverride: '1.0', // ceil 1 -> SENDEOMP desi-1 = 91.99 (seed)
       deliveryDuration: null, // Trendyol sent no delivery duration
     });
 

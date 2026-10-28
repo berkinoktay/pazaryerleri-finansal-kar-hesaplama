@@ -219,9 +219,14 @@ ALTER TABLE orders ADD CONSTRAINT orders_profit_exclusion_pair_check
   CHECK ((profit_excluded_at IS NULL) = (profit_exclusion_reason IS NULL));
 
 -- ─── 2026-06-13 desi sıfır-taban ───────────────────────────────────────
--- synced_dimensional_weight NON-NULL default 0; hiçbir desi 0'ın altına
--- inemez (negatif desi imkânsız). override (dimensional_weight) nullable
--- kalır. Mirror: prisma/migrations/20260613120000_dimensional_weight_zero_floor.
+-- synced_dimensional_weight is NON-NULL with default 0; no desi may go below 0
+-- (a negative desi is impossible). The seller override
+-- (dimensional_weight_override) stays nullable. The constraint was renamed
+-- together with the column; the legacy name is dropped too, because Postgres
+-- keeps a constraint's name on RENAME COLUMN, so a DB that got only the column
+-- rename would otherwise keep a duplicate under the old name.
+-- Mirror: prisma/migrations/20261028163120_rename_dimensional_weight_override.
 ALTER TABLE product_variants DROP CONSTRAINT IF EXISTS product_variants_dimensional_weight_nonneg_check;
-ALTER TABLE product_variants ADD CONSTRAINT product_variants_dimensional_weight_nonneg_check
-  CHECK (synced_dimensional_weight >= 0 AND (dimensional_weight IS NULL OR dimensional_weight >= 0));
+ALTER TABLE product_variants DROP CONSTRAINT IF EXISTS product_variants_dimensional_weight_override_nonneg_check;
+ALTER TABLE product_variants ADD CONSTRAINT product_variants_dimensional_weight_override_nonneg_check
+  CHECK (synced_dimensional_weight >= 0 AND (dimensional_weight_override IS NULL OR dimensional_weight_override >= 0));

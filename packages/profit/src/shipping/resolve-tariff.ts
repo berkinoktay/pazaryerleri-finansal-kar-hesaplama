@@ -26,6 +26,9 @@ export interface ShippingEstimate {
 // NO_DESI emekli: desi'nin sıfır-tabanı (@default(0)) olduğundan "desi yok" durumu
 // üretilemez — desi-bazlı tek başarısızlık DESI_OVERFLOW. Ürünler listesinin
 // `ShippingEstimateStatus.NO_DESI`'si AYRI (SQL CTE'den gelir, canlı) — ona dokunulmadı.
+// The products page's "missing desi" (override null AND synced 0) is a listing
+// and call-to-action concept, not an estimate outcome: the estimate still
+// resolves such a variant at desi 0, so it must not bring NO_DESI back.
 export type EstimateUnavailableReason =
   | 'STORE_NOT_FOUND'
   | 'NO_CARRIER'

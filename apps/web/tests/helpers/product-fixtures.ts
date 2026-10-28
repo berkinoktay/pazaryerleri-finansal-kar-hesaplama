@@ -10,9 +10,13 @@ import type {
 // contract change after `pnpm api:sync` is absorbed in one place instead of
 // in one hand-written copy per test file.
 //
-// Defaults describe one plain variant: on sale, in stock, no cost profile,
-// no desi and therefore no shipping estimate. Ids are deterministic; pass
-// explicit ids whenever a test renders several rows that must stay distinct.
+// Defaults describe one plain variant: on sale, in stock, no cost profile and
+// no shipping estimate. Desi mirrors the wire shape: the synced column is
+// NOT NULL DEFAULT 0, so a variant without a Trendyol desi arrives as "0", and
+// the backend owns the missing-desi rule. The default is NOT flagged missing;
+// pass `isDimensionalWeightMissing: true` to model a "Desi gir" variant. Ids are
+// deterministic; pass explicit ids whenever a test renders several rows that
+// must stay distinct.
 
 const DEFAULT_VARIANT_ID = 'v-1';
 const DEFAULT_PRODUCT_ID = 'p-1';
@@ -27,9 +31,10 @@ export function makeVariantSummary(overrides: Partial<VariantSummary> = {}): Var
     salePrice: '100.00',
     listPrice: '100.00',
     vatRate: 20,
-    dimensionalWeight: null,
-    syncedDimensionalWeight: null,
+    dimensionalWeight: '0',
+    syncedDimensionalWeight: '0',
     isDimensionalWeightOverridden: false,
+    isDimensionalWeightMissing: false,
     quantity: 5,
     deliveryDuration: 1,
     productUrl: null,

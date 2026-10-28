@@ -9,7 +9,10 @@ import {
   filtersToListProductsArgs,
   PRODUCT_FILTER_FIELDS,
 } from '@/features/products/lib/products-filter-fields';
-import type { ProductsFilters } from '@/features/products/lib/products-filter-parsers';
+import {
+  PRODUCT_OVERRIDE_MISSING,
+  type ProductsFilters,
+} from '@/features/products/lib/products-filter-parsers';
 import { ApiError } from '@/lib/api-error';
 
 import { makeProductWithVariants } from '../../helpers/product-fixtures';
@@ -141,7 +144,7 @@ describe('useProducts', () => {
     expect(new URL(capturedUrl).searchParams.get('status')).toBe('DELISTED');
   });
 
-  it('forwards overrideMissing as a query param', async () => {
+  it.each(PRODUCT_OVERRIDE_MISSING)('forwards overrideMissing=%s as a query param', async (tab) => {
     let capturedUrl = '';
     server.use(
       http.get(
@@ -153,11 +156,11 @@ describe('useProducts', () => {
       ),
     );
 
-    const { result } = renderHook(() => useProducts({ ...baseArgs, overrideMissing: 'cost' }), {
+    const { result } = renderHook(() => useProducts({ ...baseArgs, overrideMissing: tab }), {
       wrapper,
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(capturedUrl).toContain('overrideMissing=cost');
+    expect(new URL(capturedUrl).searchParams.get('overrideMissing')).toBe(tab);
   });
 
   it('forwards new sort vocabulary (e.g. -salePrice)', async () => {

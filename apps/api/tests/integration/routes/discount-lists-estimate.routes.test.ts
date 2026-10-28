@@ -170,7 +170,7 @@ async function setupFixture(): Promise<Fixture> {
         salePrice: new Decimal(CURRENT_PRICE),
         listPrice: new Decimal(CURRENT_PRICE),
         vatRate: 20,
-        dimensionalWeight: new Decimal('3.0'),
+        dimensionalWeightOverride: new Decimal('3.0'),
         syncedCommissionRate:
           opts.syncedCommissionRate !== null ? new Decimal(opts.syncedCommissionRate) : null,
       },
