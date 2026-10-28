@@ -1,3 +1,4 @@
+import { delay } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 
 import { BulkDesiDialog } from '@/features/products/components/bulk-desi-dialog';
@@ -76,6 +77,38 @@ describe('BulkDesiDialog', () => {
 
     expect(screen.getByLabelText(bulkDesi.fieldLabel)).toHaveValue('');
     expect(screen.queryByText(bulkDesi.errors.INVALID_DIMENSIONAL_WEIGHT_FORMAT)).toBeNull();
+  });
+
+  // The mutation lives in the always-mounted dialog host, so dismissing the
+  // dialog while the save is in flight still ends with the toast and the
+  // cleared selection.
+  it('still toasts and clears the selection when dismissed while the save is pending', async () => {
+    toastSuccess.mockReset();
+    server.use(
+      http.patch(BULK_URL, async () => {
+        await delay(50);
+        return HttpResponse.json({ updated: VARIANT_IDS.length });
+      }),
+    );
+    const props = {
+      onOpenChange: vi.fn(),
+      orgId: ORG_ID,
+      storeId: STORE_ID,
+      variantIds: VARIANT_IDS,
+      onClearSelection: vi.fn(),
+    };
+    const { user, rerender } = render(<BulkDesiDialog open {...props} />);
+
+    await user.type(screen.getByLabelText(bulkDesi.fieldLabel), '2,5');
+    await user.click(screen.getByRole('button', { name: applyButtonName }));
+    await user.keyboard('{Escape}');
+    expect(props.onOpenChange).toHaveBeenCalledWith(false);
+    rerender(<BulkDesiDialog open={false} {...props} />);
+
+    await waitFor(() => expect(props.onClearSelection).toHaveBeenCalledTimes(1));
+    expect(toastSuccess).toHaveBeenCalledWith(
+      withCount(bulkDesi.toast.applied, VARIANT_IDS.length).replace('{value}', '2,5'),
+    );
   });
 
   it('sends "2,5" as the dot string "2.5", toasts the Turkish value and closes', async () => {

@@ -3138,6 +3138,10 @@
         "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi cannot be below 0.",
         "INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE": "Desi can be at most 999.99."
       }
+    },
+    "parentDesi": {
+      "title": "Enter desi for all variants",
+      "description": "The desi you enter applies to all {count} variants of this product."
     }
   },
   "costs": {

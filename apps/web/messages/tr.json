@@ -3137,6 +3137,10 @@
         "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi 0'dan küçük olamaz.",
         "INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE": "Desi en fazla 999,99 olabilir."
       }
+    },
+    "parentDesi": {
+      "title": "Tüm varyantlara desi gir",
+      "description": "Girdiğin desi bu ürünün {count} varyantına uygulanır."
     }
   },
   "costs": {

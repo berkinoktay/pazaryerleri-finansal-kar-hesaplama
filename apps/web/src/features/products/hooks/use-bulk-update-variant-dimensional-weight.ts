@@ -21,6 +21,13 @@ interface MutationContext {
 }
 
 /**
+ * The bulk desi mutation as handed to BulkDesiForm. A host that stays mounted
+ * for the whole save owns it (the dialog, the parent-row cell), so the pending
+ * state outlives the form's DialogContent / PopoverContent.
+ */
+export type BulkDesiMutation = ReturnType<typeof useBulkUpdateVariantDimensionalWeight>;
+
+/**
  * Bulk mutation hook for setting (or clearing) the user override on many
  * variants at once. Mirrors useUpdateVariantDimensionalWeight's optimistic
  * pattern: every cached products-list page is patched in place for the listed

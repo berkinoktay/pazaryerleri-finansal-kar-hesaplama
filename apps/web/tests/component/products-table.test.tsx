@@ -459,6 +459,53 @@ describe('ProductsTable', () => {
     expect(cell.className).toMatch(/text-warning/);
   });
 
+  it('offers "Desi gir" on the collapsed row of a product whose variants all miss desi', () => {
+    const product = makeProduct({
+      title: 'All Missing Desi',
+      variantCount: 2,
+      variants: [
+        makeVariant({
+          id: 'v-m1',
+          size: 'S',
+          stockCode: 'STK-M1',
+          isDimensionalWeightMissing: true,
+        }),
+        makeVariant({
+          id: 'v-m2',
+          size: 'M',
+          stockCode: 'STK-M2',
+          isDimensionalWeightMissing: true,
+        }),
+      ],
+    });
+    // Rendered with the full tr.json catalog from the shared render helper.
+    render(<ProductsTable {...baseProps} data={[product]} />);
+    // One call to action for the whole product while its variant rows are collapsed.
+    expect(
+      screen.getAllByRole('button', { name: trMessages.products.desiCell.addDesi }),
+    ).toHaveLength(1);
+  });
+
+  it('shows the known desi on the collapsed row when only some variants miss desi', () => {
+    const product = makeProduct({
+      title: 'Partly Missing Desi',
+      variantCount: 2,
+      variants: [
+        makeVariant({
+          id: 'v-k',
+          size: 'S',
+          stockCode: 'STK-K',
+          dimensionalWeight: '1.50',
+          syncedDimensionalWeight: '1.50',
+        }),
+        makeVariant({ id: 'v-m', size: 'M', stockCode: 'STK-M', isDimensionalWeightMissing: true }),
+      ],
+    });
+    render(<ProductsTable {...baseProps} data={[product]} />);
+    expect(screen.getByText('1,5')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: trMessages.products.desiCell.addDesi })).toBeNull();
+  });
+
   it('renders the delisted badge only on delisted variant sub-rows', async () => {
     const product = makeProduct({
       title: 'Freshness Product',

@@ -9,6 +9,33 @@ import { cn } from '@/lib/utils';
 
 import type { VariantSummary } from '../api/list-products.api';
 
+/**
+ * The "Desi gir" call to action: the variant cell's missing-desi state and
+ * the parent row's popover trigger when no variant of a product has a desi.
+ * Same look as the cost cell's "Maliyet ekle". Takes button props and a ref
+ * (React 19 passes `ref` as a prop) so a Radix trigger can render it directly:
+ * aria-expanded lands on the button and focus returns to it on close.
+ */
+export function DesiAddButton({
+  className,
+  ...props
+}: React.ComponentPropsWithRef<'button'>): React.ReactElement {
+  const t = useTranslations('products.desiCell');
+  return (
+    <button
+      type="button"
+      {...props}
+      className={cn(
+        'text-muted-foreground hover:text-primary hover:bg-primary/5 duration-fast gap-2xs inline-flex h-7 cursor-pointer items-center rounded-sm px-2 text-xs transition-colors',
+        className,
+      )}
+    >
+      <PlusSignIcon className="size-icon-xs" />
+      {t('addDesi')}
+    </button>
+  );
+}
+
 export interface DesiCellProps {
   variant: VariantSummary;
   /** Called when the cell is clicked: opens the desi popover. */
@@ -39,16 +66,7 @@ export function DesiCell({ variant, onClick }: DesiCellProps): React.ReactElemen
   // A null effective desi never reaches the wire (the synced column is NOT
   // NULL); with no value to show, the call to action is the honest rendering.
   if (variant.isDimensionalWeightMissing || variant.dimensionalWeight === null) {
-    return (
-      <button
-        type="button"
-        onClick={onClick}
-        className="text-muted-foreground hover:text-primary hover:bg-primary/5 duration-fast gap-2xs inline-flex h-7 cursor-pointer items-center rounded-sm px-2 text-xs transition-colors"
-      >
-        <PlusSignIcon className="size-icon-xs" />
-        {t('addDesi')}
-      </button>
-    );
+    return <DesiAddButton onClick={onClick} />;
   }
 
   const overridden = variant.isDimensionalWeightOverridden;

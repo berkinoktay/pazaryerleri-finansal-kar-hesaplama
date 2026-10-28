@@ -146,7 +146,7 @@ export function ParentRowCostCell({
       return (
         <button
           type="button"
-          className="text-muted-foreground/70 hover:text-primary hover:bg-primary/5 duration-fast gap-2xs inline-flex h-7 cursor-pointer items-center rounded-sm px-2 text-xs transition-colors"
+          className="text-muted-foreground hover:text-primary hover:bg-primary/5 duration-fast gap-2xs inline-flex h-7 cursor-pointer items-center rounded-sm px-2 text-xs transition-colors"
         >
           <PlusSignIcon className="size-icon-xs" />
           {t('addCost')}
