@@ -32,6 +32,10 @@ export function useRestoreCostProfile() {
       void queryClient.invalidateQueries({ queryKey: costsKeys.profiles(variables.orgId) });
       // Invalidate all variant attachments — restored profile re-enters combobox
       void queryClient.invalidateQueries({ queryKey: [...costsKeys.all, 'variant'] });
+      // A restored profile counts as a cost again, so the products list's cost tab
+      // and the missing-cost banner change with it.
+      void queryClient.invalidateQueries({ queryKey: ['products'] });
+      void queryClient.invalidateQueries({ queryKey: costsKeys.missingCostStats(variables.orgId) });
     },
   });
 }

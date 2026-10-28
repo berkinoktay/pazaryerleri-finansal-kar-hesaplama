@@ -5,8 +5,8 @@
  * avoid N+1 on a paginated products list (same pattern as cost-profile's
  * `current_cost_try` in `products-list.service.ts`). The equivalence test
  * `apps/api/tests/integration/shipping-estimator-equivalence.test.ts` asserts
- * the two implementations agree across all 6 documented outcome states plus
- * a 7th branch-ordering scenario (OWN_CONTRACT + null desi → NO_DESI).
+ * the two implementations agree on every documented outcome state and on the
+ * Barem eligibility rule (deliveryDuration only, see `hasFastDeliverySetup`).
  *
  * Parameters: $1 = organizationId, $2 = storeId
  *
@@ -37,8 +37,8 @@
  */
 export const SHIPPING_ESTIMATE_CTE_SQL = `
 WITH variant_with_carrier AS (
-  SELECT pv.id, pv.store_id, pv.sale_price, pv.delivery_duration, pv.is_rush_delivery,
-         pv.fast_delivery_options, pv.dimensional_weight, pv.synced_dimensional_weight,
+  SELECT pv.id, pv.store_id, pv.sale_price, pv.delivery_duration,
+         pv.dimensional_weight, pv.synced_dimensional_weight,
          s.shipping_tariff_source, s.default_shipping_carrier_id,
          sc.code AS carrier_code, sc.supports_barem_destek, sc.max_barem_desi,
          sc.max_barem_eligible_delivery_duration,
@@ -95,11 +95,9 @@ estimates AS (
      WHERE sbt.carrier_id = vwc.default_shipping_carrier_id
        AND vwc.supports_barem_destek = true
        AND vwc.eff_desi <= vwc.max_barem_desi
-       AND (
-         (vwc.delivery_duration IS NOT NULL AND vwc.delivery_duration <= vwc.max_barem_eligible_delivery_duration)
-         OR vwc.is_rush_delivery = true
-         OR jsonb_array_length(vwc.fast_delivery_options) > 0
-       )
+       -- Fast-delivery eligibility mirrors hasFastDeliverySetup: deliveryDuration only.
+       AND vwc.delivery_duration IS NOT NULL
+       AND vwc.delivery_duration <= vwc.max_barem_eligible_delivery_duration
        AND vwc.sale_price >= sbt.min_order_amount
        AND vwc.sale_price <= sbt.max_order_amount
      LIMIT 1

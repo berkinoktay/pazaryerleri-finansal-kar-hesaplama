@@ -2,9 +2,10 @@
 // shape and our internal MappedProduct DTO. No I/O, no DB. Tested in
 // isolation with the staging Postman samples.
 
+import { ProductVariantStatus } from '@pazarsync/db/enums';
+
 import type {
   MappedProduct,
-  MappedProductFastDeliveryOption,
   MappedProductImage,
   MappedProductsPageMeta,
   MappedProductVariant,
@@ -44,6 +45,60 @@ function nullableDecimalString(value: number | null | undefined): string | null 
   return value.toFixed(2);
 }
 
+// One status per variant. Trendyol's four wire flags are independent booleans,
+// so more than one can be true at once; the single precedence archived >
+// blacklisted > locked > onSale keeps the derived statuses mutually exclusive,
+// so per-status counts add up to the catalog. A missing flag counts as false.
+export function deriveVariantStatus(flags: {
+  onSale?: boolean;
+  archived?: boolean;
+  blacklisted?: boolean;
+  locked?: boolean;
+}): ProductVariantStatus {
+  if (flags.archived === true) return ProductVariantStatus.ARCHIVED;
+  if (flags.blacklisted === true) return ProductVariantStatus.BLACKLISTED;
+  if (flags.locked === true) return ProductVariantStatus.LOCKED;
+  if (flags.onSale === true) return ProductVariantStatus.ON_SALE;
+  return ProductVariantStatus.NOT_ON_SALE;
+}
+
+// The raw reason Trendyol reported for the given status: lockReason belongs to
+// LOCKED and blacklistReason to BLACKLISTED. No other status carries a reason;
+// a leftover lockReason on an archived or on-sale variant does not describe its
+// current state.
+function reasonForStatus(
+  status: ProductVariantStatus,
+  reasons: { lockReason?: string | null; blacklistReason?: string | null },
+): string | null | undefined {
+  switch (status) {
+    case ProductVariantStatus.LOCKED:
+      return reasons.lockReason;
+    case ProductVariantStatus.BLACKLISTED:
+      return reasons.blacklistReason;
+    case ProductVariantStatus.ON_SALE:
+    case ProductVariantStatus.NOT_ON_SALE:
+    case ProductVariantStatus.ARCHIVED:
+      return null;
+    default: {
+      const _exhaustive: never = status;
+      throw new Error(`Unhandled variant status: ${_exhaustive}`);
+    }
+  }
+}
+
+// The reason stored next to the derived status (statusReason). An empty or
+// whitespace-only string collapses to null so the UI never shows a blank
+// reason; a real code is returned trimmed.
+export function deriveStatusReason(
+  status: ProductVariantStatus,
+  reasons: { lockReason?: string | null; blacklistReason?: string | null },
+): string | null {
+  const raw = reasonForStatus(status, reasons);
+  if (raw === null || raw === undefined) return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 // Trendyol's panel concatenates every "Renk" attribute with a space — categories
 // often emit two entries (attrId 47 + 295 for cottons, both as attributeName
 // "Renk") that the seller sees as e.g. "Red Haki" or "Black Siyah". Picking just
@@ -69,15 +124,6 @@ function mapImages(images: { url: string }[]): MappedProductImage[] {
   return images.map((img, position) => ({ url: img.url, position }));
 }
 
-function mapFastDeliveryOptions(
-  opts: { deliveryOptionType: string; deliveryDailyCutOffHour: string }[],
-): MappedProductFastDeliveryOption[] {
-  return opts.map((o) => ({
-    deliveryOptionType: o.deliveryOptionType,
-    deliveryDailyCutOffHour: o.deliveryDailyCutOffHour,
-  }));
-}
-
 function mapVariant(variant: TrendyolVariant): MappedProductVariant {
   // Trendyol's `approved` endpoint sometimes returns variants where
   // `price`, `stock`, or `deliveryOptions` are absent — typically
@@ -85,6 +131,7 @@ function mapVariant(variant: TrendyolVariant): MappedProductVariant {
   // completion. Treat each section as optional with sane defaults so
   // a single bad variant doesn't kill the whole sync.
   const variantAttrs = variant.attributes ?? [];
+  const status = deriveVariantStatus(variant);
   return {
     platformVariantId: BigInt(variant.variantId),
     barcode: variant.barcode,
@@ -94,14 +141,7 @@ function mapVariant(variant: TrendyolVariant): MappedProductVariant {
     vatRate: typeof variant.vatRate === 'number' ? variant.vatRate : null,
     quantity: variant.stock?.quantity ?? 0,
     deliveryDuration: variant.deliveryOptions?.deliveryDuration ?? null,
-    isRushDelivery: variant.deliveryOptions?.isRushDelivery ?? false,
-    fastDeliveryOptions: mapFastDeliveryOptions(variant.deliveryOptions?.fastDeliveryOptions ?? []),
     productUrl: variant.productUrl ?? null,
-    locationBasedDelivery: variant.locationBasedDelivery ?? null,
-    onSale: variant.onSale ?? false,
-    archived: variant.archived ?? false,
-    blacklisted: variant.blacklisted ?? false,
-    locked: variant.locked ?? false,
     size: extractVariantLabel(variantAttrs),
     attributes: variantAttrs,
     // Desi: Trendyol bu alanı çoğu üründe hiç göndermez (ya da hesaplamadan
@@ -113,6 +153,8 @@ function mapVariant(variant: TrendyolVariant): MappedProductVariant {
     // imkânsız. `nullableDecimalString` 0/absent → null, `?? '0'` tabana indirir.
     syncedDimensionalWeight: nullableDecimalString(variant.dimensionalWeight) ?? '0',
     syncedCommissionRate: nullableDecimalString(variant.commission),
+    status,
+    statusReason: deriveStatusReason(status, variant),
   };
 }
 

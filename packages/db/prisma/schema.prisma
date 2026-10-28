@@ -298,6 +298,19 @@ enum CampaignPriceSelection {
   CUSTOM
 }
 
+// Listing status of one ProductVariant (a Trendyol SKU). Mutually exclusive by
+// construction: the catalog sync maps Trendyol's onSale / archived / blacklisted /
+// locked flags with one precedence (ARCHIVED, then BLACKLISTED, then LOCKED, then
+// ON_SALE, otherwise NOT_ON_SALE), so per-status counts add up to the catalog.
+// Absence from the feed is not a status; it is ProductVariant.delistedAt.
+enum ProductVariantStatus {
+  ON_SALE
+  NOT_ON_SALE
+  LOCKED
+  BLACKLISTED
+  ARCHIVED
+}
+
 // ─── Models ──────────────────────────────────────────
 
 model UserProfile {
@@ -467,25 +480,29 @@ model Product {
   categoryName       String?   @map("category_name")
   color              String?
   attributes         Json      @default("[]")
-  approved           Boolean   @default(true)
   platformCreatedAt  DateTime? @map("platform_created_at")
   platformModifiedAt DateTime? @map("platform_modified_at")
   lastSyncedAt       DateTime  @default(now()) @map("last_synced_at")
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
-  // Denormalized SUM(variants[*].quantity) for the store. Updated
-  // transactionally inside upsertBatch in the sync worker — see
-  // apps/sync-worker/src/handlers/products.ts. Indexed for the
+  // Denormalized SUM(quantity) over the product's variants in the default
+  // listing scope (LISTED_VARIANT_WHERE in @pazarsync/catalog-sync: delistedAt
+  // IS NULL and status not ARCHIVED). Written only by refreshProductAggregates
+  // (@pazarsync/catalog-sync), inside the transaction of the write that changed
+  // the variants: the catalog upsert (full scan and barcode repair), the hourly
+  // delta, the delist pass and the order-intake stock decrement. Indexed for the
   // products-list sort=totalStock workflow (pricing + restock review).
   totalStock Int @default(0) @map("total_stock")
 
-  // Denormalized MIN/MAX(variants[*].salePrice) for the store, updated in the
-  // same upsertBatch transaction as totalStock (NOT a trigger — the sync worker
-  // stays the single writer). Prisma 7 cannot MAX() over a Decimal child
-  // relation in orderBy, so products-list sort=salePrice reads these columns,
-  // and the salePrice range filter (PR-B2) tests overlap against both bounds.
-  // NULL only for a product with zero variants. No @updatedAt (data columns).
+  // Denormalized MIN/MAX(salePrice) over the same in-scope variants, written by
+  // the same refreshProductAggregates call as totalStock (application code, NOT
+  // a trigger). Prisma 7 cannot MAX() over a Decimal child relation in orderBy,
+  // so products-list sort=salePrice reads these columns, and the salePrice range
+  // filter (PR-B2) tests overlap against both bounds. NULL when the product has
+  // no in-scope variant. The confirmed price write (apps/api price-write.service)
+  // does not refresh them yet, so they can lag until the next delta or full
+  // scan. No @updatedAt (data columns).
   minSalePrice Decimal? @map("min_sale_price") @db.Decimal(12, 2)
   maxSalePrice Decimal? @map("max_sale_price") @db.Decimal(12, 2)
 
@@ -495,7 +512,6 @@ model Product {
 
   @@unique([storeId, platformContentId])
   @@index([organizationId])
-  @@index([storeId, productMainId])
   @@index([storeId, brandId])
   @@index([storeId, totalStock])
   @@index([storeId, minSalePrice, maxSalePrice])
@@ -518,7 +534,6 @@ model ProductVariant {
   salePrice               Decimal  @map("sale_price") @db.Decimal(12, 2)
   listPrice               Decimal  @map("list_price") @db.Decimal(12, 2)
   vatRate                 Int?     @map("vat_rate")
-  costPrice               Decimal? @map("cost_price") @db.Decimal(12, 2)
   // PSF muafiyet kuralı: tüm OrderItem'larda isDigital=true → PSF=0 (design §3.7).
   // V1: kullanıcı UI'dan işaretler (variant settings toggle). V2: Trendyol kategori
   // lookup ile otomatik tahmin.
@@ -548,20 +563,23 @@ model ProductVariant {
   dimensionalWeight       Decimal? @map("dimensional_weight") @db.Decimal(6, 2)
   quantity                Int      @default(0)
   deliveryDuration        Int?     @map("delivery_duration")
-  isRushDelivery          Boolean  @default(false) @map("is_rush_delivery")
-  fastDeliveryOptions     Json     @default("[]") @map("fast_delivery_options")
   productUrl              String?  @map("product_url") @db.Text
-  locationBasedDelivery   String?  @map("location_based_delivery")
-  onSale                  Boolean  @default(true) @map("on_sale")
-  archived                Boolean  @default(false)
   // Stamped when a COMPLETE full catalog scan no longer returns this variant
   // (absence-from-feed), cleared on reappearance; never hard-delete because
   // order history references variants.
   delistedAt              DateTime? @map("delisted_at")
-  blacklisted             Boolean  @default(false)
-  locked                  Boolean  @default(false)
   size                    String?
   attributes              Json     @default("[]")
+  // Listing status, owned by the catalog sync: upsertCatalogBatch
+  // (packages/catalog-sync) writes the value that deriveVariantStatus
+  // (packages/marketplace/src/trendyol/mapper.ts) derives from Trendyol's
+  // flags with the precedence archived -> ARCHIVED, blacklisted -> BLACKLISTED,
+  // locked -> LOCKED, onSale -> ON_SALE, otherwise NOT_ON_SALE. No route or
+  // user action edits it; the product_variant_status migration backfilled it
+  // once. Independent of delistedAt (absence from the feed). statusReason is
+  // Trendyol's lockReason for LOCKED, blacklistReason for BLACKLISTED, else null.
+  status                  ProductVariantStatus @default(ON_SALE)
+  statusReason            String?              @map("status_reason")
   lastSyncedAt            DateTime @default(now()) @map("last_synced_at")
   createdAt               DateTime @default(now()) @map("created_at")
   updatedAt               DateTime @updatedAt @map("updated_at")
@@ -586,9 +604,9 @@ model ProductVariant {
   @@index([storeId, barcode])
   @@index([organizationId])
   @@index([productId])
-  @@index([storeId, stockCode])
-  @@index([storeId, onSale, archived])
   @@index([storeId, delistedAt])
+  // Products page: per-store status filter, per-status counts and the default listing scope.
+  @@index([storeId, status])
   @@map("product_variants")
 }
 

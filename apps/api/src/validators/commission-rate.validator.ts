@@ -24,7 +24,7 @@ const ProductScopeSchema = z.enum(['all', 'active']).openapi({
   description:
     "'all' returns every commission rate row matching the other filters. 'active' " +
     'restricts to (categoryId, brandId) combinations where the store has at least ' +
-    "one approved Product with a non-archived variant. Use 'active' to render the " +
+    "one Product with a non-archived variant. Use 'active' to render the " +
     'panel "Sattıklarım" tab.',
   example: 'all',
 });
@@ -115,7 +115,7 @@ export const CommissionRateListItemSchema = z
       .nonnegative()
       .openapi({
         description:
-          'Count of approved + non-archived products in this store matching the rule ' +
+          'Count of products with a non-archived variant in this store matching the rule ' +
           'scope. For CATEGORY rows: across all brands. For CATEGORY_BRAND: only this ' +
           'specific (categoryId, brandId) pair.',
         example: 42,

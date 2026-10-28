@@ -55,11 +55,7 @@ function makeTrendyolPage(opts: PageOptions): unknown {
             stockCode: `sk-${opts.contentId.toString()}`,
             attributes: [],
             onSale: true,
-            deliveryOptions: {
-              deliveryDuration: 1,
-              isRushDelivery: false,
-              fastDeliveryOptions: [],
-            },
+            deliveryOptions: { deliveryDuration: 1 },
             stock: { quantity: 5, lastModifiedDate: 0 },
             price: { salePrice: 100, listPrice: 100 },
             vatRate: 20,

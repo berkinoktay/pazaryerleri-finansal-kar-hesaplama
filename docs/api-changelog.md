@@ -13,6 +13,76 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Products list: a default listing scope, the variant status enum, and counters that match
+  the list** (`GET /v1/organizations/{orgId}/stores/{storeId}/products`,
+  `GET .../products/facets`, `GET /v1/organizations/{orgId}/products/missing-cost-stats`).
+  Breaking for the list and facets endpoints; the web client ships the matching change in the
+  same PR.
+  - **Default scope.** Without `status`, the list returns every variant that is still in
+    Trendyol's feed (`delistedAt` null) and not `ARCHIVED`: on-sale, out-of-stock or
+    closed-for-sale, locked and blacklisted variants alike. A product is listed when at least
+    one of its variants is in scope, and its `variants[]` / `variantCount` cover only those
+    variants. Previously there was no default and the web page always sent `status=onSale`.
+  - **`status` values.** The filter takes the `ProductVariantStatus` values `ON_SALE`,
+    `NOT_ON_SALE`, `LOCKED`, `BLACKLISTED`, `ARCHIVED`, plus the API-only `DELISTED`. Every
+    value except `DELISTED` means "in that status and not delisted"; `DELISTED` returns every
+    delisted variant whatever its last status, so the six values partition the catalog. The
+    old values `onSale`, `archived`, `locked` and `blacklisted` are removed and now return
+    `422 VALIDATION_ERROR`.
+  - **Search (`q`).** A barcode or stock code hit now counts only on a variant that passes the
+    variant-level filters (`status` or the default scope, `overrideMissing`, `vatRateIn`).
+    Searching the barcode of an archived variant without `status=ARCHIVED` no longer returns
+    its parent with only the unrelated in-scope siblings. Title and `productMainId` hits are
+    unchanged.
+  - **`overrideMissing`.** Only `cost` remains, and it now means "no active (non-archived) cost
+    profile attached" instead of reading the unused `costPrice` column, so the tab matches the
+    missing-cost banner. Without `status` it also applies the default scope. `vat` is removed
+    (Trendyol sends a VAT rate on every variant and the page has no VAT input) and returns
+    `422 VALIDATION_ERROR`. `vatRateIn` is unchanged.
+  - **`VariantSummary`.** `status` is now the `ProductVariantStatus` enum (it was the computed
+    `onSale | archived | locked | blacklisted | inactive`). New nullable `statusReason`:
+    Trendyol's `lockReason` for a `LOCKED` variant and `blacklistReason` for a `BLACKLISTED`
+    one, null otherwise. Removed: `costPrice` (cost lives in cost profiles), `isRushDelivery`,
+    `fastDeliveryOptions` and `locationBasedDelivery` (Trendyol dropped the rush-delivery
+    fields in August 2026; `deliveryDuration` is the only delivery signal).
+  - **`ProductWithVariants`.** `description` is removed from the list response (it stays in
+    the database).
+  - **Facets.** `ProductFacetsResponse.overrideCounts` is now `{ missingCost, total }`
+    (`missingVat` removed), both over the default scope: `total` equals the unfiltered list's
+    `pagination.total` and `missingCost` equals the `overrideMissing=cost` list's total. Brand
+    and category facets count only products with an in-scope variant. The product-pricing
+    toolbar reads its brand/category options from this endpoint while the pricing list still
+    returns archived and delisted variants, so a brand or category whose products are all
+    archived or delisted keeps its pricing rows but has no filter option there (accepted for
+    now).
+  - **Missing-cost stats.** `count` and `totalVariants` keep their names but count only
+    in-scope variants (archived and delisted variants no longer inflate them). New
+    `missingProductCount` (products with at least one cost-missing in-scope variant, each
+    counted once) at the top level and in every `byStore` row; `byStore` lists stores with at
+    least one in-scope variant, ordered by `storeId`. Additive for clients that ignore unknown
+    fields.
+  - **Product aggregates.** `Product.totalStock`, `minSalePrice` and `maxSalePrice`, which back
+    `stockMin` / `stockMax`, `salePriceMin` / `salePriceMax` and the `salePrice` / `totalStock`
+    sorts, now cover only in-scope variants: an archived or delisted variant no longer moves a
+    product's stock or price range. The parameter descriptions say so; no shape change.
+
+- **Barem eligibility in shipping estimates reads `deliveryDuration` alone, and commission-rate
+  product counts follow the variant status.** No request or response shape changes:
+  - Every per-variant shipping estimate (the `GET .../products` variant fields
+    `estimatedShippingNet` and `shippingTariffApplied`, the shipping fee in
+    `GET .../product-pricing`, and the commission tariff, Plus tariff, advantage label, flash
+    product, discount and campaign estimates built on that fee) treats a variant as
+    Barem-eligible only when its `deliveryDuration` is set and within the default carrier's
+    `maxBaremEligibleDeliveryDuration` (0 = ships today, 1 = ships by tomorrow). The
+    `isRushDelivery` and `fastDeliveryOptions` signals, which Trendyol stopped sending in August
+    2026, no longer qualify a variant; a variant without a `deliveryDuration` gets the desi-based
+    tariff.
+  - `GET .../commission-rates`: `productCount` and `productScope=active` count a product when at
+    least one of its variants has a status other than `ARCHIVED` (a variant removed from the
+    Trendyol feed still counts). The product-level `approved` flag, always true for the synced
+    catalog, is no longer part of the rule; `GET .../product-pricing` stops filtering its
+    candidate set on it too, which leaves that set unchanged.
+
 - **Each campaign price option now carries its own basket block, the campaign estimate returns
   that block, and the `current` estimate is per-unit again.** Three changes to the
   `MarketplaceCampaigns` surface, all inside this Unreleased (the vertical has not shipped):

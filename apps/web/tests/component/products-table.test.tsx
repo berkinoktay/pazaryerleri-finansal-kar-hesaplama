@@ -1,11 +1,22 @@
 import { NextIntlClientProvider } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 
+import { ProductVariantStatus } from '@pazarsync/db/enums';
+
 import type { ProductWithVariants } from '@/features/products/api/list-products.api';
 import { ProductsTable } from '@/features/products/components/products-table';
 import { FORMATS } from '@/i18n/formats';
 
-import { render, screen } from '@/../tests/helpers/render';
+import trMessages from '../../messages/tr.json';
+
+// Shared builders under this file's historical local names, so the test
+// bodies below (and later edits to them) keep reading unchanged.
+import {
+  makeProductWithVariants as makeProduct,
+  makeVariantSummary as makeVariant,
+} from '@/../tests/helpers/product-fixtures';
+import { http, HttpResponse, server } from '@/../tests/helpers/msw';
+import { render, screen, waitFor } from '@/../tests/helpers/render';
 
 // Stripped-down translations covering only what ProductsTable + its
 // children read. Keeps the test deterministic without loading the full
@@ -28,12 +39,9 @@ const messages = {
       stock: 'Stok',
       status: 'Durum',
     },
-    delivery: {
-      sameDay: 'Bugün Kargoda',
-      fast: 'Hızlı Teslimat',
-      standard: 'Standart Teslimat',
-      mixed: 'Karışık',
-    },
+    delivery: trMessages.products.delivery,
+    statusBadge: trMessages.products.statusBadge,
+    statusReasons: trMessages.products.statusReasons,
     table: {
       variantDelisted: 'Delisted',
     },
@@ -42,12 +50,7 @@ const messages = {
     a11y: { expandRow: 'Varyantları göster', collapseRow: 'Varyantları gizle' },
     filters: {
       searchPlaceholder: 'Ürün adı, model kodu, stok kodu, barkod ile ara…',
-      statusOptions: {
-        onSale: 'Satışta',
-        archived: 'Arşivde',
-        locked: 'Kilitli',
-        blacklisted: 'Engelli',
-      },
+      statusOptions: trMessages.products.filters.statusOptions,
     },
     facets: {
       brand: {
@@ -113,60 +116,6 @@ const messages = {
   },
 };
 
-function makeVariant(
-  overrides: Partial<ProductWithVariants['variants'][number]> = {},
-): ProductWithVariants['variants'][number] {
-  return {
-    id: `v-${Math.random().toString(36).slice(2, 8)}`,
-    platformVariantId: '10010',
-    barcode: 'BC-0001',
-    stockCode: 'STK-A',
-    size: 'M',
-    salePrice: '100.00',
-    listPrice: '100.00',
-    vatRate: 20,
-    costPrice: null,
-    quantity: 5,
-    deliveryDuration: 1,
-    isRushDelivery: true,
-    fastDeliveryOptions: [],
-    productUrl: null,
-    locationBasedDelivery: 'DISABLED',
-    status: 'onSale',
-    delistedAt: null,
-    currentCostTry: null,
-    profileCount: 0,
-    costStatus: 'NO_PROFILES',
-    dimensionalWeight: null,
-    syncedDimensionalWeight: null,
-    isDimensionalWeightOverridden: false,
-    estimatedShippingNet: null,
-    shippingCarrierCode: null,
-    shippingTariffApplied: null,
-    shippingEstimateStatus: 'NO_DESI',
-    ...overrides,
-  };
-}
-
-function makeProduct(overrides: Partial<ProductWithVariants> = {}): ProductWithVariants {
-  return {
-    id: `p-${Math.random().toString(36).slice(2, 8)}`,
-    productMainId: 'PMID-1',
-    platformContentId: '1001',
-    title: 'Test Product',
-    description: null,
-    brand: { id: '1', name: 'Modline' },
-    category: { id: '2', name: 'Gömlek' },
-    color: 'Beyaz',
-    images: [],
-    variantCount: 1,
-    variants: [makeVariant()],
-    lastSyncedAt: '2026-04-27T12:00:00Z',
-    platformModifiedAt: '2026-04-26T12:00:00Z',
-    ...overrides,
-  };
-}
-
 const noop = (): void => {};
 
 const baseProps = {
@@ -201,6 +150,156 @@ function renderTable(data: ProductWithVariants[]) {
 }
 
 describe('ProductsTable', () => {
+  const deliveryMessages = trMessages.products.delivery;
+  const statusBadgeMessages = trMessages.products.statusBadge;
+
+  // Text content of the table row that renders `identifier` (a stock code or model code).
+  function rowText(identifier: string): string {
+    return screen.getByText(identifier).closest('tr')?.textContent ?? '';
+  }
+
+  it('shows the status badge and its reason button on a single-variant parent row', () => {
+    renderTable([
+      makeProduct({
+        id: 'p-locked-solo',
+        variantCount: 1,
+        variants: [
+          makeVariant({
+            id: 'v-locked-solo',
+            stockCode: 'STK-LOCKED-SOLO',
+            status: ProductVariantStatus.LOCKED,
+            statusReason: 'CRITICAL_SALE_PRICE_CHANGE',
+            quantity: 4,
+            delistedAt: null,
+          }),
+        ],
+      }),
+    ]);
+
+    expect(rowText('STK-LOCKED-SOLO')).toContain(statusBadgeMessages.locked);
+    expect(
+      screen.getByRole('button', {
+        name: statusBadgeMessages.reasonAria.replace('{label}', statusBadgeMessages.locked),
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('splits not-on-sale variant rows into out-of-stock and closed badges', async () => {
+    const { user } = renderTable([
+      makeProduct({
+        id: 'p-stock-split',
+        variantCount: 3,
+        variants: [
+          makeVariant({
+            id: 'v-out',
+            stockCode: 'STK-OUT',
+            status: ProductVariantStatus.NOT_ON_SALE,
+            quantity: 0,
+            delistedAt: null,
+          }),
+          makeVariant({
+            id: 'v-closed',
+            stockCode: 'STK-CLOSED',
+            status: ProductVariantStatus.NOT_ON_SALE,
+            quantity: 6,
+            delistedAt: null,
+          }),
+          makeVariant({
+            id: 'v-on',
+            stockCode: 'STK-ON',
+            status: ProductVariantStatus.ON_SALE,
+            quantity: 6,
+            delistedAt: null,
+          }),
+        ],
+      }),
+    ]);
+    // Collapsed, the multi-variant parent row only shows the aggregate count.
+    expect(screen.queryByText(statusBadgeMessages.outOfStock)).toBeNull();
+    expect(screen.queryByText(statusBadgeMessages.closed)).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: messages.products.a11y.expandRow }));
+
+    expect(rowText('STK-OUT')).toContain(statusBadgeMessages.outOfStock);
+    expect(rowText('STK-CLOSED')).toContain(statusBadgeMessages.closed);
+    expect(rowText('STK-ON')).not.toContain(statusBadgeMessages.outOfStock);
+    expect(rowText('STK-ON')).not.toContain(statusBadgeMessages.closed);
+  });
+
+  it('shows the delisted badge instead of the status badge on a single-variant parent row', () => {
+    renderTable([
+      makeProduct({
+        id: 'p-delisted-solo',
+        variantCount: 1,
+        variants: [
+          makeVariant({
+            id: 'v-delisted-solo',
+            stockCode: 'STK-DELISTED-SOLO',
+            status: ProductVariantStatus.LOCKED,
+            statusReason: 'CRITICAL_SALE_PRICE_CHANGE',
+            delistedAt: '2026-10-20T09:00:00Z',
+          }),
+        ],
+      }),
+    ]);
+
+    const text = rowText('STK-DELISTED-SOLO');
+    expect(text).toContain(messages.products.table.variantDelisted);
+    expect(text).not.toContain(statusBadgeMessages.locked);
+  });
+
+  it('renders delivery badges from deliveryDuration', () => {
+    renderTable([
+      makeProduct({
+        id: 'p-today',
+        variantCount: 1,
+        variants: [makeVariant({ id: 'v-today', stockCode: 'STK-TODAY', deliveryDuration: 0 })],
+      }),
+      makeProduct({
+        id: 'p-tomorrow',
+        variantCount: 1,
+        variants: [
+          makeVariant({ id: 'v-tomorrow', stockCode: 'STK-TOMORROW', deliveryDuration: 1 }),
+        ],
+      }),
+      makeProduct({
+        id: 'p-later',
+        variantCount: 1,
+        variants: [makeVariant({ id: 'v-later', stockCode: 'STK-LATER', deliveryDuration: 3 })],
+      }),
+      makeProduct({
+        id: 'p-unknown',
+        color: 'White',
+        variantCount: 1,
+        variants: [
+          makeVariant({
+            id: 'v-unknown',
+            stockCode: 'STK-UNKNOWN',
+            size: 'M',
+            salePrice: '100.00',
+            deliveryDuration: null,
+          }),
+        ],
+      }),
+      makeProduct({
+        id: 'p-mixed',
+        productMainId: 'PMID-MIXED',
+        variantCount: 2,
+        variants: [
+          makeVariant({ id: 'v-mixed-a', stockCode: 'STK-MIXED-A', deliveryDuration: 0 }),
+          makeVariant({ id: 'v-mixed-b', stockCode: 'STK-MIXED-B', deliveryDuration: 1 }),
+        ],
+      }),
+    ]);
+
+    expect(rowText('STK-TODAY')).toContain(deliveryMessages.today);
+    expect(rowText('STK-TOMORROW')).toContain(deliveryMessages.tomorrow);
+    expect(rowText('STK-LATER')).toContain(deliveryMessages.inDays.replace('{days}', '3'));
+    // Size, color and price are set on this row, so its only em dash is the delivery cell.
+    expect(rowText('STK-UNKNOWN')).toContain('\u2014');
+    expect(rowText('PMID-MIXED')).toContain(deliveryMessages.mixed);
+  });
+
   it('renders single-variant products flat (no chevron)', () => {
     const product = makeProduct({
       title: 'Solo Product',
@@ -366,5 +465,46 @@ describe('ProductsTable', () => {
     const listedRow = screen.getByText(/STK-LIVE/).closest('tr');
     expect(delistedRow?.textContent).toContain('Delisted');
     expect(listedRow?.textContent).not.toContain('Delisted');
+  });
+});
+
+describe('ProductsTable store switch', () => {
+  it('saves desi to the new store after a store switch re-renders the table', async () => {
+    const nextStoreId = '00000000-0000-0000-0000-000000000003';
+    const desiMessages = trMessages.products.desiCell;
+    const requestedStoreIds: string[] = [];
+    server.use(
+      http.patch(
+        'http://localhost:3001/v1/organizations/:orgId/stores/:storeId/products/variants/:variantId/dimensional-weight',
+        ({ params }) => {
+          requestedStoreIds.push(String(params['storeId']));
+          return HttpResponse.json({
+            id: 'v-desi',
+            dimensionalWeight: '2',
+            syncedDimensionalWeight: null,
+            isDimensionalWeightOverridden: true,
+          });
+        },
+      ),
+    );
+    const data = [
+      makeProduct({
+        id: 'p-desi',
+        variantCount: 1,
+        variants: [makeVariant({ id: 'v-desi', stockCode: 'STK-DESI' })],
+      }),
+    ];
+
+    // Rendered with the full tr.json catalog from the shared render helper.
+    const { rerender, user } = render(<ProductsTable {...baseProps} data={data} />);
+    // A store switch runs router.refresh(): the page re-renders this table with
+    // the new storeId instead of remounting it.
+    rerender(<ProductsTable {...baseProps} storeId={nextStoreId} data={data} />);
+
+    await user.click(screen.getByRole('button', { name: desiMessages.addDesi }));
+    await user.type(screen.getByLabelText(desiMessages.popover.title), '2');
+    await user.click(screen.getByRole('button', { name: desiMessages.popover.save }));
+
+    await waitFor(() => expect(requestedStoreIds).toEqual([nextStoreId]));
   });
 });

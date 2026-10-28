@@ -518,13 +518,13 @@ interface ComputedPricingRow {
   costMarkupPct: Decimal | null;
 }
 
-/** Builds the SQL `where` for the candidate set: org + store + approved + cheap filters. */
+/** Builds the SQL `where` for the candidate set: org + store + cheap filters. */
 function buildListWhere(
   orgId: string,
   storeId: string,
   filters: ListProductPricingFilters,
 ): Prisma.ProductVariantWhereInput {
-  const productWhere: Prisma.ProductWhereInput = { approved: true };
+  const productWhere: Prisma.ProductWhereInput = {};
   if (filters.categoryId !== undefined) {
     productWhere.categoryId = BigInt(filters.categoryId);
   }

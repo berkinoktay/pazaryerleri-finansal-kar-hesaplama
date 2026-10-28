@@ -75,12 +75,12 @@ describe('InvalidReferenceError', () => {
 describe('ValidationError', () => {
   it('has status 422 and stable code VALIDATION_ERROR', () => {
     const err = new ValidationError([
-      { field: 'costPrice', code: 'NUMBER_TOO_SMALL', meta: { min: 0 } },
+      { field: 'vatRate', code: 'NUMBER_TOO_SMALL', meta: { min: 0 } },
     ]);
     expect(err.status).toBe(422);
     expect(err.code).toBe('VALIDATION_ERROR');
     expect(err.issues).toHaveLength(1);
-    expect(err.issues[0]?.field).toBe('costPrice');
+    expect(err.issues[0]?.field).toBe('vatRate');
   });
 });
 

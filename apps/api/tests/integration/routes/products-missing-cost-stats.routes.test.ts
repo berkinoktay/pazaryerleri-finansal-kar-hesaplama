@@ -1,8 +1,11 @@
 /**
- * Integration tests for GET /v1/organizations/:orgId/products/missing-cost-stats (Task 6.2).
+ * Integration tests for GET /v1/organizations/:orgId/products/missing-cost-stats.
  *
- * Returns { count, totalVariants, byStore: [{ storeId, missingCount, totalVariants }] }
- * where count = number of variants with 0 active attached profiles.
+ * Returns { count, missingProductCount, totalVariants, byStore: [{ storeId,
+ * missingCount, missingProductCount, totalVariants }] } over the default
+ * listing scope (variants still in Trendyol's feed that are not ARCHIVED).
+ * A variant misses cost when no active (non-archived) cost profile is
+ * attached; missingProductCount counts each such product once.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -11,6 +14,7 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import type { ProductVariantStatus } from '@pazarsync/db';
 
 import { createApp } from '../../../src/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
@@ -19,10 +23,10 @@ import { createMembership, createOrganization, createStore } from '../../helpers
 
 const app = createApp();
 
-// ─── Seed helpers ─────────────────────────────────────────────────────────────
+// --- Seed helpers ---
 
-async function seedVariant(organizationId: string, storeId: string) {
-  const product = await prisma.product.create({
+async function seedProduct(organizationId: string, storeId: string) {
+  return prisma.product.create({
     data: {
       organizationId,
       storeId,
@@ -31,21 +35,39 @@ async function seedVariant(organizationId: string, storeId: string) {
       title: 'Test Product',
     },
   });
+}
+
+interface SeedVariantOptions {
+  // Reuse an existing product to build a multi-variant product.
+  productId?: string;
+  status?: ProductVariantStatus;
+  delisted?: boolean;
+}
+
+async function seedVariant(organizationId: string, storeId: string, opts: SeedVariantOptions = {}) {
+  const productId = opts.productId ?? (await seedProduct(organizationId, storeId)).id;
   return prisma.productVariant.create({
     data: {
       organizationId,
       storeId,
-      productId: product.id,
+      productId,
       platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000)),
       barcode: `BC-${randomUUID().slice(0, 8)}`,
       stockCode: `STK-${randomUUID().slice(0, 8)}`,
       salePrice: new Decimal('100.00'),
       listPrice: new Decimal('100.00'),
+      status: opts.status ?? 'ON_SALE',
+      delistedAt: opts.delisted === true ? new Date() : null,
     },
   });
 }
 
-async function attachProfile(organizationId: string, storeId: string, variantId: string) {
+async function attachProfile(
+  organizationId: string,
+  storeId: string,
+  variantId: string,
+  opts: { archived?: boolean } = {},
+) {
   const profile = await prisma.costProfile.create({
     data: {
       organizationId,
@@ -56,6 +78,7 @@ async function attachProfile(organizationId: string, storeId: string, variantId:
       currency: 'TRY',
       vatRate: 0,
       fxRateMode: 'AUTO',
+      archivedAt: opts.archived === true ? new Date() : null,
     },
   });
   await prisma.productVariantCostProfile.create({
@@ -63,11 +86,26 @@ async function attachProfile(organizationId: string, storeId: string, variantId:
   });
 }
 
-type MissingStatsBody = {
-  count: number;
+interface StoreRow {
+  storeId: string;
+  missingCount: number;
+  missingProductCount: number;
   totalVariants: number;
-  byStore: { storeId: string; missingCount: number; totalVariants: number }[];
-};
+}
+
+interface MissingStatsBody {
+  count: number;
+  missingProductCount: number;
+  totalVariants: number;
+  byStore: StoreRow[];
+}
+
+async function setupOrg(): Promise<{ accessToken: string; orgId: string }> {
+  const user = await createAuthenticatedTestUser();
+  const org = await createOrganization();
+  await createMembership(org.id, user.id);
+  return { accessToken: user.accessToken, orgId: org.id };
+}
 
 async function callStats(
   accessToken: string,
@@ -80,7 +118,7 @@ async function callStats(
   return { status: res.status, body };
 }
 
-// ─── Tests ────────────────────────────────────────────────────────────────────
+// --- Tests ---
 
 describe('GET /v1/organizations/:orgId/products/missing-cost-stats', () => {
   beforeAll(async () => {
@@ -105,77 +143,118 @@ describe('GET /v1/organizations/:orgId/products/missing-cost-stats', () => {
   });
 
   it('returns zeroes when org has no variants', async () => {
-    const user = await createAuthenticatedTestUser();
-    const org = await createOrganization();
-    await createMembership(org.id, user.id);
+    const { accessToken, orgId } = await setupOrg();
 
-    const { status, body } = await callStats(user.accessToken, org.id);
+    const { status, body } = await callStats(accessToken, orgId);
+
     expect(status).toBe(200);
-    expect(body.count).toBe(0);
-    expect(body.totalVariants).toBe(0);
-    expect(body.byStore).toEqual([]);
+    expect(body).toEqual({ count: 0, missingProductCount: 0, totalVariants: 0, byStore: [] });
   });
 
-  it('counts variants with no profiles as missing', async () => {
-    const user = await createAuthenticatedTestUser();
-    const org = await createOrganization();
-    await createMembership(org.id, user.id);
-    const store = await createStore(org.id);
+  it('counts variants with no profiles as missing, one product each', async () => {
+    const { accessToken, orgId } = await setupOrg();
+    const store = await createStore(orgId);
+    await seedVariant(orgId, store.id);
+    await seedVariant(orgId, store.id);
 
-    await seedVariant(org.id, store.id);
-    await seedVariant(org.id, store.id);
+    const { status, body } = await callStats(accessToken, orgId);
 
-    const { status, body } = await callStats(user.accessToken, org.id);
     expect(status).toBe(200);
     expect(body.count).toBe(2);
+    expect(body.missingProductCount).toBe(2);
     expect(body.totalVariants).toBe(2);
-    const storeRow = body.byStore.find((r) => r.storeId === store.id);
-    expect(storeRow?.missingCount).toBe(2);
-    // byStore carries the store's OWN totalVariants so a store-scoped view can
-    // render "N missing of M" without mixing in other stores.
-    expect(storeRow?.totalVariants).toBe(2);
+    // byStore carries the store's OWN counts so a store-scoped view can render
+    // "N products / M variants missing" without mixing in other stores.
+    expect(body.byStore).toEqual([
+      { storeId: store.id, missingCount: 2, missingProductCount: 2, totalVariants: 2 },
+    ]);
   });
 
   it('does not count variants that have an active profile attached', async () => {
-    const user = await createAuthenticatedTestUser();
-    const org = await createOrganization();
-    await createMembership(org.id, user.id);
-    const store = await createStore(org.id);
+    const { accessToken, orgId } = await setupOrg();
+    const store = await createStore(orgId);
+    const costed = await seedVariant(orgId, store.id);
+    await seedVariant(orgId, store.id);
+    await attachProfile(orgId, store.id, costed.id);
 
-    const variant1 = await seedVariant(org.id, store.id);
-    const variant2 = await seedVariant(org.id, store.id);
-    // Attach a profile to variant1 — it should NOT be counted as missing
-    await attachProfile(org.id, store.id, variant1.id);
+    const { body } = await callStats(accessToken, orgId);
 
-    const { status, body } = await callStats(user.accessToken, org.id);
-    expect(status).toBe(200);
-    expect(body.count).toBe(1); // only variant2 is missing
+    expect(body.count).toBe(1);
+    expect(body.missingProductCount).toBe(1);
     expect(body.totalVariants).toBe(2);
-    const storeRow = body.byStore.find((r) => r.storeId === store.id);
-    expect(storeRow?.missingCount).toBe(1);
-    // Silence unused var warning
-    void variant2;
   });
 
-  it('groups missing counts by store when there are multiple stores', async () => {
-    const user = await createAuthenticatedTestUser();
-    const org = await createOrganization();
-    await createMembership(org.id, user.id);
-    const storeA = await createStore(org.id);
-    const storeB = await createStore(org.id);
+  it('treats a variant whose only profile is archived as missing', async () => {
+    const { accessToken, orgId } = await setupOrg();
+    const store = await createStore(orgId);
+    const variant = await seedVariant(orgId, store.id);
+    await attachProfile(orgId, store.id, variant.id, { archived: true });
 
-    await seedVariant(org.id, storeA.id);
-    await seedVariant(org.id, storeA.id);
-    const v = await seedVariant(org.id, storeB.id);
-    await attachProfile(org.id, storeB.id, v.id);
+    const { body } = await callStats(accessToken, orgId);
 
-    const { status, body } = await callStats(user.accessToken, org.id);
-    expect(status).toBe(200);
-    expect(body.count).toBe(2); // storeA has 2 missing; storeB has 0
+    expect(body.count).toBe(1);
+    expect(body.missingProductCount).toBe(1);
+  });
+
+  it('counts a product once when several of its variants miss cost', async () => {
+    const { accessToken, orgId } = await setupOrg();
+    const store = await createStore(orgId);
+    const product = await seedProduct(orgId, store.id);
+    await seedVariant(orgId, store.id, { productId: product.id });
+    await seedVariant(orgId, store.id, { productId: product.id, status: 'NOT_ON_SALE' });
+    const costed = await seedVariant(orgId, store.id, { productId: product.id });
+    await attachProfile(orgId, store.id, costed.id);
+
+    const { body } = await callStats(accessToken, orgId);
+
+    expect(body.count).toBe(2);
+    expect(body.missingProductCount).toBe(1);
     expect(body.totalVariants).toBe(3);
-    const rowA = body.byStore.find((r) => r.storeId === storeA.id);
-    const rowB = body.byStore.find((r) => r.storeId === storeB.id);
-    expect(rowA?.missingCount).toBe(2);
-    expect(rowB?.missingCount).toBe(0);
+  });
+
+  it('excludes ARCHIVED and delisted variants from every count', async () => {
+    const { accessToken, orgId } = await setupOrg();
+    const store = await createStore(orgId);
+    await seedVariant(orgId, store.id, { status: 'ARCHIVED' });
+    await seedVariant(orgId, store.id, { delisted: true });
+    await seedVariant(orgId, store.id, { status: 'LOCKED' });
+    const costed = await seedVariant(orgId, store.id, { status: 'BLACKLISTED' });
+    await attachProfile(orgId, store.id, costed.id);
+
+    const { body } = await callStats(accessToken, orgId);
+
+    // Only the LOCKED variant is in scope and cost-less; BLACKLISTED is in scope
+    // but costed; the ARCHIVED and the delisted variant are out of scope.
+    expect(body.count).toBe(1);
+    expect(body.missingProductCount).toBe(1);
+    expect(body.totalVariants).toBe(2);
+  });
+
+  it('groups counts by store, ordered by storeId, and omits stores with nothing in scope', async () => {
+    const { accessToken, orgId } = await setupOrg();
+    const storeA = await createStore(orgId);
+    const storeB = await createStore(orgId);
+    const storeC = await createStore(orgId);
+    await seedVariant(orgId, storeA.id);
+    await seedVariant(orgId, storeA.id);
+    const costed = await seedVariant(orgId, storeB.id);
+    await attachProfile(orgId, storeB.id, costed.id);
+    await seedVariant(orgId, storeC.id, { status: 'ARCHIVED' });
+    await seedVariant(orgId, storeC.id, { delisted: true });
+
+    const { status, body } = await callStats(accessToken, orgId);
+
+    expect(status).toBe(200);
+    expect(body.count).toBe(2);
+    expect(body.missingProductCount).toBe(2);
+    expect(body.totalVariants).toBe(3);
+    const byStoreId = (left: StoreRow, right: StoreRow): number =>
+      left.storeId < right.storeId ? -1 : 1;
+    expect(body.byStore).toEqual(
+      [
+        { storeId: storeA.id, missingCount: 2, missingProductCount: 2, totalVariants: 2 },
+        { storeId: storeB.id, missingCount: 0, missingProductCount: 0, totalVariants: 1 },
+      ].sort(byStoreId),
+    );
   });
 });

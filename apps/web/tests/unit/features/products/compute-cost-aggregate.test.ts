@@ -1,42 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { computeCostAggregate } from '@/features/products/components/parent-row-cost-cell';
-import type { VariantSummary } from '@/features/products/api/list-products.api';
+
+import { makeVariantSummary as makeVariant } from '../../../helpers/product-fixtures';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
-function makeVariant(overrides: Partial<VariantSummary> = {}): VariantSummary {
-  return {
-    id: `v-${Math.random().toString(36).slice(2, 8)}`,
-    platformVariantId: '10010',
-    barcode: 'BC-0001',
-    stockCode: 'STK-A',
-    size: 'M',
-    salePrice: '100.00',
-    listPrice: '100.00',
-    vatRate: 20,
-    costPrice: null,
-    quantity: 5,
-    deliveryDuration: 1,
-    isRushDelivery: false,
-    fastDeliveryOptions: [],
-    productUrl: null,
-    locationBasedDelivery: 'DISABLED',
-    status: 'onSale',
-    delistedAt: null,
-    currentCostTry: null,
-    profileCount: 0,
-    costStatus: 'NO_PROFILES',
-    dimensionalWeight: null,
-    syncedDimensionalWeight: null,
-    isDimensionalWeightOverridden: false,
-    estimatedShippingNet: null,
-    shippingCarrierCode: null,
-    shippingTariffApplied: null,
-    shippingEstimateStatus: 'NO_DESI',
-    ...overrides,
-  };
-}
+// Variants come from the shared builder (tests/helpers/product-fixtures.ts);
+// computeCostAggregate never reads ids, so the shared default id is enough.
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 

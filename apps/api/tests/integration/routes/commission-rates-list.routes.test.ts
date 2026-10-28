@@ -4,6 +4,7 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { ProductVariantStatus } from '@pazarsync/db/enums';
 
 import { createApp } from '@/app';
 
@@ -92,8 +93,34 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/commission-rates', () => 
   interface SeedProductSpec {
     categoryId: number;
     brandId?: number;
-    approved?: boolean;
-    variantArchived?: boolean;
+    variantStatus?: ProductVariantStatus;
+    variantDelistedAt?: Date;
+    // A second variant on the same product (never delisted), to pin that one
+    // non-archived variant is enough for the product to count.
+    extraVariantStatus?: ProductVariantStatus;
+  }
+
+  async function seedVariant(
+    orgId: string,
+    storeId: string,
+    productId: string,
+    status: ProductVariantStatus,
+    delistedAt: Date | null,
+  ) {
+    await prisma.productVariant.create({
+      data: {
+        organizationId: orgId,
+        storeId,
+        productId,
+        platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000_000)),
+        barcode: `BC-${randomUUID().slice(0, 8)}`,
+        stockCode: `SC-${randomUUID().slice(0, 8)}`,
+        salePrice: '100.00',
+        listPrice: '100.00',
+        status,
+        delistedAt,
+      },
+    });
   }
 
   async function seedProduct(orgId: string, storeId: string, spec: SeedProductSpec) {
@@ -106,22 +133,18 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/commission-rates', () => 
         title: 'Test Product',
         brandId: spec.brandId !== undefined ? BigInt(spec.brandId) : null,
         categoryId: BigInt(spec.categoryId),
-        approved: spec.approved ?? true,
       },
     });
-    await prisma.productVariant.create({
-      data: {
-        organizationId: orgId,
-        storeId,
-        productId: product.id,
-        platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000_000)),
-        barcode: `BC-${randomUUID().slice(0, 8)}`,
-        stockCode: `SC-${randomUUID().slice(0, 8)}`,
-        salePrice: '100.00',
-        listPrice: '100.00',
-        archived: spec.variantArchived ?? false,
-      },
-    });
+    await seedVariant(
+      orgId,
+      storeId,
+      product.id,
+      spec.variantStatus ?? ProductVariantStatus.ON_SALE,
+      spec.variantDelistedAt ?? null,
+    );
+    if (spec.extraVariantStatus !== undefined) {
+      await seedVariant(orgId, storeId, product.id, spec.extraVariantStatus, null);
+    }
     return product;
   }
 
@@ -308,19 +331,38 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/commission-rates', () => 
     expect(body.pagination.totalPages).toBe(0);
   });
 
-  // ─── 7. productCount excludes unapproved + variant-archived ───────────────
+  // --- 7. productCount excludes products whose variants are all archived ---
 
-  it('productCount counts only approved products with at least one non-archived variant', async () => {
+  it('productCount counts every product with at least one non-archived variant', async () => {
     const { user, orgId, storeId } = await setupOrgStore();
     await seedRate({ ruleKind: 'CATEGORY', categoryId: 411 });
-    // 3 active (approved + variant.archived=false)
+    // Counted (6): every status except ARCHIVED keeps a product in the count, a
+    // variant removed from the Trendyol feed (delistedAt set, not archived) still
+    // counts, and one non-archived variant is enough.
     await seedProduct(orgId, storeId, { categoryId: 411 });
-    await seedProduct(orgId, storeId, { categoryId: 411 });
-    await seedProduct(orgId, storeId, { categoryId: 411 });
-    // 1 unapproved (excluded)
-    await seedProduct(orgId, storeId, { categoryId: 411, approved: false });
-    // 1 with variant archived (excluded — no non-archived variant)
-    await seedProduct(orgId, storeId, { categoryId: 411, variantArchived: true });
+    await seedProduct(orgId, storeId, {
+      categoryId: 411,
+      variantStatus: ProductVariantStatus.NOT_ON_SALE,
+    });
+    await seedProduct(orgId, storeId, {
+      categoryId: 411,
+      variantStatus: ProductVariantStatus.LOCKED,
+    });
+    await seedProduct(orgId, storeId, {
+      categoryId: 411,
+      variantStatus: ProductVariantStatus.BLACKLISTED,
+    });
+    await seedProduct(orgId, storeId, { categoryId: 411, variantDelistedAt: new Date() });
+    await seedProduct(orgId, storeId, {
+      categoryId: 411,
+      variantStatus: ProductVariantStatus.ARCHIVED,
+      extraVariantStatus: ProductVariantStatus.ON_SALE,
+    });
+    // Excluded (1): the only variant is archived
+    await seedProduct(orgId, storeId, {
+      categoryId: 411,
+      variantStatus: ProductVariantStatus.ARCHIVED,
+    });
 
     const res = await app.request(
       listUrl(orgId, storeId, { ruleKind: 'CATEGORY', productScope: 'all' }),
@@ -329,7 +371,34 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/commission-rates', () => 
     expect(res.status).toBe(200);
     const body = (await res.json()) as ListResponseWire;
     expect(body.data).toHaveLength(1);
-    expect(body.data[0]?.productCount).toBe(3);
+    expect(body.data[0]?.productCount).toBe(6);
+  });
+
+  // --- 7b. productScope=active applies the same status rule ---
+
+  it('productScope=active drops a category whose only product has an archived variant', async () => {
+    const { user, orgId, storeId } = await setupOrgStore();
+    await seedRate({ ruleKind: 'CATEGORY', categoryId: 411 });
+    await seedRate({ ruleKind: 'CATEGORY', categoryId: 412 });
+    // 411: a product that is not on sale is still part of the catalog
+    await seedProduct(orgId, storeId, {
+      categoryId: 411,
+      variantStatus: ProductVariantStatus.NOT_ON_SALE,
+    });
+    // 412: the only product has an archived variant
+    await seedProduct(orgId, storeId, {
+      categoryId: 412,
+      variantStatus: ProductVariantStatus.ARCHIVED,
+    });
+
+    const res = await app.request(
+      listUrl(orgId, storeId, { ruleKind: 'CATEGORY', productScope: 'active' }),
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ListResponseWire;
+    expect(body.data.map((r) => r.categoryId)).toEqual(['411']);
+    expect(body.data[0]?.productCount).toBe(1);
   });
 
   // ─── 8. Page-based pagination ─────────────────────────────────────────────

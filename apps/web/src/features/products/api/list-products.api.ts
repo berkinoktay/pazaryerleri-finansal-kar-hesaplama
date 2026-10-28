@@ -1,4 +1,4 @@
-import type { components } from '@pazarsync/api-client';
+import type { components, paths } from '@pazarsync/api-client';
 
 import { apiClient } from '@/lib/api-client/browser';
 import { throwApiError } from '@/lib/api-error';
@@ -7,15 +7,29 @@ export type ProductWithVariants = components['schemas']['ProductWithVariants'];
 export type VariantSummary = components['schemas']['VariantSummary'];
 export type ListProductsResponse = components['schemas']['ListProductsResponse'];
 
+// Query params of the products list endpoint, read from the generated OpenAPI
+// paths so the filter vocabularies cannot drift from the backend validator.
+type ListProductsQuery = NonNullable<
+  paths['/v1/organizations/{orgId}/stores/{storeId}/products']['get']['parameters']['query']
+>;
+
+/** Every `status` filter value the list accepts: each ProductVariantStatus plus DELISTED. */
+export type ProductStatusFilter = NonNullable<ListProductsQuery['status']>;
+
 export interface ListProductsArgs {
   orgId: string;
   storeId: string;
   q?: string;
-  status?: 'onSale' | 'archived' | 'locked' | 'blacklisted';
+  /**
+   * Omit for the backend default listing scope (not delisted, not archived).
+   * A ProductVariantStatus value means "in that status and still listed";
+   * DELISTED means "removed from the Trendyol feed", whatever the status.
+   */
+  status?: ProductStatusFilter;
   brandId?: string;
   categoryId?: string;
   productId?: string;
-  overrideMissing?: 'cost' | 'vat';
+  overrideMissing?: ListProductsQuery['overrideMissing'];
   // Advanced Filtering (PR-B2 backend / PR-F1 frontend). Multi-selects are
   // comma-separated strings (the wire format the backend csvParam expects).
   salePriceMin?: string;

@@ -1,6 +1,8 @@
 import { rangeBounds, type FilterRow } from '@/lib/advanced-filter';
 
-import { PRODUCT_VARIANT_STATUSES, type ProductVariantStatus } from './products-filter-parsers';
+import type { ListProductsArgs, ProductStatusFilter } from '../api/list-products.api';
+
+import { isProductStatusFilter, type ProductsFilters } from './products-filter-parsers';
 
 // Stable field keys for the products advanced-filter catalog. The catalog with
 // localized labels + facet-driven brand/category options is built in
@@ -27,14 +29,10 @@ export interface AdvancedProductParams {
   vatRateIn?: string;
   brandIdIn?: string;
   categoryIdIn?: string;
-  status?: ProductVariantStatus;
+  status?: ProductStatusFilter;
 }
 
-function isProductVariantStatus(value: string): value is ProductVariantStatus {
-  return (PRODUCT_VARIANT_STATUSES as readonly string[]).includes(value);
-}
-
-// FilterRow[] → backend query params. Pure: chips with no usable value
+// FilterRow[] -> backend query params. Pure: chips with no usable value
 // contribute nothing. Multi-selects join to comma-separated strings (the wire
 // format the backend csvParam expects). Range bounds come from rangeBounds()
 // so operator semantics (between/gte/lte/eq) are handled in one place.
@@ -72,15 +70,41 @@ export function filterRowsToProductParams(rows: FilterRow[]): AdvancedProductPar
         break;
       }
       case PRODUCT_FILTER_FIELDS.status: {
-        // enumSingle — one status only. No status row means the caller's
-        // default view scope applies ('onSale', set at the call site).
+        // enumSingle: one status only. No status row means no status param,
+        // so the backend default listing scope (not delisted, not archived)
+        // applies.
         const value = Array.isArray(row.value) ? row.value[0] : row.value;
-        if (value !== undefined && isProductVariantStatus(value)) params.status = value;
+        if (value !== undefined && isProductStatusFilter(value)) params.status = value;
         break;
       }
     }
   }
   return params;
+}
+
+/**
+ * The products page URL state -> the products list request. Search and the
+ * deep-link product id are sent only when non-empty; the status comes ONLY
+ * from a status chip. The page never injects a default status: without one
+ * the backend lists its default scope (not delisted, not archived), which is
+ * also the scope the tab and summary counts use.
+ */
+export function filtersToListProductsArgs(
+  orgId: string,
+  storeId: string,
+  filters: ProductsFilters,
+): ListProductsArgs {
+  return {
+    orgId,
+    storeId,
+    q: filters.q.length > 0 ? filters.q : undefined,
+    productId: filters.productId.length > 0 ? filters.productId : undefined,
+    overrideMissing: filters.overrideMissing ?? undefined,
+    ...filterRowsToProductParams(filters.filters),
+    page: filters.page,
+    perPage: filters.perPage,
+    sort: filters.sort,
+  };
 }
 
 function multiValue(row: FilterRow): string[] {

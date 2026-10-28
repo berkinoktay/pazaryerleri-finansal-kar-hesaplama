@@ -1,57 +1,47 @@
-import { NextIntlClientProvider } from 'next-intl';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ProductsTabStrip } from '@/features/products/components/products-tab-strip';
-import { FORMATS } from '@/i18n/formats';
 
+import trMessages from '../../messages/tr.json';
 import { render, screen } from '../helpers/render';
 
-const messages = {
-  products: {
-    overrideTabs: {
-      all: 'Tümü',
-      missingCost: 'Maliyeti girilmemiş',
-      missingVat: 'KDV girilmemiş',
-    },
-  },
-};
+// Tab labels come from the real catalog so this file stays ASCII.
+const tabs = trMessages.products.overrideTabs;
 
-function renderStrip(props: Parameters<typeof ProductsTabStrip>[0]) {
-  return render(
-    <NextIntlClientProvider locale="tr" messages={messages} formats={FORMATS}>
-      <ProductsTabStrip {...props} />
-    </NextIntlClientProvider>,
-  );
+// Accessible tab names are "<label><count>"; match on the label prefix.
+function named(label: string): (accessibleName: string) => boolean {
+  return (accessibleName) => accessibleName.startsWith(label);
 }
 
 describe('ProductsTabStrip', () => {
-  it('renders 3 tabs with formatted counts', () => {
-    renderStrip({
-      value: 'all',
-      counts: { missingCost: 117, missingVat: 92, total: 118 },
-      onChange: () => {},
-    });
-    expect(screen.getByRole('tab', { name: /Tümü/ })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Maliyeti girilmemiş/ })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /KDV girilmemiş/ })).toBeInTheDocument();
-    expect(screen.getByText('118')).toBeInTheDocument();
-    expect(screen.getByText('117')).toBeInTheDocument();
-    expect(screen.getByText('92')).toBeInTheDocument();
+  it('renders only the all and missing-cost tabs, each with its formatted count', () => {
+    render(
+      <ProductsTabStrip
+        value="all"
+        counts={{ missingCost: 117, total: 118 }}
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.getAllByRole('tab')).toHaveLength(2);
+    expect(screen.getByRole('tab', { name: named(tabs.all) })).toHaveTextContent('118');
+    expect(screen.getByRole('tab', { name: named(tabs.missingCost) })).toHaveTextContent('117');
   });
 
-  it('calls onChange with the right value when a tab is clicked', async () => {
+  it('calls onChange with cost when the missing-cost tab is clicked', async () => {
     const onChange = vi.fn();
-    const { user } = renderStrip({
-      value: 'all',
-      counts: { missingCost: 117, missingVat: 92, total: 118 },
-      onChange,
-    });
-    await user.click(screen.getByRole('tab', { name: /Maliyeti girilmemiş/ }));
+    const { user } = render(
+      <ProductsTabStrip
+        value="all"
+        counts={{ missingCost: 117, total: 118 }}
+        onChange={onChange}
+      />,
+    );
+    await user.click(screen.getByRole('tab', { name: named(tabs.missingCost) }));
     expect(onChange).toHaveBeenCalledWith('cost');
   });
 
-  it('renders without counts (loading or facets undefined)', () => {
-    renderStrip({ value: 'all', loading: true, onChange: () => {} });
-    expect(screen.getByRole('tab', { name: /Tümü/ })).toBeInTheDocument();
+  it('renders both tabs without counts while the facets load', () => {
+    render(<ProductsTabStrip value="all" loading onChange={() => {}} />);
+    expect(screen.getAllByRole('tab')).toHaveLength(2);
   });
 });

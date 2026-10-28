@@ -7,60 +7,18 @@ import type {
   VariantSummary,
 } from '@/features/products/api/list-products.api';
 
+import { makeProductWithVariants, makeVariantSummary } from '../../../helpers/product-fixtures';
 import { render, screen } from '../../../helpers/render';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
-function makeVariant(id: string, overrides: Partial<VariantSummary> = {}): VariantSummary {
-  return {
-    id,
-    platformVariantId: id,
-    barcode: `BC-${id}`,
-    stockCode: `STK-${id}`,
-    size: 'M',
-    salePrice: '100.00',
-    listPrice: '100.00',
-    vatRate: 20,
-    costPrice: null,
-    quantity: 5,
-    deliveryDuration: 1,
-    isRushDelivery: false,
-    fastDeliveryOptions: [],
-    productUrl: null,
-    locationBasedDelivery: 'DISABLED',
-    status: 'onSale',
-    delistedAt: null,
-    currentCostTry: null,
-    profileCount: 0,
-    costStatus: 'NO_PROFILES',
-    dimensionalWeight: null,
-    syncedDimensionalWeight: null,
-    isDimensionalWeightOverridden: false,
-    estimatedShippingNet: null,
-    shippingCarrierCode: null,
-    shippingTariffApplied: null,
-    shippingEstimateStatus: 'NO_DESI',
-    ...overrides,
-  };
-}
-
+// One product built from per-variant overrides on top of the shared builders;
+// ids are positional (v1, v2, ...) so every variant row stays distinct.
 function makeProduct(variantOverrides: Partial<VariantSummary>[] = []): ProductWithVariants {
-  const variants = variantOverrides.map((ov, i) => makeVariant(`v${i + 1}`, ov));
-  return {
-    id: 'p-test',
-    productMainId: 'PMID-1',
-    platformContentId: '1001',
-    title: 'Test Product',
-    description: null,
-    brand: { id: '1', name: 'Brand' },
-    category: { id: '2', name: 'Category' },
-    color: null,
-    images: [],
-    variantCount: variants.length,
-    variants,
-    lastSyncedAt: '2026-01-01T00:00:00Z',
-    platformModifiedAt: '2026-01-01T00:00:00Z',
-  };
+  const variants = variantOverrides.map((overrides, i) =>
+    makeVariantSummary({ id: `v${i + 1}`, ...overrides }),
+  );
+  return makeProductWithVariants({ id: 'p-test', variants });
 }
 
 // Stub out the hooks used by ParentRowCostCell so the component renders

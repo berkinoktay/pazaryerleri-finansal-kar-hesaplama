@@ -12,6 +12,7 @@ import type {
   VariantSummary,
 } from '@/features/products/api/list-products.api';
 
+import { makeProductWithVariants, makeVariantSummary } from '../../../helpers/product-fixtures';
 import { render, screen } from '../../../helpers/render';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -70,55 +71,14 @@ const messages = {
   },
 };
 
-function makeVariant(id: string, overrides: Partial<VariantSummary> = {}): VariantSummary {
-  return {
-    id,
-    platformVariantId: id,
-    barcode: `BC-${id}`,
-    stockCode: `STK-${id}`,
-    size: 'M',
-    salePrice: '100.00',
-    listPrice: '100.00',
-    vatRate: 20,
-    costPrice: null,
-    quantity: 5,
-    deliveryDuration: 1,
-    isRushDelivery: false,
-    fastDeliveryOptions: [],
-    productUrl: null,
-    locationBasedDelivery: 'DISABLED',
-    status: 'onSale',
-    delistedAt: null,
-    currentCostTry: null,
-    profileCount: 0,
-    costStatus: 'NO_PROFILES',
-    dimensionalWeight: null,
-    syncedDimensionalWeight: null,
-    isDimensionalWeightOverridden: false,
-    estimatedShippingNet: null,
-    shippingCarrierCode: null,
-    shippingTariffApplied: null,
-    shippingEstimateStatus: 'NO_DESI',
-    ...overrides,
-  };
+// Thin adapters over the shared builders: explicit ids keep the selected
+// rows (and their variant ids) distinct.
+function makeVariant(id: string): VariantSummary {
+  return makeVariantSummary({ id });
 }
 
 function makeProduct(id: string, variantIds: string[]): ProductWithVariants {
-  return {
-    id,
-    productMainId: `PM-${id}`,
-    platformContentId: id,
-    title: `Product ${id}`,
-    description: null,
-    brand: { id: 'b1', name: 'Brand' },
-    category: { id: 'c1', name: 'Category' },
-    color: null,
-    images: [],
-    variantCount: variantIds.length,
-    variants: variantIds.map((vid) => makeVariant(vid)),
-    lastSyncedAt: '2026-01-01T00:00:00Z',
-    platformModifiedAt: '2026-01-01T00:00:00Z',
-  };
+  return makeProductWithVariants({ id, variants: variantIds.map((vid) => makeVariant(vid)) });
 }
 
 function makeParentRow(id: string, variantIds: string[]): ProductRow {

@@ -1,3 +1,5 @@
+import type { ProductVariantStatus } from '@pazarsync/db/enums';
+
 /**
  * In-memory shape of Trendyol API credentials. Persisted only as an
  * AES-256-GCM ciphertext (the stores.credentials JSON column holds the
@@ -38,15 +40,12 @@ export interface TrendyolImage {
   url: string;
 }
 
-export interface TrendyolFastDeliveryOption {
-  deliveryOptionType: string;
-  deliveryDailyCutOffHour: string;
-}
-
+// Since Trendyol's August 2026 delivery simplification the approved v2
+// response carries only the shipping duration here: 0 = ships today,
+// 1 = ships by tomorrow, and an empty object when the seller set none.
+// The older rush flag and fast-delivery option list are no longer sent.
 export interface TrendyolDeliveryOptions {
-  deliveryDuration: number | null;
-  isRushDelivery: boolean;
-  fastDeliveryOptions: TrendyolFastDeliveryOption[];
+  deliveryDuration?: number | null;
 }
 
 export interface TrendyolPrice {
@@ -85,6 +84,9 @@ export interface TrendyolVariant {
   sellerModifiedDate?: number;
   locked?: boolean;
   lockReason?: string | null;
+  // Not in the documented response; the stage probe (2026-10-27) saw it in live
+  // payloads. The blacklist counterpart of lockReason.
+  blacklistReason?: string | null;
   lockDate?: number | null;
   archived?: boolean;
   archivedDate?: number | null;
@@ -143,11 +145,6 @@ export interface MappedProductImage {
   position: number;
 }
 
-export interface MappedProductFastDeliveryOption {
-  deliveryOptionType: string;
-  deliveryDailyCutOffHour: string;
-}
-
 export interface MappedProductVariant {
   platformVariantId: bigint;
   barcode: string;
@@ -157,14 +154,7 @@ export interface MappedProductVariant {
   vatRate: number | null;
   quantity: number;
   deliveryDuration: number | null;
-  isRushDelivery: boolean;
-  fastDeliveryOptions: MappedProductFastDeliveryOption[];
   productUrl: string | null;
-  locationBasedDelivery: string | null;
-  onSale: boolean;
-  archived: boolean;
-  blacklisted: boolean;
-  locked: boolean;
   size: string | null;
   attributes: TrendyolAttribute[];
   // Desi. Trendyol omits it on most products (or sends an uncomputed 0); both
@@ -179,6 +169,12 @@ export interface MappedProductVariant {
   // able to tell "synced" from "unknown". Lands in syncedCommissionRate only; there
   // is no user-override twin column (yet).
   syncedCommissionRate: string | null;
+  // One derived status per variant (deriveVariantStatus: archived > blacklisted >
+  // locked > onSale > not on sale) and the Trendyol reason that belongs to it
+  // (deriveStatusReason: lockReason for LOCKED, blacklistReason for BLACKLISTED,
+  // null otherwise).
+  status: ProductVariantStatus;
+  statusReason: string | null;
 }
 
 export interface MappedProduct {
@@ -321,7 +317,6 @@ export interface TrendyolOrderLine {
   /** Commission rate %. Direct in order response (research §7.2). */
   commission?: number;
   currencyCode?: string;
-  fastDeliveryOptions?: TrendyolFastDeliveryOption[];
   orderLineItemStatusName?: string;
 }
 

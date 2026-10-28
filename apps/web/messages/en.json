@@ -2935,16 +2935,32 @@
     "filters": {
       "searchPlaceholder": "Search by product name, model code, stock code, barcode…",
       "statusOptions": {
-        "onSale": "On sale",
-        "archived": "Archived",
-        "locked": "Locked",
-        "blacklisted": "Blacklisted"
+        "ON_SALE": "On sale",
+        "NOT_ON_SALE": "Not on sale",
+        "LOCKED": "Locked",
+        "BLACKLISTED": "Blacklisted",
+        "ARCHIVED": "Archived",
+        "DELISTED": "Removed from Trendyol"
       }
+    },
+    "statusBadge": {
+      "outOfStock": "Out of stock",
+      "closed": "Closed for sale",
+      "locked": "Locked",
+      "blacklisted": "Blacklisted",
+      "archived": "Archived",
+      "reasonTitle": "Reason reported by Trendyol",
+      "reasonAria": "{label}: show reason"
+    },
+    "statusReasons": {
+      "CRITICAL_SALE_PRICE_CHANGE": "Trendyol locked the product after a critical sale price change.",
+      "UNSUPPLIED_PRODUCT": "The product was marked as unsupplied.",
+      "LOW_SALE_PRICING": "Trendyol locked the product because its sale price looked too low.",
+      "UNAPPROVED_BRAND_CATEGORY_SPM": "The product was blocked because the brand is not approved in this category."
     },
     "overrideTabs": {
       "all": "All",
-      "missingCost": "Missing cost",
-      "missingVat": "Missing VAT rate"
+      "missingCost": "Missing cost"
     },
     "columns": {
       "image": "Image",
@@ -2966,13 +2982,13 @@
       "desi": "Desi"
     },
     "delivery": {
-      "sameDay": "Same-day shipping",
-      "fast": "Fast delivery",
-      "standard": "Standard delivery",
+      "today": "Ships today",
+      "tomorrow": "Ships tomorrow",
+      "inDays": "Ships in {days} days",
       "mixed": "Mixed"
     },
     "table": {
-      "variantDelisted": "Delisted"
+      "variantDelisted": "Removed from Trendyol"
     },
     "multiVariantPlaceholder": "{n} variants",
     "empty": {
@@ -2987,8 +3003,7 @@
         "cta": "Sync now"
       },
       "filtered": "No products match the filters.",
-      "missingCostNone": "All products have a cost set.",
-      "missingVatNone": "All products have a VAT rate set."
+      "missingCostNone": "All products have a cost set."
     },
     "pagination": {
       "showing": "{from}–{to} of {total} products",
@@ -3017,12 +3032,11 @@
       "totalProducts": "Total products",
       "totalContext": "Approved · synced",
       "missingCost": "Missing cost",
-      "missingVat": "Missing VAT rate",
       "ofCatalog": "Share of catalog: {pct}%",
       "noneMissing": "None missing"
     },
     "missingCostBanner": {
-      "title": "{count} products missing cost — profit cannot be calculated.",
+      "title": "{variants} variants in {products} products are missing cost. Profit cannot be calculated.",
       "description": "Complete the missing costs.",
       "cta": "Filter products without costs"
     },
@@ -3455,11 +3469,14 @@
         }
       },
       "banner": {
-        "title": "{count} product can't compute estimated profit",
-        "filterCta": "Filter affected products",
+        "title": "{count, plural, one {# variant} other {# variants}} on this page can't compute estimated profit",
         "reasonNoDesi": "missing desi ({count})",
-        "reasonNoCarrier": "no carrier ({count})",
-        "reasonOverflow": "high desi ({count})"
+        "reasonOverflow": "high desi ({count})",
+        "storeSetup": {
+          "title": "Shipping setup is incomplete",
+          "description": "No carrier is selected for this store, or your own contract tariff is empty, so shipping cost and estimated profit can't be calculated for its products.",
+          "cta": "Open shipping settings"
+        }
       }
     }
   },

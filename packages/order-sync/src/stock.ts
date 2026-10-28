@@ -66,34 +66,6 @@ export async function incrementVariantStock(
 }
 
 /**
- * Recompute the denormalized `Product.totalStock` from `SUM(variants.quantity)`
- * for the given products, after their variant stock changed in this same
- * transaction. One grouped read plus one update per product — the distinct
- * product count for a single order is tiny. The Prisma update keeps `@updatedAt`
- * automatic; min/max sale prices are NOT a function of quantity, so they are
- * left untouched (only a catalog scan revises those).
- */
-export async function recomputeProductsTotalStock(
-  tx: Prisma.TransactionClient,
-  productIds: string[],
-): Promise<void> {
-  if (productIds.length === 0) return;
-
-  const sums = await tx.productVariant.groupBy({
-    by: ['productId'],
-    where: { productId: { in: productIds } },
-    _sum: { quantity: true },
-  });
-
-  for (const row of sums) {
-    await tx.product.update({
-      where: { id: row.productId },
-      data: { totalStock: row._sum.quantity ?? 0 },
-    });
-  }
-}
-
-/**
  * Whether `orderDate` falls on the current business day — the shared gate for the
  * optimistic stock decrement. Used by BOTH the direct-persist path
  * (upsert-order.ts, first-insert lines) and the buffered-intake path

@@ -38,5 +38,9 @@ export function useCustomPriceEstimate(
       });
     },
     enabled: price !== null,
+    // The answer for one price does not age; only a write that invalidates the detail
+    // re-prices it. Without this, a card whose debounce settles after another card's request
+    // returned would see stale data and send a second request.
+    staleTime: Infinity,
   });
 }

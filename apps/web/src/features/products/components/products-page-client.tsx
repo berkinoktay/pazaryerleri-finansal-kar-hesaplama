@@ -16,11 +16,11 @@ import { useProducts } from '../hooks/use-products';
 import { useProductsFilters } from '../hooks/use-products-filters';
 import { useRefreshProducts } from '../hooks/use-refresh-products';
 import { aggregateMissingShipping } from '../lib/aggregate-missing-shipping';
-import { filterRowsToProductParams } from '../lib/products-filter-fields';
+import { filtersToListProductsArgs } from '../lib/products-filter-fields';
 
 import { MissingCostWarningBanner } from './missing-cost-warning-banner';
 import { MissingShippingBanner } from './missing-shipping-banner';
-import { ProductsEmptyState } from './products-empty-state';
+import { ProductsEmptyState, type ProductsEmptyStateVariant } from './products-empty-state';
 import { ProductsSummary } from './products-summary';
 import { ProductsTable } from './products-table';
 import { type ProductsOverrideTab } from './products-tab-strip';
@@ -58,25 +58,11 @@ export function ProductsPageClient({
 
   const noStoreSelected = orgId === null || storeId === null;
 
+  // No status chip means no status param: the backend applies its default
+  // listing scope (not delisted, not archived), so the page never narrows
+  // the list on its own.
   const productsQuery = useProducts(
-    noStoreSelected
-      ? null
-      : {
-          orgId,
-          storeId,
-          q: filters.q.length > 0 ? filters.q : undefined,
-          // Default view scope: on-sale products. A status chip in the
-          // advanced filters overrides it via the spread below.
-          status: 'onSale',
-          productId: filters.productId.length > 0 ? filters.productId : undefined,
-          overrideMissing: filters.overrideMissing ?? undefined,
-          // Advanced Filtering chips (FilterRow[]) → query params — since the
-          // facet chips retired, this carries brand/category/status too.
-          ...filterRowsToProductParams(filters.filters),
-          page: filters.page,
-          perPage: filters.perPage,
-          sort: filters.sort,
-        },
+    noStoreSelected ? null : filtersToListProductsArgs(orgId, storeId, filters),
   );
   const facetsQuery = useProductFacets(orgId, storeId);
   const { activeSyncs, recentSyncs } = useStoreSyncs(storeId);
@@ -117,13 +103,11 @@ export function ProductsPageClient({
   const syncCenterLogs = toSyncCenterLogs(activeSyncs, recentSyncs);
 
   const tabValue: ProductsOverrideTab = filters.overrideMissing ?? 'all';
-  // Tab-aware empty-state variant. Per spec §6.3: missing-cost / missing-vat
-  // tabs that come back empty read as "you're all set" rather than the
-  // generic "no products match the filter" copy.
-  const emptyVariant = ((): ProductsEmptyVariant | undefined => {
+  // Tab-aware empty-state variant: an empty missing-cost tab reads as
+  // "you're all set" rather than the generic "no products match" copy.
+  const emptyVariant = ((): ProductsEmptyStateVariant | undefined => {
     if (!isEmptyAfterLoad) return undefined;
     if (filters.overrideMissing === 'cost') return 'missing-cost-none';
-    if (filters.overrideMissing === 'vat') return 'missing-vat-none';
     if (hasActiveSearchOrFilter) return 'filtered';
     return 'no-products';
   })();
@@ -166,19 +150,7 @@ export function ProductsPageClient({
           onFilterClick={() => void setFilters({ overrideMissing: 'cost', page: 1 })}
         />
 
-        <MissingShippingBanner
-          counts={shippingCounts}
-          // V1: the API has no `shippingEstimateStatus=NOT_OK` query
-          // parameter yet — the dedicated filter ships in V2. For now
-          // the CTA scrolls the table into view so the seller can
-          // immediately scan the non-OK rows (the yellow/red icons
-          // make each one easy to spot on a fresh page).
-          onFilterApply={() => {
-            if (typeof window !== 'undefined') {
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }
-          }}
-        />
+        <MissingShippingBanner counts={shippingCounts} />
 
         <ProductsTable
           orgId={orgId}
@@ -229,10 +201,3 @@ export function ProductsPageClient({
     </>
   );
 }
-
-type ProductsEmptyVariant =
-  | 'no-store'
-  | 'no-products'
-  | 'filtered'
-  | 'missing-cost-none'
-  | 'missing-vat-none';

@@ -72,6 +72,56 @@ describe('useCustomPriceEstimate', () => {
     expect(client.getQueryData(key)).toEqual(RESULT);
   });
 
+  it('a card that subscribes after the answer landed reuses it instead of asking again', async () => {
+    // Every card debounces the price on its own timer, so on a slow machine one card can
+    // subscribe after another card's request already returned. The answer for one price does
+    // not age, so the late card must read the cache rather than send a second request.
+    let calls = 0;
+    server.use(
+      http.post(ENDPOINT, () => {
+        calls += 1;
+        return HttpResponse.json(RESULT);
+      }),
+    );
+    const client = createTestQueryClient();
+    const first = renderHook(
+      () => useCustomPriceEstimate(ORG_ID, STORE_ID, CAMPAIGN_ID, ITEM_ID, '150.00'),
+      { wrapper: makeWrapper(client) },
+    );
+    await waitFor(() => expect(first.result.current.isSuccess).toBe(true));
+
+    const late = renderHook(
+      () => useCustomPriceEstimate(ORG_ID, STORE_ID, CAMPAIGN_ID, ITEM_ID, '150.00'),
+      { wrapper: makeWrapper(client) },
+    );
+
+    expect(late.result.current.data?.price).toBe('150.00');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(calls).toBe(1);
+  });
+
+  it('re-prices when the campaign detail is invalidated', async () => {
+    let calls = 0;
+    server.use(
+      http.post(ENDPOINT, () => {
+        calls += 1;
+        return HttpResponse.json(RESULT);
+      }),
+    );
+    const client = createTestQueryClient();
+    const { result } = renderHook(
+      () => useCustomPriceEstimate(ORG_ID, STORE_ID, CAMPAIGN_ID, ITEM_ID, '150.00'),
+      { wrapper: makeWrapper(client) },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    await client.invalidateQueries({
+      queryKey: marketplaceCampaignKeys.detail(ORG_ID, STORE_ID, CAMPAIGN_ID),
+    });
+
+    await waitFor(() => expect(calls).toBe(2));
+  });
+
   it('sends nothing while there is no price to estimate', async () => {
     let calls = 0;
     server.use(

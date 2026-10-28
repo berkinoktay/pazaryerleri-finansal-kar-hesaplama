@@ -3,9 +3,16 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { type ReactNode } from 'react';
 import { describe, expect, it } from 'vitest';
 
+import type { ListProductsResponse } from '@/features/products/api/list-products.api';
 import { useProducts } from '@/features/products/hooks/use-products';
+import {
+  filtersToListProductsArgs,
+  PRODUCT_FILTER_FIELDS,
+} from '@/features/products/lib/products-filter-fields';
+import type { ProductsFilters } from '@/features/products/lib/products-filter-parsers';
 import { ApiError } from '@/lib/api-error';
 
+import { makeProductWithVariants } from '../../helpers/product-fixtures';
 import { createTestQueryClient } from '../../helpers/render';
 import { HttpResponse, http, server } from '../../helpers/msw';
 
@@ -24,51 +31,23 @@ const baseArgs = {
   sort: '-platformModifiedAt' as const,
 };
 
-function fixtureResponse(overrides: Record<string, unknown> = {}) {
+function fixtureResponse(): ListProductsResponse {
   return {
-    data: [
-      {
-        id: 'p-1',
-        productMainId: 'pm-1',
-        platformContentId: '1001',
-        title: 'Test Product',
-        description: null,
-        brand: { id: '2032', name: 'Modline' },
-        category: { id: '597', name: 'Gömlek' },
-        color: 'Beyaz',
-        images: [],
-        variantCount: 1,
-        variants: [
-          {
-            id: 'v-1',
-            platformVariantId: '10010',
-            barcode: 'BC-1',
-            stockCode: 'SK-1',
-            size: 'M',
-            salePrice: '100.00',
-            listPrice: '100.00',
-            vatRate: 20,
-            costPrice: null,
-            quantity: 5,
-            deliveryDuration: 1,
-            isRushDelivery: true,
-            fastDeliveryOptions: [],
-            productUrl: null,
-            locationBasedDelivery: 'DISABLED',
-            status: 'onSale' as const,
-            currentCostTry: null,
-            profileCount: 0,
-            costStatus: 'NO_PROFILES' as const,
-          },
-        ],
-        lastSyncedAt: '2026-04-27T12:00:00Z',
-        platformModifiedAt: '2026-04-26T12:00:00Z',
-      },
-    ],
+    data: [makeProductWithVariants()],
     pagination: { page: 1, perPage: 25, total: 1, totalPages: 1 },
-    ...overrides,
   };
 }
+
+// The products page URL state with no search, no chip and no override tab.
+const DEFAULT_PAGE_FILTERS: ProductsFilters = {
+  q: '',
+  productId: '',
+  overrideMissing: null,
+  filters: [],
+  page: 1,
+  perPage: 25,
+  sort: '-platformCreatedAt',
+};
 
 describe('useProducts', () => {
   it('returns the paginated response on success', async () => {
@@ -114,6 +93,52 @@ describe('useProducts', () => {
     const { result } = renderHook(() => useProducts(null), { wrapper });
     expect(result.current.isFetching).toBe(false);
     expect(result.current.status).toBe('pending');
+  });
+
+  it('sends no status param for the default page filters (backend listing scope)', async () => {
+    let capturedUrl = '';
+    server.use(
+      http.get(
+        `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/products`,
+        ({ request }) => {
+          capturedUrl = request.url;
+          return HttpResponse.json(fixtureResponse(), { status: 200 });
+        },
+      ),
+    );
+
+    const { result } = renderHook(
+      () => useProducts(filtersToListProductsArgs(ORG_ID, STORE_ID, DEFAULT_PAGE_FILTERS)),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(new URL(capturedUrl).searchParams.has('status')).toBe(false);
+  });
+
+  it('forwards a status chip as the status param, DELISTED included', async () => {
+    let capturedUrl = '';
+    server.use(
+      http.get(
+        `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/products`,
+        ({ request }) => {
+          capturedUrl = request.url;
+          return HttpResponse.json(fixtureResponse(), { status: 200 });
+        },
+      ),
+    );
+
+    const filters: ProductsFilters = {
+      ...DEFAULT_PAGE_FILTERS,
+      filters: [
+        { id: 'r-status', field: PRODUCT_FILTER_FIELDS.status, operator: 'eq', value: 'DELISTED' },
+      ],
+    };
+    const { result } = renderHook(
+      () => useProducts(filtersToListProductsArgs(ORG_ID, STORE_ID, filters)),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(new URL(capturedUrl).searchParams.get('status')).toBe('DELISTED');
   });
 
   it('forwards overrideMissing as a query param', async () => {

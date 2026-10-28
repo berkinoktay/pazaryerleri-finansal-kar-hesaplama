@@ -585,6 +585,9 @@ importers:
 
   packages/order-sync:
     dependencies:
+      '@pazarsync/catalog-sync':
+        specifier: workspace:*
+        version: link:../catalog-sync
       '@pazarsync/db':
         specifier: workspace:*
         version: link:../db

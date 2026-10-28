@@ -1,5 +1,6 @@
 import { prisma } from '@pazarsync/db';
 import type { Platform, Prisma } from '@pazarsync/db';
+import { ProductVariantStatus } from '@pazarsync/db/enums';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { NotFoundError, ValidationError } from '../lib/errors';
@@ -18,7 +19,7 @@ export type ListCommissionRatesResult = ListCommissionRatesResponse;
 // Internal helpers ────────────────────────────────────────────────────────────
 
 interface ProductCounts {
-  // CATEGORY rule scope: total approved+unarchived products in the category
+  // CATEGORY rule scope: total products with a non-archived variant in the category
   // across all brands. Key = categoryId.
   categoryCount: Map<string, number>;
   // CATEGORY_BRAND rule scope: count for the exact (categoryId, brandId) pair.
@@ -52,7 +53,9 @@ async function resolveStorePlatform(organizationId: string, storeId: string): Pr
 /**
  * Single pass over Product rows to build two count maps used by both the
  * productCount column (always) and the productScope=active WHERE clause.
- * "Active" = Product.approved AND has ≥1 variant where archived=false.
+ * "Active" = has at least one variant whose status is not ARCHIVED. Unlike the
+ * products-list scope (LISTED_VARIANT_WHERE), a variant removed from the
+ * Trendyol feed (delistedAt set) still counts here.
  *
  * Returns counts of distinct *products* per scope (not variants) — that
  * matches the panel UX "kategoride X ürün var" rather than "X SKU var".
@@ -62,9 +65,8 @@ async function fetchProductCounts(organizationId: string, storeId: string): Prom
     where: {
       organizationId,
       storeId,
-      approved: true,
       categoryId: { not: null },
-      variants: { some: { archived: false } },
+      variants: { some: { status: { not: ProductVariantStatus.ARCHIVED } } },
     },
     select: { categoryId: true, brandId: true },
   });

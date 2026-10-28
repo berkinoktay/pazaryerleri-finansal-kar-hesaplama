@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
+import { ProductVariantStatus } from '@pazarsync/db/enums';
+
 import {
   filterRowsToProductParams,
+  filtersToListProductsArgs,
   PRODUCT_FILTER_FIELDS,
 } from '@/features/products/lib/products-filter-fields';
-import { parseProductFilterRows } from '@/features/products/lib/products-filter-parsers';
+import {
+  parseProductFilterRows,
+  PRODUCT_STATUS_FILTERS,
+  type ProductsFilters,
+} from '@/features/products/lib/products-filter-parsers';
 import {
   convertRowValue,
   DATATYPE_OPERATORS,
@@ -53,18 +60,18 @@ describe('rangeBounds', () => {
 });
 
 describe('filterRowsToProductParams', () => {
-  it('maps a status enumSingle row to the single-value status param', () => {
+  it.each(PRODUCT_STATUS_FILTERS)('maps a %s status row to the status param', (status) => {
     expect(
       filterRowsToProductParams([
-        row({ field: PRODUCT_FILTER_FIELDS.status, operator: 'eq', value: 'archived' }),
+        row({ field: PRODUCT_FILTER_FIELDS.status, operator: 'eq', value: status }),
       ]),
-    ).toEqual({ status: 'archived' });
+    ).toEqual({ status });
   });
 
-  it('drops a status row whose value is not a known variant status', () => {
+  it.each(['onSale', 'archived', 'bogus'])('drops an unknown status value %s', (value) => {
     expect(
       filterRowsToProductParams([
-        row({ field: PRODUCT_FILTER_FIELDS.status, operator: 'eq', value: 'bogus' }),
+        row({ field: PRODUCT_FILTER_FIELDS.status, operator: 'eq', value }),
       ]),
     ).toEqual({});
   });
@@ -202,13 +209,74 @@ describe('parseProductFilterRows (products URL reviver)', () => {
     expect(
       parseProductFilterRows([
         { id: 'a', field: 'status', operator: 'eq', value: 'Archived' },
-        { id: 'b', field: 'status', operator: 'eq', value: 'archived' },
+        { id: 'b', field: 'status', operator: 'eq', value: ProductVariantStatus.ARCHIVED },
         { id: 'c', field: 'brand', operator: 'in', value: ['2032'] },
       ]),
     ).toEqual([
-      { id: 'b', field: 'status', operator: 'eq', value: 'archived' },
+      { id: 'b', field: 'status', operator: 'eq', value: ProductVariantStatus.ARCHIVED },
       { id: 'c', field: 'brand', operator: 'in', value: ['2032'] },
     ]);
+  });
+
+  it.each(['onSale', 'archived', 'locked', 'blacklisted'])(
+    'drops a status row carrying the retired value %s (a link saved before the change)',
+    (value) => {
+      expect(
+        parseProductFilterRows([{ id: 'old', field: 'status', operator: 'eq', value }]),
+      ).toEqual([]);
+    },
+  );
+
+  it('keeps a status row for every current status filter value', () => {
+    const rows = PRODUCT_STATUS_FILTERS.map((value) => ({
+      id: `row-${value}`,
+      field: 'status',
+      operator: 'eq',
+      value,
+    }));
+    expect(parseProductFilterRows(rows)).toEqual(rows);
+  });
+});
+
+describe('filtersToListProductsArgs (products page request)', () => {
+  const DEFAULT_FILTERS: ProductsFilters = {
+    q: '',
+    productId: '',
+    overrideMissing: null,
+    filters: [],
+    page: 1,
+    perPage: 25,
+    sort: '-platformCreatedAt',
+  };
+
+  it('sends no status for the default page state, so the backend listing scope applies', () => {
+    const args = filtersToListProductsArgs('org-1', 'store-1', DEFAULT_FILTERS);
+    expect(args).not.toHaveProperty('status');
+    expect(args).toEqual({
+      orgId: 'org-1',
+      storeId: 'store-1',
+      page: 1,
+      perPage: 25,
+      sort: '-platformCreatedAt',
+    });
+  });
+
+  it('takes the status only from a status chip, DELISTED included', () => {
+    const args = filtersToListProductsArgs('org-1', 'store-1', {
+      ...DEFAULT_FILTERS,
+      filters: [row({ field: PRODUCT_FILTER_FIELDS.status, operator: 'eq', value: 'DELISTED' })],
+    });
+    expect(args.status).toBe('DELISTED');
+  });
+
+  it('forwards search, the deep-linked product and the missing-cost tab', () => {
+    const args = filtersToListProductsArgs('org-1', 'store-1', {
+      ...DEFAULT_FILTERS,
+      q: 'linen',
+      productId: 'product-1',
+      overrideMissing: 'cost',
+    });
+    expect(args).toMatchObject({ q: 'linen', productId: 'product-1', overrideMissing: 'cost' });
   });
 });
 

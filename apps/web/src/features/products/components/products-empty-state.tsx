@@ -9,8 +9,14 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { TableNoResultsState } from '@/components/patterns/data-table-states';
 import { Button } from '@/components/ui/button';
 
+export type ProductsEmptyStateVariant =
+  | 'no-store'
+  | 'no-products'
+  | 'filtered'
+  | 'missing-cost-none';
+
 interface ProductsEmptyStateProps {
-  variant: 'no-store' | 'no-products' | 'filtered' | 'missing-cost-none' | 'missing-vat-none';
+  variant: ProductsEmptyStateVariant;
   /** Resets every active search / filter. Wires the `filtered` variant's
    *  "Clear filters" button (the shared no-results state). */
   onClearFilters?: () => void;
@@ -49,9 +55,6 @@ export function ProductsEmptyState({
   }
   if (variant === 'missing-cost-none') {
     return <EmptyState embedded title={t('missingCostNone')} />;
-  }
-  if (variant === 'missing-vat-none') {
-    return <EmptyState embedded title={t('missingVatNone')} />;
   }
   // Filtered-to-zero → the shared no-results preset (filter-off icon + a real
   // "Clear filters" button), so products gets the same premium no-results

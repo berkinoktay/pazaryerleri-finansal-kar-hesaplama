@@ -30,6 +30,7 @@
 
 import { Decimal } from 'decimal.js';
 
+import { refreshProductAggregates } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
 import type {
   CostProfileType,
@@ -43,11 +44,7 @@ import type { MappedOrder } from '@pazarsync/marketplace';
 import { applyEstimateOnOrderCreate, resolveCommissionRate } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 
-import {
-  decrementVariantStock,
-  isOrderOnBusinessToday,
-  recomputeProductsTotalStock,
-} from './stock';
+import { decrementVariantStock, isOrderOnBusinessToday } from './stock';
 
 interface SnapshotComponentData {
   orderItemId: string;
@@ -684,10 +681,10 @@ export async function upsertOrderWithSnapshot(
       }
     }
 
-    // Recompute Product.totalStock for every product whose variant stock we just
-    // decremented, from the live SUM(variants.quantity). No-op when nothing was
-    // decremented (all lines re-syncs or unmatched variants).
-    await recomputeProductsTotalStock(tx, [...affectedProductIds]);
+    // Refresh the Product aggregates for every product whose variant stock we
+    // just decremented, from its in-scope variants (listed, not archived). No-op
+    // when nothing was decremented (all lines re-syncs or unmatched variants).
+    await refreshProductAggregates(tx, storeId, [...affectedProductIds]);
 
     // 3. applyEstimateOnOrderCreate — "tahmini kâr" (PSF + Stopaj + SHIPPING
     //    ESTIMATE OrderFee + Order.estimatedNetProfit). HER upsert'te çağrılır

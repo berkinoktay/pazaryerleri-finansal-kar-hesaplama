@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Store } from '@pazarsync/db';
+import { ProductVariantStatus } from '@pazarsync/db/enums';
 import type {
   MappedProduct,
   MappedProductsPage,
@@ -63,18 +64,13 @@ function variant(barcode: string): MappedProductVariant {
     vatRate: null,
     quantity: 0,
     deliveryDuration: null,
-    isRushDelivery: false,
-    fastDeliveryOptions: [],
     productUrl: null,
-    locationBasedDelivery: null,
-    onSale: false,
-    archived: false,
-    blacklisted: false,
-    locked: false,
     size: null,
     attributes: [],
     syncedDimensionalWeight: '0',
     syncedCommissionRate: null,
+    status: ProductVariantStatus.NOT_ON_SALE,
+    statusReason: null,
   };
 }
 

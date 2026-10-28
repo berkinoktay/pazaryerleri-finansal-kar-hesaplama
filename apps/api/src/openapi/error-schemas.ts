@@ -2,7 +2,7 @@ import { z } from '@hono/zod-openapi';
 
 export const ValidationErrorDetailSchema = z
   .object({
-    field: z.string().openapi({ example: 'costPrice' }),
+    field: z.string().openapi({ example: 'vatRate' }),
     code: z.string().openapi({ example: 'NUMBER_TOO_SMALL' }),
     meta: z
       .record(z.string(), z.unknown())

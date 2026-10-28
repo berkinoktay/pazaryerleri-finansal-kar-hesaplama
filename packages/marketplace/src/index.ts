@@ -17,13 +17,11 @@ export {
   type TrendyolCategory,
   type TrendyolContent,
   type TrendyolDeliveryOptions,
-  type TrendyolFastDeliveryOption,
   type TrendyolImage,
   type TrendyolPrice,
   type TrendyolStock,
   type TrendyolVariant,
   type MappedProduct,
-  type MappedProductFastDeliveryOption,
   type MappedProductImage,
   type MappedProductVariant,
   type MappedProductsPageMeta,
@@ -42,6 +40,8 @@ export {
   type MappedOrdersPageMeta,
 } from './trendyol/types';
 export {
+  deriveStatusReason,
+  deriveVariantStatus,
   mapTrendyolApprovedResponse,
   mapTrendyolContent,
   type MappedProductsPage,

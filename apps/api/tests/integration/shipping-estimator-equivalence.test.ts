@@ -8,13 +8,18 @@
  * outcome state. This test exercises one variant per state, runs both paths,
  * and asserts the SQL row matches the service result.
  *
- * Six states (per spec §5.5):
- *   1. OK / NORMAL              — happy path, normal desi-bazlı tariff
- *   2. OK / BAREM               — happy path, Barem destek tier
- *   3. NO_DESI                  — variant has no desi (neither override nor synced)
- *   4. NO_CARRIER               — TRENDYOL_CONTRACT but no defaultShippingCarrierId
- *   5. OWN_CONTRACT_EMPTY       — OWN_CONTRACT but no own_shipping_tariffs rows
- *   6. DESI_OVERFLOW            — desi exceeds the carrier's tariff coverage
+ * Cases (one variant per test, both paths run on it):
+ *   - OK / NORMAL         - price above every Barem range, desi-based tariff
+ *   - OK / BAREM          - Barem destek tier (deliveryDuration = carrier max)
+ *   - OK / NORMAL desi-0  - no override, synced desi 0 (a valid tariff tier)
+ *   - NO_CARRIER          - TRENDYOL_CONTRACT but no defaultShippingCarrierId
+ *   - OWN_CONTRACT_EMPTY  - OWN_CONTRACT but no own_shipping_tariffs rows, once
+ *                           with an override desi and once with the synced
+ *                           desi-0 default
+ *   - DESI_OVERFLOW       - desi exceeds the carrier's tariff coverage
+ *   - Barem eligibility   - deliveryDuration 0 (ships today) is eligible; a null
+ *                           deliveryDuration and one above the carrier window
+ *                           are not
  *
  * Each test creates its own org+store+product+variant inline. `truncateAll`
  * between tests wipes tenant data but preserves the global shipping reference
@@ -42,8 +47,6 @@ interface VariantFixtureOptions {
   dimensionalWeight?: string | null;
   syncedDimensionalWeight?: string;
   deliveryDuration?: number | null;
-  isRushDelivery?: boolean;
-  fastDeliveryOptions?: { deliveryOptionType: string; deliveryDailyCutOffHour: string }[];
 }
 
 interface VariantFixture {
@@ -95,8 +98,6 @@ async function createVariantFixture(opts: VariantFixtureOptions): Promise<Varian
       // Synced desi NON-NULL, floor 0 (marketplace omits it → stored 0).
       syncedDimensionalWeight: opts.syncedDimensionalWeight ?? '0',
       deliveryDuration: opts.deliveryDuration ?? null,
-      isRushDelivery: opts.isRushDelivery ?? false,
-      fastDeliveryOptions: opts.fastDeliveryOptions ?? [],
       attributes: [],
     },
   });
@@ -142,8 +143,6 @@ describe('Equivalence: service fn vs raw SQL CTE', () => {
       defaultShippingCarrierId: carrier.id,
       salePrice: '500.00', // above all Barem ranges → fall through to NORMAL
       dimensionalWeight: '3.0', // CEIL(3.0) = 3 → SENDEOMP desi-3 = 101.99
-      isRushDelivery: false,
-      fastDeliveryOptions: [],
     });
 
     const { fnResult, row } = await runBothPaths(fixture);
@@ -277,5 +276,72 @@ describe('Equivalence: service fn vs raw SQL CTE', () => {
     expect(fnResult).toEqual({ ok: false, reason: 'OWN_CONTRACT_EMPTY' });
     expect(row.shipping_tariff_applied).toBeNull();
     expect(row.estimated_shipping_net).toBeNull();
+  });
+
+  // Barem eligibility reads deliveryDuration only, on both paths
+  // (hasFastDeliverySetup and the CTE Barem predicate). SENDEOMP:
+  // maxBaremEligibleDeliveryDuration = 1, Barem [0, 199.99] = 51.24, desi-2
+  // normal tariff = 91.99. Same price and desi in the three cases below.
+  it('OK / BAREM - deliveryDuration 0 (ships today) is Barem-eligible on both paths', async () => {
+    const carrier = await getSendeomp();
+    const fixture = await createVariantFixture({
+      barcode: 'eq8',
+      defaultShippingCarrierId: carrier.id,
+      salePrice: '150.00',
+      dimensionalWeight: '2.0',
+      deliveryDuration: 0,
+    });
+
+    const { fnResult, row } = await runBothPaths(fixture);
+
+    expect(row.shipping_estimate_status).toBe('OK');
+    expect(fnResult.ok).toBe(true);
+    if (!fnResult.ok) throw new Error('unreachable: fnResult.ok asserted true above');
+    expect(row.shipping_tariff_applied).toBe('BAREM');
+    expect(row.shipping_tariff_applied).toBe(fnResult.estimate.tariffApplied);
+    expect(row.estimated_shipping_net).toBe(fnResult.estimate.amount.toFixed(2));
+    expect(row.estimated_shipping_net).toBe('51.24');
+  });
+
+  it('OK / NORMAL - null deliveryDuration is not Barem-eligible on either path', async () => {
+    const carrier = await getSendeomp();
+    const fixture = await createVariantFixture({
+      barcode: 'eq9',
+      defaultShippingCarrierId: carrier.id,
+      salePrice: '150.00',
+      dimensionalWeight: '2.0',
+      deliveryDuration: null,
+    });
+
+    const { fnResult, row } = await runBothPaths(fixture);
+
+    expect(row.shipping_estimate_status).toBe('OK');
+    expect(fnResult.ok).toBe(true);
+    if (!fnResult.ok) throw new Error('unreachable: fnResult.ok asserted true above');
+    expect(row.shipping_tariff_applied).toBe('NORMAL');
+    expect(row.shipping_tariff_applied).toBe(fnResult.estimate.tariffApplied);
+    expect(row.estimated_shipping_net).toBe(fnResult.estimate.amount.toFixed(2));
+    expect(row.estimated_shipping_net).toBe('91.99');
+  });
+
+  it('OK / NORMAL - deliveryDuration above the carrier window is not Barem-eligible on either path', async () => {
+    const carrier = await getSendeomp();
+    const fixture = await createVariantFixture({
+      barcode: 'eq10',
+      defaultShippingCarrierId: carrier.id,
+      salePrice: '150.00',
+      dimensionalWeight: '2.0',
+      deliveryDuration: 2,
+    });
+
+    const { fnResult, row } = await runBothPaths(fixture);
+
+    expect(row.shipping_estimate_status).toBe('OK');
+    expect(fnResult.ok).toBe(true);
+    if (!fnResult.ok) throw new Error('unreachable: fnResult.ok asserted true above');
+    expect(row.shipping_tariff_applied).toBe('NORMAL');
+    expect(row.shipping_tariff_applied).toBe(fnResult.estimate.tariffApplied);
+    expect(row.estimated_shipping_net).toBe(fnResult.estimate.amount.toFixed(2));
+    expect(row.estimated_shipping_net).toBe('91.99');
   });
 });

@@ -69,6 +69,9 @@ export function useDetachCostProfiles() {
         });
       }
       void queryClient.invalidateQueries({ queryKey: ['products'] });
+      // The missing-cost banner counts the same variants as the products
+      // list's cost tab, so it refreshes with the list.
+      void queryClient.invalidateQueries({ queryKey: costsKeys.missingCostStats(variables.orgId) });
     },
   });
 }

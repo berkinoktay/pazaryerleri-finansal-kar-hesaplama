@@ -275,8 +275,10 @@ async function seedStoresProductsOrders(orgs: {
         title: p.title,
       },
     });
-    // Each seed product gets one default variant carrying the barcode and
-    // cost. Multi-variant fixtures live in test factories, not the seed.
+    // Each seed product gets one default variant carrying the barcode; the
+    // seed cost doubles as its sale and list price. Costs are attached through
+    // cost profiles, so these variants start under the missing-cost tab.
+    // Multi-variant fixtures live in test factories, not the seed.
     await prisma.productVariant.create({
       data: {
         organizationId: p.orgId,
@@ -287,7 +289,6 @@ async function seedStoresProductsOrders(orgs: {
         stockCode: `seed-sku-${(i + 1).toString()}`,
         salePrice: p.cost,
         listPrice: p.cost,
-        costPrice: p.cost,
       },
     });
   }

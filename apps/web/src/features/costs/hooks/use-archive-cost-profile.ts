@@ -32,6 +32,10 @@ export function useArchiveCostProfile() {
       void queryClient.invalidateQueries({ queryKey: costsKeys.profiles(variables.orgId) });
       // Invalidate all variant attachments — archived profile drops from combobox
       void queryClient.invalidateQueries({ queryKey: [...costsKeys.all, 'variant'] });
+      // An archived profile no longer counts as a cost, so the products list's cost tab
+      // and the missing-cost banner change with it.
+      void queryClient.invalidateQueries({ queryKey: ['products'] });
+      void queryClient.invalidateQueries({ queryKey: costsKeys.missingCostStats(variables.orgId) });
     },
   });
 }

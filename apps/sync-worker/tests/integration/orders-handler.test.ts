@@ -18,6 +18,7 @@ import { Decimal } from 'decimal.js';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { ProductVariantStatus } from '@pazarsync/db/enums';
 import type {
   MappedOrder,
   TrendyolOrdersStreamResponse,
@@ -1659,5 +1660,45 @@ describe('upsertOrderWithSnapshot — optimistic stock decrement (product freshn
       where: { storeId: store.id, platformOrderId: 'stock-e' },
     });
     expect(order.promotedFromBufferAt).not.toBeNull();
+  });
+
+  it('(f) the aggregate refresh after a decrement counts only in-scope variants (an archived sibling stays out)', async () => {
+    // Product aggregates follow the default listing scope (listed, not archived):
+    // re-aggregating after the decrement must not add an archived sibling's
+    // stock back into Product.totalStock.
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-STOCK-SCOPE']);
+    await seedStock(store.id, 'EAN13-STOCK-SCOPE', 10);
+    const matched = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: 'EAN13-STOCK-SCOPE' },
+    });
+    await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: matched.productId,
+        platformVariantId: BigInt(9_900_001),
+        barcode: 'EAN13-STOCK-ARCHIVED',
+        stockCode: 'sk-EAN13-STOCK-ARCHIVED',
+        salePrice: '100',
+        listPrice: '120',
+        quantity: 50,
+        status: ProductVariantStatus.ARCHIVED,
+      },
+    });
+
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildStockMapped({
+        platformOrderId: 'stock-f',
+        lines: [{ barcode: 'EAN13-STOCK-SCOPE', quantity: 3, platformLineId: '9501' }],
+      }),
+    );
+
+    const after = await prisma.productVariant.findUniqueOrThrow({ where: { id: matched.id } });
+    expect(after.quantity).toBe(7); // 10 - 3
+    expect(
+      (await prisma.product.findFirstOrThrow({ where: { id: matched.productId } })).totalStock,
+    ).toBe(7); // the archived sibling's 50 units stay out
   });
 });

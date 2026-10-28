@@ -63,6 +63,12 @@ describe('useRestoreCostProfile', () => {
       meta: {},
     });
 
+    // The products list and the missing-cost banner change with the profile's
+    // archived state.
+    const productsListKey = ['products', 'list', { storeId: 'store-1' }];
+    queryClient.setQueryData(productsListKey, { data: [] });
+    queryClient.setQueryData(costsKeys.missingCostStats(ORG_ID), { count: 1 });
+
     const { result } = renderHook(() => useRestoreCostProfile(), {
       wrapper: makeWrapper(queryClient),
     });
@@ -73,5 +79,7 @@ describe('useRestoreCostProfile', () => {
 
     expect(queryClient.getQueryState(costsKeys.profile(PROFILE_ID))?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(costsKeys.profiles(ORG_ID))?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(productsListKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(costsKeys.missingCostStats(ORG_ID))?.isInvalidated).toBe(true);
   });
 });
