@@ -543,9 +543,8 @@ export async function getAttachedVariants(
             select: {
               id: true,
               title: true,
-              // First image only (by ascending position) is the "primary".
-              // Cheap because ProductImage has @@index([productId, position]).
-              images: { select: { url: true }, orderBy: { position: 'asc' }, take: 1 },
+              // imageUrls[0] is the primary image (Trendyol order).
+              imageUrls: true,
             },
           },
         },
@@ -568,7 +567,7 @@ export async function getAttachedVariants(
     stockCode: link.productVariant.stockCode,
     productId: link.productVariant.product.id,
     productTitle: link.productVariant.product.title,
-    productImageUrl: link.productVariant.product.images[0]?.url ?? null,
+    productImageUrl: link.productVariant.product.imageUrls[0] ?? null,
     attachedAt: link.attachedAt,
     attachedBy: link.attachedBy,
   }));

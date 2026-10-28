@@ -319,11 +319,7 @@ export async function getOrderById(
               product: {
                 select: {
                   title: true,
-                  images: {
-                    orderBy: { position: 'asc' },
-                    take: 1,
-                    select: { url: true },
-                  },
+                  imageUrls: true,
                 },
               },
             },
@@ -507,7 +503,7 @@ export async function getOrderById(
               id: item.productVariant.id,
               barcode: item.productVariant.barcode,
               productName: item.productVariant.product.title,
-              productImageUrl: item.productVariant.product.images[0]?.url ?? null,
+              productImageUrl: item.productVariant.product.imageUrls[0] ?? null,
               marketplaceProductCode: item.productVariant.stockCode,
             },
     })),

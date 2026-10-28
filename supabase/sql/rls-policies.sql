@@ -196,10 +196,10 @@ CREATE POLICY products_org_member_read ON products
   FOR SELECT TO authenticated
   USING (can_access_store(store_id));
 
--- product_variants and product_images both denormalize organization_id
--- onto themselves (rather than reaching via Product) so the policy can
+-- product_variants denormalizes organization_id onto itself
+-- (rather than reaching via Product) so the policy can
 -- be a flat is_org_member() check — same 42P17 avoidance pattern as
--- products. The data path that writes them (ProductSyncService) holds
+-- products. The data path that writes it (ProductSyncService) holds
 -- both ids and stamps organization_id at insert time, so denormalization
 -- has no maintenance cost.
 ALTER TABLE product_variants ENABLE ROW LEVEL SECURITY;
@@ -207,20 +207,6 @@ DROP POLICY IF EXISTS product_variants_org_member_read ON product_variants;
 CREATE POLICY product_variants_org_member_read ON product_variants
   FOR SELECT TO authenticated
   USING (can_access_store(store_id));
-
--- product_images has no store_id (only product_id); walk up to the parent
--- product's store_id.
-ALTER TABLE product_images ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS product_images_org_member_read ON product_images;
-CREATE POLICY product_images_org_member_read ON product_images
-  FOR SELECT TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM products
-      WHERE products.id = product_images.product_id
-        AND can_access_store(products.store_id)
-    )
-  );
 
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS orders_org_member_read ON orders;

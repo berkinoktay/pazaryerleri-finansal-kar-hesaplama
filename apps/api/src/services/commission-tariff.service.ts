@@ -207,9 +207,9 @@ export async function getTariffDetail(
               title: true,
               categoryId: true,
               brandId: true,
-              // Position-0 image from our own catalog (barcode-matched); the
+              // First catalog image (barcode-matched, from our own catalog); the
               // Trendyol tariff file carries no images. Null when none attached.
-              images: { select: { url: true }, orderBy: { position: 'asc' }, take: 1 },
+              imageUrls: true,
             },
           },
         },
@@ -219,7 +219,7 @@ export async function getTariffDetail(
     }
     for (const variant of variants) {
       variantMap.set(variant.id, variant);
-      imageMap.set(variant.id, variant.product.images[0]?.url ?? null);
+      imageMap.set(variant.id, variant.product.imageUrls[0] ?? null);
     }
 
     [costMap, shippingMap] = await Promise.all([

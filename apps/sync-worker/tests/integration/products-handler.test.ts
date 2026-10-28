@@ -23,6 +23,8 @@ interface ContentSpec {
   productMainId: string;
   title: string;
   variants: VariantSpec[];
+  // Wire image urls in Trendyol order; omitted = one image named after the contentId.
+  imageUrls?: string[];
 }
 
 interface VariantSpec {
@@ -50,7 +52,9 @@ function buildContent(spec: ContentSpec): unknown {
     lastModifiedDate: 1777246115403,
     title: spec.title,
     description: 'desc',
-    images: [{ url: `https://cdn.example.com/${spec.contentId.toString()}.jpg` }],
+    images: (spec.imageUrls ?? [`https://cdn.example.com/${spec.contentId.toString()}.jpg`]).map(
+      (url) => ({ url }),
+    ),
     attributes: [{ attributeId: 47, attributeName: 'Renk', attributeValue: 'Mavi' }],
     variants: spec.variants.map((v) => ({
       variantId: v.variantId,
@@ -222,6 +226,7 @@ describe('processProductsChunk', () => {
 
     const products = await prisma.product.findMany({ where: { storeId } });
     expect(products).toHaveLength(1);
+    expect(products[0]?.imageUrls).toEqual(['https://cdn.example.com/5001.jpg']);
   });
 
   it('returns kind=done when totalElements is reached', async () => {
@@ -885,6 +890,72 @@ describe('processProductsChunk', () => {
     });
     expect(unlocked.status).toBe(ProductVariantStatus.ON_SALE);
     expect(unlocked.statusReason).toBeNull();
+  });
+
+  it('a re-sync replaces the whole imageUrls list in Trendyol order, and clears it when no images come back', async () => {
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const { storeId } = await createTestStore(org.id);
+    const contentId = 830_001;
+
+    function imagesPage(imageUrls: string[]): Response {
+      return jsonResponse({
+        totalElements: 1,
+        totalPages: 1,
+        page: 0,
+        size: 100,
+        nextPageToken: null,
+        content: [
+          buildContent({
+            contentId,
+            productMainId: 'TS-IMAGES-1',
+            title: 'Images Product',
+            imageUrls,
+            variants: [{ variantId: 830_101, barcode: 'img-bc-1', stockCode: 'img-sk-1' }],
+          }),
+        ],
+      });
+    }
+
+    async function runScan(imageUrls: string[]): Promise<string[]> {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(imagesPage(imageUrls));
+      const log = await prisma.syncLog.create({
+        data: {
+          organizationId: org.id,
+          storeId,
+          syncType: 'PRODUCTS',
+          status: 'RUNNING',
+          startedAt: new Date(),
+          claimedAt: new Date(),
+          claimedBy: 'worker-test',
+          lastTickAt: new Date(),
+          attemptCount: 1,
+        },
+      });
+      await processProductsChunk({ syncLog: log, cursor: null, workerId: 'worker-test' });
+      // Free the (store_id, sync_type) active-sync slot for the next scan.
+      await prisma.syncLog.update({
+        where: { id: log.id },
+        data: { status: 'COMPLETED', completedAt: new Date() },
+      });
+      const product = await prisma.product.findFirstOrThrow({
+        where: { storeId, platformContentId: BigInt(contentId) },
+      });
+      return product.imageUrls;
+    }
+
+    expect(
+      await runScan(['https://cdn.example.com/a.jpg', 'https://cdn.example.com/b.jpg']),
+    ).toEqual(['https://cdn.example.com/a.jpg', 'https://cdn.example.com/b.jpg']);
+
+    // Trendyol reorders and swaps the images: the update clause replaces the list.
+    expect(
+      await runScan(['https://cdn.example.com/c.jpg', 'https://cdn.example.com/a.jpg']),
+    ).toEqual(['https://cdn.example.com/c.jpg', 'https://cdn.example.com/a.jpg']);
+
+    // Trendyol stops sending images: the list is cleared, not left stale.
+    expect(await runScan([])).toEqual([]);
   });
 
   it('keeps an archived variant out of Product.totalStock and the sale-price range', async () => {

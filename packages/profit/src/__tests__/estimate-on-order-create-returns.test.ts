@@ -45,7 +45,6 @@ async function truncateAll(): Promise<void> {
        order_items,
        orders,
        product_variant_cost_profiles,
-       product_images,
        product_variants,
        products,
        cost_profile_versions,

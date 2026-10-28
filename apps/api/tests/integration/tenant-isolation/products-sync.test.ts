@@ -120,7 +120,7 @@ describe('Tenant isolation — products sync surface', () => {
     expect(res3.status).toBe(403);
   });
 
-  it('product, product_variant, and product_image rows in org A do not leak via tenant-scoped queries from org B', async () => {
+  it('product and product_variant rows in org A do not leak via tenant-scoped queries from org B', async () => {
     const a = await makeTenant();
     await makeTenant(); // org B
 
@@ -132,6 +132,7 @@ describe('Tenant isolation — products sync surface', () => {
         platformContentId: BigInt(11),
         productMainId: 'pm-a',
         title: 'A Product',
+        imageUrls: ['https://cdn.example.com/a.jpg'],
       },
     });
     await prisma.productVariant.create({
@@ -146,13 +147,6 @@ describe('Tenant isolation — products sync surface', () => {
         listPrice: '10.00',
       },
     });
-    await prisma.productImage.create({
-      data: {
-        organizationId: a.orgId,
-        productId: productA.id,
-        url: 'https://cdn.example.com/a.jpg',
-      },
-    });
 
     // Defense-in-depth check: Prisma queries scoped to orgB return empty.
     // (The application-layer where-clause is the primary guard; this
@@ -163,11 +157,7 @@ describe('Tenant isolation — products sync surface', () => {
     const orgBVariants = await prisma.productVariant.findMany({
       where: { organizationId: { not: a.orgId } },
     });
-    const orgBImages = await prisma.productImage.findMany({
-      where: { organizationId: { not: a.orgId } },
-    });
     expect(orgBProducts).toHaveLength(0);
     expect(orgBVariants).toHaveLength(0);
-    expect(orgBImages).toHaveLength(0);
   });
 });

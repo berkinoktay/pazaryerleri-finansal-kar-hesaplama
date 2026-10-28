@@ -140,11 +140,6 @@ export interface TrendyolApprovedProductsResponse {
 // fields are strings so the boundary between fetcher (pure) and DB layer
 // (Decimal) stays explicit and serializable. Timestamps are JS Date.
 
-export interface MappedProductImage {
-  url: string;
-  position: number;
-}
-
 export interface MappedProductVariant {
   platformVariantId: bigint;
   barcode: string;
@@ -190,7 +185,9 @@ export interface MappedProduct {
   attributes: TrendyolAttribute[];
   platformCreatedAt: Date | null;
   platformModifiedAt: Date | null;
-  images: MappedProductImage[];
+  // Image urls in the order Trendyol sends them (array index = position);
+  // imageUrls[0] is the primary image. Mirrors the Product.imageUrls column.
+  imageUrls: string[];
   variants: MappedProductVariant[];
 }
 

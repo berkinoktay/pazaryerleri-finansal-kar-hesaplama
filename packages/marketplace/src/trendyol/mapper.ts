@@ -6,12 +6,12 @@ import { ProductVariantStatus } from '@pazarsync/db/enums';
 
 import type {
   MappedProduct,
-  MappedProductImage,
   MappedProductsPageMeta,
   MappedProductVariant,
   TrendyolApprovedProductsResponse,
   TrendyolAttribute,
   TrendyolContent,
+  TrendyolImage,
   TrendyolVariant,
 } from './types';
 
@@ -120,8 +120,9 @@ function extractVariantLabel(attributes: TrendyolAttribute[]): string | null {
   return attributes.map((a) => `${a.attributeValue} ${a.attributeName}`).join(' ');
 }
 
-function mapImages(images: { url: string }[]): MappedProductImage[] {
-  return images.map((img, position) => ({ url: img.url, position }));
+// Keeps Trendyol's order: the array index is the image position.
+function mapImageUrls(images: TrendyolImage[]): string[] {
+  return images.map((img) => img.url);
 }
 
 function mapVariant(variant: TrendyolVariant): MappedProductVariant {
@@ -173,7 +174,7 @@ export function mapTrendyolContent(content: TrendyolContent): MappedProduct {
     attributes: contentAttrs,
     platformCreatedAt: epochMsToDate(content.creationDate),
     platformModifiedAt: epochMsToDate(content.lastModifiedDate),
-    images: mapImages(content.images ?? []),
+    imageUrls: mapImageUrls(content.images ?? []),
     variants: (content.variants ?? []).map(mapVariant),
   };
 }

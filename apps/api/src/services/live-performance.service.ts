@@ -374,7 +374,7 @@ export async function getTodayProducts(args: {
             product: {
               select: {
                 title: true,
-                images: { orderBy: { position: 'asc' }, take: 1, select: { url: true } },
+                imageUrls: true,
               },
             },
           },
@@ -421,7 +421,7 @@ export async function getTodayProducts(args: {
       barcode: variant.barcode,
       stockCode: variant.stockCode,
       productName: variant.product.title,
-      thumbUrl: variant.product.images[0]?.url ?? null,
+      thumbUrl: variant.product.imageUrls[0] ?? null,
       unresolved: false,
     });
     acc.orderIds.add(item.orderId);
@@ -477,7 +477,7 @@ export async function getTodayProducts(args: {
             product: {
               select: {
                 title: true,
-                images: { orderBy: { position: 'asc' }, take: 1, select: { url: true } },
+                imageUrls: true,
               },
             },
           },
@@ -498,7 +498,7 @@ export async function getTodayProducts(args: {
             barcode: variant.barcode,
             stockCode: variant.stockCode,
             productName: variant.product.title,
-            thumbUrl: variant.product.images[0]?.url ?? null,
+            thumbUrl: variant.product.imageUrls[0] ?? null,
             unresolved: false,
           }
         : {
@@ -775,7 +775,7 @@ export async function getBufferDetail(args: {
             product: {
               select: {
                 title: true,
-                images: { orderBy: { position: 'asc' }, take: 1, select: { url: true } },
+                imageUrls: true,
               },
             },
           },
@@ -788,7 +788,7 @@ export async function getBufferDetail(args: {
     return {
       barcode: line.barcode,
       productName: variant?.product.title ?? line.barcode,
-      thumbUrl: variant?.product.images[0]?.url ?? null,
+      thumbUrl: variant?.product.imageUrls[0] ?? null,
       variantId: variant?.id ?? null,
       stockCode: variant?.stockCode ?? null,
       quantity: line.quantity,

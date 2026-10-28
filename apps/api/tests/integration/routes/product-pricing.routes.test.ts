@@ -475,6 +475,8 @@ async function setupRichFixture(): Promise<RichFixtureCtx> {
       categoryName: 'Gömlek',
       brandId: BRAND_ID,
       brandName: 'Modline',
+      // Two ordered images on product A: the first entry is the primary the row surfaces.
+      imageUrls: [PRIMARY_IMAGE_URL, SECONDARY_IMAGE_URL],
     },
   });
   const productB = await prisma.product.create({
@@ -489,14 +491,6 @@ async function setupRichFixture(): Promise<RichFixtureCtx> {
       brandId: BRAND_B_ID,
       brandName: 'Denimco',
     },
-  });
-
-  // Two ordered images on product A — position 0 is the primary the row surfaces.
-  await prisma.productImage.createMany({
-    data: [
-      { organizationId: org.id, productId: productA.id, url: SECONDARY_IMAGE_URL, position: 1 },
-      { organizationId: org.id, productId: productA.id, url: PRIMARY_IMAGE_URL, position: 0 },
-    ],
   });
 
   // A low-cost (200) and a high-cost (480) profile to drive profitable vs loss.
@@ -689,7 +683,7 @@ describe('GET .../product-pricing — in-memory filter/sort/paginate + image/cos
     expect(body.data[body.data.length - 1]?.netProfit).toBeNull();
   });
 
-  it('imageUrl is the position-0 image when present, null otherwise', async () => {
+  it('imageUrl is the first imageUrls entry when present, null otherwise', async () => {
     const body = await fetchList('?perPage=25');
     const withImage = body.data.find((r) => r.variantId === ctx.variants.aProfit1);
     expect(withImage?.imageUrl).toBe(PRIMARY_IMAGE_URL);

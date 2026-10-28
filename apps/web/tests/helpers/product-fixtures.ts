@@ -60,7 +60,7 @@ export function makeProductWithVariants(
     brand: { id: '1', name: 'Test Brand' },
     category: { id: '2', name: 'Test Category' },
     color: null,
-    images: [],
+    imageUrls: [],
     variantCount: variants.length,
     variants,
     lastSyncedAt: '2026-04-27T12:00:00Z',

@@ -55,6 +55,7 @@ async function seedProduct(
       categoryId: spec.categoryId ?? null,
       categoryName: spec.categoryName ?? null,
       color: spec.color ?? null,
+      imageUrls: spec.imageUrls ?? [],
       // Default platformCreatedAt to platformModifiedAt so the default
       // `-platformCreatedAt` sort yields the same ordering as the older
       // `-platformModifiedAt` for fixtures that only specify the latter.
@@ -78,11 +79,6 @@ async function seedProduct(
         statusReason: v.statusReason ?? null,
         delistedAt: v.delistedAt ?? null,
       },
-    });
-  }
-  for (const [position, url] of (spec.imageUrls ?? []).entries()) {
-    await prisma.productImage.create({
-      data: { organizationId, productId: product.id, url, position },
     });
   }
 }
@@ -196,6 +192,7 @@ interface ListResponseBody {
     id: string;
     title: string;
     productMainId: string;
+    imageUrls: string[];
     variants: {
       id: string;
       barcode: string;
@@ -290,6 +287,8 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/products', () => {
     // so the relative ordering is the same as the old -platformModifiedAt default.
     expect(body.data[0]?.title).toBe('Kirmizi Etek');
     expect(body.data[body.data.length - 1]?.title).toBe('Yesil Mont');
+    // A product seeded without images comes back with an empty list.
+    expect(body.data[body.data.length - 1]?.imageUrls).toEqual([]);
   });
 
   it('search hits product title', async () => {
@@ -298,6 +297,7 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/products', () => {
     expect(status).toBe(200);
     expect(body.data).toHaveLength(1);
     expect(body.data[0]?.title).toBe('Beyaz Keten Gomlek');
+    expect(body.data[0]?.imageUrls).toEqual(['https://cdn.example.com/1001.jpg']);
   });
 
   it('search hits variant.barcode', async () => {

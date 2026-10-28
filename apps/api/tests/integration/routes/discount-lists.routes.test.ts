@@ -117,6 +117,7 @@ async function setupFixture(): Promise<Fixture> {
       categoryName: 'Bayrak',
       brandId: 2032n,
       brandName: 'Alpaka',
+      imageUrls: [IMAGE_URL],
     },
   });
   const variant = await prisma.productVariant.create({
@@ -131,9 +132,6 @@ async function setupFixture(): Promise<Fixture> {
       listPrice: new Decimal('250.00'),
       vatRate: 20,
     },
-  });
-  await prisma.productImage.create({
-    data: { organizationId: org.id, productId: product.id, url: IMAGE_URL, position: 0 },
   });
 
   const list = await prisma.discountList.create({

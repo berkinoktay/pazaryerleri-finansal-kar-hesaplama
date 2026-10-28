@@ -101,11 +101,8 @@ describe('mapTrendyolContent', () => {
     expect(out.categoryId).toBe(BigInt(2122));
     expect(out.categoryName).toBe('Dolap ve Gardrop');
     expect(out.color).toBe('Beyaz Beyaz');
-    expect(out.images).toEqual([
-      {
-        url: 'https://cdn.dsmcdn.com/mediacenter-stage8/stage/QC_PREP/20260427/02/de9bebd6-e781-3d1d-9f76-10765a8c3b3c/1_org_zoom.jpg',
-        position: 0,
-      },
+    expect(out.imageUrls).toEqual([
+      'https://cdn.dsmcdn.com/mediacenter-stage8/stage/QC_PREP/20260427/02/de9bebd6-e781-3d1d-9f76-10765a8c3b3c/1_org_zoom.jpg',
     ]);
     expect(out.platformCreatedAt).toEqual(new Date(1777246115403));
     expect(out.variants).toHaveLength(1);
@@ -326,7 +323,7 @@ describe('mapTrendyolContent', () => {
     void _i;
     void _a;
     const out = mapTrendyolContent(stripped);
-    expect(out.images).toEqual([]);
+    expect(out.imageUrls).toEqual([]);
     expect(out.attributes).toEqual([]);
     expect(out.color).toBeNull();
   });

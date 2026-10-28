@@ -107,6 +107,8 @@ async function setupTariffFixture(): Promise<TariffFixture> {
       categoryName: 'Gömlek',
       brandId: 2032n,
       brandName: 'Modline',
+      // Two images: the detail must surface the first one for the matched item.
+      imageUrls: ['https://cdn.example/tar-0.jpg', 'https://cdn.example/tar-1.jpg'],
     },
   });
   const variant = await prisma.productVariant.create({
@@ -122,23 +124,6 @@ async function setupTariffFixture(): Promise<TariffFixture> {
       vatRate: 20,
       dimensionalWeight: new Decimal('3.0'),
     },
-  });
-  // Two images: the detail must surface the position-0 one for the matched item.
-  await prisma.productImage.createMany({
-    data: [
-      {
-        organizationId: org.id,
-        productId: product.id,
-        url: 'https://cdn.example/tar-1.jpg',
-        position: 1,
-      },
-      {
-        organizationId: org.id,
-        productId: product.id,
-        url: 'https://cdn.example/tar-0.jpg',
-        position: 0,
-      },
-    ],
   });
 
   const profile = await prisma.costProfile.create({
@@ -249,7 +234,7 @@ describe('Commission Tariffs — list / detail / delete', () => {
     expect(matched?.calculable).toBe(true);
     expect(matched?.reason).toBeNull();
     expect(matched?.selectedBand).toBe('band2');
-    // The matched item surfaces its catalog product's position-0 image.
+    // The matched item surfaces its catalog product's first image.
     expect(matched?.imageUrl).toBe('https://cdn.example/tar-0.jpg');
     expect(matched?.bands).toHaveLength(4);
     // Every band has a real (non-null) net profit + margin, and a best band is marked.

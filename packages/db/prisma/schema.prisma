@@ -462,7 +462,7 @@ model MemberStoreAccess {
 }
 
 // Parent — one row per Trendyol contentId. Shared content fields
-// (title, description, brand, category, color, images) live here. SKU-level
+// (title, description, brand, category, color, imageUrls) live here. SKU-level
 // fields (barcode, stockCode, price, stock, delivery, size) live on
 // ProductVariant. The split mirrors how the marketplace itself models
 // products and avoids lossy denormalization across N variants.
@@ -480,6 +480,9 @@ model Product {
   categoryName       String?   @map("category_name")
   color              String?
   attributes         Json      @default("[]")
+  // Image urls in the order Trendyol sends them; imageUrls[0] is the primary
+  // image. The catalog sync replaces the whole list on every upsert.
+  imageUrls          String[]  @default([]) @map("image_urls")
   platformCreatedAt  DateTime? @map("platform_created_at")
   platformModifiedAt DateTime? @map("platform_modified_at")
   lastSyncedAt       DateTime  @default(now()) @map("last_synced_at")
@@ -508,7 +511,6 @@ model Product {
 
   store    Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
   variants ProductVariant[]
-  images   ProductImage[]
 
   @@unique([storeId, platformContentId])
   @@index([organizationId])
@@ -608,20 +610,6 @@ model ProductVariant {
   // Products page: per-store status filter, per-status counts and the default listing scope.
   @@index([storeId, status])
   @@map("product_variants")
-}
-
-model ProductImage {
-  id             String   @id @default(uuid()) @db.Uuid
-  organizationId String   @map("organization_id") @db.Uuid
-  productId      String   @map("product_id") @db.Uuid
-  url            String   @db.Text
-  position       Int      @default(0)
-  createdAt      DateTime @default(now()) @map("created_at")
-
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
-
-  @@index([productId, position])
-  @@map("product_images")
 }
 
 model Order {

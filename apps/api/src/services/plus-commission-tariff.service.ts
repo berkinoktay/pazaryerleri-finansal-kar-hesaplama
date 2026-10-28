@@ -213,7 +213,7 @@ export async function getPlusTariffDetail(
               title: true,
               categoryId: true,
               brandId: true,
-              images: { select: { url: true }, orderBy: { position: 'asc' }, take: 1 },
+              imageUrls: true,
             },
           },
         },
@@ -223,7 +223,7 @@ export async function getPlusTariffDetail(
     }
     for (const variant of variants) {
       variantMap.set(variant.id, variant);
-      imageMap.set(variant.id, variant.product.images[0]?.url ?? null);
+      imageMap.set(variant.id, variant.product.imageUrls[0] ?? null);
     }
 
     [costMap, shippingMap] = await Promise.all([

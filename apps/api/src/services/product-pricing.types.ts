@@ -25,7 +25,7 @@ export interface ProductPricingRow {
   netProfit: string | null;
   saleMarginPct: string | null;
   costMarkupPct: string | null;
-  /** Primary product image URL (position=0). Null if no image is attached. */
+  /** Primary product image URL (Product.imageUrls[0]). Null if no image is attached. */
   imageUrl: string | null;
   /** Current cost (GROSS, TRY), decimal string. Null when costStatus is not OK. */
   cost: string | null;
