@@ -3193,7 +3193,7 @@
               "OWN_CONTRACT_EMPTY",
               "DESI_OVERFLOW"
             ],
-            "description": "Outcome of the shipping estimate. OK = estimate available. NO_CARRIER = TRENDYOL_CONTRACT store with no defaultShippingCarrierId. NO_DESI = variant has neither a user override nor a synced dimensional weight. OWN_CONTRACT_EMPTY = OWN_CONTRACT store with no own_shipping_tariffs row for this desi (V1 always). DESI_OVERFLOW = variant desi exceeds the carrier tariff coverage.",
+            "description": "Outcome of the shipping estimate. OK = estimate available. NO_CARRIER = TRENDYOL_CONTRACT store with no defaultShippingCarrierId. NO_DESI = no estimate could be produced for the variant (a defensive fallback): desi has a 0 floor, so a variant Trendyol sent no desi for is priced at desi 0 and flagged by isDimensionalWeightMissing instead. OWN_CONTRACT_EMPTY = OWN_CONTRACT store with no own_shipping_tariffs row for this desi (V1 always). DESI_OVERFLOW = variant desi exceeds the carrier tariff coverage.",
             "example": "OK"
           }
         },
@@ -3545,7 +3545,7 @@
               "OWN_CONTRACT_EMPTY",
               "DESI_OVERFLOW"
             ],
-            "description": "Shipping estimate availability. OK = estimate computed. NO_CARRIER = no carrier configured on this store. NO_DESI = variant has no dimensional weight. OWN_CONTRACT_EMPTY = own-contract store with no tariff row for this desi. DESI_OVERFLOW = variant desi exceeds carrier tariff coverage.",
+            "description": "Shipping estimate availability. OK = estimate computed. NO_CARRIER = no carrier configured on this store. NO_DESI = defensive fallback, not returned in practice: desi has a 0 floor, so a variant with no Trendyol desi is priced at desi 0. OWN_CONTRACT_EMPTY = own-contract store with no tariff row for this desi. DESI_OVERFLOW = variant desi exceeds carrier tariff coverage.",
             "example": "OK"
           },
           "commissionStatus": {

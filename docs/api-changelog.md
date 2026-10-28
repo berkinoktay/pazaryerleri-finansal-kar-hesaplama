@@ -13,6 +13,12 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Shipping estimate status: `NO_DESI` description** (`shippingEstimateStatus` on the products
+  list and the product pricing list). Description only, no wire change. `NO_DESI` is now
+  described as what it is: a defensive fallback for a variant with no estimate row. The
+  estimate never returns it, because desi has a 0 floor: a variant Trendyol sent no desi for is
+  priced at desi 0, and the products list flags it with `isDimensionalWeightMissing`.
+
 - **Products list: missing-desi tab, counter and per-variant flag**
   (`GET /v1/organizations/{orgId}/stores/{storeId}/products`, `GET .../products/facets`,
   `PATCH .../products/variants/{variantId}/dimensional-weight`,
