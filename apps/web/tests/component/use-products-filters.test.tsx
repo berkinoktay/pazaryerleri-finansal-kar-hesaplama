@@ -8,6 +8,8 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
+import { ProductVariantStatus } from '@pazarsync/db/enums';
+
 import { useProductsFilters } from '@/features/products/hooks/use-products-filters';
 
 import { render, screen } from '@/../tests/helpers/render';
@@ -20,6 +22,7 @@ function FilterHarness(): React.ReactElement {
   return (
     <div>
       <p data-testid="filters">{filters.filters.map((row) => row.field).join(',')}</p>
+      <p data-testid="filterValues">{filters.filters.map((row) => String(row.value)).join(',')}</p>
       <p data-testid="page">{filters.page.toString()}</p>
       <p data-testid="perPage">{filters.perPage.toString()}</p>
       <p data-testid="overrideMissing">{filters.overrideMissing ?? 'null'}</p>
@@ -28,7 +31,14 @@ function FilterHarness(): React.ReactElement {
       <button
         onClick={() =>
           void setFilters({
-            filters: [{ id: 'r-status', field: 'status', operator: 'eq', value: 'archived' }],
+            filters: [
+              {
+                id: 'r-status',
+                field: 'status',
+                operator: 'eq',
+                value: ProductVariantStatus.ARCHIVED,
+              },
+            ],
           })
         }
       >
@@ -41,13 +51,13 @@ function FilterHarness(): React.ReactElement {
   );
 }
 
-function renderHarness() {
+function renderHarness(searchParams?: Record<string, string>) {
   return render(
     // Testing adapter: synchronous URL-state application with throttling off.
     // The plain react adapter queues history updates on a timer — on a slow
     // runner the flush can fire AFTER environment teardown and crash the run
     // with "location is not defined" (exactly what CI hit).
-    <NuqsTestingAdapter rateLimitFactor={0}>
+    <NuqsTestingAdapter searchParams={searchParams} rateLimitFactor={0}>
       <FilterHarness />
     </NuqsTestingAdapter>,
   );
@@ -95,5 +105,20 @@ describe('useProductsFilters', () => {
 
     await user.click(screen.getByText('sort-desc-price'));
     expect(screen.getByTestId('sort').textContent).toBe('-salePrice');
+  });
+
+  it('drops a retired status chip from an old link but keeps a current one', () => {
+    renderHarness({
+      filters: JSON.stringify([
+        { id: 'old', field: 'status', operator: 'eq', value: 'onSale' },
+        { id: 'new', field: 'status', operator: 'eq', value: ProductVariantStatus.NOT_ON_SALE },
+      ]),
+    });
+    expect(screen.getByTestId('filterValues').textContent).toBe(ProductVariantStatus.NOT_ON_SALE);
+  });
+
+  it('falls back to no override tab for a retired overrideMissing=vat link', () => {
+    renderHarness({ overrideMissing: 'vat' });
+    expect(screen.getByTestId('overrideMissing').textContent).toBe('null');
   });
 });

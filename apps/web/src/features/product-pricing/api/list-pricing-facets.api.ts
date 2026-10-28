@@ -7,11 +7,14 @@ export type PricingFacetsResponse = components['schemas']['ProductFacetsResponse
 
 /**
  * Brand + category option lists for the pricing filter toolbar. Reuses the
- * store-scoped products `/facets` endpoint — the same approved-variant
- * universe the pricing list draws from, so its brand/category facets line up
- * 1:1 with the `categoryId` / `brandId` filters. Feature-local (not imported
- * from features/products) to respect the feature boundary; the shared contract
- * is the generated `ProductFacetsResponse` schema.
+ * store-scoped products `/facets` endpoint, whose brand/category counts only
+ * include products with at least one variant in the default listing scope
+ * (still in Trendyol's feed, not ARCHIVED). The pricing list also returns
+ * archived and delisted variants, so a brand or category whose products are
+ * all archived or delisted has rows in the pricing table but no option here.
+ * That gap is accepted until the pricing list adopts the same scope.
+ * Feature-local (not imported from features/products) to respect the feature
+ * boundary; the shared contract is the generated `ProductFacetsResponse` schema.
  */
 export async function listPricingFacets(
   orgId: string,

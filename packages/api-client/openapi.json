@@ -93,7 +93,7 @@
         "properties": {
           "field": {
             "type": "string",
-            "example": "costPrice"
+            "example": "vatRate"
           },
           "code": {
             "type": "string",
@@ -2918,12 +2918,6 @@
           "title": {
             "type": "string"
           },
-          "description": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "brand": {
             "type": "object",
             "properties": {
@@ -2985,14 +2979,14 @@
           "variantCount": {
             "type": "integer",
             "minimum": 0,
-            "description": "Number of variants in the `variants[]` array on this response. When a `status` filter is supplied, this matches the filtered count (e.g. `?status=onSale` returns only onSale variants in `variants[]` and `variantCount` mirrors that length). Without a status filter, it equals the product's total variant count. The contract is intentionally \"what you see is what you count\" — UI can use this for the variant count chip, the multi-variant expand affordance, and the Beden chip overflow with no separate length lookup."
+            "description": "Number of variants in the `variants[]` array on this response: the variants that match the variant-level filters (`status`, or the default listing scope when it is omitted, so archived and delisted variants count only when asked for; narrowed further by `overrideMissing` and `vatRateIn`). The contract is intentionally \"what you see is what you count\" — UI can use this for the variant count chip, the multi-variant expand affordance, and the Beden chip overflow with no separate length lookup."
           },
           "variants": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VariantSummary"
             },
-            "description": "Filtered to variants matching the `status` query param when one is supplied."
+            "description": "Only the variants matching the variant-level filters: the `status` value when one is supplied, otherwise the default listing scope, narrowed further by `overrideMissing` and `vatRateIn`."
           },
           "lastSyncedAt": {
             "type": "string",
@@ -3011,7 +3005,6 @@
           "productMainId",
           "platformContentId",
           "title",
-          "description",
           "brand",
           "category",
           "color",
@@ -3084,13 +3077,6 @@
               "null"
             ]
           },
-          "costPrice": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Decimal string, user-entered"
-          },
           "dimensionalWeight": {
             "type": [
               "string",
@@ -3119,36 +3105,11 @@
             "type": [
               "integer",
               "null"
-            ]
-          },
-          "isRushDelivery": {
-            "type": "boolean"
-          },
-          "fastDeliveryOptions": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "deliveryOptionType": {
-                  "type": "string"
-                },
-                "deliveryDailyCutOffHour": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "deliveryOptionType",
-                "deliveryDailyCutOffHour"
-              ]
-            }
+            ],
+            "description": "Trendyol's handling time in days and the only delivery signal since Trendyol dropped the rush-delivery fields: 0 = ships today, 1 = ships tomorrow, n = ships in n days. Null when Trendyol sends none.",
+            "example": 1
           },
           "productUrl": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "locationBasedDelivery": {
             "type": [
               "string",
               "null"
@@ -3157,13 +3118,22 @@
           "status": {
             "type": "string",
             "enum": [
-              "onSale",
-              "archived",
-              "locked",
-              "blacklisted",
-              "inactive"
+              "ON_SALE",
+              "NOT_ON_SALE",
+              "LOCKED",
+              "BLACKLISTED",
+              "ARCHIVED"
             ],
-            "description": "Computed status from variant flags. Order of precedence: archived → blacklisted → locked → onSale → inactive."
+            "description": "Variant status the catalog sync derives from the Trendyol flags with one precedence: ARCHIVED, then BLACKLISTED, then LOCKED, then ON_SALE, otherwise NOT_ON_SALE. The values are mutually exclusive. Independent of delistedAt: a delisted variant keeps its last status.",
+            "example": "ON_SALE"
+          },
+          "statusReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Trendyol's reason code for a LOCKED variant (lockReason) or a BLACKLISTED variant (blacklistReason), passed through as sent, e.g. CRITICAL_SALE_PRICE_CHANGE. Null for every other status and when Trendyol sends no reason. The UI localizes the codes it knows.",
+            "example": null
           },
           "delistedAt": {
             "type": [
@@ -3251,17 +3221,14 @@
           "salePrice",
           "listPrice",
           "vatRate",
-          "costPrice",
           "dimensionalWeight",
           "syncedDimensionalWeight",
           "isDimensionalWeightOverridden",
           "quantity",
           "deliveryDuration",
-          "isRushDelivery",
-          "fastDeliveryOptions",
           "productUrl",
-          "locationBasedDelivery",
           "status",
+          "statusReason",
           "delistedAt",
           "currentCostTry",
           "profileCount",
@@ -3334,23 +3301,20 @@
             "properties": {
               "missingCost": {
                 "type": "integer",
-                "minimum": 0
-              },
-              "missingVat": {
-                "type": "integer",
-                "minimum": 0
+                "minimum": 0,
+                "description": "Products with at least one in-scope variant that has no active cost profile. Equals pagination.total of the overrideMissing=cost list."
               },
               "total": {
                 "type": "integer",
-                "minimum": 0
+                "minimum": 0,
+                "description": "Products with at least one variant in the default listing scope. Equals pagination.total of the unfiltered list."
               }
             },
             "required": [
               "missingCost",
-              "missingVat",
               "total"
             ],
-            "description": "Counts of products with ≥1 variant missing the corresponding override field. Used to populate the override-state tab badges. Computed against the unfiltered store-scoped set (does not respect the current q/brand/category/status filters — tabs reset to the full set when activated)."
+            "description": "Tab badge counts over the default listing scope (variants still in Trendyol's feed that are not ARCHIVED). Ignores the current q/brand/category/status filters: the tabs reset to the full scope when activated."
           }
         },
         "required": [
@@ -3461,13 +3425,19 @@
           "count": {
             "type": "integer",
             "minimum": 0,
-            "description": "Total number of variants with zero attached active cost profiles.",
+            "description": "Number of variants in the default listing scope (still in Trendyol's feed, not ARCHIVED) with no active (non-archived) cost profile attached.",
             "example": 42
+          },
+          "missingProductCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of products with at least one of those variants. A product counts once however many of its variants miss cost.",
+            "example": 17
           },
           "totalVariants": {
             "type": "integer",
             "minimum": 0,
-            "description": "Total number of variants across all stores in the organization.",
+            "description": "Number of variants in the default listing scope across the stores the caller can see.",
             "example": 350
           },
           "byStore": {
@@ -3485,6 +3455,11 @@
                   "minimum": 0,
                   "example": 15
                 },
+                "missingProductCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "example": 6
+                },
                 "totalVariants": {
                   "type": "integer",
                   "minimum": 0,
@@ -3494,14 +3469,16 @@
               "required": [
                 "storeId",
                 "missingCount",
+                "missingProductCount",
                 "totalVariants"
               ]
             },
-            "description": "Per-store breakdown. Only includes stores that have at least one variant. Stores with missingCount = 0 are still included so the UI can calculate totals. Each row carries the store’s own missingCount AND totalVariants so a store-scoped view can render \"N missing of M\" for just the active store."
+            "description": "Per-store breakdown, ordered by storeId. Lists every store with at least one variant in the default listing scope; stores with missingCount = 0 are still included so the UI can calculate totals. Each row carries the store's own counts so a store-scoped view can render \"N products / M variants missing\" for just the active store."
           }
         },
         "required": [
           "count",
+          "missingProductCount",
           "totalVariants",
           "byStore"
         ]
@@ -4798,7 +4775,7 @@
           "productCount": {
             "type": "integer",
             "minimum": 0,
-            "description": "Count of approved + non-archived products in this store matching the rule scope. For CATEGORY rows: across all brands. For CATEGORY_BRAND: only this specific (categoryId, brandId) pair.",
+            "description": "Count of products with a non-archived variant in this store matching the rule scope. For CATEGORY rows: across all brands. For CATEGORY_BRAND: only this specific (categoryId, brandId) pair.",
             "example": 42
           },
           "fetchedAt": {
@@ -12671,7 +12648,7 @@
           "Products"
         ],
         "summary": "List synced products with filters and pagination",
-        "description": "Returns parent products from our local cache (synced from Trendyol). The `variants[]` in each product is filtered to those matching the `status` query param when one is supplied; the parent is included whenever at least one of its variants matches. Search (`q`) hits Product.title, Product.productMainId, and ProductVariant.barcode / .stockCode (case-insensitive substring match). Pagination is offset-based and 1-indexed; perPage is locked to {10, 25, 50, 100}.",
+        "description": "Returns parent products from our local cache (synced from Trendyol). Without a `status` param the default listing scope applies (variants still in Trendyol's feed that are not ARCHIVED); `status` selects one variant status or DELISTED instead. The `variants[]` in each product holds only the variants matching the variant-level filters, and the parent is included whenever at least one of its variants matches. Search (`q`) hits Product.title, Product.productMainId, and the barcode / stockCode of a variant that passes the variant-level filters (case-insensitive substring match). Pagination is offset-based and 1-indexed; perPage is locked to {10, 25, 50, 100}.",
         "security": [
           {
             "bearerAuth": []
@@ -12726,28 +12703,39 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 100,
-              "description": "Search across Product.title, Product.productMainId, ProductVariant.barcode, and ProductVariant.stockCode (case-insensitive substring match).",
+              "description": "Search across Product.title, Product.productMainId, ProductVariant.barcode, and ProductVariant.stockCode (case-insensitive substring match). A barcode or stock code hit counts only on a variant that passes the variant-level filters (`status`, or the default listing scope when it is omitted, plus `overrideMissing` and `vatRateIn`), so a hidden variant never surfaces its parent.",
               "example": "keten"
             },
             "required": false,
-            "description": "Search across Product.title, Product.productMainId, ProductVariant.barcode, and ProductVariant.stockCode (case-insensitive substring match).",
+            "description": "Search across Product.title, Product.productMainId, ProductVariant.barcode, and ProductVariant.stockCode (case-insensitive substring match). A barcode or stock code hit counts only on a variant that passes the variant-level filters (`status`, or the default listing scope when it is omitted, plus `overrideMissing` and `vatRateIn`), so a hidden variant never surfaces its parent.",
             "name": "q",
             "in": "query"
           },
           {
             "schema": {
-              "type": "string",
-              "enum": [
-                "onSale",
-                "archived",
-                "locked",
-                "blacklisted"
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "ON_SALE",
+                    "NOT_ON_SALE",
+                    "LOCKED",
+                    "BLACKLISTED",
+                    "ARCHIVED"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "DELISTED"
+                  ]
+                }
               ],
-              "description": "Variant-level status filter. The parent is included if at least one variant matches; the variants[] array in the response is filtered to only matching variants.",
-              "example": "onSale"
+              "description": "Variant-level status filter. Omitted: the default listing scope (variants still in Trendyol's feed that are not ARCHIVED). ON_SALE, NOT_ON_SALE, LOCKED, BLACKLISTED and ARCHIVED match variants in that status that are not delisted; DELISTED matches every variant the full catalog scan stopped returning, whatever its last status. The parent is included if at least one variant matches; the variants[] array in the response is filtered to only matching variants.",
+              "example": "NOT_ON_SALE"
             },
             "required": false,
-            "description": "Variant-level status filter. The parent is included if at least one variant matches; the variants[] array in the response is filtered to only matching variants.",
+            "description": "Variant-level status filter. Omitted: the default listing scope (variants still in Trendyol's feed that are not ARCHIVED). ON_SALE, NOT_ON_SALE, LOCKED, BLACKLISTED and ARCHIVED match variants in that status that are not delisted; DELISTED matches every variant the full catalog scan stopped returning, whatever its last status. The parent is included if at least one variant matches; the variants[] array in the response is filtered to only matching variants.",
             "name": "status",
             "in": "query"
           },
@@ -12779,14 +12767,13 @@
             "schema": {
               "type": "string",
               "enum": [
-                "cost",
-                "vat"
+                "cost"
               ],
-              "description": "Variant-level filter: \"cost\" → variants with NULL costPrice; \"vat\" → variants with NULL vatRate. Composes with the status filter via AND. Parent included if ≥1 variant matches; response variants[] is filtered to matching variants (consistent with status semantics).",
+              "description": "Variant-level filter: \"cost\" matches variants with no active (non-archived) cost profile attached. Composes via AND with the status filter, or with the default listing scope when status is omitted. Parent included if at least one variant matches; response variants[] is filtered to matching variants (consistent with status semantics).",
               "example": "cost"
             },
             "required": false,
-            "description": "Variant-level filter: \"cost\" → variants with NULL costPrice; \"vat\" → variants with NULL vatRate. Composes with the status filter via AND. Parent included if ≥1 variant matches; response variants[] is filtered to matching variants (consistent with status semantics).",
+            "description": "Variant-level filter: \"cost\" matches variants with no active (non-archived) cost profile attached. Composes via AND with the status filter, or with the default listing scope when status is omitted. Parent included if at least one variant matches; response variants[] is filtered to matching variants (consistent with status semantics).",
             "name": "overrideMissing",
             "in": "query"
           },
@@ -12818,11 +12805,11 @@
                 "-totalStock"
               ],
               "default": "-platformCreatedAt",
-              "description": "Sort key. Prefix with `-` for descending. Default: `-platformCreatedAt` (newest listings first) — matches the Trendyol seller-panel default ordering, analogous to the `orderByDirection: SellerCreatedDate, DESC` parameter on Trendyol's /products/approved endpoint. `salePrice` orders by the product’s lowest variant price (cheapest products first) and `-salePrice` by the highest (priciest first), read from the denormalized Product.minSalePrice / maxSalePrice columns the sync worker maintains.",
+              "description": "Sort key. Prefix with `-` for descending. Default: `-platformCreatedAt` (newest listings first) — matches the Trendyol seller-panel default ordering, analogous to the `orderByDirection: SellerCreatedDate, DESC` parameter on Trendyol's /products/approved endpoint. `salePrice` orders by the product’s lowest variant price (cheapest products first) and `-salePrice` by the highest (priciest first), read from the denormalized Product.minSalePrice / maxSalePrice columns. Both cover only the variants in the default listing scope (not delisted, not ARCHIVED) and are maintained by refreshProductAggregates in @pazarsync/catalog-sync.",
               "example": "-platformCreatedAt"
             },
             "required": false,
-            "description": "Sort key. Prefix with `-` for descending. Default: `-platformCreatedAt` (newest listings first) — matches the Trendyol seller-panel default ordering, analogous to the `orderByDirection: SellerCreatedDate, DESC` parameter on Trendyol's /products/approved endpoint. `salePrice` orders by the product’s lowest variant price (cheapest products first) and `-salePrice` by the highest (priciest first), read from the denormalized Product.minSalePrice / maxSalePrice columns the sync worker maintains.",
+            "description": "Sort key. Prefix with `-` for descending. Default: `-platformCreatedAt` (newest listings first) — matches the Trendyol seller-panel default ordering, analogous to the `orderByDirection: SellerCreatedDate, DESC` parameter on Trendyol's /products/approved endpoint. `salePrice` orders by the product’s lowest variant price (cheapest products first) and `-salePrice` by the highest (priciest first), read from the denormalized Product.minSalePrice / maxSalePrice columns. Both cover only the variants in the default listing scope (not delisted, not ARCHIVED) and are maintained by refreshProductAggregates in @pazarsync/catalog-sync.",
             "name": "sort",
             "in": "query"
           },
@@ -12830,11 +12817,11 @@
             "schema": {
               "type": "string",
               "pattern": "^\\d+(\\.\\d{1,2})?$",
-              "description": "Lower bound of a salePrice overlap filter (decimal string). A product matches when it has a variant priced at or above this — read from the denormalized Product.maxSalePrice.",
+              "description": "Lower bound of a salePrice overlap filter (decimal string). A product matches when it has an in-scope variant (not delisted, not ARCHIVED) priced at or above this - read from the denormalized Product.maxSalePrice.",
               "example": "50.00"
             },
             "required": false,
-            "description": "Lower bound of a salePrice overlap filter (decimal string). A product matches when it has a variant priced at or above this — read from the denormalized Product.maxSalePrice.",
+            "description": "Lower bound of a salePrice overlap filter (decimal string). A product matches when it has an in-scope variant (not delisted, not ARCHIVED) priced at or above this - read from the denormalized Product.maxSalePrice.",
             "name": "salePriceMin",
             "in": "query"
           },
@@ -12842,11 +12829,11 @@
             "schema": {
               "type": "string",
               "pattern": "^\\d+(\\.\\d{1,2})?$",
-              "description": "Upper bound of a salePrice overlap filter (decimal string). A product matches when it has a variant priced at or below this — read from the denormalized Product.minSalePrice.",
+              "description": "Upper bound of a salePrice overlap filter (decimal string). A product matches when it has an in-scope variant (not delisted, not ARCHIVED) priced at or below this - read from the denormalized Product.minSalePrice.",
               "example": "500.00"
             },
             "required": false,
-            "description": "Upper bound of a salePrice overlap filter (decimal string). A product matches when it has a variant priced at or below this — read from the denormalized Product.minSalePrice.",
+            "description": "Upper bound of a salePrice overlap filter (decimal string). A product matches when it has an in-scope variant (not delisted, not ARCHIVED) priced at or below this - read from the denormalized Product.minSalePrice.",
             "name": "salePriceMax",
             "in": "query"
           },
@@ -12857,11 +12844,11 @@
                 "null"
               ],
               "minimum": 0,
-              "description": "Inclusive lower bound on Product.totalStock (denormalized SUM of variant quantities).",
+              "description": "Inclusive lower bound on Product.totalStock (denormalized SUM of the quantities of the variants in the default listing scope: not delisted, not ARCHIVED).",
               "example": 1
             },
             "required": false,
-            "description": "Inclusive lower bound on Product.totalStock (denormalized SUM of variant quantities).",
+            "description": "Inclusive lower bound on Product.totalStock (denormalized SUM of the quantities of the variants in the default listing scope: not delisted, not ARCHIVED).",
             "name": "stockMin",
             "in": "query"
           },
@@ -12883,11 +12870,11 @@
           {
             "schema": {
               "type": "string",
-              "description": "Filter by one or more variant VAT rates (comma-separated, e.g. 10,20). Variant-level: a product matches if ≥1 of its variants carries one of the listed rates.",
+              "description": "Filter by one or more variant VAT rates (comma-separated, e.g. 10,20). Variant-level: a product matches if at least one variant that passes the other variant filters (status, or the default listing scope when status is omitted) carries one of the listed rates.",
               "example": "10,20"
             },
             "required": false,
-            "description": "Filter by one or more variant VAT rates (comma-separated, e.g. 10,20). Variant-level: a product matches if ≥1 of its variants carries one of the listed rates.",
+            "description": "Filter by one or more variant VAT rates (comma-separated, e.g. 10,20). Variant-level: a product matches if at least one variant that passes the other variant filters (status, or the default listing scope when status is omitted) carries one of the listed rates.",
             "name": "vatRateIn",
             "in": "query"
           },
@@ -13020,7 +13007,7 @@
           "Products"
         ],
         "summary": "Distinct brands and categories with row counts",
-        "description": "Two cheap GROUP BY queries over the synced products table — used to populate the product list toolbar dropdowns (brand, category) without a separate paginated read. Each entry includes the count of products in that bucket. Sorted by count descending.",
+        "description": "Brand and category facets plus the tab badge counts, read from the synced products table with two GROUP BY queries and two counts. Used to populate the product list toolbar dropdowns (brand, category) without a separate paginated read. Each entry includes the count of products in that bucket. Sorted by count descending. Every count only includes products with at least one variant in the default listing scope (still in Trendyol's feed, not ARCHIVED).",
         "security": [
           {
             "bearerAuth": []
@@ -13432,8 +13419,8 @@
         "tags": [
           "Products"
         ],
-        "summary": "Count variants with no active cost profiles",
-        "description": "Returns the total number of product variants that have zero attached (non-archived) cost profiles, along with a per-store breakdown. Used to populate the missing-cost banner on the products page and the dashboard widget.",
+        "summary": "Count variants and products with no active cost profile",
+        "description": "Returns how many variants in the default listing scope (still in Trendyol's feed, not ARCHIVED) have zero attached (non-archived) cost profiles, how many products those variants belong to, and a per-store breakdown. Uses the same scope and the same \"missing cost\" rule as the products list overrideMissing=cost view and the facets missingCost badge. Used to populate the missing-cost banner on the products page and the dashboard widget.",
         "security": [
           {
             "bearerAuth": []
@@ -16145,7 +16132,7 @@
           "CommissionRates"
         ],
         "summary": "List marketplace commission rate tariff for a store",
-        "description": "Returns the imported commission tariff (categoryId × brandId × payment-term × segment-override) for the given store. Two rule families exist: CATEGORY (kategori-only) and CATEGORY_BRAND (kategori + marka). `ruleKind` is required because the two families have different cardinality and the productCount semantic differs. `productScope=active` restricts to combinations the store actually sells (approved Product with non-archived variant). Offset/page-based pagination — `page` is 1-indexed, `perPage` is locked to {10, 25, 50, 100} with a default of 50. `sort=product_count:desc` requires productScope=active (returns 422 INVALID_SORT_FOR_SCOPE otherwise).",
+        "description": "Returns the imported commission tariff (categoryId × brandId × payment-term × segment-override) for the given store. Two rule families exist: CATEGORY (kategori-only) and CATEGORY_BRAND (kategori + marka). `ruleKind` is required because the two families have different cardinality and the productCount semantic differs. `productScope=active` restricts to combinations the store actually sells (a Product with a non-archived variant). Offset/page-based pagination — `page` is 1-indexed, `perPage` is locked to {10, 25, 50, 100} with a default of 50. `sort=product_count:desc` requires productScope=active (returns 422 INVALID_SORT_FOR_SCOPE otherwise).",
         "security": [
           {
             "bearerAuth": []
@@ -16193,11 +16180,11 @@
                 "active"
               ],
               "default": "all",
-              "description": "'all' returns every commission rate row matching the other filters. 'active' restricts to (categoryId, brandId) combinations where the store has at least one approved Product with a non-archived variant. Use 'active' to render the panel \"Sattıklarım\" tab.",
+              "description": "'all' returns every commission rate row matching the other filters. 'active' restricts to (categoryId, brandId) combinations where the store has at least one Product with a non-archived variant. Use 'active' to render the panel \"Sattıklarım\" tab.",
               "example": "all"
             },
             "required": false,
-            "description": "'all' returns every commission rate row matching the other filters. 'active' restricts to (categoryId, brandId) combinations where the store has at least one approved Product with a non-archived variant. Use 'active' to render the panel \"Sattıklarım\" tab.",
+            "description": "'all' returns every commission rate row matching the other filters. 'active' restricts to (categoryId, brandId) combinations where the store has at least one Product with a non-archived variant. Use 'active' to render the panel \"Sattıklarım\" tab.",
             "name": "productScope",
             "in": "query"
           },

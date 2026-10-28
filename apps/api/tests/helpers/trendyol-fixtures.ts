@@ -35,7 +35,8 @@ export function approvedProductsResponse(barcode: string, count: number): unknow
           barcode,
           attributes: [],
           onSale: true,
-          deliveryOptions: { deliveryDuration: 1, isRushDelivery: false, fastDeliveryOptions: [] },
+          // Post-August-2026 wire shape: deliveryOptions carries deliveryDuration only.
+          deliveryOptions: { deliveryDuration: 1 },
           stock: { quantity: 5, lastModifiedDate: 0 },
           price: { salePrice: 100, listPrice: 120 },
           stockCode: `sk-${barcode}`,

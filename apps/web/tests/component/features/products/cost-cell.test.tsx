@@ -2,45 +2,14 @@ import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CostCell } from '@/features/products/components/cost-cell';
-import type { VariantSummary } from '@/features/products/api/list-products.api';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
+import { makeVariantSummary as makeVariant } from '../../../helpers/product-fixtures';
 import { render, screen } from '../../../helpers/render';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
-function makeVariant(overrides: Partial<VariantSummary> = {}): VariantSummary {
-  return {
-    id: 'variant-uuid-001',
-    platformVariantId: '10010',
-    barcode: 'BC-0001',
-    stockCode: 'STK-A',
-    size: 'M',
-    salePrice: '100.00',
-    listPrice: '100.00',
-    vatRate: 20,
-    costPrice: null,
-    quantity: 5,
-    deliveryDuration: 1,
-    isRushDelivery: false,
-    fastDeliveryOptions: [],
-    productUrl: null,
-    locationBasedDelivery: 'DISABLED',
-    status: 'onSale',
-    delistedAt: null,
-    currentCostTry: null,
-    profileCount: 0,
-    costStatus: 'NO_PROFILES',
-    dimensionalWeight: null,
-    syncedDimensionalWeight: null,
-    isDimensionalWeightOverridden: false,
-    estimatedShippingNet: null,
-    shippingCarrierCode: null,
-    shippingTariffApplied: null,
-    shippingEstimateStatus: 'NO_DESI',
-    ...overrides,
-  };
-}
+// Variants come from the shared builder (tests/helpers/product-fixtures.ts).
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 

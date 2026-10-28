@@ -8,15 +8,16 @@ import { costsKeys } from './costs-keys';
 
 /**
  * Narrow the org-wide stats to a single store's slice. The endpoint returns a
- * `byStore` breakdown (every accessible store, each with its own missingCount +
- * totalVariants), so a store-scoped consumer picks its store's row and presents
- * it as the top-level count/totalVariants — "N missing of M" for the ACTIVE
- * store only, never mixing in other stores' variants.
+ * `byStore` breakdown (every accessible store, each with its own missingCount,
+ * missingProductCount and totalVariants), so a store-scoped consumer picks its
+ * store's row and presents it as the top-level counts: "N products / M
+ * variants missing" for the ACTIVE store only, never mixing in other stores.
  */
 function selectStoreSlice(data: MissingCostStats, storeId: string): MissingCostStats {
   const entry = data.byStore.find((s) => s.storeId === storeId);
   return {
     count: entry?.missingCount ?? 0,
+    missingProductCount: entry?.missingProductCount ?? 0,
     totalVariants: entry?.totalVariants ?? 0,
     byStore: entry ? [entry] : [],
   };

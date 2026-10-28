@@ -4,7 +4,11 @@
 // What this file guards is the URL contract: the storeId in the path MUST
 // belong to the caller's org, otherwise we return 404 (no existence leak).
 // A second test pins the platform→rows wiring: passing a HEPSIBURADA store
-// must NOT return the TRENDYOL tariff.
+// must NOT return the TRENDYOL tariff. A third test pins the product counts:
+// productCount and productScope=active read tenant Product rows, so they must
+// only see the store in the URL, never another tenant's or a sibling store's.
+
+import { randomUUID } from 'node:crypto';
 
 import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -15,10 +19,15 @@ import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization, createStore } from '../../helpers/factories';
+import {
+  createMembership,
+  createOrganization,
+  createProductVariant,
+  createStore,
+} from '../../helpers/factories';
 
 interface ListResponseWire {
-  data: { id: string; platform: string; categoryName: string }[];
+  data: { id: string; platform: string; categoryName: string; productCount: number }[];
   meta: { hasMore: boolean };
 }
 
@@ -52,6 +61,23 @@ describe('commission-rates list: route-layer authorization', () => {
     });
   }
 
+  // createProduct has no categoryId override, so the product row is written
+  // inline; the variant comes from the shared factory (status defaults to
+  // ON_SALE and delistedAt to null, so the product is inside the count scope).
+  async function seedProductInCategory(orgId: string, storeId: string, categoryId: number) {
+    const product = await prisma.product.create({
+      data: {
+        organizationId: orgId,
+        storeId,
+        platformContentId: BigInt(Math.floor(Math.random() * 1_000_000_000)),
+        productMainId: `pmid-${randomUUID().slice(0, 8)}`,
+        title: 'Isolation Test Product',
+        categoryId: BigInt(categoryId),
+      },
+    });
+    await createProductVariant(orgId, storeId, product.id);
+  }
+
   // ─── Case 1: cross-org storeId returns 404 (no existence leak) ────────────
 
   it("Org A member calling Org B's storeId returns 404, not 200 + data", async () => {
@@ -73,6 +99,51 @@ describe('commission-rates list: route-layer authorization', () => {
     expect(res.status).toBe(404);
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('NOT_FOUND');
+  });
+
+  // --- Product counts only see the store in the URL ---
+  //
+  // productCount and productScope=active are computed from Product rows, which
+  // ARE tenant data. In-scope products in another tenant's store, or in a
+  // sibling store of the same tenant, must never count toward the caller's store.
+
+  it('productCount and productScope=active ignore products outside the store in the URL', async () => {
+    const userA = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, userA.id);
+    const storeA = await createStore(orgA.id);
+    const siblingStoreA = await createStore(orgA.id);
+
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+
+    await seedRate('TRENDYOL', 411, 'Category 411');
+    // In-scope products in category 411 exist only outside storeA.
+    await seedProductInCategory(orgB.id, storeB.id, 411);
+    await seedProductInCategory(orgA.id, siblingStoreA.id, 411);
+
+    const headers = { Authorization: bearer(userA.accessToken) };
+    const listUrl = (storeId: string, productScope: 'all' | 'active'): string =>
+      `/v1/organizations/${orgA.id}/stores/${storeId}/commission-rates` +
+      `?ruleKind=CATEGORY&productScope=${productScope}`;
+
+    const allRes = await app.request(listUrl(storeA.id, 'all'), { headers });
+    expect(allRes.status).toBe(200);
+    const allBody = (await allRes.json()) as ListResponseWire;
+    expect(allBody.data).toHaveLength(1);
+    expect(allBody.data[0]?.productCount).toBe(0);
+
+    const activeRes = await app.request(listUrl(storeA.id, 'active'), { headers });
+    expect(activeRes.status).toBe(200);
+    const activeBody = (await activeRes.json()) as ListResponseWire;
+    expect(activeBody.data).toEqual([]);
+
+    // Positive control: the sibling store counts its own product, so the zeros
+    // above come from the store filter, not from the count rule.
+    const siblingRes = await app.request(listUrl(siblingStoreA.id, 'all'), { headers });
+    expect(siblingRes.status).toBe(200);
+    const siblingBody = (await siblingRes.json()) as ListResponseWire;
+    expect(siblingBody.data[0]?.productCount).toBe(1);
   });
 
   // ─── Case 2: rates are filtered by store.platform ─────────────────────────

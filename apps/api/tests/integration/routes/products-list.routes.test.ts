@@ -1,4 +1,5 @@
 import { prisma } from '@pazarsync/db';
+import type { ProductVariantStatus } from '@pazarsync/db';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '@/app';
@@ -6,7 +7,7 @@ import { encryptCredentials } from '@pazarsync/sync-core';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization } from '../../helpers/factories';
+import { createCostProfile, createMembership, createOrganization } from '../../helpers/factories';
 
 const app = createApp();
 
@@ -16,10 +17,9 @@ interface SeedVariantSpec {
   stockCode: string;
   size?: string;
   salePrice?: string;
-  onSale?: boolean;
-  archived?: boolean;
-  blacklisted?: boolean;
-  locked?: boolean;
+  status?: ProductVariantStatus;
+  statusReason?: string | null;
+  delistedAt?: Date | null;
 }
 
 interface SeedProductSpec {
@@ -74,10 +74,9 @@ async function seedProduct(
         size: v.size ?? null,
         salePrice: v.salePrice ?? '100.00',
         listPrice: v.salePrice ?? '100.00',
-        onSale: v.onSale ?? true,
-        archived: v.archived ?? false,
-        blacklisted: v.blacklisted ?? false,
-        locked: v.locked ?? false,
+        status: v.status ?? 'ON_SALE',
+        statusReason: v.statusReason ?? null,
+        delistedAt: v.delistedAt ?? null,
       },
     });
   }
@@ -114,17 +113,18 @@ async function setupOrgWithStoreAndFixtures(): Promise<{
   // Seed five products covering the test surface:
   //   - Two share the same brand (for brand-filter test)
   //   - Two share the same category (for category-filter test)
-  //   - One has an archived variant (for status-filter test)
+  //   - One has an ARCHIVED variant (BC-0003) next to an ON_SALE one (BC-0004),
+  //     for the status and search-scope tests
   //   - One title contains "keten" (for search test)
   //   - One stockCode contains "STK-2025" (for search-by-stockcode test)
   await seedProduct(org.id, store.id, {
     platformContentId: 1001,
     productMainId: 'pm-1001',
-    title: 'Beyaz Keten Gömlek',
+    title: 'Beyaz Keten Gomlek',
     brandId: BigInt(2032),
     brandName: 'Modline',
     categoryId: BigInt(597),
-    categoryName: 'Gömlek',
+    categoryName: 'Gomlek',
     color: 'Beyaz',
     platformModifiedAt: new Date('2026-04-25T12:00:00Z'),
     variants: [
@@ -162,8 +162,7 @@ async function setupOrgWithStoreAndFixtures(): Promise<{
         barcode: 'BC-0003',
         stockCode: 'STK-pantolon',
         size: 'S',
-        archived: true,
-        onSale: false,
+        status: 'ARCHIVED',
       },
       { platformVariantId: 10031, barcode: 'BC-0004', stockCode: 'STK-pantolon', size: 'M' },
     ],
@@ -171,20 +170,20 @@ async function setupOrgWithStoreAndFixtures(): Promise<{
   await seedProduct(org.id, store.id, {
     platformContentId: 1004,
     productMainId: 'pm-1004',
-    title: 'Kırmızı Etek',
+    title: 'Kirmizi Etek',
     brandId: BigInt(3226),
     brandName: 'BZN',
     categoryId: BigInt(900),
     categoryName: 'Etek',
-    color: 'Kırmızı',
+    color: 'Kirmizi',
     platformModifiedAt: new Date('2026-04-27T12:00:00Z'),
     variants: [{ platformVariantId: 10040, barcode: 'BC-0005', stockCode: 'STK-etek', size: 'M' }],
   });
   await seedProduct(org.id, store.id, {
     platformContentId: 1005,
     productMainId: 'pm-1005',
-    title: 'Yeşil Mont',
-    color: 'Yeşil',
+    title: 'Yesil Mont',
+    color: 'Yesil',
     platformModifiedAt: new Date('2026-04-20T12:00:00Z'),
     variants: [{ platformVariantId: 10050, barcode: 'BC-0006', stockCode: 'STK-mont', size: 'L' }],
   });
@@ -197,7 +196,13 @@ interface ListResponseBody {
     id: string;
     title: string;
     productMainId: string;
-    variants: { id: string; status: string }[];
+    variants: {
+      id: string;
+      barcode: string;
+      status: string;
+      statusReason: string | null;
+      delistedAt: string | null;
+    }[];
     variantCount: number;
   }[];
   pagination: { page: number; perPage: number; total: number; totalPages: number };
@@ -280,11 +285,11 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/products', () => {
     expect(status).toBe(200);
     expect(body.pagination).toEqual({ page: 1, perPage: 25, total: 5, totalPages: 1 });
     expect(body.data).toHaveLength(5);
-    // Default sort: -platformCreatedAt — Kırmızı Etek (apr 27) first.
+    // Default sort: -platformCreatedAt, so Kirmizi Etek (apr 27) comes first.
     // Fixtures default platformCreatedAt to platformModifiedAt (see seedProduct),
     // so the relative ordering is the same as the old -platformModifiedAt default.
-    expect(body.data[0]?.title).toBe('Kırmızı Etek');
-    expect(body.data[body.data.length - 1]?.title).toBe('Yeşil Mont');
+    expect(body.data[0]?.title).toBe('Kirmizi Etek');
+    expect(body.data[body.data.length - 1]?.title).toBe('Yesil Mont');
   });
 
   it('search hits product title', async () => {
@@ -292,21 +297,37 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/products', () => {
     const { status, body } = await callList(user, orgId, storeId, { q: 'keten' });
     expect(status).toBe(200);
     expect(body.data).toHaveLength(1);
-    expect(body.data[0]?.title).toBe('Beyaz Keten Gömlek');
+    expect(body.data[0]?.title).toBe('Beyaz Keten Gomlek');
   });
 
   it('search hits variant.barcode', async () => {
     const { user, orgId, storeId } = await setupOrgWithStoreAndFixtures();
-    const { body } = await callList(user, orgId, storeId, { q: 'BC-0003' });
+    const { body } = await callList(user, orgId, storeId, { q: 'BC-0004' });
     expect(body.data).toHaveLength(1);
     expect(body.data[0]?.title).toBe('Siyah Pantolon');
+    expect(body.data[0]?.variants.map((v) => v.barcode)).toEqual(['BC-0004']);
+  });
+
+  it('a barcode hit on a hidden variant counts only when its status is asked for', async () => {
+    const { user, orgId, storeId } = await setupOrgWithStoreAndFixtures();
+    // BC-0003 is the ARCHIVED variant of Siyah Pantolon. The default scope hides
+    // it, so searching its barcode must not return the parent with only the
+    // unrelated in-scope sibling BC-0004.
+    const hidden = await callList(user, orgId, storeId, { q: 'BC-0003' });
+    expect(hidden.status).toBe(200);
+    expect(hidden.body.data).toHaveLength(0);
+
+    const archived = await callList(user, orgId, storeId, { q: 'BC-0003', status: 'ARCHIVED' });
+    expect(archived.status).toBe(200);
+    expect(archived.body.data).toHaveLength(1);
+    expect(archived.body.data[0]?.variants.map((v) => v.barcode)).toEqual(['BC-0003']);
   });
 
   it('search hits variant.stockCode', async () => {
     const { user, orgId, storeId } = await setupOrgWithStoreAndFixtures();
     const { body } = await callList(user, orgId, storeId, { q: 'STK-2025' });
     expect(body.data).toHaveLength(1);
-    expect(body.data[0]?.title).toBe('Beyaz Keten Gömlek');
+    expect(body.data[0]?.title).toBe('Beyaz Keten Gomlek');
   });
 
   it('search is case-insensitive', async () => {
@@ -320,7 +341,7 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/products', () => {
     const { body } = await callList(user, orgId, storeId, { brandId: '2032' });
     expect(body.data).toHaveLength(2);
     expect(body.data.map((p) => p.title).sort()).toEqual([
-      'Beyaz Keten Gömlek',
+      'Beyaz Keten Gomlek',
       'Mavi Pamuk T-shirt',
     ]);
   });
@@ -332,36 +353,43 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/products', () => {
     expect(body.data.map((p) => p.title).sort()).toEqual(['Mavi Pamuk T-shirt', 'Siyah Pantolon']);
   });
 
-  it('status=onSale excludes products whose variants are all archived/locked/blacklisted', async () => {
+  it('status=ON_SALE keeps a mixed parent but filters its variants[] to ON_SALE ones', async () => {
     const { user, orgId, storeId } = await setupOrgWithStoreAndFixtures();
-    const { body } = await callList(user, orgId, storeId, { status: 'onSale' });
-    // Siyah Pantolon has one onSale variant + one archived variant — it's still
-    // included (parent kept if ≥1 variant matches), but its variants[] is filtered
-    // to the onSale one only.
+    const { body } = await callList(user, orgId, storeId, { status: 'ON_SALE' });
+    // Siyah Pantolon has one ON_SALE and one ARCHIVED variant: it is still
+    // included (the parent is kept when at least one variant matches), but its
+    // variants[] holds the ON_SALE one only.
     const pantolon = body.data.find((p) => p.title === 'Siyah Pantolon');
     expect(pantolon).toBeDefined();
     expect(pantolon?.variants).toHaveLength(1);
-    expect(pantolon?.variants[0]?.status).toBe('onSale');
+    expect(pantolon?.variants[0]?.status).toBe('ON_SALE');
     // variantCount mirrors variants[].length so the UI count chip, Beden chip
-    // overflow, and expanded sub-row count never disagree. Trendyol's seller
-    // panel uses the same "what you see is what you count" semantic — the
-    // earlier total-count contract surfaced phantom variants in the chip.
+    // overflow and expanded sub-row count never disagree ("what you see is
+    // what you count", the same semantic as Trendyol's seller panel).
     expect(pantolon?.variantCount).toBe(1);
   });
 
-  it('status=archived shows only the products that have an archived variant', async () => {
+  it('status=ARCHIVED shows only the products that have an archived variant', async () => {
     const { user, orgId, storeId } = await setupOrgWithStoreAndFixtures();
-    const { body } = await callList(user, orgId, storeId, { status: 'archived' });
+    const { body } = await callList(user, orgId, storeId, { status: 'ARCHIVED' });
     expect(body.data).toHaveLength(1);
     expect(body.data[0]?.title).toBe('Siyah Pantolon');
     expect(body.data[0]?.variants).toHaveLength(1);
-    expect(body.data[0]?.variants[0]?.status).toBe('archived');
+    expect(body.data[0]?.variants[0]?.status).toBe('ARCHIVED');
+  });
+
+  it('without status the archived variant of a mixed product is hidden', async () => {
+    const { user, orgId, storeId } = await setupOrgWithStoreAndFixtures();
+    const { body } = await callList(user, orgId, storeId);
+    const pantolon = body.data.find((p) => p.title === 'Siyah Pantolon');
+    expect(pantolon?.variants.map((v) => v.barcode)).toEqual(['BC-0004']);
+    expect(pantolon?.variantCount).toBe(1);
   });
 
   it('pagination page=2 perPage=2 returns the third+fourth in default sort order', async () => {
     const { user, orgId, storeId } = await setupOrgWithStoreAndFixtures();
     const { body } = await callList(user, orgId, storeId, { page: 2, perPage: 10 });
-    // 5 products, perPage=10, page=2 → empty
+    // 5 products, perPage=10, page=2 -> empty
     expect(body.pagination).toEqual({ page: 2, perPage: 10, total: 5, totalPages: 1 });
     expect(body.data).toHaveLength(0);
   });
@@ -374,9 +402,9 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/products', () => {
     const small = await callList(user, orgId, storeId, { perPage: 10 });
     expect(small.body.data).toHaveLength(5);
 
-    // Use perPage=10 (smallest valid) — only valid values are {10,25,50,100}.
+    // Use perPage=10 (smallest valid): only valid values are {10,25,50,100}.
     // To exercise pagination boundaries with a small fixture set, we instead
-    // verify totalPages math: 5 items / 10 perPage → 1 page.
+    // verify totalPages math: 5 items / 10 perPage -> 1 page.
     expect(small.body.pagination.totalPages).toBe(1);
   });
 
@@ -395,23 +423,18 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/products', () => {
     const { user, orgId, storeId } = await setupOrgWithStoreAndFixtures();
     const { body } = await callList(user, orgId, storeId, { sort: 'title' });
     expect(body.data.map((p) => p.title)).toEqual([
-      'Beyaz Keten Gömlek',
-      'Kırmızı Etek',
+      'Beyaz Keten Gomlek',
+      'Kirmizi Etek',
       'Mavi Pamuk T-shirt',
       'Siyah Pantolon',
-      'Yeşil Mont',
+      'Yesil Mont',
     ]);
   });
 });
 
-// ─── overrideMissing filter ───────────────────────────────────────────
-// Variant-level filter for products with at least one variant missing
-// the corresponding override field. Composes with status via AND.
-//
-// These tests build their own minimal setup (no shared fixtures) so the
-// assertions stay focused on the new filter semantics. The default
-// fixture set has costPrice=null and vatRate=null on every variant, so
-// reusing it would muddy "matches" / "does not match" expectations.
+// --- Bare tenant and scope fixtures ---
+// The tests below build their own minimal setup (no shared fixtures) so the
+// assertions stay focused on the scope, status and cost semantics.
 
 async function setupBareTenant(): Promise<{
   user: { accessToken: string };
@@ -438,7 +461,135 @@ async function setupBareTenant(): Promise<{
   return { user: { accessToken: user.accessToken }, orgId: org.id, storeId: store.id };
 }
 
-describe('GET /v1/.../products — overrideMissing filter', () => {
+// Attaches a fresh cost profile (active, or archived when asked) to the
+// variant with this barcode.
+async function attachCostProfile(
+  organizationId: string,
+  storeId: string,
+  barcode: string,
+  opts: { archived?: boolean } = {},
+): Promise<void> {
+  const variant = await prisma.productVariant.findFirstOrThrow({ where: { storeId, barcode } });
+  const profile = await createCostProfile(organizationId, { storeId });
+  if (opts.archived === true) {
+    await prisma.costProfile.update({
+      where: { id: profile.id },
+      data: { archivedAt: new Date() },
+    });
+  }
+  await prisma.productVariantCostProfile.create({
+    data: { organizationId, productVariantId: variant.id, profileId: profile.id },
+  });
+}
+
+// productMainId -> sorted barcodes of the variants the response returned.
+function barcodesByProduct(body: ListResponseBody): Record<string, string[]> {
+  return Object.fromEntries(
+    body.data.map((p) => [p.productMainId, p.variants.map((v) => v.barcode).sort()]),
+  );
+}
+
+const DELISTED_AT = new Date('2026-04-20T00:00:00Z');
+
+// One store covering every scope edge:
+//   P-MIXED        ON_SALE + NOT_ON_SALE (in scope), ARCHIVED, delisted ON_SALE
+//   P-ARCHIVED     only an ARCHIVED variant (never in the default list)
+//   P-DELISTED     only a delisted LOCKED variant (never in the default list)
+//   P-LOCKED       LOCKED with Trendyol's lockReason
+//   P-BLACKLISTED  BLACKLISTED with Trendyol's blacklistReason
+async function seedScopeFixtures(orgId: string, storeId: string): Promise<void> {
+  await seedProduct(orgId, storeId, {
+    platformContentId: 5001,
+    productMainId: 'P-MIXED',
+    title: 'Mixed',
+    variants: [
+      { platformVariantId: 50011, barcode: 'MIX-ON', stockCode: 'S-MIX-ON' },
+      {
+        platformVariantId: 50012,
+        barcode: 'MIX-OFF',
+        stockCode: 'S-MIX-OFF',
+        status: 'NOT_ON_SALE',
+      },
+      {
+        platformVariantId: 50013,
+        barcode: 'MIX-ARCH',
+        stockCode: 'S-MIX-ARCH',
+        status: 'ARCHIVED',
+      },
+      {
+        platformVariantId: 50014,
+        barcode: 'MIX-GONE',
+        stockCode: 'S-MIX-GONE',
+        delistedAt: DELISTED_AT,
+      },
+    ],
+  });
+  await seedProduct(orgId, storeId, {
+    platformContentId: 5002,
+    productMainId: 'P-ARCHIVED',
+    title: 'Archived only',
+    variants: [
+      { platformVariantId: 50021, barcode: 'ARCH', stockCode: 'S-ARCH', status: 'ARCHIVED' },
+    ],
+  });
+  await seedProduct(orgId, storeId, {
+    platformContentId: 5003,
+    productMainId: 'P-DELISTED',
+    title: 'Delisted only',
+    variants: [
+      {
+        platformVariantId: 50031,
+        barcode: 'GONE',
+        stockCode: 'S-GONE',
+        status: 'LOCKED',
+        statusReason: 'UNSUPPLIED_PRODUCT',
+        delistedAt: DELISTED_AT,
+      },
+    ],
+  });
+  await seedProduct(orgId, storeId, {
+    platformContentId: 5004,
+    productMainId: 'P-LOCKED',
+    title: 'Locked',
+    variants: [
+      {
+        platformVariantId: 50041,
+        barcode: 'LOCK',
+        stockCode: 'S-LOCK',
+        status: 'LOCKED',
+        statusReason: 'CRITICAL_SALE_PRICE_CHANGE',
+      },
+    ],
+  });
+  await seedProduct(orgId, storeId, {
+    platformContentId: 5005,
+    productMainId: 'P-BLACKLISTED',
+    title: 'Blacklisted',
+    variants: [
+      {
+        platformVariantId: 50051,
+        barcode: 'BLACK',
+        stockCode: 'S-BLACK',
+        status: 'BLACKLISTED',
+        statusReason: 'UNAPPROVED_BRAND_CATEGORY_SPM',
+      },
+    ],
+  });
+}
+
+// Expected productMainId -> barcodes per status value. Every value except
+// DELISTED skips delisted variants (P-DELISTED's LOCKED variant is not in the
+// LOCKED result); DELISTED returns delisted variants whatever their status.
+const STATUS_CASES: ReadonlyArray<[string, Record<string, string[]>]> = [
+  ['ON_SALE', { 'P-MIXED': ['MIX-ON'] }],
+  ['NOT_ON_SALE', { 'P-MIXED': ['MIX-OFF'] }],
+  ['LOCKED', { 'P-LOCKED': ['LOCK'] }],
+  ['BLACKLISTED', { 'P-BLACKLISTED': ['BLACK'] }],
+  ['ARCHIVED', { 'P-ARCHIVED': ['ARCH'], 'P-MIXED': ['MIX-ARCH'] }],
+  ['DELISTED', { 'P-DELISTED': ['GONE'], 'P-MIXED': ['MIX-GONE'] }],
+];
+
+describe('GET /v1/.../products: default listing scope and status filter', () => {
   beforeAll(async () => {
     await ensureDbReachable();
   });
@@ -447,7 +598,106 @@ describe('GET /v1/.../products — overrideMissing filter', () => {
     await truncateAll();
   });
 
-  it('returns only products with ≥1 variant having NULL costPrice when overrideMissing=cost', async () => {
+  it('without status hides ARCHIVED and delisted variants and products left with none', async () => {
+    const fixtures = await setupBareTenant();
+    await seedScopeFixtures(fixtures.orgId, fixtures.storeId);
+
+    const { status, body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId);
+
+    expect(status).toBe(200);
+    expect(barcodesByProduct(body)).toEqual({
+      'P-MIXED': ['MIX-OFF', 'MIX-ON'],
+      'P-LOCKED': ['LOCK'],
+      'P-BLACKLISTED': ['BLACK'],
+    });
+    expect(body.pagination.total).toBe(3);
+    const mixed = body.data.find((p) => p.productMainId === 'P-MIXED');
+    expect(mixed?.variantCount).toBe(2);
+    expect(mixed?.variants.map((v) => v.statusReason)).toEqual([null, null]);
+  });
+
+  it.each(STATUS_CASES)('status=%s returns only matching variants', async (filter, expected) => {
+    const fixtures = await setupBareTenant();
+    await seedScopeFixtures(fixtures.orgId, fixtures.storeId);
+
+    const { status, body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      status: filter,
+    });
+
+    expect(status).toBe(200);
+    expect(barcodesByProduct(body)).toEqual(expected);
+    expect(body.pagination.total).toBe(Object.keys(expected).length);
+  });
+
+  it('variants carry status and statusReason; legacy fields and description are gone', async () => {
+    const fixtures = await setupBareTenant();
+    await seedScopeFixtures(fixtures.orgId, fixtures.storeId);
+
+    const { body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      status: 'LOCKED',
+    });
+
+    const product = body.data[0];
+    const variant = product?.variants[0];
+    expect(variant).toMatchObject({
+      barcode: 'LOCK',
+      status: 'LOCKED',
+      statusReason: 'CRITICAL_SALE_PRICE_CHANGE',
+      delistedAt: null,
+    });
+    for (const legacyField of [
+      'costPrice',
+      'isRushDelivery',
+      'fastDeliveryOptions',
+      'locationBasedDelivery',
+    ]) {
+      expect(variant).not.toHaveProperty(legacyField);
+    }
+    expect(product).not.toHaveProperty('description');
+  });
+
+  it('a delisted variant keeps its last status and reason under DELISTED', async () => {
+    const fixtures = await setupBareTenant();
+    await seedScopeFixtures(fixtures.orgId, fixtures.storeId);
+
+    const { body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      status: 'DELISTED',
+    });
+
+    const gone = body.data.find((p) => p.productMainId === 'P-DELISTED')?.variants[0];
+    expect(gone?.status).toBe('LOCKED');
+    expect(gone?.statusReason).toBe('UNSUPPLIED_PRODUCT');
+    expect(gone?.delistedAt).toBe(DELISTED_AT.toISOString());
+  });
+
+  it('rejects the retired camelCase status values with VALIDATION_ERROR', async () => {
+    const fixtures = await setupBareTenant();
+    for (const legacy of ['onSale', 'archived', 'locked', 'blacklisted']) {
+      const res = await app.request(
+        `/v1/organizations/${fixtures.orgId}/stores/${fixtures.storeId}/products?status=${legacy}`,
+        { headers: { Authorization: bearer(fixtures.user.accessToken) } },
+      );
+      expect(res.status).toBe(422);
+      const body = (await res.json()) as { code: string };
+      expect(body.code).toBe('VALIDATION_ERROR');
+    }
+  });
+});
+
+// --- overrideMissing=cost ---
+// A variant misses cost when no ACTIVE (non-archived) cost profile is attached.
+// The filter composes with status (or the default listing scope) via AND.
+
+describe('GET /v1/.../products: overrideMissing=cost', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it('returns only products with a variant that has no cost profile attached', async () => {
     const fixtures = await setupBareTenant();
     await seedProduct(fixtures.orgId, fixtures.storeId, {
       platformContentId: 1001,
@@ -455,12 +705,7 @@ describe('GET /v1/.../products — overrideMissing filter', () => {
       title: 'Has cost',
       variants: [{ platformVariantId: 1101, barcode: 'B1', stockCode: 'S1' }],
     });
-    // seedProduct does not set costPrice (defaults to null), so set it
-    // explicitly here to make this product NOT match overrideMissing=cost.
-    await prisma.productVariant.updateMany({
-      where: { stockCode: 'S1' },
-      data: { costPrice: '50.00' },
-    });
+    await attachCostProfile(fixtures.orgId, fixtures.storeId, 'B1');
     await seedProduct(fixtures.orgId, fixtures.storeId, {
       platformContentId: 1002,
       productMainId: 'P-NOCOST',
@@ -471,63 +716,102 @@ describe('GET /v1/.../products — overrideMissing filter', () => {
     const { status, body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
       overrideMissing: 'cost',
     });
+
     expect(status).toBe(200);
-    const ids = body.data.map((p) => p.productMainId);
-    expect(ids).toContain('P-NOCOST');
-    expect(ids).not.toContain('P-WITHCOST');
+    expect(barcodesByProduct(body)).toEqual({ 'P-NOCOST': ['B2'] });
   });
 
-  it('returns only products with ≥1 variant having NULL vatRate when overrideMissing=vat', async () => {
+  it('treats a variant whose only profile is archived as missing cost', async () => {
     const fixtures = await setupBareTenant();
     await seedProduct(fixtures.orgId, fixtures.storeId, {
-      platformContentId: 2001,
-      productMainId: 'P-WITHVAT',
-      title: 'Has vat',
-      variants: [{ platformVariantId: 2101, barcode: 'B3', stockCode: 'S3' }],
+      platformContentId: 1003,
+      productMainId: 'P-ARCHIVED-PROFILE',
+      title: 'Archived profile',
+      variants: [{ platformVariantId: 1103, barcode: 'B3', stockCode: 'S3' }],
     });
-    await prisma.productVariant.updateMany({
-      where: { stockCode: 'S3' },
-      data: { vatRate: 18 },
-    });
+    await attachCostProfile(fixtures.orgId, fixtures.storeId, 'B3', { archived: true });
+    // Control: an active profile counts as cost, so this product stays out.
     await seedProduct(fixtures.orgId, fixtures.storeId, {
-      platformContentId: 2002,
-      productMainId: 'P-NOVAT',
-      title: 'Missing vat',
-      variants: [{ platformVariantId: 2102, barcode: 'B4', stockCode: 'S4' }],
+      platformContentId: 1009,
+      productMainId: 'P-ACTIVE-PROFILE',
+      title: 'Active profile',
+      variants: [{ platformVariantId: 1109, barcode: 'B9', stockCode: 'S9' }],
+    });
+    await attachCostProfile(fixtures.orgId, fixtures.storeId, 'B9');
+
+    const { body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      overrideMissing: 'cost',
     });
 
-    const { status, body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
-      overrideMissing: 'vat',
-    });
-    expect(status).toBe(200);
-    const ids = body.data.map((p) => p.productMainId);
-    expect(ids).toContain('P-NOVAT');
-    expect(ids).not.toContain('P-WITHVAT');
+    expect(barcodesByProduct(body)).toEqual({ 'P-ARCHIVED-PROFILE': ['B3'] });
   });
 
-  it('AND-composes overrideMissing=cost with status=onSale (variant must satisfy both)', async () => {
+  it('filters a multi-variant product down to its cost-missing variants', async () => {
     const fixtures = await setupBareTenant();
-    // P-A: archived variant missing cost → excluded by status=onSale
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 1004,
+      productMainId: 'P-HALF',
+      title: 'Half costed',
+      variants: [
+        { platformVariantId: 1104, barcode: 'B4', stockCode: 'S4' },
+        { platformVariantId: 1105, barcode: 'B5', stockCode: 'S5' },
+      ],
+    });
+    await attachCostProfile(fixtures.orgId, fixtures.storeId, 'B4');
+
+    const { body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      overrideMissing: 'cost',
+    });
+
+    expect(barcodesByProduct(body)).toEqual({ 'P-HALF': ['B5'] });
+    expect(body.data[0]?.variantCount).toBe(1);
+  });
+
+  it('without status keeps archived and delisted cost-missing variants out', async () => {
+    const fixtures = await setupBareTenant();
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 1006,
+      productMainId: 'P-OUT-OF-SCOPE',
+      title: 'Out of scope',
+      variants: [
+        { platformVariantId: 1106, barcode: 'B6', stockCode: 'S6', status: 'ARCHIVED' },
+        { platformVariantId: 1107, barcode: 'B7', stockCode: 'S7', delistedAt: DELISTED_AT },
+      ],
+    });
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 1008,
+      productMainId: 'P-CLOSED',
+      title: 'Closed for sale',
+      variants: [
+        { platformVariantId: 1108, barcode: 'B8', stockCode: 'S8', status: 'NOT_ON_SALE' },
+      ],
+    });
+
+    const { body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      overrideMissing: 'cost',
+    });
+
+    expect(barcodesByProduct(body)).toEqual({ 'P-CLOSED': ['B8'] });
+  });
+
+  it('AND-composes overrideMissing=cost with status=ON_SALE (variant must satisfy both)', async () => {
+    const fixtures = await setupBareTenant();
+    // P-A: archived variant missing cost, excluded by status=ON_SALE
     await seedProduct(fixtures.orgId, fixtures.storeId, {
       platformContentId: 3001,
       productMainId: 'P-A',
       title: 'A',
-      variants: [
-        { platformVariantId: 3101, barcode: 'BA', stockCode: 'SA', archived: true, onSale: false },
-      ],
+      variants: [{ platformVariantId: 3101, barcode: 'BA', stockCode: 'SA', status: 'ARCHIVED' }],
     });
-    // P-B: onSale variant with cost → excluded by overrideMissing=cost
+    // P-B: on-sale variant with an active profile, excluded by overrideMissing=cost
     await seedProduct(fixtures.orgId, fixtures.storeId, {
       platformContentId: 3002,
       productMainId: 'P-B',
       title: 'B',
       variants: [{ platformVariantId: 3102, barcode: 'BB', stockCode: 'SB' }],
     });
-    await prisma.productVariant.updateMany({
-      where: { stockCode: 'SB' },
-      data: { costPrice: '99.00' },
-    });
-    // P-C: onSale variant missing cost → matches both
+    await attachCostProfile(fixtures.orgId, fixtures.storeId, 'BB');
+    // P-C: on-sale variant missing cost, matches both
     await seedProduct(fixtures.orgId, fixtures.storeId, {
       platformContentId: 3003,
       productMainId: 'P-C',
@@ -537,14 +821,25 @@ describe('GET /v1/.../products — overrideMissing filter', () => {
 
     const { body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
       overrideMissing: 'cost',
-      status: 'onSale',
+      status: 'ON_SALE',
     });
     const ids = body.data.map((p) => p.productMainId);
     expect(ids).toEqual(['P-C']);
   });
+
+  it('rejects the removed overrideMissing=vat value with VALIDATION_ERROR', async () => {
+    const fixtures = await setupBareTenant();
+    const res = await app.request(
+      `/v1/organizations/${fixtures.orgId}/stores/${fixtures.storeId}/products?overrideMissing=vat`,
+      { headers: { Authorization: bearer(fixtures.user.accessToken) } },
+    );
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('VALIDATION_ERROR');
+  });
 });
 
-describe('GET /v1/.../products — sort=totalStock', () => {
+describe('GET /v1/.../products: sort=totalStock', () => {
   beforeAll(async () => {
     await ensureDbReachable();
   });
@@ -596,10 +891,43 @@ describe('GET /v1/.../products — sort=totalStock', () => {
     });
     expect(descRes.body.data.map((p) => p.productMainId)).toEqual(['P-HIGH', 'P-LOW']);
   });
+
+  it('breaks totalStock ties by id so offset pages neither repeat nor skip a product', async () => {
+    const fixtures = await setupBareTenant();
+    // Twelve products share totalStock 0 and span two pages of ten.
+    for (let i = 0; i < 12; i += 1) {
+      await seedProduct(fixtures.orgId, fixtures.storeId, {
+        platformContentId: 4200 + i,
+        productMainId: `P-TIE-${i}`,
+        title: `Tie ${i}`,
+        variants: [{ platformVariantId: 4300 + i, barcode: `BT${i}`, stockCode: `ST${i}` }],
+      });
+    }
+
+    const query = { sort: 'totalStock', perPage: 10 };
+    const page1 = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      ...query,
+      page: 1,
+    });
+    const page2 = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      ...query,
+      page: 2,
+    });
+
+    // Random v4 ids make insertion order differ from id order, so only the
+    // tiebreaker yields this sequence. Lowercase hex sorts the same in JS and
+    // in Postgres' byte-wise uuid comparison.
+    const seeded = await prisma.product.findMany({
+      where: { storeId: fixtures.storeId },
+      select: { id: true },
+    });
+    const expected = seeded.map((p) => p.id).sort();
+    expect([...page1.body.data, ...page2.body.data].map((p) => p.id)).toEqual(expected);
+  });
 });
 
-// ─── Shipping estimate fields (per spec §6.2) ─────────────────────────
-// The list response carries 4 new per-variant fields produced by the
+// --- Shipping estimate fields (per spec section 6.2) ---
+// The list response carries 4 per-variant fields produced by the
 // SHIPPING_ESTIMATE_CTE_SQL mirror of estimateShippingCostForVariant.
 // Full coverage of the 6 outcome states lives in the service-vs-SQL
 // equivalence test (apps/api/tests/integration/shipping-estimator-equivalence.test.ts);
@@ -625,7 +953,7 @@ interface ShippingFieldsBody {
   }[];
 }
 
-describe('GET /v1/.../products — shipping estimate fields', () => {
+describe('GET /v1/.../products: shipping estimate fields', () => {
   beforeAll(async () => {
     await ensureDbReachable();
   });
@@ -636,11 +964,11 @@ describe('GET /v1/.../products — shipping estimate fields', () => {
 
   it('includes shipping fields with correct OK values per variant (desi 0 resolves the lowest tier)', async () => {
     // Build a store wired to SENDEOMP with two products:
-    //   - okProduct → variant has desi=3.0 → OK / NORMAL / SENDEOMP desi-3 = 101.99
-    //   - noDesiProduct → variant has no desi at all → NO_DESI
+    //   - okProduct: variant has desi=3.0, so OK / NORMAL / SENDEOMP desi-3 = 101.99
+    //   - noDesiProduct: variant has no override and synced desi 0
     const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
     if (!carrier) {
-      throw new Error('SENDEOMP missing — PR 1 (shipping seed) must run first');
+      throw new Error('SENDEOMP missing: PR 1 (shipping seed) must run first');
     }
 
     const user = await createAuthenticatedTestUser();
@@ -659,7 +987,7 @@ describe('GET /v1/.../products — shipping estimate fields', () => {
       },
     });
 
-    // OK variant: desi 3.0 → CEIL=3 → SENDEOMP desi-3 = 101.99, salePrice 500 > all Barem ranges
+    // OK variant: desi 3.0, CEIL=3, SENDEOMP desi-3 = 101.99, salePrice 500 > all Barem ranges
     const okProduct = await prisma.product.create({
       data: {
         organizationId: org.id,
@@ -683,9 +1011,9 @@ describe('GET /v1/.../products — shipping estimate fields', () => {
       },
     });
 
-    // Desi-0 variant: no override, synced desi defaults to 0 → resolves the
-    // lowest tariff tier (SENDEOMP desi-0 = 91.99). "No desi → no estimate" is
-    // retired: desi is always ≥ 0 and the tariff table covers desi 0.
+    // Desi-0 variant: no override, synced desi defaults to 0, which resolves the
+    // lowest tariff tier (SENDEOMP desi-0 = 91.99). "No desi, no estimate" is
+    // retired: desi is always >= 0 and the tariff table covers desi 0.
     const noDesiProduct = await prisma.product.create({
       data: {
         organizationId: org.id,
@@ -716,7 +1044,7 @@ describe('GET /v1/.../products — shipping estimate fields', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as ShippingFieldsBody;
 
-    // Pull each variant out by its barcode (order-independent assertions).
+    // Pull each variant out by its id (order-independent assertions).
     const okV = body.data.flatMap((p) => p.variants).find((v) => v.id === okVariant.id);
     const noDesiV = body.data.flatMap((p) => p.variants).find((v) => v.id === noDesiVariant.id);
 
@@ -727,7 +1055,7 @@ describe('GET /v1/.../products — shipping estimate fields', () => {
     expect(okV?.estimatedShippingNet).toBe('101.99');
 
     expect(noDesiV).toBeDefined();
-    // Desi 0 resolves the lowest tariff tier — a real estimate, not NO_DESI.
+    // Desi 0 resolves the lowest tariff tier: a real estimate, not NO_DESI.
     expect(noDesiV?.shippingEstimateStatus).toBe('OK');
     expect(noDesiV?.shippingTariffApplied).toBe('NORMAL');
     expect(noDesiV?.estimatedShippingNet).toBe('91.99');
@@ -755,12 +1083,12 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/products/facets', () => {
       categories: { id: string; name: string; count: number }[];
     };
 
-    // Modline: 2 products, BZN: 2 products. (Yeşil Mont has no brand → skipped.)
+    // Modline: 2 products, BZN: 2 products. (Yesil Mont has no brand, so it is skipped.)
     expect(body.brands).toHaveLength(2);
     expect(body.brands.every((b) => b.count === 2)).toBe(true);
     expect(body.brands.map((b) => b.name).sort()).toEqual(['BZN', 'Modline']);
 
-    // T-shirt: 2 (Mavi Pamuk + Siyah Pantolon), Gömlek: 1, Etek: 1.
+    // T-shirt: 2 (Mavi Pamuk + Siyah Pantolon), Gomlek: 1, Etek: 1.
     const tshirt = body.categories.find((c) => c.name === 'T-shirt');
     expect(tshirt?.count).toBe(2);
     expect(body.categories[0]?.count).toBeGreaterThanOrEqual(body.categories[1]?.count ?? 0);

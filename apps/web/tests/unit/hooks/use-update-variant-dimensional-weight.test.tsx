@@ -3,10 +3,12 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { type ReactNode } from 'react';
 import { describe, expect, it } from 'vitest';
 
+import type { ListProductsResponse } from '@/features/products/api/list-products.api';
 import { useUpdateVariantDimensionalWeight } from '@/features/products/hooks/use-update-variant-dimensional-weight';
 import { productKeys } from '@/features/products/query-keys';
 
 import { http, HttpResponse, server } from '../../helpers/msw';
+import { makeProductWithVariants, makeVariantSummary } from '../../helpers/product-fixtures';
 
 // Local QueryClient: gcTime is non-zero so a setQueryData-seeded cache entry
 // survives an invalidate-without-observer (the standard createTestQueryClient
@@ -31,63 +33,29 @@ function wrap(client: QueryClient) {
   };
 }
 
-// Minimal product-list cache snapshot for the optimistic-update tests.
+// Minimal product-list cache snapshot for the optimistic-update tests. The
+// filters mirror the page default, which sends no status (backend scope).
 function seedListCache(client: QueryClient) {
-  const filters = {
-    q: '',
-    status: 'onSale',
-    brandId: '',
-    categoryId: '',
+  const key = productKeys.list(ORG_ID, STORE_ID, {
     page: 1,
     perPage: 25,
     sort: '-platformCreatedAt',
-  };
-  const key = productKeys.list(ORG_ID, STORE_ID, filters);
-  client.setQueryData(key, {
+  });
+  const snapshot: ListProductsResponse = {
     data: [
-      {
-        id: 'p-1',
-        productMainId: 'PM-1',
-        platformContentId: '1',
-        title: 'Test',
-        description: null,
-        brand: { id: null, name: null },
-        category: { id: null, name: null },
-        color: null,
-        images: [],
-        variantCount: 1,
+      makeProductWithVariants({
         variants: [
-          {
+          makeVariantSummary({
             id: VARIANT_ID,
-            platformVariantId: '10010',
-            barcode: 'BC-1',
-            stockCode: 'STK-1',
-            size: 'M',
-            salePrice: '100.00',
-            listPrice: '100.00',
-            vatRate: 20,
-            costPrice: null,
-            quantity: 5,
-            deliveryDuration: 1,
-            isRushDelivery: false,
-            fastDeliveryOptions: [],
-            productUrl: null,
-            locationBasedDelivery: 'DISABLED',
-            status: 'onSale',
-            currentCostTry: null,
-            profileCount: 0,
-            costStatus: 'NO_PROFILES',
             dimensionalWeight: '1.20',
             syncedDimensionalWeight: '1.20',
-            isDimensionalWeightOverridden: false,
-          },
+          }),
         ],
-        lastSyncedAt: '2026-01-01T00:00:00Z',
-        platformModifiedAt: null,
-      },
+      }),
     ],
     pagination: { page: 1, perPage: 25, total: 1, totalPages: 1 },
-  });
+  };
+  client.setQueryData(key, snapshot);
   return key;
 }
 

@@ -2935,16 +2935,32 @@
     "filters": {
       "searchPlaceholder": "Ürün adı, model kodu, stok kodu, barkod ile ara…",
       "statusOptions": {
-        "onSale": "Satışta",
-        "archived": "Arşivde",
-        "locked": "Kilitli",
-        "blacklisted": "Engelli"
+        "ON_SALE": "Satışta",
+        "NOT_ON_SALE": "Satışta değil",
+        "LOCKED": "Kilitli",
+        "BLACKLISTED": "Engelli",
+        "ARCHIVED": "Arşivde",
+        "DELISTED": "Trendyol'dan kaldırılan"
       }
+    },
+    "statusBadge": {
+      "outOfStock": "Stokta yok",
+      "closed": "Satışa kapalı",
+      "locked": "Kilitli",
+      "blacklisted": "Engelli",
+      "archived": "Arşivde",
+      "reasonTitle": "Trendyol'un bildirdiği neden",
+      "reasonAria": "{label}: nedeni göster"
+    },
+    "statusReasons": {
+      "CRITICAL_SALE_PRICE_CHANGE": "Satış fiyatında kritik bir değişiklik yapıldığı için Trendyol ürünü kilitledi.",
+      "UNSUPPLIED_PRODUCT": "Ürün tedarik edilemeyen ürün olarak işaretlendi.",
+      "LOW_SALE_PRICING": "Satış fiyatı çok düşük bulunduğu için Trendyol ürünü kilitledi.",
+      "UNAPPROVED_BRAND_CATEGORY_SPM": "Marka bu kategoride onaylı olmadığı için ürün engellendi."
     },
     "overrideTabs": {
       "all": "Tümü",
-      "missingCost": "Maliyeti girilmemiş",
-      "missingVat": "KDV girilmemiş"
+      "missingCost": "Maliyeti girilmemiş"
     },
     "columns": {
       "image": "Görsel",
@@ -2966,13 +2982,13 @@
       "desi": "Desi"
     },
     "delivery": {
-      "sameDay": "Bugün Kargoda",
-      "fast": "Hızlı Teslimat",
-      "standard": "Standart Teslimat",
+      "today": "Bugün Kargoda",
+      "tomorrow": "Yarın Kargoda",
+      "inDays": "{days} günde kargoda",
       "mixed": "Karışık"
     },
     "table": {
-      "variantDelisted": "Yayından kaldırıldı"
+      "variantDelisted": "Trendyol'dan kaldırıldı"
     },
     "multiVariantPlaceholder": "{n} varyant",
     "empty": {
@@ -2987,8 +3003,7 @@
         "cta": "Şimdi senkronize et"
       },
       "filtered": "Filtreyle eşleşen ürün yok.",
-      "missingCostNone": "Tüm ürünler için maliyet girilmiş.",
-      "missingVatNone": "Tüm ürünler için KDV oranı girilmiş."
+      "missingCostNone": "Tüm ürünler için maliyet girilmiş."
     },
     "pagination": {
       "showing": "{from}–{to} arası, {total} üründen",
@@ -3017,12 +3032,11 @@
       "totalProducts": "Toplam ürün",
       "totalContext": "Onaylı · senkron edilmiş",
       "missingCost": "Maliyeti eksik",
-      "missingVat": "KDV oranı eksik",
       "ofCatalog": "Katalog payı: %{pct}",
       "noneMissing": "Eksik ürün yok"
     },
     "missingCostBanner": {
-      "title": "Maliyetsiz {count} ürün — kâr hesabı yapılamıyor.",
+      "title": "{products} üründe {variants} varyantın maliyeti eksik. Kâr hesabı yapılamıyor.",
       "description": "Eksik maliyetleri tamamla.",
       "cta": "Maliyetsiz ürünleri filtrele"
     },

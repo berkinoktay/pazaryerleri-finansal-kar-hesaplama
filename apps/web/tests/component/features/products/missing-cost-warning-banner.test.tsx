@@ -1,105 +1,89 @@
-import { NextIntlClientProvider } from 'next-intl';
-import * as React from 'react';
-import { QueryClientProvider } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
 
 import { MissingCostWarningBanner } from '@/features/products/components/missing-cost-warning-banner';
-import { FORMATS } from '@/i18n/formats';
 
-import { render, screen, createTestQueryClient } from '../../../helpers/render';
-import { server, http, HttpResponse } from '../../../helpers/msw';
+import trMessages from '../../../../messages/tr.json';
+import { http, HttpResponse, server } from '../../../helpers/msw';
+import { render, screen } from '../../../helpers/render';
 
 const ORG_ID = '00000000-0000-0000-0000-000000000001';
 const STORE_ID = '00000000-0000-0000-0000-0000000000a1';
 const OTHER_STORE_ID = '00000000-0000-0000-0000-0000000000b2';
-const TEST_API_BASE = 'http://localhost:3001';
+const STATS_URL = `http://localhost:3001/v1/organizations/${ORG_ID}/products/missing-cost-stats`;
 
-const MESSAGES = {
-  products: {
-    missingCostBanner: {
-      title: 'Maliyetsiz {count} ürün — kâr hesabı yapılamıyor.',
-      description: 'Eksik maliyetleri tamamla.',
-      cta: 'Maliyetsiz ürünleri filtrele',
-    },
-  },
-};
+// Copy comes from the real catalog so this file stays ASCII.
+const banner = trMessages.products.missingCostBanner;
 
-function Wrapper({ children }: { children: React.ReactNode }) {
-  return (
-    <QueryClientProvider client={createTestQueryClient()}>
-      <NextIntlClientProvider
-        locale="tr"
-        messages={MESSAGES}
-        formats={FORMATS}
-        timeZone="Europe/Istanbul"
-      >
-        {children}
-      </NextIntlClientProvider>
-    </QueryClientProvider>
-  );
+function expectedTitle(products: number, variants: number): string {
+  return banner.title
+    .replace('{products}', String(products))
+    .replace('{variants}', String(variants));
 }
 
-function renderBanner(props: { orgId: string | null; storeId: string; onFilterClick: () => void }) {
-  return render(<MissingCostWarningBanner {...props} />, { wrapper: Wrapper });
+interface StoreStats {
+  storeId: string;
+  missingCount: number;
+  missingProductCount: number;
+  totalVariants: number;
 }
 
-function mockStats(
-  byStore: { storeId: string; missingCount: number; totalVariants: number }[],
-): void {
-  const count = byStore.reduce((sum, s) => sum + s.missingCount, 0);
-  const totalVariants = byStore.reduce((sum, s) => sum + s.totalVariants, 0);
+function mockStats(byStore: StoreStats[]): void {
+  const sum = (pick: (entry: StoreStats) => number): number =>
+    byStore.reduce((total, entry) => total + pick(entry), 0);
   server.use(
-    http.get(`${TEST_API_BASE}/v1/organizations/${ORG_ID}/products/missing-cost-stats`, () =>
-      HttpResponse.json({ count, totalVariants, byStore }),
+    http.get(STATS_URL, () =>
+      HttpResponse.json({
+        count: sum((entry) => entry.missingCount),
+        missingProductCount: sum((entry) => entry.missingProductCount),
+        totalVariants: sum((entry) => entry.totalVariants),
+        byStore,
+      }),
     ),
   );
 }
 
+function renderBanner(props: { orgId: string | null; storeId: string; onFilterClick: () => void }) {
+  return render(<MissingCostWarningBanner {...props} />);
+}
+
 describe('MissingCostWarningBanner', () => {
-  it('renders nothing when orgId is null', async () => {
+  it('renders nothing when orgId is null', () => {
     const { container } = renderBanner({ orgId: null, storeId: STORE_ID, onFilterClick: vi.fn() });
     expect(container.firstChild).toBeNull();
   });
 
   it('renders nothing when the active store has 0 missing (even if another store has missing)', async () => {
     // Active store clean; a SIBLING store has missing variants. The banner must
-    // stay hidden — the org-wide count is non-zero but this store's is 0.
+    // stay hidden: the org-wide count is non-zero but this store's is 0.
     mockStats([
-      { storeId: STORE_ID, missingCount: 0, totalVariants: 100 },
-      { storeId: OTHER_STORE_ID, missingCount: 9, totalVariants: 40 },
+      { storeId: STORE_ID, missingCount: 0, missingProductCount: 0, totalVariants: 100 },
+      { storeId: OTHER_STORE_ID, missingCount: 9, missingProductCount: 4, totalVariants: 40 },
     ]);
     const { container } = renderBanner({
       orgId: ORG_ID,
       storeId: STORE_ID,
       onFilterClick: vi.fn(),
     });
-    await new Promise((r) => setTimeout(r, 50));
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(container.firstChild).toBeNull();
   });
 
-  it('shows ONLY the active store count, never the org-wide sum', async () => {
-    // Active store missing 7; sibling store missing 100. The banner must show 7,
-    // not 107 — the count must agree with the CTA that filters only this store.
+  it("shows the active store's product and variant counts, never the org-wide sums", async () => {
     mockStats([
-      { storeId: STORE_ID, missingCount: 7, totalVariants: 50 },
-      { storeId: OTHER_STORE_ID, missingCount: 100, totalVariants: 200 },
+      { storeId: STORE_ID, missingCount: 7, missingProductCount: 3, totalVariants: 50 },
+      { storeId: OTHER_STORE_ID, missingCount: 100, missingProductCount: 40, totalVariants: 200 },
     ]);
     renderBanner({ orgId: ORG_ID, storeId: STORE_ID, onFilterClick: vi.fn() });
-    const alert = await screen.findByRole('alert');
-    expect(alert).toBeInTheDocument();
-    expect(alert).toHaveTextContent('7');
-    expect(alert).not.toHaveTextContent('107');
-    expect(
-      screen.getByRole('button', { name: 'Maliyetsiz ürünleri filtrele' }),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(expectedTitle(3, 7))).toBeInTheDocument();
+    expect(screen.queryByText(expectedTitle(43, 107))).toBeNull();
+    expect(screen.getByRole('button', { name: banner.cta })).toBeInTheDocument();
   });
 
-  it('calls onFilterClick when CTA button is clicked', async () => {
+  it('calls onFilterClick when the CTA button is clicked', async () => {
     const onFilterClick = vi.fn();
-    mockStats([{ storeId: STORE_ID, missingCount: 3, totalVariants: 30 }]);
+    mockStats([{ storeId: STORE_ID, missingCount: 3, missingProductCount: 2, totalVariants: 30 }]);
     const { user } = renderBanner({ orgId: ORG_ID, storeId: STORE_ID, onFilterClick });
-    const btn = await screen.findByRole('button', { name: 'Maliyetsiz ürünleri filtrele' });
-    await user.click(btn);
+    await user.click(await screen.findByRole('button', { name: banner.cta }));
     expect(onFilterClick).toHaveBeenCalledOnce();
   });
 });

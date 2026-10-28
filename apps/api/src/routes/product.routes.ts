@@ -238,12 +238,15 @@ const listProductsRoute = createRoute({
   tags: ['Products'],
   summary: 'List synced products with filters and pagination',
   description:
-    'Returns parent products from our local cache (synced from Trendyol). The `variants[]` ' +
-    'in each product is filtered to those matching the `status` query param when one is ' +
-    'supplied; the parent is included whenever at least one of its variants matches. Search ' +
-    '(`q`) hits Product.title, Product.productMainId, and ProductVariant.barcode / .stockCode ' +
-    '(case-insensitive substring match). Pagination is offset-based and 1-indexed; perPage ' +
-    'is locked to {10, 25, 50, 100}.',
+    'Returns parent products from our local cache (synced from Trendyol). Without a `status` ' +
+    "param the default listing scope applies (variants still in Trendyol's feed that are " +
+    'not ARCHIVED); `status` selects one variant status or DELISTED instead. The ' +
+    '`variants[]` in each product holds only the variants matching the variant-level ' +
+    'filters, and the parent is included whenever at least one of its variants matches. ' +
+    'Search (`q`) hits Product.title, Product.productMainId, and the barcode / stockCode ' +
+    'of a variant that passes the variant-level filters (case-insensitive substring ' +
+    'match). Pagination is offset-based and 1-indexed; perPage is locked to ' +
+    '{10, 25, 50, 100}.',
   security: [{ bearerAuth: [] }],
   request: {
     params: storeIdParams,
@@ -292,9 +295,12 @@ const productFacetsRoute = createRoute({
   tags: ['Products'],
   summary: 'Distinct brands and categories with row counts',
   description:
-    'Two cheap GROUP BY queries over the synced products table — used to populate the ' +
-    'product list toolbar dropdowns (brand, category) without a separate paginated read. ' +
-    'Each entry includes the count of products in that bucket. Sorted by count descending.',
+    'Brand and category facets plus the tab badge counts, read from the synced products ' +
+    'table with two GROUP BY queries and two counts. Used to populate the product list ' +
+    'toolbar dropdowns (brand, category) without a separate paginated read. Each entry ' +
+    'includes the count of products in that bucket. Sorted by count descending. Every ' +
+    'count only includes products with at least one variant in the default listing scope ' +
+    "(still in Trendyol's feed, not ARCHIVED).",
   security: [{ bearerAuth: [] }],
   request: { params: storeIdParams },
   responses: {

@@ -2,42 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { screen } from '@testing-library/react';
 
 import { DesiCell } from '@/features/products/components/desi-cell';
-import type { VariantSummary } from '@/features/products/api/list-products.api';
 
+import { makeVariantSummary as makeVariant } from '../../../helpers/product-fixtures';
 import { render } from '../../../helpers/render';
-
-function makeVariant(overrides: Partial<VariantSummary> = {}): VariantSummary {
-  return {
-    id: 'v-1',
-    platformVariantId: '10010',
-    barcode: 'BC-0001',
-    stockCode: 'STK-A',
-    size: 'M',
-    salePrice: '100.00',
-    listPrice: '100.00',
-    vatRate: 20,
-    costPrice: null,
-    quantity: 5,
-    deliveryDuration: 1,
-    isRushDelivery: false,
-    fastDeliveryOptions: [],
-    productUrl: null,
-    locationBasedDelivery: 'DISABLED',
-    status: 'onSale',
-    delistedAt: null,
-    currentCostTry: null,
-    profileCount: 0,
-    costStatus: 'NO_PROFILES',
-    dimensionalWeight: null,
-    syncedDimensionalWeight: null,
-    isDimensionalWeightOverridden: false,
-    estimatedShippingNet: null,
-    shippingCarrierCode: null,
-    shippingTariffApplied: null,
-    shippingEstimateStatus: 'NO_DESI',
-    ...overrides,
-  };
-}
 
 describe('DesiCell', () => {
   it('renders the empty-state "Desi ekle" pill when no value exists', () => {

@@ -7,7 +7,7 @@ import { DATATYPE_OPERATORS, type FilterFieldDef } from '@/lib/advanced-filter';
 
 import type { ProductFacetsResponse } from '../api/list-product-facets.api';
 import { PRODUCT_FILTER_FIELDS } from '../lib/products-filter-fields';
-import { PRODUCT_VARIANT_STATUSES } from '../lib/products-filter-parsers';
+import { PRODUCT_STATUS_FILTERS } from '../lib/products-filter-parsers';
 
 // Common Turkish VAT rates as the fixed-select display options. The backend
 // accepts any int (data-driven, no hardcoded set), so this list only shapes the
@@ -77,13 +77,13 @@ export function useProductFilterFields(
       },
       {
         // Single-select: the backend list query accepts ONE status. No status
-        // chip = the default 'onSale' view scope (applied at the call site).
+        // chip = the backend default listing scope (not delisted, not archived).
         key: PRODUCT_FILTER_FIELDS.status,
         label: t('fields.status'),
         groupLabel: attributeGroup,
         dataType: 'enumSingle',
         operators: [...DATATYPE_OPERATORS.enumSingle],
-        enumValues: PRODUCT_VARIANT_STATUSES.map((status) => ({
+        enumValues: PRODUCT_STATUS_FILTERS.map((status) => ({
           value: status,
           label: tStatus(status),
         })),

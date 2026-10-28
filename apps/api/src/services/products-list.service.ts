@@ -7,6 +7,7 @@
 
 import { Decimal } from 'decimal.js';
 
+import { LISTED_VARIANT_WHERE } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
 import type { Prisma } from '@pazarsync/db';
 
@@ -16,12 +17,13 @@ import type {
   CostStatus,
   ListProductsQuery,
   ProductListSort,
+  ProductListStatusFilter,
   ProductOverrideMissing,
-  ProductVariantStatus,
   VariantCostAggregate,
   VariantShippingEstimate,
 } from '../validators/product.validator';
 import {
+  DELISTED_STATUS_FILTER,
   toProductWithVariantsResponse,
   type ListProductsResponseSchema,
   type ProductFacetsResponseSchema,
@@ -33,17 +35,21 @@ type FacetsResponse = z.infer<typeof ProductFacetsResponseSchema>;
 
 // ─── Where-clause builders ─────────────────────────────────────────────
 
-function variantStatusWhere(status: ProductVariantStatus): Prisma.ProductVariantWhereInput {
-  switch (status) {
-    case 'onSale':
-      return { onSale: true, archived: false, blacklisted: false, locked: false };
-    case 'archived':
-      return { archived: true };
-    case 'locked':
-      return { locked: true };
-    case 'blacklisted':
-      return { blacklisted: true };
+// A variant "misses cost" when no ACTIVE (non-archived) cost profile is
+// attached. One predicate for the overrideMissing=cost list, the facets
+// missingCost badge and the missing-cost stats, so the three always agree.
+const MISSING_COST_VARIANT_WHERE = {
+  costProfileLinks: { none: { profile: { archivedAt: null } } },
+} satisfies Prisma.ProductVariantWhereInput;
+
+function variantStatusWhere(status: ProductListStatusFilter): Prisma.ProductVariantWhereInput {
+  // DELISTED ignores the status column (a delisted variant keeps its last
+  // status); every other value is "that status AND still listed", so the six
+  // filter values never overlap.
+  if (status === DELISTED_STATUS_FILTER) {
+    return { delistedAt: { not: null } };
   }
+  return { status, delistedAt: null };
 }
 
 function variantOverrideMissingWhere(
@@ -51,19 +57,37 @@ function variantOverrideMissingWhere(
 ): Prisma.ProductVariantWhereInput {
   switch (missing) {
     case 'cost':
-      return { costPrice: null };
-    case 'vat':
-      return { vatRate: null };
+      return MISSING_COST_VARIANT_WHERE;
+    default: {
+      const _exhaustive: never = missing;
+      throw new Error(`Unhandled overrideMissing filter: ${String(_exhaustive)}`);
+    }
   }
 }
 
-function buildSearchWhere(q: string): Prisma.ProductWhereInput {
+// Search hits the product title or productMainId, or the barcode / stockCode of
+// a variant that also passes the variant-level filters. Scoping the variant
+// side to `variantWhere` keeps a hit on a hidden variant (for example an
+// ARCHIVED one under the default listing scope) from returning its parent
+// without the matching variant in variants[].
+function buildSearchWhere(
+  q: string,
+  variantWhere: Prisma.ProductVariantWhereInput,
+): Prisma.ProductWhereInput {
   return {
     OR: [
       { title: { contains: q, mode: 'insensitive' } },
       { productMainId: { contains: q, mode: 'insensitive' } },
-      { variants: { some: { barcode: { contains: q, mode: 'insensitive' } } } },
-      { variants: { some: { stockCode: { contains: q, mode: 'insensitive' } } } },
+      {
+        variants: {
+          some: { AND: [variantWhere, { barcode: { contains: q, mode: 'insensitive' } }] },
+        },
+      },
+      {
+        variants: {
+          some: { AND: [variantWhere, { stockCode: { contains: q, mode: 'insensitive' } }] },
+        },
+      },
     ],
   };
 }
@@ -92,9 +116,9 @@ function buildOrderBy(sort: ProductListSort): Prisma.ProductOrderByWithRelationI
       // Descending = "priciest products first" → order by the product's highest
       // variant price. Intentionally NOT a strict reverse of the asc case: a
       // multi-variant product has no single price, so each direction surfaces
-      // the extreme the seller means. Both columns are denormalized
-      // transactionally in the sync worker (mirrors totalStock) — see
-      // apps/sync-worker/src/handlers/products.ts.
+      // the extreme the seller means. Both columns (like totalStock) cover
+      // only the variants in the default listing scope and are maintained by
+      // refreshProductAggregates in @pazarsync/catalog-sync.
       return { maxSalePrice: { sort: 'desc', nulls: 'last' } };
     case 'totalStock':
       return { totalStock: 'asc' };
@@ -112,13 +136,13 @@ export async function list(opts: {
 }): Promise<ListResponse> {
   const { organizationId, storeId, filters } = opts;
 
-  // Variant-level filters compose with AND. Today: status (onSale/archived/…)
-  // and overrideMissing (cost/vat). The parent is included if ≥1 variant
-  // matches; the response variants[] is filtered to matching variants.
-  const variantConditions: Prisma.ProductVariantWhereInput[] = [];
-  if (filters.status !== undefined) {
-    variantConditions.push(variantStatusWhere(filters.status));
-  }
+  // Variant-level filters compose with AND: the status (or, without one, the
+  // default listing scope), overrideMissing and vatRateIn. The parent is
+  // included if at least one variant matches them all, and the response
+  // variants[] holds exactly those variants, so the scope always applies.
+  const variantConditions: Prisma.ProductVariantWhereInput[] = [
+    filters.status !== undefined ? variantStatusWhere(filters.status) : LISTED_VARIANT_WHERE,
+  ];
   if (filters.overrideMissing !== undefined) {
     variantConditions.push(variantOverrideMissingWhere(filters.overrideMissing));
   }
@@ -129,19 +153,14 @@ export async function list(opts: {
   if (vatRateIn !== undefined) {
     variantConditions.push({ vatRate: vatRateIn });
   }
-  const variantWhere: Prisma.ProductVariantWhereInput | undefined =
-    variantConditions.length === 0
-      ? undefined
-      : variantConditions.length === 1
-        ? variantConditions[0]
-        : { AND: variantConditions };
+  const variantWhere: Prisma.ProductVariantWhereInput = { AND: variantConditions };
 
   const productWhere: Prisma.ProductWhereInput = {
     organizationId,
     storeId,
     ...(filters.productId !== undefined ? { id: filters.productId } : {}),
-    ...(variantWhere !== undefined ? { variants: { some: variantWhere } } : {}),
-    ...(filters.q !== undefined ? buildSearchWhere(filters.q) : {}),
+    variants: { some: variantWhere },
+    ...(filters.q !== undefined ? buildSearchWhere(filters.q, variantWhere) : {}),
   };
 
   // brandId / categoryId: the advanced multi-select (`*In`) wins when present,
@@ -178,15 +197,17 @@ export async function list(opts: {
     prisma.product.findMany({
       where: productWhere,
       include: {
-        // Filter the variants[] in the response when status is set —
-        // matches the contract documented on ListProductsQuerySchema.
-        // No `_count` — variantCount is now derived from variants.length
-        // inside the mapper, so the count chip / Beden chips / expanded
-        // sub-rows on the UI can never disagree.
-        variants: variantWhere !== undefined ? { where: variantWhere } : true,
+        // Same predicate as the parent filter, so variants[] holds exactly the
+        // matching variants (the contract on ListProductsQuerySchema). No
+        // `_count`: variantCount is derived from variants.length in the mapper,
+        // so the count chip, Beden chips and expanded sub-rows never disagree.
+        variants: { where: variantWhere },
         images: true,
       },
-      orderBy: buildOrderBy(filters.sort),
+      // id breaks ties so offset pages never repeat or skip a product: in the
+      // ARCHIVED and DELISTED views many products share totalStock 0 and null
+      // price bounds.
+      orderBy: [buildOrderBy(filters.sort), { id: 'asc' }],
       take: filters.perPage,
       skip,
     }),
@@ -353,65 +374,99 @@ export async function fetchCostAggregates(
 
 export interface MissingCostStats {
   count: number;
+  missingProductCount: number;
   totalVariants: number;
-  byStore: { storeId: string; missingCount: number; totalVariants: number }[];
+  byStore: {
+    storeId: string;
+    missingCount: number;
+    missingProductCount: number;
+    totalVariants: number;
+  }[];
 }
 
 /**
- * Org-wide missing-cost stats, narrowed to the caller's accessible stores.
+ * Org-wide missing-cost stats over the default listing scope, narrowed to the
+ * caller's accessible stores.
+ *
+ * Only variants in LISTED_VARIANT_WHERE (still in Trendyol's feed, not
+ * ARCHIVED) are counted, and "missing" uses the same predicate as the
+ * overrideMissing=cost list, so the banner, the tab badge and the tab content
+ * agree. `missingProductCount` counts each product once, however many of its
+ * in-scope variants miss cost.
  *
  * `storeIds` is `null` for OWNER/ADMIN (every store in the org) or the granted
  * store-id list for MEMBER/VIEWER. Without this narrowing a member restricted to
  * store A could enumerate every store id in the org plus each store's catalog
- * size and cost-coverage counts — data the store-scoped endpoints (and the
- * product_variants RLS) deliberately hide from them. The `NULL OR ANY(...)`
- * predicate keeps both cases in one query: NULL disables the filter; an empty
- * granted list (member with no grants) matches nothing → count 0, empty byStore.
+ * size and cost-coverage counts, data the store-scoped endpoints (and the
+ * product_variants RLS) deliberately hide from them. An empty granted list
+ * (member with no grants) matches nothing: zero counts and an empty byStore.
  */
 export async function missingCostStats(
   organizationId: string,
   storeIds: string[] | null,
 ): Promise<MissingCostStats> {
-  // Reuse the same logic as fetchCostAggregates but org-wide:
-  // find variants with profileCount = 0.
-  const rows = await prisma.$queryRaw<
-    { store_id: string; missing_count: bigint; total_variants: bigint }[]
-  >`
-    SELECT
-      pv.store_id                             AS store_id,
-      COUNT(*) FILTER (
-        WHERE (
-          SELECT COUNT(pvcp.id)
-          FROM product_variant_cost_profiles pvcp
-          INNER JOIN cost_profiles cp
-            ON cp.id = pvcp.profile_id AND cp.archived_at IS NULL
-          WHERE pvcp.product_variant_id = pv.id
-        ) = 0
-      )                                       AS missing_count,
-      COUNT(*)                                AS total_variants
-    FROM product_variants pv
-    WHERE pv.organization_id = ${organizationId}::uuid
-      AND (${storeIds}::uuid[] IS NULL OR pv.store_id = ANY(${storeIds}::uuid[]))
-    GROUP BY pv.store_id
-  `;
+  const storeFilter = storeIds === null ? {} : { storeId: { in: storeIds } };
+  const listedVariantWhere: Prisma.ProductVariantWhereInput = {
+    organizationId,
+    ...storeFilter,
+    ...LISTED_VARIANT_WHERE,
+  };
+  const missingVariantWhere: Prisma.ProductVariantWhereInput = {
+    AND: [listedVariantWhere, MISSING_COST_VARIANT_WHERE],
+  };
+  const missingProductWhere: Prisma.ProductWhereInput = {
+    organizationId,
+    ...storeFilter,
+    variants: { some: { AND: [LISTED_VARIANT_WHERE, MISSING_COST_VARIANT_WHERE] } },
+  };
 
-  let totalMissing = 0;
+  const [listedRows, missingRows, missingProductRows] = await Promise.all([
+    prisma.productVariant.groupBy({
+      by: ['storeId'],
+      where: listedVariantWhere,
+      _count: true,
+      orderBy: { storeId: 'asc' },
+    }),
+    prisma.productVariant.groupBy({
+      by: ['storeId'],
+      where: missingVariantWhere,
+      _count: true,
+    }),
+    prisma.product.groupBy({
+      by: ['storeId'],
+      where: missingProductWhere,
+      _count: true,
+    }),
+  ]);
+
+  const missingByStore = new Map(missingRows.map((row) => [row.storeId, row._count]));
+  const missingProductsByStore = new Map(
+    missingProductRows.map((row) => [row.storeId, row._count]),
+  );
+
+  // byStore lists every store with at least one in-scope variant (stores with
+  // nothing missing included) and carries the store's own counts, so a
+  // store-scoped consumer can render "N products / M variants missing" for the
+  // active store without mixing in other stores.
+  let count = 0;
+  let missingProductCount = 0;
   let totalVariants = 0;
   const byStore: MissingCostStats['byStore'] = [];
-
-  for (const row of rows) {
-    const missingCount = Number(row.missing_count);
-    const variantCount = Number(row.total_variants);
-    totalMissing += missingCount;
-    totalVariants += variantCount;
-    // Carry per-store totalVariants too: a store-scoped consumer (products-page
-    // banner, dashboard widget) needs BOTH the store's missing count and its
-    // own catalog size to show "N missing of M" for the active store — the
-    // org-wide totals would otherwise mix in other stores' variants.
-    byStore.push({ storeId: row.store_id, missingCount, totalVariants: variantCount });
+  for (const row of listedRows) {
+    const storeMissing = missingByStore.get(row.storeId) ?? 0;
+    const storeMissingProducts = missingProductsByStore.get(row.storeId) ?? 0;
+    count += storeMissing;
+    missingProductCount += storeMissingProducts;
+    totalVariants += row._count;
+    byStore.push({
+      storeId: row.storeId,
+      missingCount: storeMissing,
+      missingProductCount: storeMissingProducts,
+      totalVariants: row._count,
+    });
   }
 
-  return { count: totalMissing, totalVariants, byStore };
+  return { count, missingProductCount, totalVariants, byStore };
 }
 
 // ─── Facets ────────────────────────────────────────────────────────────
@@ -422,31 +477,38 @@ export async function facets(opts: {
 }): Promise<FacetsResponse> {
   const { organizationId, storeId } = opts;
 
-  const [brandRows, categoryRows, missingCost, missingVat, total] = await Promise.all([
+  // Every facet counts over the default listing scope: a product counts when
+  // at least one of its variants is in scope. So `total` equals the unfiltered
+  // list's pagination.total, `missingCost` equals the overrideMissing=cost
+  // list's total, and the brand/category options never offer a value whose
+  // products are all archived or delisted.
+  const listedProductWhere: Prisma.ProductWhereInput = {
+    organizationId,
+    storeId,
+    variants: { some: LISTED_VARIANT_WHERE },
+  };
+
+  const [brandRows, categoryRows, missingCost, total] = await Promise.all([
     prisma.product.groupBy({
       by: ['brandId', 'brandName'],
-      where: { organizationId, storeId, brandId: { not: null }, brandName: { not: null } },
+      where: { ...listedProductWhere, brandId: { not: null }, brandName: { not: null } },
       _count: { _all: true },
       orderBy: { _count: { brandId: 'desc' } },
     }),
     prisma.product.groupBy({
       by: ['categoryId', 'categoryName'],
-      where: {
-        organizationId,
-        storeId,
-        categoryId: { not: null },
-        categoryName: { not: null },
-      },
+      where: { ...listedProductWhere, categoryId: { not: null }, categoryName: { not: null } },
       _count: { _all: true },
       orderBy: { _count: { categoryId: 'desc' } },
     }),
     prisma.product.count({
-      where: { organizationId, storeId, variants: { some: { costPrice: null } } },
+      where: {
+        organizationId,
+        storeId,
+        variants: { some: { AND: [LISTED_VARIANT_WHERE, MISSING_COST_VARIANT_WHERE] } },
+      },
     }),
-    prisma.product.count({
-      where: { organizationId, storeId, variants: { some: { vatRate: null } } },
-    }),
-    prisma.product.count({ where: { organizationId, storeId } }),
+    prisma.product.count({ where: listedProductWhere }),
   ]);
 
   return {
@@ -470,6 +532,6 @@ export async function facets(opts: {
         name: r.categoryName,
         count: r._count._all,
       })),
-    overrideCounts: { missingCost, missingVat, total },
+    overrideCounts: { missingCost, total },
   };
 }

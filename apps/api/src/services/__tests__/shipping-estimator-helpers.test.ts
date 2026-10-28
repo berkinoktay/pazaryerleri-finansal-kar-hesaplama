@@ -1,13 +1,11 @@
 /**
- * Unit tests for `hasFastDeliverySetup` — pure function, no I/O.
+ * Unit tests for `hasFastDeliverySetup` - pure function, no I/O.
  *
- * Covers the three "fast delivery" indicators a variant exposes:
- *   1. `deliveryDuration` ≤ carrier max → eligible
- *   2. `isRushDelivery: true` (independent of duration) → eligible
- *   3. `fastDeliveryOptions` non-empty (independent of the other two) → eligible
- *
- * Plus the negative cases: nothing qualifies; null duration with no other
- * indicators. See spec §5.2 and plan Task 2.2.
+ * Barem eligibility reads one signal: the variant's `deliveryDuration`
+ * (Trendyol: 0 = ships today, 1 = ships by tomorrow) must be set and within
+ * the carrier's `maxBaremEligibleDeliveryDuration`. Trendyol stopped sending
+ * the rush-delivery flag and the fast-delivery option list in August 2026, so
+ * neither is part of the input any more.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -17,48 +15,24 @@ import { hasFastDeliverySetup } from '../shipping-estimator.service';
 describe('hasFastDeliverySetup', () => {
   const carrier = { maxBaremEligibleDeliveryDuration: 1 };
 
-  it('returns true when deliveryDuration is within the carrier max', () => {
-    const variant = {
-      deliveryDuration: 1,
-      isRushDelivery: false,
-      fastDeliveryOptions: [],
-    };
-    expect(hasFastDeliverySetup(variant, carrier)).toBe(true);
+  it('returns true when deliveryDuration is 0 (ships today)', () => {
+    expect(hasFastDeliverySetup({ deliveryDuration: 0 }, carrier)).toBe(true);
   });
 
-  it('returns true when isRushDelivery is true even with a too-long deliveryDuration', () => {
-    const variant = {
-      deliveryDuration: 5,
-      isRushDelivery: true,
-      fastDeliveryOptions: [],
-    };
-    expect(hasFastDeliverySetup(variant, carrier)).toBe(true);
+  it('returns true when deliveryDuration equals the carrier max', () => {
+    expect(hasFastDeliverySetup({ deliveryDuration: 1 }, carrier)).toBe(true);
   });
 
-  it('returns true when fastDeliveryOptions is non-empty and no other indicators apply', () => {
-    const variant = {
-      deliveryDuration: 5,
-      isRushDelivery: false,
-      fastDeliveryOptions: ['Today'],
-    };
-    expect(hasFastDeliverySetup(variant, carrier)).toBe(true);
+  it('returns false when deliveryDuration is one day above the carrier max', () => {
+    expect(hasFastDeliverySetup({ deliveryDuration: 2 }, carrier)).toBe(false);
   });
 
-  it('returns false when nothing qualifies', () => {
-    const variant = {
-      deliveryDuration: 5,
-      isRushDelivery: false,
-      fastDeliveryOptions: [],
-    };
-    expect(hasFastDeliverySetup(variant, carrier)).toBe(false);
+  it('returns false when deliveryDuration is null', () => {
+    expect(hasFastDeliverySetup({ deliveryDuration: null }, carrier)).toBe(false);
   });
 
-  it('returns false when deliveryDuration is null and no other indicators apply', () => {
-    const variant = {
-      deliveryDuration: null,
-      isRushDelivery: false,
-      fastDeliveryOptions: [],
-    };
-    expect(hasFastDeliverySetup(variant, carrier)).toBe(false);
+  it('uses the carrier window rather than a fixed threshold', () => {
+    const twoDayCarrier = { maxBaremEligibleDeliveryDuration: 2 };
+    expect(hasFastDeliverySetup({ deliveryDuration: 2 }, twoDayCarrier)).toBe(true);
   });
 });

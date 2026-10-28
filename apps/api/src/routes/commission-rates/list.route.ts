@@ -32,7 +32,7 @@ const listCommissionRatesRoute = createRoute({
     'segment-override) for the given store. Two rule families exist: CATEGORY (kategori-only) ' +
     'and CATEGORY_BRAND (kategori + marka). `ruleKind` is required because the two families ' +
     'have different cardinality and the productCount semantic differs. `productScope=active` ' +
-    'restricts to combinations the store actually sells (approved Product with non-archived ' +
+    'restricts to combinations the store actually sells (a Product with a non-archived ' +
     'variant). Offset/page-based pagination — `page` is 1-indexed, `perPage` is locked to ' +
     '{10, 25, 50, 100} with a default of 50. `sort=product_count:desc` requires ' +
     'productScope=active (returns 422 INVALID_SORT_FOR_SCOPE otherwise).',

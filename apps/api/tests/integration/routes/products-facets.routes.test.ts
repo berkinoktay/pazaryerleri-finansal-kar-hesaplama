@@ -1,16 +1,157 @@
+// GET /products/facets: overrideCounts and the brand/category facets count
+// products over the default listing scope (variants still in Trendyol's feed
+// that are not ARCHIVED). "Missing cost" means no active (non-archived) cost
+// profile is attached. Both counters must equal the totals of the matching
+// list views, which is what the products page shows next to them.
+
 import { prisma } from '@pazarsync/db';
+import type { ProductVariantStatus } from '@pazarsync/db';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '@/app';
-import { encryptCredentials } from '@pazarsync/sync-core';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization } from '../../helpers/factories';
+import {
+  createCostProfile,
+  createMembership,
+  createOrganization,
+  createStore,
+} from '../../helpers/factories';
 
 const app = createApp();
 
-describe('GET /v1/.../products/facets — overrideCounts', () => {
+interface VariantSpec {
+  status?: ProductVariantStatus;
+  delisted?: boolean;
+  cost?: 'active' | 'archived';
+}
+
+interface ProductSpec {
+  key: string;
+  brand?: { id: bigint; name: string };
+  category?: { id: bigint; name: string };
+  variants: VariantSpec[];
+}
+
+interface Ctx {
+  accessToken: string;
+  orgId: string;
+  storeId: string;
+}
+
+interface FacetsBody {
+  brands: { id: string; name: string; count: number }[];
+  categories: { id: string; name: string; count: number }[];
+  overrideCounts: { missingCost: number; total: number };
+}
+
+const LIVE_BRAND = { id: 2032n, name: 'Live Brand' };
+const GHOST_BRAND = { id: 9001n, name: 'Ghost Brand' };
+const LIVE_CATEGORY = { id: 597n, name: 'Live Category' };
+const GHOST_CATEGORY = { id: 9002n, name: 'Ghost Category' };
+
+// total counts P1, P2, P3, P4 and P7 (each has an in-scope variant).
+// missingCost counts P1, P3 (its only profile is archived) and P4 (its
+// NOT_ON_SALE variant is in scope and cost-less). P5 and P6 have no in-scope
+// variant at all, and P7's only cost-less variant is ARCHIVED.
+const CATALOG: ProductSpec[] = [
+  { key: 'P1-NO-COST', brand: LIVE_BRAND, category: LIVE_CATEGORY, variants: [{}] },
+  { key: 'P2-COSTED', brand: LIVE_BRAND, variants: [{ cost: 'active' }] },
+  { key: 'P3-ARCHIVED-PROFILE', variants: [{ cost: 'archived' }] },
+  { key: 'P4-CLOSED-NO-COST', variants: [{ cost: 'active' }, { status: 'NOT_ON_SALE' }] },
+  {
+    key: 'P5-ARCHIVED-ONLY',
+    brand: GHOST_BRAND,
+    category: GHOST_CATEGORY,
+    variants: [{ status: 'ARCHIVED' }],
+  },
+  {
+    key: 'P6-DELISTED-ONLY',
+    brand: GHOST_BRAND,
+    category: GHOST_CATEGORY,
+    variants: [{ delisted: true }],
+  },
+  { key: 'P7-COSTED-PLUS-ARCHIVED', variants: [{ cost: 'active' }, { status: 'ARCHIVED' }] },
+];
+
+async function setup(): Promise<Ctx> {
+  const user = await createAuthenticatedTestUser();
+  const org = await createOrganization();
+  await createMembership(org.id, user.id);
+  const store = await createStore(org.id);
+  return { accessToken: user.accessToken, orgId: org.id, storeId: store.id };
+}
+
+async function attachProfile(ctx: Ctx, variantId: string, archived: boolean): Promise<void> {
+  const profile = await createCostProfile(ctx.orgId, { storeId: ctx.storeId });
+  if (archived) {
+    await prisma.costProfile.update({
+      where: { id: profile.id },
+      data: { archivedAt: new Date() },
+    });
+  }
+  await prisma.productVariantCostProfile.create({
+    data: { organizationId: ctx.orgId, productVariantId: variantId, profileId: profile.id },
+  });
+}
+
+async function seedCatalog(ctx: Ctx, products: ProductSpec[]): Promise<void> {
+  for (const [p, spec] of products.entries()) {
+    const product = await prisma.product.create({
+      data: {
+        organizationId: ctx.orgId,
+        storeId: ctx.storeId,
+        platformContentId: BigInt(5000 + p),
+        productMainId: spec.key,
+        title: spec.key,
+        brandId: spec.brand?.id ?? null,
+        brandName: spec.brand?.name ?? null,
+        categoryId: spec.category?.id ?? null,
+        categoryName: spec.category?.name ?? null,
+      },
+    });
+    for (const [v, variantSpec] of spec.variants.entries()) {
+      const variant = await prisma.productVariant.create({
+        data: {
+          organizationId: ctx.orgId,
+          storeId: ctx.storeId,
+          productId: product.id,
+          platformVariantId: BigInt(50000 + p * 10 + v),
+          barcode: `${spec.key}-${v.toString()}`,
+          stockCode: `${spec.key}-${v.toString()}`,
+          salePrice: '10.00',
+          listPrice: '10.00',
+          status: variantSpec.status ?? 'ON_SALE',
+          delistedAt: variantSpec.delisted === true ? new Date() : null,
+        },
+      });
+      if (variantSpec.cost !== undefined) {
+        await attachProfile(ctx, variant.id, variantSpec.cost === 'archived');
+      }
+    }
+  }
+}
+
+async function getFacets(ctx: Ctx): Promise<{ status: number; body: FacetsBody }> {
+  const res = await app.request(
+    `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/products/facets`,
+    { headers: { Authorization: bearer(ctx.accessToken) } },
+  );
+  return { status: res.status, body: (await res.json()) as FacetsBody };
+}
+
+async function getListTotal(ctx: Ctx, query: string): Promise<number> {
+  const res = await app.request(
+    `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/products${query}`,
+    { headers: { Authorization: bearer(ctx.accessToken) } },
+  );
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { pagination: { total: number } };
+  return body.pagination.total;
+}
+
+describe('GET /v1/.../products/facets: default listing scope', () => {
   beforeAll(async () => {
     await ensureDbReachable();
   });
@@ -19,103 +160,66 @@ describe('GET /v1/.../products/facets — overrideCounts', () => {
     await truncateAll();
   });
 
-  it('returns counts of products with ≥1 variant missing cost/vat plus total', async () => {
-    const user = await createAuthenticatedTestUser();
-    const org = await createOrganization();
-    await createMembership(org.id, user.id);
-    const store = await prisma.store.create({
-      data: {
-        organizationId: org.id,
-        name: 'Test Store',
-        platform: 'TRENDYOL',
-        environment: 'PRODUCTION',
-        externalAccountId: '5000',
-        credentials: encryptCredentials({
-          supplierId: '5000',
-          apiKey: 'k',
-          apiSecret: 's',
-        }),
-      },
-    });
+  it('overrideCounts counts in-scope products and products with a cost-less in-scope variant', async () => {
+    const ctx = await setup();
+    await seedCatalog(ctx, CATALOG);
 
-    // P1: one variant, no cost, no vat → contributes to both
-    const p1 = await prisma.product.create({
-      data: {
-        organizationId: org.id,
-        storeId: store.id,
-        platformContentId: BigInt(5001),
-        productMainId: 'P1',
-        title: 'P1',
-      },
-    });
-    await prisma.productVariant.create({
-      data: {
-        organizationId: org.id,
-        storeId: store.id,
-        productId: p1.id,
-        platformVariantId: BigInt(5101),
-        barcode: 'B1',
-        stockCode: 'S1',
-        salePrice: '10',
-        listPrice: '10',
-      },
-    });
-    // P2: one variant, cost set, vat set → contributes to total only
-    const p2 = await prisma.product.create({
-      data: {
-        organizationId: org.id,
-        storeId: store.id,
-        platformContentId: BigInt(5002),
-        productMainId: 'P2',
-        title: 'P2',
-      },
-    });
-    await prisma.productVariant.create({
-      data: {
-        organizationId: org.id,
-        storeId: store.id,
-        productId: p2.id,
-        platformVariantId: BigInt(5102),
-        barcode: 'B2',
-        stockCode: 'S2',
-        salePrice: '10',
-        listPrice: '10',
-        costPrice: '5',
-        vatRate: 18,
-      },
-    });
-    // P3: one variant, cost set, vat null → contributes to missingVat + total
-    const p3 = await prisma.product.create({
-      data: {
-        organizationId: org.id,
-        storeId: store.id,
-        platformContentId: BigInt(5003),
-        productMainId: 'P3',
-        title: 'P3',
-      },
-    });
-    await prisma.productVariant.create({
-      data: {
-        organizationId: org.id,
-        storeId: store.id,
-        productId: p3.id,
-        platformVariantId: BigInt(5103),
-        barcode: 'B3',
-        stockCode: 'S3',
-        salePrice: '10',
-        listPrice: '10',
-        costPrice: '5',
-      },
-    });
+    const { status, body } = await getFacets(ctx);
 
-    const res = await app.request(
-      `/v1/organizations/${org.id}/stores/${store.id}/products/facets`,
-      { headers: { Authorization: bearer(user.accessToken) } },
+    expect(status).toBe(200);
+    expect(body.overrideCounts).toEqual({ missingCost: 3, total: 5 });
+  });
+
+  it('brand and category facets skip products with no in-scope variant', async () => {
+    const ctx = await setup();
+    await seedCatalog(ctx, CATALOG);
+
+    const { body } = await getFacets(ctx);
+
+    expect(body.brands).toEqual([{ id: '2032', name: 'Live Brand', count: 2 }]);
+    expect(body.categories).toEqual([{ id: '597', name: 'Live Category', count: 1 }]);
+  });
+
+  it('total and missingCost equal the totals of the matching list views', async () => {
+    const ctx = await setup();
+    await seedCatalog(ctx, CATALOG);
+
+    const { body } = await getFacets(ctx);
+
+    expect(await getListTotal(ctx, '')).toBe(body.overrideCounts.total);
+    expect(await getListTotal(ctx, '?overrideMissing=cost')).toBe(body.overrideCounts.missingCost);
+  });
+
+  it('the missing-cost banner, the cost tab badge and the cost tab list agree', async () => {
+    const ctx = await setup();
+    await seedCatalog(ctx, CATALOG);
+
+    const { body: facetsBody } = await getFacets(ctx);
+    const statsRes = await app.request(
+      `/v1/organizations/${ctx.orgId}/products/missing-cost-stats`,
+      { headers: { Authorization: bearer(ctx.accessToken) } },
     );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      overrideCounts: { missingCost: number; missingVat: number; total: number };
+    expect(statsRes.status).toBe(200);
+    const stats = (await statsRes.json()) as {
+      byStore: {
+        storeId: string;
+        missingCount: number;
+        missingProductCount: number;
+        totalVariants: number;
+      }[];
     };
-    expect(body.overrideCounts).toEqual({ missingCost: 1, missingVat: 2, total: 3 });
+    const storeRow = stats.byStore.find((row) => row.storeId === ctx.storeId);
+
+    // In scope: P1, P2, P3, both P4 variants and P7's costed variant (6).
+    // Missing cost: P1, P3 (archived profile) and P4's NOT_ON_SALE variant (3),
+    // one per product.
+    expect(storeRow).toEqual({
+      storeId: ctx.storeId,
+      missingCount: 3,
+      missingProductCount: 3,
+      totalVariants: 6,
+    });
+    expect(facetsBody.overrideCounts.missingCost).toBe(storeRow?.missingProductCount);
+    expect(await getListTotal(ctx, '?overrideMissing=cost')).toBe(storeRow?.missingProductCount);
   });
 });

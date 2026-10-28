@@ -26,8 +26,6 @@ interface VariantFixtureOptions {
   dimensionalWeight?: string | null;
   syncedDimensionalWeight?: string;
   deliveryDuration?: number | null;
-  isRushDelivery?: boolean;
-  fastDeliveryOptions?: string[];
 }
 
 /**
@@ -76,8 +74,6 @@ async function createVariantFixture(opts: VariantFixtureOptions = {}) {
       // products → stored 0, never null). Desi 0 is a valid tariff tier.
       syncedDimensionalWeight: opts.syncedDimensionalWeight ?? '0',
       deliveryDuration: opts.deliveryDuration ?? null,
-      isRushDelivery: opts.isRushDelivery ?? false,
-      fastDeliveryOptions: opts.fastDeliveryOptions ?? [],
       attributes: [],
     },
   });
@@ -120,7 +116,7 @@ describe('estimateShippingCostForVariant', () => {
       shippingTariffSource: 'TRENDYOL_CONTRACT',
       defaultShippingCarrierId: null,
       dimensionalWeight: '1.0',
-      isRushDelivery: true,
+      deliveryDuration: 1, // Barem-eligible, but the store has no carrier
     });
 
     const outcome = await prisma.$transaction((tx) =>
@@ -158,7 +154,7 @@ describe('estimateShippingCostForVariant', () => {
       defaultShippingCarrierId: carrier.id,
       salePrice: '500.00', // ≥ 350, above all Barem ranges
       dimensionalWeight: '3.5', // ceil → 4 → SENDEOMP desi-4 = 112.99 (seed)
-      isRushDelivery: true, // would be Barem-eligible but price falls through
+      deliveryDuration: 1, // Barem-eligible, but the price falls through to NORMAL
     });
 
     const outcome = await prisma.$transaction((tx) =>
@@ -268,15 +264,51 @@ describe('estimateShippingCostForVariant', () => {
     expect(outcome.estimate.amount.toString()).toBe('651.74');
   });
 
-  it('returns a NORMAL tariff when the variant has a Barem-eligible price but no fast-delivery setup', async () => {
+  it('returns a NORMAL tariff when deliveryDuration is above the carrier window', async () => {
     const carrier = await getSendeomp();
     const { variant } = await createVariantFixture({
       defaultShippingCarrierId: carrier.id,
       salePrice: '150.00', // inside [0, 200) Barem range
       dimensionalWeight: '1.0', // ceil → 1, within maxBaremDesi
-      deliveryDuration: 5, // above carrier max=1, no fast delivery
-      isRushDelivery: false,
-      fastDeliveryOptions: [],
+      deliveryDuration: 2, // one day above carrier.maxBaremEligibleDeliveryDuration = 1
+    });
+
+    const outcome = await prisma.$transaction((tx) =>
+      estimateShippingCostForVariant(variant.id, tx),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) expect.fail('Expected outcome.ok to be true');
+    expect(outcome.estimate.tariffApplied).toBe('NORMAL');
+    expect(outcome.estimate.carrierCode).toBe('SENDEOMP');
+    expect(outcome.estimate.amount.toString()).toBe('91.99');
+  });
+
+  it('returns a BAREM tariff when deliveryDuration is 0 (ships today)', async () => {
+    const carrier = await getSendeomp();
+    const { variant } = await createVariantFixture({
+      defaultShippingCarrierId: carrier.id,
+      salePrice: '150.00', // inside the SENDEOMP Barem range [0, 199.99] = 51.24 (seed)
+      dimensionalWeight: '2.0',
+      deliveryDuration: 0, // ships today, inside carrier.maxBaremEligibleDeliveryDuration = 1
+    });
+
+    const outcome = await prisma.$transaction((tx) =>
+      estimateShippingCostForVariant(variant.id, tx),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) expect.fail('Expected outcome.ok to be true');
+    expect(outcome.estimate.tariffApplied).toBe('BAREM');
+    expect(outcome.estimate.carrierCode).toBe('SENDEOMP');
+    expect(outcome.estimate.amount.toString()).toBe('51.24');
+  });
+
+  it('returns a NORMAL tariff when deliveryDuration is null even though the price is inside a Barem range', async () => {
+    const carrier = await getSendeomp();
+    const { variant } = await createVariantFixture({
+      defaultShippingCarrierId: carrier.id,
+      salePrice: '150.00', // inside the SENDEOMP Barem range [0, 199.99]
+      dimensionalWeight: '1.0', // ceil 1 -> SENDEOMP desi-1 = 91.99 (seed)
+      deliveryDuration: null, // Trendyol sent no delivery duration
     });
 
     const outcome = await prisma.$transaction((tx) =>

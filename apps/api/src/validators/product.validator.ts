@@ -2,7 +2,7 @@ import { z } from '@hono/zod-openapi';
 
 import { SyncStatus, SyncType } from '@pazarsync/db';
 import type { Prisma, SyncLog } from '@pazarsync/db';
-import { SyncErrorCode, isSyncErrorCode } from '@pazarsync/db/enums';
+import { ProductVariantStatus, SyncErrorCode, isSyncErrorCode } from '@pazarsync/db/enums';
 
 import { csvParam, decimalBoundParam, intBoundParam } from '../lib/query-params';
 import { TableMetaSchema, TablePaginationQuerySchema } from '../openapi';
@@ -197,15 +197,23 @@ export const SyncLogListResponseSchema = z
 // variant.stockCode (Plain ILIKE for v1; pg_trgm if seller datasets ever
 // exceed ~10k variants — see decision D-search in the plan doc).
 //
-// `status` applies at the variant level: parent included if ≥1 variant
-// matches, and the variants[] in the response is filtered to matching
-// variants (so an `archived` filter doesn't show a parent's onSale
-// variants alongside the archived ones in the expanded view).
+// Variant-level filters (`status`, `overrideMissing`, `vatRateIn`) decide which
+// variants a product shows: the parent is included if at least one variant
+// matches them all, and the variants[] in the response holds only those
+// variants (so an ARCHIVED filter does not show a parent's ON_SALE variants
+// next to the archived ones in the expanded view).
+//
+// Without a `status` param the list applies the default listing scope
+// (LISTED_VARIANT_WHERE from @pazarsync/catalog-sync: still in Trendyol's feed
+// and not ARCHIVED). Every ProductVariantStatus value means "in that status AND
+// not delisted". DELISTED is an API-level pseudo-status (delistedAt is its own
+// dimension, not a member of the DB enum): every delisted variant, whatever its
+// last status. The six values therefore partition the catalog.
+export const DELISTED_STATUS_FILTER = 'DELISTED';
+export type ProductListStatusFilter = ProductVariantStatus | typeof DELISTED_STATUS_FILTER;
 
-export const PRODUCT_VARIANT_STATUSES = ['onSale', 'archived', 'locked', 'blacklisted'] as const;
-export type ProductVariantStatus = (typeof PRODUCT_VARIANT_STATUSES)[number];
-
-export const PRODUCT_OVERRIDE_MISSING = ['cost', 'vat'] as const;
+// "cost": the variant has no active (non-archived) cost profile attached.
+export const PRODUCT_OVERRIDE_MISSING = ['cost'] as const;
 export type ProductOverrideMissing = (typeof PRODUCT_OVERRIDE_MISSING)[number];
 
 export const PRODUCT_LIST_SORTS = [
@@ -239,17 +247,24 @@ export const ListProductsQuerySchema = TablePaginationQuerySchema.extend({
     .openapi({
       description:
         'Search across Product.title, Product.productMainId, ProductVariant.barcode, and ' +
-        'ProductVariant.stockCode (case-insensitive substring match).',
+        'ProductVariant.stockCode (case-insensitive substring match). A barcode or stock ' +
+        'code hit counts only on a variant that passes the variant-level filters (`status`, ' +
+        'or the default listing scope when it is omitted, plus `overrideMissing` and ' +
+        '`vatRateIn`), so a hidden variant never surfaces its parent.',
       example: 'keten',
     }),
   status: z
-    .enum(PRODUCT_VARIANT_STATUSES)
+    .union([z.enum(ProductVariantStatus), z.literal(DELISTED_STATUS_FILTER)])
     .optional()
     .openapi({
       description:
-        'Variant-level status filter. The parent is included if at least one variant matches; ' +
-        'the variants[] array in the response is filtered to only matching variants.',
-      example: 'onSale',
+        'Variant-level status filter. Omitted: the default listing scope (variants still in ' +
+        "Trendyol's feed that are not ARCHIVED). ON_SALE, NOT_ON_SALE, LOCKED, BLACKLISTED " +
+        'and ARCHIVED match variants in that status that are not delisted; DELISTED matches ' +
+        'every variant the full catalog scan stopped returning, whatever its last status. ' +
+        'The parent is included if at least one variant matches; the variants[] array in ' +
+        'the response is filtered to only matching variants.',
+      example: 'NOT_ON_SALE',
     }),
   brandId: z.coerce.bigint().optional().openapi({
     description: 'Trendyol brand id (BigInt) — exact match against Product.brandId.',
@@ -264,9 +279,11 @@ export const ListProductsQuerySchema = TablePaginationQuerySchema.extend({
     .optional()
     .openapi({
       description:
-        'Variant-level filter: "cost" → variants with NULL costPrice; "vat" → variants with NULL vatRate. ' +
-        'Composes with the status filter via AND. Parent included if ≥1 variant matches; response variants[] ' +
-        'is filtered to matching variants (consistent with status semantics).',
+        'Variant-level filter: "cost" matches variants with no active (non-archived) cost ' +
+        'profile attached. Composes via AND with the status filter, or with the default ' +
+        'listing scope when status is omitted. Parent included if at least one variant ' +
+        'matches; response variants[] is filtered to matching variants (consistent with ' +
+        'status semantics).',
       example: 'cost',
     }),
   productId: z
@@ -291,7 +308,9 @@ export const ListProductsQuerySchema = TablePaginationQuerySchema.extend({
         "Trendyol's /products/approved endpoint. " +
         '`salePrice` orders by the product’s lowest variant price (cheapest products ' +
         'first) and `-salePrice` by the highest (priciest first), read from the denormalized ' +
-        'Product.minSalePrice / maxSalePrice columns the sync worker maintains.',
+        'Product.minSalePrice / maxSalePrice columns. Both cover only the variants in the ' +
+        'default listing scope (not delisted, not ARCHIVED) and are maintained by ' +
+        'refreshProductAggregates in @pazarsync/catalog-sync.',
       example: '-platformCreatedAt',
     }),
 
@@ -302,18 +321,21 @@ export const ListProductsQuerySchema = TablePaginationQuerySchema.extend({
   salePriceMin: decimalBoundParam({
     description:
       'Lower bound of a salePrice overlap filter (decimal string). A product matches when it ' +
-      'has a variant priced at or above this — read from the denormalized Product.maxSalePrice.',
+      'has an in-scope variant (not delisted, not ARCHIVED) priced at or above this - read ' +
+      'from the denormalized Product.maxSalePrice.',
     example: '50.00',
   }),
   salePriceMax: decimalBoundParam({
     description:
       'Upper bound of a salePrice overlap filter (decimal string). A product matches when it ' +
-      'has a variant priced at or below this — read from the denormalized Product.minSalePrice.',
+      'has an in-scope variant (not delisted, not ARCHIVED) priced at or below this - read ' +
+      'from the denormalized Product.minSalePrice.',
     example: '500.00',
   }),
   stockMin: intBoundParam({
     description:
-      'Inclusive lower bound on Product.totalStock (denormalized SUM of variant quantities).',
+      'Inclusive lower bound on Product.totalStock (denormalized SUM of the quantities of the ' +
+      'variants in the default listing scope: not delisted, not ARCHIVED).',
     example: 1,
   }),
   stockMax: intBoundParam({
@@ -323,7 +345,8 @@ export const ListProductsQuerySchema = TablePaginationQuerySchema.extend({
   vatRateIn: csvParam(z.coerce.number().int(), {
     description:
       'Filter by one or more variant VAT rates (comma-separated, e.g. 10,20). Variant-level: a ' +
-      'product matches if ≥1 of its variants carries one of the listed rates.',
+      'product matches if at least one variant that passes the other variant filters (status, ' +
+      'or the default listing scope when status is omitted) carries one of the listed rates.',
     example: '10,20',
   }),
   brandIdIn: csvParam(z.coerce.bigint(), {
@@ -338,12 +361,14 @@ export const ListProductsQuerySchema = TablePaginationQuerySchema.extend({
 
 export type ListProductsQuery = z.infer<typeof ListProductsQuerySchema>;
 
-const VariantStatusSchema = z
-  .enum(['onSale', 'archived', 'locked', 'blacklisted', 'inactive'])
-  .openapi({
-    description:
-      'Computed status from variant flags. Order of precedence: archived → blacklisted → locked → onSale → inactive.',
-  });
+const VariantStatusSchema = z.enum(ProductVariantStatus).openapi({
+  description:
+    'Variant status the catalog sync derives from the Trendyol flags with one precedence: ' +
+    'ARCHIVED, then BLACKLISTED, then LOCKED, then ON_SALE, otherwise NOT_ON_SALE. The ' +
+    'values are mutually exclusive. Independent of delistedAt: a delisted variant keeps ' +
+    'its last status.',
+  example: 'ON_SALE',
+});
 
 const ProductImageSchema = z
   .object({
@@ -417,7 +442,6 @@ const VariantSummarySchema = z
     salePrice: z.string().openapi({ description: 'Decimal string', example: '199.90' }),
     listPrice: z.string().openapi({ description: 'Decimal string', example: '249.90' }),
     vatRate: z.number().int().nullable(),
-    costPrice: z.string().nullable().openapi({ description: 'Decimal string, user-entered' }),
     dimensionalWeight: z
       .string()
       .nullable()
@@ -444,17 +468,30 @@ const VariantSummarySchema = z
         'the marketplace value. Drives the override badge and the "↺ Reset" affordance in the UI.',
     }),
     quantity: z.number().int().nonnegative(),
-    deliveryDuration: z.number().int().nullable(),
-    isRushDelivery: z.boolean(),
-    fastDeliveryOptions: z.array(
-      z.object({
-        deliveryOptionType: z.string(),
-        deliveryDailyCutOffHour: z.string(),
+    deliveryDuration: z
+      .number()
+      .int()
+      .nullable()
+      .openapi({
+        description:
+          "Trendyol's handling time in days and the only delivery signal since Trendyol " +
+          'dropped the rush-delivery fields: 0 = ships today, 1 = ships tomorrow, n = ships ' +
+          'in n days. Null when Trendyol sends none.',
+        example: 1,
       }),
-    ),
     productUrl: z.string().nullable(),
-    locationBasedDelivery: z.string().nullable(),
     status: VariantStatusSchema,
+    statusReason: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          "Trendyol's reason code for a LOCKED variant (lockReason) or a BLACKLISTED variant " +
+          '(blacklistReason), passed through as sent, e.g. CRITICAL_SALE_PRICE_CHANGE. Null ' +
+          'for every other status and when Trendyol sends no reason. The UI localizes the ' +
+          'codes it knows.',
+        example: null,
+      }),
     delistedAt: z
       .string()
       .datetime()
@@ -517,7 +554,6 @@ export const ProductWithVariantsSchema = z
       example: '12715815',
     }),
     title: z.string(),
-    description: z.string().nullable(),
     brand: z.object({
       id: z.string().nullable().openapi({ example: '2032' }),
       name: z.string().nullable().openapi({ example: 'Modline' }),
@@ -534,16 +570,19 @@ export const ProductWithVariantsSchema = z
       .nonnegative()
       .openapi({
         description:
-          'Number of variants in the `variants[]` array on this response. When a `status` ' +
-          'filter is supplied, this matches the filtered count (e.g. `?status=onSale` returns ' +
-          'only onSale variants in `variants[]` and `variantCount` mirrors that length). ' +
-          "Without a status filter, it equals the product's total variant count. The contract " +
+          'Number of variants in the `variants[]` array on this response: the variants that ' +
+          'match the variant-level filters (`status`, or the default listing scope when it is ' +
+          'omitted, so archived and delisted variants count only when asked for; narrowed ' +
+          'further by `overrideMissing` and `vatRateIn`). The contract ' +
           'is intentionally "what you see is what you count" — UI can use this for the variant ' +
           'count chip, the multi-variant expand affordance, and the Beden chip overflow with no ' +
           'separate length lookup.',
       }),
     variants: z.array(VariantSummarySchema).openapi({
-      description: 'Filtered to variants matching the `status` query param when one is supplied.',
+      description:
+        'Only the variants matching the variant-level filters: the `status` value when one ' +
+        'is supplied, otherwise the default listing scope, narrowed further by ' +
+        '`overrideMissing` and `vatRateIn`.',
     }),
     lastSyncedAt: z.string().datetime(),
     platformModifiedAt: z.string().datetime().nullable(),
@@ -574,15 +613,30 @@ export const ProductFacetsResponseSchema = z
     categories: z.array(FacetEntrySchema),
     overrideCounts: z
       .object({
-        missingCost: z.number().int().nonnegative(),
-        missingVat: z.number().int().nonnegative(),
-        total: z.number().int().nonnegative(),
+        missingCost: z
+          .number()
+          .int()
+          .nonnegative()
+          .openapi({
+            description:
+              'Products with at least one in-scope variant that has no active cost profile. ' +
+              'Equals pagination.total of the overrideMissing=cost list.',
+          }),
+        total: z
+          .number()
+          .int()
+          .nonnegative()
+          .openapi({
+            description:
+              'Products with at least one variant in the default listing scope. Equals ' +
+              'pagination.total of the unfiltered list.',
+          }),
       })
       .openapi({
         description:
-          'Counts of products with ≥1 variant missing the corresponding override field. Used to populate ' +
-          'the override-state tab badges. Computed against the unfiltered store-scoped set (does not respect ' +
-          'the current q/brand/category/status filters — tabs reset to the full set when activated).',
+          "Tab badge counts over the default listing scope (variants still in Trendyol's " +
+          'feed that are not ARCHIVED). Ignores the current q/brand/category/status filters: ' +
+          'the tabs reset to the full scope when activated.',
       }),
   })
   .openapi('ProductFacetsResponse');
@@ -597,14 +651,6 @@ type ProductWithRelations = Prisma.ProductGetPayload<{
 }>;
 
 type VariantRow = ProductWithRelations['variants'][number];
-
-function computeVariantStatus(variant: VariantRow): z.infer<typeof VariantStatusSchema> {
-  if (variant.archived) return 'archived';
-  if (variant.blacklisted) return 'blacklisted';
-  if (variant.locked) return 'locked';
-  if (variant.onSale) return 'onSale';
-  return 'inactive';
-}
 
 export interface VariantCostAggregate {
   currentCostTry: string | null;
@@ -633,7 +679,6 @@ export function toVariantSummary(
     salePrice: variant.salePrice.toString(),
     listPrice: variant.listPrice.toString(),
     vatRate: variant.vatRate,
-    costPrice: variant.costPrice !== null ? variant.costPrice.toString() : null,
     dimensionalWeight:
       variant.dimensionalWeight !== null
         ? variant.dimensionalWeight.toString()
@@ -645,16 +690,9 @@ export function toVariantSummary(
     isDimensionalWeightOverridden: variant.dimensionalWeight !== null,
     quantity: variant.quantity,
     deliveryDuration: variant.deliveryDuration,
-    isRushDelivery: variant.isRushDelivery,
-    fastDeliveryOptions: Array.isArray(variant.fastDeliveryOptions)
-      ? (variant.fastDeliveryOptions as {
-          deliveryOptionType: string;
-          deliveryDailyCutOffHour: string;
-        }[])
-      : [],
     productUrl: variant.productUrl,
-    locationBasedDelivery: variant.locationBasedDelivery,
-    status: computeVariantStatus(variant),
+    status: variant.status,
+    statusReason: variant.statusReason,
     delistedAt: variant.delistedAt?.toISOString() ?? null,
     currentCostTry: cost.currentCostTry,
     profileCount: cost.profileCount,
@@ -692,7 +730,6 @@ export function toProductWithVariantsResponse(
     productMainId: product.productMainId,
     platformContentId: product.platformContentId.toString(),
     title: product.title,
-    description: product.description,
     brand: {
       id: product.brandId !== null ? product.brandId.toString() : null,
       name: product.brandName,

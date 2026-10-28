@@ -20,11 +20,11 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 
 import type { ProductFacetsResponse } from '../api/list-product-facets.api';
-import type { ProductWithVariants } from '../api/list-products.api';
+import type { ProductWithVariants, VariantSummary } from '../api/list-products.api';
 import {
-  computeDeliveryType,
+  computeDeliveryInfo,
   desiRange,
-  dominantDeliveryType,
+  dominantDeliveryInfo,
   isMultiVariant,
   priceRange,
   totalStock,
@@ -45,7 +45,7 @@ import { ProductImageCell } from '@/components/patterns/product-image-cell';
 import { ProductsBulkCostActionBar } from './products-bulk-cost-action-bar';
 import type { ProductRow } from './products-bulk-cost-action-bar.types';
 import { ProductsTabStrip, type ProductsOverrideTab } from './products-tab-strip';
-import { VariantDelistedBadge } from './variant-delisted-badge';
+import { VariantStatusBadge } from './variant-status-badge';
 
 function projectRows(products: ProductWithVariants[]): ProductRow[] {
   return products.map((p) => ({ kind: 'parent', product: p }));
@@ -130,7 +130,7 @@ interface ProductsTableProps {
  * alphanumeric identifier — model / stock / barcode — now ships inside the
  * title cell with an explicit `Marka · Kategori` label line plus dedicated
  * `Stok Kodu` / `Barkod` / `Model Kodu` lines, each wrapped in `CopyableValue`;
- * status is covered by the override tab strip + status filter).
+ * status is covered by the status filter and the stock cell's status chip).
  *
  * Variant sub-rows mirror their parent's image at the same 56px size (no
  * step-down) and surface both `Stok Kodu` and `Barkod` on two labelled, copyable
@@ -409,21 +409,22 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         meta: { numeric: true },
         enableSorting: true,
         cell: ({ row }) => {
-          // Variant rows can additionally carry a "delisted" chip when the
-          // full catalog scan's absence pass has stamped delistedAt (the
-          // variant was missing from a complete catalog sweep); the hourly
-          // delta only clears it again when the variant reappears. Parent
-          // rows only show the aggregate count.
+          // Variant rows carry the variant's status chip under the count: out
+          // of stock / closed for sale / locked / blacklisted / archived, or
+          // the delisted chip once the full catalog scan's absence pass has
+          // stamped delistedAt. A single-variant product has no sub-row, so
+          // its parent row carries the chip instead. Multi-variant parent
+          // rows only show the aggregate count; their chips live on the
+          // expanded variant rows.
           if (row.original.kind === 'variant') {
-            const v = row.original.variant;
-            return (
-              <div className="gap-3xs flex flex-col items-end">
-                <StockCount count={v.quantity} />
-                {v.delistedAt !== null ? <VariantDelistedBadge /> : null}
-              </div>
-            );
+            return <VariantStockCell variant={row.original.variant} />;
           }
-          return <StockCount count={totalStock(row.original.product.variants)} />;
+          const p = row.original.product;
+          const v0 = !isMultiVariant(p) ? p.variants[0] : undefined;
+          if (v0 === undefined) {
+            return <StockCount count={totalStock(p.variants)} />;
+          }
+          return <VariantStockCell variant={v0} />;
         },
       },
       {
@@ -431,10 +432,10 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         header: () => tCols('delivery'),
         cell: ({ row }) => {
           if (row.original.kind === 'variant') {
-            return <DeliveryBadge type={computeDeliveryType(row.original.variant)} />;
+            return <DeliveryBadge info={computeDeliveryInfo(row.original.variant)} />;
           }
-          const { type, mixed } = dominantDeliveryType(row.original.product.variants);
-          return <DeliveryBadge type={type} mixed={mixed} />;
+          const { info, mixed } = dominantDeliveryInfo(row.original.product.variants);
+          return <DeliveryBadge info={info} mixed={mixed} />;
         },
       },
       {
@@ -519,7 +520,10 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         },
       },
     ],
-    [formatter, t, tCols, props.orgId],
+    // storeId changes only on a store switch, which router.refresh() applies
+    // without remounting this table; the cost and desi cells must not keep
+    // writing to the previous store.
+    [formatter, t, tCols, props.orgId, props.storeId],
   );
 
   // Map the URL sort string back into TanStack's SortingState shape, and
@@ -661,6 +665,24 @@ function StockCount({ count }: StockCountProps): React.ReactElement {
     >
       {count}
     </span>
+  );
+}
+
+interface VariantStockCellProps {
+  variant: VariantSummary;
+}
+
+/**
+ * Stock count with the variant's status chip stacked under it, right-aligned
+ * like the rest of the numeric column. The chip renders nothing for a listed,
+ * on-sale variant, so the cell then collapses to the bare count.
+ */
+function VariantStockCell({ variant }: VariantStockCellProps): React.ReactElement {
+  return (
+    <div className="gap-3xs flex flex-col items-end">
+      <StockCount count={variant.quantity} />
+      <VariantStatusBadge variant={variant} />
+    </div>
   );
 }
 

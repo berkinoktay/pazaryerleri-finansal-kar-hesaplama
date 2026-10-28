@@ -5,6 +5,7 @@
 // prove every new filter rides that anchor.
 
 import { prisma } from '@pazarsync/db';
+import { ProductVariantStatus } from '@pazarsync/db/enums';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '@/app';
@@ -21,8 +22,11 @@ interface Tenant {
   storeId: string;
 }
 
-// One product (with a variant) that matches every filter in FILTER_QUERIES,
-// titled with the tenant tag so a leak is visible.
+// One product that matches every filter in FILTER_QUERIES, titled with the
+// tenant tag so a leak is visible. It carries one variant per
+// ProductVariantStatus plus a delisted one, so every status value (DELISTED
+// included) matches it, and no variant has a cost profile, so the cost tab
+// matches it too.
 async function seedMatchingProduct(orgId: string, storeId: string, tag: string): Promise<void> {
   // A and B live under different stores, so the (storeId, platformContentId)
   // unique constraint lets both reuse the same fixed ids.
@@ -40,19 +44,27 @@ async function seedMatchingProduct(orgId: string, storeId: string, tag: string):
       totalStock: 42,
     },
   });
-  await prisma.productVariant.create({
-    data: {
-      organizationId: orgId,
-      storeId,
-      productId: product.id,
-      platformVariantId: 90010n,
-      barcode: `bc-${tag}`,
-      stockCode: `sk-${tag}`,
-      salePrice: '50.00',
-      listPrice: '150.00',
-      vatRate: 20,
-    },
-  });
+  const variants = [
+    ...Object.values(ProductVariantStatus).map((status) => ({ status, delistedAt: null })),
+    { status: ProductVariantStatus.ON_SALE, delistedAt: new Date() },
+  ];
+  for (const [index, variant] of variants.entries()) {
+    await prisma.productVariant.create({
+      data: {
+        organizationId: orgId,
+        storeId,
+        productId: product.id,
+        platformVariantId: 90010n + BigInt(index),
+        barcode: `bc-${tag}-${index.toString()}`,
+        stockCode: `sk-${tag}-${index.toString()}`,
+        salePrice: '50.00',
+        listPrice: '150.00',
+        vatRate: 20,
+        status: variant.status,
+        delistedAt: variant.delistedAt,
+      },
+    });
+  }
 }
 
 async function makeTenant(tag: string): Promise<Tenant> {
@@ -64,13 +76,22 @@ async function makeTenant(tag: string): Promise<Tenant> {
   return { accessToken: user.accessToken, orgId: org.id, storeId: store.id };
 }
 
-const FILTER_QUERIES = [
+// Every status value (DELISTED included) and the cost tab ride the same
+// org + store anchor as the Advanced Filtering params.
+const STATUS_FILTER_QUERIES = [...Object.values(ProductVariantStatus), 'DELISTED'].map(
+  (status) => `status=${status}`,
+);
+
+const FILTER_QUERIES: readonly string[] = [
   'salePriceMin=40&salePriceMax=160',
   'stockMin=10&stockMax=100',
   'vatRateIn=20',
   'brandIdIn=777',
   'categoryIdIn=888',
-] as const;
+  ...STATUS_FILTER_QUERIES,
+  'overrideMissing=cost',
+  'overrideMissing=cost&status=DELISTED',
+];
 
 describe('Tenant isolation — GET /products Advanced Filtering params', () => {
   beforeAll(async () => {

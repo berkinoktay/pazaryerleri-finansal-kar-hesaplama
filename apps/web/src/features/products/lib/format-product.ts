@@ -30,7 +30,7 @@ export function totalStock(variants: VariantSummary[]): number {
 }
 
 // Aggregate for the parent row's desi column when a product has multiple
-// variants. Mirrors priceRange — returns null when none of the variants
+// variants. Mirrors priceRange: returns null when none of the variants
 // have a value yet, otherwise reports the min/max of the effective
 // desi across all variants.
 export interface DesiRange {
@@ -57,81 +57,62 @@ export function desiRange(variants: VariantSummary[]): DesiRange | null {
 }
 
 /**
- * Trendyol's three delivery tiers, mapped from the marketplace's API
- * vocabulary (`fastDeliveryOptions[].deliveryOptionType` plus the
- * legacy `isRushDelivery` boolean):
+ * Shipping-speed tier of a variant, read from Trendyol's `deliveryDuration`
+ * (the number of days the seller has to hand the parcel to the carrier).
+ * Trendyol retired its rush-delivery flag and fast-delivery option list in
+ * August 2026, so `deliveryDuration` is the only signal left:
  *
- *   - 'sameDay'  → fastDeliveryOptions includes "SAME_DAY_SHIPPING"
- *   - 'fast'     → fastDeliveryOptions includes "FAST_DELIVERY", or
- *                  the variant carries `isRushDelivery: true`
- *   - 'standard' → neither — the variant ships under standard
- *                  marketplace lead time
- *
- * Mirrors the seller-panel taxonomy under `Hızlı Teslimat` settings.
+ *   - 'today'    -> 0, the ships-today program
+ *   - 'tomorrow' -> 1, ships by the next day at the latest
+ *   - 'later'    -> 2 or more days
+ *   - 'unknown'  -> Trendyol sent no value, or a value that is not a
+ *                   non-negative integer
  */
-export type DeliveryType = 'sameDay' | 'fast' | 'standard';
+export type DeliveryTier = 'today' | 'tomorrow' | 'later' | 'unknown';
 
-export function computeDeliveryType(variant: VariantSummary): DeliveryType {
-  for (const opt of variant.fastDeliveryOptions) {
-    if (opt.deliveryOptionType === 'SAME_DAY_SHIPPING') return 'sameDay';
+export interface DeliveryInfo {
+  tier: DeliveryTier;
+  /** The day count behind the tier; null only for the 'unknown' tier. */
+  days: number | null;
+}
+
+const SHIPS_TODAY_DURATION = 0;
+const SHIPS_TOMORROW_DURATION = 1;
+
+export function computeDeliveryInfo(variant: { deliveryDuration: number | null }): DeliveryInfo {
+  const days = variant.deliveryDuration;
+  if (days === null || !Number.isInteger(days) || days < 0) {
+    return { tier: 'unknown', days: null };
   }
-  for (const opt of variant.fastDeliveryOptions) {
-    if (opt.deliveryOptionType === 'FAST_DELIVERY') return 'fast';
-  }
-  if (variant.isRushDelivery) return 'fast';
-  return 'standard';
+  if (days === SHIPS_TODAY_DURATION) return { tier: 'today', days };
+  if (days === SHIPS_TOMORROW_DURATION) return { tier: 'tomorrow', days };
+  return { tier: 'later', days };
 }
 
 /**
- * Aggregate the delivery tier across a product's variants for the
- * parent row's "Teslimat" cell. If every variant agrees, returns that
- * type; if they disagree, returns `mixed: true` so the UI renders a
- * "Karışık" (mixed) badge instead of misleading the seller into
- * thinking the parent has a single uniform delivery option.
+ * Delivery tier for the parent row's "Teslimat" cell. When every variant
+ * reports the same tier and day count, returns that info; when they
+ * disagree, returns `mixed: true` so the UI renders a "mixed" chip instead
+ * of implying one uniform promise for the whole product. An empty list has
+ * no info at all.
  */
-export function dominantDeliveryType(variants: VariantSummary[]): {
-  type: DeliveryType | null;
-  mixed: boolean;
-} {
-  if (variants.length === 0) return { type: null, mixed: false };
+export function dominantDeliveryInfo(
+  variants: ReadonlyArray<{ deliveryDuration: number | null }>,
+): { info: DeliveryInfo | null; mixed: boolean } {
   const first = variants[0];
-  if (first === undefined) return { type: null, mixed: false };
-  const firstType = computeDeliveryType(first);
-  const allSame = variants.every((v) => computeDeliveryType(v) === firstType);
-  return allSame ? { type: firstType, mixed: false } : { type: null, mixed: true };
-}
-
-export type StatusValue = VariantSummary['status'];
-
-/**
- * Most-common status across variants for the parent row's status badge.
- * If only one status is represented, returns it as-is; if multiple are
- * represented, returns the dominant one + a count of "other" variants
- * for the UI to render as "2 satışta · 1 arşiv" style.
- */
-export interface StatusSummary {
-  dominant: StatusValue;
-  counts: Partial<Record<StatusValue, number>>;
-  isMixed: boolean;
-}
-
-export function summarizeStatus(variants: VariantSummary[]): StatusSummary | null {
-  if (variants.length === 0) return null;
-  const counts: Partial<Record<StatusValue, number>> = {};
-  for (const v of variants) {
-    counts[v.status] = (counts[v.status] ?? 0) + 1;
-  }
-  const entries = Object.entries(counts) as [StatusValue, number][];
-  entries.sort((a, b) => b[1] - a[1]);
-  const dominant = entries[0]?.[0];
-  if (dominant === undefined) return null;
-  return { dominant, counts, isMixed: entries.length > 1 };
+  if (first === undefined) return { info: null, mixed: false };
+  const firstInfo = computeDeliveryInfo(first);
+  const allSame = variants.every((variant) => {
+    const info = computeDeliveryInfo(variant);
+    return info.tier === firstInfo.tier && info.days === firstInfo.days;
+  });
+  return allSame ? { info: firstInfo, mixed: false } : { info: null, mixed: true };
 }
 
 /**
  * Returns up to N unique sizes across the variants for the parent row.
  * Primarily used in the "size" column when the parent represents
- * multiple variants — e.g. "S, M, L".
+ * multiple variants, e.g. "S, M, L".
  */
 export function uniqueSizes(
   variants: VariantSummary[],

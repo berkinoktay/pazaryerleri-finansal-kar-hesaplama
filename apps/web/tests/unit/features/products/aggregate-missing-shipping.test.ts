@@ -6,57 +6,18 @@ import type {
 } from '@/features/products/api/list-products.api';
 import { aggregateMissingShipping } from '@/features/products/lib/aggregate-missing-shipping';
 
+import {
+  makeProductWithVariants,
+  makeVariantSummary as makeVariant,
+} from '../../../helpers/product-fixtures';
+
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
-function makeVariant(overrides: Partial<VariantSummary> = {}): VariantSummary {
-  return {
-    id: 'variant-uuid-001',
-    platformVariantId: '10010',
-    barcode: 'BC-0001',
-    stockCode: 'STK-A',
-    size: null,
-    salePrice: '100.00',
-    listPrice: '100.00',
-    vatRate: 20,
-    costPrice: null,
-    quantity: 5,
-    deliveryDuration: 1,
-    isRushDelivery: false,
-    fastDeliveryOptions: [],
-    productUrl: null,
-    locationBasedDelivery: 'DISABLED',
-    status: 'onSale',
-    delistedAt: null,
-    currentCostTry: null,
-    profileCount: 0,
-    costStatus: 'NO_PROFILES',
-    dimensionalWeight: null,
-    syncedDimensionalWeight: null,
-    isDimensionalWeightOverridden: false,
-    estimatedShippingNet: null,
-    shippingCarrierCode: null,
-    shippingTariffApplied: null,
-    shippingEstimateStatus: 'OK',
-    ...overrides,
-  };
-}
-
+// Products are built from explicit variant lists on top of the shared builder.
+// Every test passes shippingEstimateStatus explicitly, so the builder default
+// (NO_DESI) never decides an expectation here.
 function makeProduct(variants: VariantSummary[]): ProductWithVariants {
-  return {
-    id: 'product-uuid-001',
-    productMainId: 'MAIN-1',
-    platformContentId: '12345',
-    title: 'Test product',
-    description: null,
-    brand: { id: null, name: null },
-    category: { id: null, name: null },
-    color: null,
-    images: [],
-    variantCount: variants.length,
-    variants,
-    lastSyncedAt: '2026-05-01T00:00:00Z',
-    platformModifiedAt: null,
-  };
+  return makeProductWithVariants({ variants });
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
