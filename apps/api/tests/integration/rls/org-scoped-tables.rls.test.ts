@@ -63,7 +63,7 @@ describe('RLS — org-scoped tables', () => {
     expect(data?.map((o) => o.id)).toEqual([orderA.id]);
   });
 
-  it('products: member sees only own org products', async () => {
+  it('products: member sees only own org products and their image urls', async () => {
     const { client, orgA, orgB, storeA, storeB } = await twoTenantsSetup();
     const [productA] = await Promise.all([
       prisma.product.create({
@@ -73,6 +73,7 @@ describe('RLS — org-scoped tables', () => {
           platformContentId: BigInt(1001),
           productMainId: 'pm-a',
           title: 'Product A',
+          imageUrls: ['https://cdn.example.com/a.jpg'],
         },
       }),
       prisma.product.create({
@@ -82,14 +83,16 @@ describe('RLS — org-scoped tables', () => {
           platformContentId: BigInt(1002),
           productMainId: 'pm-b',
           title: 'Product B',
+          imageUrls: ['https://cdn.example.com/b.jpg'],
         },
       }),
     ]);
 
-    const { data, error } = await client.from('products').select('id,title');
+    const { data, error } = await client.from('products').select('id,title,image_urls');
 
     expect(error).toBeNull();
     expect(data?.map((p) => p.id)).toEqual([productA.id]);
+    expect(data?.map((p) => p.image_urls)).toEqual([['https://cdn.example.com/a.jpg']]);
   });
 
   it('product_variants: member sees only own org variants', async () => {
@@ -145,53 +148,6 @@ describe('RLS — org-scoped tables', () => {
 
     expect(error).toBeNull();
     expect(data?.map((v) => v.id)).toEqual([variantA.id]);
-  });
-
-  it('product_images: member sees only own org images', async () => {
-    const { client, orgA, orgB, storeA, storeB } = await twoTenantsSetup();
-    const [productA, productB] = await Promise.all([
-      prisma.product.create({
-        data: {
-          organizationId: orgA.id,
-          storeId: storeA.id,
-          platformContentId: BigInt(3001),
-          productMainId: 'pm-a',
-          title: 'Product A',
-        },
-      }),
-      prisma.product.create({
-        data: {
-          organizationId: orgB.id,
-          storeId: storeB.id,
-          platformContentId: BigInt(3002),
-          productMainId: 'pm-b',
-          title: 'Product B',
-        },
-      }),
-    ]);
-    const [imageA] = await Promise.all([
-      prisma.productImage.create({
-        data: {
-          organizationId: orgA.id,
-          productId: productA.id,
-          url: 'https://cdn.example.com/a.jpg',
-          position: 0,
-        },
-      }),
-      prisma.productImage.create({
-        data: {
-          organizationId: orgB.id,
-          productId: productB.id,
-          url: 'https://cdn.example.com/b.jpg',
-          position: 0,
-        },
-      }),
-    ]);
-
-    const { data, error } = await client.from('product_images').select('id,url');
-
-    expect(error).toBeNull();
-    expect(data?.map((i) => i.id)).toEqual([imageA.id]);
   });
 
   it('order_items: member sees only items of orders in own org', async () => {

@@ -370,14 +370,6 @@ const VariantStatusSchema = z.enum(ProductVariantStatus).openapi({
   example: 'ON_SALE',
 });
 
-const ProductImageSchema = z
-  .object({
-    id: z.string().uuid(),
-    url: z.string().url(),
-    position: z.number().int().nonnegative(),
-  })
-  .openapi('ProductImage');
-
 const COST_STATUSES = ['OK', 'NO_PROFILES', 'FX_STALE', 'FX_MISSING'] as const;
 export type CostStatus = (typeof COST_STATUSES)[number];
 
@@ -563,7 +555,11 @@ export const ProductWithVariantsSchema = z
       name: z.string().nullable().openapi({ example: 'Dolap ve Gardrop' }),
     }),
     color: z.string().nullable(),
-    images: z.array(ProductImageSchema),
+    imageUrls: z.array(z.string().url()).openapi({
+      description:
+        'Product image URLs in the order Trendyol sends them; the first entry is the ' +
+        'primary image. Empty when the product has no images.',
+    }),
     variantCount: z
       .number()
       .int()
@@ -647,7 +643,7 @@ export const ProductFacetsResponseSchema = z
 // handler stays thin and wire-shape changes have one source of truth.
 
 type ProductWithRelations = Prisma.ProductGetPayload<{
-  include: { variants: true; images: true };
+  include: { variants: true };
 }>;
 
 type VariantRow = ProductWithRelations['variants'][number];
@@ -739,9 +735,7 @@ export function toProductWithVariantsResponse(
       name: product.categoryName,
     },
     color: product.color,
-    images: product.images
-      .sort((a, b) => a.position - b.position)
-      .map((img) => ({ id: img.id, url: img.url, position: img.position })),
+    imageUrls: product.imageUrls,
     // Mirrors variants[].length on purpose — see the schema description.
     // Same source ⇒ count chip + Beden chips + expanded sub-rows can never
     // disagree.

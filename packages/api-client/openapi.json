@@ -2970,11 +2970,13 @@
               "null"
             ]
           },
-          "images": {
+          "imageUrls": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ProductImage"
-            }
+              "type": "string",
+              "format": "uri"
+            },
+            "description": "Product image URLs in the order Trendyol sends them; the first entry is the primary image. Empty when the product has no images."
           },
           "variantCount": {
             "type": "integer",
@@ -3008,33 +3010,11 @@
           "brand",
           "category",
           "color",
-          "images",
+          "imageUrls",
           "variantCount",
           "variants",
           "lastSyncedAt",
           "platformModifiedAt"
-        ]
-      },
-      "ProductImage": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "url": {
-            "type": "string",
-            "format": "uri"
-          },
-          "position": {
-            "type": "integer",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "id",
-          "url",
-          "position"
         ]
       },
       "VariantSummary": {
@@ -3597,7 +3577,7 @@
               "null"
             ],
             "format": "uri",
-            "description": "Primary product image URL (position=0). Null if no image is attached.",
+            "description": "Primary product image URL (imageUrls[0]). Null if no image is attached.",
             "example": "https://cdn.example.com/p-123.jpg"
           },
           "cost": {
@@ -4464,7 +4444,7 @@
               "null"
             ],
             "format": "uri",
-            "description": "URL of the product's primary image (first ProductImage by position), or null if the product has no images. Used by the cost-profile detail page \"Bağlı varyantlar\" tab to render each variant alongside its product thumbnail."
+            "description": "URL of the product's primary image (imageUrls[0]), or null if the product has no images. Used by the cost-profile detail page \"Bağlı varyantlar\" tab to render each variant alongside its product thumbnail."
           },
           "attachedAt": {
             "type": "string",

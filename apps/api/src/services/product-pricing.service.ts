@@ -130,7 +130,7 @@ interface VariantForListRow extends VariantForAssembly {
     categoryName: string | null;
     brandId: bigint | null;
     brandName: string | null;
-    images: { url: string }[];
+    imageUrls: string[];
   };
 }
 
@@ -678,7 +678,7 @@ export async function listProductPricing(
             categoryName: true,
             brandId: true,
             brandName: true,
-            images: { select: { url: true }, orderBy: { position: 'asc' }, take: 1 },
+            imageUrls: true,
           },
         },
       },
@@ -919,8 +919,8 @@ export async function quoteProductPrice(
  * Builds a `ComputedPricingRow` — the serialized DTO row PLUS the un-rounded
  * Decimal profit metrics the in-memory filter/sort consume. `cost` is the GROSS
  * TRY aggregate, present only when costStatus is OK (it is null otherwise, even
- * if a stale FX value sits in `currentCostTry`). `imageUrl` is the position-0
- * product image url or null. category / brand ids are serialized bigints.
+ * if a stale FX value sits in `currentCostTry`). `imageUrl` is the first
+ * imageUrls entry of the product, or null. category / brand ids are serialized bigints.
  */
 function computeRow(
   variant: VariantForListRow,
@@ -928,7 +928,7 @@ function computeRow(
   costAggregate: VariantCostAggregate | undefined,
 ): ComputedPricingRow {
   const { product } = variant;
-  const imageUrl = product.images[0]?.url ?? null;
+  const imageUrl = product.imageUrls[0] ?? null;
   const cost =
     result.costStatus === 'OK' && costAggregate?.currentCostTry != null
       ? costAggregate.currentCostTry

@@ -202,7 +202,6 @@ export async function list(opts: {
         // `_count`: variantCount is derived from variants.length in the mapper,
         // so the count chip, Beden chips and expanded sub-rows never disagree.
         variants: { where: variantWhere },
-        images: true,
       },
       // id breaks ties so offset pages never repeat or skip a product: in the
       // ARCHIVED and DELISTED views many products share totalStock 0 and null

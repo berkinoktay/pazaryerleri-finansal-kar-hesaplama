@@ -93,7 +93,7 @@ function pageWith(...barcodes: string[]): MappedProductsPage {
     attributes: [],
     platformCreatedAt: null,
     platformModifiedAt: null,
-    images: [],
+    imageUrls: [],
     variants: [variant(barcode)],
   }));
   return {

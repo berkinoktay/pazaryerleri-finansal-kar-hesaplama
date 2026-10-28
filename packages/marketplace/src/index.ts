@@ -22,7 +22,6 @@ export {
   type TrendyolStock,
   type TrendyolVariant,
   type MappedProduct,
-  type MappedProductImage,
   type MappedProductVariant,
   type MappedProductsPageMeta,
   type TrendyolInventoryVariant,

@@ -13,6 +13,17 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Products list: `ProductWithVariants.images` becomes `imageUrls`**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/products`). Breaking; the web client ships
+  the matching change in the same PR. Product images now live on the product row as an ordered
+  url list, so the list response carries `imageUrls: string[]` (uri strings in the order Trendyol
+  sends them; the first entry is the primary image, empty when the product has no images)
+  instead of `images: ProductImage[]`. The `ProductImage` component schema (`{ id, url, position }`)
+  is removed. Every other image field keeps its name, type and value: `ProductPricingRow.imageUrl`,
+  `OrderItemVariant.productImageUrl`, `AttachedVariant.productImageUrl`, the live-performance
+  `thumbUrl` fields and the campaign/tariff detail `imageUrl` fields still return the primary
+  image; only the descriptions of `ProductPricingRow.imageUrl` and
+  `AttachedVariant.productImageUrl` are reworded.
 - **Products list: a default listing scope, the variant status enum, and counters that match
   the list** (`GET /v1/organizations/{orgId}/stores/{storeId}/products`,
   `GET .../products/facets`, `GET /v1/organizations/{orgId}/products/missing-cost-stats`).

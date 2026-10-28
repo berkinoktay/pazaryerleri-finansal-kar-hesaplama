@@ -337,6 +337,7 @@ async function setupFixture(): Promise<Fixture> {
       title: 'Kampanya Ürünü',
       categoryId: 597n,
       categoryName: 'Bayrak',
+      imageUrls: [IMAGE_URL],
     },
   });
   const variant = await prisma.productVariant.create({
@@ -356,9 +357,6 @@ async function setupFixture(): Promise<Fixture> {
   });
   await prisma.productVariantCostProfile.create({
     data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
-  });
-  await prisma.productImage.create({
-    data: { organizationId: org.id, productId: product.id, url: IMAGE_URL, position: 0 },
   });
 
   const list = await prisma.marketplaceCampaignList.create({

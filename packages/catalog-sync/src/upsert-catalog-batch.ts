@@ -17,7 +17,7 @@ export async function upsertCatalogBatch(
   syncLogId: string | null,
 ): Promise<void> {
   // ─── PORTED VERBATIM from apps/api/src/services/product-sync.service.ts ──
-  // One transaction per content (parent + its variants + image replace).
+  // One transaction per content (parent (incl. ordered imageUrls) + its variants).
   // Each content also runs inside a try/catch — a single malformed
   // product (rare, but real Trendyol data has shipped duplicate
   // barcodes within a store, missing required fields, etc.) gets
@@ -48,6 +48,7 @@ export async function upsertCatalogBatch(
             categoryName: mapped.categoryName,
             color: mapped.color,
             attributes: mapped.attributes as never,
+            imageUrls: mapped.imageUrls,
             platformCreatedAt: mapped.platformCreatedAt,
             platformModifiedAt: mapped.platformModifiedAt,
             lastSyncedAt: new Date(),
@@ -62,6 +63,9 @@ export async function upsertCatalogBatch(
             categoryName: mapped.categoryName,
             color: mapped.color,
             attributes: mapped.attributes as never,
+            // Written on every re-sync, even when empty: Trendyol's ordered list
+            // replaces the stored one (reordered, shrunk, or cleared).
+            imageUrls: mapped.imageUrls,
             platformCreatedAt: mapped.platformCreatedAt,
             platformModifiedAt: mapped.platformModifiedAt,
             lastSyncedAt: new Date(),
@@ -134,22 +138,6 @@ export async function upsertCatalogBatch(
         // product's in-scope variants (listed and not archived) and stay
         // consistent for the products-list sort + salePrice filter.
         await refreshProductAggregates(tx, store.id, [product.id]);
-
-        // Replace images for this product. ProductImage rows have no
-        // per-image identifier we can match against (Trendyol gives an
-        // ordered URL list), so the cleanest semantic is "this is the
-        // new ordered set, drop the previous set".
-        await tx.productImage.deleteMany({ where: { productId: product.id } });
-        if (mapped.images.length > 0) {
-          await tx.productImage.createMany({
-            data: mapped.images.map((img) => ({
-              organizationId: store.organizationId,
-              productId: product.id,
-              url: img.url,
-              position: img.position,
-            })),
-          });
-        }
       });
     } catch (err) {
       syncLog.error('content.upsert.failed', {

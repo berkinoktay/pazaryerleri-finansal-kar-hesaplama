@@ -108,7 +108,7 @@ export async function resolveCampaignEconomics(
               title: true,
               categoryId: true,
               brandId: true,
-              images: { select: { url: true }, orderBy: { position: 'asc' }, take: 1 },
+              imageUrls: true,
             },
           },
         },
@@ -123,7 +123,7 @@ export async function resolveCampaignEconomics(
           variant.syncedCommissionRate !== null
             ? new Decimal(variant.syncedCommissionRate.toString())
             : null,
-        imageUrl: variant.product.images[0]?.url ?? null,
+        imageUrl: variant.product.imageUrls[0] ?? null,
       });
     }
 

@@ -305,9 +305,18 @@ describe('ProductsTable', () => {
       title: 'Solo Product',
       variantCount: 1,
       variants: [makeVariant({ stockCode: 'STK-SOLO', barcode: 'BC-SOLO' })],
+      imageUrls: [
+        'https://cdn.example.com/solo-first.jpg',
+        'https://cdn.example.com/solo-second.jpg',
+      ],
     });
     renderTable([product]);
     expect(screen.getByText('Solo Product')).toBeInTheDocument();
+    // The row thumbnail is the product's first image.
+    expect(screen.getByRole('img', { name: 'Solo Product' })).toHaveAttribute(
+      'src',
+      'https://cdn.example.com/solo-first.jpg',
+    );
     expect(screen.getByText('BC-SOLO')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Varyantları göster' })).toBeNull();
   });
@@ -319,6 +328,10 @@ describe('ProductsTable', () => {
       variants: [
         makeVariant({ id: 'v-2a', size: 'S', stockCode: 'STK-S' }),
         makeVariant({ id: 'v-2b', size: 'L', stockCode: 'STK-L' }),
+      ],
+      imageUrls: [
+        'https://cdn.example.com/multi-first.jpg',
+        'https://cdn.example.com/multi-second.jpg',
       ],
     });
     const { user } = renderTable([product]);
@@ -343,6 +356,12 @@ describe('ProductsTable', () => {
     expect(variantRow?.getAttribute('data-depth')).toBe('1');
     // Once expanded, each variant sub-row renders its own size chip.
     expect(screen.getByText('S')).toBeInTheDocument();
+    // The parent row and both variant sub-rows show the product's first image.
+    const thumbnails = screen.getAllByRole('img', { name: 'Multi Product' });
+    expect(thumbnails).toHaveLength(3);
+    for (const thumbnail of thumbnails) {
+      expect(thumbnail).toHaveAttribute('src', 'https://cdn.example.com/multi-first.jpg');
+    }
     expect(screen.getByText('L')).toBeInTheDocument();
   });
 

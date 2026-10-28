@@ -178,7 +178,7 @@ export const ProductPricingItemSchema = z
       example: '42.30',
     }),
     imageUrl: z.string().url().nullable().openapi({
-      description: 'Primary product image URL (position=0). Null if no image is attached.',
+      description: 'Primary product image URL (imageUrls[0]). Null if no image is attached.',
       example: 'https://cdn.example.com/p-123.jpg',
     }),
     cost: moneyString.nullable().openapi({

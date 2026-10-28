@@ -274,11 +274,10 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
           if (row.original.kind === 'variant') {
             const v = row.original.variant;
             const parent = row.original.parent;
-            const parentImage = parent.images[0];
             return (
               <div className="gap-sm flex items-center">
                 <ProductImageCell
-                  url={parentImage?.url ?? null}
+                  url={parent.imageUrls[0] ?? null}
                   alt={parent.title}
                   size="lg"
                   fit="cover"
@@ -294,11 +293,10 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
           // surfaces the model code (the shared grouping key); single-variant
           // surfaces the variant's own identifiers (the variant IS the product).
           const p = row.original.product;
-          const firstImage = p.images[0];
           const v0 = !isMultiVariant(p) ? p.variants[0] : null;
           return (
             <div className="gap-sm flex items-center">
-              <ProductImageCell url={firstImage?.url ?? null} alt={p.title} size="lg" fit="cover" />
+              <ProductImageCell url={p.imageUrls[0] ?? null} alt={p.title} size="lg" fit="cover" />
               <div className="gap-3xs flex min-w-0 flex-col">
                 <span className="text-foreground line-clamp-1 font-medium">{p.title}</span>
                 <BrandCategoryLine

@@ -138,7 +138,7 @@ interface DiscountVariantRow {
     title: string;
     categoryId: bigint | null;
     brandId: bigint | null;
-    images: { url: string }[];
+    imageUrls: string[];
   };
 }
 
@@ -231,7 +231,7 @@ export async function getDiscountListDetail(
               title: true,
               categoryId: true,
               brandId: true,
-              images: { select: { url: true }, orderBy: { position: 'asc' }, take: 1 },
+              imageUrls: true,
             },
           },
         },
@@ -241,7 +241,7 @@ export async function getDiscountListDetail(
     }
     for (const variant of variants) {
       variantMap.set(variant.id, variant);
-      imageMap.set(variant.id, variant.product.images[0]?.url ?? null);
+      imageMap.set(variant.id, variant.product.imageUrls[0] ?? null);
     }
 
     [costMap, shippingMap] = await Promise.all([
