@@ -46,7 +46,7 @@ function makeContent(contentId: number, barcode: string): TrendyolContent {
         barcode,
         attributes: [{ attributeId: 293, attributeName: 'Beden', attributeValue: 'M' }],
         onSale: true,
-        deliveryOptions: { deliveryDuration: 1, isRushDelivery: true, fastDeliveryOptions: [] },
+        deliveryOptions: { deliveryDuration: 1 },
         stock: { quantity: 5, lastModifiedDate: 0 },
         price: { salePrice: 100, listPrice: 100 },
         stockCode: `sk-${contentId.toString()}`,

@@ -48,7 +48,7 @@ const STAGING_SAMPLE_DFSF: TrendyolContent = {
       productUrl:
         'https://stage.trendyol.com/abc/xyz-p-1122684425?&merchantId=2738&filterOverPriceListings=false',
       onSale: true,
-      deliveryOptions: { deliveryDuration: null, isRushDelivery: false, fastDeliveryOptions: [] },
+      deliveryOptions: {},
       stock: { quantity: 12312, lastModifiedDate: 0 },
       price: { salePrice: 131231, listPrice: 131231 },
       stockCode: '122',
@@ -67,6 +67,26 @@ const STAGING_SAMPLE_DFSF: TrendyolContent = {
     },
   ],
 };
+
+// Every key a mapped variant carries, sorted. upsertCatalogBatch persists each
+// of them, so a key outside this list would be a field nothing writes.
+const MAPPED_VARIANT_KEYS = [
+  'attributes',
+  'barcode',
+  'deliveryDuration',
+  'listPrice',
+  'platformVariantId',
+  'productUrl',
+  'quantity',
+  'salePrice',
+  'size',
+  'status',
+  'statusReason',
+  'stockCode',
+  'syncedCommissionRate',
+  'syncedDimensionalWeight',
+  'vatRate',
+] as const;
 
 describe('mapTrendyolContent', () => {
   it('maps the dfsf staging sample end-to-end', () => {
@@ -102,14 +122,13 @@ describe('mapTrendyolContent', () => {
     expect(variant?.listPrice).toBe('131231.00');
     expect(variant?.quantity).toBe(12312);
     expect(variant?.deliveryDuration).toBeNull();
-    expect(variant?.isRushDelivery).toBe(false);
-    expect(variant?.fastDeliveryOptions).toEqual([]);
     expect(variant?.productUrl).toContain('stage.trendyol.com');
-    expect(variant?.locationBasedDelivery).toBe('DISABLED');
-    expect(variant?.onSale).toBe(true);
-    expect(variant?.archived).toBe(false);
-    expect(variant?.blacklisted).toBe(false);
-    expect(variant?.locked).toBe(false);
+  });
+
+  it('emits exactly the variant fields the catalog upsert persists', () => {
+    const variant = mapTrendyolContent(STAGING_SAMPLE_DFSF).variants[0];
+    expect(variant).toBeDefined();
+    expect(Object.keys(variant ?? {}).sort()).toEqual([...MAPPED_VARIANT_KEYS]);
   });
 
   it('joins multiple Renk attribute values with a space', () => {
@@ -280,7 +299,7 @@ describe('mapTrendyolContent', () => {
     expect(out.variants[0]?.quantity).toBe(0);
   });
 
-  it('defaults delivery to null/false/[] when deliveryOptions is missing', () => {
+  it('defaults deliveryDuration to null when deliveryOptions is missing', () => {
     const variant = STAGING_SAMPLE_DFSF.variants?.[0];
     if (variant === undefined) throw new Error('fixture variant missing');
     const { deliveryOptions: _droppedDelivery, ...variantWithoutDelivery } = variant;
@@ -290,8 +309,16 @@ describe('mapTrendyolContent', () => {
       variants: [variantWithoutDelivery],
     });
     expect(out.variants[0]?.deliveryDuration).toBeNull();
-    expect(out.variants[0]?.isRushDelivery).toBe(false);
-    expect(out.variants[0]?.fastDeliveryOptions).toEqual([]);
+  });
+
+  it('keeps deliveryDuration 0 (ships today) from the current deliveryOptions shape', () => {
+    const variant = STAGING_SAMPLE_DFSF.variants?.[0];
+    if (variant === undefined) throw new Error('fixture variant missing');
+    const out = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      variants: [{ ...variant, deliveryOptions: { deliveryDuration: 0 } }],
+    });
+    expect(out.variants[0]?.deliveryDuration).toBe(0);
   });
 
   it('handles missing content-level images and attributes with empty defaults', () => {

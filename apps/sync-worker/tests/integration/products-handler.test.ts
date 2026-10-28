@@ -61,7 +61,7 @@ function buildContent(spec: ContentSpec): unknown {
           ? [{ attributeId: 293, attributeName: 'Beden', attributeValue: v.size }]
           : [],
       onSale: v.onSale ?? true,
-      deliveryOptions: { deliveryDuration: 1, isRushDelivery: true, fastDeliveryOptions: [] },
+      deliveryOptions: { deliveryDuration: 1 },
       stock: { quantity: v.quantity ?? 10, lastModifiedDate: 0 },
       price: { salePrice: v.salePrice ?? 100, listPrice: v.salePrice ?? 100 },
       stockCode: v.stockCode,

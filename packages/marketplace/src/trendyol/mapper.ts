@@ -6,7 +6,6 @@ import { ProductVariantStatus } from '@pazarsync/db/enums';
 
 import type {
   MappedProduct,
-  MappedProductFastDeliveryOption,
   MappedProductImage,
   MappedProductsPageMeta,
   MappedProductVariant,
@@ -125,15 +124,6 @@ function mapImages(images: { url: string }[]): MappedProductImage[] {
   return images.map((img, position) => ({ url: img.url, position }));
 }
 
-function mapFastDeliveryOptions(
-  opts: { deliveryOptionType: string; deliveryDailyCutOffHour: string }[],
-): MappedProductFastDeliveryOption[] {
-  return opts.map((o) => ({
-    deliveryOptionType: o.deliveryOptionType,
-    deliveryDailyCutOffHour: o.deliveryDailyCutOffHour,
-  }));
-}
-
 function mapVariant(variant: TrendyolVariant): MappedProductVariant {
   // Trendyol's `approved` endpoint sometimes returns variants where
   // `price`, `stock`, or `deliveryOptions` are absent — typically
@@ -151,14 +141,7 @@ function mapVariant(variant: TrendyolVariant): MappedProductVariant {
     vatRate: typeof variant.vatRate === 'number' ? variant.vatRate : null,
     quantity: variant.stock?.quantity ?? 0,
     deliveryDuration: variant.deliveryOptions?.deliveryDuration ?? null,
-    isRushDelivery: variant.deliveryOptions?.isRushDelivery ?? false,
-    fastDeliveryOptions: mapFastDeliveryOptions(variant.deliveryOptions?.fastDeliveryOptions ?? []),
     productUrl: variant.productUrl ?? null,
-    locationBasedDelivery: variant.locationBasedDelivery ?? null,
-    onSale: variant.onSale ?? false,
-    archived: variant.archived ?? false,
-    blacklisted: variant.blacklisted ?? false,
-    locked: variant.locked ?? false,
     size: extractVariantLabel(variantAttrs),
     attributes: variantAttrs,
     // Desi: Trendyol bu alanı çoğu üründe hiç göndermez (ya da hesaplamadan
