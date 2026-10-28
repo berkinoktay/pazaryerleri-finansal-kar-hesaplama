@@ -260,8 +260,37 @@ jobs:
         with:
           version: 2.105.0
 
+      # Image pulls: ghcr.io throttles each supabase/* image across all of its
+      # users ("toomanyrequests: ... allowed: 44000/minute"), and setup-cli
+      # pins CLI < 2.108.0 to ghcr.io with no mirror fallback, so one busy
+      # minute failed the job before any test ran (PR #504, four attempts in a
+      # row on 2026-10-28). Three mitigations:
+      #   1. Start only what the suites use: Postgres, GoTrue (admin user
+      #      creation + sign-in), Kong, PostgREST and Realtime (the RLS suite).
+      #      Excluded services are not pulled at all: 5 images instead of 13.
+      #      No test sends auth email, so mailpit can go too.
+      #   2. Retry with a growing pause. A failed start keeps the images it
+      #      already pulled, so each attempt resumes where the last one stopped.
+      #   3. From the third attempt, pull the same images from the ECR Public
+      #      mirror (the CLI's own default registry), with Docker Hub last.
       - name: Start Supabase local
-        run: supabase start
+        run: |
+          excluded=studio,postgres-meta,storage-api,imgproxy,edge-runtime,logflare,vector,mailpit
+          registries=(ghcr.io ghcr.io public.ecr.aws public.ecr.aws docker.io)
+          for i in "${!registries[@]}"; do
+            attempt=$((i + 1))
+            export SUPABASE_INTERNAL_IMAGE_REGISTRY="${registries[$i]}"
+            echo "supabase start: attempt ${attempt} via ${SUPABASE_INTERNAL_IMAGE_REGISTRY}"
+            if supabase start --exclude "$excluded"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt "${#registries[@]}" ]; then
+              echo "::warning::supabase start failed on attempt ${attempt}; retrying"
+              sleep $((attempt * 15))
+            fi
+          done
+          echo "::error::supabase start failed after ${#registries[@]} attempts"
+          exit 1
 
       # Pull Supabase's local keys into $GITHUB_ENV so subsequent steps
       # (db:push, integration tests) inherit them. Values are generated
