@@ -98,8 +98,10 @@ export interface DelistScanContext {
 // (progressCurrent > 0) OR the vendor explicitly reported an empty catalog
 // (observedTotalElements === 0). An empty FIRST response over a nonzero catalog
 // is a transient vendor blip; running the pass there would mass-delist the whole
-// catalog, because every variant carries a stale lastSyncedAt when no page
-// refreshed it this run.
+// catalog, because no page of this run refreshed lastSyncedAt, so nearly every
+// variant still carries a timestamp older than this run's startedAt (only the
+// few that an hourly PRODUCTS_CHANGES page or a barcode repair returned since
+// then would be spared).
 //
 // Exhaustive over DelistDoneReason so a future done branch forces a decision.
 export function shouldRunDelistPass(
@@ -146,14 +148,22 @@ const DELIST_CHUNK_TX_TIMEOUT_MS = 30_000;
 // same pass and the truncation branch is the only one that skips it (via the
 // decision above).
 //
-// Correctness: `lastSyncedAt` is written ONLY by the full-scan catalog upsert
-// (upsertCatalogBatch); the hourly delta sync deliberately does NOT touch it.
-// So "lastSyncedAt older than this scan's startedAt" is EXACTLY "absent from
-// this complete scan": every variant a page of this scan returned had its
-// lastSyncedAt refreshed to now() (> startedAt) and is excluded, while a
-// variant no page returned still carries an older timestamp. `delistedAt IS
-// NULL` keeps the stamp idempotent — a variant already delisted in a prior
-// scan keeps its original timestamp instead of being re-stamped.
+// Correctness: every writer of `lastSyncedAt` is an approved-products read
+// through the catalog upsert (upsertCatalogBatch): a page of this full scan, an
+// hourly PRODUCTS_CHANGES page, or a barcode repair (ensureBarcodesInCatalog).
+// The hourly stock+price delta deliberately does NOT touch it. So "lastSyncedAt
+// >= startedAt" means Trendyol returned the variant as listed at some moment
+// after this scan began, and "lastSyncedAt older than this scan's startedAt"
+// means no approved read returned it since then; in particular, no page of this
+// complete scan returned it. Every variant a page of this scan returned had its
+// lastSyncedAt refreshed to now() (> startedAt) and is excluded.
+//
+// Known effect: a variant that PRODUCTS_CHANGES (or a barcode repair) returned
+// after startedAt, and that was then removed before this scan reached its page,
+// keeps a fresh lastSyncedAt and is not delisted until the next full scan. That
+// is a one-day delay, never a false delist. `delistedAt IS NULL` keeps the stamp
+// idempotent: a variant already delisted in a prior scan keeps its original
+// timestamp instead of being re-stamped.
 //
 // Resume-safe: on a scan resumed mid-way (cursor advanced after
 // releaseToPending), `log.startedAt` stays the ORIGINAL enqueue time and every

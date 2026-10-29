@@ -59,6 +59,12 @@ export async function handleRunError(
     // the whole catalog each tick, so a cheap re-run next hour beats advancing
     // the cursor past a bad page (which would silently skip that page's stock/
     // price refresh until the following tick anyway). Terminal FAIL here is fine.
+    //
+    // DELIBERATELY NOT extended to PRODUCTS_CHANGES either: it reruns hourly,
+    // and a FAILED run never moves its date window (the anchor only reads
+    // COMPLETED runs), so the next tick rescans the same range. Skipping a page
+    // would complete the run and move the window past changes that were never
+    // written. Its cursor is not a products page cursor either.
     if (syncType === 'PRODUCTS' && code === SyncErrorCode.MARKETPLACE_UNREACHABLE) {
       const advanced = await advanceCursorPastBadPage(syncLogId, err, workerId);
       if (advanced) return;

@@ -25,7 +25,8 @@ const ShippingEstimateStatusSchema = z
   .openapi({
     description:
       'Shipping estimate availability. OK = estimate computed. NO_CARRIER = no carrier ' +
-      'configured on this store. NO_DESI = variant has no dimensional weight. ' +
+      'configured on this store. NO_DESI = defensive fallback, not returned in practice: ' +
+      'desi has a 0 floor, so a variant with no Trendyol desi is priced at desi 0. ' +
       'OWN_CONTRACT_EMPTY = own-contract store with no tariff row for this desi. ' +
       'DESI_OVERFLOW = variant desi exceeds carrier tariff coverage.',
     example: 'OK',

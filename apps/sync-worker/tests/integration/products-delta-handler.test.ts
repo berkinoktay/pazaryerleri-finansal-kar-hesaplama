@@ -273,7 +273,7 @@ describe('processProductsDeltaChunk', () => {
     });
     expect(changedAfter.quantity).toBe(3);
     expect(changedAfter.salePrice.toString()).toBe('90');
-    // lastSyncedAt is the FULL-scan marker — the delta handler must NOT touch it.
+    // lastSyncedAt is the catalog-read marker; the delta handler must NOT touch it.
     expect(changedAfter.lastSyncedAt.getTime()).toBe(changedLastSyncedBefore.getTime());
 
     // Unchanged variant: no write at all (updatedAt stable).
@@ -509,7 +509,7 @@ describe('processProductsDeltaChunk', () => {
     });
     // delistedAt cleared by the reappearance.
     expect(after.delistedAt).toBeNull();
-    // lastSyncedAt (full-scan marker) is NEVER touched by the delta handler.
+    // lastSyncedAt (catalog-read marker) is NEVER touched by the delta handler.
     expect(after.lastSyncedAt.getTime()).toBe(lastSyncedBefore.getTime());
     // Stock/price unchanged.
     expect(after.quantity).toBe(10);

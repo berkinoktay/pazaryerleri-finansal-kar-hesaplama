@@ -1,6 +1,7 @@
 import type { SyncType } from '@pazarsync/db/enums';
 import { describe, expect, it } from 'vitest';
 
+import { PAGE_SYNC_SOURCES } from '@/features/sync/config/page-sync-sources';
 import { deriveStaleHours, newestPrimarySyncedAt } from '@/features/sync/lib/stale-data';
 
 const NOW = new Date('2026-07-13T12:00:00.000Z');
@@ -51,6 +52,18 @@ describe('newestPrimarySyncedAt', () => {
     const delta = hoursBefore(NOW, 1);
     const sources = [source('PRODUCTS', hoursBefore(NOW, 30)), source('PRODUCTS_DELTA', delta)];
     expect(newestPrimarySyncedAt(sources, ['PRODUCTS', 'PRODUCTS_DELTA'])).toBe(delta);
+  });
+
+  it('takes the freshest among the three Products primaries (PRODUCTS_CHANGES wins)', () => {
+    // Reads the real config, so dropping PRODUCTS_CHANGES from the Products
+    // primaries would surface the 26h-old delta instead.
+    const changes = hoursBefore(NOW, 0.5);
+    const sources = [
+      source('PRODUCTS', hoursBefore(NOW, 30)),
+      source('PRODUCTS_DELTA', hoursBefore(NOW, 26)),
+      source('PRODUCTS_CHANGES', changes),
+    ];
+    expect(newestPrimarySyncedAt(sources, PAGE_SYNC_SOURCES.products.primary)).toBe(changes);
   });
 
   it('skips primaries that never succeeded (null lastSyncedAt)', () => {

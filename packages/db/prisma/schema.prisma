@@ -88,6 +88,8 @@ enum SyncType {
   PRODUCTS
   // Hourly lightweight stock+price walk via Trendyol inventory-and-price; full PRODUCTS scan remains the daily metadata reconciliation.
   PRODUCTS_DELTA
+  // Hourly date-window walk of the approved list (modified, then created dates): picks up new products and status/metadata changes; cron only, never delists.
+  PRODUCTS_CHANGES
   SETTLEMENTS
   CLAIMS
 }

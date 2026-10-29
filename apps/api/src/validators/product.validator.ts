@@ -25,9 +25,10 @@ export const StartSyncResponseSchema = z
 // ─── Generic manual-sync trigger body ──────────────────────────────────
 // Body for POST /v1/organizations/:orgId/stores/:storeId/syncs — the
 // generic manual-sync trigger that supersedes the PRODUCTS-only
-// products/sync route. PRODUCTS_DELTA is intentionally excluded: it's the
-// cron-internal hourly stock/price walk, never a user-facing button, so
-// the enum is the four merchant-triggerable types only. An out-of-set
+// products/sync route. PRODUCTS_DELTA and PRODUCTS_CHANGES are
+// intentionally excluded: both are cron-internal hourly walks (stock/price,
+// and the date-filtered product-changes walk), never a user-facing button,
+// so the enum is the four merchant-triggerable types only. An out-of-set
 // value fails with the SCREAMING_SNAKE code `INVALID_SYNC_TYPE`.
 
 export const MANUAL_SYNC_TRIGGER_TYPES = ['ORDERS', 'PRODUCTS', 'SETTLEMENTS', 'CLAIMS'] as const;
@@ -38,8 +39,9 @@ export const TriggerSyncBodySchema = z
     syncType: z.enum(MANUAL_SYNC_TRIGGER_TYPES, { message: 'INVALID_SYNC_TYPE' }).openapi({
       description:
         'Which marketplace surface to sync. One of ORDERS, PRODUCTS, SETTLEMENTS, CLAIMS. ' +
-        'PRODUCTS_DELTA is not accepted here — it is a cron-internal lightweight stock/price ' +
-        'walk, not a user-triggerable sync.',
+        'PRODUCTS_DELTA and PRODUCTS_CHANGES are not accepted here: both are cron-internal ' +
+        'hourly walks (the stock/price walk and the date-filtered product-changes walk), not ' +
+        'user-triggerable syncs.',
       example: 'ORDERS',
     }),
   })
@@ -419,8 +421,10 @@ const ShippingTariffAppliedSchema = z
 const ShippingEstimateStatusSchema = z.enum(SHIPPING_ESTIMATE_STATUSES).openapi({
   description:
     'Outcome of the shipping estimate. OK = estimate available. NO_CARRIER = ' +
-    'TRENDYOL_CONTRACT store with no defaultShippingCarrierId. NO_DESI = variant has ' +
-    'neither a user override nor a synced dimensional weight. OWN_CONTRACT_EMPTY = ' +
+    'TRENDYOL_CONTRACT store with no defaultShippingCarrierId. NO_DESI = no estimate ' +
+    'could be produced for the variant (a defensive fallback): desi has a 0 floor, so a ' +
+    'variant Trendyol sent no desi for is priced at desi 0 and flagged by ' +
+    'isDimensionalWeightMissing instead. OWN_CONTRACT_EMPTY = ' +
     'OWN_CONTRACT store with no own_shipping_tariffs row for this desi (V1 always). ' +
     'DESI_OVERFLOW = variant desi exceeds the carrier tariff coverage.',
   example: 'OK',
@@ -754,8 +758,10 @@ export function toProductWithVariantsResponse(
   // Default mirrors the service fn's STORE_NOT_FOUND behaviour: a variant
   // whose row didn't come back from the CTE (extremely rare — the join
   // covers every variant in the org) is treated as a NO_DESI miss with
-  // empty fields. NO_DESI is the safest default because it triggers the
-  // "ürüne desi ekle" CTA, not a misleading carrier-specific suggestion.
+  // empty fields. NO_DESI is the safest default: it marks the estimate as
+  // unavailable without suggesting a carrier-specific cause. (The CTE itself
+  // never returns NO_DESI; desi has a 0 floor. Missing desi is reported by
+  // isDimensionalWeightMissing.)
   const defaultShipping: VariantShippingEstimate = {
     estimatedShippingNet: null,
     shippingCarrierCode: null,

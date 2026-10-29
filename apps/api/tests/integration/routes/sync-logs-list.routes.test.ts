@@ -397,6 +397,51 @@ describe('GET /v1/organizations/:orgId/sync-logs (org-scoped)', () => {
     expect(ordersFreshness[0]?.recordsProcessed).toBe(42);
   });
 
+  it('serializes a COMPLETED PRODUCTS_CHANGES run in both data and freshness', async () => {
+    // PRODUCTS_CHANGES is the cron-only hourly catalog-changes walk. It is never
+    // triggerable by hand, but its runs must still flow through the generic
+    // SyncLog / freshness wire shapes like every other SyncType member.
+    const { user, orgId, storeId } = await setupOrgWithStore();
+    const now = Date.now();
+    const completedAt = new Date(now - 60_000);
+    await prisma.syncLog.create({
+      data: {
+        organizationId: orgId,
+        storeId,
+        syncType: 'PRODUCTS_CHANGES',
+        status: 'COMPLETED',
+        triggerSource: 'CRON',
+        startedAt: new Date(now - 90_000),
+        completedAt,
+        recordsProcessed: 7,
+      },
+    });
+
+    const res = await app.request(`/v1/organizations/${orgId}/sync-logs`, {
+      headers: { Authorization: bearer(user.accessToken) },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: Array<{ syncType: string; status: string }>;
+      freshness: Array<{
+        storeId: string;
+        syncType: string;
+        completedAt: string;
+        recordsProcessed: number;
+      }>;
+    };
+
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]?.syncType).toBe('PRODUCTS_CHANGES');
+    expect(body.data[0]?.status).toBe('COMPLETED');
+
+    const changesFreshness = body.freshness.filter((f) => f.syncType === 'PRODUCTS_CHANGES');
+    expect(changesFreshness).toHaveLength(1);
+    expect(changesFreshness[0]?.storeId).toBe(storeId);
+    expect(changesFreshness[0]?.completedAt).toBe(completedAt.toISOString());
+    expect(changesFreshness[0]?.recordsProcessed).toBe(7);
+  });
+
   it('returns an empty freshness array for a MEMBER with no store grants', async () => {
     // A MEMBER with zero store grants narrows to an empty store id set, which the
     // service passes as `ANY('{}')` — matching nothing. This locks that code path

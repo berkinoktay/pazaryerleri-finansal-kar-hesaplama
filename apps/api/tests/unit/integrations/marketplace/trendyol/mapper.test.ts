@@ -6,7 +6,7 @@ import {
   deriveVariantStatus,
   mapTrendyolApprovedResponse,
   mapTrendyolContent,
-  type TrendyolApprovedProductsResponse,
+  type TrendyolApprovedProductsWithContent,
   type TrendyolContent,
 } from '@pazarsync/marketplace';
 
@@ -376,7 +376,7 @@ describe('mapTrendyolContent', () => {
 
 describe('mapTrendyolApprovedResponse', () => {
   it('forwards the page meta and maps content[]', () => {
-    const wire: TrendyolApprovedProductsResponse = {
+    const wire: TrendyolApprovedProductsWithContent = {
       totalElements: 137,
       totalPages: 2,
       page: 0,
@@ -397,7 +397,7 @@ describe('mapTrendyolApprovedResponse', () => {
   });
 
   it('passes through nextPageToken when present', () => {
-    const wire: TrendyolApprovedProductsResponse = {
+    const wire: TrendyolApprovedProductsWithContent = {
       totalElements: 50000,
       totalPages: 500,
       page: 99,

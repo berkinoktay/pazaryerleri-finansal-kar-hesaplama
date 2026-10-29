@@ -5,9 +5,11 @@
 // tick is a full walk), diffs each page against the current DB state in memory,
 // and writes back ONLY the variants whose quantity or sale/list price drifted.
 //
-// Deliberately does NOT touch lastSyncedAt — that column means "seen in the FULL
-// catalog scan"; the daily PRODUCTS sync's delist diff (absence-from-feed)
-// depends on it, so a partial inventory walk must never stamp it.
+// Deliberately does NOT touch lastSyncedAt. That column means "last returned by
+// an approved-products read" (full scan, PRODUCTS_CHANGES, barcode repair), and
+// the daily PRODUCTS sync's delist diff (absence-from-feed) depends on it. This
+// handler reads the inventory feed and writes stock and price only, so it must
+// never stamp it.
 //
 // Touches delistedAt in ONE direction only. A variant present in this
 // inventory-and-price feed is, by definition, still listed. If its DB row
@@ -17,10 +19,11 @@
 // change. It NEVER SETS delistedAt: marking a variant absent stays owned by the
 // full scan, which is the only pass that observes the whole catalog.
 //
-// The daily full PRODUCTS scan remains the source of metadata reconciliation
-// (titles, images, brand/category, delist DETECTION). This handler only keeps
-// stock and price fresh — and undoes a stale delist on reappearance — between
-// those scans.
+// Metadata reconciliation (titles, images, brand/category, status) comes from
+// the hourly PRODUCTS_CHANGES walk for recently changed products and from the
+// daily full PRODUCTS scan for the whole catalog; delist DETECTION stays with
+// the full scan. This handler only keeps stock and price fresh, and undoes a
+// stale delist on reappearance, between those scans.
 //
 // Pagination reuses the products module's cursor model (ProductsCursor +
 // parseProductsCursor): page-based below the 10k cap, nextPageToken past it,
@@ -127,8 +130,10 @@ export async function processProductsDeltaChunk(input: {
   const changes = computeVariantChanges(batch, existingByVariantId);
 
   // One info log per page for unknown variants — never per-row spam. A variant
-  // the delta feed knows but our catalog does not means the daily full scan has
-  // not caught up; it lands in the catalog on the next PRODUCTS run, so skip.
+  // the delta feed knows but our catalog does not means the catalog reads have
+  // not caught up; it lands in the catalog on the next hourly PRODUCTS_CHANGES
+  // run (when recently created or modified) or at the latest on the next
+  // PRODUCTS full scan, so skip.
   if (changes.unknownCount > 0) {
     syncLog.info('products-delta.unknown-variants', {
       syncLogId: log.id,
@@ -142,7 +147,7 @@ export async function processProductsDeltaChunk(input: {
       for (const update of changes.updates) {
         await tx.productVariant.update({
           where: { id: update.id },
-          // Write the drifted stock/price fields. NEVER lastSyncedAt (full-scan
+          // Write the drifted stock/price fields. NEVER lastSyncedAt (catalog-read
           // marker). delistedAt is cleared to null ONLY for a row that
           // reappeared in the feed after a prior delist (clearDelistedAt); it is
           // never SET here — absence detection stays owned by the full scan.

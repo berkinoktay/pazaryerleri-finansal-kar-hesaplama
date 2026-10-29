@@ -9,9 +9,12 @@ export {
 } from './trendyol/prices';
 export { mapTrendyolResponseToDomainError } from './trendyol/errors';
 export {
+  TRENDYOL_DATE_QUERY_TYPES,
   isTrendyolCredentials,
   type TrendyolCredentials,
   type TrendyolApprovedProductsResponse,
+  type TrendyolApprovedProductsWithContent,
+  type TrendyolDateQueryType,
   type TrendyolAttribute,
   type TrendyolBrand,
   type TrendyolCategory,
@@ -50,8 +53,11 @@ export {
   MAX_BARCODES_PER_QUERY,
   PRODUCTS_PAGE_SIZE,
   fetchApprovedProducts,
+  fetchApprovedProductsPageByDate,
   fetchProductsByBarcodes,
+  type ApprovedProductsPageByDate,
   type FetchApprovedProductsOpts,
+  type FetchApprovedProductsPageByDateOpts,
 } from './trendyol/products';
 export {
   fetchInventoryAndPrice,

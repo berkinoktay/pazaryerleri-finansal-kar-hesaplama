@@ -7,8 +7,8 @@ export type StartSyncResponse = components['schemas']['StartSyncResponse'];
 
 /**
  * The user-triggerable sync surfaces. Mirrors the backend's TriggerSyncBody
- * enum — ORDERS / PRODUCTS / SETTLEMENTS / CLAIMS (PRODUCTS_DELTA is
- * cron-internal and rejected by the endpoint).
+ * enum: ORDERS / PRODUCTS / SETTLEMENTS / CLAIMS (PRODUCTS_DELTA and
+ * PRODUCTS_CHANGES are cron-internal and rejected by the endpoint).
  */
 export type TriggerSyncType = components['schemas']['TriggerSyncBody']['syncType'];
 

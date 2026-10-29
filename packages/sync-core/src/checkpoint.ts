@@ -104,6 +104,86 @@ export function parseOrdersCursor(raw: unknown): OrdersCursor | null {
 }
 
 /**
+ * Ordered phases of a PRODUCTS_CHANGES run (hourly date-window scan of the
+ * approved product list). A run walks every phase in this order, one page
+ * per chunk, then completes.
+ *
+ * The values ARE Trendyol `dateQueryType` literals. sync-core cannot import
+ * `@pazarsync/marketplace` (marketplace depends on sync-core), so the
+ * marketplace package owns the vendor union (`TrendyolDateQueryType`) and
+ * the handler's `dateQueryType: cursor.phase` assignment is the compile-time
+ * check that every phase is a valid Trendyol value.
+ *
+ *   VARIANT_MODIFIED_DATE  - variant edits, status, lock and archive events.
+ *   CONTENT_MODIFIED_DATE  - content edits the variant date misses (stage
+ *                            probe: a few products only this query caught).
+ *   VARIANT_CREATED_DATE   - products created days ago that Trendyol approved
+ *                            late, so they only now appear in the approved
+ *                            list (owner decision; the handler queries this
+ *                            phase over a longer look-back than the window).
+ *
+ * Adding or reordering a phase is a one-line change here; the handler and
+ * `nextProductsChangesPhase` derive the walk from this tuple.
+ */
+export const PRODUCTS_CHANGES_PHASES = [
+  'VARIANT_MODIFIED_DATE',
+  'CONTENT_MODIFIED_DATE',
+  'VARIANT_CREATED_DATE',
+] as const;
+export type ProductsChangesPhase = (typeof PRODUCTS_CHANGES_PHASES)[number];
+
+/**
+ * The phase that follows `phase` in `PRODUCTS_CHANGES_PHASES`, or null when
+ * `phase` is the last one (the run is done).
+ */
+export function nextProductsChangesPhase(phase: ProductsChangesPhase): ProductsChangesPhase | null {
+  const index = PRODUCTS_CHANGES_PHASES.indexOf(phase);
+  return PRODUCTS_CHANGES_PHASES[index + 1] ?? null;
+}
+
+/**
+ * Cursor shape for PRODUCTS_CHANGES sync.
+ *
+ * The window is computed once, in the run's first chunk, and stored here so
+ * every later chunk (and every retry or re-claim of the same row) queries
+ * the exact same range. Bounds are ms epoch, like the orders cursors. The
+ * handler derives each phase's Trendyol query range from these two bounds.
+ *
+ *   phase        - current Trendyol dateQueryType (see PRODUCTS_CHANGES_PHASES).
+ *   page         - 0-based page index within the current phase.
+ *   windowStart  - lower bound of the change window (ms epoch).
+ *   windowEnd    - upper bound of the change window = the run's startedAt
+ *                  (ms epoch). Always strictly after windowStart: an empty
+ *                  window never gets a cursor, the run finishes instead.
+ *
+ * No `kind` discriminator: the dispatcher decodes by syncType and this type
+ * has a single shape (it never uses Trendyol's nextPageToken).
+ */
+export const ProductsChangesCursorSchema = z
+  .object({
+    phase: z.enum(PRODUCTS_CHANGES_PHASES),
+    page: z.number().int().min(0),
+    windowStart: z.number().int().min(0),
+    windowEnd: z.number().int().min(0),
+  })
+  .refine((cursor) => cursor.windowStart < cursor.windowEnd, {
+    message: 'WINDOW_START_NOT_BEFORE_END',
+    path: ['windowStart'],
+  });
+export type ProductsChangesCursor = z.infer<typeof ProductsChangesCursorSchema>;
+
+/**
+ * Parse a SyncLog.pageCursor (jsonb, possibly null) for PRODUCTS_CHANGES.
+ * Returns null when the row has no cursor yet (first chunk: the handler
+ * computes the window). Throws ZodError on malformed data, which takes the
+ * same retryable INTERNAL_ERROR path as `parseProductsCursor`.
+ */
+export function parseProductsChangesCursor(raw: unknown): ProductsChangesCursor | null {
+  if (raw === null || raw === undefined) return null;
+  return ProductsChangesCursorSchema.parse(raw);
+}
+
+/**
  * Skip-bad-page diagnostic record. Worker writes this to
  * `SyncLog.skippedPages` (jsonb array) when MAX_ATTEMPTS is hit on a
  * `MARKETPLACE_UNREACHABLE` error and the cursor is advanced past the

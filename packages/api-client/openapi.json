@@ -2677,6 +2677,7 @@
               "ORDERS",
               "PRODUCTS",
               "PRODUCTS_DELTA",
+              "PRODUCTS_CHANGES",
               "SETTLEMENTS",
               "CLAIMS"
             ],
@@ -2855,6 +2856,7 @@
               "ORDERS",
               "PRODUCTS",
               "PRODUCTS_DELTA",
+              "PRODUCTS_CHANGES",
               "SETTLEMENTS",
               "CLAIMS"
             ],
@@ -3193,7 +3195,7 @@
               "OWN_CONTRACT_EMPTY",
               "DESI_OVERFLOW"
             ],
-            "description": "Outcome of the shipping estimate. OK = estimate available. NO_CARRIER = TRENDYOL_CONTRACT store with no defaultShippingCarrierId. NO_DESI = variant has neither a user override nor a synced dimensional weight. OWN_CONTRACT_EMPTY = OWN_CONTRACT store with no own_shipping_tariffs row for this desi (V1 always). DESI_OVERFLOW = variant desi exceeds the carrier tariff coverage.",
+            "description": "Outcome of the shipping estimate. OK = estimate available. NO_CARRIER = TRENDYOL_CONTRACT store with no defaultShippingCarrierId. NO_DESI = no estimate could be produced for the variant (a defensive fallback): desi has a 0 floor, so a variant Trendyol sent no desi for is priced at desi 0 and flagged by isDimensionalWeightMissing instead. OWN_CONTRACT_EMPTY = OWN_CONTRACT store with no own_shipping_tariffs row for this desi (V1 always). DESI_OVERFLOW = variant desi exceeds the carrier tariff coverage.",
             "example": "OK"
           }
         },
@@ -3545,7 +3547,7 @@
               "OWN_CONTRACT_EMPTY",
               "DESI_OVERFLOW"
             ],
-            "description": "Shipping estimate availability. OK = estimate computed. NO_CARRIER = no carrier configured on this store. NO_DESI = variant has no dimensional weight. OWN_CONTRACT_EMPTY = own-contract store with no tariff row for this desi. DESI_OVERFLOW = variant desi exceeds carrier tariff coverage.",
+            "description": "Shipping estimate availability. OK = estimate computed. NO_CARRIER = no carrier configured on this store. NO_DESI = defensive fallback, not returned in practice: desi has a 0 floor, so a variant with no Trendyol desi is priced at desi 0. OWN_CONTRACT_EMPTY = own-contract store with no tariff row for this desi. DESI_OVERFLOW = variant desi exceeds carrier tariff coverage.",
             "example": "OK"
           },
           "commissionStatus": {
@@ -3935,7 +3937,7 @@
               "SETTLEMENTS",
               "CLAIMS"
             ],
-            "description": "Which marketplace surface to sync. One of ORDERS, PRODUCTS, SETTLEMENTS, CLAIMS. PRODUCTS_DELTA is not accepted here — it is a cron-internal lightweight stock/price walk, not a user-triggerable sync.",
+            "description": "Which marketplace surface to sync. One of ORDERS, PRODUCTS, SETTLEMENTS, CLAIMS. PRODUCTS_DELTA and PRODUCTS_CHANGES are not accepted here: both are cron-internal hourly walks (the stock/price walk and the date-filtered product-changes walk), not user-triggerable syncs.",
             "example": "ORDERS"
           }
         },
@@ -14197,7 +14199,7 @@
           "Sync"
         ],
         "summary": "Enqueue a manual marketplace sync (generic across sync type)",
-        "description": "Inserts a PENDING MANUAL SyncLog row for the requested `syncType` and returns 202 with the new syncLogId. The dedicated worker (apps/sync-worker) claims it within ~1 s and runs the sync in the background; clients poll `GET /v1/organizations/:orgId/stores/:storeId/sync-logs/:syncLogId` or subscribe to Supabase Realtime to track progress. A second manual trigger for the same (store, syncType) inside its cooldown window returns 429 RATE_LIMITED with `Retry-After`; an already-active sync for that slot returns 409 SYNC_IN_PROGRESS with `meta.existingSyncLogId`. Accepts ORDERS / PRODUCTS / SETTLEMENTS / CLAIMS — PRODUCTS_DELTA is rejected as a cron-internal type.",
+        "description": "Inserts a PENDING MANUAL SyncLog row for the requested `syncType` and returns 202 with the new syncLogId. The dedicated worker (apps/sync-worker) claims it within ~1 s and runs the sync in the background; clients poll `GET /v1/organizations/:orgId/stores/:storeId/sync-logs/:syncLogId` or subscribe to Supabase Realtime to track progress. A second manual trigger for the same (store, syncType) inside its cooldown window returns 429 RATE_LIMITED with `Retry-After`; an already-active sync for that slot returns 409 SYNC_IN_PROGRESS with `meta.existingSyncLogId`. Accepts ORDERS / PRODUCTS / SETTLEMENTS / CLAIMS; PRODUCTS_DELTA and PRODUCTS_CHANGES are rejected as cron-internal types.",
         "security": [
           {
             "bearerAuth": []

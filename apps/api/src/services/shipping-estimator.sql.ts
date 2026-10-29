@@ -27,7 +27,10 @@
  * CASE branch ordering for `shipping_estimate_status` mirrors the service:
  *   1. NO_CARRIER  (TRENDYOL_CONTRACT + null carrier) — service line 124
  *      takes precedence over the NO_DESI check on line 127.
- *   2. NO_DESI     (no override and no synced desi) — service line 102/127.
+ *   2. NO_DESI     (effective desi NULL) — service line 102/127. Kept as a
+ *      guard but unreachable: synced_dimensional_weight is NOT NULL with a 0
+ *      default, so a variant Trendyol sent no desi for is priced at desi 0
+ *      (the products list flags it via isDimensionalWeightMissing).
  *   3. OWN_CONTRACT_EMPTY (OWN_CONTRACT + no own_shipping_tariffs row).
  *   4. OK          (any tariff resolved).
  *   5. DESI_OVERFLOW (fall-through).

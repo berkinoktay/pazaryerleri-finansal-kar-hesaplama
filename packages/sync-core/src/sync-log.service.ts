@@ -392,6 +392,44 @@ export async function getMostRecentManualSync(
   });
 }
 
+/**
+ * `startedAt` of the newest COMPLETED run of `syncType` for
+ * `(organizationId, storeId)`, or null when that store never completed one.
+ *
+ * Powers the PRODUCTS_CHANGES window anchor (last COMPLETED PRODUCTS_CHANGES
+ * run, else last COMPLETED PRODUCTS full scan). Only COMPLETED counts, so a
+ * FAILED / FAILED_RETRYABLE / RUNNING / PENDING row never moves the anchor:
+ * a failed run leaves the window where it was and the next run rescans it.
+ *
+ * Ordered by `completedAt DESC` rather than `startedAt DESC` so the lookup
+ * walks the freshness composite index (organizationId, status, storeId,
+ * syncType, completedAt DESC) and stops at the first row. Both orders pick
+ * the same row: the active-slot unique index allows one PENDING / RUNNING /
+ * FAILED_RETRYABLE row per (store, syncType), so runs of one type on one
+ * store are strictly sequential and the newest completion is also the
+ * newest start. `completedAt IS NOT NULL` is load-bearing for the same
+ * reason as in `listLastSuccessfulPerType`: DESC sorts NULLs first, so an
+ * unstamped COMPLETED row would otherwise win.
+ */
+export async function getLastCompletedRunStartedAt(
+  organizationId: string,
+  storeId: string,
+  syncType: SyncType,
+): Promise<Date | null> {
+  const row = await prisma.syncLog.findFirst({
+    where: {
+      organizationId,
+      storeId,
+      syncType,
+      status: 'COMPLETED',
+      completedAt: { not: null },
+    },
+    orderBy: { completedAt: 'desc' },
+    select: { startedAt: true },
+  });
+  return row?.startedAt ?? null;
+}
+
 // ─── Worker chunk-loop helpers (PR 4) ─────────────────────────────────
 //
 // These are called by `apps/sync-worker` between chunks of a claimed

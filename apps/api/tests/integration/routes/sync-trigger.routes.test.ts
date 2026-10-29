@@ -1,4 +1,5 @@
 import { prisma } from '@pazarsync/db';
+import type { SyncType } from '@pazarsync/db/enums';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '@/app';
@@ -15,9 +16,16 @@ import {
 
 const app = createApp();
 
-// The four merchant-triggerable sync types (PRODUCTS_DELTA is cron-internal
-// and deliberately excluded from the trigger body enum).
+// The four merchant-triggerable sync types. PRODUCTS_DELTA and
+// PRODUCTS_CHANGES are cron-internal hourly walks and deliberately excluded
+// from the trigger body enum.
 const TRIGGERABLE_SYNC_TYPES = ['ORDERS', 'PRODUCTS', 'SETTLEMENTS', 'CLAIMS'] as const;
+
+// Cron-only sync types: real SyncType members the manual trigger must reject.
+const CRON_ONLY_SYNC_TYPES = [
+  'PRODUCTS_DELTA',
+  'PRODUCTS_CHANGES',
+] as const satisfies readonly SyncType[];
 
 async function setupOrgWithStore(): Promise<{
   user: { id: string; email: string; accessToken: string };
@@ -134,28 +142,31 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/syncs', () => {
     expect(logRow.triggerSource).toBe('MANUAL');
   });
 
-  it('rejects PRODUCTS_DELTA in the body with 422 VALIDATION_ERROR (INVALID_SYNC_TYPE)', async () => {
-    const { user, orgId, storeId } = await setupOrgWithStore();
+  it.each(CRON_ONLY_SYNC_TYPES)(
+    'rejects %s in the body with 422 VALIDATION_ERROR (INVALID_SYNC_TYPE)',
+    async (syncType) => {
+      const { user, orgId, storeId } = await setupOrgWithStore();
 
-    const res = await app.request(`/v1/organizations/${orgId}/stores/${storeId}/syncs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: bearer(user.accessToken) },
-      body: JSON.stringify({ syncType: 'PRODUCTS_DELTA' }),
-    });
+      const res = await app.request(`/v1/organizations/${orgId}/stores/${storeId}/syncs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: bearer(user.accessToken) },
+        body: JSON.stringify({ syncType }),
+      });
 
-    expect(res.status).toBe(422);
-    const body = (await res.json()) as {
-      code: string;
-      errors: Array<{ field: string; code: string }>;
-    };
-    expect(body.code).toBe('VALIDATION_ERROR');
-    expect(body.errors.some((e) => e.field === 'syncType' && e.code === 'INVALID_SYNC_TYPE')).toBe(
-      true,
-    );
+      expect(res.status).toBe(422);
+      const body = (await res.json()) as {
+        code: string;
+        errors: Array<{ field: string; code: string }>;
+      };
+      expect(body.code).toBe('VALIDATION_ERROR');
+      expect(
+        body.errors.some((e) => e.field === 'syncType' && e.code === 'INVALID_SYNC_TYPE'),
+      ).toBe(true);
 
-    // No sync log was enqueued.
-    expect(await prisma.syncLog.count({ where: { storeId } })).toBe(0);
-  });
+      // No sync log was enqueued.
+      expect(await prisma.syncLog.count({ where: { storeId } })).toBe(0);
+    },
+  );
 
   it('returns 409 SYNC_IN_PROGRESS with existingSyncLogId when an active slot exists', async () => {
     const { user, orgId, storeId } = await setupOrgWithStore();

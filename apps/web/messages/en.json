@@ -2797,6 +2797,7 @@
     "triggers": {
       "PRODUCTS": "Sync products now",
       "PRODUCTS_DELTA": "Refresh price and stock now",
+      "PRODUCTS_CHANGES": "Scan product changes now",
       "ORDERS": "Sync orders now",
       "SETTLEMENTS": "Sync settlements now",
       "CLAIMS": "Sync returns now",
@@ -2805,6 +2806,7 @@
     "syncTypeLabel": {
       "PRODUCTS": "Product sync",
       "PRODUCTS_DELTA": "Price/stock sweep",
+      "PRODUCTS_CHANGES": "Product changes sweep",
       "ORDERS": "Order sync",
       "SETTLEMENTS": "Settlement sync",
       "CLAIMS": "Return sync"
@@ -2883,6 +2885,7 @@
       "ORDERS": "Order data",
       "PRODUCTS": "Product data",
       "PRODUCTS_DELTA": "Price and stock",
+      "PRODUCTS_CHANGES": "Product status and new products",
       "SETTLEMENTS": "Settlement and profit data",
       "CLAIMS": "Return data"
     },
@@ -2898,7 +2901,7 @@
     "schedule": {
       "orders": "Orders arrive instantly via webhook · hourly scan as backup",
       "returns": "Auto-sync every 6 hours",
-      "products": "Stock/price at 15 past each hour · full scan every night",
+      "products": "Stock/price at :15, product changes at :45 each hour · full scan every night",
       "profitability": "Auto-sync every 6 hours",
       "dashboard": "Flows sync themselves on scheduled intervals"
     },

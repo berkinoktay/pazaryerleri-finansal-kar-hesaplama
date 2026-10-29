@@ -49,7 +49,7 @@ export const PAGE_SYNC_SOURCES = {
     triggerTypes: ['CLAIMS'],
   },
   products: {
-    primary: ['PRODUCTS', 'PRODUCTS_DELTA'],
+    primary: ['PRODUCTS', 'PRODUCTS_DELTA', 'PRODUCTS_CHANGES'],
     secondary: [],
     staleAfterHours: 24,
     triggerTypes: ['PRODUCTS'],
@@ -61,7 +61,7 @@ export const PAGE_SYNC_SOURCES = {
     triggerTypes: [],
   },
   dashboard: {
-    primary: ['ORDERS', 'PRODUCTS', 'PRODUCTS_DELTA', 'SETTLEMENTS', 'CLAIMS'],
+    primary: ['ORDERS', 'PRODUCTS', 'PRODUCTS_DELTA', 'PRODUCTS_CHANGES', 'SETTLEMENTS', 'CLAIMS'],
     secondary: [],
     staleAfterHours: 24,
     triggerTypes: [],

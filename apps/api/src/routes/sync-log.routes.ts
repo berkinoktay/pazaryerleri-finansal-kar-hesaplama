@@ -133,7 +133,8 @@ const triggerSyncRoute = createRoute({
     'Supabase Realtime to track progress. A second manual trigger for the same (store, syncType) ' +
     'inside its cooldown window returns 429 RATE_LIMITED with `Retry-After`; an already-active ' +
     'sync for that slot returns 409 SYNC_IN_PROGRESS with `meta.existingSyncLogId`. Accepts ' +
-    'ORDERS / PRODUCTS / SETTLEMENTS / CLAIMS — PRODUCTS_DELTA is rejected as a cron-internal type.',
+    'ORDERS / PRODUCTS / SETTLEMENTS / CLAIMS; PRODUCTS_DELTA and PRODUCTS_CHANGES are rejected ' +
+    'as cron-internal types.',
   security: [{ bearerAuth: [] }],
   request: {
     params: storeSyncParams,

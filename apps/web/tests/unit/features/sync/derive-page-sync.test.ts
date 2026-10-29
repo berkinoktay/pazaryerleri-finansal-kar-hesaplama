@@ -260,7 +260,77 @@ describe('derivePageSync', () => {
 
     expect(vm.control.state).toBe('fresh');
     expect(vm.control.lastSyncedAt).toBe(deltaAt);
-    expect(vm.sources.map((s) => s.syncType)).toEqual(['PRODUCTS', 'PRODUCTS_DELTA']);
+    expect(vm.sources.map((s) => s.syncType)).toEqual([
+      'PRODUCTS',
+      'PRODUCTS_DELTA',
+      'PRODUCTS_CHANGES',
+    ]);
+  });
+
+  it('products page: a newer PRODUCTS_CHANGES success wins the control timestamp', () => {
+    const changesAt = '2026-07-11T11:45:00.000Z';
+    const vm = run({
+      pageKey: 'products',
+      freshness: [
+        makeFreshness({ syncType: 'PRODUCTS', completedAt: '2026-07-11T02:00:00.000Z' }),
+        makeFreshness({ syncType: 'PRODUCTS_DELTA', completedAt: '2026-07-11T11:15:00.000Z' }),
+        makeFreshness({
+          syncType: 'PRODUCTS_CHANGES',
+          completedAt: changesAt,
+          recordsProcessed: 7,
+        }),
+      ],
+    });
+
+    expect(vm.control.state).toBe('fresh');
+    expect(vm.control.lastSyncedAt).toBe(changesAt);
+    const changes = vm.sources.find((s) => s.syncType === 'PRODUCTS_CHANGES');
+    expect(changes?.lastSyncedAt).toBe(changesAt);
+    expect(changes?.recordsProcessed).toBe(7);
+  });
+
+  it('products page: a FAILED PRODUCTS_CHANGES in recentSyncs turns the control failed', () => {
+    const vm = run({
+      pageKey: 'products',
+      recentSyncs: [
+        makeLog({
+          syncType: 'PRODUCTS_CHANGES',
+          status: 'FAILED',
+          errorCode: 'MARKETPLACE_AUTH_FAILED',
+        }),
+      ],
+      freshness: [
+        makeFreshness({ syncType: 'PRODUCTS', completedAt: hoursBefore(NOW, 2) }),
+        makeFreshness({ syncType: 'PRODUCTS_DELTA', completedAt: hoursBefore(NOW, 1) }),
+      ],
+    });
+
+    expect(vm.control.state).toBe('failed');
+    const changes = vm.sources.find((s) => s.syncType === 'PRODUCTS_CHANGES');
+    expect(changes?.state).toBe('failed');
+    expect(changes?.errorCode).toBe('MARKETPLACE_AUTH_FAILED');
+    expect(changes?.lastSyncedAt).toBeNull();
+  });
+
+  it('dashboard sources include PRODUCTS_CHANGES right after PRODUCTS_DELTA', () => {
+    const changesAt = hoursBefore(NOW, 0.25);
+    const vm = run({
+      pageKey: 'dashboard',
+      freshness: [
+        makeFreshness({ syncType: 'ORDERS', completedAt: hoursBefore(NOW, 1) }),
+        makeFreshness({ syncType: 'PRODUCTS_CHANGES', completedAt: changesAt }),
+      ],
+    });
+
+    expect(vm.sources.map((s) => s.syncType)).toEqual([
+      'ORDERS',
+      'PRODUCTS',
+      'PRODUCTS_DELTA',
+      'PRODUCTS_CHANGES',
+      'SETTLEMENTS',
+      'CLAIMS',
+    ]);
+    expect(vm.control.lastSyncedAt).toBe(changesAt);
   });
 
   it('control timestamp takes the newest success across ALL sources, including secondary', () => {
@@ -283,7 +353,7 @@ describe('derivePageSync', () => {
 
   it('control progress prefers the first active source with a known total', () => {
     const vm = run({
-      pageKey: 'products', // PRODUCTS then PRODUCTS_DELTA
+      pageKey: 'products', // PRODUCTS, PRODUCTS_DELTA, then PRODUCTS_CHANGES
       activeSyncs: [
         makeLog({
           syncType: 'PRODUCTS',

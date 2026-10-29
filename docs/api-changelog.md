@@ -13,6 +13,12 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Shipping estimate status: `NO_DESI` description** (`shippingEstimateStatus` on the products
+  list and the product pricing list). Description only, no wire change. `NO_DESI` is now
+  described as what it is: a defensive fallback for a variant with no estimate row. The
+  estimate never returns it, because desi has a 0 floor: a variant Trendyol sent no desi for is
+  priced at desi 0, and the products list flags it with `isDimensionalWeightMissing`.
+
 - **Products list: missing-desi tab, counter and per-variant flag**
   (`GET /v1/organizations/{orgId}/stores/{storeId}/products`, `GET .../products/facets`,
   `PATCH .../products/variants/{variantId}/dimensional-weight`,
@@ -214,6 +220,18 @@ section "Versioning" for details.
 
 ### Added
 
+- **`SyncLogResponse.syncType` and `SyncFreshness.syncType` gained `PRODUCTS_CHANGES`**
+  (both sync-log list endpoints, `GET /v1/organizations/{orgId}/sync-logs` and
+  `GET /v1/organizations/{orgId}/stores/{storeId}/sync-logs`, plus the single sync-log
+  read `GET .../sync-logs/{syncLogId}`). `PRODUCTS_CHANGES` is the hourly, cron-only catalog-changes sync: a date-window
+  walk of the approved product list that picks up new products and changed products
+  (status, lock/archive and metadata changes) between nightly full scans. It never
+  delists. Additive enum widening; every existing value is unchanged. The manual trigger
+  `POST /v1/organizations/{orgId}/stores/{storeId}/syncs` rejects it with **422**
+  `VALIDATION_ERROR` (`errors[].code = INVALID_SYNC_TYPE`), exactly like
+  `PRODUCTS_DELTA`. The `TriggerSyncBody.syncType` enum is unchanged (still `ORDERS` /
+  `PRODUCTS` / `SETTLEMENTS` / `CLAIMS`); only its description and the route description
+  now name both cron-internal types. The spec snapshot was regenerated to pick it up.
 - **Marketplace campaign (Kampanyalar) endpoints — import, list, detail, config, selections, delete**
   (`/v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns…`, OpenAPI tag
   `MarketplaceCampaigns`). Sixth campaign vertical, for the campaigns TRENDYOL designs and
