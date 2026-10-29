@@ -1,5 +1,5 @@
 import { Decimal } from 'decimal.js';
-import { ProfitLineType, ProfitStatus } from '@pazarsync/db/enums';
+import { ProfitLineType, type ProfitStatementView, ProfitStatus } from '@pazarsync/db/enums';
 import { type ResolvedProfitSettings } from '@pazarsync/utils';
 
 import { getLineSpec, type ProfitLineGroup } from './catalog/profit-line-catalog';
@@ -11,7 +11,7 @@ import { selectLines } from './select-lines';
 import { computeVatTotals, effectiveNetVat, type VatTotals } from '../tax/tr/net-vat';
 
 /** Which view of the lines the statement is built from (see `selectLines`). */
-export type ProfitStatementView = 'ESTIMATE' | 'BEST_KNOWN';
+export type { ProfitStatementView };
 
 export interface ProfitStatementInput {
   readonly lines: readonly ProfitLine[];

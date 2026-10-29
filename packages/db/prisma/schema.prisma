@@ -386,6 +386,26 @@ enum FxRateSource {
   MANUAL
 }
 
+// How a profit statement is computed: ESTIMATE from estimate-only lines, BEST_KNOWN from the best available.
+enum ProfitStatementView {
+  ESTIMATE
+  BEST_KNOWN
+}
+
+// Measure used to split a parcel-level profit line down to its items.
+enum ProfitAllocationBasis {
+  STANDALONE_AMOUNT
+  EQUAL
+  SALE_SHARE
+}
+
+// Which family a raw marketplace finance record belongs to.
+enum FinanceRecordFamily {
+  SETTLEMENT
+  OTHER_FINANCIAL
+  CARGO_INVOICE_ITEM
+}
+
 // ─── Models ──────────────────────────────────────────
 
 model UserProfile {
@@ -504,6 +524,7 @@ model Store {
   orderClaims            OrderClaim[]
   catalogBarcodeMisses   CatalogBarcodeMiss[]
   priceChangeLogs        PriceChangeLog[]
+  financeRecords         MarketplaceFinanceRecord[]
 
   @@unique([organizationId, platform, externalAccountId])
   @@index([organizationId])
@@ -860,15 +881,18 @@ model Order {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  store  Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  items  OrderItem[]
-  fees   OrderFee[]
-  claims OrderClaim[]
+  store            Store                  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  items            OrderItem[]
+  fees             OrderFee[]
+  claims           OrderClaim[]
+  profitLines      ProfitLine[]
+  profitStatements OrderProfitStatement[]
 
   @@unique([storeId, platformOrderId])
   @@index([organizationId])
   @@index([organizationId, reconciliationStatus])
   @@index([orderDate])
+  @@index([storeId, orderDate])
   @@index([platformOrderNumber])
   @@index([storeId, paymentOrderId])
   // Kargo faturası eşleştirmesi: parcelUniqueId == cargoTrackingNumber lookup.
@@ -945,6 +969,8 @@ model OrderItem {
 
   costSnapshotComponents OrderItemCostSnapshotComponent[]
   claimItems             OrderClaimItem[]
+  profitLines            ProfitLine[]
+  profitLineAllocations  ProfitLineAllocation[]
 
   order             Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productVariant    ProductVariant?    @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
@@ -952,6 +978,7 @@ model OrderItem {
 
   @@index([organizationId, snapshotCapturedAt])
   @@index([commissionInvoiceId])
+  @@index([orderId])
   // Resolution kuyruğu index'i PARTIAL (WHERE product_variant_id IS NULL) —
   // Prisma kısmi index yazamadığı için check-constraints.sql + migration
   // aynasında yaşar (order_items_resolution_due_idx).
@@ -2055,6 +2082,181 @@ model OrderFee {
   @@index([orderId, feeType, source])
   @@index([orderClaimItemId])
   @@map("order_fees")
+}
+
+// One profit line of a parcel (rebuild, phase 3A). Holds a single income or
+// expense entry produced by the profit engine, with its original-currency and
+// base-currency amounts side by side. Written only by the profit writer, never
+// by the legacy path. store_id is stamped from the parent order and gates RLS.
+model ProfitLine {
+  id             String  @id @default(uuid()) @db.Uuid
+  organizationId String  @map("organization_id") @db.Uuid
+  storeId        String  @map("store_id") @db.Uuid
+  orderId        String  @map("order_id") @db.Uuid
+  orderItemId    String? @map("order_item_id") @db.Uuid
+
+  type      ProfitLineType
+  level     ProfitLineLevel
+  certainty ProfitLineCertainty
+  source    ProfitLineSource
+
+  amountGross Decimal  @map("amount_gross") @db.Decimal(14, 2)
+  amountVat   Decimal  @map("amount_vat") @db.Decimal(14, 2)
+  vatRatePct  Decimal? @map("vat_rate_pct") @db.Decimal(7, 4)
+
+  // ISO 4217 code, not the 3-value Currency enum: the engine is multi-currency.
+  originalCurrency String       @map("original_currency") @db.VarChar(3)
+  originalGross    Decimal      @map("original_gross") @db.Decimal(14, 2)
+  originalVat      Decimal      @map("original_vat") @db.Decimal(14, 2)
+  fxRate           Decimal      @map("fx_rate") @db.Decimal(14, 6)
+  fxRateDate       DateTime?    @map("fx_rate_date") @db.Date
+  fxSource         FxRateSource @map("fx_source")
+
+  inputs Json
+
+  externalRecordId   String? @map("external_record_id")
+  externalRecordType String? @map("external_record_type")
+
+  engineVersion Int @map("engine_version")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  order       Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItem   OrderItem?             @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  allocations ProfitLineAllocation[]
+
+  @@index([orderId])
+  @@index([orderItemId])
+  @@index([organizationId])
+  @@index([storeId, type])
+  @@map("profit_lines")
+}
+
+// One share of a parcel-level profit line pushed down to a single order item
+// (rebuild, phase 3A). Lets both statement views be summed per item. Written
+// only by the profit writer. store_id is stamped from the parent order and
+// gates RLS.
+model ProfitLineAllocation {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  storeId        String @map("store_id") @db.Uuid
+  profitLineId   String @map("profit_line_id") @db.Uuid
+  orderItemId    String @map("order_item_id") @db.Uuid
+
+  amountGross Decimal               @map("amount_gross") @db.Decimal(14, 2)
+  amountVat   Decimal               @map("amount_vat") @db.Decimal(14, 2)
+  basis       ProfitAllocationBasis
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  profitLine ProfitLine @relation(fields: [profitLineId], references: [id], onDelete: Cascade)
+  orderItem  OrderItem  @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  @@index([profitLineId])
+  @@index([orderItemId])
+  @@index([organizationId])
+  @@map("profit_line_allocations")
+}
+
+// One computed profit statement for a parcel, per view (rebuild, phase 3A).
+// Holds the rolled-up sale/cost/VAT/stoppage totals, the resolved settings
+// snapshot and a content hash for idempotent rewrites. Written only by the
+// profit writer. store_id is stamped from the parent order and gates RLS.
+model OrderProfitStatement {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  storeId        String @map("store_id") @db.Uuid
+  orderId        String @map("order_id") @db.Uuid
+
+  view   ProfitStatementView
+  status ProfitStatus
+
+  saleGross     Decimal @map("sale_gross") @db.Decimal(14, 2)
+  costGross     Decimal @map("cost_gross") @db.Decimal(14, 2)
+  vatOutput     Decimal @map("vat_output") @db.Decimal(14, 2)
+  vatInput      Decimal @map("vat_input") @db.Decimal(14, 2)
+  vatNet        Decimal @map("vat_net") @db.Decimal(14, 2)
+  vatEffective  Decimal @map("vat_effective") @db.Decimal(14, 2)
+  stoppageGross Decimal @map("stoppage_gross") @db.Decimal(14, 2)
+
+  stoppageIncluded Boolean @map("stoppage_included")
+
+  netProfit Decimal? @map("net_profit") @db.Decimal(14, 2)
+
+  saleMarginPct Decimal? @map("sale_margin_pct") @db.Decimal(12, 4)
+  costMarkupPct Decimal? @map("cost_markup_pct") @db.Decimal(12, 4)
+
+  issues           Json
+  settingsSnapshot Json @map("settings_snapshot")
+
+  engineVersion Int      @map("engine_version")
+  contentHash   String   @map("content_hash")
+  computedAt    DateTime @map("computed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, view])
+  @@index([storeId, status])
+  @@index([organizationId])
+  @@map("order_profit_statements")
+}
+
+// A raw marketplace finance record (settlement line, other-financial entry or
+// cargo-invoice item) kept verbatim for the engine to match against a parcel
+// (rebuild, phase 3A). Shared by every marketplace, so the matching keys are
+// text, never BigInt. Written only by the profit writer / sync handlers.
+// store_id is stamped from the store and gates RLS.
+model MarketplaceFinanceRecord {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  storeId        String @map("store_id") @db.Uuid
+
+  platform Platform
+  family   FinanceRecordFamily
+
+  transactionType String @map("transaction_type")
+  recordId        String @map("record_id")
+
+  // The invoice or document serial the record belongs to. For CARGO_INVOICE_ITEM
+  // rows this is the cargo invoice serial, which the Trendyol mapper uses as
+  // TrendyolCargoInvoiceItem.invoiceSerial; settlement rows may carry the
+  // commission invoice serial.
+  invoiceSerial String? @map("invoice_serial")
+
+  orderNumber       String? @map("order_number")
+  shipmentPackageId String? @map("shipment_package_id")
+  barcode           String?
+  paymentOrderId    String? @map("payment_order_id")
+  parcelUniqueId    String? @map("parcel_unique_id")
+
+  transactionDate DateTime? @map("transaction_date")
+
+  debt             Decimal? @db.Decimal(14, 2)
+  credit           Decimal? @db.Decimal(14, 2)
+  commissionAmount Decimal? @map("commission_amount") @db.Decimal(14, 2)
+  amountGross      Decimal? @map("amount_gross") @db.Decimal(14, 2)
+  desi             Decimal? @db.Decimal(8, 2)
+
+  payload   Json
+  fetchedAt DateTime @map("fetched_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, family, transactionType, recordId])
+  @@index([storeId, shipmentPackageId])
+  @@index([storeId, orderNumber])
+  @@index([storeId, paymentOrderId])
+  @@index([storeId, parcelUniqueId])
+  @@index([organizationId])
+  @@map("marketplace_finance_records")
 }
 
 // İade talep görünürlüğü — Trendyol getclaims endpoint Settlement Return'den

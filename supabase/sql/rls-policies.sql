@@ -683,3 +683,36 @@ DROP POLICY IF EXISTS price_change_logs_org_member_read ON price_change_logs;
 CREATE POLICY price_change_logs_org_member_read ON price_change_logs
   FOR SELECT TO authenticated
   USING (can_access_store(store_id));
+
+-- --- profit persistence tables (rebuild, phase 3A) ------------------------
+-- profit_lines, profit_line_allocations, order_profit_statements and
+-- marketplace_finance_records all carry a store_id stamped by the profit writer
+-- from the parent order (or the store). Reads are gated by can_access_store(store_id)
+-- (SECURITY DEFINER helper, 42P17 safe); OWNER/ADMIN see every store in their org,
+-- MEMBER/VIEWER only granted stores. Writes are service-role only (the profit
+-- writer and sync handlers use the postgres connection, which bypasses RLS);
+-- there is no authenticated INSERT/UPDATE/DELETE policy, so direct client writes
+-- default-deny.
+ALTER TABLE profit_lines ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS profit_lines_org_member_read ON profit_lines;
+CREATE POLICY profit_lines_org_member_read ON profit_lines
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
+ALTER TABLE profit_line_allocations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS profit_line_allocations_org_member_read ON profit_line_allocations;
+CREATE POLICY profit_line_allocations_org_member_read ON profit_line_allocations
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
+ALTER TABLE order_profit_statements ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS order_profit_statements_org_member_read ON order_profit_statements;
+CREATE POLICY order_profit_statements_org_member_read ON order_profit_statements
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
+ALTER TABLE marketplace_finance_records ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS marketplace_finance_records_org_member_read ON marketplace_finance_records;
+CREATE POLICY marketplace_finance_records_org_member_read ON marketplace_finance_records
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));

@@ -1,4 +1,8 @@
-import { ProfitLineLevel, type ProfitLineType } from '@pazarsync/db/enums';
+import {
+  ProfitLineLevel,
+  type ProfitAllocationBasis,
+  type ProfitLineType,
+} from '@pazarsync/db/enums';
 
 /** Where a line sits in the profit statement layout. */
 export type ProfitLineGroup =
@@ -11,8 +15,8 @@ export type ProfitLineGroup =
 export type ProfitLineDirection = 'INCOME' | 'EXPENSE';
 /** How the line participates in the Turkish net VAT calculation. */
 export type VatKind = 'OUTPUT' | 'INPUT' | 'NONE';
-/** The measure used to split a parcel-level line down to its items. */
-export type AllocationBasis = 'STANDALONE_AMOUNT' | 'EQUAL' | 'SALE_SHARE';
+/** The measure used to split a parcel-level line down to its items. Values live in the Prisma enum. */
+export type AllocationBasis = ProfitAllocationBasis;
 /** Which item set a parcel-level line is shared across when it is allocated. */
 export type AllocationScope = 'ACTIVE_ITEMS' | 'RETURNED_ITEMS';
 
