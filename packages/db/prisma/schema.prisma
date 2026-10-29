@@ -313,6 +313,77 @@ enum ProductVariantStatus {
   ARCHIVED
 }
 
+// --- Profit engine (docs/plans/2026-10-29-profit-engine-design.md) ---
+// Marketplace-agnostic profit line types. A new expense type means one value here
+// plus one entry in PROFIT_LINE_CATALOG (the compiler enforces it).
+enum ProfitLineType {
+  SALE
+  MARKETPLACE_DISCOUNT_CONTRIBUTION
+  SALE_RETURN
+  COST_COGS
+  COST_PACKAGING
+  COST_SHIPPING
+  COST_SOFTWARE
+  COST_MARKETING
+  COST_OTHER
+  COST_RETURN
+  COMMISSION
+  COMMISSION_REFUND
+  SHIPPING
+  RETURN_SHIPPING
+  SERVICE_FEE
+  PAYMENT_SERVICE_FEE
+  INTERNATIONAL_SERVICE_FEE
+  INTERNATIONAL_OPERATION_FEE
+  PENALTY
+  ADJUSTMENT_INCOME
+  ADJUSTMENT_EXPENSE
+  STOPPAGE
+  STOPPAGE_REFUND
+  SELLER_ORDER_EXPENSE
+}
+
+enum ProfitLineCertainty {
+  ESTIMATE
+  ACTUAL
+  USER_OVERRIDE
+}
+
+enum ProfitLineSource {
+  RULE
+  MARKETPLACE_RECORD
+  CARGO_INVOICE
+  SELLER_INPUT
+  USER
+}
+
+enum ProfitLineLevel {
+  PARCEL
+  ITEM
+}
+
+enum ProfitStatus {
+  NOT_COMPUTABLE
+  ESTIMATED
+  PARTIALLY_SETTLED
+  SETTLED
+  CANCELLED
+  EXCLUDED
+}
+
+enum ProfitIssueCode {
+  MISSING_COST
+  MISSING_FX_RATE
+  SHIPPING_ESTIMATE_UNAVAILABLE
+  UNMAPPED_MARKETPLACE_RECORD
+}
+
+enum FxRateSource {
+  NATIVE
+  TCMB
+  MANUAL
+}
+
 // ─── Models ──────────────────────────────────────────
 
 model UserProfile {
