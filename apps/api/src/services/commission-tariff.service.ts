@@ -26,7 +26,7 @@ import {
   type TariffAssemblyContext,
   type TariffVariant,
 } from './commission-tariff-compute.service';
-import { parseStoredBands } from './commission-tariff.types';
+import { parseStoredTariffBands } from '@pazarsync/profit';
 import type { VariantCostAggregate } from '../validators/product.validator';
 import type {
   CommissionTariffDetail,
@@ -244,7 +244,7 @@ export async function getTariffDetail(
 
       const computed: ComputedItemBands = computeItemBands(
         ctx,
-        parseStoredBands(item.bands),
+        parseStoredTariffBands(item.bands),
         new Decimal(item.currentPrice.toString()),
         item.commissionBasePrice !== null ? new Decimal(item.commissionBasePrice.toString()) : null,
         new Decimal(item.currentCommissionPct.toString()),

@@ -20,7 +20,7 @@ import {
   type DiscountCommissionInputs,
   type DiscountConfig,
 } from '@/services/discount-math-commons';
-import type { StoredBand } from '@/services/commission-tariff.types';
+import type { StoredTariffBand } from '@pazarsync/profit';
 import { assembleUnitEconomics } from '@/services/product-pricing.service';
 import { NO_SHIPPING, tariffCommission } from '@/services/tariff-compute-commons';
 import type { VariantCostAggregate } from '@/validators/product.validator';
@@ -145,7 +145,7 @@ describe('effectiveUnitPrice', () => {
 });
 
 describe('resolveDiscountCommission', () => {
-  const BANDS: StoredBand[] = [
+  const BANDS: StoredTariffBand[] = [
     { key: 'band1', lowerLimit: '200', upperLimit: null, commissionPct: '15' },
     { key: 'band2', lowerLimit: null, upperLimit: '200', commissionPct: '18' },
   ];
@@ -258,7 +258,7 @@ describe('computeDiscountItem — discounted-scenario band is anchored per type'
     isDigital: false,
     product: { title: 'Ürün', categoryId: null, brandId: null },
   };
-  const BANDS: StoredBand[] = [
+  const BANDS: StoredTariffBand[] = [
     { key: 'high', lowerLimit: '600', upperLimit: null, commissionPct: '19' },
     { key: 'low', lowerLimit: null, upperLimit: '599.99', commissionPct: '12' },
   ];
@@ -393,7 +393,7 @@ describe('computeDiscountItem resolves the commission at the 2dp wire price', ()
   };
   // Touching 2dp band boundaries: band2 covers 150.00–299.99, band1 covers ≥300.00. A full-
   // precision discounted price of 299.992 (NET %20 on 374.99) would fall through the 0.01 gap.
-  const BANDS: StoredBand[] = [
+  const BANDS: StoredTariffBand[] = [
     { key: 'band1', lowerLimit: '300', upperLimit: null, commissionPct: '10' },
     { key: 'band2', lowerLimit: '150', upperLimit: '299.99', commissionPct: '12' },
   ];

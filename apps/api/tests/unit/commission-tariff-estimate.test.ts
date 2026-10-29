@@ -7,10 +7,10 @@ import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
 import { bandForPrice } from '@/services/commission-tariff-compute.service';
-import type { StoredBand } from '@/services/commission-tariff.types';
+import type { StoredTariffBand } from '@pazarsync/profit';
 
 // band1 [450, ∞) · band2 [400, 450] · band3 [350, 400] · band4 (-∞, 350]
-const BANDS: StoredBand[] = [
+const BANDS: StoredTariffBand[] = [
   { key: 'band1', lowerLimit: '450', upperLimit: null, commissionPct: '19' },
   { key: 'band2', lowerLimit: '400', upperLimit: '450', commissionPct: '15' },
   { key: 'band3', lowerLimit: '350', upperLimit: '400', commissionPct: '12' },

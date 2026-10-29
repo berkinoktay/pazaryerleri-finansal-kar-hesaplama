@@ -35,7 +35,7 @@ import {
   type TariffVariant,
 } from './tariff-compute-commons';
 import type { VariantCostAggregate } from '../validators/product.validator';
-import type { StoredBand } from './commission-tariff.types';
+import type { StoredTariffBand } from '@pazarsync/profit';
 
 // Re-exported so existing consumers (commission-tariff.service, estimate route)
 // keep importing these shared types from here. Their single source is
@@ -90,14 +90,14 @@ const NULL_CURRENT: ComputedCurrentScenario = { netProfit: null, marginPct: null
  * the band's shown profit is computed at it — so selection, profit, and export all use one
  * number. currentPrice is only a defensive fallback for a band with neither limit.
  */
-export function bandPrice(band: StoredBand, currentPrice: Decimal): Decimal {
+export function bandPrice(band: StoredTariffBand, currentPrice: Decimal): Decimal {
   if (band.upperLimit !== null) return new Decimal(band.upperLimit);
   if (band.lowerLimit !== null) return new Decimal(band.lowerLimit);
   return currentPrice;
 }
 
 function nullBandResults(
-  bands: ReadonlyArray<StoredBand>,
+  bands: ReadonlyArray<StoredTariffBand>,
   currentPrice: Decimal,
 ): ComputedBandResult[] {
   return bands.map((band) => ({
@@ -119,7 +119,7 @@ function nullBandResults(
  */
 export function computeItemBands(
   ctx: TariffAssemblyContext,
-  bands: ReadonlyArray<StoredBand>,
+  bands: ReadonlyArray<StoredTariffBand>,
   currentPrice: Decimal,
   commissionBasePrice: Decimal | null,
   currentCommissionPct: Decimal,
@@ -208,7 +208,10 @@ export function computeItemBands(
  * only the free-form custom price relies on this lookup. Returns null when no
  * band contains the price (e.g. an item with no bands).
  */
-export function bandForPrice(bands: ReadonlyArray<StoredBand>, price: Decimal): StoredBand | null {
+export function bandForPrice(
+  bands: ReadonlyArray<StoredTariffBand>,
+  price: Decimal,
+): StoredTariffBand | null {
   for (const band of bands) {
     const aboveLower = band.lowerLimit === null || price.gte(band.lowerLimit);
     const belowUpper = band.upperLimit === null || price.lte(band.upperLimit);
@@ -301,7 +304,7 @@ const NO_PRODUCT_ESTIMATE: ComputedEstimate = {
  */
 export function computeItemEstimate(
   ctx: TariffAssemblyContext,
-  bands: ReadonlyArray<StoredBand>,
+  bands: ReadonlyArray<StoredTariffBand>,
   variant: TariffVariant | null,
   costAggregate: VariantCostAggregate | undefined,
   shipping: EstimateOutcome,

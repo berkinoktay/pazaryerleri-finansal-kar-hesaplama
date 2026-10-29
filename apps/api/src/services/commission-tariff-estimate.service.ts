@@ -28,7 +28,7 @@ import {
   type TariffAssemblyContext,
   type TariffVariant,
 } from './commission-tariff-compute.service';
-import { parseStoredBands } from './commission-tariff.types';
+import { parseStoredTariffBands } from '@pazarsync/profit';
 import type { VariantCostAggregate } from '../validators/product.validator';
 import type { EstimateItemPriceResult } from '../validators/commission-tariff.validator';
 
@@ -97,7 +97,7 @@ export async function estimateItemPrice(
       ? { kind: 'override', commissionPct: new Decimal(item.currentCommissionPct.toString()) }
       : { kind: 'band', bandKey: input.bandKey };
 
-  const bands = parseStoredBands(item.bands);
+  const bands = parseStoredTariffBands(item.bands);
 
   // Resolve the matched variant + cost + shipping once (only when matched).
   let variant: TariffVariant | null = null;

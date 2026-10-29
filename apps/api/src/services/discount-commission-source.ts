@@ -46,7 +46,7 @@ import { mapPrismaError } from '@pazarsync/sync-core';
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
 
 import { type CommissionSourceResolution } from './advantage-tariff.service';
-import { parseStoredBands, type StoredBand } from './commission-tariff.types';
+import { parseStoredTariffBands, type StoredTariffBand } from '@pazarsync/profit';
 
 /**
  * Normalizes a stored commission bound (İstanbul wall-clock-as-UTC) to the true instant,
@@ -157,8 +157,8 @@ export async function resolveCommissionSourceCovering(
     mapPrismaError(err);
   }
 
-  const bandsByBarcode = new Map<string, StoredBand[]>();
-  for (const item of items) bandsByBarcode.set(item.barcode, parseStoredBands(item.bands));
+  const bandsByBarcode = new Map<string, StoredTariffBand[]>();
+  for (const item of items) bandsByBarcode.set(item.barcode, parseStoredTariffBands(item.bands));
 
   return {
     tariffId: week.tariffId,

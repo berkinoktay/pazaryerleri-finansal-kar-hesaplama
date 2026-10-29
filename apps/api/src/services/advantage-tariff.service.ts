@@ -24,7 +24,7 @@ import type { EstimateOutcome } from '@pazarsync/profit';
 import { NotFoundError } from '../lib/errors';
 import { resolveValidity } from '../lib/tariff-period';
 import { resolveCommissionRate } from './commission-rate-resolver';
-import { parseStoredBands, type StoredBand } from './commission-tariff.types';
+import { parseStoredTariffBands, type StoredTariffBand } from '@pazarsync/profit';
 import { fetchCostAggregates } from './products-list.service';
 import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
 import {
@@ -63,7 +63,7 @@ export interface CommissionSourceResolution {
   readonly startsAt: Date | null;
   readonly endsAt: Date | null;
   /** barcode → its commission bands, from the resolved period. */
-  readonly bandsByBarcode: ReadonlyMap<string, StoredBand[]>;
+  readonly bandsByBarcode: ReadonlyMap<string, StoredTariffBand[]>;
 }
 
 /**
@@ -138,8 +138,8 @@ export async function resolveCommissionSource(
     mapPrismaError(err);
   }
 
-  const bandsByBarcode = new Map<string, StoredBand[]>();
-  for (const item of items) bandsByBarcode.set(item.barcode, parseStoredBands(item.bands));
+  const bandsByBarcode = new Map<string, StoredTariffBand[]>();
+  for (const item of items) bandsByBarcode.set(item.barcode, parseStoredTariffBands(item.bands));
 
   return {
     tariffId: period.tariffId,

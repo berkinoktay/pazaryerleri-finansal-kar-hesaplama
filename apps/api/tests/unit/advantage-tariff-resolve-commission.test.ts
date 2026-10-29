@@ -5,7 +5,7 @@ import {
   resolveCommission,
   type ItemCommissionInputs,
 } from '@/services/advantage-tariff-compute.service';
-import type { StoredBand } from '@/services/commission-tariff.types';
+import type { StoredTariffBand } from '@pazarsync/profit';
 
 // BUG-1 investigation: "a custom price above a band takes that band's (lower) rate".
 //
@@ -21,14 +21,17 @@ import type { StoredBand } from '@/services/commission-tariff.types';
 // band below.
 
 /** Contiguous Trendyol ladder: band4 open-bottom @ 6.5% (upper 128.25), band3 covers 139. */
-const LADDER: StoredBand[] = [
+const LADDER: StoredTariffBand[] = [
   { key: 'band1', lowerLimit: '200.00', upperLimit: null, commissionPct: '15' }, // [200, ∞)
   { key: 'band2', lowerLimit: '150.00', upperLimit: '199.99', commissionPct: '12' }, // [150, 199.99]
   { key: 'band3', lowerLimit: '128.26', upperLimit: '149.99', commissionPct: '9' }, // [128.26, 149.99]
   { key: 'band4', lowerLimit: null, upperLimit: '128.25', commissionPct: '6.5' }, // (-∞, 128.25]
 ];
 
-const inputs = (bands: StoredBand[] | null, categoryRate: string | null): ItemCommissionInputs => ({
+const inputs = (
+  bands: StoredTariffBand[] | null,
+  categoryRate: string | null,
+): ItemCommissionInputs => ({
   bands,
   categoryRate: categoryRate !== null ? new Decimal(categoryRate) : null,
 });

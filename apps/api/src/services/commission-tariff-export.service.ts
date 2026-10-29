@@ -23,7 +23,7 @@ import { cellText } from '../lib/xlsx-grid-cells';
 import { patchXlsxCells, type XlsxCellValue } from '../lib/xlsx-patch';
 import { bandPrice } from './commission-tariff-compute.service';
 import { resolveTariffLayout, type TariffLayout } from './commission-tariff-layout';
-import { parseStoredBands } from './commission-tariff.types';
+import { parseStoredTariffBands } from '@pazarsync/profit';
 import {
   bundleForDownload,
   exportFileName,
@@ -131,7 +131,7 @@ export async function exportTariff(
     const pricesByBarcode = new Map<string, string>();
     for (const item of period.items) {
       if (item.selectedBand === null) continue;
-      const band = parseStoredBands(item.bands).find((b) => b.key === item.selectedBand);
+      const band = parseStoredTariffBands(item.bands).find((b) => b.key === item.selectedBand);
       const chosenBandPrice = band
         ? bandPrice(band, new Decimal(item.currentPrice.toString())).toFixed(2)
         : item.currentPrice.toFixed(2);

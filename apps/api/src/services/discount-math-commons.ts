@@ -14,7 +14,7 @@
 import { Decimal } from 'decimal.js';
 
 import { bandForPrice } from './commission-tariff-compute.service';
-import type { StoredBand } from './commission-tariff.types';
+import type { StoredTariffBand } from '@pazarsync/profit';
 
 export type DiscountConfig =
   | { readonly type: 'NET'; readonly valueKind: 'AMOUNT' | 'PERCENT'; readonly value: Decimal }
@@ -172,7 +172,7 @@ export function scenarioPresentation(config: DiscountConfig): ScenarioPresentati
 
 /** Üç kademeli zincirin girdileri — kalem başına bir kez kurulur. */
 export interface DiscountCommissionInputs {
-  readonly bands: ReadonlyArray<StoredBand> | null; // 1. kademe: tarife bandı
+  readonly bands: ReadonlyArray<StoredTariffBand> | null; // 1. kademe: tarife bandı
   readonly productRate: Decimal | null; // 2. kademe: syncedCommissionRate
   readonly categoryRate: Decimal | null; // 3. kademe: kategori oranı
 }

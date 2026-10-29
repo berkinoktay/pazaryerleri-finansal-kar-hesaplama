@@ -21,7 +21,7 @@ import { computeUnitProfit, type EstimateOutcome, type UnitEconomics } from '@pa
 
 import { resolveValidity, type TariffValidity } from '../lib/tariff-period';
 import { bandForPrice } from './commission-tariff-compute.service';
-import type { StoredBand } from './commission-tariff.types';
+import type { StoredTariffBand } from '@pazarsync/profit';
 import {
   assembleUnitEconomics,
   serializeBreakdown,
@@ -53,7 +53,7 @@ export interface ResolvedFlashCommission {
  * product with no covering band keeps its current commission.
  */
 export function resolveFlashCommission(
-  bands: ReadonlyArray<StoredBand> | null,
+  bands: ReadonlyArray<StoredTariffBand> | null,
   flatPct: Decimal,
   price: Decimal,
 ): ResolvedFlashCommission {
@@ -72,7 +72,7 @@ export interface FlashOfferInput {
   readonly startsAt: Date | null;
   readonly endsAt: Date | null;
   /** The covering commission-tariff bands for THIS offer's window start, or null (flat). */
-  readonly bands: ReadonlyArray<StoredBand> | null;
+  readonly bands: ReadonlyArray<StoredTariffBand> | null;
 }
 
 export interface ComputedFlashOffer {
@@ -130,7 +130,7 @@ export interface ComputedFlashItem {
   /** Whether the item's PRIMARY window resolved to a band ladder (band) or the flat rate (current). */
   readonly commissionSource: FlashCommissionSource;
   /** The primary window's band ladder, surfaced for the ⓘ popover; null on the flat fallback. */
-  readonly commissionBands: ReadonlyArray<StoredBand> | null;
+  readonly commissionBands: ReadonlyArray<StoredTariffBand> | null;
 }
 
 export interface FlashItemComputeInput {
@@ -139,7 +139,7 @@ export interface FlashItemComputeInput {
   readonly offer24: FlashOfferInput | null;
   readonly offer3: FlashOfferInput | null;
   /** Bands for the primary window (offer24Start ?? offer3Start); drives commissionSource + commissionBands. */
-  readonly primaryBands: ReadonlyArray<StoredBand> | null;
+  readonly primaryBands: ReadonlyArray<StoredTariffBand> | null;
 }
 
 /**
@@ -232,7 +232,7 @@ export interface ComputedFlashEstimate {
 export type FlashEstimateCommission =
   | {
       readonly kind: 'resolve';
-      readonly bands: ReadonlyArray<StoredBand> | null;
+      readonly bands: ReadonlyArray<StoredTariffBand> | null;
       readonly flatPct: Decimal;
     }
   | { readonly kind: 'override'; readonly pct: Decimal };

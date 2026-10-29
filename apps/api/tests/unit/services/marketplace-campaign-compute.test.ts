@@ -11,7 +11,7 @@ import {
   type DiscountCommissionInputs,
   type DiscountConfig,
 } from '@/services/discount-math-commons';
-import type { StoredBand } from '@/services/commission-tariff.types';
+import type { StoredTariffBand } from '@pazarsync/profit';
 import {
   computeCampaignEstimate,
   computeCampaignItem,
@@ -106,7 +106,7 @@ describe('computeCampaignItem — Trendyol karşılaması matrahı yükseltir', 
   // rule, design §4.2). Two bands whose boundary sits BETWEEN the two candidate prices: a band
   // read at 900 gives %20, a band read at 960 gives %10 — so the rate alone proves which price
   // the chain used.
-  const SPLIT_BANDS: StoredBand[] = [
+  const SPLIT_BANDS: StoredTariffBand[] = [
     { key: 'high', lowerLimit: '950', upperLimit: null, commissionPct: '10' },
     { key: 'low', lowerLimit: null, upperLimit: '949.99', commissionPct: '20' },
   ];
@@ -225,7 +225,7 @@ describe('computeCampaignItem — özel fiyat senaryosu', () => {
 
 describe('computeCampaignItem — komisyon BANDI ile MATRAH farklı fiyatlardan gelir', () => {
   const bandsAt = (boundary: string, above: string, below: string): DiscountCommissionInputs => {
-    const bands: StoredBand[] = [
+    const bands: StoredTariffBand[] = [
       { key: 'high', lowerLimit: boundary, upperLimit: null, commissionPct: above },
       {
         key: 'low',
@@ -817,7 +817,7 @@ describe('kampanya senaryosu paylaşık matematikten türer', () => {
   it('bant çözümü 2 haneye yuvarlanmış fiyattan yapılır (0,01 boşluğuna düşmez)', () => {
     // NET %20 @374,99 → müşteri 299,992; karşılama 0 → hakediş de 299,992. Bant sınırları
     // 2 hanelidir: 299,99'a yuvarlanmazsa 300 ile 299,99 arasındaki boşluğa düşer.
-    const BANDS: StoredBand[] = [
+    const BANDS: StoredTariffBand[] = [
       { key: 'band1', lowerLimit: '300', upperLimit: null, commissionPct: '10' },
       { key: 'band2', lowerLimit: '150', upperLimit: '299.99', commissionPct: '12' },
     ];

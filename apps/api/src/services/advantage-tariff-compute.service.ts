@@ -20,7 +20,7 @@ import { Decimal } from 'decimal.js';
 import { computeUnitProfit, type EstimateOutcome, type UnitEconomics } from '@pazarsync/profit';
 
 import { bandForPrice } from './commission-tariff-compute.service';
-import type { StoredBand } from './commission-tariff.types';
+import type { StoredTariffBand } from '@pazarsync/profit';
 import {
   assembleUnitEconomics,
   serializeBreakdown,
@@ -88,7 +88,7 @@ const NULL_CURRENT: ComputedCurrentScenario = {
 /** The commission inputs resolved for one advantage item (per §advantage-labels design). */
 export interface ItemCommissionInputs {
   /** The matched commission-tariff bands for this barcode (active period), or null. */
-  readonly bands: ReadonlyArray<StoredBand> | null;
+  readonly bands: ReadonlyArray<StoredTariffBand> | null;
   /** The category-rate fallback PERCENT (e.g. 19), or null when unresolvable. */
   readonly categoryRate: Decimal | null;
 }

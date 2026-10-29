@@ -57,7 +57,7 @@ interface ParsedRow {
 /**
  * Builds a period's band JSON from the shared price brackets + that period's
  * commissions. Null limits are OMITTED (not stored as JSON null) so the value
- * stays a clean `Record<string, string>` array — `parseStoredBands` reads an
+ * stays a clean `Record<string, string>` array — `parseStoredTariffBands` reads an
  * absent limit back as null. Bands whose commission is missing are skipped.
  */
 function bandsForPeriod(

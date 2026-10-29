@@ -207,6 +207,10 @@ export {
   type TrendyolTransactionType,
 } from './marketplaces/trendyol/settlement-records';
 export {
+  parseStoredTariffBands,
+  type StoredTariffBand,
+} from './marketplaces/trendyol/stored-tariff-bands';
+export {
   mapTrendyolRecords,
   type MappingResult,
   type TrendyolMappingInput,

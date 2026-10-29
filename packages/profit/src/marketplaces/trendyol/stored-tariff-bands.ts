@@ -1,10 +1,9 @@
-// Internal domain types for the saved Commission Tariffs backend.
-//
-// The wire (request/response) contract lives in
-// `validators/commission-tariff.validator.ts`; this file holds the types the
-// service layer reasons with internally — the persisted band JSON shape. Period
-// validity + Trendyol period-label parsing are SHARED with the Plus tariff
-// feature and live in `lib/tariff-period.ts`.
+// The persisted commission-tariff band JSON shape and its parser, moved out of
+// the backend so the profit engine's Trendyol loader can turn a stored tariff
+// item into TrendyolCommissionBand inputs. The wire (request/response) contract
+// still lives in the backend validators; this file holds only the persisted band
+// JSON shape and the type guard that reads it. Period validity + Trendyol
+// period-label parsing stay in the backend's `lib/tariff-period.ts`.
 
 import type { Prisma } from '@pazarsync/db';
 
@@ -17,7 +16,7 @@ import type { Prisma } from '@pazarsync/db';
 // no lower limit. Money is kept as decimal STRINGS; `commissionPct` is a PERCENT
 // (e.g. "19", "13.1"), exactly as the Excel states it.
 
-export interface StoredBand {
+export interface StoredTariffBand {
   readonly key: string;
   readonly lowerLimit: string | null;
   readonly upperLimit: string | null;
@@ -32,10 +31,10 @@ export interface StoredBand {
  * carries an explicit JSON null. No type assertions: every field is runtime
  * checked, so malformed rows degrade to an empty band list rather than throwing.
  */
-export function parseStoredBands(value: Prisma.JsonValue): StoredBand[] {
+export function parseStoredTariffBands(value: Prisma.JsonValue): StoredTariffBand[] {
   if (!Array.isArray(value)) return [];
 
-  const bands: StoredBand[] = [];
+  const bands: StoredTariffBand[] = [];
   for (const entry of value) {
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue;
     const { key, lowerLimit, upperLimit, commissionPct } = entry;

@@ -20,7 +20,7 @@ import { mapPrismaError } from '@pazarsync/sync-core';
 import type { EstimateOutcome } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
-import type { StoredBand } from './commission-tariff.types';
+import type { StoredTariffBand } from '@pazarsync/profit';
 import {
   buildFlashCommissionResolver,
   type FlashCommissionRequest,
@@ -44,7 +44,7 @@ import type {
 
 /** Serializes a resolved band ladder for the wire (money 2dp, percent 4dp), or null. */
 function serializeFlashBands(
-  bands: ReadonlyArray<StoredBand> | null,
+  bands: ReadonlyArray<StoredTariffBand> | null,
 ): FlashCommissionBand[] | null {
   if (bands === null) return null;
   return bands.map((band) => ({
