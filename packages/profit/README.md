@@ -61,3 +61,15 @@ cycle and the return cycle), each gated on its own payment order. The catalog's
 or the returned items. Nothing calls this module yet; phase 3 wires the database
 loader and the callers to it. A second golden test pins the melontik parcel end to end
 through the module, including the ESTIMATED -> PARTIALLY_SETTLED -> SETTLED transition.
+
+## Scenario and price solver (rebuild, phase 2B)
+
+A product scenario is a hypothetical one-item parcel pushed through the same Trendyol
+module and profit statement as a real order, so the Barem band and the commission band
+follow the asked price and each cost's VAT comes from its own profile rate -- there is
+no scenario-specific formula. On top of it a marketplace-agnostic solver finds the
+lowest unit price that meets a target margin, markup or net profit: it splits the price
+axis at the marketplace's breakpoints and at the net VAT kink, solves each segment in
+closed form from two samples, and verifies the candidate with a bounded kurus nudge --
+no binary search. The audit report's worked examples are pinned as golden tests.
+Nothing calls this yet; phase 4 wires the pricing and campaign screens to it.

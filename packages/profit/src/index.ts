@@ -211,3 +211,26 @@ export {
   type MappingResult,
   type TrendyolMappingInput,
 } from './marketplaces/trendyol/map-records';
+
+// Scenario and price solver (rebuild, phase 2B) -- docs/plans/2026-10-29-profit-engine-faz-2b-plan.md
+export { ceilToKurus, floorToKurus } from './money';
+export {
+  solveScenarioPrice,
+  SCENARIO_SAMPLE_SPAN,
+  SCENARIO_MAX_NUDGE_STEPS,
+  type ScenarioPriceTarget,
+  type ScenarioSolveFailure,
+  type ScenarioSolveResult,
+} from './core/scenario/solve-scenario-price';
+export {
+  buildTrendyolScenarioParcel,
+  evaluateTrendyolScenario,
+  trendyolScenarioBreakpoints,
+  solveTrendyolScenarioPrice,
+  TRENDYOL_SCENARIO_PARCEL_ID,
+  TRENDYOL_SCENARIO_ITEM_ID,
+  type TrendyolScenarioProduct,
+  type TrendyolScenarioInput,
+  type TrendyolScenarioBase,
+  type TrendyolScenarioResult,
+} from './marketplaces/trendyol/scenario';
