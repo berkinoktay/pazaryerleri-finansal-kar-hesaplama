@@ -47,6 +47,14 @@ describe('createProfitLine', () => {
       InvalidProfitLineError,
     );
   });
+  it('rejects non-finite amounts', () => {
+    expect(() => makeLine({ type: ProfitLineType.COMMISSION, gross: 'Infinity' })).toThrow(
+      InvalidProfitLineError,
+    );
+    expect(() => makeLine({ type: ProfitLineType.COMMISSION, gross: 'NaN' })).toThrow(
+      InvalidProfitLineError,
+    );
+  });
   it('rejects NATIVE fx with a rate other than 1', () => {
     const base = makeLine({ type: ProfitLineType.SALE, gross: '10' });
     expect(() => createProfitLine({ ...base, fx: { ...base.fx, rate: new Decimal('2') } })).toThrow(

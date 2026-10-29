@@ -28,6 +28,19 @@ function roundRate(rate: Decimal): Decimal {
 }
 
 /**
+ * Guards against broken reference data: a `rateToBase` of zero or less (or a
+ * non-finite value) would make inversion and cross division blow up to Infinity
+ * or NaN. Reject it loudly rather than letting a nonsense rate through.
+ */
+function assertUsableQuote(quote: FxRateQuote): void {
+  if (!quote.rateToBase.isFinite() || quote.rateToBase.lte(0)) {
+    throw new RangeError(
+      `rateToBase for ${quote.currency} on ${quote.rateDate} must be a finite positive number: ${quote.rateToBase.toString()}`,
+    );
+  }
+}
+
+/**
  * Picks the rate for `eventDate`: converting `from` into `to` through `base`.
  *
  * A currency's rate is the quote with a matching `currency` and the greatest
@@ -72,6 +85,7 @@ export function selectFxRate(params: {
     if (quote === null) {
       return null;
     }
+    assertUsableQuote(quote);
     return { rate: roundRate(quote.rateToBase), rateDate: quote.rateDate, source: quoteSource };
   }
 
@@ -80,6 +94,7 @@ export function selectFxRate(params: {
     if (quote === null) {
       return null;
     }
+    assertUsableQuote(quote);
     return {
       rate: roundRate(new Decimal(1).div(quote.rateToBase)),
       rateDate: quote.rateDate,
@@ -92,6 +107,8 @@ export function selectFxRate(params: {
   if (fromQuote === null || toQuote === null) {
     return null;
   }
+  assertUsableQuote(fromQuote);
+  assertUsableQuote(toQuote);
   const rate = fromQuote.rateToBase.div(toQuote.rateToBase);
   const rateDate = fromQuote.rateDate < toQuote.rateDate ? fromQuote.rateDate : toQuote.rateDate;
   return { rate: roundRate(rate), rateDate, source: quoteSource };

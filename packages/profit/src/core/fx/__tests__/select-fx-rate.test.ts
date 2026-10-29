@@ -69,4 +69,9 @@ describe('selectFxRate', () => {
   it('rejects a malformed event date', () => {
     expect(() => select(USD, CURRENCY_TRY, '28.10.2026')).toThrow(RangeError);
   });
+  it('rejects a selected quote with a non-positive rate', () => {
+    const broken = [q(USD, '2026-10-28', '0')];
+    expect(() => select(USD, CURRENCY_TRY, '2026-10-28', broken)).toThrow(RangeError);
+    expect(() => select(CURRENCY_TRY, USD, '2026-10-28', broken)).toThrow(RangeError);
+  });
 });

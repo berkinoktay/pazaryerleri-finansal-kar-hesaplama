@@ -6,9 +6,11 @@ import { type SelectedFxRate } from './select-fx-rate';
 
 /**
  * Converts a line amount into the accounting currency. Gross and VAT are each
- * multiplied by the selected rate and rounded to kurus separately, so their sum
- * stays consistent. The returned `fx` carries the original amount, currency,
- * rate, rate date and source; a manual rate flows through the same path.
+ * multiplied by the selected rate and rounded to kurus once, independently.
+ * Because each is rounded on its own, the net (gross - VAT) derived here can
+ * differ by a kurus from converting the original net amount directly. The
+ * returned `fx` carries the original amount, currency, rate, rate date and
+ * source; a manual rate flows through the same path.
  */
 export function convertLineMoney(
   original: LineMoney,

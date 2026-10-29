@@ -52,6 +52,9 @@ const ZERO = new Decimal(0);
 const ONE = new Decimal(1);
 
 function assertRoundedNonNegative(value: Decimal, field: string): void {
+  if (!value.isFinite()) {
+    throw new InvalidProfitLineError(`${field} must be a finite number`);
+  }
   if (value.lt(ZERO)) {
     throw new InvalidProfitLineError(`${field} must not be negative`);
   }

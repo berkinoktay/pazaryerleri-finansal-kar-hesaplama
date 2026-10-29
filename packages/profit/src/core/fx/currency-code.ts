@@ -23,5 +23,8 @@ export function toCurrencyCode(value: string): CurrencyCode {
   return value;
 }
 
-/** The accounting currency: Turkish lira. */
+/**
+ * ISO 4217 code of the Turkish lira. The accounting currency is an organization
+ * setting; do not assume TRY in core logic.
+ */
 export const CURRENCY_TRY: CurrencyCode = toCurrencyCode('TRY');
