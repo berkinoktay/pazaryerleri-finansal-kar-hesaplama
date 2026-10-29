@@ -8,7 +8,7 @@ import type {
   MappedProduct,
   MappedProductsPageMeta,
   MappedProductVariant,
-  TrendyolApprovedProductsResponse,
+  TrendyolApprovedProductsWithContent,
   TrendyolAttribute,
   TrendyolContent,
   TrendyolImage,
@@ -187,7 +187,7 @@ export interface MappedProductsPage {
 }
 
 export function mapTrendyolApprovedResponse(
-  response: TrendyolApprovedProductsResponse,
+  response: TrendyolApprovedProductsWithContent,
 ): MappedProductsPage {
   return {
     batch: response.content.map(mapTrendyolContent),

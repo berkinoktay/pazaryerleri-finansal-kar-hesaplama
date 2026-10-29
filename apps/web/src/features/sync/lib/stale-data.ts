@@ -14,9 +14,9 @@ interface SourceFreshness {
  * than the control's all-sources timestamp: a page is "stale" about its own
  * subject (Returns → CLAIMS), not a secondary flow (Returns' ORDERS) that stays
  * fresh on its own schedule and would otherwise mask a 30-hour-old primary. When
- * a page has several primaries (Products → PRODUCTS + PRODUCTS_DELTA) the
- * freshest one wins — an hourly delta keeps the page fresh even after the nightly
- * full scan ages out.
+ * a page has several primaries (Products: PRODUCTS + PRODUCTS_DELTA +
+ * PRODUCTS_CHANGES) the freshest one wins: an hourly delta or changes sweep
+ * keeps the page fresh even after the nightly full scan ages out.
  */
 export function newestPrimarySyncedAt(
   sources: readonly SourceFreshness[],

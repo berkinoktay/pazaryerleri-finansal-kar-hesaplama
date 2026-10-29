@@ -1,5 +1,5 @@
 import type { SyncLog, SyncType } from '@pazarsync/db';
-import { parseProductsCursor } from '@pazarsync/sync-core';
+import { parseProductsChangesCursor, parseProductsCursor } from '@pazarsync/sync-core';
 
 import type { ChunkResult, ModuleHandler } from './handlers/types';
 
@@ -29,6 +29,10 @@ function decodeCursor(syncLog: SyncLog): unknown | null {
     case 'PRODUCTS_DELTA':
       // PRODUCTS_DELTA reuses the products page/token cursor model verbatim.
       return parseProductsCursor(syncLog.pageCursor);
+    case 'PRODUCTS_CHANGES':
+      // Date-window walk: { phase, page, windowStart, windowEnd }. Null on the
+      // first chunk, which computes the window.
+      return parseProductsChangesCursor(syncLog.pageCursor);
     case 'ORDERS':
     case 'SETTLEMENTS':
     case 'CLAIMS':

@@ -220,6 +220,18 @@ section "Versioning" for details.
 
 ### Added
 
+- **`SyncLogResponse.syncType` and `SyncFreshness.syncType` gained `PRODUCTS_CHANGES`**
+  (both sync-log list endpoints, `GET /v1/organizations/{orgId}/sync-logs` and
+  `GET /v1/organizations/{orgId}/stores/{storeId}/sync-logs`, plus the single sync-log
+  read `GET .../sync-logs/{syncLogId}`). `PRODUCTS_CHANGES` is the hourly, cron-only catalog-changes sync: a date-window
+  walk of the approved product list that picks up new products and changed products
+  (status, lock/archive and metadata changes) between nightly full scans. It never
+  delists. Additive enum widening; every existing value is unchanged. The manual trigger
+  `POST /v1/organizations/{orgId}/stores/{storeId}/syncs` rejects it with **422**
+  `VALIDATION_ERROR` (`errors[].code = INVALID_SYNC_TYPE`), exactly like
+  `PRODUCTS_DELTA`. The `TriggerSyncBody.syncType` enum is unchanged (still `ORDERS` /
+  `PRODUCTS` / `SETTLEMENTS` / `CLAIMS`); only its description and the route description
+  now name both cron-internal types. The spec snapshot was regenerated to pick it up.
 - **Marketplace campaign (Kampanyalar) endpoints — import, list, detail, config, selections, delete**
   (`/v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns…`, OpenAPI tag
   `MarketplaceCampaigns`). Sixth campaign vertical, for the campaigns TRENDYOL designs and

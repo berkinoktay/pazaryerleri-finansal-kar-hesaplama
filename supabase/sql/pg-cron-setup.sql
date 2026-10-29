@@ -104,8 +104,9 @@ SELECT cron.schedule(
 -- started_at)), so spreading each store's started_at deterministically over a
 -- 30-minute window makes the claim scan release them gradually instead of all
 -- at once — no extra scheduler machinery. The offset is stable per store
--- (hash of the store id) so re-runs land in the same slot, and the hourly
--- PRODUCTS_DELTA delta sweep keeps stock/price fresh in the meantime.
+-- (hash of the store id) so re-runs land in the same slot. In the meantime the
+-- hourly PRODUCTS_DELTA sweep keeps stock/price fresh, and the hourly
+-- PRODUCTS_CHANGES walk picks up new products and status/metadata changes.
 SELECT cron.schedule(
   'sync-products-daily',
   '0 0 * * *',
@@ -165,6 +166,71 @@ SELECT cron.schedule(
   $$
 );
 
+-- --- Products changes sync (hourly date-window walk) -------------------------
+-- Enqueues a PENDING PRODUCTS_CHANGES sync_log per ACTIVE store every hour. The
+-- worker's products-changes handler walks Trendyol's approved product list with
+-- a date filter, one page per chunk, in three phases: VARIANT_MODIFIED_DATE,
+-- CONTENT_MODIFIED_DATE, then VARIANT_CREATED_DATE over a wider lookback (for
+-- products Trendyol approves late). It upserts only the products returned, so
+-- new products and status/metadata changes (lock, archive, title, images) land
+-- within the hour instead of waiting for the daily full scan. Stock and price
+-- stay with PRODUCTS_DELTA.
+--
+-- Window: anchored on started_at of the store's last COMPLETED PRODUCTS_CHANGES
+-- run (else of its last COMPLETED PRODUCTS full scan) minus a 15-minute safety
+-- margin, capped at 48 hours back, and ending at this run's started_at (now()
+-- below). A FAILED run never moves the window, because the anchor reads
+-- COMPLETED runs only; the next tick rescans the same range.
+--
+-- Never delists: absence from a date-filtered page proves nothing, so the delist
+-- diff stays with the daily full PRODUCTS scan.
+--
+-- Gate: a store is enqueued only once its first full PRODUCTS scan has
+-- COMPLETED (the EXISTS clause). Before that there is no catalog and no anchor,
+-- and an empty COMPLETED run during the bootstrap scan would become the next
+-- tick's anchor and could hide changes made while that scan ran. The handler
+-- still finishes empty when it finds no anchor, as a fallback only. The gate
+-- filters on organization_id too: with all four equality columns it is one
+-- probe of the (organization_id, status, store_id, sync_type, completed_at)
+-- index, instead of walking a store's growing sync_logs history through the
+-- (store_id, started_at) index when its early full scans FAILED.
+--
+-- Schedule: '45 * * * *' - minute :45 of every hour, offset from the orders
+-- safety net (:00) and PRODUCTS_DELTA (:15). It shares :45 with sync-claims-6h
+-- on 4 of the 24 daily ticks; that is harmless, because the active slot is per
+-- (store, sync_type) and a quiet hour costs only one request per phase.
+--
+-- Dedupe: same NOT EXISTS in-flight guard as sync-orders-delta, scoped to the
+-- PRODUCTS_CHANGES type. A PRODUCTS_CHANGES run can be in flight alongside a
+-- full PRODUCTS run for the same store; that is benign: both are idempotent
+-- upserts of vendor truth, and PRODUCTS_CHANGES stamps last_synced_at only on
+-- variants Trendyol just returned, so the full scan's delist pass never takes a
+-- listed variant for a removed one.
+--
+SELECT cron.schedule(
+  'sync-products-changes-hourly',
+  '45 * * * *',
+  $$
+  INSERT INTO sync_logs (id, organization_id, store_id, sync_type, status, started_at)
+  SELECT gen_random_uuid(), s.organization_id, s.id, 'PRODUCTS_CHANGES', 'PENDING', now()
+  FROM stores s
+  WHERE s.status = 'ACTIVE'
+    AND NOT EXISTS (
+      SELECT 1 FROM sync_logs sl
+      WHERE sl.store_id = s.id
+        AND sl.sync_type = 'PRODUCTS_CHANGES'
+        AND sl.status IN ('PENDING', 'RUNNING', 'FAILED_RETRYABLE')
+    )
+    AND EXISTS (
+      SELECT 1 FROM sync_logs fs
+      WHERE fs.organization_id = s.organization_id
+        AND fs.store_id = s.id
+        AND fs.sync_type = 'PRODUCTS'
+        AND fs.status = 'COMPLETED'
+    );
+  $$
+);
+
 -- ─── Settlements scan (6h cadence) ────────────────────────────────────────────
 -- Enqueues a PENDING SETTLEMENTS sync_log per ACTIVE store every 6 hours.
 -- The worker's settlements handler scans the full 60-day window each tick
@@ -199,6 +265,7 @@ SELECT cron.schedule(
 --
 -- Offset from the settlements tick (minute 45 vs 30) so a store's two
 -- financial scans don't contend for the same worker slot at once.
+-- It shares minute :45 with sync-products-changes-hourly (see that job).
 --
 SELECT cron.schedule(
   'sync-claims-6h',

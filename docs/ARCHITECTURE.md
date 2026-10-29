@@ -479,8 +479,11 @@ enum ExpenseCategory {
 
 enum SyncType {
   ORDERS
-  PRODUCTS
+  PRODUCTS           // full catalog scan (daily + manual); the only delist pass
+  PRODUCTS_DELTA     // hourly stock + price walk; cron only
+  PRODUCTS_CHANGES   // hourly date-window walk (new + changed products); cron only
   SETTLEMENTS
+  CLAIMS
 }
 
 enum SyncStatus {
@@ -1028,15 +1031,26 @@ timers:
 same type via a `NOT EXISTS` guard); the worker does the actual marketplace
 calls.
 
-| Job                                   | Schedule (UTC)  | Enqueues         | Notes                                       |
-| ------------------------------------- | --------------- | ---------------- | ------------------------------------------- |
-| `sync-orders-delta`                   | `0 * * * *`     | `ORDERS`         | Hourly safety net behind the webhook        |
-| `sync-products-daily`                 | `0 0 * * *`     | `PRODUCTS`       | Full catalog scan at the low-traffic hour   |
-| `sync-products-delta-hourly`          | `15 * * * *`    | `PRODUCTS_DELTA` | Stock + price sweep, offset from minute :00  |
-| `sync-settlements-6h`                 | `30 */6 * * *`  | `SETTLEMENTS`    | 60-day window, idempotent per-row anchors   |
-| `sync-claims-6h`                      | `45 */6 * * *`  | `CLAIMS`         | Returns/refunds, offset from settlements    |
-| `live-performance-buffer-daily-reset` | `0 21 * * *`    | (SQL function)   | 21:00 UTC = 00:00 business time             |
-| `fx-rates-sync-daily`                 | `0 13 * * 1-5`  | (Edge Function)  | Only cron that leaves the DB, via `pg_net`  |
+| Job                                   | Schedule (UTC) | Enqueues           | Notes                                             |
+| ------------------------------------- | -------------- | ------------------ | ------------------------------------------------- |
+| `sync-orders-delta`                   | `0 * * * *`    | `ORDERS`           | Hourly safety net behind the webhook              |
+| `sync-products-daily`                 | `0 0 * * *`    | `PRODUCTS`         | Full catalog scan at the low-traffic hour         |
+| `sync-products-delta-hourly`          | `15 * * * *`   | `PRODUCTS_DELTA`   | Stock + price sweep, offset from minute :00       |
+| `sync-products-changes-hourly`        | `45 * * * *`   | `PRODUCTS_CHANGES` | New/changed products; needs a COMPLETED full scan |
+| `sync-settlements-6h`                 | `30 */6 * * *` | `SETTLEMENTS`      | 60-day window, idempotent per-row anchors         |
+| `sync-claims-6h`                      | `45 */6 * * *` | `CLAIMS`           | Returns/refunds, offset from settlements          |
+| `live-performance-buffer-daily-reset` | `0 21 * * *`   | (SQL function)     | 21:00 UTC = 00:00 business time                   |
+| `fx-rates-sync-daily`                 | `0 13 * * 1-5` | (Edge Function)    | Only cron that leaves the DB, via `pg_net`        |
+
+`sync-products-changes-hourly` has one extra condition: a store is enqueued only
+once it has a COMPLETED full `PRODUCTS` scan (an `EXISTS` gate), so no run starts
+before the first catalog sync. The worker walks Trendyol's approved list by date
+in three phases (variant modified, content modified, variant created) and anchors
+its window on the `started_at` of the last COMPLETED `PRODUCTS_CHANGES` run (else
+the last COMPLETED full scan), so a failed run never moves the window. It upserts
+only what Trendyol returned and never delists; the daily full scan stays the only
+delist pass. It shares minute :45 with `sync-claims-6h` on 4 of the 24 daily
+ticks, which is harmless because the active slot is per store and sync type.
 
 Türkiye is permanent GMT+3 (no DST), and pg_cron has no per-job timezone, so each
 local wall-clock time is hardcoded as its UTC equivalent: `0 0 * * *` = 03:00

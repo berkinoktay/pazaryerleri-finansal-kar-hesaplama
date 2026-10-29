@@ -7,7 +7,7 @@
 // failure rather than a silent SLA change.
 
 import { prisma } from '@pazarsync/db';
-import { SyncErrorCode } from '@pazarsync/db/enums';
+import { SyncErrorCode, type SyncStatus, type SyncType } from '@pazarsync/db/enums';
 import { LostLeaseError, syncLogService } from '@pazarsync/sync-core';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -363,5 +363,236 @@ describe('syncLogService.releaseToPending', () => {
     expect(after.attemptCount).toBe(0);
     // Cursor is intentionally preserved so the next claimer resumes mid-run.
     expect(after.pageCursor).toEqual({ kind: 'page', n: 7 });
+  });
+});
+
+// PRODUCTS_CHANGES window anchor: the newest COMPLETED run's startedAt for
+// one (org, store, syncType). Uses existing sync types (PRODUCTS, ORDERS)
+// because the helper is generic over SyncType.
+describe('syncLogService.getLastCompletedRunStartedAt', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  const ONE_HOUR_MS = 60 * 60 * 1000;
+  const RUN_DURATION_MS = 5 * 60 * 1000;
+
+  function hoursAgo(hours: number): Date {
+    return new Date(Date.now() - hours * ONE_HOUR_MS);
+  }
+
+  function afterRun(startedAt: Date): Date {
+    return new Date(startedAt.getTime() + RUN_DURATION_MS);
+  }
+
+  async function setupStore(
+    organizationId?: string,
+  ): Promise<{ organizationId: string; storeId: string }> {
+    let orgId = organizationId;
+    if (orgId === undefined) {
+      const user = await createUserProfile();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      orgId = org.id;
+    }
+    const store = await createStore(orgId);
+    return { organizationId: orgId, storeId: store.id };
+  }
+
+  interface RunRowInput {
+    organizationId: string;
+    storeId: string;
+    syncType: SyncType;
+    status: SyncStatus;
+    startedAt: Date;
+    completedAt: Date | null;
+  }
+
+  async function createRun(input: RunRowInput): Promise<void> {
+    await prisma.syncLog.create({
+      data: {
+        organizationId: input.organizationId,
+        storeId: input.storeId,
+        syncType: input.syncType,
+        status: input.status,
+        startedAt: input.startedAt,
+        completedAt: input.completedAt,
+      },
+    });
+  }
+
+  async function createCompletedRun(
+    scope: { organizationId: string; storeId: string },
+    syncType: SyncType,
+    startedAt: Date,
+  ): Promise<void> {
+    await createRun({
+      ...scope,
+      syncType,
+      status: 'COMPLETED',
+      startedAt,
+      completedAt: afterRun(startedAt),
+    });
+  }
+
+  it('returns null when the store has never run the sync type', async () => {
+    const scope = await setupStore();
+
+    await expect(
+      syncLogService.getLastCompletedRunStartedAt(scope.organizationId, scope.storeId, 'PRODUCTS'),
+    ).resolves.toBeNull();
+  });
+
+  it('returns the startedAt of the newest of several COMPLETED runs', async () => {
+    const scope = await setupStore();
+    const newest = hoursAgo(1);
+    // Inserted out of chronological order so insertion order cannot win.
+    await createCompletedRun(scope, 'PRODUCTS', hoursAgo(3));
+    await createCompletedRun(scope, 'PRODUCTS', newest);
+    await createCompletedRun(scope, 'PRODUCTS', hoursAgo(2));
+
+    const anchor = await syncLogService.getLastCompletedRunStartedAt(
+      scope.organizationId,
+      scope.storeId,
+      'PRODUCTS',
+    );
+
+    expect(anchor?.toISOString()).toBe(newest.toISOString());
+  });
+
+  it.each<SyncStatus>(['FAILED', 'FAILED_RETRYABLE', 'RUNNING', 'PENDING'])(
+    'ignores a newer %s run, so a failed run does not move the anchor',
+    async (status) => {
+      const scope = await setupStore();
+      const completedStart = hoursAgo(2);
+      await createCompletedRun(scope, 'PRODUCTS', completedStart);
+      // completedAt is stamped on the newer row too, so only the status
+      // filter (not the completedAt filter) can exclude it.
+      const newerStart = hoursAgo(1);
+      await createRun({
+        ...scope,
+        syncType: 'PRODUCTS',
+        status,
+        startedAt: newerStart,
+        completedAt: afterRun(newerStart),
+      });
+
+      const anchor = await syncLogService.getLastCompletedRunStartedAt(
+        scope.organizationId,
+        scope.storeId,
+        'PRODUCTS',
+      );
+
+      expect(anchor?.toISOString()).toBe(completedStart.toISOString());
+    },
+  );
+
+  it('ignores a COMPLETED run whose completedAt was never stamped', async () => {
+    const scope = await setupStore();
+    const stampedStart = hoursAgo(2);
+    await createCompletedRun(scope, 'PRODUCTS', stampedStart);
+    // DESC sorts NULLs first: without the completedAt filter this row wins.
+    await createRun({
+      ...scope,
+      syncType: 'PRODUCTS',
+      status: 'COMPLETED',
+      startedAt: hoursAgo(1),
+      completedAt: null,
+    });
+
+    const anchor = await syncLogService.getLastCompletedRunStartedAt(
+      scope.organizationId,
+      scope.storeId,
+      'PRODUCTS',
+    );
+
+    expect(anchor?.toISOString()).toBe(stampedStart.toISOString());
+  });
+
+  it('only counts runs of the requested sync type', async () => {
+    const scope = await setupStore();
+    const productsStart = hoursAgo(2);
+    const ordersStart = hoursAgo(1);
+    await createCompletedRun(scope, 'PRODUCTS', productsStart);
+    await createCompletedRun(scope, 'ORDERS', ordersStart);
+
+    const productsAnchor = await syncLogService.getLastCompletedRunStartedAt(
+      scope.organizationId,
+      scope.storeId,
+      'PRODUCTS',
+    );
+    const ordersAnchor = await syncLogService.getLastCompletedRunStartedAt(
+      scope.organizationId,
+      scope.storeId,
+      'ORDERS',
+    );
+    const settlementsAnchor = await syncLogService.getLastCompletedRunStartedAt(
+      scope.organizationId,
+      scope.storeId,
+      'SETTLEMENTS',
+    );
+
+    expect(productsAnchor?.toISOString()).toBe(productsStart.toISOString());
+    expect(ordersAnchor?.toISOString()).toBe(ordersStart.toISOString());
+    expect(settlementsAnchor).toBeNull();
+  });
+
+  it('only counts runs of the requested store within the same organization', async () => {
+    const storeA = await setupStore();
+    const storeB = await setupStore(storeA.organizationId);
+    const storeAStart = hoursAgo(2);
+    await createCompletedRun(storeA, 'PRODUCTS', storeAStart);
+    await createCompletedRun(storeB, 'PRODUCTS', hoursAgo(1));
+
+    const anchor = await syncLogService.getLastCompletedRunStartedAt(
+      storeA.organizationId,
+      storeA.storeId,
+      'PRODUCTS',
+    );
+
+    expect(anchor?.toISOString()).toBe(storeAStart.toISOString());
+  });
+
+  it("never counts another organization's runs (tenant isolation)", async () => {
+    const tenantA = await setupStore();
+    const tenantB = await setupStore();
+    const tenantAStart = hoursAgo(2);
+    const tenantBStart = hoursAgo(1);
+    await createCompletedRun(tenantA, 'PRODUCTS', tenantAStart);
+    await createCompletedRun(tenantB, 'PRODUCTS', tenantBStart);
+
+    // Each tenant sees only its own anchor, even though B's run is newer.
+    const ownA = await syncLogService.getLastCompletedRunStartedAt(
+      tenantA.organizationId,
+      tenantA.storeId,
+      'PRODUCTS',
+    );
+    const ownB = await syncLogService.getLastCompletedRunStartedAt(
+      tenantB.organizationId,
+      tenantB.storeId,
+      'PRODUCTS',
+    );
+    expect(ownA?.toISOString()).toBe(tenantAStart.toISOString());
+    expect(ownB?.toISOString()).toBe(tenantBStart.toISOString());
+
+    // A cross-tenant lookup (org A asking about org B's store, and the
+    // reverse) finds nothing.
+    await expect(
+      syncLogService.getLastCompletedRunStartedAt(
+        tenantA.organizationId,
+        tenantB.storeId,
+        'PRODUCTS',
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      syncLogService.getLastCompletedRunStartedAt(
+        tenantB.organizationId,
+        tenantA.storeId,
+        'PRODUCTS',
+      ),
+    ).resolves.toBeNull();
   });
 });

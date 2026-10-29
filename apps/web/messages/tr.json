@@ -2797,6 +2797,7 @@
     "triggers": {
       "PRODUCTS": "Ürünleri şimdi senkronize et",
       "PRODUCTS_DELTA": "Fiyat ve stoku şimdi tazele",
+      "PRODUCTS_CHANGES": "Ürün değişikliklerini şimdi tara",
       "ORDERS": "Siparişleri şimdi senkronize et",
       "SETTLEMENTS": "Hakedişleri şimdi senkronize et",
       "CLAIMS": "İadeleri şimdi senkronize et",
@@ -2805,6 +2806,7 @@
     "syncTypeLabel": {
       "PRODUCTS": "Ürün senkronu",
       "PRODUCTS_DELTA": "Fiyat/stok taraması",
+      "PRODUCTS_CHANGES": "Ürün değişiklik taraması",
       "ORDERS": "Sipariş senkronu",
       "SETTLEMENTS": "Hakediş senkronu",
       "CLAIMS": "İade senkronu"
@@ -2883,6 +2885,7 @@
       "ORDERS": "Sipariş bilgileri",
       "PRODUCTS": "Ürün bilgileri",
       "PRODUCTS_DELTA": "Fiyat ve stok",
+      "PRODUCTS_CHANGES": "Ürün durumu ve yeni ürünler",
       "SETTLEMENTS": "Hakediş ve kâr verisi",
       "CLAIMS": "İade bilgileri"
     },
@@ -2898,7 +2901,7 @@
     "schedule": {
       "orders": "Siparişler webhook ile anında düşer · saatlik tarama yedeği",
       "returns": "Otomatik eşitleme 6 saatte bir",
-      "products": "Stok/fiyat her saat 15 geçe · tam tarama her gece",
+      "products": "Stok/fiyat her saat 15, ürün değişiklikleri 45 geçe · tam tarama her gece",
       "profitability": "Otomatik eşitleme 6 saatte bir",
       "dashboard": "Akışlar zamanlanmış aralıklarla kendiliğinden eşitlenir"
     },

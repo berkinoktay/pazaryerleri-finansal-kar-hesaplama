@@ -8,9 +8,11 @@
  * automated sync can't block a user's refresh.
  *
  * ORDERS is a cheap, time-sensitive scan (sellers want fresh order state), so
- * it gets the short window. PRODUCTS / PRODUCTS_DELTA / SETTLEMENTS / CLAIMS
- * are heavier full-window walks that rarely change minute-to-minute, so they
- * get the long window.
+ * it gets the short window. PRODUCTS / SETTLEMENTS / CLAIMS are heavier
+ * full-window walks that rarely change minute-to-minute, so they get the long
+ * window. PRODUCTS_DELTA and PRODUCTS_CHANGES are cron-internal hourly walks
+ * that the manual trigger never accepts (see MANUAL_SYNC_TRIGGER_TYPES); they
+ * carry the long window only because the Record must be exhaustive.
  *
  * `Record<SyncType, number>` is exhaustive on purpose: adding a new SyncType
  * member fails the build here until its cooldown is declared, so no sync type
@@ -27,6 +29,7 @@ export const MANUAL_SYNC_COOLDOWN_SECONDS: Record<SyncType, number> = {
   ORDERS: SHORT_WINDOW_SECONDS,
   PRODUCTS: LONG_WINDOW_SECONDS,
   PRODUCTS_DELTA: LONG_WINDOW_SECONDS,
+  PRODUCTS_CHANGES: LONG_WINDOW_SECONDS,
   SETTLEMENTS: LONG_WINDOW_SECONDS,
   CLAIMS: LONG_WINDOW_SECONDS,
 };

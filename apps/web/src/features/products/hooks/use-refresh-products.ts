@@ -6,8 +6,9 @@ import { productKeys } from '../query-keys';
 
 /**
  * Invalidates the products list + facet caches. Does NOT call Trendyol — the
- * PRODUCTS full scan + hourly PRODUCTS_DELTA are the only paths that write
- * product rows; this re-reads whatever the worker has already written.
+ * PRODUCTS full scan + hourly PRODUCTS_DELTA + hourly PRODUCTS_CHANGES are the
+ * only paths that write product rows; this re-reads whatever the worker has
+ * already written.
  *
  * Wired to PageSyncControl's `onFlowsSettled` so the table + the summary/tab
  * counts refresh the moment a products-page source sync completes (there was no

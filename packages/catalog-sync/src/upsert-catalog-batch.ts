@@ -1,8 +1,17 @@
-// Katalog yazım hattı — tek doğruluk kaynağı (spec 2026-06-12 PR-2 terfisi).
-// Eskiden apps/sync-worker/src/handlers/products.ts içindeydi ("PORTED VERBATIM
-// from apps/api/..." notuyla); üçüncü tüketici (webhook eager onarımı) doğunca
-// paket sınırına terfi etti. Tüketiciler: sync-worker products handler'ı,
-// variant-resolution tick'i, apps/api webhook intake'i (ensureBarcodesInCatalog).
+// Catalog write path: the single source of truth for writing approved-products
+// pages into Product and ProductVariant (spec 2026-06-12, PR-2 promotion). It
+// used to live in apps/sync-worker/src/handlers/products.ts (with a "PORTED
+// VERBATIM from apps/api/..." note) and was promoted to this package boundary
+// when a third consumer, the webhook's eager catalog repair, appeared.
+//
+// Consumers:
+//   - the sync-worker PRODUCTS full-scan handler (one approved page per chunk);
+//   - the sync-worker PRODUCTS_CHANGES handler (one date-filtered approved page
+//     per chunk);
+//   - ensureBarcodesInCatalog (./ensure-barcodes.ts), the targeted barcode
+//     repair, called by the sync-worker orders handler, the variant-resolution
+//     tick and the webhook intake in
+//     packages/webhook-ingest/src/trendyol-webhook-intake.ts.
 
 import { prisma } from '@pazarsync/db';
 import type { Store } from '@pazarsync/db';
@@ -107,11 +116,12 @@ export async function upsertCatalogBatch(
             // variant starts with a null override, and sync writes only the
             // synced half of the pair.
             update: {
-              // A variant returned by any full-scan page is, by definition,
-              // listed again — clear the absence-from-feed stamp. (The create
-              // clause needs nothing: delistedAt defaults to null.) The
-              // full-scan handler re-stamps variants that this scan no longer
-              // returned in its complete-done delist pass.
+              // A variant returned by any approved-products page (full scan,
+              // PRODUCTS_CHANGES, barcode repair) is, by definition, listed
+              // again: clear the absence-from-feed stamp. (The create clause
+              // needs nothing: delistedAt defaults to null.) Re-stamping stays
+              // owned only by the full-scan handler, whose complete-done delist
+              // pass stamps the variants that scan no longer returned.
               delistedAt: null,
               barcode: variant.barcode,
               stockCode: variant.stockCode,

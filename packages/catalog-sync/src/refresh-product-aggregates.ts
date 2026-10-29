@@ -2,13 +2,14 @@
 // They back the products-list sort (totalStock, salePrice) and the salePrice
 // range filter, which read a column instead of aggregating the child relation.
 //
-// Callers: the catalog upsert (full scan and barcode repair, both through
-// upsertCatalogBatch), the hourly stock+price delta, the delist pass and the
-// order-intake stock decrement (@pazarsync/order-sync). The values are always
-// recomputed from the DB and count only the variants in the default listing
-// scope (LISTED_VARIANT_WHERE), so an archived or delisted variant never
-// inflates a product's stock or price range. Callers pass their transaction so
-// the refresh commits atomically with the variant writes that triggered it.
+// Callers: the catalog upsert (full scan, hourly PRODUCTS_CHANGES and barcode
+// repair, all through upsertCatalogBatch), the hourly stock+price delta, the
+// delist pass and the order-intake stock decrement (@pazarsync/order-sync). The
+// values are always recomputed from the DB and count only the variants in the
+// default listing scope (LISTED_VARIANT_WHERE), so an archived or delisted
+// variant never inflates a product's stock or price range. Callers pass their
+// transaction so the refresh commits atomically with the variant writes that
+// triggered it.
 //
 // Known gap: the confirmed price write in apps/api (price-write.service,
 // reconcileSuccess) updates a variant's salePrice without calling this helper,

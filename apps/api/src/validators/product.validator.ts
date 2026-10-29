@@ -25,9 +25,10 @@ export const StartSyncResponseSchema = z
 // ─── Generic manual-sync trigger body ──────────────────────────────────
 // Body for POST /v1/organizations/:orgId/stores/:storeId/syncs — the
 // generic manual-sync trigger that supersedes the PRODUCTS-only
-// products/sync route. PRODUCTS_DELTA is intentionally excluded: it's the
-// cron-internal hourly stock/price walk, never a user-facing button, so
-// the enum is the four merchant-triggerable types only. An out-of-set
+// products/sync route. PRODUCTS_DELTA and PRODUCTS_CHANGES are
+// intentionally excluded: both are cron-internal hourly walks (stock/price,
+// and the date-filtered product-changes walk), never a user-facing button,
+// so the enum is the four merchant-triggerable types only. An out-of-set
 // value fails with the SCREAMING_SNAKE code `INVALID_SYNC_TYPE`.
 
 export const MANUAL_SYNC_TRIGGER_TYPES = ['ORDERS', 'PRODUCTS', 'SETTLEMENTS', 'CLAIMS'] as const;
@@ -38,8 +39,9 @@ export const TriggerSyncBodySchema = z
     syncType: z.enum(MANUAL_SYNC_TRIGGER_TYPES, { message: 'INVALID_SYNC_TYPE' }).openapi({
       description:
         'Which marketplace surface to sync. One of ORDERS, PRODUCTS, SETTLEMENTS, CLAIMS. ' +
-        'PRODUCTS_DELTA is not accepted here — it is a cron-internal lightweight stock/price ' +
-        'walk, not a user-triggerable sync.',
+        'PRODUCTS_DELTA and PRODUCTS_CHANGES are not accepted here: both are cron-internal ' +
+        'hourly walks (the stock/price walk and the date-filtered product-changes walk), not ' +
+        'user-triggerable syncs.',
       example: 'ORDERS',
     }),
   })

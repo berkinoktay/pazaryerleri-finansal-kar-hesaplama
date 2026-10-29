@@ -88,6 +88,34 @@ describe('StaleDataBanner', () => {
     expect(screen.queryByText(STALE_MESSAGE)).not.toBeInTheDocument();
   });
 
+  it('stays hidden when a fresh PRODUCTS_CHANGES covers an aged full scan and delta (Products)', () => {
+    // Products: PRODUCTS 30h and PRODUCTS_DELTA 26h are both past the window;
+    // the 1h-old PRODUCTS_CHANGES alone keeps the page fresh, so no strip.
+    usePageSyncSnapshotMock.mockReturnValue(
+      makeSnapshot('stale', [
+        makeSource('PRODUCTS', 'stale', hoursBefore(30)),
+        makeSource('PRODUCTS_DELTA', 'stale', hoursBefore(26)),
+        makeSource('PRODUCTS_CHANGES', 'fresh', hoursBefore(1)),
+      ]),
+    );
+    render(<StaleDataBanner pageKey="products" />);
+    expect(screen.queryByText(STALE_MESSAGE)).not.toBeInTheDocument();
+  });
+
+  it('measures the age from the newest Products primary when all three are aged', () => {
+    // PRODUCTS 40h, PRODUCTS_DELTA 30h, PRODUCTS_CHANGES 26h: the strip reports
+    // the freshest primary (26h), not the full scan or the delta.
+    usePageSyncSnapshotMock.mockReturnValue(
+      makeSnapshot('stale', [
+        makeSource('PRODUCTS', 'stale', hoursBefore(40)),
+        makeSource('PRODUCTS_DELTA', 'stale', hoursBefore(30)),
+        makeSource('PRODUCTS_CHANGES', 'stale', hoursBefore(26)),
+      ]),
+    );
+    render(<StaleDataBanner pageKey="products" />);
+    expect(screen.getByText(/^Bu veriler 26 saattir/)).toBeInTheDocument();
+  });
+
   it('stays hidden when the control is failed — the chip is already red', () => {
     usePageSyncSnapshotMock.mockReturnValue(
       makeSnapshot('failed', [makeSource('ORDERS', 'failed', hoursBefore(30))]),

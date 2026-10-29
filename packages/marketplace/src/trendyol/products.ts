@@ -1,11 +1,16 @@
-// Public API of the Trendyol product-sync integration. Exposes an async
-// generator that pages through /products/approved (v2), maps each batch
-// to internal DTOs, and stops when the catalog is exhausted. Has no DB
-// or Prisma awareness — the caller (ProductSyncService) handles upsert.
+// Public API of the Trendyol approved-products (v2) integration. Three
+// fetchers share one endpoint and one mapper:
+//   - fetchApprovedProducts: async generator over the whole catalog (the
+//     full PRODUCTS scan), one mapped page per yield;
+//   - fetchApprovedProductsPageByDate: one page of a date-filtered query
+//     (the hourly PRODUCTS_CHANGES sync);
+//   - fetchProductsByBarcodes: one targeted multi-barcode lookup.
+// The module has no DB or Prisma awareness and does no logging; callers
+// own the upsert and the logs.
 //
-// Source-of-truth for endpoint shape:
+// Source of truth for the endpoint shape:
 //   docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/
-//     urun-entegrasyonlari-v2.md
+//     urun-entegrasyonu-v2/urun-filtreleme-onayli-urun-v2.md
 
 import type { StoreEnvironment } from '@pazarsync/db';
 import { MarketplaceUnreachable } from '@pazarsync/sync-core';
@@ -13,13 +18,19 @@ import { MarketplaceUnreachable } from '@pazarsync/sync-core';
 import { fetchOnce, type FetcherDeps } from './fetch-once';
 import { baseUrlFor } from './headers';
 import { mapTrendyolApprovedResponse, type MappedProductsPage } from './mapper';
-import type { TrendyolApprovedProductsResponse, TrendyolCredentials } from './types';
+import {
+  TRENDYOL_DATE_QUERY_TYPES,
+  type TrendyolApprovedProductsResponse,
+  type TrendyolApprovedProductsWithContent,
+  type TrendyolCredentials,
+  type TrendyolDateQueryType,
+} from './types';
 
 /**
  * Trendyol getApprovedProducts page size.
  *
  * The cap formula in
- * docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/urun-entegrasyonlari-v2.md §3
+ * docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/urun-entegrasyonu-v2/urun-filtreleme-onayli-urun-v2.md
  * says "Page x size maksimum 10.000 değerini alabilir." — this is the
  * PAGINATION cap (after which nextPageToken is required), not the
  * per-request size limit. The doc only shows `size=100` examples for
@@ -51,8 +62,52 @@ interface PageRequest {
   nextPageToken?: string;
 }
 
+function approvedProductsUrl(base: string, supplierId: string): URL {
+  return new URL(`${base}/integration/product/sellers/${supplierId}/products/approved`);
+}
+
+/**
+ * What a 404 maps to on the single-page paths: no rows and no further
+ * pages. `page` echoes the page that was requested.
+ */
+function emptyApprovedPage(page: number): MappedProductsPage {
+  return {
+    batch: [],
+    pageMeta: {
+      totalElements: 0,
+      totalPages: 0,
+      page,
+      size: PRODUCTS_PAGE_SIZE,
+      nextPageToken: null,
+    },
+  };
+}
+
+function isNotFound(err: unknown): boolean {
+  return err instanceof MarketplaceUnreachable && err.meta.httpStatus === 404;
+}
+
+/**
+ * The full scan and the barcode lookup require the `content` list. A 200
+ * without one is not a trusted "no rows": in the full scan, ending the walk
+ * there would let the chunk handler take a truncated catalog for a complete
+ * one and run its delist pass over every variant it did not reach. So throw.
+ * The sync worker classes a plain Error as INTERNAL_ERROR and retries the
+ * same page, which is also what the old `null.map` TypeError did.
+ */
+function requireContent(
+  raw: TrendyolApprovedProductsResponse,
+  request: string,
+): TrendyolApprovedProductsWithContent {
+  const { content } = raw;
+  if (content === null || content === undefined) {
+    throw new Error(`Trendyol approved products answered ${request} without a content list`);
+  }
+  return { ...raw, content };
+}
+
 function buildUrl(base: string, supplierId: string, req: PageRequest): string {
-  const url = new URL(`${base}/integration/product/sellers/${supplierId}/products/approved`);
+  const url = approvedProductsUrl(base, supplierId);
   url.searchParams.set('size', req.size.toString());
   if (req.nextPageToken !== undefined) {
     url.searchParams.set('nextPageToken', req.nextPageToken);
@@ -92,33 +147,21 @@ export async function fetchProductsByBarcodes(
     signal: opts.signal,
   };
 
-  const url = new URL(
-    `${base}/integration/product/sellers/${opts.credentials.supplierId}/products/approved`,
-  );
+  const url = approvedProductsUrl(base, opts.credentials.supplierId);
   url.searchParams.set('barcodes', opts.barcodes.join(','));
   url.searchParams.set('size', PRODUCTS_PAGE_SIZE.toString());
 
   try {
     const raw = await fetchOnce<TrendyolApprovedProductsResponse>(url.toString(), deps);
-    return mapTrendyolApprovedResponse(raw);
+    return mapTrendyolApprovedResponse(requireContent(raw, 'a barcode lookup'));
   } catch (err) {
-    // Barkod sorgusunda 404, "böyle onaylı ürün yok" demektir — boş
-    // sonuç, hata değil. (Toplu sayfalama senkronunda 404 KASITLI olarak
-    // MarketplaceUnreachable'a maplenir; orada "son sayfanın ötesi → 4xx
-    // → retry" anlamı taşır. O global mapleme fetch-once.ts'te DURUR; biz
-    // 404'ü yalnızca BURADA, barkod yolunda boş sayfaya çeviririz.)
-    if (err instanceof MarketplaceUnreachable && err.meta.httpStatus === 404) {
-      return {
-        batch: [],
-        pageMeta: {
-          totalElements: 0,
-          totalPages: 0,
-          page: 0,
-          size: PRODUCTS_PAGE_SIZE,
-          nextPageToken: null,
-        },
-      };
-    }
+    // On a barcode lookup a 404 means "no approved product matches": an
+    // empty result, not an error. fetch-once.ts maps 404 to
+    // MarketplaceUnreachable for every caller on purpose (in the full-scan
+    // generator a 404 past the last page is a retryable failure); only the
+    // single-page paths (this one and fetchApprovedProductsPageByDate)
+    // turn it into an empty page.
+    if (isNotFound(err)) return emptyApprovedPage(0);
     throw err;
   }
 }
@@ -137,6 +180,122 @@ export interface FetchApprovedProductsOpts {
   initialCursor?: { kind: 'page'; n: number } | { kind: 'token'; token: string } | null;
 }
 
+export interface FetchApprovedProductsPageByDateOpts extends Omit<
+  FetchApprovedProductsOpts,
+  'initialCursor'
+> {
+  /**
+   * Which timestamp the window filters on. Required: without it Trendyol
+   * ignores startDate/endDate and returns the whole catalog.
+   */
+  dateQueryType: TrendyolDateQueryType;
+  /** Window start, epoch milliseconds (Trendyol `startDate`, a long). */
+  startDate: number;
+  /** Window end, epoch milliseconds (Trendyol `endDate`, a long). */
+  endDate: number;
+  /** 0-based page; page * PRODUCTS_PAGE_SIZE must stay <= APPROVED_PAGE_CAP_ITEMS. */
+  page: number;
+}
+
+/** One page of a date-filtered approved query. */
+export interface ApprovedProductsPageByDate extends MappedProductsPage {
+  /**
+   * True when Trendyol answered 404 and the page was mapped to an empty one.
+   * Without it a caller cannot tell a 404 from a genuinely empty window, and
+   * stage answers those with 200 and `content: []`, so a 404 is worth a log.
+   */
+  notFound: boolean;
+}
+
+function isNonNegativeSafeInteger(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * Rejects a malformed date-page request before any vendor call. The page
+ * bound is Trendyol's documented "page x size <= 10,000" request rule; the
+ * PRODUCTS_CHANGES handler stops one page earlier, at the last page whose
+ * items all sit below the cap. No maximum window length is enforced:
+ * Trendyol documents none, and the handler owns the window size.
+ */
+function assertDatePageRequest(opts: FetchApprovedProductsPageByDateOpts): void {
+  if (!TRENDYOL_DATE_QUERY_TYPES.includes(opts.dateQueryType)) {
+    throw new RangeError(`Unknown dateQueryType: ${opts.dateQueryType}`);
+  }
+  if (!isNonNegativeSafeInteger(opts.page)) {
+    throw new RangeError(`page must be a non-negative integer; got ${opts.page.toString()}`);
+  }
+  if (opts.page * PRODUCTS_PAGE_SIZE > APPROVED_PAGE_CAP_ITEMS) {
+    throw new RangeError(
+      `page ${opts.page.toString()} x size ${PRODUCTS_PAGE_SIZE.toString()} exceeds the ` +
+        `${APPROVED_PAGE_CAP_ITEMS.toString()}-item page cap of the approved endpoint`,
+    );
+  }
+  if (!isNonNegativeSafeInteger(opts.startDate) || !isNonNegativeSafeInteger(opts.endDate)) {
+    throw new RangeError(
+      `startDate/endDate must be non-negative epoch milliseconds; got ` +
+        `${opts.startDate.toString()}..${opts.endDate.toString()}`,
+    );
+  }
+  if (opts.startDate > opts.endDate) {
+    throw new RangeError(
+      `startDate (${opts.startDate.toString()}) must be <= endDate (${opts.endDate.toString()})`,
+    );
+  }
+}
+
+/**
+ * One page of the approved v2 list filtered by a date window (used by the
+ * hourly PRODUCTS_CHANGES sync). Same endpoint, page size and mapper as the
+ * full scan, so a returned product carries its complete variant list with
+ * status, desi, commission, VAT, delivery duration and images.
+ *
+ * Stage behaviour (2026-10-28): dates are epoch milliseconds; an empty window
+ * answers 200 with `content: []` and `totalElements: 0`; one page past the
+ * last answers 200 with `content: []`; an endDate in the future is accepted.
+ * A 404 maps to an empty page flagged `notFound`, so a result set that shrank
+ * mid-walk ends the walk instead of failing the run, and the caller can still
+ * log it. A `totalElements` above the 10,000-item cap is returned, not thrown:
+ * the caller decides what to do with it.
+ */
+export async function fetchApprovedProductsPageByDate(
+  opts: FetchApprovedProductsPageByDateOpts,
+): Promise<ApprovedProductsPageByDate> {
+  assertDatePageRequest(opts);
+  const env = opts.environment ?? 'PRODUCTION';
+  const base = opts.baseUrl ?? baseUrlFor(env);
+  const deps: FetcherDeps = {
+    credentials: opts.credentials,
+    env,
+    signal: opts.signal,
+  };
+
+  // Exactly these five params. Never `status`: it prunes each product's
+  // variant list down to the matching variants, so products would come back
+  // short. Never `orderByDirection`: ASC sorts unreliably on stage. Never
+  // `nextPageToken`: this path pages by `page` only and stops at the cap.
+  const url = approvedProductsUrl(base, opts.credentials.supplierId);
+  url.searchParams.set('dateQueryType', opts.dateQueryType);
+  url.searchParams.set('startDate', opts.startDate.toString());
+  url.searchParams.set('endDate', opts.endDate.toString());
+  url.searchParams.set('page', opts.page.toString());
+  url.searchParams.set('size', PRODUCTS_PAGE_SIZE.toString());
+
+  try {
+    const raw = await fetchOnce<TrendyolApprovedProductsResponse>(url.toString(), deps);
+    // Only this single-page path reads a null or missing list as an empty
+    // page (the handler then moves to the next phase). PRODUCTS_CHANGES
+    // never delists, so a page cut short costs at most a few changes that
+    // the nightly full scan rewrites. The full scan does not get this
+    // tolerance: see requireContent.
+    const mapped = mapTrendyolApprovedResponse({ ...raw, content: raw.content ?? [] });
+    return { ...mapped, notFound: false };
+  } catch (err) {
+    if (isNotFound(err)) return { ...emptyApprovedPage(opts.page), notFound: true };
+    throw err;
+  }
+}
+
 /**
  * Async generator over Trendyol's /products/approved endpoint. Yields one
  * page at a time, fully mapped. Caller decides whether to upsert each
@@ -145,7 +304,8 @@ export interface FetchApprovedProductsOpts {
  * Pagination: `page=0..N` while page*size ≤ 10,000; switches to
  * `nextPageToken` when Trendyol returns one (which it does past the
  * 10k cap). Stops when an empty `content[]` is returned or all
- * `totalElements` rows have been streamed.
+ * `totalElements` rows have been streamed. A 200 with a null or missing
+ * `content` throws instead of stopping (see requireContent).
  *
  * Either `baseUrl` or `environment` must be supplied; in app code use
  * `environment` (resolves from env vars). Tests can pass `baseUrl`
@@ -183,7 +343,9 @@ export async function* fetchApprovedProducts(
     });
 
     const raw = await fetchOnce<TrendyolApprovedProductsResponse>(url, deps);
-    const mapped = mapTrendyolApprovedResponse(raw);
+    const request =
+      pendingToken === undefined ? `page ${page.toString()}` : 'a nextPageToken request';
+    const mapped = mapTrendyolApprovedResponse(requireContent(raw, request));
 
     if (totalElements === null) totalElements = mapped.pageMeta.totalElements;
 

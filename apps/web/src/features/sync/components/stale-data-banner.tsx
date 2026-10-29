@@ -24,8 +24,8 @@ import { deriveStaleHours, newestPrimarySyncedAt } from '../lib/stale-data';
  * Staleness is measured against the page's PRIMARY sources only (via
  * newestPrimarySyncedAt), not the control's all-sources timestamp: on Returns a
  * fresh secondary ORDERS must not mask a 30-hour-old primary CLAIMS, and on
- * Products a fresh hourly PRODUCTS_DELTA keeps the page fresh even after the
- * nightly full PRODUCTS scan ages.
+ * Products a fresh hourly PRODUCTS_DELTA or PRODUCTS_CHANGES keeps the page
+ * fresh even after the nightly full PRODUCTS scan ages.
  *
  * Renders `null` (nothing) unless the latched clock is set AND the newest
  * primary success is older than `staleAfterHours`. It also stays silent whenever

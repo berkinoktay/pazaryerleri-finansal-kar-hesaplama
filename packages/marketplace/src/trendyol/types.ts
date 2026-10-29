@@ -126,14 +126,47 @@ export interface TrendyolContent {
   variants?: TrendyolVariant[];
 }
 
+/**
+ * Values of the approved v2 `dateQueryType` parameter
+ * (urun-entegrasyonu-v2/urun-filtreleme-onayli-urun-v2.md):
+ *   - VARIANT_CREATED_DATE  -> variant `sellerCreatedDate`
+ *   - VARIANT_MODIFIED_DATE -> variant `sellerModifiedDate`
+ *   - CONTENT_MODIFIED_DATE -> content `lastModifiedDate`
+ * Without a `dateQueryType` Trendyol silently ignores `startDate`/`endDate`
+ * and returns the whole catalog (stage, 2026-10-27), so a date query must
+ * always carry one.
+ */
+export const TRENDYOL_DATE_QUERY_TYPES = [
+  'VARIANT_CREATED_DATE',
+  'VARIANT_MODIFIED_DATE',
+  'CONTENT_MODIFIED_DATE',
+] as const;
+export type TrendyolDateQueryType = (typeof TRENDYOL_DATE_QUERY_TYPES)[number];
+
 export interface TrendyolApprovedProductsResponse {
   totalElements: number;
   totalPages: number;
   page: number;
   size: number;
+  // Single-page responses leave the key out entirely (stage, 2026-10-27).
   nextPageToken?: string | null;
-  content: TrendyolContent[];
+  // Stage answers an empty date window and a page past the last one with
+  // `content: []` (2026-10-28), but the claims endpoint has sent
+  // `content: null` on narrow windows, so the wire type admits a missing or
+  // null list. What that means is the fetcher's call, not the mapper's: the
+  // single-page date query treats it as an empty page, while the full scan
+  // and the barcode lookup throw (see products.ts).
+  content?: TrendyolContent[] | null;
 }
+
+/**
+ * An approved-products response whose `content` list is present: the input
+ * of `mapTrendyolApprovedResponse`. A fetcher must settle a null or missing
+ * list before it maps, so no caller inherits another caller's choice.
+ */
+export type TrendyolApprovedProductsWithContent = TrendyolApprovedProductsResponse & {
+  content: TrendyolContent[];
+};
 
 // ─── Internal DTO — mapped, normalized, ready for Prisma upsert ──────────
 // The mapper produces this shape; the sync service consumes it. Decimal

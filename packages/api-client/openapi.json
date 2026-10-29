@@ -2677,6 +2677,7 @@
               "ORDERS",
               "PRODUCTS",
               "PRODUCTS_DELTA",
+              "PRODUCTS_CHANGES",
               "SETTLEMENTS",
               "CLAIMS"
             ],
@@ -2855,6 +2856,7 @@
               "ORDERS",
               "PRODUCTS",
               "PRODUCTS_DELTA",
+              "PRODUCTS_CHANGES",
               "SETTLEMENTS",
               "CLAIMS"
             ],
@@ -3935,7 +3937,7 @@
               "SETTLEMENTS",
               "CLAIMS"
             ],
-            "description": "Which marketplace surface to sync. One of ORDERS, PRODUCTS, SETTLEMENTS, CLAIMS. PRODUCTS_DELTA is not accepted here — it is a cron-internal lightweight stock/price walk, not a user-triggerable sync.",
+            "description": "Which marketplace surface to sync. One of ORDERS, PRODUCTS, SETTLEMENTS, CLAIMS. PRODUCTS_DELTA and PRODUCTS_CHANGES are not accepted here: both are cron-internal hourly walks (the stock/price walk and the date-filtered product-changes walk), not user-triggerable syncs.",
             "example": "ORDERS"
           }
         },
@@ -14197,7 +14199,7 @@
           "Sync"
         ],
         "summary": "Enqueue a manual marketplace sync (generic across sync type)",
-        "description": "Inserts a PENDING MANUAL SyncLog row for the requested `syncType` and returns 202 with the new syncLogId. The dedicated worker (apps/sync-worker) claims it within ~1 s and runs the sync in the background; clients poll `GET /v1/organizations/:orgId/stores/:storeId/sync-logs/:syncLogId` or subscribe to Supabase Realtime to track progress. A second manual trigger for the same (store, syncType) inside its cooldown window returns 429 RATE_LIMITED with `Retry-After`; an already-active sync for that slot returns 409 SYNC_IN_PROGRESS with `meta.existingSyncLogId`. Accepts ORDERS / PRODUCTS / SETTLEMENTS / CLAIMS — PRODUCTS_DELTA is rejected as a cron-internal type.",
+        "description": "Inserts a PENDING MANUAL SyncLog row for the requested `syncType` and returns 202 with the new syncLogId. The dedicated worker (apps/sync-worker) claims it within ~1 s and runs the sync in the background; clients poll `GET /v1/organizations/:orgId/stores/:storeId/sync-logs/:syncLogId` or subscribe to Supabase Realtime to track progress. A second manual trigger for the same (store, syncType) inside its cooldown window returns 429 RATE_LIMITED with `Retry-After`; an already-active sync for that slot returns 409 SYNC_IN_PROGRESS with `meta.existingSyncLogId`. Accepts ORDERS / PRODUCTS / SETTLEMENTS / CLAIMS; PRODUCTS_DELTA and PRODUCTS_CHANGES are rejected as cron-internal types.",
         "security": [
           {
             "bearerAuth": []
