@@ -103,6 +103,40 @@ export function trendyolReference(
   };
 }
 
+/**
+ * The audit scenario reference (not production data): carries the assumptions of the
+ * profit-engine audit report. The ARASMP carrier supports Barem up to 10 desi, the
+ * Barem bands are 42.91 ([0, 199.99]) and 73.74 ([200, 349.99]), desi '2' is 83.93,
+ * there is no own tariff, and the only commission rule is category '369' at 20%.
+ * The default fees (PSF, VAT and stoppage rates) are kept.
+ */
+export function arasmpScenarioReference(): TrendyolReferenceData {
+  return trendyolReference({
+    shipping: {
+      source: ShippingTariffSource.TRENDYOL_CONTRACT,
+      carrier: { code: 'ARASMP', supportsBarem: true, maxBaremDesi: new Decimal('10') },
+      desiTariffNet: new Map([['2', new Decimal('83.93')]]),
+      baremBands: [
+        {
+          minOrderAmount: new Decimal('0'),
+          maxOrderAmount: new Decimal('199.99'),
+          priceNet: new Decimal('42.91'),
+        },
+        {
+          minOrderAmount: new Decimal('200'),
+          maxOrderAmount: new Decimal('349.99'),
+          priceNet: new Decimal('73.74'),
+        },
+      ],
+      ownTariffNet: new Map(),
+    },
+    commission: {
+      categoryRatePct: new Map([['369', new Decimal('20')]]),
+      categoryBrandRatePct: new Map(),
+    },
+  });
+}
+
 /** A tariff band given as text, mirroring the stored string shape. */
 export interface MakeTrendyolBandParams {
   readonly lowerLimit: string | null;
