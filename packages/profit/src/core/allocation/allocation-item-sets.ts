@@ -25,8 +25,9 @@ export interface AllocationItemSets {
  *   no return is known yet (a return-shipping invoice can arrive before the accepted
  *   return is recorded), then to all items;
  * - a forward line uses the active items, falls back to all items.
- * A degenerate fallback is shared by sale share, and all-zero weights already split
- * equally, so an all-items split still sums back to the parcel total to the cent.
+ * A fallback item set still carries each item's real sale gross, so a sale-share line
+ * splits across it by sale share; an equal split happens only when every weight is
+ * zero. Either way the split sums back to the parcel total to the cent.
  */
 export function itemsForAllocation(
   type: ProfitLineType,

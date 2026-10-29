@@ -25,6 +25,9 @@ import { loadTrendyolParcel } from './load-trendyol-parcel';
 /** The margin columns are numeric(12,4); round in the app, not in Postgres. */
 const PERCENT_SCALE = 4;
 
+/** Seed for the parcel advisory-lock hash; a fixed namespace shared by every parcel lock. */
+const ADVISORY_LOCK_SEED = 0;
+
 /** The best-known view's headline result, surfaced to the caller for logging/UI. */
 export interface RecomputeParcelResult {
   readonly changed: boolean;
@@ -39,6 +42,14 @@ export interface RecomputeParcelResult {
  * written along with the best-known status and net profit. Throws `ParcelNotFoundError`
  * when the order is not this organization's and `UnsupportedPlatformError` for a
  * platform without a writer yet.
+ *
+ * Caller contract:
+ * - Runs inside the caller's transaction at READ COMMITTED (Postgres' default). Once
+ *   the advisory lock is granted, a call that waited on it must see the committed
+ *   statements of the call that held it; a stricter isolation level would hide them
+ *   and defeat the content-hash no-op.
+ * - The interactive-transaction timeout must cover a lock wait plus the parcel load;
+ *   Prisma's 5s default may be too short, so pass an explicit `timeout`.
  */
 export async function recomputeParcelProfit(
   tx: Prisma.TransactionClient,
@@ -48,7 +59,7 @@ export async function recomputeParcelProfit(
 
   // Serialize concurrent recomputes of the same parcel. $executeRaw, not $queryRaw:
   // the function returns void, which Prisma cannot deserialize. Released at commit.
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${orderId}, 0))`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${orderId}, ${ADVISORY_LOCK_SEED}::int8))`;
 
   const order = await tx.order.findFirst({
     where: { id: orderId, organizationId },
@@ -66,7 +77,7 @@ export async function recomputeParcelProfit(
       throw new UnsupportedPlatformError(platform);
     default: {
       const _exhaustive: never = platform;
-      throw new Error(`Unhandled platform: ${String(_exhaustive)}`);
+      throw new Error(`Unhandled platform: ${_exhaustive}`);
     }
   }
 }
@@ -135,6 +146,11 @@ async function recomputeTrendyolParcel(
     }
   });
 
+  // The hash sees Decimal values at full precision, while the persisted columns are
+  // rounded (percentages to 4, fxRate to 6, vatRatePct to 4). The hashed view is a
+  // superset of the stored one, so a change that matters always flips the hash and a
+  // needed write is never skipped; at worst two inputs that round to the same row
+  // produce different hashes and an identical row is rewritten.
   const hash = profitContentHash({
     engineVersion: PROFIT_ENGINE_VERSION,
     settings: loaded.settings,
@@ -331,10 +347,9 @@ function statementColumns(params: {
     saleMarginPct: percentColumn(statement.saleMarginPct),
     costMarkupPct: percentColumn(statement.costMarkupPct),
     issues: issuesJson(statement.issues),
-    settingsSnapshot: {
-      includeStopaj: settings.includeStopaj,
-      includeNegativeNetVat: settings.includeNegativeNetVat,
-    },
+    // Snapshot the whole resolved settings object so a future setting is captured
+    // without a second edit here; the content hash already covers every field.
+    settingsSnapshot: { ...settings },
     engineVersion: PROFIT_ENGINE_VERSION,
     contentHash: hash,
     computedAt: new Date(),
