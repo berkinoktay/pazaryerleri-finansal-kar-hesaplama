@@ -7,6 +7,7 @@ import {
   type ProfitLineType,
 } from '@pazarsync/db/enums';
 
+import { kurusAmountViolation } from '../money';
 import { type CurrencyCode } from './fx/currency-code';
 import { getLineSpec } from './catalog/profit-line-catalog';
 
@@ -47,18 +48,17 @@ export interface ProfitLine {
 
 export class InvalidProfitLineError extends Error {}
 
-const MAX_MONEY_DECIMALS = 2;
-const ZERO = new Decimal(0);
 const ONE = new Decimal(1);
 
 function assertRoundedNonNegative(value: Decimal, field: string): void {
-  if (!value.isFinite()) {
+  const violation = kurusAmountViolation(value);
+  if (violation === 'NOT_FINITE') {
     throw new InvalidProfitLineError(`${field} must be a finite number`);
   }
-  if (value.lt(ZERO)) {
+  if (violation === 'NEGATIVE') {
     throw new InvalidProfitLineError(`${field} must not be negative`);
   }
-  if (value.decimalPlaces() > MAX_MONEY_DECIMALS) {
+  if (violation === 'TOO_MANY_DECIMALS') {
     throw new InvalidProfitLineError(`${field} must not have more than two decimals`);
   }
 }

@@ -17,3 +17,28 @@ export function grossToVat(gross: Decimal, ratePct: Decimal): Decimal {
 export function roundMoney(value: Decimal): Decimal {
   return value.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
 }
+
+/** A stored money amount is denominated in kurus: at most two decimal places. */
+export const KURUS_DECIMALS = 2;
+
+/**
+ * Checks a money amount against the three kurus invariants in order: finite,
+ * non-negative, and no more than two decimals. Returns the first broken rule or
+ * `null` when the value is a valid kurus amount. Single source of truth for the
+ * money-amount shape: both `createProfitLine` and the parcel snapshot validator
+ * phrase their own error messages from this result.
+ */
+export function kurusAmountViolation(
+  value: Decimal,
+): 'NOT_FINITE' | 'NEGATIVE' | 'TOO_MANY_DECIMALS' | null {
+  if (!value.isFinite()) {
+    return 'NOT_FINITE';
+  }
+  if (value.lt(0)) {
+    return 'NEGATIVE';
+  }
+  if (value.decimalPlaces() > KURUS_DECIMALS) {
+    return 'TOO_MANY_DECIMALS';
+  }
+  return null;
+}
