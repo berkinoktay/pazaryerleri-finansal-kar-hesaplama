@@ -74,3 +74,37 @@ closed form from two samples, and resolves the candidate with a bounded noise-aw
 kurus scan -- no binary search. The audit report's worked examples are pinned as golden
 tests.
 Nothing calls this yet; phase 4 wires the pricing and campaign screens to it.
+
+## Persistence (rebuild, phase 3A)
+
+`persistence/` writes a parcel's computed profit to four tables:
+
+- `profit_lines` -- one row per profit line (sale, commission, shipping, cost, ...),
+  at item or parcel level, with its money, VAT, original currency and fx conversion.
+- `profit_line_allocations` -- one row per item share of a parcel-level line, so both
+  statement views can be summed per item.
+- `order_profit_statements` -- one rolled-up statement per parcel per view (`ESTIMATE`
+  and `BEST_KNOWN`): sale/cost/VAT/stoppage totals, status, net profit and margins,
+  the resolved settings snapshot and a content hash.
+- `marketplace_finance_records` -- the raw settlement, other-financial and cargo-invoice
+  rows the loader reads; the writer does not change them (the phase 3B period writer owns
+  the records it sets aside).
+
+`recomputeParcelProfit(tx, { organizationId, orderId })` runs inside the caller's
+transaction. It first takes a per-order advisory lock, so two concurrent recomputes of
+the same order run one at a time. It loads the parcel, drives it through the pure
+estimate + settlement mapper, builds both statement views and the per-item allocations,
+and hashes everything it would persist. When the stored content hash already matches,
+it is a no-op (`changed: false`); otherwise it deletes the parcel's lines (allocations
+cascade) and rewrites the lines, allocations and both statement rows. Every row carries
+the order's `organizationId` and `storeId`. The caller's transaction must run at READ
+COMMITTED (Postgres' default) so a call that waited on the lock sees the committed
+statements of the call that held it, and must set an interactive-transaction timeout
+long enough for a lock wait plus the load (Prisma's 5s default may be too short).
+
+`loadTrendyolParcel` reads only, filtering every store-scoped table by the order's store
+and every org-scoped table by the order's organization; an order that is not the given
+organization's raises `ParcelNotFoundError`.
+
+Nothing calls the writer yet; wiring the webhook and sync-worker callers to it is
+phase 3B.

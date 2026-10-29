@@ -240,3 +240,11 @@ export {
   type TrendyolScenarioBase,
   type TrendyolScenarioResult,
 } from './marketplaces/trendyol/scenario';
+
+// Persistence (rebuild, phase 3A) -- docs/plans/2026-10-30-profit-engine-faz-3a-plan.md
+export {
+  recomputeParcelProfit,
+  type RecomputeParcelResult,
+} from './persistence/recompute-parcel-profit';
+export { loadTrendyolParcel, type LoadedTrendyolParcel } from './persistence/load-trendyol-parcel';
+export { ParcelNotFoundError, UnsupportedPlatformError } from './persistence/errors';
