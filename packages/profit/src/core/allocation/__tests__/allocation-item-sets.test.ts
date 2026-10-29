@@ -26,6 +26,7 @@ describe('itemsForAllocation', () => {
     const sets: AllocationItemSets = {
       activeItems: [activeA, activeB],
       returnedItems: [returnedA],
+      allItems: [activeA, activeB],
     };
     expect(itemsForAllocation(ProfitLineType.RETURN_SHIPPING, sets)).toEqual([returnedA]);
   });
@@ -34,6 +35,7 @@ describe('itemsForAllocation', () => {
     const sets: AllocationItemSets = {
       activeItems: [activeA, activeB],
       returnedItems: [],
+      allItems: [activeA, activeB],
     };
     expect(itemsForAllocation(ProfitLineType.RETURN_SHIPPING, sets)).toEqual([activeA, activeB]);
   });
@@ -42,8 +44,36 @@ describe('itemsForAllocation', () => {
     const sets: AllocationItemSets = {
       activeItems: [activeA, activeB],
       returnedItems: [returnedA],
+      allItems: [activeA, activeB],
     };
     expect(itemsForAllocation(ProfitLineType.SHIPPING, sets)).toEqual([activeA, activeB]);
     expect(itemsForAllocation(ProfitLineType.SERVICE_FEE, sets)).toEqual([activeA, activeB]);
+  });
+
+  it('falls back to all items for a forward type when no active item is known', () => {
+    const sets: AllocationItemSets = {
+      activeItems: [],
+      returnedItems: [],
+      allItems: [activeA, activeB],
+    };
+    expect(itemsForAllocation(ProfitLineType.SHIPPING, sets)).toEqual([activeA, activeB]);
+  });
+
+  it('falls back to all items for a return-leg type when neither returned nor active items exist', () => {
+    const sets: AllocationItemSets = {
+      activeItems: [],
+      returnedItems: [],
+      allItems: [activeA, activeB],
+    };
+    expect(itemsForAllocation(ProfitLineType.RETURN_SHIPPING, sets)).toEqual([activeA, activeB]);
+  });
+
+  it('prefers the active items over all items for a return-leg type when no return is known', () => {
+    const sets: AllocationItemSets = {
+      activeItems: [activeA],
+      returnedItems: [],
+      allItems: [activeA, activeB],
+    };
+    expect(itemsForAllocation(ProfitLineType.RETURN_SHIPPING, sets)).toEqual([activeA]);
   });
 });

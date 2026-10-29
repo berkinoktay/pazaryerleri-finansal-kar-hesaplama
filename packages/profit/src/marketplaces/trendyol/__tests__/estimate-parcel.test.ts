@@ -57,7 +57,13 @@ describe('estimateTrendyolParcel', () => {
 
     expect(result.lines).toEqual([]);
     expect(result.issues).toEqual([]);
-    expect(result.allocation).toEqual({ activeItems: [], returnedItems: [] });
+    // A cancelled parcel yields no active and no returned items, but still carries
+    // every item in allItems so a parcel-level actual line can be allocated.
+    expect(result.allocation).toEqual({
+      activeItems: [],
+      returnedItems: [],
+      allItems: [{ orderItemId: 'a', saleGross: new Decimal('100.00'), standaloneAmount: null }],
+    });
   });
 
   it('produces lines in a fixed order and merges issues', () => {

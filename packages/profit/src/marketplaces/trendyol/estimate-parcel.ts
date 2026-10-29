@@ -66,8 +66,17 @@ export function estimateTrendyolParcel(input: TrendyolEstimateInput): EstimateRe
     );
   }
 
+  // Every item of the parcel, cancelled ones included, with no standalone amount:
+  // the last-resort fallback so a parcel-level actual line (a cancelled parcel's
+  // cargo invoice) can still be allocated when there are no active or returned items.
+  const allItems: AllocationItem[] = snapshot.items.map((item) => ({
+    orderItemId: item.orderItemId,
+    saleGross: item.saleGross,
+    standaloneAmount: null,
+  }));
+
   if (snapshot.isCancelled) {
-    return { lines: [], issues: [], allocation: { activeItems: [], returnedItems: [] } };
+    return { lines: [], issues: [], allocation: { activeItems: [], returnedItems: [], allItems } };
   }
 
   const lines: ProfitLine[] = [];
@@ -145,6 +154,6 @@ export function estimateTrendyolParcel(input: TrendyolEstimateInput): EstimateRe
   return {
     lines,
     issues,
-    allocation: { activeItems: allocationActiveItems, returnedItems },
+    allocation: { activeItems: allocationActiveItems, returnedItems, allItems },
   };
 }
