@@ -24,6 +24,22 @@ describe('PROFIT_LINE_CATALOG', () => {
     expect(new Set(keys).size).toBe(keys.length);
     for (const key of keys) expect(key).toMatch(/^profit\.lines\.[a-z][a-zA-Z]+$/);
   });
+  it('marks exactly the return-leg types as RETURNED_ITEMS', () => {
+    const returnedScopeTypes = Object.entries(PROFIT_LINE_CATALOG)
+      .filter(([, spec]) => spec.allocationScope === 'RETURNED_ITEMS')
+      .map(([type]) => type)
+      .sort();
+    expect(returnedScopeTypes).toEqual(
+      [
+        ProfitLineType.SALE_RETURN,
+        ProfitLineType.COMMISSION_REFUND,
+        ProfitLineType.COST_RETURN,
+        ProfitLineType.RETURN_SHIPPING,
+        ProfitLineType.STOPPAGE_REFUND,
+        ProfitLineType.INTERNATIONAL_OPERATION_FEE,
+      ].sort(),
+    );
+  });
   it('maps every CostProfileType to a product cost expense type', () => {
     expect(Object.keys(COST_PROFILE_LINE_TYPE).sort()).toEqual(
       Object.values(CostProfileType).sort(),

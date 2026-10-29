@@ -13,6 +13,8 @@ export type ProfitLineDirection = 'INCOME' | 'EXPENSE';
 export type VatKind = 'OUTPUT' | 'INPUT' | 'NONE';
 /** The measure used to split a parcel-level line down to its items. */
 export type AllocationBasis = 'STANDALONE_AMOUNT' | 'EQUAL' | 'SALE_SHARE';
+/** Which item set a parcel-level line is shared across when it is allocated. */
+export type AllocationScope = 'ACTIVE_ITEMS' | 'RETURNED_ITEMS';
 
 export interface ProfitLineSpec {
   readonly group: ProfitLineGroup;
@@ -21,6 +23,12 @@ export interface ProfitLineSpec {
   readonly levels: readonly ProfitLineLevel[];
   readonly settlementRequired: boolean;
   readonly allocationBasis: AllocationBasis | null;
+  /**
+   * Which items share the line when it sits at parcel level: the active items for a
+   * forward line, the returned items for a return-leg line. Ignored for item-only
+   * types, which are never allocated.
+   */
+  readonly allocationScope: AllocationScope;
   readonly labelKey: string;
 }
 
@@ -51,6 +59,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_ITEM,
     settlementRequired: true,
     allocationBasis: null,
+    allocationScope: 'ACTIVE_ITEMS',
     labelKey: 'profit.lines.sale',
   },
   MARKETPLACE_DISCOUNT_CONTRIBUTION: {
@@ -60,6 +69,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_ITEM,
     settlementRequired: true,
     allocationBasis: null,
+    allocationScope: 'ACTIVE_ITEMS',
     labelKey: 'profit.lines.marketplaceDiscountContribution',
   },
   SALE_RETURN: {
@@ -69,6 +79,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_ITEM,
     settlementRequired: true,
     allocationBasis: null,
+    allocationScope: 'RETURNED_ITEMS',
     labelKey: 'profit.lines.saleReturn',
   },
   COST_COGS: {
@@ -78,6 +89,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_ITEM,
     settlementRequired: false,
     allocationBasis: null,
+    allocationScope: 'ACTIVE_ITEMS',
     labelKey: 'profit.lines.costCogs',
   },
   COST_PACKAGING: {
@@ -87,6 +99,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_ITEM,
     settlementRequired: false,
     allocationBasis: null,
+    allocationScope: 'ACTIVE_ITEMS',
     labelKey: 'profit.lines.costPackaging',
   },
   COST_SHIPPING: {
@@ -96,6 +109,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_ITEM,
     settlementRequired: false,
     allocationBasis: null,
+    allocationScope: 'ACTIVE_ITEMS',
     labelKey: 'profit.lines.costShipping',
   },
   COST_SOFTWARE: {
@@ -105,6 +119,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_ITEM,
     settlementRequired: false,
     allocationBasis: null,
+    allocationScope: 'ACTIVE_ITEMS',
     labelKey: 'profit.lines.costSoftware',
   },
   COST_MARKETING: {
@@ -114,6 +129,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_ITEM,
     settlementRequired: false,
     allocationBasis: null,
+    allocationScope: 'ACTIVE_ITEMS',
     labelKey: 'profit.lines.costMarketing',
   },
   COST_OTHER: {
@@ -123,6 +139,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_ITEM,
     settlementRequired: false,
     allocationBasis: null,
+    allocationScope: 'ACTIVE_ITEMS',
     labelKey: 'profit.lines.costOther',
   },
   COST_RETURN: {
@@ -132,6 +149,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_ITEM,
     settlementRequired: false,
     allocationBasis: null,
+    allocationScope: 'RETURNED_ITEMS',
     labelKey: 'profit.lines.costReturn',
   },
   COMMISSION: {
@@ -141,6 +159,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_ITEM,
     settlementRequired: true,
     allocationBasis: null,
+    allocationScope: 'ACTIVE_ITEMS',
     labelKey: 'profit.lines.commission',
   },
   COMMISSION_REFUND: {
@@ -150,6 +169,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_ITEM,
     settlementRequired: true,
     allocationBasis: null,
+    allocationScope: 'RETURNED_ITEMS',
     labelKey: 'profit.lines.commissionRefund',
   },
   SHIPPING: {
@@ -159,6 +179,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_PARCEL,
     settlementRequired: true,
     allocationBasis: 'STANDALONE_AMOUNT',
+    allocationScope: 'ACTIVE_ITEMS',
     labelKey: 'profit.lines.shipping',
   },
   RETURN_SHIPPING: {
@@ -168,6 +189,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_PARCEL,
     settlementRequired: true,
     allocationBasis: 'STANDALONE_AMOUNT',
+    allocationScope: 'RETURNED_ITEMS',
     labelKey: 'profit.lines.returnShipping',
   },
   SERVICE_FEE: {
@@ -177,6 +199,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_PARCEL_ITEM,
     settlementRequired: true,
     allocationBasis: 'EQUAL',
+    allocationScope: 'ACTIVE_ITEMS',
     labelKey: 'profit.lines.serviceFee',
   },
   PAYMENT_SERVICE_FEE: {
@@ -186,6 +209,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_PARCEL_ITEM,
     settlementRequired: true,
     allocationBasis: 'SALE_SHARE',
+    allocationScope: 'ACTIVE_ITEMS',
     labelKey: 'profit.lines.paymentServiceFee',
   },
   INTERNATIONAL_SERVICE_FEE: {
@@ -195,6 +219,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_PARCEL_ITEM,
     settlementRequired: true,
     allocationBasis: 'SALE_SHARE',
+    allocationScope: 'ACTIVE_ITEMS',
     labelKey: 'profit.lines.internationalServiceFee',
   },
   INTERNATIONAL_OPERATION_FEE: {
@@ -204,6 +229,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_PARCEL_ITEM,
     settlementRequired: true,
     allocationBasis: 'SALE_SHARE',
+    allocationScope: 'RETURNED_ITEMS',
     labelKey: 'profit.lines.internationalOperationFee',
   },
   PENALTY: {
@@ -213,6 +239,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_PARCEL_ITEM,
     settlementRequired: false,
     allocationBasis: 'SALE_SHARE',
+    allocationScope: 'ACTIVE_ITEMS',
     labelKey: 'profit.lines.penalty',
   },
   ADJUSTMENT_INCOME: {
@@ -222,6 +249,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_PARCEL_ITEM,
     settlementRequired: false,
     allocationBasis: 'SALE_SHARE',
+    allocationScope: 'ACTIVE_ITEMS',
     labelKey: 'profit.lines.adjustmentIncome',
   },
   ADJUSTMENT_EXPENSE: {
@@ -231,6 +259,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_PARCEL_ITEM,
     settlementRequired: false,
     allocationBasis: 'SALE_SHARE',
+    allocationScope: 'ACTIVE_ITEMS',
     labelKey: 'profit.lines.adjustmentExpense',
   },
   STOPPAGE: {
@@ -240,6 +269,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_ITEM_PARCEL,
     settlementRequired: true,
     allocationBasis: 'SALE_SHARE',
+    allocationScope: 'ACTIVE_ITEMS',
     labelKey: 'profit.lines.stoppage',
   },
   STOPPAGE_REFUND: {
@@ -249,6 +279,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_ITEM_PARCEL,
     settlementRequired: true,
     allocationBasis: 'SALE_SHARE',
+    allocationScope: 'RETURNED_ITEMS',
     labelKey: 'profit.lines.stoppageRefund',
   },
   SELLER_ORDER_EXPENSE: {
@@ -258,6 +289,7 @@ export const PROFIT_LINE_CATALOG = {
     levels: LEVELS_PARCEL,
     settlementRequired: false,
     allocationBasis: 'EQUAL',
+    allocationScope: 'ACTIVE_ITEMS',
     labelKey: 'profit.lines.sellerOrderExpense',
   },
 } as const satisfies Record<ProfitLineType, ProfitLineSpec>;
