@@ -86,7 +86,8 @@ When adding a NEW dependency: install whatever `latest` resolves to (no `@x.y.z`
 │   ├── PRODUCT_VISION.md # Product vision and requirements
 │   ├── business-rules/   # Durable domain rules (e.g. profit-formula.md) — valid until the marketplace changes its system
 │   └── integrations/
-│       └── trendyol/     # Trendyol API documentation (Turkish)
+│       ├── trendyol/     # Trendyol API documentation (Turkish)
+│       └── hepsiburada/  # Hepsiburada developer portal mirror (Turkish) — start at README.md
 ├── turbo.json
 ├── pnpm-workspace.yaml
 └── tsconfig.base.json
@@ -102,6 +103,7 @@ When adding a NEW dependency: install whatever `latest` resolves to (no `@x.y.z`
 | Architecture & DB Schema | `docs/ARCHITECTURE.md`                  | Before designing new features or modifying the DB                                                                                                        |
 | Product Vision           | `docs/PRODUCT_VISION.md`                | Before making UX or feature scope decisions                                                                                                              |
 | Trendyol API Docs        | `docs/integrations/trendyol/`           | **MUST READ** before any Trendyol integration work                                                                                                       |
+| Hepsiburada API Docs     | `docs/integrations/hepsiburada/`        | **MUST READ** before any Hepsiburada integration work — start from its `README.md` (index in portal sidebar order)                                       |
 | Profit & Fee Rules       | `docs/business-rules/profit-formula.md` | **MUST READ** before touching the profit engine, fees, commission, VAT, returns, or stopaj — authoritative Net Kâr formula (durable, marketplace-driven) |
 | Frontend Rules           | `apps/web/CLAUDE.md`                    | When working in `apps/web/`                                                                                                                              |
 | Backend Rules            | `apps/api/CLAUDE.md`                    | When working in `apps/api/`                                                                                                                              |
@@ -116,6 +118,20 @@ When adding a NEW dependency: install whatever `latest` resolves to (no `@x.y.z`
 - `7-trendyol-marketplace-entegrasyonu/siparis-entegrasyonlari.md` — Order sync
 - `7-trendyol-marketplace-entegrasyonu/urun-entegrasyonlari-v2.md` — Product sync
 - `8-trendyol-muhasebe-ve-finans-entegrasyonu/` — Settlement & invoice data
+
+**Hepsiburada integration:** Before writing any Hepsiburada-related code, read the relevant files under `docs/integrations/hepsiburada/` (a mirror of developers.hepsiburada.com, laid out in the portal's sidebar order). Start from its `README.md` index. Layout:
+
+- `NN-<category>/NN-<product>/NN-<guide>.md` — narrative guides: business rules, webhook models, field descriptions
+- `NN-<category>/NN-<product>/endpoints/<tag>/*.md` — one file per API operation: parameters, request/response schemas
+- `NN-<category>/NN-<product>/openapi.json` — the product's raw spec and the schema source of truth (some products are Swagger 2.0: schemas under `definitions`, host under `host`)
+- Every host in these docs is the test environment (`*-sit.hepsiburada.com`); the production host drops `-sit`
+
+Key files:
+
+- `01-baslarken/03-api-authentication/` — API authentication (integrator service key)
+- `05-siparis-yonetimi/01-siparis-entegrasyonu/` — Order integration and order webhooks
+- `03-listeleme-ve-satisa-acma/` — Listing, stock, price, and buybox
+- `07-muhasebe-entegrasyonu/` — Accounting / settlement data
 
 ## Commands
 
