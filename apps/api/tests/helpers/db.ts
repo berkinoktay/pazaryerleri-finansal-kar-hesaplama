@@ -31,6 +31,12 @@ const TENANT_TABLES = [
   'order_claim_items',
   'order_claims',
   'order_fees',
+  // Profit engine persistence (rebuild, phase 3A) — children of orders/items/stores,
+  // listed before their parents; TRUNCATE CASCADE would reach them anyway.
+  'profit_line_allocations',
+  'profit_lines',
+  'order_profit_statements',
+  'marketplace_finance_records',
   'org_period_fees',
   'commission_invoices',
   'order_item_cost_snapshot_components',

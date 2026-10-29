@@ -59,6 +59,11 @@ const TENANT_TABLES = [
   'catalog_barcode_miss',
   // Fiyat yazma denetim kaydı (trendyol-price-write)
   'price_change_logs',
+  // Profit engine persistence (rebuild, phase 3A)
+  'profit_lines',
+  'profit_line_allocations',
+  'order_profit_statements',
+  'marketplace_finance_records',
 ] as const;
 
 describe('RLS — coverage', () => {
