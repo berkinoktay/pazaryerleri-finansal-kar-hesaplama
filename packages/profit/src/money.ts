@@ -22,6 +22,23 @@ export function roundMoney(value: Decimal): Decimal {
 export const KURUS_DECIMALS = 2;
 
 /**
+ * Rounds a monetary value UP to two decimals (towards +infinity). The scenario
+ * price solver rounds a solved price up to the next kurus so the asked target is
+ * met rather than missed by a fraction of a kurus.
+ */
+export function ceilToKurus(value: Decimal): Decimal {
+  return value.toDecimalPlaces(KURUS_DECIMALS, Decimal.ROUND_CEIL);
+}
+
+/**
+ * Rounds a monetary value DOWN to two decimals (towards -infinity). The mirror of
+ * `ceilToKurus`; used when a kurus boundary has to stay inside a price band.
+ */
+export function floorToKurus(value: Decimal): Decimal {
+  return value.toDecimalPlaces(KURUS_DECIMALS, Decimal.ROUND_FLOOR);
+}
+
+/**
  * Checks a money amount against the three kurus invariants in order: finite,
  * non-negative, and no more than two decimals. Returns the first broken rule or
  * `null` when the value is a valid kurus amount. Single source of truth for the
