@@ -5,6 +5,11 @@ import { getBusinessDate, type ResolvedProfitSettings } from '@pazarsync/utils';
 import { type FxRateQuote } from '../../core/fx/select-fx-rate';
 import { type CurrencyCode } from '../../core/fx/currency-code';
 import { computeProfitStatement, type ProfitStatement } from '../../core/profit-statement';
+import {
+  solveScenarioPrice,
+  type ScenarioPriceTarget,
+  type ScenarioSolveResult,
+} from '../../core/scenario/solve-scenario-price';
 import { type ItemCostProfileInput } from '../../core/seller-costs/build-seller-cost-lines';
 import { ceilToKurus, floorToKurus, KURUS_DECIMALS } from '../../money';
 import {
@@ -16,6 +21,9 @@ import { type TrendyolCommissionBand, type TrendyolReferenceData } from './trend
 
 const ZERO = new Decimal(0);
 const CENT = new Decimal('0.01');
+
+/** The lowest unit price a scenario solve considers unless the caller raises it. */
+const DEFAULT_SCENARIO_MIN_UNIT_PRICE = new Decimal('0.01');
 
 /** The parcel id of the hypothetical scenario parcel. */
 export const TRENDYOL_SCENARIO_PARCEL_ID = 'scenario';
@@ -217,4 +225,29 @@ export function trendyolScenarioBreakpoints(base: TrendyolScenarioBase): readonl
   }
 
   return sortedUniquePositive(candidates);
+}
+
+/**
+ * Finds the lowest unit price at which this product's scenario meets `target`
+ * (a margin, a markup or an absolute net profit), or the reason none does. It
+ * only wires the scenario to the marketplace-agnostic solver: the solver drives
+ * the price, `evaluateTrendyolScenario` scores each one, and
+ * `trendyolScenarioBreakpoints` tells the solver where the shipping or commission
+ * regime changes on the price axis. No binary search and no pricing rule live
+ * here. `minUnitPrice` defaults to one kurus; `maxUnitPrice` defaults to unbounded.
+ */
+export function solveTrendyolScenarioPrice(params: {
+  readonly base: TrendyolScenarioBase;
+  readonly target: ScenarioPriceTarget;
+  readonly minUnitPrice?: Decimal;
+  readonly maxUnitPrice?: Decimal | null;
+}): ScenarioSolveResult {
+  const { base, target } = params;
+  return solveScenarioPrice({
+    evaluate: (unitPrice) => evaluateTrendyolScenario({ ...base, unitPrice }).statement,
+    breakpoints: trendyolScenarioBreakpoints(base),
+    target,
+    minUnitPrice: params.minUnitPrice ?? DEFAULT_SCENARIO_MIN_UNIT_PRICE,
+    maxUnitPrice: params.maxUnitPrice ?? null,
+  });
 }

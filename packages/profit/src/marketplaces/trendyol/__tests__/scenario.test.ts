@@ -16,6 +16,7 @@ import { type ItemCostProfileInput } from '../../../core/seller-costs/build-sell
 import {
   buildTrendyolScenarioParcel,
   evaluateTrendyolScenario,
+  solveTrendyolScenarioPrice,
   trendyolScenarioBreakpoints,
   TRENDYOL_SCENARIO_ITEM_ID,
   TRENDYOL_SCENARIO_PARCEL_ID,
@@ -277,5 +278,21 @@ describe('trendyolScenarioBreakpoints', () => {
     expect(trendyolScenarioBreakpoints(scenarioBase({ reference: ownContractReference }))).toEqual(
       [],
     );
+  });
+});
+
+describe('solveTrendyolScenarioPrice', () => {
+  it('solves through the scenario with its own breakpoints', () => {
+    const result = solveTrendyolScenarioPrice({
+      base: scenarioBase({ costs: cogsProfiles('150') }),
+      target: { kind: 'MARGIN', pct: new Decimal('20') },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error(`expected a solved price, got ${result.reason}`);
+    }
+    expect(result.unitPrice.toFixed(2)).toBe('479.83');
+    expect(result.statement.netProfit?.toFixed(2)).toBe('95.97');
   });
 });
