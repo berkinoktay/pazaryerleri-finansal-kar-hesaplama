@@ -8,3 +8,12 @@ import { Decimal } from 'decimal.js';
 export function grossToVat(gross: Decimal, ratePct: Decimal): Decimal {
   return gross.mul(ratePct).div(new Decimal(100).add(ratePct));
 }
+
+/**
+ * Rounds a monetary value to two decimals using banker-free ROUND_HALF_UP
+ * (ties away from zero). Single source of truth for money rounding: every line
+ * amount passes through here exactly once before it enters a profit line.
+ */
+export function roundMoney(value: Decimal): Decimal {
+  return value.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+}
