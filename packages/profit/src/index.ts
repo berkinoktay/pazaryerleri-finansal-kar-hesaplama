@@ -123,3 +123,91 @@ export {
   type ProfitStatementRow,
   type ProfitStatementView,
 } from './core/profit-statement';
+
+// Trendyol module and seller costs (rebuild, phase 2A) -- docs/plans/2026-10-29-profit-engine-faz-2a-plan.md
+export {
+  activeItems,
+  assertAcceptedReturns,
+  assertParcelSnapshot,
+  InvalidParcelSnapshotError,
+  type AcceptedReturn,
+  type ParcelItemSnapshot,
+  type ParcelSnapshot,
+} from './core/parcel-snapshot';
+export {
+  buildSellerCostLines,
+  type CostProfileVersionInput,
+  type ItemCostInput,
+  type ItemCostProfileInput,
+} from './core/seller-costs/build-seller-cost-lines';
+export { buildCostReturnLines } from './core/seller-costs/build-cost-return-lines';
+export {
+  itemsForAllocation,
+  type AllocationItemSets,
+} from './core/allocation/allocation-item-sets';
+export { type AllocationScope } from './core/catalog/profit-line-catalog';
+export { KURUS_DECIMALS, kurusAmountViolation } from './money';
+export { saleVatRatePct } from './tax/tr/sale-vat';
+export { buildStoppageLines, buildStoppageRefundLines } from './tax/tr/stoppage-lines';
+export { grossFromNet } from './tax/tr/vat';
+export {
+  TRENDYOL_CURRENCY,
+  TRENDYOL_SAME_DAY_SHIPPING_TYPE,
+  trendyolCategoryBrandKey,
+  type OverseasReturnTier,
+  type TrendyolBaremBand,
+  type TrendyolCommissionBand,
+  type TrendyolCommissionRules,
+  type TrendyolFeeParams,
+  type TrendyolItemAttributes,
+  type TrendyolParcelAttributes,
+  type TrendyolReferenceData,
+  type TrendyolShippingCarrier,
+  type TrendyolShippingTariff,
+} from './marketplaces/trendyol/trendyol-inputs';
+export {
+  resolveTrendyolCommissionRate,
+  trendyolBandForPrice,
+  type ResolvedTrendyolCommissionRate,
+  type TrendyolCommissionRateSource,
+} from './marketplaces/trendyol/resolve-commission-rate';
+export {
+  estimateCommissionLines,
+  estimateSaleLines,
+} from './marketplaces/trendyol/estimate-sale-and-commission';
+export { estimateServiceFeeLine } from './marketplaces/trendyol/estimate-service-fee';
+export {
+  estimateShippingLine,
+  parcelDesi,
+  resolveTrendyolShippingGross,
+  resolveTrendyolShippingNet,
+  trendyolCarrierCodeForKind,
+  type ShippingTariffKind,
+  type ShippingUnavailableReason,
+} from './marketplaces/trendyol/estimate-shipping';
+export { estimateInternationalServiceLine } from './marketplaces/trendyol/estimate-export-fees';
+export { estimateReturnLines } from './marketplaces/trendyol/estimate-returns';
+export {
+  estimateTrendyolParcel,
+  type EstimateResult,
+  type TrendyolEstimateInput,
+} from './marketplaces/trendyol/estimate-parcel';
+export {
+  recordKind,
+  TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
+  TRENDYOL_CARGO_RETURN_ITEM_TYPE,
+  TRENDYOL_OTHER_FINANCIAL_RECORD_KIND,
+  TRENDYOL_RECORD_KIND,
+  TRENDYOL_RETURN_CYCLE_CONFIRMED_TYPES,
+  TRENDYOL_SALE_CYCLE_CONFIRMED_TYPES,
+  TRENDYOL_SETTLEMENT_RECORD_KIND,
+  type TrendyolCargoInvoiceItem,
+  type TrendyolRecordKind,
+  type TrendyolSettlementRecord,
+  type TrendyolTransactionType,
+} from './marketplaces/trendyol/settlement-records';
+export {
+  mapTrendyolRecords,
+  type MappingResult,
+  type TrendyolMappingInput,
+} from './marketplaces/trendyol/map-records';

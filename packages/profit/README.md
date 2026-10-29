@@ -44,3 +44,20 @@ The design is documented in `docs/plans/2026-10-29-profit-engine-design.md` (loc
 the repo; `docs/` is gitignored). An equivalence test proves the new core reproduces
 the legacy formula to the kurus across all twelve legacy scenarios, and a golden test
 pins the real melontik order 11761487239.
+
+## Trendyol module and seller costs (rebuild, phase 2A)
+
+The second rebuild phase adds the Trendyol-specific estimators and the settlement
+mapper, still marketplace-agnostic at the core. A `ParcelSnapshot` (one parcel, its
+items and accounting currency) is the shared input that every estimator reads;
+`core/seller-costs/` turns the seller's cost profiles into cost and cost-return lines.
+`estimateTrendyolParcel` composes the estimators in a fixed order — sale, commission,
+seller costs, stoppage, service fee, shipping, international service fee, then the
+return legs — and returns the lines, the issues, and the active/returned item sets.
+`mapTrendyolRecords` reconciles real settlement and cargo-invoice records into actual
+lines and confirms the estimates through two independent payment cycles (the sale
+cycle and the return cycle), each gated on its own payment order. The catalog's
+`allocationScope` decides whether a parcel-level line is split across the active items
+or the returned items. Nothing calls this module yet; phase 3 wires the database
+loader and the callers to it. A second golden test pins the melontik parcel end to end
+through the module, including the ESTIMATED -> PARTIALLY_SETTLED -> SETTLED transition.
