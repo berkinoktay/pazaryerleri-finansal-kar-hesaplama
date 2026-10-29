@@ -26,3 +26,21 @@ the core; the `resolve-*` / `infer-*` helpers feed it. Marketplace parameters
 into code or enum names.
 
 See the root `CLAUDE.md` for the shared money/decimal standards.
+
+## Profit line core (rebuild, phase 1)
+
+A marketplace-agnostic rebuild of the profit computation lives alongside the legacy
+`computeProfit`, not yet wired into any caller. It is organized in two pure folders:
+
+- `core/` holds the line model (`createProfitLine`, the `PROFIT_LINE_CATALOG` line-type
+  catalog, the single `selectLines` rule, per-item allocation of parcel-level lines,
+  event-date FX selection and conversion, the issue catalog and status, and the
+  `computeProfitStatement` statement that ties them together).
+- `tax/tr/` holds the Turkish tax module: VAT from a gross amount, the stoppage base
+  and amount, and the output/input/net VAT totals (`computeVatTotals`,
+  `effectiveNetVat`).
+
+The design is documented in `docs/plans/2026-10-29-profit-engine-design.md` (local to
+the repo; `docs/` is gitignored). An equivalence test proves the new core reproduces
+the legacy formula to the kurus across all twelve legacy scenarios, and a golden test
+pins the real melontik order 11761487239.
