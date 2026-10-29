@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { prisma, type Prisma } from '@pazarsync/db';
 import { type OrderStatus } from '@pazarsync/db/enums';
 
+import { TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE } from '../../../marketplaces/trendyol/settlement-records';
+
 /**
  * Shared setup for the profit persistence integration tests (loader + writer).
  * Reproduces the real melontik order 11761487239 of the Phase 2A golden parcel in
@@ -405,4 +407,130 @@ async function createOrderItem(params: {
     },
   });
   return created.id;
+}
+
+/** The columns a raw-finance-record insert accepts; tests set only the ones they need. */
+export interface FinanceRecordInput {
+  readonly storeId: string;
+  readonly organizationId: string;
+  readonly family: 'SETTLEMENT' | 'OTHER_FINANCIAL' | 'CARGO_INVOICE_ITEM';
+  readonly transactionType: string;
+  readonly recordId: string;
+  readonly shipmentPackageId?: string | null;
+  readonly barcode?: string | null;
+  readonly paymentOrderId?: string | null;
+  readonly parcelUniqueId?: string | null;
+  readonly invoiceSerial?: string | null;
+  readonly debt?: string | null;
+  readonly credit?: string | null;
+  readonly commissionAmount?: string | null;
+  readonly amountGross?: string | null;
+  readonly desi?: string | null;
+  readonly transactionDate?: Date | null;
+}
+
+/** Inserts one raw marketplace_finance_records row, always a TRENDYOL record. */
+export async function insertFinanceRecord(input: FinanceRecordInput): Promise<void> {
+  await prisma.marketplaceFinanceRecord.create({
+    data: {
+      organizationId: input.organizationId,
+      storeId: input.storeId,
+      platform: 'TRENDYOL',
+      family: input.family,
+      transactionType: input.transactionType,
+      recordId: input.recordId,
+      shipmentPackageId: input.shipmentPackageId ?? null,
+      barcode: input.barcode ?? null,
+      paymentOrderId: input.paymentOrderId ?? null,
+      parcelUniqueId: input.parcelUniqueId ?? null,
+      invoiceSerial: input.invoiceSerial ?? null,
+      debt: input.debt ?? null,
+      credit: input.credit ?? null,
+      commissionAmount: input.commissionAmount ?? null,
+      amountGross: input.amountGross ?? null,
+      desi: input.desi ?? null,
+      transactionDate: input.transactionDate ?? null,
+      payload: {},
+      fetchedAt: new Date(),
+    },
+  });
+}
+
+/**
+ * The golden melontik sale-cycle finance records: one sale and one seller discount
+ * per item plus the shared payment order, matched to the parcel by shipmentPackageId
+ * and paymentOrderId. Mirrors the Phase 2A golden settlement records so the writer
+ * reconciles the parcel to the same 191.79 as the pure module does.
+ */
+export function melontikSaleCycleRecordInputs(parcel: MelontikParcel): FinanceRecordInput[] {
+  const base = { storeId: parcel.storeId, organizationId: parcel.organizationId } as const;
+  return [
+    {
+      ...base,
+      family: 'SETTLEMENT',
+      transactionType: 'Sale',
+      recordId: 'sale-a',
+      shipmentPackageId: parcel.platformOrderId,
+      barcode: MELONTIK.items.a.barcode,
+      credit: '529.00',
+      commissionAmount: '100.51',
+      paymentOrderId: MELONTIK.paymentOrderId,
+    },
+    {
+      ...base,
+      family: 'SETTLEMENT',
+      transactionType: 'Discount',
+      recordId: 'disc-a',
+      shipmentPackageId: parcel.platformOrderId,
+      barcode: MELONTIK.items.a.barcode,
+      debt: '37.72',
+      commissionAmount: '7.17',
+    },
+    {
+      ...base,
+      family: 'SETTLEMENT',
+      transactionType: 'Sale',
+      recordId: 'sale-b',
+      shipmentPackageId: parcel.platformOrderId,
+      barcode: MELONTIK.items.b.barcode,
+      credit: '409.68',
+      commissionAmount: '77.84',
+      paymentOrderId: MELONTIK.paymentOrderId,
+    },
+    {
+      ...base,
+      family: 'SETTLEMENT',
+      transactionType: 'Discount',
+      recordId: 'disc-b',
+      shipmentPackageId: parcel.platformOrderId,
+      barcode: MELONTIK.items.b.barcode,
+      debt: '29.21',
+      commissionAmount: '5.55',
+    },
+    {
+      ...base,
+      family: 'OTHER_FINANCIAL',
+      transactionType: 'PaymentOrder',
+      recordId: 'po-1',
+      paymentOrderId: MELONTIK.paymentOrderId,
+    },
+  ];
+}
+
+/** The golden outbound cargo-invoice item, matched to the parcel by parcelUniqueId. */
+export function melontikCargoInvoiceInput(
+  parcel: MelontikParcel,
+  parcelUniqueId: string,
+): FinanceRecordInput {
+  return {
+    storeId: parcel.storeId,
+    organizationId: parcel.organizationId,
+    family: 'CARGO_INVOICE_ITEM',
+    transactionType: TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
+    recordId: 'cargo-1',
+    parcelUniqueId,
+    invoiceSerial: 'INV1',
+    amountGross: '98.34',
+    desi: '2',
+  };
 }
