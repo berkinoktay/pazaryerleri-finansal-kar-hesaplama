@@ -91,7 +91,11 @@ export { COST_PROFILE_LINE_TYPE } from './core/catalog/cost-profile-line-type';
 export { vatFromGross } from './tax/tr/vat';
 export { netSaleStoppageBase, stoppageAmount } from './tax/tr/stoppage';
 export { computeVatTotals, effectiveNetVat, type VatTotals } from './tax/tr/net-vat';
-export { selectLines, type LineSelectionMode } from './core/select-lines';
+export {
+  ProfitLineLevelConflictError,
+  selectLines,
+  type LineSelectionMode,
+} from './core/select-lines';
 export { InvalidAllocationError, splitByWeights } from './core/allocation/split-by-weights';
 export {
   resolveAllocationWeights,
