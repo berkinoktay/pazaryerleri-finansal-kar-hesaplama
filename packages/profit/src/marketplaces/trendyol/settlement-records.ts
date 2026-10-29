@@ -89,6 +89,14 @@ export const TRENDYOL_RECORD_KIND = {
 } satisfies Record<TrendyolTransactionType, TrendyolRecordKind>;
 
 /**
+ * The otherfinancials transaction type that marks a settlement cycle's payment
+ * order (its kind is PAYMENT_ORDER in TRENDYOL_OTHER_FINANCIAL_RECORD_KIND). Named
+ * so the loader query and the mapper's rawType never write the raw literal.
+ */
+export const TRENDYOL_PAYMENT_ORDER_TRANSACTION_TYPE: OtherFinancialTransactionType =
+  'PaymentOrder';
+
+/**
  * The cargo-invoice item type for an outbound shipment, the Trendyol Turkish label
  * 'Gonderi Kargo Bedeli' (with the 'o' umlaut). Written with a unicode escape to
  * keep the source ASCII; the runtime string is byte-identical to the legacy label.
@@ -145,7 +153,7 @@ export function recordKind(record: TrendyolSettlementRecord): TrendyolRecordKind
 
 /**
  * Narrows a raw transaction-type string to a known `TrendyolTransactionType` by
- * an own-property check on the merged kind table — so a prototype key such as
+ * an own-property check on the merged kind table -- so a prototype key such as
  * `'toString'` is never mistaken for a transaction type. The loader uses it to
  * tell a mappable settlement/otherfinancials row from one it must set aside.
  */

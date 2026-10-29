@@ -15,15 +15,24 @@ import { ProfitIssueCode, ProfitLineType } from '@pazarsync/db/enums';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { estimateTrendyolParcel } from '../../marketplaces/trendyol/estimate-parcel';
-import { TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE } from '../../marketplaces/trendyol/settlement-records';
+import {
+  TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
+  TRENDYOL_CARGO_RETURN_ITEM_TYPE,
+} from '../../marketplaces/trendyol/settlement-records';
+import { TRENDYOL_SAME_DAY_SHIPPING_TYPE } from '../../marketplaces/trendyol/trendyol-inputs';
 import { type ProfitLine } from '../../core/profit-line';
+import { FeeDefinitionNotFoundError } from '../../resolve-fee-definition';
 import { ParcelNotFoundError, UnsupportedPlatformError } from '../errors';
 import { loadTrendyolParcel } from '../load-trendyol-parcel';
 import {
+  attachCostProfile,
+  createAdditionalStore,
   ensureDbReachable,
+  insertFxRate,
   MELONTIK,
   seedMelontikParcel,
   truncateAll,
+  upsertCarrierWithTariffs,
 } from './helpers/melontik-parcel';
 
 /** Finds the single line of a type (and its order item), throwing when absent. */
@@ -501,5 +510,407 @@ describe('loadTrendyolParcel', () => {
     await expect(
       loadTrendyolParcel(prisma, { organizationId: org.id, orderId: order.id }),
     ).rejects.toBeInstanceOf(UnsupportedPlatformError);
+  });
+
+  it('loads shipping tariff rows dated after the order date (no effective-from filter)', async () => {
+    // A dedicated carrier whose only desi + Barem rows are dated 2027, after the
+    // 2026-10-28 order date. Before fix 1 the effectiveFrom <= orderDate filter
+    // dropped them; now the loader reads by carrier only, like resolve-tariff.ts.
+    const futureCarrierId = await upsertCarrierWithTariffs({
+      code: 'TEST_SHIP_FUTURE',
+      externalId: 990002,
+      supportsBaremDestek: true,
+      maxBaremDesi: 10,
+      desiRows: [{ desi: 1, priceNet: '55.00', effectiveFrom: new Date('2027-01-01T00:00:00Z') }],
+      baremRows: [
+        {
+          minOrderAmount: '0.00',
+          maxOrderAmount: '5000.00',
+          priceNet: '44.00',
+          effectiveFrom: new Date('2027-01-01T00:00:00Z'),
+        },
+      ],
+    });
+    const parcel = await seedMelontikParcel();
+    await prisma.store.update({
+      where: { id: parcel.storeId },
+      data: { defaultShippingCarrierId: futureCarrierId },
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const shipping = loaded.estimateInput.reference.shipping;
+    expect(shipping.carrier?.code).toBe('TEST_SHIP_FUTURE');
+    expect(shipping.desiTariffNet.get('1')?.toFixed(2)).toBe('55.00');
+    expect(shipping.baremBands).toHaveLength(1);
+    expect(shipping.baremBands[0]?.priceNet.toFixed(2)).toBe('44.00');
+  });
+
+  it('does not use another store CommissionTariffItem with the same barcode', async () => {
+    const parcel = await seedMelontikParcel();
+    const otherStoreId = await createAdditionalStore({
+      organizationId: parcel.organizationId,
+      name: 'Rival Store',
+    });
+
+    const tariff = await prisma.commissionTariff.create({
+      data: { organizationId: parcel.organizationId, storeId: otherStoreId, name: 'Rival tariff' },
+    });
+    const period = await prisma.commissionTariffPeriod.create({
+      data: {
+        organizationId: parcel.organizationId,
+        storeId: otherStoreId,
+        tariffId: tariff.id,
+        dateRangeLabel: 'covering',
+        sortOrder: 0,
+        startsAt: new Date('2026-10-01T00:00:00Z'),
+        endsAt: new Date('2026-11-30T23:59:00Z'),
+      },
+    });
+    await prisma.commissionTariffItem.create({
+      data: {
+        organizationId: parcel.organizationId,
+        storeId: otherStoreId,
+        periodId: period.id,
+        barcode: MELONTIK.items.a.barcode,
+        productTitle: 'Rival melontik',
+        currentPrice: MELONTIK.items.a.saleGross,
+        currentCommissionPct: '5',
+        bands: [{ key: 'band1', commissionPct: '5' }],
+      },
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const attrA = loaded.estimateInput.attributes.items.find((i) => i.orderItemId === parcel.itemA);
+    expect(attrA?.tariffBands).toBeNull();
+  });
+
+  it('breaks a tariff tie by the later-created tariff', async () => {
+    const parcel = await seedMelontikParcel();
+
+    async function createCoveringTariff(pct: string, createdAt: Date): Promise<void> {
+      const tariff = await prisma.commissionTariff.create({
+        data: {
+          organizationId: parcel.organizationId,
+          storeId: parcel.storeId,
+          name: `tariff ${pct}`,
+          createdAt,
+        },
+      });
+      const period = await prisma.commissionTariffPeriod.create({
+        data: {
+          organizationId: parcel.organizationId,
+          storeId: parcel.storeId,
+          tariffId: tariff.id,
+          dateRangeLabel: 'covering',
+          sortOrder: 0,
+          startsAt: new Date('2026-10-01T00:00:00Z'),
+          endsAt: new Date('2026-11-30T23:59:00Z'),
+        },
+      });
+      await prisma.commissionTariffItem.create({
+        data: {
+          organizationId: parcel.organizationId,
+          storeId: parcel.storeId,
+          periodId: period.id,
+          barcode: MELONTIK.items.a.barcode,
+          productTitle: `melontik ${pct}`,
+          currentPrice: MELONTIK.items.a.saleGross,
+          currentCommissionPct: pct,
+          bands: [{ key: 'band1', commissionPct: pct }],
+        },
+      });
+    }
+
+    await createCoveringTariff('11', new Date('2026-01-01T00:00:00Z'));
+    await createCoveringTariff('23', new Date('2026-01-02T00:00:00Z')); // later created -> wins
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const attrA = loaded.estimateInput.attributes.items.find((i) => i.orderItemId === parcel.itemA);
+    expect(attrA?.tariffBands).toHaveLength(1);
+    expect(attrA?.tariffBands?.[0]?.ratePct.toFixed(0)).toBe('23');
+  });
+
+  it('breaks a period tie within one tariff by the later-created period', async () => {
+    const parcel = await seedMelontikParcel();
+    const tariff = await prisma.commissionTariff.create({
+      data: {
+        organizationId: parcel.organizationId,
+        storeId: parcel.storeId,
+        name: 'two-period tariff',
+      },
+    });
+
+    async function addCoveringPeriod(
+      pct: string,
+      sortOrder: number,
+      createdAt: Date,
+    ): Promise<void> {
+      const period = await prisma.commissionTariffPeriod.create({
+        data: {
+          organizationId: parcel.organizationId,
+          storeId: parcel.storeId,
+          tariffId: tariff.id,
+          dateRangeLabel: `covering ${pct}`,
+          sortOrder,
+          startsAt: new Date('2026-10-01T00:00:00Z'),
+          endsAt: new Date('2026-11-30T23:59:00Z'),
+          createdAt,
+        },
+      });
+      await prisma.commissionTariffItem.create({
+        data: {
+          organizationId: parcel.organizationId,
+          storeId: parcel.storeId,
+          periodId: period.id,
+          barcode: MELONTIK.items.a.barcode,
+          productTitle: `melontik ${pct}`,
+          currentPrice: MELONTIK.items.a.saleGross,
+          currentCommissionPct: pct,
+          bands: [{ key: 'band1', commissionPct: pct }],
+        },
+      });
+    }
+
+    await addCoveringPeriod('11', 0, new Date('2026-01-01T00:00:00Z'));
+    await addCoveringPeriod('23', 1, new Date('2026-01-02T00:00:00Z')); // later created -> wins
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const attrA = loaded.estimateInput.attributes.items.find((i) => i.orderItemId === parcel.itemA);
+    expect(attrA?.tariffBands).toHaveLength(1);
+    expect(attrA?.tariffBands?.[0]?.ratePct.toFixed(0)).toBe('23');
+  });
+
+  it('resolves the micro-export fees and overseas return tiers for an export order', async () => {
+    const parcel = await seedMelontikParcel({ micro: true });
+    // The international-service fee definition the export path resolves.
+    await prisma.feeDefinition.create({
+      data: {
+        platform: 'TRENDYOL',
+        feeType: 'INTERNATIONAL_SERVICE',
+        displayName: 'Uluslararasi Hizmet Bedeli',
+        calculationKind: 'RATE_OF_SALE',
+        rateOfSale: '0.0600',
+        defaultVatRate: '20.00',
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const fees = loaded.estimateInput.reference.fees;
+    expect(loaded.estimateInput.snapshot.isExportSale).toBe(true);
+    // rateOfSale 0.0600 -> 6%.
+    expect(fees.internationalServiceRatePct.toFixed(2)).toBe('6.00');
+    expect(fees.internationalServiceVatRatePct.toFixed(2)).toBe('20.00');
+
+    // Seeded tiers: rate 0.3500 -> 35, 0.3000 -> 30 (rate x 100).
+    const tierByMin = new Map(
+      fees.overseasReturnTiers.map((tier) => [tier.minUnitSaleGross.toFixed(2), tier]),
+    );
+    expect(tierByMin.get('0.00')?.ratePct.toFixed(0)).toBe('35');
+    expect(tierByMin.get('2000.01')?.ratePct.toFixed(0)).toBe('30');
+  });
+
+  it('loads the latest two fx quotes on or before the business date, newest first', async () => {
+    const parcel = await seedMelontikParcel();
+    // Give variant A a USD cost version so the loader resolves USD fx quotes.
+    await attachCostProfile({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      productVariantId: parcel.variantA,
+      currency: 'USD',
+      amountGross: '10.00',
+      vatRate: '0',
+    });
+
+    // Business date is 2026-10-28. Two rates on or before it, one after (excluded).
+    await insertFxRate({
+      currency: 'USD',
+      rateDate: new Date('2026-10-26T00:00:00Z'),
+      rateToTry: '32.000000',
+    });
+    await insertFxRate({
+      currency: 'USD',
+      rateDate: new Date('2026-10-27T00:00:00Z'),
+      rateToTry: '33.000000',
+    });
+    await insertFxRate({
+      currency: 'USD',
+      rateDate: new Date('2026-10-29T00:00:00Z'),
+      rateToTry: '34.000000',
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const quotes = loaded.estimateInput.fxQuotes;
+    expect(quotes).toHaveLength(2);
+    expect(quotes.map((q) => String(q.currency))).toEqual(['USD', 'USD']);
+    // orderBy rateDate desc, take 2 -> newest first; the 2026-10-29 rate is excluded.
+    expect(quotes.map((q) => q.rateDate)).toEqual(['2026-10-27', '2026-10-26']);
+    expect(quotes[0]?.rateToBase.toFixed(2)).toBe('33.00');
+    expect(quotes[1]?.rateToBase.toFixed(2)).toBe('32.00');
+  });
+
+  it('loads a return settlement record and return cargo item matched through a claim', async () => {
+    const returnTracking = BigInt('7330000001');
+    const returnPackageId = 'return-pkg-1';
+    const parcel = await seedMelontikParcel();
+    const base = { storeId: parcel.storeId, organizationId: parcel.organizationId } as const;
+
+    await prisma.orderClaim.create({
+      data: {
+        organizationId: parcel.organizationId,
+        storeId: parcel.storeId,
+        orderId: parcel.orderId,
+        trendyolClaimId: `claim-${randomUUID().slice(0, 8)}`,
+        claimDate: new Date(),
+        resolved: false,
+        orderShipmentPackageId: returnPackageId,
+        cargoTrackingNumber: returnTracking,
+      },
+    });
+
+    // A SETTLEMENT record on the claim's return package id.
+    await insertFinanceRecord({
+      ...base,
+      family: 'SETTLEMENT',
+      transactionType: 'Return',
+      recordId: 'return-settle',
+      shipmentPackageId: returnPackageId,
+      barcode: MELONTIK.items.a.barcode,
+      debt: '491.28',
+    });
+    // A cargo item matched via the claim's cargo tracking number.
+    await insertFinanceRecord({
+      ...base,
+      family: 'CARGO_INVOICE_ITEM',
+      transactionType: TRENDYOL_CARGO_RETURN_ITEM_TYPE,
+      recordId: 'return-cargo',
+      parcelUniqueId: returnTracking.toString(),
+      invoiceSerial: 'INV-RET',
+      amountGross: '42.00',
+      desi: '2',
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    expect(loaded.loadIssues).toEqual([]);
+    expect(loaded.records.map((r) => r.recordId)).toContain('return-settle');
+    const cargo = loaded.cargoItems.find((c) => c.parcelUniqueId === returnTracking.toString());
+    expect(cargo?.invoiceSerial).toBe('INV-RET');
+    expect(cargo?.itemType).toBe(TRENDYOL_CARGO_RETURN_ITEM_TYPE);
+    expect(cargo?.amountGross.toFixed(2)).toBe('42.00');
+  });
+
+  it('ignores another store PaymentOrder and cargo item that share the parcel keys', async () => {
+    const tracking = BigInt('7330000002');
+    const parcel = await seedMelontikParcel({ cargoTrackingNumber: tracking });
+    const base = { storeId: parcel.storeId, organizationId: parcel.organizationId } as const;
+    const otherStoreId = await createAdditionalStore({
+      organizationId: parcel.organizationId,
+      name: 'Rival Store',
+    });
+
+    // This store's sale carries the payment order id (so the loader runs the
+    // PaymentOrder query at all).
+    await insertFinanceRecord({
+      ...base,
+      family: 'SETTLEMENT',
+      transactionType: 'Sale',
+      recordId: 'sale-a',
+      shipmentPackageId: parcel.platformOrderId,
+      barcode: MELONTIK.items.a.barcode,
+      credit: '529.00',
+      paymentOrderId: MELONTIK.paymentOrderId,
+    });
+    // Another store's PaymentOrder with the same paymentOrderId must NOT load.
+    await insertFinanceRecord({
+      storeId: otherStoreId,
+      organizationId: parcel.organizationId,
+      family: 'OTHER_FINANCIAL',
+      transactionType: 'PaymentOrder',
+      recordId: 'other-po',
+      paymentOrderId: MELONTIK.paymentOrderId,
+    });
+    // Another store's cargo item with the same parcelUniqueId must NOT load.
+    await insertFinanceRecord({
+      storeId: otherStoreId,
+      organizationId: parcel.organizationId,
+      family: 'CARGO_INVOICE_ITEM',
+      transactionType: TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
+      recordId: 'other-cargo',
+      parcelUniqueId: tracking.toString(),
+      invoiceSerial: 'INV-X',
+      amountGross: '10.00',
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    expect(loaded.records.map((r) => r.recordId)).toEqual(['sale-a']);
+    expect(loaded.records.every((r) => r.transactionType !== 'PaymentOrder')).toBe(true);
+    expect(loaded.cargoItems).toHaveLength(0);
+  });
+
+  it('falls back to the standard fee for a non-same-day parcel with no fast definition', async () => {
+    const parcel = await seedMelontikParcel();
+    // Remove the PLATFORM_SERVICE_FAST definition entirely.
+    await prisma.feeDefinition.deleteMany({
+      where: { platform: 'TRENDYOL', feeType: 'PLATFORM_SERVICE_FAST' },
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const fees = loaded.estimateInput.reference.fees;
+    // Non-same-day: the same-day net falls back to the standard net (10.99), no throw.
+    expect(fees.psfSameDayNet.toFixed(2)).toBe('10.99');
+    expect(fees.psfSameDayNet.toFixed(2)).toBe(fees.psfStandardNet.toFixed(2));
+  });
+
+  it('throws when a same-day parcel has no fast fee definition', async () => {
+    const parcel = await seedMelontikParcel({
+      fastDelivery: true,
+      fastDeliveryType: TRENDYOL_SAME_DAY_SHIPPING_TYPE,
+    });
+    await prisma.feeDefinition.deleteMany({
+      where: { platform: 'TRENDYOL', feeType: 'PLATFORM_SERVICE_FAST' },
+    });
+
+    await expect(
+      loadTrendyolParcel(prisma, {
+        organizationId: parcel.organizationId,
+        orderId: parcel.orderId,
+      }),
+    ).rejects.toBeInstanceOf(FeeDefinitionNotFoundError);
   });
 });

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { prisma, type Prisma } from '@pazarsync/db';
-import { type OrderStatus } from '@pazarsync/db/enums';
+import { type Currency, type OrderStatus } from '@pazarsync/db/enums';
 
 import { TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE } from '../../../marketplaces/trendyol/settlement-records';
 
@@ -284,6 +284,11 @@ export interface SeedMelontikOptions {
   readonly snapshotIncludeNegativeNetVat?: boolean | null;
   readonly status?: OrderStatus;
   readonly cargoTrackingNumber?: bigint | null;
+  /** Marks the order as a micro-export (international) sale. */
+  readonly micro?: boolean;
+  /** Same-day/fast delivery flags, used by the service-fee tier tests. */
+  readonly fastDelivery?: boolean;
+  readonly fastDeliveryType?: string | null;
   /** Override the stored lineSaleGross to prove the loader ignores it. */
   readonly lineSaleGrossA?: string;
   readonly lineSaleGrossB?: string;
@@ -335,8 +340,9 @@ export async function seedMelontikParcel(opts: SeedMelontikOptions = {}): Promis
       platformOrderId,
       orderDate: MELONTIK.orderDate,
       status: opts.status ?? 'DELIVERED',
-      micro: false,
-      fastDelivery: false,
+      micro: opts.micro ?? false,
+      fastDelivery: opts.fastDelivery ?? false,
+      fastDeliveryType: opts.fastDeliveryType ?? null,
       usesSellerCargoAgreement: false,
       cargoTrackingNumber: opts.cargoTrackingNumber ?? null,
       snapshotIncludeStopaj: opts.snapshotIncludeStopaj ?? null,
@@ -533,4 +539,161 @@ export function melontikCargoInvoiceInput(
     amountGross: '98.34',
     desi: '2',
   };
+}
+
+export interface CarrierTariffSpec {
+  readonly code: string;
+  readonly externalId: number;
+  readonly supportsBaremDestek?: boolean;
+  readonly maxBaremDesi?: number;
+  readonly desiRows: readonly { desi: number; priceNet: string; effectiveFrom: Date }[];
+  readonly baremRows: readonly {
+    minOrderAmount: string;
+    maxOrderAmount: string;
+    priceNet: string;
+    effectiveFrom: Date;
+  }[];
+}
+
+/**
+ * Upserts a dedicated carrier (its code should be TEST-prefixed so globalSetup
+ * prunes it) with the given desi and Barem tariff rows at explicit effective-from
+ * dates. Idempotent: the shipping reference tables survive truncation, so every
+ * run re-ensures the carrier and its rows. Lets a test exercise the tariff read
+ * without mutating the shared melontik carrier.
+ */
+export async function upsertCarrierWithTariffs(spec: CarrierTariffSpec): Promise<string> {
+  const carrier = await prisma.shippingCarrier.upsert({
+    where: { platform_code: { platform: 'TRENDYOL', code: spec.code } },
+    create: {
+      platform: 'TRENDYOL',
+      externalId: spec.externalId,
+      code: spec.code,
+      displayName: spec.code,
+      supportsBaremDestek: spec.supportsBaremDestek ?? false,
+      maxBaremDesi: spec.maxBaremDesi ?? 10,
+    },
+    update: {
+      supportsBaremDestek: spec.supportsBaremDestek ?? false,
+      maxBaremDesi: spec.maxBaremDesi ?? 10,
+    },
+  });
+  for (const row of spec.desiRows) {
+    await prisma.shippingDesiTariff.upsert({
+      where: { carrierId_desi: { carrierId: carrier.id, desi: row.desi } },
+      create: {
+        carrierId: carrier.id,
+        desi: row.desi,
+        priceNet: row.priceNet,
+        effectiveFrom: row.effectiveFrom,
+      },
+      update: { priceNet: row.priceNet, effectiveFrom: row.effectiveFrom },
+    });
+  }
+  for (const row of spec.baremRows) {
+    await prisma.shippingBaremTariff.upsert({
+      where: {
+        carrierId_minOrderAmount_maxOrderAmount: {
+          carrierId: carrier.id,
+          minOrderAmount: row.minOrderAmount,
+          maxOrderAmount: row.maxOrderAmount,
+        },
+      },
+      create: {
+        carrierId: carrier.id,
+        minOrderAmount: row.minOrderAmount,
+        maxOrderAmount: row.maxOrderAmount,
+        priceNet: row.priceNet,
+        effectiveFrom: row.effectiveFrom,
+      },
+      update: { priceNet: row.priceNet, effectiveFrom: row.effectiveFrom },
+    });
+  }
+  return carrier.id;
+}
+
+/** Creates one more Trendyol store in an existing org (for store-isolation tests). */
+export async function createAdditionalStore(params: {
+  readonly organizationId: string;
+  readonly name?: string;
+}): Promise<string> {
+  const store = await prisma.store.create({
+    data: {
+      organizationId: params.organizationId,
+      name: params.name ?? 'Other Store',
+      platform: 'TRENDYOL',
+      environment: 'PRODUCTION',
+      externalAccountId: randomUUID(),
+      status: 'ACTIVE',
+      credentials: 'x',
+      shippingTariffSource: 'TRENDYOL_CONTRACT',
+    },
+  });
+  return store.id;
+}
+
+/**
+ * Attaches an extra single-version COGS profile (in the given currency) to a
+ * variant. Used by the fx test to introduce a non-TRY cost version so the loader
+ * resolves its fx quotes.
+ */
+export async function attachCostProfile(params: {
+  readonly organizationId: string;
+  readonly storeId: string;
+  readonly productVariantId: string;
+  readonly currency: Currency;
+  readonly amountGross: string;
+  readonly vatRate: string;
+  readonly changedAt?: Date;
+}): Promise<void> {
+  const profile = await prisma.costProfile.create({
+    data: {
+      organizationId: params.organizationId,
+      storeId: params.storeId,
+      name: `COGS ${params.currency}`,
+      type: 'COGS',
+      amountGross: params.amountGross,
+      currency: params.currency,
+      vatRate: params.vatRate,
+      fxRateMode: 'AUTO',
+    },
+  });
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId: params.organizationId,
+      version: 1,
+      name: `COGS ${params.currency}`,
+      type: 'COGS',
+      amountGross: params.amountGross,
+      currency: params.currency,
+      vatRate: params.vatRate,
+      fxRateMode: 'AUTO',
+      changedFields: [],
+      changedAt: params.changedAt ?? MELONTIK.costEffectiveFrom,
+    },
+  });
+  await prisma.productVariantCostProfile.create({
+    data: {
+      organizationId: params.organizationId,
+      productVariantId: params.productVariantId,
+      profileId: profile.id,
+    },
+  });
+}
+
+/** Inserts one fx-rate row (currency -> TRY on a date). fx_rates is truncated per test. */
+export async function insertFxRate(params: {
+  readonly currency: Currency;
+  readonly rateDate: Date;
+  readonly rateToTry: string;
+}): Promise<void> {
+  await prisma.fxRate.create({
+    data: {
+      currency: params.currency,
+      rateDate: params.rateDate,
+      rateToTry: params.rateToTry,
+      source: 'TEST',
+    },
+  });
 }

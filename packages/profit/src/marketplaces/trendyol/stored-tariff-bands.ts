@@ -7,12 +7,12 @@
 
 import type { Prisma } from '@pazarsync/db';
 
-// ─── Persisted band JSON ───────────────────────────────────────────────────
+// --- Persisted band JSON ---
 //
 // Trendyol's tariff bands are PRICE RANGES, not single thresholds: each band is
 // a [lowerLimit, upperLimit] window with its own commission. The seller drops
 // the price into a lower window to earn a lower commission. Band 1 is the
-// current tier (no upper limit — the seller's current price applies); band 4 has
+// current tier (no upper limit -- the seller's current price applies); band 4 has
 // no lower limit. Money is kept as decimal STRINGS; `commissionPct` is a PERCENT
 // (e.g. "19", "13.1"), exactly as the Excel states it.
 
@@ -26,7 +26,7 @@ export interface StoredTariffBand {
 /**
  * Parses the persisted `bands` JSON into a typed array, dropping any entry that
  * does not match the expected shape. Returns `[]` for a non-array value. A limit
- * is `null` when its key is absent or not a string — the persisted JSON OMITS
+ * is `null` when its key is absent or not a string -- the persisted JSON OMITS
  * null limits (band 1 has no upper, band 4 no lower) so the stored value never
  * carries an explicit JSON null. No type assertions: every field is runtime
  * checked, so malformed rows degrade to an empty band list rather than throwing.

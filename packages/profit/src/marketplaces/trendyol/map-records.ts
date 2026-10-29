@@ -27,6 +27,7 @@ import {
   recordKind,
   TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
   TRENDYOL_CARGO_RETURN_ITEM_TYPE,
+  TRENDYOL_PAYMENT_ORDER_TRANSACTION_TYPE,
   TRENDYOL_RETURN_CYCLE_CONFIRMED_TYPES,
   TRENDYOL_SALE_CYCLE_CONFIRMED_TYPES,
   type TrendyolCargoInvoiceItem,
@@ -493,7 +494,10 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
           vatRatePct: estimate.vatRatePct,
           fx: estimate.fx,
           inputs: { ...estimate.inputs, confirmedBy: `payment-order:${paymentOrderId}` },
-          externalRecord: { recordId: paymentOrder.recordId, rawType: 'PaymentOrder' },
+          externalRecord: {
+            recordId: paymentOrder.recordId,
+            rawType: TRENDYOL_PAYMENT_ORDER_TRANSACTION_TYPE,
+          },
         }),
       );
     }

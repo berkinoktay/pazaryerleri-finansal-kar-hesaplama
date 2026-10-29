@@ -29,6 +29,7 @@
 import { Decimal } from 'decimal.js';
 
 import type { OrderFeeDirection, Prisma } from '@pazarsync/db';
+import { CLAIM_ITEM_STATUS_ACCEPTED } from '@pazarsync/marketplace';
 
 import { applyEstimateOnOrderCreate } from './estimate-on-order-create';
 import type { ReturnFeeType } from './fold-return-legs';
@@ -39,7 +40,6 @@ import {
 } from './overseas-return-operation';
 import { isMicroExport, resolveFeeDefinition } from './resolve-fee-definition';
 import { estimateShippingCostForOrder } from './shipping/estimate-order-shipping';
-const ACCEPTED_STATUS = 'Accepted';
 
 /**
  * İade bacaklarının görünen adları (ücret zaman çizgisi başlığı). "(tahmini)" eki
@@ -153,7 +153,7 @@ export async function estimateReturnOnClaim(
   const acceptedItems = await tx.orderClaimItem.findMany({
     where: {
       claim: { orderId },
-      status: ACCEPTED_STATUS,
+      status: CLAIM_ITEM_STATUS_ACCEPTED,
       orderItemId: { not: null },
     },
     select: { orderItemId: true },

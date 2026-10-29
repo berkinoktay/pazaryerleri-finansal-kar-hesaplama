@@ -1,6 +1,14 @@
 import { Decimal } from 'decimal.js';
 import type { Prisma } from '@pazarsync/db';
-import { type Currency, Platform, ProfitIssueCode } from '@pazarsync/db/enums';
+import {
+  CommissionRuleKind,
+  type Currency,
+  FinanceRecordFamily,
+  OrderStatus,
+  Platform,
+  ProfitIssueCode,
+} from '@pazarsync/db/enums';
+import { CLAIM_ITEM_STATUS_ACCEPTED } from '@pazarsync/marketplace';
 import {
   getBusinessDate,
   resolveProfitSettings,
@@ -19,6 +27,7 @@ import {
 import { type TrendyolEstimateInput } from '../marketplaces/trendyol/estimate-parcel';
 import {
   isTrendyolTransactionType,
+  TRENDYOL_PAYMENT_ORDER_TRANSACTION_TYPE,
   type TrendyolCargoInvoiceItem,
   type TrendyolSettlementRecord,
 } from '../marketplaces/trendyol/settlement-records';
@@ -27,6 +36,7 @@ import {
   type StoredTariffBand,
 } from '../marketplaces/trendyol/stored-tariff-bands';
 import {
+  TRENDYOL_SAME_DAY_SHIPPING_TYPE,
   trendyolCategoryBrandKey,
   type OverseasReturnTier,
   type TrendyolBaremBand,
@@ -161,7 +171,7 @@ export async function loadTrendyolParcel(
   const businessDate = getBusinessDate(orderDate);
   const accountingCurrency = toCurrencyCode(store.organization.currency);
 
-  // ─── Snapshot items (decision 7: no item carries a cancellation flag) ──────
+  // --- Snapshot items (decision 7: no item carries a cancellation flag) ---
   const items: ParcelItemSnapshot[] = order.items.map((item) => {
     const variant = item.productVariant;
     const listGross = dec(item.lineListGross);
@@ -186,14 +196,14 @@ export async function loadTrendyolParcel(
     };
   });
 
-  // ─── Per-item tariff bands covering the order date ─────────────────────────
+  // --- Per-item tariff bands covering the order date ---
   const tariffBandsByItemId = await loadTariffBands(tx, {
     storeId,
     orderDate,
     orderItems: order.items,
   });
 
-  // ─── Per-item commission attributes ────────────────────────────────────────
+  // --- Per-item commission attributes ---
   const itemAttributes: TrendyolItemAttributes[] = order.items.map((item) => {
     const variant = item.productVariant;
     const product = variant?.product ?? null;
@@ -216,24 +226,27 @@ export async function loadTrendyolParcel(
     items: itemAttributes,
   };
 
-  // ─── Reference: fees, shipping, commission rules ───────────────────────────
-  const fees = await loadFeeParams(tx, { orderDate, isExport: order.micro });
+  // --- Reference: fees, shipping, commission rules ---
+  const fees = await loadFeeParams(tx, {
+    orderDate,
+    isExport: order.micro,
+    fastDeliveryType: order.fastDeliveryType,
+  });
   const shipping = await loadShippingTariff(tx, {
     storeId,
-    orderDate,
     source: store.shippingTariffSource,
     carrier: store.defaultShippingCarrier,
   });
   const commission = await loadCommissionRules(tx, order.items);
 
-  // ─── Costs + fx quotes ─────────────────────────────────────────────────────
+  // --- Costs + fx quotes ---
   const costs = await loadItemCosts(tx, { organizationId, orderItems: order.items });
   const fxQuotes = await loadFxQuotes(tx, { businessDate, costs });
 
-  // ─── Accepted returns (one unit per accepted claim item, capped at quantity) ─
+  // --- Accepted returns (one unit per accepted claim item, capped at quantity) ---
   const acceptedReturns = buildAcceptedReturns(order.claims, order.items);
 
-  // ─── Raw finance records + cargo items ─────────────────────────────────────
+  // --- Raw finance records + cargo items ---
   const loadIssues: ProfitIssue[] = [];
   const { records, cargoItems } = await loadFinanceRecords(tx, {
     storeId,
@@ -243,7 +256,7 @@ export async function loadTrendyolParcel(
     issues: loadIssues,
   });
 
-  // ─── Settings (decision 8: order snapshot wins, else store setting) ─────────
+  // --- Settings (decision 8: order snapshot wins, else store setting) ---
   const storeSettings = resolveProfitSettings(store.profitSettings);
   const settings: ResolvedProfitSettings = {
     includeStopaj: order.snapshotIncludeStopaj ?? storeSettings.includeStopaj,
@@ -256,7 +269,7 @@ export async function loadTrendyolParcel(
       parcelId: order.id,
       orderDate,
       businessDate,
-      isCancelled: order.status === 'CANCELLED',
+      isCancelled: order.status === OrderStatus.CANCELLED,
       isExportSale: order.micro,
       measuredDesi: decOrNull(order.cargoDeci),
       accountingCurrency,
@@ -390,20 +403,38 @@ async function loadTariffBands(
  */
 async function loadFeeParams(
   tx: Prisma.TransactionClient,
-  params: { readonly orderDate: Date; readonly isExport: boolean },
+  params: {
+    readonly orderDate: Date;
+    readonly isExport: boolean;
+    readonly fastDeliveryType: string | null;
+  },
 ): Promise<TrendyolFeeParams> {
-  const { orderDate, isExport } = params;
+  const { orderDate, isExport, fastDeliveryType } = params;
 
   const psf = await resolveFeeDefinition(tx, {
     platform: Platform.TRENDYOL,
     feeType: 'PLATFORM_SERVICE',
     at: orderDate,
   });
-  const psfFast = await resolveFeeDefinition(tx, {
-    platform: Platform.TRENDYOL,
-    feeType: 'PLATFORM_SERVICE_FAST',
-    at: orderDate,
-  });
+  const psfStandardNet = requireFeeField(psf.fixedAmountNet, 'PLATFORM_SERVICE', 'fixedAmountNet');
+
+  // The same-day tier is used only when the parcel is marked same-day shipping
+  // (see estimate-service-fee). For any other parcel the value is unused, so a
+  // missing FAST definition must not break it: fall back to the standard net.
+  let psfSameDayNet = psfStandardNet;
+  if (fastDeliveryType === TRENDYOL_SAME_DAY_SHIPPING_TYPE) {
+    const psfFast = await resolveFeeDefinition(tx, {
+      platform: Platform.TRENDYOL,
+      feeType: 'PLATFORM_SERVICE_FAST',
+      at: orderDate,
+    });
+    psfSameDayNet = requireFeeField(
+      psfFast.fixedAmountNet,
+      'PLATFORM_SERVICE_FAST',
+      'fixedAmountNet',
+    );
+  }
+
   const stoppage = await resolveFeeDefinition(tx, {
     platform: Platform.TRENDYOL,
     feeType: 'STOPPAGE',
@@ -443,12 +474,8 @@ async function loadFeeParams(
   }
 
   return {
-    psfStandardNet: requireFeeField(psf.fixedAmountNet, 'PLATFORM_SERVICE', 'fixedAmountNet'),
-    psfSameDayNet: requireFeeField(
-      psfFast.fixedAmountNet,
-      'PLATFORM_SERVICE_FAST',
-      'fixedAmountNet',
-    ),
+    psfStandardNet,
+    psfSameDayNet,
     psfVatRatePct: dec(psf.defaultVatRate),
     stoppageRatePct: requireFeeField(stoppage.rateOfSale, 'STOPPAGE', 'rateOfSale').mul(PERCENT),
     commissionVatRatePct: dec(commissionInvoice.defaultVatRate),
@@ -490,7 +517,6 @@ async function loadShippingTariff(
   tx: Prisma.TransactionClient,
   params: {
     readonly storeId: string;
-    readonly orderDate: Date;
     readonly source: TrendyolShippingTariff['source'];
     readonly carrier: {
       readonly id: string;
@@ -500,7 +526,7 @@ async function loadShippingTariff(
     } | null;
   },
 ): Promise<TrendyolShippingTariff> {
-  const { storeId, orderDate, source, carrier } = params;
+  const { storeId, source, carrier } = params;
 
   let carrierInput: TrendyolShippingCarrier | null = null;
   const desiTariffNet = new Map<string, Decimal>();
@@ -512,14 +538,21 @@ async function loadShippingTariff(
       supportsBarem: carrier.supportsBaremDestek,
       maxBaremDesi: new Decimal(carrier.maxBaremDesi),
     };
+    // One row per band, no version history: ShippingDesiTariff is unique on
+    // (carrierId, desi) and ShippingBaremTariff on (carrierId, minOrderAmount,
+    // maxOrderAmount). Read by carrierId only, exactly as resolve-tariff.ts does.
+    // An effectiveFrom <= orderDate filter cannot pick a version here; it would
+    // only drop the tariff for an order older than the seeded effective_from. A
+    // historic order is estimated with today's tariff and its cargo invoice later
+    // replaces the estimate. Versioned tariffs are a future shipping feature.
     const desiRows = await tx.shippingDesiTariff.findMany({
-      where: { carrierId: carrier.id, effectiveFrom: { lte: orderDate } },
+      where: { carrierId: carrier.id },
     });
     for (const row of desiRows) {
       desiTariffNet.set(row.desi.toString(), dec(row.priceNet));
     }
     const baremRows = await tx.shippingBaremTariff.findMany({
-      where: { carrierId: carrier.id, effectiveFrom: { lte: orderDate } },
+      where: { carrierId: carrier.id },
       orderBy: { minOrderAmount: 'asc' },
     });
     baremBands = baremRows.map((row) => ({
@@ -561,12 +594,12 @@ async function loadCommissionRules(
   const rows = await tx.marketplaceCommissionRate.findMany({
     where: {
       platform: Platform.TRENDYOL,
-      ruleKind: { in: ['CATEGORY', 'CATEGORY_BRAND'] },
+      ruleKind: { in: [CommissionRuleKind.CATEGORY, CommissionRuleKind.CATEGORY_BRAND] },
       categoryId: { in: categoryIds },
     },
   });
   for (const row of rows) {
-    if (row.ruleKind === 'CATEGORY') {
+    if (row.ruleKind === CommissionRuleKind.CATEGORY) {
       categoryRatePct.set(row.categoryId.toString(), dec(row.baseRate));
     } else if (row.brandId !== null) {
       categoryBrandRatePct.set(
@@ -687,7 +720,8 @@ function buildAcceptedReturns(
   const acceptedByItemId = new Map<string, number>();
   for (const claim of claims) {
     for (const claimItem of claim.items) {
-      if (claimItem.status !== 'Accepted' || claimItem.orderItemId === null) continue;
+      if (claimItem.status !== CLAIM_ITEM_STATUS_ACCEPTED || claimItem.orderItemId === null)
+        continue;
       if (!quantityByItemId.has(claimItem.orderItemId)) continue;
       acceptedByItemId.set(
         claimItem.orderItemId,
@@ -710,7 +744,7 @@ function buildAcceptedReturns(
 
 /** A raw finance record row, with the columns the mappers and the loader read. */
 interface FinanceRow {
-  readonly family: string;
+  readonly family: FinanceRecordFamily;
   readonly transactionType: string;
   readonly recordId: string;
   readonly invoiceSerial: string | null;
@@ -763,7 +797,7 @@ async function loadFinanceRecords(
   const settlementRows = await tx.marketplaceFinanceRecord.findMany({
     where: {
       storeId,
-      family: 'SETTLEMENT',
+      family: FinanceRecordFamily.SETTLEMENT,
       shipmentPackageId: { in: [platformOrderId, ...returnPackageIds] },
     },
   });
@@ -779,8 +813,8 @@ async function loadFinanceRecords(
       : await tx.marketplaceFinanceRecord.findMany({
           where: {
             storeId,
-            family: 'OTHER_FINANCIAL',
-            transactionType: 'PaymentOrder',
+            family: FinanceRecordFamily.OTHER_FINANCIAL,
+            transactionType: TRENDYOL_PAYMENT_ORDER_TRANSACTION_TYPE,
             paymentOrderId: { in: paymentOrderIds },
           },
         });
@@ -796,7 +830,11 @@ async function loadFinanceRecords(
     cargoKeys.length === 0
       ? []
       : await tx.marketplaceFinanceRecord.findMany({
-          where: { storeId, family: 'CARGO_INVOICE_ITEM', parcelUniqueId: { in: cargoKeys } },
+          where: {
+            storeId,
+            family: FinanceRecordFamily.CARGO_INVOICE_ITEM,
+            parcelUniqueId: { in: cargoKeys },
+          },
         });
 
   const records: TrendyolSettlementRecord[] = [];
