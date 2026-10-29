@@ -35,7 +35,18 @@ describe('TRENDYOL record kind tables', () => {
     // Unicode escapes keep the source ASCII; they decode to the exact Trendyol
     // invoice labels 'Gonderi Kargo Bedeli' / 'Iade Kargo Bedeli' (with the
     // Turkish 'o' umlaut and dotted capital 'I').
-    expect(TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE).toBe('Gönderi Kargo Bedeli');
-    expect(TRENDYOL_CARGO_RETURN_ITEM_TYPE).toBe('İade Kargo Bedeli');
+    expect(TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE).toBe('G\u00f6nderi Kargo Bedeli');
+    expect(TRENDYOL_CARGO_RETURN_ITEM_TYPE).toBe('\u0130ade Kargo Bedeli');
+  });
+
+  it('keeps the cargo labels byte-identical to the legacy UTF-8 labels', () => {
+    // The sync-worker cargo-invoice matcher keys off these exact bytes; the outbound
+    // label starts 47c3b6 (G + the 'o' umlaut), the return label starts c4b0 (the
+    // dotted capital 'I'). A drift here would silently stop matching cargo fees.
+    const outboundHex = Buffer.from(TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE, 'utf8').toString('hex');
+    const returnHex = Buffer.from(TRENDYOL_CARGO_RETURN_ITEM_TYPE, 'utf8').toString('hex');
+    expect(outboundHex.startsWith('47c3b6')).toBe(true);
+    expect(outboundHex).toBe('47c3b66e64657269204b6172676f20426564656c69');
+    expect(returnHex).toBe('c4b0616465204b6172676f20426564656c69');
   });
 });

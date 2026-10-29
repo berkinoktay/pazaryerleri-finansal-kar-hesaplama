@@ -124,6 +124,8 @@ describe('mapTrendyolRecords', () => {
     expect(sale?.vatRatePct?.toString()).toBe('10');
     expect(sale?.fx.source).toBe(FxRateSource.NATIVE);
     expect(sale?.inputs.recordIds).toBe('rec-1,rec-2');
+    // The external record points at the Sale, never at the Discount.
+    expect(sale?.externalRecord?.rawType).toBe('Sale');
     expect(sale?.externalRecord).toEqual({ recordId: 'rec-1', rawType: 'Sale' });
 
     const commission = result.lines.find((line) => line.type === ProfitLineType.COMMISSION);
@@ -280,6 +282,92 @@ describe('mapTrendyolRecords', () => {
         detail: 'CARGO_ITEM:Komisyon Faturasi:INV2',
       },
     ]);
+  });
+
+  it('sums several outbound cargo items into one shipping line', () => {
+    const snapshot = makeParcel({ items: [makeItem({ orderItemId: 'a', listGross: '100.00' })] });
+    const cargoItems = [
+      makeCargoItem({
+        invoiceSerial: 'INV2',
+        parcelUniqueId: 'P1',
+        itemType: TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
+        amountGross: '49.17',
+        desi: '1',
+      }),
+      makeCargoItem({
+        invoiceSerial: 'INV1',
+        parcelUniqueId: 'P2',
+        itemType: TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
+        amountGross: '49.17',
+        desi: '1',
+      }),
+    ];
+
+    const result = mapTrendyolRecords({
+      snapshot,
+      attributes: makeTrendyolAttributes(),
+      fees: FEES,
+      records: [],
+      cargoItems,
+      estimateLines: [],
+    });
+
+    expect(result.issues).toEqual([]);
+    const shipping = result.lines.find((line) => line.type === ProfitLineType.SHIPPING);
+    expect(shipping?.amount.gross.toFixed(2)).toBe('98.34');
+    expect(shipping?.amount.vat.toFixed(2)).toBe('16.39');
+    // invoiceSerials are the unique serials, sorted as text.
+    expect(shipping?.inputs.invoiceSerials).toBe('INV1,INV2');
+  });
+
+  it('confirms with the smallest payment order id when several match', () => {
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '100.00', barcode: 'bc-a' })],
+    });
+    const estimateLines = [
+      makeLine({
+        type: ProfitLineType.SERVICE_FEE,
+        gross: '13.19',
+        vat: '2.20',
+        level: ProfitLineLevel.PARCEL,
+        certainty: ProfitLineCertainty.ESTIMATE,
+      }),
+    ];
+    const records = [
+      makeRecord({
+        recordId: 'sale-1',
+        transactionType: 'Sale',
+        barcode: 'bc-a',
+        credit: '10.00',
+        paymentOrderId: '200',
+      }),
+      makeRecord({
+        recordId: 'sale-2',
+        transactionType: 'Sale',
+        barcode: 'bc-a',
+        credit: '10.00',
+        paymentOrderId: '100',
+      }),
+      makeRecord({ recordId: 'po-200', transactionType: 'PaymentOrder', paymentOrderId: '200' }),
+      makeRecord({ recordId: 'po-100', transactionType: 'PaymentOrder', paymentOrderId: '100' }),
+    ];
+
+    const result = mapTrendyolRecords({
+      snapshot,
+      attributes: makeTrendyolAttributes(),
+      fees: FEES,
+      records,
+      cargoItems: [],
+      estimateLines,
+    });
+
+    const serviceCopy = result.lines.find(
+      (line) =>
+        line.type === ProfitLineType.SERVICE_FEE &&
+        line.source === ProfitLineSource.MARKETPLACE_RECORD,
+    );
+    expect(serviceCopy?.inputs.confirmedBy).toBe('payment-order:100');
+    expect(serviceCopy?.externalRecord).toEqual({ recordId: 'po-100', rawType: 'PaymentOrder' });
   });
 
   it('confirms sale-cycle estimates when the sale payment order is present', () => {
@@ -610,6 +698,98 @@ describe('mapTrendyolRecords', () => {
     expect(copy?.source).toBe(ProfitLineSource.MARKETPLACE_RECORD);
     expect(copy?.inputs.confirmedBy).toBe('payment-order:r1');
     expect(copy?.externalRecord).toEqual({ recordId: 'po-r1', rawType: 'PaymentOrder' });
+  });
+
+  it('flags a discount that has no sale', () => {
+    // A discount bound to an item with no sale cannot net against anything; it must
+    // not vanish silently.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '100.00', barcode: 'bc-a' })],
+    });
+    const records = [
+      makeRecord({
+        recordId: 'disc-1',
+        transactionType: 'Discount',
+        barcode: 'bc-a',
+        debt: '10.00',
+        commissionAmount: '2.00',
+      }),
+    ];
+
+    const result = mapTrendyolRecords({
+      snapshot,
+      attributes: makeTrendyolAttributes(),
+      fees: FEES,
+      records,
+      cargoItems: [],
+      estimateLines: [],
+    });
+
+    expect(result.lines).toEqual([]);
+    expect(result.issues).toEqual([
+      {
+        code: ProfitIssueCode.AMBIGUOUS_RECORD_MATCH,
+        orderItemId: 'a',
+        detail: 'DISCOUNT_WITHOUT_SALE:disc-1',
+      },
+    ]);
+  });
+
+  it('still confirms the sale cycle when the sale record cannot be bound to an item', () => {
+    // The sale cycle id comes from every Sale record, bound or not: an ambiguous sale
+    // still joins its payment cycle so its payment order can confirm the estimates.
+    const snapshot = makeParcel({
+      items: [
+        makeItem({ orderItemId: 'a', listGross: '100.00', barcode: 'dup' }),
+        makeItem({ orderItemId: 'b', listGross: '100.00', barcode: 'dup' }),
+      ],
+    });
+    const estimateLines = [
+      makeLine({
+        type: ProfitLineType.SERVICE_FEE,
+        gross: '13.19',
+        vat: '2.20',
+        level: ProfitLineLevel.PARCEL,
+        certainty: ProfitLineCertainty.ESTIMATE,
+      }),
+    ];
+    const saleRecord = makeRecord({
+      recordId: 'sale-1',
+      transactionType: 'Sale',
+      barcode: 'dup',
+      credit: '10.00',
+      paymentOrderId: 'P1',
+    });
+    const paymentOrder = makeRecord({
+      recordId: 'po-1',
+      transactionType: 'PaymentOrder',
+      paymentOrderId: 'P1',
+    });
+
+    const result = mapTrendyolRecords({
+      snapshot,
+      attributes: makeTrendyolAttributes(),
+      fees: FEES,
+      records: [saleRecord, paymentOrder],
+      cargoItems: [],
+      estimateLines,
+    });
+
+    expect(result.issues).toEqual([
+      {
+        code: ProfitIssueCode.AMBIGUOUS_RECORD_MATCH,
+        orderItemId: null,
+        detail: 'MULTIPLE_ITEMS:sale-1',
+      },
+    ]);
+    const copies = result.lines.filter(
+      (line) => line.source === ProfitLineSource.MARKETPLACE_RECORD,
+    );
+    expect(copies).toHaveLength(1);
+    const serviceCopy = result.lines.find((line) => line.type === ProfitLineType.SERVICE_FEE);
+    expect(serviceCopy?.certainty).toBe(ProfitLineCertainty.ACTUAL);
+    expect(serviceCopy?.inputs.confirmedBy).toBe('payment-order:P1');
+    expect(serviceCopy?.externalRecord).toEqual({ recordId: 'po-1', rawType: 'PaymentOrder' });
   });
 
   it('rejects a parcel whose accounting currency is not TRY', () => {

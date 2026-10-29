@@ -95,18 +95,24 @@ function isZeroAmount(amount: LineMoney): boolean {
 }
 
 /**
- * Builds the shared record reference for a set of contributing records: the ids
- * sorted as text join into `inputs.recordIds`, and the first id (with its raw
- * transaction type) becomes the `externalRecord`.
+ * Builds the shared record reference for a set of contributing records: every id in
+ * `all` sorted as text joins into `inputs.recordIds`, and the first id of `primary`
+ * (sorted as text, with its raw transaction type) becomes the `externalRecord`. The
+ * sale/commission lines pass the Sale records as `primary`, so the external record
+ * points at a Sale and never at a Discount; return lines pass their Return records.
  */
-function buildRecordReference(records: readonly TrendyolSettlementRecord[]): RecordReference {
-  const sorted = [...records].sort((a, b) => compareText(a.recordId, b.recordId));
-  const first = sorted[0];
+function buildRecordReference(params: {
+  readonly all: readonly TrendyolSettlementRecord[];
+  readonly primary: readonly TrendyolSettlementRecord[];
+}): RecordReference {
+  const sortedAll = [...params.all].sort((a, b) => compareText(a.recordId, b.recordId));
+  const sortedPrimary = [...params.primary].sort((a, b) => compareText(a.recordId, b.recordId));
+  const first = sortedPrimary[0];
   if (first === undefined) {
-    throw new Error('buildRecordReference requires at least one record');
+    throw new Error('buildRecordReference requires at least one primary record');
   }
   return {
-    recordIds: sorted.map((record) => record.recordId).join(','),
+    recordIds: sortedAll.map((record) => record.recordId).join(','),
     externalRecord: { recordId: first.recordId, rawType: first.transactionType },
   };
 }
@@ -149,24 +155,33 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
     return active.filter((item) => item.barcode === barcode);
   }
 
-  // ── Classification (record input order) ──────────────────────────────────
+  // -- Classification (record input order) --
   for (const record of records) {
     const kind = recordKind(record);
     switch (kind) {
       case 'SALE':
       case 'DISCOUNT':
       case 'RETURN': {
+        // Cycle ids come from every Sale and Return record of the parcel, bound or
+        // not: an unbound record (no item or several items) still joins its payment
+        // cycle so its payment order can confirm the cycle's estimates.
+        if (record.paymentOrderId !== null) {
+          if (kind === 'SALE') {
+            saleCyclePaymentOrderIds.add(record.paymentOrderId);
+          } else if (kind === 'RETURN') {
+            returnCyclePaymentOrderIds.add(record.paymentOrderId);
+          }
+        }
+
         if (kind === 'RETURN' && snapshot.isExportSale) {
-          // On export the return does not reverse the sale (design §18); it only
-          // joins the return cycle so its payment order can confirm export fees.
+          // On export the return does not reverse the sale (design section 18); it
+          // only joins the return cycle (above) so its payment order can confirm
+          // the export fees.
           issues.push({
             code: ProfitIssueCode.UNMAPPED_MARKETPLACE_RECORD,
             orderItemId: null,
             detail: `EXPORT_RETURN:${record.recordId}`,
           });
-          if (record.paymentOrderId !== null) {
-            returnCyclePaymentOrderIds.add(record.paymentOrderId);
-          }
           break;
         }
 
@@ -194,16 +209,10 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
         const accumulator = accumulatorFor(matched.orderItemId);
         if (kind === 'SALE') {
           accumulator.sales.push(record);
-          if (record.paymentOrderId !== null) {
-            saleCyclePaymentOrderIds.add(record.paymentOrderId);
-          }
         } else if (kind === 'DISCOUNT') {
           accumulator.discounts.push(record);
         } else {
           accumulator.returns.push(record);
-          if (record.paymentOrderId !== null) {
-            returnCyclePaymentOrderIds.add(record.paymentOrderId);
-          }
         }
         break;
       }
@@ -268,7 +277,7 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
     );
   }
 
-  // ── Per item, in snapshot order ──────────────────────────────────────────
+  // -- Per item, in snapshot order --
   for (const item of active) {
     const accumulator = accumulators.get(item.orderItemId);
     if (accumulator === undefined) {
@@ -290,7 +299,10 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
           detail: `NEGATIVE_NET:${item.orderItemId}`,
         });
       } else {
-        const reference = buildRecordReference([...accumulator.sales, ...accumulator.discounts]);
+        const reference = buildRecordReference({
+          all: [...accumulator.sales, ...accumulator.discounts],
+          primary: accumulator.sales,
+        });
         if (saleNet.gt(ZERO)) {
           addRecordLine({
             type: ProfitLineType.SALE,
@@ -310,12 +322,29 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
           });
         }
       }
+    } else if (accumulator.discounts.length > 0) {
+      // A discount bound to an item with no sale cannot net against anything; it
+      // must not vanish silently.
+      const sortedDiscounts = [...accumulator.discounts].sort((a, b) =>
+        compareText(a.recordId, b.recordId),
+      );
+      const firstDiscount = sortedDiscounts[0];
+      if (firstDiscount !== undefined) {
+        issues.push({
+          code: ProfitIssueCode.AMBIGUOUS_RECORD_MATCH,
+          orderItemId: item.orderItemId,
+          detail: `DISCOUNT_WITHOUT_SALE:${firstDiscount.recordId}`,
+        });
+      }
     }
 
     if (accumulator.returns.length > 0) {
       const returnDebt = sumDecimals(accumulator.returns.map((record) => record.debt));
       const returnCommission = sumCommission(accumulator.returns);
-      const reference = buildRecordReference(accumulator.returns);
+      const reference = buildRecordReference({
+        all: accumulator.returns,
+        primary: accumulator.returns,
+      });
       if (returnDebt.gt(ZERO)) {
         addRecordLine({
           type: ProfitLineType.SALE_RETURN,
@@ -337,7 +366,7 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
     }
   }
 
-  // ── Cargo invoice (cargo-item input order for issues) ─────────────────────
+  // -- Cargo invoice (cargo-item input order for issues) --
   const outboundCargo: TrendyolCargoInvoiceItem[] = [];
   const returnCargo: TrendyolCargoInvoiceItem[] = [];
   for (const cargoItem of cargoItems) {
@@ -420,7 +449,7 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
     cargoReturnShippingProduced = true;
   }
 
-  // ── Payment confirmation (two independent cycles) ─────────────────────────
+  // -- Payment confirmation (two independent cycles) --
   function smallestConfirmedCyclePaymentOrderId(cycleIds: ReadonlySet<string>): string | null {
     let smallest: string | null = null;
     for (const id of cycleIds) {

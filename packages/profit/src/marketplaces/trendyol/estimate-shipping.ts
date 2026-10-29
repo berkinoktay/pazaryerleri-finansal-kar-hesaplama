@@ -52,9 +52,11 @@ type ShippingGrossResult =
 
 /**
  * The parcel desi for a shipping estimate. The marketplace-measured desi wins when
- * present; otherwise the desi is the SUM of `unitDesi x quantity` over the active
- * items (the total, never the quantity-weighted average). The result is `null` when
- * any active item has an unknown desi or there is no active item to sum.
+ * present; otherwise the desi is the SUM of `unitDesi x quantity` over the active,
+ * non-digital items (the total, never the quantity-weighted average). Digital items
+ * do not ship (plan decision 11b), so they never add to the desi and their unknown
+ * desi never makes the result unknown. The result is `null` when an active
+ * non-digital item has an unknown desi or there is no active item to sum.
  */
 export function parcelDesi(
   snapshot: ParcelSnapshot,
@@ -70,6 +72,9 @@ export function parcelDesi(
 
   let total = ZERO;
   for (const item of items) {
+    if (item.isDigital) {
+      continue;
+    }
     if (item.unitDesi === null) {
       return null;
     }
@@ -200,7 +205,9 @@ function standaloneShippingGross(params: {
  * that weight the allocation. The line is ESTIMATE / RULE at PARCEL level. An
  * unknown desi or an unresolvable tariff yields a blocking
  * SHIPPING_ESTIMATE_UNAVAILABLE issue (reason in `detail`) and no line; a zero gross
- * yields neither. The standalone amounts are always computed, even when the parcel
+ * yields neither. Digital items do not ship (plan decision 11b): an all-digital
+ * parcel carries no shipping (no line, no issue) and every digital item's standalone
+ * amount is zero. The standalone amounts are always computed, even when the parcel
  * line itself fails.
  */
 export function estimateShippingLine(params: {
@@ -227,8 +234,16 @@ export function estimateShippingLine(params: {
   for (const item of items) {
     standaloneByItem.set(
       item.orderItemId,
-      standaloneShippingGross({ item, eligibleForBarem, tariff, shippingVatRatePct }),
+      item.isDigital
+        ? ZERO
+        : standaloneShippingGross({ item, eligibleForBarem, tariff, shippingVatRatePct }),
     );
+  }
+
+  // Digital items do not ship (plan decision 11b): an all-digital parcel carries no
+  // shipping, exactly like the service-fee exemption.
+  if (items.every((item) => item.isDigital)) {
+    return { line: null, issue: null, standaloneByItem };
   }
 
   const desi = parcelDesi(snapshot);

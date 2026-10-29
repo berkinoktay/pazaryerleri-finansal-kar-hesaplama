@@ -308,6 +308,52 @@ describe('estimateShippingLine', () => {
     expect(issue).toBeNull();
     expect(standaloneByItem.size).toBe(0);
   });
+
+  it('estimates no shipping for an all-digital parcel', () => {
+    // Plan decision 11b: digital items do not ship, like the service-fee exemption.
+    const snapshot = makeParcel({
+      items: [
+        makeItem({ orderItemId: 'a', listGross: '100.00', isDigital: true, unitDesi: null }),
+        makeItem({ orderItemId: 'b', listGross: '50.00', isDigital: true, unitDesi: '2' }),
+      ],
+    });
+
+    const { line, issue, standaloneByItem } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({ fastDelivery: false }),
+      reference: trendyolReference(),
+    });
+
+    expect(line).toBeNull();
+    expect(issue).toBeNull();
+    expect(standaloneByItem.get('a')?.toFixed(2)).toBe('0.00');
+    expect(standaloneByItem.get('b')?.toFixed(2)).toBe('0.00');
+  });
+
+  it('leaves digital items out of the parcel desi', () => {
+    // Plan decision 11b: a digital item does not add to the desi, and its unknown
+    // desi does not block the estimate; its standalone shipping is zero.
+    const snapshot = makeParcel({
+      items: [
+        makeItem({ orderItemId: 'a', listGross: '500.00', unitDesi: '3' }),
+        makeItem({ orderItemId: 'b', listGross: '100.00', isDigital: true, unitDesi: null }),
+      ],
+    });
+
+    const { line, issue, standaloneByItem } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({ fastDelivery: false }),
+      reference: trendyolReference(),
+    });
+
+    expect(issue).toBeNull();
+    // Only item a counts: desi 3 -> key '3' -> 93.63 net -> 112.36 gross.
+    expect(line?.amount.gross.toFixed(2)).toBe('112.36');
+    expect(line?.amount.vat.toFixed(2)).toBe('18.73');
+    expect(line?.inputs.desi).toBe('3');
+    expect(line?.inputs.desiSource).toBe('PRODUCTS');
+    expect(standaloneByItem.get('b')?.toFixed(2)).toBe('0.00');
+  });
 });
 
 describe('resolveTrendyolShippingGross', () => {

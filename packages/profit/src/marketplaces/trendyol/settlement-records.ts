@@ -88,11 +88,19 @@ export const TRENDYOL_RECORD_KIND = {
   ...TRENDYOL_OTHER_FINANCIAL_RECORD_KIND,
 } satisfies Record<TrendyolTransactionType, TrendyolRecordKind>;
 
-/** The cargo-invoice item type for an outbound shipment ('Gonderi Kargo Bedeli'). */
-export const TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE = 'Gönderi Kargo Bedeli';
+/**
+ * The cargo-invoice item type for an outbound shipment, the Trendyol Turkish label
+ * 'Gonderi Kargo Bedeli' (with the 'o' umlaut). Written with a unicode escape to
+ * keep the source ASCII; the runtime string is byte-identical to the legacy label.
+ */
+export const TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE = 'G\u00f6nderi Kargo Bedeli';
 
-/** The cargo-invoice item type for a return shipment ('Iade Kargo Bedeli'). */
-export const TRENDYOL_CARGO_RETURN_ITEM_TYPE = 'İade Kargo Bedeli';
+/**
+ * The cargo-invoice item type for a return shipment, the Trendyol Turkish label
+ * 'Iade Kargo Bedeli' (with the dotted capital 'I'). Written with a unicode escape
+ * to keep the source ASCII; the runtime string is byte-identical to the legacy label.
+ */
+export const TRENDYOL_CARGO_RETURN_ITEM_TYPE = '\u0130ade Kargo Bedeli';
 
 /** Estimate line types that the sale payment order confirms (plan decision 14). */
 export const TRENDYOL_SALE_CYCLE_CONFIRMED_TYPES: readonly ProfitLineType[] = [

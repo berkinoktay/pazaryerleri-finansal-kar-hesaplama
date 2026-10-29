@@ -258,6 +258,58 @@ describe('estimateReturnLines', () => {
     expect(fee?.amount.gross.toFixed(2)).toBe('1200.00');
   });
 
+  it('rounds the overseas return fee per item', () => {
+    // Plan decision 11: the overseas return operation fee is rounded per item, since
+    // the tier rate can differ by item.
+    const snapshot = makeParcel({
+      isExportSale: true,
+      items: [
+        makeItem({ orderItemId: 'a', listGross: '333.33', saleVatRatePct: '20' }),
+        makeItem({ orderItemId: 'b', listGross: '333.33', saleVatRatePct: '20' }),
+      ],
+    });
+
+    const { lines } = estimateReturnLines({
+      snapshot,
+      accepted: [
+        { orderItemId: 'a', acceptedQuantity: 1 },
+        { orderItemId: 'b', acceptedQuantity: 1 },
+      ],
+      commissionLines: [
+        makeLine({ type: ProfitLineType.COMMISSION, gross: '33.33', orderItemId: 'a' }),
+        makeLine({ type: ProfitLineType.COMMISSION, gross: '33.33', orderItemId: 'b' }),
+      ],
+      costLines: [],
+      reference: trendyolReference(),
+    });
+
+    // Each item: roundMoney((333.33 - 33.33) * 35%) = roundMoney(300.00 * 0.35) = 105.00.
+    const fees = lines.filter((line) => line.type === ProfitLineType.INTERNATIONAL_OPERATION_FEE);
+    expect(fees).toHaveLength(2);
+    expect(fees[0]?.orderItemId).toBe('a');
+    expect(fees[0]?.amount.gross.toFixed(2)).toBe('105.00');
+    expect(fees[1]?.orderItemId).toBe('b');
+    expect(fees[1]?.amount.gross.toFixed(2)).toBe('105.00');
+
+    // A fractional base rounds each item to the kurus on its own:
+    // roundMoney((100.01 - 10.00) * 35%) = roundMoney(90.01 * 0.35) = roundMoney(31.5035) = 31.50.
+    const fractional = estimateReturnLines({
+      snapshot: makeParcel({
+        isExportSale: true,
+        items: [makeItem({ orderItemId: 'a', listGross: '100.01', saleVatRatePct: '20' })],
+      }),
+      accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
+      commissionLines: [
+        makeLine({ type: ProfitLineType.COMMISSION, gross: '10.00', orderItemId: 'a' }),
+      ],
+      costLines: [],
+      reference: trendyolReference(),
+    });
+
+    const fee = lineOfType(fractional.lines, ProfitLineType.INTERNATIONAL_OPERATION_FEE);
+    expect(fee?.amount.gross.toFixed(2)).toBe('31.50');
+  });
+
   it('reports an unknown return desi', () => {
     const snapshot = makeParcel({
       items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: null })],
@@ -281,6 +333,66 @@ describe('estimateReturnLines', () => {
       },
     ]);
     expect(returnedItems[0]?.standaloneAmount).toBeNull();
+  });
+
+  it('writes no return shipping when only digital items are returned', () => {
+    // Plan decision 11b: digital items do not ship, so an all-digital return has no
+    // return shipping line and no unknown-desi issue.
+    const snapshot = makeParcel({
+      items: [
+        makeItem({ orderItemId: 'a', listGross: '100.00', isDigital: true, unitDesi: null }),
+        makeItem({ orderItemId: 'b', listGross: '50.00', isDigital: true, unitDesi: '2' }),
+      ],
+    });
+
+    const { lines, issues, returnedItems } = estimateReturnLines({
+      snapshot,
+      accepted: [
+        { orderItemId: 'a', acceptedQuantity: 1 },
+        { orderItemId: 'b', acceptedQuantity: 1 },
+      ],
+      commissionLines: [],
+      costLines: [],
+      reference: trendyolReference(),
+    });
+
+    expect(lineOfType(lines, ProfitLineType.RETURN_SHIPPING)).toBeUndefined();
+    expect(issues).toEqual([]);
+    expect(returnedItems[0]?.standaloneAmount?.toFixed(2)).toBe('0.00');
+    expect(returnedItems[1]?.standaloneAmount?.toFixed(2)).toBe('0.00');
+  });
+
+  it('leaves returned digital items out of the return desi', () => {
+    // Plan decision 11b: a returned digital item does not add to the return desi and
+    // its unknown desi does not block the return shipping; its standalone is zero.
+    const snapshot = makeParcel({
+      items: [
+        makeItem({ orderItemId: 'a', listGross: '491.28', saleVatRatePct: '10', unitDesi: '1' }),
+        makeItem({ orderItemId: 'b', listGross: '100.00', isDigital: true, unitDesi: null }),
+      ],
+    });
+
+    const { lines, issues, returnedItems } = estimateReturnLines({
+      snapshot,
+      accepted: [
+        { orderItemId: 'a', acceptedQuantity: 1 },
+        { orderItemId: 'b', acceptedQuantity: 1 },
+      ],
+      commissionLines: [],
+      costLines: [],
+      reference: trendyolReference(),
+    });
+
+    expect(issues).toEqual([]);
+    // Only item a counts: desi 1 -> key '1' -> 77.54 net -> 93.05 gross.
+    const returnShipping = lineOfType(lines, ProfitLineType.RETURN_SHIPPING);
+    expect(returnShipping?.inputs.desi).toBe('1');
+    expect(returnShipping?.amount.gross.toFixed(2)).toBe('93.05');
+
+    const physical = returnedItems.find((entry) => entry.orderItemId === 'a');
+    expect(physical?.standaloneAmount?.toFixed(2)).toBe('93.05');
+    const digital = returnedItems.find((entry) => entry.orderItemId === 'b');
+    expect(digital?.standaloneAmount?.toFixed(2)).toBe('0.00');
   });
 
   it('returns nothing when no return is accepted', () => {

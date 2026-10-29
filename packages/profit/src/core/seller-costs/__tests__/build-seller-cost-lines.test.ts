@@ -336,6 +336,41 @@ describe('buildSellerCostLines', () => {
     expect(lines[0]?.amount.gross.toFixed(2)).toBe('100.00');
   });
 
+  it('writes one line per profile when an item has two profiles of the same type', () => {
+    const snapshot = makeParcel({ items: [makeItem({ orderItemId: 'a', listGross: '500' })] });
+    const { lines, issues } = buildSellerCostLines({
+      snapshot,
+      costs: [
+        makeCost('a', [
+          makeProfile('p1', CostProfileType.COGS, [
+            makeVersion({
+              effectiveFrom: '2026-10-01T00:00:00Z',
+              amountGross: '100.00',
+              vatRatePct: '20',
+            }),
+          ]),
+          makeProfile('p2', CostProfileType.COGS, [
+            makeVersion({
+              effectiveFrom: '2026-10-01T00:00:00Z',
+              amountGross: '20.00',
+              vatRatePct: '20',
+            }),
+          ]),
+        ]),
+      ],
+      fxQuotes: [],
+    });
+
+    expect(issues).toEqual([]);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]?.type).toBe(ProfitLineType.COST_COGS);
+    expect(lines[0]?.amount.gross.toFixed(2)).toBe('100.00');
+    expect(lines[0]?.amount.vat.toFixed(2)).toBe('16.67');
+    expect(lines[1]?.type).toBe(ProfitLineType.COST_COGS);
+    expect(lines[1]?.amount.gross.toFixed(2)).toBe('20.00');
+    expect(lines[1]?.amount.vat.toFixed(2)).toBe('3.33');
+  });
+
   it('throws on a cost entry for an unknown item', () => {
     const snapshot = makeParcel({ items: [makeItem({ orderItemId: 'a', listGross: '500' })] });
     expect(() =>

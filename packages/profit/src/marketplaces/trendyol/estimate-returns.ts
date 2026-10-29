@@ -137,7 +137,11 @@ function standaloneReturnShippingGross(params: {
   return resolved.gross;
 }
 
-/** Return legs for a domestic parcel, per accepted item then the parcel return shipping. */
+/**
+ * Return legs for a domestic parcel, per accepted item then the parcel return
+ * shipping. Digital items do not ship (plan decision 11b): they never add to the
+ * return desi and an all-digital return writes no return shipping line.
+ */
 function estimateDomesticReturns(params: {
   readonly snapshot: ParcelSnapshot;
   readonly acceptedEntries: readonly AcceptedEntry[];
@@ -212,7 +216,11 @@ function estimateDomesticReturns(params: {
       }
     }
 
-    if (item.unitDesi === null) {
+    // Digital items do not ship (plan decision 11b): they never add to the return
+    // desi and their unknown desi never raises the unknown-desi issue.
+    if (item.isDigital) {
+      // nothing to add to the return desi
+    } else if (item.unitDesi === null) {
       anyDesiUnknown = true;
     } else {
       returnDesi = returnDesi.add(item.unitDesi.mul(acceptedQuantity));
@@ -221,12 +229,14 @@ function estimateDomesticReturns(params: {
     returnedItems.push({
       orderItemId: item.orderItemId,
       saleGross: saleReturnGross,
-      standaloneAmount: standaloneReturnShippingGross({
-        item,
-        acceptedQuantity,
-        saleReturnGross,
-        reference,
-      }),
+      standaloneAmount: item.isDigital
+        ? ZERO
+        : standaloneReturnShippingGross({
+            item,
+            acceptedQuantity,
+            saleReturnGross,
+            reference,
+          }),
     });
   }
 
@@ -246,18 +256,23 @@ function estimateDomesticReturns(params: {
   ];
   const issues: ProfitIssue[] = [];
 
-  const returnShipping = buildReturnShippingLine({
-    snapshot,
-    anyDesiUnknown,
-    desi: returnDesi,
-    basketGross: returnBasketGross,
-    reference,
-  });
-  if (returnShipping.line !== null) {
-    lines.push(returnShipping.line);
-  }
-  if (returnShipping.issue !== null) {
-    issues.push(returnShipping.issue);
+  // Digital items do not ship (plan decision 11b): an all-digital return has no
+  // return shipping line and no unknown-desi issue.
+  const hasPhysicalReturn = acceptedEntries.some((entry) => !entry.item.isDigital);
+  if (hasPhysicalReturn) {
+    const returnShipping = buildReturnShippingLine({
+      snapshot,
+      anyDesiUnknown,
+      desi: returnDesi,
+      basketGross: returnBasketGross,
+      reference,
+    });
+    if (returnShipping.line !== null) {
+      lines.push(returnShipping.line);
+    }
+    if (returnShipping.issue !== null) {
+      issues.push(returnShipping.issue);
+    }
   }
 
   return { lines, issues, returnedItems };
