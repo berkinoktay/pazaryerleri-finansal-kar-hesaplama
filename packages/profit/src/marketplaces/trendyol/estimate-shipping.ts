@@ -46,6 +46,10 @@ type ShippingNetResult =
   | { readonly ok: true; readonly net: Decimal; readonly kind: ShippingTariffKind }
   | { readonly ok: false; readonly reason: ShippingUnavailableReason };
 
+type ShippingGrossResult =
+  | { readonly ok: true; readonly gross: Decimal; readonly kind: ShippingTariffKind }
+  | { readonly ok: false; readonly reason: ShippingUnavailableReason };
+
 /**
  * The parcel desi for a shipping estimate. The marketplace-measured desi wins when
  * present; otherwise the desi is the SUM of `unitDesi x quantity` over the active
@@ -126,8 +130,32 @@ export function resolveTrendyolShippingNet(params: {
   }
 }
 
+/**
+ * Resolves the VAT-inclusive (gross) shipping tariff: `resolveTrendyolShippingNet`
+ * followed by `grossFromNet`. The single place where a shipping tariff becomes a
+ * gross amount, shared by the parcel, standalone and return shipping estimates.
+ */
+export function resolveTrendyolShippingGross(params: {
+  readonly desi: Decimal;
+  readonly basketGross: Decimal;
+  readonly eligibleForBarem: boolean;
+  readonly tariff: TrendyolShippingTariff;
+  readonly vatRatePct: Decimal;
+}): ShippingGrossResult {
+  const resolved = resolveTrendyolShippingNet({
+    desi: params.desi,
+    basketGross: params.basketGross,
+    eligibleForBarem: params.eligibleForBarem,
+    tariff: params.tariff,
+  });
+  if (!resolved.ok) {
+    return { ok: false, reason: resolved.reason };
+  }
+  return { ok: true, gross: grossFromNet(resolved.net, params.vatRatePct), kind: resolved.kind };
+}
+
 /** The carrier code recorded on the line: the carrier for Trendyol kinds, null for OWN. */
-function carrierCodeForKind(
+export function trendyolCarrierCodeForKind(
   kind: ShippingTariffKind,
   tariff: TrendyolShippingTariff,
 ): string | null {
@@ -154,16 +182,17 @@ function standaloneShippingGross(params: {
     return null;
   }
 
-  const resolved = resolveTrendyolShippingNet({
+  const resolved = resolveTrendyolShippingGross({
     desi: item.unitDesi.mul(item.quantity),
     basketGross: item.saleGross,
     eligibleForBarem,
     tariff,
+    vatRatePct: shippingVatRatePct,
   });
   if (!resolved.ok) {
     return null;
   }
-  return grossFromNet(resolved.net, shippingVatRatePct);
+  return resolved.gross;
 }
 
 /**
@@ -216,11 +245,12 @@ export function estimateShippingLine(params: {
   }
 
   const basketGross = items.reduce((sum, item) => sum.add(item.saleGross), ZERO);
-  const resolved = resolveTrendyolShippingNet({
+  const resolved = resolveTrendyolShippingGross({
     desi: desi.desi,
     basketGross,
     eligibleForBarem,
     tariff,
+    vatRatePct: shippingVatRatePct,
   });
   if (!resolved.ok) {
     return {
@@ -234,7 +264,7 @@ export function estimateShippingLine(params: {
     };
   }
 
-  const gross = grossFromNet(resolved.net, shippingVatRatePct);
+  const gross = resolved.gross;
   if (gross.equals(ZERO)) {
     return { line: null, issue: null, standaloneByItem };
   }
@@ -257,7 +287,7 @@ export function estimateShippingLine(params: {
       desiSource: desi.source,
       basketGross: basketGross.toFixed(2),
       tariffKind: resolved.kind,
-      carrierCode: carrierCodeForKind(resolved.kind, tariff),
+      carrierCode: trendyolCarrierCodeForKind(resolved.kind, tariff),
     },
     externalRecord: null,
   });

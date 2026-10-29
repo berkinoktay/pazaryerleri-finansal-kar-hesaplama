@@ -26,13 +26,9 @@ import { buildCostReturnLines } from '../../core/seller-costs/build-cost-return-
 import { roundMoney } from '../../money';
 import { saleVatRatePct } from '../../tax/tr/sale-vat';
 import { buildStoppageRefundLines } from '../../tax/tr/stoppage-lines';
-import { grossFromNet, vatFromGross } from '../../tax/tr/vat';
-import { resolveTrendyolShippingNet, type ShippingTariffKind } from './estimate-shipping';
-import {
-  type OverseasReturnTier,
-  type TrendyolReferenceData,
-  type TrendyolShippingTariff,
-} from './trendyol-inputs';
+import { vatFromGross } from '../../tax/tr/vat';
+import { resolveTrendyolShippingGross, trendyolCarrierCodeForKind } from './estimate-shipping';
+import { type OverseasReturnTier, type TrendyolReferenceData } from './trendyol-inputs';
 
 const ZERO = new Decimal(0);
 /** Percent rates are expressed per hundred; the divisor that turns a rate into a factor. */
@@ -111,17 +107,6 @@ export function estimateReturnLines(params: {
   });
 }
 
-/** The carrier code recorded on the line: the carrier for Trendyol kinds, null for OWN. */
-function carrierCodeForKind(
-  kind: ShippingTariffKind,
-  tariff: TrendyolShippingTariff,
-): string | null {
-  if (kind === 'OWN') {
-    return null;
-  }
-  return tariff.carrier === null ? null : tariff.carrier.code;
-}
-
 /**
  * The standalone (as-if-returned-alone) return shipping gross for one returned item,
  * used as an allocation weight. The desi is `unitDesi x acceptedQuantity`, the basket
@@ -139,16 +124,17 @@ function standaloneReturnShippingGross(params: {
     return null;
   }
 
-  const resolved = resolveTrendyolShippingNet({
+  const resolved = resolveTrendyolShippingGross({
     desi: item.unitDesi.mul(acceptedQuantity),
     basketGross: saleReturnGross,
     eligibleForBarem: false,
     tariff: reference.shipping,
+    vatRatePct: reference.fees.returnShippingVatRatePct,
   });
   if (!resolved.ok) {
     return null;
   }
-  return grossFromNet(resolved.net, reference.fees.returnShippingVatRatePct);
+  return resolved.gross;
 }
 
 /** Return legs for a domestic parcel, per accepted item then the parcel return shipping. */
@@ -302,11 +288,12 @@ function buildReturnShippingLine(params: {
     };
   }
 
-  const resolved = resolveTrendyolShippingNet({
+  const resolved = resolveTrendyolShippingGross({
     desi,
     basketGross,
     eligibleForBarem: false,
     tariff: reference.shipping,
+    vatRatePct: reference.fees.returnShippingVatRatePct,
   });
   if (!resolved.ok) {
     return {
@@ -319,7 +306,7 @@ function buildReturnShippingLine(params: {
     };
   }
 
-  const gross = grossFromNet(resolved.net, reference.fees.returnShippingVatRatePct);
+  const gross = resolved.gross;
   if (gross.equals(ZERO)) {
     return { line: null, issue: null };
   }
@@ -340,7 +327,7 @@ function buildReturnShippingLine(params: {
     inputs: {
       desi: desi.toString(),
       tariffKind: resolved.kind,
-      carrierCode: carrierCodeForKind(resolved.kind, reference.shipping),
+      carrierCode: trendyolCarrierCodeForKind(resolved.kind, reference.shipping),
     },
     externalRecord: null,
   });

@@ -15,7 +15,7 @@ import {
   makeTrendyolAttributes,
   trendyolReference,
 } from '../../../__tests__/fixtures/trendyol-reference';
-import { estimateShippingLine } from '../estimate-shipping';
+import { estimateShippingLine, resolveTrendyolShippingGross } from '../estimate-shipping';
 
 describe('estimateShippingLine', () => {
   it('uses the desi tariff', () => {
@@ -307,5 +307,30 @@ describe('estimateShippingLine', () => {
     expect(line).toBeNull();
     expect(issue).toBeNull();
     expect(standaloneByItem.size).toBe(0);
+  });
+});
+
+describe('resolveTrendyolShippingGross', () => {
+  it('resolves a gross amount from the net tariff', () => {
+    const tariff = trendyolReference().shipping;
+
+    const resolved = resolveTrendyolShippingGross({
+      desi: new Decimal('3'),
+      basketGross: new Decimal('500.00'),
+      eligibleForBarem: false,
+      tariff,
+      vatRatePct: new Decimal('20'),
+    });
+    // desi 3 -> key '3' -> 93.63 net -> grossFromNet(20) -> 112.36.
+    expect(resolved).toEqual({ ok: true, gross: new Decimal('112.36'), kind: 'DESI' });
+
+    const overflow = resolveTrendyolShippingGross({
+      desi: new Decimal('11'),
+      basketGross: new Decimal('500.00'),
+      eligibleForBarem: false,
+      tariff,
+      vatRatePct: new Decimal('20'),
+    });
+    expect(overflow).toEqual({ ok: false, reason: 'DESI_OVERFLOW' });
   });
 });
