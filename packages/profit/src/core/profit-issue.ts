@@ -15,13 +15,17 @@ export interface ProfitIssue {
  * Whether each issue code blocks the profit calculation. A blocking issue makes
  * the order NOT_COMPUTABLE (see `deriveProfitStatus`); a non-blocking one stays a
  * visible warning. An unmapped marketplace record is deliberately non-blocking so
- * a new record type does not turn every order "not computable" at once.
+ * a new record type does not turn every order "not computable" at once. An
+ * ambiguous record match is a warning for the same reason: like an unmapped
+ * record, it leaves the order's own estimate intact.
  */
 export const PROFIT_ISSUE_CATALOG = {
   MISSING_COST: { blocking: true },
   MISSING_FX_RATE: { blocking: true },
   SHIPPING_ESTIMATE_UNAVAILABLE: { blocking: true },
   UNMAPPED_MARKETPLACE_RECORD: { blocking: false },
+  MISSING_COMMISSION_RATE: { blocking: true },
+  AMBIGUOUS_RECORD_MATCH: { blocking: false },
 } as const satisfies Record<ProfitIssueCode, { readonly blocking: boolean }>;
 
 /** Returns true when the issue blocks the profit calculation. */

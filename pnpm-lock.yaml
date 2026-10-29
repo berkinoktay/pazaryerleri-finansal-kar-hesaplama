@@ -625,6 +625,9 @@ importers:
       '@pazarsync/db':
         specifier: workspace:*
         version: link:../db
+      '@pazarsync/marketplace':
+        specifier: workspace:*
+        version: link:../marketplace
       '@pazarsync/sync-core':
         specifier: workspace:*
         version: link:../sync-core
