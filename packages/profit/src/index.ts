@@ -193,6 +193,7 @@ export {
   type TrendyolEstimateInput,
 } from './marketplaces/trendyol/estimate-parcel';
 export {
+  isTrendyolTransactionType,
   recordKind,
   TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
   TRENDYOL_CARGO_RETURN_ITEM_TYPE,

@@ -5,6 +5,7 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import {
+  isTrendyolTransactionType,
   TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
   TRENDYOL_CARGO_RETURN_ITEM_TYPE,
   TRENDYOL_OTHER_FINANCIAL_RECORD_KIND,
@@ -48,5 +49,13 @@ describe('TRENDYOL record kind tables', () => {
     expect(outboundHex.startsWith('47c3b6')).toBe(true);
     expect(outboundHex).toBe('47c3b66e64657269204b6172676f20426564656c69');
     expect(returnHex).toBe('c4b0616465204b6172676f20426564656c69');
+  });
+
+  it('narrows a known transaction type and rejects unknown and prototype keys', () => {
+    expect(isTrendyolTransactionType('Sale')).toBe(true);
+    expect(isTrendyolTransactionType('PaymentOrder')).toBe(true);
+    expect(isTrendyolTransactionType('NotARealType')).toBe(false);
+    // A prototype key must never be mistaken for a transaction type.
+    expect(isTrendyolTransactionType('toString')).toBe(false);
   });
 });

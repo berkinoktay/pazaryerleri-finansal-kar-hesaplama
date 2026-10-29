@@ -35,6 +35,7 @@ export default defineConfig({
       'src/**/__tests__/estimate-return-on-claim.test.ts',
       'src/**/__tests__/return-into-profit-e2e.test.ts',
       'src/**/__tests__/return-estimate-isolation.test.ts',
+      'src/persistence/__tests__/load-trendyol-parcel.test.ts',
     ],
   },
 });

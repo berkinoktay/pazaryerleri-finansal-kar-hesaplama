@@ -142,3 +142,13 @@ export interface TrendyolCargoInvoiceItem {
 export function recordKind(record: TrendyolSettlementRecord): TrendyolRecordKind {
   return TRENDYOL_RECORD_KIND[record.transactionType];
 }
+
+/**
+ * Narrows a raw transaction-type string to a known `TrendyolTransactionType` by
+ * an own-property check on the merged kind table — so a prototype key such as
+ * `'toString'` is never mistaken for a transaction type. The loader uses it to
+ * tell a mappable settlement/otherfinancials row from one it must set aside.
+ */
+export function isTrendyolTransactionType(value: string): value is TrendyolTransactionType {
+  return Object.hasOwn(TRENDYOL_RECORD_KIND, value);
+}
