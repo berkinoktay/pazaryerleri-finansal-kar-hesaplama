@@ -1,7 +1,14 @@
 import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
-import { ceilToKurus, floorToKurus, grossToVat, kurusAmountViolation, roundMoney } from '../money';
+import {
+  ceilToKurus,
+  floorToKurus,
+  grossToVat,
+  kurusAmountViolation,
+  ONE_KURUS,
+  roundMoney,
+} from '../money';
 
 const D = (v: string) => new Decimal(v);
 
@@ -34,6 +41,12 @@ describe('ceilToKurus / floorToKurus', () => {
     expect(ceilToKurus(D('1.001')).toFixed(2)).toBe('1.01');
     expect(ceilToKurus(D('1.00')).toFixed(2)).toBe('1.00');
     expect(floorToKurus(D('1.009')).toFixed(2)).toBe('1.00');
+  });
+});
+
+describe('ONE_KURUS', () => {
+  it('is one kurus', () => {
+    expect(ONE_KURUS.toFixed(2)).toBe('0.01');
   });
 });
 

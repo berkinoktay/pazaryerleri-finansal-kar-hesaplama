@@ -11,7 +11,7 @@ import {
   type ScenarioSolveResult,
 } from '../../core/scenario/solve-scenario-price';
 import { type ItemCostProfileInput } from '../../core/seller-costs/build-seller-cost-lines';
-import { ceilToKurus, floorToKurus, KURUS_DECIMALS } from '../../money';
+import { ceilToKurus, floorToKurus, KURUS_DECIMALS, ONE_KURUS } from '../../money';
 import {
   estimateTrendyolParcel,
   type EstimateResult,
@@ -20,7 +20,6 @@ import {
 import { type TrendyolCommissionBand, type TrendyolReferenceData } from './trendyol-inputs';
 
 const ZERO = new Decimal(0);
-const CENT = new Decimal('0.01');
 
 /** The lowest unit price a scenario solve considers unless the caller raises it. */
 const DEFAULT_SCENARIO_MIN_UNIT_PRICE = new Decimal('0.01');
@@ -199,8 +198,9 @@ function sortedUniquePositive(values: readonly Decimal[]): Decimal[] {
  * eligible) map each basket band `[min, max]` onto the unit price by the quantity:
  * `ceilToKurus(min / quantity)` starts a band, `floorToKurus(max / quantity) + 0.01`
  * leaves it. Commission breakpoints (only without an override and with tariff bands)
- * add each band's `lowerLimit` and `upperLimit + 0.01`. The result is positive,
- * ascending and value-unique.
+ * add each band's `ceilToKurus(lowerLimit)` and `floorToKurus(upperLimit) + 0.01`, so
+ * every evaluated price lands on a kurus. The result is positive, ascending and
+ * value-unique.
  */
 export function trendyolScenarioBreakpoints(base: TrendyolScenarioBase): readonly Decimal[] {
   const quantity = new Decimal(base.quantity);
@@ -209,17 +209,17 @@ export function trendyolScenarioBreakpoints(base: TrendyolScenarioBase): readonl
   if (isBaremBreakpointEligible(base)) {
     for (const band of base.reference.shipping.baremBands) {
       candidates.push(ceilToKurus(band.minOrderAmount.div(quantity)));
-      candidates.push(floorToKurus(band.maxOrderAmount.div(quantity)).add(CENT));
+      candidates.push(floorToKurus(band.maxOrderAmount.div(quantity)).add(ONE_KURUS));
     }
   }
 
   if (base.commissionRatePctOverride === null && base.product.tariffBands !== null) {
     for (const band of base.product.tariffBands) {
       if (band.lowerLimit !== null) {
-        candidates.push(band.lowerLimit);
+        candidates.push(ceilToKurus(band.lowerLimit));
       }
       if (band.upperLimit !== null) {
-        candidates.push(band.upperLimit.add(CENT));
+        candidates.push(floorToKurus(band.upperLimit).add(ONE_KURUS));
       }
     }
   }

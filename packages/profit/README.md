@@ -70,6 +70,7 @@ follow the asked price and each cost's VAT comes from its own profile rate -- th
 no scenario-specific formula. On top of it a marketplace-agnostic solver finds the
 lowest unit price that meets a target margin, markup or net profit: it splits the price
 axis at the marketplace's breakpoints and at the net VAT kink, solves each segment in
-closed form from two samples, and verifies the candidate with a bounded kurus nudge --
-no binary search. The audit report's worked examples are pinned as golden tests.
+closed form from two samples, and resolves the candidate with a bounded noise-aware
+kurus scan -- no binary search. The audit report's worked examples are pinned as golden
+tests.
 Nothing calls this yet; phase 4 wires the pricing and campaign screens to it.

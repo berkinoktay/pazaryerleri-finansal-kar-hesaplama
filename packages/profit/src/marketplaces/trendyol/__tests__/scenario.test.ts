@@ -266,6 +266,20 @@ describe('trendyolScenarioBreakpoints', () => {
     expect(trendyolScenarioBreakpoints(overridden)).toEqual([]);
   });
 
+  it('rounds commission band edges to kurus', () => {
+    const bands: readonly TrendyolCommissionBand[] = [
+      {
+        lowerLimit: new Decimal('250.005'),
+        upperLimit: new Decimal('299.995'),
+        ratePct: new Decimal('15'),
+      },
+    ];
+    const base = scenarioBase({ fastDelivery: false, product: { tariffBands: bands } });
+    const fixed = breakpointsToFixed(trendyolScenarioBreakpoints(base));
+    expect(fixed).toContain('250.01');
+    expect(fixed).toContain('300.00');
+  });
+
   it('lists no Barem breakpoints without eligibility, for digital items or own contracts', () => {
     expect(trendyolScenarioBreakpoints(scenarioBase({ fastDelivery: false }))).toEqual([]);
     expect(trendyolScenarioBreakpoints(scenarioBase({ product: { isDigital: true } }))).toEqual([]);
@@ -294,5 +308,62 @@ describe('solveTrendyolScenarioPrice', () => {
     }
     expect(result.unitPrice.toFixed(2)).toBe('479.83');
     expect(result.statement.netProfit?.toFixed(2)).toBe('95.97');
+  });
+
+  it('solves a basket of two units', () => {
+    // unitDesi 1 keeps the basket's total desi (2) within the fixture's desi tariff tier.
+    const base = scenarioBase({
+      quantity: 2,
+      costs: cogsProfiles('150'),
+      product: { unitDesi: new Decimal('1') },
+    });
+    const result = solveTrendyolScenarioPrice({
+      base,
+      target: { kind: 'MARGIN', pct: new Decimal('20') },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error(`expected a solved price, got ${result.reason}`);
+    }
+    expect(result.statement.saleMarginPct?.gte(20)).toBe(true);
+    const below = evaluateTrendyolScenario({
+      ...base,
+      unitPrice: result.unitPrice.sub(new Decimal('0.01')),
+    });
+    expect(below.statement.saleMarginPct?.lt(20)).toBe(true);
+  });
+
+  it('respects the maximum unit price', () => {
+    const result = solveTrendyolScenarioPrice({
+      base: scenarioBase({ costs: cogsProfiles('150') }),
+      target: { kind: 'MARGIN', pct: new Decimal('20') },
+      maxUnitPrice: new Decimal('450.00'),
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error('expected no solved price');
+    }
+    expect(result.reason).toBe('UNREACHABLE_TARGET');
+  });
+
+  it('solves through the net VAT kink of a clamped store', () => {
+    const base = scenarioBase({ costs: cogsProfiles('1200.00'), settings: CLAMP_NEGATIVE });
+    const result = solveTrendyolScenarioPrice({
+      base,
+      target: { kind: 'MARGIN', pct: new Decimal('20') },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error(`expected a solved price, got ${result.reason}`);
+    }
+    expect(result.statement.saleMarginPct?.gte(20)).toBe(true);
+    const below = evaluateTrendyolScenario({
+      ...base,
+      unitPrice: result.unitPrice.sub(new Decimal('0.01')),
+    });
+    expect(below.statement.saleMarginPct?.lt(20)).toBe(true);
   });
 });

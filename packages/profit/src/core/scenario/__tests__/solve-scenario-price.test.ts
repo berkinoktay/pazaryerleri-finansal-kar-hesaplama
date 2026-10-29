@@ -1,9 +1,15 @@
 import { Decimal } from 'decimal.js';
-import { ProfitIssueCode, ProfitLineLevel, ProfitLineType } from '@pazarsync/db/enums';
+import {
+  ProfitIssueCode,
+  ProfitLineLevel,
+  ProfitLineType,
+  ProfitStatus,
+} from '@pazarsync/db/enums';
 import { describe, expect, it } from 'vitest';
 
 import { makeLine } from '../../../__tests__/helpers/make-profit-line';
 import { vatFromGross } from '../../../tax/tr/vat';
+import { PROFIT_ENGINE_VERSION } from '../../engine-version';
 import { type ProfitIssue } from '../../profit-issue';
 import { type ProfitLine } from '../../profit-line';
 import { computeProfitStatement, type ProfitStatement } from '../../profit-statement';
@@ -16,6 +22,43 @@ import {
 
 const D = (value: string): Decimal => new Decimal(value);
 const MIN = D('0.01');
+const ZERO = D('0');
+
+/** Eight trivial lines: only their count matters, setting the noise bound to 8 * 0.01. */
+function eightLines(): readonly ProfitLine[] {
+  return Array.from({ length: 8 }, () => makeLine({ type: ProfitLineType.SALE, gross: '1.00' }));
+}
+
+/**
+ * A toy whose net profit has a tiny slope (so the solve window is very wide) and a
+ * downward step at 10006.00 TL. The closed form, fit from the low samples, lands a
+ * few lira below the true solution, so the centered scan misses it -- exactly the
+ * case the upper-point fallback must rescue. Statements carry 8 lines (noise bound
+ * 0.08) and have no VAT, so no net VAT kink interferes.
+ */
+function steppedTinySlopeEvaluate(): (unitPrice: Decimal) => ProfitStatement {
+  const lines = eightLines();
+  return (unitPrice: Decimal): ProfitStatement => {
+    const base = unitPrice.mul('0.001').sub('10');
+    const netProfit = unitPrice.lte(D('10006.00')) ? base.sub('0.05') : base;
+    return {
+      view: 'ESTIMATE',
+      status: ProfitStatus.ESTIMATED,
+      engineVersion: PROFIT_ENGINE_VERSION,
+      selectedLines: lines,
+      rows: [],
+      saleGross: unitPrice,
+      costGross: D('10'),
+      vat: { output: ZERO, input: ZERO, net: ZERO, effective: ZERO },
+      stoppageGross: ZERO,
+      stoppageIncluded: true,
+      netProfit,
+      saleMarginPct: null,
+      costMarkupPct: null,
+      issues: [],
+    };
+  };
+}
 const BP_200: readonly Decimal[] = [D('200')];
 
 type ToyMissingCost = 'none' | 'below-200' | 'always';
@@ -229,6 +272,19 @@ describe('solveScenarioPrice', () => {
       maxUnitPrice: null,
     });
     expect(expectFailure(result)).toBe('NOT_COMPUTABLE');
+  });
+
+  it('falls back to the guaranteed upper point when the centered scan misses', () => {
+    const result = solveScenarioPrice({
+      evaluate: steppedTinySlopeEvaluate(),
+      breakpoints: [],
+      target: PROFIT('0'),
+      minUnitPrice: MIN,
+      maxUnitPrice: null,
+    });
+    const ok = expectOk(result);
+    expect(ok.statement.netProfit?.gte(ZERO)).toBe(true);
+    expect(ok.unitPrice.gt(D('10006.00'))).toBe(true);
   });
 
   it('splits at the net VAT zero crossing when the store clamps negative net VAT', () => {

@@ -1,6 +1,6 @@
 import { Decimal } from 'decimal.js';
 
-import { ceilToKurus } from '../../money';
+import { ceilToKurus, floorToKurus, ONE_KURUS } from '../../money';
 import { type ProfitStatement } from '../profit-statement';
 
 /**
@@ -14,11 +14,11 @@ export type ScenarioPriceTarget =
   | { readonly kind: 'PROFIT'; readonly amount: Decimal };
 
 /**
- * Why the solver returned no price:
+ * Why the solver returned no price (ordered as the union below):
  * - NOT_COMPUTABLE: no segment produced a computable statement at all.
  * - NO_COST: a MARKUP target whose cost is zero (markup has no base).
- * - NOT_PRICE_SENSITIVE: raising the price does not raise net profit.
  * - UNREACHABLE_TARGET: price-sensitive, but the target lies outside every band.
+ * - NOT_PRICE_SENSITIVE: raising the price does not raise net profit.
  */
 export type ScenarioSolveFailure =
   | 'NOT_COMPUTABLE'
@@ -34,21 +34,34 @@ export type ScenarioSolveResult =
 /** Second sample of an open-ended segment: its start plus this span. */
 export const SCENARIO_SAMPLE_SPAN = new Decimal('1000.00');
 
-/** How many kurus the solver nudges a candidate up or down while verifying it. */
-export const SCENARIO_MAX_NUDGE_STEPS = 3;
+/**
+ * The most one profit line can move the net profit through rounding: its gross and
+ * its VAT each round by at most half a kurus, so one kurus in total. A segment's
+ * noise bound is this times the line count, and it sizes the scan window below.
+ */
+export const SCENARIO_LINE_ROUNDING_BOUND = new Decimal('0.01');
+
+/** Upper bound on the kurus a single scan walks, so no loop is ever unbounded. */
+export const SCENARIO_MAX_SCAN_STEPS = 600;
 
 const ZERO = new Decimal(0);
 const HUNDRED = new Decimal(100);
-const KURUS = new Decimal('0.01');
 const KURUS_FRACTION_DIGITS = 2;
 
-/** Segments this narrow (in price) are scanned kurus by kurus instead of solved. */
-const TINY_SEGMENT_WIDTH = KURUS.mul(SCENARIO_MAX_NUDGE_STEPS * 2);
+/** A band at most this many kurus wide is scanned point by point rather than solved. */
+const TINY_SEGMENT_MAX_STEPS = 6;
+const TINY_SEGMENT_WIDTH = ONE_KURUS.mul(TINY_SEGMENT_MAX_STEPS);
 
 /** A half-open price band processed as one unit; `end === null` is unbounded above. */
 interface Segment {
   readonly start: Decimal;
   readonly end: Decimal | null;
+}
+
+/** A price band with a known upper bound, for the tiny point-by-point scan. */
+interface BoundedSegment {
+  readonly start: Decimal;
+  readonly end: Decimal;
 }
 
 /**
@@ -66,6 +79,12 @@ type Sample =
     };
 
 type ComputableSample = Extract<Sample, { readonly computable: true }>;
+
+/** A found price and the statement that justifies it. */
+interface PricePoint {
+  readonly unitPrice: Decimal;
+  readonly statement: ProfitStatement;
+}
 
 /** Mutable bookkeeping shared across the whole solve for a single call. */
 interface SolveState {
@@ -85,9 +104,16 @@ type SegmentOutcome =
 const EMPTY_OUTCOME: SegmentOutcome = { kind: 'empty' };
 const NO_COST_OUTCOME: SegmentOutcome = { kind: 'no_cost' };
 
+function pointOutcome(point: PricePoint | null): SegmentOutcome {
+  return point === null
+    ? EMPTY_OUTCOME
+    : { kind: 'candidate', unitPrice: point.unitPrice, statement: point.statement };
+}
+
 /**
  * The target gap g(P): `g >= 0` means the target is met at that price. Within a
- * band g is linear in price, which is what the closed form below exploits.
+ * band g is linear in price up to per-line rounding noise, which the closed form
+ * below exploits and the scan window corrects for.
  */
 function computeGap(
   target: ScenarioPriceTarget,
@@ -167,7 +193,7 @@ function buildSegments(
   const segments: Segment[] = [];
   let start = minUnitPrice;
   for (const breakpoint of kept) {
-    const end = breakpoint.sub(KURUS);
+    const end = breakpoint.sub(ONE_KURUS);
     if (end.gte(start)) {
       segments.push({ start, end });
     }
@@ -182,6 +208,12 @@ function buildSegments(
 /** A band's size for the recursion guard; open-ended bands count as the sample span. */
 function spanOf(segment: Segment): Decimal {
   return segment.end === null ? SCENARIO_SAMPLE_SPAN : segment.end.sub(segment.start);
+}
+
+/** The rounding noise on net profit for a segment: one kurus per line, at its busiest sample. */
+function segmentNoiseBound(a: ComputableSample, b: ComputableSample): Decimal {
+  const maxLines = Math.max(a.statement.selectedLines.length, b.statement.selectedLines.length);
+  return SCENARIO_LINE_ROUNDING_BOUND.mul(maxLines);
 }
 
 /**
@@ -226,7 +258,7 @@ function splitSegment(
     return null;
   }
   return {
-    lower: { start: segment.start, end: splitPoint.sub(KURUS) },
+    lower: { start: segment.start, end: splitPoint.sub(ONE_KURUS) },
     upper: { start: splitPoint, end: segment.end },
   };
 }
@@ -240,9 +272,9 @@ function splitAllowed(lower: Segment, upper: Segment, parentLimit: Decimal | nul
 }
 
 /**
- * The lowest kurus where the gap closes, assuming the gap is linear in price:
- * - positive slope: `ceil(-intercept / slope)`, clamped to the band start, and
- *   rejected when it overshoots a bounded band;
+ * The closed-form candidate assuming the gap is exactly linear in price:
+ * - positive slope: `ceil(-intercept / slope)`, never below the band start (the
+ *   band-end clamp and the rounding-noise window are applied by the caller);
  * - non-positive slope: only the band start can meet the target, and only if the
  *   gap already holds there.
  */
@@ -254,11 +286,7 @@ function closedFormCandidate(
   if (gapSlope.gt(ZERO)) {
     const intercept = gapAtStart.sub(gapSlope.mul(segment.start));
     const raw = ceilToKurus(intercept.negated().div(gapSlope));
-    const candidate = Decimal.max(segment.start, raw);
-    if (segment.end !== null && candidate.gt(segment.end)) {
-      return null;
-    }
-    return candidate;
+    return Decimal.max(segment.start, raw);
   }
   if (gapAtStart.lt(ZERO)) {
     return null;
@@ -266,71 +294,93 @@ function closedFormCandidate(
   return segment.start;
 }
 
-/** Nudges up to `SCENARIO_MAX_NUDGE_STEPS` kurus until the gap first holds, within the band. */
-function nudgeUp(
+/**
+ * Scans upward from `from`, one kurus at a time, up to `maxSteps` kurus and never
+ * past `maxPrice` (null = open), returning the first price whose gap holds.
+ */
+function scanUpForFirst(
   state: SolveState,
-  segment: Segment,
-  candidate: Decimal,
-): { unitPrice: Decimal; statement: ProfitStatement } | null {
-  let price = candidate;
-  for (let step = 0; step < SCENARIO_MAX_NUDGE_STEPS; step++) {
-    price = price.add(KURUS);
-    if (segment.end !== null && price.gt(segment.end)) {
+  from: Decimal,
+  maxPrice: Decimal | null,
+  maxSteps: number,
+): PricePoint | null {
+  let price = from;
+  for (let step = 0; step <= maxSteps; step++) {
+    if (maxPrice !== null && price.gt(maxPrice)) {
       return null;
     }
     const sample = evaluateAt(state, price);
     if (sample.computable && sample.gap.gte(ZERO)) {
       return { unitPrice: price, statement: sample.statement };
     }
+    price = price.add(ONE_KURUS);
   }
   return null;
 }
 
-/** Keeps the lowest kurus (within `SCENARIO_MAX_NUDGE_STEPS` and the band) where the gap still holds. */
-function nudgeDown(
+/**
+ * Turns a closed-form candidate into the lowest meeting price, correcting for
+ * per-line rounding noise. The gap is a line plus noise bounded by `noiseBound`, so
+ * the true solution sits within `3 * noiseBound / slope` kurus of the candidate.
+ * For a positive slope the solver scans that window for the lowest meeting price
+ * rather than nudging a fixed distance; below the window the gap is guaranteed
+ * negative, so the first meeting price found scanning upward is the lowest. A
+ * non-positive slope keeps the band-start rule.
+ *
+ * When the window is wider than `SCENARIO_MAX_SCAN_STEPS` kurus -- only for a target
+ * a hair below the margin asymptote, reached at very high prices -- the solver
+ * approximates: the closed form already lands within a few kurus of the answer (the
+ * `3 * noiseBound / slope` width is a conservative bound, not the actual error), so
+ * it scans a budget-sized window centred on the candidate. Should that scan miss
+ * (the candidate off by more than half the budget, i.e. model error beyond the
+ * rounding noise), `upper = ceil(candidate + 3 * noiseBound / slope)` is a safety
+ * net: when it was not clamped to the band end the noise bound guarantees the true
+ * solution sits at or below it, so if it meets the target it is returned -- a valid
+ * price, though not necessarily the lowest.
+ */
+function resolveCandidate(
   state: SolveState,
   segment: Segment,
   candidate: Decimal,
-  candidateStatement: ProfitStatement,
-): { unitPrice: Decimal; statement: ProfitStatement } {
-  let bestPrice = candidate;
-  let bestStatement = candidateStatement;
-  for (let step = 0; step < SCENARIO_MAX_NUDGE_STEPS; step++) {
-    const lower = bestPrice.sub(KURUS);
-    if (lower.lt(segment.start)) {
-      break;
+  gapSlope: Decimal,
+  noiseBound: Decimal,
+): SegmentOutcome {
+  if (gapSlope.lte(ZERO)) {
+    const sample = evaluateAt(state, candidate);
+    if (sample.computable && sample.gap.gte(ZERO)) {
+      return { kind: 'candidate', unitPrice: candidate, statement: sample.statement };
     }
-    const sample = evaluateAt(state, lower);
-    if (!sample.computable || sample.gap.lt(ZERO)) {
-      break;
-    }
-    bestPrice = lower;
-    bestStatement = sample.statement;
-  }
-  return { unitPrice: bestPrice, statement: bestStatement };
-}
-
-/** Evaluates the candidate, then nudges up (gap short) or down (gap holds) to the lowest meeting kurus. */
-function verifyAndNudge(
-  state: SolveState,
-  segment: Segment,
-  candidate: Decimal,
-): { unitPrice: Decimal; statement: ProfitStatement } | null {
-  const sample = evaluateAt(state, candidate);
-  if (!sample.computable) {
-    return null;
-  }
-  if (sample.gap.lt(ZERO)) {
-    return nudgeUp(state, segment, candidate);
-  }
-  return nudgeDown(state, segment, candidate, sample.statement);
-}
-
-/** Scans a band narrower than the nudge window kurus by kurus, returning the first meeting price. */
-function scanTinySegment(state: SolveState, segment: Segment): SegmentOutcome {
-  if (segment.end === null) {
     return EMPTY_OUTCOME;
   }
+
+  const half = noiseBound.mul(3).div(gapSlope);
+  const lower = Decimal.max(segment.start, floorToKurus(candidate.sub(half)));
+  const rawUpper = ceilToKurus(candidate.add(half));
+  const upper = segment.end !== null && rawUpper.gt(segment.end) ? segment.end : rawUpper;
+  if (lower.gt(upper)) {
+    return EMPTY_OUTCOME;
+  }
+
+  if (upper.sub(lower).div(ONE_KURUS).lte(SCENARIO_MAX_SCAN_STEPS)) {
+    return pointOutcome(scanUpForFirst(state, lower, upper, SCENARIO_MAX_SCAN_STEPS));
+  }
+
+  const halfBudget = ONE_KURUS.mul(Math.floor(SCENARIO_MAX_SCAN_STEPS / 2));
+  const scanStart = Decimal.max(lower, floorToKurus(candidate.sub(halfBudget)));
+  const found = scanUpForFirst(state, scanStart, upper, SCENARIO_MAX_SCAN_STEPS);
+  if (found !== null) {
+    return pointOutcome(found);
+  }
+
+  const top = evaluateAt(state, upper);
+  if (top.computable && top.gap.gte(ZERO)) {
+    return { kind: 'candidate', unitPrice: upper, statement: top.statement };
+  }
+  return EMPTY_OUTCOME;
+}
+
+/** Scans a band narrower than the solve window kurus by kurus, returning the first meeting price. */
+function scanTinySegment(state: SolveState, segment: BoundedSegment): SegmentOutcome {
   let firstPoint: { price: Decimal; netProfit: Decimal } | null = null;
   let lastPoint: { price: Decimal; netProfit: Decimal } | null = null;
   let price = segment.start;
@@ -348,7 +398,7 @@ function scanTinySegment(state: SolveState, segment: Segment): SegmentOutcome {
         return { kind: 'candidate', unitPrice: price, statement: sample.statement };
       }
     }
-    price = price.add(KURUS);
+    price = price.add(ONE_KURUS);
   }
   if (firstPoint !== null && lastPoint !== null && !firstPoint.price.equals(lastPoint.price)) {
     state.highestSlope = lastPoint.netProfit
@@ -360,8 +410,9 @@ function scanTinySegment(state: SolveState, segment: Segment): SegmentOutcome {
 
 /**
  * Processes one band: samples its two ends, splits once at a net VAT kink, then
- * solves the closed form and verifies the candidate. Returns a candidate, a
- * NO_COST short-circuit, or `empty` (recording computability and slope in state).
+ * solves the closed form and resolves the candidate against rounding noise.
+ * Returns a candidate, a NO_COST short-circuit, or `empty` (recording
+ * computability and slope in state).
  */
 function processSegment(
   state: SolveState,
@@ -369,7 +420,7 @@ function processSegment(
   parentLimit: Decimal | null,
 ): SegmentOutcome {
   if (segment.end !== null && segment.end.sub(segment.start).lt(TINY_SEGMENT_WIDTH)) {
-    return scanTinySegment(state, segment);
+    return scanTinySegment(state, { start: segment.start, end: segment.end });
   }
 
   const p1 = segment.start;
@@ -382,6 +433,8 @@ function processSegment(
   if (!s1.computable) {
     return EMPTY_OUTCOME;
   }
+  // A computable start already makes this band computable, even if the far sample is not.
+  state.anyComputable = true;
   const s2 = evaluateAt(state, p2);
   if (state.noCost) {
     return NO_COST_OUTCOME;
@@ -402,7 +455,6 @@ function processSegment(
     }
   }
 
-  state.anyComputable = true;
   const priceSpan = p2.sub(p1);
   state.highestSlope = s2.netProfit.sub(s1.netProfit).div(priceSpan);
 
@@ -420,16 +472,7 @@ function processSegment(
     return resolveBeyondSecondSample(state, segment, parentLimit, p1, s1, candidate);
   }
 
-  return candidateOutcome(state, segment, candidate);
-}
-
-/** Turns a closed-form candidate into an outcome via `verifyAndNudge`. */
-function candidateOutcome(state: SolveState, segment: Segment, candidate: Decimal): SegmentOutcome {
-  const found = verifyAndNudge(state, segment, candidate);
-  if (found === null) {
-    return EMPTY_OUTCOME;
-  }
-  return { kind: 'candidate', unitPrice: found.unitPrice, statement: found.statement };
+  return resolveCandidate(state, segment, candidate, gapSlope, segmentNoiseBound(s1, s2));
 }
 
 /**
@@ -474,16 +517,16 @@ function resolveBeyondSecondSample(
   if (recomputed === null) {
     return EMPTY_OUTCOME;
   }
-  return candidateOutcome(state, segment, recomputed);
+  return resolveCandidate(state, segment, recomputed, gapSlope, segmentNoiseBound(s1, s3));
 }
 
 /**
  * Finds the lowest unit price that meets `target`, or the reason none does. The
  * price axis is split into bands at `breakpoints` (where the shipping or
  * commission regime changes) plus the net VAT kink the solver finds itself; each
- * band is solved in closed form from two samples and verified with a bounded
- * kurus nudge. No binary search, no unbounded loops: every loop is bounded by the
- * band count, the nudge steps, or a tiny band's width.
+ * band is solved in closed form from two samples and the candidate is resolved
+ * against per-line rounding noise with a bounded kurus scan -- no binary search.
+ * Every loop is bounded by the band count, the scan budget, or a tiny band's width.
  */
 export function solveScenarioPrice(params: {
   readonly evaluate: (unitPrice: Decimal) => ProfitStatement;
@@ -492,7 +535,7 @@ export function solveScenarioPrice(params: {
   readonly minUnitPrice: Decimal;
   readonly maxUnitPrice: Decimal | null;
 }): ScenarioSolveResult {
-  if (params.minUnitPrice.lt(KURUS)) {
+  if (params.minUnitPrice.lt(ONE_KURUS)) {
     throw new RangeError('minUnitPrice must be at least 0.01');
   }
   if (params.maxUnitPrice !== null && params.maxUnitPrice.lt(params.minUnitPrice)) {

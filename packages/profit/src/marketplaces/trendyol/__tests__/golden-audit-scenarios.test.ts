@@ -92,6 +92,7 @@ function cogsProfiles(amountGross: string, vatRatePct = '20'): ItemCostProfileIn
 interface ScenarioOverrides {
   readonly product?: Partial<TrendyolScenarioProduct>;
   readonly costs?: readonly ItemCostProfileInput[];
+  readonly commissionRatePctOverride?: Decimal | null;
 }
 
 /** The default scenario base (no unit price); the default cost is 150.00 TRY at 20% VAT. */
@@ -99,7 +100,7 @@ function scenarioBase(overrides: ScenarioOverrides = {}): TrendyolScenarioBase {
   return {
     product: scenarioProduct(overrides.product),
     quantity: 1,
-    commissionRatePctOverride: null,
+    commissionRatePctOverride: overrides.commissionRatePctOverride ?? null,
     scenarioDate: SCENARIO_DATE,
     fastDelivery: true,
     isExportSale: false,
@@ -136,6 +137,28 @@ function requireLine(lines: readonly ProfitLine[], type: ProfitLineType): Profit
   return line;
 }
 
+/**
+ * Asserts the solver returns the global lowest unit price that meets `pct`: the
+ * solved price meets the margin, and none of the 100 kurus below it does (the
+ * reviewer's brute-force property). This catches a solver that returns a price a
+ * hair above the lowest because a fixed nudge is narrower than the rounding noise.
+ */
+function expectLowestMargin(pct: string, overrides: ScenarioOverrides = {}): void {
+  const pctValue = new Decimal(pct);
+  const solved = requireSolved(
+    solveTrendyolScenarioPrice({
+      base: scenarioBase(overrides),
+      target: { kind: 'MARGIN', pct: pctValue },
+    }),
+  );
+  expect(solved.statement.saleMarginPct?.gte(pctValue)).toBe(true);
+  for (let step = 1; step <= 100; step++) {
+    const price = solved.unitPrice.sub(ONE_KURUS.mul(step));
+    const margin = evaluateAt(price, overrides).statement.saleMarginPct;
+    expect(margin === null || margin.lt(pctValue)).toBe(true);
+  }
+}
+
 describe('golden audit scenarios', () => {
   it('B1: a zero-VAT cost gives the real order profit', () => {
     const result = evaluateAt(new Decimal('1000.00'), { costs: cogsProfiles('500.00', '0') });
@@ -151,6 +174,39 @@ describe('golden audit scenarios', () => {
   it('B2: a campaign price below the Barem threshold keeps its profit', () => {
     const result = evaluateAt(new Decimal('299.00'), { costs: cogsProfiles('130.00') });
     expect(result.statement.netProfit?.toFixed(2)).toBe('3.79');
+  });
+
+  it('returns the lowest price for a 50% margin', () => {
+    const solved = requireSolved(
+      solveTrendyolScenarioPrice({
+        base: scenarioBase(),
+        target: { kind: 'MARGIN', pct: new Decimal('50') },
+      }),
+    );
+    expect(solved.unitPrice.toFixed(2)).toBe('1388.90');
+  });
+
+  it('returns the lowest price for a 20% margin with a zero-VAT cost', () => {
+    const solved = requireSolved(
+      solveTrendyolScenarioPrice({
+        base: scenarioBase({ costs: cogsProfiles('500', '0') }),
+        target: { kind: 'MARGIN', pct: new Decimal('20') },
+      }),
+    );
+    expect(solved.unitPrice.toFixed(2)).toBe('1298.00');
+  });
+
+  it('never calls a reachable margin unreachable under a 40% commission', () => {
+    const overrides: ScenarioOverrides = { commissionRatePctOverride: new Decimal('40') };
+    for (const pct of ['33.6', '35.8', '37.2', '40.4', '44.4']) {
+      expectLowestMargin(pct, overrides);
+    }
+  });
+
+  it('never calls a reachable margin unreachable under the default commission', () => {
+    for (const pct of ['61.0', '62.3', '64.5']) {
+      expectLowestMargin(pct);
+    }
   });
 
   it('B2: solves a 20% margin across the Barem bands', () => {

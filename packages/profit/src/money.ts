@@ -21,6 +21,9 @@ export function roundMoney(value: Decimal): Decimal {
 /** A stored money amount is denominated in kurus: at most two decimal places. */
 export const KURUS_DECIMALS = 2;
 
+/** One kurus: the smallest money step and the price grid the scenario solver walks. */
+export const ONE_KURUS = new Decimal('0.01');
+
 /**
  * Rounds a monetary value UP to two decimals (towards +infinity). The scenario
  * price solver rounds a solved price up to the next kurus so the asked target is

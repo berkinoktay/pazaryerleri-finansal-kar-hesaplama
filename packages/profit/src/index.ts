@@ -217,7 +217,8 @@ export { ceilToKurus, floorToKurus } from './money';
 export {
   solveScenarioPrice,
   SCENARIO_SAMPLE_SPAN,
-  SCENARIO_MAX_NUDGE_STEPS,
+  SCENARIO_LINE_ROUNDING_BOUND,
+  SCENARIO_MAX_SCAN_STEPS,
   type ScenarioPriceTarget,
   type ScenarioSolveFailure,
   type ScenarioSolveResult,
