@@ -1,7 +1,7 @@
 import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
-import { vatFromGross } from '../vat';
+import { grossFromNet, vatFromGross } from '../vat';
 
 describe('vatFromGross', () => {
   it.each([
@@ -19,5 +19,24 @@ describe('vatFromGross', () => {
   });
   it('rejects a negative rate', () => {
     expect(() => vatFromGross(new Decimal('10'), new Decimal('-1'))).toThrow(RangeError);
+  });
+});
+
+describe('grossFromNet', () => {
+  it.each([
+    ['10.99', '20', '13.19'],
+    ['6.99', '20', '8.39'],
+    ['93.63', '20', '112.36'],
+    ['34.16', '20', '40.99'],
+    ['77.54', '20', '93.05'],
+    ['81.95', '20', '98.34'],
+    ['50.00', '20', '60.00'],
+    ['0', '20', '0.00'],
+    ['100', '0', '100.00'],
+  ])('grossFromNet(%s, %s%%) = %s', (net, rate, expected) => {
+    expect(grossFromNet(new Decimal(net), new Decimal(rate)).toFixed(2)).toBe(expected);
+  });
+  it('rejects a negative rate', () => {
+    expect(() => grossFromNet(new Decimal('10'), new Decimal('-1'))).toThrow(RangeError);
   });
 });
