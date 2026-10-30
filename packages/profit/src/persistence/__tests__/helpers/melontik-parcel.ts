@@ -69,6 +69,7 @@ export async function truncateAll(): Promise<void> {
        profit_line_allocations,
        profit_lines,
        order_profit_statements,
+       profit_recompute_queue,
        marketplace_finance_records,
        order_fees,
        order_claim_items,
@@ -130,9 +131,15 @@ export async function upsertMelontikCarrier(): Promise<string> {
   return carrier.id;
 }
 
-/** Seeds the fee definitions matching the golden fee params (PSF, stoppage, VATs). */
+/**
+ * Seeds the fee definitions matching the golden fee params (PSF, stoppage, VATs).
+ * Fee definitions are global reference data keyed by (platform, feeType,
+ * effectiveFrom), so a test that seeds two organizations would re-insert the same
+ * rows; `skipDuplicates` makes the repeat a no-op.
+ */
 export async function seedMelontikFeeDefinitions(): Promise<void> {
   await prisma.feeDefinition.createMany({
+    skipDuplicates: true,
     data: [
       {
         platform: 'TRENDYOL',
@@ -186,13 +193,22 @@ const DEFAULT_STORE_PROFIT_SETTINGS: Prisma.InputJsonValue = {
   includeNegativeNetVat: true,
 };
 
-/** Creates an organization (TRY accounting) and a Trendyol store on `carrierId`. */
+/**
+ * Creates an organization and a Trendyol store on `carrierId`. The accounting
+ * currency defaults to TRY; a test can pass a non-TRY currency to make the
+ * Trendyol estimate reject the parcel (it only computes in TRY).
+ */
 export async function createTrendyolOrg(opts: {
   readonly carrierId: string;
   readonly profitSettings?: Prisma.InputJsonValue;
+  readonly currency?: Currency;
 }): Promise<{ organizationId: string; storeId: string }> {
   const org = await prisma.organization.create({
-    data: { name: 'Melontik Org', slug: `melontik-${randomUUID().slice(0, 8)}`, currency: 'TRY' },
+    data: {
+      name: 'Melontik Org',
+      slug: `melontik-${randomUUID().slice(0, 8)}`,
+      currency: opts.currency ?? 'TRY',
+    },
   });
   const store = await prisma.store.create({
     data: {
@@ -280,6 +296,8 @@ async function createVariantWithCost(params: {
 
 export interface SeedMelontikOptions {
   readonly storeProfitSettings?: Prisma.InputJsonValue;
+  /** The organization's accounting currency; defaults to TRY. */
+  readonly currency?: Currency;
   readonly snapshotIncludeStopaj?: boolean | null;
   readonly snapshotIncludeNegativeNetVat?: boolean | null;
   readonly status?: OrderStatus;
@@ -313,6 +331,7 @@ export async function seedMelontikParcel(opts: SeedMelontikOptions = {}): Promis
   const { organizationId, storeId } = await createTrendyolOrg({
     carrierId,
     profitSettings: opts.storeProfitSettings,
+    currency: opts.currency,
   });
 
   const variantA = await createVariantWithCost({
@@ -630,6 +649,34 @@ export async function createAdditionalStore(params: {
     },
   });
   return store.id;
+}
+
+/**
+ * Creates a bare order (no items) in an existing org + store with a given order
+ * date. Enough for the queue tests, which read the orders table only: the store-
+ * and sweep-scope cases need several orders, dated apart, in one store without the
+ * full parcel setup.
+ */
+export async function seedBareOrder(params: {
+  readonly organizationId: string;
+  readonly storeId: string;
+  readonly orderDate?: Date;
+  readonly status?: OrderStatus;
+}): Promise<string> {
+  const order = await prisma.order.create({
+    data: {
+      organizationId: params.organizationId,
+      storeId: params.storeId,
+      platformOrderId: `bare-${randomUUID().slice(0, 8)}`,
+      orderDate: params.orderDate ?? MELONTIK.orderDate,
+      status: params.status ?? 'DELIVERED',
+      micro: false,
+      fastDelivery: false,
+      fastDeliveryType: null,
+      usesSellerCargoAgreement: false,
+    },
+  });
+  return order.id;
 }
 
 /**
