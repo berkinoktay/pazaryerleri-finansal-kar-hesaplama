@@ -136,6 +136,11 @@ function enqueueFromOrders(
     ON CONFLICT (order_id) DO UPDATE SET
       reason = EXCLUDED.reason,
       requested_at = clock_timestamp(),
+      -- A re-request of an order that is being computed resets next_attempt_at to now,
+      -- so the mark is claimable again before its lease ends: a second worker may pick
+      -- it up while the first is still computing. Correctness is kept by the per-order
+      -- advisory lock in recomputeParcelProfit -- the second waits, then sees an
+      -- unchanged content hash. The only cost is one redundant load.
       next_attempt_at = clock_timestamp(),
       attempts = 0,
       last_error = NULL,
@@ -231,8 +236,9 @@ export async function claimProfitRecomputeRequests(
  * while we were computing changed `requested_at`, so the mark survives for another
  * pass. A vanished order yields `ORDER_GONE` (the FK cascade may already have removed
  * the mark; the delete is then a harmless no-op). Any other error backs the request
- * off outside the rolled-back transaction and yields `FAILED`; it never throws, so one
- * bad order cannot stop the drain.
+ * off outside the rolled-back transaction and yields `FAILED`; the backoff carries the
+ * same `requested_at` guard, so a request re-enqueued mid-failure is not demoted. It
+ * never throws, so one bad order cannot stop the drain.
  */
 export async function processClaimedRecompute(
   db: PrismaClient,
@@ -247,7 +253,7 @@ export async function processClaimedRecompute(
         });
         await tx.$executeRaw`
           DELETE FROM profit_recompute_queue
-          WHERE id = ${claimed.id}::uuid AND requested_at = ${claimed.requestedAt}
+          WHERE id = ${claimed.id}::uuid AND requested_at = ${claimed.requestedAt}::timestamp(3)
         `;
         return result.changed;
       },
@@ -269,6 +275,13 @@ export async function processClaimedRecompute(
  * attempts + 1, the truncated error, and an exponential backoff of
  * `min(base * 2^attempts, cap)` from now. `power` reads the pre-update `attempts`, so
  * the first failure waits `base`, the next `2 * base`, and so on up to `cap`.
+ *
+ * The UPDATE carries the same `requested_at` guard the success-path DELETE uses: a
+ * request that arrived while we were failing bumped `requested_at`, so the guard matches
+ * nothing and the fresh mark is left untouched (attempts 0, next_attempt_at now, no
+ * error) to be processed again. `requested_at` is a `timestamp(3)` without a time zone,
+ * so the claimed value is cast explicitly rather than relying on an implicit
+ * timestamptz-to-timestamp conversion.
  */
 function recordRecomputeFailure(
   db: PrismaClient,
@@ -286,7 +299,7 @@ function recordRecomputeFailure(
                 ${PROFIT_RECOMPUTE_BACKOFF_CAP_MS}
              ) * interval '1 millisecond'),
         updated_at = clock_timestamp()
-    WHERE id = ${claimed.id}::uuid
+    WHERE id = ${claimed.id}::uuid AND requested_at = ${claimed.requestedAt}::timestamp(3)
   `;
 }
 

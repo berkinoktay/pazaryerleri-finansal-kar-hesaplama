@@ -441,6 +441,51 @@ describe('profit recompute queue', () => {
     expect(secondDelayMs).toBeLessThan(70_000);
   });
 
+  it('does not back off a request that was re-requested while its computation failed', async () => {
+    // A non-TRY accounting currency makes the Trendyol estimate throw.
+    const bad = await seedMelontikParcel({ currency: 'USD' });
+    await enqueueProfitRecompute(prisma, {
+      organizationId: bad.organizationId,
+      storeId: bad.storeId,
+      reason: ProfitRecomputeReason.ORDER_CHANGED,
+      orderIds: [bad.orderId],
+    });
+
+    const claimed = await claimProfitRecomputeRequests(prisma, { batchSize: 1 });
+    expect(claimed).toHaveLength(1);
+    const request = claimed[0];
+    if (request === undefined) {
+      throw new Error('expected a claimed request');
+    }
+
+    // A new request arrives while the claimed one is "being computed": clock_timestamp()
+    // is millisecond-stored, so wait long enough that requested_at genuinely moves.
+    await delay(10);
+    await enqueueProfitRecompute(prisma, {
+      organizationId: bad.organizationId,
+      storeId: bad.storeId,
+      reason: ProfitRecomputeReason.CLAIM_CHANGED,
+      orderIds: [bad.orderId],
+    });
+
+    // The claimed computation fails, but the failure must not demote the newer request.
+    const outcome = await processClaimedRecompute(prisma, request);
+    expect(outcome).toBe('FAILED');
+
+    // The failure UPDATE's requested_at guard no longer matches, so the fresh request
+    // stays untouched: attempts 0, no error, claimable now.
+    const row = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: bad.orderId },
+    });
+    if (row === null) {
+      throw new Error('expected the re-requested row to survive');
+    }
+    expect(row.attempts).toBe(0);
+    expect(row.lastError).toBeNull();
+    expect(row.nextAttemptAt.getTime()).toBeLessThanOrEqual(Date.now());
+    expect(row.reason).toBe(ProfitRecomputeReason.CLAIM_CHANGED);
+  });
+
   it('lets two concurrent claims take disjoint requests', async () => {
     const parcel = await seedMelontikParcel();
     for (let i = 0; i < 9; i += 1) {
