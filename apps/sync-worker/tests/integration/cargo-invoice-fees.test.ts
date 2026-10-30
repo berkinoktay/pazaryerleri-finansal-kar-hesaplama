@@ -7,6 +7,7 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { FinanceRecordFamily, ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { CargoInvoiceItem, TrendyolFinancialTransaction } from '@pazarsync/marketplace';
 import { encryptCredentials } from '@pazarsync/sync-core';
 
@@ -267,7 +268,12 @@ describe('handleCargoInvoiceItems (PR-8)', () => {
     expect(result.unknownTypeItems).toBe(1);
   });
 
-  it('cron path: Kargo Fatura row pre-fetches items and writes the fee (composition)', async () => {
+  // Phase 3B: the cron no longer calls handleCargoInvoiceItems. It still pre-fetches the
+  // invoice's items by serial, but now stores the invoice row and every item raw in
+  // marketplace_finance_records and enqueues the bound order — no legacy OrderFee, no
+  // reconciliation bump. (The direct handleCargoInvoiceItems tests above stay as-is: the
+  // handler file is untouched until phase 5.)
+  it('cron path: Kargo Fatura row pre-fetches items and stores them raw (composition)', async () => {
     const ctx = await buildStore();
     const orderId = await createCargoOrder(ctx, {
       platformOrderId: 'pkg-cron',
@@ -303,10 +309,20 @@ describe('handleCargoInvoiceItems (PR-8)', () => {
       },
     );
 
-    const fee = await prisma.orderFee.findFirstOrThrow({ where: { orderId } });
-    expect(fee.source).toBe('CARGO_INVOICE');
-    // End-of-cycle bump: a NOT_SETTLED order with a CARGO_INVOICE fee escalates.
-    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    expect(order.reconciliationStatus).toBe('PARTIALLY_SETTLED');
+    // The invoice row itself plus its one item are stored raw; no legacy OrderFee.
+    const invoiceRow = await prisma.marketplaceFinanceRecord.findFirstOrThrow({
+      where: { storeId: ctx.storeId, family: FinanceRecordFamily.OTHER_FINANCIAL },
+    });
+    expect(invoiceRow.transactionType).toBe('DeductionInvoices');
+    const cargoRows = await prisma.marketplaceFinanceRecord.findMany({
+      where: { storeId: ctx.storeId, family: FinanceRecordFamily.CARGO_INVOICE_ITEM },
+    });
+    expect(cargoRows).toHaveLength(1);
+    expect(cargoRows[0]?.recordId).toBe(`${SERIAL}:${TRACKING.toString()}`);
+    expect(await prisma.orderFee.count({ where: { orderId } })).toBe(0);
+
+    // The order the cargo item binds to (by tracking number) is enqueued for a recompute.
+    const queued = await prisma.profitRecomputeRequest.findUniqueOrThrow({ where: { orderId } });
+    expect(queued.reason).toBe(ProfitRecomputeReason.FINANCE_RECORD);
   });
 });

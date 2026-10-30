@@ -33,6 +33,7 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { FinanceRecordFamily, ProfitRecomputeReason } from '@pazarsync/db/enums';
 import { encryptCredentials } from '@pazarsync/sync-core';
 import type {
   FetchOtherFinancialsOpts,
@@ -48,7 +49,6 @@ import {
   createUserProfile,
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
-import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const BARCODE = 'EAN13-WINDOW';
@@ -213,8 +213,6 @@ describe('processSettlementsChunk — scan window coverage', () => {
 
   beforeEach(async () => {
     await truncateAll();
-    // Settlement handler'ları komisyon KDV oranını fee_definitions'tan çözer (denetim A).
-    await ensureFeeDefinitions();
   });
 
   it('store older than 60d: chunks the 60-day scan into 4 ≤15-day slices and backfills a T-35d Sale row', async () => {
@@ -277,13 +275,19 @@ describe('processSettlementsChunk — scan window coverage', () => {
     expect(totalDays, 'total scan coverage').toBeGreaterThan(59.9);
     expect(totalDays, 'total scan coverage').toBeLessThan(60.1);
 
-    // 3. T-35d row reached handleSale via the chunk that covers it →
-    //    Order.paymentOrderId backfilled. Pre-chunking this would only
-    //    fire if the entire 60d window was sent in one call (which the
-    //    client rejects), so this is the integration kill-shot.
-    const updated = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    expect(updated.paymentOrderId).toEqual(BigInt(PAYMENT_ORDER_ID));
-    expect(updated.paymentDate).not.toBeNull();
+    // 3. T-35d row reached the raw-record ingest via the chunk that covers it →
+    //    stored as a SETTLEMENT record carrying its payment order id in the raw column,
+    //    and the bound order enqueued for a profit recompute. Pre-chunking this would
+    //    only fire if the entire 60d window was sent in one call (which the client
+    //    rejects), so this is the integration kill-shot.
+    const stored = await prisma.marketplaceFinanceRecord.findFirstOrThrow({
+      where: { storeId, recordId: 'sale-window-1' },
+    });
+    expect(stored.family).toBe(FinanceRecordFamily.SETTLEMENT);
+    expect(stored.shipmentPackageId).toBe(SHIPMENT_PACKAGE_ID.toString());
+    expect(stored.paymentOrderId).toBe(PAYMENT_ORDER_ID.toString());
+    const queued = await prisma.profitRecomputeRequest.findUniqueOrThrow({ where: { orderId } });
+    expect(queued.reason).toBe(ProfitRecomputeReason.FINANCE_RECORD);
 
     // Sanity: scenario actually wired up the store we built (no silent
     // cross-store leak through a stale fixture).

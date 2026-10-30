@@ -1,12 +1,11 @@
-// Settlement cron mega-test (PR-7 commit 8).
+// Settlement cron integration test (phase 3B — raw finance-record ingest).
 //
-// Full cycle simulation — verifies the reconciliationStatus state machine
-// from NOT_SETTLED → PARTIALLY_SETTLED → FULLY_SETTLED across two ticks,
-// then re-asserts idempotency on a third tick.
-//
-// Dependency-injects mock fetchers so the test owns what Trendyol "returns"
-// without hitting the network. The cron + dispatcher + per-handler chain
-// is exercised end-to-end.
+// The cron no longer writes legacy order_fees / reconciliationStatus. Every fetched
+// settlement, otherfinancials and cargo-invoice row is stored verbatim in
+// marketplace_finance_records and the orders it binds to are enqueued for a profit
+// recompute. These tests drive the same registry-bound entrypoint the worker claims
+// (processSettlementsChunk) with mock fetchers and assert on the raw rows, the queue,
+// and — for the end-to-end case — the drained profit statement.
 
 import { randomUUID } from 'node:crypto';
 
@@ -14,12 +13,20 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import {
+  FinanceRecordFamily,
+  ProfitRecomputeReason,
+  ProfitStatementView,
+  ProfitStatus,
+} from '@pazarsync/db/enums';
 import { encryptCredentials } from '@pazarsync/sync-core';
 import type {
+  CargoInvoiceItem,
   FetchOtherFinancialsOpts,
   FetchSettlementsOpts,
   TrendyolFinancialTransaction,
 } from '@pazarsync/marketplace';
+import { drainProfitRecomputeQueue } from '@pazarsync/profit';
 
 import { processSettlementsChunk } from '../../src/handlers/settlements';
 
@@ -29,36 +36,35 @@ import {
   createUserProfile,
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
-import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
+import {
+  MELONTIK,
+  seedMelontikParcel,
+} from '../../../../packages/profit/src/persistence/__tests__/helpers/melontik-parcel';
 
-// Settlements heartbeat is lease-fenced: the syncLog is created RUNNING and
-// claimed by this id, and every direct processSettlementsChunk call passes it.
+// Settlements heartbeat is lease-fenced: the syncLog is created RUNNING and claimed by
+// this id, and every direct processSettlementsChunk call passes it.
 const WORKER_ID = 'worker-test';
 
 const BARCODE = 'EAN13-CRON';
+// A numeric platform order id so a settlement row's numeric shipmentPackageId binds it.
 const SHIPMENT_PACKAGE_ID = 444_555_666;
 const PAYMENT_ORDER_ID = 99_999_111;
-const PSF_SERIAL = 'DDF-PSF-2026-01';
-const COMMISSION_SERIAL = 'DCF-CRON-2026-01';
+const CARGO_INVOICE_RESPONSE_TYPE = 'Kargo Fatura';
 
-interface BuiltCtx {
+interface SimpleCtx {
   storeId: string;
   organizationId: string;
   orderId: string;
   syncLogId: string;
 }
 
-async function buildScenario(): Promise<BuiltCtx> {
+/** A store + a single numeric-platformOrderId order + a SETTLEMENTS syncLog claimed here. */
+async function buildScenario(): Promise<SimpleCtx> {
   const user = await createUserProfile();
   const org = await createOrganization();
   await createMembership(org.id, user.id);
 
-  // Inline store with encrypted credentials (decryptStoreCredentials path).
-  const credentials = encryptCredentials({
-    supplierId: '123456',
-    apiKey: 'k',
-    apiSecret: 's',
-  });
+  const credentials = encryptCredentials({ supplierId: '123456', apiKey: 'k', apiSecret: 's' });
   const store = await prisma.store.create({
     data: {
       organizationId: org.id,
@@ -93,9 +99,6 @@ async function buildScenario(): Promise<BuiltCtx> {
     },
   });
 
-  // Order arrives via order sync (ESTIMATE state — applyEstimateOnOrderCreate
-  // already ran). Status NOT_SETTLED.
-  // GROSS CONVENTION: saleGross/saleVat (not saleSubtotalNet/saleVatTotal).
   const order = await prisma.order.create({
     data: {
       organizationId: org.id,
@@ -105,12 +108,8 @@ async function buildScenario(): Promise<BuiltCtx> {
       status: 'DELIVERED',
       saleGross: new Decimal('120.00'),
       saleVat: new Decimal('20.00'),
-      estimatedNetProfit: new Decimal('45.00'),
-      reconciliationStatus: 'NOT_SETTLED',
     },
   });
-
-  // GROSS CONVENTION: all item columns use gross+vatRate (no net columns).
   await prisma.orderItem.create({
     data: {
       orderId: order.id,
@@ -123,43 +122,18 @@ async function buildScenario(): Promise<BuiltCtx> {
       saleVatRate: new Decimal('20.00'),
       commissionRate: new Decimal('10.00'),
       commissionGross: new Decimal('12.00'),
-      refundedCommissionGross: new Decimal('0'),
-      commissionVatRate: new Decimal('20.00'),
-      estimatedCommissionGross: new Decimal('12.00'),
-      unitCostSnapshotGross: new Decimal('48.00'), // 40 net + 8 VAT = 48 gross
-      unitCostSnapshotVatRate: new Decimal('20.00'),
     },
   });
 
-  // Seed ESTIMATE PSF + Stoppage OrderFees (applyEstimateOnOrderCreate parity)
-  // GROSS CONVENTION: amountGross+vatRate (not amountNet+vatAmount).
-  await prisma.orderFee.create({
-    data: {
-      orderId: order.id,
-      organizationId: org.id,
-      feeType: 'PLATFORM_SERVICE',
-      source: 'ESTIMATE',
-      direction: 'DEBIT',
-      amountGross: new Decimal('13.19'), // 10.99 net × 1.20 = 13.19 gross
-      vatRate: new Decimal('20.00'),
-    },
-  });
-  await prisma.orderFee.create({
-    data: {
-      orderId: order.id,
-      organizationId: org.id,
-      feeType: 'STOPPAGE',
-      source: 'ESTIMATE',
-      direction: 'DEBIT',
-      amountGross: new Decimal('1.00'),
-      vatRate: new Decimal('0'),
-    },
-  });
+  const syncLog = await createSyncLog(org.id, store.id);
+  return { storeId: store.id, organizationId: org.id, orderId: order.id, syncLogId: syncLog.id };
+}
 
-  const syncLog = await prisma.syncLog.create({
+async function createSyncLog(organizationId: string, storeId: string): Promise<{ id: string }> {
+  return prisma.syncLog.create({
     data: {
-      organizationId: org.id,
-      storeId: store.id,
+      organizationId,
+      storeId,
       syncType: 'SETTLEMENTS',
       status: 'RUNNING',
       startedAt: new Date(),
@@ -169,354 +143,289 @@ async function buildScenario(): Promise<BuiltCtx> {
       progressCurrent: 0,
     },
   });
-
-  return {
-    storeId: store.id,
-    organizationId: org.id,
-    orderId: order.id,
-    syncLogId: syncLog.id,
-  };
 }
 
 // ─── Mock fetcher row builders ───────────────────────────────────────────
 
-function makeSaleRow(): TrendyolFinancialTransaction {
-  return {
-    id: 'sale-cron-1',
-    transactionDate: 1715000000000,
-    barcode: BARCODE,
+const BASE_TX: TrendyolFinancialTransaction = {
+  id: 'tx-1',
+  transactionDate: 1_715_000_000_000,
+  barcode: null,
+  transactionType: 'Satış',
+  receiptId: null,
+  description: null,
+  debt: 0,
+  credit: 0,
+  paymentPeriod: null,
+  commissionRate: null,
+  commissionAmount: null,
+  commissionInvoiceSerialNumber: null,
+  sellerRevenue: null,
+  orderNumber: null,
+  paymentOrderId: null,
+  paymentDate: null,
+  sellerId: 123456,
+  storeId: null,
+  storeName: null,
+  storeAddress: null,
+  country: 'Türkiye',
+  orderDate: null,
+  affiliate: 'TRENDYOLTR',
+  shipmentPackageId: null,
+};
+
+function tx(
+  overrides: Partial<TrendyolFinancialTransaction> & { id: string },
+): TrendyolFinancialTransaction {
+  return { ...BASE_TX, ...overrides };
+}
+
+function saleRow(
+  id: string,
+  barcode: string,
+  credit: number,
+  commissionAmount: number,
+): TrendyolFinancialTransaction {
+  return tx({
+    id,
     transactionType: 'Satış',
-    receiptId: 7001,
-    description: 'Satış',
-    debt: 0,
-    credit: 120,
-    paymentPeriod: 30,
-    commissionRate: 10,
-    commissionAmount: 12,
-    commissionInvoiceSerialNumber: COMMISSION_SERIAL,
-    sellerRevenue: 108,
-    orderNumber: '11101228439',
-    paymentOrderId: PAYMENT_ORDER_ID,
-    paymentDate: 1715800000000,
-    sellerId: 123456,
-    storeId: null,
-    storeName: null,
-    storeAddress: null,
-    country: 'Türkiye',
-    orderDate: 1715000000000,
-    affiliate: 'TRENDYOLTR',
+    barcode,
+    credit,
+    commissionAmount,
     shipmentPackageId: SHIPMENT_PACKAGE_ID,
-  };
-}
-
-function makeStoppageRow(): TrendyolFinancialTransaction {
-  return {
-    id: 'stoppage-cron-1',
-    transactionDate: 1715800000000,
-    barcode: null,
-    transactionType: 'E-ticaret Stopajı',
-    receiptId: null,
-    description: 'Stopaj',
-    debt: 1.0,
-    credit: 0,
-    paymentPeriod: null,
-    commissionRate: null,
-    commissionAmount: null,
-    commissionInvoiceSerialNumber: null,
-    sellerRevenue: null,
-    orderNumber: null,
     paymentOrderId: PAYMENT_ORDER_ID,
-    paymentDate: 1715800000000,
-    sellerId: 123456,
-    storeId: null,
-    storeName: null,
-    storeAddress: null,
-    country: 'Türkiye',
-    orderDate: null,
-    affiliate: 'TRENDYOLTR',
-    shipmentPackageId: null,
-  };
+  });
 }
 
-function makePsfRow(): TrendyolFinancialTransaction {
-  return {
-    id: PSF_SERIAL,
-    transactionDate: 1715800000000,
-    barcode: null,
-    transactionType: 'Platform Hizmet Bedeli',
-    receiptId: null,
-    description: 'PSF',
-    debt: 13.19,
-    credit: 0,
-    paymentPeriod: null,
-    commissionRate: null,
-    commissionAmount: null,
-    commissionInvoiceSerialNumber: PSF_SERIAL,
-    sellerRevenue: null,
-    orderNumber: null,
-    paymentOrderId: PAYMENT_ORDER_ID,
-    paymentDate: 1715800000000,
-    sellerId: 123456,
-    storeId: null,
-    storeName: null,
-    storeAddress: null,
-    country: 'Türkiye',
-    orderDate: null,
-    affiliate: 'TRENDYOLTR',
-    shipmentPackageId: null,
-  };
-}
-
-function makeReturnRow(): TrendyolFinancialTransaction {
-  return {
-    id: 'return-cron-1',
-    transactionDate: 1715900000000,
-    barcode: BARCODE,
-    transactionType: 'İade',
-    receiptId: 7002,
-    description: 'İade',
-    debt: 120, // KDV-dahil gross claw-back (one unit)
-    credit: 0,
-    paymentPeriod: null,
-    commissionRate: 10,
-    commissionAmount: 12, // KDV-dahil commission handed back
-    commissionInvoiceSerialNumber: null,
-    sellerRevenue: null,
-    orderNumber: '11101228439',
-    paymentOrderId: null,
-    paymentDate: null,
-    sellerId: 123456,
-    storeId: null,
-    storeName: null,
-    storeAddress: null,
-    country: 'Türkiye',
-    orderDate: 1715000000000,
-    affiliate: 'TRENDYOLTR',
+function discountRow(
+  id: string,
+  barcode: string,
+  debt: number,
+  commissionAmount: number,
+): TrendyolFinancialTransaction {
+  return tx({
+    id,
+    transactionType: 'İndirim',
+    barcode,
+    debt,
+    commissionAmount,
     shipmentPackageId: SHIPMENT_PACKAGE_ID,
-  };
+  });
 }
 
-function makePaymentOrderRow(): TrendyolFinancialTransaction {
-  return {
+function stoppageRow(): TrendyolFinancialTransaction {
+  return tx({ id: 'stoppage-1', transactionType: 'E-ticaret Stopajı', debt: 1.0 });
+}
+
+function paymentOrderRow(): TrendyolFinancialTransaction {
+  return tx({
     id: PAYMENT_ORDER_ID.toString(),
-    transactionDate: 1715800000000,
-    barcode: null,
     transactionType: 'Ödeme',
-    receiptId: null,
-    description: 'Ödeme',
     debt: 100,
-    credit: 0,
-    paymentPeriod: null,
-    commissionRate: null,
-    commissionAmount: null,
-    commissionInvoiceSerialNumber: null,
-    sellerRevenue: null,
-    orderNumber: null,
     paymentOrderId: PAYMENT_ORDER_ID,
-    paymentDate: 1715800000000,
-    sellerId: 123456,
-    storeId: null,
-    storeName: null,
-    storeAddress: null,
-    country: 'Türkiye',
-    orderDate: null,
-    affiliate: 'TRENDYOLTR',
-    shipmentPackageId: null,
+  });
+}
+
+function cargoInvoiceRow(id: string): TrendyolFinancialTransaction {
+  return tx({ id, transactionType: CARGO_INVOICE_RESPONSE_TYPE });
+}
+
+const CARGO_OUTBOUND_TYPE = 'Gönderi Kargo Bedeli';
+
+function cargoItem(parcelUniqueId: number, amount: number, desi: number): CargoInvoiceItem {
+  return {
+    shipmentPackageType: CARGO_OUTBOUND_TYPE,
+    parcelUniqueId,
+    orderNumber: '11101228439',
+    amount,
+    desi,
   };
 }
 
 // ─── Mock fetcher factory ────────────────────────────────────────────────
 
-function makeMockFetchers(scenario: {
-  settlements: Partial<Record<'Sale' | 'Discount' | 'Return', TrendyolFinancialTransaction[]>>;
-  otherFinancials: Partial<
+interface MockScenario {
+  settlements?: Partial<Record<'Sale' | 'Discount' | 'Return', TrendyolFinancialTransaction[]>>;
+  otherFinancials?: Partial<
     Record<'PaymentOrder' | 'Stoppage' | 'DeductionInvoices', TrendyolFinancialTransaction[]>
   >;
-}) {
+  cargoItems?: CargoInvoiceItem[];
+}
+
+function makeMockFetchers(scenario: MockScenario) {
   return {
     fetchSettlements: async function* (
       opts: FetchSettlementsOpts,
     ): AsyncGenerator<TrendyolFinancialTransaction, void> {
-      const rows = scenario.settlements[opts.transactionType as 'Sale' | 'Discount' | 'Return'];
+      const rows = scenario.settlements?.[opts.transactionType as 'Sale' | 'Discount' | 'Return'];
       if (!rows) return;
-      for (const r of rows) yield r;
+      for (const row of rows) yield row;
     },
     fetchOtherFinancials: async function* (
       opts: FetchOtherFinancialsOpts,
     ): AsyncGenerator<TrendyolFinancialTransaction, void> {
       const rows =
-        scenario.otherFinancials[
+        scenario.otherFinancials?.[
           opts.transactionType as 'PaymentOrder' | 'Stoppage' | 'DeductionInvoices'
         ];
       if (!rows) return;
-      for (const r of rows) yield r;
+      for (const row of rows) yield row;
     },
-    // PR-8: cargo invoices out of scope for the state-machine scenarios.
-    fetchCargoInvoiceItems: async () => [],
+    fetchCargoInvoiceItems: async (): Promise<CargoInvoiceItem[]> => scenario.cargoItems ?? [],
   };
 }
 
-// ─── Mega-test ───────────────────────────────────────────────────────────
+async function runChunk(syncLogId: string, scenario: MockScenario): Promise<void> {
+  const syncLog = await prisma.syncLog.findUniqueOrThrow({ where: { id: syncLogId } });
+  const result = await processSettlementsChunk(
+    { syncLog, cursor: null, workerId: WORKER_ID },
+    makeMockFetchers(scenario),
+  );
+  expect(result.kind).toBe('done');
+}
 
-describe('processSettlementsChunk — state machine mega-test', () => {
+// ─── Tests ─────────────────────────────────────────────────────────────
+
+describe('processSettlementsChunk — raw finance-record ingest', () => {
   beforeAll(async () => {
     await ensureDbReachable();
   });
 
   beforeEach(async () => {
     await truncateAll();
-    // Settlement dispatcher Sale/Discount/Return handler'ları komisyon KDV oranını
-    // fee_definitions ALL/COMMISSION_INVOICE'tan çözer (denetim A).
-    await ensureFeeDefinitions();
   });
 
-  it('NOT_SETTLED → PARTIALLY_SETTLED → FULLY_SETTLED across 2 ticks; idempotent on tick 3', async () => {
+  it('stores every fetched row as a raw finance record and queues the bound orders', async () => {
     const { storeId, orderId, syncLogId } = await buildScenario();
 
-    // ─── Tick 1: Sale + Stoppage only — partial settlement ─────────────
-    // No PaymentOrder yet (T+1..5 phase). Settlement OrderFees land
-    // (Stoppage), Sale stamps paymentOrderId on Order, status bumps to
-    // PARTIALLY_SETTLED.
-    const syncLog = await prisma.syncLog.findUniqueOrThrow({ where: { id: syncLogId } });
-    const result1 = await processSettlementsChunk(
-      { syncLog, cursor: null, workerId: WORKER_ID },
-      makeMockFetchers({
-        settlements: { Sale: [makeSaleRow()] },
-        otherFinancials: { Stoppage: [makeStoppageRow()] },
-      }),
-    );
-    expect(result1.kind).toBe('done');
-
-    const orderAfter1 = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    expect(orderAfter1.reconciliationStatus).toBe('PARTIALLY_SETTLED');
-    expect(orderAfter1.paymentOrderId).toBe(BigInt(PAYMENT_ORDER_ID));
-    expect(orderAfter1.settledNetProfit).toBeNull(); // no PaymentOrder cycle yet
-
-    // ─── Tick 2: PSF + PaymentOrder — full settlement ──────────────────
-    const result2 = await processSettlementsChunk(
-      { syncLog, cursor: null, workerId: WORKER_ID },
-      makeMockFetchers({
-        settlements: {}, // Sale row already processed; re-poll absorbs no-op
-        otherFinancials: {
-          DeductionInvoices: [makePsfRow()],
-          PaymentOrder: [makePaymentOrderRow()],
-        },
-      }),
-    );
-    expect(result2.kind).toBe('done');
-
-    const orderAfter2 = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    expect(orderAfter2.reconciliationStatus).toBe('FULLY_SETTLED');
-    expect(orderAfter2.settledNetProfit).not.toBeNull();
-    // PR-9 invariant: estimatedNetProfit untouched
-    expect(orderAfter2.estimatedNetProfit?.toFixed(2)).toBe('45.00');
-
-    // ESTIMATE PSF + Stoppage confirmed
-    const fees = await prisma.orderFee.findMany({
-      where: { orderId, source: 'ESTIMATE' },
+    await runChunk(syncLogId, {
+      settlements: { Sale: [saleRow('sale-1', BARCODE, 120, 12)] },
+      otherFinancials: { Stoppage: [stoppageRow()] },
     });
-    expect(fees.every((f) => f.confirmedAt !== null)).toBe(true);
 
-    // PSF audit row in OrgPeriodFee — GROSS CONVENTION: amountGross (debt KDV-dahil)
-    const psfAudit = await prisma.orgPeriodFee.findFirst({
-      where: { storeId, feeType: 'PLATFORM_SERVICE' },
-    });
-    // makePsfRow uses debt: 13.19 (KDV-dahil gross) → amountGross=13.19
-    expect(psfAudit?.amountGross.toFixed(2)).toBe('13.19');
+    // The Sale (SETTLEMENT) and the Stoppage (OTHER_FINANCIAL) are both stored raw.
+    const rows = await prisma.marketplaceFinanceRecord.findMany({ where: { storeId } });
+    expect(rows).toHaveLength(2);
+    const sale = rows.find((row) => row.family === FinanceRecordFamily.SETTLEMENT);
+    expect(sale?.transactionType).toBe('Sale');
+    expect(sale?.shipmentPackageId).toBe(SHIPMENT_PACKAGE_ID.toString());
+    const stoppage = rows.find((row) => row.family === FinanceRecordFamily.OTHER_FINANCIAL);
+    expect(stoppage?.transactionType).toBe('Stoppage');
 
-    // ─── Tick 3: Idempotent re-poll — same rows, no state change ───────
-    const settledNetBefore = orderAfter2.settledNetProfit?.toFixed(2);
-    const result3 = await processSettlementsChunk(
-      { syncLog, cursor: null, workerId: WORKER_ID },
-      makeMockFetchers({
-        settlements: { Sale: [makeSaleRow()] },
-        otherFinancials: {
-          Stoppage: [makeStoppageRow()],
-          DeductionInvoices: [makePsfRow()],
-          PaymentOrder: [makePaymentOrderRow()],
-        },
-      }),
-    );
-    expect(result3.kind).toBe('done');
-
-    const orderAfter3 = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    expect(orderAfter3.reconciliationStatus).toBe('FULLY_SETTLED'); // unchanged
-    expect(orderAfter3.settledNetProfit?.toFixed(2)).toBe(settledNetBefore); // unchanged
-    expect(orderAfter3.estimatedNetProfit?.toFixed(2)).toBe('45.00'); // PR-9 invariant holds
-
-    // No duplicate OrgPeriodFee rows
-    const psfAudits = await prisma.orgPeriodFee.findMany({
-      where: { storeId, feeType: 'PLATFORM_SERVICE' },
-    });
-    expect(psfAudits).toHaveLength(1);
-
-    const stoppageAudits = await prisma.orgPeriodFee.findMany({
-      where: { storeId, feeType: 'STOPPAGE' },
-    });
-    expect(stoppageAudits).toHaveLength(1);
+    // Only the Sale binds an order (the Stoppage is a period row with no package id).
+    const queued = await prisma.profitRecomputeRequest.findMany({ where: { storeId } });
+    expect(queued).toHaveLength(1);
+    expect(queued[0]?.orderId).toBe(orderId);
+    expect(queued[0]?.reason).toBe(ProfitRecomputeReason.FINANCE_RECORD);
   });
 
-  it('Return row through the cron path writes the full trio; re-poll is idempotent (#300)', async () => {
-    // Composition-root coverage (#296 follow-up): every existing Return-trio
-    // test called handleReturn directly, bypassing the request-type
-    // classifier + dispatcher routing that stage Mode A1 once shipped
-    // broken. This tick drives the SAME registry-bound entrypoint the
-    // worker claims (processSettlementsChunk) with transactionType
-    // 'Return' and asserts the trio lands end-to-end.
-    const { orderId, syncLogId } = await buildScenario();
-    const syncLog = await prisma.syncLog.findUniqueOrThrow({ where: { id: syncLogId } });
+  it('stores a cargo invoice with all its items in one transaction', async () => {
+    const { storeId, syncLogId } = await buildScenario();
 
-    const result = await processSettlementsChunk(
-      { syncLog, cursor: null, workerId: WORKER_ID },
-      makeMockFetchers({
-        settlements: { Return: [makeReturnRow()] },
-        otherFinancials: {},
-      }),
-    );
-    expect(result.kind).toBe('done');
-
-    const fees = await prisma.orderFee.findMany({
-      where: { orderId, source: 'SETTLEMENT' },
+    await runChunk(syncLogId, {
+      otherFinancials: { DeductionInvoices: [cargoInvoiceRow('INV-1')] },
+      cargoItems: [cargoItem(7_000_001, 48.5, 2), cargoItem(7_000_002, 37.25, 1)],
     });
-    expect(fees.map((f) => f.feeType).sort()).toEqual([
-      'COMMISSION_REFUND',
-      'COST_RETURN',
-      'REFUND_DEDUCTION',
-    ]);
-    // Amounts prove the dispatcher routed into the real handler.
-    // GROSS CONVENTION: amountGross (KDV-dahil, net-split kaldırıldı).
-    // debt=120→amountGross=120; commissionAmount=12→amountGross=12; cost=48→amountGross=48.
-    const byType = new Map(fees.map((f) => [f.feeType, f]));
-    expect(byType.get('REFUND_DEDUCTION')?.amountGross.toFixed(2)).toBe('120.00');
-    expect(byType.get('COMMISSION_REFUND')?.amountGross.toFixed(2)).toBe('12.00');
-    expect(byType.get('COST_RETURN')?.amountGross.toFixed(2)).toBe('48.00');
-    // #297 idempotency anchor stamped on every leg by the cron path too.
-    expect(fees.every((f) => f.trendyolTransactionId === 'return-cron-1')).toBe(true);
 
-    // Re-poll tick: same row again — the trio must not duplicate.
-    const result2 = await processSettlementsChunk(
-      { syncLog, cursor: null, workerId: WORKER_ID },
-      makeMockFetchers({
-        settlements: { Return: [makeReturnRow()] },
-        otherFinancials: {},
-      }),
-    );
-    expect(result2.kind).toBe('done');
-    expect(await prisma.orderFee.count({ where: { orderId, source: 'SETTLEMENT' } })).toBe(3);
+    // The invoice row itself (OTHER_FINANCIAL / DeductionInvoices) plus its two items.
+    const invoiceRows = await prisma.marketplaceFinanceRecord.findMany({
+      where: { storeId, family: FinanceRecordFamily.OTHER_FINANCIAL },
+    });
+    expect(invoiceRows).toHaveLength(1);
+    expect(invoiceRows[0]?.transactionType).toBe('DeductionInvoices');
+
+    const itemRows = await prisma.marketplaceFinanceRecord.findMany({
+      where: { storeId, family: FinanceRecordFamily.CARGO_INVOICE_ITEM },
+      orderBy: { recordId: 'asc' },
+    });
+    expect(itemRows).toHaveLength(2);
+    expect(itemRows.map((row) => row.recordId)).toEqual(['INV-1:7000001', 'INV-1:7000002']);
   });
 
-  it('empty cycle — no rows, status unchanged', async () => {
-    const { orderId, syncLogId } = await buildScenario();
-    const syncLog = await prisma.syncLog.findUniqueOrThrow({ where: { id: syncLogId } });
+  it('a re-run of the same window stores no duplicate rows', async () => {
+    const { storeId, syncLogId } = await buildScenario();
 
-    const result = await processSettlementsChunk(
-      { syncLog, cursor: null, workerId: WORKER_ID },
-      makeMockFetchers({ settlements: {}, otherFinancials: {} }),
-    );
-    expect(result.kind).toBe('done');
-    expect(result.kind === 'done' && result.finalCount).toBe(0);
+    const scenario: MockScenario = {
+      settlements: { Sale: [saleRow('sale-1', BARCODE, 120, 12)] },
+      otherFinancials: { DeductionInvoices: [cargoInvoiceRow('INV-1')] },
+      cargoItems: [cargoItem(7_000_001, 48.5, 2)],
+    };
 
-    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    expect(order.reconciliationStatus).toBe('NOT_SETTLED');
+    await runChunk(syncLogId, scenario);
+    // 1 SETTLEMENT + 1 OTHER_FINANCIAL (invoice) + 1 CARGO_INVOICE_ITEM.
+    expect(await prisma.marketplaceFinanceRecord.count({ where: { storeId } })).toBe(3);
+
+    await runChunk(syncLogId, scenario);
+    // The re-poll updates the same three rows in place — never duplicates them.
+    expect(await prisma.marketplaceFinanceRecord.count({ where: { storeId } })).toBe(3);
+  });
+
+  it('takes a parcel to SETTLED through raw records and the queue', async () => {
+    // A fully-costed melontik parcel so the drain produces a real statement. The order's
+    // platform id is numeric so the Sale rows bind it, and its cargo tracking number
+    // matches the cargo item's parcel id. The golden sale-cycle + cargo values reconcile
+    // the parcel to 191.79, exactly as the direct writer test pins.
+    const cargoTracking = 7_331_234_567n;
+    const parcel = await seedMelontikParcel({ cargoTrackingNumber: cargoTracking });
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { platformOrderId: SHIPMENT_PACKAGE_ID.toString() },
+    });
+    // The melontik helper stores a placeholder credentials blob; the cron decrypts the
+    // store's credentials before scanning, so swap in a real encrypted value.
+    await prisma.store.update({
+      where: { id: parcel.storeId },
+      data: {
+        credentials: encryptCredentials({ supplierId: '123456', apiKey: 'k', apiSecret: 's' }),
+      },
+    });
+    const syncLog = await createSyncLog(parcel.organizationId, parcel.storeId);
+
+    const a = MELONTIK.items.a;
+    const b = MELONTIK.items.b;
+
+    // Step 1: Sale + Discount only (no payment, no cargo) -> PARTIALLY_SETTLED.
+    await runChunk(syncLog.id, {
+      settlements: {
+        Sale: [
+          saleRow('sale-a', a.barcode, 529, 100.51),
+          saleRow('sale-b', b.barcode, 409.68, 77.84),
+        ],
+        Discount: [
+          discountRow('disc-a', a.barcode, 37.72, 7.17),
+          discountRow('disc-b', b.barcode, 29.21, 5.55),
+        ],
+      },
+    });
+    const queuedAfterStep1 = await prisma.profitRecomputeRequest.findFirstOrThrow({
+      where: { orderId: parcel.orderId },
+    });
+    expect(queuedAfterStep1.reason).toBe(ProfitRecomputeReason.FINANCE_RECORD);
+
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    const partial = await prisma.orderProfitStatement.findFirstOrThrow({
+      where: { orderId: parcel.orderId, view: ProfitStatementView.BEST_KNOWN },
+    });
+    expect(partial.status).toBe(ProfitStatus.PARTIALLY_SETTLED);
+    expect(partial.netProfit?.toFixed(2)).toBe('191.79');
+
+    // Step 2: the payment order (confirms the sale cycle) + the cargo invoice (actual
+    // shipping) -> SETTLED. The stored Sale rows carry the payment order id, so the
+    // PaymentOrder row binds this order; the cargo item's parcel id matches the tracking
+    // number, so the cargo invoice binds it too.
+    await runChunk(syncLog.id, {
+      otherFinancials: {
+        PaymentOrder: [paymentOrderRow()],
+        DeductionInvoices: [cargoInvoiceRow('INV-CARGO-1')],
+      },
+      cargoItems: [cargoItem(Number(cargoTracking), 98.34, 2)],
+    });
+
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    const settled = await prisma.orderProfitStatement.findFirstOrThrow({
+      where: { orderId: parcel.orderId, view: ProfitStatementView.BEST_KNOWN },
+    });
+    expect(settled.status).toBe(ProfitStatus.SETTLED);
+    expect(settled.netProfit?.toFixed(2)).toBe('191.79');
   });
 });

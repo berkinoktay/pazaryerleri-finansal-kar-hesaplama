@@ -27,14 +27,18 @@
 // chunk ends at `now`; the oldest chunk's start is clamped to
 // `now − SCAN_WINDOW_DAYS` if the slice would otherwise overshoot.
 //
-// 6h tick / 60d window overlap is ~59.75d. Handlers' idempotency anchors
-// (handleSale OrderItem update no-op; handleReturn externalRef.trendyolId
-// pre-insert check; handleCommissionInvoice null FK filter; PaymentOrder
-// confirmedAt null filter; fastDelivery derivedFrom marker) absorb the
-// re-poll without duplicates.
+// 6h tick / 60d window overlap is ~59.75d. The raw-record store is idempotent
+// on (store_id, family, record_id) (ingestFinanceRecords' ON CONFLICT DO
+// UPDATE), so a re-polled row updates its existing row instead of duplicating.
 //
-// Per-row resilience: each transaction wraps a single dispatch. A malformed
-// row logs + skips; the rest of the cycle continues. orders.ts pattern
+// Phase 3B: every fetched row is stored verbatim as a marketplace_finance_record
+// and the orders it binds to are enqueued for a profit recompute. The legacy
+// per-row handlers (dispatchSettlementRow / dispatchOtherFinancialRow /
+// handleCargoInvoiceItems) and the end-of-cycle reconciliation bump are no longer
+// called; their files stay until phase 5.
+//
+// Per-row resilience: each transaction wraps a single raw-record ingest. A
+// malformed row logs + skips; the rest of the cycle continues. orders.ts pattern
 // mirror.
 //
 // Dependency injection: `fetchers` parameter accepts mock fetchers in
@@ -55,15 +59,27 @@ import {
   type FetchSettlementsOpts,
   type TrendyolFinancialTransaction,
 } from '@pazarsync/marketplace';
+import {
+  ingestFinanceRecords,
+  trendyolCargoInvoiceItemInputs,
+  trendyolOtherFinancialRecordInput,
+  trendyolSettlementRecordInput,
+} from '@pazarsync/profit';
 import { syncLog, syncLogService } from '@pazarsync/sync-core';
 import { computeOrdersCutoffMs } from '../orders';
-import { bumpReconciliationStatusForStore } from './status-bump';
-import { dispatchOtherFinancialRow, dispatchSettlementRow } from './dispatcher';
-import { handleCargoInvoiceItems } from './cargo-invoice-fees';
 import type { ChunkResult, ModuleHandler } from '../types';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const SCAN_WINDOW_DAYS = 60;
+
+// Interactive-transaction budgets for a single raw-record ingest. Prisma's 5s default
+// is too tight for the store + resolve + enqueue that ingestFinanceRecords runs, so each
+// ingest sets both explicitly.
+const INGEST_TX_MAX_WAIT_MS = 10_000;
+const INGEST_TX_TIMEOUT_MS = 30_000;
+// A cargo invoice can carry ~500 items, all stored in one transaction, so its ingest gets
+// a wider timeout than a single settlement/otherfinancials row.
+const CARGO_INVOICE_TX_TIMEOUT_MS = 60_000;
 
 // V1 happy path — research §3.3 confirmed only Sale/Discount/Return have
 // nonzero observations in 60-day windows. Rare types stay enumerated in
@@ -170,9 +186,16 @@ export async function processSettlementsChunk(
       });
       for await (const row of generator) {
         try {
-          await prisma.$transaction(async (tx) => {
-            await dispatchSettlementRow(store.id, store.organizationId, transactionType, row, tx);
-          });
+          await prisma.$transaction(
+            (tx) =>
+              ingestFinanceRecords(tx, {
+                organizationId: store.organizationId,
+                storeId: store.id,
+                platform: store.platform,
+                records: [trendyolSettlementRecordInput(transactionType, row)],
+              }),
+            { maxWait: INGEST_TX_MAX_WAIT_MS, timeout: INGEST_TX_TIMEOUT_MS },
+          );
           totalProcessed += 1;
         } catch (err) {
           syncLog.error('settlements.dispatch.failed', {
@@ -198,10 +221,10 @@ export async function processSettlementsChunk(
       });
       for await (const row of generator) {
         try {
-          // PR-8: kargo faturasi satiri — once item'lari AG uzerinden cek
-          // (tx disinda), sonra eslestirme + OrderFee yazimini tx icinde isle.
-          // Dispatcher'a gondermiyoruz; oradaki cargo_invoice dali yalniz
-          // guvenlik logu olarak kalir.
+          // A cargo-invoice (Kargo Fatura) DeductionInvoices row: fetch its items over the
+          // network FIRST (outside the transaction), then store the invoice row itself and
+          // every one of its items in ONE transaction. An invoice can carry ~500 items, so
+          // this ingest gets the wider timeout.
           const cargoSerial = getCargoInvoiceSerial(transactionType, row);
           if (cargoSerial !== null) {
             const items = await fetchers.fetchCargoInvoiceItems({
@@ -209,22 +232,34 @@ export async function processSettlementsChunk(
               credentials,
               invoiceSerialNumber: cargoSerial,
             });
-            await prisma.$transaction(async (tx) => {
-              await handleCargoInvoiceItems(store.id, store.organizationId, row, items, tx);
-            });
+            await prisma.$transaction(
+              (tx) =>
+                ingestFinanceRecords(tx, {
+                  organizationId: store.organizationId,
+                  storeId: store.id,
+                  platform: store.platform,
+                  records: [
+                    trendyolOtherFinancialRecordInput(transactionType, row),
+                    ...trendyolCargoInvoiceItemInputs(row, items),
+                  ],
+                }),
+              { maxWait: INGEST_TX_MAX_WAIT_MS, timeout: CARGO_INVOICE_TX_TIMEOUT_MS },
+            );
+            // One source row processed: the invoice counts once, its items ride along.
             totalProcessed += 1;
             continue;
           }
 
-          await prisma.$transaction(async (tx) => {
-            await dispatchOtherFinancialRow(
-              store.id,
-              store.organizationId,
-              transactionType,
-              row,
-              tx,
-            );
-          });
+          await prisma.$transaction(
+            (tx) =>
+              ingestFinanceRecords(tx, {
+                organizationId: store.organizationId,
+                storeId: store.id,
+                platform: store.platform,
+                records: [trendyolOtherFinancialRecordInput(transactionType, row)],
+              }),
+            { maxWait: INGEST_TX_MAX_WAIT_MS, timeout: INGEST_TX_TIMEOUT_MS },
+          );
           totalProcessed += 1;
         } catch (err) {
           syncLog.error('settlements.dispatch.failed', {
@@ -239,14 +274,6 @@ export async function processSettlementsChunk(
       }
     }
   }
-
-  // End-of-cycle reconciliation status bump — escalate NOT_SETTLED orders
-  // with any SETTLEMENT OrderFee to PARTIALLY_SETTLED. FULLY_SETTLED rows
-  // (handlePaymentOrderEntry's own writes) are preserved (NOT_SETTLED
-  // filter on updateMany).
-  await prisma.$transaction(async (tx) => {
-    await bumpReconciliationStatusForStore(store.id, tx);
-  });
 
   syncLog.info('settlements.chunk.done', {
     syncLogId: log.id,
