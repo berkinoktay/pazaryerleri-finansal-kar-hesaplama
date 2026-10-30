@@ -208,6 +208,11 @@ export {
   type TrendyolTransactionType,
 } from './marketplaces/trendyol/settlement-records';
 export {
+  trendyolCargoInvoiceItemInputs,
+  trendyolOtherFinancialRecordInput,
+  trendyolSettlementRecordInput,
+} from './marketplaces/trendyol/finance-record-inputs';
+export {
   parseStoredTariffBands,
   type StoredTariffBand,
 } from './marketplaces/trendyol/stored-tariff-bands';
@@ -249,6 +254,8 @@ export {
 } from './persistence/recompute-parcel-profit';
 export { loadTrendyolParcel, type LoadedTrendyolParcel } from './persistence/load-trendyol-parcel';
 export { ParcelNotFoundError, UnsupportedPlatformError } from './persistence/errors';
+export { type FinanceRecordInput } from './core/finance-record-input';
+export { ingestFinanceRecords } from './persistence/finance-records';
 
 // Profit recompute queue (rebuild, phase 3B) -- docs/plans/2026-10-30-profit-engine-faz-3b-plan.md
 export {
