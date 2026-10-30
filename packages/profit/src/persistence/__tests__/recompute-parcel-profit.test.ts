@@ -23,7 +23,11 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { estimateTrendyolParcel } from '../../marketplaces/trendyol/estimate-parcel';
 import { ParcelNotFoundError } from '../errors';
 import { loadTrendyolParcel } from '../load-trendyol-parcel';
-import { recomputeParcelProfit, type RecomputeParcelResult } from '../recompute-parcel-profit';
+import {
+  acquireParcelProfitLock,
+  recomputeParcelProfit,
+  type RecomputeParcelResult,
+} from '../recompute-parcel-profit';
 import {
   attachCostProfile,
   ensureDbReachable,
@@ -41,6 +45,28 @@ function recompute(organizationId: string, orderId: string): Promise<RecomputePa
   return prisma.$transaction((tx) => recomputeParcelProfit(tx, { organizationId, orderId }), {
     maxWait: 15000,
     timeout: 30000,
+  });
+}
+
+/** A promise with an exposed resolver, used to coordinate the lock-wait test. */
+interface Deferred {
+  readonly promise: Promise<void>;
+  readonly resolve: () => void;
+}
+
+/** Builds a Deferred; the executor runs synchronously, so `resolve` is always set. */
+function deferred(): Deferred {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+/** Resolves after `ms`, for polling without a busy loop. */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(() => resolve(), ms);
   });
 }
 
@@ -348,6 +374,33 @@ describe('recomputeParcelProfit', () => {
     );
   });
 
+  it('writes a cancelled parcel without any records as CANCELLED with no lines', async () => {
+    // A cancelled parcel with no finance records has no estimate lines and no actual
+    // lines, so the writer persists zero profit lines and zero allocations. This
+    // guards the empty-createMany path: lineRows is [] and must be skipped.
+    const parcel = await seedMelontikParcel({ status: 'CANCELLED' });
+
+    const first = await recompute(parcel.organizationId, parcel.orderId);
+    expect(first.changed).toBe(true);
+    expect(first.bestKnown.status).toBe(ProfitStatus.CANCELLED);
+
+    expect(await prisma.profitLine.count({ where: { orderId: parcel.orderId } })).toBe(0);
+    expect(
+      await prisma.profitLineAllocation.count({ where: { organizationId: parcel.organizationId } }),
+    ).toBe(0);
+
+    const statements = await prisma.orderProfitStatement.findMany({
+      where: { orderId: parcel.orderId },
+    });
+    expect(statements).toHaveLength(2);
+    expect(statements.every((statement) => statement.status === ProfitStatus.CANCELLED)).toBe(true);
+
+    // A second identical run finds both statement views already carry this content
+    // hash and writes nothing.
+    const second = await recompute(parcel.organizationId, parcel.orderId);
+    expect(second.changed).toBe(false);
+  });
+
   it('refuses another organization and writes nothing', async () => {
     const parcel = await seedMelontikParcel();
 
@@ -530,16 +583,103 @@ describe('recomputeParcelProfit', () => {
     expect(new Decimal(String(usdCost.vatRatePct)).toFixed(4)).toBe('18.5000');
   });
 
+  it('waits for a parcel lock held by another transaction', async () => {
+    const parcel = await seedMelontikParcel();
+    const expectedLineCount = await estimateLineCount(parcel.organizationId, parcel.orderId);
+
+    const held = deferred();
+    const releaseGate = deferred();
+
+    // Transaction H grabs the parcel lock, signals, then parks on releaseGate: it
+    // keeps the advisory lock for exactly as long as the test holds the gate shut.
+    const holder = prisma.$transaction(
+      async (tx) => {
+        await acquireParcelProfitLock(tx, parcel.orderId);
+        held.resolve();
+        await releaseGate.promise;
+      },
+      { maxWait: 15000, timeout: 30000 },
+    );
+
+    let writer: Promise<RecomputeParcelResult> | undefined;
+    try {
+      await held.promise;
+
+      // Writer W is a full recompute in its own transaction. It must block on the
+      // advisory lock that H holds before it can touch the parcel.
+      let writerSettled = false;
+      writer = recompute(parcel.organizationId, parcel.orderId);
+      // Observe settlement and swallow any rejection here, so a writer failure can
+      // never surface as an unhandled rejection; the real result is awaited below.
+      void writer.then(
+        () => {
+          writerSettled = true;
+        },
+        () => {
+          writerSettled = true;
+        },
+      );
+
+      // Prove W is parked on an advisory lock, polling pg_locks from the plain client
+      // (outside both transactions). Without the lock in recomputeParcelProfit, W
+      // never waits: it settles early (breaking the loop) or the 10s window elapses,
+      // and the throw below fails the test deterministically.
+      const deadline = Date.now() + 10000;
+      let sawWaiting = false;
+      while (Date.now() < deadline && !writerSettled) {
+        const rows = await prisma.$queryRaw<{ waiting: number }[]>`
+          SELECT count(*)::int AS waiting
+          FROM pg_locks
+          WHERE locktype = 'advisory' AND NOT granted`;
+        if ((rows[0]?.waiting ?? 0) >= 1) {
+          sawWaiting = true;
+          break;
+        }
+        await delay(50);
+      }
+
+      if (!sawWaiting) {
+        throw new Error(
+          `writer never blocked on an advisory lock (writerSettled=${String(writerSettled)}): ` +
+            'the parcel lock is not serializing writers of the same parcel',
+        );
+      }
+      // While H still holds the lock, W cannot have finished.
+      expect(writerSettled).toBe(false);
+
+      // Release H; it commits and drops the lock, then W wins it and completes.
+      releaseGate.resolve();
+      await holder;
+
+      const result = await writer;
+      expect(result.changed).toBe(true);
+      expect(await prisma.profitLine.count({ where: { orderId: parcel.orderId } })).toBe(
+        expectedLineCount,
+      );
+      expect(await prisma.orderProfitStatement.count({ where: { orderId: parcel.orderId } })).toBe(
+        2,
+      );
+    } finally {
+      // Always open the gate and drain both transactions, so a failed assertion
+      // never leaks the held lock or hangs the suite on a pending transaction.
+      releaseGate.resolve();
+      await holder.catch(() => undefined);
+      if (writer !== undefined) {
+        await writer.catch(() => undefined);
+      }
+    }
+    // Above the 10s poll window, so a mutant without the lock fails with the clear
+    // message from the throw, not a generic vitest timeout.
+  }, 20000);
+
   it('serializes two concurrent recomputes of the same parcel', async () => {
     const parcel = await seedMelontikParcel();
     const expectedLineCount = await estimateLineCount(parcel.organizationId, parcel.orderId);
 
-    // This test only proves serialization because each $transaction runs on its own
-    // pool connection (so the two advisory-lock waits are real, not reentrant on one
-    // session) and because the writer reads at READ COMMITTED: the second call, once
-    // it wins the lock, sees the first call's committed statements and no-ops on the
-    // matching content hash. Under a single connection or a stricter isolation level
-    // the assertion below (exactly one changed: true) would pass vacuously.
+    // Smoke test only. The advisory lock itself is pinned by the deterministic
+    // 'waits for a parcel lock held by another transaction' test above; here we just
+    // fire two recomputes at once and assert the end state is consistent -- exactly
+    // one of them wrote, and the parcel carries a single set of rows, not two.
     const [first, second] = await Promise.all([
       recompute(parcel.organizationId, parcel.orderId),
       recompute(parcel.organizationId, parcel.orderId),

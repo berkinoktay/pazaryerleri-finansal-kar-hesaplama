@@ -57,9 +57,8 @@ export async function recomputeParcelProfit(
 ): Promise<RecomputeParcelResult> {
   const { organizationId, orderId } = params;
 
-  // Serialize concurrent recomputes of the same parcel. $executeRaw, not $queryRaw:
-  // the function returns void, which Prisma cannot deserialize. Released at commit.
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${orderId}, ${ADVISORY_LOCK_SEED}::int8))`;
+  // Serialize concurrent recomputes of the same parcel; released at commit/rollback.
+  await acquireParcelProfitLock(tx, orderId);
 
   const order = await tx.order.findFirst({
     where: { id: orderId, organizationId },
@@ -80,6 +79,24 @@ export async function recomputeParcelProfit(
       throw new Error(`Unhandled platform: ${_exhaustive}`);
     }
   }
+}
+
+/**
+ * Takes the transaction-level advisory lock for one parcel's profit, keyed by the
+ * order id. It serializes every writer of one parcel's profit within the caller's
+ * transaction: a second caller that asks for the same parcel blocks until the first
+ * transaction commits or rolls back, when Postgres releases the lock automatically.
+ * Phase 3B writers that change a parcel's profit inputs may take it as their first
+ * statement too, to queue behind a running recompute instead of racing it.
+ *
+ * `$executeRaw`, not `$queryRaw`: pg_advisory_xact_lock returns void, which Prisma
+ * cannot deserialize into a row.
+ */
+export async function acquireParcelProfitLock(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${orderId}, ${ADVISORY_LOCK_SEED}::int8))`;
 }
 
 /**
@@ -261,7 +278,9 @@ async function persistParcelProfit(
     externalRecordType: line.externalRecord?.rawType ?? null,
     engineVersion: PROFIT_ENGINE_VERSION,
   }));
-  await tx.profitLine.createMany({ data: lineRows });
+  if (lineRows.length > 0) {
+    await tx.profitLine.createMany({ data: lineRows });
+  }
 
   const allocationRows = allocations.map((entry) => {
     const parent = lineRows[entry.lineIndex];
