@@ -13,12 +13,33 @@
 //     tick and the webhook intake in
 //     packages/webhook-ingest/src/trendyol-webhook-intake.ts.
 
+import { Decimal } from 'decimal.js';
+
 import { prisma } from '@pazarsync/db';
 import type { Store } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { MappedProduct } from '@pazarsync/marketplace';
+import { enqueueProfitRecomputeForVariants } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 
 import { refreshProductAggregates } from './refresh-product-aggregates';
+
+/**
+ * True when a synced Decimal column moved to a different numeric value. Both
+ * sides are the DB-boxed value (never the mapped input), so the comparison is
+ * apples-to-apples: a non-null -> null transition, the reverse, or any value
+ * change counts; two numerically equal values (e.g. 21 vs 21.00) do not.
+ */
+function syncedValueChanged(
+  before: { toString(): string } | null,
+  after: { toString(): string } | null,
+): boolean {
+  const b = before === null ? null : new Decimal(before.toString());
+  const a = after === null ? null : new Decimal(after.toString());
+  if (b === null) return a !== null;
+  if (a === null) return true;
+  return !b.equals(a);
+}
 
 export async function upsertCatalogBatch(
   store: Store,
@@ -81,8 +102,25 @@ export async function upsertCatalogBatch(
           },
         });
 
+        // Variants whose synced commission rate or dimensional weight actually
+        // moved: those are backdated profit inputs, so their orders are queued
+        // for a recompute below. Read the current values before the upsert, in
+        // this same transaction, and compare with decimal.js. A newly inserted
+        // variant (no prior row) has no orders yet, so it is never collected.
+        const changedVariantIds: string[] = [];
+
         for (const variant of mapped.variants) {
-          await tx.productVariant.upsert({
+          const before = await tx.productVariant.findUnique({
+            where: {
+              storeId_platformVariantId: {
+                storeId: store.id,
+                platformVariantId: variant.platformVariantId,
+              },
+            },
+            select: { syncedCommissionRate: true, syncedDimensionalWeight: true },
+          });
+
+          const after = await tx.productVariant.upsert({
             where: {
               storeId_platformVariantId: {
                 storeId: store.id,
@@ -140,6 +178,14 @@ export async function upsertCatalogBatch(
               lastSyncedAt: new Date(),
             },
           });
+
+          if (
+            before !== null &&
+            (syncedValueChanged(before.syncedCommissionRate, after.syncedCommissionRate) ||
+              syncedValueChanged(before.syncedDimensionalWeight, after.syncedDimensionalWeight))
+          ) {
+            changedVariantIds.push(after.id);
+          }
         }
 
         // Refresh the denormalized aggregates (totalStock + min/max sale price)
@@ -149,6 +195,18 @@ export async function upsertCatalogBatch(
         // product's in-scope variants (listed and not archived) and stay
         // consistent for the products-list sort + salePrice filter.
         await refreshProductAggregates(tx, store.id, [product.id]);
+
+        // A changed commission rate or desi is a backdated profit input: queue a
+        // recompute for every order carrying one of these variants. The enqueue
+        // is organization-filtered inside the same transaction, so no other
+        // tenant's order is ever touched.
+        if (changedVariantIds.length > 0) {
+          await enqueueProfitRecomputeForVariants(tx, {
+            organizationId: store.organizationId,
+            variantIds: changedVariantIds,
+            reason: ProfitRecomputeReason.REFERENCE_CHANGED,
+          });
+        }
       });
     } catch (err) {
       syncLog.error('content.upsert.failed', {

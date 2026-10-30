@@ -1,7 +1,12 @@
 import { prisma } from '@pazarsync/db';
 import type { CostProfile, Prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
-import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
+import {
+  buildCalcCheckLines,
+  enqueueProfitRecomputeForVariants,
+  resolveOrderCalculability,
+} from '@pazarsync/profit';
 
 import {
   CostProfileArchivedCannotAttachError,
@@ -233,13 +238,19 @@ export async function attachCostProfiles(
     })),
   );
 
-  // One transaction: create the links + flip any now-calculable buffer entries.
+  // One transaction: create the links + flip any now-calculable buffer entries +
+  // queue a profit recompute for the affected variants' orders (COST_CHANGED).
   return await prisma.$transaction(async (tx) => {
     const result = await tx.productVariantCostProfile.createMany({
       data,
       skipDuplicates: true,
     });
     const bufferEntriesPromoted = await flipBufferForVariants(tx, orgId, variantIds);
+    await enqueueProfitRecomputeForVariants(tx, {
+      organizationId: orgId,
+      variantIds,
+      reason: ProfitRecomputeReason.COST_CHANGED,
+    });
     return { attached: result.count, bufferEntriesPromoted };
   });
 }
@@ -262,12 +273,24 @@ export async function detachCostProfiles(
   await guardProfiles(orgId, profileIds, accessibleStoreIds);
   await guardVariants(orgId, variantIds, accessibleStoreIds);
 
-  const result = await prisma.productVariantCostProfile.deleteMany({
-    where: {
-      profileId: { in: profileIds },
-      productVariantId: { in: variantIds },
+  // One transaction: remove the links + queue a profit recompute for the
+  // detached variants' orders (COST_CHANGED). The detach ran without a
+  // transaction before this slice; wrapping it keeps the mark atomic with the
+  // delete so a crash cannot drop one without the other.
+  const result = await prisma.$transaction(async (tx) => {
+    const deleted = await tx.productVariantCostProfile.deleteMany({
+      where: {
+        profileId: { in: profileIds },
+        productVariantId: { in: variantIds },
+        organizationId: orgId,
+      },
+    });
+    await enqueueProfitRecomputeForVariants(tx, {
       organizationId: orgId,
-    },
+      variantIds,
+      reason: ProfitRecomputeReason.COST_CHANGED,
+    });
+    return deleted;
   });
 
   return { detached: result.count };
@@ -328,7 +351,13 @@ export async function replaceCostProfilesForVariants(
 
     // Re-evaluate buffer calculability after the final link state is set. A
     // clear (empty profileIds) leaves variants cost-missing → flip is a no-op.
-    return await flipBufferForVariants(tx, orgId, variantIds);
+    const promoted = await flipBufferForVariants(tx, orgId, variantIds);
+    await enqueueProfitRecomputeForVariants(tx, {
+      organizationId: orgId,
+      variantIds,
+      reason: ProfitRecomputeReason.COST_CHANGED,
+    });
+    return promoted;
   });
 
   return {

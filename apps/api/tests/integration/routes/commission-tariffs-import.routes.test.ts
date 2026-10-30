@@ -14,12 +14,13 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 
 import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization } from '../../helpers/factories';
+import { createMembership, createOrder, createOrganization } from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
@@ -205,5 +206,55 @@ describe('POST .../commission-tariffs/import — real Trendyol fixture', () => {
     const unmatched = period?.items.find((i) => i.barcode !== MATCHED_BARCODE);
     expect(unmatched?.calculable).toBe(false);
     expect(unmatched?.reason).toBe('NO_PRODUCT');
+  });
+});
+
+describe('POST .../commission-tariffs/import — profit recompute queueing', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  it('queues the orders whose barcodes a tariff import covers', async () => {
+    await truncateAll();
+    const ctx = await setupStoreWithMatch();
+
+    // An order whose item carries a barcode present in the fixture → must queue.
+    const covered = await createOrder(ctx.orgId, ctx.storeId);
+    await prisma.orderItem.create({
+      data: {
+        orderId: covered.id,
+        organizationId: ctx.orgId,
+        quantity: 1,
+        lineSaleGross: '0.00',
+        commissionRate: '0.00',
+        commissionGross: '0.00',
+        barcode: MATCHED_BARCODE,
+      },
+    });
+
+    // An order whose barcode is not in the fixture → must stay out.
+    const uncovered = await createOrder(ctx.orgId, ctx.storeId);
+    await prisma.orderItem.create({
+      data: {
+        orderId: uncovered.id,
+        organizationId: ctx.orgId,
+        quantity: 1,
+        lineSaleGross: '0.00',
+        commissionRate: '0.00',
+        commissionGross: '0.00',
+        barcode: 'NOT-IN-FIXTURE-ZZZ',
+      },
+    });
+
+    const res = await app.request(importRequest(ctx));
+    expect(res.status).toBe(201);
+
+    const coveredQueued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: covered.id },
+    });
+    expect(coveredQueued?.reason).toBe(ProfitRecomputeReason.REFERENCE_CHANGED);
+    expect(
+      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: uncovered.id } }),
+    ).toBeNull();
   });
 });

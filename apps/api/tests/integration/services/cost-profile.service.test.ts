@@ -1,11 +1,13 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 
 import {
   archiveCostProfile,
   createCostProfile,
   getCostProfile,
+  restoreCostProfile,
   updateCostProfile,
 } from '@/services/cost-profile.service';
 
@@ -14,7 +16,11 @@ import { CostProfileNameTakenError, CostProfileNotFoundError } from '@/lib/error
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import {
   createMembership,
+  createOrder,
+  createOrderItem,
   createOrganization,
+  createProduct,
+  createProductVariant,
   createStore,
   createUserProfile,
 } from '../../helpers/factories';
@@ -266,6 +272,61 @@ describe('cost-profile service', () => {
       // Monotonically increasing
       expect(vNums[0]).toBeLessThan(vNums[1]!);
       expect(vNums[1]).toBeLessThan(vNums[2]!);
+    });
+  });
+
+  // ─── profit recompute queueing ──────────────────────────────────────────────
+
+  describe('profit recompute queueing', () => {
+    it('queues the orders of the attached variants when a cost profile changes', async () => {
+      const user = await createUserProfile();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      const profile = await createCostProfile(
+        org.id,
+        { ...BASE_INPUT, storeId: store.id },
+        user.id,
+      );
+
+      const product = await createProduct(org.id, store.id);
+      const variant = await createProductVariant(org.id, store.id, product.id);
+      await prisma.productVariantCostProfile.create({
+        data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+      });
+
+      // Carries the attached variant → must be queued on a cost change.
+      const order = await createOrder(org.id, store.id);
+      await createOrderItem(order.id, org.id, { productVariantId: variant.id });
+
+      // Carries no attached variant → must stay out of the queue.
+      const unrelated = await createOrder(org.id, store.id);
+      await createOrderItem(unrelated.id, org.id, { productVariantId: null });
+
+      // (1) update
+      await updateCostProfile(org.id, profile.id, { amountGross: '40.00' }, user.id);
+      const afterUpdate = await prisma.profitRecomputeRequest.findUnique({
+        where: { orderId: order.id },
+      });
+      expect(afterUpdate?.reason).toBe(ProfitRecomputeReason.COST_CHANGED);
+      expect(
+        await prisma.profitRecomputeRequest.findUnique({ where: { orderId: unrelated.id } }),
+      ).toBeNull();
+
+      // (2) archive — clear the mark first to prove archive re-enqueues.
+      await prisma.profitRecomputeRequest.deleteMany({ where: { orderId: order.id } });
+      await archiveCostProfile(org.id, profile.id, user.id);
+      expect(
+        (await prisma.profitRecomputeRequest.findUnique({ where: { orderId: order.id } }))?.reason,
+      ).toBe(ProfitRecomputeReason.COST_CHANGED);
+
+      // (3) restore
+      await prisma.profitRecomputeRequest.deleteMany({ where: { orderId: order.id } });
+      await restoreCostProfile(org.id, profile.id, user.id);
+      expect(
+        (await prisma.profitRecomputeRequest.findUnique({ where: { orderId: order.id } }))?.reason,
+      ).toBe(ProfitRecomputeReason.COST_CHANGED);
     });
   });
 });

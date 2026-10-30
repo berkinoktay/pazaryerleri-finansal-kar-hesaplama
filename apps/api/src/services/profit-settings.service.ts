@@ -18,6 +18,8 @@ import { mapPrismaError } from '@pazarsync/sync-core';
 import { resolveProfitSettings, type ResolvedProfitSettings } from '@pazarsync/utils';
 
 import type { Prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
+import { enqueueProfitRecompute } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
 import type { UpdateProfitSettingsInput } from '../validators/profit-settings.validator';
@@ -62,5 +64,26 @@ export async function updateProfitSettings(
   } catch (err) {
     mapPrismaError(err);
   }
+
+  // Settings are snapshotted onto each order at create time, so a change here is
+  // forward-only for already-snapshotted orders. The one exception is an order
+  // that was written before it carried a snapshot (either toggle still NULL):
+  // those read the live setting, so they are queued to recompute with the new
+  // value. Store- and organization-filtered, so no other tenant is touched.
+  const orders = await tx.order.findMany({
+    where: {
+      organizationId: orgId,
+      storeId,
+      OR: [{ snapshotIncludeStopaj: null }, { snapshotIncludeNegativeNetVat: null }],
+    },
+    select: { id: true },
+  });
+  await enqueueProfitRecompute(tx, {
+    organizationId: orgId,
+    storeId,
+    orderIds: orders.map((order) => order.id),
+    reason: ProfitRecomputeReason.SETTINGS_CHANGED,
+  });
+
   return resolveProfitSettings(merged);
 }

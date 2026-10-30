@@ -1,7 +1,9 @@
 import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
-import type { CostProfile, CostProfileVersion } from '@pazarsync/db';
+import type { CostProfile, CostProfileVersion, Prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
+import { enqueueProfitRecomputeForVariants } from '@pazarsync/profit';
 
 import { CostProfileNameTakenError, CostProfileNotFoundError } from '../lib/errors';
 import type {
@@ -128,6 +130,29 @@ function diffFields(before: CostProfile, after: Partial<CostProfile>): string[] 
     }
   }
   return changed;
+}
+
+/**
+ * Enqueue a profit recompute for every order carrying a variant this profile is
+ * attached to. A cost change (amount/currency/vat/fx, archive, or restore)
+ * reshapes those orders' profit, so they must be recomputed. Runs inside the
+ * mutation's own transaction. A profile with no attached variants enqueues
+ * nothing (the empty id list short-circuits without a query).
+ */
+async function enqueueProfileVariants(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+  profileId: string,
+): Promise<void> {
+  const links = await tx.productVariantCostProfile.findMany({
+    where: { profileId, organizationId: orgId },
+    select: { productVariantId: true },
+  });
+  await enqueueProfitRecomputeForVariants(tx, {
+    organizationId: orgId,
+    variantIds: links.map((link) => link.productVariantId),
+    reason: ProfitRecomputeReason.COST_CHANGED,
+  });
 }
 
 // ─── Service functions ───────────────────────────────────────────────────────
@@ -350,6 +375,8 @@ export async function updateCostProfile(
         },
       });
 
+      await enqueueProfileVariants(tx, orgId, profileId);
+
       return row;
     });
 
@@ -412,6 +439,8 @@ export async function archiveCostProfile(
       },
     });
 
+    await enqueueProfileVariants(tx, orgId, profileId);
+
     return row;
   });
 
@@ -468,6 +497,8 @@ export async function restoreCostProfile(
         changedBy: actorId,
       },
     });
+
+    await enqueueProfileVariants(tx, orgId, profileId);
 
     return row;
   });

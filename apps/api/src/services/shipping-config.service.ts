@@ -26,6 +26,8 @@ import type { z } from '@hono/zod-openapi';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
 import type { Platform, Prisma, ShippingCarrier, Store } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
+import { enqueueProfitRecomputeForStore } from '@pazarsync/profit';
 
 import { NotFoundError, ShippingCarrierPlatformMismatchError } from '../lib/errors';
 import type {
@@ -97,7 +99,7 @@ export async function updateShippingConfig(
   }
 
   try {
-    return await tx.store.update({
+    const updated = await tx.store.update({
       where: { id: storeId },
       data: {
         shippingTariffSource: input.shippingTariffSource,
@@ -105,6 +107,15 @@ export async function updateShippingConfig(
       },
       include: { defaultShippingCarrier: true },
     });
+    // The tariff source / default carrier drives every shipping estimate for the
+    // store, so every order with a not-yet-settled shipping estimate must be
+    // recomputed. Organization- and store-filtered, so no other tenant is touched.
+    await enqueueProfitRecomputeForStore(tx, {
+      organizationId: orgId,
+      storeId,
+      reason: ProfitRecomputeReason.REFERENCE_CHANGED,
+    });
+    return updated;
   } catch (err) {
     mapPrismaError(err);
   }
