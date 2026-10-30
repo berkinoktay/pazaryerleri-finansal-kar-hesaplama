@@ -201,8 +201,8 @@ describe('Webhook ingest modes + transient contract (Paket D §D3/D5/D6)', () =>
     expect(fetchSpy).not.toHaveBeenCalled();
 
     // The order is written even though the barcode is not in the catalog: the
-    // unmatched line persists PROFIT-EXCLUDED (past-day cost-missing) with its
-    // barcode trail, and the event closes.
+    // unmatched line persists normally with its barcode trail (no auto-exclusion
+    // anymore; the write queues a profit recompute), and the event closes.
     const order = await prisma.order.findFirstOrThrow({ where: { storeId } });
     expect(order.platformOrderId).toBe('4834026802');
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
@@ -213,7 +213,7 @@ describe('Webhook ingest modes + transient contract (Paket D §D3/D5/D6)', () =>
     expect(event.processingError).toBeNull();
   });
 
-  it('(b2) inline flag, calculable barcode → order with estimate + processedAt, still no vendor call', async () => {
+  it('(b2) inline flag, calculable barcode → order queued for recompute + processedAt, still no vendor call', async () => {
     vi.stubEnv('WEBHOOK_INTAKE_INLINE', 'true');
     const { storeId } = await setupStore();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {

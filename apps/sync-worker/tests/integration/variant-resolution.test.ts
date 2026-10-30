@@ -17,6 +17,7 @@ import type { Prisma } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { intakeOrder } from '@pazarsync/order-sync';
+import { drainProfitRecomputeQueue } from '@pazarsync/profit';
 import { encryptCredentials } from '@pazarsync/sync-core';
 
 import { processVariantResolution } from '../../src/handlers/variant-resolution';
@@ -261,7 +262,7 @@ describe('processVariantResolution', () => {
     vi.unstubAllEnvs();
   });
 
-  it('links an unresolved item from the local catalog (no vendor call) and re-enters cost/profit', async () => {
+  it('enqueues the order when an unresolved item is linked to a variant', async () => {
     const ctx = await buildUnresolvedScenario('BC-LOCAL-1');
     await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-LOCAL-1', true);
 
@@ -274,8 +275,12 @@ describe('processVariantResolution', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: ctx.itemId } });
     expect(item.productVariantId).not.toBeNull();
-    // Cost re-entry: the linked variant carries an active cost profile.
-    expect(item.unitCostSnapshotGross).not.toBeNull();
+    // The link no longer captures a cost snapshot; it enqueues the order for the
+    // recompute tick instead.
+    const queued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: ctx.orderId },
+    });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
   });
 
   it('fetches a missing barcode from the vendor, upserts the catalog row, and links', async () => {
@@ -606,31 +611,30 @@ describe('processVariantResolution', () => {
     expect(miss.attempts).toBe(1);
   });
 
-  it('kâr-dışı siparişin kalemi KİMLİK için bağlanır ama para alanları donuk kalır', async () => {
+  it('links the identity and enqueues even for an order already marked excluded', async () => {
     const ctx = await buildStore();
-    const { orderId, itemIds } = await buildUnresolvedOrder(ctx, ['BC-FROZEN-1']);
+    const { orderId } = await buildUnresolvedOrder(ctx, ['BC-FROZEN-1']);
     await prisma.order.update({
       where: { id: orderId },
       data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
     });
     await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-FROZEN-1', true);
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
-      throw new Error('vendor cagrisi olmamali — yerel katalog dolu');
+      throw new Error('vendor must not be called -- local catalog is populated');
     });
 
     await processVariantResolution();
 
-    const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemIds[0]! } });
-    expect(item.productVariantId).not.toBeNull(); // kimlik bağlandı (görünürlük)
-    expect(item.unitCostSnapshotGross).toBeNull(); // para donuk
-    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    expect(order.estimatedNetProfit).toBeNull();
-    expect(await prisma.orderFee.count({ where: { orderId } })).toBe(0);
+    const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId } });
+    expect(item.productVariantId).not.toBeNull(); // identity linked (visibility)
+    // The money-freeze branch is gone: an excluded order is enqueued like any other.
+    const queued = await prisma.profitRecomputeRequest.findUnique({ where: { orderId } });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
   });
 
-  it('partial link on a multi-item order: estimate stays null until EVERY line is costed', async () => {
+  it('enqueues on a partial link and again when the remaining line resolves', async () => {
     const ctx = await buildStore();
-    const { orderId, itemIds } = await buildUnresolvedOrder(ctx, ['BC-PART-A', 'BC-PART-B']);
+    const { orderId } = await buildUnresolvedOrder(ctx, ['BC-PART-A', 'BC-PART-B']);
     await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-PART-A', true);
 
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
@@ -643,26 +647,32 @@ describe('processVariantResolution', () => {
 
     await processVariantResolution();
 
-    const [itemA, itemB] = await Promise.all(
-      itemIds.map((id) => prisma.orderItem.findUniqueOrThrow({ where: { id } })),
-    );
-    expect(itemA!.productVariantId).not.toBeNull();
-    expect(itemA!.unitCostSnapshotGross).not.toBeNull();
-    expect(itemB!.productVariantId).toBeNull();
-    expect(itemB!.variantResolutionAttempts).toBe(1);
-    // The money invariant: a half-costed order NEVER gets a profit number.
-    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    expect(order.estimatedNetProfit).toBeNull();
+    const itemA = await prisma.orderItem.findFirstOrThrow({
+      where: { orderId, barcode: 'BC-PART-A' },
+    });
+    const itemB = await prisma.orderItem.findFirstOrThrow({
+      where: { orderId, barcode: 'BC-PART-B' },
+    });
+    expect(itemA.productVariantId).not.toBeNull();
+    expect(itemB.productVariantId).toBeNull();
+    expect(itemB.variantResolutionAttempts).toBe(1);
+    // A single linked line is enough to enqueue the order; the drain decides
+    // computability once every line is costed.
+    const afterPartial = await prisma.profitRecomputeRequest.findUnique({ where: { orderId } });
+    expect(afterPartial?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
 
-    // The sibling resolves later (with cost) → estimate completes.
+    // Drain the mark, then let the sibling resolve -> the order is enqueued again.
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId } })).toBe(0);
+
     await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-PART-B', true);
     await prisma.orderItem.update({
-      where: { id: itemIds[1]! },
+      where: { id: itemB.id },
       data: { nextResolutionAt: new Date(Date.now() - 1000) },
     });
     await processVariantResolution();
-    const completed = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    expect(completed.estimatedNetProfit).not.toBeNull();
+    const afterSibling = await prisma.profitRecomputeRequest.findUnique({ where: { orderId } });
+    expect(afterSibling?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
   });
 
   it('per-store isolation: one store failing on the vendor neither blocks nor leaves the other hot-looping', async () => {

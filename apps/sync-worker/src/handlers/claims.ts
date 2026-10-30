@@ -36,6 +36,7 @@
 
 import { prisma } from '@pazarsync/db';
 import type { Prisma, SyncLog } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import {
   decryptStoreCredentials,
   fetchClaims,
@@ -45,7 +46,7 @@ import {
   type MappedClaim,
   type TrendyolClaim,
 } from '@pazarsync/marketplace';
-import { estimateReturnOnClaim } from '@pazarsync/profit';
+import { enqueueProfitRecompute } from '@pazarsync/profit';
 import { syncLog, syncLogService } from '@pazarsync/sync-core';
 
 import { computeOrdersCutoffMs } from './orders';
@@ -250,6 +251,14 @@ async function upsertClaim(
       where: { claimId: existing.id },
       data: { orderItemId: null },
     });
+    // The claim left its previous order, whose return picture changed too; enqueue
+    // it as well. Both orders belong to this store (the match above is store-scoped).
+    await enqueueProfitRecompute(tx, {
+      organizationId: order.organizationId,
+      reason: ProfitRecomputeReason.CLAIM_CHANGED,
+      storeId,
+      orderIds: [existing.orderId],
+    });
   }
 
   // Minimal NON-PII audit ref. Never the raw payload (it carries customer
@@ -352,12 +361,16 @@ async function upsertClaim(
     });
   }
 
-  // İade gerçekleşme tetikleyici (backstop): bu claim'de kabul edilmiş (Accepted) birim
-  // varsa erken iade tahminini hesapla (estimateReturnOnClaim idempotent: tek-satır upsert + fold).
-  // Webhook bu yolu hızlandırır (ayrı task); cron bu handler'ı düzenli çağırır.
-  if (claim.items.some((it) => it.status === 'Accepted')) {
-    await estimateReturnOnClaim(order.id, tx);
-  }
+  // Every claim upsert can move the order's return picture (an item status flip or a
+  // newly accepted unit), so enqueue a profit recompute for the claim's order in this
+  // same transaction, whatever the item statuses are. The recompute tick reads the
+  // claim's accepted items and writes the return legs.
+  await enqueueProfitRecompute(tx, {
+    organizationId: order.organizationId,
+    reason: ProfitRecomputeReason.CLAIM_CHANGED,
+    storeId,
+    orderIds: [order.id],
+  });
 
   return 'written';
 }

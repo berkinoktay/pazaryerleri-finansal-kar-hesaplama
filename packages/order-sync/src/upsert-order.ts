@@ -664,7 +664,8 @@ export async function upsertOrderWithSnapshot(
           // reads this column and treats null/zero as "unknown".
           orderCommissionRatePct:
             line.commissionKnown === false ? null : new Decimal(line.commissionRate),
-          // Maliyet snapshot null bırakılır — profit writer (recompute tick) doldurur.
+          // The legacy cost snapshot columns stay null: the profit engine reads cost
+          // profiles directly, never these columns. They are removed in phase 5.
           unitCostSnapshotGross: null,
           unitCostSnapshotVatRate: null,
         },
