@@ -207,10 +207,16 @@ export async function loadTrendyolParcel(
   const itemAttributes: TrendyolItemAttributes[] = order.items.map((item) => {
     const variant = item.productVariant;
     const product = variant?.product ?? null;
-    const commissionRate = dec(item.commissionRate);
+    // The rate the order line itself carried, read from the raw column. The legacy
+    // commissionRate column can hold a category fallback, so it is never read here.
+    // The module treats null or zero as "not sent", so a zero column becomes null.
+    const orderCommissionRatePct = decOrNull(item.orderCommissionRatePct);
     return {
       orderItemId: item.id,
-      orderCommissionRatePct: commissionRate.gt(ZERO) ? commissionRate : null,
+      orderCommissionRatePct:
+        orderCommissionRatePct !== null && orderCommissionRatePct.gt(ZERO)
+          ? orderCommissionRatePct
+          : null,
       tariffBands: tariffBandsByItemId.get(item.id) ?? null,
       syncedCommissionRatePct: decOrNull(variant?.syncedCommissionRate ?? null),
       categoryId: product?.categoryId?.toString() ?? null,

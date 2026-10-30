@@ -150,6 +150,65 @@ describe('loadTrendyolParcel', () => {
     expect(shipping.amount.vat.toFixed(2)).toBe('16.39');
   });
 
+  it('reads the order commission rate from the raw column, not the fallback-filled one', async () => {
+    const parcel = await seedMelontikParcel();
+    // A category fallback would have left commissionRate at 21 while the order line
+    // itself carried no rate: orderCommissionRatePct stays null and must win over the
+    // legacy column, so the commission chain never resolves to the ORDER source.
+    await prisma.orderItem.updateMany({
+      where: { orderId: parcel.orderId },
+      data: { commissionRate: '21.00', orderCommissionRatePct: null },
+    });
+    // Give both variants a synced product rate so the chain still has a non-ORDER
+    // source to fall to (resolveTrendyolCommissionRate: PRODUCT_SYNC).
+    await prisma.productVariant.updateMany({
+      where: { id: { in: [parcel.variantA, parcel.variantB] } },
+      data: { syncedCommissionRate: '15.00' },
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const attrA = loaded.estimateInput.attributes.items.find((i) => i.orderItemId === parcel.itemA);
+    const attrB = loaded.estimateInput.attributes.items.find((i) => i.orderItemId === parcel.itemB);
+    expect(attrA?.orderCommissionRatePct).toBeNull();
+    expect(attrB?.orderCommissionRatePct).toBeNull();
+
+    const result = estimateTrendyolParcel(loaded.estimateInput);
+    const commissionA = result.lines.find(
+      (line) => line.type === ProfitLineType.COMMISSION && line.orderItemId === parcel.itemA,
+    );
+    expect(commissionA).toBeDefined();
+    expect(commissionA?.inputs.rateSource).not.toBe('ORDER');
+    expect(commissionA?.inputs.rateSource).toBe('PRODUCT_SYNC');
+  });
+
+  it('reads a positive raw order commission rate as the ORDER rate', async () => {
+    const parcel = await seedMelontikParcel();
+    // The raw column carries the order line's own rate; the loader reads it verbatim.
+    await prisma.orderItem.updateMany({
+      where: { orderId: parcel.orderId },
+      data: { orderCommissionRatePct: '19.50' },
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const attrA = loaded.estimateInput.attributes.items.find((i) => i.orderItemId === parcel.itemA);
+    expect(attrA?.orderCommissionRatePct?.toFixed(2)).toBe('19.50');
+
+    const result = estimateTrendyolParcel(loaded.estimateInput);
+    const commissionA = result.lines.find(
+      (line) => line.type === ProfitLineType.COMMISSION && line.orderItemId === parcel.itemA,
+    );
+    expect(commissionA?.inputs.rateSource).toBe('ORDER');
+    expect(commissionA?.inputs.ratePct).toBe('19.5');
+  });
+
   it('builds the sale as list minus seller discount', async () => {
     // lineSaleGross is set to a value the loader must ignore: the sale is always
     // listGross - sellerDiscountGross.

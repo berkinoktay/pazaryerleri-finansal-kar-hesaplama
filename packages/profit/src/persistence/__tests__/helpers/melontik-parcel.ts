@@ -426,7 +426,11 @@ async function createOrderItem(params: {
       lineSaleGross: lineSaleGrossOverride ?? item.saleGross,
       lineSellerDiscountGross: item.sellerDiscountGross,
       saleVatRate: item.saleVatRate,
+      // The golden parcel's commission resolves from the ORDER source, so the raw
+      // column carries the same rate; the legacy commissionRate column stays filled
+      // for back-compat but the loader no longer reads it.
       commissionRate: item.commissionRate,
+      orderCommissionRatePct: item.commissionRate,
       commissionGross: '0',
       commissionVatRate: '20',
     },
