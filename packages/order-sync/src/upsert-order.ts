@@ -334,21 +334,28 @@ export async function upsertOrderWithSnapshot(
       return;
     }
 
+    // Store read (Gorev 4 review): one read serves both the create-only profit-settings
+    // snapshot and the commission fallback's platform lookup below. It stays lazy -- the
+    // read happens only on a genuine create (existingOrder === null) or when at least one
+    // line arrived without a commission (commissionKnown === false) and needs the DB
+    // category base_rate fallback -- so the hot update path with full commissions takes no
+    // extra query.
+    const needsCommissionFallback = order.lines.some((l) => l.commissionKnown === false);
+    const storeRow =
+      existingOrder === null || needsCommissionFallback
+        ? await tx.store.findUnique({
+            where: { id: storeId },
+            select: { profitSettings: true, platform: true },
+          })
+        : null;
+
     // Snapshot-at-create (decision 3): copy the store's resolved profit settings onto
     // the order on CREATE only. An UPDATE never touches the snapshot — a later settings
     // change is forward-only by design. resolveProfitSettings fills defaults for a
-    // missing/empty JSON, so the snapshot booleans are always set. The store is read
-    // only on a genuine create (existingOrder === null); the hot update path stays free
-    // of the extra read (resolveProfitSettings(undefined) returns unused defaults).
+    // missing/empty JSON, so the snapshot booleans are always set. On an UPDATE the
+    // stored snapshot is passed `undefined` and the resolved defaults are never read.
     const createProfitSettings = resolveProfitSettings(
-      existingOrder === null
-        ? (
-            await tx.store.findUnique({
-              where: { id: storeId },
-              select: { profitSettings: true },
-            })
-          )?.profitSettings
-        : undefined,
+      existingOrder === null ? storeRow?.profitSettings : undefined,
     );
 
     // Mikro ihracat (Trendyol marketplace `micro=true`): satış KDV'den müstesnadır
@@ -490,13 +497,11 @@ export async function upsertOrderWithSnapshot(
       },
     });
 
-    // Commission fallback needs the store platform only when at least one line
-    // arrived without a commission (commissionKnown === false). Resolve it once,
-    // and only then, to keep the hot intake path free of an extra store read.
-    const needsCommissionFallback = order.lines.some((l) => l.commissionKnown === false);
+    // Commission fallback needs the store platform only when at least one line arrived
+    // without a commission (commissionKnown === false). It was already resolved by the
+    // single store read above (storeRow), so the hot intake path takes no extra query.
     const storePlatform: Platform | null = needsCommissionFallback
-      ? ((await tx.store.findUnique({ where: { id: storeId }, select: { platform: true } }))
-          ?.platform ?? null)
+      ? (storeRow?.platform ?? null)
       : null;
 
     // Optimistic between-scans stock: the distinct products whose variant stock
@@ -575,34 +580,38 @@ export async function upsertOrderWithSnapshot(
           });
         }
         // Two-phase webhook (#426): a later event that finally carries the line's own
-        // commission fills the raw order_commission_rate_pct column. Independent of the
-        // settled guard below (which freezes the legacy commission columns), so the raw
-        // rate the loader reads still refreshes even once the parcel is settled. Only
-        // the line's OWN rate is written here (commissionKnown === true), never the
-        // category fallback.
+        // commission (commissionKnown === true) refreshes the raw order_commission_rate_pct
+        // column the loader reads. While the parcel is not yet settled it ALSO refreshes the
+        // legacy estimate-side commission columns, but only when the recomputed commission
+        // differs from the stored value. Decision (Gorev 4 review): fold both into ONE
+        // tx.orderItem.update so a refreshed line is a single write -- the raw rate always
+        // moves, the legacy columns only when they changed. Once the parcel is settled
+        // (settledCommissionGross set) the legacy columns are frozen, so only the raw rate is
+        // written in its own update. The freshness guard above already dropped any strictly-
+        // older event, so only a newer-or-equal event reaches here; the profit recompute is
+        // enqueued once at the end of this function.
         if (line.commissionKnown === true) {
-          await tx.orderItem.update({
-            where: { id: existing.id },
-            data: { orderCommissionRatePct: new Decimal(line.commissionRate) },
-          });
-        }
-        // A later webhook that finally carries the real commission also refreshes the
-        // legacy estimate-side commission columns when it differs from the stored value,
-        // and only while the parcel is not yet settled (settledCommissionGross null). The
-        // settled* columns are never touched. The freshness guard above already drops
-        // stale events, so only a newer-or-equal event reaches here. The profit recompute
-        // is enqueued once at the end of this function.
-        if (line.commissionKnown === true && existing.settledCommissionGross === null) {
-          const eff = await resolveEffectiveCommission(line, storePlatform, tx);
-          if (!eff.commissionGross.equals(new Decimal(existing.commissionGross))) {
+          if (existing.settledCommissionGross === null) {
+            const eff = await resolveEffectiveCommission(line, storePlatform, tx);
+            const legacyChanged = !eff.commissionGross.equals(
+              new Decimal(existing.commissionGross),
+            );
             await tx.orderItem.update({
               where: { id: existing.id },
               data: {
-                commissionRate: eff.commissionRate,
-                commissionGross: eff.commissionGross,
-                refundedCommissionGross: eff.refundedCommissionGross,
-                estimatedCommissionGross: eff.commissionGross,
+                orderCommissionRatePct: new Decimal(line.commissionRate),
+                ...(legacyChanged && {
+                  commissionRate: eff.commissionRate,
+                  commissionGross: eff.commissionGross,
+                  refundedCommissionGross: eff.refundedCommissionGross,
+                  estimatedCommissionGross: eff.commissionGross,
+                }),
               },
+            });
+          } else {
+            await tx.orderItem.update({
+              where: { id: existing.id },
+              data: { orderCommissionRatePct: new Decimal(line.commissionRate) },
             });
           }
         }
@@ -703,18 +712,31 @@ export async function upsertOrderWithSnapshot(
     // when nothing was decremented (all lines re-syncs or unmatched variants).
     await refreshProductAggregates(tx, storeId, [...affectedProductIds]);
 
-    // 3. Enqueue a profit recompute for this order (create + update alike). The
-    //    sync-worker tick drains the queue and computes the statement in its own
-    //    short transaction; a compute failure there never rolls back this write. The
-    //    freshness-guard early return above skips this, so a stale event enqueues
-    //    nothing. Tenant-scoped: enqueueProfitRecompute re-filters by organization and
-    //    store, so only this order (upserted.id) is marked.
-    await enqueueProfitRecompute(tx, {
-      organizationId,
-      storeId,
-      orderIds: [upserted.id],
-      reason: ProfitRecomputeReason.ORDER_CHANGED,
-    });
+    // 3. Enqueue a profit recompute for this order. The sync-worker tick drains the queue
+    //    and computes the statement in its own short transaction; a compute failure there
+    //    never rolls back this write. Tenant-scoped: enqueueProfitRecompute re-filters by
+    //    organization and store, so only this order (upserted.id) is marked.
+    //
+    //    Decision (Gorev 4 review): skip the enqueue when this is an UPDATE whose incoming
+    //    lastModifiedDate equals the stored watermark. Nothing on the order changed -- the
+    //    same event re-delivered, or the 6-hourly ORDERS job re-reading an unchanged order
+    //    -- so the recompute would be wasted work. Still enqueue on a create, on a strictly-
+    //    newer event, and whenever either side's lmd is null (a legacy row, or a buffer
+    //    replay carrying no lmd), because equality cannot be proven there. The strictly-
+    //    older case already returned at the freshness guard above.
+    const sameLastModified =
+      existingOrder !== null &&
+      existingOrder.platformLastModifiedAt !== null &&
+      incomingLmd !== null &&
+      incomingLmd.getTime() === existingOrder.platformLastModifiedAt.getTime();
+    if (!sameLastModified) {
+      await enqueueProfitRecompute(tx, {
+        organizationId,
+        storeId,
+        orderIds: [upserted.id],
+        reason: ProfitRecomputeReason.ORDER_CHANGED,
+      });
+    }
   };
 
   if (existingTx !== undefined) {

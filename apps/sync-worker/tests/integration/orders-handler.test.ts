@@ -1005,6 +1005,30 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     expect(afterUpdate?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
   });
 
+  it('does not enqueue when an update carries the same lastModifiedDate', async () => {
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-SAME-LMD']);
+    const lmd = new Date('2026-05-19T11:00:00Z');
+    const mapped = buildDirectMapped({
+      platformOrderId: 'same-lmd',
+      barcode: 'EAN13-SAME-LMD',
+      lastModifiedDate: lmd,
+    });
+
+    await upsertOrderWithSnapshot(store.id, org.id, mapped);
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: 'same-lmd' },
+    });
+    // Drain the create's mark so the queue is empty before the re-delivery.
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(0);
+
+    // A re-delivery carrying the SAME lastModifiedDate (the same event again, or the
+    // 6-hourly ORDERS job re-reading an unchanged order) must not re-enqueue a recompute,
+    // even though the idempotent upsert still runs.
+    await upsertOrderWithSnapshot(store.id, org.id, { ...mapped, status: 'DELIVERED' });
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(0);
+  });
+
   it('does not enqueue when the freshness guard skips a stale event', async () => {
     const { org, store } = await setupStoreAndSyncLog(['EAN13-STALE']);
     const T1 = new Date('2026-05-19T10:00:00Z');

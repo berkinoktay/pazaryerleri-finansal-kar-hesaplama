@@ -22,9 +22,15 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import { ProfitRecomputeReason } from '@pazarsync/db/enums';
+import {
+  ProfitLineType,
+  ProfitRecomputeReason,
+  ProfitStatementView,
+  ProfitStatus,
+} from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { intakeOrder, upsertOrderWithSnapshot } from '@pazarsync/order-sync';
+import { drainProfitRecomputeQueue } from '@pazarsync/profit';
 
 import { processBufferPromote } from '../../src/handlers/buffer-promote';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
@@ -360,14 +366,78 @@ describe('commission fallback + next-webhook refresh', () => {
     const orderB = await prisma.order.findFirstOrThrow({
       where: { organizationId: org.id, storeId: store.id, platformOrderId: 'buffer-B' },
     });
-    // Phase 3B: both ingest paths enqueue a recompute (the commission parity above is
-    // what pins that the two paths agree; profit now lands via the drained statement).
+    // Phase 3B: both ingest paths enqueue a recompute instead of writing an inline estimate.
     expect(
       (await prisma.profitRecomputeRequest.findUnique({ where: { orderId: orderA.id } }))?.reason,
     ).toBe(ProfitRecomputeReason.ORDER_CHANGED);
     expect(
       (await prisma.profitRecomputeRequest.findUnique({ where: { orderId: orderB.id } }))?.reason,
     ).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+
+    // Seed the reference data the loader needs to drain each order to a full ESTIMATED
+    // statement (mirrors orders-handler's ESTIMATED drain test): a default shipping
+    // carrier on the store, a dimensional weight on each variant for the shipping
+    // estimate, a cost-profile version for the COGS (the factory profile carries none),
+    // and -- because commissionKnown is false, so the raw order rate column stays null --
+    // a synced commission rate so the commission still resolves. Both orders share the
+    // same money, so the two paths must land on the same statement.
+    const carrier = await prisma.shippingCarrier.findFirstOrThrow({
+      where: { platform: 'TRENDYOL', code: 'SENDEOMP' },
+    });
+    await prisma.store.update({
+      where: { id: store.id },
+      data: { defaultShippingCarrierId: carrier.id },
+    });
+    const profiles = await prisma.costProfile.findMany({ where: { organizationId: org.id } });
+    for (const profile of profiles) {
+      await prisma.costProfileVersion.create({
+        data: {
+          profileId: profile.id,
+          organizationId: org.id,
+          version: 1,
+          name: profile.name,
+          type: profile.type,
+          amountGross: profile.amountGross,
+          currency: 'TRY',
+          vatRate: profile.vatRate,
+          fxRateMode: 'AUTO',
+          changedFields: [],
+          changedAt: new Date('2024-01-01T00:00:00Z'),
+        },
+      });
+    }
+    await prisma.productVariant.updateMany({
+      where: { storeId: store.id, barcode: { in: [barcodeA, barcodeB] } },
+      data: { syncedDimensionalWeight: '1', syncedCommissionRate: '19' },
+    });
+
+    // Draining both marks computes each statement in its own short transaction.
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+
+    const stmtA = await prisma.orderProfitStatement.findFirstOrThrow({
+      where: { orderId: orderA.id, view: ProfitStatementView.BEST_KNOWN },
+    });
+    const stmtB = await prisma.orderProfitStatement.findFirstOrThrow({
+      where: { orderId: orderB.id, view: ProfitStatementView.BEST_KNOWN },
+    });
+    // Both paths reach the SAME best-known statement: equal status and equal net profit.
+    expect(stmtA.status).toBe(ProfitStatus.ESTIMATED);
+    expect(stmtB.status).toBe(stmtA.status);
+    expect(stmtA.netProfit).not.toBeNull();
+    expect(stmtB.netProfit?.toFixed(2)).toBe(stmtA.netProfit?.toFixed(2));
+
+    // ...and equal COMMISSION profit lines (the point of the parity: the two ingest
+    // paths resolve the same commission end-to-end, not just on the legacy item column).
+    const sumCommissionGross = async (orderId: string): Promise<string> => {
+      const lines = await prisma.profitLine.findMany({
+        where: { orderId, type: ProfitLineType.COMMISSION },
+      });
+      expect(lines.length).toBeGreaterThan(0);
+      return lines
+        .reduce((acc, line) => acc.add(new Decimal(line.amountGross.toString())), new Decimal(0))
+        .toFixed(2);
+    };
+    expect(await sumCommissionGross(orderB.id)).toBe(await sumCommissionGross(orderA.id));
   });
 
   it('stale never wins: an older lastModifiedDate is dropped by the freshness guard', async () => {
