@@ -313,8 +313,9 @@ export async function processOrdersChunk(input: {
   // across cursor pages on lastModified shifts — upsert is idempotent.
   // Route per-order through the shared intake helper (own transaction each):
   // calculable → orders; cost-missing today → buffer; cost-missing past-day →
-  // orders PROFIT-EXCLUDED (spec 2026-06-12). Unmatched variant lines fold
-  // into cost_missing — the order is ALWAYS written. Identical to the webhook.
+  // orders (persisted normally, NOT_COMPUTABLE until a cost arrives). Unmatched
+  // variant lines fold into cost_missing — the order is ALWAYS written. Identical
+  // to the webhook.
   // Trendyol can emit duplicate orders across cursor pages — upsert + buffer
   // unique key are both idempotent.
   for (const order of batch) {

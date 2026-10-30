@@ -18,12 +18,18 @@ import { Decimal } from 'decimal.js';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import { ProductVariantStatus } from '@pazarsync/db/enums';
+import {
+  ProductVariantStatus,
+  ProfitRecomputeReason,
+  ProfitStatementView,
+  ProfitStatus,
+} from '@pazarsync/db/enums';
 import type {
   MappedOrder,
   TrendyolOrdersStreamResponse,
   TrendyolShipmentPackage,
 } from '@pazarsync/marketplace';
+import { drainProfitRecomputeQueue } from '@pazarsync/profit';
 import { encryptCredentials } from '@pazarsync/sync-core';
 import type { OrdersStreamWindowCursor } from '@pazarsync/sync-core';
 import { getBusinessDayRange } from '@pazarsync/utils';
@@ -122,6 +128,65 @@ function makeStreamResponse(args: {
     nextCursor: args.nextCursor,
     size: args.content.length,
     content: args.content,
+  };
+}
+
+/**
+ * A minimal single-line MappedOrder for the direct-call upsert tests (phase 3B
+ * queue + snapshot + raw-rate behavior). orderDate is a fixed past day so the fee
+ * definitions and cost versions the drain tests seed are already effective.
+ */
+function buildDirectMapped(over: {
+  platformOrderId: string;
+  barcode: string;
+  status?: MappedOrder['status'];
+  lastModifiedDate: Date;
+  commissionKnown?: boolean;
+  commissionRate?: string;
+}): MappedOrder {
+  return {
+    platformOrderId: over.platformOrderId,
+    platformOrderNumber: `TY-${over.platformOrderId}`,
+    orderDate: new Date('2026-05-19T10:00:00Z'),
+    lastModifiedDate: over.lastModifiedDate,
+    status: over.status ?? 'PROCESSING',
+    dematerialized: false,
+    saleGross: '120.00',
+    saleVat: '20.00',
+    listGross: '120.00',
+    sellerDiscountGross: '0.00',
+    promotionDisplays: null,
+    agreedDeliveryDate: null,
+    actualDeliveryDate: null,
+    actualShipDate: null,
+    fastDelivery: false,
+    fastDeliveryType: null,
+    micro: false,
+    estimatedDeliveryStartDate: null,
+    estimatedDeliveryEndDate: null,
+    cargoProviderName: null,
+    cargoTrackingNumber: null,
+    cargoDeci: null,
+    usesSellerCargoAgreement: false,
+    platformCreatedBy: 'order-creation',
+    originShipmentDate: null,
+    lines: [
+      {
+        barcode: over.barcode,
+        quantity: 1,
+        platformLineId: '9000001',
+        lineListGross: '120.00',
+        lineSaleGross: '120.00',
+        lineSellerDiscountGross: '0.00',
+        saleVatRate: '20',
+        commissionRate: over.commissionRate ?? '10',
+        commissionGross: '12.00',
+        refundedCommissionGross: '0.00',
+        commissionVatRate: '20',
+        categoryId: null,
+        commissionKnown: over.commissionKnown ?? true,
+      },
+    ],
   };
 }
 
@@ -253,15 +318,12 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(order.deliveredOnTime).toBe(DELIVERED_DATE_MS <= AGREED_DATE_MS);
     expect(order.fastDelivery).toBe(false);
     expect(order.reconciliationStatus).toBe('NOT_SETTLED');
-    // PR-B: the order is calculable (variant + cost seeded), so the estimate
-    // is computed (non-null) alongside the ESTIMATE OrderFee rows.
-    expect(order.estimatedNetProfit).not.toBeNull();
-
-    const fees = await prisma.orderFee.findMany({
-      where: { orderId: order.id, source: 'ESTIMATE' },
-      orderBy: { feeType: 'asc' },
+    // Phase 3B: the order write enqueues a profit recompute instead of the legacy
+    // inline estimate — no ESTIMATE OrderFee rows, no estimatedNetProfit written here.
+    const queued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: order.id },
     });
-    expect(fees.map((f) => f.feeType)).toEqual(['PLATFORM_SERVICE', 'STOPPAGE']);
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
 
     const items = await prisma.orderItem.findMany({ where: { orderId: order.id } });
     expect(items).toHaveLength(1);
@@ -324,8 +386,12 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(new Decimal(order.saleVat!).toString()).toBe('25');
     expect(new Decimal(order.listGross!).toString()).toBe('200');
     expect(new Decimal(order.sellerDiscountGross!).toString()).toBe('50');
-    // Pipeline çalıştı (variant + cost seeded → calculable); kâr indirimi çift düşmeden hesaplandı.
-    expect(order.estimatedNetProfit).not.toBeNull();
+    // Phase 3B: the write enqueues a recompute (the discount double-count is pinned
+    // by the item columns below, not by an inline estimate anymore).
+    const queued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: order.id },
+    });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
 
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
     // GROSS satır: lineSaleGross = 200 − 50 = 150; satıcı indirimi 50 ayrı kolonda.
@@ -421,10 +487,14 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
 
     await processOrdersChunk({ syncLog: log, cursor: null });
 
-    // ORDER_DATE_MS is past-day → persists PROFIT-EXCLUDED (spec 2026-06-12).
+    // Phase 3B: a past-day cost-missing order persists normally (no auto-exclusion);
+    // the order write enqueues a recompute.
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
-    expect(order.estimatedNetProfit).toBeNull();
-    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
+    expect(order.profitExcludedAt).toBeNull();
+    const queued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: order.id },
+    });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
     expect(item.productVariantId).toBeNull();
     expect(item.barcode).toBe('EAN13-UNKNOWN');
@@ -471,15 +541,15 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(
       await prisma.productVariant.count({ where: { storeId: store.id, barcode: 'EAGER-CRON-1' } }),
     ).toBe(1);
-    // ORDER_DATE_MS geçmiş gün → maliyetsiz ürün → KÂR-DIŞI yazım (PR-1) ama
-    // kalem ürün KİMLİĞİYLE bağlı (görünürlük sözleşmesi).
+    // ORDER_DATE_MS is a past day; the order is persisted normally (phase 3B drops
+    // the auto-exclusion) and the line is linked by product identity (visibility).
     const item = await prisma.orderItem.findFirstOrThrow({
       where: { order: { storeId: store.id } },
     });
     expect(item.productVariantId).not.toBeNull();
   });
 
-  it('cost-missing + past-day → order persisted PROFIT-EXCLUDED (not skipped)', async () => {
+  it('cost-missing + past-day → persisted normally, drained to NOT_COMPUTABLE (not excluded)', async () => {
     const { org, store, log } = await setupStoreAndSyncLog([]);
     // Seed a variant WITHOUT a cost profile link → cost_missing.
     const product = await prisma.product.create({
@@ -530,12 +600,22 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
 
     await processOrdersChunk({ syncLog: log, cursor: null });
 
-    // ORDER_DATE_MS is past-day → persisted PROFIT-EXCLUDED, not buffered.
+    // ORDER_DATE_MS is past-day → persisted normally (not buffered, not excluded).
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.organizationId).toBe(org.id);
-    expect(order.estimatedNetProfit).toBeNull();
-    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
+    expect(order.profitExcludedAt).toBeNull();
+    // The write enqueued a recompute; draining it resolves the cost-missing order to
+    // a NOT_COMPUTABLE best-known statement (end-to-end order → queue → statement).
+    const queued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: order.id },
+    });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    const stmt = await prisma.orderProfitStatement.findFirst({
+      where: { orderId: order.id, view: ProfitStatementView.BEST_KNOWN },
+    });
+    expect(stmt?.status).toBe(ProfitStatus.NOT_COMPUTABLE);
   });
 
   it('cost-missing + today → buffers (PENDING), no orders row (1A symmetry)', async () => {
@@ -891,6 +971,167 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     // PR-8 line trail.
     expect(item.platformLineId).toBe(10328256n);
     expect(item.barcode).toBe('EAN13-DIRECT');
+  });
+
+  it('enqueues a profit recompute when an order is created or updated', async () => {
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-ENQ']);
+    const mapped = buildDirectMapped({
+      platformOrderId: 'enq-1',
+      barcode: 'EAN13-ENQ',
+      lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
+    });
+
+    await upsertOrderWithSnapshot(store.id, org.id, mapped);
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: 'enq-1' },
+    });
+    const afterCreate = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: order.id },
+    });
+    expect(afterCreate?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+
+    // Drain so the queue is empty, then a newer UPDATE must re-enqueue.
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(0);
+
+    await upsertOrderWithSnapshot(store.id, org.id, {
+      ...mapped,
+      status: 'DELIVERED',
+      lastModifiedDate: new Date('2026-05-19T13:00:00Z'),
+    });
+    const afterUpdate = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: order.id },
+    });
+    expect(afterUpdate?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+  });
+
+  it('does not enqueue when the freshness guard skips a stale event', async () => {
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-STALE']);
+    const T1 = new Date('2026-05-19T10:00:00Z');
+    const T2 = new Date('2026-05-19T12:00:00Z');
+
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildDirectMapped({
+        platformOrderId: 'stale-guard',
+        barcode: 'EAN13-STALE',
+        status: 'SHIPPED',
+        lastModifiedDate: T2,
+      }),
+    );
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(0);
+
+    // A strictly-older event returns before any write — it enqueues nothing.
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildDirectMapped({
+        platformOrderId: 'stale-guard',
+        barcode: 'EAN13-STALE',
+        status: 'PROCESSING',
+        lastModifiedDate: T1,
+      }),
+    );
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(0);
+  });
+
+  it('captures the store profit settings on the order at creation only', async () => {
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-SET']);
+    await prisma.store.update({
+      where: { id: store.id },
+      data: { profitSettings: { includeStopaj: false, includeNegativeNetVat: true } },
+    });
+    const mapped = buildDirectMapped({
+      platformOrderId: 'set-1',
+      barcode: 'EAN13-SET',
+      lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
+    });
+
+    await upsertOrderWithSnapshot(store.id, org.id, mapped);
+    const created = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: 'set-1' },
+    });
+    expect(created.snapshotIncludeStopaj).toBe(false);
+    expect(created.snapshotIncludeNegativeNetVat).toBe(true);
+
+    // The store setting changes, then an UPDATE lands — the snapshot must not move
+    // (snapshot-at-create; settings changes are forward-only).
+    await prisma.store.update({
+      where: { id: store.id },
+      data: { profitSettings: { includeStopaj: true, includeNegativeNetVat: false } },
+    });
+    await upsertOrderWithSnapshot(store.id, org.id, {
+      ...mapped,
+      status: 'DELIVERED',
+      lastModifiedDate: new Date('2026-05-19T13:00:00Z'),
+    });
+    const updated = await prisma.order.findUniqueOrThrow({ where: { id: created.id } });
+    expect(updated.snapshotIncludeStopaj).toBe(false);
+    expect(updated.snapshotIncludeNegativeNetVat).toBe(true);
+  });
+
+  it('enqueues on create and drains a fully-costed order to an ESTIMATED statement', async () => {
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-EST']);
+    // Full computability for the loader: the factory cost profile carries no version
+    // row, so add one; plus a seeded shipping carrier and the variant's desi so the
+    // shipping estimate resolves. Without all three the status would be NOT_COMPUTABLE.
+    const carrier = await prisma.shippingCarrier.findFirstOrThrow({
+      where: { platform: 'TRENDYOL', code: 'SENDEOMP' },
+    });
+    await prisma.store.update({
+      where: { id: store.id },
+      data: { defaultShippingCarrierId: carrier.id },
+    });
+    const variant = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: 'EAN13-EST' },
+    });
+    await prisma.productVariant.update({
+      where: { id: variant.id },
+      data: { syncedDimensionalWeight: '1' },
+    });
+    const profile = await prisma.costProfile.findFirstOrThrow({
+      where: { organizationId: org.id },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: profile.name,
+        type: profile.type,
+        amountGross: profile.amountGross,
+        currency: 'TRY',
+        vatRate: profile.vatRate,
+        fxRateMode: 'AUTO',
+        changedFields: [],
+        changedAt: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildDirectMapped({
+        platformOrderId: 'est-1',
+        barcode: 'EAN13-EST',
+        lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
+      }),
+    );
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: 'est-1' },
+    });
+    expect(
+      (await prisma.profitRecomputeRequest.findUnique({ where: { orderId: order.id } }))?.reason,
+    ).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    const stmt = await prisma.orderProfitStatement.findFirst({
+      where: { orderId: order.id, view: ProfitStatementView.BEST_KNOWN },
+    });
+    expect(stmt?.status).toBe(ProfitStatus.ESTIMATED);
   });
 
   it('sellerDiscountVat per-line GERÇEK saleVatRate ten türetilir — %10 satışta 1.00 (hardcoded %20 DEĞİL)', async () => {

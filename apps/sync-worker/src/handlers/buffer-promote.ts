@@ -86,26 +86,27 @@ async function promoteOne(id: string, now: Date): Promise<void> {
 
         const mapped = entry.mappedOrder as unknown as MappedOrder;
 
-        // Calculated-or-excluded bekçisi (spec 2026-06-12): PROMOTING/FAILED
-        // damgası maliyetin HÂLÂ yerinde olduğunu garanti etmez — flush-fail'li
-        // PENDING entry FAILED üzerinden bu yola düşer, flip sonrası profil
-        // arşivlenmiş olabilir. Maliyetsiz bir entry tam-yazım yolundan ASLA
-        // geçemez (estimate null + exclusion yok = ölü üçüncü durum doğardı).
-        // Kilit altında calculability yeniden çözülür ve yönlendirilir.
+        // Calculability re-check under the lock: a PROMOTING/FAILED stamp does not
+        // prove the cost is STILL in place — a flush-failed PENDING entry falls onto
+        // this path through FAILED, and the profile may have been archived after the
+        // flip. So calculability is re-resolved here and routed: a past-day entry whose
+        // cost is still missing graduates as a normal, not-computable order; a same-day
+        // one is demoted to PENDING so the day's cost-flip window can still catch it.
         const calcLines = await buildCalcCheckLines(tx, {
           storeId: entry.storeId,
           lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
         });
         if (resolveOrderCalculability(calcLines).kind !== 'calculable') {
           if (entry.orderDate.getTime() < getBusinessDateAnchor(now).getTime()) {
-            // Pencere kapalı → flush semantiği: KÂR-DIŞI mezuniyet.
-            syncLog.info('buffer.promote-excluded-graduation', {
+            // Window closed → graduate as a normal order. No auto-exclusion anymore
+            // (design 6.6 / 8.3): the queued recompute resolves it as NOT_COMPUTABLE
+            // until a cost is attached.
+            syncLog.info('buffer.promote-uncosted-graduation', {
               entryId: entry.id,
               storeId: entry.storeId,
               platformOrderId: entry.platformOrderId,
             });
             await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx, {
-              profitExclusion: { reason: 'COST_DEADLINE_MISSED' },
               promotedFromBuffer: true,
             });
             await tx.livePerformanceBuffer.delete({ where: { id: entry.id } });
@@ -212,10 +213,10 @@ let lastPermanentFailedRetrySummaryAt = 0;
 
 /**
  * One flush tick: graduate up to FLUSH_CHUNK_SIZE PENDING buffer entries whose
- * business date is before today into `orders` as PROFIT-EXCLUDED
- * (COST_DEADLINE_MISSED — spec 2026-06-12), then delete the buffer row —
- * same atomic claim+upsert+delete as promoteOne. Ciro kaydı korunur; kâr
- * alanları kalıcı donuk ("null kârla mezuniyet + sonradan maliyet" kalktı).
+ * business date is before today into `orders` as normal orders, then delete the
+ * buffer row — same atomic claim+upsert+delete as promoteOne. No auto-exclusion
+ * anymore (design 6.6 / 8.3): the queued recompute resolves a still-uncosted order
+ * as NOT_COMPUTABLE until a cost is attached.
  *
  * Pass 1 (PENDING): PROMOTING (cost just attached) and FAILED (retry-due)
  * past-day entries are already handled by processBufferPromote, so this pass
@@ -309,10 +310,10 @@ async function flushOne(id: string): Promise<string | null> {
       }
 
       const mapped = entry.mappedOrder as unknown as MappedOrder;
-      // Pencere kapandı: KÂR-DIŞI mezuniyet (spec 2026-06-12). Ciro kaydı
-      // korunur; kâr alanları kalıcı donuk. Aynı tx → order + buffer-delete atomik.
+      // Window closed: graduate as a normal order. No auto-exclusion anymore (design
+      // 6.6 / 8.3) — the queued recompute resolves it as NOT_COMPUTABLE until a cost
+      // is attached. Same tx → order write + buffer delete commit atomically.
       await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx, {
-        profitExclusion: { reason: 'COST_DEADLINE_MISSED' },
         promotedFromBuffer: true,
       });
       await tx.livePerformanceBuffer.delete({ where: { id: entry.id } });

@@ -8,8 +8,9 @@
  *   - dematerialized (UnPacked)    → DELETE order + buffer rows (split ghost — children re-carry content)
  *   - status CANCELLED             → purge buffer rows + upsert (audit row; aggregates exclude by status)
  *   - variant_not_found            → cost_missing route (order IS written; line keeps barcode, null variant FK; resolution in PR-2)
- *   - calculable                   → upsertOrderWithSnapshot (full profit)
- *   - cost_missing + past-day      → KÂR-DIŞI yazım (LATE_UNCOSTED_ARRIVAL; ciro kalır, kâr donuk — spec 2026-06-12)
+ *   - calculable                   → upsertOrderWithSnapshot (persist + queue recompute)
+ *   - cost_missing + past-day      → upsertOrderWithSnapshot (persisted normally; the queued
+ *                                    recompute resolves it as NOT_COMPUTABLE until a cost arrives)
  *   - cost_missing + today + in orders → upsertOrderWithSnapshot (idempotent, no buffer)
  *   - cost_missing + today + new   → live_performance_buffer (PENDING, same-day cost-flip window)
  *
@@ -17,11 +18,12 @@
  * was costed earlier then had its cost profile archived (would otherwise live in
  * BOTH orders and buffer → double-count on the Live Performance page).
  *
- * Calculated-or-excluded (spec 2026-06-12 §3): orders'a giren her sipariş ya
- * HESAPLANMIŞ (estimatedNetProfit dolu) ya KÂR-DIŞI (profitExcludedAt dolu)
- * biter. Eski "null kârla yaz, maliyeti sonra gir" üçüncü durumu kalktı — tek
- * maliyet penceresi sipariş gününün sonudur (buffer), kaçıran sipariş kalıcı
- * olarak kâr evreninin dışında kalır.
+ * No auto-exclusion (design 6.6 / 8.3, phase 3B): every order that reaches `orders`
+ * is persisted normally and carries a queued profit recompute. A cost-missing order
+ * is NOT_COMPUTABLE until its cost is entered, then the recompute picks it up — the
+ * old "profit-excluded" state is gone (a user-chosen exclusion is the only exclusion).
+ * The live-performance buffer still owns the same-day cost-flip window; only the
+ * permanent exclusion of a window-missing order was removed.
  */
 
 import { refreshProductAggregates } from '@pazarsync/catalog-sync';
@@ -37,7 +39,7 @@ import { upsertOrderWithSnapshot } from './upsert-order';
 export type OrderIntakeOutcome =
   | {
       kind: 'persisted';
-      reason: 'calculable' | 'excluded_late_arrival' | 'already_in_orders' | 'cancelled_audit';
+      reason: 'calculable' | 'late_uncosted_arrival' | 'already_in_orders' | 'cancelled_audit';
     }
   | { kind: 'buffered' }
   // `refreshed` is an OPTIONAL flag (never a new kind) on purpose: consumers with
@@ -190,14 +192,13 @@ export async function intakeOrder(args: {
   }
 
   // calc is { kind: 'skip', reason: 'cost_missing', ... } from here.
-  // Geçmiş-gün maliyetsiz sipariş: pencere (sipariş gününün sonu) çoktan
-  // kapandı → KÂR-DIŞI yazılır (spec 2026-06-12 K3). Ciro kayıtlı kalır,
-  // kâr alanları kalıcı donuk — "null kâr + sonradan maliyet" akışı kalktı.
+  // Past-day cost-missing order: the same-day buffer window (end of the order's
+  // business day) has closed, so it is persisted normally — no auto-exclusion anymore
+  // (design 6.6 / 8.3). The queued recompute resolves it as NOT_COMPUTABLE until a cost
+  // is attached, then recomputes it. Same call as a calculable order.
   if (getBusinessDate(mapped.orderDate) < getBusinessDate()) {
-    await upsertOrderWithSnapshot(storeId, organizationId, mapped, undefined, {
-      profitExclusion: { reason: 'LATE_UNCOSTED_ARRIVAL' },
-    });
-    return { kind: 'persisted', reason: 'excluded_late_arrival' };
+    await upsertOrderWithSnapshot(storeId, organizationId, mapped);
+    return { kind: 'persisted', reason: 'late_uncosted_arrival' };
   }
 
   // Today's cost-missing — but if it is already in orders, persist (idempotent),

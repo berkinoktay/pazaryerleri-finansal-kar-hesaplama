@@ -1,4 +1,5 @@
 import { prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import { encryptCredentials } from '@pazarsync/sync-core';
 import { getBusinessDayRange } from '@pazarsync/utils';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -198,7 +199,7 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
     expect(entries[0]!.platformOrderNumber).toBe('buf-ord-1');
   });
 
-  it('cost-missing + previous-day orderDate → persists PROFIT-EXCLUDED, no buffer write', async () => {
+  it('cost-missing + previous-day orderDate → persists normally (not excluded), no buffer write', async () => {
     const { orgId, storeId } = await setupStore();
     const yesterday = todayOrderDateGmt3() - 24 * MS_HOUR;
 
@@ -213,14 +214,17 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
     );
     expect(res.status).toBe(200);
 
-    // Spec 2026-06-12: pencere kapandı → kâr-dışı yazım; ciro kayıtlı, buffer yok.
+    // Phase 3B: the window closed, but the order is persisted normally (no
+    // auto-exclusion, no buffer for past-day) and the write enqueues a recompute.
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(0);
     const order = await prisma.order.findFirstOrThrow({ where: { storeId } });
     expect(order.organizationId).toBe(orgId);
     expect(order.platformOrderId).toBe('700000002');
-    expect(order.estimatedNetProfit).toBeNull();
-    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
-    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExcludedAt).toBeNull();
+    const queued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: order.id },
+    });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
   });
 
   it('deferred katalog onarımı: katalogda olmayan barkod istek anında vendor sorgusu YAPMADAN eşleşmemiş satırla buffera düşer (D5)', async () => {

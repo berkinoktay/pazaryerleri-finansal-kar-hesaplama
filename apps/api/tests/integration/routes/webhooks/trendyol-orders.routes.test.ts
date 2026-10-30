@@ -10,6 +10,8 @@
  */
 import { Decimal } from 'decimal.js';
 import { prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason, ProfitStatementView, ProfitStatus } from '@pazarsync/db/enums';
+import { drainProfitRecomputeQueue } from '@pazarsync/profit';
 import { encryptCredentials, syncLog } from '@pazarsync/sync-core';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -323,12 +325,12 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
       expect(event.processedAt).not.toBeNull();
       expect(event.processingError).toBeNull();
 
-      // applyEstimate plug-in wrote PSF + Stopaj OrderFees
-      const fees = await prisma.orderFee.findMany({
+      // Phase 3B: the webhook intake enqueues a profit recompute instead of writing
+      // the legacy inline estimate fees.
+      const queued = await prisma.profitRecomputeRequest.findUnique({
         where: { orderId: order.id },
-        orderBy: { feeType: 'asc' },
       });
-      expect(fees.map((f) => f.feeType)).toEqual(['PLATFORM_SERVICE', 'STOPPAGE']);
+      expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
     });
   });
 
@@ -474,15 +476,17 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
       });
       const res = await postWebhook(storeId, payload, basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS));
       expect(res.status).toBe(200);
-      // Spec 2026-06-11: the variant gap no longer skips — ORDER_DATE_MS is
-      // past-day, so the order persists PROFIT-EXCLUDED (spec 2026-06-12:
-      // LATE_UNCOSTED_ARRIVAL) and the unmatched line keeps the barcode trail.
+      // Phase 3B: the variant gap no longer skips, and a past-day cost-missing order
+      // is persisted normally (no auto-exclusion); the write enqueues a recompute and
+      // the unmatched line keeps the barcode trail.
       const order = await prisma.order.findFirstOrThrow({
         where: { storeId, platformOrderId: '555000001' },
       });
-      expect(order.estimatedNetProfit).toBeNull();
-      expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
-      expect(order.profitExcludedAt).not.toBeNull();
+      expect(order.profitExcludedAt).toBeNull();
+      const queued = await prisma.profitRecomputeRequest.findUnique({
+        where: { orderId: order.id },
+      });
+      expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
       const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
       expect(item.productVariantId).toBeNull();
       expect(item.barcode).toBe('UNKNOWN-BARCODE-XYZ');
@@ -492,7 +496,7 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
       expect(event.processedAt).not.toBeNull();
     });
 
-    it('persists PROFIT-EXCLUDED (past-day cost-missing) when the variant exists but has no cost profile', async () => {
+    it('persists normally and drains to NOT_COMPUTABLE (past-day cost-missing) when the variant has no cost profile', async () => {
       const { orgId, storeId } = await setupStore();
       // Seed a SECOND variant with NO cost link.
       const product = await prisma.product.create({
@@ -535,15 +539,24 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
       });
       const res = await postWebhook(storeId, payload, basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS));
       expect(res.status).toBe(200);
-      // Spec 2026-06-12: ORDER_DATE_MS is past-day → cost window already closed →
-      // the order persists PROFIT-EXCLUDED, not skipped. No buffer entry for past-day.
+      // Phase 3B: ORDER_DATE_MS is past-day → the order is persisted normally (no
+      // auto-exclusion, no buffer for past-day); the write enqueues a recompute and
+      // draining it resolves the cost-missing order to NOT_COMPUTABLE.
       const order = await prisma.order.findFirstOrThrow({
         where: { storeId, platformOrderId: '555000002' },
       });
       expect(order.organizationId).toBe(orgId);
-      expect(order.estimatedNetProfit).toBeNull();
-      expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
+      expect(order.profitExcludedAt).toBeNull();
       expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(0);
+      const queued = await prisma.profitRecomputeRequest.findUnique({
+        where: { orderId: order.id },
+      });
+      expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+      await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+      const stmt = await prisma.orderProfitStatement.findFirst({
+        where: { orderId: order.id, view: ProfitStatementView.BEST_KNOWN },
+      });
+      expect(stmt?.status).toBe(ProfitStatus.NOT_COMPUTABLE);
     });
   });
 

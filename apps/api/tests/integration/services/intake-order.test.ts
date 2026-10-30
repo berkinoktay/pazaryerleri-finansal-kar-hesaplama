@@ -1,7 +1,9 @@
 import { prisma } from '@pazarsync/db';
 import type { Prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason, ProfitStatementView, ProfitStatus } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { intakeOrder } from '@pazarsync/order-sync';
+import { drainProfitRecomputeQueue } from '@pazarsync/profit';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -367,7 +369,7 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     expect(readBufferJson(entry.mappedOrder)['lastModifiedDate']).toBeUndefined();
   });
 
-  it('cost-missing + past-day → persists PROFIT-EXCLUDED (no later cost entry)', async () => {
+  it('persists a past-day order without a cost as a normal, not-computable order', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
     await seedVariant(org.id, store.id, BARCODE, false);
@@ -381,15 +383,22 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
       }),
     });
 
-    expect(outcome).toEqual({ kind: 'persisted', reason: 'excluded_late_arrival' });
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'late_uncosted_arrival' });
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.platformOrderId).toBe('late-1');
-    expect(order.estimatedNetProfit).toBeNull();
-    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
-    expect(order.profitExcludedAt).not.toBeNull();
-    // Fee de yazılmaz: kâr-dışı sipariş PSF/Stopaj ESTIMATE satırı taşımaz.
-    expect(await prisma.orderFee.count({ where: { orderId: order.id } })).toBe(0);
+    // Phase 3B: no auto-exclusion — the order is persisted normally and the write
+    // enqueues a recompute that resolves the cost-missing order to NOT_COMPUTABLE.
+    expect(order.profitExcludedAt).toBeNull();
+    const queued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: order.id },
+    });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    const stmt = await prisma.orderProfitStatement.findFirst({
+      where: { orderId: order.id, view: ProfitStatementView.BEST_KNOWN },
+    });
+    expect(stmt?.status).toBe(ProfitStatus.NOT_COMPUTABLE);
   });
 
   it('cost-missing + today but already in orders → persists (idempotent), never buffers', async () => {
@@ -449,7 +458,7 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
       }),
     });
 
-    expect(outcome).toEqual({ kind: 'persisted', reason: 'excluded_late_arrival' });
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'late_uncosted_arrival' });
     const item = await prisma.orderItem.findFirstOrThrow({
       where: { order: { storeId: store.id, platformOrderId: 'novar-past' } },
     });
@@ -474,7 +483,7 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     ).toBe(1);
   });
 
-  it('mixed order past-day: BOTH lines persist with frozen money — order is excluded as a whole (K5)', async () => {
+  it('mixed order past-day: BOTH lines persist; order is not-computable as a whole (K5)', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
     await seedVariant(org.id, store.id, 'EAN13-MIX-OK', true); // variant + cost profile
@@ -492,10 +501,10 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
       }),
     });
 
-    // One unmatched line makes the order cost_missing — both lines persist, but
-    // the order is EXCLUDED atomically (decision K5): even the costed line's
-    // snapshot stays frozen (null). Identity (variant FK) is still linked.
-    expect(outcome).toEqual({ kind: 'persisted', reason: 'excluded_late_arrival' });
+    // One unmatched line makes the order cost_missing — both lines persist normally
+    // (phase 3B drops the auto-exclusion). The order's identity (variant FK) is linked;
+    // the upsert no longer captures a cost snapshot (the recompute writer owns costs).
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'late_uncosted_arrival' });
     const items = await prisma.orderItem.findMany({
       where: { order: { storeId: store.id, platformOrderId: 'mixed-1' } },
       orderBy: { barcode: 'asc' },
@@ -504,7 +513,6 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     const [matched, unmatched] = items;
     expect(matched!.barcode).toBe('EAN13-MIX-OK');
     expect(matched!.productVariantId).not.toBeNull();
-    // Excluded order carries NO money snapshot — even on the costed line.
     expect(matched!.unitCostSnapshotGross).toBeNull();
     expect(unmatched!.barcode).toBe('UNKNOWN-MIX');
     expect(unmatched!.productVariantId).toBeNull();
@@ -512,7 +520,11 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     const order = await prisma.order.findFirstOrThrow({
       where: { storeId: store.id, platformOrderId: 'mixed-1' },
     });
-    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
+    expect(order.profitExcludedAt).toBeNull();
+    const queued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: order.id },
+    });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
   });
 
   it('legacy item without platformLineId is matched (not duplicated) by a re-delivery carrying one, and backfilled', async () => {

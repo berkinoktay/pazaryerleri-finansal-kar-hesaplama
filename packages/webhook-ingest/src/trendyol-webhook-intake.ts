@@ -121,8 +121,9 @@ export async function processTrendyolWebhookEvent(
 
   // ─── Intake routing (Slice 0 shared helper) ────────────────────────────
   // calculable → orders; cost-missing today → buffer; cost-missing past-day →
-  // orders PROFIT-EXCLUDED (spec 2026-06-12). Unmatched variant lines fold into
-  // cost_missing — the order is ALWAYS written. Identical to the sync-worker.
+  // orders (persisted normally, NOT_COMPUTABLE until a cost arrives). Unmatched
+  // variant lines fold into cost_missing — the order is ALWAYS written. Identical
+  // to the sync-worker.
   const outcome = await intakeOrder({
     storeId: store.id,
     organizationId: store.organizationId,

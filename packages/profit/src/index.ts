@@ -249,3 +249,18 @@ export {
 } from './persistence/recompute-parcel-profit';
 export { loadTrendyolParcel, type LoadedTrendyolParcel } from './persistence/load-trendyol-parcel';
 export { ParcelNotFoundError, UnsupportedPlatformError } from './persistence/errors';
+
+// Profit recompute queue (rebuild, phase 3B) -- docs/plans/2026-10-30-profit-engine-faz-3b-plan.md
+export {
+  enqueueProfitRecompute,
+  enqueueProfitRecomputeForVariants,
+  enqueueProfitRecomputeForStore,
+  enqueueStaleProfitStatements,
+  claimProfitRecomputeRequests,
+  processClaimedRecompute,
+  drainProfitRecomputeQueue,
+  type EnqueueScope,
+  type ClaimedRecompute,
+  type RecomputeOutcome,
+  type DrainResult,
+} from './persistence/recompute-queue';

@@ -14,6 +14,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import { prisma } from '@pazarsync/db';
 import type { Prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { intakeOrder } from '@pazarsync/order-sync';
 import { encryptCredentials } from '@pazarsync/sync-core';
@@ -398,11 +399,12 @@ describe('processVariantResolution', () => {
     expect(secondDelay).toBeLessThanOrEqual(11 * 60_000);
   });
 
-  it('full pipeline: late-arrival intake persists EXCLUDED; tick links identity, money stays frozen', async () => {
+  it('full pipeline: late-arrival intake persists normally (not excluded) and queues; the tick links the variant identity', async () => {
     const ctx = await buildStore();
 
-    // REAL intake path (spec 2026-06-12): past-day order with an unknown
-    // barcode → persisted PROFIT-EXCLUDED — no fees, no estimate, ever.
+    // REAL intake path (phase 3B): a past-day order with an unknown barcode is
+    // persisted normally — no auto-exclusion anymore — and the write enqueues a
+    // profit recompute (resolved to NOT_COMPUTABLE until a cost is attached).
     const outcome = await intakeOrder({
       storeId: ctx.storeId,
       organizationId: ctx.organizationId,
@@ -412,16 +414,18 @@ describe('processVariantResolution', () => {
         barcode: 'BC-FEEDEDUP',
       }),
     });
-    expect(outcome).toEqual({ kind: 'persisted', reason: 'excluded_late_arrival' });
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'late_uncosted_arrival' });
     const order = await prisma.order.findFirstOrThrow({
       where: { storeId: ctx.storeId, platformOrderId: 'feededup-1' },
     });
-    expect(order.estimatedNetProfit).toBeNull();
-    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
-    expect(await prisma.orderFee.count({ where: { orderId: order.id } })).toBe(0);
+    expect(order.profitExcludedAt).toBeNull();
+    const queued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: order.id },
+    });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
 
-    // Catalog catches up (variant + cost profile) → tick links IDENTITY only
-    // (görünürlük sözleşmesi): money re-entry is skipped on excluded orders.
+    // Catalog catches up (variant + cost profile) → the resolution tick links the
+    // variant identity onto the unresolved line.
     await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-FEEDEDUP', true);
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
       throw new Error('vendor must NOT be called — local catalog has the barcode');
@@ -430,11 +434,9 @@ describe('processVariantResolution', () => {
     await processVariantResolution();
 
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
-    expect(item.productVariantId).not.toBeNull(); // kimlik bağlandı (görünürlük)
-    expect(item.unitCostSnapshotGross).toBeNull(); // para donuk
+    expect(item.productVariantId).not.toBeNull(); // identity linked (visibility)
     const after = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
-    expect(after.estimatedNetProfit).toBeNull();
-    expect(await prisma.orderFee.count({ where: { orderId: order.id } })).toBe(0);
+    expect(after.profitExcludedAt).toBeNull(); // still a normal, not-excluded order
   });
 
   it('PENDING buffer satırının bilinmeyen barkodu tick ile kataloğa onarılır (item bağlanmaz)', async () => {

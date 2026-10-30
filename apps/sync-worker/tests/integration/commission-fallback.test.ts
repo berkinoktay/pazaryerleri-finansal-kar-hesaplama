@@ -22,6 +22,7 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { intakeOrder, upsertOrderWithSnapshot } from '@pazarsync/order-sync';
 
@@ -221,10 +222,15 @@ describe('commission fallback + next-webhook refresh', () => {
     const order = await prisma.order.findFirstOrThrow({
       where: { organizationId: org.id, storeId: store.id, platformOrderId: 'fallback-1' },
     });
-    // Estimate computed (not null) and it deducted the commission + fees:
-    // strictly below saleNet(500) - costNet(166.67) = 333.33.
-    expect(order.estimatedNetProfit).not.toBeNull();
-    expect(new Decimal(order.estimatedNetProfit!).lt(new Decimal('333.33'))).toBe(true);
+    // Phase 3B: the write enqueues a recompute instead of an inline estimate.
+    const queued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: order.id },
+    });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+    // commissionKnown=false → the raw order rate column stays NULL even though the
+    // legacy commissionRate carries the category fallback (19); the loader reads the
+    // raw column, so it will fall back to the tariff/category rate at recompute.
+    expect(item.orderCommissionRatePct).toBeNull();
   });
 
   it('refresh: a newer webhook carrying the real commission updates the item + estimate', async () => {
@@ -255,7 +261,8 @@ describe('commission fallback + next-webhook refresh', () => {
       where: { organizationId: org.id, orderId: before.id },
     });
     expect(new Decimal(beforeItem.commissionGross).toFixed(2)).toBe('114.00');
-    expect(before.estimatedNetProfit).not.toBeNull();
+    // commissionKnown=false on the first event → the raw order rate column is NULL.
+    expect(beforeItem.orderCommissionRatePct).toBeNull();
 
     // Next webhook carries the real commission (20% -> gross 120), newer lmd.
     await upsertOrderWithSnapshot(
@@ -277,12 +284,14 @@ describe('commission fallback + next-webhook refresh', () => {
     expect(new Decimal(afterItem.commissionRate).toString()).toBe('20');
     expect(new Decimal(afterItem.commissionGross).toFixed(2)).toBe('120.00');
     expect(new Decimal(afterItem.estimatedCommissionGross!).toFixed(2)).toBe('120.00');
-
-    const after = await prisma.order.findFirstOrThrow({ where: { id: before.id } });
-    // Commission rose 114 -> 120, so the estimated net profit dropped.
-    expect(new Decimal(after.estimatedNetProfit!).lt(new Decimal(before.estimatedNetProfit!))).toBe(
-      true,
-    );
+    // The two-phase webhook now carries the line's own commission → the raw order
+    // rate column is filled (20), independent of the legacy estimate columns.
+    expect(new Decimal(afterItem.orderCommissionRatePct!).toString()).toBe('20');
+    // The UPDATE re-enqueued a recompute.
+    const queued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: before.id },
+    });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
   });
 
   it('fresh == buffer: direct-calculable and buffer->promote paths agree on commission + profit', async () => {
@@ -351,12 +360,14 @@ describe('commission fallback + next-webhook refresh', () => {
     const orderB = await prisma.order.findFirstOrThrow({
       where: { organizationId: org.id, storeId: store.id, platformOrderId: 'buffer-B' },
     });
-    expect(orderA.estimatedNetProfit).not.toBeNull();
-    expect(orderB.estimatedNetProfit).not.toBeNull();
-    // Both ingest paths land on the same net profit.
-    expect(new Decimal(orderB.estimatedNetProfit!).toFixed(2)).toBe(
-      new Decimal(orderA.estimatedNetProfit!).toFixed(2),
-    );
+    // Phase 3B: both ingest paths enqueue a recompute (the commission parity above is
+    // what pins that the two paths agree; profit now lands via the drained statement).
+    expect(
+      (await prisma.profitRecomputeRequest.findUnique({ where: { orderId: orderA.id } }))?.reason,
+    ).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+    expect(
+      (await prisma.profitRecomputeRequest.findUnique({ where: { orderId: orderB.id } }))?.reason,
+    ).toBe(ProfitRecomputeReason.ORDER_CHANGED);
   });
 
   it('stale never wins: an older lastModifiedDate is dropped by the freshness guard', async () => {
@@ -443,7 +454,6 @@ describe('commission fallback + next-webhook refresh', () => {
     const item = await prisma.orderItem.findFirstOrThrow({
       where: { organizationId: org.id, orderId: order.id },
     });
-    const estimateBefore = order.estimatedNetProfit;
 
     // A settlement wrote the real commission into the mutable settled column.
     await prisma.orderItem.update({
@@ -471,11 +481,97 @@ describe('commission fallback + next-webhook refresh', () => {
     expect(new Decimal(afterItem.commissionGross).toFixed(2)).toBe('114.00');
     // The real settled value is untouched by the write path.
     expect(new Decimal(afterItem.settledCommissionGross!).toFixed(2)).toBe('90.00');
+    // The raw order rate column IS refreshed (20): it tracks the line's own commission
+    // independently of the settled guard that freezes the legacy estimate columns.
+    expect(new Decimal(afterItem.orderCommissionRatePct!).toString()).toBe('20');
+  });
 
-    const afterOrder = await prisma.order.findFirstOrThrow({ where: { id: order.id } });
-    // Estimate reads item.commissionGross (still 114) -> net profit unchanged.
-    expect(new Decimal(afterOrder.estimatedNetProfit!).toFixed(2)).toBe(
-      new Decimal(estimateBefore!).toFixed(2),
+  it('writes the raw order commission rate only when the line carried one', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id, { platform: 'TRENDYOL' });
+    await seedVariant(org.id, store.id, 'EAN13-RAW-NO', true);
+    await seedVariant(org.id, store.id, 'EAN13-RAW-YES', true);
+
+    // commissionKnown=false → the legacy commissionRate resolves to the category
+    // fallback (19), but the raw order rate column must stay NULL.
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildMapped({
+        platformOrderId: 'raw-no',
+        barcode: 'EAN13-RAW-NO',
+        commissionKnown: false,
+        categoryId: CATEGORY_ID,
+        commissionRate: '0',
+        commissionGross: '0.00',
+      }),
     );
+    const noItem = await prisma.orderItem.findFirstOrThrow({
+      where: { order: { storeId: store.id, platformOrderId: 'raw-no' } },
+    });
+    expect(new Decimal(noItem.commissionRate).toString()).toBe('19'); // legacy fallback
+    expect(noItem.orderCommissionRatePct).toBeNull(); // raw column untouched
+
+    // commissionKnown=true → the raw order rate column carries the line's own rate.
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildMapped({
+        platformOrderId: 'raw-yes',
+        barcode: 'EAN13-RAW-YES',
+        commissionKnown: true,
+        categoryId: CATEGORY_ID,
+        commissionRate: '17',
+        commissionGross: '102.00',
+      }),
+    );
+    const yesItem = await prisma.orderItem.findFirstOrThrow({
+      where: { order: { storeId: store.id, platformOrderId: 'raw-yes' } },
+    });
+    expect(new Decimal(yesItem.orderCommissionRatePct!).toString()).toBe('17');
+  });
+
+  it('fills the raw commission rate when a later webhook brings the commission', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id, { platform: 'TRENDYOL' });
+    await seedVariant(org.id, store.id, BARCODE, true);
+
+    const t1 = new Date('2026-07-08T08:00:00.000Z');
+    const t2 = new Date('2026-07-08T12:00:00.000Z');
+
+    // First event has no commission of its own → raw column NULL (fallback 19 only
+    // lands in the legacy commissionRate column).
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildMapped({
+        platformOrderId: 'twophase-1',
+        commissionKnown: false,
+        categoryId: CATEGORY_ID,
+        commissionRate: '0',
+        commissionGross: '0.00',
+        lastModifiedDate: t1,
+      }),
+    );
+    const before = await prisma.orderItem.findFirstOrThrow({
+      where: { order: { storeId: store.id, platformOrderId: 'twophase-1' } },
+    });
+    expect(before.orderCommissionRatePct).toBeNull();
+
+    // A later webhook finally carries the line's own commission → the raw column fills.
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildMapped({
+        platformOrderId: 'twophase-1',
+        commissionKnown: true,
+        categoryId: CATEGORY_ID,
+        commissionRate: '20',
+        commissionGross: '120.00',
+        lastModifiedDate: t2,
+      }),
+    );
+    const after = await prisma.orderItem.findFirstOrThrow({ where: { id: before.id } });
+    expect(new Decimal(after.orderCommissionRatePct!).toString()).toBe('20');
   });
 });
