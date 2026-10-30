@@ -406,6 +406,18 @@ enum FinanceRecordFamily {
   CARGO_INVOICE_ITEM
 }
 
+// Why an order was enqueued for a profit recompute; set by whichever producer wrote the request.
+enum ProfitRecomputeReason {
+  ORDER_CHANGED
+  CLAIM_CHANGED
+  FINANCE_RECORD
+  COST_CHANGED
+  SETTINGS_CHANGED
+  REFERENCE_CHANGED
+  STALE_STATEMENT
+  MANUAL
+}
+
 // ─── Models ──────────────────────────────────────────
 
 model UserProfile {
@@ -881,12 +893,13 @@ model Order {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  store            Store                  @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  items            OrderItem[]
-  fees             OrderFee[]
-  claims           OrderClaim[]
-  profitLines      ProfitLine[]
-  profitStatements OrderProfitStatement[]
+  store                  Store                   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  items                  OrderItem[]
+  fees                   OrderFee[]
+  claims                 OrderClaim[]
+  profitLines            ProfitLine[]
+  profitStatements       OrderProfitStatement[]
+  profitRecomputeRequest ProfitRecomputeRequest?
 
   @@unique([storeId, platformOrderId])
   @@index([organizationId])
@@ -944,6 +957,11 @@ model OrderItem {
   commissionVatRate        Decimal  @default(20) @map("commission_vat_rate") @db.Decimal(5, 2)
   estimatedCommissionGross Decimal? @map("estimated_commission_gross") @db.Decimal(12, 2)
   settledCommissionGross   Decimal? @map("settled_commission_gross") @db.Decimal(12, 2)
+
+  // The commission rate the marketplace order line itself carried; null when the
+  // line carried none. The category fallback is never written here (unlike the
+  // legacy commissionRate column), so the profit loader can read a raw rate.
+  orderCommissionRatePct Decimal? @map("order_commission_rate_pct") @db.Decimal(5, 2)
 
   // Settlement ACTUAL çıpası — Trendyol'un Sale settlement'ta kredilediği GERÇEK
   // satış tutarı (KDV-dahil ham `credit`; handleSale yazar, T+~5). KÂRA GİRMEZ:
@@ -2211,6 +2229,11 @@ model OrderProfitStatement {
 // (rebuild, phase 3A). Shared by every marketplace, so the matching keys are
 // text, never BigInt. Written only by the profit writer / sync handlers.
 // store_id is stamped from the store and gates RLS.
+//
+// Unique key is (store_id, family, record_id). A cargo-invoice item has no
+// vendor id, so its recordId is "<invoice serial>:<parcelUniqueId>"; its item
+// label can change on a re-scan, which is why the label (transactionType) is
+// not part of the key.
 model MarketplaceFinanceRecord {
   id             String @id @default(uuid()) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
@@ -2246,17 +2269,49 @@ model MarketplaceFinanceRecord {
   fetchedAt DateTime @map("fetched_at")
 
   createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  // Written mostly by raw SQL (the finance-record ingest), so updated_at carries
+  // a DB default on top of @updatedAt. Raw UPDATEs must still set it explicitly.
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
   store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
 
-  @@unique([storeId, family, transactionType, recordId])
+  @@unique([storeId, family, recordId])
   @@index([storeId, shipmentPackageId])
   @@index([storeId, orderNumber])
   @@index([storeId, paymentOrderId])
   @@index([storeId, parcelUniqueId])
   @@index([organizationId])
   @@map("marketplace_finance_records")
+}
+
+// One row per order that must have its profit recomputed (rebuild, phase 3B).
+// Every producer writes it inside its own transaction; the sync-worker tick
+// drains it with FOR UPDATE SKIP LOCKED. store_id gates RLS.
+model ProfitRecomputeRequest {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  storeId        String @map("store_id") @db.Uuid
+  orderId        String @unique @map("order_id") @db.Uuid
+
+  reason ProfitRecomputeReason
+
+  requestedAt   DateTime @default(now()) @map("requested_at")
+  nextAttemptAt DateTime @default(now()) @map("next_attempt_at")
+  attempts      Int      @default(0)
+  lastError     String?  @map("last_error")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  // Written mostly by raw SQL (INSERT ... ON CONFLICT and the drain's UPDATEs),
+  // so updated_at carries a DB default on top of @updatedAt. Raw UPDATEs must
+  // still set it explicitly.
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([nextAttemptAt])
+  @@index([storeId])
+  @@index([organizationId])
+  @@map("profit_recompute_queue")
 }
 
 // İade talep görünürlüğü — Trendyol getclaims endpoint Settlement Return'den

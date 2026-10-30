@@ -716,3 +716,17 @@ DROP POLICY IF EXISTS marketplace_finance_records_org_member_read ON marketplace
 CREATE POLICY marketplace_finance_records_org_member_read ON marketplace_finance_records
   FOR SELECT TO authenticated
   USING (can_access_store(store_id));
+
+-- --- profit recompute queue (rebuild, phase 3B) ---------------------------
+-- profit_recompute_queue carries a store_id stamped by each producer from the
+-- parent order. Reads are gated by can_access_store(store_id) (SECURITY DEFINER
+-- helper, 42P17 safe); OWNER/ADMIN see every store in their org, MEMBER/VIEWER
+-- only granted stores. Writes are service-role only (the producers and the
+-- sync-worker drain use the postgres connection, which bypasses RLS); there is
+-- no authenticated INSERT/UPDATE/DELETE policy, so direct client writes
+-- default-deny.
+ALTER TABLE profit_recompute_queue ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS profit_recompute_queue_org_member_read ON profit_recompute_queue;
+CREATE POLICY profit_recompute_queue_org_member_read ON profit_recompute_queue
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));

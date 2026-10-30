@@ -64,6 +64,8 @@ const TENANT_TABLES = [
   'profit_line_allocations',
   'order_profit_statements',
   'marketplace_finance_records',
+  // Profit recompute queue (rebuild, phase 3B)
+  'profit_recompute_queue',
 ] as const;
 
 describe('RLS — coverage', () => {

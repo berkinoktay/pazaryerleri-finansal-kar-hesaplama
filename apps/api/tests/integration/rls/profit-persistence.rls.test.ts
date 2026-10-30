@@ -14,11 +14,12 @@ import {
 import { createRlsScopedClient } from '../../helpers/rls-client';
 
 /**
- * Profit engine persistence (rebuild, phase 3A). The four tables are written
- * only by the profit writer (postgres role) and each carries a store_id the
- * writer stamps from the parent order (or the store). Every table has exactly
- * one policy — `<table>_org_member_read FOR SELECT USING (can_access_store(store_id))`
- * — and NO write policy, so client writes are default-deny.
+ * Profit engine persistence (rebuild, phases 3A + 3B). The five tables are
+ * written only by the profit writer / sync producers (postgres role) and each
+ * carries a store_id the writer stamps from the parent order (or the store).
+ * Every table has exactly one policy,
+ * `<table>_org_member_read FOR SELECT USING (can_access_store(store_id))`, and
+ * NO write policy, so client writes are default-deny.
  *
  * The tests assert observable behavior with the order-claims two-org pattern:
  * own-org rows visible, sibling-org rows invisible (full-table AND by-id), a
@@ -33,10 +34,11 @@ interface SeededProfitStack {
   allocationId: string;
   statementId: string;
   financeRecordId: string;
+  recomputeRequestId: string;
 }
 
 /**
- * Seed one order + item and one row in each of the four profit tables for the
+ * Seed one order + item and one row in each of the five profit tables for the
  * given org/store, via Prisma (postgres role, bypasses RLS). There are no
  * shared factories for these tables yet; the values are realistic but minimal
  * — the RLS tests only prove tenant isolation, not business correctness.
@@ -118,6 +120,15 @@ async function seedProfitStack(
     },
   });
 
+  const recomputeRequest = await prisma.profitRecomputeRequest.create({
+    data: {
+      organizationId,
+      storeId,
+      orderId: order.id,
+      reason: 'ORDER_CHANGED',
+    },
+  });
+
   return {
     orderId: order.id,
     orderItemId: orderItem.id,
@@ -125,6 +136,7 @@ async function seedProfitStack(
     allocationId: allocation.id,
     statementId: statement.id,
     financeRecordId: financeRecord.id,
+    recomputeRequestId: recomputeRequest.id,
   };
 }
 
@@ -137,7 +149,7 @@ describe('RLS — profit engine persistence', () => {
     await truncateAll();
   });
 
-  it('member sees only own-org rows across all four profit tables', async () => {
+  it('member sees only own-org rows across all five profit tables', async () => {
     const { user: userA, client } = await createRlsScopedClient();
     const userB = await createUserProfile();
     const [orgA, orgB] = await Promise.all([createOrganization(), createOrganization()]);
@@ -149,11 +161,12 @@ describe('RLS — profit engine persistence', () => {
       seedProfitStack(orgB.id, storeB.id),
     ]);
 
-    const [lines, allocations, statements, finance] = await Promise.all([
+    const [lines, allocations, statements, finance, queue] = await Promise.all([
       client.from('profit_lines').select('id,type'),
       client.from('profit_line_allocations').select('id,basis'),
       client.from('order_profit_statements').select('id,view'),
       client.from('marketplace_finance_records').select('id,transaction_type'),
+      client.from('profit_recompute_queue').select('id,reason'),
     ]);
 
     expect(lines.error).toBeNull();
@@ -164,6 +177,8 @@ describe('RLS — profit engine persistence', () => {
     expect(statements.data?.map((r) => r.id)).toEqual([stackA.statementId]);
     expect(finance.error).toBeNull();
     expect(finance.data?.map((r) => r.id)).toEqual([stackA.financeRecordId]);
+    expect(queue.error).toBeNull();
+    expect(queue.data?.map((r) => r.id)).toEqual([stackA.recomputeRequestId]);
   });
 
   it('member sees zero sibling-org rows even when querying their ids directly', async () => {
@@ -178,11 +193,12 @@ describe('RLS — profit engine persistence', () => {
       seedProfitStack(orgB.id, storeB.id),
     ]);
 
-    const [lines, allocations, statements, finance] = await Promise.all([
+    const [lines, allocations, statements, finance, queue] = await Promise.all([
       client.from('profit_lines').select('id').eq('id', stackB.profitLineId),
       client.from('profit_line_allocations').select('id').eq('id', stackB.allocationId),
       client.from('order_profit_statements').select('id').eq('id', stackB.statementId),
       client.from('marketplace_finance_records').select('id').eq('id', stackB.financeRecordId),
+      client.from('profit_recompute_queue').select('id').eq('id', stackB.recomputeRequestId),
     ]);
 
     expect(lines.error).toBeNull();
@@ -193,20 +209,23 @@ describe('RLS — profit engine persistence', () => {
     expect(statements.data).toEqual([]);
     expect(finance.error).toBeNull();
     expect(finance.data).toEqual([]);
+    expect(queue.error).toBeNull();
+    expect(queue.data).toEqual([]);
   });
 
-  it('MEMBER without a store grant sees none of the four tables', async () => {
+  it('MEMBER without a store grant sees none of the five tables', async () => {
     const { user, client } = await createRlsScopedClient();
     const org = await createOrganization();
     await createMembership(org.id, user.id, 'MEMBER');
     const store = await createStore(org.id);
     await seedProfitStack(org.id, store.id);
 
-    const [lines, allocations, statements, finance] = await Promise.all([
+    const [lines, allocations, statements, finance, queue] = await Promise.all([
       client.from('profit_lines').select('id'),
       client.from('profit_line_allocations').select('id'),
       client.from('order_profit_statements').select('id'),
       client.from('marketplace_finance_records').select('id'),
+      client.from('profit_recompute_queue').select('id'),
     ]);
 
     expect(lines.error).toBeNull();
@@ -217,6 +236,8 @@ describe('RLS — profit engine persistence', () => {
     expect(statements.data).toEqual([]);
     expect(finance.error).toBeNull();
     expect(finance.data).toEqual([]);
+    expect(queue.error).toBeNull();
+    expect(queue.data).toEqual([]);
   });
 
   it('authenticated client cannot write profit_lines (default-deny)', async () => {
@@ -365,6 +386,37 @@ describe('RLS — profit engine persistence', () => {
       .from('marketplace_finance_records')
       .delete()
       .eq('id', stack.financeRecordId)
+      .select();
+    if (remove.error === null) expect(remove.data).toEqual([]);
+  });
+
+  it('authenticated client cannot write profit_recompute_queue (default-deny)', async () => {
+    const { user, client } = await createRlsScopedClient();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id, 'OWNER');
+    const store = await createStore(org.id);
+    const stack = await seedProfitStack(org.id, store.id);
+    const other = await createOrder(org.id, store.id);
+
+    const insert = await client.from('profit_recompute_queue').insert({
+      organization_id: org.id,
+      store_id: store.id,
+      order_id: other.id,
+      reason: 'MANUAL',
+    });
+    expect(insert.error).not.toBeNull();
+
+    const update = await client
+      .from('profit_recompute_queue')
+      .update({ reason: 'MANUAL' })
+      .eq('id', stack.recomputeRequestId)
+      .select();
+    if (update.error === null) expect(update.data).toEqual([]);
+
+    const remove = await client
+      .from('profit_recompute_queue')
+      .delete()
+      .eq('id', stack.recomputeRequestId)
       .select();
     if (remove.error === null) expect(remove.data).toEqual([]);
   });

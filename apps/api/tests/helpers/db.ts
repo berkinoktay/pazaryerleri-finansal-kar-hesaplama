@@ -37,6 +37,8 @@ const TENANT_TABLES = [
   'profit_lines',
   'order_profit_statements',
   'marketplace_finance_records',
+  // Profit recompute queue (rebuild, phase 3B): child of orders.
+  'profit_recompute_queue',
   'org_period_fees',
   'commission_invoices',
   'order_item_cost_snapshot_components',
