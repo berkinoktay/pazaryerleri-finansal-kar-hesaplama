@@ -13,12 +13,13 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 
 import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization } from '../../helpers/factories';
+import { createMembership, createOrder, createOrganization } from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
@@ -485,5 +486,100 @@ describe('Commission Tariffs — list / detail / delete', () => {
     );
     expect(res.status).toBe(200);
     expect(((await res.json()) as ListWire).data).toHaveLength(0);
+  });
+});
+
+describe('DELETE .../commission-tariffs/{tariffId} - profit recompute queueing', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  it('queues the orders whose barcodes the deleted tariff covered', async () => {
+    await truncateAll();
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Delete Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'tariff-delete-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+      },
+    });
+
+    const tariff = await prisma.commissionTariff.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Delete Tariff' },
+    });
+    const period = await prisma.commissionTariffPeriod.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: tariff.id,
+        dateRangeLabel: '1 - 7 July',
+        sortOrder: 0,
+      },
+    });
+    await prisma.commissionTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        periodId: period.id,
+        barcode: 'BC-DEL',
+        productTitle: 'Delete Product',
+        currentPrice: '300.00',
+        currentCommissionPct: '0.2000',
+        bands: [{ key: 'band1', upperLimit: '300.00', commissionPct: '20' }],
+      },
+    });
+
+    // An order whose item carries the tariff's barcode -> must queue after the delete.
+    const covered = await createOrder(org.id, store.id);
+    await prisma.orderItem.create({
+      data: {
+        orderId: covered.id,
+        organizationId: org.id,
+        quantity: 1,
+        lineSaleGross: '0.00',
+        commissionRate: '0.00',
+        commissionGross: '0.00',
+        barcode: 'BC-DEL',
+      },
+    });
+
+    // An order whose barcode the tariff never covered -> must stay out.
+    const uncovered = await createOrder(org.id, store.id);
+    await prisma.orderItem.create({
+      data: {
+        orderId: uncovered.id,
+        organizationId: org.id,
+        quantity: 1,
+        lineSaleGross: '0.00',
+        commissionRate: '0.00',
+        commissionGross: '0.00',
+        barcode: 'BC-UNRELATED',
+      },
+    });
+
+    // Clear any queue rows left by the setup so the assertion proves the delete's own enqueue.
+    await prisma.profitRecomputeRequest.deleteMany();
+
+    const del = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/commission-tariffs/${tariff.id}`,
+      { method: 'DELETE', headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(del.status).toBe(204);
+
+    const coveredQueued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: covered.id },
+    });
+    expect(coveredQueued?.reason).toBe(ProfitRecomputeReason.REFERENCE_CHANGED);
+    expect(
+      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: uncovered.id } }),
+    ).toBeNull();
   });
 });

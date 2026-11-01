@@ -10,12 +10,16 @@
  * shipping-config change (by store).
  */
 
+import { readFileSync } from 'node:fs';
+
 import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 
+import { importTariff } from '@/services/commission-tariff-import.service';
+import { deleteTariff } from '@/services/commission-tariff.service';
 import { updateCostProfile } from '@/services/cost-profile.service';
 import { updateShippingConfig } from '@/services/shipping-config.service';
 
@@ -29,6 +33,31 @@ import {
   createStore,
   createUserProfile,
 } from '../../helpers/factories';
+
+// The real Trendyol "Urun Komisyon Tarifeleri" export; one of its product rows
+// carries the barcode below. Imported/deleted through the service to prove the
+// recompute enqueue stays scoped to the acting organization and store.
+const TARIFF_FIXTURE = readFileSync(
+  new URL('../../fixtures/trendyol-commission-tariff.xlsx', import.meta.url),
+);
+const FIXTURE_BARCODE = 'TB200X300A';
+
+/** Creates an order in the given store carrying one item with the fixture's barcode. */
+async function orderCarryingFixtureBarcode(orgId: string, storeId: string): Promise<string> {
+  const order = await createOrder(orgId, storeId);
+  await prisma.orderItem.create({
+    data: {
+      orderId: order.id,
+      organizationId: orgId,
+      quantity: 1,
+      lineSaleGross: '0.00',
+      commissionRate: '0.00',
+      commissionGross: '0.00',
+      barcode: FIXTURE_BARCODE,
+    },
+  });
+  return order.id;
+}
 
 describe('Tenant isolation — profit recompute triggers', () => {
   beforeAll(async () => {
@@ -116,5 +145,79 @@ describe('Tenant isolation — profit recompute triggers', () => {
       where: { orderId: siblingOrder.id },
     });
     expect(queuedSibling).toBeNull();
+  });
+
+  it('never queues another organization or a sibling store order on a commission tariff import', async () => {
+    // Org A with two stores, org B with one; each store has an order carrying the
+    // fixture's barcode. The import runs for store A1 only.
+    const orgA = await createOrganization();
+    const storeA1 = await createStore(orgA.id);
+    const storeA2 = await createStore(orgA.id);
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+
+    const orderA1 = await orderCarryingFixtureBarcode(orgA.id, storeA1.id);
+    const orderA2 = await orderCarryingFixtureBarcode(orgA.id, storeA2.id);
+    const orderB = await orderCarryingFixtureBarcode(orgB.id, storeB.id);
+
+    await importTariff({
+      organizationId: orgA.id,
+      storeId: storeA1.id,
+      file: TARIFF_FIXTURE,
+      filename: 'trendyol-commission-tariff.xlsx',
+      createdBy: null,
+      now: new Date('2026-06-24T00:00:00Z'),
+    });
+
+    const queuedA1 = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: orderA1 },
+    });
+    expect(queuedA1?.reason).toBe(ProfitRecomputeReason.REFERENCE_CHANGED);
+
+    expect(
+      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: orderA2 } }),
+    ).toBeNull();
+    expect(
+      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: orderB } }),
+    ).toBeNull();
+  });
+
+  it('never queues another organization or a sibling store order on a commission tariff delete', async () => {
+    const orgA = await createOrganization();
+    const storeA1 = await createStore(orgA.id);
+    const storeA2 = await createStore(orgA.id);
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+
+    const orderA1 = await orderCarryingFixtureBarcode(orgA.id, storeA1.id);
+    const orderA2 = await orderCarryingFixtureBarcode(orgA.id, storeA2.id);
+    const orderB = await orderCarryingFixtureBarcode(orgB.id, storeB.id);
+
+    const imported = await importTariff({
+      organizationId: orgA.id,
+      storeId: storeA1.id,
+      file: TARIFF_FIXTURE,
+      filename: 'trendyol-commission-tariff.xlsx',
+      createdBy: null,
+      now: new Date('2026-06-24T00:00:00Z'),
+    });
+
+    // The import itself enqueues A1's order; clear the queue so the assertion proves
+    // the delete's own enqueue, not the import's.
+    await prisma.profitRecomputeRequest.deleteMany();
+
+    await deleteTariff(orgA.id, storeA1.id, imported.tariffId);
+
+    const queuedA1 = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: orderA1 },
+    });
+    expect(queuedA1?.reason).toBe(ProfitRecomputeReason.REFERENCE_CHANGED);
+
+    expect(
+      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: orderA2 } }),
+    ).toBeNull();
+    expect(
+      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: orderB } }),
+    ).toBeNull();
   });
 });

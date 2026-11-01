@@ -261,6 +261,7 @@ export { ingestFinanceRecords } from './persistence/finance-records';
 export {
   enqueueProfitRecompute,
   enqueueProfitRecomputeForVariants,
+  enqueueProfitRecomputeForBarcodes,
   enqueueProfitRecomputeForStore,
   enqueueStaleProfitStatements,
   claimProfitRecomputeRequests,

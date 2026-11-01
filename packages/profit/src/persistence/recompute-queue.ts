@@ -94,6 +94,33 @@ export function enqueueProfitRecomputeForVariants(
   );
 }
 
+/**
+ * Enqueues every order of one organization and store carrying at least one item
+ * with one of the barcodes; used by reference inputs keyed by barcode (a commission
+ * tariff import or delete). An empty barcode list returns 0 without a query. Returns
+ * the affected row count.
+ */
+export function enqueueProfitRecomputeForBarcodes(
+  tx: Prisma.TransactionClient,
+  params: EnqueueScope & { readonly storeId: string; readonly barcodes: readonly string[] },
+): Promise<number> {
+  const { organizationId, reason, storeId, barcodes } = params;
+  if (barcodes.length === 0) {
+    return Promise.resolve(0);
+  }
+  const codes = [...barcodes];
+  return enqueueFromOrders(
+    tx,
+    reason,
+    Prisma.sql`o.organization_id = ${organizationId}::uuid
+      AND o.store_id = ${storeId}::uuid
+      AND EXISTS (
+        SELECT 1 FROM order_items i
+        WHERE i.order_id = o.id AND i.barcode = ANY(${codes}::text[])
+      )`,
+  );
+}
+
 /** Enqueues every order of one store. Returns the affected row count. */
 export function enqueueProfitRecomputeForStore(
   tx: Prisma.TransactionClient,

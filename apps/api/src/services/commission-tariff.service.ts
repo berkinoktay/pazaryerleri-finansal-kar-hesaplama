@@ -13,6 +13,7 @@ import { Decimal } from 'decimal.js';
 
 import { Prisma, prisma } from '@pazarsync/db';
 import type { Store as PrismaStore } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import { mapPrismaError } from '@pazarsync/sync-core';
 import type { EstimateOutcome } from '@pazarsync/profit';
 
@@ -26,7 +27,7 @@ import {
   type TariffAssemblyContext,
   type TariffVariant,
 } from './commission-tariff-compute.service';
-import { parseStoredTariffBands } from '@pazarsync/profit';
+import { enqueueProfitRecomputeForBarcodes, parseStoredTariffBands } from '@pazarsync/profit';
 import type { VariantCostAggregate } from '../validators/product.validator';
 import type {
   CommissionTariffDetail,
@@ -300,25 +301,47 @@ export async function getTariffDetail(
 // ─── Delete ────────────────────────────────────────────────────────────────
 
 /**
- * Hard-deletes a tariff (periods + items cascade via FK). Throws `NotFoundError`
- * when it does not belong to this store, so a cross-tenant id is indistinguishable
- * from a missing one.
+ * Hard-deletes a tariff (periods + items cascade via FK) in one transaction. Throws
+ * `NotFoundError` when it does not belong to this store, so a cross-tenant id is
+ * indistinguishable from a missing one. Deleting a tariff is a backdated commission
+ * input change for every order carrying one of its barcodes (their commission falls
+ * back from the tariff bands to the product/category rate), so those orders are queued
+ * for a profit recompute in the SAME transaction; the stale-statement sweep would not
+ * catch them (their statements are stamped by the current engine).
  */
 export async function deleteTariff(
   orgId: string,
   storeId: string,
   tariffId: string,
 ): Promise<void> {
-  const existing = await prisma.commissionTariff.findFirst({
-    where: { id: tariffId, organizationId: orgId, storeId },
-    select: { id: true },
-  });
-  if (existing === null) {
-    throw new NotFoundError('CommissionTariff', tariffId);
-  }
-
   try {
-    await prisma.commissionTariff.delete({ where: { id: tariffId } });
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.commissionTariff.findFirst({
+        where: { id: tariffId, organizationId: orgId, storeId },
+        select: { id: true },
+      });
+      if (existing === null) {
+        throw new NotFoundError('CommissionTariff', tariffId);
+      }
+
+      // Collect the tariff's distinct item barcodes BEFORE the delete cascades the
+      // items away. A deleted variant still leaves its barcode on the item row.
+      const items = await tx.commissionTariffItem.findMany({
+        where: { organizationId: orgId, storeId, period: { tariffId } },
+        select: { barcode: true },
+        distinct: ['barcode'],
+      });
+      const barcodes = items.map((item) => item.barcode);
+
+      await tx.commissionTariff.delete({ where: { id: tariffId } });
+
+      await enqueueProfitRecomputeForBarcodes(tx, {
+        organizationId: orgId,
+        storeId,
+        barcodes,
+        reason: ProfitRecomputeReason.REFERENCE_CHANGED,
+      });
+    });
   } catch (err) {
     mapPrismaError(err);
   }

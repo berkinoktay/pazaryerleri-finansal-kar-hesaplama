@@ -16,7 +16,7 @@
 
 import { prisma } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
-import { enqueueProfitRecompute } from '@pazarsync/profit';
+import { enqueueProfitRecomputeForBarcodes } from '@pazarsync/profit';
 import { mapPrismaError } from '@pazarsync/sync-core';
 import { readWorkbookGrid, SpreadsheetFileError, type SheetData } from '@pazarsync/spreadsheet';
 
@@ -310,17 +310,13 @@ export async function importTariff(input: ImportTariffInput): Promise<ImportTari
 
       // A new tariff is a backdated commission input for every order whose items
       // carry one of the imported barcodes: their commission now resolves through
-      // the tariff bands, so they must be recomputed. One store-scoped query joins
-      // order_items by barcode; organization- and store-filtered so no other tenant
-      // is touched even when another store shares a barcode.
-      const affected = await tx.order.findMany({
-        where: { organizationId, storeId, items: { some: { barcode: { in: barcodes } } } },
-        select: { id: true },
-      });
-      await enqueueProfitRecompute(tx, {
+      // the tariff bands, so they must be recomputed. One store- and organization-
+      // scoped statement enqueues them by barcode, so no other tenant is touched even
+      // when another store shares a barcode.
+      await enqueueProfitRecomputeForBarcodes(tx, {
         organizationId,
         storeId,
-        orderIds: affected.map((order) => order.id),
+        barcodes,
         reason: ProfitRecomputeReason.REFERENCE_CHANGED,
       });
 
