@@ -997,6 +997,10 @@ model OrderItem {
   @@index([organizationId, snapshotCapturedAt])
   @@index([commissionInvoiceId])
   @@index([orderId])
+  // product_variant_id is a FK (onDelete: SetNull) with no index; the profit queue's variants scope (enqueueProfitRecomputeForVariants in packages/profit/src/persistence/recompute-queue.ts) probes it.
+  @@index([productVariantId])
+  // barcode is probed by the barcodes scope (enqueueProfitRecomputeForBarcodes, used by commission tariff import and delete).
+  @@index([barcode])
   // Resolution kuyruğu index'i PARTIAL (WHERE product_variant_id IS NULL) —
   // Prisma kısmi index yazamadığı için check-constraints.sql + migration
   // aynasında yaşar (order_items_resolution_due_idx).
@@ -2308,7 +2312,8 @@ model ProfitRecomputeRequest {
 
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
-  @@index([nextAttemptAt])
+  // The claim orders by next_attempt_at, id.
+  @@index([nextAttemptAt, id])
   @@index([storeId])
   @@index([organizationId])
   @@map("profit_recompute_queue")
@@ -2353,6 +2358,8 @@ model OrderClaim {
   @@index([organizationId, resolved])
   @@index([storeId, orderShipmentPackageId])
   @@index([storeId, resolved])
+  // A cargo-invoice finance record binds a claim by its cargo tracking number (packages/profit/src/persistence/finance-records.ts).
+  @@index([storeId, cargoTrackingNumber])
   @@map("order_claims")
 }
 
