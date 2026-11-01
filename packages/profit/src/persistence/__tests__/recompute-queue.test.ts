@@ -12,7 +12,12 @@
 import { randomUUID } from 'node:crypto';
 
 import { prisma } from '@pazarsync/db';
-import { ProfitRecomputeReason, ProfitStatementView, ProfitStatus } from '@pazarsync/db/enums';
+import {
+  Platform,
+  ProfitRecomputeReason,
+  ProfitStatementView,
+  ProfitStatus,
+} from '@pazarsync/db/enums';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -727,5 +732,52 @@ describe('profit recompute queue', () => {
     const outcome = await processClaimedRecompute(prisma, request);
     expect(outcome).toBe('ORDER_GONE');
     expect(await prisma.profitRecomputeRequest.count()).toBe(0);
+  });
+
+  it('drops the mark of an order whose platform the engine cannot compute', async () => {
+    const parcel = await seedMelontikParcel();
+    // The engine has no Hepsiburada writer yet; flip the store's platform so the
+    // recompute throws UnsupportedPlatformError.
+    await prisma.store.update({
+      where: { id: parcel.storeId },
+      data: { platform: Platform.HEPSIBURADA },
+    });
+    await enqueueProfitRecompute(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      reason: ProfitRecomputeReason.ORDER_CHANGED,
+      orderIds: [parcel.orderId],
+    });
+
+    const result = await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(result.unsupported).toBe(1);
+    expect(result.failed).toBe(0);
+
+    // The mark is dropped (no backoff) and no statement was written for the order.
+    expect(await prisma.profitRecomputeRequest.count()).toBe(0);
+    expect(await prisma.orderProfitStatement.count({ where: { orderId: parcel.orderId } })).toBe(0);
+  });
+
+  it('does not sweep orders of a platform the engine cannot compute', async () => {
+    const trendyol = await seedMelontikParcel();
+    const hepsiStoreId = await createAdditionalStore({ organizationId: trendyol.organizationId });
+    await prisma.store.update({
+      where: { id: hepsiStoreId },
+      data: { platform: Platform.HEPSIBURADA },
+    });
+    const hepsiOrderId = await seedBareOrder({
+      organizationId: trendyol.organizationId,
+      storeId: hepsiStoreId,
+    });
+
+    // Neither order has a statement, so both are sweep-eligible except for the platform
+    // gate: only the Trendyol order may be queued.
+    const swept = await enqueueStaleProfitStatements(prisma, { limit: 10 });
+    expect(swept).toBe(1);
+    expect(await queuedOrderIds()).toEqual([trendyol.orderId]);
+    const hepsiRow = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: hepsiOrderId },
+    });
+    expect(hepsiRow).toBeNull();
   });
 });

@@ -35,6 +35,22 @@ export interface RecomputeParcelResult {
 }
 
 /**
+ * Which platforms the profit engine can compute today. It MUST agree with the dispatch
+ * switch in recomputeParcelProfit: a platform turns true in the same change that adds
+ * its writer, and the stale sweep then picks that platform's orders up by itself (they
+ * carry no statement yet).
+ */
+export const PROFIT_ENGINE_PLATFORM_SUPPORT: Readonly<Record<Platform, boolean>> = {
+  [Platform.TRENDYOL]: true,
+  [Platform.HEPSIBURADA]: false,
+};
+
+/** The platforms the engine can compute, derived from the support map. */
+export const PROFIT_ENGINE_PLATFORMS: readonly Platform[] = Object.values(Platform).filter(
+  (platform) => PROFIT_ENGINE_PLATFORM_SUPPORT[platform],
+);
+
+/**
  * Recomputes one parcel's profit and writes it in the caller's transaction. Takes a
  * parcel-scoped advisory lock first, so concurrent recomputes of the same order run
  * one at a time; the lock releases at commit or rollback. Then resolves the store's

@@ -2,8 +2,8 @@ import { Prisma, type PrismaClient } from '@pazarsync/db';
 import { ProfitRecomputeReason, ProfitStatementView } from '@pazarsync/db/enums';
 
 import { PROFIT_ENGINE_VERSION } from '../core/engine-version';
-import { ParcelNotFoundError } from './errors';
-import { recomputeParcelProfit } from './recompute-parcel-profit';
+import { ParcelNotFoundError, UnsupportedPlatformError } from './errors';
+import { PROFIT_ENGINE_PLATFORMS, recomputeParcelProfit } from './recompute-parcel-profit';
 
 /**
  * The profit recompute queue (Phase 3B). Every producer writes a single per-order
@@ -191,6 +191,11 @@ function enqueueFromOrders(
  * organization and store. `ON CONFLICT DO NOTHING` leaves an already-queued order's
  * richer reason intact. Returns the number of rows inserted.
  *
+ * Only orders whose store's platform the engine can compute are swept: a platform the
+ * engine cannot compute has no writer, so enqueuing its orders would only have them
+ * dropped on drain. Orders carry no platform column, so the store's platform is checked
+ * through an EXISTS on stores.
+ *
  * The candidates are picked newest first with the LIMIT, but the INSERT inserts them
  * ordered by their id, for the same lock-order reason as `enqueueFromOrders`: the
  * sweep can wait on a producer's uncommitted insert of a shared order, so it must
@@ -213,7 +218,12 @@ export function enqueueStaleProfitStatements(
     FROM (
       SELECT o.id, o.organization_id, o.store_id
       FROM orders o
-      WHERE NOT EXISTS (
+      WHERE EXISTS (
+          SELECT 1 FROM stores s
+          WHERE s.id = o.store_id
+            AND s.platform = ANY(${[...PROFIT_ENGINE_PLATFORMS]}::"Platform"[])
+        )
+        AND NOT EXISTS (
           SELECT 1 FROM profit_recompute_queue q WHERE q.order_id = o.id
         )
         AND NOT EXISTS (
@@ -240,7 +250,12 @@ export interface ClaimedRecompute {
 }
 
 /** The result of processing one claimed request. */
-export type RecomputeOutcome = 'CHANGED' | 'UNCHANGED' | 'FAILED' | 'ORDER_GONE';
+export type RecomputeOutcome =
+  | 'CHANGED'
+  | 'UNCHANGED'
+  | 'FAILED'
+  | 'ORDER_GONE'
+  | 'UNSUPPORTED_PLATFORM';
 
 /**
  * Claims up to `batchSize` due requests (`next_attempt_at <= now`), oldest first,
@@ -280,10 +295,12 @@ export async function claimProfitRecomputeRequests(
  * The delete matches both `id` and the claimed `requested_at`: a request that arrived
  * while we were computing changed `requested_at`, so the mark survives for another
  * pass. A vanished order yields `ORDER_GONE` (the FK cascade may already have removed
- * the mark; the delete is then a harmless no-op). Any other error backs the request
- * off outside the rolled-back transaction and yields `FAILED`; the backoff carries the
- * same `requested_at` guard, so a request re-enqueued mid-failure is not demoted. It
- * never throws, so one bad order cannot stop the drain.
+ * the mark; the delete is then a harmless no-op). An order whose store platform the
+ * engine cannot compute yet yields `UNSUPPORTED_PLATFORM`, dropped the same unguarded
+ * way (no backoff). Any other error backs the request off outside the rolled-back
+ * transaction and yields `FAILED`; the backoff carries the same `requested_at` guard,
+ * so a request re-enqueued mid-failure is not demoted. It never throws, so one bad
+ * order cannot stop the drain.
  */
 export async function processClaimedRecompute(
   db: PrismaClient,
@@ -309,6 +326,14 @@ export async function processClaimedRecompute(
     if (error instanceof ParcelNotFoundError) {
       await db.$executeRaw`DELETE FROM profit_recompute_queue WHERE id = ${claimed.id}::uuid`;
       return 'ORDER_GONE';
+    }
+    if (error instanceof UnsupportedPlatformError) {
+      // The platform is the store's property; a retry can never succeed, so the mark is
+      // dropped the same unguarded way ORDER_GONE drops it -- no backoff, not FAILED.
+      // Once that platform's writer ships, the sweep enqueues those orders again because
+      // they have no statement, so nothing is lost.
+      await db.$executeRaw`DELETE FROM profit_recompute_queue WHERE id = ${claimed.id}::uuid`;
+      return 'UNSUPPORTED_PLATFORM';
     }
     await recordRecomputeFailure(db, claimed, error);
     return 'FAILED';
@@ -354,13 +379,15 @@ export interface DrainResult {
   readonly changed: number;
   readonly unchanged: number;
   readonly failed: number;
+  readonly unsupported: number;
   readonly failedOrderIds: readonly string[];
 }
 
 /**
  * One drain pass: claim a batch, then process each claimed request in turn. Returns
  * the outcome counts; `claimed` may exceed `changed + unchanged + failed` when some
- * orders had already vanished (`ORDER_GONE`).
+ * orders had already vanished (`ORDER_GONE`) or their platform is not computable yet
+ * (`UNSUPPORTED_PLATFORM`, counted in `unsupported`).
  */
 export async function drainProfitRecomputeQueue(
   db: PrismaClient,
@@ -369,6 +396,7 @@ export async function drainProfitRecomputeQueue(
   const claimed = await claimProfitRecomputeRequests(db, { batchSize: params.batchSize });
   let changed = 0;
   let unchanged = 0;
+  let unsupported = 0;
   const failedOrderIds: string[] = [];
   for (const request of claimed) {
     const outcome = await processClaimedRecompute(db, request);
@@ -381,6 +409,9 @@ export async function drainProfitRecomputeQueue(
         break;
       case 'FAILED':
         failedOrderIds.push(request.orderId);
+        break;
+      case 'UNSUPPORTED_PLATFORM':
+        unsupported += 1;
         break;
       case 'ORDER_GONE':
         break;
@@ -395,6 +426,7 @@ export async function drainProfitRecomputeQueue(
     changed,
     unchanged,
     failed: failedOrderIds.length,
+    unsupported,
     failedOrderIds,
   };
 }

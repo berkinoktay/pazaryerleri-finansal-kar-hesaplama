@@ -97,6 +97,7 @@ export function createProfitRecomputeTick(deps: {
           changed: drain.changed,
           unchanged: drain.unchanged,
           failed: drain.failed,
+          unsupported: drain.unsupported,
           swept: swept ?? 0,
         });
       }

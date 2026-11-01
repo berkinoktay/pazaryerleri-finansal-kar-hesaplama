@@ -38,7 +38,7 @@ const warnMock = vi.mocked(syncLog.warn);
 
 /** An empty drain: nothing claimed, so the tick considers the sweep. */
 function emptyDrain(): DrainResult {
-  return { claimed: 0, changed: 0, unchanged: 0, failed: 0, failedOrderIds: [] };
+  return { claimed: 0, changed: 0, unchanged: 0, failed: 0, unsupported: 0, failedOrderIds: [] };
 }
 
 beforeEach(() => {
@@ -80,6 +80,7 @@ describe('createProfitRecomputeTick', () => {
       changed: 2,
       unchanged: 0,
       failed: 0,
+      unsupported: 0,
       failedOrderIds: [],
     });
     const busy = await tick();
@@ -129,13 +130,21 @@ describe('createProfitRecomputeTick', () => {
       changed: 2,
       unchanged: 1,
       failed: 0,
+      unsupported: 0,
       failedOrderIds: [],
     });
     await tick();
     expect(infoMock).toHaveBeenCalledTimes(1);
     expect(infoMock).toHaveBeenCalledWith(
       'profit-recompute.tick',
-      expect.objectContaining({ claimed: 3, changed: 2, unchanged: 1, failed: 0, swept: 0 }),
+      expect.objectContaining({
+        claimed: 3,
+        changed: 2,
+        unchanged: 1,
+        failed: 0,
+        unsupported: 0,
+        swept: 0,
+      }),
     );
 
     // Failed orders -> a warn with the ids.
@@ -144,6 +153,7 @@ describe('createProfitRecomputeTick', () => {
       changed: 0,
       unchanged: 0,
       failed: 1,
+      unsupported: 0,
       failedOrderIds: ['order-x'],
     });
     await tick();
