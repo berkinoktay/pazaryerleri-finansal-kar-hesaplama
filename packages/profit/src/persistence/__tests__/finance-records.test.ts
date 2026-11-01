@@ -327,6 +327,39 @@ describe('ingestFinanceRecords', () => {
     expect(rows[0]?.desi?.toFixed(2)).toBe('2.00');
   });
 
+  it('keeps records of different families that share a record id apart', async () => {
+    const parcel = await seedMelontikParcel();
+    // A settlement row and an otherfinancials row can carry the same vendor id; only
+    // (family, recordId) together form the conflict key, so both must survive as two
+    // distinct rows rather than collapsing onto one.
+    const sharedId = 'shared-rec-1';
+    const records: FinanceRecordInput[] = [
+      trendyolSettlementRecordInput(
+        'Sale',
+        financialTx({ id: sharedId, shipmentPackageId: 1001, credit: 529 }),
+      ),
+      trendyolOtherFinancialRecordInput(
+        'PaymentOrder',
+        financialTx({ id: sharedId, paymentOrderId: 9009 }),
+      ),
+    ];
+
+    const result = await ingestFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platform: Platform.TRENDYOL,
+      records,
+    });
+
+    expect(result.stored).toBe(2);
+    const rows = await prisma.marketplaceFinanceRecord.findMany({
+      where: { storeId: parcel.storeId, recordId: sharedId },
+    });
+    expect(rows).toHaveLength(2);
+    const families = rows.map((row) => row.family).sort();
+    expect(families).toEqual([FinanceRecordFamily.OTHER_FINANCIAL, FinanceRecordFamily.SETTLEMENT]);
+  });
+
   it('stores a row whose order does not exist yet and enqueues nothing', async () => {
     const parcel = await seedMelontikParcel();
 

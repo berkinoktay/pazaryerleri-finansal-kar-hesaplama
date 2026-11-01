@@ -234,6 +234,22 @@ describe('profit recompute queue', () => {
     expect(otherRow).toBeNull();
   });
 
+  it('never enqueues another organization order even when its variant id is passed', async () => {
+    const parcel = await seedMelontikParcel();
+    const other = await seedMelontikParcel();
+
+    // The organization filter is the only tenant guard of the variants scope: even a
+    // variant id that genuinely belongs to another org must not pull its order in.
+    const count = await enqueueProfitRecomputeForVariants(prisma, {
+      organizationId: parcel.organizationId,
+      reason: ProfitRecomputeReason.COST_CHANGED,
+      variantIds: [parcel.variantA, other.variantA],
+    });
+
+    expect(count).toBe(1);
+    expect(await queuedOrderIds()).toEqual([parcel.orderId]);
+  });
+
   it('enqueues every order of a store and nothing of its sibling store', async () => {
     const parcel = await seedMelontikParcel();
     const siblingStoreId = await createAdditionalStore({ organizationId: parcel.organizationId });
