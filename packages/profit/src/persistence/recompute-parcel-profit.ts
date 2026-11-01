@@ -34,30 +34,38 @@ export interface RecomputeParcelResult {
   readonly bestKnown: { readonly status: ProfitStatus; readonly netProfit: Decimal | null };
 }
 
+/** Recomputes one parcel's profit for a single marketplace, in the caller's transaction. */
+type ParcelProfitWriter = (
+  tx: Prisma.TransactionClient,
+  params: { readonly organizationId: string; readonly orderId: string },
+) => Promise<RecomputeParcelResult>;
+
 /**
- * Which platforms the profit engine can compute today. It MUST agree with the dispatch
- * switch in recomputeParcelProfit: a platform turns true in the same change that adds
- * its writer, and the stale sweep then picks that platform's orders up by itself (they
- * carry no statement yet).
+ * The one registry of per-platform profit writers. A `null` entry means the engine
+ * cannot compute that platform yet: the queue drain deletes its marks
+ * (UNSUPPORTED_PLATFORM) and the stale sweep skips its orders. Registering a writer
+ * here is all it takes to make the sweep pick those orders up by itself. A new Platform
+ * enum value without an entry is a compile error, because the map is a Record over
+ * Platform.
  */
-export const PROFIT_ENGINE_PLATFORM_SUPPORT: Readonly<Record<Platform, boolean>> = {
-  [Platform.TRENDYOL]: true,
-  [Platform.HEPSIBURADA]: false,
+const PARCEL_PROFIT_WRITERS: Readonly<Record<Platform, ParcelProfitWriter | null>> = {
+  [Platform.TRENDYOL]: recomputeTrendyolParcel,
+  [Platform.HEPSIBURADA]: null,
 };
 
-/** The platforms the engine can compute, derived from the support map. */
+/** The platforms the engine can compute: those with a writer registered above. */
 export const PROFIT_ENGINE_PLATFORMS: readonly Platform[] = Object.values(Platform).filter(
-  (platform) => PROFIT_ENGINE_PLATFORM_SUPPORT[platform],
+  (platform) => PARCEL_PROFIT_WRITERS[platform] !== null,
 );
 
 /**
  * Recomputes one parcel's profit and writes it in the caller's transaction. Takes a
  * parcel-scoped advisory lock first, so concurrent recomputes of the same order run
  * one at a time; the lock releases at commit or rollback. Then resolves the store's
- * platform, dispatches to the platform writer, and returns whether anything was
- * written along with the best-known status and net profit. Throws `ParcelNotFoundError`
- * when the order is not this organization's and `UnsupportedPlatformError` for a
- * platform without a writer yet.
+ * platform, looks its writer up in the PARCEL_PROFIT_WRITERS registry, and returns
+ * whether anything was written along with the best-known status and net profit. Throws
+ * `ParcelNotFoundError` when the order is not this organization's and
+ * `UnsupportedPlatformError` for a platform whose registry entry is null.
  *
  * Caller contract:
  * - Runs inside the caller's transaction at READ COMMITTED (Postgres' default). Once
@@ -85,16 +93,11 @@ export async function recomputeParcelProfit(
   }
 
   const platform = order.store.platform;
-  switch (platform) {
-    case Platform.TRENDYOL:
-      return recomputeTrendyolParcel(tx, params);
-    case Platform.HEPSIBURADA:
-      throw new UnsupportedPlatformError(platform);
-    default: {
-      const _exhaustive: never = platform;
-      throw new Error(`Unhandled platform: ${_exhaustive}`);
-    }
+  const writer = PARCEL_PROFIT_WRITERS[platform];
+  if (writer === null) {
+    throw new UnsupportedPlatformError(platform);
   }
+  return writer(tx, params);
 }
 
 /**
@@ -119,7 +122,7 @@ export async function acquireParcelProfitLock(
  * Loads a Trendyol parcel, drives it through the pure estimate + settlement mapper,
  * builds both statement views and the per-item allocations, and persists them unless
  * the stored content hash already matches. Kept apart from the dispatcher so a second
- * marketplace adds one switch case, not a rewrite of this function.
+ * marketplace registers one writer, not a rewrite of this function.
  */
 async function recomputeTrendyolParcel(
   tx: Prisma.TransactionClient,
