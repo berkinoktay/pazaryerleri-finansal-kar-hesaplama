@@ -140,6 +140,14 @@ export function enqueueProfitRecomputeForStore(
  * fans out over items (variants) cannot touch the same conflict row twice, which
  * Postgres rejects. On conflict the mark is refreshed: new reason, fresh request
  * and next-attempt times, attempts back to 0 and last_error cleared.
+ *
+ * The outer SELECT is ordered by `o.id` so the INSERT inserts (and so locks the
+ * conflicting queue rows) in a single global order. Producers upsert overlapping
+ * orders inside longer transactions -- settlement ingest batches, store-wide
+ * shipping config, variant and barcode scopes, catalog contents -- and without one
+ * global order two of them can lock the same rows in opposite orders and deadlock
+ * (40P01). Order id is that global order: every producer takes the shared rows the
+ * same way, so they queue instead of deadlocking.
  */
 function enqueueFromOrders(
   tx: Prisma.TransactionClient,
@@ -160,6 +168,7 @@ function enqueueFromOrders(
       FROM orders o
       WHERE ${orderFilter}
     ) o
+    ORDER BY o.id
     ON CONFLICT (order_id) DO UPDATE SET
       reason = EXCLUDED.reason,
       requested_at = clock_timestamp(),
@@ -181,6 +190,11 @@ function enqueueFromOrders(
  * It is global across tenants, and each enqueued row carries its own order's
  * organization and store. `ON CONFLICT DO NOTHING` leaves an already-queued order's
  * richer reason intact. Returns the number of rows inserted.
+ *
+ * The candidates are picked newest first with the LIMIT, but the INSERT inserts them
+ * ordered by their id, for the same lock-order reason as `enqueueFromOrders`: the
+ * sweep can wait on a producer's uncommitted insert of a shared order, so it must
+ * take rows in the one global id order every producer uses, or the two deadlock.
  */
 export function enqueueStaleProfitStatements(
   db: PrismaClient,
@@ -196,18 +210,22 @@ export function enqueueStaleProfitStatements(
       gen_random_uuid(), o.organization_id, o.store_id, o.id,
       ${ProfitRecomputeReason.STALE_STATEMENT}::"ProfitRecomputeReason",
       clock_timestamp(), clock_timestamp(), 0, NULL::text, clock_timestamp(), clock_timestamp()
-    FROM orders o
-    WHERE NOT EXISTS (
-        SELECT 1 FROM profit_recompute_queue q WHERE q.order_id = o.id
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM order_profit_statements s
-        WHERE s.order_id = o.id
-          AND s.view = ${ProfitStatementView.BEST_KNOWN}::"ProfitStatementView"
-          AND s.engine_version >= ${PROFIT_ENGINE_VERSION}
-      )
-    ORDER BY o.order_date DESC
-    LIMIT ${limit}
+    FROM (
+      SELECT o.id, o.organization_id, o.store_id
+      FROM orders o
+      WHERE NOT EXISTS (
+          SELECT 1 FROM profit_recompute_queue q WHERE q.order_id = o.id
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM order_profit_statements s
+          WHERE s.order_id = o.id
+            AND s.view = ${ProfitStatementView.BEST_KNOWN}::"ProfitStatementView"
+            AND s.engine_version >= ${PROFIT_ENGINE_VERSION}
+        )
+      ORDER BY o.order_date DESC
+      LIMIT ${limit}
+    ) o
+    ORDER BY o.id
     ON CONFLICT (order_id) DO NOTHING
   `;
 }

@@ -67,14 +67,21 @@ function numericParam(value: Decimal | null): string | null {
  * otherwise raise "ON CONFLICT DO UPDATE command cannot affect row a second time" and
  * drop the whole call (e.g. an entire cargo invoice whose items repeat a parcel id).
  * The last occurrence wins, matching a re-poll where the later row is the fresher truth.
- * The write is order-independent, so the returned order carries no meaning.
+ * The collapsed records are returned sorted by their conflict key (family, then
+ * recordId; plain string comparison) so the multi-row `ON CONFLICT DO UPDATE` locks
+ * the existing rows in one stable order. Two ingests that share rows would otherwise
+ * lock them in opposite orders and deadlock (40P01); the key order is that global order.
  */
 function dedupeByConflictKey(records: readonly FinanceRecordInput[]): FinanceRecordInput[] {
   const byKey = new Map<string, FinanceRecordInput>();
   for (const record of records) {
     byKey.set(`${record.family}\u0000${record.recordId}`, record);
   }
-  return [...byKey.values()];
+  return [...byKey.values()].sort((a, b) => {
+    if (a.family !== b.family) return a.family < b.family ? -1 : 1;
+    if (a.recordId !== b.recordId) return a.recordId < b.recordId ? -1 : 1;
+    return 0;
+  });
 }
 
 /**
