@@ -31,17 +31,16 @@ const productUpsert = vi.fn<() => Promise<{ id: string }>>();
 const variantFindUnique = vi.fn<(args: VariantWhereArg) => Promise<SyncedState | null>>();
 const variantUpsert = vi.fn<(args: VariantWhereArg) => Promise<VariantRow>>();
 const refreshAggregates = vi.fn<() => Promise<void>>();
-const enqueueForVariants =
-  vi.fn<
-    (
-      tx: unknown,
-      params: {
-        organizationId: string;
-        variantIds: readonly string[];
-        reason: ProfitRecomputeReason;
-      },
-    ) => Promise<number>
-  >();
+const enqueueForVariants = vi.fn<
+  (
+    tx: unknown,
+    params: {
+      organizationId: string;
+      variantIds: readonly string[];
+      reason: ProfitRecomputeReason;
+    },
+  ) => Promise<number>
+>();
 
 vi.mock('@pazarsync/db', () => ({
   prisma: {
