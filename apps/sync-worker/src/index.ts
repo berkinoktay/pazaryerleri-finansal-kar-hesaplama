@@ -40,6 +40,7 @@ import { LostLeaseError, syncLog, tryClaimNext } from '@pazarsync/sync-core';
 
 import { errorCodeOf } from './error-code';
 import { processBufferPromote, processPastDayBufferFlush } from './handlers/buffer-promote';
+import { PROFIT_RECOMPUTE_INTERVAL_MS, processProfitRecompute } from './handlers/profit-recompute';
 import { processVariantResolution } from './handlers/variant-resolution';
 import { processWebhookEventCleanup } from './handlers/webhook-event-cleanup';
 import { processWebhookEventsBatch } from './handlers/webhook-events-consumer';
@@ -317,6 +318,23 @@ async function main(): Promise<void> {
     });
   }, VARIANT_RESOLUTION_INTERVAL_MS);
 
+  // Profit recompute: once on boot so a restarted worker drains any marks enqueued
+  // while it was down, then on the 5 s interval. The tick drains the queue and, when
+  // it is empty, sweeps a throttled batch of stale statements into it (phase 3B /
+  // 3D migration). The in-closure "running" flag makes it safe to overlap a
+  // still-running tick. Wrapped like the other ticks so a DB hiccup never crashes
+  // the worker.
+  void processProfitRecompute().catch((err: unknown) => {
+    dbConnectivity.logBackgroundError('profit-recompute.boot-error', err, { workerId: WORKER_ID });
+  });
+  const profitRecomputeTimer = setInterval(() => {
+    void processProfitRecompute().catch((err: unknown) => {
+      dbConnectivity.logBackgroundError('profit-recompute.tick-error', err, {
+        workerId: WORKER_ID,
+      });
+    });
+  }, PROFIT_RECOMPUTE_INTERVAL_MS);
+
   syncLog.info('worker.pool.starting', { workerId: WORKER_ID, concurrency });
 
   let backoff = POLL_BACKOFF_INITIAL_MS;
@@ -405,6 +423,7 @@ async function main(): Promise<void> {
   clearInterval(webhookEventCleanupTimer);
   clearInterval(webhookEventsConsumerTimer);
   clearInterval(variantResolutionTimer);
+  clearInterval(profitRecomputeTimer);
   syncLog.info('worker.stopped', { workerId: WORKER_ID });
 }
 

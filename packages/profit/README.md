@@ -87,8 +87,9 @@ Nothing calls this yet; phase 4 wires the pricing and campaign screens to it.
   and `BEST_KNOWN`): sale/cost/VAT/stoppage totals, status, net profit and margins,
   the resolved settings snapshot and a content hash.
 - `marketplace_finance_records` -- the raw settlement, other-financial and cargo-invoice
-  rows the loader reads; the writer does not change them (the phase 3B period writer owns
-  the records it sets aside).
+  rows the loader reads; the writer does not change them. Period records (ads, period
+  stoppage, deduction invoices) are stored raw as well -- turning them into period expenses
+  is a later epic, not this phase.
 
 `recomputeParcelProfit(tx, { organizationId, orderId })` runs inside the caller's
 transaction. It first takes a per-order advisory lock, so two concurrent recomputes of
@@ -106,5 +107,28 @@ long enough for a lock wait plus the load (Prisma's 5s default may be too short)
 and every org-scoped table by the order's organization; an order that is not the given
 organization's raises `ParcelNotFoundError`.
 
-Nothing calls the writer yet; wiring the webhook and sync-worker callers to it is
-phase 3B.
+## Recompute queue (phase 3B)
+
+`persistence/recompute-queue.ts` is the single path that keeps statements current. Every
+producer -- the order write, the variant-resolution link, a claim upsert, a raw finance
+record ingest, and the cost / settings / shipping / desi / tariff / catalog input changes
+-- enqueues one per-order mark inside its own transaction (`enqueueProfitRecompute` and
+its scope variants). The mark write is atomic with the event that caused it, and a failed
+recompute never rolls that event back.
+
+The sync-worker drains the queue on a tick (`apps/sync-worker/src/handlers/profit-recompute.ts`),
+every 5 seconds: it claims a batch with `FOR UPDATE SKIP LOCKED` and recomputes each order
+in its own short transaction. When the queue is empty the tick sweeps a batch of stale
+orders -- those with no best-known statement, or one stamped by an older engine version --
+into the queue (`enqueueStaleProfitStatements`), so a new engine version and the phase 3D
+backfill migrate themselves. The sweep is a full `orders` scan, so it is throttled: it runs
+at most once every 5 minutes, but immediately on the next tick while it is still finding
+work (catch-up).
+
+To re-run a whole store on demand -- after a reference-data correction, or for the phase 3D
+backfill -- use the operator script:
+
+    cd packages/profit && pnpm exec tsx --env-file=../../.env scripts/enqueue-profit-recompute.ts --store <id>
+    cd packages/profit && pnpm exec tsx --env-file=../../.env scripts/enqueue-profit-recompute.ts --all
+
+`--all` enqueues every ACTIVE store. The marks are drained by the same tick.
