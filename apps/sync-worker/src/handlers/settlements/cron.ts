@@ -37,9 +37,11 @@
 // handleCargoInvoiceItems) and the end-of-cycle reconciliation bump are no longer
 // called; their files stay until phase 5.
 //
-// Per-row resilience: each transaction wraps a single raw-record ingest. A
-// malformed row logs + skips; the rest of the cycle continues. orders.ts pattern
-// mirror.
+// Resilience: settlement and otherfinancials rows ingest in batches of
+// FINANCE_INGEST_BATCH_SIZE per transaction; a failed batch is retried row by row so one
+// malformed row logs + skips while the rest of the batch survives. A cargo invoice keeps
+// its own one-transaction-per-invoice path (its item fan-out would bloat a batch). A
+// heartbeat follows every batch. orders.ts pattern mirror.
 //
 // Dependency injection: `fetchers` parameter accepts mock fetchers in
 // tests; production calls use the @pazarsync/marketplace defaults.
@@ -60,6 +62,7 @@ import {
   type TrendyolFinancialTransaction,
 } from '@pazarsync/marketplace';
 import {
+  type FinanceRecordInput,
   ingestFinanceRecords,
   trendyolCargoInvoiceItemInputs,
   trendyolOtherFinancialRecordInput,
@@ -80,6 +83,10 @@ const INGEST_TX_TIMEOUT_MS = 30_000;
 // A cargo invoice can carry ~500 items, all stored in one transaction, so its ingest gets
 // a wider timeout than a single settlement/otherfinancials row.
 const CARGO_INVOICE_TX_TIMEOUT_MS = 60_000;
+// Settlement and otherfinancials rows ingest this many per transaction. A high-volume
+// store can return thousands of rows per window; one ingest per row would open thousands
+// of transactions. Cargo-invoice rows are excluded; they keep their own per-invoice path.
+const FINANCE_INGEST_BATCH_SIZE = 200;
 
 // V1 happy path — research §3.3 confirmed only Sale/Discount/Return have
 // nonzero observations in 60-day windows. Rare types stay enumerated in
@@ -107,6 +114,13 @@ const DEFAULT_FETCHERS: SettlementsFetchers = {
   fetchOtherFinancials,
   fetchCargoInvoiceItems: fetchAllCargoInvoiceItems,
 };
+
+/** A fetched finance row buffered for batch ingest, with the context a per-row log needs. */
+interface BufferedFinanceRow {
+  readonly input: FinanceRecordInput;
+  readonly rowId: string;
+  readonly transactionType: string;
+}
 
 // ─── Handler ─────────────────────────────────────────────────────────────
 
@@ -149,6 +163,62 @@ export async function processSettlementsChunk(
 
   let totalProcessed = 0;
 
+  // Ingest one buffered batch in a single transaction, counting its rows into
+  // totalProcessed. On any failure, log once (settlements.ingest.batch-failed) and retry
+  // the rows one by one in their own transactions, so a single bad row (e.g. a numeric
+  // overflow) never drops the rest of the batch. A heartbeat follows every batch.
+  const flushBatch = async (rows: BufferedFinanceRow[], chunkIdx: number): Promise<void> => {
+    if (rows.length === 0) {
+      return;
+    }
+    try {
+      await prisma.$transaction(
+        (tx) =>
+          ingestFinanceRecords(tx, {
+            organizationId: store.organizationId,
+            storeId: store.id,
+            platform: store.platform,
+            records: rows.map((row) => row.input),
+          }),
+        { maxWait: INGEST_TX_MAX_WAIT_MS, timeout: INGEST_TX_TIMEOUT_MS },
+      );
+      totalProcessed += rows.length;
+    } catch (batchErr) {
+      syncLog.error('settlements.ingest.batch-failed', {
+        syncLogId: log.id,
+        storeId: store.id,
+        chunkIdx,
+        batchSize: rows.length,
+        errorMessage: batchErr instanceof Error ? batchErr.message : String(batchErr),
+      });
+      for (const row of rows) {
+        try {
+          await prisma.$transaction(
+            (tx) =>
+              ingestFinanceRecords(tx, {
+                organizationId: store.organizationId,
+                storeId: store.id,
+                platform: store.platform,
+                records: [row.input],
+              }),
+            { maxWait: INGEST_TX_MAX_WAIT_MS, timeout: INGEST_TX_TIMEOUT_MS },
+          );
+          totalProcessed += 1;
+        } catch (rowErr) {
+          syncLog.error('settlements.dispatch.failed', {
+            syncLogId: log.id,
+            storeId: store.id,
+            rowId: row.rowId,
+            transactionType: row.transactionType,
+            chunkIdx,
+            errorMessage: rowErr instanceof Error ? rowErr.message : String(rowErr),
+          });
+        }
+      }
+    }
+    await syncLogService.heartbeat(log.id, workerId);
+  };
+
   // Slide newest → oldest in FINANCIAL_WINDOW_MAX_DAYS slices. Oldest chunk
   // start is clamped to overallStartTime so non-divisible SCAN_WINDOW_DAYS
   // values (e.g. 50d / 15d → 4 chunks but the 4th is 5d) still respect the
@@ -184,30 +254,18 @@ export async function processSettlementsChunk(
         startDate: chunkStart,
         endDate: chunkEnd,
       });
+      const batch: BufferedFinanceRow[] = [];
       for await (const row of generator) {
-        try {
-          await prisma.$transaction(
-            (tx) =>
-              ingestFinanceRecords(tx, {
-                organizationId: store.organizationId,
-                storeId: store.id,
-                platform: store.platform,
-                records: [trendyolSettlementRecordInput(transactionType, row)],
-              }),
-            { maxWait: INGEST_TX_MAX_WAIT_MS, timeout: INGEST_TX_TIMEOUT_MS },
-          );
-          totalProcessed += 1;
-        } catch (err) {
-          syncLog.error('settlements.dispatch.failed', {
-            syncLogId: log.id,
-            storeId: store.id,
-            rowId: row.id,
-            transactionType,
-            chunkIdx,
-            errorMessage: err instanceof Error ? err.message : String(err),
-          });
+        batch.push({
+          input: trendyolSettlementRecordInput(transactionType, row),
+          rowId: row.id,
+          transactionType,
+        });
+        if (batch.length >= FINANCE_INGEST_BATCH_SIZE) {
+          await flushBatch(batch.splice(0), chunkIdx);
         }
       }
+      await flushBatch(batch.splice(0), chunkIdx);
     }
 
     for (const transactionType of OTHER_FINANCIAL_TYPES) {
@@ -219,14 +277,15 @@ export async function processSettlementsChunk(
         startDate: chunkStart,
         endDate: chunkEnd,
       });
+      const batch: BufferedFinanceRow[] = [];
       for await (const row of generator) {
-        try {
-          // A cargo-invoice (Kargo Fatura) DeductionInvoices row: fetch its items over the
-          // network FIRST (outside the transaction), then store the invoice row itself and
-          // every one of its items in ONE transaction. An invoice can carry ~500 items, so
-          // this ingest gets the wider timeout.
-          const cargoSerial = getCargoInvoiceSerial(transactionType, row);
-          if (cargoSerial !== null) {
+        // A cargo-invoice (Kargo Fatura) DeductionInvoices row: fetch its items over the
+        // network FIRST (outside the transaction), then store the invoice row itself and
+        // every one of its items in ONE transaction. An invoice can carry ~500 items, so
+        // this ingest keeps its own path and the wider timeout; it never joins a batch.
+        const cargoSerial = getCargoInvoiceSerial(transactionType, row);
+        if (cargoSerial !== null) {
+          try {
             const items = await fetchers.fetchCargoInvoiceItems({
               environment: store.environment,
               credentials,
@@ -247,31 +306,29 @@ export async function processSettlementsChunk(
             );
             // One source row processed: the invoice counts once, its items ride along.
             totalProcessed += 1;
-            continue;
+          } catch (err) {
+            syncLog.error('settlements.dispatch.failed', {
+              syncLogId: log.id,
+              storeId: store.id,
+              rowId: row.id,
+              transactionType,
+              chunkIdx,
+              errorMessage: err instanceof Error ? err.message : String(err),
+            });
           }
+          continue;
+        }
 
-          await prisma.$transaction(
-            (tx) =>
-              ingestFinanceRecords(tx, {
-                organizationId: store.organizationId,
-                storeId: store.id,
-                platform: store.platform,
-                records: [trendyolOtherFinancialRecordInput(transactionType, row)],
-              }),
-            { maxWait: INGEST_TX_MAX_WAIT_MS, timeout: INGEST_TX_TIMEOUT_MS },
-          );
-          totalProcessed += 1;
-        } catch (err) {
-          syncLog.error('settlements.dispatch.failed', {
-            syncLogId: log.id,
-            storeId: store.id,
-            rowId: row.id,
-            transactionType,
-            chunkIdx,
-            errorMessage: err instanceof Error ? err.message : String(err),
-          });
+        batch.push({
+          input: trendyolOtherFinancialRecordInput(transactionType, row),
+          rowId: row.id,
+          transactionType,
+        });
+        if (batch.length >= FINANCE_INGEST_BATCH_SIZE) {
+          await flushBatch(batch.splice(0), chunkIdx);
         }
       }
+      await flushBatch(batch.splice(0), chunkIdx);
     }
   }
 

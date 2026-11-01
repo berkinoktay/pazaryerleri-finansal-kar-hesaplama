@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { Decimal } from 'decimal.js';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 import {
@@ -19,7 +19,7 @@ import {
   ProfitStatementView,
   ProfitStatus,
 } from '@pazarsync/db/enums';
-import { encryptCredentials } from '@pazarsync/sync-core';
+import { encryptCredentials, syncLog } from '@pazarsync/sync-core';
 import type {
   CargoInvoiceItem,
   FetchOtherFinancialsOpts,
@@ -293,6 +293,66 @@ describe('processSettlementsChunk — raw finance-record ingest', () => {
 
   beforeEach(async () => {
     await truncateAll();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('ingests settlement rows in batches', async () => {
+    const { storeId, syncLogId } = await buildScenario();
+
+    // 450 Sale rows -> ceil(450 / 200) = 3 ingest batches, each a single transaction.
+    const saleRows = Array.from({ length: 450 }, (_, i) => saleRow(`sale-${i}`, BARCODE, 120, 12));
+    const txSpy = vi.spyOn(prisma, '$transaction');
+
+    await runChunk(syncLogId, { settlements: { Sale: saleRows } });
+
+    // Every fetched row is stored (distinct record ids), and the store ran exactly one
+    // ingest transaction per batch, not one per row.
+    expect(
+      await prisma.marketplaceFinanceRecord.count({
+        where: { storeId, family: FinanceRecordFamily.SETTLEMENT },
+      }),
+    ).toBe(450);
+    expect(txSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it('falls back to row-by-row when a batch fails and keeps the good rows', async () => {
+    const { storeId, syncLogId } = await buildScenario();
+    const errorSpy = vi.spyOn(syncLog, 'error');
+
+    // One row carries a debt beyond numeric(14,2) (1e15 has 16 integer digits), so the
+    // batch INSERT raises numeric field overflow and the whole batch transaction fails.
+    const badRow = tx({ id: 'sale-bad', debt: 1e15 });
+    await runChunk(syncLogId, {
+      settlements: {
+        Sale: [
+          saleRow('sale-ok-1', BARCODE, 120, 12),
+          badRow,
+          saleRow('sale-ok-2', BARCODE, 130, 13),
+        ],
+      },
+    });
+
+    // The two good rows survive through the row-by-row fallback; the bad row is dropped.
+    const stored = await prisma.marketplaceFinanceRecord.findMany({
+      where: { storeId, family: FinanceRecordFamily.SETTLEMENT },
+      orderBy: { recordId: 'asc' },
+    });
+    expect(stored.map((row) => row.recordId)).toEqual(['sale-ok-1', 'sale-ok-2']);
+
+    // The batch failure is logged once (with the batch size); the bad row is logged once.
+    const batchFailed = errorSpy.mock.calls.filter(
+      ([event]) => event === 'settlements.ingest.batch-failed',
+    );
+    expect(batchFailed).toHaveLength(1);
+    expect(batchFailed[0]?.[1]?.['batchSize']).toBe(3);
+    const rowFailed = errorSpy.mock.calls.filter(
+      ([event]) => event === 'settlements.dispatch.failed',
+    );
+    expect(rowFailed).toHaveLength(1);
+    expect(rowFailed[0]?.[1]?.['rowId']).toBe('sale-bad');
   });
 
   it('stores every fetched row as a raw finance record and queues the bound orders', async () => {
