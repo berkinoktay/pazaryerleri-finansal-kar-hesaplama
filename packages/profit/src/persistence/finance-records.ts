@@ -169,8 +169,14 @@ function distinctCargoTrackingNumbers(records: readonly FinanceRecordInput[]): b
  * settlement record binds the order whose outbound package is its shipment package,
  * or a claim's return package; a PaymentOrder record binds the orders tied to this
  * store's stored settlement records carrying that payment order; a cargo item binds
- * the order (or a claim) whose cargo tracking number is its parcel unique id. Every
- * clause is store-scoped. Returns distinct order ids.
+ * the order (or a claim) whose cargo tracking number is its parcel unique id.
+ *
+ * Each binding is one branch of a `UNION`, so every branch hits an index instead of
+ * sharing one `WHERE o.store_id = $s AND (A OR B OR EXISTS ... OR EXISTS ...)` whose
+ * OR across correlated subqueries would force a full scan of the store's orders on
+ * every batch. Only the branches whose key array is non-empty are built; the `UNION`
+ * returns distinct order ids. Every branch filters every table it reads by the store
+ * (tenant defense), so another tenant's order can never surface.
  */
 async function resolveAffectedOrderIds(
   tx: Prisma.TransactionClient,
@@ -199,39 +205,60 @@ async function resolveAffectedOrderIds(
     return [];
   }
 
-  const rows = await tx.$queryRaw<{ id: string }[]>`
-    SELECT DISTINCT o.id AS "id"
-    FROM orders o
-    WHERE o.store_id = ${storeId}::uuid
-      AND (
-        o.platform_order_id = ANY(${shipmentPackageIds}::text[])
-        OR o.cargo_tracking_number = ANY(${cargoTrackingNumbers}::int8[])
-        OR EXISTS (
-          SELECT 1 FROM order_claims c
-          WHERE c.order_id = o.id
-            AND c.store_id = ${storeId}::uuid
-            AND (
-              c.order_shipment_package_id = ANY(${shipmentPackageIds}::text[])
-              OR c.cargo_tracking_number = ANY(${cargoTrackingNumbers}::int8[])
-            )
-        )
-        OR EXISTS (
-          SELECT 1 FROM marketplace_finance_records r
-          WHERE r.store_id = ${storeId}::uuid
-            AND r.family = 'SETTLEMENT'::"FinanceRecordFamily"
-            AND r.payment_order_id = ANY(${paymentOrderIds}::text[])
-            AND (
-              r.shipment_package_id = o.platform_order_id
-              OR EXISTS (
-                SELECT 1 FROM order_claims c2
-                WHERE c2.order_id = o.id
-                  AND c2.store_id = ${storeId}::uuid
-                  AND c2.order_shipment_package_id = r.shipment_package_id
-              )
-            )
-        )
-      )
-  `;
+  const branches: Prisma.Sql[] = [];
+  if (shipmentPackageIds.length > 0) {
+    // B1: a settlement row's shipment package is the order's own outbound package.
+    branches.push(Prisma.sql`
+      SELECT o.id AS "id"
+      FROM orders o
+      WHERE o.store_id = ${storeId}::uuid
+        AND o.platform_order_id = ANY(${shipmentPackageIds}::text[])`);
+    // B3: a settlement row's shipment package is a claim's return package.
+    branches.push(Prisma.sql`
+      SELECT o.id AS "id"
+      FROM order_claims c
+      JOIN orders o ON o.id = c.order_id AND o.store_id = ${storeId}::uuid
+      WHERE c.store_id = ${storeId}::uuid
+        AND c.order_shipment_package_id = ANY(${shipmentPackageIds}::text[])`);
+  }
+  if (cargoTrackingNumbers.length > 0) {
+    // B2: a cargo item's parcel id is the order's own cargo tracking number.
+    branches.push(Prisma.sql`
+      SELECT o.id AS "id"
+      FROM orders o
+      WHERE o.store_id = ${storeId}::uuid
+        AND o.cargo_tracking_number = ANY(${cargoTrackingNumbers}::int8[])`);
+    // B4: a cargo item's parcel id is a claim's cargo tracking number.
+    branches.push(Prisma.sql`
+      SELECT o.id AS "id"
+      FROM order_claims c
+      JOIN orders o ON o.id = c.order_id AND o.store_id = ${storeId}::uuid
+      WHERE c.store_id = ${storeId}::uuid
+        AND c.cargo_tracking_number = ANY(${cargoTrackingNumbers}::int8[])`);
+  }
+  if (paymentOrderIds.length > 0) {
+    // B5: a PaymentOrder ties to this store's stored settlement rows whose shipment
+    // package is an order's own outbound package.
+    branches.push(Prisma.sql`
+      SELECT o.id AS "id"
+      FROM marketplace_finance_records r
+      JOIN orders o ON o.store_id = ${storeId}::uuid AND o.platform_order_id = r.shipment_package_id
+      WHERE r.store_id = ${storeId}::uuid
+        AND r.family = 'SETTLEMENT'::"FinanceRecordFamily"
+        AND r.payment_order_id = ANY(${paymentOrderIds}::text[])`);
+    // B6: a PaymentOrder ties to settlement rows whose shipment package is a claim's
+    // return package.
+    branches.push(Prisma.sql`
+      SELECT o.id AS "id"
+      FROM marketplace_finance_records r
+      JOIN order_claims c2 ON c2.store_id = ${storeId}::uuid AND c2.order_shipment_package_id = r.shipment_package_id
+      JOIN orders o ON o.id = c2.order_id AND o.store_id = ${storeId}::uuid
+      WHERE r.store_id = ${storeId}::uuid
+        AND r.family = 'SETTLEMENT'::"FinanceRecordFamily"
+        AND r.payment_order_id = ANY(${paymentOrderIds}::text[])`);
+  }
+
+  const rows = await tx.$queryRaw<{ id: string }[]>`${Prisma.join(branches, ' UNION ')}`;
   return rows.map((row) => row.id);
 }
 

@@ -485,6 +485,133 @@ describe('ingestFinanceRecords', () => {
     expect(loaderBound.sort()).toEqual(expected);
   });
 
+  it('binds a settlement return package to its claim order with no payment order (B3)', async () => {
+    const parcel = await seedMelontikParcel();
+    const order = await createTestOrder({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platformOrderId: '1001',
+    });
+    await seedClaim({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      orderId: order,
+      orderShipmentPackageId: '2002',
+    });
+
+    // A return settlement whose shipment package is the claim's return package, not the
+    // order's own package, and with no payment order in the batch: only the claim-join
+    // branch can bind it to the order.
+    const result = await ingestFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platform: Platform.TRENDYOL,
+      records: [
+        trendyolSettlementRecordInput(
+          'Return',
+          financialTx({ id: 'ret-1', shipmentPackageId: 2002, debt: 50 }),
+        ),
+      ],
+    });
+
+    expect(result.enqueuedOrders).toBe(1);
+    expect(await queuedOrderIds()).toEqual([order]);
+  });
+
+  it('binds a late payment order to its settlement order (B5)', async () => {
+    const parcel = await seedMelontikParcel();
+    const order = await createTestOrder({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platformOrderId: '5001',
+    });
+
+    // Store the settlement (carrying its payment order) first, then clear the queue.
+    await ingestFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platform: Platform.TRENDYOL,
+      records: [
+        trendyolSettlementRecordInput(
+          'Sale',
+          financialTx({
+            id: 'sale-5001',
+            shipmentPackageId: 5001,
+            credit: 100,
+            paymentOrderId: 7777,
+          }),
+        ),
+      ],
+    });
+    await prisma.profitRecomputeRequest.deleteMany({});
+
+    // A later poll brings only the payment order: with no settlement in this batch to
+    // match the order directly, it binds through the stored settlement row whose
+    // shipment package is the order's own package.
+    const result = await ingestFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platform: Platform.TRENDYOL,
+      records: [
+        trendyolOtherFinancialRecordInput(
+          'PaymentOrder',
+          financialTx({ id: 'po-5001', paymentOrderId: 7777 }),
+        ),
+      ],
+    });
+
+    expect(result.enqueuedOrders).toBe(1);
+    expect(await queuedOrderIds()).toEqual([order]);
+  });
+
+  it('binds a late payment order to its settlement claim order (B6)', async () => {
+    const parcel = await seedMelontikParcel();
+    const order = await createTestOrder({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platformOrderId: '6001',
+    });
+    await seedClaim({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      orderId: order,
+      orderShipmentPackageId: '2006',
+    });
+
+    // Store the return settlement (on the claim's return package, carrying its payment
+    // order) first, then clear the queue.
+    await ingestFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platform: Platform.TRENDYOL,
+      records: [
+        trendyolSettlementRecordInput(
+          'Return',
+          financialTx({ id: 'ret-6001', shipmentPackageId: 2006, debt: 50, paymentOrderId: 8888 }),
+        ),
+      ],
+    });
+    await prisma.profitRecomputeRequest.deleteMany({});
+
+    // A later poll brings only the payment order: the stored settlement's shipment
+    // package is the claim's return package, not the order's own, so it binds through
+    // the settlement-to-claim join, not the direct settlement branch.
+    const result = await ingestFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platform: Platform.TRENDYOL,
+      records: [
+        trendyolOtherFinancialRecordInput(
+          'PaymentOrder',
+          financialTx({ id: 'po-6001', paymentOrderId: 8888 }),
+        ),
+      ],
+    });
+
+    expect(result.enqueuedOrders).toBe(1);
+    expect(await queuedOrderIds()).toEqual([order]);
+  });
+
   it('never enqueues another store order that shares the keys', async () => {
     const parcel = await seedMelontikParcel();
     const storeB = await createAdditionalStore({ organizationId: parcel.organizationId });
