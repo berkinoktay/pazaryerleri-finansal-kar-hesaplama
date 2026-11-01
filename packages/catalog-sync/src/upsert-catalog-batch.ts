@@ -104,21 +104,34 @@ export async function upsertCatalogBatch(
 
         // Variants whose synced commission rate or dimensional weight actually
         // moved: those are backdated profit inputs, so their orders are queued
-        // for a recompute below. Read the current values before the upsert, in
-        // this same transaction, and compare with decimal.js. A newly inserted
-        // variant (no prior row) has no orders yet, so it is never collected.
+        // for a recompute below. The prior synced values are read once for the
+        // whole content, in this same transaction, before the upserts, and each
+        // variant compares its boxed before/after with decimal.js. A newly
+        // inserted variant (no prior row) has no orders yet, so it is never
+        // collected. (If a platformVariantId repeats inside one content, every
+        // copy compares against the same pre-content value, which can only flag
+        // the same or more changes, never fewer.)
+        const platformVariantIds = Array.from(
+          new Set(mapped.variants.map((variant) => variant.platformVariantId)),
+        );
+        const priorRows =
+          platformVariantIds.length === 0
+            ? []
+            : await tx.productVariant.findMany({
+                where: { storeId: store.id, platformVariantId: { in: platformVariantIds } },
+                select: {
+                  platformVariantId: true,
+                  syncedCommissionRate: true,
+                  syncedDimensionalWeight: true,
+                },
+              });
+        const priorByPlatformVariantId = new Map(
+          priorRows.map((row) => [row.platformVariantId, row]),
+        );
         const changedVariantIds: string[] = [];
 
         for (const variant of mapped.variants) {
-          const before = await tx.productVariant.findUnique({
-            where: {
-              storeId_platformVariantId: {
-                storeId: store.id,
-                platformVariantId: variant.platformVariantId,
-              },
-            },
-            select: { syncedCommissionRate: true, syncedDimensionalWeight: true },
-          });
+          const before = priorByPlatformVariantId.get(variant.platformVariantId) ?? null;
 
           const after = await tx.productVariant.upsert({
             where: {

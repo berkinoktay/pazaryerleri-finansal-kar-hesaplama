@@ -2,10 +2,10 @@
 //
 // The DB (@pazarsync/db), the profit queue (@pazarsync/profit), the aggregate
 // refresh and the logger are mocked at the module boundary. Each scenario
-// drives the per-variant BEFORE (findUnique) and AFTER (upsert) states and
-// asserts which variant ids reach enqueueProfitRecomputeForVariants — no real
-// DB. The change detection itself (decimal.js compare, null transitions, new
-// variants) is the unit under test.
+// drives the per-content BEFORE (findMany) and per-variant AFTER (upsert)
+// states and asserts which variant ids reach enqueueProfitRecomputeForVariants
+// — no real DB. The change detection itself (decimal.js compare, null
+// transitions, new variants) is the unit under test.
 
 import { Decimal } from 'decimal.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -22,13 +22,18 @@ interface SyncedState {
   syncedCommissionRate: Decimal | null;
   syncedDimensionalWeight: Decimal;
 }
+type PriorRow = SyncedState & { platformVariantId: bigint };
 type VariantRow = SyncedState & { id: string };
 interface VariantWhereArg {
   where: { storeId_platformVariantId: { platformVariantId: bigint } };
 }
+interface VariantFindManyArg {
+  where: { storeId: string; platformVariantId: { in: bigint[] } };
+}
 
 const productUpsert = vi.fn<() => Promise<{ id: string }>>();
 const variantFindUnique = vi.fn<(args: VariantWhereArg) => Promise<SyncedState | null>>();
+const variantFindMany = vi.fn<(args: VariantFindManyArg) => Promise<PriorRow[]>>();
 const variantUpsert = vi.fn<(args: VariantWhereArg) => Promise<VariantRow>>();
 const refreshAggregates = vi.fn<() => Promise<void>>();
 const enqueueForVariants = vi.fn<
@@ -49,6 +54,7 @@ vi.mock('@pazarsync/db', () => ({
         product: { upsert: () => productUpsert() },
         productVariant: {
           findUnique: (args: VariantWhereArg) => variantFindUnique(args),
+          findMany: (args: VariantFindManyArg) => variantFindMany(args),
           upsert: (args: VariantWhereArg) => variantUpsert(args),
         },
       }),
@@ -117,13 +123,18 @@ function content(...platformVariantIds: bigint[]): MappedProduct {
   };
 }
 
-/** Programs the BEFORE/AFTER state the mocked DB returns, keyed by platformVariantId. */
+/** Programs the per-content BEFORE (findMany) and per-variant AFTER (upsert) state the mocked DB returns, keyed by platformVariantId. */
 function program(states: Map<bigint, { before: SyncedState | null; after: VariantRow }>): void {
-  variantFindUnique.mockImplementation((args) =>
-    Promise.resolve(
-      states.get(args.where.storeId_platformVariantId.platformVariantId)?.before ?? null,
-    ),
-  );
+  variantFindMany.mockImplementation((args) => {
+    const requested = new Set(args.where.platformVariantId.in);
+    const rows: PriorRow[] = [];
+    for (const [platformVariantId, state] of states) {
+      if (state.before !== null && requested.has(platformVariantId)) {
+        rows.push({ platformVariantId, ...state.before });
+      }
+    }
+    return Promise.resolve(rows);
+  });
   variantUpsert.mockImplementation((args) => {
     const row = states.get(args.where.storeId_platformVariantId.platformVariantId)?.after;
     if (row === undefined) throw new Error('unprogrammed variant upsert');
@@ -246,5 +257,59 @@ describe('upsertCatalogBatch — profit recompute queueing', () => {
     await upsertCatalogBatch(STORE, [content(201n)], null);
 
     expect(enqueueForVariants).not.toHaveBeenCalled();
+  });
+
+  it('reads prior synced values with a single findMany and no findUnique per content', async () => {
+    const states = new Map<bigint, { before: SyncedState | null; after: VariantRow }>([
+      [
+        301n,
+        {
+          before: {
+            syncedCommissionRate: new Decimal('10'),
+            syncedDimensionalWeight: new Decimal('1'),
+          },
+          after: {
+            id: 'v301',
+            syncedCommissionRate: new Decimal('10'),
+            syncedDimensionalWeight: new Decimal('1'),
+          },
+        },
+      ],
+      [
+        302n,
+        {
+          before: {
+            syncedCommissionRate: new Decimal('12'),
+            syncedDimensionalWeight: new Decimal('2'),
+          },
+          after: {
+            id: 'v302',
+            syncedCommissionRate: new Decimal('12'),
+            syncedDimensionalWeight: new Decimal('2'),
+          },
+        },
+      ],
+      [
+        303n,
+        {
+          before: {
+            syncedCommissionRate: new Decimal('14'),
+            syncedDimensionalWeight: new Decimal('3'),
+          },
+          after: {
+            id: 'v303',
+            syncedCommissionRate: new Decimal('14'),
+            syncedDimensionalWeight: new Decimal('3'),
+          },
+        },
+      ],
+    ]);
+    program(states);
+
+    await upsertCatalogBatch(STORE, [content(301n, 302n, 303n)], null);
+
+    expect(variantFindMany).toHaveBeenCalledTimes(1);
+    expect(variantFindUnique).not.toHaveBeenCalled();
+    expect(variantUpsert).toHaveBeenCalledTimes(3);
   });
 });
