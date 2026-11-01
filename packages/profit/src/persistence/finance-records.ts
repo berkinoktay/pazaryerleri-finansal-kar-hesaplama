@@ -16,7 +16,9 @@ import { enqueueProfitRecompute } from './recompute-queue';
  * All writes are raw SQL with bound parameters (never string concatenation). The
  * store (write) is one `INSERT ... SELECT ... ON CONFLICT`; the resolve is one
  * `SELECT`. `marketplace_finance_records` has no `updated_at` DB trigger, so the
- * conflict path sets it by hand with `clock_timestamp()`.
+ * conflict path sets it by hand with `clock_timestamp()`. Records are deduplicated on
+ * their `(family, record_id)` conflict key before the write, and `transaction_date`
+ * binds as `::timestamp(3)` to match the time-zone-less column.
  *
  * Tenant isolation: the INSERT joins the given store filtered by both its id and the
  * caller's organization, so a store that is not this organization's stores nothing;
@@ -41,7 +43,7 @@ function financeRecordValuesRow(platform: Platform, record: FinanceRecordInput):
     ${record.barcode}::text,
     ${record.paymentOrderId}::text,
     ${record.parcelUniqueId}::text,
-    ${record.transactionDate}::timestamptz,
+    ${record.transactionDate}::timestamp(3),
     ${numericParam(record.debt)}::numeric,
     ${numericParam(record.credit)}::numeric,
     ${numericParam(record.commissionAmount)}::numeric,
@@ -57,6 +59,22 @@ function financeRecordValuesRow(platform: Platform, record: FinanceRecordInput):
 /** A decimal.js value as a fixed-notation string for a `numeric` bind; null stays null. */
 function numericParam(value: Decimal | null): string | null {
   return value === null ? null : value.toFixed();
+}
+
+/**
+ * Collapses records that repeat a `(family, record_id)` conflict key so the single
+ * `INSERT ... ON CONFLICT DO UPDATE` never carries the same key twice. Postgres would
+ * otherwise raise "ON CONFLICT DO UPDATE command cannot affect row a second time" and
+ * drop the whole call (e.g. an entire cargo invoice whose items repeat a parcel id).
+ * The last occurrence wins, matching a re-poll where the later row is the fresher truth.
+ * The write is order-independent, so the returned order carries no meaning.
+ */
+function dedupeByConflictKey(records: readonly FinanceRecordInput[]): FinanceRecordInput[] {
+  const byKey = new Map<string, FinanceRecordInput>();
+  for (const record of records) {
+    byKey.set(`${record.family}\u0000${record.recordId}`, record);
+  }
+  return [...byKey.values()];
 }
 
 /**
@@ -225,10 +243,13 @@ export async function ingestFinanceRecords(
     readonly records: readonly FinanceRecordInput[];
   },
 ): Promise<{ readonly stored: number; readonly enqueuedOrders: number }> {
-  const { organizationId, storeId, platform, records } = params;
-  if (records.length === 0) {
+  const { organizationId, storeId, platform } = params;
+  if (params.records.length === 0) {
     return { stored: 0, enqueuedOrders: 0 };
   }
+  // Collapse same-key repeats before building the VALUES list so one ON CONFLICT write
+  // never touches a conflict key twice. `stored` then counts the collapsed rows.
+  const records = dedupeByConflictKey(params.records);
 
   const stored = await storeFinanceRecords(tx, { organizationId, storeId, platform, records });
   if (stored === 0) {

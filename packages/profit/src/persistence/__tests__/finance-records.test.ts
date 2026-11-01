@@ -286,6 +286,47 @@ describe('ingestFinanceRecords', () => {
     expect(rows[0]?.recordId).toBe('INV-1:3003');
   });
 
+  it('collapses records that repeat the same id in one call', async () => {
+    const parcel = await seedMelontikParcel();
+    const invoiceRow = financialTx({ id: 'INV-1', transactionType: 'Kargo Fatura' });
+    // Two cargo items share the same parcelUniqueId, so both map to the same
+    // (family, recordId) = CARGO_INVOICE_ITEM / "INV-1:3003". Without in-call dedup the
+    // single INSERT ... ON CONFLICT would carry that key twice and Postgres would abort
+    // the whole invoice.
+    const records = trendyolCargoInvoiceItemInputs(invoiceRow, [
+      cargoItem({
+        shipmentPackageType: TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
+        parcelUniqueId: 3003,
+        amount: 10,
+        desi: 1,
+      }),
+      cargoItem({
+        shipmentPackageType: TRENDYOL_CARGO_RETURN_ITEM_TYPE,
+        parcelUniqueId: 3003,
+        amount: 98.34,
+        desi: 2,
+      }),
+    ]);
+
+    const result = await ingestFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platform: Platform.TRENDYOL,
+      records,
+    });
+
+    // One row per parcel, carrying the LAST item's values, and the call did not throw.
+    expect(result.stored).toBe(1);
+    const rows = await prisma.marketplaceFinanceRecord.findMany({
+      where: { family: FinanceRecordFamily.CARGO_INVOICE_ITEM },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.recordId).toBe('INV-1:3003');
+    expect(rows[0]?.transactionType).toBe(TRENDYOL_CARGO_RETURN_ITEM_TYPE);
+    expect(rows[0]?.amountGross?.toFixed(2)).toBe('98.34');
+    expect(rows[0]?.desi?.toFixed(2)).toBe('2.00');
+  });
+
   it('stores a row whose order does not exist yet and enqueues nothing', async () => {
     const parcel = await seedMelontikParcel();
 
