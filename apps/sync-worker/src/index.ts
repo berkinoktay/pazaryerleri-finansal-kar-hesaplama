@@ -246,9 +246,10 @@ async function main(): Promise<void> {
       dbConnectivity.logBackgroundError('buffer.promote-tick-error', err, { workerId: WORKER_ID });
     });
     // Past-day graduation: PENDING entries whose calendar day has ended are
-    // graduated into `orders` as PROFIT-EXCLUDED (COST_DEADLINE_MISSED, spec
-    // 2026-06-12) instead of being deleted at midnight — revenue is kept, the
-    // profit fields stay permanently frozen.
+    // graduated into `orders` as normal orders (revenue is kept) instead of being
+    // deleted at midnight. The order write queues a profit recompute, so an uncosted
+    // order reads as not computable until its cost is entered (phase 3B removed the
+    // automatic profit exclusion).
     // Separate catch so a flush hiccup never stops the promote tick.
     void processPastDayBufferFlush().catch((err: unknown) => {
       dbConnectivity.logBackgroundError('buffer.flush-tick-error', err, { workerId: WORKER_ID });
