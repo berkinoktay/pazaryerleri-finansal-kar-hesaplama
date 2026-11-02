@@ -168,4 +168,30 @@ describe('GET /products — cost aggregate fields', () => {
     // 15.00 + 5.00 = 20.00
     expect(variants[0]?.currentCostTry).toBe('20.00');
   });
+
+  it('excludes an archived profile from the cost total', async () => {
+    const ctx = await setup();
+    const product = await seedProduct(ctx.orgId, ctx.storeId);
+    const variant = await seedVariant(ctx.orgId, ctx.storeId, product.id);
+    const active = await seedProfile(ctx.orgId, ctx.storeId, {
+      amount: '100.00',
+      name: 'COGS active',
+    });
+    const archived = await seedProfile(ctx.orgId, ctx.storeId, {
+      amount: '40.00',
+      name: 'COGS archived',
+    });
+    await attachProfile(ctx.orgId, active.id, variant.id);
+    await attachProfile(ctx.orgId, archived.id, variant.id);
+    // Archiving the 40.00 profile must drop it from the cost total: only the active
+    // 100.00 profile counts.
+    await prisma.costProfile.update({
+      where: { id: archived.id },
+      data: { archivedAt: new Date() },
+    });
+
+    const variants = await getVariants(ctx);
+    expect(variants[0]?.costStatus).toBe('OK');
+    expect(variants[0]?.currentCostTry).toBe('100.00');
+  });
 });
