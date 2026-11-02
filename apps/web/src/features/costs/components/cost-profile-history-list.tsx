@@ -28,17 +28,7 @@ export interface CostProfileHistoryListProps {
 
 // Versioned fields we can render in a diff. Aligned with the backend's
 // TRACKED list in cost-profile.service.ts.
-const DIFF_FIELDS = [
-  'name',
-  'type',
-  'amountGross',
-  'currency',
-  'vatRate',
-  'fxRateMode',
-  'manualFxRate',
-  'note',
-  'archivedAt',
-] as const;
+const DIFF_FIELDS = ['name', 'type', 'amountGross', 'vatRate', 'note', 'archivedAt'] as const;
 
 type DiffField = (typeof DIFF_FIELDS)[number];
 
@@ -46,10 +36,7 @@ const FIELD_LABEL: Record<DiffField, string> = {
   name: 'Ad',
   type: 'Tür',
   amountGross: 'Tutar',
-  currency: 'Para birimi',
   vatRate: 'KDV oranı',
-  fxRateMode: 'Kur modu',
-  manualFxRate: 'Manuel kur',
   note: 'Not',
   archivedAt: 'Arşivlendi',
 };

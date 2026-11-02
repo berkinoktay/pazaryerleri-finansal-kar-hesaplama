@@ -26,9 +26,9 @@ import type { Prisma } from '@pazarsync/db';
  * Eski davranış (silindi): tüm OrderItem'lar snapshot'lı ise Order.netProfit'i
  * write-once yazardı. Yeni davranış PR-6'da: applyEstimateOnOrderCreate.
  *
- * Parametreler caller compatibility için signature'da tutuldu (sync-worker +
- * cost-snapshot-capture.test.ts hala bu signature ile çağırıyor). PR-6
- * implementation eklenince void cast'lar kaldırılır.
+ * Parametreler caller compatibility için signature'da tutuldu (sync-worker
+ * hala bu signature ile çağırıyor). PR-6 implementation eklenince void
+ * cast'lar kaldırılır.
  */
 export async function recomputeOrderProfit(
   orderId: string,

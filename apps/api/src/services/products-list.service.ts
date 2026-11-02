@@ -227,9 +227,8 @@ export async function list(opts: {
   ]);
 
   // Collect all variant IDs from this page and run the cost aggregate
-  // in a single raw-SQL query (per spec §5.5). The LATERAL join resolves
-  // the most recent FX rate per AUTO-mode non-TRY profile. Results are
-  // keyed by variant id for O(1) lookup in the mapper.
+  // in a single raw-SQL query. Results are keyed by variant id for O(1)
+  // lookup in the mapper.
   //
   // The shipping aggregate runs in parallel — it's the raw-SQL mirror of
   // `estimateShippingCostForVariant`. The CTE is constrained to the current
@@ -289,35 +288,19 @@ async function fetchShippingEstimates(
 }
 
 // ─── Cost aggregate ────────────────────────────────────────────────────
-// Raw SQL per spec §5.5. The LATERAL subquery finds the most-recent FX
-// rate for AUTO non-TRY profiles. The result is a flat list keyed by
-// variant_id; the caller builds a Map<id, VariantCostAggregate> for
-// O(1) lookup in the mapper.
-//
-// FX staleness threshold: rates older than 2 days are flagged FX_STALE
-// (per spec §5.8 "Variant with profiles, FX rate stale (>2 days)").
-
-const FX_STALE_DAYS = 2;
+// Raw SQL: the plain TL sum of the active (non-archived) cost profiles
+// attached to each variant. The result is a flat list keyed by variant_id;
+// the caller builds a Map<id, VariantCostAggregate> for O(1) lookup in the
+// mapper. Status is OK when the variant has ≥1 profile, NO_PROFILES otherwise.
 
 interface CostAggregateRow {
   variant_id: string;
   current_cost_try: unknown; // Decimal from PG — coerce below
   profile_count: bigint; // Prisma $queryRaw returns bigint for COUNT
-  has_auto_non_try: boolean;
-  fx_rate_date: Date | null;
 }
 
-function deriveCostStatus(
-  profileCount: number,
-  hasAutoNonTry: boolean,
-  fxRateDate: Date | null,
-): CostStatus {
-  if (profileCount === 0) return 'NO_PROFILES';
-  if (!hasAutoNonTry) return 'OK';
-  if (fxRateDate === null) return 'FX_MISSING';
-  const ageDays = (Date.now() - fxRateDate.getTime()) / (1000 * 60 * 60 * 24);
-  if (ageDays > FX_STALE_DAYS) return 'FX_STALE';
-  return 'OK';
+function deriveCostStatus(profileCount: number): CostStatus {
+  return profileCount === 0 ? 'NO_PROFILES' : 'OK';
 }
 
 export async function fetchCostAggregates(
@@ -330,32 +313,13 @@ export async function fetchCostAggregates(
   const rows = await prisma.$queryRaw<CostAggregateRow[]>`
     SELECT
       pv.id                                             AS variant_id,
-      COALESCE(SUM(
-        CASE
-          WHEN cp.currency = 'TRY'                           THEN cp.amount_gross
-          WHEN cp.fx_rate_mode = 'MANUAL'                    THEN cp.amount_gross * cp.manual_fx_rate
-          WHEN cp.fx_rate_mode = 'AUTO' AND fx.rate_to_try IS NOT NULL
-                                                             THEN cp.amount_gross * fx.rate_to_try
-          ELSE NULL
-        END
-      ), 0)::DECIMAL(12,2)                              AS current_cost_try,
-      COUNT(cp.id)                                      AS profile_count,
-      BOOL_OR(
-        cp.currency != 'TRY' AND cp.fx_rate_mode = 'AUTO'
-      )                                                 AS has_auto_non_try,
-      MAX(fx.rate_date)                                 AS fx_rate_date
+      COALESCE(SUM(cp.amount_gross), 0)::DECIMAL(12,2)  AS current_cost_try,
+      COUNT(cp.id)                                      AS profile_count
     FROM product_variants pv
     LEFT JOIN product_variant_cost_profiles pvcp
       ON pvcp.product_variant_id = pv.id
     LEFT JOIN cost_profiles cp
       ON cp.id = pvcp.profile_id AND cp.archived_at IS NULL
-    LEFT JOIN LATERAL (
-      SELECT rate_to_try, rate_date
-      FROM fx_rates
-      WHERE currency = cp.currency
-      ORDER BY rate_date DESC
-      LIMIT 1
-    ) fx ON cp.currency != 'TRY' AND cp.fx_rate_mode = 'AUTO'
     WHERE pv.id = ANY(${variantIds}::uuid[])
       AND pv.organization_id = ${organizationId}::uuid
     GROUP BY pv.id
@@ -364,17 +328,12 @@ export async function fetchCostAggregates(
   const result = new Map<string, VariantCostAggregate>();
   for (const row of rows) {
     const profileCount = Number(row.profile_count);
-    const hasAutoNonTry = row.has_auto_non_try ?? false;
-    const costStatus = deriveCostStatus(profileCount, hasAutoNonTry, row.fx_rate_date);
-    // FX_MISSING means the AUTO currency profile has no rate — the SQL SUM
-    // evaluates to 0 (via COALESCE) but the semantic value is "unknown".
-    // Surface null instead of a misleading 0.00.
-    const showCost = profileCount > 0 && costStatus !== 'FX_MISSING';
+    const costStatus = deriveCostStatus(profileCount);
     const rawCost = row.current_cost_try;
     const costDecimal =
       rawCost !== null && rawCost !== undefined ? new Decimal(String(rawCost)) : new Decimal(0);
     result.set(row.variant_id, {
-      currentCostTry: showCost ? costDecimal.toFixed(2) : null,
+      currentCostTry: profileCount > 0 ? costDecimal.toFixed(2) : null,
       profileCount,
       costStatus,
     });

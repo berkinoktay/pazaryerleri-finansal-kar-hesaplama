@@ -2,63 +2,23 @@ import { describe, expect, it } from 'vitest';
 
 import { createCostProfileSchema, listCostProfilesQuerySchema } from '../cost-profile.validator';
 
+// A cost profile is store-scoped: both schemas require a storeId.
+const STORE_ID = '00000000-0000-4000-8000-000000000000';
+
 // ─── createCostProfileSchema ──────────────────────────────────────────────────
 
 describe('createCostProfileSchema', () => {
   const base = {
+    storeId: STORE_ID,
     name: 'Hammadde COGS',
     type: 'COGS' as const,
     amountGross: '25.50',
-    currency: 'TRY' as const,
     vatRate: 18,
-    fxRateMode: 'AUTO' as const,
   };
 
-  it('accepts a valid TRY / AUTO profile', () => {
+  it('accepts a valid profile', () => {
     const result = createCostProfileSchema.safeParse(base);
     expect(result.success).toBe(true);
-  });
-
-  it('requires manualFxRate when fxRateMode is MANUAL', () => {
-    const result = createCostProfileSchema.safeParse({
-      ...base,
-      currency: 'USD',
-      fxRateMode: 'MANUAL',
-    });
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      const hasManualFxRateIssue = result.error.issues.some(
-        (issue) =>
-          issue.path.includes('manualFxRate') || issue.message === 'MANUAL_FX_RATE_REQUIRED',
-      );
-      expect(hasManualFxRateIssue).toBe(true);
-    }
-  });
-
-  it('accepts a valid USD / MANUAL profile with manualFxRate', () => {
-    const result = createCostProfileSchema.safeParse({
-      ...base,
-      currency: 'USD',
-      fxRateMode: 'MANUAL',
-      manualFxRate: '35.500000',
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('rejects currency TRY with fxRateMode MANUAL (TRY must use AUTO)', () => {
-    const result = createCostProfileSchema.safeParse({
-      ...base,
-      currency: 'TRY',
-      fxRateMode: 'MANUAL',
-      manualFxRate: '1.000000',
-    });
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      const hasFxModeIssue = result.error.issues.some(
-        (issue) => issue.path.includes('fxRateMode') || issue.message === 'TRY_MUST_USE_AUTO_FX',
-      );
-      expect(hasFxModeIssue).toBe(true);
-    }
   });
 
   it('rejects an empty name', () => {
@@ -80,14 +40,17 @@ describe('createCostProfileSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('applies defaults: currency TRY, vatRate 0, fxRateMode AUTO', () => {
-    const minimal = { name: 'Minimal', type: 'PACKAGING' as const, amountGross: '10.00' };
+  it('applies defaults: vatRate 0', () => {
+    const minimal = {
+      storeId: STORE_ID,
+      name: 'Minimal',
+      type: 'PACKAGING' as const,
+      amountGross: '10.00',
+    };
     const result = createCostProfileSchema.safeParse(minimal);
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.currency).toBe('TRY');
       expect(result.data.vatRate).toBe(0);
-      expect(result.data.fxRateMode).toBe('AUTO');
     }
   });
 });
@@ -95,8 +58,8 @@ describe('createCostProfileSchema', () => {
 // ─── listCostProfilesQuerySchema ─────────────────────────────────────────────
 
 describe('listCostProfilesQuerySchema', () => {
-  it('accepts empty params with defaults', () => {
-    const result = listCostProfilesQuerySchema.safeParse({});
+  it('accepts the required storeId with defaults', () => {
+    const result = listCostProfilesQuerySchema.safeParse({ storeId: STORE_ID });
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.limit).toBe(25);
@@ -106,26 +69,38 @@ describe('listCostProfilesQuerySchema', () => {
   });
 
   it('transforms archived string to boolean', () => {
-    const trueResult = listCostProfilesQuerySchema.safeParse({ archived: 'true' });
+    const trueResult = listCostProfilesQuerySchema.safeParse({
+      storeId: STORE_ID,
+      archived: 'true',
+    });
     expect(trueResult.success).toBe(true);
     if (trueResult.success) expect(trueResult.data.archived).toBe(true);
 
-    const falseResult = listCostProfilesQuerySchema.safeParse({ archived: 'false' });
+    const falseResult = listCostProfilesQuerySchema.safeParse({
+      storeId: STORE_ID,
+      archived: 'false',
+    });
     expect(falseResult.success).toBe(true);
     if (falseResult.success) expect(falseResult.data.archived).toBe(false);
   });
 
   it('rejects an invalid CostProfileType', () => {
-    const result = listCostProfilesQuerySchema.safeParse({ type: 'INVALID_TYPE' });
+    const result = listCostProfilesQuerySchema.safeParse({
+      storeId: STORE_ID,
+      type: 'INVALID_TYPE',
+    });
     expect(result.success).toBe(false);
   });
 
   it('coerces limit from string and rejects out-of-range values', () => {
-    const validResult = listCostProfilesQuerySchema.safeParse({ limit: '50' });
+    const validResult = listCostProfilesQuerySchema.safeParse({ storeId: STORE_ID, limit: '50' });
     expect(validResult.success).toBe(true);
     if (validResult.success) expect(validResult.data.limit).toBe(50);
 
-    const tooLargeResult = listCostProfilesQuerySchema.safeParse({ limit: '101' });
+    const tooLargeResult = listCostProfilesQuerySchema.safeParse({
+      storeId: STORE_ID,
+      limit: '101',
+    });
     expect(tooLargeResult.success).toBe(false);
   });
 });

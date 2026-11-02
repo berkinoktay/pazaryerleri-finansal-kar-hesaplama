@@ -1,6 +1,7 @@
 import { z } from '@hono/zod-openapi';
 
 import { TablePaginationQuerySchema, tablePaginated } from '../openapi';
+import { COST_STATUSES } from './product.validator';
 
 // ─── Shared field patterns ───────────────────────────────────────────────────
 
@@ -12,11 +13,10 @@ const percentString = z.string().regex(/^-?\d+(\.\d{1,4})?$/, 'INVALID_PERCENT_F
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
-const CostStatusSchema = z.enum(['OK', 'NO_PROFILES', 'FX_STALE', 'FX_MISSING']).openapi({
+const CostStatusSchema = z.enum(COST_STATUSES).openapi({
   description:
-    'Cost availability for this variant. OK = profiles exist + FX resolved. ' +
-    'NO_PROFILES = no cost profiles attached. FX_STALE = AUTO profile exists but ' +
-    'FX rate is >2 days old. FX_MISSING = AUTO profile exists but no FX rate fetched.',
+    'Cost availability for this variant. OK = at least one active cost profile. ' +
+    'NO_PROFILES = no cost profiles attached.',
   example: 'OK',
 });
 

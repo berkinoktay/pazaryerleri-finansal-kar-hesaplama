@@ -8,7 +8,6 @@ export const OrganizationSchema = z
     id: z.string().uuid().openapi({ example: '00000000-0000-0000-0000-000000000000' }),
     name: z.string().openapi({ example: 'Akyıldız Store' }),
     slug: z.string().openapi({ example: 'akyildiz-store' }),
-    currency: z.string().openapi({ example: 'TRY' }),
     timezone: z.string().openapi({ example: 'Europe/Istanbul' }),
     createdAt: z.string().datetime().openapi({ example: '2026-01-15T10:30:00Z' }),
     updatedAt: z.string().datetime().openapi({ example: '2026-04-01T14:00:00Z' }),
@@ -50,8 +49,8 @@ export const OrganizationSchema = z
   .openapi('Organization', {
     description:
       'An organization (tenant). Users can be members of multiple organizations. ' +
-      'The `currency` + `timezone` fields are business-ops defaults (reporting ' +
-      'boundaries, settlement cuts); viewer-side display timezone lives on ' +
+      'The `timezone` field is a business-ops default (reporting boundaries, ' +
+      'settlement cuts); viewer-side display timezone lives on ' +
       '`user_profiles` via GET /v1/me. The `role` / `storeCount` / `lastSyncedAt` / ' +
       '`lastAccessedAt` fields are all caller-scoped: every member of the same ' +
       'organization receives the same `storeCount` and `lastSyncedAt` but their ' +

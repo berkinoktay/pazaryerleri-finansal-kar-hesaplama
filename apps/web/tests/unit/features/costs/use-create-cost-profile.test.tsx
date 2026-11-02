@@ -35,10 +35,7 @@ const PROFILE_RESPONSE = {
   name: 'Test COGS',
   type: 'COGS' as const,
   amountGross: '10.00',
-  currency: 'TRY' as const,
   vatRate: 18,
-  fxRateMode: 'AUTO' as const,
-  manualFxRate: null,
   note: null,
   archivedAt: null,
   createdBy: null,
@@ -72,9 +69,7 @@ describe('useCreateCostProfile', () => {
         name: 'Test COGS',
         type: 'COGS',
         amountGross: '10.00',
-        currency: 'TRY',
         vatRate: 18,
-        fxRateMode: 'AUTO',
       },
     });
 

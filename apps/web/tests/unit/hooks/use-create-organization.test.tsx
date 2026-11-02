@@ -46,7 +46,6 @@ describe('useCreateOrganization', () => {
             id: '00000000-0000-0000-0000-000000000001',
             name: body.name,
             slug: 'akyildiz-ticaret',
-            currency: 'TRY',
             timezone: 'Europe/Istanbul',
             createdAt: '2026-04-20T10:00:00Z',
             updatedAt: '2026-04-20T10:00:00Z',

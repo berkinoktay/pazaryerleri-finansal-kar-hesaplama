@@ -40,7 +40,6 @@ describe('<OrganizationsPanel>', () => {
               id: 'org-1',
               name: 'Akyıldız Ticaret',
               slug: 'akyildiz-ticaret',
-              currency: 'TRY',
               timezone: 'Europe/Istanbul',
               createdAt: '2026-04-20T10:00:00Z',
               updatedAt: '2026-04-20T10:00:00Z',

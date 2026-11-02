@@ -2,7 +2,7 @@ import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
 import type { CostProfile, CostProfileVersion, Prisma } from '@pazarsync/db';
-import { ProfitRecomputeReason } from '@pazarsync/db/enums';
+import { Currency, FxRateMode, ProfitRecomputeReason } from '@pazarsync/db/enums';
 import { enqueueProfitRecomputeForVariants } from '@pazarsync/profit';
 
 import { CostProfileNameTakenError, CostProfileNotFoundError } from '../lib/errors';
@@ -11,9 +11,22 @@ import type {
   UpdateCostProfileInput,
 } from '../validators/cost-profile.validator';
 
+// Transitional: removed together with the columns in phase 3C Task 4. The
+// profile / version columns are still NOT NULL, so every write spreads this
+// single lira-only constant instead of scattering literals.
+const LIRA_ONLY_COST_PROFILE_COLUMNS = {
+  currency: Currency.TRY,
+  fxRateMode: FxRateMode.AUTO,
+  manualFxRate: null,
+} as const;
+
 // ─── DTO types ───────────────────────────────────────────────────────────────
 
 export type { CostProfile, CostProfileVersion };
+
+// Wire shape for the API: the currency / fxRateMode / manualFxRate DB columns
+// still exist (dropped in phase 3C Task 4) but no longer reach the response.
+type CostProfileWire = Omit<CostProfile, 'currency' | 'fxRateMode' | 'manualFxRate'>;
 
 export interface AttachedVariantDTO {
   linkId: string;
@@ -58,7 +71,7 @@ function decodeCursor(cursor: string): string {
  * DB row → public wire shape. Explicit field allow-list so internal
  * Prisma relations never leak to the API layer.
  */
-function toWireProfile(row: CostProfile): CostProfile {
+function toWireProfile(row: CostProfile): CostProfileWire {
   return {
     id: row.id,
     organizationId: row.organizationId,
@@ -66,10 +79,7 @@ function toWireProfile(row: CostProfile): CostProfile {
     name: row.name,
     type: row.type,
     amountGross: row.amountGross,
-    currency: row.currency,
     vatRate: row.vatRate,
-    fxRateMode: row.fxRateMode,
-    manualFxRate: row.manualFxRate,
     note: row.note,
     archivedAt: row.archivedAt,
     createdBy: row.createdBy,
@@ -100,17 +110,7 @@ function handlePrismaError(err: unknown, context: { name?: string }): never {
  * Returns an array of camelCase field names for the changedFields column.
  */
 function diffFields(before: CostProfile, after: Partial<CostProfile>): string[] {
-  const TRACKED = [
-    'name',
-    'type',
-    'amountGross',
-    'currency',
-    'vatRate',
-    'fxRateMode',
-    'manualFxRate',
-    'note',
-    'archivedAt',
-  ] as const;
+  const TRACKED = ['name', 'type', 'amountGross', 'vatRate', 'note', 'archivedAt'] as const;
 
   const changed: string[] = [];
   for (const field of TRACKED) {
@@ -134,8 +134,8 @@ function diffFields(before: CostProfile, after: Partial<CostProfile>): string[] 
 
 /**
  * Enqueue a profit recompute for every order carrying a variant this profile is
- * attached to. A cost change (amount/currency/vat/fx, archive, or restore)
- * reshapes those orders' profit, so they must be recomputed. Runs inside the
+ * attached to. A cost change (amount/vat, archive, or restore) reshapes those
+ * orders' profit, so they must be recomputed. Runs inside the
  * mutation's own transaction. A profile with no attached variants enqueues
  * nothing (the empty id list short-circuits without a query).
  */
@@ -166,7 +166,7 @@ export async function listCostProfiles(
   orgId: string,
   storeId: string,
   filters: ListCostProfilesFilters,
-): Promise<{ items: CostProfile[]; nextCursor: string | null }> {
+): Promise<{ items: CostProfileWire[]; nextCursor: string | null }> {
   const limit = filters.limit ?? 25;
 
   // Decode cursor: the id of the last item on the previous page
@@ -208,7 +208,7 @@ export async function listCostProfiles(
  * Get a single cost profile by id. Returns the profile if it belongs to the
  * given organization; throws `CostProfileNotFoundError` otherwise (non-disclosure).
  */
-export async function getCostProfile(orgId: string, profileId: string): Promise<CostProfile> {
+export async function getCostProfile(orgId: string, profileId: string): Promise<CostProfileWire> {
   const row = await prisma.costProfile.findFirst({
     where: { id: profileId, organizationId: orgId },
   });
@@ -226,7 +226,7 @@ export async function createCostProfile(
   orgId: string,
   input: CreateCostProfileInput,
   actorId: string,
-): Promise<CostProfile> {
+): Promise<CostProfileWire> {
   try {
     const profile = await prisma.$transaction(async (tx) => {
       const amountGross = new Decimal(input.amountGross);
@@ -239,13 +239,11 @@ export async function createCostProfile(
           name: input.name,
           type: input.type,
           amountGross,
-          currency: input.currency ?? 'TRY',
           vatRate,
-          fxRateMode: input.fxRateMode ?? 'AUTO',
-          manualFxRate: input.manualFxRate !== undefined ? new Decimal(input.manualFxRate) : null,
           note: input.note ?? null,
           createdBy: actorId,
           updatedBy: actorId,
+          ...LIRA_ONLY_COST_PROFILE_COLUMNS,
         },
       });
 
@@ -257,14 +255,12 @@ export async function createCostProfile(
           name: row.name,
           type: row.type,
           amountGross: row.amountGross,
-          currency: row.currency,
           vatRate: row.vatRate,
-          fxRateMode: row.fxRateMode,
-          manualFxRate: row.manualFxRate,
           note: row.note,
           archivedAt: null,
           changedFields: [],
           changedBy: actorId,
+          ...LIRA_ONLY_COST_PROFILE_COLUMNS,
         },
       });
 
@@ -288,16 +284,16 @@ export async function updateCostProfile(
   profileId: string,
   patch: UpdateCostProfileInput,
   actorId: string,
-): Promise<CostProfile> {
+): Promise<CostProfileWire> {
   try {
     const updated = await prisma.$transaction(async (tx) => {
       // Take a row-level lock for concurrency: $queryRaw with FOR UPDATE
       // acquires the lock; the subsequent Prisma findFirst inside the same
       // tx reads the locked row with proper camelCase mapping + Decimal
       // boxing. Reading directly via $queryRaw<CostProfile[]> is wrong —
-      // it returns raw snake_case columns (`vat_rate`, `fx_rate_mode`, ...),
-      // and the camelCase property accesses in diffFields silently resolve
-      // to `undefined`, which then flags every mapped field as changed.
+      // it returns raw snake_case columns (`vat_rate`, ...), and the camelCase
+      // property accesses in diffFields silently resolve to `undefined`, which
+      // then flags every mapped field as changed.
       const lockRows = await tx.$queryRaw<{ id: string }[]>`
         SELECT id FROM cost_profiles
         WHERE id = ${profileId}::uuid
@@ -329,12 +325,7 @@ export async function updateCostProfile(
         ...(patch.name !== undefined ? { name: patch.name } : {}),
         ...(patch.type !== undefined ? { type: patch.type } : {}),
         ...(patch.amountGross !== undefined ? { amountGross: new Decimal(patch.amountGross) } : {}),
-        ...(patch.currency !== undefined ? { currency: patch.currency } : {}),
         ...(patch.vatRate !== undefined ? { vatRate: patch.vatRate } : {}),
-        ...(patch.fxRateMode !== undefined ? { fxRateMode: patch.fxRateMode } : {}),
-        ...(patch.manualFxRate !== undefined
-          ? { manualFxRate: patch.manualFxRate !== null ? new Decimal(patch.manualFxRate) : null }
-          : {}),
         ...(patch.note !== undefined ? { note: patch.note } : {}),
       };
 
@@ -342,12 +333,7 @@ export async function updateCostProfile(
         ...(patch.name !== undefined ? { name: patch.name } : {}),
         ...(patch.type !== undefined ? { type: patch.type } : {}),
         ...(patch.amountGross !== undefined ? { amountGross: new Decimal(patch.amountGross) } : {}),
-        ...(patch.currency !== undefined ? { currency: patch.currency } : {}),
         ...(patch.vatRate !== undefined ? { vatRate: new Decimal(patch.vatRate) } : {}),
-        ...(patch.fxRateMode !== undefined ? { fxRateMode: patch.fxRateMode } : {}),
-        ...(patch.manualFxRate !== undefined
-          ? { manualFxRate: patch.manualFxRate !== null ? new Decimal(patch.manualFxRate) : null }
-          : {}),
         ...(patch.note !== undefined ? { note: patch.note } : {}),
       });
 
@@ -364,14 +350,12 @@ export async function updateCostProfile(
           name: row.name,
           type: row.type,
           amountGross: row.amountGross,
-          currency: row.currency,
           vatRate: row.vatRate,
-          fxRateMode: row.fxRateMode,
-          manualFxRate: row.manualFxRate,
           note: row.note,
           archivedAt: row.archivedAt,
           changedFields,
           changedBy: actorId,
+          ...LIRA_ONLY_COST_PROFILE_COLUMNS,
         },
       });
 
@@ -395,7 +379,7 @@ export async function archiveCostProfile(
   orgId: string,
   profileId: string,
   actorId: string,
-): Promise<CostProfile> {
+): Promise<CostProfileWire> {
   const archived = await prisma.$transaction(async (tx) => {
     const [locked] = await tx.$queryRaw<CostProfile[]>`
       SELECT * FROM cost_profiles
@@ -428,14 +412,12 @@ export async function archiveCostProfile(
         name: row.name,
         type: row.type,
         amountGross: row.amountGross,
-        currency: row.currency,
         vatRate: row.vatRate,
-        fxRateMode: row.fxRateMode,
-        manualFxRate: row.manualFxRate,
         note: row.note,
         archivedAt: now,
         changedFields: ['archivedAt'],
         changedBy: actorId,
+        ...LIRA_ONLY_COST_PROFILE_COLUMNS,
       },
     });
 
@@ -455,7 +437,7 @@ export async function restoreCostProfile(
   orgId: string,
   profileId: string,
   actorId: string,
-): Promise<CostProfile> {
+): Promise<CostProfileWire> {
   const restored = await prisma.$transaction(async (tx) => {
     const [locked] = await tx.$queryRaw<CostProfile[]>`
       SELECT * FROM cost_profiles
@@ -487,14 +469,12 @@ export async function restoreCostProfile(
         name: row.name,
         type: row.type,
         amountGross: row.amountGross,
-        currency: row.currency,
         vatRate: row.vatRate,
-        fxRateMode: row.fxRateMode,
-        manualFxRate: row.manualFxRate,
         note: row.note,
         archivedAt: null,
         changedFields: ['archivedAt'],
         changedBy: actorId,
+        ...LIRA_ONLY_COST_PROFILE_COLUMNS,
       },
     });
 

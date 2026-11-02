@@ -303,10 +303,6 @@
             "type": "string",
             "example": "akyildiz-store"
           },
-          "currency": {
-            "type": "string",
-            "example": "TRY"
-          },
           "timezone": {
             "type": "string",
             "example": "Europe/Istanbul"
@@ -361,7 +357,6 @@
           "id",
           "name",
           "slug",
-          "currency",
           "timezone",
           "createdAt",
           "updatedAt",
@@ -370,7 +365,7 @@
           "lastSyncedAt",
           "lastAccessedAt"
         ],
-        "description": "An organization (tenant). Users can be members of multiple organizations. The `currency` + `timezone` fields are business-ops defaults (reporting boundaries, settlement cuts); viewer-side display timezone lives on `user_profiles` via GET /v1/me. The `role` / `storeCount` / `lastSyncedAt` / `lastAccessedAt` fields are all caller-scoped: every member of the same organization receives the same `storeCount` and `lastSyncedAt` but their own `role` and `lastAccessedAt`."
+        "description": "An organization (tenant). Users can be members of multiple organizations. The `timezone` field is a business-ops default (reporting boundaries, settlement cuts); viewer-side display timezone lives on `user_profiles` via GET /v1/me. The `role` / `storeCount` / `lastSyncedAt` / `lastAccessedAt` fields are all caller-scoped: every member of the same organization receives the same `storeCount` and `lastSyncedAt` but their own `role` and `lastAccessedAt`."
       },
       "OrganizationCreatedResponse": {
         "allOf": [
@@ -3136,7 +3131,7 @@
               "string",
               "null"
             ],
-            "description": "Live sum of all active cost profiles converted to TRY. Null when profileCount is 0 or when an AUTO profile has no FX rate. Decimal string.",
+            "description": "Live TL sum of all active cost profiles. Null when profileCount is 0. Decimal string.",
             "example": "45.75"
           },
           "profileCount": {
@@ -3149,11 +3144,9 @@
             "type": "string",
             "enum": [
               "OK",
-              "NO_PROFILES",
-              "FX_STALE",
-              "FX_MISSING"
+              "NO_PROFILES"
             ],
-            "description": "Live cost availability status. OK = profiles exist + FX resolved. NO_PROFILES = variant has no attached profiles. FX_STALE = AUTO profile exists but most-recent FX rate is >2 days old. FX_MISSING = AUTO profile exists but no FX rate has ever been fetched.",
+            "description": "Live cost availability status. OK = the variant has at least one active cost profile. NO_PROFILES = variant has no attached profiles.",
             "example": "OK"
           },
           "estimatedShippingNet": {
@@ -3531,11 +3524,9 @@
             "type": "string",
             "enum": [
               "OK",
-              "NO_PROFILES",
-              "FX_STALE",
-              "FX_MISSING"
+              "NO_PROFILES"
             ],
-            "description": "Cost availability for this variant. OK = profiles exist + FX resolved. NO_PROFILES = no cost profiles attached. FX_STALE = AUTO profile exists but FX rate is >2 days old. FX_MISSING = AUTO profile exists but no FX rate fetched.",
+            "description": "Cost availability for this variant. OK = at least one active cost profile. NO_PROFILES = no cost profiles attached.",
             "example": "OK"
           },
           "shippingEstimateStatus": {
@@ -4003,36 +3994,9 @@
             "description": "KDV-dahil tutar (decimal string)",
             "example": "25.50"
           },
-          "currency": {
-            "type": "string",
-            "enum": [
-              "TRY",
-              "USD",
-              "EUR"
-            ],
-            "description": "ISO 4217 currency code for the cost amount.",
-            "example": "TRY"
-          },
           "vatRate": {
             "type": "number",
             "example": 18
-          },
-          "fxRateMode": {
-            "type": "string",
-            "enum": [
-              "AUTO",
-              "MANUAL"
-            ],
-            "description": "AUTO uses the daily TCMB rate fetched by the FX job. MANUAL requires a manualFxRate.",
-            "example": "AUTO"
-          },
-          "manualFxRate": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Decimal string or null",
-            "example": null
           },
           "note": {
             "type": [
@@ -4083,10 +4047,7 @@
           "name",
           "type",
           "amountGross",
-          "currency",
           "vatRate",
-          "fxRateMode",
-          "manualFxRate",
           "note",
           "archivedAt",
           "createdBy",
@@ -4148,17 +4109,6 @@
             "description": "KDV-dahil tutar. Ondalık string, en fazla 2 basamak.",
             "example": "25.50"
           },
-          "currency": {
-            "type": "string",
-            "enum": [
-              "TRY",
-              "USD",
-              "EUR"
-            ],
-            "default": "TRY",
-            "description": "ISO 4217 currency code for the cost amount.",
-            "example": "TRY"
-          },
           "vatRate": {
             "type": "integer",
             "minimum": 0,
@@ -4166,22 +4116,6 @@
             "default": 0,
             "description": "VAT rate as a whole-number percentage (0–100).",
             "example": 18
-          },
-          "fxRateMode": {
-            "type": "string",
-            "enum": [
-              "AUTO",
-              "MANUAL"
-            ],
-            "default": "AUTO",
-            "description": "AUTO uses the daily TCMB rate fetched by the FX job. MANUAL requires a manualFxRate.",
-            "example": "AUTO"
-          },
-          "manualFxRate": {
-            "type": "string",
-            "pattern": "^\\d+(\\.\\d{1,6})?$",
-            "description": "Required when fxRateMode is MANUAL. Up to 6 decimal places.",
-            "example": "35.500000"
           },
           "note": {
             "type": "string",
@@ -4231,17 +4165,6 @@
             "description": "KDV-dahil tutar. Ondalık string, en fazla 2 basamak.",
             "example": "25.50"
           },
-          "currency": {
-            "type": "string",
-            "enum": [
-              "TRY",
-              "USD",
-              "EUR"
-            ],
-            "default": "TRY",
-            "description": "ISO 4217 currency code for the cost amount.",
-            "example": "TRY"
-          },
           "vatRate": {
             "type": "integer",
             "minimum": 0,
@@ -4249,22 +4172,6 @@
             "default": 0,
             "description": "VAT rate as a whole-number percentage (0–100).",
             "example": 18
-          },
-          "fxRateMode": {
-            "type": "string",
-            "enum": [
-              "AUTO",
-              "MANUAL"
-            ],
-            "default": "AUTO",
-            "description": "AUTO uses the daily TCMB rate fetched by the FX job. MANUAL requires a manualFxRate.",
-            "example": "AUTO"
-          },
-          "manualFxRate": {
-            "type": "string",
-            "pattern": "^\\d+(\\.\\d{1,6})?$",
-            "description": "Required when fxRateMode is MANUAL. Up to 6 decimal places.",
-            "example": "35.500000"
           },
           "note": {
             "type": "string",
@@ -4330,33 +4237,8 @@
             "type": "string",
             "description": "KDV-dahil tutar (decimal string)"
           },
-          "currency": {
-            "type": "string",
-            "enum": [
-              "TRY",
-              "USD",
-              "EUR"
-            ],
-            "description": "ISO 4217 currency code for the cost amount.",
-            "example": "TRY"
-          },
           "vatRate": {
             "type": "number"
-          },
-          "fxRateMode": {
-            "type": "string",
-            "enum": [
-              "AUTO",
-              "MANUAL"
-            ],
-            "description": "AUTO uses the daily TCMB rate fetched by the FX job. MANUAL requires a manualFxRate.",
-            "example": "AUTO"
-          },
-          "manualFxRate": {
-            "type": [
-              "string",
-              "null"
-            ]
           },
           "note": {
             "type": [
@@ -4403,10 +4285,7 @@
           "name",
           "type",
           "amountGross",
-          "currency",
           "vatRate",
-          "fxRateMode",
-          "manualFxRate",
           "note",
           "archivedAt",
           "changedFields",
@@ -4623,57 +4502,6 @@
         "required": [
           "data"
         ]
-      },
-      "FxRatesLatestResponse": {
-        "type": "object",
-        "properties": {
-          "USD": {
-            "$ref": "#/components/schemas/FxRateEntry"
-          },
-          "EUR": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/FxRateEntry"
-              },
-              {
-                "description": "Latest EUR/TRY rate. Null when no rate has been fetched yet."
-              }
-            ]
-          }
-        },
-        "required": [
-          "USD",
-          "EUR"
-        ]
-      },
-      "FxRateEntry": {
-        "type": [
-          "object",
-          "null"
-        ],
-        "properties": {
-          "rate": {
-            "type": "string",
-            "description": "Rate to TRY, as a decimal string.",
-            "example": "38.5220"
-          },
-          "date": {
-            "type": "string",
-            "description": "Rate date (ISO 8601 date string).",
-            "example": "2026-05-09"
-          },
-          "source": {
-            "type": "string",
-            "description": "Data source.",
-            "example": "TCMB"
-          }
-        },
-        "required": [
-          "rate",
-          "date",
-          "source"
-        ],
-        "description": "Latest USD/TRY rate. Null when no rate has been fetched yet."
       },
       "ListCommissionRatesResponse": {
         "type": "object",
@@ -9190,7 +9018,7 @@
           "Organizations"
         ],
         "summary": "Create an organization with the caller as OWNER",
-        "description": "Creates a new organization and attaches the authenticated user as its OWNER in a single transaction. Slug is auto-generated from the name (slugify + collision handling). currency defaults to TRY, timezone to Europe/Istanbul — these can be edited later via organization settings.",
+        "description": "Creates a new organization and attaches the authenticated user as its OWNER in a single transaction. Slug is auto-generated from the name (slugify + collision handling). timezone defaults to Europe/Istanbul — it can be edited later via organization settings.",
         "security": [
           {
             "bearerAuth": []
@@ -14543,7 +14371,7 @@
           "CostProfiles"
         ],
         "summary": "Create a cost profile",
-        "description": "Creates a new cost profile and seeds its first version row (version=1, changedFields=[]). Profile names are unique within the store. MANUAL fxRateMode requires a manualFxRate. TRY currency must use AUTO fxRateMode.",
+        "description": "Creates a new cost profile and seeds its first version row (version=1, changedFields=[]). Profile names are unique within the store.",
         "security": [
           {
             "bearerAuth": []
@@ -15993,109 +15821,6 @@
           },
           "422": {
             "description": "Variant not found or belongs to a different organization",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "integer",
-                  "description": "Seconds to wait before retrying"
-                },
-                "required": true,
-                "description": "Seconds to wait before retrying"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/organizations/{orgId}/fx-rates/latest": {
-      "get": {
-        "tags": [
-          "FxRates"
-        ],
-        "summary": "Get the latest FX rates (USD, EUR → TRY)",
-        "description": "Returns the most-recent cached exchange rate for each non-TRY currency. The route is org-scoped for API-surface consistency; the data is global (rates are not filtered by organization). Rates are populated daily by the TCMB Edge Function cron job. A null entry means the rate has never been fetched — the AUTO FX flow will fall back to null cost snapshots until the cron succeeds.",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "required": true,
-            "name": "orgId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Latest FX rates per currency",
-            "headers": {
-              "X-RateLimit-Limit": {
-                "schema": {
-                  "type": "integer",
-                  "description": "Maximum requests permitted in the current window"
-                },
-                "required": true,
-                "description": "Maximum requests permitted in the current window"
-              },
-              "X-RateLimit-Remaining": {
-                "schema": {
-                  "type": "integer",
-                  "description": "Requests remaining in the current window"
-                },
-                "required": true,
-                "description": "Requests remaining in the current window"
-              },
-              "X-RateLimit-Reset": {
-                "schema": {
-                  "type": "integer",
-                  "description": "Epoch seconds when the current window resets"
-                },
-                "required": true,
-                "description": "Epoch seconds when the current window resets"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FxRatesLatestResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid auth token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Not a member of this organization",
             "content": {
               "application/json": {
                 "schema": {

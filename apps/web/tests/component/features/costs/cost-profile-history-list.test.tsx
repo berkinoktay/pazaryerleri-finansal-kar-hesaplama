@@ -40,10 +40,7 @@ const BASE_VERSION: CostProfileVersion = {
   name: 'Hammadde COGS',
   type: 'COGS',
   amountGross: '25.50',
-  currency: 'TRY',
   vatRate: 18,
-  fxRateMode: 'AUTO',
-  manualFxRate: null,
   note: null,
   archivedAt: null,
   changedFields: [],
@@ -105,6 +102,32 @@ describe('CostProfileHistoryList', () => {
     const beforeValue = within_updated.getByText('25.50');
     expect(beforeValue).toBeInTheDocument();
     expect(beforeValue).toHaveClass('line-through');
+    expect(within_updated.getByText('30.00')).toBeInTheDocument();
+  });
+
+  it('ignores a removed changed field (currency) and renders only the amount change', () => {
+    // A legacy version row recorded `currency` among its changed fields before
+    // the lira-only migration dropped the field. The list filters unknown
+    // changed fields, so only the amount diff renders.
+    const legacyUpdate: CostProfileVersion = {
+      ...BASE_VERSION,
+      id: 'v2-legacy',
+      version: 2,
+      amountGross: '30.00',
+      changedFields: ['currency', 'amountGross'],
+      changedBy: 'user-abc-123',
+      changedAt: '2026-04-16T10:00:00Z',
+    };
+    renderWithIntl(
+      <CostProfileHistoryList versions={[legacyUpdate, BASE_VERSION]} isLoading={false} />,
+    );
+    const updatedRow = screen.getByText('Düzenlendi').closest('div.gap-sm.flex.items-start');
+    expect(updatedRow).not.toBeNull();
+    const within_updated = within(updatedRow as HTMLElement);
+    // The removed 'currency' field has no label, so it renders no diff row.
+    expect(within_updated.queryByText('Para birimi')).toBeNull();
+    // Only the amount change renders.
+    expect(within_updated.getByText('Tutar')).toBeInTheDocument();
     expect(within_updated.getByText('30.00')).toBeInTheDocument();
   });
 

@@ -35,6 +35,5 @@ export const costsKeys = {
   profileVersions: (id: string) => [...costsKeys.profile(id), 'versions'] as const,
   profileAttachedVariants: (id: string) => [...costsKeys.profile(id), 'attached-variants'] as const,
   variantAttachments: (vid: string) => [...costsKeys.all, 'variant', vid] as const,
-  fxRatesLatest: (orgId: string) => [...costsKeys.all, 'fx-rates', 'latest', orgId] as const,
   missingCostStats: (orgId: string) => [...costsKeys.all, 'missing-stats', orgId] as const,
 };

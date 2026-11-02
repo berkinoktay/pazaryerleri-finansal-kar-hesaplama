@@ -5,6 +5,8 @@ import { useTranslations } from 'next-intl';
 import * as React from 'react';
 import { toast } from 'sonner';
 
+import { formatCurrency } from '@pazarsync/utils';
+
 import { BulkActionBar } from '@/components/patterns/bulk-action-bar';
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { Combobox, type ComboboxOption } from '@/components/patterns/combobox';
@@ -101,7 +103,7 @@ export function ProductsBulkCostActionBar({
     return all.map((p) => ({
       value: p.id,
       label: p.name,
-      description: `${p.currency} ${p.amountGross}`,
+      description: formatCurrency(p.amountGross),
       icon: <CostProfileTypeBadge type={p.type as CostProfileType} iconOnly />,
     }));
   }, [profilesQuery.data]);

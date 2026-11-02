@@ -377,15 +377,13 @@ const VariantStatusSchema = z.enum(ProductVariantStatus).openapi({
   example: 'ON_SALE',
 });
 
-const COST_STATUSES = ['OK', 'NO_PROFILES', 'FX_STALE', 'FX_MISSING'] as const;
+export const COST_STATUSES = ['OK', 'NO_PROFILES'] as const;
 export type CostStatus = (typeof COST_STATUSES)[number];
 
 const CostStatusSchema = z.enum(COST_STATUSES).openapi({
   description:
-    'Live cost availability status. OK = profiles exist + FX resolved. ' +
-    'NO_PROFILES = variant has no attached profiles. ' +
-    'FX_STALE = AUTO profile exists but most-recent FX rate is >2 days old. ' +
-    'FX_MISSING = AUTO profile exists but no FX rate has ever been fetched.',
+    'Live cost availability status. OK = the variant has at least one active cost profile. ' +
+    'NO_PROFILES = variant has no attached profiles.',
   example: 'OK',
 });
 
@@ -514,15 +512,11 @@ const VariantSummarySchema = z
           'Drives the compact "delisted" badge on the products table variant rows.',
         example: null,
       }),
-    currentCostTry: z
-      .string()
-      .nullable()
-      .openapi({
-        description:
-          'Live sum of all active cost profiles converted to TRY. Null when profileCount is 0 ' +
-          'or when an AUTO profile has no FX rate. Decimal string.',
-        example: '45.75',
-      }),
+    currentCostTry: z.string().nullable().openapi({
+      description:
+        'Live TL sum of all active cost profiles. Null when profileCount is 0. Decimal string.',
+      example: '45.75',
+    }),
     profileCount: z.number().int().nonnegative().openapi({
       description: 'Number of active (non-archived) cost profiles attached to this variant.',
       example: 2,

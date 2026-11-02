@@ -11,8 +11,26 @@ section "Versioning" for details.
 
 ## [Unreleased]
 
+### Removed
+
+- **FX rates endpoint** (`GET /v1/organizations/{orgId}/fx-rates/latest`). The platform now works
+  in Turkish lira only, so there is no exchange-rate surface. The route, its
+  `FxRatesLatestResponse` and `FxRateEntry` component schemas, and the `FxRates` tag are gone.
+  Breaking; the web client ships the matching change in the same PR.
+
 ### Changed
 
+- **Lira-only: cost profiles, cost status and the organization lose their currency / FX fields.**
+  Breaking; the web client ships the matching change in the same PR. The platform works in Turkish
+  lira only — every amount is implicitly TL.
+  - `CostProfile`, `CreateCostProfileInput`, `UpdateCostProfileInput` and `CostProfileVersion`
+    drop `currency`, `fxRateMode` and `manualFxRate`. Amounts are plain TL decimal strings.
+  - `VariantSummary.costStatus` (products list) and `ProductPricingItem.costStatus` (product
+    pricing list) narrow from `OK | NO_PROFILES | FX_STALE | FX_MISSING` to `OK | NO_PROFILES`. A
+    variant with at least one active cost profile is `OK`; `currentCostTry` is the plain TL sum of
+    those profiles and keeps its name.
+  - `Organization` drops `currency` (both the create response and the list rows); `timezone`
+    stays.
 - **Shipping estimate status: `NO_DESI` description** (`shippingEstimateStatus` on the products
   list and the product pricing list). Description only, no wire change. `NO_DESI` is now
   described as what it is: a defensive fallback for a variant with no estimate row. The

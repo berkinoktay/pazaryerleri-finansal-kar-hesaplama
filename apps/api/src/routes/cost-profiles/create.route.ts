@@ -27,8 +27,7 @@ const createCostProfileRoute = createRoute({
   summary: 'Create a cost profile',
   description:
     'Creates a new cost profile and seeds its first version row (version=1, changedFields=[]). ' +
-    'Profile names are unique within the store. ' +
-    'MANUAL fxRateMode requires a manualFxRate. TRY currency must use AUTO fxRateMode.',
+    'Profile names are unique within the store.',
   security: [{ bearerAuth: [] }],
   request: {
     params: orgIdParam,
@@ -81,10 +80,7 @@ app.openapi(createCostProfileRoute, async (c) => {
     name: profile.name,
     type: profile.type,
     amountGross: profile.amountGross.toString(),
-    currency: profile.currency,
     vatRate: Number(profile.vatRate),
-    fxRateMode: profile.fxRateMode,
-    manualFxRate: profile.manualFxRate !== null ? profile.manualFxRate.toString() : null,
     note: profile.note,
     archivedAt: profile.archivedAt?.toISOString() ?? null,
     createdBy: profile.createdBy,

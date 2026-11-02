@@ -18,7 +18,6 @@ function makeOrg(role: Organization['role']): Organization {
     id: 'org-1',
     name: 'Org',
     slug: 'org',
-    currency: 'TRY',
     timezone: 'Europe/Istanbul',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',

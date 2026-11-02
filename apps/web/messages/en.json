@@ -686,7 +686,6 @@
       "title": "Active organization",
       "description": "The dashboard and data are scoped to this organization.",
       "slugLabel": "Slug",
-      "currencyLabel": "Currency",
       "timezoneLabel": "Timezone",
       "createdLabel": "Created"
     }
@@ -2430,8 +2429,7 @@
         "namePlaceholder": "Your organization's full name",
         "slug": "Short name (slug)",
         "slugHint": "The short name cannot be changed.",
-        "timezone": "Time zone",
-        "currency": "Currency"
+        "timezone": "Time zone"
       },
       "accounting": {
         "title": "Accounting settings",
@@ -2478,16 +2476,12 @@
       },
       "formats": {
         "title": "Formats",
-        "description": "Customise how currency, numbers, and dates are displayed.",
-        "currencyLabel": "Currency display",
-        "currencyDescription": "Choose the currency symbol shown next to amounts.",
+        "description": "Customise how numbers and dates are displayed.",
         "numberLabel": "Number format",
         "numberDescription": "Choose the thousands separator and decimal notation.",
         "dateLabel": "Date format",
         "dateDescription": "Choose how dates are displayed.",
         "save": "Save",
-        "currencyTRY": "₺ Turkish Lira",
-        "currencyUSD": "$ US Dollar",
         "numberDotComma": "1.234,56 (dot thousands, comma decimal)",
         "numberCommaPoint": "1,234.56 (comma thousands, dot decimal)",
         "dateDMY": "31.12.2026 (day.month.year)",
@@ -3194,15 +3188,6 @@
       "MARKETING": "Marketing",
       "OTHER": "Other"
     },
-    "currency": {
-      "TRY": "TRY",
-      "USD": "USD",
-      "EUR": "EUR"
-    },
-    "fxMode": {
-      "AUTO": "Auto (TCMB)",
-      "MANUAL": "Manual rate"
-    },
     "vatRates": {
       "0": "0%",
       "1": "1%",
@@ -3216,31 +3201,18 @@
         "name": "Cost name",
         "namePlaceholder": "e.g. Raw materials COGS",
         "type": "Type",
-        "currency": "Currency",
         "amountGross": "Cost (VAT included)",
         "amountGrossHelp": "Enter the VAT-included amount from your supplier invoice.",
         "amountPlaceholder": "0.00",
         "vatRate": "VAT rate",
-        "fxRateMode": "FX rate mode",
-        "manualFxRate": "Manual FX rate (TRY)",
-        "manualFxRatePlaceholder": "e.g. 35.50",
         "note": "Note",
         "notePlaceholder": "Optional description…"
-      },
-      "fxPreview": {
-        "label": "Current TRY equivalent",
-        "source": "Source",
-        "noRate": "Loading exchange rate…",
-        "result": "{amount} × {rate} = {result}"
       },
       "validation": {
         "nameRequired": "Cost name is required.",
         "nameTooLong": "Cost name must be 100 characters or fewer.",
         "amountRequired": "Amount is required.",
-        "amountNegative": "Amount must be 0 or greater.",
-        "manualFxRateRequired": "A rate is required in MANUAL mode.",
-        "manualFxRatePositive": "Rate must be greater than 0.",
-        "tryMustUseAuto": "TRY currency always uses Auto mode."
+        "amountNegative": "Amount must be 0 or greater."
       },
       "submit": "Save",
       "cancel": "Cancel"

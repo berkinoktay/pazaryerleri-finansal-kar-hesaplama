@@ -33,10 +33,7 @@ const BASE_PROFILE = {
   name: 'COGS v1',
   type: 'COGS' as const,
   amountGross: '10.00',
-  currency: 'TRY' as const,
   vatRate: 18,
-  fxRateMode: 'AUTO' as const,
-  manualFxRate: null,
   note: null,
   archivedAt: null,
   createdBy: null,
@@ -73,9 +70,7 @@ describe('useUpdateCostProfile', () => {
       body: {
         name: 'COGS v2',
         amountGross: '15.00',
-        currency: 'TRY',
         vatRate: 18,
-        fxRateMode: 'AUTO',
       },
     });
 

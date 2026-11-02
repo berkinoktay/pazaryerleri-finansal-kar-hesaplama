@@ -13,7 +13,6 @@ export interface OrganizationListItem {
   id: string;
   name: string;
   slug: string;
-  currency: string;
   timezone: string;
   createdAt: string;
   updatedAt: string;
@@ -27,7 +26,6 @@ export interface OrganizationCreated {
   id: string;
   name: string;
   slug: string;
-  currency: string;
   timezone: string;
   createdAt: string;
   updatedAt: string;
@@ -83,7 +81,6 @@ export async function listForUser(userId: string): Promise<OrganizationListItem[
       id: o.id,
       name: o.name,
       slug: o.slug,
-      currency: o.currency,
       timezone: o.timezone,
       createdAt: o.createdAt.toISOString(),
       updatedAt: o.updatedAt.toISOString(),
@@ -143,7 +140,6 @@ export async function createForOwner(
           id: org.id,
           name: org.name,
           slug: org.slug,
-          currency: org.currency,
           timezone: org.timezone,
           createdAt: org.createdAt.toISOString(),
           updatedAt: org.updatedAt.toISOString(),

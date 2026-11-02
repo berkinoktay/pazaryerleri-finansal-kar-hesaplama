@@ -11,7 +11,7 @@ import type { components } from '@pazarsync/api-client';
 // ─── Domain enums (from Prisma-generated enums) ────────────────────────
 // Never redeclare as string literals — the enum VALUES live exactly once
 // in schema.prisma and flow here after `pnpm db:generate`.
-export { CostProfileType, Currency, FxRateMode } from '@pazarsync/db/enums';
+export { CostProfileType } from '@pazarsync/db/enums';
 
 export type { CostProfileType as CostProfileTypeValue } from '@pazarsync/db/enums';
 

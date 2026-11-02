@@ -8,7 +8,6 @@ import {
   Package01Icon,
   SaleTag01Icon,
 } from 'hugeicons-react';
-import { useFormatter } from 'next-intl';
 import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
@@ -81,34 +80,14 @@ export function CostProfileTypeIconSquare({
 
 export interface ProfileAmountProps {
   amount: string;
-  currency: string;
   className?: string;
 }
 
 /**
- * Renders a cost-profile amount with locale formatting:
- *   - TRY  → `<Currency>` (₺ symbol + Turkish locale)
- *   - else → `20,00 USD` (locale number + currency code)
- *
- * Use anywhere a profile's native-currency amount needs to be displayed
- * in a row alongside other identifiers (popover attached list, cmdk result).
+ * Renders a cost-profile amount in TL via `<Currency>` (₺ symbol + Turkish
+ * locale). Use anywhere a profile's amount needs to be displayed in a row
+ * alongside other identifiers (popover attached list, cmdk result).
  */
-export function ProfileAmount({
-  amount,
-  currency,
-  className,
-}: ProfileAmountProps): React.ReactElement {
-  const formatter = useFormatter();
-  if (currency === 'TRY') {
-    return <Currency value={amount} className={className} />;
-  }
-  return (
-    <span className={cn('tabular-nums', className)}>
-      {formatter.number(Number.parseFloat(amount), {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })}
-      <span className="ml-1 opacity-70">{currency}</span>
-    </span>
-  );
+export function ProfileAmount({ amount, className }: ProfileAmountProps): React.ReactElement {
+  return <Currency value={amount} className={className} />;
 }

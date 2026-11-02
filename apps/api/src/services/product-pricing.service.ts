@@ -237,9 +237,9 @@ export function assembleUnitEconomics(
 ): AssemblyResult {
   const saleVatRate = new Decimal(variant.vatRate ?? DEFAULT_VAT_RATE);
 
-  // ─── cost (GROSS-TRY batch aggregate; VAT extracted at sale rate) ───────────
-  // A null `currentCostTry` (e.g. FX_MISSING) never pairs with costStatus 'OK',
-  // but we read it directly so the type narrows without an assertion.
+  // ─── cost (GROSS-TL batch aggregate; VAT extracted at sale rate) ───────────
+  // A null `currentCostTry` never pairs with costStatus 'OK' (NO_PROFILES), but
+  // we read it directly so the type narrows without an assertion.
   const costStatus: CostStatus = inputs.costAggregate?.costStatus ?? 'NO_PROFILES';
   const currentCostTry = inputs.costAggregate?.currentCostTry ?? null;
   const costGross =
@@ -918,8 +918,8 @@ export async function quoteProductPrice(
 /**
  * Builds a `ComputedPricingRow` — the serialized DTO row PLUS the un-rounded
  * Decimal profit metrics the in-memory filter/sort consume. `cost` is the GROSS
- * TRY aggregate, present only when costStatus is OK (it is null otherwise, even
- * if a stale FX value sits in `currentCostTry`). `imageUrl` is the first
+ * TL aggregate, present only when costStatus is OK (it is null otherwise, i.e.
+ * NO_PROFILES). `imageUrl` is the first
  * imageUrls entry of the product, or null. category / brand ids are serialized bigints.
  */
 function computeRow(

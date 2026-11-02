@@ -65,12 +65,10 @@ export function CostProfileCreateDialog({
   const isSubmitting = createMutation.isPending || updateMutation.isPending;
 
   function handleSubmit(values: CostProfileFormValues) {
-    // The API types use `manualFxRate?: string` (optional, not null).
-    // The form uses `string | null` to distinguish "cleared" from "untouched".
-    // Adapt here: null → omit the field entirely.
+    // The form uses `note: string | null` to distinguish "cleared" from
+    // "untouched"; the API omits the field entirely for null.
     const apiBody = {
       ...values,
-      manualFxRate: values.manualFxRate !== null ? values.manualFxRate : undefined,
       note: values.note !== null ? values.note : undefined,
     };
 
@@ -108,7 +106,6 @@ export function CostProfileCreateDialog({
         </DialogHeader>
 
         <CostProfileForm
-          orgId={orgId}
           initialValues={
             isEditing && editProfile !== null ? profileToFormValues(editProfile) : undefined
           }
