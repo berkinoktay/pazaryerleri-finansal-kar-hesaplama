@@ -16,6 +16,7 @@ import { vatFromGross } from '../../tax/tr/vat';
 /** One version of a seller cost profile, as it stood at a point in time. All amounts are in Turkish lira. */
 export interface CostProfileVersionInput {
   readonly effectiveFrom: Date;
+  readonly versionNumber: number; // breaks an effective-date tie: the higher number is the newer version
   readonly amountGross: Decimal; // per unit, in Turkish lira
   readonly vatRatePct: Decimal;
   readonly archivedAt: Date | null; // version snapshot: non-null = the profile is archived from this version on
@@ -34,10 +35,21 @@ export interface ItemCostInput {
   readonly profiles: readonly ItemCostProfileInput[];
 }
 
+/** True when `a` sorts before `b` by (effectiveFrom, versionNumber) ascending. */
+function versionPrecedes(a: CostProfileVersionInput, b: CostProfileVersionInput): boolean {
+  const aTime = a.effectiveFrom.getTime();
+  const bTime = b.effectiveFrom.getTime();
+  if (aTime !== bTime) return aTime < bTime;
+  return a.versionNumber < b.versionNumber;
+}
+
 /**
- * Chooses the version that applies at `orderDate`: the latest version whose
- * `effectiveFrom` is on or before the order date. When no version qualifies the
- * earliest version is used (the first-version rule, design section 6.6).
+ * Chooses the version that applies at `orderDate`, ordering versions by
+ * (effectiveFrom, versionNumber): the version with the greatest (effectiveFrom,
+ * versionNumber) among those whose `effectiveFrom` is on or before the order date.
+ * When none qualifies the version with the smallest (effectiveFrom, versionNumber)
+ * is used (the first-version rule, design section 6.6). The version number breaks
+ * an effective-date tie.
  */
 function chooseCostVersion(
   versions: readonly CostProfileVersionInput[],
@@ -47,13 +59,12 @@ function chooseCostVersion(
   let latestApplicable: CostProfileVersionInput | null = null;
   let earliest: CostProfileVersionInput | null = null;
   for (const version of versions) {
-    const effectiveTime = version.effectiveFrom.getTime();
-    if (earliest === null || effectiveTime < earliest.effectiveFrom.getTime()) {
+    if (earliest === null || versionPrecedes(version, earliest)) {
       earliest = version;
     }
     if (
-      effectiveTime <= orderTime &&
-      (latestApplicable === null || effectiveTime > latestApplicable.effectiveFrom.getTime())
+      version.effectiveFrom.getTime() <= orderTime &&
+      (latestApplicable === null || versionPrecedes(latestApplicable, version))
     ) {
       latestApplicable = version;
     }

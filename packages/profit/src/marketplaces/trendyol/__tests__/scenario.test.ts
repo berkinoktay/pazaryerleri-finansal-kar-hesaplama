@@ -75,6 +75,7 @@ function cogsProfiles(amountGross: string, vatRatePct = '20'): ItemCostProfileIn
       versions: [
         {
           effectiveFrom: new Date('2026-01-01T00:00:00Z'),
+          versionNumber: 1,
           amountGross: new Decimal(amountGross),
           vatRatePct: new Decimal(vatRatePct),
           archivedAt: null,

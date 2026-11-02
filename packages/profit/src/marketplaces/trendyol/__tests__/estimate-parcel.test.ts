@@ -24,6 +24,7 @@ function tryCogs(orderItemId: string, amountGross: string): ItemCostInput {
         versions: [
           {
             effectiveFrom: new Date('2026-01-01T00:00:00Z'),
+            versionNumber: 1,
             amountGross: new Decimal(amountGross),
             vatRatePct: new Decimal('20'),
             archivedAt: null,

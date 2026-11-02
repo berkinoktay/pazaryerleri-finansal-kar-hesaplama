@@ -112,15 +112,17 @@ function toCommissionBand(band: StoredTariffBand): TrendyolCommissionBand {
   };
 }
 
-/** One cost profile version row -> the pure cost version input (decision 6: changedAt). */
+/** One cost profile version row -> the pure cost version input (decision 6: the version's effective date). */
 function toCostVersion(version: {
-  readonly changedAt: Date;
+  readonly effectiveFrom: Date;
+  readonly version: number;
   readonly amountGross: Prisma.Decimal;
   readonly vatRate: Prisma.Decimal;
   readonly archivedAt: Date | null;
 }): CostProfileVersionInput {
   return {
-    effectiveFrom: version.changedAt,
+    effectiveFrom: version.effectiveFrom,
+    versionNumber: version.version,
     amountGross: dec(version.amountGross),
     vatRatePct: dec(version.vatRate),
     archivedAt: version.archivedAt,
@@ -633,7 +635,11 @@ async function loadItemCosts(
 
   const links = await tx.productVariantCostProfile.findMany({
     where: { organizationId, productVariantId: { in: variantIds } },
-    include: { profile: { include: { versions: true } } },
+    include: {
+      profile: {
+        include: { versions: { orderBy: [{ effectiveFrom: 'asc' }, { version: 'asc' }] } },
+      },
+    },
   });
 
   const profilesByVariant = new Map<string, ItemCostProfileInput[]>();

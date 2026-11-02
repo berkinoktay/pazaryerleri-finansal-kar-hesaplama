@@ -695,6 +695,7 @@ export async function attachCostProfile(params: {
   readonly amountGross: string;
   readonly vatRate: string;
   readonly changedAt?: Date;
+  readonly effectiveFrom?: Date;
 }): Promise<void> {
   const profile = await prisma.costProfile.create({
     data: {
@@ -717,6 +718,7 @@ export async function attachCostProfile(params: {
       vatRate: params.vatRate,
       changedFields: [],
       changedAt: params.changedAt ?? MELONTIK.costEffectiveFrom,
+      effectiveFrom: params.effectiveFrom ?? MELONTIK.costEffectiveFrom,
     },
   });
   await prisma.productVariantCostProfile.create({

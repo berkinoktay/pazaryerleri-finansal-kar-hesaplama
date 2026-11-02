@@ -927,4 +927,68 @@ describe('loadTrendyolParcel', () => {
       }),
     ).rejects.toBeInstanceOf(FeeDefinitionNotFoundError);
   });
+
+  it('picks the version in effect by effective_from, not by changed_at', async () => {
+    const parcel = await seedMelontikParcel();
+
+    // A packaging profile on item A's variant with two versions whose changed_at and
+    // effective_from orders disagree on purpose. The 2026-10-28 order date falls
+    // between the two effective_from dates, so the version in effect is the one that
+    // became effective on 2026-10-01 (300.00); ordering by changed_at would pick the
+    // 2026-10-15 version (400.00) instead.
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: parcel.organizationId,
+        storeId: parcel.storeId,
+        name: 'Packaging two-version',
+        type: 'PACKAGING',
+        amountGross: '300.00',
+        vatRate: '20',
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: parcel.organizationId,
+        version: 1,
+        name: profile.name,
+        type: 'PACKAGING',
+        amountGross: '300.00',
+        vatRate: '20',
+        changedFields: [],
+        changedAt: new Date('2026-11-05T00:00:00Z'), // later changed_at, earlier effective_from
+        effectiveFrom: new Date('2026-10-01T00:00:00Z'),
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: parcel.organizationId,
+        version: 2,
+        name: profile.name,
+        type: 'PACKAGING',
+        amountGross: '400.00',
+        vatRate: '20',
+        changedFields: [],
+        changedAt: new Date('2026-10-15T00:00:00Z'), // earlier changed_at, later effective_from
+        effectiveFrom: new Date('2026-11-10T00:00:00Z'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: {
+        organizationId: parcel.organizationId,
+        productVariantId: parcel.variantA,
+        profileId: profile.id,
+      },
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const result = estimateTrendyolParcel(loaded.estimateInput);
+    const packaging = requireLine(result.lines, ProfitLineType.COST_PACKAGING, parcel.itemA);
+    expect(packaging.amount.gross.toFixed(2)).toBe('300.00');
+  });
 });

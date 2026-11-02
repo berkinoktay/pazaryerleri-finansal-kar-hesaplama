@@ -1071,6 +1071,8 @@ model CostProfileVersion {
   changedFields  String[]        @map("changed_fields")
   changedBy      String?         @map("changed_by") @db.Uuid
   changedAt      DateTime        @default(now()) @map("changed_at")
+  // When this version starts to apply; the DB default is the instant of the operation that created the version -- create, update, archive or restore -- so the API service needs no change.
+  effectiveFrom  DateTime        @default(now()) @map("effective_from")
   changeReason   String?         @map("change_reason")
 
   profile CostProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)

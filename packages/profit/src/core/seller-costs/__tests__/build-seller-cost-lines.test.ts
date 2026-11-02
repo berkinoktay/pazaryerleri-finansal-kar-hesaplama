@@ -19,6 +19,7 @@ import {
 
 interface MakeVersionParams {
   readonly effectiveFrom: string;
+  readonly versionNumber?: number;
   readonly amountGross: string;
   readonly vatRatePct?: string;
   readonly archivedAt?: string | null;
@@ -27,6 +28,7 @@ interface MakeVersionParams {
 function makeVersion(params: MakeVersionParams): CostProfileVersionInput {
   return {
     effectiveFrom: new Date(params.effectiveFrom),
+    versionNumber: params.versionNumber ?? 1,
     amountGross: new Decimal(params.amountGross),
     vatRatePct: new Decimal(params.vatRatePct ?? '20'),
     archivedAt:
@@ -117,6 +119,62 @@ describe('buildSellerCostLines', () => {
     const afterSecond = runAt('2026-10-25T09:00:00Z');
     expect(afterSecond.lines[0]?.amount.gross.toFixed(2)).toBe('120.00');
     expect(afterSecond.lines[0]?.amount.vat.toFixed(2)).toBe('20.00');
+  });
+
+  it('breaks an effective-date tie with the higher version number', () => {
+    const versions = [
+      makeVersion({
+        effectiveFrom: '2026-10-01T00:00:00Z',
+        versionNumber: 1,
+        amountGross: '100.00',
+        vatRatePct: '20',
+      }),
+      makeVersion({
+        effectiveFrom: '2026-10-01T00:00:00Z',
+        versionNumber: 2,
+        amountGross: '120.00',
+        vatRatePct: '20',
+      }),
+    ];
+    const { lines, issues } = buildSellerCostLines({
+      snapshot: makeParcel({
+        orderDate: new Date('2026-10-15T09:00:00Z'),
+        items: [makeItem({ orderItemId: 'a', listGross: '500' })],
+      }),
+      costs: [makeCost('a', [makeProfile('p1', CostProfileType.COGS, versions)])],
+    });
+
+    expect(issues).toEqual([]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.amount.gross.toFixed(2)).toBe('120.00');
+  });
+
+  it('falls back to the earliest version, the lower number on a tie', () => {
+    const versions = [
+      makeVersion({
+        effectiveFrom: '2026-10-10T00:00:00Z',
+        versionNumber: 2,
+        amountGross: '120.00',
+        vatRatePct: '20',
+      }),
+      makeVersion({
+        effectiveFrom: '2026-10-10T00:00:00Z',
+        versionNumber: 1,
+        amountGross: '100.00',
+        vatRatePct: '20',
+      }),
+    ];
+    const { lines, issues } = buildSellerCostLines({
+      snapshot: makeParcel({
+        orderDate: new Date('2026-09-01T09:00:00Z'),
+        items: [makeItem({ orderItemId: 'a', listGross: '500' })],
+      }),
+      costs: [makeCost('a', [makeProfile('p1', CostProfileType.COGS, versions)])],
+    });
+
+    expect(issues).toEqual([]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.amount.gross.toFixed(2)).toBe('100.00');
   });
 
   it('reads the archived state from the version valid at the order date', () => {
