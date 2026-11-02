@@ -44,7 +44,6 @@
 │                     BACKGROUND LAYER                                │
 │  ┌───────────────────────────┴───────────────────────────────────┐  │
 │  │  sync-worker (Node): claims SyncLog jobs (SKIP LOCKED)        │  │
-│  │  Edge Functions (Deno): fx-rates-sync only                    │  │
 │  └───────────────────────────┬───────────────────────────────────┘  │
 │                              │ HTTP API calls                       │
 ├──────────────────────────────┼──────────────────────────────────────┤
@@ -287,10 +286,6 @@ pazaryerleri-finansal-kar-hesaplama-saas/
 │       └── package.json
 │
 ├── supabase/
-│   ├── functions/                    # Edge Functions (Deno), fx-rates-sync only
-│   │   ├── fx-rates-sync/            # TCMB USD/EUR to fx_rates (daily, pg_cron)
-│   │   │   └── index.ts
-│   │   └── _shared/                 # Shared Deno modules (placeholder, empty)
 │   ├── sql/                          # SQL scripts (not managed by Prisma)
 │   │   ├── rls-policies.sql          # Row-Level Security policies
 │   │   ├── pg-cron-setup.sql         # Cron job definitions
@@ -1040,7 +1035,6 @@ calls.
 | `sync-settlements-6h`                 | `30 */6 * * *` | `SETTLEMENTS`      | 60-day window, idempotent per-row anchors         |
 | `sync-claims-6h`                      | `45 */6 * * *` | `CLAIMS`           | Returns/refunds, offset from settlements          |
 | `live-performance-buffer-daily-reset` | `0 21 * * *`   | (SQL function)     | 21:00 UTC = 00:00 business time                   |
-| `fx-rates-sync-daily`                 | `0 13 * * 1-5` | (Edge Function)    | Only cron that leaves the DB, via `pg_net`        |
 
 `sync-products-changes-hourly` has one extra condition: a store is enqueued only
 once it has a COMPLETED full `PRODUCTS` scan (an `EXISTS` gate), so no run starts
@@ -1054,21 +1048,18 @@ ticks, which is harmless because the active slot is per store and sync type.
 
 Türkiye is permanent GMT+3 (no DST), and pg_cron has no per-job timezone, so each
 local wall-clock time is hardcoded as its UTC equivalent: `0 0 * * *` = 03:00
-Istanbul, `0 21 * * *` = 00:00 Istanbul, `0 13 * * 1-5` = 16:00 Istanbul.
+Istanbul, `0 21 * * *` = 00:00 Istanbul.
 
 The buffer daily reset calls `reset_live_performance_buffer()`, which deletes
 ONLY `PERMANENT_FAILED` Live Performance buffer entries older than 7 days —
 un-graduatable rows the worker could never write to `orders`. Recoverable entries
 are graduated into `orders` by the worker, never deleted by this cron.
 
-### Edge Functions: fx-rates only
+### No Edge Functions
 
-`supabase/functions/` holds a single active function, `fx-rates-sync` (Deno): it
-fetches TCMB USD/EUR rates and upserts `fx_rates`, triggered by the
-`fx-rates-sync-daily` cron via `pg_net`. There is **no** `sync-trendyol` /
-`sync-hepsiburada` Edge Function — marketplace order/product/settlement sync is
-owned entirely by `apps/sync-worker`. Earlier boilerplate Edge stubs that implied
-an edge sync path were removed.
+The product runs no Supabase Edge Functions. All background work is either a
+`pg_cron` job (enqueue or a scheduled SQL function) or marketplace sync owned
+entirely by `apps/sync-worker`.
 
 ### Marketplace coverage
 

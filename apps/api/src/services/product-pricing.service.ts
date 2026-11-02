@@ -2,7 +2,7 @@
 //
 // Builds one `UnitEconomics` per approved ProductVariant by composing the
 // EXISTING resolvers — no new financial logic lives here:
-//   - cost           → fetchCostAggregates (raw-SQL batch, GROSS-TRY)
+//   - cost           → fetchCostAggregates (raw-SQL batch, GROSS-TL)
 //   - commission     → resolveCommissionRate (platform-global rate, percent)
 //   - commission VAT → resolveFeeDefinition(COMMISSION_INVOICE).defaultVatRate
 //   - stoppage       → resolveFeeDefinition(STOPPAGE).rateOfSale  (FRACTION)

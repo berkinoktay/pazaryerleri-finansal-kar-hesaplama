@@ -46,7 +46,7 @@ apps/
   web/          Next.js 16 frontend (App Router, React 19, Tailwind v4)  → apps/web/CLAUDE.md
   api/          Hono REST backend (Prisma 7, Zod 4, OpenAPI 3.1)          → apps/api/CLAUDE.md
   sync-worker/  Long-running worker: polls the SyncLog queue, claims jobs,
-                runs marketplace sync handlers (orders/products/settlements/fx) in chunks
+                runs marketplace sync handlers (orders/products/settlements) in chunks
 packages/
   db/           Prisma 7 schema + client (→ generated/prisma) + migrations + domain enums
   utils/        Shared utils: currency (TRY), dates, business-timezone, cursor, permissions, validation
@@ -56,7 +56,6 @@ packages/
   order-sync/   Idempotent order upsert (marketplace payload → domain Order)
   profit/       Profit engine: formula, on-create estimates, settlement reconcile, fee resolution
 supabase/
-  functions/    Edge Functions for marketplace sync (sync-trendyol, sync-hepsiburada, fx-rates-sync)
   sql/          RLS policies, pg_cron setup, DB functions
 docs/            Local-only knowledge base (gitignored): SECURITY, ARCHITECTURE, PRODUCT_VISION, plans, integrations
 ```

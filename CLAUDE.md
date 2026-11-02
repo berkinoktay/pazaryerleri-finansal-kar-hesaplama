@@ -31,7 +31,7 @@ Multi-tenant SaaS platform for Turkish e-commerce marketplace sellers. Connects 
 | **Database**        | Supabase (PostgreSQL 15)                                                                                                  |
 | **ORM**             | Prisma 7 (`prisma-client` generator + `@prisma/adapter-pg`)                                                               |
 | **Auth**            | Supabase Auth (email/password, OAuth); backend delegates token verification to `supabase.auth.getUser`                    |
-| **Background Jobs** | Supabase Edge Functions + pg_cron                                                                                         |
+| **Background Jobs** | pg_cron (enqueues jobs) + the long-running `apps/sync-worker` (claims jobs and runs periodic ticks)                       |
 | **Crypto**          | Node `crypto` (AES-256-GCM envelope in `@pazarsync/crypto-core`, key wrappers in `@pazarsync/sync-core`)                  |
 | **Money**           | `decimal.js` end-to-end — never floating point                                                                            |
 | **Testing**         | Vitest 4 + React Testing Library + MSW v2 + happy-dom (NOT jsdom — see `apps/web/CLAUDE.md`)                              |
@@ -67,7 +67,7 @@ When adding a NEW dependency: install whatever `latest` resolves to (no `@x.y.z`
 │   ├── web/              # Next.js 16 frontend (see apps/web/CLAUDE.md)
 │   ├── api/              # Hono backend server (see apps/api/CLAUDE.md)
 │   └── sync-worker/      # Long-running worker: polls the SyncLog queue, claims jobs,
-│                         #   runs marketplace sync handlers (orders/products/settlements/fx)
+│                         #   runs marketplace sync handlers (orders/products/settlements)
 ├── packages/
 │   ├── db/               # Prisma 7 schema, client (→ generated/prisma), migrations, domain enums
 │   ├── utils/            # Shared utilities (currency, date, business-timezone, cursor, permissions, validation)
@@ -78,7 +78,6 @@ When adding a NEW dependency: install whatever `latest` resolves to (no `@x.y.z`
 │   ├── order-sync/       # Idempotent order upsert (marketplace payload → domain Order)
 │   └── profit/           # Profit engine: formula, on-create estimates, settlement reconcile, fee resolution
 ├── supabase/
-│   ├── functions/        # Edge Functions: fx-rates-sync only (marketplace sync lives in apps/sync-worker)
 │   └── sql/              # RLS policies, pg_cron setup, DB functions
 ├── docs/                 # Local-only knowledge base (gitignored)
 │   ├── SECURITY.md       # CRITICAL: Tenant isolation, encryption, auth rules
@@ -173,7 +172,6 @@ pnpm check:full             # Pre-PR gate — check:all + integration suite + mi
 
 # Supabase (CLI, not a pnpm script)
 supabase start              # Start local Supabase (Postgres on port 54322)
-supabase functions serve    # Serve Edge Functions locally
 ```
 
 ## Architecture Principles
@@ -205,7 +203,7 @@ Marketplace API → webhook (apps/api) + sync-worker (pg_cron-enqueued jobs) →
 PostgreSQL → Hono API (Prisma) → Next.js Frontend (React Query)
 ```
 
-Sync is queue-driven: a `SyncLog` row is enqueued (PENDING), and `apps/sync-worker` (a long-running process) polls, claims, and drives each job through chunks with a watchdog reclaiming stale claims. Edge Functions under `supabase/functions/` cover only the fx-rates-sync path; marketplace order/product/settlement sync (Trendyol) is owned entirely by `apps/sync-worker`.
+Sync is queue-driven: a `SyncLog` row is enqueued (PENDING), and `apps/sync-worker` (a long-running process) polls, claims, and drives each job through chunks with a watchdog reclaiming stale claims. Marketplace order/product/settlement sync (Trendyol) is owned entirely by `apps/sync-worker`.
 
 ## Coding Standards (Shared)
 
@@ -627,10 +625,6 @@ SUPABASE_SECRET_KEY=           # sb_secret_*, server-only (bypasses RLS)
 TRENDYOL_BASE_URL=             # Marketplace API base URLs
 HEPSIBURADA_BASE_URL=
 ENCRYPTION_KEY=                # For encrypting store credentials
-
-# supabase/functions
-SUPABASE_URL=
-SUPABASE_SECRET_KEY=
 ```
 
 ## Git Conventions

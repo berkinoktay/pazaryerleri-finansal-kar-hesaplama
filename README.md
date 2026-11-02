@@ -22,7 +22,7 @@ Detaylı ürün vizyonu için [`docs/PRODUCT_VISION.md`](docs/PRODUCT_VISION.md)
 | **Database**        | Supabase (PostgreSQL 15) · RLS for tenant isolation         |
 | **ORM**             | Prisma 7 (`prisma-client` generator + `@prisma/adapter-pg`) |
 | **Auth**            | Supabase Auth (email/password, OAuth)                       |
-| **Background jobs** | Supabase Edge Functions + `pg_cron`                         |
+| **Background jobs** | `pg_cron` (enqueue) + long-running `apps/sync-worker`       |
 | **Testing**         | Vitest · React Testing Library · MSW v2 · happy-dom         |
 
 ---
@@ -45,7 +45,6 @@ Detaylı ürün vizyonu için [`docs/PRODUCT_VISION.md`](docs/PRODUCT_VISION.md)
 │   ├── profit/             Profit engine: formula, estimates, settlement reconcile
 │   └── eslint-config/      Shared flat ESLint config
 ├── supabase/
-│   ├── functions/          Edge Functions (fx-rates sync · Deno)
 │   └── sql/                RLS policies, pg_cron, DB functions
 ├── scripts/                Repo audits (boundaries, error codes, lint coverage) + codegen
 ├── docs/                   Architecture, security, API docs (local-only, gitignored)
@@ -138,7 +137,7 @@ User → Organization (tenant boundary) → Store (one marketplace account)
 - **Credentials** are encrypted at rest with AES-256-GCM, decrypted only in-memory inside marketplace adapters.
 
 ```
-Marketplace API ── Edge Function (pg_cron) ──▶ PostgreSQL
+Marketplace API ── pg_cron enqueue → apps/sync-worker ──▶ PostgreSQL
 PostgreSQL  ── Hono API (Prisma) ──▶ Next.js (React Query)
 ```
 
