@@ -3271,7 +3271,15 @@
           "restored": "Geri yüklendi"
         },
         "changedBy": "Değiştiren: {userId}",
-        "system": "Sistem"
+        "system": "Sistem",
+        "fields": {
+          "name": "Ad",
+          "type": "Tür",
+          "amountGross": "Tutar",
+          "vatRate": "KDV oranı",
+          "note": "Not",
+          "archivedAt": "Arşivlendi"
+        }
       },
       "attachedVariants": {
         "empty": {

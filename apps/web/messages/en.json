@@ -3226,6 +3226,18 @@
       "confirmDescription": "This cost profile will be archived and can no longer be attached to new variants. Past orders are unaffected. You can restore it at any time.",
       "confirm": "Archive",
       "cancel": "Cancel"
+    },
+    "detail": {
+      "history": {
+        "fields": {
+          "name": "Name",
+          "type": "Type",
+          "amountGross": "Amount",
+          "vatRate": "VAT rate",
+          "note": "Note",
+          "archivedAt": "Archived"
+        }
+      }
     }
   },
   "features": {

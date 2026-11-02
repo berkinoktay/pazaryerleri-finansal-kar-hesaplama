@@ -32,14 +32,16 @@ const DIFF_FIELDS = ['name', 'type', 'amountGross', 'vatRate', 'note', 'archived
 
 type DiffField = (typeof DIFF_FIELDS)[number];
 
-const FIELD_LABEL: Record<DiffField, string> = {
-  name: 'Ad',
-  type: 'Tür',
-  amountGross: 'Tutar',
-  vatRate: 'KDV oranı',
-  note: 'Not',
-  archivedAt: 'Arşivlendi',
-};
+// Maps each diff field to its message key under the `costs.detail.history`
+// namespace, so every rendered label flows through next-intl.
+const FIELD_LABEL_KEY = {
+  name: 'fields.name',
+  type: 'fields.type',
+  amountGross: 'fields.amountGross',
+  vatRate: 'fields.vatRate',
+  note: 'fields.note',
+  archivedAt: 'fields.archivedAt',
+} as const satisfies Record<DiffField, string>;
 
 function isDiffField(key: string): key is DiffField {
   return (DIFF_FIELDS as readonly string[]).includes(key);
@@ -211,7 +213,7 @@ function VersionRow({ version, previousVersion, isLast }: VersionRowProps): Reac
               return (
                 <InitialFieldRow
                   key={field}
-                  label={FIELD_LABEL[field]}
+                  label={t(FIELD_LABEL_KEY[field])}
                   value={formatValue(version, field)}
                 />
               );
@@ -222,7 +224,7 @@ function VersionRow({ version, previousVersion, isLast }: VersionRowProps): Reac
             {renderedDiffFields.map((field) => (
               <DiffRow
                 key={field}
-                label={FIELD_LABEL[field]}
+                label={t(FIELD_LABEL_KEY[field])}
                 before={previousVersion !== null ? formatValue(previousVersion, field) : '—'}
                 after={formatValue(version, field)}
               />
