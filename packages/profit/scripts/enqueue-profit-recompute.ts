@@ -2,7 +2,7 @@
 // active store.
 //
 // Purpose: after a reference-data correction (a commission rate, a fee definition,
-// a shipping tariff, an fx backfill) that invalidates already-written statements,
+// a shipping tariff) that invalidates already-written statements,
 // and for the phase 3D migration backfill, re-run the profit engine over a store's
 // orders. Each store's orders are marked MANUAL in one transaction; the sync-worker
 // recompute tick then drains the marks and rewrites the statements.

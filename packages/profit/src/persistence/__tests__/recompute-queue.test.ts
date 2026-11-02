@@ -20,6 +20,7 @@ import {
 } from '@pazarsync/db/enums';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { PROFIT_ENGINE_VERSION } from '../../core/engine-version';
 import {
   type ClaimedRecompute,
   claimProfitRecomputeRequests,
@@ -417,7 +418,7 @@ describe('profit recompute queue', () => {
       organizationId: org,
       storeId: store,
       orderId: order3,
-      engineVersion: 1,
+      engineVersion: PROFIT_ENGINE_VERSION,
     }); // up-to-date -> never swept
     const order4 = await seedBareOrder({
       organizationId: org,
@@ -519,8 +520,9 @@ describe('profit recompute queue', () => {
 
   it('backs off a failing request and still drains the others', async () => {
     const good = await seedMelontikParcel();
-    // A non-TRY accounting currency makes the Trendyol estimate throw.
-    const bad = await seedMelontikParcel({ currency: 'USD' });
+    // A seller discount larger than the list drives the computed sale negative, so the
+    // snapshot assertion rejects the parcel and the recompute throws.
+    const bad = await seedMelontikParcel({ lineSellerDiscountGrossA: '600.00' });
 
     await enqueueProfitRecompute(prisma, {
       organizationId: good.organizationId,
@@ -560,7 +562,7 @@ describe('profit recompute queue', () => {
     }
     expect(badRow.attempts).toBe(1);
     expect(badRow.lastError).not.toBeNull();
-    expect(badRow.lastError ?? '').toContain('currency');
+    expect(badRow.lastError ?? '').toContain('saleGross');
     const firstDelayMs = badRow.nextAttemptAt.getTime() - Date.now();
     expect(firstDelayMs).toBeGreaterThan(20_000);
     expect(firstDelayMs).toBeLessThan(40_000);
@@ -586,8 +588,9 @@ describe('profit recompute queue', () => {
   });
 
   it('does not back off a request that was re-requested while its computation failed', async () => {
-    // A non-TRY accounting currency makes the Trendyol estimate throw.
-    const bad = await seedMelontikParcel({ currency: 'USD' });
+    // A seller discount larger than the list drives the computed sale negative, so the
+    // snapshot assertion rejects the parcel and the recompute throws.
+    const bad = await seedMelontikParcel({ lineSellerDiscountGrossA: '600.00' });
     await enqueueProfitRecompute(prisma, {
       organizationId: bad.organizationId,
       storeId: bad.storeId,

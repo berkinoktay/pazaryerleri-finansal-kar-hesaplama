@@ -1,5 +1,5 @@
 import { Decimal } from 'decimal.js';
-import { CostProfileType, FxRateMode, ProfitLineType, ProfitStatus } from '@pazarsync/db/enums';
+import { CostProfileType, ProfitLineType, ProfitStatus } from '@pazarsync/db/enums';
 import { describe, expect, it } from 'vitest';
 
 import { makeItem, makeParcel } from '../../../__tests__/fixtures/parcel-builders';
@@ -10,7 +10,6 @@ import {
 } from '../../../__tests__/fixtures/trendyol-reference';
 import { allocateParcelLine } from '../../../core/allocation/allocate-parcel-line';
 import { itemsForAllocation } from '../../../core/allocation/allocation-item-sets';
-import { CURRENCY_TRY } from '../../../core/fx/currency-code';
 import { type ParcelSnapshot } from '../../../core/parcel-snapshot';
 import { computeProfitStatement } from '../../../core/profit-statement';
 import { type ProfitLine } from '../../../core/profit-line';
@@ -36,7 +35,7 @@ import { type TrendyolReferenceData } from '../trendyol-inputs';
 const INCLUDE_NEGATIVE = { includeStopaj: true, includeNegativeNetVat: true };
 const CLAMP_NEGATIVE = { includeStopaj: true, includeNegativeNetVat: false };
 
-/** One TRY COGS profile for one item, effective well before the order date, VAT 10%. */
+/** One COGS profile for one item, effective well before the order date, VAT 10%. */
 function tryCogs(orderItemId: string, amountGross: string): ItemCostInput {
   return {
     orderItemId,
@@ -48,10 +47,7 @@ function tryCogs(orderItemId: string, amountGross: string): ItemCostInput {
           {
             effectiveFrom: new Date('2026-01-01T00:00:00Z'),
             amountGross: new Decimal(amountGross),
-            currency: CURRENCY_TRY,
             vatRatePct: new Decimal('10'),
-            fxRateMode: FxRateMode.AUTO,
-            manualFxRate: null,
             archivedAt: null,
           },
         ],
@@ -205,7 +201,6 @@ describe('golden: melontik parcel 11761487239 through the trendyol module', () =
       attributes: melontikAttributes(),
       reference: melontikReference(),
       costs: [tryCogs('a', '233.00'), tryCogs('b', '165.00')],
-      fxQuotes: [],
       acceptedReturns: [],
     });
 
@@ -252,7 +247,6 @@ describe('golden: melontik parcel 11761487239 through the trendyol module', () =
       attributes: melontikAttributes(),
       reference: melontikReference(),
       costs: [tryCogs('a', '233.00'), tryCogs('b', '165.00')],
-      fxQuotes: [],
       acceptedReturns: [],
     });
 
@@ -286,7 +280,6 @@ describe('golden: melontik parcel 11761487239 through the trendyol module', () =
       attributes: melontikAttributes(),
       reference: melontikReference(),
       costs: [tryCogs('a', '233.00'), tryCogs('b', '165.00')],
-      fxQuotes: [],
       acceptedReturns: [],
     });
 
@@ -308,7 +301,6 @@ describe('golden: melontik parcel 11761487239 through the trendyol module', () =
       attributes,
       reference,
       costs: [tryCogs('a', '233.00'), tryCogs('b', '165.00')],
-      fxQuotes: [],
       acceptedReturns: [],
     });
 

@@ -1,8 +1,6 @@
 import { Decimal } from 'decimal.js';
 import {
   CostProfileType,
-  FxRateMode,
-  FxRateSource,
   ProfitIssueCode,
   ProfitLineCertainty,
   ProfitLineLevel,
@@ -12,8 +10,6 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import { makeItem, makeParcel } from '../../../__tests__/fixtures/parcel-builders';
-import { CURRENCY_TRY, type CurrencyCode, toCurrencyCode } from '../../fx/currency-code';
-import { type FxRateQuote } from '../../fx/select-fx-rate';
 import {
   buildSellerCostLines,
   type CostProfileVersionInput,
@@ -21,15 +17,10 @@ import {
   type ItemCostProfileInput,
 } from '../build-seller-cost-lines';
 
-const USD = toCurrencyCode('USD');
-
 interface MakeVersionParams {
   readonly effectiveFrom: string;
   readonly amountGross: string;
-  readonly currency?: CurrencyCode;
   readonly vatRatePct?: string;
-  readonly fxRateMode?: FxRateMode;
-  readonly manualFxRate?: string | null;
   readonly archivedAt?: string | null;
 }
 
@@ -37,13 +28,7 @@ function makeVersion(params: MakeVersionParams): CostProfileVersionInput {
   return {
     effectiveFrom: new Date(params.effectiveFrom),
     amountGross: new Decimal(params.amountGross),
-    currency: params.currency ?? CURRENCY_TRY,
     vatRatePct: new Decimal(params.vatRatePct ?? '20'),
-    fxRateMode: params.fxRateMode ?? FxRateMode.AUTO,
-    manualFxRate:
-      params.manualFxRate === undefined || params.manualFxRate === null
-        ? null
-        : new Decimal(params.manualFxRate),
     archivedAt:
       params.archivedAt === undefined || params.archivedAt === null
         ? null
@@ -63,14 +48,8 @@ function makeCost(orderItemId: string, profiles: readonly ItemCostProfileInput[]
   return { orderItemId, profiles };
 }
 
-const USD_QUOTE: FxRateQuote = {
-  currency: USD,
-  rateDate: '2026-10-28',
-  rateToBase: new Decimal('41.8'),
-};
-
 describe('buildSellerCostLines', () => {
-  it('builds a TRY cost line from the version valid at the order date', () => {
+  it('builds a cost line from the version valid at the order date', () => {
     const snapshot = makeParcel({ items: [makeItem({ orderItemId: 'a', listGross: '500' })] });
     const { lines, issues } = buildSellerCostLines({
       snapshot,
@@ -85,7 +64,6 @@ describe('buildSellerCostLines', () => {
           ]),
         ]),
       ],
-      fxQuotes: [],
     });
 
     expect(issues).toEqual([]);
@@ -98,8 +76,6 @@ describe('buildSellerCostLines', () => {
     expect(line?.amount.vat.toFixed(2)).toBe('21.18');
     expect(line?.certainty).toBe(ProfitLineCertainty.ACTUAL);
     expect(line?.source).toBe(ProfitLineSource.SELLER_INPUT);
-    expect(line?.fx.source).toBe(FxRateSource.NATIVE);
-    expect(line?.fx.rateDate).toBeNull();
     expect(line?.inputs).toEqual({
       profileId: 'p1',
       profileType: CostProfileType.COGS,
@@ -127,7 +103,6 @@ describe('buildSellerCostLines', () => {
           items: [makeItem({ orderItemId: 'a', listGross: '500' })],
         }),
         costs: [makeCost('a', [makeProfile('p1', CostProfileType.COGS, versions)])],
-        fxQuotes: [],
       });
 
     const onDate = runAt('2026-10-15T09:00:00Z');
@@ -142,90 +117,6 @@ describe('buildSellerCostLines', () => {
     const afterSecond = runAt('2026-10-25T09:00:00Z');
     expect(afterSecond.lines[0]?.amount.gross.toFixed(2)).toBe('120.00');
     expect(afterSecond.lines[0]?.amount.vat.toFixed(2)).toBe('20.00');
-  });
-
-  it('converts a USD cost with the order-date rate', () => {
-    const snapshot = makeParcel({
-      items: [makeItem({ orderItemId: 'a', listGross: '500', quantity: 2 })],
-    });
-    const { lines, issues } = buildSellerCostLines({
-      snapshot,
-      costs: [
-        makeCost('a', [
-          makeProfile('p1', CostProfileType.COGS, [
-            makeVersion({
-              effectiveFrom: '2026-10-01T00:00:00Z',
-              amountGross: '10.00',
-              currency: USD,
-              vatRatePct: '20',
-              fxRateMode: FxRateMode.AUTO,
-            }),
-          ]),
-        ]),
-      ],
-      fxQuotes: [USD_QUOTE],
-    });
-
-    expect(issues).toEqual([]);
-    expect(lines).toHaveLength(1);
-    const line = lines[0];
-    expect(line?.amount.gross.toFixed(2)).toBe('836.00');
-    expect(line?.amount.vat.toFixed(2)).toBe('139.19');
-    expect(line?.fx.source).toBe(FxRateSource.TCMB);
-    expect(line?.fx.rateDate).toBe('2026-10-28');
-    expect(line?.fx.original.gross.toFixed(2)).toBe('20.00');
-    expect(line?.fx.original.vat.toFixed(2)).toBe('3.33');
-  });
-
-  it('uses a manual rate and reports MISSING_FX_RATE when none applies', () => {
-    const snapshot = makeParcel({ items: [makeItem({ orderItemId: 'a', listGross: '500' })] });
-
-    const manual = buildSellerCostLines({
-      snapshot,
-      costs: [
-        makeCost('a', [
-          makeProfile('p1', CostProfileType.COGS, [
-            makeVersion({
-              effectiveFrom: '2026-10-01T00:00:00Z',
-              amountGross: '10.00',
-              currency: USD,
-              vatRatePct: '20',
-              fxRateMode: FxRateMode.MANUAL,
-              manualFxRate: '38',
-            }),
-          ]),
-        ]),
-      ],
-      fxQuotes: [],
-    });
-    expect(manual.issues).toEqual([]);
-    expect(manual.lines).toHaveLength(1);
-    expect(manual.lines[0]?.amount.gross.toFixed(2)).toBe('380.00');
-    expect(manual.lines[0]?.amount.vat.toFixed(2)).toBe('63.46');
-    expect(manual.lines[0]?.fx.source).toBe(FxRateSource.MANUAL);
-    expect(manual.lines[0]?.fx.rateDate).toBeNull();
-
-    const auto = buildSellerCostLines({
-      snapshot,
-      costs: [
-        makeCost('a', [
-          makeProfile('p1', CostProfileType.COGS, [
-            makeVersion({
-              effectiveFrom: '2026-10-01T00:00:00Z',
-              amountGross: '10.00',
-              currency: USD,
-              vatRatePct: '20',
-              fxRateMode: FxRateMode.AUTO,
-            }),
-          ]),
-        ]),
-      ],
-      fxQuotes: [],
-    });
-    expect(auto.lines).toEqual([]);
-    expect(auto.issues).toEqual([
-      { code: ProfitIssueCode.MISSING_FX_RATE, orderItemId: 'a', detail: 'USD' },
-    ]);
   });
 
   it('reads the archived state from the version valid at the order date', () => {
@@ -256,7 +147,6 @@ describe('buildSellerCostLines', () => {
           items: [makeItem({ orderItemId: 'a', listGross: '500' })],
         }),
         costs: [makeCost('a', [makeProfile('p1', CostProfileType.COGS, versions)])],
-        fxQuotes: [],
       });
 
     const beforeArchive = runAt('2026-10-05T09:00:00Z');
@@ -291,7 +181,6 @@ describe('buildSellerCostLines', () => {
           ]),
         ]),
       ],
-      fxQuotes: [],
     });
 
     expect(lines).toEqual([]);
@@ -327,7 +216,6 @@ describe('buildSellerCostLines', () => {
           ]),
         ]),
       ],
-      fxQuotes: [],
     });
 
     expect(issues).toEqual([]);
@@ -358,7 +246,6 @@ describe('buildSellerCostLines', () => {
           ]),
         ]),
       ],
-      fxQuotes: [],
     });
 
     expect(issues).toEqual([]);
@@ -383,35 +270,7 @@ describe('buildSellerCostLines', () => {
             ]),
           ]),
         ],
-        fxQuotes: [],
       }),
     ).toThrow(RangeError);
-  });
-
-  it('rejects a manual rate of zero', () => {
-    const snapshot = makeParcel({ items: [makeItem({ orderItemId: 'a', listGross: '500' })] });
-    const { lines, issues } = buildSellerCostLines({
-      snapshot,
-      costs: [
-        makeCost('a', [
-          makeProfile('p1', CostProfileType.COGS, [
-            makeVersion({
-              effectiveFrom: '2026-10-01T00:00:00Z',
-              amountGross: '10.00',
-              currency: USD,
-              vatRatePct: '20',
-              fxRateMode: FxRateMode.MANUAL,
-              manualFxRate: '0',
-            }),
-          ]),
-        ]),
-      ],
-      fxQuotes: [],
-    });
-
-    expect(lines).toEqual([]);
-    expect(issues).toEqual([
-      { code: ProfitIssueCode.MISSING_FX_RATE, orderItemId: 'a', detail: 'MANUAL:USD' },
-    ]);
   });
 });

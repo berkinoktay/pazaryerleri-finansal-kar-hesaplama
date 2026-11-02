@@ -7,12 +7,7 @@ import {
 } from '@pazarsync/db/enums';
 
 import { activeItems, type ParcelSnapshot } from '../../core/parcel-snapshot';
-import {
-  createProfitLine,
-  nativeFx,
-  type LineMoney,
-  type ProfitLine,
-} from '../../core/profit-line';
+import { createProfitLine, type LineMoney, type ProfitLine } from '../../core/profit-line';
 import { roundMoney } from '../../money';
 import { vatFromGross } from '../../tax/tr/vat';
 import { type TrendyolFeeParams } from './trendyol-inputs';
@@ -29,7 +24,7 @@ const PERCENT = new Decimal(100);
  * sum of the active items' sale amounts (list minus seller discount; a
  * marketplace-funded discount is not deducted). Item shares are allocated later by
  * the catalog's SALE_SHARE rule, not here. The line is ESTIMATE / RULE at PARCEL
- * level in the accounting currency.
+ * level in Turkish lira.
  */
 export function estimateInternationalServiceLine(params: {
   readonly snapshot: ParcelSnapshot;
@@ -69,7 +64,6 @@ export function estimateInternationalServiceLine(params: {
     source: ProfitLineSource.RULE,
     amount,
     vatRatePct: fees.internationalServiceVatRatePct,
-    fx: nativeFx(amount, snapshot.accountingCurrency),
     inputs: {
       base: base.toFixed(2),
       ratePct: fees.internationalServiceRatePct.toString(),

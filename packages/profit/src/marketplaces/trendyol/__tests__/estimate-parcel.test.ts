@@ -1,5 +1,5 @@
 import { Decimal } from 'decimal.js';
-import { CostProfileType, FxRateMode, ProfitIssueCode, ProfitLineType } from '@pazarsync/db/enums';
+import { CostProfileType, ProfitIssueCode, ProfitLineType } from '@pazarsync/db/enums';
 import { describe, expect, it } from 'vitest';
 
 import { makeItem, makeParcel } from '../../../__tests__/fixtures/parcel-builders';
@@ -8,14 +8,12 @@ import {
   makeTrendyolItemAttributes,
   trendyolReference,
 } from '../../../__tests__/fixtures/trendyol-reference';
-import { CURRENCY_TRY, toCurrencyCode } from '../../../core/fx/currency-code';
-import { InvalidParcelSnapshotError } from '../../../core/parcel-snapshot';
 import { computeProfitStatement } from '../../../core/profit-statement';
 import { selectLines } from '../../../core/select-lines';
 import { type ItemCostInput } from '../../../core/seller-costs/build-seller-cost-lines';
 import { estimateTrendyolParcel } from '../estimate-parcel';
 
-/** A single TRY COGS profile for one item, effective well before any order date. */
+/** A single COGS profile for one item, effective well before any order date. */
 function tryCogs(orderItemId: string, amountGross: string): ItemCostInput {
   return {
     orderItemId,
@@ -27,10 +25,7 @@ function tryCogs(orderItemId: string, amountGross: string): ItemCostInput {
           {
             effectiveFrom: new Date('2026-01-01T00:00:00Z'),
             amountGross: new Decimal(amountGross),
-            currency: CURRENCY_TRY,
             vatRatePct: new Decimal('20'),
-            fxRateMode: FxRateMode.AUTO,
-            manualFxRate: null,
             archivedAt: null,
           },
         ],
@@ -51,7 +46,6 @@ describe('estimateTrendyolParcel', () => {
       }),
       reference: trendyolReference(),
       costs: [],
-      fxQuotes: [],
       acceptedReturns: [],
     });
 
@@ -88,7 +82,6 @@ describe('estimateTrendyolParcel', () => {
       reference: trendyolReference(),
       // Only item b is costed, so item a surfaces MISSING_COST.
       costs: [tryCogs('b', '50.00')],
-      fxQuotes: [],
       acceptedReturns: [],
     });
 
@@ -124,7 +117,6 @@ describe('estimateTrendyolParcel', () => {
       }),
       reference: trendyolReference(),
       costs: [tryCogs('a', '40.00')],
-      fxQuotes: [],
       acceptedReturns: [],
     });
 
@@ -150,7 +142,6 @@ describe('estimateTrendyolParcel', () => {
       }),
       reference: trendyolReference(),
       costs: [tryCogs('a', '40.00'), tryCogs('b', '60.00')],
-      fxQuotes: [],
       acceptedReturns: [{ orderItemId: 'a', acceptedQuantity: 1 }],
     });
 
@@ -184,7 +175,6 @@ describe('estimateTrendyolParcel', () => {
       }),
       reference: trendyolReference(),
       costs: [tryCogs('a', '40.00'), tryCogs('b', '50.00')],
-      fxQuotes: [],
       acceptedReturns: [{ orderItemId: 'a', acceptedQuantity: 1 }],
     });
 
@@ -213,7 +203,6 @@ describe('estimateTrendyolParcel', () => {
       }),
       reference: trendyolReference(),
       costs: [tryCogs('a', '400.00')],
-      fxQuotes: [],
       acceptedReturns: [],
     });
 
@@ -226,23 +215,5 @@ describe('estimateTrendyolParcel', () => {
       (line) => line.type === ProfitLineType.INTERNATIONAL_SERVICE_FEE,
     );
     expect(intl?.amount.gross.toFixed(2)).toBe('60.00'); // 6% of 1000.00
-  });
-
-  it('rejects a parcel whose accounting currency is not TRY', () => {
-    expect(() =>
-      estimateTrendyolParcel({
-        snapshot: makeParcel({
-          accountingCurrency: toCurrencyCode('USD'),
-          items: [makeItem({ orderItemId: 'a', listGross: '100.00' })],
-        }),
-        attributes: makeTrendyolAttributes({
-          items: [makeTrendyolItemAttributes({ orderItemId: 'a' })],
-        }),
-        reference: trendyolReference(),
-        costs: [],
-        fxQuotes: [],
-        acceptedReturns: [],
-      }),
-    ).toThrow(InvalidParcelSnapshotError);
   });
 });

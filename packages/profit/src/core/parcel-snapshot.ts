@@ -2,9 +2,8 @@ import { type Decimal } from 'decimal.js';
 import { getBusinessDate } from '@pazarsync/utils';
 
 import { kurusAmountViolation } from '../money';
-import { type CurrencyCode } from './fx/currency-code';
 
-/** All money is VAT included and in the parcel's accounting currency. */
+/** All money is VAT included and in Turkish lira. */
 export interface ParcelItemSnapshot {
   readonly orderItemId: string;
   readonly productVariantId: string | null;
@@ -26,7 +25,6 @@ export interface ParcelSnapshot {
   readonly isCancelled: boolean;
   readonly isExportSale: boolean;
   readonly measuredDesi: Decimal | null; // parcel desi measured by the marketplace or carrier
-  readonly accountingCurrency: CurrencyCode;
   readonly items: readonly ParcelItemSnapshot[];
 }
 

@@ -1,13 +1,7 @@
 import { Decimal } from 'decimal.js';
 import { ProfitLineType } from '@pazarsync/db/enums';
 
-import { type CurrencyCode } from '../../core/fx/currency-code';
-import {
-  createProfitLine,
-  nativeFx,
-  type LineMoney,
-  type ProfitLine,
-} from '../../core/profit-line';
+import { createProfitLine, type LineMoney, type ProfitLine } from '../../core/profit-line';
 import { netSaleStoppageBase, stoppageAmount } from './stoppage';
 
 const ZERO = new Decimal(0);
@@ -18,7 +12,6 @@ interface StoppageBuildParams {
   readonly outputType: ProfitLineType;
   readonly ratePct: Decimal;
   readonly isExportSale: boolean;
-  readonly accountingCurrency: CurrencyCode;
 }
 
 /**
@@ -53,7 +46,6 @@ function buildStoppageFromLines(params: StoppageBuildParams): ProfitLine[] {
         source: line.source,
         amount,
         vatRatePct: null,
-        fx: nativeFx(amount, params.accountingCurrency),
         inputs: { base: base.toFixed(2), ratePct: params.ratePct.toString() },
         externalRecord: null,
       }),
@@ -71,7 +63,6 @@ export function buildStoppageLines(params: {
   readonly saleLines: readonly ProfitLine[];
   readonly ratePct: Decimal;
   readonly isExportSale: boolean;
-  readonly accountingCurrency: CurrencyCode;
 }): ProfitLine[] {
   return buildStoppageFromLines({
     lines: params.saleLines,
@@ -79,7 +70,6 @@ export function buildStoppageLines(params: {
     outputType: ProfitLineType.STOPPAGE,
     ratePct: params.ratePct,
     isExportSale: params.isExportSale,
-    accountingCurrency: params.accountingCurrency,
   });
 }
 
@@ -91,7 +81,6 @@ export function buildStoppageRefundLines(params: {
   readonly saleReturnLines: readonly ProfitLine[];
   readonly ratePct: Decimal;
   readonly isExportSale: boolean;
-  readonly accountingCurrency: CurrencyCode;
 }): ProfitLine[] {
   return buildStoppageFromLines({
     lines: params.saleReturnLines,
@@ -99,6 +88,5 @@ export function buildStoppageRefundLines(params: {
     outputType: ProfitLineType.STOPPAGE_REFUND,
     ratePct: params.ratePct,
     isExportSale: params.isExportSale,
-    accountingCurrency: params.accountingCurrency,
   });
 }

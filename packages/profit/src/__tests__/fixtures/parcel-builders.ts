@@ -1,7 +1,6 @@
 import { Decimal } from 'decimal.js';
 import { getBusinessDate } from '@pazarsync/utils';
 
-import { CURRENCY_TRY, type CurrencyCode } from '../../core/fx/currency-code';
 import { type ParcelItemSnapshot, type ParcelSnapshot } from '../../core/parcel-snapshot';
 
 /**
@@ -62,7 +61,6 @@ export interface MakeParcelParams {
   readonly isCancelled?: boolean;
   readonly isExportSale?: boolean;
   readonly measuredDesi?: string | null;
-  readonly accountingCurrency?: CurrencyCode;
   readonly items?: readonly ParcelItemSnapshot[];
 }
 
@@ -79,7 +77,6 @@ export function makeParcel(params: MakeParcelParams = {}): ParcelSnapshot {
     isCancelled: params.isCancelled ?? false,
     isExportSale: params.isExportSale ?? false,
     measuredDesi,
-    accountingCurrency: params.accountingCurrency ?? CURRENCY_TRY,
     items: params.items ?? [],
   };
 }

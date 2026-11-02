@@ -61,18 +61,9 @@ export {
 // Profit line core (rebuild, phase 1) -- docs/plans/2026-10-29-profit-engine-design.md
 export { roundMoney } from './money';
 export {
-  CURRENCY_TRY,
-  InvalidCurrencyCodeError,
-  isCurrencyCode,
-  toCurrencyCode,
-  type CurrencyCode,
-} from './core/fx/currency-code';
-export {
   createProfitLine,
-  nativeFx,
   InvalidProfitLineError,
   type ExternalRecordRef,
-  type FxConversion,
   type LineMoney,
   type ProfitLine,
   type ProfitLineInputs,
@@ -106,13 +97,6 @@ export {
   allocateParcelLine,
   type ProfitLineAllocation,
 } from './core/allocation/allocate-parcel-line';
-export {
-  FX_RATE_DECIMALS,
-  selectFxRate,
-  type FxRateQuote,
-  type SelectedFxRate,
-} from './core/fx/select-fx-rate';
-export { convertLineMoney } from './core/fx/convert-line-money';
 export { isBlockingIssue, PROFIT_ISSUE_CATALOG, type ProfitIssue } from './core/profit-issue';
 export { deriveProfitStatus, type DeriveProfitStatusParams } from './core/profit-status';
 export { PROFIT_ENGINE_VERSION } from './core/engine-version';
@@ -151,7 +135,6 @@ export { saleVatRatePct } from './tax/tr/sale-vat';
 export { buildStoppageLines, buildStoppageRefundLines } from './tax/tr/stoppage-lines';
 export { grossFromNet } from './tax/tr/vat';
 export {
-  TRENDYOL_CURRENCY,
   TRENDYOL_SAME_DAY_SHIPPING_TYPE,
   trendyolCategoryBrandKey,
   type OverseasReturnTier,

@@ -1,6 +1,5 @@
 import { Decimal } from 'decimal.js';
 import {
-  FxRateSource,
   ProfitLineCertainty,
   ProfitLineLevel,
   ProfitLineSource,
@@ -9,7 +8,6 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import { makeLine } from '../../../__tests__/helpers/make-profit-line';
-import { CURRENCY_TRY } from '../../../core/fx/currency-code';
 import { buildStoppageLines, buildStoppageRefundLines } from '../stoppage-lines';
 
 const ONE_PERCENT = new Decimal('1');
@@ -29,7 +27,6 @@ describe('buildStoppageLines', () => {
       saleLines: [sale],
       ratePct: ONE_PERCENT,
       isExportSale: false,
-      accountingCurrency: CURRENCY_TRY,
     });
 
     expect(lines).toHaveLength(1);
@@ -41,7 +38,6 @@ describe('buildStoppageLines', () => {
     expect(lines[0]?.vatRatePct).toBeNull();
     expect(lines[0]?.certainty).toBe(ProfitLineCertainty.ACTUAL);
     expect(lines[0]?.source).toBe(ProfitLineSource.MARKETPLACE_RECORD);
-    expect(lines[0]?.fx.source).toBe(FxRateSource.NATIVE);
     expect(lines[0]?.inputs).toEqual({ base: '446.62', ratePct: '1' });
   });
 
@@ -58,7 +54,6 @@ describe('buildStoppageLines', () => {
         saleLines: [sale],
         ratePct: ONE_PERCENT,
         isExportSale: true,
-        accountingCurrency: CURRENCY_TRY,
       }),
     ).toEqual([]);
   });
@@ -82,7 +77,6 @@ describe('buildStoppageLines', () => {
         saleLines: [commission, tinySale],
         ratePct: ONE_PERCENT,
         isExportSale: false,
-        accountingCurrency: CURRENCY_TRY,
       }),
     ).toEqual([]);
   });
@@ -103,7 +97,6 @@ describe('buildStoppageRefundLines', () => {
       saleReturnLines: [saleReturn],
       ratePct: ONE_PERCENT,
       isExportSale: false,
-      accountingCurrency: CURRENCY_TRY,
     });
 
     expect(lines).toHaveLength(1);
@@ -115,7 +108,6 @@ describe('buildStoppageRefundLines', () => {
     expect(lines[0]?.vatRatePct).toBeNull();
     expect(lines[0]?.certainty).toBe(ProfitLineCertainty.ACTUAL);
     expect(lines[0]?.source).toBe(ProfitLineSource.MARKETPLACE_RECORD);
-    expect(lines[0]?.fx.source).toBe(FxRateSource.NATIVE);
     expect(lines[0]?.inputs).toEqual({ base: '446.62', ratePct: '1' });
   });
 });

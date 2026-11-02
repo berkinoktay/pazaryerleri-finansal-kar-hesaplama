@@ -25,10 +25,8 @@ import { FeeDefinitionNotFoundError } from '../../resolve-fee-definition';
 import { ParcelNotFoundError, UnsupportedPlatformError } from '../errors';
 import { loadTrendyolParcel } from '../load-trendyol-parcel';
 import {
-  attachCostProfile,
   createAdditionalStore,
   ensureDbReachable,
-  insertFxRate,
   MELONTIK,
   seedMelontikParcel,
   truncateAll,
@@ -787,49 +785,6 @@ describe('loadTrendyolParcel', () => {
     );
     expect(tierByMin.get('0.00')?.ratePct.toFixed(0)).toBe('35');
     expect(tierByMin.get('2000.01')?.ratePct.toFixed(0)).toBe('30');
-  });
-
-  it('loads the latest two fx quotes on or before the business date, newest first', async () => {
-    const parcel = await seedMelontikParcel();
-    // Give variant A a USD cost version so the loader resolves USD fx quotes.
-    await attachCostProfile({
-      organizationId: parcel.organizationId,
-      storeId: parcel.storeId,
-      productVariantId: parcel.variantA,
-      currency: 'USD',
-      amountGross: '10.00',
-      vatRate: '0',
-    });
-
-    // Business date is 2026-10-28. Two rates on or before it, one after (excluded).
-    await insertFxRate({
-      currency: 'USD',
-      rateDate: new Date('2026-10-26T00:00:00Z'),
-      rateToTry: '32.000000',
-    });
-    await insertFxRate({
-      currency: 'USD',
-      rateDate: new Date('2026-10-27T00:00:00Z'),
-      rateToTry: '33.000000',
-    });
-    await insertFxRate({
-      currency: 'USD',
-      rateDate: new Date('2026-10-29T00:00:00Z'),
-      rateToTry: '34.000000',
-    });
-
-    const loaded = await loadTrendyolParcel(prisma, {
-      organizationId: parcel.organizationId,
-      orderId: parcel.orderId,
-    });
-
-    const quotes = loaded.estimateInput.fxQuotes;
-    expect(quotes).toHaveLength(2);
-    expect(quotes.map((q) => String(q.currency))).toEqual(['USD', 'USD']);
-    // orderBy rateDate desc, take 2 -> newest first; the 2026-10-29 rate is excluded.
-    expect(quotes.map((q) => q.rateDate)).toEqual(['2026-10-27', '2026-10-26']);
-    expect(quotes[0]?.rateToBase.toFixed(2)).toBe('33.00');
-    expect(quotes[1]?.rateToBase.toFixed(2)).toBe('32.00');
   });
 
   it('loads a return settlement record and return cargo item matched through a claim', async () => {

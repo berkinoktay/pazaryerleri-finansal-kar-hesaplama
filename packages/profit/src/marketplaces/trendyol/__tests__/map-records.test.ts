@@ -1,6 +1,5 @@
 import { Decimal } from 'decimal.js';
 import {
-  FxRateSource,
   ProfitIssueCode,
   ProfitLineCertainty,
   ProfitLineLevel,
@@ -15,8 +14,6 @@ import {
   trendyolReference,
 } from '../../../__tests__/fixtures/trendyol-reference';
 import { makeLine } from '../../../__tests__/helpers/make-profit-line';
-import { toCurrencyCode } from '../../../core/fx/currency-code';
-import { InvalidParcelSnapshotError } from '../../../core/parcel-snapshot';
 import { type ProfitLine } from '../../../core/profit-line';
 import { mapTrendyolRecords } from '../map-records';
 import {
@@ -122,7 +119,6 @@ describe('mapTrendyolRecords', () => {
     expect(sale?.amount.gross.toFixed(2)).toBe('491.28');
     expect(sale?.amount.vat.toFixed(2)).toBe('44.66');
     expect(sale?.vatRatePct?.toString()).toBe('10');
-    expect(sale?.fx.source).toBe(FxRateSource.NATIVE);
     expect(sale?.inputs.recordIds).toBe('rec-1,rec-2');
     // The external record points at the Sale, never at the Discount.
     expect(sale?.externalRecord?.rawType).toBe('Sale');
@@ -790,23 +786,6 @@ describe('mapTrendyolRecords', () => {
     expect(serviceCopy?.certainty).toBe(ProfitLineCertainty.ACTUAL);
     expect(serviceCopy?.inputs.confirmedBy).toBe('payment-order:P1');
     expect(serviceCopy?.externalRecord).toEqual({ recordId: 'po-1', rawType: 'PaymentOrder' });
-  });
-
-  it('rejects a parcel whose accounting currency is not TRY', () => {
-    const snapshot = makeParcel({
-      accountingCurrency: toCurrencyCode('USD'),
-      items: [makeItem({ orderItemId: 'a', listGross: '100.00' })],
-    });
-    expect(() =>
-      mapTrendyolRecords({
-        snapshot,
-        attributes: makeTrendyolAttributes(),
-        fees: FEES,
-        records: [],
-        cargoItems: [],
-        estimateLines: [],
-      }),
-    ).toThrow(InvalidParcelSnapshotError);
   });
 
   it('does not copy lines that are already actual', () => {

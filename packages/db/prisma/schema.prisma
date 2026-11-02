@@ -373,17 +373,10 @@ enum ProfitStatus {
 
 enum ProfitIssueCode {
   MISSING_COST
-  MISSING_FX_RATE
   SHIPPING_ESTIMATE_UNAVAILABLE
   UNMAPPED_MARKETPLACE_RECORD
   MISSING_COMMISSION_RATE
   AMBIGUOUS_RECORD_MATCH
-}
-
-enum FxRateSource {
-  NATIVE
-  TCMB
-  MANUAL
 }
 
 // How a profit statement is computed: ESTIMATE from estimate-only lines, BEST_KNOWN from the best available.
@@ -2125,14 +2118,6 @@ model ProfitLine {
   amountGross Decimal  @map("amount_gross") @db.Decimal(14, 2)
   amountVat   Decimal  @map("amount_vat") @db.Decimal(14, 2)
   vatRatePct  Decimal? @map("vat_rate_pct") @db.Decimal(7, 4)
-
-  // ISO 4217 code, not the 3-value Currency enum: the engine is multi-currency.
-  originalCurrency String       @map("original_currency") @db.VarChar(3)
-  originalGross    Decimal      @map("original_gross") @db.Decimal(14, 2)
-  originalVat      Decimal      @map("original_vat") @db.Decimal(14, 2)
-  fxRate           Decimal      @map("fx_rate") @db.Decimal(14, 6)
-  fxRateDate       DateTime?    @map("fx_rate_date") @db.Date
-  fxSource         FxRateSource @map("fx_source")
 
   inputs Json
 

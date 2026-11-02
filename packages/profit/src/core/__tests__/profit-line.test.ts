@@ -1,9 +1,8 @@
-import { Decimal } from 'decimal.js';
 import { ProfitLineLevel, ProfitLineType } from '@pazarsync/db/enums';
 import { describe, expect, it } from 'vitest';
 
 import { makeLine } from '../../__tests__/helpers/make-profit-line';
-import { createProfitLine, InvalidProfitLineError } from '../profit-line';
+import { InvalidProfitLineError } from '../profit-line';
 
 describe('createProfitLine', () => {
   it('accepts a valid item line', () => {
@@ -52,12 +51,6 @@ describe('createProfitLine', () => {
       InvalidProfitLineError,
     );
     expect(() => makeLine({ type: ProfitLineType.COMMISSION, gross: 'NaN' })).toThrow(
-      InvalidProfitLineError,
-    );
-  });
-  it('rejects NATIVE fx with a rate other than 1', () => {
-    const base = makeLine({ type: ProfitLineType.SALE, gross: '10' });
-    expect(() => createProfitLine({ ...base, fx: { ...base.fx, rate: new Decimal('2') } })).toThrow(
       InvalidProfitLineError,
     );
   });

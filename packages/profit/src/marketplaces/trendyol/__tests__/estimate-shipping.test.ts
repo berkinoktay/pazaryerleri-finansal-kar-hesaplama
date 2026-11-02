@@ -1,6 +1,5 @@
 import { Decimal } from 'decimal.js';
 import {
-  FxRateSource,
   ProfitIssueCode,
   ProfitLineCertainty,
   ProfitLineLevel,
@@ -35,7 +34,6 @@ describe('estimateShippingLine', () => {
     expect(line?.orderItemId).toBeNull();
     expect(line?.certainty).toBe(ProfitLineCertainty.ESTIMATE);
     expect(line?.source).toBe(ProfitLineSource.RULE);
-    expect(line?.fx.source).toBe(FxRateSource.NATIVE);
     expect(line?.amount.gross.toFixed(2)).toBe('112.36');
     expect(line?.amount.vat.toFixed(2)).toBe('18.73');
     expect(line?.vatRatePct?.toString()).toBe('20');

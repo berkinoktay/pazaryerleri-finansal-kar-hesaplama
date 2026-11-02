@@ -1,7 +1,6 @@
 import { Decimal } from 'decimal.js';
 import {
   CostProfileType,
-  FxRateMode,
   ProfitLineType,
   ProfitStatus,
   ShippingTariffSource,
@@ -10,7 +9,6 @@ import { type ResolvedProfitSettings } from '@pazarsync/utils';
 import { describe, expect, it } from 'vitest';
 
 import { arasmpScenarioReference } from '../../../__tests__/fixtures/trendyol-reference';
-import { CURRENCY_TRY } from '../../../core/fx/currency-code';
 import { type ProfitLine } from '../../../core/profit-line';
 import { type ItemCostProfileInput } from '../../../core/seller-costs/build-seller-cost-lines';
 import {
@@ -68,7 +66,7 @@ function scenarioProduct(
   };
 }
 
-/** One TRY COGS profile, 20% VAT by default, effective well before the scenario date. */
+/** One COGS profile, 20% VAT by default, effective well before the scenario date. */
 function cogsProfiles(amountGross: string, vatRatePct = '20'): ItemCostProfileInput[] {
   return [
     {
@@ -78,10 +76,7 @@ function cogsProfiles(amountGross: string, vatRatePct = '20'): ItemCostProfileIn
         {
           effectiveFrom: new Date('2026-01-01T00:00:00Z'),
           amountGross: new Decimal(amountGross),
-          currency: CURRENCY_TRY,
           vatRatePct: new Decimal(vatRatePct),
-          fxRateMode: FxRateMode.AUTO,
-          manualFxRate: null,
           archivedAt: null,
         },
       ],
@@ -113,10 +108,8 @@ function scenarioInput(
     scenarioDate: SCENARIO_DATE,
     fastDelivery: overrides.fastDelivery ?? true,
     isExportSale: overrides.isExportSale ?? false,
-    accountingCurrency: CURRENCY_TRY,
     reference: overrides.reference ?? arasmpScenarioReference(),
     costs: overrides.costs ?? cogsProfiles('130'),
-    fxQuotes: [],
     settings: overrides.settings ?? INCLUDE_NEGATIVE,
   };
 }

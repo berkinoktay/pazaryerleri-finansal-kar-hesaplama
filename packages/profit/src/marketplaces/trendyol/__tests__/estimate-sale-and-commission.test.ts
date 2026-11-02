@@ -1,5 +1,4 @@
 import {
-  FxRateSource,
   ProfitIssueCode,
   ProfitLineCertainty,
   ProfitLineLevel,
@@ -39,7 +38,6 @@ describe('estimateSaleLines', () => {
     expect(saleLines[0]?.vatRatePct?.toString()).toBe('10');
     expect(saleLines[0]?.certainty).toBe(ProfitLineCertainty.ESTIMATE);
     expect(saleLines[0]?.source).toBe(ProfitLineSource.RULE);
-    expect(saleLines[0]?.fx.source).toBe(FxRateSource.NATIVE);
     expect(saleLines[0]?.inputs).toEqual({ listGross: '529.00', sellerDiscountGross: '37.72' });
 
     const attributes = makeTrendyolAttributes({
@@ -60,7 +58,6 @@ describe('estimateSaleLines', () => {
     expect(lines[0]?.vatRatePct?.toString()).toBe('20');
     expect(lines[0]?.certainty).toBe(ProfitLineCertainty.ESTIMATE);
     expect(lines[0]?.source).toBe(ProfitLineSource.RULE);
-    expect(lines[0]?.fx.source).toBe(FxRateSource.NATIVE);
     expect(lines[0]?.inputs).toEqual({
       ratePct: '19',
       rateSource: 'ORDER',

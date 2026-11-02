@@ -183,10 +183,10 @@ async function recomputeTrendyolParcel(
   });
 
   // The hash sees Decimal values at full precision, while the persisted columns are
-  // rounded (percentages to 4, fxRate to 6, vatRatePct to 4). The hashed view is a
-  // superset of the stored one, so a change that matters always flips the hash and a
-  // needed write is never skipped; at worst two inputs that round to the same row
-  // produce different hashes and an identical row is rewritten.
+  // rounded (percentages to 4, vatRatePct to 4). The hashed view is a superset of the
+  // stored one, so a change that matters always flips the hash and a needed write is
+  // never skipped; at worst two inputs that round to the same row produce different
+  // hashes and an identical row is rewritten.
   const hash = profitContentHash({
     engineVersion: PROFIT_ENGINE_VERSION,
     settings: loaded.settings,
@@ -236,12 +236,6 @@ interface ProfitLineRow {
   readonly amountGross: string;
   readonly amountVat: string;
   readonly vatRatePct: string | null;
-  readonly originalCurrency: string;
-  readonly originalGross: string;
-  readonly originalVat: string;
-  readonly fxRate: string;
-  readonly fxRateDate: Date | null;
-  readonly fxSource: ProfitLine['fx']['source'];
   readonly inputs: Prisma.InputJsonValue;
   readonly externalRecordId: string | null;
   readonly externalRecordType: string | null;
@@ -286,12 +280,6 @@ async function persistParcelProfit(
     amountGross: line.amount.gross.toFixed(),
     amountVat: line.amount.vat.toFixed(),
     vatRatePct: line.vatRatePct === null ? null : line.vatRatePct.toFixed(),
-    originalCurrency: line.fx.currency,
-    originalGross: line.fx.original.gross.toFixed(),
-    originalVat: line.fx.original.vat.toFixed(),
-    fxRate: line.fx.rate.toFixed(),
-    fxRateDate: line.fx.rateDate === null ? null : new Date(`${line.fx.rateDate}T00:00:00.000Z`),
-    fxSource: line.fx.source,
     inputs: line.inputs,
     externalRecordId: line.externalRecord?.recordId ?? null,
     externalRecordType: line.externalRecord?.rawType ?? null,

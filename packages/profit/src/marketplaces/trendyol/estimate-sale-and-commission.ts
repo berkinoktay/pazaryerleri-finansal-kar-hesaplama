@@ -9,12 +9,7 @@ import {
 
 import { activeItems, type ParcelSnapshot } from '../../core/parcel-snapshot';
 import { type ProfitIssue } from '../../core/profit-issue';
-import {
-  createProfitLine,
-  nativeFx,
-  type LineMoney,
-  type ProfitLine,
-} from '../../core/profit-line';
+import { createProfitLine, type LineMoney, type ProfitLine } from '../../core/profit-line';
 import { roundMoney } from '../../money';
 import { saleVatRatePct } from '../../tax/tr/sale-vat';
 import { vatFromGross } from '../../tax/tr/vat';
@@ -32,7 +27,7 @@ const PERCENT = new Decimal(100);
 /**
  * One SALE (ITEM) line per active item. The gross is the seller's sale amount; the
  * VAT follows the Turkish export rule (0% on an export sale). A zero sale writes no
- * line. Lines are ESTIMATE / RULE in the parcel's accounting currency.
+ * line. Lines are ESTIMATE / RULE in Turkish lira.
  */
 export function estimateSaleLines(snapshot: ParcelSnapshot): ProfitLine[] {
   const lines: ProfitLine[] = [];
@@ -54,7 +49,6 @@ export function estimateSaleLines(snapshot: ParcelSnapshot): ProfitLine[] {
         source: ProfitLineSource.RULE,
         amount,
         vatRatePct,
-        fx: nativeFx(amount, snapshot.accountingCurrency),
         inputs: {
           listGross: item.listGross.toFixed(2),
           sellerDiscountGross: item.sellerDiscountGross.toFixed(2),
@@ -136,7 +130,6 @@ export function estimateCommissionLines(params: {
         source: ProfitLineSource.RULE,
         amount,
         vatRatePct: reference.fees.commissionVatRatePct,
-        fx: nativeFx(amount, snapshot.accountingCurrency),
         inputs: {
           ratePct: resolved.ratePct.toString(),
           rateSource: resolved.source,

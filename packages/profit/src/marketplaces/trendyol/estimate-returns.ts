@@ -16,12 +16,7 @@ import {
   type ParcelSnapshot,
 } from '../../core/parcel-snapshot';
 import { type ProfitIssue } from '../../core/profit-issue';
-import {
-  createProfitLine,
-  nativeFx,
-  type LineMoney,
-  type ProfitLine,
-} from '../../core/profit-line';
+import { createProfitLine, type LineMoney, type ProfitLine } from '../../core/profit-line';
 import { buildCostReturnLines } from '../../core/seller-costs/build-cost-return-lines';
 import { roundMoney } from '../../money';
 import { saleVatRatePct } from '../../tax/tr/sale-vat';
@@ -53,8 +48,8 @@ interface AcceptedEntry {
  * each returned item; an export parcel reverses none of these and charges the
  * overseas return operation fee instead (the sale stays with the seller and the
  * commission is not refunded). The returned-item set drives the allocation of the
- * return legs. All amounts are in the parcel's accounting currency; the module
- * never writes a zero-amount line.
+ * return legs. All amounts are in Turkish lira; the module never writes a
+ * zero-amount line.
  */
 export function estimateReturnLines(params: {
   readonly snapshot: ParcelSnapshot;
@@ -96,10 +91,9 @@ export function estimateReturnLines(params: {
   }
 
   if (snapshot.isExportSale) {
-    return estimateExportReturns({ snapshot, acceptedEntries, commissionByItem, reference });
+    return estimateExportReturns({ acceptedEntries, commissionByItem, reference });
   }
   return estimateDomesticReturns({
-    snapshot,
     acceptedEntries,
     commissionByItem,
     costLines,
@@ -143,13 +137,12 @@ function standaloneReturnShippingGross(params: {
  * return desi and an all-digital return writes no return shipping line.
  */
 function estimateDomesticReturns(params: {
-  readonly snapshot: ParcelSnapshot;
   readonly acceptedEntries: readonly AcceptedEntry[];
   readonly commissionByItem: ReadonlyMap<string, ProfitLine>;
   readonly costLines: readonly ProfitLine[];
   readonly reference: TrendyolReferenceData;
 }): ReturnEstimate {
-  const { snapshot, acceptedEntries, commissionByItem, costLines, reference } = params;
+  const { acceptedEntries, commissionByItem, costLines, reference } = params;
 
   const saleReturnLines: ProfitLine[] = [];
   const commissionRefundLines: ProfitLine[] = [];
@@ -180,7 +173,6 @@ function estimateDomesticReturns(params: {
           source: ProfitLineSource.RULE,
           amount,
           vatRatePct: saleVat,
-          fx: nativeFx(amount, snapshot.accountingCurrency),
           inputs: {
             acceptedQuantity: acceptedQuantity.toString(),
             quantity: item.quantity.toString(),
@@ -208,7 +200,6 @@ function estimateDomesticReturns(params: {
             source: ProfitLineSource.RULE,
             amount,
             vatRatePct: reference.fees.commissionVatRatePct,
-            fx: nativeFx(amount, snapshot.accountingCurrency),
             inputs: { ratio: ratio.toString() },
             externalRecord: null,
           }),
@@ -245,7 +236,6 @@ function estimateDomesticReturns(params: {
     saleReturnLines,
     ratePct: reference.fees.stoppageRatePct,
     isExportSale: false,
-    accountingCurrency: snapshot.accountingCurrency,
   });
 
   const lines: ProfitLine[] = [
@@ -261,7 +251,6 @@ function estimateDomesticReturns(params: {
   const hasPhysicalReturn = acceptedEntries.some((entry) => !entry.item.isDigital);
   if (hasPhysicalReturn) {
     const returnShipping = buildReturnShippingLine({
-      snapshot,
       anyDesiUnknown,
       desi: returnDesi,
       basketGross: returnBasketGross,
@@ -284,13 +273,12 @@ function estimateDomesticReturns(params: {
  * (reason in `detail`, prefixed `RETURN_`) and no line; a zero gross yields neither.
  */
 function buildReturnShippingLine(params: {
-  readonly snapshot: ParcelSnapshot;
   readonly anyDesiUnknown: boolean;
   readonly desi: Decimal;
   readonly basketGross: Decimal;
   readonly reference: TrendyolReferenceData;
 }): { readonly line: ProfitLine | null; readonly issue: ProfitIssue | null } {
-  const { snapshot, anyDesiUnknown, desi, basketGross, reference } = params;
+  const { anyDesiUnknown, desi, basketGross, reference } = params;
 
   if (anyDesiUnknown) {
     return {
@@ -338,7 +326,6 @@ function buildReturnShippingLine(params: {
     source: ProfitLineSource.RULE,
     amount,
     vatRatePct: reference.fees.returnShippingVatRatePct,
-    fx: nativeFx(amount, snapshot.accountingCurrency),
     inputs: {
       desi: desi.toString(),
       tariffKind: resolved.kind,
@@ -374,12 +361,11 @@ function findOverseasReturnTier(
  * zero. A fee that rounds to zero writes no line.
  */
 function estimateExportReturns(params: {
-  readonly snapshot: ParcelSnapshot;
   readonly acceptedEntries: readonly AcceptedEntry[];
   readonly commissionByItem: ReadonlyMap<string, ProfitLine>;
   readonly reference: TrendyolReferenceData;
 }): ReturnEstimate {
-  const { snapshot, acceptedEntries, commissionByItem, reference } = params;
+  const { acceptedEntries, commissionByItem, reference } = params;
 
   const lines: ProfitLine[] = [];
   const returnedItems: AllocationItem[] = [];
@@ -408,7 +394,6 @@ function estimateExportReturns(params: {
           source: ProfitLineSource.RULE,
           amount,
           vatRatePct: ZERO,
-          fx: nativeFx(amount, snapshot.accountingCurrency),
           inputs: { ratePct: tier.ratePct.toString(), vatAssumption: 'ZERO' },
           externalRecord: null,
         }),

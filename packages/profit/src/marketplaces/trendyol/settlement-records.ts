@@ -125,7 +125,7 @@ export const TRENDYOL_RETURN_CYCLE_CONFIRMED_TYPES: readonly ProfitLineType[] = 
 
 /**
  * A single Trendyol settlement / otherfinancials row, normalized for the mapper.
- * Money is VAT included and in the parcel's accounting currency (TRY).
+ * Money is VAT included and in Turkish lira.
  */
 export interface TrendyolSettlementRecord {
   readonly recordId: string;

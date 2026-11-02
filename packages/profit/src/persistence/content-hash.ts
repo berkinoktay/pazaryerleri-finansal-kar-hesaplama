@@ -120,14 +120,6 @@ function lineToCanonical(
     amountGross: profitLine.amount.gross.toFixed(),
     amountVat: profitLine.amount.vat.toFixed(),
     vatRatePct: decimalText(profitLine.vatRatePct),
-    fx: {
-      currency: profitLine.fx.currency,
-      originalGross: profitLine.fx.original.gross.toFixed(),
-      originalVat: profitLine.fx.original.vat.toFixed(),
-      rate: profitLine.fx.rate.toFixed(),
-      rateDate: profitLine.fx.rateDate,
-      source: profitLine.fx.source,
-    },
     inputs: profitLine.inputs,
     externalRecord:
       profitLine.externalRecord === null

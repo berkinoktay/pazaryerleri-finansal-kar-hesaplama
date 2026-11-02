@@ -11,8 +11,8 @@ import { type FinanceRecordFamily } from '@pazarsync/db/enums';
  *
  * `transactionType` is the requested filter type (e.g. `Sale`, `PaymentOrder`, or a
  * cargo item label), never the Turkish response label; that label survives only in
- * `payload`. Money is VAT-included in the parcel's accounting currency. `payload` is
- * the full vendor object, kept verbatim for debugging and forward-compat.
+ * `payload`. Money is VAT-included and in Turkish lira. `payload` is the full vendor
+ * object, kept verbatim for debugging and forward-compat.
  */
 export interface FinanceRecordInput {
   readonly family: FinanceRecordFamily;

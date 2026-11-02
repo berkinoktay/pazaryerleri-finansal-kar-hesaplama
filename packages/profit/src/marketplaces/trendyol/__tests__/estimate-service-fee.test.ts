@@ -1,5 +1,4 @@
 import {
-  FxRateSource,
   ProfitLineCertainty,
   ProfitLineLevel,
   ProfitLineSource,
@@ -39,7 +38,6 @@ describe('estimateServiceFeeLine', () => {
     expect(line?.vatRatePct?.toString()).toBe('20');
     expect(line?.certainty).toBe(ProfitLineCertainty.ESTIMATE);
     expect(line?.source).toBe(ProfitLineSource.RULE);
-    expect(line?.fx.source).toBe(FxRateSource.NATIVE);
     expect(line?.inputs).toEqual({ tier: 'STANDARD', net: '10.99' });
   });
 

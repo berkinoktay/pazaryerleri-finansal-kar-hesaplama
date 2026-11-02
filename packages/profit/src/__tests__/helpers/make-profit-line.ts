@@ -7,13 +7,7 @@ import {
 } from '@pazarsync/db/enums';
 
 import { getLineSpec } from '../../core/catalog/profit-line-catalog';
-import { CURRENCY_TRY } from '../../core/fx/currency-code';
-import {
-  createProfitLine,
-  nativeFx,
-  type LineMoney,
-  type ProfitLine,
-} from '../../core/profit-line';
+import { createProfitLine, type LineMoney, type ProfitLine } from '../../core/profit-line';
 
 export interface MakeLineParams {
   readonly type: ProfitLineType;
@@ -51,7 +45,6 @@ export function makeLine(params: MakeLineParams): ProfitLine {
     source: params.source ?? ProfitLineSource.RULE,
     amount,
     vatRatePct: null,
-    fx: nativeFx(amount, CURRENCY_TRY),
     inputs: {},
     externalRecord: null,
   });

@@ -48,7 +48,7 @@ describe('deriveProfitStatus', () => {
     );
   });
   it('a blocking issue makes the order not computable', () => {
-    expect(status([sellerCost], [issue(ProfitIssueCode.MISSING_FX_RATE)])).toBe(
+    expect(status([sellerCost], [issue(ProfitIssueCode.MISSING_COMMISSION_RATE)])).toBe(
       ProfitStatus.NOT_COMPUTABLE,
     );
   });

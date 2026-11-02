@@ -9,14 +9,12 @@ import {
 
 import {
   activeItems,
-  InvalidParcelSnapshotError,
   type ParcelItemSnapshot,
   type ParcelSnapshot,
 } from '../../core/parcel-snapshot';
 import { type ProfitIssue } from '../../core/profit-issue';
 import {
   createProfitLine,
-  nativeFx,
   type ExternalRecordRef,
   type LineMoney,
   type ProfitLine,
@@ -33,11 +31,7 @@ import {
   type TrendyolCargoInvoiceItem,
   type TrendyolSettlementRecord,
 } from './settlement-records';
-import {
-  TRENDYOL_CURRENCY,
-  type TrendyolFeeParams,
-  type TrendyolParcelAttributes,
-} from './trendyol-inputs';
+import { type TrendyolFeeParams, type TrendyolParcelAttributes } from './trendyol-inputs';
 
 const ZERO = new Decimal(0);
 
@@ -121,13 +115,6 @@ function buildRecordReference(params: {
 export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
   const { snapshot, attributes, fees, records, cargoItems, estimateLines } = input;
 
-  if (snapshot.accountingCurrency !== TRENDYOL_CURRENCY) {
-    throw new InvalidParcelSnapshotError(
-      `Trendyol settlements require ${TRENDYOL_CURRENCY} accounting currency, got ${snapshot.accountingCurrency}`,
-    );
-  }
-
-  const currency = snapshot.accountingCurrency;
   const active = activeItems(snapshot);
 
   const lines: ProfitLine[] = [];
@@ -271,7 +258,6 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
         source: ProfitLineSource.MARKETPLACE_RECORD,
         amount,
         vatRatePct: params.vatRatePct,
-        fx: nativeFx(amount, currency),
         inputs: { recordIds: params.reference.recordIds },
         externalRecord: params.reference.externalRecord,
       }),
@@ -422,7 +408,6 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
       source: ProfitLineSource.CARGO_INVOICE,
       amount,
       vatRatePct,
-      fx: nativeFx(amount, currency),
       inputs: { invoiceSerials, desi },
       externalRecord: { recordId: first.key, rawType: first.cargoItem.itemType },
     });
@@ -492,7 +477,6 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
           source: ProfitLineSource.MARKETPLACE_RECORD,
           amount: estimate.amount,
           vatRatePct: estimate.vatRatePct,
-          fx: estimate.fx,
           inputs: { ...estimate.inputs, confirmedBy: `payment-order:${paymentOrderId}` },
           externalRecord: {
             recordId: paymentOrder.recordId,

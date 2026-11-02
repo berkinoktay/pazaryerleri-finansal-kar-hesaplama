@@ -21,7 +21,6 @@ export interface ProfitIssue {
  */
 export const PROFIT_ISSUE_CATALOG = {
   MISSING_COST: { blocking: true },
-  MISSING_FX_RATE: { blocking: true },
   SHIPPING_ESTIMATE_UNAVAILABLE: { blocking: true },
   UNMAPPED_MARKETPLACE_RECORD: { blocking: false },
   MISSING_COMMISSION_RATE: { blocking: true },

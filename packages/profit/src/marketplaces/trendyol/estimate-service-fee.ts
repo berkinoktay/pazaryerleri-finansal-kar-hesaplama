@@ -7,12 +7,7 @@ import {
 } from '@pazarsync/db/enums';
 
 import { activeItems, type ParcelSnapshot } from '../../core/parcel-snapshot';
-import {
-  createProfitLine,
-  nativeFx,
-  type LineMoney,
-  type ProfitLine,
-} from '../../core/profit-line';
+import { createProfitLine, type LineMoney, type ProfitLine } from '../../core/profit-line';
 import { inferShippedSameDay } from '../../infer-shipped-same-day';
 import { grossFromNet, vatFromGross } from '../../tax/tr/vat';
 import {
@@ -42,7 +37,7 @@ type ServiceFeeTier = (typeof SERVICE_FEE_TIER)[keyof typeof SERVICE_FEE_TIER];
  * day: `fastDeliveryType === TRENDYOL_SAME_DAY_SHIPPING_TYPE` and
  * `inferShippedSameDay(...) !== false` (an unknown ship date stays optimistic).
  * Otherwise the standard tier (`psfStandardNet`) applies. A zero gross writes no
- * line. Lines are ESTIMATE / RULE in the parcel's accounting currency.
+ * line. Lines are ESTIMATE / RULE in Turkish lira.
  */
 export function estimateServiceFeeLine(params: {
   readonly snapshot: ParcelSnapshot;
@@ -91,7 +86,6 @@ export function estimateServiceFeeLine(params: {
     source: ProfitLineSource.RULE,
     amount,
     vatRatePct: fees.psfVatRatePct,
-    fx: nativeFx(amount, snapshot.accountingCurrency),
     inputs: {
       tier,
       net: net.toFixed(2),

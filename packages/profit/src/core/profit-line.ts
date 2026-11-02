@@ -1,6 +1,5 @@
-import { Decimal } from 'decimal.js';
+import { type Decimal } from 'decimal.js';
 import {
-  FxRateSource,
   ProfitLineLevel,
   type ProfitLineCertainty,
   type ProfitLineSource,
@@ -8,7 +7,6 @@ import {
 } from '@pazarsync/db/enums';
 
 import { kurusAmountViolation } from '../money';
-import { type CurrencyCode } from './fx/currency-code';
 import { getLineSpec } from './catalog/profit-line-catalog';
 
 /** A line input value. Numbers travel as text (e.g. desi "2") to keep precision. */
@@ -18,14 +16,6 @@ export type ProfitLineInputs = Readonly<Record<string, ProfitLineInputValue>>;
 export interface LineMoney {
   readonly gross: Decimal;
   readonly vat: Decimal;
-}
-
-export interface FxConversion {
-  readonly currency: CurrencyCode; // original currency
-  readonly original: LineMoney; // amount in the original currency
-  readonly rate: Decimal; // original -> accounting currency
-  readonly rateDate: string | null; // YYYY-MM-DD; null for NATIVE and MANUAL
-  readonly source: FxRateSource;
 }
 
 export interface ExternalRecordRef {
@@ -39,16 +29,13 @@ export interface ProfitLine {
   readonly orderItemId: string | null; // required for ITEM, null for PARCEL
   readonly certainty: ProfitLineCertainty;
   readonly source: ProfitLineSource;
-  readonly amount: LineMoney; // accounting currency, rounded to 2 decimals, non-negative
+  readonly amount: LineMoney; // Turkish lira, rounded to 2 decimals, non-negative
   readonly vatRatePct: Decimal | null; // informational only
-  readonly fx: FxConversion;
   readonly inputs: ProfitLineInputs;
   readonly externalRecord: ExternalRecordRef | null;
 }
 
 export class InvalidProfitLineError extends Error {}
-
-const ONE = new Decimal(1);
 
 function assertRoundedNonNegative(value: Decimal, field: string): void {
   const violation = kurusAmountViolation(value);
@@ -64,9 +51,9 @@ function assertRoundedNonNegative(value: Decimal, field: string): void {
 }
 
 /**
- * The single profit line constructor. Validates the four invariants in order and
- * throws `InvalidProfitLineError` naming the broken rule. A valid line is returned
- * as a shallow copy of its params.
+ * The single profit line constructor. Validates the invariants in order and throws
+ * `InvalidProfitLineError` naming the broken rule. A valid line is returned as a
+ * shallow copy of its params.
  */
 export function createProfitLine(params: ProfitLine): ProfitLine {
   const spec = getLineSpec(params.type);
@@ -86,25 +73,5 @@ export function createProfitLine(params: ProfitLine): ProfitLine {
   assertRoundedNonNegative(params.amount.gross, 'amount.gross');
   assertRoundedNonNegative(params.amount.vat, 'amount.vat');
 
-  if (params.fx.source === FxRateSource.NATIVE) {
-    if (!params.fx.rate.equals(ONE)) {
-      throw new InvalidProfitLineError('a NATIVE fx conversion must have a rate of 1');
-    }
-    if (params.fx.rateDate !== null) {
-      throw new InvalidProfitLineError('a NATIVE fx conversion must have a null rateDate');
-    }
-  }
-
   return { ...params };
-}
-
-/** Builds a same-currency (NATIVE) fx conversion: rate 1, no rate date. */
-export function nativeFx(amount: LineMoney, currency: CurrencyCode): FxConversion {
-  return {
-    currency,
-    original: amount,
-    rate: new Decimal(1),
-    rateDate: null,
-    source: FxRateSource.NATIVE,
-  };
 }

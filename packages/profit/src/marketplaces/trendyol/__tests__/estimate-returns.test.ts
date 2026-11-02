@@ -1,5 +1,4 @@
 import {
-  FxRateSource,
   ProfitIssueCode,
   ProfitLineCertainty,
   ProfitLineLevel,
@@ -63,7 +62,6 @@ describe('estimateReturnLines', () => {
     expect(saleReturn?.orderItemId).toBe('a');
     expect(saleReturn?.certainty).toBe(ProfitLineCertainty.ESTIMATE);
     expect(saleReturn?.source).toBe(ProfitLineSource.RULE);
-    expect(saleReturn?.fx.source).toBe(FxRateSource.NATIVE);
     expect(saleReturn?.amount.gross.toFixed(2)).toBe('491.28');
     expect(saleReturn?.amount.vat.toFixed(2)).toBe('44.66');
     expect(saleReturn?.vatRatePct?.toString()).toBe('10');

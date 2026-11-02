@@ -9,12 +9,10 @@ import {
 import { type ResolvedProfitSettings } from '@pazarsync/utils';
 import { describe, expect, it } from 'vitest';
 
-import { CURRENCY_TRY } from '../../core/fx/currency-code';
 import {
   createProfitLine,
   type ExternalRecordRef,
   type LineMoney,
-  nativeFx,
   type ProfitLine,
   type ProfitLineInputs,
 } from '../../core/profit-line';
@@ -52,7 +50,6 @@ function line(params: {
     source: params.source ?? ProfitLineSource.RULE,
     amount,
     vatRatePct: null,
-    fx: nativeFx(amount, CURRENCY_TRY),
     inputs: params.inputs ?? {},
     externalRecord: params.externalRecord ?? null,
   });

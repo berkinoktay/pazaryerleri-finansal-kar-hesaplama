@@ -2,8 +2,6 @@ import { Decimal } from 'decimal.js';
 import { ShippingTariffSource } from '@pazarsync/db/enums';
 import { getBusinessDate, type ResolvedProfitSettings } from '@pazarsync/utils';
 
-import { type FxRateQuote } from '../../core/fx/select-fx-rate';
-import { type CurrencyCode } from '../../core/fx/currency-code';
 import { computeProfitStatement, type ProfitStatement } from '../../core/profit-statement';
 import {
   solveScenarioPrice,
@@ -48,13 +46,11 @@ export interface TrendyolScenarioInput {
   readonly unitPrice: Decimal; // seller's unit sale price, VAT incl., kurus; a campaign passes the seller-effective price
   readonly quantity: number; // integer >= 1; basket scenarios pass n
   readonly commissionRatePctOverride: Decimal | null; // a screen that prices a given band or plus rate
-  readonly scenarioDate: Date; // cost version, FX and reference date
+  readonly scenarioDate: Date; // cost version and reference date
   readonly fastDelivery: boolean; // Barem eligibility, computed by the loader
   readonly isExportSale: boolean;
-  readonly accountingCurrency: CurrencyCode;
   readonly reference: TrendyolReferenceData;
   readonly costs: readonly ItemCostProfileInput[];
-  readonly fxQuotes: readonly FxRateQuote[];
   readonly settings: ResolvedProfitSettings;
 }
 
@@ -95,7 +91,6 @@ export function buildTrendyolScenarioParcel(input: TrendyolScenarioInput): Trend
       isCancelled: false,
       isExportSale: input.isExportSale,
       measuredDesi: null,
-      accountingCurrency: input.accountingCurrency,
       items: [
         {
           orderItemId: TRENDYOL_SCENARIO_ITEM_ID,
@@ -130,7 +125,6 @@ export function buildTrendyolScenarioParcel(input: TrendyolScenarioInput): Trend
     },
     reference: input.reference,
     costs: [{ orderItemId: TRENDYOL_SCENARIO_ITEM_ID, profiles: input.costs }],
-    fxQuotes: input.fxQuotes,
     acceptedReturns: [],
   };
 }

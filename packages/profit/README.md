@@ -34,8 +34,8 @@ A marketplace-agnostic rebuild of the profit computation lives alongside the leg
 
 - `core/` holds the line model (`createProfitLine`, the `PROFIT_LINE_CATALOG` line-type
   catalog, the single `selectLines` rule, per-item allocation of parcel-level lines,
-  event-date FX selection and conversion, the issue catalog and status, and the
-  `computeProfitStatement` statement that ties them together).
+  the issue catalog and status, and the `computeProfitStatement` statement that ties
+  them together). Every amount is in Turkish lira.
 - `tax/tr/` holds the Turkish tax module: VAT from a gross amount, the stoppage base
   and amount, and the output/input/net VAT totals (`computeVatTotals`,
   `effectiveNetVat`).
@@ -48,8 +48,8 @@ pins the real melontik order 11761487239.
 ## Trendyol module and seller costs (rebuild, phase 2A)
 
 The second rebuild phase adds the Trendyol-specific estimators and the settlement
-mapper, still marketplace-agnostic at the core. A `ParcelSnapshot` (one parcel, its
-items and accounting currency) is the shared input that every estimator reads;
+mapper, still marketplace-agnostic at the core. A `ParcelSnapshot` (one parcel and its
+items, every amount in Turkish lira) is the shared input that every estimator reads;
 `core/seller-costs/` turns the seller's cost profiles into cost and cost-return lines.
 `estimateTrendyolParcel` composes the estimators in a fixed order — sale, commission,
 seller costs, stoppage, service fee, shipping, international service fee, then the
@@ -80,7 +80,7 @@ Nothing calls this yet; phase 4 wires the pricing and campaign screens to it.
 `persistence/` writes a parcel's computed profit to four tables:
 
 - `profit_lines` -- one row per profit line (sale, commission, shipping, cost, ...),
-  at item or parcel level, with its money, VAT, original currency and fx conversion.
+  at item or parcel level, with its money and VAT in Turkish lira.
 - `profit_line_allocations` -- one row per item share of a parcel-level line, so both
   statement views can be summed per item.
 - `order_profit_statements` -- one rolled-up statement per parcel per view (`ESTIMATE`

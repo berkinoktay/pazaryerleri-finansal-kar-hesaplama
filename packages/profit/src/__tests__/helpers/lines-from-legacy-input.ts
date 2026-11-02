@@ -6,13 +6,7 @@ import {
   ProfitLineType,
 } from '@pazarsync/db/enums';
 
-import { CURRENCY_TRY } from '../../core/fx/currency-code';
-import {
-  createProfitLine,
-  nativeFx,
-  type LineMoney,
-  type ProfitLine,
-} from '../../core/profit-line';
+import { createProfitLine, type LineMoney, type ProfitLine } from '../../core/profit-line';
 import { type ProfitInput, type ProfitInputFee } from '../../profit-formula';
 
 /** Legacy DEBIT fee type -> new profit line type. CREDIT fees map to ADJUSTMENT_INCOME. */
@@ -23,7 +17,7 @@ const DEBIT_FEE_LINE_TYPE = {
   OVERSEAS_RETURN_OPERATION: ProfitLineType.INTERNATIONAL_OPERATION_FEE,
 } as const satisfies Record<ProfitInputFee['type'], ProfitLineType>;
 
-/** Builds a rule/estimate, native-TRY profit line with no inputs and no external record. */
+/** Builds a rule/estimate profit line with no inputs and no external record. */
 function ruleLine(
   type: ProfitLineType,
   level: ProfitLineLevel,
@@ -38,7 +32,6 @@ function ruleLine(
     source: ProfitLineSource.RULE,
     amount,
     vatRatePct: null,
-    fx: nativeFx(amount, CURRENCY_TRY),
     inputs: {},
     externalRecord: null,
   });
@@ -46,7 +39,7 @@ function ruleLine(
 
 /**
  * Turns a legacy `ProfitInput` into the new profit line model. Every line is an
- * ESTIMATE from the RULE source in native TRY with empty inputs; zero amounts are
+ * ESTIMATE from the RULE source in Turkish lira with empty inputs; zero amounts are
  * still written as lines. Sale, cost, commission and stoppage are ITEM lines on a
  * single `item-1`; fees are PARCEL lines. DEBIT fees map by type, CREDIT fees
  * (whatever their legacy type) become ADJUSTMENT_INCOME. The equivalence test

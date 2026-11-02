@@ -29,10 +29,8 @@ import {
   type RecomputeParcelResult,
 } from '../recompute-parcel-profit';
 import {
-  attachCostProfile,
   ensureDbReachable,
   insertFinanceRecord,
-  insertFxRate,
   MELONTIK,
   melontikCargoInvoiceInput,
   melontikSaleCycleRecordInputs,
@@ -541,46 +539,24 @@ describe('recomputeParcelProfit', () => {
     expect(statementsAfter).toEqual(statementsBefore);
   });
 
-  it('round-trips the fx columns at their stored precision', async () => {
+  it('round-trips vat_rate_pct at its stored precision', async () => {
     const parcel = await seedMelontikParcel();
-    // A USD cost on item A, with a 6-decimal USD->TRY rate on the day before the
-    // order's business date (2026-10-28), so the loader resolves the quote.
-    await attachCostProfile({
-      organizationId: parcel.organizationId,
-      storeId: parcel.storeId,
-      productVariantId: parcel.variantA,
-      currency: 'USD',
-      amountGross: '10.00',
-      vatRate: '18.5',
-    });
-    await insertFxRate({
-      currency: 'USD',
-      rateDate: new Date('2026-10-27T00:00:00.000Z'),
-      rateToTry: '32.123456',
-    });
-
     await recompute(parcel.organizationId, parcel.orderId);
 
-    const usdCost = await prisma.profitLine.findFirst({
+    const cost = await prisma.profitLine.findFirst({
       where: {
         orderId: parcel.orderId,
         orderItemId: parcel.itemA,
         type: ProfitLineType.COST_COGS,
-        originalCurrency: 'USD',
       },
     });
-    if (usdCost === null) {
-      throw new Error('expected a USD COST_COGS line for item A');
+    if (cost === null) {
+      throw new Error('expected a COST_COGS line for item A');
     }
 
-    expect(usdCost.originalCurrency).toBe('USD');
-    // fx_rate is numeric(14,6): the six-decimal rate survives unchanged.
-    expect(new Decimal(usdCost.fxRate.toString()).toFixed(6)).toBe('32.123456');
-    // fx_rate_date is a DATE column: the same calendar day, no timezone shift.
-    expect(usdCost.fxRateDate?.toISOString().slice(0, 10)).toBe('2026-10-27');
-    // vat_rate_pct is numeric(7,4): the fractional rate keeps its decimals.
-    expect(usdCost.vatRatePct).not.toBeNull();
-    expect(new Decimal(String(usdCost.vatRatePct)).toFixed(4)).toBe('18.5000');
+    // vat_rate_pct is numeric(7,4): the melontik cost VAT rate (10%) keeps its decimals.
+    expect(cost.vatRatePct).not.toBeNull();
+    expect(new Decimal(String(cost.vatRatePct)).toFixed(4)).toBe('10.0000');
   });
 
   it('waits for a parcel lock held by another transaction', async () => {

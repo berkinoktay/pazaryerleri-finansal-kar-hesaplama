@@ -14,12 +14,7 @@ import {
   type ParcelSnapshot,
 } from '../../core/parcel-snapshot';
 import { type ProfitIssue } from '../../core/profit-issue';
-import {
-  createProfitLine,
-  nativeFx,
-  type LineMoney,
-  type ProfitLine,
-} from '../../core/profit-line';
+import { createProfitLine, type LineMoney, type ProfitLine } from '../../core/profit-line';
 import { grossFromNet, vatFromGross } from '../../tax/tr/vat';
 import {
   type TrendyolParcelAttributes,
@@ -296,7 +291,6 @@ export function estimateShippingLine(params: {
     source: ProfitLineSource.RULE,
     amount,
     vatRatePct: shippingVatRatePct,
-    fx: nativeFx(amount, snapshot.accountingCurrency),
     inputs: {
       desi: desi.desi.toString(),
       desiSource: desi.source,

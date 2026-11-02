@@ -2,7 +2,6 @@ import { Decimal } from 'decimal.js';
 import type { Prisma } from '@pazarsync/db';
 import {
   CommissionRuleKind,
-  type Currency,
   FinanceRecordFamily,
   OrderStatus,
   Platform,
@@ -15,8 +14,6 @@ import {
   type ResolvedProfitSettings,
 } from '@pazarsync/utils';
 
-import { CURRENCY_TRY, toCurrencyCode } from '../core/fx/currency-code';
-import { type FxRateQuote } from '../core/fx/select-fx-rate';
 import { type AcceptedReturn, type ParcelItemSnapshot } from '../core/parcel-snapshot';
 import { type ProfitIssue } from '../core/profit-issue';
 import {
@@ -119,19 +116,13 @@ function toCommissionBand(band: StoredTariffBand): TrendyolCommissionBand {
 function toCostVersion(version: {
   readonly changedAt: Date;
   readonly amountGross: Prisma.Decimal;
-  readonly currency: Currency;
   readonly vatRate: Prisma.Decimal;
-  readonly fxRateMode: CostProfileVersionInput['fxRateMode'];
-  readonly manualFxRate: Prisma.Decimal | null;
   readonly archivedAt: Date | null;
 }): CostProfileVersionInput {
   return {
     effectiveFrom: version.changedAt,
     amountGross: dec(version.amountGross),
-    currency: toCurrencyCode(version.currency),
     vatRatePct: dec(version.vatRate),
-    fxRateMode: version.fxRateMode,
-    manualFxRate: decOrNull(version.manualFxRate),
     archivedAt: version.archivedAt,
   };
 }
@@ -152,7 +143,7 @@ export async function loadTrendyolParcel(
   const order = await tx.order.findFirst({
     where: { id: orderId, organizationId },
     include: {
-      store: { include: { organization: true, defaultShippingCarrier: true } },
+      store: { include: { defaultShippingCarrier: true } },
       items: { include: { productVariant: { include: { product: true } } } },
       claims: { include: { items: true } },
     },
@@ -169,7 +160,6 @@ export async function loadTrendyolParcel(
   const storeId = order.storeId;
   const orderDate = order.orderDate;
   const businessDate = getBusinessDate(orderDate);
-  const accountingCurrency = toCurrencyCode(store.organization.currency);
 
   // --- Snapshot items (decision 7: no item carries a cancellation flag) ---
   const items: ParcelItemSnapshot[] = order.items.map((item) => {
@@ -245,9 +235,8 @@ export async function loadTrendyolParcel(
   });
   const commission = await loadCommissionRules(tx, order.items);
 
-  // --- Costs + fx quotes ---
+  // --- Costs ---
   const costs = await loadItemCosts(tx, { organizationId, orderItems: order.items });
-  const fxQuotes = await loadFxQuotes(tx, { businessDate, costs });
 
   // --- Accepted returns (one unit per accepted claim item, capped at quantity) ---
   const acceptedReturns = buildAcceptedReturns(order.claims, order.items);
@@ -278,13 +267,11 @@ export async function loadTrendyolParcel(
       isCancelled: order.status === OrderStatus.CANCELLED,
       isExportSale: order.micro,
       measuredDesi: decOrNull(order.cargoDeci),
-      accountingCurrency,
       items,
     },
     attributes,
     reference: { fees, shipping, commission },
     costs,
-    fxQuotes,
     acceptedReturns,
   };
 
@@ -671,48 +658,6 @@ async function loadItemCosts(
 }
 
 /**
- * The fx quotes for every distinct non-TRY currency among the loaded cost versions:
- * the latest two rates on or before the business date, expressed against TRY.
- */
-async function loadFxQuotes(
-  tx: Prisma.TransactionClient,
-  params: { readonly businessDate: string; readonly costs: readonly ItemCostInput[] },
-): Promise<FxRateQuote[]> {
-  const { businessDate, costs } = params;
-  const currencies = new Set<Currency>();
-  for (const cost of costs) {
-    for (const profile of cost.profiles) {
-      for (const version of profile.versions) {
-        if (version.currency !== CURRENCY_TRY) {
-          currencies.add(toCurrency(version.currency));
-        }
-      }
-    }
-  }
-  if (currencies.size === 0) {
-    return [];
-  }
-
-  const upperBound = new Date(`${businessDate}T00:00:00.000Z`);
-  const quotes: FxRateQuote[] = [];
-  for (const currency of currencies) {
-    const rows = await tx.fxRate.findMany({
-      where: { currency, rateDate: { lte: upperBound } },
-      orderBy: { rateDate: 'desc' },
-      take: 2,
-    });
-    for (const row of rows) {
-      quotes.push({
-        currency: toCurrencyCode(row.currency),
-        rateDate: row.rateDate.toISOString().slice(0, 10),
-        rateToBase: dec(row.rateToTry),
-      });
-    }
-  }
-  return quotes;
-}
-
-/**
  * The accepted returns per item: one unit for every Accepted claim item with a
  * non-null order item id, capped at the item's ordered quantity.
  */
@@ -881,22 +826,4 @@ async function loadFinanceRecords(
   }
 
   return { records, cargoItems };
-}
-
-/**
- * Narrows a non-TRY `CurrencyCode` back to the Prisma `Currency` enum used by the
- * fx-rate query. The cost version carries the branded `CurrencyCode`; the three
- * supported currencies are the enum, and anything else is a loader bug, not data.
- */
-function toCurrency(code: string): Currency {
-  switch (code) {
-    case 'USD':
-      return 'USD';
-    case 'EUR':
-      return 'EUR';
-    case 'TRY':
-      return 'TRY';
-    default:
-      throw new Error(`Unsupported cost currency for fx lookup: ${code}`);
-  }
 }

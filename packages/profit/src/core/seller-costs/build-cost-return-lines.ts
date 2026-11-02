@@ -7,12 +7,7 @@ import {
 } from '@pazarsync/db/enums';
 
 import { getLineSpec } from '../catalog/profit-line-catalog';
-import {
-  createProfitLine,
-  type FxConversion,
-  type LineMoney,
-  type ProfitLine,
-} from '../profit-line';
+import { createProfitLine, type LineMoney, type ProfitLine } from '../profit-line';
 import { roundMoney } from '../../money';
 
 /**
@@ -29,10 +24,9 @@ function isCostLine(line: ProfitLine): boolean {
 
 /**
  * Builds a `COST_RETURN` line for every cost line whose item has an accepted
- * return ratio in (0, 1]. The line amount and the carried original amount are
- * each scaled by the ratio and rounded to kurus independently. A ratio outside
- * (0, 1] throws `RangeError`; a return that rounds to 0.00 writes no line. Lines
- * that are not cost lines are ignored.
+ * return ratio in (0, 1]. The line amount is scaled by the ratio and rounded to
+ * kurus. A ratio outside (0, 1] throws `RangeError`; a return that rounds to 0.00
+ * writes no line. Lines that are not cost lines are ignored.
  */
 export function buildCostReturnLines(params: {
   readonly costLines: readonly ProfitLine[];
@@ -61,13 +55,6 @@ export function buildCostReturnLines(params: {
       continue;
     }
     const amount: LineMoney = { gross, vat: roundMoney(line.amount.vat.mul(ratio)) };
-    const fx: FxConversion = {
-      ...line.fx,
-      original: {
-        gross: roundMoney(line.fx.original.gross.mul(ratio)),
-        vat: roundMoney(line.fx.original.vat.mul(ratio)),
-      },
-    };
 
     lines.push(
       createProfitLine({
@@ -78,7 +65,6 @@ export function buildCostReturnLines(params: {
         source: ProfitLineSource.SELLER_INPUT,
         amount,
         vatRatePct: line.vatRatePct,
-        fx,
         inputs: { returnOf: line.type },
         externalRecord: null,
       }),

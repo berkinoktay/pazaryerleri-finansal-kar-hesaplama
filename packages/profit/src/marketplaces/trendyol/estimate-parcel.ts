@@ -1,11 +1,9 @@
 import { type AllocationItemSets } from '../../core/allocation/allocation-item-sets';
 import { type AllocationItem } from '../../core/allocation/allocation-weights';
-import { type FxRateQuote } from '../../core/fx/select-fx-rate';
 import {
   activeItems,
   assertAcceptedReturns,
   assertParcelSnapshot,
-  InvalidParcelSnapshotError,
   type AcceptedReturn,
   type ParcelSnapshot,
 } from '../../core/parcel-snapshot';
@@ -21,11 +19,7 @@ import { estimateReturnLines } from './estimate-returns';
 import { estimateCommissionLines, estimateSaleLines } from './estimate-sale-and-commission';
 import { estimateServiceFeeLine } from './estimate-service-fee';
 import { estimateShippingLine } from './estimate-shipping';
-import {
-  TRENDYOL_CURRENCY,
-  type TrendyolParcelAttributes,
-  type TrendyolReferenceData,
-} from './trendyol-inputs';
+import { type TrendyolParcelAttributes, type TrendyolReferenceData } from './trendyol-inputs';
 
 /** Everything the Trendyol parcel estimate needs; the Phase 3 loader assembles it. */
 export interface TrendyolEstimateInput {
@@ -33,7 +27,6 @@ export interface TrendyolEstimateInput {
   readonly attributes: TrendyolParcelAttributes;
   readonly reference: TrendyolReferenceData;
   readonly costs: readonly ItemCostInput[];
-  readonly fxQuotes: readonly FxRateQuote[];
   readonly acceptedReturns: readonly AcceptedReturn[];
 }
 
@@ -46,25 +39,19 @@ export interface EstimateResult {
 
 /**
  * The Trendyol parcel estimate orchestrator. It validates the snapshot and the
- * accepted returns, rejects a non-TRY accounting currency, and returns nothing for a
- * cancelled parcel. Otherwise it composes the sale, commission, seller cost, stoppage,
- * service fee, shipping, international service and (when a return is accepted) the
- * return generators in a fixed order, re-implementing none of their rules. Lines come
- * in that generator order; issues are merged in the order commission, costs, shipping,
- * returns. The allocation item sets carry the active items with their standalone
- * shipping (for forward-line allocation) and the returned items (for return-leg
- * allocation).
+ * accepted returns, and returns nothing for a cancelled parcel. Otherwise it composes
+ * the sale, commission, seller cost, stoppage, service fee, shipping, international
+ * service and (when a return is accepted) the return generators in a fixed order,
+ * re-implementing none of their rules. Lines come in that generator order; issues are
+ * merged in the order commission, costs, shipping, returns. The allocation item sets
+ * carry the active items with their standalone shipping (for forward-line allocation)
+ * and the returned items (for return-leg allocation).
  */
 export function estimateTrendyolParcel(input: TrendyolEstimateInput): EstimateResult {
-  const { snapshot, attributes, reference, costs, fxQuotes, acceptedReturns } = input;
+  const { snapshot, attributes, reference, costs, acceptedReturns } = input;
 
   assertParcelSnapshot(snapshot);
   assertAcceptedReturns(snapshot, acceptedReturns);
-  if (snapshot.accountingCurrency !== TRENDYOL_CURRENCY) {
-    throw new InvalidParcelSnapshotError(
-      `accounting currency ${snapshot.accountingCurrency} is not the Trendyol currency ${TRENDYOL_CURRENCY}`,
-    );
-  }
 
   // Every item of the parcel, cancelled ones included, with no standalone amount:
   // the last-resort fallback so a parcel-level actual line (a cancelled parcel's
@@ -90,7 +77,7 @@ export function estimateTrendyolParcel(input: TrendyolEstimateInput): EstimateRe
   lines.push(...commission.lines);
 
   // 3. Seller cost lines.
-  const sellerCost = buildSellerCostLines({ snapshot, costs, fxQuotes });
+  const sellerCost = buildSellerCostLines({ snapshot, costs });
   lines.push(...sellerCost.lines);
 
   // 4. Stoppage lines (from the sale lines).
@@ -98,7 +85,6 @@ export function estimateTrendyolParcel(input: TrendyolEstimateInput): EstimateRe
     saleLines,
     ratePct: reference.fees.stoppageRatePct,
     isExportSale: snapshot.isExportSale,
-    accountingCurrency: snapshot.accountingCurrency,
   });
   lines.push(...stoppageLines);
 

@@ -1,11 +1,6 @@
 import { type Decimal } from 'decimal.js';
 import { type ShippingTariffSource } from '@pazarsync/db/enums';
 
-import { CURRENCY_TRY } from '../../core/fx/currency-code';
-
-/** Turkish marketplaces keep their accounting in TRY; the module rejects any other currency. */
-export const TRENDYOL_CURRENCY = CURRENCY_TRY;
-
 /** The `fastDeliveryType` value that marks a same-day shipment. */
 export const TRENDYOL_SAME_DAY_SHIPPING_TYPE = 'SameDayShipping';
 

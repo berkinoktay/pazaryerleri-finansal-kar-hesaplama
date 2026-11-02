@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { prisma, type Prisma } from '@pazarsync/db';
-import { type Currency, type OrderStatus } from '@pazarsync/db/enums';
+import { type OrderStatus } from '@pazarsync/db/enums';
 
 import { TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE } from '../../../marketplaces/trendyol/settlement-records';
 
@@ -193,21 +193,15 @@ const DEFAULT_STORE_PROFIT_SETTINGS: Prisma.InputJsonValue = {
   includeNegativeNetVat: true,
 };
 
-/**
- * Creates an organization and a Trendyol store on `carrierId`. The accounting
- * currency defaults to TRY; a test can pass a non-TRY currency to make the
- * Trendyol estimate reject the parcel (it only computes in TRY).
- */
+/** Creates an organization and a Trendyol store on `carrierId`. */
 export async function createTrendyolOrg(opts: {
   readonly carrierId: string;
   readonly profitSettings?: Prisma.InputJsonValue;
-  readonly currency?: Currency;
 }): Promise<{ organizationId: string; storeId: string }> {
   const org = await prisma.organization.create({
     data: {
       name: 'Melontik Org',
       slug: `melontik-${randomUUID().slice(0, 8)}`,
-      currency: opts.currency ?? 'TRY',
     },
   });
   const store = await prisma.store.create({
@@ -296,8 +290,6 @@ async function createVariantWithCost(params: {
 
 export interface SeedMelontikOptions {
   readonly storeProfitSettings?: Prisma.InputJsonValue;
-  /** The organization's accounting currency; defaults to TRY. */
-  readonly currency?: Currency;
   readonly snapshotIncludeStopaj?: boolean | null;
   readonly snapshotIncludeNegativeNetVat?: boolean | null;
   readonly status?: OrderStatus;
@@ -310,6 +302,13 @@ export interface SeedMelontikOptions {
   /** Override the stored lineSaleGross to prove the loader ignores it. */
   readonly lineSaleGrossA?: string;
   readonly lineSaleGrossB?: string;
+  /**
+   * Override item A's stored seller discount. A discount larger than the list gross
+   * drives the loader's computed sale (list - discount) negative, so the snapshot
+   * assertion rejects the parcel -- a deterministic recompute failure for the queue
+   * backoff tests.
+   */
+  readonly lineSellerDiscountGrossA?: string;
 }
 
 export interface MelontikParcel {
@@ -331,7 +330,6 @@ export async function seedMelontikParcel(opts: SeedMelontikOptions = {}): Promis
   const { organizationId, storeId } = await createTrendyolOrg({
     carrierId,
     profitSettings: opts.storeProfitSettings,
-    currency: opts.currency,
   });
 
   const variantA = await createVariantWithCost({
@@ -375,6 +373,7 @@ export async function seedMelontikParcel(opts: SeedMelontikOptions = {}): Promis
     variantId: variantA,
     item: MELONTIK.items.a,
     lineSaleGrossOverride: opts.lineSaleGrossA,
+    lineSellerDiscountGrossOverride: opts.lineSellerDiscountGrossA,
   });
   const itemB = await createOrderItem({
     orderId: order.id,
@@ -413,6 +412,7 @@ async function createOrderItem(params: {
   readonly variantId: string;
   readonly item: MelontikItemSpec;
   readonly lineSaleGrossOverride?: string;
+  readonly lineSellerDiscountGrossOverride?: string;
 }): Promise<string> {
   const { orderId, organizationId, variantId, item, lineSaleGrossOverride } = params;
   const created = await prisma.orderItem.create({
@@ -424,7 +424,7 @@ async function createOrderItem(params: {
       barcode: item.barcode,
       lineListGross: item.listGross,
       lineSaleGross: lineSaleGrossOverride ?? item.saleGross,
-      lineSellerDiscountGross: item.sellerDiscountGross,
+      lineSellerDiscountGross: params.lineSellerDiscountGrossOverride ?? item.sellerDiscountGross,
       saleVatRate: item.saleVatRate,
       // The golden parcel's commission resolves from the ORDER source, so the raw
       // column carries the same rate; the legacy commissionRate column stays filled
@@ -684,15 +684,14 @@ export async function seedBareOrder(params: {
 }
 
 /**
- * Attaches an extra single-version COGS profile (in the given currency) to a
- * variant. Used by the fx test to introduce a non-TRY cost version so the loader
- * resolves its fx quotes.
+ * Attaches an extra single-version COGS profile to a variant. Writes currency 'TRY'
+ * and fxRateMode 'AUTO' to the still-existing NOT NULL columns (dropped in a later
+ * task); the engine no longer reads them.
  */
 export async function attachCostProfile(params: {
   readonly organizationId: string;
   readonly storeId: string;
   readonly productVariantId: string;
-  readonly currency: Currency;
   readonly amountGross: string;
   readonly vatRate: string;
   readonly changedAt?: Date;
@@ -701,10 +700,10 @@ export async function attachCostProfile(params: {
     data: {
       organizationId: params.organizationId,
       storeId: params.storeId,
-      name: `COGS ${params.currency}`,
+      name: `COGS ${randomUUID().slice(0, 8)}`,
       type: 'COGS',
       amountGross: params.amountGross,
-      currency: params.currency,
+      currency: 'TRY',
       vatRate: params.vatRate,
       fxRateMode: 'AUTO',
     },
@@ -714,10 +713,10 @@ export async function attachCostProfile(params: {
       profileId: profile.id,
       organizationId: params.organizationId,
       version: 1,
-      name: `COGS ${params.currency}`,
+      name: profile.name,
       type: 'COGS',
       amountGross: params.amountGross,
-      currency: params.currency,
+      currency: 'TRY',
       vatRate: params.vatRate,
       fxRateMode: 'AUTO',
       changedFields: [],
@@ -729,22 +728,6 @@ export async function attachCostProfile(params: {
       organizationId: params.organizationId,
       productVariantId: params.productVariantId,
       profileId: profile.id,
-    },
-  });
-}
-
-/** Inserts one fx-rate row (currency -> TRY on a date). fx_rates is truncated per test. */
-export async function insertFxRate(params: {
-  readonly currency: Currency;
-  readonly rateDate: Date;
-  readonly rateToTry: string;
-}): Promise<void> {
-  await prisma.fxRate.create({
-    data: {
-      currency: params.currency,
-      rateDate: params.rateDate,
-      rateToTry: params.rateToTry,
-      source: 'TEST',
     },
   });
 }

@@ -1,8 +1,6 @@
 import { type Decimal } from 'decimal.js';
 import {
   CostProfileType,
-  FxRateMode,
-  FxRateSource,
   ProfitIssueCode,
   ProfitLineCertainty,
   ProfitLineLevel,
@@ -10,28 +8,16 @@ import {
 } from '@pazarsync/db/enums';
 
 import { COST_PROFILE_LINE_TYPE } from '../catalog/cost-profile-line-type';
-import { convertLineMoney } from '../fx/convert-line-money';
-import { CURRENCY_TRY, type CurrencyCode } from '../fx/currency-code';
-import { type FxRateQuote, type SelectedFxRate, selectFxRate } from '../fx/select-fx-rate';
 import { activeItems, type ParcelItemSnapshot, type ParcelSnapshot } from '../parcel-snapshot';
-import {
-  createProfitLine,
-  type FxConversion,
-  type LineMoney,
-  nativeFx,
-  type ProfitLine,
-} from '../profit-line';
+import { createProfitLine, type LineMoney, type ProfitLine } from '../profit-line';
 import { type ProfitIssue } from '../profit-issue';
 import { vatFromGross } from '../../tax/tr/vat';
 
-/** One version of a seller cost profile, as it stood at a point in time. */
+/** One version of a seller cost profile, as it stood at a point in time. All amounts are in Turkish lira. */
 export interface CostProfileVersionInput {
   readonly effectiveFrom: Date;
-  readonly amountGross: Decimal; // per unit, in `currency`
-  readonly currency: CurrencyCode;
+  readonly amountGross: Decimal; // per unit, in Turkish lira
   readonly vatRatePct: Decimal;
-  readonly fxRateMode: FxRateMode; // Prisma enum: AUTO | MANUAL
-  readonly manualFxRate: Decimal | null;
   readonly archivedAt: Date | null; // version snapshot: non-null = the profile is archived from this version on
 }
 
@@ -47,11 +33,6 @@ export interface ItemCostInput {
   readonly orderItemId: string;
   readonly profiles: readonly ItemCostProfileInput[];
 }
-
-/** Either a converted amount or a missing-rate signal for one cost profile. */
-type CostFxResult =
-  | { readonly kind: 'ok'; readonly amount: LineMoney; readonly fx: FxConversion }
-  | { readonly kind: 'missing-fx'; readonly detail: string };
 
 /**
  * Chooses the version that applies at `orderDate`: the latest version whose
@@ -82,63 +63,6 @@ function chooseCostVersion(
     throw new RangeError('a cost profile must have at least one version');
   }
   return chosen;
-}
-
-/** Picks the rate for a non-native cost version, or null when none applies. */
-function selectCostFxRate(params: {
-  readonly version: CostProfileVersionInput;
-  readonly snapshot: ParcelSnapshot;
-  readonly fxQuotes: readonly FxRateQuote[];
-}): SelectedFxRate | null {
-  const { version, snapshot, fxQuotes } = params;
-  switch (version.fxRateMode) {
-    case FxRateMode.MANUAL: {
-      const rate = version.manualFxRate;
-      if (rate === null || !rate.isFinite() || rate.lte(0)) {
-        return null;
-      }
-      return { rate, rateDate: null, source: FxRateSource.MANUAL };
-    }
-    case FxRateMode.AUTO:
-      return selectFxRate({
-        from: version.currency,
-        to: snapshot.accountingCurrency,
-        eventDate: snapshot.businessDate,
-        base: CURRENCY_TRY,
-        quotes: fxQuotes,
-        quoteSource: FxRateSource.TCMB,
-      });
-    default: {
-      const exhaustive: never = version.fxRateMode;
-      throw new Error(`Unhandled fx rate mode: ${exhaustive}`);
-    }
-  }
-}
-
-/** Builds the `MISSING_FX_RATE` detail string for a non-native cost version. */
-function missingFxDetail(version: CostProfileVersionInput): string {
-  return version.fxRateMode === FxRateMode.MANUAL ? `MANUAL:${version.currency}` : version.currency;
-}
-
-/** Converts the per-item cost amount into the accounting currency. */
-function resolveCostFx(params: {
-  readonly original: LineMoney;
-  readonly version: CostProfileVersionInput;
-  readonly snapshot: ParcelSnapshot;
-  readonly fxQuotes: readonly FxRateQuote[];
-}): CostFxResult {
-  const { original, version, snapshot, fxQuotes } = params;
-
-  if (version.currency === snapshot.accountingCurrency) {
-    return { kind: 'ok', amount: original, fx: nativeFx(original, version.currency) };
-  }
-
-  const selected = selectCostFxRate({ version, snapshot, fxQuotes });
-  if (selected === null) {
-    return { kind: 'missing-fx', detail: missingFxDetail(version) };
-  }
-  const converted = convertLineMoney(original, version.currency, selected);
-  return { kind: 'ok', amount: converted.amount, fx: converted.fx };
 }
 
 /**
@@ -173,15 +97,13 @@ function indexCosts(
   return byItemId;
 }
 
-/** Builds the cost lines for one active item, pushing issues onto `issues`. */
+/** Builds the cost lines for one active item. */
 function buildItemCostLines(params: {
   readonly item: ParcelItemSnapshot;
   readonly entry: ItemCostInput;
   readonly snapshot: ParcelSnapshot;
-  readonly fxQuotes: readonly FxRateQuote[];
-  readonly issues: ProfitIssue[];
 }): { readonly lines: ProfitLine[]; readonly costed: boolean } {
-  const { item, entry, snapshot, fxQuotes, issues } = params;
+  const { item, entry, snapshot } = params;
   const lines: ProfitLine[] = [];
   let costed = false;
 
@@ -192,24 +114,14 @@ function buildItemCostLines(params: {
     }
     costed = true;
 
-    const grossOriginal = version.amountGross.mul(item.quantity);
-    if (grossOriginal.isZero()) {
+    const gross = version.amountGross.mul(item.quantity);
+    if (gross.isZero()) {
       continue; // a zero-amount profile still counts as costed but writes no line
     }
-    const original: LineMoney = {
-      gross: grossOriginal,
-      vat: vatFromGross(grossOriginal, version.vatRatePct),
+    const amount: LineMoney = {
+      gross,
+      vat: vatFromGross(gross, version.vatRatePct),
     };
-
-    const fxResult = resolveCostFx({ original, version, snapshot, fxQuotes });
-    if (fxResult.kind === 'missing-fx') {
-      issues.push({
-        code: ProfitIssueCode.MISSING_FX_RATE,
-        orderItemId: item.orderItemId,
-        detail: fxResult.detail,
-      });
-      continue;
-    }
 
     lines.push(
       createProfitLine({
@@ -218,9 +130,8 @@ function buildItemCostLines(params: {
         orderItemId: item.orderItemId,
         certainty: ProfitLineCertainty.ACTUAL,
         source: ProfitLineSource.SELLER_INPUT,
-        amount: fxResult.amount,
+        amount,
         vatRatePct: version.vatRatePct,
-        fx: fxResult.fx,
         inputs: {
           profileId: profile.profileId,
           profileType: profile.profileType,
@@ -237,18 +148,16 @@ function buildItemCostLines(params: {
 /**
  * Builds the seller cost lines for a parcel from its cost profiles. For each
  * active item, the version valid at the order date is chosen per profile, its
- * archived state is read from that version, and the amount is converted into the
- * accounting currency at the business-date rate. An active item with no cost
- * entry, or whose every chosen version is archived, yields a `MISSING_COST`
- * issue; a missing rate yields `MISSING_FX_RATE`. Lines come in snapshot item
- * order then profile input order; issues come in item order.
+ * archived state is read from that version, and the amount is the version's
+ * per-unit lira amount times the item quantity. An active item with no cost entry,
+ * or whose every chosen version is archived, yields a `MISSING_COST` issue. Lines
+ * come in snapshot item order then profile input order; issues come in item order.
  */
 export function buildSellerCostLines(params: {
   readonly snapshot: ParcelSnapshot;
   readonly costs: readonly ItemCostInput[];
-  readonly fxQuotes: readonly FxRateQuote[];
 }): { readonly lines: ProfitLine[]; readonly issues: ProfitIssue[] } {
-  const { snapshot, costs, fxQuotes } = params;
+  const { snapshot, costs } = params;
   const costByItemId = indexCosts(snapshot, costs);
 
   const lines: ProfitLine[] = [];
@@ -265,7 +174,7 @@ export function buildSellerCostLines(params: {
       continue;
     }
 
-    const result = buildItemCostLines({ item, entry, snapshot, fxQuotes, issues });
+    const result = buildItemCostLines({ item, entry, snapshot });
     lines.push(...result.lines);
     if (!result.costed) {
       issues.push({
