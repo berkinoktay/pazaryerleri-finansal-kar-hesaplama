@@ -29,9 +29,7 @@ const BASE_INPUT = {
   name: 'Hammadde COGS',
   type: 'COGS' as const,
   amountGross: '25.50',
-  currency: 'TRY' as const,
   vatRate: 18,
-  fxRateMode: 'AUTO' as const,
 };
 
 // createCostProfile now requires a storeId — cost profiles are store-scoped.

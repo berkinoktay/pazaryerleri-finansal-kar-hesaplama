@@ -326,31 +326,6 @@ CREATE POLICY product_variant_cost_profiles_org_member_read ON product_variant_c
   FOR SELECT TO authenticated
   USING (is_org_member(organization_id));
 
--- ─── order_item_cost_snapshot_components — org-scoped read ───────────
--- Frozen, write-once. Inserts happen only via the sync worker (Edge
--- Function with service-role key) when an order arrives and its variant
--- has cost profiles attached. Updates are blocked by the
--- reject_snapshot_update trigger in cost-snapshot-immutable.sql (Task 1.4).
--- RLS just gates authenticated reads.
-ALTER TABLE order_item_cost_snapshot_components ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS order_item_cost_snapshot_components_org_member_read ON order_item_cost_snapshot_components;
-CREATE POLICY order_item_cost_snapshot_components_org_member_read ON order_item_cost_snapshot_components
-  FOR SELECT TO authenticated
-  USING (is_org_member(organization_id));
-
--- ─── fx_rates — global read, service-role writes ─────────────────────
--- FX rates are not tenant-scoped; the same TCMB rate applies to every
--- org. Any authenticated user can read the latest cached rates for UI
--- display (e.g., the cost-profile-fx-preview component). Writes are
--- service-role only via the fx-rates-sync Edge Function — postgres
--- bypasses RLS, and there is no INSERT/UPDATE/DELETE policy for
--- `authenticated`, so direct client writes default-deny.
-ALTER TABLE fx_rates ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS fx_rates_authenticated_read ON fx_rates;
-CREATE POLICY fx_rates_authenticated_read ON fx_rates
-  FOR SELECT TO authenticated
-  USING (true);
-
 -- marketplace_commission_rate: platform-scoped reference data, NOT tenant-private.
 -- Trendyol/Hepsiburada commission tariff is the same for every seller on the
 -- platform — segment-based overrides conceptually exist, but the marketplaces
@@ -594,7 +569,7 @@ CREATE POLICY commission_invoices_org_member_read ON commission_invoices
 
 -- ─── fee_definitions — global reference, public read ──────────────────
 -- Pazaryeri × ücret tipi başına sistem-düzeyi tanım. Tüm seller'lara aynı
--- kural — fx_rates / shipping_carriers / marketplace_commission_rate ile
+-- kural — shipping_carriers / marketplace_commission_rate ile
 -- aynı pattern. Yazma postgres rolü (PR-2 seed migration); authenticated
 -- INSERT/UPDATE/DELETE policy yok → default-deny.
 ALTER TABLE fee_definitions ENABLE ROW LEVEL SECURITY;

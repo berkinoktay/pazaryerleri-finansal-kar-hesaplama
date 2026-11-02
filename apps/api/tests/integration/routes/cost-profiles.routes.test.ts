@@ -34,9 +34,7 @@ describe('Cost profile routes', () => {
         name: opts.name ?? 'Test COGS',
         type: 'COGS',
         amountGross: new Decimal('25.50'),
-        currency: 'TRY',
         vatRate: 18,
-        fxRateMode: 'AUTO',
       },
     });
   }
@@ -307,9 +305,7 @@ describe('Cost profile routes', () => {
           name: profile.name,
           type: profile.type,
           amountGross: profile.amountGross,
-          currency: profile.currency,
           vatRate: profile.vatRate,
-          fxRateMode: profile.fxRateMode,
           changedFields: [],
         },
       });

@@ -75,9 +75,7 @@ async function attachProfile(
       name: `Profile ${randomUUID().slice(0, 6)}`,
       type: 'COGS',
       amountGross: new Decimal('10.00'),
-      currency: 'TRY',
       vatRate: 0,
-      fxRateMode: 'AUTO',
       archivedAt: opts.archived === true ? new Date() : null,
     },
   });

@@ -429,7 +429,6 @@ export async function createCostProfile(
       name: overrides.name ?? `COGS-${randomUUID().slice(0, 8)}`,
       type: overrides.type ?? 'COGS',
       amountGross: overrides.amountGross ?? '60.00',
-      currency: 'TRY',
       vatRate: 20,
     },
   });

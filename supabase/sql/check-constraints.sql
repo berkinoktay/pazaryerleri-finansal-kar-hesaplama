@@ -35,11 +35,6 @@ ALTER TABLE cost_profile_versions DROP CONSTRAINT IF EXISTS cost_profile_version
 ALTER TABLE cost_profile_versions DROP CONSTRAINT IF EXISTS cost_profile_versions_vat_rate_nonneg;
 ALTER TABLE cost_profile_versions ADD CONSTRAINT cost_profile_versions_vat_rate_nonneg CHECK (vat_rate >= 0);
 
-ALTER TABLE order_item_cost_snapshot_components DROP CONSTRAINT IF EXISTS order_item_cost_snapshot_components_vat_amount_nonneg;
-ALTER TABLE order_item_cost_snapshot_components DROP CONSTRAINT IF EXISTS order_item_cost_snapshot_components_vat_amount_in_try_nonneg;
-ALTER TABLE order_item_cost_snapshot_components DROP CONSTRAINT IF EXISTS order_item_cost_snapshot_components_vat_rate_nonneg;
-ALTER TABLE order_item_cost_snapshot_components ADD CONSTRAINT order_item_cost_snapshot_components_vat_rate_nonneg CHECK (vat_rate >= 0);
-
 -- ─── #297: settlement fee idempotency — partial unique guards ──────────
 -- Çift fee yazımı DB seviyesinde imkânsız (kod disiplini değil). Kaynak-bazlı
 -- kimlik kolonlarda yaşar; external_ref JSONB audit-only (okuma yolu yok).

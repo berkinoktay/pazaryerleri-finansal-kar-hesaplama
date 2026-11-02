@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { PROFIT_ENGINE_VERSION } from '@pazarsync/profit';
+
 import { ensureDbReachable, prisma, truncateAll } from '../../helpers/db';
 import {
   createMembership,
@@ -63,7 +65,7 @@ async function seedProfitStack(
       amountGross: '100.00',
       amountVat: '16.67',
       inputs: {},
-      engineVersion: 1,
+      engineVersion: PROFIT_ENGINE_VERSION,
     },
   });
 
@@ -96,7 +98,7 @@ async function seedProfitStack(
       stoppageIncluded: true,
       issues: [],
       settingsSnapshot: {},
-      engineVersion: 1,
+      engineVersion: PROFIT_ENGINE_VERSION,
       contentHash: 'test',
       computedAt: new Date(),
     },
@@ -253,11 +255,6 @@ describe('RLS — profit engine persistence', () => {
       source: 'RULE',
       amount_gross: '1.00',
       amount_vat: '0.17',
-      original_currency: 'TRY',
-      original_gross: '1.00',
-      original_vat: '0.17',
-      fx_rate: '1',
-      fx_source: 'NATIVE',
       inputs: {},
       engine_version: 1,
     });

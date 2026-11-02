@@ -341,9 +341,7 @@ describe('flash-products: route-layer authorization', () => {
         name: 'COGS Test',
         type: 'COGS',
         amountGross: new Decimal('200.00'),
-        currency: 'TRY',
         vatRate: 20,
-        fxRateMode: 'MANUAL',
       },
     });
     await prisma.productVariantCostProfile.create({

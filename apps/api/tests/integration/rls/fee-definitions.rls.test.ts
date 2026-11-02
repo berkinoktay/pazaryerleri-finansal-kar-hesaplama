@@ -9,7 +9,7 @@ import { createRlsScopedClient } from '../../helpers/rls-client';
  * tüm seller'lara aynı kural. RLS: `USING (true)` SELECT açık; INSERT/UPDATE/
  * DELETE policy YOK → authenticated rolü için default-deny.
  *
- * Aynı pattern: fx_rates, shipping_carriers, shipping_desi_tariffs,
+ * Aynı pattern: shipping_carriers, shipping_desi_tariffs,
  * marketplace_commission_rate.
  *
  * Seed (PR-2'de) Trendyol için 4 satır ekler. PR-1'de seed yok — bu test'ler

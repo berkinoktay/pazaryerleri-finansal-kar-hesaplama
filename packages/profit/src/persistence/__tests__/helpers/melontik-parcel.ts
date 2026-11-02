@@ -85,7 +85,6 @@ export async function truncateAll(): Promise<void> {
        commission_tariff_periods,
        commission_tariffs,
        own_shipping_tariffs,
-       fx_rates,
        marketplace_commission_rate,
        fee_definitions,
        member_store_access,
@@ -262,9 +261,7 @@ async function createVariantWithCost(params: {
       name: `COGS ${barcode}`,
       type: 'COGS',
       amountGross: costGross,
-      currency: 'TRY',
       vatRate: MELONTIK.costVatRate,
-      fxRateMode: 'AUTO',
     },
   });
   await prisma.costProfileVersion.create({
@@ -275,9 +272,7 @@ async function createVariantWithCost(params: {
       name: `COGS ${barcode}`,
       type: 'COGS',
       amountGross: costGross,
-      currency: 'TRY',
       vatRate: MELONTIK.costVatRate,
-      fxRateMode: 'AUTO',
       changedFields: [],
       changedAt: MELONTIK.costEffectiveFrom,
     },
@@ -414,7 +409,14 @@ async function createOrderItem(params: {
   readonly lineSaleGrossOverride?: string;
   readonly lineSellerDiscountGrossOverride?: string;
 }): Promise<string> {
-  const { orderId, organizationId, variantId, item, lineSaleGrossOverride } = params;
+  const {
+    orderId,
+    organizationId,
+    variantId,
+    item,
+    lineSaleGrossOverride,
+    lineSellerDiscountGrossOverride,
+  } = params;
   const created = await prisma.orderItem.create({
     data: {
       orderId,
@@ -424,7 +426,7 @@ async function createOrderItem(params: {
       barcode: item.barcode,
       lineListGross: item.listGross,
       lineSaleGross: lineSaleGrossOverride ?? item.saleGross,
-      lineSellerDiscountGross: params.lineSellerDiscountGrossOverride ?? item.sellerDiscountGross,
+      lineSellerDiscountGross: lineSellerDiscountGrossOverride ?? item.sellerDiscountGross,
       saleVatRate: item.saleVatRate,
       // The golden parcel's commission resolves from the ORDER source, so the raw
       // column carries the same rate; the legacy commissionRate column stays filled
@@ -684,9 +686,7 @@ export async function seedBareOrder(params: {
 }
 
 /**
- * Attaches an extra single-version COGS profile to a variant. Writes currency 'TRY'
- * and fxRateMode 'AUTO' to the still-existing NOT NULL columns (dropped in a later
- * task); the engine no longer reads them.
+ * Attaches an extra single-version COGS profile to a variant.
  */
 export async function attachCostProfile(params: {
   readonly organizationId: string;
@@ -703,9 +703,7 @@ export async function attachCostProfile(params: {
       name: `COGS ${randomUUID().slice(0, 8)}`,
       type: 'COGS',
       amountGross: params.amountGross,
-      currency: 'TRY',
       vatRate: params.vatRate,
-      fxRateMode: 'AUTO',
     },
   });
   await prisma.costProfileVersion.create({
@@ -716,9 +714,7 @@ export async function attachCostProfile(params: {
       name: profile.name,
       type: 'COGS',
       amountGross: params.amountGross,
-      currency: 'TRY',
       vatRate: params.vatRate,
-      fxRateMode: 'AUTO',
       changedFields: [],
       changedAt: params.changedAt ?? MELONTIK.costEffectiveFrom,
     },

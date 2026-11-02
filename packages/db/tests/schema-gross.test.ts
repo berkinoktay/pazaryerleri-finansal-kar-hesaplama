@@ -102,11 +102,7 @@ describe('OrderFee GROSS convention', () => {
 
 describe('Maliyet tables GROSS convention', () => {
   it('cost tables have amountGross + vatRate', async () => {
-    for (const table of [
-      'cost_profiles',
-      'cost_profile_versions',
-      'order_item_cost_snapshot_components',
-    ]) {
+    for (const table of ['cost_profiles', 'cost_profile_versions']) {
       const cols = await prisma.$queryRaw<{ column_name: string }[]>`
         SELECT column_name FROM information_schema.columns
         WHERE table_name = ${table} AND column_name IN ('amount_gross', 'vat_rate')`;

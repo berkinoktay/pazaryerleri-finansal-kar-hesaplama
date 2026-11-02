@@ -81,9 +81,7 @@ describe('Tenant isolation — profit recompute triggers', () => {
         name: 'Org A COGS',
         type: 'COGS',
         amountGross: new Decimal('25.00'),
-        currency: 'TRY',
         vatRate: 0,
-        fxRateMode: 'AUTO',
       },
     });
     const productA = await createProduct(orgA.id, storeA.id);

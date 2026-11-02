@@ -2,7 +2,7 @@ import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
 import type { CostProfile, CostProfileVersion, Prisma } from '@pazarsync/db';
-import { Currency, FxRateMode, ProfitRecomputeReason } from '@pazarsync/db/enums';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import { enqueueProfitRecomputeForVariants } from '@pazarsync/profit';
 
 import { CostProfileNameTakenError, CostProfileNotFoundError } from '../lib/errors';
@@ -11,22 +11,9 @@ import type {
   UpdateCostProfileInput,
 } from '../validators/cost-profile.validator';
 
-// Transitional: removed together with the columns in phase 3C Task 4. The
-// profile / version columns are still NOT NULL, so every write spreads this
-// single lira-only constant instead of scattering literals.
-const LIRA_ONLY_COST_PROFILE_COLUMNS = {
-  currency: Currency.TRY,
-  fxRateMode: FxRateMode.AUTO,
-  manualFxRate: null,
-} as const;
-
 // ─── DTO types ───────────────────────────────────────────────────────────────
 
 export type { CostProfile, CostProfileVersion };
-
-// Wire shape for the API: the currency / fxRateMode / manualFxRate DB columns
-// still exist (dropped in phase 3C Task 4) but no longer reach the response.
-type CostProfileWire = Omit<CostProfile, 'currency' | 'fxRateMode' | 'manualFxRate'>;
 
 export interface AttachedVariantDTO {
   linkId: string;
@@ -71,7 +58,7 @@ function decodeCursor(cursor: string): string {
  * DB row → public wire shape. Explicit field allow-list so internal
  * Prisma relations never leak to the API layer.
  */
-function toWireProfile(row: CostProfile): CostProfileWire {
+function toWireProfile(row: CostProfile): CostProfile {
   return {
     id: row.id,
     organizationId: row.organizationId,
@@ -166,7 +153,7 @@ export async function listCostProfiles(
   orgId: string,
   storeId: string,
   filters: ListCostProfilesFilters,
-): Promise<{ items: CostProfileWire[]; nextCursor: string | null }> {
+): Promise<{ items: CostProfile[]; nextCursor: string | null }> {
   const limit = filters.limit ?? 25;
 
   // Decode cursor: the id of the last item on the previous page
@@ -208,7 +195,7 @@ export async function listCostProfiles(
  * Get a single cost profile by id. Returns the profile if it belongs to the
  * given organization; throws `CostProfileNotFoundError` otherwise (non-disclosure).
  */
-export async function getCostProfile(orgId: string, profileId: string): Promise<CostProfileWire> {
+export async function getCostProfile(orgId: string, profileId: string): Promise<CostProfile> {
   const row = await prisma.costProfile.findFirst({
     where: { id: profileId, organizationId: orgId },
   });
@@ -226,7 +213,7 @@ export async function createCostProfile(
   orgId: string,
   input: CreateCostProfileInput,
   actorId: string,
-): Promise<CostProfileWire> {
+): Promise<CostProfile> {
   try {
     const profile = await prisma.$transaction(async (tx) => {
       const amountGross = new Decimal(input.amountGross);
@@ -243,7 +230,6 @@ export async function createCostProfile(
           note: input.note ?? null,
           createdBy: actorId,
           updatedBy: actorId,
-          ...LIRA_ONLY_COST_PROFILE_COLUMNS,
         },
       });
 
@@ -260,7 +246,6 @@ export async function createCostProfile(
           archivedAt: null,
           changedFields: [],
           changedBy: actorId,
-          ...LIRA_ONLY_COST_PROFILE_COLUMNS,
         },
       });
 
@@ -284,7 +269,7 @@ export async function updateCostProfile(
   profileId: string,
   patch: UpdateCostProfileInput,
   actorId: string,
-): Promise<CostProfileWire> {
+): Promise<CostProfile> {
   try {
     const updated = await prisma.$transaction(async (tx) => {
       // Take a row-level lock for concurrency: $queryRaw with FOR UPDATE
@@ -355,7 +340,6 @@ export async function updateCostProfile(
           archivedAt: row.archivedAt,
           changedFields,
           changedBy: actorId,
-          ...LIRA_ONLY_COST_PROFILE_COLUMNS,
         },
       });
 
@@ -379,7 +363,7 @@ export async function archiveCostProfile(
   orgId: string,
   profileId: string,
   actorId: string,
-): Promise<CostProfileWire> {
+): Promise<CostProfile> {
   const archived = await prisma.$transaction(async (tx) => {
     const [locked] = await tx.$queryRaw<CostProfile[]>`
       SELECT * FROM cost_profiles
@@ -417,7 +401,6 @@ export async function archiveCostProfile(
         archivedAt: now,
         changedFields: ['archivedAt'],
         changedBy: actorId,
-        ...LIRA_ONLY_COST_PROFILE_COLUMNS,
       },
     });
 
@@ -437,7 +420,7 @@ export async function restoreCostProfile(
   orgId: string,
   profileId: string,
   actorId: string,
-): Promise<CostProfileWire> {
+): Promise<CostProfile> {
   const restored = await prisma.$transaction(async (tx) => {
     const [locked] = await tx.$queryRaw<CostProfile[]>`
       SELECT * FROM cost_profiles
@@ -474,7 +457,6 @@ export async function restoreCostProfile(
         archivedAt: null,
         changedFields: ['archivedAt'],
         changedBy: actorId,
-        ...LIRA_ONLY_COST_PROFILE_COLUMNS,
       },
     });
 

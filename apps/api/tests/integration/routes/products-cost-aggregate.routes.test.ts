@@ -72,10 +72,7 @@ async function seedProfile(
       name: opts.name ?? `Profile ${randomUUID().slice(0, 6)}`,
       type: 'COGS',
       amountGross: new Decimal(opts.amount),
-      currency: 'TRY',
       vatRate: 0,
-      fxRateMode: 'AUTO',
-      manualFxRate: null,
     },
   });
   return profile;

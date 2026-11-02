@@ -23,10 +23,6 @@ describe('cost-profile tables: RLS isolation', () => {
 
   beforeEach(async () => {
     await truncateAll();
-    // fx_rates is not org-scoped so truncateAll (which cascades from
-    // organizations) does not touch it. Clean it explicitly so each test
-    // starts with a predictable empty fx_rates table.
-    await prisma.$executeRawUnsafe('TRUNCATE TABLE fx_rates RESTART IDENTITY CASCADE');
   });
 
   // ─── Case 1: cost_profiles SELECT isolation ──────────────────────────
@@ -56,9 +52,7 @@ describe('cost-profile tables: RLS isolation', () => {
         name: 'Org B COGS',
         type: 'COGS',
         amountGross: new Decimal('10.00'),
-        currency: 'TRY',
         vatRate: 18,
-        fxRateMode: 'AUTO',
       },
     });
 
@@ -88,9 +82,7 @@ describe('cost-profile tables: RLS isolation', () => {
       name: 'sneaky insert',
       type: 'COGS',
       amount_gross: '10.00',
-      currency: 'TRY',
       vat_rate: 0,
-      fx_rate_mode: 'AUTO',
     });
 
     expect(error).not.toBeNull();
@@ -148,9 +140,7 @@ describe('cost-profile tables: RLS isolation', () => {
         name: 'Org B COGS variant',
         type: 'COGS',
         amountGross: new Decimal('5.00'),
-        currency: 'TRY',
         vatRate: 0,
-        fxRateMode: 'AUTO',
       },
     });
 
@@ -169,110 +159,5 @@ describe('cost-profile tables: RLS isolation', () => {
 
     expect(error).toBeNull();
     expect(data).toEqual([]);
-  });
-
-  // ─── Case 4: order_item_cost_snapshot_components SELECT isolation ────
-
-  it("Org A user cannot SELECT Org B's order_item_cost_snapshot_components row", async () => {
-    const { user: userA, client: clientA } = await createRlsScopedClient();
-    const orgA = await createOrganization();
-    await createMembership(orgA.id, userA.id);
-
-    const orgB = await createOrganization();
-
-    // Seed Org B: store → order → order_item → cost_profile → snapshot component
-    const storeB = await prisma.store.create({
-      data: {
-        organizationId: orgB.id,
-        name: 'Store B',
-        platform: 'TRENDYOL',
-        environment: 'PRODUCTION',
-        externalAccountId: randomUUID(),
-        credentials: 'test-encrypted-blob',
-      },
-    });
-
-    const orderB = await prisma.order.create({
-      data: {
-        organizationId: orgB.id,
-        storeId: storeB.id,
-        platformOrderId: `order-b-${randomUUID().slice(0, 8)}`,
-        orderDate: new Date(),
-        status: 'DELIVERED',
-      },
-    });
-
-    const orderItemB = await prisma.orderItem.create({
-      data: {
-        orderId: orderB.id,
-        organizationId: orgB.id,
-        quantity: 1,
-        lineSaleGross: '100.00',
-        commissionRate: '20.00',
-        commissionGross: '20.00',
-        unitCostSnapshotGross: '15.00',
-        snapshotCapturedAt: new Date(),
-      },
-    });
-
-    const profileB = await prisma.costProfile.create({
-      data: {
-        organizationId: orgB.id,
-        storeId: storeB.id,
-        name: 'Org B COGS snapshot',
-        type: 'COGS',
-        amountGross: new Decimal('15.00'),
-        currency: 'TRY',
-        vatRate: 0,
-        fxRateMode: 'AUTO',
-      },
-    });
-
-    const snapshot = await prisma.orderItemCostSnapshotComponent.create({
-      data: {
-        orderItemId: orderItemB.id,
-        organizationId: orgB.id,
-        profileId: profileB.id,
-        profileName: 'Org B COGS snapshot',
-        profileType: 'COGS',
-        amountGross: new Decimal('15.00'),
-        currency: 'TRY',
-        vatRate: 0,
-        amountInTryGross: new Decimal('15.00'),
-        fxRateMode: 'AUTO',
-        fxRateUsed: new Decimal('1.000000'),
-        fxRateSource: 'TRY-NATIVE',
-      },
-    });
-
-    const { data, error } = await clientA
-      .from('order_item_cost_snapshot_components')
-      .select('*')
-      .eq('id', snapshot.id);
-
-    expect(error).toBeNull();
-    expect(data).toEqual([]);
-  });
-
-  // ─── Case 5: fx_rates globally readable ──────────────────────────────
-
-  it('fx_rates is globally readable for any authenticated user', async () => {
-    const { user: userA, client: clientA } = await createRlsScopedClient();
-    const orgA = await createOrganization();
-    await createMembership(orgA.id, userA.id);
-
-    await prisma.fxRate.create({
-      data: {
-        currency: 'USD',
-        rateDate: new Date('2026-05-09'),
-        rateToTry: new Decimal('35.50'),
-        source: 'TCMB',
-      },
-    });
-
-    const { data, error } = await clientA.from('fx_rates').select('*');
-
-    expect(error).toBeNull();
-    expect(data?.length).toBeGreaterThan(0);
   });
 });

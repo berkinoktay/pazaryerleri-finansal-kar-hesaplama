@@ -178,9 +178,7 @@ async function setupBatchFixture(): Promise<BatchFixture> {
       name: 'COGS Test',
       type: 'COGS',
       amountGross: new Decimal('200.00'),
-      currency: 'TRY',
       vatRate: DEFAULT_VAT_RATE,
-      fxRateMode: 'MANUAL',
     },
   });
   await prisma.productVariantCostProfile.create({

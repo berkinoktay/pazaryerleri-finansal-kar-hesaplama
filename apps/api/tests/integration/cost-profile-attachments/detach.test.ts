@@ -31,9 +31,7 @@ describe('POST /v1/organizations/:orgId/cost-profile-attachments/detach', () => 
         name: `Profile-${randomUUID().slice(0, 8)}`,
         type: 'COGS',
         amountGross: new Decimal('25.50'),
-        currency: 'TRY',
         vatRate: 18,
-        fxRateMode: 'AUTO',
       },
     });
   }

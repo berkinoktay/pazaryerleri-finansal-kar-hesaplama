@@ -540,7 +540,7 @@ describe('loadTrendyolParcel', () => {
 
   it('refuses a non-trendyol store', async () => {
     const org = await prisma.organization.create({
-      data: { name: 'HB Org', slug: `hb-${randomUUID().slice(0, 8)}`, currency: 'TRY' },
+      data: { name: 'HB Org', slug: `hb-${randomUUID().slice(0, 8)}` },
     });
     const store = await prisma.store.create({
       data: {

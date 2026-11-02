@@ -53,9 +53,7 @@ async function seedProfile(
       name: opts.name ?? `Profile-${randomUUID().slice(0, 8)}`,
       type: 'COGS',
       amountGross: new Decimal('25.50'),
-      currency: 'TRY',
       vatRate: 18,
-      fxRateMode: 'AUTO',
       archivedAt: opts.archived === true ? new Date() : null,
     },
   });

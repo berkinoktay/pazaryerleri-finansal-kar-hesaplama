@@ -154,9 +154,7 @@ async function setupFullyConfiguredStore(): Promise<FullySetupCtx> {
       name: 'COGS Test',
       type: 'COGS',
       amountGross: new Decimal('200.00'),
-      currency: 'TRY',
       vatRate: 20,
-      fxRateMode: 'MANUAL',
     },
   });
   await prisma.productVariantCostProfile.create({
@@ -501,9 +499,7 @@ async function setupRichFixture(): Promise<RichFixtureCtx> {
       name: 'Low COGS',
       type: 'COGS',
       amountGross: new Decimal('200.00'),
-      currency: 'TRY',
       vatRate: 20,
-      fxRateMode: 'MANUAL',
     },
   });
   const highCost = await prisma.costProfile.create({
@@ -513,9 +509,7 @@ async function setupRichFixture(): Promise<RichFixtureCtx> {
       name: 'High COGS',
       type: 'COGS',
       amountGross: new Decimal('480.00'),
-      currency: 'TRY',
       vatRate: 20,
-      fxRateMode: 'MANUAL',
     },
   });
 

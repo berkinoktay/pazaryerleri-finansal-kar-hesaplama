@@ -120,9 +120,7 @@ async function setupFixture(): Promise<Fixture> {
       name: 'COGS Test',
       type: 'COGS',
       amountGross: new Decimal('200.00'),
-      currency: 'TRY',
       vatRate: 20,
-      fxRateMode: 'MANUAL',
     },
   });
   await ensureFeeDefinitions();
@@ -489,9 +487,7 @@ async function setupCoveringFixture(): Promise<CoveringFixture> {
         name: `COGS Test ${opts.seq}`,
         type: 'COGS',
         amountGross: new Decimal('200.00'),
-        currency: 'TRY',
         vatRate: 20,
-        fxRateMode: 'MANUAL',
       },
     });
     const product = await prisma.product.create({
@@ -904,9 +900,7 @@ async function setupSplitWeekFixture(): Promise<SplitWeekFixture> {
       name: 'COGS Split',
       type: 'COGS',
       amountGross: new Decimal('200.00'),
-      currency: 'TRY',
       vatRate: 20,
-      fxRateMode: 'MANUAL',
     },
   });
   const product = await prisma.product.create({

@@ -131,17 +131,6 @@ enum CostProfileType {
   OTHER
 }
 
-enum Currency {
-  TRY
-  USD
-  EUR
-}
-
-enum FxRateMode {
-  AUTO
-  MANUAL
-}
-
 enum ShippingTariffSource {
   TRENDYOL_CONTRACT
   OWN_CONTRACT
@@ -433,7 +422,6 @@ model Organization {
   id        String   @id @default(uuid()) @db.Uuid
   name      String
   slug      String   @unique
-  currency  String   @default("TRY")
   timezone  String   @default("Europe/Istanbul")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -978,7 +966,6 @@ model OrderItem {
   commissionInvoiceSerialNumber String? @map("commission_invoice_serial_number")
   commissionInvoiceId           String? @map("commission_invoice_id") @db.Uuid
 
-  costSnapshotComponents OrderItemCostSnapshotComponent[]
   claimItems             OrderClaimItem[]
   profitLines            ProfitLine[]
   profitLineAllocations  ProfitLineAllocation[]
@@ -1047,10 +1034,7 @@ model CostProfile {
   // KDV oranı satış KDV'sinden bağımsız olabilir (tedarikçi %20 / satış %10).
   // KDV'siz maliyet → vatRate=0. @default(0): dev truncate+re-sync için (pre-launch).
   amountGross    Decimal         @default(0) @map("amount_gross") @db.Decimal(12, 2)
-  currency       Currency        @default(TRY)
   vatRate        Decimal         @default(0) @map("vat_rate") @db.Decimal(5, 2)
-  fxRateMode     FxRateMode      @default(AUTO) @map("fx_rate_mode")
-  manualFxRate   Decimal?        @map("manual_fx_rate") @db.Decimal(14, 6)
   note           String?
   archivedAt     DateTime?       @map("archived_at")
   createdBy      String?         @map("created_by") @db.Uuid
@@ -1062,7 +1046,6 @@ model CostProfile {
   store              Store                            @relation(fields: [storeId], references: [id], onDelete: Cascade)
   versions           CostProfileVersion[]
   variantLinks       ProductVariantCostProfile[]
-  snapshotComponents OrderItemCostSnapshotComponent[]
 
   // Names are unique PER STORE (not per org): two stores may each have a "Kargo
   // Kutusu" profile. Deleting a store cascades its profiles.
@@ -1082,10 +1065,7 @@ model CostProfileVersion {
   // GROSS konvansiyon (2026-06-16): CostProfile mirror — versiyonlar da GROSS saklar.
   // @default(0): dev truncate+re-sync için (pre-launch).
   amountGross    Decimal         @default(0) @map("amount_gross") @db.Decimal(12, 2)
-  currency       Currency
   vatRate        Decimal         @map("vat_rate") @db.Decimal(5, 2)
-  fxRateMode     FxRateMode      @map("fx_rate_mode")
-  manualFxRate   Decimal?        @map("manual_fx_rate") @db.Decimal(14, 6)
   note           String?
   archivedAt     DateTime?       @map("archived_at")
   changedFields  String[]        @map("changed_fields")
@@ -1121,54 +1101,6 @@ model ProductVariantCostProfile {
   @@index([profileId])
   @@index([organizationId, productVariantId], map: "idx_pvcp_org_product_variant")
   @@map("product_variant_cost_profiles")
-}
-
-model OrderItemCostSnapshotComponent {
-  id             String          @id @default(uuid()) @db.Uuid
-  orderItemId    String          @map("order_item_id") @db.Uuid
-  organizationId String          @map("organization_id") @db.Uuid
-  profileId      String          @map("profile_id") @db.Uuid
-  profileName    String          @map("profile_name")
-  profileType    CostProfileType @map("profile_type")
-  // GROSS konvansiyon (2026-06-16): amount(net)+vatAmount → amountGross+vatRate.
-  // FX: amountInTryGross replaces amountInTry+vatAmountInTry.
-  // Net türetilir: amountGross × 100/(100+vatRate).
-  // @default(0): dev truncate+re-sync için (pre-launch); snapshot sync yazar.
-  amountGross      Decimal    @default(0) @map("amount_gross") @db.Decimal(12, 2)
-  currency         Currency
-  vatRate          Decimal    @default(0) @map("vat_rate") @db.Decimal(5, 2)
-  amountInTryGross Decimal    @default(0) @map("amount_in_try_gross") @db.Decimal(12, 2)
-  fxRateMode       FxRateMode @map("fx_rate_mode")
-  fxRateUsed     Decimal         @map("fx_rate_used") @db.Decimal(14, 6)
-  fxRateSource   String          @map("fx_rate_source")
-
-  orderItem OrderItem   @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
-  // Cascade (not Restrict): a cost profile is store-scoped and only ever
-  // hard-deleted when its store is disconnected — at which point this snapshot
-  // component's order item is being deleted too (OrderItem cascades from the
-  // same store). Restrict here deadlocked the store-delete cascade. Historical
-  // integrity is unaffected: this row carries denormalized profileName/amounts
-  // and dies with its order regardless (disconnect wipes the whole store).
-  profile   CostProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
-
-  @@index([orderItemId])
-  @@index([organizationId, profileType], map: "idx_oi_cost_snapshot_org_profile_type")
-  @@index([organizationId, profileId], map: "idx_oi_cost_snapshot_org_profile_id")
-  @@map("order_item_cost_snapshot_components")
-}
-
-model FxRate {
-  id        String   @id @default(uuid()) @db.Uuid
-  currency  Currency
-  rateDate  DateTime @map("rate_date") @db.Date
-  rateToTry Decimal  @map("rate_to_try") @db.Decimal(14, 6)
-  source    String
-  fetchedAt DateTime @default(now()) @map("fetched_at")
-
-  @@unique([currency, rateDate])
-  // Note: no separate DESC index — Postgres B-tree is bidirectional; the unique
-  // index above is used for "latest rate per currency" queries via backward scan.
-  @@map("fx_rates")
 }
 
 model Expense {
@@ -2100,9 +2032,9 @@ model OrderFee {
 }
 
 // One profit line of a parcel (rebuild, phase 3A). Holds a single income or
-// expense entry produced by the profit engine, with its original-currency and
-// base-currency amounts side by side. Written only by the profit writer, never
-// by the legacy path. store_id is stamped from the parent order and gates RLS.
+// expense entry produced by the profit engine. Written only by the profit
+// writer, never by the legacy path. store_id is stamped from the parent order
+// and gates RLS.
 model ProfitLine {
   id             String  @id @default(uuid()) @db.Uuid
   organizationId String  @map("organization_id") @db.Uuid
