@@ -21,18 +21,13 @@
  *   - enqueueProfitRecompute on every write (create + update): one mark per order.
  *     The sync-worker tick drains it and computes the statement in its own short
  *     transaction; a compute failure there never rolls back this order write.
- *
- * GROSS konvansiyon (2026-06-16): captureCostSnapshot writes the two GROSS cost
- * columns (`unitCostSnapshotGross` + `unitCostSnapshotVatRate`); components carry
- * `amountGross`/`vatRate`/`amountInTryGross`. Net/KDV are derived downstream by the
- * profit engine (computeProfit), never re-split here.
  */
 
 import { Decimal } from 'decimal.js';
 
 import { refreshProductAggregates } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
-import type { CostProfileType, Currency, FxRateMode, Platform, Prisma } from '@pazarsync/db';
+import type { Platform, Prisma } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { enqueueProfitRecompute, resolveCommissionRate } from '@pazarsync/profit';
@@ -40,162 +35,6 @@ import { syncLog } from '@pazarsync/sync-core';
 import { resolveProfitSettings } from '@pazarsync/utils';
 
 import { decrementVariantStock, isOrderOnBusinessToday } from './stock';
-
-interface SnapshotComponentData {
-  orderItemId: string;
-  organizationId: string;
-  profileId: string;
-  profileName: string;
-  profileType: CostProfileType;
-  // GROSS konvansiyon (2026-06-16): maliyet GROSS (KDV-dahil) saklanır.
-  // amountGross = profil GROSS tutarı (native currency); amountInTryGross = ×fxRate.
-  // vatRate maliyet KDV oranı (satıştan bağımsız); net = amountGross × 100/(100+vatRate).
-  amountGross: Decimal;
-  currency: Currency;
-  vatRate: Decimal;
-  amountInTryGross: Decimal;
-  fxRateMode: FxRateMode;
-  fxRateUsed: Decimal;
-  fxRateSource: string;
-}
-
-interface FxResolution {
-  rate: Decimal;
-  source: string;
-}
-
-/**
- * FX rate resolve helper. Mirrors `apps/api/src/services/fx-rates.service.ts`
- * — same logic, runs inside the upsert transaction so a rate change between
- * the read and the order item write cannot race.
- *
- * Returns null when an AUTO rate is unavailable (no fx_rates row for the
- * currency). Caller (captureCostSnapshot) treats that as best-effort abort
- * and leaves the snapshot null.
- */
-async function resolveFx(
-  profile: { currency: Currency; fxRateMode: FxRateMode; manualFxRate: Decimal | null },
-  tx: Prisma.TransactionClient,
-): Promise<FxResolution | null> {
-  if (profile.currency === 'TRY') {
-    return { rate: new Decimal(1), source: 'TRY-NATIVE' };
-  }
-  if (profile.fxRateMode === 'MANUAL') {
-    if (profile.manualFxRate === null) {
-      throw new Error('Profile has fxRateMode=MANUAL but manualFxRate is null');
-    }
-    return { rate: new Decimal(profile.manualFxRate), source: 'MANUAL' };
-  }
-  const row = await tx.fxRate.findFirst({
-    where: { currency: profile.currency },
-    orderBy: { rateDate: 'desc' },
-  });
-  if (!row) return null;
-  const dateStr = row.rateDate.toISOString().slice(0, 10);
-  return { rate: new Decimal(row.rateToTry), source: `TCMB-${dateStr}` };
-}
-
-/**
- * Capture unit_cost_snapshot for a newly-inserted OrderItem.
- * Best-effort: if FX rate is unavailable or no profiles are attached,
- * exits silently leaving the snapshot null.
- *
- * Mirrors apps/api/src/services/cost-snapshot.service.ts#captureCostSnapshot.
- * The two implementations must stay in sync if the spec changes.
- *
- * No production caller since phase 3B: the order write and the variant-resolution
- * tick enqueue a profit recompute instead of snapshotting here. Kept with the legacy
- * engine until it is deleted in phase 5.
- */
-export async function captureCostSnapshot(
-  orderItemId: string,
-  tx: Prisma.TransactionClient,
-): Promise<void> {
-  const item = await tx.orderItem.findUnique({
-    where: { id: orderItemId },
-    include: { productVariant: true, order: { select: { profitExcludedAt: true } } },
-  });
-
-  if (
-    !item ||
-    item.unitCostSnapshotGross !== null ||
-    !item.productVariantId ||
-    item.order.profitExcludedAt !== null // kâr-dışı: snapshot da donuk (spec 2026-06-12)
-  ) {
-    return;
-  }
-
-  const links = await tx.productVariantCostProfile.findMany({
-    where: { productVariantId: item.productVariantId },
-    include: { profile: true },
-  });
-
-  const activeProfiles = links.map((l) => l.profile).filter((p) => p.archivedAt === null);
-
-  if (activeProfiles.length === 0) return;
-
-  const components: SnapshotComponentData[] = [];
-
-  for (const profile of activeProfiles) {
-    const fx = await resolveFx(profile, tx);
-    if (fx === null) {
-      syncLog.warn('snapshot.fx-unavailable', {
-        orderItemId,
-        profileId: profile.id,
-        currency: profile.currency,
-      });
-      return; // best-effort: abort, leave null
-    }
-    // GROSS konvansiyon (2026-06-16): `profile.amountGross` zaten GROSS (KDV-dahil);
-    // KDV'yi yeniden bölmeyiz, oranı (`profile.vatRate`) taşırız. TRY karşılığı
-    // ×fxRate. Net türetimi (amountGross × 100/(100+vatRate)) downstream kâr motorunda.
-    const amountGrossNative = new Decimal(profile.amountGross);
-
-    components.push({
-      orderItemId,
-      organizationId: item.organizationId ?? '',
-      profileId: profile.id,
-      profileName: profile.name,
-      profileType: profile.type,
-      amountGross: amountGrossNative,
-      currency: profile.currency,
-      vatRate: new Decimal(profile.vatRate),
-      amountInTryGross: amountGrossNative.mul(fx.rate),
-      fxRateMode: profile.fxRateMode,
-      fxRateUsed: fx.rate,
-      fxRateSource: fx.source,
-    });
-  }
-
-  // Aggregate GROSS (TRY) across profiles. Effective vatRate denormalized for
-  // downstream consumers — multi-profile case yields a blended (amount-weighted)
-  // rate so the net split stays exact: net = Σ(grossᵢ × 100/(100+rateᵢ)).
-  const unitCostSnapshotGross = components
-    .reduce((acc, c) => acc.add(c.amountInTryGross), new Decimal(0))
-    .toDecimalPlaces(2);
-  // Blended rate = (Σ grossInTry − Σ netInTry) implied; expressed as the rate
-  // that reproduces the aggregate net. GROSS=0 → rate undefined → NULL.
-  const totalNetInTry = components.reduce((acc, c) => {
-    const r = c.vatRate;
-    const net = c.amountInTryGross.mul(100).div(new Decimal(100).add(r));
-    return acc.add(net);
-  }, new Decimal(0));
-  const unitCostSnapshotVatRate =
-    unitCostSnapshotGross.isZero() || totalNetInTry.isZero()
-      ? null
-      : unitCostSnapshotGross.sub(totalNetInTry).div(totalNetInTry).mul(100).toDecimalPlaces(2);
-
-  await tx.orderItem.update({
-    where: { id: orderItemId },
-    data: {
-      unitCostSnapshotGross,
-      unitCostSnapshotVatRate,
-      snapshotCapturedAt: new Date(),
-    },
-  });
-
-  await tx.orderItemCostSnapshotComponent.createMany({ data: components });
-}
 
 /**
  * Resolve the effective commission for a mapped line, applying the DB category

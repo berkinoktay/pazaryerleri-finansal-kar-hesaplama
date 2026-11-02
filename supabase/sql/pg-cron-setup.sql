@@ -1,49 +1,22 @@
 -- pg_cron job definitions for marketplace sync
 --
 -- Applied AUTOMATICALLY by apply-policies.ts (cron step) on db:push (dev) and
--- db:deploy (prod) — the script creates the pg_cron + pg_net extensions first
--- and skips this file with a warning when the image doesn't ship them. CI sets
--- CI=true, which skips scheduling so cron ticks never race the test suite; the
--- fan-out SQL itself is exercised by packages/sync-core's pg-cron-fanout
--- integration test instead.
+-- db:deploy (prod) — the script creates the pg_cron extension first and skips
+-- this file with a warning when the image doesn't ship it. CI sets CI=true,
+-- which skips scheduling so cron ticks never race the test suite; the fan-out
+-- SQL itself is exercised by packages/sync-core's pg-cron-fanout integration
+-- test instead.
 --
--- This file is environment-independent: the only env-specific values (the fx
--- Edge Function URL + service-role key) are read at RUN time from DB settings
--- (`app.supabase_functions_url`, `app.supabase_service_role_key`) that
--- apply-policies.ts sets from PG_CRON_FUNCTIONS_URL / SUPABASE_SECRET_KEY when
--- present. Unset → the fx job is a silent no-op; all queue fan-out jobs work
--- everywhere with no configuration.
+-- This file is environment-independent: every job runs entirely inside Postgres
+-- (queue fan-out INSERTs + a buffer reset), so no job needs any configuration.
 --
 -- cron.schedule upserts by job name, so re-applying is always safe.
 
--- ─── FX rates daily sync ──────────────────────────────────────────────────────
--- Fetches USD/EUR rates from TCMB (Türkiye Cumhuriyet Merkez Bankası) and
--- upserts them into fx_rates via the fx-rates-sync Edge Function.
---
--- Schedule: 16:00 Istanbul time on business days (Mon–Fri).
--- Istanbul is UTC+3, so 16:00 IST = 13:00 UTC.
--- Cron expression: '0 13 * * 1-5'
---
--- The WHERE guard makes the call a no-op until apply-policies.ts has set both
--- app.* settings for this database — so the job can be scheduled everywhere
--- without a key, and configured environments start firing on the next tick.
---
-SELECT cron.schedule(
-  'fx-rates-sync-daily',
-  '0 13 * * 1-5',
-  $$
-  SELECT net.http_post(
-    url     := current_setting('app.supabase_functions_url', true) || '/fx-rates-sync',
-    headers := jsonb_build_object(
-      'Content-Type',  'application/json',
-      'Authorization', 'Bearer ' || current_setting('app.supabase_service_role_key', true)
-    ),
-    body    := '{}'::jsonb
-  )
-  WHERE current_setting('app.supabase_functions_url', true) IS NOT NULL
-    AND current_setting('app.supabase_service_role_key', true) IS NOT NULL;
-  $$
-);
+-- --- FX rates daily sync (removed) -------------------------------------------
+-- The product is lira-only: the fx-rates-sync job and its Edge Function are gone.
+-- cron.schedule upserts by name, so deleting the block alone would leave the job
+-- running in existing databases, so unschedule it idempotently here.
+SELECT cron.unschedule(jobid) FROM cron.job WHERE jobname = 'fx-rates-sync-daily';
 
 -- ─── Orders delta sync (safety-net polling) ───────────────────────────────────
 -- Webhook (real-time, T+0) is the PRIMARY order ingest path. This hourly cron
@@ -298,10 +271,10 @@ SELECT cron.schedule(
 -- every PERMANENT_FAILED row older than 7 days whenever it fires, so the fire
 -- time only changes how soon over-retained rows are purged, never which rows.
 --
--- Schedule: '0 21 * * *' — 21:00 UTC = 00:00 business time. Türkiye is permanent
--- GMT+3 (no DST since 2016), so this lands at business midnight, matching the
--- fx-rates cron convention (hardcode the UTC equivalent of the local wall-clock
--- time; pg_cron 1.6.4 has no per-job timezone support — verified empirically).
+-- Schedule: '0 21 * * *' -- 21:00 UTC = 00:00 business time. Turkiye is permanent
+-- GMT+3 (no DST since 2016), so this lands at business midnight. The convention
+-- across every job here: hardcode the UTC equivalent of the local wall-clock
+-- time, because pg_cron 1.6.4 has no per-job timezone support (verified empirically).
 --
 -- Prerequisite: db-functions.sql must be applied first (it is — apply-policies
 -- runs every AUTO_APPLIED file before this cron step).

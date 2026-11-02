@@ -347,7 +347,6 @@ export interface TrendyolOrderLine {
   vatRate: number;
   /** Commission rate %. Direct in order response (research §7.2). */
   commission?: number;
-  currencyCode?: string;
   orderLineItemStatusName?: string;
 }
 
