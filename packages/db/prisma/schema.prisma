@@ -2205,6 +2205,10 @@ model MarketplaceFinanceRecord {
   @@index([storeId, paymentOrderId])
   @@index([storeId, parcelUniqueId])
   @@index([organizationId])
+  // The settlement cron's prune DELETE filters by (store_id, family, transaction_type)
+  // and a transaction_date range; this index serves it directly. The name is set
+  // explicitly because the default would exceed Postgres' 63-char identifier limit.
+  @@index([storeId, family, transactionType, transactionDate], map: "marketplace_finance_records_prune_idx")
   @@map("marketplace_finance_records")
 }
 
