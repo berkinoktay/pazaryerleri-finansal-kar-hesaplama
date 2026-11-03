@@ -1,21 +1,28 @@
 /**
- * Profit-exclusion DB guards (design 2026-10-29 profit-engine section 8.3).
+ * Profit-exclusion DB guards (Faz 3E, Berkin 2026-11-03).
  *
- * Exclusion is no longer permanent. The old freeze contract
- * (reject_profit_freeze_breach trigger + orders_profit_freeze_xor_check)
- * made exclusion a one-way door and forbade excluding a calculated order;
- * both were dropped in this phase. What remains is the pair check
- * (orders_profit_exclusion_pair_check): the stamp and its reason must be
- * written and cleared together.
+ * An order whose cost missed its order day is excluded from profit
+ * PERMANENTLY. Phase 3D had dropped the old freeze trigger (which also froze
+ * the legacy profit columns); this phase re-introduces a narrower guard:
  *
- * Assert style follows the house pattern (order-immutability.test.ts): match
- * the constraint name in the rejection so we prove it was OUR check, not a
- * generic error.
+ *   - reject_automatic_exclusion_change (trigger): once an AUTOMATIC exclusion
+ *     reason (COST_DEADLINE_MISSED / LATE_UNCOSTED_ARRIVAL / LEGACY_BACKFILL)
+ *     is stamped, it can never be cleared or re-pointed at another reason.
+ *     Stamping an exclusion on an order that has none stays allowed -- the two
+ *     writers and the backfill script do exactly that. A future, reversible
+ *     user exclusion will carry its own reason and is not covered here.
+ *   - orders_profit_exclusion_pair_check (CHECK): the stamp and its reason must
+ *     be written together, on both INSERT and UPDATE.
+ *
+ * Assert style follows the house pattern (order-immutability.test.ts /
+ * cost-snapshot-immutability.test.ts): match the rejection message so we prove
+ * it was OUR guard (the trigger message, the constraint name), not a generic
+ * error.
  */
 
 import { randomUUID } from 'node:crypto';
 
-import { Prisma, prisma } from '@pazarsync/db';
+import { prisma } from '@pazarsync/db';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -29,7 +36,28 @@ describe('profit exclusion guards', () => {
     await truncateAll();
   });
 
-  it('clears an exclusion stamp together with its reason', async () => {
+  it('rejects clearing an automatic exclusion', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const order = await createOrder(org.id, store.id);
+
+    // Stamping on an order that has none is allowed (OLD reason is NULL).
+    await prisma.order.update({
+      where: { id: order.id },
+      data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
+    });
+
+    // Clearing both columns trips the trigger (SQLSTATE 42501): an automatic
+    // exclusion is permanent.
+    await expect(
+      prisma.order.update({
+        where: { id: order.id },
+        data: { profitExcludedAt: null, profitExclusionReason: null },
+      }),
+    ).rejects.toThrow(/automatic profit exclusion is permanent/);
+  });
+
+  it('rejects changing the reason of an automatic exclusion', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
     const order = await createOrder(org.id, store.id);
@@ -39,46 +67,29 @@ describe('profit exclusion guards', () => {
       data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
     });
 
-    // Clearing both columns in one update used to be rejected by the freeze
-    // trigger ("profit exclusion is permanent"); it must now succeed.
-    await prisma.order.update({
-      where: { id: order.id },
-      data: { profitExcludedAt: null, profitExclusionReason: null },
-    });
-
-    const reread = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
-    expect(reread.profitExcludedAt).toBeNull();
-    expect(reread.profitExclusionReason).toBeNull();
+    // Re-pointing the reason at another automatic reason is just as forbidden.
+    await expect(
+      prisma.order.update({
+        where: { id: order.id },
+        data: { profitExclusionReason: 'LATE_UNCOSTED_ARRIVAL' },
+      }),
+    ).rejects.toThrow(/automatic profit exclusion is permanent/);
   });
 
-  it('excludes and re-includes an order that already carries a legacy estimate', async () => {
+  it('stamps an exclusion on an order that has none', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
     const order = await createOrder(org.id, store.id);
 
+    const stampedAt = new Date();
     await prisma.order.update({
       where: { id: order.id },
-      data: { estimatedNetProfit: new Prisma.Decimal('42.00') },
-    });
-
-    // Stamping an exclusion on a calculated order used to trip both the xor
-    // check (estimate + stamp coexisting) and the trigger ("calculated order
-    // cannot be excluded"); both are gone, so it must succeed.
-    await prisma.order.update({
-      where: { id: order.id },
-      data: { profitExcludedAt: new Date(), profitExclusionReason: 'LEGACY_BACKFILL' },
-    });
-
-    // Re-including the order (clearing the stamp) must also succeed.
-    await prisma.order.update({
-      where: { id: order.id },
-      data: { profitExcludedAt: null, profitExclusionReason: null },
+      data: { profitExcludedAt: stampedAt, profitExclusionReason: 'LATE_UNCOSTED_ARRIVAL' },
     });
 
     const reread = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
-    expect(reread.profitExcludedAt).toBeNull();
-    expect(reread.profitExclusionReason).toBeNull();
-    expect(reread.estimatedNetProfit).not.toBeNull();
+    expect(reread.profitExcludedAt).toEqual(stampedAt);
+    expect(reread.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
   });
 
   it('still rejects an exclusion stamp without a reason', async () => {
@@ -86,7 +97,8 @@ describe('profit exclusion guards', () => {
     const store = await createStore(org.id);
     const order = await createOrder(org.id, store.id);
 
-    // Stamp without a reason violates the surviving pair check (SQLSTATE 23514).
+    // Stamp without a reason violates the pair check (SQLSTATE 23514). The
+    // trigger passes it through (OLD reason is NULL), the constraint catches it.
     await expect(
       prisma.order.update({
         where: { id: order.id },
@@ -113,5 +125,27 @@ describe('profit exclusion guards', () => {
         },
       }),
     ).rejects.toThrow(/orders_profit_exclusion_pair_check/);
+  });
+
+  it('leaves status and cargo updates on an excluded order free', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const order = await createOrder(org.id, store.id);
+
+    await prisma.order.update({
+      where: { id: order.id },
+      data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
+    });
+
+    // An UPDATE that touches neither exclusion column never fires the trigger,
+    // so ordinary status / cargo progress on an excluded order stays free.
+    const updated = await prisma.order.update({
+      where: { id: order.id },
+      data: { status: 'SHIPPED', cargoProviderName: 'Trendyol Express' },
+    });
+
+    expect(updated.status).toBe('SHIPPED');
+    expect(updated.cargoProviderName).toBe('Trendyol Express');
+    expect(updated.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
   });
 });

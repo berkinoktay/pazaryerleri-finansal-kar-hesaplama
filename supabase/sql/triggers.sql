@@ -107,10 +107,58 @@ DROP TRIGGER IF EXISTS orders_estimated_net_profit_write_once ON orders;
 DROP FUNCTION IF EXISTS public.reject_estimated_net_profit_update();
 
 -- ─── reject_profit_freeze_breach (tombstone) ───────────────────────────
--- Exclusion is no longer permanent (design 2026-10-29 §8.3: "Hariç" is a
--- future user exclusion and must be reversible; automatic exclusion was
--- removed in phase 3B). The old freeze trigger made exclusion a one-way door
--- and forbade excluding a calculated order; it is gone. These lines drop the
--- trigger and its function on databases that still carry them.
+-- The old freeze trigger made exclusion a one-way door AND froze the legacy
+-- profit columns of an excluded order. It was dropped in phase 3D (design
+-- 2026-10-29 section 8.3). These lines drop the trigger and its function on
+-- databases that still carry them. The narrower permanence guard below
+-- (reject_automatic_exclusion_change) replaces only its exclusion half --
+-- Berkin reversed the "exclusion is not permanent" reading on 2026-11-03.
 DROP TRIGGER IF EXISTS trg_reject_profit_freeze_breach ON orders;
 DROP FUNCTION IF EXISTS public.reject_profit_freeze_breach();
+
+-- --- reject_automatic_exclusion_change ---------------------------------
+-- Berkin's rule (2026-11-03): an order whose cost missed its order day must
+-- stay out of profit PERMANENTLY. Supply prices drift, so a cost entered after
+-- the day is no longer that day's cost and must never pull the order back into
+-- any net-profit figure. Once an order carries an AUTOMATIC exclusion reason it
+-- can never be un-excluded or re-pointed at another reason.
+--
+-- The guard covers ONLY the automatic reasons -- COST_DEADLINE_MISSED (the
+-- day-end buffer flush), LATE_UNCOSTED_ARRIVAL (a past-day order that arrived
+-- uncosted) and LEGACY_BACKFILL (the operator backfill script). A future
+-- user-chosen exclusion is meant to be reversible and will carry its own
+-- distinct reason, so it is deliberately left out of this list. Stamping an
+-- exclusion on an order that currently has none stays allowed, because OLD's
+-- reason is then NULL (not one of the automatic reasons): the two writers and
+-- the backfill script rely on that, and the pair check still forces the stamp
+-- and its reason to be written together.
+--
+-- Not SECURITY DEFINER: its only job is to deny, so it runs with the UPDATE
+-- caller's privileges, never as postgres.
+CREATE OR REPLACE FUNCTION public.reject_automatic_exclusion_change()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF OLD.profit_exclusion_reason IN ('COST_DEADLINE_MISSED', 'LATE_UNCOSTED_ARRIVAL', 'LEGACY_BACKFILL')
+     AND (NEW.profit_excluded_at IS DISTINCT FROM OLD.profit_excluded_at
+          OR NEW.profit_exclusion_reason IS DISTINCT FROM OLD.profit_exclusion_reason) THEN
+    RAISE EXCEPTION 'automatic profit exclusion is permanent'
+      USING ERRCODE = '42501',
+            HINT = 'An automatic profit exclusion (cost missed the order day) can never be cleared or re-pointed.';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+-- BEFORE UPDATE OF keeps every unrelated order update (status, cargo progress,
+-- estimate refinement) from running this at all. Postgres fires a column-scoped
+-- trigger whenever any listed column appears in the UPDATE's SET list -- exactly
+-- the writes that could tamper with an automatic stamp -- regardless of whether
+-- the value actually changes; the IS DISTINCT FROM checks inside do the real
+-- gating so an idempotent re-stamp of the same values still passes.
+DROP TRIGGER IF EXISTS trg_reject_automatic_exclusion_change ON orders;
+CREATE TRIGGER trg_reject_automatic_exclusion_change
+  BEFORE UPDATE OF profit_excluded_at, profit_exclusion_reason ON orders
+  FOR EACH ROW
+  EXECUTE FUNCTION public.reject_automatic_exclusion_change();
