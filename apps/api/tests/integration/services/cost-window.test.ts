@@ -1,10 +1,17 @@
 import { prisma } from '@pazarsync/db';
-import { hadCostWithinOrderDay } from '@pazarsync/order-sync';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
+import { hadCostWithinOrderDay, stampCostWindowExclusions } from '@pazarsync/order-sync';
 import { getBusinessDayRange } from '@pazarsync/utils';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createCostProfile, createOrganization, createStore } from '../../helpers/factories';
+import {
+  createCostProfile,
+  createOrder,
+  createOrderItem,
+  createOrganization,
+  createStore,
+} from '../../helpers/factories';
 
 // The cost-window helper (Berkin 2026-11-03): true iff every non-cancelled item
 // had a cost entered before the order's business day ended. The day end is the
@@ -308,5 +315,258 @@ describe('hadCostWithinOrderDay', () => {
       items: [{ productVariantId: variantId, isCancelled: false }],
     });
     expect(result).toBe(false);
+  });
+});
+
+// The backfill (Faz 3E, Task 4): stamp the cost-window exclusion on a store's
+// EXISTING orders. A past-day, non-cancelled, not-yet-excluded order whose cost
+// missed its business day is stamped COST_DEADLINE_MISSED -- or LATE_UNCOSTED_ARRIVAL
+// when our first record of it (created_at) is itself after the day closed -- and
+// enqueued for a MANUAL recompute. dryRun returns the counts and writes nothing.
+// See packages/order-sync/src/cost-window.ts (stampCostWindowExclusions).
+
+const IN_TIME = new Date(DAY_END.getTime() - ONE_MINUTE_MS);
+const TOO_LATE = new Date(DAY_END.getTime() + ONE_MINUTE_MS);
+
+// Create a past-day order (orderDate ORDER_DATE) with a single line carrying the
+// given variant, then force its created_at so the reason split is deterministic.
+async function createPastDayOrder(params: {
+  orgId: string;
+  storeId: string;
+  variantId: string | null;
+  createdAt: Date;
+  orderDate?: Date;
+  status?: 'DELIVERED' | 'CANCELLED';
+}): Promise<string> {
+  const order = await createOrder(params.orgId, params.storeId, {
+    orderDate: params.orderDate ?? ORDER_DATE,
+    status: params.status ?? 'DELIVERED',
+  });
+  await createOrderItem(order.id, params.orgId, { productVariantId: params.variantId });
+  await prisma.order.update({ where: { id: order.id }, data: { createdAt: params.createdAt } });
+  return order.id;
+}
+
+function runStamp(params: {
+  organizationId: string;
+  storeId: string;
+  now?: Date;
+  dryRun?: boolean;
+}): Promise<{ readonly costDeadlineMissed: number; readonly lateUncostedArrival: number }> {
+  return prisma.$transaction((tx) =>
+    stampCostWindowExclusions(tx, {
+      organizationId: params.organizationId,
+      storeId: params.storeId,
+      now: params.now ?? new Date(),
+      dryRun: params.dryRun ?? false,
+    }),
+  );
+}
+
+describe('stampCostWindowExclusions', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it('stamps a past-day order whose cost came after its day', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const variantId = await createVariant(org.id, store.id, 'EAN13-BF-MISS');
+    // Cost attached after the day end -> the window was missed. We had the order in
+    // time (created_at before the day end), so the reason is COST_DEADLINE_MISSED.
+    await attachCost({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      attachedAt: TOO_LATE,
+      versionEffectiveFrom: TOO_LATE,
+    });
+    const orderId = await createPastDayOrder({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      createdAt: IN_TIME,
+    });
+
+    const result = await runStamp({ organizationId: org.id, storeId: store.id });
+
+    expect(result).toEqual({ costDeadlineMissed: 1, lateUncostedArrival: 0 });
+    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
+    const queued = await prisma.profitRecomputeRequest.findUnique({ where: { orderId } });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.MANUAL);
+  });
+
+  it('stamps a late arrival as LATE_UNCOSTED_ARRIVAL', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // A resolved but never-costed variant, and our first record of the order lands
+    // after its business day closed -> LATE_UNCOSTED_ARRIVAL.
+    const variantId = await createVariant(org.id, store.id, 'EAN13-BF-LATE');
+    const orderId = await createPastDayOrder({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      createdAt: TOO_LATE,
+    });
+
+    const result = await runStamp({ organizationId: org.id, storeId: store.id });
+
+    expect(result).toEqual({ costDeadlineMissed: 0, lateUncostedArrival: 1 });
+    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
+    const queued = await prisma.profitRecomputeRequest.findUnique({ where: { orderId } });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.MANUAL);
+  });
+
+  it('leaves a timely costed, a cancelled and an already excluded order alone', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+
+    // (1) Timely costed -> the window is satisfied, so it stays in profit.
+    const timelyVariant = await createVariant(org.id, store.id, 'EAN13-BF-OK');
+    await attachCost({
+      orgId: org.id,
+      storeId: store.id,
+      variantId: timelyVariant,
+      attachedAt: IN_TIME,
+      versionEffectiveFrom: IN_TIME,
+    });
+    const timelyId = await createPastDayOrder({
+      orgId: org.id,
+      storeId: store.id,
+      variantId: timelyVariant,
+      createdAt: IN_TIME,
+    });
+
+    // (2) Cancelled + uncosted -> carries no payout, never excluded.
+    const cancelledVariant = await createVariant(org.id, store.id, 'EAN13-BF-CANCEL');
+    const cancelledId = await createPastDayOrder({
+      orgId: org.id,
+      storeId: store.id,
+      variantId: cancelledVariant,
+      createdAt: IN_TIME,
+      status: 'CANCELLED',
+    });
+
+    // (3) Already excluded -> filtered out by the profit_excluded_at IS NULL guard.
+    const excluded = await createOrder(org.id, store.id, { orderDate: ORDER_DATE });
+    await prisma.order.update({
+      where: { id: excluded.id },
+      data: {
+        profitExcludedAt: new Date(DAY_END.getTime() - 2 * ONE_MINUTE_MS),
+        profitExclusionReason: 'LATE_UNCOSTED_ARRIVAL',
+      },
+    });
+
+    const result = await runStamp({ organizationId: org.id, storeId: store.id });
+
+    expect(result).toEqual({ costDeadlineMissed: 0, lateUncostedArrival: 0 });
+    expect(
+      (await prisma.order.findUniqueOrThrow({ where: { id: timelyId } })).profitExcludedAt,
+    ).toBeNull();
+    expect(
+      (await prisma.order.findUniqueOrThrow({ where: { id: cancelledId } })).profitExcludedAt,
+    ).toBeNull();
+    // The pre-excluded order kept its original reason (no re-stamp).
+    expect(
+      (await prisma.order.findUniqueOrThrow({ where: { id: excluded.id } })).profitExclusionReason,
+    ).toBe('LATE_UNCOSTED_ARRIVAL');
+    expect(await prisma.profitRecomputeRequest.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it("leaves today's orders alone", async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // Uncosted, but its business day is today -> the window is still open, so it is
+    // not a backfill candidate.
+    const variantId = await createVariant(org.id, store.id, 'EAN13-BF-TODAY');
+    const orderId = await createPastDayOrder({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      createdAt: new Date(),
+      orderDate: new Date(),
+    });
+
+    const result = await runStamp({ organizationId: org.id, storeId: store.id });
+
+    expect(result).toEqual({ costDeadlineMissed: 0, lateUncostedArrival: 0 });
+    expect(
+      (await prisma.order.findUniqueOrThrow({ where: { id: orderId } })).profitExcludedAt,
+    ).toBeNull();
+    expect(await prisma.profitRecomputeRequest.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it('writes nothing in dry-run mode', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const variantId = await createVariant(org.id, store.id, 'EAN13-BF-DRY');
+    const orderId = await createPastDayOrder({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      createdAt: IN_TIME,
+    });
+
+    const result = await runStamp({ organizationId: org.id, storeId: store.id, dryRun: true });
+
+    // The count reflects what a real run would stamp, but nothing is written.
+    expect(result).toEqual({ costDeadlineMissed: 1, lateUncostedArrival: 0 });
+    expect(
+      (await prisma.order.findUniqueOrThrow({ where: { id: orderId } })).profitExcludedAt,
+    ).toBeNull();
+    expect(await prisma.profitRecomputeRequest.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it('never touches another store or organization', async () => {
+    const orgA = await createOrganization();
+    const storeA = await createStore(orgA.id);
+    const storeA2 = await createStore(orgA.id);
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+
+    // One missed past-day order in each store/org, all identical in shape.
+    const targetVariant = await createVariant(orgA.id, storeA.id, 'EAN13-BF-TARGET');
+    const targetId = await createPastDayOrder({
+      orgId: orgA.id,
+      storeId: storeA.id,
+      variantId: targetVariant,
+      createdAt: IN_TIME,
+    });
+    const siblingVariant = await createVariant(orgA.id, storeA2.id, 'EAN13-BF-SIBLING');
+    const siblingId = await createPastDayOrder({
+      orgId: orgA.id,
+      storeId: storeA2.id,
+      variantId: siblingVariant,
+      createdAt: IN_TIME,
+    });
+    const otherVariant = await createVariant(orgB.id, storeB.id, 'EAN13-BF-OTHER');
+    const otherId = await createPastDayOrder({
+      orgId: orgB.id,
+      storeId: storeB.id,
+      variantId: otherVariant,
+      createdAt: IN_TIME,
+    });
+
+    const result = await runStamp({ organizationId: orgA.id, storeId: storeA.id });
+
+    // Only storeA's order is counted and stamped.
+    expect(result).toEqual({ costDeadlineMissed: 1, lateUncostedArrival: 0 });
+    expect(
+      (await prisma.order.findUniqueOrThrow({ where: { id: targetId } })).profitExcludedAt,
+    ).not.toBeNull();
+    expect(
+      (await prisma.order.findUniqueOrThrow({ where: { id: siblingId } })).profitExcludedAt,
+    ).toBeNull();
+    expect(
+      (await prisma.order.findUniqueOrThrow({ where: { id: otherId } })).profitExcludedAt,
+    ).toBeNull();
   });
 });
