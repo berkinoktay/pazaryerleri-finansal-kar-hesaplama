@@ -448,6 +448,7 @@ export interface FinanceRecordInput {
   readonly transactionType: string;
   readonly recordId: string;
   readonly shipmentPackageId?: string | null;
+  readonly orderNumber?: string | null;
   readonly barcode?: string | null;
   readonly paymentOrderId?: string | null;
   readonly parcelUniqueId?: string | null;
@@ -471,6 +472,7 @@ export async function insertFinanceRecord(input: FinanceRecordInput): Promise<vo
       transactionType: input.transactionType,
       recordId: input.recordId,
       shipmentPackageId: input.shipmentPackageId ?? null,
+      orderNumber: input.orderNumber ?? null,
       barcode: input.barcode ?? null,
       paymentOrderId: input.paymentOrderId ?? null,
       parcelUniqueId: input.parcelUniqueId ?? null,

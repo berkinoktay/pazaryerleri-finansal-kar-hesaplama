@@ -14,6 +14,7 @@ import { prisma, type Prisma } from '@pazarsync/db';
 import {
   ProfitIssueCode,
   ProfitLineLevel,
+  ProfitLineSource,
   ProfitLineType,
   ProfitStatementView,
   ProfitStatus,
@@ -314,6 +315,105 @@ describe('recomputeParcelProfit', () => {
     // ...and different statuses: the estimate view never left ESTIMATED.
     expect(estimate.status).toBe(ProfitStatus.ESTIMATED);
     expect(bestKnown.status).toBe(ProfitStatus.PARTIALLY_SETTLED);
+  });
+
+  it('nets a fully returned couponed item whose return records carry no package id', async () => {
+    const orderNumber = 'ORDER-4B-E2E';
+    const parcel = await seedMelontikParcel();
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { platformOrderNumber: orderNumber },
+    });
+    const base = { storeId: parcel.storeId, organizationId: parcel.organizationId } as const;
+    const barcode = MELONTIK.items.a.barcode;
+
+    // The sale side lands on the outbound package; the Return and both reversals carry
+    // NO shipment package id and bind only by order number + barcode (Gorev 4B). A fully
+    // returned couponed item nets each leg to the same amount:
+    //   SALE = 333.50 - 3.34 - 250.00 = 80.16; COMMISSION = 66.70 - 0.67 - 50.00 = 16.03;
+    //   the return legs net the same, so sale minus return is zero.
+    await insertFinanceRecord({
+      ...base,
+      family: 'SETTLEMENT',
+      transactionType: 'Sale',
+      recordId: 'sale-a',
+      shipmentPackageId: parcel.platformOrderId,
+      barcode,
+      credit: '333.50',
+      commissionAmount: '66.70',
+    });
+    await insertFinanceRecord({
+      ...base,
+      family: 'SETTLEMENT',
+      transactionType: 'Discount',
+      recordId: 'disc-a',
+      shipmentPackageId: parcel.platformOrderId,
+      barcode,
+      debt: '3.34',
+      commissionAmount: '0.67',
+    });
+    await insertFinanceRecord({
+      ...base,
+      family: 'SETTLEMENT',
+      transactionType: 'Coupon',
+      recordId: 'coup-a',
+      shipmentPackageId: parcel.platformOrderId,
+      barcode,
+      debt: '250.00',
+      commissionAmount: '50.00',
+    });
+    await insertFinanceRecord({
+      ...base,
+      family: 'SETTLEMENT',
+      transactionType: 'Return',
+      recordId: 'ret-a',
+      shipmentPackageId: null,
+      orderNumber,
+      barcode,
+      debt: '333.50',
+      commissionAmount: '66.70',
+    });
+    await insertFinanceRecord({
+      ...base,
+      family: 'SETTLEMENT',
+      transactionType: 'DiscountCancel',
+      recordId: 'dc-a',
+      shipmentPackageId: null,
+      orderNumber,
+      barcode,
+      credit: '3.34',
+      commissionAmount: '0.67',
+    });
+    await insertFinanceRecord({
+      ...base,
+      family: 'SETTLEMENT',
+      transactionType: 'CouponCancel',
+      recordId: 'cc-a',
+      shipmentPackageId: null,
+      orderNumber,
+      barcode,
+      credit: '250.00',
+      commissionAmount: '50.00',
+    });
+
+    const result = await recompute(parcel.organizationId, parcel.orderId);
+    expect(result.changed).toBe(true);
+
+    // The actual (marketplace-record) lines the mapper netted for item A.
+    const actualLines = await prisma.profitLine.findMany({
+      where: {
+        orderId: parcel.orderId,
+        orderItemId: parcel.itemA,
+        source: ProfitLineSource.MARKETPLACE_RECORD,
+      },
+    });
+    const grossOf = (type: ProfitLineType): string | undefined =>
+      actualLines.find((line) => line.type === type)?.amountGross.toFixed(2);
+
+    expect(grossOf(ProfitLineType.SALE)).toBe('80.16');
+    expect(grossOf(ProfitLineType.SALE_RETURN)).toBe('80.16');
+    expect(grossOf(ProfitLineType.COMMISSION)).toBe('16.03');
+    expect(grossOf(ProfitLineType.COMMISSION_REFUND)).toBe('16.03');
   });
 
   it('merges loader issues into the statements', async () => {

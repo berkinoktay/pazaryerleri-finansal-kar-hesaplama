@@ -15,6 +15,7 @@ import { ProfitIssueCode, ProfitLineType } from '@pazarsync/db/enums';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { estimateTrendyolParcel } from '../../marketplaces/trendyol/estimate-parcel';
+import { mapTrendyolRecords } from '../../marketplaces/trendyol/map-records';
 import {
   TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
   TRENDYOL_CARGO_RETURN_ITEM_TYPE,
@@ -55,6 +56,7 @@ interface FinanceRecordInput {
   readonly transactionType: string;
   readonly recordId: string;
   readonly shipmentPackageId?: string | null;
+  readonly orderNumber?: string | null;
   readonly barcode?: string | null;
   readonly paymentOrderId?: string | null;
   readonly parcelUniqueId?: string | null;
@@ -77,6 +79,7 @@ async function insertFinanceRecord(input: FinanceRecordInput): Promise<void> {
       transactionType: input.transactionType,
       recordId: input.recordId,
       shipmentPackageId: input.shipmentPackageId ?? null,
+      orderNumber: input.orderNumber ?? null,
       barcode: input.barcode ?? null,
       paymentOrderId: input.paymentOrderId ?? null,
       parcelUniqueId: input.parcelUniqueId ?? null,
@@ -891,6 +894,185 @@ describe('loadTrendyolParcel', () => {
     expect(loaded.records.map((r) => r.recordId)).toEqual(['sale-a']);
     expect(loaded.records.every((r) => r.transactionType !== 'PaymentOrder')).toBe(true);
     expect(loaded.cargoItems).toHaveLength(0);
+  });
+
+  it('binds a package-less settlement record by order number and barcode', async () => {
+    const orderNumber = 'ORDER-4B-BIND';
+    const parcel = await seedMelontikParcel();
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { platformOrderNumber: orderNumber },
+    });
+    const base = { storeId: parcel.storeId, organizationId: parcel.organizationId } as const;
+
+    // A Return carrying no shipment package id, named only by its order number and
+    // barcode: the third binding layer must reach it (Gorev 4B).
+    await insertFinanceRecord({
+      ...base,
+      family: 'SETTLEMENT',
+      transactionType: 'Return',
+      recordId: 'ret-packageless',
+      shipmentPackageId: null,
+      orderNumber,
+      barcode: MELONTIK.items.a.barcode,
+      debt: '491.28',
+      commissionAmount: '93.34',
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    expect(loaded.loadIssues).toEqual([]);
+    expect(loaded.records.map((r) => r.recordId)).toContain('ret-packageless');
+
+    // Driven through the estimate + mapper, the bound return nets a SALE_RETURN line.
+    const estimate = estimateTrendyolParcel(loaded.estimateInput);
+    const mapped = mapTrendyolRecords({
+      snapshot: loaded.estimateInput.snapshot,
+      attributes: loaded.estimateInput.attributes,
+      fees: loaded.estimateInput.reference.fees,
+      records: loaded.records,
+      cargoItems: loaded.cargoItems,
+      estimateLines: estimate.lines,
+    });
+    const saleReturn = mapped.lines.find(
+      (line) => line.type === ProfitLineType.SALE_RETURN && line.orderItemId === parcel.itemA,
+    );
+    expect(saleReturn?.amount.gross.toFixed(2)).toBe('491.28');
+  });
+
+  it('leaves a package-less record unbound when two parcels of the order carry its barcode', async () => {
+    const orderNumber = 'ORDER-4B-SPLIT';
+    const parcel = await seedMelontikParcel();
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { platformOrderNumber: orderNumber },
+    });
+    const base = { storeId: parcel.storeId, organizationId: parcel.organizationId } as const;
+
+    // A second parcel of the same order number (a split shipment) that also carries
+    // item A's barcode: the record cannot be attributed to one parcel over the other.
+    const siblingOrder = await prisma.order.create({
+      data: {
+        organizationId: parcel.organizationId,
+        storeId: parcel.storeId,
+        platformOrderId: `sibling-${randomUUID().slice(0, 8)}`,
+        platformOrderNumber: orderNumber,
+        orderDate: MELONTIK.orderDate,
+        status: 'DELIVERED',
+      },
+    });
+    await prisma.orderItem.create({
+      data: {
+        orderId: siblingOrder.id,
+        organizationId: parcel.organizationId,
+        quantity: 1,
+        barcode: MELONTIK.items.a.barcode,
+        lineListGross: '100.00',
+        lineSaleGross: '100.00',
+        lineSellerDiscountGross: '0',
+        saleVatRate: '10',
+        commissionRate: '19',
+        commissionGross: '0',
+        commissionVatRate: '20',
+      },
+    });
+
+    await insertFinanceRecord({
+      ...base,
+      family: 'SETTLEMENT',
+      transactionType: 'Return',
+      recordId: 'ret-ambiguous',
+      shipmentPackageId: null,
+      orderNumber,
+      barcode: MELONTIK.items.a.barcode,
+      debt: '491.28',
+    });
+
+    const loadedPrimary = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+    const loadedSibling = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: siblingOrder.id,
+    });
+
+    // Neither parcel's load picks up the ambiguous record.
+    expect(loadedPrimary.records.map((r) => r.recordId)).not.toContain('ret-ambiguous');
+    expect(loadedSibling.records.map((r) => r.recordId)).not.toContain('ret-ambiguous');
+    // No spurious issue is raised for the sibling parcels either.
+    expect(loadedPrimary.loadIssues).toEqual([]);
+    expect(loadedSibling.loadIssues).toEqual([]);
+  });
+
+  it('does not bind a record whose package id is set but matches nothing', async () => {
+    const orderNumber = 'ORDER-4B-SETPKG';
+    const parcel = await seedMelontikParcel();
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { platformOrderNumber: orderNumber },
+    });
+    const base = { storeId: parcel.storeId, organizationId: parcel.organizationId } as const;
+
+    // A non-null shipment package id that matches no outbound package and no claim's
+    // return package. The order number and barcode match, but a set-but-unmatched
+    // package id is never guessed by the order-number layer.
+    await insertFinanceRecord({
+      ...base,
+      family: 'SETTLEMENT',
+      transactionType: 'Return',
+      recordId: 'ret-wrong-pkg',
+      shipmentPackageId: 'unknown-package-id',
+      orderNumber,
+      barcode: MELONTIK.items.a.barcode,
+      debt: '491.28',
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    expect(loaded.records.map((r) => r.recordId)).not.toContain('ret-wrong-pkg');
+    expect(loaded.records).toHaveLength(0);
+  });
+
+  it("never binds another store's package-less record", async () => {
+    const orderNumber = 'ORDER-4B-STORE';
+    const parcel = await seedMelontikParcel();
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { platformOrderNumber: orderNumber },
+    });
+    const otherStoreId = await createAdditionalStore({
+      organizationId: parcel.organizationId,
+      name: 'Rival Store',
+    });
+
+    // Same order number and barcode, but the record lives in another store: the
+    // store-scoped candidate query must never reach it.
+    await insertFinanceRecord({
+      storeId: otherStoreId,
+      organizationId: parcel.organizationId,
+      family: 'SETTLEMENT',
+      transactionType: 'Return',
+      recordId: 'ret-other-store',
+      shipmentPackageId: null,
+      orderNumber,
+      barcode: MELONTIK.items.a.barcode,
+      debt: '491.28',
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    expect(loaded.records.map((r) => r.recordId)).not.toContain('ret-other-store');
+    expect(loaded.records).toHaveLength(0);
   });
 
   it('falls back to the standard fee for a non-same-day parcel with no fast definition', async () => {

@@ -647,6 +647,41 @@ describe('ingestFinanceRecords', () => {
     expect(siblingRow).toBeNull();
   });
 
+  it('enqueues the parcel a package-less record names by order number and barcode', async () => {
+    const parcel = await seedMelontikParcel();
+    const orderNumber = 'ORDER-4B-ENQUEUE';
+    // The parcel order carries this platform order number, and item A carries the barcode
+    // the package-less record names.
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { platformOrderNumber: orderNumber },
+    });
+
+    // A Return with no shipment package id and no payment order: only the order-number +
+    // barcode branch can resolve it to the parcel.
+    const result = await ingestFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platform: Platform.TRENDYOL,
+      records: [
+        trendyolSettlementRecordInput(
+          'Return',
+          financialTx({
+            id: 'ret-pkgless',
+            shipmentPackageId: null,
+            orderNumber,
+            barcode: MELONTIK.items.a.barcode,
+            debt: 50,
+          }),
+        ),
+      ],
+    });
+
+    expect(result.stored).toBe(1);
+    expect(result.enqueuedOrders).toBe(1);
+    expect(await queuedOrderIds()).toEqual([parcel.orderId]);
+  });
+
   it('stores nothing when the store does not belong to the organization', async () => {
     const parcel = await seedMelontikParcel();
     const carrierId = await upsertMelontikCarrier();

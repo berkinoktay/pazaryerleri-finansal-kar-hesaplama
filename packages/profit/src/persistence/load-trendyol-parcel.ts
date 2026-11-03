@@ -244,9 +244,21 @@ export async function loadTrendyolParcel(
   const acceptedReturns = buildAcceptedReturns(order.claims, order.items);
 
   // --- Raw finance records + cargo items ---
+  // The barcodes the mapper matches records against: every item's barcode (all items
+  // are active here, decision 7). The package-less binding below reuses this set.
+  const itemBarcodes = [
+    ...new Set(
+      order.items
+        .map((item) => item.barcode)
+        .filter((barcode): barcode is string => barcode !== null),
+    ),
+  ];
   const loadIssues: ProfitIssue[] = [];
   const { records, cargoItems } = await loadFinanceRecords(tx, {
     storeId,
+    orderId: order.id,
+    platformOrderNumber: order.platformOrderNumber,
+    itemBarcodes,
     platformOrderId: order.platformOrderId,
     cargoTrackingNumber: order.cargoTrackingNumber,
     claims: order.claims,
@@ -728,15 +740,20 @@ function unmappedRecordIssue(row: FinanceRow): ProfitIssue {
 /**
  * The raw settlement/otherfinancials records and cargo-invoice items of the parcel,
  * always filtered by the order's store. Settlement rows match the order's outbound
- * package or any return package; PaymentOrder rows match those settlements' payment
- * orders; cargo items match the order's or a claim's cargo tracking number. A row
- * the loader cannot map (an unknown transaction type, or a cargo item with no serial
- * or amount) becomes a non-blocking issue instead of being dropped silently.
+ * package or any return package, plus package-less rows bound by order number and
+ * barcode (see `loadPackagelessSettlementRows`); PaymentOrder rows match those
+ * settlements' payment orders; cargo items match the order's or a claim's cargo
+ * tracking number. A row the loader cannot map (an unknown transaction type, or a
+ * cargo item with no serial or amount) becomes a non-blocking issue instead of being
+ * dropped silently.
  */
 async function loadFinanceRecords(
   tx: Prisma.TransactionClient,
   params: {
     readonly storeId: string;
+    readonly orderId: string;
+    readonly platformOrderNumber: string | null;
+    readonly itemBarcodes: readonly string[];
     readonly platformOrderId: string;
     readonly cargoTrackingNumber: bigint | null;
     readonly claims: readonly {
@@ -746,18 +763,37 @@ async function loadFinanceRecords(
     readonly issues: ProfitIssue[];
   },
 ): Promise<{ records: TrendyolSettlementRecord[]; cargoItems: TrendyolCargoInvoiceItem[] }> {
-  const { storeId, platformOrderId, cargoTrackingNumber, claims, issues } = params;
+  const {
+    storeId,
+    orderId,
+    platformOrderNumber,
+    itemBarcodes,
+    platformOrderId,
+    cargoTrackingNumber,
+    claims,
+    issues,
+  } = params;
 
   const returnPackageIds = claims
     .map((claim) => claim.orderShipmentPackageId)
     .filter((id): id is string => id !== null);
-  const settlementRows = await tx.marketplaceFinanceRecord.findMany({
+  const packageSettlementRows = await tx.marketplaceFinanceRecord.findMany({
     where: {
       storeId,
       family: FinanceRecordFamily.SETTLEMENT,
       shipmentPackageId: { in: [platformOrderId, ...returnPackageIds] },
     },
   });
+
+  // Package-less settlement rows (Gorev 4B) are appended here, BEFORE the payment-order
+  // ids are collected, so their payment cycle loads too.
+  const packagelessRows = await loadPackagelessSettlementRows(tx, {
+    storeId,
+    orderId,
+    platformOrderNumber,
+    itemBarcodes,
+  });
+  const settlementRows = [...packageSettlementRows, ...packagelessRows];
 
   const paymentOrderIds = [
     ...new Set(
@@ -832,4 +868,71 @@ async function loadFinanceRecords(
   }
 
   return { records, cargoItems };
+}
+
+/**
+ * The package-less settlement rows (shipment_package_id NULL) that bind to this parcel
+ * by order number and barcode (Gorev 4B). Trendyol returns and their coupon/discount
+ * reversals can carry the RETURN package id or none at all; the legacy third binding
+ * layer matched these dateless-package rows by order number and barcode, used ONLY when
+ * the package id is null -- a non-null but unmatched package id is never guessed.
+ *
+ * A row binds only when all three hold: (a) its order_number equals the parcel's
+ * platform order number; (b) one of the parcel's items (the same barcode set the mapper
+ * matches against) carries the row's barcode; (c) no OTHER parcel of the same order
+ * number in the same store carries that barcode (a split shipment makes the row
+ * ambiguous, so it binds to neither, is never counted twice, and raises no spurious
+ * sibling warning). Returns [] when the parcel has no platform order number or no item
+ * barcode -- there is no key to bind on. Both queries are store-scoped (tenant defense);
+ * the sibling check reaches order_items only through orders of this store.
+ */
+async function loadPackagelessSettlementRows(
+  tx: Prisma.TransactionClient,
+  params: {
+    readonly storeId: string;
+    readonly orderId: string;
+    readonly platformOrderNumber: string | null;
+    readonly itemBarcodes: readonly string[];
+  },
+): Promise<FinanceRow[]> {
+  const { storeId, orderId, platformOrderNumber, itemBarcodes } = params;
+  if (platformOrderNumber === null || itemBarcodes.length === 0) {
+    return [];
+  }
+
+  const candidates = await tx.marketplaceFinanceRecord.findMany({
+    where: {
+      storeId,
+      family: FinanceRecordFamily.SETTLEMENT,
+      shipmentPackageId: null,
+      orderNumber: platformOrderNumber,
+      barcode: { in: [...itemBarcodes] },
+    },
+  });
+  if (candidates.length === 0) {
+    return [];
+  }
+
+  // Sibling check: the barcodes another parcel of the same order number (same store)
+  // carries. A candidate whose barcode a sibling also carries is ambiguous and binds to
+  // neither parcel. Reached only through this store's orders, so no other tenant leaks.
+  const candidateBarcodes = [
+    ...new Set(
+      candidates.map((row) => row.barcode).filter((barcode): barcode is string => barcode !== null),
+    ),
+  ];
+  const siblingItems = await tx.orderItem.findMany({
+    where: {
+      barcode: { in: candidateBarcodes },
+      order: { storeId, platformOrderNumber, id: { not: orderId } },
+    },
+    select: { barcode: true },
+  });
+  const siblingBarcodes = new Set(
+    siblingItems
+      .map((item) => item.barcode)
+      .filter((barcode): barcode is string => barcode !== null),
+  );
+
+  return candidates.filter((row) => row.barcode !== null && !siblingBarcodes.has(row.barcode));
 }

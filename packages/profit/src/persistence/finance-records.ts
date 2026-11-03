@@ -37,7 +37,13 @@ const NUMERIC_ID = /^\d+$/;
  */
 type FinanceRecordBindingKey = Pick<
   FinanceRecordInput,
-  'family' | 'transactionType' | 'shipmentPackageId' | 'paymentOrderId' | 'parcelUniqueId'
+  | 'family'
+  | 'transactionType'
+  | 'shipmentPackageId'
+  | 'paymentOrderId'
+  | 'parcelUniqueId'
+  | 'orderNumber'
+  | 'barcode'
 >;
 
 /** One marketplace_finance_records VALUES tuple; every column after store_id. */
@@ -163,6 +169,29 @@ function distinctKeys(
   return [...keys];
 }
 
+/** One (orderNumber, barcode) binding pair of a package-less settlement record. */
+interface PackagelessPair {
+  readonly orderNumber: string;
+  readonly barcode: string;
+}
+
+/**
+ * Distinct (orderNumber, barcode) pairs of the package-less SETTLEMENT records (no
+ * shipment package id) whose order number and barcode are both set. These feed the B7
+ * order-number + barcode branch; a record missing either key cannot bind that way.
+ */
+function distinctPackagelessPairs(records: readonly FinanceRecordBindingKey[]): PackagelessPair[] {
+  const byKey = new Map<string, PackagelessPair>();
+  for (const record of records) {
+    if (record.family !== FinanceRecordFamily.SETTLEMENT) continue;
+    if (record.shipmentPackageId !== null) continue;
+    const { orderNumber, barcode } = record;
+    if (orderNumber === null || barcode === null) continue;
+    byKey.set(`${orderNumber}\u0000${barcode}`, { orderNumber, barcode });
+  }
+  return [...byKey.values()];
+}
+
 /** Distinct numeric-only cargo tracking numbers (as bigint) among CARGO records. */
 function distinctCargoTrackingNumbers(records: readonly FinanceRecordBindingKey[]): bigint[] {
   const byText = new Map<string, bigint>();
@@ -178,9 +207,11 @@ function distinctCargoTrackingNumbers(records: readonly FinanceRecordBindingKey[
 /**
  * The store's orders the given records bind to, mirroring the loader exactly. A
  * settlement record binds the order whose outbound package is its shipment package,
- * or a claim's return package; a PaymentOrder record binds the orders tied to this
- * store's stored settlement records carrying that payment order; a cargo item binds
- * the order (or a claim) whose cargo tracking number is its parcel unique id.
+ * or a claim's return package; a package-less settlement record (no shipment package
+ * id) binds the order whose platform order number and item barcode match the record's
+ * order number and barcode; a PaymentOrder record binds the orders tied to this store's
+ * stored settlement records carrying that payment order; a cargo item binds the order
+ * (or a claim) whose cargo tracking number is its parcel unique id.
  *
  * Each binding is one branch of a `UNION`, so every branch hits an index instead of
  * sharing one `WHERE o.store_id = $s AND (A OR B OR EXISTS ... OR EXISTS ...)` whose
@@ -188,6 +219,10 @@ function distinctCargoTrackingNumbers(records: readonly FinanceRecordBindingKey[
  * every batch. Only the branches whose key array is non-empty are built; the `UNION`
  * returns distinct order ids. Every branch filters every table it reads by the store
  * (tenant defense), so another tenant's order can never surface.
+ *
+ * The package-less branch is deliberately generous: it enqueues every candidate parcel
+ * of the order number (no sibling check), because the loader makes the real binding
+ * decision and an extra recompute is harmless (an unchanged content hash is a no-op).
  */
 async function resolveAffectedOrderIds(
   tx: Prisma.TransactionClient,
@@ -207,11 +242,13 @@ async function resolveAffectedOrderIds(
     (record) => record.paymentOrderId,
   );
   const cargoTrackingNumbers = distinctCargoTrackingNumbers(records);
+  const packagelessPairs = distinctPackagelessPairs(records);
 
   if (
     shipmentPackageIds.length === 0 &&
     paymentOrderIds.length === 0 &&
-    cargoTrackingNumbers.length === 0
+    cargoTrackingNumbers.length === 0 &&
+    packagelessPairs.length === 0
   ) {
     return [];
   }
@@ -267,6 +304,21 @@ async function resolveAffectedOrderIds(
       WHERE r.store_id = ${storeId}::uuid
         AND r.family = 'SETTLEMENT'::"FinanceRecordFamily"
         AND r.payment_order_id = ANY(${paymentOrderIds}::text[])`);
+  }
+  if (packagelessPairs.length > 0) {
+    // B7: a package-less settlement row (no shipment package id) names an order by its
+    // (order number, barcode) pair. Any order of the store whose platform_order_number
+    // and an item barcode match the PAIR qualifies; the join is on the unnested pair so
+    // an order-number of one row never borrows another row's barcode.
+    const pairOrderNumbers = packagelessPairs.map((pair) => pair.orderNumber);
+    const pairBarcodes = packagelessPairs.map((pair) => pair.barcode);
+    branches.push(Prisma.sql`
+      SELECT o.id AS "id"
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.id
+      JOIN unnest(${pairOrderNumbers}::text[], ${pairBarcodes}::text[]) AS k(order_number, barcode)
+        ON o.platform_order_number = k.order_number AND oi.barcode = k.barcode
+      WHERE o.store_id = ${storeId}::uuid`);
   }
 
   const rows = await tx.$queryRaw<{ id: string }[]>`${Prisma.join(branches, ' UNION ')}`;
@@ -334,7 +386,9 @@ export async function ingestFinanceRecords(
  *
  * The deleted rows' binding keys feed `resolveAffectedOrderIds` -- the same UNION
  * branches the ingest uses -- and the bound orders are enqueued with the
- * `FINANCE_RECORD` reason so their profit is recomputed without the stale row.
+ * `FINANCE_RECORD` reason so their profit is recomputed without the stale row. The
+ * RETURNING clause includes `order_number` and `barcode`, so a pruned package-less row
+ * enqueues its order through the order-number + barcode branch too.
  */
 export async function pruneUnseenFinanceRecords(
   tx: Prisma.TransactionClient,
@@ -371,7 +425,9 @@ export async function pruneUnseenFinanceRecords(
       r.transaction_type AS "transactionType",
       r.shipment_package_id AS "shipmentPackageId",
       r.payment_order_id AS "paymentOrderId",
-      r.parcel_unique_id AS "parcelUniqueId"
+      r.parcel_unique_id AS "parcelUniqueId",
+      r.order_number AS "orderNumber",
+      r.barcode AS "barcode"
   `;
   if (deleted.length === 0) {
     return { pruned: 0, enqueuedOrders: 0 };
