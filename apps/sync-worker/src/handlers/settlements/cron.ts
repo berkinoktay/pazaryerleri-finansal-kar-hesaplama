@@ -1,6 +1,6 @@
 // Settlement cron module handler (PR-7 commit 8).
 //
-// One chunk = one full settlement window scan (3 settlements transactionTypes
+// One chunk = one full settlement window scan (6 settlements transactionTypes
 // + 3 otherfinancials types). Single-chunk semantics chosen because:
 //   - 60-day window total volume << orders epic's 90-day backfill
 //   - Per-row $transaction isolation already gives partial-fail recovery

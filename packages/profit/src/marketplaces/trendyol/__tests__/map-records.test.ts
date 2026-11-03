@@ -582,11 +582,11 @@ describe('mapTrendyolRecords', () => {
     const stoppage = makeRecord({ recordId: 'st-1', transactionType: 'Stoppage' });
     const wire = makeRecord({ recordId: 'wt-1', transactionType: 'WireTransfer' });
     // ProvisionPositive is still UNVERIFIED (Coupon now maps to DISCOUNT), so it is the
-    // unverified example the mapper flags.
+    // unverified example the mapper flags. It never reaches barcode matching, so it
+    // carries no barcode.
     const provision = makeRecord({
       recordId: 'pv-1',
       transactionType: 'ProvisionPositive',
-      barcode: 'bc-a',
     });
 
     const result = mapTrendyolRecords({
@@ -1213,6 +1213,183 @@ describe('mapTrendyolRecords', () => {
         code: ProfitIssueCode.UNMAPPED_MARKETPLACE_RECORD,
         orderItemId: null,
         detail: 'EXPORT_RETURN:dc-1',
+      },
+    ]);
+  });
+
+  it('drops both return lines and flags NEGATIVE_NET when the reversals exceed the return', () => {
+    // A reversal credit larger than the Return debt would drive the net return negative
+    // (reversal 150.00 > return 100.00, and reversal commission 30.00 > return commission
+    // 20.00). The net turns negative on both legs, so neither line is written and the
+    // item is flagged exactly like any other negative net.
+    const snapshot = makeParcel({
+      items: [
+        makeItem({ orderItemId: 'a', listGross: '333.50', saleVatRatePct: '20', barcode: 'bc-a' }),
+      ],
+    });
+    const records = [
+      makeRecord({
+        recordId: 'ret-1',
+        transactionType: 'Return',
+        barcode: 'bc-a',
+        debt: '100.00',
+        commissionAmount: '20.00',
+      }),
+      makeRecord({
+        recordId: 'cc-1',
+        transactionType: 'CouponCancel',
+        barcode: 'bc-a',
+        credit: '150.00',
+        commissionAmount: '30.00',
+      }),
+    ];
+
+    const result = mapTrendyolRecords({
+      snapshot,
+      attributes: makeTrendyolAttributes(),
+      fees: FEES,
+      records,
+      cargoItems: [],
+      estimateLines: [],
+    });
+
+    expect(result.lines.find((line) => line.type === ProfitLineType.SALE_RETURN)).toBeUndefined();
+    expect(
+      result.lines.find((line) => line.type === ProfitLineType.COMMISSION_REFUND),
+    ).toBeUndefined();
+    expect(result.issues).toEqual([
+      { code: ProfitIssueCode.AMBIGUOUS_RECORD_MATCH, orderItemId: 'a', detail: 'NEGATIVE_NET:a' },
+    ]);
+  });
+
+  it('nets a partial return of a multi-unit item with its reversal share', () => {
+    // A two-unit item: both units sell (two Sale rows of 100.00, each with a 10.00 Coupon),
+    // but only one unit is returned (one Return of 100.00 with its 10.00 CouponCancel). The
+    // sale legs cover both units (200.00 - 20.00 = 180.00) while the return legs cover only
+    // the returned unit (100.00 - 10.00 = 90.00). Commission nets the same way per leg.
+    const snapshot = makeParcel({
+      items: [
+        makeItem({
+          orderItemId: 'a',
+          listGross: '400.00',
+          quantity: 2,
+          saleVatRatePct: '20',
+          barcode: 'bc-a',
+        }),
+      ],
+    });
+    const records = [
+      makeRecord({
+        recordId: 'sale-1',
+        transactionType: 'Sale',
+        barcode: 'bc-a',
+        credit: '100.00',
+        commissionAmount: '20.00',
+      }),
+      makeRecord({
+        recordId: 'sale-2',
+        transactionType: 'Sale',
+        barcode: 'bc-a',
+        credit: '100.00',
+        commissionAmount: '20.00',
+      }),
+      makeRecord({
+        recordId: 'coup-1',
+        transactionType: 'Coupon',
+        barcode: 'bc-a',
+        debt: '10.00',
+        commissionAmount: '2.00',
+      }),
+      makeRecord({
+        recordId: 'coup-2',
+        transactionType: 'Coupon',
+        barcode: 'bc-a',
+        debt: '10.00',
+        commissionAmount: '2.00',
+      }),
+      makeRecord({
+        recordId: 'ret-1',
+        transactionType: 'Return',
+        barcode: 'bc-a',
+        debt: '100.00',
+        commissionAmount: '20.00',
+      }),
+      makeRecord({
+        recordId: 'cc-1',
+        transactionType: 'CouponCancel',
+        barcode: 'bc-a',
+        credit: '10.00',
+        commissionAmount: '2.00',
+      }),
+    ];
+
+    const result = mapTrendyolRecords({
+      snapshot,
+      attributes: makeTrendyolAttributes(),
+      fees: FEES,
+      records,
+      cargoItems: [],
+      estimateLines: [],
+    });
+
+    expect(result.issues).toEqual([]);
+    const sale = result.lines.find((line) => line.type === ProfitLineType.SALE);
+    expect(sale?.amount.gross.toFixed(2)).toBe('180.00');
+    const commission = result.lines.find((line) => line.type === ProfitLineType.COMMISSION);
+    expect(commission?.amount.gross.toFixed(2)).toBe('36.00');
+    const saleReturn = result.lines.find((line) => line.type === ProfitLineType.SALE_RETURN);
+    expect(saleReturn?.amount.gross.toFixed(2)).toBe('90.00');
+    const commissionRefund = result.lines.find(
+      (line) => line.type === ProfitLineType.COMMISSION_REFUND,
+    );
+    expect(commissionRefund?.amount.gross.toFixed(2)).toBe('18.00');
+  });
+
+  it('flags both the discount without sale and the unmatched reversal when they do not cancel', () => {
+    // A Discount (debt 10.00) and a DiscountCancel (credit 7.00) with no sale and no
+    // return: the reversal does not give the discount back exactly (7.00 != 10.00), so the
+    // pair is not suppressed. The discount is flagged DISCOUNT_WITHOUT_SALE and the reversal
+    // UNMATCHED_DISCOUNT_REVERSAL; no line is produced.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '333.50', barcode: 'bc-a' })],
+    });
+    const records = [
+      makeRecord({
+        recordId: 'disc-1',
+        transactionType: 'Discount',
+        barcode: 'bc-a',
+        debt: '10.00',
+        commissionAmount: '2.00',
+      }),
+      makeRecord({
+        recordId: 'dc-1',
+        transactionType: 'DiscountCancel',
+        barcode: 'bc-a',
+        credit: '7.00',
+        commissionAmount: '1.00',
+      }),
+    ];
+
+    const result = mapTrendyolRecords({
+      snapshot,
+      attributes: makeTrendyolAttributes(),
+      fees: FEES,
+      records,
+      cargoItems: [],
+      estimateLines: [],
+    });
+
+    expect(result.lines).toEqual([]);
+    expect(result.issues).toEqual([
+      {
+        code: ProfitIssueCode.AMBIGUOUS_RECORD_MATCH,
+        orderItemId: 'a',
+        detail: 'DISCOUNT_WITHOUT_SALE:disc-1',
+      },
+      {
+        code: ProfitIssueCode.AMBIGUOUS_RECORD_MATCH,
+        orderItemId: 'a',
+        detail: 'UNMATCHED_DISCOUNT_REVERSAL:dc-1',
       },
     ]);
   });
