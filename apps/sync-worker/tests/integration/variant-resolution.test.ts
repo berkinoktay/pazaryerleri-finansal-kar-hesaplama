@@ -404,12 +404,12 @@ describe('processVariantResolution', () => {
     expect(secondDelay).toBeLessThanOrEqual(11 * 60_000);
   });
 
-  it('full pipeline: late-arrival intake persists normally (not excluded) and queues; the tick links the variant identity', async () => {
+  it('full pipeline: late-arrival intake persists PROFIT-EXCLUDED and queues; the tick links the variant identity', async () => {
     const ctx = await buildStore();
 
-    // REAL intake path (phase 3B): a past-day order with an unknown barcode is
-    // persisted normally — no auto-exclusion anymore — and the write enqueues a
-    // profit recompute (resolved to NOT_COMPUTABLE until a cost is attached).
+    // REAL intake path (Berkin 2026-11-03): a past-day order with an unknown barcode
+    // is cost-missing, so it is persisted PROFIT-EXCLUDED (LATE_UNCOSTED_ARRIVAL); the
+    // write still enqueues a profit recompute.
     const outcome = await intakeOrder({
       storeId: ctx.storeId,
       organizationId: ctx.organizationId,
@@ -423,14 +423,16 @@ describe('processVariantResolution', () => {
     const order = await prisma.order.findFirstOrThrow({
       where: { storeId: ctx.storeId, platformOrderId: 'feededup-1' },
     });
-    expect(order.profitExcludedAt).toBeNull();
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
     const queued = await prisma.profitRecomputeRequest.findUnique({
       where: { orderId: order.id },
     });
     expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
 
     // Catalog catches up (variant + cost profile) → the resolution tick links the
-    // variant identity onto the unresolved line.
+    // variant identity onto the unresolved line. The order stays excluded: a cost
+    // that arrives after the day never pulls an excluded order back into profit.
     await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-FEEDEDUP', true);
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
       throw new Error('vendor must NOT be called — local catalog has the barcode');
@@ -441,7 +443,8 @@ describe('processVariantResolution', () => {
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
     expect(item.productVariantId).not.toBeNull(); // identity linked (visibility)
     const after = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
-    expect(after.profitExcludedAt).toBeNull(); // still a normal, not-excluded order
+    expect(after.profitExcludedAt).not.toBeNull(); // still excluded
+    expect(after.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
   });
 
   it('PENDING buffer satırının bilinmeyen barkodu tick ile kataloğa onarılır (item bağlanmaz)', async () => {

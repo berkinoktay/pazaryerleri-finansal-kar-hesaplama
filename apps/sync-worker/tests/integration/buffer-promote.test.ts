@@ -4,7 +4,7 @@ import { ProfitRecomputeReason, ProfitStatementView, ProfitStatus } from '@pazar
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { intakeOrder } from '@pazarsync/order-sync';
 import { drainProfitRecomputeQueue } from '@pazarsync/profit';
-import { getBusinessDateAnchor } from '@pazarsync/utils';
+import { getBusinessDateAnchor, getBusinessDayRange } from '@pazarsync/utils';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { processBufferPromote, processPastDayBufferFlush } from '../../src/handlers/buffer-promote';
@@ -37,13 +37,16 @@ function buildMappedOrder(over: {
   /** ISO string — the marketplace lastModifiedDate carried by the buffer snapshot.
    * Omitted by default so existing rows keep their lastModifiedDate-free shape. */
   lastModifiedDate?: string;
+  /** Order status in the snapshot. Defaults to PROCESSING; CANCELLED exercises the
+   * cost-window skip (a cancelled order is never excluded at graduation). */
+  status?: string;
 }): Prisma.InputJsonValue {
   const value = {
     platformOrderId: over.platformOrderId,
     platformOrderNumber: over.platformOrderNumber ?? `ord-${over.platformOrderId}`,
     orderDate: new Date().toISOString(),
     ...(over.lastModifiedDate !== undefined && { lastModifiedDate: over.lastModifiedDate }),
-    status: 'PROCESSING',
+    status: over.status ?? 'PROCESSING',
     // GROSS konvansiyon: saleGross (KDV-dahil) = 100; saleVat = 100×18/118 = 15.25.
     saleGross: '100.00',
     saleVat: '15.25',
@@ -158,6 +161,55 @@ async function seedCalculableVariant(
       salePrice: '100',
       listPrice: '120',
       costProfileLinks: { create: { organizationId, profileId: profile.id } },
+    },
+  });
+}
+
+// Seed a variant whose cost was entered IN TIME for `orderDate`: the link is
+// attached, and the profile's first version becomes effective, one minute before
+// the order's business day ends. Models a cost attached just before midnight whose
+// buffer-flip had not fired yet when the day-end flush runs after midnight.
+async function seedTimelyCostedVariant(
+  organizationId: string,
+  storeId: string,
+  barcode: string,
+  orderDate: Date,
+): Promise<void> {
+  const profile = await createCostProfile(organizationId, { storeId, amountGross: '48.00' });
+  const product = await prisma.product.create({
+    data: {
+      organizationId,
+      storeId,
+      platformContentId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      productMainId: `pm-${barcode}`,
+      title: 'Promote Test Product',
+    },
+  });
+  const inTime = new Date(getBusinessDayRange(orderDate).end.getTime() - 60 * 1000);
+  await prisma.productVariant.create({
+    data: {
+      organizationId,
+      storeId,
+      productId: product.id,
+      platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      barcode,
+      stockCode: `sk-${barcode}`,
+      salePrice: '100',
+      listPrice: '120',
+      costProfileLinks: { create: { organizationId, profileId: profile.id, attachedAt: inTime } },
+    },
+  });
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId,
+      version: 1,
+      name: profile.name,
+      type: profile.type,
+      amountGross: profile.amountGross,
+      vatRate: profile.vatRate,
+      changedFields: [],
+      effectiveFrom: inTime,
     },
   });
 }
@@ -397,12 +449,12 @@ describe('processBufferPromote', () => {
     expect(after.status).toBe('PERMANENT_FAILED');
   });
 
-  it('flush-failed handoff: past-day FAILED entry with missing cost graduates normally (not excluded)', async () => {
+  it('flush-failed handoff: past-day FAILED entry with missing cost graduates COST_DEADLINE_MISSED', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
     // No cost seeded — the entry is NOT calculable. A flush failure handed it to the
-    // promote retry path; phase 3B graduates it as a normal order (no auto-exclusion),
-    // and the queued recompute resolves it as NOT_COMPUTABLE until a cost arrives.
+    // promote retry path; cost-window rule (Berkin 2026-11-03): the retry graduates it
+    // PROFIT-EXCLUDED (COST_DEADLINE_MISSED), the write still enqueues a recompute.
     const entry = await createBufferEntry(org.id, store.id, {
       platformOrderId: 'pkg-flush-handoff',
       orderDate: getBusinessDateAnchor(new Date(Date.now() - 24 * 60 * 60_000)),
@@ -419,7 +471,8 @@ describe('processBufferPromote', () => {
 
     expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
-    expect(order.profitExcludedAt).toBeNull();
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
     const queued = await prisma.profitRecomputeRequest.findUnique({
       where: { orderId: order.id },
     });
@@ -511,11 +564,12 @@ describe('processPastDayBufferFlush', () => {
 
   const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-  it('graduates a past-day buffer entry without excluding it, drained to NOT_COMPUTABLE', async () => {
+  it('graduates a buffer entry still missing its cost as COST_DEADLINE_MISSED', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
-    // No cost seeded → cost window missed. Phase 3B graduates it as a normal order
-    // (no auto-exclusion); the queued recompute resolves it as NOT_COMPUTABLE.
+    // No cost seeded → cost window missed. Cost-window rule (Berkin 2026-11-03): the
+    // flush graduates it PROFIT-EXCLUDED (COST_DEADLINE_MISSED); the queued recompute
+    // resolves it to an EXCLUDED best-known statement.
     const entry = await createBufferEntry(org.id, store.id, {
       platformOrderId: 'flush-pending',
       orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
@@ -528,9 +582,10 @@ describe('processPastDayBufferFlush', () => {
     expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.platformOrderId).toBe('flush-pending');
-    expect(order.profitExcludedAt).toBeNull();
-    // The graduation enqueued a recompute; draining it resolves the cost-missing
-    // order to a NOT_COMPUTABLE best-known statement (buffer path end-to-end).
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
+    // The graduation enqueued a recompute; draining it resolves the excluded order to
+    // an EXCLUDED best-known statement (buffer path end-to-end).
     const queued = await prisma.profitRecomputeRequest.findUnique({
       where: { orderId: order.id },
     });
@@ -539,10 +594,63 @@ describe('processPastDayBufferFlush', () => {
     const stmt = await prisma.orderProfitStatement.findFirst({
       where: { orderId: order.id, view: ProfitStatementView.BEST_KNOWN },
     });
-    expect(stmt?.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(stmt?.status).toBe(ProfitStatus.EXCLUDED);
     // The midnight flush is exactly the buffer -> orders path whose toast C2 must
     // suppress: the graduated order carries the promotion marker.
     expect(order.promotedFromBufferAt).not.toBeNull();
+  });
+
+  it('graduates a buffer entry costed during the day as a normal order', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS));
+    // The cost was attached (and its version made effective) one minute before the
+    // order's day ended, but the attach-flip never fired, so the row is still PENDING
+    // when the flush runs after midnight. A cost attached in time still counts.
+    await seedTimelyCostedVariant(org.id, store.id, 'EAN13-FLUSH-OK', orderDate);
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'flush-costed',
+      orderDate,
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder({ platformOrderId: 'flush-costed', barcode: 'EAN13-FLUSH-OK' }),
+    });
+
+    await processPastDayBufferFlush();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('flush-costed');
+    expect(order.profitExcludedAt).toBeNull();
+    expect(order.profitExclusionReason).toBeNull();
+    const queued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: order.id },
+    });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+  });
+
+  it('does not exclude a cancelled order at the day-end flush', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // A cancelled order carries no payout and is never excluded, even without a cost.
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'flush-cancelled',
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'flush-cancelled',
+        barcode: 'EAN13-FLUSH',
+        status: 'CANCELLED',
+      }),
+    });
+
+    await processPastDayBufferFlush();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('flush-cancelled');
+    expect(order.status).toBe('CANCELLED');
+    expect(order.profitExcludedAt).toBeNull();
+    expect(order.profitExclusionReason).toBeNull();
   });
 
   it('does NOT flush a today PENDING entry (same-day cost window preserved)', async () => {
@@ -596,13 +704,13 @@ describe('processPastDayBufferFlush', () => {
     expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
   });
 
-  it('graduates a past-day PERMANENT_FAILED entry normally via the flush tick (loss-proofing)', async () => {
+  it('graduates a past-day PERMANENT_FAILED entry via the flush tick (loss-proofing), excluded when uncosted', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
     // A row that exhausted its promote attempts (PERMANENT_FAILED) but now carries
     // graduatable data gets a final graduation attempt on the flush tick BEFORE the
-    // 7-day reset cron may reap it: phase 3B lands it in orders as a normal (queued,
-    // not-excluded) order, and it never vanishes.
+    // 7-day reset cron may reap it: it lands in orders and never vanishes. No cost was
+    // ever entered, so the cost-window rule excludes it with COST_DEADLINE_MISSED.
     const entry = await createBufferEntry(org.id, store.id, {
       platformOrderId: 'flush-perm-recover',
       orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
@@ -618,7 +726,8 @@ describe('processPastDayBufferFlush', () => {
     expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.platformOrderId).toBe('flush-perm-recover');
-    expect(order.profitExcludedAt).toBeNull();
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
     const queued = await prisma.profitRecomputeRequest.findUnique({
       where: { orderId: order.id },
     });

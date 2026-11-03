@@ -1,7 +1,12 @@
 import { prisma } from '@pazarsync/db';
-import type { BufferEntryStatus, LivePerformanceBuffer } from '@pazarsync/db';
+import type {
+  BufferEntryStatus,
+  LivePerformanceBuffer,
+  Prisma,
+  ProfitExclusionReason,
+} from '@pazarsync/db';
 import type { MappedOrder } from '@pazarsync/marketplace';
-import { upsertOrderWithSnapshot } from '@pazarsync/order-sync';
+import { hadCostWithinOrderDay, upsertOrderWithSnapshot } from '@pazarsync/order-sync';
 import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 import { getBusinessDateAnchor } from '@pazarsync/utils';
@@ -9,6 +14,40 @@ import { getBusinessDateAnchor } from '@pazarsync/utils';
 import { isRetryDue, MAX_ATTEMPTS, RETRY_BACKOFF_MINUTES } from '../lib/buffer-promote-backoff';
 
 const CHUNK_SIZE = 25;
+
+/**
+ * Decide the cost-window exclusion for a past-day buffer entry about to graduate
+ * into `orders`. Berkin 2026-11-03: an order enters net profit only if every
+ * non-cancelled item had a cost entered before the order's business day ended;
+ * supply prices drift, so a cost entered after that day is too late. A past-day
+ * graduation whose cost is still missing is PERMANENTLY excluded with
+ * COST_DEADLINE_MISSED; a cancelled order is never excluded. The decision reads the
+ * attach/version timestamps against the entry's OWN business day end, so a cost
+ * attached before that end still counts even when this tick runs after midnight.
+ * Tenant-scoped via the entry's organization + store. A buffer snapshot carries no
+ * per-line cancel flag, so every line is treated as non-cancelled (the order-level
+ * CANCELLED check above owns the cancelled case).
+ */
+async function resolvePastDayGraduationExclusion(
+  tx: Prisma.TransactionClient,
+  entry: LivePerformanceBuffer,
+  mapped: MappedOrder,
+): Promise<{ readonly reason: ProfitExclusionReason } | undefined> {
+  if (mapped.status === 'CANCELLED') {
+    return undefined;
+  }
+  const calcLines = await buildCalcCheckLines(tx, {
+    storeId: entry.storeId,
+    lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
+  });
+  const hasTimelyCost = await hadCostWithinOrderDay(tx, {
+    organizationId: entry.organizationId,
+    storeId: entry.storeId,
+    orderDate: entry.orderDate,
+    items: calcLines.map((line) => ({ productVariantId: line.variantId, isCancelled: false })),
+  });
+  return hasTimelyCost ? undefined : { reason: 'COST_DEADLINE_MISSED' };
+}
 
 /**
  * One promote tick: drain up to CHUNK_SIZE due buffer entries into `orders`.
@@ -98,16 +137,22 @@ async function promoteOne(id: string, now: Date): Promise<void> {
         });
         if (resolveOrderCalculability(calcLines).kind !== 'calculable') {
           if (entry.orderDate.getTime() < getBusinessDateAnchor(now).getTime()) {
-            // Window closed → graduate as a normal order. No auto-exclusion anymore
-            // (design 6.6 / 8.3): the queued recompute resolves it as NOT_COMPUTABLE
-            // until a cost is attached.
+            // Window closed → graduate into orders. Cost-window rule (Berkin
+            // 2026-11-03): a past-day graduation whose cost missed the order's
+            // business day is permanently excluded with COST_DEADLINE_MISSED; a
+            // cancelled order (or one whose cost did land in time) graduates as a
+            // normal order. The queued recompute then writes its statement.
+            // profitExclusion is stamped CREATE-only inside upsertOrderWithSnapshot.
+            const profitExclusion = await resolvePastDayGraduationExclusion(tx, entry, mapped);
             syncLog.info('buffer.promote-uncosted-graduation', {
               entryId: entry.id,
               storeId: entry.storeId,
               platformOrderId: entry.platformOrderId,
+              excluded: profitExclusion !== undefined,
             });
             await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx, {
               promotedFromBuffer: true,
+              profitExclusion,
             });
             await tx.livePerformanceBuffer.delete({ where: { id: entry.id } });
             return entry;
@@ -213,10 +258,11 @@ let lastPermanentFailedRetrySummaryAt = 0;
 
 /**
  * One flush tick: graduate up to FLUSH_CHUNK_SIZE PENDING buffer entries whose
- * business date is before today into `orders` as normal orders, then delete the
- * buffer row — same atomic claim+upsert+delete as promoteOne. No auto-exclusion
- * anymore (design 6.6 / 8.3): the queued recompute resolves a still-uncosted order
- * as NOT_COMPUTABLE until a cost is attached.
+ * business date is before today into `orders`, then delete the buffer row — same
+ * atomic claim+upsert+delete as promoteOne. Cost-window rule (Berkin 2026-11-03):
+ * an entry whose cost missed the order's business day graduates PROFIT-EXCLUDED
+ * (COST_DEADLINE_MISSED); its ciro still counts, its net profit never shows. An
+ * entry costed in time (or a cancelled one) graduates as a normal order.
  *
  * Pass 1 (PENDING): PROMOTING (cost just attached) and FAILED (retry-due)
  * past-day entries are already handled by processBufferPromote, so this pass
@@ -310,11 +356,16 @@ async function flushOne(id: string): Promise<string | null> {
       }
 
       const mapped = entry.mappedOrder as unknown as MappedOrder;
-      // Window closed: graduate as a normal order. No auto-exclusion anymore (design
-      // 6.6 / 8.3) — the queued recompute resolves it as NOT_COMPUTABLE until a cost
-      // is attached. Same tx → order write + buffer delete commit atomically.
+      // Window closed: graduate into orders. Cost-window rule (Berkin 2026-11-03): a
+      // past-day entry whose cost missed the order's business day is excluded with
+      // COST_DEADLINE_MISSED; a cancelled entry (or one costed in time -- e.g. a cost
+      // attached just before midnight while the attach-flip had not yet fired)
+      // graduates as a normal order. Same tx → order write + buffer delete commit
+      // atomically. profitExclusion is stamped CREATE-only inside upsertOrderWithSnapshot.
+      const profitExclusion = await resolvePastDayGraduationExclusion(tx, entry, mapped);
       await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx, {
         promotedFromBuffer: true,
+        profitExclusion,
       });
       await tx.livePerformanceBuffer.delete({ where: { id: entry.id } });
       return entry;

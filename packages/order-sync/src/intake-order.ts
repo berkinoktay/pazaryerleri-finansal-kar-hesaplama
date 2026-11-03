@@ -8,9 +8,9 @@
  *   - dematerialized (UnPacked)    → DELETE order + buffer rows (split ghost — children re-carry content)
  *   - status CANCELLED             → purge buffer rows + upsert (audit row; aggregates exclude by status)
  *   - variant_not_found            → cost_missing route (order IS written; line keeps barcode, null variant FK; resolution in PR-2)
- *   - calculable                   → upsertOrderWithSnapshot (persist + queue recompute)
- *   - cost_missing + past-day      → upsertOrderWithSnapshot (persisted normally; the queued
- *                                    recompute resolves it as NOT_COMPUTABLE until a cost arrives)
+ *   - calculable + today           → upsertOrderWithSnapshot (persist + queue recompute)
+ *   - past-day + timely cost       → upsertOrderWithSnapshot (persisted normally; the queued recompute profits it)
+ *   - past-day + cost missed day   → upsertOrderWithSnapshot with profitExclusion LATE_UNCOSTED_ARRIVAL
  *   - cost_missing + today + in orders → upsertOrderWithSnapshot (idempotent, no buffer)
  *   - cost_missing + today + new   → live_performance_buffer (PENDING, same-day cost-flip window)
  *
@@ -18,12 +18,18 @@
  * was costed earlier then had its cost profile archived (would otherwise live in
  * BOTH orders and buffer → double-count on the Live Performance page).
  *
- * No auto-exclusion (design 6.6 / 8.3, phase 3B): every order that reaches `orders`
- * is persisted normally and carries a queued profit recompute. A cost-missing order
- * is NOT_COMPUTABLE until its cost is entered, then the recompute picks it up — the
- * old "profit-excluded" state is gone (a user-chosen exclusion is the only exclusion).
- * The live-performance buffer still owns the same-day cost-flip window; only the
- * permanent exclusion of a window-missing order was removed.
+ * Cost-window rule (Berkin 2026-11-03): an order enters net profit only if every
+ * non-cancelled item had a cost entered BEFORE the order's business day ended
+ * (Europe/Istanbul midnight). Supply prices drift, so a cost entered after that day
+ * may not reflect the day's real price. A past-day order that arrives without a
+ * timely cost -- or one whose cost was entered only after its day (hadCostWithinOrderDay
+ * false) -- is persisted but PERMANENTLY excluded from profit with LATE_UNCOSTED_ARRIVAL;
+ * its ciro still counts, its net profit never shows. Only a missing COST excludes; a
+ * missing desi / commission / carrier never does, and a cancelled order is never
+ * excluded (its CANCELLED branch returns above). The order is still enqueued for a
+ * profit recompute like every other write. This supersedes the phase-3B "no
+ * auto-exclusion" stance. The live-performance buffer still owns the same-day
+ * cost-flip window for today's orders.
  */
 
 import { refreshProductAggregates } from '@pazarsync/catalog-sync';
@@ -33,6 +39,7 @@ import type { MappedOrder } from '@pazarsync/marketplace';
 import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
 import { getBusinessDate, getBusinessDateAnchor } from '@pazarsync/utils';
 
+import { hadCostWithinOrderDay } from './cost-window';
 import { decrementVariantStock, incrementVariantStock, isOrderOnBusinessToday } from './stock';
 import { upsertOrderWithSnapshot } from './upsert-order';
 
@@ -185,22 +192,42 @@ export async function intakeOrder(args: {
   const calcLines = await buildCalcCheckLines(prisma, { storeId, lines: mapped.lines });
   const calc = resolveOrderCalculability(calcLines);
 
-  // Fully costable → persist with profit.
+  // Past-day cost-window gate (Berkin 2026-11-03). A past-day order's cost window
+  // (its own business day) has already closed, so it enters profit ONLY when it is
+  // calculable now AND every non-cancelled item had its cost entered before that day
+  // ended. Otherwise -- no cost at all, or a cost entered only after the day (decision
+  // 2) -- it is persisted but PERMANENTLY excluded with LATE_UNCOSTED_ARRIVAL. The
+  // order is never cancelled here (the CANCELLED branch returned above), so every line
+  // is non-cancelled.
+  if (getBusinessDate(mapped.orderDate) < getBusinessDate()) {
+    const hasTimelyCost =
+      calc.kind === 'calculable' &&
+      (await hadCostWithinOrderDay(prisma, {
+        organizationId,
+        storeId,
+        orderDate: mapped.orderDate,
+        items: calcLines.map((line) => ({
+          productVariantId: line.variantId,
+          isCancelled: false,
+        })),
+      }));
+    if (hasTimelyCost) {
+      await upsertOrderWithSnapshot(storeId, organizationId, mapped);
+      return { kind: 'persisted', reason: 'calculable' };
+    }
+    await upsertOrderWithSnapshot(storeId, organizationId, mapped, undefined, {
+      profitExclusion: { reason: 'LATE_UNCOSTED_ARRIVAL' },
+    });
+    return { kind: 'persisted', reason: 'late_uncosted_arrival' };
+  }
+
+  // Today's order from here. Fully costable → persist with profit.
   if (calc.kind === 'calculable') {
     await upsertOrderWithSnapshot(storeId, organizationId, mapped);
     return { kind: 'persisted', reason: 'calculable' };
   }
 
-  // calc is { kind: 'skip', reason: 'cost_missing', ... } from here.
-  // Past-day cost-missing order: the same-day buffer window (end of the order's
-  // business day) has closed, so it is persisted normally — no auto-exclusion anymore
-  // (design 6.6 / 8.3). The queued recompute resolves it as NOT_COMPUTABLE until a cost
-  // is attached, then recomputes it. Same call as a calculable order.
-  if (getBusinessDate(mapped.orderDate) < getBusinessDate()) {
-    await upsertOrderWithSnapshot(storeId, organizationId, mapped);
-    return { kind: 'persisted', reason: 'late_uncosted_arrival' };
-  }
-
+  // calc is { kind: 'skip', reason: 'cost_missing', ... } from here (today only).
   // Today's cost-missing — but if it is already in orders, persist (idempotent),
   // never create a parallel buffer row (double-count guard). Org-scoped query
   // (CLAUDE.md: every order read filters by organizationId — defense-in-depth).

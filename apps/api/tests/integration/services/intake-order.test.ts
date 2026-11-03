@@ -4,6 +4,7 @@ import { ProfitRecomputeReason, ProfitStatementView, ProfitStatus } from '@pazar
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { intakeOrder } from '@pazarsync/order-sync';
 import { drainProfitRecomputeQueue } from '@pazarsync/profit';
+import { getBusinessDayRange } from '@pazarsync/utils';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -136,6 +137,44 @@ async function seedVariant(
       salePrice: '100',
       listPrice: '120',
       ...costLink,
+    },
+  });
+}
+
+// Seed a variant whose cost was entered IN TIME for `orderDate`: the link is
+// attached, and the profile carries a first version effective, one minute before
+// the order's business day ends. Used by the past-day cost-window tests that need a
+// timely cost (the plain `seedVariant(..., true)` attaches at now(), which is after
+// any past day, so it models a cost entered too late).
+async function seedVariantWithTimelyCost(
+  orgId: string,
+  storeId: string,
+  barcode: string,
+  orderDate: Date,
+): Promise<void> {
+  await seedVariant(orgId, storeId, barcode, false);
+  const variant = await prisma.productVariant.findFirstOrThrow({ where: { storeId, barcode } });
+  const inTime = new Date(getBusinessDayRange(orderDate).end.getTime() - 60 * 1000);
+  const profile = await createCostProfile(orgId, { storeId, amountGross: '40.00' });
+  await prisma.productVariantCostProfile.create({
+    data: {
+      organizationId: orgId,
+      productVariantId: variant.id,
+      profileId: profile.id,
+      attachedAt: inTime,
+    },
+  });
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId: orgId,
+      version: 1,
+      name: profile.name,
+      type: profile.type,
+      amountGross: profile.amountGross,
+      vatRate: profile.vatRate,
+      changedFields: [],
+      effectiveFrom: inTime,
     },
   });
 }
@@ -369,7 +408,7 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     expect(readBufferJson(entry.mappedOrder)['lastModifiedDate']).toBeUndefined();
   });
 
-  it('persists a past-day order without a cost as a normal, not-computable order', async () => {
+  it('excludes a past-day order that arrives without a timely cost', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
     await seedVariant(org.id, store.id, BARCODE, false);
@@ -383,22 +422,68 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
       }),
     });
 
+    // Cost-window rule (Berkin 2026-11-03): a past-day order whose cost was never
+    // entered in time is persisted but permanently excluded with LATE_UNCOSTED_ARRIVAL.
     expect(outcome).toEqual({ kind: 'persisted', reason: 'late_uncosted_arrival' });
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.platformOrderId).toBe('late-1');
-    // Phase 3B: no auto-exclusion — the order is persisted normally and the write
-    // enqueues a recompute that resolves the cost-missing order to NOT_COMPUTABLE.
-    expect(order.profitExcludedAt).toBeNull();
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
+    // Still enqueued for a profit recompute like every other write.
     const queued = await prisma.profitRecomputeRequest.findUnique({
       where: { orderId: order.id },
     });
     expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+    // Draining resolves the excluded order to an EXCLUDED best-known statement.
     await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
     const stmt = await prisma.orderProfitStatement.findFirst({
       where: { orderId: order.id, view: ProfitStatementView.BEST_KNOWN },
     });
-    expect(stmt?.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(stmt?.status).toBe(ProfitStatus.EXCLUDED);
+  });
+
+  it('excludes a past-day order whose cost was entered only after its day', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // seedVariant(..., true) attaches the cost at now() — after any past day — so the
+    // order IS calculable now, but the cost missed the order's day (decision 2).
+    await seedVariant(org.id, store.id, BARCODE, true);
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'late-cost-1',
+        orderDate: new Date(Date.now() - PAST_DAY_MS),
+      }),
+    });
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'late_uncosted_arrival' });
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
+  });
+
+  it('does not exclude a past-day order blocked only by a missing desi', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const orderDate = new Date(Date.now() - PAST_DAY_MS);
+    // Timely cost but no desi seeded: only a missing COST excludes, never a missing
+    // desi — so the order enters profit (not excluded), even if its shipping estimate
+    // later resolves to not-computable.
+    await seedVariantWithTimelyCost(org.id, store.id, BARCODE, orderDate);
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'desi-1', orderDate }),
+    });
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'calculable' });
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.profitExcludedAt).toBeNull();
+    expect(order.profitExclusionReason).toBeNull();
   });
 
   it('cost-missing + today but already in orders → persists (idempotent), never buffers', async () => {
@@ -483,7 +568,7 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     ).toBe(1);
   });
 
-  it('mixed order past-day: BOTH lines persist; order is not-computable as a whole (K5)', async () => {
+  it('mixed order past-day: BOTH lines persist; order is excluded as a whole (K5)', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
     await seedVariant(org.id, store.id, 'EAN13-MIX-OK', true); // variant + cost profile
@@ -501,9 +586,10 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
       }),
     });
 
-    // One unmatched line makes the order cost_missing — both lines persist normally
-    // (phase 3B drops the auto-exclusion). The order's identity (variant FK) is linked;
-    // the upsert no longer captures a cost snapshot (the recompute writer owns costs).
+    // One unmatched line makes the order cost_missing — both lines persist, and the
+    // past-day order is excluded as a whole (LATE_UNCOSTED_ARRIVAL). The matched line
+    // keeps its variant identity; the upsert captures no cost snapshot (the recompute
+    // writer owns costs).
     expect(outcome).toEqual({ kind: 'persisted', reason: 'late_uncosted_arrival' });
     const items = await prisma.orderItem.findMany({
       where: { order: { storeId: store.id, platformOrderId: 'mixed-1' } },
@@ -520,7 +606,8 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     const order = await prisma.order.findFirstOrThrow({
       where: { storeId: store.id, platformOrderId: 'mixed-1' },
     });
-    expect(order.profitExcludedAt).toBeNull();
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
     const queued = await prisma.profitRecomputeRequest.findUnique({
       where: { orderId: order.id },
     });

@@ -487,10 +487,11 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
 
     await processOrdersChunk({ syncLog: log, cursor: null });
 
-    // Phase 3B: a past-day cost-missing order persists normally (no auto-exclusion);
-    // the order write enqueues a recompute.
+    // Cost-window rule (Berkin 2026-11-03): a past-day cost-missing order is persisted
+    // PROFIT-EXCLUDED (LATE_UNCOSTED_ARRIVAL); the write still enqueues a recompute.
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
-    expect(order.profitExcludedAt).toBeNull();
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
     const queued = await prisma.profitRecomputeRequest.findUnique({
       where: { orderId: order.id },
     });
@@ -549,7 +550,7 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(item.productVariantId).not.toBeNull();
   });
 
-  it('cost-missing + past-day → persisted normally, drained to NOT_COMPUTABLE (not excluded)', async () => {
+  it('cost-missing + past-day → persisted PROFIT-EXCLUDED, drained to EXCLUDED', async () => {
     const { org, store, log } = await setupStoreAndSyncLog([]);
     // Seed a variant WITHOUT a cost profile link → cost_missing.
     const product = await prisma.product.create({
@@ -600,13 +601,15 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
 
     await processOrdersChunk({ syncLog: log, cursor: null });
 
-    // ORDER_DATE_MS is past-day → persisted normally (not buffered, not excluded).
+    // ORDER_DATE_MS is past-day and the cost is missing → persisted PROFIT-EXCLUDED
+    // (LATE_UNCOSTED_ARRIVAL), not buffered.
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.organizationId).toBe(org.id);
-    expect(order.profitExcludedAt).toBeNull();
-    // The write enqueued a recompute; draining it resolves the cost-missing order to
-    // a NOT_COMPUTABLE best-known statement (end-to-end order → queue → statement).
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
+    // The write enqueued a recompute; draining it resolves the excluded order to an
+    // EXCLUDED best-known statement (end-to-end order → queue → statement).
     const queued = await prisma.profitRecomputeRequest.findUnique({
       where: { orderId: order.id },
     });
@@ -615,7 +618,7 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     const stmt = await prisma.orderProfitStatement.findFirst({
       where: { orderId: order.id, view: ProfitStatementView.BEST_KNOWN },
     });
-    expect(stmt?.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(stmt?.status).toBe(ProfitStatus.EXCLUDED);
   });
 
   it('cost-missing + today → buffers (PENDING), no orders row (1A symmetry)', async () => {

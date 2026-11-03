@@ -476,13 +476,14 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
       });
       const res = await postWebhook(storeId, payload, basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS));
       expect(res.status).toBe(200);
-      // Phase 3B: the variant gap no longer skips, and a past-day cost-missing order
-      // is persisted normally (no auto-exclusion); the write enqueues a recompute and
-      // the unmatched line keeps the barcode trail.
+      // Cost-window rule (Berkin 2026-11-03): the variant gap no longer skips, and a
+      // past-day cost-missing order is persisted PROFIT-EXCLUDED (LATE_UNCOSTED_ARRIVAL);
+      // the write still enqueues a recompute and the unmatched line keeps the barcode trail.
       const order = await prisma.order.findFirstOrThrow({
         where: { storeId, platformOrderId: '555000001' },
       });
-      expect(order.profitExcludedAt).toBeNull();
+      expect(order.profitExcludedAt).not.toBeNull();
+      expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
       const queued = await prisma.profitRecomputeRequest.findUnique({
         where: { orderId: order.id },
       });
@@ -496,7 +497,7 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
       expect(event.processedAt).not.toBeNull();
     });
 
-    it('persists normally and drains to NOT_COMPUTABLE (past-day cost-missing) when the variant has no cost profile', async () => {
+    it('persists PROFIT-EXCLUDED and drains to EXCLUDED (past-day cost-missing) when the variant has no cost profile', async () => {
       const { orgId, storeId } = await setupStore();
       // Seed a SECOND variant with NO cost link.
       const product = await prisma.product.create({
@@ -539,14 +540,16 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
       });
       const res = await postWebhook(storeId, payload, basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS));
       expect(res.status).toBe(200);
-      // Phase 3B: ORDER_DATE_MS is past-day → the order is persisted normally (no
-      // auto-exclusion, no buffer for past-day); the write enqueues a recompute and
-      // draining it resolves the cost-missing order to NOT_COMPUTABLE.
+      // Cost-window rule (Berkin 2026-11-03): ORDER_DATE_MS is past-day and the cost is
+      // missing → the order is persisted PROFIT-EXCLUDED (LATE_UNCOSTED_ARRIVAL), no
+      // buffer for past-day; the write enqueues a recompute and draining it resolves the
+      // excluded order to an EXCLUDED best-known statement.
       const order = await prisma.order.findFirstOrThrow({
         where: { storeId, platformOrderId: '555000002' },
       });
       expect(order.organizationId).toBe(orgId);
-      expect(order.profitExcludedAt).toBeNull();
+      expect(order.profitExcludedAt).not.toBeNull();
+      expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
       expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(0);
       const queued = await prisma.profitRecomputeRequest.findUnique({
         where: { orderId: order.id },
@@ -556,7 +559,7 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
       const stmt = await prisma.orderProfitStatement.findFirst({
         where: { orderId: order.id, view: ProfitStatementView.BEST_KNOWN },
       });
-      expect(stmt?.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+      expect(stmt?.status).toBe(ProfitStatus.EXCLUDED);
     });
   });
 

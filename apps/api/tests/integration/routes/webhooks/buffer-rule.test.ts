@@ -199,7 +199,7 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
     expect(entries[0]!.platformOrderNumber).toBe('buf-ord-1');
   });
 
-  it('cost-missing + previous-day orderDate → persists normally (not excluded), no buffer write', async () => {
+  it('cost-missing + previous-day orderDate → persists PROFIT-EXCLUDED, no buffer write', async () => {
     const { orgId, storeId } = await setupStore();
     const yesterday = todayOrderDateGmt3() - 24 * MS_HOUR;
 
@@ -214,13 +214,15 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
     );
     expect(res.status).toBe(200);
 
-    // Phase 3B: the window closed, but the order is persisted normally (no
-    // auto-exclusion, no buffer for past-day) and the write enqueues a recompute.
+    // Cost-window rule (Berkin 2026-11-03): the window closed with the cost still
+    // missing, so the order is persisted PROFIT-EXCLUDED (LATE_UNCOSTED_ARRIVAL), no
+    // buffer for past-day; the write still enqueues a recompute.
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(0);
     const order = await prisma.order.findFirstOrThrow({ where: { storeId } });
     expect(order.organizationId).toBe(orgId);
     expect(order.platformOrderId).toBe('700000002');
-    expect(order.profitExcludedAt).toBeNull();
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
     const queued = await prisma.profitRecomputeRequest.findUnique({
       where: { orderId: order.id },
     });

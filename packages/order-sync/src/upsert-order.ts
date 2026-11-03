@@ -27,7 +27,7 @@ import { Decimal } from 'decimal.js';
 
 import { refreshProductAggregates } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
-import type { Platform, Prisma } from '@pazarsync/db';
+import type { Platform, Prisma, ProfitExclusionReason } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { enqueueProfitRecompute, resolveCommissionRate } from '@pazarsync/profit';
@@ -111,6 +111,17 @@ async function resolveEffectiveCommission(
  *     create and update alike — one mark per order for the sync-worker tick to drain.
  */
 export interface UpsertOrderOpts {
+  /**
+   * Cost-window exclusion (Berkin 2026-11-03): when set, the order is stamped
+   * profit-excluded. Written ONLY on a genuine create -- the UPDATE branch omits
+   * both columns, so a later re-delivery of an already-excluded order can never
+   * clear the stamp, and the stale-event case never overwrites it. Only two
+   * callers set it: intake-order's past-day route (LATE_UNCOSTED_ARRIVAL) and the
+   * buffer day-end graduation (COST_DEADLINE_MISSED). The permanence trigger
+   * (Faz 3E, Gorev 3) additionally rejects any attempt to clear or change an
+   * automatic exclusion at the database layer.
+   */
+  profitExclusion?: { readonly reason: ProfitExclusionReason };
   /**
    * Set true by the buffer-promote worker when this order graduates from the
    * live-performance buffer (the seller already saw it as a cost-missing entry).
@@ -296,6 +307,14 @@ export async function upsertOrderWithSnapshot(
         // copied onto the order here and never rewritten on the UPDATE branch below.
         snapshotIncludeStopaj: createProfitSettings.includeStopaj,
         snapshotIncludeNegativeNetVat: createProfitSettings.includeNegativeNetVat,
+        // Cost-window exclusion (Berkin 2026-11-03): an order whose cost missed its
+        // business day is stamped profit-excluded ON CREATE ONLY -- the update branch
+        // below never touches these two columns, so a later re-delivery cannot clear
+        // the stamp. Stamp and reason are set together to satisfy the pair check.
+        ...(opts?.profitExclusion !== undefined && {
+          profitExcludedAt: new Date(),
+          profitExclusionReason: opts.profitExclusion.reason,
+        }),
         // Buffer-graduation marker (CREATE-only): the realtime toast reads this to
         // drop a duplicate "new order" for an order the seller already saw in the
         // buffer. Deliberately NOT in the update branch — an UPDATE emits no

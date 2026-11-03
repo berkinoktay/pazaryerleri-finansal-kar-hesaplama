@@ -10,12 +10,13 @@ describe('@pazarsync/order-sync — public API surface', () => {
     expect(orderSync.upsertOrderWithSnapshot.constructor.name).toBe('AsyncFunction');
   });
 
-  it('exposes exactly the intake + write helpers (public API guard)', () => {
-    // Paketin scope'unu küçük tutmak için yalnız iki public runtime symbol:
-    // order yazma (upsertOrderWithSnapshot) + paylaşılan intake routing
-    // (intakeOrder, Slice 0). OrderIntakeOutcome type-only export — runtime'da
-    // görünmez. Bu test ileride yanlışlıkla private helper export edilirse fail eder.
+  it('exposes exactly the intake + write + cost-window helpers (public API guard)', () => {
+    // Paketin scope'unu küçük tutmak için yalnız üç public runtime symbol: order
+    // yazma (upsertOrderWithSnapshot), paylaşılan intake routing (intakeOrder,
+    // Slice 0) ve maliyet-penceresi ölçütü (hadCostWithinOrderDay, Faz 3E — iki
+    // dışlama yazıcısının ortak sorusu). OrderIntakeOutcome type-only export —
+    // runtime'da görünmez. Bu test yanlışlıkla private helper export edilirse fail eder.
     const keys = Object.keys(orderSync).sort();
-    expect(keys).toEqual(['intakeOrder', 'upsertOrderWithSnapshot']);
+    expect(keys).toEqual(['hadCostWithinOrderDay', 'intakeOrder', 'upsertOrderWithSnapshot']);
   });
 });
