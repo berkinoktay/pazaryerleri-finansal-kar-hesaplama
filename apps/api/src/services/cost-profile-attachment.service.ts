@@ -211,8 +211,11 @@ async function flipBufferForVariants(
         // Same-day guard (cost-window rule): flip only rows whose order day has not
         // ended. A past-day row stays PENDING for the day-end flush to graduate (and
         // exclude unless its cost was timely); a late cost attach must not promote it.
+        // organizationId is defense in depth: the candidate ids already come from a
+        // tenant-filtered query, but every buffer write pins the org (CLAUDE.md).
         where: {
           id: { in: promotableIds },
+          organizationId: orgId,
           status: 'PENDING',
           orderDate: { gte: todayAnchor },
         },
