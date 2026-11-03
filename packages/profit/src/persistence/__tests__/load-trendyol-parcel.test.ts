@@ -1075,6 +1075,128 @@ describe('loadTrendyolParcel', () => {
     expect(loaded.records).toHaveLength(0);
   });
 
+  it('does not bind a package-less sale record', async () => {
+    const orderNumber = 'ORDER-4B-SALE';
+    const parcel = await seedMelontikParcel();
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { platformOrderNumber: orderNumber },
+    });
+    const base = { storeId: parcel.storeId, organizationId: parcel.organizationId } as const;
+
+    // A Sale carrying no shipment package id but the parcel's order number and barcode.
+    // Only return-leg types bind package-less; a Sale always carries its package in real
+    // data, so binding one here would double-count the sale a package-bound Sale row holds.
+    await insertFinanceRecord({
+      ...base,
+      family: 'SETTLEMENT',
+      transactionType: 'Sale',
+      recordId: 'sale-packageless',
+      shipmentPackageId: null,
+      orderNumber,
+      barcode: MELONTIK.items.a.barcode,
+      credit: '491.28',
+      commissionAmount: '93.34',
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    expect(loaded.records.map((r) => r.recordId)).not.toContain('sale-packageless');
+    expect(loaded.records).toHaveLength(0);
+  });
+
+  it('ignores a namesake order of another store in the sibling check', async () => {
+    const orderNumber = 'ORDER-4B-NAMESAKE';
+    const parcel = await seedMelontikParcel();
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { platformOrderNumber: orderNumber },
+    });
+    const base = { storeId: parcel.storeId, organizationId: parcel.organizationId } as const;
+
+    // Another store owns an order with the SAME platform order number and an item with the
+    // SAME barcode. The sibling check must reach only this store's orders, so the namesake
+    // never makes the record ambiguous: the record still binds to this store's parcel.
+    const otherStoreId = await createAdditionalStore({
+      organizationId: parcel.organizationId,
+      name: 'Rival Store',
+    });
+    const namesakeOrder = await prisma.order.create({
+      data: {
+        organizationId: parcel.organizationId,
+        storeId: otherStoreId,
+        platformOrderId: `namesake-${randomUUID().slice(0, 8)}`,
+        platformOrderNumber: orderNumber,
+        orderDate: MELONTIK.orderDate,
+        status: 'DELIVERED',
+      },
+    });
+    await prisma.orderItem.create({
+      data: {
+        orderId: namesakeOrder.id,
+        organizationId: parcel.organizationId,
+        quantity: 1,
+        barcode: MELONTIK.items.a.barcode,
+        lineListGross: '100.00',
+        lineSaleGross: '100.00',
+        lineSellerDiscountGross: '0',
+        saleVatRate: '10',
+        commissionRate: '19',
+        commissionGross: '0',
+        commissionVatRate: '20',
+      },
+    });
+
+    await insertFinanceRecord({
+      ...base,
+      family: 'SETTLEMENT',
+      transactionType: 'Return',
+      recordId: 'ret-namesake',
+      shipmentPackageId: null,
+      orderNumber,
+      barcode: MELONTIK.items.a.barcode,
+      debt: '491.28',
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    expect(loaded.loadIssues).toEqual([]);
+    expect(loaded.records.map((r) => r.recordId)).toContain('ret-namesake');
+  });
+
+  it('skips package-less binding when the order has no order number', async () => {
+    // seedMelontikParcel leaves platform_order_number null: there is no key to bind a
+    // package-less row on, so the loader must skip the binding entirely without erroring.
+    const parcel = await seedMelontikParcel();
+    const base = { storeId: parcel.storeId, organizationId: parcel.organizationId } as const;
+
+    await insertFinanceRecord({
+      ...base,
+      family: 'SETTLEMENT',
+      transactionType: 'Return',
+      recordId: 'ret-no-order-number',
+      shipmentPackageId: null,
+      orderNumber: 'SOME-ORDER-NUMBER',
+      barcode: MELONTIK.items.a.barcode,
+      debt: '491.28',
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    expect(loaded.loadIssues).toEqual([]);
+    expect(loaded.records.map((r) => r.recordId)).not.toContain('ret-no-order-number');
+    expect(loaded.records).toHaveLength(0);
+  });
+
   it('falls back to the standard fee for a non-same-day parcel with no fast definition', async () => {
     const parcel = await seedMelontikParcel();
     // Remove the PLATFORM_SERVICE_FAST definition entirely.

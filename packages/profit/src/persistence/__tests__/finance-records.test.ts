@@ -112,6 +112,41 @@ async function createTestOrder(params: {
   return order.id;
 }
 
+/** Creates one order with a platform order number and a single item on a given barcode. */
+async function createOrderWithItem(params: {
+  readonly organizationId: string;
+  readonly storeId: string;
+  readonly platformOrderNumber: string;
+  readonly barcode: string;
+}): Promise<string> {
+  const order = await prisma.order.create({
+    data: {
+      organizationId: params.organizationId,
+      storeId: params.storeId,
+      platformOrderId: `po-${randomUUID().slice(0, 8)}`,
+      platformOrderNumber: params.platformOrderNumber,
+      orderDate: MELONTIK.orderDate,
+      status: 'DELIVERED',
+    },
+  });
+  await prisma.orderItem.create({
+    data: {
+      orderId: order.id,
+      organizationId: params.organizationId,
+      quantity: 1,
+      barcode: params.barcode,
+      lineListGross: '100.00',
+      lineSaleGross: '100.00',
+      lineSellerDiscountGross: '0',
+      saleVatRate: '10',
+      commissionRate: '19',
+      commissionGross: '0',
+      commissionVatRate: '20',
+    },
+  });
+  return order.id;
+}
+
 /** Attaches one claim to an order, carrying a return package id and/or cargo number. */
 async function seedClaim(params: {
   readonly organizationId: string;
@@ -682,6 +717,68 @@ describe('ingestFinanceRecords', () => {
     expect(await queuedOrderIds()).toEqual([parcel.orderId]);
   });
 
+  it("pairs each package-less record's order number with its own barcode", async () => {
+    const parcel = await seedMelontikParcel();
+    const org = parcel.organizationId;
+    const store = parcel.storeId;
+
+    // Two package-less records: order number A names barcode X, order number B names
+    // barcode Y. Three orders: A/X and B/Y each match a record; A/Y shares A's order
+    // number and Y's barcode but no record names that pair. A cartesian resolve
+    // (= ANY(numbers) AND = ANY(barcodes)) would wrongly enqueue A/Y; the per-pair unnest
+    // join must enqueue only A/X and B/Y.
+    const orderAX = await createOrderWithItem({
+      organizationId: org,
+      storeId: store,
+      platformOrderNumber: 'PAIR-A',
+      barcode: 'bc-x',
+    });
+    const orderBY = await createOrderWithItem({
+      organizationId: org,
+      storeId: store,
+      platformOrderNumber: 'PAIR-B',
+      barcode: 'bc-y',
+    });
+    await createOrderWithItem({
+      organizationId: org,
+      storeId: store,
+      platformOrderNumber: 'PAIR-A',
+      barcode: 'bc-y',
+    });
+
+    const result = await ingestFinanceRecords(prisma, {
+      organizationId: org,
+      storeId: store,
+      platform: Platform.TRENDYOL,
+      records: [
+        trendyolSettlementRecordInput(
+          'Return',
+          financialTx({
+            id: 'ret-ax',
+            shipmentPackageId: null,
+            orderNumber: 'PAIR-A',
+            barcode: 'bc-x',
+            debt: 10,
+          }),
+        ),
+        trendyolSettlementRecordInput(
+          'Return',
+          financialTx({
+            id: 'ret-by',
+            shipmentPackageId: null,
+            orderNumber: 'PAIR-B',
+            barcode: 'bc-y',
+            debt: 20,
+          }),
+        ),
+      ],
+    });
+
+    expect(result.stored).toBe(2);
+    expect(result.enqueuedOrders).toBe(2);
+    expect(await queuedOrderIds()).toEqual([orderAX, orderBY].sort());
+  });
+
   it('stores nothing when the store does not belong to the organization', async () => {
     const parcel = await seedMelontikParcel();
     const carrierId = await upsertMelontikCarrier();
@@ -751,6 +848,51 @@ describe('pruneUnseenFinanceRecords', () => {
       storeId: parcel.storeId,
       family: FinanceRecordFamily.SETTLEMENT,
       transactionType: 'Sale',
+      windowStart: WINDOW_START,
+      windowEnd: WINDOW_END,
+      seenRecordIds: [],
+    });
+
+    expect(result.pruned).toBe(1);
+    expect(result.enqueuedOrders).toBe(1);
+    expect(await prisma.marketplaceFinanceRecord.count()).toBe(0);
+    expect(await queuedOrderIds()).toEqual([order]);
+    const queued = await prisma.profitRecomputeRequest.findUniqueOrThrow({
+      where: { orderId: order },
+    });
+    expect(queued.reason).toBe(ProfitRecomputeReason.FINANCE_RECORD);
+  });
+
+  it('enqueues the order of a pruned package-less record', async () => {
+    const parcel = await seedMelontikParcel();
+    const orderNumber = 'ORDER-4B-PRUNE';
+    const barcode = 'bc-prune';
+    const order = await createOrderWithItem({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platformOrderNumber: orderNumber,
+      barcode,
+    });
+    // A package-less Return (bound only by order number + barcode), in-window, that the
+    // scan did not return: pruning deletes it and enqueues the order it bound to through
+    // the RETURNING order_number + barcode branch.
+    await insertFinanceRecord({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      family: 'SETTLEMENT',
+      transactionType: 'Return',
+      recordId: 'ret-prune',
+      shipmentPackageId: null,
+      orderNumber,
+      barcode,
+      transactionDate: INSIDE,
+    });
+
+    const result = await pruneUnseenFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      family: FinanceRecordFamily.SETTLEMENT,
+      transactionType: 'Return',
       windowStart: WINDOW_START,
       windowEnd: WINDOW_END,
       seenRecordIds: [],

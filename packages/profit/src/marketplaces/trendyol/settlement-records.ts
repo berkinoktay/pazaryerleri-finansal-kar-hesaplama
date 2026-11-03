@@ -1,8 +1,9 @@
 import { type Decimal } from 'decimal.js';
 import { ProfitLineType } from '@pazarsync/db/enums';
-import type {
-  OtherFinancialTransactionType,
-  SettlementTransactionType,
+import {
+  SETTLEMENT_TRANSACTION_TYPES,
+  type OtherFinancialTransactionType,
+  type SettlementTransactionType,
 } from '@pazarsync/marketplace';
 
 /**
@@ -65,6 +66,32 @@ export const TRENDYOL_SETTLEMENT_RECORD_KIND = {
   CommissionPositiveCancel: 'UNVERIFIED',
   CommissionNegativeCancel: 'UNVERIFIED',
 } as const satisfies Record<SettlementTransactionType, TrendyolRecordKind>;
+
+/**
+ * The record kinds a package-less settlement row (shipment_package_id NULL) may bind
+ * by order number + barcode: a return leg only. Trendyol sends only return-leg records
+ * without a package -- a straight RETURN, or a DISCOUNT_REVERSAL (DiscountCancel /
+ * CouponCancel) that gives a coupon or discount back on a return or cancel. A Sale,
+ * Discount or Coupon always carries its package, so binding one package-less would
+ * double-count a sale that already has a package-bound row.
+ */
+const TRENDYOL_PACKAGELESS_BINDABLE_KINDS: readonly TrendyolRecordKind[] = [
+  'RETURN',
+  'DISCOUNT_REVERSAL',
+];
+
+/**
+ * The settlement transaction types a package-less row may bind by order number +
+ * barcode. Derived from TRENDYOL_SETTLEMENT_RECORD_KIND by keeping every type whose
+ * kind is a return leg, so a future kind change (a new reversal type, say) flows through
+ * without a hand-maintained duplicate list. Today: Return, DiscountCancel, CouponCancel.
+ * Evidence (dev data, 3 Nov 2026): every Sale and Discount row carries a package; 16 of
+ * 41 Return rows do not.
+ */
+export const TRENDYOL_PACKAGELESS_BINDABLE_TYPES: readonly SettlementTransactionType[] =
+  SETTLEMENT_TRANSACTION_TYPES.filter((type) =>
+    TRENDYOL_PACKAGELESS_BINDABLE_KINDS.includes(TRENDYOL_SETTLEMENT_RECORD_KIND[type]),
+  );
 
 /**
  * Otherfinancials (`/otherfinancials`) transaction types.

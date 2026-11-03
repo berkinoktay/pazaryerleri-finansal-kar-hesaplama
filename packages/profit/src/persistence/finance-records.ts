@@ -177,8 +177,9 @@ interface PackagelessPair {
 
 /**
  * Distinct (orderNumber, barcode) pairs of the package-less SETTLEMENT records (no
- * shipment package id) whose order number and barcode are both set. These feed the B7
- * order-number + barcode branch; a record missing either key cannot bind that way.
+ * shipment package id) whose order number and barcode are both set (non-null and
+ * non-empty). These feed the B7 order-number + barcode branch; a record missing either
+ * key cannot bind that way.
  */
 function distinctPackagelessPairs(records: readonly FinanceRecordBindingKey[]): PackagelessPair[] {
   const byKey = new Map<string, PackagelessPair>();
@@ -186,7 +187,8 @@ function distinctPackagelessPairs(records: readonly FinanceRecordBindingKey[]): 
     if (record.family !== FinanceRecordFamily.SETTLEMENT) continue;
     if (record.shipmentPackageId !== null) continue;
     const { orderNumber, barcode } = record;
-    if (orderNumber === null || barcode === null) continue;
+    // An empty order number or barcode is as good as missing: it cannot name a parcel.
+    if (orderNumber === null || orderNumber === '' || barcode === null || barcode === '') continue;
     byKey.set(`${orderNumber}\u0000${barcode}`, { orderNumber, barcode });
   }
   return [...byKey.values()];

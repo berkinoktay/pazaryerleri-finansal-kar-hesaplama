@@ -9,6 +9,7 @@ import {
   TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
   TRENDYOL_CARGO_RETURN_ITEM_TYPE,
   TRENDYOL_OTHER_FINANCIAL_RECORD_KIND,
+  TRENDYOL_PACKAGELESS_BINDABLE_TYPES,
   TRENDYOL_SETTLEMENT_RECORD_KIND,
 } from '../settlement-records';
 
@@ -49,6 +50,18 @@ describe('TRENDYOL record kind tables', () => {
     expect(outboundHex.startsWith('47c3b6')).toBe(true);
     expect(outboundHex).toBe('47c3b66e64657269204b6172676f20426564656c69');
     expect(returnHex).toBe('c4b0616465204b6172676f20426564656c69');
+  });
+
+  it('derives the package-less bindable types from the kind table (return legs only)', () => {
+    // Only return-leg types ever arrive without a package, so a package-less row binds by
+    // order number + barcode only for these. Derived from the kind table, so a future kind
+    // change flows through here without a hand-maintained duplicate list.
+    expect([...TRENDYOL_PACKAGELESS_BINDABLE_TYPES].sort()).toEqual(
+      ['CouponCancel', 'DiscountCancel', 'Return'].sort(),
+    );
+    for (const type of TRENDYOL_PACKAGELESS_BINDABLE_TYPES) {
+      expect(['RETURN', 'DISCOUNT_REVERSAL']).toContain(TRENDYOL_SETTLEMENT_RECORD_KIND[type]);
+    }
   });
 
   it('narrows a known transaction type and rejects unknown and prototype keys', () => {

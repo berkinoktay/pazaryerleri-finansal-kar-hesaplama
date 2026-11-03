@@ -24,6 +24,7 @@ import {
 import { type TrendyolEstimateInput } from '../marketplaces/trendyol/estimate-parcel';
 import {
   isTrendyolTransactionType,
+  TRENDYOL_PACKAGELESS_BINDABLE_TYPES,
   TRENDYOL_PAYMENT_ORDER_TRANSACTION_TYPE,
   type TrendyolCargoInvoiceItem,
   type TrendyolSettlementRecord,
@@ -877,14 +878,18 @@ async function loadFinanceRecords(
  * layer matched these dateless-package rows by order number and barcode, used ONLY when
  * the package id is null -- a non-null but unmatched package id is never guessed.
  *
- * A row binds only when all three hold: (a) its order_number equals the parcel's
- * platform order number; (b) one of the parcel's items (the same barcode set the mapper
- * matches against) carries the row's barcode; (c) no OTHER parcel of the same order
- * number in the same store carries that barcode (a split shipment makes the row
- * ambiguous, so it binds to neither, is never counted twice, and raises no spurious
- * sibling warning). Returns [] when the parcel has no platform order number or no item
- * barcode -- there is no key to bind on. Both queries are store-scoped (tenant defense);
- * the sibling check reaches order_items only through orders of this store.
+ * A row binds only when all four hold: (a) its transaction type is a return-leg type
+ * (TRENDYOL_PACKAGELESS_BINDABLE_TYPES: Return, DiscountCancel, CouponCancel) -- only
+ * return-leg records arrive without a package, and a package-less Sale/Discount/Coupon
+ * would double-count a sale that already has a package-bound row; (b) its order_number
+ * equals the parcel's platform order number; (c) one of the parcel's items (the same
+ * barcode set the mapper matches against) carries the row's barcode; (d) no OTHER parcel
+ * of the same order number in the same store carries that barcode (a split shipment makes
+ * the row ambiguous, so it binds to neither, is never counted twice, and raises no
+ * spurious sibling warning). Returns [] when the parcel has no platform order number
+ * (null or empty) or no item barcode -- there is no key to bind on. Both queries are
+ * store-scoped (tenant defense); the sibling check reaches order_items only through orders
+ * of this store.
  */
 async function loadPackagelessSettlementRows(
   tx: Prisma.TransactionClient,
@@ -896,7 +901,7 @@ async function loadPackagelessSettlementRows(
   },
 ): Promise<FinanceRow[]> {
   const { storeId, orderId, platformOrderNumber, itemBarcodes } = params;
-  if (platformOrderNumber === null || itemBarcodes.length === 0) {
+  if (platformOrderNumber === null || platformOrderNumber === '' || itemBarcodes.length === 0) {
     return [];
   }
 
@@ -905,6 +910,10 @@ async function loadPackagelessSettlementRows(
       storeId,
       family: FinanceRecordFamily.SETTLEMENT,
       shipmentPackageId: null,
+      // Only return-leg types bind package-less; a package-less Sale/Discount/Coupon would
+      // double-count a sale that already has a package-bound row. The list is derived from
+      // the kind table, so a kind change flows through automatically.
+      transactionType: { in: [...TRENDYOL_PACKAGELESS_BINDABLE_TYPES] },
       orderNumber: platformOrderNumber,
       barcode: { in: [...itemBarcodes] },
     },
