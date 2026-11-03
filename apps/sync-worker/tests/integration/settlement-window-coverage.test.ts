@@ -201,7 +201,7 @@ function makeOldSaleRow(
 }
 
 // Distinct chunk windows captured across all fetchSettlements calls. Each
-// chunk fires one call per SETTLEMENT_TYPE (3), all sharing the same window,
+// chunk fires one call per SETTLEMENT_TYPE (6), all sharing the same window,
 // so the distinct-window count IS the slice count.
 function distinctWindows(windows: { start: Date; end: Date }[]): { start: Date; end: Date }[] {
   const byKey = new Map<string, { start: Date; end: Date }>();

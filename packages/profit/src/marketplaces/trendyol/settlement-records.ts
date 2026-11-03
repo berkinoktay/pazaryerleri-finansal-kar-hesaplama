@@ -15,6 +15,8 @@ export type TrendyolTransactionType = SettlementTransactionType | OtherFinancial
 /**
  * How the mapper treats a record:
  * - SALE / DISCOUNT / RETURN: order-item records that build actual profit lines.
+ * - DISCOUNT_REVERSAL: DiscountCancel and CouponCancel; give a discount or coupon back
+ *   when the item is cancelled or returned.
  * - PAYMENT_ORDER: a cycle marker that confirms estimates (no line of its own).
  * - PERIOD: a period-level record with no order key; set aside for the period epic.
  * - IGNORED: a cash movement, neither income nor expense.
@@ -25,24 +27,27 @@ export type TrendyolRecordKind =
   | 'SALE'
   | 'DISCOUNT'
   | 'RETURN'
+  | 'DISCOUNT_REVERSAL'
   | 'PAYMENT_ORDER'
   | 'PERIOD'
   | 'IGNORED'
   | 'UNVERIFIED';
 
 /**
- * Settlement (`/settlements`) transaction types. Only Sale, Discount and Return
- * build lines today; every other type stays UNVERIFIED (plan decision 15) until
- * its mapping is confirmed with live data. The `satisfies Record<...>` forces the
- * table to cover every member of the marketplace union.
+ * Settlement (`/settlements`) transaction types. Sale, Discount, Coupon, Return and the
+ * two reversals (DiscountCancel, CouponCancel) build lines: a Coupon is a debt that nets
+ * out of the sale like a Discount, and a reversal gives a discount or coupon back on a
+ * cancel or return (confirmed with live data, 3 Nov 2026). Every other type stays
+ * UNVERIFIED (plan decision 15) until its mapping is confirmed with live data. The
+ * `satisfies Record<...>` forces the table to cover every member of the marketplace union.
  */
 export const TRENDYOL_SETTLEMENT_RECORD_KIND = {
   Sale: 'SALE',
   Return: 'RETURN',
   Discount: 'DISCOUNT',
-  DiscountCancel: 'UNVERIFIED',
-  Coupon: 'UNVERIFIED',
-  CouponCancel: 'UNVERIFIED',
+  DiscountCancel: 'DISCOUNT_REVERSAL',
+  Coupon: 'DISCOUNT',
+  CouponCancel: 'DISCOUNT_REVERSAL',
   ProvisionPositive: 'UNVERIFIED',
   ProvisionNegative: 'UNVERIFIED',
   ManualRefund: 'UNVERIFIED',

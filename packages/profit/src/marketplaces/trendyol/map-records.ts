@@ -52,11 +52,12 @@ export interface MappingResult {
   readonly periodRecords: readonly TrendyolSettlementRecord[];
 }
 
-/** The SALE / DISCOUNT / RETURN records that bound to one order item. */
+/** The SALE / DISCOUNT / RETURN / DISCOUNT_REVERSAL records that bound to one order item. */
 interface ItemRecordAccumulator {
   readonly sales: TrendyolSettlementRecord[];
   readonly discounts: TrendyolSettlementRecord[];
   readonly returns: TrendyolSettlementRecord[];
+  readonly discountReversals: TrendyolSettlementRecord[];
 }
 
 /** The shared reference built from the records that contribute to a line. */
@@ -131,7 +132,12 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
     if (existing !== undefined) {
       return existing;
     }
-    const created: ItemRecordAccumulator = { sales: [], discounts: [], returns: [] };
+    const created: ItemRecordAccumulator = {
+      sales: [],
+      discounts: [],
+      returns: [],
+      discountReversals: [],
+    };
     accumulators.set(orderItemId, created);
     return created;
   }
@@ -149,10 +155,12 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
     switch (kind) {
       case 'SALE':
       case 'DISCOUNT':
-      case 'RETURN': {
+      case 'RETURN':
+      case 'DISCOUNT_REVERSAL': {
         // Cycle ids come from every Sale and Return record of the parcel, bound or
         // not: an unbound record (no item or several items) still joins its payment
-        // cycle so its payment order can confirm the cycle's estimates.
+        // cycle so its payment order can confirm the cycle's estimates. A DISCOUNT or
+        // DISCOUNT_REVERSAL adds no cycle id (it rides the sale/return it belongs to).
         if (record.paymentOrderId !== null) {
           if (kind === 'SALE') {
             saleCyclePaymentOrderIds.add(record.paymentOrderId);
@@ -161,10 +169,10 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
           }
         }
 
-        if (kind === 'RETURN' && snapshot.isExportSale) {
-          // On export the return does not reverse the sale (design section 18); it
-          // only joins the return cycle (above) so its payment order can confirm
-          // the export fees.
+        if ((kind === 'RETURN' || kind === 'DISCOUNT_REVERSAL') && snapshot.isExportSale) {
+          // On export the return does not reverse the sale (design section 18), and a
+          // reversal is treated the same way: it only joins the return cycle (above) so
+          // its payment order can confirm the export fees, never netting a line.
           issues.push({
             code: ProfitIssueCode.UNMAPPED_MARKETPLACE_RECORD,
             orderItemId: null,
@@ -199,8 +207,10 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
           accumulator.sales.push(record);
         } else if (kind === 'DISCOUNT') {
           accumulator.discounts.push(record);
-        } else {
+        } else if (kind === 'RETURN') {
           accumulator.returns.push(record);
+        } else {
+          accumulator.discountReversals.push(record);
         }
         break;
       }
@@ -272,6 +282,22 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
     }
     const itemSaleVatRatePct = saleVatRatePct(item.saleVatRatePct, snapshot.isExportSale);
 
+    const hasReturns = accumulator.returns.length > 0;
+    const hasReversals = accumulator.discountReversals.length > 0;
+
+    // A cancelled item keeps a discount and its reversal but no sale and no return. When
+    // the reversal gives the discount back exactly (debt == credit and commission ==
+    // commission) the pair leaves no trace: nothing is produced and the
+    // discount-without-sale warning below is suppressed.
+    const reversalsCancelDiscounts =
+      !hasReturns &&
+      hasReversals &&
+      accumulator.sales.length === 0 &&
+      sumDecimals(accumulator.discounts.map((record) => record.debt)).equals(
+        sumDecimals(accumulator.discountReversals.map((record) => record.credit)),
+      ) &&
+      sumCommission(accumulator.discounts).equals(sumCommission(accumulator.discountReversals));
+
     if (accumulator.sales.length > 0) {
       const saleNet = sumDecimals(accumulator.sales.map((record) => record.credit)).sub(
         sumDecimals(accumulator.discounts.map((record) => record.debt)),
@@ -309,9 +335,10 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
           });
         }
       }
-    } else if (accumulator.discounts.length > 0) {
+    } else if (accumulator.discounts.length > 0 && !reversalsCancelDiscounts) {
       // A discount bound to an item with no sale cannot net against anything; it
-      // must not vanish silently.
+      // must not vanish silently. (It is suppressed only when a reversal gives it
+      // back exactly on a cancelled item, handled by reversalsCancelDiscounts.)
       const sortedDiscounts = [...accumulator.discounts].sort((a, b) =>
         compareText(a.recordId, b.recordId),
       );
@@ -325,30 +352,58 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
       }
     }
 
-    if (accumulator.returns.length > 0) {
-      const returnDebt = sumDecimals(accumulator.returns.map((record) => record.debt));
-      const returnCommission = sumCommission(accumulator.returns);
-      const reference = buildRecordReference({
-        all: accumulator.returns,
-        primary: accumulator.returns,
-      });
-      if (returnDebt.gt(ZERO)) {
-        addRecordLine({
-          type: ProfitLineType.SALE_RETURN,
+    // A reversal nets only against a return (below). With no return it cannot net: unless
+    // the whole item was cancelled (reversalsCancelDiscounts), each reversal record is
+    // flagged so it does not vanish silently. The item's sale/discount handling above is
+    // left exactly as today.
+    if (!hasReturns && hasReversals && !reversalsCancelDiscounts) {
+      for (const reversal of accumulator.discountReversals) {
+        issues.push({
+          code: ProfitIssueCode.AMBIGUOUS_RECORD_MATCH,
           orderItemId: item.orderItemId,
-          gross: returnDebt,
-          vatRatePct: itemSaleVatRatePct,
-          reference,
+          detail: `UNMATCHED_DISCOUNT_REVERSAL:${reversal.recordId}`,
         });
       }
-      if (returnCommission.gt(ZERO)) {
-        addRecordLine({
-          type: ProfitLineType.COMMISSION_REFUND,
+    }
+
+    if (hasReturns) {
+      // A reversal gives the discount/coupon back on the return, so the net return is the
+      // return debt minus the reversal credit (commission likewise).
+      const returnDebt = sumDecimals(accumulator.returns.map((record) => record.debt)).sub(
+        sumDecimals(accumulator.discountReversals.map((record) => record.credit)),
+      );
+      const returnCommission = sumCommission(accumulator.returns).sub(
+        sumCommission(accumulator.discountReversals),
+      );
+      if (returnDebt.lt(ZERO) || returnCommission.lt(ZERO)) {
+        issues.push({
+          code: ProfitIssueCode.AMBIGUOUS_RECORD_MATCH,
           orderItemId: item.orderItemId,
-          gross: returnCommission,
-          vatRatePct: fees.commissionVatRatePct,
-          reference,
+          detail: `NEGATIVE_NET:${item.orderItemId}`,
         });
+      } else {
+        const reference = buildRecordReference({
+          all: [...accumulator.returns, ...accumulator.discountReversals],
+          primary: accumulator.returns,
+        });
+        if (returnDebt.gt(ZERO)) {
+          addRecordLine({
+            type: ProfitLineType.SALE_RETURN,
+            orderItemId: item.orderItemId,
+            gross: returnDebt,
+            vatRatePct: itemSaleVatRatePct,
+            reference,
+          });
+        }
+        if (returnCommission.gt(ZERO)) {
+          addRecordLine({
+            type: ProfitLineType.COMMISSION_REFUND,
+            orderItemId: item.orderItemId,
+            gross: returnCommission,
+            vatRatePct: fees.commissionVatRatePct,
+            reference,
+          });
+        }
       }
     }
   }

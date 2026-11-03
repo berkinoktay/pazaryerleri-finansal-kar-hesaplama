@@ -448,6 +448,46 @@ describe('processSettlementsChunk — raw finance-record ingest', () => {
     expect(await prisma.marketplaceFinanceRecord.count({ where: { storeId } })).toBe(3);
   });
 
+  it('requests every mapped settlement type', async () => {
+    // A default store createdAt (≈now) runs one tiny slice, enough for every type to be
+    // requested once. The scan must pull all six settlement types the mapper now maps
+    // (Sale, Discount, Return, DiscountCancel, Coupon, CouponCancel) and the three
+    // otherfinancials types, so a live coupon or reversal is never silently dropped.
+    const { syncLogId } = await buildScenario();
+    const requestedSettlements: string[] = [];
+    const requestedOtherFinancials: string[] = [];
+
+    const syncLogRow = await prisma.syncLog.findUniqueOrThrow({ where: { id: syncLogId } });
+    const result = await processSettlementsChunk(
+      { syncLog: syncLogRow, cursor: null, workerId: WORKER_ID },
+      {
+        fetchSettlements: async function* (
+          opts: FetchSettlementsOpts,
+        ): AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary> {
+          requestedSettlements.push(opts.transactionType);
+          yield* [];
+          return { totalElements: 0, yielded: 0 };
+        },
+        fetchOtherFinancials: async function* (
+          opts: FetchOtherFinancialsOpts,
+        ): AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary> {
+          requestedOtherFinancials.push(opts.transactionType);
+          yield* [];
+          return { totalElements: 0, yielded: 0 };
+        },
+        fetchCargoInvoiceItems: async (): Promise<CargoInvoiceItem[]> => [],
+      },
+    );
+    expect(result.kind).toBe('done');
+
+    expect([...new Set(requestedSettlements)].sort()).toEqual(
+      ['Coupon', 'CouponCancel', 'Discount', 'DiscountCancel', 'Return', 'Sale'].sort(),
+    );
+    expect([...new Set(requestedOtherFinancials)].sort()).toEqual(
+      ['DeductionInvoices', 'PaymentOrder', 'Stoppage'].sort(),
+    );
+  });
+
   it('takes a parcel to SETTLED through raw records and the queue', async () => {
     // A fully-costed melontik parcel so the drain produces a real statement. The order's
     // platform id is numeric so the Sale rows bind it, and its cargo tracking number

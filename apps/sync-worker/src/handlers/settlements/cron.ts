@@ -110,12 +110,22 @@ const FINANCE_INGEST_BATCH_SIZE = 200;
 // it did not actually consider. See [[feedback_trendyol_orderdate_local_as_utc]].
 const FINANCE_PRUNE_EDGE_TOLERANCE_MS = 86_400_000;
 
-// V1 happy path — research §3.3 confirmed only Sale/Discount/Return have
-// nonzero observations in 60-day windows. Rare types stay enumerated in
-// dispatcher.ts (audit log fall-through) but the cron loop skips them
-// for now to reduce API calls. They'll surface naturally once stage
-// produces concrete rows (PR-N follow-up).
-const SETTLEMENT_TYPES = ['Sale', 'Discount', 'Return'] as const;
+// Settlement transaction types scanned each window. The 3 Nov 2026 coupon-semantics probe
+// found coupons and discount reversals on live sellers (both prod and stage), so the scan
+// now pulls all six: a Coupon is a debt like a Discount (its amount is already inside the
+// Sale credit, so it nets out of the sale), and DiscountCancel / CouponCancel are credits
+// that give a discount or coupon back — every reversal observed came with a Return and
+// reverses its return legs. Pruning (previous commit) covers these types too, so a renewed
+// id drops its stale row. The remaining rare types stay enumerated in dispatcher.ts (audit
+// log fall-through) but the cron loop still skips them until live rows appear.
+const SETTLEMENT_TYPES = [
+  'Sale',
+  'Discount',
+  'Return',
+  'DiscountCancel',
+  'Coupon',
+  'CouponCancel',
+] as const;
 const OTHER_FINANCIAL_TYPES = ['PaymentOrder', 'Stoppage', 'DeductionInvoices'] as const;
 
 // ─── DI shape for fetchers (test-mockable) ──────────────────────────────

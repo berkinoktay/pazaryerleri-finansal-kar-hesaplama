@@ -581,13 +581,19 @@ describe('mapTrendyolRecords', () => {
     });
     const stoppage = makeRecord({ recordId: 'st-1', transactionType: 'Stoppage' });
     const wire = makeRecord({ recordId: 'wt-1', transactionType: 'WireTransfer' });
-    const coupon = makeRecord({ recordId: 'cp-1', transactionType: 'Coupon', barcode: 'bc-a' });
+    // ProvisionPositive is still UNVERIFIED (Coupon now maps to DISCOUNT), so it is the
+    // unverified example the mapper flags.
+    const provision = makeRecord({
+      recordId: 'pv-1',
+      transactionType: 'ProvisionPositive',
+      barcode: 'bc-a',
+    });
 
     const result = mapTrendyolRecords({
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
-      records: [stoppage, wire, coupon],
+      records: [stoppage, wire, provision],
       cargoItems: [],
       estimateLines: [],
     });
@@ -598,7 +604,7 @@ describe('mapTrendyolRecords', () => {
       {
         code: ProfitIssueCode.UNMAPPED_MARKETPLACE_RECORD,
         orderItemId: null,
-        detail: 'Coupon:cp-1',
+        detail: 'ProvisionPositive:pv-1',
       },
     ]);
   });
@@ -851,6 +857,363 @@ describe('mapTrendyolRecords', () => {
     expect(result.lines).toEqual([]);
     expect(result.issues).toEqual([
       { code: ProfitIssueCode.AMBIGUOUS_RECORD_MATCH, orderItemId: 'a', detail: 'NEGATIVE_NET:a' },
+    ]);
+  });
+
+  it('nets a coupon against the sale like a discount', () => {
+    // Live Trendyol (3 Nov 2026): a Coupon is a debt like a Discount, and the Sale credit
+    // already includes the coupon, so the net sale subtracts both the discount and the
+    // coupon. 920.00 - 46.00 - 19.65 = 854.35; 174.80 - 8.74 - 3.73 = 162.33.
+    const snapshot = makeParcel({
+      items: [
+        makeItem({ orderItemId: 'a', listGross: '920.00', saleVatRatePct: '20', barcode: 'bc-a' }),
+      ],
+    });
+    const records = [
+      makeRecord({
+        recordId: 'sale-1',
+        transactionType: 'Sale',
+        barcode: 'bc-a',
+        credit: '920.00',
+        commissionAmount: '174.80',
+      }),
+      makeRecord({
+        recordId: 'disc-1',
+        transactionType: 'Discount',
+        barcode: 'bc-a',
+        debt: '46.00',
+        commissionAmount: '8.74',
+      }),
+      makeRecord({
+        recordId: 'coup-1',
+        transactionType: 'Coupon',
+        barcode: 'bc-a',
+        debt: '19.65',
+        commissionAmount: '3.73',
+      }),
+    ];
+
+    const result = mapTrendyolRecords({
+      snapshot,
+      attributes: makeTrendyolAttributes(),
+      fees: FEES,
+      records,
+      cargoItems: [],
+      estimateLines: [],
+    });
+
+    expect(result.issues).toEqual([]);
+    const sale = result.lines.find((line) => line.type === ProfitLineType.SALE);
+    expect(sale?.amount.gross.toFixed(2)).toBe('854.35');
+    // The coupon record joins the sale reference so the stored line cites every input.
+    expect(sale?.inputs.recordIds).toBe('coup-1,disc-1,sale-1');
+    const commission = result.lines.find((line) => line.type === ProfitLineType.COMMISSION);
+    expect(commission?.amount.gross.toFixed(2)).toBe('162.33');
+  });
+
+  it('reverses the discount on a returned item so a full return nets the sale legs to zero', () => {
+    // Stage example (3 Nov 2026): a fully returned item carries a Sale, a Discount and a
+    // Coupon on the sale side and a Return plus both reversals on the return side. The sale
+    // legs net to 80.16 / 16.03 and the return legs net to the same, so sale minus return
+    // is zero. SALE = 333.50 - 3.34 - 250.00; SALE_RETURN = 333.50 - 3.34 - 250.00.
+    const snapshot = makeParcel({
+      items: [
+        makeItem({ orderItemId: 'a', listGross: '333.50', saleVatRatePct: '20', barcode: 'bc-a' }),
+      ],
+    });
+    const records = [
+      makeRecord({
+        recordId: 'sale-1',
+        transactionType: 'Sale',
+        barcode: 'bc-a',
+        credit: '333.50',
+        commissionAmount: '66.70',
+      }),
+      makeRecord({
+        recordId: 'disc-1',
+        transactionType: 'Discount',
+        barcode: 'bc-a',
+        debt: '3.34',
+        commissionAmount: '0.67',
+      }),
+      makeRecord({
+        recordId: 'coup-1',
+        transactionType: 'Coupon',
+        barcode: 'bc-a',
+        debt: '250.00',
+        commissionAmount: '50.00',
+      }),
+      makeRecord({
+        recordId: 'ret-1',
+        transactionType: 'Return',
+        barcode: 'bc-a',
+        debt: '333.50',
+        commissionAmount: '66.70',
+      }),
+      makeRecord({
+        recordId: 'dc-1',
+        transactionType: 'DiscountCancel',
+        barcode: 'bc-a',
+        credit: '3.34',
+        commissionAmount: '0.67',
+      }),
+      makeRecord({
+        recordId: 'cc-1',
+        transactionType: 'CouponCancel',
+        barcode: 'bc-a',
+        credit: '250.00',
+        commissionAmount: '50.00',
+      }),
+    ];
+
+    const result = mapTrendyolRecords({
+      snapshot,
+      attributes: makeTrendyolAttributes(),
+      fees: FEES,
+      records,
+      cargoItems: [],
+      estimateLines: [],
+    });
+
+    expect(result.issues).toEqual([]);
+    const sale = result.lines.find((line) => line.type === ProfitLineType.SALE);
+    expect(sale?.amount.gross.toFixed(2)).toBe('80.16');
+    const commission = result.lines.find((line) => line.type === ProfitLineType.COMMISSION);
+    expect(commission?.amount.gross.toFixed(2)).toBe('16.03');
+    const saleReturn = result.lines.find((line) => line.type === ProfitLineType.SALE_RETURN);
+    expect(saleReturn?.amount.gross.toFixed(2)).toBe('80.16');
+    // The reversal records join the return reference; the external record stays the Return.
+    expect(saleReturn?.inputs.recordIds).toBe('cc-1,dc-1,ret-1');
+    expect(saleReturn?.externalRecord).toEqual({ recordId: 'ret-1', rawType: 'Return' });
+    const commissionRefund = result.lines.find(
+      (line) => line.type === ProfitLineType.COMMISSION_REFUND,
+    );
+    expect(commissionRefund?.amount.gross.toFixed(2)).toBe('16.03');
+  });
+
+  it('reverses a coupon on a returned item the same way', () => {
+    // Only a CouponCancel reverses the return here: SALE = 333.50 - 250.00 = 83.50 and the
+    // return nets the same, so the sale and return legs cancel.
+    const snapshot = makeParcel({
+      items: [
+        makeItem({ orderItemId: 'a', listGross: '333.50', saleVatRatePct: '20', barcode: 'bc-a' }),
+      ],
+    });
+    const records = [
+      makeRecord({
+        recordId: 'sale-1',
+        transactionType: 'Sale',
+        barcode: 'bc-a',
+        credit: '333.50',
+        commissionAmount: '66.70',
+      }),
+      makeRecord({
+        recordId: 'coup-1',
+        transactionType: 'Coupon',
+        barcode: 'bc-a',
+        debt: '250.00',
+        commissionAmount: '50.00',
+      }),
+      makeRecord({
+        recordId: 'ret-1',
+        transactionType: 'Return',
+        barcode: 'bc-a',
+        debt: '333.50',
+        commissionAmount: '66.70',
+      }),
+      makeRecord({
+        recordId: 'cc-1',
+        transactionType: 'CouponCancel',
+        barcode: 'bc-a',
+        credit: '250.00',
+        commissionAmount: '50.00',
+      }),
+    ];
+
+    const result = mapTrendyolRecords({
+      snapshot,
+      attributes: makeTrendyolAttributes(),
+      fees: FEES,
+      records,
+      cargoItems: [],
+      estimateLines: [],
+    });
+
+    expect(result.issues).toEqual([]);
+    const sale = result.lines.find((line) => line.type === ProfitLineType.SALE);
+    expect(sale?.amount.gross.toFixed(2)).toBe('83.50');
+    const saleReturn = result.lines.find((line) => line.type === ProfitLineType.SALE_RETURN);
+    expect(saleReturn?.amount.gross.toFixed(2)).toBe('83.50');
+    const commission = result.lines.find((line) => line.type === ProfitLineType.COMMISSION);
+    expect(commission?.amount.gross.toFixed(2)).toBe('16.70');
+    const commissionRefund = result.lines.find(
+      (line) => line.type === ProfitLineType.COMMISSION_REFUND,
+    );
+    expect(commissionRefund?.amount.gross.toFixed(2)).toBe('16.70');
+  });
+
+  it('nets a discount and its reversal on a cancelled item to nothing', () => {
+    // A cancelled item keeps a Discount and its DiscountCancel but no Sale and no Return.
+    // The reversal exactly gives the discount back (3.34 / 0.67), so nothing is produced
+    // and the discount-without-sale warning is suppressed.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '333.50', barcode: 'bc-a' })],
+    });
+    const records = [
+      makeRecord({
+        recordId: 'disc-1',
+        transactionType: 'Discount',
+        barcode: 'bc-a',
+        debt: '3.34',
+        commissionAmount: '0.67',
+      }),
+      makeRecord({
+        recordId: 'dc-1',
+        transactionType: 'DiscountCancel',
+        barcode: 'bc-a',
+        credit: '3.34',
+        commissionAmount: '0.67',
+      }),
+    ];
+
+    const result = mapTrendyolRecords({
+      snapshot,
+      attributes: makeTrendyolAttributes(),
+      fees: FEES,
+      records,
+      cargoItems: [],
+      estimateLines: [],
+    });
+
+    expect(result.lines).toEqual([]);
+    expect(result.issues).toEqual([]);
+  });
+
+  it('flags a discount reversal that has nothing to reverse', () => {
+    // A lone DiscountCancel has no discount, sale or return to net against: it must not
+    // vanish silently.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '333.50', barcode: 'bc-a' })],
+    });
+    const records = [
+      makeRecord({
+        recordId: 'dc-1',
+        transactionType: 'DiscountCancel',
+        barcode: 'bc-a',
+        credit: '3.34',
+        commissionAmount: '0.67',
+      }),
+    ];
+
+    const result = mapTrendyolRecords({
+      snapshot,
+      attributes: makeTrendyolAttributes(),
+      fees: FEES,
+      records,
+      cargoItems: [],
+      estimateLines: [],
+    });
+
+    expect(result.lines).toEqual([]);
+    expect(result.issues).toEqual([
+      {
+        code: ProfitIssueCode.AMBIGUOUS_RECORD_MATCH,
+        orderItemId: 'a',
+        detail: 'UNMATCHED_DISCOUNT_REVERSAL:dc-1',
+      },
+    ]);
+  });
+
+  it('flags a discount reversal on an item that was sold but not returned', () => {
+    // The item was sold and discounted but not returned, so the reversal cannot net: the
+    // sale stays today's net (333.50 - 3.34 = 330.16) and the reversal is flagged.
+    const snapshot = makeParcel({
+      items: [
+        makeItem({ orderItemId: 'a', listGross: '333.50', saleVatRatePct: '20', barcode: 'bc-a' }),
+      ],
+    });
+    const records = [
+      makeRecord({
+        recordId: 'sale-1',
+        transactionType: 'Sale',
+        barcode: 'bc-a',
+        credit: '333.50',
+        commissionAmount: '66.70',
+      }),
+      makeRecord({
+        recordId: 'disc-1',
+        transactionType: 'Discount',
+        barcode: 'bc-a',
+        debt: '3.34',
+        commissionAmount: '0.67',
+      }),
+      makeRecord({
+        recordId: 'dc-1',
+        transactionType: 'DiscountCancel',
+        barcode: 'bc-a',
+        credit: '3.34',
+        commissionAmount: '0.67',
+      }),
+    ];
+
+    const result = mapTrendyolRecords({
+      snapshot,
+      attributes: makeTrendyolAttributes(),
+      fees: FEES,
+      records,
+      cargoItems: [],
+      estimateLines: [],
+    });
+
+    const sale = result.lines.find((line) => line.type === ProfitLineType.SALE);
+    expect(sale?.amount.gross.toFixed(2)).toBe('330.16');
+    const commission = result.lines.find((line) => line.type === ProfitLineType.COMMISSION);
+    expect(commission?.amount.gross.toFixed(2)).toBe('66.03');
+    expect(result.lines.find((line) => line.type === ProfitLineType.SALE_RETURN)).toBeUndefined();
+    expect(result.issues).toEqual([
+      {
+        code: ProfitIssueCode.AMBIGUOUS_RECORD_MATCH,
+        orderItemId: 'a',
+        detail: 'UNMATCHED_DISCOUNT_REVERSAL:dc-1',
+      },
+    ]);
+  });
+
+  it('treats a reversal on an export sale like an export return', () => {
+    // On an export sale a reversal does not reverse anything (design section 18); it is
+    // flagged exactly like an export return and never nets.
+    const snapshot = makeParcel({
+      isExportSale: true,
+      items: [
+        makeItem({ orderItemId: 'a', listGross: '333.50', saleVatRatePct: '20', barcode: 'bc-a' }),
+      ],
+    });
+    const records = [
+      makeRecord({
+        recordId: 'dc-1',
+        transactionType: 'DiscountCancel',
+        barcode: 'bc-a',
+        credit: '3.34',
+        commissionAmount: '0.67',
+      }),
+    ];
+
+    const result = mapTrendyolRecords({
+      snapshot,
+      attributes: makeTrendyolAttributes(),
+      fees: FEES,
+      records,
+      cargoItems: [],
+      estimateLines: [],
+    });
+
+    expect(result.lines).toEqual([]);
+    expect(result.issues).toEqual([
+      {
+        code: ProfitIssueCode.UNMAPPED_MARKETPLACE_RECORD,
+        orderItemId: null,
+        detail: 'EXPORT_RETURN:dc-1',
+      },
     ]);
   });
 });
