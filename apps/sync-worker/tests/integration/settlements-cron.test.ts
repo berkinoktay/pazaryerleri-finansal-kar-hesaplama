@@ -24,6 +24,7 @@ import type {
   CargoInvoiceItem,
   FetchOtherFinancialsOpts,
   FetchSettlementsOpts,
+  FinancialScanSummary,
   TrendyolFinancialTransaction,
 } from '@pazarsync/marketplace';
 import { drainProfitRecomputeQueue } from '@pazarsync/profit';
@@ -50,6 +51,7 @@ const BARCODE = 'EAN13-CRON';
 const SHIPMENT_PACKAGE_ID = 444_555_666;
 const PAYMENT_ORDER_ID = 99_999_111;
 const CARGO_INVOICE_RESPONSE_TYPE = 'Kargo Fatura';
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 interface SimpleCtx {
   storeId: string;
@@ -59,7 +61,7 @@ interface SimpleCtx {
 }
 
 /** A store + a single numeric-platformOrderId order + a SETTLEMENTS syncLog claimed here. */
-async function buildScenario(): Promise<SimpleCtx> {
+async function buildScenario(opts: { storeCreatedAt?: Date } = {}): Promise<SimpleCtx> {
   const user = await createUserProfile();
   const org = await createOrganization();
   await createMembership(org.id, user.id);
@@ -74,6 +76,10 @@ async function buildScenario(): Promise<SimpleCtx> {
       externalAccountId: '123456',
       credentials,
       status: 'ACTIVE',
+      // The prune window derives from store.createdAt (via the orders cutoff clamp), so a
+      // test that needs a non-empty window sets an older createdAt; undefined keeps the
+      // DB default (now), which collapses the prune window to empty.
+      createdAt: opts.storeCreatedAt,
     },
   });
 
@@ -197,6 +203,20 @@ function saleRow(
   });
 }
 
+/** A Sale row bound to the scenario order, dated at an explicit instant (prune tests). */
+function saleRowOn(id: string, transactionDate: number): TrendyolFinancialTransaction {
+  return tx({
+    id,
+    transactionType: 'Satış',
+    barcode: BARCODE,
+    credit: 120,
+    commissionAmount: 12,
+    shipmentPackageId: SHIPMENT_PACKAGE_ID,
+    paymentOrderId: PAYMENT_ORDER_ID,
+    transactionDate,
+  });
+}
+
 function discountRow(
   id: string,
   barcode: string,
@@ -250,26 +270,34 @@ interface MockScenario {
     Record<'PaymentOrder' | 'Stoppage' | 'DeductionInvoices', TrendyolFinancialTransaction[]>
   >;
   cargoItems?: CargoInvoiceItem[];
+  /**
+   * Overrides the reported totalElements per settlement type so a scan can be made to
+   * come back short of its total (an incomplete scan the prune must refuse). Absent, the
+   * reported total equals the number of rows yielded (a complete scan).
+   */
+  settlementTotals?: Partial<Record<'Sale' | 'Discount' | 'Return', number>>;
 }
 
 function makeMockFetchers(scenario: MockScenario) {
   return {
     fetchSettlements: async function* (
       opts: FetchSettlementsOpts,
-    ): AsyncGenerator<TrendyolFinancialTransaction, void> {
-      const rows = scenario.settlements?.[opts.transactionType as 'Sale' | 'Discount' | 'Return'];
-      if (!rows) return;
+    ): AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary> {
+      const type = opts.transactionType as 'Sale' | 'Discount' | 'Return';
+      const rows = scenario.settlements?.[type] ?? [];
       for (const row of rows) yield row;
+      const totalElements = scenario.settlementTotals?.[type] ?? rows.length;
+      return { totalElements, yielded: rows.length };
     },
     fetchOtherFinancials: async function* (
       opts: FetchOtherFinancialsOpts,
-    ): AsyncGenerator<TrendyolFinancialTransaction, void> {
+    ): AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary> {
       const rows =
         scenario.otherFinancials?.[
           opts.transactionType as 'PaymentOrder' | 'Stoppage' | 'DeductionInvoices'
-        ];
-      if (!rows) return;
+        ] ?? [];
       for (const row of rows) yield row;
+      return { totalElements: rows.length, yielded: rows.length };
     },
     fetchCargoInvoiceItems: async (): Promise<CargoInvoiceItem[]> => scenario.cargoItems ?? [],
   };
@@ -487,5 +515,121 @@ describe('processSettlementsChunk — raw finance-record ingest', () => {
     });
     expect(settled.status).toBe(ProfitStatus.SETTLED);
     expect(settled.netProfit?.toFixed(2)).toBe('191.79');
+  });
+
+  /** All settlement record ids of the store, sorted, for prune survivor assertions. */
+  async function settlementRecordIds(storeId: string): Promise<string[]> {
+    const rows = await prisma.marketplaceFinanceRecord.findMany({
+      where: { storeId, family: FinanceRecordFamily.SETTLEMENT },
+      select: { recordId: true },
+    });
+    return rows.map((row) => row.recordId).sort();
+  }
+
+  it('replaces a renewed record id instead of counting the sale twice', async () => {
+    const now = Date.now();
+    // A store 14 days old gives a single slice and a non-empty prune window
+    // (overallStartTime + 1d .. now - 1d); the sale sits well inside at now - 7d.
+    const { storeId, orderId, syncLogId } = await buildScenario({
+      storeCreatedAt: new Date(now - 14 * DAY_MS),
+    });
+    const inside = now - 7 * DAY_MS;
+
+    await runChunk(syncLogId, { settlements: { Sale: [saleRowOn('S-OLD', inside)] } });
+    expect(await settlementRecordIds(storeId)).toEqual(['S-OLD']);
+
+    // The same sale comes back under a renewed id: the old row must not linger as a second
+    // copy of the same sale.
+    await runChunk(syncLogId, { settlements: { Sale: [saleRowOn('S-NEW', inside)] } });
+
+    expect(await settlementRecordIds(storeId)).toEqual(['S-NEW']);
+    const queued = await prisma.profitRecomputeRequest.findUnique({ where: { orderId } });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.FINANCE_RECORD);
+  });
+
+  it('keeps every stored record when a scan comes back short', async () => {
+    const now = Date.now();
+    const { storeId, syncLogId } = await buildScenario({
+      storeCreatedAt: new Date(now - 14 * DAY_MS),
+    });
+    const inside = now - 7 * DAY_MS;
+    const warnSpy = vi.spyOn(syncLog, 'warn');
+
+    await runChunk(syncLogId, { settlements: { Sale: [saleRowOn('S-OLD', inside)] } });
+
+    // Run 2 yields the renewed row but reports more elements than it returned: an
+    // incomplete scan must prune nothing, so both ids survive.
+    await runChunk(syncLogId, {
+      settlements: { Sale: [saleRowOn('S-NEW', inside)] },
+      settlementTotals: { Sale: 5 },
+    });
+
+    expect(await settlementRecordIds(storeId)).toEqual(['S-NEW', 'S-OLD']);
+    const skipped = warnSpy.mock.calls.filter(([event]) => event === 'settlements.prune.skipped');
+    expect(
+      skipped.some(
+        ([, ctx]) => ctx?.['transactionType'] === 'Sale' && ctx?.['reason'] === 'INCOMPLETE_SCAN',
+      ),
+    ).toBe(true);
+  });
+
+  it('skips pruning when the vendor returns a row outside the requested window', async () => {
+    const now = Date.now();
+    const { storeId, syncLogId } = await buildScenario({
+      storeCreatedAt: new Date(now - 14 * DAY_MS),
+    });
+    const warnSpy = vi.spyOn(syncLog, 'warn');
+
+    await runChunk(syncLogId, { settlements: { Sale: [saleRowOn('S-OLD', now - 7 * DAY_MS)] } });
+
+    // Run 2 returns a row dated two days after the slice end (beyond the 1-day tolerance):
+    // the vendor filter is not the field we assumed, so nothing of this type is pruned.
+    await runChunk(syncLogId, { settlements: { Sale: [saleRowOn('S-FUTURE', now + 2 * DAY_MS)] } });
+
+    expect(await settlementRecordIds(storeId)).toEqual(['S-FUTURE', 'S-OLD']);
+    const skipped = warnSpy.mock.calls.filter(([event]) => event === 'settlements.prune.skipped');
+    expect(
+      skipped.some(
+        ([, ctx]) => ctx?.['transactionType'] === 'Sale' && ctx?.['reason'] === 'OUT_OF_WINDOW_ROW',
+      ),
+    ).toBe(true);
+  });
+
+  it('tolerates a few hours of vendor date shift and still prunes', async () => {
+    const now = Date.now();
+    const { storeId, syncLogId } = await buildScenario({
+      storeCreatedAt: new Date(now - 14 * DAY_MS),
+    });
+
+    await runChunk(syncLogId, { settlements: { Sale: [saleRowOn('S-OLD', now - 7 * DAY_MS)] } });
+
+    // Run 2's renewed row is dated three hours after the slice end — inside tolerance — so
+    // the window guard holds and pruning still runs, dropping the stale old id.
+    await runChunk(syncLogId, {
+      settlements: { Sale: [saleRowOn('S-NEW', now + 3 * 60 * 60 * 1000)] },
+    });
+
+    expect(await settlementRecordIds(storeId)).toEqual(['S-NEW']);
+  });
+
+  it('keeps a stale record within a day of the window edge', async () => {
+    const now = Date.now();
+    const { storeId, syncLogId } = await buildScenario({
+      storeCreatedAt: new Date(now - 14 * DAY_MS),
+    });
+    // One stale row 12h inside the overall window start (within the 1-day edge pad), one
+    // deep inside the prune range.
+    const edge = now - 14 * DAY_MS + 12 * 60 * 60 * 1000;
+    const deep = now - 7 * DAY_MS;
+
+    await runChunk(syncLogId, {
+      settlements: { Sale: [saleRowOn('stale-edge', edge), saleRowOn('stale-deep', deep)] },
+    });
+
+    // Run 2 is a complete, empty scan: the deep stale row is pruned, but the one within a
+    // day of the window edge sits outside the delete range and is spared.
+    await runChunk(syncLogId, { settlements: { Sale: [] } });
+
+    expect(await settlementRecordIds(storeId)).toEqual(['stale-edge']);
   });
 });

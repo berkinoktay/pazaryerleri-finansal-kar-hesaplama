@@ -298,9 +298,16 @@ describe('handleCargoInvoiceItems (PR-8)', () => {
       {
         fetchSettlements: async function* () {
           // no settlement rows in this scenario
+          yield* [];
+          return { totalElements: 0, yielded: 0 };
         },
         fetchOtherFinancials: async function* (opts) {
-          if (opts.transactionType === 'DeductionInvoices') yield makeCargoRow();
+          let yielded = 0;
+          if (opts.transactionType === 'DeductionInvoices') {
+            yield makeCargoRow();
+            yielded = 1;
+          }
+          return { totalElements: yielded, yielded };
         },
         fetchCargoInvoiceItems: async (opts) => {
           expect(opts.invoiceSerialNumber).toBe(SERIAL);

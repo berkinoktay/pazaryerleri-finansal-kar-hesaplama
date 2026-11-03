@@ -238,7 +238,7 @@ export {
 export { loadTrendyolParcel, type LoadedTrendyolParcel } from './persistence/load-trendyol-parcel';
 export { ParcelNotFoundError, UnsupportedPlatformError } from './persistence/errors';
 export { type FinanceRecordInput } from './core/finance-record-input';
-export { ingestFinanceRecords } from './persistence/finance-records';
+export { ingestFinanceRecords, pruneUnseenFinanceRecords } from './persistence/finance-records';
 
 // Profit recompute queue (rebuild, phase 3B) -- docs/plans/2026-10-30-profit-engine-faz-3b-plan.md
 export {

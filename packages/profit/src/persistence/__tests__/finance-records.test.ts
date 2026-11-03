@@ -14,7 +14,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { prisma } from '@pazarsync/db';
-import { FinanceRecordFamily, Platform } from '@pazarsync/db/enums';
+import { FinanceRecordFamily, Platform, ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { CargoInvoiceItem, TrendyolFinancialTransaction } from '@pazarsync/marketplace';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -28,12 +28,13 @@ import {
   TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
   TRENDYOL_CARGO_RETURN_ITEM_TYPE,
 } from '../../marketplaces/trendyol/settlement-records';
-import { ingestFinanceRecords } from '../finance-records';
+import { ingestFinanceRecords, pruneUnseenFinanceRecords } from '../finance-records';
 import { loadTrendyolParcel } from '../load-trendyol-parcel';
 import {
   createAdditionalStore,
   createTrendyolOrg,
   ensureDbReachable,
+  insertFinanceRecord,
   MELONTIK,
   seedMelontikParcel,
   truncateAll,
@@ -668,5 +669,262 @@ describe('ingestFinanceRecords', () => {
     expect(result.enqueuedOrders).toBe(0);
     expect(await prisma.marketplaceFinanceRecord.count()).toBe(0);
     expect(await queuedOrderIds()).toEqual([]);
+  });
+});
+
+describe('pruneUnseenFinanceRecords', () => {
+  const WINDOW_START = new Date('2026-10-01T00:00:00.000Z');
+  const WINDOW_END = new Date('2026-11-01T00:00:00.000Z');
+  const INSIDE = new Date('2026-10-15T00:00:00.000Z');
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  /** All stored record ids of this store, sorted, for survivor assertions. */
+  async function storedRecordIds(storeId: string): Promise<string[]> {
+    const rows = await prisma.marketplaceFinanceRecord.findMany({
+      where: { storeId },
+      select: { recordId: true },
+    });
+    return rows.map((row) => row.recordId).sort();
+  }
+
+  it('deletes an unseen record inside the window and enqueues its order', async () => {
+    const parcel = await seedMelontikParcel();
+    const order = await createTestOrder({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platformOrderId: '1001',
+    });
+    await insertFinanceRecord({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      family: 'SETTLEMENT',
+      transactionType: 'Sale',
+      recordId: 'R1',
+      shipmentPackageId: '1001',
+      transactionDate: INSIDE,
+    });
+
+    const result = await pruneUnseenFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      family: FinanceRecordFamily.SETTLEMENT,
+      transactionType: 'Sale',
+      windowStart: WINDOW_START,
+      windowEnd: WINDOW_END,
+      seenRecordIds: [],
+    });
+
+    expect(result.pruned).toBe(1);
+    expect(result.enqueuedOrders).toBe(1);
+    expect(await prisma.marketplaceFinanceRecord.count()).toBe(0);
+    expect(await queuedOrderIds()).toEqual([order]);
+    const queued = await prisma.profitRecomputeRequest.findUniqueOrThrow({
+      where: { orderId: order },
+    });
+    expect(queued.reason).toBe(ProfitRecomputeReason.FINANCE_RECORD);
+  });
+
+  it('keeps a record that the scan saw', async () => {
+    const parcel = await seedMelontikParcel();
+    await createTestOrder({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platformOrderId: '1001',
+    });
+    await insertFinanceRecord({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      family: 'SETTLEMENT',
+      transactionType: 'Sale',
+      recordId: 'R1',
+      shipmentPackageId: '1001',
+      transactionDate: INSIDE,
+    });
+
+    const result = await pruneUnseenFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      family: FinanceRecordFamily.SETTLEMENT,
+      transactionType: 'Sale',
+      windowStart: WINDOW_START,
+      windowEnd: WINDOW_END,
+      seenRecordIds: ['R1'],
+    });
+
+    expect(result.pruned).toBe(0);
+    expect(result.enqueuedOrders).toBe(0);
+    expect(await storedRecordIds(parcel.storeId)).toEqual(['R1']);
+    expect(await queuedOrderIds()).toEqual([]);
+  });
+
+  it('keeps records on or outside the window bounds', async () => {
+    const parcel = await seedMelontikParcel();
+    const base = {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      family: 'SETTLEMENT' as const,
+      transactionType: 'Sale',
+      shipmentPackageId: null,
+    };
+    // Exactly the exclusive edges and one day beyond each: none may be pruned.
+    await insertFinanceRecord({ ...base, recordId: 'at-start', transactionDate: WINDOW_START });
+    await insertFinanceRecord({ ...base, recordId: 'at-end', transactionDate: WINDOW_END });
+    await insertFinanceRecord({
+      ...base,
+      recordId: 'before',
+      transactionDate: new Date(WINDOW_START.getTime() - 24 * 60 * 60 * 1000),
+    });
+    await insertFinanceRecord({
+      ...base,
+      recordId: 'after',
+      transactionDate: new Date(WINDOW_END.getTime() + 24 * 60 * 60 * 1000),
+    });
+
+    const result = await pruneUnseenFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      family: FinanceRecordFamily.SETTLEMENT,
+      transactionType: 'Sale',
+      windowStart: WINDOW_START,
+      windowEnd: WINDOW_END,
+      seenRecordIds: [],
+    });
+
+    expect(result.pruned).toBe(0);
+    expect(await storedRecordIds(parcel.storeId)).toEqual([
+      'after',
+      'at-end',
+      'at-start',
+      'before',
+    ]);
+  });
+
+  it('keeps records of another transaction type, family, store or organization', async () => {
+    const parcel = await seedMelontikParcel();
+    const storeB = await createAdditionalStore({ organizationId: parcel.organizationId });
+    const carrierId = await upsertMelontikCarrier();
+    const otherOrg = await createTrendyolOrg({ carrierId });
+
+    // The only row that matches the prune's (org, store, family, type) and lies inside
+    // the window -- the one row that must be deleted.
+    await insertFinanceRecord({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      family: 'SETTLEMENT',
+      transactionType: 'Sale',
+      recordId: 'match',
+      shipmentPackageId: '9999',
+      transactionDate: INSIDE,
+    });
+    // Same store/org/window but a different transaction type.
+    await insertFinanceRecord({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      family: 'SETTLEMENT',
+      transactionType: 'Return',
+      recordId: 'other-type',
+      transactionDate: INSIDE,
+    });
+    // Same store/org/window/type string but a different family.
+    await insertFinanceRecord({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      family: 'OTHER_FINANCIAL',
+      transactionType: 'Sale',
+      recordId: 'other-family',
+      transactionDate: INSIDE,
+    });
+    // Same org and keys but a sibling store.
+    await insertFinanceRecord({
+      organizationId: parcel.organizationId,
+      storeId: storeB,
+      family: 'SETTLEMENT',
+      transactionType: 'Sale',
+      recordId: 'other-store',
+      transactionDate: INSIDE,
+    });
+    // Another organization entirely.
+    await insertFinanceRecord({
+      organizationId: otherOrg.organizationId,
+      storeId: otherOrg.storeId,
+      family: 'SETTLEMENT',
+      transactionType: 'Sale',
+      recordId: 'other-org',
+      transactionDate: INSIDE,
+    });
+
+    const result = await pruneUnseenFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      family: FinanceRecordFamily.SETTLEMENT,
+      transactionType: 'Sale',
+      windowStart: WINDOW_START,
+      windowEnd: WINDOW_END,
+      seenRecordIds: [],
+    });
+
+    expect(result.pruned).toBe(1);
+    expect(await storedRecordIds(parcel.storeId)).toEqual(['other-family', 'other-type']);
+    expect(await storedRecordIds(storeB)).toEqual(['other-store']);
+    expect(await storedRecordIds(otherOrg.storeId)).toEqual(['other-org']);
+  });
+
+  it('keeps a record with no transaction date', async () => {
+    const parcel = await seedMelontikParcel();
+    await insertFinanceRecord({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      family: 'SETTLEMENT',
+      transactionType: 'Sale',
+      recordId: 'dateless',
+      transactionDate: null,
+    });
+
+    const result = await pruneUnseenFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      family: FinanceRecordFamily.SETTLEMENT,
+      transactionType: 'Sale',
+      windowStart: WINDOW_START,
+      windowEnd: WINDOW_END,
+      seenRecordIds: [],
+    });
+
+    expect(result.pruned).toBe(0);
+    expect(await storedRecordIds(parcel.storeId)).toEqual(['dateless']);
+  });
+
+  it('refuses the cargo invoice item family', async () => {
+    const parcel = await seedMelontikParcel();
+    await insertFinanceRecord({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      family: 'CARGO_INVOICE_ITEM',
+      transactionType: TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
+      recordId: 'INV-1:3003',
+      parcelUniqueId: '3003',
+      transactionDate: INSIDE,
+    });
+
+    await expect(
+      pruneUnseenFinanceRecords(prisma, {
+        organizationId: parcel.organizationId,
+        storeId: parcel.storeId,
+        family: FinanceRecordFamily.CARGO_INVOICE_ITEM,
+        transactionType: TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
+        windowStart: WINDOW_START,
+        windowEnd: WINDOW_END,
+        seenRecordIds: [],
+      }),
+    ).rejects.toThrow(/CARGO_INVOICE_ITEM/);
+    // Nothing was deleted.
+    expect(await storedRecordIds(parcel.storeId)).toEqual(['INV-1:3003']);
   });
 });

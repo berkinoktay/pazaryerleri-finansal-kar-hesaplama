@@ -38,10 +38,15 @@ import { encryptCredentials } from '@pazarsync/sync-core';
 import type {
   FetchOtherFinancialsOpts,
   FetchSettlementsOpts,
+  FinancialScanSummary,
   TrendyolFinancialTransaction,
 } from '@pazarsync/marketplace';
 
 import { processSettlementsChunk } from '../../src/handlers/settlements';
+
+// A scan that yielded nothing: the generators now RETURN this instead of void so the
+// cron can read each scan's completeness for pruning.
+const EMPTY_SCAN: FinancialScanSummary = { totalElements: 0, yielded: 0 };
 
 import {
   createMembership,
@@ -231,20 +236,25 @@ describe('processSettlementsChunk — scan window coverage', () => {
     const mockFetchers = {
       fetchSettlements: async function* (
         opts: FetchSettlementsOpts,
-      ): AsyncGenerator<TrendyolFinancialTransaction, void> {
+      ): AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary> {
         capturedWindows.push({ start: opts.startDate, end: opts.endDate });
+        let yielded = 0;
         if (
           opts.transactionType === 'Sale' &&
           saleRow.transactionDate >= opts.startDate.getTime() &&
           saleRow.transactionDate <= opts.endDate.getTime()
         ) {
           yield saleRow;
+          yielded = 1;
         }
+        return { totalElements: yielded, yielded };
       },
       fetchOtherFinancials: async function* (
         _opts: FetchOtherFinancialsOpts,
-      ): AsyncGenerator<TrendyolFinancialTransaction, void> {
+      ): AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary> {
         // empty — window check is on the settlements path
+        yield* [];
+        return EMPTY_SCAN;
       },
       // PR-8: cargo invoices out of scope for the window-coverage check.
       fetchCargoInvoiceItems: async () => [],
@@ -305,15 +315,18 @@ describe('processSettlementsChunk — scan window coverage', () => {
     const mockFetchers = {
       fetchSettlements: async function* (
         opts: FetchSettlementsOpts,
-      ): AsyncGenerator<TrendyolFinancialTransaction, void> {
+      ): AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary> {
         capturedWindows.push({ start: opts.startDate, end: opts.endDate });
         // Record the window only; this scenario yields no rows.
         yield* [];
+        return EMPTY_SCAN;
       },
       fetchOtherFinancials: async function* (
         _opts: FetchOtherFinancialsOpts,
-      ): AsyncGenerator<TrendyolFinancialTransaction, void> {
+      ): AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary> {
         // empty
+        yield* [];
+        return EMPTY_SCAN;
       },
       fetchCargoInvoiceItems: async () => [],
     };

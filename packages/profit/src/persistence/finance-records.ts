@@ -29,6 +29,17 @@ import { enqueueProfitRecompute } from './recompute-queue';
 /** Only a text of all-digits is a numeric cargo tracking number the index can match. */
 const NUMERIC_ID = /^\d+$/;
 
+/**
+ * The record columns the order-binding resolve reads: enough to run the same UNION
+ * branches whether the caller passes a full `FinanceRecordInput` (ingest) or just the
+ * keys a `DELETE ... RETURNING` hands back (prune). `FinanceRecordInput` satisfies it
+ * structurally, so the ingest path needs no cast.
+ */
+type FinanceRecordBindingKey = Pick<
+  FinanceRecordInput,
+  'family' | 'transactionType' | 'shipmentPackageId' | 'paymentOrderId' | 'parcelUniqueId'
+>;
+
 /** One marketplace_finance_records VALUES tuple; every column after store_id. */
 function financeRecordValuesRow(platform: Platform, record: FinanceRecordInput): Prisma.Sql {
   return Prisma.sql`(
@@ -139,9 +150,9 @@ function storeFinanceRecords(
 
 /** Distinct, non-null text keys of the records in `family` read from `pick`. */
 function distinctKeys(
-  records: readonly FinanceRecordInput[],
-  predicate: (record: FinanceRecordInput) => boolean,
-  pick: (record: FinanceRecordInput) => string | null,
+  records: readonly FinanceRecordBindingKey[],
+  predicate: (record: FinanceRecordBindingKey) => boolean,
+  pick: (record: FinanceRecordBindingKey) => string | null,
 ): string[] {
   const keys = new Set<string>();
   for (const record of records) {
@@ -153,7 +164,7 @@ function distinctKeys(
 }
 
 /** Distinct numeric-only cargo tracking numbers (as bigint) among CARGO records. */
-function distinctCargoTrackingNumbers(records: readonly FinanceRecordInput[]): bigint[] {
+function distinctCargoTrackingNumbers(records: readonly FinanceRecordBindingKey[]): bigint[] {
   const byText = new Map<string, bigint>();
   for (const record of records) {
     if (record.family !== FinanceRecordFamily.CARGO_INVOICE_ITEM) continue;
@@ -180,7 +191,7 @@ function distinctCargoTrackingNumbers(records: readonly FinanceRecordInput[]): b
  */
 async function resolveAffectedOrderIds(
   tx: Prisma.TransactionClient,
-  params: { readonly storeId: string; readonly records: readonly FinanceRecordInput[] },
+  params: { readonly storeId: string; readonly records: readonly FinanceRecordBindingKey[] },
 ): Promise<string[]> {
   const { storeId, records } = params;
   const shipmentPackageIds = distinctKeys(
@@ -300,4 +311,78 @@ export async function ingestFinanceRecords(
     orderIds,
   });
   return { stored, enqueuedOrders };
+}
+
+/**
+ * Prunes the stored finance records of one type that a complete scan no longer
+ * returned, then enqueues the orders those deleted rows bound to. Trendyol renews
+ * record ids (it did on 3 Aug 2026), and the raw store is keyed by
+ * `(store_id, family, record_id)`, so a renewed id lands as a second row and the same
+ * sale is counted twice; deleting the rows the scan did not return removes the stale
+ * duplicate. The caller only prunes after a scan it has judged complete and in-window.
+ *
+ * The one `DELETE ... RETURNING` is store- AND organization-scoped (tenant defense),
+ * filtered to the single family and transaction type, to rows whose `transaction_date`
+ * lies strictly inside the `(windowStart, windowEnd)` open interval, and to rows whose
+ * `record_id` the scan did not see. A null `transaction_date` never satisfies the range
+ * comparison, so a dateless row is never pruned. An empty `seenRecordIds` deletes every
+ * in-window row of that type -- correct, because a complete scan returned none of them.
+ * `windowStart >= windowEnd` makes no query and prunes nothing.
+ *
+ * `CARGO_INVOICE_ITEM` is refused before any query: a cargo item's key is the invoice
+ * serial and parcel number, not a renewable Trendyol record id, so it is never pruned.
+ *
+ * The deleted rows' binding keys feed `resolveAffectedOrderIds` -- the same UNION
+ * branches the ingest uses -- and the bound orders are enqueued with the
+ * `FINANCE_RECORD` reason so their profit is recomputed without the stale row.
+ */
+export async function pruneUnseenFinanceRecords(
+  tx: Prisma.TransactionClient,
+  params: {
+    readonly organizationId: string;
+    readonly storeId: string;
+    readonly family: FinanceRecordFamily;
+    readonly transactionType: string;
+    readonly windowStart: Date; // exclusive
+    readonly windowEnd: Date; // exclusive
+    readonly seenRecordIds: readonly string[];
+  },
+): Promise<{ readonly pruned: number; readonly enqueuedOrders: number }> {
+  const { organizationId, storeId, family, transactionType, windowStart, windowEnd } = params;
+  if (family === FinanceRecordFamily.CARGO_INVOICE_ITEM) {
+    throw new Error('pruneUnseenFinanceRecords does not prune CARGO_INVOICE_ITEM rows');
+  }
+  if (windowStart.getTime() >= windowEnd.getTime()) {
+    return { pruned: 0, enqueuedOrders: 0 };
+  }
+  const seen = [...params.seenRecordIds];
+
+  const deleted = await tx.$queryRaw<FinanceRecordBindingKey[]>`
+    DELETE FROM marketplace_finance_records r
+    WHERE r.organization_id = ${organizationId}::uuid
+      AND r.store_id = ${storeId}::uuid
+      AND r.family = ${family}::"FinanceRecordFamily"
+      AND r.transaction_type = ${transactionType}::text
+      AND r.transaction_date > ${windowStart}::timestamp(3)
+      AND r.transaction_date < ${windowEnd}::timestamp(3)
+      AND NOT (r.record_id = ANY(${seen}::text[]))
+    RETURNING
+      r.family AS "family",
+      r.transaction_type AS "transactionType",
+      r.shipment_package_id AS "shipmentPackageId",
+      r.payment_order_id AS "paymentOrderId",
+      r.parcel_unique_id AS "parcelUniqueId"
+  `;
+  if (deleted.length === 0) {
+    return { pruned: 0, enqueuedOrders: 0 };
+  }
+
+  const orderIds = await resolveAffectedOrderIds(tx, { storeId, records: deleted });
+  const enqueuedOrders = await enqueueProfitRecompute(tx, {
+    organizationId,
+    storeId,
+    reason: ProfitRecomputeReason.FINANCE_RECORD,
+    orderIds,
+  });
+  return { pruned: deleted.length, enqueuedOrders };
 }

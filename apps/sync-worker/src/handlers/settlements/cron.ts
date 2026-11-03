@@ -37,6 +37,16 @@
 // handleCargoInvoiceItems) and the end-of-cycle reconciliation bump are no longer
 // called; their files stay until phase 5.
 //
+// Phase 3D pruning: the raw store is keyed by (store_id, family, record_id), and
+// Trendyol renews record ids (it did on 3 Aug 2026), so a renewed id lands as a second
+// row and the same sale is counted twice. After all slices, each scanned type whose scan
+// came back complete (yielded >= totalElements over every slice) and fully in window is
+// pruned: pruneUnseenFinanceRecords deletes the stored rows the scan no longer returned
+// and enqueues their orders. A short scan (settlements.prune.skipped INCOMPLETE_SCAN) or a
+// row dated outside its slice window (OUT_OF_WINDOW_ROW) prunes nothing; cargo invoice
+// items are never pruned (their key is the invoice serial, not a renewable record id). A
+// thrown fetch error still fails the whole job as before, so no pruning runs on a bad scan.
+//
 // Resilience: settlement and otherfinancials rows ingest in batches of
 // FINANCE_INGEST_BATCH_SIZE per transaction; a failed batch is retried row by row so one
 // malformed row logs + skips while the rest of the batch survives. A cargo invoice keeps
@@ -48,6 +58,7 @@
 
 import { prisma } from '@pazarsync/db';
 import type { SyncLog } from '@pazarsync/db';
+import { FinanceRecordFamily } from '@pazarsync/db/enums';
 import {
   decryptStoreCredentials,
   fetchAllCargoInvoiceItems,
@@ -55,15 +66,18 @@ import {
   fetchSettlements,
   FINANCIAL_WINDOW_MAX_DAYS,
   getCargoInvoiceSerial,
+  isCompleteFinancialScan,
   type CargoInvoiceItem,
   type FetchCargoInvoiceItemsOpts,
   type FetchOtherFinancialsOpts,
   type FetchSettlementsOpts,
+  type FinancialScanSummary,
   type TrendyolFinancialTransaction,
 } from '@pazarsync/marketplace';
 import {
   type FinanceRecordInput,
   ingestFinanceRecords,
+  pruneUnseenFinanceRecords,
   trendyolCargoInvoiceItemInputs,
   trendyolOtherFinancialRecordInput,
   trendyolSettlementRecordInput,
@@ -88,6 +102,14 @@ const CARGO_INVOICE_TX_TIMEOUT_MS = 60_000;
 // of transactions. Cargo-invoice rows are excluded; they keep their own per-invoice path.
 const FINANCE_INGEST_BATCH_SIZE = 200;
 
+// One day of slack around the scan edges when deciding what to prune. Trendyol stamps
+// dates in Istanbul time as if they were UTC, so a row can read a few hours off from the
+// filter window we requested; that shift must not trip the per-row window guard. The same
+// one-day pad keeps the delete range (overallStartTime + pad, endDate - pad) one day
+// inside both scan edges, so a vendor filter that is itself shifted can never delete a row
+// it did not actually consider. See [[feedback_trendyol_orderdate_local_as_utc]].
+const FINANCE_PRUNE_EDGE_TOLERANCE_MS = 86_400_000;
+
 // V1 happy path — research §3.3 confirmed only Sale/Discount/Return have
 // nonzero observations in 60-day windows. Rare types stay enumerated in
 // dispatcher.ts (audit log fall-through) but the cron loop skips them
@@ -101,10 +123,10 @@ const OTHER_FINANCIAL_TYPES = ['PaymentOrder', 'Stoppage', 'DeductionInvoices'] 
 export interface SettlementsFetchers {
   fetchSettlements: (
     opts: FetchSettlementsOpts,
-  ) => AsyncGenerator<TrendyolFinancialTransaction, void>;
+  ) => AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary>;
   fetchOtherFinancials: (
     opts: FetchOtherFinancialsOpts,
-  ) => AsyncGenerator<TrendyolFinancialTransaction, void>;
+  ) => AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary>;
   /** PR-8: kargo faturasi item'lari — cron tx DISINDA ceker (ag cagrisi). */
   fetchCargoInvoiceItems: (opts: FetchCargoInvoiceItemsOpts) => Promise<CargoInvoiceItem[]>;
 }
@@ -120,6 +142,58 @@ interface BufferedFinanceRow {
   readonly input: FinanceRecordInput;
   readonly rowId: string;
   readonly transactionType: string;
+}
+
+/**
+ * One scanned (family, transactionType)'s pruning state, aggregated across every window
+ * slice. `seen` is every record id the scan returned (so a stored row NOT in it is a
+ * stale candidate); `complete` is the AND of every slice's completeness; `inWindow` is
+ * false once any returned row carried a date outside its slice window (plus tolerance).
+ * Only a complete, in-window scan may prune.
+ */
+interface FinancialScanState {
+  readonly family: FinanceRecordFamily;
+  readonly transactionType: string;
+  readonly seen: Set<string>;
+  complete: boolean;
+  inWindow: boolean;
+}
+
+/**
+ * Drains one scan generator through `next()` (not `for await`) so its RETURN value — the
+ * FinancialScanSummary — is read, calling `onRow` for every yielded row. The caller keeps
+ * its batching/flush exactly as before inside `onRow`.
+ */
+async function consumeFinancialScan(
+  generator: AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary>,
+  onRow: (row: TrendyolFinancialTransaction) => Promise<void>,
+): Promise<FinancialScanSummary> {
+  let next = await generator.next();
+  while (next.done !== true) {
+    await onRow(next.value);
+    next = await generator.next();
+  }
+  return next.value;
+}
+
+/**
+ * Records one fetched row against its type's scan state: its id joins `seen` (even if the
+ * ingest later fails, because a renewed id the vendor still returns is not stale), and
+ * `inWindow` is cleared if the row's transactionDate falls outside its slice window padded
+ * by FINANCE_PRUNE_EDGE_TOLERANCE_MS on each side.
+ */
+function recordScanRow(
+  state: FinancialScanState,
+  row: TrendyolFinancialTransaction,
+  chunkStart: Date,
+  chunkEnd: Date,
+): void {
+  state.seen.add(row.id);
+  const lowerMs = chunkStart.getTime() - FINANCE_PRUNE_EDGE_TOLERANCE_MS;
+  const upperMs = chunkEnd.getTime() + FINANCE_PRUNE_EDGE_TOLERANCE_MS;
+  if (row.transactionDate < lowerMs || row.transactionDate > upperMs) {
+    state.inWindow = false;
+  }
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────
@@ -162,6 +236,29 @@ export async function processSettlementsChunk(
   const chunkCount = Math.ceil(SCAN_WINDOW_DAYS / FINANCIAL_WINDOW_MAX_DAYS);
 
   let totalProcessed = 0;
+
+  // Pruning state per scanned (family, transactionType), aggregated across every slice.
+  // CARGO_INVOICE_ITEM never gets a state here, so cargo items are never pruned.
+  const scanStates = new Map<string, FinancialScanState>();
+  const scanStateFor = (
+    family: FinanceRecordFamily,
+    transactionType: string,
+  ): FinancialScanState => {
+    const key = `${family}:${transactionType}`;
+    const existing = scanStates.get(key);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const created: FinancialScanState = {
+      family,
+      transactionType,
+      seen: new Set<string>(),
+      complete: true,
+      inWindow: true,
+    };
+    scanStates.set(key, created);
+    return created;
+  };
 
   // Ingest one buffered batch in a single transaction, counting its rows into
   // totalProcessed. On any failure, log once (settlements.ingest.batch-failed) and retry
@@ -247,6 +344,7 @@ export async function processSettlementsChunk(
 
     for (const transactionType of SETTLEMENT_TYPES) {
       await syncLogService.heartbeat(log.id, workerId);
+      const state = scanStateFor(FinanceRecordFamily.SETTLEMENT, transactionType);
       const generator = fetchers.fetchSettlements({
         environment: store.environment,
         credentials,
@@ -255,7 +353,8 @@ export async function processSettlementsChunk(
         endDate: chunkEnd,
       });
       const batch: BufferedFinanceRow[] = [];
-      for await (const row of generator) {
+      const summary = await consumeFinancialScan(generator, async (row) => {
+        recordScanRow(state, row, chunkStart, chunkEnd);
         batch.push({
           input: trendyolSettlementRecordInput(transactionType, row),
           rowId: row.id,
@@ -264,12 +363,14 @@ export async function processSettlementsChunk(
         if (batch.length >= FINANCE_INGEST_BATCH_SIZE) {
           await flushBatch(batch.splice(0), chunkIdx);
         }
-      }
+      });
       await flushBatch(batch.splice(0), chunkIdx);
+      state.complete = state.complete && isCompleteFinancialScan(summary);
     }
 
     for (const transactionType of OTHER_FINANCIAL_TYPES) {
       await syncLogService.heartbeat(log.id, workerId);
+      const state = scanStateFor(FinanceRecordFamily.OTHER_FINANCIAL, transactionType);
       const generator = fetchers.fetchOtherFinancials({
         environment: store.environment,
         credentials,
@@ -278,7 +379,11 @@ export async function processSettlementsChunk(
         endDate: chunkEnd,
       });
       const batch: BufferedFinanceRow[] = [];
-      for await (const row of generator) {
+      const summary = await consumeFinancialScan(generator, async (row) => {
+        // The invoice row itself is an OTHER_FINANCIAL/DeductionInvoices record, so its id
+        // joins this type's seen set (it can be pruned); its cargo items are a separate
+        // CARGO_INVOICE_ITEM family that is never pruned, so they are not tracked here.
+        recordScanRow(state, row, chunkStart, chunkEnd);
         // A cargo-invoice (Kargo Fatura) DeductionInvoices row: fetch its items over the
         // network FIRST (outside the transaction), then store the invoice row itself and
         // every one of its items in ONE transaction. An invoice can carry ~500 items, so
@@ -316,7 +421,7 @@ export async function processSettlementsChunk(
               errorMessage: err instanceof Error ? err.message : String(err),
             });
           }
-          continue;
+          return;
         }
 
         batch.push({
@@ -327,8 +432,54 @@ export async function processSettlementsChunk(
         if (batch.length >= FINANCE_INGEST_BATCH_SIZE) {
           await flushBatch(batch.splice(0), chunkIdx);
         }
-      }
+      });
       await flushBatch(batch.splice(0), chunkIdx);
+      state.complete = state.complete && isCompleteFinancialScan(summary);
+    }
+  }
+
+  // Prune stale raw rows a complete scan no longer returned. The delete range sits one
+  // tolerance inside both scan edges so a shifted vendor filter can never delete a row it
+  // did not consider; an empty range (a freshly connected store whose whole window is
+  // narrower than two tolerances) prunes nothing and logs nothing.
+  const pruneWindowStart = new Date(overallStartTime + FINANCE_PRUNE_EDGE_TOLERANCE_MS);
+  const pruneWindowEnd = new Date(endDate.getTime() - FINANCE_PRUNE_EDGE_TOLERANCE_MS);
+  if (pruneWindowStart.getTime() < pruneWindowEnd.getTime()) {
+    for (const state of scanStates.values()) {
+      if (!state.complete || !state.inWindow) {
+        // A short scan or an out-of-window row means we cannot be sure a stored row is
+        // stale; leave every stored row of this type untouched.
+        syncLog.warn('settlements.prune.skipped', {
+          syncLogId: log.id,
+          storeId: store.id,
+          family: state.family,
+          transactionType: state.transactionType,
+          reason: state.complete ? 'OUT_OF_WINDOW_ROW' : 'INCOMPLETE_SCAN',
+        });
+        continue;
+      }
+      await syncLogService.heartbeat(log.id, workerId);
+      const { pruned, enqueuedOrders } = await prisma.$transaction(
+        (tx) =>
+          pruneUnseenFinanceRecords(tx, {
+            organizationId: store.organizationId,
+            storeId: store.id,
+            family: state.family,
+            transactionType: state.transactionType,
+            windowStart: pruneWindowStart,
+            windowEnd: pruneWindowEnd,
+            seenRecordIds: [...state.seen],
+          }),
+        { maxWait: INGEST_TX_MAX_WAIT_MS, timeout: INGEST_TX_TIMEOUT_MS },
+      );
+      syncLog.info('settlements.prune.done', {
+        syncLogId: log.id,
+        storeId: store.id,
+        family: state.family,
+        transactionType: state.transactionType,
+        pruned,
+        enqueuedOrders,
+      });
     }
   }
 

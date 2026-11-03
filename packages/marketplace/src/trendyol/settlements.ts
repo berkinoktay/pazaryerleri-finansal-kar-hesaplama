@@ -255,13 +255,36 @@ function assertWindow(startDate: Date, endDate: Date): void {
 }
 
 /**
- * Async generator over /settlements. Yields each transaction row.
- * Caller is responsible for routing by transactionType (dispatcher in
- * PR-7 commit 2). Pagination is page-based per Trendyol contract.
+ * The outcome of one full paged scan of /settlements or /otherfinancials.
+ * `totalElements` is the FIRST page's reported total (null only if no page was
+ * ever read); `yielded` is how many rows the generator actually produced. The
+ * cron compares the two to decide whether a scan is complete enough to prune
+ * stale rows (a short scan must never delete a valid stored row).
+ */
+export interface FinancialScanSummary {
+  readonly totalElements: number | null; // the first page's totalElements
+  readonly yielded: number;
+}
+
+/**
+ * A scan is complete when the vendor reported a total and the generator yielded
+ * at least that many rows. A null total (never read a page) or a short yield
+ * means the scan under-delivered and its type must not be pruned.
+ */
+export function isCompleteFinancialScan(summary: FinancialScanSummary): boolean {
+  return summary.totalElements !== null && summary.yielded >= summary.totalElements;
+}
+
+/**
+ * Async generator over /settlements. Yields each transaction row and RETURNS a
+ * FinancialScanSummary on every normal exit path (an empty page, or the yielded
+ * count reaching the reported total) so the caller can tell a complete scan from
+ * a short one. Caller is responsible for routing by transactionType (dispatcher
+ * in PR-7 commit 2). Pagination is page-based per Trendyol contract.
  */
 export async function* fetchSettlements(
   opts: FetchSettlementsOpts,
-): AsyncGenerator<TrendyolFinancialTransaction, void> {
+): AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary> {
   assertWindow(opts.startDate, opts.endDate);
   const env = opts.environment ?? 'PRODUCTION';
   const base = opts.baseUrl ?? baseUrlFor(env);
@@ -288,24 +311,26 @@ export async function* fetchSettlements(
 
     if (totalElements === null) totalElements = res.totalElements;
 
-    if (res.content.length === 0) return;
+    if (res.content.length === 0) return { totalElements, yielded: processedSoFar };
 
     for (const tx of res.content) yield tx;
     processedSoFar += res.content.length;
 
-    if (totalElements !== null && processedSoFar >= totalElements) return;
+    if (totalElements !== null && processedSoFar >= totalElements) {
+      return { totalElements, yielded: processedSoFar };
+    }
     page += 1;
   }
 }
 
 /**
- * Async generator over /otherfinancials. Same pagination + window
- * semantics as fetchSettlements. Supports transactionSubType for
- * DeductionInvoices/PlatformServiceFee filtering.
+ * Async generator over /otherfinancials. Same pagination + window semantics as
+ * fetchSettlements, and the same FinancialScanSummary return contract. Supports
+ * transactionSubType for DeductionInvoices/PlatformServiceFee filtering.
  */
 export async function* fetchOtherFinancials(
   opts: FetchOtherFinancialsOpts,
-): AsyncGenerator<TrendyolFinancialTransaction, void> {
+): AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary> {
   assertWindow(opts.startDate, opts.endDate);
   const env = opts.environment ?? 'PRODUCTION';
   const base = opts.baseUrl ?? baseUrlFor(env);
@@ -333,12 +358,14 @@ export async function* fetchOtherFinancials(
 
     if (totalElements === null) totalElements = res.totalElements;
 
-    if (res.content.length === 0) return;
+    if (res.content.length === 0) return { totalElements, yielded: processedSoFar };
 
     for (const tx of res.content) yield tx;
     processedSoFar += res.content.length;
 
-    if (totalElements !== null && processedSoFar >= totalElements) return;
+    if (totalElements !== null && processedSoFar >= totalElements) {
+      return { totalElements, yielded: processedSoFar };
+    }
     page += 1;
   }
 }
