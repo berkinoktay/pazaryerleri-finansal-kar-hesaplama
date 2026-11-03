@@ -791,6 +791,65 @@ describe('processPastDayBufferFlush', () => {
     expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
   });
 
+  it('excludes a past-day entry whose cost arrived after its day at the day-end flush', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS));
+    // The cost was attached (and its version made effective) one minute AFTER the
+    // order's day ended, so the entry is calculable now but its cost missed the
+    // window. The day-end flush must still exclude it with COST_DEADLINE_MISSED.
+    await seedLateCostedVariant(org.id, store.id, 'EAN13-FLUSH-LATE', orderDate);
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'flush-late',
+      orderDate,
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'flush-late',
+        barcode: 'EAN13-FLUSH-LATE',
+      }),
+    });
+
+    await processPastDayBufferFlush();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('flush-late');
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
+  });
+
+  it('excludes a past-day PERMANENT_FAILED entry whose cost arrived after its day on its final flush attempt', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS));
+    // Same late-cost shape, but the entry reaches the flush via its PERMANENT_FAILED
+    // final-attempt pass (loss-proofing). The late cost must not rescue it from
+    // COST_DEADLINE_MISSED.
+    await seedLateCostedVariant(org.id, store.id, 'EAN13-FLUSH-LATE-PF', orderDate);
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'flush-late-pf',
+      orderDate,
+      status: 'PERMANENT_FAILED',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'flush-late-pf',
+        barcode: 'EAN13-FLUSH-LATE-PF',
+      }),
+    });
+    // Faithful PERMANENT_FAILED shape: 4 attempts already spent.
+    await prisma.livePerformanceBuffer.update({
+      where: { id: entry.id },
+      data: { attempts: 4, lastError: 'x' },
+    });
+
+    await processPastDayBufferFlush();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('flush-late-pf');
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
+  });
+
   it('does not exclude a cancelled order at the day-end flush', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);

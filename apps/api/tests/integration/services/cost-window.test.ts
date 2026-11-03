@@ -109,6 +109,30 @@ describe('hadCostWithinOrderDay', () => {
     expect(result).toBe(true);
   });
 
+  it('counts a cost attached exactly at the end of the order day', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const variantId = await createVariant(org.id, store.id, 'EAN13-CW-EXACT');
+    // Both the link attach and the version effective-from land EXACTLY on the day
+    // end. The query uses `lte`, so the boundary instant itself still counts (plan
+    // decision 1: the day end is inclusive).
+    await attachCost({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      attachedAt: DAY_END,
+      versionEffectiveFrom: DAY_END,
+    });
+
+    const result = await hadCostWithinOrderDay(prisma, {
+      organizationId: org.id,
+      storeId: store.id,
+      orderDate: ORDER_DATE,
+      items: [{ productVariantId: variantId, isCancelled: false }],
+    });
+    expect(result).toBe(true);
+  });
+
   it('ignores a cost attached after the end of the order day', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
