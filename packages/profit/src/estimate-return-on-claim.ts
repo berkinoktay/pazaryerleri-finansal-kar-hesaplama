@@ -20,7 +20,7 @@
  * kargo faturası/hakediş sonradan per-leg mutabık kılar). Tek-item dosyalarında
  * (büyük çoğunluk) bu hiç devreye girmez.
  *
- * Kâr-dışı sipariş (`profitExcludedAt !== null`): hiçbir şey yazılmaz (kalıcı donuk).
+ * Excluded order (`profitExcludedAt !== null`): nothing is written -- the guard skips it.
  *
  * Bitişte `applyEstimateOnOrderCreate` çağrılır → estimatedNetProfit iade-farkında
  * yeniden hesaplanır (fold-return-legs ESTIMATE iade satırlarını katlar).

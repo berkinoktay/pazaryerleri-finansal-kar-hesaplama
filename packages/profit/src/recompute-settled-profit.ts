@@ -23,9 +23,10 @@
  *
  * Writes:
  *   - Order.settledNetProfit / settledNetVat / settledSaleMarginPct / settledCostMarkupPct
- *     (kâr-DIŞI olmayan siparişte serbestçe güncellenir; kâr-dışı siparişte
- *     reject_profit_freeze_breach hem estimated_* hem settled_* kolonlarını dondurur,
- *     bu yüzden recompute kâr-dışı siparişi erken atlar).
+ *     (written freely on a non-excluded order; an excluded order is skipped by the
+ *     application-level early return for profitExcludedAt !== null below, not by any DB
+ *     trigger -- the reject_profit_freeze_breach freeze was dropped and exclusion is no
+ *     longer permanent, design section 8.3).
  *
  * Idempotent — pure function of (Order + items + confirmed fees) state.
  * Re-running yields the same value unless new SETTLEMENT/CARGO_INVOICE

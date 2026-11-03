@@ -66,7 +66,7 @@ export async function applyEstimateOnOrderCreate(
   // Fonksiyon idempotent: PSF/Stopaj skip-if-exists, SHIPPING upsert, maliyet
   // snapshot DB-immutable → tekrar çağrı aynı (veya kargo-rafine) sonucu verir.
 
-  // Kâr-dışı sipariş: ne fee ne estimate — kalıcı donuk (spec 2026-06-12).
+  // Excluded order: write neither a fee nor an estimate -- the guard skips it.
   if (order.profitExcludedAt !== null) return;
 
   // ─── Kâr formülü ayar snapshot'ı (write-once, snapshot-at-create) ──────

@@ -13,6 +13,8 @@
  * generic error.
  */
 
+import { randomUUID } from 'node:crypto';
+
 import { Prisma, prisma } from '@pazarsync/db';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -89,6 +91,26 @@ describe('profit exclusion guards', () => {
       prisma.order.update({
         where: { id: order.id },
         data: { profitExcludedAt: new Date() },
+      }),
+    ).rejects.toThrow(/orders_profit_exclusion_pair_check/);
+  });
+
+  it('rejects an exclusion stamp without a reason on insert', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+
+    // Inserting an order already stamped excluded but with a null reason violates the
+    // surviving pair check (SQLSTATE 23514) -- the same guard the update path hits.
+    await expect(
+      prisma.order.create({
+        data: {
+          organizationId: org.id,
+          storeId: store.id,
+          platformOrderId: `test-order-${randomUUID().slice(0, 8)}`,
+          orderDate: new Date(),
+          status: 'DELIVERED',
+          profitExcludedAt: new Date(),
+        },
       }),
     ).rejects.toThrow(/orders_profit_exclusion_pair_check/);
   });
