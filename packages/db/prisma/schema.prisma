@@ -812,6 +812,9 @@ model Order {
   // Stamped automatically when an order's cost misses its business day (owner
   // decision 2026-11-03): COST_DEADLINE_MISSED at the day-end buffer graduation,
   // LATE_UNCOSTED_ARRIVAL when a past-day order arrives without a timely cost.
+  // LEGACY_BACKFILL (the old 2026-06-12 profit-freeze backfill; no writer stamps
+  // it today) is an automatic reason too, so "automatic exclusions" covers all
+  // three.
   // Automatic exclusions are PERMANENT -- trg_reject_automatic_exclusion_change in
   // supabase/sql/triggers.sql rejects clearing or re-pointing them; a future
   // user-chosen exclusion will carry its own reversible reason. While stamped the
