@@ -809,10 +809,14 @@ model Order {
   snapshotIncludeNegativeNetVat Boolean?            @map("snapshot_include_negative_net_vat")
 
   // ─── Profit exclusion (design 2026-10-29 profit-engine §8.3) ─────────
-  // Set only by a future user exclusion and reversible: clearing the stamp
-  // brings the order back into the profit system. While the stamp is present
-  // the engine writes an EXCLUDED profit statement for the order. No longer
-  // permanent (the old freeze trigger + xor check were dropped). The pair check
+  // Stamped automatically when an order's cost misses its business day (owner
+  // decision 2026-11-03): COST_DEADLINE_MISSED at the day-end buffer graduation,
+  // LATE_UNCOSTED_ARRIVAL when a past-day order arrives without a timely cost.
+  // Automatic exclusions are PERMANENT -- trg_reject_automatic_exclusion_change in
+  // supabase/sql/triggers.sql rejects clearing or re-pointing them; a future
+  // user-chosen exclusion will carry its own reversible reason. While stamped the
+  // engine writes an EXCLUDED profit statement (no net profit, revenue still
+  // counted) and the legacy profit columns above stay null. The pair check
   // (orders_profit_exclusion_pair_check) keeps stamp and reason together.
   profitExcludedAt      DateTime?              @map("profit_excluded_at")
   profitExclusionReason ProfitExclusionReason? @map("profit_exclusion_reason")

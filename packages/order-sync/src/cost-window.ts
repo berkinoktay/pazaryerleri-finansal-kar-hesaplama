@@ -27,6 +27,12 @@ import { getBusinessDayRange } from '@pazarsync/utils';
  * Cancelled items are skipped (a cancelled line needs no cost). An order with no
  * non-cancelled item has nothing to cost, so it qualifies (returns true).
  *
+ * Line-level cancellation is not modeled yet: order_items carry no cancel flag, so
+ * every caller passes `isCancelled: false` (the engine's parcel loader
+ * packages/profit/src/persistence/load-trendyol-parcel.ts does the same), and a
+ * cancelled ORDER is handled by the callers' order-status guard before this check.
+ * The flag stays for a future marketplace that reports line-level cancels.
+ *
  * The day end is the end of the order's business day, taken from the single
  * APP_TIME_ZONE helper (`getBusinessDayRange`) that intake-order uses to split
  * "today" from a past day -- never a hand-rolled timezone calculation.
@@ -244,6 +250,14 @@ export async function stampCostWindowExclusions(
  * all inside the caller's transaction. The update is guarded by
  * `profit_excluded_at IS NULL` (plus the org + store filter) so it only ever ADDS
  * an exclusion -- it can never overwrite one, matching the permanence trigger.
+ *
+ * The same update clears the eight denormalized legacy profit columns: an excluded
+ * order carries no legacy profit figure. The live profit writers skip an already
+ * excluded order, but this backfill excludes EXISTING orders that may already carry
+ * one, so it nulls them atomically with the stamp -- otherwise an excluded order
+ * would still leak a net profit. The legacy readers (order list summary, the
+ * cost-status segment, the loss-only filter, and live performance) read these
+ * columns until they move to the new profit statements.
  */
 async function stampAndEnqueue(
   tx: Prisma.TransactionClient,
@@ -266,7 +280,21 @@ async function stampAndEnqueue(
       storeId,
       profitExcludedAt: null,
     },
-    data: { profitExcludedAt: now, profitExclusionReason: reason },
+    data: {
+      profitExcludedAt: now,
+      profitExclusionReason: reason,
+      // Clear the eight denormalized legacy profit columns in the SAME guarded
+      // update so a backfilled exclusion can never leak a net profit or margin
+      // through the legacy readers (see the docstring above).
+      estimatedNetProfit: null,
+      estimatedNetVat: null,
+      estimatedSaleMarginPct: null,
+      estimatedCostMarkupPct: null,
+      settledNetProfit: null,
+      settledNetVat: null,
+      settledSaleMarginPct: null,
+      settledCostMarkupPct: null,
+    },
   });
   await enqueueProfitRecompute(tx, {
     organizationId,
