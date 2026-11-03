@@ -678,6 +678,35 @@ describe('processSettlementsChunk — raw finance-record ingest', () => {
     ).toBe(true);
   });
 
+  it('reports the incomplete scan first when several prune conditions fail', async () => {
+    const now = Date.now();
+    const { storeId, syncLogId } = await buildScenario({
+      storeCreatedAt: new Date(now - 14 * DAY_MS),
+    });
+    const inside = now - 7 * DAY_MS;
+    const warnSpy = vi.spyOn(syncLog, 'warn');
+
+    await runChunk(syncLogId, { settlements: { Sale: [saleRowOn('S-OLD', inside)] } });
+
+    // Run 2's single row trips two prune guards at once: it is dated two days after the
+    // slice end (out of window) AND the scan reports more elements than it returned (an
+    // incomplete scan). The guards run in a fixed precedence, so the incomplete scan is
+    // reported first: the stale old row stays and a single skip is logged with reason
+    // INCOMPLETE_SCAN, never OUT_OF_WINDOW_ROW.
+    await runChunk(syncLogId, {
+      settlements: { Sale: [saleRowOn('S-FUTURE', now + 2 * DAY_MS)] },
+      settlementTotals: { Sale: 5 },
+    });
+
+    expect(await settlementRecordIds(storeId)).toEqual(['S-FUTURE', 'S-OLD']);
+    const skippedForSale = warnSpy.mock.calls.filter(
+      ([event, ctx]) =>
+        event === 'settlements.prune.skipped' && ctx?.['transactionType'] === 'Sale',
+    );
+    expect(skippedForSale).toHaveLength(1);
+    expect(skippedForSale[0]?.[1]?.['reason']).toBe('INCOMPLETE_SCAN');
+  });
+
   it('tolerates a few hours of vendor date shift and still prunes', async () => {
     const now = Date.now();
     const { storeId, syncLogId } = await buildScenario({
