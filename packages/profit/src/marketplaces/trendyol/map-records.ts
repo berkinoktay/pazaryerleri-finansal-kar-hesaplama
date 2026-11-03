@@ -171,8 +171,10 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
 
         if ((kind === 'RETURN' || kind === 'DISCOUNT_REVERSAL') && snapshot.isExportSale) {
           // On export the return does not reverse the sale (design section 18), and a
-          // reversal is treated the same way: it only joins the return cycle (above) so
-          // its payment order can confirm the export fees, never netting a line.
+          // discount reversal is treated the same way -- neither nets a line. A return
+          // joined the return cycle above (adding its payment order id); a reversal adds no
+          // cycle id (like a discount) and rides on its Return's cycle, whose payment order
+          // confirms the export fees.
           issues.push({
             code: ProfitIssueCode.UNMAPPED_MARKETPLACE_RECORD,
             orderItemId: null,
