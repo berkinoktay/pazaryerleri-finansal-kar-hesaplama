@@ -250,6 +250,16 @@ function cargoInvoiceRow(id: string): TrendyolFinancialTransaction {
   return tx({ id, transactionType: CARGO_INVOICE_RESPONSE_TYPE });
 }
 
+/** A PaymentOrder row dated at an explicit instant (prune tests reuse the base builder). */
+function paymentOrderRowOn(id: string, transactionDate: number): TrendyolFinancialTransaction {
+  return { ...paymentOrderRow(), id, transactionDate };
+}
+
+/** A cargo-invoice DeductionInvoices row dated at an explicit instant (prune tests). */
+function cargoInvoiceRowOn(id: string, transactionDate: number): TrendyolFinancialTransaction {
+  return { ...cargoInvoiceRow(id), transactionDate };
+}
+
 const CARGO_OUTBOUND_TYPE = 'Gönderi Kargo Bedeli';
 
 function cargoItem(parcelUniqueId: number, amount: number, desi: number): CargoInvoiceItem {
@@ -278,24 +288,39 @@ interface MockScenario {
   settlementTotals?: Partial<Record<'Sale' | 'Discount' | 'Return', number>>;
 }
 
+// The settlement/otherfinancials types this mock serves rows for. A type guard over each
+// const tuple narrows opts.transactionType (a plain string) to the scenario record's key
+// union without a cast; any other requested type yields no rows.
+const MOCK_SETTLEMENT_TYPES = ['Sale', 'Discount', 'Return'] as const;
+type MockSettlementType = (typeof MOCK_SETTLEMENT_TYPES)[number];
+function isMockSettlementType(value: string): value is MockSettlementType {
+  return MOCK_SETTLEMENT_TYPES.some((type) => type === value);
+}
+
+const MOCK_OTHER_FINANCIAL_TYPES = ['PaymentOrder', 'Stoppage', 'DeductionInvoices'] as const;
+type MockOtherFinancialType = (typeof MOCK_OTHER_FINANCIAL_TYPES)[number];
+function isMockOtherFinancialType(value: string): value is MockOtherFinancialType {
+  return MOCK_OTHER_FINANCIAL_TYPES.some((type) => type === value);
+}
+
 function makeMockFetchers(scenario: MockScenario) {
   return {
     fetchSettlements: async function* (
       opts: FetchSettlementsOpts,
     ): AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary> {
-      const type = opts.transactionType as 'Sale' | 'Discount' | 'Return';
-      const rows = scenario.settlements?.[type] ?? [];
+      const type = opts.transactionType;
+      const rows = isMockSettlementType(type) ? (scenario.settlements?.[type] ?? []) : [];
       for (const row of rows) yield row;
-      const totalElements = scenario.settlementTotals?.[type] ?? rows.length;
+      const totalElements = isMockSettlementType(type)
+        ? (scenario.settlementTotals?.[type] ?? rows.length)
+        : rows.length;
       return { totalElements, yielded: rows.length };
     },
     fetchOtherFinancials: async function* (
       opts: FetchOtherFinancialsOpts,
     ): AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary> {
-      const rows =
-        scenario.otherFinancials?.[
-          opts.transactionType as 'PaymentOrder' | 'Stoppage' | 'DeductionInvoices'
-        ] ?? [];
+      const type = opts.transactionType;
+      const rows = isMockOtherFinancialType(type) ? (scenario.otherFinancials?.[type] ?? []) : [];
       for (const row of rows) yield row;
       return { totalElements: rows.length, yielded: rows.length };
     },
@@ -557,13 +582,31 @@ describe('processSettlementsChunk — raw finance-record ingest', () => {
     expect(settled.netProfit?.toFixed(2)).toBe('191.79');
   });
 
-  /** All settlement record ids of the store, sorted, for prune survivor assertions. */
-  async function settlementRecordIds(storeId: string): Promise<string[]> {
+  /** Record ids of the store in one family, sorted, for prune survivor assertions. */
+  async function recordIdsByFamily(
+    storeId: string,
+    family: FinanceRecordFamily,
+  ): Promise<string[]> {
     const rows = await prisma.marketplaceFinanceRecord.findMany({
-      where: { storeId, family: FinanceRecordFamily.SETTLEMENT },
+      where: { storeId, family },
       select: { recordId: true },
     });
     return rows.map((row) => row.recordId).sort();
+  }
+
+  /** All settlement record ids of the store, sorted, for prune survivor assertions. */
+  async function settlementRecordIds(storeId: string): Promise<string[]> {
+    return recordIdsByFamily(storeId, FinanceRecordFamily.SETTLEMENT);
+  }
+
+  /** All other-financial record ids of the store, sorted. */
+  async function otherFinancialRecordIds(storeId: string): Promise<string[]> {
+    return recordIdsByFamily(storeId, FinanceRecordFamily.OTHER_FINANCIAL);
+  }
+
+  /** All cargo-invoice-item record ids of the store, sorted. */
+  async function cargoItemRecordIds(storeId: string): Promise<string[]> {
+    return recordIdsByFamily(storeId, FinanceRecordFamily.CARGO_INVOICE_ITEM);
   }
 
   it('replaces a renewed record id instead of counting the sale twice', async () => {
@@ -666,10 +709,122 @@ describe('processSettlementsChunk — raw finance-record ingest', () => {
       settlements: { Sale: [saleRowOn('stale-edge', edge), saleRowOn('stale-deep', deep)] },
     });
 
-    // Run 2 is a complete, empty scan: the deep stale row is pruned, but the one within a
-    // day of the window edge sits outside the delete range and is spared.
+    // Run 2 returns one fresh in-window row, so the scan is non-empty and pruning runs (an
+    // empty scan would now be left untouched). The deep stale row is dropped, but the one
+    // within a day of the window edge sits outside the delete range and is spared, and the
+    // fresh row the scan saw survives.
+    await runChunk(syncLogId, { settlements: { Sale: [saleRowOn('S-FRESH', deep)] } });
+
+    expect(await settlementRecordIds(storeId)).toEqual(['S-FRESH', 'stale-edge']);
+  });
+
+  it('prunes a renewed payment order record and enqueues the orders it settled', async () => {
+    const now = Date.now();
+    const { storeId, orderId, syncLogId } = await buildScenario({
+      storeCreatedAt: new Date(now - 14 * DAY_MS),
+    });
+    const inside = now - 7 * DAY_MS;
+
+    // Run 1 stores the sale (carrying the payment order id) and the payment order row that
+    // binds the order through it.
+    await runChunk(syncLogId, {
+      settlements: { Sale: [saleRowOn('S-1', inside)] },
+      otherFinancials: { PaymentOrder: [paymentOrderRowOn('PO-OLD', inside)] },
+    });
+    expect(await otherFinancialRecordIds(storeId)).toEqual(['PO-OLD']);
+    await prisma.profitRecomputeRequest.deleteMany({});
+
+    // The same payment order comes back under a renewed id. The stored sale rows stay (an
+    // empty settlement scan never wipes them), so the old payment-order row is the only
+    // stale row this window: it is pruned and the order it settled is enqueued.
+    await runChunk(syncLogId, {
+      otherFinancials: { PaymentOrder: [paymentOrderRowOn('PO-NEW', inside)] },
+    });
+
+    expect(await otherFinancialRecordIds(storeId)).toEqual(['PO-NEW']);
+    expect(await settlementRecordIds(storeId)).toEqual(['S-1']);
+    const queued = await prisma.profitRecomputeRequest.findUnique({ where: { orderId } });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.FINANCE_RECORD);
+  });
+
+  it('prunes a renewed cargo invoice row but keeps its items', async () => {
+    const now = Date.now();
+    const { storeId, syncLogId } = await buildScenario({
+      storeCreatedAt: new Date(now - 14 * DAY_MS),
+    });
+    const inside = now - 7 * DAY_MS;
+
+    // Run 1 stores the cargo invoice row (OTHER_FINANCIAL / DeductionInvoices) and its item.
+    await runChunk(syncLogId, {
+      otherFinancials: { DeductionInvoices: [cargoInvoiceRowOn('INV-OLD', inside)] },
+      cargoItems: [cargoItem(7_000_001, 48.5, 2)],
+    });
+
+    // The invoice comes back under a renewed id with its item.
+    await runChunk(syncLogId, {
+      otherFinancials: { DeductionInvoices: [cargoInvoiceRowOn('INV-NEW', inside)] },
+      cargoItems: [cargoItem(7_000_001, 48.5, 2)],
+    });
+
+    // The stale invoice row is pruned; the cargo items (a never-pruned family) all remain,
+    // including the one the old invoice stored.
+    expect(await otherFinancialRecordIds(storeId)).toEqual(['INV-NEW']);
+    expect(await cargoItemRecordIds(storeId)).toEqual(['INV-NEW:7000001', 'INV-OLD:7000001']);
+  });
+
+  it('keeps the stale record when a renewed row fails to ingest', async () => {
+    const now = Date.now();
+    const { storeId, syncLogId } = await buildScenario({
+      storeCreatedAt: new Date(now - 14 * DAY_MS),
+    });
+    const inside = now - 7 * DAY_MS;
+    const warnSpy = vi.spyOn(syncLog, 'warn');
+
+    await runChunk(syncLogId, { settlements: { Sale: [saleRowOn('S-OLD', inside)] } });
+
+    // Run 2's renewed row carries a debt beyond numeric(14,2), so both the batch and the
+    // row-by-row retry fail to ingest it. The type must not be pruned — otherwise the stale
+    // old row would be deleted while the renewed row was never stored, leaving the sale with
+    // no record at all until the next cycle.
+    const badRow = tx({
+      id: 'S-NEW',
+      barcode: BARCODE,
+      debt: 1e15,
+      shipmentPackageId: SHIPMENT_PACKAGE_ID,
+      transactionDate: inside,
+    });
+    await runChunk(syncLogId, { settlements: { Sale: [badRow] } });
+
+    expect(await settlementRecordIds(storeId)).toEqual(['S-OLD']);
+    const skipped = warnSpy.mock.calls.filter(([event]) => event === 'settlements.prune.skipped');
+    expect(
+      skipped.some(
+        ([, ctx]) => ctx?.['transactionType'] === 'Sale' && ctx?.['reason'] === 'INGEST_FAILED',
+      ),
+    ).toBe(true);
+  });
+
+  it('does not prune a type whose complete scan came back empty while rows are stored', async () => {
+    const now = Date.now();
+    const { storeId, syncLogId } = await buildScenario({
+      storeCreatedAt: new Date(now - 14 * DAY_MS),
+    });
+    const inside = now - 7 * DAY_MS;
+    const warnSpy = vi.spyOn(syncLog, 'warn');
+
+    await runChunk(syncLogId, { settlements: { Sale: [saleRowOn('S-OLD', inside)] } });
+
+    // Run 2 is a complete scan that returned no Sale rows at all. A transient empty vendor
+    // response must not wipe every stored Sale row, so the type is left untouched and the
+    // skip is logged with the count still stored in the window.
     await runChunk(syncLogId, { settlements: { Sale: [] } });
 
-    expect(await settlementRecordIds(storeId)).toEqual(['stale-edge']);
+    expect(await settlementRecordIds(storeId)).toEqual(['S-OLD']);
+    const skipped = warnSpy.mock.calls.filter(([event]) => event === 'settlements.prune.skipped');
+    const emptyScan = skipped.find(
+      ([, ctx]) => ctx?.['transactionType'] === 'Sale' && ctx?.['reason'] === 'EMPTY_SCAN',
+    );
+    expect(emptyScan).toBeDefined();
+    expect(emptyScan?.[1]?.['storedCount']).toBe(1);
   });
 });

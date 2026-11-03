@@ -39,13 +39,18 @@
 //
 // Phase 3D pruning: the raw store is keyed by (store_id, family, record_id), and
 // Trendyol renews record ids (it did on 3 Aug 2026), so a renewed id lands as a second
-// row and the same sale is counted twice. After all slices, each scanned type whose scan
-// came back complete (yielded >= totalElements over every slice) and fully in window is
-// pruned: pruneUnseenFinanceRecords deletes the stored rows the scan no longer returned
-// and enqueues their orders. A short scan (settlements.prune.skipped INCOMPLETE_SCAN) or a
-// row dated outside its slice window (OUT_OF_WINDOW_ROW) prunes nothing; cargo invoice
-// items are never pruned (their key is the invoice serial, not a renewable record id). A
-// thrown fetch error still fails the whole job as before, so no pruning runs on a bad scan.
+// row and the same sale is counted twice. After all slices, a scanned type is pruned only
+// when its scan came back complete (yielded >= totalElements over every slice), fully in
+// window, ingested every row, and actually saw at least one row: pruneUnseenFinanceRecords
+// then deletes the stored rows the scan no longer returned and enqueues their orders. A
+// type is left untouched (settlements.prune.skipped, reason chosen in precedence order)
+// when the scan was short (INCOMPLETE_SCAN), returned a row dated outside its slice window
+// (OUT_OF_WINDOW_ROW), had a row that finally failed to ingest (INGEST_FAILED), or came
+// back empty while rows are still stored in the window (EMPTY_SCAN). An empty scan with
+// nothing stored is the normal case for a rarely used type and is skipped silently. Cargo
+// invoice items are never pruned (their key is the invoice serial, not a renewable record
+// id). A thrown fetch error still fails the whole job as before, so no pruning runs on a
+// bad scan.
 //
 // Resilience: settlement and otherfinancials rows ingest in batches of
 // FINANCE_INGEST_BATCH_SIZE per transaction; a failed batch is retried row by row so one
@@ -114,7 +119,7 @@ const FINANCE_PRUNE_EDGE_TOLERANCE_MS = 86_400_000;
 // found coupons and discount reversals on live sellers (both prod and stage), so the scan
 // now pulls all six: a Coupon is a debt like a Discount (its amount is already inside the
 // Sale credit, so it nets out of the sale), and DiscountCancel / CouponCancel are credits
-// that give a discount or coupon back — every reversal observed came with a Return and
+// that give a discount or coupon back -- every reversal observed came with a Return and
 // reverses its return legs. Pruning (previous commit) covers these types too, so a renewed
 // id drops its stale row. The remaining rare types stay enumerated in dispatcher.ts (audit
 // log fall-through) but the cron loop still skips them until live rows appear.
@@ -158,8 +163,10 @@ interface BufferedFinanceRow {
  * One scanned (family, transactionType)'s pruning state, aggregated across every window
  * slice. `seen` is every record id the scan returned (so a stored row NOT in it is a
  * stale candidate); `complete` is the AND of every slice's completeness; `inWindow` is
- * false once any returned row carried a date outside its slice window (plus tolerance).
- * Only a complete, in-window scan may prune.
+ * false once any returned row carried a date outside its slice window (plus tolerance);
+ * `ingestFailed` is true once any row of this type finally failed to ingest (a batch
+ * failure whose rows all survive the row-by-row retry is NOT a failure). Only a complete,
+ * in-window scan that ingested every row and saw at least one row may prune.
  */
 interface FinancialScanState {
   readonly family: FinanceRecordFamily;
@@ -167,11 +174,12 @@ interface FinancialScanState {
   readonly seen: Set<string>;
   complete: boolean;
   inWindow: boolean;
+  ingestFailed: boolean;
 }
 
 /**
- * Drains one scan generator through `next()` (not `for await`) so its RETURN value — the
- * FinancialScanSummary — is read, calling `onRow` for every yielded row. The caller keeps
+ * Drains one scan generator through `next()` (not `for await`) so its RETURN value -- the
+ * FinancialScanSummary -- is read, calling `onRow` for every yielded row. The caller keeps
  * its batching/flush exactly as before inside `onRow`.
  */
 async function consumeFinancialScan(
@@ -265,6 +273,7 @@ export async function processSettlementsChunk(
       seen: new Set<string>(),
       complete: true,
       inWindow: true,
+      ingestFailed: false,
     };
     scanStates.set(key, created);
     return created;
@@ -273,8 +282,15 @@ export async function processSettlementsChunk(
   // Ingest one buffered batch in a single transaction, counting its rows into
   // totalProcessed. On any failure, log once (settlements.ingest.batch-failed) and retry
   // the rows one by one in their own transactions, so a single bad row (e.g. a numeric
-  // overflow) never drops the rest of the batch. A heartbeat follows every batch.
-  const flushBatch = async (rows: BufferedFinanceRow[], chunkIdx: number): Promise<void> => {
+  // overflow) never drops the rest of the batch. A row that still fails the row-by-row
+  // retry marks its type's scan state ingestFailed, so that type is not pruned this cycle.
+  // A heartbeat follows every batch. Every row in one call shares `state` (the batch is
+  // built inside a single type's loop).
+  const flushBatch = async (
+    rows: BufferedFinanceRow[],
+    chunkIdx: number,
+    state: FinancialScanState,
+  ): Promise<void> => {
     if (rows.length === 0) {
       return;
     }
@@ -312,6 +328,7 @@ export async function processSettlementsChunk(
           );
           totalProcessed += 1;
         } catch (rowErr) {
+          state.ingestFailed = true;
           syncLog.error('settlements.dispatch.failed', {
             syncLogId: log.id,
             storeId: store.id,
@@ -371,10 +388,10 @@ export async function processSettlementsChunk(
           transactionType,
         });
         if (batch.length >= FINANCE_INGEST_BATCH_SIZE) {
-          await flushBatch(batch.splice(0), chunkIdx);
+          await flushBatch(batch.splice(0), chunkIdx, state);
         }
       });
-      await flushBatch(batch.splice(0), chunkIdx);
+      await flushBatch(batch.splice(0), chunkIdx, state);
       state.complete = state.complete && isCompleteFinancialScan(summary);
     }
 
@@ -422,6 +439,9 @@ export async function processSettlementsChunk(
             // One source row processed: the invoice counts once, its items ride along.
             totalProcessed += 1;
           } catch (err) {
+            // The invoice (and its items) failed to ingest: mark this DeductionInvoices type
+            // so its stale rows are not pruned while the renewed invoice is not stored.
+            state.ingestFailed = true;
             syncLog.error('settlements.dispatch.failed', {
               syncLogId: log.id,
               storeId: store.id,
@@ -440,10 +460,10 @@ export async function processSettlementsChunk(
           transactionType,
         });
         if (batch.length >= FINANCE_INGEST_BATCH_SIZE) {
-          await flushBatch(batch.splice(0), chunkIdx);
+          await flushBatch(batch.splice(0), chunkIdx, state);
         }
       });
-      await flushBatch(batch.splice(0), chunkIdx);
+      await flushBatch(batch.splice(0), chunkIdx, state);
       state.complete = state.complete && isCompleteFinancialScan(summary);
     }
   }
@@ -454,18 +474,63 @@ export async function processSettlementsChunk(
   // narrower than two tolerances) prunes nothing and logs nothing.
   const pruneWindowStart = new Date(overallStartTime + FINANCE_PRUNE_EDGE_TOLERANCE_MS);
   const pruneWindowEnd = new Date(endDate.getTime() - FINANCE_PRUNE_EDGE_TOLERANCE_MS);
+  const logPruneSkipped = (state: FinancialScanState, reason: string): void => {
+    syncLog.warn('settlements.prune.skipped', {
+      syncLogId: log.id,
+      storeId: store.id,
+      family: state.family,
+      transactionType: state.transactionType,
+      reason,
+    });
+  };
   if (pruneWindowStart.getTime() < pruneWindowEnd.getTime()) {
     for (const state of scanStates.values()) {
-      if (!state.complete || !state.inWindow) {
-        // A short scan or an out-of-window row means we cannot be sure a stored row is
-        // stale; leave every stored row of this type untouched.
-        syncLog.warn('settlements.prune.skipped', {
-          syncLogId: log.id,
-          storeId: store.id,
-          family: state.family,
-          transactionType: state.transactionType,
-          reason: state.complete ? 'OUT_OF_WINDOW_ROW' : 'INCOMPLETE_SCAN',
+      // A type may prune only after a complete, fully in-window scan that ingested every
+      // row and saw at least one. The guards run in a fixed precedence so a type that trips
+      // several logs the first that applies: INCOMPLETE_SCAN, OUT_OF_WINDOW_ROW,
+      // INGEST_FAILED, EMPTY_SCAN.
+      if (!state.complete) {
+        // A short scan: we cannot be sure a stored row the scan omitted is actually stale.
+        logPruneSkipped(state, 'INCOMPLETE_SCAN');
+        continue;
+      }
+      if (!state.inWindow) {
+        // A returned row dated outside its slice: the vendor filter is not the field we
+        // assumed, so a missing row may simply be outside the window we think we scanned.
+        logPruneSkipped(state, 'OUT_OF_WINDOW_ROW');
+        continue;
+      }
+      if (state.ingestFailed) {
+        // A row of this type failed to ingest: a stored row the scan omitted may be the
+        // stale copy of the renewed id we just failed to store. Pruning it would leave that
+        // sale with no record at all until the next cycle.
+        logPruneSkipped(state, 'INGEST_FAILED');
+        continue;
+      }
+      if (state.seen.size === 0) {
+        // A complete but empty scan: a transient empty vendor response must not wipe every
+        // stored row of this type. Nothing stored in the window is the normal case for a
+        // rarely used type (skip silently); any stored rows make the empty scan suspect, so
+        // skip and log the stored count.
+        const storedCount = await prisma.marketplaceFinanceRecord.count({
+          where: {
+            organizationId: store.organizationId,
+            storeId: store.id,
+            family: state.family,
+            transactionType: state.transactionType,
+            transactionDate: { gt: pruneWindowStart, lt: pruneWindowEnd },
+          },
         });
+        if (storedCount > 0) {
+          syncLog.warn('settlements.prune.skipped', {
+            syncLogId: log.id,
+            storeId: store.id,
+            family: state.family,
+            transactionType: state.transactionType,
+            reason: 'EMPTY_SCAN',
+            storedCount,
+          });
+        }
         continue;
       }
       await syncLogService.heartbeat(log.id, workerId);

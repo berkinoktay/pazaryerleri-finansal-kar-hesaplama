@@ -44,16 +44,16 @@ import type {
 
 import { processSettlementsChunk } from '../../src/handlers/settlements';
 
-// A scan that yielded nothing: the generators now RETURN this instead of void so the
-// cron can read each scan's completeness for pruning.
-const EMPTY_SCAN: FinancialScanSummary = { totalElements: 0, yielded: 0 };
-
 import {
   createMembership,
   createOrganization,
   createUserProfile,
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
+
+// A scan that yielded nothing: the generators now RETURN this instead of void so the
+// cron can read each scan's completeness for pruning.
+const EMPTY_SCAN: FinancialScanSummary = { totalElements: 0, yielded: 0 };
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const BARCODE = 'EAN13-WINDOW';
