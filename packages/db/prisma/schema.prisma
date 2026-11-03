@@ -808,11 +808,12 @@ model Order {
   snapshotIncludeStopaj         Boolean?            @map("snapshot_include_stopaj")
   snapshotIncludeNegativeNetVat Boolean?            @map("snapshot_include_negative_net_vat")
 
-  // ─── Kâr dondurma (spec 2026-06-12 cost-deadline-profit-freeze) ──────
-  // Maliyet penceresi (sipariş gününün sonu, İstanbul) kaçırıldıysa sipariş
-  // KALICI olarak kâr evreninin dışında: estimatedNetProfit sonsuza dek null,
-  // settledNetProfit hesaplanmaz (karar K1); ciro raporlanır. Geri dönüş yok —
-  // reject_profit_freeze_breach trigger'ı + CHECK her yolu kapatır.
+  // ─── Profit exclusion (design 2026-10-29 profit-engine §8.3) ─────────
+  // Set only by a future user exclusion and reversible: clearing the stamp
+  // brings the order back into the profit system. While the stamp is present
+  // the engine writes an EXCLUDED profit statement for the order. No longer
+  // permanent (the old freeze trigger + xor check were dropped). The pair check
+  // (orders_profit_exclusion_pair_check) keeps stamp and reason together.
   profitExcludedAt      DateTime?              @map("profit_excluded_at")
   profitExclusionReason ProfitExclusionReason? @map("profit_exclusion_reason")
 

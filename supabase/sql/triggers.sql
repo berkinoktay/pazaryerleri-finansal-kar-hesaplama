@@ -101,71 +101,16 @@ CREATE TRIGGER order_items_snapshot_immutable
 --
 -- MALİYET-DONDURMA korunur: order_items snapshot immutability (yukarıdaki
 -- reject_snapshot_update) maliyetin değişmezliğini garanti eder; estimate
--- recompute her zaman donmuş maliyeti kullanır. EXCLUDED sipariş donması da
--- korunur (aşağıdaki reject_profit_freeze_breach — kâr-dışı siparişte iki
--- kâr kolonu da donuk kalır).
+-- recompute her zaman donmuş maliyeti kullanır. Dışlama artık kalıcı değil
+-- (design 2026-10-29 §8.3): kâr-dışı siparişin kâr kolonları donuk tutulmaz.
 DROP TRIGGER IF EXISTS orders_estimated_net_profit_write_once ON orders;
 DROP FUNCTION IF EXISTS public.reject_estimated_net_profit_update();
--- KABUL EDİLEN ZAYIFLAMA (review M1): write-once gidince "hesaplanmış sipariş
--- kâr-dışına çekilemez" garantisi (reject_profit_freeze_breach ELSIF, aşağıda)
--- yalnız OLD.estimated_net_profit NOT NULL iken tutuyor. Teorik 2-UPDATE açığı:
--- estimate'i NULL'la → sonra exclude et. App kodundan ULAŞILMAZ: tek NULL'layan
--- check-constraints.sql'deki dedup-repair (rn>1 yinelenenler, re-entry yeniden
--- yazar); estimate yazan tek yol non-null yazar + profitExcludedAt'te erken döner;
--- exclusion yalnız CREATE'te damgalanır. Estimate write-many olduğundan saf
--- write-once trigger geri konamaz; garanti app-katmanı disipliniyle korunuyor.
 
--- ─── reject_profit_freeze_breach ───────────────────────────────────────
--- Calculated-or-excluded sözleşmesinin (spec 2026-06-12 §3) DB bekçisi.
--- Kâr-dışı (profit_excluded_at NOT NULL) sipariş: estimate/settled kâr
--- yazımı, damganın silinmesi/değişmesi yasak. Hesaplanmış sipariş kâr-dışına
--- çekilemez. Status/kargo gibi diğer kolonlar serbest. Not SECURITY DEFINER:
--- görevi reddetmek, yetki aşmak değil (reject_snapshot_update ile aynı).
-CREATE OR REPLACE FUNCTION public.reject_profit_freeze_breach()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  IF OLD.profit_excluded_at IS NOT NULL THEN
-    IF NEW.estimated_net_profit IS DISTINCT FROM OLD.estimated_net_profit THEN
-      RAISE EXCEPTION 'profit-excluded order: estimated_net_profit is frozen'
-        USING ERRCODE = '42501',
-              HINT = 'Cost window closed at end of order day; exclusion is permanent.';
-    END IF;
-    IF NEW.settled_net_profit IS DISTINCT FROM OLD.settled_net_profit THEN
-      RAISE EXCEPTION 'profit-excluded order: settled_net_profit is frozen'
-        USING ERRCODE = '42501',
-              HINT = 'Excluded orders never enter profit aggregates (decision K1).';
-    END IF;
-    -- Net KDV kolonları da kâr kolonlarıyla aynı dondurma sözleşmesine tabi
-    -- (2026-06-15): kâr-dışı siparişte estimated/settled net_vat de donuk kalır.
-    IF NEW.estimated_net_vat IS DISTINCT FROM OLD.estimated_net_vat THEN
-      RAISE EXCEPTION 'profit-excluded order: estimated_net_vat is frozen'
-        USING ERRCODE = '42501',
-              HINT = 'Net VAT follows the profit-freeze contract (display-only, never re-derived).';
-    END IF;
-    IF NEW.settled_net_vat IS DISTINCT FROM OLD.settled_net_vat THEN
-      RAISE EXCEPTION 'profit-excluded order: settled_net_vat is frozen'
-        USING ERRCODE = '42501',
-              HINT = 'Net VAT follows the profit-freeze contract (display-only, never re-derived).';
-    END IF;
-    IF NEW.profit_excluded_at IS DISTINCT FROM OLD.profit_excluded_at
-       OR NEW.profit_exclusion_reason IS DISTINCT FROM OLD.profit_exclusion_reason THEN
-      RAISE EXCEPTION 'profit exclusion is permanent'
-        USING ERRCODE = '42501',
-              HINT = 'Exclusion cannot be cleared or rewritten.';
-    END IF;
-  ELSIF NEW.profit_excluded_at IS NOT NULL AND OLD.estimated_net_profit IS NOT NULL THEN
-    RAISE EXCEPTION 'calculated order cannot be excluded'
-      USING ERRCODE = '42501',
-            HINT = 'Calculated profit already in aggregates; excluding would rewrite history.';
-  END IF;
-  RETURN NEW;
-END;
-$$;
-
+-- ─── reject_profit_freeze_breach (tombstone) ───────────────────────────
+-- Exclusion is no longer permanent (design 2026-10-29 §8.3: "Hariç" is a
+-- future user exclusion and must be reversible; automatic exclusion was
+-- removed in phase 3B). The old freeze trigger made exclusion a one-way door
+-- and forbade excluding a calculated order; it is gone. These lines drop the
+-- trigger and its function on databases that still carry them.
 DROP TRIGGER IF EXISTS trg_reject_profit_freeze_breach ON orders;
-CREATE TRIGGER trg_reject_profit_freeze_breach
-  BEFORE UPDATE ON orders
-  FOR EACH ROW
-  EXECUTE FUNCTION public.reject_profit_freeze_breach();
+DROP FUNCTION IF EXISTS public.reject_profit_freeze_breach();

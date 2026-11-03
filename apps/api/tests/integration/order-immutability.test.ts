@@ -8,7 +8,7 @@
  *
  * KORUNAN garantiler (burada DEĞİL, ilgili dosyalarda test edilir):
  *   - Maliyet snapshot immutability → cost-snapshot-immutability.test.ts
- *   - EXCLUDED sipariş kâr donması → services/profit-freeze-guards.test.ts
+ *   - Kâr-dışı damga/gerekçe çift kısıtı → services/profit-exclusion-guards.test.ts
  */
 
 import { Decimal } from 'decimal.js';

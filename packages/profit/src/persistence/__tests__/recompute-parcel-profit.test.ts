@@ -413,8 +413,8 @@ describe('recomputeParcelProfit', () => {
 
   it('writes an excluded order as EXCLUDED', async () => {
     const parcel = await seedMelontikParcel();
-    // The pair-check constraint wants both exclusion columns set together, and the
-    // freeze trigger allows a first-time exclusion on an uncalculated order.
+    // The pair-check constraint wants both exclusion columns set together; while
+    // the stamp is present the engine writes the order as EXCLUDED.
     await prisma.order.update({
       where: { id: parcel.orderId },
       data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },

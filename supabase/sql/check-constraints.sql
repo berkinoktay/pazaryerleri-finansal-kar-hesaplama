@@ -198,15 +198,10 @@ CREATE INDEX IF NOT EXISTS webhook_events_unprocessed_idx
   WHERE processed_at IS NULL;
 
 -- ─── 2026-06-12 profit-freeze: calculated-or-excluded ──────────────────
--- Orders'a giren her sipariş iki nihai durumdan birindedir: HESAPLANMIŞ
--- (estimated_net_profit NOT NULL) ya da KÂR-DIŞI (profit_excluded_at NOT
--- NULL). Üçüncü durum ("maliyeti sonra girilecek") yok — spec §3.
--- Mirror: prisma/migrations/20260612120000_order_profit_freeze.
-
--- Bir sipariş aynı anda hem hesaplanmış hem kâr-dışı olamaz.
+-- Tombstone (design 2026-10-29 §8.3): exclusion is no longer permanent and a
+-- calculated order may be excluded, so the xor check is dropped here and on any
+-- database that still carries it. The pair check below stays.
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_profit_freeze_xor_check;
-ALTER TABLE orders ADD CONSTRAINT orders_profit_freeze_xor_check
-  CHECK (NOT (estimated_net_profit IS NOT NULL AND profit_excluded_at IS NOT NULL));
 
 -- Çift kolon tutarlılığı: damga ve gerekçe birlikte yaşar.
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_profit_exclusion_pair_check;
