@@ -76,6 +76,50 @@ describe('profit exclusion guards', () => {
     ).rejects.toThrow(/automatic profit exclusion is permanent/);
   });
 
+  it('rejects changing only the timestamp of an automatic exclusion', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const order = await createOrder(org.id, store.id);
+
+    const stampedAt = new Date();
+    await prisma.order.update({
+      where: { id: order.id },
+      data: { profitExcludedAt: stampedAt, profitExclusionReason: 'COST_DEADLINE_MISSED' },
+    });
+
+    // Keeping the reason but moving the stamp to another instant still mutates an
+    // automatic exclusion, so the trigger rejects it (SQLSTATE 42501). The offset
+    // guarantees a distinct instant (two bare `new Date()` calls could collide on
+    // the same millisecond and then pass through the IS DISTINCT FROM check).
+    const movedStamp = new Date(stampedAt.getTime() + 1000);
+    await expect(
+      prisma.order.update({
+        where: { id: order.id },
+        data: { profitExcludedAt: movedStamp },
+      }),
+    ).rejects.toThrow(/automatic profit exclusion is permanent/);
+  });
+
+  it('rejects clearing a LEGACY_BACKFILL exclusion', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const order = await createOrder(org.id, store.id);
+
+    await prisma.order.update({
+      where: { id: order.id },
+      data: { profitExcludedAt: new Date(), profitExclusionReason: 'LEGACY_BACKFILL' },
+    });
+
+    // LEGACY_BACKFILL is an automatic reason as well, so clearing its stamp is
+    // just as permanent (SQLSTATE 42501).
+    await expect(
+      prisma.order.update({
+        where: { id: order.id },
+        data: { profitExcludedAt: null, profitExclusionReason: null },
+      }),
+    ).rejects.toThrow(/automatic profit exclusion is permanent/);
+  });
+
   it('stamps an exclusion on an order that has none', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
@@ -127,7 +171,7 @@ describe('profit exclusion guards', () => {
     ).rejects.toThrow(/orders_profit_exclusion_pair_check/);
   });
 
-  it('leaves status and cargo updates on an excluded order free', async () => {
+  it('allows updates that leave the exclusion columns unchanged', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
     const order = await createOrder(org.id, store.id);

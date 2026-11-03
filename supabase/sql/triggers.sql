@@ -125,7 +125,8 @@ DROP FUNCTION IF EXISTS public.reject_profit_freeze_breach();
 --
 -- The guard covers ONLY the automatic reasons -- COST_DEADLINE_MISSED (the
 -- day-end buffer flush), LATE_UNCOSTED_ARRIVAL (a past-day order that arrived
--- uncosted) and LEGACY_BACKFILL (the operator backfill script). A future
+-- uncosted) and LEGACY_BACKFILL (the old 2026-06-12 profit-freeze backfill; no
+-- writer stamps it today, it is listed defensively). A future
 -- user-chosen exclusion is meant to be reversible and will carry its own
 -- distinct reason, so it is deliberately left out of this list. Stamping an
 -- exclusion on an order that currently has none stays allowed, because OLD's
