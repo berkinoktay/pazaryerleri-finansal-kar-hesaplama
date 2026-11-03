@@ -474,7 +474,7 @@ describe('processSettlementsChunk — raw finance-record ingest', () => {
   });
 
   it('requests every mapped settlement type', async () => {
-    // A default store createdAt (≈now) runs one tiny slice, enough for every type to be
+    // A default store createdAt (~now) runs one tiny slice, enough for every type to be
     // requested once. The scan must pull all six settlement types the mapper now maps
     // (Sale, Discount, Return, DiscountCancel, Coupon, CouponCancel) and the three
     // otherfinancials types, so a live coupon or reversal is never silently dropped.
@@ -686,7 +686,7 @@ describe('processSettlementsChunk — raw finance-record ingest', () => {
 
     await runChunk(syncLogId, { settlements: { Sale: [saleRowOn('S-OLD', now - 7 * DAY_MS)] } });
 
-    // Run 2's renewed row is dated three hours after the slice end — inside tolerance — so
+    // Run 2's renewed row is dated three hours after the slice end -- inside tolerance -- so
     // the window guard holds and pruning still runs, dropping the stale old id.
     await runChunk(syncLogId, {
       settlements: { Sale: [saleRowOn('S-NEW', now + 3 * 60 * 60 * 1000)] },
@@ -783,7 +783,7 @@ describe('processSettlementsChunk — raw finance-record ingest', () => {
     await runChunk(syncLogId, { settlements: { Sale: [saleRowOn('S-OLD', inside)] } });
 
     // Run 2's renewed row carries a debt beyond numeric(14,2), so both the batch and the
-    // row-by-row retry fail to ingest it. The type must not be pruned — otherwise the stale
+    // row-by-row retry fail to ingest it. The type must not be pruned -- otherwise the stale
     // old row would be deleted while the renewed row was never stored, leaving the sale with
     // no record at all until the next cycle.
     const badRow = tx({
@@ -802,6 +802,44 @@ describe('processSettlementsChunk — raw finance-record ingest', () => {
         ([, ctx]) => ctx?.['transactionType'] === 'Sale' && ctx?.['reason'] === 'INGEST_FAILED',
       ),
     ).toBe(true);
+  });
+
+  it('still prunes when a failed batch recovers row by row', async () => {
+    const now = Date.now();
+    const { storeId, syncLogId } = await buildScenario({
+      storeCreatedAt: new Date(now - 14 * DAY_MS),
+    });
+    const inside = now - 7 * DAY_MS;
+
+    // Run 1 stores the sale under its old id.
+    await runChunk(syncLogId, { settlements: { Sale: [saleRowOn('S-OLD', inside)] } });
+    expect(await settlementRecordIds(storeId)).toEqual(['S-OLD']);
+
+    const errorSpy = vi.spyOn(syncLog, 'error');
+    const warnSpy = vi.spyOn(syncLog, 'warn');
+    // Run 2's first ingest transaction (the Sale batch) fails once, then the row-by-row retry
+    // runs against the real transaction and stores the renewed row. A batch that fails but
+    // whose rows all recover row by row must NOT mark the type ingestFailed (the flag is set
+    // only in the per-row catch), so pruning still runs.
+    vi.spyOn(prisma, '$transaction').mockRejectedValueOnce(new Error('transient batch failure'));
+
+    await runChunk(syncLogId, { settlements: { Sale: [saleRowOn('S-NEW', inside)] } });
+
+    // The batch failed once (the fallback path was exercised) and the renewed row ingested.
+    const batchFailed = errorSpy.mock.calls.filter(
+      ([event]) => event === 'settlements.ingest.batch-failed',
+    );
+    expect(batchFailed).toHaveLength(1);
+
+    // The renewed row recovered, so the stale old id is pruned and no INGEST_FAILED skip is
+    // logged for this type.
+    expect(await settlementRecordIds(storeId)).toEqual(['S-NEW']);
+    const skipped = warnSpy.mock.calls.filter(([event]) => event === 'settlements.prune.skipped');
+    expect(
+      skipped.some(
+        ([, ctx]) => ctx?.['transactionType'] === 'Sale' && ctx?.['reason'] === 'INGEST_FAILED',
+      ),
+    ).toBe(false);
   });
 
   it('does not prune a type whose complete scan came back empty while rows are stored', async () => {
