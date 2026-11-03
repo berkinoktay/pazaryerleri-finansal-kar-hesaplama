@@ -34,7 +34,13 @@ export const PROFIT_RECOMPUTE_BATCH_SIZE = 50;
 
 // The shortest gap between two stale sweeps once a sweep found no work. The sweep
 // scans the whole `orders` table, so it must not run every 5 s in steady state.
-export const PROFIT_STALE_SWEEP_INTERVAL_MS = 300_000;
+// It can afford to be rare: every producer enqueues its own order inside its own
+// transaction, so the sweep is only a safety net for a mark that never landed plus
+// the engine-version migration engine (it re-stamps orders an older engine wrote).
+// The first tick after every worker start sweeps regardless of this gap (lastSweepAt
+// starts at 0), and a sweep that found work still re-runs on the very next tick
+// (catch-up) -- so a one-hour gap only throttles a truly idle worker.
+export const PROFIT_STALE_SWEEP_INTERVAL_MS = 3_600_000;
 
 // How many stale orders one sweep enqueues. The drain then works through them a
 // batch at a time on the following ticks.

@@ -197,6 +197,23 @@ CREATE INDEX IF NOT EXISTS webhook_events_unprocessed_idx
   ON webhook_events (received_at)
   WHERE processed_at IS NULL;
 
+-- ─── phase 3D: profit stale-sweep NOT EXISTS probe ────────────────────
+-- The profit recompute tick's idle stale sweep (packages/profit
+-- enqueueStaleProfitStatements) finds orders missing a current best-known
+-- statement with
+--   NOT EXISTS (SELECT 1 FROM order_profit_statements s
+--               WHERE s.order_id = o.id
+--                 AND s.view = 'BEST_KNOWN'
+--                 AND s.engine_version >= <PROFIT_ENGINE_VERSION>)
+-- A partial index over (order_id, engine_version) restricted to the
+-- BEST_KNOWN view lets that probe answer from the index alone, one lookup
+-- per candidate order, instead of scanning the statement heap. Prisma 7 has
+-- no WHERE-clause index syntax, so it lives here and is applied by
+-- apply-policies alongside the other partial indexes above.
+CREATE INDEX IF NOT EXISTS order_profit_statements_best_known_idx
+  ON order_profit_statements (order_id, engine_version)
+  WHERE view = 'BEST_KNOWN';
+
 -- ─── 2026-06-12 profit-freeze: calculated-or-excluded ──────────────────
 -- Tombstone (design 2026-10-29 §8.3): exclusion is no longer permanent and a
 -- calculated order may be excluded, so the xor check is dropped here and on any
