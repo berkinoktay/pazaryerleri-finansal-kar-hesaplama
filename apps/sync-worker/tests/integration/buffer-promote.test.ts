@@ -214,6 +214,56 @@ async function seedTimelyCostedVariant(
   });
 }
 
+// Seed a variant whose cost was entered AFTER `orderDate`'s business day ended:
+// the link is attached, and the profile's first version becomes effective, one
+// minute after the day end. buildCalcCheckLines sees an amount so the order is
+// calculable NOW, but the cost missed the window, so a past-day graduation must
+// still be excluded with COST_DEADLINE_MISSED.
+async function seedLateCostedVariant(
+  organizationId: string,
+  storeId: string,
+  barcode: string,
+  orderDate: Date,
+): Promise<void> {
+  const profile = await createCostProfile(organizationId, { storeId, amountGross: '48.00' });
+  const product = await prisma.product.create({
+    data: {
+      organizationId,
+      storeId,
+      platformContentId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      productMainId: `pm-${barcode}`,
+      title: 'Promote Test Product',
+    },
+  });
+  const tooLate = new Date(getBusinessDayRange(orderDate).end.getTime() + 60 * 1000);
+  await prisma.productVariant.create({
+    data: {
+      organizationId,
+      storeId,
+      productId: product.id,
+      platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      barcode,
+      stockCode: `sk-${barcode}`,
+      salePrice: '100',
+      listPrice: '120',
+      costProfileLinks: { create: { organizationId, profileId: profile.id, attachedAt: tooLate } },
+    },
+  });
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId,
+      version: 1,
+      name: profile.name,
+      type: profile.type,
+      amountGross: profile.amountGross,
+      vatRate: profile.vatRate,
+      changedFields: [],
+      effectiveFrom: tooLate,
+    },
+  });
+}
+
 describe('processBufferPromote', () => {
   beforeAll(async () => {
     await ensureDbReachable();
@@ -549,6 +599,119 @@ describe('processBufferPromote', () => {
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.status).toBe('SHIPPED');
     expect(order.platformLastModifiedAt?.toISOString()).toBe(T2.toISOString());
+  });
+
+  it('graduates a past-day PROMOTING entry whose cost arrived after its day as COST_DEADLINE_MISSED', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 24 * 60 * 60_000));
+    // The cost was attached (and its version made effective) one minute AFTER the
+    // order's day ended, so the entry is calculable now but its cost missed the
+    // window. The calculable graduation branch must still exclude it (the BLOCKER:
+    // the old branch skipped the cost-window check and graduated it as a normal order).
+    await seedLateCostedVariant(org.id, store.id, 'EAN13-PROMOTE-LATE', orderDate);
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-late-promoting',
+      orderDate,
+      status: 'PROMOTING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'pkg-late-promoting',
+        barcode: 'EAN13-PROMOTE-LATE',
+      }),
+    });
+
+    await processBufferPromote();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('pkg-late-promoting');
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
+    expect(order.promotedFromBufferAt).not.toBeNull();
+  });
+
+  it('graduates a past-day FAILED entry whose cost arrived after its day as COST_DEADLINE_MISSED', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 24 * 60 * 60_000));
+    // Same late-cost shape, but the entry reaches the promote tick via FAILED (a
+    // day-end flush that threw handed it off). The retry graduates it; the late cost
+    // must not rescue it from COST_DEADLINE_MISSED.
+    await seedLateCostedVariant(org.id, store.id, 'EAN13-PROMOTE-LATE-F', orderDate);
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-late-failed',
+      orderDate,
+      status: 'FAILED',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'pkg-late-failed',
+        barcode: 'EAN13-PROMOTE-LATE-F',
+      }),
+    });
+    // attempts=1, failed 10 min ago (> 5) -> due for retry.
+    await prisma.livePerformanceBuffer.update({
+      where: { id: entry.id },
+      data: { attempts: 1, lastFailedAt: new Date(Date.now() - 10 * 60_000), lastError: 'x' },
+    });
+
+    await processBufferPromote();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('pkg-late-failed');
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
+  });
+
+  it('graduates a past-day entry whose cost was attached before its day ended as a normal order', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 24 * 60 * 60_000));
+    // Cost attached (and effective) one minute before the order's day ended, but the
+    // attach-flip never fired, so the row is still PROMOTING when the promote tick runs
+    // after midnight. A timely cost still counts -- it graduates unexcluded.
+    await seedTimelyCostedVariant(org.id, store.id, 'EAN13-PROMOTE-OK', orderDate);
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-timely-promoting',
+      orderDate,
+      status: 'PROMOTING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'pkg-timely-promoting',
+        barcode: 'EAN13-PROMOTE-OK',
+      }),
+    });
+
+    await processBufferPromote();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('pkg-timely-promoting');
+    expect(order.profitExcludedAt).toBeNull();
+    expect(order.profitExclusionReason).toBeNull();
+  });
+
+  it('does not exclude a same-day PROMOTING entry', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // Cost attached today, still inside the order's business day. A same-day
+    // calculable promote is never excluded -- its cost-flip window is still open.
+    await seedCalculableVariant(org.id, store.id, 'EAN13-PROMOTE-TODAY');
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-today-promoting',
+      orderDate: getBusinessDateAnchor(),
+      status: 'PROMOTING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'pkg-today-promoting',
+        barcode: 'EAN13-PROMOTE-TODAY',
+      }),
+    });
+
+    await processBufferPromote();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('pkg-today-promoting');
+    expect(order.profitExcludedAt).toBeNull();
+    expect(order.profitExclusionReason).toBeNull();
   });
 });
 

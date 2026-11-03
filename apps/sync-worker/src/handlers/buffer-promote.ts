@@ -7,7 +7,11 @@ import type {
 } from '@pazarsync/db';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { hadCostWithinOrderDay, upsertOrderWithSnapshot } from '@pazarsync/order-sync';
-import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
+import {
+  buildCalcCheckLines,
+  type OrderLineForCalcCheck,
+  resolveOrderCalculability,
+} from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 import { getBusinessDateAnchor } from '@pazarsync/utils';
 
@@ -16,30 +20,41 @@ import { isRetryDue, MAX_ATTEMPTS, RETRY_BACKOFF_MINUTES } from '../lib/buffer-p
 const CHUNK_SIZE = 25;
 
 /**
- * Decide the cost-window exclusion for a past-day buffer entry about to graduate
- * into `orders`. Berkin 2026-11-03: an order enters net profit only if every
- * non-cancelled item had a cost entered before the order's business day ended;
- * supply prices drift, so a cost entered after that day is too late. A past-day
- * graduation whose cost is still missing is PERMANENTLY excluded with
- * COST_DEADLINE_MISSED; a cancelled order is never excluded. The decision reads the
- * attach/version timestamps against the entry's OWN business day end, so a cost
- * attached before that end still counts even when this tick runs after midnight.
- * Tenant-scoped via the entry's organization + store. A buffer snapshot carries no
- * per-line cancel flag, so every line is treated as non-cancelled (the order-level
- * CANCELLED check above owns the cancelled case).
+ * The SINGLE cost-window decision point every buffer graduation routes through.
+ * Berkin 2026-11-03: an order enters net profit only if every non-cancelled item
+ * had a cost entered before the order's business day ended; supply prices drift,
+ * so a cost entered after that day is too late.
+ *
+ * This excludes ONLY a PAST-DAY entry whose cost is still missing or arrived late
+ * (COST_DEADLINE_MISSED) and returns undefined -- no exclusion -- for:
+ *   - a SAME-DAY entry: its cost-flip window is still open, so it is never excluded
+ *     here regardless of its cost state. The guard below enforces this so the
+ *     function cannot mislead -- it decides PAST-DAY graduations only; the day-end
+ *     flush owns an entry once its day closes.
+ *   - a CANCELLED order: it carries no payout and is never excluded.
+ *
+ * The decision reads the attach/version timestamps against the entry's OWN business
+ * day end (via hadCostWithinOrderDay), so a cost attached before that end still
+ * counts even when this tick runs after midnight. Tenant-scoped via the entry's
+ * organization + store. The caller's already-built calc lines are reused (no
+ * rebuild). A buffer snapshot carries no per-line cancel flag, so every line is
+ * treated as non-cancelled (the order-level CANCELLED check owns the cancelled case).
  */
 async function resolvePastDayGraduationExclusion(
   tx: Prisma.TransactionClient,
   entry: LivePerformanceBuffer,
   mapped: MappedOrder,
+  calcLines: readonly OrderLineForCalcCheck[],
+  now: Date,
 ): Promise<{ readonly reason: ProfitExclusionReason } | undefined> {
+  // Same-day guard: the cost-flip window has not closed, so a same-day entry is
+  // never excluded here. Keeps the name honest (PAST-DAY graduations only).
+  if (entry.orderDate.getTime() >= getBusinessDateAnchor(now).getTime()) {
+    return undefined;
+  }
   if (mapped.status === 'CANCELLED') {
     return undefined;
   }
-  const calcLines = await buildCalcCheckLines(tx, {
-    storeId: entry.storeId,
-    lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
-  });
   const hasTimelyCost = await hadCostWithinOrderDay(tx, {
     organizationId: entry.organizationId,
     storeId: entry.storeId,
@@ -126,39 +141,22 @@ async function promoteOne(id: string, now: Date): Promise<void> {
         const mapped = entry.mappedOrder as unknown as MappedOrder;
 
         // Calculability re-check under the lock: a PROMOTING/FAILED stamp does not
-        // prove the cost is STILL in place — a flush-failed PENDING entry falls onto
+        // prove the cost is STILL in place -- a flush-failed PENDING entry falls onto
         // this path through FAILED, and the profile may have been archived after the
-        // flip. So calculability is re-resolved here and routed: a past-day entry whose
-        // cost is still missing graduates as a normal, not-computable order; a same-day
-        // one is demoted to PENDING so the day's cost-flip window can still catch it.
+        // flip. So calculability is re-resolved here and routed: a SAME-DAY entry whose
+        // cost is still missing is demoted to PENDING so the day's cost-flip window can
+        // still catch it; every other entry graduates into orders below.
         const calcLines = await buildCalcCheckLines(tx, {
           storeId: entry.storeId,
           lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
         });
-        if (resolveOrderCalculability(calcLines).kind !== 'calculable') {
-          if (entry.orderDate.getTime() < getBusinessDateAnchor(now).getTime()) {
-            // Window closed → graduate into orders. Cost-window rule (Berkin
-            // 2026-11-03): a past-day graduation whose cost missed the order's
-            // business day is permanently excluded with COST_DEADLINE_MISSED; a
-            // cancelled order (or one whose cost did land in time) graduates as a
-            // normal order. The queued recompute then writes its statement.
-            // profitExclusion is stamped CREATE-only inside upsertOrderWithSnapshot.
-            const profitExclusion = await resolvePastDayGraduationExclusion(tx, entry, mapped);
-            syncLog.info('buffer.promote-uncosted-graduation', {
-              entryId: entry.id,
-              storeId: entry.storeId,
-              platformOrderId: entry.platformOrderId,
-              excluded: profitExclusion !== undefined,
-            });
-            await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx, {
-              promotedFromBuffer: true,
-              profitExclusion,
-            });
-            await tx.livePerformanceBuffer.delete({ where: { id: entry.id } });
-            return entry;
-          }
-          // Aynı gün: pencere hâlâ açık — entry PENDING'e iade edilir; maliyet
-          // gün içinde gelirse attach-tetikli flip yeniden PROMOTING'e çeker.
+        const isCalculable = resolveOrderCalculability(calcLines).kind === 'calculable';
+        const windowClosed = entry.orderDate.getTime() < getBusinessDateAnchor(now).getTime();
+
+        if (!isCalculable && !windowClosed) {
+          // Same day, cost still missing: the window is still open, so return the
+          // entry to PENDING; a cost arriving during the day re-promotes it via the
+          // attach-triggered flip.
           syncLog.warn('buffer.promote-demoted-pending', {
             entryId: entry.id,
             storeId: entry.storeId,
@@ -171,11 +169,33 @@ async function promoteOne(id: string, now: Date): Promise<void> {
           return null;
         }
 
-        // Same tx → order write + buffer delete commit atomically. Marked as a
-        // buffer graduation so the realtime toast suppresses a duplicate ding for
-        // an order the seller already saw as a cost-missing buffer entry.
+        // Graduate into orders. ONE cost-window decision point for EVERY graduation
+        // (Berkin 2026-11-03): resolvePastDayGraduationExclusion excludes a PAST-DAY
+        // entry whose cost missed the order's business day (COST_DEADLINE_MISSED) and
+        // no-ops for a same-day or cancelled entry. So a past-day entry that is
+        // calculable ONLY because a late cost was attached is still excluded (the
+        // BLOCKER this fixes: the calculable branch used to skip the check), while a
+        // same-day calculable promote is not. The already-built calc lines are reused.
+        // Same tx -> order write + buffer delete commit atomically; marked as a buffer
+        // graduation so the realtime toast suppresses a duplicate ding for an order the
+        // seller already saw as a cost-missing buffer entry. profitExclusion is stamped
+        // CREATE-only inside upsertOrderWithSnapshot.
+        const profitExclusion = await resolvePastDayGraduationExclusion(
+          tx,
+          entry,
+          mapped,
+          calcLines,
+          now,
+        );
+        syncLog.info('buffer.promote-graduation', {
+          entryId: entry.id,
+          storeId: entry.storeId,
+          platformOrderId: entry.platformOrderId,
+          excluded: profitExclusion !== undefined,
+        });
         await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx, {
           promotedFromBuffer: true,
+          profitExclusion,
         });
         await tx.livePerformanceBuffer.delete({ where: { id: entry.id } });
         return entry;
@@ -258,7 +278,7 @@ let lastPermanentFailedRetrySummaryAt = 0;
 
 /**
  * One flush tick: graduate up to FLUSH_CHUNK_SIZE PENDING buffer entries whose
- * business date is before today into `orders`, then delete the buffer row — same
+ * business date is before today into `orders`, then delete the buffer row -- same
  * atomic claim+upsert+delete as promoteOne. Cost-window rule (Berkin 2026-11-03):
  * an entry whose cost missed the order's business day graduates PROFIT-EXCLUDED
  * (COST_DEADLINE_MISSED); its ciro still counts, its net profit never shows. An
@@ -288,7 +308,7 @@ export async function processPastDayBufferFlush(now: Date = new Date()): Promise
     select: { id: true },
   });
   for (const { id } of pending) {
-    await flushOne(id);
+    await flushOne(id, now);
   }
 
   // Pass 2: give past-day PERMANENT_FAILED rows a final graduation attempt via
@@ -304,7 +324,7 @@ export async function processPastDayBufferFlush(now: Date = new Date()): Promise
   });
   const retryFailedIds: string[] = [];
   for (const { id } of permanentFailed) {
-    const failedId = await flushOne(id);
+    const failedId = await flushOne(id, now);
     if (failedId !== null) {
       retryFailedIds.push(failedId);
     }
@@ -330,7 +350,7 @@ export async function processPastDayBufferFlush(now: Date = new Date()): Promise
  * can aggregate + throttle the log); returns null in every other outcome
  * (success, skip, claim-lost, or a PENDING failure that was marked FAILED).
  */
-async function flushOne(id: string): Promise<string | null> {
+async function flushOne(id: string, now: Date): Promise<string | null> {
   try {
     const flushed = await prisma.$transaction(async (tx): Promise<LivePerformanceBuffer | null> => {
       const locked = await tx.$queryRaw<Array<{ id: string }>>`
@@ -360,9 +380,21 @@ async function flushOne(id: string): Promise<string | null> {
       // past-day entry whose cost missed the order's business day is excluded with
       // COST_DEADLINE_MISSED; a cancelled entry (or one costed in time -- e.g. a cost
       // attached just before midnight while the attach-flip had not yet fired)
-      // graduates as a normal order. Same tx → order write + buffer delete commit
+      // graduates as a normal order. The flush path graduates unconditionally (no
+      // calculability re-check), so the calc lines are built here solely to feed the
+      // single cost-window decision point. Same tx -> order write + buffer delete commit
       // atomically. profitExclusion is stamped CREATE-only inside upsertOrderWithSnapshot.
-      const profitExclusion = await resolvePastDayGraduationExclusion(tx, entry, mapped);
+      const calcLines = await buildCalcCheckLines(tx, {
+        storeId: entry.storeId,
+        lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
+      });
+      const profitExclusion = await resolvePastDayGraduationExclusion(
+        tx,
+        entry,
+        mapped,
+        calcLines,
+        now,
+      );
       await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx, {
         promotedFromBuffer: true,
         profitExclusion,

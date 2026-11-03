@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { prisma } from '@pazarsync/db';
 import type { Prisma } from '@pazarsync/db';
+import { getBusinessDateAnchor } from '@pazarsync/utils';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -183,5 +184,42 @@ describe('cost attach — Live Performance buffer flip (full-calculability)', ()
       (await prisma.livePerformanceBuffer.findFirstOrThrow({ where: { storeId: store.id } }))
         .status,
     ).toBe('PROMOTING');
+  });
+
+  it('flips only same-day pending buffer rows when a cost is attached', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const variant = await seedVariant(org.id, store.id, 'BC-DAY');
+    const profile = await createCostProfile(org.id, { storeId: store.id, amountGross: '50.00' });
+
+    // Two PENDING entries for the same barcode: one from today's business day, one
+    // from a past day. Attaching the cost makes both calculable, but the flip must
+    // touch only the same-day row. A past-day row's cost window is already closed, so
+    // the day-end flush -- not a late cost attach -- graduates it under the cost-window
+    // rule (defense in depth for the promote-tick exclusion check).
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-today',
+      orderDate: getBusinessDateAnchor(),
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder(['BC-DAY']),
+    });
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-pastday',
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - 24 * 60 * 60 * 1000)),
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder(['BC-DAY']),
+    });
+
+    const result = await attachCostProfiles(org.id, [profile.id], [variant.id], randomUUID(), null);
+
+    expect(result.bufferEntriesPromoted).toBe(1);
+    const today = await prisma.livePerformanceBuffer.findFirstOrThrow({
+      where: { platformOrderId: 'pkg-today' },
+    });
+    expect(today.status).toBe('PROMOTING');
+    const pastday = await prisma.livePerformanceBuffer.findFirstOrThrow({
+      where: { platformOrderId: 'pkg-pastday' },
+    });
+    expect(pastday.status).toBe('PENDING');
   });
 });

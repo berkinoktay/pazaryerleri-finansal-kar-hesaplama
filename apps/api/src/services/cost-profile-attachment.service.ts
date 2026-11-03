@@ -7,6 +7,7 @@ import {
   enqueueProfitRecomputeForVariants,
   resolveOrderCalculability,
 } from '@pazarsync/profit';
+import { getBusinessDateAnchor } from '@pazarsync/utils';
 
 import {
   CostProfileArchivedCannotAttachError,
@@ -143,6 +144,13 @@ async function assertSameStore(
  * discipline). Forward-only — never reverts PROMOTING → PENDING. The PR-C promote
  * worker then writes the PROMOTING entries to `orders` on its next tick.
  *
+ * Cost-window scope (Berkin 2026-11-03): only a buffer row whose order day has NOT
+ * ended yet (same-day or later) is flipped. A past-day row's cost window is already
+ * closed, so the day-end flush -- not a late cost attach -- graduates it under the
+ * cost-window rule (excluded unless its cost was timely). This is defense in depth
+ * for the promote-tick exclusion check: a late cost must never promote a past-day
+ * entry here.
+ *
  * Returns the number of entries flipped (surfaced to the UI as
  * `bufferEntriesPromoted` for the "X sipariş kâr hesabına eklendi" toast).
  */
@@ -151,6 +159,11 @@ async function flipBufferForVariants(
   orgId: string,
   variantIds: string[],
 ): Promise<number> {
+  // Business-day anchor for the same-day guard on the flip update below. order_date
+  // is a DATE anchor, so this reuses the exact DATE comparison the day-end flush uses
+  // (orderDate < todayAnchor == past day) rather than a raw-SQL date cast.
+  const todayAnchor = getBusinessDateAnchor(new Date());
+
   const variants = await tx.productVariant.findMany({
     where: { id: { in: variantIds }, organizationId: orgId },
     select: { barcode: true, storeId: true },
@@ -195,7 +208,14 @@ async function flipBufferForVariants(
 
     if (promotableIds.length > 0) {
       const result = await tx.livePerformanceBuffer.updateMany({
-        where: { id: { in: promotableIds }, status: 'PENDING' },
+        // Same-day guard (cost-window rule): flip only rows whose order day has not
+        // ended. A past-day row stays PENDING for the day-end flush to graduate (and
+        // exclude unless its cost was timely); a late cost attach must not promote it.
+        where: {
+          id: { in: promotableIds },
+          status: 'PENDING',
+          orderDate: { gte: todayAnchor },
+        },
         data: { status: 'PROMOTING' },
       });
       promoted += result.count;

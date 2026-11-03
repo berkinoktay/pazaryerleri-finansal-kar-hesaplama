@@ -29,7 +29,9 @@ import { getBusinessDayRange } from '@pazarsync/utils';
  * APP_TIME_ZONE helper (`getBusinessDayRange`) that intake-order uses to split
  * "today" from a past day -- never a hand-rolled timezone calculation.
  * `getBusinessDayRange(orderDate).end` is the first instant of the next business
- * day, i.e. the exclusive upper bound of the order's own day.
+ * day (the order day's closing midnight). The query filters with `lte`, so that
+ * boundary instant itself still counts (plan decision 1: the day end is inclusive);
+ * only a cost attached or effective strictly after it is too late.
  *
  * One tenant-scoped query (plus the in-memory coverage check): every filter pins
  * `organization_id` and `store_id`, so the lookup can never read another tenant's
@@ -67,7 +69,9 @@ export async function hadCostWithinOrderDay(
     ),
   ];
 
-  // Exclusive upper bound of the order's business day (next business midnight).
+  // The order day's closing midnight (first instant of the next business day).
+  // Used with `lte` below, so this boundary instant is inclusive -- a cost attached
+  // or effective exactly at it still counts (plan decision 1: the day end is included).
   const dayEnd = getBusinessDayRange(params.orderDate).end;
 
   // Tenant-scoped: the variants (of THIS organization + store) that carry a cost

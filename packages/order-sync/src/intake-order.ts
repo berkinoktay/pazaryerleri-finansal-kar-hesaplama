@@ -8,9 +8,9 @@
  *   - dematerialized (UnPacked)    → DELETE order + buffer rows (split ghost — children re-carry content)
  *   - status CANCELLED             → purge buffer rows + upsert (audit row; aggregates exclude by status)
  *   - variant_not_found            → cost_missing route (order IS written; line keeps barcode, null variant FK; resolution in PR-2)
- *   - calculable + today           → upsertOrderWithSnapshot (persist + queue recompute)
- *   - past-day + timely cost       → upsertOrderWithSnapshot (persisted normally; the queued recompute profits it)
- *   - past-day + cost missed day   → upsertOrderWithSnapshot with profitExclusion LATE_UNCOSTED_ARRIVAL
+ *   - calculable + today           -> upsertOrderWithSnapshot (persist + queue recompute)
+ *   - past-day + timely cost       -> upsertOrderWithSnapshot (persisted normally; the queued recompute profits it)
+ *   - past-day + cost missed day   -> upsertOrderWithSnapshot with profitExclusion LATE_UNCOSTED_ARRIVAL
  *   - cost_missing + today + in orders → upsertOrderWithSnapshot (idempotent, no buffer)
  *   - cost_missing + today + new   → live_performance_buffer (PENDING, same-day cost-flip window)
  *
@@ -221,7 +221,7 @@ export async function intakeOrder(args: {
     return { kind: 'persisted', reason: 'late_uncosted_arrival' };
   }
 
-  // Today's order from here. Fully costable → persist with profit.
+  // Today's order from here. Fully costable -> persist with profit.
   if (calc.kind === 'calculable') {
     await upsertOrderWithSnapshot(storeId, organizationId, mapped);
     return { kind: 'persisted', reason: 'calculable' };
