@@ -41,7 +41,7 @@ export interface ProfitStatement {
   readonly vat: VatTotals & { readonly effective: Decimal };
   readonly stoppageGross: Decimal; // sum STOPPAGE - sum STOPPAGE_REFUND (ignores settings)
   readonly stoppageIncluded: boolean;
-  readonly netProfit: Decimal | null; // null when NOT_COMPUTABLE
+  readonly netProfit: Decimal | null; // null when NOT_COMPUTABLE or EXCLUDED
   readonly saleMarginPct: Decimal | null;
   readonly costMarkupPct: Decimal | null;
   readonly issues: readonly ProfitIssue[];
@@ -118,6 +118,11 @@ function ratioPct(numerator: Decimal | null, base: Decimal): Decimal | null {
  * the lines for the requested view, aggregates them into per-type rows, derives the
  * net VAT and the status, and turns those into a net profit and its margins. Nothing
  * is re-rounded here; rows sum already-rounded line amounts and ratios stay unrounded.
+ *
+ * Two statuses leave the net profit and both margins empty: NOT_COMPUTABLE, which has
+ * no trustworthy total to report, and EXCLUDED, whose order is permanently kept out of
+ * every net profit figure (Berkin 2026-11-03) because its cost missed the order day.
+ * Either way the revenue and the other totals (sale, cost, VAT, stoppage) still compute.
  */
 export function computeProfitStatement(input: ProfitStatementInput): ProfitStatement {
   const selectedLines = selectLines(input.lines, input.view);
@@ -144,13 +149,17 @@ export function computeProfitStatement(input: ProfitStatementInput): ProfitState
     isExcluded: input.isExcluded,
   });
 
-  const netProfit =
-    status === ProfitStatus.NOT_COMPUTABLE
-      ? null
-      : rows
-          .filter((row) => row.includedInProfit)
-          .reduce((acc, row) => acc.add(row.signedGross), ZERO)
-          .sub(effective);
+  // NOT_COMPUTABLE has no trustworthy total; EXCLUDED is kept out of every net profit
+  // figure on purpose. Both leave the net profit and margins empty while the totals
+  // above are still reported. The reduce stays live for every other status, so the
+  // "included rows minus effective VAT equals net profit" invariant keeps its teeth.
+  const carriesProfit = status !== ProfitStatus.NOT_COMPUTABLE && status !== ProfitStatus.EXCLUDED;
+  const netProfit = carriesProfit
+    ? rows
+        .filter((row) => row.includedInProfit)
+        .reduce((acc, row) => acc.add(row.signedGross), ZERO)
+        .sub(effective)
+    : null;
 
   return {
     view: input.view,

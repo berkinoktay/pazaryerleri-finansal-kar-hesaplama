@@ -79,6 +79,23 @@ describe('computeProfitStatement', () => {
     expect(s.netProfit).toBeNull();
     expect(s.saleMarginPct).toBeNull();
   });
+  it('leaves the net profit and the margins empty for an excluded order', () => {
+    // An excluded order keeps its full set of cost lines, yet its net profit is
+    // permanently kept out of every figure (Berkin 2026-11-03). Only the revenue
+    // and the other totals still compute, exactly as for a normal order.
+    const s = statementOf(basic(), { isExcluded: true });
+    expect(s.status).toBe(ProfitStatus.EXCLUDED);
+    expect(s.saleGross.toFixed(2)).toBe('120.00');
+    expect(s.costGross.toFixed(2)).toBe('60.00');
+    expect(s.vat.output.toFixed(2)).toBe('20.00');
+    expect(s.vat.input.toFixed(2)).toBe('13.00');
+    expect(s.vat.net.toFixed(2)).toBe('7.00');
+    expect(s.vat.effective.toFixed(2)).toBe('7.00');
+    expect(s.stoppageGross.toFixed(2)).toBe('1.00');
+    expect(s.netProfit).toBeNull();
+    expect(s.saleMarginPct).toBeNull();
+    expect(s.costMarkupPct).toBeNull();
+  });
   it('the ESTIMATE view ignores the cargo invoice actual', () => {
     const lines = [
       ...basic(),

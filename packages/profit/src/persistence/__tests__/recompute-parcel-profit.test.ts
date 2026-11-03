@@ -30,6 +30,7 @@ import {
   type RecomputeParcelResult,
 } from '../recompute-parcel-profit';
 import {
+  attachCostProfile,
   ensureDbReachable,
   insertFinanceRecord,
   MELONTIK,
@@ -523,17 +524,86 @@ describe('recomputeParcelProfit', () => {
     const result = await recompute(parcel.organizationId, parcel.orderId);
     expect(result.changed).toBe(true);
     expect(result.bestKnown.status).toBe(ProfitStatus.EXCLUDED);
+    expect(result.bestKnown.netProfit).toBeNull();
 
     const statements = await prisma.orderProfitStatement.findMany({
       where: { orderId: parcel.orderId },
     });
     expect(statements).toHaveLength(2);
-    expect(statements.every((statement) => statement.status === ProfitStatus.EXCLUDED)).toBe(true);
+    for (const statement of statements) {
+      expect(statement.status).toBe(ProfitStatus.EXCLUDED);
+      // An excluded order carries no net profit and no margins in either view...
+      expect(statement.netProfit).toBeNull();
+      expect(statement.saleMarginPct).toBeNull();
+      expect(statement.costMarkupPct).toBeNull();
+      // ...while its revenue still counts.
+      expect(new Decimal(statement.saleGross.toString()).gt(0)).toBe(true);
+    }
 
     // The lines are still written for an excluded order.
     expect(await prisma.profitLine.count({ where: { orderId: parcel.orderId } })).toBeGreaterThan(
       0,
     );
+  });
+
+  it('keeps an excluded order out of profit after its cost arrives', async () => {
+    const parcel = await seedMelontikParcel();
+    // Start from an excluded order whose variants carry no cost at all: drop every
+    // cost profile link, then stamp the exclusion.
+    await prisma.productVariantCostProfile.deleteMany({
+      where: { organizationId: parcel.organizationId },
+    });
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
+    });
+
+    const first = await recompute(parcel.organizationId, parcel.orderId);
+    expect(first.changed).toBe(true);
+    expect(first.bestKnown.status).toBe(ProfitStatus.EXCLUDED);
+    expect(first.bestKnown.netProfit).toBeNull();
+
+    // A cost profile (with a version) is attached to each variant after the fact and
+    // the order is recomputed. The cost lines now exist, but the excluded order still
+    // carries no net profit and no margins -- its cost never enters a profit figure.
+    await attachCostProfile({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      productVariantId: parcel.variantA,
+      amountGross: MELONTIK.items.a.costGross,
+      vatRate: MELONTIK.costVatRate,
+    });
+    await attachCostProfile({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      productVariantId: parcel.variantB,
+      amountGross: MELONTIK.items.b.costGross,
+      vatRate: MELONTIK.costVatRate,
+    });
+
+    const second = await recompute(parcel.organizationId, parcel.orderId);
+    expect(second.changed).toBe(true);
+    expect(second.bestKnown.status).toBe(ProfitStatus.EXCLUDED);
+    expect(second.bestKnown.netProfit).toBeNull();
+
+    const statements = await prisma.orderProfitStatement.findMany({
+      where: { orderId: parcel.orderId },
+    });
+    expect(statements).toHaveLength(2);
+    for (const statement of statements) {
+      expect(statement.status).toBe(ProfitStatus.EXCLUDED);
+      expect(statement.netProfit).toBeNull();
+      expect(statement.saleMarginPct).toBeNull();
+      expect(statement.costMarkupPct).toBeNull();
+      expect(new Decimal(statement.saleGross.toString()).gt(0)).toBe(true);
+    }
+
+    // The freshly attached cost is present on the parcel as cost lines.
+    expect(
+      await prisma.profitLine.count({
+        where: { orderId: parcel.orderId, type: ProfitLineType.COST_COGS },
+      }),
+    ).toBeGreaterThan(0);
   });
 
   it('writes a not-computable order with a null net profit and null ratios', async () => {
