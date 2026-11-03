@@ -1053,6 +1053,41 @@ describe('pruneUnseenFinanceRecords', () => {
     expect(await storedRecordIds(otherOrg.storeId)).toEqual(['other-org']);
   });
 
+  it('deletes nothing when the organization does not own the store', async () => {
+    // Tenant defense: the DELETE is both store- AND organization-scoped. Pruning with
+    // another organization but this store's id must spare the store's rows even though
+    // their store id matches, mirroring the ingest store/organization-mismatch guard. A
+    // store-only filter would wrongly delete the row.
+    const parcel = await seedMelontikParcel();
+    const carrierId = await upsertMelontikCarrier();
+    const otherOrg = await createTrendyolOrg({ carrierId });
+
+    await insertFinanceRecord({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      family: 'SETTLEMENT',
+      transactionType: 'Sale',
+      recordId: 'A-OWNED',
+      shipmentPackageId: '1001',
+      transactionDate: INSIDE,
+    });
+
+    const result = await pruneUnseenFinanceRecords(prisma, {
+      // Org B does not own store A: the organization filter must spare store A's row.
+      organizationId: otherOrg.organizationId,
+      storeId: parcel.storeId,
+      family: FinanceRecordFamily.SETTLEMENT,
+      transactionType: 'Sale',
+      windowStart: WINDOW_START,
+      windowEnd: WINDOW_END,
+      seenRecordIds: [],
+    });
+
+    expect(result.pruned).toBe(0);
+    expect(result.enqueuedOrders).toBe(0);
+    expect(await storedRecordIds(parcel.storeId)).toEqual(['A-OWNED']);
+  });
+
   it('keeps a record with no transaction date', async () => {
     const parcel = await seedMelontikParcel();
     await insertFinanceRecord({
