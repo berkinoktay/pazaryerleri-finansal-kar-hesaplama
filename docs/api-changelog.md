@@ -20,6 +20,48 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Orders list, tabs, summary and detail read the profit engine's statements.** No wire-shape
+  change: field names, types and nullability stay the same; values and meanings change.
+  - `reconciliationStatus` comes from the order's best-known profit statement. The engine derives
+    it from which settlement-required lines have landed as marketplace-record or cargo-invoice
+    actuals; a slot the engine could not estimate (missing shipping estimate or commission rate)
+    keeps it at `PARTIALLY_SETTLED`. An order without a statement reports `NOT_SETTLED`. The
+    `reconciliationStatus` filter uses the same rule.
+  - `settledNetProfit` is the best-known net profit as soon as reconciliation has started
+    (`PARTIALLY_SETTLED` or `FULLY_SETTLED`); before this change it appeared only at full
+    settlement. `estimatedNetProfit` is the estimate statement's net profit. Both are `null` when
+    the profit cannot be computed or the order is excluded from profit.
+  - `saleMarginPct` / `costMarkupPct` come from the best-known statement; `sort=marginPct` /
+    `-marginPct` sorts by that margin, orders without a statement last.
+  - `saleGross` (list rows, summary revenue, detail top level) is the best-known statement's sale
+    (sale minus sale return); the order's own sale when no statement exists yet; `0` for a
+    cancelled order without a statement. Cancelled orders no longer add to revenue.
+  - Tabs and counts: `costStatus=calculated` lists the orders not excluded from profit, including
+    cancelled and not-yet-computable ones (shown without profit); `excluded` lists the orders
+    stamped as excluded. `lossOnly` = best-known net profit below zero.
+  - Summary: revenue, net profit, average margin (now rounded to 4 decimals) and the loss rate
+    come from the best-known statements; excluded orders count in revenue, never in profit.
+  - Detail `profitBreakdown` is built from the best-known statement and its selected lines (same
+    fields; cost + marketplace fees + taxes + net profit = sale). It is `null` when the order has no
+    net profit. When no statement is stored yet, the profit is computed for the request without
+    writing anything; if that is impossible (an unsupported marketplace) or fails, the profit part
+    is empty and the request still succeeds (a failure is logged server-side).
+  - Detail items: `unitCostSnapshotGross`, `unitCostSnapshotVatRate`, `commissionGross`,
+    `commissionRate`, `estimatedCommissionGross` and `settledCommissionGross` come from the order's
+    profit lines (the rate falls back to the item column).
+  - Deprecated, still on the wire: detail `fees` is always `[]`; `paymentOrderId`, `paymentDate`
+    and item `commissionInvoiceSerialNumber` are always `null`.
+- **Live performance reads the estimate statement.** Net profit, margin and profit/cost ratio cover
+  the orders whose estimate is computed (the ratio's denominator is their cost from the statement);
+  per-order profit and margin are `null` unless computed; today's products `unitCost` comes from the
+  order's cost lines; the new-order notification computes the profit for the request when the
+  statement is not written yet (empty, never an error, when that fails). Also fixed: an order that a
+  re-delivery made computable while it waited in the live-performance buffer was counted twice and
+  its stock was decremented twice.
+- **Returns summary money KPIs** (`refundDeductionGross`, `commissionRefundGross`,
+  `costReturnGross`, `netImpactGross`) come from the profit lines, dated by the transaction date of
+  each return line's earliest settlement record; an item's cost return counts with its return.
+  Count KPIs are unchanged.
 - **Lira-only: cost profiles, cost status and the organization lose their currency / FX fields.**
   Breaking; the web client ships the matching change in the same PR. The platform works in Turkish
   lira only — every amount is implicitly TL.
@@ -727,8 +769,9 @@ section "Versioning" for details.
 - **`PATCH /v1/organizations/{orgId}/stores/{storeId}/profit-settings`** — Shallow-merges a partial
   `UpdateProfitSettingsInput` (`includeStopaj?`, `includeNegativeNetVat?`) into the store's JSONB blob
   (only supplied keys change). Gated to OWNER/ADMIN (`STORES_CONFIGURE`) → `403 FORBIDDEN` otherwise.
-  SNAPSHOT-AT-CREATE: the change only affects orders created afterwards; existing orders keep their
-  stored profit values (no recompute). Defined types: `ProfitSettings`, `UpdateProfitSettingsInput`.
+  SNAPSHOT-AT-CREATE: an order captures the settings when it is created. A change recomputes the
+  stored profit of the store's orders that never captured them; orders that did keep their captured
+  settings. Defined types: `ProfitSettings`, `UpdateProfitSettingsInput`.
 
 - **`GET /v1/me/preferences`** — Returns the authenticated user's preferences blob (`{}`
   for new users). User-scoped: always returns the calling user's own row. Supports
