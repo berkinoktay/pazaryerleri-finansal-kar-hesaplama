@@ -4,7 +4,7 @@ import { ProfitRecomputeReason, ProfitStatementView, ProfitStatus } from '@pazar
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { intakeOrder } from '@pazarsync/order-sync';
 import { drainProfitRecomputeQueue } from '@pazarsync/profit';
-import { getBusinessDayRange } from '@pazarsync/utils';
+import { getBusinessDateAnchor, getBusinessDayRange } from '@pazarsync/utils';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -176,6 +176,17 @@ async function seedVariantWithTimelyCost(
       changedFields: [],
       effectiveFrom: inTime,
     },
+  });
+}
+
+// Attach a cost profile to an already-seeded (cost-missing) variant, flipping it to
+// calculable -- mirrors the cost-attach service's link write (the same step the
+// buffer-promote end-to-end test uses before promoting).
+async function attachCost(orgId: string, storeId: string, barcode: string): Promise<void> {
+  const variant = await prisma.productVariant.findFirstOrThrow({ where: { storeId, barcode } });
+  const profile = await createCostProfile(orgId, { storeId, amountGross: '40.00' });
+  await prisma.productVariantCostProfile.create({
+    data: { organizationId: orgId, productVariantId: variant.id, profileId: profile.id },
   });
 }
 
@@ -1026,5 +1037,103 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
       (await prisma.product.findFirstOrThrow({ where: { id: afterDemat.productId } })).totalStock,
     ).toBe(40);
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  // --- Buffer graduation on persist (Faz 4A, Gorev 8) ---
+  // A cost-missing order parks in the buffer; once its cost is attached it becomes
+  // calculable, and the next delivery reaches a persist branch. That persist must
+  // graduate (delete) the buffer row atomically, or the order would sit in BOTH
+  // `orders` and the buffer and getKpis would double-count it.
+
+  it('persists a buffered order that became calculable and removes its buffer entry', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false); // cost-missing -> buffer
+    const mapped = buildMapped({ platformOrderId: 'graduate-1', orderDate: new Date() });
+
+    // 1. Cost-missing today -> buffered (PENDING), no orders row.
+    const first = await intakeOrder({ storeId: store.id, organizationId: org.id, mapped });
+    expect(first).toEqual({ kind: 'buffered' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(1);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+
+    // 2. The cost is attached -> the order is now calculable.
+    await attachCost(org.id, store.id, BARCODE);
+
+    // 3. The same order re-delivers (a status webhook or the periodic ORDERS sync)
+    //    and is now calculable -> it persists AND its buffer row is graduated away in
+    //    the same transaction. Before the fix the buffer row lingered until the
+    //    promote tick / midnight flush, so the order double-counted on Live Performance.
+    const second = await intakeOrder({ storeId: store.id, organizationId: org.id, mapped });
+    expect(second).toEqual({ kind: 'persisted', reason: 'calculable' });
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(1);
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it('does not decrement stock twice when a buffered order becomes calculable', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false); // cost-missing -> buffer
+    await setStock(store.id, BARCODE, 40);
+    const mapped = buildMapped({ platformOrderId: 'graduate-stock', orderDate: new Date() });
+
+    // 1. Buffered intake drops stock once: 40 -> 39.
+    await intakeOrder({ storeId: store.id, organizationId: org.id, mapped });
+    expect(
+      (
+        await prisma.productVariant.findFirstOrThrow({
+          where: { storeId: store.id, barcode: BARCODE },
+        })
+      ).quantity,
+    ).toBe(39);
+
+    // 2. Cost attached -> the order becomes calculable.
+    await attachCost(org.id, store.id, BARCODE);
+
+    // 3. The re-delivery graduates the buffer row into `orders`. The graduation
+    //    carries promotedFromBuffer, so it must NOT decrement a second time -- the
+    //    intake already dropped the unit. Stock stays at the single 40 -> 39 drop
+    //    (before the fix the calculable branch decremented again -> 38).
+    const outcome = await intakeOrder({ storeId: store.id, organizationId: org.id, mapped });
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'calculable' });
+    const variant = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: BARCODE },
+    });
+    expect(variant.quantity).toBe(39);
+    expect(
+      (await prisma.product.findFirstOrThrow({ where: { id: variant.productId } })).totalStock,
+    ).toBe(39);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(1);
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it('removes a coexisting buffer entry when a past-day order is persisted', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false);
+    const past = new Date(Date.now() - PAST_DAY_MS);
+
+    // A buffer row already exists for this order (it was buffered when still same-day;
+    // the day-end flush had not run yet when it re-delivered as past-day).
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'graduate-past',
+      orderDate: getBusinessDateAnchor(past),
+      status: 'PENDING',
+    });
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'graduate-past', orderDate: past }),
+    });
+
+    // Past-day without a timely cost -> persisted + permanently excluded, and the
+    // stale buffer row is graduated away in the same transaction (never left to coexist).
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'late_uncosted_arrival' });
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(1);
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
   });
 });

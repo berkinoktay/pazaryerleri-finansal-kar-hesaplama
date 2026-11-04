@@ -1,3 +1,5 @@
+import type { MappedOrder } from '@pazarsync/marketplace';
+import { intakeOrder } from '@pazarsync/order-sync';
 import { getBusinessDateAnchor, getBusinessDayRange } from '@pazarsync/utils';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -7,6 +9,7 @@ import { bearer, createAuthenticatedTestUser } from '../../../helpers/auth';
 import { ensureDbReachable, prisma, truncateAll } from '../../../helpers/db';
 import {
   createBufferEntry,
+  createCostProfile,
   createMembership,
   createOrder,
   createOrderItem,
@@ -26,6 +29,96 @@ function todayAt(hours: number): Date {
 function yesterdayAt(hours: number): Date {
   const range = getBusinessDayRange(new Date(Date.now() - ONE_DAY_MS));
   return new Date(range.start.getTime() + hours * 60 * 60 * 1000);
+}
+
+const GRADUATE_BARCODE = 'EAN13-KPIS-GRADUATE';
+
+// A single-line MappedOrder (real Date objects -- intakeOrder receives the in-memory
+// DTO) for driving the buffer -> cost-attach -> re-delivery flow end-to-end.
+function buildMapped(platformOrderId: string, orderDate: Date): MappedOrder {
+  return {
+    platformOrderId,
+    platformOrderNumber: `ord-${platformOrderId}`,
+    orderDate,
+    lastModifiedDate: orderDate,
+    status: 'PROCESSING',
+    dematerialized: false,
+    saleGross: '100.00',
+    saleVat: '15.25',
+    listGross: '100.00',
+    sellerDiscountGross: '0.00',
+    promotionDisplays: null,
+    agreedDeliveryDate: null,
+    actualDeliveryDate: null,
+    actualShipDate: null,
+    fastDelivery: false,
+    fastDeliveryType: null,
+    micro: false,
+    estimatedDeliveryStartDate: null,
+    estimatedDeliveryEndDate: null,
+    cargoProviderName: null,
+    cargoTrackingNumber: null,
+    cargoDeci: null,
+    usesSellerCargoAgreement: false,
+    platformCreatedBy: null,
+    originShipmentDate: null,
+    lines: [
+      {
+        barcode: GRADUATE_BARCODE,
+        quantity: 1,
+        platformLineId: null,
+        lineListGross: '100.00',
+        lineSaleGross: '100.00',
+        lineSellerDiscountGross: '0.00',
+        saleVatRate: '18',
+        commissionRate: '15',
+        commissionGross: '15.00',
+        refundedCommissionGross: '0.00',
+        commissionVatRate: '20',
+        categoryId: null,
+        commissionKnown: true,
+      },
+    ],
+  };
+}
+
+// A cost-MISSING variant (resolves by barcode, no cost profile attached yet) so the
+// first intake routes to the buffer.
+async function seedCostMissingVariant(
+  orgId: string,
+  storeId: string,
+  barcode: string,
+): Promise<void> {
+  const product = await prisma.product.create({
+    data: {
+      organizationId: orgId,
+      storeId,
+      platformContentId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      productMainId: `pm-${barcode}`,
+      title: 'KPIs Graduate Product',
+    },
+  });
+  await prisma.productVariant.create({
+    data: {
+      organizationId: orgId,
+      storeId,
+      productId: product.id,
+      platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      barcode,
+      stockCode: `sk-${barcode}`,
+      salePrice: '100',
+      listPrice: '120',
+    },
+  });
+}
+
+// Attach a cost profile to the variant, flipping it from cost-missing to calculable.
+async function attachCost(orgId: string, storeId: string, barcode: string): Promise<void> {
+  const variant = await prisma.productVariant.findFirstOrThrow({ where: { storeId, barcode } });
+  const profile = await createCostProfile(orgId, { storeId, amountGross: '40.00' });
+  await prisma.productVariantCostProfile.create({
+    data: { organizationId: orgId, productVariantId: variant.id, profileId: profile.id },
+  });
 }
 
 interface KpisBody {
@@ -371,5 +464,41 @@ describe('GET /v1/.../live-performance/kpis', () => {
     expect(body.profitCostRatioToday).toBe('0.00');
     expect(body.pendingRevenueToday).toBe('0.00');
     expect(body.pendingOrderCountToday).toBe(0);
+  });
+
+  it('counts an order once after a re-delivery makes it calculable', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+    await seedCostMissingVariant(org.id, store.id, GRADUATE_BARCODE);
+
+    // Noon UTC (15:00 Istanbul) so the order falls unambiguously inside today's window.
+    const todayInstant = new Date(getBusinessDayRange().start.getTime() + 12 * 60 * 60 * 1000);
+    const mapped = buildMapped('kpis-graduate', todayInstant);
+
+    // 1. Cost-missing today -> buffered.
+    const first = await intakeOrder({ storeId: store.id, organizationId: org.id, mapped });
+    expect(first).toEqual({ kind: 'buffered' });
+
+    // 2. Cost attached -> calculable. 3. The same order re-delivers -> it persists and
+    //    its buffer row is graduated away. Before the fix the order sat in BOTH `orders`
+    //    and the buffer, so getKpis (which unions the two for today) counted its 100.00
+    //    revenue, its order and its unit twice (revenue 200.00, count 2, units 2).
+    await attachCost(org.id, store.id, GRADUATE_BARCODE);
+    const second = await intakeOrder({ storeId: store.id, organizationId: org.id, mapped });
+    expect(second).toEqual({ kind: 'persisted', reason: 'calculable' });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/kpis`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as KpisBody;
+    // Counted exactly once: the graduated order in `orders`, no lingering buffer row.
+    expect(body.revenueToday).toBe('100.00');
+    expect(body.orderCountToday).toBe(1);
+    expect(body.unitsSoldToday).toBe(1);
   });
 });

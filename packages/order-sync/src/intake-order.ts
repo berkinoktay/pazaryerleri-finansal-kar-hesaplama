@@ -8,15 +8,27 @@
  *   - dematerialized (UnPacked)    → DELETE order + buffer rows (split ghost — children re-carry content)
  *   - status CANCELLED             → purge buffer rows + upsert (audit row; aggregates exclude by status)
  *   - variant_not_found            → cost_missing route (order IS written; line keeps barcode, null variant FK; resolution in PR-2)
- *   - calculable + today           -> upsertOrderWithSnapshot (persist + queue recompute)
- *   - past-day + timely cost       -> upsertOrderWithSnapshot (persisted normally; the queued recompute profits it)
- *   - past-day + cost missed day   -> upsertOrderWithSnapshot with profitExclusion LATE_UNCOSTED_ARRIVAL
- *   - cost_missing + today + in orders → upsertOrderWithSnapshot (idempotent, no buffer)
+ *   - calculable + today           -> persist + graduate any buffer row (queue recompute)
+ *   - past-day + timely cost       -> persist + graduate any buffer row (the queued recompute profits it)
+ *   - past-day + cost missed day   -> persist + graduate any buffer row with profitExclusion LATE_UNCOSTED_ARRIVAL
+ *   - cost_missing + today + in orders -> persist + graduate any buffer row (idempotent)
  *   - cost_missing + today + new   → live_performance_buffer (PENDING, same-day cost-flip window)
  *
  * The "already in orders" guard prevents a phantom buffer row for an order that
  * was costed earlier then had its cost profile archived (would otherwise live in
  * BOTH orders and buffer → double-count on the Live Performance page).
+ *
+ * Buffer graduation on persist (Faz 4A, Gorev 8): a cost-missing order parks in the
+ * buffer and drops its stock there; once its cost is attached (cost-attach service) or
+ * its variant resolves (variant-resolution tick) it becomes calculable, and the NEXT
+ * delivery -- a status webhook or the periodic ORDERS sync -- reaches a persist branch
+ * below. Each such branch persists through `persistWithBufferGraduation`, which deletes
+ * any buffer row for the same (organizationId, storeId, platformOrderId) in the SAME
+ * transaction as the order write. Without this the order would sit in BOTH `orders` and
+ * the buffer until the promote tick / midnight flush, and getKpis -- which unions orders
+ * with today's buffer -- would count its revenue, units and order twice. A graduated
+ * write is flagged promotedFromBuffer so the buffer's intake decrement is not repeated
+ * (exactly what the buffer-promote worker does).
  *
  * Cost-window rule (Berkin 2026-11-03): an order enters net profit only if every
  * non-cancelled item had a cost entered BEFORE the order's business day ended
@@ -41,7 +53,7 @@ import { getBusinessDate, getBusinessDateAnchor } from '@pazarsync/utils';
 
 import { hadCostWithinOrderDay } from './cost-window';
 import { decrementVariantStock, incrementVariantStock, isOrderOnBusinessToday } from './stock';
-import { upsertOrderWithSnapshot } from './upsert-order';
+import { upsertOrderWithSnapshot, type UpsertOrderOpts } from './upsert-order';
 
 export type OrderIntakeOutcome =
   | {
@@ -91,8 +103,9 @@ export async function intakeOrder(args: {
     // Invariant: an order row and a buffer row do NOT coexist for one
     // (org, store, platformOrderId). The buffered path only inserts a buffer row
     // when no order exists (the routing persists calculable / already-in-orders /
-    // past-day BEFORE reaching the buffer branch), and buffer promotion deletes
-    // the buffer row atomically with the order write. So exactly one source owns
+    // past-day BEFORE reaching the buffer branch), and every persist branch (plus
+    // the buffer-promote worker) deletes any coexisting buffer row atomically with
+    // the order write (Faz 4A, Gorev 8). So exactly one source owns
     // the single decrement; re-adding from just that source both undoes the
     // decrement and guarantees no variant is double-credited even in a rare
     // cross-path race — preferring the order row when present.
@@ -212,18 +225,18 @@ export async function intakeOrder(args: {
         })),
       }));
     if (hasTimelyCost) {
-      await upsertOrderWithSnapshot(storeId, organizationId, mapped);
+      await persistWithBufferGraduation(storeId, organizationId, mapped);
       return { kind: 'persisted', reason: 'calculable' };
     }
-    await upsertOrderWithSnapshot(storeId, organizationId, mapped, undefined, {
-      profitExclusion: { reason: 'LATE_UNCOSTED_ARRIVAL' },
+    await persistWithBufferGraduation(storeId, organizationId, mapped, {
+      reason: 'LATE_UNCOSTED_ARRIVAL',
     });
     return { kind: 'persisted', reason: 'late_uncosted_arrival' };
   }
 
   // Today's order from here. Fully costable -> persist with profit.
   if (calc.kind === 'calculable') {
-    await upsertOrderWithSnapshot(storeId, organizationId, mapped);
+    await persistWithBufferGraduation(storeId, organizationId, mapped);
     return { kind: 'persisted', reason: 'calculable' };
   }
 
@@ -236,7 +249,7 @@ export async function intakeOrder(args: {
     select: { id: true },
   });
   if (existing !== null) {
-    await upsertOrderWithSnapshot(storeId, organizationId, mapped);
+    await persistWithBufferGraduation(storeId, organizationId, mapped);
     return { kind: 'persisted', reason: 'already_in_orders' };
   }
 
@@ -282,6 +295,45 @@ export async function intakeOrder(args: {
     }
     throw err;
   }
+}
+
+/**
+ * Persist an order that may still carry a live-performance buffer row for the same
+ * (organizationId, storeId, platformOrderId), graduating it atomically (Faz 4A, Gorev 8).
+ *
+ * The invariant is that an order is NEVER in both `orders` and `live_performance_buffer`:
+ * the Live Performance page unions the two for today (getKpis), so a coexisting order has
+ * its revenue, order count and units counted twice. A cost-missing order parks in the
+ * buffer; when its cost is attached or its variant resolves it becomes calculable, and a
+ * re-delivery then reaches one of intakeOrder's persist branches. This deletes the buffer
+ * row in the SAME transaction as the order write -- exactly like the buffer-promote worker
+ * -- so the two never coexist, instead of leaving the row for the promote tick / midnight
+ * flush.
+ *
+ * When a buffer row existed, its optimistic intake already decremented the matched
+ * variants' stock, so the order write is flagged promotedFromBuffer to skip a second
+ * decrement (the same gate the promote path uses). With no buffer row (the common direct
+ * persist) the flag is false and the write decrements once as before.
+ *
+ * Tenant-scoped: the buffer delete filters organizationId + storeId (CLAUDE.md -- every
+ * order/buffer read or write pins the tenant). The optional profitExclusion is forwarded
+ * unchanged so the past-day late route keeps stamping LATE_UNCOSTED_ARRIVAL.
+ */
+async function persistWithBufferGraduation(
+  storeId: string,
+  organizationId: string,
+  mapped: MappedOrder,
+  profitExclusion?: UpsertOrderOpts['profitExclusion'],
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const removed = await tx.livePerformanceBuffer.deleteMany({
+      where: { organizationId, storeId, platformOrderId: mapped.platformOrderId },
+    });
+    await upsertOrderWithSnapshot(storeId, organizationId, mapped, tx, {
+      promotedFromBuffer: removed.count > 0,
+      profitExclusion,
+    });
+  });
 }
 
 /**
