@@ -172,7 +172,7 @@ export function computeProfitStatement(input: ProfitStatementInput): ProfitState
   return {
     view: input.view,
     status,
-    reconciliationStatus: deriveReconciliationStatus(selectedLines),
+    reconciliationStatus: deriveReconciliationStatus(selectedLines, input.issues),
     engineVersion: PROFIT_ENGINE_VERSION,
     selectedLines,
     rows,

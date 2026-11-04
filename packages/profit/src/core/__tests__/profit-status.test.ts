@@ -89,30 +89,81 @@ describe('deriveReconciliationStatus', () => {
   it('reports NOT_SETTLED without a settlement-sourced actual line', () => {
     // A seller-entered ACTUAL cost line proves nothing about the marketplace.
     expect(
-      deriveReconciliationStatus([
-        makeLine({ type: ProfitLineType.SALE, gross: '120' }),
-        sellerCost,
-      ]),
+      deriveReconciliationStatus(
+        [makeLine({ type: ProfitLineType.SALE, gross: '120' }), sellerCost],
+        [],
+      ),
     ).toBe(ReconciliationStatus.NOT_SETTLED);
   });
   it('reports PARTIALLY_SETTLED while a settlement-required line is still an estimate', () => {
     expect(
-      deriveReconciliationStatus([
-        actual(ProfitLineType.COMMISSION),
-        makeLine({ type: ProfitLineType.SHIPPING, gross: '6' }),
-      ]),
+      deriveReconciliationStatus(
+        [
+          actual(ProfitLineType.COMMISSION),
+          makeLine({ type: ProfitLineType.SHIPPING, gross: '6' }),
+        ],
+        [],
+      ),
     ).toBe(ReconciliationStatus.PARTIALLY_SETTLED);
   });
   it('reports FULLY_SETTLED when every settlement-required line is actual', () => {
     expect(
-      deriveReconciliationStatus([
-        actual(ProfitLineType.SALE),
-        actual(ProfitLineType.COMMISSION),
-        actual(ProfitLineType.SHIPPING, { source: ProfitLineSource.CARGO_INVOICE }),
-        actual(ProfitLineType.SERVICE_FEE, { level: ProfitLineLevel.PARCEL, orderItemId: null }),
-        actual(ProfitLineType.STOPPAGE),
-        sellerCost,
-      ]),
+      deriveReconciliationStatus(
+        [
+          actual(ProfitLineType.SALE),
+          actual(ProfitLineType.COMMISSION),
+          actual(ProfitLineType.SHIPPING, { source: ProfitLineSource.CARGO_INVOICE }),
+          actual(ProfitLineType.SERVICE_FEE, { level: ProfitLineLevel.PARCEL, orderItemId: null }),
+          actual(ProfitLineType.STOPPAGE),
+          sellerCost,
+        ],
+        [],
+      ),
+    ).toBe(ReconciliationStatus.FULLY_SETTLED);
+  });
+  it('reports PARTIALLY_SETTLED while a settlement gap issue stands, even with every line actual', () => {
+    // A settlement-gap issue marks a required slot the engine left without any line.
+    // Even when every present line is a settlement actual, the gap holds the status
+    // down so a missing cargo invoice does not read as fully reconciled.
+    expect(
+      deriveReconciliationStatus(
+        [
+          actual(ProfitLineType.SALE),
+          actual(ProfitLineType.COMMISSION),
+          actual(ProfitLineType.SHIPPING, { source: ProfitLineSource.CARGO_INVOICE }),
+          actual(ProfitLineType.SERVICE_FEE, { level: ProfitLineLevel.PARCEL, orderItemId: null }),
+          actual(ProfitLineType.STOPPAGE),
+          sellerCost,
+        ],
+        [issue(ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE)],
+      ),
+    ).toBe(ReconciliationStatus.PARTIALLY_SETTLED);
+  });
+  it('keeps NOT_SETTLED for a gap issue without any settlement actual', () => {
+    // No settlement-sourced actual means nothing has reconciled yet; a standing gap
+    // issue cannot lift the status above NOT_SETTLED on its own.
+    expect(
+      deriveReconciliationStatus(
+        [makeLine({ type: ProfitLineType.SALE, gross: '120' }), sellerCost],
+        [issue(ProfitIssueCode.MISSING_COMMISSION_RATE)],
+      ),
+    ).toBe(ReconciliationStatus.NOT_SETTLED);
+  });
+  it('ignores issues that are not settlement gaps', () => {
+    // MISSING_COST is blocking but not a settlement gap, so with every settlement-required
+    // line actual the statement still reconciles fully.
+    expect(
+      deriveReconciliationStatus(
+        [
+          actual(ProfitLineType.SALE),
+          actual(ProfitLineType.COMMISSION),
+          actual(ProfitLineType.SHIPPING, { source: ProfitLineSource.CARGO_INVOICE }),
+          actual(ProfitLineType.SERVICE_FEE, { level: ProfitLineLevel.PARCEL, orderItemId: null }),
+          actual(ProfitLineType.STOPPAGE),
+          sellerCost,
+        ],
+        [issue(ProfitIssueCode.MISSING_COST)],
+      ),
     ).toBe(ReconciliationStatus.FULLY_SETTLED);
   });
   it('reports progress for an excluded, cancelled or not computable parcel', () => {
@@ -127,6 +178,6 @@ describe('deriveReconciliationStatus', () => {
     expect(status(lines, [issue(ProfitIssueCode.MISSING_COMMISSION_RATE)])).toBe(
       ProfitStatus.NOT_COMPUTABLE,
     );
-    expect(deriveReconciliationStatus(lines)).toBe(ReconciliationStatus.PARTIALLY_SETTLED);
+    expect(deriveReconciliationStatus(lines, [])).toBe(ReconciliationStatus.PARTIALLY_SETTLED);
   });
 });

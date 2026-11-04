@@ -6,7 +6,7 @@ import {
 } from '@pazarsync/db/enums';
 
 import { getLineSpec } from './catalog/profit-line-catalog';
-import { isBlockingIssue, type ProfitIssue } from './profit-issue';
+import { isBlockingIssue, isSettlementGapIssue, type ProfitIssue } from './profit-issue';
 import { type ProfitLine } from './profit-line';
 
 export interface DeriveProfitStatusParams {
@@ -47,21 +47,29 @@ const PROFIT_STATUS_BY_RECONCILIATION: Record<ReconciliationStatus, ProfitStatus
 
 /**
  * Derives how far a set of selected lines has reconciled with the marketplace. It
- * looks only at the lines, ignoring exclusion, cancellation and blocking issues:
+ * looks at the lines and the standing issues, ignoring exclusion and cancellation:
  * 1. no settlement-sourced ACTUAL line -> NOT_SETTLED
- * 2. a settlement-required line still pending -> PARTIALLY_SETTLED
+ * 2. a settlement-required line still pending, OR a standing settlement-gap issue
+ *    (a required slot the engine left without any line) -> PARTIALLY_SETTLED
  * 3. otherwise -> FULLY_SETTLED
+ *
+ * The settlement-gap issues matter because the slot they stand for has no line at
+ * all, so `isPendingRequired` alone cannot see it: without them a statement whose
+ * cargo invoice never arrived would read FULLY_SETTLED once the sale and commission
+ * records land. A gap on its own never lifts the status: rule 1 still wins when no
+ * settlement actual exists.
  *
  * The ESTIMATE view never selects settlement actuals, so it always comes out
  * NOT_SETTLED without any special-casing.
  */
 export function deriveReconciliationStatus(
   selectedLines: readonly ProfitLine[],
+  issues: readonly ProfitIssue[],
 ): ReconciliationStatus {
   if (!selectedLines.some(isSettlementActual)) {
     return ReconciliationStatus.NOT_SETTLED;
   }
-  if (selectedLines.some(isPendingRequired)) {
+  if (selectedLines.some(isPendingRequired) || issues.some(isSettlementGapIssue)) {
     return ReconciliationStatus.PARTIALLY_SETTLED;
   }
   return ReconciliationStatus.FULLY_SETTLED;
@@ -87,5 +95,9 @@ export function deriveProfitStatus(params: DeriveProfitStatusParams): ProfitStat
   if (params.issues.some(isBlockingIssue)) {
     return ProfitStatus.NOT_COMPUTABLE;
   }
-  return PROFIT_STATUS_BY_RECONCILIATION[deriveReconciliationStatus(params.selectedLines)];
+  // Passing the issues here does not change the outcome: every settlement-gap issue is
+  // also blocking, so rule 3 above has already returned before this point can read one.
+  return PROFIT_STATUS_BY_RECONCILIATION[
+    deriveReconciliationStatus(params.selectedLines, params.issues)
+  ];
 }

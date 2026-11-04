@@ -97,7 +97,12 @@ export {
   allocateParcelLine,
   type ProfitLineAllocation,
 } from './core/allocation/allocate-parcel-line';
-export { isBlockingIssue, PROFIT_ISSUE_CATALOG, type ProfitIssue } from './core/profit-issue';
+export {
+  isBlockingIssue,
+  isSettlementGapIssue,
+  PROFIT_ISSUE_CATALOG,
+  type ProfitIssue,
+} from './core/profit-issue';
 export {
   deriveProfitStatus,
   deriveReconciliationStatus,
