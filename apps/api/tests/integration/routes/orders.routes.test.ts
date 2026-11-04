@@ -1160,6 +1160,53 @@ describe('Order routes', () => {
       expect(await prisma.profitLine.count({ where: { orderId } })).toBe(0);
     });
 
+    it('keeps the list sale on the detail while the statement is not stored yet', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const orderId = await seedCalculableTrendyolOrder(org.id, store.id);
+
+      // The order carries no stored best-known statement, so both the list row and the
+      // detail top-level sale must read the order's own recorded sale. Give that column a
+      // value distinct from the 240 the engine computes from the single line, so the
+      // parity check also proves the detail no longer surfaces the computed statement's
+      // sale -- exactly the divergence an accepted return produces.
+      await prisma.order.update({ where: { id: orderId }, data: { saleGross: '180.00' } });
+
+      const listRes = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
+        headers: { Authorization: bearer(user.accessToken) },
+      });
+      expect(listRes.status).toBe(200);
+      const listBody = (await listRes.json()) as {
+        data: { id: string; saleGross: string | null }[];
+      };
+      const listRow = listBody.data.find((o) => o.id === orderId);
+      expect(listRow?.saleGross).toBe('180');
+
+      const detailRes = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/${orderId}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(detailRes.status).toBe(200);
+      const detailBody = (await detailRes.json()) as {
+        saleGross: string | null;
+        profitBreakdown: { saleGross: string } | null;
+      };
+
+      // Top-level sale matches the list row (the order's own sale), not the computed
+      // statement's sale.
+      expect(detailBody.saleGross).toBe(listRow?.saleGross);
+      expect(detailBody.saleGross).toBe('180');
+      // The breakdown is still computed in the request and keeps the engine's own sale
+      // (240 from the single line), so only the top-level sale took the list value.
+      expect(detailBody.profitBreakdown).not.toBeNull();
+      expect(detailBody.profitBreakdown?.saleGross).toBe('240.00');
+
+      // The request wrote nothing: no statement rows exist afterwards.
+      expect(await prisma.orderProfitStatement.count({ where: { orderId } })).toBe(0);
+    });
+
     it('returns no breakdown for a platform the engine cannot compute', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();

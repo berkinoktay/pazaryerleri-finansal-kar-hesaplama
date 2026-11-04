@@ -218,9 +218,10 @@ export async function intakeOrder(args: {
   // (its own business day) has already closed, so it enters profit ONLY when it is
   // calculable now AND every non-cancelled item had its cost entered before that day
   // ended. Otherwise -- no cost at all, or a cost entered only after the day (decision
-  // 2) -- it is persisted but PERMANENTLY excluded with LATE_UNCOSTED_ARRIVAL. The
-  // order is never cancelled here (the CANCELLED branch returned above), so every line
-  // is non-cancelled.
+  // 2) -- it is persisted but PERMANENTLY excluded; the exclusion reason is derived in
+  // persistWithBufferGraduation (a graduated buffer row -> COST_DEADLINE_MISSED,
+  // otherwise LATE_UNCOSTED_ARRIVAL). The order is never cancelled here (the CANCELLED
+  // branch returned above), so every line is non-cancelled.
   if (getBusinessDate(mapped.orderDate) < getBusinessDate()) {
     const hasTimelyCost =
       calc.kind === 'calculable' &&

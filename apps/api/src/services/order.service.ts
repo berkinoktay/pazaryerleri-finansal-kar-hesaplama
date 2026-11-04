@@ -193,16 +193,16 @@ function buildOrderListWhere(
 }
 
 /**
- * Include shape for an orders-list row: the item count and the org-scoped
+ * Include shape for an orders-list row: the item count and the store-scoped
  * profit statements (estimate + best-known) the list fields are derived from.
- * The profitStatements where carries organizationId so a statement filed under
- * another org for the same order id is never read (tenant isolation).
+ * The profitStatements where carries organizationId + storeId so a statement filed
+ * under another org or store for the same order id is never read (tenant isolation).
  */
-function orderListInclude(orgId: string) {
+function orderListInclude(orgId: string, storeId: string) {
   return {
     _count: { select: { items: true } },
     profitStatements: {
-      where: { organizationId: orgId },
+      where: { organizationId: orgId, storeId },
       select: STATEMENT_LIST_SELECT,
     },
   } satisfies Prisma.OrderInclude;
@@ -326,7 +326,7 @@ async function loadOrdersByMargin(
 
   const rows = await prisma.order.findMany({
     where: { id: { in: ids }, organizationId: orgId, storeId },
-    include: orderListInclude(orgId),
+    include: orderListInclude(orgId, storeId),
   });
 
   const byId = new Map(rows.map((row) => [row.id, row]));
@@ -353,7 +353,7 @@ function fetchOrderListRows(
         orderBy: [{ orderDate: 'desc' }, { id: 'desc' }],
         skip,
         take,
-        include: orderListInclude(orgId),
+        include: orderListInclude(orgId, storeId),
       });
     case 'marginPct':
       return loadOrdersByMargin(orgId, storeId, where, 'asc', skip, take);
@@ -653,7 +653,7 @@ async function loadOrderProfitDetail(
     return emptyOrderProfitDetail(order);
   }
 
-  const fields = orderProfitFields({
+  const computedFields = orderProfitFields({
     pair: {
       estimate: statementListRowFromStatement(computed.estimate),
       bestKnown: statementListRowFromStatement(computed.bestKnown),
@@ -661,6 +661,17 @@ async function loadOrderProfitDetail(
     orderStatus: order.status,
     orderSaleGross: order.saleGross,
   });
+  // Sale parity: the top-level sale must read the same value the orders list row does.
+  // The list has no stored best-known statement for this order yet, so it shows the
+  // order's own sale (0 for a cancelled order) -- never the in-request computed
+  // statement's sale, which can differ (e.g. after an accepted return) and belongs only
+  // to the breakdown below. Derive it exactly as the list does: orderProfitFields over an
+  // empty statement pair.
+  const listSaleGross = orderProfitFields({
+    pair: { estimate: null, bestKnown: null },
+    orderStatus: order.status,
+    orderSaleGross: order.saleGross,
+  }).saleGross;
   const profitBreakdown = buildStatementBreakdown({
     totals: statementTotalsFromStatement(computed.bestKnown),
     selectedLines: computed.bestKnown.selectedLines,
@@ -668,7 +679,7 @@ async function loadOrderProfitDetail(
     sellerDiscountGross,
   });
   return {
-    fields,
+    fields: { ...computedFields, saleGross: listSaleGross },
     profitBreakdown,
     lineContext: {
       bestKnownLines: computed.bestKnown.selectedLines,

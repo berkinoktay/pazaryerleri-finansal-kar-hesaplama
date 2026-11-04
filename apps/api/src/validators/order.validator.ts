@@ -54,11 +54,10 @@ const PlatformSchema = z.enum(Platform).openapi({
 /**
  * Sort keys for the orders list. The default (`-orderDate`) preserves the
  * historical fixed ordering (newest first). `marginPct` / `-marginPct` order by
- * `Order.estimatedSaleMarginPct` — the only user-sortable column on the table.
- * Margin is `coalesce(settled, estimated)` on the wire, but sorting by a single
- * representative column (the write-once estimate) keeps the ORDER BY stable and
- * index-friendly; the settled value is a small per-order delta, so the estimate
- * is a faithful ordering proxy.
+ * the best-known profit statement's sale margin -- the only user-sortable column on
+ * the table. Orders that carry a best-known statement sort by that statement's margin
+ * (ascending / descending); orders without one sort last in both directions, with the
+ * order id as the tiebreaker.
  */
 export const ORDER_LIST_SORTS = ['-orderDate', 'marginPct', '-marginPct'] as const;
 export type OrderListSort = (typeof ORDER_LIST_SORTS)[number];
@@ -177,10 +176,9 @@ export const OrderListItemSchema = z
           'the order; null before any settlement is applied.',
         example: '75.10',
       }),
-    // Marj backend'de hesaplanıp persist edilir (estimatedSaleMarginPct /
-    // settledSaleMarginPct). Wire'a consumed değer servis edilir: settled ?? estimated
-    // (settled varsa hakediş gerçeği, yoksa T+0 tahmini). Frontend SADECE render eder
-    // (% glyph'i salt gösterim) — türetmez. null: marj henüz hesaplanmadı / payda 0.
+    // Margin is computed and persisted on the best-known profit statement; the wire serves
+    // that value. The frontend only renders it (the % glyph is display-only) -- it never
+    // derives it. null: no statement yet, or the sale gross denominator is 0.
     saleMarginPct: z
       .string()
       .nullable()
@@ -190,8 +188,9 @@ export const OrderListItemSchema = z
           'gross * 100. Null until a statement exists or when the sale gross is 0.',
         example: '15.50',
       }),
-    // ROI = kâr / Σ maliyet brüt × 100 (consumed: settled ?? estimated). Frontend
-    // SADECE render eder (% glyph'i salt gösterim) — türetmez. null: maliyet brüt 0.
+    // ROI = net profit / total cost gross * 100, read from the best-known profit statement.
+    // The frontend only renders it (the % glyph is display-only) -- it never derives it.
+    // null: the total cost gross denominator is 0 (or no statement yet).
     costMarkupPct: z
       .string()
       .nullable()
@@ -483,8 +482,9 @@ const OrderStoreSummarySchema = z
 // ─── Kâr dökümü (backend-hesaplı, frontend türetmez) ──────────────────────
 // Berkin'in otoritatif formülü: Satış − Maliyet − Komisyon − Kargo − PSF −
 // Stopaj − Net KDV = Kâr. Brüt (KDV-dahil) terimler + Net KDV; tüm değer Decimal
-// string. netProfit/netVat persist'ten (computeProfit), brüt toplamlar
-// buildProfitBreakdown'dan. profit-excluded / maliyet-eksik siparişte null.
+// string. netProfit and netVat are read from the best-known profit statement; the gross
+// group totals come from buildStatementBreakdown. Null for a profit-excluded or
+// cost-missing order.
 const ProfitBreakdownSchema = z
   .object({
     listGross: z
@@ -535,8 +535,9 @@ const ProfitBreakdownSchema = z
       description: 'Net KDV = Satış KDV − Maliyet KDV − Komisyon KDV − Kargo KDV − PSF KDV.',
     }),
     netProfit: z.string(),
-    // Marjlar persist'ten okunur (estimatedSaleMarginPct/estimatedCostMarkupPct);
-    // null: payda 0 (saleGross=0 ya da Σ costGross=0). Frontend türetmez, render eder.
+    // Margins come from the best-known profit statement (its sale margin / cost markup);
+    // null when the denominator is 0 (sale gross 0, or total cost gross 0). The frontend
+    // only renders them -- it never derives them.
     saleMarginPct: z
       .string()
       .nullable()
