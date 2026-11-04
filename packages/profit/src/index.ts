@@ -59,7 +59,7 @@ export {
 } from './unit-pricing';
 
 // Profit line core (rebuild, phase 1) -- docs/plans/2026-10-29-profit-engine-design.md
-export { roundMoney } from './money';
+export { roundMoney, roundPercent } from './money';
 export {
   createProfitLine,
   InvalidProfitLineError,

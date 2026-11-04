@@ -1,7 +1,7 @@
 import type { Prisma } from '@pazarsync/db';
 import { prisma } from '@pazarsync/db';
 import { OrderStatus, ProfitStatementView, ReconciliationStatus } from '@pazarsync/db/enums';
-import { buildProfitBreakdown } from '@pazarsync/profit';
+import { buildProfitBreakdown, roundPercent } from '@pazarsync/profit';
 import { Decimal } from 'decimal.js';
 
 import { resolveVendorMissingBarcodes } from '../lib/catalog-barcode-miss-lookup';
@@ -68,30 +68,39 @@ function reconciliationStatusCondition(
   orgId: string,
   reconciliationStatus: ReconciliationStatus,
 ): Prisma.OrderWhereInput {
-  if (reconciliationStatus === ReconciliationStatus.NOT_SETTLED) {
-    return {
-      NOT: {
+  switch (reconciliationStatus) {
+    case ReconciliationStatus.NOT_SETTLED:
+      // The complement: orders whose best-known statement has not started settling,
+      // including orders with no best-known statement at all.
+      return {
+        NOT: {
+          profitStatements: {
+            some: {
+              view: ProfitStatementView.BEST_KNOWN,
+              organizationId: orgId,
+              reconciliationStatus: {
+                in: [ReconciliationStatus.PARTIALLY_SETTLED, ReconciliationStatus.FULLY_SETTLED],
+              },
+            },
+          },
+        },
+      };
+    case ReconciliationStatus.PARTIALLY_SETTLED:
+    case ReconciliationStatus.FULLY_SETTLED:
+      return {
         profitStatements: {
           some: {
             view: ProfitStatementView.BEST_KNOWN,
             organizationId: orgId,
-            reconciliationStatus: {
-              in: [ReconciliationStatus.PARTIALLY_SETTLED, ReconciliationStatus.FULLY_SETTLED],
-            },
+            reconciliationStatus,
           },
         },
-      },
-    };
+      };
+    default: {
+      const _exhaustive: never = reconciliationStatus;
+      throw new Error(`Unhandled reconciliation status: ${_exhaustive}`);
+    }
   }
-  return {
-    profitStatements: {
-      some: {
-        view: ProfitStatementView.BEST_KNOWN,
-        organizationId: orgId,
-        reconciliationStatus,
-      },
-    },
-  };
 }
 
 function buildOrderListWhere(
@@ -130,7 +139,18 @@ function buildOrderListWhere(
   // not a statement — cancelled / not-computable / statement-less orders stay
   // "calculated" so long as they are not stamped out of the profit universe.
   if (filters.costStatus !== undefined) {
-    where.profitExcludedAt = filters.costStatus === 'calculated' ? null : { not: null };
+    switch (filters.costStatus) {
+      case 'calculated':
+        where.profitExcludedAt = null;
+        break;
+      case 'excluded':
+        where.profitExcludedAt = { not: null };
+        break;
+      default: {
+        const _exhaustive: never = filters.costStatus;
+        throw new Error(`Unhandled cost status: ${_exhaustive}`);
+      }
+    }
   }
 
   // "Sadece zararlı": the best-known statement's net profit < 0 (decision 1).
@@ -255,7 +275,9 @@ async function listOrderIdsByMargin(
       where: {
         ...where,
         profitStatements: {
-          none: { view: ProfitStatementView.BEST_KNOWN, organizationId: orgId },
+          // Same predicate as segment 1's aggregate (view + organizationId + storeId),
+          // so the two segments partition order.count(where) without overlap or gap.
+          none: { view: ProfitStatementView.BEST_KNOWN, organizationId: orgId, storeId },
         },
       },
       orderBy: [{ id: 'desc' }],
@@ -385,6 +407,11 @@ export async function getOrdersSummary(
   // Revenue fallback: orders in scope that are not cancelled and have no
   // best-known statement contribute their own sale_gross (decision 4). The
   // extra conditions go into AND so the status/costStatus filters still apply.
+  // The writer persists an order's ESTIMATE and BEST_KNOWN statements together in
+  // one transaction, so an order with an estimate but no best-known statement can
+  // never exist: "no best-known statement" means "no statement at all", so this
+  // fallback and the best-known aggregate partition the orders exactly once. The
+  // none filter carries storeId too, matching segment 1's aggregate predicate.
   const fallbackRevenueWhere: Prisma.OrderWhereInput = {
     ...where,
     AND: [
@@ -392,7 +419,7 @@ export async function getOrdersSummary(
       { status: { not: OrderStatus.CANCELLED } },
       {
         profitStatements: {
-          none: { view: ProfitStatementView.BEST_KNOWN, organizationId: orgId },
+          none: { view: ProfitStatementView.BEST_KNOWN, organizationId: orgId, storeId },
         },
       },
     ],
@@ -421,7 +448,10 @@ export async function getOrdersSummary(
   return {
     totalRevenueGross: bestKnownRevenue.add(fallback).toString(),
     netProfitGross: netProfit.toString(),
-    avgMarginPct: avgMargin === null ? null : avgMargin.toString(),
+    // Round the averaged margin to the stored column scale (4 decimals, half-up) so
+    // the aggregate reads the same scale as every per-statement margin the list shows.
+    avgMarginPct:
+      avgMargin === null ? null : roundPercent(new Decimal(avgMargin.toString())).toString(),
     lossOrderRate: { lossCount, totalCount, pct: pct.toString() },
   };
 }

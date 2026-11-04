@@ -125,6 +125,45 @@ describe('Order routes', () => {
       expect(ids).not.toContain(profitable.id);
     });
 
+    it('lossOnly ignores an excluded order with no net profit', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      const losing = await createOrder(org.id, store.id);
+      await createProfitStatement(losing.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        saleGross: '240.00',
+        netProfit: '-30.00',
+        saleMarginPct: '-12.50',
+      });
+      // Excluded order: the best-known net profit is null, so the lossOnly filter
+      // (best-known net < 0) must never match it, even though it carries no profit.
+      const excluded = await createOrder(org.id, store.id);
+      await prisma.order.update({
+        where: { id: excluded.id },
+        data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
+      });
+      await createProfitStatement(excluded.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'EXCLUDED',
+        saleGross: '240.00',
+        netProfit: null,
+        saleMarginPct: null,
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders?lossOnly=true`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { id: string }[] };
+      const ids = body.data.map((o) => o.id);
+      expect(ids).toContain(losing.id);
+      expect(ids).not.toContain(excluded.id);
+    });
+
     it('returns 403 when caller is not a member of the org', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
@@ -368,6 +407,81 @@ describe('Order routes', () => {
       );
       const partialBody = (await partialRes.json()) as { data: { id: string }[] };
       expect(partialBody.data.map((o) => o.id)).toEqual([partial.id]);
+    });
+
+    it('filters by reconciliationStatus FULLY_SETTLED', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      const fully = await createOrder(org.id, store.id);
+      await createProfitStatement(fully.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'SETTLED',
+        saleGross: '240.00',
+        netProfit: '50.00',
+        reconciliationStatus: 'FULLY_SETTLED',
+      });
+      const partial = await createOrder(org.id, store.id);
+      await createProfitStatement(partial.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        saleGross: '240.00',
+        netProfit: '55.00',
+        reconciliationStatus: 'PARTIALLY_SETTLED',
+      });
+      const notSettled = await createOrder(org.id, store.id);
+      await createProfitStatement(notSettled.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        saleGross: '240.00',
+        netProfit: '60.00',
+        reconciliationStatus: 'NOT_SETTLED',
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders?reconciliationStatus=FULLY_SETTLED`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { id: string }[] };
+      // Only the fully-settled best-known statement matches; partial and not-settled drop.
+      expect(body.data.map((o) => o.id)).toEqual([fully.id]);
+    });
+
+    it('breaks equal margins by order id across the segment boundary', async () => {
+      // Three orders share the same best-known margin, so segment 1 falls back to
+      // its order-id-descending tiebreaker; a fourth order has no statement and
+      // lands in segment 2 (also order id descending). perPage 2 forces the two
+      // segments to meet mid-page, proving the tiebreaker is stable across the
+      // boundary with no repeat or gap.
+      const org = await createOrganization();
+      const store = await createStore(org.id);
+
+      const withStatement: string[] = [];
+      for (let i = 0; i < 3; i += 1) {
+        const order = await createOrder(org.id, store.id);
+        await createProfitStatement(order.id, org.id, store.id, {
+          view: 'BEST_KNOWN',
+          saleGross: '100.00',
+          netProfit: '10.00',
+          saleMarginPct: '10.00',
+        });
+        withStatement.push(order.id);
+      }
+      const noStatement = await createOrder(org.id, store.id);
+
+      // Segment 1 shares one margin → order id descending; segment 2 follows.
+      const expected = [...[...withStatement].sort().reverse(), noStatement.id];
+
+      for (const sort of ['marginPct', '-marginPct'] as const) {
+        const paged: string[] = [];
+        for (let page = 1; page <= 2; page += 1) {
+          const result = await listOrders(org.id, store.id, { page, perPage: 2, sort });
+          for (const row of result.data) paged.push(row.id);
+        }
+        expect(paged).toEqual(expected);
+        expect(new Set(paged).size).toBe(4);
+      }
     });
 
     it('pages a margin sort across orders with and without a statement', async () => {
