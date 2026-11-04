@@ -244,9 +244,22 @@ export {
   type ComputedParcelProfit,
 } from './persistence/compute-parcel-profit';
 export { loadTrendyolParcel, type LoadedTrendyolParcel } from './persistence/load-trendyol-parcel';
-export { ParcelNotFoundError, UnsupportedPlatformError } from './persistence/errors';
+export {
+  ParcelNotFoundError,
+  UnsupportedPlatformError,
+  InvalidStoredProfitDataError,
+} from './persistence/errors';
 export { type FinanceRecordInput } from './core/finance-record-input';
 export { ingestFinanceRecords, pruneUnseenFinanceRecords } from './persistence/finance-records';
+
+// Read layer (rebuild, phase 4A) -- docs/plans/2026-11-04-profit-engine-faz-4a-plan.md
+export {
+  STORED_PROFIT_LINE_SELECT,
+  toProfitLine,
+  type StoredProfitLineRow,
+} from './read/stored-profit-line';
+export { parseStoredIssues } from './read/stored-issues';
+export { loadOrderProfitLines } from './read/load-order-profit-lines';
 
 // Profit recompute queue (rebuild, phase 3B) -- docs/plans/2026-10-30-profit-engine-faz-3b-plan.md
 export {

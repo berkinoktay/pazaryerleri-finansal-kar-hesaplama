@@ -12,17 +12,29 @@ import { randomUUID } from 'node:crypto';
 import { Decimal } from 'decimal.js';
 import { prisma, type Prisma } from '@pazarsync/db';
 import {
+  ProfitLineCertainty,
+  ProfitLineLevel,
+  ProfitLineSource,
+  ProfitLineType,
   ProfitStatementView,
   type ProfitStatus,
   type ReconciliationStatus,
 } from '@pazarsync/db/enums';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { PROFIT_ENGINE_VERSION } from '../../core/engine-version';
+import { type ProfitLine } from '../../core/profit-line';
 import { type ProfitStatement } from '../../core/profit-statement';
+import { loadOrderProfitLines } from '../../read/load-order-profit-lines';
 import { computeParcelProfit, type ComputedParcelProfit } from '../compute-parcel-profit';
 import { ParcelNotFoundError, UnsupportedPlatformError } from '../errors';
 import { recomputeParcelProfit } from '../recompute-parcel-profit';
-import { ensureDbReachable, seedMelontikParcel, truncateAll } from './helpers/melontik-parcel';
+import {
+  ensureDbReachable,
+  seedBareOrder,
+  seedMelontikParcel,
+  truncateAll,
+} from './helpers/melontik-parcel';
 
 /** The margin columns are numeric(12,4); round the computed margins the same way the writer does. */
 const PERCENT_SCALE = 4;
@@ -134,6 +146,71 @@ async function readStoredStatement(
   return row;
 }
 
+/** A line's comparable projection: scalar fields plus Decimal amounts as fixed strings. */
+interface LineProjection {
+  readonly type: ProfitLineType;
+  readonly level: ProfitLineLevel;
+  readonly orderItemId: string | null;
+  readonly certainty: ProfitLineCertainty;
+  readonly source: ProfitLineSource;
+  readonly gross: string;
+  readonly vat: string;
+  readonly vatRatePct: string | null;
+  readonly inputs: ProfitLine['inputs'];
+  readonly externalRecord: ProfitLine['externalRecord'];
+}
+
+function projectLine(line: ProfitLine): LineProjection {
+  return {
+    type: line.type,
+    level: line.level,
+    orderItemId: line.orderItemId,
+    certainty: line.certainty,
+    source: line.source,
+    gross: line.amount.gross.toFixed(),
+    vat: line.amount.vat.toFixed(),
+    vatRatePct:
+      line.vatRatePct === null
+        ? null
+        : line.vatRatePct.toDecimalPlaces(PERCENT_SCALE, Decimal.ROUND_HALF_UP).toFixed(),
+    inputs: line.inputs,
+    externalRecord: line.externalRecord,
+  };
+}
+
+/** A deterministic sort key over the scalar fields, independent of `inputs` key order. */
+function lineSortKey(line: LineProjection): string {
+  return [
+    line.type,
+    line.level,
+    line.orderItemId ?? '',
+    line.certainty,
+    line.source,
+    line.gross,
+    line.vat,
+    line.vatRatePct ?? '',
+  ].join('|');
+}
+
+function sortedProjection(lines: readonly ProfitLine[]): LineProjection[] {
+  return lines.map(projectLine).sort((left, right) => {
+    const leftKey = lineSortKey(left);
+    const rightKey = lineSortKey(right);
+    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+  });
+}
+
+/** Loads the stored lines of several orders in one transaction. */
+function loadLines(
+  organizationId: string,
+  storeId: string,
+  orderIds: readonly string[],
+): Promise<ReadonlyMap<string, readonly ProfitLine[]>> {
+  return prisma.$transaction((tx) =>
+    loadOrderProfitLines(tx, { organizationId, storeId, orderIds }),
+  );
+}
+
 /** Seeds a Hepsiburada store with a bare order -- a platform the engine cannot compute. */
 async function seedHepsiburadaOrder(): Promise<{ organizationId: string; orderId: string }> {
   const org = await prisma.organization.create({
@@ -218,5 +295,74 @@ describe('computeParcelProfit', () => {
     const { organizationId, orderId } = await seedHepsiburadaOrder();
 
     await expect(compute(organizationId, orderId)).rejects.toBeInstanceOf(UnsupportedPlatformError);
+  });
+
+  it("returns each order's lines, round-tripping the writer's lines", async () => {
+    const parcel = await seedMelontikParcel();
+    await runWriter(parcel.organizationId, parcel.orderId);
+    // A second order in the same store with no profit lines at all.
+    const emptyOrderId = await seedBareOrder({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
+
+    const computed = await compute(parcel.organizationId, parcel.orderId);
+    const loaded = await loadLines(parcel.organizationId, parcel.storeId, [
+      parcel.orderId,
+      emptyOrderId,
+    ]);
+
+    // The writer's stored lines round-trip to the freshly computed lines.
+    const loadedLines = loaded.get(parcel.orderId);
+    if (loadedLines === undefined) {
+      throw new Error('expected the parcel order id in the map');
+    }
+    expect(loadedLines.length).toBeGreaterThan(0);
+    expect(sortedProjection(loadedLines)).toEqual(sortedProjection(computed.lines));
+
+    // An order without lines maps to an empty array, not a missing key.
+    expect(loaded.get(emptyOrderId)).toEqual([]);
+  });
+
+  it('ignores lines of another organization or store', async () => {
+    const parcel = await seedMelontikParcel();
+    await runWriter(parcel.organizationId, parcel.orderId);
+
+    const realCount = await prisma.profitLine.count({
+      where: {
+        orderId: parcel.orderId,
+        organizationId: parcel.organizationId,
+        storeId: parcel.storeId,
+      },
+    });
+    expect(realCount).toBeGreaterThan(0);
+
+    // A profit_lines row for the same order id but another organization, and one for
+    // another store in the real organization. Both must stay invisible to the loader.
+    const foreignRow = {
+      orderId: parcel.orderId,
+      type: ProfitLineType.SHIPPING,
+      level: ProfitLineLevel.PARCEL,
+      certainty: ProfitLineCertainty.ESTIMATE,
+      source: ProfitLineSource.RULE,
+      amountGross: '0',
+      amountVat: '0',
+      inputs: {},
+      engineVersion: PROFIT_ENGINE_VERSION,
+    } as const;
+    await prisma.profitLine.create({
+      data: { ...foreignRow, organizationId: randomUUID(), storeId: randomUUID() },
+    });
+    await prisma.profitLine.create({
+      data: { ...foreignRow, organizationId: parcel.organizationId, storeId: randomUUID() },
+    });
+
+    // The two extra rows now sit under the order id alongside the real ones.
+    expect(await prisma.profitLine.count({ where: { orderId: parcel.orderId } })).toBe(
+      realCount + 2,
+    );
+
+    const loaded = await loadLines(parcel.organizationId, parcel.storeId, [parcel.orderId]);
+    expect(loaded.get(parcel.orderId)?.length).toBe(realCount);
   });
 });

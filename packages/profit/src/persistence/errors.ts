@@ -19,3 +19,15 @@ export class UnsupportedPlatformError extends Error {
     this.name = 'UnsupportedPlatformError';
   }
 }
+
+/**
+ * Thrown when a stored profit row cannot be turned back into an engine value: a
+ * malformed line `inputs` object, a half-set external record, or a bad persisted
+ * issue entry. The message names the offending field (English, for logs).
+ */
+export class InvalidStoredProfitDataError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidStoredProfitDataError';
+  }
+}
