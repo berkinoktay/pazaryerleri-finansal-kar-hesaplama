@@ -4,24 +4,18 @@ import { Decimal } from 'decimal.js';
 import { type Prisma } from '@pazarsync/db';
 import {
   Platform,
-  ProfitLineLevel,
   ProfitStatementView,
   type ProfitStatus,
   type ReconciliationStatus,
 } from '@pazarsync/db/enums';
 import { type ResolvedProfitSettings } from '@pazarsync/utils';
 
-import { allocateParcelLine } from '../core/allocation/allocate-parcel-line';
-import { itemsForAllocation } from '../core/allocation/allocation-item-sets';
 import { PROFIT_ENGINE_VERSION } from '../core/engine-version';
 import { type ProfitIssue } from '../core/profit-issue';
 import { type ProfitLine } from '../core/profit-line';
-import { computeProfitStatement, type ProfitStatement } from '../core/profit-statement';
-import { estimateTrendyolParcel } from '../marketplaces/trendyol/estimate-parcel';
-import { mapTrendyolRecords } from '../marketplaces/trendyol/map-records';
+import { type ProfitStatement } from '../core/profit-statement';
+import { computeParcelProfit, PARCEL_PROFIT_COMPUTERS } from './compute-parcel-profit';
 import { type ContentHashAllocation, profitContentHash } from './content-hash';
-import { ParcelNotFoundError, UnsupportedPlatformError } from './errors';
-import { loadTrendyolParcel } from './load-trendyol-parcel';
 
 /** The margin columns are numeric(12,4); round in the app, not in Postgres. */
 const PERCENT_SCALE = 4;
@@ -35,38 +29,26 @@ export interface RecomputeParcelResult {
   readonly bestKnown: { readonly status: ProfitStatus; readonly netProfit: Decimal | null };
 }
 
-/** Recomputes one parcel's profit for a single marketplace, in the caller's transaction. */
-type ParcelProfitWriter = (
-  tx: Prisma.TransactionClient,
-  params: { readonly organizationId: string; readonly orderId: string },
-) => Promise<RecomputeParcelResult>;
-
 /**
- * The one registry of per-platform profit writers. A `null` entry means the engine
- * cannot compute that platform yet: the queue drain deletes its marks
- * (UNSUPPORTED_PLATFORM) and the stale sweep skips its orders. Registering a writer
- * here is all it takes to make the sweep pick those orders up by itself. A new Platform
- * enum value without an entry is a compile error, because the map is a Record over
- * Platform.
+ * The platforms the engine can compute: those with a computer registered in the
+ * PARCEL_PROFIT_COMPUTERS registry. Exported from here so the queue drain and the
+ * stale sweep keep importing it unchanged.
  */
-const PARCEL_PROFIT_WRITERS: Readonly<Record<Platform, ParcelProfitWriter | null>> = {
-  [Platform.TRENDYOL]: recomputeTrendyolParcel,
-  [Platform.HEPSIBURADA]: null,
-};
-
-/** The platforms the engine can compute: those with a writer registered above. */
 export const PROFIT_ENGINE_PLATFORMS: readonly Platform[] = Object.values(Platform).filter(
-  (platform) => PARCEL_PROFIT_WRITERS[platform] !== null,
+  (platform) => PARCEL_PROFIT_COMPUTERS[platform] !== null,
 );
 
 /**
  * Recomputes one parcel's profit and writes it in the caller's transaction. Takes a
  * parcel-scoped advisory lock first, so concurrent recomputes of the same order run
- * one at a time; the lock releases at commit or rollback. Then resolves the store's
- * platform, looks its writer up in the PARCEL_PROFIT_WRITERS registry, and returns
- * whether anything was written along with the best-known status and net profit. Throws
- * `ParcelNotFoundError` when the order is not this organization's and
- * `UnsupportedPlatformError` for a platform whose registry entry is null.
+ * one at a time; the lock releases at commit or rollback. Then computes the parcel
+ * read-only via `computeParcelProfit` (the single per-platform registry), hashes the
+ * result, and writes the lines, allocations and both statements only when the stored
+ * content hash does not already match. No platform-specific code lives here: a second
+ * marketplace registers one computer in PARCEL_PROFIT_COMPUTERS and the writer and the
+ * sweep pick it up by themselves. Throws `ParcelNotFoundError` when the order is not
+ * this organization's and `UnsupportedPlatformError` for a platform whose registry
+ * entry is null -- both raised by `computeParcelProfit`.
  *
  * Caller contract:
  * - Runs inside the caller's transaction at READ COMMITTED (Postgres' default). Once
@@ -85,20 +67,51 @@ export async function recomputeParcelProfit(
   // Serialize concurrent recomputes of the same parcel; released at commit/rollback.
   await acquireParcelProfitLock(tx, orderId);
 
-  const order = await tx.order.findFirst({
-    where: { id: orderId, organizationId },
-    select: { store: { select: { platform: true } } },
+  const computed = await computeParcelProfit(tx, params);
+  const statements = [computed.estimate, computed.bestKnown];
+  const bestKnown = {
+    status: computed.bestKnown.status,
+    netProfit: computed.bestKnown.netProfit,
+  };
+
+  // The hash sees Decimal values at full precision, while the persisted columns are
+  // rounded (percentages to 4, vatRatePct to 4). The hashed view is a superset of the
+  // stored one, so a change that matters always flips the hash and a needed write is
+  // never skipped; at worst two inputs that round to the same row produce different
+  // hashes and an identical row is rewritten.
+  const hash = profitContentHash({
+    engineVersion: PROFIT_ENGINE_VERSION,
+    settings: computed.settings,
+    lines: computed.lines,
+    allocations: computed.allocations,
+    statements,
   });
-  if (order === null) {
-    throw new ParcelNotFoundError(orderId);
+
+  // No-op when both stored statement views already carry this exact content hash.
+  const stored = await tx.orderProfitStatement.findMany({
+    where: { orderId, organizationId },
+    select: { view: true, contentHash: true },
+  });
+  const storedHashByView = new Map(stored.map((row) => [row.view, row.contentHash]));
+  if (
+    storedHashByView.get(ProfitStatementView.ESTIMATE) === hash &&
+    storedHashByView.get(ProfitStatementView.BEST_KNOWN) === hash
+  ) {
+    return { changed: false, bestKnown };
   }
 
-  const platform = order.store.platform;
-  const writer = PARCEL_PROFIT_WRITERS[platform];
-  if (writer === null) {
-    throw new UnsupportedPlatformError(platform);
-  }
-  return writer(tx, params);
+  await persistParcelProfit(tx, {
+    organizationId: computed.organizationId,
+    storeId: computed.storeId,
+    orderId,
+    settings: computed.settings,
+    lines: computed.lines,
+    allocations: computed.allocations,
+    statements,
+    hash,
+  });
+
+  return { changed: true, bestKnown };
 }
 
 /**
@@ -117,110 +130,6 @@ export async function acquireParcelProfitLock(
   orderId: string,
 ): Promise<void> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${orderId}, ${ADVISORY_LOCK_SEED}::int8))`;
-}
-
-/**
- * Loads a Trendyol parcel, drives it through the pure estimate + settlement mapper,
- * builds both statement views and the per-item allocations, and persists them unless
- * the stored content hash already matches. Kept apart from the dispatcher so a second
- * marketplace registers one writer, not a rewrite of this function.
- */
-async function recomputeTrendyolParcel(
-  tx: Prisma.TransactionClient,
-  params: { readonly organizationId: string; readonly orderId: string },
-): Promise<RecomputeParcelResult> {
-  const { organizationId, orderId } = params;
-  const loaded = await loadTrendyolParcel(tx, params);
-  const snapshot = loaded.estimateInput.snapshot;
-
-  const estimate = estimateTrendyolParcel(loaded.estimateInput);
-  const mapped = mapTrendyolRecords({
-    snapshot,
-    attributes: loaded.estimateInput.attributes,
-    fees: loaded.estimateInput.reference.fees,
-    records: loaded.records,
-    cargoItems: loaded.cargoItems,
-    estimateLines: estimate.lines,
-  });
-  // mapped.periodRecords are not parcel lines: they stay in marketplace_finance_records
-  // for the period writer in phase 3B and are not persisted here.
-
-  const lines: ProfitLine[] = [...estimate.lines, ...mapped.lines];
-  const issues: ProfitIssue[] = [...estimate.issues, ...mapped.issues, ...loaded.loadIssues];
-
-  const statementCommon = {
-    lines,
-    settings: loaded.settings,
-    isExportSale: snapshot.isExportSale,
-    isCancelled: snapshot.isCancelled,
-    isExcluded: loaded.isExcluded,
-    issues,
-  } as const;
-  const estimateStatement = computeProfitStatement({
-    ...statementCommon,
-    view: ProfitStatementView.ESTIMATE,
-  });
-  const bestKnownStatement = computeProfitStatement({
-    ...statementCommon,
-    view: ProfitStatementView.BEST_KNOWN,
-  });
-  const statements = [estimateStatement, bestKnownStatement];
-  const bestKnown = {
-    status: bestKnownStatement.status,
-    netProfit: bestKnownStatement.netProfit,
-  };
-
-  // Allocations for every parcel-level line (estimate and actual alike), kept with
-  // the line's index so the hash and, later, the rows both find their parent line.
-  const allocations: ContentHashAllocation[] = [];
-  lines.forEach((line, index) => {
-    if (line.level !== ProfitLineLevel.PARCEL) {
-      return;
-    }
-    const shares = allocateParcelLine(line, itemsForAllocation(line.type, estimate.allocation));
-    for (const share of shares) {
-      allocations.push({ lineIndex: index, allocation: share });
-    }
-  });
-
-  // The hash sees Decimal values at full precision, while the persisted columns are
-  // rounded (percentages to 4, vatRatePct to 4). The hashed view is a superset of the
-  // stored one, so a change that matters always flips the hash and a needed write is
-  // never skipped; at worst two inputs that round to the same row produce different
-  // hashes and an identical row is rewritten.
-  const hash = profitContentHash({
-    engineVersion: PROFIT_ENGINE_VERSION,
-    settings: loaded.settings,
-    lines,
-    allocations,
-    statements,
-  });
-
-  // No-op when both stored statement views already carry this exact content hash.
-  const stored = await tx.orderProfitStatement.findMany({
-    where: { orderId, organizationId },
-    select: { view: true, contentHash: true },
-  });
-  const storedHashByView = new Map(stored.map((row) => [row.view, row.contentHash]));
-  if (
-    storedHashByView.get(ProfitStatementView.ESTIMATE) === hash &&
-    storedHashByView.get(ProfitStatementView.BEST_KNOWN) === hash
-  ) {
-    return { changed: false, bestKnown };
-  }
-
-  await persistParcelProfit(tx, {
-    organizationId: loaded.organizationId,
-    storeId: loaded.storeId,
-    orderId,
-    settings: loaded.settings,
-    lines,
-    allocations,
-    statements,
-    hash,
-  });
-
-  return { changed: true, bestKnown };
 }
 
 /** A profit-line row built for createMany, carrying the id its allocations reference. */

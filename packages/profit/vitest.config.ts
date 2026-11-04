@@ -37,6 +37,7 @@ export default defineConfig({
       'src/**/__tests__/return-estimate-isolation.test.ts',
       'src/persistence/__tests__/load-trendyol-parcel.test.ts',
       'src/persistence/__tests__/recompute-parcel-profit.test.ts',
+      'src/persistence/__tests__/compute-parcel-profit.test.ts',
       'src/persistence/__tests__/recompute-queue.test.ts',
       'src/persistence/__tests__/finance-records.test.ts',
     ],

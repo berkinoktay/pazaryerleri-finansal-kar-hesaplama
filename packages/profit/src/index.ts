@@ -239,6 +239,10 @@ export {
   acquireParcelProfitLock,
   type RecomputeParcelResult,
 } from './persistence/recompute-parcel-profit';
+export {
+  computeParcelProfit,
+  type ComputedParcelProfit,
+} from './persistence/compute-parcel-profit';
 export { loadTrendyolParcel, type LoadedTrendyolParcel } from './persistence/load-trendyol-parcel';
 export { ParcelNotFoundError, UnsupportedPlatformError } from './persistence/errors';
 export { type FinanceRecordInput } from './core/finance-record-input';
