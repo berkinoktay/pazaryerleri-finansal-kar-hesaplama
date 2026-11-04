@@ -125,26 +125,52 @@ function vatOf(lines: readonly ProfitLine[], type: ProfitLineType): Decimal {
   return lines.reduce((sum, line) => (line.type === type ? sum.add(line.amount.vat) : sum), ZERO);
 }
 
-/** Signed gross over a whole layout group: income adds, expense subtracts. */
-function signedGrossOfGroup(lines: readonly ProfitLine[], group: ProfitLineGroup): Decimal {
-  return lines.reduce((sum, line) => {
-    const spec = getLineSpec(line.type);
-    if (spec.group !== group) {
-      return sum;
-    }
-    return spec.direction === 'INCOME' ? sum.add(line.amount.gross) : sum.sub(line.amount.gross);
-  }, ZERO);
+/** The four display buckets the catalog groups fold into for the order breakdown. */
+type BreakdownFold = 'SALE' | 'COST' | 'MARKETPLACE' | 'TAX';
+
+/**
+ * Which display bucket each catalog group folds into. Typed as a total `Record` over
+ * `ProfitLineGroup`, so adding a group to the catalog is a compile error here until it
+ * is placed -- that is what keeps the four-group closure (cost + marketplace + taxes +
+ * net === sale) honest as the catalog grows, instead of a hard-coded list of the line
+ * types that happen to exist today.
+ */
+const BREAKDOWN_GROUP_FOLD: Readonly<Record<ProfitLineGroup, BreakdownFold>> = {
+  REVENUE: 'SALE',
+  PRODUCT_COST: 'COST',
+  SELLER_EXPENSE: 'COST',
+  MARKETPLACE_FEE: 'MARKETPLACE',
+  TAX: 'TAX',
+};
+
+interface SignedAmount {
+  readonly gross: Decimal;
+  readonly vat: Decimal;
 }
 
-/** Input (deductible) VAT over a group: expense adds, income (e.g. a return) subtracts. */
-function inputVatOfGroup(lines: readonly ProfitLine[], group: ProfitLineGroup): Decimal {
-  return lines.reduce((sum, line) => {
+/**
+ * Folds every selected line's gross and VAT into the four display buckets by its catalog
+ * group and direction: income adds, expense subtracts. The caller flips the cost and
+ * marketplace signs for display (both read as deductions from the sale).
+ */
+function foldByGroup(lines: readonly ProfitLine[]): Record<BreakdownFold, SignedAmount> {
+  const folds: Record<BreakdownFold, SignedAmount> = {
+    SALE: { gross: ZERO, vat: ZERO },
+    COST: { gross: ZERO, vat: ZERO },
+    MARKETPLACE: { gross: ZERO, vat: ZERO },
+    TAX: { gross: ZERO, vat: ZERO },
+  };
+  for (const line of lines) {
     const spec = getLineSpec(line.type);
-    if (spec.group !== group) {
-      return sum;
-    }
-    return spec.direction === 'EXPENSE' ? sum.add(line.amount.vat) : sum.sub(line.amount.vat);
-  }, ZERO);
+    const fold = BREAKDOWN_GROUP_FOLD[spec.group];
+    const current = folds[fold];
+    const isIncome = spec.direction === 'INCOME';
+    folds[fold] = {
+      gross: isIncome ? current.gross.add(line.amount.gross) : current.gross.sub(line.amount.gross),
+      vat: isIncome ? current.vat.add(line.amount.vat) : current.vat.sub(line.amount.vat),
+    };
+  }
+  return folds;
 }
 
 /** A kurus amount as a two-decimal string (half-up), with signed zero normalized. */
@@ -153,19 +179,26 @@ function money(value: Decimal): string {
   return fixed === '-0.00' ? '0.00' : fixed;
 }
 
-/** A margin as a two-decimal string (half-up), or null. */
+/** A margin as a two-decimal string (half-up) with signed zero normalized, or null. */
 function percent(value: Decimal | null): string | null {
-  return value === null ? null : value.toFixed(2, Decimal.ROUND_HALF_UP);
+  if (value === null) {
+    return null;
+  }
+  const fixed = value.toFixed(2, Decimal.ROUND_HALF_UP);
+  return fixed === '-0.00' ? '0.00' : fixed;
 }
 
 /**
  * Builds the order profit breakdown from a statement's totals and its selected lines.
  * Returns null when the statement carries no net profit (not computable or excluded).
  *
- * Group membership and direction come from the catalog (`getLineSpec`), never from a
- * hard-coded type list, so a new line type is placed by its spec. The four display
- * groups close to the sale to the kurus: cost + marketplace fees + taxes + net profit
- * equals the sale gross, which the golden tests assert.
+ * The four display groups fold from the catalog: each line's catalog group maps to a
+ * display bucket through `BREAKDOWN_GROUP_FOLD` and its direction gives the sign, so a
+ * new line type -- or a whole new group -- is placed by its spec, never by a hard-coded
+ * type list. That keeps the closure honest: cost + marketplace fees + taxes + net profit
+ * equals the sale gross to the kurus (the golden tests assert it). The individual fee
+ * rows below (commission, shipping, service fees, stoppage) are still summed per type,
+ * because each is a named line on screen rather than a whole group.
  */
 export function buildStatementBreakdown(input: {
   readonly totals: StatementTotals;
@@ -178,13 +211,21 @@ export function buildStatementBreakdown(input: {
     return null;
   }
 
-  // Product cost plus the seller's own per-order expense; their input VAT together.
-  const costGross = totals.costGross.add(
-    grossOf(selectedLines, ProfitLineType.SELLER_ORDER_EXPENSE),
+  const folds = foldByGroup(selectedLines);
+
+  // The shown sale is SALE - SALE_RETURN (`totals.saleGross`); its VAT is the VAT inside
+  // that, never the revenue group's output VAT, which would also carry the VAT of a
+  // discount contribution. Any other REVENUE income is a surplus over the shown sale --
+  // today only a marketplace-funded discount contribution -- credited to the fees below.
+  const revenueSurplus = folds.SALE.gross.sub(totals.saleGross);
+  const saleVat = vatOf(selectedLines, ProfitLineType.SALE).sub(
+    vatOf(selectedLines, ProfitLineType.SALE_RETURN),
   );
-  const costVat = inputVatOfGroup(selectedLines, 'PRODUCT_COST').add(
-    inputVatOfGroup(selectedLines, 'SELLER_EXPENSE'),
-  );
+
+  // Product cost plus the seller's own per-order expense fold into one deduction, their
+  // input VAT with them; the COST-fold groups give the sign, not a per-type list.
+  const costGross = folds.COST.gross.negated();
+  const costVat = folds.COST.vat.negated();
 
   const commissionGross = grossOf(selectedLines, ProfitLineType.COMMISSION).sub(
     grossOf(selectedLines, ProfitLineType.COMMISSION_REFUND),
@@ -220,10 +261,10 @@ export function buildStatementBreakdown(input: {
   const netVat = totals.vatEffective;
 
   // Every marketplace charge (commission, shipping, PSF, micro fees, penalties,
-  // adjustments) nets into one group, less the discount the marketplace funded.
-  const marketplaceFeesGross = signedGrossOfGroup(selectedLines, 'MARKETPLACE_FEE')
-    .negated()
-    .sub(grossOf(selectedLines, ProfitLineType.MARKETPLACE_DISCOUNT_CONTRIBUTION));
+  // adjustments) nets into one deduction, less the revenue surplus the marketplace
+  // funded. The MARKETPLACE fold carries whatever types the catalog places there, so a
+  // new fee type lands here with no code change.
+  const marketplaceFeesGross = folds.MARKETPLACE.gross.negated().sub(revenueSurplus);
   const taxesGross = stoppage.add(netVat);
   const totalDeductionsGross = costGross.add(marketplaceFeesGross).add(taxesGross);
 
@@ -231,7 +272,7 @@ export function buildStatementBreakdown(input: {
     listGross: money(listGross),
     sellerDiscountGross: money(sellerDiscountGross),
     saleGross: money(totals.saleGross),
-    saleVat: money(totals.vatOutput),
+    saleVat: money(saleVat),
     costGross: money(costGross),
     costVat: money(costVat),
     commissionGross: money(commissionGross),

@@ -64,17 +64,23 @@ function costExpenseLines(lines: readonly ProfitLine[]): ProfitLine[] {
   });
 }
 
-/** True when a blocking MISSING_COST issue names this item. */
+/**
+ * True when a blocking MISSING_COST issue applies to this item: one that names the item,
+ * or a parcel-wide issue (`orderItemId` null) that covers every item.
+ */
 function hasMissingCost(issues: readonly ProfitIssue[], orderItemId: string): boolean {
   return issues.some(
-    (issue) => issue.code === ProfitIssueCode.MISSING_COST && issue.orderItemId === orderItemId,
+    (issue) =>
+      issue.code === ProfitIssueCode.MISSING_COST &&
+      (issue.orderItemId === null || issue.orderItemId === orderItemId),
   );
 }
 
 /**
- * Unit cost: null when a MISSING_COST issue names the item; otherwise the item's cost
- * lines summed and divided by the quantity (two decimals, half-up), or "0.00" when the
- * item has no cost line.
+ * Unit cost: null when a MISSING_COST issue covers the item; "0.00" when the item has no
+ * cost line; otherwise the item's cost lines summed and divided by the quantity (two
+ * decimals, half-up). A non-positive quantity yields null -- there is no unit to divide
+ * into.
  */
 function unitCostGrossOf(
   lines: readonly ProfitLine[],
@@ -88,6 +94,9 @@ function unitCostGrossOf(
   const costLines = costExpenseLines(lines);
   if (costLines.length === 0) {
     return '0.00';
+  }
+  if (quantity <= 0) {
+    return null;
   }
   const total = costLines.reduce((sum, line) => sum.add(line.amount.gross), ZERO);
   return roundMoney(total.div(quantity)).toFixed(2);

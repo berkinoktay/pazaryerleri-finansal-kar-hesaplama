@@ -183,6 +183,43 @@ describe('itemProfitValues', () => {
     expect(other.unitCostGross).toBe('0.00');
   });
 
+  it('treats a parcel-wide missing cost as missing for every item', () => {
+    const issues: ProfitIssue[] = [
+      { code: ProfitIssueCode.MISSING_COST, orderItemId: null, detail: null },
+    ];
+    for (const orderItemId of [ITEM, OTHER_ITEM]) {
+      const values = itemProfitValues({
+        orderItemId,
+        quantity: 1,
+        bestKnownLines: [],
+        estimateLines: [],
+        issues,
+      });
+      expect(values.unitCostGross).toBeNull();
+    }
+  });
+
+  it('reports a null unit cost for a non-positive quantity', () => {
+    const bestKnownLines = [
+      costLine({
+        type: ProfitLineType.COST_COGS,
+        orderItemId: ITEM,
+        gross: '120.00',
+        vatRatePct: '20',
+      }),
+    ];
+    for (const quantity of [0, -3]) {
+      const values = itemProfitValues({
+        orderItemId: ITEM,
+        quantity,
+        bestKnownLines,
+        estimateLines: [],
+        issues: [],
+      });
+      expect(values.unitCostGross).toBeNull();
+    }
+  });
+
   it('takes the commission amount from the best-known line and the rate from the estimate', () => {
     const values = itemProfitValues({
       orderItemId: ITEM,

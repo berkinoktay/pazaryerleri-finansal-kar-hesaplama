@@ -19,10 +19,15 @@ import {
   statementTotalsFromRow,
   statementTotalsFromStatement,
   type StatementBreakdown,
+  type StatementTotals,
   type StoredStatementTotalsRow,
 } from '../statement-breakdown';
 
 const WITH_STOPPAGE: ResolvedProfitSettings = { includeStopaj: true, includeNegativeNetVat: true };
+const WITHOUT_STOPPAGE: ResolvedProfitSettings = {
+  includeStopaj: false,
+  includeNegativeNetVat: true,
+};
 const LIST_GROSS = new Decimal('1000.00');
 const SELLER_DISCOUNT_GROSS = new Decimal('120.00');
 
@@ -172,6 +177,66 @@ describe('buildStatementBreakdown', () => {
     const exported = breakdownOf(statementOf(exportSale, { isExportSale: true }));
     expect(exported.internationalServiceGross).toBe('30.00');
     expect(exported.overseasReturnOperationGross).toBe('15.00');
+  });
+
+  it('closes the four groups to the sale for every line type in the catalog', () => {
+    // One line of each catalog type, placed at a level the spec allows (makeLine reads
+    // the catalog), on top of a plain sale. Whatever group the catalog puts the type in,
+    // the four display groups still close to the sale -- with the stoppage both ways.
+    for (const type of Object.values(ProfitLineType)) {
+      const lines = [
+        makeLine({ type: ProfitLineType.SALE, gross: '200.00', vat: '18.18' }),
+        makeLine({ type, gross: '30.00', vat: '2.50' }),
+      ];
+      for (const settings of [WITH_STOPPAGE, WITHOUT_STOPPAGE] as const) {
+        const breakdown = breakdownOf(statementOf(lines, { settings }));
+        expectClosesToSale(breakdown);
+      }
+    }
+  });
+
+  it("keeps a discount contribution's VAT out of the sale VAT", () => {
+    const breakdown = breakdownOf(
+      statementOf([
+        makeLine({ type: ProfitLineType.SALE, gross: '100.00', vat: '9.09' }),
+        makeLine({
+          type: ProfitLineType.MARKETPLACE_DISCOUNT_CONTRIBUTION,
+          gross: '20.00',
+          vat: '1.82',
+        }),
+      ]),
+    );
+
+    // The sale VAT is the VAT inside the shown sale (9.09), not the revenue group's
+    // output VAT, which would also carry the discount contribution's 1.82.
+    expect(breakdown.saleVat).toBe('9.09');
+    expect(breakdown.saleGross).toBe('100.00');
+    expectClosesToSale(breakdown);
+  });
+
+  it('never writes a negative zero margin', () => {
+    // A margin that rounds to "-0.00" at two decimals must render as a plain "0.00",
+    // exactly as the money formatter normalizes its own signed zero.
+    const totals: StatementTotals = {
+      saleGross: new Decimal('100.00'),
+      vatOutput: new Decimal('0'),
+      costGross: new Decimal('0'),
+      vatEffective: new Decimal('0'),
+      stoppageGross: new Decimal('0'),
+      stoppageIncluded: false,
+      netProfit: new Decimal('0.00'),
+      saleMarginPct: new Decimal('-0.004'),
+      costMarkupPct: new Decimal('-0.004'),
+    };
+    const breakdown = buildStatementBreakdown({
+      totals,
+      selectedLines: [],
+      listGross: new Decimal(0),
+      sellerDiscountGross: new Decimal(0),
+    });
+
+    expect(breakdown?.saleMarginPct).toBe('0.00');
+    expect(breakdown?.costMarkupPct).toBe('0.00');
   });
 
   it('writes every amount with two decimals', () => {
