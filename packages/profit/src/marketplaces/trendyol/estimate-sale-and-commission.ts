@@ -13,7 +13,10 @@ import { createProfitLine, type LineMoney, type ProfitLine } from '../../core/pr
 import { roundMoney } from '../../money';
 import { saleVatRatePct } from '../../tax/tr/sale-vat';
 import { vatFromGross } from '../../tax/tr/vat';
-import { resolveTrendyolCommissionRate } from './resolve-commission-rate';
+import {
+  resolveTrendyolCommissionRate,
+  type ResolvedTrendyolCommissionRate,
+} from './resolve-commission-rate';
 import {
   type TrendyolItemAttributes,
   type TrendyolParcelAttributes,
@@ -66,12 +69,20 @@ export function estimateSaleLines(snapshot: ParcelSnapshot): ProfitLine[] {
  * each rounded to kurus and then subtracted. An item with no attributes or no
  * resolvable rate produces a blocking MISSING_COMMISSION_RATE issue and no line; a
  * commission that nets to zero produces neither a line nor an issue.
+ *
+ * `commissionByItem` records the rate resolved for each item that had attributes
+ * (null when nothing applied), so a caller can report the rate even when it nets to
+ * zero and carries no line, without resolving the chain a second time.
  */
 export function estimateCommissionLines(params: {
   readonly snapshot: ParcelSnapshot;
   readonly attributes: TrendyolParcelAttributes;
   readonly reference: TrendyolReferenceData;
-}): { readonly lines: ProfitLine[]; readonly issues: ProfitIssue[] } {
+}): {
+  readonly lines: ProfitLine[];
+  readonly issues: ProfitIssue[];
+  readonly commissionByItem: ReadonlyMap<string, ResolvedTrendyolCommissionRate | null>;
+} {
   const { snapshot, attributes, reference } = params;
 
   const attributesByItem = new Map<string, TrendyolItemAttributes>();
@@ -81,6 +92,7 @@ export function estimateCommissionLines(params: {
 
   const lines: ProfitLine[] = [];
   const issues: ProfitIssue[] = [];
+  const commissionByItem = new Map<string, ResolvedTrendyolCommissionRate | null>();
 
   for (const item of activeItems(snapshot)) {
     const itemAttributes = attributesByItem.get(item.orderItemId);
@@ -99,6 +111,7 @@ export function estimateCommissionLines(params: {
       unitCommissionBase,
       rules: reference.commission,
     });
+    commissionByItem.set(item.orderItemId, resolved);
     if (resolved === null) {
       issues.push({
         code: ProfitIssueCode.MISSING_COMMISSION_RATE,
@@ -141,5 +154,5 @@ export function estimateCommissionLines(params: {
     );
   }
 
-  return { lines, issues };
+  return { lines, issues, commissionByItem };
 }

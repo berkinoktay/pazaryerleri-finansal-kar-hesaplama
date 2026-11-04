@@ -9,16 +9,13 @@ import {
   type ScenarioSolveResult,
 } from '../../core/scenario/solve-scenario-price';
 import { type ItemCostProfileInput } from '../../core/seller-costs/build-seller-cost-lines';
-import { ceilToKurus, floorToKurus, KURUS_DECIMALS, ONE_KURUS, roundMoney } from '../../money';
+import { ceilToKurus, floorToKurus, KURUS_DECIMALS, ONE_KURUS } from '../../money';
 import {
   estimateTrendyolParcel,
   type EstimateResult,
   type TrendyolEstimateInput,
 } from './estimate-parcel';
-import {
-  resolveTrendyolCommissionRate,
-  type ResolvedTrendyolCommissionRate,
-} from './resolve-commission-rate';
+import { type ResolvedTrendyolCommissionRate } from './resolve-commission-rate';
 import {
   type TrendyolCommissionBand,
   type TrendyolItemAttributes,
@@ -184,18 +181,13 @@ function computeScenarioStatement(input: TrendyolScenarioInput): {
 
 /**
  * Evaluates one scenario: the estimate, the profit statement, and the commission rate
- * the estimate resolved. The rate is resolved from the same item attributes and unit
- * base the estimate uses, so it matches the COMMISSION line when there is one and is
+ * the estimate resolved. The rate comes straight from the estimate's per-item map, the
+ * single resolution point, so it matches the COMMISSION line when there is one and is
  * still reported when the commission nets to zero or is unresolvable (null).
  */
 export function evaluateTrendyolScenario(input: TrendyolScenarioInput): TrendyolScenarioResult {
   const { estimate, statement } = computeScenarioStatement(input);
-  const saleGross = input.unitPrice.mul(input.quantity);
-  const commission = resolveTrendyolCommissionRate({
-    item: scenarioItemAttributes(input),
-    unitCommissionBase: roundMoney(saleGross.div(input.quantity)),
-    rules: input.reference.commission,
-  });
+  const commission = estimate.commissionByItem.get(TRENDYOL_SCENARIO_ITEM_ID) ?? null;
   return { estimate, statement, commission };
 }
 

@@ -221,32 +221,37 @@ describe('evaluateTrendyolScenario', () => {
     expect(result.statement.saleMarginPct).toBeNull();
   });
 
-  it('reports the commission rate and source even when the commission is zero', () => {
-    // A zero-rate override nets no commission line, yet the scenario still reports the
-    // rate and its source so a screen can show the commission the seller chose.
-    const result = evaluateTrendyolScenario(
+  it('reports the commission the estimate used', () => {
+    // The scenario reads its rate from the estimate's single resolution, so the reported
+    // commission always agrees with the line the estimate wrote. A banded price reports
+    // the band the line used; a zero-rate override nets no line yet still reports its
+    // rate and source so a screen can show the commission the seller chose; and an
+    // unresolvable rate (the MISSING_COMMISSION_RATE case) reports null.
+    const banded = evaluateTrendyolScenario(
+      scenarioInput('280.00', { product: { tariffBands: THREE_BANDS } }),
+    );
+    const bandedLine = requireLine(banded.estimate.lines, ProfitLineType.COMMISSION);
+    expect(banded.commission).not.toBeNull();
+    expect(banded.commission?.source).toBe('TARIFF_BAND');
+    expect(banded.commission?.ratePct.toString()).toBe(bandedLine.inputs.ratePct);
+
+    const zeroOverride = evaluateTrendyolScenario(
       scenarioInput('280.00', {
         product: { tariffBands: THREE_BANDS },
         commissionRatePctOverride: new Decimal('0'),
       }),
     );
-
-    const commissionLine = result.estimate.lines.find(
+    const zeroLine = zeroOverride.estimate.lines.find(
       (line) => line.type === ProfitLineType.COMMISSION,
     );
-    expect(commissionLine).toBeUndefined();
-    expect(result.commission).not.toBeNull();
-    expect(result.commission?.ratePct.toString()).toBe('0');
-    expect(result.commission?.source).toBe('OVERRIDE');
-  });
+    expect(zeroLine).toBeUndefined();
+    expect(zeroOverride.commission?.ratePct.toString()).toBe('0');
+    expect(zeroOverride.commission?.source).toBe('OVERRIDE');
 
-  it('reports no commission when none can be resolved', () => {
-    // No override, no bands, no synced rate and no category rule: the commission is
-    // unresolvable (the MISSING_COMMISSION_RATE case), so the reported rate is null.
-    const result = evaluateTrendyolScenario(
+    const unresolvable = evaluateTrendyolScenario(
       scenarioInput('280.00', { product: { categoryId: null, brandId: null } }),
     );
-    expect(result.commission).toBeNull();
+    expect(unresolvable.commission).toBeNull();
   });
 
   it('uses the band of the asked price, or the override', () => {

@@ -140,6 +140,8 @@ function requireLine(lines: readonly ProfitLine[], type: ProfitLineType): Profit
  * is several times that, so it still catches a solver that returns a price a hair above
  * the lowest because a fixed nudge is narrower than the rounding noise.
  */
+// Twelve kurus is several times the couple-of-kurus correction span above -- wide
+// enough to expose a nudge narrower than the rounding noise, still a handful of points.
 const LOWEST_MARGIN_NOISE_WINDOW = 12;
 
 /**
@@ -149,9 +151,13 @@ const LOWEST_MARGIN_NOISE_WINDOW = 12;
  * can err -- a rounding-noise window just below the solved price, and every Barem or
  * commission breakpoint below the solved price with the kurus either side, where a
  * cheaper band could otherwise sneak a meeting price in under the answer. Same claim,
- * a handful of evaluations instead of a hundred.
+ * a handful of evaluations instead of a hundred. Returns the solved result so a caller
+ * can assert a further premise about the price without solving a second time.
  */
-function expectLowestMargin(pct: string, overrides: ScenarioOverrides = {}): void {
+function expectLowestMargin(
+  pct: string,
+  overrides: ScenarioOverrides = {},
+): { readonly unitPrice: Decimal; readonly statement: ProfitStatement } {
   const pctValue = new Decimal(pct);
   const base = scenarioBase(overrides);
   const solved = requireSolved(
@@ -176,6 +182,8 @@ function expectLowestMargin(pct: string, overrides: ScenarioOverrides = {}): voi
     const margin = evaluateTrendyolScenario({ ...base, unitPrice: price }).statement.saleMarginPct;
     expect(margin === null || margin.lt(pctValue), price.toFixed(2)).toBe(true);
   }
+
+  return solved;
 }
 
 describe('golden audit scenarios', () => {
@@ -216,15 +224,25 @@ describe('golden audit scenarios', () => {
   });
 
   it('never calls a reachable margin unreachable under a 40% commission', () => {
-    // Two reachable margins bracket the range: a low one and a high one that solves far
-    // up the open-ended top segment, where a solver is most tempted to call a reachable
-    // margin unreachable. Both solve above the Barem edges, and `expectLowestMargin`
-    // samples every breakpoint below the answer, so the three middling margins dropped
-    // here only re-ran the same open-segment solve at a different height (and the
-    // unreachable path has its own test above).
+    // Reachable margins across the range: a low one, a middling one, and a high one that
+    // solves far up the open-ended top segment, where a solver is most tempted to call a
+    // reachable margin unreachable. The audit swept five commission percentages; the
+    // reduction to these rests on every target solving above the top Barem breakpoint, so
+    // the shipping band no longer moves below any answer and `expectLowestMargin` need
+    // only sample the breakpoints below it. That premise is asserted here, not trusted.
     const overrides: ScenarioOverrides = { commissionRatePctOverride: new Decimal('40') };
-    for (const pct of ['33.6', '40.4']) {
-      expectLowestMargin(pct, overrides);
+    const breakpoints = trendyolScenarioBreakpoints(scenarioBase(overrides));
+    const topBaremBreakpoint = breakpoints.reduce<Decimal | null>(
+      (highest, value) => (highest === null || value.gt(highest) ? value : highest),
+      null,
+    );
+    if (topBaremBreakpoint === null) {
+      throw new Error('expected at least one Barem breakpoint to anchor the premise');
+    }
+
+    for (const pct of ['33.6', '40.4', '44.4']) {
+      const solved = expectLowestMargin(pct, overrides);
+      expect(solved.unitPrice.gt(topBaremBreakpoint), pct).toBe(true);
     }
   });
 

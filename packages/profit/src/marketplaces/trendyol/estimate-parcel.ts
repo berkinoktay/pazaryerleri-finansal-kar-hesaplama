@@ -16,6 +16,7 @@ import {
 import { buildStoppageLines } from '../../tax/tr/stoppage-lines';
 import { estimateInternationalServiceLine } from './estimate-export-fees';
 import { estimateReturnLines } from './estimate-returns';
+import { type ResolvedTrendyolCommissionRate } from './resolve-commission-rate';
 import { estimateCommissionLines, estimateSaleLines } from './estimate-sale-and-commission';
 import { estimateServiceFeeLine } from './estimate-service-fee';
 import { estimateShippingLine } from './estimate-shipping';
@@ -35,6 +36,9 @@ export interface EstimateResult {
   readonly lines: readonly ProfitLine[];
   readonly issues: readonly ProfitIssue[];
   readonly allocation: AllocationItemSets;
+  // The commission rate resolved for each active item (null when nothing applied). It
+  // is the single source for the scenario's reported rate; the order path ignores it.
+  readonly commissionByItem: ReadonlyMap<string, ResolvedTrendyolCommissionRate | null>;
 }
 
 /**
@@ -63,7 +67,12 @@ export function estimateTrendyolParcel(input: TrendyolEstimateInput): EstimateRe
   }));
 
   if (snapshot.isCancelled) {
-    return { lines: [], issues: [], allocation: { activeItems: [], returnedItems: [], allItems } };
+    return {
+      lines: [],
+      issues: [],
+      allocation: { activeItems: [], returnedItems: [], allItems },
+      commissionByItem: new Map(),
+    };
   }
 
   const lines: ProfitLine[] = [];
@@ -141,5 +150,6 @@ export function estimateTrendyolParcel(input: TrendyolEstimateInput): EstimateRe
     lines,
     issues,
     allocation: { activeItems: allocationActiveItems, returnedItems, allItems },
+    commissionByItem: commission.commissionByItem,
   };
 }
