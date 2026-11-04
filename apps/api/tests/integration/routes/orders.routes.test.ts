@@ -3,6 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import {
+  buildStatementBreakdown,
+  computeParcelProfit,
+  recomputeParcelProfit,
+  statementTotalsFromStatement,
+} from '@pazarsync/profit';
 
 import { createApp } from '../../../src/app';
 import { listOrders } from '../../../src/services/order.service';
@@ -15,9 +21,11 @@ import {
   createOrderClaimItem,
   createOrderFee,
   createOrganization,
+  createProfitLine,
   createProfitStatement,
   createStore,
 } from '../../helpers/factories';
+import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 describe('Order routes', () => {
   const app = createApp();
@@ -78,6 +86,93 @@ describe('Order routes', () => {
     });
 
     return order;
+  }
+
+  // Seeds a calculable Trendyol order: a digital variant (so no shipping/PSF line
+  // can block the estimate) with a COGS cost profile and a per-line commission rate,
+  // so the engine computes a non-null net profit. No statement or line rows are
+  // written here -- the caller either runs the writer (recomputeParcelProfit) or
+  // lets the detail compute the profit read-only in the request. Returns the order id.
+  async function seedCalculableTrendyolOrder(orgId: string, storeId: string): Promise<string> {
+    await ensureFeeDefinitions();
+
+    const product = await prisma.product.create({
+      data: {
+        organizationId: orgId,
+        storeId,
+        platformContentId: BigInt(Math.floor(Math.random() * 1e9)),
+        productMainId: `pm-${randomUUID().slice(0, 8)}`,
+        title: 'Hesaplanabilir Ürün',
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: orgId,
+        storeId,
+        productId: product.id,
+        platformVariantId: BigInt(Math.floor(Math.random() * 1e12)),
+        barcode: `BC-${randomUUID().slice(0, 10)}`,
+        stockCode: `SC-${randomUUID().slice(0, 8)}`,
+        salePrice: '240.00',
+        listPrice: '240.00',
+        isDigital: true,
+      },
+    });
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: orgId,
+        storeId,
+        name: `COGS-${randomUUID().slice(0, 8)}`,
+        type: 'COGS',
+        amountGross: '60.00',
+        vatRate: '20',
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: orgId,
+        version: 1,
+        name: profile.name,
+        type: 'COGS',
+        amountGross: '60.00',
+        vatRate: '20',
+        changedFields: [],
+        changedAt: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: orgId, productVariantId: variant.id, profileId: profile.id },
+    });
+
+    const order = await createOrder(orgId, storeId, { status: 'DELIVERED' });
+    await prisma.order.update({
+      where: { id: order.id },
+      data: {
+        saleGross: '240.00',
+        saleVat: '40.00',
+        listGross: '240.00',
+        sellerDiscountGross: '0.00',
+      },
+    });
+    await prisma.orderItem.create({
+      data: {
+        orderId: order.id,
+        organizationId: orgId,
+        productVariantId: variant.id,
+        quantity: 1,
+        barcode: variant.barcode,
+        lineListGross: '240.00',
+        lineSaleGross: '240.00',
+        lineSellerDiscountGross: '0.00',
+        saleVatRate: '20.00',
+        commissionRate: '19.00',
+        orderCommissionRatePct: '19.00',
+        commissionGross: '0',
+        commissionVatRate: '20.00',
+      },
+    });
+    return order.id;
   }
 
   // ─── GET /v1/organizations/:orgId/stores/:storeId/orders ──────────────────
@@ -829,24 +924,20 @@ describe('Order routes', () => {
       expect(res.status).toBe(404);
     });
 
-    it('returns the order with its fees and claims', async () => {
+    it('returns the order with its claims and an empty fee list', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
       const order = await seedSimpleOrder(org.id, store.id);
 
+      // A stored order_fee must NOT surface: the detail serves fees as [] now
+      // (decision 9), so this proves the fee list is empty even when rows exist.
       await createOrderFee(order.id, org.id, {
         feeType: 'PLATFORM_SERVICE',
         source: 'ESTIMATE',
-        amountGross: '13.19', // KDV-dahil (eski net 10.99 + KDV 2.20)
+        amountGross: '13.19',
         vatRate: '20.00',
-      });
-      await createOrderFee(order.id, org.id, {
-        feeType: 'STOPPAGE',
-        source: 'ESTIMATE',
-        amountGross: '2.00',
-        vatRate: '0.00',
       });
 
       const claim = await createOrderClaim(org.id, store.id, order.id, { resolved: false });
@@ -891,8 +982,8 @@ describe('Order routes', () => {
       expect(body.id).toBe(order.id);
       expect(body.store.id).toBe(store.id);
       expect(body.saleGross).toBe('240');
-      expect(body.fees).toHaveLength(2);
-      expect(body.fees.map((f) => f.feeType).sort()).toEqual(['PLATFORM_SERVICE', 'STOPPAGE']);
+      // fees[] is always empty now, even though an order_fee row exists.
+      expect(body.fees).toEqual([]);
       expect(body.claims).toHaveLength(1);
       expect(body.claims[0]?.items[0]?.reasonCode).toBe('DAMAGEDITEM');
       // Unmatched line: variant null, the item-level barcode carries the trace.
@@ -1043,6 +1134,16 @@ describe('Order routes', () => {
         where: { id: order.id },
         data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
       });
+      // An excluded best-known statement carries no net profit, so the detail serves a
+      // null breakdown and null estimated profit even though the statement exists.
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'EXCLUDED',
+        saleGross: '100.00',
+        netProfit: null,
+        saleMarginPct: null,
+        costMarkupPct: null,
+      });
 
       const res = await app.request(
         `/v1/organizations/${org.id}/stores/${store.id}/orders/${order.id}`,
@@ -1058,11 +1159,113 @@ describe('Order routes', () => {
       expect(body.profitExcludedAt).not.toBeNull();
       expect(body.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
       expect(body.estimatedNetProfit).toBeNull();
-      // Kâr-dışı → backend-hesaplı kâr dökümü de yok.
+      // Profit-excluded → no backend-computed breakdown.
       expect(body.profitBreakdown).toBeNull();
     });
 
-    it('returns the backend-computed profitBreakdown for a calculable order', async () => {
+    it('returns the profit breakdown from the best-known statement', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const orderId = await seedCalculableTrendyolOrder(org.id, store.id);
+
+      // Run the writer so the detail reads the stored best-known statement + lines.
+      await prisma.$transaction(
+        (tx) => recomputeParcelProfit(tx, { organizationId: org.id, orderId }),
+        {
+          maxWait: 15000,
+          timeout: 30000,
+        },
+      );
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/${orderId}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        profitBreakdown: {
+          saleGross: string;
+          costGross: string;
+          shippingGross: string;
+          platformServiceGross: string;
+          internationalServiceGross: string;
+          overseasReturnOperationGross: string;
+          returnShippingGross: string;
+          marketplaceFeesGross: string;
+          taxesGross: string;
+          netProfit: string;
+        } | null;
+      };
+      const b = body.profitBreakdown;
+      if (b === null) throw new Error('profitBreakdown unexpectedly null');
+      expect(b.saleGross).toBe('240.00');
+      expect(b.costGross).toBe('60.00');
+      // A digital parcel ships nothing and pays no PSF; the micro/return rows are
+      // absent too, so every absent row is exactly "0.00".
+      expect(b.shippingGross).toBe('0.00');
+      expect(b.platformServiceGross).toBe('0.00');
+      expect(b.internationalServiceGross).toBe('0.00');
+      expect(b.overseasReturnOperationGross).toBe('0.00');
+      expect(b.returnShippingGross).toBe('0.00');
+      // The four display groups close to the sale to the kurus (decision 6).
+      const closed = new Decimal(b.costGross)
+        .add(b.marketplaceFeesGross)
+        .add(b.taxesGross)
+        .add(b.netProfit);
+      expect(closed.toFixed(2)).toBe(b.saleGross);
+    });
+
+    it('computes the breakdown in the request when no statement is stored yet', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const orderId = await seedCalculableTrendyolOrder(org.id, store.id);
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/${orderId}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { profitBreakdown: unknown };
+
+      // The detail must match a fresh read-only computation of the same parcel, built
+      // from the order's own list/discount columns (240 / 0).
+      const computed = await computeParcelProfit(prisma, { organizationId: org.id, orderId });
+      const expected = buildStatementBreakdown({
+        totals: statementTotalsFromStatement(computed.bestKnown),
+        selectedLines: computed.bestKnown.selectedLines,
+        listGross: new Decimal('240.00'),
+        sellerDiscountGross: new Decimal('0.00'),
+      });
+      expect(body.profitBreakdown).toEqual(expected);
+
+      // The request wrote nothing: no statement or line rows exist afterwards.
+      expect(await prisma.orderProfitStatement.count({ where: { orderId } })).toBe(0);
+      expect(await prisma.profitLine.count({ where: { orderId } })).toBe(0);
+    });
+
+    it('returns no breakdown for a platform the engine cannot compute', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      // Hepsiburada has no profit computer yet, so a request with no stored statement
+      // returns a null breakdown instead of raising a 500.
+      const store = await createStore(org.id, { platform: 'HEPSIBURADA' });
+      const order = await createOrder(org.id, store.id);
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/${order.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { profitBreakdown: unknown };
+      expect(body.profitBreakdown).toBeNull();
+    });
+
+    it('returns item cost and commission from the profit lines', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
@@ -1070,50 +1273,73 @@ describe('Order routes', () => {
       const order = await createOrder(org.id, store.id, { status: 'DELIVERED' });
       await prisma.order.update({
         where: { id: order.id },
-        data: {
-          // GROSS konvansiyon: saleGross = KDV-dahil (200 net + 40 KDV = 240);
-          // listGross = saleGross + satıcı indirimi brüt (240 + 30 = 270);
-          // sellerDiscountGross = 30 (display-only, netProfit'i etkilemez).
-          // Persist edilen skalarlar, eklenen kalem+fee'lerden computeProfit'in
-          // ÜRETECEĞİ değerlerle TUTARLI (drift değil). STOPAJ kâr dökümünde
-          // GÖSTERİLMEZ (ProfitBreakdown wire'da yok) → setup'tan çıkarıldı, böylece
-          // döküm kendi alt-çizgisine (netProfit) toplanır:
-          // netProfit = 240−60−24−0−13.19−23.80 = 119.01; netVat = 40−10−4−2.20 = 23.80.
-          saleGross: new Decimal('240.00'),
-          saleVat: new Decimal('40.00'),
-          listGross: new Decimal('270.00'),
-          sellerDiscountGross: new Decimal('30.00'),
-          estimatedNetProfit: new Decimal('119.01'),
-          estimatedNetVat: new Decimal('23.80'),
-        },
+        data: { saleGross: '240.00', saleVat: '40.00' },
       });
-      await prisma.orderItem.create({
+
+      // Item 1 has a cost line and two commission lines (an estimate carrying the rate,
+      // and a marketplace-record actual carrying the settled amount). Item 2 is named
+      // by a MISSING_COST issue, so its unit cost reads null.
+      const item1 = await prisma.orderItem.create({
         data: {
           orderId: order.id,
           organizationId: org.id,
           productVariantId: null,
-          barcode: '8680000000002',
-          quantity: 1,
+          barcode: 'BC-ITEM-1',
+          platformLineId: 7001n,
+          quantity: 2,
           commissionRate: '10.00',
-          // GROSS konvansiyon: komisyon brüt = eski net 20 + KDV 4 = 24.
-          commissionGross: '24.00',
-          // Maliyet snapshot brüt = eski net 50 + KDV 10 = 60 (KDV oranı %20).
-          unitCostSnapshotGross: '60.00',
-          unitCostSnapshotVatRate: '20.00',
-          // Satıcı indirimi brüt = eski net 25 + KDV 5 = 30 (display-only; netProfit'i
-          // ETKİLEMEZ — saleGross zaten effectiveSale). listGross = 240 + 30 = 270.
-          lineSellerDiscountGross: '30.00',
+          commissionGross: '0',
         },
       });
-      // ESTIMATE fee (SETTLEMENT/CARGO değil) → tahmini basis dökümüne girer.
-      // amountGross = KDV-dahil (eski net 10.99 + KDV 2.20 = 13.19). STOPAJ fee'si
-      // EKLENMEZ: kâr dökümü (ProfitBreakdown) stopajı GÖSTERMEZ (wire'da alan yok),
-      // bu yüzden setup'tan çıkarıldı → döküm kendi alt-çizgisine temiz toplanır.
-      await createOrderFee(order.id, org.id, {
-        feeType: 'PLATFORM_SERVICE',
-        source: 'ESTIMATE',
-        amountGross: '13.19',
-        vatRate: '20.00',
+      const item2 = await prisma.orderItem.create({
+        data: {
+          orderId: order.id,
+          organizationId: org.id,
+          productVariantId: null,
+          barcode: 'BC-ITEM-2',
+          platformLineId: 7002n,
+          quantity: 1,
+          commissionRate: '15.00',
+          commissionGross: '0',
+        },
+      });
+
+      await createProfitLine(order.id, org.id, store.id, {
+        orderItemId: item1.id,
+        type: 'COST_COGS',
+        certainty: 'ESTIMATE',
+        source: 'SELLER_INPUT',
+        amountGross: '100.00',
+        amountVat: '16.67',
+        vatRatePct: '20',
+      });
+      await createProfitLine(order.id, org.id, store.id, {
+        orderItemId: item1.id,
+        type: 'COMMISSION',
+        certainty: 'ESTIMATE',
+        source: 'RULE',
+        amountGross: '20.00',
+        amountVat: '3.33',
+        vatRatePct: '20',
+        inputs: { ratePct: '19' },
+      });
+      await createProfitLine(order.id, org.id, store.id, {
+        orderItemId: item1.id,
+        type: 'COMMISSION',
+        certainty: 'ACTUAL',
+        source: 'MARKETPLACE_RECORD',
+        amountGross: '24.00',
+        amountVat: '4.00',
+        vatRatePct: '20',
+        externalRecordId: 'settle-1',
+        externalRecordType: 'Sale',
+      });
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'NOT_COMPUTABLE',
+        saleGross: '240.00',
+        netProfit: null,
+        issues: [{ code: 'MISSING_COST', orderItemId: item2.id, detail: null }],
       });
 
       const res = await app.request(
@@ -1122,40 +1348,29 @@ describe('Order routes', () => {
       );
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        profitBreakdown: {
-          listGross: string;
-          sellerDiscountGross: string;
-          saleGross: string;
-          costGross: string;
+        items: {
+          id: string;
+          unitCostSnapshotGross: string | null;
+          unitCostSnapshotVatRate: string | null;
           commissionGross: string;
-          shippingGross: string;
-          platformServiceGross: string;
-          netVat: string;
-          netProfit: string;
-        } | null;
+          commissionRate: string;
+          estimatedCommissionGross: string | null;
+          settledCommissionGross: string | null;
+        }[];
       };
-      const b = body.profitBreakdown;
-      if (b === null) throw new Error('profitBreakdown beklenmedik şekilde null');
-      // Brüt (KDV-dahil) toplamlar backend'de hesaplandı; netVat/netProfit persist'ten.
-      expect(b.saleGross).toBe('240.00'); // 200 + 40 (KDV-dahil)
-      expect(b.costGross).toBe('60.00'); // (50 + 10) × 1
-      expect(b.commissionGross).toBe('24.00'); // 20 + 4
-      expect(b.shippingGross).toBe('0.00'); // kargo fee yok
-      expect(b.platformServiceGross).toBe('13.19'); // 10.99 + 2.20
-      expect(b.netVat).toBe('23.80'); // persist edilen estimatedNetVat
-      expect(b.netProfit).toBe('119.01'); // persist edilen estimatedNetProfit (stopajsız)
-      // Satıcı indirimi şeffaflığı (display-only; netProfit'i ETKİLEMEZ).
-      expect(b.sellerDiscountGross).toBe('30.00'); // 25 + 5
-      expect(b.listGross).toBe('270.00'); // 240 + 30
-      // Çekirdek invariant: döküm kendi alt-çizgisine (netProfit) toplanmalı.
-      // Stopaj dökümde GÖSTERİLMEZ → setup'tan çıkarıldığı için netProfit stopajsız.
-      const sum = new Decimal(b.saleGross)
-        .sub(b.costGross)
-        .sub(b.commissionGross)
-        .sub(b.shippingGross)
-        .sub(b.platformServiceGross)
-        .sub(b.netVat);
-      expect(sum.toFixed(2)).toBe(b.netProfit);
+      const byId = new Map(body.items.map((i) => [i.id, i]));
+      const i1 = byId.get(item1.id);
+      const i2 = byId.get(item2.id);
+      // Unit cost: the cost line's gross divided by the quantity (100 / 2).
+      expect(i1?.unitCostSnapshotGross).toBe('50.00');
+      expect(i1?.unitCostSnapshotVatRate).toBe('20');
+      // Amount from the best-known (actual) line; rate from the estimate's inputs.ratePct.
+      expect(i1?.commissionGross).toBe('24.00');
+      expect(i1?.commissionRate).toBe('19');
+      expect(i1?.estimatedCommissionGross).toBe('20.00');
+      expect(i1?.settledCommissionGross).toBe('24.00');
+      // MISSING_COST names item 2 → its unit cost is null.
+      expect(i2?.unitCostSnapshotGross).toBeNull();
     });
   });
 

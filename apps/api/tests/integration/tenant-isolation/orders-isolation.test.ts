@@ -168,6 +168,9 @@ describe('Orders — tenant isolation', () => {
         commissionGross: '12.00',
       },
     });
+    // A stored best-known statement keeps the detail on its read path rather than
+    // computing in-request; this test only exercises vendorMissing, not profit.
+    await createProfitStatement(orderA.id, orgA.id, storeA.id, { view: 'BEST_KNOWN' });
     await prisma.catalogBarcodeMiss.create({
       data: { organizationId: orgA.id, storeId: storeA.id, barcode, vendorMissing: true },
     });
@@ -189,6 +192,7 @@ describe('Orders — tenant isolation', () => {
         commissionGross: '12.00',
       },
     });
+    await createProfitStatement(orderB.id, orgB.id, storeB.id, { view: 'BEST_KNOWN' });
 
     // Org A sees its own confirmed gap as true.
     const resA = await app.request(

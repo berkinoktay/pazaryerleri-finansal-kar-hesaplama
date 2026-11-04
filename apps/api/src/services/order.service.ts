@@ -1,7 +1,25 @@
 import type { Prisma } from '@pazarsync/db';
 import { prisma } from '@pazarsync/db';
 import { OrderStatus, ProfitStatementView, ReconciliationStatus } from '@pazarsync/db/enums';
-import { buildProfitBreakdown, roundPercent } from '@pazarsync/profit';
+import {
+  STORED_STATEMENT_TOTALS_SELECT,
+  UnsupportedPlatformError,
+  buildStatementBreakdown,
+  computeParcelProfit,
+  itemProfitValues,
+  loadOrderProfitLines,
+  parseStoredIssues,
+  roundPercent,
+  selectLines,
+  statementTotalsFromRow,
+  statementTotalsFromStatement,
+  type ComputedParcelProfit,
+  type ItemProfitValues,
+  type ProfitIssue,
+  type ProfitLine,
+  type ProfitStatement,
+  type StatementBreakdown,
+} from '@pazarsync/profit';
 import { Decimal } from 'decimal.js';
 
 import { resolveVendorMissingBarcodes } from '../lib/catalog-barcode-miss-lookup';
@@ -10,6 +28,8 @@ import {
   STATEMENT_LIST_SELECT,
   orderProfitFields,
   toStatementPair,
+  type OrderProfitFields,
+  type StatementListRow,
 } from '../lib/order-profit-fields';
 import { toPromotionDisplays } from '../lib/promotion-displays';
 import type {
@@ -456,6 +476,177 @@ export async function getOrdersSummary(
   };
 }
 
+/**
+ * The statement columns the order detail reads: the list projection's fields plus the
+ * breakdown totals and the stored issues. A superset of STATEMENT_LIST_SELECT, so the
+ * same rows feed both toStatementPair (the profit fields) and statementTotalsFromRow
+ * (the breakdown totals). Store-scoped reads filter these by organizationId + storeId.
+ */
+const DETAIL_STATEMENT_SELECT = {
+  view: true,
+  status: true,
+  reconciliationStatus: true,
+  issues: true,
+  ...STORED_STATEMENT_TOTALS_SELECT,
+} as const satisfies Prisma.OrderProfitStatementSelect;
+
+type DetailStatementRow = Prisma.OrderProfitStatementGetPayload<{
+  select: typeof DETAIL_STATEMENT_SELECT;
+}>;
+
+/** The two view selections and the best-known issues an order's item values read. */
+interface OrderProfitLineContext {
+  readonly bestKnownLines: readonly ProfitLine[];
+  readonly estimateLines: readonly ProfitLine[];
+  readonly issues: readonly ProfitIssue[];
+}
+
+/**
+ * Everything the order detail needs from the profit layer: the profit fields
+ * (reconciliation status, estimated / settled net profit), the best-known breakdown,
+ * and the per-item line context. lineContext is null only when the engine cannot
+ * compute this platform's profit at all, in which case every item falls back to its
+ * own columns and the value-only figures are null.
+ */
+interface OrderProfitDetail {
+  readonly fields: OrderProfitFields;
+  readonly profitBreakdown: StatementBreakdown | null;
+  readonly lineContext: OrderProfitLineContext | null;
+}
+
+/** The all-null item values for a platform whose profit the engine cannot compute. */
+const EMPTY_ITEM_PROFIT_VALUES: ItemProfitValues = {
+  unitCostGross: null,
+  unitCostVatRate: null,
+  commissionGross: null,
+  commissionRate: null,
+  estimatedCommissionGross: null,
+  settledCommissionGross: null,
+};
+
+/**
+ * Projects an in-request computed statement into the list-row shape orderProfitFields
+ * reads, rounding the two margins to the stored column scale exactly as the writer
+ * would, so the computed path reports the same fields a stored row would.
+ */
+function statementListRowFromStatement(statement: ProfitStatement): StatementListRow {
+  return {
+    view: statement.view,
+    status: statement.status,
+    saleGross: statement.saleGross,
+    netProfit: statement.netProfit,
+    saleMarginPct: statement.saleMarginPct === null ? null : roundPercent(statement.saleMarginPct),
+    costMarkupPct: statement.costMarkupPct === null ? null : roundPercent(statement.costMarkupPct),
+    reconciliationStatus: statement.reconciliationStatus,
+  };
+}
+
+/**
+ * Loads the order's profit detail from its two stored statements and lines, or computes
+ * it in the request when no best-known statement is stored yet (decision 8). The writer
+ * persists the estimate and best-known views together, so a missing best-known row means
+ * no statement at all; computeParcelProfit then produces both views read-only. Only an
+ * UnsupportedPlatformError is expected from it (a platform the engine cannot compute):
+ * the detail then keeps its profit fields empty and its breakdown null; every other
+ * error propagates. Every query filters organizationId + storeId (tenant defense).
+ */
+async function loadOrderProfitDetail(
+  orgId: string,
+  storeId: string,
+  order: {
+    readonly id: string;
+    readonly status: OrderStatus;
+    readonly saleGross: Prisma.Decimal | null;
+    readonly listGross: Prisma.Decimal | null;
+    readonly sellerDiscountGross: Prisma.Decimal | null;
+  },
+): Promise<OrderProfitDetail> {
+  const statements = await prisma.orderProfitStatement.findMany({
+    where: { organizationId: orgId, storeId, orderId: order.id },
+    select: DETAIL_STATEMENT_SELECT,
+  });
+  const linesByOrder = await loadOrderProfitLines(prisma, {
+    organizationId: orgId,
+    storeId,
+    orderIds: [order.id],
+  });
+  const lines = linesByOrder.get(order.id) ?? [];
+
+  const listGross = new Decimal(order.listGross?.toString() ?? '0');
+  const sellerDiscountGross = new Decimal(order.sellerDiscountGross?.toString() ?? '0');
+
+  let bestKnownRow: DetailStatementRow | null = null;
+  for (const statement of statements) {
+    if (statement.view === ProfitStatementView.BEST_KNOWN) {
+      bestKnownRow = statement;
+    }
+  }
+
+  if (bestKnownRow !== null) {
+    const fields = orderProfitFields({
+      pair: toStatementPair(statements),
+      orderStatus: order.status,
+      orderSaleGross: order.saleGross,
+    });
+    const lineContext: OrderProfitLineContext = {
+      bestKnownLines: selectLines(lines, 'BEST_KNOWN'),
+      estimateLines: selectLines(lines, 'ESTIMATE'),
+      issues: parseStoredIssues(bestKnownRow.issues),
+    };
+    const profitBreakdown = buildStatementBreakdown({
+      totals: statementTotalsFromRow(bestKnownRow),
+      selectedLines: lineContext.bestKnownLines,
+      listGross,
+      sellerDiscountGross,
+    });
+    return { fields, profitBreakdown, lineContext };
+  }
+
+  // No best-known statement stored yet: compute read-only in the request (decision 8).
+  let computed: ComputedParcelProfit;
+  try {
+    computed = await computeParcelProfit(prisma, { organizationId: orgId, orderId: order.id });
+  } catch (error) {
+    if (error instanceof UnsupportedPlatformError) {
+      // A platform the engine cannot compute (e.g. Hepsiburada): no profit at all.
+      return {
+        fields: orderProfitFields({
+          pair: { estimate: null, bestKnown: null },
+          orderStatus: order.status,
+          orderSaleGross: order.saleGross,
+        }),
+        profitBreakdown: null,
+        lineContext: null,
+      };
+    }
+    throw error;
+  }
+
+  const fields = orderProfitFields({
+    pair: {
+      estimate: statementListRowFromStatement(computed.estimate),
+      bestKnown: statementListRowFromStatement(computed.bestKnown),
+    },
+    orderStatus: order.status,
+    orderSaleGross: order.saleGross,
+  });
+  const profitBreakdown = buildStatementBreakdown({
+    totals: statementTotalsFromStatement(computed.bestKnown),
+    selectedLines: computed.bestKnown.selectedLines,
+    listGross,
+    sellerDiscountGross,
+  });
+  return {
+    fields,
+    profitBreakdown,
+    lineContext: {
+      bestKnownLines: computed.bestKnown.selectedLines,
+      estimateLines: computed.estimate.selectedLines,
+      issues: computed.bestKnown.issues,
+    },
+  };
+}
+
 export async function getOrderById(
   orgId: string,
   storeId: string,
@@ -485,9 +676,6 @@ export async function getOrderById(
           },
         },
       },
-      fees: {
-        orderBy: [{ capturedAt: 'asc' }, { id: 'asc' }],
-      },
       claims: {
         orderBy: { claimDate: 'asc' },
         include: {
@@ -514,84 +702,11 @@ export async function getOrderById(
     ),
   );
 
-  // Kâr dökümü (tahmini basis) — backend-hesaplı, frontend türetmez. GROSS
-  // konvansiyon: computeProfit'in persist ettiği netProfit/netVat + kalıcı gross
-  // marjlar + ESTIMATE fee'lerden brüt toplamlar. Estimate hesaplanmadıysa
-  // (profit-excluded / maliyet eksik) null. buildProfitBreakdown marjı '—'
-  // (em-dash) sentinel olarak döndürür; wire kontratı gerçek null taşır.
-  const profitBreakdown =
-    row.estimatedNetProfit !== null &&
-    row.estimatedNetVat !== null &&
-    row.saleGross !== null &&
-    row.saleVat !== null
-      ? buildProfitBreakdown({
-          saleGross: new Decimal(row.saleGross.toString()),
-          saleVat: new Decimal(row.saleVat.toString()),
-          listGross: new Decimal(row.listGross?.toString() ?? '0'),
-          sellerDiscountGross: new Decimal(row.sellerDiscountGross?.toString() ?? '0'),
-          items: row.items.map((item) => ({
-            quantity: item.quantity,
-            lineListGross: new Decimal(item.lineListGross.toString()),
-            lineSaleGross: new Decimal(item.lineSaleGross.toString()),
-            lineSellerDiscountGross: new Decimal(item.lineSellerDiscountGross.toString()),
-            saleVatRate: Number(item.saleVatRate),
-            commissionGross: new Decimal(item.commissionGross.toString()),
-            refundedCommissionGross: new Decimal(item.refundedCommissionGross.toString()),
-            commissionVatRate: Number(item.commissionVatRate),
-            unitCostSnapshotGross:
-              item.unitCostSnapshotGross === null
-                ? null
-                : new Decimal(item.unitCostSnapshotGross.toString()),
-            unitCostSnapshotVatRate: Number(item.unitCostSnapshotVatRate ?? 0),
-          })),
-          // Breakdown estimated kârla eşleşir (netProfit: estimatedNetProfit aşağıda).
-          // Forward fee'ler (SHIPPING/PSF/STOPPAGE) YALNIZ ESTIMATE kaynağından alınır —
-          // estimate motorunun (applyEstimateOnOrderCreate) kullandığıyla birebir; aksi
-          // halde feeAgg, cargo-invoice geldikten sonra gerçek+tahmin forward'ı ÇİFT sayar.
-          // İade bacakları (4 tip) TÜM kaynaklardan geçer; resolveReturnLegs (breakdown
-          // içinde) per-leg gerçek-varsa-gerçek seçer (estimate motoruyla aynı).
-          fees: row.fees
-            .filter(
-              (fee) =>
-                fee.source === 'ESTIMATE' ||
-                fee.feeType === 'REFUND_DEDUCTION' ||
-                fee.feeType === 'COMMISSION_REFUND' ||
-                fee.feeType === 'COST_RETURN' ||
-                fee.feeType === 'RETURN_SHIPPING' ||
-                fee.feeType === 'STOPPAGE_REFUND',
-            )
-            .map((fee) => ({
-              feeType: fee.feeType,
-              direction: fee.direction,
-              amountGross: new Decimal(fee.amountGross.toString()),
-              vatRate: Number(fee.vatRate),
-              source: fee.source,
-            })),
-          netProfit: new Decimal(row.estimatedNetProfit.toString()),
-          netVat: new Decimal(row.estimatedNetVat.toString()),
-          saleMarginPct:
-            row.estimatedSaleMarginPct === null
-              ? null
-              : new Decimal(row.estimatedSaleMarginPct.toString()),
-          costMarkupPct:
-            row.estimatedCostMarkupPct === null
-              ? null
-              : new Decimal(row.estimatedCostMarkupPct.toString()),
-        })
-      : null;
-
-  // buildProfitBreakdown marjı '—' sentinel'i ile döndürür; wire kontratı gerçek
-  // null taşır (frontend `=== null ? '—'` ile render eder, türetmez).
-  const profitBreakdownWire =
-    profitBreakdown === null
-      ? null
-      : {
-          ...profitBreakdown,
-          saleMarginPct:
-            profitBreakdown.saleMarginPct === '—' ? null : profitBreakdown.saleMarginPct,
-          costMarkupPct:
-            profitBreakdown.costMarkupPct === '—' ? null : profitBreakdown.costMarkupPct,
-        };
+  // The profit fields, the breakdown and the per-item cost/commission values all read
+  // the order's profit statements and lines (decisions 1, 6-8). When no best-known
+  // statement is stored yet, loadOrderProfitDetail computes them read-only in the
+  // request. The legacy order columns and order_fees are no longer read here.
+  const profit = await loadOrderProfitDetail(orgId, storeId, row);
 
   return {
     id: row.id,
@@ -618,68 +733,75 @@ export async function getOrderById(
     saleGross: row.saleGross?.toString() ?? null,
     saleVat: row.saleVat?.toString() ?? null,
     listGross: row.listGross?.toString() ?? null,
-    estimatedNetProfit: row.estimatedNetProfit?.toString() ?? null,
-    settledNetProfit: row.settledNetProfit?.toString() ?? null,
-    profitBreakdown: profitBreakdownWire,
+    estimatedNetProfit: profit.fields.estimatedNetProfit,
+    settledNetProfit: profit.fields.settledNetProfit,
+    profitBreakdown: profit.profitBreakdown,
     promotionDisplays: toPromotionDisplays(row.promotionDisplays),
 
     profitExcludedAt: row.profitExcludedAt?.toISOString() ?? null,
     profitExclusionReason: row.profitExclusionReason,
 
-    reconciliationStatus: row.reconciliationStatus,
-    paymentOrderId: row.paymentOrderId?.toString() ?? null,
-    paymentDate: row.paymentDate?.toISOString() ?? null,
+    reconciliationStatus: profit.fields.reconciliationStatus,
+    // fees[] is always empty and paymentOrderId/paymentDate always null in the wire
+    // contract now (Faz 4A decision 9); both fall away entirely in Faz 5.
+    paymentOrderId: null,
+    paymentDate: null,
 
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
 
-    items: row.items.map((item) => ({
-      id: item.id,
-      quantity: item.quantity,
-      lineSaleGross: item.lineSaleGross.toString(),
-      saleVatRate: item.saleVatRate.toString(),
-      lineSellerDiscountGross: item.lineSellerDiscountGross.toString(),
-      commissionGross: item.commissionGross.toString(),
-      commissionRate: item.commissionRate.toString(),
-      commissionVatRate: item.commissionVatRate.toString(),
-      refundedCommissionGross: item.refundedCommissionGross.toString(),
-      estimatedCommissionGross: item.estimatedCommissionGross?.toString() ?? null,
-      settledCommissionGross: item.settledCommissionGross?.toString() ?? null,
-      unitCostSnapshotGross: item.unitCostSnapshotGross?.toString() ?? null,
-      unitCostSnapshotVatRate: item.unitCostSnapshotVatRate?.toString() ?? null,
-      commissionInvoiceSerialNumber: item.commissionInvoiceSerialNumber,
-      barcode: item.barcode,
-      // Only an unmatched line (no variant) with a confirmed catalog gap is true;
-      // matched lines are always false.
-      vendorMissing:
-        item.productVariant === null &&
-        item.barcode !== null &&
-        vendorMissingBarcodes.has(item.barcode),
-      variant:
-        item.productVariant === null
-          ? null
-          : {
-              id: item.productVariant.id,
-              barcode: item.productVariant.barcode,
-              productName: item.productVariant.product.title,
-              productImageUrl: item.productVariant.product.imageUrls[0] ?? null,
-              marketplaceProductCode: item.productVariant.stockCode,
-            },
-    })),
+    items: row.items.map((item) => {
+      // Cost and commission figures come from the profit lines (decision 7); the
+      // commission amount and rate fall back to the item's own columns when no line
+      // supplies them. An unsupported platform leaves every figure null/column.
+      const values =
+        profit.lineContext === null
+          ? EMPTY_ITEM_PROFIT_VALUES
+          : itemProfitValues({
+              orderItemId: item.id,
+              quantity: item.quantity,
+              bestKnownLines: profit.lineContext.bestKnownLines,
+              estimateLines: profit.lineContext.estimateLines,
+              issues: profit.lineContext.issues,
+            });
+      return {
+        id: item.id,
+        quantity: item.quantity,
+        lineSaleGross: item.lineSaleGross.toString(),
+        saleVatRate: item.saleVatRate.toString(),
+        lineSellerDiscountGross: item.lineSellerDiscountGross.toString(),
+        commissionGross: values.commissionGross ?? item.commissionGross.toString(),
+        commissionRate: values.commissionRate ?? item.commissionRate.toString(),
+        commissionVatRate: item.commissionVatRate.toString(),
+        refundedCommissionGross: item.refundedCommissionGross.toString(),
+        estimatedCommissionGross: values.estimatedCommissionGross,
+        settledCommissionGross: values.settledCommissionGross,
+        unitCostSnapshotGross: values.unitCostGross,
+        unitCostSnapshotVatRate: values.unitCostVatRate,
+        commissionInvoiceSerialNumber: null,
+        barcode: item.barcode,
+        // Only an unmatched line (no variant) with a confirmed catalog gap is true;
+        // matched lines are always false.
+        vendorMissing:
+          item.productVariant === null &&
+          item.barcode !== null &&
+          vendorMissingBarcodes.has(item.barcode),
+        variant:
+          item.productVariant === null
+            ? null
+            : {
+                id: item.productVariant.id,
+                barcode: item.productVariant.barcode,
+                productName: item.productVariant.product.title,
+                productImageUrl: item.productVariant.product.imageUrls[0] ?? null,
+                marketplaceProductCode: item.productVariant.stockCode,
+              },
+      };
+    }),
 
-    fees: row.fees.map((fee) => ({
-      id: fee.id,
-      feeType: fee.feeType,
-      source: fee.source,
-      direction: fee.direction,
-      amountGross: fee.amountGross.toString(),
-      vatRate: fee.vatRate.toString(),
-      // Tahmin/gerçek-fatura ayrımı: ESTIMATE = henüz vendor-onaylı değil.
-      isEstimate: fee.source === 'ESTIMATE',
-      displayName: fee.displayName,
-      capturedAt: fee.capturedAt.toISOString(),
-      confirmedAt: fee.confirmedAt?.toISOString() ?? null,
-    })),
+    // Always empty in the wire contract now (decision 9); the fee timeline falls away
+    // in Faz 5.
+    fees: [],
 
     claims: row.claims.map((claim) => ({
       id: claim.id,
