@@ -11,9 +11,17 @@ import type {
   OrderStatus,
   Platform,
   Prisma,
+  ProfitLineCertainty,
+  ProfitLineLevel,
+  ProfitLineSource,
+  ProfitLineType,
+  ProfitStatementView,
+  ProfitStatus,
+  ReconciliationStatus,
   StoreEnvironment,
   StoreStatus,
 } from '@pazarsync/db';
+import { PROFIT_ENGINE_VERSION } from '@pazarsync/profit';
 
 import { prisma } from './db';
 
@@ -532,6 +540,120 @@ export async function createPriceChangeLog(
       trendyolBatchId: overrides.trendyolBatchId ?? `batch-${randomUUID()}`,
       status: overrides.status ?? 'PENDING',
       errorCode: overrides.errorCode ?? null,
+    },
+  });
+}
+
+// ─── Profit engine statements & lines (rebuild, phase 4A) ──────────────
+// Both tables are written only by the profit writer in production; tests seed
+// them directly so the order read paths (list, summary, detail, live
+// performance, returns) can be exercised without running the engine.
+
+export interface CreateProfitStatementOverrides {
+  view?: ProfitStatementView;
+  status?: ProfitStatus;
+  reconciliationStatus?: ReconciliationStatus;
+  // Decimal columns take strings (Prisma coerces). Totals default to "0".
+  saleGross?: string;
+  costGross?: string;
+  vatOutput?: string;
+  vatInput?: string;
+  vatNet?: string;
+  vatEffective?: string;
+  stoppageGross?: string;
+  stoppageIncluded?: boolean;
+  // netProfit + margins are nullable: null = not computable / excluded.
+  netProfit?: string | null;
+  saleMarginPct?: string | null;
+  costMarkupPct?: string | null;
+  issues?: Prisma.InputJsonValue;
+  settingsSnapshot?: Prisma.InputJsonValue;
+  contentHash?: string;
+  computedAt?: Date;
+}
+
+/**
+ * One computed profit statement for a parcel. Defaults to a best-known,
+ * estimated-status view with zero totals and null net profit / margins; pass a
+ * view/status/amounts override to shape the two views a test needs.
+ */
+export async function createProfitStatement(
+  orderId: string,
+  organizationId: string,
+  storeId: string,
+  overrides: CreateProfitStatementOverrides = {},
+) {
+  return prisma.orderProfitStatement.create({
+    data: {
+      organizationId,
+      storeId,
+      orderId,
+      view: overrides.view ?? 'BEST_KNOWN',
+      status: overrides.status ?? 'ESTIMATED',
+      reconciliationStatus: overrides.reconciliationStatus ?? 'NOT_SETTLED',
+      saleGross: overrides.saleGross ?? '0',
+      costGross: overrides.costGross ?? '0',
+      vatOutput: overrides.vatOutput ?? '0',
+      vatInput: overrides.vatInput ?? '0',
+      vatNet: overrides.vatNet ?? '0',
+      vatEffective: overrides.vatEffective ?? '0',
+      stoppageGross: overrides.stoppageGross ?? '0',
+      stoppageIncluded: overrides.stoppageIncluded ?? false,
+      netProfit: overrides.netProfit ?? null,
+      saleMarginPct: overrides.saleMarginPct ?? null,
+      costMarkupPct: overrides.costMarkupPct ?? null,
+      issues: overrides.issues ?? [],
+      settingsSnapshot: overrides.settingsSnapshot ?? {},
+      engineVersion: PROFIT_ENGINE_VERSION,
+      contentHash: overrides.contentHash ?? 'test',
+      computedAt: overrides.computedAt ?? new Date(),
+    },
+  });
+}
+
+export interface CreateProfitLineOverrides {
+  // Required for an item-level line; null for a parcel-level line.
+  orderItemId?: string | null;
+  type?: ProfitLineType;
+  level?: ProfitLineLevel;
+  certainty?: ProfitLineCertainty;
+  source?: ProfitLineSource;
+  amountGross?: string;
+  amountVat?: string;
+  vatRatePct?: string | null;
+  inputs?: Prisma.InputJsonValue;
+  externalRecordId?: string | null;
+  externalRecordType?: string | null;
+}
+
+/**
+ * One profit line. Defaults to an item-level, estimated COGS cost line with
+ * zero amounts; pass overrides for the type/level/certainty/source and amounts
+ * a test needs. An item-level line requires an orderItemId override.
+ */
+export async function createProfitLine(
+  orderId: string,
+  organizationId: string,
+  storeId: string,
+  overrides: CreateProfitLineOverrides = {},
+) {
+  return prisma.profitLine.create({
+    data: {
+      organizationId,
+      storeId,
+      orderId,
+      orderItemId: overrides.orderItemId ?? null,
+      type: overrides.type ?? 'COST_COGS',
+      level: overrides.level ?? 'ITEM',
+      certainty: overrides.certainty ?? 'ESTIMATE',
+      source: overrides.source ?? 'SELLER_INPUT',
+      amountGross: overrides.amountGross ?? '0',
+      amountVat: overrides.amountVat ?? '0',
+      vatRatePct: overrides.vatRatePct ?? null,
+      inputs: overrides.inputs ?? {},
+      externalRecordId: overrides.externalRecordId ?? null,
+      externalRecordType: overrides.externalRecordType ?? null,
+      engineVersion: PROFIT_ENGINE_VERSION,
     },
   });
 }

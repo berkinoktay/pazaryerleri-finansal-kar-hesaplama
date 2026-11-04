@@ -5,6 +5,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { prisma } from '@pazarsync/db';
 
 import { createApp } from '../../../src/app';
+import { listOrders } from '../../../src/services/order.service';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import {
@@ -14,6 +15,7 @@ import {
   createOrderClaimItem,
   createOrderFee,
   createOrganization,
+  createProfitStatement,
   createStore,
 } from '../../helpers/factories';
 
@@ -30,6 +32,9 @@ describe('Order routes', () => {
 
   // ─── Seed helpers ─────────────────────────────────────────────────────────
 
+  // Seeds an order plus its estimate + best-known statements (net 60, margin 25
+  // by default) so the list reads its profit fields from the statements, not the
+  // legacy columns. Overrides shape the best-known view the list surfaces.
   async function seedSimpleOrder(
     orgId: string,
     storeId: string,
@@ -37,12 +42,13 @@ describe('Order routes', () => {
       status?: 'DELIVERED' | 'PROCESSING' | 'CANCELLED' | 'RETURNED' | 'SHIPPED' | 'PENDING';
       platformOrderNumber?: string;
       orderDate?: Date;
-      estimatedSaleMarginPct?: string;
-      settledSaleMarginPct?: string;
+      netProfit?: string;
+      saleMarginPct?: string;
+      costMarkupPct?: string | null;
     } = {},
   ) {
     const base = await createOrder(orgId, storeId, { status: overrides.status ?? 'DELIVERED' });
-    return prisma.order.update({
+    const order = await prisma.order.update({
       where: { id: base.id },
       data: {
         platformOrderNumber: overrides.platformOrderNumber ?? `ON-${randomUUID().slice(0, 6)}`,
@@ -50,18 +56,28 @@ describe('Order routes', () => {
         // GROSS konvansiyon: saleGross = KDV-dahil satış (eski net 200 + KDV 40).
         saleGross: new Decimal('240.00'),
         saleVat: new Decimal('40.00'),
-        estimatedNetProfit: new Decimal('60.00'),
-        // Persist edilen marj (backend hesaplar; liste consumed = settled ?? estimated).
-        estimatedSaleMarginPct:
-          overrides.estimatedSaleMarginPct !== undefined
-            ? new Decimal(overrides.estimatedSaleMarginPct)
-            : new Decimal('25.00'),
-        settledSaleMarginPct:
-          overrides.settledSaleMarginPct !== undefined
-            ? new Decimal(overrides.settledSaleMarginPct)
-            : null,
       },
     });
+
+    const netProfit = overrides.netProfit ?? '60.00';
+    const saleMarginPct = overrides.saleMarginPct ?? '25.00';
+    await createProfitStatement(order.id, orgId, storeId, {
+      view: 'ESTIMATE',
+      status: 'ESTIMATED',
+      saleGross: '240.00',
+      netProfit,
+      saleMarginPct,
+    });
+    await createProfitStatement(order.id, orgId, storeId, {
+      view: 'BEST_KNOWN',
+      status: 'ESTIMATED',
+      saleGross: '240.00',
+      netProfit,
+      saleMarginPct,
+      costMarkupPct: overrides.costMarkupPct ?? null,
+    });
+
+    return order;
   }
 
   // ─── GET /v1/organizations/:orgId/stores/:storeId/orders ──────────────────
@@ -79,17 +95,14 @@ describe('Order routes', () => {
       const org = await createOrganization();
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
-      const order = await seedSimpleOrder(org.id, store.id);
-      await prisma.order.update({
-        where: { id: order.id },
-        data: { estimatedCostMarkupPct: new Decimal('38.40') },
-      });
+      await seedSimpleOrder(org.id, store.id, { costMarkupPct: '38.40' });
 
       const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
         headers: { Authorization: bearer(user.accessToken) },
       });
       expect(res.status).toBe(200);
       const body = await res.json();
+      // ROI reads the best-known statement's cost markup.
       expect(body.data[0].costMarkupPct).toBe('38.4');
     });
 
@@ -99,11 +112,7 @@ describe('Order routes', () => {
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
       const profitable = await seedSimpleOrder(org.id, store.id);
-      const losing = await seedSimpleOrder(org.id, store.id);
-      await prisma.order.update({
-        where: { id: losing.id },
-        data: { estimatedNetProfit: new Decimal('-50.00') },
-      });
+      const losing = await seedSimpleOrder(org.id, store.id, { netProfit: '-50.00' });
 
       const res = await app.request(
         `/v1/organizations/${org.id}/stores/${store.id}/orders?lossOnly=true`,
@@ -182,22 +191,19 @@ describe('Order routes', () => {
       expect(body.data[0]?.itemCount).toBe(0);
     });
 
-    it('exposes saleMarginPct = settled ?? estimated on list rows', async () => {
+    it('exposes saleMarginPct from the best-known statement', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
 
-      // estimate-only order → consumed margin is the estimate.
-      const estimateOnly = await seedSimpleOrder(org.id, store.id, {
+      const a = await seedSimpleOrder(org.id, store.id, {
         orderDate: new Date('2026-04-02T10:00:00Z'),
-        estimatedSaleMarginPct: '18.50',
+        saleMarginPct: '18.50',
       });
-      // settled order → consumed margin is the settled value (overrides estimate).
-      const settled = await seedSimpleOrder(org.id, store.id, {
+      const b = await seedSimpleOrder(org.id, store.id, {
         orderDate: new Date('2026-04-01T10:00:00Z'),
-        estimatedSaleMarginPct: '20.00',
-        settledSaleMarginPct: '17.25',
+        saleMarginPct: '17.25',
       });
 
       const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
@@ -206,9 +212,8 @@ describe('Order routes', () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { data: { id: string; saleMarginPct: string | null }[] };
       const byId = new Map(body.data.map((o) => [o.id, o.saleMarginPct]));
-      expect(byId.get(estimateOnly.id)).toBe('18.5');
-      // settled wins over estimated.
-      expect(byId.get(settled.id)).toBe('17.25');
+      expect(byId.get(a.id)).toBe('18.5');
+      expect(byId.get(b.id)).toBe('17.25');
     });
 
     it('serves promotionDisplays on list rows (null when the order has no promotion)', async () => {
@@ -249,9 +254,9 @@ describe('Order routes', () => {
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
 
-      const low = await seedSimpleOrder(org.id, store.id, { estimatedSaleMarginPct: '5.00' });
-      const mid = await seedSimpleOrder(org.id, store.id, { estimatedSaleMarginPct: '15.00' });
-      const high = await seedSimpleOrder(org.id, store.id, { estimatedSaleMarginPct: '40.00' });
+      const low = await seedSimpleOrder(org.id, store.id, { saleMarginPct: '5.00' });
+      const mid = await seedSimpleOrder(org.id, store.id, { saleMarginPct: '15.00' });
+      const high = await seedSimpleOrder(org.id, store.id, { saleMarginPct: '40.00' });
 
       const asc = await app.request(
         `/v1/organizations/${org.id}/stores/${store.id}/orders?sort=marginPct`,
@@ -266,6 +271,249 @@ describe('Order routes', () => {
       );
       const descBody = (await desc.json()) as { data: { id: string }[] };
       expect(descBody.data.map((o) => o.id)).toEqual([high.id, mid.id, low.id]);
+    });
+
+    it('returns the estimated and settled net profit from the two statements', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      // Reconciliation started → settled net profit surfaces (the best-known net).
+      const settled = await createOrder(org.id, store.id, {
+        orderDate: new Date('2026-04-02T10:00:00Z'),
+      });
+      await createProfitStatement(settled.id, org.id, store.id, {
+        view: 'ESTIMATE',
+        status: 'ESTIMATED',
+        saleGross: '240.00',
+        netProfit: '60.00',
+      });
+      await createProfitStatement(settled.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'PARTIALLY_SETTLED',
+        saleGross: '240.00',
+        netProfit: '55.00',
+        reconciliationStatus: 'PARTIALLY_SETTLED',
+      });
+
+      // Best-known still NOT_SETTLED → settled net profit stays null (decision 1).
+      const unsettled = await createOrder(org.id, store.id, {
+        orderDate: new Date('2026-04-01T10:00:00Z'),
+      });
+      await createProfitStatement(unsettled.id, org.id, store.id, {
+        view: 'ESTIMATE',
+        status: 'ESTIMATED',
+        saleGross: '240.00',
+        netProfit: '70.00',
+      });
+      await createProfitStatement(unsettled.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'ESTIMATED',
+        saleGross: '240.00',
+        netProfit: '70.00',
+        reconciliationStatus: 'NOT_SETTLED',
+      });
+
+      const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
+        headers: { Authorization: bearer(user.accessToken) },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { id: string; estimatedNetProfit: string | null; settledNetProfit: string | null }[];
+      };
+      const byId = new Map(body.data.map((o) => [o.id, o]));
+      expect(byId.get(settled.id)?.estimatedNetProfit).toBe('60');
+      expect(byId.get(settled.id)?.settledNetProfit).toBe('55');
+      expect(byId.get(unsettled.id)?.estimatedNetProfit).toBe('70');
+      expect(byId.get(unsettled.id)?.settledNetProfit).toBeNull();
+    });
+
+    it('filters by reconciliationStatus from the best-known statement', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      const partial = await createOrder(org.id, store.id);
+      await createProfitStatement(partial.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        saleGross: '240.00',
+        netProfit: '55.00',
+        reconciliationStatus: 'PARTIALLY_SETTLED',
+      });
+      const notSettled = await createOrder(org.id, store.id);
+      await createProfitStatement(notSettled.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        saleGross: '240.00',
+        netProfit: '60.00',
+        reconciliationStatus: 'NOT_SETTLED',
+      });
+      const noStatement = await createOrder(org.id, store.id);
+
+      const notSettledRes = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders?reconciliationStatus=NOT_SETTLED`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      const notSettledBody = (await notSettledRes.json()) as { data: { id: string }[] };
+      const notSettledIds = notSettledBody.data.map((o) => o.id);
+      // NOT_SETTLED includes the statement-less order (decision 2).
+      expect(notSettledIds).toContain(notSettled.id);
+      expect(notSettledIds).toContain(noStatement.id);
+      expect(notSettledIds).not.toContain(partial.id);
+
+      const partialRes = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders?reconciliationStatus=PARTIALLY_SETTLED`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      const partialBody = (await partialRes.json()) as { data: { id: string }[] };
+      expect(partialBody.data.map((o) => o.id)).toEqual([partial.id]);
+    });
+
+    it('pages a margin sort across orders with and without a statement', async () => {
+      // perPage 2 forces the segment-1 (has a statement) / segment-2 (none)
+      // boundary mid-page, so it exercises listOrders directly (the wire schema
+      // locks perPage to {10,25,50,100}).
+      const org = await createOrganization();
+      const store = await createStore(org.id);
+
+      const m5 = await createOrder(org.id, store.id);
+      await createProfitStatement(m5.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        saleGross: '100.00',
+        netProfit: '5.00',
+        saleMarginPct: '5.00',
+      });
+      const m15 = await createOrder(org.id, store.id);
+      await createProfitStatement(m15.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        saleGross: '100.00',
+        netProfit: '15.00',
+        saleMarginPct: '15.00',
+      });
+      const mNull = await createOrder(org.id, store.id);
+      await createProfitStatement(mNull.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        saleGross: '100.00',
+        netProfit: null,
+        saleMarginPct: null,
+      });
+      const noStmtA = await createOrder(org.id, store.id);
+      const noStmtB = await createOrder(org.id, store.id);
+
+      // Segment 2 is ordered by order id descending in both directions.
+      const segment2Desc = [noStmtA.id, noStmtB.id].sort().reverse();
+
+      for (const sort of ['marginPct', '-marginPct'] as const) {
+        const segment1 =
+          sort === 'marginPct' ? [m5.id, m15.id, mNull.id] : [m15.id, m5.id, mNull.id];
+        const expected = [...segment1, ...segment2Desc];
+
+        const paged: string[] = [];
+        for (let page = 1; page <= 3; page += 1) {
+          const result = await listOrders(org.id, store.id, { page, perPage: 2, sort });
+          for (const row of result.data) paged.push(row.id);
+        }
+        expect(paged).toEqual(expected);
+        expect(new Set(paged).size).toBe(5);
+      }
+    });
+
+    it('reports the best-known sale and zero for a cancelled order', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      // Return-adjusted order → the best-known statement's sale wins.
+      const withReturn = await createOrder(org.id, store.id, {
+        status: 'DELIVERED',
+        saleGross: '240.00',
+      });
+      await createProfitStatement(withReturn.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        saleGross: '180.00',
+        netProfit: '40.00',
+      });
+      // Cancelled order, no statement → sale is 0 (rule B5).
+      const cancelled = await createOrder(org.id, store.id, {
+        status: 'CANCELLED',
+        saleGross: '240.00',
+      });
+      // Plain order, no statement → its own sale.
+      const plain = await createOrder(org.id, store.id, {
+        status: 'DELIVERED',
+        saleGross: '150.00',
+      });
+
+      const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
+        headers: { Authorization: bearer(user.accessToken) },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { id: string; saleGross: string | null }[] };
+      const byId = new Map(body.data.map((o) => [o.id, o.saleGross]));
+      expect(byId.get(withReturn.id)).toBe('180');
+      expect(byId.get(cancelled.id)).toBe('0');
+      expect(byId.get(plain.id)).toBe('150');
+    });
+
+    it('never shows a profit for an excluded order', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      const normal = await seedSimpleOrder(org.id, store.id); // best-known net 60, sale 240
+      const excluded = await createOrder(org.id, store.id, {
+        status: 'DELIVERED',
+        saleGross: '100.00',
+      });
+      await prisma.order.update({
+        where: { id: excluded.id },
+        data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
+      });
+      await createProfitStatement(excluded.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'EXCLUDED',
+        saleGross: '100.00',
+        netProfit: null,
+        saleMarginPct: null,
+        costMarkupPct: null,
+      });
+
+      const listRes = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
+        headers: { Authorization: bearer(user.accessToken) },
+      });
+      const listBody = (await listRes.json()) as {
+        data: {
+          id: string;
+          estimatedNetProfit: string | null;
+          settledNetProfit: string | null;
+          saleMarginPct: string | null;
+          costMarkupPct: string | null;
+          saleGross: string | null;
+        }[];
+      };
+      const row = listBody.data.find((o) => o.id === excluded.id);
+      expect(row?.estimatedNetProfit).toBeNull();
+      expect(row?.settledNetProfit).toBeNull();
+      expect(row?.saleMarginPct).toBeNull();
+      expect(row?.costMarkupPct).toBeNull();
+      // Revenue still counts even though profit is excluded.
+      expect(row?.saleGross).toBe('100');
+
+      const summaryRes = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/summary`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      const summaryBody = (await summaryRes.json()) as {
+        totalRevenueGross: string;
+        netProfitGross: string;
+      };
+      // Net profit excludes the stamped order (null net); revenue includes it.
+      expect(summaryBody.netProfitGross).toBe('60');
+      expect(summaryBody.totalRevenueGross).toBe('340');
+      expect(normal.id).not.toBe(excluded.id);
     });
 
     it('filters by status', async () => {
@@ -805,14 +1053,7 @@ describe('Order routes', () => {
       const store = await createStore(org.id);
       await seedSimpleOrder(org.id, store.id);
       await seedSimpleOrder(org.id, store.id);
-      const losing = await seedSimpleOrder(org.id, store.id);
-      await prisma.order.update({
-        where: { id: losing.id },
-        data: {
-          estimatedNetProfit: new Decimal('-40.00'),
-          estimatedSaleMarginPct: new Decimal('-16.67'),
-        },
-      });
+      await seedSimpleOrder(org.id, store.id, { netProfit: '-40.00', saleMarginPct: '-16.67' });
 
       const res = await app.request(
         `/v1/organizations/${org.id}/stores/${store.id}/orders/summary`,
@@ -823,6 +1064,31 @@ describe('Order routes', () => {
       expect(body.totalRevenueGross).toBe('720'); // 3 × 240
       expect(body.netProfitGross).toBe('80'); // 60 + 60 − 40
       expect(body.lossOrderRate).toMatchObject({ lossCount: 1, totalCount: 3 });
+    });
+
+    it('averages the best-known margins', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      for (const margin of ['10.00', '20.00', '30.00']) {
+        const order = await createOrder(org.id, store.id);
+        await createProfitStatement(order.id, org.id, store.id, {
+          view: 'BEST_KNOWN',
+          saleGross: '240.00',
+          netProfit: '48.00',
+          saleMarginPct: margin,
+        });
+      }
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/summary`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { avgMarginPct: string | null };
+      expect(body.avgMarginPct).toBe('20'); // avg(10, 20, 30)
     });
   });
 });

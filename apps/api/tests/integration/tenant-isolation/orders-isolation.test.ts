@@ -8,6 +8,7 @@ import {
   createMembership,
   createOrder,
   createOrganization,
+  createProfitStatement,
   createStore,
 } from '../../helpers/factories';
 
@@ -213,7 +214,8 @@ describe('Orders — tenant isolation', () => {
     const orgA = await createOrganization();
     await createMembership(orgA.id, user.id);
     const storeA = await createStore(orgA.id);
-    await createOrder(orgA.id, storeA.id, { estimatedNetProfit: '10.00' });
+    // Not stamped → "calculated" tab (decision 3 — the stamp is the segment key).
+    await createOrder(orgA.id, storeA.id);
     const excludedA = await createOrder(orgA.id, storeA.id);
     await prisma.order.update({
       where: { id: excludedA.id },
@@ -236,5 +238,64 @@ describe('Orders — tenant isolation', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { counts: { calculated: number; excluded: number } };
     expect(body.counts).toEqual({ calculated: 1, excluded: 1 });
+  });
+
+  it('ignores a statement row filed under another organization', async () => {
+    // Org A's order carries a best-known statement row whose organizationId is
+    // org B's. Every list/summary query filters statements by org A, so the
+    // foreign-org row must never be read into org A's profit fields or totals.
+    const user = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, user.id);
+    const storeA = await createStore(orgA.id);
+    const orgB = await createOrganization();
+
+    const orderA = await createOrder(orgA.id, storeA.id, {
+      status: 'DELIVERED',
+      saleGross: '240.00',
+    });
+    await createProfitStatement(orderA.id, orgB.id, storeA.id, {
+      view: 'BEST_KNOWN',
+      status: 'SETTLED',
+      saleGross: '999.00',
+      netProfit: '999.00',
+      saleMarginPct: '99.00',
+      reconciliationStatus: 'FULLY_SETTLED',
+    });
+
+    const listRes = await app.request(`/v1/organizations/${orgA.id}/stores/${storeA.id}/orders`, {
+      headers: { Authorization: bearer(user.accessToken) },
+    });
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as {
+      data: {
+        id: string;
+        estimatedNetProfit: string | null;
+        settledNetProfit: string | null;
+        saleMarginPct: string | null;
+        saleGross: string | null;
+        reconciliationStatus: string;
+      }[];
+    };
+    const row = listBody.data.find((o) => o.id === orderA.id);
+    expect(row?.estimatedNetProfit).toBeNull();
+    expect(row?.settledNetProfit).toBeNull();
+    expect(row?.saleMarginPct).toBeNull();
+    // Falls back to the order's own sale, never the foreign 999.
+    expect(row?.saleGross).toBe('240');
+    expect(row?.reconciliationStatus).toBe('NOT_SETTLED');
+
+    const summaryRes = await app.request(
+      `/v1/organizations/${orgA.id}/stores/${storeA.id}/orders/summary`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(summaryRes.status).toBe(200);
+    const summaryBody = (await summaryRes.json()) as {
+      totalRevenueGross: string;
+      netProfitGross: string;
+    };
+    // The foreign 999 never enters org A's totals; revenue falls back to 240.
+    expect(summaryBody.netProfitGross).toBe('0');
+    expect(summaryBody.totalRevenueGross).toBe('240');
   });
 });
