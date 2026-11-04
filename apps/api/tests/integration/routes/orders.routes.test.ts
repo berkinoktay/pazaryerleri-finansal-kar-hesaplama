@@ -1342,6 +1342,79 @@ describe('Order routes', () => {
       }
     });
 
+    it('opens the detail without profit when a stored profit line is corrupt', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      // An order with a stored best-known statement and a profit line whose `inputs` is a
+      // nested object -- a shape the reader rejects. Rebuilding the stored rows throws, so
+      // the detail must still open with an empty profit section (owner decision 2026-11-04).
+      const order = await createOrder(org.id, store.id, {
+        status: 'DELIVERED',
+        saleGross: '240.00',
+      });
+      const item = await prisma.orderItem.create({
+        data: {
+          orderId: order.id,
+          organizationId: org.id,
+          productVariantId: null,
+          barcode: 'BC-CORRUPT-1',
+          platformLineId: 7501n,
+          quantity: 1,
+          commissionRate: '10.00',
+          commissionGross: '12.00',
+        },
+      });
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'ESTIMATED',
+        saleGross: '240.00',
+        netProfit: '60.00',
+      });
+      await createProfitLine(order.id, org.id, store.id, {
+        orderItemId: item.id,
+        type: 'COST_COGS',
+        certainty: 'ESTIMATE',
+        source: 'SELLER_INPUT',
+        amountGross: '30.00',
+        amountVat: '5.00',
+        vatRatePct: '20',
+        // A nested object is not a flat string/boolean/null input -- the reader throws.
+        inputs: { nested: { reason: 'corrupt' } },
+      });
+
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const res = await app.request(
+          `/v1/organizations/${org.id}/stores/${store.id}/orders/${order.id}`,
+          { headers: { Authorization: bearer(user.accessToken) } },
+        );
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          items: { id: string }[];
+          profitBreakdown: unknown;
+          estimatedNetProfit: string | null;
+        };
+        // Items still render; the profit section is empty.
+        expect(body.items).toHaveLength(1);
+        expect(body.items[0]?.id).toBe(item.id);
+        expect(body.profitBreakdown).toBeNull();
+        expect(body.estimatedNetProfit).toBeNull();
+
+        // The deliberate fallback logged exactly one [profit-read] error carrying the
+        // order id (owner decision 2026-11-04).
+        expect(errorSpy).toHaveBeenCalledTimes(1);
+        expect(errorSpy).toHaveBeenCalledWith(
+          '[profit-read] in-request profit computation failed',
+          expect.objectContaining({ surface: 'order-detail', orderId: order.id }),
+        );
+      } finally {
+        errorSpy.mockRestore();
+      }
+    });
+
     it('opens the detail of a cancelled order with zero sale', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();

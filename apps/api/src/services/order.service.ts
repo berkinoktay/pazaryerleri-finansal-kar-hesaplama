@@ -36,7 +36,10 @@ import type {
   OrderListSort,
   OrderSummaryQuery,
 } from '../validators/order.validator';
-import { computeParcelProfitForRead } from './profit-compute-fallback.service';
+import {
+  computeParcelProfitForRead,
+  logProfitReadFailure,
+} from './profit-compute-fallback.service';
 
 interface OrderListResult {
   data: OrderListItemResponse[];
@@ -539,14 +542,38 @@ function statementListRowFromStatement(statement: ProfitStatement): StatementLis
   };
 }
 
+/** The empty-profit detail: fields with no statement, a null breakdown and no line
+ *  context. The shared result both the unsupported-platform path and the corrupt-stored
+ *  fallback return, so the page opens with an empty profit section. */
+function emptyOrderProfitDetail(order: {
+  readonly status: OrderStatus;
+  readonly saleGross: Prisma.Decimal | null;
+}): OrderProfitDetail {
+  return {
+    fields: orderProfitFields({
+      pair: { estimate: null, bestKnown: null },
+      orderStatus: order.status,
+      orderSaleGross: order.saleGross,
+    }),
+    profitBreakdown: null,
+    lineContext: null,
+  };
+}
+
 /**
  * Loads the order's profit detail from its two stored statements and lines, or computes
  * it in the request when no best-known statement is stored yet (decision 8). The writer
  * persists the estimate and best-known views together, so a missing best-known row means
  * no statement at all; computeParcelProfit then produces both views read-only. Only an
  * UnsupportedPlatformError is expected from it (a platform the engine cannot compute):
- * the detail then keeps its profit fields empty and its breakdown null; every other
- * error propagates. Every query filters organizationId + storeId (tenant defense).
+ * the detail then keeps its profit fields empty and its breakdown null.
+ *
+ * The stored path rebuilds engine values from the persisted rows, which throws on a
+ * corrupt row (a malformed line `inputs`/`issues`, a half-set external record, a level
+ * conflict). One such row must not 500 the page: on any stored-derivation failure this
+ * logs at error level and returns the same empty-profit result, so the order, its items
+ * and claims still open (owner decision 2026-11-04). Every query filters organizationId
+ * + storeId (tenant defense).
  */
 async function loadOrderProfitDetail(
   orgId: string,
@@ -559,18 +586,10 @@ async function loadOrderProfitDetail(
     readonly sellerDiscountGross: Prisma.Decimal | null;
   },
 ): Promise<OrderProfitDetail> {
-  const [statements, linesByOrder] = await Promise.all([
-    prisma.orderProfitStatement.findMany({
-      where: { organizationId: orgId, storeId, orderId: order.id },
-      select: DETAIL_STATEMENT_SELECT,
-    }),
-    loadOrderProfitLines(prisma, {
-      organizationId: orgId,
-      storeId,
-      orderIds: [order.id],
-    }),
-  ]);
-  const lines = linesByOrder.get(order.id) ?? [];
+  const statements = await prisma.orderProfitStatement.findMany({
+    where: { organizationId: orgId, storeId, orderId: order.id },
+    select: DETAIL_STATEMENT_SELECT,
+  });
 
   const listGross = new Decimal(order.listGross?.toString() ?? '0');
   const sellerDiscountGross = new Decimal(order.sellerDiscountGross?.toString() ?? '0');
@@ -583,23 +602,42 @@ async function loadOrderProfitDetail(
   }
 
   if (bestKnownRow !== null) {
-    const fields = orderProfitFields({
-      pair: toStatementPair(statements),
-      orderStatus: order.status,
-      orderSaleGross: order.saleGross,
-    });
-    const lineContext: OrderProfitLineContext = {
-      bestKnownLines: selectLines(lines, 'BEST_KNOWN'),
-      estimateLines: selectLines(lines, 'ESTIMATE'),
-      issues: parseStoredIssues(bestKnownRow.issues),
-    };
-    const profitBreakdown = buildStatementBreakdown({
-      totals: statementTotalsFromRow(bestKnownRow),
-      selectedLines: lineContext.bestKnownLines,
-      listGross,
-      sellerDiscountGross,
-    });
-    return { fields, profitBreakdown, lineContext };
+    // Stored path: rebuild the detail from the persisted statements and lines. A single
+    // corrupt stored row throws here; log it and open with an empty profit section
+    // rather than 500 the whole response (owner decision 2026-11-04).
+    try {
+      const linesByOrder = await loadOrderProfitLines(prisma, {
+        organizationId: orgId,
+        storeId,
+        orderIds: [order.id],
+      });
+      const lines = linesByOrder.get(order.id) ?? [];
+      const fields = orderProfitFields({
+        pair: toStatementPair(statements),
+        orderStatus: order.status,
+        orderSaleGross: order.saleGross,
+      });
+      const lineContext: OrderProfitLineContext = {
+        bestKnownLines: selectLines(lines, 'BEST_KNOWN'),
+        estimateLines: selectLines(lines, 'ESTIMATE'),
+        issues: parseStoredIssues(bestKnownRow.issues),
+      };
+      const profitBreakdown = buildStatementBreakdown({
+        totals: statementTotalsFromRow(bestKnownRow),
+        selectedLines: lineContext.bestKnownLines,
+        listGross,
+        sellerDiscountGross,
+      });
+      return { fields, profitBreakdown, lineContext };
+    } catch (err) {
+      logProfitReadFailure({
+        surface: 'order-detail',
+        organizationId: orgId,
+        orderId: order.id,
+        err,
+      });
+      return emptyOrderProfitDetail(order);
+    }
   }
 
   // No best-known statement stored yet: compute read-only in the request (owner decision
@@ -612,15 +650,7 @@ async function loadOrderProfitDetail(
     surface: 'order-detail',
   });
   if (computed === null) {
-    return {
-      fields: orderProfitFields({
-        pair: { estimate: null, bestKnown: null },
-        orderStatus: order.status,
-        orderSaleGross: order.saleGross,
-      }),
-      profitBreakdown: null,
-      lineContext: null,
-    };
+    return emptyOrderProfitDetail(order);
   }
 
   const fields = orderProfitFields({

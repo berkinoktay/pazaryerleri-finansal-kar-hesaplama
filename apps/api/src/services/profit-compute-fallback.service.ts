@@ -6,11 +6,33 @@ import {
 } from '@pazarsync/profit';
 
 /**
- * The read surfaces that compute a parcel's profit in-request when no statement is
- * stored. The order detail page and the new-order notification share the same
- * deliberate fallback, so each names itself here for the log line.
+ * A read surface that must keep its page up when a parcel's profit cannot be derived for
+ * display. The order detail and the new-order notification compute in-request when no
+ * statement is stored; today's products reads the stored profit lines. Each names itself
+ * here for the log line (owner decision 2026-11-04).
  */
-export type ProfitReadSurface = 'order-detail' | 'order-notification';
+export type ProfitReadSurface = 'order-detail' | 'order-notification' | 'today-products';
+
+/**
+ * Logs a profit-read failure at error level, tagged `[profit-read]` with the surface and
+ * the order id (null when the failure is not tied to a single order, e.g. today's
+ * products list) so support can trace the line. The single sink for the owner's "the
+ * page opens, the profit stays empty, the error is logged" rule (decision 2026-11-04):
+ * every read surface that swallows a profit failure to keep its page up routes here.
+ */
+export function logProfitReadFailure(params: {
+  readonly surface: ProfitReadSurface;
+  readonly organizationId: string;
+  readonly orderId: string | null;
+  readonly err: unknown;
+}): void {
+  console.error('[profit-read] in-request profit computation failed', {
+    surface: params.surface,
+    organizationId: params.organizationId,
+    orderId: params.orderId,
+    err: params.err,
+  });
+}
 
 /**
  * Computes a parcel's profit read-only for a surface that must still render when no
@@ -41,12 +63,7 @@ export async function computeParcelProfitForRead(params: {
       // A platform the engine cannot compute yet (e.g. Hepsiburada): expected, no log.
       return null;
     }
-    console.error('[profit-read] in-request profit computation failed', {
-      surface,
-      organizationId,
-      orderId,
-      err,
-    });
+    logProfitReadFailure({ surface, organizationId, orderId, err });
     return null;
   }
 }

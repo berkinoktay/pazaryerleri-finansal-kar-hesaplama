@@ -14,7 +14,10 @@ import Decimal from 'decimal.js';
 import { resolveVendorMissingBarcodes } from '../lib/catalog-barcode-miss-lookup';
 import { NotFoundError } from '../lib/errors';
 import { toPromotionDisplays, type PromotionDisplayWire } from '../lib/promotion-displays';
-import { computeParcelProfitForRead } from './profit-compute-fallback.service';
+import {
+  computeParcelProfitForRead,
+  logProfitReadFailure,
+} from './profit-compute-fallback.service';
 
 // All "today"/"yesterday" windows come from the single business-timezone helpers
 // (packages/utils/src/timezone.ts) — never a hard-coded offset. Orders carry a
@@ -361,9 +364,9 @@ export interface TodayProductRow {
 }
 
 /**
- * The order item whose cost lines back a variant's displayed unit cost: the earliest
- * (order date, then item id) of today's order items selling the variant whose order
- * carries a stored ESTIMATE statement. `issues` are that statement's stored issues.
+ * An order item whose cost lines can back a variant's displayed unit cost: one of today's
+ * order items selling the variant whose order carries a stored ESTIMATE statement.
+ * `issues` are that statement's stored issues.
  */
 interface ChosenOrderItem {
   orderId: string;
@@ -383,10 +386,22 @@ interface ProductAccumulator {
   bufferEntryCount: number; // distinct buffer entries containing this barcode
   unitsSold: number;
   revenue: Decimal;
-  // The chosen order item whose cost lines drive the displayed unit cost; null until an
-  // order with a stored ESTIMATE statement sells this variant.
-  chosenItem: ChosenOrderItem | null;
+  // The earliest (order date, then item id) item whose order's ESTIMATE statement is
+  // ESTIMATED -- the preferred source of the displayed unit cost; null until one exists.
+  estimatedItem: ChosenOrderItem | null;
+  // The earliest item whose order carries ANY ESTIMATE statement -- the fallback used
+  // only when no ESTIMATED one exists, so a not-yet-estimated order still shows a cost.
+  anyStatementItem: ChosenOrderItem | null;
   unresolved: boolean;
+}
+
+/**
+ * The item backing a variant's displayed unit cost: the earliest item whose ESTIMATE
+ * statement is ESTIMATED if any, else the earliest item with any ESTIMATE statement,
+ * else null (unit cost stays null).
+ */
+function chosenItemOf(acc: ProductAccumulator): ChosenOrderItem | null {
+  return acc.estimatedItem ?? acc.anyStatementItem;
 }
 
 /** Order-by for the chosen item: earliest order date, then lowest item id. */
@@ -394,6 +409,51 @@ function isEarlierChosenItem(candidate: ChosenOrderItem, current: ChosenOrderIte
   const byDate = candidate.orderDate.getTime() - current.orderDate.getTime();
   if (byDate !== 0) return byDate < 0;
   return candidate.itemId < current.itemId;
+}
+
+/**
+ * The displayed unit cost for each variant's chosen order item, keyed by that item's id.
+ * Loads the chosen orders' stored profit lines once, then runs itemProfitValues per
+ * chosen item -- itemProfitValues' unitCostGross over the item's view-selected lines.
+ * Rebuilding engine values from stored rows throws on a corrupt row (malformed line
+ * inputs/issues, a level conflict); that must not take the whole day down, so on any
+ * failure this logs at error level and returns an empty map, leaving every row with a
+ * null unit cost (owner decision 2026-11-04). Tenant-scoped by organizationId + storeId.
+ */
+async function deriveUnitCostByItem(
+  orgId: string,
+  storeId: string,
+  chosenItems: readonly ChosenOrderItem[],
+): Promise<ReadonlyMap<string, string | null>> {
+  if (chosenItems.length === 0) {
+    return new Map();
+  }
+  try {
+    const orderIds = [...new Set(chosenItems.map((item) => item.orderId))];
+    const linesByOrder = await loadOrderProfitLines(prisma, {
+      organizationId: orgId,
+      storeId,
+      orderIds,
+    });
+    const unitCostByItem = new Map<string, string | null>();
+    for (const chosen of chosenItems) {
+      const lines = linesByOrder.get(chosen.orderId) ?? [];
+      unitCostByItem.set(
+        chosen.itemId,
+        itemProfitValues({
+          orderItemId: chosen.itemId,
+          quantity: chosen.quantity,
+          bestKnownLines: selectLines(lines, 'BEST_KNOWN'),
+          estimateLines: selectLines(lines, 'ESTIMATE'),
+          issues: parseStoredIssues(chosen.issues),
+        }).unitCostGross,
+      );
+    }
+    return unitCostByItem;
+  } catch (err) {
+    logProfitReadFailure({ surface: 'today-products', organizationId: orgId, orderId: null, err });
+    return new Map();
+  }
 }
 
 interface VariantIdentity {
@@ -413,11 +473,14 @@ interface VariantIdentity {
  * known the moment the order arrives — no cost required. costStatus is resolved
  * from the active ProductVariantCostProfile (authoritative; matches the retired
  * getMissingCost), and the displayed unitCost is itemProfitValues' unit cost for the
- * variant's earliest today order item whose order carries a stored ESTIMATE statement
- * (decision 10) -- derived from that order's cost lines, not a legacy snapshot column.
- * There is NO per-product profit (an order's net profit can't be cleanly attributed to
- * one line). Rows are returned sorted by unitsSold desc for deterministic output; the
- * frontend owns the live re-sort.
+ * variant's preferred today order item -- the earliest whose ESTIMATE statement is
+ * ESTIMATED, else the earliest with any ESTIMATE statement (decision 10) -- derived from
+ * that order's cost lines, not a legacy snapshot column. A corrupt stored line must not
+ * take the whole day down: on any unit-cost derivation failure the list is returned with
+ * a null unitCost on every row and the error is logged (owner decision 2026-11-04);
+ * volumes and cost status stand. There is NO per-product profit (an order's net profit
+ * can't be cleanly attributed to one line). Rows are returned sorted by unitsSold desc
+ * for deterministic output; the frontend owns the live re-sort.
  */
 export async function getTodayProducts(args: {
   orgId: string;
@@ -443,14 +506,14 @@ export async function getTodayProducts(args: {
         orderId: true,
         quantity: true,
         lineSaleGross: true,
-        // The order date picks the earliest item; the ESTIMATE statement's presence
-        // gates the chosen item and its issues feed itemProfitValues.
+        // The order date orders the candidates; the ESTIMATE statement's status picks
+        // the preferred item (ESTIMATED over any), and its issues feed itemProfitValues.
         order: {
           select: {
             orderDate: true,
             profitStatements: {
               where: estimateStatementWhere(args.orgId, args.storeId),
-              select: { issues: true },
+              select: { status: true, issues: true },
             },
           },
         },
@@ -492,7 +555,8 @@ export async function getTodayProducts(args: {
       bufferEntryCount: 0,
       unitsSold: 0,
       revenue: new Decimal(0),
-      chosenItem: null,
+      estimatedItem: null,
+      anyStatementItem: null,
       unresolved: identity.unresolved,
     };
     byVariant.set(identity.id, created);
@@ -516,8 +580,9 @@ export async function getTodayProducts(args: {
     acc.unitsSold += item.quantity;
     // lineSaleGross is the LINE total (KDV-dahil, already × quantity) — add directly.
     acc.revenue = acc.revenue.add(item.lineSaleGross.toString());
-    // Track the earliest (order date, then item id) item whose order carries a stored
-    // ESTIMATE statement -- its cost lines back the displayed unit cost below.
+    // Track the preferred item whose cost lines back the displayed unit cost below: any
+    // ESTIMATE statement feeds the fallback, an ESTIMATED one also the preferred choice.
+    // Both keep the earliest (order date, then item id) candidate.
     const estimateStatement = item.order.profitStatements[0];
     if (estimateStatement !== undefined) {
       const candidate: ChosenOrderItem = {
@@ -527,8 +592,14 @@ export async function getTodayProducts(args: {
         orderDate: item.order.orderDate,
         issues: estimateStatement.issues,
       };
-      if (acc.chosenItem === null || isEarlierChosenItem(candidate, acc.chosenItem)) {
-        acc.chosenItem = candidate;
+      if (acc.anyStatementItem === null || isEarlierChosenItem(candidate, acc.anyStatementItem)) {
+        acc.anyStatementItem = candidate;
+      }
+      if (
+        estimateStatement.status === ProfitStatus.ESTIMATED &&
+        (acc.estimatedItem === null || isEarlierChosenItem(candidate, acc.estimatedItem))
+      ) {
+        acc.estimatedItem = candidate;
       }
     }
   }
@@ -643,37 +714,22 @@ export async function getTodayProducts(args: {
     [...byVariant.values()].flatMap((acc) => (acc.variantId === null ? [acc.barcode] : [])),
   );
 
-  // The chosen items' orders, read in one batched call; their cost lines drive the
-  // displayed unit cost (decision 10). Tenant-scoped by organizationId + storeId.
-  const chosenOrderIds = [
-    ...new Set(
-      [...byVariant.values()].flatMap((acc) =>
-        acc.chosenItem === null ? [] : [acc.chosenItem.orderId],
-      ),
-    ),
-  ];
-  const linesByOrder = await loadOrderProfitLines(prisma, {
-    organizationId: args.orgId,
-    storeId: args.storeId,
-    orderIds: chosenOrderIds,
+  // The chosen items' unit costs, derived in one batched read of their orders' cost
+  // lines (decision 10). A corrupt stored line leaves every unit cost null but never
+  // 500s the day. Tenant-scoped by organizationId + storeId.
+  const chosenItems = [...byVariant.values()].flatMap((acc) => {
+    const chosen = chosenItemOf(acc);
+    return chosen === null ? [] : [chosen];
   });
+  const unitCostByItem = await deriveUnitCostByItem(args.orgId, args.storeId, chosenItems);
 
   return [...byVariant.values()]
     .map((acc) => {
       const costed = acc.variantId !== null && costedVariantIds.has(acc.variantId);
-      // Unit cost: itemProfitValues over the chosen item's view-selected lines; null
-      // when no order with a stored ESTIMATE statement sold this variant today.
-      let unitCost: string | null = null;
-      if (acc.chosenItem !== null) {
-        const lines = linesByOrder.get(acc.chosenItem.orderId) ?? [];
-        unitCost = itemProfitValues({
-          orderItemId: acc.chosenItem.itemId,
-          quantity: acc.chosenItem.quantity,
-          bestKnownLines: selectLines(lines, 'BEST_KNOWN'),
-          estimateLines: selectLines(lines, 'ESTIMATE'),
-          issues: parseStoredIssues(acc.chosenItem.issues),
-        }).unitCostGross;
-      }
+      // Unit cost: the chosen item's derived unit cost; null when no order with a stored
+      // ESTIMATE statement sold this variant today, or when the derivation failed above.
+      const chosen = chosenItemOf(acc);
+      const unitCost = chosen === null ? null : (unitCostByItem.get(chosen.itemId) ?? null);
       const row: TodayProductRow = {
         variantId: acc.variantId,
         barcode: acc.barcode,

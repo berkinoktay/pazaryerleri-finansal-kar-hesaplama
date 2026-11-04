@@ -313,6 +313,44 @@ describe('GET /v1/.../live-performance/kpis', () => {
     expect(body.netProfitYesterday).toBe('50.00');
   });
 
+  it('does not count a CANCELLED estimate statement as costed', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // The order itself is live (not cancelled), but its ESTIMATE statement is CANCELLED.
+    // The costed gate is the statement status, not the order status, so this order adds
+    // to volume but never to the profit family -- even with a non-null net profit.
+    const order = await createOrder(org.id, store.id, {
+      orderDate: todayAt(10),
+      saleGross: '100.00',
+      status: 'DELIVERED',
+    });
+    await createOrderItem(order.id, org.id, { quantity: 1 });
+    await createProfitStatement(order.id, org.id, store.id, {
+      view: 'ESTIMATE',
+      status: 'CANCELLED',
+      netProfit: '90.00',
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/kpis`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as KpisBody;
+    // Volume counts the order.
+    expect(body.revenueToday).toBe('100.00');
+    expect(body.orderCountToday).toBe(1);
+    expect(body.unitsSoldToday).toBe(1);
+    // Profit family does not -- the CANCELLED statement is not costed.
+    expect(body.netProfitToday).toBe('0.00');
+    expect(body.pendingRevenueToday).toBe('100.00');
+    expect(body.pendingOrderCountToday).toBe(1);
+  });
+
   it('returns zeroes (not an error) for a store with no orders', async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();
