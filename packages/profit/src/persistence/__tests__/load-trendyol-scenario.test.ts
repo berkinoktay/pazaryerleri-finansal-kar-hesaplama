@@ -9,10 +9,17 @@
 
 import { Decimal } from 'decimal.js';
 import { prisma, type Prisma } from '@pazarsync/db';
-import { ProfitIssueCode } from '@pazarsync/db/enums';
+import { ProfitIssueCode, ProfitLineSource, ProfitLineType } from '@pazarsync/db/enums';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { evaluateTrendyolScenario } from '../../marketplaces/trendyol/scenario';
+import {
+  evaluateTrendyolScenario,
+  TRENDYOL_SCENARIO_ITEM_ID,
+} from '../../marketplaces/trendyol/scenario';
+import {
+  FeeDefinitionNotFoundError,
+  IncompleteFeeDefinitionError,
+} from '../../resolve-fee-definition';
 import { loadTrendyolParcel } from '../load-trendyol-parcel';
 import { loadTrendyolScenarioBases } from '../load-trendyol-scenario';
 import {
@@ -148,6 +155,14 @@ describe('loadTrendyolScenarioBases', () => {
 
   it("matches the order loader's inputs for the same product and date", async () => {
     const parcel = await seedMelontikParcel();
+    // Give variant A an explicit vat_rate so the scenario has a concrete column to read;
+    // the order path takes item A's VAT from the order line (10%), a deliberate source
+    // difference the assertions at the end of this test pin.
+    const variantVatRatePct = 8;
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { vatRate: variantVatRatePct },
+    });
 
     const order = await loadTrendyolParcel(prisma, {
       organizationId: parcel.organizationId,
@@ -187,6 +202,21 @@ describe('loadTrendyolScenarioBases', () => {
     expect(base.product.tariffBands).toEqual(orderAttr?.tariffBands ?? null);
     expect(base.product.categoryId).toBe(orderAttr?.categoryId ?? null);
     expect(base.product.brandId).toBe(orderAttr?.brandId ?? null);
+
+    const orderItemA = order.estimateInput.snapshot.items.find(
+      (item) => item.orderItemId === parcel.itemA,
+    );
+    if (orderItemA === undefined) {
+      throw new Error('expected item A in the order parcel snapshot');
+    }
+    // unitDesi and isDigital share a source (the variant columns), so they match.
+    expect(base.product.unitDesi).toEqual(orderItemA.unitDesi);
+    expect(base.product.isDigital).toBe(orderItemA.isDigital);
+    // saleVatRatePct does not: the scenario reads the variant's own vat_rate column,
+    // while the order path reads the order line's saleVatRate (10%) -- so the scenario
+    // matches the DB column, not the order's rate.
+    expect(base.product.saleVatRatePct).toEqual(new Decimal(variantVatRatePct));
+    expect(orderItemA.saleVatRatePct).toEqual(new Decimal(MELONTIK.items.a.saleVatRate));
   });
 
   it('surfaces a missing carrier as an estimate issue, not a load failure', async () => {
@@ -400,7 +430,7 @@ describe('loadTrendyolScenarioBases', () => {
     expect(variantB.base.product.tariffBands).toBeNull();
   });
 
-  it('reports a variant that is not this store as unavailable', async () => {
+  it('reports an unknown variant id as unavailable', async () => {
     const parcel = await seedMelontikParcel();
     const foreignVariantId = '00000000-0000-0000-0000-000000000000';
 
@@ -419,5 +449,332 @@ describe('loadTrendyolScenarioBases', () => {
       kind: 'unavailable',
       reason: 'VARIANT_NOT_FOUND',
     });
+  });
+
+  it('reports a variant of another store in the same organization as unavailable', async () => {
+    const parcel = await seedMelontikParcel();
+
+    // A sibling store in the SAME organization, with a real product + variant that
+    // reuses variant A's barcode. A store-blind variant read would match it on the
+    // shared barcode; the loader's store filter must keep it out.
+    const otherStoreId = await createAdditionalStore({ organizationId: parcel.organizationId });
+    const otherProduct = await prisma.product.create({
+      data: {
+        organizationId: parcel.organizationId,
+        storeId: otherStoreId,
+        platformContentId: BigInt(700001),
+        productMainId: 'other-store-main',
+        title: 'Other store melontik',
+        categoryId: BigInt(369),
+      },
+    });
+    const otherVariant = await prisma.productVariant.create({
+      data: {
+        organizationId: parcel.organizationId,
+        storeId: otherStoreId,
+        productId: otherProduct.id,
+        platformVariantId: BigInt(800001),
+        barcode: MELONTIK.items.a.barcode, // same barcode as variant A
+        stockCode: 'other-store-sku',
+        salePrice: '150.00',
+        listPrice: '150.00',
+        syncedDimensionalWeight: '1',
+        isDigital: false,
+      },
+    });
+
+    // Variant A resolves against the melontik store; the sibling store's variant is not
+    // THIS store's, so it is VARIANT_NOT_FOUND despite the shared barcode.
+    const both = await loadTrendyolScenarioBases(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      scenarioDate: MELONTIK.orderDate,
+      variants: [
+        { variantId: parcel.variantA, tariffAnchor: null },
+        { variantId: otherVariant.id, tariffAnchor: null },
+      ],
+    });
+    expect(both.get(parcel.variantA)?.kind).toBe('ready');
+    expect(both.get(otherVariant.id)).toEqual({
+      kind: 'unavailable',
+      reason: 'VARIANT_NOT_FOUND',
+    });
+
+    // With only the sibling store's variant, the loader finds no variant of this store
+    // and takes the early-return branch -- still VARIANT_NOT_FOUND.
+    const onlyOther = await loadTrendyolScenarioBases(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      scenarioDate: MELONTIK.orderDate,
+      variants: [{ variantId: otherVariant.id, tariffAnchor: null }],
+    });
+    expect(onlyOther.get(otherVariant.id)).toEqual({
+      kind: 'unavailable',
+      reason: 'VARIANT_NOT_FOUND',
+    });
+  });
+
+  it('prices a digital variant without shipping or a platform service fee', async () => {
+    const parcel = await seedMelontikParcel();
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { isDigital: true },
+    });
+
+    const bases = await loadTrendyolScenarioBases(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      scenarioDate: MELONTIK.orderDate,
+      variants: [{ variantId: parcel.variantA, tariffAnchor: null }],
+    });
+    const result = bases.get(parcel.variantA);
+    if (result?.kind !== 'ready') {
+      throw new Error('expected variant A scenario base to be ready');
+    }
+    expect(result.base.product.isDigital).toBe(true);
+
+    const evaluated = evaluateTrendyolScenario({ ...result.base, unitPrice: new Decimal('100') });
+    // An all-digital parcel ships nothing (plan decision 11b) and owes no platform
+    // service fee (the PSF digital exemption): neither line is emitted.
+    const hasShipping = evaluated.estimate.lines.some(
+      (line) => line.type === ProfitLineType.SHIPPING,
+    );
+    const hasServiceFee = evaluated.estimate.lines.some(
+      (line) => line.type === ProfitLineType.SERVICE_FEE,
+    );
+    expect(hasShipping).toBe(false);
+    expect(hasServiceFee).toBe(false);
+  });
+
+  it('prices with the cost version effective on the scenario date', async () => {
+    const carrierId = await upsertMelontikCarrier();
+    await seedMelontikFeeDefinitions();
+    const { organizationId, storeId } = await createTrendyolOrg({ carrierId });
+    const variantId = await createPricedVariant(organizationId, storeId, 0);
+
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId,
+        storeId,
+        name: 'Versioned COGS',
+        type: 'COGS',
+        amountGross: '40.00',
+        vatRate: '20',
+      },
+    });
+    // v1 takes effect before the scenario date, v2 after it: the loader must pick v1.
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId,
+        version: 1,
+        name: 'Versioned COGS',
+        type: 'COGS',
+        amountGross: '40.00',
+        vatRate: '20',
+        changedFields: [],
+        changedAt: new Date('2026-01-01T00:00:00Z'),
+        effectiveFrom: new Date('2026-01-01T00:00:00Z'),
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId,
+        version: 2,
+        name: 'Versioned COGS',
+        type: 'COGS',
+        amountGross: '90.00',
+        vatRate: '20',
+        changedFields: [],
+        changedAt: new Date('2027-01-01T00:00:00Z'),
+        effectiveFrom: new Date('2027-01-01T00:00:00Z'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId, productVariantId: variantId, profileId: profile.id },
+    });
+
+    const bases = await loadTrendyolScenarioBases(prisma, {
+      organizationId,
+      storeId,
+      scenarioDate: MELONTIK.orderDate, // between v1 (2026-01-01) and v2 (2027-01-01)
+      variants: [{ variantId, tariffAnchor: null }],
+    });
+    const result = bases.get(variantId);
+    if (result?.kind !== 'ready') {
+      throw new Error('expected the scenario base to be ready');
+    }
+
+    const evaluated = evaluateTrendyolScenario({ ...result.base, unitPrice: new Decimal('100') });
+    const costLine = evaluated.estimate.lines.find(
+      (line) => line.source === ProfitLineSource.SELLER_INPUT,
+    );
+    expect(costLine?.amount.gross.toFixed(2)).toBe('40.00');
+  });
+
+  it('falls back to the first version when every version starts after the scenario date', async () => {
+    const carrierId = await upsertMelontikCarrier();
+    await seedMelontikFeeDefinitions();
+    const { organizationId, storeId } = await createTrendyolOrg({ carrierId });
+    const variantId = await createPricedVariant(organizationId, storeId, 0);
+
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId,
+        storeId,
+        name: 'Future COGS',
+        type: 'COGS',
+        amountGross: '70.00',
+        vatRate: '20',
+      },
+    });
+    // The only version starts after the scenario date, so the first-version rule
+    // (design 6.6) uses it anyway.
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId,
+        version: 1,
+        name: 'Future COGS',
+        type: 'COGS',
+        amountGross: '70.00',
+        vatRate: '20',
+        changedFields: [],
+        changedAt: new Date('2027-01-01T00:00:00Z'),
+        effectiveFrom: new Date('2027-01-01T00:00:00Z'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId, productVariantId: variantId, profileId: profile.id },
+    });
+
+    const bases = await loadTrendyolScenarioBases(prisma, {
+      organizationId,
+      storeId,
+      scenarioDate: MELONTIK.orderDate, // before the only version (2027-01-01)
+      variants: [{ variantId, tariffAnchor: null }],
+    });
+    const result = bases.get(variantId);
+    if (result?.kind !== 'ready') {
+      throw new Error('expected the scenario base to be ready');
+    }
+
+    const evaluated = evaluateTrendyolScenario({ ...result.base, unitPrice: new Decimal('100') });
+    const costLine = evaluated.estimate.lines.find(
+      (line) => line.source === ProfitLineSource.SELLER_INPUT,
+    );
+    expect(costLine?.amount.gross.toFixed(2)).toBe('70.00');
+  });
+
+  it('treats an archived cost version as missing cost', async () => {
+    const carrierId = await upsertMelontikCarrier();
+    await seedMelontikFeeDefinitions();
+    const { organizationId, storeId } = await createTrendyolOrg({ carrierId });
+    const variantId = await createPricedVariant(organizationId, storeId, 0);
+
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId,
+        storeId,
+        name: 'Archived COGS',
+        type: 'COGS',
+        amountGross: '50.00',
+        vatRate: '20',
+      },
+    });
+    // The version chosen at the scenario date is archived, so it contributes nothing
+    // and the item ends up with no cost.
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId,
+        version: 1,
+        name: 'Archived COGS',
+        type: 'COGS',
+        amountGross: '50.00',
+        vatRate: '20',
+        changedFields: [],
+        changedAt: new Date('2026-01-01T00:00:00Z'),
+        effectiveFrom: new Date('2026-01-01T00:00:00Z'),
+        archivedAt: new Date('2026-02-01T00:00:00Z'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId, productVariantId: variantId, profileId: profile.id },
+    });
+
+    const bases = await loadTrendyolScenarioBases(prisma, {
+      organizationId,
+      storeId,
+      scenarioDate: MELONTIK.orderDate,
+      variants: [{ variantId, tariffAnchor: null }],
+    });
+    const result = bases.get(variantId);
+    if (result?.kind !== 'ready') {
+      throw new Error('expected the scenario base to be ready');
+    }
+
+    const evaluated = evaluateTrendyolScenario({ ...result.base, unitPrice: new Decimal('100') });
+    const hasCostLine = evaluated.estimate.lines.some(
+      (line) => line.source === ProfitLineSource.SELLER_INPUT,
+    );
+    expect(hasCostLine).toBe(false);
+    expect(evaluated.estimate.issues).toContainEqual({
+      code: ProfitIssueCode.MISSING_COST,
+      orderItemId: TRENDYOL_SCENARIO_ITEM_ID,
+      detail: null,
+    });
+  });
+
+  it('throws FeeDefinitionNotFoundError when no fee definition covers the scenario date', async () => {
+    const parcel = await seedMelontikParcel();
+
+    // The fixture seeds fee definitions from 2024-01-01; a 2023 scenario date is covered
+    // by none, so the fee load fails -- no row is deleted.
+    await expect(
+      loadTrendyolScenarioBases(prisma, {
+        organizationId: parcel.organizationId,
+        storeId: parcel.storeId,
+        scenarioDate: new Date('2023-06-01T00:00:00Z'),
+        variants: [{ variantId: parcel.variantA, tariffAnchor: null }],
+      }),
+    ).rejects.toBeInstanceOf(FeeDefinitionNotFoundError);
+  });
+
+  it('throws IncompleteFeeDefinitionError when the platform service definition has no fixed amount', async () => {
+    const parcel = await seedMelontikParcel();
+
+    // A later PLATFORM_SERVICE definition with no fixed amount. The unique key is
+    // (platform, feeType, effectiveFrom), so a distinct effectiveFrom avoids a clash.
+    await prisma.feeDefinition.create({
+      data: {
+        platform: 'TRENDYOL',
+        feeType: 'PLATFORM_SERVICE',
+        displayName: 'Platform Hizmet Bedeli (eksik)',
+        calculationKind: 'FIXED',
+        fixedAmountNet: null,
+        defaultVatRate: '20.00',
+        effectiveFrom: new Date('2027-01-01T00:00:00Z'),
+      },
+    });
+
+    let caught: unknown;
+    try {
+      await loadTrendyolScenarioBases(prisma, {
+        organizationId: parcel.organizationId,
+        storeId: parcel.storeId,
+        scenarioDate: new Date('2027-06-01T00:00:00Z'),
+        variants: [{ variantId: parcel.variantA, tariffAnchor: null }],
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(IncompleteFeeDefinitionError);
+    if (!(caught instanceof IncompleteFeeDefinitionError)) {
+      throw new Error('expected an IncompleteFeeDefinitionError');
+    }
+    expect(caught.feeType).toBe('PLATFORM_SERVICE');
+    expect(caught.field).toBe('fixedAmountNet');
   });
 });

@@ -136,9 +136,10 @@ function buildScenarioBase(params: {
  *
  * A variant that is not this organization and store's is `VARIANT_NOT_FOUND`. A
  * missing carrier, desi or commission rule is not a failure -- it surfaces as an
- * estimate issue on evaluation. A store-wide reference problem (e.g. no fee
- * definitions) throws, as it does for a stored order; the caller turns that into
- * empty profit with a log. A store that is not Trendyol throws
+ * estimate issue on evaluation. A store-wide reference problem throws, as it does for
+ * a stored order: `FeeDefinitionNotFoundError` when no fee definition covers the date,
+ * `IncompleteFeeDefinitionError` when a used definition lacks its amount; the caller
+ * turns that into empty profit with a log. A store that is not Trendyol throws
  * `UnsupportedPlatformError`.
  */
 export async function loadTrendyolScenarioBases(

@@ -14,9 +14,11 @@ export {
 } from './recompute-settled-profit';
 export {
   FeeDefinitionNotFoundError,
+  IncompleteFeeDefinitionError,
   isMicroExport,
   isPsfExempt,
   resolveFeeDefinition,
+  type FeeDefinitionAmountField,
 } from './resolve-fee-definition';
 export {
   resolveOrderCalculability,

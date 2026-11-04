@@ -8,7 +8,7 @@
 // org-scoped table by organization.
 
 import { Decimal } from 'decimal.js';
-import type { Prisma } from '@pazarsync/db';
+import type { OrderFeeType, Prisma } from '@pazarsync/db';
 import { CommissionRuleKind, Platform } from '@pazarsync/db/enums';
 import { isInstantWithinTariffPeriod } from '@pazarsync/utils';
 
@@ -31,7 +31,11 @@ import {
   parseStoredTariffBands,
   type StoredTariffBand,
 } from '../marketplaces/trendyol/stored-tariff-bands';
-import { resolveFeeDefinition } from '../resolve-fee-definition';
+import {
+  IncompleteFeeDefinitionError,
+  resolveFeeDefinition,
+  type FeeDefinitionAmountField,
+} from '../resolve-fee-definition';
 
 const ZERO = new Decimal(0);
 const PERCENT = new Decimal(100);
@@ -47,9 +51,13 @@ export function decOrNull(value: Prisma.Decimal | null): Decimal | null {
 }
 
 /** A Prisma Decimal that a used fee needs; throws naming the fee type when null. */
-function requireFeeField(value: Prisma.Decimal | null, feeType: string, field: string): Decimal {
+function requireFeeField(
+  value: Prisma.Decimal | null,
+  feeType: OrderFeeType,
+  field: FeeDefinitionAmountField,
+): Decimal {
   if (value === null) {
-    throw new Error(`${feeType} fee definition is missing ${field}`);
+    throw new IncompleteFeeDefinitionError(feeType, field);
   }
   return dec(value);
 }

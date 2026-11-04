@@ -24,6 +24,24 @@ export class FeeDefinitionNotFoundError extends Error {
   }
 }
 
+/** The amount column of a fee definition a used fee requires. */
+export type FeeDefinitionAmountField = 'fixedAmountNet' | 'rateOfSale';
+
+/**
+ * A fee definition that a parcel or scenario actually uses exists for the date but
+ * is missing the amount column it needs (a FIXED fee without `fixedAmountNet`, a
+ * RATE_OF_SALE fee without `rateOfSale`).
+ */
+export class IncompleteFeeDefinitionError extends Error {
+  constructor(
+    public readonly feeType: OrderFeeType,
+    public readonly field: FeeDefinitionAmountField,
+  ) {
+    super(`${feeType} fee definition is missing ${field}`);
+    this.name = 'IncompleteFeeDefinitionError';
+  }
+}
+
 interface ResolveArgs {
   platform: Platform;
   feeType: OrderFeeType;
