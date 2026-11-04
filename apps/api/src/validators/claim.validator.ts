@@ -111,13 +111,24 @@ export const ClaimsSummaryResponseSchema = z
       description: 'Claims with claimDate in the period that are resolved.',
     }),
     refundDeductionGross: z.string().openapi({
-      description: 'Sum of REFUND_DEDUCTION (net+VAT) captured in the period. Decimal string.',
+      description:
+        'Sum of sale-return deductions (incl. VAT, decimal string) whose return line is dated into ' +
+        "the period by the earliest settlement record's transaction date.",
       example: '785.50',
     }),
-    commissionRefundGross: z.string(),
-    costReturnGross: z.string(),
+    commissionRefundGross: z.string().openapi({
+      description:
+        'Sum of commission refunds (incl. VAT, decimal string) whose return line is dated into the ' +
+        "period by the earliest settlement record's transaction date.",
+    }),
+    costReturnGross: z.string().openapi({
+      description:
+        'Sum of cost returns (incl. VAT, decimal string); a cost return is counted when its order ' +
+        "item's sale-return line falls in the period.",
+    }),
     netImpactGross: z.string().openapi({
-      description: '−refundDeduction + commissionRefund + costReturn — usually negative.',
+      description:
+        'commissionRefund + costReturn - refundDeduction (decimal string); usually negative.',
       example: '-471.30',
     }),
   })

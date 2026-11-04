@@ -19,15 +19,24 @@ export const LivePerformanceKpisSchema = z
       .openapi({ description: 'Σ line quantity across the universe', example: 134 }),
     unitsSoldYesterday: z.number().int().nonnegative().openapi({ example: 121 }),
     // ── Profit family (costed subset = orders with non-null estimatedNetProfit) ──
-    netProfitToday: z.string().openapi({ example: '3220.00' }),
+    netProfitToday: z.string().openapi({
+      description:
+        "Net profit (decimal string) over today's orders whose estimate profit statement is " +
+        'computed; cost-pending orders do not contribute.',
+      example: '3220.00',
+    }),
     netProfitYesterday: z.string().openapi({ example: '2875.00' }),
     marginToday: z.string().openapi({
-      description: 'Net profit ÷ costed revenue × 100, decimal string',
+      description:
+        "Net profit / costed revenue * 100 (decimal string), over today's orders whose estimate " +
+        'profit statement is computed.',
       example: '25.86',
     }),
     marginYesterday: z.string().openapi({ example: '25.43' }),
     profitCostRatioToday: z.string().openapi({
-      description: 'Net profit ÷ costed cost × 100, decimal string',
+      description:
+        "Net profit / costed cost * 100 (decimal string), over today's orders whose estimate " +
+        'profit statement is computed.',
       example: '38.40',
     }),
     profitCostRatioYesterday: z.string().openapi({ example: '37.10' }),
@@ -36,7 +45,16 @@ export const LivePerformanceKpisSchema = z
       description: "Today's revenue counted but not yet costed, decimal string",
       example: '1860.00',
     }),
-    pendingOrderCountToday: z.number().int().nonnegative().openapi({ example: 4 }),
+    pendingOrderCountToday: z
+      .number()
+      .int()
+      .nonnegative()
+      .openapi({
+        description:
+          "Count of today's orders without a computed estimate - cost still missing in the buffer, " +
+          'or not computable yet.',
+        example: 4,
+      }),
   })
   .openapi('LivePerformanceKpis');
 
@@ -83,11 +101,15 @@ const TodayProductRowSchema = z.object({
     description: "'costed' = variant has an active cost profile; 'missing' = needs a cost",
     example: 'costed',
   }),
-  unitCost: z.string().nullable().openapi({
-    description:
-      'Costed net unit cost (from the order-item snapshot), Decimal string; null when cost-missing',
-    example: '42.00',
-  }),
+  unitCost: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        "Unit cost incl. VAT (decimal string) derived from the order's cost lines for the earliest " +
+        'today order selling this variant; null when cost-missing or not yet computable.',
+      example: '42.00',
+    }),
   unresolved: z.boolean().openapi({
     description:
       'Barcode resolves to no catalog variant — identity falls back to the raw barcode; ' +
@@ -126,8 +148,22 @@ const LiveOrderRowSchema = z.object({
   orderDate: z.string().datetime(),
   status: z.string(),
   revenue: z.string().openapi({ description: 'Decimal string' }),
-  profit: z.string().nullable().openapi({ description: 'Decimal string, null for buffer rows' }),
-  margin: z.string().nullable().openapi({ description: 'Decimal string, null for buffer rows' }),
+  profit: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        'Net profit (decimal string); null for buffer rows and for orders whose estimate profit ' +
+        'statement is not yet computed.',
+    }),
+  margin: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        'Sale margin % (decimal string); null for buffer rows and for orders whose estimate profit ' +
+        'statement is not yet computed.',
+    }),
   // Promosyon gösterimi (spec ekleme #3): indirimli siparişin promosyon adları +
   // brüt tutarları. İndirim/promosyon yoksa null. Buffer satırlarında her zaman null
   // (mapped payload promosyon taşımaz). Frontend rozet/tooltip ile render eder.

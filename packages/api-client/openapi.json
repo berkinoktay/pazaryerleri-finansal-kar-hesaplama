@@ -763,12 +763,13 @@
             "properties": {
               "calculated": {
                 "type": "integer",
-                "minimum": 0
+                "minimum": 0,
+                "description": "Count of orders not excluded from profit (profit_excluded_at is null)."
               },
               "excluded": {
                 "type": "integer",
                 "minimum": 0,
-                "description": "Profit-excluded orders (profit_excluded_at set — permanent)."
+                "description": "Count of profit-excluded orders (profit_excluded_at set - permanent)."
               }
             },
             "required": [
@@ -827,7 +828,7 @@
               "PARTIALLY_SETTLED",
               "FULLY_SETTLED"
             ],
-            "description": "Settlement progression. NOT_SETTLED = only ESTIMATE fees written. PARTIALLY_SETTLED = at least one SETTLEMENT/CARGO_INVOICE fee. FULLY_SETTLED = PaymentOrder confirmed + settledNetProfit written.",
+            "description": "Settlement progression, read from the order's best-known profit statement; NOT_SETTLED when the order has no statement yet. NOT_SETTLED = no settlement applied, PARTIALLY_SETTLED = settlement started, FULLY_SETTLED = settlement fully reconciled.",
             "example": "PARTIALLY_SETTLED"
           },
           "saleGross": {
@@ -835,7 +836,7 @@
               "string",
               "null"
             ],
-            "description": "Net sale incl. VAT (decimal string): gross sale minus resolved return deductions (matches the detail modal). null until OrderItems are synced.",
+            "description": "Sale incl. VAT (decimal string), read from the best-known profit statement: its sale (gross sale minus sale returns). Falls back to the order's own sale when no statement exists yet, 0 for a cancelled order without a statement, and null until OrderItems are synced.",
             "example": "299.40"
           },
           "saleVat": {
@@ -859,7 +860,7 @@
               "string",
               "null"
             ],
-            "description": "Net profit estimated at T+0 by applyEstimateOnOrderCreate. Write-once; never updated after the order is created.",
+            "description": "Net profit from the order's estimate profit statement (decimal string). Null when the estimate cannot be computed or the order is excluded from profit.",
             "example": "78.40"
           },
           "settledNetProfit": {
@@ -867,7 +868,7 @@
               "string",
               "null"
             ],
-            "description": "Net profit reconciled with settlement data. Mutable as Return/Discount transactions flow in. Null until the first SETTLEMENT row is processed.",
+            "description": "Best-known net profit (decimal string) once settlement reconciliation has started for the order; null before any settlement is applied.",
             "example": "75.10"
           },
           "saleMarginPct": {
@@ -875,7 +876,7 @@
               "string",
               "null"
             ],
-            "description": "Sale margin % (decimal string) = settledSaleMarginPct ?? estimatedSaleMarginPct. Net profit / gross sale × 100. Null until computed or when the gross sale is 0.",
+            "description": "Sale margin % (decimal string) from the best-known profit statement: net profit / sale gross * 100. Null until a statement exists or when the sale gross is 0.",
             "example": "15.50"
           },
           "costMarkupPct": {
@@ -883,7 +884,7 @@
               "string",
               "null"
             ],
-            "description": "Cost markup % (ROI, decimal string) = settledCostMarkupPct ?? estimatedCostMarkupPct. Net profit / total cost gross × 100. Null until computed or when total cost is 0.",
+            "description": "Cost markup % (ROI, decimal string) from the best-known profit statement: net profit / total cost gross * 100. Null until a statement exists or when total cost is 0.",
             "example": "38.40"
           },
           "promotionDisplays": {
@@ -1011,18 +1012,18 @@
         "properties": {
           "totalRevenueGross": {
             "type": "string",
-            "description": "Σ net sale (return-adjusted, KDV-dahil) over the filtered set."
+            "description": "Total revenue (sale incl. VAT, decimal string) over the filtered orders, summed from their best-known profit statements; an order with no statement contributes its own sale (a cancelled order contributes nothing). Profit-excluded orders still count toward revenue."
           },
           "netProfitGross": {
             "type": "string",
-            "description": "Σ consumed net profit (settledNetProfit ?? estimatedNetProfit)."
+            "description": "Total net profit (decimal string) over the filtered orders, summed from their best-known profit statements. Orders excluded from profit never contribute."
           },
           "avgMarginPct": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Average consumed sale margin % (decimal string); null when no scored orders."
+            "description": "Average sale margin % (decimal string) across the filtered orders' best-known profit statements, rounded to 4 decimals; null when no order has a statement."
           },
           "lossOrderRate": {
             "type": "object",
@@ -1037,7 +1038,7 @@
               },
               "pct": {
                 "type": "string",
-                "description": "lossCount / totalCount × 100 (decimal string)."
+                "description": "lossCount / totalCount * 100 (decimal string)."
               }
             },
             "required": [
@@ -1045,7 +1046,7 @@
               "totalCount",
               "pct"
             ],
-            "description": "Share of filtered orders whose consumed net profit is negative."
+            "description": "Share of filtered orders whose best-known profit statement reports a negative net profit. lossCount counts those statements; totalCount is every filtered order."
           }
         },
         "required": [
@@ -1129,7 +1130,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Sale incl. VAT (decimal string), the same value as the orders list row: the best-known statement's sale, the order's own sale when no statement exists, 0 for a cancelled order without a statement, null until OrderItems are synced."
           },
           "saleVat": {
             "type": [
@@ -1212,7 +1214,7 @@
               "PARTIALLY_SETTLED",
               "FULLY_SETTLED"
             ],
-            "description": "Settlement progression. NOT_SETTLED = only ESTIMATE fees written. PARTIALLY_SETTLED = at least one SETTLEMENT/CARGO_INVOICE fee. FULLY_SETTLED = PaymentOrder confirmed + settledNetProfit written.",
+            "description": "Settlement progression, read from the order's best-known profit statement; NOT_SETTLED when the order has no statement yet. NOT_SETTLED = no settlement applied, PARTIALLY_SETTLED = settlement started, FULLY_SETTLED = settlement fully reconciled.",
             "example": "PARTIALLY_SETTLED"
           },
           "paymentOrderId": {
@@ -1220,14 +1222,15 @@
               "string",
               "null"
             ],
-            "description": "PaymentOrder cycle id (BigInt → string). Null until reconciliation closes."
+            "description": "Deprecated: always null."
           },
           "paymentDate": {
             "type": [
               "string",
               "null"
             ],
-            "format": "date-time"
+            "format": "date-time",
+            "description": "Deprecated: always null."
           },
           "createdAt": {
             "type": "string",
@@ -1248,7 +1251,7 @@
             "items": {
               "$ref": "#/components/schemas/OrderFeeDetail"
             },
-            "description": "Chronologically ordered (capturedAt asc). Renders as the fee timeline."
+            "description": "Deprecated: always an empty array."
           },
           "claims": {
             "type": "array",
@@ -1457,7 +1460,8 @@
           "marketplaceFeesGross",
           "taxesGross",
           "totalDeductionsGross"
-        ]
+        ],
+        "description": "Profit breakdown built from the order's best-known profit statement and its selected profit lines. Null when the order has no net profit to show - not computable, excluded from profit, or the profit could not be computed for this request."
       },
       "OrderItemDetail": {
         "type": "object",
@@ -1484,11 +1488,11 @@
           },
           "commissionGross": {
             "type": "string",
-            "description": "Commission incl. VAT (decimal string)."
+            "description": "Commission incl. VAT (decimal string), from the order's best-known profit lines; falls back to the item's own commission column when no line supplies it."
           },
           "commissionRate": {
             "type": "string",
-            "description": "Commission rate % (decimal string), e.g. \"21.64\"."
+            "description": "Commission rate % (decimal string) from the profit lines; falls back to the item's own commission rate column when no line supplies it."
           },
           "commissionVatRate": {
             "type": "string",
@@ -1503,33 +1507,35 @@
               "string",
               "null"
             ],
-            "description": "T+0 commission estimate (write-once); null pre-estimate."
+            "description": "Estimated commission incl. VAT (decimal string) from the estimate profit lines; null when none."
           },
           "settledCommissionGross": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Settlement commission (mutable); null pre-settlement."
+            "description": "Settled commission incl. VAT (decimal string) from the settlement profit lines; null until settlement."
           },
           "unitCostSnapshotGross": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Unit cost snapshot incl. VAT (decimal string)."
+            "description": "Unit cost incl. VAT (decimal string) from the order's best-known profit lines; null when this order profit cannot be computed or no cost line exists."
           },
           "unitCostSnapshotVatRate": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Unit cost VAT rate % (decimal string) from the order's best-known profit lines; null when no cost line exists."
           },
           "commissionInvoiceSerialNumber": {
             "type": [
               "string",
               "null"
             ],
+            "description": "Deprecated: always null.",
             "example": "DCF2024000123"
           },
           "barcode": {
@@ -1823,18 +1829,20 @@
           },
           "refundDeductionGross": {
             "type": "string",
-            "description": "Sum of REFUND_DEDUCTION (net+VAT) captured in the period. Decimal string.",
+            "description": "Sum of sale-return deductions (incl. VAT, decimal string) whose return line is dated into the period by the earliest settlement record's transaction date.",
             "example": "785.50"
           },
           "commissionRefundGross": {
-            "type": "string"
+            "type": "string",
+            "description": "Sum of commission refunds (incl. VAT, decimal string) whose return line is dated into the period by the earliest settlement record's transaction date."
           },
           "costReturnGross": {
-            "type": "string"
+            "type": "string",
+            "description": "Sum of cost returns (incl. VAT, decimal string); a cost return is counted when its order item's sale-return line falls in the period."
           },
           "netImpactGross": {
             "type": "string",
-            "description": "−refundDeduction + commissionRefund + costReturn — usually negative.",
+            "description": "commissionRefund + costReturn - refundDeduction (decimal string); usually negative.",
             "example": "-471.30"
           }
         },
@@ -2053,6 +2061,7 @@
           },
           "netProfitToday": {
             "type": "string",
+            "description": "Net profit (decimal string) over today's orders whose estimate profit statement is computed; cost-pending orders do not contribute.",
             "example": "3220.00"
           },
           "netProfitYesterday": {
@@ -2061,7 +2070,7 @@
           },
           "marginToday": {
             "type": "string",
-            "description": "Net profit ÷ costed revenue × 100, decimal string",
+            "description": "Net profit / costed revenue * 100 (decimal string), over today's orders whose estimate profit statement is computed.",
             "example": "25.86"
           },
           "marginYesterday": {
@@ -2070,7 +2079,7 @@
           },
           "profitCostRatioToday": {
             "type": "string",
-            "description": "Net profit ÷ costed cost × 100, decimal string",
+            "description": "Net profit / costed cost * 100 (decimal string), over today's orders whose estimate profit statement is computed.",
             "example": "38.40"
           },
           "profitCostRatioYesterday": {
@@ -2085,6 +2094,7 @@
           "pendingOrderCountToday": {
             "type": "integer",
             "minimum": 0,
+            "description": "Count of today's orders without a computed estimate - cost still missing in the buffer, or not computable yet.",
             "example": 4
           }
         },
@@ -2246,7 +2256,7 @@
                     "string",
                     "null"
                   ],
-                  "description": "Costed net unit cost (from the order-item snapshot), Decimal string; null when cost-missing",
+                  "description": "Unit cost incl. VAT (decimal string) derived from the order's cost lines for the earliest today order selling this variant; null when cost-missing or not yet computable.",
                   "example": "42.00"
                 },
                 "unresolved": {
@@ -2338,14 +2348,14 @@
                     "string",
                     "null"
                   ],
-                  "description": "Decimal string, null for buffer rows"
+                  "description": "Net profit (decimal string); null for buffer rows and for orders whose estimate profit statement is not yet computed."
                 },
                 "margin": {
                   "type": [
                     "string",
                     "null"
                   ],
-                  "description": "Decimal string, null for buffer rows"
+                  "description": "Sale margin % (decimal string); null for buffer rows and for orders whose estimate profit statement is not yet computed."
                 },
                 "promotionDisplays": {
                   "type": [
@@ -10399,11 +10409,11 @@
                 "calculated",
                 "excluded"
               ],
-              "description": "Filter by profit universe (spec 2026-06-12 calculated-or-excluded). 'calculated' = estimatedNetProfit set; 'excluded' = profit_excluded_at set (cost window missed — permanent). There is no pending state: orders persist in one of the two. Omit for all.",
+              "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost window missed - permanent). Omit for all.",
               "example": "excluded"
             },
             "required": false,
-            "description": "Filter by profit universe (spec 2026-06-12 calculated-or-excluded). 'calculated' = estimatedNetProfit set; 'excluded' = profit_excluded_at set (cost window missed — permanent). There is no pending state: orders persist in one of the two. Omit for all.",
+            "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost window missed - permanent). Omit for all.",
             "name": "costStatus",
             "in": "query"
           },
@@ -10656,11 +10666,11 @@
                 "calculated",
                 "excluded"
               ],
-              "description": "Filter by profit universe (spec 2026-06-12 calculated-or-excluded). 'calculated' = estimatedNetProfit set; 'excluded' = profit_excluded_at set (cost window missed — permanent). There is no pending state: orders persist in one of the two. Omit for all.",
+              "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost window missed - permanent). Omit for all.",
               "example": "excluded"
             },
             "required": false,
-            "description": "Filter by profit universe (spec 2026-06-12 calculated-or-excluded). 'calculated' = estimatedNetProfit set; 'excluded' = profit_excluded_at set (cost window missed — permanent). There is no pending state: orders persist in one of the two. Omit for all.",
+            "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost window missed - permanent). Omit for all.",
             "name": "costStatus",
             "in": "query"
           },

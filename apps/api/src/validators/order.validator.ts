@@ -23,9 +23,9 @@ const OrderStatusSchema = z.enum(OrderStatus).openapi({
 
 const ReconciliationStatusSchema = z.enum(ReconciliationStatus).openapi({
   description:
-    'Settlement progression. NOT_SETTLED = only ESTIMATE fees written. PARTIALLY_SETTLED = ' +
-    'at least one SETTLEMENT/CARGO_INVOICE fee. FULLY_SETTLED = PaymentOrder confirmed + ' +
-    'settledNetProfit written.',
+    "Settlement progression, read from the order's best-known profit statement; NOT_SETTLED when " +
+    'the order has no statement yet. NOT_SETTLED = no settlement applied, PARTIALLY_SETTLED = ' +
+    'settlement started, FULLY_SETTLED = settlement fully reconciled.',
   example: 'PARTIALLY_SETTLED',
 });
 
@@ -92,9 +92,9 @@ export const listOrdersQuerySchema = TablePaginationQuerySchema.extend({
     .optional()
     .openapi({
       description:
-        "Filter by profit universe (spec 2026-06-12 calculated-or-excluded). 'calculated' = " +
-        "estimatedNetProfit set; 'excluded' = profit_excluded_at set (cost window missed — " +
-        'permanent). There is no pending state: orders persist in one of the two. Omit for all.',
+        "Filter by profit universe. 'calculated' = orders not excluded from profit " +
+        "(profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe " +
+        '(profit_excluded_at set, cost window missed - permanent). Omit for all.',
       example: 'excluded',
     }),
   lossOnly: z
@@ -141,11 +141,16 @@ export const OrderListItemSchema = z
     // GROSS konvansiyon (2026-06-16): saleSubtotalNet/saleVatTotal → saleGross/saleVat.
     // saleGross = satış toplamı (KDV-dahil), saleVat = içindeki KDV, listGross =
     // liste fiyatı (KDV-dahil). null: OrderItem'lar henüz senkronlanmadı.
-    saleGross: z.string().nullable().openapi({
-      description:
-        'Net sale incl. VAT (decimal string): gross sale minus resolved return deductions (matches the detail modal). null until OrderItems are synced.',
-      example: '299.40',
-    }),
+    saleGross: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Sale incl. VAT (decimal string), read from the best-known profit statement: its sale ' +
+          "(gross sale minus sale returns). Falls back to the order's own sale when no statement " +
+          'exists yet, 0 for a cancelled order without a statement, and null until OrderItems are synced.',
+        example: '299.40',
+      }),
     saleVat: z.string().nullable().openapi({
       description: 'KDV contained in the gross sale (decimal string).',
       example: '49.90',
@@ -159,8 +164,8 @@ export const OrderListItemSchema = z
       .nullable()
       .openapi({
         description:
-          'Net profit estimated at T+0 by applyEstimateOnOrderCreate. Write-once; ' +
-          'never updated after the order is created.',
+          "Net profit from the order's estimate profit statement (decimal string). Null when the " +
+          'estimate cannot be computed or the order is excluded from profit.',
         example: '78.40',
       }),
     settledNetProfit: z
@@ -168,8 +173,8 @@ export const OrderListItemSchema = z
       .nullable()
       .openapi({
         description:
-          'Net profit reconciled with settlement data. Mutable as Return/Discount transactions ' +
-          'flow in. Null until the first SETTLEMENT row is processed.',
+          'Best-known net profit (decimal string) once settlement reconciliation has started for ' +
+          'the order; null before any settlement is applied.',
         example: '75.10',
       }),
     // Marj backend'de hesaplanıp persist edilir (estimatedSaleMarginPct /
@@ -181,8 +186,8 @@ export const OrderListItemSchema = z
       .nullable()
       .openapi({
         description:
-          'Sale margin % (decimal string) = settledSaleMarginPct ?? estimatedSaleMarginPct. ' +
-          'Net profit / gross sale × 100. Null until computed or when the gross sale is 0.',
+          'Sale margin % (decimal string) from the best-known profit statement: net profit / sale ' +
+          'gross * 100. Null until a statement exists or when the sale gross is 0.',
         example: '15.50',
       }),
     // ROI = kâr / Σ maliyet brüt × 100 (consumed: settled ?? estimated). Frontend
@@ -192,8 +197,8 @@ export const OrderListItemSchema = z
       .nullable()
       .openapi({
         description:
-          'Cost markup % (ROI, decimal string) = settledCostMarkupPct ?? estimatedCostMarkupPct. ' +
-          'Net profit / total cost gross × 100. Null until computed or when total cost is 0.',
+          'Cost markup % (ROI, decimal string) from the best-known profit statement: net profit / ' +
+          'total cost gross * 100. Null until a statement exists or when total cost is 0.',
         example: '38.40',
       }),
     // Promosyon gösterimi (spec ekleme #3): mapper'ın yakaladığı satıcı-indirimi
@@ -253,9 +258,11 @@ export const ListOrdersResponseSchema = z
     pagination: TableMetaSchema,
     counts: z
       .object({
-        calculated: z.number().int().nonnegative(),
+        calculated: z.number().int().nonnegative().openapi({
+          description: 'Count of orders not excluded from profit (profit_excluded_at is null).',
+        }),
         excluded: z.number().int().nonnegative().openapi({
-          description: 'Profit-excluded orders (profit_excluded_at set — permanent).',
+          description: 'Count of profit-excluded orders (profit_excluded_at set - permanent).',
         }),
       })
       .openapi({
@@ -271,21 +278,35 @@ export const ListOrdersResponseSchema = z
 export const OrderSummaryResponseSchema = z
   .object({
     totalRevenueGross: z.string().openapi({
-      description: 'Σ net sale (return-adjusted, KDV-dahil) over the filtered set.',
+      description:
+        'Total revenue (sale incl. VAT, decimal string) over the filtered orders, summed from ' +
+        'their best-known profit statements; an order with no statement contributes its own sale ' +
+        '(a cancelled order contributes nothing). Profit-excluded orders still count toward revenue.',
     }),
-    netProfitGross: z
+    netProfitGross: z.string().openapi({
+      description:
+        'Total net profit (decimal string) over the filtered orders, summed from their best-known ' +
+        'profit statements. Orders excluded from profit never contribute.',
+    }),
+    avgMarginPct: z
       .string()
-      .openapi({ description: 'Σ consumed net profit (settledNetProfit ?? estimatedNetProfit).' }),
-    avgMarginPct: z.string().nullable().openapi({
-      description: 'Average consumed sale margin % (decimal string); null when no scored orders.',
-    }),
+      .nullable()
+      .openapi({
+        description:
+          "Average sale margin % (decimal string) across the filtered orders' best-known profit " +
+          'statements, rounded to 4 decimals; null when no order has a statement.',
+      }),
     lossOrderRate: z
       .object({
         lossCount: z.number().int().nonnegative(),
         totalCount: z.number().int().nonnegative(),
-        pct: z.string().openapi({ description: 'lossCount / totalCount × 100 (decimal string).' }),
+        pct: z.string().openapi({ description: 'lossCount / totalCount * 100 (decimal string).' }),
       })
-      .openapi({ description: 'Share of filtered orders whose consumed net profit is negative.' }),
+      .openapi({
+        description:
+          'Share of filtered orders whose best-known profit statement reports a negative net ' +
+          'profit. lossCount counts those statements; totalCount is every filtered order.',
+      }),
   })
   .openapi('OrderSummaryResponse');
 
@@ -316,10 +337,16 @@ const OrderItemDetailSchema = z
       .string()
       .openapi({ description: 'Seller discount incl. VAT (decimal string).' }),
     // Komisyon (gross + oran) — always present (default 0 in schema).
-    commissionGross: z.string().openapi({ description: 'Commission incl. VAT (decimal string).' }),
-    commissionRate: z
-      .string()
-      .openapi({ description: 'Commission rate % (decimal string), e.g. "21.64".' }),
+    commissionGross: z.string().openapi({
+      description:
+        "Commission incl. VAT (decimal string), from the order's best-known profit lines; falls " +
+        "back to the item's own commission column when no line supplies it.",
+    }),
+    commissionRate: z.string().openapi({
+      description:
+        "Commission rate % (decimal string) from the profit lines; falls back to the item's own " +
+        'commission rate column when no line supplies it.',
+    }),
     commissionVatRate: z
       .string()
       .openapi({ description: 'Commission VAT rate %, decimal string.' }),
@@ -329,19 +356,41 @@ const OrderItemDetailSchema = z
     estimatedCommissionGross: z
       .string()
       .nullable()
-      .openapi({ description: 'T+0 commission estimate (write-once); null pre-estimate.' }),
+      .openapi({
+        description:
+          'Estimated commission incl. VAT (decimal string) from the estimate profit lines; null ' +
+          'when none.',
+      }),
     settledCommissionGross: z
       .string()
       .nullable()
-      .openapi({ description: 'Settlement commission (mutable); null pre-settlement.' }),
+      .openapi({
+        description:
+          'Settled commission incl. VAT (decimal string) from the settlement profit lines; null ' +
+          'until settlement.',
+      }),
     // Cost snapshot (gross + VAT rate) — null when the variant has no cost profile attached.
     unitCostSnapshotGross: z
       .string()
       .nullable()
-      .openapi({ description: 'Unit cost snapshot incl. VAT (decimal string).' }),
-    unitCostSnapshotVatRate: z.string().nullable(),
+      .openapi({
+        description:
+          "Unit cost incl. VAT (decimal string) from the order's best-known profit lines; null " +
+          'when this order profit cannot be computed or no cost line exists.',
+      }),
+    unitCostSnapshotVatRate: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          "Unit cost VAT rate % (decimal string) from the order's best-known profit lines; null when " +
+          'no cost line exists.',
+      }),
     // Komisyon Faturası anchor (Sale satırı yazdığında set'lenir).
-    commissionInvoiceSerialNumber: z.string().nullable().openapi({ example: 'DCF2024000123' }),
+    commissionInvoiceSerialNumber: z
+      .string()
+      .nullable()
+      .openapi({ description: 'Deprecated: always null.', example: 'DCF2024000123' }),
     barcode: z.string().nullable().openapi({
       description:
         'Vendor barcode on the order line — the only product trace while productVariantId is null (unmatched line).',
@@ -510,7 +559,12 @@ const ProfitBreakdownSchema = z
         'Toplam gider = ürün maliyeti + pazaryeri kesintileri + vergiler ( = satış − net kâr ).',
     }),
   })
-  .openapi('ProfitBreakdown');
+  .openapi('ProfitBreakdown', {
+    description:
+      "Profit breakdown built from the order's best-known profit statement and its selected " +
+      'profit lines. Null when the order has no net profit to show - not computable, excluded ' +
+      'from profit, or the profit could not be computed for this request.',
+  });
 
 // ─── Detail: top-level ────────────────────────────────────────────────────
 
@@ -534,7 +588,15 @@ export const OrderDetailSchema = z
     micro: z.boolean(),
 
     // GROSS konvansiyon (2026-06-16): saleSubtotalNet/saleVatTotal → saleGross/saleVat/listGross.
-    saleGross: z.string().nullable(),
+    saleGross: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Sale incl. VAT (decimal string), the same value as the orders list row: the best-known ' +
+          "statement's sale, the order's own sale when no statement exists, 0 for a cancelled order " +
+          'without a statement, null until OrderItems are synced.',
+      }),
     saleVat: z.string().nullable(),
     listGross: z.string().nullable(),
     estimatedNetProfit: z.string().nullable(),
@@ -578,16 +640,18 @@ export const OrderDetailSchema = z
 
     reconciliationStatus: ReconciliationStatusSchema,
     paymentOrderId: z.string().nullable().openapi({
-      description: 'PaymentOrder cycle id (BigInt → string). Null until reconciliation closes.',
+      description: 'Deprecated: always null.',
     }),
-    paymentDate: z.string().datetime().nullable(),
+    paymentDate: z.string().datetime().nullable().openapi({
+      description: 'Deprecated: always null.',
+    }),
 
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
 
     items: z.array(OrderItemDetailSchema),
     fees: z.array(OrderFeeDetailSchema).openapi({
-      description: 'Chronologically ordered (capturedAt asc). Renders as the fee timeline.',
+      description: 'Deprecated: always an empty array.',
     }),
     claims: z.array(OrderClaimDetailSchema).openapi({
       description: 'Return claims, synced from Trendyol getClaims by the CLAIMS worker (6h).',
