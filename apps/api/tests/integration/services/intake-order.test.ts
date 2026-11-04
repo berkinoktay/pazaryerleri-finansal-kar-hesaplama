@@ -1107,33 +1107,104 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
   });
 
-  it('removes a coexisting buffer entry when a past-day order is persisted', async () => {
+  it('graduates a coexisting past-day buffer entry as COST_DEADLINE_MISSED', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
-    await seedVariant(org.id, store.id, BARCODE, false);
-    const past = new Date(Date.now() - PAST_DAY_MS);
+    await seedVariant(org.id, store.id, BARCODE, false); // cost-missing -> buffer
+    await setStock(store.id, BARCODE, 40);
+    const platformOrderId = 'graduate-past';
 
-    // A buffer row already exists for this order (it was buffered when still same-day;
-    // the day-end flush had not run yet when it re-delivered as past-day).
-    await createBufferEntry(org.id, store.id, {
-      platformOrderId: 'graduate-past',
-      orderDate: getBusinessDateAnchor(past),
-      status: 'PENDING',
+    // 1. Same-day cost-missing intake -> buffered (PENDING); the optimistic intake
+    //    decrement drops stock once, 40 -> 39, with no orders row yet.
+    const first = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId, orderDate: new Date() }),
     });
+    expect(first).toEqual({ kind: 'buffered' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(1);
+    expect(
+      (
+        await prisma.productVariant.findFirstOrThrow({
+          where: { storeId: store.id, barcode: BARCODE },
+        })
+      ).quantity,
+    ).toBe(39);
 
+    // 2. The order re-delivers once its business day has closed (modeled with a
+    //    past-day orderDate) while the buffer row still coexists. It graduates into
+    //    orders and the buffer row is deleted in the same transaction. Because a
+    //    buffer row was removed, the permanent reason is COST_DEADLINE_MISSED: the
+    //    order was here within its day and merely missed the cost deadline (the same
+    //    reason the midnight flush would stamp), NOT LATE_UNCOSTED_ARRIVAL. Before the
+    //    fix the past-day branch stamped LATE_UNCOSTED_ARRIVAL unconditionally.
     const outcome = await intakeOrder({
       storeId: store.id,
       organizationId: org.id,
-      mapped: buildMapped({ platformOrderId: 'graduate-past', orderDate: past }),
+      mapped: buildMapped({ platformOrderId, orderDate: new Date(Date.now() - PAST_DAY_MS) }),
     });
 
-    // Past-day without a timely cost -> persisted + permanently excluded, and the
-    // stale buffer row is graduated away in the same transaction (never left to coexist).
     expect(outcome).toEqual({ kind: 'persisted', reason: 'late_uncosted_arrival' });
     expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(1);
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.profitExcludedAt).not.toBeNull();
-    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
+    expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
+    // Graduation carries promotedFromBuffer, so it does NOT decrement a second time:
+    // stock stays at the single 40 -> 39 drop from the buffered intake.
+    const variant = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: BARCODE },
+    });
+    expect(variant.quantity).toBe(39);
+  });
+
+  it('heals an order that sits in both tables without restamping or decrementing again', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false); // cost-missing (today -> would buffer)
+    await setStock(store.id, BARCODE, 40);
+    const today = new Date();
+
+    // A rare cross-path state: the order is ALREADY in `orders` (e.g. costed earlier,
+    // its profile later archived) AND a buffer row coexists for the same platformOrderId.
+    await prisma.order.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformOrderId: 'heal-1',
+        platformOrderNumber: 'ord-heal-1',
+        orderDate: today,
+        status: 'PROCESSING',
+      },
+    });
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'heal-1',
+      orderDate: getBusinessDateAnchor(today),
+      status: 'PENDING',
+    });
+
+    // A re-delivery (today, still cost-missing) takes the already_in_orders branch: it
+    // persists idempotently and graduates the coexisting buffer row away in the same tx.
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'heal-1', orderDate: today }),
+    });
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'already_in_orders' });
+    // Buffer row graduated away; still exactly one orders row.
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(1);
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    // The heal never stamps an exclusion -- the already_in_orders branch flags no
+    // pastDayUncosted, and the update branch never touches the exclusion columns.
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.profitExcludedAt).toBeNull();
+    expect(order.profitExclusionReason).toBeNull();
+    // A buffer row was removed, so promotedFromBuffer suppresses a second decrement:
+    // stock stays at its starting 40, untouched by the heal.
+    const variant = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: BARCODE },
+    });
+    expect(variant.quantity).toBe(40);
   });
 });

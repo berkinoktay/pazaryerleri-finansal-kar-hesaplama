@@ -10,7 +10,10 @@
  *   - variant_not_found            → cost_missing route (order IS written; line keeps barcode, null variant FK; resolution in PR-2)
  *   - calculable + today           -> persist + graduate any buffer row (queue recompute)
  *   - past-day + timely cost       -> persist + graduate any buffer row (the queued recompute profits it)
- *   - past-day + cost missed day   -> persist + graduate any buffer row with profitExclusion LATE_UNCOSTED_ARRIVAL
+ *   - past-day + cost missed day   -> persist + graduate any buffer row; the permanent
+ *                                      exclusion reason is derived from the graduation
+ *                                      (buffer row removed -> COST_DEADLINE_MISSED, else
+ *                                      LATE_UNCOSTED_ARRIVAL)
  *   - cost_missing + today + in orders -> persist + graduate any buffer row (idempotent)
  *   - cost_missing + today + new   → live_performance_buffer (PENDING, same-day cost-flip window)
  *
@@ -35,8 +38,13 @@
  * (Europe/Istanbul midnight). Supply prices drift, so a cost entered after that day
  * may not reflect the day's real price. A past-day order that arrives without a
  * timely cost -- or one whose cost was entered only after its day (hadCostWithinOrderDay
- * false) -- is persisted but PERMANENTLY excluded from profit with LATE_UNCOSTED_ARRIVAL;
- * its ciro still counts, its net profit never shows. Only a missing COST excludes; a
+ * false) -- is persisted but PERMANENTLY excluded from profit; its ciro still counts, its
+ * net profit never shows. The exclusion reason is derived from whether a live-performance
+ * buffer row for the same order is graduated in the persisting transaction: a coexisting
+ * buffer row proves the order ARRIVED within its business day (the buffer only holds
+ * same-day cost-missing orders) and merely missed its cost deadline -> COST_DEADLINE_MISSED
+ * (the same reason the day-end flush stamps); with no buffer row we first saw the order
+ * after its day had closed -> LATE_UNCOSTED_ARRIVAL. Only a missing COST excludes; a
  * missing desi / commission / carrier never does, and a cancelled order is never
  * excluded (its CANCELLED branch returns above). The order is still enqueued for a
  * profit recompute like every other write. This supersedes the phase-3B "no
@@ -47,13 +55,14 @@
 import { refreshProductAggregates } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
 import { Prisma } from '@pazarsync/db';
+import { ProfitExclusionReason } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
 import { getBusinessDate, getBusinessDateAnchor } from '@pazarsync/utils';
 
 import { hadCostWithinOrderDay } from './cost-window';
 import { decrementVariantStock, incrementVariantStock, isOrderOnBusinessToday } from './stock';
-import { upsertOrderWithSnapshot, type UpsertOrderOpts } from './upsert-order';
+import { upsertOrderWithSnapshot } from './upsert-order';
 
 export type OrderIntakeOutcome =
   | {
@@ -228,8 +237,12 @@ export async function intakeOrder(args: {
       await persistWithBufferGraduation(storeId, organizationId, mapped);
       return { kind: 'persisted', reason: 'calculable' };
     }
+    // Past-day uncosted: the order is permanently excluded, but the REASON is derived
+    // inside the persisting transaction (see persistWithBufferGraduation) from whether a
+    // coexisting buffer row is graduated, not stamped unconditionally here -- so a buffered
+    // order re-delivered just after midnight gets the same reason the day-end flush would.
     await persistWithBufferGraduation(storeId, organizationId, mapped, {
-      reason: 'LATE_UNCOSTED_ARRIVAL',
+      pastDayUncosted: true,
     });
     return { kind: 'persisted', reason: 'late_uncosted_arrival' };
   }
@@ -316,21 +329,36 @@ export async function intakeOrder(args: {
  * persist) the flag is false and the write decrements once as before.
  *
  * Tenant-scoped: the buffer delete filters organizationId + storeId (CLAUDE.md -- every
- * order/buffer read or write pins the tenant). The optional profitExclusion is forwarded
- * unchanged so the past-day late route keeps stamping LATE_UNCOSTED_ARRIVAL.
+ * order/buffer read or write pins the tenant). When the caller flags pastDayUncosted, the
+ * permanent exclusion reason is derived HERE from the SAME buffer-removal signal: a buffer
+ * row was removed -> COST_DEADLINE_MISSED (the order arrived within its business day -- the
+ * buffer only ever holds a same-day cost-missing order -- so it merely missed its cost
+ * deadline, exactly what the midnight flush stamps); no buffer row -> LATE_UNCOSTED_ARRIVAL
+ * (we first saw the order after its day had already closed). Computing it inside the
+ * transaction is what fixes the race: a buffered order re-delivered just after midnight but
+ * before the flush tick can no longer get a different reason depending on which side wins.
  */
 async function persistWithBufferGraduation(
   storeId: string,
   organizationId: string,
   mapped: MappedOrder,
-  profitExclusion?: UpsertOrderOpts['profitExclusion'],
+  opts?: { readonly pastDayUncosted: boolean },
 ): Promise<void> {
   await prisma.$transaction(async (tx) => {
     const removed = await tx.livePerformanceBuffer.deleteMany({
       where: { organizationId, storeId, platformOrderId: mapped.platformOrderId },
     });
+    const graduated = removed.count > 0;
+    const profitExclusion =
+      opts?.pastDayUncosted === true
+        ? {
+            reason: graduated
+              ? ProfitExclusionReason.COST_DEADLINE_MISSED
+              : ProfitExclusionReason.LATE_UNCOSTED_ARRIVAL,
+          }
+        : undefined;
     await upsertOrderWithSnapshot(storeId, organizationId, mapped, tx, {
-      promotedFromBuffer: removed.count > 0,
+      promotedFromBuffer: graduated,
       profitExclusion,
     });
   });
