@@ -10,6 +10,7 @@ import {
 import { CLAIM_ITEM_STATUS_ACCEPTED } from '@pazarsync/marketplace';
 import {
   getBusinessDate,
+  isInstantWithinTariffPeriod,
   resolveProfitSettings,
   type ResolvedProfitSettings,
 } from '@pazarsync/utils';
@@ -331,10 +332,11 @@ function tariffCandidateBeats(a: TariffCandidate, b: TariffCandidate): boolean {
 
 /**
  * The tariff band list per order item. A candidate is a saved commission-tariff
- * item of the order's store with a matching barcode whose period fully bounds the
- * order date (both bounds non-null and startsAt <= orderDate <= endsAt). The
- * best candidate's parsed bands become the item's tariff bands; an empty band list
- * or no candidate leaves the item without tariff bands.
+ * item of the order's store with a matching barcode whose period covers the order
+ * instant (both bounds non-null; bounds converted from Istanbul wall-clock to the
+ * real instant and compared half-open [startsAt, endsAt), via the shared helper).
+ * The best candidate's parsed bands become the item's tariff bands; an empty band
+ * list or no candidate leaves the item without tariff bands.
  */
 async function loadTariffBands(
   tx: Prisma.TransactionClient,
@@ -368,8 +370,8 @@ async function loadTariffBands(
     if (startsAt === null || endsAt === null) {
       continue; // a period with a null bound never covers the order date
     }
-    if (startsAt.getTime() > orderDate.getTime() || endsAt.getTime() < orderDate.getTime()) {
-      continue;
+    if (!isInstantWithinTariffPeriod({ startsAt, endsAt }, orderDate)) {
+      continue; // bounds converted to the real instant, compared half-open
     }
     const candidate: TariffCandidate = {
       id: row.id,

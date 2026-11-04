@@ -298,6 +298,77 @@ describe('loadTrendyolParcel', () => {
     expect(attrB?.tariffBands).toBeNull(); // no tariff for bc-b
   });
 
+  it('selects the tariff band by the real order instant', async () => {
+    // Tariff period bounds are stored as Istanbul wall-clock saved as UTC, while the
+    // order date is a true instant. This order sits at 22:00Z on 2026-10-28 -- two
+    // hours before the stored 2026-10-29T00:00Z boundary, but one hour PAST the real
+    // Istanbul-midnight instant it denotes (2026-10-28T21:00Z). So it belongs to the
+    // period that STARTS at that boundary, not the one that ends at it. A raw
+    // comparison (or a closed end bound) would wrongly keep it in the earlier period.
+    const parcel = await seedMelontikParcel();
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { orderDate: new Date('2026-10-28T22:00:00Z') },
+    });
+
+    const tariff = await prisma.commissionTariff.create({
+      data: {
+        organizationId: parcel.organizationId,
+        storeId: parcel.storeId,
+        name: 'Boundary tariff',
+      },
+    });
+    const periods: { label: string; startsAt: Date; endsAt: Date; pct: string }[] = [
+      {
+        label: 'ends at the boundary',
+        startsAt: new Date('2026-10-20T00:00:00Z'),
+        endsAt: new Date('2026-10-29T00:00:00Z'),
+        pct: '11',
+      },
+      {
+        label: 'starts at the boundary',
+        startsAt: new Date('2026-10-29T00:00:00Z'),
+        endsAt: new Date('2026-11-05T00:00:00Z'),
+        pct: '23',
+      },
+    ];
+    for (const [index, period] of periods.entries()) {
+      const createdPeriod = await prisma.commissionTariffPeriod.create({
+        data: {
+          organizationId: parcel.organizationId,
+          storeId: parcel.storeId,
+          tariffId: tariff.id,
+          dateRangeLabel: period.label,
+          sortOrder: index,
+          startsAt: period.startsAt,
+          endsAt: period.endsAt,
+        },
+      });
+      await prisma.commissionTariffItem.create({
+        data: {
+          organizationId: parcel.organizationId,
+          storeId: parcel.storeId,
+          periodId: createdPeriod.id,
+          barcode: MELONTIK.items.a.barcode,
+          productTitle: `Melontik ${period.label}`,
+          currentPrice: MELONTIK.items.a.saleGross,
+          currentCommissionPct: period.pct,
+          bands: [{ key: 'band1', commissionPct: period.pct }],
+        },
+      });
+    }
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const attrA = loaded.estimateInput.attributes.items.find((i) => i.orderItemId === parcel.itemA);
+    expect(attrA?.tariffBands).toHaveLength(1);
+    // The period that STARTS at the Istanbul-midnight boundary wins (half-open, real instant).
+    expect(attrA?.tariffBands?.[0]?.ratePct.toFixed(0)).toBe('23');
+  });
+
   it('counts accepted claim units as accepted returns', async () => {
     const parcel = await seedMelontikParcel();
 

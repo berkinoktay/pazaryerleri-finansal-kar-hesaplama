@@ -22,3 +22,8 @@ export {
   resolveSnapshotProfitSettings,
   type ResolvedProfitSettings,
 } from './profit-settings';
+export {
+  findCoveringTariffPeriod,
+  isInstantWithinTariffPeriod,
+  tariffBoundToInstant,
+} from './tariff-period';

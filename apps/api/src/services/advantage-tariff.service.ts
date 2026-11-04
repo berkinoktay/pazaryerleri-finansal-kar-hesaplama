@@ -20,9 +20,9 @@ import { Prisma, prisma } from '@pazarsync/db';
 import type { Store as PrismaStore } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 import type { EstimateOutcome } from '@pazarsync/profit';
+import { isInstantWithinTariffPeriod, tariffBoundToInstant } from '@pazarsync/utils';
 
 import { NotFoundError } from '../lib/errors';
-import { resolveValidity } from '../lib/tariff-period';
 import { resolveCommissionRate } from './commission-rate-resolver';
 import { parseStoredTariffBands, type StoredTariffBand } from '@pazarsync/profit';
 import { fetchCostAggregates } from './products-list.service';
@@ -113,13 +113,22 @@ export async function resolveCommissionSource(
     });
     // Within the pinned week, use the sub-period (3-Gün / 4-Gün) active NOW; else,
     // when the whole week is still upcoming (preparing ahead), the one that starts
-    // SOONEST; else the last (a fully-past week).
+    // SOONEST; else the last (a fully-past week). Period bounds are stored as Istanbul
+    // wall-clock saved as UTC, so they are converted to the real instant (and compared
+    // half-open) via the shared helper before matching against `now`.
     const nowMs = now.getTime();
-    const active = periods.find((p) => resolveValidity(p.startsAt, p.endsAt, now) === 'active');
+    const active = periods.find(
+      (p) =>
+        p.startsAt !== null &&
+        p.endsAt !== null &&
+        isInstantWithinTariffPeriod({ startsAt: p.startsAt, endsAt: p.endsAt }, now),
+    );
     const upcoming = periods
-      .flatMap((p) =>
-        p.startsAt !== null && p.startsAt.getTime() > nowMs ? [{ p, t: p.startsAt.getTime() }] : [],
-      )
+      .flatMap((p) => {
+        if (p.startsAt === null) return [];
+        const startMs = tariffBoundToInstant(p.startsAt).getTime();
+        return startMs > nowMs ? [{ p, t: startMs }] : [];
+      })
       .sort((a, b) => a.t - b.t)[0]?.p;
     period = active ?? upcoming ?? periods.at(-1) ?? null;
   } catch (err) {
