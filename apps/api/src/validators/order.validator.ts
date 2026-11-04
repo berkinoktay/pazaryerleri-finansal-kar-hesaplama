@@ -103,8 +103,8 @@ export const listOrdersQuerySchema = TablePaginationQuerySchema.extend({
     .optional()
     .openapi({
       description:
-        'When true, return only orders whose consumed net profit ' +
-        '(settledNetProfit ?? estimatedNetProfit) is negative ("sadece zararlı").',
+        'When true, return only orders whose best-known profit statement reports a net ' +
+        'profit below zero.',
       example: 'true',
     }),
   sort: z
@@ -113,8 +113,8 @@ export const listOrdersQuerySchema = TablePaginationQuerySchema.extend({
     .openapi({
       description:
         'Sort key. Default `-orderDate` (newest first). `marginPct` / `-marginPct` order by ' +
-        'Order.estimatedSaleMarginPct (the sale-margin column on the table) ascending / ' +
-        'descending; null margins sort last in both directions.',
+        "the best-known profit statement's sale margin ascending / descending; orders without " +
+        'a statement sort last in both directions, ties broken by id.',
       example: '-marginPct',
     }),
 }).openapi('ListOrdersQuery');

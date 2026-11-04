@@ -10424,11 +10424,11 @@
                 "true",
                 "false"
               ],
-              "description": "When true, return only orders whose consumed net profit (settledNetProfit ?? estimatedNetProfit) is negative (\"sadece zararlı\").",
+              "description": "When true, return only orders whose best-known profit statement reports a net profit below zero.",
               "example": "true"
             },
             "required": false,
-            "description": "When true, return only orders whose consumed net profit (settledNetProfit ?? estimatedNetProfit) is negative (\"sadece zararlı\").",
+            "description": "When true, return only orders whose best-known profit statement reports a net profit below zero.",
             "name": "lossOnly",
             "in": "query"
           },
@@ -10441,11 +10441,11 @@
                 "-marginPct"
               ],
               "default": "-orderDate",
-              "description": "Sort key. Default `-orderDate` (newest first). `marginPct` / `-marginPct` order by Order.estimatedSaleMarginPct (the sale-margin column on the table) ascending / descending; null margins sort last in both directions.",
+              "description": "Sort key. Default `-orderDate` (newest first). `marginPct` / `-marginPct` order by the best-known profit statement's sale margin ascending / descending; orders without a statement sort last in both directions, ties broken by id.",
               "example": "-marginPct"
             },
             "required": false,
-            "description": "Sort key. Default `-orderDate` (newest first). `marginPct` / `-marginPct` order by Order.estimatedSaleMarginPct (the sale-margin column on the table) ascending / descending; null margins sort last in both directions.",
+            "description": "Sort key. Default `-orderDate` (newest first). `marginPct` / `-marginPct` order by the best-known profit statement's sale margin ascending / descending; orders without a statement sort last in both directions, ties broken by id.",
             "name": "sort",
             "in": "query"
           }
@@ -10681,11 +10681,11 @@
                 "true",
                 "false"
               ],
-              "description": "When true, return only orders whose consumed net profit (settledNetProfit ?? estimatedNetProfit) is negative (\"sadece zararlı\").",
+              "description": "When true, return only orders whose best-known profit statement reports a net profit below zero.",
               "example": "true"
             },
             "required": false,
-            "description": "When true, return only orders whose consumed net profit (settledNetProfit ?? estimatedNetProfit) is negative (\"sadece zararlı\").",
+            "description": "When true, return only orders whose best-known profit statement reports a net profit below zero.",
             "name": "lossOnly",
             "in": "query"
           }
