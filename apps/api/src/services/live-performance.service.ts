@@ -1,12 +1,20 @@
+import type { Prisma } from '@pazarsync/db';
 import { prisma } from '@pazarsync/db';
-import type { OrderStatus } from '@pazarsync/db/enums';
+import { ProfitStatementView, ProfitStatus, type OrderStatus } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
+import {
+  itemProfitValues,
+  loadOrderProfitLines,
+  parseStoredIssues,
+  selectLines,
+} from '@pazarsync/profit';
 import { getBusinessDateAnchor, getBusinessDayRange, getBusinessHour } from '@pazarsync/utils';
 import Decimal from 'decimal.js';
 
 import { resolveVendorMissingBarcodes } from '../lib/catalog-barcode-miss-lookup';
 import { NotFoundError } from '../lib/errors';
 import { toPromotionDisplays, type PromotionDisplayWire } from '../lib/promotion-displays';
+import { computeParcelProfitForRead } from './profit-compute-fallback.service';
 
 // All "today"/"yesterday" windows come from the single business-timezone helpers
 // (packages/utils/src/timezone.ts) — never a hard-coded offset. Orders carry a
@@ -23,14 +31,52 @@ interface DayRange {
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-// Aggregate KPI ratio (net profit ÷ denominator × 100), computed and SERVED by
+// Aggregate KPI ratio (net profit / denominator * 100), computed and SERVED by
 // the backend over the costed subset. This is NOT a render-time per-order margin
-// derivation (the rule-violation target removed in Bölüm H is the frontend
+// derivation (the rule-violation target removed in Bolum H is the frontend
 // computeMargin in order-kpi-grid); the per-order margin in getLiveOrders is read
-// straight from the persisted estimatedSaleMarginPct column, never recomputed.
+// straight from the ESTIMATE statement's sale_margin_pct, never recomputed.
 function aggregateRatio(profit: Decimal, denominator: Decimal): string {
   if (denominator.isZero()) return '0.00';
   return profit.div(denominator).mul(100).toFixed(2);
+}
+
+// The ESTIMATE statement columns live performance reads: the status gates the costed
+// subset (decision 10), net profit drives the KPI/chart/feed profit, cost_gross is the
+// Kar/Maliyet ratio denominator (replacing the always-null item cost snapshots), and
+// sale_margin_pct is the per-order margin the feed surfaces.
+const ESTIMATE_STATEMENT_SELECT = {
+  status: true,
+  netProfit: true,
+  costGross: true,
+  saleMarginPct: true,
+} as const satisfies Prisma.OrderProfitStatementSelect;
+
+type EstimateStatementRow = Prisma.OrderProfitStatementGetPayload<{
+  select: typeof ESTIMATE_STATEMENT_SELECT;
+}>;
+
+// The relation filter for an order's ESTIMATE statement. Carries organizationId AND
+// storeId so a statement filed under another org/store for the same order id is never
+// read (tenant isolation); the (order, view) unique leaves at most one matching row.
+function estimateStatementWhere(
+  orgId: string,
+  storeId: string,
+): Prisma.OrderProfitStatementWhereInput {
+  return { view: ProfitStatementView.ESTIMATE, organizationId: orgId, storeId };
+}
+
+/**
+ * The order's ESTIMATE statement when it is costed -- stored and ESTIMATED, so its net
+ * profit is non-null (decision 10). Returns null for a missing statement or one that
+ * never reached ESTIMATED (NOT_COMPUTABLE / EXCLUDED / cancelled). Callers still guard
+ * net profit before using it, so the type stays honest about the nullable column.
+ */
+function costedEstimate(statements: readonly EstimateStatementRow[]): EstimateStatementRow | null {
+  const estimate = statements[0];
+  if (estimate === undefined) return null;
+  if (estimate.status !== ProfitStatus.ESTIMATED) return null;
+  return estimate;
 }
 
 // ─── KPIs ───────────────────────────────────────────────────────────────────
@@ -70,11 +116,12 @@ interface BufferAggregate {
 
 /**
  * Aggregate the `orders` rows for a day. Volume (revenue / count / units) is over
- * EVERY order; profit / costed-revenue / costed-cost / costed-count are over the
- * costed subset only (orders with a non-null estimatedNetProfit). Today's
- * cost-missing orders sit in the buffer (not here); yesterday's persisted
- * profit-excluded orders (estimate null) are here but excluded from the costed
- * aggregates.
+ * EVERY non-cancelled order; profit / costed-revenue / costed-cost / costed-count are
+ * over the costed subset only -- orders whose ESTIMATE statement is ESTIMATED
+ * (decision 10). The costed net and cost_gross come from that statement; the costed
+ * revenue is the order's own sale_gross. Today's cost-missing orders sit in the buffer
+ * (not here); yesterday's profit-excluded orders carry an EXCLUDED estimate and so land
+ * in volume but never in the costed aggregates.
  */
 async function aggregateOrders(
   orgId: string,
@@ -92,8 +139,11 @@ async function aggregateOrders(
     },
     select: {
       saleGross: true,
-      estimatedNetProfit: true,
-      items: { select: { quantity: true, unitCostSnapshotGross: true } },
+      items: { select: { quantity: true } },
+      profitStatements: {
+        where: estimateStatementWhere(orgId, storeId),
+        select: ESTIMATE_STATEMENT_SELECT,
+      },
     },
   });
 
@@ -108,16 +158,12 @@ async function aggregateOrders(
     if (order.saleGross !== null) revenue = revenue.add(order.saleGross.toString());
     for (const item of order.items) unitsSold += item.quantity;
 
-    if (order.estimatedNetProfit === null) continue;
-    netProfit = netProfit.add(order.estimatedNetProfit.toString());
+    const estimate = costedEstimate(order.profitStatements);
+    if (estimate === null || estimate.netProfit === null) continue;
+    netProfit = netProfit.add(estimate.netProfit.toString());
     costedCount += 1;
     if (order.saleGross !== null) costedRevenue = costedRevenue.add(order.saleGross.toString());
-    for (const item of order.items) {
-      if (item.unitCostSnapshotGross !== null)
-        costedCost = costedCost.add(
-          new Decimal(item.unitCostSnapshotGross.toString()).mul(item.quantity),
-        );
-    }
+    costedCost = costedCost.add(estimate.costGross.toString());
   }
 
   return {
@@ -209,8 +255,8 @@ const HOURS_IN_DAY = 24;
 /**
  * Hourly cumulative revenue + profit for a business day. Revenue buckets EVERY
  * order's subtotal (plus the buffer, today only); profit buckets the costed
- * subset (non-null estimate). The two running totals drive the front-end's
- * ciro↔kâr toggle without a second request.
+ * subset -- the costed ESTIMATE statement's net, by order hour (decision 10). The
+ * two running totals drive the front-end's ciro<->kar toggle without a second request.
  */
 async function hourlyCumulative(
   orgId: string,
@@ -226,7 +272,14 @@ async function hourlyCumulative(
       // Mirrors aggregateOrders — cancelled orders carry no payout.
       status: { not: 'CANCELLED' },
     },
-    select: { orderDate: true, saleGross: true, estimatedNetProfit: true },
+    select: {
+      orderDate: true,
+      saleGross: true,
+      profitStatements: {
+        where: estimateStatementWhere(orgId, storeId),
+        select: ESTIMATE_STATEMENT_SELECT,
+      },
+    },
   });
 
   const revenueBuckets = Array.from({ length: HOURS_IN_DAY }, () => new Decimal(0));
@@ -238,9 +291,10 @@ async function hourlyCumulative(
       revenueBuckets[hour] = (revenueBuckets[hour] ?? new Decimal(0)).add(
         order.saleGross.toString(),
       );
-    if (order.estimatedNetProfit !== null)
+    const estimate = costedEstimate(order.profitStatements);
+    if (estimate !== null && estimate.netProfit !== null)
       profitBuckets[hour] = (profitBuckets[hour] ?? new Decimal(0)).add(
-        order.estimatedNetProfit.toString(),
+        estimate.netProfit.toString(),
       );
   }
 
@@ -306,6 +360,19 @@ export interface TodayProductRow {
   vendorMissing: boolean;
 }
 
+/**
+ * The order item whose cost lines back a variant's displayed unit cost: the earliest
+ * (order date, then item id) of today's order items selling the variant whose order
+ * carries a stored ESTIMATE statement. `issues` are that statement's stored issues.
+ */
+interface ChosenOrderItem {
+  orderId: string;
+  itemId: string;
+  quantity: number;
+  orderDate: Date;
+  issues: Prisma.JsonValue;
+}
+
 interface ProductAccumulator {
   variantId: string | null;
   barcode: string;
@@ -316,8 +383,17 @@ interface ProductAccumulator {
   bufferEntryCount: number; // distinct buffer entries containing this barcode
   unitsSold: number;
   revenue: Decimal;
-  snapshotUnitCost: Decimal | null; // gross unit cost actually applied (costed rows)
+  // The chosen order item whose cost lines drive the displayed unit cost; null until an
+  // order with a stored ESTIMATE statement sells this variant.
+  chosenItem: ChosenOrderItem | null;
   unresolved: boolean;
+}
+
+/** Order-by for the chosen item: earliest order date, then lowest item id. */
+function isEarlierChosenItem(candidate: ChosenOrderItem, current: ChosenOrderItem): boolean {
+  const byDate = candidate.orderDate.getTime() - current.orderDate.getTime();
+  if (byDate !== 0) return byDate < 0;
+  return candidate.itemId < current.itemId;
 }
 
 interface VariantIdentity {
@@ -336,11 +412,12 @@ interface VariantIdentity {
  * `orders`(today) ∪ `buffer`(today). Volume (orderCount / unitsSold / revenue) is
  * known the moment the order arrives — no cost required. costStatus is resolved
  * from the active ProductVariantCostProfile (authoritative; matches the retired
- * getMissingCost), and the displayed unitCost is the net snapshot the profit
- * engine actually applied to today's costed orders. There is NO per-product
- * profit (an order's net profit can't be cleanly attributed to one line). Rows
- * are returned sorted by unitsSold desc for deterministic output; the frontend
- * owns the live re-sort.
+ * getMissingCost), and the displayed unitCost is itemProfitValues' unit cost for the
+ * variant's earliest today order item whose order carries a stored ESTIMATE statement
+ * (decision 10) -- derived from that order's cost lines, not a legacy snapshot column.
+ * There is NO per-product profit (an order's net profit can't be cleanly attributed to
+ * one line). Rows are returned sorted by unitsSold desc for deterministic output; the
+ * frontend owns the live re-sort.
  */
 export async function getTodayProducts(args: {
   orgId: string;
@@ -362,10 +439,21 @@ export async function getTodayProducts(args: {
         },
       },
       select: {
+        id: true,
         orderId: true,
         quantity: true,
         lineSaleGross: true,
-        unitCostSnapshotGross: true,
+        // The order date picks the earliest item; the ESTIMATE statement's presence
+        // gates the chosen item and its issues feed itemProfitValues.
+        order: {
+          select: {
+            orderDate: true,
+            profitStatements: {
+              where: estimateStatementWhere(args.orgId, args.storeId),
+              select: { issues: true },
+            },
+          },
+        },
         productVariant: {
           select: {
             id: true,
@@ -404,7 +492,7 @@ export async function getTodayProducts(args: {
       bufferEntryCount: 0,
       unitsSold: 0,
       revenue: new Decimal(0),
-      snapshotUnitCost: null,
+      chosenItem: null,
       unresolved: identity.unresolved,
     };
     byVariant.set(identity.id, created);
@@ -428,12 +516,20 @@ export async function getTodayProducts(args: {
     acc.unitsSold += item.quantity;
     // lineSaleGross is the LINE total (KDV-dahil, already × quantity) — add directly.
     acc.revenue = acc.revenue.add(item.lineSaleGross.toString());
-    // First non-null snapshot wins. If the variant was costed at differing
-    // snapshots intraday, this shows a representative applied cost (the cell is
-    // a quiet reference, not a reconciled figure). unitCostSnapshotGross is the
-    // per-unit cost (KDV-dahil).
-    if (acc.snapshotUnitCost === null && item.unitCostSnapshotGross !== null) {
-      acc.snapshotUnitCost = new Decimal(item.unitCostSnapshotGross.toString());
+    // Track the earliest (order date, then item id) item whose order carries a stored
+    // ESTIMATE statement -- its cost lines back the displayed unit cost below.
+    const estimateStatement = item.order.profitStatements[0];
+    if (estimateStatement !== undefined) {
+      const candidate: ChosenOrderItem = {
+        orderId: item.orderId,
+        itemId: item.id,
+        quantity: item.quantity,
+        orderDate: item.order.orderDate,
+        issues: estimateStatement.issues,
+      };
+      if (acc.chosenItem === null || isEarlierChosenItem(candidate, acc.chosenItem)) {
+        acc.chosenItem = candidate;
+      }
     }
   }
 
@@ -547,9 +643,37 @@ export async function getTodayProducts(args: {
     [...byVariant.values()].flatMap((acc) => (acc.variantId === null ? [acc.barcode] : [])),
   );
 
+  // The chosen items' orders, read in one batched call; their cost lines drive the
+  // displayed unit cost (decision 10). Tenant-scoped by organizationId + storeId.
+  const chosenOrderIds = [
+    ...new Set(
+      [...byVariant.values()].flatMap((acc) =>
+        acc.chosenItem === null ? [] : [acc.chosenItem.orderId],
+      ),
+    ),
+  ];
+  const linesByOrder = await loadOrderProfitLines(prisma, {
+    organizationId: args.orgId,
+    storeId: args.storeId,
+    orderIds: chosenOrderIds,
+  });
+
   return [...byVariant.values()]
     .map((acc) => {
       const costed = acc.variantId !== null && costedVariantIds.has(acc.variantId);
+      // Unit cost: itemProfitValues over the chosen item's view-selected lines; null
+      // when no order with a stored ESTIMATE statement sold this variant today.
+      let unitCost: string | null = null;
+      if (acc.chosenItem !== null) {
+        const lines = linesByOrder.get(acc.chosenItem.orderId) ?? [];
+        unitCost = itemProfitValues({
+          orderItemId: acc.chosenItem.itemId,
+          quantity: acc.chosenItem.quantity,
+          bestKnownLines: selectLines(lines, 'BEST_KNOWN'),
+          estimateLines: selectLines(lines, 'ESTIMATE'),
+          issues: parseStoredIssues(acc.chosenItem.issues),
+        }).unitCostGross;
+      }
       const row: TodayProductRow = {
         variantId: acc.variantId,
         barcode: acc.barcode,
@@ -560,7 +684,7 @@ export async function getTodayProducts(args: {
         unitsSold: acc.unitsSold,
         revenue: acc.revenue.toFixed(2),
         costStatus: costed ? 'costed' : 'missing',
-        unitCost: costed && acc.snapshotUnitCost !== null ? acc.snapshotUnitCost.toFixed(2) : null,
+        unitCost,
         unresolved: acc.unresolved,
         vendorMissing: acc.variantId === null && vendorMissingBarcodes.has(acc.barcode),
       };
@@ -620,9 +744,12 @@ export async function getLiveOrders(args: {
         orderDate: true,
         status: true,
         saleGross: true,
-        estimatedNetProfit: true,
-        // Marj kalıcı kolondan okunur — render-time hesap yok (kural: backend servis eder).
-        estimatedSaleMarginPct: true,
+        // Profit + margin come from the order's ESTIMATE statement (decision 10) --
+        // render-time hesap yok (kural: backend servis eder).
+        profitStatements: {
+          where: estimateStatementWhere(args.orgId, args.storeId),
+          select: ESTIMATE_STATEMENT_SELECT,
+        },
         // Promosyon adları (spec ekleme #3) — liste detayıyla aynı JSON kolonu.
         promotionDisplays: true,
       },
@@ -643,12 +770,16 @@ export async function getLiveOrders(args: {
   const calculatedRows: LiveOrderRow[] = ordersToday.map((order) => {
     const revenue =
       order.saleGross !== null ? new Decimal(order.saleGross.toString()) : new Decimal(0);
+    // Profit + margin read the ESTIMATE statement, only when it is ESTIMATED
+    // (decision 10) -- render-time recompute YOK.
+    const estimate = costedEstimate(order.profitStatements);
     const profit =
-      order.estimatedNetProfit !== null ? new Decimal(order.estimatedNetProfit.toString()) : null;
-    // Marj kalıcı estimatedSaleMarginPct kolonundan — render-time recompute YOK.
+      estimate !== null && estimate.netProfit !== null
+        ? new Decimal(estimate.netProfit.toString())
+        : null;
     const margin =
-      order.estimatedSaleMarginPct !== null
-        ? new Decimal(order.estimatedSaleMarginPct.toString()).toFixed(2)
+      estimate !== null && estimate.saleMarginPct !== null
+        ? new Decimal(estimate.saleMarginPct.toString()).toFixed(2)
         : null;
     return {
       source: 'orders',
@@ -806,10 +937,41 @@ export async function getBufferDetail(args: {
 }
 
 /**
+ * The notification's served profit for an orders-source summary (decision 10): the
+ * order's stored ESTIMATE statement net when it is ESTIMATED, else null. When no
+ * estimate statement is stored yet, the engine computes it read-only in the request
+ * (computeParcelProfitForRead) and the same ESTIMATED gate applies; an unsupported
+ * platform or a failed computation yields null. Every amount is toFixed(2).
+ */
+async function notificationProfit(
+  orgId: string,
+  orderId: string,
+  statements: readonly EstimateStatementRow[],
+): Promise<string | null> {
+  const stored = statements[0];
+  if (stored !== undefined) {
+    return stored.status === ProfitStatus.ESTIMATED && stored.netProfit !== null
+      ? new Decimal(stored.netProfit.toString()).toFixed(2)
+      : null;
+  }
+  const computed = await computeParcelProfitForRead({
+    organizationId: orgId,
+    orderId,
+    surface: 'order-notification',
+  });
+  const estimate = computed?.estimate ?? null;
+  return estimate !== null &&
+    estimate.status === ProfitStatus.ESTIMATED &&
+    estimate.netProfit !== null
+    ? estimate.netProfit.toFixed(2)
+    : null;
+}
+
+/**
  * Canonical revenue/profit summary for a realtime new-order toast. Looks the
- * row up by id (org + store scoped) so a cross-tenant id returns NotFoundError
- * and the post-event read sees the settled money columns. `isToday` lets the
- * client drop backfills / historical inserts.
+ * row up by id (org + store scoped) so a cross-tenant id returns NotFoundError.
+ * Profit reads the order's ESTIMATE statement (or an in-request computation when none
+ * is stored); `isToday` lets the client drop backfills / historical inserts.
  */
 export async function getNewOrderNotificationSummary(args: {
   orgId: string;
@@ -824,9 +986,13 @@ export async function getNewOrderNotificationSummary(args: {
         id: true,
         platformOrderNumber: true,
         saleGross: true,
-        estimatedNetProfit: true,
         orderDate: true,
         status: true,
+        // The order's ESTIMATE statement (decision 10) -- the profit source when stored.
+        profitStatements: {
+          where: estimateStatementWhere(args.orgId, args.storeId),
+          select: ESTIMATE_STATEMENT_SELECT,
+        },
         // Buffer-graduation marker: non-null when the order came from the
         // live-performance buffer (the seller already saw it). Drives isPromotion
         // so the client can drop a duplicate toast for an already-shown order.
@@ -837,8 +1003,7 @@ export async function getNewOrderNotificationSummary(args: {
       throw new NotFoundError('Order', args.id);
     }
     const { start, end } = getBusinessDayRange();
-    const profit =
-      order.estimatedNetProfit !== null ? new Decimal(order.estimatedNetProfit).toFixed(2) : null;
+    const profit = await notificationProfit(args.orgId, order.id, order.profitStatements);
     return {
       source: 'orders',
       orderId: order.id,

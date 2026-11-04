@@ -10,6 +10,7 @@ import {
   createMembership,
   createOrder,
   createOrganization,
+  createProfitStatement,
   createStore,
 } from '../../../helpers/factories';
 
@@ -48,9 +49,14 @@ async function seed(): Promise<{
     orderDate: todayAt(10),
     platformOrderId: 'ORD-1',
     saleGross: '100.00',
-    estimatedNetProfit: '20.00',
-    // Marj kalıcı kolondan servis edilir (20 / 100 × 100 = %20) — render-time hesap yok.
-    estimatedSaleMarginPct: '20.00',
+  });
+  // Profit + margin are served from the order's ESTIMATE statement (net 20, margin
+  // 20 / 100 * 100 = 20 pct) -- the live feed no longer reads the legacy order columns.
+  await createProfitStatement(order.id, org.id, store.id, {
+    view: 'ESTIMATE',
+    status: 'ESTIMATED',
+    netProfit: '20.00',
+    saleMarginPct: '20.00',
   });
   const bufferEntry = await createBufferEntry(org.id, store.id, {
     orderDate: getBusinessDateAnchor(),

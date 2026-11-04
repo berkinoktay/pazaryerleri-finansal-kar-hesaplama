@@ -11,6 +11,8 @@ import {
   createMembership,
   createOrder,
   createOrganization,
+  createProfitLine,
+  createProfitStatement,
   createStore,
 } from '../../../helpers/factories';
 
@@ -286,13 +288,15 @@ describe('GET /v1/.../live-performance/today-products', () => {
     expect(row?.vendorMissing).toBe(false);
   });
 
-  it('marks variants with an active cost profile as costed and surfaces the snapshot unit cost', async () => {
+  it("surfaces the unit cost from the order's cost lines", async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
-    // Costed variant: an active profile + a today order carrying a net snapshot.
+    // Costed variant: an active profile + a today order carrying a stored ESTIMATE
+    // statement and a 30 COST_COGS line (qty 1). The displayed unit cost is derived
+    // from the item's cost lines (itemProfitValues), not from a legacy snapshot column.
     const costedId = await createVariant(org.id, store.id, {
       title: 'Costed Variant',
       barcode: 'BC-COSTED',
@@ -307,10 +311,35 @@ describe('GET /v1/.../live-performance/today-products', () => {
         attachedBy: user.id,
       },
     });
-    await sellInOrders(org.id, store.id, costedId, {
-      count: 1,
-      lineSaleGross: '60.00',
-      unitCostSnapshotGross: '30.00',
+    const order = await createOrder(org.id, store.id, {
+      orderDate: todayAt(10),
+      saleGross: '60.00',
+    });
+    const item = await prisma.orderItem.create({
+      data: {
+        orderId: order.id,
+        organizationId: org.id,
+        productVariantId: costedId,
+        quantity: 1,
+        commissionRate: '10.00',
+        commissionGross: '12.00',
+        lineSaleGross: '60.00',
+      },
+    });
+    await createProfitStatement(order.id, org.id, store.id, {
+      view: 'ESTIMATE',
+      status: 'ESTIMATED',
+      netProfit: '5.00',
+      saleMarginPct: '8.33',
+    });
+    await createProfitLine(order.id, org.id, store.id, {
+      orderItemId: item.id,
+      type: 'COST_COGS',
+      certainty: 'ACTUAL',
+      source: 'SELLER_INPUT',
+      amountGross: '30.00',
+      amountVat: '5.00',
+      vatRatePct: '20',
     });
 
     // Cost-missing variant: buffer only, no profile.
@@ -347,18 +376,18 @@ describe('GET /v1/.../live-performance/today-products', () => {
     expect(missing?.unitCost).toBeNull();
   });
 
-  it('reports costed with a null unitCost when the order-item carries no snapshot', async () => {
+  it('reports costed with a null unitCost when the order has no stored statement', async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
-    // Active cost profile attached, but today's order-item has no cost snapshot
-    // (omitting unitCostSnapshotGross stores null). Cost status is authoritative
-    // from the profile; the displayed unit cost stays null.
+    // Active cost profile attached, but today's order has no stored ESTIMATE statement
+    // yet (the writer has not caught up), so no cost line backs a unit cost. Cost
+    // status is authoritative from the profile; the displayed unit cost stays null.
     const costedId = await createVariant(org.id, store.id, {
-      title: 'Costed No-Snapshot Variant',
-      barcode: 'BC-NO-SNAPSHOT',
+      title: 'Costed No-Statement Variant',
+      barcode: 'BC-NO-STATEMENT',
       seq: 4,
     });
     const profile = await createCostProfile(org.id);

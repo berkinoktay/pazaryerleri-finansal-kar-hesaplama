@@ -10,6 +10,7 @@ import {
   createMembership,
   createOrder,
   createOrganization,
+  createProfitStatement,
   createStore,
 } from '../../../helpers/factories';
 
@@ -45,11 +46,16 @@ describe('GET /v1/.../live-performance/chart', () => {
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
-    // Costed order at hour 9: ₺50 revenue, ₺10 profit.
-    await createOrder(org.id, store.id, {
+    // Costed order at hour 9: 50 revenue, 10 profit (from its ESTIMATE statement).
+    const costed = await createOrder(org.id, store.id, {
       orderDate: todayAtHour(9),
       saleGross: '50.00',
-      estimatedNetProfit: '10.00',
+    });
+    await createProfitStatement(costed.id, org.id, store.id, {
+      view: 'ESTIMATE',
+      status: 'ESTIMATED',
+      netProfit: '10.00',
+      saleMarginPct: '20.00',
     });
     // Cost-missing buffer order at hour 10: ₺60 revenue, no profit.
     await createBufferEntry(org.id, store.id, {
