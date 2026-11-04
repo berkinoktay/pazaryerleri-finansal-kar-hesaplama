@@ -23,7 +23,7 @@ import type { Prisma } from '@pazarsync/db';
 // order-level estimator). The types are re-exported here so the existing
 // apps/api consumers (products-list, the SQL CTE, the validator) keep their
 // import paths.
-import { resolveTariffForDesi } from '@pazarsync/profit';
+import { isTrendyolBaremEligible, resolveTariffForDesi } from '@pazarsync/profit';
 import type {
   EstimateOutcome,
   EstimateUnavailableReason,
@@ -43,16 +43,20 @@ export type { EstimateOutcome, EstimateUnavailableReason, ShippingEstimate };
  * option list in August 2026. The Barem predicate in `SHIPPING_ESTIMATE_CTE_SQL`
  * mirrors this rule (pinned by the equivalence test).
  *
- * Pure function - no I/O. Exported for direct unit testing.
+ * Pure function - no I/O. Exported for direct unit testing. Delegates to the
+ * single Barem rule `isTrendyolBaremEligible` in `@pazarsync/profit` so the
+ * variant estimator and the scenario loader never drift; the carrier is always
+ * present here, so the shared rule's null-window branch is unreachable from this
+ * call site and the semantics are unchanged.
  */
 export function hasFastDeliverySetup(
   variant: { deliveryDuration: number | null },
   carrier: { maxBaremEligibleDeliveryDuration: number },
 ): boolean {
-  return (
-    variant.deliveryDuration !== null &&
-    variant.deliveryDuration <= carrier.maxBaremEligibleDeliveryDuration
-  );
+  return isTrendyolBaremEligible({
+    deliveryDurationDays: variant.deliveryDuration,
+    carrierMaxBaremDurationDays: carrier.maxBaremEligibleDeliveryDuration,
+  });
 }
 
 // --- Service ------------------------------------------------------------------

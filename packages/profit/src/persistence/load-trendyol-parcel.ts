@@ -1,27 +1,16 @@
 import { Decimal } from 'decimal.js';
 import type { Prisma } from '@pazarsync/db';
-import {
-  CommissionRuleKind,
-  FinanceRecordFamily,
-  OrderStatus,
-  Platform,
-  ProfitIssueCode,
-} from '@pazarsync/db/enums';
+import { FinanceRecordFamily, OrderStatus, Platform, ProfitIssueCode } from '@pazarsync/db/enums';
 import { CLAIM_ITEM_STATUS_ACCEPTED } from '@pazarsync/marketplace';
 import {
   getBusinessDate,
-  isInstantWithinTariffPeriod,
   resolveProfitSettings,
   type ResolvedProfitSettings,
 } from '@pazarsync/utils';
 
 import { type AcceptedReturn, type ParcelItemSnapshot } from '../core/parcel-snapshot';
 import { type ProfitIssue } from '../core/profit-issue';
-import {
-  type CostProfileVersionInput,
-  type ItemCostInput,
-  type ItemCostProfileInput,
-} from '../core/seller-costs/build-seller-cost-lines';
+import { type ItemCostInput } from '../core/seller-costs/build-seller-cost-lines';
 import { type TrendyolEstimateInput } from '../marketplaces/trendyol/estimate-parcel';
 import {
   isTrendyolTransactionType,
@@ -31,27 +20,24 @@ import {
   type TrendyolSettlementRecord,
 } from '../marketplaces/trendyol/settlement-records';
 import {
-  parseStoredTariffBands,
-  type StoredTariffBand,
-} from '../marketplaces/trendyol/stored-tariff-bands';
-import {
-  TRENDYOL_SAME_DAY_SHIPPING_TYPE,
-  trendyolCategoryBrandKey,
-  type OverseasReturnTier,
-  type TrendyolBaremBand,
   type TrendyolCommissionBand,
   type TrendyolCommissionRules,
-  type TrendyolFeeParams,
   type TrendyolItemAttributes,
   type TrendyolParcelAttributes,
-  type TrendyolShippingCarrier,
-  type TrendyolShippingTariff,
 } from '../marketplaces/trendyol/trendyol-inputs';
-import { resolveFeeDefinition } from '../resolve-fee-definition';
 import { ParcelNotFoundError, UnsupportedPlatformError } from './errors';
+import {
+  dec,
+  decOrNull,
+  loadCommissionRulesForCategories,
+  loadCostProfilesByVariant,
+  loadFeeParams,
+  loadShippingTariff,
+  loadTariffCandidatesByBarcode,
+  resolveTariffBandsAt,
+} from './trendyol-reference-loaders';
 
 const ZERO = new Decimal(0);
-const PERCENT = new Decimal(100);
 
 /**
  * Everything a parcel needs to be driven through the Phase 2A Trendyol module and
@@ -70,23 +56,6 @@ export interface LoadedTrendyolParcel {
   readonly loadIssues: readonly ProfitIssue[];
 }
 
-/** Converts a Prisma Decimal (decimal.js) to a fresh decimal.js value. */
-function dec(value: Prisma.Decimal): Decimal {
-  return new Decimal(value.toString());
-}
-
-function decOrNull(value: Prisma.Decimal | null): Decimal | null {
-  return value === null ? null : dec(value);
-}
-
-/** A Prisma Decimal that a used fee needs; throws naming the fee type when null. */
-function requireFeeField(value: Prisma.Decimal | null, feeType: string, field: string): Decimal {
-  if (value === null) {
-    throw new Error(`${feeType} fee definition is missing ${field}`);
-  }
-  return dec(value);
-}
-
 /** Lexicographic comparison, the single text order used for record ids. */
 function compareText(a: string, b: string): number {
   if (a < b) return -1;
@@ -103,32 +72,6 @@ function compareFinanceRows(
   const bTime = b.transactionDate === null ? Number.MAX_SAFE_INTEGER : b.transactionDate.getTime();
   if (aTime !== bTime) return aTime - bTime;
   return compareText(a.recordId, b.recordId);
-}
-
-/** One stored tariff band -> a Trendyol commission band; the rate is already a percent. */
-function toCommissionBand(band: StoredTariffBand): TrendyolCommissionBand {
-  return {
-    lowerLimit: band.lowerLimit === null ? null : new Decimal(band.lowerLimit),
-    upperLimit: band.upperLimit === null ? null : new Decimal(band.upperLimit),
-    ratePct: new Decimal(band.commissionPct),
-  };
-}
-
-/** One cost profile version row -> the pure cost version input (decision 6: the version's effective date). */
-function toCostVersion(version: {
-  readonly effectiveFrom: Date;
-  readonly version: number;
-  readonly amountGross: Prisma.Decimal;
-  readonly vatRate: Prisma.Decimal;
-  readonly archivedAt: Date | null;
-}): CostProfileVersionInput {
-  return {
-    effectiveFrom: version.effectiveFrom,
-    versionNumber: version.version,
-    amountGross: dec(version.amountGross),
-    vatRatePct: dec(version.vatRate),
-    archivedAt: version.archivedAt,
-  };
 }
 
 /**
@@ -306,37 +249,12 @@ export async function loadTrendyolParcel(
   };
 }
 
-/** A commission tariff item row with the period + tariff createdAt tie-breakers. */
-interface TariffCandidate {
-  readonly id: string;
-  readonly barcode: string;
-  readonly bands: Prisma.JsonValue;
-  readonly period: {
-    readonly startsAt: Date | null;
-    readonly endsAt: Date | null;
-    readonly createdAt: Date;
-    readonly tariff: { readonly createdAt: Date };
-  };
-}
-
-/** True when `a` beats `b`: latest tariff createdAt, then latest period createdAt, then smallest id. */
-function tariffCandidateBeats(a: TariffCandidate, b: TariffCandidate): boolean {
-  const aTariff = a.period.tariff.createdAt.getTime();
-  const bTariff = b.period.tariff.createdAt.getTime();
-  if (aTariff !== bTariff) return aTariff > bTariff;
-  const aPeriod = a.period.createdAt.getTime();
-  const bPeriod = b.period.createdAt.getTime();
-  if (aPeriod !== bPeriod) return aPeriod > bPeriod;
-  return a.id < b.id;
-}
-
 /**
- * The tariff band list per order item. A candidate is a saved commission-tariff
- * item of the order's store with a matching barcode whose period covers the order
- * instant (both bounds non-null; bounds converted from Istanbul wall-clock to the
- * real instant and compared half-open [startsAt, endsAt), via the shared helper).
- * The best candidate's parsed bands become the item's tariff bands; an empty band
- * list or no candidate leaves the item without tariff bands.
+ * The tariff band list per order item, resolved at the order instant. One query
+ * fetches every store tariff candidate for the items' barcodes
+ * (`loadTariffCandidatesByBarcode`); the covering-period selection and tie-breaks
+ * live in the shared `resolveTariffBandsAt`. An item with no covering candidate (or
+ * an empty band list) is left without tariff bands.
  */
 async function loadTariffBands(
   tx: Prisma.TransactionClient,
@@ -347,241 +265,20 @@ async function loadTariffBands(
   },
 ): Promise<Map<string, TrendyolCommissionBand[]>> {
   const { storeId, orderDate, orderItems } = params;
-  const barcodes = [
-    ...new Set(
-      orderItems
-        .map((item) => item.barcode)
-        .filter((barcode): barcode is string => barcode !== null),
-    ),
-  ];
+  const barcodes = orderItems
+    .map((item) => item.barcode)
+    .filter((barcode): barcode is string => barcode !== null);
+  const candidatesByBarcode = await loadTariffCandidatesByBarcode(tx, { storeId, barcodes });
+
   const result = new Map<string, TrendyolCommissionBand[]>();
-  if (barcodes.length === 0) {
-    return result;
-  }
-
-  const rows = await tx.commissionTariffItem.findMany({
-    where: { storeId, barcode: { in: barcodes } },
-    include: { period: { include: { tariff: true } } },
-  });
-
-  const bestByBarcode = new Map<string, TariffCandidate>();
-  for (const row of rows) {
-    const { startsAt, endsAt } = row.period;
-    if (startsAt === null || endsAt === null) {
-      continue; // a period with a null bound never covers the order date
-    }
-    if (!isInstantWithinTariffPeriod({ startsAt, endsAt }, orderDate)) {
-      continue; // bounds converted to the real instant, compared half-open
-    }
-    const candidate: TariffCandidate = {
-      id: row.id,
-      barcode: row.barcode,
-      bands: row.bands,
-      period: {
-        startsAt,
-        endsAt,
-        createdAt: row.period.createdAt,
-        tariff: { createdAt: row.period.tariff.createdAt },
-      },
-    };
-    const current = bestByBarcode.get(row.barcode);
-    if (current === undefined || tariffCandidateBeats(candidate, current)) {
-      bestByBarcode.set(row.barcode, candidate);
-    }
-  }
-
-  const bandsByBarcode = new Map<string, TrendyolCommissionBand[]>();
-  for (const [barcode, candidate] of bestByBarcode) {
-    const bands = parseStoredTariffBands(candidate.bands).map(toCommissionBand);
-    if (bands.length > 0) {
-      bandsByBarcode.set(barcode, bands);
-    }
-  }
-
   for (const item of orderItems) {
     if (item.barcode === null) continue;
-    const bands = bandsByBarcode.get(item.barcode);
-    if (bands !== undefined) {
+    const bands = resolveTariffBandsAt(candidatesByBarcode.get(item.barcode), orderDate);
+    if (bands !== null) {
       result.set(item.id, bands);
     }
   }
   return result;
-}
-
-/**
- * The fee parameters effective on the order date. The international-service fee and
- * the overseas-return tiers are resolved only for an export (micro) parcel; for a
- * domestic parcel they are unused, so a missing definition must not break it and
- * both rates are left at zero.
- */
-async function loadFeeParams(
-  tx: Prisma.TransactionClient,
-  params: {
-    readonly orderDate: Date;
-    readonly isExport: boolean;
-    readonly fastDeliveryType: string | null;
-  },
-): Promise<TrendyolFeeParams> {
-  const { orderDate, isExport, fastDeliveryType } = params;
-
-  const psf = await resolveFeeDefinition(tx, {
-    platform: Platform.TRENDYOL,
-    feeType: 'PLATFORM_SERVICE',
-    at: orderDate,
-  });
-  const psfStandardNet = requireFeeField(psf.fixedAmountNet, 'PLATFORM_SERVICE', 'fixedAmountNet');
-
-  // The same-day tier is used only when the parcel is marked same-day shipping
-  // (see estimate-service-fee). For any other parcel the value is unused, so a
-  // missing FAST definition must not break it: fall back to the standard net.
-  let psfSameDayNet = psfStandardNet;
-  if (fastDeliveryType === TRENDYOL_SAME_DAY_SHIPPING_TYPE) {
-    const psfFast = await resolveFeeDefinition(tx, {
-      platform: Platform.TRENDYOL,
-      feeType: 'PLATFORM_SERVICE_FAST',
-      at: orderDate,
-    });
-    psfSameDayNet = requireFeeField(
-      psfFast.fixedAmountNet,
-      'PLATFORM_SERVICE_FAST',
-      'fixedAmountNet',
-    );
-  }
-
-  const stoppage = await resolveFeeDefinition(tx, {
-    platform: Platform.TRENDYOL,
-    feeType: 'STOPPAGE',
-    at: orderDate,
-  });
-  const commissionInvoice = await resolveFeeDefinition(tx, {
-    platform: Platform.TRENDYOL,
-    feeType: 'COMMISSION_INVOICE',
-    at: orderDate,
-  });
-  const shippingDef = await resolveFeeDefinition(tx, {
-    platform: Platform.TRENDYOL,
-    feeType: 'SHIPPING',
-    at: orderDate,
-  });
-
-  // The return-shipping VAT follows the SHIPPING definition, exactly as the legacy
-  // path does; there is no separate return-shipping rate to resolve here.
-  const shippingVatRatePct = dec(shippingDef.defaultVatRate);
-
-  let internationalServiceRatePct = ZERO;
-  let internationalServiceVatRatePct = ZERO;
-  let overseasReturnTiers: readonly OverseasReturnTier[] = [];
-  if (isExport) {
-    const intl = await resolveFeeDefinition(tx, {
-      platform: Platform.TRENDYOL,
-      feeType: 'INTERNATIONAL_SERVICE',
-      at: orderDate,
-    });
-    internationalServiceRatePct = requireFeeField(
-      intl.rateOfSale,
-      'INTERNATIONAL_SERVICE',
-      'rateOfSale',
-    ).mul(PERCENT);
-    internationalServiceVatRatePct = dec(intl.defaultVatRate);
-    overseasReturnTiers = await loadOverseasReturnTiers(tx, orderDate);
-  }
-
-  return {
-    psfStandardNet,
-    psfSameDayNet,
-    psfVatRatePct: dec(psf.defaultVatRate),
-    stoppageRatePct: requireFeeField(stoppage.rateOfSale, 'STOPPAGE', 'rateOfSale').mul(PERCENT),
-    commissionVatRatePct: dec(commissionInvoice.defaultVatRate),
-    shippingVatRatePct,
-    returnShippingVatRatePct: shippingVatRatePct,
-    internationalServiceRatePct,
-    internationalServiceVatRatePct,
-    overseasReturnTiers,
-  };
-}
-
-/** The micro-export return-fee tiers effective on the order date, rate scaled to a percent. */
-async function loadOverseasReturnTiers(
-  tx: Prisma.TransactionClient,
-  orderDate: Date,
-): Promise<OverseasReturnTier[]> {
-  const rows = await tx.microExportReturnFeeTier.findMany({
-    where: { effectiveFrom: { lte: orderDate } },
-    orderBy: { effectiveFrom: 'desc' },
-  });
-  // Mirror resolve-overseas-return-rate: for each band keep the row with the latest
-  // effectiveFrom on or before the order date.
-  const byBand = new Map<string, OverseasReturnTier>();
-  for (const row of rows) {
-    const key = `${row.minSaleGross.toString()}:${row.maxSaleGross.toString()}`;
-    if (!byBand.has(key)) {
-      byBand.set(key, {
-        minUnitSaleGross: dec(row.minSaleGross),
-        maxUnitSaleGross: dec(row.maxSaleGross),
-        ratePct: dec(row.rate).mul(PERCENT),
-      });
-    }
-  }
-  return [...byBand.values()];
-}
-
-/** The shipping tariff mirror of resolve-tariff.ts: carrier, desi, barem and own rows. */
-async function loadShippingTariff(
-  tx: Prisma.TransactionClient,
-  params: {
-    readonly storeId: string;
-    readonly source: TrendyolShippingTariff['source'];
-    readonly carrier: {
-      readonly id: string;
-      readonly code: string;
-      readonly supportsBaremDestek: boolean;
-      readonly maxBaremDesi: number;
-    } | null;
-  },
-): Promise<TrendyolShippingTariff> {
-  const { storeId, source, carrier } = params;
-
-  let carrierInput: TrendyolShippingCarrier | null = null;
-  const desiTariffNet = new Map<string, Decimal>();
-  let baremBands: TrendyolBaremBand[] = [];
-
-  if (carrier !== null) {
-    carrierInput = {
-      code: carrier.code,
-      supportsBarem: carrier.supportsBaremDestek,
-      maxBaremDesi: new Decimal(carrier.maxBaremDesi),
-    };
-    // One row per band, no version history: ShippingDesiTariff is unique on
-    // (carrierId, desi) and ShippingBaremTariff on (carrierId, minOrderAmount,
-    // maxOrderAmount). Read by carrierId only, exactly as resolve-tariff.ts does.
-    // An effectiveFrom <= orderDate filter cannot pick a version here; it would
-    // only drop the tariff for an order older than the seeded effective_from. A
-    // historic order is estimated with today's tariff and its cargo invoice later
-    // replaces the estimate. Versioned tariffs are a future shipping feature.
-    const desiRows = await tx.shippingDesiTariff.findMany({
-      where: { carrierId: carrier.id },
-    });
-    for (const row of desiRows) {
-      desiTariffNet.set(row.desi.toString(), dec(row.priceNet));
-    }
-    const baremRows = await tx.shippingBaremTariff.findMany({
-      where: { carrierId: carrier.id },
-      orderBy: { minOrderAmount: 'asc' },
-    });
-    baremBands = baremRows.map((row) => ({
-      minOrderAmount: dec(row.minOrderAmount),
-      maxOrderAmount: dec(row.maxOrderAmount),
-      priceNet: dec(row.priceNet),
-    }));
-  }
-
-  const ownRows = await tx.ownShippingTariff.findMany({ where: { storeId } });
-  const ownTariffNet = new Map<string, Decimal>();
-  for (const row of ownRows) {
-    ownTariffNet.set(row.desi.toString(), dec(row.priceNet));
-  }
-
-  return { source, carrier: carrierInput, desiTariffNet, baremBands, ownTariffNet };
 }
 
 /** The category and category+brand commission rules for the items' categories. */
@@ -591,37 +288,10 @@ async function loadCommissionRules(
     readonly productVariant: { readonly product: { readonly categoryId: bigint | null } } | null;
   }[],
 ): Promise<TrendyolCommissionRules> {
-  const categoryIds = [
-    ...new Set(
-      orderItems
-        .map((item) => item.productVariant?.product.categoryId ?? null)
-        .filter((categoryId): categoryId is bigint => categoryId !== null),
-    ),
-  ];
-  const categoryRatePct = new Map<string, Decimal>();
-  const categoryBrandRatePct = new Map<string, Decimal>();
-  if (categoryIds.length === 0) {
-    return { categoryRatePct, categoryBrandRatePct };
-  }
-
-  const rows = await tx.marketplaceCommissionRate.findMany({
-    where: {
-      platform: Platform.TRENDYOL,
-      ruleKind: { in: [CommissionRuleKind.CATEGORY, CommissionRuleKind.CATEGORY_BRAND] },
-      categoryId: { in: categoryIds },
-    },
-  });
-  for (const row of rows) {
-    if (row.ruleKind === CommissionRuleKind.CATEGORY) {
-      categoryRatePct.set(row.categoryId.toString(), dec(row.baseRate));
-    } else if (row.brandId !== null) {
-      categoryBrandRatePct.set(
-        trendyolCategoryBrandKey(row.categoryId.toString(), row.brandId.toString()),
-        dec(row.baseRate),
-      );
-    }
-  }
-  return { categoryRatePct, categoryBrandRatePct };
+  const categoryIds = orderItems
+    .map((item) => item.productVariant?.product.categoryId ?? null)
+    .filter((categoryId): categoryId is bigint => categoryId !== null);
+  return loadCommissionRulesForCategories(tx, { categoryIds });
 }
 
 /**
@@ -640,36 +310,10 @@ async function loadItemCosts(
   },
 ): Promise<ItemCostInput[]> {
   const { organizationId, orderItems } = params;
-  const variantIds = [
-    ...new Set(
-      orderItems
-        .map((item) => item.productVariantId)
-        .filter((variantId): variantId is string => variantId !== null),
-    ),
-  ];
-  if (variantIds.length === 0) {
-    return [];
-  }
-
-  const links = await tx.productVariantCostProfile.findMany({
-    where: { organizationId, productVariantId: { in: variantIds } },
-    include: {
-      profile: {
-        include: { versions: { orderBy: [{ effectiveFrom: 'asc' }, { version: 'asc' }] } },
-      },
-    },
-  });
-
-  const profilesByVariant = new Map<string, ItemCostProfileInput[]>();
-  for (const link of links) {
-    const versions = link.profile.versions.map(toCostVersion);
-    if (versions.length === 0) {
-      continue; // a profile with no versions cannot be costed and would break indexing
-    }
-    const list = profilesByVariant.get(link.productVariantId) ?? [];
-    list.push({ profileId: link.profile.id, profileType: link.profile.type, versions });
-    profilesByVariant.set(link.productVariantId, list);
-  }
+  const variantIds = orderItems
+    .map((item) => item.productVariantId)
+    .filter((variantId): variantId is string => variantId !== null);
+  const profilesByVariant = await loadCostProfilesByVariant(tx, { organizationId, variantIds });
 
   const costs: ItemCostInput[] = [];
   for (const item of orderItems) {

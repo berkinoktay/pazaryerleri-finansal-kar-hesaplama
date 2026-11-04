@@ -249,6 +249,12 @@ export {
   type ComputedParcelProfit,
 } from './persistence/compute-parcel-profit';
 export { loadTrendyolParcel, type LoadedTrendyolParcel } from './persistence/load-trendyol-parcel';
+// Batch scenario input loader (rebuild, phase 4B) -- docs/plans/2026-11-04-profit-engine-faz-4b-plan.md
+export {
+  loadTrendyolScenarioBases,
+  type ScenarioLoadResult,
+} from './persistence/load-trendyol-scenario';
+export { isTrendyolBaremEligible } from './marketplaces/trendyol/barem-eligibility';
 export {
   ParcelNotFoundError,
   UnsupportedPlatformError,

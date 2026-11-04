@@ -13,6 +13,7 @@ export default defineConfig({
       'src/**/__tests__/return-into-profit-e2e.test.ts',
       'src/**/__tests__/return-estimate-isolation.test.ts',
       'src/persistence/__tests__/load-trendyol-parcel.test.ts',
+      'src/persistence/__tests__/load-trendyol-scenario.test.ts',
       'src/persistence/__tests__/recompute-parcel-profit.test.ts',
       'src/persistence/__tests__/compute-parcel-profit.test.ts',
       'src/persistence/__tests__/statement-breakdown-golden.test.ts',
