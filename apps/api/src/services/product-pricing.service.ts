@@ -56,7 +56,6 @@ import { InvalidReferenceError, mapPrismaError } from '@pazarsync/sync-core';
 import { type ResolvedCommissionRate } from './commission-rate-resolver';
 import { feeToProfitInputFee, deriveCalculable } from './product-pricing-assembly';
 import { logProfitReadFailure } from './profit-compute-fallback.service';
-import { fetchCostAggregates } from './products-list.service';
 import { SHIPPING_ESTIMATE_CTE_SQL, type ShippingEstimateRow } from './shipping-estimator.sql';
 import type {
   CommissionStatus,
@@ -70,6 +69,14 @@ import type { VariantCostAggregate } from '../validators/product.validator';
 
 /** Trendyol default sale VAT rate (percent) when a variant carries no override. */
 const DEFAULT_VAT_RATE = 20;
+
+/**
+ * The unit price the quote probes the loaded base at to read whether the cost resolved.
+ * Zero is a valid scenario (Faz 4B Task 1: a free item still deducts its cost and fees),
+ * and the seller cost lines do not depend on the price, so a MISSING_COST at zero is
+ * exactly the one the list raises -- the probe lets list and quote agree.
+ */
+const COST_PROBE_UNIT_PRICE = new Decimal(0);
 
 // ─── Filters ─────────────────────────────────────────────────────────────────
 
@@ -597,9 +604,11 @@ function sortComputedRows(
  *
  * Degradation (decision 9, owner rule -- the list always returns 200): a store-wide
  * loader failure (missing fee definitions, a non-Trendyol store, ...) empties every
- * row's profit and is logged once; a single variant whose evaluation throws empties
- * only its own profit and is logged. An `UnsupportedPlatformError` degrades without an
- * error log, exactly as the order read path treats it.
+ * row's profit and is logged once; a variant whose own evaluation throws empties only
+ * its own profit. The per-variant failures are logged ONCE per request (the first error
+ * with the failed count), so a systemic failure on a large catalog writes one line, not
+ * one per row. An `UnsupportedPlatformError` degrades without an error log, exactly as
+ * the order read path treats it.
  */
 async function computeScenarioRows(
   db: Prisma.TransactionClient,
@@ -628,7 +637,12 @@ async function computeScenarioRows(
     bases = null;
   }
 
-  return variants.map((variant): ComputedPricingRow => {
+  // Collect per-variant evaluation failures (count + first error) and log them once
+  // after the pass, so a systemic per-variant failure on a large list is one log line.
+  let firstEvaluationError: unknown = null;
+  let failedCount = 0;
+
+  const rows = variants.map((variant): ComputedPricingRow => {
     const loaded = bases === null ? undefined : bases.get(variant.id);
     if (loaded === undefined || loaded.kind !== 'ready') {
       return degradedRow(variant);
@@ -640,15 +654,25 @@ async function computeScenarioRows(
       });
       return computeRowFromStatement(variant, statement);
     } catch (err) {
-      logProfitReadFailure({
-        surface: 'product-pricing',
-        organizationId: orgId,
-        orderId: null,
-        err,
-      });
+      if (failedCount === 0) {
+        firstEvaluationError = err;
+      }
+      failedCount += 1;
       return degradedRow(variant);
     }
   });
+
+  if (failedCount > 0) {
+    logProfitReadFailure({
+      surface: 'product-pricing',
+      organizationId: orgId,
+      orderId: null,
+      err: firstEvaluationError,
+      failedCount,
+    });
+  }
+
+  return rows;
 }
 
 /**
@@ -881,12 +905,18 @@ export function quoteBreakdownFromStatement(params: {
  * Solves for the sale price that achieves a given margin / markup / profit target for a
  * single variant with the scenario engine. Throws `InvalidReferenceError` (422) if the
  * variant does not exist in this store. Returns `{ calculable: false }` with a reason
- * when cost is missing (pre-gate) or the solver finds no price.
+ * when cost is missing (gate) or the solver finds no price.
  *
- * Decision 5 (plan): if costStatus !== 'OK', reject before calling the solver so a
- * margin/profit target is never "solved" against a zero cost. `db` is injected (the
- * route passes the shared client); the path is read-only, so it runs as plain reads
- * with no interactive transaction.
+ * Decision 5 (plan): no margin/profit target is ever solved against a missing cost. The
+ * cost gate reads the SAME view the list does -- the loaded scenario base -- rather than
+ * the profile count `fetchCostAggregates` returns, so list and quote agree: a profile
+ * without a version is dropped by the loader and raises MISSING_COST on both. After the
+ * base loads ready, the scenario is probed once at `COST_PROBE_UNIT_PRICE` (the seller
+ * cost lines do not move with the price, the cost version is chosen by the scenario
+ * date), and a MISSING_COST issue rejects as NO_COST before the solver runs.
+ *
+ * `db` is injected (the route passes the shared client); the path is read-only, so it
+ * runs as plain reads with no interactive transaction.
  */
 export async function quoteProductPrice(
   db: Prisma.TransactionClient,
@@ -912,16 +942,7 @@ export async function quoteProductPrice(
     mapPrismaError(err);
   }
 
-  // 2. Cost pre-gate (decision 5).
-  // Reject before calling the solver when cost is unavailable. Margin/profit
-  // targets would "solve" against a zero cost and produce incorrect results.
-  const costMap = await fetchCostAggregates(orgId, [input.variantId]);
-  const costStatus = costMap.get(input.variantId)?.costStatus ?? 'NO_PROFILES';
-  if (costStatus !== 'OK') {
-    return { calculable: false, variantId: input.variantId, reason: 'NO_COST' };
-  }
-
-  // 3. Load the scenario base (tariff anchor + scenario date = now).
+  // 2. Load the scenario base (tariff anchor + scenario date = now).
   const now = new Date();
   const bases = await loadTrendyolScenarioBases(db, {
     organizationId: orgId,
@@ -933,6 +954,18 @@ export async function quoteProductPrice(
   if (loaded === undefined || loaded.kind !== 'ready') {
     // The variant was just found store-scoped above, so a non-ready base is defensive.
     return { calculable: false, variantId: input.variantId, reason: 'NOT_CALCULABLE' };
+  }
+
+  // 3. Cost gate (decision 5) read from the loaded base, so it matches the list.
+  // Probe the scenario at a zero unit price: the cost does not depend on the price, so a
+  // MISSING_COST here is exactly the one the list raises. Reject as NO_COST before the
+  // solver, so a margin/profit target is never solved against a missing cost.
+  const { statement: probe } = evaluateTrendyolScenario({
+    ...loaded.base,
+    unitPrice: COST_PROBE_UNIT_PRICE,
+  });
+  if (probe.issues.some((issue) => issue.code === ProfitIssueCode.MISSING_COST)) {
+    return { calculable: false, variantId: input.variantId, reason: 'NO_COST' };
   }
 
   // 4. Solve, then build the breakdown at the solved price.
@@ -1045,12 +1078,26 @@ function statusesFromIssues(issues: readonly ProfitIssue[]): ScenarioStatuses {
   let shippingStatus: ShippingEstimateStatus = 'OK';
   let commissionStatus: CommissionStatus = 'OK';
   for (const issue of issues) {
-    if (issue.code === ProfitIssueCode.MISSING_COST) {
-      costStatus = 'NO_PROFILES';
-    } else if (issue.code === ProfitIssueCode.MISSING_COMMISSION_RATE) {
-      commissionStatus = 'NO_RULE';
-    } else if (issue.code === ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE) {
-      shippingStatus = shippingStatusFromDetail(issue.detail);
+    switch (issue.code) {
+      case ProfitIssueCode.MISSING_COST:
+        costStatus = 'NO_PROFILES';
+        break;
+      case ProfitIssueCode.MISSING_COMMISSION_RATE:
+        commissionStatus = 'NO_RULE';
+        break;
+      case ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE:
+        shippingStatus = shippingStatusFromDetail(issue.detail);
+        break;
+      // Settlement-only codes: a scenario never raises them, so they leave the three
+      // statuses unchanged. A blocking one would still leave netProfit null (the row
+      // reads uncalculable) without mapping onto one of these three inputs.
+      case ProfitIssueCode.UNMAPPED_MARKETPLACE_RECORD:
+      case ProfitIssueCode.AMBIGUOUS_RECORD_MATCH:
+        break;
+      default: {
+        const _exhaustive: never = issue.code;
+        throw new Error(`Unhandled profit issue code: ${_exhaustive}`);
+      }
     }
   }
   return { costStatus, shippingStatus, commissionStatus };

@@ -19,7 +19,7 @@
 // it is ensured once by globalSetup — so SENDEOMP is always present.
 
 import { Decimal } from 'decimal.js';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma, type Prisma } from '@pazarsync/db';
 
@@ -814,6 +814,70 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/product-pricing/quote �
     expect(Number(body.breakdown?.netProfit)).toBeGreaterThan(0);
   });
 
+  it('solves a markup target: 40% markup → 200 calculable:true with pinned price', async () => {
+    const res = await sendQuote(ctx.calculableVariantId, 'markup', '40', ctx.accessToken);
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as {
+      calculable: boolean;
+      price?: string;
+      priceDelta?: string;
+      breakdown?: Record<string, string | null>;
+    };
+    expect(body.calculable).toBe(true);
+
+    // ── Golden price guard (derived by hand from the fixture, not the engine) ──────
+    // Same fixture as the 20% margin case. Markup is netProfit / costGross; the cost
+    // GROSS is a price-independent 200.00, so a 40% markup needs netProfit >= 80.00.
+    // Net profit in the NET convention (each line's gross minus its rounded VAT):
+    //   netProfit(P) = saleNet − commissionNet − stoppage − 279.65
+    //     saleNet      = P − round(P/6)                         [20% sale VAT]
+    //     commission   = round(0.18·P); commissionNet = that − round(that/6)
+    //     stoppage     = round(saleNet/100)                     [1% of net sale]
+    //     279.65       = costNet 166.67 + shipNet 101.99 + psfNet 10.99 (all constant)
+    // At P=532.80: saleNet 444.00, commissionNet 79.92, stoppage 4.44 → netProfit 79.99
+    //   (markup 39.995% < 40, so 532.80 misses).
+    // At P=532.81: saleNet 444.01, commissionNet 79.92, stoppage 4.44 → netProfit 80.00
+    //   (markup exactly 40.00% >= 40). 532.81 is the lowest kurus that meets the target.
+    expect(body.price).toBe('532.81');
+    // priceDelta = solved − current sale price (532.81 − 500.00 = 32.81), signed.
+    expect(body.priceDelta).toBe('32.81');
+    expect(body.breakdown?.netProfit).toBe('80.00');
+    // Quote margins render the stored numeric(12,4) precision: 80.00 / 200 × 100.
+    expect(body.breakdown?.costMarkupPct).toBe('40.0000');
+    // The solver returns the LOWEST kurus meeting the target, so the target still holds.
+    expect(Number(body.breakdown?.costMarkupPct)).toBeGreaterThanOrEqual(40);
+  });
+
+  it('solves a profit target: 100 TRY profit → 200 calculable:true with pinned price', async () => {
+    const res = await sendQuote(ctx.calculableVariantId, 'profit', '100', ctx.accessToken);
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as {
+      calculable: boolean;
+      price?: string;
+      priceDelta?: string;
+      breakdown?: Record<string, string | null>;
+    };
+    expect(body.calculable).toBe(true);
+
+    // ── Golden price guard (derived by hand from the fixture, not the engine) ──────
+    // Same netProfit(P) as the markup case above. An absolute profit target of 100.00
+    // needs netProfit >= 100.00:
+    // At P=562.44: saleNet 468.70, commissionNet 84.37, stoppage 4.69 → netProfit 99.99
+    //   (< 100, so 562.44 misses).
+    // At P=562.45: saleNet 468.71, commissionNet 84.37, stoppage 4.69 → netProfit 100.00
+    //   (= 100). 562.45 is the lowest kurus that meets the target.
+    expect(body.price).toBe('562.45');
+    // priceDelta = solved − current sale price (562.45 − 500.00 = 62.45), signed.
+    expect(body.priceDelta).toBe('62.45');
+    expect(body.breakdown?.netProfit).toBe('100.00');
+    // Markup at the solved price: netProfit 100.00 / cost 200 × 100 = 50.0000.
+    expect(body.breakdown?.costMarkupPct).toBe('50.0000');
+    // The solver returns the LOWEST kurus meeting the target, so the target still holds.
+    expect(Number(body.breakdown?.netProfit)).toBeGreaterThanOrEqual(100);
+  });
+
   it('no-cost variant → 200 calculable:false, reason NO_COST', async () => {
     const res = await sendQuote(ctx.noCostVariantId, 'margin', '20', ctx.accessToken);
     expect(res.status).toBe(200);
@@ -886,6 +950,7 @@ interface ScenarioEngineCtx {
   digitalVariantId: string;
   tariffBandVariantId: string;
   failingVariantId: string;
+  failingVariant2Id: string;
 }
 
 async function setupScenarioEngineFixture(): Promise<ScenarioEngineCtx> {
@@ -984,12 +1049,17 @@ async function setupScenarioEngineFixture(): Promise<ScenarioEngineCtx> {
   const physicalVariantId = await makeVariant('PHYS', { dimensionalWeightOverride: '3.0' });
   const digitalVariantId = await makeVariant('DIG', { isDigital: true });
   const tariffBandVariantId = await makeVariant('TARIFF', { dimensionalWeightOverride: '3.0' });
-  // A negative sale price is accepted by the DB (no check constraint) but rejected by
+  // Two negative sale prices: accepted by the DB (no check constraint) but rejected by
   // the scenario's unit-price validator at evaluation time -- the deterministic way to
-  // make exactly one variant's compute throw while its siblings succeed.
+  // make exactly these two variants' compute throw while their siblings succeed, so the
+  // per-variant failures can be asserted to log once for the whole list.
   const failingVariantId = await makeVariant('FAIL', {
     dimensionalWeightOverride: '3.0',
     salePrice: '-1.00',
+  });
+  const failingVariant2Id = await makeVariant('FAIL2', {
+    dimensionalWeightOverride: '3.0',
+    salePrice: '-2.00',
   });
 
   // An active commission tariff for BC-TARIFF: one band at 10% covering now. A band with
@@ -1029,6 +1099,7 @@ async function setupScenarioEngineFixture(): Promise<ScenarioEngineCtx> {
     digitalVariantId,
     tariffBandVariantId,
     failingVariantId,
+    failingVariant2Id,
   };
 }
 
@@ -1073,19 +1144,38 @@ describe('GET .../product-pricing -- scenario engine (digital / tariff band / de
     expect(Number(banded?.netProfit)).toBeGreaterThan(Number(physical?.netProfit));
   });
 
-  it('keeps the list up when one variant fails to compute', async () => {
-    const rows = await fetchRows();
-    // Every variant is still present (the list always returns 200 -- owner rule).
-    expect(rows).toHaveLength(4);
-    const failing = rows.find((r) => r.variantId === sctx.failingVariantId);
-    expect(failing).toBeDefined();
-    // Its scenario evaluation throws (invalid desi), so its profit is empty while the
-    // row stays. The failure is logged (decision 9); the console error is expected here.
-    expect(failing?.calculable).toBe(false);
-    expect(failing?.netProfit).toBeNull();
-    // The siblings computed fine -- one bad variant did not take the list down.
-    expect(rows.find((r) => r.variantId === sctx.physicalVariantId)?.calculable).toBe(true);
-    expect(rows.find((r) => r.variantId === sctx.digitalVariantId)?.calculable).toBe(true);
+  it('keeps the list up when variants fail to compute and logs the failures once', async () => {
+    // Silence + capture the deliberate fallback log so the one-line-per-request rule
+    // can be asserted (two failing variants must still produce a single [profit-read]).
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const rows = await fetchRows();
+      // Every variant is still present (the list always returns 200 -- owner rule).
+      expect(rows).toHaveLength(5);
+      const failing = rows.find((r) => r.variantId === sctx.failingVariantId);
+      const failing2 = rows.find((r) => r.variantId === sctx.failingVariant2Id);
+      expect(failing).toBeDefined();
+      expect(failing2).toBeDefined();
+      // Each negative sale price is rejected by the scenario unit-price validator
+      // (assertScenarioUnitPrice), so its evaluation throws and its profit is empty while
+      // the row stays. The siblings computed fine -- bad variants did not take the list down.
+      expect(failing?.calculable).toBe(false);
+      expect(failing?.netProfit).toBeNull();
+      expect(failing2?.calculable).toBe(false);
+      expect(failing2?.netProfit).toBeNull();
+      expect(rows.find((r) => r.variantId === sctx.physicalVariantId)?.calculable).toBe(true);
+      expect(rows.find((r) => r.variantId === sctx.digitalVariantId)?.calculable).toBe(true);
+
+      // Two per-variant failures, but the list logs them ONCE (the first error with the
+      // failed count) so a systemic failure on a large catalog is not 5 000 log lines.
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[profit-read] in-request profit computation failed',
+        expect.objectContaining({ surface: 'product-pricing', orderId: null, failedCount: 2 }),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
 
@@ -1253,4 +1343,147 @@ describe('GET .../product-pricing -- large catalog (constant query count)', () =
     );
     expect(elapsedMs).toBeLessThan(30000);
   }, 60000);
+});
+
+// -- Version-less cost profile: list and quote agree it is a missing cost --
+//
+// A variant whose only cost profile has NO version. fetchCostAggregates counts the
+// profile (so the old quote pre-gate saw cost OK and ran the solver, which then returned
+// NOT_COMPUTABLE -> NOT_CALCULABLE), but the scenario loader DROPS a version-less profile
+// so the base carries no cost and the engine raises MISSING_COST. The list already reads
+// that (costStatus NO_PROFILES); the quote now reads the same base, so both agree the
+// cost is missing. Built once in beforeAll; both requests are reads.
+
+interface VersionlessCostCtx {
+  accessToken: string;
+  orgId: string;
+  storeId: string;
+  versionlessVariantId: string;
+}
+
+async function setupVersionlessCostFixture(): Promise<VersionlessCostCtx> {
+  const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+  if (carrier === null) {
+    throw new Error('SENDEOMP carrier missing -- globalSetup ensureShippingReferenceData must run');
+  }
+
+  const user = await createAuthenticatedTestUser();
+  const org = await createOrganization();
+  await createMembership(org.id, user.id);
+  const store = await prisma.store.create({
+    data: {
+      organizationId: org.id,
+      name: 'Versionless Cost Store',
+      platform: 'TRENDYOL',
+      environment: 'PRODUCTION',
+      externalAccountId: 'versionless-cost',
+      credentials: 'opaque',
+      shippingTariffSource: 'TRENDYOL_CONTRACT',
+      defaultShippingCarrierId: carrier.id,
+    },
+  });
+
+  await ensureFeeDefinitions();
+  await seedCommissionRate(); // category 597 @ 18% -> commission + shipping are OK
+
+  const product = await prisma.product.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      platformContentId: 8800n,
+      productMainId: 'pm-8800',
+      title: 'Versionless Cost Product',
+      categoryId: CATEGORY_ID,
+      categoryName: 'Gomlek',
+      brandId: BRAND_ID,
+      brandName: 'Modline',
+    },
+  });
+
+  const variant = await prisma.productVariant.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      productId: product.id,
+      platformVariantId: 88000n,
+      barcode: 'BC-VERSIONLESS',
+      stockCode: 'STK-VERSIONLESS',
+      salePrice: new Decimal('500.00'),
+      listPrice: new Decimal('500.00'),
+      vatRate: 20,
+      dimensionalWeightOverride: new Decimal('3.0'),
+    },
+  });
+
+  // A cost profile (NOT archived, so fetchCostAggregates counts it) with NO version, so
+  // the scenario loader drops it and the engine sees no cost.
+  const profile = await prisma.costProfile.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      name: 'Versionless COGS',
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      vatRate: 20,
+    },
+  });
+  await prisma.productVariantCostProfile.create({
+    data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+  });
+
+  return {
+    accessToken: user.accessToken,
+    orgId: org.id,
+    storeId: store.id,
+    versionlessVariantId: variant.id,
+  };
+}
+
+describe('.../product-pricing -- version-less cost profile (list + quote agree)', () => {
+  let vctx: VersionlessCostCtx;
+
+  beforeAll(async () => {
+    await truncateAll();
+    vctx = await setupVersionlessCostFixture();
+  });
+
+  it('reports a version-less cost profile as missing cost on both the list and the quote', async () => {
+    // List: the loader drops the version-less profile, so the row reads NO_PROFILES.
+    const listRes = await app.request(
+      `/v1/organizations/${vctx.orgId}/stores/${vctx.storeId}/product-pricing?perPage=25`,
+      { headers: { Authorization: bearer(vctx.accessToken) } },
+    );
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as ListResponseWire;
+    const row = listBody.data.find((r) => r.variantId === vctx.versionlessVariantId);
+    expect(row).toBeDefined();
+    expect(row?.costStatus).toBe('NO_PROFILES');
+    expect(row?.calculable).toBe(false);
+
+    // Quote: the cost gate now reads the same base, so it agrees -- NO_COST, not
+    // NOT_CALCULABLE (which the fetchCostAggregates pre-gate used to produce).
+    const quoteRes = await app.request(
+      `/v1/organizations/${vctx.orgId}/stores/${vctx.storeId}/product-pricing/quote`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: bearer(vctx.accessToken),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          variantId: vctx.versionlessVariantId,
+          target: { type: 'margin', value: '20' },
+        }),
+      },
+    );
+    expect(quoteRes.status).toBe(200);
+    const quoteBody = (await quoteRes.json()) as {
+      calculable: boolean;
+      variantId: string;
+      reason?: string;
+    };
+    expect(quoteBody.calculable).toBe(false);
+    expect(quoteBody.variantId).toBe(vctx.versionlessVariantId);
+    expect(quoteBody.reason).toBe('NO_COST');
+  });
 });

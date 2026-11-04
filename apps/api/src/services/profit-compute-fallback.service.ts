@@ -24,17 +24,24 @@ export type ProfitReadSurface =
  * products list) so support can trace the line. The single sink for the owner's "the
  * page opens, the profit stays empty, the error is logged" rule (decision 2026-11-04):
  * every read surface that swallows a profit failure to keep its page up routes here.
+ *
+ * `failedCount` is set only by a list that logs its per-row failures once (how many rows
+ * of the request failed; `err` is then the first failure), so a systemic failure on a
+ * large list is one log line, not one per row. It is omitted from the logged object when
+ * absent, so single-order surfaces log exactly as before.
  */
 export function logProfitReadFailure(params: {
   readonly surface: ProfitReadSurface;
   readonly organizationId: string;
   readonly orderId: string | null;
   readonly err: unknown;
+  readonly failedCount?: number;
 }): void {
   console.error('[profit-read] in-request profit computation failed', {
     surface: params.surface,
     organizationId: params.organizationId,
     orderId: params.orderId,
+    ...(params.failedCount !== undefined ? { failedCount: params.failedCount } : {}),
     err: params.err,
   });
 }
