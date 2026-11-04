@@ -4,6 +4,7 @@ import type {
   BufferEntryStatus,
   CostProfileType,
   FeeCalculationKind,
+  FinanceRecordFamily,
   MemberRole,
   OrderFeeDirection,
   OrderFeeSource,
@@ -607,6 +608,45 @@ export async function createProfitStatement(
       engineVersion: PROFIT_ENGINE_VERSION,
       contentHash: overrides.contentHash ?? 'test',
       computedAt: overrides.computedAt ?? new Date(),
+    },
+  });
+}
+
+export interface CreateFinanceRecordOverrides {
+  platform?: Platform;
+  family?: FinanceRecordFamily;
+  transactionType?: string;
+  recordId?: string;
+  // Nullable on the model; pass a date to place the row in or out of a
+  // transaction-date window. Explicit null keeps the column NULL.
+  transactionDate?: Date | null;
+  payload?: Prisma.InputJsonValue;
+  fetchedAt?: Date;
+}
+
+/**
+ * One raw marketplace finance record. Defaults to a SETTLEMENT-family Trendyol
+ * row dated now with an empty payload. The returns summary joins a profit
+ * line's externalRecordId to this row's recordId, so a test links the two by
+ * passing the same recordId and dates the money with transactionDate.
+ */
+export async function createFinanceRecord(
+  organizationId: string,
+  storeId: string,
+  overrides: CreateFinanceRecordOverrides = {},
+) {
+  return prisma.marketplaceFinanceRecord.create({
+    data: {
+      organizationId,
+      storeId,
+      platform: overrides.platform ?? 'TRENDYOL',
+      family: overrides.family ?? 'SETTLEMENT',
+      transactionType: overrides.transactionType ?? 'Return',
+      recordId: overrides.recordId ?? `rec-${randomUUID().slice(0, 8)}`,
+      transactionDate:
+        overrides.transactionDate === undefined ? new Date() : overrides.transactionDate,
+      payload: overrides.payload ?? {},
+      fetchedAt: overrides.fetchedAt ?? new Date(),
     },
   });
 }
