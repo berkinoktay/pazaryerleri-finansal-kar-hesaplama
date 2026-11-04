@@ -192,12 +192,18 @@ export async function getClaimsSummary(
 
   // Count KPIs run on claimDate (when the claim was opened). Money KPIs run on
   // the settlement record's transaction_date (when the deduction/refund hit the
-  // books), NOT on when the profit line was written: a line is dated by joining
-  // it to its marketplace_finance_record (same store, SETTLEMENT family,
-  // record_id = external_record_id) and reading that record's transaction_date.
-  // Refund/commission come from ACTUAL marketplace-record lines in the period; a
-  // COST_RETURN counts only when its own order item also carries such a dated
-  // SALE_RETURN line.
+  // books), NOT on when the profit line was written. The mapper folds every
+  // Return record of an item (plus its discount/coupon reversals) into ONE
+  // SALE_RETURN and ONE COMMISSION_REFUND line, listing every contributing
+  // settlement id in inputs.recordIds. So each line is dated by the EARLIEST
+  // transaction_date among those SETTLEMENT records (same org, same store), and
+  // falls back to external_record_id only when the line carries no record list.
+  // Accepted limitation: a partial return of one item split across two periods
+  // lands wholly in the period of its earliest record. Refund/commission come
+  // from ACTUAL marketplace-record lines dated into the period; a COST_RETURN
+  // (its own ACTUAL + SELLER_INPUT line) counts only when its order item also
+  // carries such a dated SALE_RETURN line, so the cost return follows its item's
+  // return line into the same period.
   const to = range.to ?? new Date();
   const from =
     range.from ?? new Date(to.getTime() - SUMMARY_DEFAULT_PERIOD_DAYS * 24 * 60 * 60 * 1000);
@@ -213,10 +219,19 @@ export async function getClaimsSummary(
       WITH dated_returns AS (
         SELECT pl.type AS line_type, pl.order_item_id, pl.amount_gross
         FROM profit_lines pl
-        JOIN marketplace_finance_records r
-          ON r.store_id = pl.store_id
-         AND r.family = ${FinanceRecordFamily.SETTLEMENT}::"FinanceRecordFamily"
-         AND r.record_id = pl.external_record_id
+        JOIN LATERAL (
+          SELECT MIN(r.transaction_date) AS line_date
+          FROM marketplace_finance_records r
+          WHERE r.organization_id = ${orgId}::uuid
+            AND r.store_id = pl.store_id
+            AND r.family = ${FinanceRecordFamily.SETTLEMENT}::"FinanceRecordFamily"
+            AND r.record_id = ANY(
+              string_to_array(
+                COALESCE(NULLIF(pl.inputs->>'recordIds', ''), pl.external_record_id),
+                ','
+              )
+            )
+        ) ld ON TRUE
         WHERE pl.organization_id = ${orgId}::uuid
           AND pl.store_id = ${storeId}::uuid
           AND pl.certainty = ${ProfitLineCertainty.ACTUAL}::"ProfitLineCertainty"
@@ -225,10 +240,8 @@ export async function getClaimsSummary(
             ${ProfitLineType.SALE_RETURN}::"ProfitLineType",
             ${ProfitLineType.COMMISSION_REFUND}::"ProfitLineType"
           )
-          AND r.organization_id = ${orgId}::uuid
-          AND r.store_id = ${storeId}::uuid
-          AND r.transaction_date >= ${from}::timestamp(3)
-          AND r.transaction_date <= ${to}::timestamp(3)
+          AND ld.line_date >= ${from}::timestamp(3)
+          AND ld.line_date <= ${to}::timestamp(3)
       ),
       cost_return AS (
         SELECT COALESCE(SUM(pl.amount_gross), 0) AS total
@@ -236,6 +249,8 @@ export async function getClaimsSummary(
         WHERE pl.organization_id = ${orgId}::uuid
           AND pl.store_id = ${storeId}::uuid
           AND pl.type = ${ProfitLineType.COST_RETURN}::"ProfitLineType"
+          AND pl.certainty = ${ProfitLineCertainty.ACTUAL}::"ProfitLineCertainty"
+          AND pl.source = ${ProfitLineSource.SELLER_INPUT}::"ProfitLineSource"
           AND pl.order_item_id IN (
             SELECT dr.order_item_id
             FROM dated_returns dr

@@ -37,6 +37,7 @@ async function seedSaleReturn(orgId: string, storeId: string, gross: string): Pr
     certainty: 'ACTUAL',
     source: 'MARKETPLACE_RECORD',
     amountGross: gross,
+    inputs: { recordIds: recordId },
     externalRecordId: recordId,
   });
 }
@@ -138,6 +139,31 @@ describe('Claims — tenant isolation', () => {
 
     const res = await app.request(
       `/v1/organizations/${orgA.id}/stores/${storeA.id}/claims/summary`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      refundDeductionGross: '50.00',
+      commissionRefundGross: '0.00',
+      costReturnGross: '0.00',
+      netImpactGross: '-50.00',
+    });
+  });
+
+  it('ignores lines and records of another store of the same organization', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const storeA = await createStore(org.id);
+    const storeB = await createStore(org.id);
+
+    await seedSaleReturn(org.id, storeA.id, '50.00');
+    // Same org, a sibling store: its lines and records must never reach storeA.
+    await seedSaleReturn(org.id, storeB.id, '120.00');
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${storeA.id}/claims/summary`,
       { headers: { Authorization: bearer(user.accessToken) } },
     );
     expect(res.status).toBe(200);
