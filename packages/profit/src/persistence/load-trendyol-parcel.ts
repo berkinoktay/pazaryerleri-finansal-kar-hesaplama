@@ -206,6 +206,9 @@ export async function loadTrendyolParcel(
     const orderCommissionRatePct = decOrNull(item.orderCommissionRatePct);
     return {
       orderItemId: item.id,
+      // Orders never override the rate; the scenario engine is the only caller that
+      // does. A stored order resolves through the chain below.
+      commissionRatePctOverride: null,
       orderCommissionRatePct:
         orderCommissionRatePct !== null && orderCommissionRatePct.gt(ZERO)
           ? orderCommissionRatePct

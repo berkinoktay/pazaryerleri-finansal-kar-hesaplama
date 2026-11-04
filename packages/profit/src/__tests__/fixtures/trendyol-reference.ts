@@ -159,6 +159,7 @@ function toBand(band: MakeTrendyolBandParams): TrendyolCommissionBand {
  */
 export interface MakeTrendyolItemAttributesParams {
   readonly orderItemId: string;
+  readonly commissionRatePctOverride?: string | null;
   readonly orderCommissionRatePct?: string | null;
   readonly tariffBands?: readonly MakeTrendyolBandParams[] | null;
   readonly syncedCommissionRatePct?: string | null;
@@ -169,6 +170,8 @@ export interface MakeTrendyolItemAttributesParams {
 export function makeTrendyolItemAttributes(
   params: MakeTrendyolItemAttributesParams,
 ): TrendyolItemAttributes {
+  const overrideText =
+    params.commissionRatePctOverride === undefined ? null : params.commissionRatePctOverride;
   const orderText =
     params.orderCommissionRatePct === undefined ? '19' : params.orderCommissionRatePct;
   const syncedText =
@@ -179,6 +182,7 @@ export function makeTrendyolItemAttributes(
       : params.tariffBands.map(toBand);
   return {
     orderItemId: params.orderItemId,
+    commissionRatePctOverride: overrideText === null ? null : new Decimal(overrideText),
     orderCommissionRatePct: orderText === null ? null : new Decimal(orderText),
     tariffBands,
     syncedCommissionRatePct: syncedText === null ? null : new Decimal(syncedText),

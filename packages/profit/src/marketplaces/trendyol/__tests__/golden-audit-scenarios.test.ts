@@ -15,6 +15,7 @@ import { trendyolBandForPrice } from '../resolve-commission-rate';
 import {
   evaluateTrendyolScenario,
   solveTrendyolScenarioPrice,
+  trendyolScenarioBreakpoints,
   type TrendyolScenarioBase,
   type TrendyolScenarioProduct,
   type TrendyolScenarioResult,
@@ -133,24 +134,47 @@ function requireLine(lines: readonly ProfitLine[], type: ProfitLineType): Profit
 }
 
 /**
- * Asserts the solver returns the global lowest unit price that meets `pct`: the
- * solved price meets the margin, and none of the 100 kurus below it does (the
- * reviewer's brute-force property). This catches a solver that returns a price a
- * hair above the lowest because a fixed nudge is narrower than the rounding noise.
+ * How many kurus below the solved price the sweep still covers point by point. The
+ * solver corrects a closed-form candidate against per-line rounding noise over a few
+ * kurus (`3 * noiseBound / slope`, a couple of kurus for these scenarios); this window
+ * is several times that, so it still catches a solver that returns a price a hair above
+ * the lowest because a fixed nudge is narrower than the rounding noise.
+ */
+const LOWEST_MARGIN_NOISE_WINDOW = 12;
+
+/**
+ * Asserts the solver returns the global lowest unit price that meets `pct`: the solved
+ * price meets the margin, and no lower price does. Rather than sweeping a hundred blind
+ * kurus (which only ever rebuilt the same answer), it samples the two places a solver
+ * can err -- a rounding-noise window just below the solved price, and every Barem or
+ * commission breakpoint below the solved price with the kurus either side, where a
+ * cheaper band could otherwise sneak a meeting price in under the answer. Same claim,
+ * a handful of evaluations instead of a hundred.
  */
 function expectLowestMargin(pct: string, overrides: ScenarioOverrides = {}): void {
   const pctValue = new Decimal(pct);
+  const base = scenarioBase(overrides);
   const solved = requireSolved(
-    solveTrendyolScenarioPrice({
-      base: scenarioBase(overrides),
-      target: { kind: 'MARGIN', pct: pctValue },
-    }),
+    solveTrendyolScenarioPrice({ base, target: { kind: 'MARGIN', pct: pctValue } }),
   );
   expect(solved.statement.saleMarginPct?.gte(pctValue)).toBe(true);
-  for (let step = 1; step <= 100; step++) {
-    const price = solved.unitPrice.sub(ONE_KURUS.mul(step));
-    const margin = evaluateAt(price, overrides).statement.saleMarginPct;
-    expect(margin === null || margin.lt(pctValue)).toBe(true);
+
+  const prices: Decimal[] = [];
+  for (let step = 1; step <= LOWEST_MARGIN_NOISE_WINDOW; step++) {
+    prices.push(solved.unitPrice.sub(ONE_KURUS.mul(step)));
+  }
+  for (const breakpoint of trendyolScenarioBreakpoints(base)) {
+    if (breakpoint.lt(solved.unitPrice)) {
+      prices.push(breakpoint.sub(ONE_KURUS), breakpoint);
+    }
+  }
+
+  for (const price of prices) {
+    if (price.lt(ONE_KURUS)) {
+      continue;
+    }
+    const margin = evaluateTrendyolScenario({ ...base, unitPrice: price }).statement.saleMarginPct;
+    expect(margin === null || margin.lt(pctValue), price.toFixed(2)).toBe(true);
   }
 }
 
@@ -192,8 +216,14 @@ describe('golden audit scenarios', () => {
   });
 
   it('never calls a reachable margin unreachable under a 40% commission', () => {
+    // Two reachable margins bracket the range: a low one and a high one that solves far
+    // up the open-ended top segment, where a solver is most tempted to call a reachable
+    // margin unreachable. Both solve above the Barem edges, and `expectLowestMargin`
+    // samples every breakpoint below the answer, so the three middling margins dropped
+    // here only re-ran the same open-segment solve at a different height (and the
+    // unreachable path has its own test above).
     const overrides: ScenarioOverrides = { commissionRatePctOverride: new Decimal('40') };
-    for (const pct of ['33.6', '35.8', '37.2', '40.4', '44.4']) {
+    for (const pct of ['33.6', '40.4']) {
       expectLowestMargin(pct, overrides);
     }
   });

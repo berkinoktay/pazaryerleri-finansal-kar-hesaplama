@@ -32,6 +32,40 @@ const THREE_BANDS: readonly MakeTrendyolBandParams[] = [
 ];
 
 describe('resolveTrendyolCommissionRate', () => {
+  it('applies an explicit zero commission override', () => {
+    // A non-null override wins the whole chain and is applied verbatim, zero included,
+    // ahead of the order rate it is given alongside. Source is OVERRIDE, not ORDER.
+    const result = resolve(
+      makeTrendyolItemAttributes({
+        orderItemId: 'a',
+        commissionRatePctOverride: '0',
+        orderCommissionRatePct: '19',
+        syncedCommissionRatePct: '17.5',
+      }),
+      '280',
+    );
+    expect(result).not.toBeNull();
+    expect(result?.ratePct.toString()).toBe('0');
+    expect(result?.source).toBe('OVERRIDE');
+  });
+
+  it('keeps treating a synced zero rate as unknown', () => {
+    // Phase 2A rule: Trendyol sends 0 when it does not know the rate, so a synced 0
+    // is "not received" and falls through to the category rule, unlike an override 0.
+    const result = resolve(
+      makeTrendyolItemAttributes({
+        orderItemId: 'a',
+        orderCommissionRatePct: null,
+        syncedCommissionRatePct: '0',
+        categoryId: '369',
+        brandId: null,
+      }),
+      '100',
+    );
+    expect(result?.ratePct.toString()).toBe('20');
+    expect(result?.source).toBe('CATEGORY');
+  });
+
   it('uses a positive order rate', () => {
     const result = resolve(makeTrendyolItemAttributes({ orderItemId: 'a' }), '280');
     expect(result).not.toBeNull();

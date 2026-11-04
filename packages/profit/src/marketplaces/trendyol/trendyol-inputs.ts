@@ -14,6 +14,10 @@ export interface TrendyolCommissionBand {
 /** Commission inputs attached to one order item. */
 export interface TrendyolItemAttributes {
   readonly orderItemId: string;
+  // A scenario's explicit rate; applied verbatim ahead of the whole chain, zero
+  // included (source OVERRIDE). null = no override. Orders never set this, so a stored
+  // order resolves through the chain below exactly as before.
+  readonly commissionRatePctOverride: Decimal | null;
   readonly orderCommissionRatePct: Decimal | null; // rate on the order line; null or 0 = not sent
   readonly tariffBands: readonly TrendyolCommissionBand[] | null; // product commission tariff covering the order date, in stored order; null = none
   readonly syncedCommissionRatePct: Decimal | null; // product API rate, not tariff-aware; null or 0 = unknown

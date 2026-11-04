@@ -9,13 +9,21 @@ import {
   type ScenarioSolveResult,
 } from '../../core/scenario/solve-scenario-price';
 import { type ItemCostProfileInput } from '../../core/seller-costs/build-seller-cost-lines';
-import { ceilToKurus, floorToKurus, KURUS_DECIMALS, ONE_KURUS } from '../../money';
+import { ceilToKurus, floorToKurus, KURUS_DECIMALS, ONE_KURUS, roundMoney } from '../../money';
 import {
   estimateTrendyolParcel,
   type EstimateResult,
   type TrendyolEstimateInput,
 } from './estimate-parcel';
-import { type TrendyolCommissionBand, type TrendyolReferenceData } from './trendyol-inputs';
+import {
+  resolveTrendyolCommissionRate,
+  type ResolvedTrendyolCommissionRate,
+} from './resolve-commission-rate';
+import {
+  type TrendyolCommissionBand,
+  type TrendyolItemAttributes,
+  type TrendyolReferenceData,
+} from './trendyol-inputs';
 
 const ZERO = new Decimal(0);
 
@@ -57,17 +65,48 @@ export interface TrendyolScenarioInput {
 /** The scenario question without its unit price; the price axis the solver varies. */
 export type TrendyolScenarioBase = Omit<TrendyolScenarioInput, 'unitPrice'>;
 
-/** The estimate lines and the profit statement of one evaluated scenario. */
+/**
+ * The estimate lines, the profit statement and the commission rate of one evaluated
+ * scenario. `commission` is the rate and source the scenario actually used, so a
+ * screen can show it even when the commission nets to zero and carries no COMMISSION
+ * line; it is null only when no rate could be resolved (MISSING_COMMISSION_RATE).
+ */
 export interface TrendyolScenarioResult {
   readonly estimate: EstimateResult;
   readonly statement: ProfitStatement;
+  readonly commission: ResolvedTrendyolCommissionRate | null;
 }
 
-/** Throws `RangeError` unless the unit price is a positive kurus amount. */
+/**
+ * Throws `RangeError` unless the unit price is a non-negative kurus amount. Zero is a
+ * valid scenario (a free item): the sale is zero while the cost and fees still deduct.
+ * A negative price and a price with more than two decimals are rejected.
+ */
 function assertScenarioUnitPrice(unitPrice: Decimal): void {
-  if (!unitPrice.isFinite() || unitPrice.lte(ZERO) || unitPrice.decimalPlaces() > KURUS_DECIMALS) {
-    throw new RangeError('scenario unitPrice must be a positive amount with at most two decimals');
+  if (!unitPrice.isFinite() || unitPrice.lt(ZERO) || unitPrice.decimalPlaces() > KURUS_DECIMALS) {
+    throw new RangeError(
+      'scenario unitPrice must be a non-negative amount with at most two decimals',
+    );
   }
+}
+
+/**
+ * The single scenario item's commission attributes. The screen's explicit rate rides
+ * on `commissionRatePctOverride` (applied verbatim, zero included); a scenario never
+ * carries an order-line rate, so with no override the resolver walks the tariff,
+ * synced and category chain.
+ */
+function scenarioItemAttributes(input: TrendyolScenarioInput): TrendyolItemAttributes {
+  const { product } = input;
+  return {
+    orderItemId: TRENDYOL_SCENARIO_ITEM_ID,
+    commissionRatePctOverride: input.commissionRatePctOverride,
+    orderCommissionRatePct: null,
+    tariffBands: product.tariffBands,
+    syncedCommissionRatePct: product.syncedCommissionRatePct,
+    categoryId: product.categoryId,
+    brandId: product.brandId,
+  };
 }
 
 /**
@@ -112,16 +151,7 @@ export function buildTrendyolScenarioParcel(input: TrendyolScenarioInput): Trend
       fastDeliveryType: null,
       actualShipDate: null,
       usesSellerCargoAgreement: false,
-      items: [
-        {
-          orderItemId: TRENDYOL_SCENARIO_ITEM_ID,
-          orderCommissionRatePct: input.commissionRatePctOverride,
-          tariffBands: product.tariffBands,
-          syncedCommissionRatePct: product.syncedCommissionRatePct,
-          categoryId: product.categoryId,
-          brandId: product.brandId,
-        },
-      ],
+      items: [scenarioItemAttributes(input)],
     },
     reference: input.reference,
     costs: [{ orderItemId: TRENDYOL_SCENARIO_ITEM_ID, profiles: input.costs }],
@@ -130,10 +160,15 @@ export function buildTrendyolScenarioParcel(input: TrendyolScenarioInput): Trend
 }
 
 /**
- * Evaluates one scenario: estimate the parcel, then tie its lines into a profit
- * statement under the store's settings, exactly as a real estimated order does.
+ * Estimates the scenario parcel and ties its lines into a profit statement under the
+ * store's settings, exactly as a real estimated order does. No commission rate is
+ * resolved here, so the price solver, which only needs the statement, pays nothing
+ * for the rate it does not read.
  */
-export function evaluateTrendyolScenario(input: TrendyolScenarioInput): TrendyolScenarioResult {
+function computeScenarioStatement(input: TrendyolScenarioInput): {
+  readonly estimate: EstimateResult;
+  readonly statement: ProfitStatement;
+} {
   const estimate = estimateTrendyolParcel(buildTrendyolScenarioParcel(input));
   const statement = computeProfitStatement({
     lines: estimate.lines,
@@ -145,6 +180,23 @@ export function evaluateTrendyolScenario(input: TrendyolScenarioInput): Trendyol
     issues: estimate.issues,
   });
   return { estimate, statement };
+}
+
+/**
+ * Evaluates one scenario: the estimate, the profit statement, and the commission rate
+ * the estimate resolved. The rate is resolved from the same item attributes and unit
+ * base the estimate uses, so it matches the COMMISSION line when there is one and is
+ * still reported when the commission nets to zero or is unresolvable (null).
+ */
+export function evaluateTrendyolScenario(input: TrendyolScenarioInput): TrendyolScenarioResult {
+  const { estimate, statement } = computeScenarioStatement(input);
+  const saleGross = input.unitPrice.mul(input.quantity);
+  const commission = resolveTrendyolCommissionRate({
+    item: scenarioItemAttributes(input),
+    unitCommissionBase: roundMoney(saleGross.div(input.quantity)),
+    rules: input.reference.commission,
+  });
+  return { estimate, statement, commission };
 }
 
 /**
@@ -238,7 +290,7 @@ export function solveTrendyolScenarioPrice(params: {
 }): ScenarioSolveResult {
   const { base, target } = params;
   return solveScenarioPrice({
-    evaluate: (unitPrice) => evaluateTrendyolScenario({ ...base, unitPrice }).statement,
+    evaluate: (unitPrice) => computeScenarioStatement({ ...base, unitPrice }).statement,
     breakpoints: trendyolScenarioBreakpoints(base),
     target,
     minUnitPrice: params.minUnitPrice ?? DEFAULT_SCENARIO_MIN_UNIT_PRICE,

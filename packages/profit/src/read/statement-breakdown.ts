@@ -179,13 +179,18 @@ function money(value: Decimal): string {
   return fixed === '-0.00' ? '0.00' : fixed;
 }
 
-/** A margin as a two-decimal string (half-up) with signed zero normalized, or null. */
-function percent(value: Decimal | null): string | null {
+/**
+ * A margin as a fixed-decimals string (half-up) with signed zero normalized, or null.
+ * `decimals` is 2 for an order and 4 for a quote, which renders the stored
+ * numeric(12,4) precision in full.
+ */
+function percent(value: Decimal | null, decimals: 2 | 4): string | null {
   if (value === null) {
     return null;
   }
-  const fixed = value.toFixed(2, Decimal.ROUND_HALF_UP);
-  return fixed === '-0.00' ? '0.00' : fixed;
+  const fixed = value.toFixed(decimals, Decimal.ROUND_HALF_UP);
+  const negativeZero = `-${ZERO.toFixed(decimals)}`;
+  return fixed === negativeZero ? fixed.slice(1) : fixed;
 }
 
 /**
@@ -199,14 +204,20 @@ function percent(value: Decimal | null): string | null {
  * equals the sale gross to the kurus (the golden tests assert it). The individual fee
  * rows below (commission, shipping, service fees, stoppage) are still summed per type,
  * because each is a named line on screen rather than a whole group.
+ *
+ * `marginDecimals` controls only the two margins: 2 (default) for an order, 4 for a
+ * quote screen that renders the stored numeric(12,4) precision. Every amount is always
+ * two decimals.
  */
 export function buildStatementBreakdown(input: {
   readonly totals: StatementTotals;
   readonly selectedLines: readonly ProfitLine[];
   readonly listGross: Decimal;
   readonly sellerDiscountGross: Decimal;
+  readonly marginDecimals?: 2 | 4;
 }): StatementBreakdown | null {
   const { totals, selectedLines, listGross, sellerDiscountGross } = input;
+  const marginDecimals = input.marginDecimals ?? 2;
   if (totals.netProfit === null) {
     return null;
   }
@@ -292,8 +303,8 @@ export function buildStatementBreakdown(input: {
     stoppage: money(stoppage),
     netVat: money(netVat),
     netProfit: money(totals.netProfit),
-    saleMarginPct: percent(totals.saleMarginPct),
-    costMarkupPct: percent(totals.costMarkupPct),
+    saleMarginPct: percent(totals.saleMarginPct, marginDecimals),
+    costMarkupPct: percent(totals.costMarkupPct, marginDecimals),
     marketplaceFeesGross: money(marketplaceFeesGross),
     taxesGross: money(taxesGross),
     totalDeductionsGross: money(totalDeductionsGross),

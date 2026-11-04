@@ -146,10 +146,12 @@ describe('buildTrendyolScenarioParcel', () => {
     expect(item?.sellerDiscountGross.toFixed(2)).toBe('0.00');
   });
 
-  it('rejects a non-positive or over-precise unit price', () => {
-    expect(() => buildTrendyolScenarioParcel(scenarioInput('0'))).toThrow(RangeError);
+  it('rejects a negative unit price', () => {
+    // A zero price is a valid scenario (a free item); only a negative price and a
+    // price with more than two decimals are rejected.
     expect(() => buildTrendyolScenarioParcel(scenarioInput('-1.00'))).toThrow(RangeError);
     expect(() => buildTrendyolScenarioParcel(scenarioInput('10.001'))).toThrow(RangeError);
+    expect(() => buildTrendyolScenarioParcel(scenarioInput('0'))).not.toThrow();
   });
 });
 
@@ -205,6 +207,46 @@ describe('evaluateTrendyolScenario', () => {
       scenarioInput('190.00', { costs: cogsProfiles('150'), settings: CLAMP_NEGATIVE }),
     );
     expect(clamped.statement.netProfit?.toFixed(2)).toBe('-64.26');
+  });
+
+  it('accepts a zero unit price and leaves the margins empty', () => {
+    // A free item: the sale is zero, but the cost and every fee are still deducted,
+    // so the net profit is negative. A margin over a zero sale is undefined (null),
+    // and nothing divides by zero or throws walking the whole estimate path.
+    const result = evaluateTrendyolScenario(scenarioInput('0', { costs: cogsProfiles('130') }));
+
+    expect(result.statement.saleGross.toFixed(2)).toBe('0.00');
+    expect(result.statement.netProfit).not.toBeNull();
+    expect(result.statement.netProfit?.lt(0)).toBe(true);
+    expect(result.statement.saleMarginPct).toBeNull();
+  });
+
+  it('reports the commission rate and source even when the commission is zero', () => {
+    // A zero-rate override nets no commission line, yet the scenario still reports the
+    // rate and its source so a screen can show the commission the seller chose.
+    const result = evaluateTrendyolScenario(
+      scenarioInput('280.00', {
+        product: { tariffBands: THREE_BANDS },
+        commissionRatePctOverride: new Decimal('0'),
+      }),
+    );
+
+    const commissionLine = result.estimate.lines.find(
+      (line) => line.type === ProfitLineType.COMMISSION,
+    );
+    expect(commissionLine).toBeUndefined();
+    expect(result.commission).not.toBeNull();
+    expect(result.commission?.ratePct.toString()).toBe('0');
+    expect(result.commission?.source).toBe('OVERRIDE');
+  });
+
+  it('reports no commission when none can be resolved', () => {
+    // No override, no bands, no synced rate and no category rule: the commission is
+    // unresolvable (the MISSING_COMMISSION_RATE case), so the reported rate is null.
+    const result = evaluateTrendyolScenario(
+      scenarioInput('280.00', { product: { categoryId: null, brandId: null } }),
+    );
+    expect(result.commission).toBeNull();
   });
 
   it('uses the band of the asked price, or the override', () => {

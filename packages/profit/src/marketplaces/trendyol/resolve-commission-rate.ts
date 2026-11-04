@@ -10,6 +10,7 @@ import {
 const ZERO = new Decimal(0);
 
 export type TrendyolCommissionRateSource =
+  | 'OVERRIDE'
   | 'ORDER'
   | 'TARIFF_BAND'
   | 'PRODUCT_SYNC'
@@ -44,13 +45,16 @@ export function trendyolBandForPrice(
 /**
  * Resolves an item's effective Trendyol commission rate through the single chain,
  * first match wins (design 7.2):
+ *   0. OVERRIDE     - a scenario's explicit rate, applied verbatim including 0,
  *   1. ORDER        - a positive order-line rate,
  *   2. TARIFF_BAND  - the product tariff band covering the unit price,
  *   3. PRODUCT_SYNC - a positive synced product rate,
  *   4. CATEGORY_BRAND / CATEGORY - the lowest of the category+brand rule (only when
  *      both ids exist) and the category rule; CATEGORY on a tie.
- * Returns null when nothing applies, which the caller turns into a blocking
- * MISSING_COMMISSION_RATE issue instead of a silent zero.
+ * A zero is meaningful only at the OVERRIDE rung: an order or synced rate of 0 means
+ * "not sent" (phase 2A) and falls through. Returns null when nothing applies, which
+ * the caller turns into a blocking MISSING_COMMISSION_RATE issue instead of a silent
+ * zero.
  */
 export function resolveTrendyolCommissionRate(params: {
   readonly item: TrendyolItemAttributes;
@@ -58,6 +62,10 @@ export function resolveTrendyolCommissionRate(params: {
   readonly rules: TrendyolCommissionRules;
 }): ResolvedTrendyolCommissionRate | null {
   const { item, unitCommissionBase, rules } = params;
+
+  if (item.commissionRatePctOverride !== null) {
+    return { ratePct: item.commissionRatePctOverride, source: 'OVERRIDE' };
+  }
 
   if (item.orderCommissionRatePct !== null && item.orderCommissionRatePct.gt(ZERO)) {
     return { ratePct: item.orderCommissionRatePct, source: 'ORDER' };

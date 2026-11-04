@@ -239,6 +239,42 @@ describe('buildStatementBreakdown', () => {
     expect(breakdown?.costMarkupPct).toBe('0.00');
   });
 
+  it('writes four-decimal margins when asked', () => {
+    // The stored margins are numeric(12,4); a quote screen renders them at full
+    // precision, while an order keeps the default two decimals. A four-decimal
+    // negative zero normalizes just like the two-decimal one.
+    const totals: StatementTotals = {
+      saleGross: new Decimal('100.00'),
+      vatOutput: new Decimal('0'),
+      costGross: new Decimal('80.00'),
+      vatEffective: new Decimal('0'),
+      stoppageGross: new Decimal('0'),
+      stoppageIncluded: false,
+      netProfit: new Decimal('12.3456'),
+      saleMarginPct: new Decimal('12.3456'),
+      costMarkupPct: new Decimal('-0.00004'),
+    };
+
+    const four = buildStatementBreakdown({
+      totals,
+      selectedLines: [],
+      listGross: new Decimal(0),
+      sellerDiscountGross: new Decimal(0),
+      marginDecimals: 4,
+    });
+    expect(four?.saleMarginPct).toBe('12.3456');
+    expect(four?.costMarkupPct).toBe('0.0000');
+
+    const two = buildStatementBreakdown({
+      totals,
+      selectedLines: [],
+      listGross: new Decimal(0),
+      sellerDiscountGross: new Decimal(0),
+    });
+    expect(two?.saleMarginPct).toBe('12.35');
+    expect(two?.costMarkupPct).toBe('0.00');
+  });
+
   it('writes every amount with two decimals', () => {
     const breakdown = breakdownOf(
       statementOf([
