@@ -2,6 +2,8 @@ import { createRoute, z } from '@hono/zod-openapi';
 
 import { CAPABILITIES } from '@pazarsync/utils';
 
+import { prisma } from '@pazarsync/db';
+
 import { createSubApp } from '../../lib/create-hono-app';
 import { assertCapability } from '../../lib/require-capability';
 import { requireStoreAccess } from '../../lib/require-store-access';
@@ -82,13 +84,13 @@ app.openapi(listProductPricingRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId } = c.req.valid('param');
   const filters = c.req.valid('query');
-  const { store, role } = await requireStoreAccess(userId, orgId, storeId);
+  const { role } = await requireStoreAccess(userId, orgId, storeId);
   assertCapability(role, CAPABILITIES.DATA_READ);
 
   // The service computes EVERY approved variant in memory, then filters / sorts /
   // paginates in memory, so `total` is the EXACT filtered count (calculableOnly,
   // profitStatus, margin range and category/brand all applied before the slice).
-  const { data, total } = await listProductPricing(orgId, storeId, store, {
+  const { data, total } = await listProductPricing(prisma, orgId, storeId, {
     page: filters.page,
     perPage: filters.perPage,
     q: filters.q,

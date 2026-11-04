@@ -21,9 +21,10 @@
 import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { prisma } from '@pazarsync/db';
+import { prisma, type Prisma } from '@pazarsync/db';
 
 import { createApp } from '@/app';
+import { listProductPricing } from '@/services/product-pricing.service';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -146,7 +147,9 @@ async function setupFullyConfiguredStore(): Promise<FullySetupCtx> {
     },
   });
 
-  // Attach a TRY cost profile (no FX) to ONLY the calculable variant.
+  // Attach a TRY cost profile (no FX) to ONLY the calculable variant. The scenario
+  // engine reads the profile's VERSION (effective at the scenario date), so seed a
+  // single version alongside the profile.
   const profile = await prisma.costProfile.create({
     data: {
       organizationId: org.id,
@@ -155,6 +158,19 @@ async function setupFullyConfiguredStore(): Promise<FullySetupCtx> {
       type: 'COGS',
       amountGross: new Decimal('200.00'),
       vatRate: 20,
+    },
+  });
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId: org.id,
+      version: 1,
+      name: 'COGS Test',
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      vatRate: 20,
+      changedFields: [],
+      effectiveFrom: new Date('2024-01-01T00:00:00Z'),
     },
   });
   await prisma.productVariantCostProfile.create({
@@ -298,6 +314,13 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/product-pricing — fully
     // PSF=10.99 NET → 13.19 GROSS (VAT 20%). netProfit=57.85, margin=11.57%,
     // markup=28.93%. If any formula constant, fee definition, or tariff row
     // changes, this diff makes the breakage explicit rather than silently wrong.
+    //
+    // Faz 4B: these values are UNCHANGED under the scenario engine. The plan's
+    // expected differences all no-op for this fixture: cost VAT equals the sale VAT
+    // (B1 is a no-op here), there is no tariff band or synced rate so commission stays
+    // the 18% category rule (B3 no-op), net VAT is positive so the default settings
+    // (includeStopaj true, includeNegativeNetVat false) do not bite, and per-line kurus
+    // rounding lands on the same figures -- so the pins carry over verbatim.
     expect(Number.isFinite(Number(row?.netProfit))).toBe(true);
     expect(Number(row?.netProfit)).toBeGreaterThan(0);
     expect(row?.netProfit).toBe('57.85');
@@ -491,27 +514,39 @@ async function setupRichFixture(): Promise<RichFixtureCtx> {
     },
   });
 
-  // A low-cost (200) and a high-cost (480) profile to drive profitable vs loss.
-  const lowCost = await prisma.costProfile.create({
-    data: {
-      organizationId: org.id,
-      storeId: store.id,
-      name: 'Low COGS',
-      type: 'COGS',
-      amountGross: new Decimal('200.00'),
-      vatRate: 20,
-    },
-  });
-  const highCost = await prisma.costProfile.create({
-    data: {
-      organizationId: org.id,
-      storeId: store.id,
-      name: 'High COGS',
-      type: 'COGS',
-      amountGross: new Decimal('480.00'),
-      vatRate: 20,
-    },
-  });
+  // A low-cost (200) and a high-cost (480) profile to drive profitable vs loss. The
+  // scenario engine reads the effective VERSION, so each profile carries one.
+  async function createCostProfileWithVersion(
+    name: string,
+    amountGross: string,
+  ): Promise<{ id: string }> {
+    const created = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name,
+        type: 'COGS',
+        amountGross: new Decimal(amountGross),
+        vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: created.id,
+        organizationId: org.id,
+        version: 1,
+        name,
+        type: 'COGS',
+        amountGross: new Decimal(amountGross),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+    return created;
+  }
+  const lowCost = await createCostProfileWithVersion('Low COGS', '200.00');
+  const highCost = await createCostProfileWithVersion('High COGS', '480.00');
 
   let seq = 90100n;
   async function makeVariant(
@@ -765,9 +800,11 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/product-pricing/quote �
     // (ALL/COMMISSION_INVOICE), stoppage=1% of NET sale (ALL/STOPPAGE),
     // SENDEOMP desi-3 → 101.99 NET → 122.39 GROSS (VAT 20%),
     // PSF=10.99 NET → 13.19 GROSS (VAT 20%). Target: margin=20%.
-    // solvePriceForTarget produces this price given those economics; if any
-    // formula constant, fee definition, or tariff row changes, the diff is explicit.
-    // Pinned empirically from first green run: 588.74.
+    //
+    // Faz 4B: UNCHANGED under the scenario solver. The solver returns the lowest kurus
+    // meeting the 20% margin; for this fixture that is the same 588.74 the old closed
+    // form produced (no band splits -- no tariff band here -- and the single net-VAT
+    // segment is linear, so the lowest meeting price equals the old half-up price).
     expect(body.price).toBe('588.74');
     // priceDelta = solved − current sale price (588.74 − 500.00 = 88.74), signed.
     expect(body.priceDelta).toBe('88.74');
@@ -827,4 +864,393 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/product-pricing/quote �
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('INVALID_REFERENCE');
   });
+});
+
+// -- Scenario-engine behaviours: digital, active tariff band, degradation --
+//
+// One fixture, four variants in the same category (597, 18% rule), all sharing the
+// SENDEOMP / TRENDYOL_CONTRACT store and a single 200 GROSS cost profile (+version):
+//   - physical:   desi 3, 18% category commission, shipping + PSF deducted;
+//   - digital:    isDigital -- no shipping, no PSF (its profit beats the physical one);
+//   - tariffBand: an active 10% tariff band on its barcode (lower commission than 18%);
+//   - failing:    a negative desi override that makes the scenario evaluation throw.
+// Built once in beforeAll; every test is a read.
+
+const SCENARIO_CATEGORY_ID = 597n;
+
+interface ScenarioEngineCtx {
+  accessToken: string;
+  orgId: string;
+  storeId: string;
+  physicalVariantId: string;
+  digitalVariantId: string;
+  tariffBandVariantId: string;
+  failingVariantId: string;
+}
+
+async function setupScenarioEngineFixture(): Promise<ScenarioEngineCtx> {
+  const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+  if (carrier === null) {
+    throw new Error('SENDEOMP carrier missing -- globalSetup ensureShippingReferenceData must run');
+  }
+
+  const user = await createAuthenticatedTestUser();
+  const org = await createOrganization();
+  await createMembership(org.id, user.id);
+  const store = await prisma.store.create({
+    data: {
+      organizationId: org.id,
+      name: 'Scenario Engine Store',
+      platform: 'TRENDYOL',
+      environment: 'PRODUCTION',
+      externalAccountId: 'scenario-engine',
+      credentials: 'opaque',
+      shippingTariffSource: 'TRENDYOL_CONTRACT',
+      defaultShippingCarrierId: carrier.id,
+    },
+  });
+
+  await ensureFeeDefinitions();
+  await seedCommissionRate(); // category 597 @ 18%
+
+  const product = await prisma.product.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      platformContentId: 9500n,
+      productMainId: 'pm-9500',
+      title: 'Scenario Product',
+      categoryId: SCENARIO_CATEGORY_ID,
+      categoryName: 'Gomlek',
+      brandId: BRAND_ID,
+      brandName: 'Modline',
+    },
+  });
+
+  // One 200 GROSS cost profile (+version) shared by every variant.
+  const profile = await prisma.costProfile.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      name: 'COGS Scenario',
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      vatRate: 20,
+    },
+  });
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId: org.id,
+      version: 1,
+      name: 'COGS Scenario',
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      vatRate: 20,
+      changedFields: [],
+      effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+    },
+  });
+
+  let seq = 95000n;
+  async function makeVariant(
+    suffix: string,
+    extra: { isDigital?: boolean; dimensionalWeightOverride?: string; salePrice?: string },
+  ): Promise<string> {
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: seq++,
+        barcode: `BC-${suffix}`,
+        stockCode: `STK-${suffix}`,
+        salePrice: new Decimal(extra.salePrice ?? '500.00'),
+        listPrice: new Decimal('500.00'),
+        vatRate: 20,
+        isDigital: extra.isDigital ?? false,
+        dimensionalWeightOverride:
+          extra.dimensionalWeightOverride !== undefined
+            ? new Decimal(extra.dimensionalWeightOverride)
+            : null,
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+    });
+    return variant.id;
+  }
+
+  const physicalVariantId = await makeVariant('PHYS', { dimensionalWeightOverride: '3.0' });
+  const digitalVariantId = await makeVariant('DIG', { isDigital: true });
+  const tariffBandVariantId = await makeVariant('TARIFF', { dimensionalWeightOverride: '3.0' });
+  // A negative sale price is accepted by the DB (no check constraint) but rejected by
+  // the scenario's unit-price validator at evaluation time -- the deterministic way to
+  // make exactly one variant's compute throw while its siblings succeed.
+  const failingVariantId = await makeVariant('FAIL', {
+    dimensionalWeightOverride: '3.0',
+    salePrice: '-1.00',
+  });
+
+  // An active commission tariff for BC-TARIFF: one band at 10% covering now. A band with
+  // no limits matches every price, so the engine's chain prefers it over the 18% rule.
+  const tariff = await prisma.commissionTariff.create({
+    data: { organizationId: org.id, storeId: store.id, name: 'Active Tariff' },
+  });
+  const period = await prisma.commissionTariffPeriod.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      tariffId: tariff.id,
+      dateRangeLabel: 'covering',
+      sortOrder: 0,
+      startsAt: new Date('2026-01-01T00:00:00Z'),
+      endsAt: new Date('2027-01-01T00:00:00Z'),
+    },
+  });
+  await prisma.commissionTariffItem.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      periodId: period.id,
+      barcode: 'BC-TARIFF',
+      productTitle: 'Scenario Product',
+      currentPrice: new Decimal('500.00'),
+      currentCommissionPct: new Decimal('10'),
+      bands: [{ key: 'band1', commissionPct: '10' }],
+    },
+  });
+
+  return {
+    accessToken: user.accessToken,
+    orgId: org.id,
+    storeId: store.id,
+    physicalVariantId,
+    digitalVariantId,
+    tariffBandVariantId,
+    failingVariantId,
+  };
+}
+
+describe('GET .../product-pricing -- scenario engine (digital / tariff band / degradation)', () => {
+  let sctx: ScenarioEngineCtx;
+
+  beforeAll(async () => {
+    await truncateAll();
+    sctx = await setupScenarioEngineFixture();
+  }, 60000);
+
+  async function fetchRows(): Promise<PricingRowWire[]> {
+    const res = await app.request(
+      `/v1/organizations/${sctx.orgId}/stores/${sctx.storeId}/product-pricing?perPage=100`,
+      { headers: { Authorization: bearer(sctx.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    return ((await res.json()) as ListResponseWire).data;
+  }
+
+  it('prices a digital product without shipping', async () => {
+    const rows = await fetchRows();
+    const digital = rows.find((r) => r.variantId === sctx.digitalVariantId);
+    const physical = rows.find((r) => r.variantId === sctx.physicalVariantId);
+    expect(digital?.calculable).toBe(true);
+    // A digital variant raises no shipping issue: the status is OK and no cargo deducts.
+    expect(digital?.shippingEstimateStatus).toBe('OK');
+    expect(digital?.netProfit).not.toBeNull();
+    // Neither shipping nor PSF is deducted, so the digital profit beats the physical one.
+    expect(Number(digital?.netProfit)).toBeGreaterThan(Number(physical?.netProfit));
+  });
+
+  it('uses the active tariff band on the product pricing list', async () => {
+    const rows = await fetchRows();
+    const banded = rows.find((r) => r.variantId === sctx.tariffBandVariantId);
+    const physical = rows.find((r) => r.variantId === sctx.physicalVariantId);
+    expect(banded?.calculable).toBe(true);
+    expect(physical?.calculable).toBe(true);
+    // Same category (18% rule), same cost + shipping -- the only difference is the active
+    // 10% tariff band, which the engine's commission chain prefers, so the banded
+    // variant's lower commission yields a higher net profit (plan difference B3).
+    expect(Number(banded?.netProfit)).toBeGreaterThan(Number(physical?.netProfit));
+  });
+
+  it('keeps the list up when one variant fails to compute', async () => {
+    const rows = await fetchRows();
+    // Every variant is still present (the list always returns 200 -- owner rule).
+    expect(rows).toHaveLength(4);
+    const failing = rows.find((r) => r.variantId === sctx.failingVariantId);
+    expect(failing).toBeDefined();
+    // Its scenario evaluation throws (invalid desi), so its profit is empty while the
+    // row stays. The failure is logged (decision 9); the console error is expected here.
+    expect(failing?.calculable).toBe(false);
+    expect(failing?.netProfit).toBeNull();
+    // The siblings computed fine -- one bad variant did not take the list down.
+    expect(rows.find((r) => r.variantId === sctx.physicalVariantId)?.calculable).toBe(true);
+    expect(rows.find((r) => r.variantId === sctx.digitalVariantId)?.calculable).toBe(true);
+  });
+});
+
+// -- Large catalog: constant query count + wall-time guard --
+//
+// The list computes EVERY candidate variant, so a 5 000-variant store must still issue
+// a constant number of queries (the scenario loader batches all reference reads) and
+// finish well under any transaction/timeout ceiling. Two stores (5 and 5 000 variants)
+// in one org; the query count for the large store must equal the small store's.
+
+/**
+ * Wraps a transaction client so every model-delegate method call bumps a counter -- the
+ * count is the number of DB round-trips, the exact N+1 metric. `new Proxy` preserves
+ * the target's type, so the wrapped client is still a `Prisma.TransactionClient`.
+ */
+function countingTransactionClient(
+  tx: Prisma.TransactionClient,
+  bump: () => void,
+): Prisma.TransactionClient {
+  return new Proxy(tx, {
+    get(target, prop, receiver) {
+      const value: unknown = Reflect.get(target, prop, receiver);
+      const isModelDelegate =
+        typeof prop === 'string' &&
+        !prop.startsWith('$') &&
+        !prop.startsWith('_') &&
+        typeof value === 'object' &&
+        value !== null;
+      if (!isModelDelegate) {
+        return value;
+      }
+      return new Proxy(value, {
+        get(delegate, methodName, delegateReceiver) {
+          const method: unknown = Reflect.get(delegate, methodName, delegateReceiver);
+          if (typeof method !== 'function') {
+            return method;
+          }
+          return (...args: unknown[]): unknown => {
+            bump();
+            return Reflect.apply(method, delegate, args);
+          };
+        },
+      });
+    },
+  });
+}
+
+interface LargeCatalogCtx {
+  orgId: string;
+  smallStoreId: string;
+  largeStoreId: string;
+}
+
+async function createStoreWithVariants(
+  orgId: string,
+  name: string,
+  externalAccountId: string,
+  barcodePrefix: string,
+  platformVariantBase: bigint,
+  count: number,
+): Promise<string> {
+  const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+  if (carrier === null) {
+    throw new Error('SENDEOMP carrier missing -- globalSetup ensureShippingReferenceData must run');
+  }
+  const store = await prisma.store.create({
+    data: {
+      organizationId: orgId,
+      name,
+      platform: 'TRENDYOL',
+      environment: 'PRODUCTION',
+      externalAccountId,
+      credentials: 'opaque',
+      shippingTariffSource: 'TRENDYOL_CONTRACT',
+      defaultShippingCarrierId: carrier.id,
+    },
+  });
+  const product = await prisma.product.create({
+    data: {
+      organizationId: orgId,
+      storeId: store.id,
+      platformContentId: platformVariantBase,
+      productMainId: `pm-${externalAccountId}`,
+      title: `${name} Product`,
+      categoryId: SCENARIO_CATEGORY_ID,
+      categoryName: 'Gomlek',
+    },
+  });
+  const data = Array.from({ length: count }, (_unused, index) => ({
+    organizationId: orgId,
+    storeId: store.id,
+    productId: product.id,
+    platformVariantId: platformVariantBase + BigInt(index),
+    barcode: `${barcodePrefix}-${index.toString()}`,
+    stockCode: `${barcodePrefix}-${index.toString()}`,
+    salePrice: new Decimal('500.00'),
+    listPrice: new Decimal('500.00'),
+    vatRate: 20,
+    dimensionalWeightOverride: new Decimal('3.0'),
+  }));
+  await prisma.productVariant.createMany({ data });
+  return store.id;
+}
+
+describe('GET .../product-pricing -- large catalog (constant query count)', () => {
+  let lctx: LargeCatalogCtx;
+
+  beforeAll(async () => {
+    await truncateAll();
+    await ensureFeeDefinitions();
+    await seedCommissionRate(); // category 597 @ 18%
+    const org = await createOrganization();
+    const smallStoreId = await createStoreWithVariants(
+      org.id,
+      'Small',
+      'cat-small',
+      'BC-S',
+      100000n,
+      5,
+    );
+    const largeStoreId = await createStoreWithVariants(
+      org.id,
+      'Large',
+      'cat-large',
+      'BC-L',
+      1000000n,
+      5000,
+    );
+    lctx = { orgId: org.id, smallStoreId, largeStoreId };
+  }, 120000);
+
+  async function countQueries(storeId: string): Promise<number> {
+    let queries = 0;
+    const counting = countingTransactionClient(prisma, () => {
+      queries += 1;
+    });
+    const { total } = await listProductPricing(counting, lctx.orgId, storeId, {
+      page: 1,
+      perPage: 100,
+    });
+    expect(total).toBeGreaterThan(0);
+    return queries;
+  }
+
+  it('lists five thousand variants with a constant number of queries', async () => {
+    const qSmall = await countQueries(lctx.smallStoreId);
+    const qLarge = await countQueries(lctx.largeStoreId);
+    expect(qSmall).toBeGreaterThan(0);
+    // N+1 guard: the scenario loader batches every reference read, so 5 000 variants
+    // cost the same number of queries as 5.
+    expect(qLarge).toBe(qSmall);
+
+    // Wall time through the real client (reported, not pinned). An N+1 regression --
+    // thousands of round-trips -- would blow the generous ceiling below.
+    const start = Date.now();
+    const { data, total } = await listProductPricing(prisma, lctx.orgId, lctx.largeStoreId, {
+      page: 1,
+      perPage: 100,
+    });
+    const elapsedMs = Date.now() - start;
+    expect(total).toBe(5000);
+    expect(data).toHaveLength(100);
+    process.stdout.write(
+      `\n[perf] listProductPricing over 5000 variants: ${elapsedMs.toString()} ms (queries: ${qLarge.toString()})\n`,
+    );
+    expect(elapsedMs).toBeLessThan(30000);
+  }, 60000);
 });

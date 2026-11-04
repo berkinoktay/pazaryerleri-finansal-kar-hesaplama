@@ -1,39 +1,48 @@
-// Assembly service for the Ürün Fiyatlandırma (product pricing) backend.
+// Service for the product pricing backend.
 //
-// Builds one `UnitEconomics` per approved ProductVariant by composing the
-// EXISTING resolvers — no new financial logic lives here:
-//   - cost           → fetchCostAggregates (raw-SQL batch, GROSS-TL)
-//   - commission     → resolveCommissionRate (platform-global rate, percent)
-//   - commission VAT → resolveFeeDefinition(COMMISSION_INVOICE).defaultVatRate
-//   - stoppage       → resolveFeeDefinition(STOPPAGE).rateOfSale  (FRACTION)
-//   - shipping fee   → estimateShippingCostForVariant            (NET → GROSS)
-//   - PSF fee        → resolveFeeDefinition(PLATFORM_SERVICE).fixedAmountNet
-//
-// then calls Dilim 1's pure `computeUnitProfit`. All financial math stays in
-// the backend (feedback_no_frontend_financial_calculation); the frontend only
-// renders the serialized strings.
-//
-// Unit conventions (grounding §0, CRITICAL): saleVatRate / commissionRate /
-// commissionVatRate / shipVat / psfVat are PERCENTS (20, 18); stoppageRate is a
-// FRACTION (0.01 — do NOT /100); cost + fixedFees are GROSS (VAT-inclusive).
+// The list and the quote price every variant with the shared scenario engine
+// (`@pazarsync/profit`): `loadTrendyolScenarioBases` reads cost, commission, tariff,
+// fee and shipping inputs for the whole page in a constant number of queries, then
+// `evaluateTrendyolScenario` scores each variant at its sale price and
+// `solveTrendyolScenarioPrice` finds the price for a quote target. All financial math
+// lives in the engine (feedback_no_frontend_financial_calculation); this service only
+// maps the engine's statement onto the wire and never re-implements a formula.
 //
 // Rows are ALWAYS returned, calculable or not, so the user sees which input is
-// missing. A variant is calculable only when cost, shipping AND commission are
-// all OK (deriveCalculable). When not calculable, profit/margin fields are null.
+// missing. The three independent statuses are read from the statement's issues
+// (MISSING_COST -> NO_PROFILES, SHIPPING_ESTIMATE_UNAVAILABLE -> the shipping status,
+// MISSING_COMMISSION_RATE -> NO_RULE); a variant is calculable only when all three are
+// OK (deriveCalculable). When not calculable, profit/margin fields are null.
+//
+// `assembleUnitEconomics` + `serializeBreakdown` below are the LEGACY unit-engine
+// helpers, no longer used by the list/quote but still consumed by the remaining
+// scenario screens until Faz 4B Tasks 5-8 move them to the engine.
 
 import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
-import type { Platform, Prisma, Store as PrismaStore } from '@pazarsync/db';
+import type { Platform, Prisma } from '@pazarsync/db';
+import { ProfitIssueCode } from '@pazarsync/db/enums';
 import {
-  computeUnitProfit,
+  buildStatementBreakdown,
+  evaluateTrendyolScenario,
   grossToVat,
+  loadTrendyolScenarioBases,
   resolveFeeDefinition,
-  solvePriceForTarget,
+  roundPercent,
+  solveTrendyolScenarioPrice,
+  statementTotalsFromStatement,
+  UnsupportedPlatformError,
   type EstimateOutcome,
   type EstimateUnavailableReason,
   type ProfitBreakdown,
   type ProfitInputFee,
+  type ProfitIssue,
+  type ProfitStatement,
+  type ScenarioLoadResult,
+  type ScenarioPriceTarget,
+  type ScenarioSolveFailure,
+  type ShippingUnavailableReason,
   type SolveReason,
   type UnitEconomics,
 } from '@pazarsync/profit';
@@ -44,10 +53,10 @@ import {
 export type QuoteReason = SolveReason | 'NOT_CALCULABLE';
 import { InvalidReferenceError, mapPrismaError } from '@pazarsync/sync-core';
 
-import { resolveCommissionRate, type ResolvedCommissionRate } from './commission-rate-resolver';
+import { type ResolvedCommissionRate } from './commission-rate-resolver';
 import { feeToProfitInputFee, deriveCalculable } from './product-pricing-assembly';
+import { logProfitReadFailure } from './profit-compute-fallback.service';
 import { fetchCostAggregates } from './products-list.service';
-import { estimateShippingCostForVariant } from './shipping-estimator.service';
 import { SHIPPING_ESTIMATE_CTE_SQL, type ShippingEstimateRow } from './shipping-estimator.sql';
 import type {
   CommissionStatus,
@@ -220,6 +229,7 @@ export interface AssemblyInputs {
 
 // ─── Assembly ─────────────────────────────────────────────────────────────────
 
+// Legacy: kept until the remaining scenario screens move to the engine (Faz 4B Tasks 5-8).
 /**
  * Builds a variant's `UnitEconomics` and the three independent status codes.
  * `econ` is non-null only when cost, shipping and commission are all OK; in any
@@ -298,69 +308,6 @@ export function assembleUnitEconomics(
 }
 
 // ─── Batch resolvers (one DB round-trip for the whole page) ───────────────────
-
-/** Variant fields the batch commission resolver reads. */
-interface VariantForCommission {
-  id: string;
-  product: { categoryId: bigint | null; brandId: bigint | null };
-}
-
-/**
- * Resolves the commission rate for every variant with at most one
- * `resolveCommissionRate` call per UNIQUE `(categoryId, brandId)` pair — the
- * rate is platform-global, so two variants in the same category+brand share a
- * result. Variants with a null `categoryId` cannot match any rule and map to
- * `null` without a resolver call.
- *
- * Returns a `Map<variantId, ResolvedCommissionRate | null>` covering every input
- * variant. Same-pair variants receive the SAME resolved reference, so the dedupe
- * is observable both by call count and by reference identity.
- */
-export async function batchResolveCommission(
-  platform: Platform,
-  variants: VariantForCommission[],
-): Promise<Map<string, ResolvedCommissionRate | null>> {
-  // Unique pairs keyed by a stable string; null categoryId never enters the pool.
-  const pairKey = (categoryId: bigint, brandId: bigint | null): string =>
-    `${categoryId.toString()}|${brandId === null ? '' : brandId.toString()}`;
-
-  const uniquePairs = new Map<string, { categoryId: bigint; brandId: bigint | null }>();
-  for (const variant of variants) {
-    const { categoryId, brandId } = variant.product;
-    if (categoryId === null) continue;
-    const key = pairKey(categoryId, brandId);
-    if (!uniquePairs.has(key)) {
-      uniquePairs.set(key, { categoryId, brandId });
-    }
-  }
-
-  // Resolve each unique pair exactly once (in parallel).
-  const resolvedByKey = new Map<string, ResolvedCommissionRate | null>();
-  await Promise.all(
-    [...uniquePairs.entries()].map(async ([key, pair]) => {
-      const resolved = await resolveCommissionRate({
-        platform,
-        categoryId: pair.categoryId,
-        brandId: pair.brandId,
-        // Trendyol does not expose a seller's segment via API — always null today.
-        sellerSegment: null,
-      });
-      resolvedByKey.set(key, resolved);
-    }),
-  );
-
-  // Map every variant back to its pair's result (null categoryId ⇒ null).
-  const result = new Map<string, ResolvedCommissionRate | null>();
-  for (const variant of variants) {
-    const { categoryId, brandId } = variant.product;
-    if (categoryId === null) {
-      result.set(variant.id, null);
-      continue;
-    }
-    result.set(variant.id, resolvedByKey.get(pairKey(categoryId, brandId)) ?? null);
-  }
-  return result;
-}
 
 /**
  * Maps a `ShippingEstimateRow` (from the CTE) back to the `EstimateOutcome`
@@ -642,27 +589,94 @@ function sortComputedRows(
 // ─── List entry point ─────────────────────────────────────────────────────────
 
 /**
- * Lists per-variant forward pricing for a store's APPROVED products. Computes
- * EVERY candidate variant's profit in memory (batch resolvers — no N+1), then
- * filters / sorts / paginates IN MEMORY so the profit/margin sorts and the
- * profit/margin filters operate on the live computed values and `total` is the
- * exact filtered count. Calculability is reported per row so the user can see
- * and fix the gaps. `imageUrl` / `cost` / category + brand names are included.
+ * Loads the scenario base of every candidate variant in one pass and evaluates each at
+ * its own `salePrice`, turning the engine's statement into a computed row. The tariff
+ * anchor and the scenario date are both `now` (this screen prices at the current
+ * instant). The query count is constant: `loadTrendyolScenarioBases` reads the store,
+ * the variants and all reference data once, regardless of how many variants are passed.
+ *
+ * Degradation (decision 9, owner rule -- the list always returns 200): a store-wide
+ * loader failure (missing fee definitions, a non-Trendyol store, ...) empties every
+ * row's profit and is logged once; a single variant whose evaluation throws empties
+ * only its own profit and is logged. An `UnsupportedPlatformError` degrades without an
+ * error log, exactly as the order read path treats it.
  */
-export async function listProductPricing(
+async function computeScenarioRows(
+  db: Prisma.TransactionClient,
   orgId: string,
   storeId: string,
-  store: PrismaStore,
+  now: Date,
+  variants: readonly VariantForListRow[],
+): Promise<ComputedPricingRow[]> {
+  let bases: ReadonlyMap<string, ScenarioLoadResult> | null;
+  try {
+    bases = await loadTrendyolScenarioBases(db, {
+      organizationId: orgId,
+      storeId,
+      scenarioDate: now,
+      variants: variants.map((variant) => ({ variantId: variant.id, tariffAnchor: now })),
+    });
+  } catch (err) {
+    if (!(err instanceof UnsupportedPlatformError)) {
+      logProfitReadFailure({
+        surface: 'product-pricing',
+        organizationId: orgId,
+        orderId: null,
+        err,
+      });
+    }
+    bases = null;
+  }
+
+  return variants.map((variant): ComputedPricingRow => {
+    const loaded = bases === null ? undefined : bases.get(variant.id);
+    if (loaded === undefined || loaded.kind !== 'ready') {
+      return degradedRow(variant);
+    }
+    try {
+      const { statement } = evaluateTrendyolScenario({
+        ...loaded.base,
+        unitPrice: new Decimal(variant.salePrice.toString()),
+      });
+      return computeRowFromStatement(variant, statement);
+    } catch (err) {
+      logProfitReadFailure({
+        surface: 'product-pricing',
+        organizationId: orgId,
+        orderId: null,
+        err,
+      });
+      return degradedRow(variant);
+    }
+  });
+}
+
+/**
+ * Lists per-variant forward pricing for a store's APPROVED products. Computes
+ * EVERY candidate variant's profit in memory with the scenario engine (one batch
+ * load -- no N+1), then filters / sorts / paginates IN MEMORY so the profit/margin
+ * sorts and filters operate on the live computed values and `total` is the exact
+ * filtered count. Calculability is reported per row so the user can see and fix the
+ * gaps. `imageUrl` / `cost` / category + brand names are included.
+ *
+ * `db` is injected (not the module client) so the query count is observable; the route
+ * passes the shared client. No interactive transaction: the whole path is read-only, so
+ * plain reads remove the 5 s transaction ceiling that a large catalog would hit.
+ */
+export async function listProductPricing(
+  db: Prisma.TransactionClient,
+  orgId: string,
+  storeId: string,
   filters: ListProductPricingFilters,
 ): Promise<{ data: ProductPricingRow[]; total: number }> {
   const where = buildListWhere(orgId, storeId, filters);
 
-  // 1. Candidate set — ALL approved variants matching the cheap SQL filters.
+  // 1. Candidate set -- ALL approved variants matching the cheap SQL filters.
   //    No skip/take here: the full set must be computed before in-memory
   //    filter/sort/paginate can produce a correct `total`.
   let variants: VariantForListRow[];
   try {
-    variants = await prisma.productVariant.findMany({
+    variants = await db.productVariant.findMany({
       where,
       select: {
         id: true,
@@ -692,34 +706,10 @@ export async function listProductPricing(
     return { data: [], total: 0 };
   }
 
-  const variantIds = variants.map((v) => v.id);
+  // 2. Compute every variant with the scenario engine (constant query count).
+  const computed = await computeScenarioRows(db, orgId, storeId, new Date(), variants);
 
-  // 2. Batch-resolve all three per-variant inputs up front (one query each) so
-  //    the per-variant assembly below is a pure in-memory loop — no N+1.
-  const [costByVariantId, commissionByVariantId, shippingByVariantId] = await Promise.all([
-    fetchCostAggregates(orgId, variantIds),
-    batchResolveCommission(store.platform, variants),
-    batchResolveShipping(orgId, storeId, variantIds),
-  ]);
-
-  // 3. Compute every variant in memory. Fee definitions are loop-invariant —
-  //    resolved once inside a transaction.
-  const computed = await prisma.$transaction(async (tx) => {
-    const feeDefs = await resolveFeeDefs(tx, store.platform);
-    const ctx: AssemblyContext = { platform: store.platform, feeDefs };
-
-    return variants.map((variant): ComputedPricingRow => {
-      const costAggregate = costByVariantId.get(variant.id);
-      const result = assembleUnitEconomics(ctx, variant, {
-        costAggregate,
-        commission: commissionByVariantId.get(variant.id) ?? null,
-        shipping: shippingByVariantId.get(variant.id) ?? { ok: false, reason: 'STORE_NOT_FOUND' },
-      });
-      return computeRow(variant, result, costAggregate);
-    });
-  });
-
-  // 4. Filter → 5. sort → 6. paginate, all in memory; `total` is exact.
+  // 3. Filter -> 4. sort -> 5. paginate, all in memory; `total` is exact.
   const filtered = applyInMemoryFilters(computed, filters);
   const sorted = sortComputedRows(filtered, filters.sortBy);
   const total = sorted.length;
@@ -777,6 +767,7 @@ export interface QuoteServiceInput {
   target: { type: 'margin' | 'markup' | 'profit'; value: string };
 }
 
+// Legacy: kept until the remaining scenario screens move to the engine (Faz 4B Tasks 5-8).
 export function serializeBreakdown(bd: ProfitBreakdown): QuoteBreakdown {
   // Grup toplamları Decimal ile burada hesaplanır (frontend para toplamaz).
   // totalDeductions'ı satış − kâr olarak türetmek, uluslararası/yurt dışı gibi
@@ -809,35 +800,108 @@ export function serializeBreakdown(bd: ProfitBreakdown): QuoteBreakdown {
 }
 
 /**
- * Solves for the sale price that achieves a given margin / markup / profit
- * target for a single variant. Throws `InvalidReferenceError` (422) if the
- * variant does not exist in this store. Returns `{ calculable: false }` when
- * cost is missing or the target is unreachable.
+ * Maps the scenario solver's failure reason onto the quote wire reason set. A Record,
+ * not a switch chain: the solver's NOT_COMPUTABLE (no price produced a computable
+ * statement -- cost/commission/shipping missing) is the quote's NOT_CALCULABLE; its
+ * other failures already match the wire names.
+ */
+const SCENARIO_FAILURE_TO_QUOTE_REASON: Record<ScenarioSolveFailure, QuoteReason> = {
+  NOT_COMPUTABLE: 'NOT_CALCULABLE',
+  NO_COST: 'NO_COST',
+  UNREACHABLE_TARGET: 'UNREACHABLE_TARGET',
+  NOT_PRICE_SENSITIVE: 'NOT_PRICE_SENSITIVE',
+};
+
+/** Translates the quote request target into the scenario solver's target shape. */
+function toScenarioTarget(target: QuoteServiceInput['target']): ScenarioPriceTarget {
+  const value = new Decimal(target.value);
+  switch (target.type) {
+    case 'margin':
+      return { kind: 'MARGIN', pct: value };
+    case 'markup':
+      return { kind: 'MARKUP', pct: value };
+    case 'profit':
+      return { kind: 'PROFIT', amount: value };
+    default: {
+      const _exhaustive: never = target.type;
+      throw new Error(`Unhandled quote target type: ${_exhaustive}`);
+    }
+  }
+}
+
+/**
+ * Builds the quote `QuoteBreakdown` from a solved scenario statement. The scenario
+ * prices one unit with no seller discount, so `listGross` is the solved unit price and
+ * the seller discount is zero. `buildStatementBreakdown` folds every selected line into
+ * the four display groups (margins at four decimals for the quote screen); the result
+ * is projected onto the quote wire shape, which carries combined shipping and no
+ * export/return rows (a domestic scenario never produces them). Returns null only when
+ * the statement carries no net profit, which the solver's success already rules out.
+ */
+export function quoteBreakdownFromStatement(params: {
+  readonly statement: ProfitStatement;
+  readonly listGross: Decimal;
+  readonly sellerDiscountGross: Decimal;
+}): QuoteBreakdown | null {
+  const breakdown = buildStatementBreakdown({
+    totals: statementTotalsFromStatement(params.statement),
+    selectedLines: params.statement.selectedLines,
+    listGross: params.listGross,
+    sellerDiscountGross: params.sellerDiscountGross,
+    marginDecimals: 4,
+  });
+  if (breakdown === null) {
+    return null;
+  }
+  return {
+    listGross: breakdown.listGross,
+    sellerDiscountGross: breakdown.sellerDiscountGross,
+    saleGross: breakdown.saleGross,
+    saleVat: breakdown.saleVat,
+    costGross: breakdown.costGross,
+    costVat: breakdown.costVat,
+    commissionGross: breakdown.commissionGross,
+    commissionVat: breakdown.commissionVat,
+    shippingGross: breakdown.shippingGross,
+    shippingVat: breakdown.shippingVat,
+    platformServiceGross: breakdown.platformServiceGross,
+    platformServiceVat: breakdown.platformServiceVat,
+    stoppage: breakdown.stoppage,
+    netVat: breakdown.netVat,
+    netProfit: breakdown.netProfit,
+    saleMarginPct: breakdown.saleMarginPct,
+    costMarkupPct: breakdown.costMarkupPct,
+    marketplaceFeesGross: breakdown.marketplaceFeesGross,
+    taxesGross: breakdown.taxesGross,
+    totalDeductionsGross: breakdown.totalDeductionsGross,
+  };
+}
+
+/**
+ * Solves for the sale price that achieves a given margin / markup / profit target for a
+ * single variant with the scenario engine. Throws `InvalidReferenceError` (422) if the
+ * variant does not exist in this store. Returns `{ calculable: false }` with a reason
+ * when cost is missing (pre-gate) or the solver finds no price.
  *
- * Decision §5 (plan): if costStatus !== 'OK', reject before calling the motor
- * to avoid returning a price based on cost=0 for margin/profit targets.
+ * Decision 5 (plan): if costStatus !== 'OK', reject before calling the solver so a
+ * margin/profit target is never "solved" against a zero cost. `db` is injected (the
+ * route passes the shared client); the path is read-only, so it runs as plain reads
+ * with no interactive transaction.
  */
 export async function quoteProductPrice(
-  tx: Prisma.TransactionClient,
+  db: Prisma.TransactionClient,
   orgId: string,
   storeId: string,
-  store: PrismaStore,
   input: QuoteServiceInput,
 ): Promise<QuoteResult> {
-  // ─── 1. Fetch the variant (must belong to this store) ────────────────────
-  let variant: VariantForAssembly;
+  // 1. Fetch the variant (must belong to this store).
+  // Only the current sale price is needed here (for the signed priceDelta); the
+  // scenario base carries everything else. A store-scoped miss is a 422.
+  let variant: { salePrice: Prisma.Decimal };
   try {
-    const raw = await tx.productVariant.findFirst({
+    const raw = await db.productVariant.findFirst({
       where: { id: input.variantId, organizationId: orgId, storeId },
-      select: {
-        id: true,
-        stockCode: true,
-        barcode: true,
-        salePrice: true,
-        vatRate: true,
-        isDigital: true,
-        product: { select: { title: true, categoryId: true, brandId: true } },
-      },
+      select: { salePrice: true },
     });
     if (raw === null) {
       throw new InvalidReferenceError('ProductVariant', input.variantId);
@@ -848,139 +912,246 @@ export async function quoteProductPrice(
     mapPrismaError(err);
   }
 
-  // ─── 2. Maliyet kapısı (karar §5) ────────────────────────────────────────
+  // 2. Cost pre-gate (decision 5).
   // Reject before calling the solver when cost is unavailable. Margin/profit
-  // targets would "solve" with cost=0 and produce incorrect results.
+  // targets would "solve" against a zero cost and produce incorrect results.
   const costMap = await fetchCostAggregates(orgId, [input.variantId]);
-  const costAggregate = costMap.get(input.variantId);
-  const costStatus = costAggregate?.costStatus ?? 'NO_PROFILES';
-
+  const costStatus = costMap.get(input.variantId)?.costStatus ?? 'NO_PROFILES';
   if (costStatus !== 'OK') {
     return { calculable: false, variantId: input.variantId, reason: 'NO_COST' };
   }
 
-  // ─── 3. Resolve the per-variant inputs, then assemble ────────────────────
-  // Single variant: resolve commission + shipping directly (one call each),
-  // exactly as the old in-assembly path did, then run the pure assembly. The
-  // commission resolver is skipped when categoryId is null (no possible match);
-  // shipping uses the canonical per-variant estimator (CTE-equivalent).
-  const feeDefs = await resolveFeeDefs(tx, store.platform);
-  const ctx: AssemblyContext = { platform: store.platform, feeDefs };
-
-  const commission =
-    variant.product.categoryId !== null
-      ? await resolveCommissionRate({
-          platform: store.platform,
-          categoryId: variant.product.categoryId,
-          brandId: variant.product.brandId,
-          // Trendyol does not expose a seller's segment via API — always null today.
-          sellerSegment: null,
-        })
-      : null;
-  const shipping = await estimateShippingCostForVariant(variant.id, tx);
-
-  const assemblyResult = assembleUnitEconomics(ctx, variant, {
-    costAggregate,
-    commission,
-    shipping,
+  // 3. Load the scenario base (tariff anchor + scenario date = now).
+  const now = new Date();
+  const bases = await loadTrendyolScenarioBases(db, {
+    organizationId: orgId,
+    storeId,
+    scenarioDate: now,
+    variants: [{ variantId: input.variantId, tariffAnchor: now }],
   });
-
-  if (assemblyResult.econ === null) {
-    // Cost is guaranteed OK here (the gate above returned 'NO_COST' otherwise),
-    // so econ is null only because shipping or commission is not available.
+  const loaded = bases.get(input.variantId);
+  if (loaded === undefined || loaded.kind !== 'ready') {
+    // The variant was just found store-scoped above, so a non-ready base is defensive.
     return { calculable: false, variantId: input.variantId, reason: 'NOT_CALCULABLE' };
   }
 
-  // ─── 4. Solve ────────────────────────────────────────────────────────────
-  const solveResult = solvePriceForTarget(assemblyResult.econ, {
-    type: input.target.type,
-    value: new Decimal(input.target.value),
+  // 4. Solve, then build the breakdown at the solved price.
+  const solved = solveTrendyolScenarioPrice({
+    base: loaded.base,
+    target: toScenarioTarget(input.target),
   });
+  if (!solved.ok) {
+    return {
+      calculable: false,
+      variantId: input.variantId,
+      reason: SCENARIO_FAILURE_TO_QUOTE_REASON[solved.reason],
+    };
+  }
 
-  if (!solveResult.calculable) {
-    return { calculable: false, variantId: input.variantId, reason: solveResult.reason };
+  const breakdown = quoteBreakdownFromStatement({
+    statement: solved.statement,
+    listGross: solved.unitPrice,
+    sellerDiscountGross: new Decimal(0),
+  });
+  if (breakdown === null) {
+    return { calculable: false, variantId: input.variantId, reason: 'NOT_CALCULABLE' };
   }
 
   return {
     calculable: true,
     variantId: input.variantId,
-    price: solveResult.price.toFixed(2),
-    // Signed change vs the current list price (solved − current). Negative when
-    // the target lowers the price. Computed here (backend) — the frontend never
-    // does money math, it only renders this value.
-    priceDelta: solveResult.price.sub(variant.salePrice.toString()).toFixed(2),
-    breakdown: serializeBreakdown(solveResult.breakdown),
+    price: solved.unitPrice.toFixed(2),
+    // Signed change vs the current list price (solved - current). Negative when the
+    // target lowers the price. Computed here (backend) -- the frontend never does money
+    // math, it only renders this value.
+    priceDelta: solved.unitPrice.sub(variant.salePrice.toString()).toFixed(2),
+    breakdown,
   };
 }
 
 // ─── Serialization ────────────────────────────────────────────────────────────
 
-/**
- * Builds a `ComputedPricingRow` — the serialized DTO row PLUS the un-rounded
- * Decimal profit metrics the in-memory filter/sort consume. `cost` is the GROSS
- * TL aggregate, present only when costStatus is OK (it is null otherwise, i.e.
- * NO_PROFILES). `imageUrl` is the first
- * imageUrls entry of the product, or null. category / brand ids are serialized bigints.
- */
-function computeRow(
-  variant: VariantForListRow,
-  result: AssemblyResult,
-  costAggregate: VariantCostAggregate | undefined,
-): ComputedPricingRow {
-  const { product } = variant;
-  const imageUrl = product.imageUrls[0] ?? null;
-  const cost =
-    result.costStatus === 'OK' && costAggregate?.currentCostTry != null
-      ? costAggregate.currentCostTry
-      : null;
+/** The display fields of a row, shared by the computed and the degraded paths. */
+type RowDisplayFields = Omit<
+  ProductPricingRow,
+  'calculable' | 'netProfit' | 'saleMarginPct' | 'costMarkupPct'
+>;
 
-  const displayFields = {
-    imageUrl,
+/** A two-decimal money string (half-up), signed zero normalized to a plain zero. */
+function money2(value: Decimal): string {
+  const fixed = value.toFixed(2, Decimal.ROUND_HALF_UP);
+  return fixed === '-0.00' ? '0.00' : fixed;
+}
+
+/**
+ * A margin as a two-decimal string, rounded the way the stored statement rounds it
+ * (roundPercent to the stored scale first, then two decimals) so the list renders the
+ * same value the order list and the stored row do. Null stays null; signed zero is
+ * normalized to a plain zero.
+ */
+function marginPct2(value: Decimal | null): string | null {
+  if (value === null) {
+    return null;
+  }
+  const fixed = roundPercent(value).toFixed(2, Decimal.ROUND_HALF_UP);
+  return fixed === '-0.00' ? '0.00' : fixed;
+}
+
+/**
+ * Maps a SHIPPING_ESTIMATE_UNAVAILABLE issue's `detail` (a ShippingUnavailableReason)
+ * to the wire ShippingEstimateStatus. A Record keyed by the reason union, so a new
+ * reason is a compile error here until it is placed. UNKNOWN_DESI surfaces as NO_DESI
+ * (defensive: the scenario desi has a 0 floor, so it is never returned in practice).
+ */
+const SHIPPING_DETAIL_TO_STATUS: Record<ShippingUnavailableReason, ShippingEstimateStatus> = {
+  UNKNOWN_DESI: 'NO_DESI',
+  NO_CARRIER: 'NO_CARRIER',
+  DESI_OVERFLOW: 'DESI_OVERFLOW',
+  OWN_CONTRACT_EMPTY: 'OWN_CONTRACT_EMPTY',
+};
+
+/**
+ * The ShippingEstimateStatus a SHIPPING_ESTIMATE_UNAVAILABLE issue implies, read from
+ * its detail through the Record above. The engine always sets the detail to a mapped
+ * reason; an unexpected value degrades defensively to NO_CARRIER so the row still
+ * renders. `Object.entries` keeps the lookup type-safe without an assertion.
+ */
+function shippingStatusFromDetail(detail: string | null): ShippingEstimateStatus {
+  for (const [reason, status] of Object.entries(SHIPPING_DETAIL_TO_STATUS)) {
+    if (reason === detail) {
+      return status;
+    }
+  }
+  return 'NO_CARRIER';
+}
+
+/** The three independent wire statuses implied by an evaluated scenario's issues. */
+interface ScenarioStatuses {
+  costStatus: CostStatus;
+  shippingStatus: ShippingEstimateStatus;
+  commissionStatus: CommissionStatus;
+}
+
+/**
+ * Reads the three independent statuses from a statement's issues. A missing cost line
+ * raises MISSING_COST (-> NO_PROFILES), a missing commission rate raises
+ * MISSING_COMMISSION_RATE (-> NO_RULE) and an unresolvable shipping tariff raises
+ * SHIPPING_ESTIMATE_UNAVAILABLE (its detail -> the shipping status). The absence of a
+ * kind of issue leaves that status OK, so a digital variant (which raises no shipping
+ * issue) reads shippingStatus OK and stays calculable.
+ */
+function statusesFromIssues(issues: readonly ProfitIssue[]): ScenarioStatuses {
+  let costStatus: CostStatus = 'OK';
+  let shippingStatus: ShippingEstimateStatus = 'OK';
+  let commissionStatus: CommissionStatus = 'OK';
+  for (const issue of issues) {
+    if (issue.code === ProfitIssueCode.MISSING_COST) {
+      costStatus = 'NO_PROFILES';
+    } else if (issue.code === ProfitIssueCode.MISSING_COMMISSION_RATE) {
+      commissionStatus = 'NO_RULE';
+    } else if (issue.code === ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE) {
+      shippingStatus = shippingStatusFromDetail(issue.detail);
+    }
+  }
+  return { costStatus, shippingStatus, commissionStatus };
+}
+
+/**
+ * Builds a row's display fields (everything but the profit metrics). `cost` is the
+ * statement's gross cost when costStatus is OK and null otherwise; `imageUrl` is the
+ * first product image or null; category / brand ids are serialized bigints.
+ */
+function buildRowDisplayFields(
+  variant: VariantForListRow,
+  statuses: ScenarioStatuses,
+  cost: string | null,
+): RowDisplayFields {
+  const { product } = variant;
+  return {
+    variantId: variant.id,
+    sku: variant.stockCode,
+    barcode: variant.barcode,
+    productName: product.title,
+    salePrice: new Decimal(variant.salePrice.toString()).toFixed(2),
+    costStatus: statuses.costStatus,
+    shippingEstimateStatus: statuses.shippingStatus,
+    commissionStatus: statuses.commissionStatus,
+    imageUrl: product.imageUrls[0] ?? null,
     cost,
     categoryId: product.categoryId !== null ? product.categoryId.toString() : null,
     categoryName: product.categoryName,
     brandId: product.brandId !== null ? product.brandId.toString() : null,
     brandName: product.brandName,
   };
+}
 
-  const base = {
-    variantId: variant.id,
-    sku: variant.stockCode,
-    barcode: variant.barcode,
-    productName: product.title,
-    salePrice: new Decimal(variant.salePrice.toString()).toFixed(2),
-    costStatus: result.costStatus,
-    shippingEstimateStatus: result.shippingStatus,
-    commissionStatus: result.commissionStatus,
-    ...displayFields,
-  };
-
-  if (result.econ === null) {
-    return {
-      row: {
-        ...base,
-        calculable: false,
-        netProfit: null,
-        saleMarginPct: null,
-        costMarkupPct: null,
-      },
+/** A not-calculable `ComputedPricingRow` from display fields: empty profit, null metrics. */
+function notCalculableRow(display: RowDisplayFields): ComputedPricingRow {
+  return {
+    row: {
+      ...display,
+      calculable: false,
       netProfit: null,
       saleMarginPct: null,
       costMarkupPct: null,
-    };
+    },
+    netProfit: null,
+    saleMarginPct: null,
+    costMarkupPct: null,
+  };
+}
+
+/**
+ * A degraded row: profit could not be computed (store-wide loader failure, an
+ * unavailable base, or a per-variant evaluation error). The profit metrics stay empty
+ * and the three statuses default to OK -- with no statement there is no issue to
+ * surface. The caller logs the failure (decision 9).
+ */
+function degradedRow(variant: VariantForListRow): ComputedPricingRow {
+  const display = buildRowDisplayFields(
+    variant,
+    { costStatus: 'OK', shippingStatus: 'OK', commissionStatus: 'OK' },
+    null,
+  );
+  return notCalculableRow(display);
+}
+
+/**
+ * Turns one variant's evaluated scenario statement into a `ComputedPricingRow` -- the
+ * serialized DTO row PLUS the un-rounded Decimal profit metrics the in-memory
+ * filter/sort consume. The three statuses come from the statement's issues; `cost` is
+ * the statement's gross cost when cost resolved. When the statement carries a net
+ * profit the row is calculable and the metrics come straight from it; otherwise the
+ * profit fields are null.
+ */
+function computeRowFromStatement(
+  variant: VariantForListRow,
+  statement: ProfitStatement,
+): ComputedPricingRow {
+  const statuses = statusesFromIssues(statement.issues);
+  const cost = statuses.costStatus === 'OK' ? money2(statement.costGross) : null;
+  const display = buildRowDisplayFields(variant, statuses, cost);
+
+  const calculable = deriveCalculable(
+    statuses.costStatus,
+    statuses.shippingStatus,
+    statuses.commissionStatus,
+  );
+  const netProfit = statement.netProfit;
+  if (!calculable || netProfit === null) {
+    return notCalculableRow(display);
   }
 
-  const breakdown = computeUnitProfit(result.econ, new Decimal(variant.salePrice.toString()));
   return {
     row: {
-      ...base,
+      ...display,
       calculable: true,
-      netProfit: breakdown.netProfit.toFixed(2),
-      saleMarginPct: breakdown.saleMarginPct !== null ? breakdown.saleMarginPct.toFixed(2) : null,
-      costMarkupPct: breakdown.costMarkupPct !== null ? breakdown.costMarkupPct.toFixed(2) : null,
+      netProfit: money2(netProfit),
+      saleMarginPct: marginPct2(statement.saleMarginPct),
+      costMarkupPct: marginPct2(statement.costMarkupPct),
     },
-    netProfit: breakdown.netProfit,
-    saleMarginPct: breakdown.saleMarginPct,
-    costMarkupPct: breakdown.costMarkupPct,
+    netProfit,
+    saleMarginPct: statement.saleMarginPct,
+    costMarkupPct: statement.costMarkupPct,
   };
 }

@@ -8,10 +8,15 @@ import {
 /**
  * A read surface that must keep its page up when a parcel's profit cannot be derived for
  * display. The order detail and the new-order notification compute in-request when no
- * statement is stored; today's products reads the stored profit lines. Each names itself
- * here for the log line (owner decision 2026-11-04).
+ * statement is stored; today's products reads the stored profit lines; product pricing
+ * evaluates a scenario per variant. Each names itself here for the log line (owner
+ * decision 2026-11-04).
  */
-export type ProfitReadSurface = 'order-detail' | 'order-notification' | 'today-products';
+export type ProfitReadSurface =
+  | 'order-detail'
+  | 'order-notification'
+  | 'today-products'
+  | 'product-pricing';
 
 /**
  * Logs a profit-read failure at error level, tagged `[profit-read]` with the surface and

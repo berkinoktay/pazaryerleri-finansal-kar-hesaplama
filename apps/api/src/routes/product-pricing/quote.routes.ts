@@ -80,16 +80,15 @@ app.openapi(quoteProductPriceRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId } = c.req.valid('param');
   const body = c.req.valid('json');
-  const { store, role } = await requireStoreAccess(userId, orgId, storeId);
+  const { role } = await requireStoreAccess(userId, orgId, storeId);
   assertCapability(role, CAPABILITIES.DATA_READ);
 
-  // Run the quote inside a transaction so that all resolver calls share a
-  // consistent DB snapshot for the duration of the request.
-  const result = await prisma.$transaction(async (tx) => {
-    return quoteProductPrice(tx, orgId, storeId, store, {
-      variantId: body.variantId,
-      target: body.target,
-    });
+  // The quote is read-only (load the scenario base, solve, build the breakdown), so it
+  // runs as plain reads without an interactive transaction: a brief read inconsistency
+  // across the few reads is harmless for a what-if price.
+  const result = await quoteProductPrice(prisma, orgId, storeId, {
+    variantId: body.variantId,
+    target: body.target,
   });
 
   return c.json(result, 200);
