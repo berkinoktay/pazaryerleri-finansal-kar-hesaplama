@@ -1,6 +1,6 @@
 import { Decimal } from 'decimal.js';
 import { randomUUID } from 'node:crypto';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 import {
@@ -1371,6 +1371,248 @@ describe('Order routes', () => {
       expect(i1?.settledCommissionGross).toBe('24.00');
       // MISSING_COST names item 2 → its unit cost is null.
       expect(i2?.unitCostSnapshotGross).toBeNull();
+    });
+
+    it('opens the detail without profit when the in-request computation fails', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      // A bare Trendyol order with no stored statement and no fee reference data (every
+      // test truncates it): the in-request computation throws when it resolves the
+      // platform fees, so the detail must still open with an empty profit section.
+      const order = await createOrder(org.id, store.id, {
+        status: 'DELIVERED',
+        saleGross: '240.00',
+      });
+      const item = await prisma.orderItem.create({
+        data: {
+          orderId: order.id,
+          organizationId: org.id,
+          productVariantId: null,
+          barcode: 'BC-NOFEES-1',
+          platformLineId: 7301n,
+          quantity: 1,
+          commissionRate: '10.00',
+          commissionGross: '12.00',
+        },
+      });
+
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const res = await app.request(
+          `/v1/organizations/${org.id}/stores/${store.id}/orders/${order.id}`,
+          { headers: { Authorization: bearer(user.accessToken) } },
+        );
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          items: { id: string }[];
+          profitBreakdown: unknown;
+          estimatedNetProfit: string | null;
+        };
+        // Items still render; the profit section is empty.
+        expect(body.items).toHaveLength(1);
+        expect(body.items[0]?.id).toBe(item.id);
+        expect(body.profitBreakdown).toBeNull();
+        expect(body.estimatedNetProfit).toBeNull();
+
+        // The deliberate fallback logged exactly one [profit-read] error carrying the
+        // order id (owner decision 2026-11-04).
+        expect(errorSpy).toHaveBeenCalledTimes(1);
+        expect(errorSpy).toHaveBeenCalledWith(
+          '[profit-read] in-request profit computation failed',
+          expect.objectContaining({ surface: 'order-detail', orderId: order.id }),
+        );
+      } finally {
+        errorSpy.mockRestore();
+      }
+    });
+
+    it('opens the detail of a cancelled order with zero sale', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      // Cancelled, no statement: the sale is 0 even though the order column holds 240
+      // (rule B5). No fee reference data, so the in-request computation fails and logs;
+      // the page still opens. Silence the expected log so it does not look like a break.
+      const cancelled = await createOrder(org.id, store.id, {
+        status: 'CANCELLED',
+        saleGross: '240.00',
+      });
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const res = await app.request(
+          `/v1/organizations/${org.id}/stores/${store.id}/orders/${cancelled.id}`,
+          { headers: { Authorization: bearer(user.accessToken) } },
+        );
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { saleGross: string | null };
+        expect(body.saleGross).toBe('0');
+      } finally {
+        errorSpy.mockRestore();
+      }
+
+      // Cancelled but with a best-known statement: the sale follows the statement.
+      const settled = await createOrder(org.id, store.id, {
+        status: 'CANCELLED',
+        saleGross: '240.00',
+      });
+      await createProfitStatement(settled.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        saleGross: '180.00',
+        netProfit: '40.00',
+      });
+      const settledRes = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/${settled.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(settledRes.status).toBe(200);
+      const settledBody = (await settledRes.json()) as { saleGross: string | null };
+      expect(settledBody.saleGross).toBe('180');
+    });
+
+    it('returns no breakdown for an excluded order even when cost lines exist', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      const order = await createOrder(org.id, store.id, {
+        status: 'DELIVERED',
+        saleGross: '240.00',
+      });
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
+      });
+      const item = await prisma.orderItem.create({
+        data: {
+          orderId: order.id,
+          organizationId: org.id,
+          productVariantId: null,
+          barcode: 'BC-EXCLUDED-1',
+          platformLineId: 7401n,
+          quantity: 2,
+          commissionRate: '10.00',
+          commissionGross: '0',
+        },
+      });
+      // A cost line survives the exclusion, so the item's unit cost is still shown.
+      await createProfitLine(order.id, org.id, store.id, {
+        orderItemId: item.id,
+        type: 'COST_COGS',
+        certainty: 'ESTIMATE',
+        source: 'SELLER_INPUT',
+        amountGross: '100.00',
+        amountVat: '16.67',
+        vatRatePct: '20',
+      });
+      // An excluded best-known statement carries no net profit -- the breakdown is null.
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'EXCLUDED',
+        saleGross: '240.00',
+        netProfit: null,
+        saleMarginPct: null,
+        costMarkupPct: null,
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/${order.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        profitBreakdown: unknown;
+        items: { id: string; unitCostSnapshotGross: string | null }[];
+      };
+      // Excluded -- no breakdown, even though cost lines exist.
+      expect(body.profitBreakdown).toBeNull();
+      const excludedItem = body.items.find((i) => i.id === item.id);
+      // Unit cost still reads from the line (100 / 2).
+      expect(excludedItem?.unitCostSnapshotGross).toBe('50.00');
+    });
+
+    it('shows the settled profit once the best-known statement started reconciling', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      const order = await createOrder(org.id, store.id, {
+        status: 'DELIVERED',
+        saleGross: '240.00',
+      });
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'ESTIMATE',
+        status: 'ESTIMATED',
+        saleGross: '240.00',
+        netProfit: '60.00',
+      });
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'PARTIALLY_SETTLED',
+        saleGross: '240.00',
+        netProfit: '55.00',
+        reconciliationStatus: 'PARTIALLY_SETTLED',
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/${order.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        estimatedNetProfit: string | null;
+        settledNetProfit: string | null;
+        reconciliationStatus: string;
+      };
+      // Estimate stays the estimate's net; the settled net surfaces because
+      // reconciliation has started (decision 1).
+      expect(body.estimatedNetProfit).toBe('60');
+      expect(body.settledNetProfit).toBe('55');
+      expect(body.reconciliationStatus).toBe('PARTIALLY_SETTLED');
+    });
+
+    it('returns the same sale on the detail as on the list', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      // The order column holds 240, but a return shrank the best-known statement's sale
+      // to 180 -- the list row and the detail must agree on the latter.
+      const order = await createOrder(org.id, store.id, {
+        status: 'DELIVERED',
+        saleGross: '240.00',
+      });
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        saleGross: '180.00',
+        netProfit: '40.00',
+      });
+
+      const listRes = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
+        headers: { Authorization: bearer(user.accessToken) },
+      });
+      expect(listRes.status).toBe(200);
+      const listBody = (await listRes.json()) as {
+        data: { id: string; saleGross: string | null }[];
+      };
+      const listRow = listBody.data.find((o) => o.id === order.id);
+
+      const detailRes = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/${order.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(detailRes.status).toBe(200);
+      const detailBody = (await detailRes.json()) as { saleGross: string | null };
+
+      expect(detailBody.saleGross).toBe('180');
+      expect(detailBody.saleGross).toBe(listRow?.saleGross);
     });
   });
 

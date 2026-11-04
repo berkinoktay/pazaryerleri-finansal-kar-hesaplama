@@ -3,9 +3,7 @@ import { prisma } from '@pazarsync/db';
 import { OrderStatus, ProfitStatementView, ReconciliationStatus } from '@pazarsync/db/enums';
 import {
   STORED_STATEMENT_TOTALS_SELECT,
-  UnsupportedPlatformError,
   buildStatementBreakdown,
-  computeParcelProfit,
   itemProfitValues,
   loadOrderProfitLines,
   parseStoredIssues,
@@ -13,7 +11,6 @@ import {
   selectLines,
   statementTotalsFromRow,
   statementTotalsFromStatement,
-  type ComputedParcelProfit,
   type ItemProfitValues,
   type ProfitIssue,
   type ProfitLine,
@@ -39,6 +36,7 @@ import type {
   OrderListSort,
   OrderSummaryQuery,
 } from '../validators/order.validator';
+import { computeParcelProfitForRead } from './profit-compute-fallback.service';
 
 interface OrderListResult {
   data: OrderListItemResponse[];
@@ -561,15 +559,17 @@ async function loadOrderProfitDetail(
     readonly sellerDiscountGross: Prisma.Decimal | null;
   },
 ): Promise<OrderProfitDetail> {
-  const statements = await prisma.orderProfitStatement.findMany({
-    where: { organizationId: orgId, storeId, orderId: order.id },
-    select: DETAIL_STATEMENT_SELECT,
-  });
-  const linesByOrder = await loadOrderProfitLines(prisma, {
-    organizationId: orgId,
-    storeId,
-    orderIds: [order.id],
-  });
+  const [statements, linesByOrder] = await Promise.all([
+    prisma.orderProfitStatement.findMany({
+      where: { organizationId: orgId, storeId, orderId: order.id },
+      select: DETAIL_STATEMENT_SELECT,
+    }),
+    loadOrderProfitLines(prisma, {
+      organizationId: orgId,
+      storeId,
+      orderIds: [order.id],
+    }),
+  ]);
   const lines = linesByOrder.get(order.id) ?? [];
 
   const listGross = new Decimal(order.listGross?.toString() ?? '0');
@@ -602,24 +602,25 @@ async function loadOrderProfitDetail(
     return { fields, profitBreakdown, lineContext };
   }
 
-  // No best-known statement stored yet: compute read-only in the request (decision 8).
-  let computed: ComputedParcelProfit;
-  try {
-    computed = await computeParcelProfit(prisma, { organizationId: orgId, orderId: order.id });
-  } catch (error) {
-    if (error instanceof UnsupportedPlatformError) {
-      // A platform the engine cannot compute (e.g. Hepsiburada): no profit at all.
-      return {
-        fields: orderProfitFields({
-          pair: { estimate: null, bestKnown: null },
-          orderStatus: order.status,
-          orderSaleGross: order.saleGross,
-        }),
-        profitBreakdown: null,
-        lineContext: null,
-      };
-    }
-    throw error;
+  // No best-known statement stored yet: compute read-only in the request (owner decision
+  // 2026-11-04 / decision 8). computeParcelProfitForRead returns null -- no profit at all
+  // -- for a platform the engine cannot compute and for any computation failure (the
+  // latter is logged), so the detail still opens with an empty profit section.
+  const computed = await computeParcelProfitForRead({
+    organizationId: orgId,
+    orderId: order.id,
+    surface: 'order-detail',
+  });
+  if (computed === null) {
+    return {
+      fields: orderProfitFields({
+        pair: { estimate: null, bestKnown: null },
+        orderStatus: order.status,
+        orderSaleGross: order.saleGross,
+      }),
+      profitBreakdown: null,
+      lineContext: null,
+    };
   }
 
   const fields = orderProfitFields({
@@ -730,7 +731,10 @@ export async function getOrderById(
     fastDelivery: row.fastDelivery,
     micro: row.micro,
 
-    saleGross: row.saleGross?.toString() ?? null,
+    // Sale parity: the detail's top-level sale reads the same profit field the list row
+    // does (best-known sale, else the order's sale, '0' for a cancelled order with no
+    // statement), so an order with a return never shows two different sale figures.
+    saleGross: profit.fields.saleGross,
     saleVat: row.saleVat?.toString() ?? null,
     listGross: row.listGross?.toString() ?? null,
     estimatedNetProfit: profit.fields.estimatedNetProfit,
