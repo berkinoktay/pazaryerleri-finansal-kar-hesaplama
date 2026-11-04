@@ -19,7 +19,12 @@ import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrder, createOrganization } from '../../helpers/factories';
+import {
+  createMembership,
+  createOrder,
+  createOrganization,
+  createStore,
+} from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
@@ -577,5 +582,99 @@ describe('DELETE .../commission-tariffs/{tariffId} - profit recompute queueing',
     expect(
       await prisma.profitRecomputeRequest.findUnique({ where: { orderId: uncovered.id } }),
     ).toBeNull();
+  });
+});
+
+describe('Commission Tariffs - validity reflects the real Istanbul instant', () => {
+  // Period bounds are stored as Istanbul wall-clock saved verbatim as UTC, while the
+  // request's `now` is a true instant. Istanbul runs UTC+3, so the real instant a bound
+  // denotes is ~3h BEFORE the stored value. Each stored bound below sits only 1h ahead of
+  // `now` (less than the 3h offset), so the OLD raw comparison (stored-vs-now) misreads it
+  // and only the converted comparison classifies it correctly:
+  //   - active: stored start now+1h reads 'upcoming' raw, but its real start (now-2h) is
+  //     already past -> active.
+  //   - past:   stored end now+1h reads 'active' raw, but its real end (now-2h) is already
+  //     past -> ended.
+  // Dates are relative to Date.now() so the test never drifts.
+  const HOUR_MS = 60 * 60 * 1000;
+  let accessToken: string;
+  let orgId: string;
+  let storeId: string;
+  let tariffId: string;
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    // The detail route resolves fee definitions unconditionally; a prior describe's
+    // truncate may have cleared them, so re-seed before building the fixture.
+    await ensureFeeDefinitions();
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id, { name: 'Validity Store' });
+    const tariff = await prisma.commissionTariff.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Gecerlilik Tarifesi' },
+    });
+    const now = Date.now();
+    await prisma.commissionTariffPeriod.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: tariff.id,
+        dateRangeLabel: 'Aktif Donem',
+        sortOrder: 0,
+        startsAt: new Date(now + 1 * HOUR_MS), // real now-2h
+        endsAt: new Date(now + 10 * HOUR_MS), // real now+7h
+      },
+    });
+    await prisma.commissionTariffPeriod.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: tariff.id,
+        dateRangeLabel: 'Biten Donem',
+        sortOrder: 1,
+        startsAt: new Date(now - 20 * HOUR_MS), // real now-23h
+        endsAt: new Date(now + 1 * HOUR_MS), // real now-2h
+      },
+    });
+    accessToken = user.accessToken;
+    orgId = org.id;
+    storeId = store.id;
+    tariffId = tariff.id;
+  });
+
+  it('marks a tariff period active from the real Istanbul start', async () => {
+    const res = await app.request(
+      `/v1/organizations/${orgId}/stores/${storeId}/commission-tariffs/${tariffId}`,
+      { headers: { Authorization: bearer(accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DetailWire;
+    const active = body.periods.find((p) => p.dateRangeLabel === 'Aktif Donem');
+    // Raw stored start (now+1h) would read 'upcoming'; the converted real start (now-2h)
+    // is already past, so the period is active.
+    expect(active?.validity).toBe('active');
+  });
+
+  it('marks it ended at the real Istanbul end', async () => {
+    const res = await app.request(
+      `/v1/organizations/${orgId}/stores/${storeId}/commission-tariffs/${tariffId}`,
+      { headers: { Authorization: bearer(accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DetailWire;
+    const ended = body.periods.find((p) => p.dateRangeLabel === 'Biten Donem');
+    // Raw stored end (now+1h) would read 'active'; the converted real end (now-2h) is
+    // already past, so the period is ended.
+    expect(ended?.validity).toBe('past');
+
+    // The list's overall validity spans both periods' real instants [now-23h, now+7h),
+    // which contains now -> active (exercises the list call site's conversion too).
+    const listRes = await app.request(
+      `/v1/organizations/${orgId}/stores/${storeId}/commission-tariffs`,
+      { headers: { Authorization: bearer(accessToken) } },
+    );
+    const list = (await listRes.json()) as ListWire;
+    expect(list.data.find((r) => r.id === tariffId)?.validity).toBe('active');
   });
 });

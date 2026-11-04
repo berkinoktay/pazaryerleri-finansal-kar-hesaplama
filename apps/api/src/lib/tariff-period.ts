@@ -7,7 +7,21 @@
 // degrades to null. The İstanbul wall-clock time is stored as the instant
 // verbatim — validity only needs coarse ordering, not exact timezone math.
 
+import { tariffBoundToInstant } from '@pazarsync/utils';
+
 export type TariffValidity = 'active' | 'upcoming' | 'past';
+
+/**
+ * Null-safe {@link tariffBoundToInstant}: converts a stored tariff bound (Istanbul
+ * wall-clock saved as UTC) to the real instant it denotes, passing `null` straight
+ * through. Tariff-period/week callers compare these bounds against a true-instant
+ * `now`, so the bounds must be reconciled to the same frame first; the bound may be
+ * null (an unparseable period label) and `resolveValidity` keeps that null contract,
+ * so the conversion preserves it. Routes through the one business-timezone helper.
+ */
+export function tariffBoundInstantOrNull(bound: Date | null): Date | null {
+  return bound === null ? null : tariffBoundToInstant(bound);
+}
 
 /**
  * Derives a period's validity from its best-effort parsed bounds versus `now`.

@@ -18,7 +18,7 @@ import { mapPrismaError } from '@pazarsync/sync-core';
 import type { EstimateOutcome } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
-import { resolveValidity } from '../lib/tariff-period';
+import { resolveValidity, tariffBoundInstantOrNull } from '../lib/tariff-period';
 import { fetchCostAggregates } from './products-list.service';
 import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
 import {
@@ -101,7 +101,13 @@ export async function listTariffs(
       productCount,
       selectedCount,
       exported: tariff.exportedAt !== null,
-      validity: resolveValidity(minStart, maxEnd, now),
+      // Period bounds are Istanbul wall-clock saved as UTC; convert them to real
+      // instants before comparing against the true-instant `now`.
+      validity: resolveValidity(
+        tariffBoundInstantOrNull(minStart),
+        tariffBoundInstantOrNull(maxEnd),
+        now,
+      ),
       weekStartsAt: minStart !== null ? minStart.toISOString() : null,
       weekEndsAt: maxEnd !== null ? maxEnd.toISOString() : null,
       updatedAt: tariff.updatedAt.toISOString(),
@@ -290,7 +296,13 @@ export async function getTariffDetail(
       id: period.id,
       dateRangeLabel: period.dateRangeLabel,
       dayCount: period.dayCount,
-      validity: resolveValidity(period.startsAt, period.endsAt, new Date()),
+      // Period bounds are Istanbul wall-clock saved as UTC; convert them to real
+      // instants before comparing against the true-instant `now`.
+      validity: resolveValidity(
+        tariffBoundInstantOrNull(period.startsAt),
+        tariffBoundInstantOrNull(period.endsAt),
+        new Date(),
+      ),
       items,
     };
   });
