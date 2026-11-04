@@ -265,6 +265,16 @@ export {
 } from './read/stored-profit-line';
 export { parseStoredIssues } from './read/stored-issues';
 export { loadOrderProfitLines } from './read/load-order-profit-lines';
+export {
+  STORED_STATEMENT_TOTALS_SELECT,
+  buildStatementBreakdown,
+  statementTotalsFromRow,
+  statementTotalsFromStatement,
+  type StatementBreakdown,
+  type StatementTotals,
+  type StoredStatementTotalsRow,
+} from './read/statement-breakdown';
+export { itemProfitValues, type ItemProfitValues } from './read/item-profit-values';
 
 // Profit recompute queue (rebuild, phase 3B) -- docs/plans/2026-10-30-profit-engine-faz-3b-plan.md
 export {

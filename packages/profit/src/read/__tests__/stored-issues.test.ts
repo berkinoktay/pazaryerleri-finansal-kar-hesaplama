@@ -26,4 +26,27 @@ describe('parseStoredIssues', () => {
       parseStoredIssues([{ code: 'NOT_A_REAL_CODE', orderItemId: null, detail: null }]),
     ).toThrow(InvalidStoredProfitDataError);
   });
+
+  it('rejects a value that is not an array', () => {
+    expect(() => parseStoredIssues({ code: 'MISSING_COST' })).toThrow(InvalidStoredProfitDataError);
+    expect(() => parseStoredIssues('MISSING_COST')).toThrow(InvalidStoredProfitDataError);
+    expect(() => parseStoredIssues(null)).toThrow(InvalidStoredProfitDataError);
+  });
+
+  it('rejects an element that is not an object', () => {
+    expect(() => parseStoredIssues(['MISSING_COST'])).toThrow(InvalidStoredProfitDataError);
+    expect(() => parseStoredIssues([null])).toThrow(InvalidStoredProfitDataError);
+    expect(() => parseStoredIssues([['MISSING_COST', 'item-1']])).toThrow(
+      InvalidStoredProfitDataError,
+    );
+  });
+
+  it('rejects a non-string orderItemId or detail', () => {
+    expect(() =>
+      parseStoredIssues([{ code: 'MISSING_COST', orderItemId: 7, detail: null }]),
+    ).toThrow(InvalidStoredProfitDataError);
+    expect(() =>
+      parseStoredIssues([{ code: 'MISSING_COST', orderItemId: 'item-1', detail: true }]),
+    ).toThrow(InvalidStoredProfitDataError);
+  });
 });

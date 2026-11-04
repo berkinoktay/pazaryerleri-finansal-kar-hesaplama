@@ -1,0 +1,148 @@
+import { Decimal } from 'decimal.js';
+import {
+  ProfitIssueCode,
+  ProfitLineCertainty,
+  ProfitLineSource,
+  ProfitLineType,
+} from '@pazarsync/db/enums';
+
+import { getLineSpec } from '../core/catalog/profit-line-catalog';
+import { type ProfitIssue } from '../core/profit-issue';
+import { type ProfitLine } from '../core/profit-line';
+import { roundMoney } from '../money';
+
+const ZERO = new Decimal(0);
+
+/**
+ * The per-item cost and commission figures the order detail shows for one line. Unit
+ * cost and its VAT rate come from the item's best-known cost lines; the commission
+ * amount from the best-known commission line, the rate from the estimate; the settled
+ * commission is set only when the best-known commission came from a marketplace record.
+ */
+export interface ItemProfitValues {
+  readonly unitCostGross: string | null;
+  readonly unitCostVatRate: string | null;
+  readonly commissionGross: string | null;
+  readonly commissionRate: string | null;
+  readonly estimatedCommissionGross: string | null;
+  readonly settledCommissionGross: string | null;
+}
+
+/**
+ * Derives one order item's cost and commission values from its already view-selected
+ * profit lines (callers run `selectLines`). `bestKnownLines` and `estimateLines` are
+ * the two views' lines; `issues` are the statement's issues. All amounts are decimal
+ * strings; a missing figure is null.
+ */
+export function itemProfitValues(input: {
+  readonly orderItemId: string;
+  readonly quantity: number;
+  readonly bestKnownLines: readonly ProfitLine[];
+  readonly estimateLines: readonly ProfitLine[];
+  readonly issues: readonly ProfitIssue[];
+}): ItemProfitValues {
+  const { orderItemId, quantity, bestKnownLines, estimateLines, issues } = input;
+
+  const bestKnownForItem = bestKnownLines.filter((line) => line.orderItemId === orderItemId);
+  const estimateForItem = estimateLines.filter((line) => line.orderItemId === orderItemId);
+
+  return {
+    unitCostGross: unitCostGrossOf(bestKnownForItem, orderItemId, quantity, issues),
+    unitCostVatRate: sharedCostVatRate(bestKnownForItem),
+    commissionGross: commissionGrossOf(bestKnownForItem),
+    commissionRate: commissionRateOf(estimateForItem),
+    estimatedCommissionGross: commissionGrossOf(estimateForItem),
+    settledCommissionGross: settledCommissionGrossOf(bestKnownForItem),
+  };
+}
+
+/** The item's product-cost expense lines (COST_* without COST_RETURN), by catalog spec. */
+function costExpenseLines(lines: readonly ProfitLine[]): ProfitLine[] {
+  return lines.filter((line) => {
+    const spec = getLineSpec(line.type);
+    return spec.group === 'PRODUCT_COST' && spec.direction === 'EXPENSE';
+  });
+}
+
+/** True when a blocking MISSING_COST issue names this item. */
+function hasMissingCost(issues: readonly ProfitIssue[], orderItemId: string): boolean {
+  return issues.some(
+    (issue) => issue.code === ProfitIssueCode.MISSING_COST && issue.orderItemId === orderItemId,
+  );
+}
+
+/**
+ * Unit cost: null when a MISSING_COST issue names the item; otherwise the item's cost
+ * lines summed and divided by the quantity (two decimals, half-up), or "0.00" when the
+ * item has no cost line.
+ */
+function unitCostGrossOf(
+  lines: readonly ProfitLine[],
+  orderItemId: string,
+  quantity: number,
+  issues: readonly ProfitIssue[],
+): string | null {
+  if (hasMissingCost(issues, orderItemId)) {
+    return null;
+  }
+  const costLines = costExpenseLines(lines);
+  if (costLines.length === 0) {
+    return '0.00';
+  }
+  const total = costLines.reduce((sum, line) => sum.add(line.amount.gross), ZERO);
+  return roundMoney(total.div(quantity)).toFixed(2);
+}
+
+/** The VAT rate shared by every cost line as a string; null when none or they differ. */
+function sharedCostVatRate(lines: readonly ProfitLine[]): string | null {
+  const costLines = costExpenseLines(lines);
+  let shared: string | null = null;
+  let seen = false;
+  for (const line of costLines) {
+    const rate = line.vatRatePct === null ? null : line.vatRatePct.toFixed();
+    if (!seen) {
+      shared = rate;
+      seen = true;
+    } else if (shared !== rate) {
+      return null;
+    }
+  }
+  return seen ? shared : null;
+}
+
+/** The item's commission line(s) gross summed as a string; null when there is none. */
+function commissionGrossOf(lines: readonly ProfitLine[]): string | null {
+  const commissionLines = lines.filter((line) => line.type === ProfitLineType.COMMISSION);
+  if (commissionLines.length === 0) {
+    return null;
+  }
+  return commissionLines.reduce((sum, line) => sum.add(line.amount.gross), ZERO).toFixed(2);
+}
+
+/** The estimate commission line's rate input as a string; null when there is none. */
+function commissionRateOf(estimateLines: readonly ProfitLine[]): string | null {
+  for (const line of estimateLines) {
+    if (line.type !== ProfitLineType.COMMISSION) {
+      continue;
+    }
+    const rate = line.inputs['ratePct'];
+    if (typeof rate === 'string') {
+      return rate;
+    }
+  }
+  return null;
+}
+
+/** The best-known commission gross only when it is an actual from a marketplace record. */
+function settledCommissionGrossOf(lines: readonly ProfitLine[]): string | null {
+  const settled = lines.filter(
+    (line) =>
+      line.type === ProfitLineType.COMMISSION &&
+      line.certainty === ProfitLineCertainty.ACTUAL &&
+      line.source === ProfitLineSource.MARKETPLACE_RECORD,
+  );
+  if (settled.length === 0) {
+    return null;
+  }
+  return settled.reduce((sum, line) => sum.add(line.amount.gross), ZERO).toFixed(2);
+}

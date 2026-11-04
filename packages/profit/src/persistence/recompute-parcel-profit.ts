@@ -14,11 +14,9 @@ import { PROFIT_ENGINE_VERSION } from '../core/engine-version';
 import { type ProfitIssue } from '../core/profit-issue';
 import { type ProfitLine } from '../core/profit-line';
 import { type ProfitStatement } from '../core/profit-statement';
+import { roundPercent } from '../money';
 import { computeParcelProfit, PARCEL_PROFIT_COMPUTERS } from './compute-parcel-profit';
 import { type ContentHashAllocation, profitContentHash } from './content-hash';
-
-/** The margin columns are numeric(12,4); round in the app, not in Postgres. */
-const PERCENT_SCALE = 4;
 
 /** Seed for the parcel advisory-lock hash; a fixed namespace shared by every parcel lock. */
 const ADVISORY_LOCK_SEED = 0;
@@ -230,9 +228,7 @@ async function persistParcelProfit(
 
 /** A percent rounded to the column's 4 decimals, half-up; null passes through. */
 function percentColumn(value: Decimal | null): string | null {
-  return value === null
-    ? null
-    : value.toDecimalPlaces(PERCENT_SCALE, Decimal.ROUND_HALF_UP).toFixed();
+  return value === null ? null : roundPercent(value).toFixed();
 }
 
 /** The persisted shape of a single statement issue. */

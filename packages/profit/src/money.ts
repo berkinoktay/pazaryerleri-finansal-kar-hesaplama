@@ -21,6 +21,19 @@ export function roundMoney(value: Decimal): Decimal {
 /** A stored money amount is denominated in kurus: at most two decimal places. */
 export const KURUS_DECIMALS = 2;
 
+/** The margin/percent columns are numeric(12,4): round in the app, not in Postgres. */
+export const PERCENT_SCALE = 4;
+
+/**
+ * Rounds a percentage to the stored column scale (four decimals, half-up). Single
+ * source of truth for margin rounding: the statement writer persists margins through
+ * this, and the read layer rounds an in-request margin the same way so a breakdown
+ * built from a fresh computation matches one read back from the stored row.
+ */
+export function roundPercent(value: Decimal): Decimal {
+  return value.toDecimalPlaces(PERCENT_SCALE, Decimal.ROUND_HALF_UP);
+}
+
 /** One kurus: the smallest money step and the price grid the scenario solver walks. */
 export const ONE_KURUS = new Decimal('0.01');
 

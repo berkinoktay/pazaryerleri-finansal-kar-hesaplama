@@ -7,6 +7,7 @@ import {
 } from '@pazarsync/db/enums';
 import { describe, expect, it } from 'vitest';
 
+import { InvalidProfitLineError } from '../../core/profit-line';
 import { InvalidStoredProfitDataError } from '../../persistence/errors';
 import { toProfitLine, type StoredProfitLineRow } from '../stored-profit-line';
 
@@ -76,5 +77,16 @@ describe('toProfitLine', () => {
     expect(() =>
       toProfitLine(makeRow({ externalRecordId: null, externalRecordType: 'Sale' })),
     ).toThrow(InvalidStoredProfitDataError);
+  });
+
+  it('rejects a stored amount the line model would reject', () => {
+    // More than two decimals and a negative amount both break a line invariant, so
+    // toProfitLine surfaces the model's own error rather than silently accepting the row.
+    expect(() => toProfitLine(makeRow({ amountGross: new Decimal('233.123') }))).toThrow(
+      InvalidProfitLineError,
+    );
+    expect(() => toProfitLine(makeRow({ amountVat: new Decimal('-1.00') }))).toThrow(
+      InvalidProfitLineError,
+    );
   });
 });

@@ -9,6 +9,10 @@ import { STORED_PROFIT_LINE_SELECT, toProfitLine } from './stored-profit-line';
  * AND store AND the id list (tenant defense), ordered deterministically by (orderId,
  * id). Every input id appears in the returned map -- an order with no lines maps to an
  * empty array -- and an empty input list returns an empty map without querying.
+ *
+ * The order of each order's lines is not meaningful: the ids are random and rewritten
+ * on every recompute, so consumers must aggregate by type and item and never rely on
+ * sequence.
  */
 export async function loadOrderProfitLines(
   tx: Prisma.TransactionClient,
