@@ -5,6 +5,7 @@ import {
   ProfitLineLevel,
   ProfitLineSource,
   ProfitLineType,
+  ReconciliationStatus,
 } from '@pazarsync/db/enums';
 import { type ResolvedProfitSettings } from '@pazarsync/utils';
 import { describe, expect, it } from 'vitest';
@@ -219,6 +220,16 @@ describe('profitContentHash', () => {
   it('changes the hash when the engine version changes', () => {
     const input = baseInput();
     expect(profitContentHash({ ...input, engineVersion: 2 })).not.toBe(profitContentHash(input));
+  });
+
+  it('changes when only the reconciliation status changes', () => {
+    const input = baseInput();
+    const bumped = input.statements.map((statement) =>
+      statement.view === 'BEST_KNOWN'
+        ? { ...statement, reconciliationStatus: ReconciliationStatus.PARTIALLY_SETTLED }
+        : statement,
+    );
+    expect(profitContentHash({ ...input, statements: bumped })).not.toBe(profitContentHash(input));
   });
 
   it('changes the hash when a setting changes', () => {

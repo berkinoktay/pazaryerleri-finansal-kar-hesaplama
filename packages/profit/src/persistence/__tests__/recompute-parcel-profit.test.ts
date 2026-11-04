@@ -18,6 +18,7 @@ import {
   ProfitLineType,
   ProfitStatementView,
   ProfitStatus,
+  ReconciliationStatus,
 } from '@pazarsync/db/enums';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -275,6 +276,28 @@ describe('recomputeParcelProfit', () => {
     const estimateAfterSettled = await readStatement(parcel.orderId, ProfitStatementView.ESTIMATE);
     expect(estimateAfterSettled.status).toBe(ProfitStatus.ESTIMATED);
     expect(estimateAfterSettled.netProfit?.toFixed(2)).toBe('191.79');
+  });
+
+  it('persists the reconciliation status of both views', async () => {
+    const parcel = await seedMelontikParcel();
+    // The sale-cycle records give the best-known view settlement-sourced actuals while
+    // the shipping leg stays an estimate, so it reconciles to PARTIALLY_SETTLED; the
+    // estimate view ignores the records and stays NOT_SETTLED.
+    for (const record of melontikSaleCycleRecordInputs(parcel)) {
+      await insertFinanceRecord(record);
+    }
+
+    const result = await recompute(parcel.organizationId, parcel.orderId);
+    expect(result.changed).toBe(true);
+
+    const bestKnown = await prisma.orderProfitStatement.findFirst({
+      where: { orderId: parcel.orderId, view: ProfitStatementView.BEST_KNOWN },
+    });
+    const estimate = await prisma.orderProfitStatement.findFirst({
+      where: { orderId: parcel.orderId, view: ProfitStatementView.ESTIMATE },
+    });
+    expect(bestKnown?.reconciliationStatus).toBe(ReconciliationStatus.PARTIALLY_SETTLED);
+    expect(estimate?.reconciliationStatus).toBe(ReconciliationStatus.NOT_SETTLED);
   });
 
   it('keeps the estimate view on estimates while the best-known view takes the actual amounts', async () => {

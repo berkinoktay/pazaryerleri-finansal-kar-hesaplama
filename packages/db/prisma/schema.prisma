@@ -2122,6 +2122,12 @@ model OrderProfitStatement {
   view   ProfitStatementView
   status ProfitStatus
 
+  // How far this statement's selected lines have reconciled with the marketplace.
+  // The engine derives it from the selected lines (deriveReconciliationStatus),
+  // independently of `status`: it reports progress even for an excluded, cancelled
+  // or not-computable order. The ESTIMATE view is always NOT_SETTLED.
+  reconciliationStatus ReconciliationStatus @default(NOT_SETTLED) @map("reconciliation_status")
+
   saleGross     Decimal @map("sale_gross") @db.Decimal(14, 2)
   costGross     Decimal @map("cost_gross") @db.Decimal(14, 2)
   vatOutput     Decimal @map("vat_output") @db.Decimal(14, 2)

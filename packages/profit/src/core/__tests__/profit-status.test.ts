@@ -5,12 +5,13 @@ import {
   ProfitLineSource,
   ProfitStatus,
   ProfitLineType,
+  ReconciliationStatus,
 } from '@pazarsync/db/enums';
 import { describe, expect, it } from 'vitest';
 
 import { makeLine, type MakeLineParams } from '../../__tests__/helpers/make-profit-line';
 import { PROFIT_ISSUE_CATALOG, type ProfitIssue } from '../profit-issue';
-import { deriveProfitStatus } from '../profit-status';
+import { deriveProfitStatus, deriveReconciliationStatus } from '../profit-status';
 import { type ProfitLine } from '../profit-line';
 
 const actual = (type: ProfitLineType, extra: Partial<MakeLineParams> = {}): ProfitLine =>
@@ -81,5 +82,51 @@ describe('deriveProfitStatus', () => {
         sellerCost,
       ]),
     ).toBe(ProfitStatus.SETTLED);
+  });
+});
+
+describe('deriveReconciliationStatus', () => {
+  it('reports NOT_SETTLED without a settlement-sourced actual line', () => {
+    // A seller-entered ACTUAL cost line proves nothing about the marketplace.
+    expect(
+      deriveReconciliationStatus([
+        makeLine({ type: ProfitLineType.SALE, gross: '120' }),
+        sellerCost,
+      ]),
+    ).toBe(ReconciliationStatus.NOT_SETTLED);
+  });
+  it('reports PARTIALLY_SETTLED while a settlement-required line is still an estimate', () => {
+    expect(
+      deriveReconciliationStatus([
+        actual(ProfitLineType.COMMISSION),
+        makeLine({ type: ProfitLineType.SHIPPING, gross: '6' }),
+      ]),
+    ).toBe(ReconciliationStatus.PARTIALLY_SETTLED);
+  });
+  it('reports FULLY_SETTLED when every settlement-required line is actual', () => {
+    expect(
+      deriveReconciliationStatus([
+        actual(ProfitLineType.SALE),
+        actual(ProfitLineType.COMMISSION),
+        actual(ProfitLineType.SHIPPING, { source: ProfitLineSource.CARGO_INVOICE }),
+        actual(ProfitLineType.SERVICE_FEE, { level: ProfitLineLevel.PARCEL, orderItemId: null }),
+        actual(ProfitLineType.STOPPAGE),
+        sellerCost,
+      ]),
+    ).toBe(ReconciliationStatus.FULLY_SETTLED);
+  });
+  it('reports progress for an excluded, cancelled or not computable parcel', () => {
+    // The same lines reconcile to PARTIALLY_SETTLED regardless of the profit status
+    // the order ends up with: reconciliation ignores exclusion, cancellation and issues.
+    const lines = [
+      actual(ProfitLineType.COMMISSION),
+      makeLine({ type: ProfitLineType.SHIPPING, gross: '6' }),
+    ];
+    expect(status(lines, [], false, true)).toBe(ProfitStatus.EXCLUDED);
+    expect(status(lines, [], true, false)).toBe(ProfitStatus.CANCELLED);
+    expect(status(lines, [issue(ProfitIssueCode.MISSING_COMMISSION_RATE)])).toBe(
+      ProfitStatus.NOT_COMPUTABLE,
+    );
+    expect(deriveReconciliationStatus(lines)).toBe(ReconciliationStatus.PARTIALLY_SETTLED);
   });
 });

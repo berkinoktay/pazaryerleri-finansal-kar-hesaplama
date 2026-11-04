@@ -4,6 +4,7 @@ import {
   ProfitLineLevel,
   ProfitLineType,
   ProfitStatus,
+  ReconciliationStatus,
 } from '@pazarsync/db/enums';
 import { describe, expect, it } from 'vitest';
 
@@ -44,6 +45,7 @@ function steppedTinySlopeEvaluate(): (unitPrice: Decimal) => ProfitStatement {
     return {
       view: 'ESTIMATE',
       status: ProfitStatus.ESTIMATED,
+      reconciliationStatus: ReconciliationStatus.NOT_SETTLED,
       engineVersion: PROFIT_ENGINE_VERSION,
       selectedLines: lines,
       rows: [],

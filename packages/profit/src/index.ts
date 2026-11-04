@@ -98,7 +98,11 @@ export {
   type ProfitLineAllocation,
 } from './core/allocation/allocate-parcel-line';
 export { isBlockingIssue, PROFIT_ISSUE_CATALOG, type ProfitIssue } from './core/profit-issue';
-export { deriveProfitStatus, type DeriveProfitStatusParams } from './core/profit-status';
+export {
+  deriveProfitStatus,
+  deriveReconciliationStatus,
+  type DeriveProfitStatusParams,
+} from './core/profit-status';
 export { PROFIT_ENGINE_VERSION } from './core/engine-version';
 export {
   computeProfitStatement,

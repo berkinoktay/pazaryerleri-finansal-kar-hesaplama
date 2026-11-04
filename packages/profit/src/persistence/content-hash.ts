@@ -149,6 +149,7 @@ function statementToCanonical(statement: ProfitStatement): CanonicalValue {
   return {
     view: statement.view,
     status: statement.status,
+    reconciliationStatus: statement.reconciliationStatus,
     saleGross: statement.saleGross.toFixed(),
     costGross: statement.costGross.toFixed(),
     vatOutput: statement.vat.output.toFixed(),

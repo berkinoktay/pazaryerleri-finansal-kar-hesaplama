@@ -5,6 +5,7 @@ import {
   ProfitLineSource,
   ProfitLineType,
   ProfitStatus,
+  ReconciliationStatus,
 } from '@pazarsync/db/enums';
 import { describe, expect, it } from 'vitest';
 
@@ -109,6 +110,24 @@ describe('computeProfitStatement', () => {
     ];
     expect(statementOf(lines).netProfit?.toFixed(2)).toBe('31.50');
     expect(statementOf(lines, { view: 'ESTIMATE' }).netProfit?.toFixed(2)).toBe('34.00');
+  });
+  it('keeps the estimate view NOT_SETTLED even when actual lines exist', () => {
+    // A settlement-sourced actual lifts the best-known view off NOT_SETTLED, but the
+    // estimate view never selects actuals, so it stays NOT_SETTLED on the same lines.
+    const lines = [
+      ...basic(),
+      makeLine({
+        type: ProfitLineType.SHIPPING,
+        gross: '9',
+        vat: '1.50',
+        certainty: ProfitLineCertainty.ACTUAL,
+        source: ProfitLineSource.CARGO_INVOICE,
+      }),
+    ];
+    expect(statementOf(lines).reconciliationStatus).not.toBe(ReconciliationStatus.NOT_SETTLED);
+    expect(statementOf(lines, { view: 'ESTIMATE' }).reconciliationStatus).toBe(
+      ReconciliationStatus.NOT_SETTLED,
+    );
   });
   it('included rows minus effective VAT always equal net profit', () => {
     for (const s of [

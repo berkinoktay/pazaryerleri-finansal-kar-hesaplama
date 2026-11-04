@@ -7,6 +7,7 @@ import {
   ProfitLineLevel,
   ProfitStatementView,
   type ProfitStatus,
+  type ReconciliationStatus,
 } from '@pazarsync/db/enums';
 import { type ResolvedProfitSettings } from '@pazarsync/utils';
 
@@ -341,6 +342,7 @@ function statementColumns(params: {
   readonly hash: string;
 }): {
   readonly status: ProfitStatus;
+  readonly reconciliationStatus: ReconciliationStatus;
   readonly saleGross: string;
   readonly costGross: string;
   readonly vatOutput: string;
@@ -361,6 +363,7 @@ function statementColumns(params: {
   const { statement, settings, hash } = params;
   return {
     status: statement.status,
+    reconciliationStatus: statement.reconciliationStatus,
     saleGross: statement.saleGross.toFixed(),
     costGross: statement.costGross.toFixed(),
     vatOutput: statement.vat.output.toFixed(),

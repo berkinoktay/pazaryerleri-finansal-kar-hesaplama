@@ -1,12 +1,17 @@
 import { Decimal } from 'decimal.js';
-import { ProfitLineType, type ProfitStatementView, ProfitStatus } from '@pazarsync/db/enums';
+import {
+  ProfitLineType,
+  type ProfitStatementView,
+  ProfitStatus,
+  type ReconciliationStatus,
+} from '@pazarsync/db/enums';
 import { type ResolvedProfitSettings } from '@pazarsync/utils';
 
 import { getLineSpec, type ProfitLineGroup } from './catalog/profit-line-catalog';
 import { PROFIT_ENGINE_VERSION } from './engine-version';
 import { type ProfitIssue } from './profit-issue';
 import { type ProfitLine } from './profit-line';
-import { deriveProfitStatus } from './profit-status';
+import { deriveProfitStatus, deriveReconciliationStatus } from './profit-status';
 import { selectLines } from './select-lines';
 import { computeVatTotals, effectiveNetVat, type VatTotals } from '../tax/tr/net-vat';
 
@@ -33,6 +38,9 @@ export interface ProfitStatementRow {
 export interface ProfitStatement {
   readonly view: ProfitStatementView;
   readonly status: ProfitStatus;
+  // How far the statement's selected lines have reconciled with the marketplace,
+  // derived independently of the profit status (see `deriveReconciliationStatus`).
+  readonly reconciliationStatus: ReconciliationStatus;
   readonly engineVersion: number;
   readonly selectedLines: readonly ProfitLine[];
   readonly rows: readonly ProfitStatementRow[];
@@ -164,6 +172,7 @@ export function computeProfitStatement(input: ProfitStatementInput): ProfitState
   return {
     view: input.view,
     status,
+    reconciliationStatus: deriveReconciliationStatus(selectedLines),
     engineVersion: PROFIT_ENGINE_VERSION,
     selectedLines,
     rows,

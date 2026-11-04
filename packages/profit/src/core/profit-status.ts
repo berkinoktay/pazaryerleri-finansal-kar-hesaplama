@@ -1,4 +1,9 @@
-import { ProfitLineCertainty, ProfitLineSource, ProfitStatus } from '@pazarsync/db/enums';
+import {
+  ProfitLineCertainty,
+  ProfitLineSource,
+  ProfitStatus,
+  ReconciliationStatus,
+} from '@pazarsync/db/enums';
 
 import { getLineSpec } from './catalog/profit-line-catalog';
 import { isBlockingIssue, type ProfitIssue } from './profit-issue';
@@ -30,14 +35,47 @@ function isPendingRequired(line: ProfitLine): boolean {
 }
 
 /**
+ * How far along the marketplace reconciliation each reconciliation stage is, mapped
+ * to the profit status it implies. Rules 4-6 of `deriveProfitStatus` are exactly this
+ * lookup applied to `deriveReconciliationStatus`, so the two can never drift apart.
+ */
+const PROFIT_STATUS_BY_RECONCILIATION: Record<ReconciliationStatus, ProfitStatus> = {
+  [ReconciliationStatus.NOT_SETTLED]: ProfitStatus.ESTIMATED,
+  [ReconciliationStatus.PARTIALLY_SETTLED]: ProfitStatus.PARTIALLY_SETTLED,
+  [ReconciliationStatus.FULLY_SETTLED]: ProfitStatus.SETTLED,
+};
+
+/**
+ * Derives how far a set of selected lines has reconciled with the marketplace. It
+ * looks only at the lines, ignoring exclusion, cancellation and blocking issues:
+ * 1. no settlement-sourced ACTUAL line -> NOT_SETTLED
+ * 2. a settlement-required line still pending -> PARTIALLY_SETTLED
+ * 3. otherwise -> FULLY_SETTLED
+ *
+ * The ESTIMATE view never selects settlement actuals, so it always comes out
+ * NOT_SETTLED without any special-casing.
+ */
+export function deriveReconciliationStatus(
+  selectedLines: readonly ProfitLine[],
+): ReconciliationStatus {
+  if (!selectedLines.some(isSettlementActual)) {
+    return ReconciliationStatus.NOT_SETTLED;
+  }
+  if (selectedLines.some(isPendingRequired)) {
+    return ReconciliationStatus.PARTIALLY_SETTLED;
+  }
+  return ReconciliationStatus.FULLY_SETTLED;
+}
+
+/**
  * Derives the single profit status for an order. Rules are evaluated in order;
  * the first match wins:
  * 1. excluded -> EXCLUDED
  * 2. cancelled -> CANCELLED
  * 3. a blocking issue -> NOT_COMPUTABLE
- * 4. no settlement-sourced ACTUAL line -> ESTIMATED
- * 5. a settlement-required line still pending -> PARTIALLY_SETTLED
- * 6. otherwise -> SETTLED
+ * 4-6. otherwise the reconciliation status (see `deriveReconciliationStatus`) mapped
+ *      through PROFIT_STATUS_BY_RECONCILIATION: NOT_SETTLED -> ESTIMATED,
+ *      PARTIALLY_SETTLED -> PARTIALLY_SETTLED, FULLY_SETTLED -> SETTLED
  */
 export function deriveProfitStatus(params: DeriveProfitStatusParams): ProfitStatus {
   if (params.isExcluded) {
@@ -49,11 +87,5 @@ export function deriveProfitStatus(params: DeriveProfitStatusParams): ProfitStat
   if (params.issues.some(isBlockingIssue)) {
     return ProfitStatus.NOT_COMPUTABLE;
   }
-  if (!params.selectedLines.some(isSettlementActual)) {
-    return ProfitStatus.ESTIMATED;
-  }
-  if (params.selectedLines.some(isPendingRequired)) {
-    return ProfitStatus.PARTIALLY_SETTLED;
-  }
-  return ProfitStatus.SETTLED;
+  return PROFIT_STATUS_BY_RECONCILIATION[deriveReconciliationStatus(params.selectedLines)];
 }
