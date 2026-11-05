@@ -4,7 +4,8 @@
 // `validators/advantage-tariff.validator.ts`; this file holds the persisted
 // star-tier JSON shape the service layer reasons with. Period validity + Trendyol
 // period-label parsing are reused from `lib/tariff-period.ts` (via the commission
-// tariff that supplies the rate). Band lookup reuses `@pazarsync/profit` (`StoredTariffBand`) and `commission-tariff-compute.service.ts` (`bandForPrice`).
+// tariff that supplies the rate). Band lookup reuses `@pazarsync/profit`
+// (`StoredTariffBand`, `storedTariffBandForPrice`).
 
 import type { Prisma } from '@pazarsync/db';
 

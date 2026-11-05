@@ -4,7 +4,7 @@
 // commission is NOT in this Excel. Pricing a product at a star tier's threshold
 // lands it into a band of the seller's COMMISSION TARIFF, and THAT band's rate is
 // the commission. So per tier we look the target price up in the commission
-// source's bands (`bandForPrice`) and, when the product has no commission tariff
+// source's bands (`storedTariffBandForPrice`) and, when the product has no commission tariff
 // (or no band matches), fall back to the category rate. Everything else — cost,
 // shipping, PSF, stoppage, VAT — is resolved exactly as Ürün Fiyatlandırma does,
 // by REUSING `assembleUnitEconomics` + `computeUnitProfit`. No financial math is
@@ -17,10 +17,13 @@
 
 import { Decimal } from 'decimal.js';
 
-import { computeUnitProfit, type EstimateOutcome, type UnitEconomics } from '@pazarsync/profit';
-
-import { bandForPrice } from './commission-tariff-compute.service';
-import type { StoredTariffBand } from '@pazarsync/profit';
+import {
+  computeUnitProfit,
+  storedTariffBandForPrice,
+  type EstimateOutcome,
+  type StoredTariffBand,
+  type UnitEconomics,
+} from '@pazarsync/profit';
 import {
   assembleUnitEconomics,
   serializeBreakdown,
@@ -114,7 +117,7 @@ export function resolveCommission(
   price: Decimal,
 ): ResolvedCommission | null {
   if (commission.bands !== null && commission.bands.length > 0) {
-    const band = bandForPrice(commission.bands, price);
+    const band = storedTariffBandForPrice(commission.bands, price);
     if (band !== null) return { pct: new Decimal(band.commissionPct), source: 'band' };
   }
   if (commission.categoryRate !== null) {

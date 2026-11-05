@@ -1,46 +1,38 @@
 // Per-band profit computation for the saved Commission Tariffs feature.
 //
-// This is the ONE place the tariff feature differs from Ürün Fiyatlandırma: the
-// commission rate comes from the uploaded Excel BAND, not the category/brand
-// rate table. Everything else — cost, shipping, PSF, stoppage, VAT — is resolved
-// exactly as `product-pricing.service` does, by REUSING its `assembleUnitEconomics`
-// and `computeUnitProfit`. No financial math is re-implemented here.
+// This is the ONE place the tariff feature differs from Urun Fiyatlandirma: the
+// commission rate comes from the uploaded Excel BAND, not the category/brand rate
+// chain. Everything else -- cost, shipping, PSF, stoppage, VAT -- is resolved by the
+// shared scenario engine (`@pazarsync/profit`): the screen picks the band price and
+// rate, and hands the rate to `evaluateScreenScenario` as the engine's commission
+// override. No financial math is re-implemented here.
 //
-// Each Trendyol band is a PRICE RANGE [lowerLimit, upperLimit] with its own
-// commission (a PERCENT). Profit for a band is computed at the bracket's upper
-// limit — the highest price that still earns that commission, i.e. the best
-// profit for the tier (optimistic, like every other estimate in the system).
-// Band 1 has no upper limit, so the seller's current price applies.
+// Each Trendyol band is a PRICE RANGE [lowerLimit, upperLimit] with its own commission
+// (a PERCENT). Profit for a band is computed at the bracket's upper limit -- the highest
+// price that still earns that commission, i.e. the best profit for the tier (optimistic,
+// like every other estimate in the system). Band 1 has no upper limit, so the seller's
+// current price applies.
 //
-// Strategy: assemble the variant's `UnitEconomics` ONCE (a probe — cost/shipping/
-// PSF/VAT are band-invariant), then for each band override only `commissionRate`
-// and run the engine at that band's price. A null probe econ means the variant is
-// not calculable (no cost or no shipping); every band then reports null profit.
+// Strategy: the item's CURRENT baseline (the commission-base price at the current rate)
+// decides calculability -- when it is not calculable, every band reports null profit
+// (legacy all-or-none). Otherwise each band is evaluated at its own price under its own
+// stored rate.
 
 import { Decimal } from 'decimal.js';
 
-import { computeUnitProfit, type EstimateOutcome, type UnitEconomics } from '@pazarsync/profit';
+import { storedTariffBandForPrice, type StoredTariffBand } from '@pazarsync/profit';
 
 import {
-  assembleUnitEconomics,
-  serializeBreakdown,
-  type AssemblyInputs,
-  type QuoteBreakdown,
-} from './product-pricing.service';
-import {
-  deriveReason,
-  tariffCommission,
-  type TariffAssemblyContext,
-  type TariffItemReason,
-  type TariffVariant,
-} from './tariff-compute-commons';
-import type { VariantCostAggregate } from '../validators/product.validator';
-import type { StoredTariffBand } from '@pazarsync/profit';
+  evaluateScreenScenario,
+  formatMarginPct2,
+  formatMoney2,
+  type ScreenScenarioBase,
+} from './scenario-screen-commons';
+import { quoteBreakdownFromStatement, type QuoteBreakdown } from './product-pricing.service';
+import { type TariffItemReason } from './tariff-compute-commons';
 
-// Re-exported so existing consumers (commission-tariff.service, estimate route)
-// keep importing these shared types from here. Their single source is
-// `tariff-compute-commons`, shared with the Plus tariff feature.
-export type { TariffAssemblyContext, TariffItemReason, TariffVariant };
+// Re-exported so existing consumers keep importing the shared wire reason from here.
+export type { TariffItemReason };
 
 // ─── Computed result shapes (serialized — strings, never float) ─────────────
 
@@ -112,23 +104,32 @@ function nullBandResults(
 }
 
 /**
- * Computes every band's net profit for one tariff item. `variant` is null for an
- * unmatched barcode → not calculable, reason NO_PRODUCT. Otherwise the variant's
- * econ is probed once; if non-null, each band overrides only `commissionRate` and
- * runs `computeUnitProfit` at the band price.
+ * Computes every band's net profit for one tariff item with the scenario engine. An
+ * unmatched barcode (`base` no-product) or an item with no bands is not calculable with
+ * reason NO_PRODUCT and every band null. A store-wide load failure (`base` degraded)
+ * returns the same empty shape with a null reason (the caller has already logged it).
+ *
+ * For a ready base the CURRENT baseline is evaluated at `commissionBasePrice ?? currentPrice`
+ * under `currentCommissionPct`; it decides the item's calculability all-or-none (so a
+ * missing cost drops every band). Then each band is evaluated at its own `bandPrice`
+ * under its stored rate (the screen's choice, passed to the engine as an override). A
+ * band whose own evaluation is not calculable (rare, price-dependent shipping) shows null
+ * profit and is skipped for `bestBandKey`, which is the highest net profit (first wins on
+ * ties). The engine may throw on a pathological input -- that propagates to the service,
+ * which catches it per item.
  */
-export function computeItemBands(
-  ctx: TariffAssemblyContext,
-  bands: ReadonlyArray<StoredTariffBand>,
-  currentPrice: Decimal,
-  commissionBasePrice: Decimal | null,
-  currentCommissionPct: Decimal,
-  variant: TariffVariant | null,
-  costAggregate: VariantCostAggregate | undefined,
-  shipping: EstimateOutcome,
-): ComputedItemBands {
+export function computeItemBands(params: {
+  readonly bands: readonly StoredTariffBand[];
+  readonly currentPrice: Decimal;
+  readonly commissionBasePrice: Decimal | null;
+  readonly currentCommissionPct: Decimal;
+  readonly base: ScreenScenarioBase;
+}): ComputedItemBands {
+  const { bands, currentPrice, commissionBasePrice, currentCommissionPct, base } = params;
   const [firstBand] = bands;
-  if (variant === null || firstBand === undefined) {
+
+  // No bands, or an unmatched barcode: not calculable, every band null (legacy).
+  if (firstBand === undefined || base.kind === 'no-product') {
     return {
       calculable: false,
       reason: 'NO_PRODUCT',
@@ -138,37 +139,38 @@ export function computeItemBands(
     };
   }
 
-  const inputs: AssemblyInputs = {
-    costAggregate,
-    commission: tariffCommission(new Decimal(firstBand.commissionPct)),
-    shipping,
-  };
-  const probe = assembleUnitEconomics(ctx, variant, inputs);
-
-  if (probe.econ === null) {
+  // A store-wide load failure (already logged): same empty shape, no reason.
+  if (base.kind === 'degraded') {
     return {
       calculable: false,
-      reason: deriveReason(probe.costStatus === 'OK', probe.shippingStatus === 'OK'),
+      reason: null,
       bands: nullBandResults(bands, currentPrice),
       bestBandKey: null,
       current: NULL_CURRENT,
     };
   }
 
-  const baseEcon: UnitEconomics = probe.econ;
+  // Baseline ("do nothing"): the current commission at the commission-base price (the
+  // customer-seen price commission is actually charged on), falling back to the sale
+  // price for imports predating the column. It decides the item's calculability.
+  const currentOutcome = evaluateScreenScenario({
+    base: base.base,
+    unitPrice: commissionBasePrice ?? currentPrice,
+    commissionPct: currentCommissionPct,
+  });
+  if (!currentOutcome.calculable) {
+    return {
+      calculable: false,
+      reason: currentOutcome.reason,
+      bands: nullBandResults(bands, currentPrice),
+      bestBandKey: null,
+      current: NULL_CURRENT,
+    };
+  }
 
-  // Baseline ("do nothing"): reuse the assembled econ, override only the commission
-  // to the seller's CURRENT (regular) rate, and run the engine at the commission-base
-  // price — the customer-seen price commission is actually charged on. A null base
-  // (imports predating the KOMİSYONA ESAS FİYAT column) falls back to the sale price.
-  const currentBreakdown = computeUnitProfit(
-    { ...baseEcon, commissionRate: currentCommissionPct },
-    commissionBasePrice ?? currentPrice,
-  );
   const current: ComputedCurrentScenario = {
-    netProfit: currentBreakdown.netProfit.toFixed(2),
-    marginPct:
-      currentBreakdown.saleMarginPct !== null ? currentBreakdown.saleMarginPct.toFixed(2) : null,
+    netProfit: formatMoney2(currentOutcome.netProfit),
+    marginPct: formatMarginPct2(currentOutcome.statement.saleMarginPct),
   };
 
   let bestBandKey: string | null = null;
@@ -176,10 +178,13 @@ export function computeItemBands(
 
   const results = bands.map((band): ComputedBandResult => {
     const price = bandPrice(band, currentPrice);
-    const econ: UnitEconomics = { ...baseEcon, commissionRate: new Decimal(band.commissionPct) };
-    const breakdown = computeUnitProfit(econ, price);
-    if (bestProfit === null || breakdown.netProfit.gt(bestProfit)) {
-      bestProfit = breakdown.netProfit;
+    const outcome = evaluateScreenScenario({
+      base: base.base,
+      unitPrice: price,
+      commissionPct: new Decimal(band.commissionPct),
+    });
+    if (outcome.calculable && (bestProfit === null || outcome.netProfit.gt(bestProfit))) {
+      bestProfit = outcome.netProfit;
       bestBandKey = band.key;
     }
     return {
@@ -188,8 +193,8 @@ export function computeItemBands(
       upperLimit: band.upperLimit,
       price: price.toFixed(2),
       commissionPct: band.commissionPct,
-      netProfit: breakdown.netProfit.toFixed(2),
-      marginPct: breakdown.saleMarginPct !== null ? breakdown.saleMarginPct.toFixed(2) : null,
+      netProfit: outcome.calculable ? formatMoney2(outcome.netProfit) : null,
+      marginPct: outcome.calculable ? formatMarginPct2(outcome.statement.saleMarginPct) : null,
     };
   });
 
@@ -197,28 +202,6 @@ export function computeItemBands(
 }
 
 // ─── Single-price estimate (band-click breakdown + custom-price what-if) ─────
-
-/**
- * Finds the band an arbitrary price falls into. Bands are stored top-down —
- * band1 `[lower, ∞)`, band2/band3 `[lower, upper]`, band4 `(-∞, upper]` — with
- * TOUCHING boundaries (band2's upper equals band1's lower). Iterating in order
- * returns the FIRST containing band, so a price on a shared boundary resolves to
- * the HIGHER band. That is why a band-click must pass an explicit `bandKey`
- * (a band's own upper-limit price would otherwise map to the band above it);
- * only the free-form custom price relies on this lookup. Returns null when no
- * band contains the price (e.g. an item with no bands).
- */
-export function bandForPrice(
-  bands: ReadonlyArray<StoredTariffBand>,
-  price: Decimal,
-): StoredTariffBand | null {
-  for (const band of bands) {
-    const aboveLower = band.lowerLimit === null || price.gte(band.lowerLimit);
-    const belowUpper = band.upperLimit === null || price.lte(band.upperLimit);
-    if (aboveLower && belowUpper) return band;
-  }
-  return null;
-}
 
 export interface ComputedEstimate {
   readonly calculable: boolean;
@@ -235,54 +218,13 @@ export interface ComputedEstimate {
  * How the estimate resolves its commission:
  *   - `band`    — from the tariff bands: a non-null `bandKey` selects that band
  *                 exactly (band-click); otherwise the band the price falls into
- *                 (`bandForPrice`) supplies it (custom-price what-if).
+ *                 (`storedTariffBandForPrice`) supplies it (custom-price what-if).
  *   - `override` — supplied directly (the current scenario), so NO band lookup
  *                 happens; the rate is applied verbatim.
  */
 export type EstimateCommission =
   | { readonly kind: 'band'; readonly bandKey: string | null }
   | { readonly kind: 'override'; readonly commissionPct: Decimal };
-
-/**
- * Assembles the variant's econ at `commissionRate` and computes the breakdown at
- * `price`, echoing the caller-chosen `bandKey` / `commissionPct` on the result.
- * Shared tail of both estimate modes — the variant is already known non-null.
- */
-function estimateAtCommission(
-  ctx: TariffAssemblyContext,
-  variant: TariffVariant,
-  costAggregate: VariantCostAggregate | undefined,
-  shipping: EstimateOutcome,
-  price: Decimal,
-  commissionRate: Decimal,
-  bandKey: string | null,
-  commissionPct: string,
-): ComputedEstimate {
-  const inputs: AssemblyInputs = {
-    costAggregate,
-    commission: tariffCommission(commissionRate),
-    shipping,
-  };
-  const probe = assembleUnitEconomics(ctx, variant, inputs);
-
-  if (probe.econ === null) {
-    return {
-      calculable: false,
-      reason: deriveReason(probe.costStatus === 'OK', probe.shippingStatus === 'OK'),
-      bandKey,
-      commissionPct,
-      breakdown: null,
-    };
-  }
-
-  return {
-    calculable: true,
-    reason: null,
-    bandKey,
-    commissionPct,
-    breakdown: serializeBreakdown(computeUnitProfit(probe.econ, price)),
-  };
-}
 
 const NO_PRODUCT_ESTIMATE: ComputedEstimate = {
   calculable: false,
@@ -292,57 +234,120 @@ const NO_PRODUCT_ESTIMATE: ComputedEstimate = {
   breakdown: null,
 };
 
+/** The commission a non-override estimate applies: its rate plus the band key + stored string it echoes. */
+interface ResolvedEstimateCommission {
+  readonly rate: Decimal;
+  readonly bandKey: string | null;
+  readonly commissionPct: string;
+}
+
 /**
- * Computes the full profit breakdown for ONE tariff item at `price`. Mirrors
- * `computeItemBands` (same assembly, same not-calculable semantics) but returns
- * a single serialized breakdown for the detail band-click modal, the custom-price
- * what-if, and the current-scenario breakdown. The commission comes from
- * `commission`: `band` resolves a tariff band (see `EstimateCommission`), while
- * `override` applies the given rate directly (no band, so `bandKey` is null on the
- * result). A null variant — or, in band mode, no resolvable band — is
- * not-calculable with reason `NO_PRODUCT` (matching the detail view).
+ * Resolves the commission an estimate applies. Override mode echoes the given rate with
+ * no band. Band mode selects the explicit `bandKey`, else the band the price falls into
+ * (`storedTariffBandForPrice`); a band mode with no resolvable band returns null, which
+ * the caller maps to NO_PRODUCT (matching the detail view).
  */
-export function computeItemEstimate(
-  ctx: TariffAssemblyContext,
-  bands: ReadonlyArray<StoredTariffBand>,
-  variant: TariffVariant | null,
-  costAggregate: VariantCostAggregate | undefined,
-  shipping: EstimateOutcome,
+function resolveEstimateCommission(
+  bands: readonly StoredTariffBand[],
   price: Decimal,
   commission: EstimateCommission,
-): ComputedEstimate {
-  // Override mode (current scenario): commission is supplied directly, no band
-  // lookup. Only the variant match gates calculability (same NO_PRODUCT semantics).
+): ResolvedEstimateCommission | null {
   if (commission.kind === 'override') {
-    if (variant === null) return NO_PRODUCT_ESTIMATE;
-    return estimateAtCommission(
-      ctx,
-      variant,
-      costAggregate,
-      shipping,
-      price,
-      commission.commissionPct,
-      null,
-      commission.commissionPct.toString(),
-    );
+    return {
+      rate: commission.commissionPct,
+      bandKey: null,
+      commissionPct: commission.commissionPct.toString(),
+    };
   }
-
-  // Band mode: a non-null bandKey selects the band exactly (band-click); otherwise
-  // the band the price falls into supplies the commission (custom-price what-if).
   const band =
     (commission.bandKey !== null ? bands.find((b) => b.key === commission.bandKey) : undefined) ??
-    bandForPrice(bands, price);
+    storedTariffBandForPrice(bands, price);
+  if (band === null) {
+    return null;
+  }
+  return {
+    rate: new Decimal(band.commissionPct),
+    bandKey: band.key,
+    commissionPct: band.commissionPct,
+  };
+}
 
-  if (variant === null || band === null) return NO_PRODUCT_ESTIMATE;
+/**
+ * Computes the full profit breakdown for ONE tariff item at `price` with the scenario
+ * engine. Mirrors `computeItemBands` (same engine, same not-calculable semantics) but
+ * returns a single serialized breakdown (4-decimal margins) for the detail band-click
+ * modal, the custom-price what-if, and the current-scenario breakdown. The commission
+ * comes from `commission` (band or override). An unmatched variant (`base` no-product),
+ * or in band mode no resolvable band, is not-calculable with reason NO_PRODUCT. A
+ * store-wide load failure (`base` degraded) echoes the resolved band/commission with a
+ * null breakdown and null reason.
+ */
+export function computeItemEstimate(params: {
+  readonly bands: readonly StoredTariffBand[];
+  readonly base: ScreenScenarioBase;
+  readonly price: Decimal;
+  readonly commission: EstimateCommission;
+}): ComputedEstimate {
+  const { bands, base, price, commission } = params;
 
-  return estimateAtCommission(
-    ctx,
-    variant,
-    costAggregate,
-    shipping,
-    price,
-    new Decimal(band.commissionPct),
-    band.key,
-    band.commissionPct,
-  );
+  // An unmatched barcode is NO_PRODUCT regardless of mode.
+  if (base.kind === 'no-product') {
+    return NO_PRODUCT_ESTIMATE;
+  }
+
+  const resolved = resolveEstimateCommission(bands, price, commission);
+  // Band mode with no resolvable band: NO_PRODUCT (matching the detail view).
+  if (resolved === null) {
+    return NO_PRODUCT_ESTIMATE;
+  }
+
+  // A store-wide load failure (already logged): echo the resolved band/commission, but
+  // the breakdown could not be computed.
+  if (base.kind === 'degraded') {
+    return {
+      calculable: false,
+      reason: null,
+      bandKey: resolved.bandKey,
+      commissionPct: resolved.commissionPct,
+      breakdown: null,
+    };
+  }
+
+  const outcome = evaluateScreenScenario({
+    base: base.base,
+    unitPrice: price,
+    commissionPct: resolved.rate,
+  });
+  if (!outcome.calculable) {
+    return {
+      calculable: false,
+      reason: outcome.reason,
+      bandKey: resolved.bandKey,
+      commissionPct: resolved.commissionPct,
+      breakdown: null,
+    };
+  }
+
+  const breakdown = quoteBreakdownFromStatement({
+    statement: outcome.statement,
+    listGross: price,
+    sellerDiscountGross: new Decimal(0),
+  });
+  if (breakdown === null) {
+    return {
+      calculable: false,
+      reason: null,
+      bandKey: resolved.bandKey,
+      commissionPct: resolved.commissionPct,
+      breakdown: null,
+    };
+  }
+
+  return {
+    calculable: true,
+    reason: null,
+    bandKey: resolved.bandKey,
+    commissionPct: resolved.commissionPct,
+    breakdown,
+  };
 }

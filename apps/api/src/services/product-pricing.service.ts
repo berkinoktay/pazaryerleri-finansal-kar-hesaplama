@@ -29,7 +29,6 @@ import {
   grossToVat,
   loadTrendyolScenarioBases,
   resolveFeeDefinition,
-  roundPercent,
   solveTrendyolScenarioPrice,
   statementTotalsFromStatement,
   UnsupportedPlatformError,
@@ -56,6 +55,7 @@ import { InvalidReferenceError, mapPrismaError } from '@pazarsync/sync-core';
 import { type ResolvedCommissionRate } from './commission-rate-resolver';
 import { feeToProfitInputFee, deriveCalculable } from './product-pricing-assembly';
 import { logProfitReadFailure } from './profit-compute-fallback.service';
+import { createRequestFailureLog, formatMarginPct2, formatMoney2 } from './scenario-screen-commons';
 import { SHIPPING_ESTIMATE_CTE_SQL, type ShippingEstimateRow } from './shipping-estimator.sql';
 import type {
   CommissionStatus,
@@ -637,10 +637,9 @@ async function computeScenarioRows(
     bases = null;
   }
 
-  // Collect per-variant evaluation failures (count + first error) and log them once
-  // after the pass, so a systemic per-variant failure on a large list is one log line.
-  let firstEvaluationError: unknown = null;
-  let failedCount = 0;
+  // Collect per-variant evaluation failures and log them once after the pass, so a
+  // systemic per-variant failure on a large list is one log line.
+  const failureLog = createRequestFailureLog({ surface: 'product-pricing', organizationId: orgId });
 
   const rows = variants.map((variant): ComputedPricingRow => {
     const loaded = bases === null ? undefined : bases.get(variant.id);
@@ -654,23 +653,12 @@ async function computeScenarioRows(
       });
       return computeRowFromStatement(variant, statement);
     } catch (err) {
-      if (failedCount === 0) {
-        firstEvaluationError = err;
-      }
-      failedCount += 1;
+      failureLog.record(err);
       return degradedRow(variant);
     }
   });
 
-  if (failedCount > 0) {
-    logProfitReadFailure({
-      surface: 'product-pricing',
-      organizationId: orgId,
-      orderId: null,
-      err: firstEvaluationError,
-      failedCount,
-    });
-  }
+  failureLog.flush();
 
   return rows;
 }
@@ -1010,26 +998,6 @@ type RowDisplayFields = Omit<
   'calculable' | 'netProfit' | 'saleMarginPct' | 'costMarkupPct'
 >;
 
-/** A two-decimal money string (half-up), signed zero normalized to a plain zero. */
-function money2(value: Decimal): string {
-  const fixed = value.toFixed(2, Decimal.ROUND_HALF_UP);
-  return fixed === '-0.00' ? '0.00' : fixed;
-}
-
-/**
- * A margin as a two-decimal string, rounded the way the stored statement rounds it
- * (roundPercent to the stored scale first, then two decimals) so the list renders the
- * same value the order list and the stored row do. Null stays null; signed zero is
- * normalized to a plain zero.
- */
-function marginPct2(value: Decimal | null): string | null {
-  if (value === null) {
-    return null;
-  }
-  const fixed = roundPercent(value).toFixed(2, Decimal.ROUND_HALF_UP);
-  return fixed === '-0.00' ? '0.00' : fixed;
-}
-
 /**
  * Maps a SHIPPING_ESTIMATE_UNAVAILABLE issue's `detail` (a ShippingUnavailableReason)
  * to the wire ShippingEstimateStatus. A Record keyed by the reason union, so a new
@@ -1176,7 +1144,7 @@ function computeRowFromStatement(
   statement: ProfitStatement,
 ): ComputedPricingRow {
   const statuses = statusesFromIssues(statement.issues);
-  const cost = statuses.costStatus === 'OK' ? money2(statement.costGross) : null;
+  const cost = statuses.costStatus === 'OK' ? formatMoney2(statement.costGross) : null;
   const display = buildRowDisplayFields(variant, statuses, cost);
 
   const calculable = deriveCalculable(
@@ -1193,9 +1161,9 @@ function computeRowFromStatement(
     row: {
       ...display,
       calculable: true,
-      netProfit: money2(netProfit),
-      saleMarginPct: marginPct2(statement.saleMarginPct),
-      costMarkupPct: marginPct2(statement.costMarkupPct),
+      netProfit: formatMoney2(netProfit),
+      saleMarginPct: formatMarginPct2(statement.saleMarginPct),
+      costMarkupPct: formatMarginPct2(statement.costMarkupPct),
     },
     netProfit,
     saleMarginPct: statement.saleMarginPct,

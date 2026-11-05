@@ -77,7 +77,7 @@ app.openapi(estimateRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId, tariffId, itemId } = c.req.valid('param');
   const { price, bandKey, scenario } = c.req.valid('json');
-  const { store, role } = await requireStoreAccess(userId, orgId, storeId);
+  const { role } = await requireStoreAccess(userId, orgId, storeId);
   assertCapability(role, CAPABILITIES.DATA_READ);
 
   let input: EstimateItemPriceInput;
@@ -91,7 +91,7 @@ app.openapi(estimateRoute, async (c) => {
     throw new ValidationError([{ field: 'price', code: 'PRICE_REQUIRED' }]);
   }
 
-  const result = await estimateItemPrice(orgId, storeId, store, tariffId, itemId, input);
+  const result = await estimateItemPrice(orgId, storeId, tariffId, itemId, input);
   return c.json(result, 200);
 });
 

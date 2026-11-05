@@ -13,25 +13,20 @@
 import { Decimal } from 'decimal.js';
 
 import { Prisma, prisma } from '@pazarsync/db';
-import type { Store as PrismaStore } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
-import type { EstimateOutcome } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
 import { resolveValidity, tariffBoundInstantOrNull } from '../lib/tariff-period';
-import { fetchCostAggregates } from './products-list.service';
-import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
 import {
   computePlusItem,
   type ComputedPlusItem,
   type PlusItemInputs,
 } from './plus-commission-tariff-compute.service';
 import {
-  NO_SHIPPING,
-  type TariffAssemblyContext,
-  type TariffVariant,
-} from './tariff-compute-commons';
-import type { VariantCostAggregate } from '../validators/product.validator';
+  createRequestFailureLog,
+  loadScreenScenarioBases,
+  screenScenarioBaseFor,
+} from './scenario-screen-commons';
 import type {
   PlusTariffDetail,
   PlusTariffDetailItem,
@@ -128,14 +123,15 @@ export async function listPlusTariffs(
  * Throws `NotFoundError` when the tariff does not belong to this store. Periods are
  * ordered by `sortOrder`; within each, items follow the Excel row order
  * (`sortOrder`, barcode tie-break) so every sub-period tab lists products
- * identically. Matched items are joined to their ProductVariant; cost + shipping
- * are batch-resolved ONCE for the whole tariff, fee definitions once, then each
- * item is computed by reusing the product-pricing assembly.
+ * identically. The scenario bases of every matched variant are loaded ONCE for the
+ * whole tariff, then each item is computed by the scenario engine with the chosen
+ * commission as an override; a slim org + store scoped query supplies the display
+ * image only. Per decision 9 a store-wide load failure or a per-item engine throw
+ * leaves that profit empty (logged once) rather than failing the request.
  */
 export async function getPlusTariffDetail(
   orgId: string,
   storeId: string,
-  store: PrismaStore,
   tariffId: string,
 ): Promise<PlusTariffDetail> {
   let tariff;
@@ -196,61 +192,44 @@ export async function getPlusTariffDetail(
     }
   }
 
-  // ─── Batch-resolve variants + cost + shipping + image once ────────────────
-  const variantMap = new Map<string, TariffVariant>();
+  // ─── Display image per matched variant (org + store scoped) ───────────────
+  // The only variant read the detail still needs; the profit inputs come from the
+  // scenario loader below. First catalog image, null when none attached.
   const imageMap = new Map<string, string | null>();
-  let costMap = new Map<string, VariantCostAggregate>();
-  let shippingMap = new Map<string, EstimateOutcome>();
-
   if (variantIds.length > 0) {
     let variants;
     try {
       variants = await prisma.productVariant.findMany({
         where: { id: { in: variantIds }, organizationId: orgId, storeId },
-        select: {
-          id: true,
-          stockCode: true,
-          barcode: true,
-          salePrice: true,
-          vatRate: true,
-          isDigital: true,
-          product: {
-            select: {
-              title: true,
-              categoryId: true,
-              brandId: true,
-              imageUrls: true,
-            },
-          },
-        },
+        select: { id: true, product: { select: { imageUrls: true } } },
       });
     } catch (err) {
       mapPrismaError(err);
     }
     for (const variant of variants) {
-      variantMap.set(variant.id, variant);
       imageMap.set(variant.id, variant.product.imageUrls[0] ?? null);
     }
-
-    [costMap, shippingMap] = await Promise.all([
-      fetchCostAggregates(orgId, variantIds),
-      batchResolveShipping(orgId, storeId, variantIds),
-    ]);
   }
 
-  const feeDefs = await prisma.$transaction((tx) => resolveFeeDefs(tx, store.platform));
-  const ctx: TariffAssemblyContext = { platform: store.platform, feeDefs };
+  // ─── One scenario-base load for the whole tariff; scenario date = now ─────
   const now = new Date();
+  const bases = await loadScreenScenarioBases({
+    organizationId: orgId,
+    storeId,
+    scenarioDate: now,
+    variantIds,
+    surface: 'plus-commission-tariff',
+  });
+
+  // A per-item engine throw degrades only that item; collect and log once (decision 9).
+  const failureLog = createRequestFailureLog({
+    surface: 'plus-commission-tariff',
+    organizationId: orgId,
+  });
 
   const periods = tariff.periods.map((period): PlusTariffPeriod => {
     const items = period.items.map((item): PlusTariffDetailItem => {
-      const variant =
-        item.productVariantId !== null ? variantMap.get(item.productVariantId) : undefined;
-      const cost = item.productVariantId !== null ? costMap.get(item.productVariantId) : undefined;
-      const shipping =
-        item.productVariantId !== null
-          ? (shippingMap.get(item.productVariantId) ?? NO_SHIPPING)
-          : NO_SHIPPING;
+      const base = screenScenarioBaseFor(bases, item.productVariantId);
 
       // The committed custom price is intentionally NOT passed to the compute: the
       // Plus offer scenario is always the ceiling (see plus-commission-tariff-compute
@@ -263,13 +242,13 @@ export async function getPlusTariffDetail(
         plusPriceUpperLimit: new Decimal(item.plusPriceUpperLimit.toString()),
         plusCommissionPct: new Decimal(item.plusCommissionPct.toString()),
       };
-      const computed: ComputedPlusItem = computePlusItem(
-        ctx,
-        inputs,
-        variant ?? null,
-        cost,
-        shipping,
-      );
+      let computed: ComputedPlusItem;
+      try {
+        computed = computePlusItem({ inputs, base });
+      } catch (err) {
+        failureLog.record(err);
+        computed = computePlusItem({ inputs, base: { kind: 'degraded' } });
+      }
 
       return {
         id: item.id,
@@ -309,6 +288,8 @@ export async function getPlusTariffDetail(
       items,
     };
   });
+
+  failureLog.flush();
 
   return { id: tariff.id, name: tariff.name, exported: tariff.exportedAt !== null, periods };
 }

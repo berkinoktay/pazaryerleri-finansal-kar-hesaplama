@@ -1,8 +1,15 @@
-// Shared compute primitives for the campaign tariff features (Ürün Komisyon +
-// Plus Komisyon). Both features price a variant by REUSING the Ürün Fiyatlandırma
-// assembly (`assembleUnitEconomics` + `computeUnitProfit`) and OVERRIDING only the
-// commission — everything else (cost, shipping, PSF, stoppage, VAT) is identical.
-// This module holds the pieces that are byte-for-byte the same across both.
+// Shared compute primitives for the tariff/campaign features.
+//
+// `TariffItemReason` is the shared wire reason every one of these screens serializes;
+// it stays here regardless of engine.
+//
+// LEGACY (deleted in Faz 4B Task 8 with `assembleUnitEconomics`): `TariffAssemblyContext`,
+// `tariffCommission`, `deriveReason`, `NO_SHIPPING` and `TariffVariant` back the advantage,
+// flash, discount and campaign screens, which still price via the old unit assembly
+// (`assembleUnitEconomics` + `computeUnitProfit`) by OVERRIDING only the commission. The
+// product and Plus commission tariffs have moved to the scenario engine (Task 5) and no
+// longer use any of them. Once Tasks 6-8 move the remaining screens too, this file keeps
+// only `TariffItemReason`.
 
 import type { Decimal } from 'decimal.js';
 

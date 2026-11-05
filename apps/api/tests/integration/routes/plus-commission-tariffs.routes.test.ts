@@ -14,7 +14,7 @@
 // (each Supabase auth user costs ~800 ms). SENDEOMP is ensured by globalSetup.
 
 import { Decimal } from 'decimal.js';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 
@@ -152,6 +152,22 @@ async function setupTariffFixture(): Promise<TariffFixture> {
       type: 'COGS',
       amountGross: new Decimal('200.00'),
       vatRate: 20,
+    },
+  });
+  // The scenario engine costs from the profile's VERSIONS (effective-dated), exactly as
+  // the real cost-profile service writes a version 1 on create. Without it the variant
+  // would read MISSING_COST.
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId: org.id,
+      version: 1,
+      name: 'COGS Test',
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      vatRate: 20,
+      changedFields: [],
+      effectiveFrom: new Date('2024-01-01T00:00:00Z'),
     },
   });
   await prisma.productVariantCostProfile.create({
@@ -442,6 +458,19 @@ describe('Plus Commission Tariffs - list / detail / delete', () => {
         vatRate: 20,
       },
     });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Base',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
     await prisma.productVariantCostProfile.create({
       data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
     });
@@ -574,6 +603,19 @@ describe('Plus Commission Tariffs - list / detail / delete', () => {
         type: 'COGS',
         amountGross: new Decimal('200.00'),
         vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Ceiling',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
       },
     });
     await prisma.productVariantCostProfile.create({
@@ -751,5 +793,175 @@ describe('Plus Commission Tariffs - validity reflects the real Istanbul instant'
     );
     const list = (await listRes.json()) as ListWire;
     expect(list.data.find((r) => r.id === tariffId)?.validity).toBe('active');
+  });
+});
+
+describe('Plus Commission Tariffs - per-item degrade (decision 9)', () => {
+  // One item's scenario is forced to throw (a negative commission-base price, which the
+  // engine's unit-price validator rejects): the detail must still return 200 with that
+  // item's profit empty (reason null) while the sibling item computes fine, and the
+  // failure must be logged exactly once per request with the right surface + failedCount.
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  it('keeps the Plus detail up when one item fails to compute', async () => {
+    await truncateAll();
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing - globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Plus Degrade Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'plus-degrade-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 8801n,
+        productMainId: 'pm-8801',
+        title: 'Bozulma Urunu',
+        categoryId: 597n,
+        categoryName: 'Gomlek',
+        brandId: 2032n,
+        brandName: 'Modline',
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: 88010n,
+        barcode: 'BC-PDEG',
+        stockCode: 'STK-PDEG',
+        salePrice: new Decimal('500.00'),
+        listPrice: new Decimal('500.00'),
+        vatRate: 20,
+        dimensionalWeightOverride: new Decimal('3.0'),
+      },
+    });
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'COGS Plus Degrade',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Plus Degrade',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+    });
+    await ensureFeeDefinitions();
+
+    const tariff = await prisma.plusCommissionTariff.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Bozulma Tarifesi' },
+    });
+    const period = await prisma.plusCommissionTariffPeriod.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: tariff.id,
+        dateRangeLabel: '1 - 7 Temmuz',
+        sortOrder: 0,
+      },
+    });
+    // Healthy item: a positive commission-base price -> computes.
+    await prisma.plusCommissionTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        periodId: period.id,
+        productVariantId: variant.id,
+        barcode: 'BC-OK',
+        productTitle: 'Saglam',
+        currentPrice: '500.00',
+        commissionBasePrice: '400.00',
+        currentCommissionPct: '19.0000',
+        plusPriceUpperLimit: '450.00',
+        plusCommissionPct: '15.4',
+        plusCommissionBasePrice: '450.00',
+        sortOrder: 0,
+      },
+    });
+    // Failing item: same calculable variant, but a NEGATIVE commission-base price makes
+    // the engine reject the baseline unit price -> that item's compute throws.
+    const failing = await prisma.plusCommissionTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        periodId: period.id,
+        productVariantId: variant.id,
+        barcode: 'BC-FAIL',
+        productTitle: 'Bozuk',
+        currentPrice: '500.00',
+        commissionBasePrice: '-5.00',
+        currentCommissionPct: '19.0000',
+        plusPriceUpperLimit: '450.00',
+        plusCommissionPct: '15.4',
+        plusCommissionBasePrice: '450.00',
+        sortOrder: 1,
+      },
+    });
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/plus-commission-tariffs/${tariff.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const items = ((await res.json()) as DetailWire).periods[0]?.items ?? [];
+
+      const ok = items.find((i) => i.barcode === 'BC-OK');
+      expect(ok?.calculable).toBe(true);
+      expect(ok?.currentNetProfit).not.toBeNull();
+
+      const bad = items.find((i) => i.id === failing.id);
+      expect(bad?.calculable).toBe(false);
+      // A degraded compute carries no reason (not NO_PRODUCT -- the variant is matched).
+      expect(bad?.reason).toBeNull();
+      expect(bad?.currentNetProfit).toBeNull();
+      expect(bad?.plus.netProfit).toBeNull();
+
+      // One failing item -> exactly one [profit-read] line for this surface, failedCount 1.
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[profit-read] in-request profit computation failed',
+        expect.objectContaining({
+          surface: 'plus-commission-tariff',
+          orderId: null,
+          failedCount: 1,
+        }),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

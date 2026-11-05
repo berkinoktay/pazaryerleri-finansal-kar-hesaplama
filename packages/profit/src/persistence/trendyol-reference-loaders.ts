@@ -29,7 +29,7 @@ import {
 } from '../marketplaces/trendyol/trendyol-inputs';
 import {
   parseStoredTariffBands,
-  type StoredTariffBand,
+  toCommissionBand,
 } from '../marketplaces/trendyol/stored-tariff-bands';
 import {
   IncompleteFeeDefinitionError,
@@ -60,15 +60,6 @@ function requireFeeField(
     throw new IncompleteFeeDefinitionError(feeType, field);
   }
   return dec(value);
-}
-
-/** One stored tariff band -> a Trendyol commission band; the rate is already a percent. */
-function toCommissionBand(band: StoredTariffBand): TrendyolCommissionBand {
-  return {
-    lowerLimit: band.lowerLimit === null ? null : new Decimal(band.lowerLimit),
-    upperLimit: band.upperLimit === null ? null : new Decimal(band.upperLimit),
-    ratePct: new Decimal(band.commissionPct),
-  };
 }
 
 /** One cost profile version row -> the pure cost version input (decision 6: the version's effective date). */

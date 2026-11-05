@@ -17,11 +17,15 @@
 
 import { Decimal } from 'decimal.js';
 
-import { computeUnitProfit, type EstimateOutcome, type UnitEconomics } from '@pazarsync/profit';
+import {
+  computeUnitProfit,
+  storedTariffBandForPrice,
+  type EstimateOutcome,
+  type StoredTariffBand,
+  type UnitEconomics,
+} from '@pazarsync/profit';
 
 import { resolveValidity, type TariffValidity } from '../lib/tariff-period';
-import { bandForPrice } from './commission-tariff-compute.service';
-import type { StoredTariffBand } from '@pazarsync/profit';
 import {
   assembleUnitEconomics,
   serializeBreakdown,
@@ -58,7 +62,7 @@ export function resolveFlashCommission(
   price: Decimal,
 ): ResolvedFlashCommission {
   if (bands !== null && bands.length > 0) {
-    const band = bandForPrice(bands, price);
+    const band = storedTariffBandForPrice(bands, price);
     if (band !== null) return { pct: new Decimal(band.commissionPct), source: 'band' };
   }
   return { pct: flatPct, source: 'current' };

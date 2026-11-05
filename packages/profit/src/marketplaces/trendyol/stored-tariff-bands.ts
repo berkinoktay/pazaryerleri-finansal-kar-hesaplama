@@ -5,7 +5,11 @@
 // JSON shape and the type guard that reads it. Period validity + Trendyol
 // period-label parsing stay in the backend's `lib/tariff-period.ts`.
 
+import { Decimal } from 'decimal.js';
 import type { Prisma } from '@pazarsync/db';
+
+import { trendyolBandForPrice } from './resolve-commission-rate';
+import { type TrendyolCommissionBand } from './trendyol-inputs';
 
 // --- Persisted band JSON ---
 //
@@ -48,4 +52,37 @@ export function parseStoredTariffBands(value: Prisma.JsonValue): StoredTariffBan
     }
   }
   return bands;
+}
+
+/** One stored tariff band -> a Trendyol commission band; the rate is already a percent. */
+export function toCommissionBand(band: StoredTariffBand): TrendyolCommissionBand {
+  return {
+    lowerLimit: band.lowerLimit === null ? null : new Decimal(band.lowerLimit),
+    upperLimit: band.upperLimit === null ? null : new Decimal(band.upperLimit),
+    ratePct: new Decimal(band.commissionPct),
+  };
+}
+
+/**
+ * The stored tariff band whose inclusive price range contains `price`, or null when
+ * none does. It converts the stored bands to `TrendyolCommissionBand` in the same
+ * order, defers the match to `trendyolBandForPrice` (the single band-resolution rule:
+ * inclusive limits, first match wins, so a shared boundary resolves to the band listed
+ * first -- the higher band), then maps the hit back to the stored band by index so its
+ * `key` survives. A band-click therefore passes its own band explicitly; only a
+ * free-form price relies on this lookup.
+ */
+export function storedTariffBandForPrice(
+  bands: readonly StoredTariffBand[],
+  price: Decimal,
+): StoredTariffBand | null {
+  const commissionBands = bands.map(toCommissionBand);
+  const hit = trendyolBandForPrice(commissionBands, price);
+  if (hit === null) {
+    return null;
+  }
+  // `hit` is a member of `commissionBands` (same order as `bands`), so its index maps
+  // straight back to the stored band. A -1 (never, defensively) reads undefined -> null.
+  const index = commissionBands.indexOf(hit);
+  return bands[index] ?? null;
 }

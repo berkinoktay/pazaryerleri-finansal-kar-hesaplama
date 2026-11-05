@@ -127,6 +127,22 @@ async function setupFixture(): Promise<EstimateFixture> {
       vatRate: 20,
     },
   });
+  // The scenario engine costs from the profile's VERSIONS (effective-dated), exactly as
+  // the real cost-profile service writes a version 1 on create. Without it the variant
+  // would read MISSING_COST.
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId: org.id,
+      version: 1,
+      name: 'COGS Test',
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      vatRate: 20,
+      changedFields: [],
+      effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+    },
+  });
   await prisma.productVariantCostProfile.create({
     data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
   });
@@ -268,6 +284,33 @@ describe('Commission Tariffs — item estimate', () => {
     expect(body.commissionPct).toBe('19');
   });
 
+  it('keeps the band key on the estimate', async () => {
+    // A band-click passes an explicit bandKey; at a price on that band's upper limit
+    // (450 = band2.upper = band1.lower, a shared boundary) the echoed key must stay
+    // band2, NOT the higher band the raw price lookup would pick.
+    const clicked = await app.request(estimateUrl(fx, fx.matchedItemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ price: '450.00', bandKey: 'band2' }),
+    });
+    expect(clicked.status).toBe(200);
+    const clickedBody = (await clicked.json()) as EstimateWire;
+    expect(clickedBody.bandKey).toBe('band2');
+    expect(clickedBody.commissionPct).toBe('15');
+
+    // A custom price strictly inside another band (375 in band3 [350,400]) echoes THAT
+    // band's key, resolved from the price alone (no explicit bandKey).
+    const custom = await app.request(estimateUrl(fx, fx.matchedItemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ price: '375.00' }),
+    });
+    expect(custom.status).toBe(200);
+    const customBody = (await custom.json()) as EstimateWire;
+    expect(customBody.bandKey).toBe('band3');
+    expect(customBody.commissionPct).toBe('12');
+  });
+
   it('current scenario breakdown equals the detail currentNetProfit (same engine, same price + commission)', async () => {
     // Read the detail's current-scenario numbers for the SAME item, then prove the
     // estimate reproduces them byte-for-byte — the guarantee the badge relies on.
@@ -378,5 +421,169 @@ describe('Commission Tariffs — item estimate', () => {
     expect(body.code).toBe('VALIDATION_ERROR');
     expect(body.errors[0]?.field).toBe('price');
     expect(body.errors[0]?.code).toBe('INVALID_CUSTOM_PRICE');
+  });
+});
+
+describe('Commission Tariffs — zero-commission band', () => {
+  // The engine honors an explicit 0% commission override (plan Görev 1). Two bands land
+  // on the SAME price (500): band1 is open-topped from 500 (0% commission), band2 is
+  // [400, 500] (19%). Priced at 500 the 0% band must net strictly MORE than the 19% band,
+  // and the estimate at the 0% band must charge no commission at all.
+  let accessToken: string;
+  let orgId: string;
+  let storeId: string;
+  let tariffId: string;
+  let itemId: string;
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing — globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Zero Commission Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'zero-commission-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 8203n,
+        productMainId: 'pm-8203',
+        title: 'Sifir Komisyon Urunu',
+        categoryId: 597n,
+        categoryName: 'Gömlek',
+        brandId: 2032n,
+        brandName: 'Modline',
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: 82030n,
+        barcode: 'BC-ZERO',
+        stockCode: 'STK-ZERO',
+        salePrice: new Decimal('500.00'),
+        listPrice: new Decimal('500.00'),
+        vatRate: 20,
+        dimensionalWeightOverride: new Decimal('3.0'),
+      },
+    });
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'COGS Zero',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Zero',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+    });
+    await ensureFeeDefinitions();
+
+    const tariff = await prisma.commissionTariff.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Sifir Tarifesi' },
+    });
+    const period = await prisma.commissionTariffPeriod.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: tariff.id,
+        dateRangeLabel: '1 – 7 Temmuz',
+        sortOrder: 0,
+      },
+    });
+    const item = await prisma.commissionTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        periodId: period.id,
+        productVariantId: variant.id,
+        barcode: 'BC-ZERO',
+        stockCode: 'STK-ZERO',
+        productTitle: 'Sifir Komisyon Urunu',
+        currentPrice: '500.00',
+        commissionBasePrice: '500.00',
+        currentCommissionPct: '19.0000',
+        // band1 open-topped from 500 (bandPrice = 500, 0% commission); band2 [400,500]
+        // (bandPrice = 500, 19%). Both priced at 500 for an apples-to-apples comparison.
+        bands: [
+          { key: 'band1', lowerLimit: '500.00', commissionPct: '0' },
+          { key: 'band2', lowerLimit: '400.00', upperLimit: '500.00', commissionPct: '19' },
+        ],
+      },
+    });
+
+    accessToken = user.accessToken;
+    orgId = org.id;
+    storeId = store.id;
+    tariffId = tariff.id;
+    itemId = item.id;
+  });
+
+  it('prices a zero-commission band at zero commission', async () => {
+    const detailRes = await app.request(
+      `/v1/organizations/${orgId}/stores/${storeId}/commission-tariffs/${tariffId}`,
+      { headers: { Authorization: bearer(accessToken) } },
+    );
+    expect(detailRes.status).toBe(200);
+    const matched = ((await detailRes.json()) as DetailWire).periods[0]?.items.find(
+      (i) => i.barcode === 'BC-ZERO',
+    );
+    const zeroBand = matched?.bands.find((b) => b.key === 'band1');
+    const paidBand = matched?.bands.find((b) => b.key === 'band2');
+    expect(zeroBand?.price).toBe('500.00');
+    expect(paidBand?.price).toBe('500.00');
+    expect(zeroBand?.netProfit).not.toBeNull();
+    expect(paidBand?.netProfit).not.toBeNull();
+    // Same price, no commission vs 19% commission -> the 0% band nets strictly more.
+    expect(Number(zeroBand?.netProfit)).toBeGreaterThan(Number(paidBand?.netProfit));
+
+    const estRes = await app.request(
+      `/v1/organizations/${orgId}/stores/${storeId}/commission-tariffs/${tariffId}/items/${itemId}/estimate`,
+      {
+        method: 'POST',
+        headers: { Authorization: bearer(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ price: '500.00', bandKey: 'band1' }),
+      },
+    );
+    expect(estRes.status).toBe(200);
+    const est = (await estRes.json()) as EstimateWire;
+    expect(est.bandKey).toBe('band1');
+    expect(est.commissionPct).toBe('0');
+    // An explicit 0% override charges no commission at all.
+    expect(est.breakdown?.commissionGross).toBe('0.00');
+    // The estimate at the band price reproduces the detail band's profit exactly.
+    expect(est.breakdown?.netProfit).toBe(zeroBand?.netProfit);
   });
 });

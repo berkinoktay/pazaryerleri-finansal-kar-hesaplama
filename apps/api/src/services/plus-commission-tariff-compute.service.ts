@@ -1,9 +1,9 @@
 // Profit computation for the saved Plus Commission Tariffs feature.
 //
-// Like the product commission tariff, this REUSES the Ürün Fiyatlandırma assembly
-// (`assembleUnitEconomics` + `computeUnitProfit`) and overrides only the
-// commission — no financial math is re-implemented. The difference: instead of a
-// 4-band ladder, each Plus item has exactly TWO scenarios:
+// Like the product commission tariff, this prices a variant with the shared scenario
+// engine (`@pazarsync/profit`) and hands it the chosen commission as an override -- no
+// financial math is re-implemented. The difference: instead of a 4-band ladder, each
+// Plus item has exactly TWO scenarios:
 //   • CURRENT — the seller's current price @ their current commission (e.g. 19%).
 //   • PLUS    — the Trendyol Plus price CEILING @ the reduced Plus commission
 //               (e.g. 15.4%). ALWAYS the ceiling: a committed custom Plus price is
@@ -11,29 +11,21 @@
 //               offer card is a pure ceiling option. The custom price is written by
 //               the export and priced free-form by the estimate endpoint instead.
 // The Plus deal requires DROPPING the price to the ceiling to earn the lower
-// commission (confirmed from the seller panel), so the value proposition is
-// whether the lower ceiling price + lower commission nets more than the status
-// quo — `plusIsBetter` compares the CEILING scenario against the current one.
-// Profit is optimistic (a what-if), like every estimate here.
+// commission (confirmed from the seller panel), so the value proposition is whether the
+// lower ceiling price + lower commission nets more than the status quo — `plusIsBetter`
+// compares the CEILING scenario against the current one. Profit is optimistic (a
+// what-if), like every estimate here.
 
 import { Decimal } from 'decimal.js';
 
-import { computeUnitProfit, type EstimateOutcome, type UnitEconomics } from '@pazarsync/profit';
-
 import {
-  assembleUnitEconomics,
-  serializeBreakdown,
-  type AssemblyInputs,
-  type QuoteBreakdown,
-} from './product-pricing.service';
-import {
-  deriveReason,
-  tariffCommission,
-  type TariffAssemblyContext,
-  type TariffItemReason,
-  type TariffVariant,
-} from './tariff-compute-commons';
-import type { VariantCostAggregate } from '../validators/product.validator';
+  evaluateScreenScenario,
+  formatMarginPct2,
+  formatMoney2,
+  type ScreenScenarioBase,
+} from './scenario-screen-commons';
+import { quoteBreakdownFromStatement, type QuoteBreakdown } from './product-pricing.service';
+import { type TariffItemReason } from './tariff-compute-commons';
 
 // ─── Inputs the compute reads off one persisted item ────────────────────────
 
@@ -84,15 +76,6 @@ export interface ComputedPlusItem {
 
 const NULL_CURRENT: ComputedCurrentScenario = { netProfit: null, marginPct: null };
 
-/**
- * The gross price the Plus offer scenario is computed at: ALWAYS the ceiling. A
- * committed custom price is deliberately NOT read here — the offer card is a pure
- * ceiling option; the custom price is exported and priced by the estimate endpoint.
- */
-function plusPrice(inputs: PlusItemInputs): Decimal {
-  return inputs.plusPriceUpperLimit;
-}
-
 function nullScenario(price: Decimal, commissionPct: Decimal): ComputedScenario {
   return {
     price: price.toFixed(2),
@@ -102,34 +85,27 @@ function nullScenario(price: Decimal, commissionPct: Decimal): ComputedScenario 
   };
 }
 
-/** Runs the engine at one (price, commission) over a shared base econ. */
-function runScenario(
-  baseEcon: UnitEconomics,
-  price: Decimal,
-  commissionPct: Decimal,
-): { netProfit: Decimal; marginPct: Decimal | null } {
-  const econ: UnitEconomics = { ...baseEcon, commissionRate: commissionPct };
-  const breakdown = computeUnitProfit(econ, price);
-  return { netProfit: breakdown.netProfit, marginPct: breakdown.saleMarginPct };
-}
-
 /**
- * Computes the current + Plus scenarios for one item. `variant` is null for an
- * unmatched barcode → not calculable (NO_PRODUCT). Otherwise the econ is probed
- * once (cost/shipping/PSF/VAT are commission-invariant); if non-null, the current
- * scenario runs at the commission-base price under the current commission and the
- * Plus scenario at the CEILING price under the reduced commission (a committed
- * custom price never enters here — see `plusPrice`).
+ * Computes the current + Plus scenarios for one item with the scenario engine. An
+ * unmatched barcode (`base` no-product) is not calculable (NO_PRODUCT); a store-wide
+ * load failure (`base` degraded) is not calculable with a null reason (the caller has
+ * already logged it). Otherwise the CURRENT baseline runs at the commission-base price
+ * under the current commission and decides the item's calculability; the PLUS scenario
+ * runs at the ceiling (`plusPriceUpperLimit`, ALWAYS -- a committed custom price never
+ * enters here) under the reduced commission, both passed to the engine as overrides. The
+ * engine may throw on a pathological input -- that propagates to the service, which
+ * catches it per item.
  */
-export function computePlusItem(
-  ctx: TariffAssemblyContext,
-  inputs: PlusItemInputs,
-  variant: TariffVariant | null,
-  costAggregate: VariantCostAggregate | undefined,
-  shipping: EstimateOutcome,
-): ComputedPlusItem {
-  const pPrice = plusPrice(inputs);
-  if (variant === null) {
+export function computePlusItem(params: {
+  readonly inputs: PlusItemInputs;
+  readonly base: ScreenScenarioBase;
+}): ComputedPlusItem {
+  const { inputs, base } = params;
+  // The Plus offer is ALWAYS priced at the ceiling; a committed custom price is echoed
+  // and priced by the estimate endpoint, never read here.
+  const pPrice = inputs.plusPriceUpperLimit;
+
+  if (base.kind === 'no-product') {
     return {
       calculable: false,
       reason: 'NO_PRODUCT',
@@ -139,44 +115,59 @@ export function computePlusItem(
     };
   }
 
-  const probeInputs: AssemblyInputs = {
-    costAggregate,
-    commission: tariffCommission(inputs.currentCommissionPct),
-    shipping,
-  };
-  const probe = assembleUnitEconomics(ctx, variant, probeInputs);
-
-  if (probe.econ === null) {
+  if (base.kind === 'degraded') {
     return {
       calculable: false,
-      reason: deriveReason(probe.costStatus === 'OK', probe.shippingStatus === 'OK'),
+      reason: null,
       current: NULL_CURRENT,
       plus: nullScenario(pPrice, inputs.plusCommissionPct),
       plusIsBetter: false,
     };
   }
 
-  const baseEcon: UnitEconomics = probe.econ;
+  // Baseline ("do nothing"): the current commission at the COMMISSION-BASE price — the
+  // customer-seen price commission is actually charged on, NOT the sale price. It
+  // decides the item's calculability.
+  const currentOutcome = evaluateScreenScenario({
+    base: base.base,
+    unitPrice: inputs.commissionBasePrice,
+    commissionPct: inputs.currentCommissionPct,
+  });
+  if (!currentOutcome.calculable) {
+    return {
+      calculable: false,
+      reason: currentOutcome.reason,
+      current: NULL_CURRENT,
+      plus: nullScenario(pPrice, inputs.plusCommissionPct),
+      plusIsBetter: false,
+    };
+  }
 
-  // Baseline ("do nothing"): the current commission at the COMMISSION-BASE price —
-  // the customer-seen price commission is actually charged on, NOT the sale price.
-  const current = runScenario(baseEcon, inputs.commissionBasePrice, inputs.currentCommissionPct);
-  const plus = runScenario(baseEcon, pPrice, inputs.plusCommissionPct);
+  const plusOutcome = evaluateScreenScenario({
+    base: base.base,
+    unitPrice: pPrice,
+    commissionPct: inputs.plusCommissionPct,
+  });
+
+  // plusIsBetter needs BOTH scenarios calculable; a null Plus profit never "wins".
+  const plusIsBetter = plusOutcome.calculable && plusOutcome.netProfit.gt(currentOutcome.netProfit);
 
   return {
     calculable: true,
     reason: null,
     current: {
-      netProfit: current.netProfit.toFixed(2),
-      marginPct: current.marginPct !== null ? current.marginPct.toFixed(2) : null,
+      netProfit: formatMoney2(currentOutcome.netProfit),
+      marginPct: formatMarginPct2(currentOutcome.statement.saleMarginPct),
     },
     plus: {
       price: pPrice.toFixed(2),
       commissionPct: inputs.plusCommissionPct.toString(),
-      netProfit: plus.netProfit.toFixed(2),
-      marginPct: plus.marginPct !== null ? plus.marginPct.toFixed(2) : null,
+      netProfit: plusOutcome.calculable ? formatMoney2(plusOutcome.netProfit) : null,
+      marginPct: plusOutcome.calculable
+        ? formatMarginPct2(plusOutcome.statement.saleMarginPct)
+        : null,
     },
-    plusIsBetter: plus.netProfit.gt(current.netProfit),
+    plusIsBetter,
   };
 }
 
@@ -185,52 +176,54 @@ export function computePlusItem(
 export interface ComputedPlusEstimate {
   readonly calculable: boolean;
   readonly reason: TariffItemReason | null;
-  /** The Plus commission percent applied (e.g. "15.4"); null when not calculable at all. */
+  /** The Plus commission percent applied (e.g. "15.4"); null when no variant. */
   readonly commissionPct: string | null;
   /** Full serialized profit breakdown at `price`; null when not calculable. */
   readonly breakdown: QuoteBreakdown | null;
 }
 
 /**
- * Computes the full profit breakdown for ONE Plus item at an arbitrary price
- * under a GIVEN commission percent (the caller picks the scenario's commission:
- * current or Plus). This is the free-form what-if the detail modal drives. Same
- * assembly + not-calculable semantics as `computePlusItem`. Commission is applied
- * as a PERCENT, exactly like the detail scenarios.
+ * Computes the full profit breakdown for ONE Plus item at an arbitrary `price` under a
+ * GIVEN commission percent (the caller picks the scenario's commission: current or Plus),
+ * with the scenario engine. This is the free-form what-if the detail modal drives. Same
+ * not-calculable semantics as `computePlusItem`: an unmatched variant (`base` no-product)
+ * has a null commission; a store-wide load failure (`base` degraded) or a not-calculable
+ * scenario still echoes the applied percent with a null breakdown.
  */
-export function computePlusEstimate(
-  ctx: TariffAssemblyContext,
-  applyCommissionPct: Decimal,
-  variant: TariffVariant | null,
-  costAggregate: VariantCostAggregate | undefined,
-  shipping: EstimateOutcome,
-  price: Decimal,
-): ComputedPlusEstimate {
-  if (variant === null) {
+export function computePlusEstimate(params: {
+  readonly applyCommissionPct: Decimal;
+  readonly base: ScreenScenarioBase;
+  readonly price: Decimal;
+}): ComputedPlusEstimate {
+  const { applyCommissionPct, base, price } = params;
+
+  if (base.kind === 'no-product') {
     return { calculable: false, reason: 'NO_PRODUCT', commissionPct: null, breakdown: null };
   }
 
-  const probeInputs: AssemblyInputs = {
-    costAggregate,
-    commission: tariffCommission(applyCommissionPct),
-    shipping,
-  };
-  const probe = assembleUnitEconomics(ctx, variant, probeInputs);
+  const commissionPct = applyCommissionPct.toString();
 
-  if (probe.econ === null) {
-    return {
-      calculable: false,
-      reason: deriveReason(probe.costStatus === 'OK', probe.shippingStatus === 'OK'),
-      commissionPct: applyCommissionPct.toString(),
-      breakdown: null,
-    };
+  if (base.kind === 'degraded') {
+    return { calculable: false, reason: null, commissionPct, breakdown: null };
   }
 
-  const econ: UnitEconomics = { ...probe.econ, commissionRate: applyCommissionPct };
-  return {
-    calculable: true,
-    reason: null,
-    commissionPct: applyCommissionPct.toString(),
-    breakdown: serializeBreakdown(computeUnitProfit(econ, price)),
-  };
+  const outcome = evaluateScreenScenario({
+    base: base.base,
+    unitPrice: price,
+    commissionPct: applyCommissionPct,
+  });
+  if (!outcome.calculable) {
+    return { calculable: false, reason: outcome.reason, commissionPct, breakdown: null };
+  }
+
+  const breakdown = quoteBreakdownFromStatement({
+    statement: outcome.statement,
+    listGross: price,
+    sellerDiscountGross: new Decimal(0),
+  });
+  if (breakdown === null) {
+    return { calculable: false, reason: null, commissionPct, breakdown: null };
+  }
+
+  return { calculable: true, reason: null, commissionPct, breakdown };
 }

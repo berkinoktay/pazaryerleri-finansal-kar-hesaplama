@@ -208,6 +208,7 @@ export {
 } from './marketplaces/trendyol/finance-record-inputs';
 export {
   parseStoredTariffBands,
+  storedTariffBandForPrice,
   type StoredTariffBand,
 } from './marketplaces/trendyol/stored-tariff-bands';
 export {

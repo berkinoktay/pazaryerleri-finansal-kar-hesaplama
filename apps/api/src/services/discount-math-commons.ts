@@ -13,8 +13,7 @@
 
 import { Decimal } from 'decimal.js';
 
-import { bandForPrice } from './commission-tariff-compute.service';
-import type { StoredTariffBand } from '@pazarsync/profit';
+import { storedTariffBandForPrice, type StoredTariffBand } from '@pazarsync/profit';
 
 export type DiscountConfig =
   | { readonly type: 'NET'; readonly valueKind: 'AMOUNT' | 'PERCENT'; readonly value: Decimal }
@@ -193,7 +192,7 @@ export function resolveDiscountCommission(
   price: Decimal,
 ): ResolvedDiscountCommission | null {
   if (inputs.bands !== null && inputs.bands.length > 0) {
-    const band = bandForPrice(inputs.bands, price);
+    const band = storedTariffBandForPrice(inputs.bands, price);
     if (band !== null) return { pct: new Decimal(band.commissionPct), source: 'band' };
   }
   if (inputs.productRate !== null) return { pct: inputs.productRate, source: 'product' };
