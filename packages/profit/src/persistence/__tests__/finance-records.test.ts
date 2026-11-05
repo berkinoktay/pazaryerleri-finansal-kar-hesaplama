@@ -8,7 +8,7 @@
  * stores nothing and enqueues nothing, that a changed row is flagged and bound, that a
  * sale row is updated in place when its payment order arrives later, that a cargo item
  * keeps one row when a re-scan relabels it, that a row stored before its order exists is
- * bound once the order exists (the race the outbox closes), that the bound order set
+ * bound by the first pass to run after the order is committed, that the bound order set
  * equals exactly what the loader would bind, that a sibling store's order sharing the
  * keys is never enqueued, and that a store/organization mismatch stores and binds nothing.
  *
@@ -432,7 +432,10 @@ describe('ingestFinanceRecords', () => {
 
     expect(result.stored).toBe(1);
     // The bind pass clears the flagged row but finds no order to enqueue (it does not
-    // exist yet). A later pass re-binds it once the order arrives (see the race test).
+    // exist yet). The flag is NOT kept set -- this record is never re-picked here. When
+    // the order is created later, upsertOrderWithSnapshot's create-time ORDER_CHANGED
+    // recompute reads this already-stored record; that path covers the late order, not a
+    // second bind pass.
     const bind = await bindPendingFinanceRecords(prisma, {
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
@@ -1004,8 +1007,8 @@ describe('ingestFinanceRecords', () => {
       platformOrderId: '5555',
     });
 
-    // The bind pass finds the still-flagged row and enqueues the order -- the race the
-    // outbox closes (a timestamp comparison could not detect it).
+    // The bind pass resolves a row whose order was committed before the pass ran. The row
+    // was still flagged (no pass had run since the ingest), so this first pass enqueues it.
     const bind = await bindPendingFinanceRecords(prisma, {
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,

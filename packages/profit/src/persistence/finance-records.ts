@@ -19,11 +19,17 @@ import { enqueueProfitRecompute } from './recompute-queue';
  *
  * Phase 2 -- `bindPendingFinanceRecords` -- runs AFTER that transaction commits, on the
  * root client: it claims the flagged rows, clears the flag, resolves the orders they
- * bind to, and enqueues a profit recompute. Running after the commit closes a race the
- * one-phase ingest could not: a record inserted before its order exists (so the inline
- * resolve found nothing) stays flagged until a later bind pass -- once the order is
- * present -- enqueues it. A timestamp comparison cannot detect this (updated_at is the
- * insert time, not the commit time); the flag does.
+ * bind to, and enqueues a profit recompute. Running after the commit lets a bind pass
+ * resolve a record against the orders a concurrent sync already committed, which an
+ * inline resolve inside the ingest transaction could miss. Correctness for a record whose
+ * order does not exist yet is NOT carried by the flag: a bind pass clears bind_pending for
+ * every row it claims, resolved or not, so a record stored before its order enqueues
+ * nothing here and is never re-picked. That late-order case is closed by the OTHER path --
+ * upsertOrderWithSnapshot (packages/order-sync/src/upsert-order.ts) enqueues an
+ * ORDER_CHANGED recompute on every order create, and that recompute reads the
+ * already-stored finance record. The two paths are symmetric: this bind pass catches an
+ * order that exists when the record commits; the order-create enqueue catches a record
+ * whose order is created later.
  *
  * All writes are raw SQL with bound parameters (never string concatenation). The store
  * is one conditional `INSERT ... SELECT ... ON CONFLICT DO UPDATE ... WHERE ... IS
@@ -399,8 +405,8 @@ const BIND_PASS_TX_TIMEOUT_MS = 30_000;
  * Phase 2 of the outbox: binds the rows an ingest flagged `bind_pending` and enqueues the
  * orders they resolve to, AFTER the ingest transaction that stored them has committed.
  * Runs its own interactive transaction(s) on the root client -- never inside the caller's
- * ingest transaction -- so the committed rows (including a settlement whose order appeared
- * only after the ingest) are all visible when the bind resolves them.
+ * ingest transaction -- so an order a concurrent sync committed before the pass runs is
+ * visible when the bind resolves the flagged rows.
  *
  * Each pass claims up to `BIND_PASS_BATCH_SIZE` of the store's pending rows with
  * `FOR UPDATE SKIP LOCKED`, clears their flag, resolves their orders and enqueues a
@@ -435,8 +441,9 @@ export async function bindPendingFinanceRecords(
 /**
  * One bind-pass transaction: claim up to `BIND_PASS_BATCH_SIZE` pending rows of the store
  * (ordered by their `(family, record_id)` key, the same global order the ingest and prune
- * take, so overlapping passes queue instead of deadlocking), clear their flag, and
- * enqueue the orders they bind to. The `UPDATE ... RETURNING` hands the binding keys to
+ * take, so overlapping passes queue instead of deadlocking), clear their flag (every
+ * claimed row, resolved or not), and enqueue the orders they bind to. The
+ * `UPDATE ... RETURNING` hands the binding keys to
  * the same `resolveAffectedOrderIds` the ingest used to use, so the bound set is identical.
  */
 async function bindPendingPass(

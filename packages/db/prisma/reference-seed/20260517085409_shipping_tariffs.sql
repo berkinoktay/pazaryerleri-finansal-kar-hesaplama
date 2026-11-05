@@ -214,8 +214,9 @@ JOIN carriers c ON c.code = bd.carrier_code;
 -- strings Trendyol writes on orders/packages (the getProviders "Name" column); the
 -- order profit path matches an order's cargo name against these OR the display name.
 -- The carriers above were just inserted with the column default (empty array), so
--- these UPDATEs run after. Turkish letters are Unicode escapes (U&'...') to keep this
--- file ASCII-safe.
+-- these UPDATEs run after. U& escapes keep the new rows byte-identical to the migration
+-- twin (20261105094822), which is ASCII-only; earlier rows of this seed predate that
+-- convention.
 UPDATE "shipping_carriers" SET "order_cargo_names" = ARRAY[U&'Yurti\00E7i Kargo Marketplace'] WHERE "platform" = 'TRENDYOL' AND "code" = 'YKMP';
 UPDATE "shipping_carriers" SET "order_cargo_names" = ARRAY['Aras Kargo Marketplace'] WHERE "platform" = 'TRENDYOL' AND "code" = 'ARASMP';
 UPDATE "shipping_carriers" SET "order_cargo_names" = ARRAY[U&'S\00FCrat Kargo Marketplace'] WHERE "platform" = 'TRENDYOL' AND "code" = 'SURATMP';

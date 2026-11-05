@@ -583,6 +583,14 @@ export async function upsertOrderWithSnapshot(
     //    newer event, and whenever either side's lmd is null (a legacy row, or a buffer
     //    replay carrying no lmd), because equality cannot be proven there. The strictly-
     //    older case already returned at the freshness guard above.
+    //
+    //    Load-bearing for the finance-record outbox: a settlement stored before this order
+    //    existed had its bind_pending cleared by a bind pass that found no order, so it is
+    //    never re-enqueued from that side (see bindPendingFinanceRecords in
+    //    @pazarsync/profit). This create-time enqueue is the ONLY path that reaches such a
+    //    record -- the recompute it triggers reads the already-stored record. Do NOT remove
+    //    it or gate the create path on the order's content changing; the create always
+    //    enqueues (sameLastModified is false when existingOrder is null).
     const sameLastModified =
       existingOrder !== null &&
       existingOrder.platformLastModifiedAt !== null &&

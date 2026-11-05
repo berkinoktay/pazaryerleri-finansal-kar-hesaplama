@@ -15,9 +15,13 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { prisma } from '@pazarsync/db';
 import {
   FinanceRecordFamily,
+  ProfitLineCertainty,
+  ProfitLineSource,
+  ProfitLineType,
   ProfitRecomputeReason,
   ProfitStatementView,
   ProfitStatus,
+  ReconciliationStatus,
 } from '@pazarsync/db/enums';
 import { encryptCredentials, syncLog } from '@pazarsync/sync-core';
 import type {
@@ -25,8 +29,10 @@ import type {
   FetchOtherFinancialsOpts,
   FetchSettlementsOpts,
   FinancialScanSummary,
+  MappedOrder,
   TrendyolFinancialTransaction,
 } from '@pazarsync/marketplace';
+import { upsertOrderWithSnapshot } from '@pazarsync/order-sync';
 import { drainProfitRecomputeQueue } from '@pazarsync/profit';
 
 import { processSettlementsChunk } from '../../src/handlers/settlements';
@@ -670,6 +676,125 @@ describe('processSettlementsChunk — raw finance-record ingest', () => {
     });
     expect(settled.status).toBe(ProfitStatus.SETTLED);
     expect(settled.netProfit?.toFixed(2)).toBe('191.79');
+  });
+
+  it("a settlement stored before its order exists reaches the order's profit once the order arrives", async () => {
+    // The fully-costed melontik setup (costed variant + fee definitions), but the order is
+    // removed so the Sale's shipment package has NO order when the cron runs. Its cost
+    // version is effective well before the order day, so the 3E rule never excludes it --
+    // exactly how the SETTLED test's costed parcel stays computable. The cron decrypts the
+    // store credentials, so swap in a real encrypted value like that test does.
+    const parcel = await seedMelontikParcel();
+    await prisma.order.delete({ where: { id: parcel.orderId } });
+    await prisma.store.update({
+      where: { id: parcel.storeId },
+      data: {
+        credentials: encryptCredentials({ supplierId: '123456', apiKey: 'k', apiSecret: 's' }),
+      },
+    });
+    const syncLog = await createSyncLog(parcel.organizationId, parcel.storeId);
+    const a = MELONTIK.items.a;
+
+    // Path 1 (bind pass): the Sale for SHIPMENT_PACKAGE_ID is ingested while no order with
+    // that platform id exists. The bind pass clears bind_pending and finds no order, so it
+    // enqueues nothing -- the record is NOT left flagged for a later pass to re-pick.
+    await runChunk(syncLog.id, {
+      settlements: { Sale: [saleRow('sale-a', a.barcode, 529, 100.51)] },
+    });
+    const storedRows = await prisma.marketplaceFinanceRecord.findMany({
+      where: { storeId: parcel.storeId, family: FinanceRecordFamily.SETTLEMENT },
+    });
+    expect(storedRows).toHaveLength(1);
+    const saleRecord = storedRows[0];
+    expect(saleRecord?.bindPending).toBe(false);
+    expect(saleRecord?.credit?.toFixed(2)).toBe('529.00');
+    expect(await prisma.profitRecomputeRequest.count()).toBe(0);
+
+    // Path 2 (order-create enqueue): the order arrives through the same intake the worker
+    // uses (upsertOrderWithSnapshot). Its create-time ORDER_CHANGED recompute is the ONLY
+    // path that reaches the already-stored settlement.
+    const mapped: MappedOrder = {
+      platformOrderId: SHIPMENT_PACKAGE_ID.toString(),
+      platformOrderNumber: `ord-${SHIPMENT_PACKAGE_ID}`,
+      orderDate: MELONTIK.orderDate,
+      lastModifiedDate: MELONTIK.orderDate,
+      status: 'DELIVERED',
+      dematerialized: false,
+      packagePending: false,
+      saleGross: a.saleGross,
+      saleVat: '44.66',
+      listGross: a.listGross,
+      sellerDiscountGross: a.sellerDiscountGross,
+      promotionDisplays: null,
+      agreedDeliveryDate: null,
+      actualDeliveryDate: null,
+      actualShipDate: null,
+      fastDelivery: false,
+      fastDeliveryType: null,
+      micro: false,
+      estimatedDeliveryStartDate: null,
+      estimatedDeliveryEndDate: null,
+      cargoProviderName: null,
+      cargoTrackingNumber: null,
+      cargoDeci: null,
+      usesSellerCargoAgreement: false,
+      platformCreatedBy: null,
+      originShipmentDate: null,
+      lines: [
+        {
+          barcode: a.barcode,
+          quantity: 1,
+          platformLineId: '7001',
+          lineListGross: a.listGross,
+          lineSaleGross: a.saleGross,
+          lineSellerDiscountGross: a.sellerDiscountGross,
+          saleVatRate: a.saleVatRate,
+          commissionRate: a.commissionRate,
+          commissionGross: '100.51',
+          refundedCommissionGross: '7.17',
+          commissionVatRate: '20',
+          categoryId: null,
+          commissionKnown: true,
+        },
+      ],
+    };
+    await upsertOrderWithSnapshot(parcel.storeId, parcel.organizationId, mapped);
+
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: parcel.storeId, platformOrderId: SHIPMENT_PACKAGE_ID.toString() },
+    });
+    const queued = await prisma.profitRecomputeRequest.findMany({
+      where: { storeId: parcel.storeId },
+    });
+    expect(queued).toHaveLength(1);
+    expect(queued[0]?.orderId).toBe(order.id);
+    expect(queued[0]?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+
+    // Draining that recompute loads the stored Sale and lands it as a settlement-sourced
+    // SALE actual, moving the order off NOT_SETTLED.
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    const statement = await prisma.orderProfitStatement.findFirstOrThrow({
+      where: { orderId: order.id, view: ProfitStatementView.BEST_KNOWN },
+    });
+    expect(statement.reconciliationStatus).not.toBe(ReconciliationStatus.NOT_SETTLED);
+
+    const saleActual = await prisma.profitLine.findFirstOrThrow({
+      where: {
+        orderId: order.id,
+        type: ProfitLineType.SALE,
+        certainty: ProfitLineCertainty.ACTUAL,
+        source: ProfitLineSource.MARKETPLACE_RECORD,
+      },
+    });
+    const recordCredit = saleRecord?.credit;
+    if (recordCredit === null || recordCredit === undefined) {
+      throw new Error('expected the stored Sale record to carry a credit');
+    }
+    // The SALE actual equals the stored Sale record's credit (529.00), decimal-exact.
+    expect(
+      new Decimal(saleActual.amountGross.toFixed()).equals(new Decimal(recordCredit.toFixed())),
+    ).toBe(true);
+    expect(saleActual.amountGross.toFixed(2)).toBe('529.00');
   });
 
   /** Record ids of the store in one family, sorted, for prune survivor assertions. */
