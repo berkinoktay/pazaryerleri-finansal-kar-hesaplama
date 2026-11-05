@@ -571,6 +571,10 @@ export function melontikCargoInvoiceInput(
 export interface CarrierTariffSpec {
   readonly code: string;
   readonly externalId: number;
+  /** The carrier display name; defaults to the code. The order loader matches the
+   * order's cargoProviderName against this, so a test that needs a name distinct from
+   * the code (as real carriers have) sets it explicitly. */
+  readonly displayName?: string;
   readonly supportsBaremDestek?: boolean;
   readonly maxBaremDesi?: number;
   readonly desiRows: readonly { desi: number; priceNet: string; effectiveFrom: Date }[];
@@ -596,11 +600,12 @@ export async function upsertCarrierWithTariffs(spec: CarrierTariffSpec): Promise
       platform: 'TRENDYOL',
       externalId: spec.externalId,
       code: spec.code,
-      displayName: spec.code,
+      displayName: spec.displayName ?? spec.code,
       supportsBaremDestek: spec.supportsBaremDestek ?? false,
       maxBaremDesi: spec.maxBaremDesi ?? 10,
     },
     update: {
+      displayName: spec.displayName ?? spec.code,
       supportsBaremDestek: spec.supportsBaremDestek ?? false,
       maxBaremDesi: spec.maxBaremDesi ?? 10,
     },

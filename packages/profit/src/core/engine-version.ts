@@ -7,5 +7,7 @@
  * 4: every statement records a reconciliation status derived from its selected lines.
  * 5: tariff period bounds are matched at the real instant on a half-open interval,
  *    so an order near a period boundary can resolve to a different commission band.
+ * 6: the order's own carrier (matched from its cargoProviderName) drives the shipping
+ *    estimate instead of always the store's default carrier.
  */
-export const PROFIT_ENGINE_VERSION = 5;
+export const PROFIT_ENGINE_VERSION = 6;

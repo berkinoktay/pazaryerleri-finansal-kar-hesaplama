@@ -1521,4 +1521,103 @@ describe('loadTrendyolParcel', () => {
     const packaging = requireLine(result.lines, ProfitLineType.COST_PACKAGING, parcel.itemA);
     expect(packaging.amount.gross.toFixed(2)).toBe('300.00');
   });
+
+  it("uses the order's own carrier for the shipping estimate", async () => {
+    // The store default is the melontik carrier (desi 2 -> 81.95 net -> 98.34 gross).
+    // A second carrier with a distinct display name and a cheaper desi tariff is the
+    // one Trendyol assigned to this order: matched by cargoProviderName, its tariff
+    // drives the estimate instead of the store default's.
+    const parcel = await seedMelontikParcel();
+    const effectiveFrom = new Date('2024-01-01T00:00:00Z');
+    await upsertCarrierWithTariffs({
+      code: 'TEST_ORDER_CARRIER',
+      displayName: 'Test Kargo Marketplace',
+      externalId: 990010,
+      supportsBaremDestek: false,
+      maxBaremDesi: 10,
+      desiRows: [
+        { desi: 1, priceNet: '50.00', effectiveFrom },
+        { desi: 2, priceNet: '50.00', effectiveFrom },
+      ],
+      baremRows: [],
+    });
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { cargoProviderName: 'Test Kargo Marketplace' },
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+    const result = estimateTrendyolParcel(loaded.estimateInput);
+
+    const shipping = requireLine(result.lines, ProfitLineType.SHIPPING, null);
+    // 50.00 net x 1.20 VAT = 60.00 gross, from the order's carrier -- not the store
+    // default's 98.34.
+    expect(shipping.amount.gross.toFixed(2)).toBe('60.00');
+    expect(shipping.amount.vat.toFixed(2)).toBe('10.00');
+    expect(shipping.inputs.tariffKind).toBe('DESI');
+    expect(shipping.inputs.carrierCode).toBe('TEST_ORDER_CARRIER');
+  });
+
+  it('does not apply Barem for a carrier outside the Barem program', async () => {
+    // The store default supports Barem and carries a cheap Barem band; the order's own
+    // carrier does NOT support Barem. Even though the order is fast-delivery and its
+    // basket sits inside the band, the estimate must use the order carrier's desi
+    // tariff, never a Barem band -- because the order carrier is outside the program.
+    const parcel = await seedMelontikParcel({ fastDelivery: true });
+    const effectiveFrom = new Date('2024-01-01T00:00:00Z');
+
+    const baremStoreCarrierId = await upsertCarrierWithTariffs({
+      code: 'TEST_STORE_BAREM',
+      displayName: 'Test Store Barem Marketplace',
+      externalId: 990011,
+      supportsBaremDestek: true,
+      maxBaremDesi: 10,
+      desiRows: [{ desi: 2, priceNet: '40.00', effectiveFrom }],
+      baremRows: [
+        { minOrderAmount: '0.00', maxOrderAmount: '5000.00', priceNet: '20.00', effectiveFrom },
+      ],
+    });
+    await prisma.store.update({
+      where: { id: parcel.storeId },
+      data: { defaultShippingCarrierId: baremStoreCarrierId },
+    });
+
+    await upsertCarrierWithTariffs({
+      code: 'TEST_ORDER_NOBAREM',
+      displayName: 'Test NoBarem Marketplace',
+      externalId: 990012,
+      supportsBaremDestek: false,
+      maxBaremDesi: 10,
+      desiRows: [
+        { desi: 1, priceNet: '70.00', effectiveFrom },
+        { desi: 2, priceNet: '70.00', effectiveFrom },
+      ],
+      // A band is present on purpose: it must still be skipped because the carrier is
+      // outside the Barem program.
+      baremRows: [
+        { minOrderAmount: '0.00', maxOrderAmount: '5000.00', priceNet: '20.00', effectiveFrom },
+      ],
+    });
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { cargoProviderName: 'Test NoBarem Marketplace' },
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+    const result = estimateTrendyolParcel(loaded.estimateInput);
+
+    const shipping = requireLine(result.lines, ProfitLineType.SHIPPING, null);
+    // Had the store default (Barem-supporting) been used, the 20.00 band -> 24.00 gross
+    // would apply. The order's non-Barem carrier falls to its desi tariff: 70.00 net
+    // x 1.20 = 84.00 gross, kind DESI.
+    expect(shipping.inputs.tariffKind).toBe('DESI');
+    expect(shipping.amount.gross.toFixed(2)).toBe('84.00');
+    expect(shipping.inputs.carrierCode).toBe('TEST_ORDER_NOBAREM');
+  });
 });

@@ -75,6 +75,46 @@ function compareFinanceRows(
 }
 
 /**
+ * The subset of a shipping carrier the parcel loader needs: its identity, the Barem
+ * eligibility fields `loadShippingTariff` reads, and the display name the order's
+ * cargo name is matched against.
+ */
+export interface CarrierRow {
+  readonly id: string;
+  readonly code: string;
+  readonly displayName: string;
+  readonly supportsBaremDestek: boolean;
+  readonly maxBaremDesi: number;
+}
+
+/**
+ * The carrier whose tariff the order's shipping estimate should use. Trendyol stamps
+ * each order with the carrier it assigned (`cargoProviderName`), and those names are
+ * the same getProviders names that seed `shipping_carriers.display_name` ("PTT Kargo
+ * Marketplace", ...). When the order's name matches an active carrier that carrier
+ * wins; otherwise -- a null or blank name, an "Alternative Delivery", or no match --
+ * the store's default carrier is used, exactly as before. Both sides are compared
+ * after `trim()` + `toLowerCase()` (a deterministic, non-locale compare). Inactive
+ * carriers are never passed in (the query filters `active = true`), so an inactive
+ * namesake falls back to the store default too.
+ */
+export function resolveOrderCarrier(
+  cargoProviderName: string | null,
+  carriers: readonly CarrierRow[],
+  storeDefault: CarrierRow | null,
+): CarrierRow | null {
+  if (cargoProviderName === null) {
+    return storeDefault;
+  }
+  const normalized = cargoProviderName.trim().toLowerCase();
+  if (normalized === '') {
+    return storeDefault;
+  }
+  const match = carriers.find((carrier) => carrier.displayName.trim().toLowerCase() === normalized);
+  return match ?? storeDefault;
+}
+
+/**
  * Loads one Trendyol order (parcel) from the database into the pure inputs of the
  * Phase 2A Trendyol module. Reads only; filters every store-scoped table by the
  * order's store and every org-scoped table by the order's organization. Throws
@@ -178,10 +218,23 @@ export async function loadTrendyolParcel(
     isExport: order.micro,
     fastDeliveryType: order.fastDeliveryType,
   });
+  // The order's own carrier (the one Trendyol assigned, named by cargoProviderName)
+  // drives the shipping estimate, falling back to the store default. Active Trendyol
+  // carriers are a small platform-global reference table shared across every
+  // organization, so this read carries no tenant filter by design -- like the
+  // commission-rate and fee reference reads (Gorev 1, engine v6).
+  const activeCarriers = await tx.shippingCarrier.findMany({
+    where: { platform: Platform.TRENDYOL, active: true },
+  });
+  const orderCarrier = resolveOrderCarrier(
+    order.cargoProviderName,
+    activeCarriers,
+    store.defaultShippingCarrier,
+  );
   const shipping = await loadShippingTariff(tx, {
     storeId,
     source: store.shippingTariffSource,
-    carrier: store.defaultShippingCarrier,
+    carrier: orderCarrier,
   });
   const commission = await loadCommissionRules(tx, order.items);
 
