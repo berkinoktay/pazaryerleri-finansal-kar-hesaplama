@@ -891,6 +891,12 @@ model Order {
   profitRecomputeRequest ProfitRecomputeRequest?
 
   @@unique([storeId, platformOrderId])
+  // Composite reference target for the profit tables: profit_lines and
+  // order_profit_statements bind (order_id, organization_id, store_id) to this,
+  // so a profit row whose tenant differs from its order's is rejected at the DB
+  // (tenant-isolation defense in depth). id alone is already unique; this triple
+  // only exists to back those foreign keys.
+  @@unique([id, organizationId, storeId])
   @@index([organizationId])
   @@index([organizationId, reconciliationStatus])
   @@index([orderDate])
@@ -2073,7 +2079,10 @@ model ProfitLine {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  order       Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  // Composite tenant-bound reference: the line's (order, organization, store)
+  // must match an orders row exactly, so a line cannot point at an order of a
+  // different tenant. References orders' @@unique([id, organizationId, storeId]).
+  order       Order                  @relation(fields: [orderId, organizationId, storeId], references: [id, organizationId, storeId], onDelete: Cascade)
   orderItem   OrderItem?             @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
   allocations ProfitLineAllocation[]
 
@@ -2155,7 +2164,10 @@ model OrderProfitStatement {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  // Composite tenant-bound reference: the statement's (order, organization, store)
+  // must match an orders row exactly, so a statement cannot point at an order of a
+  // different tenant. References orders' @@unique([id, organizationId, storeId]).
+  order Order @relation(fields: [orderId, organizationId, storeId], references: [id, organizationId, storeId], onDelete: Cascade)
 
   @@unique([orderId, view])
   @@index([storeId, status])

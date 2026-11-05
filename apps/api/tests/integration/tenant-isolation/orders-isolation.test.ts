@@ -245,20 +245,27 @@ describe('Orders — tenant isolation', () => {
   });
 
   it('ignores a statement row filed under another organization', async () => {
-    // Org A's order carries a best-known statement row whose organizationId is
-    // org B's. Every list/summary query filters statements by org A, so the
-    // foreign-org row must never be read into org A's profit fields or totals.
+    // Another organization carries a fully-settled best-known statement with a 999
+    // net profit on its own order. Every list/summary query filters statements by
+    // org A, so org B's statement must never be read into org A's profit fields or
+    // totals. (Mis-attributing a statement onto org A's own order is impossible now:
+    // the composite tenant FK rejects it -- see the profit-row-tenant-fk db test.)
     const user = await createAuthenticatedTestUser();
     const orgA = await createOrganization();
     await createMembership(orgA.id, user.id);
     const storeA = await createStore(orgA.id);
     const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
 
     const orderA = await createOrder(orgA.id, storeA.id, {
       status: 'DELIVERED',
       saleGross: '240.00',
     });
-    await createProfitStatement(orderA.id, orgB.id, storeA.id, {
+    const orderB = await createOrder(orgB.id, storeB.id, {
+      status: 'DELIVERED',
+      saleGross: '999.00',
+    });
+    await createProfitStatement(orderB.id, orgB.id, storeB.id, {
       view: 'BEST_KNOWN',
       status: 'SETTLED',
       saleGross: '999.00',
@@ -304,22 +311,29 @@ describe('Orders — tenant isolation', () => {
   });
 
   it('ignores a foreign-organization statement in the margin sort', async () => {
-    // Org A's order carries a best-known statement row filed under org B. The margin
-    // sort partitions statements by org A (segment 1, ordered by margin) and orders
-    // with no org A best-known statement (segment 2, ordered by id). The foreign-org
-    // row must count for neither: under sort=-marginPct the order lands in segment 2
-    // and reads its own sale, never the foreign 999.
+    // Another organization carries a best-known statement with a 99 margin on its own
+    // order. The margin sort partitions statements by org A (segment 1, ordered by
+    // margin) and org A orders with no best-known statement (segment 2, ordered by id).
+    // Org B's statement must count for neither: under sort=-marginPct org A's order
+    // lands in segment 2 and reads its own sale, never the foreign 999/99. (A statement
+    // mis-attributed onto org A's own order is impossible now: the composite tenant FK
+    // rejects it -- see the profit-row-tenant-fk db test.)
     const user = await createAuthenticatedTestUser();
     const orgA = await createOrganization();
     await createMembership(orgA.id, user.id);
     const storeA = await createStore(orgA.id);
     const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
 
     const orderA = await createOrder(orgA.id, storeA.id, {
       status: 'DELIVERED',
       saleGross: '240.00',
     });
-    await createProfitStatement(orderA.id, orgB.id, storeA.id, {
+    const orderB = await createOrder(orgB.id, storeB.id, {
+      status: 'DELIVERED',
+      saleGross: '999.00',
+    });
+    await createProfitStatement(orderB.id, orgB.id, storeB.id, {
       view: 'BEST_KNOWN',
       status: 'SETTLED',
       saleGross: '999.00',

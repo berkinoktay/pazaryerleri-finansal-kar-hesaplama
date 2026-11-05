@@ -30,6 +30,7 @@ import { computeParcelProfit, type ComputedParcelProfit } from '../compute-parce
 import { ParcelNotFoundError, UnsupportedPlatformError } from '../errors';
 import { recomputeParcelProfit } from '../recompute-parcel-profit';
 import {
+  createAdditionalStore,
   ensureDbReachable,
   seedBareOrder,
   seedMelontikParcel,
@@ -337,10 +338,19 @@ describe('computeParcelProfit', () => {
     });
     expect(realCount).toBeGreaterThan(0);
 
-    // A profit_lines row for the same order id but another organization, and one for
-    // another store in the real organization. Both must stay invisible to the loader.
-    const foreignRow = {
-      orderId: parcel.orderId,
+    // The composite tenant FK forbids filing a line under the parcel's order id with a
+    // foreign org/store, so each foreign line sits on an order that genuinely belongs to
+    // that other store/org: a sibling store in the same organization, and a whole other
+    // organization's parcel. The loader, scoped to the parcel's org AND store, must
+    // return neither.
+    const siblingStoreId = await createAdditionalStore({ organizationId: parcel.organizationId });
+    const siblingOrderId = await seedBareOrder({
+      organizationId: parcel.organizationId,
+      storeId: siblingStoreId,
+    });
+    const other = await seedMelontikParcel();
+
+    const foreignLine = {
       type: ProfitLineType.SHIPPING,
       level: ProfitLineLevel.PARCEL,
       certainty: ProfitLineCertainty.ESTIMATE,
@@ -351,18 +361,31 @@ describe('computeParcelProfit', () => {
       engineVersion: PROFIT_ENGINE_VERSION,
     } as const;
     await prisma.profitLine.create({
-      data: { ...foreignRow, organizationId: randomUUID(), storeId: randomUUID() },
+      data: {
+        ...foreignLine,
+        organizationId: parcel.organizationId,
+        storeId: siblingStoreId,
+        orderId: siblingOrderId,
+      },
     });
     await prisma.profitLine.create({
-      data: { ...foreignRow, organizationId: parcel.organizationId, storeId: randomUUID() },
+      data: {
+        ...foreignLine,
+        organizationId: other.organizationId,
+        storeId: other.storeId,
+        orderId: other.orderId,
+      },
     });
 
-    // The two extra rows now sit under the order id alongside the real ones.
-    expect(await prisma.profitLine.count({ where: { orderId: parcel.orderId } })).toBe(
-      realCount + 2,
-    );
-
-    const loaded = await loadLines(parcel.organizationId, parcel.storeId, [parcel.orderId]);
+    // Scoped to the parcel's own org and store, the loader returns only the parcel's
+    // lines; the sibling-store and other-org orders map to empty arrays.
+    const loaded = await loadLines(parcel.organizationId, parcel.storeId, [
+      parcel.orderId,
+      siblingOrderId,
+      other.orderId,
+    ]);
     expect(loaded.get(parcel.orderId)?.length).toBe(realCount);
+    expect(loaded.get(siblingOrderId)).toEqual([]);
+    expect(loaded.get(other.orderId)).toEqual([]);
   });
 });
