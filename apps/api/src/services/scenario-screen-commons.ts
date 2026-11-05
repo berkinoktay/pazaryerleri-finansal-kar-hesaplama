@@ -132,21 +132,25 @@ export function scenarioReasonFromIssues(issues: readonly ProfitIssue[]): Tariff
 
 /**
  * Evaluates one scenario: the base at `unitPrice` with `commissionPct` applied as the
- * engine's commission override (verbatim, zero included). A mapped issue reason (NO_COST
- * / NO_SHIPPING) makes it not-calculable; a null net profit or any other blocking issue
- * is a defensive not-calculable with no reason. The engine may throw (e.g. a RangeError
- * for a negative price) -- that PROPAGATES; the calling service catches it per item and
- * degrades that row.
+ * engine's commission override (verbatim, zero included). `quantity` defaults to the
+ * base's quantity (one); a basket/order scope passes n, and the engine then prices
+ * `unitPrice x quantity` with n cost units but a single shipping and platform-service fee
+ * per parcel (decision 6). A mapped issue reason (NO_COST / NO_SHIPPING) makes it
+ * not-calculable; a null net profit or any other blocking issue is a defensive
+ * not-calculable with no reason. The engine may throw (e.g. a RangeError for a negative
+ * price) -- that PROPAGATES; the calling service catches it per item and degrades that row.
  */
 export function evaluateScreenScenario(params: {
   readonly base: TrendyolScenarioBase;
   readonly unitPrice: Decimal;
   readonly commissionPct: Decimal;
+  readonly quantity?: number;
 }): ScreenScenarioOutcome {
   const { statement } = evaluateTrendyolScenario({
     ...params.base,
     unitPrice: params.unitPrice,
     commissionRatePctOverride: params.commissionPct,
+    quantity: params.quantity ?? params.base.quantity,
   });
 
   const reason = scenarioReasonFromIssues(statement.issues);
@@ -185,6 +189,15 @@ export function serializeCommissionBandLadder(
     upperLimit: band.upperLimit !== null ? new Decimal(band.upperLimit).toFixed(2) : null,
     commissionPct: new Decimal(band.commissionPct).toFixed(4),
   }));
+}
+
+/**
+ * Rounds a full-precision taxed base (matrah) to the kurus, half-up -- the unit price the
+ * discount and campaign screens hand the engine (decision 6). The band-lookup price keeps
+ * its own rounding at the call site; this only rounds the engine's revenue input.
+ */
+export function toKurusHalfUp(value: Decimal): Decimal {
+  return value.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
 }
 
 /** A two-decimal money string (half-up), signed zero normalized to a plain zero. */

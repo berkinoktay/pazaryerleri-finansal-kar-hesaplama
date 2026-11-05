@@ -195,7 +195,13 @@ export function resolveDiscountCommission(
     const band = storedTariffBandForPrice(inputs.bands, price);
     if (band !== null) return { pct: new Decimal(band.commissionPct), source: 'band' };
   }
-  if (inputs.productRate !== null) return { pct: inputs.productRate, source: 'product' };
+  // Decision 7 (Faz 4B): a SYNCED product rate of 0 means "not sent", exactly as the order
+  // path treats it (the 2A rule) -- so it falls through to the category rate rather than
+  // charging a real 0%. Only the synced tier gets this treatment: a 0 tariff band or a 0
+  // category rate is an explicit, authoritative 0%. Campaigns share this chain (Task 8).
+  if (inputs.productRate !== null && inputs.productRate.gt(0)) {
+    return { pct: inputs.productRate, source: 'product' };
+  }
   if (inputs.categoryRate !== null) return { pct: inputs.categoryRate, source: 'category' };
   return null;
 }

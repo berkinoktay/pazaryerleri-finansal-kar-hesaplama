@@ -9,9 +9,9 @@ import {
  * A read surface that must keep its page up when a parcel's profit cannot be derived for
  * display. The order detail and the new-order notification compute in-request when no
  * statement is stored; today's products reads the stored profit lines; product pricing,
- * the commission tariff, the Plus commission tariff, the advantage tariff and the flash
- * product screens each evaluate a scenario per variant. Each names itself here for the
- * log line (owner decision 2026-11-04).
+ * the commission tariff, the Plus commission tariff, the advantage tariff, the flash
+ * product and the discount list screens each evaluate a scenario per variant. Each names
+ * itself here for the log line (owner decision 2026-11-04).
  */
 export type ProfitReadSurface =
   | 'order-detail'
@@ -21,7 +21,8 @@ export type ProfitReadSurface =
   | 'commission-tariff'
   | 'plus-commission-tariff'
   | 'advantage-tariff'
-  | 'flash-product';
+  | 'flash-product'
+  | 'discount-list';
 
 /**
  * Logs a profit-read failure at error level, tagged `[profit-read]` with the surface and

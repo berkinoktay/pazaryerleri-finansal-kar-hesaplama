@@ -123,6 +123,21 @@ async function setupFixture(): Promise<Fixture> {
       vatRate: 20,
     },
   });
+  // The scenario engine costs from the profile's VERSIONS (effective-dated); without one the
+  // variant reads MISSING_COST and the band item would be uncalculable.
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId: org.id,
+      version: 1,
+      name: 'COGS Test',
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      vatRate: 20,
+      changedFields: [],
+      effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+    },
+  });
   await ensureFeeDefinitions();
 
   const product = await prisma.product.create({
@@ -488,6 +503,20 @@ async function setupCoveringFixture(): Promise<CoveringFixture> {
         type: 'COGS',
         amountGross: new Decimal('200.00'),
         vatRate: 20,
+      },
+    });
+    // Version 1 so the engine resolves cost (it reads versions, not the profile row).
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: `COGS Test ${opts.seq}`,
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
       },
     });
     const product = await prisma.product.create({
@@ -901,6 +930,20 @@ async function setupSplitWeekFixture(): Promise<SplitWeekFixture> {
       type: 'COGS',
       amountGross: new Decimal('200.00'),
       vatRate: 20,
+    },
+  });
+  // Version 1 so the engine resolves cost (it reads versions, not the profile row).
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId: org.id,
+      version: 1,
+      name: 'COGS Split',
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      vatRate: 20,
+      changedFields: [],
+      effectiveFrom: new Date('2024-01-01T00:00:00Z'),
     },
   });
   const product = await prisma.product.create({

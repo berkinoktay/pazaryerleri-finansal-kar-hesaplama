@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 
 import { computeUnitProfit, type EstimateOutcome } from '@pazarsync/profit';
 
-import { computeDiscountItem } from '@/services/discount-compute.service';
 import {
   effectiveUnitPrice,
   resolveDiscountCommission,
@@ -361,16 +360,20 @@ describe('computeCampaignItem — sipariş (sepet) senaryosu', () => {
       config: buyXPayY,
       fundingPct: d(0),
     });
-    const discount = computeDiscountItem(
-      ctx,
-      variant,
-      OK_COST,
-      OK_SHIPPING,
-      openCommission,
-      d(1000),
-      buyXPayY,
+    // At funding 0 the seller's settlement equals effectiveUnitPrice, so the campaign basket
+    // reduces to the plain discount order (4-al-2-ode @1000 -> n=4, paid 2000, no funding). The
+    // discount screen now prices on the scenario engine (Faz 4B Task 7) while campaigns keep the
+    // legacy assembly until Task 8, so the funding-0 basket is asserted against the SAME legacy
+    // oracle the other basket cases use rather than against computeDiscountItem (now engine-shaped).
+    expect(campaign.maxBasket?.assumedQuantity).toBe(4);
+    expect(campaign.maxBasket?.basketTotal).toBe('4000.00');
+    expect(campaign.maxBasket?.basketPaidTotal).toBe('2000.00');
+    expect(campaign.maxBasket?.basketDiscountTotal).toBe('2000.00');
+    expect(campaign.maxBasket?.trendyolFundedTotal).toBe('0.00');
+    expect(campaign.maxBasket?.orderNetProfit).toBe(oracleProfit(d(2000), '15', 4).toFixed(2));
+    expect(campaign.maxBasket?.currentOrderNetProfit).toBe(
+      oracleProfit(d(4000), '15', 4).toFixed(2),
     );
-    expect(campaign.maxBasket).toEqual({ ...discount.scenario, trendyolFundedTotal: '0.00' });
   });
 
   it('özel fiyat seçeneğinin sepeti ÖZEL fiyattan kurulur', () => {

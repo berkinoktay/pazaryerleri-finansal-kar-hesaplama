@@ -1,17 +1,17 @@
 // Per-list discount configuration, narrowed from the DiscountList row by the
 // validator's discriminated union. Every V1 kurgu reduces to ONE contract:
-// effectiveUnitPrice — the per-unit selling price under the "single-product
+// effectiveUnitPrice -- the per-unit selling price under the "single-product
 // basket at the minimum qualifying quantity + proportional split" assumption
-// (design §5.1). The profit engine never learns discount types.
+// (design 5.1). The profit engine never learns discount types.
 //
 // The type-agnostic scenario primitives (priceScenario / toScenario / toEstimate /
-// computeOrderBreakdown) live in `discount-scenario-commons.ts` — Kampanyalar is their
-// second consumer. This file keeps only what is İndirimler-specific: the two-scenario
-// item and its basket framing.
+// scenarioBreakdown) live in `discount-scenario-commons.ts` and now run on the scenario
+// engine (`@pazarsync/profit`). This file keeps only what is Indirimler-specific: the two-
+// scenario item and its basket framing. Each screen hands the engine the econ it loaded as
+// a `ScreenScenarioBase`; the commission is resolved by the three-tier chain and passed as
+// the engine's rate override.
 
 import { Decimal } from 'decimal.js';
-
-import type { EstimateOutcome } from '@pazarsync/profit';
 
 import {
   assumedBasketQuantity,
@@ -19,52 +19,46 @@ import {
   effectiveUnitPrice,
   type DiscountCommissionInputs,
   type DiscountConfig,
-  type ResolvedDiscountCommission,
 } from './discount-math-commons';
 import {
-  computeOrderBreakdown,
   priceScenario,
+  scenarioBreakdown,
+  scenarioMarginPct,
+  scenarioNetProfit,
   toEstimate,
   toScenario,
   type ComputedPriceScenario,
   type ComputedScenarioEstimate,
   type ScenarioItemReason,
 } from './discount-scenario-commons';
-import type { TariffAssemblyContext, TariffVariant } from './tariff-compute-commons';
-import type { VariantCostAggregate } from '../validators/product.validator';
-
-// Re-exported so the detail + estimate services import the assembly context/variant
-// shapes — and the order-scope breakdown — from one place, alongside the discount-specific
-// chain types below.
-export type { TariffAssemblyContext, TariffVariant };
-export { computeOrderBreakdown };
+import { toKurusHalfUp, type ScreenScenarioBase } from './scenario-screen-commons';
 
 const ZERO = new Decimal(0);
 
-// ─── Per-scenario profit compute ─────────────────────────────────────────────
+// --- Per-scenario profit compute ---
 
 export type DiscountItemReason = ScenarioItemReason;
 
 export type ComputedDiscountScenario = ComputedPriceScenario;
 
 /**
- * Order-scope settlement scenario (design §11, profit-formula.md §2.4): assuming the basket is made
+ * Order-scope settlement scenario (design 11, profit-formula.md 2.4): assuming the basket is made
  * only of THIS product at the minimum qualifying quantity `assumedQuantity` (n), the basket's list
  * total, what the customer pays, the discount, and the ORDER net profit (`orderNetProfit` with its
  * margin `orderMarginPct`) alongside the campaign-free same-basis baseline (`currentOrderNetProfit`).
- * Both order profits run the real profit engine over the n-unit basket (n× product cost, 1× shipping,
- * 1× PSF — the platform service and shipping are per-parcel). Null for NET (its showcase price
- * genuinely changes — no basket framing) or a non-positive price. Money fields are 2dp strings; the
- * profit engine's Decimal drives them, never a float.
+ * Both order profits run the real scenario engine over the n-unit basket (n cost units, one shipping,
+ * one platform fee -- the platform service and shipping are per-parcel, and desi scales by n). Null
+ * for NET (its showcase price genuinely changes -- no basket framing) or a non-positive price. Money
+ * fields are 2dp strings; the profit engine's Decimal drives them, never a float.
  */
 export interface DiscountBasketScenario {
   readonly assumedQuantity: number;
   readonly basketTotal: string; // toFixed(2)
   readonly basketPaidTotal: string; // toFixed(2)
   readonly basketDiscountTotal: string; // toFixed(2)
-  readonly orderNetProfit: string | null; // toFixed(2) — discounted order net profit (n-unit basket)
-  readonly orderMarginPct: string | null; // toFixed(2) — orderNetProfit / basketPaidTotal × 100
-  readonly currentOrderNetProfit: string | null; // toFixed(2) — same n-unit basis, campaign-free
+  readonly orderNetProfit: string | null; // discounted order net profit (n-unit basket)
+  readonly orderMarginPct: string | null; // orderNetProfit / basketPaidTotal x 100
+  readonly currentOrderNetProfit: string | null; // same n-unit basis, campaign-free
 }
 
 export interface ComputedDiscountItem {
@@ -76,133 +70,108 @@ export interface ComputedDiscountItem {
 }
 
 /**
- * Builds the ORDER-scope settlement scenario (design §11, profit-formula.md §2.4) from the current
- * price, the discounted effective unit, the config, and BOTH scenarios' resolved commissions.
- * `assumedQuantity` (n) is the minimum qualifying quantity per type. `basketPaidTotal` uses the SAME
- * 2dp effective unit the row displays (`unit2dp`), so the popover can never disagree with the shown
- * unit price. Returns null for NET (its showcase price genuinely changes — no basket framing) or a
+ * Builds the ORDER-scope settlement scenario (design 11, profit-formula.md 2.4) from the current
+ * price, the discounted effective unit, the config, and the item's loaded scenario base + commission
+ * chain. `assumedQuantity` (n) is the minimum qualifying quantity per type. `basketPaidTotal` uses
+ * the SAME 2dp effective unit the row displays, so the popover can never disagree with the shown unit
+ * price. Returns null for NET (its showcase price genuinely changes -- no basket framing) or a
  * non-positive current price.
  *
- * Order model: both order net profits run the REAL engine over an n-unit basket via
- * {@link computeOrderBreakdown} — n× product cost, 1× shipping, 1× PSF (profit-formula.md §2.4: the
- * platform service and shipping are per-PARCEL, and a basket of n identical units ships once).
- * `orderNetProfit` prices the discounted basket at `basketPaidTotal`; `currentOrderNetProfit` prices
- * the same n units campaign-free at `basketTotal` — an apples-to-apples baseline. `orderMarginPct` is
- * the discounted order breakdown's own saleMarginPct (netProfit / basketPaidTotal × 100), which the
- * engine returns as null when the paid basket is zero. Each value is null when its scenario's order
- * breakdown is null (unmatched, no commission, or missing cost/shipping). Commission/stoppage/VAT
- * follow the engine formula. All arithmetic is Decimal.
+ * Order model: both order net profits run the engine over an n-unit basket via `priceScenario`
+ * with `quantity: n` -- the engine prices n cost units, one shipping and one platform-service fee per
+ * parcel (profit-formula.md 2.4), and desi scales by n (so a big basket can exceed the carrier's
+ * desi limit and that order profit is null while the row stays). `orderNetProfit` prices the
+ * discounted basket (unitPrice = the rounded effective unit, band chosen from the UNIT price);
+ * `currentOrderNetProfit` prices the same n units campaign-free at the current price -- an
+ * apples-to-apples baseline. `orderMarginPct` is the discounted order statement's own saleMarginPct
+ * (netProfit / basketPaidTotal x 100), which the engine returns as null when the paid basket is zero.
+ * Each value is null when its scenario is not calculable (unmatched, no commission, missing
+ * cost/shipping, or a desi overflow). All arithmetic is Decimal.
  */
 function buildBasketScenario(
-  ctx: TariffAssemblyContext,
-  variant: TariffVariant | null,
-  cost: VariantCostAggregate | undefined,
-  shipping: EstimateOutcome,
+  base: ScreenScenarioBase,
+  commission: DiscountCommissionInputs,
   currentPrice: Decimal,
   discountedPrice: Decimal,
+  discountedBandPrice: Decimal,
   config: DiscountConfig,
-  currentResolved: ResolvedDiscountCommission | null,
-  discountedResolved: ResolvedDiscountCommission | null,
 ): DiscountBasketScenario | null {
   if (config.type === 'NET' || currentPrice.lte(ZERO)) return null;
 
   const n = assumedBasketQuantity(config, currentPrice);
-  const unit2dp = discountedPrice.toDecimalPlaces(2);
+  const unit2dp = toKurusHalfUp(discountedPrice);
   const basketTotal = currentPrice.mul(n);
   const basketPaidTotal = unit2dp.mul(n);
 
-  const discountedOrder = computeOrderBreakdown(
-    ctx,
-    variant,
-    cost,
-    shipping,
-    discountedResolved,
-    n,
-    basketPaidTotal,
-  );
-  const currentOrder = computeOrderBreakdown(
-    ctx,
-    variant,
-    cost,
-    shipping,
-    currentResolved,
-    n,
-    basketTotal,
-  );
+  const discountedOrder = priceScenario({
+    base,
+    commission,
+    price: discountedPrice,
+    bandPrice: discountedBandPrice,
+    quantity: n,
+  });
+  const currentOrder = priceScenario({
+    base,
+    commission,
+    price: currentPrice,
+    bandPrice: currentPrice,
+    quantity: n,
+  });
 
   return {
     assumedQuantity: n,
     basketTotal: basketTotal.toFixed(2),
     basketPaidTotal: basketPaidTotal.toFixed(2),
     basketDiscountTotal: basketTotal.sub(basketPaidTotal).toFixed(2),
-    orderNetProfit: discountedOrder !== null ? discountedOrder.netProfit.toFixed(2) : null,
-    orderMarginPct:
-      discountedOrder !== null && discountedOrder.saleMarginPct !== null
-        ? discountedOrder.saleMarginPct.toFixed(2)
-        : null,
-    currentOrderNetProfit: currentOrder !== null ? currentOrder.netProfit.toFixed(2) : null,
+    orderNetProfit: scenarioNetProfit(discountedOrder),
+    orderMarginPct: scenarioMarginPct(discountedOrder),
+    currentOrderNetProfit: scenarioNetProfit(currentOrder),
   };
 }
 
 /**
  * Computes one discount item's TWO scenarios: `current` at `currentPrice` (band + matrah
  * both the current price), and `discounted` whose MATRAH is effectiveUnitPrice(currentPrice,
- * config) but whose commission BAND is selected by {@link commissionBandPrice} — the
+ * config) but whose commission BAND is selected by {@link commissionBandPrice} -- the
  * discounted price for genuinely-cheaper-per-unit types, the current (list) price for
  * X-al-Y / Nth-product where the list price is unchanged. The item's calculability + reason
- * follow the `current` (baseline) scenario — the "do nothing" state the list row shows. The
+ * follow the `current` (baseline) scenario -- the "do nothing" state the list row shows. The
  * basket-scoped `scenario` block ({@link buildBasketScenario}) reframes the discounted unit as
  * the settlement-basis unit under the single-product-basket assumption (null for NET).
  */
-export function computeDiscountItem(
-  ctx: TariffAssemblyContext,
-  variant: TariffVariant | null,
-  cost: VariantCostAggregate | undefined,
-  shipping: EstimateOutcome,
-  commission: DiscountCommissionInputs,
-  currentPrice: Decimal,
-  config: DiscountConfig,
-): ComputedDiscountItem {
+export function computeDiscountItem(params: {
+  readonly base: ScreenScenarioBase;
+  readonly commission: DiscountCommissionInputs;
+  readonly currentPrice: Decimal;
+  readonly config: DiscountConfig;
+}): ComputedDiscountItem {
+  const { base, commission, currentPrice, config } = params;
   const discountedPrice = effectiveUnitPrice(currentPrice, config);
   const discountedBandPrice = commissionBandPrice(currentPrice, discountedPrice, config);
-  const current = priceScenario(
-    ctx,
-    variant,
-    cost,
-    shipping,
+  const current = priceScenario({ base, commission, price: currentPrice, bandPrice: currentPrice });
+  const discounted = priceScenario({
+    base,
     commission,
-    currentPrice,
-    currentPrice,
-  );
-  const discounted = priceScenario(
-    ctx,
-    variant,
-    cost,
-    shipping,
-    commission,
-    discountedPrice,
-    discountedBandPrice,
-  );
+    price: discountedPrice,
+    bandPrice: discountedBandPrice,
+  });
   return {
     calculable: current.calculable,
     reason: current.reason,
     current: toScenario(currentPrice, current),
     discounted: toScenario(discountedPrice, discounted),
     scenario: buildBasketScenario(
-      ctx,
-      variant,
-      cost,
-      shipping,
+      base,
+      commission,
       currentPrice,
       discountedPrice,
+      discountedBandPrice,
       config,
-      current.resolved,
-      discounted.resolved,
     ),
   };
 }
 
-// ─── Single-scenario estimate (breakdown modal) ──────────────────────────────
+// --- Single-scenario estimate (breakdown modal) ---
 
 export type ComputedDiscountEstimate = ComputedScenarioEstimate;
 
@@ -210,19 +179,22 @@ export type ComputedDiscountEstimate = ComputedScenarioEstimate;
  * Full profit breakdown for ONE discount item: `price` is the MATRAH (already chosen by the
  * caller: the current price, or effectiveUnitPrice for the discounted scenario) and
  * `bandPrice` is the price the commission BAND is selected from (from {@link commissionBandPrice}
- * — equal to `price` for the current scenario and the genuinely-cheaper types, the current
- * price for X-al-Y / Nth-product). Serializes the breakdown — the same numbers the detail
- * row's matching scenario shows, so the modal never disagrees with the row.
+ * -- equal to `price` for the current scenario and the genuinely-cheaper types, the current
+ * price for X-al-Y / Nth-product). The breakdown is built from the scenario statement at the
+ * 2dp unit price -- the same numbers the detail row's matching scenario shows, so the modal
+ * never disagrees with the row.
  */
-export function computeDiscountEstimate(
-  ctx: TariffAssemblyContext,
-  variant: TariffVariant | null,
-  cost: VariantCostAggregate | undefined,
-  shipping: EstimateOutcome,
-  commission: DiscountCommissionInputs,
-  price: Decimal,
-  bandPrice: Decimal,
-): ComputedDiscountEstimate {
-  const c = priceScenario(ctx, variant, cost, shipping, commission, price, bandPrice);
-  return toEstimate(c, c.breakdown);
+export function computeDiscountEstimate(params: {
+  readonly base: ScreenScenarioBase;
+  readonly commission: DiscountCommissionInputs;
+  readonly price: Decimal;
+  readonly bandPrice: Decimal;
+}): ComputedDiscountEstimate {
+  const c = priceScenario({
+    base: params.base,
+    commission: params.commission,
+    price: params.price,
+    bandPrice: params.bandPrice,
+  });
+  return toEstimate(c, scenarioBreakdown(c, toKurusHalfUp(params.price)));
 }

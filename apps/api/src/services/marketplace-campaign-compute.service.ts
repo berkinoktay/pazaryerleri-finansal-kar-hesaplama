@@ -43,7 +43,7 @@ import {
   type ComputedScenarioEstimate,
   type ScenarioCompute,
   type ScenarioItemReason,
-} from './discount-scenario-commons';
+} from './campaign-scenario-legacy';
 import { assembleUnitEconomics } from './product-pricing.service';
 import {
   tariffCommission,
