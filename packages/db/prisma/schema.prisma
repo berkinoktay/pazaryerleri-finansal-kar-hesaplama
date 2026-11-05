@@ -2219,6 +2219,12 @@ model MarketplaceFinanceRecord {
   payload   Json
   fetchedAt DateTime @map("fetched_at")
 
+  // true from the moment an ingest inserts or changes this row until the post-commit
+  // bind pass has enqueued the orders it binds to (outbox flag; see
+  // bindPendingFinanceRecords). The bind pass clears it. Every pre-existing row is
+  // false: the one-phase ingest that wrote it had already bound its orders.
+  bindPending Boolean @default(false) @map("bind_pending")
+
   createdAt DateTime @default(now()) @map("created_at")
   // Written mostly by raw SQL (the finance-record ingest), so updated_at carries
   // a DB default on top of @updatedAt. Raw UPDATEs must still set it explicitly.
@@ -2231,6 +2237,9 @@ model MarketplaceFinanceRecord {
   @@index([storeId, orderNumber])
   @@index([storeId, paymentOrderId])
   @@index([storeId, parcelUniqueId])
+  // The bind pass claims this store's still-pending rows; the btree range
+  // (store_id, true) stays small because almost every row is false.
+  @@index([storeId, bindPending])
   @@index([organizationId])
   // The settlement cron's prune DELETE filters by (store_id, family, transaction_type)
   // and a transaction_date range; this index serves it directly. The name is set

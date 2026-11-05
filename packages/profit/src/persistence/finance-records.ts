@@ -1,5 +1,5 @@
 import { type Decimal } from 'decimal.js';
-import { Prisma } from '@pazarsync/db';
+import { Prisma, type PrismaClient } from '@pazarsync/db';
 import { FinanceRecordFamily, type Platform, ProfitRecomputeReason } from '@pazarsync/db/enums';
 
 import { type FinanceRecordInput } from '../core/finance-record-input';
@@ -7,23 +7,36 @@ import { TRENDYOL_PAYMENT_ORDER_TRANSACTION_TYPE } from '../marketplaces/trendyo
 import { enqueueProfitRecompute } from './recompute-queue';
 
 /**
- * Raw finance-record ingest (Phase 3B, Gorev 6). Stores vendor settlement,
- * otherfinancials and cargo-invoice rows verbatim in `marketplace_finance_records`,
- * then enqueues exactly the orders the loader would hand those records to. Both steps
- * run inside the caller's transaction (the settlement cron owns the maxWait/timeout),
- * so the just-inserted settlement rows are visible to the payment-order resolve below.
+ * Raw finance-record outbox (Phase 3B, Gorev 6), in two phases. The settlement cron
+ * re-reads a wide window every few hours, so most re-polled rows are unchanged; writing
+ * them back and recomputing their orders on every scan would be almost entirely no-ops.
  *
- * All writes are raw SQL with bound parameters (never string concatenation). The
- * store (write) is one `INSERT ... SELECT ... ON CONFLICT`; the resolve is one
- * `SELECT`. `marketplace_finance_records` has no `updated_at` DB trigger, so the
- * conflict path sets it by hand with `clock_timestamp()`. Records are deduplicated on
- * their `(family, record_id)` conflict key before the write, and `transaction_date`
- * binds as `::timestamp(3)` to match the time-zone-less column.
+ * Phase 1 -- `ingestFinanceRecords` -- only stores: it upserts vendor settlement,
+ * otherfinancials and cargo-invoice rows verbatim in `marketplace_finance_records` and
+ * flags every row it inserts or actually changes `bind_pending = true`. An unchanged
+ * re-poll touches nothing. It runs inside the caller's transaction (the cron owns the
+ * maxWait/timeout) and neither resolves orders nor enqueues.
+ *
+ * Phase 2 -- `bindPendingFinanceRecords` -- runs AFTER that transaction commits, on the
+ * root client: it claims the flagged rows, clears the flag, resolves the orders they
+ * bind to, and enqueues a profit recompute. Running after the commit closes a race the
+ * one-phase ingest could not: a record inserted before its order exists (so the inline
+ * resolve found nothing) stays flagged until a later bind pass -- once the order is
+ * present -- enqueues it. A timestamp comparison cannot detect this (updated_at is the
+ * insert time, not the commit time); the flag does.
+ *
+ * All writes are raw SQL with bound parameters (never string concatenation). The store
+ * is one conditional `INSERT ... SELECT ... ON CONFLICT DO UPDATE ... WHERE ... IS
+ * DISTINCT FROM`; a bind pass is one `UPDATE ... RETURNING` plus one resolve `SELECT`.
+ * `marketplace_finance_records` has no `updated_at` DB trigger, so every write sets it
+ * by hand with `clock_timestamp()`. Records are deduplicated on their `(family,
+ * record_id)` conflict key before the write, and `transaction_date` binds as
+ * `::timestamp(3)` to match the time-zone-less column.
  *
  * Tenant isolation: the INSERT joins the given store filtered by both its id and the
- * caller's organization, so a store that is not this organization's stores nothing;
- * the resolve and enqueue are both store-scoped and the enqueue re-checks the
- * organization, so another tenant's order can never enter the queue.
+ * caller's organization, so a store that is not this organization's stores nothing; the
+ * bind pass filters every statement by both organization and store, and the enqueue
+ * re-checks the organization, so another tenant's order can never enter the queue.
  */
 
 /** Only a text of all-digits is a numeric cargo tracking number the index can match. */
@@ -69,7 +82,8 @@ function financeRecordValuesRow(platform: Platform, record: FinanceRecordInput):
     ${JSON.stringify(record.payload)}::jsonb,
     clock_timestamp(),
     clock_timestamp(),
-    clock_timestamp()
+    clock_timestamp(),
+    true
   )`;
 }
 
@@ -102,10 +116,16 @@ function dedupeByConflictKey(records: readonly FinanceRecordInput[]): FinanceRec
 }
 
 /**
- * Upserts every record on `(store_id, family, record_id)`. organization_id and
- * store_id come from the `stores` row (not the caller's raw ids), and the CROSS JOIN
- * matches nothing unless the store belongs to the organization, so a mismatch stores
- * nothing. Returns the affected row count (inserted + updated).
+ * Upserts every record on `(store_id, family, record_id)` and flags each inserted or
+ * changed row `bind_pending = true`. organization_id and store_id come from the `stores`
+ * row (not the caller's raw ids), and the CROSS JOIN matches nothing unless the store
+ * belongs to the organization, so a mismatch stores nothing.
+ *
+ * The conflict update is conditional: its `WHERE ... IS DISTINCT FROM` compares the
+ * content columns (not fetched_at/updated_at, which always differ, nor bind_pending), so
+ * an unchanged re-poll touches no row -- no rewrite, no dead tuple, no re-flag. Only a
+ * row whose content actually changed is updated, re-flagged and counted. Returns the
+ * affected row count (inserted + actually changed).
  */
 function storeFinanceRecords(
   tx: Prisma.TransactionClient,
@@ -118,18 +138,18 @@ function storeFinanceRecords(
 ): Promise<number> {
   const valueRows = params.records.map((record) => financeRecordValuesRow(params.platform, record));
   return tx.$executeRaw`
-    INSERT INTO marketplace_finance_records (
+    INSERT INTO marketplace_finance_records AS r (
       organization_id, store_id, id, platform, family, transaction_type, record_id,
       invoice_serial, order_number, shipment_package_id, barcode, payment_order_id, parcel_unique_id,
       transaction_date, debt, credit, commission_amount, amount_gross, desi, payload,
-      fetched_at, created_at, updated_at
+      fetched_at, created_at, updated_at, bind_pending
     )
     SELECT s.organization_id, s.id, v.*
     FROM (VALUES ${Prisma.join(valueRows)}) v (
       id, platform, family, transaction_type, record_id,
       invoice_serial, order_number, shipment_package_id, barcode, payment_order_id, parcel_unique_id,
       transaction_date, debt, credit, commission_amount, amount_gross, desi, payload,
-      fetched_at, created_at, updated_at
+      fetched_at, created_at, updated_at, bind_pending
     )
     CROSS JOIN stores s
     WHERE s.id = ${params.storeId}::uuid AND s.organization_id = ${params.organizationId}::uuid
@@ -150,7 +170,19 @@ function storeFinanceRecords(
       desi = EXCLUDED.desi,
       payload = EXCLUDED.payload,
       fetched_at = EXCLUDED.fetched_at,
+      bind_pending = true,
       updated_at = clock_timestamp()
+    WHERE (
+      r.platform, r.transaction_type, r.invoice_serial, r.order_number,
+      r.shipment_package_id, r.barcode, r.payment_order_id, r.parcel_unique_id,
+      r.transaction_date, r.debt, r.credit, r.commission_amount, r.amount_gross,
+      r.desi, r.payload
+    ) IS DISTINCT FROM (
+      EXCLUDED.platform, EXCLUDED.transaction_type, EXCLUDED.invoice_serial, EXCLUDED.order_number,
+      EXCLUDED.shipment_package_id, EXCLUDED.barcode, EXCLUDED.payment_order_id, EXCLUDED.parcel_unique_id,
+      EXCLUDED.transaction_date, EXCLUDED.debt, EXCLUDED.credit, EXCLUDED.commission_amount, EXCLUDED.amount_gross,
+      EXCLUDED.desi, EXCLUDED.payload
+    )
   `;
 }
 
@@ -328,10 +360,11 @@ async function resolveAffectedOrderIds(
 }
 
 /**
- * Stores the records idempotently and enqueues a profit recompute for every order
- * they bind to. An empty records list makes no query. A store/organization mismatch
- * stores nothing and enqueues nothing. `stored` is the affected row count;
- * `enqueuedOrders` is the number of queue rows written.
+ * Phase 1 of the outbox: stores the records idempotently and flags the inserted or
+ * changed ones `bind_pending`, so a later `bindPendingFinanceRecords` pass can enqueue
+ * their orders after this transaction commits. It does NOT resolve orders or enqueue.
+ * An empty records list makes no query. A store/organization mismatch stores nothing.
+ * `stored` is the affected row count (inserted + actually changed).
  */
 export async function ingestFinanceRecords(
   tx: Prisma.TransactionClient,
@@ -341,30 +374,111 @@ export async function ingestFinanceRecords(
     readonly platform: Platform;
     readonly records: readonly FinanceRecordInput[];
   },
-): Promise<{ readonly stored: number; readonly enqueuedOrders: number }> {
+): Promise<{ readonly stored: number }> {
   const { organizationId, storeId, platform } = params;
   if (params.records.length === 0) {
-    return { stored: 0, enqueuedOrders: 0 };
+    return { stored: 0 };
   }
   // Collapse same-key repeats before building the VALUES list so one ON CONFLICT write
   // never touches a conflict key twice. `stored` then counts the collapsed rows.
   const records = dedupeByConflictKey(params.records);
 
   const stored = await storeFinanceRecords(tx, { organizationId, storeId, platform, records });
-  if (stored === 0) {
-    // The CROSS JOIN matched no store: the store is not this organization's, so
-    // nothing was stored and nothing may be enqueued (tenant defense).
-    return { stored: 0, enqueuedOrders: 0 };
-  }
+  return { stored };
+}
 
-  const orderIds = await resolveAffectedOrderIds(tx, { storeId, records });
+/** The max pending rows one bind-pass transaction claims and clears at a time. */
+const BIND_PASS_BATCH_SIZE = 500;
+
+/** Interactive-transaction budget for one bind pass (Prisma's 5s default is tight for a
+ * claim + resolve + enqueue over a busy store). */
+const BIND_PASS_TX_MAX_WAIT_MS = 10_000;
+const BIND_PASS_TX_TIMEOUT_MS = 30_000;
+
+/**
+ * Phase 2 of the outbox: binds the rows an ingest flagged `bind_pending` and enqueues the
+ * orders they resolve to, AFTER the ingest transaction that stored them has committed.
+ * Runs its own interactive transaction(s) on the root client -- never inside the caller's
+ * ingest transaction -- so the committed rows (including a settlement whose order appeared
+ * only after the ingest) are all visible when the bind resolves them.
+ *
+ * Each pass claims up to `BIND_PASS_BATCH_SIZE` of the store's pending rows with
+ * `FOR UPDATE SKIP LOCKED`, clears their flag, resolves their orders and enqueues a
+ * `FINANCE_RECORD` recompute -- all in one transaction. It repeats while a pass filled a
+ * whole batch; a short pass stops (SKIP LOCKED leaves rows another in-flight ingest still
+ * holds to that ingest's own bind pass). An empty queue runs one no-op pass and returns.
+ *
+ * Tenant isolation: every statement is filtered by both organization_id and store_id, and
+ * the enqueue re-checks the organization, so another tenant's row can never be bound here.
+ */
+export async function bindPendingFinanceRecords(
+  db: PrismaClient,
+  params: { readonly organizationId: string; readonly storeId: string },
+): Promise<{ readonly bound: number; readonly enqueuedOrders: number }> {
+  const { organizationId, storeId } = params;
+  let bound = 0;
+  let enqueuedOrders = 0;
+  for (;;) {
+    const pass = await db.$transaction((tx) => bindPendingPass(tx, { organizationId, storeId }), {
+      maxWait: BIND_PASS_TX_MAX_WAIT_MS,
+      timeout: BIND_PASS_TX_TIMEOUT_MS,
+    });
+    bound += pass.bound;
+    enqueuedOrders += pass.enqueuedOrders;
+    if (pass.bound < BIND_PASS_BATCH_SIZE) {
+      break;
+    }
+  }
+  return { bound, enqueuedOrders };
+}
+
+/**
+ * One bind-pass transaction: claim up to `BIND_PASS_BATCH_SIZE` pending rows of the store
+ * (ordered by their `(family, record_id)` key, the same global order the ingest and prune
+ * take, so overlapping passes queue instead of deadlocking), clear their flag, and
+ * enqueue the orders they bind to. The `UPDATE ... RETURNING` hands the binding keys to
+ * the same `resolveAffectedOrderIds` the ingest used to use, so the bound set is identical.
+ */
+async function bindPendingPass(
+  tx: Prisma.TransactionClient,
+  params: { readonly organizationId: string; readonly storeId: string },
+): Promise<{ readonly bound: number; readonly enqueuedOrders: number }> {
+  const { organizationId, storeId } = params;
+  const picked = await tx.$queryRaw<FinanceRecordBindingKey[]>`
+    WITH picked AS (
+      SELECT id
+      FROM marketplace_finance_records
+      WHERE organization_id = ${organizationId}::uuid
+        AND store_id = ${storeId}::uuid
+        AND bind_pending
+      ORDER BY family, record_id
+      LIMIT ${BIND_PASS_BATCH_SIZE}
+      FOR UPDATE SKIP LOCKED
+    )
+    UPDATE marketplace_finance_records r
+    SET bind_pending = false, updated_at = clock_timestamp()
+    FROM picked
+    WHERE r.id = picked.id
+    RETURNING
+      r.family AS "family",
+      r.transaction_type AS "transactionType",
+      r.shipment_package_id AS "shipmentPackageId",
+      r.payment_order_id AS "paymentOrderId",
+      r.parcel_unique_id AS "parcelUniqueId",
+      r.order_number AS "orderNumber",
+      r.barcode AS "barcode"
+  `;
+  if (picked.length === 0) {
+    return { bound: 0, enqueuedOrders: 0 };
+  }
+  const orderIds = await resolveAffectedOrderIds(tx, { storeId, records: picked });
   const enqueuedOrders = await enqueueProfitRecompute(tx, {
     organizationId,
     storeId,
     reason: ProfitRecomputeReason.FINANCE_RECORD,
     orderIds,
   });
-  return { stored, enqueuedOrders };
+  return { bound: picked.length, enqueuedOrders };
 }
 
 /**

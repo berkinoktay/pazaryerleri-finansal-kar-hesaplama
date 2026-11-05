@@ -264,7 +264,11 @@ export {
   InvalidStoredProfitDataError,
 } from './persistence/errors';
 export { type FinanceRecordInput } from './core/finance-record-input';
-export { ingestFinanceRecords, pruneUnseenFinanceRecords } from './persistence/finance-records';
+export {
+  bindPendingFinanceRecords,
+  ingestFinanceRecords,
+  pruneUnseenFinanceRecords,
+} from './persistence/finance-records';
 
 // Read layer (rebuild, phase 4A) -- docs/plans/2026-11-04-profit-engine-faz-4a-plan.md
 export {

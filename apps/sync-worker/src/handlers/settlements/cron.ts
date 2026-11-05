@@ -31,11 +31,17 @@
 // on (store_id, family, record_id) (ingestFinanceRecords' ON CONFLICT DO
 // UPDATE), so a re-polled row updates its existing row instead of duplicating.
 //
-// Phase 3B: every fetched row is stored verbatim as a marketplace_finance_record
-// and the orders it binds to are enqueued for a profit recompute. The legacy
-// per-row handlers (dispatchSettlementRow / dispatchOtherFinancialRow /
-// handleCargoInvoiceItems) and the end-of-cycle reconciliation bump are no longer
-// called; their files stay until phase 5.
+// Phase 3B (two-phase outbox): every fetched row is stored verbatim as a
+// marketplace_finance_record and flagged bind_pending in one transaction
+// (ingestFinanceRecords). After that transaction commits, a separate bind pass
+// (bindPendingFinanceRecords, run on the root client after every batch and once more at
+// the end of the run) resolves the flagged rows to their orders and enqueues a profit
+// recompute, then clears the flag. A re-poll that finds a row unchanged stores nothing
+// and flags nothing, so it enqueues no recompute -- only inserted or changed rows reach
+// the queue, and binding after the store commit closes the race where a settlement is
+// stored before its order exists. The legacy per-row handlers (dispatchSettlementRow /
+// dispatchOtherFinancialRow / handleCargoInvoiceItems) and the end-of-cycle
+// reconciliation bump are no longer called; their files stay until phase 5.
 //
 // Phase 3D pruning: the raw store is keyed by (store_id, family, record_id), and
 // Trendyol renews record ids (it did on 3 Aug 2026), so a renewed id lands as a second
@@ -80,6 +86,7 @@ import {
   type TrendyolFinancialTransaction,
 } from '@pazarsync/marketplace';
 import {
+  bindPendingFinanceRecords,
   type FinanceRecordInput,
   ingestFinanceRecords,
   pruneUnseenFinanceRecords,
@@ -94,9 +101,10 @@ import type { ChunkResult, ModuleHandler } from '../types';
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const SCAN_WINDOW_DAYS = 60;
 
-// Interactive-transaction budgets for a single raw-record ingest. Prisma's 5s default
-// is too tight for the store + resolve + enqueue that ingestFinanceRecords runs, so each
-// ingest sets both explicitly.
+// Interactive-transaction budgets for a single raw-record store. Prisma's 5s default is
+// tight for a batch INSERT ... ON CONFLICT, so each ingest sets both explicitly. The
+// post-commit bind pass (bindPendingFinanceRecords) runs its own transactions on the root
+// client, never inside these.
 const INGEST_TX_MAX_WAIT_MS = 10_000;
 const INGEST_TX_TIMEOUT_MS = 30_000;
 // A cargo invoice can carry ~500 items, all stored in one transaction, so its ingest gets
@@ -279,6 +287,31 @@ export async function processSettlementsChunk(
     return created;
   };
 
+  // Phase 2 of the outbox: after an ingest transaction commits, bind the rows it flagged
+  // and enqueue the orders they resolve to, on the root client OUTSIDE any ingest
+  // transaction. Accumulates the run totals; on failure it logs settlements.bind.failed and
+  // rethrows so the pending rows stay flagged and the job's retry machinery drives them
+  // (never swallowed).
+  let totalBound = 0;
+  let totalEnqueuedByBind = 0;
+  const runBindPass = async (): Promise<void> => {
+    try {
+      const { bound, enqueuedOrders } = await bindPendingFinanceRecords(prisma, {
+        organizationId: store.organizationId,
+        storeId: store.id,
+      });
+      totalBound += bound;
+      totalEnqueuedByBind += enqueuedOrders;
+    } catch (bindErr) {
+      syncLog.error('settlements.bind.failed', {
+        syncLogId: log.id,
+        storeId: store.id,
+        errorMessage: bindErr instanceof Error ? bindErr.message : String(bindErr),
+      });
+      throw bindErr;
+    }
+  };
+
   // Ingest one buffered batch in a single transaction, counting its rows into
   // totalProcessed. On any failure, log once (settlements.ingest.batch-failed) and retry
   // the rows one by one in their own transactions, so a single bad row (e.g. a numeric
@@ -341,6 +374,9 @@ export async function processSettlementsChunk(
       }
     }
     await syncLogService.heartbeat(log.id, workerId);
+    // The ingest transaction (batch or per-row fallback) has committed; bind its flagged
+    // rows and enqueue their orders before the next batch.
+    await runBindPass();
   };
 
   // Slide newest → oldest in FINANCIAL_WINDOW_MAX_DAYS slices. Oldest chunk
@@ -438,6 +474,8 @@ export async function processSettlementsChunk(
             );
             // One source row processed: the invoice counts once, its items ride along.
             totalProcessed += 1;
+            // The invoice ingest committed; bind its flagged rows and enqueue their orders.
+            await runBindPass();
           } catch (err) {
             // The invoice (and its items) failed to ingest: mark this DeductionInvoices type
             // so its stale rows are not pruned while the renewed invoice is not stored.
@@ -467,6 +505,18 @@ export async function processSettlementsChunk(
       state.complete = state.complete && isCompleteFinancialScan(summary);
     }
   }
+
+  // A final catch-all bind pass before pruning: it sweeps up any rows a crashed earlier
+  // run left flagged (its per-batch bind never ran) and binds them now that the whole scan
+  // has committed. One settlements.bind.done line per run makes the saving visible -- a
+  // re-poll of an unchanged window flags nothing, so bound/enqueuedOrders stay 0.
+  await runBindPass();
+  syncLog.info('settlements.bind.done', {
+    syncLogId: log.id,
+    storeId: store.id,
+    bound: totalBound,
+    enqueuedOrders: totalEnqueuedByBind,
+  });
 
   // Prune stale raw rows a complete scan no longer returned. The delete range sits one
   // tolerance inside both scan edges so a shifted vendor filter can never delete a row it

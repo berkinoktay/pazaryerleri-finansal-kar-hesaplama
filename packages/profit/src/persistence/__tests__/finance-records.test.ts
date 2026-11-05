@@ -1,12 +1,16 @@
 /**
- * Integration tests for the raw finance-record ingest (Phase 3B, Gorev 6). They run
- * against the isolated test database. They pin that rows are stored idempotently on
- * the (store, family, record_id) key, that a sale row is updated in place when its
- * payment order arrives later, that a cargo item keeps one row when a re-scan relabels
- * it, that a row for a not-yet-existing order is still stored while enqueuing nothing,
- * that the enqueued order set equals exactly what the loader would bind, that a sibling
- * store's order sharing the keys is never enqueued, and that a store/organization
- * mismatch stores and enqueues nothing.
+ * Integration tests for the two-phase raw finance-record outbox (Phase 3B, Gorev 6).
+ * They run against the isolated test database. Phase 1 (`ingestFinanceRecords`) only
+ * stores rows and flags inserted or changed ones `bind_pending`; Phase 2
+ * (`bindPendingFinanceRecords`) resolves the flagged rows to their orders and enqueues a
+ * profit recompute after the store transaction has committed. They pin that rows are
+ * stored idempotently on the (store, family, record_id) key, that an unchanged re-ingest
+ * stores nothing and enqueues nothing, that a changed row is flagged and bound, that a
+ * sale row is updated in place when its payment order arrives later, that a cargo item
+ * keeps one row when a re-scan relabels it, that a row stored before its order exists is
+ * bound once the order exists (the race the outbox closes), that the bound order set
+ * equals exactly what the loader would bind, that a sibling store's order sharing the
+ * keys is never enqueued, and that a store/organization mismatch stores and binds nothing.
  *
  * Requires: `supabase start` + `pnpm db:push` before running.
  */
@@ -28,7 +32,11 @@ import {
   TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
   TRENDYOL_CARGO_RETURN_ITEM_TYPE,
 } from '../../marketplaces/trendyol/settlement-records';
-import { ingestFinanceRecords, pruneUnseenFinanceRecords } from '../finance-records';
+import {
+  bindPendingFinanceRecords,
+  ingestFinanceRecords,
+  pruneUnseenFinanceRecords,
+} from '../finance-records';
 import { loadTrendyolParcel } from '../load-trendyol-parcel';
 import {
   createAdditionalStore,
@@ -220,8 +228,9 @@ describe('ingestFinanceRecords', () => {
       platform: Platform.TRENDYOL,
       records,
     });
-    expect(second.stored).toBe(4);
-    // The second ingest updated the same four rows; it never duplicated them.
+    // The second ingest sees four unchanged rows: the conditional ON CONFLICT touches
+    // none of them, so nothing is stored and no row is duplicated.
+    expect(second.stored).toBe(0);
     expect(await prisma.marketplaceFinanceRecord.count()).toBe(4);
   });
 
@@ -245,7 +254,11 @@ describe('ingestFinanceRecords', () => {
       ],
     });
     expect(first.stored).toBe(1);
-    expect(first.enqueuedOrders).toBe(1);
+    const firstBind = await bindPendingFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
+    expect(firstBind.enqueuedOrders).toBe(1);
     const before = await prisma.marketplaceFinanceRecord.findFirstOrThrow({
       where: { recordId: 'sale-a' },
     });
@@ -270,7 +283,13 @@ describe('ingestFinanceRecords', () => {
         ),
       ],
     });
-    expect(second.enqueuedOrders).toBe(1);
+    // The sale row gained a payment order and the PaymentOrder row is new: both change.
+    expect(second.stored).toBe(2);
+    const secondBind = await bindPendingFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
+    expect(secondBind.enqueuedOrders).toBe(1);
 
     const after = await prisma.marketplaceFinanceRecord.findFirstOrThrow({
       where: { recordId: 'sale-a' },
@@ -396,7 +415,7 @@ describe('ingestFinanceRecords', () => {
     expect(families).toEqual([FinanceRecordFamily.OTHER_FINANCIAL, FinanceRecordFamily.SETTLEMENT]);
   });
 
-  it('stores a row whose order does not exist yet and enqueues nothing', async () => {
+  it('stores a row whose order does not exist yet and binds nothing', async () => {
     const parcel = await seedMelontikParcel();
 
     const result = await ingestFinanceRecords(prisma, {
@@ -412,7 +431,14 @@ describe('ingestFinanceRecords', () => {
     });
 
     expect(result.stored).toBe(1);
-    expect(result.enqueuedOrders).toBe(0);
+    // The bind pass clears the flagged row but finds no order to enqueue (it does not
+    // exist yet). A later pass re-binds it once the order arrives (see the race test).
+    const bind = await bindPendingFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
+    expect(bind.bound).toBe(1);
+    expect(bind.enqueuedOrders).toBe(0);
     expect(await prisma.marketplaceFinanceRecord.count()).toBe(1);
     expect(await queuedOrderIds()).toEqual([]);
   });
@@ -502,7 +528,8 @@ describe('ingestFinanceRecords', () => {
       records,
     });
     expect(result.stored).toBe(5);
-    expect(result.enqueuedOrders).toBe(4);
+    const bind = await bindPendingFinanceRecords(prisma, { organizationId: org, storeId: store });
+    expect(bind.enqueuedOrders).toBe(4);
 
     const expected = [order1, order2, order3, order4].sort();
     expect(await queuedOrderIds()).toEqual(expected);
@@ -538,7 +565,7 @@ describe('ingestFinanceRecords', () => {
     // A return settlement whose shipment package is the claim's return package, not the
     // order's own package, and with no payment order in the batch: only the claim-join
     // branch can bind it to the order.
-    const result = await ingestFinanceRecords(prisma, {
+    await ingestFinanceRecords(prisma, {
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
       platform: Platform.TRENDYOL,
@@ -550,7 +577,11 @@ describe('ingestFinanceRecords', () => {
       ],
     });
 
-    expect(result.enqueuedOrders).toBe(1);
+    const bind = await bindPendingFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
+    expect(bind.enqueuedOrders).toBe(1);
     expect(await queuedOrderIds()).toEqual([order]);
   });
 
@@ -562,7 +593,8 @@ describe('ingestFinanceRecords', () => {
       platformOrderId: '5001',
     });
 
-    // Store the settlement (carrying its payment order) first, then clear the queue.
+    // Store the settlement (carrying its payment order) first, bind it, then clear the
+    // queue so the second bind pass has only the payment order left to resolve.
     await ingestFinanceRecords(prisma, {
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
@@ -579,12 +611,16 @@ describe('ingestFinanceRecords', () => {
         ),
       ],
     });
+    await bindPendingFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
     await prisma.profitRecomputeRequest.deleteMany({});
 
-    // A later poll brings only the payment order: with no settlement in this batch to
-    // match the order directly, it binds through the stored settlement row whose
+    // A later poll brings only the payment order: with no settlement flagged in this pass
+    // to match the order directly, it binds through the stored settlement row whose
     // shipment package is the order's own package.
-    const result = await ingestFinanceRecords(prisma, {
+    await ingestFinanceRecords(prisma, {
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
       platform: Platform.TRENDYOL,
@@ -596,7 +632,11 @@ describe('ingestFinanceRecords', () => {
       ],
     });
 
-    expect(result.enqueuedOrders).toBe(1);
+    const bind = await bindPendingFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
+    expect(bind.enqueuedOrders).toBe(1);
     expect(await queuedOrderIds()).toEqual([order]);
   });
 
@@ -615,7 +655,7 @@ describe('ingestFinanceRecords', () => {
     });
 
     // Store the return settlement (on the claim's return package, carrying its payment
-    // order) first, then clear the queue.
+    // order) first, bind it, then clear the queue.
     await ingestFinanceRecords(prisma, {
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
@@ -627,12 +667,16 @@ describe('ingestFinanceRecords', () => {
         ),
       ],
     });
+    await bindPendingFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
     await prisma.profitRecomputeRequest.deleteMany({});
 
     // A later poll brings only the payment order: the stored settlement's shipment
     // package is the claim's return package, not the order's own, so it binds through
     // the settlement-to-claim join, not the direct settlement branch.
-    const result = await ingestFinanceRecords(prisma, {
+    await ingestFinanceRecords(prisma, {
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
       platform: Platform.TRENDYOL,
@@ -644,7 +688,11 @@ describe('ingestFinanceRecords', () => {
       ],
     });
 
-    expect(result.enqueuedOrders).toBe(1);
+    const bind = await bindPendingFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
+    expect(bind.enqueuedOrders).toBe(1);
     expect(await queuedOrderIds()).toEqual([order]);
   });
 
@@ -662,7 +710,7 @@ describe('ingestFinanceRecords', () => {
       platformOrderId: '7777',
     });
 
-    const result = await ingestFinanceRecords(prisma, {
+    await ingestFinanceRecords(prisma, {
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
       platform: Platform.TRENDYOL,
@@ -674,7 +722,11 @@ describe('ingestFinanceRecords', () => {
       ],
     });
 
-    expect(result.enqueuedOrders).toBe(1);
+    const bind = await bindPendingFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
+    expect(bind.enqueuedOrders).toBe(1);
     expect(await queuedOrderIds()).toEqual([orderA]);
     const siblingRow = await prisma.profitRecomputeRequest.findUnique({
       where: { orderId: orderB },
@@ -713,7 +765,11 @@ describe('ingestFinanceRecords', () => {
     });
 
     expect(result.stored).toBe(1);
-    expect(result.enqueuedOrders).toBe(1);
+    const bind = await bindPendingFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
+    expect(bind.enqueuedOrders).toBe(1);
     expect(await queuedOrderIds()).toEqual([parcel.orderId]);
   });
 
@@ -775,11 +831,12 @@ describe('ingestFinanceRecords', () => {
     });
 
     expect(result.stored).toBe(2);
-    expect(result.enqueuedOrders).toBe(2);
+    const bind = await bindPendingFinanceRecords(prisma, { organizationId: org, storeId: store });
+    expect(bind.enqueuedOrders).toBe(2);
     expect(await queuedOrderIds()).toEqual([orderAX, orderBY].sort());
   });
 
-  it('stores nothing when the store does not belong to the organization', async () => {
+  it("tenant: a store that is not the organization's stores nothing and binds nothing", async () => {
     const parcel = await seedMelontikParcel();
     const carrierId = await upsertMelontikCarrier();
     const otherOrg = await createTrendyolOrg({ carrierId });
@@ -798,9 +855,196 @@ describe('ingestFinanceRecords', () => {
     });
 
     expect(result.stored).toBe(0);
-    expect(result.enqueuedOrders).toBe(0);
+    // The bind pass is filtered by both organization and store, so the wrong organization
+    // picks up none of this store's rows and binds nothing.
+    const bind = await bindPendingFinanceRecords(prisma, {
+      organizationId: otherOrg.organizationId,
+      storeId: parcel.storeId,
+    });
+    expect(bind.bound).toBe(0);
+    expect(bind.enqueuedOrders).toBe(0);
     expect(await prisma.marketplaceFinanceRecord.count()).toBe(0);
     expect(await queuedOrderIds()).toEqual([]);
+  });
+
+  it('an identical re-ingest stores nothing and leaves nothing pending', async () => {
+    const parcel = await seedMelontikParcel();
+    const order = await createTestOrder({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platformOrderId: '1001',
+    });
+    const records: FinanceRecordInput[] = [
+      trendyolSettlementRecordInput(
+        'Sale',
+        financialTx({ id: 'sale-a', shipmentPackageId: 1001, credit: 529 }),
+      ),
+    ];
+
+    const first = await ingestFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platform: Platform.TRENDYOL,
+      records,
+    });
+    expect(first.stored).toBe(1);
+    const firstBind = await bindPendingFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
+    expect(firstBind.bound).toBe(1);
+    expect(firstBind.enqueuedOrders).toBe(1);
+    expect(await queuedOrderIds()).toEqual([order]);
+
+    // Capture the row AFTER the first bind cleared its flag, then drain the queue.
+    const before = await prisma.marketplaceFinanceRecord.findFirstOrThrow({
+      where: { recordId: 'sale-a' },
+    });
+    await prisma.profitRecomputeRequest.deleteMany({});
+
+    const second = await ingestFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platform: Platform.TRENDYOL,
+      records,
+    });
+    expect(second.stored).toBe(0);
+    const secondBind = await bindPendingFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
+    expect(secondBind.bound).toBe(0);
+    expect(secondBind.enqueuedOrders).toBe(0);
+    expect(await queuedOrderIds()).toEqual([]);
+
+    // The unchanged re-ingest never touched the row: its updated_at is exactly the bind's.
+    const after = await prisma.marketplaceFinanceRecord.findFirstOrThrow({
+      where: { recordId: 'sale-a' },
+    });
+    expect(after.updatedAt.getTime()).toBe(before.updatedAt.getTime());
+  });
+
+  it('a changed record is flagged and its order enqueued by the bind pass', async () => {
+    const parcel = await seedMelontikParcel();
+    const order = await createTestOrder({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platformOrderId: '1001',
+    });
+
+    await ingestFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platform: Platform.TRENDYOL,
+      records: [
+        trendyolSettlementRecordInput(
+          'Sale',
+          financialTx({ id: 'sale-a', shipmentPackageId: 1001, credit: 529 }),
+        ),
+      ],
+    });
+    await bindPendingFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
+    await prisma.profitRecomputeRequest.deleteMany({});
+
+    // Re-ingest the same record with a different credit: the change flags the row.
+    const changed = await ingestFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platform: Platform.TRENDYOL,
+      records: [
+        trendyolSettlementRecordInput(
+          'Sale',
+          financialTx({ id: 'sale-a', shipmentPackageId: 1001, credit: 600 }),
+        ),
+      ],
+    });
+    expect(changed.stored).toBe(1);
+    const flagged = await prisma.marketplaceFinanceRecord.findFirstOrThrow({
+      where: { recordId: 'sale-a' },
+    });
+    expect(flagged.bindPending).toBe(true);
+
+    const bind = await bindPendingFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
+    expect(bind.bound).toBe(1);
+    expect(bind.enqueuedOrders).toBe(1);
+    expect(await queuedOrderIds()).toEqual([order]);
+    const cleared = await prisma.marketplaceFinanceRecord.findFirstOrThrow({
+      where: { recordId: 'sale-a' },
+    });
+    expect(cleared.bindPending).toBe(false);
+  });
+
+  it('a record stored before its order exists is bound once the order exists', async () => {
+    const parcel = await seedMelontikParcel();
+
+    // The settlement arrives before its order: it is stored and left flagged.
+    const result = await ingestFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platform: Platform.TRENDYOL,
+      records: [
+        trendyolSettlementRecordInput(
+          'Sale',
+          financialTx({ id: 'sale-race', shipmentPackageId: 5555, credit: 100 }),
+        ),
+      ],
+    });
+    expect(result.stored).toBe(1);
+
+    // The order is then persisted.
+    const order = await createTestOrder({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platformOrderId: '5555',
+    });
+
+    // The bind pass finds the still-flagged row and enqueues the order -- the race the
+    // outbox closes (a timestamp comparison could not detect it).
+    const bind = await bindPendingFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
+    expect(bind.bound).toBe(1);
+    expect(bind.enqueuedOrders).toBe(1);
+    expect(await queuedOrderIds()).toEqual([order]);
+  });
+
+  it('a crashed bind is completed by the next pass', async () => {
+    const parcel = await seedMelontikParcel();
+    const order = await createTestOrder({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platformOrderId: '1001',
+    });
+
+    // Ingest stores the row and flags it; a crash skips the bind pass entirely.
+    await ingestFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platform: Platform.TRENDYOL,
+      records: [
+        trendyolSettlementRecordInput(
+          'Sale',
+          financialTx({ id: 'sale-a', shipmentPackageId: 1001, credit: 529 }),
+        ),
+      ],
+    });
+    expect(await queuedOrderIds()).toEqual([]);
+
+    // A later run's bind pass completes the still-flagged row.
+    const bind = await bindPendingFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
+    expect(bind.bound).toBe(1);
+    expect(bind.enqueuedOrders).toBe(1);
+    expect(await queuedOrderIds()).toEqual([order]);
   });
 });
 

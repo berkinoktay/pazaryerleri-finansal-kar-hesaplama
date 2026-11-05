@@ -361,14 +361,16 @@ describe('processSettlementsChunk — raw finance-record ingest', () => {
 
     await runChunk(syncLogId, { settlements: { Sale: saleRows } });
 
-    // Every fetched row is stored (distinct record ids), and the store ran exactly one
-    // ingest transaction per batch, not one per row.
+    // Every fetched row is stored (distinct record ids) in 3 ingest transactions (one per
+    // 200-row batch), not one per row. Each non-empty batch is followed by a bind-pass
+    // transaction and the run ends with a catch-all bind pass, so the store opened
+    // 3 ingest + 4 bind = 7 transactions -- far below the 450 a per-row ingest would open.
     expect(
       await prisma.marketplaceFinanceRecord.count({
         where: { storeId, family: FinanceRecordFamily.SETTLEMENT },
       }),
     ).toBe(450);
-    expect(txSpy).toHaveBeenCalledTimes(3);
+    expect(txSpy).toHaveBeenCalledTimes(7);
   });
 
   it('falls back to row-by-row when a batch fails and keeps the good rows', async () => {
@@ -471,6 +473,94 @@ describe('processSettlementsChunk — raw finance-record ingest', () => {
     await runChunk(syncLogId, scenario);
     // The re-poll updates the same three rows in place — never duplicates them.
     expect(await prisma.marketplaceFinanceRecord.count({ where: { storeId } })).toBe(3);
+  });
+
+  it('a second identical cron run enqueues no order', async () => {
+    // A fully-costed melontik parcel so the drain produces a statement and empties the
+    // queue (a bare order would leave a non-computable row behind). Its platform id is set
+    // numeric so the Sale rows bind it; real credentials replace the helper's placeholder.
+    const parcel = await seedMelontikParcel();
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { platformOrderId: SHIPMENT_PACKAGE_ID.toString() },
+    });
+    await prisma.store.update({
+      where: { id: parcel.storeId },
+      data: {
+        credentials: encryptCredentials({ supplierId: '123456', apiKey: 'k', apiSecret: 's' }),
+      },
+    });
+    const syncLog = await createSyncLog(parcel.organizationId, parcel.storeId);
+    const a = MELONTIK.items.a;
+    const b = MELONTIK.items.b;
+    const scenario: MockScenario = {
+      settlements: {
+        Sale: [
+          saleRow('sale-a', a.barcode, 529, 100.51),
+          saleRow('sale-b', b.barcode, 409.68, 77.84),
+        ],
+        Discount: [
+          discountRow('disc-a', a.barcode, 37.72, 7.17),
+          discountRow('disc-b', b.barcode, 29.21, 5.55),
+        ],
+      },
+    };
+
+    // First run stores the rows, binds them and enqueues the order; drain empties the queue.
+    await runChunk(syncLog.id, scenario);
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(await prisma.profitRecomputeRequest.count()).toBe(0);
+
+    // A second identical run finds every row unchanged: nothing is flagged, so the bind
+    // pass enqueues no recompute and the queue stays empty.
+    await runChunk(syncLog.id, scenario);
+    expect(await prisma.profitRecomputeRequest.count()).toBe(0);
+    // Sanity: the order itself still exists; the empty queue is not a cascade delete.
+    expect(await prisma.order.findUnique({ where: { id: parcel.orderId } })).not.toBeNull();
+  });
+
+  it("a run where one record changed enqueues only that record's order", async () => {
+    const { storeId, organizationId, orderId, syncLogId } = await buildScenario();
+
+    // A second order bound by its own shipment package, plus a sale row that names it.
+    const SHIPMENT_PACKAGE_ID_2 = 444_555_777;
+    const order2 = await prisma.order.create({
+      data: {
+        organizationId,
+        storeId,
+        platformOrderId: SHIPMENT_PACKAGE_ID_2.toString(),
+        orderDate: new Date(),
+        status: 'DELIVERED',
+        saleGross: new Decimal('200.00'),
+        saleVat: new Decimal('33.33'),
+      },
+    });
+    const sale2 = (credit: number, commissionAmount: number): TrendyolFinancialTransaction =>
+      tx({
+        id: 'sale-2',
+        transactionType: 'Satış',
+        barcode: BARCODE,
+        credit,
+        commissionAmount,
+        shipmentPackageId: SHIPMENT_PACKAGE_ID_2,
+        paymentOrderId: PAYMENT_ORDER_ID,
+      });
+
+    // First run: both sales stored, both orders bound and enqueued; clear the queue.
+    await runChunk(syncLogId, {
+      settlements: { Sale: [saleRow('sale-1', BARCODE, 120, 12), sale2(200, 20)] },
+    });
+    await prisma.profitRecomputeRequest.deleteMany({});
+
+    // Second run: sale-1's amount changed, sale-2 is identical. Only the changed row is
+    // flagged, so the bind pass enqueues only its order (order1), never order2.
+    await runChunk(syncLogId, {
+      settlements: { Sale: [saleRow('sale-1', BARCODE, 150, 15), sale2(200, 20)] },
+    });
+    const queued = await prisma.profitRecomputeRequest.findMany({ where: { storeId } });
+    expect(queued).toHaveLength(1);
+    expect(queued[0]?.orderId).toBe(orderId);
+    expect(queued.map((row) => row.orderId)).not.toContain(order2.id);
   });
 
   it('requests every mapped settlement type', async () => {
