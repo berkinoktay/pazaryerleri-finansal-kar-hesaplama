@@ -1054,6 +1054,25 @@ describe('Commission Tariffs - store-wide degrade (decision 9)', () => {
         bands,
       },
     });
+    // A third MATCHED item (same calculable variant) but with NO bands (empty JSON list).
+    // Under a store-wide degrade the degrade-first ordering must win: reason null, never
+    // NO_PRODUCT. This is the only item whose no-bands branch would otherwise fire, so it
+    // is what pins the ordering (M10: moving the degraded check after the no-bands check).
+    await prisma.commissionTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        periodId: period.id,
+        productVariantId: variant.id,
+        barcode: 'BC-SDEG-NB',
+        productTitle: 'Magaza Bozulma Bantsiz',
+        currentPrice: '500.00',
+        commissionBasePrice: '400.00',
+        currentCommissionPct: '19.0000',
+        sortOrder: 2,
+        bands: [],
+      },
+    });
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
@@ -1063,7 +1082,7 @@ describe('Commission Tariffs - store-wide degrade (decision 9)', () => {
       );
       expect(res.status).toBe(200);
       const items = ((await res.json()) as DetailWire).periods[0]?.items ?? [];
-      expect(items).toHaveLength(2);
+      expect(items).toHaveLength(3);
 
       // Every matched item degrades: not calculable, reason null (NEVER NO_PRODUCT), empty
       // profits and bands.
@@ -1075,6 +1094,14 @@ describe('Commission Tariffs - store-wide degrade (decision 9)', () => {
           expect(band.netProfit).toBeNull();
         }
       }
+
+      // The bandless matched item is the one that pins the degrade-first ordering: with no
+      // bands its no-bands branch would report NO_PRODUCT if the degraded check did not run
+      // first, so the store-wide degrade must still give it reason null.
+      const bandless = items.find((item) => item.barcode === 'BC-SDEG-NB');
+      expect(bandless?.calculable).toBe(false);
+      expect(bandless?.reason).toBeNull();
+      expect(bandless?.bands).toHaveLength(0);
 
       // The loader logs ONCE at request level - WITHOUT failedCount (that key is set only by
       // the per-item collect-then-log-once path, not the store-wide loader failure).
