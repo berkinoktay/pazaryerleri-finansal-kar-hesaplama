@@ -401,7 +401,7 @@ export function campaignSearchWindow(
  *
  * Yöntem: {@link campaignPriceSegments} ile doğrusal parçalara ayrılır; her parçada `S`, parçanın
  * KENDİ doğrusal dalına ait iki noktada ÖRNEKLENEREK eğim ve kesişim çıkarılır (formül burada
- * ikinci kez yazılmaz — motorun `solvePriceForTarget` içinde kullandığı numaranın aynısı). Alt uç
+ * ikinci kez yazılmaz — motorun `solveTrendyolScenarioPrice` çözücüsünün kullandığı numaranın aynısı). Alt uç
  * doğrudan `seg.lo`'dur; üst örnekleme noktası ise `seg.hi`'nin KENDİSİ değil, ondan 1 kuruş
  * içeride kalan noktadır — `seg.hi`, kesikli bir kırılımın (CONDITIONAL_BASKET/CODE'un ceil
  * sıçraması) kuruşa yukarı yuvarlanmış hâli olabilir ve bu durumda artık komşu parçaya ait olur;

@@ -3536,7 +3536,7 @@
               "OK",
               "NO_PROFILES"
             ],
-            "description": "Cost availability for this variant. OK = at least one active cost profile. NO_PROFILES = no cost profiles attached.",
+            "description": "Cost availability for this variant, as the scenario engine reads it. OK = the variant has a cost profile whose version effective at the scenario instant (now) is not archived. NO_PROFILES = no usable cost (no profile, no version, or the effective version is archived).",
             "example": "OK"
           },
           "shippingEstimateStatus": {
@@ -3548,7 +3548,7 @@
               "OWN_CONTRACT_EMPTY",
               "DESI_OVERFLOW"
             ],
-            "description": "Shipping estimate availability. OK = estimate computed. NO_CARRIER = no carrier configured on this store. NO_DESI = defensive fallback, not returned in practice: desi has a 0 floor, so a variant with no Trendyol desi is priced at desi 0. OWN_CONTRACT_EMPTY = own-contract store with no tariff row for this desi. DESI_OVERFLOW = variant desi exceeds carrier tariff coverage.",
+            "description": "Shipping availability from the engine shipping estimate at the variant own sale price (the Barem / carrier tariff band is chosen at that price). A digital variant has no shipping and reads OK. OK = estimate computed. NO_CARRIER = no carrier configured on this store. NO_DESI = defensive fallback, not returned in practice: desi has a 0 floor, so a variant with no Trendyol desi is priced at desi 0. OWN_CONTRACT_EMPTY = own-contract store with no tariff row for this desi. DESI_OVERFLOW = variant desi exceeds carrier tariff coverage.",
             "example": "OK"
           },
           "commissionStatus": {
@@ -3557,12 +3557,12 @@
               "OK",
               "NO_RULE"
             ],
-            "description": "Commission rule availability. OK = a matching marketplace commission rate exists. NO_RULE = no rule found for this category/brand combination.",
+            "description": "Commission availability from the engine commission chain. OK = a rate resolved -- the commission tariff band covering the price in the current tariff period, else the synced product rate (a synced 0 counts as not sent), else the category / category+brand rule. NO_RULE = none applied.",
             "example": "OK"
           },
           "calculable": {
             "type": "boolean",
-            "description": "True only when costStatus, shippingEstimateStatus, and commissionStatus are all OK.",
+            "description": "True only when costStatus, shippingEstimateStatus and commissionStatus are all OK and the scenario produced a net profit. False otherwise, including when the profit could not be computed (the failure is logged server-side).",
             "example": true
           },
           "netProfit": {
@@ -3571,7 +3571,7 @@
               "null"
             ],
             "pattern": "^-?\\d+(\\.\\d{1,2})?$",
-            "description": "Net profit at current sale price. Null when calculable=false.",
+            "description": "Net profit at the current sale price, computed by the scenario engine with the store profit settings (stopaj, negative net VAT floor). Null when calculable=false or the profit could not be computed (logged server-side).",
             "example": "234.56"
           },
           "saleMarginPct": {
@@ -3580,7 +3580,7 @@
               "null"
             ],
             "pattern": "^-?\\d+(\\.\\d{1,4})?$",
-            "description": "Net profit / sale GROSS × 100. Null when calculable=false or saleGross=0.",
+            "description": "Net profit over sale GROSS as a percent, rounded through the stored percent scale. Null when calculable=false or saleGross=0.",
             "example": "18.05"
           },
           "costMarkupPct": {
@@ -3589,7 +3589,7 @@
               "null"
             ],
             "pattern": "^-?\\d+(\\.\\d{1,4})?$",
-            "description": "Net profit / cost GROSS × 100. Null when calculable=false or costGross=0.",
+            "description": "Net profit over cost GROSS as a percent, rounded through the stored percent scale. Null when calculable=false or costGross=0.",
             "example": "42.30"
           },
           "imageUrl": {
@@ -3607,7 +3607,7 @@
               "null"
             ],
             "pattern": "^-?\\d+(\\.\\d{1,2})?$",
-            "description": "Current cost (GROSS, TRY), decimal string. Null when costStatus is not OK.",
+            "description": "Gross cost (TRY) of the cost version(s) effective now, as the engine reads them, decimal string. Null when costStatus is not OK.",
             "example": "250.00"
           },
           "categoryId": {
@@ -3691,7 +3691,7 @@
           "price": {
             "type": "string",
             "pattern": "^-?\\d+(\\.\\d{1,2})?$",
-            "description": "Solved sale price (GROSS, VAT-inclusive), decimal string. Present only when calculable=true.",
+            "description": "Solved sale price (GROSS, VAT-inclusive), decimal string: the lowest kurus price that meets the target, solved in closed form per price band (Barem / commission breakpoints), never by search. Present only when calculable=true.",
             "example": "1499.90"
           },
           "priceDelta": {
@@ -4876,7 +4876,7 @@
           "NO_SHIPPING",
           null
         ],
-        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok."
+        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok. reason null + calculable false ise kâr bu kalem için hesaplanamadı (sunucuda loglandı); satır yine de döner."
       },
       "EstimateItemPriceBody": {
         "type": "object",
@@ -5023,7 +5023,7 @@
               "string",
               "null"
             ],
-            "description": "Komisyona esas fiyat (yoksa güncel fiyat) + güncel komisyonla net kâr; hesaplanamıyorsa null."
+            "description": "Komisyona esas fiyat (yoksa güncel fiyat) + güncel komisyonla net kâr; senaryo motoru bu fiyatı güncel komisyon oranıyla değerlendirir ve mağazanın kâr ayarları uygulanır; hesaplanamıyorsa null."
           },
           "currentMarginPct": {
             "type": [
@@ -5350,7 +5350,7 @@
           "NO_SHIPPING",
           null
         ],
-        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok."
+        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok. reason null + calculable false ise kâr bu kalem için hesaplanamadı (sunucuda loglandı); satır yine de döner."
       },
       "EstimatePlusPriceBody": {
         "type": "object",
@@ -5484,7 +5484,7 @@
               "string",
               "null"
             ],
-            "description": "Komisyona esas fiyat + güncel komisyonla net kâr; hesaplanamıyorsa null."
+            "description": "Komisyona esas fiyat + güncel komisyonla net kâr; senaryo motoru bu fiyatı güncel komisyon oranıyla değerlendirir ve mağazanın kâr ayarları uygulanır; hesaplanamıyorsa null."
           },
           "currentMarginPct": {
             "type": [
@@ -5812,7 +5812,7 @@
           "NO_COMMISSION",
           null
         ],
-        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon oranı çözülemedi."
+        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon oranı çözülemedi. reason null + calculable false ise kâr bu kalem için hesaplanamadı (sunucuda loglandı); satır yine de döner."
       },
       "EstimateAdvantagePriceBody": {
         "type": "object",
@@ -6365,7 +6365,7 @@
           "NO_SHIPPING",
           null
         ],
-        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok."
+        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok. reason null + calculable false ise kâr bu kalem için hesaplanamadı (sunucuda loglandı); satır yine de döner."
       },
       "EstimateFlashPriceBody": {
         "type": "object",
@@ -7003,7 +7003,7 @@
           "category",
           null
         ],
-        "description": "Komisyon nereden geldi: komisyon tarifesi bandı (band) / ürünün senkronlanan komisyonu (product) / kategori oranı (category)."
+        "description": "Komisyon nereden geldi: komisyon tarifesi bandı (band) / ürünün senkronlanan komisyonu (product; senkronlanan %0 \"gelmedi\" sayılır ve kategori oranına düşer) / kategori oranı (category)."
       },
       "DiscountItemReason": {
         "type": [
@@ -7017,7 +7017,7 @@
           "NO_COMMISSION",
           null
         ],
-        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon yok."
+        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon yok. reason null + calculable false ise kâr bu kalem için hesaplanamadı (sunucuda loglandı); satır yine de döner."
       },
       "EstimateDiscountItemBody": {
         "type": "object",
@@ -7364,7 +7364,7 @@
               "string",
               "null"
             ],
-            "description": "Order net profit for the assumed n-unit basket, from the real profit engine over the order (n× product cost, 1× shipping, 1× PSF — the platform service and shipping are per-parcel and a basket of n identical units ships once); 2-decimal string, null when the discounted scenario is not calculable."
+            "description": "Order net profit for the assumed n-unit basket, from the scenario engine over the order with the store profit settings applied: one parcel of n units -- n x product cost, one shipping and one platform-service fee (per-parcel, so a basket of n identical units ships once), desi x n. 2-decimal string, null when the discounted scenario is not calculable (for example when the n-unit desi exceeds the carrier tariff)."
           },
           "orderMarginPct": {
             "type": [
@@ -7808,7 +7808,7 @@
           "category",
           null
         ],
-        "description": "Komisyon nereden geldi: komisyon tarifesi bandı (band) / ürünün senkronlanan komisyonu (product) / kategori oranı (category)."
+        "description": "Komisyon nereden geldi: komisyon tarifesi bandı (band) / ürünün senkronlanan komisyonu (product; senkronlanan %0 \"gelmedi\" sayılır ve kategori oranına düşer) / kategori oranı (category)."
       },
       "CampaignItemReason": {
         "type": [
@@ -7822,7 +7822,7 @@
           "NO_COMMISSION",
           null
         ],
-        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon yok."
+        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon yok. reason null + calculable false ise kâr bu kalem için hesaplanamadı (sunucuda loglandı); satır yine de döner."
       },
       "CampaignBasketScenario": {
         "type": [
@@ -7855,7 +7855,7 @@
               "string",
               "null"
             ],
-            "description": "Order net profit for the assumed n-unit basket, from the real profit engine over the order (n× product cost, 1× shipping, 1× PSF — the platform service and shipping are per-parcel and a basket of n identical units ships once); 2-decimal string, null when the priced scenario is not calculable."
+            "description": "Order net profit for the assumed n-unit basket, from the scenario engine over the order with the store profit settings applied: one parcel of n units -- n x product cost, one shipping and one platform-service fee (per-parcel, so a basket of n identical units ships once), desi x n. 2-decimal string, null when the priced scenario is not calculable (for example when the n-unit desi exceeds the carrier tariff)."
           },
           "orderMarginPct": {
             "type": [
@@ -7923,7 +7923,7 @@
                     "string",
                     "null"
                   ],
-                  "description": "Suggested price reaching the target margin; null when reason is set."
+                  "description": "The lowest campaign price whose seller settlement meets the target margin, never above the item maxPrice; null when reason is set."
                 },
                 "reason": {
                   "type": [
@@ -7935,7 +7935,7 @@
                     "NOT_CALCULABLE",
                     null
                   ],
-                  "description": "UNREACHABLE = no price up to maxPrice reaches the target margin. NOT_CALCULABLE = required cost/commission/shipping inputs are missing for this item. Null when `price` is present."
+                  "description": "UNREACHABLE = no price up to maxPrice reaches the target margin (a real but unmet target). NOT_CALCULABLE = the item cannot be priced at all (unmatched, degraded, no resolvable commission, or no computable statement). Null when `price` is present."
                 }
               },
               "required": [
@@ -8270,7 +8270,7 @@
           "netProfit",
           "marginPct"
         ],
-        "description": "One priced scenario for a campaign item (at the current, max, or custom price): the resolved commission and the resulting net profit / margin. commissionPct/commissionSource/netProfit/marginPct are null when the item is not calculable at this price."
+        "description": "One priced scenario for a campaign item (at the current, max, or custom price): the resolved commission and the resulting net profit / margin. netProfit / marginPct come from the scenario engine at that price with this screen resolved commission rate and the store profit settings applied. commissionPct/commissionSource/netProfit/marginPct are null when the item is not calculable at this price."
       },
       "CampaignCommissionBand": {
         "type": "object",
@@ -13636,7 +13636,7 @@
           "ProductPricing"
         ],
         "summary": "Solve sale price for a target margin, markup, or profit",
-        "description": "Given a single variant and a pricing target (margin %, markup %, or absolute profit in TRY), solves for the sale price that achieves that target. Assembles the variant's full UnitEconomics (cost / commission / shipping / PSF / stoppage) and calls the Dilim 1 `solvePriceForTarget` engine. Returns `calculable: false` with a reason code when the target is unreachable or when required inputs (cost / shipping / commission) are missing. This is a read/compute operation — no data is persisted. Requires DATA_READ capability.",
+        "description": "Given a single variant and a pricing target (margin %, markup %, or absolute profit in TRY), solves for the sale price that achieves that target. Loads the variant scenario base (cost, commission chain, shipping, fees) and solves with the scenario engine (`solveTrendyolScenarioPrice`): the lowest kurus price that meets the target, in closed form per price band (Barem / commission breakpoints), never by search. Returns `calculable: false` with a reason code when the target is unreachable or when required inputs (cost / shipping / commission) are missing. This is a read/compute operation -- no data is persisted. Requires DATA_READ capability.",
         "security": [
           {
             "bearerAuth": []

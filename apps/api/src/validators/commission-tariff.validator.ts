@@ -22,7 +22,9 @@ export const TariffBandKeySchema = z.enum(['band1', 'band2', 'band3', 'band4']);
 export const TariffItemReasonSchema = z
   .enum(['NO_PRODUCT', 'NO_COST', 'NO_SHIPPING'])
   .openapi('TariffItemReason', {
-    description: 'Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok.',
+    description:
+      'Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok. reason null + ' +
+      'calculable false ise kâr bu kalem için hesaplanamadı (sunucuda loglandı); satır yine de döner.',
   });
 
 // ─── Path params ────────────────────────────────────────────────────────────
@@ -99,10 +101,15 @@ export const TariffDetailItemSchema = z
         'Komisyona esas fiyat (müşterinin gördüğü fiyat) — güncel kâr bu fiyattan hesaplanır; kolon öncesi eski içe aktarımlarda null.',
     }),
     currentCommissionPct: z.string(),
-    currentNetProfit: z.string().nullable().openapi({
-      description:
-        'Komisyona esas fiyat (yoksa güncel fiyat) + güncel komisyonla net kâr; hesaplanamıyorsa null.',
-    }),
+    currentNetProfit: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Komisyona esas fiyat (yoksa güncel fiyat) + güncel komisyonla net kâr; senaryo motoru ' +
+          'bu fiyatı güncel komisyon oranıyla değerlendirir ve mağazanın kâr ayarları uygulanır; ' +
+          'hesaplanamıyorsa null.',
+      }),
     currentMarginPct: z.string().nullable(),
     calculable: z.boolean(),
     reason: TariffItemReasonSchema.nullable(),

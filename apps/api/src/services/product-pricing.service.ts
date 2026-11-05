@@ -34,9 +34,9 @@ import {
   type SolveReason,
 } from '@pazarsync/profit';
 
-// Quote-level failure reason — superset of the engine's SolveReason.
-// NOT_CALCULABLE is quote-only: cost is OK here but shipping or commission is
-// missing, so the engine cannot be invoked at all.
+// Quote-level failure reason -- superset of the engine's SolveReason. NOT_CALCULABLE is
+// quote-only: no price produced a computable statement (shipping or commission missing),
+// so the solver found no priceable point.
 export type QuoteReason = SolveReason | 'NOT_CALCULABLE';
 import { InvalidReferenceError, mapPrismaError } from '@pazarsync/sync-core';
 
@@ -89,7 +89,7 @@ export type ProductPricingSort =
   | 'costMarkupPct:asc'
   | 'costMarkupPct:desc';
 
-// ─── Variant shape for the list pipeline ──────────────────────────────────────
+// --- Variant shape for the list pipeline ---
 
 /**
  * The variant columns the LIST pipeline reads: the identity + sale/VAT/digital fields the
@@ -440,7 +440,7 @@ export async function listProductPricing(
 
 // ─── Quote ────────────────────────────────────────────────────────────────────
 
-/** Serialized ProfitBreakdown — all Decimal fields become strings. */
+/** The quote wire breakdown built from the engine statement (buildStatementBreakdown) -- all Decimal fields become strings. */
 export interface QuoteBreakdown {
   listGross: string;
   sellerDiscountGross: string;
@@ -461,7 +461,7 @@ export interface QuoteBreakdown {
   costMarkupPct: string | null;
   // Grup toplamları — "satış nereye gitti" tahsisini besler (frontend para toplamaz).
   // marketplaceFees = totalDeductions − cost − taxes (komisyon + kargo + PSF + mikro
-  // ihracat DEBIT/CREDIT'in net'i; ProfitBreakdown'da ayrı kova olmayan uluslararası
+  // ihracat DEBIT/CREDIT'in net'i; dökümde ayrı kova olmayan uluslararası
   // ücretler de böylece dahil olur ve gruplar HER ZAMAN satışa toplanır).
   marketplaceFeesGross: string;
   // taxes = stopaj + net KDV.

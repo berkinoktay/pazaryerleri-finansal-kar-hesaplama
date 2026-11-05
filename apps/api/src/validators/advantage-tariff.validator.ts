@@ -23,7 +23,9 @@ export const AdvantageTariffItemReasonSchema = z
   .enum(['NO_PRODUCT', 'NO_COST', 'NO_SHIPPING', 'NO_COMMISSION'])
   .openapi('AdvantageTariffItemReason', {
     description:
-      'Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon oranı çözülemedi.',
+      'Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon oranı ' +
+      'çözülemedi. reason null + calculable false ise kâr bu kalem için hesaplanamadı ' +
+      '(sunucuda loglandı); satır yine de döner.',
   });
 
 export const CommissionSourceKindSchema = z

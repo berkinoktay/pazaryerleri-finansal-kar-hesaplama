@@ -30,11 +30,13 @@ const quoteProductPriceRoute = createRoute({
   summary: 'Solve sale price for a target margin, markup, or profit',
   description:
     'Given a single variant and a pricing target (margin %, markup %, or absolute profit in TRY), ' +
-    "solves for the sale price that achieves that target. Assembles the variant's full " +
-    'UnitEconomics (cost / commission / shipping / PSF / stoppage) and calls the Dilim 1 ' +
-    '`solvePriceForTarget` engine. Returns `calculable: false` with a reason code when the ' +
-    'target is unreachable or when required inputs (cost / shipping / commission) are missing. ' +
-    'This is a read/compute operation — no data is persisted. Requires DATA_READ capability.',
+    'solves for the sale price that achieves that target. Loads the variant scenario base (cost, ' +
+    'commission chain, shipping, fees) and solves with the scenario engine ' +
+    '(`solveTrendyolScenarioPrice`): the lowest kurus price that meets the target, in closed form ' +
+    'per price band (Barem / commission breakpoints), never by search. Returns `calculable: false` ' +
+    'with a reason code when the target is unreachable or when required inputs (cost / shipping / ' +
+    'commission) are missing. This is a read/compute operation -- no data is persisted. Requires ' +
+    'DATA_READ capability.',
   security: [{ bearerAuth: [] }],
   request: {
     params: pathParams,

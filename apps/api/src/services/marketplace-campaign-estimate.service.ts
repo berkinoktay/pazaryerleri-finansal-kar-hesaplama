@@ -3,9 +3,9 @@
 //
 // Two read-only entry points, both scoped by organizationId + storeId + campaign:
 //
-//   estimateCampaignItem        → the breakdown modal's data for ONE item under ONE of the
+//   estimateCampaignItem        -> the breakdown modal's data for ONE item under ONE of the
 //                                 three scenarios (current / max / custom).
-//   suggestCampaignTargetMargin → a suggested campaign price per item for a target margin.
+//   suggestCampaignTargetMargin -> a suggested campaign price per item for a target margin.
 //
 // NEITHER WRITES ANYTHING. The seller's price choices live in an ephemeral client buffer
 // until "Kaydet ve İndir" posts them to the selections endpoint; persisting a suggestion
@@ -62,8 +62,7 @@ const CAMPAIGN_CONFIG_SELECT = {
   startsAt: true,
 } as const;
 
-// ─── Single-item estimate (breakdown modal) ───────────────────────────────────
-
+// --- Single-item estimate (breakdown modal) ---
 /** The campaign price a scenario is priced at, and whether the promotion applies to it. */
 interface ScenarioPrice {
   readonly price: Decimal;
@@ -271,8 +270,7 @@ function unitFundingSplit(
   };
 }
 
-// ─── Target-margin suggestion ─────────────────────────────────────────────────
-
+// --- Target-margin suggestion ---
 /**
  * Suggests, per item, the smallest campaign price that reaches `targetMarginPct`. Throws
  * `NotFoundError` when the campaign is not in this store.

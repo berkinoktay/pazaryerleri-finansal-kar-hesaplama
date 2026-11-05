@@ -319,14 +319,17 @@ export const DiscountCommissionSourceSchema = z
   .openapi('DiscountCommissionSource', {
     description:
       'Komisyon nereden geldi: komisyon tarifesi bandı (band) / ürünün senkronlanan ' +
-      'komisyonu (product) / kategori oranı (category).',
+      'komisyonu (product; senkronlanan %0 "gelmedi" sayılır ve kategori oranına düşer) / ' +
+      'kategori oranı (category).',
   });
 
 export const DiscountItemReasonSchema = z
   .enum(['NO_PRODUCT', 'NO_COST', 'NO_SHIPPING', 'NO_COMMISSION'])
   .openapi('DiscountItemReason', {
     description:
-      'Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon yok.',
+      'Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon yok. ' +
+      'reason null + calculable false ise kâr bu kalem için hesaplanamadı (sunucuda loglandı); ' +
+      'satır yine de döner.',
   });
 
 export const DiscountScenarioPresentationSchema = z
@@ -394,10 +397,11 @@ export const DiscountBasketScenarioSchema = z
       .nullable()
       .openapi({
         description:
-          'Order net profit for the assumed n-unit basket, from the real profit engine over the ' +
-          'order (n× product cost, 1× shipping, 1× PSF — the platform service and shipping are ' +
-          'per-parcel and a basket of n identical units ships once); 2-decimal string, null when ' +
-          'the discounted scenario is not calculable.',
+          'Order net profit for the assumed n-unit basket, from the scenario engine over the ' +
+          'order with the store profit settings applied: one parcel of n units -- n x product ' +
+          'cost, one shipping and one platform-service fee (per-parcel, so a basket of n ' +
+          'identical units ships once), desi x n. 2-decimal string, null when the discounted ' +
+          'scenario is not calculable (for example when the n-unit desi exceeds the carrier tariff).',
       }),
     orderMarginPct: z
       .string()

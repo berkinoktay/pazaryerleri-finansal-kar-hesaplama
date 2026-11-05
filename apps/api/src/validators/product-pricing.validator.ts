@@ -15,8 +15,9 @@ const percentString = z.string().regex(/^-?\d+(\.\d{1,4})?$/, 'INVALID_PERCENT_F
 
 const CostStatusSchema = z.enum(COST_STATUSES).openapi({
   description:
-    'Cost availability for this variant. OK = at least one active cost profile. ' +
-    'NO_PROFILES = no cost profiles attached.',
+    'Cost availability for this variant, as the scenario engine reads it. OK = the variant ' +
+    'has a cost profile whose version effective at the scenario instant (now) is not archived. ' +
+    'NO_PROFILES = no usable cost (no profile, no version, or the effective version is archived).',
   example: 'OK',
 });
 
@@ -24,7 +25,9 @@ const ShippingEstimateStatusSchema = z
   .enum(['OK', 'NO_CARRIER', 'NO_DESI', 'OWN_CONTRACT_EMPTY', 'DESI_OVERFLOW'])
   .openapi({
     description:
-      'Shipping estimate availability. OK = estimate computed. NO_CARRIER = no carrier ' +
+      'Shipping availability from the engine shipping estimate at the variant own sale price ' +
+      '(the Barem / carrier tariff band is chosen at that price). A digital variant has no ' +
+      'shipping and reads OK. OK = estimate computed. NO_CARRIER = no carrier ' +
       'configured on this store. NO_DESI = defensive fallback, not returned in practice: ' +
       'desi has a 0 floor, so a variant with no Trendyol desi is priced at desi 0. ' +
       'OWN_CONTRACT_EMPTY = own-contract store with no tariff row for this desi. ' +
@@ -34,15 +37,17 @@ const ShippingEstimateStatusSchema = z
 
 const CommissionStatusSchema = z.enum(['OK', 'NO_RULE']).openapi({
   description:
-    'Commission rule availability. OK = a matching marketplace commission rate exists. ' +
-    'NO_RULE = no rule found for this category/brand combination.',
+    'Commission availability from the engine commission chain. OK = a rate resolved -- the ' +
+    'commission tariff band covering the price in the current tariff period, else the synced ' +
+    'product rate (a synced 0 counts as not sent), else the category / category+brand rule. ' +
+    'NO_RULE = none applied.',
   example: 'OK',
 });
 
 /**
- * Quote-level failure reason. Superset of the engine's SolveReason — adds
- * NOT_CALCULABLE for the case where cost is OK but shipping or commission data
- * is missing, preventing the solver from being invoked at all.
+ * Quote-level failure reason. Superset of the scenario solver's failure set -- adds
+ * NOT_CALCULABLE, returned when no price produced a computable statement (shipping or
+ * commission missing), so the solver found no priceable point.
  */
 const QuoteReasonSchema = z
   .enum(['NOT_PRICE_SENSITIVE', 'UNREACHABLE_TARGET', 'NO_COST', 'NOT_CALCULABLE'])
@@ -51,8 +56,9 @@ const QuoteReasonSchema = z
       'Why the price could not be solved. NOT_PRICE_SENSITIVE = net profit does not ' +
       'increase with price (commission + fees > margin). UNREACHABLE_TARGET = the ' +
       'requested margin/markup target cannot be reached at any positive price. ' +
-      'NO_COST = cost is unavailable so the calculation would be incorrect. ' +
-      'NOT_CALCULABLE = required cost/commission/shipping inputs are missing for this variant.',
+      'NO_COST = the scenario has no usable cost line (same rule as the list NO_PROFILES), ' +
+      'checked before the solver runs. ' +
+      'NOT_CALCULABLE = no price produced a computable statement (shipping or commission missing).',
     example: 'UNREACHABLE_TARGET',
   });
 
@@ -163,19 +169,28 @@ export const ProductPricingItemSchema = z
     commissionStatus: CommissionStatusSchema,
     calculable: z.boolean().openapi({
       description:
-        'True only when costStatus, shippingEstimateStatus, and commissionStatus are all OK.',
+        'True only when costStatus, shippingEstimateStatus and commissionStatus are all OK and ' +
+        'the scenario produced a net profit. False otherwise, including when the profit could ' +
+        'not be computed (the failure is logged server-side).',
       example: true,
     }),
     netProfit: moneyString.nullable().openapi({
-      description: 'Net profit at current sale price. Null when calculable=false.',
+      description:
+        'Net profit at the current sale price, computed by the scenario engine with the store ' +
+        'profit settings (stopaj, negative net VAT floor). Null when calculable=false or the ' +
+        'profit could not be computed (logged server-side).',
       example: '234.56',
     }),
     saleMarginPct: percentString.nullable().openapi({
-      description: 'Net profit / sale GROSS × 100. Null when calculable=false or saleGross=0.',
+      description:
+        'Net profit over sale GROSS as a percent, rounded through the stored percent scale. ' +
+        'Null when calculable=false or saleGross=0.',
       example: '18.05',
     }),
     costMarkupPct: percentString.nullable().openapi({
-      description: 'Net profit / cost GROSS × 100. Null when calculable=false or costGross=0.',
+      description:
+        'Net profit over cost GROSS as a percent, rounded through the stored percent scale. ' +
+        'Null when calculable=false or costGross=0.',
       example: '42.30',
     }),
     imageUrl: z.string().url().nullable().openapi({
@@ -183,7 +198,9 @@ export const ProductPricingItemSchema = z
       example: 'https://cdn.example.com/p-123.jpg',
     }),
     cost: moneyString.nullable().openapi({
-      description: 'Current cost (GROSS, TRY), decimal string. Null when costStatus is not OK.',
+      description:
+        'Gross cost (TRY) of the cost version(s) effective now, as the engine reads them, ' +
+        'decimal string. Null when costStatus is not OK.',
       example: '250.00',
     }),
     categoryId: z
@@ -302,7 +319,9 @@ export const QuoteResponseSchema = z
     }),
     price: moneyString.optional().openapi({
       description:
-        'Solved sale price (GROSS, VAT-inclusive), decimal string. Present only when calculable=true.',
+        'Solved sale price (GROSS, VAT-inclusive), decimal string: the lowest kurus price that ' +
+        'meets the target, solved in closed form per price band (Barem / commission breakpoints), ' +
+        'never by search. Present only when calculable=true.',
       example: '1499.90',
     }),
     priceDelta: moneyString.optional().openapi({

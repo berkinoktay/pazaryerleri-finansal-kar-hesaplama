@@ -22,7 +22,9 @@ export const FlashOfferTypeSchema = z.enum(['H24', 'H3']).openapi('FlashOfferTyp
 export const FlashItemReasonSchema = z
   .enum(['NO_PRODUCT', 'NO_COST', 'NO_SHIPPING'])
   .openapi('FlashItemReason', {
-    description: 'Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok.',
+    description:
+      'Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok. reason null + ' +
+      'calculable false ise kâr bu kalem için hesaplanamadı (sunucuda loglandı); satır yine de döner.',
   });
 
 export const FlashCommissionSourceSchema = z

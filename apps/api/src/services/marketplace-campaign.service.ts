@@ -1,14 +1,14 @@
 // Read / update / selection / delete service for the Kampanyalar (Trendyol-designed
 // campaign participation) feature.
 //
-// list       → one row per saved campaign (config fields incl. the Trendyol funding rate,
+// list       -> one row per saved campaign (config fields incl. the Trendyol funding rate,
 //              item + selected counts, exported flag).
-// detail     → the campaign with its items (sortOrder asc), each carrying the THREE price
+// detail     -> the campaign with its items (sortOrder asc), each carrying the THREE price
 //              scenarios (current / max / custom) plus the basket settlement block.
-// update     → full-replace of the config fields on the campaign row (name only if given).
-// selections → bulk write of the per-item price choice: mode 'set' (per row), 'all' (MAX),
+// update     -> full-replace of the config fields on the campaign row (name only if given).
+// selections -> bulk write of the per-item price choice: mode 'set' (per row), 'all' (MAX),
 //              'none' (clear).
-// delete     → hard delete (cascades to items via the schema FK).
+// delete     -> hard delete (cascades to items via the schema FK).
 //
 // The İndirimler sibling (`discount-list.service.ts`) is the structural template; the two
 // differences are that a campaign item has three scenarios instead of two and that the
@@ -66,8 +66,7 @@ function toWireDiscountType(value: DiscountType, campaignId: string): CampaignWi
   return value;
 }
 
-// ─── List ─────────────────────────────────────────────────────────────────────
-
+// --- List ---
 /** Lists every saved campaign for a store with item + selected counts. */
 export async function listMarketplaceCampaigns(
   orgId: string,
@@ -145,8 +144,7 @@ export async function listMarketplaceCampaigns(
   });
 }
 
-// ─── Detail ───────────────────────────────────────────────────────────────────
-
+// --- Detail ---
 /** Serializes a computed scenario (Decimal price) to the wire scenario (money 2dp). */
 function serializeScenario(
   s: ReturnType<typeof computeCampaignItem>['current'],
@@ -353,8 +351,7 @@ export async function getMarketplaceCampaignDetail(
   };
 }
 
-// ─── Update config ────────────────────────────────────────────────────────────
-
+// --- Update config ---
 /**
  * Full-replaces the campaign configuration on the list row (name only when provided).
  *
@@ -407,8 +404,7 @@ export async function updateMarketplaceCampaign(
   }
 }
 
-// ─── Update selections ────────────────────────────────────────────────────────
-
+// --- Update selections ---
 /**
  * Rejects any requested custom price above the item's "Maksimum Girebileceğin Fiyat".
  *
@@ -542,8 +538,7 @@ export async function updateCampaignSelections(
   }
 }
 
-// ─── Delete ───────────────────────────────────────────────────────────────────
-
+// --- Delete ---
 /** Hard-deletes a campaign (items cascade). 404 when not in this store. */
 export async function deleteMarketplaceCampaign(
   orgId: string,
