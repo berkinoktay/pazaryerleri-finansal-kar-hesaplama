@@ -317,8 +317,18 @@ async function resolveForStore(storeId: string, items: DueItem[]): Promise<void>
   const retriableItems = attempted.filter((i) => !vendorMissingBarcodes.has(i.barcode));
 
   await applyBackoff(storeId, vendorMissingItems, 'vendorMissing');
+  // Upsert the table ONCE per distinct barcode, not once per order line: a
+  // barcode that sits on N lines in this tick must not increment attempts N
+  // times. An inflated count would push repairBufferCatalogGaps's first
+  // transient-failure retry straight to the 24h backoff cap, so a same-day
+  // buffered order could miss its catalog repair before its cost window closes.
+  // The per-item backoff above stays per line (each item owns its own attempts).
+  const organizationByBarcode = new Map<string, string>();
   for (const item of vendorMissingItems) {
-    await upsertBarcodeMiss(storeId, item.order.organizationId, item.barcode, true, 0);
+    organizationByBarcode.set(item.barcode, item.order.organizationId);
+  }
+  for (const [barcode, organizationId] of organizationByBarcode) {
+    await upsertBarcodeMiss(storeId, organizationId, barcode, true, 0);
   }
   // retriable yolu tabloya KASITLI yazmaz → varsa önceki vendorMissing=true
   // satırı OLDUĞU GİBİ kalır (rozet "Trendyol'da yok" durur). İyi-huylu bayatlık:

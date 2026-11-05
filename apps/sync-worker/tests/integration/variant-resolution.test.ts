@@ -353,6 +353,46 @@ describe('processVariantResolution', () => {
     expect(missDelay).toBeLessThanOrEqual(25 * 60 * 60_000);
   });
 
+  it('vendor-missing on a barcode shared by two order items: ONE CatalogBarcodeMiss upsert (attempts=1), each item deferred once', async () => {
+    // One barcode sitting on two order items in the same tick (here: two
+    // separate orders) must upsert the table ONCE per barcode, not once per
+    // line: attempts must not scale with the line count. If it did, the
+    // buffer-gap repair would jump its first transient-failure retry to the
+    // 24h cap.
+    const ctx = await buildStore();
+    const first = await buildUnresolvedOrder(ctx, ['BC-VM-DUP']);
+    const second = await buildUnresolvedOrder(ctx, ['BC-VM-DUP']);
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.startsWith(SANDBOX_BASE) && queriesBarcode(url, 'BC-VM-DUP')) {
+        // Empty batch -> vendorMissing (the vendor genuinely does not know it).
+        return Promise.resolve(jsonResponse(approvedProductsResponse('BC-VM-DUP', 0)));
+      }
+      throw new Error(`unexpected fetch in test: ${url}`);
+    });
+
+    await processVariantResolution();
+
+    // One shared barcode -> one vendor call.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // The table row is upserted ONCE for the shared barcode, not once per line.
+    const miss = await prisma.catalogBarcodeMiss.findUniqueOrThrow({
+      where: { storeId_barcode: { storeId: ctx.storeId, barcode: 'BC-VM-DUP' } },
+    });
+    expect(miss.vendorMissing).toBe(true);
+    expect(miss.attempts).toBe(1);
+    expect(miss.organizationId).toBe(ctx.organizationId);
+
+    // Each order item still owns its own attempts + backoff (one per line).
+    const items = await prisma.orderItem.findMany({
+      where: { orderId: { in: [first.orderId, second.orderId] } },
+    });
+    expect(items).toHaveLength(2);
+    expect(items.every((i) => i.variantResolutionAttempts === 1)).toBe(true);
+  });
+
   it('retriable (vendor throws): order-item gets the EXPONENTIAL curve and NO CatalogBarcodeMiss row', async () => {
     // Sorgu ATTI (geçici) = retriable: mevcut üstel eğri korunur ve tablo
     // YAZILMAZ — order-item kendi geçici-retry vadesini sahiplenir.
