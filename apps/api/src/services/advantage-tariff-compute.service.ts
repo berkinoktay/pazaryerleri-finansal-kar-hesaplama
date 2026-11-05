@@ -11,11 +11,13 @@
 // `evaluateScreenScenario` as the engine's commission override. No financial math is
 // re-implemented here.
 //
-// Strategy: resolve the item's CURRENT baseline (current price at its resolved
-// commission) first; it decides calculability (cost/shipping gate, then whether any
-// commission resolves). Then each tier is evaluated at its target price (= the tier
-// upper limit, the highest price that still earns the badge -> best profit) under the
-// commission that price resolves to.
+// Strategy: resolve the item's CURRENT commission first (the current price's band, else
+// the category rate); an unresolvable commission fails the item (NO_COMMISSION) before any
+// engine evaluation -- matching the discount and campaign screens. With a commission in
+// hand, the current baseline (current price at that commission) decides the cost/shipping
+// gate. Then each tier is evaluated at its target price (= the tier upper limit, the
+// highest price that still earns the badge -> best profit) under the commission that price
+// resolves to.
 
 import { Decimal } from 'decimal.js';
 
@@ -31,11 +33,6 @@ import {
 import { quoteBreakdownFromStatement, type QuoteBreakdown } from './product-pricing.service';
 import { type TariffItemReason } from './tariff-compute-commons';
 import type { StarTier, StarTierKey } from './advantage-tariff.types';
-
-// The current baseline is probed at this commission when no rate resolves anywhere, so
-// the cost/shipping gate reports NO_COST/NO_SHIPPING before NO_COMMISSION -- exactly as
-// the legacy assembly probed cost/shipping with a zero commission placeholder.
-const COMMISSION_PROBE_RATE = new Decimal(0);
 
 // Advantage rows can also fail because no commission rate is resolvable (no band
 // AND no category rate) -- beyond the shared cost/shipping/product reasons.
@@ -182,16 +179,17 @@ export function selectBestScenario(
 
 /**
  * Computes every tier's net profit for one advantage item with the scenario engine.
- * Reason order mirrors the legacy assembly: no tiers or an unmatched barcode (`base`
- * no-product) -> NO_PRODUCT; a store-wide load failure (`base` degraded) -> reason null
- * (the caller has already logged it); the current baseline (current price at its resolved
- * commission, probed at zero when none resolves) gates on cost/shipping -> NO_COST /
- * NO_SHIPPING (or null on the defensive branch); econ ok but no commission resolvable
- * anywhere -> NO_COMMISSION; otherwise calculable. Each tier is evaluated at
- * `new Decimal(tier.upperLimit)` under the commission that price resolves to; a tier with
- * no resolvable commission keeps null commission and profit, a tier whose own evaluation
- * is not calculable shows null profit. The engine may throw on a pathological input --
- * that propagates to the service, which catches it per item.
+ * Reason order (matching the discount and campaign screens): a store-wide load failure
+ * (`base` degraded) -> reason null (the caller has already logged it); no tiers or an
+ * unmatched barcode (`base` no-product) -> NO_PRODUCT; no commission resolvable at the
+ * current price (no band AND no category rate) -> NO_COMMISSION, returned WITHOUT
+ * evaluating the engine; the current baseline (current price at its resolved commission)
+ * then gates on cost/shipping -> NO_COST / NO_SHIPPING (or null on the defensive branch);
+ * otherwise calculable. Each tier is evaluated at `new Decimal(tier.upperLimit)` under the
+ * commission that price resolves to; a tier with no resolvable commission keeps null
+ * commission and profit, a tier whose own evaluation is not calculable shows null profit.
+ * The engine may throw on a pathological input -- that propagates to the service, which
+ * catches it per item.
  */
 export function computeAdvantageItemTiers(params: {
   readonly tiers: readonly StarTier[];
@@ -226,28 +224,30 @@ export function computeAdvantageItemTiers(params: {
   }
 
   // Baseline ("do nothing"): the current price at its resolved commission (band, else
-  // category). Probe at zero when nothing resolves so the cost/shipping gate is reported
-  // before NO_COMMISSION. When a rate DOES resolve, this evaluation is the real baseline.
+  // category). An unresolvable commission fails the whole item BEFORE the engine runs, so
+  // NO_COMMISSION ranks ahead of the cost/shipping gate -- exactly as the discount and
+  // campaign screens report it.
   const currentResolved = resolveCommission(commission, currentPrice);
-  const currentOutcome = evaluateScreenScenario({
-    base: base.base,
-    unitPrice: currentPrice,
-    commissionPct: currentResolved?.pct ?? COMMISSION_PROBE_RATE,
-  });
-  if (!currentOutcome.calculable) {
+  if (currentResolved === null) {
     return {
       calculable: false,
-      reason: currentOutcome.reason,
+      reason: 'NO_COMMISSION',
       tiers: uncalculableTierResults(tiers, commission),
       bestTierKey: null,
       current: NULL_CURRENT,
     };
   }
-  // Econ ok but no commission resolvable at the current price -> the whole item fails.
-  if (currentResolved === null) {
+
+  // With a commission in hand, the real baseline gates on cost/shipping.
+  const currentOutcome = evaluateScreenScenario({
+    base: base.base,
+    unitPrice: currentPrice,
+    commissionPct: currentResolved.pct,
+  });
+  if (!currentOutcome.calculable) {
     return {
       calculable: false,
-      reason: 'NO_COMMISSION',
+      reason: currentOutcome.reason,
       tiers: uncalculableTierResults(tiers, commission),
       bestTierKey: null,
       current: NULL_CURRENT,
@@ -337,12 +337,12 @@ const ADVANTAGE_NO_PRODUCT_ESTIMATE: ComputedAdvantageEstimate = {
 /**
  * Full profit breakdown for ONE advantage item at `price` with the scenario engine. In
  * `resolve` mode the commission comes from the band the price lands in (else category);
- * in `override` mode it is applied verbatim (the current scenario). An unmatched variant
- * (`base` no-product) -> NO_PRODUCT; a store-wide load failure (`base` degraded) echoes
- * the resolved commission with a null breakdown and null reason. Otherwise the scenario
- * is evaluated at `price` (probed at zero when no commission resolves): a cost/shipping
- * gate -> NO_COST / NO_SHIPPING (commission echoed), an unresolvable commission ->
- * NO_COMMISSION (null commission), else the 4-decimal-margin breakdown. Same ordering the
+ * in `override` mode it is applied verbatim (the current scenario). A store-wide load
+ * failure (`base` degraded) echoes the resolved commission with a null breakdown and null
+ * reason; an unmatched variant (`base` no-product) -> NO_PRODUCT; an unresolvable
+ * commission -> NO_COMMISSION (null commission), returned WITHOUT evaluating the engine;
+ * the scenario is then evaluated at `price` and a cost/shipping gate -> NO_COST /
+ * NO_SHIPPING (commission echoed), else the 4-decimal-margin breakdown. Same ordering the
  * detail view uses.
  */
 export function computeAdvantageEstimate(params: {
@@ -374,26 +374,29 @@ export function computeAdvantageEstimate(params: {
     return ADVANTAGE_NO_PRODUCT_ESTIMATE;
   }
 
-  const outcome = evaluateScreenScenario({
-    base: base.base,
-    unitPrice: price,
-    commissionPct: resolved?.pct ?? COMMISSION_PROBE_RATE,
-  });
-  if (!outcome.calculable) {
-    return {
-      calculable: false,
-      reason: outcome.reason,
-      commissionPct: resolved?.pct.toFixed(4) ?? null,
-      commissionSource: resolved?.source ?? null,
-      breakdown: null,
-    };
-  }
+  // An unresolvable commission fails the item BEFORE the engine runs, so NO_COMMISSION
+  // ranks ahead of the cost/shipping gate -- the same ordering the detail view uses.
   if (resolved === null) {
     return {
       calculable: false,
       reason: 'NO_COMMISSION',
       commissionPct: null,
       commissionSource: null,
+      breakdown: null,
+    };
+  }
+
+  const outcome = evaluateScreenScenario({
+    base: base.base,
+    unitPrice: price,
+    commissionPct: resolved.pct,
+  });
+  if (!outcome.calculable) {
+    return {
+      calculable: false,
+      reason: outcome.reason,
+      commissionPct: resolved.pct.toFixed(4),
+      commissionSource: resolved.source,
       breakdown: null,
     };
   }

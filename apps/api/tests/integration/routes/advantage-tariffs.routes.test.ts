@@ -519,6 +519,85 @@ describe('Advantage Product Labels - list / detail / commission-source / delete'
     await prisma.advantageTariff.delete({ where: { id: tariff.id } });
   });
 
+  it('reports NO_COMMISSION before NO_COST on the advantage screen', async () => {
+    // A matched item whose econ is INCOMPLETE (no cost profile -> MISSING_COST) AND whose
+    // commission is unresolvable (barcode absent from the pinned tariff's bands, product
+    // has no category so no category-rate fallback). The reason is NO_COMMISSION, not
+    // NO_COST: an unresolvable commission ranks ahead of the cost/shipping gate (Faz 4C
+    // Task 0 -- aligning the advantage screen with the discount and campaign screens).
+    const product = await prisma.product.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: fx.storeId,
+        platformContentId: 8502n,
+        productMainId: 'pm-8502',
+        title: 'Komisyonsuz Ürün',
+        // No category -> the category-rate fallback resolves to null.
+        categoryId: null,
+        brandId: null,
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: fx.storeId,
+        productId: product.id,
+        platformVariantId: 85020n,
+        barcode: 'ADV-NOCOMM',
+        stockCode: 'STK-NOCOMM',
+        salePrice: new Decimal('360.00'),
+        listPrice: new Decimal('360.00'),
+        vatRate: 20,
+        // Shipping resolves (store is SENDEOMP / TRENDYOL_CONTRACT), so the ONLY missing
+        // econ input is cost -- under the old ordering this item read NO_COST.
+        dimensionalWeightOverride: new Decimal('3.0'),
+      },
+    });
+    // No cost profile is attached, so the scenario reads MISSING_COST for this variant.
+
+    const tariff = await prisma.advantageTariff.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: fx.storeId,
+        name: 'Komisyonsuz Avantaj',
+        // Pinned to the fixture's commission tariff, which holds no band for this barcode.
+        commissionSourceTariffId: fx.commissionTariffId,
+      },
+    });
+    await prisma.advantageTariffItem.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: fx.storeId,
+        tariffId: tariff.id,
+        productVariantId: variant.id,
+        barcode: 'ADV-NOCOMM',
+        stockCode: 'STK-NOCOMM',
+        productTitle: 'Komisyonsuz Ürün',
+        currentPrice: '360.00',
+        customerPrice: '360.00',
+        hasCommissionTariff: false,
+        starTiers: [{ key: 'tier1', upperLimit: '250.00' }],
+        applyUntilEnd: false,
+        sortOrder: 0,
+      },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/advantage-tariffs/${tariff.id}`,
+      { headers: { Authorization: bearer(fx.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DetailWire;
+    const item = body.items.find((i) => i.barcode === 'ADV-NOCOMM');
+    expect(item?.calculable).toBe(false);
+    expect(item?.reason).toBe('NO_COMMISSION');
+
+    // Clean up (tariff cascade drops its item) so the fixture's state is untouched.
+    await prisma.advantageTariff.delete({ where: { id: tariff.id } });
+    await prisma.productVariant.delete({ where: { id: variant.id } });
+    await prisma.product.delete({ where: { id: product.id } });
+  });
+
   it('rejects an import pinned to a commission tariff from outside the store (422)', async () => {
     const form = new FormData();
     form.append(

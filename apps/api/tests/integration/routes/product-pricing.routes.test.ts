@@ -22,6 +22,7 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma, type Prisma } from '@pazarsync/db';
+import { ProductVariantStatus } from '@pazarsync/db/enums';
 
 import { createApp } from '@/app';
 import { listProductPricing } from '@/services/product-pricing.service';
@@ -273,6 +274,93 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/product-pricing — simpl
     const body = (await res.json()) as ListResponseWire;
     expect(body.data).toEqual([]);
     expect(body.pagination).toEqual({ page: 1, perPage: 25, total: 0, totalPages: 0 });
+  });
+
+  it('leaves delisted and archived variants out of the product pricing list', async () => {
+    // The pricing list reads the shared products-page listing scope (LISTED_VARIANT_WHERE:
+    // delistedAt null and status not ARCHIVED). A delisted or archived variant must never
+    // appear, regardless of calculability.
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Scope Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'scope',
+        credentials: 'opaque',
+      },
+    });
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 9001n,
+        productMainId: 'pm-9001',
+        title: 'Scope Product',
+      },
+    });
+    const baseVariant = {
+      organizationId: org.id,
+      storeId: store.id,
+      productId: product.id,
+      salePrice: new Decimal('100.00'),
+      listPrice: new Decimal('100.00'),
+      vatRate: 20,
+    };
+    const onSale = await prisma.productVariant.create({
+      data: {
+        ...baseVariant,
+        platformVariantId: 90010n,
+        barcode: 'SC-ONSALE',
+        stockCode: 'SC-ONSALE',
+        status: ProductVariantStatus.ON_SALE,
+      },
+    });
+    const locked = await prisma.productVariant.create({
+      data: {
+        ...baseVariant,
+        platformVariantId: 90011n,
+        barcode: 'SC-LOCKED',
+        stockCode: 'SC-LOCKED',
+        status: ProductVariantStatus.LOCKED,
+      },
+    });
+    // Archived: excluded by the listing scope (status not ARCHIVED).
+    await prisma.productVariant.create({
+      data: {
+        ...baseVariant,
+        platformVariantId: 90012n,
+        barcode: 'SC-ARCHIVED',
+        stockCode: 'SC-ARCHIVED',
+        status: ProductVariantStatus.ARCHIVED,
+      },
+    });
+    // Delisted: still ON_SALE but dropped from Trendyol's feed (delistedAt set) -> excluded.
+    await prisma.productVariant.create({
+      data: {
+        ...baseVariant,
+        platformVariantId: 90013n,
+        barcode: 'SC-DELISTED',
+        stockCode: 'SC-DELISTED',
+        status: ProductVariantStatus.ON_SALE,
+        delistedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/product-pricing`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ListResponseWire;
+
+    // Only the listed variants (ON_SALE + LOCKED) survive the shared scope.
+    const ids = body.data.map((r) => r.variantId).sort();
+    expect(ids).toEqual([locked.id, onSale.id].sort());
+    expect(body.pagination.total).toBe(2);
   });
 });
 

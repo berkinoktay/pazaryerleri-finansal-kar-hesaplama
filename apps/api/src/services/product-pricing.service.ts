@@ -16,6 +16,7 @@
 
 import { Decimal } from 'decimal.js';
 
+import { LISTED_VARIANT_WHERE } from '@pazarsync/catalog-sync';
 import type { Prisma } from '@pazarsync/db';
 import { ProfitIssueCode } from '@pazarsync/db/enums';
 import {
@@ -167,7 +168,7 @@ function buildCandidateOrderBy(
 
 /**
  * The product-pricing row PLUS the un-serialized profit metrics kept as
- * `Decimal | null`. The list pipeline computes EVERY approved variant in memory,
+ * `Decimal | null`. The list pipeline computes EVERY listed variant in memory,
  * then filters / sorts by these numeric copies (decimal.js compares, never
  * float), and finally serializes the surviving page to `ProductPricingRow`. The
  * numeric copies never leave the service.
@@ -179,7 +180,12 @@ interface ComputedPricingRow {
   costMarkupPct: Decimal | null;
 }
 
-/** Builds the SQL `where` for the candidate set: org + store + cheap filters. */
+/**
+ * Builds the SQL `where` for the candidate set: org + store + the shared products-page
+ * listing scope + cheap filters. `LISTED_VARIANT_WHERE` (delistedAt null, status not
+ * ARCHIVED) is ANDed in so this list shows exactly the variants the products page shows
+ * by default -- a delisted or archived variant never appears here.
+ */
 function buildListWhere(
   orgId: string,
   storeId: string,
@@ -193,6 +199,7 @@ function buildListWhere(
     productWhere.brandId = BigInt(filters.brandId);
   }
   return {
+    ...LISTED_VARIANT_WHERE,
     organizationId: orgId,
     storeId,
     product: productWhere,
@@ -371,7 +378,8 @@ async function computeScenarioRows(
 }
 
 /**
- * Lists per-variant forward pricing for a store's APPROVED products. Computes
+ * Lists per-variant forward pricing for a store's LISTED products (the products-page
+ * default scope: not delisted, not ARCHIVED). Computes
  * EVERY candidate variant's profit in memory with the scenario engine (one batch
  * load -- no N+1), then filters / sorts / paginates IN MEMORY so the profit/margin
  * sorts and filters operate on the live computed values and `total` is the exact
@@ -390,7 +398,7 @@ export async function listProductPricing(
 ): Promise<{ data: ProductPricingRow[]; total: number }> {
   const where = buildListWhere(orgId, storeId, filters);
 
-  // 1. Candidate set -- ALL approved variants matching the cheap SQL filters.
+  // 1. Candidate set -- ALL listed variants matching the cheap SQL filters.
   //    No skip/take here: the full set must be computed before in-memory
   //    filter/sort/paginate can produce a correct `total`.
   let variants: VariantForListRow[];

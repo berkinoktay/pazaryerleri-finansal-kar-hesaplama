@@ -33,7 +33,8 @@ const listProductPricingRoute = createRoute({
   tags: ['ProductPricing'],
   summary: 'List per-variant forward profit for a store',
   description:
-    'Returns one forward-pricing row per APPROVED ProductVariant. Each row assembles a ' +
+    'Returns one forward-pricing row per LISTED ProductVariant (the products-page default ' +
+    'scope: not delisted, not ARCHIVED). Each row assembles a ' +
     'single-unit profit from the existing cost / commission / shipping / PSF / stoppage ' +
     'resolvers and the profit engine. Rows are ALWAYS returned — even when a variant cannot ' +
     'be costed — so the user can see which input is missing: the three independent status ' +
@@ -41,7 +42,7 @@ const listProductPricingRoute = createRoute({
     '`calculable` is their conjunction. When calculable=false, netProfit / saleMarginPct / ' +
     'costMarkupPct are null. Money fields are GROSS (VAT-inclusive) decimal strings. Each row ' +
     'also carries `imageUrl` (primary image), `cost` (GROSS TRY, null unless costStatus=OK), and ' +
-    'category/brand ids + names. Every approved variant is computed in memory, then filtered, ' +
+    'category/brand ids + names. Every listed variant is computed in memory, then filtered, ' +
     'sorted and paginated server-side, so `total`/`totalPages` reflect the FILTERED set exactly. ' +
     'Filters: `calculableOnly=true` (actionable rows only), `profitStatus` (profitable/breakeven/' +
     'loss/all), `marginMin`/`marginMax` (sale margin %), `categoryId`/`brandId` (SQL). Sorts: ' +
@@ -87,7 +88,7 @@ app.openapi(listProductPricingRoute, async (c) => {
   const { role } = await requireStoreAccess(userId, orgId, storeId);
   assertCapability(role, CAPABILITIES.DATA_READ);
 
-  // The service computes EVERY approved variant in memory, then filters / sorts /
+  // The service computes EVERY listed variant in memory, then filters / sorts /
   // paginates in memory, so `total` is the EXACT filtered count (calculableOnly,
   // profitStatus, margin range and category/brand all applied before the slice).
   const { data, total } = await listProductPricing(prisma, orgId, storeId, {
