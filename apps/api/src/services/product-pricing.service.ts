@@ -13,29 +13,18 @@
 // (MISSING_COST -> NO_PROFILES, SHIPPING_ESTIMATE_UNAVAILABLE -> the shipping status,
 // MISSING_COMMISSION_RATE -> NO_RULE); a variant is calculable only when all three are
 // OK (deriveCalculable). When not calculable, profit/margin fields are null.
-//
-// `assembleUnitEconomics` + `serializeBreakdown` below are the LEGACY unit-engine
-// helpers, no longer used by the list/quote but still consumed by the remaining
-// scenario screens until Faz 4B Tasks 5-8 move them to the engine.
 
 import { Decimal } from 'decimal.js';
 
-import { prisma } from '@pazarsync/db';
-import type { Platform, Prisma } from '@pazarsync/db';
+import type { Prisma } from '@pazarsync/db';
 import { ProfitIssueCode } from '@pazarsync/db/enums';
 import {
   buildStatementBreakdown,
   evaluateTrendyolScenario,
-  grossToVat,
   loadTrendyolScenarioBases,
-  resolveFeeDefinition,
   solveTrendyolScenarioPrice,
   statementTotalsFromStatement,
   UnsupportedPlatformError,
-  type EstimateOutcome,
-  type EstimateUnavailableReason,
-  type ProfitBreakdown,
-  type ProfitInputFee,
   type ProfitIssue,
   type ProfitStatement,
   type ScenarioLoadResult,
@@ -43,7 +32,6 @@ import {
   type ScenarioSolveFailure,
   type ShippingUnavailableReason,
   type SolveReason,
-  type UnitEconomics,
 } from '@pazarsync/profit';
 
 // Quote-level failure reason — superset of the engine's SolveReason.
@@ -52,23 +40,17 @@ import {
 export type QuoteReason = SolveReason | 'NOT_CALCULABLE';
 import { InvalidReferenceError, mapPrismaError } from '@pazarsync/sync-core';
 
-import { type ResolvedCommissionRate } from './commission-rate-resolver';
-import { feeToProfitInputFee, deriveCalculable } from './product-pricing-assembly';
+import { deriveCalculable } from './product-pricing-assembly';
 import { logProfitReadFailure } from './profit-compute-fallback.service';
 import { createRequestFailureLog, formatMarginPct2, formatMoney2 } from './scenario-screen-commons';
-import { SHIPPING_ESTIMATE_CTE_SQL, type ShippingEstimateRow } from './shipping-estimator.sql';
 import type {
   CommissionStatus,
   CostStatus,
   ProductPricingRow,
   ShippingEstimateStatus,
 } from './product-pricing.types';
-import type { VariantCostAggregate } from '../validators/product.validator';
 
 // ─── Constants ─────────────────────────────────────────────────────────────
-
-/** Trendyol default sale VAT rate (percent) when a variant carries no override. */
-const DEFAULT_VAT_RATE = 20;
 
 /**
  * The unit price the quote probes the loaded base at to read whether the cost resolved.
@@ -107,39 +89,20 @@ export type ProductPricingSort =
   | 'costMarkupPct:asc'
   | 'costMarkupPct:desc';
 
-// ─── Fee definitions resolved once per request (loop-invariant) ───────────────
+// ─── Variant shape for the list pipeline ──────────────────────────────────────
 
-export interface ResolvedFeeDefs {
-  /** Komisyon KDV oranı, yüzde (örn. 20). */
-  commissionVatRate: Decimal;
-  /** Stopaj oranı — NET satış üstüne KESİR (örn. 0.01). */
-  stoppageRate: Decimal;
-  /** PSF (Platform Hizmet Bedeli) NET sabit tutar. */
-  psfNet: Decimal;
-  /** PSF KDV oranı, yüzde. */
-  psfVatRate: Decimal;
-  /** Kargo KDV oranı, yüzde. */
-  shipVatRate: Decimal;
-}
-
-/** Variant shape consumed by the assembly — exactly the columns we read. */
-interface VariantForAssembly {
+/**
+ * The variant columns the LIST pipeline reads: the identity + sale/VAT/digital fields the
+ * scenario evaluation needs, plus the category/brand names and the primary image the list
+ * rows surface.
+ */
+interface VariantForListRow {
   id: string;
   stockCode: string;
   barcode: string;
   salePrice: Prisma.Decimal;
   vatRate: number | null;
   isDigital: boolean;
-  product: { title: string; categoryId: bigint | null; brandId: bigint | null };
-}
-
-/**
- * Variant shape for the LIST pipeline — the assembly columns plus the display
- * fields (category/brand names + primary image) the list rows surface. A
- * superset of `VariantForAssembly`, so it can be passed straight to
- * `assembleUnitEconomics` and the batch commission resolver.
- */
-interface VariantForListRow extends VariantForAssembly {
   product: {
     title: string;
     categoryId: bigint | null;
@@ -148,262 +111,6 @@ interface VariantForListRow extends VariantForAssembly {
     brandName: string | null;
     imageUrls: string[];
   };
-}
-
-interface AssemblyContext {
-  platform: Platform;
-  feeDefs: ResolvedFeeDefs;
-}
-
-interface AssemblyResult {
-  econ: UnitEconomics | null;
-  costStatus: CostStatus;
-  shippingStatus: ShippingEstimateStatus;
-  commissionStatus: CommissionStatus;
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * Maps a shipping estimate failure reason to the wire `ShippingEstimateStatus`.
- * `STORE_NOT_FOUND` cannot occur here (the store is verified by
- * `requireStoreAccess` before this runs) — mapped defensively to NO_CARRIER so
- * the row degrades gracefully rather than throwing. Exhaustive over the union.
- */
-function shippingReasonToStatus(reason: EstimateUnavailableReason): ShippingEstimateStatus {
-  switch (reason) {
-    case 'NO_CARRIER':
-      return 'NO_CARRIER';
-    case 'DESI_OVERFLOW':
-      return 'DESI_OVERFLOW';
-    case 'OWN_CONTRACT_EMPTY':
-      return 'OWN_CONTRACT_EMPTY';
-    case 'STORE_NOT_FOUND':
-      return 'NO_CARRIER';
-    default: {
-      const _exhaustive: never = reason;
-      throw new Error(`Unhandled shipping estimate reason: ${_exhaustive}`);
-    }
-  }
-}
-
-/**
- * Resolves the four loop-invariant FeeDefinitions ONCE per request (single
- * `now`). COMMISSION_INVOICE/SHIPPING contribute only their VAT rate; STOPPAGE
- * its rateOfSale (fraction); PLATFORM_SERVICE its net fixed amount + VAT rate.
- */
-export async function resolveFeeDefs(
-  tx: Prisma.TransactionClient,
-  platform: Platform,
-): Promise<ResolvedFeeDefs> {
-  const now = new Date();
-  const [commissionDef, stoppageDef, psfDef, shipDef] = await Promise.all([
-    resolveFeeDefinition(tx, { platform, feeType: 'COMMISSION_INVOICE', at: now }),
-    resolveFeeDefinition(tx, { platform, feeType: 'STOPPAGE', at: now }),
-    resolveFeeDefinition(tx, { platform, feeType: 'PLATFORM_SERVICE', at: now }),
-    resolveFeeDefinition(tx, { platform, feeType: 'SHIPPING', at: now }),
-  ]);
-
-  if (stoppageDef.rateOfSale === null) {
-    throw new Error(`STOPPAGE FeeDefinition ${stoppageDef.id} missing rateOfSale`);
-  }
-  if (psfDef.fixedAmountNet === null) {
-    throw new Error(`PLATFORM_SERVICE FeeDefinition ${psfDef.id} missing fixedAmountNet`);
-  }
-
-  return {
-    commissionVatRate: new Decimal(commissionDef.defaultVatRate),
-    stoppageRate: new Decimal(stoppageDef.rateOfSale),
-    psfNet: new Decimal(psfDef.fixedAmountNet),
-    psfVatRate: new Decimal(psfDef.defaultVatRate),
-    shipVatRate: new Decimal(shipDef.defaultVatRate),
-  };
-}
-
-// ─── Pre-resolved inputs (batch-friendly) ────────────────────────────────────
-
-/**
- * The three per-variant inputs `assembleUnitEconomics` needs, resolved UPSTREAM
- * so the assembly stays pure (no DB). `quoteProductPrice` resolves these for one
- * variant; `listProductPricing` resolves them in batch (one query each) across
- * the whole page — that is how the N+1 is removed without changing the math.
- */
-export interface AssemblyInputs {
-  costAggregate: VariantCostAggregate | undefined;
-  commission: ResolvedCommissionRate | null;
-  shipping: EstimateOutcome;
-}
-
-// ─── Assembly ─────────────────────────────────────────────────────────────────
-
-// Legacy: kept until the remaining scenario screens move to the engine (Faz 4B Tasks 5-8).
-/**
- * Builds a variant's `UnitEconomics` and the three independent status codes.
- * `econ` is non-null only when cost, shipping and commission are all OK; in any
- * other case it is `null` (the caller turns that into a not-calculable row).
- *
- * PURE — performs no DB queries. All three resolver-backed inputs (cost,
- * commission, shipping) are supplied via `inputs`, resolved upstream in batch by
- * the caller. The unit math (percent vs fraction, NET → GROSS) is unchanged from
- * the previous per-variant version; only WHERE the inputs come from changed.
- */
-export function assembleUnitEconomics(
-  ctx: AssemblyContext,
-  variant: VariantForAssembly,
-  inputs: AssemblyInputs,
-): AssemblyResult {
-  const saleVatRate = new Decimal(variant.vatRate ?? DEFAULT_VAT_RATE);
-
-  // ─── cost (GROSS-TL batch aggregate; VAT extracted at sale rate) ───────────
-  // A null `currentCostTry` never pairs with costStatus 'OK' (NO_PROFILES), but
-  // we read it directly so the type narrows without an assertion.
-  const costStatus: CostStatus = inputs.costAggregate?.costStatus ?? 'NO_PROFILES';
-  const currentCostTry = inputs.costAggregate?.currentCostTry ?? null;
-  const costGross =
-    costStatus === 'OK' && currentCostTry !== null ? new Decimal(currentCostTry) : null;
-
-  // ─── commission (platform-global rate; null ⇒ NO_RULE) ──────────────────────
-  // categoryId is required to match a rule — when there is no possible match the
-  // caller passes `commission: null` (it skips the resolver), so a null here
-  // means NO_RULE regardless of why.
-  let commissionStatus: CommissionStatus = 'NO_RULE';
-  let commissionRate: Decimal | null = null;
-  if (inputs.commission !== null) {
-    commissionStatus = 'OK';
-    commissionRate = inputs.commission.rate;
-  }
-
-  // ─── shipping (NET tariff → GROSS DEBIT fee) ────────────────────────────────
-  let shippingStatus: ShippingEstimateStatus;
-  let shippingFee: ProfitInputFee | null = null;
-  if (inputs.shipping.ok) {
-    shippingStatus = 'OK';
-    shippingFee = feeToProfitInputFee(
-      inputs.shipping.estimate.amount,
-      ctx.feeDefs.shipVatRate,
-      'SHIPPING',
-    );
-  } else {
-    shippingStatus = shippingReasonToStatus(inputs.shipping.reason);
-  }
-
-  const calculable = deriveCalculable(costStatus, shippingStatus, commissionStatus);
-  if (!calculable || costGross === null || commissionRate === null || shippingFee === null) {
-    return { econ: null, costStatus, shippingStatus, commissionStatus };
-  }
-
-  // ─── PSF (Platform Hizmet Bedeli) — skip for digital variants ───────────────
-  // Catalog has no order context, so FAST PSF cannot be inferred — always the
-  // standard PLATFORM_SERVICE tier (plan §Kararlar 4).
-  const fixedFees: ProfitInputFee[] = [shippingFee];
-  if (!variant.isDigital) {
-    fixedFees.push(
-      feeToProfitInputFee(ctx.feeDefs.psfNet, ctx.feeDefs.psfVatRate, 'PLATFORM_SERVICE'),
-    );
-  }
-
-  const econ: UnitEconomics = {
-    saleVatRate,
-    cost: { gross: costGross, vat: grossToVat(costGross, saleVatRate) },
-    commissionRate,
-    commissionVatRate: ctx.feeDefs.commissionVatRate,
-    stoppageRate: ctx.feeDefs.stoppageRate,
-    fixedFees,
-  };
-
-  return { econ, costStatus, shippingStatus, commissionStatus };
-}
-
-// ─── Batch resolvers (one DB round-trip for the whole page) ───────────────────
-
-/**
- * Maps a `ShippingEstimateRow` (from the CTE) back to the `EstimateOutcome`
- * shape `assembleUnitEconomics` consumes. The CTE already mirrors the canonical
- * `estimateShippingCostForVariant` (equivalence test guarantees agreement), so
- * this is a pure wire-shape adaptation — no recomputation.
- *
- * `NO_DESI` is unreachable in practice (`synced_dimensional_weight` is non-null
- * `@default(0)`, so the COALESCE'd desi is never NULL); it is mapped defensively
- * to `DESI_OVERFLOW` so the `EstimateOutcome` reason union stays closed.
- */
-function shippingRowToOutcome(row: ShippingEstimateRow): EstimateOutcome {
-  if (row.shipping_estimate_status === 'OK') {
-    if (row.estimated_shipping_net === null || row.shipping_tariff_applied === null) {
-      // Defensive: an 'OK' row always carries a net amount + applied tariff.
-      return { ok: false, reason: 'DESI_OVERFLOW' };
-    }
-    return {
-      ok: true,
-      estimate: {
-        amount: new Decimal(row.estimated_shipping_net),
-        carrierCode: row.shipping_carrier_code ?? 'OWN',
-        tariffApplied: row.shipping_tariff_applied,
-        // The CTE selects only `price_net`, not the winning tariff row id — null
-        // matches the OWN_CONTRACT branch of the per-variant estimator. Neither
-        // field feeds the profit math (assembly reads only `amount`).
-        sourceTariffId: null,
-        baseDesiAtEstimate: new Decimal(row.eff_desi ?? '0'),
-      },
-    };
-  }
-
-  switch (row.shipping_estimate_status) {
-    case 'NO_CARRIER':
-      return { ok: false, reason: 'NO_CARRIER' };
-    case 'OWN_CONTRACT_EMPTY':
-      return { ok: false, reason: 'OWN_CONTRACT_EMPTY' };
-    case 'DESI_OVERFLOW':
-      return { ok: false, reason: 'DESI_OVERFLOW' };
-    case 'NO_DESI':
-      return { ok: false, reason: 'DESI_OVERFLOW' };
-    default: {
-      const _exhaustive: never = row.shipping_estimate_status;
-      throw new Error(`Unhandled shipping estimate status: ${_exhaustive}`);
-    }
-  }
-}
-
-/**
- * Resolves shipping for every variant in a store with ONE query, reusing the
- * canonical `SHIPPING_ESTIMATE_CTE_SQL` (the same CTE products-list uses). The
- * CTE returns one row per variant in the (org, store) scope; we keep only the
- * requested `variantIds` and adapt each row to an `EstimateOutcome`. Variants
- * with no CTE row (e.g. STORE_NOT_FOUND) map to `STORE_NOT_FOUND`.
- */
-export async function batchResolveShipping(
-  organizationId: string,
-  storeId: string,
-  variantIds: string[],
-): Promise<Map<string, EstimateOutcome>> {
-  const result = new Map<string, EstimateOutcome>();
-  if (variantIds.length === 0) return result;
-
-  let rows: ShippingEstimateRow[];
-  try {
-    rows = await prisma.$queryRawUnsafe<ShippingEstimateRow[]>(
-      SHIPPING_ESTIMATE_CTE_SQL,
-      organizationId,
-      storeId,
-    );
-  } catch (err) {
-    mapPrismaError(err);
-  }
-
-  const requested = new Set(variantIds);
-  for (const row of rows) {
-    if (requested.has(row.id)) {
-      result.set(row.id, shippingRowToOutcome(row));
-    }
-  }
-
-  // Any requested variant the CTE did not return (no store join, etc.) degrades
-  // to STORE_NOT_FOUND so the row stays present and not-calculable.
-  for (const id of variantIds) {
-    if (!result.has(id)) {
-      result.set(id, { ok: false, reason: 'STORE_NOT_FOUND' });
-    }
-  }
-  return result;
 }
 
 // ─── Query builders ───────────────────────────────────────────────────────────
@@ -777,38 +484,6 @@ export type QuoteResult =
 export interface QuoteServiceInput {
   variantId: string;
   target: { type: 'margin' | 'markup' | 'profit'; value: string };
-}
-
-// Legacy: kept until the remaining scenario screens move to the engine (Faz 4B Tasks 5-8).
-export function serializeBreakdown(bd: ProfitBreakdown): QuoteBreakdown {
-  // Grup toplamları Decimal ile burada hesaplanır (frontend para toplamaz).
-  // totalDeductions'ı satış − kâr olarak türetmek, uluslararası/yurt dışı gibi
-  // ayrı kovası olmayan ücretleri de otomatik yakalar → gruplar tam satışa toplanır.
-  const taxesGross = bd.stoppage.add(bd.netVat);
-  const totalDeductionsGross = bd.saleGross.sub(bd.netProfit);
-  const marketplaceFeesGross = totalDeductionsGross.sub(bd.costGross).sub(taxesGross);
-  return {
-    listGross: bd.listGross.toFixed(2),
-    sellerDiscountGross: bd.sellerDiscountGross.toFixed(2),
-    saleGross: bd.saleGross.toFixed(2),
-    saleVat: bd.saleVat.toFixed(2),
-    costGross: bd.costGross.toFixed(2),
-    costVat: bd.costVat.toFixed(2),
-    commissionGross: bd.commissionGross.toFixed(2),
-    commissionVat: bd.commissionVat.toFixed(2),
-    shippingGross: bd.shippingGross.toFixed(2),
-    shippingVat: bd.shippingVat.toFixed(2),
-    platformServiceGross: bd.platformServiceGross.toFixed(2),
-    platformServiceVat: bd.platformServiceVat.toFixed(2),
-    stoppage: bd.stoppage.toFixed(2),
-    netVat: bd.netVat.toFixed(2),
-    netProfit: bd.netProfit.toFixed(2),
-    saleMarginPct: bd.saleMarginPct !== null ? bd.saleMarginPct.toFixed(4) : null,
-    costMarkupPct: bd.costMarkupPct !== null ? bd.costMarkupPct.toFixed(4) : null,
-    marketplaceFeesGross: marketplaceFeesGross.toFixed(2),
-    taxesGross: taxesGross.toFixed(2),
-    totalDeductionsGross: totalDeductionsGross.toFixed(2),
-  };
 }
 
 /**

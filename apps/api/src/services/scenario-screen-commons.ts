@@ -115,7 +115,7 @@ export type ScreenScenarioOutcome =
 
 /**
  * Maps an evaluated statement's issues to the screen's not-calculable reason. Cost gates
- * first (a margin at cost=0 would be wrong), exactly like the legacy `deriveReason`: a
+ * first (a margin at cost=0 would be wrong), the legacy cost-first order: a
  * MISSING_COST wins as NO_COST, else a SHIPPING_ESTIMATE_UNAVAILABLE is NO_SHIPPING, else
  * there is no reason. MISSING_COMMISSION_RATE cannot occur here (every screen passes a
  * commission override); `evaluateScreenScenario`'s defensive branch still covers it.

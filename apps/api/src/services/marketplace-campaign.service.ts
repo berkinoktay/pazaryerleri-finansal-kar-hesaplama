@@ -29,6 +29,7 @@ import { NotFoundError, ValidationError, type ValidationIssue } from '../lib/err
 import { scenarioPresentation } from './discount-math-commons';
 import { computeCampaignItem } from './marketplace-campaign-compute.service';
 import { resolveCampaignEconomics, EMPTY_ITEM_ECONOMICS } from './marketplace-campaign-economics';
+import { createRequestFailureLog, serializeCommissionBandLadder } from './scenario-screen-commons';
 import {
   campaignConfigFromListRow,
   isCampaignDiscountType,
@@ -233,8 +234,9 @@ export async function getMarketplaceCampaignDetail(
 
   const config = campaignConfigFromListRow(list);
   const fundingPct = new Decimal(list.trendyolFundingPct.toString());
+  const now = new Date();
 
-  // Every priced input — matched variant, image, cost, shipping and the three commission tiers
+  // Every priced input — matched variant scenario base, image and the three commission tiers
   // anchored to the campaign start — comes from the SHARED resolver, the same one the estimate
   // and target-margin services call. The detail layers only its own presentation extras (the
   // band ladder below) on top; it never forks the resolution, so the modal cannot end up on a
@@ -244,32 +246,54 @@ export async function getMarketplaceCampaignDetail(
     storeId,
     store,
     list.startsAt,
+    now,
     list.items,
   );
 
+  // A per-item engine throw degrades only that item; collect and log once (decision 9).
+  const failureLog = createRequestFailureLog({
+    surface: 'marketplace-campaign',
+    organizationId: orgId,
+  });
+
   const items = list.items.map((item): MarketplaceCampaignDetailItem => {
     const inputs = economics.byItemId.get(item.id) ?? EMPTY_ITEM_ECONOMICS;
-    const { variant, cost, shipping, commission } = inputs;
+    const { base, commission } = inputs;
 
     // The band ladder surfaced to the UI popover ("which band does this price land in?").
     // Reuses the bands ALREADY resolved for the compute — no extra query. Money at 2 decimals,
     // percent at 4. Null when there is no ladder for the barcode.
     const commissionBands: CampaignCommissionBand[] | null =
-      commission.bands === null
-        ? null
-        : commission.bands.map((band) => ({
-            lowerLimit: band.lowerLimit !== null ? new Decimal(band.lowerLimit).toFixed(2) : null,
-            upperLimit: band.upperLimit !== null ? new Decimal(band.upperLimit).toFixed(2) : null,
-            commissionPct: new Decimal(band.commissionPct).toFixed(4),
-          }));
+      commission.bands === null ? null : serializeCommissionBandLadder(commission.bands);
 
-    const computed = computeCampaignItem(economics.ctx, variant, cost, shipping, commission, {
-      currentPrice: new Decimal(item.currentPrice.toString()),
-      maxPrice: new Decimal(item.maxPrice.toString()),
-      customPrice: item.customPrice !== null ? new Decimal(item.customPrice.toString()) : null,
-      config,
-      fundingPct,
-    });
+    const currentPrice = new Decimal(item.currentPrice.toString());
+    const maxPrice = new Decimal(item.maxPrice.toString());
+    const customPrice = item.customPrice !== null ? new Decimal(item.customPrice.toString()) : null;
+    // A per-item engine throw degrades only that item (reason null, profits empty) and is
+    // collected to log once after the pass (decision 9).
+    let computed: ReturnType<typeof computeCampaignItem>;
+    try {
+      computed = computeCampaignItem({
+        base,
+        commission,
+        currentPrice,
+        maxPrice,
+        customPrice,
+        config,
+        fundingPct,
+      });
+    } catch (err) {
+      failureLog.record(err);
+      computed = computeCampaignItem({
+        base: { kind: 'degraded' },
+        commission,
+        currentPrice,
+        maxPrice,
+        customPrice,
+        config,
+        fundingPct,
+      });
+    }
 
     return {
       id: item.id,
@@ -300,6 +324,8 @@ export async function getMarketplaceCampaignDetail(
       customBasket: computed.customBasket,
     };
   });
+
+  failureLog.flush();
 
   return {
     id: list.id,

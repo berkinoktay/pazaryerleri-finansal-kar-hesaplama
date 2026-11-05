@@ -22,7 +22,7 @@ import { quoteBreakdownFromStatement } from '@/services/product-pricing.service'
  * and projected onto the `QuoteBreakdown` wire shape. These tests build a real
  * statement from profit lines and assert the four allocation groups (cost + marketplace
  * fees + taxes + net profit) close to the sale gross, so the "where the sale went" bar
- * renders without a gap -- the same closure the legacy `serializeBreakdown` guaranteed.
+ * renders without a gap -- the closure the quote breakdown has always guaranteed.
  *
  * `quoteBreakdownFromStatement` is the service's statement -> QuoteBreakdown mapper
  * (the same path the quote route runs). It is pure, so this stays a unit test.

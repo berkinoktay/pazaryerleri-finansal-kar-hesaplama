@@ -1,26 +1,30 @@
-// Kampanyalar (Trendyol'un kurguladığı kampanyalara katılım) kâr hesabı.
+// Profit math for Kampanyalar (seller participation in Trendyol-designed campaigns).
 //
-// İndirimler'in `discount-compute.service.ts` kardeşiyle aynı iskelet: senaryo kurma
-// primitifleri `discount-scenario-commons.ts`'ten, tür matematiği `discount-math-commons.ts`'ten
-// gelir; burada yalnız BU dikeye özgü iki şey yaşar:
+// Same skeleton as the Indirimler sibling (`discount-compute.service.ts`): the scenario
+// primitives come from `discount-scenario-commons.ts` (engine-backed) and the type math from
+// `discount-math-commons.ts`. Only two things are specific to this vertical:
 //
-//  1. ÜÇ senaryo (İndirimler'in ikisi yerine): `current` (katılmazsam bugünkü kârım),
-//     `maxScenario` (Excel'in izin verdiği en yüksek fiyattan katılırsam), `customScenario`
-//     (satıcının yazdığı daha düşük fiyattan katılırsam; fiyat yoksa null).
+//   1. THREE scenarios instead of Indirimler's two: `current` (today's profit if I do not
+//      join), `maxScenario` (joining at the Excel's highest allowed price), `customScenario`
+//      (joining at the seller's own, lower price; null when none is typed).
 //
-//  2. TRENDYOL KARŞILAMASI. Kampanya promosyonu satıcının girdiği kampanya fiyatının ÜSTÜNE
-//     çalışır ve indirimin bir kısmını Trendyol üstlenir. Berkin'in canlı kuralı (tasarım §4.2,
-//     karar 5): komisyon müşterinin ödediğinden DEĞİL, satıcının hakedişine esas tutardan kesilir
-//     — 1.000 TL kampanya fiyatı + %10 indirim + %60 karşılama → matrah 960. Bu tutarı
-//     `sellerEffectivePrice` verir; komisyon, stopaj, KDV ve marj hepsi ondan yürür, kâr
-//     motorunda hiçbir değişiklik gerekmez.
+//   2. THE TRENDYOL FUNDING. A campaign promotion runs on TOP of the price the seller enters
+//      and Trendyol absorbs part of the discount. Owner's live rule (design 4.2, decision 5):
+//      commission is charged NOT on what the customer pays but on the seller's settlement
+//      amount -- 1,000 TL campaign price + 10% discount + 60% funding -> matrah 960.
+//      `sellerEffectivePrice` yields that amount; commission, stoppage, VAT and margin all run
+//      off it, so the profit engine needs no change.
 //
-// Sepet (sipariş) senaryosunda da gelir SATICININ sepet hakedişidir, müşterinin ödediği tutar
-// değil; ikisinin farkı `trendyolFundedTotal` alanı olarak ayrıca döner.
+// In the basket (order) scenario the revenue is likewise the SELLER's basket settlement, not
+// what the customer pays; the difference is reported separately as `trendyolFundedTotal`.
+//
+// No financial math lives here that the engine does not own
+// (feedback_no_frontend_financial_calculation): every number flows through the shared
+// `priceScenario` and the engine (`@pazarsync/profit`).
 
 import { Decimal } from 'decimal.js';
 
-import { solvePriceForTarget, type EstimateOutcome } from '@pazarsync/profit';
+import { solveTrendyolScenarioPrice } from '@pazarsync/profit';
 
 import {
   assumedBasketQuantity,
@@ -32,80 +36,61 @@ import {
   solveCampaignPriceForTarget,
   type DiscountCommissionInputs,
   type DiscountConfig,
-  type ResolvedDiscountCommission,
 } from './discount-math-commons';
 import {
-  computeOrderBreakdown,
   priceScenario,
+  scenarioBreakdown,
+  scenarioMarginPct,
+  scenarioNetProfit,
   toEstimate,
   toScenario,
   type ComputedPriceScenario,
   type ComputedScenarioEstimate,
   type ScenarioCompute,
   type ScenarioItemReason,
-} from './campaign-scenario-legacy';
-import { assembleUnitEconomics } from './product-pricing.service';
+} from './discount-scenario-commons';
 import {
-  tariffCommission,
-  type TariffAssemblyContext,
-  type TariffVariant,
-} from './tariff-compute-commons';
+  toKurusHalfUp,
+  type RequestFailureLog,
+  type ScreenScenarioBase,
+} from './scenario-screen-commons';
 import type { CampaignBasketScenario } from '../validators/marketplace-campaign.validator';
-import type { VariantCostAggregate } from '../validators/product.validator';
-
-// Re-exported so the detail / estimate / target-margin services import the assembly
-// context + variant shapes from one place, exactly as the İndirimler sibling does.
-export type { TariffAssemblyContext, TariffVariant };
 
 const ZERO = new Decimal(0);
+
+/** The lowest unit price the scenario solver accepts; below it there is nothing to solve. */
+const MIN_SCENARIO_UNIT_PRICE = new Decimal('0.01');
 
 export type CampaignItemReason = ScenarioItemReason;
 
 export type ComputedCampaignScenario = ComputedPriceScenario;
 
-/** Bir kampanya kaleminin üç fiyat senaryosu + sepet çerçevesi. */
+/** A campaign item's three price scenarios plus each price option's basket framing. */
 export interface ComputedCampaignItem {
   readonly calculable: boolean;
   readonly reason: CampaignItemReason | null;
-  /** Kampanyasız taban: bugünkü satış fiyatı, promosyon uygulanmadan. */
+  /** Campaign-free baseline: today's sale price with no promotion applied. */
   readonly current: ComputedCampaignScenario;
-  /** Excel'in "Maksimum Girebileceğin Fiyat" değerinden katılım senaryosu. */
+  /** Joining at the Excel's "Maksimum Girebileceğin Fiyat". */
   readonly maxScenario: ComputedCampaignScenario;
-  /** Satıcının yazdığı özel fiyattan katılım senaryosu; fiyat girilmemişse null. */
+  /** Joining at the seller's own typed price; null when none is typed. */
   readonly customScenario: ComputedCampaignScenario | null;
-  /**
-   * Maksimum fiyat seçeneğinin sepet kapsamlı hakediş senaryosu — wire tipi doğrudan
-   * doğrulayıcıdan gelir (`CampaignBasketScenarioSchema`), böylece aynı şekil ikinci kez
-   * TANIMLANMAZ ve detay servisi blokları olduğu gibi geçirebilir.
-   */
+  /** The max price option's basket (order) framing; the wire type comes from the validator. */
   readonly maxBasket: CampaignBasketScenario | null;
-  /** Özel fiyat seçeneğinin sepet senaryosu; özel fiyat yazılmamışsa null. */
+  /** The custom price option's basket framing; null when no custom price is typed. */
   readonly customBasket: CampaignBasketScenario | null;
 }
 
-/** `computeCampaignItem`'ın kalem başına girdileri. */
-export interface ComputeCampaignItemInput {
-  /** "Mevcut Satış Fiyatı" — kampanyasız taban senaryonun fiyatı. */
-  readonly currentPrice: Decimal;
-  /** "Maksimum Girebileceğin Fiyat" — birinci fiyat seçeneği ve özel fiyatın tavanı. */
-  readonly maxPrice: Decimal;
-  /** Satıcının yazdığı özel fiyat; yazılmamışsa null. Seçimden BAĞIMSIZ saklanır (tasarım §3). */
-  readonly customPrice: Decimal | null;
-  readonly config: DiscountConfig;
-  /** Trendyol karşılama oranı, yüzde (60 = %60). Karşılama bilinmiyorsa 0. */
-  readonly fundingPct: Decimal;
-}
-
 /**
- * Bir kampanya fiyatının (P) iki türev fiyatı.
+ * A campaign price's two derived prices.
  *
- * - `settlementPrice` (S): satıcının HAKEDİŞİNE esas birim tutar, yani komisyonun MATRAHI.
- *   `sellerEffectivePrice` verir; müşterinin ödediği `effectiveUnitPrice`'tan karşılama payı
- *   kadar YÜKSEKTİR.
- * - `bandPrice`: komisyon BANDINI seçen fiyat. `commissionBandPrice` kurguya göre belirler:
- *   `BUY_X_PAY_Y` / `NTH_PRODUCT`'ta ürünün raf fiyatı değişmediği için kampanya fiyatı P,
- *   diğer kurgularda her birim gerçekten ucuza satıldığı için hakediş fiyatı S (tasarım §4.3).
- *   Matrah bu seçimden ETKİLENMEZ; yalnız oran değişir.
+ * - `settlementPrice` (S): the per-unit amount the seller SETTLES on, i.e. the commission
+ *   matrah. `sellerEffectivePrice` yields it; it is HIGHER than what the customer pays
+ *   (`effectiveUnitPrice`) by Trendyol's funded share.
+ * - `bandPrice`: the price that SELECTS the commission band. `commissionBandPrice` decides it
+ *   per config: for `BUY_X_PAY_Y` / `NTH_PRODUCT` the shelf price is unchanged so it is the
+ *   campaign price P; otherwise every unit genuinely sells cheaper so it is the settlement
+ *   price S (design 4.3). Only the rate changes with this choice; the matrah does not.
  */
 function campaignScenarioPrices(
   price: Decimal,
@@ -117,47 +102,44 @@ function campaignScenarioPrices(
 }
 
 /**
- * Sepet kapsamlı hakediş senaryosu (tasarım §4.4, profit-formula.md §2.4): sepetin yalnız BU
- * üründen ve koşulu karşılayan en küçük adetten (n) oluştuğu varsayımıyla kampanya siparişinin
- * dökümü. Zincir modaldeki sırayla kapanır:
+ * The basket (order) settlement scenario (design 4.4, profit-formula.md 2.4): assuming the
+ * basket holds only THIS product at the minimum qualifying quantity n, the campaign order's
+ * breakdown. The money chain closes in the modal's order:
  *
- *   sepet tutarı (n × P)
- *     − kampanya indirimi        → müşterinin ödediği (n × birim etkin fiyat)
- *     + Trendyol'un karşıladığı  → satıcının hakedişi (n × birim hakediş fiyatı)
- *     → sipariş kârı (motor, hakediş tutarı üzerinden)
+ *   basket total (n x P)
+ *     - campaign discount    -> what the customer pays (n x effective unit)
+ *     + Trendyol's funded     -> the seller's settlement (n x settlement unit)
+ *     -> order profit (engine, over the settlement total)
  *
- * `basketTotal` KAMPANYA fiyatından kurulur (güncel fiyattan değil): promosyon kampanya
- * fiyatının üstüne çalışır, dolayısıyla "kampanya indirimi" satırı yalnız promosyonun payıdır ve
- * `trendyolFundedTotal` gerçekten onun bir yüzdesi olur. `trendyolFundedTotal` iki toplamın
- * FARKI olarak yazılır (oranla yeniden çarpılmaz), böylece ödenen + karşılanan = hakediş
- * eşitliği kuruşuna kadar kapanır.
+ * `basketTotal` is built from the CAMPAIGN price (not the current price): the promotion runs on
+ * top of the campaign price, so the "campaign discount" line is the promotion's share alone and
+ * `trendyolFundedTotal` is genuinely a percentage of it. `trendyolFundedTotal` is written as the
+ * DIFFERENCE of the two totals (never the rate re-applied), so paid + funded closes on the
+ * settlement total to the kurus.
  *
- * Sipariş kârı `computeOrderBreakdown` ile SATICININ sepet hakedişinden hesaplanır — müşterinin
- * ödediğinden değil; komisyon ve hakediş satıcının tutarından yürür (karar 5). Model n× ürün
- * maliyeti, 1× kargo, 1× PSF'tir (kargo ve platform hizmet bedeli koli başına bir kez).
- * `currentOrderNetProfit` aynı n birimi kampanyasız, güncel fiyattan fiyatlar — elmayla elma
- * karşılaştırması. Karşılama sıfırken hakediş toplamı ödenen toplama eşitlenir ve blok
- * İndirimler'in ürettiğiyle birebir aynı olur.
+ * Both order profits run the engine over the n-unit basket via `priceScenario(quantity: n)` --
+ * the engine prices n cost units, one shipping and one platform-service fee per parcel, and desi
+ * scales by n (so a large basket can exceed the carrier's desi limit and that order profit is
+ * null while the row stays). The campaign order's revenue IS the seller's settlement basket
+ * (unit price = the 2dp settlement unit), not what the customer pays; `currentOrderNetProfit`
+ * prices the same n units campaign-free at the current price -- an apples-to-apples baseline.
  *
- * `NET` kurgusunda null döner (vitrin fiyatı gerçekten değiştiği için sepet çerçevesi anlamsız),
- * pozitif olmayan kampanya fiyatında da null (n, fiyata bölünerek bulunur).
+ * Null for `NET` (its showcase price genuinely changes, so no basket framing) or a non-positive
+ * campaign price (n is found by dividing by the price).
  */
-function buildCampaignBasketScenario(
-  ctx: TariffAssemblyContext,
-  variant: TariffVariant | null,
-  cost: VariantCostAggregate | undefined,
-  shipping: EstimateOutcome,
-  currentPrice: Decimal,
-  campaignPrice: Decimal,
-  config: DiscountConfig,
-  fundingPct: Decimal,
-  currentResolved: ResolvedDiscountCommission | null,
-  campaignResolved: ResolvedDiscountCommission | null,
-): CampaignBasketScenario | null {
+function buildCampaignBasketScenario(params: {
+  readonly base: ScreenScenarioBase;
+  readonly commission: DiscountCommissionInputs;
+  readonly currentPrice: Decimal;
+  readonly campaignPrice: Decimal;
+  readonly config: DiscountConfig;
+  readonly fundingPct: Decimal;
+}): CampaignBasketScenario | null {
+  const { base, commission, currentPrice, campaignPrice, config, fundingPct } = params;
   if (config.type === 'NET' || campaignPrice.lte(ZERO)) return null;
 
   const n = assumedBasketQuantity(config, campaignPrice);
-  // Satırda gösterilen 2 haneli birim fiyatların AYNISI ile çarpılır; modal satırla çelişemez.
+  // Multiplied by the SAME 2dp unit prices the row shows, so the modal can never disagree.
   const paidUnit2dp = effectiveUnitPrice(campaignPrice, config).toDecimalPlaces(2);
   const sellerUnit2dp = sellerEffectivePrice(campaignPrice, config, fundingPct).toDecimalPlaces(2);
 
@@ -165,120 +147,90 @@ function buildCampaignBasketScenario(
   const basketPaidTotal = paidUnit2dp.mul(n);
   const sellerBasketTotal = sellerUnit2dp.mul(n);
 
-  const campaignOrder = computeOrderBreakdown(
-    ctx,
-    variant,
-    cost,
-    shipping,
-    campaignResolved,
-    n,
-    sellerBasketTotal,
-  );
-  const currentOrder = computeOrderBreakdown(
-    ctx,
-    variant,
-    cost,
-    shipping,
-    currentResolved,
-    n,
-    currentPrice.mul(n),
-  );
+  // The campaign order: unit price = the seller's 2dp settlement (so saleGross = the seller
+  // basket total), band from the campaign price's band-lookup price.
+  const { bandPrice } = campaignScenarioPrices(campaignPrice, config, fundingPct);
+  const campaignOrder = priceScenario({
+    base,
+    commission,
+    price: sellerUnit2dp,
+    bandPrice,
+    quantity: n,
+  });
+  // The same n units campaign-free: matrah and band both the current price.
+  const currentOrder = priceScenario({
+    base,
+    commission,
+    price: currentPrice,
+    bandPrice: currentPrice,
+    quantity: n,
+  });
 
   return {
     assumedQuantity: n,
     basketTotal: basketTotal.toFixed(2),
     basketPaidTotal: basketPaidTotal.toFixed(2),
     basketDiscountTotal: basketTotal.sub(basketPaidTotal).toFixed(2),
-    // Varsayılan sepette Trendyol'un karşıladığı toplam: satıcının hakedişi eksi müşterinin
-    // ödediği. Karşılama sıfırken ikisi eşitlenir ve alan "0.00" olur.
+    // Trendyol's funded total in the assumed basket: the seller's settlement minus what the
+    // customer paid. At funding 0 the two are equal and the field is "0.00".
     trendyolFundedTotal: sellerBasketTotal.sub(basketPaidTotal).toFixed(2),
-    orderNetProfit: campaignOrder !== null ? campaignOrder.netProfit.toFixed(2) : null,
-    orderMarginPct:
-      campaignOrder !== null && campaignOrder.saleMarginPct !== null
-        ? campaignOrder.saleMarginPct.toFixed(2)
-        : null,
-    currentOrderNetProfit: currentOrder !== null ? currentOrder.netProfit.toFixed(2) : null,
+    orderNetProfit: scenarioNetProfit(campaignOrder),
+    orderMarginPct: scenarioMarginPct(campaignOrder),
+    currentOrderNetProfit: scenarioNetProfit(currentOrder),
   };
 }
 
 /**
- * Bir kampanya kaleminin ÜÇ senaryosunu ve iki fiyat seçeneğinin sepet çerçevesini hesaplar:
+ * Computes a campaign item's THREE scenarios and each price option's basket framing:
  *
- * - `current`: matrah ve bant `currentPrice` — kampanyaya katılmama hâli.
- * - `maxScenario`: matrah `sellerEffectivePrice(maxPrice, config, fundingPct)`, bant
- *   {@link campaignScenarioPrices} kuralıyla.
- * - `customScenario`: aynı hesap `customPrice` ile; fiyat girilmemişse null.
+ * - `current`: matrah and band both `currentPrice` -- not joining the campaign.
+ * - `maxScenario`: matrah `sellerEffectivePrice(maxPrice, config, fundingPct)`, band by
+ *   {@link campaignScenarioPrices}.
+ * - `customScenario`: the same at `customPrice`; null when none is typed.
  *
- * Kalemin hesaplanabilirliği ve gerekçesi MEVCUT senaryodan gelir — listede görünen "bugünkü
- * durum" odur; ürün eşleşmemişse ya da maliyet/komisyon/kargo eksikse üç senaryo da boş kalır.
+ * Calculability and reason come from the CURRENT scenario -- the "today" figure the row shows;
+ * an unmatched product or a missing cost/commission/shipping empties all three scenarios.
  *
- * Sepet blokları ({@link buildCampaignBasketScenario}) HER seçenek için KENDİ fiyatından ayrı
- * kurulur: `maxBasket` maksimum fiyattan, `customBasket` özel fiyattan (fiyat yoksa null).
- * Sipariş gösterimli kurgularda (`BUY_X_PAY_Y`, `NTH_PRODUCT`, koşulluların TL varyantları)
- * satırdaki iki fiyat kartı da kendi siparişini gösterir (Berkin kararı, 2026-10-22); satıcının
- * hangi seçeneği işaretlediği bu hesaba GİRMEZ — seçim ekranın yerel tamponunda yaşar ve iki
- * kartın manşet rakamı da işaretlemeden bağımsız olarak kendi fiyatının sepetidir.
+ * Each price option carries its OWN basket block ({@link buildCampaignBasketScenario}) built
+ * from its own price: `maxBasket` from the maximum, `customBasket` from the custom price (null
+ * when none). The seller's saved selection does NOT enter this compute (design decision
+ * 2026-10-22); selection lives in the screen's local buffer and both cards headline their own
+ * basket regardless of which option is marked.
  */
-export function computeCampaignItem(
-  ctx: TariffAssemblyContext,
-  variant: TariffVariant | null,
-  cost: VariantCostAggregate | undefined,
-  shipping: EstimateOutcome,
-  commission: DiscountCommissionInputs,
-  input: ComputeCampaignItemInput,
-): ComputedCampaignItem {
-  const { currentPrice, maxPrice, customPrice, config, fundingPct } = input;
+export function computeCampaignItem(params: {
+  readonly base: ScreenScenarioBase;
+  readonly commission: DiscountCommissionInputs;
+  readonly currentPrice: Decimal;
+  readonly maxPrice: Decimal;
+  readonly customPrice: Decimal | null;
+  readonly config: DiscountConfig;
+  readonly fundingPct: Decimal;
+}): ComputedCampaignItem {
+  const { base, commission, currentPrice, maxPrice, customPrice, config, fundingPct } = params;
 
-  /**
-   * Bir KAMPANYA fiyatının senaryosu: matrah + bant türetmesi ve zincir çözümü tek adımda,
-   * kampanya fiyatının kendisiyle birlikte. Üçlü bir arada döndüğü için sepet bloğunun
-   * kullandığı fiyat ile o fiyatın komisyonu birbirinden AYRILAMAZ.
-   */
   const scenarioAt = (
     price: Decimal,
-  ): {
-    readonly price: Decimal;
-    readonly settlementPrice: Decimal;
-    readonly compute: ScenarioCompute;
-  } => {
+  ): { readonly settlementPrice: Decimal; readonly compute: ScenarioCompute } => {
     const { settlementPrice, bandPrice } = campaignScenarioPrices(price, config, fundingPct);
     return {
-      price,
       settlementPrice,
-      compute: priceScenario(ctx, variant, cost, shipping, commission, settlementPrice, bandPrice),
+      compute: priceScenario({ base, commission, price: settlementPrice, bandPrice }),
     };
   };
 
-  // Kampanyasız taban: matrah da bant da güncel fiyattır.
-  const current = priceScenario(
-    ctx,
-    variant,
-    cost,
-    shipping,
-    commission,
-    currentPrice,
-    currentPrice,
-  );
+  const current = priceScenario({ base, commission, price: currentPrice, bandPrice: currentPrice });
   const max = scenarioAt(maxPrice);
   const custom = customPrice !== null ? scenarioAt(customPrice) : null;
 
-  /**
-   * Bir seçeneğin sepet çerçevesi: kendi kampanya fiyatından kurulur, aynı n birimin
-   * kampanyasız karşılığı ise güncel fiyatın komisyonuyla fiyatlanır.
-   */
-  const basketFor = (priced: ReturnType<typeof scenarioAt>): CampaignBasketScenario | null =>
-    buildCampaignBasketScenario(
-      ctx,
-      variant,
-      cost,
-      shipping,
+  const basketFor = (campaignPrice: Decimal): CampaignBasketScenario | null =>
+    buildCampaignBasketScenario({
+      base,
+      commission,
       currentPrice,
-      priced.price,
+      campaignPrice,
       config,
       fundingPct,
-      current.resolved,
-      priced.compute.resolved,
-    );
+    });
 
   return {
     calculable: current.calculable,
@@ -286,85 +238,63 @@ export function computeCampaignItem(
     current: toScenario(currentPrice, current),
     maxScenario: toScenario(max.settlementPrice, max.compute),
     customScenario: custom !== null ? toScenario(custom.settlementPrice, custom.compute) : null,
-    maxBasket: basketFor(max),
-    customBasket: custom !== null ? basketFor(custom) : null,
+    maxBasket: basketFor(maxPrice),
+    customBasket: customPrice !== null ? basketFor(customPrice) : null,
   };
 }
 
-// ─── Tek senaryonun tam dökümü (kâr dökümü modali) ──────────────────────────
-
-/** `computeCampaignEstimate`'in girdileri — hangi fiyatın hangi çerçevede fiyatlanacağı. */
-export interface ComputeCampaignEstimateInput {
-  /** Senaryonun KAMPANYA fiyatı: `current` için kalemin güncel fiyatı, diğerlerinde max/özel fiyat. */
-  readonly price: Decimal;
-  /**
-   * Kalemin güncel ("Mevcut Satış Fiyatı") fiyatı. Sipariş kapsamındaki sepet bloğu aynı n
-   * birimin KAMPANYASIZ karşılığını (`currentOrderNetProfit`) bu fiyattan kurar — modal, satırdaki
-   * kartın "kampanyasız aynı siparişe göre" farkıyla aynı tabanı kullansın diye.
-   */
-  readonly currentPrice: Decimal;
-  readonly config: DiscountConfig;
-  readonly fundingPct: Decimal;
-  /** `current` senaryosunda false: satıcı katılmıyor, promosyon da karşılama da yok. */
-  readonly applyCampaign: boolean;
-}
+// --- Single-scenario estimate (profit breakdown modal) ---
 
 export interface ComputedCampaignEstimate extends ComputedScenarioEstimate {
-  /** Dökümün fiyatlandığı tutar: birim kapsamda hakediş fiyatı, sipariş kapsamında sepet hakedişi. */
+  /** The amount the breakdown is priced at: the settlement unit at unit scope, the settlement basket at order scope. */
   readonly price: Decimal;
   readonly scope: 'unit' | 'order';
   /**
-   * Sipariş kapsamında dökümün sepet çerçevesi — satırdaki kartın `maxBasket` / `customBasket`
-   * bloğuyla AYNI hesap (n, sepet tutarı, müşterinin ödediği, Trendyol'un karşıladığı, sipariş
-   * kârı ve aynı siparişin kampanyasız kârı). Birim kapsamda null.
+   * At order scope, the breakdown's basket framing -- the SAME block the row's max/custom card
+   * shows (n, basket total, customer-paid, Trendyol-funded, order profit and the campaign-free
+   * baseline). Null at unit scope.
    */
   readonly basket: CampaignBasketScenario | null;
 }
 
 /**
- * Tek senaryonun tam kâr dökümü. Fiyat türetmesi `computeCampaignItem` ile AYNI yoldan geçer
- * ({@link campaignScenarioPrices}), bu yüzden modal satırla asla çelişemez.
+ * The full profit breakdown of ONE scenario. The price derivation runs the SAME path as
+ * `computeCampaignItem` ({@link campaignScenarioPrices}), so the modal can never disagree with
+ * the row.
  *
- * Kapsam kurgunun gösterimini VE senaryoyu birlikte izler. Sipariş gösterimli kurgularda
- * (`BUY_X_PAY_Y` / `NTH_PRODUCT` / koşulluların TL varyantları) kampanya senaryoları (`max`,
- * `custom`) SİPARİŞ dökümü döner: birim-etkin fiyat yapay bir ortalamadır ve satırdaki fiyat
- * kartlarının manşeti de sipariş toplamıdır; sepet o senaryonun KENDİ fiyatından kurulur. Gelir
- * satıcının sepet hakedişidir (müşterinin ödediği değil).
- *
- * Kampanyasız `current` her zaman BİRİM dökümü döner: katılmayan satıcının bugünkü satışı tek
- * ürünlük bir siparişdir ve satırın mevcut hücresi de birim kârı gösterir, yani modal tıklanan
- * rakamla aynı tabanda kalır. Birim gösterimli kurgularda her senaryo birim dökümü döner.
- * Hesaplanabilirlik, gerekçe ve komisyon her iki kapsamda da BİRİM çözümünden gelir.
+ * Scope follows both the config's presentation AND the scenario: on an ORDER-presentation config
+ * (`BUY_X_PAY_Y` / `NTH_PRODUCT` / the conditional AMOUNT variants) the campaign scenarios return
+ * an ORDER breakdown (the per-unit effective price is a synthetic average and the row's price
+ * cards headline the order total), and the basket is built from that scenario's OWN price. The
+ * revenue is the seller's settlement basket, not what the customer pays. The campaign-free
+ * `current` scenario is ALWAYS a one-unit breakdown. Calculability, reason and commission always
+ * come from the UNIT compute.
  */
-export function computeCampaignEstimate(
-  ctx: TariffAssemblyContext,
-  variant: TariffVariant | null,
-  cost: VariantCostAggregate | undefined,
-  shipping: EstimateOutcome,
-  commission: DiscountCommissionInputs,
-  input: ComputeCampaignEstimateInput,
-): ComputedCampaignEstimate {
-  const { price, currentPrice, config, fundingPct, applyCampaign } = input;
+export function computeCampaignEstimate(params: {
+  readonly base: ScreenScenarioBase;
+  readonly commission: DiscountCommissionInputs;
+  /** The scenario's campaign price: the current price for `current`, else the max/custom price. */
+  readonly price: Decimal;
+  /** The item's current price; the basket's campaign-free baseline is priced from it. */
+  readonly currentPrice: Decimal;
+  readonly config: DiscountConfig;
+  readonly fundingPct: Decimal;
+  /** False for `current`: the seller is not joining, so no promotion and no funding apply. */
+  readonly applyCampaign: boolean;
+}): ComputedCampaignEstimate {
+  const { base, commission, price, currentPrice, config, fundingPct, applyCampaign } = params;
   const { settlementPrice, bandPrice } = applyCampaign
     ? campaignScenarioPrices(price, config, fundingPct)
     : { settlementPrice: price, bandPrice: price };
 
-  const computed = priceScenario(
-    ctx,
-    variant,
-    cost,
-    shipping,
-    commission,
-    settlementPrice,
-    bandPrice,
-  );
+  const computed = priceScenario({ base, commission, price: settlementPrice, bandPrice });
 
-  // Pozitif olmayan fiyatta sepet kurulamaz (n, fiyata bölünerek bulunur) — satırın sepet bloğu
-  // da o durumda null'dır, dolayısıyla birim dökümüne düşmek satırla tutarlıdır.
+  // A non-positive price cannot frame a basket (n is found by dividing by the price); the row's
+  // basket block is null there too, so falling back to the unit breakdown stays consistent.
   const wantOrder = applyCampaign && scenarioPresentation(config) === 'ORDER' && price.gt(ZERO);
   if (!wantOrder) {
     return {
-      ...toEstimate(computed, computed.breakdown),
+      ...toEstimate(computed, scenarioBreakdown(computed, toKurusHalfUp(settlementPrice))),
       price: settlementPrice,
       scope: 'unit',
       basket: null,
@@ -372,126 +302,126 @@ export function computeCampaignEstimate(
   }
 
   const n = assumedBasketQuantity(config, price);
-  const orderRevenue = settlementPrice.toDecimalPlaces(2).mul(n);
-  const order = computeOrderBreakdown(
-    ctx,
-    variant,
-    cost,
-    shipping,
-    computed.resolved,
-    n,
-    orderRevenue,
-  );
-  // Aynı n birimin kampanyasız karşılığı, satırdaki blokta olduğu gibi güncel fiyatın komisyonuyla
-  // fiyatlanır (matrah ve bant güncel fiyattır).
-  const current = priceScenario(
-    ctx,
-    variant,
-    cost,
-    shipping,
+  const orderRevenue = toKurusHalfUp(settlementPrice).mul(n);
+  // Calculability/reason/commission come from the UNIT `computed`; the breakdown is the n-unit
+  // order statement, serialized at the order revenue -- the two can never disagree (toEstimate).
+  const orderCompute = priceScenario({
+    base,
+    commission,
+    price: settlementPrice,
+    bandPrice,
+    quantity: n,
+  });
+  const basket = buildCampaignBasketScenario({
+    base,
     commission,
     currentPrice,
-    currentPrice,
-  );
-  const basket = buildCampaignBasketScenario(
-    ctx,
-    variant,
-    cost,
-    shipping,
-    currentPrice,
-    price,
+    campaignPrice: price,
     config,
     fundingPct,
-    current.resolved,
-    computed.resolved,
-  );
-  return { ...toEstimate(computed, order), price: orderRevenue, scope: 'order', basket };
+  });
+  return {
+    ...toEstimate(computed, scenarioBreakdown(orderCompute, orderRevenue)),
+    price: orderRevenue,
+    scope: 'order',
+    basket,
+  };
 }
 
-// ─── Hedef marja göre fiyat önerisi ─────────────────────────────────────────
+// --- Target-margin price suggestion ---
 
-/** Hedef marj çözümünün kalem başına girdileri (kalem kimliği + çözülmüş ekonomik girdiler). */
+/** One item's inputs for the target-margin solve. */
 export interface CampaignTargetMarginItem {
   readonly itemId: string;
-  readonly variant: TariffVariant | null;
-  readonly cost: VariantCostAggregate | undefined;
-  readonly shipping: EstimateOutcome;
+  readonly base: ScreenScenarioBase;
   readonly commission: DiscountCommissionInputs;
-  /** "Maksimum Girebileceğin Fiyat" — önerinin tavanı. */
+  /** "Maksimum Girebileceğin Fiyat" -- the suggestion's ceiling. */
   readonly maxPrice: Decimal;
 }
 
 export interface CampaignTargetMarginInput {
+  readonly items: readonly CampaignTargetMarginItem[];
   readonly config: DiscountConfig;
   readonly fundingPct: Decimal;
-  /** Hedef net kâr marjı, yüzde. */
+  /** Target net margin, percent. */
   readonly targetMarginPct: Decimal;
+  /** Collects per-item engine throws; the caller flushes once per request (decision 9). */
+  readonly failureLog: RequestFailureLog;
 }
 
 export interface CampaignTargetMarginSuggestion {
   readonly itemId: string;
-  /** Hedefi tutturan en küçük kampanya fiyatı (2 hane); `reason` doluysa null. */
+  /** The smallest campaign price (2dp) that reaches the target; null when `reason` is set. */
   readonly price: string | null;
   readonly reason: 'UNREACHABLE' | 'NOT_CALCULABLE' | null;
 }
 
 /**
- * Her kalem için hedef marjı tutturan EN KÜÇÜK kampanya fiyatını önerir. İki adım (tasarım §4.5):
+ * Suggests, per item, the smallest campaign price that reaches `targetMarginPct`. Two steps
+ * (design 4.5):
  *
- *  1. Hedef HAKEDİŞ tutarı: net kâr hakedişte doğrusaldır, motorun `solvePriceForTarget`
- *     fonksiyonu hedef marjı tutturan `S`'yi kapalı formda verir. Yeni matematik yazılmaz.
- *  2. `S`'den kampanya fiyatına geri dönüş: `solveCampaignPriceForTarget`,
- *     `sellerEffectivePrice(P) >= S` koşulunu sağlayan en küçük `P`'yi parça parça çözümle bulur
- *     (ikili arama kullanılmaz — `S` fiyatta monoton değildir).
+ *   1. The target SETTLEMENT price S: net margin is linear in the settlement, so the engine's
+ *      `solveTrendyolScenarioPrice` finds S in closed form over the price breakpoints -- NEVER a
+ *      binary search (project rule). The rate is resolved ONCE, from the band at the MAXIMUM
+ *      price, and passed as the engine's override: the solve needs a fixed rate, but the rate
+ *      depends on the band, so the highest allowed price breaks the loop. `maxUnitPrice` caps the
+ *      solve at the seller's ceiling; S(P) <= P for every config (proof in campaignSearchWindow),
+ *      so an S above the ceiling is never reachable.
+ *   2. S back to a campaign price: `solveCampaignPriceForTarget` finds the smallest P whose
+ *      settlement reaches S without exceeding the maximum, piecewise over the breakpoints (S is
+ *      non-monotonic in P, so binary search would silently answer wrong).
  *
- * Komisyon oranı kalem başına BİR kez, MAKSİMUM fiyatın bandından çözülür: motorun hedef çözümü
- * sabit bir orana ihtiyaç duyar, oysa oran fiyatın bandına bağlıdır — döngüyü kırmak için satıcının
- * girebileceği en yüksek fiyat çapa alınır. Önerilen fiyat daha düşük bir banda düşerse satırın
- * KENDİ senaryosu (`computeCampaignItem`) gerçek oranla yeniden hesaplandığı için satıcı doğru kârı
- * görür; öneri "iyimser tahmin, hakediş düzeltir" ilkesine uyar.
- *
- * `NOT_CALCULABLE`: ürün eşleşmedi ya da maliyet/kargo/komisyon eksik. `UNREACHABLE`: hedef hiçbir
- * fiyatta tutmuyor ya da tutturan fiyat maksimumun üstünde. Bu fonksiyon HESAPLAR ve DÖNER —
- * veritabanına hiçbir şey yazmaz (seçim kalıcılığı "Kaydet ve İndir" anındadır, tasarım §6).
+ * If the suggested price lands in a cheaper band, the row's own scenario recomputes with the real
+ * rate ("optimistic estimate, settlement reconciles"). `NOT_CALCULABLE`: unmatched / degraded /
+ * no resolvable commission / no computable statement. `UNREACHABLE`: a real but unmet target, or a
+ * price above the maximum. This COMPUTES and RETURNS -- it writes nothing (selection persistence
+ * happens at "Kaydet ve Indir", design 6).
  */
 export function suggestTargetMarginPrices(
-  ctx: TariffAssemblyContext,
-  items: readonly CampaignTargetMarginItem[],
   input: CampaignTargetMarginInput,
 ): CampaignTargetMarginSuggestion[] {
-  const { config, fundingPct, targetMarginPct } = input;
+  const { items, config, fundingPct, targetMarginPct, failureLog } = input;
 
   return items.map((item): CampaignTargetMarginSuggestion => {
     const notCalculable = { itemId: item.itemId, price: null, reason: 'NOT_CALCULABLE' } as const;
     const unreachable = { itemId: item.itemId, price: null, reason: 'UNREACHABLE' } as const;
 
-    if (item.variant === null) return notCalculable;
+    // A degraded base (store-wide load failed, already logged) or an unmatched product cannot
+    // be solved.
+    if (item.base.kind !== 'ready') return notCalculable;
 
     const { bandPrice } = campaignScenarioPrices(item.maxPrice, config, fundingPct);
     const resolved = resolveDiscountCommission(item.commission, bandPrice.toDecimalPlaces(2));
     if (resolved === null) return notCalculable;
 
-    const probe = assembleUnitEconomics(ctx, item.variant, {
-      costAggregate: item.cost,
-      commission: tariffCommission(resolved.pct),
-      shipping: item.shipping,
-    });
-    if (probe.econ === null) return notCalculable;
+    // A maximum below one kurus is the solver's RangeError territory -- refuse before calling it.
+    const maxUnitPrice = item.maxPrice.toDecimalPlaces(2, Decimal.ROUND_DOWN);
+    if (maxUnitPrice.lt(MIN_SCENARIO_UNIT_PRICE)) return unreachable;
 
-    // 1. adım: hedef marjı tutturan hakediş tutarı. Çözülemeyen her durum (marj fiyatla
-    // ulaşılamıyor / kâr fiyata duyarsız) satıcı açısından aynı sonuca çıkar: ulaşılamaz.
-    const solved = solvePriceForTarget(probe.econ, { type: 'margin', value: targetMarginPct });
-    if (!solved.calculable) return unreachable;
+    try {
+      const solved = solveTrendyolScenarioPrice({
+        base: { ...item.base.base, commissionRatePctOverride: resolved.pct },
+        target: { kind: 'MARGIN', pct: targetMarginPct },
+        maxUnitPrice,
+      });
+      if (!solved.ok) {
+        // No computable statement at any price -> NOT_CALCULABLE; any real-but-unreachable
+        // failure (UNREACHABLE_TARGET / NOT_PRICE_SENSITIVE / NO_COST) -> UNREACHABLE (plan).
+        return solved.reason === 'NOT_COMPUTABLE' ? notCalculable : unreachable;
+      }
 
-    // 2. adım: o hakedişi maksimum fiyatı aşmadan veren en küçük kampanya fiyatı.
-    const campaignPrice = solveCampaignPriceForTarget(
-      config,
-      fundingPct,
-      solved.price,
-      item.maxPrice,
-    );
-    if (campaignPrice === null) return unreachable;
+      const campaignPrice = solveCampaignPriceForTarget(
+        config,
+        fundingPct,
+        solved.unitPrice,
+        item.maxPrice,
+      );
+      if (campaignPrice === null) return unreachable;
 
-    return { itemId: item.itemId, price: campaignPrice.toFixed(2), reason: null };
+      return { itemId: item.itemId, price: campaignPrice.toFixed(2), reason: null };
+    } catch (err) {
+      failureLog.record(err);
+      return notCalculable;
+    }
   });
 }

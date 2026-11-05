@@ -26,7 +26,9 @@ import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { NotFoundError, ValidationError } from '../lib/errors';
 import {
+  assumedBasketQuantity,
   effectiveUnitPrice,
+  scenarioPresentation,
   sellerEffectivePrice,
   type DiscountConfig,
 } from './discount-math-commons';
@@ -34,8 +36,11 @@ import {
   computeCampaignEstimate,
   suggestTargetMarginPrices,
   type CampaignTargetMarginItem,
+  type ComputedCampaignEstimate,
 } from './marketplace-campaign-compute.service';
 import { resolveCampaignEconomics, EMPTY_ITEM_ECONOMICS } from './marketplace-campaign-economics';
+import { logProfitReadFailure } from './profit-compute-fallback.service';
+import { createRequestFailureLog, toKurusHalfUp } from './scenario-screen-commons';
 import {
   campaignConfigFromListRow,
   type EstimateCampaignItemBody,
@@ -164,19 +169,50 @@ export async function estimateCampaignItem(
     savedCustomPrice,
   );
 
-  const economics = await resolveCampaignEconomics(orgId, storeId, store, item.list.startsAt, [
+  const now = new Date();
+  const economics = await resolveCampaignEconomics(orgId, storeId, store, item.list.startsAt, now, [
     item,
   ]);
   const inputs = economics.byItemId.get(item.id) ?? EMPTY_ITEM_ECONOMICS;
 
-  const computed = computeCampaignEstimate(
-    economics.ctx,
-    inputs.variant,
-    inputs.cost,
-    inputs.shipping,
-    inputs.commission,
-    { price, currentPrice, config, fundingPct, applyCampaign },
-  );
+  // The scope and the priced amount, derived with the pure price math so they survive even when
+  // the engine throws on a pathological input (decision 9 -- the modal opens, the profit stays
+  // empty, the error is logged, never a 500).
+  const wantOrder = applyCampaign && scenarioPresentation(config) === 'ORDER' && price.gt(0);
+  const settlementPrice = applyCampaign ? sellerEffectivePrice(price, config, fundingPct) : price;
+  const resultPrice = wantOrder
+    ? toKurusHalfUp(settlementPrice).mul(assumedBasketQuantity(config, price))
+    : settlementPrice;
+
+  let computed: ComputedCampaignEstimate;
+  try {
+    computed = computeCampaignEstimate({
+      base: inputs.base,
+      commission: inputs.commission,
+      price,
+      currentPrice,
+      config,
+      fundingPct,
+      applyCampaign,
+    });
+  } catch (err) {
+    logProfitReadFailure({
+      surface: 'marketplace-campaign',
+      organizationId: orgId,
+      orderId: null,
+      err,
+    });
+    computed = {
+      calculable: false,
+      reason: null,
+      commissionPct: null,
+      commissionSource: null,
+      breakdown: null,
+      price: resultPrice,
+      scope: wantOrder ? 'order' : 'unit',
+      basket: null,
+    };
+  }
 
   return {
     itemId: item.id,
@@ -279,11 +315,13 @@ export async function suggestCampaignTargetMargin(
 
   if (list.items.length === 0) return { suggestions: [] };
 
+  const now = new Date();
   const economics = await resolveCampaignEconomics(
     orgId,
     storeId,
     store,
     list.startsAt,
+    now,
     list.items,
   );
 
@@ -291,19 +329,25 @@ export async function suggestCampaignTargetMargin(
     const inputs = economics.byItemId.get(item.id) ?? EMPTY_ITEM_ECONOMICS;
     return {
       itemId: item.id,
-      variant: inputs.variant,
-      cost: inputs.cost,
-      shipping: inputs.shipping,
+      base: inputs.base,
       commission: inputs.commission,
       maxPrice: new Decimal(item.maxPrice.toString()),
     };
   });
 
-  return {
-    suggestions: suggestTargetMarginPrices(economics.ctx, items, {
-      config,
-      fundingPct,
-      targetMarginPct,
-    }),
-  };
+  // A per-item engine throw degrades that item to NOT_CALCULABLE and is logged once (decision 9).
+  const failureLog = createRequestFailureLog({
+    surface: 'marketplace-campaign',
+    organizationId: orgId,
+  });
+  const suggestions = suggestTargetMarginPrices({
+    items,
+    config,
+    fundingPct,
+    targetMarginPct,
+    failureLog,
+  });
+  failureLog.flush();
+
+  return { suggestions };
 }

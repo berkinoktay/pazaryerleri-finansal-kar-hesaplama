@@ -5,7 +5,7 @@
 // and hands it to the scenario engine (`@pazarsync/profit`) as the rate the engine applies
 // verbatim; no financial math lives here -- `evaluateScreenScenario` owns every formula via
 // the engine (feedback_no_frontend_financial_calculation). The marketplace campaign screen
-// still runs on the pre-engine assembly (`campaign-scenario-legacy.ts`) until Faz 4B Task 8.
+// reuses these same primitives on top of its own seller-settlement price math.
 //
 // Nothing here knows the discount TYPE: the caller decides which price is the matrah and
 // which price selects the band. Type knowledge stays in `discount-math-commons`.

@@ -1,95 +1,96 @@
-// Kampanyalar'ın TEK girdi çözümleyicisi: bir kampanya kaleminin fiyatlanabilmesi için gereken
-// her şeyi (eşleşen varyant, görsel, maliyet, kargo ve üç kademeli komisyon zincirinin girdileri)
-// tek bir toplu geçişte kurar.
+// The SINGLE input resolver for Kampanyalar (seller participation in Trendyol-designed
+// campaigns): for every campaign item it resolves, in one batch pass, everything a campaign
+// price scenario needs -- the matched variant's scenario base (cost, shipping, fees, VAT,
+// desi, from the shared engine loader), the first product image, and the three-tier
+// commission chain inputs (tariff band, synced product rate, category rate fallback).
 //
-// Neden ayrı bir modül: bu, "modal satırla çelişmemeli" değişmezinin GİRDİ tarafıdır. Detay
-// görünümü ile kâr-dökümü/hedef-marj servisleri ayrı ayrı çözümleseydi — ki bir süre öyleydi —
-// zincire bir kademe eklemek, bantların hangi koşulda geçerli sayıldığını değiştirmek ya da
-// çapanın anlamını oynatmak yalnız BİR tarafı günceller ve diğer taraf sessizce eski zinciri
-// kullanmaya devam ederdi. Hiçbir test de düşmezdi. Tek uygulama olunca böyle bir sapma
-// yapısal olarak imkânsız.
+// Why one module: this is the INPUT side of the "the modal must not disagree with the row"
+// invariant. If the detail view and the estimate / target-margin services each resolved
+// their own inputs -- which they did for a while -- adding a chain tier, changing when a band
+// counts, or moving the anchor would touch only ONE side and the other would silently keep
+// the old chain, with no test failing. One resolver makes that drift structurally impossible.
 //
-// Her sorgu organizationId + storeId ile süzülür (kiracı izolasyonu). Hesap YOK: burada yalnız
-// veri toplanır, matematiğin tamamı `marketplace-campaign-compute.service.ts`'te yaşar.
+// No financial math lives here: it only gathers data. The math is in
+// `marketplace-campaign-compute.service.ts`. Every query filters by organizationId + storeId
+// (tenant isolation).
 
 import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
-import type { Store as PrismaStore } from '@pazarsync/db';
+import type { Prisma, Store as PrismaStore } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
-import type { EstimateOutcome } from '@pazarsync/profit';
 
 import { resolveCommissionRate } from './commission-rate-resolver';
 import { resolveDiscountCommissionSource } from './discount-commission-source';
 import type { DiscountCommissionInputs } from './discount-math-commons';
-import type { TariffAssemblyContext, TariffVariant } from './marketplace-campaign-compute.service';
-import { fetchCostAggregates } from './products-list.service';
-import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
-import { NO_SHIPPING } from './tariff-compute-commons';
-import type { VariantCostAggregate } from '../validators/product.validator';
+import { loadScreenScenarioBases, screenScenarioBaseFor } from './scenario-screen-commons';
+import type { ScreenScenarioBase } from './scenario-screen-commons';
 
-/** Bir kalemin çözülmüş fiyatlama girdileri. */
+/** One item's resolved pricing inputs. */
 export interface CampaignItemEconomics {
-  /** Barkodla eşleşen katalog varyantı; eşleşme yoksa null (kâr "ürün yok" ile boş kalır). */
-  readonly variant: TariffVariant | null;
-  /** Ürünün ilk görseli — her ürün yüzeyinde görsel gösterilir (proje kuralı). */
+  /** How the matched variant reaches the engine: ready / no-product / degraded. */
+  readonly base: ScreenScenarioBase;
+  /** The product's first image -- every product surface shows an image (project rule). */
   readonly imageUrl: string | null;
-  readonly cost: VariantCostAggregate | undefined;
-  readonly shipping: EstimateOutcome;
-  /** Üç kademeli zincirin girdileri: tarife bandı → ürünün senkron oranı → kategori oranı. */
+  /** The three-tier chain inputs: tariff band -> synced product rate -> category rate. */
   readonly commission: DiscountCommissionInputs;
 }
 
-/** Toplu çözümlemenin sonucu: motor bağlamı + kalem başına girdiler + tarife şeffaflığı. */
+/** The batch resolution: per-item inputs + tariff-source transparency. */
 export interface CampaignEconomics {
-  readonly ctx: TariffAssemblyContext;
   readonly byItemId: ReadonlyMap<string, CampaignItemEconomics>;
-  /** Bantları besleyen komisyon tarifesi ve dönemi; kapsayan hafta yoksa null. */
+  /** The commission tariff + period that fed the bands; null when no covering week. */
   readonly tariffName: string | null;
   readonly periodLabel: string | null;
-  /** Mağazanın tarifesi var ama hiçbiri çapayı kapsamıyorsa true; hiç tarifesi yoksa false. */
+  /** True only when the store has tariffs but none covers the anchor; false with no tariffs. */
   readonly tariffOutdated: boolean;
 }
 
-/** Çözümlemenin kalem başına ihtiyaç duyduğu tek şey: kimlik, varyant bağı ve barkod. */
+/** The only per-item fields the resolution needs: identity, variant link and barcode. */
 export interface CampaignEconomicsRow {
   readonly id: string;
   readonly productVariantId: string | null;
   readonly barcode: string;
 }
 
+/** The slim variant columns the chain + display need (the scenario base carries the rest). */
+interface CampaignVariantRow {
+  id: string;
+  syncedCommissionRate: Prisma.Decimal | null;
+  product: {
+    categoryId: bigint | null;
+    brandId: bigint | null;
+    imageUrls: string[];
+  };
+}
+
 /**
- * Verilen kalemlerin fiyatlama girdilerini TEK toplu geçişte çözer.
+ * Resolves the pricing inputs of the given items in ONE batch pass.
  *
- * Sırasıyla: eşleşen varyantlar (+ senkronlanan komisyon oranı + ilk görsel), maliyet toplamları
- * ve kargo tahminleri (paralel), kampanya başlangıcına çapalanmış komisyon tarifesi bantları,
- * ve her ayrı (kategori, marka) çifti için bir kez kategori oranı yedeği.
+ * In order: the matched variants (synced commission rate + category/brand + first image) in a
+ * slim query, the per-variant scenario bases from the shared engine loader at `scenarioDate`,
+ * the commission tariff bands anchored to `anchor` (the campaign start, or null for "now"),
+ * and one category-rate fallback per distinct (category, brand) pair.
  *
- * Bantlar YALNIZCA çapa anını KAPSAYAN bir tarife haftasından gelir — kapsayan hafta yoksa bant
- * yoktur ve zincir ürün/kategori oranına düşer. Çözümleyici İndirimler ile ORTAK
- * (`resolveDiscountCommissionSource`); bu dikey kendi çözümleyicisini yazmaz.
+ * Bands come ONLY from a tariff week that COVERS the anchor instant -- no covering week means
+ * no bands and the chain falls to the product/category rate. The resolver is SHARED with
+ * Indirimler (`resolveDiscountCommissionSource`); this vertical adds no resolver of its own.
  *
- * Görsel, kalem sayısından bağımsız olarak HER çağrıda çekilir. Tek kalemlik kâr-dökümü çağrısı
- * onu kullanmaz, ama koşullu bir `select` iki ayrı sorgu şekli demek olurdu ve bu modülün tüm
- * varlık sebebi tek sorgu şeklidir; maliyeti zaten aynı küme üzerinde koşan maliyet/kargo
- * çözümlemelerinin yanında ihmal edilebilir bir lateral join.
+ * The image is fetched on EVERY call regardless of item count. The single-item estimate call
+ * does not use it, but a conditional select would mean two query shapes and this module's
+ * whole point is one shape; the cost is a negligible lateral join alongside the variant read.
  */
 export async function resolveCampaignEconomics(
   orgId: string,
   storeId: string,
   store: PrismaStore,
   anchor: Date | null,
+  scenarioDate: Date,
   items: ReadonlyArray<CampaignEconomicsRow>,
 ): Promise<CampaignEconomics> {
   const variantIds = items.map((i) => i.productVariantId).filter((id): id is string => id !== null);
 
-  const variantMap = new Map<
-    string,
-    TariffVariant & { syncedCommissionRate: Decimal | null; imageUrl: string | null }
-  >();
-  let costMap = new Map<string, VariantCostAggregate>();
-  let shippingMap = new Map<string, EstimateOutcome>();
-
+  const variantMap = new Map<string, CampaignVariantRow>();
   if (variantIds.length > 0) {
     let variants;
     try {
@@ -97,50 +98,36 @@ export async function resolveCampaignEconomics(
         where: { id: { in: variantIds }, organizationId: orgId, storeId },
         select: {
           id: true,
-          stockCode: true,
-          barcode: true,
-          salePrice: true,
-          vatRate: true,
-          isDigital: true,
           syncedCommissionRate: true,
-          product: {
-            select: {
-              title: true,
-              categoryId: true,
-              brandId: true,
-              imageUrls: true,
-            },
-          },
+          product: { select: { categoryId: true, brandId: true, imageUrls: true } },
         },
       });
     } catch (err) {
       mapPrismaError(err);
     }
     for (const variant of variants) {
-      variantMap.set(variant.id, {
-        ...variant,
-        syncedCommissionRate:
-          variant.syncedCommissionRate !== null
-            ? new Decimal(variant.syncedCommissionRate.toString())
-            : null,
-        imageUrl: variant.product.imageUrls[0] ?? null,
-      });
+      variantMap.set(variant.id, variant);
     }
-
-    [costMap, shippingMap] = await Promise.all([
-      fetchCostAggregates(orgId, variantIds),
-      batchResolveShipping(orgId, storeId, variantIds),
-    ]);
   }
+
+  // One scenario-base load for the whole request; the screen passes its own rate as the
+  // engine override, so the base carries no tariff lookup (anchor null inside the loader).
+  const bases = await loadScreenScenarioBases({
+    organizationId: orgId,
+    storeId,
+    scenarioDate,
+    variantIds,
+    surface: 'marketplace-campaign',
+  });
 
   const { resolution: source, outdated } = await resolveDiscountCommissionSource(
     orgId,
     storeId,
     anchor,
-    new Date(),
+    scenarioDate,
   );
 
-  // Kategori oranı yedeği (3. kademe) — ayrı her (kategori, marka) çifti için tek çözüm.
+  // Category-rate fallback (3rd tier) -- resolved once per distinct (category, brand) pair.
   const categoryRateByKey = new Map<string, Decimal | null>();
   const distinctCatKeys = new Map<string, { categoryId: bigint; brandId: bigint | null }>();
   for (const variant of variantMap.values()) {
@@ -160,8 +147,6 @@ export async function resolveCampaignEconomics(
     }),
   );
 
-  const feeDefs = await prisma.$transaction((tx) => resolveFeeDefs(tx, store.platform));
-
   const byItemId = new Map<string, CampaignItemEconomics>();
   for (const item of items) {
     const variantRow =
@@ -174,26 +159,23 @@ export async function resolveCampaignEconomics(
         : null;
 
     byItemId.set(item.id, {
-      variant: variantRow ?? null,
-      imageUrl: variantRow?.imageUrl ?? null,
-      cost: item.productVariantId !== null ? costMap.get(item.productVariantId) : undefined,
-      shipping:
-        item.productVariantId !== null
-          ? (shippingMap.get(item.productVariantId) ?? NO_SHIPPING)
-          : NO_SHIPPING,
+      base: screenScenarioBaseFor(bases, item.productVariantId),
+      imageUrl: variantRow?.product.imageUrls[0] ?? null,
       commission: {
-        // Kalemin kendi `hasCommissionTariff` bayrağı Trendyol'un DOSYA hakkındaki iddiasıdır,
-        // mağazanın gerçekten ne yüklediği hakkında değil — arama o bayrağa bağlanmaz, bant
-        // haritası tek gerçektir.
+        // The item's own `hasCommissionTariff` flag is Trendyol's claim ABOUT the file, not
+        // what the store actually uploaded -- the lookup never binds to it; the band map is
+        // the single truth.
         bands: source?.bandsByBarcode.get(item.barcode) ?? null,
-        productRate: variantRow?.syncedCommissionRate ?? null,
+        productRate:
+          variantRow !== undefined && variantRow.syncedCommissionRate !== null
+            ? new Decimal(variantRow.syncedCommissionRate.toString())
+            : null,
         categoryRate,
       },
     });
   }
 
   return {
-    ctx: { platform: store.platform, feeDefs },
     byItemId,
     tariffName: source?.tariffName ?? null,
     periodLabel: source?.periodLabel ?? null,
@@ -201,16 +183,14 @@ export async function resolveCampaignEconomics(
   };
 }
 
-/** Kategori oranı önbelleğinin anahtarı — iki çağrı yerinde de AYNI biçim. */
+/** Category-rate cache key -- same shape at both call sites. */
 function categoryRateKey(categoryId: bigint, brandId: bigint | null): string {
   return `${categoryId}:${brandId ?? 'null'}`;
 }
 
-/** Boş girdiye çözümlenmiş, sorgusuz bir kalem — eşleşmesi olmayan satırların yedeği. */
+/** A no-match item resolved to empty inputs, queryless -- the fallback for unmatched rows. */
 export const EMPTY_ITEM_ECONOMICS: CampaignItemEconomics = {
-  variant: null,
+  base: { kind: 'no-product' },
   imageUrl: null,
-  cost: undefined,
-  shipping: NO_SHIPPING,
   commission: { bands: null, productRate: null, categoryRate: null },
 };

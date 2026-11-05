@@ -328,4 +328,46 @@ describe('solveScenarioPrice', () => {
     expect(ok.unitPrice.toFixed(2)).toBe('1578.95');
     expect(ok.statement.netProfit?.toFixed(2)).toBe('315.79');
   });
+
+  it('evaluates only at breakpoints and segment samples (no scan over the price range)', () => {
+    // A 1-line, no-VAT statement with net profit 10*P - 1000 (slope 10), so the rounding-noise
+    // window collapses to a kurus or two. Three breakpoints cut the axis into four segments; the
+    // target (profit 5,000) is met at P = 600. Each segment samples its two ends and the winning
+    // segment resolves its candidate inside a tiny noise window, so the evaluate count scales
+    // with the segment count (breakpoints + 2), NOT with the ~60,000-kurus price range.
+    const line = makeLine({ type: ProfitLineType.SALE, gross: '1.00' });
+    let calls = 0;
+    const evaluate = (unitPrice: Decimal): ProfitStatement => {
+      calls += 1;
+      return {
+        view: 'ESTIMATE',
+        status: ProfitStatus.ESTIMATED,
+        reconciliationStatus: ReconciliationStatus.NOT_SETTLED,
+        engineVersion: PROFIT_ENGINE_VERSION,
+        selectedLines: [line],
+        rows: [],
+        saleGross: unitPrice,
+        costGross: D('10'),
+        vat: { output: ZERO, input: ZERO, net: ZERO, effective: ZERO },
+        stoppageGross: ZERO,
+        stoppageIncluded: true,
+        netProfit: unitPrice.mul('10').sub('1000'),
+        saleMarginPct: null,
+        costMarkupPct: null,
+        issues: [],
+      };
+    };
+    const breakpoints = [D('100'), D('200'), D('300')];
+    const result = solveScenarioPrice({
+      evaluate,
+      breakpoints,
+      target: PROFIT('5000'),
+      minUnitPrice: MIN,
+      maxUnitPrice: null,
+    });
+    const ok = expectOk(result);
+    expect(ok.unitPrice.toFixed(2)).toBe('600.00');
+    // Bound: at most four evaluations per segment (its two ends plus a few noise-window kurus).
+    expect(calls).toBeLessThanOrEqual(4 * (breakpoints.length + 2));
+  });
 });
