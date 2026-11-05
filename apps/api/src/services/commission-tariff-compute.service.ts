@@ -104,10 +104,12 @@ function nullBandResults(
 }
 
 /**
- * Computes every band's net profit for one tariff item with the scenario engine. An
- * unmatched barcode (`base` no-product) or an item with no bands is not calculable with
- * reason NO_PRODUCT and every band null. A store-wide load failure (`base` degraded)
- * returns the same empty shape with a null reason (the caller has already logged it).
+ * Computes every band's net profit for one tariff item with the scenario engine. A
+ * store-wide load failure (`base` degraded) is checked FIRST: the empty shape with a null
+ * reason (the caller has already logged it), so a matched item under a store-wide degrade
+ * always reports null -- never NO_PRODUCT, even with no bands. Otherwise an unmatched
+ * barcode (`base` no-product) or an item with no bands is not calculable with reason
+ * NO_PRODUCT and every band null (legacy all-or-none).
  *
  * For a ready base the CURRENT baseline is evaluated at `commissionBasePrice ?? currentPrice`
  * under `currentCommissionPct`; it decides the item's calculability all-or-none (so a
@@ -128,22 +130,23 @@ export function computeItemBands(params: {
   const { bands, currentPrice, commissionBasePrice, currentCommissionPct, base } = params;
   const [firstBand] = bands;
 
-  // No bands, or an unmatched barcode: not calculable, every band null (legacy).
-  if (firstBand === undefined || base.kind === 'no-product') {
+  // A store-wide load failure (already logged) is checked FIRST, so a matched item under a
+  // store-wide degrade always reports reason null -- never NO_PRODUCT, even with no bands.
+  if (base.kind === 'degraded') {
     return {
       calculable: false,
-      reason: 'NO_PRODUCT',
+      reason: null,
       bands: nullBandResults(bands, currentPrice),
       bestBandKey: null,
       current: NULL_CURRENT,
     };
   }
 
-  // A store-wide load failure (already logged): same empty shape, no reason.
-  if (base.kind === 'degraded') {
+  // No bands, or an unmatched barcode: not calculable, every band null (legacy).
+  if (firstBand === undefined || base.kind === 'no-product') {
     return {
       calculable: false,
-      reason: null,
+      reason: 'NO_PRODUCT',
       bands: nullBandResults(bands, currentPrice),
       bestBandKey: null,
       current: NULL_CURRENT,
@@ -277,10 +280,11 @@ function resolveEstimateCommission(
  * engine. Mirrors `computeItemBands` (same engine, same not-calculable semantics) but
  * returns a single serialized breakdown (4-decimal margins) for the detail band-click
  * modal, the custom-price what-if, and the current-scenario breakdown. The commission
- * comes from `commission` (band or override). An unmatched variant (`base` no-product),
- * or in band mode no resolvable band, is not-calculable with reason NO_PRODUCT. A
- * store-wide load failure (`base` degraded) echoes the resolved band/commission with a
- * null breakdown and null reason.
+ * comes from `commission` (band or override). A store-wide load failure (`base` degraded)
+ * is checked FIRST: it echoes the resolved band/commission (null when unresolvable) with a
+ * null breakdown and null reason, so a matched item under a store-wide degrade never
+ * reports NO_PRODUCT. Otherwise an unmatched variant (`base` no-product), or in band mode
+ * no resolvable band, is not-calculable with reason NO_PRODUCT.
  */
 export function computeItemEstimate(params: {
   readonly bands: readonly StoredTariffBand[];
@@ -290,27 +294,29 @@ export function computeItemEstimate(params: {
 }): ComputedEstimate {
   const { bands, base, price, commission } = params;
 
+  const resolved = resolveEstimateCommission(bands, price, commission);
+
+  // A store-wide load failure (already logged) is checked FIRST, so a matched item under a
+  // store-wide degrade reports reason null (never NO_PRODUCT). Echo the resolved
+  // band/commission (null when unresolvable); the breakdown could not be computed.
+  if (base.kind === 'degraded') {
+    return {
+      calculable: false,
+      reason: null,
+      bandKey: resolved?.bandKey ?? null,
+      commissionPct: resolved?.commissionPct ?? null,
+      breakdown: null,
+    };
+  }
+
   // An unmatched barcode is NO_PRODUCT regardless of mode.
   if (base.kind === 'no-product') {
     return NO_PRODUCT_ESTIMATE;
   }
 
-  const resolved = resolveEstimateCommission(bands, price, commission);
   // Band mode with no resolvable band: NO_PRODUCT (matching the detail view).
   if (resolved === null) {
     return NO_PRODUCT_ESTIMATE;
-  }
-
-  // A store-wide load failure (already logged): echo the resolved band/commission, but
-  // the breakdown could not be computed.
-  if (base.kind === 'degraded') {
-    return {
-      calculable: false,
-      reason: null,
-      bandKey: resolved.bandKey,
-      commissionPct: resolved.commissionPct,
-      breakdown: null,
-    };
   }
 
   const outcome = evaluateScreenScenario({

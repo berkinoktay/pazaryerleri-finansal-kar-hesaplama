@@ -797,15 +797,16 @@ describe('Plus Commission Tariffs - validity reflects the real Istanbul instant'
 });
 
 describe('Plus Commission Tariffs - per-item degrade (decision 9)', () => {
-  // One item's scenario is forced to throw (a negative commission-base price, which the
-  // engine's unit-price validator rejects): the detail must still return 200 with that
-  // item's profit empty (reason null) while the sibling item computes fine, and the
-  // failure must be logged exactly once per request with the right surface + failedCount.
+  // Two items' scenarios are forced to throw (a negative commission-base price, which the
+  // engine's unit-price validator rejects): the detail must still return 200 with those
+  // items' profit empty (reason null) while a third item computes fine, and the failures
+  // must be logged exactly once per request with the right surface + failedCount 2 (the
+  // per-request collect-then-log-once path, NOT one line per failing row).
   beforeAll(async () => {
     await ensureDbReachable();
   });
 
-  it('keeps the Plus detail up when one item fails to compute', async () => {
+  it('keeps the Plus detail up when items fail to compute and logs once', async () => {
     await truncateAll();
     const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
     if (carrier === null) throw new Error('SENDEOMP carrier missing - globalSetup must run');
@@ -910,8 +911,9 @@ describe('Plus Commission Tariffs - per-item degrade (decision 9)', () => {
         sortOrder: 0,
       },
     });
-    // Failing item: same calculable variant, but a NEGATIVE commission-base price makes
-    // the engine reject the baseline unit price -> that item's compute throws.
+    // Two failing items: same calculable variant, but a NEGATIVE commission-base price
+    // makes the engine reject the baseline unit price -> each item's compute throws. Two
+    // of them prove the collect-then-log-once path reports failedCount 2 from a single line.
     const failing = await prisma.plusCommissionTariffItem.create({
       data: {
         organizationId: org.id,
@@ -929,6 +931,23 @@ describe('Plus Commission Tariffs - per-item degrade (decision 9)', () => {
         sortOrder: 1,
       },
     });
+    const failingTwo = await prisma.plusCommissionTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        periodId: period.id,
+        productVariantId: variant.id,
+        barcode: 'BC-FAIL-2',
+        productTitle: 'Bozuk 2',
+        currentPrice: '500.00',
+        commissionBasePrice: '-7.00',
+        currentCommissionPct: '19.0000',
+        plusPriceUpperLimit: '450.00',
+        plusCommissionPct: '15.4',
+        plusCommissionBasePrice: '450.00',
+        sortOrder: 2,
+      },
+    });
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
@@ -943,21 +962,25 @@ describe('Plus Commission Tariffs - per-item degrade (decision 9)', () => {
       expect(ok?.calculable).toBe(true);
       expect(ok?.currentNetProfit).not.toBeNull();
 
-      const bad = items.find((i) => i.id === failing.id);
-      expect(bad?.calculable).toBe(false);
-      // A degraded compute carries no reason (not NO_PRODUCT -- the variant is matched).
-      expect(bad?.reason).toBeNull();
-      expect(bad?.currentNetProfit).toBeNull();
-      expect(bad?.plus.netProfit).toBeNull();
+      // Both failing items degrade: not calculable, no reason (NOT NO_PRODUCT -- the
+      // variant is matched), empty current + Plus profits.
+      for (const failingId of [failing.id, failingTwo.id]) {
+        const bad = items.find((i) => i.id === failingId);
+        expect(bad?.calculable).toBe(false);
+        expect(bad?.reason).toBeNull();
+        expect(bad?.currentNetProfit).toBeNull();
+        expect(bad?.plus.netProfit).toBeNull();
+      }
 
-      // One failing item -> exactly one [profit-read] line for this surface, failedCount 1.
+      // Two failing items -> still exactly one [profit-read] line for this surface, with
+      // failedCount 2 (collected then logged once, not one line per row).
       expect(errorSpy).toHaveBeenCalledTimes(1);
       expect(errorSpy).toHaveBeenCalledWith(
         '[profit-read] in-request profit computation failed',
         expect.objectContaining({
           surface: 'plus-commission-tariff',
           orderId: null,
-          failedCount: 1,
+          failedCount: 2,
         }),
       );
     } finally {

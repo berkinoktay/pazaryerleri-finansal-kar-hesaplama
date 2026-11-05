@@ -86,10 +86,11 @@ function nullScenario(price: Decimal, commissionPct: Decimal): ComputedScenario 
 }
 
 /**
- * Computes the current + Plus scenarios for one item with the scenario engine. An
- * unmatched barcode (`base` no-product) is not calculable (NO_PRODUCT); a store-wide
- * load failure (`base` degraded) is not calculable with a null reason (the caller has
- * already logged it). Otherwise the CURRENT baseline runs at the commission-base price
+ * Computes the current + Plus scenarios for one item with the scenario engine. A
+ * store-wide load failure (`base` degraded) is checked FIRST: not calculable with a null
+ * reason (the caller has already logged it), so a matched item under a store-wide degrade
+ * never reports NO_PRODUCT. Otherwise an unmatched barcode (`base` no-product) is not
+ * calculable (NO_PRODUCT). Otherwise the CURRENT baseline runs at the commission-base price
  * under the current commission and decides the item's calculability; the PLUS scenario
  * runs at the ceiling (`plusPriceUpperLimit`, ALWAYS -- a committed custom price never
  * enters here) under the reduced commission, both passed to the engine as overrides. The
@@ -105,20 +106,22 @@ export function computePlusItem(params: {
   // and priced by the estimate endpoint, never read here.
   const pPrice = inputs.plusPriceUpperLimit;
 
-  if (base.kind === 'no-product') {
+  // A store-wide load failure (already logged) is checked FIRST, so a matched item under a
+  // store-wide degrade always reports reason null -- never NO_PRODUCT.
+  if (base.kind === 'degraded') {
     return {
       calculable: false,
-      reason: 'NO_PRODUCT',
+      reason: null,
       current: NULL_CURRENT,
       plus: nullScenario(pPrice, inputs.plusCommissionPct),
       plusIsBetter: false,
     };
   }
 
-  if (base.kind === 'degraded') {
+  if (base.kind === 'no-product') {
     return {
       calculable: false,
-      reason: null,
+      reason: 'NO_PRODUCT',
       current: NULL_CURRENT,
       plus: nullScenario(pPrice, inputs.plusCommissionPct),
       plusIsBetter: false,
@@ -186,9 +189,11 @@ export interface ComputedPlusEstimate {
  * Computes the full profit breakdown for ONE Plus item at an arbitrary `price` under a
  * GIVEN commission percent (the caller picks the scenario's commission: current or Plus),
  * with the scenario engine. This is the free-form what-if the detail modal drives. Same
- * not-calculable semantics as `computePlusItem`: an unmatched variant (`base` no-product)
- * has a null commission; a store-wide load failure (`base` degraded) or a not-calculable
- * scenario still echoes the applied percent with a null breakdown.
+ * not-calculable semantics as `computePlusItem`: a store-wide load failure (`base`
+ * degraded) is checked FIRST and still echoes the applied percent with a null breakdown
+ * (reason null), so a matched item under a store-wide degrade never reports NO_PRODUCT; an
+ * unmatched variant (`base` no-product) has a null commission; a not-calculable scenario
+ * also echoes the applied percent with a null breakdown.
  */
 export function computePlusEstimate(params: {
   readonly applyCommissionPct: Decimal;
@@ -197,14 +202,16 @@ export function computePlusEstimate(params: {
 }): ComputedPlusEstimate {
   const { applyCommissionPct, base, price } = params;
 
-  if (base.kind === 'no-product') {
-    return { calculable: false, reason: 'NO_PRODUCT', commissionPct: null, breakdown: null };
-  }
-
   const commissionPct = applyCommissionPct.toString();
 
+  // A store-wide load failure (already logged) is checked FIRST, so a matched item under a
+  // store-wide degrade reports reason null (never NO_PRODUCT); the applied percent is echoed.
   if (base.kind === 'degraded') {
     return { calculable: false, reason: null, commissionPct, breakdown: null };
+  }
+
+  if (base.kind === 'no-product') {
+    return { calculable: false, reason: 'NO_PRODUCT', commissionPct: null, breakdown: null };
   }
 
   const outcome = evaluateScreenScenario({

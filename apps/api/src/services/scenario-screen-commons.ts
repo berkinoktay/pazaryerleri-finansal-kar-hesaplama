@@ -31,7 +31,7 @@ import {
 import { logProfitReadFailure, type ProfitReadSurface } from './profit-compute-fallback.service';
 import { type TariffItemReason } from './tariff-compute-commons';
 
-// ─── Per-item scenario base ───────────────────────────────────────────────────
+// --- Per-item scenario base ---
 
 /** How one tariff/campaign item reaches the engine. */
 export type ScreenScenarioBase =
@@ -106,7 +106,7 @@ export function screenScenarioBaseFor(
   return { kind: 'ready', base: loaded.base };
 }
 
-// ─── One scenario evaluation ──────────────────────────────────────────────────
+// --- One scenario evaluation ---
 
 export type ScreenScenarioOutcome =
   | { readonly calculable: true; readonly statement: ProfitStatement; readonly netProfit: Decimal }
@@ -161,7 +161,7 @@ export function evaluateScreenScenario(params: {
   return { calculable: true, statement, netProfit };
 }
 
-// ─── Serialization (shared with product pricing) ──────────────────────────────
+// --- Serialization (shared with product pricing) ---
 
 /** A two-decimal money string (half-up), signed zero normalized to a plain zero. */
 export function formatMoney2(value: Decimal): string {
@@ -183,7 +183,7 @@ export function formatMarginPct2(value: Decimal | null): string | null {
   return fixed === '-0.00' ? '0.00' : fixed;
 }
 
-// ─── Per-request failure log (collect then log once) ──────────────────────────
+// --- Per-request failure log (collect then log once) ---
 
 /**
  * Collects per-item compute failures across one request and logs them once. A list that

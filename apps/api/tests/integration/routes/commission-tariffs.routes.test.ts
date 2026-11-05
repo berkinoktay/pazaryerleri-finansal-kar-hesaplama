@@ -13,7 +13,12 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import { ProfitRecomputeReason } from '@pazarsync/db/enums';
+import {
+  FeeCalculationKind,
+  FeeScope,
+  OrderFeeType,
+  ProfitRecomputeReason,
+} from '@pazarsync/db/enums';
 
 import { createApp } from '@/app';
 
@@ -709,15 +714,16 @@ describe('Commission Tariffs - validity reflects the real Istanbul instant', () 
 });
 
 describe('Commission Tariffs — per-item degrade (decision 9)', () => {
-  // One item's scenario is forced to throw (a negative commission-base price, which the
-  // engine's unit-price validator rejects): the detail must still return 200 with that
-  // item's profit empty (reason null) while the sibling item computes fine, and the
-  // failure must be logged exactly once per request with the right surface + failedCount.
+  // Two items' scenarios are forced to throw (a negative commission-base price, which the
+  // engine's unit-price validator rejects): the detail must still return 200 with those
+  // items' profit empty (reason null) while a third item computes fine, and the failures
+  // must be logged exactly once per request with the right surface + failedCount 2 (the
+  // per-request collect-then-log-once path, NOT one line per failing row).
   beforeAll(async () => {
     await ensureDbReachable();
   });
 
-  it('keeps the tariff detail up when one item fails to compute', async () => {
+  it('keeps the tariff detail up when items fail to compute and logs once', async () => {
     await truncateAll();
     const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
     if (carrier === null) throw new Error('SENDEOMP carrier missing — globalSetup must run');
@@ -821,8 +827,9 @@ describe('Commission Tariffs — per-item degrade (decision 9)', () => {
         bands,
       },
     });
-    // Failing item: same calculable variant, but a NEGATIVE commission-base price makes
-    // the engine reject the baseline unit price -> that item's compute throws.
+    // Two failing items: same calculable variant, but a NEGATIVE commission-base price
+    // makes the engine reject the baseline unit price -> each item's compute throws. Two
+    // of them prove the collect-then-log-once path reports failedCount 2 from a single line.
     const failing = await prisma.commissionTariffItem.create({
       data: {
         organizationId: org.id,
@@ -835,6 +842,21 @@ describe('Commission Tariffs — per-item degrade (decision 9)', () => {
         commissionBasePrice: '-5.00',
         currentCommissionPct: '19.0000',
         sortOrder: 1,
+        bands,
+      },
+    });
+    const failingTwo = await prisma.commissionTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        periodId: period.id,
+        productVariantId: variant.id,
+        barcode: 'BC-FAIL-2',
+        productTitle: 'Bozuk 2',
+        currentPrice: '500.00',
+        commissionBasePrice: '-7.00',
+        currentCommissionPct: '19.0000',
+        sortOrder: 2,
         bands,
       },
     });
@@ -852,27 +874,219 @@ describe('Commission Tariffs — per-item degrade (decision 9)', () => {
       expect(ok?.calculable).toBe(true);
       expect(ok?.currentNetProfit).not.toBeNull();
 
-      const bad = items.find((i) => i.id === failing.id);
-      expect(bad?.calculable).toBe(false);
-      // A degraded compute carries no reason (not NO_PRODUCT -- the variant is matched).
-      expect(bad?.reason).toBeNull();
-      expect(bad?.currentNetProfit).toBeNull();
-      for (const band of bad?.bands ?? []) {
-        expect(band.netProfit).toBeNull();
+      // Both failing items degrade: not calculable, no reason (NOT NO_PRODUCT -- the
+      // variant is matched), empty profits and bands.
+      for (const failingId of [failing.id, failingTwo.id]) {
+        const bad = items.find((i) => i.id === failingId);
+        expect(bad?.calculable).toBe(false);
+        expect(bad?.reason).toBeNull();
+        expect(bad?.currentNetProfit).toBeNull();
+        for (const band of bad?.bands ?? []) {
+          expect(band.netProfit).toBeNull();
+        }
       }
 
-      // One failing item -> exactly one [profit-read] line for this surface, failedCount 1.
+      // Two failing items -> still exactly one [profit-read] line for this surface, with
+      // failedCount 2 (collected then logged once, not one line per row).
       expect(errorSpy).toHaveBeenCalledTimes(1);
       expect(errorSpy).toHaveBeenCalledWith(
         '[profit-read] in-request profit computation failed',
         expect.objectContaining({
           surface: 'commission-tariff',
           orderId: null,
-          failedCount: 1,
+          failedCount: 2,
         }),
       );
     } finally {
       errorSpy.mockRestore();
+    }
+  });
+});
+
+describe('Commission Tariffs - store-wide degrade (decision 9)', () => {
+  // The WHOLE scenario load fails (not just one item): a TRENDYOL PLATFORM_SERVICE fee
+  // definition with a NULL fixed amount, effective just before now, wins the loader's
+  // "latest effectiveFrom" ordering over the seeded row, so `loadTrendyolScenarioBases`
+  // throws IncompleteFeeDefinitionError. `loadScreenScenarioBases` then degrades the whole
+  // request (bases === null) and logs ONCE at the loader level (no failedCount). The detail
+  // must still return 200 with every matched item empty (reason null), and -- the point of
+  // the degrade-first ordering -- a matched item reports reason null, never NO_PRODUCT. The
+  // poisoned definition is removed in `finally` so later tests in the run are unaffected
+  // (truncateAll DOES wipe fee_definitions, but only the next test that truncates would).
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  it('degrades every item with one log when the store-wide load fails', async () => {
+    await truncateAll();
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing - globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Store Degrade Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'tariff-store-degrade-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 8901n,
+        productMainId: 'pm-8901',
+        title: 'Bozulma Urunu',
+        categoryId: 597n,
+        categoryName: 'Gomlek',
+        brandId: 2032n,
+        brandName: 'Modline',
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: 89010n,
+        barcode: 'BC-SDEG',
+        stockCode: 'STK-SDEG',
+        salePrice: new Decimal('500.00'),
+        listPrice: new Decimal('500.00'),
+        vatRate: 20,
+        dimensionalWeightOverride: new Decimal('3.0'),
+      },
+    });
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'COGS Store Degrade',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Store Degrade',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+    });
+    await ensureFeeDefinitions();
+
+    // Poison the store-wide load: a later PLATFORM_SERVICE definition with no fixed amount.
+    // effectiveFrom now-1min beats the seeded 2026-05-18 row in resolveFeeDefinition's
+    // "latest effectiveFrom <= scenarioDate" ordering; the unique key is
+    // (platform, feeType, effectiveFrom), so a distinct effectiveFrom avoids a clash.
+    const poison = await prisma.feeDefinition.create({
+      data: {
+        platform: FeeScope.TRENDYOL,
+        feeType: OrderFeeType.PLATFORM_SERVICE,
+        displayName: 'Platform Hizmet Bedeli (eksik)',
+        calculationKind: FeeCalculationKind.FIXED,
+        fixedAmountNet: null,
+        defaultVatRate: new Decimal('20.00'),
+        effectiveFrom: new Date(Date.now() - 60 * 1000),
+        isRequired: true,
+      },
+    });
+
+    const tariff = await prisma.commissionTariff.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Magaza Bozulma Tarifesi' },
+    });
+    const period = await prisma.commissionTariffPeriod.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: tariff.id,
+        dateRangeLabel: '1 - 7 Temmuz',
+        sortOrder: 0,
+      },
+    });
+    const bands = [{ key: 'band1', upperLimit: '600.00', commissionPct: '19' }];
+    // Two matched items (same calculable variant) - both must degrade to reason null when
+    // the store-wide load fails, proving the degrade wins over a per-item NO_PRODUCT.
+    await prisma.commissionTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        periodId: period.id,
+        productVariantId: variant.id,
+        barcode: 'BC-SDEG-1',
+        productTitle: 'Magaza Bozulma 1',
+        currentPrice: '500.00',
+        commissionBasePrice: '400.00',
+        currentCommissionPct: '19.0000',
+        sortOrder: 0,
+        bands,
+      },
+    });
+    await prisma.commissionTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        periodId: period.id,
+        productVariantId: variant.id,
+        barcode: 'BC-SDEG-2',
+        productTitle: 'Magaza Bozulma 2',
+        currentPrice: '500.00',
+        commissionBasePrice: '400.00',
+        currentCommissionPct: '19.0000',
+        sortOrder: 1,
+        bands,
+      },
+    });
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/commission-tariffs/${tariff.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const items = ((await res.json()) as DetailWire).periods[0]?.items ?? [];
+      expect(items).toHaveLength(2);
+
+      // Every matched item degrades: not calculable, reason null (NEVER NO_PRODUCT), empty
+      // profits and bands.
+      for (const item of items) {
+        expect(item.calculable).toBe(false);
+        expect(item.reason).toBeNull();
+        expect(item.currentNetProfit).toBeNull();
+        for (const band of item.bands) {
+          expect(band.netProfit).toBeNull();
+        }
+      }
+
+      // The loader logs ONCE at request level - WITHOUT failedCount (that key is set only by
+      // the per-item collect-then-log-once path, not the store-wide loader failure).
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      const [message, fields] = errorSpy.mock.calls[0] ?? [];
+      expect(message).toBe('[profit-read] in-request profit computation failed');
+      expect(fields).toMatchObject({ surface: 'commission-tariff', orderId: null });
+      expect(fields).not.toHaveProperty('failedCount');
+    } finally {
+      errorSpy.mockRestore();
+      // Remove the poisoned fee definition so later tests in the run are unaffected.
+      await prisma.feeDefinition.delete({ where: { id: poison.id } });
     }
   });
 });
