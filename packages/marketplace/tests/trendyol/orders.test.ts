@@ -748,6 +748,28 @@ describe('mapTrendyolShipmentPackage — dematerialized flag', () => {
   });
 });
 
+// ─── package-pending flag (Awaiting orders before the payment check) ───
+// Trendyol reports shipmentPackageId 0 for a package it has not created yet
+// (an Awaiting order waiting on the payment check). Every such package maps to
+// platformOrderId '0', so intake can never key it — the mapper flags it so
+// intake skips it until Trendyol re-sends it under a real id.
+
+describe('mapTrendyolShipmentPackage — packagePending flag', () => {
+  it('marks a shipmentPackageId 0 package as packagePending (no package id yet)', () => {
+    const mapped = mapTrendyolShipmentPackage({ ...buildPackage(), shipmentPackageId: 0 });
+    expect(mapped.packagePending).toBe(true);
+    // Every pending package collapses onto platformOrderId '0' — exactly the
+    // collision intake avoids by skipping it.
+    expect(mapped.platformOrderId).toBe('0');
+  });
+
+  it('leaves packagePending false for a real (positive) shipmentPackageId', () => {
+    const mapped = mapTrendyolShipmentPackage({ ...buildPackage(), shipmentPackageId: 1234567 });
+    expect(mapped.packagePending).toBe(false);
+    expect(mapped.platformOrderId).toBe('1234567');
+  });
+});
+
 // ─── PR-8 cargo enrichment (research 2026-06-09) ───────────────────────
 
 describe('mapTrendyolShipmentPackage — cargo fields', () => {

@@ -312,8 +312,9 @@ export async function processOrdersChunk(input: {
   // Upsert per-order (own transaction). Trendyol can emit duplicate orders
   // across cursor pages on lastModified shifts — upsert is idempotent.
   // Route per-order through the shared intake helper (own transaction each):
-  // calculable → orders; cost-missing today → buffer; cost-missing past-day →
-  // orders (persisted normally, NOT_COMPUTABLE until a cost arrives). Unmatched
+  // a package without a package id yet (Awaiting) → skipped; calculable → orders;
+  // cost-missing today → buffer; cost-missing past-day → orders (persisted but
+  // PERMANENTLY profit-excluded, LATE_UNCOSTED_ARRIVAL since Faz 3E). Unmatched
   // variant lines fold into cost_missing — the order is ALWAYS written. Identical
   // to the webhook.
   // Trendyol can emit duplicate orders across cursor pages — upsert + buffer
@@ -340,6 +341,17 @@ export async function processOrdersChunk(input: {
           break;
         case 'persisted':
           // Steady-state happy path — no per-order log line.
+          break;
+        case 'skipped':
+          // Package not created yet (Awaiting, shipmentPackageId 0) — skipped so
+          // distinct order numbers do not collide onto platformOrderId '0'. It
+          // arrives again under a real id once Trendyol creates the package.
+          syncLog.info('orders.package-pending-skipped', {
+            source: 'cron',
+            syncLogId: log.id,
+            storeId: log.storeId,
+            platformOrderNumber: order.platformOrderNumber,
+          });
           break;
         case 'dematerialized':
           // Split ghost (UnPacked) removed from the books — children re-carry

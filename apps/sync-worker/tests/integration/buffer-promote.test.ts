@@ -96,6 +96,7 @@ function buildMappedForIntake(over: {
     lastModifiedDate: over.orderDate,
     status: 'PROCESSING',
     dematerialized: false,
+    packagePending: false,
     saleGross: '100.00',
     saleVat: '15.25',
     listGross: '100.00',

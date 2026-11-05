@@ -138,6 +138,7 @@ function buildMappedOrder(args: {
     lastModifiedDate: args.orderDate,
     status: 'PROCESSING',
     dematerialized: false,
+    packagePending: false,
     // GROSS konvansiyon: saleGross = packageTotalPrice (100); saleVat = 100 × 18/118.
     saleGross: '100.00',
     saleVat: '15.25',

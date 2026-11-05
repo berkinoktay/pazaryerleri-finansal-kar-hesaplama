@@ -521,6 +521,16 @@ export interface MappedOrder {
    * branches on this flag before any other routing.
    */
   dematerialized: boolean;
+  /**
+   * True when Trendyol has not created the shipment package yet: its
+   * `shipmentPackageId` is 0 — an Awaiting order still waiting on the payment
+   * check. Such a package cannot be keyed (every one would map to
+   * platformOrderId '0', so distinct order numbers would collide onto a single
+   * row), so `intakeOrder` skips it entirely — no order, no buffer row, no stock
+   * change. Trendyol re-sends the same order under a real shipmentPackageId once
+   * it creates the package (status Created), and that one is keyed normally.
+   */
+  packagePending: boolean;
   /** Sipariş başlığı — paket toplamlarından DOĞRUDAN (KDV dahil, spec §4). */
   saleGross: string;
   saleVat: string;

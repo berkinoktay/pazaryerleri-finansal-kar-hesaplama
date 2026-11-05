@@ -120,8 +120,9 @@ export async function processTrendyolWebhookEvent(
   }
 
   // ─── Intake routing (Slice 0 shared helper) ────────────────────────────
-  // calculable → orders; cost-missing today → buffer; cost-missing past-day →
-  // orders (persisted normally, NOT_COMPUTABLE until a cost arrives). Unmatched
+  // a package without a package id yet (Awaiting) → skipped; calculable → orders;
+  // cost-missing today → buffer; cost-missing past-day → orders (persisted but
+  // PERMANENTLY profit-excluded, LATE_UNCOSTED_ARRIVAL since Faz 3E). Unmatched
   // variant lines fold into cost_missing — the order is ALWAYS written. Identical
   // to the sync-worker.
   const outcome = await intakeOrder({
@@ -153,6 +154,16 @@ export async function processTrendyolWebhookEvent(
         reason: outcome.reason,
         storeId: store.id,
         platformOrderId,
+      });
+      break;
+    case 'skipped':
+      // Package not created yet (Awaiting, shipmentPackageId 0) — skipped so
+      // distinct order numbers do not collide onto platformOrderId '0'. The
+      // webhook event row still gets the normal success stamp below.
+      syncLog.info('orders.package-pending-skipped', {
+        source: 'webhook',
+        storeId: store.id,
+        platformOrderNumber: mapped.platformOrderNumber,
       });
       break;
     case 'dematerialized':

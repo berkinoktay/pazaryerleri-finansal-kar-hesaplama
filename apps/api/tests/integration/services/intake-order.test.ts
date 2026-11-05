@@ -31,6 +31,9 @@ const BARCODE = 'EAN13-INTAKE-001';
 // not the JSON round-trip). orderDate drives the today/past-day routing.
 function buildMapped(over: {
   platformOrderId: string;
+  /** Parent order number. Defaults to `ord-${platformOrderId}`; pass explicitly
+   * when two orders share a platformOrderId (package-pending collision on '0'). */
+  platformOrderNumber?: string;
   orderDate: Date;
   /** Marketplace lastModifiedDate — drives the out-of-order / refresh comparison.
    * Defaults to orderDate when omitted (the pre-existing tests' behavior). */
@@ -38,6 +41,9 @@ function buildMapped(over: {
   barcode?: string;
   status?: MappedOrder['status'];
   dematerialized?: boolean;
+  /** Awaiting order whose shipment package Trendyol has not created yet
+   * (shipmentPackageId 0). Defaults false. */
+  packagePending?: boolean;
   /** Multi-line orders: each entry clones the single-line template below. */
   lines?: Array<{ barcode: string; platformLineId: string }>;
 }): MappedOrder {
@@ -58,11 +64,12 @@ function buildMapped(over: {
   };
   return {
     platformOrderId: over.platformOrderId,
-    platformOrderNumber: `ord-${over.platformOrderId}`,
+    platformOrderNumber: over.platformOrderNumber ?? `ord-${over.platformOrderId}`,
     orderDate: over.orderDate,
     lastModifiedDate: over.lastModifiedDate ?? over.orderDate,
     status: over.status ?? 'PROCESSING',
     dematerialized: over.dematerialized ?? false,
+    packagePending: over.packagePending ?? false,
     // GROSS konvansiyon: saleGross 100 = net 84.75 + KDV 15.25.
     saleGross: '100',
     saleVat: '15.25',
@@ -1206,5 +1213,101 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
       where: { storeId: store.id, barcode: BARCODE },
     });
     expect(variant.quantity).toBe(40);
+  });
+});
+
+// ─── Package-pending skip (Awaiting orders, shipmentPackageId 0) ──────────
+// Trendyol reports shipmentPackageId 0 for a package it has not created yet, so
+// the mapper gives every Awaiting order the same platformOrderId '0'. Distinct
+// order numbers would collide onto a single orders / buffer row (the live-data
+// defect that prompted this fix). intakeOrder must skip such a package with no
+// DB access at all — no order, no buffer row, no stock movement.
+describe('intakeOrder — package-pending skip (Awaiting, no package id yet)', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    await ensureFeeDefinitions();
+  });
+
+  it('skips two Awaiting orders (today + yesterday) that collide on platformOrderId 0', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // A matched, calculable variant with a known starting stock: the skip must
+    // leave it untouched (no optimistic decrement).
+    await seedVariant(org.id, store.id, BARCODE, true);
+    await setStock(store.id, BARCODE, 40);
+
+    const today = new Date();
+    const yesterday = new Date(Date.now() - PAST_DAY_MS);
+
+    // Both package-pending → platformOrderId '0', different order numbers (the
+    // real collision: 19 distinct order numbers all mapped to '0').
+    const todayOutcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: '0',
+        platformOrderNumber: '2147427535',
+        orderDate: today,
+        packagePending: true,
+      }),
+    });
+    const pastOutcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: '0',
+        platformOrderNumber: '2147427999',
+        orderDate: yesterday,
+        packagePending: true,
+      }),
+    });
+
+    expect(todayOutcome).toEqual({ kind: 'skipped', reason: 'package_pending' });
+    expect(pastOutcome).toEqual({ kind: 'skipped', reason: 'package_pending' });
+
+    // Nothing was written by either path.
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+
+    // The matched variant's stock is unchanged.
+    const variant = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: BARCODE },
+    });
+    expect(variant.quantity).toBe(40);
+  });
+
+  it('leaves a pre-existing buffer row of a DIFFERENT order (real package id) untouched', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false);
+
+    // A genuine today cost-missing order already parked in the buffer under its
+    // real package id.
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: '700000123',
+      platformOrderNumber: 'real-order-123',
+      status: 'PENDING',
+    });
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: '0',
+        platformOrderNumber: '2147427535',
+        orderDate: new Date(),
+        packagePending: true,
+      }),
+    });
+
+    expect(outcome).toEqual({ kind: 'skipped', reason: 'package_pending' });
+    // The package-pending skip does no DB work, so the unrelated buffer row survives.
+    const rows = await prisma.livePerformanceBuffer.findMany({ where: { storeId: store.id } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.platformOrderId).toBe('700000123');
   });
 });

@@ -42,6 +42,10 @@ import type {
  */
 export const ORDERS_PAGE_SIZE = 200;
 
+// Trendyol stamps shipmentPackageId 0 on a package it has not created yet (an
+// Awaiting order before the payment check) — the mapper flags these as pending.
+const UNASSIGNED_PACKAGE_ID = 0;
+
 // Commission VAT rate is DB-driven (denetim A #331) — resolved by the caller
 // and passed in as `commissionVatRate`; defaults to TRENDYOL_COMMISSION_VAT_RATE
 // (the estimate fallback). In the GROSS mapper this rate is carried verbatim on
@@ -241,6 +245,10 @@ export function mapTrendyolShipmentPackage(
     // Split artifact: UnPacked = paket bozuldu, içerik çocuk paketlerde.
     // intakeOrder bu bayrakla kaydı (orders + buffer) SİLER (research 2026-06-09).
     dematerialized: pkg.status.toUpperCase() === 'UNPACKED',
+    // shipmentPackageId 0 means Trendyol has not created the package yet (an
+    // Awaiting order before the payment check). Such a package cannot be keyed
+    // (every one maps to platformOrderId '0'), so intakeOrder skips it.
+    packagePending: pkg.shipmentPackageId <= UNASSIGNED_PACKAGE_ID,
     // Sipariş başlığı — paket toplamlarından DOĞRUDAN (spec §4, yeniden-kurma yok).
     saleGross: packageSale.toFixed(2),
     saleVat: saleVat.toDecimalPlaces(2).toFixed(2),

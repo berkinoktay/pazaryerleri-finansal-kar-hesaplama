@@ -151,6 +151,7 @@ function buildDirectMapped(over: {
     lastModifiedDate: over.lastModifiedDate,
     status: over.status ?? 'PROCESSING',
     dematerialized: false,
+    packagePending: false,
     saleGross: '120.00',
     saleVat: '20.00',
     listGross: '120.00',
@@ -338,6 +339,39 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     // Komisyon TAHMİNİ donuk kopyası yazıldı (= T+0 gross değer; settlement bunu KORUR).
     expect(new Decimal(item.estimatedCommissionGross!).toString()).toBe('12');
     expect(new Decimal(item.refundedCommissionGross).toString()).toBe('0');
+  });
+
+  it('stream page with a zero-id (Awaiting) package next to a normal one → only the normal one persists', async () => {
+    const { store, log } = await setupStoreAndSyncLog(['EAN13-ORD-001']);
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse(
+        makeStreamResponse({
+          hasMore: false,
+          nextCursor: null,
+          content: [
+            // Awaiting order Trendyol has not created a package for yet: the mapper
+            // flags it packagePending and intake skips it (shipmentPackageId 0 would
+            // collide with every other Awaiting order on platformOrderId '0'). Same
+            // barcode as the normal one so the catalog repair never touches the vendor.
+            makeShipmentPackage({ shipmentPackageId: 0, orderNumber: 'awaiting-1' }),
+            // A normal package with a real id persists as usual.
+            makeShipmentPackage(),
+          ],
+        }),
+      ),
+    );
+
+    await processOrdersChunk({ syncLog: log, cursor: null });
+
+    const orders = await prisma.order.findMany({ where: { storeId: store.id } });
+    expect(orders).toHaveLength(1);
+    expect(orders[0]!.platformOrderId).toBe('3734026895');
+    // Nothing keyed onto platformOrderId '0'.
+    expect(await prisma.order.count({ where: { storeId: store.id, platformOrderId: '0' } })).toBe(
+      0,
+    );
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
   });
 
   it('co-funded order: saleGross = effectiveSale (liste − satıcı indirimi), tyDiscount excluded (denetim #1)', async () => {
@@ -907,6 +941,7 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
       status: 'DELIVERED' as const,
       dematerialized: false,
+      packagePending: false,
       saleGross: '120.00',
       saleVat: '20.00',
       listGross: '120.00',
@@ -1173,6 +1208,7 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
       status: 'DELIVERED' as const,
       dematerialized: false,
+      packagePending: false,
       // Satış 99 (KDV-dahil) = net 90 + %10 KDV 9; liste 110, indirim 11.
       saleGross: '99.00',
       saleVat: '9.00',
@@ -1235,6 +1271,7 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
       status: 'DELIVERED' as const,
       dematerialized: false,
+      packagePending: false,
       saleGross: '209.00',
       saleVat: '21.00',
       listGross: '232.00',
@@ -1307,6 +1344,7 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
       status: 'PROCESSING' as const,
       dematerialized: false,
+      packagePending: false,
       saleGross: '120.00',
       saleVat: '20.00',
       listGross: '120.00',
@@ -1401,6 +1439,7 @@ describe('upsertOrderWithSnapshot — out-of-order guard (freshness)', () => {
       lastModifiedDate: over.lastModifiedDate,
       status: over.status,
       dematerialized: false,
+      packagePending: false,
       saleGross: '120.00',
       saleVat: '20.00',
       listGross: '120.00',
@@ -1706,6 +1745,7 @@ describe('upsertOrderWithSnapshot — optimistic stock decrement (product freshn
       lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
       status: 'PROCESSING',
       dematerialized: false,
+      packagePending: false,
       saleGross: '120.00',
       saleVat: '20.00',
       listGross: '120.00',

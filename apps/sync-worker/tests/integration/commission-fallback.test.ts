@@ -92,6 +92,7 @@ function buildMapped(over: {
     lastModifiedDate: over.lastModifiedDate ?? orderDate,
     status: 'PROCESSING',
     dematerialized: false,
+    packagePending: false,
     // GROSS convention: saleGross 600 = net 500 + VAT 100 (20% inclusive).
     saleGross: '600.00',
     saleVat: '100.00',

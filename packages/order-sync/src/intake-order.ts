@@ -5,6 +5,9 @@
  *
  * Routing (see the spec's decision table + split research 2026-06-09 +
  * cost-deadline-profit-freeze spec 2026-06-12):
+ *   - packagePending (no package id yet) → SKIP entirely (Awaiting order before the
+ *                                      payment check; shipmentPackageId 0 can't be keyed,
+ *                                      arrives again under a real id as Created)
  *   - dematerialized (UnPacked)    → DELETE order + buffer rows (split ghost — children re-carry content)
  *   - status CANCELLED             → purge buffer rows + upsert (audit row; aggregates exclude by status)
  *   - variant_not_found            → cost_missing route (order IS written; line keeps barcode, null variant FK; resolution in PR-2)
@@ -74,7 +77,11 @@ export type OrderIntakeOutcome =
   // an exhaustive `switch (outcome.kind)` keep compiling untouched, while callers
   // that care can tell a plain dedupe from one that refreshed the buffer snapshot.
   | { kind: 'buffered_deduped'; refreshed?: boolean }
-  | { kind: 'dematerialized'; deletedOrder: boolean; deletedBufferEntries: number };
+  | { kind: 'dematerialized'; deletedOrder: boolean; deletedBufferEntries: number }
+  // Trendyol has not created the shipment package yet (shipmentPackageId 0 —
+  // an Awaiting order before the payment check). It cannot be keyed (every one
+  // would be platformOrderId '0'), so intake skips it with no DB access at all.
+  | { kind: 'skipped'; reason: 'package_pending' };
 
 export async function intakeOrder(args: {
   storeId: string;
@@ -88,6 +95,18 @@ export async function intakeOrder(args: {
   rawPayload?: Prisma.InputJsonValue;
 }): Promise<OrderIntakeOutcome> {
   const { storeId, organizationId, mapped } = args;
+
+  // ─── Package not created yet (Awaiting, shipmentPackageId 0) ─────────────
+  // Trendyol reports shipmentPackageId 0 for a package it has not created yet —
+  // an Awaiting order still waiting on the payment check. Every such package
+  // maps to platformOrderId '0', so distinct order numbers would collide onto a
+  // single orders / buffer row (last write wins). Skip it entirely — no DB read
+  // or write of any kind (no order, no buffer row, no stock change, no recompute
+  // enqueue). Trendyol re-sends the same order under a real shipmentPackageId
+  // once it creates the package (status Created), and that one is keyed normally.
+  if (mapped.packagePending) {
+    return { kind: 'skipped', reason: 'package_pending' };
+  }
 
   // ─── Split artifact: UnPacked package dematerialized ─────────────────────
   // Trendyol keeps the pre-split package in the feed with status `UnPacked`
