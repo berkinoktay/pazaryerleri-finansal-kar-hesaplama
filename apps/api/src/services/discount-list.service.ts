@@ -47,7 +47,7 @@ function intOrNull(value: string | undefined): number | null {
   return value === undefined ? null : Number(value);
 }
 
-// ─── List ─────────────────────────────────────────────────────────────────────
+// --- List ---
 
 /** Lists every saved discount list for a store with item + selected counts. */
 export async function listDiscountLists(
@@ -120,7 +120,7 @@ export async function listDiscountLists(
   });
 }
 
-// ─── Detail ─────────────────────────────────────────────────────────────────
+// --- Detail ---
 
 // The slim variant columns the detail needs for the commission chain + display: the synced
 // rate (2nd tier), the category/brand (3rd-tier fallback rate), and the first catalog image.
@@ -240,7 +240,7 @@ export async function getDiscountListDetail(
   // A per-item engine throw degrades only that item; collect and log once (decision 9).
   const failureLog = createRequestFailureLog({ surface: 'discount-list', organizationId: orgId });
 
-  // ─── Resolve the commission tariff bands (1st tier), anchored to the campaign ──
+  // --- Resolve the commission tariff bands (1st tier), anchored to the campaign ---
   // start: bands are authoritative ONLY from a tariff week that COVERS the anchor
   // instant; no covering week → no bands (the per-item chain falls to product/category
   // rate). `outdated` is true only when the store has tariffs but none covers the
@@ -248,7 +248,7 @@ export async function getDiscountListDetail(
   const { resolution: source, outdated: commissionTariffOutdated } =
     await resolveDiscountCommissionSource(orgId, storeId, list.startsAt, now);
 
-  // ─── Category-rate fallback cache (3rd tier) — once per distinct (cat, brand) ──
+  // --- Category-rate fallback cache (3rd tier): once per distinct (cat, brand) ---
   const categoryRateByKey = new Map<string, Decimal | null>();
   const distinctCatKeys = new Map<string, { categoryId: bigint; brandId: bigint | null }>();
   for (const variant of variantMap.values()) {
@@ -376,7 +376,7 @@ function serializeScenario(
   };
 }
 
-// ─── Update config ───────────────────────────────────────────────────────────
+// --- Update config ---
 
 /**
  * Full-replaces the discount configuration on the list row (name only when provided).
@@ -420,7 +420,7 @@ export async function updateDiscountList(
   }
 }
 
-// ─── Update selections ─────────────────────────────────────────────────────────
+// --- Update selections ---
 
 /**
  * Toggles the `included` flag on list items. 404 when the list is not in this store.
@@ -501,7 +501,7 @@ export async function updateDiscountSelections(
   }
 }
 
-// ─── Delete ────────────────────────────────────────────────────────────────
+// --- Delete ---
 
 /** Hard-deletes a discount list (items cascade). 404 when not in this store. */
 export async function deleteDiscountList(

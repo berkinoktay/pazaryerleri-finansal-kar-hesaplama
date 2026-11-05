@@ -30,6 +30,9 @@ const BAND_BARCODE = 'DISC-EST-BAND';
 const PROD_BARCODE = 'DISC-EST-PROD';
 const CAT_BARCODE = 'DISC-EST-CAT';
 const NONE_BARCODE = 'DISC-EST-NONE';
+// A variant whose synced rate is an explicit 0 (decision 7: "not sent", not a real 0%),
+// so the chain must skip the product tier and fall to this category's rate.
+const ZERO_BARCODE = 'DISC-EST-ZERO';
 
 // current 300 → discounted 240 (NET -20%). 240 lands in band2 (150–299.99 → 12); 300 in
 // band1 (≥300 → 19).
@@ -39,6 +42,9 @@ const BAND_DISCOUNTED_PCT = 12;
 const BAND_CURRENT_PCT = 19;
 const PRODUCT_PCT = 18;
 const CATEGORY_PCT = 15;
+// Distinct from CATEGORY_PCT and carries decimals so the 4dp serialization is unambiguous.
+const ZERO_CATEGORY_PCT = '17.5';
+const ZERO_CATEGORY_PCT_4DP = '17.5000';
 
 const BANDS = [
   { key: 'band1', lowerLimit: '300.00', commissionPct: '19' },
@@ -50,6 +56,7 @@ const BAND_CATEGORY_ID = 597n;
 const PROD_CATEGORY_ID = 598n;
 const CAT_CATEGORY_ID = 599n;
 const NONE_CATEGORY_ID = 600n;
+const ZERO_CATEGORY_ID = 601n;
 
 interface ScenarioWire {
   price: string;
@@ -94,6 +101,7 @@ interface Fixture {
   productItemId: string;
   categoryItemId: string;
   noneItemId: string;
+  zeroItemId: string;
   // A second list of type BUY_X_PAY_Y (4-al-2-öde) carrying the SAME band product, to prove the
   // list-price band anchor: effective 150 (300×2/4) but the rate comes from the 300 band.
   buyXListId: string;
@@ -215,6 +223,12 @@ async function setupFixture(): Promise<Fixture> {
     categoryId: NONE_CATEGORY_ID,
     syncedCommissionRate: null,
   });
+  // Synced rate is an explicit 0 — the chain must treat it as "not sent" and fall to category.
+  await createCalculableVariant({
+    barcode: ZERO_BARCODE,
+    categoryId: ZERO_CATEGORY_ID,
+    syncedCommissionRate: '0',
+  });
 
   // Category rate ONLY for the category-source item's category — the 3rd-tier fallback.
   await prisma.marketplaceCommissionRate.create({
@@ -227,6 +241,23 @@ async function setupFixture(): Promise<Fixture> {
       parentCategoryName: 'Üst Kategori',
       brandName: null,
       baseRate: new Decimal(CATEGORY_PCT),
+      paymentTermDays: 60,
+      segmentOverrides: {},
+      fetchedAt: new Date(),
+      sourceScreen: 'CategoryCommissionPaymentTerms',
+    },
+  });
+  // Category rate for the synced-zero item's category — the tier the chain must land on.
+  await prisma.marketplaceCommissionRate.create({
+    data: {
+      platform: 'TRENDYOL',
+      ruleKind: 'CATEGORY',
+      categoryId: ZERO_CATEGORY_ID,
+      brandId: null,
+      categoryName: 'Kategori',
+      parentCategoryName: 'Üst Kategori',
+      brandName: null,
+      baseRate: new Decimal(ZERO_CATEGORY_PCT),
       paymentTermDays: 60,
       segmentOverrides: {},
       fetchedAt: new Date(),
@@ -315,6 +346,7 @@ async function setupFixture(): Promise<Fixture> {
   const productItemId = await createItem(PROD_BARCODE, idByBarcode.get(PROD_BARCODE) ?? '');
   const categoryItemId = await createItem(CAT_BARCODE, idByBarcode.get(CAT_BARCODE) ?? '');
   const noneItemId = await createItem(NONE_BARCODE, idByBarcode.get(NONE_BARCODE) ?? '');
+  const zeroItemId = await createItem(ZERO_BARCODE, idByBarcode.get(ZERO_BARCODE) ?? '');
 
   // Second list — BUY_X_PAY_Y (4-al-2-öde) — carrying the same band product. Its discounted band
   // anchors to the CURRENT price (300 → band1 19%), not the effective 150 (which sits in band2).
@@ -352,6 +384,7 @@ async function setupFixture(): Promise<Fixture> {
     productItemId,
     categoryItemId,
     noneItemId,
+    zeroItemId,
     buyXListId: buyXList.id,
     buyXBandItemId: buyXBandItem.id,
   };
@@ -429,6 +462,16 @@ describe('Discount Lists - item estimate', () => {
     expect(body.calculable).toBe(true);
     expect(body.commissionSource).toBe('category');
     expect(Number(body.commissionPct)).toBe(CATEGORY_PCT);
+  });
+
+  it('falls back to the category rate when the synced rate is zero (source "category")', async () => {
+    const { status, body } = await estimate(fx, fx.zeroItemId, 'discounted');
+    expect(status).toBe(200);
+    expect(body.calculable).toBe(true);
+    // Decision 7: a synced rate of 0 is "not sent", so the chain skips the product tier and
+    // resolves this category's rate instead of charging a real 0%.
+    expect(body.commissionSource).toBe('category');
+    expect(body.commissionPct).toBe(ZERO_CATEGORY_PCT_4DP);
   });
 
   it('is not calculable when nothing in the chain resolves (NO_COMMISSION)', async () => {
