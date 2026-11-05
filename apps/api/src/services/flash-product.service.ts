@@ -15,9 +15,7 @@
 import { Decimal } from 'decimal.js';
 
 import { Prisma, prisma } from '@pazarsync/db';
-import type { Store as PrismaStore } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
-import type { EstimateOutcome } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
 import type { StoredTariffBand } from '@pazarsync/profit';
@@ -25,15 +23,16 @@ import {
   buildFlashCommissionResolver,
   type FlashCommissionRequest,
 } from './flash-product-commission.service';
-import { computeFlashItem, type FlashOfferInput } from './flash-product-compute.service';
-import { fetchCostAggregates } from './products-list.service';
-import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
 import {
-  NO_SHIPPING,
-  type TariffAssemblyContext,
-  type TariffVariant,
-} from './tariff-compute-commons';
-import type { VariantCostAggregate } from '../validators/product.validator';
+  computeFlashItem,
+  type ComputedFlashItem,
+  type FlashOfferInput,
+} from './flash-product-compute.service';
+import {
+  createRequestFailureLog,
+  loadScreenScenarioBases,
+  screenScenarioBaseFor,
+} from './scenario-screen-commons';
 import type {
   FlashCommissionBand,
   FlashProductDetail,
@@ -102,14 +101,16 @@ export async function listFlashProducts(
 
 /**
  * Returns one flash list with per-item, per-scenario profit computed on read. Throws
- * `NotFoundError` when it does not belong to this store. Batch-resolves variants + cost
- * + shipping + images and every offer window's commission source once, then computes
- * each item by reusing the product-pricing assembly.
+ * `NotFoundError` when it does not belong to this store. Loads every matched variant's
+ * scenario base in one pass and every offer window's commission source once, then
+ * computes each item with the scenario engine (the resolved band / flat rate handed in as
+ * the commission override). A slim org + store scoped variant query supplies the display
+ * image only. Per decision 9 a store-wide load failure or a per-item engine throw leaves
+ * that profit empty (logged once) rather than failing the request.
  */
 export async function getFlashProductDetail(
   orgId: string,
   storeId: string,
-  store: PrismaStore,
   listId: string,
 ): Promise<FlashProductDetail> {
   let list;
@@ -158,50 +159,28 @@ export async function getFlashProductDetail(
 
   const now = new Date();
 
-  // ─── Batch-resolve matched variants + cost + shipping + image once ────────
+  // --- Matched variant image (slim, org + store scoped) ---
+  // The first catalog image is the only field the detail needs from the variant -- the
+  // profit inputs come from the scenario loader below, not from this query.
   const variantIds = list.items
     .map((i) => i.productVariantId)
     .filter((id): id is string => id !== null);
 
-  const variantMap = new Map<string, TariffVariant>();
   const imageMap = new Map<string, string | null>();
-  let costMap = new Map<string, VariantCostAggregate>();
-  let shippingMap = new Map<string, EstimateOutcome>();
 
   if (variantIds.length > 0) {
     let variants;
     try {
       variants = await prisma.productVariant.findMany({
         where: { id: { in: variantIds }, organizationId: orgId, storeId },
-        select: {
-          id: true,
-          stockCode: true,
-          barcode: true,
-          salePrice: true,
-          vatRate: true,
-          isDigital: true,
-          product: {
-            select: {
-              title: true,
-              categoryId: true,
-              brandId: true,
-              imageUrls: true,
-            },
-          },
-        },
+        select: { id: true, product: { select: { imageUrls: true } } },
       });
     } catch (err) {
       mapPrismaError(err);
     }
     for (const variant of variants) {
-      variantMap.set(variant.id, variant);
       imageMap.set(variant.id, variant.product.imageUrls[0] ?? null);
     }
-
-    [costMap, shippingMap] = await Promise.all([
-      fetchCostAggregates(orgId, variantIds),
-      batchResolveShipping(orgId, storeId, variantIds),
-    ]);
   }
 
   // ─── Resolve every offer window's commission source in ONE batch ──────────
@@ -225,17 +204,20 @@ export async function getFlashProductDetail(
   }
   const resolver = await buildFlashCommissionResolver(orgId, storeId, requests);
 
-  const feeDefs = await prisma.$transaction((tx) => resolveFeeDefs(tx, store.platform));
-  const ctx: TariffAssemblyContext = { platform: store.platform, feeDefs };
+  // --- One scenario-base load for the whole list; scenario date = now ---
+  const bases = await loadScreenScenarioBases({
+    organizationId: orgId,
+    storeId,
+    scenarioDate: now,
+    variantIds,
+    surface: 'flash-product',
+  });
+
+  // A per-item engine throw degrades only that item; collect and log once (decision 9).
+  const failureLog = createRequestFailureLog({ surface: 'flash-product', organizationId: orgId });
 
   const items = list.items.map((item): FlashProductDetailItem => {
-    const variant =
-      item.productVariantId !== null ? variantMap.get(item.productVariantId) : undefined;
-    const cost = item.productVariantId !== null ? costMap.get(item.productVariantId) : undefined;
-    const shipping =
-      item.productVariantId !== null
-        ? (shippingMap.get(item.productVariantId) ?? NO_SHIPPING)
-        : NO_SHIPPING;
+    const base = screenScenarioBaseFor(bases, item.productVariantId);
 
     const offer24: FlashOfferInput | null =
       item.offer24Price !== null
@@ -278,20 +260,20 @@ export async function getFlashProductDetail(
       item.hasCommissionTariff,
     );
 
-    const computed = computeFlashItem(
-      ctx,
-      {
-        currentCommissionPct: new Decimal(item.currentCommissionPct.toString()),
-        customerPrice: new Decimal(item.customerPrice.toString()),
-        offer24,
-        offer3,
-        primaryBands,
-      },
-      now,
-      variant ?? null,
-      cost,
-      shipping,
-    );
+    const flashInput = {
+      currentCommissionPct: new Decimal(item.currentCommissionPct.toString()),
+      customerPrice: new Decimal(item.customerPrice.toString()),
+      offer24,
+      offer3,
+      primaryBands,
+    };
+    let computed: ComputedFlashItem;
+    try {
+      computed = computeFlashItem({ input: flashInput, now, base });
+    } catch (err) {
+      failureLog.record(err);
+      computed = computeFlashItem({ input: flashInput, now, base: { kind: 'degraded' } });
+    }
 
     return {
       id: item.id,
@@ -320,6 +302,8 @@ export async function getFlashProductDetail(
       customPrice: item.customPrice !== null ? item.customPrice.toFixed(2) : null,
     };
   });
+
+  failureLog.flush();
 
   return {
     id: list.id,

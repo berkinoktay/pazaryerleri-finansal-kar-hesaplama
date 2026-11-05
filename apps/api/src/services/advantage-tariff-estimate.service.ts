@@ -2,46 +2,42 @@
 //
 // Backs two frontend surfaces without bloating the detail payload: the custom-price
 // what-if and the current-scenario breakdown. It resolves the SAME inputs the detail
-// resolves — cost, shipping, fee definitions, and the commission source bands /
-// category fallback — but for ONE item, then runs the engine via
-// `computeAdvantageEstimate`. No financial math lives here — the engine is reused, so
-// the current-scenario breakdown matches the detail row's `current` byte-for-byte
-// (same price = customer price, same current commission resolved the SAME way).
+// resolves -- the scenario base (cost, shipping, fee + commission reference) and the
+// commission source bands / category fallback -- but for ONE item, then runs the scenario
+// engine via `computeAdvantageEstimate`. No financial math lives here -- the engine is
+// reused, so the current-scenario breakdown matches the detail row's `current`
+// byte-for-byte (same price = customer price, same current commission resolved the SAME
+// way).
 //
 // Scoped by organizationId + storeId + tariff. A cross-tenant or foreign item id
-// is indistinguishable from a missing one (404).
+// is indistinguishable from a missing one (404). A pathological engine input degrades to
+// a logged not-calculable result rather than a 500 (decision 9).
 
 import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
 import type { Store as PrismaStore } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
-import type { EstimateOutcome } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
 import { resolveCommissionRate } from './commission-rate-resolver';
-import { fetchCostAggregates } from './products-list.service';
-import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
 import {
   computeAdvantageEstimate,
   resolveCommission,
   type AdvantageEstimateCommission,
+  type ComputedAdvantageEstimate,
   type ItemCommissionInputs,
 } from './advantage-tariff-compute.service';
 import { resolveCommissionSource } from './advantage-tariff.service';
-import {
-  NO_SHIPPING,
-  type TariffAssemblyContext,
-  type TariffVariant,
-} from './tariff-compute-commons';
-import type { VariantCostAggregate } from '../validators/product.validator';
+import { logProfitReadFailure } from './profit-compute-fallback.service';
+import { loadScreenScenarioBases, screenScenarioBaseFor } from './scenario-screen-commons';
 import type { EstimateAdvantagePriceResult } from '../validators/advantage-tariff.validator';
 
 /**
  * Which scenario to price:
- *   - `price`   — an explicit price; the band it lands in (else the category rate)
+ *   - `price`   -- an explicit price; the band it lands in (else the category rate)
  *                 supplies the reduced commission (the custom-price what-if).
- *   - `current` — the item's own customer price at its current commission — the "do
+ *   - `current` -- the item's own customer price at its current commission -- the "do
  *                 nothing" baseline the detail's `current` shows.
  */
 export type EstimateAdvantagePriceInput =
@@ -83,37 +79,23 @@ export async function estimateAdvantageItemPrice(
     throw new NotFoundError('AdvantageTariffItem', itemId);
   }
 
-  // Resolve the matched variant + cost + shipping once (only when matched).
-  let variant: TariffVariant | null = null;
-  let cost: VariantCostAggregate | undefined;
-  let shipping: EstimateOutcome = NO_SHIPPING;
-
+  // Slim category/brand read for the matched variant (feeds the category fallback rate).
+  // The profit inputs come from the scenario loader below, not from this query.
+  let category: { categoryId: bigint | null; brandId: bigint | null } | null = null;
   if (item.productVariantId !== null) {
     let variantRow;
     try {
       variantRow = await prisma.productVariant.findFirst({
         where: { id: item.productVariantId, organizationId: orgId, storeId },
-        select: {
-          id: true,
-          stockCode: true,
-          barcode: true,
-          salePrice: true,
-          vatRate: true,
-          isDigital: true,
-          product: { select: { title: true, categoryId: true, brandId: true } },
-        },
+        select: { product: { select: { categoryId: true, brandId: true } } },
       });
     } catch (err) {
       mapPrismaError(err);
     }
-    variant = variantRow;
-
-    const [costMap, shippingMap] = await Promise.all([
-      fetchCostAggregates(orgId, [item.productVariantId]),
-      batchResolveShipping(orgId, storeId, [item.productVariantId]),
-    ]);
-    cost = costMap.get(item.productVariantId);
-    shipping = shippingMap.get(item.productVariantId) ?? NO_SHIPPING;
+    category =
+      variantRow !== null
+        ? { categoryId: variantRow.product.categoryId, brandId: variantRow.product.brandId }
+        : null;
   }
 
   // Resolve the commission for this barcode: source band, else category fallback.
@@ -125,11 +107,11 @@ export async function estimateAdvantageItemPrice(
   );
   const bands = source?.bandsByBarcode.get(item.barcode) ?? null;
   let categoryRate: Decimal | null = null;
-  if (variant !== null && variant.product.categoryId !== null) {
+  if (category !== null && category.categoryId !== null) {
     const resolved = await resolveCommissionRate({
       platform: store.platform,
-      categoryId: variant.product.categoryId,
-      brandId: variant.product.brandId,
+      categoryId: category.categoryId,
+      brandId: category.brandId,
       sellerSegment: null,
     });
     categoryRate = resolved?.rate ?? null;
@@ -138,7 +120,7 @@ export async function estimateAdvantageItemPrice(
 
   // Resolve the price + commission per mode. The 'current' scenario mirrors the detail
   // row's baseline EXACTLY: the customer price at the commission resolved the SAME way
-  // (band, else category) at that price — injected as a verbatim override so the
+  // (band, else category) at that price -- injected as a verbatim override so the
   // breakdown equals `current.netProfit` byte-for-byte, with no second band lookup.
   const price = input.mode === 'current' ? new Decimal(item.customerPrice.toString()) : input.price;
   const commission: AdvantageEstimateCommission =
@@ -146,10 +128,29 @@ export async function estimateAdvantageItemPrice(
       ? { kind: 'override', resolved: resolveCommission(commissionInputs, price) }
       : { kind: 'resolve', inputs: commissionInputs };
 
-  const feeDefs = await prisma.$transaction((tx) => resolveFeeDefs(tx, store.platform));
-  const ctx: TariffAssemblyContext = { platform: store.platform, feeDefs };
+  // Load the scenario base for the matched variant only (scenario date = now). An
+  // unmatched item passes no ids -> no-product; a store-wide load failure -> degraded.
+  const bases = await loadScreenScenarioBases({
+    organizationId: orgId,
+    storeId,
+    scenarioDate: new Date(),
+    variantIds: item.productVariantId !== null ? [item.productVariantId] : [],
+    surface: 'advantage-tariff',
+  });
+  const base = screenScenarioBaseFor(bases, item.productVariantId);
 
-  const computed = computeAdvantageEstimate(ctx, variant, cost, shipping, commission, price);
+  let computed: ComputedAdvantageEstimate;
+  try {
+    computed = computeAdvantageEstimate({ base, commission, price });
+  } catch (err) {
+    logProfitReadFailure({
+      surface: 'advantage-tariff',
+      organizationId: orgId,
+      orderId: null,
+      err,
+    });
+    computed = computeAdvantageEstimate({ base: { kind: 'degraded' }, commission, price });
+  }
 
   return {
     itemId: item.id,

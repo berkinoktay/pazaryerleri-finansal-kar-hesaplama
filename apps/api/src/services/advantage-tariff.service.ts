@@ -19,26 +19,22 @@ import { Decimal } from 'decimal.js';
 import { Prisma, prisma } from '@pazarsync/db';
 import type { Store as PrismaStore } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
-import type { EstimateOutcome } from '@pazarsync/profit';
 import { isInstantWithinTariffPeriod, tariffBoundToInstant } from '@pazarsync/utils';
 
 import { NotFoundError } from '../lib/errors';
 import { resolveCommissionRate } from './commission-rate-resolver';
 import { parseStoredTariffBands, type StoredTariffBand } from '@pazarsync/profit';
-import { fetchCostAggregates } from './products-list.service';
-import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
 import {
   computeAdvantageItemTiers,
   type ComputedAdvantageItem,
   type ItemCommissionInputs,
 } from './advantage-tariff-compute.service';
 import {
-  NO_SHIPPING,
-  type TariffAssemblyContext,
-  type TariffVariant,
-} from './tariff-compute-commons';
+  createRequestFailureLog,
+  loadScreenScenarioBases,
+  screenScenarioBaseFor,
+} from './scenario-screen-commons';
 import { parseStarTiers } from './advantage-tariff.types';
-import type { VariantCostAggregate } from '../validators/product.validator';
 import type {
   AdvantageCommissionBand,
   AdvantageCommissionSource,
@@ -209,8 +205,12 @@ export async function listAdvantageTariffs(
 /**
  * Returns one advantage tariff with per-item, per-tier profit computed on read.
  * Throws `NotFoundError` when it does not belong to this store. Resolves the
- * commission source once, batch-loads variants + cost + shipping + category
- * rates, then computes each item's tiers by reusing the product-pricing assembly.
+ * commission source + a per-category fallback rate once, loads every matched variant's
+ * scenario base in one pass, then computes each item's tiers with the scenario engine
+ * (the resolved band / category rate handed in as the commission override). A slim org +
+ * store scoped variant query supplies the category/brand (for the fallback rate) and the
+ * display image only. Per decision 9 a store-wide load failure or a per-item engine throw
+ * leaves that profit empty (logged once) rather than failing the request.
  */
 export async function getAdvantageTariffDetail(
   orgId: string,
@@ -259,15 +259,16 @@ export async function getAdvantageTariffDetail(
 
   const now = new Date();
 
-  // ─── Batch-resolve matched variants + cost + shipping + image once ────────
+  // --- Matched variant category/brand + image (slim, org + store scoped) ---
+  // Category/brand feed the per-category fallback rate; the first catalog image is the
+  // only other field the detail needs -- the profit inputs come from the scenario loader
+  // below, not from this query.
   const variantIds = tariff.items
     .map((i) => i.productVariantId)
     .filter((id): id is string => id !== null);
 
-  const variantMap = new Map<string, TariffVariant>();
+  const variantMap = new Map<string, { categoryId: bigint | null; brandId: bigint | null }>();
   const imageMap = new Map<string, string | null>();
-  let costMap = new Map<string, VariantCostAggregate>();
-  let shippingMap = new Map<string, EstimateOutcome>();
 
   if (variantIds.length > 0) {
     let variants;
@@ -276,33 +277,19 @@ export async function getAdvantageTariffDetail(
         where: { id: { in: variantIds }, organizationId: orgId, storeId },
         select: {
           id: true,
-          stockCode: true,
-          barcode: true,
-          salePrice: true,
-          vatRate: true,
-          isDigital: true,
-          product: {
-            select: {
-              title: true,
-              categoryId: true,
-              brandId: true,
-              imageUrls: true,
-            },
-          },
+          product: { select: { categoryId: true, brandId: true, imageUrls: true } },
         },
       });
     } catch (err) {
       mapPrismaError(err);
     }
     for (const variant of variants) {
-      variantMap.set(variant.id, variant);
+      variantMap.set(variant.id, {
+        categoryId: variant.product.categoryId,
+        brandId: variant.product.brandId,
+      });
       imageMap.set(variant.id, variant.product.imageUrls[0] ?? null);
     }
-
-    [costMap, shippingMap] = await Promise.all([
-      fetchCostAggregates(orgId, variantIds),
-      batchResolveShipping(orgId, storeId, variantIds),
-    ]);
   }
 
   // ─── Resolve the commission source + a category-rate fallback cache ───────
@@ -317,8 +304,8 @@ export async function getAdvantageTariffDetail(
   // matched variants — the fallback commission for products with no tariff band.
   const categoryRateByKey = new Map<string, Decimal | null>();
   const distinctCatKeys = new Map<string, { categoryId: bigint; brandId: bigint | null }>();
-  for (const variant of variantMap.values()) {
-    const { categoryId, brandId } = variant.product;
+  for (const ref of variantMap.values()) {
+    const { categoryId, brandId } = ref;
     if (categoryId === null) continue;
     distinctCatKeys.set(`${categoryId}:${brandId ?? 'null'}`, { categoryId, brandId });
   }
@@ -334,19 +321,26 @@ export async function getAdvantageTariffDetail(
     }),
   );
 
-  const feeDefs = await prisma.$transaction((tx) => resolveFeeDefs(tx, store.platform));
-  const ctx: TariffAssemblyContext = { platform: store.platform, feeDefs };
+  // --- One scenario-base load for the whole tariff; scenario date = now ---
+  const bases = await loadScreenScenarioBases({
+    organizationId: orgId,
+    storeId,
+    scenarioDate: now,
+    variantIds,
+    surface: 'advantage-tariff',
+  });
+
+  // A per-item engine throw degrades only that item; collect and log once (decision 9).
+  const failureLog = createRequestFailureLog({
+    surface: 'advantage-tariff',
+    organizationId: orgId,
+  });
 
   let hasUnmatchedCommissionProducts = false;
 
   const items = tariff.items.map((item): AdvantageTariffDetailItem => {
-    const variant =
-      item.productVariantId !== null ? variantMap.get(item.productVariantId) : undefined;
-    const cost = item.productVariantId !== null ? costMap.get(item.productVariantId) : undefined;
-    const shipping =
-      item.productVariantId !== null
-        ? (shippingMap.get(item.productVariantId) ?? NO_SHIPPING)
-        : NO_SHIPPING;
+    const base = screenScenarioBaseFor(bases, item.productVariantId);
+    const ref = item.productVariantId !== null ? variantMap.get(item.productVariantId) : undefined;
 
     const bands = source?.bandsByBarcode.get(item.barcode) ?? null;
     if (item.hasCommissionTariff && bands === null) hasUnmatchedCommissionProducts = true;
@@ -365,10 +359,8 @@ export async function getAdvantageTariffDetail(
           }));
 
     const categoryRate =
-      variant && variant.product.categoryId !== null
-        ? (categoryRateByKey.get(
-            `${variant.product.categoryId}:${variant.product.brandId ?? 'null'}`,
-          ) ?? null)
+      ref && ref.categoryId !== null
+        ? (categoryRateByKey.get(`${ref.categoryId}:${ref.brandId ?? 'null'}`) ?? null)
         : null;
 
     const commission: ItemCommissionInputs = { bands, categoryRate };
@@ -378,15 +370,18 @@ export async function getAdvantageTariffDetail(
     // price, and Trendyol's own badge eligibility ("geçerli aralık") is checked against
     // it too. customerPrice falls back to currentPrice at import when no discount is
     // active, so products without a discount are unaffected. See profit-formula.md §2.1.
-    const computed: ComputedAdvantageItem = computeAdvantageItemTiers(
-      ctx,
-      parseStarTiers(item.starTiers),
-      new Decimal(item.customerPrice.toString()),
-      variant ?? null,
-      cost,
-      shipping,
+    const tierParams = {
+      tiers: parseStarTiers(item.starTiers),
+      currentPrice: new Decimal(item.customerPrice.toString()),
       commission,
-    );
+    };
+    let computed: ComputedAdvantageItem;
+    try {
+      computed = computeAdvantageItemTiers({ ...tierParams, base });
+    } catch (err) {
+      failureLog.record(err);
+      computed = computeAdvantageItemTiers({ ...tierParams, base: { kind: 'degraded' } });
+    }
 
     return {
       id: item.id,
@@ -412,6 +407,8 @@ export async function getAdvantageTariffDetail(
       customPrice: item.customPrice !== null ? item.customPrice.toFixed(2) : null,
     };
   });
+
+  failureLog.flush();
 
   const commissionSource: AdvantageCommissionSource | null =
     source === null

@@ -24,7 +24,7 @@
 // SENDEOMP is ensured by globalSetup.
 
 import { Decimal } from 'decimal.js';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
@@ -218,6 +218,22 @@ async function setupFixture(): Promise<Fixture> {
       type: 'COGS',
       amountGross: new Decimal('200.00'),
       vatRate: 20,
+    },
+  });
+  // The scenario engine costs from the profile's VERSIONS (effective-dated), exactly as
+  // the real cost-profile service writes a version 1 on create. Without it the variants
+  // would read MISSING_COST. One version covers both variants sharing this profile.
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId: org.id,
+      version: 1,
+      name: 'COGS Test',
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      vatRate: 20,
+      changedFields: [],
+      effectiveFrom: new Date('2024-01-01T00:00:00Z'),
     },
   });
   await prisma.productVariantCostProfile.createMany({
@@ -517,6 +533,29 @@ describe('Flash Products - list / detail / delete', () => {
     expect(p1?.customPrice).toBeNull();
   });
 
+  it('keeps the flat current rate when the flash tariff has no band', async () => {
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/flash-products/${fx.listId}`,
+      { headers: { Authorization: bearer(fx.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DetailWire;
+    const noBand = body.items.find((i) => i.id === fx.itemNoBand);
+
+    // hasCommissionTariff but its barcode is absent from the period -> no covering band,
+    // so the offer keeps the flat "Mevcut Komisyon" (I) rate, source 'current'.
+    expect(noBand?.hasCommissionTariff).toBe(true);
+    expect(noBand?.commissionSource).toBe('current');
+    // The offer commission equals the item's current (flat) rate, both in 4dp.
+    expect(noBand?.offer24?.commissionPct).toBe(noBand?.currentCommissionPct);
+    expect(noBand?.offer24?.commissionPct).toBe('19.0000');
+    // The item is calculable (cost + shipping resolve) and the offer carries a concrete,
+    // finite profit -- not null.
+    expect(noBand?.calculable).toBe(true);
+    expect(noBand?.offer24?.netProfit).not.toBeNull();
+    expect(Number.isFinite(Number(noBand?.offer24?.netProfit))).toBe(true);
+  });
+
   it('404s for a list id from another store, then deletes and lists empty', async () => {
     const foreign = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/flash-products/${crypto.randomUUID()}`,
@@ -541,5 +580,155 @@ describe('Flash Products - list / detail / delete', () => {
       { headers: { Authorization: bearer(fx.accessToken) } },
     );
     expect(((await list.json()) as ListWire).data).toHaveLength(0);
+  });
+});
+
+describe('Flash Products — per-item degrade (decision 9)', () => {
+  // TWO items' scenarios are forced to throw (a negative customer price, which the
+  // engine's unit-price validator rejects): the detail must still return 200 with those
+  // items' profit empty (reason null) while a third item computes fine, and the failures
+  // must collapse into exactly one [profit-read] line per request with failedCount 2.
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  it('keeps the flash detail up when one item fails to compute', async () => {
+    await truncateAll();
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing — globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Flash Degrade Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'flash-degrade-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 9301n,
+        productMainId: 'pm-9301',
+        title: 'Bozulma Flas Urunu',
+        categoryId: 597n,
+        categoryName: 'Bayrak',
+        brandId: 2032n,
+        brandName: 'Alpaka',
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: 93010n,
+        barcode: 'FLASH-DEG',
+        stockCode: 'STK-FDEG',
+        salePrice: new Decimal('500.00'),
+        listPrice: new Decimal('500.00'),
+        vatRate: 20,
+        dimensionalWeightOverride: new Decimal('3.0'),
+      },
+    });
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'COGS Flash Degrade',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Flash Degrade',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+    });
+    await ensureFeeDefinitions();
+
+    const list = await prisma.flashProductList.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Bozulma Flas', createdBy: user.id },
+    });
+    const baseItem = {
+      organizationId: org.id,
+      storeId: store.id,
+      listId: list.id,
+      productVariantId: variant.id,
+      barcode: 'FLASH-DEG',
+      productTitle: 'Bozulma Flas Urunu',
+      currentPrice: '500.00',
+      currentCommissionPct: '19', // flat, no commission tariff -> the flat fallback
+      hasCommissionTariff: false,
+      offer24Price: '400.00',
+    };
+    // Healthy item: a positive customer price -> computes.
+    const okItem = await prisma.flashProductItem.create({
+      data: { ...baseItem, customerPrice: '500.00', sortOrder: 0 },
+    });
+    // Two failing items: a NEGATIVE customer price makes the engine reject the baseline
+    // unit price -> each item's compute throws.
+    const fail1 = await prisma.flashProductItem.create({
+      data: { ...baseItem, customerPrice: '-5.00', sortOrder: 1 },
+    });
+    const fail2 = await prisma.flashProductItem.create({
+      data: { ...baseItem, customerPrice: '-7.00', sortOrder: 2 },
+    });
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/flash-products/${list.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const items = ((await res.json()) as DetailWire).items;
+
+      const ok = items.find((i) => i.id === okItem.id);
+      expect(ok?.calculable).toBe(true);
+      expect(ok?.currentNetProfit).not.toBeNull();
+
+      for (const failId of [fail1.id, fail2.id]) {
+        const bad = items.find((i) => i.id === failId);
+        expect(bad?.calculable).toBe(false);
+        // A degraded compute carries no reason (not NO_PRODUCT -- the variant is matched).
+        expect(bad?.reason).toBeNull();
+        expect(bad?.currentNetProfit).toBeNull();
+        expect(bad?.offer24?.netProfit).toBeNull();
+      }
+
+      // Two failing items collapse into exactly one [profit-read] line, failedCount 2.
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[profit-read] in-request profit computation failed',
+        expect.objectContaining({
+          surface: 'flash-product',
+          orderId: null,
+          failedCount: 2,
+        }),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

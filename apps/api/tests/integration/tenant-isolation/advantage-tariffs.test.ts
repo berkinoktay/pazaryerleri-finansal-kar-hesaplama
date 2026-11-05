@@ -366,6 +366,22 @@ describe('advantage-tariffs: route-layer authorization', () => {
         vatRate: 20,
       },
     });
+    // The scenario engine costs from the profile's VERSIONS (effective-dated); without a
+    // version the variant reads MISSING_COST, which would mask the NO_COMMISSION this test
+    // asserts (the econ must be fine so the ONLY missing input is the commission rate).
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profileA.id,
+        organizationId: orgA.id,
+        version: 1,
+        name: 'COGS Test',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
     await prisma.productVariantCostProfile.create({
       data: { organizationId: orgA.id, profileId: profileA.id, productVariantId: variantA.id },
     });

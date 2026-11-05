@@ -19,7 +19,7 @@
 import { readFileSync } from 'node:fs';
 
 import { Decimal } from 'decimal.js';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 
@@ -204,6 +204,22 @@ async function setupTariffFixture(): Promise<TariffFixture> {
       type: 'COGS',
       amountGross: new Decimal('200.00'),
       vatRate: 20,
+    },
+  });
+  // The scenario engine costs from the profile's VERSIONS (effective-dated), exactly as
+  // the real cost-profile service writes a version 1 on create. Without it the variant
+  // would read MISSING_COST.
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId: org.id,
+      version: 1,
+      name: 'COGS Test',
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      vatRate: 20,
+      changedFields: [],
+      effectiveFrom: new Date('2024-01-01T00:00:00Z'),
     },
   });
   await prisma.productVariantCostProfile.create({
@@ -546,5 +562,180 @@ describe('Advantage Product Labels - list / detail / commission-source / delete'
     );
     expect(res.status).toBe(200);
     expect(((await res.json()) as ListWire).data).toHaveLength(0);
+  });
+});
+
+describe('Advantage Product Labels — per-item degrade (decision 9)', () => {
+  // TWO items' scenarios are forced to throw (a negative customer price, which the
+  // engine's unit-price validator rejects): the detail must still return 200 with those
+  // items' profit empty (reason null) while a third item computes fine, and the failures
+  // must collapse into exactly one [profit-read] line per request with failedCount 2.
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  it('keeps the advantage detail up when one item fails to compute', async () => {
+    await truncateAll();
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing — globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Advantage Degrade Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'advantage-degrade-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    // brandId null so the category rate rule below matches on category alone.
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 8801n,
+        productMainId: 'pm-8801',
+        title: 'Bozulma Avantaj Urunu',
+        categoryId: 599n,
+        categoryName: 'Kategori',
+        brandId: null,
+        brandName: null,
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: 88010n,
+        barcode: 'ADV-DEG',
+        stockCode: 'STK-ADEG',
+        salePrice: new Decimal('500.00'),
+        listPrice: new Decimal('500.00'),
+        vatRate: 20,
+        dimensionalWeightOverride: new Decimal('3.0'),
+      },
+    });
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'COGS Adv Degrade',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Adv Degrade',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+    });
+    await ensureFeeDefinitions();
+    // A CATEGORY commission rate so the unpinned (category-mode) advantage resolves a
+    // commission for the matched variant -> the healthy item is calculable.
+    await prisma.marketplaceCommissionRate.create({
+      data: {
+        platform: 'TRENDYOL',
+        ruleKind: 'CATEGORY',
+        categoryId: 599n,
+        brandId: null,
+        categoryName: 'Kategori',
+        parentCategoryName: 'Ust Kategori',
+        brandName: null,
+        baseRate: new Decimal('15'),
+        paymentTermDays: 60,
+        segmentOverrides: {},
+        fetchedAt: new Date(),
+        sourceScreen: 'CategoryCommissionPaymentTerms',
+      },
+    });
+
+    // Unpinned -> category commission supplies the rate (no band ladder).
+    const tariff = await prisma.advantageTariff.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Bozulma Avantaj' },
+    });
+    const tiers = [
+      { key: 'tier1', upperLimit: '450.00', lowerLimit: '400.00' },
+      { key: 'tier2', upperLimit: '399.99', lowerLimit: '300.00' },
+      { key: 'tier3', upperLimit: '299.99' },
+    ];
+    const baseItem = {
+      organizationId: org.id,
+      storeId: store.id,
+      tariffId: tariff.id,
+      productVariantId: variant.id,
+      barcode: 'ADV-DEG',
+      productTitle: 'Bozulma Avantaj Urunu',
+      currentPrice: '500.00',
+      hasCommissionTariff: false,
+      starTiers: tiers,
+      applyUntilEnd: false,
+    };
+    // Healthy item: a positive customer price -> computes.
+    const okItem = await prisma.advantageTariffItem.create({
+      data: { ...baseItem, customerPrice: '500.00', sortOrder: 0 },
+    });
+    // Two failing items: a NEGATIVE customer price makes the engine reject the baseline
+    // unit price -> each item's compute throws.
+    const fail1 = await prisma.advantageTariffItem.create({
+      data: { ...baseItem, customerPrice: '-5.00', sortOrder: 1 },
+    });
+    const fail2 = await prisma.advantageTariffItem.create({
+      data: { ...baseItem, customerPrice: '-7.00', sortOrder: 2 },
+    });
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/advantage-tariffs/${tariff.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const items = ((await res.json()) as DetailWire).items;
+
+      const ok = items.find((i) => i.id === okItem.id);
+      expect(ok?.calculable).toBe(true);
+      expect(ok?.current.netProfit).not.toBeNull();
+
+      for (const failId of [fail1.id, fail2.id]) {
+        const bad = items.find((i) => i.id === failId);
+        expect(bad?.calculable).toBe(false);
+        // A degraded compute carries no reason (not NO_PRODUCT -- the variant is matched).
+        expect(bad?.reason).toBeNull();
+        expect(bad?.current.netProfit).toBeNull();
+        expect(bad?.tiers.every((t) => t.netProfit === null)).toBe(true);
+      }
+
+      // Two failing items collapse into exactly one [profit-read] line, failedCount 2.
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[profit-read] in-request profit computation failed',
+        expect.objectContaining({
+          surface: 'advantage-tariff',
+          orderId: null,
+          failedCount: 2,
+        }),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

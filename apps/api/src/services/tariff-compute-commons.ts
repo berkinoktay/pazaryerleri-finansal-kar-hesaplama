@@ -4,12 +4,12 @@
 // it stays here regardless of engine.
 //
 // LEGACY (deleted in Faz 4B Task 8 with `assembleUnitEconomics`): `TariffAssemblyContext`,
-// `tariffCommission`, `deriveReason`, `NO_SHIPPING` and `TariffVariant` back the advantage,
-// flash, discount and campaign screens, which still price via the old unit assembly
-// (`assembleUnitEconomics` + `computeUnitProfit`) by OVERRIDING only the commission. The
-// product and Plus commission tariffs have moved to the scenario engine (Task 5) and no
-// longer use any of them. Once Tasks 6-8 move the remaining screens too, this file keeps
-// only `TariffItemReason`.
+// `tariffCommission`, `deriveReason`, `NO_SHIPPING` and `TariffVariant` back the discount
+// and campaign screens, which still price via the old unit assembly (`assembleUnitEconomics`
+// + `computeUnitProfit`) by OVERRIDING only the commission. The product, Plus, advantage
+// and flash screens have moved to the scenario engine (Tasks 5-6) and no longer use any of
+// them. Once Tasks 7-8 move the remaining screens too, this file keeps only
+// `TariffItemReason`.
 
 import type { Decimal } from 'decimal.js';
 
