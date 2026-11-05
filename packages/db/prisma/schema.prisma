@@ -1266,6 +1266,8 @@ model ShippingCarrier {
   externalId                       Int      @map("external_id")
   code                             String
   displayName                      String   @map("display_name")
+  // The exact cargoProviderName values Trendyol writes on orders and packages for this carrier; the order profit path matches against these and the display name.
+  orderCargoNames                  String[] @default([]) @map("order_cargo_names")
   taxNumber                        String?  @map("tax_number")
   supportsBaremDestek              Boolean  @default(true) @map("supports_barem_destek")
   maxBaremDesi                     Int      @default(10) @map("max_barem_desi")
