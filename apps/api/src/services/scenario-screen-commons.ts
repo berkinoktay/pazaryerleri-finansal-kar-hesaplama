@@ -25,6 +25,7 @@ import {
   type ProfitIssue,
   type ProfitStatement,
   type ScenarioLoadResult,
+  type StoredTariffBand,
   type TrendyolScenarioBase,
 } from '@pazarsync/profit';
 
@@ -162,6 +163,29 @@ export function evaluateScreenScenario(params: {
 }
 
 // --- Serialization (shared with product pricing) ---
+
+/** One commission band serialized for the wire: price limits 2dp, percent 4dp. */
+export interface SerializedCommissionBand {
+  readonly lowerLimit: string | null;
+  readonly upperLimit: string | null;
+  readonly commissionPct: string;
+}
+
+/**
+ * Serializes a resolved commission-band ladder for the wire the single way every screen
+ * shows it (advantage / flash / discount popover): a price limit at two decimals or null
+ * when open-ended, the percent at four decimals. The caller keeps the null-in / null-out
+ * guard (no ladder -> null) so this never has to invent an empty ladder.
+ */
+export function serializeCommissionBandLadder(
+  bands: readonly StoredTariffBand[],
+): SerializedCommissionBand[] {
+  return bands.map((band) => ({
+    lowerLimit: band.lowerLimit !== null ? new Decimal(band.lowerLimit).toFixed(2) : null,
+    upperLimit: band.upperLimit !== null ? new Decimal(band.upperLimit).toFixed(2) : null,
+    commissionPct: new Decimal(band.commissionPct).toFixed(4),
+  }));
+}
 
 /** A two-decimal money string (half-up), signed zero normalized to a plain zero. */
 export function formatMoney2(value: Decimal): string {

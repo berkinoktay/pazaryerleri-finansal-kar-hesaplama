@@ -472,6 +472,20 @@ describe('Flash Products - list / detail / delete', () => {
     expect(p1?.commissionSource).toBe('band');
     expect(p1?.offer24?.commissionPct).toBe('11.5000');
     expect(p1?.offer24?.netProfit).not.toBeNull();
+    // --- Golden offer profit (hand-derived from the fixture, NOT the engine) ---
+    // Locks that the resolved band rate (Period 1 band2 = 11.5%) flows into the engine
+    // at the offer price 260.00. Same fixture constants as product-pricing: cost 200
+    // GROSS (VAT 20%), SENDEOMP desi-3 ship 122.39 GROSS, PSF 13.19 GROSS, sale VAT 20%,
+    // commission VAT 20%, stoppage 1% of NET sale; store has no profitSettings ->
+    // defaults (includeStopaj true, includeNegativeNetVat FALSE). Each line's VAT rounds
+    // half-up to the kurus; netProfit = sum of signed line GROSS (incl. stoppage) minus
+    // effective net VAT (floored at 0 when the net VAT is negative):
+    //   saleGross 260.00; commission round(0.115*260)=29.90; ship 122.39; psf 13.19;
+    //   cost 200.00; saleVAT round(260/6)=43.33 -> saleNet 216.67 -> stoppage 2.17
+    //   inputVAT = cost 33.33 + comm round(29.90/6)=4.98 + ship 20.40 + psf 2.20 = 60.91
+    //   netVAT 43.33 - 60.91 = -17.58 < 0 -> floored to 0 (negative net VAT excluded)
+    //   netProfit = 260.00 - 29.90 - 122.39 - 13.19 - 200.00 - 2.17 - 0 = -107.65
+    expect(p1?.offer24?.netProfit).toBe('-107.65');
     expect(p1?.imageUrl).toBe('https://cdn.example/flash-1.jpg');
     expect(p1?.commissionBands).toEqual([
       { lowerLimit: '300.00', upperLimit: null, commissionPct: '19.0000' },
@@ -592,7 +606,7 @@ describe('Flash Products — per-item degrade (decision 9)', () => {
     await ensureDbReachable();
   });
 
-  it('keeps the flash detail up when one item fails to compute', async () => {
+  it('keeps the flash detail up when items fail to compute and logs once', async () => {
     await truncateAll();
     const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
     if (carrier === null) throw new Error('SENDEOMP carrier missing — globalSetup must run');

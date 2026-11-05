@@ -31,6 +31,7 @@ import {
   type TariffVariant,
 } from './discount-compute.service';
 import { scenarioPresentation, type DiscountCommissionInputs } from './discount-math-commons';
+import { serializeCommissionBandLadder } from './scenario-screen-commons';
 import { fetchCostAggregates } from './products-list.service';
 import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
 import { NO_SHIPPING } from './tariff-compute-commons';
@@ -298,13 +299,7 @@ export async function getDiscountListDetail(
     // query. Serialized like advantage: money at 2 decimals, percent at 4. Null when
     // there is no ladder (no covering tariff week for the barcode).
     const commissionBands: DiscountCommissionBand[] | null =
-      bands === null
-        ? null
-        : bands.map((band) => ({
-            lowerLimit: band.lowerLimit !== null ? new Decimal(band.lowerLimit).toFixed(2) : null,
-            upperLimit: band.upperLimit !== null ? new Decimal(band.upperLimit).toFixed(2) : null,
-            commissionPct: new Decimal(band.commissionPct).toFixed(4),
-          }));
+      bands === null ? null : serializeCommissionBandLadder(bands);
     const productRate =
       variantRow !== undefined && variantRow.syncedCommissionRate !== null
         ? new Decimal(variantRow.syncedCommissionRate.toString())

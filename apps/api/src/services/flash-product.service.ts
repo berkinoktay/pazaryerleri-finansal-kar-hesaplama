@@ -1,13 +1,13 @@
-// Read + delete + selections service for the Flash Products (Flaş Ürünler) feature.
+// Read + delete + selections service for the Flash Products (Flas Urunler) feature.
 //
-// list   → one row per saved flash upload (product / item / selected counts, exported).
-// detail → the list with per-item, per-scenario profit COMPUTED on read. The reduced
-//          commission of each offer is READ from the store's Commission Tariff — the
+// list   -> one row per saved flash upload (product / item / selected counts, exported).
+// detail -> the list with per-item, per-scenario profit COMPUTED on read. The reduced
+//          commission of each offer is READ from the store's Commission Tariff -- the
 //          offer's window resolves into a commission BAND, else the flat "Mevcut
 //          Komisyon" rate (see flash-product-commission). Resolved in ONE batch per
 //          detail so the same (week, period) is not re-queried per date row.
-// delete → hard delete (cascades to items via the schema FK).
-// updateSelections → bulk offer choice XOR custom price.
+// delete -> hard delete (cascades to items via the schema FK).
+// updateSelections -> bulk offer choice XOR custom price.
 //
 // Every query is scoped by organizationId + storeId (tenant isolation). Money is
 // serialized to GROSS decimal strings; the frontend renders, never computes.
@@ -18,7 +18,6 @@ import { Prisma, prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { NotFoundError } from '../lib/errors';
-import type { StoredTariffBand } from '@pazarsync/profit';
 import {
   buildFlashCommissionResolver,
   type FlashCommissionRequest,
@@ -32,28 +31,16 @@ import {
   createRequestFailureLog,
   loadScreenScenarioBases,
   screenScenarioBaseFor,
+  serializeCommissionBandLadder,
 } from './scenario-screen-commons';
 import type {
-  FlashCommissionBand,
   FlashProductDetail,
   FlashProductDetailItem,
   FlashProductListItem,
   FlashSelection,
 } from '../validators/flash-product.validator';
 
-/** Serializes a resolved band ladder for the wire (money 2dp, percent 4dp), or null. */
-function serializeFlashBands(
-  bands: ReadonlyArray<StoredTariffBand> | null,
-): FlashCommissionBand[] | null {
-  if (bands === null) return null;
-  return bands.map((band) => ({
-    lowerLimit: band.lowerLimit !== null ? new Decimal(band.lowerLimit).toFixed(2) : null,
-    upperLimit: band.upperLimit !== null ? new Decimal(band.upperLimit).toFixed(2) : null,
-    commissionPct: new Decimal(band.commissionPct).toFixed(4),
-  }));
-}
-
-// ─── List ───────────────────────────────────────────────────────────────────
+// --- List ---
 
 /** Lists every saved flash upload for a store with product / item / selected counts. */
 export async function listFlashProducts(
@@ -97,7 +84,7 @@ export async function listFlashProducts(
   });
 }
 
-// ─── Detail ──────────────────────────────────────────────────────────────────
+// --- Detail ---
 
 /**
  * Returns one flash list with per-item, per-scenario profit computed on read. Throws
@@ -183,7 +170,7 @@ export async function getFlashProductDetail(
     }
   }
 
-  // ─── Resolve every offer window's commission source in ONE batch ──────────
+  // --- Resolve every offer window's commission source in ONE batch ---
   const requests: FlashCommissionRequest[] = [];
   for (const item of list.items) {
     if (!item.hasCommissionTariff) continue;
@@ -248,8 +235,8 @@ export async function getFlashProductDetail(
           }
         : null;
 
-    // Primary window = the 24h offer's window, else the 3h offer's — drives the surfaced
-    // band ladder + the custom-price estimate (design MİMARİ KARAR 2). Resolved on the
+    // Primary window = the 24h offer's window, else the 3h offer's -- drives the surfaced
+    // band ladder + the custom-price estimate (design MIMARI KARAR 2). Resolved on the
     // window's END (see flash-product-commission).
     const primaryStart = item.offer24StartsAt ?? item.offer3StartsAt;
     const primaryEnd = item.offer24StartsAt !== null ? item.offer24EndsAt : item.offer3EndsAt;
@@ -295,7 +282,11 @@ export async function getFlashProductDetail(
       reason: computed.reason,
       hasCommissionTariff: item.hasCommissionTariff,
       commissionSource: computed.commissionSource,
-      commissionBands: serializeFlashBands(computed.commissionBands),
+      // null-in / null-out: the flat fallback carries no ladder (see computeFlashItem).
+      commissionBands:
+        computed.commissionBands === null
+          ? null
+          : serializeCommissionBandLadder(computed.commissionBands),
       offer24: computed.offer24,
       offer3: computed.offer3,
       selectedOffer: item.selectedOffer,
@@ -313,7 +304,7 @@ export async function getFlashProductDetail(
   };
 }
 
-// ─── Delete ────────────────────────────────────────────────────────────────
+// --- Delete ---
 
 /** Hard-deletes a flash list (items cascade). 404 when not in this store. */
 export async function deleteFlashProductList(
@@ -336,7 +327,7 @@ export async function deleteFlashProductList(
   }
 }
 
-// ─── Save selections ─────────────────────────────────────────────────────────
+// --- Save selections ---
 
 /**
  * Persists the seller's offer choice (H24 / H3) XOR custom price in ONE bulk UPDATE.

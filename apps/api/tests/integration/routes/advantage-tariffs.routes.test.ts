@@ -385,6 +385,21 @@ describe('Advantage Product Labels - list / detail / commission-source / delete'
     // commissionPct is serialized at 4-decimal precision (matching the commission-tariff
     // vertical's `toFixed(4)`), so the full applied rate is preserved on the wire.
     expect(matched?.tiers.map((t) => t.commissionPct)).toEqual(['13.1000', '11.5000', '8.8000']);
+    // --- Golden tier profit (hand-derived from the fixture, NOT the engine) ---
+    // Locks that the chosen band rate flows into the engine at the tier's own price.
+    // tier2 is priced at its upperLimit 274.42 and lands in band3 -> 11.5% commission.
+    // Same fixture constants as product-pricing: cost 200 GROSS (VAT 20%), SENDEOMP
+    // desi-3 ship 122.39 GROSS, PSF 13.19 GROSS, sale VAT 20%, commission VAT 20%,
+    // stoppage 1% of NET sale; store has no profitSettings -> defaults (includeStopaj
+    // true, includeNegativeNetVat FALSE). Each line's VAT rounds half-up to the kurus;
+    // netProfit = sum of signed line GROSS (incl. stoppage) minus effective net VAT
+    // (floored at 0 when the net VAT is negative):
+    //   saleGross 274.42; commission round(0.115*274.42)=31.56; ship 122.39; psf 13.19;
+    //   cost 200.00; saleVAT round(274.42/6)=45.74 -> saleNet 228.68 -> stoppage 2.29
+    //   inputVAT = cost 33.33 + comm round(31.56/6)=5.26 + ship 20.40 + psf 2.20 = 61.19
+    //   netVAT 45.74 - 61.19 = -15.45 < 0 -> floored to 0 (negative net VAT excluded)
+    //   netProfit = 274.42 - 31.56 - 122.39 - 13.19 - 200.00 - 2.29 - 0 = -95.01
+    expect(matched?.tiers[1]?.netProfit).toBe('-95.01');
     // The band-sourced item surfaces its full commission-band ladder (top-down), so the
     // UI can label WHICH band a price lands in. Money at 2 decimals, percent at 4 —
     // omitted limits (band1 upper, band4 lower) serialize to null.
@@ -574,7 +589,7 @@ describe('Advantage Product Labels — per-item degrade (decision 9)', () => {
     await ensureDbReachable();
   });
 
-  it('keeps the advantage detail up when one item fails to compute', async () => {
+  it('keeps the advantage detail up when items fail to compute and logs once', async () => {
     await truncateAll();
     const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
     if (carrier === null) throw new Error('SENDEOMP carrier missing — globalSetup must run');

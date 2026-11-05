@@ -1,15 +1,15 @@
 // Read + delete + selections + commission-source service for the Advantage
 // Product Labels feature.
 //
-// list   → one row per saved advantage tariff (product / selected counts, exported).
-// detail → the tariff with per-item, per-tier profit COMPUTED on read. The reduced
+// list   -> one row per saved advantage tariff (product / selected counts, exported).
+// detail -> the tariff with per-item, per-tier profit COMPUTED on read. The reduced
 //          commission is READ from the store's active-period Commission Tariff (or
-//          the pinned override) via a barcode → bands lookup, with a category-rate
+//          the pinned override) via a barcode -> bands lookup, with a category-rate
 //          fallback. The resolved source (tariff + period) is surfaced so the seller
 //          can confirm the periods align.
-// delete → hard delete (cascades to items via the schema FK).
-// updateSelections      → bulk tier choice + optional custom price.
-// updateCommissionSource → pin (or clear → category commission) which commission tariff supplies rates.
+// delete -> hard delete (cascades to items via the schema FK).
+// updateSelections      -> bulk tier choice + optional custom price.
+// updateCommissionSource -> pin (or clear -> category commission) which commission tariff supplies rates.
 //
 // Every query is scoped by organizationId + storeId (tenant isolation). Money is
 // serialized to GROSS decimal strings; the frontend renders only.
@@ -33,6 +33,7 @@ import {
   createRequestFailureLog,
   loadScreenScenarioBases,
   screenScenarioBaseFor,
+  serializeCommissionBandLadder,
 } from './scenario-screen-commons';
 import { parseStarTiers } from './advantage-tariff.types';
 import type {
@@ -50,7 +51,7 @@ function toTierKey(value: string | null): StarTierKey | null {
   return value === 'tier1' || value === 'tier2' || value === 'tier3' ? value : null;
 }
 
-// ─── Commission source resolution (the cross-vertical read) ──────────────────
+// --- Commission source resolution (the cross-vertical read) ---
 
 export interface CommissionSourceResolution {
   readonly tariffId: string;
@@ -58,7 +59,7 @@ export interface CommissionSourceResolution {
   readonly periodLabel: string;
   readonly startsAt: Date | null;
   readonly endsAt: Date | null;
-  /** barcode → its commission bands, from the resolved period. */
+  /** barcode -> its commission bands, from the resolved period. */
   readonly bandsByBarcode: ReadonlyMap<string, StoredTariffBand[]>;
 }
 
@@ -67,7 +68,7 @@ export interface CommissionSourceResolution {
  * is pinned, uses that tariff's sub-period active now, else the nearest-upcoming, else
  * its last (past) period. Returns null when nothing is pinned (the seller chose the
  * category commission at upload) or the pinned tariff has no usable period. This is the
- * one place the advantage vertical reads another vertical's data — always store-scoped.
+ * one place the advantage vertical reads another vertical's data -- always store-scoped.
  */
 export async function resolveCommissionSource(
   orgId: string,
@@ -96,7 +97,7 @@ export async function resolveCommissionSource(
     | null
     | undefined;
 
-  // No pinned tariff → category-only (the seller chose "kategori komisyonu" at
+  // No pinned tariff -> category-only (the seller chose "kategori komisyonu" at
   // upload, or this is a pre-picker record). There is no silent auto-resolution:
   // the Advantage upload makes the commission tariff choice explicit.
   if (overrideTariffId === null) return null;
@@ -107,7 +108,7 @@ export async function resolveCommissionSource(
       orderBy: { sortOrder: 'asc' },
       select: periodSelect,
     });
-    // Within the pinned week, use the sub-period (3-Gün / 4-Gün) active NOW; else,
+    // Within the pinned week, use the sub-period (3-Gun / 4-Gun) active NOW; else,
     // when the whole week is still upcoming (preparing ahead), the one that starts
     // SOONEST; else the last (a fully-past week). Period bounds are stored as Istanbul
     // wall-clock saved as UTC, so they are converted to the real instant (and compared
@@ -156,7 +157,7 @@ export async function resolveCommissionSource(
   };
 }
 
-// ─── List ───────────────────────────────────────────────────────────────────
+// --- List ---
 
 /** Lists every saved advantage tariff for a store with product/selected counts. */
 export async function listAdvantageTariffs(
@@ -185,7 +186,7 @@ export async function listAdvantageTariffs(
     for (const item of tariff.items) {
       // A row counts as selected when it has a tier OR a custom price. A confirmed
       // custom price is persisted with selected_tier = NULL (custom_price only), so
-      // keying on selectedTier alone undercounts custom-only rows — the same root
+      // keying on selectedTier alone undercounts custom-only rows -- the same root
       // cause as the export skip (resolveAdvantageExportPrice).
       if (item.selectedTier !== null || item.customPrice !== null) selectedCount += 1;
     }
@@ -200,7 +201,7 @@ export async function listAdvantageTariffs(
   });
 }
 
-// ─── Detail ──────────────────────────────────────────────────────────────────
+// --- Detail ---
 
 /**
  * Returns one advantage tariff with per-item, per-tier profit computed on read.
@@ -292,7 +293,7 @@ export async function getAdvantageTariffDetail(
     }
   }
 
-  // ─── Resolve the commission source + a category-rate fallback cache ───────
+  // --- Resolve the commission source + a category-rate fallback cache ---
   const source = await resolveCommissionSource(
     orgId,
     storeId,
@@ -301,7 +302,7 @@ export async function getAdvantageTariffDetail(
   );
 
   // Resolve the category rate once per distinct (categoryId, brandId) among the
-  // matched variants — the fallback commission for products with no tariff band.
+  // matched variants -- the fallback commission for products with no tariff band.
   const categoryRateByKey = new Map<string, Decimal | null>();
   const distinctCatKeys = new Map<string, { categoryId: bigint; brandId: bigint | null }>();
   for (const ref of variantMap.values()) {
@@ -346,17 +347,11 @@ export async function getAdvantageTariffDetail(
     if (item.hasCommissionTariff && bands === null) hasUnmatchedCommissionProducts = true;
 
     // The commission-band ladder surfaced to the UI (the "which band does this price
-    // land in?" popup). Reuses the bands ALREADY read for the compute above — no extra
+    // land in?" popup). Reuses the bands ALREADY read for the compute above -- no extra
     // query. Serialized like the tier commission: money at 2 decimals, percent at 4.
     // Null when there is no ladder (category source, or an unmatched barcode).
     const commissionBands: AdvantageCommissionBand[] | null =
-      bands === null
-        ? null
-        : bands.map((band) => ({
-            lowerLimit: band.lowerLimit !== null ? new Decimal(band.lowerLimit).toFixed(2) : null,
-            upperLimit: band.upperLimit !== null ? new Decimal(band.upperLimit).toFixed(2) : null,
-            commissionPct: new Decimal(band.commissionPct).toFixed(4),
-          }));
+      bands === null ? null : serializeCommissionBandLadder(bands);
 
     const categoryRate =
       ref && ref.categoryId !== null
@@ -365,11 +360,11 @@ export async function getAdvantageTariffDetail(
 
     const commission: ItemCommissionInputs = { bands, categoryRate };
     // The "current" baseline profit is computed on the price the buyer actually pays
-    // (customerPrice = "Müşterinin Gördüğü Fiyat"), NOT the raw Trendyol list price
+    // (customerPrice = "Musterinin Gordugu Fiyat"), NOT the raw Trendyol list price
     // (currentPrice = TSF). Commission and settlement are levied on the customer-paid
-    // price, and Trendyol's own badge eligibility ("geçerli aralık") is checked against
+    // price, and Trendyol's own badge eligibility ("gecerli aralik") is checked against
     // it too. customerPrice falls back to currentPrice at import when no discount is
-    // active, so products without a discount are unaffected. See profit-formula.md §2.1.
+    // active, so products without a discount are unaffected. See profit-formula.md section 2.1.
     const tierParams = {
       tiers: parseStarTiers(item.starTiers),
       currentPrice: new Decimal(item.customerPrice.toString()),
@@ -426,7 +421,7 @@ export async function getAdvantageTariffDetail(
     name: tariff.name,
     exported: tariff.exportedAt !== null,
     // Pinned = a commission tariff supplied the bands; category = none picked (or a
-    // pinned tariff was deleted / had no resolvable period → category fallback).
+    // pinned tariff was deleted / had no resolvable period -> category fallback).
     commissionSourceMode: source !== null ? 'pinned' : 'category',
     commissionSource,
     hasUnmatchedCommissionProducts,
@@ -434,7 +429,7 @@ export async function getAdvantageTariffDetail(
   };
 }
 
-// ─── Delete ────────────────────────────────────────────────────────────────
+// --- Delete ---
 
 /** Hard-deletes an advantage tariff (items cascade). 404 when not in this store. */
 export async function deleteAdvantageTariff(
@@ -457,7 +452,7 @@ export async function deleteAdvantageTariff(
   }
 }
 
-// ─── Save selections ─────────────────────────────────────────────────────────
+// --- Save selections ---
 
 /**
  * Persists the seller's tier choice + optional custom price in ONE bulk UPDATE.
@@ -499,11 +494,11 @@ export async function updateAdvantageSelections(
   }
 }
 
-// ─── Commission source switch ───────────────────────────────────────────────
+// --- Commission source switch ---
 
 /**
- * Pins (or clears → category commission) which Commission Tariff supplies the reduced rates.
- * 404 when the advantage tariff — or a non-null commission source — is not in this
+ * Pins (or clears -> category commission) which Commission Tariff supplies the reduced rates.
+ * 404 when the advantage tariff -- or a non-null commission source -- is not in this
  * store, so a cross-tenant id is indistinguishable from a missing one.
  */
 export async function updateAdvantageCommissionSource(
