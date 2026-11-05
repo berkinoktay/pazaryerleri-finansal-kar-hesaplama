@@ -1090,3 +1090,153 @@ describe('Commission Tariffs - store-wide degrade (decision 9)', () => {
     }
   });
 });
+
+describe('Commission Tariffs - sub-kurus band limits (Faz 4B closing gate)', () => {
+  // An imported Excel cell can carry more than two decimals (xlsx keeps arbitrary
+  // precision), so a band upperLimit like "149.999" reaches the engine unrounded. The
+  // engine rejects a unit price with more than two decimals, which (before the fix) threw
+  // and degraded the whole item. The engine price is now rounded half-up to the kurus
+  // ("149.999" -> 150.00), so the band computes and prices identically to a sibling band
+  // whose limit is already "150.00" -- and no [profit-read] degrade line is logged.
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  it('prices a band whose limit has more than two decimals', async () => {
+    await truncateAll();
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing - globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Sub Kurus Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'tariff-subkurus-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 9101n,
+        productMainId: 'pm-9101',
+        title: 'Alt Kurus Urunu',
+        categoryId: 597n,
+        categoryName: 'Gomlek',
+        brandId: 2032n,
+        brandName: 'Modline',
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: 91010n,
+        barcode: 'BC-SUBK',
+        stockCode: 'STK-SUBK',
+        salePrice: new Decimal('150.00'),
+        listPrice: new Decimal('150.00'),
+        vatRate: 20,
+        dimensionalWeightOverride: new Decimal('3.0'),
+      },
+    });
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'COGS SubKurus',
+        type: 'COGS',
+        amountGross: new Decimal('50.00'),
+        vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS SubKurus',
+        type: 'COGS',
+        amountGross: new Decimal('50.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+    });
+    await ensureFeeDefinitions();
+
+    const tariff = await prisma.commissionTariff.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Alt Kurus Tarifesi' },
+    });
+    const period = await prisma.commissionTariffPeriod.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: tariff.id,
+        dateRangeLabel: '1 - 7 Temmuz',
+        sortOrder: 0,
+      },
+    });
+    // Two bands at the SAME commission: one whose upperLimit carries a third decimal that
+    // rounds up to the kurus (149.999 -> 150.00) and a sibling already at 150.00. Both must
+    // price to the same engine revenue, so their net profits must match exactly.
+    await prisma.commissionTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        periodId: period.id,
+        productVariantId: variant.id,
+        barcode: 'BC-SUBK',
+        stockCode: 'STK-SUBK',
+        productTitle: 'Alt Kurus Urunu',
+        currentPrice: '150.00',
+        currentCommissionPct: '19.0000',
+        bands: [
+          { key: 'bandSub', upperLimit: '149.999', commissionPct: '19' },
+          { key: 'bandWhole', upperLimit: '150.00', commissionPct: '19' },
+        ],
+      },
+    });
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/commission-tariffs/${tariff.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const item = ((await res.json()) as DetailWire).periods[0]?.items[0];
+
+      expect(item?.calculable).toBe(true);
+      expect(item?.reason).toBeNull();
+
+      const bandSub = item?.bands.find((b) => b.key === 'bandSub');
+      const bandWhole = item?.bands.find((b) => b.key === 'bandWhole');
+      // The sub-kurus limit rounds to the kurus for both the engine and the wire price.
+      expect(bandSub?.price).toBe('150.00');
+      expect(bandWhole?.price).toBe('150.00');
+      expect(bandSub?.netProfit).not.toBeNull();
+      // Priced at the identical 150.00 point under the identical rate, the two bands must
+      // net the same profit (asserted against the sibling, not recomputed with the engine).
+      expect(bandSub?.netProfit).toBe(bandWhole?.netProfit);
+      expect(bandSub?.marginPct).toBe(bandWhole?.marginPct);
+
+      // No degrade: the item computed, so no [profit-read] line was written.
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+});

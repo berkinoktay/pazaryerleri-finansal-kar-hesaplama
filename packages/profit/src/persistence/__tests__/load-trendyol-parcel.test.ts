@@ -369,6 +369,161 @@ describe('loadTrendyolParcel', () => {
     expect(attrA?.tariffBands?.[0]?.ratePct.toFixed(0)).toBe('23');
   });
 
+  it('resolves an order at the exact end of a period to the next period', async () => {
+    // Two contiguous periods A [s, e) and B [e, f) share the boundary e. Period bounds are
+    // Istanbul wall-clock saved as UTC (UTC+3), so the stored 2026-10-29T00:00Z boundary
+    // denotes the real instant 2026-10-28T21:00Z; the order sits at exactly that instant.
+    // Bounds are half-open [start, end): the shared boundary belongs to the period that
+    // STARTS at it (B), never the one that ENDS at it (A) -- same convention as the
+    // "selects the tariff band by the real order instant" test above.
+    const parcel = await seedMelontikParcel();
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { orderDate: new Date('2026-10-28T21:00:00Z') },
+    });
+
+    const tariff = await prisma.commissionTariff.create({
+      data: {
+        organizationId: parcel.organizationId,
+        storeId: parcel.storeId,
+        name: 'Edge tariff',
+      },
+    });
+    const periods: { label: string; startsAt: Date; endsAt: Date; pct: string }[] = [
+      {
+        label: 'ends at the boundary',
+        startsAt: new Date('2026-10-20T00:00:00Z'),
+        endsAt: new Date('2026-10-29T00:00:00Z'),
+        pct: '11',
+      },
+      {
+        label: 'starts at the boundary',
+        startsAt: new Date('2026-10-29T00:00:00Z'),
+        endsAt: new Date('2026-11-05T00:00:00Z'),
+        pct: '23',
+      },
+    ];
+    for (const [index, period] of periods.entries()) {
+      const createdPeriod = await prisma.commissionTariffPeriod.create({
+        data: {
+          organizationId: parcel.organizationId,
+          storeId: parcel.storeId,
+          tariffId: tariff.id,
+          dateRangeLabel: period.label,
+          sortOrder: index,
+          startsAt: period.startsAt,
+          endsAt: period.endsAt,
+        },
+      });
+      await prisma.commissionTariffItem.create({
+        data: {
+          organizationId: parcel.organizationId,
+          storeId: parcel.storeId,
+          periodId: createdPeriod.id,
+          barcode: MELONTIK.items.a.barcode,
+          productTitle: `Melontik ${period.label}`,
+          currentPrice: MELONTIK.items.a.saleGross,
+          currentCommissionPct: period.pct,
+          bands: [{ key: 'band1', commissionPct: period.pct }],
+        },
+      });
+    }
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const attrA = loaded.estimateInput.attributes.items.find((i) => i.orderItemId === parcel.itemA);
+    expect(attrA?.tariffBands).toHaveLength(1);
+    // At the exact boundary the period that STARTS there wins -- B's rate, not A's.
+    expect(attrA?.tariffBands?.[0]?.ratePct.toFixed(0)).toBe('23');
+  });
+
+  it('falls back to the synced rate when the order falls in a gap between periods', async () => {
+    // Periods A [s, e) and C [g, h) with g > e leave a gap; the order (2026-10-28T09:00Z)
+    // sits inside it, so no tariff band covers it. With the order line's own rate cleared,
+    // the commission chain falls to the synced product rate (PRODUCT_SYNC), not a band.
+    const parcel = await seedMelontikParcel();
+    // Clear the order rate and give both variants a synced product rate, so the chain has a
+    // non-ORDER, non-tariff source to fall to.
+    await prisma.orderItem.updateMany({
+      where: { orderId: parcel.orderId },
+      data: { orderCommissionRatePct: null },
+    });
+    await prisma.productVariant.updateMany({
+      where: { id: { in: [parcel.variantA, parcel.variantB] } },
+      data: { syncedCommissionRate: '15.00' },
+    });
+
+    const tariff = await prisma.commissionTariff.create({
+      data: {
+        organizationId: parcel.organizationId,
+        storeId: parcel.storeId,
+        name: 'Gap tariff',
+      },
+    });
+    // A ends 2026-10-20 (real 2026-10-19T21:00Z), C starts 2026-11-01 (real 2026-10-31T21:00Z);
+    // the 2026-10-28T09:00Z order falls in the gap between them.
+    const periods: { label: string; startsAt: Date; endsAt: Date; pct: string }[] = [
+      {
+        label: 'before the gap',
+        startsAt: new Date('2026-10-01T00:00:00Z'),
+        endsAt: new Date('2026-10-20T00:00:00Z'),
+        pct: '11',
+      },
+      {
+        label: 'after the gap',
+        startsAt: new Date('2026-11-01T00:00:00Z'),
+        endsAt: new Date('2026-11-30T00:00:00Z'),
+        pct: '23',
+      },
+    ];
+    for (const [index, period] of periods.entries()) {
+      const createdPeriod = await prisma.commissionTariffPeriod.create({
+        data: {
+          organizationId: parcel.organizationId,
+          storeId: parcel.storeId,
+          tariffId: tariff.id,
+          dateRangeLabel: period.label,
+          sortOrder: index,
+          startsAt: period.startsAt,
+          endsAt: period.endsAt,
+        },
+      });
+      await prisma.commissionTariffItem.create({
+        data: {
+          organizationId: parcel.organizationId,
+          storeId: parcel.storeId,
+          periodId: createdPeriod.id,
+          barcode: MELONTIK.items.a.barcode,
+          productTitle: `Melontik ${period.label}`,
+          currentPrice: MELONTIK.items.a.saleGross,
+          currentCommissionPct: period.pct,
+          bands: [{ key: 'band1', commissionPct: period.pct }],
+        },
+      });
+    }
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const attrA = loaded.estimateInput.attributes.items.find((i) => i.orderItemId === parcel.itemA);
+    // The order is in the gap: no period covers it, so no tariff band is attached.
+    expect(attrA?.tariffBands).toBeNull();
+
+    // Driven through the estimate, the commission resolves from the synced product rate.
+    const result = estimateTrendyolParcel(loaded.estimateInput);
+    const commissionA = result.lines.find(
+      (line) => line.type === ProfitLineType.COMMISSION && line.orderItemId === parcel.itemA,
+    );
+    expect(commissionA?.inputs.rateSource).toBe('PRODUCT_SYNC');
+    // The synced rate 15.00 serializes with trailing zeros stripped (Decimal.toString).
+    expect(commissionA?.inputs.ratePct).toBe('15');
+  });
+
   it('counts accepted claim units as accepted returns', async () => {
     const parcel = await seedMelontikParcel();
 

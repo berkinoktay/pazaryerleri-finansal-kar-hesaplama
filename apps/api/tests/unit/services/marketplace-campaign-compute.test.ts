@@ -801,6 +801,68 @@ describe('suggestTargetMarginPrices', () => {
   });
 });
 
+describe('suggestTargetMarginPrices -- the suggestion stays safe in a cheaper band', () => {
+  // The solve resolves the commission ONCE, from the band at the MAXIMUM price (by design),
+  // then finds the smallest campaign price that reaches the target at that fixed rate. When
+  // the suggested price is below the maximum and its settlement lands in a CHEAPER band (a
+  // lower rate), the row's real scenario earns MORE than it was solved for -- so the
+  // suggestion never undershoots the target ("optimistic estimate, settlement reconciles").
+  // This two-band ladder gives a lower rate at lower prices to prove it.
+  const config: DiscountConfig = { type: 'NET', valueKind: 'PERCENT', value: d(10) };
+  // Boundary 700: a settlement at or above 700 pays 25%, below it pays 8%.
+  const LADDER_BANDS: StoredTariffBand[] = [
+    { key: 'pricey', lowerLimit: '700', upperLimit: null, commissionPct: '25' },
+    { key: 'cheap', lowerLimit: null, upperLimit: '699.99', commissionPct: '8' },
+  ];
+  const ladderCommission: DiscountCommissionInputs = {
+    bands: LADDER_BANDS,
+    productRate: null,
+    categoryRate: null,
+  };
+  const silentLog = (): RequestFailureLog =>
+    createRequestFailureLog({ surface: 'marketplace-campaign', organizationId: 'org-test' });
+
+  it('a suggestion that drops into a cheaper band still clears the target margin', () => {
+    const targetMarginPct = d(20);
+    const [suggestion] = suggestTargetMarginPrices({
+      items: [
+        { itemId: 'ladder', base: readyBase(), commission: ladderCommission, maxPrice: d(1000) },
+      ],
+      config,
+      fundingPct: d(0),
+      targetMarginPct,
+      failureLog: silentLog(),
+    });
+    expect(suggestion?.reason).toBeNull();
+    expect(suggestion?.price).not.toBeNull();
+
+    const suggestedPrice = d(suggestion?.price ?? '0');
+    // The target is reachable well below the ceiling, so the price genuinely dropped.
+    expect(suggestedPrice.lt(d(1000))).toBe(true);
+
+    // The row's own scenario, recomputed at exactly the suggested price.
+    const row = computeCampaignItem({
+      base: readyBase(),
+      commission: ladderCommission,
+      currentPrice: d(1000),
+      maxPrice: d(1000),
+      customPrice: suggestedPrice,
+      config,
+      fundingPct: d(0),
+    });
+    // The solve used the maximum price's band (25%); the suggested price settles into the
+    // cheaper band (8%) -- together they prove the price really crossed the boundary.
+    expect(row.maxScenario.commissionSource).toBe('band');
+    expect(row.maxScenario.commissionPct).toBe('25.0000');
+    expect(row.customScenario?.commissionSource).toBe('band');
+    expect(row.customScenario?.commissionPct).toBe('8.0000');
+    // Safe: the real margin at the suggested price meets (here, exceeds) the target.
+    expect(Number(row.customScenario?.marginPct)).toBeGreaterThanOrEqual(
+      targetMarginPct.toNumber(),
+    );
+  });
+});
+
 // --- Shared math bridge ---
 
 describe('the campaign scenario derives from the shared math', () => {

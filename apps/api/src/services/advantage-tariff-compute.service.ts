@@ -25,6 +25,7 @@ import {
   evaluateScreenScenario,
   formatMarginPct2,
   formatMoney2,
+  toKurusHalfUp,
   type ScreenScenarioBase,
 } from './scenario-screen-commons';
 import { quoteBreakdownFromStatement, type QuoteBreakdown } from './product-pricing.service';
@@ -274,9 +275,13 @@ export function computeAdvantageItemTiers(params: {
         marginPct: null,
       };
     }
+    // An imported tier limit can carry sub-kurus precision; the engine rejects a unit price
+    // with more than two decimals, so round it to the kurus half-up before evaluating --
+    // exactly as the discount/campaign screens do. The band lookup above and the wire
+    // `price` below keep the unrounded tier limit.
     const outcome = evaluateScreenScenario({
       base: base.base,
-      unitPrice: price,
+      unitPrice: toKurusHalfUp(price),
       commissionPct: resolved.pct,
     });
     return {

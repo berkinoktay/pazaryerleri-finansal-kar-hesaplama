@@ -754,3 +754,178 @@ describe('Advantage Product Labels — per-item degrade (decision 9)', () => {
     }
   });
 });
+
+describe('Advantage Product Labels - sub-kurus tier limits (Faz 4B closing gate)', () => {
+  // A star-tier upper limit imported from Excel can carry more than two decimals
+  // ("249.999"). The engine rejects a unit price with more than two decimals, which (before
+  // the fix) threw and degraded the whole item. The tier evaluation price is now rounded
+  // half-up to the kurus ("249.999" -> 250.00), so the tier computes its reduced commission
+  // and profit and no [profit-read] degrade line is logged.
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  it('prices a star tier whose limit has more than two decimals', async () => {
+    await truncateAll();
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing - globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Advantage Sub Kurus Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'advantage-subkurus-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 9501n,
+        productMainId: 'pm-9501',
+        title: 'Alt Kurus Avantaj Urunu',
+        categoryId: 597n,
+        categoryName: 'Bayrak',
+        brandId: 2032n,
+        brandName: 'Alpaka',
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: 95010n,
+        barcode: 'ADV-SUBK',
+        stockCode: 'STK-ASUBK',
+        salePrice: new Decimal('360.00'),
+        listPrice: new Decimal('360.00'),
+        vatRate: 20,
+        dimensionalWeightOverride: new Decimal('3.0'),
+      },
+    });
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'COGS Adv SubKurus',
+        type: 'COGS',
+        amountGross: new Decimal('50.00'),
+        vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Adv SubKurus',
+        type: 'COGS',
+        amountGross: new Decimal('50.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+    });
+    await ensureFeeDefinitions();
+
+    // A commission tariff whose active period holds one all-covering band, pinned as the
+    // advantage's reduced-rate source, so the tier's price resolves to the band (19%).
+    const commissionTariff = await prisma.commissionTariff.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Komisyon Tarifesi' },
+    });
+    const now = Date.now();
+    const period = await prisma.commissionTariffPeriod.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: commissionTariff.id,
+        dateRangeLabel: '7 - 14 Temmuz',
+        startsAt: new Date(now - 86_400_000),
+        endsAt: new Date(now + 86_400_000),
+        sortOrder: 0,
+      },
+    });
+    await prisma.commissionTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        periodId: period.id,
+        productVariantId: variant.id,
+        barcode: 'ADV-SUBK',
+        stockCode: 'STK-ASUBK',
+        productTitle: 'Alt Kurus Avantaj Urunu',
+        currentPrice: '360.00',
+        currentCommissionPct: '0.1900',
+        // No limits: the band covers both the unrounded tier limit (249.999) and the
+        // rounded engine price (250.00).
+        bands: [{ key: 'band1', commissionPct: '19' }],
+      },
+    });
+
+    const tariff = await prisma.advantageTariff.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'Alt Kurus Avantaj',
+        commissionSourceTariffId: commissionTariff.id,
+      },
+    });
+    const matched = await prisma.advantageTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: tariff.id,
+        productVariantId: variant.id,
+        barcode: 'ADV-SUBK',
+        stockCode: 'STK-ASUBK',
+        productTitle: 'Alt Kurus Avantaj Urunu',
+        currentPrice: '360.00',
+        customerPrice: '360.00',
+        hasCommissionTariff: true,
+        // The tier limit carries a third decimal that rounds up to the kurus.
+        starTiers: [{ key: 'tier1', upperLimit: '249.999' }],
+        applyUntilEnd: false,
+        sortOrder: 0,
+      },
+    });
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/advantage-tariffs/${tariff.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const item = ((await res.json()) as DetailWire).items.find((i) => i.id === matched.id);
+
+      expect(item?.calculable).toBe(true);
+      expect(item?.reason).toBeNull();
+
+      const tier = item?.tiers.find((t) => t.key === 'tier1');
+      // The sub-kurus limit rounds to the kurus for the engine and the wire price...
+      expect(tier?.price).toBe('250.00');
+      // ...and the tier still resolves its reduced commission and a concrete profit.
+      expect(tier?.commissionSource).toBe('band');
+      expect(tier?.commissionPct).not.toBeNull();
+      expect(tier?.netProfit).not.toBeNull();
+      expect(tier?.marginPct).not.toBeNull();
+
+      // No degrade: the item computed, so no [profit-read] line was written.
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+});

@@ -659,8 +659,9 @@ export async function quoteProductPrice(
     price: solved.unitPrice.toFixed(2),
     // Signed change vs the current list price (solved - current). Negative when the
     // target lowers the price. Computed here (backend) -- the frontend never does money
-    // math, it only renders this value.
-    priceDelta: solved.unitPrice.sub(variant.salePrice.toString()).toFixed(2),
+    // math, it only renders this value. formatMoney2 normalizes a signed zero ("-0.00")
+    // to a plain "0.00".
+    priceDelta: formatMoney2(solved.unitPrice.sub(variant.salePrice.toString())),
     breakdown,
   };
 }

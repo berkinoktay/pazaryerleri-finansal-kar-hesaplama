@@ -26,6 +26,7 @@ import {
   evaluateScreenScenario,
   formatMarginPct2,
   formatMoney2,
+  toKurusHalfUp,
   type ScreenScenarioBase,
 } from './scenario-screen-commons';
 import { quoteBreakdownFromStatement, type QuoteBreakdown } from './product-pricing.service';
@@ -181,9 +182,13 @@ export function computeItemBands(params: {
 
   const results = bands.map((band): ComputedBandResult => {
     const price = bandPrice(band, currentPrice);
+    // An imported band limit can carry sub-kurus precision (e.g. "149.999"); the engine
+    // rejects a unit price with more than two decimals, so round it to the kurus half-up
+    // before evaluating -- exactly as the discount/campaign screens do. The wire `price`
+    // below keeps its own `toFixed(2)` (the identical value).
     const outcome = evaluateScreenScenario({
       base: base.base,
-      unitPrice: price,
+      unitPrice: toKurusHalfUp(price),
       commissionPct: new Decimal(band.commissionPct),
     });
     if (outcome.calculable && (bestProfit === null || outcome.netProfit.gt(bestProfit))) {
