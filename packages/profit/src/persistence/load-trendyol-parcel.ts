@@ -76,27 +76,38 @@ function compareFinanceRows(
 
 /**
  * The subset of a shipping carrier the parcel loader needs: its identity, the Barem
- * eligibility fields `loadShippingTariff` reads, and the display name the order's
- * cargo name is matched against.
+ * eligibility fields `loadShippingTariff` reads, and the two name sources the order's
+ * cargo name is matched against -- the display name and `orderCargoNames` (the exact
+ * cargoProviderName values Trendyol writes on orders for this carrier).
  */
 export interface CarrierRow {
   readonly id: string;
   readonly code: string;
   readonly displayName: string;
+  readonly orderCargoNames: readonly string[];
   readonly supportsBaremDestek: boolean;
   readonly maxBaremDesi: number;
 }
 
 /**
  * The carrier whose tariff the order's shipping estimate should use. Trendyol stamps
- * each order with the carrier it assigned (`cargoProviderName`), and those names are
- * the same getProviders names that seed `shipping_carriers.display_name` ("PTT Kargo
- * Marketplace", ...). When the order's name matches an active carrier that carrier
- * wins; otherwise -- a null or blank name, an "Alternative Delivery", or no match --
- * the store's default carrier is used, exactly as before. Both sides are compared
- * after `trim()` + `toLowerCase()` (a deterministic, non-locale compare). Inactive
- * carriers are never passed in (the query filters `active = true`), so an inactive
- * namesake falls back to the store default too.
+ * each order with the carrier it assigned (`cargoProviderName`); that string is the
+ * getProviders "Name" ("PTT Kargo Marketplace", ...), which seeds the carrier's
+ * `orderCargoNames` -- NOT its short `display_name` ("PTT Kargo"). So a carrier is
+ * matched when the order's name equals either its display name OR one of its
+ * `orderCargoNames`. Both sides are compared after `trim()` + `toLowerCase()` (a
+ * deterministic, non-locale compare).
+ *
+ * When exactly one carrier matches it wins. Otherwise the store's default carrier is
+ * used, exactly as before: a null or blank name, an "Alternative Delivery" / "***" or
+ * any other unknown name, AND the ambiguous case where two or more distinct carriers
+ * claim the same name (never a silent pick among equals). Inactive carriers are never
+ * passed in (the query filters `active = true`), so an inactive namesake falls back to
+ * the store default too.
+ *
+ * For an own-contract store the matched carrier still drives Barem eligibility, while
+ * the own desi tariff stays store-level -- intended (plan decision 3): the carrier
+ * identity decides whether Barem applies, the store's own prices decide the amount.
  */
 export function resolveOrderCarrier(
   cargoProviderName: string | null,
@@ -110,7 +121,18 @@ export function resolveOrderCarrier(
   if (normalized === '') {
     return storeDefault;
   }
-  const match = carriers.find((carrier) => carrier.displayName.trim().toLowerCase() === normalized);
+  const matches = carriers.filter(
+    (carrier) =>
+      carrier.displayName.trim().toLowerCase() === normalized ||
+      carrier.orderCargoNames.some((name) => name.trim().toLowerCase() === normalized),
+  );
+  // Collapse to distinct carriers: one carrier matching on both its display name and an
+  // orderCargoNames entry is still a single match. Zero or 2+ distinct -> store default.
+  const distinct = new Map(matches.map((carrier) => [carrier.id, carrier]));
+  if (distinct.size !== 1) {
+    return storeDefault;
+  }
+  const [match] = distinct.values();
   return match ?? storeDefault;
 }
 
@@ -225,6 +247,7 @@ export async function loadTrendyolParcel(
   // commission-rate and fee reference reads (Gorev 1, engine v6).
   const activeCarriers = await tx.shippingCarrier.findMany({
     where: { platform: Platform.TRENDYOL, active: true },
+    orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
   });
   const orderCarrier = resolveOrderCarrier(
     order.cargoProviderName,

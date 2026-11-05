@@ -575,6 +575,10 @@ export interface CarrierTariffSpec {
    * order's cargoProviderName against this, so a test that needs a name distinct from
    * the code (as real carriers have) sets it explicitly. */
   readonly displayName?: string;
+  /** The exact cargoProviderName values Trendyol writes on orders for this carrier
+   * (the getProviders "Name"). The order loader matches the order's cargoProviderName
+   * against these OR the display name. Defaults to [] (backward compatible). */
+  readonly orderCargoNames?: readonly string[];
   readonly supportsBaremDestek?: boolean;
   readonly maxBaremDesi?: number;
   readonly desiRows: readonly { desi: number; priceNet: string; effectiveFrom: Date }[];
@@ -594,6 +598,7 @@ export interface CarrierTariffSpec {
  * without mutating the shared melontik carrier.
  */
 export async function upsertCarrierWithTariffs(spec: CarrierTariffSpec): Promise<string> {
+  const orderCargoNames = spec.orderCargoNames === undefined ? [] : [...spec.orderCargoNames];
   const carrier = await prisma.shippingCarrier.upsert({
     where: { platform_code: { platform: 'TRENDYOL', code: spec.code } },
     create: {
@@ -601,11 +606,13 @@ export async function upsertCarrierWithTariffs(spec: CarrierTariffSpec): Promise
       externalId: spec.externalId,
       code: spec.code,
       displayName: spec.displayName ?? spec.code,
+      orderCargoNames,
       supportsBaremDestek: spec.supportsBaremDestek ?? false,
       maxBaremDesi: spec.maxBaremDesi ?? 10,
     },
     update: {
       displayName: spec.displayName ?? spec.code,
+      orderCargoNames,
       supportsBaremDestek: spec.supportsBaremDestek ?? false,
       maxBaremDesi: spec.maxBaremDesi ?? 10,
     },

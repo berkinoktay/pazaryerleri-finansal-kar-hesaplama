@@ -1524,14 +1524,19 @@ describe('loadTrendyolParcel', () => {
 
   it("uses the order's own carrier for the shipping estimate", async () => {
     // The store default is the melontik carrier (desi 2 -> 81.95 net -> 98.34 gross).
-    // A second carrier with a distinct display name and a cheaper desi tariff is the
-    // one Trendyol assigned to this order: matched by cargoProviderName, its tariff
-    // drives the estimate instead of the store default's.
+    // A second carrier with a SHORT display name, the long "... Marketplace" name in
+    // orderCargoNames and a cheaper desi tariff is the one Trendyol assigned to this
+    // order. The order carries only the long marketplace name (as real orders do), so
+    // it matches via orderCargoNames -- not the display name -- and that carrier's
+    // tariff drives the estimate instead of the store default's. A TEST-prefixed brand
+    // (not a canonical one like SENDEOMP) keeps the match unambiguous against the 10
+    // seeded carriers, which now carry their own getProviders names.
     const parcel = await seedMelontikParcel();
     const effectiveFrom = new Date('2024-01-01T00:00:00Z');
     await upsertCarrierWithTariffs({
       code: 'TEST_ORDER_CARRIER',
-      displayName: 'Test Kargo Marketplace',
+      displayName: 'Test Kolay Kargo',
+      orderCargoNames: ['Test Kolay Kargo Marketplace'],
       externalId: 990010,
       supportsBaremDestek: false,
       maxBaremDesi: 10,
@@ -1543,7 +1548,7 @@ describe('loadTrendyolParcel', () => {
     });
     await prisma.order.update({
       where: { id: parcel.orderId },
-      data: { cargoProviderName: 'Test Kargo Marketplace' },
+      data: { cargoProviderName: 'Test Kolay Kargo Marketplace' },
     });
 
     const loaded = await loadTrendyolParcel(prisma, {
@@ -1587,7 +1592,8 @@ describe('loadTrendyolParcel', () => {
 
     await upsertCarrierWithTariffs({
       code: 'TEST_ORDER_NOBAREM',
-      displayName: 'Test NoBarem Marketplace',
+      displayName: 'Test NoBarem Kargo',
+      orderCargoNames: ['Test NoBarem Kargo Marketplace'],
       externalId: 990012,
       supportsBaremDestek: false,
       maxBaremDesi: 10,
@@ -1603,7 +1609,8 @@ describe('loadTrendyolParcel', () => {
     });
     await prisma.order.update({
       where: { id: parcel.orderId },
-      data: { cargoProviderName: 'Test NoBarem Marketplace' },
+      // The long marketplace name Trendyol writes; it matches via orderCargoNames.
+      data: { cargoProviderName: 'Test NoBarem Kargo Marketplace' },
     });
 
     const loaded = await loadTrendyolParcel(prisma, {
@@ -1619,5 +1626,47 @@ describe('loadTrendyolParcel', () => {
     expect(shipping.inputs.tariffKind).toBe('DESI');
     expect(shipping.amount.gross.toFixed(2)).toBe('84.00');
     expect(shipping.inputs.carrierCode).toBe('TEST_ORDER_NOBAREM');
+  });
+
+  it('ignores an inactive carrier with the same name', async () => {
+    // An INACTIVE carrier whose orderCargoNames contains the order's cargo name must
+    // never drive the estimate: the active-only carrier query drops it before the match,
+    // so the order falls back to the store default (the melontik carrier, 98.34 gross) --
+    // not the inactive namesake's cheap 50.00 -> 60.00 tariff.
+    const parcel = await seedMelontikParcel();
+    const effectiveFrom = new Date('2024-01-01T00:00:00Z');
+    await upsertCarrierWithTariffs({
+      code: 'TEST_INACTIVE_NAMESAKE',
+      displayName: 'Test Inactive Kargo',
+      orderCargoNames: ['Test Inactive Kargo Marketplace'],
+      externalId: 990013,
+      supportsBaremDestek: false,
+      maxBaremDesi: 10,
+      desiRows: [
+        { desi: 1, priceNet: '50.00', effectiveFrom },
+        { desi: 2, priceNet: '50.00', effectiveFrom },
+      ],
+      baremRows: [],
+    });
+    // Flip it inactive (the helper always upserts an active carrier).
+    await prisma.shippingCarrier.update({
+      where: { platform_code: { platform: 'TRENDYOL', code: 'TEST_INACTIVE_NAMESAKE' } },
+      data: { active: false },
+    });
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { cargoProviderName: 'Test Inactive Kargo Marketplace' },
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+    const result = estimateTrendyolParcel(loaded.estimateInput);
+
+    const shipping = requireLine(result.lines, ProfitLineType.SHIPPING, null);
+    // Store default (melontik) 98.34, NOT the inactive namesake's 60.00.
+    expect(shipping.amount.gross.toFixed(2)).toBe('98.34');
+    expect(shipping.inputs.carrierCode).toBe('TEST_MELONTIK');
   });
 });
