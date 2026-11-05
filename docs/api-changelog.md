@@ -20,6 +20,55 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Scenario screens are priced by the profit engine.** Product pricing (list and quote), commission
+  tariffs and Plus commission tariffs (detail and estimate), advantage product labels and flash
+  products (detail and estimate), discount lists (detail and estimate) and marketplace campaigns
+  (detail, estimate and target-margin suggestion). No wire-shape change: field names, types,
+  nullability and enum values stay the same; values and some meanings change.
+  - One engine: every profit, margin and breakdown comes from the scenario engine that also prices
+    orders (a one-parcel hypothetical sale) instead of the old unit-pricing assembly. The store's
+    profit settings apply: stopaj shows `0.00` when the store excludes it, and a negative net VAT
+    is clamped to zero unless the store includes it.
+  - Cost: the cost version effective at the scenario instant (now) is used, with that version's own
+    VAT rate. A cost profile without a version, or whose chosen version is archived, counts as
+    missing cost. Product pricing `cost` is the gross total of the cost versions effective now.
+  - Shipping: the Barem / carrier tariff band is chosen at the priced price (each band, tier, offer
+    or scenario price), not at the product's current sale price. Digital products carry no shipping
+    and no platform service fee, and are calculable.
+  - Commission: each screen keeps choosing its own rate (tariff band, Plus rate, advantage band or
+    category rate, flash window band or the flat current rate, the discount / campaign three-tier
+    chain) and the engine applies it verbatim; an explicit 0% band prices at zero commission.
+    Product pricing resolves the rate through the engine's chain: the commission tariff band that
+    covers the price in the current tariff period, else the synced product rate, else the category
+    / category+brand rule (before, it looked at the category rule only). On discounts and campaigns
+    a synced product rate of `0` counts as not sent and falls through to the category rate
+    (`commissionSource: 'category'`).
+  - Prices: the discount and campaign taxed base is rounded half up to the kurus before pricing. A
+    zero price is a valid scenario: margins are `null` and the net profit is the loss.
+  - Baskets: discount and campaign order scenarios price one parcel of `n` units -- `n` x cost, one
+    shipping and one platform service fee, and `n` x desi; an order whose desi exceeds the carrier
+    tariff has a `null` order profit.
+  - Margins are rounded through the stored percent scale before two decimals, as on the orders list
+    (a value can differ by one in the last digit).
+  - Product pricing quote: `price` is the lowest kurus that meets the target, solved in closed form
+    per price band. `NO_COST` is returned whenever the scenario has no usable cost line, including a
+    profile without a version (which used to return `NOT_CALCULABLE`).
+  - Campaign target margin: the settlement price that meets the target margin is solved by the same
+    engine solver, capped at the item's max price; `NOT_CALCULABLE` when no price is computable,
+    `UNREACHABLE` otherwise.
+  - Failures: an item whose profit cannot be computed is still returned, with `calculable: false`,
+    `reason: null` and empty profit fields, and the failure is logged server-side once per request;
+    a store-wide failure (for example a missing fee definition) empties every item's profit the same
+    way. The lists, details and estimates of these screens no longer answer 500 for a profit
+    computation failure (the product pricing quote still reports an unexpected engine failure as
+    an error).
+  - The product pricing list and quote run as plain reads (no interactive transaction), so a large
+    catalog no longer hits the 5-second transaction ceiling.
+- **Tariff periods are compared at their real instant.** Period bounds are stored as Istanbul
+  wall-clock; they are now converted to the real instant before comparing, and periods are
+  half-open (`[start, end)`). The commission tariff and Plus validity badges, the advantage
+  period choice and the commission tariff band of an order's profit no longer shift by three hours
+  around a boundary. Order profits are re-written with engine version 5.
 - **Orders list, tabs, summary and detail read the profit engine's statements.** No wire-shape
   change: field names, types and nullability stay the same; values and meanings change.
   - `reconciliationStatus` comes from the order's best-known profit statement. The engine derives
