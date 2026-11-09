@@ -23,6 +23,7 @@ import type {
   StoreStatus,
 } from '@pazarsync/db';
 import { PROFIT_ENGINE_VERSION } from '@pazarsync/profit';
+import { getBusinessDateAnchor } from '@pazarsync/utils';
 
 import { prisma } from './db';
 
@@ -459,7 +460,9 @@ export async function createBufferEntry(
     data: {
       organizationId,
       storeId,
-      orderDate: overrides.orderDate ?? new Date(),
+      // order_date is a DATE holding the business (Istanbul) day. A raw `new Date()` would
+      // store the UTC day, which is the previous day between 00:00 and 03:00 Istanbul time.
+      orderDate: overrides.orderDate ?? getBusinessDateAnchor(),
       platformOrderId: overrides.platformOrderId ?? `pkg-${randomUUID().slice(0, 8)}`,
       platformOrderNumber: overrides.platformOrderNumber ?? `ord-${randomUUID().slice(0, 8)}`,
       rawPayload: overrides.rawPayload ?? { test: true },
