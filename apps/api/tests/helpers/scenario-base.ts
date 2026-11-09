@@ -118,7 +118,6 @@ export function makeDiscountScenarioBase(
       categoryId: null,
       brandId: null,
       syncedCommissionRatePct: null,
-      tariffBands: null,
     },
     quantity: 1,
     commissionRatePctOverride: null,

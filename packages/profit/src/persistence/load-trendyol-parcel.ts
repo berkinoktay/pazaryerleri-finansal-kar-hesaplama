@@ -20,7 +20,6 @@ import {
   type TrendyolSettlementRecord,
 } from '../marketplaces/trendyol/settlement-records';
 import {
-  type TrendyolCommissionBand,
   type TrendyolCommissionRules,
   type TrendyolItemAttributes,
   type TrendyolParcelAttributes,
@@ -33,8 +32,6 @@ import {
   loadCostProfilesByVariant,
   loadFeeParams,
   loadShippingTariff,
-  loadTariffCandidatesByBarcode,
-  resolveTariffBandsAt,
 } from './trendyol-reference-loaders';
 
 const ZERO = new Decimal(0);
@@ -195,13 +192,6 @@ export async function loadTrendyolParcel(
     };
   });
 
-  // --- Per-item tariff bands covering the order date ---
-  const tariffBandsByItemId = await loadTariffBands(tx, {
-    storeId,
-    orderDate,
-    orderItems: order.items,
-  });
-
   // --- Per-item commission attributes ---
   const itemAttributes: TrendyolItemAttributes[] = order.items.map((item) => {
     const variant = item.productVariant;
@@ -219,7 +209,6 @@ export async function loadTrendyolParcel(
         orderCommissionRatePct !== null && orderCommissionRatePct.gt(ZERO)
           ? orderCommissionRatePct
           : null,
-      tariffBands: tariffBandsByItemId.get(item.id) ?? null,
       syncedCommissionRatePct: decOrNull(variant?.syncedCommissionRate ?? null),
       categoryId: product?.categoryId?.toString() ?? null,
       brandId: product?.brandId?.toString() ?? null,
@@ -323,38 +312,6 @@ export async function loadTrendyolParcel(
     isExcluded: order.profitExcludedAt !== null,
     loadIssues,
   };
-}
-
-/**
- * The tariff band list per order item, resolved at the order instant. One query
- * fetches every store tariff candidate for the items' barcodes
- * (`loadTariffCandidatesByBarcode`); the covering-period selection and tie-breaks
- * live in the shared `resolveTariffBandsAt`. An item with no covering candidate (or
- * an empty band list) is left without tariff bands.
- */
-async function loadTariffBands(
-  tx: Prisma.TransactionClient,
-  params: {
-    readonly storeId: string;
-    readonly orderDate: Date;
-    readonly orderItems: readonly { readonly id: string; readonly barcode: string | null }[];
-  },
-): Promise<Map<string, TrendyolCommissionBand[]>> {
-  const { storeId, orderDate, orderItems } = params;
-  const barcodes = orderItems
-    .map((item) => item.barcode)
-    .filter((barcode): barcode is string => barcode !== null);
-  const candidatesByBarcode = await loadTariffCandidatesByBarcode(tx, { storeId, barcodes });
-
-  const result = new Map<string, TrendyolCommissionBand[]>();
-  for (const item of orderItems) {
-    if (item.barcode === null) continue;
-    const bands = resolveTariffBandsAt(candidatesByBarcode.get(item.barcode), orderDate);
-    if (bands !== null) {
-      result.set(item.id, bands);
-    }
-  }
-  return result;
 }
 
 /** The category and category+brand commission rules for the items' categories. */

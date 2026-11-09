@@ -16,11 +16,7 @@ import {
   type TrendyolEstimateInput,
 } from './estimate-parcel';
 import { type ResolvedTrendyolCommissionRate } from './resolve-commission-rate';
-import {
-  type TrendyolCommissionBand,
-  type TrendyolItemAttributes,
-  type TrendyolReferenceData,
-} from './trendyol-inputs';
+import { type TrendyolItemAttributes, type TrendyolReferenceData } from './trendyol-inputs';
 
 const ZERO = new Decimal(0);
 
@@ -42,7 +38,6 @@ export interface TrendyolScenarioProduct {
   readonly categoryId: string | null;
   readonly brandId: string | null;
   readonly syncedCommissionRatePct: Decimal | null;
-  readonly tariffBands: readonly TrendyolCommissionBand[] | null; // tariff covering the scenario date
 }
 
 /** A single scenario question: this product, at this unit price, under these settings. */
@@ -90,8 +85,9 @@ function assertScenarioUnitPrice(unitPrice: Decimal): void {
 /**
  * The single scenario item's commission attributes. The screen's explicit rate rides
  * on `commissionRatePctOverride` (applied verbatim, zero included); a scenario never
- * carries an order-line rate, so with no override the resolver walks the tariff,
- * synced and category chain.
+ * carries an order-line rate, so with no override the resolver walks the synced and
+ * category chain (tariff bands are never consulted here -- a campaign screen passes its
+ * chosen band rate as the override instead).
  */
 function scenarioItemAttributes(input: TrendyolScenarioInput): TrendyolItemAttributes {
   const { product } = input;
@@ -99,7 +95,6 @@ function scenarioItemAttributes(input: TrendyolScenarioInput): TrendyolItemAttri
     orderItemId: TRENDYOL_SCENARIO_ITEM_ID,
     commissionRatePctOverride: input.commissionRatePctOverride,
     orderCommissionRatePct: null,
-    tariffBands: product.tariffBands,
     syncedCommissionRatePct: product.syncedCommissionRatePct,
     categoryId: product.categoryId,
     brandId: product.brandId,
@@ -109,8 +104,8 @@ function scenarioItemAttributes(input: TrendyolScenarioInput): TrendyolItemAttri
 /**
  * Builds the hypothetical one-item parcel the Phase 2A module estimates. The sale is
  * `unitPrice x quantity` with no seller discount; the product's VAT rate, desi and
- * digital flag ride on the item, and its commission chain (the override, the tariff
- * bands, the synced rate and the category/brand ids) rides on the item attributes.
+ * digital flag ride on the item, and its commission chain (the override, the synced
+ * rate and the category/brand ids) rides on the item attributes.
  * No rule is re-implemented here; `estimateTrendyolParcel` validates the snapshot
  * (quantity included) and resolves every amount.
  */
@@ -232,13 +227,13 @@ function sortedUniquePositive(values: readonly Decimal[]): Decimal[] {
 
 /**
  * The unit prices where the Trendyol regime changes on the price axis, for the price
- * solver to split the axis at. Barem breakpoints (only when the scenario is Barem
- * eligible) map each basket band `[min, max]` onto the unit price by the quantity:
- * `ceilToKurus(min / quantity)` starts a band, `floorToKurus(max / quantity) + 0.01`
- * leaves it. Commission breakpoints (only without an override and with tariff bands)
- * add each band's `ceilToKurus(lowerLimit)` and `floorToKurus(upperLimit) + 0.01`, so
- * every evaluated price lands on a kurus. The result is positive, ascending and
- * value-unique.
+ * solver to split the axis at. Only Barem breakpoints apply (and only when the scenario
+ * is Barem eligible): each basket band `[min, max]` maps onto the unit price by the
+ * quantity, `ceilToKurus(min / quantity)` starting a band and
+ * `floorToKurus(max / quantity) + 0.01` leaving it, so every evaluated price lands on a
+ * kurus. Commission does not change on the price axis -- an order never uses tariff
+ * bands, and a campaign screen's rate is a fixed override -- so the commission regime
+ * contributes no breakpoint. The result is positive, ascending and value-unique.
  */
 export function trendyolScenarioBreakpoints(base: TrendyolScenarioBase): readonly Decimal[] {
   const quantity = new Decimal(base.quantity);
@@ -248,17 +243,6 @@ export function trendyolScenarioBreakpoints(base: TrendyolScenarioBase): readonl
     for (const band of base.reference.shipping.baremBands) {
       candidates.push(ceilToKurus(band.minOrderAmount.div(quantity)));
       candidates.push(floorToKurus(band.maxOrderAmount.div(quantity)).add(ONE_KURUS));
-    }
-  }
-
-  if (base.commissionRatePctOverride === null && base.product.tariffBands !== null) {
-    for (const band of base.product.tariffBands) {
-      if (band.lowerLimit !== null) {
-        candidates.push(ceilToKurus(band.lowerLimit));
-      }
-      if (band.upperLimit !== null) {
-        candidates.push(floorToKurus(band.upperLimit).add(ONE_KURUS));
-      }
     }
   }
 

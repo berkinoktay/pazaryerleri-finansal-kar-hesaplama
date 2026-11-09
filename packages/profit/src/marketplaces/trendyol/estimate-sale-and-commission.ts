@@ -105,10 +105,8 @@ export function estimateCommissionLines(params: {
       continue;
     }
 
-    const unitCommissionBase = roundMoney(item.saleGross.div(item.quantity));
     const resolved = resolveTrendyolCommissionRate({
       item: itemAttributes,
-      unitCommissionBase,
       rules: reference.commission,
     });
     commissionByItem.set(item.orderItemId, resolved);

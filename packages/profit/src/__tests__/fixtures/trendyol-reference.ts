@@ -3,7 +3,6 @@ import { ShippingTariffSource } from '@pazarsync/db/enums';
 
 import {
   trendyolCategoryBrandKey,
-  type TrendyolCommissionBand,
   type TrendyolCommissionRules,
   type TrendyolFeeParams,
   type TrendyolItemAttributes,
@@ -137,21 +136,6 @@ export function arasmpScenarioReference(): TrendyolReferenceData {
   });
 }
 
-/** A tariff band given as text, mirroring the stored string shape. */
-export interface MakeTrendyolBandParams {
-  readonly lowerLimit: string | null;
-  readonly upperLimit: string | null;
-  readonly ratePct: string;
-}
-
-function toBand(band: MakeTrendyolBandParams): TrendyolCommissionBand {
-  return {
-    lowerLimit: band.lowerLimit === null ? null : new Decimal(band.lowerLimit),
-    upperLimit: band.upperLimit === null ? null : new Decimal(band.upperLimit),
-    ratePct: new Decimal(band.ratePct),
-  };
-}
-
 /**
  * Commission attributes for one order item. `orderItemId` is required. Rates are
  * given as text; `null` is kept as an explicit value, so the default only applies
@@ -161,7 +145,6 @@ export interface MakeTrendyolItemAttributesParams {
   readonly orderItemId: string;
   readonly commissionRatePctOverride?: string | null;
   readonly orderCommissionRatePct?: string | null;
-  readonly tariffBands?: readonly MakeTrendyolBandParams[] | null;
   readonly syncedCommissionRatePct?: string | null;
   readonly categoryId?: string | null;
   readonly brandId?: string | null;
@@ -176,15 +159,10 @@ export function makeTrendyolItemAttributes(
     params.orderCommissionRatePct === undefined ? '19' : params.orderCommissionRatePct;
   const syncedText =
     params.syncedCommissionRatePct === undefined ? null : params.syncedCommissionRatePct;
-  const tariffBands =
-    params.tariffBands === undefined || params.tariffBands === null
-      ? null
-      : params.tariffBands.map(toBand);
   return {
     orderItemId: params.orderItemId,
     commissionRatePctOverride: overrideText === null ? null : new Decimal(overrideText),
     orderCommissionRatePct: orderText === null ? null : new Decimal(orderText),
-    tariffBands,
     syncedCommissionRatePct: syncedText === null ? null : new Decimal(syncedText),
     categoryId: params.categoryId === undefined ? '369' : params.categoryId,
     brandId: params.brandId === undefined ? null : params.brandId,

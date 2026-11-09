@@ -1,8 +1,8 @@
 // Service for the product pricing backend.
 //
 // The list and the quote price every variant with the shared scenario engine
-// (`@pazarsync/profit`): `loadTrendyolScenarioBases` reads cost, commission, tariff,
-// fee and shipping inputs for the whole page in a constant number of queries, then
+// (`@pazarsync/profit`): `loadTrendyolScenarioBases` reads cost, commission, fee and
+// shipping inputs for the whole page in a constant number of queries, then
 // `evaluateTrendyolScenario` scores each variant at its sale price and
 // `solveTrendyolScenarioPrice` finds the price for a quote target. All financial math
 // lives in the engine (feedback_no_frontend_financial_calculation); this service only
@@ -311,10 +311,10 @@ function sortComputedRows(
 
 /**
  * Loads the scenario base of every candidate variant in one pass and evaluates each at
- * its own `salePrice`, turning the engine's statement into a computed row. The tariff
- * anchor and the scenario date are both `now` (this screen prices at the current
- * instant). The query count is constant: `loadTrendyolScenarioBases` reads the store,
- * the variants and all reference data once, regardless of how many variants are passed.
+ * its own `salePrice`, turning the engine's statement into a computed row. The scenario
+ * date is `now` (this screen prices at the current instant). The query count is
+ * constant: `loadTrendyolScenarioBases` reads the store, the variants and all reference
+ * data once, regardless of how many variants are passed.
  *
  * Degradation (decision 9, owner rule -- the list always returns 200): a store-wide
  * loader failure (missing fee definitions, a non-Trendyol store, ...) empties every
@@ -337,7 +337,7 @@ async function computeScenarioRows(
       organizationId: orgId,
       storeId,
       scenarioDate: now,
-      variants: variants.map((variant) => ({ variantId: variant.id, tariffAnchor: now })),
+      variants: variants.map((variant) => ({ variantId: variant.id })),
     });
   } catch (err) {
     if (!(err instanceof UnsupportedPlatformError)) {
@@ -613,13 +613,13 @@ export async function quoteProductPrice(
     mapPrismaError(err);
   }
 
-  // 2. Load the scenario base (tariff anchor + scenario date = now).
+  // 2. Load the scenario base (scenario date = now).
   const now = new Date();
   const bases = await loadTrendyolScenarioBases(db, {
     organizationId: orgId,
     storeId,
     scenarioDate: now,
-    variants: [{ variantId: input.variantId, tariffAnchor: now }],
+    variants: [{ variantId: input.variantId }],
   });
   const loaded = bases.get(input.variantId);
   if (loaded === undefined || loaded.kind !== 'ready') {

@@ -1024,7 +1024,7 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/product-pricing/quote â€
 // SENDEOMP / TRENDYOL_CONTRACT store and a single 200 GROSS cost profile (+version):
 //   - physical:   desi 3, 18% category commission, shipping + PSF deducted;
 //   - digital:    isDigital -- no shipping, no PSF (its profit beats the physical one);
-//   - tariffBand: an active 10% tariff band on its barcode (lower commission than 18%);
+//   - tariffBand: an active 10% tariff band on its barcode -- IGNORED by product pricing,
 //   - failing:    a negative desi override that makes the scenario evaluation throw.
 // Built once in beforeAll; every test is a read.
 
@@ -1150,8 +1150,8 @@ async function setupScenarioEngineFixture(): Promise<ScenarioEngineCtx> {
     salePrice: '-2.00',
   });
 
-  // An active commission tariff for BC-TARIFF: one band at 10% covering now. A band with
-  // no limits matches every price, so the engine's chain prefers it over the 18% rule.
+  // An active commission tariff for BC-TARIFF: one band at 10% covering now. Product
+  // pricing never consults tariff bands, so this must be ignored (the test proves it).
   const tariff = await prisma.commissionTariff.create({
     data: { organizationId: org.id, storeId: store.id, name: 'Active Tariff' },
   });
@@ -1191,7 +1191,7 @@ async function setupScenarioEngineFixture(): Promise<ScenarioEngineCtx> {
   };
 }
 
-describe('GET .../product-pricing -- scenario engine (digital / tariff band / degradation)', () => {
+describe('GET .../product-pricing -- scenario engine (digital / ignored tariff / degradation)', () => {
   let sctx: ScenarioEngineCtx;
 
   beforeAll(async () => {
@@ -1220,16 +1220,17 @@ describe('GET .../product-pricing -- scenario engine (digital / tariff band / de
     expect(Number(digital?.netProfit)).toBeGreaterThan(Number(physical?.netProfit));
   });
 
-  it('uses the active tariff band on the product pricing list', async () => {
+  it('ignores an active tariff band on the product pricing list', async () => {
     const rows = await fetchRows();
     const banded = rows.find((r) => r.variantId === sctx.tariffBandVariantId);
     const physical = rows.find((r) => r.variantId === sctx.physicalVariantId);
     expect(banded?.calculable).toBe(true);
     expect(physical?.calculable).toBe(true);
-    // Same category (18% rule), same cost + shipping -- the only difference is the active
-    // 10% tariff band, which the engine's commission chain prefers, so the banded
-    // variant's lower commission yields a higher net profit (plan difference B3).
-    expect(Number(banded?.netProfit)).toBeGreaterThan(Number(physical?.netProfit));
+    // Owner decision (2026-11-09): product pricing is not a campaign screen, so it never
+    // consults a product tariff band. Both variants share the category (18% rule), cost
+    // and shipping, and the "banded" variant's 10% tariff is IGNORED -- so its net profit
+    // equals the plain physical variant's, proving the stored tariff changes nothing.
+    expect(banded?.netProfit).toBe(physical?.netProfit);
   });
 
   it('keeps the list up when variants fail to compute and logs the failures once', async () => {

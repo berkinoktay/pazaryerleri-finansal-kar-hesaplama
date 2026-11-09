@@ -12,7 +12,6 @@ const ZERO = new Decimal(0);
 export type TrendyolCommissionRateSource =
   | 'OVERRIDE'
   | 'ORDER'
-  | 'TARIFF_BAND'
   | 'PRODUCT_SYNC'
   | 'CATEGORY_BRAND'
   | 'CATEGORY';
@@ -44,24 +43,23 @@ export function trendyolBandForPrice(
 
 /**
  * Resolves an item's effective Trendyol commission rate through the single chain,
- * first match wins (design 7.2):
+ * first match wins (owner decision 2026-11-09):
  *   0. OVERRIDE     - a scenario's explicit rate, applied verbatim including 0,
  *   1. ORDER        - a positive order-line rate,
- *   2. TARIFF_BAND  - the product tariff band covering the unit price,
- *   3. PRODUCT_SYNC - a positive synced product rate,
- *   4. CATEGORY_BRAND / CATEGORY - the lowest of the category+brand rule (only when
+ *   2. PRODUCT_SYNC - a positive synced product rate,
+ *   3. CATEGORY_BRAND / CATEGORY - the lowest of the category+brand rule (only when
  *      both ids exist) and the category rule; CATEGORY on a tie.
- * A zero is meaningful only at the OVERRIDE rung: an order or synced rate of 0 means
- * "not sent" (phase 2A) and falls through. Returns null when nothing applies, which
- * the caller turns into a blocking MISSING_COMMISSION_RATE issue instead of a silent
- * zero.
+ * Tariff bands are NEVER consulted for an order: they belong to the campaign screens,
+ * which pass their chosen band rate as the OVERRIDE rung instead. A zero is meaningful
+ * only at the OVERRIDE rung: an order or synced rate of 0 means "not sent" (phase 2A)
+ * and falls through. Returns null when nothing applies, which the caller turns into a
+ * blocking MISSING_COMMISSION_RATE issue instead of a silent zero.
  */
 export function resolveTrendyolCommissionRate(params: {
   readonly item: TrendyolItemAttributes;
-  readonly unitCommissionBase: Decimal; // roundMoney(saleGross / quantity)
   readonly rules: TrendyolCommissionRules;
 }): ResolvedTrendyolCommissionRate | null {
-  const { item, unitCommissionBase, rules } = params;
+  const { item, rules } = params;
 
   if (item.commissionRatePctOverride !== null) {
     return { ratePct: item.commissionRatePctOverride, source: 'OVERRIDE' };
@@ -69,13 +67,6 @@ export function resolveTrendyolCommissionRate(params: {
 
   if (item.orderCommissionRatePct !== null && item.orderCommissionRatePct.gt(ZERO)) {
     return { ratePct: item.orderCommissionRatePct, source: 'ORDER' };
-  }
-
-  if (item.tariffBands !== null) {
-    const band = trendyolBandForPrice(item.tariffBands, unitCommissionBase);
-    if (band !== null) {
-      return { ratePct: band.ratePct, source: 'TARIFF_BAND' };
-    }
   }
 
   if (item.syncedCommissionRatePct !== null && item.syncedCommissionRatePct.gt(ZERO)) {

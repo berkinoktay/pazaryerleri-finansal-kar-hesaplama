@@ -6,10 +6,7 @@ import { resolveProfitSettings, type ResolvedProfitSettings } from '@pazarsync/u
 import { type ItemCostProfileInput } from '../core/seller-costs/build-seller-cost-lines';
 import { isTrendyolBaremEligible } from '../marketplaces/trendyol/barem-eligibility';
 import { type TrendyolScenarioBase } from '../marketplaces/trendyol/scenario';
-import {
-  type TrendyolCommissionBand,
-  type TrendyolReferenceData,
-} from '../marketplaces/trendyol/trendyol-inputs';
+import { type TrendyolReferenceData } from '../marketplaces/trendyol/trendyol-inputs';
 import { UnsupportedPlatformError } from './errors';
 import {
   dec,
@@ -18,9 +15,6 @@ import {
   loadCostProfilesByVariant,
   loadFeeParams,
   loadShippingTariff,
-  loadTariffCandidatesByBarcode,
-  resolveTariffBandsAt,
-  type TariffCandidate,
 } from './trendyol-reference-loaders';
 
 /**
@@ -41,10 +35,9 @@ export type ScenarioLoadResult =
   | { readonly kind: 'ready'; readonly base: TrendyolScenarioBase }
   | { readonly kind: 'unavailable'; readonly reason: 'VARIANT_NOT_FOUND' };
 
-/** One variant to price, with the tariff anchor its screen resolves bands at (null = no bands). */
+/** One variant to price. */
 interface ScenarioVariantRequest {
   readonly variantId: string;
-  readonly tariffAnchor: Date | null;
 }
 
 /** The variant columns the scenario base reads, with its product's category and brand. */
@@ -77,21 +70,15 @@ interface StoreForScenario {
 /** Builds one variant's scenario base from the pre-loaded, store-wide reference data. */
 function buildScenarioBase(params: {
   readonly variant: VariantForScenario;
-  readonly tariffAnchor: Date | null;
   readonly scenarioDate: Date;
   readonly store: StoreForScenario;
   readonly reference: TrendyolReferenceData;
   readonly settings: ResolvedProfitSettings;
   readonly costs: readonly ItemCostProfileInput[];
-  readonly tariffCandidatesByBarcode: ReadonlyMap<string, TariffCandidate[]>;
 }): TrendyolScenarioBase {
-  const { variant, tariffAnchor, scenarioDate, store, reference, settings, costs } = params;
+  const { variant, scenarioDate, store, reference, settings, costs } = params;
 
   const carrier = store.defaultShippingCarrier;
-  const tariffBands: readonly TrendyolCommissionBand[] | null =
-    tariffAnchor === null
-      ? null
-      : resolveTariffBandsAt(params.tariffCandidatesByBarcode.get(variant.barcode), tariffAnchor);
 
   return {
     product: {
@@ -104,7 +91,6 @@ function buildScenarioBase(params: {
       categoryId: variant.product.categoryId?.toString() ?? null,
       brandId: variant.product.brandId?.toString() ?? null,
       syncedCommissionRatePct: decOrNull(variant.syncedCommissionRate),
-      tariffBands,
     },
     quantity: 1,
     commissionRatePctOverride: null,
@@ -124,15 +110,15 @@ function buildScenarioBase(params: {
  * Builds the scenario input (`TrendyolScenarioBase`) for many variants of one store
  * in one pass, sharing the order loader's sub-loaders. Reads only, with a constant
  * number of queries regardless of how many variants are passed: the store, the
- * variants, their cost profiles, the tariff candidates, the commission rules and the
- * fee + shipping reference are each read once.
+ * variants, their cost profiles, the commission rules and the fee + shipping reference
+ * are each read once.
  *
  * Each variant's base prices one unit (`quantity: 1`) at the given `scenarioDate`,
  * with no commission override and as a domestic (non-export) sale; the screen that
  * calls `evaluateTrendyolScenario` supplies its own unit price and rate override.
- * Barem eligibility, the store's profit settings, the variant's attached cost
- * profiles (dropping any without a version) and the tariff bands covering the
- * variant's `tariffAnchor` (null anchor = no bands) all come from here.
+ * Barem eligibility, the store's profit settings and the variant's attached cost
+ * profiles (dropping any without a version) all come from here. Tariff bands are never
+ * resolved here -- a campaign screen passes its chosen band rate as the override.
  *
  * A variant that is not this organization and store's is `VARIANT_NOT_FOUND`. A
  * missing carrier, desi or commission rule is not a failure -- it surfaces as an
@@ -211,10 +197,6 @@ export async function loadTrendyolScenarioBases(
     organizationId,
     variantIds: foundVariants.map((variant) => variant.id),
   });
-  const tariffCandidatesByBarcode = await loadTariffCandidatesByBarcode(tx, {
-    storeId,
-    barcodes: foundVariants.map((variant) => variant.barcode),
-  });
 
   const reference: TrendyolReferenceData = { fees, shipping, commission };
   const settings = resolveProfitSettings(store.profitSettings);
@@ -227,13 +209,11 @@ export async function loadTrendyolScenarioBases(
     }
     const base = buildScenarioBase({
       variant,
-      tariffAnchor: request.tariffAnchor,
       scenarioDate,
       store,
       reference,
       settings,
       costs: costProfilesByVariant.get(variant.id) ?? [],
-      tariffCandidatesByBarcode,
     });
     result.set(request.variantId, { kind: 'ready', base });
   }

@@ -9,5 +9,7 @@
  *    so an order near a period boundary can resolve to a different commission band.
  * 6: the order's own carrier (matched from its cargoProviderName) drives the shipping
  *    estimate instead of always the store's default carrier.
+ * 7: an order's commission no longer consults product tariff bands; the chain is the
+ *    order rate, then the synced product rate, then the category rule.
  */
-export const PROFIT_ENGINE_VERSION = 6;
+export const PROFIT_ENGINE_VERSION = 7;

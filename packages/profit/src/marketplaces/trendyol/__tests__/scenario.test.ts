@@ -22,7 +22,7 @@ import {
   type TrendyolScenarioInput,
   type TrendyolScenarioProduct,
 } from '../scenario';
-import { type TrendyolCommissionBand, type TrendyolReferenceData } from '../trendyol-inputs';
+import { type TrendyolReferenceData } from '../trendyol-inputs';
 
 /**
  * Trendyol scenario tests. The scenario is a hypothetical one-item parcel run through
@@ -41,14 +41,7 @@ const CLAMP_NEGATIVE: ResolvedProfitSettings = {
   includeNegativeNetVat: false,
 };
 
-/** The three-band tariff of the "band of the asked price" cases: [300,-]=19, [250,300]=15, [-,250]=12. */
-const THREE_BANDS: readonly TrendyolCommissionBand[] = [
-  { lowerLimit: new Decimal('300'), upperLimit: null, ratePct: new Decimal('19') },
-  { lowerLimit: new Decimal('250'), upperLimit: new Decimal('300'), ratePct: new Decimal('15') },
-  { lowerLimit: null, upperLimit: new Decimal('250'), ratePct: new Decimal('12') },
-];
-
-/** The default scenario product: sale VAT 20, desi 2, physical, category 369, no bands, no synced rate. */
+/** The default scenario product: sale VAT 20, desi 2, physical, category 369, no synced rate. */
 function scenarioProduct(
   overrides: Partial<TrendyolScenarioProduct> = {},
 ): TrendyolScenarioProduct {
@@ -61,7 +54,6 @@ function scenarioProduct(
     categoryId: '369',
     brandId: null,
     syncedCommissionRatePct: null,
-    tariffBands: null,
     ...overrides,
   };
 }
@@ -223,23 +215,19 @@ describe('evaluateTrendyolScenario', () => {
 
   it('reports the commission the estimate used', () => {
     // The scenario reads its rate from the estimate's single resolution, so the reported
-    // commission always agrees with the line the estimate wrote. A banded price reports
-    // the band the line used; a zero-rate override nets no line yet still reports its
-    // rate and source so a screen can show the commission the seller chose; and an
-    // unresolvable rate (the MISSING_COMMISSION_RATE case) reports null.
-    const banded = evaluateTrendyolScenario(
-      scenarioInput('280.00', { product: { tariffBands: THREE_BANDS } }),
-    );
-    const bandedLine = requireLine(banded.estimate.lines, ProfitLineType.COMMISSION);
-    expect(banded.commission).not.toBeNull();
-    expect(banded.commission?.source).toBe('TARIFF_BAND');
-    expect(banded.commission?.ratePct.toString()).toBe(bandedLine.inputs.ratePct);
+    // commission always agrees with the line the estimate wrote. With no override the
+    // chain resolves the category rule (tariff bands are never consulted); a zero-rate
+    // override nets no line yet still reports its rate and source so a screen can show
+    // the commission the seller chose; and an unresolvable rate (the
+    // MISSING_COMMISSION_RATE case) reports null.
+    const resolved = evaluateTrendyolScenario(scenarioInput('280.00'));
+    const resolvedLine = requireLine(resolved.estimate.lines, ProfitLineType.COMMISSION);
+    expect(resolved.commission).not.toBeNull();
+    expect(resolved.commission?.source).toBe('CATEGORY');
+    expect(resolved.commission?.ratePct.toString()).toBe(resolvedLine.inputs.ratePct);
 
     const zeroOverride = evaluateTrendyolScenario(
-      scenarioInput('280.00', {
-        product: { tariffBands: THREE_BANDS },
-        commissionRatePctOverride: new Decimal('0'),
-      }),
+      scenarioInput('280.00', { commissionRatePctOverride: new Decimal('0') }),
     );
     const zeroLine = zeroOverride.estimate.lines.find(
       (line) => line.type === ProfitLineType.COMMISSION,
@@ -254,18 +242,14 @@ describe('evaluateTrendyolScenario', () => {
     expect(unresolvable.commission).toBeNull();
   });
 
-  it('uses the band of the asked price, or the override', () => {
-    const banded = evaluateTrendyolScenario(
-      scenarioInput('280.00', { product: { tariffBands: THREE_BANDS } }),
-    );
-    const bandedCommission = requireLine(banded.estimate.lines, ProfitLineType.COMMISSION);
-    expect(bandedCommission.amount.gross.toFixed(2)).toBe('42.00');
+  it('uses the resolved category rate, or the override', () => {
+    // No override: the category rule (20%) prices 280.00 * 20% = 56.00.
+    const resolved = evaluateTrendyolScenario(scenarioInput('280.00'));
+    const resolvedCommission = requireLine(resolved.estimate.lines, ProfitLineType.COMMISSION);
+    expect(resolvedCommission.amount.gross.toFixed(2)).toBe('56.00');
 
     const overridden = evaluateTrendyolScenario(
-      scenarioInput('280.00', {
-        product: { tariffBands: THREE_BANDS },
-        commissionRatePctOverride: new Decimal('19'),
-      }),
+      scenarioInput('280.00', { commissionRatePctOverride: new Decimal('19') }),
     );
     const overriddenCommission = requireLine(overridden.estimate.lines, ProfitLineType.COMMISSION);
     expect(overriddenCommission.amount.gross.toFixed(2)).toBe('53.20');
@@ -287,38 +271,18 @@ describe('trendyolScenarioBreakpoints', () => {
     ]);
   });
 
-  it('lists commission band breakpoints unless overridden', () => {
-    const base = scenarioBase({
-      fastDelivery: false,
-      product: { tariffBands: THREE_BANDS },
-    });
-    expect(breakpointsToFixed(trendyolScenarioBreakpoints(base))).toEqual([
-      '250.00',
-      '250.01',
-      '300.00',
-      '300.01',
-    ]);
+  it('lists no commission breakpoints -- the commission regime is price-independent', () => {
+    // An order never uses tariff bands and a campaign screen's rate is a fixed override,
+    // so commission never changes on the price axis: with Barem off, there is no
+    // breakpoint at all.
+    const base = scenarioBase({ fastDelivery: false });
+    expect(trendyolScenarioBreakpoints(base)).toEqual([]);
 
     const overridden = scenarioBase({
       fastDelivery: false,
-      product: { tariffBands: THREE_BANDS },
       commissionRatePctOverride: new Decimal('19'),
     });
     expect(trendyolScenarioBreakpoints(overridden)).toEqual([]);
-  });
-
-  it('rounds commission band edges to kurus', () => {
-    const bands: readonly TrendyolCommissionBand[] = [
-      {
-        lowerLimit: new Decimal('250.005'),
-        upperLimit: new Decimal('299.995'),
-        ratePct: new Decimal('15'),
-      },
-    ];
-    const base = scenarioBase({ fastDelivery: false, product: { tariffBands: bands } });
-    const fixed = breakpointsToFixed(trendyolScenarioBreakpoints(base));
-    expect(fixed).toContain('250.01');
-    expect(fixed).toContain('300.00');
   });
 
   it('lists no Barem breakpoints without eligibility, for digital items or own contracts', () => {

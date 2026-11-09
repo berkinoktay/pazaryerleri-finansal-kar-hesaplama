@@ -41,9 +41,9 @@ export type ScreenScenarioBase =
   | { readonly kind: 'degraded' }; // the store-wide load failed (already logged)
 
 /**
- * Loads the scenario base of every given variant for one store in a single pass, with the
- * tariff anchor left null (these screens pass their own rate as an override, so the
- * engine's tariff lookup is not used). The cost version and fee definitions are read at
+ * Loads the scenario base of every given variant for one store in a single pass. These
+ * screens pass their own rate as the engine's commission override, so the engine never
+ * resolves a tariff band itself. The cost version and fee definitions are read at
  * `scenarioDate`.
  *
  * Decision 9 (the page always opens): a store-wide loader failure never throws out of
@@ -68,7 +68,7 @@ export async function loadScreenScenarioBases(params: {
       organizationId: params.organizationId,
       storeId: params.storeId,
       scenarioDate: params.scenarioDate,
-      variants: variantIds.map((variantId) => ({ variantId, tariffAnchor: null })),
+      variants: variantIds.map((variantId) => ({ variantId })),
     });
   } catch (err) {
     if (err instanceof UnsupportedPlatformError) {

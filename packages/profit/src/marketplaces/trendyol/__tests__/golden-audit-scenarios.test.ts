@@ -11,7 +11,6 @@ import { type ItemCostProfileInput } from '../../../core/seller-costs/build-sell
 import { grossToVat } from '../../../money';
 import { type ProfitInputFee } from '../../../profit-formula';
 import { computeUnitProfit, type UnitEconomics } from '../../../unit-pricing';
-import { trendyolBandForPrice } from '../resolve-commission-rate';
 import {
   evaluateTrendyolScenario,
   solveTrendyolScenarioPrice,
@@ -20,7 +19,6 @@ import {
   type TrendyolScenarioProduct,
   type TrendyolScenarioResult,
 } from '../scenario';
-import { type TrendyolCommissionBand } from '../trendyol-inputs';
 
 /**
  * Golden tests that pin the profit-engine audit report's worked examples (B1, B2,
@@ -30,10 +28,10 @@ import { type TrendyolCommissionBand } from '../trendyol-inputs';
  * would produce; the reference is the audit fixture `arasmpScenarioReference`.
  *
  * The default scenario is built locally so this file stands on its own: sale VAT
- * 20, desi 2, physical, category '369', no bands and no synced rate; fast
- * delivery, quantity 1, not export; the store includes stopaj and negative net
- * VAT; the date is 2026-10-29. The default cost is one COGS profile of 150.00 TRY
- * at 20% VAT unless a test overrides it.
+ * 20, desi 2, physical, category '369', no synced rate; fast delivery, quantity 1,
+ * not export; the store includes stopaj and negative net VAT; the date is
+ * 2026-10-29. The default cost is one COGS profile of 150.00 TRY at 20% VAT unless
+ * a test overrides it.
  */
 
 const SCENARIO_DATE = new Date('2026-10-29T09:00:00Z');
@@ -43,13 +41,6 @@ const INCLUDE_NEGATIVE: ResolvedProfitSettings = {
   includeStopaj: true,
   includeNegativeNetVat: true,
 };
-
-/** The audit's three-band tariff: [300, -] = 19%, [250, 300] = 15%, [-, 250] = 12%. */
-const B3_BANDS: readonly TrendyolCommissionBand[] = [
-  { lowerLimit: new Decimal('300'), upperLimit: null, ratePct: new Decimal('19') },
-  { lowerLimit: new Decimal('250'), upperLimit: new Decimal('300'), ratePct: new Decimal('15') },
-  { lowerLimit: null, upperLimit: new Decimal('250'), ratePct: new Decimal('12') },
-];
 
 function scenarioProduct(
   overrides: Partial<TrendyolScenarioProduct> = {},
@@ -63,7 +54,6 @@ function scenarioProduct(
     categoryId: '369',
     brandId: null,
     syncedCommissionRatePct: null,
-    tariffBands: null,
     ...overrides,
   };
 }
@@ -320,32 +310,6 @@ describe('golden audit scenarios', () => {
       throw new Error('expected no solved price');
     }
     expect(result.reason).toBe('NOT_COMPUTABLE');
-  });
-
-  it('B3: picks the commission band of the solved price', () => {
-    const solved = requireSolved(
-      solveTrendyolScenarioPrice({
-        base: scenarioBase({ product: { tariffBands: B3_BANDS } }),
-        target: { kind: 'MARGIN', pct: new Decimal('20') },
-      }),
-    );
-
-    const commission = requireLine(solved.statement.selectedLines, ProfitLineType.COMMISSION);
-    expect(commission.inputs.rateSource).toBe('TARIFF_BAND');
-
-    const band = trendyolBandForPrice(B3_BANDS, solved.unitPrice);
-    expect(band).not.toBeNull();
-    if (band === null) {
-      throw new Error('no band contains the solved price');
-    }
-    expect(commission.inputs.ratePct).toBe(band.ratePct.toString());
-
-    // The solved price meets the 20% margin; one kurus lower does not.
-    expect(solved.statement.saleMarginPct?.gte(20)).toBe(true);
-    const below = evaluateAt(solved.unitPrice.sub(ONE_KURUS), {
-      product: { tariffBands: B3_BANDS },
-    });
-    expect(below.statement.saleMarginPct?.lt(20)).toBe(true);
   });
 
   it('matches the old scenario engine within a few kurus where B1, B2 and B3 do not apply', () => {

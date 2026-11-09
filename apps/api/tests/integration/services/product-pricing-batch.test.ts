@@ -163,7 +163,7 @@ describe('loadTrendyolScenarioBases + evaluateTrendyolScenario -- the list scena
       organizationId: ctx.orgId,
       storeId: ctx.storeId,
       scenarioDate: new Date(),
-      variants: [{ variantId: ctx.calculableVariantId, tariffAnchor: new Date() }],
+      variants: [{ variantId: ctx.calculableVariantId }],
     });
 
     const loaded = bases.get(ctx.calculableVariantId);
@@ -187,7 +187,7 @@ describe('loadTrendyolScenarioBases + evaluateTrendyolScenario -- the list scena
       organizationId: ctx.orgId,
       storeId: ctx.storeId,
       scenarioDate: new Date(),
-      variants: [{ variantId: ctx.noCostVariantId, tariffAnchor: new Date() }],
+      variants: [{ variantId: ctx.noCostVariantId }],
     });
 
     const loaded = bases.get(ctx.noCostVariantId);
@@ -211,10 +211,7 @@ describe('loadTrendyolScenarioBases + evaluateTrendyolScenario -- the list scena
       organizationId: ctx.orgId,
       storeId: ctx.storeId,
       scenarioDate: new Date(),
-      variants: [
-        { variantId: ctx.calculableVariantId, tariffAnchor: new Date() },
-        { variantId: ctx.noCostVariantId, tariffAnchor: new Date() },
-      ],
+      variants: [{ variantId: ctx.calculableVariantId }, { variantId: ctx.noCostVariantId }],
     });
 
     expect(bases.size).toBe(2);

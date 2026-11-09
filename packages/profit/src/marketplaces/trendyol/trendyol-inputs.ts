@@ -19,7 +19,6 @@ export interface TrendyolItemAttributes {
   // order resolves through the chain below exactly as before.
   readonly commissionRatePctOverride: Decimal | null;
   readonly orderCommissionRatePct: Decimal | null; // rate on the order line; null or 0 = not sent
-  readonly tariffBands: readonly TrendyolCommissionBand[] | null; // product commission tariff covering the order date, in stored order; null = none
   readonly syncedCommissionRatePct: Decimal | null; // product API rate, not tariff-aware; null or 0 = unknown
   readonly categoryId: string | null;
   readonly brandId: string | null;

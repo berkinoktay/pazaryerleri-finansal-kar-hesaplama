@@ -29,10 +29,46 @@ import {
   createAdditionalStore,
   ensureDbReachable,
   MELONTIK,
+  type MelontikParcel,
   seedMelontikParcel,
   truncateAll,
   upsertCarrierWithTariffs,
 } from './helpers/melontik-parcel';
+
+/** Seeds one commission tariff whose single period covers the melontik order date, with
+ *  a single band at `pct` on item A's barcode -- used to prove an order IGNORES bands. */
+async function seedCoveringTariffBand(parcel: MelontikParcel, pct: string): Promise<void> {
+  const tariff = await prisma.commissionTariff.create({
+    data: {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      name: 'Covering tariff',
+    },
+  });
+  const period = await prisma.commissionTariffPeriod.create({
+    data: {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      tariffId: tariff.id,
+      dateRangeLabel: 'covering',
+      sortOrder: 0,
+      startsAt: new Date('2026-10-01T00:00:00Z'),
+      endsAt: new Date('2026-11-30T23:59:00Z'),
+    },
+  });
+  await prisma.commissionTariffItem.create({
+    data: {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      periodId: period.id,
+      barcode: MELONTIK.items.a.barcode,
+      productTitle: 'Covering melontik',
+      currentPrice: MELONTIK.items.a.saleGross,
+      currentCommissionPct: pct,
+      bands: [{ key: 'band1', commissionPct: pct }],
+    },
+  });
+}
 
 /** Finds the single line of a type (and its order item), throwing when absent. */
 function requireLine(
@@ -229,224 +265,11 @@ describe('loadTrendyolParcel', () => {
     expect(itemB?.saleGross.toFixed(2)).toBe('380.47'); // 409.68 - 29.21
   });
 
-  it('picks the tariff band period that covers the order date', async () => {
+  it('ignores a stored tariff covering the order date and resolves the synced product rate', async () => {
+    // Owner decision (2026-11-09): an order never uses a product tariff band. With the
+    // order line's own rate cleared and a synced product rate present, a tariff band
+    // covering the order date must be IGNORED -- the chain resolves PRODUCT_SYNC.
     const parcel = await seedMelontikParcel();
-
-    const tariff = await prisma.commissionTariff.create({
-      data: {
-        organizationId: parcel.organizationId,
-        storeId: parcel.storeId,
-        name: 'Melontik tariff',
-      },
-    });
-    const periods: { label: string; startsAt: Date | null; endsAt: Date | null; pct: string }[] = [
-      {
-        label: 'before',
-        startsAt: new Date('2026-09-01T00:00:00Z'),
-        endsAt: new Date('2026-09-30T23:59:00Z'),
-        pct: '11',
-      },
-      {
-        label: 'covering',
-        startsAt: new Date('2026-10-01T00:00:00Z'),
-        endsAt: new Date('2026-11-30T23:59:00Z'),
-        pct: '17',
-      },
-      {
-        label: 'open',
-        startsAt: new Date('2026-10-01T00:00:00Z'),
-        endsAt: null,
-        pct: '13',
-      },
-    ];
-    for (const [index, period] of periods.entries()) {
-      const createdPeriod = await prisma.commissionTariffPeriod.create({
-        data: {
-          organizationId: parcel.organizationId,
-          storeId: parcel.storeId,
-          tariffId: tariff.id,
-          dateRangeLabel: period.label,
-          sortOrder: index,
-          startsAt: period.startsAt,
-          endsAt: period.endsAt,
-        },
-      });
-      await prisma.commissionTariffItem.create({
-        data: {
-          organizationId: parcel.organizationId,
-          storeId: parcel.storeId,
-          periodId: createdPeriod.id,
-          barcode: MELONTIK.items.a.barcode,
-          productTitle: `Melontik ${period.label}`,
-          currentPrice: MELONTIK.items.a.saleGross,
-          currentCommissionPct: period.pct,
-          bands: [{ key: 'band1', commissionPct: period.pct }],
-        },
-      });
-    }
-
-    const loaded = await loadTrendyolParcel(prisma, {
-      organizationId: parcel.organizationId,
-      orderId: parcel.orderId,
-    });
-
-    const attrA = loaded.estimateInput.attributes.items.find((i) => i.orderItemId === parcel.itemA);
-    const attrB = loaded.estimateInput.attributes.items.find((i) => i.orderItemId === parcel.itemB);
-    expect(attrA?.tariffBands).not.toBeNull();
-    expect(attrA?.tariffBands).toHaveLength(1);
-    expect(attrA?.tariffBands?.[0]?.ratePct.toFixed(0)).toBe('17'); // the covering period
-    expect(attrB?.tariffBands).toBeNull(); // no tariff for bc-b
-  });
-
-  it('selects the tariff band by the real order instant', async () => {
-    // Tariff period bounds are stored as Istanbul wall-clock saved as UTC, while the
-    // order date is a true instant. This order sits at 22:00Z on 2026-10-28 -- two
-    // hours before the stored 2026-10-29T00:00Z boundary, but one hour PAST the real
-    // Istanbul-midnight instant it denotes (2026-10-28T21:00Z). So it belongs to the
-    // period that STARTS at that boundary, not the one that ends at it. A raw
-    // comparison (or a closed end bound) would wrongly keep it in the earlier period.
-    const parcel = await seedMelontikParcel();
-    await prisma.order.update({
-      where: { id: parcel.orderId },
-      data: { orderDate: new Date('2026-10-28T22:00:00Z') },
-    });
-
-    const tariff = await prisma.commissionTariff.create({
-      data: {
-        organizationId: parcel.organizationId,
-        storeId: parcel.storeId,
-        name: 'Boundary tariff',
-      },
-    });
-    const periods: { label: string; startsAt: Date; endsAt: Date; pct: string }[] = [
-      {
-        label: 'ends at the boundary',
-        startsAt: new Date('2026-10-20T00:00:00Z'),
-        endsAt: new Date('2026-10-29T00:00:00Z'),
-        pct: '11',
-      },
-      {
-        label: 'starts at the boundary',
-        startsAt: new Date('2026-10-29T00:00:00Z'),
-        endsAt: new Date('2026-11-05T00:00:00Z'),
-        pct: '23',
-      },
-    ];
-    for (const [index, period] of periods.entries()) {
-      const createdPeriod = await prisma.commissionTariffPeriod.create({
-        data: {
-          organizationId: parcel.organizationId,
-          storeId: parcel.storeId,
-          tariffId: tariff.id,
-          dateRangeLabel: period.label,
-          sortOrder: index,
-          startsAt: period.startsAt,
-          endsAt: period.endsAt,
-        },
-      });
-      await prisma.commissionTariffItem.create({
-        data: {
-          organizationId: parcel.organizationId,
-          storeId: parcel.storeId,
-          periodId: createdPeriod.id,
-          barcode: MELONTIK.items.a.barcode,
-          productTitle: `Melontik ${period.label}`,
-          currentPrice: MELONTIK.items.a.saleGross,
-          currentCommissionPct: period.pct,
-          bands: [{ key: 'band1', commissionPct: period.pct }],
-        },
-      });
-    }
-
-    const loaded = await loadTrendyolParcel(prisma, {
-      organizationId: parcel.organizationId,
-      orderId: parcel.orderId,
-    });
-
-    const attrA = loaded.estimateInput.attributes.items.find((i) => i.orderItemId === parcel.itemA);
-    expect(attrA?.tariffBands).toHaveLength(1);
-    // The period that STARTS at the Istanbul-midnight boundary wins (half-open, real instant).
-    expect(attrA?.tariffBands?.[0]?.ratePct.toFixed(0)).toBe('23');
-  });
-
-  it('resolves an order at the exact end of a period to the next period', async () => {
-    // Two contiguous periods A [s, e) and B [e, f) share the boundary e. Period bounds are
-    // Istanbul wall-clock saved as UTC (UTC+3), so the stored 2026-10-29T00:00Z boundary
-    // denotes the real instant 2026-10-28T21:00Z; the order sits at exactly that instant.
-    // Bounds are half-open [start, end): the shared boundary belongs to the period that
-    // STARTS at it (B), never the one that ENDS at it (A) -- same convention as the
-    // "selects the tariff band by the real order instant" test above.
-    const parcel = await seedMelontikParcel();
-    await prisma.order.update({
-      where: { id: parcel.orderId },
-      data: { orderDate: new Date('2026-10-28T21:00:00Z') },
-    });
-
-    const tariff = await prisma.commissionTariff.create({
-      data: {
-        organizationId: parcel.organizationId,
-        storeId: parcel.storeId,
-        name: 'Edge tariff',
-      },
-    });
-    const periods: { label: string; startsAt: Date; endsAt: Date; pct: string }[] = [
-      {
-        label: 'ends at the boundary',
-        startsAt: new Date('2026-10-20T00:00:00Z'),
-        endsAt: new Date('2026-10-29T00:00:00Z'),
-        pct: '11',
-      },
-      {
-        label: 'starts at the boundary',
-        startsAt: new Date('2026-10-29T00:00:00Z'),
-        endsAt: new Date('2026-11-05T00:00:00Z'),
-        pct: '23',
-      },
-    ];
-    for (const [index, period] of periods.entries()) {
-      const createdPeriod = await prisma.commissionTariffPeriod.create({
-        data: {
-          organizationId: parcel.organizationId,
-          storeId: parcel.storeId,
-          tariffId: tariff.id,
-          dateRangeLabel: period.label,
-          sortOrder: index,
-          startsAt: period.startsAt,
-          endsAt: period.endsAt,
-        },
-      });
-      await prisma.commissionTariffItem.create({
-        data: {
-          organizationId: parcel.organizationId,
-          storeId: parcel.storeId,
-          periodId: createdPeriod.id,
-          barcode: MELONTIK.items.a.barcode,
-          productTitle: `Melontik ${period.label}`,
-          currentPrice: MELONTIK.items.a.saleGross,
-          currentCommissionPct: period.pct,
-          bands: [{ key: 'band1', commissionPct: period.pct }],
-        },
-      });
-    }
-
-    const loaded = await loadTrendyolParcel(prisma, {
-      organizationId: parcel.organizationId,
-      orderId: parcel.orderId,
-    });
-
-    const attrA = loaded.estimateInput.attributes.items.find((i) => i.orderItemId === parcel.itemA);
-    expect(attrA?.tariffBands).toHaveLength(1);
-    // At the exact boundary the period that STARTS there wins -- B's rate, not A's.
-    expect(attrA?.tariffBands?.[0]?.ratePct.toFixed(0)).toBe('23');
-  });
-
-  it('falls back to the synced rate when the order falls in a gap between periods', async () => {
-    // Periods A [s, e) and C [g, h) with g > e leave a gap; the order (2026-10-28T09:00Z)
-    // sits inside it, so no tariff band covers it. With the order line's own rate cleared,
-    // the commission chain falls to the synced product rate (PRODUCT_SYNC), not a band.
-    const parcel = await seedMelontikParcel();
-    // Clear the order rate and give both variants a synced product rate, so the chain has a
-    // non-ORDER, non-tariff source to fall to.
     await prisma.orderItem.updateMany({
       where: { orderId: parcel.orderId },
       data: { orderCommissionRatePct: null },
@@ -455,73 +278,60 @@ describe('loadTrendyolParcel', () => {
       where: { id: { in: [parcel.variantA, parcel.variantB] } },
       data: { syncedCommissionRate: '15.00' },
     });
-
-    const tariff = await prisma.commissionTariff.create({
-      data: {
-        organizationId: parcel.organizationId,
-        storeId: parcel.storeId,
-        name: 'Gap tariff',
-      },
-    });
-    // A ends 2026-10-20 (real 2026-10-19T21:00Z), C starts 2026-11-01 (real 2026-10-31T21:00Z);
-    // the 2026-10-28T09:00Z order falls in the gap between them.
-    const periods: { label: string; startsAt: Date; endsAt: Date; pct: string }[] = [
-      {
-        label: 'before the gap',
-        startsAt: new Date('2026-10-01T00:00:00Z'),
-        endsAt: new Date('2026-10-20T00:00:00Z'),
-        pct: '11',
-      },
-      {
-        label: 'after the gap',
-        startsAt: new Date('2026-11-01T00:00:00Z'),
-        endsAt: new Date('2026-11-30T00:00:00Z'),
-        pct: '23',
-      },
-    ];
-    for (const [index, period] of periods.entries()) {
-      const createdPeriod = await prisma.commissionTariffPeriod.create({
-        data: {
-          organizationId: parcel.organizationId,
-          storeId: parcel.storeId,
-          tariffId: tariff.id,
-          dateRangeLabel: period.label,
-          sortOrder: index,
-          startsAt: period.startsAt,
-          endsAt: period.endsAt,
-        },
-      });
-      await prisma.commissionTariffItem.create({
-        data: {
-          organizationId: parcel.organizationId,
-          storeId: parcel.storeId,
-          periodId: createdPeriod.id,
-          barcode: MELONTIK.items.a.barcode,
-          productTitle: `Melontik ${period.label}`,
-          currentPrice: MELONTIK.items.a.saleGross,
-          currentCommissionPct: period.pct,
-          bands: [{ key: 'band1', commissionPct: period.pct }],
-        },
-      });
-    }
+    await seedCoveringTariffBand(parcel, '7');
 
     const loaded = await loadTrendyolParcel(prisma, {
       organizationId: parcel.organizationId,
       orderId: parcel.orderId,
     });
 
-    const attrA = loaded.estimateInput.attributes.items.find((i) => i.orderItemId === parcel.itemA);
-    // The order is in the gap: no period covers it, so no tariff band is attached.
-    expect(attrA?.tariffBands).toBeNull();
-
-    // Driven through the estimate, the commission resolves from the synced product rate.
     const result = estimateTrendyolParcel(loaded.estimateInput);
     const commissionA = result.lines.find(
       (line) => line.type === ProfitLineType.COMMISSION && line.orderItemId === parcel.itemA,
     );
+    // The band (7%) is never consulted; the synced product rate (15%) wins.
     expect(commissionA?.inputs.rateSource).toBe('PRODUCT_SYNC');
-    // The synced rate 15.00 serializes with trailing zeros stripped (Decimal.toString).
     expect(commissionA?.inputs.ratePct).toBe('15');
+  });
+
+  it('ignores a stored tariff and falls to the category rule when there is no synced rate', async () => {
+    // With no order rate and no synced rate, the chain falls to the category rule, never
+    // the tariff band covering the order date.
+    const parcel = await seedMelontikParcel();
+    await prisma.orderItem.updateMany({
+      where: { orderId: parcel.orderId },
+      data: { orderCommissionRatePct: null },
+    });
+    await prisma.marketplaceCommissionRate.create({
+      data: {
+        platform: 'TRENDYOL',
+        ruleKind: 'CATEGORY',
+        categoryId: 369n,
+        brandId: null,
+        categoryName: 'Melontik category',
+        parentCategoryName: null,
+        brandName: null,
+        baseRate: new Decimal('20.00'),
+        paymentTermDays: 60,
+        segmentOverrides: {},
+        fetchedAt: new Date(),
+        sourceScreen: 'CategoryCommissionPaymentTerms',
+      },
+    });
+    await seedCoveringTariffBand(parcel, '7');
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const result = estimateTrendyolParcel(loaded.estimateInput);
+    const commissionA = result.lines.find(
+      (line) => line.type === ProfitLineType.COMMISSION && line.orderItemId === parcel.itemA,
+    );
+    // The band (7%) is never consulted; the category rule (20%) wins.
+    expect(commissionA?.inputs.rateSource).toBe('CATEGORY');
+    expect(commissionA?.inputs.ratePct).toBe('20');
   });
 
   it('counts accepted claim units as accepted returns', async () => {
@@ -833,153 +643,6 @@ describe('loadTrendyolParcel', () => {
     expect(shipping.desiTariffNet.get('1')?.toFixed(2)).toBe('55.00');
     expect(shipping.baremBands).toHaveLength(1);
     expect(shipping.baremBands[0]?.priceNet.toFixed(2)).toBe('44.00');
-  });
-
-  it('does not use another store CommissionTariffItem with the same barcode', async () => {
-    const parcel = await seedMelontikParcel();
-    const otherStoreId = await createAdditionalStore({
-      organizationId: parcel.organizationId,
-      name: 'Rival Store',
-    });
-
-    const tariff = await prisma.commissionTariff.create({
-      data: { organizationId: parcel.organizationId, storeId: otherStoreId, name: 'Rival tariff' },
-    });
-    const period = await prisma.commissionTariffPeriod.create({
-      data: {
-        organizationId: parcel.organizationId,
-        storeId: otherStoreId,
-        tariffId: tariff.id,
-        dateRangeLabel: 'covering',
-        sortOrder: 0,
-        startsAt: new Date('2026-10-01T00:00:00Z'),
-        endsAt: new Date('2026-11-30T23:59:00Z'),
-      },
-    });
-    await prisma.commissionTariffItem.create({
-      data: {
-        organizationId: parcel.organizationId,
-        storeId: otherStoreId,
-        periodId: period.id,
-        barcode: MELONTIK.items.a.barcode,
-        productTitle: 'Rival melontik',
-        currentPrice: MELONTIK.items.a.saleGross,
-        currentCommissionPct: '5',
-        bands: [{ key: 'band1', commissionPct: '5' }],
-      },
-    });
-
-    const loaded = await loadTrendyolParcel(prisma, {
-      organizationId: parcel.organizationId,
-      orderId: parcel.orderId,
-    });
-
-    const attrA = loaded.estimateInput.attributes.items.find((i) => i.orderItemId === parcel.itemA);
-    expect(attrA?.tariffBands).toBeNull();
-  });
-
-  it('breaks a tariff tie by the later-created tariff', async () => {
-    const parcel = await seedMelontikParcel();
-
-    async function createCoveringTariff(pct: string, createdAt: Date): Promise<void> {
-      const tariff = await prisma.commissionTariff.create({
-        data: {
-          organizationId: parcel.organizationId,
-          storeId: parcel.storeId,
-          name: `tariff ${pct}`,
-          createdAt,
-        },
-      });
-      const period = await prisma.commissionTariffPeriod.create({
-        data: {
-          organizationId: parcel.organizationId,
-          storeId: parcel.storeId,
-          tariffId: tariff.id,
-          dateRangeLabel: 'covering',
-          sortOrder: 0,
-          startsAt: new Date('2026-10-01T00:00:00Z'),
-          endsAt: new Date('2026-11-30T23:59:00Z'),
-        },
-      });
-      await prisma.commissionTariffItem.create({
-        data: {
-          organizationId: parcel.organizationId,
-          storeId: parcel.storeId,
-          periodId: period.id,
-          barcode: MELONTIK.items.a.barcode,
-          productTitle: `melontik ${pct}`,
-          currentPrice: MELONTIK.items.a.saleGross,
-          currentCommissionPct: pct,
-          bands: [{ key: 'band1', commissionPct: pct }],
-        },
-      });
-    }
-
-    await createCoveringTariff('11', new Date('2026-01-01T00:00:00Z'));
-    await createCoveringTariff('23', new Date('2026-01-02T00:00:00Z')); // later created -> wins
-
-    const loaded = await loadTrendyolParcel(prisma, {
-      organizationId: parcel.organizationId,
-      orderId: parcel.orderId,
-    });
-
-    const attrA = loaded.estimateInput.attributes.items.find((i) => i.orderItemId === parcel.itemA);
-    expect(attrA?.tariffBands).toHaveLength(1);
-    expect(attrA?.tariffBands?.[0]?.ratePct.toFixed(0)).toBe('23');
-  });
-
-  it('breaks a period tie within one tariff by the later-created period', async () => {
-    const parcel = await seedMelontikParcel();
-    const tariff = await prisma.commissionTariff.create({
-      data: {
-        organizationId: parcel.organizationId,
-        storeId: parcel.storeId,
-        name: 'two-period tariff',
-      },
-    });
-
-    async function addCoveringPeriod(
-      pct: string,
-      sortOrder: number,
-      createdAt: Date,
-    ): Promise<void> {
-      const period = await prisma.commissionTariffPeriod.create({
-        data: {
-          organizationId: parcel.organizationId,
-          storeId: parcel.storeId,
-          tariffId: tariff.id,
-          dateRangeLabel: `covering ${pct}`,
-          sortOrder,
-          startsAt: new Date('2026-10-01T00:00:00Z'),
-          endsAt: new Date('2026-11-30T23:59:00Z'),
-          createdAt,
-        },
-      });
-      await prisma.commissionTariffItem.create({
-        data: {
-          organizationId: parcel.organizationId,
-          storeId: parcel.storeId,
-          periodId: period.id,
-          barcode: MELONTIK.items.a.barcode,
-          productTitle: `melontik ${pct}`,
-          currentPrice: MELONTIK.items.a.saleGross,
-          currentCommissionPct: pct,
-          bands: [{ key: 'band1', commissionPct: pct }],
-        },
-      });
-    }
-
-    await addCoveringPeriod('11', 0, new Date('2026-01-01T00:00:00Z'));
-    await addCoveringPeriod('23', 1, new Date('2026-01-02T00:00:00Z')); // later created -> wins
-
-    const loaded = await loadTrendyolParcel(prisma, {
-      organizationId: parcel.organizationId,
-      orderId: parcel.orderId,
-    });
-
-    const attrA = loaded.estimateInput.attributes.items.find((i) => i.orderItemId === parcel.itemA);
-    expect(attrA?.tariffBands).toHaveLength(1);
-    expect(attrA?.tariffBands?.[0]?.ratePct.toFixed(0)).toBe('23');
   });
 
   it('resolves the micro-export fees and overseas return tiers for an export order', async () => {

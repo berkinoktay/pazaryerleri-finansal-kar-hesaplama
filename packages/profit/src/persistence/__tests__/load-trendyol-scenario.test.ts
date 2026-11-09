@@ -136,9 +136,7 @@ describe('loadTrendyolScenarioBases', () => {
         organizationId,
         storeId,
         scenarioDate: MELONTIK.orderDate,
-        variants: variantIds
-          .slice(0, count)
-          .map((variantId) => ({ variantId, tariffAnchor: null })),
+        variants: variantIds.slice(0, count).map((variantId) => ({ variantId })),
       });
       expect(bases.size).toBe(count);
       expect([...bases.values()].every((result) => result.kind === 'ready')).toBe(true);
@@ -173,7 +171,7 @@ describe('loadTrendyolScenarioBases', () => {
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
       scenarioDate: MELONTIK.orderDate,
-      variants: [{ variantId: parcel.variantA, tariffAnchor: MELONTIK.orderDate }],
+      variants: [{ variantId: parcel.variantA }],
     });
 
     const result = bases.get(parcel.variantA);
@@ -197,9 +195,8 @@ describe('loadTrendyolScenarioBases', () => {
     expect(base.reference.commission).toEqual(order.estimateInput.reference.commission);
 
     // Commission chain inputs match too (a scenario never carries an order-line rate,
-    // which the order path reads separately).
+    // which the order path reads separately; neither consults tariff bands).
     expect(base.product.syncedCommissionRatePct).toEqual(orderAttr?.syncedCommissionRatePct);
-    expect(base.product.tariffBands).toEqual(orderAttr?.tariffBands ?? null);
     expect(base.product.categoryId).toBe(orderAttr?.categoryId ?? null);
     expect(base.product.brandId).toBe(orderAttr?.brandId ?? null);
 
@@ -232,7 +229,7 @@ describe('loadTrendyolScenarioBases', () => {
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
       scenarioDate: MELONTIK.orderDate,
-      variants: [{ variantId: parcel.variantA, tariffAnchor: null }],
+      variants: [{ variantId: parcel.variantA }],
     });
 
     const result = bases.get(parcel.variantA);
@@ -249,13 +246,11 @@ describe('loadTrendyolScenarioBases', () => {
     });
   });
 
-  it("ignores another organization's cost profiles and tariffs", async () => {
+  it("ignores another organization's cost profiles", async () => {
     const parcel = await seedMelontikParcel();
 
-    // Another organization + store. Its cost profile is linked to THIS org's variant A
-    // (org-denormalized link column) and its commission tariff carries variant A's
-    // barcode: the org filter on cost links and the store filter on tariffs must both
-    // exclude them.
+    // Another organization + store whose cost profile is linked to THIS org's variant A
+    // (org-denormalized link column): the org filter on cost links must exclude it.
     const otherOrg = await prisma.organization.create({
       data: { name: 'Rival Org', slug: `rival-${Date.now()}` },
     });
@@ -268,38 +263,11 @@ describe('loadTrendyolScenarioBases', () => {
       vatRate: '20',
     });
 
-    const rivalTariff = await prisma.commissionTariff.create({
-      data: { organizationId: otherOrg.id, storeId: otherStoreId, name: 'Rival tariff' },
-    });
-    const rivalPeriod = await prisma.commissionTariffPeriod.create({
-      data: {
-        organizationId: otherOrg.id,
-        storeId: otherStoreId,
-        tariffId: rivalTariff.id,
-        dateRangeLabel: 'covering',
-        sortOrder: 0,
-        startsAt: new Date('2026-10-01T00:00:00Z'),
-        endsAt: new Date('2026-11-30T23:59:00Z'),
-      },
-    });
-    await prisma.commissionTariffItem.create({
-      data: {
-        organizationId: otherOrg.id,
-        storeId: otherStoreId,
-        periodId: rivalPeriod.id,
-        barcode: MELONTIK.items.a.barcode,
-        productTitle: 'Rival melontik',
-        currentPrice: MELONTIK.items.a.saleGross,
-        currentCommissionPct: '5',
-        bands: [{ key: 'band1', commissionPct: '5' }],
-      },
-    });
-
     const bases = await loadTrendyolScenarioBases(prisma, {
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
       scenarioDate: MELONTIK.orderDate,
-      variants: [{ variantId: parcel.variantA, tariffAnchor: MELONTIK.orderDate }],
+      variants: [{ variantId: parcel.variantA }],
     });
 
     const result = bases.get(parcel.variantA);
@@ -308,8 +276,6 @@ describe('loadTrendyolScenarioBases', () => {
     }
     // Only this org's COGS profile survives; the rival org's cross-org link is filtered out.
     expect(result.base.costs).toHaveLength(1);
-    // The rival store's tariff with the same barcode is filtered out by store.
-    expect(result.base.product.tariffBands).toBeNull();
   });
 
   it('drops a cost profile without versions', async () => {
@@ -339,7 +305,7 @@ describe('loadTrendyolScenarioBases', () => {
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
       scenarioDate: MELONTIK.orderDate,
-      variants: [{ variantId: parcel.variantA, tariffAnchor: null }],
+      variants: [{ variantId: parcel.variantA }],
     });
 
     const result = bases.get(parcel.variantA);
@@ -352,84 +318,6 @@ describe('loadTrendyolScenarioBases', () => {
     expect(result.base.costs.every((profile) => profile.versions.length > 0)).toBe(true);
   });
 
-  it('takes the tariff bands from the period covering the anchor', async () => {
-    const parcel = await seedMelontikParcel();
-
-    const tariff = await prisma.commissionTariff.create({
-      data: {
-        organizationId: parcel.organizationId,
-        storeId: parcel.storeId,
-        name: 'Melontik tariff',
-      },
-    });
-    const periods: { label: string; startsAt: Date; endsAt: Date | null; pct: string }[] = [
-      {
-        label: 'before',
-        startsAt: new Date('2026-09-01T00:00:00Z'),
-        endsAt: new Date('2026-09-30T23:59:00Z'),
-        pct: '11',
-      },
-      {
-        label: 'covering',
-        startsAt: new Date('2026-10-01T00:00:00Z'),
-        endsAt: new Date('2026-11-30T23:59:00Z'),
-        pct: '17',
-      },
-      {
-        label: 'open',
-        startsAt: new Date('2026-10-01T00:00:00Z'),
-        endsAt: null,
-        pct: '13',
-      },
-    ];
-    for (const [index, period] of periods.entries()) {
-      const createdPeriod = await prisma.commissionTariffPeriod.create({
-        data: {
-          organizationId: parcel.organizationId,
-          storeId: parcel.storeId,
-          tariffId: tariff.id,
-          dateRangeLabel: period.label,
-          sortOrder: index,
-          startsAt: period.startsAt,
-          endsAt: period.endsAt,
-        },
-      });
-      await prisma.commissionTariffItem.create({
-        data: {
-          organizationId: parcel.organizationId,
-          storeId: parcel.storeId,
-          periodId: createdPeriod.id,
-          barcode: MELONTIK.items.a.barcode,
-          productTitle: `Melontik ${period.label}`,
-          currentPrice: MELONTIK.items.a.saleGross,
-          currentCommissionPct: period.pct,
-          bands: [{ key: 'band1', commissionPct: period.pct }],
-        },
-      });
-    }
-
-    const bases = await loadTrendyolScenarioBases(prisma, {
-      organizationId: parcel.organizationId,
-      storeId: parcel.storeId,
-      scenarioDate: MELONTIK.orderDate,
-      variants: [
-        { variantId: parcel.variantA, tariffAnchor: MELONTIK.orderDate },
-        { variantId: parcel.variantB, tariffAnchor: null },
-      ],
-    });
-
-    const variantA = bases.get(parcel.variantA);
-    const variantB = bases.get(parcel.variantB);
-    if (variantA?.kind !== 'ready' || variantB?.kind !== 'ready') {
-      throw new Error('expected both scenario bases to be ready');
-    }
-    // Variant A resolves at an anchor inside the covering period (17%).
-    expect(variantA.base.product.tariffBands).toHaveLength(1);
-    expect(variantA.base.product.tariffBands?.[0]?.ratePct.toFixed(0)).toBe('17');
-    // A null anchor never resolves bands.
-    expect(variantB.base.product.tariffBands).toBeNull();
-  });
-
   it('reports an unknown variant id as unavailable', async () => {
     const parcel = await seedMelontikParcel();
     const foreignVariantId = '00000000-0000-0000-0000-000000000000';
@@ -438,10 +326,7 @@ describe('loadTrendyolScenarioBases', () => {
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
       scenarioDate: MELONTIK.orderDate,
-      variants: [
-        { variantId: parcel.variantA, tariffAnchor: null },
-        { variantId: foreignVariantId, tariffAnchor: null },
-      ],
+      variants: [{ variantId: parcel.variantA }, { variantId: foreignVariantId }],
     });
 
     expect(bases.get(parcel.variantA)?.kind).toBe('ready');
@@ -489,10 +374,7 @@ describe('loadTrendyolScenarioBases', () => {
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
       scenarioDate: MELONTIK.orderDate,
-      variants: [
-        { variantId: parcel.variantA, tariffAnchor: null },
-        { variantId: otherVariant.id, tariffAnchor: null },
-      ],
+      variants: [{ variantId: parcel.variantA }, { variantId: otherVariant.id }],
     });
     expect(both.get(parcel.variantA)?.kind).toBe('ready');
     expect(both.get(otherVariant.id)).toEqual({
@@ -506,7 +388,7 @@ describe('loadTrendyolScenarioBases', () => {
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
       scenarioDate: MELONTIK.orderDate,
-      variants: [{ variantId: otherVariant.id, tariffAnchor: null }],
+      variants: [{ variantId: otherVariant.id }],
     });
     expect(onlyOther.get(otherVariant.id)).toEqual({
       kind: 'unavailable',
@@ -525,7 +407,7 @@ describe('loadTrendyolScenarioBases', () => {
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
       scenarioDate: MELONTIK.orderDate,
-      variants: [{ variantId: parcel.variantA, tariffAnchor: null }],
+      variants: [{ variantId: parcel.variantA }],
     });
     const result = bases.get(parcel.variantA);
     if (result?.kind !== 'ready') {
@@ -599,7 +481,7 @@ describe('loadTrendyolScenarioBases', () => {
       organizationId,
       storeId,
       scenarioDate: MELONTIK.orderDate, // between v1 (2026-01-01) and v2 (2027-01-01)
-      variants: [{ variantId, tariffAnchor: null }],
+      variants: [{ variantId }],
     });
     const result = bases.get(variantId);
     if (result?.kind !== 'ready') {
@@ -653,7 +535,7 @@ describe('loadTrendyolScenarioBases', () => {
       organizationId,
       storeId,
       scenarioDate: MELONTIK.orderDate, // before the only version (2027-01-01)
-      variants: [{ variantId, tariffAnchor: null }],
+      variants: [{ variantId }],
     });
     const result = bases.get(variantId);
     if (result?.kind !== 'ready') {
@@ -708,7 +590,7 @@ describe('loadTrendyolScenarioBases', () => {
       organizationId,
       storeId,
       scenarioDate: MELONTIK.orderDate,
-      variants: [{ variantId, tariffAnchor: null }],
+      variants: [{ variantId }],
     });
     const result = bases.get(variantId);
     if (result?.kind !== 'ready') {
@@ -737,7 +619,7 @@ describe('loadTrendyolScenarioBases', () => {
         organizationId: parcel.organizationId,
         storeId: parcel.storeId,
         scenarioDate: new Date('2023-06-01T00:00:00Z'),
-        variants: [{ variantId: parcel.variantA, tariffAnchor: null }],
+        variants: [{ variantId: parcel.variantA }],
       }),
     ).rejects.toBeInstanceOf(FeeDefinitionNotFoundError);
   });
@@ -765,7 +647,7 @@ describe('loadTrendyolScenarioBases', () => {
         organizationId: parcel.organizationId,
         storeId: parcel.storeId,
         scenarioDate: new Date('2027-06-01T00:00:00Z'),
-        variants: [{ variantId: parcel.variantA, tariffAnchor: null }],
+        variants: [{ variantId: parcel.variantA }],
       });
     } catch (error) {
       caught = error;

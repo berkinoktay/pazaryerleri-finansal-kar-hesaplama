@@ -1,7 +1,7 @@
 // Shared Trendyol reference sub-loaders, used by both the per-order parcel loader
 // (`load-trendyol-parcel`) and the batch scenario loader (`load-trendyol-scenario`).
-// Each loader reads one kind of input (costs, tariff bands, fees, shipping,
-// commission rules) for a SET of keys in a single query, so a caller that needs
+// Each loader reads one kind of input (costs, fees, shipping, commission rules)
+// for a SET of keys in a single query, so a caller that needs
 // many variants in one pass issues a constant number of queries. This module is
 // internal to the persistence layer and is never re-exported from the package
 // index. Reads only; every store-scoped table is filtered by store and every
@@ -10,7 +10,6 @@
 import { Decimal } from 'decimal.js';
 import type { OrderFeeType, Prisma } from '@pazarsync/db';
 import { CommissionRuleKind, Platform } from '@pazarsync/db/enums';
-import { isInstantWithinTariffPeriod } from '@pazarsync/utils';
 
 import {
   type CostProfileVersionInput,
@@ -21,16 +20,11 @@ import {
   trendyolCategoryBrandKey,
   type OverseasReturnTier,
   type TrendyolBaremBand,
-  type TrendyolCommissionBand,
   type TrendyolCommissionRules,
   type TrendyolFeeParams,
   type TrendyolShippingCarrier,
   type TrendyolShippingTariff,
 } from '../marketplaces/trendyol/trendyol-inputs';
-import {
-  parseStoredTariffBands,
-  toCommissionBand,
-} from '../marketplaces/trendyol/stored-tariff-bands';
 import {
   IncompleteFeeDefinitionError,
   resolveFeeDefinition,
@@ -118,109 +112,6 @@ export async function loadCostProfilesByVariant(
     profilesByVariant.set(link.productVariantId, list);
   }
   return profilesByVariant;
-}
-
-// --- Tariff bands ------------------------------------------------------------
-
-/** A commission tariff item row with the period + tariff createdAt tie-breakers. */
-export interface TariffCandidate {
-  readonly id: string;
-  readonly barcode: string;
-  readonly bands: Prisma.JsonValue;
-  readonly period: {
-    readonly startsAt: Date;
-    readonly endsAt: Date;
-    readonly createdAt: Date;
-    readonly tariff: { readonly createdAt: Date };
-  };
-}
-
-/** True when `a` beats `b`: latest tariff createdAt, then latest period createdAt, then smallest id. */
-function tariffCandidateBeats(a: TariffCandidate, b: TariffCandidate): boolean {
-  const aTariff = a.period.tariff.createdAt.getTime();
-  const bTariff = b.period.tariff.createdAt.getTime();
-  if (aTariff !== bTariff) return aTariff > bTariff;
-  const aPeriod = a.period.createdAt.getTime();
-  const bPeriod = b.period.createdAt.getTime();
-  if (aPeriod !== bPeriod) return aPeriod > bPeriod;
-  return a.id < b.id;
-}
-
-/**
- * Every saved commission-tariff item of the store that matches one of the given
- * barcodes, grouped by barcode, in a single query. A candidate with a null period
- * bound is dropped here (a null-bound period can never cover an instant). The
- * covering-period selection is left to `resolveTariffBandsAt`, so one query serves
- * many anchors (the order loader resolves at the order instant, a scenario resolves
- * at each variant's own tariff anchor).
- */
-export async function loadTariffCandidatesByBarcode(
-  tx: Prisma.TransactionClient,
-  params: { readonly storeId: string; readonly barcodes: readonly string[] },
-): Promise<Map<string, TariffCandidate[]>> {
-  const { storeId } = params;
-  const barcodes = [...new Set(params.barcodes)];
-  const byBarcode = new Map<string, TariffCandidate[]>();
-  if (barcodes.length === 0) {
-    return byBarcode;
-  }
-
-  const rows = await tx.commissionTariffItem.findMany({
-    where: { storeId, barcode: { in: barcodes } },
-    include: { period: { include: { tariff: true } } },
-  });
-
-  for (const row of rows) {
-    const { startsAt, endsAt } = row.period;
-    if (startsAt === null || endsAt === null) {
-      continue; // a period with a null bound never covers an instant
-    }
-    const candidate: TariffCandidate = {
-      id: row.id,
-      barcode: row.barcode,
-      bands: row.bands,
-      period: {
-        startsAt,
-        endsAt,
-        createdAt: row.period.createdAt,
-        tariff: { createdAt: row.period.tariff.createdAt },
-      },
-    };
-    const list = byBarcode.get(row.barcode) ?? [];
-    list.push(candidate);
-    byBarcode.set(row.barcode, list);
-  }
-  return byBarcode;
-}
-
-/**
- * The tariff bands of the best candidate whose period covers `at`, or null when no
- * candidate covers it or the best one carries an empty band list. Bounds are
- * compared half-open [startsAt, endsAt) after conversion to their real instants
- * (`isInstantWithinTariffPeriod`); ties break by latest tariff createdAt, then
- * latest period createdAt, then smallest id (`tariffCandidateBeats`).
- */
-export function resolveTariffBandsAt(
-  candidates: readonly TariffCandidate[] | undefined,
-  at: Date,
-): TrendyolCommissionBand[] | null {
-  if (candidates === undefined) {
-    return null;
-  }
-  let best: TariffCandidate | null = null;
-  for (const candidate of candidates) {
-    if (!isInstantWithinTariffPeriod(candidate.period, at)) {
-      continue; // bounds converted to the real instant, compared half-open
-    }
-    if (best === null || tariffCandidateBeats(candidate, best)) {
-      best = candidate;
-    }
-  }
-  if (best === null) {
-    return null;
-  }
-  const bands = parseStoredTariffBands(best.bands).map(toCommissionBand);
-  return bands.length > 0 ? bands : null;
 }
 
 // --- Commission rules --------------------------------------------------------
