@@ -32,6 +32,7 @@ import {
   enqueueStaleProfitStatements,
   processClaimedRecompute,
 } from '../recompute-queue';
+import { deferred, delay } from './helpers/concurrency';
 import {
   createAdditionalStore,
   ensureDbReachable,
@@ -41,30 +42,8 @@ import {
   truncateAll,
 } from './helpers/melontik-parcel';
 
-/** Resolves after `ms`, used to force two clock_timestamp() values onto different ms. */
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(() => resolve(), ms);
-  });
-}
-
 /** The window a disjoint claim gets before we treat it as blocked on a held lock. */
 const CONCURRENT_CLAIM_WAIT_MS = 8000;
-
-/** A promise with its resolver exposed, to coordinate the concurrent-claim holder. */
-interface Deferred<T> {
-  readonly promise: Promise<T>;
-  resolve: (value: T) => void;
-}
-
-/** Builds a Deferred; the executor runs synchronously, so `resolve` is always set. */
-function deferred<T>(): Deferred<T> {
-  let resolve: (value: T) => void = () => undefined;
-  const promise = new Promise<T>((res) => {
-    resolve = res;
-  });
-  return { promise, resolve };
-}
 
 /** Adds one more order item pointing at an existing variant (same-variant line). */
 async function addOrderItemForVariant(params: {

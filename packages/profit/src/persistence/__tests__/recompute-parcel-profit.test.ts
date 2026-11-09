@@ -30,6 +30,7 @@ import {
   recomputeParcelProfit,
   type RecomputeParcelResult,
 } from '../recompute-parcel-profit';
+import { deferred, delay } from './helpers/concurrency';
 import {
   attachCostProfile,
   ensureDbReachable,
@@ -46,28 +47,6 @@ function recompute(organizationId: string, orderId: string): Promise<RecomputePa
   return prisma.$transaction((tx) => recomputeParcelProfit(tx, { organizationId, orderId }), {
     maxWait: 15000,
     timeout: 30000,
-  });
-}
-
-/** A promise with an exposed resolver, used to coordinate the lock-wait test. */
-interface Deferred {
-  readonly promise: Promise<void>;
-  readonly resolve: () => void;
-}
-
-/** Builds a Deferred; the executor runs synchronously, so `resolve` is always set. */
-function deferred(): Deferred {
-  let resolve: () => void = () => undefined;
-  const promise = new Promise<void>((res) => {
-    resolve = res;
-  });
-  return { promise, resolve };
-}
-
-/** Resolves after `ms`, for polling without a busy loop. */
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(() => resolve(), ms);
   });
 }
 
@@ -756,8 +735,8 @@ describe('recomputeParcelProfit', () => {
     const parcel = await seedMelontikParcel();
     const expectedLineCount = await estimateLineCount(parcel.organizationId, parcel.orderId);
 
-    const held = deferred();
-    const releaseGate = deferred();
+    const held = deferred<void>();
+    const releaseGate = deferred<void>();
 
     // Transaction H grabs the parcel lock, signals, then parks on releaseGate: it
     // keeps the advisory lock for exactly as long as the test holds the gate shut.

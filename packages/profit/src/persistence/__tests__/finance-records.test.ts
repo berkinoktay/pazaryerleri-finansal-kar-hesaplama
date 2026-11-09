@@ -6,18 +6,21 @@
  * profit recompute after the store transaction has committed. They pin that rows are
  * stored idempotently on the (store, family, record_id) key, that an unchanged re-ingest
  * stores nothing and enqueues nothing, that a changed row is flagged and bound, that a
- * sale row is updated in place when its payment order arrives later, that a cargo item
- * keeps one row when a re-scan relabels it, that a row stored before its order exists is
- * bound by the first pass to run after the order is committed, that the bound order set
- * equals exactly what the loader would bind, that a sibling store's order sharing the
- * keys is never enqueued, and that a store/organization mismatch stores and binds nothing.
+ * change seen only in the stored payload (a field mapped to no dedicated column) still
+ * re-stores and re-flags the row, that a sale row is updated in place when its payment
+ * order arrives later, that a cargo item keeps one row when a re-scan relabels it, that a
+ * row stored before its order exists is bound by the first pass to run after the order is
+ * committed, that a bind pass skips a pending row another transaction holds locked, that
+ * the bound order set equals exactly what the loader would bind, that a sibling store's
+ * order sharing the keys is never enqueued, and that a store/organization mismatch stores
+ * and binds nothing.
  *
  * Requires: `supabase start` + `pnpm db:push` before running.
  */
 
 import { randomUUID } from 'node:crypto';
 
-import { prisma } from '@pazarsync/db';
+import { prisma, type Prisma } from '@pazarsync/db';
 import { FinanceRecordFamily, Platform, ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { CargoInvoiceItem, TrendyolFinancialTransaction } from '@pazarsync/marketplace';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -38,6 +41,7 @@ import {
   pruneUnseenFinanceRecords,
 } from '../finance-records';
 import { loadTrendyolParcel } from '../load-trendyol-parcel';
+import { deferred, delay } from './helpers/concurrency';
 import {
   createAdditionalStore,
   createTrendyolOrg,
@@ -50,6 +54,9 @@ import {
 } from './helpers/melontik-parcel';
 
 const TX_MS = Date.parse('2026-10-28T09:00:00.000Z');
+
+/** The window a bind pass gets before we treat it as blocked on a held lock. */
+const SKIP_LOCKED_BIND_WAIT_MS = 8000;
 
 const BASE_TX: TrendyolFinancialTransaction = {
   id: 'rec-1',
@@ -181,6 +188,14 @@ async function seedClaim(params: {
 async function queuedOrderIds(): Promise<string[]> {
   const rows = await prisma.profitRecomputeRequest.findMany({ select: { orderId: true } });
   return rows.map((row) => row.orderId).sort();
+}
+
+/** Reads one field out of a stored jsonb payload object; undefined when it is not one. */
+function payloadField(payload: Prisma.JsonValue, field: string): Prisma.JsonValue | undefined {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return undefined;
+  }
+  return payload[field];
 }
 
 describe('ingestFinanceRecords', () => {
@@ -982,6 +997,182 @@ describe('ingestFinanceRecords', () => {
     });
     expect(cleared.bindPending).toBe(false);
   });
+
+  it('a payload-only change re-stores the row and flags it for the bind pass', async () => {
+    const parcel = await seedMelontikParcel();
+    const order = await createTestOrder({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platformOrderId: '1001',
+    });
+
+    await ingestFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platform: Platform.TRENDYOL,
+      records: [
+        trendyolSettlementRecordInput(
+          'Sale',
+          financialTx({ id: 'sale-a', shipmentPackageId: 1001, credit: 529 }),
+        ),
+      ],
+    });
+    await bindPendingFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
+    await prisma.profitRecomputeRequest.deleteMany({});
+
+    // Re-ingest the same record changing only `description`. trendyolSettlementRecordInput
+    // maps `description` to no dedicated column -- it survives only inside `payload` -- so
+    // every compared column stays identical and the row differs by its payload alone. The
+    // conditional ON CONFLICT must keep `payload` in its IS DISTINCT FROM comparison, or
+    // this change is neither re-stored nor re-flagged.
+    const description = 'payload-only change marker';
+    const changed = await ingestFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platform: Platform.TRENDYOL,
+      records: [
+        trendyolSettlementRecordInput(
+          'Sale',
+          financialTx({ id: 'sale-a', shipmentPackageId: 1001, credit: 529, description }),
+        ),
+      ],
+    });
+    expect(changed.stored).toBe(1);
+
+    const flagged = await prisma.marketplaceFinanceRecord.findFirstOrThrow({
+      where: { recordId: 'sale-a' },
+    });
+    expect(flagged.bindPending).toBe(true);
+    expect(payloadField(flagged.payload, 'description')).toBe(description);
+
+    const bind = await bindPendingFinanceRecords(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+    });
+    expect(bind.bound).toBe(1);
+    expect(bind.enqueuedOrders).toBe(1);
+    expect(await queuedOrderIds()).toEqual([order]);
+  });
+
+  it('a bind pass skips a pending row another transaction holds locked', async () => {
+    const parcel = await seedMelontikParcel();
+    const org = parcel.organizationId;
+    const store = parcel.storeId;
+    const order1001 = await createTestOrder({
+      organizationId: org,
+      storeId: store,
+      platformOrderId: '1001',
+    });
+    const order1002 = await createTestOrder({
+      organizationId: org,
+      storeId: store,
+      platformOrderId: '1002',
+    });
+
+    // Two settlement rows land pending in one ingest; neither is bound yet.
+    const stored = await ingestFinanceRecords(prisma, {
+      organizationId: org,
+      storeId: store,
+      platform: Platform.TRENDYOL,
+      records: [
+        trendyolSettlementRecordInput(
+          'Sale',
+          financialTx({ id: 'sale-1', shipmentPackageId: 1001, credit: 529 }),
+        ),
+        trendyolSettlementRecordInput(
+          'Sale',
+          financialTx({ id: 'sale-2', shipmentPackageId: 1002, credit: 600 }),
+        ),
+      ],
+    });
+    expect(stored.stored).toBe(2);
+
+    // A holder transaction on a pooled connection locks sale-1's row FOR UPDATE and parks.
+    // The Prisma client pools connections, so the bind pass below runs on a different
+    // connection, genuinely concurrent with the held lock -- the only setup under which
+    // FOR UPDATE SKIP LOCKED is observable.
+    const held = deferred<string[]>();
+    const releaseGate = deferred<void>();
+    const holder = prisma.$transaction(
+      async (tx) => {
+        const rows = await tx.$queryRaw<{ id: string }[]>`
+          SELECT id FROM marketplace_finance_records
+          WHERE organization_id = ${org}::uuid
+            AND store_id = ${store}::uuid
+            AND record_id = 'sale-1'
+          FOR UPDATE`;
+        held.resolve(rows.map((row) => row.id));
+        await releaseGate.promise;
+      },
+      { maxWait: 15000, timeout: 30000 },
+    );
+
+    let bindPromise:
+      | Promise<{ readonly bound: number; readonly enqueuedOrders: number }>
+      | undefined;
+    try {
+      const heldIds = await held.promise;
+      expect(heldIds).toHaveLength(1);
+
+      // The bind pass must skip the row the holder locked and bind only sale-2. With SKIP
+      // LOCKED it skips the held row and settles fast; without it, the pass's claim CTE
+      // blocks on the held row and never settles inside the window -- which fails the test.
+      bindPromise = bindPendingFinanceRecords(prisma, { organizationId: org, storeId: store });
+      const settled = await Promise.race([
+        bindPromise.then(
+          (result) => ({ kind: 'ok' as const, result }),
+          (error: unknown) => ({ kind: 'error' as const, error }),
+        ),
+        delay(SKIP_LOCKED_BIND_WAIT_MS).then(() => ({ kind: 'timeout' as const })),
+      ]);
+
+      if (settled.kind === 'timeout') {
+        throw new Error(
+          'the bind pass blocked on a row held by another transaction: FOR UPDATE SKIP LOCKED is missing',
+        );
+      }
+      if (settled.kind === 'error') {
+        throw settled.error instanceof Error ? settled.error : new Error(String(settled.error));
+      }
+
+      // Only sale-2 bound: its order is enqueued while sale-1 stays pending behind the lock.
+      expect(settled.result.bound).toBe(1);
+      expect(settled.result.enqueuedOrders).toBe(1);
+      expect(await queuedOrderIds()).toEqual([order1002]);
+      const saleOne = await prisma.marketplaceFinanceRecord.findFirstOrThrow({
+        where: { recordId: 'sale-1' },
+      });
+      expect(saleOne.bindPending).toBe(true);
+      const saleTwo = await prisma.marketplaceFinanceRecord.findFirstOrThrow({
+        where: { recordId: 'sale-2' },
+      });
+      expect(saleTwo.bindPending).toBe(false);
+
+      // Release the holder; a second bind pass claims the now-free sale-1 and binds it, so
+      // the queue holds both orders.
+      releaseGate.resolve();
+      await holder;
+
+      const secondBind = await bindPendingFinanceRecords(prisma, {
+        organizationId: org,
+        storeId: store,
+      });
+      expect(secondBind.bound).toBe(1);
+      expect(secondBind.enqueuedOrders).toBe(1);
+      expect(await queuedOrderIds()).toEqual([order1001, order1002].sort());
+    } finally {
+      // Always release the holder and drain both, so a failed assertion never leaks the
+      // held lock or hangs the suite on a pending transaction.
+      releaseGate.resolve();
+      await holder.catch(() => undefined);
+      if (bindPromise !== undefined) {
+        await bindPromise.catch(() => undefined);
+      }
+    }
+  }, 30000);
 
   it('a record stored before its order exists is bound once the order exists', async () => {
     const parcel = await seedMelontikParcel();
