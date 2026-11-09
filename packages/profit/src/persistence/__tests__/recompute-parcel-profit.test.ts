@@ -13,6 +13,7 @@ import { Decimal } from 'decimal.js';
 import { prisma, type Prisma } from '@pazarsync/db';
 import {
   ProfitIssueCode,
+  ProfitLineCertainty,
   ProfitLineLevel,
   ProfitLineSource,
   ProfitLineType,
@@ -473,6 +474,33 @@ describe('recomputeParcelProfit', () => {
     expect(allocations.map((share) => share.orderItemId).sort()).toEqual(
       [parcel.itemA, parcel.itemB].sort(),
     );
+  });
+
+  it('replaces the zero estimate of an unrecognized carrier with a later cargo invoice', async () => {
+    // Trendyol named a carrier we cannot recognize, so the forward estimate is a zero
+    // SHIPPING line. When the cargo invoice arrives it writes an ACTUAL SHIPPING line and
+    // the statement selects it, so the real cost (98.34) replaces the zero estimate.
+    const tracking = BigInt('7335551111');
+    const parcel = await seedMelontikParcel({ cargoTrackingNumber: tracking });
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { cargoProviderName: 'Alternative Delivery' },
+    });
+    await insertFinanceRecord(melontikCargoInvoiceInput(parcel, tracking.toString()));
+
+    const result = await recompute(parcel.organizationId, parcel.orderId);
+    expect(result.changed).toBe(true);
+
+    const shippingLines = await prisma.profitLine.findMany({
+      where: { orderId: parcel.orderId, type: ProfitLineType.SHIPPING },
+    });
+    const estimate = shippingLines.find((line) => line.certainty === ProfitLineCertainty.ESTIMATE);
+    const actual = shippingLines.find((line) => line.certainty === ProfitLineCertainty.ACTUAL);
+    // The zero estimate stays recorded (with its reason) while the ACTUAL cargo invoice
+    // supplies the real amount that the statement selects.
+    expect(estimate?.amountGross.toFixed(2)).toBe('0.00');
+    expect(estimate?.inputs).toMatchObject({ reason: 'CARRIER_NOT_RECOGNIZED' });
+    expect(actual?.amountGross.toFixed(2)).toBe('98.34');
   });
 
   it('writes a cancelled parcel without any records as CANCELLED with no lines', async () => {

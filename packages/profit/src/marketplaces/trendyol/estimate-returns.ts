@@ -5,6 +5,7 @@ import {
   ProfitLineLevel,
   ProfitLineSource,
   ProfitLineType,
+  ShippingTariffSource,
 } from '@pazarsync/db/enums';
 
 import { type AllocationItem } from '../../core/allocation/allocation-weights';
@@ -22,7 +23,11 @@ import { roundMoney } from '../../money';
 import { saleVatRatePct } from '../../tax/tr/sale-vat';
 import { buildStoppageRefundLines } from '../../tax/tr/stoppage-lines';
 import { vatFromGross } from '../../tax/tr/vat';
-import { resolveTrendyolShippingGross, trendyolCarrierCodeForKind } from './estimate-shipping';
+import {
+  CARRIER_NOT_RECOGNIZED_REASON,
+  resolveTrendyolShippingGross,
+  trendyolCarrierCodeForKind,
+} from './estimate-shipping';
 import { type OverseasReturnTier, type TrendyolReferenceData } from './trendyol-inputs';
 
 const ZERO = new Decimal(0);
@@ -279,6 +284,33 @@ function buildReturnShippingLine(params: {
   readonly reference: TrendyolReferenceData;
 }): { readonly line: ProfitLine | null; readonly issue: ProfitIssue | null } {
   const { anyDesiUnknown, desi, basketGross, reference } = params;
+
+  // A not-recognized carrier on a Trendyol-contract order cannot be priced, so the
+  // return-shipping estimate is a zero line recording why -- consistent with the forward
+  // leg, and never an unavailable issue (a cargo invoice later replaces it). An
+  // own-contract store is unaffected and falls through to its own tariff below.
+  const carrierOutcome = reference.shipping.orderCarrierOutcome;
+  if (
+    reference.shipping.source === ShippingTariffSource.TRENDYOL_CONTRACT &&
+    carrierOutcome !== null &&
+    carrierOutcome.kind === 'not-recognized'
+  ) {
+    const line = createProfitLine({
+      type: ProfitLineType.RETURN_SHIPPING,
+      level: ProfitLineLevel.PARCEL,
+      orderItemId: null,
+      certainty: ProfitLineCertainty.ESTIMATE,
+      source: ProfitLineSource.RULE,
+      amount: { gross: ZERO, vat: ZERO },
+      vatRatePct: reference.fees.returnShippingVatRatePct,
+      inputs: {
+        reason: CARRIER_NOT_RECOGNIZED_REASON,
+        providerName: carrierOutcome.providerName,
+      },
+      externalRecord: null,
+    });
+    return { line, issue: null };
+  }
 
   if (anyDesiUnknown) {
     return {

@@ -69,6 +69,8 @@ function defaultShipping(): TrendyolShippingTariff {
       },
     ],
     ownTariffNet: new Map(),
+    // Non-order context by default; carrier-outcome tests set this explicitly.
+    orderCarrierOutcome: null,
   };
 }
 

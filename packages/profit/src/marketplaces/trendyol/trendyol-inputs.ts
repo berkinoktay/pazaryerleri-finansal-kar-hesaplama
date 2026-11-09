@@ -68,6 +68,21 @@ export interface TrendyolBaremBand {
   readonly priceNet: Decimal;
 }
 
+/**
+ * How an order's assigned carrier resolved, carried on the shipping tariff so the
+ * shipping estimate can tell a not-recognized ORDER carrier apart from a non-order
+ * context that simply has no carrier. `matched` means the order's `cargoProviderName`
+ * resolved to an active carrier (its tariff is in `TrendyolShippingTariff.carrier`);
+ * `not-recognized` means the name was null, blank, unknown (e.g. Trendyol's alternative
+ * delivery), ambiguous, or only an inactive namesake, and carries the provider name as
+ * Trendyol wrote it. On the tariff, `null` is the non-order context (a scenario or the
+ * store default): the carrier field alone decides, so a carrier-less TRENDYOL_CONTRACT
+ * tariff stays NO_CARRIER / unavailable.
+ */
+export type TrendyolOrderCarrierOutcome =
+  | { readonly kind: 'matched' }
+  | { readonly kind: 'not-recognized'; readonly providerName: string | null };
+
 /** Shipping tariff effective on the order date. */
 export interface TrendyolShippingTariff {
   readonly source: ShippingTariffSource; // Prisma enum: TRENDYOL_CONTRACT | OWN_CONTRACT
@@ -75,6 +90,8 @@ export interface TrendyolShippingTariff {
   readonly desiTariffNet: ReadonlyMap<string, Decimal>; // key = ceil(desi) as an integer string
   readonly baremBands: readonly TrendyolBaremBand[];
   readonly ownTariffNet: ReadonlyMap<string, Decimal>;
+  // How the order's carrier resolved (null = non-order context: scenario / store default).
+  readonly orderCarrierOutcome: TrendyolOrderCarrierOutcome | null;
 }
 
 /** Category and category+brand commission rules. */

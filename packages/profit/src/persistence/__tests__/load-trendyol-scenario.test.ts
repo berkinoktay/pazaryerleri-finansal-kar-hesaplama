@@ -188,10 +188,17 @@ describe('loadTrendyolScenarioBases', () => {
     );
 
     // Cost versions, fee parameters, shipping reference and commission rules are built
-    // by the SAME shared sub-loaders, so they match the order's inputs exactly.
+    // by the SAME shared sub-loaders, so they match the order's inputs exactly -- apart
+    // from the carrier outcome, which only the order resolves (the scenario is a non-order
+    // context, so its outcome is null while the order's matched carrier is `matched`).
     expect(base.costs).toEqual(orderCosts?.profiles);
     expect(base.reference.fees).toEqual(order.estimateInput.reference.fees);
-    expect(base.reference.shipping).toEqual(order.estimateInput.reference.shipping);
+    expect(base.reference.shipping.orderCarrierOutcome).toBeNull();
+    expect(order.estimateInput.reference.shipping.orderCarrierOutcome).toEqual({ kind: 'matched' });
+    expect({ ...base.reference.shipping, orderCarrierOutcome: null }).toEqual({
+      ...order.estimateInput.reference.shipping,
+      orderCarrierOutcome: null,
+    });
     expect(base.reference.commission).toEqual(order.estimateInput.reference.commission);
 
     // Commission chain inputs match too (a scenario never carries an order-line rate,

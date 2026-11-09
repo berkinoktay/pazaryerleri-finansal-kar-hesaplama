@@ -22,6 +22,7 @@ import {
 import {
   type TrendyolCommissionRules,
   type TrendyolItemAttributes,
+  type TrendyolOrderCarrierOutcome,
   type TrendyolParcelAttributes,
 } from '../marketplaces/trendyol/trendyol-inputs';
 import { ParcelNotFoundError, UnsupportedPlatformError } from './errors';
@@ -95,28 +96,28 @@ export interface CarrierRow {
  * `orderCargoNames`. Both sides are compared after `trim()` + `toLowerCase()` (a
  * deterministic, non-locale compare).
  *
- * When exactly one carrier matches it wins. Otherwise the store's default carrier is
- * used, exactly as before: a null or blank name, an "Alternative Delivery" / "***" or
- * any other unknown name, AND the ambiguous case where two or more distinct carriers
- * claim the same name (never a silent pick among equals). Inactive carriers are never
- * passed in (the query filters `active = true`), so an inactive namesake falls back to
- * the store default too.
+ * When exactly one carrier matches it wins. Otherwise the carrier is NOT recognized and
+ * the result is null (the store default is never used on an order): a null or blank name,
+ * an "Alternative Delivery" / "***" or any other unknown name, AND the ambiguous case
+ * where two or more distinct carriers claim the same name (never a silent pick among
+ * equals). Inactive carriers are never passed in (the query filters `active = true`), so
+ * an inactive namesake is not recognized either.
  *
  * For an own-contract store the matched carrier still drives Barem eligibility, while
  * the own desi tariff stays store-level -- intended (plan decision 3): the carrier
- * identity decides whether Barem applies, the store's own prices decide the amount.
+ * identity decides whether Barem applies, the store's own prices decide the amount. A
+ * not-recognized carrier there only means no Barem, never a zero estimate.
  */
 export function resolveOrderCarrier(
   cargoProviderName: string | null,
   carriers: readonly CarrierRow[],
-  storeDefault: CarrierRow | null,
 ): CarrierRow | null {
   if (cargoProviderName === null) {
-    return storeDefault;
+    return null;
   }
   const normalized = cargoProviderName.trim().toLowerCase();
   if (normalized === '') {
-    return storeDefault;
+    return null;
   }
   const matches = carriers.filter(
     (carrier) =>
@@ -124,13 +125,13 @@ export function resolveOrderCarrier(
       carrier.orderCargoNames.some((name) => name.trim().toLowerCase() === normalized),
   );
   // Collapse to distinct carriers: one carrier matching on both its display name and an
-  // orderCargoNames entry is still a single match. Zero or 2+ distinct -> store default.
+  // orderCargoNames entry is still a single match. Zero or 2+ distinct -> not recognized.
   const distinct = new Map(matches.map((carrier) => [carrier.id, carrier]));
   if (distinct.size !== 1) {
-    return storeDefault;
+    return null;
   }
   const [match] = distinct.values();
-  return match ?? storeDefault;
+  return match ?? null;
 }
 
 /**
@@ -149,7 +150,7 @@ export async function loadTrendyolParcel(
   const order = await tx.order.findFirst({
     where: { id: orderId, organizationId },
     include: {
-      store: { include: { defaultShippingCarrier: true } },
+      store: true,
       items: { include: { productVariant: { include: { product: true } } } },
       claims: { include: { items: true } },
     },
@@ -230,23 +231,25 @@ export async function loadTrendyolParcel(
     fastDeliveryType: order.fastDeliveryType,
   });
   // The order's own carrier (the one Trendyol assigned, named by cargoProviderName)
-  // drives the shipping estimate, falling back to the store default. Active Trendyol
-  // carriers are a small platform-global reference table shared across every
+  // drives the shipping estimate; the store default is never used on an order. When the
+  // name is not recognized the carrier is null and the estimate records why. Active
+  // Trendyol carriers are a small platform-global reference table shared across every
   // organization, so this read carries no tenant filter by design -- like the
   // commission-rate and fee reference reads (Gorev 1, engine v6).
   const activeCarriers = await tx.shippingCarrier.findMany({
     where: { platform: Platform.TRENDYOL, active: true },
     orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
   });
-  const orderCarrier = resolveOrderCarrier(
-    order.cargoProviderName,
-    activeCarriers,
-    store.defaultShippingCarrier,
-  );
+  const orderCarrier = resolveOrderCarrier(order.cargoProviderName, activeCarriers);
+  const orderCarrierOutcome: TrendyolOrderCarrierOutcome =
+    orderCarrier === null
+      ? { kind: 'not-recognized', providerName: order.cargoProviderName }
+      : { kind: 'matched' };
   const shipping = await loadShippingTariff(tx, {
     storeId,
     source: store.shippingTariffSource,
     carrier: orderCarrier,
+    orderCarrierOutcome,
   });
   const commission = await loadCommissionRules(tx, order.items);
 

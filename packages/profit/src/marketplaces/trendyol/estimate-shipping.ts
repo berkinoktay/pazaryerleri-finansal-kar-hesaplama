@@ -24,6 +24,9 @@ import {
 
 const ZERO = new Decimal(0);
 
+/** The SHIPPING-line input reason recorded when an order's carrier is not recognized. */
+export const CARRIER_NOT_RECOGNIZED_REASON = 'CARRIER_NOT_RECOGNIZED';
+
 /** Why a shipping amount could not be resolved for a parcel or a standalone item. */
 export type ShippingUnavailableReason =
   | 'UNKNOWN_DESI'
@@ -239,6 +242,34 @@ export function estimateShippingLine(params: {
   // shipping, exactly like the service-fee exemption.
   if (items.every((item) => item.isDigital)) {
     return { line: null, issue: null, standaloneByItem };
+  }
+
+  // A not-recognized carrier on a Trendyol-contract order cannot be priced from any
+  // tariff, so the estimate is a zero SHIPPING line recording why -- never an unavailable
+  // issue (a cargo invoice later replaces it with the real amount). This is distinct from
+  // a scenario with no carrier, which stays NO_CARRIER / unavailable (its outcome is
+  // null); an own-contract store is unaffected and falls through to its own tariff below.
+  const carrierOutcome = tariff.orderCarrierOutcome;
+  if (
+    tariff.source === ShippingTariffSource.TRENDYOL_CONTRACT &&
+    carrierOutcome !== null &&
+    carrierOutcome.kind === 'not-recognized'
+  ) {
+    const line = createProfitLine({
+      type: ProfitLineType.SHIPPING,
+      level: ProfitLineLevel.PARCEL,
+      orderItemId: null,
+      certainty: ProfitLineCertainty.ESTIMATE,
+      source: ProfitLineSource.RULE,
+      amount: { gross: ZERO, vat: ZERO },
+      vatRatePct: shippingVatRatePct,
+      inputs: {
+        reason: CARRIER_NOT_RECOGNIZED_REASON,
+        providerName: carrierOutcome.providerName,
+      },
+      externalRecord: null,
+    });
+    return { line, issue: null, standaloneByItem };
   }
 
   const desi = parcelDesi(snapshot);

@@ -11,5 +11,7 @@
  *    estimate instead of always the store's default carrier.
  * 7: an order's commission no longer consults product tariff bands; the chain is the
  *    order rate, then the synced product rate, then the category rule.
+ * 8: an order whose carrier Trendyol does not name recognizably gets a zero shipping
+ *    estimate (recording the reason) instead of the store default or an unavailable gap.
  */
-export const PROFIT_ENGINE_VERSION = 7;
+export const PROFIT_ENGINE_VERSION = 8;

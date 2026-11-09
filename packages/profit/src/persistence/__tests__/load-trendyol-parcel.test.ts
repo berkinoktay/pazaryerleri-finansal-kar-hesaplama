@@ -15,6 +15,7 @@ import { ProfitIssueCode, ProfitLineType } from '@pazarsync/db/enums';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { estimateTrendyolParcel } from '../../marketplaces/trendyol/estimate-parcel';
+import { CARRIER_NOT_RECOGNIZED_REASON } from '../../marketplaces/trendyol/estimate-shipping';
 import { mapTrendyolRecords } from '../../marketplaces/trendyol/map-records';
 import {
   TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
@@ -612,7 +613,7 @@ describe('loadTrendyolParcel', () => {
     // A dedicated carrier whose only desi + Barem rows are dated 2027, after the
     // 2026-10-28 order date. Before fix 1 the effectiveFrom <= orderDate filter
     // dropped them; now the loader reads by carrier only, like resolve-tariff.ts.
-    const futureCarrierId = await upsertCarrierWithTariffs({
+    await upsertCarrierWithTariffs({
       code: 'TEST_SHIP_FUTURE',
       externalId: 990002,
       supportsBaremDestek: true,
@@ -628,9 +629,11 @@ describe('loadTrendyolParcel', () => {
       ],
     });
     const parcel = await seedMelontikParcel();
-    await prisma.store.update({
-      where: { id: parcel.storeId },
-      data: { defaultShippingCarrierId: futureCarrierId },
+    // The order names this carrier (its display name defaults to the code), so it drives
+    // the estimate -- the store default is not used on an order.
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { cargoProviderName: 'TEST_SHIP_FUTURE' },
     });
 
     const loaded = await loadTrendyolParcel(prisma, {
@@ -1186,14 +1189,13 @@ describe('loadTrendyolParcel', () => {
   });
 
   it("uses the order's own carrier for the shipping estimate", async () => {
-    // The store default is the melontik carrier (desi 2 -> 81.95 net -> 98.34 gross).
-    // A second carrier with a SHORT display name, the long "... Marketplace" name in
+    // A carrier with a SHORT display name, the long "... Marketplace" name in
     // orderCargoNames and a cheaper desi tariff is the one Trendyol assigned to this
-    // order. The order carries only the long marketplace name (as real orders do), so
-    // it matches via orderCargoNames -- not the display name -- and that carrier's
-    // tariff drives the estimate instead of the store default's. A TEST-prefixed brand
-    // (not a canonical one like SENDEOMP) keeps the match unambiguous against the 10
-    // seeded carriers, which now carry their own getProviders names.
+    // order. The order carries only the long marketplace name (as real orders do), so it
+    // matches via orderCargoNames -- not the display name -- and that carrier's tariff
+    // drives the estimate. A TEST-prefixed brand (not a canonical one like SENDEOMP)
+    // keeps the match unambiguous against the 10 seeded carriers, which now carry their
+    // own getProviders names.
     const parcel = await seedMelontikParcel();
     const effectiveFrom = new Date('2024-01-01T00:00:00Z');
     await upsertCarrierWithTariffs({
@@ -1221,8 +1223,7 @@ describe('loadTrendyolParcel', () => {
     const result = estimateTrendyolParcel(loaded.estimateInput);
 
     const shipping = requireLine(result.lines, ProfitLineType.SHIPPING, null);
-    // 50.00 net x 1.20 VAT = 60.00 gross, from the order's carrier -- not the store
-    // default's 98.34.
+    // 50.00 net x 1.20 VAT = 60.00 gross, from the order's matched carrier.
     expect(shipping.amount.gross.toFixed(2)).toBe('60.00');
     expect(shipping.amount.vat.toFixed(2)).toBe('10.00');
     expect(shipping.inputs.tariffKind).toBe('DESI');
@@ -1230,28 +1231,11 @@ describe('loadTrendyolParcel', () => {
   });
 
   it('does not apply Barem for a carrier outside the Barem program', async () => {
-    // The store default supports Barem and carries a cheap Barem band; the order's own
-    // carrier does NOT support Barem. Even though the order is fast-delivery and its
-    // basket sits inside the band, the estimate must use the order carrier's desi
-    // tariff, never a Barem band -- because the order carrier is outside the program.
+    // The order's matched carrier does NOT support Barem. Even though the order is
+    // fast-delivery and its basket sits inside the carrier's band, the estimate must use
+    // the carrier's desi tariff, never a Barem band -- because it is outside the program.
     const parcel = await seedMelontikParcel({ fastDelivery: true });
     const effectiveFrom = new Date('2024-01-01T00:00:00Z');
-
-    const baremStoreCarrierId = await upsertCarrierWithTariffs({
-      code: 'TEST_STORE_BAREM',
-      displayName: 'Test Store Barem Marketplace',
-      externalId: 990011,
-      supportsBaremDestek: true,
-      maxBaremDesi: 10,
-      desiRows: [{ desi: 2, priceNet: '40.00', effectiveFrom }],
-      baremRows: [
-        { minOrderAmount: '0.00', maxOrderAmount: '5000.00', priceNet: '20.00', effectiveFrom },
-      ],
-    });
-    await prisma.store.update({
-      where: { id: parcel.storeId },
-      data: { defaultShippingCarrierId: baremStoreCarrierId },
-    });
 
     await upsertCarrierWithTariffs({
       code: 'TEST_ORDER_NOBAREM',
@@ -1283,18 +1267,85 @@ describe('loadTrendyolParcel', () => {
     const result = estimateTrendyolParcel(loaded.estimateInput);
 
     const shipping = requireLine(result.lines, ProfitLineType.SHIPPING, null);
-    // Had the store default (Barem-supporting) been used, the 20.00 band -> 24.00 gross
-    // would apply. The order's non-Barem carrier falls to its desi tariff: 70.00 net
-    // x 1.20 = 84.00 gross, kind DESI.
+    // The non-Barem carrier uses its desi tariff: 70.00 net x 1.20 = 84.00 gross, DESI.
     expect(shipping.inputs.tariffKind).toBe('DESI');
     expect(shipping.amount.gross.toFixed(2)).toBe('84.00');
     expect(shipping.inputs.carrierCode).toBe('TEST_ORDER_NOBAREM');
   });
 
-  it('ignores an inactive carrier with the same name', async () => {
-    // An INACTIVE carrier whose orderCargoNames contains the order's cargo name must
-    // never drive the estimate: the active-only carrier query drops it before the match,
-    // so the order falls back to the store default (the melontik carrier, 98.34 gross) --
+  /** The single parcel SHIPPING line for `cargoProviderName`, estimated read-only. */
+  async function shippingLineFor(cargoProviderName: string | null): Promise<ProfitLine> {
+    const parcel = await seedMelontikParcel();
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { cargoProviderName },
+    });
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+    const result = estimateTrendyolParcel(loaded.estimateInput);
+    return requireLine(result.lines, ProfitLineType.SHIPPING, null);
+  }
+
+  /** Asserts a parcel SHIPPING line is a zero estimate recording the not-recognized reason. */
+  function expectZeroShipping(line: ProfitLine, providerName: string | null): void {
+    expect(line.amount.gross.toFixed(2)).toBe('0.00');
+    expect(line.amount.vat.toFixed(2)).toBe('0.00');
+    expect(line.inputs.reason).toBe(CARRIER_NOT_RECOGNIZED_REASON);
+    expect(line.inputs.providerName).toBe(providerName);
+  }
+
+  it('estimates zero shipping for an unknown carrier name', async () => {
+    // Trendyol named a carrier that matches no active carrier (e.g. alternative delivery):
+    // the estimate is a zero SHIPPING line recording the provider name, never the store
+    // default (which is no longer consulted on an order) nor an unavailable issue.
+    const shipping = await shippingLineFor('Alternative Delivery');
+    expectZeroShipping(shipping, 'Alternative Delivery');
+  });
+
+  it('estimates zero shipping for an empty carrier name', async () => {
+    const shipping = await shippingLineFor('');
+    expectZeroShipping(shipping, '');
+  });
+
+  it('estimates zero shipping for an ambiguous carrier name', async () => {
+    // Two distinct active carriers both claim the order's cargo name: the match is
+    // ambiguous, so the carrier is not recognized and the estimate is a zero line.
+    const parcel = await seedMelontikParcel();
+    const effectiveFrom = new Date('2024-01-01T00:00:00Z');
+    for (const code of ['TEST_AMBIG_A', 'TEST_AMBIG_B']) {
+      await upsertCarrierWithTariffs({
+        code,
+        displayName: `${code} Display`,
+        orderCargoNames: ['Shared Ambiguous Kargo Marketplace'],
+        externalId: code === 'TEST_AMBIG_A' ? 990014 : 990015,
+        supportsBaremDestek: false,
+        maxBaremDesi: 10,
+        desiRows: [{ desi: 2, priceNet: '50.00', effectiveFrom }],
+        baremRows: [],
+      });
+    }
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { cargoProviderName: 'Shared Ambiguous Kargo Marketplace' },
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+    const shipping = requireLine(
+      estimateTrendyolParcel(loaded.estimateInput).lines,
+      ProfitLineType.SHIPPING,
+      null,
+    );
+    expectZeroShipping(shipping, 'Shared Ambiguous Kargo Marketplace');
+  });
+
+  it('estimates zero shipping for an inactive carrier with the same name', async () => {
+    // An INACTIVE carrier whose orderCargoNames contains the order's cargo name is dropped
+    // by the active-only query, so the order's carrier is not recognized -- a zero estimate,
     // not the inactive namesake's cheap 50.00 -> 60.00 tariff.
     const parcel = await seedMelontikParcel();
     const effectiveFrom = new Date('2024-01-01T00:00:00Z');
@@ -1325,11 +1376,48 @@ describe('loadTrendyolParcel', () => {
       organizationId: parcel.organizationId,
       orderId: parcel.orderId,
     });
-    const result = estimateTrendyolParcel(loaded.estimateInput);
+    const shipping = requireLine(
+      estimateTrendyolParcel(loaded.estimateInput).lines,
+      ProfitLineType.SHIPPING,
+      null,
+    );
+    expectZeroShipping(shipping, 'Test Inactive Kargo Marketplace');
+  });
 
-    const shipping = requireLine(result.lines, ProfitLineType.SHIPPING, null);
-    // Store default (melontik) 98.34, NOT the inactive namesake's 60.00.
-    expect(shipping.amount.gross.toFixed(2)).toBe('98.34');
-    expect(shipping.inputs.carrierCode).toBe('TEST_MELONTIK');
+  it('prices an own-contract store normally when the carrier is not recognized', async () => {
+    // OWN_CONTRACT tariffs are store-level and carrier-independent, so a not-recognized
+    // carrier only means no Barem -- the own desi tariff still prices the shipment, never
+    // a zero line.
+    const parcel = await seedMelontikParcel();
+    await prisma.store.update({
+      where: { id: parcel.storeId },
+      data: { shippingTariffSource: 'OWN_CONTRACT' },
+    });
+    await prisma.ownShippingTariff.create({
+      data: {
+        organizationId: parcel.organizationId,
+        storeId: parcel.storeId,
+        desi: 2,
+        priceNet: '45.00',
+      },
+    });
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { cargoProviderName: 'Alternative Delivery' },
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+    const shipping = requireLine(
+      estimateTrendyolParcel(loaded.estimateInput).lines,
+      ProfitLineType.SHIPPING,
+      null,
+    );
+    // 45.00 net x 1.20 VAT = 54.00 gross from the own tariff; no zero line.
+    expect(shipping.amount.gross.toFixed(2)).toBe('54.00');
+    expect(shipping.inputs.tariffKind).toBe('OWN');
+    expect(shipping.inputs.reason).toBeUndefined();
   });
 });

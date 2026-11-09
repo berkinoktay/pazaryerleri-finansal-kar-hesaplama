@@ -20,6 +20,9 @@ export const MELONTIK = {
   businessDate: '2026-10-28',
   carrierCode: 'TEST_MELONTIK',
   carrierExternalId: 990001,
+  // The carrier name Trendyol writes on the order; matches the melontik carrier's display
+  // name so the order resolves to it (the store default is not used on an order).
+  cargoProviderName: 'Test Melontik Kargo',
   desiNet: '81.95',
   paymentOrderId: '58450612',
   items: {
@@ -356,6 +359,7 @@ export async function seedMelontikParcel(opts: SeedMelontikOptions = {}): Promis
       fastDelivery: opts.fastDelivery ?? false,
       fastDeliveryType: opts.fastDeliveryType ?? null,
       usesSellerCargoAgreement: false,
+      cargoProviderName: MELONTIK.cargoProviderName,
       cargoTrackingNumber: opts.cargoTrackingNumber ?? null,
       snapshotIncludeStopaj: opts.snapshotIncludeStopaj ?? null,
       snapshotIncludeNegativeNetVat: opts.snapshotIncludeNegativeNetVat ?? null,

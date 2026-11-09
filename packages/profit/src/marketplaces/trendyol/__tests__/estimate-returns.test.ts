@@ -12,6 +12,7 @@ import { type ProfitLine } from '../../../core/profit-line';
 import { makeItem, makeParcel } from '../../../__tests__/fixtures/parcel-builders';
 import { trendyolReference } from '../../../__tests__/fixtures/trendyol-reference';
 import { makeLine } from '../../../__tests__/helpers/make-profit-line';
+import { CARRIER_NOT_RECOGNIZED_REASON } from '../estimate-shipping';
 import { estimateReturnLines } from '../estimate-returns';
 
 function lineOfType(lines: readonly ProfitLine[], type: ProfitLineType): ProfitLine | undefined {
@@ -113,6 +114,37 @@ describe('estimateReturnLines', () => {
     const returnShipping = lineOfType(lines, ProfitLineType.RETURN_SHIPPING);
     expect(returnShipping?.amount.gross.toFixed(2)).toBe('93.05');
     expect(returnShipping?.inputs.tariffKind).toBe('DESI');
+  });
+
+  it('writes a zero return-shipping estimate for a not-recognized order carrier', () => {
+    // Consistent with the forward leg: a not-recognized Trendyol-contract carrier cannot
+    // be priced, so the return shipping is a zero line recording the reason -- never an
+    // unavailable issue.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '2' })],
+    });
+
+    const { lines, issues } = estimateReturnLines({
+      snapshot,
+      accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
+      commissionLines: [],
+      costLines: [],
+      reference: trendyolReference({
+        shipping: {
+          carrier: null,
+          orderCarrierOutcome: { kind: 'not-recognized', providerName: 'Alternative Delivery' },
+        },
+      }),
+    });
+
+    expect(issues).toEqual([]);
+    const returnShipping = lineOfType(lines, ProfitLineType.RETURN_SHIPPING);
+    expect(returnShipping?.level).toBe(ProfitLineLevel.PARCEL);
+    expect(returnShipping?.amount.gross.toFixed(2)).toBe('0.00');
+    expect(returnShipping?.inputs).toEqual({
+      reason: CARRIER_NOT_RECOGNIZED_REASON,
+      providerName: 'Alternative Delivery',
+    });
   });
 
   it('prorates a partial return', () => {

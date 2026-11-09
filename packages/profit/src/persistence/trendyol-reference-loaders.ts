@@ -22,6 +22,7 @@ import {
   type TrendyolBaremBand,
   type TrendyolCommissionRules,
   type TrendyolFeeParams,
+  type TrendyolOrderCarrierOutcome,
   type TrendyolShippingCarrier,
   type TrendyolShippingTariff,
 } from '../marketplaces/trendyol/trendyol-inputs';
@@ -285,9 +286,13 @@ export async function loadShippingTariff(
       readonly supportsBaremDestek: boolean;
       readonly maxBaremDesi: number;
     } | null;
+    // How the order's carrier resolved; omitted (null) for the scenario / store-default
+    // context, where the carrier field alone decides.
+    readonly orderCarrierOutcome?: TrendyolOrderCarrierOutcome | null;
   },
 ): Promise<TrendyolShippingTariff> {
   const { storeId, source, carrier } = params;
+  const orderCarrierOutcome = params.orderCarrierOutcome ?? null;
 
   let carrierInput: TrendyolShippingCarrier | null = null;
   const desiTariffNet = new Map<string, Decimal>();
@@ -329,5 +334,12 @@ export async function loadShippingTariff(
     ownTariffNet.set(row.desi.toString(), dec(row.priceNet));
   }
 
-  return { source, carrier: carrierInput, desiTariffNet, baremBands, ownTariffNet };
+  return {
+    source,
+    carrier: carrierInput,
+    desiTariffNet,
+    baremBands,
+    ownTariffNet,
+    orderCarrierOutcome,
+  };
 }

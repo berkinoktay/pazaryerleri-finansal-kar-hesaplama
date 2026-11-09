@@ -154,6 +154,7 @@ export {
   type TrendyolCommissionRules,
   type TrendyolFeeParams,
   type TrendyolItemAttributes,
+  type TrendyolOrderCarrierOutcome,
   type TrendyolParcelAttributes,
   type TrendyolReferenceData,
   type TrendyolShippingCarrier,
@@ -171,6 +172,7 @@ export {
 } from './marketplaces/trendyol/estimate-sale-and-commission';
 export { estimateServiceFeeLine } from './marketplaces/trendyol/estimate-service-fee';
 export {
+  CARRIER_NOT_RECOGNIZED_REASON,
   estimateShippingLine,
   parcelDesi,
   resolveTrendyolShippingGross,

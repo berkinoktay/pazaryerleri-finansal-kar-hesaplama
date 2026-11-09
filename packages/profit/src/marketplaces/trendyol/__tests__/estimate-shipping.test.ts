@@ -14,7 +14,11 @@ import {
   makeTrendyolAttributes,
   trendyolReference,
 } from '../../../__tests__/fixtures/trendyol-reference';
-import { estimateShippingLine, resolveTrendyolShippingGross } from '../estimate-shipping';
+import {
+  CARRIER_NOT_RECOGNIZED_REASON,
+  estimateShippingLine,
+  resolveTrendyolShippingGross,
+} from '../estimate-shipping';
 
 describe('estimateShippingLine', () => {
   it('uses the desi tariff', () => {
@@ -222,6 +226,37 @@ describe('estimateShippingLine', () => {
       code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
       orderItemId: null,
       detail: 'NO_CARRIER',
+    });
+  });
+
+  it('writes a zero estimate for a not-recognized order carrier', () => {
+    // An order whose Trendyol-contract carrier is not recognized gets a zero SHIPPING line
+    // recording the reason + provider name -- NOT the NO_CARRIER unavailable issue a
+    // carrier-less scenario (outcome null) produces.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: '3' })],
+    });
+
+    const { line, issue } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({ fastDelivery: false }),
+      reference: trendyolReference({
+        shipping: {
+          carrier: null,
+          orderCarrierOutcome: { kind: 'not-recognized', providerName: 'Alternative Delivery' },
+        },
+      }),
+    });
+
+    expect(issue).toBeNull();
+    expect(line?.type).toBe(ProfitLineType.SHIPPING);
+    expect(line?.level).toBe(ProfitLineLevel.PARCEL);
+    expect(line?.certainty).toBe(ProfitLineCertainty.ESTIMATE);
+    expect(line?.amount.gross.toFixed(2)).toBe('0.00');
+    expect(line?.amount.vat.toFixed(2)).toBe('0.00');
+    expect(line?.inputs).toEqual({
+      reason: CARRIER_NOT_RECOGNIZED_REASON,
+      providerName: 'Alternative Delivery',
     });
   });
 
