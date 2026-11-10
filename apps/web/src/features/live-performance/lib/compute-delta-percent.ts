@@ -12,6 +12,11 @@ import Decimal from 'decimal.js';
  * compare. The KPI tile omits its TrendDelta chip in those cases. Returns a
  * plain number (percent units, e.g. `25` for +25%) for TrendDelta, which
  * formats and rounds for display.
+ *
+ * The change is divided by the absolute value of `previous` so the sign always
+ * says whether today is better: profit going from -271.30 to +50.56 is an
+ * improvement and must read as +118.6%, not -118.6%. Net profit and margin
+ * can be negative; revenue and order count never are, so they are unaffected.
  */
 export function computeDeltaPercent(
   current: string | null,
@@ -25,5 +30,5 @@ export function computeDeltaPercent(
     return null;
   }
   const curr = new Decimal(current);
-  return curr.sub(prev).div(prev).mul(100).toNumber();
+  return curr.sub(prev).div(prev.abs()).mul(100).toNumber();
 }
