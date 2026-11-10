@@ -3,10 +3,13 @@ import { prisma } from '@pazarsync/db';
 import { ProfitStatementView, ProfitStatus, type OrderStatus } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import {
+  computeParcelProfit,
   itemProfitValues,
   loadOrderProfitLines,
   parseStoredIssues,
+  roundPercent,
   selectLines,
+  UnsupportedPlatformError,
 } from '@pazarsync/profit';
 import { getBusinessDateAnchor, getBusinessDayRange, getBusinessHour } from '@pazarsync/utils';
 import Decimal from 'decimal.js';
@@ -18,6 +21,7 @@ import {
   computeParcelProfitForRead,
   logProfitReadFailure,
 } from './profit-compute-fallback.service';
+import { createRequestFailureLog } from './scenario-screen-commons';
 
 // All "today"/"yesterday" windows come from the single business-timezone helpers
 // (packages/utils/src/timezone.ts) — never a hard-coded offset. Orders carry a
@@ -109,7 +113,9 @@ interface EstimateStatementAmounts {
 /**
  * The live estimate of an estimate statement when it is costed -- ESTIMATED with a
  * non-null net profit (decision 10). Null for a statement that never reached ESTIMATED
- * (NOT_COMPUTABLE / EXCLUDED / CANCELLED).
+ * (NOT_COMPUTABLE / EXCLUDED / CANCELLED). The margin is rounded to the stored column
+ * scale (roundPercent), as the writer stores it, so an in-request computation serves
+ * the same margin a stored statement would; on a stored value the rounding is a no-op.
  */
 function toLiveEstimate(statement: EstimateStatementAmounts): LiveEstimate | null {
   if (statement.status !== ProfitStatus.ESTIMATED || statement.netProfit === null) return null;
@@ -118,7 +124,9 @@ function toLiveEstimate(statement: EstimateStatementAmounts): LiveEstimate | nul
     costGross: new Decimal(statement.costGross.toString()),
     saleGross: new Decimal(statement.saleGross.toString()),
     saleMarginPct:
-      statement.saleMarginPct === null ? null : new Decimal(statement.saleMarginPct.toString()),
+      statement.saleMarginPct === null
+        ? null
+        : roundPercent(new Decimal(statement.saleMarginPct.toString())),
   };
 }
 
@@ -133,7 +141,10 @@ function toLiveEstimate(statement: EstimateStatementAmounts): LiveEstimate | nul
  * The computations run one at a time, not in parallel, so a backlog cannot fan out into
  * a burst of connections; at most LIVE_IN_REQUEST_ESTIMATE_LIMIT run per call, the rest
  * stay pending and are logged once. A computation that fails or is not ESTIMATED leaves
- * the order pending; the page still opens (owner decision 2026-11-04).
+ * the order pending; the page still opens (owner decision 2026-11-04). The failures of
+ * one call are collected and logged once (`[profit-read]`, with the failed count), so a
+ * systemic failure is one line per call, not one per order; an unsupported platform is
+ * an expected case and stays pending without a log.
  */
 async function resolveLiveEstimates(
   orgId: string,
@@ -145,6 +156,10 @@ async function resolveLiveEstimates(
   computeMissing: boolean,
 ): Promise<ReadonlyMap<string, LiveEstimate>> {
   const estimates = new Map<string, LiveEstimate>();
+  const failures = createRequestFailureLog({
+    surface: 'live-performance',
+    organizationId: orgId,
+  });
   let computedCount = 0;
   let skipped = 0;
 
@@ -162,15 +177,20 @@ async function resolveLiveEstimates(
     }
     computedCount += 1;
     // Sequential on purpose (see above): one computation holds the connection at a time.
-    const computed = await computeParcelProfitForRead({
-      organizationId: orgId,
-      orderId: order.id,
-      surface: 'live-performance',
-    });
-    const estimate = computed === null ? null : toLiveEstimate(computed.estimate);
-    if (estimate !== null) estimates.set(order.id, estimate);
+    try {
+      const computed = await computeParcelProfit(prisma, {
+        organizationId: orgId,
+        orderId: order.id,
+      });
+      const estimate = toLiveEstimate(computed.estimate);
+      if (estimate !== null) estimates.set(order.id, estimate);
+    } catch (err) {
+      // A platform the engine cannot compute yet (e.g. Hepsiburada): expected, no log.
+      if (!(err instanceof UnsupportedPlatformError)) failures.record(err);
+    }
   }
 
+  failures.flush();
   if (skipped > 0) {
     console.warn(LIMIT_REACHED_LOG, { organizationId: orgId, storeId, skipped });
   }
@@ -242,8 +262,8 @@ async function aggregateOrders(
       status: { not: 'CANCELLED' },
     },
     // Newest first, like the feed, so past the in-request limit the KPIs, the chart and
-    // the feed compute the same orders.
-    orderBy: { orderDate: 'desc' },
+    // the feed compute the same orders; the id breaks an equal-date tie the same way.
+    orderBy: [{ orderDate: 'desc' }, { id: 'desc' }],
     select: {
       id: true,
       saleGross: true,
@@ -325,8 +345,11 @@ export async function getKpis(args: { orgId: string; storeId: string }): Promise
 
   // Yesterday never unions the buffer — its uncosted orders were graduated into
   // `orders` as PROFIT-EXCLUDED at midnight, so `orders` is already complete. Only today
-  // computes a statement-less order in the request: yesterday's statements are long
-  // written, and one still missing there is a writer failure, not a lag.
+  // computes a statement-less order in the request: computing yesterday too would add
+  // to every page open. Normally yesterday's statements are long written, but a first
+  // deploy's recompute backlog can take hours; in that window a statement-less order of
+  // yesterday counts toward volume and not toward profit (yesterday's profit reads low),
+  // and the next write of its statement corrects it.
   const [todayOrders, todayBuffer, yesterdayOrders] = await Promise.all([
     aggregateOrders(args.orgId, args.storeId, today, true),
     aggregateBuffer(args.orgId, args.storeId, todayAnchor),
@@ -396,7 +419,7 @@ async function hourlyCumulative(
       status: { not: 'CANCELLED' },
     },
     // Mirrors aggregateOrders -- the same orders are computed past the in-request limit.
-    orderBy: { orderDate: 'desc' },
+    orderBy: [{ orderDate: 'desc' }, { id: 'desc' }],
     select: {
       id: true,
       orderDate: true,
@@ -915,7 +938,8 @@ export async function getLiveOrders(args: {
         // Mirrors aggregateOrders — the live feed shows earnings, not cancels.
         status: { not: 'CANCELLED' },
       },
-      orderBy: { orderDate: 'desc' },
+      // Mirrors aggregateOrders -- the same orders are computed past the in-request limit.
+      orderBy: [{ orderDate: 'desc' }, { id: 'desc' }],
       select: {
         id: true,
         platformOrderId: true,

@@ -143,6 +143,7 @@ interface KpisBody {
 }
 
 const LIMIT_WARNING = '[profit-read] live in-request estimate limit reached';
+const PROFIT_READ_FAILURE = '[profit-read] in-request profit computation failed';
 
 describe('GET /v1/.../live-performance/kpis', () => {
   const app = createApp();
@@ -340,32 +341,52 @@ describe('GET /v1/.../live-performance/kpis', () => {
       netProfit: null,
     });
 
-    // Statement-less (writer has not caught up yet): the request tries to compute it, the
-    // computation fails here (no fee reference seeded) and is logged, so the order stays
-    // volume + pending only and the KPIs still answer 200.
+    // Two statement-less orders (writer has not caught up yet): the request tries to
+    // compute each, both computations fail here and are logged together in ONE line, so
+    // the orders stay volume + pending only and the KPIs still answer 200.
     const statementless = await createOrder(org.id, store.id, {
       orderDate: todayAt(11),
       saleGross: '30.00',
     });
     await createOrderItem(statementless.id, org.id, { quantity: 1 });
+    const secondStatementless = await createOrder(org.id, store.id, {
+      orderDate: todayAt(13),
+      saleGross: '20.00',
+    });
+    await createOrderItem(secondStatementless.id, org.id, { quantity: 1 });
 
-    const res = await app.request(
-      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/kpis`,
-      { headers: { Authorization: bearer(user.accessToken) } },
-    );
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/live-performance/kpis`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as KpisBody;
-    // Volume counts all three orders.
-    expect(body.revenueToday).toBe('180.00');
-    expect(body.orderCountToday).toBe(3);
-    // Profit family counts only the ESTIMATED one.
-    expect(body.netProfitToday).toBe('20.00');
-    expect(body.marginToday).toBe('20.00'); // 20 / 100 costed revenue
-    expect(body.profitCostRatioToday).toBe('33.33'); // 20 / 60 costed cost
-    // Pending = universe - costed = the two uncosted orders (80, 2 orders).
-    expect(body.pendingRevenueToday).toBe('80.00');
-    expect(body.pendingOrderCountToday).toBe(2);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as KpisBody;
+      // Volume counts all four orders.
+      expect(body.revenueToday).toBe('200.00');
+      expect(body.orderCountToday).toBe(4);
+      // Profit family counts only the ESTIMATED one.
+      expect(body.netProfitToday).toBe('20.00');
+      expect(body.marginToday).toBe('20.00'); // 20 / 100 costed revenue
+      expect(body.profitCostRatioToday).toBe('33.33'); // 20 / 60 costed cost
+      // Pending = universe - costed = the three uncosted orders (100, 3 orders).
+      expect(body.pendingRevenueToday).toBe('100.00');
+      expect(body.pendingOrderCountToday).toBe(3);
+
+      // The failed in-request computations are logged once per request, not per order.
+      const failureLogs = error.mock.calls.filter((call) => call[0] === PROFIT_READ_FAILURE);
+      expect(failureLogs).toHaveLength(1);
+      expect(failureLogs[0]?.[1]).toMatchObject({
+        surface: 'live-performance',
+        organizationId: org.id,
+        orderId: null,
+        failedCount: 2,
+      });
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it("never adds an excluded order to yesterday's profit", async () => {
