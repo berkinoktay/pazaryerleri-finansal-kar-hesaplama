@@ -1,11 +1,14 @@
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { intakeOrder } from '@pazarsync/order-sync';
+import { computeParcelProfit } from '@pazarsync/profit';
 import { getBusinessDateAnchor, getBusinessDayRange } from '@pazarsync/utils';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '@/app';
+import { LIVE_IN_REQUEST_ESTIMATE_LIMIT } from '@/services/live-performance.service';
 
 import { bearer, createAuthenticatedTestUser } from '../../../helpers/auth';
+import { seedCalculableTrendyolOrder } from '../../../helpers/calculable-order';
 import { ensureDbReachable, prisma, truncateAll } from '../../../helpers/db';
 import {
   createBufferEntry,
@@ -130,14 +133,16 @@ interface KpisBody {
   unitsSoldToday: number;
   unitsSoldYesterday: number;
   netProfitToday: string;
-  netProfitYesterday: string;
-  marginToday: string;
-  marginYesterday: string;
-  profitCostRatioToday: string;
-  profitCostRatioYesterday: string;
+  netProfitYesterday: string | null;
+  marginToday: string | null;
+  marginYesterday: string | null;
+  profitCostRatioToday: string | null;
+  profitCostRatioYesterday: string | null;
   pendingRevenueToday: string;
   pendingOrderCountToday: number;
 }
+
+const LIMIT_WARNING = '[profit-read] live in-request estimate limit reached';
 
 describe('GET /v1/.../live-performance/kpis', () => {
   const app = createApp();
@@ -166,6 +171,7 @@ describe('GET /v1/.../live-performance/kpis', () => {
     await createProfitStatement(costed.id, org.id, store.id, {
       view: 'ESTIMATE',
       status: 'ESTIMATED',
+      saleGross: '100.00',
       netProfit: '20.00',
       costGross: '60.00',
       saleMarginPct: '20.00',
@@ -264,6 +270,7 @@ describe('GET /v1/.../live-performance/kpis', () => {
     await createProfitStatement(costed.id, org.id, store.id, {
       view: 'ESTIMATE',
       status: 'ESTIMATED',
+      saleGross: '200.00',
       netProfit: '50.00',
       costGross: '80.00',
       saleMarginPct: '25.00',
@@ -314,6 +321,7 @@ describe('GET /v1/.../live-performance/kpis', () => {
     await createProfitStatement(costed.id, org.id, store.id, {
       view: 'ESTIMATE',
       status: 'ESTIMATED',
+      saleGross: '100.00',
       netProfit: '20.00',
       costGross: '60.00',
       saleMarginPct: '20.00',
@@ -332,7 +340,9 @@ describe('GET /v1/.../live-performance/kpis', () => {
       netProfit: null,
     });
 
-    // Statement-less (writer has not caught up yet): volume + pending only.
+    // Statement-less (writer has not caught up yet): the request tries to compute it, the
+    // computation fails here (no fee reference seeded) and is logged, so the order stays
+    // volume + pending only and the KPIs still answer 200.
     const statementless = await createOrder(org.id, store.id, {
       orderDate: todayAt(11),
       saleGross: '30.00',
@@ -445,7 +455,7 @@ describe('GET /v1/.../live-performance/kpis', () => {
     expect(body.pendingOrderCountToday).toBe(1);
   });
 
-  it('returns zeroes (not an error) for a store with no orders', async () => {
+  it('returns zeroes and null ratios (not an error) for a store with no orders', async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
@@ -461,8 +471,9 @@ describe('GET /v1/.../live-performance/kpis', () => {
     expect(body.revenueToday).toBe('0.00');
     expect(body.orderCountToday).toBe(0);
     expect(body.unitsSoldToday).toBe(0);
-    expect(body.marginToday).toBe('0.00');
-    expect(body.profitCostRatioToday).toBe('0.00');
+    // No costed order -> no denominator, so the ratios are null rather than a fake 0.
+    expect(body.marginToday).toBeNull();
+    expect(body.profitCostRatioToday).toBeNull();
     expect(body.pendingRevenueToday).toBe('0.00');
     expect(body.pendingOrderCountToday).toBe(0);
   });
@@ -501,5 +512,144 @@ describe('GET /v1/.../live-performance/kpis', () => {
     expect(body.revenueToday).toBe('100.00');
     expect(body.orderCountToday).toBe(1);
     expect(body.unitsSoldToday).toBe(1);
+  });
+
+  it('computes a costed order in the request when its statement is not written yet', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+    // A calculable order dated now (today) with no stored statement: the writer has not
+    // caught up yet, so the KPIs compute its profit read-only in the request.
+    const orderId = await seedCalculableTrendyolOrder(org.id, store.id);
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/kpis`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as KpisBody;
+
+    // The served profit matches a fresh read-only computation of the same parcel.
+    const computed = await computeParcelProfit(prisma, { organizationId: org.id, orderId });
+    const expectedNet = computed.estimate.netProfit;
+    if (expectedNet === null) throw new Error('estimate net profit unexpectedly null');
+    expect(expectedNet.isZero()).toBe(false);
+    expect(body.netProfitToday).toBe(expectedNet.toFixed(2));
+    expect(body.orderCountToday).toBe(1);
+    expect(body.pendingOrderCountToday).toBe(0);
+
+    // The request wrote nothing: no statement row exists afterwards.
+    expect(await prisma.orderProfitStatement.count({ where: { orderId } })).toBe(0);
+  });
+
+  it('stops computing in the request past the limit and counts the rest as pending', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+    // One more statement-less calculable order than a request may compute (first deploy
+    // backlog): the overflow order stays pending instead of being computed.
+    const orderCount = LIVE_IN_REQUEST_ESTIMATE_LIMIT + 1;
+    for (let index = 0; index < orderCount; index += 1) {
+      await seedCalculableTrendyolOrder(org.id, store.id);
+    }
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/live-performance/kpis`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as KpisBody;
+      expect(body.orderCountToday).toBe(orderCount);
+      expect(body.pendingOrderCountToday).toBe(1);
+      // The skipped overflow is logged once per request, not once per order.
+      const limitWarnings = warn.mock.calls.filter((call) => call[0] === LIMIT_WARNING);
+      expect(limitWarnings).toHaveLength(1);
+      expect(limitWarnings[0]?.[1]).toEqual({
+        organizationId: org.id,
+        storeId: store.id,
+        skipped: 1,
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('divides the margin by the statement sale after a return', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // The order sold 280 but half came back: the statement's sale is 140 and its profit
+    // already carries the return. The margin must divide by the 140 the profit was
+    // computed from, while revenue keeps the order's own 280.
+    const order = await createOrder(org.id, store.id, {
+      orderDate: todayAt(12),
+      saleGross: '280.00',
+    });
+    await createOrderItem(order.id, org.id, { quantity: 2 });
+    await createProfitStatement(order.id, org.id, store.id, {
+      view: 'ESTIMATE',
+      status: 'ESTIMATED',
+      saleGross: '140.00',
+      netProfit: '-188.56',
+      costGross: '100.00',
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/kpis`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as KpisBody;
+    expect(body.revenueToday).toBe('280.00');
+    expect(body.netProfitToday).toBe('-188.56');
+    expect(body.marginToday).toBe('-134.69'); // -188.56 / 140 statement sale
+    expect(body.profitCostRatioToday).toBe('-188.56'); // -188.56 / 100 statement cost
+    // The costed order is not pending, whatever its statement sale.
+    expect(body.pendingRevenueToday).toBe('0.00');
+    expect(body.pendingOrderCountToday).toBe(0);
+  });
+
+  it('returns null profit metrics for a day without a costed order', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // Yesterday's only order is profit-excluded: volume counts, profit has no source.
+    const excluded = await createOrder(org.id, store.id, {
+      orderDate: yesterdayAt(10),
+      saleGross: '80.00',
+    });
+    await createOrderItem(excluded.id, org.id, { quantity: 1 });
+    await createProfitStatement(excluded.id, org.id, store.id, {
+      view: 'ESTIMATE',
+      status: 'EXCLUDED',
+      netProfit: null,
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/kpis`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as KpisBody;
+    expect(body.revenueYesterday).toBe('80.00');
+    expect(body.netProfitYesterday).toBeNull();
+    expect(body.marginYesterday).toBeNull();
+    expect(body.profitCostRatioYesterday).toBeNull();
+    // Today has no order at all: the net stays a zero sum, the ratios have no base.
+    expect(body.netProfitToday).toBe('0.00');
+    expect(body.marginToday).toBeNull();
+    expect(body.profitCostRatioToday).toBeNull();
   });
 });

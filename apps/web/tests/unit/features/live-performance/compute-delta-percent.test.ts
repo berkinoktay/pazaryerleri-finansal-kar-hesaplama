@@ -34,4 +34,18 @@ describe('computeDeltaPercent', () => {
     // 24.80 vs 22.70 → ((24.80 - 22.70) / 22.70) * 100 = 9.2511013...
     expect(computeDeltaPercent('24.80', '22.70')).toBeCloseTo(9.2511, 3);
   });
+
+  it('returns the percent change for fractional decimal strings', () => {
+    expect(computeDeltaPercent('12.5', '10')).toBe(25);
+  });
+
+  // The API sends null for yesterday's profit and the four ratios when the day
+  // has no costed order; no relative change can be expressed then.
+  it('returns null when yesterday is null (no costed order yesterday)', () => {
+    expect(computeDeltaPercent('10', null)).toBeNull();
+  });
+
+  it('returns null when today is null (no costed order today)', () => {
+    expect(computeDeltaPercent(null, '10')).toBeNull();
+  });
 });

@@ -39,18 +39,21 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 // derivation (the rule-violation target removed in Bolum H is the frontend
 // computeMargin in order-kpi-grid); the per-order margin in getLiveOrders is read
 // straight from the ESTIMATE statement's sale_margin_pct, never recomputed.
-function aggregateRatio(profit: Decimal, denominator: Decimal): string {
-  if (denominator.isZero()) return '0.00';
+// Null when the denominator is zero -- no costed order means no ratio, not a fake 0.
+function aggregateRatio(profit: Decimal, denominator: Decimal): string | null {
+  if (denominator.isZero()) return null;
   return profit.div(denominator).mul(100).toFixed(2);
 }
 
 // The ESTIMATE statement columns live performance reads: the status gates the costed
-// subset (decision 10), net profit drives the KPI/chart/feed profit, cost_gross is the
-// Kar/Maliyet ratio denominator (replacing the always-null item cost snapshots), and
-// sale_margin_pct is the per-order margin the feed surfaces.
+// subset (decision 10), net profit drives the KPI/chart/feed profit, sale_gross is the
+// margin denominator (the sale the profit was computed from, after any return),
+// cost_gross is the Kar/Maliyet ratio denominator (replacing the always-null item cost
+// snapshots), and sale_margin_pct is the per-order margin the feed surfaces.
 const ESTIMATE_STATEMENT_SELECT = {
   status: true,
   netProfit: true,
+  saleGross: true,
   costGross: true,
   saleMarginPct: true,
 } as const satisfies Prisma.OrderProfitStatementSelect;
@@ -70,16 +73,108 @@ function estimateStatementWhere(
 }
 
 /**
- * The order's ESTIMATE statement when it is costed -- stored and ESTIMATED, so its net
- * profit is non-null (decision 10). Returns null for a missing statement or one that
- * never reached ESTIMATED (NOT_COMPUTABLE / EXCLUDED / cancelled). Callers still guard
- * net profit before using it, so the type stays honest about the nullable column.
+ * A costed order's estimate as live performance reads it: the profit, the sale and cost
+ * it was computed from (margin and Kar/Maliyet denominators) and the per-order margin.
+ * Built from a stored ESTIMATE statement or from an in-request computation.
  */
-function costedEstimate(statements: readonly EstimateStatementRow[]): EstimateStatementRow | null {
-  const estimate = statements[0];
-  if (estimate === undefined) return null;
-  if (estimate.status !== ProfitStatus.ESTIMATED) return null;
-  return estimate;
+interface LiveEstimate {
+  readonly netProfit: Decimal;
+  readonly costGross: Decimal;
+  readonly saleGross: Decimal;
+  readonly saleMarginPct: Decimal | null;
+}
+
+/**
+ * The most statement-less orders one live-performance read computes in the request. A
+ * statement is normally written seconds after the order, so a handful is the steady
+ * state; during a first deploy or a bulk recompute hundreds can be statement-less, and
+ * computing them all would stall the page. Past the limit the rest count as pending.
+ */
+export const LIVE_IN_REQUEST_ESTIMATE_LIMIT = 25;
+
+const LIMIT_REACHED_LOG = '[profit-read] live in-request estimate limit reached';
+
+/**
+ * The amounts an estimate statement carries, whether stored (Prisma decimals) or
+ * computed in the request (engine decimals); both read through their string form.
+ */
+interface EstimateStatementAmounts {
+  readonly status: ProfitStatus;
+  readonly netProfit: { toString(): string } | null;
+  readonly costGross: { toString(): string };
+  readonly saleGross: { toString(): string };
+  readonly saleMarginPct: { toString(): string } | null;
+}
+
+/**
+ * The live estimate of an estimate statement when it is costed -- ESTIMATED with a
+ * non-null net profit (decision 10). Null for a statement that never reached ESTIMATED
+ * (NOT_COMPUTABLE / EXCLUDED / CANCELLED).
+ */
+function toLiveEstimate(statement: EstimateStatementAmounts): LiveEstimate | null {
+  if (statement.status !== ProfitStatus.ESTIMATED || statement.netProfit === null) return null;
+  return {
+    netProfit: new Decimal(statement.netProfit.toString()),
+    costGross: new Decimal(statement.costGross.toString()),
+    saleGross: new Decimal(statement.saleGross.toString()),
+    saleMarginPct:
+      statement.saleMarginPct === null ? null : new Decimal(statement.saleMarginPct.toString()),
+  };
+}
+
+/**
+ * The costed estimate of each order, keyed by order id; an order is a key only when its
+ * profit is known (decision 10). A stored ESTIMATE statement is read as is. An order
+ * with no stored statement yet -- the writer runs seconds to minutes after the order --
+ * is computed read-only in the request when `computeMissing` is set (owner decision
+ * 2026-11-10: today's live page must show a new order's profit at once). Callers pass
+ * only non-cancelled orders of this org + store, so the computation stays in the tenant.
+ *
+ * The computations run one at a time, not in parallel, so a backlog cannot fan out into
+ * a burst of connections; at most LIVE_IN_REQUEST_ESTIMATE_LIMIT run per call, the rest
+ * stay pending and are logged once. A computation that fails or is not ESTIMATED leaves
+ * the order pending; the page still opens (owner decision 2026-11-04).
+ */
+async function resolveLiveEstimates(
+  orgId: string,
+  storeId: string,
+  orders: readonly {
+    readonly id: string;
+    readonly profitStatements: readonly EstimateStatementRow[];
+  }[],
+  computeMissing: boolean,
+): Promise<ReadonlyMap<string, LiveEstimate>> {
+  const estimates = new Map<string, LiveEstimate>();
+  let computedCount = 0;
+  let skipped = 0;
+
+  for (const order of orders) {
+    const stored = order.profitStatements[0];
+    if (stored !== undefined) {
+      const estimate = toLiveEstimate(stored);
+      if (estimate !== null) estimates.set(order.id, estimate);
+      continue;
+    }
+    if (!computeMissing) continue;
+    if (computedCount >= LIVE_IN_REQUEST_ESTIMATE_LIMIT) {
+      skipped += 1;
+      continue;
+    }
+    computedCount += 1;
+    // Sequential on purpose (see above): one computation holds the connection at a time.
+    const computed = await computeParcelProfitForRead({
+      organizationId: orgId,
+      orderId: order.id,
+      surface: 'live-performance',
+    });
+    const estimate = computed === null ? null : toLiveEstimate(computed.estimate);
+    if (estimate !== null) estimates.set(order.id, estimate);
+  }
+
+  if (skipped > 0) {
+    console.warn(LIMIT_REACHED_LOG, { organizationId: orgId, storeId, skipped });
+  }
+  return estimates;
 }
 
 // ─── KPIs ───────────────────────────────────────────────────────────────────
@@ -92,23 +187,26 @@ export interface KpisResult {
   unitsSoldToday: number;
   unitsSoldYesterday: number;
   netProfitToday: string;
-  netProfitYesterday: string;
-  marginToday: string;
-  marginYesterday: string;
-  profitCostRatioToday: string;
-  profitCostRatioYesterday: string;
+  // Null when yesterday has no costed order: a zero sum would read as "earned nothing".
+  netProfitYesterday: string | null;
+  // The ratios are null when their denominator is zero (no costed order).
+  marginToday: string | null;
+  marginYesterday: string | null;
+  profitCostRatioToday: string | null;
+  profitCostRatioYesterday: string | null;
   pendingRevenueToday: string;
   pendingOrderCountToday: number;
 }
 
 interface OrdersAggregate {
-  revenue: Decimal; // universe (all orders in range)
+  revenue: Decimal; // universe (all orders in range), the order's own sale
   orderCount: number; // universe
   unitsSold: number; // universe
   netProfit: Decimal; // costed subset
-  costedRevenue: Decimal; // costed subset (margin denominator)
+  costedRevenue: Decimal; // costed subset, the statement's sale (margin denominator)
   costedCost: Decimal; // costed subset (Kâr/Maliyet denominator)
   costedCount: number; // costed subset
+  pendingRevenue: Decimal; // outside the costed subset, the order's own sale
 }
 
 interface BufferAggregate {
@@ -120,16 +218,19 @@ interface BufferAggregate {
 /**
  * Aggregate the `orders` rows for a day. Volume (revenue / count / units) is over
  * EVERY non-cancelled order; profit / costed-revenue / costed-cost / costed-count are
- * over the costed subset only -- orders whose ESTIMATE statement is ESTIMATED
- * (decision 10). The costed net and cost_gross come from that statement; the costed
- * revenue is the order's own sale_gross. Today's cost-missing orders sit in the buffer
- * (not here); yesterday's profit-excluded orders carry an EXCLUDED estimate and so land
- * in volume but never in the costed aggregates.
+ * over the costed subset only -- orders whose estimate is ESTIMATED (decision 10),
+ * stored or, with `computeMissing`, computed in the request (owner decision
+ * 2026-11-10). The costed net, sale and cost all come from that estimate, so the margin
+ * divides the profit by the sale it was computed from (after any return); revenue stays
+ * the order's own sale_gross, as the seller sees it on the marketplace. Today's
+ * cost-missing orders sit in the buffer (not here); yesterday's profit-excluded orders
+ * carry an EXCLUDED estimate and so land in volume but never in the costed aggregates.
  */
 async function aggregateOrders(
   orgId: string,
   storeId: string,
   range: DayRange,
+  computeMissing: boolean,
 ): Promise<OrdersAggregate> {
   const orders = await prisma.order.findMany({
     where: {
@@ -140,7 +241,11 @@ async function aggregateOrders(
       // (Split ghosts are deleted at intake; this also belts any that leak.)
       status: { not: 'CANCELLED' },
     },
+    // Newest first, like the feed, so past the in-request limit the KPIs, the chart and
+    // the feed compute the same orders.
+    orderBy: { orderDate: 'desc' },
     select: {
+      id: true,
       saleGross: true,
       items: { select: { quantity: true } },
       profitStatements: {
@@ -149,6 +254,7 @@ async function aggregateOrders(
       },
     },
   });
+  const estimates = await resolveLiveEstimates(orgId, storeId, orders, computeMissing);
 
   let revenue = new Decimal(0);
   let unitsSold = 0;
@@ -156,17 +262,23 @@ async function aggregateOrders(
   let costedRevenue = new Decimal(0);
   let costedCost = new Decimal(0);
   let costedCount = 0;
+  let pendingRevenue = new Decimal(0);
 
   for (const order of orders) {
-    if (order.saleGross !== null) revenue = revenue.add(order.saleGross.toString());
+    const orderRevenue =
+      order.saleGross !== null ? new Decimal(order.saleGross.toString()) : new Decimal(0);
+    revenue = revenue.add(orderRevenue);
     for (const item of order.items) unitsSold += item.quantity;
 
-    const estimate = costedEstimate(order.profitStatements);
-    if (estimate === null || estimate.netProfit === null) continue;
-    netProfit = netProfit.add(estimate.netProfit.toString());
+    const estimate = estimates.get(order.id);
+    if (estimate === undefined) {
+      pendingRevenue = pendingRevenue.add(orderRevenue);
+      continue;
+    }
+    netProfit = netProfit.add(estimate.netProfit);
     costedCount += 1;
-    if (order.saleGross !== null) costedRevenue = costedRevenue.add(order.saleGross.toString());
-    costedCost = costedCost.add(estimate.costGross.toString());
+    costedRevenue = costedRevenue.add(estimate.saleGross);
+    costedCost = costedCost.add(estimate.costGross);
   }
 
   return {
@@ -177,6 +289,7 @@ async function aggregateOrders(
     costedRevenue,
     costedCost,
     costedCount,
+    pendingRevenue,
   };
 }
 
@@ -211,11 +324,13 @@ export async function getKpis(args: { orgId: string; storeId: string }): Promise
   const todayAnchor = getBusinessDateAnchor();
 
   // Yesterday never unions the buffer — its uncosted orders were graduated into
-  // `orders` as PROFIT-EXCLUDED at midnight, so `orders` is already complete.
+  // `orders` as PROFIT-EXCLUDED at midnight, so `orders` is already complete. Only today
+  // computes a statement-less order in the request: yesterday's statements are long
+  // written, and one still missing there is a writer failure, not a lag.
   const [todayOrders, todayBuffer, yesterdayOrders] = await Promise.all([
-    aggregateOrders(args.orgId, args.storeId, today),
+    aggregateOrders(args.orgId, args.storeId, today, true),
     aggregateBuffer(args.orgId, args.storeId, todayAnchor),
-    aggregateOrders(args.orgId, args.storeId, yesterday),
+    aggregateOrders(args.orgId, args.storeId, yesterday, false),
   ]);
 
   const todayRevenue = todayOrders.revenue.add(todayBuffer.revenue);
@@ -230,12 +345,15 @@ export async function getKpis(args: { orgId: string; storeId: string }): Promise
     unitsSoldToday: todayUnits,
     unitsSoldYesterday: yesterdayOrders.unitsSold,
     netProfitToday: todayOrders.netProfit.toFixed(2),
-    netProfitYesterday: yesterdayOrders.netProfit.toFixed(2),
+    netProfitYesterday:
+      yesterdayOrders.costedCount === 0 ? null : yesterdayOrders.netProfit.toFixed(2),
     marginToday: aggregateRatio(todayOrders.netProfit, todayOrders.costedRevenue),
     marginYesterday: aggregateRatio(yesterdayOrders.netProfit, yesterdayOrders.costedRevenue),
     profitCostRatioToday: aggregateRatio(todayOrders.netProfit, todayOrders.costedCost),
     profitCostRatioYesterday: aggregateRatio(yesterdayOrders.netProfit, yesterdayOrders.costedCost),
-    pendingRevenueToday: todayRevenue.sub(todayOrders.costedRevenue).toFixed(2),
+    // The pending gap is the order's own sale of every uncosted order (orders + buffer),
+    // not universe minus the costed statements' sale, which a return would skew.
+    pendingRevenueToday: todayOrders.pendingRevenue.add(todayBuffer.revenue).toFixed(2),
     pendingOrderCountToday: todayCount - todayOrders.costedCount,
   };
 }
@@ -258,14 +376,16 @@ const HOURS_IN_DAY = 24;
 /**
  * Hourly cumulative revenue + profit for a business day. Revenue buckets EVERY
  * order's subtotal (plus the buffer, today only); profit buckets the costed
- * subset -- the costed ESTIMATE statement's net, by order hour (decision 10). The
- * two running totals drive the front-end's ciro<->kar toggle without a second request.
+ * subset -- the costed estimate's net, by order hour (decision 10), stored or, with
+ * `computeMissing`, computed in the request (owner decision 2026-11-10). The two running
+ * totals drive the front-end's ciro<->kar toggle without a second request.
  */
 async function hourlyCumulative(
   orgId: string,
   storeId: string,
   range: DayRange,
   bufferAnchor: Date | null,
+  computeMissing: boolean,
 ): Promise<ChartPoint[]> {
   const orders = await prisma.order.findMany({
     where: {
@@ -275,7 +395,10 @@ async function hourlyCumulative(
       // Mirrors aggregateOrders — cancelled orders carry no payout.
       status: { not: 'CANCELLED' },
     },
+    // Mirrors aggregateOrders -- the same orders are computed past the in-request limit.
+    orderBy: { orderDate: 'desc' },
     select: {
+      id: true,
       orderDate: true,
       saleGross: true,
       profitStatements: {
@@ -284,6 +407,7 @@ async function hourlyCumulative(
       },
     },
   });
+  const estimates = await resolveLiveEstimates(orgId, storeId, orders, computeMissing);
 
   const revenueBuckets = Array.from({ length: HOURS_IN_DAY }, () => new Decimal(0));
   const profitBuckets = Array.from({ length: HOURS_IN_DAY }, () => new Decimal(0));
@@ -294,11 +418,9 @@ async function hourlyCumulative(
       revenueBuckets[hour] = (revenueBuckets[hour] ?? new Decimal(0)).add(
         order.saleGross.toString(),
       );
-    const estimate = costedEstimate(order.profitStatements);
-    if (estimate !== null && estimate.netProfit !== null)
-      profitBuckets[hour] = (profitBuckets[hour] ?? new Decimal(0)).add(
-        estimate.netProfit.toString(),
-      );
+    const estimate = estimates.get(order.id);
+    if (estimate !== undefined)
+      profitBuckets[hour] = (profitBuckets[hour] ?? new Decimal(0)).add(estimate.netProfit);
   }
 
   if (bufferAnchor !== null) {
@@ -331,9 +453,10 @@ export async function getChart(args: { orgId: string; storeId: string }): Promis
   const yesterday = getBusinessDayRange(new Date(Date.now() - ONE_DAY_MS));
   const todayAnchor = getBusinessDateAnchor();
 
+  // Only today computes a statement-less order in the request (see getKpis).
   const [todayPoints, yesterdayPoints] = await Promise.all([
-    hourlyCumulative(args.orgId, args.storeId, today, todayAnchor),
-    hourlyCumulative(args.orgId, args.storeId, yesterday, null),
+    hourlyCumulative(args.orgId, args.storeId, today, todayAnchor, true),
+    hourlyCumulative(args.orgId, args.storeId, yesterday, null, false),
   ]);
 
   return { today: todayPoints, yesterday: yesterdayPoints };
@@ -823,21 +946,18 @@ export async function getLiveOrders(args: {
     }),
   ]);
 
-  const calculatedRows: LiveOrderRow[] = ordersToday.map((order) => {
+  // Profit + margin come from the order's costed estimate (decision 10): the stored
+  // ESTIMATE statement, or an in-request computation while the writer catches up (owner
+  // decision 2026-11-10) -- render-time recompute YOK. An order without one is listed
+  // under pending, so the tab counts match the KPIs' costed subset.
+  const estimates = await resolveLiveEstimates(args.orgId, args.storeId, ordersToday, true);
+  const calculatedRows: LiveOrderRow[] = [];
+  const uncostedOrderRows: LiveOrderRow[] = [];
+  for (const order of ordersToday) {
     const revenue =
       order.saleGross !== null ? new Decimal(order.saleGross.toString()) : new Decimal(0);
-    // Profit + margin read the ESTIMATE statement, only when it is ESTIMATED
-    // (decision 10) -- render-time recompute YOK.
-    const estimate = costedEstimate(order.profitStatements);
-    const profit =
-      estimate !== null && estimate.netProfit !== null
-        ? new Decimal(estimate.netProfit.toString())
-        : null;
-    const margin =
-      estimate !== null && estimate.saleMarginPct !== null
-        ? new Decimal(estimate.saleMarginPct.toString()).toFixed(2)
-        : null;
-    return {
+    const estimate = estimates.get(order.id);
+    const row: LiveOrderRow = {
       source: 'orders',
       platformOrderId: order.platformOrderId,
       platformOrderNumber: order.platformOrderNumber,
@@ -846,14 +966,22 @@ export async function getLiveOrders(args: {
       orderDate: order.orderDate.toISOString(),
       status: order.status,
       revenue: revenue.toFixed(2),
-      profit: profit !== null ? profit.toFixed(2) : null,
-      margin,
+      profit: estimate !== undefined ? estimate.netProfit.toFixed(2) : null,
+      margin:
+        estimate !== undefined && estimate.saleMarginPct !== null
+          ? estimate.saleMarginPct.toFixed(2)
+          : null,
       // Promosyon adları liste detayıyla aynı runtime-doğrulamalı dönüşümden geçer.
       promotionDisplays: toPromotionDisplays(order.promotionDisplays),
     };
-  });
+    if (estimate === undefined) {
+      uncostedOrderRows.push(row);
+    } else {
+      calculatedRows.push(row);
+    }
+  }
 
-  const pendingRows: LiveOrderRow[] = bufferRows.map((entry) => {
+  const bufferPendingRows: LiveOrderRow[] = bufferRows.map((entry) => {
     const mapped = entry.mappedOrder as unknown as MappedOrder;
     return {
       source: 'buffer',
@@ -874,8 +1002,11 @@ export async function getLiveOrders(args: {
     };
   });
 
+  const newestFirst = (a: LiveOrderRow, b: LiveOrderRow): number =>
+    b.orderDate.localeCompare(a.orderDate);
+  const pendingRows = [...uncostedOrderRows, ...bufferPendingRows].sort(newestFirst);
   const dataByFilter: Record<typeof filter, LiveOrderRow[]> = {
-    all: [...calculatedRows, ...pendingRows].sort((a, b) => b.orderDate.localeCompare(a.orderDate)),
+    all: [...calculatedRows, ...pendingRows].sort(newestFirst),
     calculated: calculatedRows,
     pending: pendingRows,
   };

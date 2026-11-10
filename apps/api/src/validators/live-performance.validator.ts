@@ -21,25 +21,48 @@ export const LivePerformanceKpisSchema = z
     // ── Profit family (costed subset = orders with non-null estimatedNetProfit) ──
     netProfitToday: z.string().openapi({
       description:
-        "Net profit (decimal string) over today's orders whose estimate profit statement is " +
-        'computed; cost-pending orders do not contribute.',
+        "Net profit (decimal string) over today's orders whose estimate is computed - stored, " +
+        'or computed in the request while the statement is not written yet; cost-pending ' +
+        'orders do not contribute.',
       example: '3220.00',
     }),
-    netProfitYesterday: z.string().openapi({ example: '2875.00' }),
-    marginToday: z.string().openapi({
-      description:
-        "Net profit / costed revenue * 100 (decimal string), over today's orders whose estimate " +
-        'profit statement is computed.',
-      example: '25.86',
+    netProfitYesterday: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          "Net profit (decimal string) over yesterday's orders whose estimate profit statement is " +
+          'computed; null when no costed order.',
+        example: '2875.00',
+      }),
+    marginToday: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          "Net profit / costed sale * 100 (decimal string), over today's orders whose estimate " +
+          "is computed; the sale is the estimate's own (after any return). Null when no costed " +
+          'order.',
+        example: '25.86',
+      }),
+    marginYesterday: z.string().nullable().openapi({
+      description: "Yesterday's margin, as marginToday; null when no costed order.",
+      example: '25.43',
     }),
-    marginYesterday: z.string().openapi({ example: '25.43' }),
-    profitCostRatioToday: z.string().openapi({
+    profitCostRatioToday: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          "Net profit / costed cost * 100 (decimal string), over today's orders whose estimate " +
+          'is computed. Null when no costed order.',
+        example: '38.40',
+      }),
+    profitCostRatioYesterday: z.string().nullable().openapi({
       description:
-        "Net profit / costed cost * 100 (decimal string), over today's orders whose estimate " +
-        'profit statement is computed.',
-      example: '38.40',
+        "Yesterday's profit/cost ratio, as profitCostRatioToday; null when no costed order.",
+      example: '37.10',
     }),
-    profitCostRatioYesterday: z.string().openapi({ example: '37.10' }),
     // ── Pending gap (today only: universe − costed) — drives the profit-card hint ──
     pendingRevenueToday: z.string().openapi({
       description: "Today's revenue counted but not yet costed, decimal string",
@@ -133,7 +156,9 @@ export const LivePerformanceTodayProductsSchema = z
 
 const LiveOrderRowSchema = z.object({
   source: z.enum(['orders', 'buffer']).openapi({
-    description: '"orders" = fully calculated; "buffer" = cost-missing, awaiting cost entry',
+    description:
+      '"orders" = an orders-table row (calculated when its estimate is computed, pending ' +
+      'otherwise); "buffer" = cost-missing, awaiting cost entry',
   }),
   platformOrderId: z.string(),
   platformOrderNumber: z.string().nullable(),
@@ -186,7 +211,9 @@ export const liveOrdersQuerySchema = z.object({
     .optional()
     .openapi({
       param: { name: 'filter', in: 'query' },
-      description: 'Tab filter — all (default), calculated (orders), or pending (buffer)',
+      description:
+        'Tab filter — all (default), calculated (orders whose estimate is computed), or ' +
+        'pending (buffer + orders whose estimate is not computed)',
     }),
 });
 

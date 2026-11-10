@@ -29,7 +29,13 @@ export function LiveHeroCaption({ kpis }: { kpis: LivePerformanceKpis }): React.
       <span className="gap-xs inline-flex flex-wrap items-center">
         {netProfitDelta !== null ? <TrendDelta value={netProfitDelta} goodDirection="up" /> : null}
         <span>
-          {t('chart.yesterdayLabel')} <Currency value={kpis.netProfitYesterday} />
+          {/* Null when no order of yesterday is costed: a dash, not a misleading 0 TL. */}
+          {t('chart.yesterdayLabel')}{' '}
+          {kpis.netProfitYesterday === null ? (
+            <span>—</span>
+          ) : (
+            <Currency value={kpis.netProfitYesterday} />
+          )}
         </span>
         <InfoHint label={t('kpis.netProfit')}>{t('kpis.estimateHint')}</InfoHint>
       </span>

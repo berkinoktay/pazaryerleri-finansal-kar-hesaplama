@@ -2111,29 +2111,47 @@
           },
           "netProfitToday": {
             "type": "string",
-            "description": "Net profit (decimal string) over today's orders whose estimate profit statement is computed; cost-pending orders do not contribute.",
+            "description": "Net profit (decimal string) over today's orders whose estimate is computed - stored, or computed in the request while the statement is not written yet; cost-pending orders do not contribute.",
             "example": "3220.00"
           },
           "netProfitYesterday": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Net profit (decimal string) over yesterday's orders whose estimate profit statement is computed; null when no costed order.",
             "example": "2875.00"
           },
           "marginToday": {
-            "type": "string",
-            "description": "Net profit / costed revenue * 100 (decimal string), over today's orders whose estimate profit statement is computed.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Net profit / costed sale * 100 (decimal string), over today's orders whose estimate is computed; the sale is the estimate's own (after any return). Null when no costed order.",
             "example": "25.86"
           },
           "marginYesterday": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Yesterday's margin, as marginToday; null when no costed order.",
             "example": "25.43"
           },
           "profitCostRatioToday": {
-            "type": "string",
-            "description": "Net profit / costed cost * 100 (decimal string), over today's orders whose estimate profit statement is computed.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Net profit / costed cost * 100 (decimal string), over today's orders whose estimate is computed. Null when no costed order.",
             "example": "38.40"
           },
           "profitCostRatioYesterday": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Yesterday's profit/cost ratio, as profitCostRatioToday; null when no costed order.",
             "example": "37.10"
           },
           "pendingRevenueToday": {
@@ -2355,7 +2373,7 @@
                     "orders",
                     "buffer"
                   ],
-                  "description": "\"orders\" = fully calculated; \"buffer\" = cost-missing, awaiting cost entry"
+                  "description": "\"orders\" = an orders-table row (calculated when its estimate is computed, pending otherwise); \"buffer\" = cost-missing, awaiting cost entry"
                 },
                 "platformOrderId": {
                   "type": "string"
@@ -11715,7 +11733,7 @@
           "Live Performance"
         ],
         "summary": "Today’s orders (calculated + cost-missing buffer)",
-        "description": "Today’s order feed combining the calculated orders table with the cost-missing buffer, each row tagged by source. `filter` selects the tab: all (default), calculated (orders only), or pending (buffer only). `counts` always reports every tab’s total. Money values are Decimal strings; buffer rows have null profit/margin until they graduate.",
+        "description": "Today’s order feed combining the calculated orders table with the cost-missing buffer, each row tagged by source. `filter` selects the tab: all (default), calculated (orders whose estimate is computed, stored or in the request), or pending (buffer rows and orders whose estimate is not computed). `counts` always reports every tab’s total. Money values are Decimal strings; pending rows have null profit/margin.",
         "security": [
           {
             "bearerAuth": []
@@ -11748,10 +11766,10 @@
                 "calculated",
                 "pending"
               ],
-              "description": "Tab filter — all (default), calculated (orders), or pending (buffer)"
+              "description": "Tab filter — all (default), calculated (orders whose estimate is computed), or pending (buffer + orders whose estimate is not computed)"
             },
             "required": false,
-            "description": "Tab filter — all (default), calculated (orders), or pending (buffer)",
+            "description": "Tab filter — all (default), calculated (orders whose estimate is computed), or pending (buffer + orders whose estimate is not computed)",
             "name": "filter",
             "in": "query"
           }

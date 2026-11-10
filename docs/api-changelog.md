@@ -138,6 +138,21 @@ section "Versioning" for details.
   statement is not written yet (empty, never an error, when that fails). Also fixed: an order that a
   re-delivery made computable while it waited in the live-performance buffer was counted twice and
   its stock was decremented twice.
+- **Live performance computes today's profit in the request and divides margins by the estimate's
+  sale** (`GET .../live-performance/kpis`, `.../chart`, `.../orders`). Breaking for the KPI
+  schema: `netProfitYesterday`, `marginToday`, `marginYesterday`, `profitCostRatioToday` and
+  `profitCostRatioYesterday` become nullable; the web client ships the matching change in the
+  same PR.
+  - A today order whose estimate statement is not written yet is computed read-only in the
+    request, so its profit reaches the KPIs, the chart and the feed at once. At most a fixed
+    number of such orders are computed per request; the rest count as pending and the overflow is
+    logged once. Yesterday reads stored statements only.
+  - Margin divides the costed net profit by the estimate's own sale (after any return), not the
+    order's sale; revenue and `pendingRevenueToday` keep the order's own sale.
+  - The four ratios are `null` when their denominator is zero, and `netProfitYesterday` is `null`
+    when yesterday has no costed order (was `0.00`).
+  - Feed tabs: an order without a computed estimate is listed under `pending` (with buffer rows),
+    not `calculated`; `counts.calculated` / `counts.pending` match the KPIs' costed subset.
 - **Returns summary money KPIs** (`refundDeductionGross`, `commissionRefundGross`,
   `costReturnGross`, `netImpactGross`) come from the profit lines, dated by the transaction date of
   each return line's earliest settlement record; an item's cost return counts with its return.

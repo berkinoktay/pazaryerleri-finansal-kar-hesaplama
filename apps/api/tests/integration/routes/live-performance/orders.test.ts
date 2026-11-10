@@ -149,4 +149,50 @@ describe('GET /v1/.../live-performance/orders', () => {
     expect(body.data).toHaveLength(1);
     expect(body.data[0]?.source).toBe('buffer');
   });
+
+  it('lists an order without a costed estimate under pending, not calculated', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // A stored estimate that never reached ESTIMATED: the KPIs count it as pending, so
+    // the feed must too (decision 10) -- it is not a calculated row.
+    const order = await createOrder(org.id, store.id, {
+      orderDate: todayAt(10),
+      platformOrderId: 'ORD-NC',
+      saleGross: '75.00',
+    });
+    await createProfitStatement(order.id, org.id, store.id, {
+      view: 'ESTIMATE',
+      status: 'NOT_COMPUTABLE',
+      netProfit: null,
+    });
+
+    const pendingRes = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/orders?filter=pending`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(pendingRes.status).toBe(200);
+    const pendingBody = (await pendingRes.json()) as OrdersBody;
+    expect(pendingBody.counts).toEqual({ all: 1, calculated: 0, pending: 1 });
+    expect(pendingBody.data).toHaveLength(1);
+    expect(pendingBody.data[0]).toMatchObject({
+      source: 'orders',
+      platformOrderId: 'ORD-NC',
+      orderId: order.id,
+      bufferId: null,
+      revenue: '75.00',
+      profit: null,
+      margin: null,
+    });
+
+    const allRes = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/orders?filter=all`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    const allBody = (await allRes.json()) as OrdersBody;
+    expect(allBody.data).toHaveLength(1);
+    expect(allBody.data[0]?.profit).toBeNull();
+  });
 });
