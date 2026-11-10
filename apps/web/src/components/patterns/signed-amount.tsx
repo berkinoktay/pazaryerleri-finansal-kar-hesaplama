@@ -21,15 +21,24 @@ export interface SignedAmountProps {
  * magnitude goes to `<Currency>` and we prefix `−`/`+` ourselves so Intl doesn't
  * also print its own minus (which would double up to `−-₺`).
  */
+/** "0", "0.00", "000.000" — a zero amount in any served precision. */
+const ZERO_AMOUNT = /^0+(\.0+)?$/;
+
 export function SignedAmount({ value, positive }: SignedAmountProps): React.ReactElement {
   const isNegative = value.startsWith('-');
   const magnitude = isNegative ? value.slice(1) : value;
-  const showMinus = positive ? isNegative : !isNegative;
+  // A zero row (e.g. Net KDV clamped to 0 by the store setting) carries no
+  // direction, so it gets no glyph: "−₺0,00" reads as a negative amount.
+  const glyph = ZERO_AMOUNT.test(magnitude)
+    ? ''
+    : (positive ? isNegative : !isNegative)
+      ? '−'
+      : '+';
   return (
     // whitespace-nowrap: the glyph must never wrap onto its own line (a lone "−"
     // read as an em-dash in a narrow column).
     <span className="whitespace-nowrap tabular-nums">
-      {showMinus ? '−' : '+'}
+      {glyph}
       <Currency value={magnitude} />
     </span>
   );
