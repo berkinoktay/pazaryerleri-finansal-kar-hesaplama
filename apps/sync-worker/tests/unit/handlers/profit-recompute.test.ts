@@ -15,6 +15,7 @@ import { syncLog } from '@pazarsync/sync-core';
 
 import {
   createProfitRecomputeTick,
+  PROFIT_RECOMPUTE_TICK_BUDGET_MS,
   PROFIT_STALE_SWEEP_INTERVAL_MS,
 } from '../../../src/handlers/profit-recompute';
 
@@ -158,5 +159,136 @@ describe('createProfitRecomputeTick', () => {
     });
     await tick();
     expect(warnMock).toHaveBeenCalledWith('profit-recompute.failed', { orderIds: ['order-x'] });
+  });
+
+  it('sums every pass of a multi-pass tick into one result and one log line', async () => {
+    // Two full batches, then a short one: the short pass ends the tick. A fixed clock
+    // never spends the budget, so only the short pass stops the loop.
+    drainMock
+      .mockResolvedValueOnce({
+        claimed: 2,
+        changed: 1,
+        unchanged: 0,
+        failed: 1,
+        unsupported: 0,
+        failedOrderIds: ['a'],
+      })
+      .mockResolvedValueOnce({
+        claimed: 2,
+        changed: 0,
+        unchanged: 1,
+        failed: 0,
+        unsupported: 1,
+        failedOrderIds: [],
+      })
+      .mockResolvedValueOnce({
+        claimed: 1,
+        changed: 0,
+        unchanged: 0,
+        failed: 1,
+        unsupported: 0,
+        failedOrderIds: ['b'],
+      });
+
+    const tick = createProfitRecomputeTick({ db, now: () => 0, batchSize: 2 });
+    const result = await tick();
+
+    expect(result).toEqual({
+      skipped: false,
+      drain: {
+        claimed: 5,
+        changed: 1,
+        unchanged: 1,
+        failed: 2,
+        unsupported: 1,
+        failedOrderIds: ['a', 'b'],
+      },
+      swept: null,
+    });
+    expect(drainMock).toHaveBeenCalledTimes(3);
+    expect(sweepMock).not.toHaveBeenCalled();
+
+    expect(infoMock).toHaveBeenCalledTimes(1);
+    expect(infoMock).toHaveBeenCalledWith('profit-recompute.tick', {
+      claimed: 5,
+      changed: 1,
+      unchanged: 1,
+      failed: 2,
+      unsupported: 1,
+      swept: 0,
+    });
+    expect(warnMock).toHaveBeenCalledTimes(1);
+    expect(warnMock).toHaveBeenCalledWith('profit-recompute.failed', { orderIds: ['a', 'b'] });
+  });
+
+  it('stops starting new passes once the tick budget is spent', async () => {
+    // The clock reads 0 at the start, just under the budget after the first pass,
+    // and exactly the budget from then on. The queue always has a full batch for
+    // three passes (then runs dry), so only the budget can stop the tick after two.
+    const readings = [0, PROFIT_RECOMPUTE_TICK_BUDGET_MS - 1];
+    const now = (): number => readings.shift() ?? PROFIT_RECOMPUTE_TICK_BUDGET_MS;
+    const fullBatch: DrainResult = {
+      claimed: 1,
+      changed: 1,
+      unchanged: 0,
+      failed: 0,
+      unsupported: 0,
+      failedOrderIds: [],
+    };
+    drainMock
+      .mockResolvedValueOnce(fullBatch)
+      .mockResolvedValueOnce(fullBatch)
+      .mockResolvedValueOnce(fullBatch)
+      .mockResolvedValue(emptyDrain());
+
+    const tick = createProfitRecomputeTick({ db, now, batchSize: 1 });
+    const result = await tick();
+
+    expect(result.drain?.claimed).toBe(2);
+    expect(drainMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('logs the completed passes and rethrows when a pass fails midway', async () => {
+    const failure = new Error('drain pass failed');
+    drainMock
+      .mockResolvedValueOnce({
+        claimed: 2,
+        changed: 1,
+        unchanged: 0,
+        failed: 1,
+        unsupported: 0,
+        failedOrderIds: ['a'],
+      })
+      .mockRejectedValueOnce(failure);
+
+    const tick = createProfitRecomputeTick({ db, now: () => 0, batchSize: 2 });
+
+    // The very same error reaches the caller (index.ts logs it as tick-error).
+    await expect(tick()).rejects.toBe(failure);
+    expect(drainMock).toHaveBeenCalledTimes(2);
+    expect(sweepMock).not.toHaveBeenCalled();
+
+    // The first pass is already committed, so its totals are logged, marked as
+    // interrupted.
+    expect(infoMock).toHaveBeenCalledTimes(1);
+    expect(infoMock).toHaveBeenCalledWith('profit-recompute.tick', {
+      claimed: 2,
+      changed: 1,
+      unchanged: 0,
+      failed: 1,
+      unsupported: 0,
+      swept: 0,
+      interrupted: true,
+    });
+    expect(warnMock).toHaveBeenCalledTimes(1);
+    expect(warnMock).toHaveBeenCalledWith('profit-recompute.failed', {
+      orderIds: ['a'],
+      interrupted: true,
+    });
+
+    // The running flag was released: the next tick runs instead of being skipped.
+    drainMock.mockResolvedValueOnce(emptyDrain());
+    const next = await tick();
+    expect(next.skipped).toBe(false);
   });
 });

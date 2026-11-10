@@ -205,12 +205,14 @@ describe('profit recompute tick', () => {
     const orders = await buildQueuedOrders(['multi-a', 'multi-b', 'multi-c']);
 
     // One mark per batch: only a tick that keeps draining batch after batch can
-    // empty a three-mark queue in a single call.
-    const tick = createProfitRecomputeTick({ db: prisma, batchSize: 1 });
+    // empty a three-mark queue in a single call. A fixed clock never spends the
+    // budget, so only the queue running dry stops the loop (no wall-clock flake).
+    const tick = createProfitRecomputeTick({ db: prisma, batchSize: 1, now: () => 0 });
     const result = await tick();
 
     expect(result.skipped).toBe(false);
     expect(result.drain?.claimed).toBe(3);
+    expect(result.drain?.changed).toBe(3);
     expect(result.swept).toBeNull();
 
     expect(await prisma.profitRecomputeRequest.count()).toBe(0);

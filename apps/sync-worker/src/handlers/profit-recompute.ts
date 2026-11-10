@@ -51,8 +51,8 @@ export const PROFIT_RECOMPUTE_TICK_BUDGET_MS = 4_000;
 // (catch-up) -- so a one-hour gap only throttles a truly idle worker.
 export const PROFIT_STALE_SWEEP_INTERVAL_MS = 3_600_000;
 
-// How many stale orders one sweep enqueues. The drain then works through them a
-// batch at a time on the following ticks.
+// How many stale orders one sweep enqueues. The drain then works through them in
+// consecutive batches, usually within the next tick or two.
 export const PROFIT_STALE_SWEEP_LIMIT = 500;
 
 // What one tick did: skipped (a previous tick was still running), or the drain
@@ -87,11 +87,39 @@ function addDrainPass(total: DrainResult, pass: DrainResult): DrainResult {
 }
 
 /**
+ * Writes the tick's log lines: one info line with the drain totals, only when
+ * something happened so an idle worker does not spam a line every 5 s, and one warn
+ * line with the failed order ids. A tick cut short by a failing pass marks both
+ * lines `interrupted: true`.
+ */
+function logTick(drain: DrainResult, swept: number | null, interrupted: boolean): void {
+  const marker = interrupted ? { interrupted: true } : {};
+  if (drain.claimed > 0 || (swept !== null && swept > 0)) {
+    syncLog.info('profit-recompute.tick', {
+      claimed: drain.claimed,
+      changed: drain.changed,
+      unchanged: drain.unchanged,
+      failed: drain.failed,
+      unsupported: drain.unsupported,
+      swept: swept ?? 0,
+      ...marker,
+    });
+  }
+  if (drain.failedOrderIds.length > 0) {
+    syncLog.warn('profit-recompute.failed', { orderIds: [...drain.failedOrderIds], ...marker });
+  }
+}
+
+/**
  * Builds a profit recompute tick over its own closure state (running flag, last
  * sweep time, whether the last sweep found work), so a test can make a fresh one.
- * `now` is injectable for the sweep-throttle test and defaults to the wall clock;
- * `batchSize` and `tickBudgetMs` default to PROFIT_RECOMPUTE_BATCH_SIZE and
- * PROFIT_RECOMPUTE_TICK_BUDGET_MS and are injectable for the multi-pass tests.
+ * `now` defaults to the wall clock and drives both the sweep throttle and the tick
+ * budget; with a fixed `now` the budget is never spent, so only the queue running
+ * dry (a short pass) stops the drain loop. `batchSize` and `tickBudgetMs` default to
+ * PROFIT_RECOMPUTE_BATCH_SIZE and PROFIT_RECOMPUTE_TICK_BUDGET_MS and are injectable
+ * for the multi-pass tests. A pass that throws ends the tick: the totals of the
+ * passes completed before it are logged as interrupted, the sweep is skipped, and
+ * the error is rethrown unchanged for the caller to log.
  */
 export function createProfitRecomputeTick(deps: {
   db: PrismaClient;
@@ -122,7 +150,15 @@ export function createProfitRecomputeTick(deps: {
       let drain = EMPTY_DRAIN;
       let pass: DrainResult;
       do {
-        pass = await drainProfitRecomputeQueue(db, { batchSize });
+        try {
+          pass = await drainProfitRecomputeQueue(db, { batchSize });
+        } catch (error) {
+          // The passes before this one are already committed, so log their totals
+          // rather than lose them, then rethrow unchanged: index.ts logs the error
+          // itself (tick-error). The sweep does not run on this path.
+          logTick(drain, null, true);
+          throw error;
+        }
         drain = addDrainPass(drain, pass);
       } while (pass.claimed >= batchSize && now() - startedAt < tickBudgetMs);
 
@@ -139,21 +175,7 @@ export function createProfitRecomputeTick(deps: {
         }
       }
 
-      // One log line, only when something happened, so an idle worker does not spam
-      // a line every 5 s.
-      if (drain.claimed > 0 || (swept !== null && swept > 0)) {
-        syncLog.info('profit-recompute.tick', {
-          claimed: drain.claimed,
-          changed: drain.changed,
-          unchanged: drain.unchanged,
-          failed: drain.failed,
-          unsupported: drain.unsupported,
-          swept: swept ?? 0,
-        });
-      }
-      if (drain.failedOrderIds.length > 0) {
-        syncLog.warn('profit-recompute.failed', { orderIds: [...drain.failedOrderIds] });
-      }
+      logTick(drain, swept, false);
 
       return { skipped: false, drain, swept };
     } finally {
