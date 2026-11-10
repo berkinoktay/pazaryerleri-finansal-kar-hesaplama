@@ -11,7 +11,13 @@ import { randomUUID } from 'node:crypto';
 
 import { Decimal } from 'decimal.js';
 import { prisma } from '@pazarsync/db';
-import { ProfitIssueCode, ProfitLineType, ProfitStatus } from '@pazarsync/db/enums';
+import {
+  ProfitIssueCode,
+  ProfitLineCertainty,
+  ProfitLineType,
+  ProfitStatus,
+  ReconciliationStatus,
+} from '@pazarsync/db/enums';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { estimateTrendyolParcel } from '../../marketplaces/trendyol/estimate-parcel';
@@ -32,6 +38,7 @@ import {
   ensureDbReachable,
   MELONTIK,
   type MelontikParcel,
+  melontikSaleCycleRecordInputs,
   seedMelontikParcel,
   truncateAll,
   upsertCarrierWithTariffs,
@@ -826,6 +833,7 @@ describe('loadTrendyolParcel', () => {
       snapshot: loaded.estimateInput.snapshot,
       attributes: loaded.estimateInput.attributes,
       fees: loaded.estimateInput.reference.fees,
+      shippingTariffSource: loaded.estimateInput.reference.shipping.source,
       records: loaded.records,
       cargoItems: loaded.cargoItems,
       estimateLines: estimate.lines,
@@ -1318,11 +1326,16 @@ describe('loadTrendyolParcel', () => {
       'Alternative Delivery',
     );
     for (const statement of [computed.estimate, computed.bestKnown]) {
-      expect(statement.issues).toContainEqual({
-        code: ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
-        orderItemId: null,
-        detail: 'Alternative Delivery',
-      });
+      // Exactly one per parcel: the return leg never adds a second one.
+      expect(
+        statement.issues.filter((issue) => issue.code === ProfitIssueCode.CARRIER_NOT_RECOGNIZED),
+      ).toEqual([
+        {
+          code: ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
+          orderItemId: null,
+          detail: 'Alternative Delivery',
+        },
+      ]);
       expect(statement.status).toBe(ProfitStatus.ESTIMATED);
     }
   });
@@ -1442,5 +1455,38 @@ describe('loadTrendyolParcel', () => {
     expect(shipping.amount.gross.toFixed(2)).toBe('54.00');
     expect(shipping.inputs.tariffKind).toBe('OWN');
     expect(shipping.inputs.reason).toBeUndefined();
+  });
+
+  it('keeps seller-cargo shipping an estimate yet settles the rest on a Trendyol-contract store', async () => {
+    // Owner decision 2026-11-10: a seller-cargo-agreement order on a Trendyol-contract
+    // store keeps its shipping estimate even after the sale payment order lands, and a
+    // non-blocking issue says why. That estimate does not hold reconciliation back, so
+    // the best-known view settles fully at the golden 191.79 (the shipping amount is the
+    // same 98.34 estimate; only its certainty stays ESTIMATE).
+    const parcel = await seedMelontikParcel();
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { usesSellerCargoAgreement: true },
+    });
+    for (const record of melontikSaleCycleRecordInputs(parcel)) {
+      await insertFinanceRecord(record);
+    }
+
+    const computed = await computeParcelProfit(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const shippingLines = computed.lines.filter((line) => line.type === ProfitLineType.SHIPPING);
+    expect(shippingLines.map((line) => line.certainty)).toEqual([ProfitLineCertainty.ESTIMATE]);
+    expect(shippingLines[0]?.amount.gross.toFixed(2)).toBe('98.34');
+    expect(computed.bestKnown.issues).toContainEqual({
+      code: ProfitIssueCode.SELLER_CARGO_AGREEMENT_ESTIMATE,
+      orderItemId: null,
+      detail: null,
+    });
+    expect(computed.bestKnown.reconciliationStatus).toBe(ReconciliationStatus.FULLY_SETTLED);
+    expect(computed.bestKnown.status).toBe(ProfitStatus.SETTLED);
+    expect(computed.bestKnown.netProfit?.toFixed(2)).toBe('191.79');
   });
 });

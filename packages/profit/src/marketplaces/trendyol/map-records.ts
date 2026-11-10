@@ -5,6 +5,7 @@ import {
   ProfitLineLevel,
   ProfitLineSource,
   ProfitLineType,
+  ShippingTariffSource,
 } from '@pazarsync/db/enums';
 
 import {
@@ -40,6 +41,7 @@ export interface TrendyolMappingInput {
   readonly snapshot: ParcelSnapshot;
   readonly attributes: TrendyolParcelAttributes;
   readonly fees: TrendyolFeeParams;
+  readonly shippingTariffSource: ShippingTariffSource; // the store's tariff, for seller-cargo confirmation
   readonly records: readonly TrendyolSettlementRecord[]; // records the loader associated with this parcel
   readonly cargoItems: readonly TrendyolCargoInvoiceItem[];
   readonly estimateLines: readonly ProfitLine[]; // current estimates, for payment confirmation
@@ -544,14 +546,23 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
     }
   }
 
+  // A seller-cargo-agreement order gets no cargo invoice, so its payment order confirms
+  // the shipping estimates -- but only on an own-contract store, whose estimate comes from
+  // the seller's own tariff. On a Trendyol-contract store the engine does not know the
+  // seller's real cargo price, so the estimate is never confirmed and stays an estimate
+  // (owner decision 2026-11-10; the estimate carries SELLER_CARGO_AGREEMENT_ESTIMATE).
+  const confirmsSellerCargoShipping =
+    attributes.usesSellerCargoAgreement &&
+    input.shippingTariffSource === ShippingTariffSource.OWN_CONTRACT;
+
   const saleConfirmedTypes = new Set<ProfitLineType>(TRENDYOL_SALE_CYCLE_CONFIRMED_TYPES);
-  if (attributes.usesSellerCargoAgreement && !cargoShippingProduced) {
+  if (confirmsSellerCargoShipping && !cargoShippingProduced) {
     saleConfirmedTypes.add(ProfitLineType.SHIPPING);
   }
   confirmCycle(saleCyclePaymentOrderIds, saleConfirmedTypes);
 
   const returnConfirmedTypes = new Set<ProfitLineType>(TRENDYOL_RETURN_CYCLE_CONFIRMED_TYPES);
-  if (attributes.usesSellerCargoAgreement && !cargoReturnShippingProduced) {
+  if (confirmsSellerCargoShipping && !cargoReturnShippingProduced) {
     returnConfirmedTypes.add(ProfitLineType.RETURN_SHIPPING);
   }
   confirmCycle(returnCyclePaymentOrderIds, returnConfirmedTypes);

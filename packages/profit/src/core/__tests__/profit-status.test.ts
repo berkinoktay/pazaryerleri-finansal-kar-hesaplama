@@ -166,6 +166,50 @@ describe('deriveReconciliationStatus', () => {
       ),
     ).toBe(ReconciliationStatus.FULLY_SETTLED);
   });
+  it('does not hold reconciliation on a seller-cargo shipping estimate', () => {
+    // On a Trendyol-contract store a seller-cargo-agreement shipping line never becomes
+    // actual (owner decision 2026-11-10); its standing issue lets the rest of the
+    // settlement reconcile fully instead of leaving the order partially settled forever.
+    const lines = [
+      actual(ProfitLineType.SALE),
+      actual(ProfitLineType.COMMISSION),
+      makeLine({
+        type: ProfitLineType.SHIPPING,
+        gross: '6',
+        certainty: ProfitLineCertainty.ESTIMATE,
+        source: ProfitLineSource.RULE,
+      }),
+    ];
+    const sellerCargo = [issue(ProfitIssueCode.SELLER_CARGO_AGREEMENT_ESTIMATE)];
+
+    expect(deriveReconciliationStatus(lines, sellerCargo)).toBe(ReconciliationStatus.FULLY_SETTLED);
+    expect(status(lines, sellerCargo)).toBe(ProfitStatus.SETTLED);
+    expect(deriveReconciliationStatus(lines, [])).toBe(ReconciliationStatus.PARTIALLY_SETTLED);
+  });
+  it('exempts only the shipping legs from a seller-cargo issue', () => {
+    // A return-shipping estimate is exempt like the outbound one; any other pending
+    // settlement-required line still holds reconciliation at PARTIALLY_SETTLED.
+    const sellerCargo = [issue(ProfitIssueCode.SELLER_CARGO_AGREEMENT_ESTIMATE)];
+    expect(
+      deriveReconciliationStatus(
+        [
+          actual(ProfitLineType.SALE),
+          makeLine({ type: ProfitLineType.RETURN_SHIPPING, gross: '6' }),
+        ],
+        sellerCargo,
+      ),
+    ).toBe(ReconciliationStatus.FULLY_SETTLED);
+    expect(
+      deriveReconciliationStatus(
+        [
+          actual(ProfitLineType.SALE),
+          makeLine({ type: ProfitLineType.SHIPPING, gross: '6' }),
+          makeLine({ type: ProfitLineType.STOPPAGE, gross: '1' }),
+        ],
+        sellerCargo,
+      ),
+    ).toBe(ReconciliationStatus.PARTIALLY_SETTLED);
+  });
   it('reports progress for an excluded, cancelled or not computable parcel', () => {
     // The same lines reconcile to PARTIALLY_SETTLED regardless of the profit status
     // the order ends up with: reconciliation ignores exclusion, cancellation and issues.

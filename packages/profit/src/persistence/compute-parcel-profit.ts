@@ -97,6 +97,7 @@ async function computeTrendyolParcelProfit(
     snapshot,
     attributes: loaded.estimateInput.attributes,
     fees: loaded.estimateInput.reference.fees,
+    shippingTariffSource: loaded.estimateInput.reference.shipping.source,
     records: loaded.records,
     cargoItems: loaded.cargoItems,
     estimateLines: estimateResult.lines,

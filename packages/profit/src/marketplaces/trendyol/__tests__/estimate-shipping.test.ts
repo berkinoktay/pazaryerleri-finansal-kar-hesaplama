@@ -273,6 +273,119 @@ describe('estimateShippingLine', () => {
     });
   });
 
+  it('records a null detail for a not-recognized carrier without a provider name', () => {
+    // Trendyol named no provider at all: the zero line is still written and the issue
+    // carries a null detail rather than an empty or made-up name.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: '3' })],
+    });
+
+    const { line, issues } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({ fastDelivery: false }),
+      reference: trendyolReference({
+        shipping: {
+          carrier: null,
+          orderCarrierOutcome: { kind: 'not-recognized', providerName: null },
+        },
+      }),
+    });
+
+    expect(issues).toEqual([
+      { code: ProfitIssueCode.CARRIER_NOT_RECOGNIZED, orderItemId: null, detail: null },
+    ]);
+    expect(line?.type).toBe(ProfitLineType.SHIPPING);
+    expect(line?.amount.gross.toFixed(2)).toBe('0.00');
+    expect(line?.inputs.reason).toBe(CARRIER_NOT_RECOGNIZED_REASON);
+  });
+
+  it('flags a seller-cargo-agreement order on a Trendyol-contract store', () => {
+    // The seller ships under their own carrier contract, whose real price the engine
+    // does not know: the line is still estimated from the Trendyol tariff, unchanged, and
+    // a non-blocking SELLER_CARGO_AGREEMENT_ESTIMATE issue records why it stays an estimate.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '500.00', unitDesi: '3' })],
+    });
+
+    const { line, issues } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({ fastDelivery: false, usesSellerCargoAgreement: true }),
+      reference: trendyolReference(),
+    });
+
+    expect(issues).toEqual([
+      {
+        code: ProfitIssueCode.SELLER_CARGO_AGREEMENT_ESTIMATE,
+        orderItemId: null,
+        detail: null,
+      },
+    ]);
+    // Same amount as the plain desi tariff case: desi 3 -> 93.63 net -> 112.36 gross.
+    expect(line?.certainty).toBe(ProfitLineCertainty.ESTIMATE);
+    expect(line?.source).toBe(ProfitLineSource.RULE);
+    expect(line?.amount.gross.toFixed(2)).toBe('112.36');
+    expect(line?.amount.vat.toFixed(2)).toBe('18.73');
+    expect(line?.inputs.tariffKind).toBe('DESI');
+    expect(line?.inputs.carrierCode).toBe('TEXMP');
+  });
+
+  it('does not flag a seller-cargo-agreement order on an own-contract store', () => {
+    // An own-contract store already prices shipping from the seller's own tariff, so the
+    // estimate needs no warning.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: '3' })],
+    });
+
+    const { line, issues } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({ fastDelivery: false, usesSellerCargoAgreement: true }),
+      reference: trendyolReference({
+        shipping: {
+          source: ShippingTariffSource.OWN_CONTRACT,
+          ownTariffNet: new Map([['3', new Decimal('50.00')]]),
+        },
+      }),
+    });
+
+    expect(issues).toEqual([]);
+    expect(line?.amount.gross.toFixed(2)).toBe('60.00');
+    expect(line?.inputs.tariffKind).toBe('OWN');
+  });
+
+  it('returns both issues with a zero line for a not-recognized carrier on a seller-cargo order', () => {
+    // A seller-cargo-agreement order whose carrier is not recognized keeps the zero line and
+    // carries both non-blocking issues: the carrier one and the seller-cargo one.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: '3' })],
+    });
+
+    const { line, issues } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({ fastDelivery: false, usesSellerCargoAgreement: true }),
+      reference: trendyolReference({
+        shipping: {
+          carrier: null,
+          orderCarrierOutcome: { kind: 'not-recognized', providerName: 'Alternative Delivery' },
+        },
+      }),
+    });
+
+    expect(issues).toEqual([
+      {
+        code: ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
+        orderItemId: null,
+        detail: 'Alternative Delivery',
+      },
+      {
+        code: ProfitIssueCode.SELLER_CARGO_AGREEMENT_ESTIMATE,
+        orderItemId: null,
+        detail: null,
+      },
+    ]);
+    expect(line?.amount.gross.toFixed(2)).toBe('0.00');
+    expect(line?.inputs.reason).toBe(CARRIER_NOT_RECOGNIZED_REASON);
+  });
+
   it('reports OWN_CONTRACT_EMPTY when the own tariff has no row', () => {
     const snapshot = makeParcel({
       items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: '3' })],

@@ -1,6 +1,8 @@
 import {
+  ProfitIssueCode,
   ProfitLineCertainty,
   ProfitLineSource,
+  ProfitLineType,
   ProfitStatus,
   ReconciliationStatus,
 } from '@pazarsync/db/enums';
@@ -29,9 +31,32 @@ function isSettlementActual(line: ProfitLine): boolean {
   );
 }
 
-/** A settlement-required line that has not yet landed as an ACTUAL value. */
-function isPendingRequired(line: ProfitLine): boolean {
-  return getLineSpec(line.type).settlementRequired && line.certainty !== ProfitLineCertainty.ACTUAL;
+/**
+ * The shipping legs a seller-cargo-agreement order keeps as estimates on a
+ * Trendyol-contract store: no payment order ever confirms them (see map-records), so
+ * while the SELLER_CARGO_AGREEMENT_ESTIMATE issue stands they are not "pending".
+ */
+const SELLER_CARGO_SETTLEMENT_EXEMPT_TYPES: ReadonlySet<ProfitLineType> = new Set([
+  ProfitLineType.SHIPPING,
+  ProfitLineType.RETURN_SHIPPING,
+]);
+
+/**
+ * A settlement-required line that has not yet landed as an ACTUAL value. A shipping leg
+ * of a seller-cargo-agreement estimate never lands, so it is exempt while its issue
+ * stands.
+ */
+function isPendingRequired(line: ProfitLine, issues: readonly ProfitIssue[]): boolean {
+  if (!getLineSpec(line.type).settlementRequired) {
+    return false;
+  }
+  if (line.certainty === ProfitLineCertainty.ACTUAL) {
+    return false;
+  }
+  return !(
+    SELLER_CARGO_SETTLEMENT_EXEMPT_TYPES.has(line.type) &&
+    issues.some((issue) => issue.code === ProfitIssueCode.SELLER_CARGO_AGREEMENT_ESTIMATE)
+  );
 }
 
 /**
@@ -52,6 +77,10 @@ const PROFIT_STATUS_BY_RECONCILIATION: Record<ReconciliationStatus, ProfitStatus
  * 2. a settlement-required line still pending, OR a standing settlement-gap issue
  *    (a required slot the engine left without any line) -> PARTIALLY_SETTLED
  * 3. otherwise -> FULLY_SETTLED
+ * 4. a SHIPPING or RETURN_SHIPPING estimate is not pending while a
+ *    SELLER_CARGO_AGREEMENT_ESTIMATE issue stands: on a Trendyol-contract store that
+ *    estimate never becomes actual (owner decision 2026-11-10), so it must not hold the
+ *    order at PARTIALLY_SETTLED forever.
  *
  * The settlement-gap issues matter because the slot they stand for has no line at
  * all, so `isPendingRequired` alone cannot see it: without them a statement whose
@@ -69,7 +98,10 @@ export function deriveReconciliationStatus(
   if (!selectedLines.some(isSettlementActual)) {
     return ReconciliationStatus.NOT_SETTLED;
   }
-  if (selectedLines.some(isPendingRequired) || issues.some(isSettlementGapIssue)) {
+  if (
+    selectedLines.some((line) => isPendingRequired(line, issues)) ||
+    issues.some(isSettlementGapIssue)
+  ) {
     return ReconciliationStatus.PARTIALLY_SETTLED;
   }
   return ReconciliationStatus.FULLY_SETTLED;
@@ -95,8 +127,9 @@ export function deriveProfitStatus(params: DeriveProfitStatusParams): ProfitStat
   if (params.issues.some(isBlockingIssue)) {
     return ProfitStatus.NOT_COMPUTABLE;
   }
-  // Passing the issues here does not change the outcome: every settlement-gap issue is
-  // also blocking, so rule 3 above has already returned before this point can read one.
+  // Every settlement-gap issue is also blocking, so rule 3 above has already returned
+  // before this point can read one; the issues still matter here for the non-blocking
+  // seller-cargo exemption (see `deriveReconciliationStatus` rule 4).
   return PROFIT_STATUS_BY_RECONCILIATION[
     deriveReconciliationStatus(params.selectedLines, params.issues)
   ];

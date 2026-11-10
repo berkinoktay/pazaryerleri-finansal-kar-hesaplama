@@ -193,6 +193,44 @@ describe('estimateTrendyolParcel', () => {
     expect(statement.netProfit).not.toBeNull();
   });
 
+  it('records CARRIER_NOT_RECOGNIZED once per parcel even with an accepted return', () => {
+    // The outbound and the return leg both write a zero line for a not-recognized carrier,
+    // but only the outbound leg records the issue: the parcel carries it exactly once.
+    const result = estimateTrendyolParcel({
+      snapshot: makeParcel({
+        items: [makeItem({ orderItemId: 'a', listGross: '200.00', unitDesi: '1' })],
+      }),
+      attributes: makeTrendyolAttributes({
+        items: [makeTrendyolItemAttributes({ orderItemId: 'a' })],
+      }),
+      reference: trendyolReference({
+        shipping: {
+          carrier: null,
+          orderCarrierOutcome: { kind: 'not-recognized', providerName: 'Alternative Delivery' },
+        },
+      }),
+      costs: [tryCogs('a', '40.00')],
+      acceptedReturns: [{ orderItemId: 'a', acceptedQuantity: 1 }],
+    });
+
+    expect(result.issues).toEqual([
+      {
+        code: ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
+        orderItemId: null,
+        detail: 'Alternative Delivery',
+      },
+    ]);
+    const shippingLegs = result.lines.filter(
+      (line) =>
+        line.type === ProfitLineType.SHIPPING || line.type === ProfitLineType.RETURN_SHIPPING,
+    );
+    expect(shippingLegs.map((line) => line.type)).toEqual([
+      ProfitLineType.SHIPPING,
+      ProfitLineType.RETURN_SHIPPING,
+    ]);
+    expect(shippingLegs.map((line) => line.amount.gross.toFixed(2))).toEqual(['0.00', '0.00']);
+  });
+
   it('gives an export parcel no service fee and no stoppage but the international service fee', () => {
     const result = estimateTrendyolParcel({
       snapshot: makeParcel({

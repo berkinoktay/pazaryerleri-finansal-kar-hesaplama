@@ -5,6 +5,7 @@ import {
   ProfitLineLevel,
   ProfitLineSource,
   ProfitLineType,
+  ShippingTariffSource,
 } from '@pazarsync/db/enums';
 import { describe, expect, it } from 'vitest';
 
@@ -105,6 +106,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records,
       cargoItems: [],
       estimateLines: [],
@@ -166,6 +168,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records,
       cargoItems: [],
       estimateLines: [],
@@ -203,6 +206,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records,
       cargoItems: [],
       estimateLines: [],
@@ -252,6 +256,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records: [],
       cargoItems,
       estimateLines: [],
@@ -303,6 +308,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records: [],
       cargoItems,
       estimateLines: [],
@@ -352,6 +358,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records,
       cargoItems: [],
       estimateLines,
@@ -401,6 +408,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records: [saleRecord, paymentOrder],
       cargoItems: [],
       estimateLines,
@@ -428,6 +436,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records: [saleRecord],
       cargoItems: [],
       estimateLines,
@@ -472,6 +481,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records: [saleRecord, salePayment, returnRecord],
       cargoItems: [],
       estimateLines,
@@ -491,6 +501,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records: [saleRecord, salePayment, returnRecord, returnPayment],
       cargoItems: [],
       estimateLines,
@@ -504,36 +515,78 @@ describe('mapTrendyolRecords', () => {
     expect(copy?.externalRecord).toEqual({ recordId: 'po-200', rawType: 'PaymentOrder' });
   });
 
-  it('confirms seller-cargo shipping only without a cargo invoice line', () => {
-    const snapshot = makeParcel({
-      items: [makeItem({ orderItemId: 'a', listGross: '100.00', barcode: 'bc-a' })],
-    });
-    const attributes = makeTrendyolAttributes({ usesSellerCargoAgreement: true });
-    const estimateLines = [
-      makeLine({
-        type: ProfitLineType.SHIPPING,
-        gross: '60.00',
-        vat: '10.00',
-        certainty: ProfitLineCertainty.ESTIMATE,
+  /** A seller-cargo parcel with shipping estimates and both payment cycles paid. */
+  function sellerCargoScenario(): {
+    readonly snapshot: ReturnType<typeof makeParcel>;
+    readonly attributes: ReturnType<typeof makeTrendyolAttributes>;
+    readonly estimateLines: ProfitLine[];
+    readonly records: TrendyolSettlementRecord[];
+  } {
+    return {
+      snapshot: makeParcel({
+        items: [makeItem({ orderItemId: 'a', listGross: '100.00', barcode: 'bc-a' })],
       }),
-    ];
-    const saleRecord = makeRecord({
-      recordId: 'sale-1',
-      transactionType: 'Sale',
-      barcode: 'bc-a',
-      paymentOrderId: 'pay-1',
-    });
-    const paymentOrder = makeRecord({
-      recordId: 'po-1',
-      transactionType: 'PaymentOrder',
-      paymentOrderId: 'pay-1',
-    });
+      attributes: makeTrendyolAttributes({ usesSellerCargoAgreement: true }),
+      estimateLines: [
+        makeLine({
+          type: ProfitLineType.SHIPPING,
+          gross: '60.00',
+          vat: '10.00',
+          certainty: ProfitLineCertainty.ESTIMATE,
+        }),
+        makeLine({
+          type: ProfitLineType.RETURN_SHIPPING,
+          gross: '72.00',
+          vat: '12.00',
+          certainty: ProfitLineCertainty.ESTIMATE,
+        }),
+        makeLine({
+          type: ProfitLineType.SERVICE_FEE,
+          gross: '13.19',
+          vat: '2.20',
+          level: ProfitLineLevel.PARCEL,
+          certainty: ProfitLineCertainty.ESTIMATE,
+        }),
+      ],
+      records: [
+        makeRecord({
+          recordId: 'sale-1',
+          transactionType: 'Sale',
+          barcode: 'bc-a',
+          paymentOrderId: 'pay-1',
+        }),
+        makeRecord({
+          recordId: 'po-1',
+          transactionType: 'PaymentOrder',
+          paymentOrderId: 'pay-1',
+        }),
+        makeRecord({
+          recordId: 'ret-1',
+          transactionType: 'Return',
+          barcode: 'bc-a',
+          debt: '0',
+          paymentOrderId: 'pay-2',
+        }),
+        makeRecord({
+          recordId: 'po-2',
+          transactionType: 'PaymentOrder',
+          paymentOrderId: 'pay-2',
+        }),
+      ],
+    };
+  }
+
+  it('confirms seller-cargo shipping only without a cargo invoice line on an own-contract store', () => {
+    // Review focus 3: a store priced from its own tariff keeps confirming the seller-cargo
+    // shipping legs with the payment order, exactly as before.
+    const { snapshot, attributes, estimateLines, records } = sellerCargoScenario();
 
     const withoutCargo = mapTrendyolRecords({
       snapshot,
       attributes,
       fees: FEES,
-      records: [saleRecord, paymentOrder],
+      shippingTariffSource: ShippingTariffSource.OWN_CONTRACT,
+      records,
       cargoItems: [],
       estimateLines,
     });
@@ -544,12 +597,20 @@ describe('mapTrendyolRecords', () => {
     );
     expect(shippingCopy?.certainty).toBe(ProfitLineCertainty.ACTUAL);
     expect(shippingCopy?.inputs.confirmedBy).toBe('payment-order:pay-1');
+    const returnShippingCopy = withoutCargo.lines.find(
+      (line) =>
+        line.type === ProfitLineType.RETURN_SHIPPING &&
+        line.source === ProfitLineSource.MARKETPLACE_RECORD,
+    );
+    expect(returnShippingCopy?.certainty).toBe(ProfitLineCertainty.ACTUAL);
+    expect(returnShippingCopy?.inputs.confirmedBy).toBe('payment-order:pay-2');
 
     const withCargo = mapTrendyolRecords({
       snapshot,
       attributes,
       fees: FEES,
-      records: [saleRecord, paymentOrder],
+      shippingTariffSource: ShippingTariffSource.OWN_CONTRACT,
+      records,
       cargoItems: [
         makeCargoItem({
           invoiceSerial: 'INV1',
@@ -575,6 +636,33 @@ describe('mapTrendyolRecords', () => {
     ).toHaveLength(1);
   });
 
+  it('keeps seller-cargo shipping as an estimate on a Trendyol-contract store', () => {
+    // Owner decision 2026-11-10: on a Trendyol-contract store the engine does not know the
+    // seller's real cargo price, so a payment order never turns the shipping legs into
+    // actuals. The rest of the cycle is still confirmed.
+    const { snapshot, attributes, estimateLines, records } = sellerCargoScenario();
+
+    const result = mapTrendyolRecords({
+      snapshot,
+      attributes,
+      fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
+      records,
+      cargoItems: [],
+      estimateLines,
+    });
+
+    expect(
+      result.lines.filter(
+        (line) =>
+          line.type === ProfitLineType.SHIPPING || line.type === ProfitLineType.RETURN_SHIPPING,
+      ),
+    ).toHaveLength(0);
+    const serviceCopy = result.lines.find((line) => line.type === ProfitLineType.SERVICE_FEE);
+    expect(serviceCopy?.certainty).toBe(ProfitLineCertainty.ACTUAL);
+    expect(serviceCopy?.inputs.confirmedBy).toBe('payment-order:pay-1');
+  });
+
   it('separates period records, drops ignored ones and flags unverified ones', () => {
     const snapshot = makeParcel({
       items: [makeItem({ orderItemId: 'a', listGross: '100.00', barcode: 'bc-a' })],
@@ -593,6 +681,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records: [stoppage, wire, provision],
       cargoItems: [],
       estimateLines: [],
@@ -633,6 +722,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records: [noItem, multiple],
       cargoItems: [],
       estimateLines: [],
@@ -681,6 +771,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records: [returnRecord, paymentOrder],
       cargoItems: [],
       estimateLines,
@@ -722,6 +813,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records,
       cargoItems: [],
       estimateLines: [],
@@ -772,6 +864,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records: [saleRecord, paymentOrder],
       cargoItems: [],
       estimateLines,
@@ -822,6 +915,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records: [saleRecord, paymentOrder],
       cargoItems: [],
       estimateLines,
@@ -849,6 +943,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records,
       cargoItems: [],
       estimateLines: [],
@@ -897,6 +992,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records,
       cargoItems: [],
       estimateLines: [],
@@ -970,6 +1066,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records,
       cargoItems: [],
       estimateLines: [],
@@ -1034,6 +1131,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records,
       cargoItems: [],
       estimateLines: [],
@@ -1080,6 +1178,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records,
       cargoItems: [],
       estimateLines: [],
@@ -1109,6 +1208,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records,
       cargoItems: [],
       estimateLines: [],
@@ -1160,6 +1260,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records,
       cargoItems: [],
       estimateLines: [],
@@ -1202,6 +1303,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records,
       cargoItems: [],
       estimateLines: [],
@@ -1248,6 +1350,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records,
       cargoItems: [],
       estimateLines: [],
@@ -1327,6 +1430,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records,
       cargoItems: [],
       estimateLines: [],
@@ -1374,6 +1478,7 @@ describe('mapTrendyolRecords', () => {
       snapshot,
       attributes: makeTrendyolAttributes(),
       fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
       records,
       cargoItems: [],
       estimateLines: [],

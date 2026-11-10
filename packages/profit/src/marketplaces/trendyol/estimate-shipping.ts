@@ -205,8 +205,11 @@ function standaloneShippingGross(params: {
  * SHIPPING_ESTIMATE_UNAVAILABLE issue (reason in `detail`) and no line; a zero gross
  * yields neither. A not-recognized carrier on a Trendyol-contract order yields a zero
  * line plus a non-blocking CARRIER_NOT_RECOGNIZED issue (provider name in `detail`).
- * Digital items do not ship (plan decision 11b): an all-digital parcel carries no
- * shipping (no line, no issue) and every digital item's standalone amount is zero.
+ * A seller-cargo-agreement order on a Trendyol-contract store adds a non-blocking
+ * SELLER_CARGO_AGREEMENT_ESTIMATE issue to whichever outcome it gets; its line is
+ * unchanged. Digital items do not ship (plan decision 11b): an all-digital parcel
+ * carries no shipping (no line, no issue) and every digital item's standalone amount
+ * is zero.
  * The standalone amounts are always computed, even when the parcel line itself fails.
  */
 export function estimateShippingLine(params: {
@@ -245,6 +248,24 @@ export function estimateShippingLine(params: {
     return { line: null, issues: [], standaloneByItem };
   }
 
+  // A seller-cargo-agreement order on a Trendyol-contract store ships under the seller's
+  // own carrier contract, whose real price the engine does not know. The line below is
+  // still estimated from the Trendyol tariff, unchanged, but it never becomes an actual
+  // (see map-records), so a non-blocking SELLER_CARGO_AGREEMENT_ESTIMATE issue records why
+  // it stays an estimate (owner decision 2026-11-10). It rides along every outcome below,
+  // after that outcome's own issue; an own-contract store is already priced from the
+  // seller's own tariff and needs no warning.
+  const sellerCargoIssues: readonly ProfitIssue[] =
+    tariff.source === ShippingTariffSource.TRENDYOL_CONTRACT && attributes.usesSellerCargoAgreement
+      ? [
+          {
+            code: ProfitIssueCode.SELLER_CARGO_AGREEMENT_ESTIMATE,
+            orderItemId: null,
+            detail: null,
+          },
+        ]
+      : [];
+
   // A not-recognized carrier on a Trendyol-contract order cannot be priced from any
   // tariff, so the estimate is a zero SHIPPING line recording why -- never an unavailable
   // issue (a cargo invoice later replaces it with the real amount). A non-blocking
@@ -280,6 +301,7 @@ export function estimateShippingLine(params: {
           orderItemId: null,
           detail: carrierOutcome.providerName,
         },
+        ...sellerCargoIssues,
       ],
       standaloneByItem,
     };
@@ -295,6 +317,7 @@ export function estimateShippingLine(params: {
           orderItemId: null,
           detail: 'UNKNOWN_DESI',
         },
+        ...sellerCargoIssues,
       ],
       standaloneByItem,
     };
@@ -317,6 +340,7 @@ export function estimateShippingLine(params: {
           orderItemId: null,
           detail: resolved.reason,
         },
+        ...sellerCargoIssues,
       ],
       standaloneByItem,
     };
@@ -324,7 +348,7 @@ export function estimateShippingLine(params: {
 
   const gross = resolved.gross;
   if (gross.equals(ZERO)) {
-    return { line: null, issues: [], standaloneByItem };
+    return { line: null, issues: sellerCargoIssues, standaloneByItem };
   }
 
   const amount: LineMoney = {
@@ -349,5 +373,5 @@ export function estimateShippingLine(params: {
     externalRecord: null,
   });
 
-  return { line, issues: [], standaloneByItem };
+  return { line, issues: sellerCargoIssues, standaloneByItem };
 }
