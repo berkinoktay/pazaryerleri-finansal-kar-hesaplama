@@ -638,6 +638,140 @@ describe('Order routes', () => {
       expect(normal.id).not.toBe(excluded.id);
     });
 
+    it('hides the profit of a cancelled order without a penalty line', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      // Cancelled with no penalty: both views are CANCELLED with a zero net profit.
+      // Reconciliation has finished, so without the rule the settled net would show 0.
+      const order = await createOrder(org.id, store.id, {
+        status: 'CANCELLED',
+        saleGross: '240.00',
+      });
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'ESTIMATE',
+        status: 'CANCELLED',
+        saleGross: '0',
+        netProfit: '0',
+      });
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'CANCELLED',
+        saleGross: '0',
+        netProfit: '0',
+        reconciliationStatus: 'FULLY_SETTLED',
+      });
+
+      const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
+        headers: { Authorization: bearer(user.accessToken) },
+      });
+      expect(res.status).toBe(200);
+      const body: {
+        data: {
+          id: string;
+          estimatedNetProfit: string | null;
+          settledNetProfit: string | null;
+          saleGross: string | null;
+        }[];
+      } = await res.json();
+      const row = body.data.find((o) => o.id === order.id);
+      expect(row?.estimatedNetProfit).toBeNull();
+      expect(row?.settledNetProfit).toBeNull();
+      expect(row?.saleGross).toBe('0');
+    });
+
+    it('shows the profit of a cancelled order that carries a penalty', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      // A cancellation penalty line leaves a non-zero net profit: the amount stays visible.
+      const order = await createOrder(org.id, store.id, {
+        status: 'CANCELLED',
+        saleGross: '240.00',
+      });
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'ESTIMATE',
+        status: 'CANCELLED',
+        saleGross: '0',
+        netProfit: '-15.00',
+      });
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'CANCELLED',
+        saleGross: '0',
+        netProfit: '-15.00',
+        reconciliationStatus: 'PARTIALLY_SETTLED',
+      });
+
+      const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
+        headers: { Authorization: bearer(user.accessToken) },
+      });
+      expect(res.status).toBe(200);
+      const body: {
+        data: { id: string; estimatedNetProfit: string | null; settledNetProfit: string | null }[];
+      } = await res.json();
+      const row = body.data.find((o) => o.id === order.id);
+      expect(row?.estimatedNetProfit).toBe('-15');
+      expect(row?.settledNetProfit).toBe('-15');
+    });
+
+    it('reads the sale VAT from the best-known statement', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      // The order column holds the pre-return VAT (36.06); the best-known statement's
+      // output VAT (12.73) is what remains after the return, alongside its sale (140).
+      const withStatement = await createOrder(org.id, store.id, {
+        status: 'DELIVERED',
+        saleGross: '240.00',
+        saleVat: '36.06',
+      });
+      await createProfitStatement(withStatement.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        saleGross: '140.00',
+        vatOutput: '12.73',
+        netProfit: '20.00',
+      });
+      // Cancelled, no statement: VAT is 0 like its sale (rule B5).
+      const cancelled = await createOrder(org.id, store.id, {
+        status: 'CANCELLED',
+        saleGross: '240.00',
+        saleVat: '36.06',
+      });
+      // Open, no statement: the order's own VAT column.
+      const open = await createOrder(org.id, store.id, {
+        status: 'PROCESSING',
+        saleGross: '240.00',
+        saleVat: '36.06',
+      });
+
+      const listRes = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
+        headers: { Authorization: bearer(user.accessToken) },
+      });
+      expect(listRes.status).toBe(200);
+      const listBody: { data: { id: string; saleGross: string | null; saleVat: string | null }[] } =
+        await listRes.json();
+      const byId = new Map(listBody.data.map((o) => [o.id, o]));
+      expect(byId.get(withStatement.id)?.saleGross).toBe('140');
+      expect(byId.get(withStatement.id)?.saleVat).toBe('12.73');
+      expect(byId.get(cancelled.id)?.saleVat).toBe('0');
+      expect(byId.get(open.id)?.saleVat).toBe('36.06');
+
+      const detailRes = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/${withStatement.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(detailRes.status).toBe(200);
+      const detailBody: { saleVat: string | null } = await detailRes.json();
+      expect(detailBody.saleVat).toBe('12.73');
+    });
+
     it('filters by status', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
@@ -1647,6 +1781,193 @@ describe('Order routes', () => {
       expect(detailBody.saleGross).toBe('180');
       expect(detailBody.saleGross).toBe(listRow?.saleGross);
     });
+
+    it('returns the item commission refund from the profit lines', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const order = await createOrder(org.id, store.id, {
+        status: 'DELIVERED',
+        saleGross: '280.00',
+      });
+
+      // Both items carry a stale legacy refund column (8.40, the discount's commission).
+      // Only the returned item has a COMMISSION_REFUND line.
+      const returnedItem = await prisma.orderItem.create({
+        data: {
+          orderId: order.id,
+          organizationId: org.id,
+          productVariantId: null,
+          barcode: 'BC-REFUND-1',
+          platformLineId: 7501n,
+          quantity: 1,
+          commissionRate: '20.00',
+          commissionGross: '28.00',
+          refundedCommissionGross: '8.40',
+        },
+      });
+      const keptItem = await prisma.orderItem.create({
+        data: {
+          orderId: order.id,
+          organizationId: org.id,
+          productVariantId: null,
+          barcode: 'BC-REFUND-2',
+          platformLineId: 7502n,
+          quantity: 1,
+          commissionRate: '20.00',
+          commissionGross: '28.00',
+          refundedCommissionGross: '8.40',
+        },
+      });
+      for (const item of [returnedItem, keptItem]) {
+        await createProfitLine(order.id, org.id, store.id, {
+          orderItemId: item.id,
+          type: 'COMMISSION',
+          certainty: 'ESTIMATE',
+          source: 'RULE',
+          amountGross: '28.00',
+          amountVat: '4.67',
+          vatRatePct: '20',
+          inputs: { ratePct: '20' },
+        });
+      }
+      await createProfitLine(order.id, org.id, store.id, {
+        orderItemId: returnedItem.id,
+        type: 'COMMISSION_REFUND',
+        certainty: 'ESTIMATE',
+        source: 'RULE',
+        amountGross: '28.00',
+        amountVat: '4.67',
+        vatRatePct: '20',
+      });
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        saleGross: '140.00',
+        netProfit: '30.00',
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/${order.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body: { items: { id: string; refundedCommissionGross: string }[] } = await res.json();
+      const byId = new Map(body.items.map((i) => [i.id, i]));
+      expect(byId.get(returnedItem.id)?.refundedCommissionGross).toBe('28.00');
+      expect(byId.get(keptItem.id)?.refundedCommissionGross).toBe('0.00');
+    });
+
+    it('does not fall back to the legacy commission on a cancelled order with a statement', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const order = await createOrder(org.id, store.id, {
+        status: 'CANCELLED',
+        saleGross: '140.00',
+      });
+
+      // The legacy column still holds the pre-cancel commission (28); the statement has
+      // no commission line, so the item's commission is zero, not the column.
+      const item = await prisma.orderItem.create({
+        data: {
+          orderId: order.id,
+          organizationId: org.id,
+          productVariantId: null,
+          barcode: 'BC-CANCEL-1',
+          platformLineId: 7601n,
+          quantity: 1,
+          commissionRate: '19.50',
+          commissionGross: '28.00',
+        },
+      });
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'ESTIMATE',
+        status: 'CANCELLED',
+        saleGross: '0',
+        netProfit: '0',
+      });
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'CANCELLED',
+        saleGross: '0',
+        netProfit: '0',
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/${order.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body: { items: { id: string; commissionGross: string; commissionRate: string }[] } =
+        await res.json();
+      const cancelledItem = body.items.find((i) => i.id === item.id);
+      expect(cancelledItem?.commissionGross).toBe('0.00');
+      // The rate stays informational: with no estimate commission line it is the column.
+      expect(cancelledItem?.commissionRate).toBe('19.5');
+    });
+
+    it('lists the profit issues of the best-known statement', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const carrierIssue = {
+        code: 'CARRIER_NOT_RECOGNIZED',
+        orderItemId: null,
+        detail: 'Alternative Delivery',
+      };
+
+      // Warned: the stored issue is returned as it is.
+      const warned = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      await createProfitStatement(warned.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        saleGross: '140.00',
+        netProfit: '30.00',
+        issues: [carrierIssue],
+      });
+      // Plain: no stored issue.
+      const plain = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      await createProfitStatement(plain.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        saleGross: '140.00',
+        netProfit: '30.00',
+      });
+      // Invoiced: the same issue, but a cargo-invoice actual shipping line is selected,
+      // so the warning no longer applies and is hidden.
+      const invoiced = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      await createProfitLine(invoiced.id, org.id, store.id, {
+        orderItemId: null,
+        type: 'SHIPPING',
+        level: 'PARCEL',
+        certainty: 'ACTUAL',
+        source: 'CARGO_INVOICE',
+        amountGross: '42.00',
+        amountVat: '7.00',
+        vatRatePct: '20',
+      });
+      await createProfitStatement(invoiced.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        saleGross: '140.00',
+        netProfit: '30.00',
+        issues: [carrierIssue],
+      });
+
+      const issuesOf = async (orderId: string): Promise<unknown> => {
+        const res = await app.request(
+          `/v1/organizations/${org.id}/stores/${store.id}/orders/${orderId}`,
+          { headers: { Authorization: bearer(user.accessToken) } },
+        );
+        expect(res.status).toBe(200);
+        const body: { profitIssues: unknown } = await res.json();
+        return body.profitIssues;
+      };
+
+      expect(await issuesOf(warned.id)).toEqual([carrierIssue]);
+      expect(await issuesOf(plain.id)).toEqual([]);
+      expect(await issuesOf(invoiced.id)).toEqual([]);
+    });
   });
 
   describe('GET /v1/organizations/:orgId/stores/:storeId/orders/summary', () => {
@@ -1667,6 +1988,41 @@ describe('Order routes', () => {
       const body = await res.json();
       expect(body.totalRevenueGross).toBe('720'); // 3 × 240
       expect(body.netProfitGross).toBe('80'); // 60 + 60 − 40
+      expect(body.lossOrderRate).toMatchObject({ lossCount: 1, totalCount: 3 });
+    });
+
+    it('leaves cancelled orders out of the loss-rate denominator', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      await seedSimpleOrder(org.id, store.id);
+      await seedSimpleOrder(org.id, store.id);
+      await seedSimpleOrder(org.id, store.id, { netProfit: '-40.00', saleMarginPct: '-16.67' });
+
+      // Cancelled with a zero net: not a sold order, so not in the denominator (rule B5).
+      const cancelled = await createOrder(org.id, store.id, { status: 'CANCELLED' });
+      await createProfitStatement(cancelled.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'CANCELLED',
+        saleGross: '0',
+        netProfit: '0',
+      });
+      // Excluded with no net profit: an order without a profit stays out of the rate.
+      const excluded = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      await createProfitStatement(excluded.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'EXCLUDED',
+        saleGross: '100.00',
+        netProfit: null,
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/summary`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body: { lossOrderRate: { lossCount: number; totalCount: number } } = await res.json();
       expect(body.lossOrderRate).toMatchObject({ lossCount: 1, totalCount: 3 });
     });
 

@@ -7,6 +7,7 @@ import {
   OrderStatus,
   Platform,
   ProfitExclusionReason,
+  ProfitIssueCode,
   ReconciliationStatus,
 } from '@pazarsync/db/enums';
 
@@ -150,10 +151,16 @@ export const OrderListItemSchema = z
           'exists yet, 0 for a cancelled order without a statement, and null until OrderItems are synced.',
         example: '299.40',
       }),
-    saleVat: z.string().nullable().openapi({
-      description: 'KDV contained in the gross sale (decimal string).',
-      example: '49.90',
-    }),
+    saleVat: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'VAT contained in saleGross (decimal string), from the same source: the best-known ' +
+          "profit statement's output VAT; the order's own sale VAT when no statement exists yet, " +
+          '0 for a cancelled order without a statement, and null until OrderItems are synced.',
+        example: '49.90',
+      }),
     listGross: z.string().nullable().openapi({
       description: 'List price incl. VAT (decimal string) = saleGross + sellerDiscountGross.',
       example: '349.40',
@@ -164,7 +171,8 @@ export const OrderListItemSchema = z
       .openapi({
         description:
           "Net profit from the order's estimate profit statement (decimal string). Null when the " +
-          'estimate cannot be computed or the order is excluded from profit.',
+          'estimate cannot be computed, the order is excluded from profit, or the order was ' +
+          'cancelled without a penalty (a CANCELLED statement with a zero net profit).',
         example: '78.40',
       }),
     settledNetProfit: z
@@ -173,7 +181,8 @@ export const OrderListItemSchema = z
       .openapi({
         description:
           'Best-known net profit (decimal string) once settlement reconciliation has started for ' +
-          'the order; null before any settlement is applied.',
+          'the order; null before any settlement is applied, and null for an order cancelled ' +
+          'without a penalty (a CANCELLED statement with a zero net profit).',
         example: '75.10',
       }),
     // Margin is computed and persisted on the best-known profit statement; the wire serves
@@ -338,8 +347,10 @@ const OrderItemDetailSchema = z
     // Komisyon (gross + oran) — always present (default 0 in schema).
     commissionGross: z.string().openapi({
       description:
-        "Commission incl. VAT (decimal string), from the order's best-known profit lines; falls " +
-        "back to the item's own commission column when no line supplies it.",
+        "Commission incl. VAT (decimal string), from the order's best-known COMMISSION lines; " +
+        "'0.00' when none (e.g. a cancelled order). Falls back to the item's own commission " +
+        'column only when the profit part is empty (a platform the engine cannot compute, or a ' +
+        'profit read that failed).',
     }),
     commissionRate: z.string().openapi({
       description:
@@ -349,9 +360,12 @@ const OrderItemDetailSchema = z
     commissionVatRate: z
       .string()
       .openapi({ description: 'Commission VAT rate %, decimal string.' }),
-    refundedCommissionGross: z
-      .string()
-      .openapi({ description: 'Refunded commission incl. VAT (decimal string).' }),
+    refundedCommissionGross: z.string().openapi({
+      description:
+        'Refunded commission incl. VAT (decimal string), from the best-known COMMISSION_REFUND ' +
+        "lines; '0.00' when none. Falls back to the item's own column only when the profit " +
+        'part is empty (a platform the engine cannot compute, or a profit read that failed).',
+    }),
     estimatedCommissionGross: z
       .string()
       .nullable()
@@ -374,8 +388,9 @@ const OrderItemDetailSchema = z
       .nullable()
       .openapi({
         description:
-          "Unit cost incl. VAT (decimal string) from the order's best-known profit lines; null " +
-          'when this order profit cannot be computed or no cost line exists.',
+          "Unit cost incl. VAT (decimal string) from the order's best-known profit lines; '0.00' " +
+          'when no cost line exists; null when a MISSING_COST issue covers the item or the profit ' +
+          'cannot be computed.',
       }),
     unitCostSnapshotVatRate: z
       .string()
@@ -490,9 +505,12 @@ const ProfitBreakdownSchema = z
     listGross: z
       .string()
       .openapi({ description: 'Liste fiyatı brüt = satış brüt + satıcı indirimi brüt.' }),
-    sellerDiscountGross: z
-      .string()
-      .openapi({ description: "Satıcı indirimi brüt (≥0). '0.00' → indirim yok." }),
+    sellerDiscountGross: z.string().openapi({
+      description:
+        "Seller discount incl. VAT (decimal string); '0.00' when there is no discount. May be " +
+        'transiently negative while a return record has arrived before its discount reversal. ' +
+        'listGross - sellerDiscountGross always equals saleGross.',
+    }),
     saleGross: z
       .string()
       .openapi({ description: 'Satış brüt (effectiveSale = liste − indirim, KDV-dahil).' }),
@@ -567,6 +585,28 @@ const ProfitBreakdownSchema = z
       'from profit, or the profit could not be computed for this request.',
   });
 
+// A profit issue the engine recorded on the order's best-known statement and that still
+// applies to its selected lines. The frontend localizes from `code`; `detail` is English
+// context for logs.
+const ProfitIssueSchema = z
+  .object({
+    code: z.enum(ProfitIssueCode).openapi({
+      description:
+        'Machine-readable issue code. Blocking codes make the profit not computable; the others ' +
+        'are warnings shown next to a computed profit.',
+      example: 'CARRIER_NOT_RECOGNIZED',
+    }),
+    orderItemId: z.string().uuid().nullable().openapi({
+      description: 'The order item the issue names; null for a parcel-wide issue.',
+      example: null,
+    }),
+    detail: z.string().nullable().openapi({
+      description: 'Optional English context for the issue (not user-facing copy).',
+      example: 'Alternative Delivery',
+    }),
+  })
+  .openapi('ProfitIssue');
+
 // ─── Detail: top-level ────────────────────────────────────────────────────
 
 export const OrderDetailSchema = z
@@ -598,7 +638,16 @@ export const OrderDetailSchema = z
           "statement's sale, the order's own sale when no statement exists, 0 for a cancelled order " +
           'without a statement, null until OrderItems are synced.',
       }),
-    saleVat: z.string().nullable(),
+    saleVat: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'VAT contained in saleGross (decimal string), matching the orders list row value and ' +
+          "source: the best-known statement's output VAT, the order's own sale VAT when no " +
+          'statement exists, 0 for a cancelled order without a statement, null until OrderItems ' +
+          'are synced.',
+      }),
     listGross: z.string().nullable(),
     estimatedNetProfit: z.string().nullable(),
     settledNetProfit: z.string().nullable(),
@@ -606,6 +655,13 @@ export const OrderDetailSchema = z
     // AYNI bileşene servis edilir; frontend hiçbir finansal değeri türetmez.
     // null: profit-excluded ya da maliyet snapshot eksik (estimate hesaplanmadı).
     profitBreakdown: ProfitBreakdownSchema.nullable(),
+    profitIssues: z.array(ProfitIssueSchema).openapi({
+      description:
+        "The best-known profit statement's issues that still apply to its selected lines; a " +
+        'warning a later actual made moot is left out (e.g. CARRIER_NOT_RECOGNIZED once a cargo ' +
+        'invoice is selected). Empty when there are none, and when the profit part is empty (a ' +
+        'platform the engine cannot compute, or a profit read that failed).',
+    }),
 
     // Promosyon gösterimi (spec ekleme #3): mapper'ın yakaladığı satıcı-indirimi
     // promosyon isimleri + brüt tutarları. İndirim/promosyon yoksa null. Frontend

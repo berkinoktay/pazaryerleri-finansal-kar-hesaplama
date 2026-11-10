@@ -100,6 +100,31 @@ section "Versioning" for details.
     profit lines (the rate falls back to the item column).
   - Deprecated, still on the wire: detail `fees` is always `[]`; `paymentOrderId`, `paymentDate`
     and item `commissionInvoiceSerialNumber` are always `null`.
+- **Orders: cancelled profit, sale VAT, loss rate, item commission refunds and profit issues read
+  the profit statements** (`GET .../orders`, `GET .../orders/summary`, `GET .../orders/{orderId}`).
+  - Cancelled profit: a view whose statement is `CANCELLED` with a zero net profit (a cancellation
+    without a penalty) reports `estimatedNetProfit` / `settledNetProfit` as `null` on the list
+    and the detail. A cancellation penalty (non-zero net profit) stays visible.
+  - `saleVat` (list rows and detail top level) comes from the same source as `saleGross`: the
+    best-known statement's output VAT; the order's own sale VAT when no statement exists yet; `0`
+    for a cancelled order without a statement. Before, it was always the order column, so a
+    cancelled or returned order showed its pre-cancel / pre-return VAT.
+  - Summary `lossOrderRate.totalCount` counts the in-scope orders whose best-known statement has a
+    net profit and is not `CANCELLED`. Cancelled orders and orders without a profit (excluded, not
+    computable, no statement yet) no longer inflate the denominator.
+  - Detail items: `refundedCommissionGross` comes from the best-known `COMMISSION_REFUND` lines
+    (`'0.00'` when none) instead of the item column. `commissionGross` no longer falls back to the
+    item column when the order has profit lines and none supplies it: it reads `'0.00'` (e.g. a
+    cancelled order). The item columns are kept only when the profit part is empty (a platform
+    the engine cannot compute, or a profit read that failed).
+  - Detail `profitBreakdown.listGross` and `sellerDiscountGross` now derive from the selected
+    `SALE` and `SALE_RETURN` profit lines instead of the order columns; a returned or cancelled item
+    drops out of both, so `listGross - sellerDiscountGross` equals `saleGross`.
+  - Added detail `profitIssues` (new `ProfitIssue` schema: `code`, `orderItemId`, `detail`): the
+    best-known statement's issues that still apply to its selected lines. A warning a later
+    actual made moot is left out (`CARRIER_NOT_RECOGNIZED` once an actual shipping line is
+    selected; `SELLER_CARGO_AGREEMENT_ESTIMATE` once no shipping leg is an estimate). Always an
+    array; empty when the profit part is empty.
 - **Live performance reads the estimate statement.** Net profit, margin and profit/cost ratio cover
   the orders whose estimate is computed (the ratio's denominator is their cost from the statement);
   per-order profit and margin are `null` unless computed; today's products `unitCost` comes from the

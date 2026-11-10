@@ -1,6 +1,11 @@
 import type { Prisma } from '@pazarsync/db';
 import { prisma } from '@pazarsync/db';
-import { OrderStatus, ProfitStatementView, ReconciliationStatus } from '@pazarsync/db/enums';
+import {
+  OrderStatus,
+  ProfitStatementView,
+  ProfitStatus,
+  ReconciliationStatus,
+} from '@pazarsync/db/enums';
 import {
   STORED_STATEMENT_TOTALS_SELECT,
   buildStatementBreakdown,
@@ -11,6 +16,7 @@ import {
   selectLines,
   statementTotalsFromRow,
   statementTotalsFromStatement,
+  visibleProfitIssues,
   type ItemProfitValues,
   type ProfitIssue,
   type ProfitLine,
@@ -220,6 +226,7 @@ function toOrderListItem(row: OrderListRow): OrderListItemResponse {
     pair: toStatementPair(row.profitStatements),
     orderStatus: row.status,
     orderSaleGross: row.saleGross,
+    orderSaleVat: row.saleVat,
   });
 
   return {
@@ -230,7 +237,7 @@ function toOrderListItem(row: OrderListRow): OrderListItemResponse {
     status: row.status,
     reconciliationStatus: fields.reconciliationStatus,
     saleGross: fields.saleGross,
-    saleVat: row.saleVat?.toString() ?? null,
+    saleVat: fields.saleVat,
     listGross: row.listGross?.toString() ?? null,
     estimatedNetProfit: fields.estimatedNetProfit,
     settledNetProfit: fields.settledNetProfit,
@@ -446,8 +453,19 @@ export async function getOrdersSummary(
     ],
   };
 
+  // Loss-rate denominator: the in-scope orders that have a profit -- a best-known
+  // statement with a net profit that is not cancelled. A cancelled order is not a sale
+  // (rule B5), and an order with no profit (excluded, not computable, or no statement
+  // yet) does not enter the rate. The same best-known where keeps the organizationId +
+  // storeId scope.
   const [totalCount, aggregate, lossCount, fallbackRevenue] = await Promise.all([
-    prisma.order.count({ where }),
+    prisma.orderProfitStatement.count({
+      where: {
+        ...bestKnownStatementWhere,
+        netProfit: { not: null },
+        status: { not: ProfitStatus.CANCELLED },
+      },
+    }),
     prisma.orderProfitStatement.aggregate({
       where: bestKnownStatementWhere,
       _sum: { saleGross: true, netProfit: true },
@@ -515,6 +533,9 @@ interface OrderProfitDetail {
   readonly lineContext: OrderProfitLineContext | null;
 }
 
+/** A zero money amount in the two-decimal wire shape the profit-line figures use. */
+const ZERO_MONEY = '0.00';
+
 /** The all-null item values for a platform whose profit the engine cannot compute. */
 const EMPTY_ITEM_PROFIT_VALUES: ItemProfitValues = {
   unitCostGross: null,
@@ -536,6 +557,7 @@ function statementListRowFromStatement(statement: ProfitStatement): StatementLis
     view: statement.view,
     status: statement.status,
     saleGross: statement.saleGross,
+    vatOutput: statement.vat.output,
     netProfit: statement.netProfit,
     saleMarginPct: statement.saleMarginPct === null ? null : roundPercent(statement.saleMarginPct),
     costMarkupPct: statement.costMarkupPct === null ? null : roundPercent(statement.costMarkupPct),
@@ -549,12 +571,14 @@ function statementListRowFromStatement(statement: ProfitStatement): StatementLis
 function emptyOrderProfitDetail(order: {
   readonly status: OrderStatus;
   readonly saleGross: Prisma.Decimal | null;
+  readonly saleVat: Prisma.Decimal | null;
 }): OrderProfitDetail {
   return {
     fields: orderProfitFields({
       pair: { estimate: null, bestKnown: null },
       orderStatus: order.status,
       orderSaleGross: order.saleGross,
+      orderSaleVat: order.saleVat,
     }),
     profitBreakdown: null,
     lineContext: null,
@@ -583,6 +607,7 @@ async function loadOrderProfitDetail(
     readonly id: string;
     readonly status: OrderStatus;
     readonly saleGross: Prisma.Decimal | null;
+    readonly saleVat: Prisma.Decimal | null;
   },
 ): Promise<OrderProfitDetail> {
   const statements = await prisma.orderProfitStatement.findMany({
@@ -612,6 +637,7 @@ async function loadOrderProfitDetail(
         pair: toStatementPair(statements),
         orderStatus: order.status,
         orderSaleGross: order.saleGross,
+        orderSaleVat: order.saleVat,
       });
       const lineContext: OrderProfitLineContext = {
         bestKnownLines: selectLines(lines, 'BEST_KNOWN'),
@@ -654,24 +680,26 @@ async function loadOrderProfitDetail(
     },
     orderStatus: order.status,
     orderSaleGross: order.saleGross,
+    orderSaleVat: order.saleVat,
   });
-  // Sale parity: the top-level sale must read the same value the orders list row does.
-  // The list has no stored best-known statement for this order yet, so it shows the
-  // order's own sale (0 for a cancelled order) -- never the in-request computed
-  // statement's sale, which can differ (e.g. after an accepted return) and belongs only
-  // to the breakdown below. Derive it exactly as the list does: orderProfitFields over an
-  // empty statement pair.
-  const listSaleGross = orderProfitFields({
+  // Sale parity: the top-level sale and its VAT must read the same values the orders
+  // list row does. The list has no stored best-known statement for this order yet, so it
+  // shows the order's own sale and VAT (0 for a cancelled order) -- never the in-request
+  // computed statement's, which can differ (e.g. after an accepted return) and belong
+  // only to the breakdown below. Derive them exactly as the list does: orderProfitFields
+  // over an empty statement pair.
+  const listFields = orderProfitFields({
     pair: { estimate: null, bestKnown: null },
     orderStatus: order.status,
     orderSaleGross: order.saleGross,
-  }).saleGross;
+    orderSaleVat: order.saleVat,
+  });
   const profitBreakdown = buildStatementBreakdown({
     totals: statementTotalsFromStatement(computed.bestKnown),
     selectedLines: computed.bestKnown.selectedLines,
   });
   return {
-    fields: { ...computedFields, saleGross: listSaleGross },
+    fields: { ...computedFields, saleGross: listFields.saleGross, saleVat: listFields.saleVat },
     profitBreakdown,
     lineContext: {
       bestKnownLines: computed.bestKnown.selectedLines,
@@ -768,11 +796,19 @@ export async function getOrderById(
     // does (best-known sale, else the order's sale, '0' for a cancelled order with no
     // statement), so an order with a return never shows two different sale figures.
     saleGross: profit.fields.saleGross,
-    saleVat: row.saleVat?.toString() ?? null,
+    saleVat: profit.fields.saleVat,
     listGross: row.listGross?.toString() ?? null,
     estimatedNetProfit: profit.fields.estimatedNetProfit,
     settledNetProfit: profit.fields.settledNetProfit,
     profitBreakdown: profit.profitBreakdown,
+    // The best-known statement's issues that still apply to its selected lines (a
+    // warning an actual made moot is dropped); none without a line context.
+    profitIssues:
+      profit.lineContext === null
+        ? []
+        : visibleProfitIssues(profit.lineContext.issues, profit.lineContext.bestKnownLines).map(
+            ({ code, orderItemId, detail }) => ({ code, orderItemId, detail }),
+          ),
     promotionDisplays: toPromotionDisplays(row.promotionDisplays),
 
     profitExcludedAt: row.profitExcludedAt?.toISOString() ?? null,
@@ -788,9 +824,8 @@ export async function getOrderById(
     updatedAt: row.updatedAt.toISOString(),
 
     items: row.items.map((item) => {
-      // Cost and commission figures come from the profit lines (decision 7); the
-      // commission amount and rate fall back to the item's own columns when no line
-      // supplies them. An unsupported platform leaves every figure null/column.
+      // Cost and commission figures come from the profit lines (decision 7). An
+      // unsupported platform (no line context) leaves every figure null/column.
       const values =
         profit.lineContext === null
           ? EMPTY_ITEM_PROFIT_VALUES
@@ -801,16 +836,32 @@ export async function getOrderById(
               estimateLines: profit.lineContext.estimateLines,
               issues: profit.lineContext.issues,
             });
+      // With a line context, a commission amount or refund no line supplies is zero (a
+      // cancelled order's commission, an item that was not returned), so a stale legacy
+      // column never shows; the rate is informational and still falls back to the
+      // item's column. Without one, all three keep the item's own columns.
+      const commission =
+        profit.lineContext === null
+          ? {
+              gross: item.commissionGross.toString(),
+              rate: item.commissionRate.toString(),
+              refundedGross: item.refundedCommissionGross.toString(),
+            }
+          : {
+              gross: values.commissionGross ?? ZERO_MONEY,
+              rate: values.commissionRate ?? item.commissionRate.toString(),
+              refundedGross: values.refundedCommissionGross ?? ZERO_MONEY,
+            };
       return {
         id: item.id,
         quantity: item.quantity,
         lineSaleGross: item.lineSaleGross.toString(),
         saleVatRate: item.saleVatRate.toString(),
         lineSellerDiscountGross: item.lineSellerDiscountGross.toString(),
-        commissionGross: values.commissionGross ?? item.commissionGross.toString(),
-        commissionRate: values.commissionRate ?? item.commissionRate.toString(),
+        commissionGross: commission.gross,
+        commissionRate: commission.rate,
         commissionVatRate: item.commissionVatRate.toString(),
-        refundedCommissionGross: item.refundedCommissionGross.toString(),
+        refundedCommissionGross: commission.refundedGross,
         estimatedCommissionGross: values.estimatedCommissionGross,
         settledCommissionGross: values.settledCommissionGross,
         unitCostSnapshotGross: values.unitCostGross,

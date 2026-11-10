@@ -19,6 +19,7 @@ function makeStatement(overrides: Partial<StatementListRow> = {}): StatementList
     view: ProfitStatementView.BEST_KNOWN,
     status: ProfitStatus.ESTIMATED,
     saleGross: new Decimal('240.00'),
+    vatOutput: new Decimal('40.00'),
     netProfit: new Decimal('60.00'),
     saleMarginPct: new Decimal('25.00'),
     costMarkupPct: new Decimal('38.40'),
@@ -39,6 +40,7 @@ describe('orderProfitFields', () => {
       ]),
       orderStatus: OrderStatus.DELIVERED,
       orderSaleGross: new Decimal('240.00'),
+      orderSaleVat: null,
     });
     expect(withStatement.reconciliationStatus).toBe(ReconciliationStatus.PARTIALLY_SETTLED);
 
@@ -46,6 +48,7 @@ describe('orderProfitFields', () => {
       pair: toStatementPair([]),
       orderStatus: OrderStatus.DELIVERED,
       orderSaleGross: new Decimal('240.00'),
+      orderSaleVat: null,
     });
     expect(noStatement.reconciliationStatus).toBe(ReconciliationStatus.NOT_SETTLED);
   });
@@ -62,6 +65,7 @@ describe('orderProfitFields', () => {
       ]),
       orderStatus: OrderStatus.DELIVERED,
       orderSaleGross: new Decimal('240.00'),
+      orderSaleVat: null,
     });
     expect(notSettled.estimatedNetProfit).toBe('60');
     expect(notSettled.settledNetProfit).toBeNull();
@@ -77,6 +81,7 @@ describe('orderProfitFields', () => {
       ]),
       orderStatus: OrderStatus.DELIVERED,
       orderSaleGross: new Decimal('240.00'),
+      orderSaleVat: null,
     });
     expect(settled.estimatedNetProfit).toBe('60');
     expect(settled.settledNetProfit).toBe('55');
@@ -87,6 +92,7 @@ describe('orderProfitFields', () => {
       pair: toStatementPair([]),
       orderStatus: OrderStatus.DELIVERED,
       orderSaleGross: new Decimal('150.00'),
+      orderSaleVat: null,
     });
     expect(delivered.saleGross).toBe('150');
 
@@ -94,6 +100,7 @@ describe('orderProfitFields', () => {
       pair: toStatementPair([]),
       orderStatus: OrderStatus.CANCELLED,
       orderSaleGross: new Decimal('240.00'),
+      orderSaleVat: null,
     });
     expect(cancelled.saleGross).toBe('0');
 
@@ -101,6 +108,7 @@ describe('orderProfitFields', () => {
       pair: toStatementPair([]),
       orderStatus: OrderStatus.DELIVERED,
       orderSaleGross: null,
+      orderSaleVat: null,
     });
     expect(unsynced.saleGross).toBeNull();
 
@@ -109,7 +117,72 @@ describe('orderProfitFields', () => {
       pair: toStatementPair([makeStatement({ saleGross: new Decimal('180.00') })]),
       orderStatus: OrderStatus.CANCELLED,
       orderSaleGross: new Decimal('240.00'),
+      orderSaleVat: null,
     });
     expect(withStatement.saleGross).toBe('180');
+  });
+
+  it('reads the sale VAT from the same source as the sale', () => {
+    const withStatement = orderProfitFields({
+      pair: toStatementPair([makeStatement({ vatOutput: new Decimal('12.73') })]),
+      orderStatus: OrderStatus.DELIVERED,
+      orderSaleGross: new Decimal('240.00'),
+      orderSaleVat: new Decimal('36.06'),
+    });
+    expect(withStatement.saleVat).toBe('12.73');
+
+    const cancelled = orderProfitFields({
+      pair: toStatementPair([]),
+      orderStatus: OrderStatus.CANCELLED,
+      orderSaleGross: new Decimal('240.00'),
+      orderSaleVat: new Decimal('36.06'),
+    });
+    expect(cancelled.saleVat).toBe('0');
+
+    const open = orderProfitFields({
+      pair: toStatementPair([]),
+      orderStatus: OrderStatus.PROCESSING,
+      orderSaleGross: new Decimal('240.00'),
+      orderSaleVat: new Decimal('36.06'),
+    });
+    expect(open.saleVat).toBe('36.06');
+  });
+
+  it('hides a penalty-free cancelled net profit and keeps a penalty', () => {
+    const cancelledView = {
+      status: ProfitStatus.CANCELLED,
+      reconciliationStatus: ReconciliationStatus.FULLY_SETTLED,
+    };
+    const noPenalty = orderProfitFields({
+      pair: toStatementPair([
+        makeStatement({
+          ...cancelledView,
+          view: ProfitStatementView.ESTIMATE,
+          netProfit: new Decimal('0'),
+        }),
+        makeStatement({ ...cancelledView, netProfit: new Decimal('0') }),
+      ]),
+      orderStatus: OrderStatus.CANCELLED,
+      orderSaleGross: new Decimal('240.00'),
+      orderSaleVat: null,
+    });
+    expect(noPenalty.estimatedNetProfit).toBeNull();
+    expect(noPenalty.settledNetProfit).toBeNull();
+
+    const withPenalty = orderProfitFields({
+      pair: toStatementPair([
+        makeStatement({
+          ...cancelledView,
+          view: ProfitStatementView.ESTIMATE,
+          netProfit: new Decimal('-15.00'),
+        }),
+        makeStatement({ ...cancelledView, netProfit: new Decimal('-15.00') }),
+      ]),
+      orderStatus: OrderStatus.CANCELLED,
+      orderSaleGross: new Decimal('240.00'),
+      orderSaleVat: null,
+    });
+    expect(withPenalty.estimatedNetProfit).toBe('-15');
+    expect(withPenalty.settledNetProfit).toBe('-15');
   });
 });
