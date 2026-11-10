@@ -39,8 +39,19 @@ yarn-error.log*
 supabase/.temp/
 supabase/.branches/
 
-# Claude Code — personal toolchain and MCP secrets (project rules live in CLAUDE.md files)
-.claude/
+# Claude Code — project-owned agents, our own skills, hook scripts and shared
+# settings are versioned. Personal permissions (settings.local.json), runtime
+# state, agent worktrees, third-party skills (.agents/ + symlinks) and MCP
+# secrets stay local.
+.claude/*
+!.claude/agents/
+!.claude/scripts/
+!.claude/settings.json
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/orchestrate/
+!.claude/skills/frontend-pr-review/
+!.claude/skills/ui-design-system/
 .agents/
 skills-lock.json
 .mcp.json

@@ -1,0 +1,57 @@
+{
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true,
+    "code-simplifier@claude-plugins-official": true,
+    "learning-output-style@claude-plugins-official": false,
+    "postman@claude-plugins-official": false
+  },
+  "permissions": {
+    "ask": [
+      "Bash(git stash *)",
+      "Bash(git checkout *)",
+      "Bash(git switch *)",
+      "Bash(git reset *)",
+      "Bash(git restore *)",
+      "Bash(git clean *)",
+      "Bash(git rebase *)",
+      "Bash(git merge *)"
+    ]
+  },
+  "skillOverrides": {
+    "deploy-to-vercel": "user-invocable-only",
+    "vercel-cli-with-tokens": "user-invocable-only",
+    "vercel-optimize": "user-invocable-only",
+    "session-handoff": "user-invocable-only",
+    "api-design-principles": "user-invocable-only",
+    "api-integration-specialist": "user-invocable-only",
+    "debugging-strategies": "user-invocable-only",
+    "nextjs-app-router-patterns": "user-invocable-only",
+    "typescript-advanced-types": "user-invocable-only",
+    "writing-guidelines": "user-invocable-only",
+    "ultra-think": "user-invocable-only"
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/ui-workflow-reminder.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/check-utf8.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
