@@ -505,9 +505,12 @@ const OrderStoreSummarySchema = z
 // cost-missing order.
 const ProfitBreakdownSchema = z
   .object({
-    listGross: z
-      .string()
-      .openapi({ description: 'Liste fiyatı brüt = satış brüt + satıcı indirimi brüt.' }),
+    listGross: z.string().openapi({
+      description:
+        'List price incl. VAT (decimal string) = saleGross + sellerDiscountGross, derived from ' +
+        'the selected SALE and SALE_RETURN lines. Like sellerDiscountGross it may be transiently ' +
+        'negative while a return record has arrived before its discount reversal.',
+    }),
     sellerDiscountGross: z.string().openapi({
       description:
         "Seller discount incl. VAT (decimal string); '0.00' when there is no discount. May be " +

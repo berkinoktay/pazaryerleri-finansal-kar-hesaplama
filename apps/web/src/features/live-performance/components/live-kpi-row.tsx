@@ -9,6 +9,7 @@ import { AnimatedNumber } from '@/components/patterns/animated-number';
 import { Currency } from '@/components/patterns/currency';
 import { type StatCardDelta } from '@/components/patterns/stat-card';
 import { StatStrip, type StatStripItem } from '@/components/patterns/stat-strip';
+import { EM_DASH } from '@/lib/format-percent';
 import type { MarginScale } from '@/lib/margin-coloring';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { marginColorStyle } from '@/lib/margin-color-style';
@@ -75,7 +76,7 @@ const KPI_ITEMS: KpiItemDescriptor[] = [
     // Null when today has no costed order: a dash, not a misleading 0%.
     value: (k, scale) =>
       k.marginToday === null ? (
-        '—'
+        EM_DASH
       ) : (
         <AnimatedNumber
           value={Number(k.marginToday)}
@@ -92,7 +93,7 @@ const KPI_ITEMS: KpiItemDescriptor[] = [
     // Null when today has no costed order: a dash, not a misleading 0%.
     value: (k) =>
       k.profitCostRatioToday === null ? (
-        '—'
+        EM_DASH
       ) : (
         <AnimatedNumber value={Number(k.profitCostRatioToday)} format={formatPercent} />
       ),

@@ -6,6 +6,7 @@ import * as React from 'react';
 import { Currency } from '@/components/patterns/currency';
 import { InfoHint } from '@/components/patterns/info-hint';
 import { TrendDelta } from '@/components/patterns/trend-delta';
+import { EM_DASH } from '@/lib/format-percent';
 
 import type { LivePerformanceKpis } from '../api/get-live-kpis.api';
 import { computeDeltaPercent } from '../lib/compute-delta-percent';
@@ -32,7 +33,7 @@ export function LiveHeroCaption({ kpis }: { kpis: LivePerformanceKpis }): React.
           {/* Null when no order of yesterday is costed: a dash, not a misleading 0 TL. */}
           {t('chart.yesterdayLabel')}{' '}
           {kpis.netProfitYesterday === null ? (
-            <span>—</span>
+            <span>{EM_DASH}</span>
           ) : (
             <Currency value={kpis.netProfitYesterday} />
           )}
