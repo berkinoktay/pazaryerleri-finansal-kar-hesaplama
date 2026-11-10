@@ -381,9 +381,11 @@ describe('GET /v1/.../live-performance/kpis', () => {
       expect(failureLogs[0]?.[1]).toMatchObject({
         surface: 'live-performance',
         organizationId: org.id,
-        orderId: null,
         failedCount: 2,
       });
+      // The line names the first order that failed, so support can trace it.
+      const loggedOrderId: unknown = failureLogs[0]?.[1]?.orderId;
+      expect([statementless.id, secondStatementless.id]).toContain(loggedOrderId);
     } finally {
       error.mockRestore();
     }

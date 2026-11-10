@@ -230,7 +230,8 @@ export function formatMarginPct2(value: Decimal | null): string | null {
  * product pricing's list uses; decision 9).
  */
 export interface RequestFailureLog {
-  record(err: unknown): void;
+  /** Counts one failure; the first one (and its order id, when known) is what gets logged. */
+  record(err: unknown, orderId?: string): void;
   flush(): void;
 }
 
@@ -239,11 +240,13 @@ export function createRequestFailureLog(params: {
   readonly organizationId: string;
 }): RequestFailureLog {
   let firstError: unknown = null;
+  let firstOrderId: string | null = null;
   let failedCount = 0;
   return {
-    record(err: unknown): void {
+    record(err: unknown, orderId?: string): void {
       if (failedCount === 0) {
         firstError = err;
+        firstOrderId = orderId ?? null;
       }
       failedCount += 1;
     },
@@ -254,7 +257,7 @@ export function createRequestFailureLog(params: {
       logProfitReadFailure({
         surface: params.surface,
         organizationId: params.organizationId,
-        orderId: null,
+        orderId: firstOrderId,
         err: firstError,
         failedCount,
       });

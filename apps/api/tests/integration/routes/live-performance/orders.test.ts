@@ -198,7 +198,7 @@ describe('GET /v1/.../live-performance/orders', () => {
     expect(allBody.data[0]?.profit).toBeNull();
   });
 
-  it('lists an order computed in the request as calculated, rounding its margin like a stored one', async () => {
+  it('lists an order computed in the request as calculated', async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();
     await createMembership(org.id, user.id);

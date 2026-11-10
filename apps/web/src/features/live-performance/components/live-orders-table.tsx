@@ -90,9 +90,10 @@ export function LiveOrdersTable({
       {
         // Tahmini kâr — tıklanabilir, marj-renkli rozet (siparişler tablosuyla aynı
         // bileşen). Arka plan rengi satırın marj'ından beslenir; rozete tıklamak
-        // satır detayını (yan panel) açar. Buffer satırlarında profit/margin null →
-        // nötr ama yine tıklanabilir "—" rozet. Satır-tıklaması da korunur (DataTable
-        // onRowClick), böylece buffer akışı ve köklü davranış bozulmaz.
+        // satır detayını (yan panel) açar. Bekleyen satırlarda (tampon kaydı ya da kârı
+        // henüz hesaplanmamış sipariş) profit/margin null → nötr ama yine tıklanabilir
+        // "—" rozet. Satır-tıklaması da korunur (DataTable onRowClick), böylece
+        // bekleyen akış ve köklü davranış bozulmaz.
         accessorKey: 'profit',
         header: () => t('columns.profit'),
         meta: { numeric: true },

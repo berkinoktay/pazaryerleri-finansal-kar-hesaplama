@@ -186,7 +186,7 @@ async function resolveLiveEstimates(
       if (estimate !== null) estimates.set(order.id, estimate);
     } catch (err) {
       // A platform the engine cannot compute yet (e.g. Hepsiburada): expected, no log.
-      if (!(err instanceof UnsupportedPlatformError)) failures.record(err);
+      if (!(err instanceof UnsupportedPlatformError)) failures.record(err, order.id);
     }
   }
 
@@ -348,7 +348,7 @@ export async function getKpis(args: { orgId: string; storeId: string }): Promise
   // computes a statement-less order in the request: computing yesterday too would add
   // to every page open. Normally yesterday's statements are long written, but a first
   // deploy's recompute backlog can take hours; in that window a statement-less order of
-  // yesterday counts toward volume and not toward profit (yesterday's profit reads low),
+  // yesterday counts toward volume and not toward profit (yesterday's profit misses that order),
   // and the next write of its statement corrects it.
   const [todayOrders, todayBuffer, yesterdayOrders] = await Promise.all([
     aggregateOrders(args.orgId, args.storeId, today, true),
