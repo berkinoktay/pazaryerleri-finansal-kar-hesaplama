@@ -652,6 +652,7 @@ describe('mapTrendyolRecords', () => {
       estimateLines,
     });
 
+    expect(result.issues).toEqual([]);
     expect(
       result.lines.filter(
         (line) =>

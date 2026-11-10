@@ -386,6 +386,51 @@ describe('estimateShippingLine', () => {
     expect(line?.inputs.reason).toBe(CARRIER_NOT_RECOGNIZED_REASON);
   });
 
+  it('adds no seller-cargo issue to an all-digital parcel on a Trendyol-contract store', () => {
+    // An all-digital parcel ships nothing, so it returns before the seller-cargo issue is
+    // attached: no line and no warning, even on a seller-cargo-agreement order.
+    const snapshot = makeParcel({
+      items: [
+        makeItem({ orderItemId: 'a', listGross: '100.00', isDigital: true, unitDesi: null }),
+        makeItem({ orderItemId: 'b', listGross: '50.00', isDigital: true, unitDesi: '2' }),
+      ],
+    });
+
+    const { line, issues } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({ fastDelivery: false, usesSellerCargoAgreement: true }),
+      reference: trendyolReference({
+        shipping: { source: ShippingTariffSource.TRENDYOL_CONTRACT },
+      }),
+    });
+
+    expect(line).toBeNull();
+    expect(issues).toEqual([]);
+  });
+
+  it('adds the seller-cargo issue after the unknown-desi issue on a Trendyol-contract store', () => {
+    // The seller-cargo issue rides along the unavailable outcome, after that outcome's own
+    // issue.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: null })],
+    });
+
+    const { line, issues } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({ fastDelivery: false, usesSellerCargoAgreement: true }),
+      reference: trendyolReference({
+        shipping: { source: ShippingTariffSource.TRENDYOL_CONTRACT },
+      }),
+    });
+
+    expect(line).toBeNull();
+    expect(issues.map((issue) => issue.code)).toEqual([
+      ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+      ProfitIssueCode.SELLER_CARGO_AGREEMENT_ESTIMATE,
+    ]);
+    expect(issues[0]?.detail).toBe('UNKNOWN_DESI');
+  });
+
   it('reports OWN_CONTRACT_EMPTY when the own tariff has no row', () => {
     const snapshot = makeParcel({
       items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: '3' })],
