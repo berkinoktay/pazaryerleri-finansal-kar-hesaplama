@@ -116,6 +116,13 @@ describe('statement breakdown golden', () => {
     expect(breakdownA).toEqual(breakdownB);
     expectClosesToSale(breakdownA);
 
+    // The settled sale lines carry the list price and the seller discount, so the
+    // best-known breakdown keeps the discount: list 529.00 + 409.68, discount
+    // 37.72 + 29.21, sale 491.28 + 380.47.
+    expect(breakdownA.listGross).toBe('938.68');
+    expect(breakdownA.sellerDiscountGross).toBe('66.93');
+    expect(breakdownA.saleGross).toBe('871.75');
+
     // The best-known view really did take the settlement actuals, so this is not a
     // trivial estimate-only parcel.
     expect(

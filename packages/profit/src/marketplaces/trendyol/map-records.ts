@@ -19,6 +19,7 @@ import {
   type ExternalRecordRef,
   type LineMoney,
   type ProfitLine,
+  type ProfitLineInputs,
 } from '../../core/profit-line';
 import { saleVatRatePct } from '../../tax/tr/sale-vat';
 import { vatFromGross } from '../../tax/tr/vat';
@@ -255,6 +256,7 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
     readonly gross: Decimal;
     readonly vatRatePct: Decimal;
     readonly reference: RecordReference;
+    readonly extraInputs?: ProfitLineInputs; // inputs beyond recordIds (only the SALE line today)
   }): void {
     const amount: LineMoney = {
       gross: params.gross,
@@ -272,7 +274,7 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
         source: ProfitLineSource.MARKETPLACE_RECORD,
         amount,
         vatRatePct: params.vatRatePct,
-        inputs: { recordIds: params.reference.recordIds },
+        inputs: { recordIds: params.reference.recordIds, ...params.extraInputs },
         externalRecord: params.reference.externalRecord,
       }),
     );
@@ -303,9 +305,11 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
       sumCommission(accumulator.discounts).equals(sumCommission(accumulator.discountReversals));
 
     if (accumulator.sales.length > 0) {
-      const saleNet = sumDecimals(accumulator.sales.map((record) => record.credit)).sub(
-        sumDecimals(accumulator.discounts.map((record) => record.debt)),
-      );
+      // The Sale credit is the list price and the Discount / Coupon debt the seller
+      // discount (see settlement-records), so the net sale is list - discount.
+      const listGross = sumDecimals(accumulator.sales.map((record) => record.credit));
+      const sellerDiscountGross = sumDecimals(accumulator.discounts.map((record) => record.debt));
+      const saleNet = listGross.sub(sellerDiscountGross);
       const commissionNet = sumCommission(accumulator.sales).sub(
         sumCommission(accumulator.discounts),
       );
@@ -327,6 +331,13 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
             gross: saleNet,
             vatRatePct: itemSaleVatRatePct,
             reference,
+            // The breakdown reads the list price and seller discount from the SALE lines
+            // (read/statement-breakdown `incomeFromSaleLines`), so the settled line carries
+            // them under the same keys as the estimate SALE line; list - discount = gross.
+            extraInputs: {
+              listGross: listGross.toFixed(2),
+              sellerDiscountGross: sellerDiscountGross.toFixed(2),
+            },
           });
         }
         if (commissionNet.gt(ZERO)) {

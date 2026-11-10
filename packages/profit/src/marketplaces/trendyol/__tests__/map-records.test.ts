@@ -121,7 +121,13 @@ describe('mapTrendyolRecords', () => {
     expect(sale?.amount.gross.toFixed(2)).toBe('491.28');
     expect(sale?.amount.vat.toFixed(2)).toBe('44.66');
     expect(sale?.vatRatePct?.toString()).toBe('10');
-    expect(sale?.inputs.recordIds).toBe('rec-1,rec-2');
+    // The Sale credit is the list price and the Discount debt the seller discount, so the
+    // settled sale line carries them like the estimate does (list - discount = gross).
+    expect(sale?.inputs).toEqual({
+      recordIds: 'rec-1,rec-2',
+      listGross: '529.00',
+      sellerDiscountGross: '37.72',
+    });
     // The external record points at the Sale, never at the Discount.
     expect(sale?.externalRecord?.rawType).toBe('Sale');
     expect(sale?.externalRecord).toEqual({ recordId: 'rec-1', rawType: 'Sale' });
@@ -132,7 +138,43 @@ describe('mapTrendyolRecords', () => {
     expect(commission?.vatRatePct?.toString()).toBe('20');
     expect(commission?.certainty).toBe(ProfitLineCertainty.ACTUAL);
     expect(commission?.source).toBe(ProfitLineSource.MARKETPLACE_RECORD);
-    expect(commission?.inputs.recordIds).toBe('rec-1,rec-2');
+    expect(commission?.inputs).toEqual({ recordIds: 'rec-1,rec-2' });
+  });
+
+  it('carries a zero seller discount on a settled sale line without a discount', () => {
+    const snapshot = makeParcel({
+      items: [
+        makeItem({ orderItemId: 'a', listGross: '529.00', saleVatRatePct: '10', barcode: 'bc-a' }),
+      ],
+    });
+    const records = [
+      makeRecord({
+        recordId: 'rec-1',
+        transactionType: 'Sale',
+        barcode: 'bc-a',
+        credit: '529.00',
+        commissionAmount: '100.51',
+      }),
+    ];
+
+    const result = mapTrendyolRecords({
+      snapshot,
+      attributes: makeTrendyolAttributes(),
+      fees: FEES,
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
+      records,
+      cargoItems: [],
+      estimateLines: [],
+    });
+
+    expect(result.issues).toEqual([]);
+    const sale = result.lines.find((line) => line.type === ProfitLineType.SALE);
+    expect(sale?.amount.gross.toFixed(2)).toBe('529.00');
+    expect(sale?.inputs).toEqual({
+      recordIds: 'rec-1',
+      listGross: '529.00',
+      sellerDiscountGross: '0.00',
+    });
   });
 
   it('sums per-unit duplicate sale rows', () => {
