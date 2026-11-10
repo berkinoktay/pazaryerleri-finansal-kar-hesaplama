@@ -135,9 +135,7 @@ export function estimateTrendyolParcel(input: TrendyolEstimateInput): EstimateRe
   }
 
   const issues: ProfitIssue[] = [...commission.issues, ...sellerCost.issues];
-  if (shipping.issue !== null) {
-    issues.push(shipping.issue);
-  }
+  issues.push(...shipping.issues);
   issues.push(...returnIssues);
 
   const allocationActiveItems: AllocationItem[] = activeItems(snapshot).map((item) => ({

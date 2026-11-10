@@ -13,5 +13,8 @@
  *    order rate, then the synced product rate, then the category rule.
  * 8: an order whose carrier Trendyol does not name recognizably gets a zero shipping
  *    estimate (recording the reason) instead of the store default or an unavailable gap.
+ * 9: an order whose carrier is not recognized records a non-blocking CARRIER_NOT_RECOGNIZED
+ *    issue, and a seller-cargo-agreement order on a Trendyol-contract store keeps its
+ *    shipping as an estimate with a SELLER_CARGO_AGREEMENT_ESTIMATE issue.
  */
-export const PROFIT_ENGINE_VERSION = 8;
+export const PROFIT_ENGINE_VERSION = 9;

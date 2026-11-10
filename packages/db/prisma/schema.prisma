@@ -366,6 +366,8 @@ enum ProfitIssueCode {
   UNMAPPED_MARKETPLACE_RECORD
   MISSING_COMMISSION_RATE
   AMBIGUOUS_RECORD_MATCH
+  CARRIER_NOT_RECOGNIZED
+  SELLER_CARGO_AGREEMENT_ESTIMATE
 }
 
 // How a profit statement is computed: ESTIMATE from estimate-only lines, BEST_KNOWN from the best available.

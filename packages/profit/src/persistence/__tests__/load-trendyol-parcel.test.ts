@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 
 import { Decimal } from 'decimal.js';
 import { prisma } from '@pazarsync/db';
-import { ProfitIssueCode, ProfitLineType } from '@pazarsync/db/enums';
+import { ProfitIssueCode, ProfitLineType, ProfitStatus } from '@pazarsync/db/enums';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { estimateTrendyolParcel } from '../../marketplaces/trendyol/estimate-parcel';
@@ -24,6 +24,7 @@ import {
 import { TRENDYOL_SAME_DAY_SHIPPING_TYPE } from '../../marketplaces/trendyol/trendyol-inputs';
 import { type ProfitLine } from '../../core/profit-line';
 import { FeeDefinitionNotFoundError } from '../../resolve-fee-definition';
+import { computeParcelProfit } from '../compute-parcel-profit';
 import { ParcelNotFoundError, UnsupportedPlatformError } from '../errors';
 import { loadTrendyolParcel } from '../load-trendyol-parcel';
 import {
@@ -1299,9 +1300,31 @@ describe('loadTrendyolParcel', () => {
   it('estimates zero shipping for an unknown carrier name', async () => {
     // Trendyol named a carrier that matches no active carrier (e.g. alternative delivery):
     // the estimate is a zero SHIPPING line recording the provider name, never the store
-    // default (which is no longer consulted on an order) nor an unavailable issue.
-    const shipping = await shippingLineFor('Alternative Delivery');
-    expectZeroShipping(shipping, 'Alternative Delivery');
+    // default (which is no longer consulted on an order) nor an unavailable issue. The
+    // statement records a non-blocking CARRIER_NOT_RECOGNIZED issue and stays ESTIMATED.
+    const parcel = await seedMelontikParcel();
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { cargoProviderName: 'Alternative Delivery' },
+    });
+
+    const computed = await computeParcelProfit(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    expectZeroShipping(
+      requireLine(computed.lines, ProfitLineType.SHIPPING, null),
+      'Alternative Delivery',
+    );
+    for (const statement of [computed.estimate, computed.bestKnown]) {
+      expect(statement.issues).toContainEqual({
+        code: ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
+        orderItemId: null,
+        detail: 'Alternative Delivery',
+      });
+      expect(statement.status).toBe(ProfitStatus.ESTIMATED);
+    }
   });
 
   it('estimates zero shipping for an empty carrier name', async () => {

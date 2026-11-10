@@ -1,7 +1,7 @@
 import { ProfitIssueCode } from '@pazarsync/db/enums';
 import { describe, expect, it } from 'vitest';
 
-import { isSettlementGapIssue, PROFIT_ISSUE_CATALOG } from '../profit-issue';
+import { isBlockingIssue, isSettlementGapIssue, PROFIT_ISSUE_CATALOG } from '../profit-issue';
 
 describe('PROFIT_ISSUE_CATALOG', () => {
   it('every settlement gap issue is blocking', () => {
@@ -11,6 +11,17 @@ describe('PROFIT_ISSUE_CATALOG', () => {
       if (PROFIT_ISSUE_CATALOG[code].settlementGap) {
         expect(PROFIT_ISSUE_CATALOG[code].blocking).toBe(true);
       }
+    }
+  });
+  it('the carrier warnings are non-blocking and leave no settlement gap', () => {
+    // A not-recognized carrier and a seller-cargo-agreement estimate keep the order's own
+    // estimate (a zero or tariff-based shipping line), so they stay visible warnings.
+    for (const code of [
+      ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
+      ProfitIssueCode.SELLER_CARGO_AGREEMENT_ESTIMATE,
+    ]) {
+      expect(PROFIT_ISSUE_CATALOG[code]).toEqual({ blocking: false, settlementGap: false });
+      expect(isBlockingIssue({ code, orderItemId: null, detail: null })).toBe(false);
     }
   });
   it('isSettlementGapIssue reflects the catalog flag for every code', () => {

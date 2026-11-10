@@ -18,7 +18,9 @@ export interface ProfitIssue {
  * one stays a visible warning. An unmapped marketplace record is deliberately
  * non-blocking so a new record type does not turn every order "not computable" at once.
  * An ambiguous record match is a warning for the same reason: like an unmapped record,
- * it leaves the order's own estimate intact.
+ * it leaves the order's own estimate intact. A not-recognized carrier and a
+ * seller-cargo-agreement estimate are warnings too: the order still carries a shipping
+ * line (a zero or a tariff-based estimate), so the profit stays computable.
  *
  * `settlementGap` marks a settlement-required slot the engine left without any line,
  * because it could neither estimate it nor read an actual for it (it could not estimate
@@ -33,6 +35,8 @@ export const PROFIT_ISSUE_CATALOG = {
   UNMAPPED_MARKETPLACE_RECORD: { blocking: false, settlementGap: false },
   MISSING_COMMISSION_RATE: { blocking: true, settlementGap: true },
   AMBIGUOUS_RECORD_MATCH: { blocking: false, settlementGap: false },
+  CARRIER_NOT_RECOGNIZED: { blocking: false, settlementGap: false },
+  SELLER_CARGO_AGREEMENT_ESTIMATE: { blocking: false, settlementGap: false },
 } as const satisfies Record<
   ProfitIssueCode,
   { readonly blocking: boolean; readonly settlementGap: boolean }

@@ -203,10 +203,11 @@ function standaloneShippingGross(params: {
  * that weight the allocation. The line is ESTIMATE / RULE at PARCEL level. An
  * unknown desi or an unresolvable tariff yields a blocking
  * SHIPPING_ESTIMATE_UNAVAILABLE issue (reason in `detail`) and no line; a zero gross
- * yields neither. Digital items do not ship (plan decision 11b): an all-digital
- * parcel carries no shipping (no line, no issue) and every digital item's standalone
- * amount is zero. The standalone amounts are always computed, even when the parcel
- * line itself fails.
+ * yields neither. A not-recognized carrier on a Trendyol-contract order yields a zero
+ * line plus a non-blocking CARRIER_NOT_RECOGNIZED issue (provider name in `detail`).
+ * Digital items do not ship (plan decision 11b): an all-digital parcel carries no
+ * shipping (no line, no issue) and every digital item's standalone amount is zero.
+ * The standalone amounts are always computed, even when the parcel line itself fails.
  */
 export function estimateShippingLine(params: {
   readonly snapshot: ParcelSnapshot;
@@ -214,14 +215,14 @@ export function estimateShippingLine(params: {
   readonly reference: TrendyolReferenceData;
 }): {
   readonly line: ProfitLine | null;
-  readonly issue: ProfitIssue | null;
+  readonly issues: readonly ProfitIssue[];
   readonly standaloneByItem: ReadonlyMap<string, Decimal | null>;
 } {
   const { snapshot, attributes, reference } = params;
   const items = activeItems(snapshot);
 
   if (items.length === 0) {
-    return { line: null, issue: null, standaloneByItem: new Map() };
+    return { line: null, issues: [], standaloneByItem: new Map() };
   }
 
   const eligibleForBarem = attributes.fastDelivery;
@@ -241,14 +242,16 @@ export function estimateShippingLine(params: {
   // Digital items do not ship (plan decision 11b): an all-digital parcel carries no
   // shipping, exactly like the service-fee exemption.
   if (items.every((item) => item.isDigital)) {
-    return { line: null, issue: null, standaloneByItem };
+    return { line: null, issues: [], standaloneByItem };
   }
 
   // A not-recognized carrier on a Trendyol-contract order cannot be priced from any
   // tariff, so the estimate is a zero SHIPPING line recording why -- never an unavailable
-  // issue (a cargo invoice later replaces it with the real amount). This is distinct from
-  // a scenario with no carrier, which stays NO_CARRIER / unavailable (its outcome is
-  // null); an own-contract store is unaffected and falls through to its own tariff below.
+  // issue (a cargo invoice later replaces it with the real amount). A non-blocking
+  // CARRIER_NOT_RECOGNIZED issue makes the zero visible on the statement; the return leg
+  // adds none, so a parcel carries it once. This is distinct from a scenario with no
+  // carrier, which stays NO_CARRIER / unavailable (its outcome is null); an own-contract
+  // store is unaffected and falls through to its own tariff below.
   const carrierOutcome = tariff.orderCarrierOutcome;
   if (
     tariff.source === ShippingTariffSource.TRENDYOL_CONTRACT &&
@@ -269,18 +272,30 @@ export function estimateShippingLine(params: {
       },
       externalRecord: null,
     });
-    return { line, issue: null, standaloneByItem };
+    return {
+      line,
+      issues: [
+        {
+          code: ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
+          orderItemId: null,
+          detail: carrierOutcome.providerName,
+        },
+      ],
+      standaloneByItem,
+    };
   }
 
   const desi = parcelDesi(snapshot);
   if (desi === null) {
     return {
       line: null,
-      issue: {
-        code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
-        orderItemId: null,
-        detail: 'UNKNOWN_DESI',
-      },
+      issues: [
+        {
+          code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+          orderItemId: null,
+          detail: 'UNKNOWN_DESI',
+        },
+      ],
       standaloneByItem,
     };
   }
@@ -296,18 +311,20 @@ export function estimateShippingLine(params: {
   if (!resolved.ok) {
     return {
       line: null,
-      issue: {
-        code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
-        orderItemId: null,
-        detail: resolved.reason,
-      },
+      issues: [
+        {
+          code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+          orderItemId: null,
+          detail: resolved.reason,
+        },
+      ],
       standaloneByItem,
     };
   }
 
   const gross = resolved.gross;
   if (gross.equals(ZERO)) {
-    return { line: null, issue: null, standaloneByItem };
+    return { line: null, issues: [], standaloneByItem };
   }
 
   const amount: LineMoney = {
@@ -332,5 +349,5 @@ export function estimateShippingLine(params: {
     externalRecord: null,
   });
 
-  return { line, issue: null, standaloneByItem };
+  return { line, issues: [], standaloneByItem };
 }

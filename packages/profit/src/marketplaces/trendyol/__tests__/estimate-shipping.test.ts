@@ -26,13 +26,13 @@ describe('estimateShippingLine', () => {
       items: [makeItem({ orderItemId: 'a', listGross: '500.00', unitDesi: '3' })],
     });
 
-    const { line, issue } = estimateShippingLine({
+    const { line, issues } = estimateShippingLine({
       snapshot,
       attributes: makeTrendyolAttributes({ fastDelivery: false }),
       reference: trendyolReference(),
     });
 
-    expect(issue).toBeNull();
+    expect(issues).toEqual([]);
     expect(line?.type).toBe(ProfitLineType.SHIPPING);
     expect(line?.level).toBe(ProfitLineLevel.PARCEL);
     expect(line?.orderItemId).toBeNull();
@@ -59,13 +59,13 @@ describe('estimateShippingLine', () => {
       ],
     });
 
-    const { line, issue } = estimateShippingLine({
+    const { line, issues } = estimateShippingLine({
       snapshot,
       attributes: makeTrendyolAttributes({ fastDelivery: false }),
       reference: trendyolReference(),
     });
 
-    expect(issue).toBeNull();
+    expect(issues).toEqual([]);
     // Total desi 1x2 + 3x1 = 5 -> key '5' -> 108.90 net. An average (5/3 -> ceil 2) would give 93.05.
     expect(line?.amount.gross.toFixed(2)).toBe('130.68');
     expect(line?.amount.vat.toFixed(2)).toBe('21.78');
@@ -79,13 +79,13 @@ describe('estimateShippingLine', () => {
       items: [makeItem({ orderItemId: 'a', listGross: '500.00', unitDesi: '1' })],
     });
 
-    const { line, issue } = estimateShippingLine({
+    const { line, issues } = estimateShippingLine({
       snapshot,
       attributes: makeTrendyolAttributes({ fastDelivery: false }),
       reference: trendyolReference(),
     });
 
-    expect(issue).toBeNull();
+    expect(issues).toEqual([]);
     // ceil(2.4) = 3 -> key '3' -> 93.63 net -> 112.36 gross.
     expect(line?.amount.gross.toFixed(2)).toBe('112.36');
     expect(line?.inputs.desi).toBe('2.4');
@@ -97,13 +97,13 @@ describe('estimateShippingLine', () => {
       items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '2' })],
     });
 
-    const { line, issue } = estimateShippingLine({
+    const { line, issues } = estimateShippingLine({
       snapshot,
       attributes: makeTrendyolAttributes({ fastDelivery: true }),
       reference: trendyolReference(),
     });
 
-    expect(issue).toBeNull();
+    expect(issues).toEqual([]);
     // Band [0, 199.99] -> 34.16 net -> 40.99 gross.
     expect(line?.amount.gross.toFixed(2)).toBe('40.99');
     expect(line?.amount.vat.toFixed(2)).toBe('6.83');
@@ -116,13 +116,13 @@ describe('estimateShippingLine', () => {
       items: [makeItem({ orderItemId: 'a', listGross: '350.00', unitDesi: '2' })],
     });
 
-    const { line, issue } = estimateShippingLine({
+    const { line, issues } = estimateShippingLine({
       snapshot,
       attributes: makeTrendyolAttributes({ fastDelivery: true }),
       reference: trendyolReference(),
     });
 
-    expect(issue).toBeNull();
+    expect(issues).toEqual([]);
     // Basket 350 is above every Barem band -> desi tariff key '2' -> 77.54 net -> 93.05 gross.
     expect(line?.amount.gross.toFixed(2)).toBe('93.05');
     expect(line?.amount.vat.toFixed(2)).toBe('15.51');
@@ -134,18 +134,20 @@ describe('estimateShippingLine', () => {
       items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: '11' })],
     });
 
-    const { line, issue } = estimateShippingLine({
+    const { line, issues } = estimateShippingLine({
       snapshot,
       attributes: makeTrendyolAttributes({ fastDelivery: false }),
       reference: trendyolReference(),
     });
 
     expect(line).toBeNull();
-    expect(issue).toEqual({
-      code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
-      orderItemId: null,
-      detail: 'DESI_OVERFLOW',
-    });
+    expect(issues).toEqual([
+      {
+        code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+        orderItemId: null,
+        detail: 'DESI_OVERFLOW',
+      },
+    ]);
   });
 
   it('reports UNKNOWN_DESI when a product desi is missing', () => {
@@ -153,18 +155,20 @@ describe('estimateShippingLine', () => {
       items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: null })],
     });
 
-    const { line, issue, standaloneByItem } = estimateShippingLine({
+    const { line, issues, standaloneByItem } = estimateShippingLine({
       snapshot,
       attributes: makeTrendyolAttributes({ fastDelivery: false }),
       reference: trendyolReference(),
     });
 
     expect(line).toBeNull();
-    expect(issue).toEqual({
-      code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
-      orderItemId: null,
-      detail: 'UNKNOWN_DESI',
-    });
+    expect(issues).toEqual([
+      {
+        code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+        orderItemId: null,
+        detail: 'UNKNOWN_DESI',
+      },
+    ]);
     expect(standaloneByItem.get('a')).toBeNull();
   });
 
@@ -173,7 +177,7 @@ describe('estimateShippingLine', () => {
       items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: '3' })],
     });
 
-    const { line, issue } = estimateShippingLine({
+    const { line, issues } = estimateShippingLine({
       snapshot,
       attributes: makeTrendyolAttributes({ fastDelivery: false }),
       reference: trendyolReference({
@@ -184,7 +188,7 @@ describe('estimateShippingLine', () => {
       }),
     });
 
-    expect(issue).toBeNull();
+    expect(issues).toEqual([]);
     expect(line?.amount.gross.toFixed(2)).toBe('60.00');
     expect(line?.amount.vat.toFixed(2)).toBe('10.00');
     expect(line?.inputs.tariffKind).toBe('OWN');
@@ -215,29 +219,32 @@ describe('estimateShippingLine', () => {
       items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: '3' })],
     });
 
-    const { line, issue } = estimateShippingLine({
+    const { line, issues } = estimateShippingLine({
       snapshot,
       attributes: makeTrendyolAttributes({ fastDelivery: false }),
       reference: trendyolReference({ shipping: { carrier: null } }),
     });
 
     expect(line).toBeNull();
-    expect(issue).toEqual({
-      code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
-      orderItemId: null,
-      detail: 'NO_CARRIER',
-    });
+    expect(issues).toEqual([
+      {
+        code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+        orderItemId: null,
+        detail: 'NO_CARRIER',
+      },
+    ]);
   });
 
   it('writes a zero estimate for a not-recognized order carrier', () => {
     // An order whose Trendyol-contract carrier is not recognized gets a zero SHIPPING line
-    // recording the reason + provider name -- NOT the NO_CARRIER unavailable issue a
-    // carrier-less scenario (outcome null) produces.
+    // recording the reason + provider name, plus a non-blocking CARRIER_NOT_RECOGNIZED
+    // issue -- NOT the NO_CARRIER unavailable issue a carrier-less scenario (outcome null)
+    // produces.
     const snapshot = makeParcel({
       items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: '3' })],
     });
 
-    const { line, issue } = estimateShippingLine({
+    const { line, issues } = estimateShippingLine({
       snapshot,
       attributes: makeTrendyolAttributes({ fastDelivery: false }),
       reference: trendyolReference({
@@ -248,7 +255,13 @@ describe('estimateShippingLine', () => {
       }),
     });
 
-    expect(issue).toBeNull();
+    expect(issues).toEqual([
+      {
+        code: ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
+        orderItemId: null,
+        detail: 'Alternative Delivery',
+      },
+    ]);
     expect(line?.type).toBe(ProfitLineType.SHIPPING);
     expect(line?.level).toBe(ProfitLineLevel.PARCEL);
     expect(line?.certainty).toBe(ProfitLineCertainty.ESTIMATE);
@@ -265,18 +278,20 @@ describe('estimateShippingLine', () => {
       items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: '3' })],
     });
 
-    const { line, issue } = estimateShippingLine({
+    const { line, issues } = estimateShippingLine({
       snapshot,
       attributes: makeTrendyolAttributes({ fastDelivery: false }),
       reference: trendyolReference({ shipping: { source: ShippingTariffSource.OWN_CONTRACT } }),
     });
 
     expect(line).toBeNull();
-    expect(issue).toEqual({
-      code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
-      orderItemId: null,
-      detail: 'OWN_CONTRACT_EMPTY',
-    });
+    expect(issues).toEqual([
+      {
+        code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+        orderItemId: null,
+        detail: 'OWN_CONTRACT_EMPTY',
+      },
+    ]);
   });
 
   it('uses the unrounded desi for the Barem limit', () => {
@@ -285,7 +300,7 @@ describe('estimateShippingLine', () => {
       items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '1' })],
     });
 
-    const { line, issue } = estimateShippingLine({
+    const { line, issues } = estimateShippingLine({
       snapshot,
       attributes: makeTrendyolAttributes({ fastDelivery: true }),
       reference: trendyolReference({
@@ -295,7 +310,7 @@ describe('estimateShippingLine', () => {
       }),
     });
 
-    expect(issue).toBeNull();
+    expect(issues).toEqual([]);
     // 2.4 <= 2.5 keeps Barem even though ceil(2.4) = 3 would overflow the limit if rounded.
     expect(line?.amount.gross.toFixed(2)).toBe('40.99');
     expect(line?.inputs.tariffKind).toBe('BAREM');
@@ -307,7 +322,7 @@ describe('estimateShippingLine', () => {
       items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '3' })],
     });
 
-    const { line, issue } = estimateShippingLine({
+    const { line, issues } = estimateShippingLine({
       snapshot,
       attributes: makeTrendyolAttributes({ fastDelivery: true }),
       reference: trendyolReference({
@@ -317,7 +332,7 @@ describe('estimateShippingLine', () => {
       }),
     });
 
-    expect(issue).toBeNull();
+    expect(issues).toEqual([]);
     // desi 3 > maxBaremDesi 2 -> no Barem -> desi tariff key '3' -> 93.63 net -> 112.36 gross.
     expect(line?.amount.gross.toFixed(2)).toBe('112.36');
     expect(line?.inputs.tariffKind).toBe('DESI');
@@ -331,14 +346,14 @@ describe('estimateShippingLine', () => {
       ],
     });
 
-    const { line, issue, standaloneByItem } = estimateShippingLine({
+    const { line, issues, standaloneByItem } = estimateShippingLine({
       snapshot,
       attributes: makeTrendyolAttributes({ fastDelivery: false }),
       reference: trendyolReference(),
     });
 
     expect(line).toBeNull();
-    expect(issue).toBeNull();
+    expect(issues).toEqual([]);
     expect(standaloneByItem.size).toBe(0);
   });
 
@@ -351,14 +366,14 @@ describe('estimateShippingLine', () => {
       ],
     });
 
-    const { line, issue, standaloneByItem } = estimateShippingLine({
+    const { line, issues, standaloneByItem } = estimateShippingLine({
       snapshot,
       attributes: makeTrendyolAttributes({ fastDelivery: false }),
       reference: trendyolReference(),
     });
 
     expect(line).toBeNull();
-    expect(issue).toBeNull();
+    expect(issues).toEqual([]);
     expect(standaloneByItem.get('a')?.toFixed(2)).toBe('0.00');
     expect(standaloneByItem.get('b')?.toFixed(2)).toBe('0.00');
   });
@@ -373,13 +388,13 @@ describe('estimateShippingLine', () => {
       ],
     });
 
-    const { line, issue, standaloneByItem } = estimateShippingLine({
+    const { line, issues, standaloneByItem } = estimateShippingLine({
       snapshot,
       attributes: makeTrendyolAttributes({ fastDelivery: false }),
       reference: trendyolReference(),
     });
 
-    expect(issue).toBeNull();
+    expect(issues).toEqual([]);
     // Only item a counts: desi 3 -> key '3' -> 93.63 net -> 112.36 gross.
     expect(line?.amount.gross.toFixed(2)).toBe('112.36');
     expect(line?.amount.vat.toFixed(2)).toBe('18.73');

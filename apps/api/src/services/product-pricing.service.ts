@@ -746,6 +746,12 @@ function statusesFromIssues(issues: readonly ProfitIssue[]): ScenarioStatuses {
       case ProfitIssueCode.UNMAPPED_MARKETPLACE_RECORD:
       case ProfitIssueCode.AMBIGUOUS_RECORD_MATCH:
         break;
+      // Order-carrier warnings: they come from an order's own carrier (a scenario has no
+      // order carrier) and are non-blocking -- the shipping line still exists -- so they
+      // leave the three statuses unchanged.
+      case ProfitIssueCode.CARRIER_NOT_RECOGNIZED:
+      case ProfitIssueCode.SELLER_CARGO_AGREEMENT_ESTIMATE:
+        break;
       default: {
         const _exhaustive: never = issue.code;
         throw new Error(`Unhandled profit issue code: ${_exhaustive}`);
