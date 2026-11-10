@@ -3672,6 +3672,17 @@
     "returnBanner": {
       "title": "This order has a return",
       "description": "{count, plural, one {# return claim} other {# return claims}} processed; the amounts in the profit breakdown are shown net of returns."
+    },
+    "profitIssues": {
+      "unknownCarrier": "unknown carrier",
+      "CARRIER_NOT_RECOGNIZED": {
+        "title": "Shipping estimate is 0 TL",
+        "description": "The carrier reported by Trendyol ({providerName}) is not recognized, so shipping could not be estimated. The actual amount is applied to this order once the cargo invoice arrives."
+      },
+      "SELLER_CARGO_AGREEMENT_ESTIMATE": {
+        "title": "Shipping amount will stay an estimate",
+        "description": "This order was shipped under your own cargo agreement; Trendyol does not issue a cargo invoice for it. Enter your own tariff in the shipping settings to see the actual amount."
+      }
     }
   },
   "livePerformance": {

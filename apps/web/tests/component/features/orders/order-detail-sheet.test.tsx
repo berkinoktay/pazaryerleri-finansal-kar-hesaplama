@@ -80,6 +80,7 @@ const ORDER = {
   estimatedNetProfit: '31.00',
   settledNetProfit: null,
   profitBreakdown: BREAKDOWN,
+  profitIssues: [],
   promotionDisplays: null,
   profitExcludedAt: null,
   profitExclusionReason: null,

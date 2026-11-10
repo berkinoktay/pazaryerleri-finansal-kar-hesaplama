@@ -21,6 +21,7 @@ import { OrderItemsList } from './order-items-list';
 import { OrderProfitHero } from './order-profit-hero';
 import { OrderProfitSummary } from './order-profit-summary';
 import { OrderStatusBadge } from './order-status-badge';
+import { ProfitIssueNotices } from './profit-issue-notices';
 import { ReconciliationStatusBadge } from './reconciliation-status-badge';
 
 interface OrderDetailClientProps {
@@ -181,6 +182,10 @@ export function OrderDetailClient({
           </AlertDescription>
         </Alert>
       ) : null}
+
+      {/* Non-blocking profit warnings (carrier not recognized, seller cargo
+          agreement) sit right above the profit result they qualify. */}
+      <ProfitIssueNotices issues={order.profitIssues} />
 
       {/* Profit-led + odaklı: sonuç (hero) → siparişteki ürünler (resimlerle) →
           kâr dökümü (gelir + gruplu tahsis + öneri). Ücret zaman çizgisi, iade

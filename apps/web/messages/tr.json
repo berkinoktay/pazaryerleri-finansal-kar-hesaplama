@@ -3733,6 +3733,17 @@
     "returnBanner": {
       "title": "Bu siparişte iade var",
       "description": "{count, plural, other {# iade talebi}} işlendi; kâr dökümündeki tutarlar iade sonrası net gösterilir."
+    },
+    "profitIssues": {
+      "unknownCarrier": "bilinmeyen taşıyıcı",
+      "CARRIER_NOT_RECOGNIZED": {
+        "title": "Kargo tahmini 0 TL",
+        "description": "Trendyol'un bildirdiği taşıyıcı ({providerName}) tanınmadığı için kargo tahmini yapılamadı. Kargo faturası gelince gerçek tutar bu siparişe yansır."
+      },
+      "SELLER_CARGO_AGREEMENT_ESTIMATE": {
+        "title": "Kargo tutarı tahmin olarak kalacak",
+        "description": "Bu sipariş kendi kargo anlaşmanla gönderildi; Trendyol bunun için kargo faturası kesmez. Gerçek tutarı görmek için kargo ayarlarından kendi tarifeni gir."
+      }
     }
   },
   "livePerformance": {
