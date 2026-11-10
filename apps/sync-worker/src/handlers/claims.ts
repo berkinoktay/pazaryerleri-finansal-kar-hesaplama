@@ -121,6 +121,8 @@ export async function processClaimsChunk(
   );
 
   let written = 0;
+  let unchanged = 0;
+  let enqueued = 0;
   let unmatched = 0;
   let failed = 0;
   let processed = 0;
@@ -143,10 +145,17 @@ export async function processClaimsChunk(
       const outcome = await prisma.$transaction(async (tx) => {
         return upsertClaim(store.id, mapped, tx);
       });
-      if (outcome === 'written') {
-        written += 1;
-      } else {
+      if (outcome === 'unmatched') {
         unmatched += 1;
+      } else {
+        if (outcome.wrote) {
+          written += 1;
+        } else {
+          unchanged += 1;
+        }
+        if (outcome.enqueued) {
+          enqueued += 1;
+        }
       }
     } catch (err) {
       failed += 1;
@@ -166,22 +175,28 @@ export async function processClaimsChunk(
   // the failure is systemic (DB down, schema drift) — swallowing it
   // would mark the run COMPLETED and mute the retry machinery. Rethrow
   // the last error so handleRunError classifies + backs off.
-  if (failed > 0 && written === 0 && unmatched === 0) {
+  if (failed > 0 && written === 0 && unchanged === 0 && unmatched === 0) {
     throw lastError;
   }
 
   syncLog.info('claims.chunk.done', {
     syncLogId: log.id,
     storeId: store.id,
+    // `written` is what this scan changed; `unchanged` passed with nothing to write and
+    // `enqueued` is how many of either queued a profit recompute (the figure that shows
+    // the per-scan re-enqueue of every claim is gone).
     written,
+    unchanged,
+    enqueued,
     unmatched,
     failed,
   });
 
-  return { kind: 'done', finalCount: written };
+  return { kind: 'done', finalCount: written + unchanged };
 }
 
-type UpsertOutcome = 'written' | 'unmatched';
+/** What one claim's pass did: no order to attach to, or whether it wrote and whether it enqueued. */
+type UpsertOutcome = 'unmatched' | { readonly wrote: boolean; readonly enqueued: boolean };
 
 async function upsertClaim(
   storeId: string,
@@ -241,6 +256,7 @@ async function upsertClaim(
     },
     select: { id: true, orderId: true },
   });
+  let wrote = false;
   if (existing !== null) {
     syncLog.warn('claims.order.reanchored', {
       storeId,
@@ -256,6 +272,7 @@ async function upsertClaim(
       where: { claimId: existing.id },
       data: { orderItemId: null },
     });
+    wrote = true;
     // The claim left its previous order, whose return picture changed too; enqueue
     // it as well. Both orders belong to this store (the match above is store-scoped).
     await enqueueProfitRecompute(tx, {
@@ -334,6 +351,7 @@ async function upsertClaim(
   //    nothing.
   let claimId: string;
   if (stored === null) {
+    wrote = true;
     const created = await tx.orderClaim.create({
       data: {
         organizationId: order.organizationId,
@@ -374,6 +392,7 @@ async function upsertClaim(
     const changedClaim = pickChangedFields(claimUpdate, stored);
     if (Object.keys(changedClaim).length > 0) {
       await tx.orderClaim.update({ where: { id: stored.id, storeId }, data: changedClaim });
+      wrote = true;
     }
     claimId = stored.id;
   }
@@ -400,6 +419,7 @@ async function upsertClaim(
         resolved: item.resolved,
       };
       await tx.orderClaimItem.create({ data: { claimId, ...row } });
+      wrote = true;
       // A payload repeating a unit id updates that row instead of hitting the unique key.
       storedItems.set(item.trendyolClaimItemId, row);
       continue;
@@ -427,6 +447,10 @@ async function upsertClaim(
         },
         data: changedItem,
       });
+      wrote = true;
+      // Keep the map current so a payload repeating a unit id compares against what was
+      // just written (last one wins, as on create).
+      storedItems.set(item.trendyolClaimItemId, { ...storedItem, ...changedItem });
     }
   }
 
@@ -446,7 +470,8 @@ async function upsertClaim(
   // A re-anchored row is found by `stored` (it was just moved onto this order), but the
   // claim is new to this order, so it compares as not stored.
   const storedForChange: StoredClaimForChange | null = existing !== null ? null : stored;
-  if (claimProfitInputsChanged(storedForChange, claim, resolvedLinks)) {
+  const enqueued = claimProfitInputsChanged(storedForChange, claim, resolvedLinks);
+  if (enqueued) {
     await enqueueProfitRecompute(tx, {
       organizationId: order.organizationId,
       reason: ProfitRecomputeReason.CLAIM_CHANGED,
@@ -455,7 +480,7 @@ async function upsertClaim(
     });
   }
 
-  return 'written';
+  return { wrote, enqueued };
 }
 
 export const claimsHandler: ModuleHandler = { processChunk: processClaimsChunk };

@@ -1662,8 +1662,9 @@ describe('GET .../product-pricing -- zero sale price', () => {
   }
 
   it('does not score a variant whose sale price is zero', async () => {
-    // No calculableOnly: the row is listed, not calculable, with empty profit. Its
-    // inputs are all present, so the three statuses stay OK; cost is not surfaced.
+    // No calculableOnly: the row is listed, not calculable, with empty profit. The three
+    // statuses read OK because an unpriced variant's inputs are not checked at all (the
+    // fixture happens to have every input); cost is not surfaced.
     const all = await fetchRows('?perPage=25');
     const row = all.find((r) => r.variantId === zctx.zeroPriceVariantId);
     expect(row).toBeDefined();

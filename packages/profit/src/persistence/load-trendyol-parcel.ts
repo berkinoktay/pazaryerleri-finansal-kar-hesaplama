@@ -165,6 +165,10 @@ export async function loadTrendyolParcel(
     include: {
       store: true,
       items: { include: { productVariant: { include: { product: true } } } },
+      // The engine reads only orderShipmentPackageId and cargoTrackingNumber of a claim
+      // and status and orderItemId of its items. The claims sync enqueues a recompute
+      // only when one of those changes (apps/sync-worker/src/handlers/claim-change.ts):
+      // a new engine read from a claim must be added to that change check too.
       claims: { include: { items: true } },
     },
   });

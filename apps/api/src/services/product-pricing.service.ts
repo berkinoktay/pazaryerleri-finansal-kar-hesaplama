@@ -58,7 +58,9 @@ import type {
  * The unit price the quote probes the loaded base at to read whether the cost resolved.
  * Zero is a valid scenario (Faz 4B Task 1: a free item still deducts its cost and fees),
  * and the seller cost lines do not depend on the price, so a MISSING_COST at zero is
- * exactly the one the list raises -- the probe lets list and quote agree.
+ * exactly the one the list raises -- the probe lets list and quote agree. That agreement
+ * holds for priced variants only: the list does not check a zero-priced variant's inputs
+ * (see `noPriceRow`), while the quote still evaluates it.
  */
 const COST_PROBE_UNIT_PRICE = new Decimal(0);
 
@@ -824,8 +826,9 @@ function degradedRow(variant: VariantForListRow): ComputedPricingRow {
 /**
  * A zero-priced row: the variant's sale price is 0, which is not a price, so it is not
  * scored (owner decision 2026-11-10). The profit metrics stay empty, the three statuses
- * read OK (no input is missing) and cost is not surfaced. Not a failure -- nothing is
- * logged.
+ * read OK because an unpriced variant's inputs are not checked at all, and cost is not
+ * surfaced. Not a failure -- nothing is logged. (The quote still evaluates such a
+ * variant, so list and quote agree only for priced variants.)
  */
 function noPriceRow(variant: VariantForListRow): ComputedPricingRow {
   const display = buildRowDisplayFields(
