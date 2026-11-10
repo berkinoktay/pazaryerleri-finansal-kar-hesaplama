@@ -75,7 +75,7 @@ export interface TrendyolBaremBand {
  * resolved to an active carrier (its tariff is in `TrendyolShippingTariff.carrier`);
  * `not-recognized` means the name was null, blank, unknown (e.g. Trendyol's alternative
  * delivery), ambiguous, or only an inactive namesake, and carries the provider name as
- * Trendyol wrote it. On the tariff, `null` is the non-order context (a scenario or the
+ * Trendyol wrote it (null when null or blank). On the tariff, `null` is the non-order context (a scenario or the
  * store default): the carrier field alone decides, so a carrier-less TRENDYOL_CONTRACT
  * tariff stays NO_CARRIER / unavailable.
  */

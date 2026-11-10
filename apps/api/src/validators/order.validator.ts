@@ -313,7 +313,10 @@ export const OrderSummaryResponseSchema = z
       .openapi({
         description:
           'Share of filtered orders whose best-known profit statement reports a negative net ' +
-          'profit. lossCount counts those statements; totalCount is every filtered order.',
+          'profit. Both counts take the same statements: best-known, with a computed net ' +
+          'profit, status not CANCELLED (a cancellation never enters the rate). lossCount ' +
+          'is the negative ones, totalCount all of them; a filtered order without such a ' +
+          'statement counts in neither.',
       }),
   })
   .openapi('OrderSummaryResponse');
@@ -600,10 +603,16 @@ const ProfitIssueSchema = z
       description: 'The order item the issue names; null for a parcel-wide issue.',
       example: null,
     }),
-    detail: z.string().nullable().openapi({
-      description: 'Optional English context for the issue (not user-facing copy).',
-      example: 'Alternative Delivery',
-    }),
+    detail: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Optional English context for the issue. For CARRIER_NOT_RECOGNIZED it is the ' +
+          'carrier name as Trendyol reported it (null when blank) and the frontend shows it ' +
+          'inside its localized copy; for every other code it is not user-facing.',
+        example: 'Alternative Delivery',
+      }),
   })
   .openapi('ProfitIssue');
 

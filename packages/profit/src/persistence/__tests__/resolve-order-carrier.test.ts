@@ -12,7 +12,11 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { resolveOrderCarrier, type CarrierRow } from '../load-trendyol-parcel';
+import {
+  reportedProviderName,
+  resolveOrderCarrier,
+  type CarrierRow,
+} from '../load-trendyol-parcel';
 
 const PTT: CarrierRow = {
   id: 'carrier-ptt',
@@ -92,5 +96,19 @@ describe('resolveOrderCarrier', () => {
     // recognized rather than resolved to the dropped inactive row.
     const activeCarriers = [PTT];
     expect(resolveOrderCarrier('Trendyol Express Marketplace', activeCarriers)).toBeNull();
+  });
+});
+
+describe('reportedProviderName', () => {
+  it('keeps the name as Trendyol wrote it', () => {
+    expect(reportedProviderName('Alternative Delivery')).toBe('Alternative Delivery');
+    expect(reportedProviderName(' PTT Kargo Marketplace ')).toBe(' PTT Kargo Marketplace ');
+  });
+
+  it('reports null for a missing or blank name', () => {
+    // The frontend falls back to its "unknown carrier" label on null, never on ''.
+    expect(reportedProviderName(null)).toBeNull();
+    expect(reportedProviderName('')).toBeNull();
+    expect(reportedProviderName('   ')).toBeNull();
   });
 });

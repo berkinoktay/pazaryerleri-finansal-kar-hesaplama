@@ -126,9 +126,11 @@ section "Versioning" for details.
   - Added detail `profitIssues` (new `ProfitIssue` schema: `code`, `orderItemId`, `detail`): the
     best-known statement's issues that still apply to its selected lines. A warning a later
     actual made moot is left out (`CARRIER_NOT_RECOGNIZED` once an actual shipping line is
-    selected). `SELLER_CARGO_AGREEMENT_ESTIMATE` is hidden once a cargo invoice replaced every
-    shipping estimate (it stays when the statement has no shipping line). Always an array; empty
-    when the profit part is empty.
+    selected, and also while a `SELLER_CARGO_AGREEMENT_ESTIMATE` notice is shown, since no cargo
+    invoice is coming on such an order). `SELLER_CARGO_AGREEMENT_ESTIMATE` is hidden once a cargo
+    invoice replaced every shipping estimate (it stays when the statement has no shipping line).
+    For `CARRIER_NOT_RECOGNIZED`, `detail` is the carrier name as Trendyol reported it, or null
+    when blank. Always an array; empty when the profit part is empty.
 - **Live performance reads the estimate statement.** Net profit, margin and profit/cost ratio cover
   the orders whose estimate is computed (the ratio's denominator is their cost from the statement);
   per-order profit and margin are `null` unless computed; today's products `unitCost` comes from the

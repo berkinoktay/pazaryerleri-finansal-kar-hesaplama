@@ -18,7 +18,10 @@ const SELLER_CARGO_SHIPPING_TYPES: ReadonlySet<ProfitLineType> = new Set([
  * here, on read, from the selected lines:
  *
  * - CARRIER_NOT_RECOGNIZED is dropped once an ACTUAL SHIPPING line is selected -- the
- *   cargo invoice replaced the zero estimate the warning was about.
+ *   cargo invoice replaced the zero estimate the warning was about. It is also dropped
+ *   while a SELLER_CARGO_AGREEMENT_ESTIMATE warning is shown: on such an order no cargo
+ *   invoice is coming, so the two notices would contradict each other, and the step the
+ *   seller-cargo notice asks for (entering the store's own tariff) resolves both.
  * - SELLER_CARGO_AGREEMENT_ESTIMATE is dropped once a cargo invoice replaced every
  *   shipping estimate: at least one selected SHIPPING or RETURN_SHIPPING line is ACTUAL
  *   and none is an ESTIMATE. While a shipping leg is still an estimate the warning
@@ -40,9 +43,12 @@ export function visibleProfitIssues(
   const sellerCargoInvoiced =
     sellerCargoLines.length > 0 &&
     sellerCargoLines.every((line) => line.certainty === ProfitLineCertainty.ACTUAL);
+  const sellerCargoNoticeShown =
+    !sellerCargoInvoiced &&
+    issues.some((issue) => issue.code === ProfitIssueCode.SELLER_CARGO_AGREEMENT_ESTIMATE);
   return issues.filter((issue) => {
     if (issue.code === ProfitIssueCode.CARRIER_NOT_RECOGNIZED) {
-      return !shippingIsActual;
+      return !shippingIsActual && !sellerCargoNoticeShown;
     }
     if (issue.code === ProfitIssueCode.SELLER_CARGO_AGREEMENT_ESTIMATE) {
       return !sellerCargoInvoiced;

@@ -80,6 +80,17 @@ describe('visibleProfitIssues', () => {
     ).toEqual([SELLER_CARGO_AGREEMENT_ESTIMATE]);
   });
 
+  it('shows only the seller-cargo notice when both shipping notices are stored', () => {
+    // No cargo invoice is coming on a seller-cargo order: the carrier notice would promise one.
+    const both = [CARRIER_NOT_RECOGNIZED, SELLER_CARGO_AGREEMENT_ESTIMATE];
+    expect(visibleProfitIssues(both, [SALE, ESTIMATED_SHIPPING])).toEqual([
+      SELLER_CARGO_AGREEMENT_ESTIMATE,
+    ]);
+    expect(visibleProfitIssues(both, [SALE])).toEqual([SELLER_CARGO_AGREEMENT_ESTIMATE]);
+    // Once an invoice did arrive after all, both notices are moot.
+    expect(visibleProfitIssues(both, [SALE, INVOICED_SHIPPING])).toEqual([]);
+  });
+
   it('keeps every other issue as it is', () => {
     const issues = [CARRIER_NOT_RECOGNIZED, UNMAPPED_MARKETPLACE_RECORD];
     expect(visibleProfitIssues(issues, [SALE, INVOICED_SHIPPING])).toEqual([

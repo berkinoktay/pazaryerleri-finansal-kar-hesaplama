@@ -108,6 +108,19 @@ export interface CarrierRow {
  * identity decides whether Barem applies, the store's own prices decide the amount. A
  * not-recognized carrier there only means no Barem, never a zero estimate.
  */
+/**
+ * The provider name a not-recognized carrier issue carries: the name as Trendyol wrote
+ * it, or null when Trendyol sent none or only whitespace. The frontend shows this name
+ * inside its copy and falls back to an "unknown carrier" label on null, so a blank must
+ * not reach it as an empty string.
+ */
+export function reportedProviderName(cargoProviderName: string | null): string | null {
+  if (cargoProviderName === null || cargoProviderName.trim() === '') {
+    return null;
+  }
+  return cargoProviderName;
+}
+
 export function resolveOrderCarrier(
   cargoProviderName: string | null,
   carriers: readonly CarrierRow[],
@@ -243,7 +256,7 @@ export async function loadTrendyolParcel(
   const orderCarrier = resolveOrderCarrier(order.cargoProviderName, activeCarriers);
   const orderCarrierOutcome: TrendyolOrderCarrierOutcome =
     orderCarrier === null
-      ? { kind: 'not-recognized', providerName: order.cargoProviderName }
+      ? { kind: 'not-recognized', providerName: reportedProviderName(order.cargoProviderName) }
       : { kind: 'matched' };
   const shipping = await loadShippingTariff(tx, {
     storeId,
