@@ -809,7 +809,8 @@ export async function getOrderById(
     settledNetProfit: profit.fields.settledNetProfit,
     profitBreakdown: profit.profitBreakdown,
     // The best-known statement's issues that still apply to its selected lines (a
-    // warning an actual made moot is dropped); none without a line context.
+    // warning an actual made moot is dropped, and the carrier notice gives way to the
+    // seller-cargo notice; see visibleProfitIssues); none without a line context.
     profitIssues:
       profit.lineContext === null
         ? []

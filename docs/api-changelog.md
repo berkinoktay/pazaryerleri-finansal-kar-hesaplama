@@ -113,8 +113,9 @@ section "Versioning" for details.
   - Summary `lossOrderRate.totalCount` counts the in-scope orders whose best-known statement has a
     net profit and is not `CANCELLED`. Cancelled orders and orders without a profit (excluded, not
     computable, no statement yet) no longer inflate the denominator. `lossCount` uses the same
-    filter plus a negative net profit, so it never exceeds `totalCount`: a penalized cancellation
-    shows in the `lossOnly` list but enters neither count.
+    filter plus a negative net profit (the two counts are separate queries, so a write landing
+    between them can skew one refresh): a penalized cancellation shows in the `lossOnly` list but
+    enters neither count.
   - Detail items: `refundedCommissionGross` comes from the best-known `COMMISSION_REFUND` lines
     (`'0.00'` when none) instead of the item column. `commissionGross` no longer falls back to the
     item column when the order has profit lines and none supplies it: it reads `'0.00'` (e.g. a
@@ -126,9 +127,10 @@ section "Versioning" for details.
   - Added detail `profitIssues` (new `ProfitIssue` schema: `code`, `orderItemId`, `detail`): the
     best-known statement's issues that still apply to its selected lines. A warning a later
     actual made moot is left out (`CARRIER_NOT_RECOGNIZED` once an actual shipping line is
-    selected, and also while a `SELLER_CARGO_AGREEMENT_ESTIMATE` notice is shown, since no cargo
-    invoice is coming on such an order). `SELLER_CARGO_AGREEMENT_ESTIMATE` is hidden once a cargo
-    invoice replaced every shipping estimate (it stays when the statement has no shipping line).
+    selected; `SELLER_CARGO_AGREEMENT_ESTIMATE` once a cargo invoice replaced every shipping
+    estimate, while it stays when the statement has no shipping line). `CARRIER_NOT_RECOGNIZED`
+    is also left out while a `SELLER_CARGO_AGREEMENT_ESTIMATE` notice is shown: no cargo invoice
+    is coming on such an order, so the two notices would contradict each other.
     For `CARRIER_NOT_RECOGNIZED`, `detail` is the carrier name as Trendyol reported it, or null
     when blank. Always an array; empty when the profit part is empty.
 - **Live performance reads the estimate statement.** Net profit, margin and profit/cost ratio cover

@@ -88,6 +88,19 @@ export interface CarrierRow {
 }
 
 /**
+ * The provider name a not-recognized carrier issue carries: the name as Trendyol wrote
+ * it, or null when Trendyol sent none or only whitespace. The frontend shows this name
+ * inside its copy and falls back to an "unknown carrier" label on null, so a blank must
+ * not reach it as an empty string.
+ */
+export function reportedProviderName(cargoProviderName: string | null): string | null {
+  if (cargoProviderName === null || cargoProviderName.trim() === '') {
+    return null;
+  }
+  return cargoProviderName;
+}
+
+/**
  * The carrier whose tariff the order's shipping estimate should use. Trendyol stamps
  * each order with the carrier it assigned (`cargoProviderName`); that string is the
  * getProviders "Name" ("PTT Kargo Marketplace", ...), which seeds the carrier's
@@ -108,19 +121,6 @@ export interface CarrierRow {
  * identity decides whether Barem applies, the store's own prices decide the amount. A
  * not-recognized carrier there only means no Barem, never a zero estimate.
  */
-/**
- * The provider name a not-recognized carrier issue carries: the name as Trendyol wrote
- * it, or null when Trendyol sent none or only whitespace. The frontend shows this name
- * inside its copy and falls back to an "unknown carrier" label on null, so a blank must
- * not reach it as an empty string.
- */
-export function reportedProviderName(cargoProviderName: string | null): string | null {
-  if (cargoProviderName === null || cargoProviderName.trim() === '') {
-    return null;
-  }
-  return cargoProviderName;
-}
-
 export function resolveOrderCarrier(
   cargoProviderName: string | null,
   carriers: readonly CarrierRow[],

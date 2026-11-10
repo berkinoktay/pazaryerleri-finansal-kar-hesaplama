@@ -1341,8 +1341,30 @@ describe('loadTrendyolParcel', () => {
   });
 
   it('estimates zero shipping for an empty carrier name', async () => {
+    // Trendyol sent no usable name: the line records null, never '' (the frontend falls
+    // back to its "unknown carrier" label on null only).
     const shipping = await shippingLineFor('');
-    expectZeroShipping(shipping, '');
+    expectZeroShipping(shipping, null);
+  });
+
+  it('reports a null provider name for a whitespace-only carrier name', async () => {
+    const parcel = await seedMelontikParcel();
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { cargoProviderName: '   ' },
+    });
+
+    const computed = await computeParcelProfit(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    expectZeroShipping(requireLine(computed.lines, ProfitLineType.SHIPPING, null), null);
+    expect(
+      computed.bestKnown.issues.filter(
+        (issue) => issue.code === ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
+      ),
+    ).toEqual([{ code: ProfitIssueCode.CARRIER_NOT_RECOGNIZED, orderItemId: null, detail: null }]);
   });
 
   it('estimates zero shipping for an ambiguous carrier name', async () => {

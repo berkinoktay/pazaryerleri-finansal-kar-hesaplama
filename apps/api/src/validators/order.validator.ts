@@ -590,7 +590,8 @@ const ProfitBreakdownSchema = z
 
 // A profit issue the engine recorded on the order's best-known statement and that still
 // applies to its selected lines. The frontend localizes from `code`; `detail` is English
-// context for logs.
+// context (shown inside the localized copy only for CARRIER_NOT_RECOGNIZED, where it is
+// the carrier name Trendyol reported).
 const ProfitIssueSchema = z
   .object({
     code: z.enum(ProfitIssueCode).openapi({
@@ -667,9 +668,12 @@ export const OrderDetailSchema = z
     profitIssues: z.array(ProfitIssueSchema).openapi({
       description:
         "The best-known profit statement's issues that still apply to its selected lines; a " +
-        'warning a later actual made moot is left out (e.g. CARRIER_NOT_RECOGNIZED once a cargo ' +
-        'invoice is selected). Empty when there are none, and when the profit part is empty (a ' +
-        'platform the engine cannot compute, or a profit read that failed).',
+        'warning a later actual made moot is left out (CARRIER_NOT_RECOGNIZED once an actual ' +
+        'shipping line is selected; SELLER_CARGO_AGREEMENT_ESTIMATE once a cargo invoice replaced ' +
+        'every shipping estimate). CARRIER_NOT_RECOGNIZED is also left out while ' +
+        'SELLER_CARGO_AGREEMENT_ESTIMATE is returned, since no cargo invoice is coming on such an ' +
+        'order. Empty when there are none, and when the profit part is empty (a platform the ' +
+        'engine cannot compute, or a profit read that failed).',
     }),
 
     // Promosyon gösterimi (spec ekleme #3): mapper'ın yakaladığı satıcı-indirimi

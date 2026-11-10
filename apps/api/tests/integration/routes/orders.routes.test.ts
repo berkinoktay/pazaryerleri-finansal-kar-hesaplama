@@ -706,7 +706,7 @@ describe('Order routes', () => {
         status: 'CANCELLED',
         saleGross: '0',
         netProfit: '-15.00',
-        reconciliationStatus: 'PARTIALLY_SETTLED',
+        reconciliationStatus: 'FULLY_SETTLED',
       });
 
       const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {

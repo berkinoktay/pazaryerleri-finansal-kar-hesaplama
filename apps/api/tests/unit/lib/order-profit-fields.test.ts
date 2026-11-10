@@ -149,18 +149,28 @@ describe('orderProfitFields', () => {
   });
 
   it('hides a penalty-free cancelled net profit and keeps a penalty', () => {
+    // A cancellation writes no SALE line: zero sale, null margins. The estimate view is
+    // never reconciled; the best-known view settles fully once the records arrive.
     const cancelledView = {
       status: ProfitStatus.CANCELLED,
-      reconciliationStatus: ReconciliationStatus.FULLY_SETTLED,
+      saleGross: new Decimal('0'),
+      saleMarginPct: null,
+      costMarkupPct: null,
+    };
+    const cancelledEstimate = {
+      ...cancelledView,
+      view: ProfitStatementView.ESTIMATE,
+      reconciliationStatus: ReconciliationStatus.NOT_SETTLED,
+      netProfit: new Decimal('0'),
     };
     const noPenalty = orderProfitFields({
       pair: toStatementPair([
+        makeStatement(cancelledEstimate),
         makeStatement({
           ...cancelledView,
-          view: ProfitStatementView.ESTIMATE,
+          reconciliationStatus: ReconciliationStatus.FULLY_SETTLED,
           netProfit: new Decimal('0'),
         }),
-        makeStatement({ ...cancelledView, netProfit: new Decimal('0') }),
       ]),
       orderStatus: OrderStatus.CANCELLED,
       orderSaleGross: new Decimal('240.00'),
@@ -173,15 +183,11 @@ describe('orderProfitFields', () => {
     // zero-net cancel, and the penalty arrives with the settlement on the best-known view.
     const withPenalty = orderProfitFields({
       pair: toStatementPair([
+        makeStatement(cancelledEstimate),
         makeStatement({
           ...cancelledView,
-          view: ProfitStatementView.ESTIMATE,
-          netProfit: new Decimal('0'),
-        }),
-        makeStatement({
-          status: ProfitStatus.CANCELLED,
+          reconciliationStatus: ReconciliationStatus.FULLY_SETTLED,
           netProfit: new Decimal('-15.00'),
-          reconciliationStatus: ReconciliationStatus.PARTIALLY_SETTLED,
         }),
       ]),
       orderStatus: OrderStatus.CANCELLED,
