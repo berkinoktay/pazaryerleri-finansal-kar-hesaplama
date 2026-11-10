@@ -86,6 +86,11 @@ function resolveSaleGross(
  * Sale VAT follows the same rule as the sale it is part of (resolveSaleGross): the
  * best-known statement's output VAT when one exists; otherwise the order's own sale
  * VAT, which is 0 for a cancelled order with no statement and null until synced.
+ *
+ * Known assumption: `vatOutput` is the VAT of every OUTPUT line. Today only SALE and
+ * SALE_RETURN lines are produced, so it equals the VAT inside `saleGross`. A mapper
+ * that produces a MARKETPLACE_DISCOUNT_CONTRIBUTION line would break that equality;
+ * the statement would then need its own sale-VAT column.
  */
 function resolveSaleVat(
   bestKnown: StatementListRow | null,

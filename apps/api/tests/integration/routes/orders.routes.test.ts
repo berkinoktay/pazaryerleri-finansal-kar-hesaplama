@@ -688,7 +688,9 @@ describe('Order routes', () => {
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
 
-      // A cancellation penalty line leaves a non-zero net profit: the amount stays visible.
+      // The engine writes no estimate line for a cancellation, so the estimate view is a
+      // zero-net CANCELLED view. The penalty arrives with the settlement on the best-known
+      // view: its non-zero net profit stays visible as the settled profit.
       const order = await createOrder(org.id, store.id, {
         status: 'CANCELLED',
         saleGross: '240.00',
@@ -697,7 +699,7 @@ describe('Order routes', () => {
         view: 'ESTIMATE',
         status: 'CANCELLED',
         saleGross: '0',
-        netProfit: '-15.00',
+        netProfit: '0',
       });
       await createProfitStatement(order.id, org.id, store.id, {
         view: 'BEST_KNOWN',
@@ -715,7 +717,7 @@ describe('Order routes', () => {
         data: { id: string; estimatedNetProfit: string | null; settledNetProfit: string | null }[];
       } = await res.json();
       const row = body.data.find((o) => o.id === order.id);
-      expect(row?.estimatedNetProfit).toBe('-15');
+      expect(row?.estimatedNetProfit).toBeNull();
       expect(row?.settledNetProfit).toBe('-15');
     });
 
@@ -2008,6 +2010,15 @@ describe('Order routes', () => {
         saleGross: '0',
         netProfit: '0',
       });
+      // Cancelled with a penalty (a loss): still not a sale, so it enters neither the
+      // denominator nor the loss count -- the count stays a subset of the denominator.
+      const penalized = await createOrder(org.id, store.id, { status: 'CANCELLED' });
+      await createProfitStatement(penalized.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'CANCELLED',
+        saleGross: '0',
+        netProfit: '-15.00',
+      });
       // Excluded with no net profit: an order without a profit stays out of the rate.
       const excluded = await createOrder(org.id, store.id, { status: 'DELIVERED' });
       await createProfitStatement(excluded.id, org.id, store.id, {
@@ -2024,6 +2035,30 @@ describe('Order routes', () => {
       expect(res.status).toBe(200);
       const body: { lossOrderRate: { lossCount: number; totalCount: number } } = await res.json();
       expect(body.lossOrderRate).toMatchObject({ lossCount: 1, totalCount: 3 });
+    });
+
+    it('reports a zero loss rate when the only loss is a penalized cancellation', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      const penalized = await createOrder(org.id, store.id, { status: 'CANCELLED' });
+      await createProfitStatement(penalized.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'CANCELLED',
+        saleGross: '0',
+        netProfit: '-15.00',
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/summary`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body: { lossOrderRate: { lossCount: number; totalCount: number; pct: string } } =
+        await res.json();
+      expect(body.lossOrderRate).toEqual({ lossCount: 0, totalCount: 0, pct: '0' });
     });
 
     it('averages the best-known margins', async () => {

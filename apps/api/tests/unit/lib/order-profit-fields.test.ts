@@ -169,20 +169,26 @@ describe('orderProfitFields', () => {
     expect(noPenalty.estimatedNetProfit).toBeNull();
     expect(noPenalty.settledNetProfit).toBeNull();
 
+    // The engine writes no estimate line for a cancellation: the estimate view stays a
+    // zero-net cancel, and the penalty arrives with the settlement on the best-known view.
     const withPenalty = orderProfitFields({
       pair: toStatementPair([
         makeStatement({
           ...cancelledView,
           view: ProfitStatementView.ESTIMATE,
-          netProfit: new Decimal('-15.00'),
+          netProfit: new Decimal('0'),
         }),
-        makeStatement({ ...cancelledView, netProfit: new Decimal('-15.00') }),
+        makeStatement({
+          status: ProfitStatus.CANCELLED,
+          netProfit: new Decimal('-15.00'),
+          reconciliationStatus: ReconciliationStatus.PARTIALLY_SETTLED,
+        }),
       ]),
       orderStatus: OrderStatus.CANCELLED,
       orderSaleGross: new Decimal('240.00'),
       orderSaleVat: null,
     });
-    expect(withPenalty.estimatedNetProfit).toBe('-15');
+    expect(withPenalty.estimatedNetProfit).toBeNull();
     expect(withPenalty.settledNetProfit).toBe('-15');
   });
 });

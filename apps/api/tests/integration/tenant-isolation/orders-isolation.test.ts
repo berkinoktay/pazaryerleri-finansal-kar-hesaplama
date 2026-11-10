@@ -81,15 +81,29 @@ describe('Orders — tenant isolation', () => {
     const storeA = await createStore(orgA.id);
     const orgB = await createOrganization();
     const storeB = await createStore(orgB.id);
-    await createOrder(orgB.id, storeB.id);
+    // orgB carries a sale and a loss-making best-known statement: without the tenant
+    // filter, revenue, net profit, the loss count and its denominator would all pick
+    // them up.
+    const orderB = await createOrder(orgB.id, storeB.id, { saleGross: '999.00' });
+    await createProfitStatement(orderB.id, orgB.id, storeB.id, {
+      view: 'BEST_KNOWN',
+      saleGross: '999.00',
+      netProfit: '-50.00',
+    });
 
     const res = await app.request(
       `/v1/organizations/${orgA.id}/stores/${storeA.id}/orders/summary`,
       { headers: { Authorization: bearer(user.accessToken) } },
     );
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body: {
+      totalRevenueGross: string;
+      netProfitGross: string;
+      lossOrderRate: { lossCount: number; totalCount: number };
+    } = await res.json();
     expect(body.lossOrderRate.totalCount).toBe(0);
+    expect(body.lossOrderRate.lossCount).toBe(0);
+    expect(body.netProfitGross).toBe('0');
     expect(body.totalRevenueGross).toBe('0');
   });
 

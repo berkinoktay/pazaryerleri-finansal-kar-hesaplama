@@ -104,14 +104,17 @@ section "Versioning" for details.
   the profit statements** (`GET .../orders`, `GET .../orders/summary`, `GET .../orders/{orderId}`).
   - Cancelled profit: a view whose statement is `CANCELLED` with a zero net profit (a cancellation
     without a penalty) reports `estimatedNetProfit` / `settledNetProfit` as `null` on the list
-    and the detail. A cancellation penalty (non-zero net profit) stays visible.
+    and the detail. A cancellation penalty (non-zero net profit) stays visible: the engine writes
+    no estimate line for a cancellation, so the penalty shows on `settledNetProfit`.
   - `saleVat` (list rows and detail top level) comes from the same source as `saleGross`: the
     best-known statement's output VAT; the order's own sale VAT when no statement exists yet; `0`
     for a cancelled order without a statement. Before, it was always the order column, so a
     cancelled or returned order showed its pre-cancel / pre-return VAT.
   - Summary `lossOrderRate.totalCount` counts the in-scope orders whose best-known statement has a
     net profit and is not `CANCELLED`. Cancelled orders and orders without a profit (excluded, not
-    computable, no statement yet) no longer inflate the denominator.
+    computable, no statement yet) no longer inflate the denominator. `lossCount` uses the same
+    filter plus a negative net profit, so it never exceeds `totalCount`: a penalized cancellation
+    shows in the `lossOnly` list but enters neither count.
   - Detail items: `refundedCommissionGross` comes from the best-known `COMMISSION_REFUND` lines
     (`'0.00'` when none) instead of the item column. `commissionGross` no longer falls back to the
     item column when the order has profit lines and none supplies it: it reads `'0.00'` (e.g. a
@@ -123,8 +126,9 @@ section "Versioning" for details.
   - Added detail `profitIssues` (new `ProfitIssue` schema: `code`, `orderItemId`, `detail`): the
     best-known statement's issues that still apply to its selected lines. A warning a later
     actual made moot is left out (`CARRIER_NOT_RECOGNIZED` once an actual shipping line is
-    selected; `SELLER_CARGO_AGREEMENT_ESTIMATE` once no shipping leg is an estimate). Always an
-    array; empty when the profit part is empty.
+    selected). `SELLER_CARGO_AGREEMENT_ESTIMATE` is hidden once a cargo invoice replaced every
+    shipping estimate (it stays when the statement has no shipping line). Always an array; empty
+    when the profit part is empty.
 - **Live performance reads the estimate statement.** Net profit, margin and profit/cost ratio cover
   the orders whose estimate is computed (the ratio's denominator is their cost from the statement);
   per-order profit and margin are `null` unless computed; today's products `unitCost` comes from the

@@ -458,6 +458,9 @@ export async function getOrdersSummary(
   // (rule B5), and an order with no profit (excluded, not computable, or no statement
   // yet) does not enter the rate. The same best-known where keeps the organizationId +
   // storeId scope.
+  // Loss-rate numerator: the same filter plus a negative net profit, so the count is a
+  // subset of the denominator. A cancellation is not in the rate (rule B5): a penalized
+  // cancellation shows in the `lossOnly` list but does not enter the loss count.
   const [totalCount, aggregate, lossCount, fallbackRevenue] = await Promise.all([
     prisma.orderProfitStatement.count({
       where: {
@@ -472,7 +475,11 @@ export async function getOrdersSummary(
       _avg: { saleMarginPct: true },
     }),
     prisma.orderProfitStatement.count({
-      where: { ...bestKnownStatementWhere, netProfit: { lt: 0 } },
+      where: {
+        ...bestKnownStatementWhere,
+        netProfit: { lt: 0 },
+        status: { not: ProfitStatus.CANCELLED },
+      },
     }),
     prisma.order.aggregate({ where: fallbackRevenueWhere, _sum: { saleGross: true } }),
   ]);
