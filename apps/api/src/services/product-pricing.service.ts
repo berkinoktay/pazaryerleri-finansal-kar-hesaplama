@@ -12,7 +12,8 @@
 // missing. The three independent statuses are read from the statement's issues
 // (MISSING_COST -> NO_PROFILES, SHIPPING_ESTIMATE_UNAVAILABLE -> the shipping status,
 // MISSING_COMMISSION_RATE -> NO_RULE); a variant is calculable only when all three are
-// OK (deriveCalculable). When not calculable, profit/margin fields are null.
+// OK (deriveCalculable). When not calculable, profit/margin fields are null. A variant
+// whose sale price is 0 is not scored at all (noPriceRow): not calculable, empty profit.
 
 import { Decimal } from 'decimal.js';
 
@@ -356,6 +357,12 @@ async function computeScenarioRows(
   const failureLog = createRequestFailureLog({ surface: 'product-pricing', organizationId: orgId });
 
   const rows = variants.map((variant): ComputedPricingRow => {
+    // Owner decision 2026-11-10: a zero sale price is not a price (most locked or
+    // blacklisted stage products carry 0), so the variant is not scored. Not a failure,
+    // so nothing is logged.
+    if (variant.salePrice.isZero()) {
+      return noPriceRow(variant);
+    }
     const loaded = bases === null ? undefined : bases.get(variant.id);
     if (loaded === undefined || loaded.kind !== 'ready') {
       return degradedRow(variant);
@@ -806,6 +813,21 @@ function notCalculableRow(display: RowDisplayFields): ComputedPricingRow {
  * surface. The caller logs the failure (decision 9).
  */
 function degradedRow(variant: VariantForListRow): ComputedPricingRow {
+  const display = buildRowDisplayFields(
+    variant,
+    { costStatus: 'OK', shippingStatus: 'OK', commissionStatus: 'OK' },
+    null,
+  );
+  return notCalculableRow(display);
+}
+
+/**
+ * A zero-priced row: the variant's sale price is 0, which is not a price, so it is not
+ * scored (owner decision 2026-11-10). The profit metrics stay empty, the three statuses
+ * read OK (no input is missing) and cost is not surfaced. Not a failure -- nothing is
+ * logged.
+ */
+function noPriceRow(variant: VariantForListRow): ComputedPricingRow {
   const display = buildRowDisplayFields(
     variant,
     { costStatus: 'OK', shippingStatus: 'OK', commissionStatus: 'OK' },

@@ -155,6 +155,11 @@ section "Versioning" for details.
     when yesterday has no costed order (was `0.00`).
   - Feed tabs: an order without a computed estimate is listed under `pending` (with buffer rows),
     not `calculated`; `counts.calculated` / `counts.pending` match the KPIs' costed subset.
+- **Product pricing list leaves zero-priced variants unscored** (`GET .../product-pricing`). No
+  wire-shape change: a variant whose sale price is 0 is returned with `calculable: false`, empty
+  profit / margin fields, `cost: null` and OK statuses, so it is dropped by `calculableOnly` and by
+  `profitStatus=profitable|breakeven|loss`, and sorts with the null-profit rows. The quote is
+  unchanged.
 - **Returns summary money KPIs** (`refundDeductionGross`, `commissionRefundGross`,
   `costReturnGross`, `netImpactGross`) come from the profit lines, dated by the transaction date of
   each return line's earliest settlement record; an item's cost return counts with its return.

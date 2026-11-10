@@ -171,7 +171,8 @@ export const ProductPricingItemSchema = z
       description:
         'True only when costStatus, shippingEstimateStatus and commissionStatus are all OK and ' +
         'the scenario produced a net profit. False otherwise, including when the profit could ' +
-        'not be computed (the failure is logged server-side).',
+        "not be computed (the failure is logged server-side), and false when the variant's " +
+        'sale price is 0 (a zero price is not scored).',
       example: true,
     }),
     netProfit: moneyString.nullable().openapi({

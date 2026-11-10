@@ -1576,3 +1576,125 @@ describe('.../product-pricing -- version-less cost profile (list + quote agree)'
     expect(quoteBody.reason).toBe('NO_COST');
   });
 });
+
+// -- Zero sale price (owner decision 2026-11-10) -----------------------------
+//
+// A costed variant whose sale price is 0.00 (most locked or blacklisted products carry
+// 0) is not scored: the row is still listed, but not calculable and with empty profit,
+// so it drops out of calculableOnly, never reads as a loss and sorts with the
+// null-profit rows. Built on the fully-configured store (calculable 57.85 + no-cost).
+
+interface ZeroPriceCtx extends FullySetupCtx {
+  zeroPriceVariantId: string;
+}
+
+async function setupZeroPriceFixture(): Promise<ZeroPriceCtx> {
+  const base = await setupFullyConfiguredStore();
+
+  // Reuse the calculable variant's product and cost profile so the zero-priced variant
+  // has every input (cost, shipping, commission) and differs only in its sale price.
+  const calculable = await prisma.productVariant.findFirst({
+    where: { id: base.calculableVariantId, organizationId: base.orgId, storeId: base.storeId },
+    select: { productId: true },
+  });
+  const costLink = await prisma.productVariantCostProfile.findFirst({
+    where: { organizationId: base.orgId, productVariantId: base.calculableVariantId },
+    select: { profileId: true },
+  });
+  if (calculable === null || costLink === null) {
+    throw new Error('fully-configured fixture is missing the calculable variant or its cost');
+  }
+
+  const zeroPrice = await prisma.productVariant.create({
+    data: {
+      organizationId: base.orgId,
+      storeId: base.storeId,
+      productId: calculable.productId,
+      platformVariantId: 80012n,
+      barcode: 'BC-ZERO',
+      stockCode: 'STK-ZERO',
+      salePrice: new Decimal('0.00'),
+      listPrice: new Decimal('0.00'),
+      vatRate: 20,
+      dimensionalWeightOverride: new Decimal('3.0'),
+    },
+  });
+  await prisma.productVariantCostProfile.create({
+    data: {
+      organizationId: base.orgId,
+      profileId: costLink.profileId,
+      productVariantId: zeroPrice.id,
+    },
+  });
+
+  return { ...base, zeroPriceVariantId: zeroPrice.id };
+}
+
+function isListResponseWire(value: unknown): value is ListResponseWire {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'data' in value &&
+    Array.isArray(value.data) &&
+    'pagination' in value
+  );
+}
+
+describe('GET .../product-pricing -- zero sale price', () => {
+  let zctx: ZeroPriceCtx;
+
+  beforeAll(async () => {
+    await truncateAll();
+    zctx = await setupZeroPriceFixture();
+  });
+
+  async function fetchRows(query: string): Promise<PricingRowWire[]> {
+    const res = await app.request(
+      `/v1/organizations/${zctx.orgId}/stores/${zctx.storeId}/product-pricing${query}`,
+      { headers: { Authorization: bearer(zctx.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body: unknown = await res.json();
+    if (!isListResponseWire(body)) {
+      throw new Error('unexpected product pricing list body');
+    }
+    return body.data;
+  }
+
+  it('does not score a variant whose sale price is zero', async () => {
+    // No calculableOnly: the row is listed, not calculable, with empty profit. Its
+    // inputs are all present, so the three statuses stay OK; cost is not surfaced.
+    const all = await fetchRows('?perPage=25');
+    const row = all.find((r) => r.variantId === zctx.zeroPriceVariantId);
+    expect(row).toBeDefined();
+    expect(row?.salePrice).toBe('0.00');
+    expect(row?.netProfit).toBeNull();
+    expect(row?.calculable).toBe(false);
+    expect(row?.saleMarginPct).toBeNull();
+    expect(row?.costMarkupPct).toBeNull();
+    expect(row?.cost).toBeNull();
+    expect(row?.costStatus).toBe('OK');
+    expect(row?.shippingEstimateStatus).toBe('OK');
+    expect(row?.commissionStatus).toBe('OK');
+
+    // calculableOnly=true: the zero-priced variant is left out, the scored one stays.
+    const calculableIds = (await fetchRows('?calculableOnly=true&perPage=25')).map(
+      (r) => r.variantId,
+    );
+    expect(calculableIds).not.toContain(zctx.zeroPriceVariantId);
+    expect(calculableIds).toContain(zctx.calculableVariantId);
+
+    // profitStatus=loss: a zero price never reads as a loss.
+    const lossIds = (await fetchRows('?profitStatus=loss&perPage=25')).map((r) => r.variantId);
+    expect(lossIds).not.toContain(zctx.zeroPriceVariantId);
+
+    // sortBy=netProfit:asc: it sorts in the null-profit tail, after every scored row
+    // (nulls keep the SQL salePrice order, so it may precede the no-cost row there).
+    const sorted = await fetchRows('?sortBy=netProfit:asc&perPage=25');
+    const zeroIndex = sorted.findIndex((r) => r.variantId === zctx.zeroPriceVariantId);
+    const calculableIndex = sorted.findIndex((r) => r.variantId === zctx.calculableVariantId);
+    expect(calculableIndex).toBeGreaterThan(-1);
+    expect(zeroIndex).toBeGreaterThan(calculableIndex);
+    expect(sorted.slice(zeroIndex).every((r) => r.netProfit === null)).toBe(true);
+  });
+});
