@@ -523,6 +523,7 @@ const EMPTY_ITEM_PROFIT_VALUES: ItemProfitValues = {
   commissionRate: null,
   estimatedCommissionGross: null,
   settledCommissionGross: null,
+  refundedCommissionGross: null,
 };
 
 /**
@@ -582,17 +583,12 @@ async function loadOrderProfitDetail(
     readonly id: string;
     readonly status: OrderStatus;
     readonly saleGross: Prisma.Decimal | null;
-    readonly listGross: Prisma.Decimal | null;
-    readonly sellerDiscountGross: Prisma.Decimal | null;
   },
 ): Promise<OrderProfitDetail> {
   const statements = await prisma.orderProfitStatement.findMany({
     where: { organizationId: orgId, storeId, orderId: order.id },
     select: DETAIL_STATEMENT_SELECT,
   });
-
-  const listGross = new Decimal(order.listGross?.toString() ?? '0');
-  const sellerDiscountGross = new Decimal(order.sellerDiscountGross?.toString() ?? '0');
 
   let bestKnownRow: DetailStatementRow | null = null;
   for (const statement of statements) {
@@ -625,8 +621,6 @@ async function loadOrderProfitDetail(
       const profitBreakdown = buildStatementBreakdown({
         totals: statementTotalsFromRow(bestKnownRow),
         selectedLines: lineContext.bestKnownLines,
-        listGross,
-        sellerDiscountGross,
       });
       return { fields, profitBreakdown, lineContext };
     } catch (err) {
@@ -675,8 +669,6 @@ async function loadOrderProfitDetail(
   const profitBreakdown = buildStatementBreakdown({
     totals: statementTotalsFromStatement(computed.bestKnown),
     selectedLines: computed.bestKnown.selectedLines,
-    listGross,
-    sellerDiscountGross,
   });
   return {
     fields: { ...computedFields, saleGross: listSaleGross },

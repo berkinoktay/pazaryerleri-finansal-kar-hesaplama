@@ -129,19 +129,14 @@ export function scenarioMarginPct(c: ScenarioCompute): string | null {
 }
 
 /**
- * The scenario's full profit breakdown (4-decimal margins, the quote precision) at
- * `listGross` (the unit price times the quantity, with no seller discount at the scenario
- * level), or null when the scenario is not calculable. Shared by the unit estimate and the
- * order estimate so both read one serializer.
+ * The scenario's full profit breakdown (4-decimal margins, the quote precision), or null
+ * when the scenario is not calculable. Its list price is the scenario sale (the unit price
+ * times the quantity, with no seller discount at the scenario level), read from the
+ * statement's SALE line. Shared by the unit estimate and the order estimate so both read
+ * one serializer.
  */
-export function scenarioBreakdown(c: ScenarioCompute, listGross: Decimal): QuoteBreakdown | null {
-  return c.statement !== null
-    ? quoteBreakdownFromStatement({
-        statement: c.statement,
-        listGross,
-        sellerDiscountGross: new Decimal(0),
-      })
-    : null;
+export function scenarioBreakdown(c: ScenarioCompute): QuoteBreakdown | null {
+  return c.statement !== null ? quoteBreakdownFromStatement({ statement: c.statement }) : null;
 }
 
 /** Serializes a scenario compute to the wire scenario (money 2dp, commission 4dp). */

@@ -196,5 +196,5 @@ export function computeDiscountEstimate(params: {
     price: params.price,
     bandPrice: params.bandPrice,
   });
-  return toEstimate(c, scenarioBreakdown(c, toKurusHalfUp(params.price)));
+  return toEstimate(c, scenarioBreakdown(c));
 }

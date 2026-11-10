@@ -1,6 +1,9 @@
 import { Decimal } from 'decimal.js';
 import { Prisma } from '@pazarsync/db';
 import {
+  ProfitLineCertainty,
+  ProfitLineLevel,
+  ProfitLineSource,
   ProfitLineType,
   ProfitStatementView,
   ProfitStatus,
@@ -10,7 +13,7 @@ import { type ResolvedProfitSettings } from '@pazarsync/utils';
 import { describe, expect, it } from 'vitest';
 
 import { PROFIT_ENGINE_VERSION } from '../../core/engine-version';
-import { type ProfitLine } from '../../core/profit-line';
+import { createProfitLine, type ProfitLine } from '../../core/profit-line';
 import { computeProfitStatement, type ProfitStatement } from '../../core/profit-statement';
 import { roundPercent } from '../../money';
 import { makeLine } from '../../__tests__/helpers/make-profit-line';
@@ -28,8 +31,6 @@ const WITHOUT_STOPPAGE: ResolvedProfitSettings = {
   includeStopaj: false,
   includeNegativeNetVat: true,
 };
-const LIST_GROSS = new Decimal('1000.00');
-const SELLER_DISCOUNT_GROSS = new Decimal('120.00');
 
 /** Builds a best-known statement from a set of lines under the given flags. */
 function statementOf(
@@ -57,8 +58,6 @@ function breakdownOf(statement: ProfitStatement): StatementBreakdown {
   const breakdown = buildStatementBreakdown({
     totals: statementTotalsFromStatement(statement),
     selectedLines: statement.selectedLines,
-    listGross: LIST_GROSS,
-    sellerDiscountGross: SELLER_DISCOUNT_GROSS,
   });
   if (breakdown === null) {
     throw new Error('expected a breakdown, got null');
@@ -76,6 +75,129 @@ function expectClosesToSale(breakdown: StatementBreakdown): void {
 }
 
 const TWO_DECIMALS = /^-?\d+\.\d{2}$/;
+
+/** A SALE line for one item, optionally carrying the engine's list/discount inputs. */
+function saleLine(params: {
+  readonly orderItemId: string;
+  readonly gross: string;
+  readonly listGross?: string;
+  readonly sellerDiscountGross?: string;
+}): ProfitLine {
+  const inputs: Record<string, string> = {};
+  if (params.listGross !== undefined) {
+    inputs['listGross'] = params.listGross;
+  }
+  if (params.sellerDiscountGross !== undefined) {
+    inputs['sellerDiscountGross'] = params.sellerDiscountGross;
+  }
+  return createProfitLine({
+    type: ProfitLineType.SALE,
+    level: ProfitLineLevel.ITEM,
+    orderItemId: params.orderItemId,
+    certainty: ProfitLineCertainty.ESTIMATE,
+    source: ProfitLineSource.RULE,
+    amount: { gross: new Decimal(params.gross), vat: new Decimal('0') },
+    vatRatePct: null,
+    inputs,
+    externalRecord: null,
+  });
+}
+
+/** The list price less the seller discount must equal the shown sale to the kurus. */
+function expectListLessDiscountIsSale(breakdown: StatementBreakdown): void {
+  expect(new Decimal(breakdown.listGross).sub(breakdown.sellerDiscountGross).toFixed(2)).toBe(
+    breakdown.saleGross,
+  );
+}
+
+describe('buildStatementBreakdown income lines', () => {
+  it('derives list price and discount from the sale lines', () => {
+    const breakdown = breakdownOf(
+      statementOf([
+        saleLine({
+          orderItemId: 'item-1',
+          gross: '399.00',
+          listGross: '420.00',
+          sellerDiscountGross: '21.00',
+        }),
+        saleLine({
+          orderItemId: 'item-2',
+          gross: '140.00',
+          listGross: '140.00',
+          sellerDiscountGross: '0.00',
+        }),
+      ]),
+    );
+
+    expect(breakdown.listGross).toBe('560.00');
+    expect(breakdown.sellerDiscountGross).toBe('21.00');
+    expect(breakdown.saleGross).toBe('539.00');
+    expectListLessDiscountIsSale(breakdown);
+  });
+
+  it('nets a returned item out of the list price and discount', () => {
+    const breakdown = breakdownOf(
+      statementOf([
+        saleLine({
+          orderItemId: 'item-1',
+          gross: '399.00',
+          listGross: '420.00',
+          sellerDiscountGross: '21.00',
+        }),
+        makeLine({ type: ProfitLineType.SALE_RETURN, orderItemId: 'item-1', gross: '399.00' }),
+        saleLine({
+          orderItemId: 'item-2',
+          gross: '140.00',
+          listGross: '140.00',
+          sellerDiscountGross: '0.00',
+        }),
+      ]),
+    );
+
+    expect(breakdown.listGross).toBe('140.00');
+    expect(breakdown.sellerDiscountGross).toBe('0.00');
+    expect(breakdown.saleGross).toBe('140.00');
+    expectListLessDiscountIsSale(breakdown);
+  });
+
+  it('keeps the unreturned share of a partly returned item', () => {
+    // Two units at 210 list / 10.50 discount each; one unit comes back.
+    const breakdown = breakdownOf(
+      statementOf([
+        saleLine({
+          orderItemId: 'item-1',
+          gross: '399.00',
+          listGross: '420.00',
+          sellerDiscountGross: '21.00',
+        }),
+        makeLine({ type: ProfitLineType.SALE_RETURN, orderItemId: 'item-1', gross: '199.50' }),
+      ]),
+    );
+
+    expect(breakdown.listGross).toBe('210.00');
+    expect(breakdown.sellerDiscountGross).toBe('10.50');
+    expect(breakdown.saleGross).toBe('199.50');
+    expectListLessDiscountIsSale(breakdown);
+  });
+
+  it('reads a sale line without list inputs as list price with no discount', () => {
+    const breakdown = breakdownOf(
+      statementOf([saleLine({ orderItemId: 'item-1', gross: '100.00' })]),
+    );
+
+    expect(breakdown.listGross).toBe('100.00');
+    expect(breakdown.sellerDiscountGross).toBe('0.00');
+    expectListLessDiscountIsSale(breakdown);
+  });
+
+  it('shows no list price and no discount for a cancelled order', () => {
+    const breakdown = breakdownOf(statementOf([], { isCancelled: true }));
+
+    expect(breakdown.listGross).toBe('0.00');
+    expect(breakdown.sellerDiscountGross).toBe('0.00');
+    expect(breakdown.saleGross).toBe('0.00');
+  });
+});
 
 describe('buildStatementBreakdown', () => {
   it('closes the four groups to the sale to the kurus', () => {
@@ -231,8 +353,6 @@ describe('buildStatementBreakdown', () => {
     const breakdown = buildStatementBreakdown({
       totals,
       selectedLines: [],
-      listGross: new Decimal(0),
-      sellerDiscountGross: new Decimal(0),
     });
 
     expect(breakdown?.saleMarginPct).toBe('0.00');
@@ -258,8 +378,6 @@ describe('buildStatementBreakdown', () => {
     const four = buildStatementBreakdown({
       totals,
       selectedLines: [],
-      listGross: new Decimal(0),
-      sellerDiscountGross: new Decimal(0),
       marginDecimals: 4,
     });
     expect(four?.saleMarginPct).toBe('12.3456');
@@ -268,8 +386,6 @@ describe('buildStatementBreakdown', () => {
     const two = buildStatementBreakdown({
       totals,
       selectedLines: [],
-      listGross: new Decimal(0),
-      sellerDiscountGross: new Decimal(0),
     });
     expect(two?.saleMarginPct).toBe('12.35');
     expect(two?.costMarkupPct).toBe('0.00');
@@ -307,8 +423,6 @@ describe('buildStatementBreakdown', () => {
       buildStatementBreakdown({
         totals: statementTotalsFromStatement(statement),
         selectedLines: statement.selectedLines,
-        listGross: LIST_GROSS,
-        sellerDiscountGross: SELLER_DISCOUNT_GROSS,
       }),
     ).toBeNull();
   });
@@ -376,14 +490,10 @@ describe('buildStatementBreakdown', () => {
     const fromStatement = buildStatementBreakdown({
       totals: statementTotalsFromStatement(statement),
       selectedLines: [],
-      listGross: new Decimal(0),
-      sellerDiscountGross: new Decimal(0),
     });
     const fromRow = buildStatementBreakdown({
       totals: statementTotalsFromRow(row),
       selectedLines: [],
-      listGross: new Decimal(0),
-      sellerDiscountGross: new Decimal(0),
     });
 
     expect(fromStatement?.saleMarginPct).toBe('12.35');

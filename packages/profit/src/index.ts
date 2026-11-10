@@ -290,6 +290,7 @@ export {
   type StoredStatementTotalsRow,
 } from './read/statement-breakdown';
 export { itemProfitValues, type ItemProfitValues } from './read/item-profit-values';
+export { visibleProfitIssues } from './read/visible-profit-issues';
 
 // Profit recompute queue (rebuild, phase 3B) -- docs/plans/2026-10-30-profit-engine-faz-3b-plan.md
 export {

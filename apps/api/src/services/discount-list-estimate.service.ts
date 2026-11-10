@@ -176,7 +176,7 @@ export async function estimateDiscountItem(
   let computed: ComputedDiscountEstimate;
   try {
     computed = wantOrder
-      ? estimateOrder(base, commission, price, bandPrice, n, resultPrice)
+      ? estimateOrder(base, commission, price, bandPrice, n)
       : computeDiscountEstimate({ base, commission, price, bandPrice });
   } catch (err) {
     logProfitReadFailure({ surface: 'discount-list', organizationId: orgId, orderId: null, err });
@@ -211,9 +211,9 @@ export async function estimateDiscountItem(
 /**
  * The ORDER-scope estimate: one engine evaluation of the n-unit basket (`quantity: n`,
  * unit price = the 2dp effective unit, band chosen from the UNIT price). Calculability,
- * reason and commission come from the SAME order evaluation; the breakdown is serialized at
- * the order revenue (the 2dp unit times n), so the modal matches the detail row's settlement
- * scenario.
+ * reason and commission come from the SAME order evaluation; the breakdown's list price is
+ * the order revenue (the 2dp unit times n) read from that evaluation's SALE line, so the modal
+ * matches the detail row's settlement scenario.
  */
 function estimateOrder(
   base: ScreenScenarioBase,
@@ -221,8 +221,7 @@ function estimateOrder(
   price: Decimal,
   bandPrice: Decimal,
   n: number,
-  orderRevenue: Decimal,
 ): ComputedDiscountEstimate {
   const c = priceScenario({ base, commission, price, bandPrice, quantity: n });
-  return toEstimate(c, scenarioBreakdown(c, orderRevenue));
+  return toEstimate(c, scenarioBreakdown(c));
 }

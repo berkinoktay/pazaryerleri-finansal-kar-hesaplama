@@ -5,7 +5,7 @@ import { ProfitLineType } from '@pazarsync/db/enums';
 import { getLineSpec, type ProfitLineGroup } from '../core/catalog/profit-line-catalog';
 import { type ProfitLine } from '../core/profit-line';
 import { type ProfitStatement } from '../core/profit-statement';
-import { roundPercent } from '../money';
+import { roundMoney, roundPercent } from '../money';
 
 const ZERO = new Decimal(0);
 
@@ -125,6 +125,65 @@ function vatOf(lines: readonly ProfitLine[], type: ProfitLineType): Decimal {
   return lines.reduce((sum, line) => (line.type === type ? sum.add(line.amount.vat) : sum), ZERO);
 }
 
+/** One item's sale-side sums: list and discount shares, sale gross and returned gross. */
+interface ItemIncome {
+  readonly list: Decimal;
+  readonly discount: Decimal;
+  readonly sale: Decimal;
+  readonly returned: Decimal;
+}
+
+const NO_ITEM_INCOME: ItemIncome = { list: ZERO, discount: ZERO, sale: ZERO, returned: ZERO };
+
+/**
+ * The list price and seller discount behind the shown sale, derived from the same
+ * selected lines the sale is. Each SALE line contributes its `listGross` input (the
+ * line's own gross when the input is absent -- an older line or a marketplace record
+ * that carries no list figure) and its `sellerDiscountGross` input (zero when absent).
+ * An item's SALE_RETURN lines then take back their share: what is kept is
+ * (sale - returned) / sale of the item's list and discount, so a returned or cancelled
+ * item leaves both, exactly as it leaves the sale. Because every SALE line satisfies
+ * list - discount = gross, the result keeps list - discount equal to the shown sale.
+ */
+function incomeFromSaleLines(lines: readonly ProfitLine[]): {
+  readonly listGross: Decimal;
+  readonly sellerDiscountGross: Decimal;
+} {
+  const byItem = new Map<string | null, ItemIncome>();
+  for (const line of lines) {
+    if (line.type !== ProfitLineType.SALE && line.type !== ProfitLineType.SALE_RETURN) {
+      continue;
+    }
+    const current = byItem.get(line.orderItemId) ?? NO_ITEM_INCOME;
+    if (line.type === ProfitLineType.SALE_RETURN) {
+      byItem.set(line.orderItemId, {
+        ...current,
+        returned: current.returned.add(line.amount.gross),
+      });
+      continue;
+    }
+    const listInput = line.inputs['listGross'];
+    const discountInput = line.inputs['sellerDiscountGross'];
+    const list = typeof listInput === 'string' ? new Decimal(listInput) : line.amount.gross;
+    const discount = typeof discountInput === 'string' ? new Decimal(discountInput) : ZERO;
+    byItem.set(line.orderItemId, {
+      list: current.list.add(list),
+      discount: current.discount.add(discount),
+      sale: current.sale.add(line.amount.gross),
+      returned: current.returned,
+    });
+  }
+
+  let listGross = ZERO;
+  let sellerDiscountGross = ZERO;
+  for (const item of byItem.values()) {
+    const keep = item.sale.isZero() ? ZERO : item.sale.sub(item.returned).div(item.sale);
+    listGross = listGross.add(item.list.mul(keep));
+    sellerDiscountGross = sellerDiscountGross.add(item.discount.mul(keep));
+  }
+  return { listGross: roundMoney(listGross), sellerDiscountGross: roundMoney(sellerDiscountGross) };
+}
+
 /** The four display buckets the catalog groups fold into for the order breakdown. */
 type BreakdownFold = 'SALE' | 'COST' | 'MARKETPLACE' | 'TAX';
 
@@ -205,6 +264,10 @@ function percent(value: Decimal | null, decimals: 2 | 4): string | null {
  * rows below (commission, shipping, service fees, stoppage) are still summed per type,
  * because each is a named line on screen rather than a whole group.
  *
+ * The list price and seller discount come from the selected SALE and SALE_RETURN lines
+ * (`incomeFromSaleLines`), the same source as the shown sale, so a return or a cancel
+ * nets out of all three and list - discount = sale holds.
+ *
  * `marginDecimals` controls only the two margins: 2 (default) for an order, 4 for a
  * quote screen that renders the stored numeric(12,4) precision. Every amount is always
  * two decimals.
@@ -212,17 +275,16 @@ function percent(value: Decimal | null, decimals: 2 | 4): string | null {
 export function buildStatementBreakdown(input: {
   readonly totals: StatementTotals;
   readonly selectedLines: readonly ProfitLine[];
-  readonly listGross: Decimal;
-  readonly sellerDiscountGross: Decimal;
   readonly marginDecimals?: 2 | 4;
 }): StatementBreakdown | null {
-  const { totals, selectedLines, listGross, sellerDiscountGross } = input;
+  const { totals, selectedLines } = input;
   const marginDecimals = input.marginDecimals ?? 2;
   if (totals.netProfit === null) {
     return null;
   }
 
   const folds = foldByGroup(selectedLines);
+  const { listGross, sellerDiscountGross } = incomeFromSaleLines(selectedLines);
 
   // The shown sale is SALE - SALE_RETURN (`totals.saleGross`); its VAT is the VAT inside
   // that, never the revenue group's output VAT, which would also carry the VAT of a

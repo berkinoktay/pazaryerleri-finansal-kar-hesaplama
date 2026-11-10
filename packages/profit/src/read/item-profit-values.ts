@@ -18,6 +18,8 @@ const ZERO = new Decimal(0);
  * cost and its VAT rate come from the item's best-known cost lines; the commission
  * amount from the best-known commission line, the rate from the estimate; the settled
  * commission is set only when the best-known commission came from a marketplace record.
+ * The refunded commission is the item's best-known COMMISSION_REFUND lines (a returned
+ * item's commission given back), read the same way the commission is.
  */
 export interface ItemProfitValues {
   readonly unitCostGross: string | null;
@@ -26,6 +28,7 @@ export interface ItemProfitValues {
   readonly commissionRate: string | null;
   readonly estimatedCommissionGross: string | null;
   readonly settledCommissionGross: string | null;
+  readonly refundedCommissionGross: string | null;
 }
 
 /**
@@ -53,6 +56,7 @@ export function itemProfitValues(input: {
     commissionRate: commissionRateOf(estimateForItem),
     estimatedCommissionGross: commissionGrossOf(estimateForItem),
     settledCommissionGross: settledCommissionGrossOf(bestKnownForItem),
+    refundedCommissionGross: refundedCommissionGrossOf(bestKnownForItem),
   };
 }
 
@@ -154,4 +158,13 @@ function settledCommissionGrossOf(lines: readonly ProfitLine[]): string | null {
     return null;
   }
   return settled.reduce((sum, line) => sum.add(line.amount.gross), ZERO).toFixed(2);
+}
+
+/** The item's commission refund line(s) gross summed as a string; null when there is none. */
+function refundedCommissionGrossOf(lines: readonly ProfitLine[]): string | null {
+  const refundLines = lines.filter((line) => line.type === ProfitLineType.COMMISSION_REFUND);
+  if (refundLines.length === 0) {
+    return null;
+  }
+  return refundLines.reduce((sum, line) => sum.add(line.amount.gross), ZERO).toFixed(2);
 }

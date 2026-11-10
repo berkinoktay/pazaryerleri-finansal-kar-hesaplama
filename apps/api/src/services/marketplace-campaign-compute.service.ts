@@ -294,7 +294,7 @@ export function computeCampaignEstimate(params: {
   const wantOrder = applyCampaign && scenarioPresentation(config) === 'ORDER' && price.gt(ZERO);
   if (!wantOrder) {
     return {
-      ...toEstimate(computed, scenarioBreakdown(computed, toKurusHalfUp(settlementPrice))),
+      ...toEstimate(computed, scenarioBreakdown(computed)),
       price: settlementPrice,
       scope: 'unit',
       basket: null,
@@ -321,7 +321,7 @@ export function computeCampaignEstimate(params: {
     fundingPct,
   });
   return {
-    ...toEstimate(computed, scenarioBreakdown(orderCompute, orderRevenue)),
+    ...toEstimate(computed, scenarioBreakdown(orderCompute)),
     price: orderRevenue,
     scope: 'order',
     basket,

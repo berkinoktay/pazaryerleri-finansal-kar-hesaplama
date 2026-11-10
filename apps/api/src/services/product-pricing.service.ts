@@ -526,23 +526,20 @@ function toScenarioTarget(target: QuoteServiceInput['target']): ScenarioPriceTar
 
 /**
  * Builds the quote `QuoteBreakdown` from a solved scenario statement. The scenario
- * prices one unit with no seller discount, so `listGross` is the solved unit price and
- * the seller discount is zero. `buildStatementBreakdown` folds every selected line into
- * the four display groups (margins at four decimals for the quote screen); the result
- * is projected onto the quote wire shape, which carries combined shipping and no
- * export/return rows (a domestic scenario never produces them). Returns null only when
- * the statement carries no net profit, which the solver's success already rules out.
+ * prices its units with no seller discount, so the list price `buildStatementBreakdown`
+ * derives from the SALE line is the scenario sale and the seller discount is zero. It
+ * folds every selected line into the four display groups (margins at four decimals for
+ * the quote screen); the result is projected onto the quote wire shape, which carries
+ * combined shipping and no export/return rows (a domestic scenario never produces them).
+ * Returns null only when the statement carries no net profit, which the solver's
+ * success already rules out.
  */
 export function quoteBreakdownFromStatement(params: {
   readonly statement: ProfitStatement;
-  readonly listGross: Decimal;
-  readonly sellerDiscountGross: Decimal;
 }): QuoteBreakdown | null {
   const breakdown = buildStatementBreakdown({
     totals: statementTotalsFromStatement(params.statement),
     selectedLines: params.statement.selectedLines,
-    listGross: params.listGross,
-    sellerDiscountGross: params.sellerDiscountGross,
     marginDecimals: 4,
   });
   if (breakdown === null) {
@@ -652,11 +649,7 @@ export async function quoteProductPrice(
     };
   }
 
-  const breakdown = quoteBreakdownFromStatement({
-    statement: solved.statement,
-    listGross: solved.unitPrice,
-    sellerDiscountGross: new Decimal(0),
-  });
+  const breakdown = quoteBreakdownFromStatement({ statement: solved.statement });
   if (breakdown === null) {
     return { calculable: false, variantId: input.variantId, reason: 'NOT_CALCULABLE' };
   }

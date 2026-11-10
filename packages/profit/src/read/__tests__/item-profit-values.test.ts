@@ -56,7 +56,61 @@ function commissionLine(params: {
   });
 }
 
+/** A commission refund line for one item (the returned item's commission given back). */
+function commissionRefundLine(params: {
+  readonly orderItemId: string;
+  readonly gross: string;
+}): ProfitLine {
+  return createProfitLine({
+    type: ProfitLineType.COMMISSION_REFUND,
+    level: ProfitLineLevel.ITEM,
+    orderItemId: params.orderItemId,
+    certainty: ProfitLineCertainty.ESTIMATE,
+    source: ProfitLineSource.RULE,
+    amount: { gross: new Decimal(params.gross), vat: new Decimal('0') },
+    vatRatePct: null,
+    inputs: {},
+    externalRecord: null,
+  });
+}
+
 describe('itemProfitValues', () => {
+  it('sums the item commission refunds from the best-known lines', () => {
+    const commission = commissionLine({
+      orderItemId: ITEM,
+      gross: '28.00',
+      certainty: ProfitLineCertainty.ESTIMATE,
+      source: ProfitLineSource.RULE,
+    });
+
+    const refunded = itemProfitValues({
+      orderItemId: ITEM,
+      quantity: 1,
+      bestKnownLines: [
+        commission,
+        commissionRefundLine({ orderItemId: ITEM, gross: '28.00' }),
+        // Another item's refund must not count toward this item.
+        commissionRefundLine({ orderItemId: OTHER_ITEM, gross: '10.00' }),
+      ],
+      estimateLines: [],
+      issues: [],
+    });
+    expect(refunded.refundedCommissionGross).toBe('28.00');
+
+    // No refund line for the item: null, even when another item carries one.
+    const notRefunded = itemProfitValues({
+      orderItemId: ITEM,
+      quantity: 1,
+      bestKnownLines: [
+        commission,
+        commissionRefundLine({ orderItemId: OTHER_ITEM, gross: '10.00' }),
+      ],
+      estimateLines: [],
+      issues: [],
+    });
+    expect(notRefunded.refundedCommissionGross).toBeNull();
+  });
+
   it("divides the item's cost lines by its quantity", () => {
     const values = itemProfitValues({
       orderItemId: ITEM,

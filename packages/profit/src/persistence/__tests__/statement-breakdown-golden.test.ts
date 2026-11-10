@@ -29,19 +29,11 @@ import { recomputeParcelProfit } from '../recompute-parcel-profit';
 import {
   ensureDbReachable,
   insertFinanceRecord,
-  MELONTIK,
   melontikSaleCycleRecordInputs,
   seedMelontikParcel,
   truncateAll,
   type MelontikParcel,
 } from './helpers/melontik-parcel';
-
-// Shared across both breakdowns so the list/discount display fields match trivially;
-// the four-group closure does not depend on them.
-const LIST_GROSS = new Decimal(MELONTIK.items.a.listGross).add(MELONTIK.items.b.listGross);
-const SELLER_DISCOUNT_GROSS = new Decimal(MELONTIK.items.a.sellerDiscountGross).add(
-  MELONTIK.items.b.sellerDiscountGross,
-);
 
 /** Runs the writer in its own transaction with a generous lock-wait budget. */
 function runWriter(organizationId: string, orderId: string): Promise<void> {
@@ -109,8 +101,6 @@ describe('statement breakdown golden', () => {
     const breakdownA = buildStatementBreakdown({
       totals: statementTotalsFromRow(storedRow),
       selectedLines: selectLines(loaded, 'BEST_KNOWN'),
-      listGross: LIST_GROSS,
-      sellerDiscountGross: SELLER_DISCOUNT_GROSS,
     });
 
     // Breakdown B: from the fresh in-request computation's best-known view.
@@ -118,8 +108,6 @@ describe('statement breakdown golden', () => {
     const breakdownB = buildStatementBreakdown({
       totals: statementTotalsFromStatement(computed.bestKnown),
       selectedLines: computed.bestKnown.selectedLines,
-      listGross: LIST_GROSS,
-      sellerDiscountGross: SELLER_DISCOUNT_GROSS,
     });
 
     if (breakdownA === null || breakdownB === null) {

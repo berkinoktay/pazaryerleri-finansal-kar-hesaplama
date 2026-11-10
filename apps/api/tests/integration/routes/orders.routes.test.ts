@@ -1144,16 +1144,16 @@ describe('Order routes', () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { profitBreakdown: unknown };
 
-      // The detail must match a fresh read-only computation of the same parcel, built
-      // from the order's own list/discount columns (240 / 0).
+      // The detail must match a fresh read-only computation of the same parcel; its
+      // list price and discount come from the SALE line (the order line's 240 / 0).
       const computed = await computeParcelProfit(prisma, { organizationId: org.id, orderId });
       const expected = buildStatementBreakdown({
         totals: statementTotalsFromStatement(computed.bestKnown),
         selectedLines: computed.bestKnown.selectedLines,
-        listGross: new Decimal('240.00'),
-        sellerDiscountGross: new Decimal('0.00'),
       });
       expect(body.profitBreakdown).toEqual(expected);
+      expect(expected?.listGross).toBe('240.00');
+      expect(expected?.sellerDiscountGross).toBe('0.00');
 
       // The request wrote nothing: no statement or line rows exist afterwards.
       expect(await prisma.orderProfitStatement.count({ where: { orderId } })).toBe(0);

@@ -71,11 +71,7 @@ function plainSaleStatement(extra: readonly ProfitLine[] = []): ProfitStatement 
 }
 
 function quoteBreakdownOf(statement: ProfitStatement) {
-  const breakdown = quoteBreakdownFromStatement({
-    statement,
-    listGross: new Decimal('500.00'),
-    sellerDiscountGross: new Decimal('50.00'),
-  });
+  const breakdown = quoteBreakdownFromStatement({ statement });
   if (breakdown === null) throw new Error('expected a breakdown, got null');
   return breakdown;
 }

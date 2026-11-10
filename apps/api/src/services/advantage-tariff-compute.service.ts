@@ -401,11 +401,7 @@ export function computeAdvantageEstimate(params: {
     };
   }
 
-  const breakdown = quoteBreakdownFromStatement({
-    statement: outcome.statement,
-    listGross: price,
-    sellerDiscountGross: new Decimal(0),
-  });
+  const breakdown = quoteBreakdownFromStatement({ statement: outcome.statement });
   if (breakdown === null) {
     return {
       calculable: false,
