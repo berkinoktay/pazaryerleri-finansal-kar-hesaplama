@@ -1,11 +1,13 @@
 // Profit recompute tick (phase 3B, Task 9).
 //
-// The single consumer of the profit recompute queue. Each tick drains a batch of
-// per-order marks through recomputeParcelProfit (every producer enqueues its own
-// mark inside its own transaction). When the queue is empty, the tick sweeps a
-// batch of stale orders into the queue -- those with no best-known statement, or
-// one stamped by an older engine version -- so a new engine version and the phase
-// 3D backfill migrate themselves.
+// The single consumer of the profit recompute queue. Each tick drains per-order
+// marks through recomputeParcelProfit (every producer enqueues its own mark inside
+// its own transaction), batch after batch, until the queue runs dry or the tick
+// budget (PROFIT_RECOMPUTE_TICK_BUDGET_MS) is spent; whatever is left waits for the
+// next tick. The batches run one after another, never in parallel. When a tick
+// claimed nothing at all, it sweeps a batch of stale orders into the queue -- those
+// with no best-known statement, or one stamped by an older engine version -- so a
+// new engine version and the phase 3D backfill migrate themselves.
 //
 // The sweep is a full `orders` scan, so it is throttled (queue-review finding): it
 // runs at most once every PROFIT_STALE_SWEEP_INTERVAL_MS, but immediately on the
@@ -23,14 +25,21 @@ import {
 } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 
-// The queue drain cadence. index.ts runs the tick once on boot, then on this
-// interval, exactly like the other sync-worker ticks. 5 s keeps the seller's
-// profit numbers near-real-time after a webhook, cost edit or settlement lands.
+// How often the tick fires. index.ts runs the tick once on boot, then on this
+// interval, exactly like the other sync-worker ticks. It is not the drain cadence
+// under load -- a busy tick keeps draining batch after batch -- but the upper bound
+// on how long a fresh mark waits before an idle worker picks it up. 5 s keeps the
+// seller's profit numbers near-real-time after a webhook, cost edit or settlement.
 export const PROFIT_RECOMPUTE_INTERVAL_MS = 5_000;
 
 // How many marks one drain pass claims. Each claimed mark is recomputed in its own
-// short transaction, so this bounds the work (and the lock window) per tick.
+// short transaction, so this bounds the work (and the lock window) per pass.
 export const PROFIT_RECOMPUTE_BATCH_SIZE = 50;
+
+// How long one tick keeps starting new drain passes. The budget is checked between
+// passes, so a tick can overrun it by one pass; it stays below the interval so a
+// tick normally ends before the next one fires (an overlapping tick is skipped).
+export const PROFIT_RECOMPUTE_TICK_BUDGET_MS = 4_000;
 
 // The shortest gap between two stale sweeps once a sweep found no work. The sweep
 // scans the whole `orders` table, so it must not run every 5 s in steady state.
@@ -46,25 +55,54 @@ export const PROFIT_STALE_SWEEP_INTERVAL_MS = 3_600_000;
 // batch at a time on the following ticks.
 export const PROFIT_STALE_SWEEP_LIMIT = 500;
 
-// What one tick did: skipped (a previous tick was still running), or a drain result
-// plus the number of stale orders swept (null when the tick did not sweep).
+// What one tick did: skipped (a previous tick was still running), or the drain
+// totals summed over every pass of the tick plus the number of stale orders swept
+// (null when the tick did not sweep).
 export interface ProfitRecomputeTickResult {
   readonly skipped: boolean;
   readonly drain: DrainResult | null;
   readonly swept: number | null;
 }
 
+// The running total a tick starts from before its first pass.
+const EMPTY_DRAIN: DrainResult = {
+  claimed: 0,
+  changed: 0,
+  unchanged: 0,
+  failed: 0,
+  unsupported: 0,
+  failedOrderIds: [],
+};
+
+/** Adds one drain pass to the tick's running total. */
+function addDrainPass(total: DrainResult, pass: DrainResult): DrainResult {
+  return {
+    claimed: total.claimed + pass.claimed,
+    changed: total.changed + pass.changed,
+    unchanged: total.unchanged + pass.unchanged,
+    failed: total.failed + pass.failed,
+    unsupported: total.unsupported + pass.unsupported,
+    failedOrderIds: [...total.failedOrderIds, ...pass.failedOrderIds],
+  };
+}
+
 /**
  * Builds a profit recompute tick over its own closure state (running flag, last
  * sweep time, whether the last sweep found work), so a test can make a fresh one.
- * `now` is injectable for the sweep-throttle test and defaults to the wall clock.
+ * `now` is injectable for the sweep-throttle test and defaults to the wall clock;
+ * `batchSize` and `tickBudgetMs` default to PROFIT_RECOMPUTE_BATCH_SIZE and
+ * PROFIT_RECOMPUTE_TICK_BUDGET_MS and are injectable for the multi-pass tests.
  */
 export function createProfitRecomputeTick(deps: {
   db: PrismaClient;
   now?: () => number;
+  batchSize?: number;
+  tickBudgetMs?: number;
 }): () => Promise<ProfitRecomputeTickResult> {
   const { db } = deps;
   const now = deps.now ?? ((): number => Date.now());
+  const batchSize = deps.batchSize ?? PROFIT_RECOMPUTE_BATCH_SIZE;
+  const tickBudgetMs = deps.tickBudgetMs ?? PROFIT_RECOMPUTE_TICK_BUDGET_MS;
 
   let running = false;
   let lastSweepAt = 0;
@@ -78,9 +116,15 @@ export function createProfitRecomputeTick(deps: {
     }
     running = true;
     try {
-      const drain = await drainProfitRecomputeQueue(db, {
-        batchSize: PROFIT_RECOMPUTE_BATCH_SIZE,
-      });
+      // Drain pass after pass, sequentially. A short pass means the queue has no
+      // more due marks; a spent budget leaves the rest for the next tick.
+      const startedAt = now();
+      let drain = EMPTY_DRAIN;
+      let pass: DrainResult;
+      do {
+        pass = await drainProfitRecomputeQueue(db, { batchSize });
+        drain = addDrainPass(drain, pass);
+      } while (pass.claimed >= batchSize && now() - startedAt < tickBudgetMs);
 
       let swept: number | null = null;
       if (drain.claimed === 0) {

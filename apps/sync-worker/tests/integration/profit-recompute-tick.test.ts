@@ -1,10 +1,12 @@
 // Profit recompute tick integration test (phase 3B, Task 9).
 //
 // The sync-worker tick is the one consumer of the profit recompute queue. This
-// suite proves the two things the tick does end to end against the DB:
+// suite proves what the tick does end to end against the DB:
 //   (1) a tick drains a queued order -- the mark is gone and a best-known profit
 //       statement exists;
-//   (2) when the queue is empty the tick sweeps an order that has no statement
+//   (2) one tick drains pass after pass until the queue is empty, and stops after
+//       the current pass once its time budget is spent;
+//   (3) when the queue is empty the tick sweeps an order that has no statement
 //       into the queue (reason STALE_STATEMENT), so the engine-version migration
 //       and the phase 3D backfill run on their own.
 //
@@ -140,6 +142,27 @@ async function buildCostedOrder(tag: string): Promise<CostedOrderCtx> {
   return { orderId: order.id, storeId: store.id, organizationId: org.id };
 }
 
+/**
+ * Builds one costed order per tag (each in its own store) and enqueues every one of
+ * them, so the queue holds exactly `tags.length` due marks.
+ */
+async function buildQueuedOrders(tags: readonly string[]): Promise<CostedOrderCtx[]> {
+  const orders: CostedOrderCtx[] = [];
+  for (const tag of tags) {
+    const ctx = await buildCostedOrder(tag);
+    await prisma.$transaction((tx) =>
+      enqueueProfitRecomputeForStore(tx, {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        reason: ProfitRecomputeReason.MANUAL,
+      }),
+    );
+    orders.push(ctx);
+  }
+  expect(await prisma.profitRecomputeRequest.count()).toBe(tags.length);
+  return orders;
+}
+
 describe('profit recompute tick', () => {
   beforeAll(async () => {
     await ensureDbReachable();
@@ -176,6 +199,41 @@ describe('profit recompute tick', () => {
       where: { orderId: ctx.orderId, view: ProfitStatementView.BEST_KNOWN },
     });
     expect(statement).not.toBeNull();
+  });
+
+  it('drains several batches in one tick while the queue is not empty', async () => {
+    const orders = await buildQueuedOrders(['multi-a', 'multi-b', 'multi-c']);
+
+    // One mark per batch: only a tick that keeps draining batch after batch can
+    // empty a three-mark queue in a single call.
+    const tick = createProfitRecomputeTick({ db: prisma, batchSize: 1 });
+    const result = await tick();
+
+    expect(result.skipped).toBe(false);
+    expect(result.drain?.claimed).toBe(3);
+    expect(result.swept).toBeNull();
+
+    expect(await prisma.profitRecomputeRequest.count()).toBe(0);
+    const statements = await prisma.orderProfitStatement.count({
+      where: {
+        orderId: { in: orders.map((order) => order.orderId) },
+        view: ProfitStatementView.BEST_KNOWN,
+      },
+    });
+    expect(statements).toBe(3);
+  });
+
+  it('stops after one batch when the tick budget is spent', async () => {
+    await buildQueuedOrders(['budget-a', 'budget-b', 'budget-c']);
+
+    // A zero budget is spent as soon as the first batch finishes; the rest of the
+    // queue is left for the next tick.
+    const tick = createProfitRecomputeTick({ db: prisma, batchSize: 1, tickBudgetMs: 0 });
+    const result = await tick();
+
+    expect(result.skipped).toBe(false);
+    expect(result.drain?.claimed).toBe(1);
+    expect(await prisma.profitRecomputeRequest.count()).toBe(2);
   });
 
   it('sweeps orders without statements when the queue is empty', async () => {
