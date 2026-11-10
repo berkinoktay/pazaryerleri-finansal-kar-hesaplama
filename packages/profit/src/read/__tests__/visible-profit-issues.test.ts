@@ -64,6 +64,13 @@ describe('visibleProfitIssues', () => {
     ).toEqual([]);
   });
 
+  it('keeps a seller-cargo-agreement estimate when the statement has no shipping line', () => {
+    // An unknown desi writes no shipping line at all: nothing replaced the estimate.
+    expect(visibleProfitIssues([SELLER_CARGO_AGREEMENT_ESTIMATE], [SALE])).toEqual([
+      SELLER_CARGO_AGREEMENT_ESTIMATE,
+    ]);
+  });
+
   it('keeps a seller-cargo-agreement estimate while the return shipping is an estimate', () => {
     expect(
       visibleProfitIssues(

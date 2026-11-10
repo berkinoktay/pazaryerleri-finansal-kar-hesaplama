@@ -19,10 +19,11 @@ const SELLER_CARGO_SHIPPING_TYPES: ReadonlySet<ProfitLineType> = new Set([
  *
  * - CARRIER_NOT_RECOGNIZED is dropped once an ACTUAL SHIPPING line is selected -- the
  *   cargo invoice replaced the zero estimate the warning was about.
- * - SELLER_CARGO_AGREEMENT_ESTIMATE is dropped once no selected SHIPPING or
- *   RETURN_SHIPPING line is an ESTIMATE -- a cargo invoice arrived for every leg, so no
- *   estimate is left for the warning to explain. While at least one shipping leg is
- *   still an estimate, the warning stays.
+ * - SELLER_CARGO_AGREEMENT_ESTIMATE is dropped once a cargo invoice replaced every
+ *   shipping estimate: at least one selected SHIPPING or RETURN_SHIPPING line is ACTUAL
+ *   and none is an ESTIMATE. While a shipping leg is still an estimate the warning
+ *   stays, and so does it when the statement carries no shipping line at all (the desi
+ *   is unknown, say): nothing replaced the estimate, the seller still has to act.
  * - Every other code is returned as it is.
  */
 export function visibleProfitIssues(
@@ -33,16 +34,18 @@ export function visibleProfitIssues(
     (line) =>
       line.type === ProfitLineType.SHIPPING && line.certainty === ProfitLineCertainty.ACTUAL,
   );
-  const shippingEstimateRemains = selectedLines.some(
-    (line) =>
-      SELLER_CARGO_SHIPPING_TYPES.has(line.type) && line.certainty === ProfitLineCertainty.ESTIMATE,
+  const sellerCargoLines = selectedLines.filter((line) =>
+    SELLER_CARGO_SHIPPING_TYPES.has(line.type),
   );
+  const sellerCargoInvoiced =
+    sellerCargoLines.length > 0 &&
+    sellerCargoLines.every((line) => line.certainty === ProfitLineCertainty.ACTUAL);
   return issues.filter((issue) => {
     if (issue.code === ProfitIssueCode.CARRIER_NOT_RECOGNIZED) {
       return !shippingIsActual;
     }
     if (issue.code === ProfitIssueCode.SELLER_CARGO_AGREEMENT_ESTIMATE) {
-      return shippingEstimateRemains;
+      return !sellerCargoInvoiced;
     }
     return true;
   });

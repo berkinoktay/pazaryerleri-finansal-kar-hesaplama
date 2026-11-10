@@ -1045,7 +1045,12 @@ describe('mapTrendyolRecords', () => {
     const sale = result.lines.find((line) => line.type === ProfitLineType.SALE);
     expect(sale?.amount.gross.toFixed(2)).toBe('854.35');
     // The coupon record joins the sale reference so the stored line cites every input.
-    expect(sale?.inputs.recordIds).toBe('coup-1,disc-1,sale-1');
+    // The list and discount come from the records, and the coupon counts as a discount.
+    expect(sale?.inputs).toEqual({
+      recordIds: 'coup-1,disc-1,sale-1',
+      listGross: '920.00',
+      sellerDiscountGross: '65.65',
+    });
     const commission = result.lines.find((line) => line.type === ProfitLineType.COMMISSION);
     expect(commission?.amount.gross.toFixed(2)).toBe('162.33');
   });

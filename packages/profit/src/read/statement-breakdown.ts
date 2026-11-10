@@ -137,13 +137,16 @@ const NO_ITEM_INCOME: ItemIncome = { list: ZERO, discount: ZERO, sale: ZERO, ret
 
 /**
  * The list price and seller discount behind the shown sale, derived from the same
- * selected lines the sale is. Each SALE line contributes its `listGross` input (the
- * line's own gross when the input is absent -- an older line or a marketplace record
- * that carries no list figure) and its `sellerDiscountGross` input (zero when absent).
- * An item's SALE_RETURN lines then take back their share: what is kept is
+ * selected lines the sale is. Each SALE line, estimated or settled, carries a
+ * `listGross` and a `sellerDiscountGross` input; a line stored before the settled sale
+ * line carried its list figure falls back to its own gross as the list and zero as the
+ * discount. An item's SALE_RETURN lines then take back their share: what is kept is
  * (sale - returned) / sale of the item's list and discount, so a returned or cancelled
  * item leaves both, exactly as it leaves the sale. Because every SALE line satisfies
  * list - discount = gross, the result keeps list - discount equal to the shown sale.
+ *
+ * Known limit: an item whose seller discount covers its whole list price has a zero
+ * sale and therefore no SALE line, so its list price and discount leave the breakdown.
  */
 function incomeFromSaleLines(lines: readonly ProfitLine[]): {
   readonly listGross: Decimal;
