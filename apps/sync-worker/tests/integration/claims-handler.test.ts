@@ -498,6 +498,9 @@ describe('processClaimsChunk', () => {
       },
     });
 
+    // Clear the queue the first scan filled so the re-anchor's own enqueues are visible.
+    await prisma.profitRecomputeRequest.deleteMany({ where: { storeId: ctx.storeId } });
+
     await runChunk(ctx.syncLogId, [makeWireClaim({ orderOutboundPackageId: 91_982_999 })]);
 
     // Moved, not duplicated; stale item links re-resolved against the
@@ -509,6 +512,74 @@ describe('processClaimsChunk', () => {
     for (const item of claims[0]?.items ?? []) {
       expect(item.orderItemId).toBeNull();
     }
+
+    // Both the order the claim left and the order it moved to are queued, even though
+    // the new order resolves no item link (nothing else about the claim changed).
+    const queued = await prisma.profitRecomputeRequest.findMany({
+      where: { storeId: ctx.storeId },
+      select: { orderId: true },
+    });
+    expect(queued.map((row) => row.orderId).sort()).toEqual([ctx.orderId, siblingOrder.id].sort());
+  });
+
+  it('a re-scan of an unchanged claim writes nothing and enqueues nothing', async () => {
+    const ctx = await buildScenario();
+
+    await runChunk(ctx.syncLogId, [makeWireClaim()]);
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: ctx.orderId } })).toBe(1);
+    await prisma.profitRecomputeRequest.deleteMany({ where: { storeId: ctx.storeId } });
+
+    const claimBefore = await prisma.orderClaim.findFirstOrThrow({
+      where: { storeId: ctx.storeId, trendyolClaimId: CLAIM_ID },
+      select: { id: true, updatedAt: true },
+    });
+    const itemsBefore = await prisma.orderClaimItem.findMany({
+      where: { claimId: claimBefore.id },
+      select: { trendyolClaimItemId: true, updatedAt: true },
+      orderBy: { trendyolClaimItemId: 'asc' },
+    });
+    expect(itemsBefore).toHaveLength(2);
+
+    const result = await runChunk(ctx.syncLogId, [makeWireClaim()]);
+    expect(result).toEqual({ kind: 'done', finalCount: 1 });
+
+    expect(await prisma.profitRecomputeRequest.count({ where: { storeId: ctx.storeId } })).toBe(0);
+    const claimAfter = await prisma.orderClaim.findUniqueOrThrow({
+      where: { id: claimBefore.id },
+      select: { updatedAt: true },
+    });
+    const itemsAfter = await prisma.orderClaimItem.findMany({
+      where: { claimId: claimBefore.id },
+      select: { trendyolClaimItemId: true, updatedAt: true },
+      orderBy: { trendyolClaimItemId: 'asc' },
+    });
+    expect(claimAfter.updatedAt).toEqual(claimBefore.updatedAt);
+    expect(itemsAfter).toEqual(itemsBefore);
+  });
+
+  it('enqueues when the return package id is filled in by a later scan', async () => {
+    const ctx = await buildScenario();
+
+    await runChunk(ctx.syncLogId, [makeWireClaim({ orderShipmentPackageId: undefined })]);
+    const sparse = await prisma.orderClaim.findFirstOrThrow({
+      where: { storeId: ctx.storeId, trendyolClaimId: CLAIM_ID },
+      select: { orderShipmentPackageId: true },
+    });
+    expect(sparse.orderShipmentPackageId).toBeNull();
+    await prisma.profitRecomputeRequest.deleteMany({ where: { storeId: ctx.storeId } });
+
+    await runChunk(ctx.syncLogId, [makeWireClaim()]);
+
+    const filled = await prisma.orderClaim.findFirstOrThrow({
+      where: { storeId: ctx.storeId, trendyolClaimId: CLAIM_ID },
+      select: { orderShipmentPackageId: true },
+    });
+    expect(filled.orderShipmentPackageId).toBe('91982454');
+    const queued = await prisma.profitRecomputeRequest.findMany({
+      where: { storeId: ctx.storeId },
+      select: { orderId: true },
+    });
+    expect(queued.map((row) => row.orderId)).toEqual([ctx.orderId]);
   });
 
   it('a malformed wire claim is isolated — the healthy claim still lands', async () => {

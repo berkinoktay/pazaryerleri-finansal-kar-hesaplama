@@ -1,11 +1,12 @@
 // Claims handler -> profit recompute queue integration test (phase 3B, Task 5).
 //
-// The claims handler no longer calls estimateReturnOnClaim. Instead every claim
-// upsert enqueues a profit recompute for the claim's order (and, on a re-anchor,
-// the order the claim left), and the recompute tick turns an accepted claim into
-// the return legs. This suite verifies:
-//   (1) every upsert enqueues the order whatever the item statuses are, and a
-//       re-anchor enqueues BOTH the old and the new order;
+// The claims handler no longer calls estimateReturnOnClaim. Instead a claim upsert
+// that changes the claim's profit inputs enqueues a profit recompute for the claim's
+// order (and, on a re-anchor, the order the claim left), and the recompute tick turns
+// an accepted claim into the return legs. This suite verifies:
+//   (1) creating a claim and changing an item status enqueue the order, an unchanged
+//       re-scan enqueues nothing, and a re-anchor enqueues BOTH the old and the new
+//       order;
 //   (2) draining an order with an accepted claim writes the SALE_RETURN and
 //       COMMISSION_REFUND ESTIMATE profit lines for the returned item.
 //
@@ -247,10 +248,10 @@ describe('processClaimsChunk — profit recompute queue (Task 5)', () => {
     await truncateAll();
   });
 
-  it('enqueues the order on every claim upsert, and both orders on a re-anchor', async () => {
+  it('enqueues the order on create and on a status change, and both orders on a re-anchor', async () => {
     const ctx = await buildScenario();
 
-    // A non-accepted claim still enqueues the order (every upsert, any status).
+    // Creating a claim enqueues the order whatever its item statuses are.
     const waiting = makeAcceptedClaim();
     for (const group of waiting.items ?? []) {
       for (const ci of group.claimItems) {
@@ -265,9 +266,21 @@ describe('processClaimsChunk — profit recompute queue (Task 5)', () => {
     });
     expect(firstQueued?.reason).toBe(ProfitRecomputeReason.CLAIM_CHANGED);
 
+    // An unchanged second scan leaves the queue empty.
+    await prisma.profitRecomputeRequest.deleteMany({ where: { storeId: ctx.storeId } });
+    await runChunk(ctx.syncLogId, [waiting]);
+    expect(await prisma.profitRecomputeRequest.count({ where: { storeId: ctx.storeId } })).toBe(0);
+
+    // A status change (WaitingInAction -> Accepted) enqueues the order again.
+    await runChunk(ctx.syncLogId, [makeAcceptedClaim()]);
+    const statusQueued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: ctx.orderId },
+    });
+    expect(statusQueued?.reason).toBe(ProfitRecomputeReason.CLAIM_CHANGED);
+
     // Clear the queue, then move the SAME Trendyol claim onto a second order of the
     // same store -> the re-anchor enqueues BOTH the old and the new order.
-    await prisma.profitRecomputeRequest.deleteMany({ where: { orderId: ctx.orderId } });
+    await prisma.profitRecomputeRequest.deleteMany({ where: { storeId: ctx.storeId } });
     const secondOrder = await prisma.order.create({
       data: {
         organizationId: ctx.organizationId,

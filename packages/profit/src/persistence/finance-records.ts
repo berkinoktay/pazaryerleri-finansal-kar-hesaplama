@@ -31,6 +31,16 @@ import { enqueueProfitRecompute } from './recompute-queue';
  * order that exists when the record commits; the order-create enqueue catches a record
  * whose order is created later.
  *
+ * A third path covers records bound through a claim. The B3, B4 and B6 branches resolve
+ * an order through a claim's return package id or cargo tracking number, so a return
+ * settlement row (or its PaymentOrder) or a return cargo-invoice item stored BEFORE its
+ * claim -- or before the claim carried those numbers -- resolves no order here and is
+ * never re-picked. The claims sync closes that case (apps/sync-worker/src/handlers/
+ * claims.ts): it enqueues a CLAIM_CHANGED recompute whenever a claim is created and
+ * whenever its return package id or cargo tracking number is filled in, and that
+ * recompute reads the already-stored record. An unchanged claim re-scan enqueues nothing,
+ * so these triggers must stay in the claims sync's change check.
+ *
  * All writes are raw SQL with bound parameters (never string concatenation). The store
  * is one conditional `INSERT ... SELECT ... ON CONFLICT DO UPDATE ... WHERE ... IS
  * DISTINCT FROM`; a bind pass is one `UPDATE ... RETURNING` plus one resolve `SELECT`.
