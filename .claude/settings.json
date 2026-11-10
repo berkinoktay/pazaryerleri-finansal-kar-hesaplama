@@ -7,7 +7,16 @@
   },
   "permissions": {
     "ask": [
-      "Bash(git stash *)",
+      "Bash(git stash)",
+      "Bash(git stash -*)",
+      "Bash(git stash push *)",
+      "Bash(git stash save *)",
+      "Bash(git stash pop *)",
+      "Bash(git stash apply *)",
+      "Bash(git stash drop *)",
+      "Bash(git stash clear *)",
+      "Bash(git stash store *)",
+      "Bash(git stash branch *)",
       "Bash(git checkout *)",
       "Bash(git switch *)",
       "Bash(git reset *)",
