@@ -19,8 +19,6 @@ import { Decimal } from 'decimal.js';
 
 import { Prisma, prisma } from '@pazarsync/db';
 import type { Store as PrismaStore } from '@pazarsync/db';
-import { Platform } from '@pazarsync/db/enums';
-import { loadCommissionRulesForCategories, resolveTrendyolCategoryRate } from '@pazarsync/profit';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { NotFoundError } from '../lib/errors';
@@ -32,6 +30,8 @@ import {
   loadScreenScenarioBases,
   screenScenarioBaseFor,
   serializeCommissionBandLadder,
+  resolveCategoryRatesByKey,
+  categoryRateKey,
 } from './scenario-screen-commons';
 import {
   discountConfigFromListRow,
@@ -250,28 +250,10 @@ export async function getDiscountListDetail(
     await resolveDiscountCommissionSource(orgId, storeId, list.startsAt, now);
 
   // --- Category-rate fallback cache (3rd tier): once per distinct (cat, brand) ---
-  // The commission rule table is Trendyol reference data, so another marketplace's
-  // store keeps the map empty (no category fallback rate).
-  const categoryRateByKey = new Map<string, Decimal | null>();
-  if (store.platform === Platform.TRENDYOL) {
-    const distinctCatKeys = new Map<string, { categoryId: bigint; brandId: bigint | null }>();
-    for (const variant of variantMap.values()) {
-      const { categoryId, brandId } = variant.product;
-      if (categoryId === null) continue;
-      distinctCatKeys.set(`${categoryId}:${brandId ?? 'null'}`, { categoryId, brandId });
-    }
-    const commissionRules = await loadCommissionRulesForCategories(prisma, {
-      categoryIds: [...distinctCatKeys.values()].map((ref) => ref.categoryId),
-    });
-    for (const [key, { categoryId, brandId }] of distinctCatKeys) {
-      const resolved = resolveTrendyolCategoryRate({
-        rules: commissionRules,
-        categoryId: categoryId.toString(),
-        brandId: brandId === null ? null : brandId.toString(),
-      });
-      categoryRateByKey.set(key, resolved?.ratePct ?? null);
-    }
-  }
+  const categoryRateByKey = await resolveCategoryRatesByKey({
+    platform: store.platform,
+    refs: [...variantMap.values()].map((variant) => variant.product),
+  });
 
   const items = list.items.map((item): DiscountListDetailItem => {
     const base = screenScenarioBaseFor(bases, item.productVariantId);
@@ -293,7 +275,7 @@ export async function getDiscountListDetail(
     const categoryRate =
       variantRow !== undefined && variantRow.product.categoryId !== null
         ? (categoryRateByKey.get(
-            `${variantRow.product.categoryId}:${variantRow.product.brandId ?? 'null'}`,
+            categoryRateKey(variantRow.product.categoryId, variantRow.product.brandId),
           ) ?? null)
         : null;
 

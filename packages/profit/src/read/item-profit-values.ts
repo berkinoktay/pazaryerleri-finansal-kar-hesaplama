@@ -98,27 +98,28 @@ function costExpenseLines(lines: readonly ProfitLine[]): ProfitLine[] {
 }
 
 /**
- * True when a blocking MISSING_COST issue applies to this item: one that names the item,
- * or a parcel-wide issue (`orderItemId` null) that covers every item.
+ * True when an issue of `code` applies to this item: one that names the item, or a
+ * parcel-wide issue (`orderItemId` null) that covers every item.
  */
-function hasMissingCost(issues: readonly ProfitIssue[], orderItemId: string): boolean {
+function hasIssueForItem(
+  issues: readonly ProfitIssue[],
+  code: ProfitIssueCode,
+  orderItemId: string,
+): boolean {
   return issues.some(
     (issue) =>
-      issue.code === ProfitIssueCode.MISSING_COST &&
-      (issue.orderItemId === null || issue.orderItemId === orderItemId),
+      issue.code === code && (issue.orderItemId === null || issue.orderItemId === orderItemId),
   );
 }
 
-/**
- * True when a blocking MISSING_COMMISSION_RATE issue applies to this item: one that names
- * the item, or a parcel-wide issue (`orderItemId` null) that covers every item.
- */
+/** True when a blocking MISSING_COST issue covers this item. */
+function hasMissingCost(issues: readonly ProfitIssue[], orderItemId: string): boolean {
+  return hasIssueForItem(issues, ProfitIssueCode.MISSING_COST, orderItemId);
+}
+
+/** True when a blocking MISSING_COMMISSION_RATE issue covers this item. */
 function hasMissingCommissionRate(issues: readonly ProfitIssue[], orderItemId: string): boolean {
-  return issues.some(
-    (issue) =>
-      issue.code === ProfitIssueCode.MISSING_COMMISSION_RATE &&
-      (issue.orderItemId === null || issue.orderItemId === orderItemId),
-  );
+  return hasIssueForItem(issues, ProfitIssueCode.MISSING_COMMISSION_RATE, orderItemId);
 }
 
 /**

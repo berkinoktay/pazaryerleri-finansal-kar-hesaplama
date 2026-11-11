@@ -18,17 +18,11 @@ import { Decimal } from 'decimal.js';
 
 import { Prisma, prisma } from '@pazarsync/db';
 import type { Store as PrismaStore } from '@pazarsync/db';
-import { Platform } from '@pazarsync/db/enums';
 import { mapPrismaError } from '@pazarsync/sync-core';
 import { isInstantWithinTariffPeriod, tariffBoundToInstant } from '@pazarsync/utils';
 
 import { NotFoundError } from '../lib/errors';
-import {
-  loadCommissionRulesForCategories,
-  parseStoredTariffBands,
-  resolveTrendyolCategoryRate,
-  type StoredTariffBand,
-} from '@pazarsync/profit';
+import { parseStoredTariffBands, type StoredTariffBand } from '@pazarsync/profit';
 import {
   computeAdvantageItemTiers,
   type ComputedAdvantageItem,
@@ -39,6 +33,8 @@ import {
   loadScreenScenarioBases,
   screenScenarioBaseFor,
   serializeCommissionBandLadder,
+  resolveCategoryRatesByKey,
+  categoryRateKey,
 } from './scenario-screen-commons';
 import { parseStarTiers } from './advantage-tariff.types';
 import type {
@@ -308,28 +304,10 @@ export async function getAdvantageTariffDetail(
 
   // Resolve the category rate once per distinct (categoryId, brandId) among the
   // matched variants -- the fallback commission for products with no tariff band.
-  // The commission rule table is Trendyol reference data, so another marketplace's
-  // store keeps the map empty (no category fallback rate).
-  const categoryRateByKey = new Map<string, Decimal | null>();
-  if (store.platform === Platform.TRENDYOL) {
-    const distinctCatKeys = new Map<string, { categoryId: bigint; brandId: bigint | null }>();
-    for (const ref of variantMap.values()) {
-      const { categoryId, brandId } = ref;
-      if (categoryId === null) continue;
-      distinctCatKeys.set(`${categoryId}:${brandId ?? 'null'}`, { categoryId, brandId });
-    }
-    const commissionRules = await loadCommissionRulesForCategories(prisma, {
-      categoryIds: [...distinctCatKeys.values()].map((ref) => ref.categoryId),
-    });
-    for (const [key, { categoryId, brandId }] of distinctCatKeys) {
-      const resolved = resolveTrendyolCategoryRate({
-        rules: commissionRules,
-        categoryId: categoryId.toString(),
-        brandId: brandId === null ? null : brandId.toString(),
-      });
-      categoryRateByKey.set(key, resolved?.ratePct ?? null);
-    }
-  }
+  const categoryRateByKey = await resolveCategoryRatesByKey({
+    platform: store.platform,
+    refs: variantMap.values(),
+  });
 
   // --- One scenario-base load for the whole tariff; scenario date = now ---
   const bases = await loadScreenScenarioBases({
@@ -364,7 +342,7 @@ export async function getAdvantageTariffDetail(
 
     const categoryRate =
       ref && ref.categoryId !== null
-        ? (categoryRateByKey.get(`${ref.categoryId}:${ref.brandId ?? 'null'}`) ?? null)
+        ? (categoryRateByKey.get(categoryRateKey(ref.categoryId, ref.brandId)) ?? null)
         : null;
 
     const commission: ItemCommissionInputs = { bands, categoryRate };

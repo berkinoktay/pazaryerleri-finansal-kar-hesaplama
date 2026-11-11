@@ -49,7 +49,7 @@ const CommissionStatusSchema = z.enum(['OK', 'NO_RULE']).openapi({
  * NOT_CALCULABLE, returned when no price produced a computable statement (shipping or
  * commission missing), so the solver found no priceable point.
  */
-const QuoteReasonSchema = z
+export const QuoteReasonSchema = z
   .enum(['NOT_PRICE_SENSITIVE', 'UNREACHABLE_TARGET', 'NO_COST', 'NOT_CALCULABLE'])
   .openapi({
     description:
@@ -61,6 +61,9 @@ const QuoteReasonSchema = z
       'NOT_CALCULABLE = no price produced a computable statement (shipping or commission missing).',
     example: 'UNREACHABLE_TARGET',
   });
+
+/** The quote failure reason, the wire enum's own member type. */
+export type QuoteReason = z.infer<typeof QuoteReasonSchema>;
 
 // ─── List query ──────────────────────────────────────────────────────────────
 

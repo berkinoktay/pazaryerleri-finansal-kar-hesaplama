@@ -173,11 +173,11 @@ enum OrderFeeType {
   PENALTY_SUPPLY_FAILURE
   NOTIFICATION_FEE
   COMMISSION_INVOICE
-  // Mikro ihracat (Order.isExportSale=true) — marketplace ihracat siparişlerine özgü iki ücret:
-  // INTERNATIONAL_SERVICE: ürün satışı üzerinden %6 KDV-dahil "Uluslararası Hizmet Bedeli"
-  //   (PSF mikro ihracatta uygulanmaz; bunun yerine bu ücret kesilir). Tahmin yolunda yazılır.
-  // OVERSEAS_RETURN_OPERATION: iadede satış reverse edilmez, ayrıca (satış−komisyon)×%35/%30
-  //   "Yurt Dışı İade Operasyon Bedeli" kesilir (iade yolunda yazılır).
+  // Export sale (Order.isExportSale = true): the two fees specific to a marketplace export order.
+  // INTERNATIONAL_SERVICE: 6% VAT-inclusive "international service fee" on the product sale
+  //   (replaces the platform service fee, which an export order does not pay). Estimate path.
+  // OVERSEAS_RETURN_OPERATION: a return does not reverse the sale; an extra
+  //   (sale - commission) x 35% / 30% "overseas return operation fee" is charged. Return path.
   INTERNATIONAL_SERVICE
   OVERSEAS_RETURN_OPERATION
 }
@@ -2059,11 +2059,11 @@ model ProfitRecomputeRequest {
   @@map("profit_recompute_queue")
 }
 
-// İade talep görünürlüğü — Trendyol getclaims endpoint Settlement Return'den
-// ÖNCE iade talebini gösteriyor (design §3.6). Kar hesabını DOĞRUDAN etkilemez;
-// UI'da "iade riski" badge için kullanılır. Kabul edilen iade, kâr motorunun
-// iade satırlarını (SALE_RETURN / COMMISSION_REFUND / RETURN_SHIPPING vb.)
-// üretir. marketplaceClaimId (the marketplace's claim id) is unique per order.
+// Return-claim visibility: the Trendyol claims endpoint shows a claim BEFORE the
+// settlement's Return record arrives (design section 3.6). A claim does not change the
+// profit by itself; the UI shows it as a "return risk" badge. An ACCEPTED claim makes the
+// profit engine write the return lines (SALE_RETURN / COMMISSION_REFUND / RETURN_SHIPPING
+// and so on). marketplaceClaimId (the marketplace's claim id) is unique per order.
 //
 // #298: storeId denormalize (insert sırasında parent order'dan stamp) — tenant
 // filtreleme artık `order: { storeId }` parent-walk'u değil doğrudan kolon;

@@ -15,11 +15,13 @@
 import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
-import { ProfitIssueCode } from '@pazarsync/db/enums';
+import { Platform, ProfitIssueCode } from '@pazarsync/db/enums';
 import {
   evaluateTrendyolScenario,
   isBlockingIssue,
+  loadCommissionRulesForCategories,
   loadTrendyolScenarioBases,
+  resolveTrendyolCategoryRate,
   roundPercent,
   UnsupportedPlatformError,
   type ProfitIssue,
@@ -31,6 +33,65 @@ import {
 
 import { logProfitReadFailure, type ProfitReadSurface } from './profit-compute-fallback.service';
 import { type TariffItemReason } from './tariff-compute-commons';
+
+// --- Category-rate fallback (the chain's last tier) ---
+
+/** A product's category and brand ids, the inputs of the category-rate fallback. */
+export interface CategoryRateRef {
+  readonly categoryId: bigint | null;
+  readonly brandId: bigint | null;
+}
+
+/** Category-rate cache key -- the same shape at every scenario screen. */
+export function categoryRateKey(categoryId: bigint, brandId: bigint | null): string {
+  return `${categoryId}:${brandId ?? 'null'}`;
+}
+
+/**
+ * The category-fallback commission rate of every distinct (category, brand) pair among
+ * `refs`, keyed by `categoryRateKey`, from ONE rule load for the whole screen. The
+ * commission rule table is Trendyol reference data, so another marketplace's store gets
+ * an empty map (no category fallback rate). Refs without a category are skipped.
+ */
+export async function resolveCategoryRatesByKey(params: {
+  readonly platform: Platform;
+  readonly refs: Iterable<CategoryRateRef>;
+}): Promise<ReadonlyMap<string, Decimal | null>> {
+  const { platform, refs } = params;
+  const categoryRateByKey = new Map<string, Decimal | null>();
+  if (platform !== Platform.TRENDYOL) return categoryRateByKey;
+
+  const distinct = new Map<string, { categoryId: bigint; brandId: bigint | null }>();
+  for (const { categoryId, brandId } of refs) {
+    if (categoryId === null) continue;
+    distinct.set(categoryRateKey(categoryId, brandId), { categoryId, brandId });
+  }
+  if (distinct.size === 0) return categoryRateByKey;
+
+  const rules = await loadCommissionRulesForCategories(prisma, {
+    categoryIds: [...distinct.values()].map((ref) => ref.categoryId),
+  });
+  for (const [key, { categoryId, brandId }] of distinct) {
+    const resolved = resolveTrendyolCategoryRate({
+      rules,
+      categoryId: categoryId.toString(),
+      brandId: brandId === null ? null : brandId.toString(),
+    });
+    categoryRateByKey.set(key, resolved?.ratePct ?? null);
+  }
+  return categoryRateByKey;
+}
+
+/** The category-fallback commission rate of one product; null when none applies. */
+export async function resolveCategoryRate(params: {
+  readonly platform: Platform;
+  readonly ref: CategoryRateRef | null;
+}): Promise<Decimal | null> {
+  const { platform, ref } = params;
+  if (ref === null || ref.categoryId === null) return null;
+  const rates = await resolveCategoryRatesByKey({ platform, refs: [ref] });
+  return rates.get(categoryRateKey(ref.categoryId, ref.brandId)) ?? null;
+}
 
 // --- Per-item scenario base ---
 

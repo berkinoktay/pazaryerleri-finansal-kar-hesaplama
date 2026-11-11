@@ -76,17 +76,6 @@ export interface UpsertOrderOpts {
   promotedFromBuffer?: boolean;
 }
 
-/**
- * The order's export-sale flag. `order` also arrives as live-performance buffer
- * JSONB (buffer-promote), and a row buffered before the micro -> isExportSale rename
- * carries the flag under the legacy `micro` key with no `isExportSale`; that row
- * falls back to the legacy key so its export VAT treatment survives the rename.
- */
-function resolveIsExportSale(order: MappedOrder): boolean {
-  if (typeof order.isExportSale === 'boolean') return order.isExportSale;
-  return 'micro' in order && order.micro === true;
-}
-
 export async function upsertOrderWithSnapshot(
   storeId: string,
   organizationId: string,
@@ -164,7 +153,7 @@ export async function upsertOrderWithSnapshot(
     // The VAT is zeroed AT THE SOURCE (Order.saleVat, OrderItem.saleVatRate, sellerDiscountVat)
     // so the stored value is the real one and every profit path, list and summary reads it as
     // is. Commission and shipping stay the same as a domestic sale.
-    const microExport = resolveIsExportSale(order);
+    const microExport = order.isExportSale;
 
     // sellerDiscountVat: satıcı indirimi KDV'si — per-line GERÇEK satış KDV oranından
     // türetilir (hardcoded %20 DEĞİL). %10 satışlarda (Türk bayrağı, kitap) %20
@@ -364,7 +353,7 @@ export async function upsertOrderWithSnapshot(
                 ],
               }
             : { orderId: upserted.id, productVariantId: variant?.id ?? null },
-        select: { id: true, platformLineId: true },
+        select: { id: true, platformLineId: true, orderCommissionRatePct: true },
       });
       if (existing !== null) {
         // Self-heal: legacy anahtarla yakalanan satıra platform kimliğini
@@ -380,12 +369,19 @@ export async function upsertOrderWithSnapshot(
         // commission (commissionKnown === true) refreshes the raw order_commission_rate_pct
         // column the loader reads. The freshness guard above already dropped any strictly-
         // older event, so only a newer-or-equal event reaches here; the profit recompute is
-        // enqueued once at the end of this function.
+        // enqueued once at the end of this function. A re-sync that carries the same rate
+        // writes nothing (every status change re-syncs every line).
         if (line.commissionKnown === true) {
-          await tx.orderItem.update({
-            where: { id: existing.id },
-            data: { orderCommissionRatePct: new Decimal(line.commissionRate) },
-          });
+          const rate = new Decimal(line.commissionRate);
+          const unchanged =
+            existing.orderCommissionRatePct !== null &&
+            existing.orderCommissionRatePct.equals(rate);
+          if (!unchanged) {
+            await tx.orderItem.update({
+              where: { id: existing.id },
+              data: { orderCommissionRatePct: rate },
+            });
+          }
         }
         continue;
       }

@@ -17,8 +17,6 @@ import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
 import type { Store as PrismaStore } from '@pazarsync/db';
-import { Platform } from '@pazarsync/db/enums';
-import { loadCommissionRulesForCategories, resolveTrendyolCategoryRate } from '@pazarsync/profit';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { NotFoundError } from '../lib/errors';
@@ -31,7 +29,11 @@ import {
 } from './advantage-tariff-compute.service';
 import { resolveCommissionSource } from './advantage-tariff.service';
 import { logProfitReadFailure } from './profit-compute-fallback.service';
-import { loadScreenScenarioBases, screenScenarioBaseFor } from './scenario-screen-commons';
+import {
+  loadScreenScenarioBases,
+  screenScenarioBaseFor,
+  resolveCategoryRate,
+} from './scenario-screen-commons';
 import type { EstimateAdvantagePriceResult } from '../validators/advantage-tariff.validator';
 
 /**
@@ -107,20 +109,7 @@ export async function estimateAdvantageItemPrice(
     new Date(),
   );
   const bands = source?.bandsByBarcode.get(item.barcode) ?? null;
-  // The commission rule table is Trendyol reference data: another marketplace's store
-  // has no category fallback rate.
-  let categoryRate: Decimal | null = null;
-  if (store.platform === Platform.TRENDYOL && category !== null && category.categoryId !== null) {
-    const commissionRules = await loadCommissionRulesForCategories(prisma, {
-      categoryIds: [category.categoryId],
-    });
-    const resolved = resolveTrendyolCategoryRate({
-      rules: commissionRules,
-      categoryId: category.categoryId.toString(),
-      brandId: category.brandId === null ? null : category.brandId.toString(),
-    });
-    categoryRate = resolved?.ratePct ?? null;
-  }
+  const categoryRate = await resolveCategoryRate({ platform: store.platform, ref: category });
   const commissionInputs: ItemCommissionInputs = { bands, categoryRate };
 
   // Resolve the price + commission per mode. The 'current' scenario mirrors the detail

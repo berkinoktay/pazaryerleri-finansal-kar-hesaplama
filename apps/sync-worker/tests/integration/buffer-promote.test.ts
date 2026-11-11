@@ -49,12 +49,8 @@ function buildMappedOrder(over: {
   /** Order status in the snapshot. Defaults to PROCESSING; CANCELLED exercises the
    * cost-window skip (a cancelled order is never excluded at graduation). */
   status?: string;
-  /** Writes the export flag under the pre-rename `micro` key (and no isExportSale),
-   * the shape of a row buffered before the micro -> isExportSale rename. */
-  legacyMicro?: boolean;
 }): Prisma.InputJsonValue {
-  const exportFlag =
-    over.legacyMicro !== undefined ? { micro: over.legacyMicro } : { isExportSale: false };
+  const exportFlag = { isExportSale: false };
   const value = {
     platformOrderId: over.platformOrderId,
     platformOrderNumber: over.platformOrderNumber ?? `ord-${over.platformOrderId}`,
@@ -393,30 +389,6 @@ describe('processBufferPromote', () => {
     expect(order.estimatedDeliveryStartDate?.toISOString()).toBe('2026-06-12T15:57:28.000Z');
     expect(order.estimatedDeliveryEndDate?.toISOString()).toBe('2026-06-13T11:38:56.000Z');
     expect(order.actualShipDate?.toISOString()).toBe('2026-06-12T11:35:54.000Z');
-  });
-
-  it('keeps the export flag of an entry buffered before the rename (legacy micro key)', async () => {
-    const org = await createOrganization();
-    const store = await createStore(org.id);
-    await seedCalculableVariant(org.id, store.id, BARCODE);
-
-    await createBufferEntry(org.id, store.id, {
-      platformOrderId: 'pkg-legacy-micro',
-      platformOrderNumber: 'ord-legacy-micro',
-      status: 'PROMOTING',
-      mappedOrder: buildMappedOrder({
-        platformOrderId: 'pkg-legacy-micro',
-        platformOrderNumber: 'ord-legacy-micro',
-        legacyMicro: true,
-      }),
-    });
-
-    await processBufferPromote();
-
-    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
-    expect(order.isExportSale).toBe(true);
-    // The export sale is VAT exempt at the source, exactly as before the rename.
-    expect(order.saleVat?.toFixed(2)).toBe('0.00');
   });
 
   it('promotes a today entry without throwing on the JSONB string orderDate, and does NOT decrement at promote (intake-time semantics)', async () => {

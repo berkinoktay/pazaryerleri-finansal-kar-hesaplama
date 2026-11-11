@@ -35,15 +35,9 @@ import {
   type ShippingUnavailableReason,
 } from '@pazarsync/profit';
 
-// Quote-level failure reason, mirrored by QuoteReasonSchema in product-pricing.validator.
-// NOT_CALCULABLE: no price produced a computable statement (shipping or commission
-// missing), so the solver found no priceable point.
-export type QuoteReason =
-  | 'NOT_PRICE_SENSITIVE'
-  | 'UNREACHABLE_TARGET'
-  | 'NO_COST'
-  | 'NOT_CALCULABLE';
 import { InvalidReferenceError, mapPrismaError } from '@pazarsync/sync-core';
+
+import type { QuoteReason } from '../validators/product-pricing.validator';
 
 import { deriveCalculable } from './product-pricing-assembly';
 import { logProfitReadFailure } from './profit-compute-fallback.service';
