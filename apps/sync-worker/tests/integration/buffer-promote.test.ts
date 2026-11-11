@@ -1,8 +1,17 @@
+import { Decimal } from 'decimal.js';
+
 import { prisma } from '@pazarsync/db';
 import type { Prisma } from '@pazarsync/db';
-import { ProfitRecomputeReason, ProfitStatementView, ProfitStatus } from '@pazarsync/db/enums';
+import {
+  CommissionRuleKind,
+  Platform,
+  ProfitLineType,
+  ProfitRecomputeReason,
+  ProfitStatementView,
+  ProfitStatus,
+} from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
-import { intakeOrder } from '@pazarsync/order-sync';
+import { intakeOrder, upsertOrderWithSnapshot } from '@pazarsync/order-sync';
 import { drainProfitRecomputeQueue } from '@pazarsync/profit';
 import { getBusinessDateAnchor, getBusinessDayRange } from '@pazarsync/utils';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -85,7 +94,11 @@ function buildMappedForIntake(over: {
   barcode: string;
   quantity: number;
   orderDate: Date;
+  /** False models the sparse payload with no commission on the line (rate is the
+   *  mapper's defensive '0'). Defaults to true (a 15% line rate). */
+  commissionKnown?: boolean;
 }): MappedOrder {
+  const commissionKnown = over.commissionKnown ?? true;
   return {
     platformOrderId: over.platformOrderId,
     platformOrderNumber: `ord-${over.platformOrderId}`,
@@ -122,9 +135,9 @@ function buildMappedForIntake(over: {
         lineSaleGross: '100.00',
         lineSellerDiscountGross: '0.00',
         saleVatRate: '18',
-        commissionRate: '15',
+        commissionRate: commissionKnown ? '15' : '0',
         categoryId: null,
-        commissionKnown: true,
+        commissionKnown,
       },
     ],
   };
@@ -256,6 +269,74 @@ async function seedLateCostedVariant(
       changedFields: [],
       effectiveFrom: tooLate,
     },
+  });
+}
+
+// The commission category of the path-parity test and its Trendyol category rule.
+const PARITY_CATEGORY_ID = 626n;
+const PARITY_CATEGORY_RATE = '19';
+
+// Seed a variant whose product sits in PARITY_CATEGORY_ID, with a 1-desi weight for the
+// shipping estimate and no synced commission rate (so only the category rule can price
+// the commission). withCost attaches a 48.00 cost profile; without it intake buffers.
+async function seedCategoryVariant(
+  organizationId: string,
+  storeId: string,
+  barcode: string,
+  withCost: boolean,
+): Promise<string> {
+  const product = await prisma.product.create({
+    data: {
+      organizationId,
+      storeId,
+      platformContentId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      productMainId: `pm-${barcode}`,
+      title: 'Promote Parity Product',
+      categoryId: PARITY_CATEGORY_ID,
+    },
+  });
+  const variant = await prisma.productVariant.create({
+    data: {
+      organizationId,
+      storeId,
+      productId: product.id,
+      platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      barcode,
+      stockCode: `sk-${barcode}`,
+      salePrice: '100',
+      listPrice: '100',
+      syncedDimensionalWeight: '1',
+    },
+  });
+  if (withCost) {
+    await attachVersionedCost(organizationId, storeId, variant.id);
+  }
+  return variant.id;
+}
+
+// Attach a 48.00 cost profile with a version effective long before the order, so the
+// loader reads a cost for the order's day.
+async function attachVersionedCost(
+  organizationId: string,
+  storeId: string,
+  variantId: string,
+): Promise<void> {
+  const profile = await createCostProfile(organizationId, { storeId, amountGross: '48.00' });
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId,
+      version: 1,
+      name: profile.name,
+      type: profile.type,
+      amountGross: profile.amountGross,
+      vatRate: profile.vatRate,
+      changedFields: [],
+      effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+    },
+  });
+  await prisma.productVariantCostProfile.create({
+    data: { organizationId, productVariantId: variantId, profileId: profile.id },
   });
 }
 
@@ -707,6 +788,139 @@ describe('processBufferPromote', () => {
     expect(order.platformOrderId).toBe('pkg-today-promoting');
     expect(order.profitExcludedAt).toBeNull();
     expect(order.profitExclusionReason).toBeNull();
+  });
+
+  it('direct write and buffer promote reach the same best-known net profit and COMMISSION lines for a line without commission', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id, { platform: Platform.TRENDYOL });
+    // The line carries no commission (commissionKnown false) and the variant has no synced
+    // rate, so on both paths the engine prices the commission from the category rule.
+    await prisma.marketplaceCommissionRate.create({
+      data: {
+        platform: Platform.TRENDYOL,
+        ruleKind: CommissionRuleKind.CATEGORY,
+        categoryId: PARITY_CATEGORY_ID,
+        brandId: null,
+        categoryName: 'Parity Category',
+        parentCategoryName: null,
+        brandName: null,
+        baseRate: new Decimal(PARITY_CATEGORY_RATE),
+        paymentTermDays: 60,
+        fetchedAt: new Date(),
+        sourceScreen: 'CategoryCommissionPaymentTerms',
+      },
+    });
+    const carrier = await prisma.shippingCarrier.findFirstOrThrow({
+      where: { platform: Platform.TRENDYOL, code: 'SENDEOMP' },
+    });
+    await prisma.store.update({
+      where: { id: store.id },
+      data: { defaultShippingCarrierId: carrier.id },
+    });
+    const orderDate = new Date();
+
+    // Path A -- direct: the variant already has a cost, so the order is written at once.
+    const barcodeA = 'EAN13-PARITY-A';
+    await seedCategoryVariant(org.id, store.id, barcodeA, true);
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildMappedForIntake({
+        platformOrderId: 'parity-direct',
+        barcode: barcodeA,
+        quantity: 1,
+        orderDate,
+        commissionKnown: false,
+      }),
+    );
+
+    // Path B -- buffer: the variant is cost-missing today, so intake buffers it; the cost
+    // then arrives and the entry is flipped PROMOTING (cost-attach simulation) -> promote.
+    const barcodeB = 'EAN13-PARITY-B';
+    const variantB = await seedCategoryVariant(org.id, store.id, barcodeB, false);
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMappedForIntake({
+        platformOrderId: 'parity-buffer',
+        barcode: barcodeB,
+        quantity: 1,
+        orderDate,
+        commissionKnown: false,
+      }),
+    });
+    expect(outcome).toEqual({ kind: 'buffered' });
+    await attachVersionedCost(org.id, store.id, variantB);
+    await prisma.livePerformanceBuffer.updateMany({
+      where: { storeId: store.id, platformOrderId: 'parity-buffer' },
+      data: { status: 'PROMOTING' },
+    });
+    await processBufferPromote();
+
+    const orderA = await prisma.order.findFirstOrThrow({
+      where: { organizationId: org.id, storeId: store.id, platformOrderId: 'parity-direct' },
+    });
+    const orderB = await prisma.order.findFirstOrThrow({
+      where: { organizationId: org.id, storeId: store.id, platformOrderId: 'parity-buffer' },
+    });
+    // Neither path stores a raw order rate for a line that carried none.
+    for (const orderId of [orderA.id, orderB.id]) {
+      const item = await prisma.orderItem.findFirstOrThrow({
+        where: { organizationId: org.id, orderId },
+      });
+      expect(item.orderCommissionRatePct).toBeNull();
+    }
+
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+
+    const stmtA = await prisma.orderProfitStatement.findFirstOrThrow({
+      where: {
+        organizationId: org.id,
+        storeId: store.id,
+        orderId: orderA.id,
+        view: ProfitStatementView.BEST_KNOWN,
+      },
+    });
+    const stmtB = await prisma.orderProfitStatement.findFirstOrThrow({
+      where: {
+        organizationId: org.id,
+        storeId: store.id,
+        orderId: orderB.id,
+        view: ProfitStatementView.BEST_KNOWN,
+      },
+    });
+    expect(stmtA.status).toBe(ProfitStatus.ESTIMATED);
+    expect(stmtB.status).toBe(stmtA.status);
+    expect(stmtA.netProfit).not.toBeNull();
+    expect(stmtB.netProfit?.toString()).toBe(stmtA.netProfit?.toString());
+
+    // ...and the same COMMISSION lines, priced at the category rate.
+    const commissionLines = async (
+      orderId: string,
+    ): Promise<{ source: string; amountGross: string }[]> => {
+      const lines = await prisma.profitLine.findMany({
+        where: {
+          organizationId: org.id,
+          storeId: store.id,
+          orderId,
+          type: ProfitLineType.COMMISSION,
+        },
+        orderBy: [{ source: 'asc' }, { amountGross: 'asc' }],
+      });
+      return lines.map((line) => ({
+        source: line.source,
+        amountGross: line.amountGross.toString(),
+      }));
+    };
+    const linesA = await commissionLines(orderA.id);
+    expect(linesA.length).toBeGreaterThan(0);
+    expect(await commissionLines(orderB.id)).toEqual(linesA);
+    const commissionTotal = linesA.reduce(
+      (acc, line) => acc.add(new Decimal(line.amountGross)),
+      new Decimal(0),
+    );
+    // Sale 100.00 incl. VAT x the 19% category rule.
+    expect(commissionTotal.toString()).toBe('19');
   });
 });
 

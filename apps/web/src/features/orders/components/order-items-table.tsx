@@ -14,6 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { EM_DASH } from '@/lib/format-percent';
 
 import { type OrderItemDetail } from '../api/get-order.api';
 
@@ -95,11 +96,20 @@ export function OrderItemsTable({
                     <TableCell className="text-right">
                       <Currency value={item.lineSaleGross} />
                     </TableCell>
+                    {/* Null = the order's profit part is empty (not a zero commission). */}
                     <TableCell className="text-right">
-                      <Currency value={item.commissionGross} />
+                      {item.commissionGross !== null ? (
+                        <Currency value={item.commissionGross} />
+                      ) : (
+                        EM_DASH
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Currency value={item.refundedCommissionGross} dimWhenZero />
+                      {item.refundedCommissionGross !== null ? (
+                        <Currency value={item.refundedCommissionGross} dimWhenZero />
+                      ) : (
+                        EM_DASH
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       {item.unitCostSnapshotGross !== null ? (

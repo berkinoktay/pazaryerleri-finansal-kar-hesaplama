@@ -18,6 +18,7 @@ import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
 import type { Prisma, Store as PrismaStore } from '@pazarsync/db';
+import { Platform } from '@pazarsync/db/enums';
 import { loadCommissionRulesForCategories, resolveTrendyolCategoryRate } from '@pazarsync/profit';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
@@ -128,23 +129,27 @@ export async function resolveCampaignEconomics(
   );
 
   // Category-rate fallback (3rd tier) -- resolved once per distinct (category, brand) pair.
+  // The commission rule table is Trendyol reference data, so another marketplace's store
+  // keeps the map empty (no category fallback rate).
   const categoryRateByKey = new Map<string, Decimal | null>();
-  const distinctCatKeys = new Map<string, { categoryId: bigint; brandId: bigint | null }>();
-  for (const variant of variantMap.values()) {
-    const { categoryId, brandId } = variant.product;
-    if (categoryId === null) continue;
-    distinctCatKeys.set(categoryRateKey(categoryId, brandId), { categoryId, brandId });
-  }
-  const commissionRules = await loadCommissionRulesForCategories(prisma, {
-    categoryIds: [...distinctCatKeys.values()].map((ref) => ref.categoryId),
-  });
-  for (const [key, { categoryId, brandId }] of distinctCatKeys) {
-    const resolved = resolveTrendyolCategoryRate({
-      rules: commissionRules,
-      categoryId: categoryId.toString(),
-      brandId: brandId === null ? null : brandId.toString(),
+  if (store.platform === Platform.TRENDYOL) {
+    const distinctCatKeys = new Map<string, { categoryId: bigint; brandId: bigint | null }>();
+    for (const variant of variantMap.values()) {
+      const { categoryId, brandId } = variant.product;
+      if (categoryId === null) continue;
+      distinctCatKeys.set(categoryRateKey(categoryId, brandId), { categoryId, brandId });
+    }
+    const commissionRules = await loadCommissionRulesForCategories(prisma, {
+      categoryIds: [...distinctCatKeys.values()].map((ref) => ref.categoryId),
     });
-    categoryRateByKey.set(key, resolved?.ratePct ?? null);
+    for (const [key, { categoryId, brandId }] of distinctCatKeys) {
+      const resolved = resolveTrendyolCategoryRate({
+        rules: commissionRules,
+        categoryId: categoryId.toString(),
+        brandId: brandId === null ? null : brandId.toString(),
+      });
+      categoryRateByKey.set(key, resolved?.ratePct ?? null);
+    }
   }
 
   const byItemId = new Map<string, CampaignItemEconomics>();

@@ -17,6 +17,7 @@ import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
 import type { Store as PrismaStore } from '@pazarsync/db';
+import { Platform } from '@pazarsync/db/enums';
 import { loadCommissionRulesForCategories, resolveTrendyolCategoryRate } from '@pazarsync/profit';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
@@ -106,8 +107,10 @@ export async function estimateAdvantageItemPrice(
     new Date(),
   );
   const bands = source?.bandsByBarcode.get(item.barcode) ?? null;
+  // The commission rule table is Trendyol reference data: another marketplace's store
+  // has no category fallback rate.
   let categoryRate: Decimal | null = null;
-  if (category !== null && category.categoryId !== null) {
+  if (store.platform === Platform.TRENDYOL && category !== null && category.categoryId !== null) {
     const commissionRules = await loadCommissionRulesForCategories(prisma, {
       categoryIds: [category.categoryId],
     });

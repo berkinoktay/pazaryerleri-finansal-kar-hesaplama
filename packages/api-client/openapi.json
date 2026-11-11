@@ -1512,8 +1512,11 @@
             "description": "Seller discount incl. VAT (decimal string)."
           },
           "commissionGross": {
-            "type": "string",
-            "description": "Commission incl. VAT (decimal string), from the order's best-known COMMISSION lines; '0.00' when none (e.g. a cancelled order)."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Commission incl. VAT (decimal string), from the order's best-known COMMISSION lines; '0.00' when the profit lines carry none (e.g. a cancelled order); null when the profit part is empty (a platform the engine cannot compute, a corrupt stored line, or a failed in-request computation)."
           },
           "commissionRate": {
             "type": [
@@ -1530,8 +1533,11 @@
             "description": "Commission VAT rate % (decimal string) from the same profit line; null when no line supplies it."
           },
           "refundedCommissionGross": {
-            "type": "string",
-            "description": "Refunded commission incl. VAT (decimal string), from the best-known COMMISSION_REFUND lines; '0.00' when none."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Refunded commission incl. VAT (decimal string), from the best-known COMMISSION_REFUND lines; '0.00' when the profit lines carry none (e.g. a cancelled order); null when the profit part is empty (a platform the engine cannot compute, a corrupt stored line, or a failed in-request computation)."
           },
           "estimatedCommissionGross": {
             "type": [
@@ -9989,7 +9995,7 @@
           "Stores"
         ],
         "summary": "Disconnect (hard delete) a store",
-        "description": "Cascades to products, orders, settlements, and sync_logs. No soft-delete path — this is intentional per the design doc.",
+        "description": "Cascades to the store's data, including products and variants, orders (with their items, profit lines and statements), claims, marketplace finance records, cost profiles, commission and shipping tariffs, campaign lists, webhook events, and sync_logs; store-linked expenses are kept with the store link cleared. No soft-delete path — this is intentional per the design doc.",
         "security": [
           {
             "bearerAuth": []

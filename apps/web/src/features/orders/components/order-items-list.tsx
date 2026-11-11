@@ -8,7 +8,7 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { ProductImageCell } from '@/components/patterns/product-image-cell';
 import { UnmatchedVariantBadge } from '@/components/patterns/unmatched-variant-badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { formatPercentDisplay } from '@/lib/format-percent';
+import { EM_DASH, formatPercentDisplay } from '@/lib/format-percent';
 
 import { type OrderItemDetail } from '../api/get-order.api';
 
@@ -105,7 +105,14 @@ export function OrderItemsList({
                       />
                       <MetaCol
                         label={t('meta.commissionAmount')}
-                        value={<Currency value={item.commissionGross} />}
+                        value={
+                          // Null = the order's profit part is empty (not a zero commission).
+                          item.commissionGross !== null ? (
+                            <Currency value={item.commissionGross} />
+                          ) : (
+                            EM_DASH
+                          )
+                        }
                       />
                     </div>
                   </div>

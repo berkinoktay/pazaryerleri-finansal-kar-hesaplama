@@ -1441,6 +1441,8 @@ describe('upsertOrderWithSnapshot — out-of-order guard (freshness)', () => {
     status: MappedOrder['status'];
     lastModifiedDate: Date;
     actualDeliveryDate?: Date | null;
+    /** The line's raw commission rate %; defaults to '10'. */
+    commissionRate?: string;
   }): MappedOrder {
     return {
       platformOrderId: 'guard-1',
@@ -1478,7 +1480,7 @@ describe('upsertOrderWithSnapshot — out-of-order guard (freshness)', () => {
           lineSaleGross: '120.00',
           lineSellerDiscountGross: '0.00',
           saleVatRate: '20',
-          commissionRate: '10',
+          commissionRate: over.commissionRate ?? '10',
           categoryId: null,
           commissionKnown: true,
         },
@@ -1489,23 +1491,28 @@ describe('upsertOrderWithSnapshot — out-of-order guard (freshness)', () => {
   it('(a) stale event (older lastModifiedDate) is dropped — no status regression, watermark stays', async () => {
     const { org, store } = await setupStoreAndSyncLog([GUARD_BARCODE]);
 
-    // Fresh event at T2 → status SHIPPED, watermark stamped at T2.
+    // Fresh event at T2 → status SHIPPED, raw commission rate 20, watermark stamped at T2.
     await upsertOrderWithSnapshot(
       store.id,
       org.id,
-      buildGuardMapped({ status: 'SHIPPED', lastModifiedDate: T2 }),
+      buildGuardMapped({ status: 'SHIPPED', lastModifiedDate: T2, commissionRate: '20' }),
     );
-    // Stale older event (T1 < T2) tries to regress the status back to PROCESSING.
+    // Stale older event (T1 < T2) tries to regress the status back to PROCESSING and
+    // the raw commission rate down to 5.
     await upsertOrderWithSnapshot(
       store.id,
       org.id,
-      buildGuardMapped({ status: 'PROCESSING', lastModifiedDate: T1 }),
+      buildGuardMapped({ status: 'PROCESSING', lastModifiedDate: T1, commissionRate: '5' }),
     );
 
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
-    // Guard dropped the whole write — status and watermark are untouched.
+    // Guard dropped the whole write — status, watermark and raw rate are untouched.
     expect(order.status).toBe('SHIPPED');
     expect(order.platformLastModifiedAt?.toISOString()).toBe(T2.toISOString());
+    const item = await prisma.orderItem.findFirstOrThrow({
+      where: { organizationId: org.id, orderId: order.id },
+    });
+    expect(item.orderCommissionRatePct?.toString()).toBe('20');
   });
 
   it('(b) newer event is applied and advances the watermark', async () => {

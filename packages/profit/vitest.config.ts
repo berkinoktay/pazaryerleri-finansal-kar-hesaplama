@@ -38,6 +38,7 @@ export default defineConfig({
       'src/persistence/__tests__/statement-breakdown-golden.test.ts',
       'src/persistence/__tests__/recompute-queue.test.ts',
       'src/persistence/__tests__/finance-records.test.ts',
+      'src/persistence/__tests__/trendyol-reference-loaders.test.ts',
     ],
   },
 });

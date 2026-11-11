@@ -195,7 +195,10 @@ const disconnectStoreRoute = createRoute({
   tags: ['Stores'],
   summary: 'Disconnect (hard delete) a store',
   description:
-    'Cascades to products, orders, settlements, and sync_logs. No soft-delete path — ' +
+    "Cascades to the store's data, including products and variants, orders (with their " +
+    'items, profit lines and statements), claims, marketplace finance records, cost ' +
+    'profiles, commission and shipping tariffs, campaign lists, webhook events, and ' +
+    'sync_logs; store-linked expenses are kept with the store link cleared. No soft-delete path — ' +
     'this is intentional per the design doc.',
   security: [{ bearerAuth: [] }],
   request: { params: storeIdParams },

@@ -1326,7 +1326,7 @@ describe('Order routes', () => {
       expect(await prisma.orderProfitStatement.count({ where: { orderId } })).toBe(0);
     });
 
-    it('returns no breakdown and null item rates for a platform the engine cannot compute', async () => {
+    it('returns no breakdown and null item commission figures for a platform the engine cannot compute', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
@@ -1334,8 +1334,8 @@ describe('Order routes', () => {
       // returns a null breakdown instead of raising a 500.
       const store = await createStore(org.id, { platform: 'HEPSIBURADA' });
       const order = await createOrder(org.id, store.id);
-      // The legacy item columns hold a rate and amount; with no line context the
-      // detail must not fall back to them.
+      // With no line context the profit part is empty: the item's commission rates and
+      // amounts are all null, never a fabricated 0.00.
       const item = await prisma.orderItem.create({
         data: {
           orderId: order.id,
@@ -1356,18 +1356,19 @@ describe('Order routes', () => {
         profitBreakdown: unknown;
         items: {
           id: string;
-          commissionGross: string;
+          commissionGross: string | null;
           commissionRate: string | null;
           commissionVatRate: string | null;
-          refundedCommissionGross: string;
+          refundedCommissionGross: string | null;
         }[];
       };
       expect(body.profitBreakdown).toBeNull();
       const hbItem = body.items.find((i) => i.id === item.id);
+      expect(hbItem).toBeDefined();
       expect(hbItem?.commissionRate).toBeNull();
       expect(hbItem?.commissionVatRate).toBeNull();
-      expect(hbItem?.commissionGross).toBe('0.00');
-      expect(hbItem?.refundedCommissionGross).toBe('0.00');
+      expect(hbItem?.commissionGross).toBeNull();
+      expect(hbItem?.refundedCommissionGross).toBeNull();
     });
 
     it('returns item cost and commission from the profit lines', async () => {

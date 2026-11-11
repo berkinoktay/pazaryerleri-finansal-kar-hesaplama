@@ -530,9 +530,10 @@ interface OrderProfitLineContext {
 /**
  * Everything the order detail needs from the profit layer: the profit fields
  * (reconciliation status, estimated / settled net profit), the best-known breakdown,
- * and the per-item line context. lineContext is null only when the engine cannot
- * compute this platform's profit at all, in which case every item takes the all-null
- * EMPTY_ITEM_PROFIT_VALUES.
+ * and the per-item line context. lineContext is null when the profit part is empty: a
+ * platform the engine cannot compute, a corrupt stored line (or statement) that the
+ * stored path cannot rebuild, or a failed in-request computation. Every item then takes
+ * the all-null EMPTY_ITEM_PROFIT_VALUES, commission amounts included.
  */
 interface OrderProfitDetail {
   readonly fields: OrderProfitFields;
@@ -543,7 +544,7 @@ interface OrderProfitDetail {
 /** A zero money amount in the two-decimal wire shape the profit-line figures use. */
 const ZERO_MONEY = '0.00';
 
-/** The all-null item values for a platform whose profit the engine cannot compute. */
+/** The all-null item values for an order whose profit part is empty (no line context). */
 const EMPTY_ITEM_PROFIT_VALUES: ItemProfitValues = {
   unitCostGross: null,
   unitCostVatRate: null,
@@ -830,16 +831,17 @@ export async function getOrderById(
 
     items: row.items.map((item) => {
       // Cost and commission figures come from the profit lines alone (decision 7). An
-      // unsupported platform (no line context) leaves every figure null.
+      // empty profit part (no line context) leaves every figure null.
+      const lineContext = profit.lineContext;
       const values =
-        profit.lineContext === null
+        lineContext === null
           ? EMPTY_ITEM_PROFIT_VALUES
           : itemProfitValues({
               orderItemId: item.id,
               quantity: item.quantity,
-              bestKnownLines: profit.lineContext.bestKnownLines,
-              estimateLines: profit.lineContext.estimateLines,
-              issues: profit.lineContext.issues,
+              bestKnownLines: lineContext.bestKnownLines,
+              estimateLines: lineContext.estimateLines,
+              issues: lineContext.issues,
             });
       return {
         id: item.id,
@@ -847,13 +849,15 @@ export async function getOrderById(
         lineSaleGross: item.lineSaleGross.toString(),
         saleVatRate: item.saleVatRate.toString(),
         lineSellerDiscountGross: item.lineSellerDiscountGross.toString(),
-        // A commission amount or refund no line supplies is zero (a cancelled order's
-        // commission, an item that was not returned); the two rates are informational
-        // and stay null when no line supplies them.
-        commissionGross: values.commissionGross ?? ZERO_MONEY,
+        // With a line context, a commission amount or refund no line supplies is zero (a
+        // cancelled order's commission, an item that was not returned). Without one the
+        // profit part is empty, so both amounts stay null rather than a fabricated zero.
+        // The two rates are informational and stay null when no line supplies them.
+        commissionGross: lineContext === null ? null : (values.commissionGross ?? ZERO_MONEY),
         commissionRate: values.commissionRate,
         commissionVatRate: values.commissionVatRate,
-        refundedCommissionGross: values.refundedCommissionGross ?? ZERO_MONEY,
+        refundedCommissionGross:
+          lineContext === null ? null : (values.refundedCommissionGross ?? ZERO_MONEY),
         estimatedCommissionGross: values.estimatedCommissionGross,
         settledCommissionGross: values.settledCommissionGross,
         unitCostSnapshotGross: values.unitCostGross,

@@ -330,11 +330,16 @@ const OrderItemDetailSchema = z
       .string()
       .openapi({ description: 'Seller discount incl. VAT (decimal string).' }),
     // Commission (gross + rates) from the profit lines.
-    commissionGross: z.string().openapi({
-      description:
-        "Commission incl. VAT (decimal string), from the order's best-known COMMISSION lines; " +
-        "'0.00' when none (e.g. a cancelled order).",
-    }),
+    commissionGross: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          "Commission incl. VAT (decimal string), from the order's best-known COMMISSION lines; " +
+          "'0.00' when the profit lines carry none (e.g. a cancelled order); null when the " +
+          'profit part is empty (a platform the engine cannot compute, a corrupt stored line, ' +
+          'or a failed in-request computation).',
+      }),
     commissionRate: z
       .string()
       .nullable()
@@ -351,11 +356,16 @@ const OrderItemDetailSchema = z
           'Commission VAT rate % (decimal string) from the same profit line; null when no line ' +
           'supplies it.',
       }),
-    refundedCommissionGross: z.string().openapi({
-      description:
-        'Refunded commission incl. VAT (decimal string), from the best-known COMMISSION_REFUND ' +
-        "lines; '0.00' when none.",
-    }),
+    refundedCommissionGross: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Refunded commission incl. VAT (decimal string), from the best-known COMMISSION_REFUND ' +
+          "lines; '0.00' when the profit lines carry none (e.g. a cancelled order); null when " +
+          'the profit part is empty (a platform the engine cannot compute, a corrupt stored ' +
+          'line, or a failed in-request computation).',
+      }),
     estimatedCommissionGross: z
       .string()
       .nullable()

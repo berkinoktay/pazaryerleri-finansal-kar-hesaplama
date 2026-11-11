@@ -26,13 +26,20 @@ section "Versioning" for details.
 
 ### Changed
 
-- **Order detail item commission rates are nullable and read from the profit lines only**
-  (`GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}`). `items[].commissionRate`
-  and `items[].commissionVatRate` are now `string | null`: both come from the order's estimate
-  commission profit line (the VAT rate from the same line as the rate) and are null when no line
-  supplies them. The fallback to the item's legacy columns is gone: for a platform the engine
-  cannot compute, `commissionGross` and `refundedCommissionGross` read `'0.00'` and the two rates
-  read null instead of the stored item values. Profit amounts are unchanged.
+- **Order detail item commission rates and amounts are nullable and read from the profit lines
+  only** (`GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}`).
+  `items[].commissionRate` and `items[].commissionVatRate` are now `string | null`: both come from
+  the order's estimate commission profit line (the VAT rate from the same line as the rate) and are
+  null when no line supplies them. `items[].commissionGross` and `items[].refundedCommissionGross`
+  are now `string | null` too: `'0.00'` when the profit lines carry none (e.g. a cancelled order,
+  an item that was not returned), null when the profit part is empty (a platform the engine cannot
+  compute, a corrupt stored line, or a failed in-request computation). The fallback to the item's
+  legacy columns is gone, so an empty profit part no longer reads the stored item values or a
+  fabricated `'0.00'` commission. Profit amounts are unchanged. Breaking for clients that treat the
+  two amounts as always present; the web client shows an em dash for a null amount in the same PR.
+- **Store disconnect description** (`DELETE /v1/organizations/{orgId}/stores/{storeId}`). The
+  description now names the real cascades (orders with their items, profit lines and statements,
+  among others) instead of the dropped settlements table. Description only; no wire change.
 - **Scenario screens are priced by the profit engine.** Product pricing (list and quote), commission
   tariffs and Plus commission tariffs (detail and estimate), advantage product labels and flash
   products (detail and estimate), discount lists (detail and estimate) and marketplace campaigns
