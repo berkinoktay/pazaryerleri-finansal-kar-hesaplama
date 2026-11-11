@@ -8,9 +8,6 @@ import { type ProfitLine } from '../../../core/profit-line';
 import { type ProfitStatement } from '../../../core/profit-statement';
 import { type ScenarioSolveResult } from '../../../core/scenario/solve-scenario-price';
 import { type ItemCostProfileInput } from '../../../core/seller-costs/build-seller-cost-lines';
-import { grossToVat } from '../../../money';
-import { type ProfitInputFee } from '../../../profit-formula';
-import { computeUnitProfit, type UnitEconomics } from '../../../unit-pricing';
 import {
   evaluateTrendyolScenario,
   solveTrendyolScenarioPrice,
@@ -24,7 +21,8 @@ import {
  * Golden tests that pin the profit-engine audit report's worked examples (B1, B2,
  * B3) to the rebuilt Trendyol scenario and its price solver, plus a kurus-level
  * comparison against the old scenario engine (`computeUnitProfit`) where none of
- * those audit corrections apply. Every expected value is a kurus a real order
+ * those audit corrections apply; the old engine's results were frozen from the
+ * legacy engine on 2026-11-11. Every expected value is a kurus a real order
  * would produce; the reference is the audit fixture `arasmpScenarioReference`.
  *
  * The default scenario is built locally so this file stands on its own: sale VAT
@@ -313,42 +311,27 @@ describe('golden audit scenarios', () => {
   });
 
   it('matches the old scenario engine within a few kurus where B1, B2 and B3 do not apply', () => {
-    const vatRate = new Decimal('20');
-    const shippingGross = new Decimal('100.72');
-    const platformServiceGross = new Decimal('13.19');
-    const fixedFees: ProfitInputFee[] = [
-      {
-        type: 'SHIPPING',
-        gross: shippingGross,
-        vat: grossToVat(shippingGross, vatRate),
-        direction: 'DEBIT',
-      },
-      {
-        type: 'PLATFORM_SERVICE',
-        gross: platformServiceGross,
-        vat: grossToVat(platformServiceGross, vatRate),
-        direction: 'DEBIT',
-      },
+    // Old scenario engine (`computeUnitProfit`) net profit per unit price, frozen from
+    // the legacy engine on 2026-11-11; the legacy engine was deleted in Faz 5. Its
+    // inputs were: sale VAT 20%, cost 150.00 gross at 20% VAT, commission 20% with 20%
+    // commission VAT, stoppage 0.01 of the net sale, and two fixed DEBIT fees at 20% VAT
+    // (shipping 100.72 gross, platform service 13.19 gross).
+    const oldNetProfitByPrice = [
+      { price: '360.00', oldNetProfit: new Decimal('17.075') },
+      { price: '400.00', oldNetProfit: new Decimal('43.408333333333333333') },
+      { price: '500.00', oldNetProfit: new Decimal('109.24166666666666666') },
+      { price: '750.00', oldNetProfit: new Decimal('273.825') },
+      { price: '1000.00', oldNetProfit: new Decimal('438.40833333333333333') },
     ];
-    const costGross = new Decimal('150.00');
-    const econ: UnitEconomics = {
-      saleVatRate: vatRate,
-      cost: { gross: costGross, vat: grossToVat(costGross, vatRate) },
-      commissionRate: new Decimal('20'),
-      commissionVatRate: vatRate,
-      stoppageRate: new Decimal('0.01'),
-      fixedFees,
-    };
 
     const tolerance = new Decimal('0.03');
-    for (const price of ['360.00', '400.00', '500.00', '750.00', '1000.00']) {
+    for (const { price, oldNetProfit } of oldNetProfitByPrice) {
       const unitPrice = new Decimal(price);
       const newNetProfit = evaluateAt(unitPrice).statement.netProfit;
       if (newNetProfit === null) {
         throw new Error(`scenario netProfit is null at ${price}`);
       }
-      const oldNetProfit = computeUnitProfit(econ, unitPrice).netProfit;
-      expect(newNetProfit.sub(oldNetProfit).abs().lte(tolerance)).toBe(true);
+      expect(newNetProfit.sub(oldNetProfit).abs().lte(tolerance), price).toBe(true);
     }
   });
 });

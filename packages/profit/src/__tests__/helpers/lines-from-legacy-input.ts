@@ -7,7 +7,7 @@ import {
 } from '@pazarsync/db/enums';
 
 import { createProfitLine, type LineMoney, type ProfitLine } from '../../core/profit-line';
-import { type ProfitInput, type ProfitInputFee } from '../../profit-formula';
+import { type ProfitInput, type ProfitInputFee } from '../fixtures/legacy-profit-scenarios';
 
 /** Legacy DEBIT fee type -> new profit line type. CREDIT fees map to ADJUSTMENT_INCOME. */
 const DEBIT_FEE_LINE_TYPE = {
@@ -43,7 +43,8 @@ function ruleLine(
  * still written as lines. Sale, cost, commission and stoppage are ITEM lines on a
  * single `item-1`; fees are PARCEL lines. DEBIT fees map by type, CREDIT fees
  * (whatever their legacy type) become ADJUSTMENT_INCOME. The equivalence test
- * feeds these lines into the new core and compares against `computeProfit`.
+ * feeds these lines into the new core and compares against the legacy
+ * `computeProfit` values frozen in the scenario fixtures.
  */
 export function linesFromLegacyInput(input: ProfitInput): ProfitLine[] {
   const lines: ProfitLine[] = [
