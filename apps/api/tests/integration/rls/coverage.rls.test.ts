@@ -21,6 +21,10 @@ const TENANT_TABLES = [
   'expenses',
   'sync_logs',
   'own_shipping_tariffs',
+  // Seller cost profiles and their variant attachments (org-scoped cost intelligence)
+  'cost_profiles',
+  'cost_profile_versions',
+  'product_variant_cost_profiles',
   // Saved commission tariffs (store-scoped campaign price-band tariffs)
   'commission_tariffs',
   'commission_tariff_periods',

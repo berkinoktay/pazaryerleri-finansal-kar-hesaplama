@@ -993,6 +993,32 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     expect(item.barcode).toBe('EAN13-DIRECT');
   });
 
+  it('zeroes every stored VAT figure at the source for an export sale', async () => {
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-EXPORT']);
+
+    await upsertOrderWithSnapshot(store.id, org.id, {
+      ...buildDirectMapped({
+        platformOrderId: 'export-1',
+        barcode: 'EAN13-EXPORT',
+        lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
+      }),
+      isExportSale: true,
+      sellerDiscountGross: '10.00',
+    });
+
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: 'export-1' },
+      include: { items: true },
+    });
+    expect(order.isExportSale).toBe(true);
+    // The export exemption zeroes the mapper's 20.00 sale VAT, the seller-discount VAT and
+    // the line's 20% rate; the gross amounts stay as mapped.
+    expect(order.saleVat?.toString()).toBe('0');
+    expect(order.sellerDiscountVat?.toString()).toBe('0');
+    expect(order.saleGross?.toString()).toBe('120');
+    expect(order.items[0]?.saleVatRate.toString()).toBe('0');
+  });
+
   it('fills the raw commission rate when a later event brings the commission', async () => {
     const { org, store } = await setupStoreAndSyncLog(['EAN13-TWOPHASE']);
 
