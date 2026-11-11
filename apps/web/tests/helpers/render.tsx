@@ -1,4 +1,4 @@
-import { type ReactElement, type ReactNode } from 'react';
+import { type ReactElement, type ReactNode, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NextIntlClientProvider } from 'next-intl';
 import { render as rtlRender, type RenderOptions } from '@testing-library/react';
@@ -27,8 +27,16 @@ interface ProvidersProps {
   queryClient?: QueryClient;
 }
 
-function AllProviders({ children, queryClient }: ProvidersProps) {
-  const client = queryClient ?? createTestQueryClient();
+/**
+ * The standard provider tree (QueryClient + NextIntl + Tooltip). Exported for
+ * tests that must build the SAME tree twice — a server string via
+ * `renderToString` and then a client `hydrate` — so both passes share one
+ * component shape and React can hydrate the first into the second.
+ */
+export function AllProviders({ children, queryClient }: ProvidersProps): ReactElement {
+  // Held in state so a re-render (RTL `rerender`, a parent update) never swaps
+  // the cache out from under the mounted observers when no client is passed.
+  const [client] = useState(() => queryClient ?? createTestQueryClient());
   return (
     <QueryClientProvider client={client}>
       <NextIntlClientProvider
