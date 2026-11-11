@@ -33,10 +33,14 @@ actuals on purpose; never treat an `ESTIMATE` view as final.
   recompute writer, the finance-record ingest and the recompute queue. Order-bound
   tenant queries filter by the order's organization and store; the worker's queue claim
   and stale-statement scan are deliberately system-wide (they run for every
-  organization), and the reference loaders read platform-global tables.
+  organization). Among the reference loaders, the commission-rule, fee and platform
+  tariff loaders read platform-global tables, while the cost-profile and own-tariff
+  loaders filter by organization or store.
 - `read/` -- helpers that turn stored lines, statements and issues back into engine
   types and display breakdowns.
-- `shipping/` -- the shared Barem-vs-desi tariff resolution (`resolveTariffForDesi`).
+- `shipping/` -- the Barem-vs-desi tariff resolution (`resolveTariffForDesi`) used by the
+  products list's variant estimator; the engine's pure counterpart is
+  `resolveTrendyolShippingNet`.
 
 A few small helpers sit at the top level: `infer-shipped-same-day`, `resolve-fee-definition`
 and the calculability helpers used when an order is taken in. Marketplace parameters

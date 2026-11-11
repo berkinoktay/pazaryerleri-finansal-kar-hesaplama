@@ -41,7 +41,7 @@ interface OrderDetailClientProps {
  *   3. KPI grid — sale net / estimated profit / settled profit / margin
  *   4. VAT breakdown — net+VAT aggregate of items
  *   5. Fees — no separate timeline; they render as lines of the profit summary (OrderProfitSummary)
- *   6. Items table — per-line variant + commission split + cost snapshot
+ *   6. Items list (OrderItemsList) — per-line variant, quantity, unit cost, commission rate and amount
  *   7. Claims card — PR-13 graceful empty until GetClaims worker ships
  */
 export function OrderDetailClient({

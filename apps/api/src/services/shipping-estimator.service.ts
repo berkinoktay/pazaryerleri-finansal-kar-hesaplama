@@ -78,9 +78,9 @@ export async function estimateShippingCostForVariant(
   );
   const carrier = variant.store.defaultShippingCarrier;
 
-  // Barem-vs-desi resolution lives in the shared core (resolveTariffForDesi,
-  // @pazarsync/profit). grossTotalForBarem = the variant salePrice (products-list
-  // display estimate).
+  // Barem-vs-desi resolution lives in @pazarsync/profit (resolveTariffForDesi; this
+  // estimator is its only caller). grossTotalForBarem = the variant salePrice
+  // (products-list display estimate).
   return resolveTariffForDesi(tx, {
     storeId: variant.store.id,
     tariffSource: variant.store.shippingTariffSource,
