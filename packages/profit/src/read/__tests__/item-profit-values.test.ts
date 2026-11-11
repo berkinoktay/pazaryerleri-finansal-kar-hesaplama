@@ -98,7 +98,7 @@ describe('itemProfitValues', () => {
     });
     expect(refunded.refundedCommissionGross).toBe('28.00');
 
-    // No refund line for the item: null, even when another item carries one.
+    // No refund line for the item: zero, even when another item carries one.
     const notRefunded = itemProfitValues({
       orderItemId: ITEM,
       quantity: 1,
@@ -109,7 +109,93 @@ describe('itemProfitValues', () => {
       estimateLines: [],
       issues: [],
     });
-    expect(notRefunded.refundedCommissionGross).toBeNull();
+    expect(notRefunded.refundedCommissionGross).toBe('0.00');
+  });
+
+  it('reports zero commission and refund when no line supplies them and no issue applies', () => {
+    // A cancelled order: the lines carry no commission and nothing blocks the item.
+    const values = itemProfitValues({
+      orderItemId: ITEM,
+      quantity: 1,
+      bestKnownLines: [],
+      estimateLines: [],
+      issues: [],
+    });
+    expect(values.commissionGross).toBe('0.00');
+    expect(values.refundedCommissionGross).toBe('0.00');
+    expect(values.estimatedCommissionGross).toBeNull();
+    expect(values.settledCommissionGross).toBeNull();
+  });
+
+  it('reports a null commission when a MISSING_COMMISSION_RATE issue names the item', () => {
+    const issues: ProfitIssue[] = [
+      { code: ProfitIssueCode.MISSING_COMMISSION_RATE, orderItemId: ITEM, detail: null },
+    ];
+    const named = itemProfitValues({
+      orderItemId: ITEM,
+      quantity: 1,
+      bestKnownLines: [],
+      estimateLines: [],
+      issues,
+    });
+    expect(named.commissionGross).toBeNull();
+    expect(named.refundedCommissionGross).toBeNull();
+    expect(named.commissionRate).toBeNull();
+    expect(named.estimatedCommissionGross).toBeNull();
+    expect(named.settledCommissionGross).toBeNull();
+
+    // The same issue naming another item leaves this item at a plain zero commission.
+    const other = itemProfitValues({
+      orderItemId: OTHER_ITEM,
+      quantity: 1,
+      bestKnownLines: [],
+      estimateLines: [],
+      issues,
+    });
+    expect(other.commissionGross).toBe('0.00');
+    expect(other.refundedCommissionGross).toBe('0.00');
+  });
+
+  it('treats a parcel-wide missing commission rate as missing for every item', () => {
+    const issues: ProfitIssue[] = [
+      { code: ProfitIssueCode.MISSING_COMMISSION_RATE, orderItemId: null, detail: null },
+    ];
+    for (const orderItemId of [ITEM, OTHER_ITEM]) {
+      const values = itemProfitValues({
+        orderItemId,
+        quantity: 1,
+        bestKnownLines: [],
+        estimateLines: [],
+        issues,
+      });
+      expect(values.commissionGross).toBeNull();
+      expect(values.refundedCommissionGross).toBeNull();
+    }
+  });
+
+  it('reports the settled commission even while a MISSING_COMMISSION_RATE issue covers the item', () => {
+    // The engine priced no estimate commission, but the settlement brought the real one:
+    // the line wins over the issue, and the commission is known, so no refund reads zero.
+    const values = itemProfitValues({
+      orderItemId: ITEM,
+      quantity: 1,
+      bestKnownLines: [
+        commissionLine({
+          orderItemId: ITEM,
+          gross: '30.00',
+          certainty: ProfitLineCertainty.ACTUAL,
+          source: ProfitLineSource.MARKETPLACE_RECORD,
+        }),
+      ],
+      estimateLines: [],
+      issues: [{ code: ProfitIssueCode.MISSING_COMMISSION_RATE, orderItemId: ITEM, detail: null }],
+    });
+    expect(values.commissionGross).toBe('30.00');
+    expect(values.settledCommissionGross).toBe('30.00');
+    expect(values.refundedCommissionGross).toBe('0.00');
+    // The estimate view has no commission line, so neither an estimate nor a rate exists.
+    expect(values.estimatedCommissionGross).toBeNull();
+    expect(values.commissionRate).toBeNull();
   });
 
   it("divides the item's cost lines by its quantity", () => {

@@ -1510,7 +1510,11 @@ describe('Order routes', () => {
         );
         expect(res.status).toBe(200);
         const body = (await res.json()) as {
-          items: { id: string }[];
+          items: {
+            id: string;
+            commissionGross: string | null;
+            refundedCommissionGross: string | null;
+          }[];
           profitBreakdown: unknown;
           estimatedNetProfit: string | null;
         };
@@ -1519,6 +1523,9 @@ describe('Order routes', () => {
         expect(body.items[0]?.id).toBe(item.id);
         expect(body.profitBreakdown).toBeNull();
         expect(body.estimatedNetProfit).toBeNull();
+        // An empty profit part leaves the item's commission amounts null, never 0.00.
+        expect(body.items[0]?.commissionGross).toBeNull();
+        expect(body.items[0]?.refundedCommissionGross).toBeNull();
 
         // The deliberate fallback logged exactly one [profit-read] error carrying the
         // order id (owner decision 2026-11-04).
@@ -1581,7 +1588,11 @@ describe('Order routes', () => {
         );
         expect(res.status).toBe(200);
         const body = (await res.json()) as {
-          items: { id: string }[];
+          items: {
+            id: string;
+            commissionGross: string | null;
+            refundedCommissionGross: string | null;
+          }[];
           profitBreakdown: unknown;
           estimatedNetProfit: string | null;
         };
@@ -1590,6 +1601,9 @@ describe('Order routes', () => {
         expect(body.items[0]?.id).toBe(item.id);
         expect(body.profitBreakdown).toBeNull();
         expect(body.estimatedNetProfit).toBeNull();
+        // An empty profit part leaves the item's commission amounts null, never 0.00.
+        expect(body.items[0]?.commissionGross).toBeNull();
+        expect(body.items[0]?.refundedCommissionGross).toBeNull();
 
         // The deliberate fallback logged exactly one [profit-read] error carrying the
         // order id (owner decision 2026-11-04).
@@ -1904,6 +1918,60 @@ describe('Order routes', () => {
       expect(cancelledItem?.commissionGross).toBe('0.00');
       // No estimate commission line supplies a rate, so it is null.
       expect(cancelledItem?.commissionRate).toBeNull();
+    });
+
+    it('returns a null commission for an item whose commission rate cannot be resolved', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const orderId = await seedCalculableTrendyolOrder(org.id, store.id);
+
+      // Drop the order line's rate: the seeded product has no category and its variant no
+      // synced rate, so the engine resolves no commission rate and raises a blocking
+      // MISSING_COMMISSION_RATE issue for the item instead of a commission line.
+      await prisma.orderItem.updateMany({
+        where: { orderId, organizationId: org.id },
+        data: { orderCommissionRatePct: null },
+      });
+
+      type ItemWire = {
+        id: string;
+        commissionGross: string | null;
+        commissionRate: string | null;
+        refundedCommissionGross: string | null;
+      };
+      const readDetail = async (): Promise<{
+        items: ItemWire[];
+        profitIssues: { code: string; orderItemId: string | null }[];
+      }> => {
+        const res = await app.request(
+          `/v1/organizations/${org.id}/stores/${store.id}/orders/${orderId}`,
+          { headers: { Authorization: bearer(user.accessToken) } },
+        );
+        expect(res.status).toBe(200);
+        return res.json();
+      };
+
+      // In-request computation (no statement stored yet), then the stored path after the
+      // writer runs: both read the commission as unknown, never a fabricated 0.00.
+      const computed = await readDetail();
+      await prisma.$transaction(
+        (tx) => recomputeParcelProfit(tx, { organizationId: org.id, orderId }),
+        { maxWait: 15000, timeout: 30000 },
+      );
+      const stored = await readDetail();
+
+      for (const body of [computed, stored]) {
+        expect(body.items).toHaveLength(1);
+        const item = body.items[0];
+        expect(body.profitIssues).toContainEqual(
+          expect.objectContaining({ code: 'MISSING_COMMISSION_RATE', orderItemId: item?.id }),
+        );
+        expect(item?.commissionGross).toBeNull();
+        expect(item?.commissionRate).toBeNull();
+        expect(item?.refundedCommissionGross).toBeNull();
+      }
     });
 
     it('lists the profit issues of the best-known statement', async () => {

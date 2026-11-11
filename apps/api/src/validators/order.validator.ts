@@ -336,9 +336,10 @@ const OrderItemDetailSchema = z
       .openapi({
         description:
           "Commission incl. VAT (decimal string), from the order's best-known COMMISSION lines; " +
-          "'0.00' when the profit lines carry none (e.g. a cancelled order); null when the " +
-          'profit part is empty (a platform the engine cannot compute, a corrupt stored line, ' +
-          'or a failed in-request computation).',
+          'null when the profit part is empty (a platform the engine cannot compute, a corrupt ' +
+          'stored line, or a failed in-request computation) or a MISSING_COMMISSION_RATE issue ' +
+          "covers the item and no line supplies the commission; '0.00' when the profit lines " +
+          'carry none (e.g. a cancelled order).',
       }),
     commissionRate: z
       .string()
@@ -362,9 +363,10 @@ const OrderItemDetailSchema = z
       .openapi({
         description:
           'Refunded commission incl. VAT (decimal string), from the best-known COMMISSION_REFUND ' +
-          "lines; '0.00' when the profit lines carry none (e.g. a cancelled order); null when " +
-          'the profit part is empty (a platform the engine cannot compute, a corrupt stored ' +
-          'line, or a failed in-request computation).',
+          'lines; null when the profit part is empty (a platform the engine cannot compute, a ' +
+          'corrupt stored line, or a failed in-request computation) or a MISSING_COMMISSION_RATE ' +
+          "issue covers the item and no line supplies its commission; '0.00' when the profit " +
+          'lines carry none (e.g. a cancelled order, an item that was not returned).',
       }),
     estimatedCommissionGross: z
       .string()
@@ -372,15 +374,17 @@ const OrderItemDetailSchema = z
       .openapi({
         description:
           'Estimated commission incl. VAT (decimal string) from the estimate profit lines; null ' +
-          'when none.',
+          'when the profit part is empty or the estimate lines carry none (including an item a ' +
+          'MISSING_COMMISSION_RATE issue covers, which gets no estimate commission line).',
       }),
     settledCommissionGross: z
       .string()
       .nullable()
       .openapi({
         description:
-          'Settled commission incl. VAT (decimal string) from the settlement profit lines; null ' +
-          'until settlement.',
+          'Settled commission incl. VAT (decimal string) from the settlement profit lines, also ' +
+          'when a MISSING_COMMISSION_RATE issue covers the item; null until settlement and when ' +
+          'the profit part is empty.',
       }),
     unitCostSnapshotGross: z
       .string()

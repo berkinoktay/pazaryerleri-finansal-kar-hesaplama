@@ -541,9 +541,6 @@ interface OrderProfitDetail {
   readonly lineContext: OrderProfitLineContext | null;
 }
 
-/** A zero money amount in the two-decimal wire shape the profit-line figures use. */
-const ZERO_MONEY = '0.00';
-
 /** The all-null item values for an order whose profit part is empty (no line context). */
 const EMPTY_ITEM_PROFIT_VALUES: ItemProfitValues = {
   unitCostGross: null,
@@ -849,15 +846,15 @@ export async function getOrderById(
         lineSaleGross: item.lineSaleGross.toString(),
         saleVatRate: item.saleVatRate.toString(),
         lineSellerDiscountGross: item.lineSellerDiscountGross.toString(),
-        // With a line context, a commission amount or refund no line supplies is zero (a
-        // cancelled order's commission, an item that was not returned). Without one the
-        // profit part is empty, so both amounts stay null rather than a fabricated zero.
-        // The two rates are informational and stay null when no line supplies them.
-        commissionGross: lineContext === null ? null : (values.commissionGross ?? ZERO_MONEY),
+        // itemProfitValues decides the two amounts: null while a MISSING_COMMISSION_RATE
+        // issue leaves the item's commission unknown, '0.00' when the lines carry none (a
+        // cancelled order, an item that was not returned). Without a line context the
+        // profit part is empty and every figure is null. The two rates are informational
+        // and stay null when no line supplies them.
+        commissionGross: values.commissionGross,
         commissionRate: values.commissionRate,
         commissionVatRate: values.commissionVatRate,
-        refundedCommissionGross:
-          lineContext === null ? null : (values.refundedCommissionGross ?? ZERO_MONEY),
+        refundedCommissionGross: values.refundedCommissionGross,
         estimatedCommissionGross: values.estimatedCommissionGross,
         settledCommissionGross: values.settledCommissionGross,
         unitCostSnapshotGross: values.unitCostGross,

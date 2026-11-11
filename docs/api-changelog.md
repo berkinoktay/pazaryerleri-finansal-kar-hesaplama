@@ -33,7 +33,12 @@ section "Versioning" for details.
   null when no line supplies them. `items[].commissionGross` and `items[].refundedCommissionGross`
   are now `string | null` too: `'0.00'` when the profit lines carry none (e.g. a cancelled order,
   an item that was not returned), null when the profit part is empty (a platform the engine cannot
-  compute, a corrupt stored line, or a failed in-request computation). The fallback to the item's
+  compute, a corrupt stored line, or a failed in-request computation). Both are also null while a
+  blocking `MISSING_COMMISSION_RATE` issue covers the item (naming it, or parcel-wide) and no
+  commission line supplies the amount, so an item the engine could not price no longer shows a
+  `'0.00'` commission next to a blank rate; once a settlement commission line lands, its amount is
+  shown. `estimatedCommissionGross` and `settledCommissionGross` keep their null-when-no-line
+  behaviour. The fallback to the item's
   legacy columns is gone, so an empty profit part no longer reads the stored item values or a
   fabricated `'0.00'` commission. Profit amounts are unchanged. Breaking for clients that treat the
   two amounts as always present; the web client shows an em dash for a null amount in the same PR.

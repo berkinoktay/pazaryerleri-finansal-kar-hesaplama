@@ -13,6 +13,9 @@ import { roundMoney } from '../money';
 
 const ZERO = new Decimal(0);
 
+/** A zero money amount in the two-decimal wire shape the per-item figures use. */
+const ZERO_AMOUNT = '0.00';
+
 /**
  * The per-item cost and commission figures the order detail shows for one line. Unit
  * cost and its VAT rate come from the item's best-known cost lines; the commission
@@ -21,6 +24,13 @@ const ZERO = new Decimal(0);
  * when the best-known commission came from a marketplace record.
  * The refunded commission is the item's best-known COMMISSION_REFUND lines (a returned
  * item's commission given back), read the same way the commission is.
+ *
+ * A missing commission reads like a missing cost: while a MISSING_COMMISSION_RATE issue
+ * covers the item and the view has no commission line for it, the commission amount and
+ * the refunded commission are null (unknown), not a fabricated zero. A commission line
+ * (a settlement actual included) always wins over the issue; with neither a line nor the
+ * issue the two amounts are "0.00" (a cancelled order, an item that was not returned).
+ * The estimated and settled commissions stay null whenever their view has no line.
  */
 export interface ItemProfitValues {
   readonly unitCostGross: string | null;
@@ -51,16 +61,23 @@ export function itemProfitValues(input: {
   const bestKnownForItem = bestKnownLines.filter((line) => line.orderItemId === orderItemId);
   const estimateForItem = estimateLines.filter((line) => line.orderItemId === orderItemId);
   const rateSource = rateCarryingCommissionLine(estimateForItem);
+  const bestKnownCommission = commissionGrossOf(bestKnownForItem);
+  // The best-known commission is unknown -- not zero -- when no line supplies it and a
+  // blocking MISSING_COMMISSION_RATE issue covers the item.
+  const commissionUnknown =
+    bestKnownCommission === null && hasMissingCommissionRate(issues, orderItemId);
 
   return {
     unitCostGross: unitCostGrossOf(bestKnownForItem, orderItemId, quantity, issues),
     unitCostVatRate: sharedCostVatRate(bestKnownForItem),
-    commissionGross: commissionGrossOf(bestKnownForItem),
+    commissionGross: commissionUnknown ? null : (bestKnownCommission ?? ZERO_AMOUNT),
     commissionRate: rateSource?.ratePct ?? null,
     commissionVatRate: rateSource?.line.vatRatePct?.toString() ?? null,
+    // Null when the estimate view has no commission line, which includes every item a
+    // MISSING_COMMISSION_RATE issue covers (the engine writes no line for it).
     estimatedCommissionGross: commissionGrossOf(estimateForItem),
     settledCommissionGross: settledCommissionGrossOf(bestKnownForItem),
-    refundedCommissionGross: refundedCommissionGrossOf(bestKnownForItem),
+    refundedCommissionGross: refundedCommissionGrossOf(bestKnownForItem, commissionUnknown),
   };
 }
 
@@ -80,6 +97,18 @@ function hasMissingCost(issues: readonly ProfitIssue[], orderItemId: string): bo
   return issues.some(
     (issue) =>
       issue.code === ProfitIssueCode.MISSING_COST &&
+      (issue.orderItemId === null || issue.orderItemId === orderItemId),
+  );
+}
+
+/**
+ * True when a blocking MISSING_COMMISSION_RATE issue applies to this item: one that names
+ * the item, or a parcel-wide issue (`orderItemId` null) that covers every item.
+ */
+function hasMissingCommissionRate(issues: readonly ProfitIssue[], orderItemId: string): boolean {
+  return issues.some(
+    (issue) =>
+      issue.code === ProfitIssueCode.MISSING_COMMISSION_RATE &&
       (issue.orderItemId === null || issue.orderItemId === orderItemId),
   );
 }
@@ -170,11 +199,18 @@ function settledCommissionGrossOf(lines: readonly ProfitLine[]): string | null {
   return settled.reduce((sum, line) => sum.add(line.amount.gross), ZERO).toFixed(2);
 }
 
-/** The item's commission refund line(s) gross summed as a string; null when there is none. */
-function refundedCommissionGrossOf(lines: readonly ProfitLine[]): string | null {
+/**
+ * The item's commission refund line(s) gross summed as a string. With no refund line it is
+ * null when the item's commission itself is unknown (nothing known to give back), else
+ * "0.00".
+ */
+function refundedCommissionGrossOf(
+  lines: readonly ProfitLine[],
+  commissionUnknown: boolean,
+): string | null {
   const refundLines = lines.filter((line) => line.type === ProfitLineType.COMMISSION_REFUND);
   if (refundLines.length === 0) {
-    return null;
+    return commissionUnknown ? null : ZERO_AMOUNT;
   }
   return refundLines.reduce((sum, line) => sum.add(line.amount.gross), ZERO).toFixed(2);
 }

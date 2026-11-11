@@ -25,7 +25,7 @@ import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization } from '../../helpers/factories';
+import { createMembership, createOrganization, createStore } from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
@@ -645,5 +645,75 @@ describe('Advantage Product Labels - item estimate', () => {
     expect(body.breakdown).toBeNull();
 
     await deleteNoCostItem(created);
+  });
+
+  it('gives a Hepsiburada store no category rate from a Trendyol commission rule', async () => {
+    // The commission rule table is Trendyol reference data. A Hepsiburada store's item in
+    // category 598 -- the category the fixture's TRENDYOL CATEGORY rule (15%) covers --
+    // must not borrow that rate. The engine cannot price this platform, so the base is
+    // degraded and the estimate echoes the commission it resolved: none.
+    const hbStore = await createStore(fx.orgId, { platform: 'HEPSIBURADA' });
+    const product = await prisma.product.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: hbStore.id,
+        platformContentId: 8606n,
+        productMainId: 'pm-8606',
+        title: 'HB Advantage Item',
+        categoryId: CAT_CATEGORY_ID,
+        brandId: null,
+        brandName: null,
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: hbStore.id,
+        productId: product.id,
+        platformVariantId: 86060n,
+        barcode: 'ADV-EST-HB',
+        stockCode: 'STK-HB',
+        salePrice: new Decimal('360.00'),
+        listPrice: new Decimal('360.00'),
+        vatRate: 20,
+      },
+    });
+    const tariff = await prisma.advantageTariff.create({
+      data: { organizationId: fx.orgId, storeId: hbStore.id, name: 'HB Advantage Labels' },
+    });
+    const item = await prisma.advantageTariffItem.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: hbStore.id,
+        tariffId: tariff.id,
+        productVariantId: variant.id,
+        barcode: 'ADV-EST-HB',
+        stockCode: 'STK-HB',
+        productTitle: 'HB Advantage Item',
+        currentPrice: '360.00',
+        customerPrice: '360.00',
+        hasCommissionTariff: false,
+        starTiers: [{ key: 'tier1', upperLimit: '250.00' }],
+        applyUntilEnd: false,
+        sortOrder: 0,
+      },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${hbStore.id}/advantage-tariffs/${tariff.id}/items/${item.id}/estimate`,
+      {
+        method: 'POST',
+        headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ price: '260.00' }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const body: EstimateWire = await res.json();
+    expect(body.itemId).toBe(item.id);
+    expect(body.commissionPct).toBeNull();
+    expect(body.commissionSource).toBeNull();
+    expect(body.calculable).toBe(false);
+    expect(body.reason).toBeNull();
+    expect(body.breakdown).toBeNull();
   });
 });
