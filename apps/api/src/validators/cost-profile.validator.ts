@@ -1,6 +1,6 @@
 import { z } from '@hono/zod-openapi';
 
-import { CostProfileType, Currency, FxRateMode } from '@pazarsync/db/enums';
+import { CostProfileType } from '@pazarsync/db/enums';
 
 import { CursorMetaSchema } from '../openapi';
 
@@ -11,20 +11,8 @@ const CostProfileTypeSchema = z.enum(CostProfileType).openapi({
   example: 'COGS',
 });
 
-const CurrencySchema = z.enum(Currency).openapi({
-  description: 'ISO 4217 currency code for the cost amount.',
-  example: 'TRY',
-});
-
-const FxRateModeSchema = z.enum(FxRateMode).openapi({
-  description:
-    'AUTO uses the daily TCMB rate fetched by the FX job. MANUAL requires a manualFxRate.',
-  example: 'AUTO',
-});
-
 // ─── Base object (shared between create and update) ──────────────────────────
-// The refines in createCostProfileSchema cannot coexist with .partial() in
-// Zod 4. Split the base object so both schemas share the same field shapes.
+// Split the base object so create and update share the same field shapes.
 
 const costProfileBaseObject = z.object({
   name: z.string().trim().min(1, 'NAME_REQUIRED').max(120, 'NAME_TOO_LONG').openapi({
@@ -39,7 +27,6 @@ const costProfileBaseObject = z.object({
       description: 'KDV-dahil tutar. Ondalık string, en fazla 2 basamak.',
       example: '25.50',
     }),
-  currency: CurrencySchema.default('TRY'),
   vatRate: z
     .number()
     .int('VAT_RATE_MUST_BE_INTEGER')
@@ -47,15 +34,6 @@ const costProfileBaseObject = z.object({
     .max(100, 'VAT_RATE_TOO_LARGE')
     .default(0)
     .openapi({ description: 'VAT rate as a whole-number percentage (0–100).', example: 18 }),
-  fxRateMode: FxRateModeSchema.default('AUTO'),
-  manualFxRate: z
-    .string()
-    .regex(/^\d+(\.\d{1,6})?$/, 'MANUAL_FX_RATE_INVALID_FORMAT')
-    .optional()
-    .openapi({
-      description: 'Required when fxRateMode is MANUAL. Up to 6 decimal places.',
-      example: '35.500000',
-    }),
   note: z.string().trim().max(500, 'NOTE_TOO_LONG').optional().openapi({
     description: 'Optional free-text note for the profile.',
     example: 'Kumaş + dikiş maliyeti',
@@ -66,10 +44,6 @@ const costProfileBaseObject = z.object({
 
 /**
  * Validated create payload for POST /v1/organizations/:orgId/cost-profiles.
- *
- * Two cross-field invariants enforced by .refine():
- *   1. fxRateMode === 'MANUAL' → manualFxRate must be present and positive.
- *   2. currency === 'TRY' → fxRateMode must be 'AUTO' (TRY needs no conversion).
  */
 export const createCostProfileSchema = costProfileBaseObject
   .extend({
@@ -80,24 +54,6 @@ export const createCostProfileSchema = costProfileBaseObject
       .uuid('INVALID_STORE_ID')
       .openapi({ description: 'The store this cost profile belongs to.' }),
   })
-  .refine(
-    (data) => {
-      if (data.fxRateMode === 'MANUAL') {
-        return data.manualFxRate !== undefined && data.manualFxRate.length > 0;
-      }
-      return true;
-    },
-    { message: 'MANUAL_FX_RATE_REQUIRED', path: ['manualFxRate'] },
-  )
-  .refine(
-    (data) => {
-      if (data.currency === 'TRY') {
-        return data.fxRateMode === 'AUTO';
-      }
-      return true;
-    },
-    { message: 'TRY_MUST_USE_AUTO_FX', path: ['fxRateMode'] },
-  )
   .openapi('CreateCostProfileInput');
 
 export type CreateCostProfileInput = z.infer<typeof createCostProfileSchema>;
@@ -105,10 +61,7 @@ export type CreateCostProfileInput = z.infer<typeof createCostProfileSchema>;
 // ─── Update payload ─────────────────────────────────────────────────────────
 
 /**
- * PATCH payload — all fields optional. Zod 4 disallows .partial() on schemas
- * with refinements, so the update schema derives from the base object (no
- * refines). Cross-field invariants (MANUAL requires manualFxRate; TRY must be
- * AUTO) are re-validated by the service against the merged state.
+ * PATCH payload — all fields optional. Only the provided fields are changed.
  */
 export const updateCostProfileSchema = costProfileBaseObject
   .partial()
@@ -174,13 +127,7 @@ export const CostProfileSchema = z
     amountGross: z
       .string()
       .openapi({ description: 'KDV-dahil tutar (decimal string)', example: '25.50' }),
-    currency: CurrencySchema,
     vatRate: z.number().openapi({ example: 18 }),
-    fxRateMode: FxRateModeSchema,
-    manualFxRate: z
-      .string()
-      .nullable()
-      .openapi({ description: 'Decimal string or null', example: null }),
     note: z.string().nullable().openapi({ example: null }),
     archivedAt: z.string().datetime().nullable().openapi({ example: null }),
     createdBy: z.string().uuid().nullable().openapi({ example: null }),
@@ -210,10 +157,7 @@ export const CostProfileVersionSchema = z
     name: z.string(),
     type: CostProfileTypeSchema,
     amountGross: z.string().openapi({ description: 'KDV-dahil tutar (decimal string)' }),
-    currency: CurrencySchema,
     vatRate: z.number(),
-    fxRateMode: FxRateModeSchema,
-    manualFxRate: z.string().nullable(),
     note: z.string().nullable(),
     archivedAt: z.string().datetime().nullable(),
     changedFields: z.array(z.string()),

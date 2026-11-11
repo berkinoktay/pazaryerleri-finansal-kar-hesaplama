@@ -30,11 +30,8 @@ interface WebhookPayloadWithMeta extends TrendyolShipmentPackage {
 export function mapTrendyolWebhookPayload(
   payload: WebhookPayloadWithMeta,
   routedStatus: MappedOrder['status'],
-  commissionVatRate?: number,
 ): MappedOrder {
-  // commissionVatRate: commission VAT rate resolved from the DB (audit A). Omit
-  // -> the mapper uses its TRENDYOL_COMMISSION_VAT_RATE fallback (same path as sync).
-  const base = mapTrendyolShipmentPackage(payload, commissionVatRate);
+  const base = mapTrendyolShipmentPackage(payload);
 
   // Apply the route's resolved status (the route already short-circuits
   // unknown statuses before reaching this mapper).

@@ -8,6 +8,7 @@ import {
   createMembership,
   createOrder,
   createOrganization,
+  createProfitStatement,
   createStore,
 } from '../../helpers/factories';
 
@@ -80,15 +81,29 @@ describe('Orders — tenant isolation', () => {
     const storeA = await createStore(orgA.id);
     const orgB = await createOrganization();
     const storeB = await createStore(orgB.id);
-    await createOrder(orgB.id, storeB.id);
+    // orgB carries a sale and a loss-making best-known statement: without the tenant
+    // filter, revenue, net profit, the loss count and its denominator would all pick
+    // them up.
+    const orderB = await createOrder(orgB.id, storeB.id, { saleGross: '999.00' });
+    await createProfitStatement(orderB.id, orgB.id, storeB.id, {
+      view: 'BEST_KNOWN',
+      saleGross: '999.00',
+      netProfit: '-50.00',
+    });
 
     const res = await app.request(
       `/v1/organizations/${orgA.id}/stores/${storeA.id}/orders/summary`,
       { headers: { Authorization: bearer(user.accessToken) } },
     );
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body: {
+      totalRevenueGross: string;
+      netProfitGross: string;
+      lossOrderRate: { lossCount: number; totalCount: number };
+    } = await res.json();
     expect(body.lossOrderRate.totalCount).toBe(0);
+    expect(body.lossOrderRate.lossCount).toBe(0);
+    expect(body.netProfitGross).toBe('0');
     expect(body.totalRevenueGross).toBe('0');
   });
 
@@ -163,10 +178,11 @@ describe('Orders — tenant isolation', () => {
         barcode,
         platformLineId: 9301n,
         quantity: 1,
-        commissionRate: '10.00',
-        commissionGross: '12.00',
       },
     });
+    // A stored best-known statement keeps the detail on its read path rather than
+    // computing in-request; this test only exercises vendorMissing, not profit.
+    await createProfitStatement(orderA.id, orgA.id, storeA.id, { view: 'BEST_KNOWN' });
     await prisma.catalogBarcodeMiss.create({
       data: { organizationId: orgA.id, storeId: storeA.id, barcode, vendorMissing: true },
     });
@@ -184,10 +200,9 @@ describe('Orders — tenant isolation', () => {
         barcode,
         platformLineId: 9302n,
         quantity: 1,
-        commissionRate: '10.00',
-        commissionGross: '12.00',
       },
     });
+    await createProfitStatement(orderB.id, orgB.id, storeB.id, { view: 'BEST_KNOWN' });
 
     // Org A sees its own confirmed gap as true.
     const resA = await app.request(
@@ -213,7 +228,8 @@ describe('Orders — tenant isolation', () => {
     const orgA = await createOrganization();
     await createMembership(orgA.id, user.id);
     const storeA = await createStore(orgA.id);
-    await createOrder(orgA.id, storeA.id, { estimatedNetProfit: '10.00' });
+    // Not stamped → "calculated" tab (decision 3 — the stamp is the segment key).
+    await createOrder(orgA.id, storeA.id);
     const excludedA = await createOrder(orgA.id, storeA.id);
     await prisma.order.update({
       where: { id: excludedA.id },
@@ -236,5 +252,118 @@ describe('Orders — tenant isolation', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { counts: { calculated: number; excluded: number } };
     expect(body.counts).toEqual({ calculated: 1, excluded: 1 });
+  });
+
+  it('ignores a statement row filed under another organization', async () => {
+    // Another organization carries a fully-settled best-known statement with a 999
+    // net profit on its own order. Every list/summary query filters statements by
+    // org A, so org B's statement must never be read into org A's profit fields or
+    // totals. (Mis-attributing a statement onto org A's own order is impossible now:
+    // the composite tenant FK rejects it -- see the profit-row-tenant-fk db test.)
+    const user = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, user.id);
+    const storeA = await createStore(orgA.id);
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+
+    const orderA = await createOrder(orgA.id, storeA.id, {
+      status: 'DELIVERED',
+      saleGross: '240.00',
+    });
+    const orderB = await createOrder(orgB.id, storeB.id, {
+      status: 'DELIVERED',
+      saleGross: '999.00',
+    });
+    await createProfitStatement(orderB.id, orgB.id, storeB.id, {
+      view: 'BEST_KNOWN',
+      status: 'SETTLED',
+      saleGross: '999.00',
+      netProfit: '999.00',
+      saleMarginPct: '99.00',
+      reconciliationStatus: 'FULLY_SETTLED',
+    });
+
+    const listRes = await app.request(`/v1/organizations/${orgA.id}/stores/${storeA.id}/orders`, {
+      headers: { Authorization: bearer(user.accessToken) },
+    });
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as {
+      data: {
+        id: string;
+        estimatedNetProfit: string | null;
+        settledNetProfit: string | null;
+        saleMarginPct: string | null;
+        saleGross: string | null;
+        reconciliationStatus: string;
+      }[];
+    };
+    const row = listBody.data.find((o) => o.id === orderA.id);
+    expect(row?.estimatedNetProfit).toBeNull();
+    expect(row?.settledNetProfit).toBeNull();
+    expect(row?.saleMarginPct).toBeNull();
+    // Falls back to the order's own sale, never the foreign 999.
+    expect(row?.saleGross).toBe('240');
+    expect(row?.reconciliationStatus).toBe('NOT_SETTLED');
+
+    const summaryRes = await app.request(
+      `/v1/organizations/${orgA.id}/stores/${storeA.id}/orders/summary`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(summaryRes.status).toBe(200);
+    const summaryBody = (await summaryRes.json()) as {
+      totalRevenueGross: string;
+      netProfitGross: string;
+    };
+    // The foreign 999 never enters org A's totals; revenue falls back to 240.
+    expect(summaryBody.netProfitGross).toBe('0');
+    expect(summaryBody.totalRevenueGross).toBe('240');
+  });
+
+  it('ignores a foreign-organization statement in the margin sort', async () => {
+    // Another organization carries a best-known statement with a 99 margin on its own
+    // order. The margin sort partitions statements by org A (segment 1, ordered by
+    // margin) and org A orders with no best-known statement (segment 2, ordered by id).
+    // Org B's statement must count for neither: under sort=-marginPct org A's order
+    // lands in segment 2 and reads its own sale, never the foreign 999/99. (A statement
+    // mis-attributed onto org A's own order is impossible now: the composite tenant FK
+    // rejects it -- see the profit-row-tenant-fk db test.)
+    const user = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, user.id);
+    const storeA = await createStore(orgA.id);
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+
+    const orderA = await createOrder(orgA.id, storeA.id, {
+      status: 'DELIVERED',
+      saleGross: '240.00',
+    });
+    const orderB = await createOrder(orgB.id, storeB.id, {
+      status: 'DELIVERED',
+      saleGross: '999.00',
+    });
+    await createProfitStatement(orderB.id, orgB.id, storeB.id, {
+      view: 'BEST_KNOWN',
+      status: 'SETTLED',
+      saleGross: '999.00',
+      netProfit: '999.00',
+      saleMarginPct: '99.00',
+      reconciliationStatus: 'FULLY_SETTLED',
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${orgA.id}/stores/${storeA.id}/orders?sort=-marginPct`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { id: string; saleGross: string | null; saleMarginPct: string | null }[];
+    };
+    expect(body.data.map((o) => o.id)).toEqual([orderA.id]);
+    const row = body.data.find((o) => o.id === orderA.id);
+    // Falls back to the order's own sale and a null margin, never the foreign 999/99.
+    expect(row?.saleGross).toBe('240');
+    expect(row?.saleMarginPct).toBeNull();
   });
 });

@@ -28,9 +28,11 @@ interface LiveOrdersTableProps {
 const EMPTY_COUNTS = { all: 0, calculated: 0, pending: 0 } as const;
 
 /**
- * Today's orders feed: a UNION of fully-calculated orders and cost-missing
- * buffer entries. The Tümü / Hesaplanmış / Bekliyor FilterTabs drive a
- * server-side filter; `counts` always reports every tab's total so the chips
+ * Today's orders feed: each row is either an order whose profit is calculated or a
+ * pending row -- a cost-missing buffer entry, or an order whose profit is not
+ * calculated yet. The served profit decides the status badge (a null profit is
+ * pending), not the row's source. The Tümü / Hesaplanmış / Bekliyor FilterTabs drive
+ * a server-side filter; `counts` always reports every tab's total so the chips
  * stay honest. Rows persist all day — attaching a cost moves a row from Bekliyor
  * into Hesaplanmış, never off the feed (until the 00:00 reset).
  */
@@ -88,9 +90,10 @@ export function LiveOrdersTable({
       {
         // Tahmini kâr — tıklanabilir, marj-renkli rozet (siparişler tablosuyla aynı
         // bileşen). Arka plan rengi satırın marj'ından beslenir; rozete tıklamak
-        // satır detayını (yan panel) açar. Buffer satırlarında profit/margin null →
-        // nötr ama yine tıklanabilir "—" rozet. Satır-tıklaması da korunur (DataTable
-        // onRowClick), böylece buffer akışı ve köklü davranış bozulmaz.
+        // satır detayını (yan panel) açar. Bekleyen satırlarda (tampon kaydı ya da kârı
+        // henüz hesaplanmamış sipariş) profit/margin null → nötr ama yine tıklanabilir
+        // "—" rozet. Satır-tıklaması da korunur (DataTable onRowClick), böylece
+        // bekleyen akış ve köklü davranış bozulmaz.
         accessorKey: 'profit',
         header: () => t('columns.profit'),
         meta: { numeric: true },
@@ -120,7 +123,9 @@ export function LiveOrdersTable({
         id: 'status',
         header: () => t('columns.status'),
         cell: ({ row }) => {
-          const calculated = row.original.source === 'orders';
+          // The API serves a profit only for a calculated row, so a null profit is
+          // pending -- whether a buffer entry or an order not computed yet.
+          const calculated = row.original.profit !== null;
           return (
             <Badge tone={calculated ? 'success' : 'warning'}>
               {calculated ? t('statusCalculated') : t('statusPending')}

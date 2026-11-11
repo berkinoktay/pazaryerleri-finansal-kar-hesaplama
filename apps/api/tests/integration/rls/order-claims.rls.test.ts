@@ -44,7 +44,7 @@ describe('RLS — order_claims', () => {
       createOrderClaim(orgB.id, storeB.id, orderB.id),
     ]);
 
-    const { data, error } = await client.from('order_claims').select('id,trendyol_claim_id');
+    const { data, error } = await client.from('order_claims').select('id,marketplace_claim_id');
 
     expect(error).toBeNull();
     expect(data?.map((c) => c.id)).toEqual([claimA.id]);

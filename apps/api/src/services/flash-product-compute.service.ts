@@ -1,42 +1,39 @@
-// Per-item profit computation for the Flash Products (Flaş Ürünler) feature.
+// Per-item profit computation for the Flash Products (Flas Urunler) feature.
 //
 // Sibling of the Advantage compute service. A flash row has a current baseline plus up
 // to two flash OFFERS (a 24-hour window and a 3-hour window), each with its own price.
 // The reduced commission is NOT in the Excel: an offer's price is charged the rate of
 // the commission-tariff BAND its window resolves into (see flash-product-commission),
-// and when no band resolves it keeps the flat "Mevcut Komisyon" (I) rate — there is NO
-// category fallback (the difference from Advantage). Everything else — cost, shipping,
-// PSF, stoppage, VAT — is resolved exactly as Ürün Fiyatlandırma does, by REUSING
-// `assembleUnitEconomics` + `computeUnitProfit`. No financial math is re-implemented.
+// and when no band resolves it keeps the flat "Mevcut Komisyon" (I) rate -- there is NO
+// category fallback (the difference from Advantage). Everything else -- cost, shipping,
+// PSF, stoppage, VAT -- is resolved by the shared scenario engine (`@pazarsync/profit`):
+// the screen picks the band (or flat) rate and hands it to `evaluateScreenScenario` as
+// the engine's commission override. No financial math is re-implemented.
 //
-// Strategy mirrors the other tariff computes: assemble the variant's econ ONCE (a
-// probe — commission-invariant), then per scenario override only `commissionRate` and
-// run the engine at that scenario's price. Since the flat rate always resolves, an
-// item can only fail on cost or shipping (or an unmatched product) — there is no
-// NO_COMMISSION case, so the reason vocabulary is the shared `TariffItemReason`.
+// Strategy: the current baseline (customer price @ current commission) decides
+// calculability; since the flat rate always resolves, an item can only fail on cost or
+// shipping (or an unmatched product) -- there is no NO_COMMISSION case, so the reason
+// vocabulary is the shared `TariffItemReason`. Each present offer is evaluated at its own
+// price under its own rate and carries profit only when the item is calculable AND the
+// offer's own evaluation is calculable.
 
 import { Decimal } from 'decimal.js';
 
-import { computeUnitProfit, type EstimateOutcome, type UnitEconomics } from '@pazarsync/profit';
+import {
+  storedTariffBandForPrice,
+  type StoredTariffBand,
+  type TrendyolScenarioBase,
+} from '@pazarsync/profit';
 
 import { resolveValidity, type TariffValidity } from '../lib/tariff-period';
-import { bandForPrice } from './commission-tariff-compute.service';
-import type { StoredBand } from './commission-tariff.types';
 import {
-  assembleUnitEconomics,
-  serializeBreakdown,
-  type QuoteBreakdown,
-} from './product-pricing.service';
-import {
-  deriveReason,
-  tariffCommission,
-  type TariffAssemblyContext,
-  type TariffItemReason,
-  type TariffVariant,
-} from './tariff-compute-commons';
-import type { VariantCostAggregate } from '../validators/product.validator';
-
-export type { TariffAssemblyContext, TariffItemReason, TariffVariant };
+  evaluateScreenScenario,
+  formatMarginPct2,
+  formatMoney2,
+  type ScreenScenarioBase,
+} from './scenario-screen-commons';
+import { quoteBreakdownFromStatement, type QuoteBreakdown } from './product-pricing.service';
+import { type TariffItemReason } from './tariff-compute-commons';
 
 /** Where an offer/estimate commission came from: a covering tariff band, else the flat "Mevcut Komisyon" rate. */
 export type FlashCommissionSource = 'band' | 'current';
@@ -49,22 +46,22 @@ export interface ResolvedFlashCommission {
 /**
  * Resolves the commission PERCENT for a price: the band it lands in (of the offer's
  * covering commission-tariff period), else the flat fallback (`flatPct`, the "Mevcut
- * Komisyon" column). Unlike the Advantage vertical there is NO category fallback — a
+ * Komisyon" column). Unlike the Advantage vertical there is NO category fallback -- a
  * product with no covering band keeps its current commission.
  */
 export function resolveFlashCommission(
-  bands: ReadonlyArray<StoredBand> | null,
+  bands: ReadonlyArray<StoredTariffBand> | null,
   flatPct: Decimal,
   price: Decimal,
 ): ResolvedFlashCommission {
   if (bands !== null && bands.length > 0) {
-    const band = bandForPrice(bands, price);
+    const band = storedTariffBandForPrice(bands, price);
     if (band !== null) return { pct: new Decimal(band.commissionPct), source: 'band' };
   }
   return { pct: flatPct, source: 'current' };
 }
 
-// ─── Per-offer scenario ──────────────────────────────────────────────────────
+// --- Per-offer scenario ---
 
 /** One offer window (24h or 3h) resolved for compute: its price, window, and covering bands. */
 export interface FlashOfferInput {
@@ -72,7 +69,7 @@ export interface FlashOfferInput {
   readonly startsAt: Date | null;
   readonly endsAt: Date | null;
   /** The covering commission-tariff bands for THIS offer's window start, or null (flat). */
-  readonly bands: ReadonlyArray<StoredBand> | null;
+  readonly bands: ReadonlyArray<StoredTariffBand> | null;
 }
 
 export interface ComputedFlashOffer {
@@ -88,23 +85,26 @@ export interface ComputedFlashOffer {
 
 /**
  * Builds one offer's result: commission resolved from its OWN window bands (else the
- * flat rate), validity from its window, and — when `baseEcon` is non-null (the item is
- * calculable) — net profit + margin at the offer price. An uncalculable item still
- * surfaces the price / window / validity / commission with null profit.
+ * flat rate), validity from its window, and -- when `base` is non-null (the item is
+ * calculable) -- net profit + margin at the offer price. An uncalculable item (null
+ * `base`), or an offer whose own evaluation is not calculable, still surfaces the price /
+ * window / validity / commission with null profit.
  */
 function buildFlashOffer(
   offer: FlashOfferInput,
   flatPct: Decimal,
   now: Date,
-  baseEcon: UnitEconomics | null,
+  base: TrendyolScenarioBase | null,
 ): ComputedFlashOffer {
   const { pct } = resolveFlashCommission(offer.bands, flatPct, offer.price);
   let netProfit: string | null = null;
   let marginPct: string | null = null;
-  if (baseEcon !== null) {
-    const breakdown = computeUnitProfit({ ...baseEcon, commissionRate: pct }, offer.price);
-    netProfit = breakdown.netProfit.toFixed(2);
-    marginPct = breakdown.saleMarginPct !== null ? breakdown.saleMarginPct.toFixed(2) : null;
+  if (base !== null) {
+    const outcome = evaluateScreenScenario({ base, unitPrice: offer.price, commissionPct: pct });
+    if (outcome.calculable) {
+      netProfit = formatMoney2(outcome.netProfit);
+      marginPct = formatMarginPct2(outcome.statement.saleMarginPct);
+    }
   }
   return {
     price: offer.price.toFixed(2),
@@ -117,7 +117,7 @@ function buildFlashOffer(
   };
 }
 
-// ─── Item compute ────────────────────────────────────────────────────────────
+// --- Item compute ---
 
 export interface ComputedFlashItem {
   readonly calculable: boolean;
@@ -129,8 +129,8 @@ export interface ComputedFlashItem {
   readonly offer3: ComputedFlashOffer | null;
   /** Whether the item's PRIMARY window resolved to a band ladder (band) or the flat rate (current). */
   readonly commissionSource: FlashCommissionSource;
-  /** The primary window's band ladder, surfaced for the ⓘ popover; null on the flat fallback. */
-  readonly commissionBands: ReadonlyArray<StoredBand> | null;
+  /** The primary window's band ladder, surfaced for the info popover; null on the flat fallback. */
+  readonly commissionBands: ReadonlyArray<StoredTariffBand> | null;
 }
 
 export interface FlashItemComputeInput {
@@ -139,41 +139,46 @@ export interface FlashItemComputeInput {
   readonly offer24: FlashOfferInput | null;
   readonly offer3: FlashOfferInput | null;
   /** Bands for the primary window (offer24Start ?? offer3Start); drives commissionSource + commissionBands. */
-  readonly primaryBands: ReadonlyArray<StoredBand> | null;
+  readonly primaryBands: ReadonlyArray<StoredTariffBand> | null;
 }
 
 /**
- * Computes one flash item on read: the current baseline (customer price @ current
- * commission) plus each present offer (its price @ the commission its window's band
- * supplies, else the flat rate). `variant` null → NO_PRODUCT; a null probe econ →
- * NO_COST / NO_SHIPPING. There is no NO_COMMISSION — the flat rate always resolves.
+ * Computes one flash item on read with the scenario engine: the current baseline
+ * (customer price @ current commission) plus each present offer (its price @ the
+ * commission its window's band supplies, else the flat rate). An unmatched barcode
+ * (`base` no-product) -> NO_PRODUCT; a store-wide load failure (`base` degraded) ->
+ * reason null (the caller has already logged it); otherwise the current baseline gates on
+ * cost/shipping -> NO_COST / NO_SHIPPING (or null on the defensive branch). There is no
+ * NO_COMMISSION -- the flat rate always resolves. Offers are always built (price / window
+ * / validity / commission shown) and carry profit only when the item is calculable AND
+ * the offer's own evaluation is calculable. The engine may throw on a pathological input
+ * -- that propagates to the service, which catches it per item.
  */
-export function computeFlashItem(
-  ctx: TariffAssemblyContext,
-  input: FlashItemComputeInput,
-  now: Date,
-  variant: TariffVariant | null,
-  costAggregate: VariantCostAggregate | undefined,
-  shipping: EstimateOutcome,
-): ComputedFlashItem {
+export function computeFlashItem(params: {
+  readonly input: FlashItemComputeInput;
+  readonly now: Date;
+  readonly base: ScreenScenarioBase;
+}): ComputedFlashItem {
+  const { input, now, base } = params;
+
   const commissionSource: FlashCommissionSource =
     input.primaryBands !== null && input.primaryBands.length > 0 ? 'band' : 'current';
   const commissionBands = commissionSource === 'band' ? input.primaryBands : null;
 
   const buildOffers = (
-    baseEcon: UnitEconomics | null,
+    evalBase: TrendyolScenarioBase | null,
   ): Pick<ComputedFlashItem, 'offer24' | 'offer3'> => ({
     offer24:
       input.offer24 !== null
-        ? buildFlashOffer(input.offer24, input.currentCommissionPct, now, baseEcon)
+        ? buildFlashOffer(input.offer24, input.currentCommissionPct, now, evalBase)
         : null,
     offer3:
       input.offer3 !== null
-        ? buildFlashOffer(input.offer3, input.currentCommissionPct, now, baseEcon)
+        ? buildFlashOffer(input.offer3, input.currentCommissionPct, now, evalBase)
         : null,
   });
 
-  const uncalculable = (reason: TariffItemReason): ComputedFlashItem => ({
+  const uncalculable = (reason: TariffItemReason | null): ComputedFlashItem => ({
     calculable: false,
     reason,
     currentNetProfit: null,
@@ -183,36 +188,33 @@ export function computeFlashItem(
     commissionBands,
   });
 
-  if (variant === null) return uncalculable('NO_PRODUCT');
+  // Degraded (store-wide load failure, already logged) is checked FIRST, so a matched
+  // item under a store-wide degrade reports reason null, never NO_PRODUCT.
+  if (base.kind === 'degraded') return uncalculable(null);
+  if (base.kind === 'no-product') return uncalculable('NO_PRODUCT');
 
-  const probe = assembleUnitEconomics(ctx, variant, {
-    costAggregate,
-    commission: tariffCommission(new Decimal(0)),
-    shipping,
+  // Current baseline (customer price @ current commission) decides calculability.
+  const currentOutcome = evaluateScreenScenario({
+    base: base.base,
+    unitPrice: input.customerPrice,
+    commissionPct: input.currentCommissionPct,
   });
-  if (probe.econ === null) {
-    return uncalculable(deriveReason(probe.costStatus === 'OK', probe.shippingStatus === 'OK'));
+  if (!currentOutcome.calculable) {
+    return uncalculable(currentOutcome.reason);
   }
-
-  const baseEcon: UnitEconomics = probe.econ;
-  const currentBreakdown = computeUnitProfit(
-    { ...baseEcon, commissionRate: input.currentCommissionPct },
-    input.customerPrice,
-  );
 
   return {
     calculable: true,
     reason: null,
-    currentNetProfit: currentBreakdown.netProfit.toFixed(2),
-    currentMarginPct:
-      currentBreakdown.saleMarginPct !== null ? currentBreakdown.saleMarginPct.toFixed(2) : null,
-    ...buildOffers(baseEcon),
+    currentNetProfit: formatMoney2(currentOutcome.netProfit),
+    currentMarginPct: formatMarginPct2(currentOutcome.statement.saleMarginPct),
+    ...buildOffers(base.base),
     commissionSource,
     commissionBands,
   };
 }
 
-// ─── Single-price estimate (custom-price what-if + current scenario) ─────────
+// --- Single-price estimate (custom-price what-if + current scenario) ---
 
 export interface ComputedFlashEstimate {
   readonly calculable: boolean;
@@ -224,34 +226,55 @@ export interface ComputedFlashEstimate {
 
 /**
  * How the estimate resolves its commission:
- *   - `resolve`  — from the item's PRIMARY window bands at the estimate price (the band
- *                  it lands in, else the flat rate) — the custom-price what-if.
- *   - `override` — applied verbatim (the current scenario: customer price @ current
+ *   - `resolve`  -- from the item's PRIMARY window bands at the estimate price (the band
+ *                  it lands in, else the flat rate) -- the custom-price what-if.
+ *   - `override` -- applied verbatim (the current scenario: customer price @ current
  *                  commission), so the breakdown matches the detail's current baseline.
  */
 export type FlashEstimateCommission =
   | {
       readonly kind: 'resolve';
-      readonly bands: ReadonlyArray<StoredBand> | null;
+      readonly bands: ReadonlyArray<StoredTariffBand> | null;
       readonly flatPct: Decimal;
     }
   | { readonly kind: 'override'; readonly pct: Decimal };
 
 /**
- * Full profit breakdown for ONE flash item at `price`. In `resolve` mode the commission
- * comes from the band the price lands in (else the flat rate); in `override` mode it is
- * applied verbatim (the current scenario). A null variant → NO_PRODUCT, a null probe
- * econ → NO_COST / NO_SHIPPING — the same ordering the detail view uses.
+ * Full profit breakdown for ONE flash item at `price` with the scenario engine. In
+ * `resolve` mode the commission comes from the band the price lands in (else the flat
+ * rate); in `override` mode it is applied verbatim (the current scenario). An unmatched
+ * variant (`base` no-product) -> NO_PRODUCT; a store-wide load failure (`base` degraded)
+ * echoes the resolved commission with a null breakdown and null reason. Otherwise the
+ * scenario is evaluated at `price`: a cost/shipping gate -> NO_COST / NO_SHIPPING
+ * (commission echoed), else the 4-decimal-margin breakdown. There is no NO_COMMISSION --
+ * the flat rate always resolves. Same ordering the detail view uses.
  */
-export function computeFlashEstimate(
-  ctx: TariffAssemblyContext,
-  variant: TariffVariant | null,
-  costAggregate: VariantCostAggregate | undefined,
-  shipping: EstimateOutcome,
-  commission: FlashEstimateCommission,
-  price: Decimal,
-): ComputedFlashEstimate {
-  if (variant === null) {
+export function computeFlashEstimate(params: {
+  readonly base: ScreenScenarioBase;
+  readonly commission: FlashEstimateCommission;
+  readonly price: Decimal;
+}): ComputedFlashEstimate {
+  const { base, commission, price } = params;
+
+  const resolved: ResolvedFlashCommission =
+    commission.kind === 'override'
+      ? { pct: commission.pct, source: 'current' }
+      : resolveFlashCommission(commission.bands, commission.flatPct, price);
+
+  // A store-wide load failure (already logged) is checked FIRST, so a matched item under
+  // a store-wide degrade reports reason null (never NO_PRODUCT). Echo the resolved
+  // commission; the breakdown could not be computed.
+  if (base.kind === 'degraded') {
+    return {
+      calculable: false,
+      reason: null,
+      commissionPct: resolved.pct.toFixed(4),
+      commissionSource: resolved.source,
+      breakdown: null,
+    };
+  }
+
+  if (base.kind === 'no-product') {
     return {
       calculable: false,
       reason: 'NO_PRODUCT',
@@ -261,21 +284,26 @@ export function computeFlashEstimate(
     };
   }
 
-  const resolved: ResolvedFlashCommission =
-    commission.kind === 'override'
-      ? { pct: commission.pct, source: 'current' }
-      : resolveFlashCommission(commission.bands, commission.flatPct, price);
-
-  const probe = assembleUnitEconomics(ctx, variant, {
-    costAggregate,
-    commission: tariffCommission(resolved.pct),
-    shipping,
+  const outcome = evaluateScreenScenario({
+    base: base.base,
+    unitPrice: price,
+    commissionPct: resolved.pct,
   });
-
-  if (probe.econ === null) {
+  if (!outcome.calculable) {
     return {
       calculable: false,
-      reason: deriveReason(probe.costStatus === 'OK', probe.shippingStatus === 'OK'),
+      reason: outcome.reason,
+      commissionPct: resolved.pct.toFixed(4),
+      commissionSource: resolved.source,
+      breakdown: null,
+    };
+  }
+
+  const breakdown = quoteBreakdownFromStatement({ statement: outcome.statement });
+  if (breakdown === null) {
+    return {
+      calculable: false,
+      reason: null,
       commissionPct: resolved.pct.toFixed(4),
       commissionSource: resolved.source,
       breakdown: null,
@@ -287,6 +315,6 @@ export function computeFlashEstimate(
     reason: null,
     commissionPct: resolved.pct.toFixed(4),
     commissionSource: resolved.source,
-    breakdown: serializeBreakdown(computeUnitProfit(probe.econ, price)),
+    breakdown,
   };
 }

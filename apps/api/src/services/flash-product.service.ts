@@ -1,13 +1,13 @@
-// Read + delete + selections service for the Flash Products (Flaş Ürünler) feature.
+// Read + delete + selections service for the Flash Products (Flas Urunler) feature.
 //
-// list   → one row per saved flash upload (product / item / selected counts, exported).
-// detail → the list with per-item, per-scenario profit COMPUTED on read. The reduced
-//          commission of each offer is READ from the store's Commission Tariff — the
+// list   -> one row per saved flash upload (product / item / selected counts, exported).
+// detail -> the list with per-item, per-scenario profit COMPUTED on read. The reduced
+//          commission of each offer is READ from the store's Commission Tariff -- the
 //          offer's window resolves into a commission BAND, else the flat "Mevcut
 //          Komisyon" rate (see flash-product-commission). Resolved in ONE batch per
 //          detail so the same (week, period) is not re-queried per date row.
-// delete → hard delete (cascades to items via the schema FK).
-// updateSelections → bulk offer choice XOR custom price.
+// delete -> hard delete (cascades to items via the schema FK).
+// updateSelections -> bulk offer choice XOR custom price.
 //
 // Every query is scoped by organizationId + storeId (tenant isolation). Money is
 // serialized to GROSS decimal strings; the frontend renders, never computes.
@@ -15,46 +15,32 @@
 import { Decimal } from 'decimal.js';
 
 import { Prisma, prisma } from '@pazarsync/db';
-import type { Store as PrismaStore } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
-import type { EstimateOutcome } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
-import type { StoredBand } from './commission-tariff.types';
 import {
   buildFlashCommissionResolver,
   type FlashCommissionRequest,
 } from './flash-product-commission.service';
-import { computeFlashItem, type FlashOfferInput } from './flash-product-compute.service';
-import { fetchCostAggregates } from './products-list.service';
-import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
 import {
-  NO_SHIPPING,
-  type TariffAssemblyContext,
-  type TariffVariant,
-} from './tariff-compute-commons';
-import type { VariantCostAggregate } from '../validators/product.validator';
+  computeFlashItem,
+  type ComputedFlashItem,
+  type FlashOfferInput,
+} from './flash-product-compute.service';
+import {
+  createRequestFailureLog,
+  loadScreenScenarioBases,
+  screenScenarioBaseFor,
+  serializeCommissionBandLadder,
+} from './scenario-screen-commons';
 import type {
-  FlashCommissionBand,
   FlashProductDetail,
   FlashProductDetailItem,
   FlashProductListItem,
   FlashSelection,
 } from '../validators/flash-product.validator';
 
-/** Serializes a resolved band ladder for the wire (money 2dp, percent 4dp), or null. */
-function serializeFlashBands(
-  bands: ReadonlyArray<StoredBand> | null,
-): FlashCommissionBand[] | null {
-  if (bands === null) return null;
-  return bands.map((band) => ({
-    lowerLimit: band.lowerLimit !== null ? new Decimal(band.lowerLimit).toFixed(2) : null,
-    upperLimit: band.upperLimit !== null ? new Decimal(band.upperLimit).toFixed(2) : null,
-    commissionPct: new Decimal(band.commissionPct).toFixed(4),
-  }));
-}
-
-// ─── List ───────────────────────────────────────────────────────────────────
+// --- List ---
 
 /** Lists every saved flash upload for a store with product / item / selected counts. */
 export async function listFlashProducts(
@@ -98,18 +84,20 @@ export async function listFlashProducts(
   });
 }
 
-// ─── Detail ──────────────────────────────────────────────────────────────────
+// --- Detail ---
 
 /**
  * Returns one flash list with per-item, per-scenario profit computed on read. Throws
- * `NotFoundError` when it does not belong to this store. Batch-resolves variants + cost
- * + shipping + images and every offer window's commission source once, then computes
- * each item by reusing the product-pricing assembly.
+ * `NotFoundError` when it does not belong to this store. Loads every matched variant's
+ * scenario base in one pass and every offer window's commission source once, then
+ * computes each item with the scenario engine (the resolved band / flat rate handed in as
+ * the commission override). A slim org + store scoped variant query supplies the display
+ * image only. Per decision 9 a store-wide load failure or a per-item engine throw leaves
+ * that profit empty (logged once) rather than failing the request.
  */
 export async function getFlashProductDetail(
   orgId: string,
   storeId: string,
-  store: PrismaStore,
   listId: string,
 ): Promise<FlashProductDetail> {
   let list;
@@ -158,53 +146,31 @@ export async function getFlashProductDetail(
 
   const now = new Date();
 
-  // ─── Batch-resolve matched variants + cost + shipping + image once ────────
+  // --- Matched variant image (slim, org + store scoped) ---
+  // The first catalog image is the only field the detail needs from the variant -- the
+  // profit inputs come from the scenario loader below, not from this query.
   const variantIds = list.items
     .map((i) => i.productVariantId)
     .filter((id): id is string => id !== null);
 
-  const variantMap = new Map<string, TariffVariant>();
   const imageMap = new Map<string, string | null>();
-  let costMap = new Map<string, VariantCostAggregate>();
-  let shippingMap = new Map<string, EstimateOutcome>();
 
   if (variantIds.length > 0) {
     let variants;
     try {
       variants = await prisma.productVariant.findMany({
         where: { id: { in: variantIds }, organizationId: orgId, storeId },
-        select: {
-          id: true,
-          stockCode: true,
-          barcode: true,
-          salePrice: true,
-          vatRate: true,
-          isDigital: true,
-          product: {
-            select: {
-              title: true,
-              categoryId: true,
-              brandId: true,
-              imageUrls: true,
-            },
-          },
-        },
+        select: { id: true, product: { select: { imageUrls: true } } },
       });
     } catch (err) {
       mapPrismaError(err);
     }
     for (const variant of variants) {
-      variantMap.set(variant.id, variant);
       imageMap.set(variant.id, variant.product.imageUrls[0] ?? null);
     }
-
-    [costMap, shippingMap] = await Promise.all([
-      fetchCostAggregates(orgId, variantIds),
-      batchResolveShipping(orgId, storeId, variantIds),
-    ]);
   }
 
-  // ─── Resolve every offer window's commission source in ONE batch ──────────
+  // --- Resolve every offer window's commission source in ONE batch ---
   const requests: FlashCommissionRequest[] = [];
   for (const item of list.items) {
     if (!item.hasCommissionTariff) continue;
@@ -225,17 +191,20 @@ export async function getFlashProductDetail(
   }
   const resolver = await buildFlashCommissionResolver(orgId, storeId, requests);
 
-  const feeDefs = await prisma.$transaction((tx) => resolveFeeDefs(tx, store.platform));
-  const ctx: TariffAssemblyContext = { platform: store.platform, feeDefs };
+  // --- One scenario-base load for the whole list; scenario date = now ---
+  const bases = await loadScreenScenarioBases({
+    organizationId: orgId,
+    storeId,
+    scenarioDate: now,
+    variantIds,
+    surface: 'flash-product',
+  });
+
+  // A per-item engine throw degrades only that item; collect and log once (decision 9).
+  const failureLog = createRequestFailureLog({ surface: 'flash-product', organizationId: orgId });
 
   const items = list.items.map((item): FlashProductDetailItem => {
-    const variant =
-      item.productVariantId !== null ? variantMap.get(item.productVariantId) : undefined;
-    const cost = item.productVariantId !== null ? costMap.get(item.productVariantId) : undefined;
-    const shipping =
-      item.productVariantId !== null
-        ? (shippingMap.get(item.productVariantId) ?? NO_SHIPPING)
-        : NO_SHIPPING;
+    const base = screenScenarioBaseFor(bases, item.productVariantId);
 
     const offer24: FlashOfferInput | null =
       item.offer24Price !== null
@@ -266,8 +235,8 @@ export async function getFlashProductDetail(
           }
         : null;
 
-    // Primary window = the 24h offer's window, else the 3h offer's — drives the surfaced
-    // band ladder + the custom-price estimate (design MİMARİ KARAR 2). Resolved on the
+    // Primary window = the 24h offer's window, else the 3h offer's -- drives the surfaced
+    // band ladder + the custom-price estimate (design MIMARI KARAR 2). Resolved on the
     // window's END (see flash-product-commission).
     const primaryStart = item.offer24StartsAt ?? item.offer3StartsAt;
     const primaryEnd = item.offer24StartsAt !== null ? item.offer24EndsAt : item.offer3EndsAt;
@@ -278,20 +247,20 @@ export async function getFlashProductDetail(
       item.hasCommissionTariff,
     );
 
-    const computed = computeFlashItem(
-      ctx,
-      {
-        currentCommissionPct: new Decimal(item.currentCommissionPct.toString()),
-        customerPrice: new Decimal(item.customerPrice.toString()),
-        offer24,
-        offer3,
-        primaryBands,
-      },
-      now,
-      variant ?? null,
-      cost,
-      shipping,
-    );
+    const flashInput = {
+      currentCommissionPct: new Decimal(item.currentCommissionPct.toString()),
+      customerPrice: new Decimal(item.customerPrice.toString()),
+      offer24,
+      offer3,
+      primaryBands,
+    };
+    let computed: ComputedFlashItem;
+    try {
+      computed = computeFlashItem({ input: flashInput, now, base });
+    } catch (err) {
+      failureLog.record(err);
+      computed = computeFlashItem({ input: flashInput, now, base: { kind: 'degraded' } });
+    }
 
     return {
       id: item.id,
@@ -313,13 +282,19 @@ export async function getFlashProductDetail(
       reason: computed.reason,
       hasCommissionTariff: item.hasCommissionTariff,
       commissionSource: computed.commissionSource,
-      commissionBands: serializeFlashBands(computed.commissionBands),
+      // null-in / null-out: the flat fallback carries no ladder (see computeFlashItem).
+      commissionBands:
+        computed.commissionBands === null
+          ? null
+          : serializeCommissionBandLadder(computed.commissionBands),
       offer24: computed.offer24,
       offer3: computed.offer3,
       selectedOffer: item.selectedOffer,
       customPrice: item.customPrice !== null ? item.customPrice.toFixed(2) : null,
     };
   });
+
+  failureLog.flush();
 
   return {
     id: list.id,
@@ -329,7 +304,7 @@ export async function getFlashProductDetail(
   };
 }
 
-// ─── Delete ────────────────────────────────────────────────────────────────
+// --- Delete ---
 
 /** Hard-deletes a flash list (items cascade). 404 when not in this store. */
 export async function deleteFlashProductList(
@@ -352,7 +327,7 @@ export async function deleteFlashProductList(
   }
 }
 
-// ─── Save selections ─────────────────────────────────────────────────────────
+// --- Save selections ---
 
 /**
  * Persists the seller's offer choice (H24 / H3) XOR custom price in ONE bulk UPDATE.

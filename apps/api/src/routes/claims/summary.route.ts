@@ -29,9 +29,10 @@ const claimsSummaryRoute = createRoute({
   summary: 'Return-claims KPI summary for a store',
   description:
     'KPI strip data for the returns page: current open-claim count, resolved count in the ' +
-    'period, and the financial totals of the return trio (REFUND_DEDUCTION / ' +
-    'COMMISSION_REFUND / COST_RETURN) captured in the period. Count KPIs use claimDate; ' +
-    'financial KPIs use OrderFee.capturedAt. Period defaults to the last 30 days.',
+    'period, and the financial totals of the return trio (SALE_RETURN / ' +
+    'COMMISSION_REFUND / COST_RETURN) from profit_lines dated into the period. Count KPIs use ' +
+    "claimDate; financial KPIs use the settlement record's transaction date. Period defaults " +
+    'to the last 30 days.',
   security: [{ bearerAuth: [] }],
   request: {
     params: storeScopeParams,

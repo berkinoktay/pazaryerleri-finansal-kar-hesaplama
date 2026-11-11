@@ -27,11 +27,12 @@ const getOrderRoute = createRoute({
   method: 'get',
   path: '/organizations/{orgId}/stores/{storeId}/orders/{orderId}',
   tags: ['Orders'],
-  summary: 'Get a single order with items, fees, and claims',
+  summary: 'Get a single order with items, profit, and claims',
   description:
     'Returns the full Order graph required by the detail surface: OrderItems with joined ' +
-    'variant + product image, OrderFee timeline (capturedAt asc), and OrderClaim list ' +
-    '(populated by the CLAIMS sync worker every 6 hours).',
+    'variant + product image, the profit breakdown and per-item cost and commission figures ' +
+    'read from profit_lines, and OrderClaim list (populated by the CLAIMS sync worker every ' +
+    '6 hours).',
   security: [{ bearerAuth: [] }],
   request: { params: orderScopeParams },
   responses: {

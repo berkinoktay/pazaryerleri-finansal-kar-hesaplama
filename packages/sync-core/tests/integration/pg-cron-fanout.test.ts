@@ -135,7 +135,6 @@ describe('pg-cron-setup.sql — schedule contract (static)', () => {
     const byName = new Map(JOBS.map((j) => [j.name, j.schedule]));
     expect(byName).toEqual(
       new Map([
-        ['fx-rates-sync-daily', '0 13 * * 1-5'], // 16:00 İstanbul, hafta içi
         ['sync-orders-delta', '0 * * * *'], // saat başı güvenlik ağı (webhook birincil)
         ['sync-products-daily', '0 0 * * *'], // 03:00 İstanbul, günlük katalog
         ['sync-products-delta-hourly', '15 * * * *'], // saat başı :15 hafif stok+fiyat yürüyüşü

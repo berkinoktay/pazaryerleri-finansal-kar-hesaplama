@@ -16,7 +16,7 @@ function makeRow(overrides: Partial<ClaimListItem> = {}): ClaimListItem {
     id: 'c1',
     orderId: 'o1',
     platformOrderNumber: '11101228439',
-    trendyolClaimId: 't1',
+    marketplaceClaimId: 't1',
     claimDate: '2026-06-10T10:00:00.000Z',
     resolved: true,
     derivedStatus: 'ACCEPTED',

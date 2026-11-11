@@ -15,7 +15,7 @@ import { createRlsScopedClient } from '../../helpers/rls-client';
 /**
  * order_claim_items: no direct organization_id; reach via parent OrderClaim
  * and gate on ITS denormalized store_id (#298 — the orders join dropped).
- * EXISTS walk pattern (settlement_items mirror, one hop shorter now).
+ * EXISTS walk pattern.
  */
 describe('RLS — order_claim_items', () => {
   beforeAll(async () => {

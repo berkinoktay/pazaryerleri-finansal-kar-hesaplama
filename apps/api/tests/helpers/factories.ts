@@ -4,16 +4,24 @@ import type {
   BufferEntryStatus,
   CostProfileType,
   FeeCalculationKind,
+  FinanceRecordFamily,
   MemberRole,
-  OrderFeeDirection,
-  OrderFeeSource,
   OrderFeeType,
   OrderStatus,
   Platform,
   Prisma,
+  ProfitLineCertainty,
+  ProfitLineLevel,
+  ProfitLineSource,
+  ProfitLineType,
+  ProfitStatementView,
+  ProfitStatus,
+  ReconciliationStatus,
   StoreEnvironment,
   StoreStatus,
 } from '@pazarsync/db';
+import { PROFIT_ENGINE_VERSION } from '@pazarsync/profit';
+import { getBusinessDateAnchor } from '@pazarsync/utils';
 
 import { prisma } from './db';
 
@@ -21,13 +29,7 @@ import { prisma } from './db';
 // '../helpers/factories'` without reaching into @pazarsync/db directly —
 // the helpers module is the canonical seam for tests, and this avoids
 // every test file growing a second package import.
-export type {
-  FeeCalculationKind,
-  MemberRole,
-  OrderFeeDirection,
-  OrderFeeSource,
-  OrderFeeType,
-} from '@pazarsync/db';
+export type { FeeCalculationKind, MemberRole, OrderFeeType } from '@pazarsync/db';
 
 export interface CreateUserProfileOverrides {
   id?: string;
@@ -133,16 +135,14 @@ export interface CreateOrderOverrides {
   platformOrderNumber?: string | null;
   saleGross?: string | null;
   saleVat?: string | null;
-  estimatedNetProfit?: string | null;
-  // Persist edilen marj (estimatedNetProfit / saleGross × 100). Live-performance +
-  // order detayı bu kolondan okur (render-time hesap yok). null = henüz hesaplanmadı.
-  estimatedSaleMarginPct?: string | null;
   // Promosyon adları + brüt tutarları (spec ekleme #3). Order upsert'in yazdığı
   // JSON; liste/detay/canlı-performans bu kolondan servis eder. null = indirimsiz.
   promotionDisplays?: { displayName: string; amountGross: string }[] | null;
   // Buffer-graduation marker: non-null when the order came from the
   // live-performance buffer (drives the notification summary's isPromotion flag).
   promotedFromBufferAt?: Date | null;
+  // Export (cross-border) sale flag; Trendyol micro export orders.
+  isExportSale?: boolean;
 }
 
 export async function createOrder(
@@ -160,32 +160,26 @@ export async function createOrder(
       status: overrides.status ?? 'DELIVERED',
       saleGross: overrides.saleGross ?? null,
       saleVat: overrides.saleVat ?? null,
-      estimatedNetProfit: overrides.estimatedNetProfit ?? null,
-      estimatedSaleMarginPct: overrides.estimatedSaleMarginPct ?? null,
       // Omit (undefined) → column stays SQL NULL, matching the order upsert's
       // no-promotion write. A provided array is stored verbatim as JSON.
       promotionDisplays: overrides.promotionDisplays ?? undefined,
       promotedFromBufferAt: overrides.promotedFromBufferAt ?? null,
+      isExportSale: overrides.isExportSale ?? false,
     },
   });
 }
 
 export interface CreateOrderItemOverrides {
   quantity?: number;
-  // GROSS CONVENTION (2026-06-16): lineSaleGross replaces unitPrice; commissionGross
-  // replaces commissionAmount. unitCostSnapshotGross (KDV-dahil) replaces unitCostSnapshotNet.
+  // GROSS CONVENTION (2026-06-16): lineSaleGross replaces unitPrice.
   lineSaleGross?: string;
-  commissionRate?: string;
-  commissionGross?: string;
-  // GROSS cost snapshot — drives the costed-cost aggregate. null = cost-missing line.
-  unitCostSnapshotGross?: string | null;
   productVariantId?: string | null;
 }
 
 /**
- * One order line. `quantity` feeds "units sold"; `unitCostSnapshotGross` (KDV-dahil)
- * feeds the costed-cost denominator of the Kâr/Maliyet ratio. Money columns default
- * to zero — tests that only exercise aggregates don't depend on them.
+ * One order line. `quantity` feeds "units sold". Money columns default to zero;
+ * commission and cost figures live on profit lines (`createProfitLine`), not on
+ * the item.
  */
 export async function createOrderItem(
   orderId: string,
@@ -198,9 +192,6 @@ export async function createOrderItem(
       organizationId,
       quantity: overrides.quantity ?? 1,
       lineSaleGross: overrides.lineSaleGross ?? '0.00',
-      commissionRate: overrides.commissionRate ?? '0.00',
-      commissionGross: overrides.commissionGross ?? '0.00',
-      unitCostSnapshotGross: overrides.unitCostSnapshotGross ?? null,
       productVariantId: overrides.productVariantId ?? null,
     },
   });
@@ -239,46 +230,12 @@ export async function createFeeDefinition(
   });
 }
 
-export async function createOrderFee(
-  orderId: string,
-  organizationId: string,
-  overrides: {
-    feeType?: OrderFeeType;
-    source?: OrderFeeSource;
-    direction?: OrderFeeDirection;
-    // GROSS CONVENTION (2026-06-16): amountGross (KDV-dahil) + vatRate. Net = gross × 100/(100+rate).
-    amountGross?: string;
-    vatRate?: string;
-    feeDefinitionId?: string | null;
-    // SETTLEMENT rows carry the Trendyol row id (#297 idempotency column).
-    trendyolTransactionId?: string | null;
-    // Omit to take the DB default (now()); set to place a fee outside a
-    // capturedAt-windowed aggregate (e.g. the claims summary period).
-    capturedAt?: Date;
-  } = {},
-) {
-  return prisma.orderFee.create({
-    data: {
-      orderId,
-      organizationId,
-      feeDefinitionId: overrides.feeDefinitionId ?? null,
-      feeType: overrides.feeType ?? 'PLATFORM_SERVICE',
-      source: overrides.source ?? 'ESTIMATE',
-      direction: overrides.direction ?? 'DEBIT',
-      amountGross: overrides.amountGross ?? '13.19',
-      vatRate: overrides.vatRate ?? '20.00',
-      trendyolTransactionId: overrides.trendyolTransactionId ?? null,
-      ...(overrides.capturedAt !== undefined ? { capturedAt: overrides.capturedAt } : {}),
-    },
-  });
-}
-
 export async function createOrderClaim(
   organizationId: string,
   storeId: string,
   orderId: string,
   overrides: {
-    trendyolClaimId?: string;
+    marketplaceClaimId?: string;
     claimDate?: Date;
     resolved?: boolean;
     orderShipmentPackageId?: string | null;
@@ -289,7 +246,7 @@ export async function createOrderClaim(
       organizationId,
       storeId,
       orderId,
-      trendyolClaimId: overrides.trendyolClaimId ?? `claim-${randomUUID().slice(0, 8)}`,
+      marketplaceClaimId: overrides.marketplaceClaimId ?? `claim-${randomUUID().slice(0, 8)}`,
       claimDate: overrides.claimDate ?? new Date(),
       resolved: overrides.resolved ?? false,
       orderShipmentPackageId: overrides.orderShipmentPackageId ?? null,
@@ -301,7 +258,7 @@ export async function createOrderClaimItem(
   claimId: string,
   overrides: {
     orderItemId?: string | null;
-    trendyolClaimItemId?: string;
+    marketplaceClaimItemId?: string;
     reasonCode?: string;
     reasonName?: string;
     status?: string;
@@ -313,65 +270,13 @@ export async function createOrderClaimItem(
     data: {
       claimId,
       orderItemId: overrides.orderItemId ?? null,
-      trendyolClaimItemId:
-        overrides.trendyolClaimItemId ?? `claim-item-${randomUUID().slice(0, 8)}`,
+      marketplaceClaimItemId:
+        overrides.marketplaceClaimItemId ?? `claim-item-${randomUUID().slice(0, 8)}`,
       reasonCode: overrides.reasonCode ?? 'DAMAGEDITEM',
       reasonName: overrides.reasonName ?? 'Hasarlı Ürün',
       status: overrides.status ?? 'Pending',
       acceptedBySeller: overrides.acceptedBySeller ?? false,
       resolved: overrides.resolved ?? false,
-    },
-  });
-}
-
-export async function createOrgPeriodFee(
-  organizationId: string,
-  storeId: string,
-  overrides: {
-    paymentOrderId?: bigint;
-    paymentDate?: Date;
-    feeType?: OrderFeeType;
-    source?: OrderFeeSource;
-    // GROSS CONVENTION (2026-06-16, Bölüm E Task 20): amountGross + vatRate.
-    // Default: 60.00 gross (50.00 net × 1.20) at vatRate=20.
-    amountGross?: string;
-    vatRate?: string;
-  } = {},
-) {
-  return prisma.orgPeriodFee.create({
-    data: {
-      organizationId,
-      storeId,
-      paymentOrderId: overrides.paymentOrderId ?? BigInt(1000000),
-      paymentDate: overrides.paymentDate ?? new Date(),
-      feeType: overrides.feeType ?? 'ADVERTISING',
-      source: overrides.source ?? 'SETTLEMENT',
-      amountGross: overrides.amountGross ?? '60.00',
-      vatRate: overrides.vatRate ?? '20.00',
-    },
-  });
-}
-
-export async function createCommissionInvoice(
-  organizationId: string,
-  storeId: string,
-  overrides: {
-    trendyolSerialNumber?: string;
-    periodStart?: Date;
-    periodEnd?: Date;
-    totalNet?: string;
-    totalVat?: string;
-  } = {},
-) {
-  return prisma.commissionInvoice.create({
-    data: {
-      organizationId,
-      storeId,
-      trendyolSerialNumber: overrides.trendyolSerialNumber ?? `DCF${randomUUID().slice(0, 13)}`,
-      periodStart: overrides.periodStart ?? new Date('2026-05-01'),
-      periodEnd: overrides.periodEnd ?? new Date('2026-05-07'),
-      totalNet: overrides.totalNet ?? '1000.00',
-      totalVat: overrides.totalVat ?? '200.00',
     },
   });
 }
@@ -415,7 +320,7 @@ export async function createCostProfile(
 ) {
   // GROSS konvansiyon (2026-06-16): amountGross is GROSS (KDV-dahil) + vatRate.
   // A cost snapshot captured from this profile is fully specified (gross + rate),
-  // which is what the estimate path needs to compute a non-null estimatedNetProfit.
+  // which is what the profit engine needs to compute a non-null net profit.
   //
   // storeId is required on the model (cost profiles are store-scoped). Tests that
   // attach a profile to a variant MUST pass the variant's storeId so both share a
@@ -429,7 +334,6 @@ export async function createCostProfile(
       name: overrides.name ?? `COGS-${randomUUID().slice(0, 8)}`,
       type: overrides.type ?? 'COGS',
       amountGross: overrides.amountGross ?? '60.00',
-      currency: 'TRY',
       vatRate: 20,
     },
   });
@@ -451,7 +355,9 @@ export async function createBufferEntry(
     data: {
       organizationId,
       storeId,
-      orderDate: overrides.orderDate ?? new Date(),
+      // order_date is a DATE holding the business (Istanbul) day. A raw `new Date()` would
+      // store the UTC day, which is the previous day between 00:00 and 03:00 Istanbul time.
+      orderDate: overrides.orderDate ?? getBusinessDateAnchor(),
       platformOrderId: overrides.platformOrderId ?? `pkg-${randomUUID().slice(0, 8)}`,
       platformOrderNumber: overrides.platformOrderNumber ?? `ord-${randomUUID().slice(0, 8)}`,
       rawPayload: overrides.rawPayload ?? { test: true },
@@ -533,6 +439,159 @@ export async function createPriceChangeLog(
       trendyolBatchId: overrides.trendyolBatchId ?? `batch-${randomUUID()}`,
       status: overrides.status ?? 'PENDING',
       errorCode: overrides.errorCode ?? null,
+    },
+  });
+}
+
+// ─── Profit engine statements & lines (rebuild, phase 4A) ──────────────
+// Both tables are written only by the profit writer in production; tests seed
+// them directly so the order read paths (list, summary, detail, live
+// performance, returns) can be exercised without running the engine.
+
+export interface CreateProfitStatementOverrides {
+  view?: ProfitStatementView;
+  status?: ProfitStatus;
+  reconciliationStatus?: ReconciliationStatus;
+  // Decimal columns take strings (Prisma coerces). Totals default to "0".
+  saleGross?: string;
+  costGross?: string;
+  vatOutput?: string;
+  vatInput?: string;
+  vatNet?: string;
+  vatEffective?: string;
+  stoppageGross?: string;
+  stoppageIncluded?: boolean;
+  // netProfit + margins are nullable: null = not computable / excluded.
+  netProfit?: string | null;
+  saleMarginPct?: string | null;
+  costMarkupPct?: string | null;
+  issues?: Prisma.InputJsonValue;
+  settingsSnapshot?: Prisma.InputJsonValue;
+  contentHash?: string;
+  computedAt?: Date;
+}
+
+/**
+ * One computed profit statement for a parcel. Defaults to a best-known,
+ * estimated-status view with zero totals and null net profit / margins; pass a
+ * view/status/amounts override to shape the two views a test needs.
+ */
+export async function createProfitStatement(
+  orderId: string,
+  organizationId: string,
+  storeId: string,
+  overrides: CreateProfitStatementOverrides = {},
+) {
+  return prisma.orderProfitStatement.create({
+    data: {
+      organizationId,
+      storeId,
+      orderId,
+      view: overrides.view ?? 'BEST_KNOWN',
+      status: overrides.status ?? 'ESTIMATED',
+      reconciliationStatus: overrides.reconciliationStatus ?? 'NOT_SETTLED',
+      saleGross: overrides.saleGross ?? '0',
+      costGross: overrides.costGross ?? '0',
+      vatOutput: overrides.vatOutput ?? '0',
+      vatInput: overrides.vatInput ?? '0',
+      vatNet: overrides.vatNet ?? '0',
+      vatEffective: overrides.vatEffective ?? '0',
+      stoppageGross: overrides.stoppageGross ?? '0',
+      stoppageIncluded: overrides.stoppageIncluded ?? false,
+      netProfit: overrides.netProfit ?? null,
+      saleMarginPct: overrides.saleMarginPct ?? null,
+      costMarkupPct: overrides.costMarkupPct ?? null,
+      issues: overrides.issues ?? [],
+      settingsSnapshot: overrides.settingsSnapshot ?? {},
+      engineVersion: PROFIT_ENGINE_VERSION,
+      contentHash: overrides.contentHash ?? 'test',
+      computedAt: overrides.computedAt ?? new Date(),
+    },
+  });
+}
+
+export interface CreateFinanceRecordOverrides {
+  platform?: Platform;
+  family?: FinanceRecordFamily;
+  transactionType?: string;
+  recordId?: string;
+  // Nullable on the model; pass a date to place the row in or out of a
+  // transaction-date window. Explicit null keeps the column NULL.
+  transactionDate?: Date | null;
+  payload?: Prisma.InputJsonValue;
+  fetchedAt?: Date;
+}
+
+/**
+ * One raw marketplace finance record. Defaults to a SETTLEMENT-family Trendyol
+ * row dated now with an empty payload. The returns summary joins a profit
+ * line's externalRecordId to this row's recordId, so a test links the two by
+ * passing the same recordId and dates the money with transactionDate.
+ */
+export async function createFinanceRecord(
+  organizationId: string,
+  storeId: string,
+  overrides: CreateFinanceRecordOverrides = {},
+) {
+  return prisma.marketplaceFinanceRecord.create({
+    data: {
+      organizationId,
+      storeId,
+      platform: overrides.platform ?? 'TRENDYOL',
+      family: overrides.family ?? 'SETTLEMENT',
+      transactionType: overrides.transactionType ?? 'Return',
+      recordId: overrides.recordId ?? `rec-${randomUUID().slice(0, 8)}`,
+      transactionDate:
+        overrides.transactionDate === undefined ? new Date() : overrides.transactionDate,
+      payload: overrides.payload ?? {},
+      fetchedAt: overrides.fetchedAt ?? new Date(),
+    },
+  });
+}
+
+export interface CreateProfitLineOverrides {
+  // Required for an item-level line; null for a parcel-level line.
+  orderItemId?: string | null;
+  type?: ProfitLineType;
+  level?: ProfitLineLevel;
+  certainty?: ProfitLineCertainty;
+  source?: ProfitLineSource;
+  amountGross?: string;
+  amountVat?: string;
+  vatRatePct?: string | null;
+  inputs?: Prisma.InputJsonValue;
+  externalRecordId?: string | null;
+  externalRecordType?: string | null;
+}
+
+/**
+ * One profit line. Defaults to an item-level, estimated COGS cost line with
+ * zero amounts; pass overrides for the type/level/certainty/source and amounts
+ * a test needs. An item-level line requires an orderItemId override.
+ */
+export async function createProfitLine(
+  orderId: string,
+  organizationId: string,
+  storeId: string,
+  overrides: CreateProfitLineOverrides = {},
+) {
+  return prisma.profitLine.create({
+    data: {
+      organizationId,
+      storeId,
+      orderId,
+      orderItemId: overrides.orderItemId ?? null,
+      type: overrides.type ?? 'COST_COGS',
+      level: overrides.level ?? 'ITEM',
+      certainty: overrides.certainty ?? 'ESTIMATE',
+      source: overrides.source ?? 'SELLER_INPUT',
+      amountGross: overrides.amountGross ?? '0',
+      amountVat: overrides.amountVat ?? '0',
+      vatRatePct: overrides.vatRatePct ?? null,
+      inputs: overrides.inputs ?? {},
+      externalRecordId: overrides.externalRecordId ?? null,
+      externalRecordType: overrides.externalRecordType ?? null,
+      engineVersion: PROFIT_ENGINE_VERSION,
     },
   });
 }

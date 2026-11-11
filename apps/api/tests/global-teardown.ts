@@ -113,8 +113,6 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
         await prisma.$executeRawUnsafe(
           `TRUNCATE TABLE
              sync_logs,
-             settlement_items,
-             settlements,
              order_items,
              orders,
              products,

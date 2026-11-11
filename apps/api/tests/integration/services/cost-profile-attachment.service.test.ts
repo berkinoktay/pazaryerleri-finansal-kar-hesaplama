@@ -4,6 +4,7 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 
 import {
   attachCostProfiles,
@@ -18,7 +19,13 @@ import {
 } from '@/lib/errors';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createOrganization, createStore, createUserProfile } from '../../helpers/factories';
+import {
+  createOrder,
+  createOrderItem,
+  createOrganization,
+  createStore,
+  createUserProfile,
+} from '../../helpers/factories';
 
 // The write services take `accessibleStoreIds` as their last arg: `null` for
 // OWNER/ADMIN (every store, no store-grant narrowing), or the caller's granted
@@ -46,9 +53,7 @@ async function seedProfile(
       name: opts.name ?? `Profile-${randomUUID().slice(0, 8)}`,
       type: 'COGS',
       amountGross: new Decimal('25.50'),
-      currency: 'TRY',
       vatRate: 18,
-      fxRateMode: 'AUTO',
       archivedAt: opts.archived === true ? new Date() : null,
     },
   });
@@ -535,6 +540,42 @@ describe('cost-profile-attachment service', () => {
       await expect(
         listCostProfilesForVariant(orgA.id, variantB.id, ALL_STORES),
       ).rejects.toBeInstanceOf(CostProfileVariantOrgMismatchError);
+    });
+  });
+
+  // ─── profit recompute queueing ────────────────────────────────────────────
+
+  describe('profit recompute queueing', () => {
+    it('queues the orders of variants attached, detached or replaced', async () => {
+      const user = await createUserProfile();
+      const org = await createOrganization();
+      const store = await createStore(org.id);
+
+      const profile = await seedProfile(org.id, { storeId: store.id });
+      const variant = await seedVariant(org.id, store.id);
+
+      const order = await createOrder(org.id, store.id);
+      await createOrderItem(order.id, org.id, { productVariantId: variant.id });
+
+      const requestReason = async (): Promise<ProfitRecomputeReason | undefined> =>
+        (await prisma.profitRecomputeRequest.findUnique({ where: { orderId: order.id } }))?.reason;
+      const clearRequest = async (): Promise<void> => {
+        await prisma.profitRecomputeRequest.deleteMany({ where: { orderId: order.id } });
+      };
+
+      // attach → queued
+      await attachCostProfiles(org.id, [profile.id], [variant.id], user.id, ALL_STORES);
+      expect(await requestReason()).toBe(ProfitRecomputeReason.COST_CHANGED);
+
+      // detach → queued again (clear first so each op must re-enqueue on its own)
+      await clearRequest();
+      await detachCostProfiles(org.id, [profile.id], [variant.id], ALL_STORES);
+      expect(await requestReason()).toBe(ProfitRecomputeReason.COST_CHANGED);
+
+      // replace → queued again
+      await clearRequest();
+      await replaceCostProfilesForVariants(org.id, [variant.id], [profile.id], user.id, ALL_STORES);
+      expect(await requestReason()).toBe(ProfitRecomputeReason.COST_CHANGED);
     });
   });
 });

@@ -20,21 +20,19 @@ import { Decimal } from 'decimal.js';
 import { Prisma, prisma } from '@pazarsync/db';
 import type { Store as PrismaStore } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
-import type { EstimateOutcome } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
-import { resolveCommissionRate } from './commission-rate-resolver';
 import { resolveDiscountCommissionSource } from './discount-commission-source';
-import {
-  computeDiscountItem,
-  type TariffAssemblyContext,
-  type TariffVariant,
-} from './discount-compute.service';
+import { computeDiscountItem, type ComputedDiscountItem } from './discount-compute.service';
 import { scenarioPresentation, type DiscountCommissionInputs } from './discount-math-commons';
-import { fetchCostAggregates } from './products-list.service';
-import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
-import { NO_SHIPPING } from './tariff-compute-commons';
-import type { VariantCostAggregate } from '../validators/product.validator';
+import {
+  createRequestFailureLog,
+  loadScreenScenarioBases,
+  screenScenarioBaseFor,
+  serializeCommissionBandLadder,
+  resolveCategoryRatesByKey,
+  categoryRateKey,
+} from './scenario-screen-commons';
 import {
   discountConfigFromListRow,
   type DiscountCommissionBand,
@@ -50,7 +48,7 @@ function intOrNull(value: string | undefined): number | null {
   return value === undefined ? null : Number(value);
 }
 
-// ─── List ─────────────────────────────────────────────────────────────────────
+// --- List ---
 
 /** Lists every saved discount list for a store with item + selected counts. */
 export async function listDiscountLists(
@@ -123,19 +121,15 @@ export async function listDiscountLists(
   });
 }
 
-// ─── Detail ─────────────────────────────────────────────────────────────────
+// --- Detail ---
 
-/** The variant columns the detail compute reads — TariffVariant + its synced rate + image. */
+// The slim variant columns the detail needs for the commission chain + display: the synced
+// rate (2nd tier), the category/brand (3rd-tier fallback rate), and the first catalog image.
+// The profit inputs (cost, shipping, VAT, desi) come from the scenario loader, not here.
 interface DiscountVariantRow {
   id: string;
-  stockCode: string;
-  barcode: string;
-  salePrice: Prisma.Decimal;
-  vatRate: number | null;
-  isDigital: boolean;
   syncedCommissionRate: Prisma.Decimal | null;
   product: {
-    title: string;
     categoryId: bigint | null;
     brandId: bigint | null;
     imageUrls: string[];
@@ -202,16 +196,17 @@ export async function getDiscountListDetail(
   }
 
   const config = discountConfigFromListRow(list);
+  const now = new Date();
 
-  // ─── Batch-resolve matched variants + cost + shipping + image once ─────────
+  // --- Matched variants: slim query for the chain + display, org + store scoped ---
+  // syncedCommissionRate (2nd tier), category/brand (3rd-tier fallback), and the first
+  // catalog image. The profit inputs come from the scenario loader below, not from here.
   const variantIds = list.items
     .map((i) => i.productVariantId)
     .filter((id): id is string => id !== null);
 
   const variantMap = new Map<string, DiscountVariantRow>();
   const imageMap = new Map<string, string | null>();
-  let costMap = new Map<string, VariantCostAggregate>();
-  let shippingMap = new Map<string, EstimateOutcome>();
 
   if (variantIds.length > 0) {
     let variants;
@@ -220,20 +215,8 @@ export async function getDiscountListDetail(
         where: { id: { in: variantIds }, organizationId: orgId, storeId },
         select: {
           id: true,
-          stockCode: true,
-          barcode: true,
-          salePrice: true,
-          vatRate: true,
-          isDigital: true,
           syncedCommissionRate: true,
-          product: {
-            select: {
-              title: true,
-              categoryId: true,
-              brandId: true,
-              imageUrls: true,
-            },
-          },
+          product: { select: { categoryId: true, brandId: true, imageUrls: true } },
         },
       });
     } catch (err) {
@@ -243,53 +226,39 @@ export async function getDiscountListDetail(
       variantMap.set(variant.id, variant);
       imageMap.set(variant.id, variant.product.imageUrls[0] ?? null);
     }
-
-    [costMap, shippingMap] = await Promise.all([
-      fetchCostAggregates(orgId, variantIds),
-      batchResolveShipping(orgId, storeId, variantIds),
-    ]);
   }
 
-  // ─── Resolve the commission tariff bands (1st tier), anchored to the campaign ──
+  // --- One scenario-base load for the whole list; scenario date = now, tariff anchor null
+  // (the screen passes its own chain rate as the engine override, so no tariff lookup). ---
+  const bases = await loadScreenScenarioBases({
+    organizationId: orgId,
+    storeId,
+    scenarioDate: now,
+    variantIds,
+    surface: 'discount-list',
+  });
+
+  // A per-item engine throw degrades only that item; collect and log once (decision 9).
+  const failureLog = createRequestFailureLog({ surface: 'discount-list', organizationId: orgId });
+
+  // --- Resolve the commission tariff bands (1st tier), anchored to the campaign ---
   // start: bands are authoritative ONLY from a tariff week that COVERS the anchor
   // instant; no covering week → no bands (the per-item chain falls to product/category
   // rate). `outdated` is true only when the store has tariffs but none covers the
   // anchor. See discount-commission-source.ts.
   const { resolution: source, outdated: commissionTariffOutdated } =
-    await resolveDiscountCommissionSource(orgId, storeId, list.startsAt, new Date());
+    await resolveDiscountCommissionSource(orgId, storeId, list.startsAt, now);
 
-  // ─── Category-rate fallback cache (3rd tier) — once per distinct (cat, brand) ──
-  const categoryRateByKey = new Map<string, Decimal | null>();
-  const distinctCatKeys = new Map<string, { categoryId: bigint; brandId: bigint | null }>();
-  for (const variant of variantMap.values()) {
-    const { categoryId, brandId } = variant.product;
-    if (categoryId === null) continue;
-    distinctCatKeys.set(`${categoryId}:${brandId ?? 'null'}`, { categoryId, brandId });
-  }
-  await Promise.all(
-    [...distinctCatKeys].map(async ([key, { categoryId, brandId }]) => {
-      const resolved = await resolveCommissionRate({
-        platform: store.platform,
-        categoryId,
-        brandId,
-        sellerSegment: null,
-      });
-      categoryRateByKey.set(key, resolved?.rate ?? null);
-    }),
-  );
-
-  const feeDefs = await prisma.$transaction((tx) => resolveFeeDefs(tx, store.platform));
-  const ctx: TariffAssemblyContext = { platform: store.platform, feeDefs };
+  // --- Category-rate fallback cache (3rd tier): once per distinct (cat, brand) ---
+  const categoryRateByKey = await resolveCategoryRatesByKey({
+    platform: store.platform,
+    refs: [...variantMap.values()].map((variant) => variant.product),
+  });
 
   const items = list.items.map((item): DiscountListDetailItem => {
+    const base = screenScenarioBaseFor(bases, item.productVariantId);
     const variantRow =
       item.productVariantId !== null ? variantMap.get(item.productVariantId) : undefined;
-    const variant: TariffVariant | null = variantRow ?? null;
-    const cost = item.productVariantId !== null ? costMap.get(item.productVariantId) : undefined;
-    const shipping =
-      item.productVariantId !== null
-        ? (shippingMap.get(item.productVariantId) ?? NO_SHIPPING)
-        : NO_SHIPPING;
 
     // Three-tier chain inputs: tariff bands (by barcode) → synced product rate → category.
     const bands = source?.bandsByBarcode.get(item.barcode) ?? null;
@@ -298,13 +267,7 @@ export async function getDiscountListDetail(
     // query. Serialized like advantage: money at 2 decimals, percent at 4. Null when
     // there is no ladder (no covering tariff week for the barcode).
     const commissionBands: DiscountCommissionBand[] | null =
-      bands === null
-        ? null
-        : bands.map((band) => ({
-            lowerLimit: band.lowerLimit !== null ? new Decimal(band.lowerLimit).toFixed(2) : null,
-            upperLimit: band.upperLimit !== null ? new Decimal(band.upperLimit).toFixed(2) : null,
-            commissionPct: new Decimal(band.commissionPct).toFixed(4),
-          }));
+      bands === null ? null : serializeCommissionBandLadder(bands);
     const productRate =
       variantRow !== undefined && variantRow.syncedCommissionRate !== null
         ? new Decimal(variantRow.syncedCommissionRate.toString())
@@ -312,20 +275,26 @@ export async function getDiscountListDetail(
     const categoryRate =
       variantRow !== undefined && variantRow.product.categoryId !== null
         ? (categoryRateByKey.get(
-            `${variantRow.product.categoryId}:${variantRow.product.brandId ?? 'null'}`,
+            categoryRateKey(variantRow.product.categoryId, variantRow.product.brandId),
           ) ?? null)
         : null;
 
     const commission: DiscountCommissionInputs = { bands, productRate, categoryRate };
-    const computed = computeDiscountItem(
-      ctx,
-      variant,
-      cost,
-      shipping,
-      commission,
-      new Decimal(item.currentPrice.toString()),
-      config,
-    );
+    const currentPrice = new Decimal(item.currentPrice.toString());
+    // A per-item engine throw degrades only that item (reason null, profits empty) and is
+    // collected to log once after the pass (decision 9).
+    let computed: ComputedDiscountItem;
+    try {
+      computed = computeDiscountItem({ base, commission, currentPrice, config });
+    } catch (err) {
+      failureLog.record(err);
+      computed = computeDiscountItem({
+        base: { kind: 'degraded' },
+        commission,
+        currentPrice,
+        config,
+      });
+    }
 
     return {
       id: item.id,
@@ -348,6 +317,8 @@ export async function getDiscountListDetail(
       scenario: computed.scenario,
     };
   });
+
+  failureLog.flush();
 
   // Selection is now EPHEMERAL client state: the detail returns no summary card. The frontend
   // derives the total product count from items.length and the selected count from its own local
@@ -392,7 +363,7 @@ function serializeScenario(
   };
 }
 
-// ─── Update config ───────────────────────────────────────────────────────────
+// --- Update config ---
 
 /**
  * Full-replaces the discount configuration on the list row (name only when provided).
@@ -436,7 +407,7 @@ export async function updateDiscountList(
   }
 }
 
-// ─── Update selections ─────────────────────────────────────────────────────────
+// --- Update selections ---
 
 /**
  * Toggles the `included` flag on list items. 404 when the list is not in this store.
@@ -517,7 +488,7 @@ export async function updateDiscountSelections(
   }
 }
 
-// ─── Delete ────────────────────────────────────────────────────────────────
+// --- Delete ---
 
 /** Hard-deletes a discount list (items cascade). 404 when not in this store. */
 export async function deleteDiscountList(

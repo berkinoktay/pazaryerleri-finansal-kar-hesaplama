@@ -1,14 +1,14 @@
 // Read / update / selection / delete service for the Kampanyalar (Trendyol-designed
 // campaign participation) feature.
 //
-// list       → one row per saved campaign (config fields incl. the Trendyol funding rate,
+// list       -> one row per saved campaign (config fields incl. the Trendyol funding rate,
 //              item + selected counts, exported flag).
-// detail     → the campaign with its items (sortOrder asc), each carrying the THREE price
+// detail     -> the campaign with its items (sortOrder asc), each carrying the THREE price
 //              scenarios (current / max / custom) plus the basket settlement block.
-// update     → full-replace of the config fields on the campaign row (name only if given).
-// selections → bulk write of the per-item price choice: mode 'set' (per row), 'all' (MAX),
+// update     -> full-replace of the config fields on the campaign row (name only if given).
+// selections -> bulk write of the per-item price choice: mode 'set' (per row), 'all' (MAX),
 //              'none' (clear).
-// delete     → hard delete (cascades to items via the schema FK).
+// delete     -> hard delete (cascades to items via the schema FK).
 //
 // The İndirimler sibling (`discount-list.service.ts`) is the structural template; the two
 // differences are that a campaign item has three scenarios instead of two and that the
@@ -29,6 +29,7 @@ import { NotFoundError, ValidationError, type ValidationIssue } from '../lib/err
 import { scenarioPresentation } from './discount-math-commons';
 import { computeCampaignItem } from './marketplace-campaign-compute.service';
 import { resolveCampaignEconomics, EMPTY_ITEM_ECONOMICS } from './marketplace-campaign-economics';
+import { createRequestFailureLog, serializeCommissionBandLadder } from './scenario-screen-commons';
 import {
   campaignConfigFromListRow,
   isCampaignDiscountType,
@@ -65,8 +66,7 @@ function toWireDiscountType(value: DiscountType, campaignId: string): CampaignWi
   return value;
 }
 
-// ─── List ─────────────────────────────────────────────────────────────────────
-
+// --- List ---
 /** Lists every saved campaign for a store with item + selected counts. */
 export async function listMarketplaceCampaigns(
   orgId: string,
@@ -144,8 +144,7 @@ export async function listMarketplaceCampaigns(
   });
 }
 
-// ─── Detail ───────────────────────────────────────────────────────────────────
-
+// --- Detail ---
 /** Serializes a computed scenario (Decimal price) to the wire scenario (money 2dp). */
 function serializeScenario(
   s: ReturnType<typeof computeCampaignItem>['current'],
@@ -233,8 +232,9 @@ export async function getMarketplaceCampaignDetail(
 
   const config = campaignConfigFromListRow(list);
   const fundingPct = new Decimal(list.trendyolFundingPct.toString());
+  const now = new Date();
 
-  // Every priced input — matched variant, image, cost, shipping and the three commission tiers
+  // Every priced input — matched variant scenario base, image and the three commission tiers
   // anchored to the campaign start — comes from the SHARED resolver, the same one the estimate
   // and target-margin services call. The detail layers only its own presentation extras (the
   // band ladder below) on top; it never forks the resolution, so the modal cannot end up on a
@@ -244,32 +244,54 @@ export async function getMarketplaceCampaignDetail(
     storeId,
     store,
     list.startsAt,
+    now,
     list.items,
   );
 
+  // A per-item engine throw degrades only that item; collect and log once (decision 9).
+  const failureLog = createRequestFailureLog({
+    surface: 'marketplace-campaign',
+    organizationId: orgId,
+  });
+
   const items = list.items.map((item): MarketplaceCampaignDetailItem => {
     const inputs = economics.byItemId.get(item.id) ?? EMPTY_ITEM_ECONOMICS;
-    const { variant, cost, shipping, commission } = inputs;
+    const { base, commission } = inputs;
 
     // The band ladder surfaced to the UI popover ("which band does this price land in?").
     // Reuses the bands ALREADY resolved for the compute — no extra query. Money at 2 decimals,
     // percent at 4. Null when there is no ladder for the barcode.
     const commissionBands: CampaignCommissionBand[] | null =
-      commission.bands === null
-        ? null
-        : commission.bands.map((band) => ({
-            lowerLimit: band.lowerLimit !== null ? new Decimal(band.lowerLimit).toFixed(2) : null,
-            upperLimit: band.upperLimit !== null ? new Decimal(band.upperLimit).toFixed(2) : null,
-            commissionPct: new Decimal(band.commissionPct).toFixed(4),
-          }));
+      commission.bands === null ? null : serializeCommissionBandLadder(commission.bands);
 
-    const computed = computeCampaignItem(economics.ctx, variant, cost, shipping, commission, {
-      currentPrice: new Decimal(item.currentPrice.toString()),
-      maxPrice: new Decimal(item.maxPrice.toString()),
-      customPrice: item.customPrice !== null ? new Decimal(item.customPrice.toString()) : null,
-      config,
-      fundingPct,
-    });
+    const currentPrice = new Decimal(item.currentPrice.toString());
+    const maxPrice = new Decimal(item.maxPrice.toString());
+    const customPrice = item.customPrice !== null ? new Decimal(item.customPrice.toString()) : null;
+    // A per-item engine throw degrades only that item (reason null, profits empty) and is
+    // collected to log once after the pass (decision 9).
+    let computed: ReturnType<typeof computeCampaignItem>;
+    try {
+      computed = computeCampaignItem({
+        base,
+        commission,
+        currentPrice,
+        maxPrice,
+        customPrice,
+        config,
+        fundingPct,
+      });
+    } catch (err) {
+      failureLog.record(err);
+      computed = computeCampaignItem({
+        base: { kind: 'degraded' },
+        commission,
+        currentPrice,
+        maxPrice,
+        customPrice,
+        config,
+        fundingPct,
+      });
+    }
 
     return {
       id: item.id,
@@ -301,6 +323,8 @@ export async function getMarketplaceCampaignDetail(
     };
   });
 
+  failureLog.flush();
+
   return {
     id: list.id,
     name: list.name,
@@ -327,8 +351,7 @@ export async function getMarketplaceCampaignDetail(
   };
 }
 
-// ─── Update config ────────────────────────────────────────────────────────────
-
+// --- Update config ---
 /**
  * Full-replaces the campaign configuration on the list row (name only when provided).
  *
@@ -381,8 +404,7 @@ export async function updateMarketplaceCampaign(
   }
 }
 
-// ─── Update selections ────────────────────────────────────────────────────────
-
+// --- Update selections ---
 /**
  * Rejects any requested custom price above the item's "Maksimum Girebileceğin Fiyat".
  *
@@ -516,8 +538,7 @@ export async function updateCampaignSelections(
   }
 }
 
-// ─── Delete ───────────────────────────────────────────────────────────────────
-
+// --- Delete ---
 /** Hard-deletes a campaign (items cascade). 404 when not in this store. */
 export async function deleteMarketplaceCampaign(
   orgId: string,

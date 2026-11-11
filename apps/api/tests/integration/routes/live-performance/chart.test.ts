@@ -1,15 +1,18 @@
+import { computeParcelProfit } from '@pazarsync/profit';
 import { getBusinessDateAnchor, getBusinessDayRange } from '@pazarsync/utils';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../../helpers/auth';
-import { ensureDbReachable, truncateAll } from '../../../helpers/db';
+import { seedCalculableTrendyolOrder } from '../../../helpers/calculable-order';
+import { ensureDbReachable, prisma, truncateAll } from '../../../helpers/db';
 import {
   createBufferEntry,
   createMembership,
   createOrder,
   createOrganization,
+  createProfitStatement,
   createStore,
 } from '../../../helpers/factories';
 
@@ -45,11 +48,16 @@ describe('GET /v1/.../live-performance/chart', () => {
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
-    // Costed order at hour 9: ₺50 revenue, ₺10 profit.
-    await createOrder(org.id, store.id, {
+    // Costed order at hour 9: 50 revenue, 10 profit (from its ESTIMATE statement).
+    const costed = await createOrder(org.id, store.id, {
       orderDate: todayAtHour(9),
       saleGross: '50.00',
-      estimatedNetProfit: '10.00',
+    });
+    await createProfitStatement(costed.id, org.id, store.id, {
+      view: 'ESTIMATE',
+      status: 'ESTIMATED',
+      netProfit: '10.00',
+      saleMarginPct: '20.00',
     });
     // Cost-missing buffer order at hour 10: ₺60 revenue, no profit.
     await createBufferEntry(org.id, store.id, {
@@ -83,5 +91,28 @@ describe('GET /v1/.../live-performance/chart', () => {
     // Empty yesterday → flat 0 on both series.
     expect(body.yesterday[23]?.cumulativeRevenue).toBe('0.00');
     expect(body.yesterday[23]?.cumulativeProfit).toBe('0.00');
+  });
+
+  it("adds a statement-less calculable order's in-request profit to today's curve", async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+    // Dated now (today), no stored statement yet: the chart computes its profit in the
+    // request rather than leaving it out of the curve.
+    const orderId = await seedCalculableTrendyolOrder(org.id, store.id);
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/chart`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ChartBody;
+    const computed = await computeParcelProfit(prisma, { organizationId: org.id, orderId });
+    const expectedNet = computed.estimate.netProfit;
+    if (expectedNet === null) throw new Error('estimate net profit unexpectedly null');
+    expect(expectedNet.isZero()).toBe(false);
+    expect(body.today[23]?.cumulativeProfit).toBe(expectedNet.toFixed(2));
   });
 });

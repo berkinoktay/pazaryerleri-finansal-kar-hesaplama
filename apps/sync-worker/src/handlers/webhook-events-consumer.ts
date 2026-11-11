@@ -237,7 +237,7 @@ async function runBatch(prisma: PrismaClient, deps: WebhookConsumerDeps): Promis
       await processEvent(store, parse.payload, event.id, { catalogRepair: 'deferred' });
       closed += 1;
     } catch (err) {
-      // TRANSIENT fault (fee resolution, intake, DB): record the failure with a
+      // TRANSIENT fault (intake, DB; catalog repair is deferred here): record the failure with a
       // backoff so a later tick replays the row (or stamp it terminal once the
       // attempt cap is hit). The per-row error is NOT logged — the tick folds all
       // of this pass's failures into one throttled summary below.

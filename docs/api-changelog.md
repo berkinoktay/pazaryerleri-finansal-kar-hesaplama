@@ -11,8 +11,211 @@ section "Versioning" for details.
 
 ## [Unreleased]
 
+### Removed
+
+- **FX rates endpoint** (`GET /v1/organizations/{orgId}/fx-rates/latest`). The platform now works
+  in Turkish lira only, so there is no exchange-rate surface. The route, its
+  `FxRatesLatestResponse` and `FxRateEntry` component schemas, and the `FxRates` tag are gone.
+  Breaking; the web client ships the matching change in the same PR.
+- **Order detail fee and payment-order fields**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}`). `fees` (always an empty
+  array), `paymentOrderId` and `paymentDate` (always null), and the per-item
+  `commissionInvoiceSerialNumber` (always null) are gone, together with the `OrderFeeDetail`
+  component schema. The order list never carried them. Breaking; the web client ships the matching
+  change in the same PR.
+
 ### Changed
 
+- **Description-only updates (no wire change).** The order detail `unitCostSnapshotGross` and
+  `unitCostSnapshotVatRate` descriptions, the order GET summary and the claim list and summary
+  descriptions now say the values come from the profit lines (`profit_lines`), not from the
+  dropped legacy columns or the `order_fees` table.
+- **Marketplace-neutral field names on orders and claims.** Three wire fields are renamed; types
+  and values are unchanged:
+  - `micro` becomes `isExportSale` on the order list rows and the order detail
+    (`GET /v1/organizations/{orgId}/stores/{storeId}/orders`, `.../orders/{orderId}`).
+  - `claims[].trendyolClaimId` becomes `claims[].marketplaceClaimId` on the order detail.
+  - `trendyolClaimId` becomes `marketplaceClaimId` on the claim list rows
+    (`GET /v1/organizations/{orgId}/stores/{storeId}/claims`); the `q` search covers the renamed
+    field.
+
+  The backing columns were renamed with the same meaning (`orders.is_export_sale`,
+  `order_claims.marketplace_claim_id`, `order_claim_items.marketplace_claim_item_id`). Breaking;
+  the web client ships the matching change in the same PR.
+- **Order detail item commission rates and amounts are nullable and read from the profit lines
+  only** (`GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}`).
+  `items[].commissionRate` and `items[].commissionVatRate` are now `string | null`: both come from
+  the order's estimate commission profit line (the VAT rate from the same line as the rate) and are
+  null when no line supplies them. `items[].commissionGross` and `items[].refundedCommissionGross`
+  are now `string | null` too: `'0.00'` when the profit lines carry none (e.g. a cancelled order,
+  an item that was not returned), null when the profit part is empty (a platform the engine cannot
+  compute, a corrupt stored line, or a failed in-request computation). Both are also null while a
+  blocking `MISSING_COMMISSION_RATE` issue covers the item (naming it, or parcel-wide) and no
+  commission line supplies the amount, so an item the engine could not price no longer shows a
+  `'0.00'` commission next to a blank rate; once a settlement commission line lands, its amount is
+  shown. `estimatedCommissionGross` and `settledCommissionGross` keep their null-when-no-line
+  behaviour. The fallback to the item's
+  legacy columns is gone, so an empty profit part no longer reads the stored item values or a
+  fabricated `'0.00'` commission. Profit amounts are unchanged. Breaking for clients that treat the
+  two amounts as always present; the web client shows an em dash for a null amount in the same PR.
+- **Store disconnect description** (`DELETE /v1/organizations/{orgId}/stores/{storeId}`). The
+  description now names the real cascades (orders with their items, profit lines and statements,
+  among others) instead of the dropped settlements table. Description only; no wire change.
+- **Scenario screens are priced by the profit engine.** Product pricing (list and quote), commission
+  tariffs and Plus commission tariffs (detail and estimate), advantage product labels and flash
+  products (detail and estimate), discount lists (detail and estimate) and marketplace campaigns
+  (detail, estimate and target-margin suggestion). No wire-shape change: field names, types,
+  nullability and enum values stay the same; values and some meanings change.
+  - One engine: every profit, margin and breakdown comes from the scenario engine that also prices
+    orders (a one-parcel hypothetical sale) instead of the old unit-pricing assembly. The store's
+    profit settings apply: stopaj shows `0.00` when the store excludes it, and a negative net VAT
+    is clamped to zero unless the store includes it.
+  - Cost: the cost version effective at the scenario instant (now) is used, with that version's own
+    VAT rate. A cost profile without a version, or whose chosen version is archived, counts as
+    missing cost. Product pricing `cost` is the gross total of the cost versions effective now.
+  - Shipping: the Barem / carrier tariff band is chosen at the priced price (each band, tier, offer
+    or scenario price), not at the product's current sale price. Digital products carry no shipping
+    and no platform service fee, and are calculable.
+  - Commission: each screen keeps choosing its own rate (tariff band, Plus rate, advantage band or
+    category rate, flash window band or the flat current rate, the discount / campaign three-tier
+    chain) and the engine applies it verbatim; an explicit 0% band prices at zero commission.
+    Product pricing resolves the rate through the engine's chain: the commission tariff band that
+    covers the price in the current tariff period, else the synced product rate, else the category
+    / category+brand rule (before, it looked at the category rule only). On discounts and campaigns
+    a synced product rate of `0` counts as not sent and falls through to the category rate
+    (`commissionSource: 'category'`).
+  - Prices: the discount and campaign taxed base is rounded half up to the kurus before pricing. A
+    zero price is a valid scenario: margins are `null` and the net profit is the loss.
+  - Baskets: discount and campaign order scenarios price one parcel of `n` units -- `n` x cost, one
+    shipping and one platform service fee, and `n` x desi; an order whose desi exceeds the carrier
+    tariff has a `null` order profit.
+  - Margins are rounded through the stored percent scale before two decimals, as on the orders list
+    (a value can differ by one in the last digit).
+  - Product pricing quote: `price` is the lowest kurus that meets the target, solved in closed form
+    per price band. `NO_COST` is returned whenever the scenario has no usable cost line, including a
+    profile without a version (which used to return `NOT_CALCULABLE`).
+  - Campaign target margin: the settlement price that meets the target margin is solved by the same
+    engine solver, capped at the item's max price; `NOT_CALCULABLE` when no price is computable,
+    `UNREACHABLE` otherwise.
+  - Failures: an item whose profit cannot be computed is still returned, with `calculable: false`,
+    `reason: null` and empty profit fields, and the failure is logged server-side once per request;
+    a store-wide failure (for example a missing fee definition) empties every item's profit the same
+    way. The lists, details and estimates of these screens no longer answer 500 for a profit
+    computation failure (the product pricing quote still reports an unexpected engine failure as
+    an error).
+  - The product pricing list and quote run as plain reads (no interactive transaction), so a large
+    catalog no longer hits the 5-second transaction ceiling.
+- **Tariff periods are compared at their real instant.** Period bounds are stored as Istanbul
+  wall-clock; they are now converted to the real instant before comparing, and periods are
+  half-open (`[start, end)`). The commission tariff and Plus validity badges, the advantage
+  period choice and the commission tariff band of an order's profit no longer shift by three hours
+  around a boundary. Order profits are re-written with engine version 5.
+- **Orders list, tabs, summary and detail read the profit engine's statements.** No wire-shape
+  change: field names, types and nullability stay the same; values and meanings change.
+  - `reconciliationStatus` comes from the order's best-known profit statement. The engine derives
+    it from which settlement-required lines have landed as marketplace-record or cargo-invoice
+    actuals; a slot the engine could not estimate (missing shipping estimate or commission rate)
+    keeps it at `PARTIALLY_SETTLED`. An order without a statement reports `NOT_SETTLED`. The
+    `reconciliationStatus` filter uses the same rule.
+  - `settledNetProfit` is the best-known net profit as soon as reconciliation has started
+    (`PARTIALLY_SETTLED` or `FULLY_SETTLED`); before this change it appeared only at full
+    settlement. `estimatedNetProfit` is the estimate statement's net profit. Both are `null` when
+    the profit cannot be computed or the order is excluded from profit.
+  - `saleMarginPct` / `costMarkupPct` come from the best-known statement; `sort=marginPct` /
+    `-marginPct` sorts by that margin, orders without a statement last.
+  - `saleGross` (list rows, summary revenue, detail top level) is the best-known statement's sale
+    (sale minus sale return); the order's own sale when no statement exists yet; `0` for a
+    cancelled order without a statement. Cancelled orders no longer add to revenue.
+  - Tabs and counts: `costStatus=calculated` lists the orders not excluded from profit, including
+    cancelled and not-yet-computable ones (shown without profit); `excluded` lists the orders
+    stamped as excluded. `lossOnly` = best-known net profit below zero.
+  - Summary: revenue, net profit, average margin (now rounded to 4 decimals) and the loss rate
+    come from the best-known statements; excluded orders count in revenue, never in profit.
+  - Detail `profitBreakdown` is built from the best-known statement and its selected lines (same
+    fields; cost + marketplace fees + taxes + net profit = sale). It is `null` when the order has no
+    net profit. When no statement is stored yet, the profit is computed for the request without
+    writing anything; if that is impossible (an unsupported marketplace) or fails, the profit part
+    is empty and the request still succeeds (a failure is logged server-side).
+  - Detail items: `unitCostSnapshotGross`, `unitCostSnapshotVatRate`, `commissionGross`,
+    `commissionRate`, `estimatedCommissionGross` and `settledCommissionGross` come from the order's
+    profit lines (the rate falls back to the item column).
+  - Deprecated, still on the wire: detail `fees` is always `[]`; `paymentOrderId`, `paymentDate`
+    and item `commissionInvoiceSerialNumber` are always `null`.
+- **Orders: cancelled profit, sale VAT, loss rate, item commission refunds and profit issues read
+  the profit statements** (`GET .../orders`, `GET .../orders/summary`, `GET .../orders/{orderId}`).
+  - Cancelled profit: a view whose statement is `CANCELLED` with a zero net profit (a cancellation
+    without a penalty) reports `estimatedNetProfit` / `settledNetProfit` as `null` on the list
+    and the detail. A cancellation penalty (non-zero net profit) stays visible: the engine writes
+    no estimate line for a cancellation, so the penalty shows on `settledNetProfit`.
+  - `saleVat` (list rows and detail top level) comes from the same source as `saleGross`: the
+    best-known statement's output VAT; the order's own sale VAT when no statement exists yet; `0`
+    for a cancelled order without a statement. Before, it was always the order column, so a
+    cancelled or returned order showed its pre-cancel / pre-return VAT.
+  - Summary `lossOrderRate.totalCount` counts the in-scope orders whose best-known statement has a
+    net profit and is not `CANCELLED`. Cancelled orders and orders without a profit (excluded, not
+    computable, no statement yet) no longer inflate the denominator. `lossCount` uses the same
+    filter plus a negative net profit (the two counts are separate queries, so a write landing
+    between them can skew one refresh): a penalized cancellation shows in the `lossOnly` list but
+    enters neither count.
+  - Detail items: `refundedCommissionGross` comes from the best-known `COMMISSION_REFUND` lines
+    (`'0.00'` when none) instead of the item column. `commissionGross` no longer falls back to the
+    item column when the order has profit lines and none supplies it: it reads `'0.00'` (e.g. a
+    cancelled order). The item columns are kept only when the profit part is empty (a platform
+    the engine cannot compute, or a profit read that failed).
+  - Detail `profitBreakdown.listGross` and `sellerDiscountGross` now derive from the selected
+    `SALE` and `SALE_RETURN` profit lines instead of the order columns; a returned or cancelled item
+    drops out of both, so `listGross - sellerDiscountGross` equals `saleGross`.
+  - Added detail `profitIssues` (new `ProfitIssue` schema: `code`, `orderItemId`, `detail`): the
+    best-known statement's issues that still apply to its selected lines. A warning a later
+    actual made moot is left out (`CARRIER_NOT_RECOGNIZED` once an actual shipping line is
+    selected; `SELLER_CARGO_AGREEMENT_ESTIMATE` once a cargo invoice replaced every shipping
+    estimate, while it stays when the statement has no shipping line). `CARRIER_NOT_RECOGNIZED`
+    is also left out while a `SELLER_CARGO_AGREEMENT_ESTIMATE` notice is shown: no cargo invoice
+    is coming on such an order, so the two notices would contradict each other.
+    For `CARRIER_NOT_RECOGNIZED`, `detail` is the carrier name as Trendyol reported it, or null
+    when blank. Always an array; empty when the profit part is empty.
+- **Live performance reads the estimate statement.** Net profit, margin and profit/cost ratio cover
+  the orders whose estimate is computed (the ratio's denominator is their cost from the statement);
+  per-order profit and margin are `null` unless computed; today's products `unitCost` comes from the
+  order's cost lines; the new-order notification computes the profit for the request when the
+  statement is not written yet (empty, never an error, when that fails). Also fixed: an order that a
+  re-delivery made computable while it waited in the live-performance buffer was counted twice and
+  its stock was decremented twice.
+- **Live performance computes today's profit in the request and divides margins by the estimate's
+  sale** (`GET .../live-performance/kpis`, `.../chart`, `.../orders`). Breaking for the KPI
+  schema: `netProfitYesterday`, `marginToday`, `marginYesterday`, `profitCostRatioToday` and
+  `profitCostRatioYesterday` become nullable; the web client ships the matching change in the
+  same PR.
+  - A today order whose estimate statement is not written yet is computed read-only in the
+    request, so its profit reaches the KPIs, the chart and the feed at once. At most a fixed
+    number of such orders are computed per request; the rest count as pending and the overflow is
+    logged once. Yesterday reads stored statements only.
+  - Margin divides the costed net profit by the estimate's own sale (after any return), not the
+    order's sale; revenue and `pendingRevenueToday` keep the order's own sale.
+  - The four ratios are `null` when their denominator is zero, and `netProfitYesterday` is `null`
+    when yesterday has no costed order (was `0.00`).
+  - Feed tabs: an order without a computed estimate is listed under `pending` (with buffer rows),
+    not `calculated`; `counts.calculated` / `counts.pending` match the KPIs' costed subset.
+- **Product pricing list leaves zero-priced variants unscored** (`GET .../product-pricing`). No
+  wire-shape change: a variant whose sale price is 0 is returned with `calculable: false`, empty
+  profit / margin fields, `cost: null` and OK statuses, so it is dropped by `calculableOnly` and by
+  `profitStatus=profitable|breakeven|loss`, and sorts with the null-profit rows. The quote is
+  unchanged.
+- **Returns summary money KPIs** (`refundDeductionGross`, `commissionRefundGross`,
+  `costReturnGross`, `netImpactGross`) come from the profit lines, dated by the transaction date of
+  each return line's earliest settlement record; an item's cost return counts with its return.
+  Count KPIs are unchanged.
+- **Lira-only: cost profiles, cost status and the organization lose their currency / FX fields.**
+  Breaking; the web client ships the matching change in the same PR. The platform works in Turkish
+  lira only — every amount is implicitly TL.
+  - `CostProfile`, `CreateCostProfileInput`, `UpdateCostProfileInput` and `CostProfileVersion`
+    drop `currency`, `fxRateMode` and `manualFxRate`. Amounts are plain TL decimal strings.
+  - `VariantSummary.costStatus` (products list) and `ProductPricingItem.costStatus` (product
+    pricing list) narrow from `OK | NO_PROFILES | FX_STALE | FX_MISSING` to `OK | NO_PROFILES`. A
+    variant with at least one active cost profile is `OK`; `currentCostTry` is the plain TL sum of
+    those profiles and keeps its name.
+  - `Organization` drops `currency` (both the create response and the list rows); `timezone`
+    stays.
 - **Shipping estimate status: `NO_DESI` description** (`shippingEstimateStatus` on the products
   list and the product pricing list). Description only, no wire change. `NO_DESI` is now
   described as what it is: a defensive fallback for a variant with no estimate row. The
@@ -709,8 +912,9 @@ section "Versioning" for details.
 - **`PATCH /v1/organizations/{orgId}/stores/{storeId}/profit-settings`** — Shallow-merges a partial
   `UpdateProfitSettingsInput` (`includeStopaj?`, `includeNegativeNetVat?`) into the store's JSONB blob
   (only supplied keys change). Gated to OWNER/ADMIN (`STORES_CONFIGURE`) → `403 FORBIDDEN` otherwise.
-  SNAPSHOT-AT-CREATE: the change only affects orders created afterwards; existing orders keep their
-  stored profit values (no recompute). Defined types: `ProfitSettings`, `UpdateProfitSettingsInput`.
+  SNAPSHOT-AT-CREATE: an order captures the settings when it is created. A change recomputes the
+  stored profit of the store's orders that never captured them; orders that did keep their captured
+  settings. Defined types: `ProfitSettings`, `UpdateProfitSettingsInput`.
 
 - **`GET /v1/me/preferences`** — Returns the authenticated user's preferences blob (`{}`
   for new users). User-scoped: always returns the calling user's own row. Supports

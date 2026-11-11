@@ -686,7 +686,6 @@
       "title": "Active organization",
       "description": "The dashboard and data are scoped to this organization.",
       "slugLabel": "Slug",
-      "currencyLabel": "Currency",
       "timezoneLabel": "Timezone",
       "createdLabel": "Created"
     }
@@ -2148,7 +2147,7 @@
       },
       "badges": {
         "fastDelivery": "Fast",
-        "micro": "Micro"
+        "exportSale": "Micro"
       },
       "sla": {
         "onTime": {
@@ -2430,8 +2429,7 @@
         "namePlaceholder": "Your organization's full name",
         "slug": "Short name (slug)",
         "slugHint": "The short name cannot be changed.",
-        "timezone": "Time zone",
-        "currency": "Currency"
+        "timezone": "Time zone"
       },
       "accounting": {
         "title": "Accounting settings",
@@ -2478,16 +2476,12 @@
       },
       "formats": {
         "title": "Formats",
-        "description": "Customise how currency, numbers, and dates are displayed.",
-        "currencyLabel": "Currency display",
-        "currencyDescription": "Choose the currency symbol shown next to amounts.",
+        "description": "Customise how numbers and dates are displayed.",
         "numberLabel": "Number format",
         "numberDescription": "Choose the thousands separator and decimal notation.",
         "dateLabel": "Date format",
         "dateDescription": "Choose how dates are displayed.",
         "save": "Save",
-        "currencyTRY": "₺ Turkish Lira",
-        "currencyUSD": "$ US Dollar",
         "numberDotComma": "1.234,56 (dot thousands, comma decimal)",
         "numberCommaPoint": "1,234.56 (comma thousands, dot decimal)",
         "dateDMY": "31.12.2026 (day.month.year)",
@@ -3194,15 +3188,6 @@
       "MARKETING": "Marketing",
       "OTHER": "Other"
     },
-    "currency": {
-      "TRY": "TRY",
-      "USD": "USD",
-      "EUR": "EUR"
-    },
-    "fxMode": {
-      "AUTO": "Auto (TCMB)",
-      "MANUAL": "Manual rate"
-    },
     "vatRates": {
       "0": "0%",
       "1": "1%",
@@ -3216,31 +3201,18 @@
         "name": "Cost name",
         "namePlaceholder": "e.g. Raw materials COGS",
         "type": "Type",
-        "currency": "Currency",
         "amountGross": "Cost (VAT included)",
         "amountGrossHelp": "Enter the VAT-included amount from your supplier invoice.",
         "amountPlaceholder": "0.00",
         "vatRate": "VAT rate",
-        "fxRateMode": "FX rate mode",
-        "manualFxRate": "Manual FX rate (TRY)",
-        "manualFxRatePlaceholder": "e.g. 35.50",
         "note": "Note",
         "notePlaceholder": "Optional description…"
-      },
-      "fxPreview": {
-        "label": "Current TRY equivalent",
-        "source": "Source",
-        "noRate": "Loading exchange rate…",
-        "result": "{amount} × {rate} = {result}"
       },
       "validation": {
         "nameRequired": "Cost name is required.",
         "nameTooLong": "Cost name must be 100 characters or fewer.",
         "amountRequired": "Amount is required.",
-        "amountNegative": "Amount must be 0 or greater.",
-        "manualFxRateRequired": "A rate is required in MANUAL mode.",
-        "manualFxRatePositive": "Rate must be greater than 0.",
-        "tryMustUseAuto": "TRY currency always uses Auto mode."
+        "amountNegative": "Amount must be 0 or greater."
       },
       "submit": "Save",
       "cancel": "Cancel"
@@ -3254,6 +3226,18 @@
       "confirmDescription": "This cost profile will be archived and can no longer be attached to new variants. Past orders are unaffected. You can restore it at any time.",
       "confirm": "Archive",
       "cancel": "Cancel"
+    },
+    "detail": {
+      "history": {
+        "fields": {
+          "name": "Name",
+          "type": "Type",
+          "amountGross": "Amount",
+          "vatRate": "VAT rate",
+          "note": "Note",
+          "archivedAt": "Archived"
+        }
+      }
     }
   },
   "features": {
@@ -3647,14 +3631,6 @@
         "title": "No order items",
         "description": "The sync has not pulled line items yet."
       },
-      "columns": {
-        "variant": "Variant",
-        "quantity": "Qty",
-        "lineSaleGross": "Line total (incl. VAT)",
-        "commissionGross": "Commission (incl. VAT)",
-        "refundedCommissionGross": "Refunded com. (incl. VAT)",
-        "unitCostSnapshotGross": "Cost (incl. VAT)"
-      },
       "unknownVariant": "Variant not linked",
       "costMissing": "Cost missing",
       "costFrozen": "Excluded"
@@ -3688,6 +3664,17 @@
     "returnBanner": {
       "title": "This order has a return",
       "description": "{count, plural, one {# return claim} other {# return claims}} processed; the amounts in the profit breakdown are shown net of returns."
+    },
+    "profitIssues": {
+      "unknownCarrier": "unknown carrier",
+      "CARRIER_NOT_RECOGNIZED": {
+        "title": "Shipping estimate is 0 TL",
+        "description": "The carrier reported by Trendyol ({providerName}) is not recognized, so shipping could not be estimated. The actual amount is applied to this order once the cargo invoice arrives."
+      },
+      "SELLER_CARGO_AGREEMENT_ESTIMATE": {
+        "title": "Shipping amount will stay an estimate",
+        "description": "This order was shipped under your own cargo agreement; Trendyol does not issue a cargo invoice for it. Enter your own tariff in the shipping settings to see the actual amount."
+      }
     }
   },
   "livePerformance": {

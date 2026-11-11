@@ -21,7 +21,7 @@ upsert "P3" "c2e0c6" "Düşük öncelik"
 upsert "area: web"  "1d76db" "apps/web"
 upsert "area: api"  "5319e7" "apps/api"
 upsert "area: db"   "006b75" "packages/db"
-upsert "area: sync" "0e8a16" "sync worker / edge functions"
+upsert "area: sync" "0e8a16" "sync worker"
 upsert "area: ci"   "bfd4f2" ".github / CI / scripts"
 upsert "area: docs" "bfdadc" "docs/"
 # status

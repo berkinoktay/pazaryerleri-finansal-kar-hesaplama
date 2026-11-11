@@ -249,26 +249,6 @@ CREATE POLICY order_items_org_member_read ON order_items
     )
   );
 
--- ─── settlements ───────────────────────────────────────────────────────
-ALTER TABLE settlements ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS settlements_org_member_read ON settlements;
-CREATE POLICY settlements_org_member_read ON settlements
-  FOR SELECT TO authenticated
-  USING (can_access_store(store_id));
-
--- ─── settlement_items — reach via parent settlement ────────────────────
-ALTER TABLE settlement_items ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS settlement_items_org_member_read ON settlement_items;
-CREATE POLICY settlement_items_org_member_read ON settlement_items
-  FOR SELECT TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM settlements
-      WHERE settlements.id = settlement_items.settlement_id
-        AND can_access_store(settlements.store_id)
-    )
-  );
-
 -- ─── sync_logs — store-scoped, Realtime-exposed ───────────────────────
 -- sync_logs carries store_id directly, so the policy gates on
 -- can_access_store(store_id). Supabase Realtime's postgres_changes evaluator
@@ -325,31 +305,6 @@ DROP POLICY IF EXISTS product_variant_cost_profiles_org_member_read ON product_v
 CREATE POLICY product_variant_cost_profiles_org_member_read ON product_variant_cost_profiles
   FOR SELECT TO authenticated
   USING (is_org_member(organization_id));
-
--- ─── order_item_cost_snapshot_components — org-scoped read ───────────
--- Frozen, write-once. Inserts happen only via the sync worker (Edge
--- Function with service-role key) when an order arrives and its variant
--- has cost profiles attached. Updates are blocked by the
--- reject_snapshot_update trigger in cost-snapshot-immutable.sql (Task 1.4).
--- RLS just gates authenticated reads.
-ALTER TABLE order_item_cost_snapshot_components ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS order_item_cost_snapshot_components_org_member_read ON order_item_cost_snapshot_components;
-CREATE POLICY order_item_cost_snapshot_components_org_member_read ON order_item_cost_snapshot_components
-  FOR SELECT TO authenticated
-  USING (is_org_member(organization_id));
-
--- ─── fx_rates — global read, service-role writes ─────────────────────
--- FX rates are not tenant-scoped; the same TCMB rate applies to every
--- org. Any authenticated user can read the latest cached rates for UI
--- display (e.g., the cost-profile-fx-preview component). Writes are
--- service-role only via the fx-rates-sync Edge Function — postgres
--- bypasses RLS, and there is no INSERT/UPDATE/DELETE policy for
--- `authenticated`, so direct client writes default-deny.
-ALTER TABLE fx_rates ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS fx_rates_authenticated_read ON fx_rates;
-CREATE POLICY fx_rates_authenticated_read ON fx_rates
-  FOR SELECT TO authenticated
-  USING (true);
 
 -- marketplace_commission_rate: platform-scoped reference data, NOT tenant-private.
 -- Trendyol/Hepsiburada commission tariff is the same for every seller on the
@@ -525,26 +480,6 @@ CREATE POLICY marketplace_campaign_items_store_read ON marketplace_campaign_item
   FOR SELECT TO authenticated
   USING (can_access_store(store_id));
 
--- ─── Profit Calculation V1 — PR-1 ──────────────────────────────────────
--- design: docs/plans/2026-05-18-profit-calculation-design.md §3, §8
--- guide:  docs/plans/2026-05-19-profit-calc-implementation-guide.md
-
--- ─── order_fees — reach via parent order ───────────────────────────────
--- Sipariş paket-düzeyi ücret satırları (PSF, Stopaj, Shipping, vs.). No
--- store_id of its own; walk up to the parent order and gate on that order's
--- store access.
-ALTER TABLE order_fees ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS order_fees_org_member_read ON order_fees;
-CREATE POLICY order_fees_org_member_read ON order_fees
-  FOR SELECT TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM orders
-      WHERE orders.id = order_fees.order_id
-        AND can_access_store(orders.store_id)
-    )
-  );
-
 -- ─── order_claims — store-scoped ───────────────────────────────────────
 -- İade talep görünürlüğü; getclaims sync worker (PR-13) yazar. store_id
 -- denormalize (#298) — parent-walk yerine doğrudan can_access_store(store_id),
@@ -572,29 +507,9 @@ CREATE POLICY order_claim_items_org_member_read ON order_claim_items
     )
   );
 
--- ─── org_period_fees — store-scoped ────────────────────────────────────
--- Mağaza-düzeyi dönem ücretleri (Reklam, Penalty, Notification, PSF/Stopaj
--- audit). Settlement worker (PR-7) yazar; store_id taşır → store access ile
--- gate'lenir, böylece bir mağazaya erişimi olmayan üye o mağazanın ücretlerini görmez.
-ALTER TABLE org_period_fees ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS org_period_fees_org_member_read ON org_period_fees;
-CREATE POLICY org_period_fees_org_member_read ON org_period_fees
-  FOR SELECT TO authenticated
-  USING (can_access_store(store_id));
-
--- ─── commission_invoices — store-scoped ────────────────────────────────
--- Trendyol haftalık komisyon faturası aggregate. otherfinancials 'Komisyon
--- Faturası' kayıtlarından oluşturulur (PR-7). store_id taşır → store access
--- ile gate'lenir. OrderItem.commissionInvoiceId FK PR-3'te eklenir.
-ALTER TABLE commission_invoices ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS commission_invoices_org_member_read ON commission_invoices;
-CREATE POLICY commission_invoices_org_member_read ON commission_invoices
-  FOR SELECT TO authenticated
-  USING (can_access_store(store_id));
-
 -- ─── fee_definitions — global reference, public read ──────────────────
 -- Pazaryeri × ücret tipi başına sistem-düzeyi tanım. Tüm seller'lara aynı
--- kural — fx_rates / shipping_carriers / marketplace_commission_rate ile
+-- kural — shipping_carriers / marketplace_commission_rate ile
 -- aynı pattern. Yazma postgres rolü (PR-2 seed migration); authenticated
 -- INSERT/UPDATE/DELETE policy yok → default-deny.
 ALTER TABLE fee_definitions ENABLE ROW LEVEL SECURITY;
@@ -681,5 +596,52 @@ CREATE POLICY catalog_barcode_miss_org_member_read ON catalog_barcode_miss
 ALTER TABLE price_change_logs ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS price_change_logs_org_member_read ON price_change_logs;
 CREATE POLICY price_change_logs_org_member_read ON price_change_logs
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
+-- --- profit persistence tables (rebuild, phase 3A) ------------------------
+-- profit_lines, profit_line_allocations, order_profit_statements and
+-- marketplace_finance_records all carry a store_id stamped by the profit writer
+-- from the parent order (or the store). Reads are gated by can_access_store(store_id)
+-- (SECURITY DEFINER helper, 42P17 safe); OWNER/ADMIN see every store in their org,
+-- MEMBER/VIEWER only granted stores. Writes are service-role only (the profit
+-- writer and sync handlers use the postgres connection, which bypasses RLS);
+-- there is no authenticated INSERT/UPDATE/DELETE policy, so direct client writes
+-- default-deny.
+ALTER TABLE profit_lines ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS profit_lines_org_member_read ON profit_lines;
+CREATE POLICY profit_lines_org_member_read ON profit_lines
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
+ALTER TABLE profit_line_allocations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS profit_line_allocations_org_member_read ON profit_line_allocations;
+CREATE POLICY profit_line_allocations_org_member_read ON profit_line_allocations
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
+ALTER TABLE order_profit_statements ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS order_profit_statements_org_member_read ON order_profit_statements;
+CREATE POLICY order_profit_statements_org_member_read ON order_profit_statements
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
+ALTER TABLE marketplace_finance_records ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS marketplace_finance_records_org_member_read ON marketplace_finance_records;
+CREATE POLICY marketplace_finance_records_org_member_read ON marketplace_finance_records
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
+-- --- profit recompute queue (rebuild, phase 3B) ---------------------------
+-- profit_recompute_queue carries a store_id stamped by each producer from the
+-- parent order. Reads are gated by can_access_store(store_id) (SECURITY DEFINER
+-- helper, 42P17 safe); OWNER/ADMIN see every store in their org, MEMBER/VIEWER
+-- only granted stores. Writes are service-role only (the producers and the
+-- sync-worker drain use the postgres connection, which bypasses RLS); there is
+-- no authenticated INSERT/UPDATE/DELETE policy, so direct client writes
+-- default-deny.
+ALTER TABLE profit_recompute_queue ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS profit_recompute_queue_org_member_read ON profit_recompute_queue;
+CREATE POLICY profit_recompute_queue_org_member_read ON profit_recompute_queue
   FOR SELECT TO authenticated
   USING (can_access_store(store_id));

@@ -23,8 +23,8 @@ interface KpiCardDescriptor {
  * The four returns KPIs (spec §6): current open-claim workload, period
  * resolution count, the period's gross refund deduction, and the net profit
  * impact (−deduction + commission refund + cost return — usually negative,
- * tinted destructive when it is). Counts run on claimDate, money on
- * OrderFee.capturedAt — the backend owns both axes; no FE re-derivation.
+ * tinted destructive when it is). Counts run on claimDate, money on the
+ * settlement record's transaction date — the backend owns both axes; no FE re-derivation.
  */
 const KPI_CARDS: KpiCardDescriptor[] = [
   {

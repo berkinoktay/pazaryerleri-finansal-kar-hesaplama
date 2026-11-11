@@ -1,7 +1,9 @@
 import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
-import type { CostProfile, CostProfileVersion } from '@pazarsync/db';
+import type { CostProfile, CostProfileVersion, Prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
+import { enqueueProfitRecomputeForVariants } from '@pazarsync/profit';
 
 import { CostProfileNameTakenError, CostProfileNotFoundError } from '../lib/errors';
 import type {
@@ -64,10 +66,7 @@ function toWireProfile(row: CostProfile): CostProfile {
     name: row.name,
     type: row.type,
     amountGross: row.amountGross,
-    currency: row.currency,
     vatRate: row.vatRate,
-    fxRateMode: row.fxRateMode,
-    manualFxRate: row.manualFxRate,
     note: row.note,
     archivedAt: row.archivedAt,
     createdBy: row.createdBy,
@@ -98,17 +97,7 @@ function handlePrismaError(err: unknown, context: { name?: string }): never {
  * Returns an array of camelCase field names for the changedFields column.
  */
 function diffFields(before: CostProfile, after: Partial<CostProfile>): string[] {
-  const TRACKED = [
-    'name',
-    'type',
-    'amountGross',
-    'currency',
-    'vatRate',
-    'fxRateMode',
-    'manualFxRate',
-    'note',
-    'archivedAt',
-  ] as const;
+  const TRACKED = ['name', 'type', 'amountGross', 'vatRate', 'note', 'archivedAt'] as const;
 
   const changed: string[] = [];
   for (const field of TRACKED) {
@@ -128,6 +117,29 @@ function diffFields(before: CostProfile, after: Partial<CostProfile>): string[] 
     }
   }
   return changed;
+}
+
+/**
+ * Enqueue a profit recompute for every order carrying a variant this profile is
+ * attached to. A cost change (amount/vat, archive, or restore) reshapes those
+ * orders' profit, so they must be recomputed. Runs inside the
+ * mutation's own transaction. A profile with no attached variants enqueues
+ * nothing (the empty id list short-circuits without a query).
+ */
+async function enqueueProfileVariants(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+  profileId: string,
+): Promise<void> {
+  const links = await tx.productVariantCostProfile.findMany({
+    where: { profileId, organizationId: orgId },
+    select: { productVariantId: true },
+  });
+  await enqueueProfitRecomputeForVariants(tx, {
+    organizationId: orgId,
+    variantIds: links.map((link) => link.productVariantId),
+    reason: ProfitRecomputeReason.COST_CHANGED,
+  });
 }
 
 // ─── Service functions ───────────────────────────────────────────────────────
@@ -214,10 +226,7 @@ export async function createCostProfile(
           name: input.name,
           type: input.type,
           amountGross,
-          currency: input.currency ?? 'TRY',
           vatRate,
-          fxRateMode: input.fxRateMode ?? 'AUTO',
-          manualFxRate: input.manualFxRate !== undefined ? new Decimal(input.manualFxRate) : null,
           note: input.note ?? null,
           createdBy: actorId,
           updatedBy: actorId,
@@ -232,10 +241,7 @@ export async function createCostProfile(
           name: row.name,
           type: row.type,
           amountGross: row.amountGross,
-          currency: row.currency,
           vatRate: row.vatRate,
-          fxRateMode: row.fxRateMode,
-          manualFxRate: row.manualFxRate,
           note: row.note,
           archivedAt: null,
           changedFields: [],
@@ -270,9 +276,9 @@ export async function updateCostProfile(
       // acquires the lock; the subsequent Prisma findFirst inside the same
       // tx reads the locked row with proper camelCase mapping + Decimal
       // boxing. Reading directly via $queryRaw<CostProfile[]> is wrong —
-      // it returns raw snake_case columns (`vat_rate`, `fx_rate_mode`, ...),
-      // and the camelCase property accesses in diffFields silently resolve
-      // to `undefined`, which then flags every mapped field as changed.
+      // it returns raw snake_case columns (`vat_rate`, ...), and the camelCase
+      // property accesses in diffFields silently resolve to `undefined`, which
+      // then flags every mapped field as changed.
       const lockRows = await tx.$queryRaw<{ id: string }[]>`
         SELECT id FROM cost_profiles
         WHERE id = ${profileId}::uuid
@@ -304,12 +310,7 @@ export async function updateCostProfile(
         ...(patch.name !== undefined ? { name: patch.name } : {}),
         ...(patch.type !== undefined ? { type: patch.type } : {}),
         ...(patch.amountGross !== undefined ? { amountGross: new Decimal(patch.amountGross) } : {}),
-        ...(patch.currency !== undefined ? { currency: patch.currency } : {}),
         ...(patch.vatRate !== undefined ? { vatRate: patch.vatRate } : {}),
-        ...(patch.fxRateMode !== undefined ? { fxRateMode: patch.fxRateMode } : {}),
-        ...(patch.manualFxRate !== undefined
-          ? { manualFxRate: patch.manualFxRate !== null ? new Decimal(patch.manualFxRate) : null }
-          : {}),
         ...(patch.note !== undefined ? { note: patch.note } : {}),
       };
 
@@ -317,12 +318,7 @@ export async function updateCostProfile(
         ...(patch.name !== undefined ? { name: patch.name } : {}),
         ...(patch.type !== undefined ? { type: patch.type } : {}),
         ...(patch.amountGross !== undefined ? { amountGross: new Decimal(patch.amountGross) } : {}),
-        ...(patch.currency !== undefined ? { currency: patch.currency } : {}),
         ...(patch.vatRate !== undefined ? { vatRate: new Decimal(patch.vatRate) } : {}),
-        ...(patch.fxRateMode !== undefined ? { fxRateMode: patch.fxRateMode } : {}),
-        ...(patch.manualFxRate !== undefined
-          ? { manualFxRate: patch.manualFxRate !== null ? new Decimal(patch.manualFxRate) : null }
-          : {}),
         ...(patch.note !== undefined ? { note: patch.note } : {}),
       });
 
@@ -339,16 +335,15 @@ export async function updateCostProfile(
           name: row.name,
           type: row.type,
           amountGross: row.amountGross,
-          currency: row.currency,
           vatRate: row.vatRate,
-          fxRateMode: row.fxRateMode,
-          manualFxRate: row.manualFxRate,
           note: row.note,
           archivedAt: row.archivedAt,
           changedFields,
           changedBy: actorId,
         },
       });
+
+      await enqueueProfileVariants(tx, orgId, profileId);
 
       return row;
     });
@@ -401,16 +396,15 @@ export async function archiveCostProfile(
         name: row.name,
         type: row.type,
         amountGross: row.amountGross,
-        currency: row.currency,
         vatRate: row.vatRate,
-        fxRateMode: row.fxRateMode,
-        manualFxRate: row.manualFxRate,
         note: row.note,
         archivedAt: now,
         changedFields: ['archivedAt'],
         changedBy: actorId,
       },
     });
+
+    await enqueueProfileVariants(tx, orgId, profileId);
 
     return row;
   });
@@ -458,16 +452,15 @@ export async function restoreCostProfile(
         name: row.name,
         type: row.type,
         amountGross: row.amountGross,
-        currency: row.currency,
         vatRate: row.vatRate,
-        fxRateMode: row.fxRateMode,
-        manualFxRate: row.manualFxRate,
         note: row.note,
         archivedAt: null,
         changedFields: ['archivedAt'],
         changedBy: actorId,
       },
     });
+
+    await enqueueProfileVariants(tx, orgId, profileId);
 
     return row;
   });

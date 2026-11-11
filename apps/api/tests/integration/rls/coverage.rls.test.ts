@@ -19,8 +19,6 @@ const TENANT_TABLES = [
   'orders',
   'order_items',
   'expenses',
-  'settlements',
-  'settlement_items',
   'sync_logs',
   'own_shipping_tariffs',
   // Saved commission tariffs (store-scoped campaign price-band tariffs)
@@ -44,11 +42,8 @@ const TENANT_TABLES = [
   'marketplace_campaign_lists',
   'marketplace_campaign_items',
   // Profit Calculation V1 (PR-1)
-  'order_fees',
   'order_claims',
   'order_claim_items',
-  'org_period_fees',
-  'commission_invoices',
   // Trendyol webhook receiver (PR-C1)
   'webhook_events',
   // Member ↔ store access grants (member/org/store access-control)
@@ -59,6 +54,13 @@ const TENANT_TABLES = [
   'catalog_barcode_miss',
   // Fiyat yazma denetim kaydı (trendyol-price-write)
   'price_change_logs',
+  // Profit engine persistence (rebuild, phase 3A)
+  'profit_lines',
+  'profit_line_allocations',
+  'order_profit_statements',
+  'marketplace_finance_records',
+  // Profit recompute queue (rebuild, phase 3B)
+  'profit_recompute_queue',
 ] as const;
 
 describe('RLS — coverage', () => {

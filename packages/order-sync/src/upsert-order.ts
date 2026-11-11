@@ -1,6 +1,6 @@
 /**
- * Order/OrderItem write-once upsert + cost snapshot capture + applyEstimate
- * dispatch — single transaction, GROSS convention (KDV-dahil native, 2026-06-16).
+ * Order/OrderItem write-once upsert + profit recompute enqueue — single
+ * transaction, GROSS convention (KDV-dahil native, 2026-06-16).
  *
  * Promoted from `apps/sync-worker/src/handlers/orders.ts` (PR-C3a) so that
  * both consumers share one source of truth:
@@ -18,246 +18,23 @@
  *   - Order UPSERT on (storeId, platformOrderId)
  *   - OrderItem INSERT skip-if-exists, platformLineId-first (legacy fallback:
  *     (orderId, productVariantId) for lines/rows without a platform line id)
- *   - captureCostSnapshot inner guard ile write-once
- *   - applyEstimateOnOrderCreate inner guard ile write-once
- *     (estimatedNetProfit non-null ise no-op)
- *
- * GROSS konvansiyon (2026-06-16): captureCostSnapshot writes the two GROSS cost
- * columns (`unitCostSnapshotGross` + `unitCostSnapshotVatRate`); components carry
- * `amountGross`/`vatRate`/`amountInTryGross`. Net/KDV are derived downstream by the
- * profit engine (computeProfit), never re-split here.
+ *   - enqueueProfitRecompute on every write (create + update): one mark per order.
+ *     The sync-worker tick drains it and computes the statement in its own short
+ *     transaction; a compute failure there never rolls back this order write.
  */
 
 import { Decimal } from 'decimal.js';
 
 import { refreshProductAggregates } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
-import type {
-  CostProfileType,
-  Currency,
-  FxRateMode,
-  Platform,
-  Prisma,
-  ProfitExclusionReason,
-} from '@pazarsync/db';
+import type { Prisma, ProfitExclusionReason } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
-import { applyEstimateOnOrderCreate, resolveCommissionRate } from '@pazarsync/profit';
+import { enqueueProfitRecompute } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
+import { resolveProfitSettings } from '@pazarsync/utils';
 
 import { decrementVariantStock, isOrderOnBusinessToday } from './stock';
-
-interface SnapshotComponentData {
-  orderItemId: string;
-  organizationId: string;
-  profileId: string;
-  profileName: string;
-  profileType: CostProfileType;
-  // GROSS konvansiyon (2026-06-16): maliyet GROSS (KDV-dahil) saklanır.
-  // amountGross = profil GROSS tutarı (native currency); amountInTryGross = ×fxRate.
-  // vatRate maliyet KDV oranı (satıştan bağımsız); net = amountGross × 100/(100+vatRate).
-  amountGross: Decimal;
-  currency: Currency;
-  vatRate: Decimal;
-  amountInTryGross: Decimal;
-  fxRateMode: FxRateMode;
-  fxRateUsed: Decimal;
-  fxRateSource: string;
-}
-
-interface FxResolution {
-  rate: Decimal;
-  source: string;
-}
-
-/**
- * FX rate resolve helper. Mirrors `apps/api/src/services/fx-rates.service.ts`
- * — same logic, runs inside the upsert transaction so a rate change between
- * the read and the order item write cannot race.
- *
- * Returns null when an AUTO rate is unavailable (no fx_rates row for the
- * currency). Caller (captureCostSnapshot) treats that as best-effort abort
- * and leaves the snapshot null.
- */
-async function resolveFx(
-  profile: { currency: Currency; fxRateMode: FxRateMode; manualFxRate: Decimal | null },
-  tx: Prisma.TransactionClient,
-): Promise<FxResolution | null> {
-  if (profile.currency === 'TRY') {
-    return { rate: new Decimal(1), source: 'TRY-NATIVE' };
-  }
-  if (profile.fxRateMode === 'MANUAL') {
-    if (profile.manualFxRate === null) {
-      throw new Error('Profile has fxRateMode=MANUAL but manualFxRate is null');
-    }
-    return { rate: new Decimal(profile.manualFxRate), source: 'MANUAL' };
-  }
-  const row = await tx.fxRate.findFirst({
-    where: { currency: profile.currency },
-    orderBy: { rateDate: 'desc' },
-  });
-  if (!row) return null;
-  const dateStr = row.rateDate.toISOString().slice(0, 10);
-  return { rate: new Decimal(row.rateToTry), source: `TCMB-${dateStr}` };
-}
-
-/**
- * Capture unit_cost_snapshot for a newly-inserted OrderItem.
- * Best-effort: if FX rate is unavailable or no profiles are attached,
- * exits silently leaving the snapshot null.
- *
- * Mirrors apps/api/src/services/cost-snapshot.service.ts#captureCostSnapshot.
- * The two implementations must stay in sync if the spec changes.
- *
- * Exported (variant-recovery PR-2): the worker's variant-resolution tick calls
- * this after linking a late-resolved variant, inside its own order transaction.
- */
-export async function captureCostSnapshot(
-  orderItemId: string,
-  tx: Prisma.TransactionClient,
-): Promise<void> {
-  const item = await tx.orderItem.findUnique({
-    where: { id: orderItemId },
-    include: { productVariant: true, order: { select: { profitExcludedAt: true } } },
-  });
-
-  if (
-    !item ||
-    item.unitCostSnapshotGross !== null ||
-    !item.productVariantId ||
-    item.order.profitExcludedAt !== null // kâr-dışı: snapshot da donuk (spec 2026-06-12)
-  ) {
-    return;
-  }
-
-  const links = await tx.productVariantCostProfile.findMany({
-    where: { productVariantId: item.productVariantId },
-    include: { profile: true },
-  });
-
-  const activeProfiles = links.map((l) => l.profile).filter((p) => p.archivedAt === null);
-
-  if (activeProfiles.length === 0) return;
-
-  const components: SnapshotComponentData[] = [];
-
-  for (const profile of activeProfiles) {
-    const fx = await resolveFx(profile, tx);
-    if (fx === null) {
-      syncLog.warn('snapshot.fx-unavailable', {
-        orderItemId,
-        profileId: profile.id,
-        currency: profile.currency,
-      });
-      return; // best-effort: abort, leave null
-    }
-    // GROSS konvansiyon (2026-06-16): `profile.amountGross` zaten GROSS (KDV-dahil);
-    // KDV'yi yeniden bölmeyiz, oranı (`profile.vatRate`) taşırız. TRY karşılığı
-    // ×fxRate. Net türetimi (amountGross × 100/(100+vatRate)) downstream kâr motorunda.
-    const amountGrossNative = new Decimal(profile.amountGross);
-
-    components.push({
-      orderItemId,
-      organizationId: item.organizationId ?? '',
-      profileId: profile.id,
-      profileName: profile.name,
-      profileType: profile.type,
-      amountGross: amountGrossNative,
-      currency: profile.currency,
-      vatRate: new Decimal(profile.vatRate),
-      amountInTryGross: amountGrossNative.mul(fx.rate),
-      fxRateMode: profile.fxRateMode,
-      fxRateUsed: fx.rate,
-      fxRateSource: fx.source,
-    });
-  }
-
-  // Aggregate GROSS (TRY) across profiles. Effective vatRate denormalized for
-  // downstream consumers — multi-profile case yields a blended (amount-weighted)
-  // rate so the net split stays exact: net = Σ(grossᵢ × 100/(100+rateᵢ)).
-  const unitCostSnapshotGross = components
-    .reduce((acc, c) => acc.add(c.amountInTryGross), new Decimal(0))
-    .toDecimalPlaces(2);
-  // Blended rate = (Σ grossInTry − Σ netInTry) implied; expressed as the rate
-  // that reproduces the aggregate net. GROSS=0 → rate undefined → NULL.
-  const totalNetInTry = components.reduce((acc, c) => {
-    const r = c.vatRate;
-    const net = c.amountInTryGross.mul(100).div(new Decimal(100).add(r));
-    return acc.add(net);
-  }, new Decimal(0));
-  const unitCostSnapshotVatRate =
-    unitCostSnapshotGross.isZero() || totalNetInTry.isZero()
-      ? null
-      : unitCostSnapshotGross.sub(totalNetInTry).div(totalNetInTry).mul(100).toDecimalPlaces(2);
-
-  await tx.orderItem.update({
-    where: { id: orderItemId },
-    data: {
-      unitCostSnapshotGross,
-      unitCostSnapshotVatRate,
-      snapshotCapturedAt: new Date(),
-    },
-  });
-
-  await tx.orderItemCostSnapshotComponent.createMany({ data: components });
-}
-
-/**
- * Resolve the effective commission for a mapped line, applying the DB category
- * base_rate fallback when the webhook carried no commission of its own.
- *
- * Precedence:
- *   1. commissionKnown !== false (true OR legacy-undefined) → trust the mapped
- *      commission values as-is (existing behavior; no DB read).
- *   2. commissionKnown === false with a categoryId and a known platform → look
- *      up the category base_rate (sellerSegment=null) and recompute
- *      commissionGross/refundedCommissionGross with mapLine's exact formula.
- *   3. Category has no rule in the DB (resolver returns null) → keep the mapped
- *      0 fallback (unchanged legacy behavior) and warn.
- */
-async function resolveEffectiveCommission(
-  line: MappedOrder['lines'][number],
-  platform: Platform | null,
-  tx: Prisma.TransactionClient,
-): Promise<{
-  commissionRate: Decimal;
-  commissionGross: Decimal;
-  refundedCommissionGross: Decimal;
-}> {
-  // commissionKnown !== false (true veya legacy undefined) -> mapped degerleri KULLAN (mevcut davranis).
-  if (line.commissionKnown !== false || line.categoryId === null || platform === null) {
-    return {
-      commissionRate: new Decimal(line.commissionRate),
-      commissionGross: new Decimal(line.commissionGross),
-      refundedCommissionGross: new Decimal(line.refundedCommissionGross),
-    };
-  }
-  // Webhook komisyon tasimadi -> DB kategori base_rate fallback (sellerSegment=null).
-  const resolved = await resolveCommissionRate(
-    { platform, categoryId: BigInt(line.categoryId), brandId: null, sellerSegment: null },
-    tx,
-  );
-  if (resolved === null) {
-    syncLog.warn('orders.commission-fallback-miss', {
-      barcode: line.barcode,
-      categoryId: line.categoryId,
-    });
-    return {
-      commissionRate: new Decimal(line.commissionRate),
-      commissionGross: new Decimal(line.commissionGross),
-      refundedCommissionGross: new Decimal(line.refundedCommissionGross),
-    };
-  }
-  const rate = resolved.rate;
-  // mapLine ile AYNI formul: commissionGross = rate x lineListGross / 100; refunded = rate x lineSellerDiscountGross / 100.
-  return {
-    commissionRate: rate,
-    commissionGross: new Decimal(line.lineListGross).mul(rate).div(100).toDecimalPlaces(2),
-    refundedCommissionGross: new Decimal(line.lineSellerDiscountGross)
-      .mul(rate)
-      .div(100)
-      .toDecimalPlaces(2),
-  };
-}
 
 /**
  * Persist a single mapped order + its items in one transaction.
@@ -265,24 +42,29 @@ async function resolveEffectiveCommission(
  * GROSS convention native (2026-06-16):
  *   - Order: saleGross/saleVat/listGross/sellerDiscountGross (+ sellerDiscountVat)
  *     aggregate'ı MappedOrder paket toplamlarından. promotionDisplays UI gösterimi.
- *     agreedDeliveryDate, actualDeliveryDate, fastDelivery, micro direct API.
+ *     agreedDeliveryDate, actualDeliveryDate, fastDelivery, isExportSale direct API.
  *   - OrderItem: lineListGross/lineSaleGross/lineSellerDiscountGross/saleVatRate +
- *     commissionGross/refundedCommissionGross/commissionVatRate +
- *     estimatedCommissionGross (write-once #340). Variant lookup by barcode (storeId scoped).
- *   - Cost snapshot capture: write-once per item (unit_cost_snapshot_gross + vat_rate).
- *   - applyEstimateOnOrderCreate (`@pazarsync/profit`): aynı tx içinde son adım
- *     olarak çağrılır — PSF + Stopaj + Kargo ESTIMATE OrderFee rows + Order.estimated*.
- *     Cost snapshot eksikse profit null kalır.
+ *     orderCommissionRatePct (the line's own raw commission rate, null when the line
+ *     carried none). The profit engine derives every commission amount from that rate;
+ *     no commission or cost amount is stored on the item. Variant lookup by barcode
+ *     (storeId scoped).
+ *   - Snapshot-at-create: the store's resolved profit settings are copied onto the
+ *     order on CREATE only (forward-only; an UPDATE never rewrites them).
+ *   - enqueueProfitRecompute (`@pazarsync/profit`): the last step of the tx on
+ *     create and update alike — one mark per order for the sync-worker tick to drain.
  */
 export interface UpsertOrderOpts {
   /**
-   * Kâr-dondurma (spec 2026-06-12): set'liyse sipariş KÂR-DIŞI yazılır —
-   * yalnız CREATE verisine işlenir (var olan satırın durumu asla değişmez;
-   * geç webhook'un already-calculated siparişe çarpması update yoludur ve
-   * exclusion alanları update data'da YOKTUR → trigger'a takılmaz).
-   * Snapshot + estimate adımları atlanır; item'lar barkod iziyle yazılır.
+   * Cost-window exclusion (Berkin 2026-11-03): when set, the order is stamped
+   * profit-excluded. Written ONLY on a genuine create -- the UPDATE branch omits
+   * both columns, so a later re-delivery of an already-excluded order can never
+   * clear the stamp, and the stale-event case never overwrites it. Only two
+   * callers set it: intake-order's past-day route (LATE_UNCOSTED_ARRIVAL) and the
+   * buffer day-end graduation (COST_DEADLINE_MISSED). The permanence trigger
+   * (Faz 3E, Gorev 3) additionally rejects any attempt to clear or change an
+   * automatic exclusion at the database layer.
    */
-  profitExclusion?: { reason: ProfitExclusionReason };
+  profitExclusion?: { readonly reason: ProfitExclusionReason };
   /**
    * Set true by the buffer-promote worker when this order graduates from the
    * live-performance buffer (the seller already saw it as a cost-missing entry).
@@ -346,12 +128,32 @@ export async function upsertOrderWithSnapshot(
       return;
     }
 
-    // Mikro ihracat (Trendyol marketplace `micro=true`): satış KDV'den müstesnadır
-    // (ihracat istisnası, 3065 sayılı KDV Kanunu 11/1-a — e-arşiv fatura tipi "İstisna").
-    // KDV'yi KAYNAKTA sıfırlarız (Order.saleVat + OrderItem.saleVatRate + sellerDiscountVat):
-    // depolanan değer GERÇEKTİR (distorsiyon değil), tüm kâr yolları (estimate/settled/
-    // breakdown) + liste/özet otomatik doğru olur. Komisyon/kargo TR içiyle aynı kalır.
-    const microExport = order.micro === true;
+    // Store read: serves only the create-only profit-settings snapshot below, so it
+    // stays lazy -- the read happens only on a genuine create (existingOrder === null)
+    // and the hot update path takes no extra query.
+    const storeRow =
+      existingOrder === null
+        ? await tx.store.findUnique({
+            where: { id: storeId },
+            select: { profitSettings: true },
+          })
+        : null;
+
+    // Snapshot-at-create (decision 3): copy the store's resolved profit settings onto
+    // the order on CREATE only. An UPDATE never touches the snapshot — a later settings
+    // change is forward-only by design. resolveProfitSettings fills defaults for a
+    // missing/empty JSON, so the snapshot booleans are always set. On an UPDATE the
+    // stored snapshot is passed `undefined` and the resolved defaults are never read.
+    const createProfitSettings = resolveProfitSettings(
+      existingOrder === null ? storeRow?.profitSettings : undefined,
+    );
+
+    // Export sale (isExportSale; Trendyol marketplace `micro=true`): the sale is exempt from
+    // VAT (export exemption, Turkish VAT law 3065 article 11/1-a; e-invoice type "Istisna").
+    // The VAT is zeroed AT THE SOURCE (Order.saleVat, OrderItem.saleVatRate, sellerDiscountVat)
+    // so the stored value is the real one and every profit path, list and summary reads it as
+    // is. Commission and shipping stay the same as a domestic sale.
+    const microExport = order.isExportSale;
 
     // sellerDiscountVat: satıcı indirimi KDV'si — per-line GERÇEK satış KDV oranından
     // türetilir (hardcoded %20 DEĞİL). %10 satışlarda (Türk bayrağı, kitap) %20
@@ -423,7 +225,7 @@ export async function upsertOrderWithSnapshot(
         // fastDeliveryType: sipariş-seviyesi tip (PROD'da dolu). Eski buffer
         // JSONB'sinde UNDEFINED olabilir → ?? null.
         fastDeliveryType: order.fastDeliveryType ?? null,
-        micro: order.micro,
+        isExportSale: microExport,
         // PR-8 kargo alanları (research 2026-06-09). DİKKAT: `mappedOrder`
         // buffer'dan JSONB olarak da gelir — yeni alanlar eski kayıtlarda
         // UNDEFINED'dır (null değil). Bu yüzden tüm korumalar gevşek `!= null`
@@ -440,8 +242,14 @@ export async function upsertOrderWithSnapshot(
         // subsequent stale events are rejected. Null when the buffer JSONB replay
         // carries no lastModifiedDate (legacy rows).
         platformLastModifiedAt: incomingLmd,
-        // Kâr-dondurma (spec 2026-06-12): yalnız CREATE — pencereyi kaçırmış
-        // sipariş KÂR-DIŞI doğar; mevcut satırın durumu update'le değişmez.
+        // Snapshot-at-create (decision 3): the store's resolved profit settings are
+        // copied onto the order here and never rewritten on the UPDATE branch below.
+        snapshotIncludeStopaj: createProfitSettings.includeStopaj,
+        snapshotIncludeNegativeNetVat: createProfitSettings.includeNegativeNetVat,
+        // Cost-window exclusion (Berkin 2026-11-03): an order whose cost missed its
+        // business day is stamped profit-excluded ON CREATE ONLY -- the update branch
+        // below never touches these two columns, so a later re-delivery cannot clear
+        // the stamp. Stamp and reason are set together to satisfy the pair check.
         ...(opts?.profitExclusion !== undefined && {
           profitExcludedAt: new Date(),
           profitExclusionReason: opts.profitExclusion.reason,
@@ -486,15 +294,6 @@ export async function upsertOrderWithSnapshot(
         ...(incomingLmd !== null && { platformLastModifiedAt: incomingLmd }),
       },
     });
-
-    // Commission fallback needs the store platform only when at least one line
-    // arrived without a commission (commissionKnown === false). Resolve it once,
-    // and only then, to keep the hot intake path free of an extra store read.
-    const needsCommissionFallback = order.lines.some((l) => l.commissionKnown === false);
-    const storePlatform: Platform | null = needsCommissionFallback
-      ? ((await tx.store.findUnique({ where: { id: storeId }, select: { platform: true } }))
-          ?.platform ?? null)
-      : null;
 
     // Optimistic between-scans stock: the distinct products whose variant stock
     // we decrement below (one first-insert per line). Recomputed once after the
@@ -554,12 +353,7 @@ export async function upsertOrderWithSnapshot(
                 ],
               }
             : { orderId: upserted.id, productVariantId: variant?.id ?? null },
-        select: {
-          id: true,
-          platformLineId: true,
-          commissionGross: true,
-          settledCommissionGross: true,
-        },
+        select: { id: true, platformLineId: true, orderCommissionRatePct: true },
       });
       if (existing !== null) {
         // Self-heal: legacy anahtarla yakalanan satıra platform kimliğini
@@ -571,22 +365,21 @@ export async function upsertOrderWithSnapshot(
             data: { platformLineId: BigInt(line.platformLineId) },
           });
         }
-        // Sonraki webhook gercek komisyon getirdi ve depodakinden farkliysa tazele
-        // (settlement yoksa). Freshness guard (yukarida) bayat olaylari zaten erken
-        // dondurur -> buraya newer-or-equal gelir. estimate-tarafi komisyon alanlari
-        // tazelenir; settled* alanlarina ASLA dokunulmaz. Fonksiyon sonundaki
-        // applyEstimateOnOrderCreate kari taze komisyonla yeniden hesaplar.
-        if (line.commissionKnown === true && existing.settledCommissionGross === null) {
-          const eff = await resolveEffectiveCommission(line, storePlatform, tx);
-          if (!eff.commissionGross.equals(new Decimal(existing.commissionGross))) {
+        // Two-phase webhook (#426): a later event that finally carries the line's own
+        // commission (commissionKnown === true) refreshes the raw order_commission_rate_pct
+        // column the loader reads. The freshness guard above already dropped any strictly-
+        // older event, so only a newer-or-equal event reaches here; the profit recompute is
+        // enqueued once at the end of this function. A re-sync that carries the same rate
+        // writes nothing (every status change re-syncs every line).
+        if (line.commissionKnown === true) {
+          const rate = new Decimal(line.commissionRate);
+          const unchanged =
+            existing.orderCommissionRatePct !== null &&
+            existing.orderCommissionRatePct.equals(rate);
+          if (!unchanged) {
             await tx.orderItem.update({
               where: { id: existing.id },
-              data: {
-                commissionRate: eff.commissionRate,
-                commissionGross: eff.commissionGross,
-                refundedCommissionGross: eff.refundedCommissionGross,
-                estimatedCommissionGross: eff.commissionGross,
-              },
+              data: { orderCommissionRatePct: rate },
             });
           }
         }
@@ -603,12 +396,7 @@ export async function upsertOrderWithSnapshot(
         });
       }
 
-      // Commission with DB category base_rate fallback when the line carried no
-      // real commission (commissionKnown === false). Otherwise the mapped values
-      // pass through unchanged.
-      const eff = await resolveEffectiveCommission(line, storePlatform, tx);
-
-      const item = await tx.orderItem.create({
+      await tx.orderItem.create({
         data: {
           orderId: upserted.id,
           organizationId,
@@ -619,32 +407,20 @@ export async function upsertOrderWithSnapshot(
           // undefined'dır — BigInt(undefined) fırlatır.
           platformLineId: line.platformLineId != null ? BigInt(line.platformLineId) : null,
           barcode: line.barcode,
-          // GROSS konvansiyon (2026-06-16): satır para değerleri GROSS (KDV-dahil).
-          // Satış: lineListGross (liste×adet) / lineSaleGross (effectiveSale) /
-          // lineSellerDiscountGross (satıcı indirimi) + saleVatRate. Komisyon:
-          // commissionRate × lineListGross = commissionGross (LİSTE brüt) + ayrı
-          // refundedCommissionGross (satıcı-indirim payının komisyon iadesi); effective
-          // = gross − refunded = effectiveSale × rate (net-satış tabanı #332, çift-düşme
-          // YOK — taban liste, indirim yalnız refunded'da düşülür).
+          // GROSS convention (2026-06-16): line money values are GROSS (VAT included).
+          // Sale: lineListGross (list x quantity) / lineSaleGross (effective sale) /
+          // lineSellerDiscountGross (seller discount) + saleVatRate.
           lineListGross: new Decimal(line.lineListGross),
           lineSaleGross: new Decimal(line.lineSaleGross),
           lineSellerDiscountGross: new Decimal(line.lineSellerDiscountGross),
-          // Mikro ihracat → satış KDV oranı %0 (ihracat istisnası). build-profit-breakdown
-          // saleVat'i bu orandan türetir → micro siparişte 0 (Order.saleVat=0 ile tutarlı).
+          // Micro export -> sale VAT rate 0% (export exemption), consistent with
+          // Order.saleVat = 0 on a micro order.
           saleVatRate: microExport ? new Decimal(0) : new Decimal(line.saleVatRate),
-          commissionRate: eff.commissionRate,
-          commissionGross: eff.commissionGross,
-          refundedCommissionGross: eff.refundedCommissionGross,
-          commissionVatRate: new Decimal(line.commissionVatRate),
-          // Komisyon TAHMİNİ (#340): T+0'da mapper değeri — webhook komisyon taşımazsa
-          // kategori base_rate fallback'i (resolveEffectiveCommission). Sonraki webhook
-          // gerçek komisyonu getirince settlement'a kadar TAZELENİR (mevcut-satır dalı);
-          // settledCommissionGross yazılınca donar. Hakediş Kontrolü tahmin-vs-gerçek tabanı
-          // (recompute-settled önce settledCommissionGross'u, yoksa bunu okur).
-          estimatedCommissionGross: eff.commissionGross,
-          // Maliyet snapshot null bırakılır — captureCostSnapshot (aşağıda) doldurur.
-          unitCostSnapshotGross: null,
-          unitCostSnapshotVatRate: null,
+          // Raw order commission rate (phase 3B): the line's OWN rate, null when the
+          // line carried no commission of its own. The loader reads this column and
+          // treats null/zero as "unknown", falling back to the category rule.
+          orderCommissionRatePct:
+            line.commissionKnown === false ? null : new Decimal(line.commissionRate),
         },
       });
 
@@ -673,12 +449,6 @@ export async function upsertOrderWithSnapshot(
         await decrementVariantStock(tx, variant.id, line.quantity);
         affectedProductIds.add(variant.productId);
       }
-
-      // Cost snapshot capture (write-once iç guard).
-      // Kâr-dışı yazım — para alanları donuk; item yalnız barkod iziyle yazıldı.
-      if (opts?.profitExclusion === undefined) {
-        await captureCostSnapshot(item.id, tx);
-      }
     }
 
     // Refresh the Product aggregates for every product whose variant stock we
@@ -686,15 +456,38 @@ export async function upsertOrderWithSnapshot(
     // when nothing was decremented (all lines re-syncs or unmatched variants).
     await refreshProductAggregates(tx, storeId, [...affectedProductIds]);
 
-    // 3. applyEstimateOnOrderCreate — "tahmini kâr" (PSF + Stopaj + SHIPPING
-    //    ESTIMATE OrderFee + Order.estimatedNetProfit). HER upsert'te çağrılır
-    //    (create + re-sync); write-once gevşedi (design 2026-06-13) → kargoya
-    //    verilip cargoDeci yenilenince bu çağrı kargoyu cargoDeci ile RAFINE
-    //    eder (idempotent: PSF/Stopaj skip-if-exists, SHIPPING upsert, maliyet
-    //    snapshot immutable). Cost snapshot eksikse estimatedNetProfit null kalır.
-    //    Kâr-dışı yazım — para alanları donuk: ne fee ne estimate (spec 2026-06-12).
-    if (opts?.profitExclusion === undefined) {
-      await applyEstimateOnOrderCreate(upserted.id, tx);
+    // 3. Enqueue a profit recompute for this order. The sync-worker tick drains the queue
+    //    and computes the statement in its own short transaction; a compute failure there
+    //    never rolls back this write. Tenant-scoped: enqueueProfitRecompute re-filters by
+    //    organization and store, so only this order (upserted.id) is marked.
+    //
+    //    Decision (Gorev 4 review): skip the enqueue when this is an UPDATE whose incoming
+    //    lastModifiedDate equals the stored watermark. Nothing on the order changed -- the
+    //    same event re-delivered, or the 6-hourly ORDERS job re-reading an unchanged order
+    //    -- so the recompute would be wasted work. Still enqueue on a create, on a strictly-
+    //    newer event, and whenever either side's lmd is null (a legacy row, or a buffer
+    //    replay carrying no lmd), because equality cannot be proven there. The strictly-
+    //    older case already returned at the freshness guard above.
+    //
+    //    Load-bearing for the finance-record outbox: a settlement stored before this order
+    //    existed had its bind_pending cleared by a bind pass that found no order, so it is
+    //    never re-enqueued from that side (see bindPendingFinanceRecords in
+    //    @pazarsync/profit). This create-time enqueue is the ONLY path that reaches such a
+    //    record -- the recompute it triggers reads the already-stored record. Do NOT remove
+    //    it or gate the create path on the order's content changing; the create always
+    //    enqueues (sameLastModified is false when existingOrder is null).
+    const sameLastModified =
+      existingOrder !== null &&
+      existingOrder.platformLastModifiedAt !== null &&
+      incomingLmd !== null &&
+      incomingLmd.getTime() === existingOrder.platformLastModifiedAt.getTime();
+    if (!sameLastModified) {
+      await enqueueProfitRecompute(tx, {
+        organizationId,
+        storeId,
+        orderIds: [upserted.id],
+        reason: ProfitRecomputeReason.ORDER_CHANGED,
+      });
     }
   };
 

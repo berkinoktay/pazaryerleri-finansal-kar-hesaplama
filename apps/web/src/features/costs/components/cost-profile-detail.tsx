@@ -115,11 +115,8 @@ export function CostProfileDetail({
       body: {
         name: values.name,
         type: values.type,
-        currency: values.currency,
         amountGross: values.amountGross,
         vatRate: values.vatRate,
-        fxRateMode: values.fxRateMode,
-        manualFxRate: values.manualFxRate ?? undefined,
         note: values.note ?? undefined,
       },
     });
@@ -242,7 +239,6 @@ export function CostProfileDetail({
               ) : (
                 <div className="max-w-form">
                   <CostProfileForm
-                    orgId={orgId}
                     initialValues={profileToFormValues(profile)}
                     onSubmit={handleFormSubmit}
                     onCancel={() => {

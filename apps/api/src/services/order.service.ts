@@ -1,10 +1,39 @@
 import type { Prisma } from '@pazarsync/db';
 import { prisma } from '@pazarsync/db';
-import { buildProfitBreakdown, computeNetSaleGross } from '@pazarsync/profit';
+import {
+  OrderStatus,
+  ProfitStatementView,
+  ProfitStatus,
+  ReconciliationStatus,
+} from '@pazarsync/db/enums';
+import {
+  STORED_STATEMENT_TOTALS_SELECT,
+  buildStatementBreakdown,
+  itemProfitValues,
+  loadOrderProfitLines,
+  parseStoredIssues,
+  roundPercent,
+  selectLines,
+  statementTotalsFromRow,
+  statementTotalsFromStatement,
+  visibleProfitIssues,
+  type ItemProfitValues,
+  type ProfitIssue,
+  type ProfitLine,
+  type ProfitStatement,
+  type StatementBreakdown,
+} from '@pazarsync/profit';
 import { Decimal } from 'decimal.js';
 
 import { resolveVendorMissingBarcodes } from '../lib/catalog-barcode-miss-lookup';
 import { NotFoundError } from '../lib/errors';
+import {
+  STATEMENT_LIST_SELECT,
+  orderProfitFields,
+  toStatementPair,
+  type OrderProfitFields,
+  type StatementListRow,
+} from '../lib/order-profit-fields';
 import { toPromotionDisplays } from '../lib/promotion-displays';
 import type {
   ListOrdersQuery,
@@ -13,6 +42,10 @@ import type {
   OrderListSort,
   OrderSummaryQuery,
 } from '../validators/order.validator';
+import {
+  computeParcelProfitForRead,
+  logProfitReadFailure,
+} from './profit-compute-fallback.service';
 
 interface OrderListResult {
   data: OrderListItemResponse[];
@@ -51,6 +84,52 @@ async function ensureStoreInOrg(orgId: string, storeId: string): Promise<void> {
   }
 }
 
+/**
+ * A reconciliationStatus filter reads the best-known statement (decision 2).
+ * PARTIALLY/FULLY_SETTLED match orders whose best-known statement carries that
+ * status; NOT_SETTLED matches the complement — orders with no settlement-started
+ * best-known statement, including orders that have no statement at all. Every
+ * relation filter carries organizationId for tenant isolation.
+ */
+function reconciliationStatusCondition(
+  orgId: string,
+  reconciliationStatus: ReconciliationStatus,
+): Prisma.OrderWhereInput {
+  switch (reconciliationStatus) {
+    case ReconciliationStatus.NOT_SETTLED:
+      // The complement: orders whose best-known statement has not started settling,
+      // including orders with no best-known statement at all.
+      return {
+        NOT: {
+          profitStatements: {
+            some: {
+              view: ProfitStatementView.BEST_KNOWN,
+              organizationId: orgId,
+              reconciliationStatus: {
+                in: [ReconciliationStatus.PARTIALLY_SETTLED, ReconciliationStatus.FULLY_SETTLED],
+              },
+            },
+          },
+        },
+      };
+    case ReconciliationStatus.PARTIALLY_SETTLED:
+    case ReconciliationStatus.FULLY_SETTLED:
+      return {
+        profitStatements: {
+          some: {
+            view: ProfitStatementView.BEST_KNOWN,
+            organizationId: orgId,
+            reconciliationStatus,
+          },
+        },
+      };
+    default: {
+      const _exhaustive: never = reconciliationStatus;
+      throw new Error(`Unhandled reconciliation status: ${_exhaustive}`);
+    }
+  }
+}
+
 function buildOrderListWhere(
   orgId: string,
   storeId: string,
@@ -60,11 +139,10 @@ function buildOrderListWhere(
     organizationId: orgId,
     storeId,
   };
+  // The q filter uses where.OR, so the relation-backed filters compose via AND.
+  const and: Prisma.OrderWhereInput[] = [];
 
   if (filters.status !== undefined) where.status = filters.status;
-  if (filters.reconciliationStatus !== undefined) {
-    where.reconciliationStatus = filters.reconciliationStatus;
-  }
 
   if (filters.from !== undefined || filters.to !== undefined) {
     where.orderDate = {
@@ -80,49 +158,214 @@ function buildOrderListWhere(
     ];
   }
 
-  // Calculated-or-excluded (spec 2026-06-12): the segment key is the exclusion
-  // stamp, not "estimate still null" — there is no pending state anymore.
+  if (filters.reconciliationStatus !== undefined) {
+    and.push(reconciliationStatusCondition(orgId, filters.reconciliationStatus));
+  }
+
+  // Calculated-or-excluded (decision 3): the segment key is the exclusion stamp,
+  // not a statement — cancelled / not-computable / statement-less orders stay
+  // "calculated" so long as they are not stamped out of the profit universe.
   if (filters.costStatus !== undefined) {
-    if (filters.costStatus === 'calculated') {
-      where.estimatedNetProfit = { not: null };
-    } else {
-      where.profitExcludedAt = { not: null };
+    switch (filters.costStatus) {
+      case 'calculated':
+        where.profitExcludedAt = null;
+        break;
+      case 'excluded':
+        where.profitExcludedAt = { not: null };
+        break;
+      default: {
+        const _exhaustive: never = filters.costStatus;
+        throw new Error(`Unhandled cost status: ${_exhaustive}`);
+      }
     }
   }
 
-  // "Sadece zararlı": consumed net kâr (settled ?? estimated) < 0. Prisma coalesce
-  // desteklemediği için OR; q filtresi where.OR'u kullandığından AND ile birleştir.
+  // "Sadece zararlı": the best-known statement's net profit < 0 (decision 1).
   if (filters.lossOnly === true) {
-    const lossCondition: Prisma.OrderWhereInput = {
-      OR: [
-        { settledNetProfit: { lt: 0 } },
-        { settledNetProfit: null, estimatedNetProfit: { lt: 0 } },
-      ],
-    };
-    where.AND = Array.isArray(where.AND)
-      ? [...where.AND, lossCondition]
-      : where.AND === undefined
-        ? [lossCondition]
-        : [where.AND, lossCondition];
+    and.push({
+      profitStatements: {
+        some: {
+          view: ProfitStatementView.BEST_KNOWN,
+          organizationId: orgId,
+          netProfit: { lt: 0 },
+        },
+      },
+    });
   }
+
+  if (and.length > 0) where.AND = and;
 
   return where;
 }
 
 /**
- * Map the sort key to a Prisma orderBy. Every branch appends a stable `id`
- * tiebreaker so pagination is deterministic when the lead column ties (e.g.
- * many orders share the same margin). Margin sorts push null margins to the
- * end in BOTH directions so unscored orders never crowd the top.
+ * Include shape for an orders-list row: the item count and the store-scoped
+ * profit statements (estimate + best-known) the list fields are derived from.
+ * The profitStatements where carries organizationId + storeId so a statement filed
+ * under another org or store for the same order id is never read (tenant isolation).
  */
-function buildOrderListOrderBy(sort: OrderListSort): Prisma.OrderOrderByWithRelationInput[] {
+function orderListInclude(orgId: string, storeId: string) {
+  return {
+    _count: { select: { items: true } },
+    profitStatements: {
+      where: { organizationId: orgId, storeId },
+      select: STATEMENT_LIST_SELECT,
+    },
+  } satisfies Prisma.OrderInclude;
+}
+
+type OrderListRow = Prisma.OrderGetPayload<{
+  include: {
+    _count: { select: { items: true } };
+    profitStatements: { select: typeof STATEMENT_LIST_SELECT };
+  };
+}>;
+
+function toOrderListItem(row: OrderListRow): OrderListItemResponse {
+  const fields = orderProfitFields({
+    pair: toStatementPair(row.profitStatements),
+    orderStatus: row.status,
+    orderSaleGross: row.saleGross,
+    orderSaleVat: row.saleVat,
+  });
+
+  return {
+    id: row.id,
+    platformOrderId: row.platformOrderId,
+    platformOrderNumber: row.platformOrderNumber,
+    orderDate: row.orderDate.toISOString(),
+    status: row.status,
+    reconciliationStatus: fields.reconciliationStatus,
+    saleGross: fields.saleGross,
+    saleVat: fields.saleVat,
+    listGross: row.listGross?.toString() ?? null,
+    estimatedNetProfit: fields.estimatedNetProfit,
+    settledNetProfit: fields.settledNetProfit,
+    saleMarginPct: fields.saleMarginPct,
+    costMarkupPct: fields.costMarkupPct,
+    // Promosyon adları (spec ekleme #3): detaydakiyle aynı runtime-doğrulamalı
+    // dönüşüm — liste satırı indirimin hangi promosyondan geldiğini gösterir.
+    promotionDisplays: toPromotionDisplays(row.promotionDisplays),
+    fastDelivery: row.fastDelivery,
+    deliveredOnTime: row.deliveredOnTime,
+    isExportSale: row.isExportSale,
+    itemCount: row._count.items,
+    // Kâr-dışı satırında sebep + tarih gösterimi için. Hesaplanan siparişlerde null.
+    profitExcludedAt: row.profitExcludedAt?.toISOString() ?? null,
+    profitExclusionReason: row.profitExclusionReason,
+  };
+}
+
+/**
+ * The page's ordered order ids for a margin sort, paged across two segments
+ * (decision 5). Segment 1 is the orders that carry a best-known statement,
+ * ordered by the statement's sale margin (nulls last, order id as the
+ * tiebreaker). Segment 2 is the orders with no best-known statement, ordered by
+ * order id descending. The two segments partition order.count(where), so paging
+ * never repeats or skips a row at the boundary. Every relation filter carries
+ * organizationId + storeId.
+ */
+async function listOrderIdsByMargin(
+  orgId: string,
+  storeId: string,
+  where: Prisma.OrderWhereInput,
+  sort: Prisma.SortOrder,
+  skip: number,
+  take: number,
+): Promise<string[]> {
+  const bestKnownStatementWhere: Prisma.OrderProfitStatementWhereInput = {
+    view: ProfitStatementView.BEST_KNOWN,
+    organizationId: orgId,
+    storeId,
+    order: { is: where },
+  };
+
+  const segment1Count = await prisma.orderProfitStatement.count({
+    where: bestKnownStatementWhere,
+  });
+
+  const ids: string[] = [];
+
+  if (skip < segment1Count) {
+    const statements = await prisma.orderProfitStatement.findMany({
+      where: bestKnownStatementWhere,
+      orderBy: [{ saleMarginPct: { sort, nulls: 'last' } }, { orderId: 'desc' }],
+      skip,
+      take,
+      select: { orderId: true },
+    });
+    for (const statement of statements) ids.push(statement.orderId);
+  }
+
+  const remaining = take - ids.length;
+  if (remaining > 0) {
+    const statementlessOrders = await prisma.order.findMany({
+      where: {
+        ...where,
+        profitStatements: {
+          // Same predicate as segment 1's aggregate (view + organizationId + storeId),
+          // so the two segments partition order.count(where) without overlap or gap.
+          none: { view: ProfitStatementView.BEST_KNOWN, organizationId: orgId, storeId },
+        },
+      },
+      orderBy: [{ id: 'desc' }],
+      skip: Math.max(0, skip - segment1Count),
+      take: remaining,
+      select: { id: true },
+    });
+    for (const order of statementlessOrders) ids.push(order.id);
+  }
+
+  return ids;
+}
+
+/** Load the page's rows for a margin sort by id, preserving the paged id order. */
+async function loadOrdersByMargin(
+  orgId: string,
+  storeId: string,
+  where: Prisma.OrderWhereInput,
+  sort: Prisma.SortOrder,
+  skip: number,
+  take: number,
+): Promise<OrderListRow[]> {
+  const ids = await listOrderIdsByMargin(orgId, storeId, where, sort, skip, take);
+  if (ids.length === 0) return [];
+
+  const rows = await prisma.order.findMany({
+    where: { id: { in: ids }, organizationId: orgId, storeId },
+    include: orderListInclude(orgId, storeId),
+  });
+
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const ordered: OrderListRow[] = [];
+  for (const id of ids) {
+    const row = byId.get(id);
+    if (row !== undefined) ordered.push(row);
+  }
+  return ordered;
+}
+
+function fetchOrderListRows(
+  orgId: string,
+  storeId: string,
+  where: Prisma.OrderWhereInput,
+  sort: OrderListSort,
+  skip: number,
+  take: number,
+): Promise<OrderListRow[]> {
   switch (sort) {
     case '-orderDate':
-      return [{ orderDate: 'desc' }, { id: 'desc' }];
+      return prisma.order.findMany({
+        where,
+        orderBy: [{ orderDate: 'desc' }, { id: 'desc' }],
+        skip,
+        take,
+        include: orderListInclude(orgId, storeId),
+      });
     case 'marginPct':
-      return [{ estimatedSaleMarginPct: { sort: 'asc', nulls: 'last' } }, { id: 'desc' }];
+      return loadOrdersByMargin(orgId, storeId, where, 'asc', skip, take);
     case '-marginPct':
-      return [{ estimatedSaleMarginPct: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }];
+      return loadOrdersByMargin(orgId, storeId, where, 'desc', skip, take);
     default: {
       const _exhaustive: never = sort;
       throw new Error(`Unhandled order sort: ${_exhaustive}`);
@@ -130,10 +373,15 @@ function buildOrderListOrderBy(sort: OrderListSort): Prisma.OrderOrderByWithRela
   }
 }
 
+// The list service accepts any positive page size for internal paging; the
+// route's Zod schema (TABLE_PER_PAGE_OPTIONS) is the wire-level perPage
+// whitelist, so a validated ListOrdersQuery is always assignable here.
+type OrderListParams = Omit<ListOrdersQuery, 'perPage'> & { perPage: number };
+
 export async function listOrders(
   orgId: string,
   storeId: string,
-  filters: ListOrdersQuery,
+  filters: OrderListParams,
 ): Promise<OrderListResult> {
   await ensureStoreInOrg(orgId, storeId);
 
@@ -142,78 +390,32 @@ export async function listOrders(
   const skip = (filters.page - 1) * filters.perPage;
 
   const [rows, total, calculatedCount, excludedCount] = await Promise.all([
-    prisma.order.findMany({
-      where,
-      orderBy: buildOrderListOrderBy(filters.sort),
-      skip,
-      take: filters.perPage,
-      include: {
-        _count: { select: { items: true } },
-        // İade-düşülmüş net satış için REFUND_DEDUCTION fee'leri (kâr dökümüyle aynı).
-        fees: {
-          where: { feeType: 'REFUND_DEDUCTION' },
-          select: { source: true, amountGross: true, vatRate: true },
-        },
-      },
-    }),
+    fetchOrderListRows(orgId, storeId, where, filters.sort, skip, filters.perPage),
     prisma.order.count({ where }),
-    prisma.order.count({ where: { ...baseWhere, estimatedNetProfit: { not: null } } }),
+    // Tabs count from the exclusion stamp (decision 3): calculated = not stamped,
+    // excluded = stamped — honoring the sibling filters but ignoring costStatus.
+    prisma.order.count({ where: { ...baseWhere, profitExcludedAt: null } }),
     prisma.order.count({ where: { ...baseWhere, profitExcludedAt: { not: null } } }),
   ]);
 
-  const data: OrderListItemResponse[] = rows.map((row) => ({
-    id: row.id,
-    platformOrderId: row.platformOrderId,
-    platformOrderNumber: row.platformOrderNumber,
-    orderDate: row.orderDate.toISOString(),
-    status: row.status,
-    reconciliationStatus: row.reconciliationStatus,
-    // Satış = NET (iade düşülmüş), modal + kâr dökümüyle tutarlı (Berkin kararı
-    // 2026-06-20): ham saleGross − çözümlenmiş REFUND_DEDUCTION. İadesiz siparişte
-    // fee yok → net = ham. Frontend türetmez, hazır net değeri render eder.
-    saleGross:
-      row.saleGross === null
-        ? null
-        : computeNetSaleGross(
-            new Decimal(row.saleGross.toString()),
-            row.fees.map((f) => ({
-              source: f.source,
-              amountGross: new Decimal(f.amountGross.toString()),
-              vatRate: new Decimal(f.vatRate.toString()),
-            })),
-          ).toString(),
-    saleVat: row.saleVat?.toString() ?? null,
-    listGross: row.listGross?.toString() ?? null,
-    estimatedNetProfit: row.estimatedNetProfit?.toString() ?? null,
-    settledNetProfit: row.settledNetProfit?.toString() ?? null,
-    // Consumed marj: hakediş gerçeği varsa onu, yoksa T+0 tahminini servis et.
-    // Frontend SADECE render eder (render-time hesap yok).
-    saleMarginPct: (row.settledSaleMarginPct ?? row.estimatedSaleMarginPct)?.toString() ?? null,
-    // ROI (consumed): settled ?? estimated cost-markup; frontend türetmez, render eder.
-    costMarkupPct: (row.settledCostMarkupPct ?? row.estimatedCostMarkupPct)?.toString() ?? null,
-    // Promosyon adları (spec ekleme #3): detaydakiyle aynı runtime-doğrulamalı
-    // dönüşüm — liste satırı indirimin hangi promosyondan geldiğini gösterir.
-    promotionDisplays: toPromotionDisplays(row.promotionDisplays),
-    fastDelivery: row.fastDelivery,
-    deliveredOnTime: row.deliveredOnTime,
-    micro: row.micro,
-    itemCount: row._count.items,
-    // Kâr-dışı satırında sebep + tarih gösterimi için (liste include'u tüm Order
-    // kolonlarını getirir; ekstra sorgu yok). Hesaplanan siparişlerde her ikisi null.
-    profitExcludedAt: row.profitExcludedAt?.toISOString() ?? null,
-    profitExclusionReason: row.profitExclusionReason,
-  }));
+  const data: OrderListItemResponse[] = rows.map((row) => toOrderListItem(row));
 
   return { data, total, counts: { calculated: calculatedCount, excluded: excludedCount } };
 }
 
+/** The existing AND conditions of a where, normalized to an array to extend. */
+function whereAndConditions(where: Prisma.OrderWhereInput): Prisma.OrderWhereInput[] {
+  if (Array.isArray(where.AND)) return where.AND;
+  if (where.AND === undefined) return [];
+  return [where.AND];
+}
+
 /**
  * Filter-aware KPI aggregation for the orders page header. Honors the same
- * filters as listOrders (no pagination/sort). Revenue + counts use Prisma
- * aggregate; consumed net profit / margin use a column projection reduced with
- * Decimal (Prisma can't COALESCE in aggregate). Bounded by the store + date
- * filter; if a very large unfiltered range becomes a hotspot, move the coalesce
- * sums to a $queryRaw SUM(COALESCE(...)).
+ * filters as listOrders (no pagination/sort). Revenue, net profit and the loss
+ * rate read the best-known statements (decisions 1 + 4); a non-cancelled order
+ * with no best-known statement contributes its own sale_gross as the revenue
+ * fallback. Four aggregates run in parallel.
  */
 export async function getOrdersSummary(
   orgId: string,
@@ -223,77 +425,293 @@ export async function getOrdersSummary(
   await ensureStoreInOrg(orgId, storeId);
   const where = buildOrderListWhere(orgId, storeId, filters);
 
-  const lossCondition: Prisma.OrderWhereInput = {
-    OR: [
-      { settledNetProfit: { lt: 0 } },
-      { settledNetProfit: null, estimatedNetProfit: { lt: 0 } },
-    ],
+  const bestKnownStatementWhere: Prisma.OrderProfitStatementWhereInput = {
+    view: ProfitStatementView.BEST_KNOWN,
+    organizationId: orgId,
+    storeId,
+    order: { is: where },
   };
-  const lossWhere: Prisma.OrderWhereInput = {
+
+  // Revenue fallback: orders in scope that are not cancelled and have no
+  // best-known statement contribute their own sale_gross (decision 4). The
+  // extra conditions go into AND so the status/costStatus filters still apply.
+  // The writer persists an order's ESTIMATE and BEST_KNOWN statements together in
+  // one transaction, so an order with an estimate but no best-known statement can
+  // never exist: "no best-known statement" means "no statement at all", so this
+  // fallback and the best-known aggregate partition the orders exactly once. The
+  // none filter carries storeId too, matching segment 1's aggregate predicate.
+  const fallbackRevenueWhere: Prisma.OrderWhereInput = {
     ...where,
     AND: [
-      ...(Array.isArray(where.AND) ? where.AND : where.AND !== undefined ? [where.AND] : []),
-      lossCondition,
+      ...whereAndConditions(where),
+      { status: { not: OrderStatus.CANCELLED } },
+      {
+        profitStatements: {
+          none: { view: ProfitStatementView.BEST_KNOWN, organizationId: orgId, storeId },
+        },
+      },
     ],
   };
 
-  const [totalCount, lossCount, profitRows] = await Promise.all([
-    prisma.order.count({ where }),
-    prisma.order.count({ where: lossWhere }),
-    prisma.order.findMany({
-      where,
-      select: {
-        saleGross: true,
-        settledNetProfit: true,
-        estimatedNetProfit: true,
-        settledSaleMarginPct: true,
-        estimatedSaleMarginPct: true,
-        // Net satış (iade düşülmüş) için REFUND_DEDUCTION fee'leri.
-        fees: {
-          where: { feeType: 'REFUND_DEDUCTION' },
-          select: { source: true, amountGross: true, vatRate: true },
-        },
+  // Loss-rate denominator: the in-scope orders that have a profit -- a best-known
+  // statement with a net profit that is not cancelled. A cancelled order is not a sale
+  // (rule B5), and an order with no profit (excluded, not computable, or no statement
+  // yet) does not enter the rate. The same best-known where keeps the organizationId +
+  // storeId scope.
+  // Loss-rate numerator: the same filter plus a negative net profit, so the count is a
+  // subset of the denominator. A cancellation is not in the rate (rule B5): a penalized
+  // cancellation shows in the `lossOnly` list but does not enter the loss count.
+  const [totalCount, aggregate, lossCount, fallbackRevenue] = await Promise.all([
+    prisma.orderProfitStatement.count({
+      where: {
+        ...bestKnownStatementWhere,
+        netProfit: { not: null },
+        status: { not: ProfitStatus.CANCELLED },
       },
     }),
+    prisma.orderProfitStatement.aggregate({
+      where: bestKnownStatementWhere,
+      _sum: { saleGross: true, netProfit: true },
+      _avg: { saleMarginPct: true },
+    }),
+    prisma.orderProfitStatement.count({
+      where: {
+        ...bestKnownStatementWhere,
+        netProfit: { lt: 0 },
+        status: { not: ProfitStatus.CANCELLED },
+      },
+    }),
+    prisma.order.aggregate({ where: fallbackRevenueWhere, _sum: { saleGross: true } }),
   ]);
 
-  // Ciro = Σ NET satış (iade düşülmüş), liste + kâr dökümüyle tutarlı (ham Σ saleGross
-  // DEĞİL): her sipariş için ham satış − çözümlenmiş REFUND_DEDUCTION.
-  const totalRevenue = profitRows.reduce((sum, row) => {
-    if (row.saleGross === null) return sum;
-    return sum.add(
-      computeNetSaleGross(
-        new Decimal(row.saleGross.toString()),
-        row.fees.map((f) => ({
-          source: f.source,
-          amountGross: new Decimal(f.amountGross.toString()),
-          vatRate: new Decimal(f.vatRate.toString()),
-        })),
-      ),
-    );
-  }, new Decimal(0));
-
-  const netProfit = profitRows.reduce((sum, row) => {
-    const value = row.settledNetProfit ?? row.estimatedNetProfit;
-    return value === null ? sum : sum.add(new Decimal(value.toString()));
-  }, new Decimal(0));
-
-  const margins = profitRows
-    .map((row) => row.settledSaleMarginPct ?? row.estimatedSaleMarginPct)
-    .filter((margin): margin is NonNullable<typeof margin> => margin !== null)
-    .map((margin) => new Decimal(margin.toString()));
-  const avgMargin =
-    margins.length === 0
-      ? null
-      : margins.reduce((sum, margin) => sum.add(margin), new Decimal(0)).div(margins.length);
+  const bestKnownRevenue = new Decimal(aggregate._sum.saleGross?.toString() ?? '0');
+  const fallback = new Decimal(fallbackRevenue._sum.saleGross?.toString() ?? '0');
+  const netProfit = new Decimal(aggregate._sum.netProfit?.toString() ?? '0');
+  const avgMargin = aggregate._avg.saleMarginPct;
 
   const pct = totalCount === 0 ? new Decimal(0) : new Decimal(lossCount).div(totalCount).mul(100);
 
   return {
-    totalRevenueGross: totalRevenue.toString(),
+    totalRevenueGross: bestKnownRevenue.add(fallback).toString(),
     netProfitGross: netProfit.toString(),
-    avgMarginPct: avgMargin === null ? null : avgMargin.toString(),
+    // Round the averaged margin to the stored column scale (4 decimals, half-up) so
+    // the aggregate reads the same scale as every per-statement margin the list shows.
+    avgMarginPct:
+      avgMargin === null ? null : roundPercent(new Decimal(avgMargin.toString())).toString(),
     lossOrderRate: { lossCount, totalCount, pct: pct.toString() },
+  };
+}
+
+/**
+ * The statement columns the order detail reads: the list projection's fields plus the
+ * breakdown totals and the stored issues. A superset of STATEMENT_LIST_SELECT, so the
+ * same rows feed both toStatementPair (the profit fields) and statementTotalsFromRow
+ * (the breakdown totals). Store-scoped reads filter these by organizationId + storeId.
+ */
+const DETAIL_STATEMENT_SELECT = {
+  view: true,
+  status: true,
+  reconciliationStatus: true,
+  issues: true,
+  ...STORED_STATEMENT_TOTALS_SELECT,
+} as const satisfies Prisma.OrderProfitStatementSelect;
+
+type DetailStatementRow = Prisma.OrderProfitStatementGetPayload<{
+  select: typeof DETAIL_STATEMENT_SELECT;
+}>;
+
+/** The two view selections and the best-known issues an order's item values read. */
+interface OrderProfitLineContext {
+  readonly bestKnownLines: readonly ProfitLine[];
+  readonly estimateLines: readonly ProfitLine[];
+  readonly issues: readonly ProfitIssue[];
+}
+
+/**
+ * Everything the order detail needs from the profit layer: the profit fields
+ * (reconciliation status, estimated / settled net profit), the best-known breakdown,
+ * and the per-item line context. lineContext is null when the profit part is empty: a
+ * platform the engine cannot compute, a corrupt stored line (or statement) that the
+ * stored path cannot rebuild, or a failed in-request computation. Every item then takes
+ * the all-null EMPTY_ITEM_PROFIT_VALUES, commission amounts included.
+ */
+interface OrderProfitDetail {
+  readonly fields: OrderProfitFields;
+  readonly profitBreakdown: StatementBreakdown | null;
+  readonly lineContext: OrderProfitLineContext | null;
+}
+
+/** The all-null item values for an order whose profit part is empty (no line context). */
+const EMPTY_ITEM_PROFIT_VALUES: ItemProfitValues = {
+  unitCostGross: null,
+  unitCostVatRate: null,
+  commissionGross: null,
+  commissionRate: null,
+  commissionVatRate: null,
+  estimatedCommissionGross: null,
+  settledCommissionGross: null,
+  refundedCommissionGross: null,
+};
+
+/**
+ * Projects an in-request computed statement into the list-row shape orderProfitFields
+ * reads, rounding the two margins to the stored column scale exactly as the writer
+ * would, so the computed path reports the same fields a stored row would.
+ */
+function statementListRowFromStatement(statement: ProfitStatement): StatementListRow {
+  return {
+    view: statement.view,
+    status: statement.status,
+    saleGross: statement.saleGross,
+    vatOutput: statement.vat.output,
+    netProfit: statement.netProfit,
+    saleMarginPct: statement.saleMarginPct === null ? null : roundPercent(statement.saleMarginPct),
+    costMarkupPct: statement.costMarkupPct === null ? null : roundPercent(statement.costMarkupPct),
+    reconciliationStatus: statement.reconciliationStatus,
+  };
+}
+
+/** The empty-profit detail: fields with no statement, a null breakdown and no line
+ *  context. The shared result both the unsupported-platform path and the corrupt-stored
+ *  fallback return, so the page opens with an empty profit section. */
+function emptyOrderProfitDetail(order: {
+  readonly status: OrderStatus;
+  readonly saleGross: Prisma.Decimal | null;
+  readonly saleVat: Prisma.Decimal | null;
+}): OrderProfitDetail {
+  return {
+    fields: orderProfitFields({
+      pair: { estimate: null, bestKnown: null },
+      orderStatus: order.status,
+      orderSaleGross: order.saleGross,
+      orderSaleVat: order.saleVat,
+    }),
+    profitBreakdown: null,
+    lineContext: null,
+  };
+}
+
+/**
+ * Loads the order's profit detail from its two stored statements and lines, or computes
+ * it in the request when no best-known statement is stored yet (decision 8). The writer
+ * persists the estimate and best-known views together, so a missing best-known row means
+ * no statement at all; computeParcelProfit then produces both views read-only. Only an
+ * UnsupportedPlatformError is expected from it (a platform the engine cannot compute):
+ * the detail then keeps its profit fields empty and its breakdown null.
+ *
+ * The stored path rebuilds engine values from the persisted rows, which throws on a
+ * corrupt row (a malformed line `inputs`/`issues`, a half-set external record, a level
+ * conflict). One such row must not 500 the page: on any stored-derivation failure this
+ * logs at error level and returns the same empty-profit result, so the order, its items
+ * and claims still open (owner decision 2026-11-04). Every query filters organizationId
+ * + storeId (tenant defense).
+ */
+async function loadOrderProfitDetail(
+  orgId: string,
+  storeId: string,
+  order: {
+    readonly id: string;
+    readonly status: OrderStatus;
+    readonly saleGross: Prisma.Decimal | null;
+    readonly saleVat: Prisma.Decimal | null;
+  },
+): Promise<OrderProfitDetail> {
+  const statements = await prisma.orderProfitStatement.findMany({
+    where: { organizationId: orgId, storeId, orderId: order.id },
+    select: DETAIL_STATEMENT_SELECT,
+  });
+
+  let bestKnownRow: DetailStatementRow | null = null;
+  for (const statement of statements) {
+    if (statement.view === ProfitStatementView.BEST_KNOWN) {
+      bestKnownRow = statement;
+    }
+  }
+
+  if (bestKnownRow !== null) {
+    // Stored path: rebuild the detail from the persisted statements and lines. A single
+    // corrupt stored row throws here; log it and open with an empty profit section
+    // rather than 500 the whole response (owner decision 2026-11-04).
+    try {
+      const linesByOrder = await loadOrderProfitLines(prisma, {
+        organizationId: orgId,
+        storeId,
+        orderIds: [order.id],
+      });
+      const lines = linesByOrder.get(order.id) ?? [];
+      const fields = orderProfitFields({
+        pair: toStatementPair(statements),
+        orderStatus: order.status,
+        orderSaleGross: order.saleGross,
+        orderSaleVat: order.saleVat,
+      });
+      const lineContext: OrderProfitLineContext = {
+        bestKnownLines: selectLines(lines, 'BEST_KNOWN'),
+        estimateLines: selectLines(lines, 'ESTIMATE'),
+        issues: parseStoredIssues(bestKnownRow.issues),
+      };
+      const profitBreakdown = buildStatementBreakdown({
+        totals: statementTotalsFromRow(bestKnownRow),
+        selectedLines: lineContext.bestKnownLines,
+      });
+      return { fields, profitBreakdown, lineContext };
+    } catch (err) {
+      logProfitReadFailure({
+        surface: 'order-detail',
+        organizationId: orgId,
+        orderId: order.id,
+        err,
+      });
+      return emptyOrderProfitDetail(order);
+    }
+  }
+
+  // No best-known statement stored yet: compute read-only in the request (owner decision
+  // 2026-11-04 / decision 8). computeParcelProfitForRead returns null -- no profit at all
+  // -- for a platform the engine cannot compute and for any computation failure (the
+  // latter is logged), so the detail still opens with an empty profit section.
+  const computed = await computeParcelProfitForRead({
+    organizationId: orgId,
+    orderId: order.id,
+    surface: 'order-detail',
+  });
+  if (computed === null) {
+    return emptyOrderProfitDetail(order);
+  }
+
+  const computedFields = orderProfitFields({
+    pair: {
+      estimate: statementListRowFromStatement(computed.estimate),
+      bestKnown: statementListRowFromStatement(computed.bestKnown),
+    },
+    orderStatus: order.status,
+    orderSaleGross: order.saleGross,
+    orderSaleVat: order.saleVat,
+  });
+  // Sale parity: the top-level sale and its VAT must read the same values the orders
+  // list row does. The list has no stored best-known statement for this order yet, so it
+  // shows the order's own sale and VAT (0 for a cancelled order) -- never the in-request
+  // computed statement's, which can differ (e.g. after an accepted return) and belong
+  // only to the breakdown below. Derive them exactly as the list does: orderProfitFields
+  // over an empty statement pair.
+  const listFields = orderProfitFields({
+    pair: { estimate: null, bestKnown: null },
+    orderStatus: order.status,
+    orderSaleGross: order.saleGross,
+    orderSaleVat: order.saleVat,
+  });
+  const profitBreakdown = buildStatementBreakdown({
+    totals: statementTotalsFromStatement(computed.bestKnown),
+    selectedLines: computed.bestKnown.selectedLines,
+  });
+  return {
+    fields: { ...computedFields, saleGross: listFields.saleGross, saleVat: listFields.saleVat },
+    profitBreakdown,
+    lineContext: {
+      bestKnownLines: computed.bestKnown.selectedLines,
+      estimateLines: computed.estimate.selectedLines,
+      issues: computed.bestKnown.issues,
+    },
   };
 }
 
@@ -326,9 +744,6 @@ export async function getOrderById(
           },
         },
       },
-      fees: {
-        orderBy: [{ capturedAt: 'asc' }, { id: 'asc' }],
-      },
       claims: {
         orderBy: { claimDate: 'asc' },
         include: {
@@ -355,84 +770,11 @@ export async function getOrderById(
     ),
   );
 
-  // Kâr dökümü (tahmini basis) — backend-hesaplı, frontend türetmez. GROSS
-  // konvansiyon: computeProfit'in persist ettiği netProfit/netVat + kalıcı gross
-  // marjlar + ESTIMATE fee'lerden brüt toplamlar. Estimate hesaplanmadıysa
-  // (profit-excluded / maliyet eksik) null. buildProfitBreakdown marjı '—'
-  // (em-dash) sentinel olarak döndürür; wire kontratı gerçek null taşır.
-  const profitBreakdown =
-    row.estimatedNetProfit !== null &&
-    row.estimatedNetVat !== null &&
-    row.saleGross !== null &&
-    row.saleVat !== null
-      ? buildProfitBreakdown({
-          saleGross: new Decimal(row.saleGross.toString()),
-          saleVat: new Decimal(row.saleVat.toString()),
-          listGross: new Decimal(row.listGross?.toString() ?? '0'),
-          sellerDiscountGross: new Decimal(row.sellerDiscountGross?.toString() ?? '0'),
-          items: row.items.map((item) => ({
-            quantity: item.quantity,
-            lineListGross: new Decimal(item.lineListGross.toString()),
-            lineSaleGross: new Decimal(item.lineSaleGross.toString()),
-            lineSellerDiscountGross: new Decimal(item.lineSellerDiscountGross.toString()),
-            saleVatRate: Number(item.saleVatRate),
-            commissionGross: new Decimal(item.commissionGross.toString()),
-            refundedCommissionGross: new Decimal(item.refundedCommissionGross.toString()),
-            commissionVatRate: Number(item.commissionVatRate),
-            unitCostSnapshotGross:
-              item.unitCostSnapshotGross === null
-                ? null
-                : new Decimal(item.unitCostSnapshotGross.toString()),
-            unitCostSnapshotVatRate: Number(item.unitCostSnapshotVatRate ?? 0),
-          })),
-          // Breakdown estimated kârla eşleşir (netProfit: estimatedNetProfit aşağıda).
-          // Forward fee'ler (SHIPPING/PSF/STOPPAGE) YALNIZ ESTIMATE kaynağından alınır —
-          // estimate motorunun (applyEstimateOnOrderCreate) kullandığıyla birebir; aksi
-          // halde feeAgg, cargo-invoice geldikten sonra gerçek+tahmin forward'ı ÇİFT sayar.
-          // İade bacakları (4 tip) TÜM kaynaklardan geçer; resolveReturnLegs (breakdown
-          // içinde) per-leg gerçek-varsa-gerçek seçer (estimate motoruyla aynı).
-          fees: row.fees
-            .filter(
-              (fee) =>
-                fee.source === 'ESTIMATE' ||
-                fee.feeType === 'REFUND_DEDUCTION' ||
-                fee.feeType === 'COMMISSION_REFUND' ||
-                fee.feeType === 'COST_RETURN' ||
-                fee.feeType === 'RETURN_SHIPPING' ||
-                fee.feeType === 'STOPPAGE_REFUND',
-            )
-            .map((fee) => ({
-              feeType: fee.feeType,
-              direction: fee.direction,
-              amountGross: new Decimal(fee.amountGross.toString()),
-              vatRate: Number(fee.vatRate),
-              source: fee.source,
-            })),
-          netProfit: new Decimal(row.estimatedNetProfit.toString()),
-          netVat: new Decimal(row.estimatedNetVat.toString()),
-          saleMarginPct:
-            row.estimatedSaleMarginPct === null
-              ? null
-              : new Decimal(row.estimatedSaleMarginPct.toString()),
-          costMarkupPct:
-            row.estimatedCostMarkupPct === null
-              ? null
-              : new Decimal(row.estimatedCostMarkupPct.toString()),
-        })
-      : null;
-
-  // buildProfitBreakdown marjı '—' sentinel'i ile döndürür; wire kontratı gerçek
-  // null taşır (frontend `=== null ? '—'` ile render eder, türetmez).
-  const profitBreakdownWire =
-    profitBreakdown === null
-      ? null
-      : {
-          ...profitBreakdown,
-          saleMarginPct:
-            profitBreakdown.saleMarginPct === '—' ? null : profitBreakdown.saleMarginPct,
-          costMarkupPct:
-            profitBreakdown.costMarkupPct === '—' ? null : profitBreakdown.costMarkupPct,
-        };
+  // The profit fields, the breakdown and the per-item cost/commission values all read
+  // the order's profit statements and lines (decisions 1, 6-8). When no best-known
+  // statement is stored yet, loadOrderProfitDetail computes them read-only in the
+  // request.
+  const profit = await loadOrderProfitDetail(orgId, storeId, row);
 
   return {
     id: row.id,
@@ -454,77 +796,92 @@ export async function getOrderById(
     actualDeliveryDate: row.actualDeliveryDate?.toISOString() ?? null,
     deliveredOnTime: row.deliveredOnTime,
     fastDelivery: row.fastDelivery,
-    micro: row.micro,
+    isExportSale: row.isExportSale,
 
-    saleGross: row.saleGross?.toString() ?? null,
-    saleVat: row.saleVat?.toString() ?? null,
+    // Sale parity: the detail's top-level sale reads the same profit field the list row
+    // does (best-known sale, else the order's sale, '0' for a cancelled order with no
+    // statement), so an order with a return never shows two different sale figures.
+    saleGross: profit.fields.saleGross,
+    saleVat: profit.fields.saleVat,
     listGross: row.listGross?.toString() ?? null,
-    estimatedNetProfit: row.estimatedNetProfit?.toString() ?? null,
-    settledNetProfit: row.settledNetProfit?.toString() ?? null,
-    profitBreakdown: profitBreakdownWire,
+    estimatedNetProfit: profit.fields.estimatedNetProfit,
+    settledNetProfit: profit.fields.settledNetProfit,
+    profitBreakdown: profit.profitBreakdown,
+    // The best-known statement's issues that still apply to its selected lines (a
+    // warning an actual made moot is dropped, and the carrier notice gives way to the
+    // seller-cargo notice; see visibleProfitIssues); none without a line context.
+    profitIssues:
+      profit.lineContext === null
+        ? []
+        : visibleProfitIssues(profit.lineContext.issues, profit.lineContext.bestKnownLines).map(
+            ({ code, orderItemId, detail }) => ({ code, orderItemId, detail }),
+          ),
     promotionDisplays: toPromotionDisplays(row.promotionDisplays),
 
     profitExcludedAt: row.profitExcludedAt?.toISOString() ?? null,
     profitExclusionReason: row.profitExclusionReason,
 
-    reconciliationStatus: row.reconciliationStatus,
-    paymentOrderId: row.paymentOrderId?.toString() ?? null,
-    paymentDate: row.paymentDate?.toISOString() ?? null,
+    reconciliationStatus: profit.fields.reconciliationStatus,
 
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
 
-    items: row.items.map((item) => ({
-      id: item.id,
-      quantity: item.quantity,
-      lineSaleGross: item.lineSaleGross.toString(),
-      saleVatRate: item.saleVatRate.toString(),
-      lineSellerDiscountGross: item.lineSellerDiscountGross.toString(),
-      commissionGross: item.commissionGross.toString(),
-      commissionRate: item.commissionRate.toString(),
-      commissionVatRate: item.commissionVatRate.toString(),
-      refundedCommissionGross: item.refundedCommissionGross.toString(),
-      estimatedCommissionGross: item.estimatedCommissionGross?.toString() ?? null,
-      settledCommissionGross: item.settledCommissionGross?.toString() ?? null,
-      unitCostSnapshotGross: item.unitCostSnapshotGross?.toString() ?? null,
-      unitCostSnapshotVatRate: item.unitCostSnapshotVatRate?.toString() ?? null,
-      commissionInvoiceSerialNumber: item.commissionInvoiceSerialNumber,
-      barcode: item.barcode,
-      // Only an unmatched line (no variant) with a confirmed catalog gap is true;
-      // matched lines are always false.
-      vendorMissing:
-        item.productVariant === null &&
-        item.barcode !== null &&
-        vendorMissingBarcodes.has(item.barcode),
-      variant:
-        item.productVariant === null
-          ? null
-          : {
-              id: item.productVariant.id,
-              barcode: item.productVariant.barcode,
-              productName: item.productVariant.product.title,
-              productImageUrl: item.productVariant.product.imageUrls[0] ?? null,
-              marketplaceProductCode: item.productVariant.stockCode,
-            },
-    })),
-
-    fees: row.fees.map((fee) => ({
-      id: fee.id,
-      feeType: fee.feeType,
-      source: fee.source,
-      direction: fee.direction,
-      amountGross: fee.amountGross.toString(),
-      vatRate: fee.vatRate.toString(),
-      // Tahmin/gerçek-fatura ayrımı: ESTIMATE = henüz vendor-onaylı değil.
-      isEstimate: fee.source === 'ESTIMATE',
-      displayName: fee.displayName,
-      capturedAt: fee.capturedAt.toISOString(),
-      confirmedAt: fee.confirmedAt?.toISOString() ?? null,
-    })),
+    items: row.items.map((item) => {
+      // Cost and commission figures come from the profit lines alone (decision 7). An
+      // empty profit part (no line context) leaves every figure null.
+      const lineContext = profit.lineContext;
+      const values =
+        lineContext === null
+          ? EMPTY_ITEM_PROFIT_VALUES
+          : itemProfitValues({
+              orderItemId: item.id,
+              quantity: item.quantity,
+              bestKnownLines: lineContext.bestKnownLines,
+              estimateLines: lineContext.estimateLines,
+              issues: lineContext.issues,
+            });
+      return {
+        id: item.id,
+        quantity: item.quantity,
+        lineSaleGross: item.lineSaleGross.toString(),
+        saleVatRate: item.saleVatRate.toString(),
+        lineSellerDiscountGross: item.lineSellerDiscountGross.toString(),
+        // itemProfitValues decides the two amounts: null while a MISSING_COMMISSION_RATE
+        // issue leaves the item's commission unknown, '0.00' when the lines carry none (a
+        // cancelled order, an item that was not returned). Without a line context the
+        // profit part is empty and every figure is null. The two rates are informational
+        // and stay null when no line supplies them.
+        commissionGross: values.commissionGross,
+        commissionRate: values.commissionRate,
+        commissionVatRate: values.commissionVatRate,
+        refundedCommissionGross: values.refundedCommissionGross,
+        estimatedCommissionGross: values.estimatedCommissionGross,
+        settledCommissionGross: values.settledCommissionGross,
+        unitCostSnapshotGross: values.unitCostGross,
+        unitCostSnapshotVatRate: values.unitCostVatRate,
+        barcode: item.barcode,
+        // Only an unmatched line (no variant) with a confirmed catalog gap is true;
+        // matched lines are always false.
+        vendorMissing:
+          item.productVariant === null &&
+          item.barcode !== null &&
+          vendorMissingBarcodes.has(item.barcode),
+        variant:
+          item.productVariant === null
+            ? null
+            : {
+                id: item.productVariant.id,
+                barcode: item.productVariant.barcode,
+                productName: item.productVariant.product.title,
+                productImageUrl: item.productVariant.product.imageUrls[0] ?? null,
+                marketplaceProductCode: item.productVariant.stockCode,
+              },
+      };
+    }),
 
     claims: row.claims.map((claim) => ({
       id: claim.id,
-      trendyolClaimId: claim.trendyolClaimId,
+      marketplaceClaimId: claim.marketplaceClaimId,
       claimDate: claim.claimDate.toISOString(),
       cargoProviderName: claim.cargoProviderName,
       cargoTrackingNumber: claim.cargoTrackingNumber?.toString() ?? null,

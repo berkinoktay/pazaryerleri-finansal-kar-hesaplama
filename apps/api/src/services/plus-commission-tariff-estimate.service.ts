@@ -1,32 +1,28 @@
 // On-demand profit estimate for a single Plus Commission Tariff item.
 //
 // Backs two frontend surfaces without bloating the detail payload: the custom-price
-// what-if and the current-scenario breakdown. It resolves the SAME inputs the detail
-// view resolves (cost, shipping, fee definitions) but for ONE item, then runs the
-// profit engine via `computePlusEstimate`. No financial math lives here — the engine
-// is reused, so an estimate at the Plus ceiling matches the detail's `plus.netProfit`
-// and the current-scenario breakdown matches the row's `currentNetProfit`.
+// what-if and the current-scenario breakdown. It loads the SAME scenario base the detail
+// view uses (cost, shipping, fee + commission reference) but for ONE variant, then runs
+// the profit engine via `computePlusEstimate`. No financial math lives here -- the engine
+// is reused, so an estimate at the Plus ceiling matches the detail's `plus.netProfit` and
+// the current-scenario breakdown matches the row's `currentNetProfit`.
 //
-// Scoped by organizationId + storeId + tariff (via the item's period). A cross
-// -tenant or foreign item id is indistinguishable from a missing one (404).
+// Scoped by organizationId + storeId + tariff (via the item's period). A cross-tenant or
+// foreign item id is indistinguishable from a missing one (404). A pathological engine
+// input degrades to a logged not-calculable result rather than a 500 (decision 9).
 
 import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
-import type { Store as PrismaStore } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
-import type { EstimateOutcome } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
-import { fetchCostAggregates } from './products-list.service';
-import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
-import { computePlusEstimate } from './plus-commission-tariff-compute.service';
 import {
-  NO_SHIPPING,
-  type TariffAssemblyContext,
-  type TariffVariant,
-} from './tariff-compute-commons';
-import type { VariantCostAggregate } from '../validators/product.validator';
+  computePlusEstimate,
+  type ComputedPlusEstimate,
+} from './plus-commission-tariff-compute.service';
+import { logProfitReadFailure } from './profit-compute-fallback.service';
+import { loadScreenScenarioBases, screenScenarioBaseFor } from './scenario-screen-commons';
 import type { EstimatePlusPriceResult } from '../validators/plus-commission-tariff.validator';
 
 /**
@@ -48,7 +44,6 @@ export type EstimatePlusPriceInput =
 export async function estimatePlusItemPrice(
   orgId: string,
   storeId: string,
-  store: PrismaStore,
   tariffId: string,
   itemId: string,
   input: EstimatePlusPriceInput,
@@ -85,43 +80,29 @@ export async function estimatePlusItemPrice(
       ? new Decimal(item.currentCommissionPct.toString())
       : new Decimal(item.plusCommissionPct.toString());
 
-  // Resolve the matched variant + cost + shipping once (only when matched).
-  let variant: TariffVariant | null = null;
-  let cost: VariantCostAggregate | undefined;
-  let shipping: EstimateOutcome = NO_SHIPPING;
+  // Load the scenario base for the matched variant only (scenario date = now). An
+  // unmatched item passes no ids -> no-product; a store-wide load failure -> degraded.
+  const bases = await loadScreenScenarioBases({
+    organizationId: orgId,
+    storeId,
+    scenarioDate: new Date(),
+    variantIds: item.productVariantId !== null ? [item.productVariantId] : [],
+    surface: 'plus-commission-tariff',
+  });
+  const base = screenScenarioBaseFor(bases, item.productVariantId);
 
-  if (item.productVariantId !== null) {
-    let variantRow;
-    try {
-      variantRow = await prisma.productVariant.findFirst({
-        where: { id: item.productVariantId, organizationId: orgId, storeId },
-        select: {
-          id: true,
-          stockCode: true,
-          barcode: true,
-          salePrice: true,
-          vatRate: true,
-          isDigital: true,
-          product: { select: { title: true, categoryId: true, brandId: true } },
-        },
-      });
-    } catch (err) {
-      mapPrismaError(err);
-    }
-    variant = variantRow;
-
-    const [costMap, shippingMap] = await Promise.all([
-      fetchCostAggregates(orgId, [item.productVariantId]),
-      batchResolveShipping(orgId, storeId, [item.productVariantId]),
-    ]);
-    cost = costMap.get(item.productVariantId);
-    shipping = shippingMap.get(item.productVariantId) ?? NO_SHIPPING;
+  let computed: ComputedPlusEstimate;
+  try {
+    computed = computePlusEstimate({ applyCommissionPct, base, price });
+  } catch (err) {
+    logProfitReadFailure({
+      surface: 'plus-commission-tariff',
+      organizationId: orgId,
+      orderId: null,
+      err,
+    });
+    computed = computePlusEstimate({ applyCommissionPct, base: { kind: 'degraded' }, price });
   }
-
-  const feeDefs = await prisma.$transaction((tx) => resolveFeeDefs(tx, store.platform));
-  const ctx: TariffAssemblyContext = { platform: store.platform, feeDefs };
-
-  const computed = computePlusEstimate(ctx, applyCommissionPct, variant, cost, shipping, price);
 
   return {
     itemId: item.id,

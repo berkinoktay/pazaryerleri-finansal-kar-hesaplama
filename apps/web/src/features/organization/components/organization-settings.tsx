@@ -27,18 +27,15 @@ import { useCurrentOrg } from '@/providers/current-scope';
 interface OrgInfoFormValues {
   name: string;
   timezone: string;
-  currency: string;
 }
 
 const TIMEZONE_OPTIONS = [{ value: 'Europe/Istanbul', label: 'İstanbul (GMT+3)' }] as const;
-
-const CURRENCY_OPTIONS = [{ value: 'TRY', label: 'Türk Lirası (TRY)' }] as const;
 
 /**
  * Main column of the Genel (organization) settings page.
  *
  * Two cards, both `draft` (no PATCH /v1/organizations/:id endpoint yet):
- *   1. Organizasyon bilgileri — logo, name, slug, timezone, currency.
+ *   1. Organizasyon bilgileri — logo, name, slug, timezone.
  *   2. Muhasebe ayarları — two boolean preferences (negative VAT, stopaj).
  *
  * All save actions produce a "coming soon" toast until the backend lands.
@@ -52,12 +49,10 @@ export function OrganizationSettings(): React.ReactElement {
     defaultValues: {
       name: org.name,
       timezone: TIMEZONE_OPTIONS[0].value,
-      currency: CURRENCY_OPTIONS[0].value,
     },
   });
 
   const [tz, setTz] = useState<string>(TIMEZONE_OPTIONS[0].value);
-  const [currency, setCurrency] = useState<string>(CURRENCY_OPTIONS[0].value);
   const [negativeVat, setNegativeVat] = useState(false);
   const [stopaj, setStopaj] = useState(false);
 
@@ -135,25 +130,6 @@ export function OrganizationSettings(): React.ReactElement {
                     </SelectTrigger>
                     <SelectContent>
                       {TIMEZONE_OPTIONS.map((o) => (
-                        <SelectItem key={o.value} value={o.value}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Para birimi */}
-                <div className="gap-3xs flex flex-col">
-                  <label htmlFor="org-currency" className="text-foreground text-sm font-medium">
-                    {t('fields.currency')}
-                  </label>
-                  <Select value={currency} onValueChange={setCurrency}>
-                    <SelectTrigger id="org-currency" aria-label={t('fields.currency')}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {CURRENCY_OPTIONS.map((o) => (
                         <SelectItem key={o.value} value={o.value}>
                           {o.label}
                         </SelectItem>

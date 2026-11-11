@@ -14,7 +14,7 @@
 // (each Supabase auth user costs ~800 ms). SENDEOMP is ensured by globalSetup.
 
 import { Decimal } from 'decimal.js';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 
@@ -22,7 +22,7 @@ import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization } from '../../helpers/factories';
+import { createMembership, createOrganization, createStore } from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
@@ -151,9 +151,23 @@ async function setupTariffFixture(): Promise<TariffFixture> {
       name: 'COGS Test',
       type: 'COGS',
       amountGross: new Decimal('200.00'),
-      currency: 'TRY',
       vatRate: 20,
-      fxRateMode: 'MANUAL',
+    },
+  });
+  // The scenario engine costs from the profile's VERSIONS (effective-dated), exactly as
+  // the real cost-profile service writes a version 1 on create. Without it the variant
+  // would read MISSING_COST.
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId: org.id,
+      version: 1,
+      name: 'COGS Test',
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      vatRate: 20,
+      changedFields: [],
+      effectiveFrom: new Date('2024-01-01T00:00:00Z'),
     },
   });
   await prisma.productVariantCostProfile.create({
@@ -441,9 +455,20 @@ describe('Plus Commission Tariffs - list / detail / delete', () => {
         name: 'COGS Base',
         type: 'COGS',
         amountGross: new Decimal('200.00'),
-        currency: 'TRY',
         vatRate: 20,
-        fxRateMode: 'MANUAL',
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Base',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
       },
     });
     await prisma.productVariantCostProfile.create({
@@ -577,9 +602,20 @@ describe('Plus Commission Tariffs - list / detail / delete', () => {
         name: 'COGS Ceiling',
         type: 'COGS',
         amountGross: new Decimal('200.00'),
-        currency: 'TRY',
         vatRate: 20,
-        fxRateMode: 'MANUAL',
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Ceiling',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
       },
     });
     await prisma.productVariantCostProfile.create({
@@ -663,5 +699,292 @@ describe('Plus Commission Tariffs - list / detail / delete', () => {
     );
     expect(res.status).toBe(200);
     expect(((await res.json()) as ListWire).data).toHaveLength(0);
+  });
+});
+
+describe('Plus Commission Tariffs - validity reflects the real Istanbul instant', () => {
+  // Period bounds are stored as Istanbul wall-clock saved verbatim as UTC, while the
+  // request's `now` is a true instant. Istanbul runs UTC+3, so the real instant a bound
+  // denotes is ~3h BEFORE the stored value. Each stored bound below sits only 1h ahead of
+  // `now` (less than the 3h offset), so the OLD raw comparison (stored-vs-now) misreads it
+  // and only the converted comparison classifies it correctly:
+  //   - active: stored start now+1h reads 'upcoming' raw, but its real start (now-2h) is
+  //     already past -> active.
+  //   - past:   stored end now+1h reads 'active' raw, but its real end (now-2h) is already
+  //     past -> ended.
+  // Dates are relative to Date.now() so the test never drifts.
+  const HOUR_MS = 60 * 60 * 1000;
+  let accessToken: string;
+  let orgId: string;
+  let storeId: string;
+  let tariffId: string;
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    // The detail route resolves fee definitions unconditionally; a prior describe's
+    // truncate may have cleared them, so re-seed before building the fixture.
+    await ensureFeeDefinitions();
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id, { name: 'Plus Validity Store' });
+    const tariff = await prisma.plusCommissionTariff.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Gecerlilik Tarifesi' },
+    });
+    const now = Date.now();
+    await prisma.plusCommissionTariffPeriod.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: tariff.id,
+        dateRangeLabel: 'Aktif Donem',
+        sortOrder: 0,
+        startsAt: new Date(now + 1 * HOUR_MS), // real now-2h
+        endsAt: new Date(now + 10 * HOUR_MS), // real now+7h
+      },
+    });
+    await prisma.plusCommissionTariffPeriod.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: tariff.id,
+        dateRangeLabel: 'Biten Donem',
+        sortOrder: 1,
+        startsAt: new Date(now - 20 * HOUR_MS), // real now-23h
+        endsAt: new Date(now + 1 * HOUR_MS), // real now-2h
+      },
+    });
+    accessToken = user.accessToken;
+    orgId = org.id;
+    storeId = store.id;
+    tariffId = tariff.id;
+  });
+
+  it('marks a tariff period active from the real Istanbul start', async () => {
+    const res = await app.request(
+      `/v1/organizations/${orgId}/stores/${storeId}/plus-commission-tariffs/${tariffId}`,
+      { headers: { Authorization: bearer(accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DetailWire;
+    const active = body.periods.find((p) => p.dateRangeLabel === 'Aktif Donem');
+    // Raw stored start (now+1h) would read 'upcoming'; the converted real start (now-2h)
+    // is already past, so the period is active.
+    expect(active?.validity).toBe('active');
+  });
+
+  it('marks it ended at the real Istanbul end', async () => {
+    const res = await app.request(
+      `/v1/organizations/${orgId}/stores/${storeId}/plus-commission-tariffs/${tariffId}`,
+      { headers: { Authorization: bearer(accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DetailWire;
+    const ended = body.periods.find((p) => p.dateRangeLabel === 'Biten Donem');
+    // Raw stored end (now+1h) would read 'active'; the converted real end (now-2h) is
+    // already past, so the period is ended.
+    expect(ended?.validity).toBe('past');
+
+    // The list's overall validity spans both periods' real instants [now-23h, now+7h),
+    // which contains now -> active (exercises the list call site's conversion too).
+    const listRes = await app.request(
+      `/v1/organizations/${orgId}/stores/${storeId}/plus-commission-tariffs`,
+      { headers: { Authorization: bearer(accessToken) } },
+    );
+    const list = (await listRes.json()) as ListWire;
+    expect(list.data.find((r) => r.id === tariffId)?.validity).toBe('active');
+  });
+});
+
+describe('Plus Commission Tariffs - per-item degrade (decision 9)', () => {
+  // Two items' scenarios are forced to throw (a negative commission-base price, which the
+  // engine's unit-price validator rejects): the detail must still return 200 with those
+  // items' profit empty (reason null) while a third item computes fine, and the failures
+  // must be logged exactly once per request with the right surface + failedCount 2 (the
+  // per-request collect-then-log-once path, NOT one line per failing row).
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  it('keeps the Plus detail up when items fail to compute and logs once', async () => {
+    await truncateAll();
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing - globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Plus Degrade Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'plus-degrade-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 8801n,
+        productMainId: 'pm-8801',
+        title: 'Bozulma Urunu',
+        categoryId: 597n,
+        categoryName: 'Gomlek',
+        brandId: 2032n,
+        brandName: 'Modline',
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: 88010n,
+        barcode: 'BC-PDEG',
+        stockCode: 'STK-PDEG',
+        salePrice: new Decimal('500.00'),
+        listPrice: new Decimal('500.00'),
+        vatRate: 20,
+        dimensionalWeightOverride: new Decimal('3.0'),
+      },
+    });
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'COGS Plus Degrade',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Plus Degrade',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+    });
+    await ensureFeeDefinitions();
+
+    const tariff = await prisma.plusCommissionTariff.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Bozulma Tarifesi' },
+    });
+    const period = await prisma.plusCommissionTariffPeriod.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: tariff.id,
+        dateRangeLabel: '1 - 7 Temmuz',
+        sortOrder: 0,
+      },
+    });
+    // Healthy item: a positive commission-base price -> computes.
+    await prisma.plusCommissionTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        periodId: period.id,
+        productVariantId: variant.id,
+        barcode: 'BC-OK',
+        productTitle: 'Saglam',
+        currentPrice: '500.00',
+        commissionBasePrice: '400.00',
+        currentCommissionPct: '19.0000',
+        plusPriceUpperLimit: '450.00',
+        plusCommissionPct: '15.4',
+        plusCommissionBasePrice: '450.00',
+        sortOrder: 0,
+      },
+    });
+    // Two failing items: same calculable variant, but a NEGATIVE commission-base price
+    // makes the engine reject the baseline unit price -> each item's compute throws. Two
+    // of them prove the collect-then-log-once path reports failedCount 2 from a single line.
+    const failing = await prisma.plusCommissionTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        periodId: period.id,
+        productVariantId: variant.id,
+        barcode: 'BC-FAIL',
+        productTitle: 'Bozuk',
+        currentPrice: '500.00',
+        commissionBasePrice: '-5.00',
+        currentCommissionPct: '19.0000',
+        plusPriceUpperLimit: '450.00',
+        plusCommissionPct: '15.4',
+        plusCommissionBasePrice: '450.00',
+        sortOrder: 1,
+      },
+    });
+    const failingTwo = await prisma.plusCommissionTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        periodId: period.id,
+        productVariantId: variant.id,
+        barcode: 'BC-FAIL-2',
+        productTitle: 'Bozuk 2',
+        currentPrice: '500.00',
+        commissionBasePrice: '-7.00',
+        currentCommissionPct: '19.0000',
+        plusPriceUpperLimit: '450.00',
+        plusCommissionPct: '15.4',
+        plusCommissionBasePrice: '450.00',
+        sortOrder: 2,
+      },
+    });
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/plus-commission-tariffs/${tariff.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const items = ((await res.json()) as DetailWire).periods[0]?.items ?? [];
+
+      const ok = items.find((i) => i.barcode === 'BC-OK');
+      expect(ok?.calculable).toBe(true);
+      expect(ok?.currentNetProfit).not.toBeNull();
+
+      // Both failing items degrade: not calculable, no reason (NOT NO_PRODUCT -- the
+      // variant is matched), empty current + Plus profits.
+      for (const failingId of [failing.id, failingTwo.id]) {
+        const bad = items.find((i) => i.id === failingId);
+        expect(bad?.calculable).toBe(false);
+        expect(bad?.reason).toBeNull();
+        expect(bad?.currentNetProfit).toBeNull();
+        expect(bad?.plus.netProfit).toBeNull();
+      }
+
+      // Two failing items -> still exactly one [profit-read] line for this surface, with
+      // failedCount 2 (collected then logged once, not one line per row).
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[profit-read] in-request profit computation failed',
+        expect.objectContaining({
+          surface: 'plus-commission-tariff',
+          orderId: null,
+          failedCount: 2,
+        }),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

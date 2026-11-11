@@ -20,7 +20,8 @@
  *   6xl  60/64  — oversized display
  *
  * Font stack:
- * - Host Grotesk: body + display. Loaded via next/font in app/layout.tsx.
+ * - Host Grotesk: body + display. Self-hosted variable woff2 under app/fonts/,
+ *   loaded via next/font/local in app/layout.tsx.
  * - JetBrains Mono: code, IDs (order numbers, SKUs). Primary numeric
  *   tabular alignment is achieved via `font-variant-numeric: tabular-nums`
  *   on Host Grotesk, not via mono.

@@ -9,15 +9,136 @@ import { createApp } from '../../../src/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import {
+  createFinanceRecord,
   createMembership,
   createOrder,
   createOrderClaim,
   createOrderClaimItem,
-  createOrderFee,
   createOrderItem,
   createOrganization,
+  createProfitLine,
   createStore,
 } from '../../helpers/factories';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Seeds one order + item with the return-related profit lines the summary
+ * reads, plus the SETTLEMENT finance record a SALE_RETURN / COMMISSION_REFUND
+ * line is dated by. Return lines carry `inputs.recordIds` like the mapper writes
+ * it (a single id here); `recordTransactionDate` places that record in or out of
+ * the period; an omitted amount skips that line. The COST_RETURN line is ACTUAL +
+ * SELLER_INPUT (its engine shape) and counts only when the same item also gets a
+ * SALE_RETURN line.
+ */
+async function seedReturnLines(args: {
+  orgId: string;
+  storeId: string;
+  recordTransactionDate: Date;
+  saleReturnGross?: string;
+  commissionRefundGross?: string;
+  costReturnGross?: string;
+}): Promise<void> {
+  const order = await createOrder(args.orgId, args.storeId);
+  const orderItem = await createOrderItem(order.id, args.orgId, { quantity: 1 });
+  const recordId = `rec-${randomUUID().slice(0, 8)}`;
+  await createFinanceRecord(args.orgId, args.storeId, {
+    recordId,
+    transactionDate: args.recordTransactionDate,
+  });
+
+  if (args.saleReturnGross !== undefined) {
+    await createProfitLine(order.id, args.orgId, args.storeId, {
+      orderItemId: orderItem.id,
+      type: 'SALE_RETURN',
+      certainty: 'ACTUAL',
+      source: 'MARKETPLACE_RECORD',
+      amountGross: args.saleReturnGross,
+      inputs: { recordIds: recordId },
+      externalRecordId: recordId,
+    });
+  }
+  if (args.commissionRefundGross !== undefined) {
+    await createProfitLine(order.id, args.orgId, args.storeId, {
+      orderItemId: orderItem.id,
+      type: 'COMMISSION_REFUND',
+      certainty: 'ACTUAL',
+      source: 'MARKETPLACE_RECORD',
+      amountGross: args.commissionRefundGross,
+      inputs: { recordIds: recordId },
+      externalRecordId: recordId,
+    });
+  }
+  if (args.costReturnGross !== undefined) {
+    await createProfitLine(order.id, args.orgId, args.storeId, {
+      orderItemId: orderItem.id,
+      type: 'COST_RETURN',
+      certainty: 'ACTUAL',
+      source: 'SELLER_INPUT',
+      amountGross: args.costReturnGross,
+    });
+  }
+}
+
+/**
+ * Seeds a SALE_RETURN line whose `inputs.recordIds` lists several SETTLEMENT
+ * records with the given transaction dates. Record ids are sorted as text (as
+ * the mapper does) and the text-first id becomes `external_record_id`, so a
+ * caller can make the text-first id the LATER-dated one to prove the line is
+ * dated by its EARLIEST record, not by the external record.
+ */
+async function seedMultiRecordReturn(args: {
+  orgId: string;
+  storeId: string;
+  gross: string;
+  records: { id: string; transactionDate: Date }[];
+}): Promise<void> {
+  const order = await createOrder(args.orgId, args.storeId);
+  const orderItem = await createOrderItem(order.id, args.orgId, { quantity: 1 });
+  for (const record of args.records) {
+    await createFinanceRecord(args.orgId, args.storeId, {
+      recordId: record.id,
+      transactionDate: record.transactionDate,
+    });
+  }
+  const sortedIds = args.records.map((record) => record.id).sort();
+  await createProfitLine(order.id, args.orgId, args.storeId, {
+    orderItemId: orderItem.id,
+    type: 'SALE_RETURN',
+    certainty: 'ACTUAL',
+    source: 'MARKETPLACE_RECORD',
+    amountGross: args.gross,
+    inputs: { recordIds: sortedIds.join(',') },
+    externalRecordId: sortedIds[0] ?? null,
+  });
+}
+
+/**
+ * Seeds a SALE_RETURN line that carries NO `inputs.recordIds`, so the summary
+ * must fall back to `external_record_id` to date it by the given record.
+ */
+async function seedExternalRecordReturn(args: {
+  orgId: string;
+  storeId: string;
+  gross: string;
+  recordTransactionDate: Date;
+}): Promise<void> {
+  const order = await createOrder(args.orgId, args.storeId);
+  const orderItem = await createOrderItem(order.id, args.orgId, { quantity: 1 });
+  const recordId = `rec-${randomUUID().slice(0, 8)}`;
+  await createFinanceRecord(args.orgId, args.storeId, {
+    recordId,
+    transactionDate: args.recordTransactionDate,
+  });
+  await createProfitLine(order.id, args.orgId, args.storeId, {
+    orderItemId: orderItem.id,
+    type: 'SALE_RETURN',
+    certainty: 'ACTUAL',
+    source: 'MARKETPLACE_RECORD',
+    amountGross: args.gross,
+    externalRecordId: recordId,
+  });
+}
 
 /**
  * Builds an order with `orderUnits` total units (single line) and a claim
@@ -278,7 +399,7 @@ describe('Claims routes', () => {
     const org = await createOrganization();
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
-    const { orderId } = await createClaimFixture({
+    await createClaimFixture({
       orgId: org.id,
       storeId: store.id,
       orderUnits: 1,
@@ -295,23 +416,18 @@ describe('Claims routes', () => {
       resolved: false,
     });
 
-    // Return trio on the resolved claim's order — captured now (in period).
-    // amountGross = KDV-dahil (eski amountNet + vatAmount): 100+20, 10+2, 40+8.
-    const trio = [
-      { feeType: 'REFUND_DEDUCTION', direction: 'DEBIT', amountGross: '120.00' },
-      { feeType: 'COMMISSION_REFUND', direction: 'CREDIT', amountGross: '12.00' },
-      { feeType: 'COST_RETURN', direction: 'CREDIT', amountGross: '48.00' },
-    ] as const;
-    for (const leg of trio) {
-      await createOrderFee(orderId, org.id, {
-        feeType: leg.feeType,
-        source: 'SETTLEMENT',
-        direction: leg.direction,
-        amountGross: leg.amountGross,
-        vatRate: '20.00',
-        trendyolTransactionId: '725041340',
-      });
-    }
+    // Return trio on one item, dated by an in-period settlement record: a
+    // SALE_RETURN (120) and COMMISSION_REFUND (12) from ACTUAL marketplace-record
+    // lines, plus a COST_RETURN (48) counted because the same item has that
+    // dated SALE_RETURN.
+    await seedReturnLines({
+      orgId: org.id,
+      storeId: store.id,
+      recordTransactionDate: new Date(),
+      saleReturnGross: '120.00',
+      commissionRefundGross: '12.00',
+      costReturnGross: '48.00',
+    });
 
     const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/claims/summary`, {
       headers: { Authorization: bearer(user.accessToken) },
@@ -334,23 +450,22 @@ describe('Claims routes', () => {
     const org = await createOrganization();
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
-    const { orderId } = await createClaimFixture({
+    await createClaimFixture({
       orgId: org.id,
       storeId: store.id,
       orderUnits: 1,
       claimUnits: 1,
       itemStatuses: ['Accepted'],
       resolved: true,
-      claimDate: new Date('2026-01-01T00:00:00Z'), // 30g penceresi DIŞI
+      claimDate: new Date(Date.now() - 400 * DAY_MS), // 30g penceresi DIŞI
     });
-    await createOrderFee(orderId, org.id, {
-      feeType: 'REFUND_DEDUCTION',
-      source: 'SETTLEMENT',
-      direction: 'DEBIT',
-      amountGross: '120.00', // KDV-dahil (eski amountNet 100 + vatAmount 20)
-      vatRate: '20.00',
-      trendyolTransactionId: '725041399',
-      capturedAt: new Date('2026-01-02T00:00:00Z'), // pencere DIŞI
+    // SALE_RETURN line dated by an out-of-period settlement record: its own
+    // write time is irrelevant, so the money stays out of the summary.
+    await seedReturnLines({
+      orgId: org.id,
+      storeId: store.id,
+      recordTransactionDate: new Date(Date.now() - 400 * DAY_MS),
+      saleReturnGross: '120.00',
     });
 
     const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/claims/summary`, {
@@ -365,6 +480,153 @@ describe('Claims routes', () => {
       commissionRefundGross: '0.00',
       costReturnGross: '0.00',
       netImpactGross: '0.00',
+    });
+  });
+
+  it("dates the money by the return record's transaction date", async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // Both SALE_RETURN lines are written now; only the one whose settlement
+    // record falls in the period is summed.
+    await seedReturnLines({
+      orgId: org.id,
+      storeId: store.id,
+      recordTransactionDate: new Date(),
+      saleReturnGross: '120.00',
+    });
+    await seedReturnLines({
+      orgId: org.id,
+      storeId: store.id,
+      recordTransactionDate: new Date(Date.now() - 400 * DAY_MS),
+      saleReturnGross: '999.00',
+    });
+
+    const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/claims/summary`, {
+      headers: { Authorization: bearer(user.accessToken) },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      refundDeductionGross: '120.00',
+      commissionRefundGross: '0.00',
+      costReturnGross: '0.00',
+      netImpactGross: '-120.00',
+    });
+  });
+
+  it('counts a cost return only with a dated return record of the same item', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // Item A has a dated SALE_RETURN, so its COST_RETURN (48) counts.
+    await seedReturnLines({
+      orgId: org.id,
+      storeId: store.id,
+      recordTransactionDate: new Date(),
+      saleReturnGross: '120.00',
+      costReturnGross: '48.00',
+    });
+    // Item B has a COST_RETURN but no SALE_RETURN record, so its 30 is ignored.
+    await seedReturnLines({
+      orgId: org.id,
+      storeId: store.id,
+      recordTransactionDate: new Date(),
+      costReturnGross: '30.00',
+    });
+
+    const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/claims/summary`, {
+      headers: { Authorization: bearer(user.accessToken) },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      refundDeductionGross: '120.00',
+      commissionRefundGross: '0.00',
+      costReturnGross: '48.00',
+      netImpactGross: '-72.00',
+    });
+  });
+
+  it('dates a return by its earliest settlement record', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // A fixed, past window so both record dates are absolute, not clock-relative.
+    const now = Date.now();
+    const from = new Date(now - 40 * DAY_MS);
+    const to = new Date(now - 10 * DAY_MS);
+    const inPeriod = new Date(now - 20 * DAY_MS);
+    const afterPeriod = new Date(now - 5 * DAY_MS); // later than inPeriod, past `to`
+    const beforePeriod = new Date(now - 50 * DAY_MS); // earlier than the window
+
+    // Counts: earliest record (text-second id) is in the period, the LATER one
+    // (text-first id, used as external_record_id) is out. MIN date is in period.
+    await seedMultiRecordReturn({
+      orgId: org.id,
+      storeId: store.id,
+      gross: '70.00',
+      records: [
+        { id: 'rec-a-late', transactionDate: afterPeriod },
+        { id: 'rec-b-early', transactionDate: inPeriod },
+      ],
+    });
+    // Does not count: the LATER record (text-first id) is in the period, but the
+    // earliest record is before it, so MIN date is out of period.
+    await seedMultiRecordReturn({
+      orgId: org.id,
+      storeId: store.id,
+      gross: '999.00',
+      records: [
+        { id: 'rec-c-late', transactionDate: new Date(now - 15 * DAY_MS) },
+        { id: 'rec-d-early', transactionDate: beforePeriod },
+      ],
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/claims/summary?from=${from.toISOString()}&to=${to.toISOString()}`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      refundDeductionGross: '70.00',
+      commissionRefundGross: '0.00',
+      costReturnGross: '0.00',
+      netImpactGross: '-70.00',
+    });
+  });
+
+  it('falls back to the external record when the line has no record list', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // No inputs.recordIds, so the in-period external record dates the line.
+    await seedExternalRecordReturn({
+      orgId: org.id,
+      storeId: store.id,
+      gross: '80.00',
+      recordTransactionDate: new Date(),
+    });
+
+    const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/claims/summary`, {
+      headers: { Authorization: bearer(user.accessToken) },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      refundDeductionGross: '80.00',
+      commissionRefundGross: '0.00',
+      costReturnGross: '0.00',
+      netImpactGross: '-80.00',
     });
   });
 });

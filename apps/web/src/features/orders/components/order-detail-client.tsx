@@ -21,6 +21,7 @@ import { OrderItemsList } from './order-items-list';
 import { OrderProfitHero } from './order-profit-hero';
 import { OrderProfitSummary } from './order-profit-summary';
 import { OrderStatusBadge } from './order-status-badge';
+import { ProfitIssueNotices } from './profit-issue-notices';
 import { ReconciliationStatusBadge } from './reconciliation-status-badge';
 
 interface OrderDetailClientProps {
@@ -39,8 +40,8 @@ interface OrderDetailClientProps {
  *   2. Reconciliation banner — state-machine signal + next-step copy
  *   3. KPI grid — sale net / estimated profit / settled profit / margin
  *   4. VAT breakdown — net+VAT aggregate of items
- *   5. Fee timeline — chronological OrderFee rows with confirmedAt pairing
- *   6. Items table — per-line variant + commission split + cost snapshot
+ *   5. Fees — no separate timeline; they render as lines of the profit summary (OrderProfitSummary)
+ *   6. Items list (OrderItemsList) — per-line variant, quantity, unit cost, commission rate and amount
  *   7. Claims card — PR-13 graceful empty until GetClaims worker ships
  */
 export function OrderDetailClient({
@@ -182,6 +183,10 @@ export function OrderDetailClient({
         </Alert>
       ) : null}
 
+      {/* Non-blocking profit warnings (carrier not recognized, seller cargo
+          agreement) sit right above the profit result they qualify. */}
+      <ProfitIssueNotices issues={order.profitIssues} />
+
       {/* Profit-led + odaklı: sonuç (hero) → siparişteki ürünler (resimlerle) →
           kâr dökümü (gelir + gruplu tahsis + öneri). Ücret zaman çizgisi, iade
           talepleri ve teslimat bilinçli olarak kaldırıldı — sheet yalnız kâr
@@ -196,7 +201,7 @@ export function OrderDetailClient({
       <OrderProfitSummary
         breakdown={order.profitBreakdown}
         promotionDisplays={order.promotionDisplays}
-        micro={order.micro}
+        isExportSale={order.isExportSale}
       />
     </div>
   );

@@ -5,7 +5,6 @@ import { throwApiError } from '@/lib/api-error';
 
 export type OrderDetail = components['schemas']['OrderDetail'];
 export type OrderItemDetail = components['schemas']['OrderItemDetail'];
-export type OrderFeeDetail = components['schemas']['OrderFeeDetail'];
 export type OrderClaimDetail = components['schemas']['OrderClaimDetail'];
 
 export interface GetOrderArgs {

@@ -15,6 +15,8 @@
 // (product × period), joining barcode → ProductVariant. Profit is computed on read.
 
 import { prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
+import { enqueueProfitRecomputeForBarcodes } from '@pazarsync/profit';
 import { mapPrismaError } from '@pazarsync/sync-core';
 import { readWorkbookGrid, SpreadsheetFileError, type SheetData } from '@pazarsync/spreadsheet';
 
@@ -57,7 +59,7 @@ interface ParsedRow {
 /**
  * Builds a period's band JSON from the shared price brackets + that period's
  * commissions. Null limits are OMITTED (not stored as JSON null) so the value
- * stays a clean `Record<string, string>` array — `parseStoredBands` reads an
+ * stays a clean `Record<string, string>` array — `parseStoredTariffBands` reads an
  * absent limit back as null. Bands whose commission is missing are skipped.
  */
 function bandsForPeriod(
@@ -305,6 +307,19 @@ export async function importTariff(input: ImportTariffInput): Promise<ImportTari
         await tx.commissionTariffItem.createMany({ data: itemsData });
         items += itemsData.length;
       }
+
+      // A new tariff is a backdated commission input for every order whose items
+      // carry one of the imported barcodes: their commission now resolves through
+      // the tariff bands, so they must be recomputed. One store- and organization-
+      // scoped statement enqueues them by barcode, so no other tenant is touched even
+      // when another store shares a barcode.
+      await enqueueProfitRecomputeForBarcodes(tx, {
+        organizationId,
+        storeId,
+        barcodes,
+        reason: ProfitRecomputeReason.REFERENCE_CHANGED,
+      });
+
       return { tariffId: tariff.id, itemCount: items };
     });
 

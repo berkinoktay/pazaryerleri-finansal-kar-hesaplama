@@ -183,13 +183,11 @@ describe('POST /v1/organizations', () => {
       id: string;
       name: string;
       slug: string;
-      currency: string;
       timezone: string;
       membership: { role: string };
     };
     expect(body.name).toBe('Akyıldız Ticaret');
     expect(body.slug).toBe('akyildiz-ticaret');
-    expect(body.currency).toBe('TRY');
     expect(body.timezone).toBe('Europe/Istanbul');
     expect(body.membership.role).toBe('OWNER');
 

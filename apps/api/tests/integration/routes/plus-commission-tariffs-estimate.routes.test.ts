@@ -120,9 +120,23 @@ async function setupFixture(): Promise<EstimateFixture> {
       name: 'COGS Test',
       type: 'COGS',
       amountGross: new Decimal('200.00'),
-      currency: 'TRY',
       vatRate: 20,
-      fxRateMode: 'MANUAL',
+    },
+  });
+  // The scenario engine costs from the profile's VERSIONS (effective-dated), exactly as
+  // the real cost-profile service writes a version 1 on create. Without it the variant
+  // would read MISSING_COST.
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId: org.id,
+      version: 1,
+      name: 'COGS Test',
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      vatRate: 20,
+      changedFields: [],
+      effectiveFrom: new Date('2024-01-01T00:00:00Z'),
     },
   });
   await prisma.productVariantCostProfile.create({

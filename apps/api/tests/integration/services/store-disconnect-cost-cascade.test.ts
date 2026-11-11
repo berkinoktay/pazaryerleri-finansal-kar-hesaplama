@@ -1,17 +1,14 @@
 /**
  * Regression: disconnecting a store must cascade-delete its store-scoped cost
- * profiles even when those profiles are referenced by variant links and by
- * order-item cost snapshot components.
+ * profiles even when those profiles are referenced by variant links.
  *
  * Cost profiles became store-scoped (Store --Cascade--> CostProfile). Their
- * child FKs (product_variant_cost_profiles.profile_id and
- * order_item_cost_snapshot_components.profile_id) were `onDelete: Restrict`,
+ * child FK (product_variant_cost_profiles.profile_id) was `onDelete: Restrict`,
  * which is checked immediately and deadlocked the store-delete cascade — so a
  * store that had ANY real cost data could never be disconnected (P2003 → 422).
- * The FKs are now `onDelete: Cascade`; this test locks that in.
+ * The FK is now `onDelete: Cascade`; this test locks that in.
  */
 
-import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
@@ -21,8 +18,6 @@ import { disconnect } from '@/services/store.service';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import {
   createCostProfile,
-  createOrder,
-  createOrderItem,
   createOrganization,
   createProduct,
   createProductVariant,
@@ -38,7 +33,7 @@ describe('store disconnect — cost-profile cascade', () => {
     await truncateAll();
   });
 
-  it('disconnects a store that has a cost profile referenced by a variant link and an order snapshot', async () => {
+  it('disconnects a store that has a cost profile referenced by a variant link', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
 
@@ -51,24 +46,6 @@ describe('store disconnect — cost-profile cascade', () => {
       data: { organizationId: org.id, productVariantId: variant.id, profileId: profile.id },
     });
 
-    // Order snapshot component: an order line whose cost breakdown references
-    // the profile (captured during order sync in production).
-    const order = await createOrder(org.id, store.id);
-    const item = await createOrderItem(order.id, org.id, { productVariantId: variant.id });
-    await prisma.orderItemCostSnapshotComponent.create({
-      data: {
-        orderItemId: item.id,
-        organizationId: org.id,
-        profileId: profile.id,
-        profileName: profile.name,
-        profileType: profile.type,
-        currency: 'TRY',
-        fxRateMode: 'MANUAL',
-        fxRateUsed: new Decimal('1'),
-        fxRateSource: 'TEST',
-      },
-    });
-
     // Previously this threw (RESTRICT deadlock); it must now succeed.
     await expect(disconnect(org.id, store.id)).resolves.toBeUndefined();
 
@@ -78,8 +55,5 @@ describe('store disconnect — cost-profile cascade', () => {
     expect(await prisma.productVariantCostProfile.count({ where: { profileId: profile.id } })).toBe(
       0,
     );
-    expect(
-      await prisma.orderItemCostSnapshotComponent.count({ where: { profileId: profile.id } }),
-    ).toBe(0);
   });
 });

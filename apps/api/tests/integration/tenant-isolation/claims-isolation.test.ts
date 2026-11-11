@@ -1,13 +1,18 @@
+import { randomUUID } from 'node:crypto';
+
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '../../../src/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import {
+  createFinanceRecord,
   createMembership,
   createOrder,
   createOrderClaim,
+  createOrderItem,
   createOrganization,
+  createProfitLine,
   createStore,
 } from '../../helpers/factories';
 
@@ -15,6 +20,26 @@ async function createBareClaim(orgId: string, storeId: string): Promise<{ claimI
   const order = await createOrder(orgId, storeId);
   const claim = await createOrderClaim(orgId, storeId, order.id);
   return { claimId: claim.id };
+}
+
+/**
+ * Seeds one in-period SALE_RETURN line dated by a SETTLEMENT record, for the
+ * summary's refund-deduction KPI.
+ */
+async function seedSaleReturn(orgId: string, storeId: string, gross: string): Promise<void> {
+  const order = await createOrder(orgId, storeId);
+  const orderItem = await createOrderItem(order.id, orgId, { quantity: 1 });
+  const recordId = `rec-${randomUUID().slice(0, 8)}`;
+  await createFinanceRecord(orgId, storeId, { recordId, transactionDate: new Date() });
+  await createProfitLine(order.id, orgId, storeId, {
+    orderItemId: orderItem.id,
+    type: 'SALE_RETURN',
+    certainty: 'ACTUAL',
+    source: 'MARKETPLACE_RECORD',
+    amountGross: gross,
+    inputs: { recordIds: recordId },
+    externalRecordId: recordId,
+  });
 }
 
 /**
@@ -98,5 +123,56 @@ describe('Claims — tenant isolation', () => {
       { headers: { Authorization: bearer(user.accessToken) } },
     );
     expect(foreignStore.status).toBe(404);
+  });
+
+  it('ignores lines and records of another organization', async () => {
+    const user = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, user.id);
+    const storeA = await createStore(orgA.id);
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+
+    await seedSaleReturn(orgA.id, storeA.id, '50.00');
+    // Org B's same-dated return lines and records must never reach org A.
+    await seedSaleReturn(orgB.id, storeB.id, '120.00');
+
+    const res = await app.request(
+      `/v1/organizations/${orgA.id}/stores/${storeA.id}/claims/summary`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      refundDeductionGross: '50.00',
+      commissionRefundGross: '0.00',
+      costReturnGross: '0.00',
+      netImpactGross: '-50.00',
+    });
+  });
+
+  it('ignores lines and records of another store of the same organization', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const storeA = await createStore(org.id);
+    const storeB = await createStore(org.id);
+
+    await seedSaleReturn(org.id, storeA.id, '50.00');
+    // Same org, a sibling store: its lines and records must never reach storeA.
+    await seedSaleReturn(org.id, storeB.id, '120.00');
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${storeA.id}/claims/summary`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      refundDeductionGross: '50.00',
+      commissionRefundGross: '0.00',
+      costReturnGross: '0.00',
+      netImpactGross: '-50.00',
+    });
   });
 });

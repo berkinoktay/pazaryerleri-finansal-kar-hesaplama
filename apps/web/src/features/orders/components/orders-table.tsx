@@ -199,9 +199,9 @@ export function OrdersTable({
                 fastDelivery={row.original.fastDelivery}
                 deliveredOnTime={row.original.deliveredOnTime}
               />
-              {row.original.micro ? (
+              {row.original.isExportSale ? (
                 <Badge tone="neutral" size="sm">
-                  {t('badges.micro')}
+                  {t('badges.exportSale')}
                 </Badge>
               ) : null}
             </span>

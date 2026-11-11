@@ -1,5 +1,5 @@
 import { getBusinessDateAnchor, getBusinessDayRange } from '@pazarsync/utils';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '@/app';
 
@@ -11,6 +11,8 @@ import {
   createMembership,
   createOrder,
   createOrganization,
+  createProfitLine,
+  createProfitStatement,
   createStore,
 } from '../../../helpers/factories';
 
@@ -71,14 +73,13 @@ async function sellInOrders(
   storeId: string,
   variantId: string,
   // GROSS konvansiyon: lineSaleGross = LINE total (× quantity). quantity 1 olduğu
-  // için per-unit değerle aynı; unitCostSnapshotGross per-unit kalır.
-  opts: { count: number; lineSaleGross: string; unitCostSnapshotGross?: string },
+  // için per-unit değerle aynı.
+  opts: { count: number; lineSaleGross: string },
 ): Promise<void> {
   for (let i = 0; i < opts.count; i += 1) {
     const order = await createOrder(orgId, storeId, {
       orderDate: todayAt(10),
       saleGross: opts.lineSaleGross,
-      estimatedNetProfit: opts.unitCostSnapshotGross !== undefined ? '5.00' : null,
     });
     await prisma.orderItem.create({
       data: {
@@ -86,10 +87,7 @@ async function sellInOrders(
         organizationId: orgId,
         productVariantId: variantId,
         quantity: 1,
-        commissionRate: '10.00',
-        commissionGross: '12.00',
         lineSaleGross: opts.lineSaleGross,
-        unitCostSnapshotGross: opts.unitCostSnapshotGross ?? null,
       },
     });
   }
@@ -286,13 +284,15 @@ describe('GET /v1/.../live-performance/today-products', () => {
     expect(row?.vendorMissing).toBe(false);
   });
 
-  it('marks variants with an active cost profile as costed and surfaces the snapshot unit cost', async () => {
+  it("surfaces the unit cost from the order's cost lines", async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
-    // Costed variant: an active profile + a today order carrying a net snapshot.
+    // Costed variant: an active profile + a today order carrying a stored ESTIMATE
+    // statement and a 30 COST_COGS line (qty 1). The displayed unit cost is derived
+    // from the item's cost lines (itemProfitValues), not from a legacy snapshot column.
     const costedId = await createVariant(org.id, store.id, {
       title: 'Costed Variant',
       barcode: 'BC-COSTED',
@@ -307,10 +307,33 @@ describe('GET /v1/.../live-performance/today-products', () => {
         attachedBy: user.id,
       },
     });
-    await sellInOrders(org.id, store.id, costedId, {
-      count: 1,
-      lineSaleGross: '60.00',
-      unitCostSnapshotGross: '30.00',
+    const order = await createOrder(org.id, store.id, {
+      orderDate: todayAt(10),
+      saleGross: '60.00',
+    });
+    const item = await prisma.orderItem.create({
+      data: {
+        orderId: order.id,
+        organizationId: org.id,
+        productVariantId: costedId,
+        quantity: 1,
+        lineSaleGross: '60.00',
+      },
+    });
+    await createProfitStatement(order.id, org.id, store.id, {
+      view: 'ESTIMATE',
+      status: 'ESTIMATED',
+      netProfit: '5.00',
+      saleMarginPct: '8.33',
+    });
+    await createProfitLine(order.id, org.id, store.id, {
+      orderItemId: item.id,
+      type: 'COST_COGS',
+      certainty: 'ACTUAL',
+      source: 'SELLER_INPUT',
+      amountGross: '30.00',
+      amountVat: '5.00',
+      vatRatePct: '20',
     });
 
     // Cost-missing variant: buffer only, no profile.
@@ -347,18 +370,18 @@ describe('GET /v1/.../live-performance/today-products', () => {
     expect(missing?.unitCost).toBeNull();
   });
 
-  it('reports costed with a null unitCost when the order-item carries no snapshot', async () => {
+  it('reports costed with a null unitCost when the order has no stored statement', async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
-    // Active cost profile attached, but today's order-item has no cost snapshot
-    // (omitting unitCostSnapshotGross stores null). Cost status is authoritative
-    // from the profile; the displayed unit cost stays null.
+    // Active cost profile attached, but today's order has no stored ESTIMATE statement
+    // yet (the writer has not caught up), so no cost line backs a unit cost. Cost
+    // status is authoritative from the profile; the displayed unit cost stays null.
     const costedId = await createVariant(org.id, store.id, {
-      title: 'Costed No-Snapshot Variant',
-      barcode: 'BC-NO-SNAPSHOT',
+      title: 'Costed No-Statement Variant',
+      barcode: 'BC-NO-STATEMENT',
       seq: 4,
     });
     const profile = await createCostProfile(org.id);
@@ -385,5 +408,269 @@ describe('GET /v1/.../live-performance/today-products', () => {
     expect(row?.variantId).toBe(costedId);
     expect(row?.costStatus).toBe('costed');
     expect(row?.unitCost).toBeNull();
+  });
+
+  it('keeps the list when a stored profit line is corrupt', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // A today order selling the variant, with a stored ESTIMATE statement and a profit
+    // line whose `inputs` is a nested object -- a shape the reader rejects. Rebuilding
+    // the stored lines throws, so the list must still return with a null unit cost and
+    // log the failure (owner decision 2026-11-04); volume is unaffected.
+    const variantId = await createVariant(org.id, store.id, {
+      title: 'Corrupt Line Variant',
+      barcode: 'BC-CORRUPT',
+      seq: 10,
+    });
+    const order = await createOrder(org.id, store.id, {
+      orderDate: todayAt(10),
+      saleGross: '60.00',
+    });
+    const item = await prisma.orderItem.create({
+      data: {
+        orderId: order.id,
+        organizationId: org.id,
+        productVariantId: variantId,
+        quantity: 1,
+        lineSaleGross: '60.00',
+      },
+    });
+    await createProfitStatement(order.id, org.id, store.id, {
+      view: 'ESTIMATE',
+      status: 'ESTIMATED',
+      netProfit: '5.00',
+      saleMarginPct: '8.33',
+    });
+    await createProfitLine(order.id, org.id, store.id, {
+      orderItemId: item.id,
+      type: 'COST_COGS',
+      certainty: 'ESTIMATE',
+      source: 'SELLER_INPUT',
+      amountGross: '30.00',
+      amountVat: '5.00',
+      vatRatePct: '20',
+      inputs: { nested: { reason: 'corrupt' } },
+    });
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as TodayProductsBody;
+      expect(body.data).toHaveLength(1);
+      const row = body.data[0];
+      expect(row?.variantId).toBe(variantId);
+      // Volume still reported; only the unit cost falls back to null.
+      expect(row?.unitsSold).toBe(1);
+      expect(row?.revenue).toBe('60.00');
+      expect(row?.unitCost).toBeNull();
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[profit-read] in-request profit computation failed',
+        expect.objectContaining({ surface: 'today-products', orderId: null }),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('prefers a computed order over an earlier not-computable one for the unit cost', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    const variantId = await createVariant(org.id, store.id, {
+      title: 'Preferred Variant',
+      barcode: 'BC-PREFER',
+      seq: 11,
+    });
+
+    // Earlier order: its ESTIMATE statement never reached ESTIMATED and it carries no
+    // cost line, so if it backed the unit cost the row would read 0.00.
+    const earlier = await createOrder(org.id, store.id, {
+      orderDate: todayAt(9),
+      saleGross: '60.00',
+    });
+    await prisma.orderItem.create({
+      data: {
+        orderId: earlier.id,
+        organizationId: org.id,
+        productVariantId: variantId,
+        quantity: 1,
+        lineSaleGross: '60.00',
+      },
+    });
+    await createProfitStatement(earlier.id, org.id, store.id, {
+      view: 'ESTIMATE',
+      status: 'NOT_COMPUTABLE',
+      netProfit: null,
+    });
+
+    // Later order: its ESTIMATE statement is ESTIMATED with a 30.00 cost line (qty 1).
+    const later = await createOrder(org.id, store.id, {
+      orderDate: todayAt(11),
+      saleGross: '60.00',
+    });
+    const laterItem = await prisma.orderItem.create({
+      data: {
+        orderId: later.id,
+        organizationId: org.id,
+        productVariantId: variantId,
+        quantity: 1,
+        lineSaleGross: '60.00',
+      },
+    });
+    await createProfitStatement(later.id, org.id, store.id, {
+      view: 'ESTIMATE',
+      status: 'ESTIMATED',
+      netProfit: '5.00',
+      saleMarginPct: '8.33',
+    });
+    await createProfitLine(later.id, org.id, store.id, {
+      orderItemId: laterItem.id,
+      type: 'COST_COGS',
+      certainty: 'ESTIMATE',
+      source: 'SELLER_INPUT',
+      amountGross: '30.00',
+      amountVat: '5.00',
+      vatRatePct: '20',
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TodayProductsBody;
+    expect(body.data).toHaveLength(1);
+    const row = body.data[0];
+    expect(row?.variantId).toBe(variantId);
+    expect(row?.unitsSold).toBe(2);
+    // The ESTIMATED (later) order backs the unit cost, not the earlier not-computable one.
+    expect(row?.unitCost).toBe('30.00');
+  });
+
+  it('picks the next order when the first has no statement', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    const variantId = await createVariant(org.id, store.id, {
+      title: 'Next Order Variant',
+      barcode: 'BC-NEXT',
+      seq: 12,
+    });
+
+    // Earliest order has no ESTIMATE statement yet (the writer has not caught up), so it
+    // is not a unit-cost candidate at all.
+    const first = await createOrder(org.id, store.id, {
+      orderDate: todayAt(9),
+      saleGross: '60.00',
+    });
+    await prisma.orderItem.create({
+      data: {
+        orderId: first.id,
+        organizationId: org.id,
+        productVariantId: variantId,
+        quantity: 1,
+        lineSaleGross: '60.00',
+      },
+    });
+
+    // Next order: ESTIMATED with a 30.00 cost line (qty 1) -- the unit cost source.
+    const next = await createOrder(org.id, store.id, {
+      orderDate: todayAt(11),
+      saleGross: '60.00',
+    });
+    const nextItem = await prisma.orderItem.create({
+      data: {
+        orderId: next.id,
+        organizationId: org.id,
+        productVariantId: variantId,
+        quantity: 1,
+        lineSaleGross: '60.00',
+      },
+    });
+    await createProfitStatement(next.id, org.id, store.id, {
+      view: 'ESTIMATE',
+      status: 'ESTIMATED',
+      netProfit: '5.00',
+      saleMarginPct: '8.33',
+    });
+    await createProfitLine(next.id, org.id, store.id, {
+      orderItemId: nextItem.id,
+      type: 'COST_COGS',
+      certainty: 'ESTIMATE',
+      source: 'SELLER_INPUT',
+      amountGross: '30.00',
+      amountVat: '5.00',
+      vatRatePct: '20',
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TodayProductsBody;
+    expect(body.data).toHaveLength(1);
+    const row = body.data[0];
+    expect(row?.variantId).toBe(variantId);
+    expect(row?.unitsSold).toBe(2);
+    expect(row?.unitCost).toBe('30.00');
+  });
+
+  it('reports zero unit cost when the statement has no cost line', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // A today order with an ESTIMATED estimate statement but no cost line. itemProfitValues
+    // reports a 0.00 unit cost for an item with no cost line (and no MISSING_COST issue).
+    const variantId = await createVariant(org.id, store.id, {
+      title: 'Zero Cost Variant',
+      barcode: 'BC-ZEROCOST',
+      seq: 13,
+    });
+    const order = await createOrder(org.id, store.id, {
+      orderDate: todayAt(10),
+      saleGross: '60.00',
+    });
+    await prisma.orderItem.create({
+      data: {
+        orderId: order.id,
+        organizationId: org.id,
+        productVariantId: variantId,
+        quantity: 1,
+        lineSaleGross: '60.00',
+      },
+    });
+    await createProfitStatement(order.id, org.id, store.id, {
+      view: 'ESTIMATE',
+      status: 'ESTIMATED',
+      netProfit: '5.00',
+      saleMarginPct: '8.33',
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TodayProductsBody;
+    expect(body.data).toHaveLength(1);
+    const row = body.data[0];
+    expect(row?.variantId).toBe(variantId);
+    expect(row?.unitCost).toBe('0.00');
   });
 });

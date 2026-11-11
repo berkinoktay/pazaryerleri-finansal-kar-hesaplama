@@ -36,9 +36,7 @@ async function seedProfile(orgId: string, storeId: string, name: string) {
       name,
       type: 'COGS',
       amountGross: new Decimal('25.50'),
-      currency: 'TRY',
       vatRate: 18,
-      fxRateMode: 'AUTO',
     },
   });
 }

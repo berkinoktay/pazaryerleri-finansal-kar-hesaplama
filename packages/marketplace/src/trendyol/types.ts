@@ -347,7 +347,6 @@ export interface TrendyolOrderLine {
   vatRate: number;
   /** Commission rate %. Direct in order response (research §7.2). */
   commission?: number;
-  currencyCode?: string;
   orderLineItemStatusName?: string;
 }
 
@@ -456,8 +455,9 @@ export interface TrendyolOrdersStreamResponse {
 //                             (fallback: lineGrossAmount × quantity when absent)
 //   lineSellerDiscountGross = Σ discountDetails.lineItemSellerDiscount
 //   lineListGross           = lineGrossAmount × quantity
-//   commissionGross         = commissionRate × lineSaleGross   (net-sale base #332)
-//   refundedCommissionGross = commissionRate × lineSellerDiscountGross  (T+0 estimate)
+//
+// Commission: only the raw line rate (commissionRate) is carried; the profit engine
+// derives every commission amount and its VAT itself.
 //
 // Invariant: Σ lineSaleGross = packageTotalPrice → syncLog.warn on mismatch
 // (no silent drift). Intra-line scalar-vs-details drift is EXPECTED (no warn).
@@ -478,27 +478,16 @@ export interface MappedOrderLine {
   lineSaleGross: string;
   lineSellerDiscountGross: string;
   saleVatRate: string;
+  /**
+   * The line's raw commission rate % (decimal string). It feeds only the
+   * `OrderItem.orderCommissionRatePct` raw column; the profit engine computes the
+   * commission itself. "0" when the payload omits it (see `commissionKnown`).
+   */
   commissionRate: string;
-  commissionGross: string;
-  /**
-   * T+0 estimate of the commission Trendyol refunds on the seller-discount
-   * portion (research §7.3): commissionRate × lineSellerDiscountGross. Settlement
-   * (handleDiscount) overwrites with the real Discount line. 0 when no discount.
-   */
-  refundedCommissionGross: string;
-  /** Commission VAT rate %, DB-driven default (#331); net split derived downstream. */
-  commissionVatRate: string;
-  /**
-   * Trendyol lines[].productCategoryId — stringified for boundary parity with the
-   * other id/money fields (downstream converts to BigInt). null when the payload
-   * omits it. Used by order-intake to fall back to a DB category commission rate
-   * when the line carries no commission of its own.
-   */
-  categoryId: string | null;
   /**
    * True only when Trendyol actually carried a commission rate on the line.
-   * When false, commissionRate/commissionGross are the defensive 0 fallback (not a
-   * real zero), signalling order-intake to resolve the rate from the category.
+   * When false, commissionRate is the defensive 0 fallback (not a real zero), so
+   * order intake stores a null raw rate and the engine falls back to the category.
    */
   commissionKnown: boolean;
 }
@@ -522,6 +511,16 @@ export interface MappedOrder {
    * branches on this flag before any other routing.
    */
   dematerialized: boolean;
+  /**
+   * True when Trendyol has not created the shipment package yet: its
+   * `shipmentPackageId` is 0 — an Awaiting order still waiting on the payment
+   * check. Such a package cannot be keyed (every one would map to
+   * platformOrderId '0', so distinct order numbers would collide onto a single
+   * row), so `intakeOrder` skips it entirely — no order, no buffer row, no stock
+   * change. Trendyol re-sends the same order under a real shipmentPackageId once
+   * it creates the package (status Created), and that one is keyed normally.
+   */
+  packagePending: boolean;
   /** Sipariş başlığı — paket toplamlarından DOĞRUDAN (KDV dahil, spec §4). */
   saleGross: string;
   saleVat: string;
@@ -545,7 +544,8 @@ export interface MappedOrder {
    * "SameDayShipping" / "TodayDelivery"; fast değil/boş → null). Kriter hangi
    * tip kuralını uygulayacağını buradan bilir (2026-06-14 hibrit tasarım). */
   fastDeliveryType: string | null;
-  micro: boolean;
+  /** Marketplace-neutral export sale flag; mapped from the package's `micro` boolean. */
+  isExportSale: boolean;
   /** Trendyol tahmini teslim penceresi (PROD'da dolu; stage'de 0 → null). */
   estimatedDeliveryStartDate: Date | null;
   estimatedDeliveryEndDate: Date | null;

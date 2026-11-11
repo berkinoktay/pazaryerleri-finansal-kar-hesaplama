@@ -12,11 +12,10 @@
 // so re-running -- and running against prod after dev -- is safe.
 //
 // `pg-cron-setup.sql` is applied by the cron step below (CRON_APPLIED): the
-// script creates the pg_cron + pg_net extensions itself (the Supabase image
-// preloads both) and the file is environment-independent — the fx job reads
-// its Edge Function URL + key from DB settings this script sets from env vars
-// when present. CI (CI=true) skips scheduling so cron ticks never race the
-// test suite; the fan-out SQL is covered by packages/sync-core's
+// script creates the pg_cron extension itself (the Supabase image preloads it),
+// and every scheduled job runs entirely inside Postgres so the file needs no
+// per-environment configuration. CI (CI=true) skips scheduling so cron ticks
+// never race the test suite; the fan-out SQL is covered by packages/sync-core's
 // pg-cron-fanout integration test instead.
 //
 // Uses `pg` directly rather than shelling to `psql` because `psql` is an
@@ -68,21 +67,8 @@ if (connectionString === undefined || connectionString.length === 0) {
 }
 
 /**
- * Hosted Supabase exposes Edge Functions at `<SUPABASE_URL>/functions/v1`.
- * Local dev must opt in explicitly via PG_CRON_FUNCTIONS_URL instead: pg_net
- * runs INSIDE the Postgres container, where the host's 127.0.0.1:54321 is not
- * reachable (use e.g. http://host.docker.internal:54321/functions/v1).
- */
-function deriveFunctionsUrl(supabaseUrl: string | undefined): string | undefined {
-  if (supabaseUrl === undefined || !supabaseUrl.startsWith('https://')) {
-    return undefined;
-  }
-  return `${supabaseUrl.replace(/\/+$/, '')}/functions/v1`;
-}
-
-/**
- * Cron step: enable pg_cron/pg_net, persist the fx job's run-time settings
- * from env (when present), then schedule every job in pg-cron-setup.sql.
+ * Cron step: enable pg_cron, reset the retired fx-rates DB settings, then
+ * schedule every job in pg-cron-setup.sql.
  *
  * Never throws — cron is additive infrastructure; a missing extension must
  * not block RLS/trigger governance from landing. The warning is loud enough
@@ -98,38 +84,46 @@ async function applyCronSetup(c: Client): Promise<void> {
 
   try {
     await c.query('CREATE EXTENSION IF NOT EXISTS pg_cron');
-    await c.query('CREATE EXTENSION IF NOT EXISTS pg_net');
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(
-      `⚠ pg_cron/pg_net unavailable (${message}) — cron jobs NOT scheduled.\n` +
+      `⚠ pg_cron unavailable (${message}) — cron jobs NOT scheduled.\n` +
         `  Marketplace syncs will only run via the connect-time bootstrap and manual enqueue.\n` +
-        `  Enable both extensions for this database, then re-run pnpm db:apply-policies.`,
+        `  Enable the extension for this database, then re-run pnpm db:apply-policies.`,
     );
     return;
   }
 
-  // fx-rates job config — read at run time via current_setting(). Unset → the
-  // job's WHERE guard makes every tick a silent no-op, so scheduling is safe.
-  const functionsUrl =
-    process.env['PG_CRON_FUNCTIONS_URL'] ?? deriveFunctionsUrl(process.env['SUPABASE_URL']);
-  const serviceKey = process.env['SUPABASE_SECRET_KEY'];
-  if (functionsUrl !== undefined && serviceKey !== undefined && serviceKey.length > 0) {
-    const db = c.escapeIdentifier(
-      (await c.query<{ db: string }>('SELECT current_database() AS db')).rows[0]?.db ?? 'postgres',
-    );
-    await c.query(
-      `ALTER DATABASE ${db} SET app.supabase_functions_url = ${c.escapeLiteral(functionsUrl)}`,
-    );
-    await c.query(
-      `ALTER DATABASE ${db} SET app.supabase_service_role_key = ${c.escapeLiteral(serviceKey)}`,
-    );
-    console.log('✓ Configured fx-rates cron settings (app.supabase_functions_url + key)');
-  } else {
-    console.log(
-      'ℹ fx-rates cron left unconfigured (PG_CRON_FUNCTIONS_URL / SUPABASE_SECRET_KEY unset) — job no-ops',
-    );
-  }
+  // Lira-only cutover: the retired fx-rates job stored its Edge Function URL and
+  // the service-role key in per-database settings. The job is gone (pg-cron-setup.sql
+  // unschedules it), so RESET both settings here too — an already-configured
+  // database must not keep holding the service-role key. Each RESET is guarded on
+  // the setting actually being present in this database's config: resetting an
+  // absent custom GUC would otherwise raise "permission denied to set parameter"
+  // for a non-superuser role, and a database that never ran the old SET has
+  // nothing to clear anyway. Guarded this way the step is a clean, idempotent
+  // no-op where there is nothing to reset, and a real reset where the old script
+  // persisted the key (the deploy role that set it can also reset it).
+  await c.query(
+    `DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM pg_db_role_setting s JOIN pg_database d ON d.oid = s.setdatabase
+        WHERE d.datname = current_database() AND s.setrole = 0
+          AND EXISTS (SELECT 1 FROM unnest(s.setconfig) cfg WHERE cfg LIKE 'app.supabase_functions_url=%')
+      ) THEN
+        EXECUTE format('ALTER DATABASE %I RESET app.supabase_functions_url', current_database());
+      END IF;
+      IF EXISTS (
+        SELECT 1 FROM pg_db_role_setting s JOIN pg_database d ON d.oid = s.setdatabase
+        WHERE d.datname = current_database() AND s.setrole = 0
+          AND EXISTS (SELECT 1 FROM unnest(s.setconfig) cfg WHERE cfg LIKE 'app.supabase_service_role_key=%')
+      ) THEN
+        EXECUTE format('ALTER DATABASE %I RESET app.supabase_service_role_key', current_database());
+      END IF;
+    END
+    $$;`,
+  );
 
   for (const file of CRON_APPLIED) {
     const sqlPath = path.join(sqlDir, file);

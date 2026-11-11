@@ -32,13 +32,20 @@ import type { TrendyolCredentials } from './types';
 export const CLAIMS_PAGE_SIZE = 200;
 
 /**
+ * The claimItemStatus that marks an accepted (completed) return. Terminal: once
+ * the seller accepts, the return happened and cannot be reversed. Named so the
+ * profit engine's loader and return estimator never write the raw literal.
+ */
+export const CLAIM_ITEM_STATUS_ACCEPTED = 'Accepted';
+
+/**
  * claimItemStatus values whose meaning is final: the return either
  * happened (Accepted) or definitively did not (Rejected / Cancelled).
  * Created / WaitingInAction / WaitingFraudCheck / Unresolved / InAnalysis
  * are in-flight. Claim-level `resolved` derives from ALL items being
  * terminal (Berkin'in kararı 2026-06-10 — settlement eşleşmesi DEĞİL).
  */
-const TERMINAL_CLAIM_ITEM_STATUSES = new Set(['Accepted', 'Rejected', 'Cancelled']);
+const TERMINAL_CLAIM_ITEM_STATUSES = new Set([CLAIM_ITEM_STATUS_ACCEPTED, 'Rejected', 'Cancelled']);
 
 export function isTerminalClaimItemStatus(status: string): boolean {
   return TERMINAL_CLAIM_ITEM_STATUSES.has(status);
@@ -123,8 +130,9 @@ export interface TrendyolClaimsResponse {
 // ─── Mapped domain shapes (PII dropped here) ────────────────────────────
 
 export interface MappedClaimItem {
-  /** claimItems[].id — per-unit UUID, upsert anchor with the parent claim. */
-  trendyolClaimItemId: string;
+  /** The marketplace claim item id (claimItems[].id, a per-unit UUID); upsert
+   * anchor with the parent claim. */
+  marketplaceClaimItemId: string;
   /** items[].orderLine.id as string — resolves OrderItem.platformLineId. */
   orderLineId: string | null;
   reasonCode: string;
@@ -136,7 +144,8 @@ export interface MappedClaimItem {
 }
 
 export interface MappedClaim {
-  trendyolClaimId: string;
+  /** The marketplace claim id (Trendyol: claim.id). */
+  marketplaceClaimId: string;
   orderNumber: string;
   /** Primary order-match key (== Order.platformOrderId), string form. */
   orderOutboundPackageId: string | null;
@@ -183,7 +192,7 @@ export function mapTrendyolClaim(claim: TrendyolClaim): MappedClaim {
           ? ci.trendyolClaimItemReason
           : null;
       items.push({
-        trendyolClaimItemId: ci.id,
+        marketplaceClaimItemId: ci.id,
         orderLineId,
         reasonCode: reason !== null ? reason.code : UNKNOWN_REASON_CODE,
         reasonName: reason?.name ?? '',
@@ -196,7 +205,7 @@ export function mapTrendyolClaim(claim: TrendyolClaim): MappedClaim {
   }
 
   return {
-    trendyolClaimId: claim.id,
+    marketplaceClaimId: claim.id,
     orderNumber: claim.orderNumber,
     orderOutboundPackageId:
       claim.orderOutboundPackageId != null ? String(claim.orderOutboundPackageId) : null,

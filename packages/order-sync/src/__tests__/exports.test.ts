@@ -10,14 +10,19 @@ describe('@pazarsync/order-sync — public API surface', () => {
     expect(orderSync.upsertOrderWithSnapshot.constructor.name).toBe('AsyncFunction');
   });
 
-  it('exposes exactly the intake + write helpers (public API guard)', () => {
-    // Paketin scope'unu küçük tutmak için yalnız üç public runtime symbol:
-    // order yazma (upsertOrderWithSnapshot) + paylaşılan intake routing
-    // (intakeOrder, Slice 0) + geç-bağlanan variant'ın snapshot re-entry'si
-    // (captureCostSnapshot, variant-recovery PR-2). OrderIntakeOutcome
-    // type-only export — runtime'da görünmez. Bu test ileride yanlışlıkla
-    // private helper export edilirse fail eder.
+  it('exposes exactly the intake + write + cost-window helpers (public API guard)', () => {
+    // The package keeps a small runtime surface of four symbols: the order writer
+    // (upsertOrderWithSnapshot), the shared intake routing (intakeOrder), the
+    // cost-window criterion both exclusion writers ask (hadCostWithinOrderDay),
+    // and the operator backfill that stamps existing orders by the same criterion
+    // (stampCostWindowExclusions). OrderIntakeOutcome is a type-only export and is
+    // invisible at runtime. This test fails if a private helper gets exported by accident.
     const keys = Object.keys(orderSync).sort();
-    expect(keys).toEqual(['captureCostSnapshot', 'intakeOrder', 'upsertOrderWithSnapshot']);
+    expect(keys).toEqual([
+      'hadCostWithinOrderDay',
+      'intakeOrder',
+      'stampCostWindowExclusions',
+      'upsertOrderWithSnapshot',
+    ]);
   });
 });

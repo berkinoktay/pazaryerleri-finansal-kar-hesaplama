@@ -30,11 +30,13 @@ const quoteProductPriceRoute = createRoute({
   summary: 'Solve sale price for a target margin, markup, or profit',
   description:
     'Given a single variant and a pricing target (margin %, markup %, or absolute profit in TRY), ' +
-    "solves for the sale price that achieves that target. Assembles the variant's full " +
-    'UnitEconomics (cost / commission / shipping / PSF / stoppage) and calls the Dilim 1 ' +
-    '`solvePriceForTarget` engine. Returns `calculable: false` with a reason code when the ' +
-    'target is unreachable or when required inputs (cost / shipping / commission) are missing. ' +
-    'This is a read/compute operation — no data is persisted. Requires DATA_READ capability.',
+    'solves for the sale price that achieves that target. Loads the variant scenario base (cost, ' +
+    'commission chain, shipping, fees) and solves with the scenario engine ' +
+    '(`solveTrendyolScenarioPrice`): the lowest kurus price that meets the target, in closed form ' +
+    'per price band (Barem / commission breakpoints), never by search. Returns `calculable: false` ' +
+    'with a reason code when the target is unreachable or when required inputs (cost / shipping / ' +
+    'commission) are missing. This is a read/compute operation -- no data is persisted. Requires ' +
+    'DATA_READ capability.',
   security: [{ bearerAuth: [] }],
   request: {
     params: pathParams,
@@ -80,16 +82,15 @@ app.openapi(quoteProductPriceRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId } = c.req.valid('param');
   const body = c.req.valid('json');
-  const { store, role } = await requireStoreAccess(userId, orgId, storeId);
+  const { role } = await requireStoreAccess(userId, orgId, storeId);
   assertCapability(role, CAPABILITIES.DATA_READ);
 
-  // Run the quote inside a transaction so that all resolver calls share a
-  // consistent DB snapshot for the duration of the request.
-  const result = await prisma.$transaction(async (tx) => {
-    return quoteProductPrice(tx, orgId, storeId, store, {
-      variantId: body.variantId,
-      target: body.target,
-    });
+  // The quote is read-only (load the scenario base, solve, build the breakdown), so it
+  // runs as plain reads without an interactive transaction: a brief read inconsistency
+  // across the few reads is harmless for a what-if price.
+  const result = await quoteProductPrice(prisma, orgId, storeId, {
+    variantId: body.variantId,
+    target: body.target,
   });
 
   return c.json(result, 200);

@@ -54,10 +54,10 @@ const getTariffRoute = createRoute({
 app.openapi(getTariffRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId, tariffId } = c.req.valid('param');
-  const { store, role } = await requireStoreAccess(userId, orgId, storeId);
+  const { role } = await requireStoreAccess(userId, orgId, storeId);
   assertCapability(role, CAPABILITIES.DATA_READ);
 
-  const detail = await getTariffDetail(orgId, storeId, store, tariffId);
+  const detail = await getTariffDetail(orgId, storeId, tariffId);
   return c.json(detail, 200);
 });
 

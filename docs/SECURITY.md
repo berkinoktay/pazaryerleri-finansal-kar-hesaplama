@@ -361,7 +361,7 @@ The backend currently uses the `postgres` role via Prisma, so RLS does not filte
 
 - Blocks direct psql access to the database
 - Blocks realtime subscribers from reading any tenant data
-- Blocks edge functions using the anon key from reading cross-tenant rows
+- Blocks anon-key clients from reading cross-tenant rows
 - Protects against future code paths that use a non-superuser connection
 
 Phase B (future plan) moves backend queries through a per-request `authenticated` role scoped via transaction, so RLS also filters backend queries directly. Deferred until service-function count grows and the refactor has a clean shape.

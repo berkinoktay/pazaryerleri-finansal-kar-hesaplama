@@ -1,8 +1,8 @@
 // Public API of the Trendyol order-sync integration. Exposes an async
 // generator that pages through /integration/order/sellers/{supplierId}/orders
 // (getShipmentPackages), maps each batch to GROSS (KDV-dahil) DTOs, and stops
-// when the time window is exhausted. Has no DB or Prisma awareness — the caller
-// (OrderSyncService) handles upsert + applyEstimateOnOrderCreate.
+// when the time window is exhausted. Has no DB or Prisma awareness; the caller
+// (OrderSyncService) handles the upsert.
 //
 // Source-of-truth for endpoint shape:
 //   docs/integrations/trendyol/research/2026-05-18-hakedis-bulgulari.md §7
@@ -18,7 +18,6 @@ import type { StoreEnvironment } from '@pazarsync/db';
 import { syncLog } from '@pazarsync/sync-core';
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
 
-import { TRENDYOL_COMMISSION_VAT_RATE } from './constants';
 import { fetchOnce, type FetcherDeps } from './fetch-once';
 import { baseUrlFor } from './headers';
 import type {
@@ -42,10 +41,9 @@ import type {
  */
 export const ORDERS_PAGE_SIZE = 200;
 
-// Commission VAT rate is DB-driven (denetim A #331) — resolved by the caller
-// and passed in as `commissionVatRate`; defaults to TRENDYOL_COMMISSION_VAT_RATE
-// (the estimate fallback). In the GROSS mapper this rate is carried verbatim on
-// each line (`commissionVatRate`); the net/KDV split is derived downstream.
+// Trendyol stamps shipmentPackageId 0 on a package it has not created yet (an
+// Awaiting order before the payment check) — the mapper flags these as pending.
+const UNASSIGNED_PACKAGE_ID = 0;
 
 // ─── Request URL building ───────────────────────────────────────────────
 
@@ -173,10 +171,7 @@ export function computeDeliveredOnTime(
   return actualDeliveryDate.getTime() <= agreedDeliveryDate.getTime();
 }
 
-export function mapTrendyolShipmentPackage(
-  pkg: TrendyolShipmentPackage,
-  commissionVatRate: number = TRENDYOL_COMMISSION_VAT_RATE,
-): MappedOrder {
+export function mapTrendyolShipmentPackage(pkg: TrendyolShipmentPackage): MappedOrder {
   const deliveredEvent = (pkg.packageHistories ?? []).find((h) => h.status === 'Delivered');
   const actualDeliveryDate =
     deliveredEvent !== undefined ? epochMsToDate(deliveredEvent.createdDate) : null;
@@ -194,7 +189,7 @@ export function mapTrendyolShipmentPackage(
   const deliveredOnTime = computeDeliveredOnTime(agreedDeliveryDate, actualDeliveryDate);
 
   const mappedLines: MappedOrderLine[] = pkg.lines.map((line) =>
-    mapLine(line, { shipmentPackageId: pkg.shipmentPackageId }, commissionVatRate),
+    mapLine(line, { shipmentPackageId: pkg.shipmentPackageId }),
   );
 
   // Sipariş başlığı paket toplamlarından DOĞRUDAN gelir (spec §4) — satır
@@ -241,6 +236,10 @@ export function mapTrendyolShipmentPackage(
     // Split artifact: UnPacked = paket bozuldu, içerik çocuk paketlerde.
     // intakeOrder bu bayrakla kaydı (orders + buffer) SİLER (research 2026-06-09).
     dematerialized: pkg.status.toUpperCase() === 'UNPACKED',
+    // shipmentPackageId 0 means Trendyol has not created the package yet (an
+    // Awaiting order before the payment check). Such a package cannot be keyed
+    // (every one maps to platformOrderId '0'), so intakeOrder skips it.
+    packagePending: pkg.shipmentPackageId <= UNASSIGNED_PACKAGE_ID,
     // Sipariş başlığı — paket toplamlarından DOĞRUDAN (spec §4, yeniden-kurma yok).
     saleGross: packageSale.toFixed(2),
     saleVat: saleVat.toDecimalPlaces(2).toFixed(2),
@@ -255,7 +254,7 @@ export function mapTrendyolShipmentPackage(
     actualShipDate,
     fastDelivery: pkg.fastDelivery,
     fastDeliveryType: normalizeFastDeliveryType(pkg.fastDeliveryType),
-    micro: pkg.micro,
+    isExportSale: pkg.micro,
     // PR-8 kargo alanları (research 2026-06-09). cargoTrackingNumber/cargoDeci
     // raw String() — toFixed KULLANMA (tracking no bir kimliktir, desi Trendyol
     // ne verdiyse o). originShipmentDate true UTC → RAW (normalize edilmez;
@@ -273,7 +272,6 @@ export function mapTrendyolShipmentPackage(
 export function mapLine(
   line: TrendyolOrderLine,
   ctx: { shipmentPackageId: number },
-  commissionVatRate: number = TRENDYOL_COMMISSION_VAT_RATE,
 ): MappedOrderLine {
   // Defensive sparse-field handling — PR-A regression hotfix.
   //
@@ -290,10 +288,9 @@ export function mapLine(
   // but a defensive mapper keeps sync resilient if Trendyol ever ships a sparse
   // order in prod.
   //
-  // Fallback: `?? 0` keeps the line in the batch with effective-zero values.
-  // applyEstimateOnOrderCreate runs with conservative zeros; settlement
-  // reconciliation (PR-7) writes the real values when they land. Sentry/log
-  // signals the data gap upstream.
+  // Fallback: `?? 0` keeps the line in the batch with effective-zero values;
+  // settlement records correct the profit when they land. Sentry/log signals
+  // the data gap upstream.
   const missingFields: string[] = [];
   if (line.quantity === undefined || line.quantity === null) missingFields.push('quantity');
   if (line.lineUnitPrice === undefined || line.lineUnitPrice === null) {
@@ -348,21 +345,6 @@ export function mapLine(
   }
   lineSaleGross = Decimal.max(lineSaleGross, new Decimal(0));
 
-  // Komisyon — net-satış tabanı (#332), LİSTE üzerinden brüt + iade ayrı kolon.
-  // Trendyol komisyonu LİSTE fiyatından alır, satıcı-indirim payının komisyonunu
-  // İADE eder (research §7.3): commissionGross = commissionRate × lineListGross;
-  // refunded = commissionRate × lineSellerDiscountGross. effective komisyon =
-  // gross − refunded = (liste − indirim) × rate = effectiveSale × rate (panel/
-  // Trendyol gerçek değeri). DİKKAT: taban lineSaleGross OLAMAZ — o effective satış
-  // (indirim zaten düşülmüş) olduğundan refunded ikinci kez indirim düşerdi → komisyon
-  // bir kuruş eksik (çift-düşme regresyonu). commissionGross GROSS taşınır; net/KDV
-  // split downstream'de oran (commissionVatRate, DB-driven #331) ile türetilir.
-  const commissionGross = lineListGross.mul(commissionRate).div(100).toDecimalPlaces(2);
-  const refundedCommissionGross = lineSellerDiscountGross
-    .mul(commissionRate)
-    .div(100)
-    .toDecimalPlaces(2);
-
   return {
     barcode: line.barcode,
     quantity: safeQuantity,
@@ -371,11 +353,9 @@ export function mapLine(
     lineSaleGross: lineSaleGross.toFixed(2),
     lineSellerDiscountGross: lineSellerDiscountGross.toFixed(2),
     saleVatRate: new Decimal(safeVatRate).toString(),
+    // Raw line commission rate only; the profit engine computes the commission
+    // itself (VAT-inclusive sale x rate).
     commissionRate: commissionRate.toString(),
-    commissionGross: commissionGross.toFixed(2),
-    refundedCommissionGross: refundedCommissionGross.toFixed(2),
-    commissionVatRate: new Decimal(commissionVatRate).toString(),
-    categoryId: line.productCategoryId != null ? String(line.productCategoryId) : null,
     commissionKnown: line.commission !== undefined && line.commission !== null,
   };
 }
@@ -403,10 +383,7 @@ export interface MappedOrdersPage {
  * Map a full /orders page response: wraps each shipmentPackage and
  * preserves page meta for cursor advancement decisions in the caller.
  */
-export function mapTrendyolOrdersResponse(
-  raw: TrendyolOrdersResponse,
-  commissionVatRate: number = TRENDYOL_COMMISSION_VAT_RATE,
-): MappedOrdersPage {
+export function mapTrendyolOrdersResponse(raw: TrendyolOrdersResponse): MappedOrdersPage {
   return {
     pageMeta: {
       totalElements: raw.totalElements,
@@ -414,7 +391,7 @@ export function mapTrendyolOrdersResponse(
       page: raw.page,
       size: raw.size,
     },
-    batch: raw.content.map((pkg) => mapTrendyolShipmentPackage(pkg, commissionVatRate)),
+    batch: raw.content.map((pkg) => mapTrendyolShipmentPackage(pkg)),
   };
 }
 
@@ -439,13 +416,6 @@ export interface FetchShipmentPackagesOpts {
    * the decoded cursor so each invocation processes exactly one page.
    */
   initialPage?: number;
-  /**
-   * Commission VAT rate (%) for the KDV split. Resolve from the
-   * `COMMISSION_INVOICE`/`ALL` FeeDefinition (denetim A) and pass in. Omit to
-   * fall back to TRENDYOL_COMMISSION_VAT_RATE (estimate default, reconciled by
-   * settlement).
-   */
-  commissionVatRate?: number;
 }
 
 /**
@@ -491,7 +461,7 @@ export async function* fetchShipmentPackages(
     });
 
     const raw = await fetchOnce<TrendyolOrdersResponse>(url, deps);
-    const mapped = mapTrendyolOrdersResponse(raw, opts.commissionVatRate);
+    const mapped = mapTrendyolOrdersResponse(raw);
 
     if (totalElements === null) totalElements = mapped.pageMeta.totalElements;
     if (totalElements > ORDERS_V2_MAX_QUERY_WINDOW) {
@@ -574,13 +544,6 @@ export interface FetchShipmentPackagesStreamOpts {
   cursor?: string;
   /** Page size; defaults to ORDERS_PAGE_SIZE (200). */
   size?: number;
-  /**
-   * Commission VAT rate (%) for the KDV split. Resolve from the
-   * `COMMISSION_INVOICE`/`ALL` FeeDefinition (denetim A) and pass in. Omit to
-   * fall back to TRENDYOL_COMMISSION_VAT_RATE (estimate default, reconciled by
-   * settlement).
-   */
-  commissionVatRate?: number;
 }
 
 /** Yield shape per stream page — caller advances via the next cursor + flag. */
@@ -643,7 +606,7 @@ export async function* fetchShipmentPackagesStream(
     });
 
     const raw = await fetchOnce<TrendyolOrdersStreamResponse>(url, deps);
-    const batch = raw.content.map((pkg) => mapTrendyolShipmentPackage(pkg, opts.commissionVatRate));
+    const batch = raw.content.map((pkg) => mapTrendyolShipmentPackage(pkg));
 
     yield { batch, nextCursor: raw.nextCursor, hasMore: raw.hasMore };
 

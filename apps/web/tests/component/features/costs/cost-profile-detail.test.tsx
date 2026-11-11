@@ -55,10 +55,7 @@ const MOCK_PROFILE = {
   name: 'Hammadde COGS',
   type: 'COGS',
   amountGross: '25.50',
-  currency: 'TRY',
   vatRate: 18,
-  fxRateMode: 'AUTO',
-  manualFxRate: null,
   note: null,
   archivedAt: null,
   createdBy: null,
@@ -77,10 +74,7 @@ const MOCK_VERSIONS_RESPONSE = {
       name: 'Hammadde COGS',
       type: 'COGS',
       amountGross: '25.50',
-      currency: 'TRY',
       vatRate: 18,
-      fxRateMode: 'AUTO',
-      manualFxRate: null,
       note: null,
       archivedAt: null,
       changedFields: [],
@@ -97,8 +91,6 @@ const MOCK_VARIANTS_RESPONSE = {
   meta: { cursor: null, hasMore: false, total: 0 },
 };
 
-const MOCK_FX_RATES = { USD: null, EUR: null };
-
 // ─── Default MSW handlers for the detail page ────────────────────────────────
 
 function setupDefaultHandlers() {
@@ -113,9 +105,6 @@ function setupDefaultHandlers() {
     http.get(
       `http://localhost:3001/v1/organizations/${ORG_ID}/cost-profiles/${PROFILE_ID}/attached-variants`,
       () => HttpResponse.json(MOCK_VARIANTS_RESPONSE),
-    ),
-    http.get(`http://localhost:3001/v1/organizations/${ORG_ID}/fx-rates/latest`, () =>
-      HttpResponse.json(MOCK_FX_RATES),
     ),
   );
 }
@@ -186,9 +175,6 @@ describe('CostProfileDetail', () => {
       http.get(
         `http://localhost:3001/v1/organizations/${ORG_ID}/cost-profiles/${PROFILE_ID}/attached-variants`,
         () => HttpResponse.json(MOCK_VARIANTS_RESPONSE),
-      ),
-      http.get(`http://localhost:3001/v1/organizations/${ORG_ID}/fx-rates/latest`, () =>
-        HttpResponse.json(MOCK_FX_RATES),
       ),
     );
     renderWithIntl(<CostProfileDetail orgId={ORG_ID} profileId={PROFILE_ID} />);

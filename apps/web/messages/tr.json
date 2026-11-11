@@ -686,7 +686,6 @@
       "title": "Aktif organizasyon",
       "description": "Panel ve veriler bu organizasyona göre gösteriliyor.",
       "slugLabel": "Slug",
-      "currencyLabel": "Para birimi",
       "timezoneLabel": "Saat dilimi",
       "createdLabel": "Oluşturuldu"
     }
@@ -2148,7 +2147,7 @@
       },
       "badges": {
         "fastDelivery": "Hızlı",
-        "micro": "Mikro"
+        "exportSale": "Mikro"
       },
       "sla": {
         "onTime": {
@@ -2430,8 +2429,7 @@
         "namePlaceholder": "Organizasyonunuzun tam adı",
         "slug": "Kısa ad (slug)",
         "slugHint": "Kısa ad değiştirilemez.",
-        "timezone": "Saat dilimi",
-        "currency": "Para birimi"
+        "timezone": "Saat dilimi"
       },
       "accounting": {
         "title": "Muhasebe ayarları",
@@ -2478,16 +2476,12 @@
       },
       "formats": {
         "title": "Biçimler",
-        "description": "Para birimi, sayı ve tarih gösterimini özelleştirin.",
-        "currencyLabel": "Para birimi gösterimi",
-        "currencyDescription": "Tutarların yanında gösterilecek para birimi sembolünü seçin.",
+        "description": "Sayı ve tarih gösterimini özelleştirin.",
         "numberLabel": "Sayı biçimi",
         "numberDescription": "Binlik ayraç ve ondalık gösterimini seçin.",
         "dateLabel": "Tarih biçimi",
         "dateDescription": "Tarihlerin nasıl gösterileceğini seçin.",
         "save": "Kaydet",
-        "currencyTRY": "₺ Türk Lirası",
-        "currencyUSD": "$ ABD Doları",
         "numberDotComma": "1.234,56 (nokta binlik, virgül ondalık)",
         "numberCommaPoint": "1,234.56 (virgül binlik, nokta ondalık)",
         "dateDMY": "31.12.2026 (gün.ay.yıl)",
@@ -3193,15 +3187,6 @@
       "MARKETING": "Pazarlama",
       "OTHER": "Diğer"
     },
-    "currency": {
-      "TRY": "TL",
-      "USD": "USD",
-      "EUR": "EUR"
-    },
-    "fxMode": {
-      "AUTO": "Otomatik (TCMB)",
-      "MANUAL": "Manuel kur"
-    },
     "vatRates": {
       "0": "%0",
       "1": "%1",
@@ -3215,31 +3200,18 @@
         "name": "Maliyet adı",
         "namePlaceholder": "ör. Hammadde COGS",
         "type": "Tür",
-        "currency": "Para birimi",
         "amountGross": "Maliyet (KDV dahil)",
         "amountGrossHelp": "Tedarikçi faturanızdaki KDV-dahil tutarı girin.",
         "amountPlaceholder": "0.00",
         "vatRate": "KDV oranı",
-        "fxRateMode": "Kur modu",
-        "manualFxRate": "Manuel kur (TRY)",
-        "manualFxRatePlaceholder": "ör. 35.50",
         "note": "Not",
         "notePlaceholder": "İsteğe bağlı açıklama…"
-      },
-      "fxPreview": {
-        "label": "Güncel TRY karşılığı",
-        "source": "Kaynak",
-        "noRate": "Kur bilgisi yükleniyor…",
-        "result": "{amount} × {rate} = {result}"
       },
       "validation": {
         "nameRequired": "Maliyet adı zorunludur.",
         "nameTooLong": "Maliyet adı en fazla 100 karakter olabilir.",
         "amountRequired": "Tutar zorunludur.",
-        "amountNegative": "Tutar 0 veya daha büyük olmalıdır.",
-        "manualFxRateRequired": "MANUAL modunda kur değeri zorunludur.",
-        "manualFxRatePositive": "Kur değeri 0'dan büyük olmalıdır.",
-        "tryMustUseAuto": "TL para birimi her zaman Otomatik kur kullanır."
+        "amountNegative": "Tutar 0 veya daha büyük olmalıdır."
       },
       "submit": "Kaydet",
       "cancel": "Vazgeç"
@@ -3299,7 +3271,15 @@
           "restored": "Geri yüklendi"
         },
         "changedBy": "Değiştiren: {userId}",
-        "system": "Sistem"
+        "system": "Sistem",
+        "fields": {
+          "name": "Ad",
+          "type": "Tür",
+          "amountGross": "Tutar",
+          "vatRate": "KDV oranı",
+          "note": "Not",
+          "archivedAt": "Arşivlendi"
+        }
       },
       "attachedVariants": {
         "empty": {
@@ -3712,14 +3692,6 @@
         "title": "Sipariş kalemi yok",
         "description": "Sipariş senkronu kalemleri henüz çekmedi."
       },
-      "columns": {
-        "variant": "Varyant",
-        "quantity": "Adet",
-        "lineSaleGross": "Satır tutarı (KDV dahil)",
-        "commissionGross": "Komisyon (KDV dahil)",
-        "refundedCommissionGross": "İade kom. (KDV dahil)",
-        "unitCostSnapshotGross": "Maliyet (KDV dahil)"
-      },
       "unknownVariant": "Varyant bağlı değil",
       "costMissing": "Maliyet eksik",
       "costFrozen": "Kâr hesabı dışı"
@@ -3753,6 +3725,17 @@
     "returnBanner": {
       "title": "Bu siparişte iade var",
       "description": "{count, plural, other {# iade talebi}} işlendi; kâr dökümündeki tutarlar iade sonrası net gösterilir."
+    },
+    "profitIssues": {
+      "unknownCarrier": "bilinmeyen taşıyıcı",
+      "CARRIER_NOT_RECOGNIZED": {
+        "title": "Kargo tahmini 0 TL",
+        "description": "Trendyol'un bildirdiği taşıyıcı ({providerName}) tanınmadığı için kargo tahmini yapılamadı. Kargo faturası gelince gerçek tutar bu siparişe yansır."
+      },
+      "SELLER_CARGO_AGREEMENT_ESTIMATE": {
+        "title": "Kargo tutarı tahmin olarak kalacak",
+        "description": "Bu sipariş kendi kargo anlaşmanla gönderildi; Trendyol bunun için kargo faturası kesmez. Gerçek tutarı görmek için kargo ayarlarından kendi tarifeni gir."
+      }
     }
   },
   "livePerformance": {

@@ -50,8 +50,8 @@ const createOrganizationRoute = createRoute({
   description:
     'Creates a new organization and attaches the authenticated user as its OWNER ' +
     'in a single transaction. Slug is auto-generated from the name (slugify + ' +
-    'collision handling). currency defaults to TRY, timezone to Europe/Istanbul — ' +
-    'these can be edited later via organization settings.',
+    'collision handling). timezone defaults to Europe/Istanbul — ' +
+    'it can be edited later via organization settings.',
   security: [{ bearerAuth: [] }],
   request: {
     body: {

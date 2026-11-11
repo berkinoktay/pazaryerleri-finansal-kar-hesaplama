@@ -1,13 +1,14 @@
-// Claims handler return-estimate backstop integration test — return-into-profit Task 7.
+// Claims handler -> profit recompute queue integration test (phase 3B, Task 5).
 //
-// Verifies that when processClaimsChunk processes a claim with at least one
-// Accepted item, the trigger fires estimateReturnOnClaim inside the same
-// transaction, producing the ESTIMATE return-leg OrderFee rows.
-//
-// Mirrors the DB-setup + fetcher-mock pattern from claims-handler.test.ts.
-// Adds the seeding that estimateReturnOnClaim requires: FeeDefinitions (PSF /
-// STOPPAGE / SHIPPING / RETURN_SHIPPING), a ShippingCarrier + DesiTariff, and
-// a cost snapshot on the OrderItem.
+// The claims handler no longer calls estimateReturnOnClaim. Instead a claim upsert
+// that changes the claim's profit inputs enqueues a profit recompute for the claim's
+// order (and, on a re-anchor, the order the claim left), and the recompute tick turns
+// an accepted claim into the return legs. This suite verifies:
+//   (1) creating a claim and changing an item status enqueue the order, an unchanged
+//       re-scan enqueues nothing, and a re-anchor enqueues BOTH the old and the new
+//       order;
+//   (2) draining an order with an accepted claim writes the SALE_RETURN and
+//       COMMISSION_REFUND ESTIMATE profit lines for the returned item.
 //
 // Requires: `supabase start` + `pnpm db:push`.
 // Run: pnpm --filter sync-worker test:integration -- claims-return-estimate
@@ -16,23 +17,30 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import { encryptCredentials } from '@pazarsync/sync-core';
+import { ProfitLineCertainty, ProfitLineType, ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { FetchClaimsOpts, TrendyolClaim } from '@pazarsync/marketplace';
+import { drainProfitRecomputeQueue } from '@pazarsync/profit';
+import { encryptCredentials } from '@pazarsync/sync-core';
 
 import { processClaimsChunk, type ClaimsFetchers } from '../../src/handlers/claims';
 
 import {
+  createCostProfile,
   createMembership,
   createOrganization,
   createUserProfile,
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
+import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
 
 // ─── Constants ────────────────────────────────────────────────────────────
 
 const OUTBOUND_PACKAGE_ID = 73_001_234;
+const REANCHOR_OUTBOUND_PACKAGE_ID = 73_009_999;
 const ORDER_NUMBER = 'RET-TEST-001';
+const REANCHOR_ORDER_NUMBER = 'RET-TEST-REANCHOR';
 const PLATFORM_LINE_ID = 88_991_122n;
+const ITEM_BARCODE = 'RET-EST-BARCODE';
 const CLAIM_ITEM_ID_ACCEPTED = 'claim-item-accepted-001';
 const TRENDYOL_CLAIM_ID = 'eabc1234-return-estimate-test';
 
@@ -47,71 +55,21 @@ interface ScenarioCtx {
 }
 
 /**
- * Seeds the FeeDefinition rows estimateReturnOnClaim and applyEstimateOnOrderCreate
- * need. Must be called after truncateAll() so there are no stale rows.
+ * A Trendyol store with one costed order: a catalog variant with an active cost
+ * profile version (so the loader costs it), the SENDEOMP carrier for return
+ * shipping, and the production fee definitions. The order line carries its own
+ * commission rate so the estimate writes a COMMISSION line (and its refund leg).
  */
-async function seedFeeDefinitions(): Promise<void> {
-  await prisma.feeDefinition.createMany({
-    data: [
-      {
-        platform: 'TRENDYOL',
-        feeType: 'PLATFORM_SERVICE',
-        displayName: 'Platform Hizmet Bedeli',
-        calculationKind: 'FIXED',
-        fixedAmountNet: new Decimal('9.16'),
-        defaultVatRate: new Decimal('20.00'),
-        effectiveFrom: new Date('2024-01-01'),
-      },
-      {
-        platform: 'TRENDYOL',
-        feeType: 'STOPPAGE',
-        displayName: 'E-ticaret Stopaji',
-        calculationKind: 'RATE_OF_SALE',
-        rateOfSale: new Decimal('0.01'),
-        defaultVatRate: new Decimal('0.00'),
-        effectiveFrom: new Date('2024-01-01'),
-      },
-      {
-        platform: 'TRENDYOL',
-        feeType: 'SHIPPING',
-        displayName: 'Kargo Bedeli',
-        calculationKind: 'FORMULA',
-        defaultVatRate: new Decimal('20.00'),
-        effectiveFrom: new Date('2024-01-01'),
-      },
-      {
-        platform: 'TRENDYOL',
-        feeType: 'RETURN_SHIPPING',
-        displayName: 'Iade Kargo Bedeli',
-        calculationKind: 'FORMULA',
-        defaultVatRate: new Decimal('20.00'),
-        effectiveFrom: new Date('2024-01-01'),
-      },
-    ],
-  });
-}
-
-/**
- * Returns the seeded SENDEOMP carrier id for store.defaultShippingCarrierId, so
- * RETURN_SHIPPING can be estimated. Shipping reference data is a READ-ONLY
- * fixture seeded once by globalSetup (@pazarsync/db/test-support) — tests never
- * create or truncate it. cargoDeci=5 → ceil(5)=5 → SENDEOMP desi tariff at
- * desi=5 (the exact amount is not asserted here; only the leg's presence is).
- */
-async function getSeededCarrierId(): Promise<string> {
-  const carrier = await prisma.shippingCarrier.findFirstOrThrow({ where: { code: 'SENDEOMP' } });
-  return carrier.id;
-}
-
 async function buildScenario(): Promise<ScenarioCtx> {
   const user = await createUserProfile();
   const org = await createOrganization();
   await createMembership(org.id, user.id);
 
-  await seedFeeDefinitions();
-  const carrierId = await getSeededCarrierId();
+  await ensureFeeDefinitions();
 
-  const credentials = encryptCredentials({ supplierId: '5001', apiKey: 'k', apiSecret: 's' });
+  const carrier = await prisma.shippingCarrier.findFirstOrThrow({
+    where: { platform: 'TRENDYOL', code: 'SENDEOMP' },
+  });
   const store = await prisma.store.create({
     data: {
       organizationId: org.id,
@@ -119,14 +77,52 @@ async function buildScenario(): Promise<ScenarioCtx> {
       platform: 'TRENDYOL',
       environment: 'SANDBOX',
       externalAccountId: '5001',
-      credentials,
+      credentials: encryptCredentials({ supplierId: '5001', apiKey: 'k', apiSecret: 's' }),
       status: 'ACTIVE',
       shippingTariffSource: 'TRENDYOL_CONTRACT',
-      defaultShippingCarrierId: carrierId,
+      defaultShippingCarrierId: carrier.id,
     },
   });
 
-  // Per-unit: sale 1100 (VAT 10%), cost 500, commission 110 (VAT 20%).
+  const product = await prisma.product.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      platformContentId: BigInt(Math.floor(Math.random() * 1_000_000_000)),
+      productMainId: 'pm-return-estimate',
+      title: 'Return Estimate Product',
+    },
+  });
+  const costProfile = await createCostProfile(org.id, { storeId: store.id, amountGross: '500.00' });
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: costProfile.id,
+      organizationId: org.id,
+      version: 1,
+      name: costProfile.name,
+      type: costProfile.type,
+      amountGross: costProfile.amountGross,
+      vatRate: costProfile.vatRate,
+      changedFields: [],
+      changedAt: new Date('2024-01-01T00:00:00Z'),
+    },
+  });
+  const variant = await prisma.productVariant.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      productId: product.id,
+      platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000_000)),
+      barcode: ITEM_BARCODE,
+      stockCode: 'sk-return-estimate',
+      salePrice: '1100',
+      listPrice: '1100',
+      syncedDimensionalWeight: '5',
+      costProfileLinks: { create: { organizationId: org.id, profileId: costProfile.id } },
+    },
+  });
+
+  // Per-unit: sale 1100 (VAT 10%), commission 10%, cost 500 (via the profile).
   const order = await prisma.order.create({
     data: {
       organizationId: org.id,
@@ -145,17 +141,15 @@ async function buildScenario(): Promise<ScenarioCtx> {
     data: {
       orderId: order.id,
       organizationId: org.id,
+      productVariantId: variant.id,
+      barcode: ITEM_BARCODE,
+      platformLineId: PLATFORM_LINE_ID,
       quantity: 1,
+      orderCommissionRatePct: new Decimal('10.00'),
       lineListGross: new Decimal('1100.00'),
       lineSaleGross: new Decimal('1100.00'),
+      lineSellerDiscountGross: new Decimal('0.00'),
       saleVatRate: new Decimal('10.00'),
-      commissionRate: new Decimal('10.00'),
-      commissionGross: new Decimal('110.00'),
-      commissionVatRate: new Decimal('20.00'),
-      refundedCommissionGross: new Decimal('0.00'),
-      unitCostSnapshotGross: new Decimal('500.00'),
-      unitCostSnapshotVatRate: new Decimal('10.00'),
-      platformLineId: PLATFORM_LINE_ID,
     },
   });
 
@@ -240,7 +234,7 @@ async function runChunk(syncLogId: string, claims: TrendyolClaim[]): Promise<voi
 
 // ─── Tests ────────────────────────────────────────────────────────────────
 
-describe('processClaimsChunk — return estimate backstop (Task 7)', () => {
+describe('processClaimsChunk — profit recompute queue (Task 5)', () => {
   beforeAll(async () => {
     await ensureDbReachable();
   });
@@ -249,121 +243,95 @@ describe('processClaimsChunk — return estimate backstop (Task 7)', () => {
     await truncateAll();
   });
 
-  it('fires estimateReturnOnClaim when the synced claim has an Accepted item — writes REFUND_DEDUCTION ESTIMATE fee', async () => {
+  it('enqueues the order on create and on a status change, and both orders on a re-anchor', async () => {
     const ctx = await buildScenario();
 
-    await runChunk(ctx.syncLogId, [makeAcceptedClaim()]);
-
-    // The trigger must have fired: at minimum a REFUND_DEDUCTION ESTIMATE
-    // fee row must exist for the order (proves estimateReturnOnClaim ran).
-    const refundFee = await prisma.orderFee.findFirst({
-      where: { orderId: ctx.orderId, feeType: 'REFUND_DEDUCTION', source: 'ESTIMATE' },
-      select: { id: true, direction: true, amountGross: true },
-    });
-    expect(refundFee).not.toBeNull();
-    expect(refundFee?.direction).toBe('DEBIT');
-    // Full 1-unit return: refund = lineSaleGross (1100.00).
-    expect(refundFee?.amountGross.toFixed(2)).toBe('1100.00');
-  });
-
-  it('writes all 4 ESTIMATE return-leg fees and makes estimatedNetProfit negative', async () => {
-    const ctx = await buildScenario();
-
-    await runChunk(ctx.syncLogId, [makeAcceptedClaim()]);
-
-    const returnFees = await prisma.orderFee.findMany({
-      where: {
-        orderId: ctx.orderId,
-        source: 'ESTIMATE',
-        feeType: {
-          in: ['REFUND_DEDUCTION', 'COMMISSION_REFUND', 'COST_RETURN', 'RETURN_SHIPPING'],
-        },
-      },
-      select: { feeType: true, direction: true, amountGross: true },
-    });
-
-    // All 4 return legs must be written.
-    expect(returnFees).toHaveLength(4);
-    const byType = new Map(returnFees.map((f) => [f.feeType, f]));
-    expect(byType.has('REFUND_DEDUCTION')).toBe(true);
-    expect(byType.has('COMMISSION_REFUND')).toBe(true);
-    expect(byType.has('COST_RETURN')).toBe(true);
-    expect(byType.has('RETURN_SHIPPING')).toBe(true);
-
-    // Directions follow the fold contract.
-    expect(byType.get('REFUND_DEDUCTION')?.direction).toBe('DEBIT');
-    expect(byType.get('COMMISSION_REFUND')?.direction).toBe('CREDIT');
-    expect(byType.get('COST_RETURN')?.direction).toBe('CREDIT');
-    expect(byType.get('RETURN_SHIPPING')?.direction).toBe('DEBIT');
-
-    // estimatedNetProfit should be recomputed and be negative (return ate revenue).
-    const order = await prisma.order.findUniqueOrThrow({ where: { id: ctx.orderId } });
-    expect(order.estimatedNetProfit).not.toBeNull();
-    expect(order.estimatedNetProfit!.toNumber()).toBeLessThan(0);
-  });
-
-  it('does NOT trigger for a claim with only WaitingInAction items — no ESTIMATE return fees', async () => {
-    const ctx = await buildScenario();
-
-    const waitingClaim = makeAcceptedClaim();
-    for (const group of waitingClaim.items ?? []) {
+    // Creating a claim enqueues the order whatever its item statuses are.
+    const waiting = makeAcceptedClaim();
+    for (const group of waiting.items ?? []) {
       for (const ci of group.claimItems) {
         ci.claimItemStatus = { name: 'WaitingInAction' };
         ci.resolved = false;
         ci.acceptedBySeller = false;
       }
     }
-
-    await runChunk(ctx.syncLogId, [waitingClaim]);
-
-    // Claim is written, but no ESTIMATE return-leg fees (trigger did not fire).
-    const claim = await prisma.orderClaim.findFirst({
-      where: { trendyolClaimId: TRENDYOL_CLAIM_ID },
+    await runChunk(ctx.syncLogId, [waiting]);
+    const firstQueued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: ctx.orderId },
     });
-    expect(claim).not.toBeNull();
+    expect(firstQueued?.reason).toBe(ProfitRecomputeReason.CLAIM_CHANGED);
 
-    const returnFees = await prisma.orderFee.findMany({
-      where: {
-        orderId: ctx.orderId,
-        source: 'ESTIMATE',
-        feeType: {
-          in: ['REFUND_DEDUCTION', 'COMMISSION_REFUND', 'COST_RETURN', 'RETURN_SHIPPING'],
-        },
+    // An unchanged second scan leaves the queue empty.
+    await prisma.profitRecomputeRequest.deleteMany({ where: { storeId: ctx.storeId } });
+    await runChunk(ctx.syncLogId, [waiting]);
+    expect(await prisma.profitRecomputeRequest.count({ where: { storeId: ctx.storeId } })).toBe(0);
+
+    // A status change (WaitingInAction -> Accepted) enqueues the order again.
+    await runChunk(ctx.syncLogId, [makeAcceptedClaim()]);
+    const statusQueued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: ctx.orderId },
+    });
+    expect(statusQueued?.reason).toBe(ProfitRecomputeReason.CLAIM_CHANGED);
+
+    // Clear the queue, then move the SAME Trendyol claim onto a second order of the
+    // same store -> the re-anchor enqueues BOTH the old and the new order.
+    await prisma.profitRecomputeRequest.deleteMany({ where: { storeId: ctx.storeId } });
+    const secondOrder = await prisma.order.create({
+      data: {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        platformOrderId: REANCHOR_OUTBOUND_PACKAGE_ID.toString(),
+        platformOrderNumber: REANCHOR_ORDER_NUMBER,
+        orderDate: new Date(),
+        status: 'DELIVERED',
+        saleGross: new Decimal('1100.00'),
+        saleVat: new Decimal('100.00'),
       },
     });
-    expect(returnFees).toHaveLength(0);
+
+    await runChunk(ctx.syncLogId, [
+      makeAcceptedClaim({
+        orderOutboundPackageId: REANCHOR_OUTBOUND_PACKAGE_ID,
+        orderNumber: REANCHOR_ORDER_NUMBER,
+      }),
+    ]);
+
+    const oldQueued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: ctx.orderId },
+    });
+    const newQueued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: secondOrder.id },
+    });
+    expect(oldQueued?.reason).toBe(ProfitRecomputeReason.CLAIM_CHANGED);
+    expect(newQueued?.reason).toBe(ProfitRecomputeReason.CLAIM_CHANGED);
   });
 
-  it('re-scan with Accepted item is idempotent — ESTIMATE fees are updated, not duplicated', async () => {
+  it('recomputes an accepted return into return lines through the queue', async () => {
     const ctx = await buildScenario();
 
-    // First scan: trigger fires, fees are created.
     await runChunk(ctx.syncLogId, [makeAcceptedClaim()]);
 
-    const countAfterFirst = await prisma.orderFee.count({
+    // The claim upsert enqueued the order; no legacy OrderFee is written anymore.
+    const queued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: ctx.orderId },
+    });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.CLAIM_CHANGED);
+
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+
+    // The drain read the accepted claim item and wrote the return legs as ESTIMATE
+    // profit lines for the returned item (no settlement yet).
+    const returnLines = await prisma.profitLine.findMany({
       where: {
         orderId: ctx.orderId,
-        source: 'ESTIMATE',
-        feeType: {
-          in: ['REFUND_DEDUCTION', 'COMMISSION_REFUND', 'COST_RETURN', 'RETURN_SHIPPING'],
-        },
+        orderItemId: ctx.orderItemId,
+        certainty: ProfitLineCertainty.ESTIMATE,
+        type: { in: [ProfitLineType.SALE_RETURN, ProfitLineType.COMMISSION_REFUND] },
       },
+      select: { type: true },
     });
-
-    // Second scan: trigger fires again (idempotent — same 4 rows, no duplicates).
-    await runChunk(ctx.syncLogId, [makeAcceptedClaim()]);
-
-    const countAfterSecond = await prisma.orderFee.count({
-      where: {
-        orderId: ctx.orderId,
-        source: 'ESTIMATE',
-        feeType: {
-          in: ['REFUND_DEDUCTION', 'COMMISSION_REFUND', 'COST_RETURN', 'RETURN_SHIPPING'],
-        },
-      },
-    });
-
-    expect(countAfterFirst).toBe(4);
-    expect(countAfterSecond).toBe(4);
+    const types = new Set(returnLines.map((line) => line.type));
+    expect(types.has(ProfitLineType.SALE_RETURN)).toBe(true);
+    expect(types.has(ProfitLineType.COMMISSION_REFUND)).toBe(true);
   });
 });

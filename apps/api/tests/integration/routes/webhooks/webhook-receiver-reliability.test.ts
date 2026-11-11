@@ -222,7 +222,7 @@ describe('Webhook receiver reliability (fix/webhook-receiver-reliability)', () =
     // it and the calculable-barcode order is intaken as an estimate. The payload
     // still carries package-level totals (packageTotalPrice/packageGrossAmount =
     // 120), so the ORDER header saleGross is 120 (header-derived) — but the LINE
-    // money is sparse: lineGrossAmount ?? 0 → zero commission base → commissionGross 0.
+    // money is sparse: lineGrossAmount ?? 0 → zero list gross on the line.
     const sparse = makeWebhookPayload({
       lines: [
         {
@@ -250,12 +250,12 @@ describe('Webhook receiver reliability (fix/webhook-receiver-reliability)', () =
     });
     // Header total comes from packageTotalPrice (present), NOT from the sparse line.
     expect(order.saleGross?.toNumber()).toBe(120);
-    // Sparse line → lineGrossAmount ?? 0 → zero list gross → zero commission estimate.
+    // Sparse line → lineGrossAmount ?? 0 → zero list gross; the line's own raw
+    // commission rate is still stored.
     expect(order.items).toHaveLength(1);
     const [item] = order.items;
     expect(item?.lineListGross.toNumber()).toBe(0);
-    expect(item?.commissionGross.toNumber()).toBe(0);
-    expect(item?.estimatedCommissionGross?.toNumber()).toBe(0);
+    expect(item?.orderCommissionRatePct?.toNumber()).toBe(10);
   });
 
   it('(a2b) sparse line AND no package totals → zero-revenue order intakes with no Decimal crash', async () => {

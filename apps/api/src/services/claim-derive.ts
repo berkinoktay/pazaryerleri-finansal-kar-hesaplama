@@ -5,6 +5,8 @@
 // terminal values participate here because derivation runs on resolved
 // claims (resolved === every item terminal — the CLAIMS sync invariant).
 
+import { CLAIM_ITEM_STATUS_ACCEPTED } from '@pazarsync/marketplace';
+
 export type DerivedClaimStatus = 'OPEN' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED' | 'MIXED';
 export type ClaimScope = 'FULL' | 'PARTIAL';
 
@@ -19,7 +21,7 @@ export function deriveClaimStatus(
   if (!resolved) return 'OPEN';
   const unique = new Set(itemStatuses);
   if (unique.size === 1) {
-    if (unique.has('Accepted')) return 'ACCEPTED';
+    if (unique.has(CLAIM_ITEM_STATUS_ACCEPTED)) return 'ACCEPTED';
     if (unique.has('Rejected')) return 'REJECTED';
     if (unique.has('Cancelled')) return 'CANCELLED';
   }

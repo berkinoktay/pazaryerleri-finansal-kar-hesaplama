@@ -1,22 +1,6 @@
-import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
-import {
-  deriveCalculable,
-  feeToProfitInputFee,
-} from '../../../src/services/product-pricing-assembly';
-
-const D = (v: string) => new Decimal(v);
-
-describe('feeToProfitInputFee', () => {
-  it('converts a NET shipping amount to a GROSS DEBIT fee with embedded VAT', () => {
-    const fee = feeToProfitInputFee(D('40'), D('20'), 'SHIPPING');
-    expect(fee.type).toBe('SHIPPING');
-    expect(fee.direction).toBe('DEBIT');
-    expect(fee.gross.toFixed(2)).toBe('48.00'); // 40 × 120/100
-    expect(fee.vat.toFixed(2)).toBe('8.00'); // grossToVat(48,20)
-  });
-});
+import { deriveCalculable } from '../../../src/services/product-pricing-assembly';
 
 describe('deriveCalculable', () => {
   it('true only when cost, shipping and commission are all OK', () => {

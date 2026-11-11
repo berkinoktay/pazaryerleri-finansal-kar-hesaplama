@@ -1,14 +1,12 @@
 /**
- * Paylaşılan kargo tarife çözümleyici — variant-level (apps/api products list)
- * ve order-level (profit estimate) estimator'ların ORTAK çekirdeği.
+ * Barem-vs-desi shipping tariff resolver backed by the tariff tables. Only the
+ * products list's variant estimator (apps/api shipping-estimator.service) uses it;
+ * the profit engine's pure counterpart is `resolveTrendyolShippingNet`.
  *
- * Verilen (carrier, desi, brüt-tutar, hızlı-teslim-uygunluğu, tariffSource) için
- * tek bir `ShippingEstimate` ya da uygunsuzluk nedeni döner. Barem-vs-desi karar
- * ağacı burada YAŞAR (tek doğruluk kaynağı); iki estimator yalnız girdileri
- * (variant.salePrice / desi  vs  order brüt toplamı / cargoDeci-veya-ortalama)
- * hazırlar.
+ * For a given (carrier, desi, gross amount, fast-delivery eligibility, tariffSource)
+ * it returns one `ShippingEstimate` or an unavailability reason.
  *
- * Saf-ish: yalnız tariff tablolarını `tx` üzerinden okur, yazmaz. decimal.js.
+ * Read-only: it reads the tariff tables through `tx` and never writes. decimal.js.
  */
 
 import { Decimal } from 'decimal.js';

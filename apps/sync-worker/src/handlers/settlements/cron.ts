@@ -1,6 +1,6 @@
 // Settlement cron module handler (PR-7 commit 8).
 //
-// One chunk = one full settlement window scan (3 settlements transactionTypes
+// One chunk = one full settlement window scan (6 settlements transactionTypes
 // + 3 otherfinancials types). Single-chunk semantics chosen because:
 //   - 60-day window total volume << orders epic's 90-day backfill
 //   - Per-row $transaction isolation already gives partial-fail recovery
@@ -27,21 +27,48 @@
 // chunk ends at `now`; the oldest chunk's start is clamped to
 // `now − SCAN_WINDOW_DAYS` if the slice would otherwise overshoot.
 //
-// 6h tick / 60d window overlap is ~59.75d. Handlers' idempotency anchors
-// (handleSale OrderItem update no-op; handleReturn externalRef.trendyolId
-// pre-insert check; handleCommissionInvoice null FK filter; PaymentOrder
-// confirmedAt null filter; fastDelivery derivedFrom marker) absorb the
-// re-poll without duplicates.
+// 6h tick / 60d window overlap is ~59.75d. The raw-record store is idempotent
+// on (store_id, family, record_id) (ingestFinanceRecords' ON CONFLICT DO
+// UPDATE), so a re-polled row updates its existing row instead of duplicating.
 //
-// Per-row resilience: each transaction wraps a single dispatch. A malformed
-// row logs + skips; the rest of the cycle continues. orders.ts pattern
-// mirror.
+// Phase 3B (two-phase outbox): every fetched row is stored verbatim as a
+// marketplace_finance_record and flagged bind_pending in one transaction
+// (ingestFinanceRecords). After that transaction commits, a separate bind pass
+// (bindPendingFinanceRecords, run on the root client after every batch and once more at
+// the end of the run) resolves the flagged rows to their orders and enqueues a profit
+// recompute, then clears the flag. A re-poll that finds a row unchanged stores nothing
+// and flags nothing, so it enqueues no recompute -- only inserted or changed rows reach
+// the queue, and binding after the store commit closes the race where a settlement is
+// stored before its order exists. The legacy per-row settlement and cargo-invoice
+// handlers and the end-of-cycle reconciliation bump were deleted in phase 5.
+//
+// Phase 3D pruning: the raw store is keyed by (store_id, family, record_id), and
+// Trendyol renews record ids (it did on 3 Aug 2026), so a renewed id lands as a second
+// row and the same sale is counted twice. After all slices, a scanned type is pruned only
+// when its scan came back complete (yielded >= totalElements over every slice), fully in
+// window, ingested every row, and actually saw at least one row: pruneUnseenFinanceRecords
+// then deletes the stored rows the scan no longer returned and enqueues their orders. A
+// type is left untouched (settlements.prune.skipped, reason chosen in precedence order)
+// when the scan was short (INCOMPLETE_SCAN), returned a row dated outside its slice window
+// (OUT_OF_WINDOW_ROW), had a row that finally failed to ingest (INGEST_FAILED), or came
+// back empty while rows are still stored in the window (EMPTY_SCAN). An empty scan with
+// nothing stored is the normal case for a rarely used type and is skipped silently. Cargo
+// invoice items are never pruned (their key is the invoice serial, not a renewable record
+// id). A thrown fetch error still fails the whole job as before, so no pruning runs on a
+// bad scan.
+//
+// Resilience: settlement and otherfinancials rows ingest in batches of
+// FINANCE_INGEST_BATCH_SIZE per transaction; a failed batch is retried row by row so one
+// malformed row logs + skips while the rest of the batch survives. A cargo invoice keeps
+// its own one-transaction-per-invoice path (its item fan-out would bloat a batch). A
+// heartbeat follows every batch. orders.ts pattern mirror.
 //
 // Dependency injection: `fetchers` parameter accepts mock fetchers in
 // tests; production calls use the @pazarsync/marketplace defaults.
 
 import { prisma } from '@pazarsync/db';
 import type { SyncLog } from '@pazarsync/db';
+import { FinanceRecordFamily } from '@pazarsync/db/enums';
 import {
   decryptStoreCredentials,
   fetchAllCargoInvoiceItems,
@@ -49,28 +76,69 @@ import {
   fetchSettlements,
   FINANCIAL_WINDOW_MAX_DAYS,
   getCargoInvoiceSerial,
+  isCompleteFinancialScan,
   type CargoInvoiceItem,
   type FetchCargoInvoiceItemsOpts,
   type FetchOtherFinancialsOpts,
   type FetchSettlementsOpts,
+  type FinancialScanSummary,
   type TrendyolFinancialTransaction,
 } from '@pazarsync/marketplace';
+import {
+  bindPendingFinanceRecords,
+  type FinanceRecordInput,
+  ingestFinanceRecords,
+  pruneUnseenFinanceRecords,
+  trendyolCargoInvoiceItemInputs,
+  trendyolOtherFinancialRecordInput,
+  trendyolSettlementRecordInput,
+} from '@pazarsync/profit';
 import { syncLog, syncLogService } from '@pazarsync/sync-core';
 import { computeOrdersCutoffMs } from '../orders';
-import { bumpReconciliationStatusForStore } from './status-bump';
-import { dispatchOtherFinancialRow, dispatchSettlementRow } from './dispatcher';
-import { handleCargoInvoiceItems } from './cargo-invoice-fees';
 import type { ChunkResult, ModuleHandler } from '../types';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const SCAN_WINDOW_DAYS = 60;
 
-// V1 happy path — research §3.3 confirmed only Sale/Discount/Return have
-// nonzero observations in 60-day windows. Rare types stay enumerated in
-// dispatcher.ts (audit log fall-through) but the cron loop skips them
-// for now to reduce API calls. They'll surface naturally once stage
-// produces concrete rows (PR-N follow-up).
-const SETTLEMENT_TYPES = ['Sale', 'Discount', 'Return'] as const;
+// Interactive-transaction budgets for a single raw-record store. Prisma's 5s default is
+// tight for a batch INSERT ... ON CONFLICT, so each ingest sets both explicitly. The
+// post-commit bind pass (bindPendingFinanceRecords) runs its own transactions on the root
+// client, never inside these.
+const INGEST_TX_MAX_WAIT_MS = 10_000;
+const INGEST_TX_TIMEOUT_MS = 30_000;
+// A cargo invoice can carry ~500 items, all stored in one transaction, so its ingest gets
+// a wider timeout than a single settlement/otherfinancials row.
+const CARGO_INVOICE_TX_TIMEOUT_MS = 60_000;
+// Settlement and otherfinancials rows ingest this many per transaction. A high-volume
+// store can return thousands of rows per window; one ingest per row would open thousands
+// of transactions. Cargo-invoice rows are excluded; they keep their own per-invoice path.
+const FINANCE_INGEST_BATCH_SIZE = 200;
+
+// One day of slack around the scan edges when deciding what to prune. Trendyol stamps
+// dates in Istanbul time as if they were UTC, so a row can read a few hours off from the
+// filter window we requested; that shift must not trip the per-row window guard. The same
+// one-day pad keeps the delete range (overallStartTime + pad, endDate - pad) one day
+// inside both scan edges, so a vendor filter that is itself shifted can never delete a row
+// it did not actually consider. See [[feedback_trendyol_orderdate_local_as_utc]].
+const FINANCE_PRUNE_EDGE_TOLERANCE_MS = 86_400_000;
+
+// Settlement transaction types scanned each window. The 3 Nov 2026 coupon-semantics probe
+// found coupons and discount reversals on live sellers (both prod and stage), so the scan
+// now pulls all six: a Coupon is a debt like a Discount (its amount is already inside the
+// Sale credit, so it nets out of the sale), and DiscountCancel / CouponCancel are credits
+// that give a discount or coupon back -- every reversal observed came with a Return and
+// reverses its return legs. Pruning (previous commit) covers these types too, so a renewed
+// id drops its stale row. The remaining rare types stay enumerated as UNVERIFIED in the
+// engine's settlement-records.ts record-kind map, but the cron loop still skips them until
+// live rows appear.
+const SETTLEMENT_TYPES = [
+  'Sale',
+  'Discount',
+  'Return',
+  'DiscountCancel',
+  'Coupon',
+  'CouponCancel',
+] as const;
 const OTHER_FINANCIAL_TYPES = ['PaymentOrder', 'Stoppage', 'DeductionInvoices'] as const;
 
 // ─── DI shape for fetchers (test-mockable) ──────────────────────────────
@@ -78,10 +146,10 @@ const OTHER_FINANCIAL_TYPES = ['PaymentOrder', 'Stoppage', 'DeductionInvoices'] 
 export interface SettlementsFetchers {
   fetchSettlements: (
     opts: FetchSettlementsOpts,
-  ) => AsyncGenerator<TrendyolFinancialTransaction, void>;
+  ) => AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary>;
   fetchOtherFinancials: (
     opts: FetchOtherFinancialsOpts,
-  ) => AsyncGenerator<TrendyolFinancialTransaction, void>;
+  ) => AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary>;
   /** PR-8: kargo faturasi item'lari — cron tx DISINDA ceker (ag cagrisi). */
   fetchCargoInvoiceItems: (opts: FetchCargoInvoiceItemsOpts) => Promise<CargoInvoiceItem[]>;
 }
@@ -91,6 +159,68 @@ const DEFAULT_FETCHERS: SettlementsFetchers = {
   fetchOtherFinancials,
   fetchCargoInvoiceItems: fetchAllCargoInvoiceItems,
 };
+
+/** A fetched finance row buffered for batch ingest, with the context a per-row log needs. */
+interface BufferedFinanceRow {
+  readonly input: FinanceRecordInput;
+  readonly rowId: string;
+  readonly transactionType: string;
+}
+
+/**
+ * One scanned (family, transactionType)'s pruning state, aggregated across every window
+ * slice. `seen` is every record id the scan returned (so a stored row NOT in it is a
+ * stale candidate); `complete` is the AND of every slice's completeness; `inWindow` is
+ * false once any returned row carried a date outside its slice window (plus tolerance);
+ * `ingestFailed` is true once any row of this type finally failed to ingest (a batch
+ * failure whose rows all survive the row-by-row retry is NOT a failure). Only a complete,
+ * in-window scan that ingested every row and saw at least one row may prune.
+ */
+interface FinancialScanState {
+  readonly family: FinanceRecordFamily;
+  readonly transactionType: string;
+  readonly seen: Set<string>;
+  complete: boolean;
+  inWindow: boolean;
+  ingestFailed: boolean;
+}
+
+/**
+ * Drains one scan generator through `next()` (not `for await`) so its RETURN value -- the
+ * FinancialScanSummary -- is read, calling `onRow` for every yielded row. The caller keeps
+ * its batching/flush exactly as before inside `onRow`.
+ */
+async function consumeFinancialScan(
+  generator: AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary>,
+  onRow: (row: TrendyolFinancialTransaction) => Promise<void>,
+): Promise<FinancialScanSummary> {
+  let next = await generator.next();
+  while (next.done !== true) {
+    await onRow(next.value);
+    next = await generator.next();
+  }
+  return next.value;
+}
+
+/**
+ * Records one fetched row against its type's scan state: its id joins `seen` (even if the
+ * ingest later fails, because a renewed id the vendor still returns is not stale), and
+ * `inWindow` is cleared if the row's transactionDate falls outside its slice window padded
+ * by FINANCE_PRUNE_EDGE_TOLERANCE_MS on each side.
+ */
+function recordScanRow(
+  state: FinancialScanState,
+  row: TrendyolFinancialTransaction,
+  chunkStart: Date,
+  chunkEnd: Date,
+): void {
+  state.seen.add(row.id);
+  const lowerMs = chunkStart.getTime() - FINANCE_PRUNE_EDGE_TOLERANCE_MS;
+  const upperMs = chunkEnd.getTime() + FINANCE_PRUNE_EDGE_TOLERANCE_MS;
+  if (row.transactionDate < lowerMs || row.transactionDate > upperMs) {
+    state.inWindow = false;
+  }
+}
 
 // ─── Handler ─────────────────────────────────────────────────────────────
 
@@ -133,6 +263,122 @@ export async function processSettlementsChunk(
 
   let totalProcessed = 0;
 
+  // Pruning state per scanned (family, transactionType), aggregated across every slice.
+  // CARGO_INVOICE_ITEM never gets a state here, so cargo items are never pruned.
+  const scanStates = new Map<string, FinancialScanState>();
+  const scanStateFor = (
+    family: FinanceRecordFamily,
+    transactionType: string,
+  ): FinancialScanState => {
+    const key = `${family}:${transactionType}`;
+    const existing = scanStates.get(key);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const created: FinancialScanState = {
+      family,
+      transactionType,
+      seen: new Set<string>(),
+      complete: true,
+      inWindow: true,
+      ingestFailed: false,
+    };
+    scanStates.set(key, created);
+    return created;
+  };
+
+  // Phase 2 of the outbox: after an ingest transaction commits, bind the rows it flagged
+  // and enqueue the orders they resolve to, on the root client OUTSIDE any ingest
+  // transaction. Accumulates the run totals; on failure it logs settlements.bind.failed and
+  // rethrows so the pending rows stay flagged and the job's retry machinery drives them
+  // (never swallowed).
+  let totalBound = 0;
+  let totalEnqueuedByBind = 0;
+  const runBindPass = async (): Promise<void> => {
+    try {
+      const { bound, enqueuedOrders } = await bindPendingFinanceRecords(prisma, {
+        organizationId: store.organizationId,
+        storeId: store.id,
+      });
+      totalBound += bound;
+      totalEnqueuedByBind += enqueuedOrders;
+    } catch (bindErr) {
+      syncLog.error('settlements.bind.failed', {
+        syncLogId: log.id,
+        storeId: store.id,
+        errorMessage: bindErr instanceof Error ? bindErr.message : String(bindErr),
+      });
+      throw bindErr;
+    }
+  };
+
+  // Ingest one buffered batch in a single transaction, counting its rows into
+  // totalProcessed. On any failure, log once (settlements.ingest.batch-failed) and retry
+  // the rows one by one in their own transactions, so a single bad row (e.g. a numeric
+  // overflow) never drops the rest of the batch. A row that still fails the row-by-row
+  // retry marks its type's scan state ingestFailed, so that type is not pruned this cycle.
+  // A heartbeat follows every batch. Every row in one call shares `state` (the batch is
+  // built inside a single type's loop).
+  const flushBatch = async (
+    rows: BufferedFinanceRow[],
+    chunkIdx: number,
+    state: FinancialScanState,
+  ): Promise<void> => {
+    if (rows.length === 0) {
+      return;
+    }
+    try {
+      await prisma.$transaction(
+        (tx) =>
+          ingestFinanceRecords(tx, {
+            organizationId: store.organizationId,
+            storeId: store.id,
+            platform: store.platform,
+            records: rows.map((row) => row.input),
+          }),
+        { maxWait: INGEST_TX_MAX_WAIT_MS, timeout: INGEST_TX_TIMEOUT_MS },
+      );
+      totalProcessed += rows.length;
+    } catch (batchErr) {
+      syncLog.error('settlements.ingest.batch-failed', {
+        syncLogId: log.id,
+        storeId: store.id,
+        chunkIdx,
+        batchSize: rows.length,
+        errorMessage: batchErr instanceof Error ? batchErr.message : String(batchErr),
+      });
+      for (const row of rows) {
+        try {
+          await prisma.$transaction(
+            (tx) =>
+              ingestFinanceRecords(tx, {
+                organizationId: store.organizationId,
+                storeId: store.id,
+                platform: store.platform,
+                records: [row.input],
+              }),
+            { maxWait: INGEST_TX_MAX_WAIT_MS, timeout: INGEST_TX_TIMEOUT_MS },
+          );
+          totalProcessed += 1;
+        } catch (rowErr) {
+          state.ingestFailed = true;
+          syncLog.error('settlements.dispatch.failed', {
+            syncLogId: log.id,
+            storeId: store.id,
+            rowId: row.rowId,
+            transactionType: row.transactionType,
+            chunkIdx,
+            errorMessage: rowErr instanceof Error ? rowErr.message : String(rowErr),
+          });
+        }
+      }
+    }
+    await syncLogService.heartbeat(log.id, workerId);
+    // The ingest transaction (batch or per-row fallback) has committed; bind its flagged
+    // rows and enqueue their orders before the next batch.
+    await runBindPass();
+  };
+
   // Slide newest → oldest in FINANCIAL_WINDOW_MAX_DAYS slices. Oldest chunk
   // start is clamped to overallStartTime so non-divisible SCAN_WINDOW_DAYS
   // values (e.g. 50d / 15d → 4 chunks but the 4th is 5d) still respect the
@@ -161,6 +407,7 @@ export async function processSettlementsChunk(
 
     for (const transactionType of SETTLEMENT_TYPES) {
       await syncLogService.heartbeat(log.id, workerId);
+      const state = scanStateFor(FinanceRecordFamily.SETTLEMENT, transactionType);
       const generator = fetchers.fetchSettlements({
         environment: store.environment,
         credentials,
@@ -168,27 +415,25 @@ export async function processSettlementsChunk(
         startDate: chunkStart,
         endDate: chunkEnd,
       });
-      for await (const row of generator) {
-        try {
-          await prisma.$transaction(async (tx) => {
-            await dispatchSettlementRow(store.id, store.organizationId, transactionType, row, tx);
-          });
-          totalProcessed += 1;
-        } catch (err) {
-          syncLog.error('settlements.dispatch.failed', {
-            syncLogId: log.id,
-            storeId: store.id,
-            rowId: row.id,
-            transactionType,
-            chunkIdx,
-            errorMessage: err instanceof Error ? err.message : String(err),
-          });
+      const batch: BufferedFinanceRow[] = [];
+      const summary = await consumeFinancialScan(generator, async (row) => {
+        recordScanRow(state, row, chunkStart, chunkEnd);
+        batch.push({
+          input: trendyolSettlementRecordInput(transactionType, row),
+          rowId: row.id,
+          transactionType,
+        });
+        if (batch.length >= FINANCE_INGEST_BATCH_SIZE) {
+          await flushBatch(batch.splice(0), chunkIdx, state);
         }
-      }
+      });
+      await flushBatch(batch.splice(0), chunkIdx, state);
+      state.complete = state.complete && isCompleteFinancialScan(summary);
     }
 
     for (const transactionType of OTHER_FINANCIAL_TYPES) {
       await syncLogService.heartbeat(log.id, workerId);
+      const state = scanStateFor(FinanceRecordFamily.OTHER_FINANCIAL, transactionType);
       const generator = fetchers.fetchOtherFinancials({
         environment: store.environment,
         credentials,
@@ -196,57 +441,172 @@ export async function processSettlementsChunk(
         startDate: chunkStart,
         endDate: chunkEnd,
       });
-      for await (const row of generator) {
-        try {
-          // PR-8: kargo faturasi satiri — once item'lari AG uzerinden cek
-          // (tx disinda), sonra eslestirme + OrderFee yazimini tx icinde isle.
-          // Dispatcher'a gondermiyoruz; oradaki cargo_invoice dali yalniz
-          // guvenlik logu olarak kalir.
-          const cargoSerial = getCargoInvoiceSerial(transactionType, row);
-          if (cargoSerial !== null) {
+      const batch: BufferedFinanceRow[] = [];
+      const summary = await consumeFinancialScan(generator, async (row) => {
+        // The invoice row itself is an OTHER_FINANCIAL/DeductionInvoices record, so its id
+        // joins this type's seen set (it can be pruned); its cargo items are a separate
+        // CARGO_INVOICE_ITEM family that is never pruned, so they are not tracked here.
+        recordScanRow(state, row, chunkStart, chunkEnd);
+        // A cargo-invoice (Kargo Fatura) DeductionInvoices row: fetch its items over the
+        // network FIRST (outside the transaction), then store the invoice row itself and
+        // every one of its items in ONE transaction. An invoice can carry ~500 items, so
+        // this ingest keeps its own path and the wider timeout; it never joins a batch.
+        const cargoSerial = getCargoInvoiceSerial(transactionType, row);
+        if (cargoSerial !== null) {
+          try {
             const items = await fetchers.fetchCargoInvoiceItems({
               environment: store.environment,
               credentials,
               invoiceSerialNumber: cargoSerial,
             });
-            await prisma.$transaction(async (tx) => {
-              await handleCargoInvoiceItems(store.id, store.organizationId, row, items, tx);
-            });
-            totalProcessed += 1;
-            continue;
-          }
-
-          await prisma.$transaction(async (tx) => {
-            await dispatchOtherFinancialRow(
-              store.id,
-              store.organizationId,
-              transactionType,
-              row,
-              tx,
+            await prisma.$transaction(
+              (tx) =>
+                ingestFinanceRecords(tx, {
+                  organizationId: store.organizationId,
+                  storeId: store.id,
+                  platform: store.platform,
+                  records: [
+                    trendyolOtherFinancialRecordInput(transactionType, row),
+                    ...trendyolCargoInvoiceItemInputs(row, items),
+                  ],
+                }),
+              { maxWait: INGEST_TX_MAX_WAIT_MS, timeout: CARGO_INVOICE_TX_TIMEOUT_MS },
             );
-          });
-          totalProcessed += 1;
-        } catch (err) {
-          syncLog.error('settlements.dispatch.failed', {
-            syncLogId: log.id,
-            storeId: store.id,
-            rowId: row.id,
-            transactionType,
-            chunkIdx,
-            errorMessage: err instanceof Error ? err.message : String(err),
-          });
+            // One source row processed: the invoice counts once, its items ride along.
+            totalProcessed += 1;
+            // The invoice ingest committed; bind its flagged rows and enqueue their orders.
+            await runBindPass();
+          } catch (err) {
+            // The invoice (and its items) failed to ingest: mark this DeductionInvoices type
+            // so its stale rows are not pruned while the renewed invoice is not stored.
+            state.ingestFailed = true;
+            syncLog.error('settlements.dispatch.failed', {
+              syncLogId: log.id,
+              storeId: store.id,
+              rowId: row.id,
+              transactionType,
+              chunkIdx,
+              errorMessage: err instanceof Error ? err.message : String(err),
+            });
+          }
+          return;
         }
-      }
+
+        batch.push({
+          input: trendyolOtherFinancialRecordInput(transactionType, row),
+          rowId: row.id,
+          transactionType,
+        });
+        if (batch.length >= FINANCE_INGEST_BATCH_SIZE) {
+          await flushBatch(batch.splice(0), chunkIdx, state);
+        }
+      });
+      await flushBatch(batch.splice(0), chunkIdx, state);
+      state.complete = state.complete && isCompleteFinancialScan(summary);
     }
   }
 
-  // End-of-cycle reconciliation status bump — escalate NOT_SETTLED orders
-  // with any SETTLEMENT OrderFee to PARTIALLY_SETTLED. FULLY_SETTLED rows
-  // (handlePaymentOrderEntry's own writes) are preserved (NOT_SETTLED
-  // filter on updateMany).
-  await prisma.$transaction(async (tx) => {
-    await bumpReconciliationStatusForStore(store.id, tx);
+  // A final catch-all bind pass before pruning: it sweeps up any rows a crashed earlier
+  // run left flagged (its per-batch bind never ran) and binds them now that the whole scan
+  // has committed. One settlements.bind.done line per run makes the saving visible -- a
+  // re-poll of an unchanged window flags nothing, so bound/enqueuedOrders stay 0.
+  await runBindPass();
+  syncLog.info('settlements.bind.done', {
+    syncLogId: log.id,
+    storeId: store.id,
+    bound: totalBound,
+    enqueuedOrders: totalEnqueuedByBind,
   });
+
+  // Prune stale raw rows a complete scan no longer returned. The delete range sits one
+  // tolerance inside both scan edges so a shifted vendor filter can never delete a row it
+  // did not consider; an empty range (a freshly connected store whose whole window is
+  // narrower than two tolerances) prunes nothing and logs nothing.
+  const pruneWindowStart = new Date(overallStartTime + FINANCE_PRUNE_EDGE_TOLERANCE_MS);
+  const pruneWindowEnd = new Date(endDate.getTime() - FINANCE_PRUNE_EDGE_TOLERANCE_MS);
+  const logPruneSkipped = (state: FinancialScanState, reason: string): void => {
+    syncLog.warn('settlements.prune.skipped', {
+      syncLogId: log.id,
+      storeId: store.id,
+      family: state.family,
+      transactionType: state.transactionType,
+      reason,
+    });
+  };
+  if (pruneWindowStart.getTime() < pruneWindowEnd.getTime()) {
+    for (const state of scanStates.values()) {
+      // A type may prune only after a complete, fully in-window scan that ingested every
+      // row and saw at least one. The guards run in a fixed precedence so a type that trips
+      // several logs the first that applies: INCOMPLETE_SCAN, OUT_OF_WINDOW_ROW,
+      // INGEST_FAILED, EMPTY_SCAN.
+      if (!state.complete) {
+        // A short scan: we cannot be sure a stored row the scan omitted is actually stale.
+        logPruneSkipped(state, 'INCOMPLETE_SCAN');
+        continue;
+      }
+      if (!state.inWindow) {
+        // A returned row dated outside its slice: the vendor filter is not the field we
+        // assumed, so a missing row may simply be outside the window we think we scanned.
+        logPruneSkipped(state, 'OUT_OF_WINDOW_ROW');
+        continue;
+      }
+      if (state.ingestFailed) {
+        // A row of this type failed to ingest: a stored row the scan omitted may be the
+        // stale copy of the renewed id we just failed to store. Pruning it would leave that
+        // sale with no record at all until the next cycle.
+        logPruneSkipped(state, 'INGEST_FAILED');
+        continue;
+      }
+      if (state.seen.size === 0) {
+        // A complete but empty scan: a transient empty vendor response must not wipe every
+        // stored row of this type. Nothing stored in the window is the normal case for a
+        // rarely used type (skip silently); any stored rows make the empty scan suspect, so
+        // skip and log the stored count.
+        const storedCount = await prisma.marketplaceFinanceRecord.count({
+          where: {
+            organizationId: store.organizationId,
+            storeId: store.id,
+            family: state.family,
+            transactionType: state.transactionType,
+            transactionDate: { gt: pruneWindowStart, lt: pruneWindowEnd },
+          },
+        });
+        if (storedCount > 0) {
+          syncLog.warn('settlements.prune.skipped', {
+            syncLogId: log.id,
+            storeId: store.id,
+            family: state.family,
+            transactionType: state.transactionType,
+            reason: 'EMPTY_SCAN',
+            storedCount,
+          });
+        }
+        continue;
+      }
+      await syncLogService.heartbeat(log.id, workerId);
+      const { pruned, enqueuedOrders } = await prisma.$transaction(
+        (tx) =>
+          pruneUnseenFinanceRecords(tx, {
+            organizationId: store.organizationId,
+            storeId: store.id,
+            family: state.family,
+            transactionType: state.transactionType,
+            windowStart: pruneWindowStart,
+            windowEnd: pruneWindowEnd,
+            seenRecordIds: [...state.seen],
+          }),
+        { maxWait: INGEST_TX_MAX_WAIT_MS, timeout: INGEST_TX_TIMEOUT_MS },
+      );
+      syncLog.info('settlements.prune.done', {
+        syncLogId: log.id,
+        storeId: store.id,
+        family: state.family,
+        transactionType: state.transactionType,
+        pruned,
+        enqueuedOrders,
+      });
+    }
+  }
 
   syncLog.info('settlements.chunk.done', {
     syncLogId: log.id,

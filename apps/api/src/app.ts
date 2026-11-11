@@ -20,7 +20,6 @@ import discountListRoutes from './routes/discount-lists/index';
 import marketplaceCampaignRoutes from './routes/marketplace-campaigns/index';
 import costProfileRoutes from './routes/cost-profiles/index';
 import costProfileAttachmentRoutes from './routes/cost-profile-attachments/index';
-import fxRatesRoutes from './routes/fx-rates/index';
 import livePerformanceRoutes from './routes/live-performance/index';
 import orderRoutes from './routes/orders/index';
 import productPricingRoutes from './routes/product-pricing/index';
@@ -158,7 +157,6 @@ export function createApp(): OpenAPIHono {
   app.route('/', costProfileRoutes);
   app.route('/', costProfileAttachmentRoutes);
   app.route('/', variantRoutes);
-  app.route('/', fxRatesRoutes);
   app.route('/', commissionRateRoutes);
   app.route('/', commissionTariffRoutes);
   app.route('/', plusCommissionTariffRoutes);

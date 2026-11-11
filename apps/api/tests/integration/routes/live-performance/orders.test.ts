@@ -1,15 +1,18 @@
+import { computeParcelProfit, roundPercent } from '@pazarsync/profit';
 import { getBusinessDateAnchor, getBusinessDayRange } from '@pazarsync/utils';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../../helpers/auth';
-import { ensureDbReachable, truncateAll } from '../../../helpers/db';
+import { seedCalculableTrendyolOrder } from '../../../helpers/calculable-order';
+import { ensureDbReachable, prisma, truncateAll } from '../../../helpers/db';
 import {
   createBufferEntry,
   createMembership,
   createOrder,
   createOrganization,
+  createProfitStatement,
   createStore,
 } from '../../../helpers/factories';
 
@@ -48,9 +51,14 @@ async function seed(): Promise<{
     orderDate: todayAt(10),
     platformOrderId: 'ORD-1',
     saleGross: '100.00',
-    estimatedNetProfit: '20.00',
-    // Marj kalıcı kolondan servis edilir (20 / 100 × 100 = %20) — render-time hesap yok.
-    estimatedSaleMarginPct: '20.00',
+  });
+  // Profit + margin are served from the order's ESTIMATE statement (net 20, margin
+  // 20 / 100 * 100 = 20 pct) -- the live feed no longer reads the legacy order columns.
+  await createProfitStatement(order.id, org.id, store.id, {
+    view: 'ESTIMATE',
+    status: 'ESTIMATED',
+    netProfit: '20.00',
+    saleMarginPct: '20.00',
   });
   const bufferEntry = await createBufferEntry(org.id, store.id, {
     orderDate: getBusinessDateAnchor(),
@@ -142,5 +150,89 @@ describe('GET /v1/.../live-performance/orders', () => {
     const body = (await res.json()) as OrdersBody;
     expect(body.data).toHaveLength(1);
     expect(body.data[0]?.source).toBe('buffer');
+  });
+
+  it('lists an order without a costed estimate under pending, not calculated', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // A stored estimate that never reached ESTIMATED: the KPIs count it as pending, so
+    // the feed must too (decision 10) -- it is not a calculated row.
+    const order = await createOrder(org.id, store.id, {
+      orderDate: todayAt(10),
+      platformOrderId: 'ORD-NC',
+      saleGross: '75.00',
+    });
+    await createProfitStatement(order.id, org.id, store.id, {
+      view: 'ESTIMATE',
+      status: 'NOT_COMPUTABLE',
+      netProfit: null,
+    });
+
+    const pendingRes = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/orders?filter=pending`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(pendingRes.status).toBe(200);
+    const pendingBody = (await pendingRes.json()) as OrdersBody;
+    expect(pendingBody.counts).toEqual({ all: 1, calculated: 0, pending: 1 });
+    expect(pendingBody.data).toHaveLength(1);
+    expect(pendingBody.data[0]).toMatchObject({
+      source: 'orders',
+      platformOrderId: 'ORD-NC',
+      orderId: order.id,
+      bufferId: null,
+      revenue: '75.00',
+      profit: null,
+      margin: null,
+    });
+
+    const allRes = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/orders?filter=all`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    const allBody = (await allRes.json()) as OrdersBody;
+    expect(allBody.data).toHaveLength(1);
+    expect(allBody.data[0]?.profit).toBeNull();
+  });
+
+  it('lists an order computed in the request as calculated', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+    // A calculable order dated today with no stored statement: the writer has not caught
+    // up yet, so the feed computes its profit read-only in the request.
+    const orderId = await seedCalculableTrendyolOrder(org.id, store.id);
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/orders?filter=calculated`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as OrdersBody;
+
+    // The served row matches a fresh read-only computation of the same parcel, its margin
+    // rounded to the stored column scale first (as the writer stores it), then to two
+    // decimals -- the same string a stored statement would serve.
+    const computed = await computeParcelProfit(prisma, { organizationId: org.id, orderId });
+    const { netProfit, saleMarginPct } = computed.estimate;
+    if (netProfit === null || saleMarginPct === null) {
+      throw new Error('estimate net profit or margin unexpectedly null');
+    }
+    expect(body.counts).toEqual({ all: 1, calculated: 1, pending: 0 });
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]).toMatchObject({
+      source: 'orders',
+      orderId,
+      profit: netProfit.toFixed(2),
+      margin: roundPercent(saleMarginPct).toFixed(2),
+    });
+
+    // The request wrote nothing: no statement row exists afterwards.
+    expect(await prisma.orderProfitStatement.count({ where: { orderId } })).toBe(0);
   });
 });

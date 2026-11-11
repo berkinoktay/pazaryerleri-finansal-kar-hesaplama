@@ -1,4 +1,5 @@
 import { prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import { encryptCredentials } from '@pazarsync/sync-core';
 import { getBusinessDayRange } from '@pazarsync/utils';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -165,9 +166,8 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
   beforeEach(async () => {
     _resetRateLimitStoreForTests();
     await truncateAll();
-    // Late-arrival cost-missing now persists to orders, which runs
-    // applyEstimateOnOrderCreate (PSF + Stopaj ESTIMATE fees) — needs the
-    // FeeDefinition seed even though the estimate itself stays null (no cost).
+    // Late-arrival cost-missing now persists to orders; the FeeDefinition seed keeps
+    // the reference data complete for the profit engine.
     await ensureFeeDefinitions();
   });
 
@@ -213,14 +213,19 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
     );
     expect(res.status).toBe(200);
 
-    // Spec 2026-06-12: pencere kapandı → kâr-dışı yazım; ciro kayıtlı, buffer yok.
+    // Cost-window rule (Berkin 2026-11-03): the window closed with the cost still
+    // missing, so the order is persisted PROFIT-EXCLUDED (LATE_UNCOSTED_ARRIVAL), no
+    // buffer for past-day; the write still enqueues a recompute.
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(0);
     const order = await prisma.order.findFirstOrThrow({ where: { storeId } });
     expect(order.organizationId).toBe(orgId);
     expect(order.platformOrderId).toBe('700000002');
-    expect(order.estimatedNetProfit).toBeNull();
-    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
     expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
+    const queued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: order.id },
+    });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
   });
 
   it('deferred katalog onarımı: katalogda olmayan barkod istek anında vendor sorgusu YAPMADAN eşleşmemiş satırla buffera düşer (D5)', async () => {

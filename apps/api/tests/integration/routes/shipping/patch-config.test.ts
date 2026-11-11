@@ -17,12 +17,18 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 
 import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../../helpers/db';
-import { createMembership, createOrganization, createStore } from '../../../helpers/factories';
+import {
+  createMembership,
+  createOrder,
+  createOrganization,
+  createStore,
+} from '../../../helpers/factories';
 
 interface ShippingConfigResponse {
   shippingTariffSource: 'TRENDYOL_CONTRACT' | 'OWN_CONTRACT';
@@ -106,5 +112,42 @@ describe('PATCH /v1/organizations/:orgId/stores/:storeId/shipping-config', () =>
     const body = (await res.json()) as ProblemDetailsWire;
     expect(body.code).toBe('VALIDATION_ERROR');
     expect(body.errors?.[0]?.code).toBe('SHIPPING_CARRIER_REQUIRED_FOR_TRENDYOL_CONTRACT');
+  });
+
+  it('queues every order of the store when the shipping config changes', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id, { platform: 'TRENDYOL' });
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    expect(carrier).not.toBeNull();
+
+    // Two orders of the store (no item needed — a shipping change reprices the
+    // whole store) and a sibling store whose orders must stay untouched.
+    const orderA = await createOrder(org.id, store.id);
+    const orderB = await createOrder(org.id, store.id);
+    const sibling = await createStore(org.id, { platform: 'TRENDYOL' });
+    const siblingOrder = await createOrder(org.id, sibling.id);
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/shipping-config`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: bearer(user.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shippingTariffSource: 'TRENDYOL_CONTRACT',
+          defaultShippingCarrierId: carrier?.id ?? null,
+        }),
+      },
+    );
+    expect(res.status).toBe(200);
+
+    for (const orderId of [orderA.id, orderB.id]) {
+      const queued = await prisma.profitRecomputeRequest.findUnique({ where: { orderId } });
+      expect(queued?.reason).toBe(ProfitRecomputeReason.REFERENCE_CHANGED);
+    }
+    expect(
+      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: siblingOrder.id } }),
+    ).toBeNull();
   });
 });

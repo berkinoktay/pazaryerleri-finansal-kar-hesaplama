@@ -9,12 +9,18 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 
 import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization, createStore } from '../../helpers/factories';
+import {
+  createMembership,
+  createOrder,
+  createOrganization,
+  createStore,
+} from '../../helpers/factories';
 
 interface ProfitSettingsWire {
   includeStopaj: boolean;
@@ -109,5 +115,35 @@ describe('Profit-settings routes', () => {
       includeStopaj: false,
       includeNegativeNetVat: true,
     });
+  });
+
+  it('queues only orders without a settings snapshot when the profit settings change', async () => {
+    const { accessToken, orgId, storeId } = await ownerContext();
+
+    // No snapshot (both toggles NULL) → reads the live setting → must be queued.
+    const noSnapshot = await createOrder(orgId, storeId);
+    // Already snapshotted at create time → forward-only → must NOT be queued.
+    const withSnapshot = await createOrder(orgId, storeId);
+    await prisma.order.update({
+      where: { id: withSnapshot.id },
+      data: { snapshotIncludeStopaj: true, snapshotIncludeNegativeNetVat: false },
+    });
+
+    const res = await app.request(`/v1/organizations/${orgId}/stores/${storeId}/profit-settings`, {
+      method: 'PATCH',
+      headers: { Authorization: bearer(accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ includeNegativeNetVat: true }),
+    });
+    expect(res.status).toBe(200);
+
+    const queuedNoSnapshot = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: noSnapshot.id },
+    });
+    expect(queuedNoSnapshot?.reason).toBe(ProfitRecomputeReason.SETTINGS_CHANGED);
+
+    const queuedWithSnapshot = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: withSnapshot.id },
+    });
+    expect(queuedWithSnapshot).toBeNull();
   });
 });

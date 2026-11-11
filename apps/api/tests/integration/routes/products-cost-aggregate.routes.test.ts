@@ -1,17 +1,15 @@
 /**
  * Integration tests for the cost-aggregate fields on the products list response.
  *
- * Per spec §6.5 each variant now carries:
+ * Each variant carries:
  *   currentCostTry: string | null
  *   profileCount: number
- *   costStatus: 'OK' | 'NO_PROFILES' | 'FX_STALE' | 'FX_MISSING'
+ *   costStatus: 'OK' | 'NO_PROFILES'
  *
- * Test matrix per spec §5.5 and task 6.1:
- *   1. Variant with 0 profiles      → NO_PROFILES, currentCostTry null
- *   2. 1 TRY profile                → OK, currentCostTry = profile.amount
- *   3. 1 USD AUTO profile with rate → OK, currentCostTry = amount × rate
- *   4. 1 USD AUTO without rate      → FX_MISSING, currentCostTry null
- *   5. 2 mixed profiles             → OK, currentCostTry = sum
+ * Test matrix:
+ *   1. Variant with 0 profiles → NO_PROFILES, currentCostTry null
+ *   2. 1 profile               → OK, currentCostTry = profile.amount
+ *   3. 2 profiles              → OK, currentCostTry = sum
  */
 
 import { randomUUID } from 'node:crypto';
@@ -65,13 +63,7 @@ async function seedProduct(organizationId: string, storeId: string) {
 async function seedProfile(
   organizationId: string,
   storeId: string,
-  opts: {
-    amount: string;
-    currency?: 'TRY' | 'USD' | 'EUR';
-    fxRateMode?: 'AUTO' | 'MANUAL';
-    manualFxRate?: string;
-    name?: string;
-  },
+  opts: { amount: string; name?: string },
 ) {
   const profile = await prisma.costProfile.create({
     data: {
@@ -80,10 +72,7 @@ async function seedProfile(
       name: opts.name ?? `Profile ${randomUUID().slice(0, 6)}`,
       type: 'COGS',
       amountGross: new Decimal(opts.amount),
-      currency: opts.currency ?? 'TRY',
       vatRate: 0,
-      fxRateMode: opts.fxRateMode ?? 'AUTO',
-      manualFxRate: opts.manualFxRate ? new Decimal(opts.manualFxRate) : null,
     },
   });
   return profile;
@@ -92,17 +81,6 @@ async function seedProfile(
 async function attachProfile(organizationId: string, profileId: string, variantId: string) {
   return prisma.productVariantCostProfile.create({
     data: { organizationId, profileId, productVariantId: variantId },
-  });
-}
-
-async function seedFxRate(currency: 'USD' | 'EUR', rateToTry: string, rateDate: Date) {
-  return prisma.fxRate.create({
-    data: {
-      currency,
-      rateToTry: new Decimal(rateToTry),
-      rateDate,
-      source: 'TCMB',
-    },
   });
 }
 
@@ -162,11 +140,11 @@ describe('GET /products — cost aggregate fields', () => {
     expect(variants[0]?.currentCostTry).toBeNull();
   });
 
-  it('1 TRY profile → OK, currentCostTry = profile amount', async () => {
+  it('1 profile → OK, currentCostTry = profile amount', async () => {
     const ctx = await setup();
     const product = await seedProduct(ctx.orgId, ctx.storeId);
     const variant = await seedVariant(ctx.orgId, ctx.storeId, product.id);
-    const profile = await seedProfile(ctx.orgId, ctx.storeId, { amount: '25.50', currency: 'TRY' });
+    const profile = await seedProfile(ctx.orgId, ctx.storeId, { amount: '25.50' });
     await attachProfile(ctx.orgId, profile.id, variant.id);
 
     const variants = await getVariants(ctx);
@@ -175,86 +153,45 @@ describe('GET /products — cost aggregate fields', () => {
     expect(variants[0]?.currentCostTry).toBe('25.50');
   });
 
-  it('1 USD AUTO profile with FX rate → OK, currentCostTry = amount × rate', async () => {
+  it('2 profiles → OK, currentCostTry = sum', async () => {
     const ctx = await setup();
-    // Seed a fresh FX rate (today's date)
-    await seedFxRate('USD', '38.50', new Date());
     const product = await seedProduct(ctx.orgId, ctx.storeId);
     const variant = await seedVariant(ctx.orgId, ctx.storeId, product.id);
-    const profile = await seedProfile(ctx.orgId, ctx.storeId, {
-      amount: '10.00',
-      currency: 'USD',
-      fxRateMode: 'AUTO',
-    });
-    await attachProfile(ctx.orgId, profile.id, variant.id);
-
-    const variants = await getVariants(ctx);
-    expect(variants[0]?.profileCount).toBe(1);
-    expect(variants[0]?.costStatus).toBe('OK');
-    // 10.00 × 38.50 = 385.00
-    expect(variants[0]?.currentCostTry).toBe('385.00');
-  });
-
-  it('1 USD AUTO profile with no FX rate → FX_MISSING, null currentCostTry', async () => {
-    const ctx = await setup();
-    // No FX rate seeded
-    const product = await seedProduct(ctx.orgId, ctx.storeId);
-    const variant = await seedVariant(ctx.orgId, ctx.storeId, product.id);
-    const profile = await seedProfile(ctx.orgId, ctx.storeId, {
-      amount: '10.00',
-      currency: 'USD',
-      fxRateMode: 'AUTO',
-    });
-    await attachProfile(ctx.orgId, profile.id, variant.id);
-
-    const variants = await getVariants(ctx);
-    expect(variants[0]?.profileCount).toBe(1);
-    expect(variants[0]?.costStatus).toBe('FX_MISSING');
-    expect(variants[0]?.currentCostTry).toBeNull();
-  });
-
-  it('2 mixed profiles (TRY + USD AUTO) → OK, currentCostTry = sum', async () => {
-    const ctx = await setup();
-    await seedFxRate('USD', '40.00', new Date());
-    const product = await seedProduct(ctx.orgId, ctx.storeId);
-    const variant = await seedVariant(ctx.orgId, ctx.storeId, product.id);
-    const tryProfile = await seedProfile(ctx.orgId, ctx.storeId, {
-      amount: '15.00',
-      currency: 'TRY',
-      name: 'TRY COGS',
-    });
-    const usdProfile = await seedProfile(ctx.orgId, ctx.storeId, {
-      amount: '5.00',
-      currency: 'USD',
-      fxRateMode: 'AUTO',
-      name: 'USD COGS',
-    });
-    await attachProfile(ctx.orgId, tryProfile.id, variant.id);
-    await attachProfile(ctx.orgId, usdProfile.id, variant.id);
+    const first = await seedProfile(ctx.orgId, ctx.storeId, { amount: '15.00', name: 'COGS A' });
+    const second = await seedProfile(ctx.orgId, ctx.storeId, { amount: '5.00', name: 'COGS B' });
+    await attachProfile(ctx.orgId, first.id, variant.id);
+    await attachProfile(ctx.orgId, second.id, variant.id);
 
     const variants = await getVariants(ctx);
     expect(variants[0]?.profileCount).toBe(2);
     expect(variants[0]?.costStatus).toBe('OK');
-    // 15.00 (TRY) + 5.00 × 40.00 (USD) = 15 + 200 = 215
-    expect(variants[0]?.currentCostTry).toBe('215.00');
+    // 15.00 + 5.00 = 20.00
+    expect(variants[0]?.currentCostTry).toBe('20.00');
   });
 
-  it('USD AUTO profile with stale FX rate (>2 days old) → FX_STALE', async () => {
+  it('excludes an archived profile from the cost total', async () => {
     const ctx = await setup();
-    const staleDate = new Date();
-    staleDate.setDate(staleDate.getDate() - 3); // 3 days ago
-    await seedFxRate('USD', '38.00', staleDate);
     const product = await seedProduct(ctx.orgId, ctx.storeId);
     const variant = await seedVariant(ctx.orgId, ctx.storeId, product.id);
-    const profile = await seedProfile(ctx.orgId, ctx.storeId, {
-      amount: '10.00',
-      currency: 'USD',
-      fxRateMode: 'AUTO',
+    const active = await seedProfile(ctx.orgId, ctx.storeId, {
+      amount: '100.00',
+      name: 'COGS active',
     });
-    await attachProfile(ctx.orgId, profile.id, variant.id);
+    const archived = await seedProfile(ctx.orgId, ctx.storeId, {
+      amount: '40.00',
+      name: 'COGS archived',
+    });
+    await attachProfile(ctx.orgId, active.id, variant.id);
+    await attachProfile(ctx.orgId, archived.id, variant.id);
+    // Archiving the 40.00 profile must drop it from the cost total: only the active
+    // 100.00 profile counts.
+    await prisma.costProfile.update({
+      where: { id: archived.id },
+      data: { archivedAt: new Date() },
+    });
 
     const variants = await getVariants(ctx);
-    expect(variants[0]?.profileCount).toBe(1);
-    expect(variants[0]?.costStatus).toBe('FX_STALE');
+    expect(variants[0]?.costStatus).toBe('OK');
+    expect(variants[0]?.currentCostTry).toBe('100.00');
   });
 });

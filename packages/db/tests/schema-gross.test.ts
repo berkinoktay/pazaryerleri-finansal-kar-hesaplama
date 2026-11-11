@@ -13,18 +13,16 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 /** Creates the minimal org+store+order structure required to INSERT an OrderItem. */
-async function seedOrderForSnapshotTest(
-  db: PrismaClient,
-): Promise<{ orderId: string; orgId: string }> {
+async function seedOrderForItemTest(db: PrismaClient): Promise<{ orderId: string; orgId: string }> {
   const orgId = randomUUID();
   await db.organization.create({
-    data: { id: orgId, name: 'Snapshot Test Org', slug: `snapshot-test-${orgId.slice(0, 8)}` },
+    data: { id: orgId, name: 'Gross Test Org', slug: `gross-test-${orgId.slice(0, 8)}` },
   });
 
   const store = await db.store.create({
     data: {
       organizationId: orgId,
-      name: 'Snapshot Test Store',
+      name: 'Gross Test Store',
       platform: 'TRENDYOL',
       environment: 'PRODUCTION',
       externalAccountId: randomUUID(),
@@ -36,7 +34,7 @@ async function seedOrderForSnapshotTest(
     data: {
       organizationId: orgId,
       storeId: store.id,
-      platformOrderId: `snap-test-${randomUUID().slice(0, 8)}`,
+      platformOrderId: `gross-test-${randomUUID().slice(0, 8)}`,
       orderDate: new Date(),
       status: 'DELIVERED',
     },
@@ -46,16 +44,14 @@ async function seedOrderForSnapshotTest(
 }
 
 describe('OrderItem GROSS convention columns', () => {
-  it('has gross + vatRate columns, no net columns', async () => {
+  it('has the gross sale + vatRate columns, no net columns', async () => {
     const present = await prisma.$queryRaw<{ column_name: string }[]>`
       SELECT column_name FROM information_schema.columns
       WHERE table_name = 'order_items' AND column_name IN (
         'line_list_gross', 'line_sale_gross', 'line_seller_discount_gross',
-        'sale_vat_rate', 'commission_gross', 'refunded_commission_gross',
-        'commission_vat_rate', 'estimated_commission_gross', 'settled_commission_gross',
-        'unit_cost_snapshot_gross', 'unit_cost_snapshot_vat_rate'
+        'sale_vat_rate', 'order_commission_rate_pct'
       ) ORDER BY column_name`;
-    expect(present).toHaveLength(11);
+    expect(present).toHaveLength(5);
 
     const removed = await prisma.$queryRaw<{ column_name: string }[]>`
       SELECT column_name FROM information_schema.columns
@@ -68,16 +64,15 @@ describe('OrderItem GROSS convention columns', () => {
   });
 });
 
-describe('Order GROSS + marj + promosyon columns', () => {
-  it('has gross aggregate + margin + promotion columns', async () => {
+describe('Order GROSS + promotion columns', () => {
+  it('has the gross aggregate + promotion columns', async () => {
     const present = await prisma.$queryRaw<{ column_name: string }[]>`
       SELECT column_name FROM information_schema.columns
       WHERE table_name = 'orders' AND column_name IN (
         'sale_gross', 'sale_vat', 'list_gross', 'seller_discount_gross', 'seller_discount_vat',
-        'estimated_sale_margin_pct', 'settled_sale_margin_pct',
-        'estimated_cost_markup_pct', 'settled_cost_markup_pct', 'promotion_displays'
+        'promotion_displays'
       )`;
-    expect(present).toHaveLength(10);
+    expect(present).toHaveLength(6);
 
     const removed = await prisma.$queryRaw<{ column_name: string }[]>`
       SELECT column_name FROM information_schema.columns
@@ -86,27 +81,9 @@ describe('Order GROSS + marj + promosyon columns', () => {
   });
 });
 
-describe('OrderFee GROSS convention', () => {
-  it('has amountGross + vatRate, no amountNet/vatAmount', async () => {
-    const present = await prisma.$queryRaw<{ column_name: string }[]>`
-      SELECT column_name FROM information_schema.columns
-      WHERE table_name = 'order_fees' AND column_name IN ('amount_gross', 'vat_rate')`;
-    expect(present).toHaveLength(2);
-
-    const removed = await prisma.$queryRaw<{ column_name: string }[]>`
-      SELECT column_name FROM information_schema.columns
-      WHERE table_name = 'order_fees' AND column_name IN ('amount_net', 'vat_amount')`;
-    expect(removed).toHaveLength(0);
-  });
-});
-
 describe('Maliyet tables GROSS convention', () => {
   it('cost tables have amountGross + vatRate', async () => {
-    for (const table of [
-      'cost_profiles',
-      'cost_profile_versions',
-      'order_item_cost_snapshot_components',
-    ]) {
+    for (const table of ['cost_profiles', 'cost_profile_versions']) {
       const cols = await prisma.$queryRaw<{ column_name: string }[]>`
         SELECT column_name FROM information_schema.columns
         WHERE table_name = ${table} AND column_name IN ('amount_gross', 'vat_rate')`;
@@ -115,66 +92,52 @@ describe('Maliyet tables GROSS convention', () => {
   });
 });
 
-describe('OrderItem snapshot immutability (GROSS)', () => {
-  it('rejects update to unit_cost_snapshot_gross after initial write', async () => {
-    const { orderId, orgId } = await seedOrderForSnapshotTest(prisma);
+// The cost-snapshot write-once trigger referenced columns dropped in migration
+// 20261111104912. Had it survived, every UPDATE on order_items would fail at
+// runtime, so its absence and a plain item update are both pinned here.
+describe('OrderItem cost-snapshot trigger removed', () => {
+  it('has neither the trigger nor its function', async () => {
+    const triggers = await prisma.$queryRaw<{ tgname: string }[]>`
+      SELECT tgname FROM pg_trigger WHERE tgname = 'order_items_snapshot_immutable'`;
+    expect(triggers).toHaveLength(0);
 
-    const item = await prisma.orderItem.create({
-      data: {
-        orderId,
-        organizationId: orgId,
-        quantity: 1,
-        barcode: 'SNAP-TEST-001',
-        platformLineId: BigInt(1),
-        lineListGross: new Decimal('100'),
-        lineSaleGross: new Decimal('100'),
-        lineSellerDiscountGross: new Decimal('0'),
-        saleVatRate: new Decimal('20'),
-        commissionRate: new Decimal('10'),
-        commissionGross: new Decimal('10'),
-        refundedCommissionGross: new Decimal('0'),
-        commissionVatRate: new Decimal('20'),
-        unitCostSnapshotGross: new Decimal('50'),
-        unitCostSnapshotVatRate: new Decimal('20'),
-      },
-    });
-
-    await expect(
-      prisma.orderItem.update({
-        where: { id: item.id },
-        data: { unitCostSnapshotGross: new Decimal('60') },
-      }),
-    ).rejects.toThrow(/write-once/);
+    const functions = await prisma.$queryRaw<{ proname: string }[]>`
+      SELECT proname FROM pg_proc WHERE proname = 'reject_snapshot_update'`;
+    expect(functions).toHaveLength(0);
   });
 
-  it('rejects update to unit_cost_snapshot_vat_rate after initial write', async () => {
-    const { orderId, orgId } = await seedOrderForSnapshotTest(prisma);
+  it('defaults the line money columns to 0 and accepts an item update', async () => {
+    const { orderId, orgId } = await seedOrderForItemTest(prisma);
 
     const item = await prisma.orderItem.create({
       data: {
         orderId,
         organizationId: orgId,
         quantity: 1,
-        barcode: 'SNAP-TEST-002',
-        platformLineId: BigInt(2),
-        lineListGross: new Decimal('100'),
-        lineSaleGross: new Decimal('100'),
-        lineSellerDiscountGross: new Decimal('0'),
-        saleVatRate: new Decimal('10'),
-        commissionRate: new Decimal('10'),
-        commissionGross: new Decimal('10'),
-        refundedCommissionGross: new Decimal('0'),
-        commissionVatRate: new Decimal('20'),
-        unitCostSnapshotGross: new Decimal('50'),
-        unitCostSnapshotVatRate: new Decimal('20'),
+        barcode: 'GROSS-TEST-001',
+        platformLineId: BigInt(1),
       },
     });
 
-    await expect(
-      prisma.orderItem.update({
-        where: { id: item.id },
-        data: { unitCostSnapshotVatRate: new Decimal('10') },
-      }),
-    ).rejects.toThrow(/write-once/);
+    expect(new Decimal(item.lineListGross).toString()).toBe('0');
+    expect(new Decimal(item.lineSaleGross).toString()).toBe('0');
+    expect(new Decimal(item.lineSellerDiscountGross).toString()).toBe('0');
+    expect(new Decimal(item.saleVatRate).toString()).toBe('0');
+    expect(item.orderCommissionRatePct).toBeNull();
+
+    const updated = await prisma.orderItem.update({
+      where: { id: item.id },
+      data: {
+        quantity: 2,
+        lineSaleGross: new Decimal('120.00'),
+        saleVatRate: new Decimal('20'),
+        orderCommissionRatePct: new Decimal('19.50'),
+      },
+    });
+
+    expect(updated.quantity).toBe(2);
+    expect(new Decimal(updated.lineSaleGross).toString()).toBe('120');
+    expect(new Decimal(updated.saleVatRate).toString()).toBe('20');
+    expect(new Decimal(updated.orderCommissionRatePct ?? '0').toString()).toBe('19.5');
   });
 });

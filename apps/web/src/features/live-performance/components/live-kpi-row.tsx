@@ -9,6 +9,7 @@ import { AnimatedNumber } from '@/components/patterns/animated-number';
 import { Currency } from '@/components/patterns/currency';
 import { type StatCardDelta } from '@/components/patterns/stat-card';
 import { StatStrip, type StatStripItem } from '@/components/patterns/stat-strip';
+import { EM_DASH } from '@/lib/format-percent';
 import type { MarginScale } from '@/lib/margin-coloring';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { marginColorStyle } from '@/lib/margin-color-style';
@@ -32,8 +33,8 @@ interface KpiItemDescriptor {
   labelKey: KpiKey;
   /** Value node (Currency / number / percent). Margin reads the scale for its inline color. */
   value: (k: LivePerformanceKpis, scale: MarginScale | null) => React.ReactNode;
-  /** [today, yesterday] decimal strings for the delta chip. */
-  deltaPair: (k: LivePerformanceKpis) => [string, string];
+  /** [today, yesterday] decimal strings for the delta chip; null when that day has no costed order. */
+  deltaPair: (k: LivePerformanceKpis) => [string | null, string | null];
   /** ⓘ note key — only the profit-quality satellites explain the estimate. */
   hintKey?: KpiKey;
 }
@@ -72,20 +73,30 @@ const KPI_ITEMS: KpiItemDescriptor[] = [
     // Margin coloring: the inline style tints the value by the live margin bucket;
     // `marginColorStyle` returns undefined (colorless) when coloring is off, so the
     // OFF state renders exactly as it did before the margin-coloring feature.
-    value: (k, scale) => (
-      <AnimatedNumber
-        value={Number(k.marginToday)}
-        format={formatPercent}
-        style={marginColorStyle(k.marginToday, scale)}
-      />
-    ),
+    // Null when today has no costed order: a dash, not a misleading 0%.
+    value: (k, scale) =>
+      k.marginToday === null ? (
+        EM_DASH
+      ) : (
+        <AnimatedNumber
+          value={Number(k.marginToday)}
+          format={formatPercent}
+          style={marginColorStyle(k.marginToday, scale)}
+        />
+      ),
     deltaPair: (k) => [k.marginToday, k.marginYesterday],
     hintKey: 'estimateHint',
   },
   {
     key: 'profitCostRatio',
     labelKey: 'profitCostRatio',
-    value: (k) => <AnimatedNumber value={Number(k.profitCostRatioToday)} format={formatPercent} />,
+    // Null when today has no costed order: a dash, not a misleading 0%.
+    value: (k) =>
+      k.profitCostRatioToday === null ? (
+        EM_DASH
+      ) : (
+        <AnimatedNumber value={Number(k.profitCostRatioToday)} format={formatPercent} />
+      ),
     deltaPair: (k) => [k.profitCostRatioToday, k.profitCostRatioYesterday],
     hintKey: 'estimateHint',
   },
@@ -136,9 +147,10 @@ export function LiveKpiRow({
 
 /**
  * Build the StatStrip delta, or `undefined` when no relative change exists
- * (yesterday was zero). All five satellites read "higher is better" → goodDirection up.
+ * (yesterday was zero, or either day has no costed order). All five satellites
+ * read "higher is better" → goodDirection up.
  */
-function deltaProp(today: string, yesterday: string): StatCardDelta | undefined {
+function deltaProp(today: string | null, yesterday: string | null): StatCardDelta | undefined {
   const percent = computeDeltaPercent(today, yesterday);
   return percent === null ? undefined : { percent, goodDirection: 'up' };
 }

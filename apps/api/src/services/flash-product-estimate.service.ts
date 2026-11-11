@@ -2,43 +2,37 @@
 //
 // Backs two frontend surfaces without bloating the detail payload: the custom-price
 // what-if and the current-scenario breakdown. It resolves the SAME inputs the detail
-// resolves — cost, shipping, fee definitions, and the item's PRIMARY window commission
-// bands — but for ONE item, then runs the engine via `computeFlashEstimate`. No
-// financial math lives here; the current-scenario breakdown matches the detail row's
-// current baseline byte-for-byte (same price = customer price, same commission = the
-// flat "Mevcut Komisyon" rate).
+// resolves -- the scenario base (cost, shipping, fee + commission reference) and the
+// item's PRIMARY window commission bands -- but for ONE item, then runs the scenario
+// engine via `computeFlashEstimate`. No financial math lives here; the current-scenario
+// breakdown matches the detail row's current baseline byte-for-byte (same price =
+// customer price, same commission = the flat "Mevcut Komisyon" rate).
 //
 // Scoped by organizationId + storeId + list. A cross-tenant or foreign item id is
-// indistinguishable from a missing one (404).
+// indistinguishable from a missing one (404). A pathological engine input degrades to a
+// logged not-calculable result rather than a 500 (decision 9).
 
 import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
-import type { Store as PrismaStore } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
-import type { EstimateOutcome } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
 import { buildFlashCommissionResolver } from './flash-product-commission.service';
 import {
   computeFlashEstimate,
+  type ComputedFlashEstimate,
   type FlashEstimateCommission,
 } from './flash-product-compute.service';
-import { fetchCostAggregates } from './products-list.service';
-import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
-import {
-  NO_SHIPPING,
-  type TariffAssemblyContext,
-  type TariffVariant,
-} from './tariff-compute-commons';
-import type { VariantCostAggregate } from '../validators/product.validator';
+import { logProfitReadFailure } from './profit-compute-fallback.service';
+import { loadScreenScenarioBases, screenScenarioBaseFor } from './scenario-screen-commons';
 import type { EstimateFlashPriceResult } from '../validators/flash-product.validator';
 
 /**
  * Which scenario to price:
- *   - `price`   — an explicit price; the band it lands in (of the item's primary window),
+ *   - `price`   -- an explicit price; the band it lands in (of the item's primary window),
  *                 else the flat rate, supplies the reduced commission (custom-price what-if).
- *   - `current` — the item's own customer price at its current commission — the "do
+ *   - `current` -- the item's own customer price at its current commission -- the "do
  *                 nothing" baseline the detail's current fields show.
  */
 export type EstimateFlashPriceInput =
@@ -54,7 +48,6 @@ export type EstimateFlashPriceInput =
 export async function estimateFlashItemPrice(
   orgId: string,
   storeId: string,
-  store: PrismaStore,
   listId: string,
   itemId: string,
   input: EstimateFlashPriceInput,
@@ -84,41 +77,8 @@ export async function estimateFlashItemPrice(
     throw new NotFoundError('FlashProductItem', itemId);
   }
 
-  // Resolve the matched variant + cost + shipping once (only when matched).
-  let variant: TariffVariant | null = null;
-  let cost: VariantCostAggregate | undefined;
-  let shipping: EstimateOutcome = NO_SHIPPING;
-
-  if (item.productVariantId !== null) {
-    let variantRow;
-    try {
-      variantRow = await prisma.productVariant.findFirst({
-        where: { id: item.productVariantId, organizationId: orgId, storeId },
-        select: {
-          id: true,
-          stockCode: true,
-          barcode: true,
-          salePrice: true,
-          vatRate: true,
-          isDigital: true,
-          product: { select: { title: true, categoryId: true, brandId: true } },
-        },
-      });
-    } catch (err) {
-      mapPrismaError(err);
-    }
-    variant = variantRow;
-
-    const [costMap, shippingMap] = await Promise.all([
-      fetchCostAggregates(orgId, [item.productVariantId]),
-      batchResolveShipping(orgId, storeId, [item.productVariantId]),
-    ]);
-    cost = costMap.get(item.productVariantId);
-    shipping = shippingMap.get(item.productVariantId) ?? NO_SHIPPING;
-  }
-
-  // Resolve the item's PRIMARY window bands (offer24 window ?? offer3 window) once — the
-  // same source the detail uses for the custom-price estimate and the ⓘ popover. The
+  // Resolve the item's PRIMARY window bands (offer24 window ?? offer3 window) once -- the
+  // same source the detail uses for the custom-price estimate and the info popover. The
   // window resolves on its END (see flash-product-commission).
   const primaryStart = item.offer24StartsAt ?? item.offer3StartsAt;
   const primaryEnd = item.offer24StartsAt !== null ? item.offer24EndsAt : item.offer3EndsAt;
@@ -143,10 +103,29 @@ export async function estimateFlashItemPrice(
       ? { kind: 'override', pct: flatPct }
       : { kind: 'resolve', bands: primaryBands, flatPct };
 
-  const feeDefs = await prisma.$transaction((tx) => resolveFeeDefs(tx, store.platform));
-  const ctx: TariffAssemblyContext = { platform: store.platform, feeDefs };
+  // Load the scenario base for the matched variant only (scenario date = now). An
+  // unmatched item passes no ids -> no-product; a store-wide load failure -> degraded.
+  const bases = await loadScreenScenarioBases({
+    organizationId: orgId,
+    storeId,
+    scenarioDate: new Date(),
+    variantIds: item.productVariantId !== null ? [item.productVariantId] : [],
+    surface: 'flash-product',
+  });
+  const base = screenScenarioBaseFor(bases, item.productVariantId);
 
-  const computed = computeFlashEstimate(ctx, variant, cost, shipping, commission, price);
+  let computed: ComputedFlashEstimate;
+  try {
+    computed = computeFlashEstimate({ base, commission, price });
+  } catch (err) {
+    logProfitReadFailure({
+      surface: 'flash-product',
+      organizationId: orgId,
+      orderId: null,
+      err,
+    });
+    computed = computeFlashEstimate({ base: { kind: 'degraded' }, commission, price });
+  }
 
   return {
     itemId: item.id,

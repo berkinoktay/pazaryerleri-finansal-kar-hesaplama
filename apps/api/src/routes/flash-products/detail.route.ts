@@ -54,10 +54,10 @@ const getFlashProductRoute = createRoute({
 app.openapi(getFlashProductRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId, listId } = c.req.valid('param');
-  const { store, role } = await requireStoreAccess(userId, orgId, storeId);
+  const { role } = await requireStoreAccess(userId, orgId, storeId);
   assertCapability(role, CAPABILITIES.DATA_READ);
 
-  const detail = await getFlashProductDetail(orgId, storeId, store, listId);
+  const detail = await getFlashProductDetail(orgId, storeId, listId);
   return c.json(detail, 200);
 });
 

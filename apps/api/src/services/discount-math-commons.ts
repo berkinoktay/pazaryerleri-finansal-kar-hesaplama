@@ -13,8 +13,7 @@
 
 import { Decimal } from 'decimal.js';
 
-import { bandForPrice } from './commission-tariff-compute.service';
-import type { StoredBand } from './commission-tariff.types';
+import { storedTariffBandForPrice, type StoredTariffBand } from '@pazarsync/profit';
 
 export type DiscountConfig =
   | { readonly type: 'NET'; readonly valueKind: 'AMOUNT' | 'PERCENT'; readonly value: Decimal }
@@ -172,7 +171,7 @@ export function scenarioPresentation(config: DiscountConfig): ScenarioPresentati
 
 /** Üç kademeli zincirin girdileri — kalem başına bir kez kurulur. */
 export interface DiscountCommissionInputs {
-  readonly bands: ReadonlyArray<StoredBand> | null; // 1. kademe: tarife bandı
+  readonly bands: ReadonlyArray<StoredTariffBand> | null; // 1. kademe: tarife bandı
   readonly productRate: Decimal | null; // 2. kademe: syncedCommissionRate
   readonly categoryRate: Decimal | null; // 3. kademe: kategori oranı
 }
@@ -193,10 +192,16 @@ export function resolveDiscountCommission(
   price: Decimal,
 ): ResolvedDiscountCommission | null {
   if (inputs.bands !== null && inputs.bands.length > 0) {
-    const band = bandForPrice(inputs.bands, price);
+    const band = storedTariffBandForPrice(inputs.bands, price);
     if (band !== null) return { pct: new Decimal(band.commissionPct), source: 'band' };
   }
-  if (inputs.productRate !== null) return { pct: inputs.productRate, source: 'product' };
+  // Decision 7 (Faz 4B): a SYNCED product rate of 0 means "not sent", exactly as the order
+  // path treats it (the 2A rule) -- so it falls through to the category rate rather than
+  // charging a real 0%. Only the synced tier gets this treatment: a 0 tariff band or a 0
+  // category rate is an explicit, authoritative 0%. Campaigns share this chain (Task 8).
+  if (inputs.productRate !== null && inputs.productRate.gt(0)) {
+    return { pct: inputs.productRate, source: 'product' };
+  }
   if (inputs.categoryRate !== null) return { pct: inputs.categoryRate, source: 'category' };
   return null;
 }
@@ -396,7 +401,7 @@ export function campaignSearchWindow(
  *
  * Yöntem: {@link campaignPriceSegments} ile doğrusal parçalara ayrılır; her parçada `S`, parçanın
  * KENDİ doğrusal dalına ait iki noktada ÖRNEKLENEREK eğim ve kesişim çıkarılır (formül burada
- * ikinci kez yazılmaz — motorun `solvePriceForTarget` içinde kullandığı numaranın aynısı). Alt uç
+ * ikinci kez yazılmaz — motorun `solveTrendyolScenarioPrice` çözücüsünün kullandığı numaranın aynısı). Alt uç
  * doğrudan `seg.lo`'dur; üst örnekleme noktası ise `seg.hi`'nin KENDİSİ değil, ondan 1 kuruş
  * içeride kalan noktadır — `seg.hi`, kesikli bir kırılımın (CONDITIONAL_BASKET/CODE'un ceil
  * sıçraması) kuruşa yukarı yuvarlanmış hâli olabilir ve bu durumda artık komşu parçaya ait olur;

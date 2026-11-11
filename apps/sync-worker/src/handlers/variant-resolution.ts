@@ -9,8 +9,8 @@
 
 import { ensureBarcodesInCatalog } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
-import { captureCostSnapshot } from '@pazarsync/order-sync';
-import { applyEstimateOnOrderCreate } from '@pazarsync/profit';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
+import { enqueueProfitRecompute } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 
 const MAX_BARCODES_PER_STORE_PER_TICK = 25;
@@ -317,8 +317,18 @@ async function resolveForStore(storeId: string, items: DueItem[]): Promise<void>
   const retriableItems = attempted.filter((i) => !vendorMissingBarcodes.has(i.barcode));
 
   await applyBackoff(storeId, vendorMissingItems, 'vendorMissing');
+  // Upsert the table ONCE per distinct barcode, not once per order line: a
+  // barcode that sits on N lines in this tick must not increment attempts N
+  // times. An inflated count would push repairBufferCatalogGaps's first
+  // transient-failure retry straight to the 24h backoff cap, so a same-day
+  // buffered order could miss its catalog repair before its cost window closes.
+  // The per-item backoff above stays per line (each item owns its own attempts).
+  const organizationByBarcode = new Map<string, string>();
   for (const item of vendorMissingItems) {
-    await upsertBarcodeMiss(storeId, item.order.organizationId, item.barcode, true, 0);
+    organizationByBarcode.set(item.barcode, item.order.organizationId);
+  }
+  for (const [barcode, organizationId] of organizationByBarcode) {
+    await upsertBarcodeMiss(storeId, organizationId, barcode, true, 0);
   }
   // retriable yolu tabloya KASITLI yazmaz → varsa önceki vendorMissing=true
   // satırı OLDUĞU GİBİ kalır (rozet "Trendyol'da yok" durur). İyi-huylu bayatlık:
@@ -350,10 +360,10 @@ async function clearMissForLinked(
   });
 }
 
-/** Bağlananları listeden düşürür; bağlama + snapshot + estimate tek tx/order. */
+/** Drops the linked items from the list; links the variant identity and enqueues one recompute per order, in that order's own tx. */
 async function linkAgainstLocalCatalog(storeId: string, items: DueItem[]): Promise<DueItem[]> {
   const stillUnresolved: DueItem[] = [];
-  // Order bazında grupla — snapshot + estimate order-tx'inde koşar.
+  // Group by order so the identity link and the enqueue share one per-order tx.
   const byOrder = new Map<string, DueItem[]>();
   for (const item of items) {
     const list = byOrder.get(item.order.id) ?? [];
@@ -363,17 +373,14 @@ async function linkAgainstLocalCatalog(storeId: string, items: DueItem[]): Promi
 
   for (const [orderId, orderItems] of byOrder) {
     await prisma.$transaction(async (tx) => {
-      // Kâr-dışı sipariş (spec 2026-06-12): kalem KİMLİK için yine bağlanır
-      // (görünürlük sözleşmesi — ürün adı/görseli görünsün) ama para
-      // re-entry'si atlanır. Alt guard'lar zaten no-op yapar — bu şart
-      // niyeti koda yazar ve gereksiz sorguları keser.
-      const orderRow = await tx.order.findUniqueOrThrow({
-        where: { id: orderId },
-        select: { profitExcludedAt: true },
-      });
-      const moneyFrozen = orderRow.profitExcludedAt !== null;
+      // The identity link always runs (visibility contract: the product name and
+      // image must show), independent of any profit exclusion. The profit is no
+      // longer written here; a linked item changes the parcel's profit, so the
+      // order is enqueued for the recompute tick instead.
       let linkedAny = false;
+      let organizationId: string | null = null;
       for (const item of orderItems) {
+        organizationId = item.order.organizationId;
         if (item.barcode === null) {
           stillUnresolved.push(item);
           continue;
@@ -390,9 +397,6 @@ async function linkAgainstLocalCatalog(storeId: string, items: DueItem[]): Promi
           where: { id: item.id },
           data: { productVariantId: variant.id },
         });
-        if (!moneyFrozen) {
-          await captureCostSnapshot(item.id, tx);
-        }
         linkedAny = true;
         syncLog.info('resolution.linked', {
           storeId,
@@ -401,10 +405,13 @@ async function linkAgainstLocalCatalog(storeId: string, items: DueItem[]): Promi
           productVariantId: variant.id,
         });
       }
-      if (linkedAny && !moneyFrozen) {
-        // Write-once + re-entry-safe: estimatedNetProfit doluysa no-op; eksik
-        // snapshot kaldıysa null bırakır, sonraki bağlamada yeniden denenir.
-        await applyEstimateOnOrderCreate(orderId, tx);
+      if (linkedAny && organizationId !== null) {
+        await enqueueProfitRecompute(tx, {
+          organizationId,
+          reason: ProfitRecomputeReason.ORDER_CHANGED,
+          storeId,
+          orderIds: [orderId],
+        });
       }
     });
   }

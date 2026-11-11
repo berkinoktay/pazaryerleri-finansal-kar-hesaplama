@@ -24,7 +24,9 @@ export const PlusTariffValiditySchema = z
 export const PlusTariffItemReasonSchema = z
   .enum(['NO_PRODUCT', 'NO_COST', 'NO_SHIPPING'])
   .openapi('PlusTariffItemReason', {
-    description: 'Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok.',
+    description:
+      'Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok. reason null + ' +
+      'calculable false ise kâr bu kalem için hesaplanamadı (sunucuda loglandı); satır yine de döner.',
   });
 
 // ─── Path params ────────────────────────────────────────────────────────────
@@ -112,9 +114,14 @@ export const PlusTariffDetailItemSchema = z
         'Komisyona esas fiyat (müşterinin gördüğü fiyat) — güncel kâr bu fiyattan hesaplanır.',
     }),
     currentCommissionPct: z.string(),
-    currentNetProfit: z.string().nullable().openapi({
-      description: 'Komisyona esas fiyat + güncel komisyonla net kâr; hesaplanamıyorsa null.',
-    }),
+    currentNetProfit: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Komisyona esas fiyat + güncel komisyonla net kâr; senaryo motoru bu fiyatı güncel ' +
+          'komisyon oranıyla değerlendirir ve mağazanın kâr ayarları uygulanır; hesaplanamıyorsa null.',
+      }),
     currentMarginPct: z.string().nullable(),
     /** Plus Fiyat Üst Limiti — the ceiling price to qualify for the Plus commission. */
     plusPriceUpperLimit: z.string(),

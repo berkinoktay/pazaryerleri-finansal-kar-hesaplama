@@ -12,22 +12,18 @@
 import { Decimal } from 'decimal.js';
 
 import { Prisma, prisma } from '@pazarsync/db';
-import type { Store as PrismaStore } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import { mapPrismaError } from '@pazarsync/sync-core';
-import type { EstimateOutcome } from '@pazarsync/profit';
+import { enqueueProfitRecomputeForBarcodes, parseStoredTariffBands } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
-import { resolveValidity } from '../lib/tariff-period';
-import { fetchCostAggregates } from './products-list.service';
-import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
+import { resolveValidity, tariffBoundInstantOrNull } from '../lib/tariff-period';
+import { computeItemBands, type ComputedItemBands } from './commission-tariff-compute.service';
 import {
-  computeItemBands,
-  type ComputedItemBands,
-  type TariffAssemblyContext,
-  type TariffVariant,
-} from './commission-tariff-compute.service';
-import { parseStoredBands } from './commission-tariff.types';
-import type { VariantCostAggregate } from '../validators/product.validator';
+  createRequestFailureLog,
+  loadScreenScenarioBases,
+  screenScenarioBaseFor,
+} from './scenario-screen-commons';
 import type {
   CommissionTariffDetail,
   CommissionTariffListItem,
@@ -35,9 +31,6 @@ import type {
   TariffPeriod,
   TariffSelection,
 } from '../validators/commission-tariff.validator';
-
-// A variant the CTE/cost resolvers could not place degrades to not-calculable.
-const NO_SHIPPING: EstimateOutcome = { ok: false, reason: 'STORE_NOT_FOUND' };
 
 // ─── List ───────────────────────────────────────────────────────────────────
 
@@ -100,7 +93,13 @@ export async function listTariffs(
       productCount,
       selectedCount,
       exported: tariff.exportedAt !== null,
-      validity: resolveValidity(minStart, maxEnd, now),
+      // Period bounds are Istanbul wall-clock saved as UTC; convert them to real
+      // instants before comparing against the true-instant `now`.
+      validity: resolveValidity(
+        tariffBoundInstantOrNull(minStart),
+        tariffBoundInstantOrNull(maxEnd),
+        now,
+      ),
       weekStartsAt: minStart !== null ? minStart.toISOString() : null,
       weekEndsAt: maxEnd !== null ? maxEnd.toISOString() : null,
       updatedAt: tariff.updatedAt.toISOString(),
@@ -113,14 +112,15 @@ export async function listTariffs(
 /**
  * Returns one tariff with per-band profit computed on read. Throws
  * `NotFoundError` when the tariff does not belong to this store (non-disclosure).
- * Matched items are joined to their ProductVariant; cost + shipping are
- * batch-resolved once, fee definitions once, then each item's bands are computed
- * by reusing the product-pricing assembly with the band's commission.
+ * The scenario bases of every matched variant are loaded once for the whole tariff,
+ * then each item's bands are computed by the scenario engine with the band's
+ * commission as an override. A slim org + store scoped variant query supplies the
+ * display image only. Per decision 9 a store-wide load failure or a per-item engine
+ * throw leaves that profit empty (logged once) rather than failing the request.
  */
 export async function getTariffDetail(
   orgId: string,
   storeId: string,
-  store: PrismaStore,
   tariffId: string,
 ): Promise<CommissionTariffDetail> {
   let tariff;
@@ -182,76 +182,61 @@ export async function getTariffDetail(
     }
   }
 
-  // ─── Batch-resolve variants + cost + shipping once for the whole tariff ───
-  const variantMap = new Map<string, TariffVariant>();
-  // Primary product image per matched variant, resolved alongside the variant
-  // fetch so the detail rows can show the same thumbnail as the products screen.
+  // ─── Display image per matched variant (org + store scoped) ───────────────
+  // First catalog image (barcode-matched, from our own catalog); the Trendyol tariff
+  // file carries no images. Null when none attached. This is the only variant read the
+  // detail still needs -- the profit inputs come from the scenario loader below.
   const imageMap = new Map<string, string | null>();
-  let costMap = new Map<string, VariantCostAggregate>();
-  let shippingMap = new Map<string, EstimateOutcome>();
-
   if (variantIds.length > 0) {
     let variants;
     try {
       variants = await prisma.productVariant.findMany({
         where: { id: { in: variantIds }, organizationId: orgId, storeId },
-        select: {
-          id: true,
-          stockCode: true,
-          barcode: true,
-          salePrice: true,
-          vatRate: true,
-          isDigital: true,
-          product: {
-            select: {
-              title: true,
-              categoryId: true,
-              brandId: true,
-              // First catalog image (barcode-matched, from our own catalog); the
-              // Trendyol tariff file carries no images. Null when none attached.
-              imageUrls: true,
-            },
-          },
-        },
+        select: { id: true, product: { select: { imageUrls: true } } },
       });
     } catch (err) {
       mapPrismaError(err);
     }
     for (const variant of variants) {
-      variantMap.set(variant.id, variant);
       imageMap.set(variant.id, variant.product.imageUrls[0] ?? null);
     }
-
-    [costMap, shippingMap] = await Promise.all([
-      fetchCostAggregates(orgId, variantIds),
-      batchResolveShipping(orgId, storeId, variantIds),
-    ]);
   }
 
-  // ─── Fee definitions once, then compute every item (pure) ─────────────────
-  const feeDefs = await prisma.$transaction((tx) => resolveFeeDefs(tx, store.platform));
-  const ctx: TariffAssemblyContext = { platform: store.platform, feeDefs };
+  // ─── One scenario-base load for the whole tariff; scenario date = now ─────
+  const now = new Date();
+  const bases = await loadScreenScenarioBases({
+    organizationId: orgId,
+    storeId,
+    scenarioDate: now,
+    variantIds,
+    surface: 'commission-tariff',
+  });
+
+  // A per-item engine throw degrades only that item; collect and log once (decision 9).
+  const failureLog = createRequestFailureLog({
+    surface: 'commission-tariff',
+    organizationId: orgId,
+  });
 
   const periods = tariff.periods.map((period): TariffPeriod => {
     const items = period.items.map((item): TariffDetailItem => {
-      const variant =
-        item.productVariantId !== null ? variantMap.get(item.productVariantId) : undefined;
-      const cost = item.productVariantId !== null ? costMap.get(item.productVariantId) : undefined;
-      const shipping =
-        item.productVariantId !== null
-          ? (shippingMap.get(item.productVariantId) ?? NO_SHIPPING)
-          : NO_SHIPPING;
-
-      const computed: ComputedItemBands = computeItemBands(
-        ctx,
-        parseStoredBands(item.bands),
-        new Decimal(item.currentPrice.toString()),
-        item.commissionBasePrice !== null ? new Decimal(item.commissionBasePrice.toString()) : null,
-        new Decimal(item.currentCommissionPct.toString()),
-        variant ?? null,
-        cost,
-        shipping,
-      );
+      const base = screenScenarioBaseFor(bases, item.productVariantId);
+      const bandParams = {
+        bands: parseStoredTariffBands(item.bands),
+        currentPrice: new Decimal(item.currentPrice.toString()),
+        commissionBasePrice:
+          item.commissionBasePrice !== null
+            ? new Decimal(item.commissionBasePrice.toString())
+            : null,
+        currentCommissionPct: new Decimal(item.currentCommissionPct.toString()),
+      };
+      let computed: ComputedItemBands;
+      try {
+        computed = computeItemBands({ ...bandParams, base });
+      } catch (err) {
+        failureLog.record(err);
+        computed = computeItemBands({ ...bandParams, base: { kind: 'degraded' } });
+      }
 
       return {
         id: item.id,
@@ -289,10 +274,18 @@ export async function getTariffDetail(
       id: period.id,
       dateRangeLabel: period.dateRangeLabel,
       dayCount: period.dayCount,
-      validity: resolveValidity(period.startsAt, period.endsAt, new Date()),
+      // Period bounds are Istanbul wall-clock saved as UTC; convert them to real
+      // instants before comparing against the true-instant `now`.
+      validity: resolveValidity(
+        tariffBoundInstantOrNull(period.startsAt),
+        tariffBoundInstantOrNull(period.endsAt),
+        now,
+      ),
       items,
     };
   });
+
+  failureLog.flush();
 
   return { id: tariff.id, name: tariff.name, exported: tariff.exportedAt !== null, periods };
 }
@@ -300,25 +293,47 @@ export async function getTariffDetail(
 // ─── Delete ────────────────────────────────────────────────────────────────
 
 /**
- * Hard-deletes a tariff (periods + items cascade via FK). Throws `NotFoundError`
- * when it does not belong to this store, so a cross-tenant id is indistinguishable
- * from a missing one.
+ * Hard-deletes a tariff (periods + items cascade via FK) in one transaction. Throws
+ * `NotFoundError` when it does not belong to this store, so a cross-tenant id is
+ * indistinguishable from a missing one. Deleting a tariff is a backdated commission
+ * input change for every order carrying one of its barcodes (their commission falls
+ * back from the tariff bands to the product/category rate), so those orders are queued
+ * for a profit recompute in the SAME transaction; the stale-statement sweep would not
+ * catch them (their statements are stamped by the current engine).
  */
 export async function deleteTariff(
   orgId: string,
   storeId: string,
   tariffId: string,
 ): Promise<void> {
-  const existing = await prisma.commissionTariff.findFirst({
-    where: { id: tariffId, organizationId: orgId, storeId },
-    select: { id: true },
-  });
-  if (existing === null) {
-    throw new NotFoundError('CommissionTariff', tariffId);
-  }
-
   try {
-    await prisma.commissionTariff.delete({ where: { id: tariffId } });
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.commissionTariff.findFirst({
+        where: { id: tariffId, organizationId: orgId, storeId },
+        select: { id: true },
+      });
+      if (existing === null) {
+        throw new NotFoundError('CommissionTariff', tariffId);
+      }
+
+      // Collect the tariff's distinct item barcodes BEFORE the delete cascades the
+      // items away. A deleted variant still leaves its barcode on the item row.
+      const items = await tx.commissionTariffItem.findMany({
+        where: { organizationId: orgId, storeId, period: { tariffId } },
+        select: { barcode: true },
+        distinct: ['barcode'],
+      });
+      const barcodes = items.map((item) => item.barcode);
+
+      await tx.commissionTariff.delete({ where: { id: tariffId } });
+
+      await enqueueProfitRecomputeForBarcodes(tx, {
+        organizationId: orgId,
+        storeId,
+        barcodes,
+        reason: ProfitRecomputeReason.REFERENCE_CHANGED,
+      });
+    });
   } catch (err) {
     mapPrismaError(err);
   }

@@ -10,7 +10,7 @@
 // scenario shape, the PATCH validator gate, and the delete cascade.
 
 import { Decimal } from 'decimal.js';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 
@@ -401,5 +401,176 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
       { headers: { Authorization: bearer(fx.accessToken) } },
     );
     expect(((await list.json()) as ListWire).data).toHaveLength(0);
+  });
+});
+
+describe('Discount Lists — per-item degrade (decision 9)', () => {
+  // TWO items' scenarios are forced to throw (a negative currentPrice, which the engine's
+  // unit-price validator rejects): the detail must still return 200 with those items' profit
+  // empty (reason null) while a third item computes fine, and the failures must collapse into
+  // exactly one [profit-read] line per request with failedCount 2.
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  it('keeps the discount detail up when items fail to compute and logs once', async () => {
+    await truncateAll();
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing — globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Discount Degrade Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'discount-degrade-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 7301n,
+        productMainId: 'pm-7301',
+        title: 'Bozulma Indirim Urunu',
+        categoryId: 599n,
+        categoryName: 'Kategori',
+        brandId: null,
+        brandName: null,
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: 73010n,
+        barcode: 'DISC-DEG',
+        stockCode: 'STK-DDEG',
+        salePrice: new Decimal('500.00'),
+        listPrice: new Decimal('500.00'),
+        vatRate: 20,
+        dimensionalWeightOverride: new Decimal('3.0'),
+      },
+    });
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'COGS Disc Degrade',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Disc Degrade',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+    });
+    await ensureFeeDefinitions();
+    // A CATEGORY commission rate so the chain resolves for the matched variant -> the healthy
+    // item is calculable AND the failing items reach the engine (where the negative price throws).
+    await prisma.marketplaceCommissionRate.create({
+      data: {
+        platform: 'TRENDYOL',
+        ruleKind: 'CATEGORY',
+        categoryId: 599n,
+        brandId: null,
+        categoryName: 'Kategori',
+        parentCategoryName: 'Ust Kategori',
+        brandName: null,
+        baseRate: new Decimal('15'),
+        paymentTermDays: 60,
+        segmentOverrides: {},
+        fetchedAt: new Date(),
+        sourceScreen: 'CategoryCommissionPaymentTerms',
+      },
+    });
+
+    const list = await prisma.discountList.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'Bozulma Indirim',
+        discountType: 'NET',
+        valueKind: 'PERCENT',
+        value: new Decimal('10.00'),
+        createdBy: user.id,
+      },
+    });
+    const baseItem = {
+      organizationId: org.id,
+      storeId: store.id,
+      listId: list.id,
+      productVariantId: variant.id,
+      barcode: 'DISC-DEG',
+      productTitle: 'Bozulma Indirim Urunu',
+    };
+    // Healthy item: a positive current price -> computes.
+    const okItem = await prisma.discountListItem.create({
+      data: { ...baseItem, currentPrice: new Decimal('500.00'), included: true, sortOrder: 0 },
+    });
+    // Two failing items: a NEGATIVE current price makes the engine reject the unit price -> throw.
+    const fail1 = await prisma.discountListItem.create({
+      data: { ...baseItem, currentPrice: new Decimal('-5.00'), included: true, sortOrder: 1 },
+    });
+    const fail2 = await prisma.discountListItem.create({
+      data: { ...baseItem, currentPrice: new Decimal('-7.00'), included: true, sortOrder: 2 },
+    });
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/discount-lists/${list.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const items = ((await res.json()) as DetailWire).items;
+
+      const ok = items.find((i) => i.id === okItem.id);
+      expect(ok?.calculable).toBe(true);
+      expect(ok?.current.netProfit).not.toBeNull();
+
+      for (const failId of [fail1.id, fail2.id]) {
+        const bad = items.find((i) => i.id === failId);
+        expect(bad?.calculable).toBe(false);
+        // A degraded compute carries no reason (not NO_PRODUCT -- the variant is matched).
+        expect(bad?.reason).toBeNull();
+        expect(bad?.current.netProfit).toBeNull();
+        expect(bad?.discounted.netProfit).toBeNull();
+      }
+
+      // Two failing items collapse into exactly one [profit-read] line, failedCount 2.
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[profit-read] in-request profit computation failed',
+        expect.objectContaining({
+          surface: 'discount-list',
+          orderId: null,
+          failedCount: 2,
+        }),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

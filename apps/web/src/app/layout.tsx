@@ -1,4 +1,4 @@
-import { Host_Grotesk, JetBrains_Mono } from 'next/font/google';
+import localFont from 'next/font/local';
 import { getLocale } from 'next-intl/server';
 
 import { Toaster } from '@/components/ui/sonner';
@@ -8,18 +8,23 @@ import { cn } from '@/lib/utils';
 
 import './globals.css';
 
-const hostGrotesk = Host_Grotesk({
+// Both brand fonts are self-hosted variable woff2 files (see ./fonts/README.md).
+// They used to come from next/font/google, but Google intermittently serves
+// extensionless font URLs that Turbopack cannot resolve (vercel/next.js#99114),
+// which broke `next dev` and `next build` at random. Local files also remove
+// the build-time network dependency entirely.
+const hostGrotesk = localFont({
+  src: './fonts/host-grotesk-wght.woff2',
   variable: '--font-host-grotesk',
-  subsets: ['latin', 'latin-ext'],
   display: 'swap',
-  weight: ['400', '500', '600', '700'],
+  weight: '300 800',
 });
 
-const jetBrainsMono = JetBrains_Mono({
+const jetBrainsMono = localFont({
+  src: './fonts/jetbrains-mono-wght.woff2',
   variable: '--font-jetbrains-mono',
-  subsets: ['latin', 'latin-ext'],
   display: 'swap',
-  weight: ['400', '500', '600'],
+  weight: '100 800',
 });
 
 export default async function RootLayout({

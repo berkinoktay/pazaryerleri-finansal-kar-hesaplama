@@ -36,6 +36,7 @@
 
 import { prisma } from '@pazarsync/db';
 import type { Prisma, SyncLog } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import {
   decryptStoreCredentials,
   fetchClaims,
@@ -45,9 +46,14 @@ import {
   type MappedClaim,
   type TrendyolClaim,
 } from '@pazarsync/marketplace';
-import { estimateReturnOnClaim } from '@pazarsync/profit';
+import { enqueueProfitRecompute } from '@pazarsync/profit';
 import { syncLog, syncLogService } from '@pazarsync/sync-core';
 
+import {
+  claimProfitInputsChanged,
+  pickChangedFields,
+  type StoredClaimForChange,
+} from './claim-change';
 import { computeOrdersCutoffMs } from './orders';
 
 import type { ChunkResult, ModuleHandler } from './types';
@@ -115,6 +121,8 @@ export async function processClaimsChunk(
   );
 
   let written = 0;
+  let unchanged = 0;
+  let enqueued = 0;
   let unmatched = 0;
   let failed = 0;
   let processed = 0;
@@ -137,10 +145,17 @@ export async function processClaimsChunk(
       const outcome = await prisma.$transaction(async (tx) => {
         return upsertClaim(store.id, mapped, tx);
       });
-      if (outcome === 'written') {
-        written += 1;
-      } else {
+      if (outcome === 'unmatched') {
         unmatched += 1;
+      } else {
+        if (outcome.wrote) {
+          written += 1;
+        } else {
+          unchanged += 1;
+        }
+        if (outcome.enqueued) {
+          enqueued += 1;
+        }
       }
     } catch (err) {
       failed += 1;
@@ -148,7 +163,7 @@ export async function processClaimsChunk(
       syncLog.error('claims.upsert.failed', {
         syncLogId: log.id,
         storeId: store.id,
-        trendyolClaimId: raw.id,
+        marketplaceClaimId: raw.id,
         errorMessage: err instanceof Error ? err.message : String(err),
       });
     }
@@ -160,22 +175,28 @@ export async function processClaimsChunk(
   // the failure is systemic (DB down, schema drift) — swallowing it
   // would mark the run COMPLETED and mute the retry machinery. Rethrow
   // the last error so handleRunError classifies + backs off.
-  if (failed > 0 && written === 0 && unmatched === 0) {
+  if (failed > 0 && written === 0 && unchanged === 0 && unmatched === 0) {
     throw lastError;
   }
 
   syncLog.info('claims.chunk.done', {
     syncLogId: log.id,
     storeId: store.id,
+    // `written` is what this scan changed; `unchanged` passed with nothing to write and
+    // `enqueued` is how many of either queued a profit recompute (the figure that shows
+    // the per-scan re-enqueue of every claim is gone).
     written,
+    unchanged,
+    enqueued,
     unmatched,
     failed,
   });
 
-  return { kind: 'done', finalCount: written };
+  return { kind: 'done', finalCount: written + unchanged };
 }
 
-type UpsertOutcome = 'written' | 'unmatched';
+/** What one claim's pass did: no order to attach to, or whether it wrote and whether it enqueued. */
+type UpsertOutcome = 'unmatched' | { readonly wrote: boolean; readonly enqueued: boolean };
 
 async function upsertClaim(
   storeId: string,
@@ -211,7 +232,7 @@ async function upsertClaim(
   if (order === null) {
     syncLog.warn('claims.order.unmatched', {
       storeId,
-      trendyolClaimId: claim.trendyolClaimId,
+      marketplaceClaimId: claim.marketplaceClaimId,
       orderNumber: claim.orderNumber,
       orderOutboundPackageId: claim.orderOutboundPackageId,
     });
@@ -222,23 +243,24 @@ async function upsertClaim(
   // DIFFERENT order row of the same store (e.g. an early fallback match
   // before the real package synced, or Trendyol enriching a formerly
   // id-less claim), move the existing row instead of creating a
-  // duplicate — the unique key is (orderId, trendyolClaimId), so a
+  // duplicate; the unique key is (orderId, marketplaceClaimId), so a
   // plain upsert under the new order would silently double-count the
   // return. Stale item links are nulled; the item pass below re-resolves
   // them against the new order's lines. storeId is the denormalized
   // column (#298) — no parent-walk.
   const existing = await tx.orderClaim.findFirst({
     where: {
-      trendyolClaimId: claim.trendyolClaimId,
+      marketplaceClaimId: claim.marketplaceClaimId,
       orderId: { not: order.id },
       storeId,
     },
     select: { id: true, orderId: true },
   });
+  let wrote = false;
   if (existing !== null) {
     syncLog.warn('claims.order.reanchored', {
       storeId,
-      trendyolClaimId: claim.trendyolClaimId,
+      marketplaceClaimId: claim.marketplaceClaimId,
       fromOrderId: existing.orderId,
       toOrderId: order.id,
     });
@@ -250,6 +272,68 @@ async function upsertClaim(
       where: { claimId: existing.id },
       data: { orderItemId: null },
     });
+    wrote = true;
+    // The claim left its previous order, whose return picture changed too; enqueue
+    // it as well. Both orders belong to this store (the match above is store-scoped).
+    await enqueueProfitRecompute(tx, {
+      organizationId: order.organizationId,
+      reason: ProfitRecomputeReason.CLAIM_CHANGED,
+      storeId,
+      orderIds: [existing.orderId],
+    });
+  }
+
+  // The stored claim and its items as they stand now (after a re-anchor moved the row
+  // onto this order). Drives both the write diff below and the recompute decision.
+  const stored = await tx.orderClaim.findUnique({
+    where: {
+      orderId_marketplaceClaimId: {
+        orderId: order.id,
+        marketplaceClaimId: claim.marketplaceClaimId,
+      },
+      organizationId: order.organizationId,
+      storeId,
+    },
+    select: {
+      id: true,
+      orderShipmentPackageId: true,
+      cargoTrackingNumber: true,
+      cargoProviderName: true,
+      resolved: true,
+      orderOutboundPackageId: true,
+      externalRef: true,
+      items: {
+        select: {
+          marketplaceClaimItemId: true,
+          status: true,
+          orderItemId: true,
+          acceptedBySeller: true,
+          autoApproveDate: true,
+          resolved: true,
+          reasonCode: true,
+          reasonName: true,
+        },
+      },
+    },
+  });
+
+  // Item links: items[].orderLine.id == OrderItem.platformLineId on THIS order,
+  // resolved before any write so the recompute decision can see them.
+  const resolvedLinks = new Map<string, string | null>();
+  for (const item of claim.items) {
+    let orderItemId: string | null = null;
+    if (item.orderLineId !== null) {
+      const orderItem = await tx.orderItem.findFirst({
+        where: {
+          orderId: order.id,
+          organizationId: order.organizationId,
+          platformLineId: BigInt(item.orderLineId),
+        },
+        select: { id: true },
+      });
+      orderItemId = orderItem?.id ?? null;
+    }
+    resolvedLinks.set(item.marketplaceClaimItemId, orderItemId);
   }
 
   // Minimal NON-PII audit ref. Never the raw payload (it carries customer
@@ -260,35 +344,41 @@ async function upsertClaim(
     lastModifiedDate: claim.lastModifiedDate?.toISOString() ?? null,
   };
 
-  // 2. Claim upsert — organizationId + storeId denormalized from the PARENT
+  // 2. Claim write — organizationId + storeId denormalized from the PARENT
   //    ORDER side (never from the payload). claimDate is immutable after
   //    create. Package-id columns (#298): orderShipmentPackageId is the
   //    RETURN parcel id the settlement Return bridge looks up — load-bearing,
   //    so unlike the audit blob it NULL-PRESERVES on update (a sparse tick
-  //    must never blank the bridge key).
-  const dbClaim = await tx.orderClaim.upsert({
-    where: {
-      orderId_trendyolClaimId: { orderId: order.id, trendyolClaimId: claim.trendyolClaimId },
-    },
-    create: {
-      organizationId: order.organizationId,
-      storeId,
-      orderId: order.id,
-      trendyolClaimId: claim.trendyolClaimId,
-      claimDate: claim.claimDate,
-      cargoProviderName: claim.cargoProviderName,
-      cargoTrackingNumber:
-        claim.cargoTrackingNumber !== null ? BigInt(claim.cargoTrackingNumber) : null,
-      resolved: claim.resolved,
-      orderShipmentPackageId: claim.orderShipmentPackageId,
-      orderOutboundPackageId: claim.orderOutboundPackageId,
-      externalRef,
-    },
-    update: {
-      // Null-preserve on cargo + package-id fields (they can lag behind
-      // claim creation). resolved follows the latest scan ONLY when the
-      // scan carried item data — an itemless/sparse payload must never
-      // regress true→false. externalRef always refreshes (audit-only).
+  //    must never blank the bridge key). An existing row is updated only on
+  //    the keys whose value actually differs, so an unchanged re-scan writes
+  //    nothing.
+  let claimId: string;
+  if (stored === null) {
+    wrote = true;
+    const created = await tx.orderClaim.create({
+      data: {
+        organizationId: order.organizationId,
+        storeId,
+        orderId: order.id,
+        marketplaceClaimId: claim.marketplaceClaimId,
+        claimDate: claim.claimDate,
+        cargoProviderName: claim.cargoProviderName,
+        cargoTrackingNumber:
+          claim.cargoTrackingNumber !== null ? BigInt(claim.cargoTrackingNumber) : null,
+        resolved: claim.resolved,
+        orderShipmentPackageId: claim.orderShipmentPackageId,
+        orderOutboundPackageId: claim.orderOutboundPackageId,
+        externalRef,
+      },
+      select: { id: true },
+    });
+    claimId = created.id;
+  } else {
+    // Null-preserve on cargo + package-id fields (they can lag behind
+    // claim creation). resolved follows the latest scan ONLY when the
+    // scan carried item data — an itemless/sparse payload must never
+    // regress true→false. externalRef refreshes whenever it differs (audit-only).
+    const claimUpdate = {
       ...(claim.cargoProviderName !== null ? { cargoProviderName: claim.cargoProviderName } : {}),
       ...(claim.cargoTrackingNumber !== null
         ? { cargoTrackingNumber: BigInt(claim.cargoTrackingNumber) }
@@ -301,65 +391,102 @@ async function upsertClaim(
         ? { orderOutboundPackageId: claim.orderOutboundPackageId }
         : {}),
       externalRef,
-    },
-    select: { id: true },
-  });
+    };
+    const changedClaim = pickChangedFields(claimUpdate, stored);
+    if (Object.keys(changedClaim).length > 0) {
+      await tx.orderClaim.update({ where: { id: stored.id, storeId }, data: changedClaim });
+      wrote = true;
+    }
+    claimId = stored.id;
+  }
 
   // 3. Items — one row per Trendyol claimLineItem (per UNIT). Status is
-  //    live state, updated every scan (CRUD's U — claims are not snapshots).
+  //    live state, refreshed by every scan that changes it (CRUD's U —
+  //    claims are not snapshots).
+  const storedItems = new Map(
+    (stored?.items ?? []).map((item) => [item.marketplaceClaimItemId, item]),
+  );
   for (const item of claim.items) {
-    let orderItemId: string | null = null;
-    if (item.orderLineId !== null) {
-      const orderItem = await tx.orderItem.findFirst({
-        where: { orderId: order.id, platformLineId: BigInt(item.orderLineId) },
-        select: { id: true },
-      });
-      orderItemId = orderItem?.id ?? null;
-    }
+    const orderItemId = resolvedLinks.get(item.marketplaceClaimItemId) ?? null;
+    const storedItem = storedItems.get(item.marketplaceClaimItemId);
 
-    await tx.orderClaimItem.upsert({
-      where: {
-        claimId_trendyolClaimItemId: {
-          claimId: dbClaim.id,
-          trendyolClaimItemId: item.trendyolClaimItemId,
-        },
-      },
-      create: {
-        claimId: dbClaim.id,
+    if (storedItem === undefined) {
+      const row = {
         orderItemId,
-        trendyolClaimItemId: item.trendyolClaimItemId,
+        marketplaceClaimItemId: item.marketplaceClaimItemId,
         reasonCode: item.reasonCode,
         reasonName: item.reasonName,
         status: item.status,
         acceptedBySeller: item.acceptedBySeller,
         autoApproveDate: item.autoApproveDate,
         resolved: item.resolved,
-      },
-      update: {
-        status: item.status,
-        acceptedBySeller: item.acceptedBySeller,
-        autoApproveDate: item.autoApproveDate,
-        resolved: item.resolved,
-        // Reason refreshes only when the scan carried a real code — a
-        // sparse tick must not downgrade a known reason to UNKNOWN.
-        ...(item.reasonCode !== UNKNOWN_REASON_CODE
-          ? { reasonCode: item.reasonCode, reasonName: item.reasonName }
-          : {}),
-        // Null-preserve: keep an existing link if this scan failed to
-        // resolve one (an order item is never un-linked by a later scan).
-        ...(orderItemId !== null ? { orderItemId } : {}),
-      },
+      };
+      await tx.orderClaimItem.create({ data: { claimId, ...row } });
+      wrote = true;
+      // A payload repeating a unit id updates that row instead of hitting the unique key.
+      storedItems.set(item.marketplaceClaimItemId, row);
+      continue;
+    }
+
+    const itemUpdate = {
+      status: item.status,
+      acceptedBySeller: item.acceptedBySeller,
+      autoApproveDate: item.autoApproveDate,
+      resolved: item.resolved,
+      // Reason refreshes only when the scan carried a real code — a
+      // sparse tick must not downgrade a known reason to UNKNOWN.
+      ...(item.reasonCode !== UNKNOWN_REASON_CODE
+        ? { reasonCode: item.reasonCode, reasonName: item.reasonName }
+        : {}),
+      // Null-preserve: keep an existing link if this scan failed to
+      // resolve one (an order item is never un-linked by a later scan).
+      ...(orderItemId !== null ? { orderItemId } : {}),
+    };
+    const changedItem = pickChangedFields(itemUpdate, storedItem);
+    if (Object.keys(changedItem).length > 0) {
+      await tx.orderClaimItem.update({
+        where: {
+          claimId_marketplaceClaimItemId: {
+            claimId,
+            marketplaceClaimItemId: item.marketplaceClaimItemId,
+          },
+        },
+        data: changedItem,
+      });
+      wrote = true;
+      // Keep the map current so a payload repeating a unit id compares against what was
+      // just written (last one wins, as on create).
+      storedItems.set(item.marketplaceClaimItemId, { ...storedItem, ...changedItem });
+    }
+  }
+
+  // Enqueue a profit recompute for the claim's order, in this same transaction, only when
+  // the scan changed something the engine reads: a new claim (or one re-anchored onto
+  // this order -- the re-anchor already enqueued the order it left), a new item, an item
+  // status or item link change, or a return package id / cargo tracking number arriving.
+  // An unchanged re-scan enqueues nothing.
+  //
+  // This enqueue is also how a return settlement record or a return cargo-invoice item
+  // that was stored BEFORE its claim reaches the profit tables: the finance-record bind
+  // pass (packages/profit/src/persistence/finance-records.ts, branches B3/B4/B6) resolves
+  // an order through the claim's return package id and cargo tracking number, so a record
+  // bound before the claim existed resolved no order and is never re-bound. That is why
+  // creating a claim and filling in its return package id or cargo tracking number always
+  // enqueue.
+  // A re-anchored row is found by `stored` (it was just moved onto this order), but the
+  // claim is new to this order, so it compares as not stored.
+  const storedForChange: StoredClaimForChange | null = existing !== null ? null : stored;
+  const enqueued = claimProfitInputsChanged(storedForChange, claim, resolvedLinks);
+  if (enqueued) {
+    await enqueueProfitRecompute(tx, {
+      organizationId: order.organizationId,
+      reason: ProfitRecomputeReason.CLAIM_CHANGED,
+      storeId,
+      orderIds: [order.id],
     });
   }
 
-  // İade gerçekleşme tetikleyici (backstop): bu claim'de kabul edilmiş (Accepted) birim
-  // varsa erken iade tahminini hesapla (estimateReturnOnClaim idempotent: tek-satır upsert + fold).
-  // Webhook bu yolu hızlandırır (ayrı task); cron bu handler'ı düzenli çağırır.
-  if (claim.items.some((it) => it.status === 'Accepted')) {
-    await estimateReturnOnClaim(order.id, tx);
-  }
-
-  return 'written';
+  return { wrote, enqueued };
 }
 
 export const claimsHandler: ModuleHandler = { processChunk: processClaimsChunk };

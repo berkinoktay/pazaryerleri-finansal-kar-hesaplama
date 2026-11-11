@@ -12,7 +12,7 @@ export const listClaimsQuerySchema = TablePaginationQuerySchema.extend({
   from: z.coerce.date().optional().openapi({ description: 'claimDate >= (ISO date).' }),
   to: z.coerce.date().optional().openapi({ description: 'claimDate <= (ISO date).' }),
   q: z.string().trim().min(1).max(120).optional().openapi({
-    description: 'Substring search over platformOrderNumber and trendyolClaimId.',
+    description: "Substring search over platformOrderNumber and the marketplace's claim id.",
   }),
 }).openapi('ListClaimsQuery');
 export type ListClaimsQuery = z.infer<typeof listClaimsQuerySchema>;
@@ -55,7 +55,7 @@ export const ClaimListItemSchema = z
     id: z.string().uuid(),
     orderId: z.string().uuid(),
     platformOrderNumber: z.string().nullable(),
-    trendyolClaimId: z.string(),
+    marketplaceClaimId: z.string().openapi({ description: "The marketplace's claim id." }),
     claimDate: z.string().datetime(),
     resolved: z.boolean(),
     derivedStatus: DerivedClaimStatusSchema,
@@ -111,13 +111,24 @@ export const ClaimsSummaryResponseSchema = z
       description: 'Claims with claimDate in the period that are resolved.',
     }),
     refundDeductionGross: z.string().openapi({
-      description: 'Sum of REFUND_DEDUCTION (net+VAT) captured in the period. Decimal string.',
+      description:
+        'Sum of sale-return deductions (incl. VAT, decimal string) whose return line is dated into ' +
+        "the period by the earliest settlement record's transaction date.",
       example: '785.50',
     }),
-    commissionRefundGross: z.string(),
-    costReturnGross: z.string(),
+    commissionRefundGross: z.string().openapi({
+      description:
+        'Sum of commission refunds (incl. VAT, decimal string) whose return line is dated into the ' +
+        "period by the earliest settlement record's transaction date.",
+    }),
+    costReturnGross: z.string().openapi({
+      description:
+        'Sum of cost returns (incl. VAT, decimal string); a cost return is counted when its order ' +
+        "item's sale-return line falls in the period.",
+    }),
     netImpactGross: z.string().openapi({
-      description: '−refundDeduction + commissionRefund + costReturn — usually negative.',
+      description:
+        'commissionRefund + costReturn - refundDeduction (decimal string); usually negative.',
       example: '-471.30',
     }),
   })

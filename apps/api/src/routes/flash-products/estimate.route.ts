@@ -77,7 +77,7 @@ app.openapi(estimateRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId, listId, itemId } = c.req.valid('param');
   const { price, scenario } = c.req.valid('json');
-  const { store, role } = await requireStoreAccess(userId, orgId, storeId);
+  const { role } = await requireStoreAccess(userId, orgId, storeId);
   assertCapability(role, CAPABILITIES.DATA_READ);
 
   let input: EstimateFlashPriceInput;
@@ -91,7 +91,7 @@ app.openapi(estimateRoute, async (c) => {
     throw new ValidationError([{ field: 'price', code: 'PRICE_REQUIRED' }]);
   }
 
-  const result = await estimateFlashItemPrice(orgId, storeId, store, listId, itemId, input);
+  const result = await estimateFlashItemPrice(orgId, storeId, listId, itemId, input);
   return c.json(result, 200);
 });
 

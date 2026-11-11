@@ -25,7 +25,7 @@ import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization } from '../../helpers/factories';
+import { createMembership, createOrganization, createStore } from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
@@ -146,9 +146,23 @@ async function setupFixture(): Promise<EstimateFixture> {
       name: 'COGS Test',
       type: 'COGS',
       amountGross: new Decimal('200.00'),
-      currency: 'TRY',
       vatRate: 20,
-      fxRateMode: 'MANUAL',
+    },
+  });
+  // The scenario engine costs from the profile's VERSIONS (effective-dated), exactly as
+  // the real cost-profile service writes a version 1 on create. Without it the variant
+  // would read MISSING_COST. One version covers both variants sharing this profile.
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId: org.id,
+      version: 1,
+      name: 'COGS Test',
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      vatRate: 20,
+      changedFields: [],
+      effectiveFrom: new Date('2024-01-01T00:00:00Z'),
     },
   });
   await prisma.productVariantCostProfile.create({
@@ -382,6 +396,86 @@ async function assertCurrentParity(
   );
 }
 
+interface NoCostItem {
+  itemId: string;
+  productId: string;
+  variantId: string;
+}
+
+/**
+ * Creates a cost-less advantage item under the shared fixture tariff: a matched variant
+ * whose shipping resolves (SENDEOMP / TRENDYOL_CONTRACT + a dimensional weight) but which
+ * has NO cost profile, so the scenario reads MISSING_COST. The barcode is absent from the
+ * pinned commission tariff's bands, so the band path never matches. `categoryId` null
+ * leaves the category-rate fallback unresolvable (the NO_COMMISSION case); category 598
+ * carries a CATEGORY rate in the fixture, so the commission resolves (the NO_COST case).
+ */
+async function createNoCostItem(
+  fx: EstimateFixture,
+  params: {
+    readonly categoryId: bigint | null;
+    readonly barcode: string;
+    readonly platformContentId: bigint;
+    readonly productMainId: string;
+    readonly platformVariantId: bigint;
+    readonly stockCode: string;
+    readonly sortOrder: number;
+  },
+): Promise<NoCostItem> {
+  const product = await prisma.product.create({
+    data: {
+      organizationId: fx.orgId,
+      storeId: fx.storeId,
+      platformContentId: params.platformContentId,
+      productMainId: params.productMainId,
+      title: 'No-Cost Advantage Item',
+      categoryId: params.categoryId,
+      brandId: null,
+      brandName: null,
+    },
+  });
+  const variant = await prisma.productVariant.create({
+    data: {
+      organizationId: fx.orgId,
+      storeId: fx.storeId,
+      productId: product.id,
+      platformVariantId: params.platformVariantId,
+      barcode: params.barcode,
+      stockCode: params.stockCode,
+      salePrice: new Decimal('360.00'),
+      listPrice: new Decimal('360.00'),
+      vatRate: 20,
+      // Shipping resolves, so MISSING_COST is the ONLY econ gap.
+      dimensionalWeightOverride: new Decimal('3.0'),
+    },
+  });
+  // No cost profile is attached, so the scenario reads MISSING_COST for this variant.
+  const item = await prisma.advantageTariffItem.create({
+    data: {
+      organizationId: fx.orgId,
+      storeId: fx.storeId,
+      tariffId: fx.tariffId,
+      productVariantId: variant.id,
+      barcode: params.barcode,
+      stockCode: params.stockCode,
+      productTitle: 'No-Cost Advantage Item',
+      currentPrice: '360.00',
+      customerPrice: '360.00',
+      hasCommissionTariff: false,
+      starTiers: [{ key: 'tier1', upperLimit: '250.00' }],
+      applyUntilEnd: false,
+      sortOrder: params.sortOrder,
+    },
+  });
+  return { itemId: item.id, productId: product.id, variantId: variant.id };
+}
+
+async function deleteNoCostItem(item: NoCostItem): Promise<void> {
+  await prisma.advantageTariffItem.delete({ where: { id: item.itemId } });
+  await prisma.productVariant.delete({ where: { id: item.variantId } });
+  await prisma.product.delete({ where: { id: item.productId } });
+}
+
 describe('Advantage Product Labels - item estimate', () => {
   let fx: EstimateFixture;
 
@@ -488,5 +582,138 @@ describe('Advantage Product Labels - item estimate', () => {
     expect(body.code).toBe('VALIDATION_ERROR');
     expect(body.errors[0]?.field).toBe('price');
     expect(body.errors[0]?.code).toBe('INVALID_CUSTOM_PRICE');
+  });
+
+  it('estimate reports NO_COMMISSION before NO_COST when no commission resolves', async () => {
+    // A cost-less variant whose commission is also unresolvable (barcode absent from the
+    // pinned tariff's bands, product has no category so no category-rate fallback). The
+    // estimate must report NO_COMMISSION, not NO_COST: an unresolvable commission ranks
+    // ahead of the cost/shipping gate, exactly as the detail list does (Faz 4C Task 0).
+    const created = await createNoCostItem(fx, {
+      categoryId: null,
+      barcode: 'ADV-EST-NOCOMM',
+      platformContentId: 8604n,
+      productMainId: 'pm-8604',
+      platformVariantId: 86040n,
+      stockCode: 'STK-NOCOMM',
+      sortOrder: 3,
+    });
+
+    const res = await app.request(estimateUrl(fx, created.itemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ price: '260.00' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as EstimateWire;
+    expect(body.calculable).toBe(false);
+    expect(body.reason).toBe('NO_COMMISSION');
+    expect(body.commissionPct).toBeNull();
+    expect(body.breakdown).toBeNull();
+
+    // Clean up so the fixture's detail payload is untouched.
+    await deleteNoCostItem(created);
+  });
+
+  it('estimate falls through to NO_COST once the commission resolves', async () => {
+    // The same cost-less variant, but now its category (598) carries a CATEGORY commission
+    // rate, so the commission resolves (category fallback) while cost is still missing. The
+    // estimate must fall through to NO_COST and echo the resolved rate -- pinning the reason
+    // order from the other side.
+    const created = await createNoCostItem(fx, {
+      categoryId: CAT_CATEGORY_ID,
+      barcode: 'ADV-EST-NOCOST',
+      platformContentId: 8605n,
+      productMainId: 'pm-8605',
+      platformVariantId: 86050n,
+      stockCode: 'STK-NOCOST',
+      sortOrder: 4,
+    });
+
+    const res = await app.request(estimateUrl(fx, created.itemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ price: '260.00' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as EstimateWire;
+    expect(body.calculable).toBe(false);
+    expect(body.reason).toBe('NO_COST');
+    // Commission resolved from the category rate, serialized at the file's 4dp precision.
+    expect(body.commissionPct).toBe(new Decimal(CAT_COMMISSION_PCT).toFixed(4));
+    expect(body.commissionSource).toBe('category');
+    expect(body.breakdown).toBeNull();
+
+    await deleteNoCostItem(created);
+  });
+
+  it('gives a Hepsiburada store no category rate from a Trendyol commission rule', async () => {
+    // The commission rule table is Trendyol reference data. A Hepsiburada store's item in
+    // category 598 -- the category the fixture's TRENDYOL CATEGORY rule (15%) covers --
+    // must not borrow that rate. The engine cannot price this platform, so the base is
+    // degraded and the estimate echoes the commission it resolved: none.
+    const hbStore = await createStore(fx.orgId, { platform: 'HEPSIBURADA' });
+    const product = await prisma.product.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: hbStore.id,
+        platformContentId: 8606n,
+        productMainId: 'pm-8606',
+        title: 'HB Advantage Item',
+        categoryId: CAT_CATEGORY_ID,
+        brandId: null,
+        brandName: null,
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: hbStore.id,
+        productId: product.id,
+        platformVariantId: 86060n,
+        barcode: 'ADV-EST-HB',
+        stockCode: 'STK-HB',
+        salePrice: new Decimal('360.00'),
+        listPrice: new Decimal('360.00'),
+        vatRate: 20,
+      },
+    });
+    const tariff = await prisma.advantageTariff.create({
+      data: { organizationId: fx.orgId, storeId: hbStore.id, name: 'HB Advantage Labels' },
+    });
+    const item = await prisma.advantageTariffItem.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: hbStore.id,
+        tariffId: tariff.id,
+        productVariantId: variant.id,
+        barcode: 'ADV-EST-HB',
+        stockCode: 'STK-HB',
+        productTitle: 'HB Advantage Item',
+        currentPrice: '360.00',
+        customerPrice: '360.00',
+        hasCommissionTariff: false,
+        starTiers: [{ key: 'tier1', upperLimit: '250.00' }],
+        applyUntilEnd: false,
+        sortOrder: 0,
+      },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${hbStore.id}/advantage-tariffs/${tariff.id}/items/${item.id}/estimate`,
+      {
+        method: 'POST',
+        headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ price: '260.00' }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const body: EstimateWire = await res.json();
+    expect(body.itemId).toBe(item.id);
+    expect(body.commissionPct).toBeNull();
+    expect(body.commissionSource).toBeNull();
+    expect(body.calculable).toBe(false);
+    expect(body.reason).toBeNull();
+    expect(body.breakdown).toBeNull();
   });
 });

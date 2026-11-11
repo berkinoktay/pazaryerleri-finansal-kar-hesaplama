@@ -2,10 +2,12 @@ import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
 import { bandPrice } from '@/services/commission-tariff-compute.service';
-import type { StoredBand } from '@/services/commission-tariff.types';
+import type { StoredTariffBand } from '@pazarsync/profit';
 
 /** Terse band builder — defaults both limits to null, override what the case needs. */
-function band(partial: Partial<StoredBand> & Pick<StoredBand, 'key'>): StoredBand {
+function band(
+  partial: Partial<StoredTariffBand> & Pick<StoredTariffBand, 'key'>,
+): StoredTariffBand {
   return { lowerLimit: null, upperLimit: null, commissionPct: '19', ...partial };
 }
 

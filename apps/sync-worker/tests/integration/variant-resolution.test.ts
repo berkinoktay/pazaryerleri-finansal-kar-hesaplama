@@ -14,8 +14,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import { prisma } from '@pazarsync/db';
 import type { Prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { intakeOrder } from '@pazarsync/order-sync';
+import { drainProfitRecomputeQueue } from '@pazarsync/profit';
 import { encryptCredentials } from '@pazarsync/sync-core';
 
 import { processVariantResolution } from '../../src/handlers/variant-resolution';
@@ -98,15 +100,10 @@ async function buildUnresolvedOrder(
         barcode,
         platformLineId: BigInt(Math.floor(Math.random() * 1_000_000)),
         quantity: 1,
-        commissionRate: new Decimal('10.00'),
         lineListGross: new Decimal('120.00'),
         lineSaleGross: new Decimal('120.00'),
         lineSellerDiscountGross: new Decimal('0.00'),
         saleVatRate: new Decimal('20.00'),
-        commissionGross: new Decimal('12.00'),
-        refundedCommissionGross: new Decimal('0.00'),
-        commissionVatRate: new Decimal('20.00'),
-        estimatedCommissionGross: new Decimal('12.00'),
       },
     });
     itemIds.push(item.id);
@@ -136,6 +133,7 @@ function buildMappedOrder(args: {
     lastModifiedDate: args.orderDate,
     status: 'PROCESSING',
     dematerialized: false,
+    packagePending: false,
     // GROSS konvansiyon: saleGross = packageTotalPrice (100); saleVat = 100 × 18/118.
     saleGross: '100.00',
     saleVat: '15.25',
@@ -147,7 +145,7 @@ function buildMappedOrder(args: {
     actualShipDate: null,
     fastDelivery: false,
     fastDeliveryType: null,
-    micro: false,
+    isExportSale: false,
     estimatedDeliveryStartDate: null,
     estimatedDeliveryEndDate: null,
     cargoProviderName: null,
@@ -166,10 +164,6 @@ function buildMappedOrder(args: {
         lineSellerDiscountGross: '0.00',
         saleVatRate: '18',
         commissionRate: '15',
-        commissionGross: '15.00',
-        refundedCommissionGross: '0.00',
-        commissionVatRate: '20',
-        categoryId: null,
         commissionKnown: true,
       },
     ],
@@ -260,7 +254,7 @@ describe('processVariantResolution', () => {
     vi.unstubAllEnvs();
   });
 
-  it('links an unresolved item from the local catalog (no vendor call) and re-enters cost/profit', async () => {
+  it('enqueues the order when an unresolved item is linked to a variant', async () => {
     const ctx = await buildUnresolvedScenario('BC-LOCAL-1');
     await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-LOCAL-1', true);
 
@@ -273,8 +267,12 @@ describe('processVariantResolution', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: ctx.itemId } });
     expect(item.productVariantId).not.toBeNull();
-    // Cost re-entry: the linked variant carries an active cost profile.
-    expect(item.unitCostSnapshotGross).not.toBeNull();
+    // The link no longer captures a cost snapshot; it enqueues the order for the
+    // recompute tick instead.
+    const queued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: ctx.orderId },
+    });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
   });
 
   it('fetches a missing barcode from the vendor, upserts the catalog row, and links', async () => {
@@ -346,6 +344,46 @@ describe('processVariantResolution', () => {
     expect(missDelay).toBeLessThanOrEqual(25 * 60 * 60_000);
   });
 
+  it('vendor-missing on a barcode shared by two order items: ONE CatalogBarcodeMiss upsert (attempts=1), each item deferred once', async () => {
+    // One barcode sitting on two order items in the same tick (here: two
+    // separate orders) must upsert the table ONCE per barcode, not once per
+    // line: attempts must not scale with the line count. If it did, the
+    // buffer-gap repair would jump its first transient-failure retry to the
+    // 24h cap.
+    const ctx = await buildStore();
+    const first = await buildUnresolvedOrder(ctx, ['BC-VM-DUP']);
+    const second = await buildUnresolvedOrder(ctx, ['BC-VM-DUP']);
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.startsWith(SANDBOX_BASE) && queriesBarcode(url, 'BC-VM-DUP')) {
+        // Empty batch -> vendorMissing (the vendor genuinely does not know it).
+        return Promise.resolve(jsonResponse(approvedProductsResponse('BC-VM-DUP', 0)));
+      }
+      throw new Error(`unexpected fetch in test: ${url}`);
+    });
+
+    await processVariantResolution();
+
+    // One shared barcode -> one vendor call.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // The table row is upserted ONCE for the shared barcode, not once per line.
+    const miss = await prisma.catalogBarcodeMiss.findUniqueOrThrow({
+      where: { storeId_barcode: { storeId: ctx.storeId, barcode: 'BC-VM-DUP' } },
+    });
+    expect(miss.vendorMissing).toBe(true);
+    expect(miss.attempts).toBe(1);
+    expect(miss.organizationId).toBe(ctx.organizationId);
+
+    // Each order item still owns its own attempts + backoff (one per line).
+    const items = await prisma.orderItem.findMany({
+      where: { orderId: { in: [first.orderId, second.orderId] } },
+    });
+    expect(items).toHaveLength(2);
+    expect(items.every((i) => i.variantResolutionAttempts === 1)).toBe(true);
+  });
+
   it('retriable (vendor throws): order-item gets the EXPONENTIAL curve and NO CatalogBarcodeMiss row', async () => {
     // Sorgu ATTI (geçici) = retriable: mevcut üstel eğri korunur ve tablo
     // YAZILMAZ — order-item kendi geçici-retry vadesini sahiplenir.
@@ -398,11 +436,12 @@ describe('processVariantResolution', () => {
     expect(secondDelay).toBeLessThanOrEqual(11 * 60_000);
   });
 
-  it('full pipeline: late-arrival intake persists EXCLUDED; tick links identity, money stays frozen', async () => {
+  it('full pipeline: late-arrival intake persists PROFIT-EXCLUDED and queues; the tick links the variant identity', async () => {
     const ctx = await buildStore();
 
-    // REAL intake path (spec 2026-06-12): past-day order with an unknown
-    // barcode → persisted PROFIT-EXCLUDED — no fees, no estimate, ever.
+    // REAL intake path (Berkin 2026-11-03): a past-day order with an unknown barcode
+    // is cost-missing, so it is persisted PROFIT-EXCLUDED (LATE_UNCOSTED_ARRIVAL); the
+    // write still enqueues a profit recompute.
     const outcome = await intakeOrder({
       storeId: ctx.storeId,
       organizationId: ctx.organizationId,
@@ -412,16 +451,20 @@ describe('processVariantResolution', () => {
         barcode: 'BC-FEEDEDUP',
       }),
     });
-    expect(outcome).toEqual({ kind: 'persisted', reason: 'excluded_late_arrival' });
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'late_uncosted_arrival' });
     const order = await prisma.order.findFirstOrThrow({
       where: { storeId: ctx.storeId, platformOrderId: 'feededup-1' },
     });
-    expect(order.estimatedNetProfit).toBeNull();
+    expect(order.profitExcludedAt).not.toBeNull();
     expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
-    expect(await prisma.orderFee.count({ where: { orderId: order.id } })).toBe(0);
+    const queued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: order.id },
+    });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
 
-    // Catalog catches up (variant + cost profile) → tick links IDENTITY only
-    // (görünürlük sözleşmesi): money re-entry is skipped on excluded orders.
+    // Catalog catches up (variant + cost profile) → the resolution tick links the
+    // variant identity onto the unresolved line. The order stays excluded: a cost
+    // that arrives after the day never pulls an excluded order back into profit.
     await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-FEEDEDUP', true);
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
       throw new Error('vendor must NOT be called — local catalog has the barcode');
@@ -430,11 +473,10 @@ describe('processVariantResolution', () => {
     await processVariantResolution();
 
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
-    expect(item.productVariantId).not.toBeNull(); // kimlik bağlandı (görünürlük)
-    expect(item.unitCostSnapshotGross).toBeNull(); // para donuk
+    expect(item.productVariantId).not.toBeNull(); // identity linked (visibility)
     const after = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
-    expect(after.estimatedNetProfit).toBeNull();
-    expect(await prisma.orderFee.count({ where: { orderId: order.id } })).toBe(0);
+    expect(after.profitExcludedAt).not.toBeNull(); // still excluded
+    expect(after.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
   });
 
   it('PENDING buffer satırının bilinmeyen barkodu tick ile kataloğa onarılır (item bağlanmaz)', async () => {
@@ -604,31 +646,30 @@ describe('processVariantResolution', () => {
     expect(miss.attempts).toBe(1);
   });
 
-  it('kâr-dışı siparişin kalemi KİMLİK için bağlanır ama para alanları donuk kalır', async () => {
+  it('links the identity and enqueues even for an order already marked excluded', async () => {
     const ctx = await buildStore();
-    const { orderId, itemIds } = await buildUnresolvedOrder(ctx, ['BC-FROZEN-1']);
+    const { orderId } = await buildUnresolvedOrder(ctx, ['BC-FROZEN-1']);
     await prisma.order.update({
       where: { id: orderId },
       data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
     });
     await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-FROZEN-1', true);
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
-      throw new Error('vendor cagrisi olmamali — yerel katalog dolu');
+      throw new Error('vendor must not be called -- local catalog is populated');
     });
 
     await processVariantResolution();
 
-    const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemIds[0]! } });
-    expect(item.productVariantId).not.toBeNull(); // kimlik bağlandı (görünürlük)
-    expect(item.unitCostSnapshotGross).toBeNull(); // para donuk
-    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    expect(order.estimatedNetProfit).toBeNull();
-    expect(await prisma.orderFee.count({ where: { orderId } })).toBe(0);
+    const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId } });
+    expect(item.productVariantId).not.toBeNull(); // identity linked (visibility)
+    // The money-freeze branch is gone: an excluded order is enqueued like any other.
+    const queued = await prisma.profitRecomputeRequest.findUnique({ where: { orderId } });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
   });
 
-  it('partial link on a multi-item order: estimate stays null until EVERY line is costed', async () => {
+  it('enqueues on a partial link and again when the remaining line resolves', async () => {
     const ctx = await buildStore();
-    const { orderId, itemIds } = await buildUnresolvedOrder(ctx, ['BC-PART-A', 'BC-PART-B']);
+    const { orderId } = await buildUnresolvedOrder(ctx, ['BC-PART-A', 'BC-PART-B']);
     await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-PART-A', true);
 
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
@@ -641,26 +682,32 @@ describe('processVariantResolution', () => {
 
     await processVariantResolution();
 
-    const [itemA, itemB] = await Promise.all(
-      itemIds.map((id) => prisma.orderItem.findUniqueOrThrow({ where: { id } })),
-    );
-    expect(itemA!.productVariantId).not.toBeNull();
-    expect(itemA!.unitCostSnapshotGross).not.toBeNull();
-    expect(itemB!.productVariantId).toBeNull();
-    expect(itemB!.variantResolutionAttempts).toBe(1);
-    // The money invariant: a half-costed order NEVER gets a profit number.
-    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    expect(order.estimatedNetProfit).toBeNull();
+    const itemA = await prisma.orderItem.findFirstOrThrow({
+      where: { orderId, barcode: 'BC-PART-A' },
+    });
+    const itemB = await prisma.orderItem.findFirstOrThrow({
+      where: { orderId, barcode: 'BC-PART-B' },
+    });
+    expect(itemA.productVariantId).not.toBeNull();
+    expect(itemB.productVariantId).toBeNull();
+    expect(itemB.variantResolutionAttempts).toBe(1);
+    // A single linked line is enough to enqueue the order; the drain decides
+    // computability once every line is costed.
+    const afterPartial = await prisma.profitRecomputeRequest.findUnique({ where: { orderId } });
+    expect(afterPartial?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
 
-    // The sibling resolves later (with cost) → estimate completes.
+    // Drain the mark, then let the sibling resolve -> the order is enqueued again.
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId } })).toBe(0);
+
     await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-PART-B', true);
     await prisma.orderItem.update({
-      where: { id: itemIds[1]! },
+      where: { id: itemB.id },
       data: { nextResolutionAt: new Date(Date.now() - 1000) },
     });
     await processVariantResolution();
-    const completed = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    expect(completed.estimatedNetProfit).not.toBeNull();
+    const afterSibling = await prisma.profitRecomputeRequest.findUnique({ where: { orderId } });
+    expect(afterSibling?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
   });
 
   it('per-store isolation: one store failing on the vendor neither blocks nor leaves the other hot-looping', async () => {

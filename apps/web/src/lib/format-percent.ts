@@ -14,7 +14,8 @@
  *
  * `null` (not calculable / undefined metric) renders an em-dash.
  */
-const EM_DASH = '—';
+/** The empty-value glyph every surface shows for a missing figure. */
+export const EM_DASH = '—';
 
 export function formatPercentDisplay(value: string | null): string {
   if (value === null) return EM_DASH;

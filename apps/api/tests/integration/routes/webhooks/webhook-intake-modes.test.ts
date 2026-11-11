@@ -201,8 +201,8 @@ describe('Webhook ingest modes + transient contract (Paket D §D3/D5/D6)', () =>
     expect(fetchSpy).not.toHaveBeenCalled();
 
     // The order is written even though the barcode is not in the catalog: the
-    // unmatched line persists PROFIT-EXCLUDED (past-day cost-missing) with its
-    // barcode trail, and the event closes.
+    // unmatched line persists normally with its barcode trail (no auto-exclusion
+    // anymore; the write queues a profit recompute), and the event closes.
     const order = await prisma.order.findFirstOrThrow({ where: { storeId } });
     expect(order.platformOrderId).toBe('4834026802');
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
@@ -213,7 +213,7 @@ describe('Webhook ingest modes + transient contract (Paket D §D3/D5/D6)', () =>
     expect(event.processingError).toBeNull();
   });
 
-  it('(b2) inline flag, calculable barcode → order with estimate + processedAt, still no vendor call', async () => {
+  it('(b2) inline flag, calculable barcode → order queued for recompute + processedAt, still no vendor call', async () => {
     vi.stubEnv('WEBHOOK_INTAKE_INLINE', 'true');
     const { storeId } = await setupStore();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
@@ -234,10 +234,11 @@ describe('Webhook ingest modes + transient contract (Paket D §D3/D5/D6)', () =>
   it('(c) inline flag + transient processing fault → 200 + backoff (unprocessed, attempts=1, no order)', async () => {
     vi.stubEnv('WEBHOOK_INTAKE_INLINE', 'true');
     const { storeId } = await setupStore();
-    // Remove the COMMISSION_INVOICE fee definition the intake resolves FIRST so
-    // `resolveFeeDefinition` throws FeeDefinitionNotFoundError — a transient
-    // fault (missing seed = misconfiguration, not a payload defect).
-    await prisma.feeDefinition.deleteMany({ where: { feeType: 'COMMISSION_INVOICE' } });
+    // Fail the intake's order-write transaction once -- a transient fault (DB, not a
+    // payload defect).
+    vi.spyOn(prisma, '$transaction').mockRejectedValueOnce(
+      new Error('simulated transient DB fault'),
+    );
 
     const before = Date.now();
     const res = await postWebhook(storeId, makeWebhookPayload());
@@ -248,7 +249,7 @@ describe('Webhook ingest modes + transient contract (Paket D §D3/D5/D6)', () =>
     // Left unprocessed with a recorded error + a future retry window.
     expect(event.processedAt).toBeNull();
     expect(event.processingError).not.toBeNull();
-    expect(event.processingError).toContain('COMMISSION_INVOICE');
+    expect(event.processingError).toContain('simulated transient DB fault');
     expect(event.processAttempts).toBe(1);
     expect(event.nextProcessAt).not.toBeNull();
     expect(event.nextProcessAt!.getTime()).toBeGreaterThan(before);

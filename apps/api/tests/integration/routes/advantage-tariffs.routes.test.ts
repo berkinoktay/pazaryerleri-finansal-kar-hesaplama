@@ -19,7 +19,7 @@
 import { readFileSync } from 'node:fs';
 
 import { Decimal } from 'decimal.js';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 
@@ -203,9 +203,23 @@ async function setupTariffFixture(): Promise<TariffFixture> {
       name: 'COGS Test',
       type: 'COGS',
       amountGross: new Decimal('200.00'),
-      currency: 'TRY',
       vatRate: 20,
-      fxRateMode: 'MANUAL',
+    },
+  });
+  // The scenario engine costs from the profile's VERSIONS (effective-dated), exactly as
+  // the real cost-profile service writes a version 1 on create. Without it the variant
+  // would read MISSING_COST.
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId: org.id,
+      version: 1,
+      name: 'COGS Test',
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      vatRate: 20,
+      changedFields: [],
+      effectiveFrom: new Date('2024-01-01T00:00:00Z'),
     },
   });
   await prisma.productVariantCostProfile.create({
@@ -371,6 +385,21 @@ describe('Advantage Product Labels - list / detail / commission-source / delete'
     // commissionPct is serialized at 4-decimal precision (matching the commission-tariff
     // vertical's `toFixed(4)`), so the full applied rate is preserved on the wire.
     expect(matched?.tiers.map((t) => t.commissionPct)).toEqual(['13.1000', '11.5000', '8.8000']);
+    // --- Golden tier profit (hand-derived from the fixture, NOT the engine) ---
+    // Locks that the chosen band rate flows into the engine at the tier's own price.
+    // tier2 is priced at its upperLimit 274.42 and lands in band3 -> 11.5% commission.
+    // Same fixture constants as product-pricing: cost 200 GROSS (VAT 20%), SENDEOMP
+    // desi-3 ship 122.39 GROSS, PSF 13.19 GROSS, sale VAT 20%, commission VAT 20%,
+    // stoppage 1% of NET sale; store has no profitSettings -> defaults (includeStopaj
+    // true, includeNegativeNetVat FALSE). Each line's VAT rounds half-up to the kurus;
+    // netProfit = sum of signed line GROSS (incl. stoppage) minus effective net VAT
+    // (floored at 0 when the net VAT is negative):
+    //   saleGross 274.42; commission round(0.115*274.42)=31.56; ship 122.39; psf 13.19;
+    //   cost 200.00; saleVAT round(274.42/6)=45.74 -> saleNet 228.68 -> stoppage 2.29
+    //   inputVAT = cost 33.33 + comm round(31.56/6)=5.26 + ship 20.40 + psf 2.20 = 61.19
+    //   netVAT 45.74 - 61.19 = -15.45 < 0 -> floored to 0 (negative net VAT excluded)
+    //   netProfit = 274.42 - 31.56 - 122.39 - 13.19 - 200.00 - 2.29 - 0 = -95.01
+    expect(matched?.tiers[1]?.netProfit).toBe('-95.01');
     // The band-sourced item surfaces its full commission-band ladder (top-down), so the
     // UI can label WHICH band a price lands in. Money at 2 decimals, percent at 4 —
     // omitted limits (band1 upper, band4 lower) serialize to null.
@@ -490,6 +519,85 @@ describe('Advantage Product Labels - list / detail / commission-source / delete'
     await prisma.advantageTariff.delete({ where: { id: tariff.id } });
   });
 
+  it('reports NO_COMMISSION before NO_COST on the advantage screen', async () => {
+    // A matched item whose econ is INCOMPLETE (no cost profile -> MISSING_COST) AND whose
+    // commission is unresolvable (barcode absent from the pinned tariff's bands, product
+    // has no category so no category-rate fallback). The reason is NO_COMMISSION, not
+    // NO_COST: an unresolvable commission ranks ahead of the cost/shipping gate (Faz 4C
+    // Task 0 -- aligning the advantage screen with the discount and campaign screens).
+    const product = await prisma.product.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: fx.storeId,
+        platformContentId: 8502n,
+        productMainId: 'pm-8502',
+        title: 'Komisyonsuz Ürün',
+        // No category -> the category-rate fallback resolves to null.
+        categoryId: null,
+        brandId: null,
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: fx.storeId,
+        productId: product.id,
+        platformVariantId: 85020n,
+        barcode: 'ADV-NOCOMM',
+        stockCode: 'STK-NOCOMM',
+        salePrice: new Decimal('360.00'),
+        listPrice: new Decimal('360.00'),
+        vatRate: 20,
+        // Shipping resolves (store is SENDEOMP / TRENDYOL_CONTRACT), so the ONLY missing
+        // econ input is cost -- under the old ordering this item read NO_COST.
+        dimensionalWeightOverride: new Decimal('3.0'),
+      },
+    });
+    // No cost profile is attached, so the scenario reads MISSING_COST for this variant.
+
+    const tariff = await prisma.advantageTariff.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: fx.storeId,
+        name: 'Komisyonsuz Avantaj',
+        // Pinned to the fixture's commission tariff, which holds no band for this barcode.
+        commissionSourceTariffId: fx.commissionTariffId,
+      },
+    });
+    await prisma.advantageTariffItem.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: fx.storeId,
+        tariffId: tariff.id,
+        productVariantId: variant.id,
+        barcode: 'ADV-NOCOMM',
+        stockCode: 'STK-NOCOMM',
+        productTitle: 'Komisyonsuz Ürün',
+        currentPrice: '360.00',
+        customerPrice: '360.00',
+        hasCommissionTariff: false,
+        starTiers: [{ key: 'tier1', upperLimit: '250.00' }],
+        applyUntilEnd: false,
+        sortOrder: 0,
+      },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/advantage-tariffs/${tariff.id}`,
+      { headers: { Authorization: bearer(fx.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DetailWire;
+    const item = body.items.find((i) => i.barcode === 'ADV-NOCOMM');
+    expect(item?.calculable).toBe(false);
+    expect(item?.reason).toBe('NO_COMMISSION');
+
+    // Clean up (tariff cascade drops its item) so the fixture's state is untouched.
+    await prisma.advantageTariff.delete({ where: { id: tariff.id } });
+    await prisma.productVariant.delete({ where: { id: variant.id } });
+    await prisma.product.delete({ where: { id: product.id } });
+  });
+
   it('rejects an import pinned to a commission tariff from outside the store (422)', async () => {
     const form = new FormData();
     form.append(
@@ -548,5 +656,355 @@ describe('Advantage Product Labels - list / detail / commission-source / delete'
     );
     expect(res.status).toBe(200);
     expect(((await res.json()) as ListWire).data).toHaveLength(0);
+  });
+});
+
+describe('Advantage Product Labels — per-item degrade (decision 9)', () => {
+  // TWO items' scenarios are forced to throw (a negative customer price, which the
+  // engine's unit-price validator rejects): the detail must still return 200 with those
+  // items' profit empty (reason null) while a third item computes fine, and the failures
+  // must collapse into exactly one [profit-read] line per request with failedCount 2.
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  it('keeps the advantage detail up when items fail to compute and logs once', async () => {
+    await truncateAll();
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing — globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Advantage Degrade Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'advantage-degrade-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    // brandId null so the category rate rule below matches on category alone.
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 8801n,
+        productMainId: 'pm-8801',
+        title: 'Bozulma Avantaj Urunu',
+        categoryId: 599n,
+        categoryName: 'Kategori',
+        brandId: null,
+        brandName: null,
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: 88010n,
+        barcode: 'ADV-DEG',
+        stockCode: 'STK-ADEG',
+        salePrice: new Decimal('500.00'),
+        listPrice: new Decimal('500.00'),
+        vatRate: 20,
+        dimensionalWeightOverride: new Decimal('3.0'),
+      },
+    });
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'COGS Adv Degrade',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Adv Degrade',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+    });
+    await ensureFeeDefinitions();
+    // A CATEGORY commission rate so the unpinned (category-mode) advantage resolves a
+    // commission for the matched variant -> the healthy item is calculable.
+    await prisma.marketplaceCommissionRate.create({
+      data: {
+        platform: 'TRENDYOL',
+        ruleKind: 'CATEGORY',
+        categoryId: 599n,
+        brandId: null,
+        categoryName: 'Kategori',
+        parentCategoryName: 'Ust Kategori',
+        brandName: null,
+        baseRate: new Decimal('15'),
+        paymentTermDays: 60,
+        segmentOverrides: {},
+        fetchedAt: new Date(),
+        sourceScreen: 'CategoryCommissionPaymentTerms',
+      },
+    });
+
+    // Unpinned -> category commission supplies the rate (no band ladder).
+    const tariff = await prisma.advantageTariff.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Bozulma Avantaj' },
+    });
+    const tiers = [
+      { key: 'tier1', upperLimit: '450.00', lowerLimit: '400.00' },
+      { key: 'tier2', upperLimit: '399.99', lowerLimit: '300.00' },
+      { key: 'tier3', upperLimit: '299.99' },
+    ];
+    const baseItem = {
+      organizationId: org.id,
+      storeId: store.id,
+      tariffId: tariff.id,
+      productVariantId: variant.id,
+      barcode: 'ADV-DEG',
+      productTitle: 'Bozulma Avantaj Urunu',
+      currentPrice: '500.00',
+      hasCommissionTariff: false,
+      starTiers: tiers,
+      applyUntilEnd: false,
+    };
+    // Healthy item: a positive customer price -> computes.
+    const okItem = await prisma.advantageTariffItem.create({
+      data: { ...baseItem, customerPrice: '500.00', sortOrder: 0 },
+    });
+    // Two failing items: a NEGATIVE customer price makes the engine reject the baseline
+    // unit price -> each item's compute throws.
+    const fail1 = await prisma.advantageTariffItem.create({
+      data: { ...baseItem, customerPrice: '-5.00', sortOrder: 1 },
+    });
+    const fail2 = await prisma.advantageTariffItem.create({
+      data: { ...baseItem, customerPrice: '-7.00', sortOrder: 2 },
+    });
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/advantage-tariffs/${tariff.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const items = ((await res.json()) as DetailWire).items;
+
+      const ok = items.find((i) => i.id === okItem.id);
+      expect(ok?.calculable).toBe(true);
+      expect(ok?.current.netProfit).not.toBeNull();
+
+      for (const failId of [fail1.id, fail2.id]) {
+        const bad = items.find((i) => i.id === failId);
+        expect(bad?.calculable).toBe(false);
+        // A degraded compute carries no reason (not NO_PRODUCT -- the variant is matched).
+        expect(bad?.reason).toBeNull();
+        expect(bad?.current.netProfit).toBeNull();
+        expect(bad?.tiers.every((t) => t.netProfit === null)).toBe(true);
+      }
+
+      // Two failing items collapse into exactly one [profit-read] line, failedCount 2.
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[profit-read] in-request profit computation failed',
+        expect.objectContaining({
+          surface: 'advantage-tariff',
+          orderId: null,
+          failedCount: 2,
+        }),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+});
+
+describe('Advantage Product Labels - sub-kurus tier limits (Faz 4B closing gate)', () => {
+  // A star-tier upper limit imported from Excel can carry more than two decimals
+  // ("249.999"). The engine rejects a unit price with more than two decimals, which (before
+  // the fix) threw and degraded the whole item. The tier evaluation price is now rounded
+  // half-up to the kurus ("249.999" -> 250.00), so the tier computes its reduced commission
+  // and profit and no [profit-read] degrade line is logged.
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  it('prices a star tier whose limit has more than two decimals', async () => {
+    await truncateAll();
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing - globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Advantage Sub Kurus Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'advantage-subkurus-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 9501n,
+        productMainId: 'pm-9501',
+        title: 'Alt Kurus Avantaj Urunu',
+        categoryId: 597n,
+        categoryName: 'Bayrak',
+        brandId: 2032n,
+        brandName: 'Alpaka',
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: 95010n,
+        barcode: 'ADV-SUBK',
+        stockCode: 'STK-ASUBK',
+        salePrice: new Decimal('360.00'),
+        listPrice: new Decimal('360.00'),
+        vatRate: 20,
+        dimensionalWeightOverride: new Decimal('3.0'),
+      },
+    });
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'COGS Adv SubKurus',
+        type: 'COGS',
+        amountGross: new Decimal('50.00'),
+        vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Adv SubKurus',
+        type: 'COGS',
+        amountGross: new Decimal('50.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+    });
+    await ensureFeeDefinitions();
+
+    // A commission tariff whose active period holds one all-covering band, pinned as the
+    // advantage's reduced-rate source, so the tier's price resolves to the band (19%).
+    const commissionTariff = await prisma.commissionTariff.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Komisyon Tarifesi' },
+    });
+    const now = Date.now();
+    const period = await prisma.commissionTariffPeriod.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: commissionTariff.id,
+        dateRangeLabel: '7 - 14 Temmuz',
+        startsAt: new Date(now - 86_400_000),
+        endsAt: new Date(now + 86_400_000),
+        sortOrder: 0,
+      },
+    });
+    await prisma.commissionTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        periodId: period.id,
+        productVariantId: variant.id,
+        barcode: 'ADV-SUBK',
+        stockCode: 'STK-ASUBK',
+        productTitle: 'Alt Kurus Avantaj Urunu',
+        currentPrice: '360.00',
+        currentCommissionPct: '0.1900',
+        // No limits: the band covers both the unrounded tier limit (249.999) and the
+        // rounded engine price (250.00).
+        bands: [{ key: 'band1', commissionPct: '19' }],
+      },
+    });
+
+    const tariff = await prisma.advantageTariff.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'Alt Kurus Avantaj',
+        commissionSourceTariffId: commissionTariff.id,
+      },
+    });
+    const matched = await prisma.advantageTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: tariff.id,
+        productVariantId: variant.id,
+        barcode: 'ADV-SUBK',
+        stockCode: 'STK-ASUBK',
+        productTitle: 'Alt Kurus Avantaj Urunu',
+        currentPrice: '360.00',
+        customerPrice: '360.00',
+        hasCommissionTariff: true,
+        // The tier limit carries a third decimal that rounds up to the kurus.
+        starTiers: [{ key: 'tier1', upperLimit: '249.999' }],
+        applyUntilEnd: false,
+        sortOrder: 0,
+      },
+    });
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/advantage-tariffs/${tariff.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const item = ((await res.json()) as DetailWire).items.find((i) => i.id === matched.id);
+
+      expect(item?.calculable).toBe(true);
+      expect(item?.reason).toBeNull();
+
+      const tier = item?.tiers.find((t) => t.key === 'tier1');
+      // The sub-kurus limit rounds to the kurus for the engine and the wire price...
+      expect(tier?.price).toBe('250.00');
+      // ...and the tier still resolves its reduced commission and a concrete profit.
+      expect(tier?.commissionSource).toBe('band');
+      expect(tier?.commissionPct).not.toBeNull();
+      expect(tier?.netProfit).not.toBeNull();
+      expect(tier?.marginPct).not.toBeNull();
+
+      // No degrade: the item computed, so no [profit-read] line was written.
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

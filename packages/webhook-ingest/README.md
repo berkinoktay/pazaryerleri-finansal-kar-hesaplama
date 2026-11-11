@@ -2,7 +2,7 @@
 
 Shared processing pipeline for a persisted marketplace webhook event. Given a
 `WebhookEvent` row, it maps the payload to a domain order and dispatches intake:
-status mapping, fee resolution, payload mapping, catalog repair, `intakeOrder`,
+status mapping, payload mapping, catalog repair, `intakeOrder`,
 the `processedAt`/`processingError` lifecycle, and the RETURNED -> CLAIMS
 acceleration.
 

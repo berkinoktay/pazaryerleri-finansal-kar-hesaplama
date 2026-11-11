@@ -22,8 +22,8 @@
 //
 // Assertions:
 //   - Store older than 60d: 4 slices, every window ≤ 15 days, union ≈ 60 days,
-//     and a T-35d Sale row (falls inside the 3rd chunk) reaches handleSale
-//     and backfills Order.paymentOrderId.
+//     and a T-35d Sale row (falls inside the 3rd chunk) is stored as a raw
+//     finance record carrying its paymentOrderId.
 //   - Fresh store (createdAt = yesterday): exactly ONE slice, starting at
 //     store.createdAt.
 
@@ -33,10 +33,12 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { FinanceRecordFamily, ProfitRecomputeReason } from '@pazarsync/db/enums';
 import { encryptCredentials } from '@pazarsync/sync-core';
 import type {
   FetchOtherFinancialsOpts,
   FetchSettlementsOpts,
+  FinancialScanSummary,
   TrendyolFinancialTransaction,
 } from '@pazarsync/marketplace';
 
@@ -48,7 +50,10 @@ import {
   createUserProfile,
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
-import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
+
+// A scan that yielded nothing: the generators now RETURN this instead of void so the
+// cron can read each scan's completeness for pruning.
+const EMPTY_SCAN: FinancialScanSummary = { totalElements: 0, yielded: 0 };
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const BARCODE = 'EAN13-WINDOW';
@@ -120,7 +125,6 @@ async function buildScenario(storeCreatedAt: Date): Promise<BuiltCtx> {
       // GROSS CONVENTION (2026-06-16, Bölüm E Task 20): saleGross/saleVat.
       saleGross: new Decimal('120.00'),
       saleVat: new Decimal('20.00'),
-      reconciliationStatus: 'NOT_SETTLED',
     },
   });
 
@@ -130,13 +134,10 @@ async function buildScenario(storeCreatedAt: Date): Promise<BuiltCtx> {
       organizationId: org.id,
       productVariantId: variant.id,
       quantity: 1,
-      // GROSS CONVENTION (2026-06-16): lineListGross/lineSaleGross; commissionGross replaces
-      // grossCommissionAmountNet (12.00 gross). saleVatRate replaces unitVatRate.
+      // GROSS CONVENTION (2026-06-16): lineListGross/lineSaleGross; saleVatRate replaces unitVatRate.
       lineListGross: new Decimal('120.00'),
       lineSaleGross: new Decimal('120.00'),
       saleVatRate: new Decimal('20.00'),
-      commissionRate: new Decimal('10.00'),
-      commissionGross: new Decimal('12.00'),
     },
   });
 
@@ -196,7 +197,7 @@ function makeOldSaleRow(
 }
 
 // Distinct chunk windows captured across all fetchSettlements calls. Each
-// chunk fires one call per SETTLEMENT_TYPE (3), all sharing the same window,
+// chunk fires one call per SETTLEMENT_TYPE (6), all sharing the same window,
 // so the distinct-window count IS the slice count.
 function distinctWindows(windows: { start: Date; end: Date }[]): { start: Date; end: Date }[] {
   const byKey = new Map<string, { start: Date; end: Date }>();
@@ -213,8 +214,6 @@ describe('processSettlementsChunk — scan window coverage', () => {
 
   beforeEach(async () => {
     await truncateAll();
-    // Settlement handler'ları komisyon KDV oranını fee_definitions'tan çözer (denetim A).
-    await ensureFeeDefinitions();
   });
 
   it('store older than 60d: chunks the 60-day scan into 4 ≤15-day slices and backfills a T-35d Sale row', async () => {
@@ -228,25 +227,30 @@ describe('processSettlementsChunk — scan window coverage', () => {
 
     // Mock fetcher mirrors Trendyol's date filter: a row is only yielded
     // when its transactionDate falls inside the requested chunk window.
-    // This means the T-35d row reaches the dispatcher exactly once —
+    // This means the T-35d row reaches the raw-record ingest exactly once —
     // via the chunk that covers T-45..T-30.
     const mockFetchers = {
       fetchSettlements: async function* (
         opts: FetchSettlementsOpts,
-      ): AsyncGenerator<TrendyolFinancialTransaction, void> {
+      ): AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary> {
         capturedWindows.push({ start: opts.startDate, end: opts.endDate });
+        let yielded = 0;
         if (
           opts.transactionType === 'Sale' &&
           saleRow.transactionDate >= opts.startDate.getTime() &&
           saleRow.transactionDate <= opts.endDate.getTime()
         ) {
           yield saleRow;
+          yielded = 1;
         }
+        return { totalElements: yielded, yielded };
       },
       fetchOtherFinancials: async function* (
         _opts: FetchOtherFinancialsOpts,
-      ): AsyncGenerator<TrendyolFinancialTransaction, void> {
+      ): AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary> {
         // empty — window check is on the settlements path
+        yield* [];
+        return EMPTY_SCAN;
       },
       // PR-8: cargo invoices out of scope for the window-coverage check.
       fetchCargoInvoiceItems: async () => [],
@@ -277,13 +281,19 @@ describe('processSettlementsChunk — scan window coverage', () => {
     expect(totalDays, 'total scan coverage').toBeGreaterThan(59.9);
     expect(totalDays, 'total scan coverage').toBeLessThan(60.1);
 
-    // 3. T-35d row reached handleSale via the chunk that covers it →
-    //    Order.paymentOrderId backfilled. Pre-chunking this would only
-    //    fire if the entire 60d window was sent in one call (which the
-    //    client rejects), so this is the integration kill-shot.
-    const updated = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    expect(updated.paymentOrderId).toEqual(BigInt(PAYMENT_ORDER_ID));
-    expect(updated.paymentDate).not.toBeNull();
+    // 3. T-35d row reached the raw-record ingest via the chunk that covers it →
+    //    stored as a SETTLEMENT record carrying its payment order id in the raw column,
+    //    and the bound order enqueued for a profit recompute. Pre-chunking this would
+    //    only fire if the entire 60d window was sent in one call (which the client
+    //    rejects), so this is the integration kill-shot.
+    const stored = await prisma.marketplaceFinanceRecord.findFirstOrThrow({
+      where: { storeId, recordId: 'sale-window-1' },
+    });
+    expect(stored.family).toBe(FinanceRecordFamily.SETTLEMENT);
+    expect(stored.shipmentPackageId).toBe(SHIPMENT_PACKAGE_ID.toString());
+    expect(stored.paymentOrderId).toBe(PAYMENT_ORDER_ID.toString());
+    const queued = await prisma.profitRecomputeRequest.findUniqueOrThrow({ where: { orderId } });
+    expect(queued.reason).toBe(ProfitRecomputeReason.FINANCE_RECORD);
 
     // Sanity: scenario actually wired up the store we built (no silent
     // cross-store leak through a stale fixture).
@@ -301,15 +311,18 @@ describe('processSettlementsChunk — scan window coverage', () => {
     const mockFetchers = {
       fetchSettlements: async function* (
         opts: FetchSettlementsOpts,
-      ): AsyncGenerator<TrendyolFinancialTransaction, void> {
+      ): AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary> {
         capturedWindows.push({ start: opts.startDate, end: opts.endDate });
         // Record the window only; this scenario yields no rows.
         yield* [];
+        return EMPTY_SCAN;
       },
       fetchOtherFinancials: async function* (
         _opts: FetchOtherFinancialsOpts,
-      ): AsyncGenerator<TrendyolFinancialTransaction, void> {
+      ): AsyncGenerator<TrendyolFinancialTransaction, FinancialScanSummary> {
         // empty
+        yield* [];
+        return EMPTY_SCAN;
       },
       fetchCargoInvoiceItems: async () => [],
     };

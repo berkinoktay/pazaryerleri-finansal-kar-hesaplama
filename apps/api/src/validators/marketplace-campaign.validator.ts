@@ -260,14 +260,17 @@ export const CampaignCommissionSourceSchema = z
   .openapi('CampaignCommissionSource', {
     description:
       'Komisyon nereden geldi: komisyon tarifesi bandı (band) / ürünün senkronlanan ' +
-      'komisyonu (product) / kategori oranı (category).',
+      'komisyonu (product; senkronlanan %0 "gelmedi" sayılır ve kategori oranına düşer) / ' +
+      'kategori oranı (category).',
   });
 
 export const CampaignItemReasonSchema = z
   .enum(['NO_PRODUCT', 'NO_COST', 'NO_SHIPPING', 'NO_COMMISSION'])
   .openapi('CampaignItemReason', {
     description:
-      'Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon yok.',
+      'Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon yok. ' +
+      'reason null + calculable false ise kâr bu kalem için hesaplanamadı (sunucuda loglandı); ' +
+      'satır yine de döner.',
   });
 
 export const CampaignScenarioPresentationSchema = z
@@ -290,8 +293,10 @@ export const CampaignScenarioSchema = z
   .openapi('CampaignScenario', {
     description:
       'One priced scenario for a campaign item (at the current, max, or custom price): the ' +
-      'resolved commission and the resulting net profit / margin. commissionPct/commissionSource/' +
-      'netProfit/marginPct are null when the item is not calculable at this price.',
+      'resolved commission and the resulting net profit / margin. netProfit / marginPct come ' +
+      'from the scenario engine at that price with this screen resolved commission rate and the ' +
+      'store profit settings applied. commissionPct/commissionSource/netProfit/marginPct are ' +
+      'null when the item is not calculable at this price.',
   });
 
 // Mirrors the İndirimler CommissionBand shape on the wire (no shared exported schema — each
@@ -353,10 +358,11 @@ export const CampaignBasketScenarioSchema = z
       .nullable()
       .openapi({
         description:
-          'Order net profit for the assumed n-unit basket, from the real profit engine over the ' +
-          'order (n× product cost, 1× shipping, 1× PSF — the platform service and shipping are ' +
-          'per-parcel and a basket of n identical units ships once); 2-decimal string, null when ' +
-          'the priced scenario is not calculable.',
+          'Order net profit for the assumed n-unit basket, from the scenario engine over the ' +
+          'order with the store profit settings applied: one parcel of n units -- n x product ' +
+          'cost, one shipping and one platform-service fee (per-parcel, so a basket of n ' +
+          'identical units ships once), desi x n. 2-decimal string, null when the priced ' +
+          'scenario is not calculable (for example when the n-unit desi exceeds the carrier tariff).',
       }),
     orderMarginPct: z
       .string()
@@ -658,17 +664,23 @@ export const TargetMarginResultSchema = z
     suggestions: z.array(
       z.object({
         itemId: z.string().uuid(),
-        price: z.string().nullable().openapi({
-          description: 'Suggested price reaching the target margin; null when reason is set.',
-        }),
+        price: z
+          .string()
+          .nullable()
+          .openapi({
+            description:
+              'The lowest campaign price whose seller settlement meets the target margin, never ' +
+              'above the item maxPrice; null when reason is set.',
+          }),
         reason: z
           .enum(['UNREACHABLE', 'NOT_CALCULABLE'])
           .nullable()
           .openapi({
             description:
-              'UNREACHABLE = no price up to maxPrice reaches the target margin. ' +
-              'NOT_CALCULABLE = required cost/commission/shipping inputs are missing for this item. ' +
-              'Null when `price` is present.',
+              'UNREACHABLE = no price up to maxPrice reaches the target margin (a real but ' +
+              'unmet target). NOT_CALCULABLE = the item cannot be priced at all (unmatched, ' +
+              'degraded, no resolvable commission, or no computable statement). Null when ' +
+              '`price` is present.',
           }),
       }),
     ),

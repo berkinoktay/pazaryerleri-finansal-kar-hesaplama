@@ -20,10 +20,7 @@ const newProfile = {
   name: 'Yeni Maliyet',
   type: 'COGS',
   amountGross: '30.00',
-  currency: 'TRY',
   vatRate: 18,
-  fxRateMode: 'AUTO',
-  manualFxRate: null,
   note: null,
   archivedAt: null,
   createdBy: null,
@@ -66,12 +63,6 @@ describe('CostCellCreateBridge', () => {
     let attachPayload: { profileIds: string[]; variantIds: string[] } | null = null;
 
     server.use(
-      http.get(`${TEST_API_BASE}/v1/organizations/${ORG_ID}/fx-rates/latest`, () =>
-        HttpResponse.json({
-          USD: { rate: '38.5000', date: '2026-05-09', source: 'TCMB-2026-05-09' },
-          EUR: { rate: '42.0000', date: '2026-05-09', source: 'TCMB-2026-05-09' },
-        }),
-      ),
       http.post(`${TEST_API_BASE}/v1/organizations/${ORG_ID}/cost-profiles`, () =>
         HttpResponse.json(newProfile, { status: 201 }),
       ),

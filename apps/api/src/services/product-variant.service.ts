@@ -1,5 +1,7 @@
 import { prisma } from '@pazarsync/db';
 import type { ProductVariant } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
+import { enqueueProfitRecomputeForVariants } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
 
@@ -28,23 +30,33 @@ export async function setDimensionalWeight(opts: {
 }): Promise<Pick<ProductVariant, 'id' | 'dimensionalWeightOverride' | 'syncedDimensionalWeight'>> {
   const { organizationId, storeId, variantId, value } = opts;
 
-  const result = await prisma.productVariant.updateMany({
-    where: { id: variantId, organizationId, storeId },
-    data: { dimensionalWeightOverride: value },
-  });
+  // One transaction: write the override + queue a profit recompute for every
+  // order carrying this variant (REFERENCE_CHANGED). The desi drives the
+  // shipping estimate, so a change here is a backdated profit input.
+  return prisma.$transaction(async (tx) => {
+    const result = await tx.productVariant.updateMany({
+      where: { id: variantId, organizationId, storeId },
+      data: { dimensionalWeightOverride: value },
+    });
 
-  if (result.count === 0) {
-    throw new NotFoundError('ProductVariant', variantId);
-  }
+    if (result.count === 0) {
+      throw new NotFoundError('ProductVariant', variantId);
+    }
 
-  // updateMany doesn't return rows; fetch the canonical state to
-  // serialize back to the client. The where-clause is the same tenant
-  // filter, so a successful update guarantees this read returns a row.
-  const updated = await prisma.productVariant.findFirstOrThrow({
-    where: { id: variantId, organizationId, storeId },
-    select: { id: true, dimensionalWeightOverride: true, syncedDimensionalWeight: true },
+    await enqueueProfitRecomputeForVariants(tx, {
+      organizationId,
+      variantIds: [variantId],
+      reason: ProfitRecomputeReason.REFERENCE_CHANGED,
+    });
+
+    // updateMany doesn't return rows; fetch the canonical state to
+    // serialize back to the client. The where-clause is the same tenant
+    // filter, so a successful update guarantees this read returns a row.
+    return tx.productVariant.findFirstOrThrow({
+      where: { id: variantId, organizationId, storeId },
+      select: { id: true, dimensionalWeightOverride: true, syncedDimensionalWeight: true },
+    });
   });
-  return updated;
 }
 
 // ─── bulkSetDimensionalWeight ──────────────────────────────────────────
@@ -70,10 +82,21 @@ export async function bulkSetDimensionalWeight(opts: {
 
   if (variantIds.length === 0) return { updated: 0 };
 
-  const result = await prisma.productVariant.updateMany({
-    where: { id: { in: variantIds }, organizationId, storeId },
-    data: { dimensionalWeightOverride: value },
-  });
+  // One transaction: write the overrides + queue a profit recompute for every
+  // order carrying any of these variants (REFERENCE_CHANGED). The enqueue is
+  // organization-filtered, so cross-tenant ids in the array pull no orders.
+  return prisma.$transaction(async (tx) => {
+    const result = await tx.productVariant.updateMany({
+      where: { id: { in: variantIds }, organizationId, storeId },
+      data: { dimensionalWeightOverride: value },
+    });
 
-  return { updated: result.count };
+    await enqueueProfitRecomputeForVariants(tx, {
+      organizationId,
+      variantIds,
+      reason: ProfitRecomputeReason.REFERENCE_CHANGED,
+    });
+
+    return { updated: result.count };
+  });
 }

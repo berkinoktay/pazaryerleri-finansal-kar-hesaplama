@@ -84,8 +84,8 @@ estimates AS (
     END AS shipping_estimate_status,
     vwc.carrier_code AS shipping_carrier_code,
     -- Effective desi (override ?? synced), text-cast like estimated_shipping_net.
-    -- Consumed by batchResolveShipping to populate ShippingEstimate.baseDesiAtEstimate;
-    -- products-list ignores this column.
+    -- Carried for callers that persist ShippingEstimate.baseDesiAtEstimate; products-list
+    -- ignores this column.
     vwc.eff_desi::text AS eff_desi
   FROM variant_with_carrier vwc
   LEFT JOIN LATERAL (

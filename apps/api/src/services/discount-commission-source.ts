@@ -34,7 +34,7 @@
 // CRITICAL timezone frame: commission tariff week/period bounds are persisted as İstanbul
 // WALL-CLOCK-as-UTC (via the commission import's `parsePeriodPart`), while `list.startsAt`
 // and `now` are TRUE instants. We mirror the Flash resolver's normalization EXACTLY — each
-// stored bound is reconciled to a true instant with `businessZoneEpochToInstant(bound.getTime())`
+// stored bound is reconciled to a true instant with the shared `isInstantWithinTariffPeriod` helper
 // before comparing — so `weekStart <= anchor < weekEnd` (and the sub-period / expiry test) is
 // meaningful. See `flash-product-commission.service.ts` for the sibling implementation.
 //
@@ -43,34 +43,23 @@
 
 import { prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
-import { businessZoneEpochToInstant } from '@pazarsync/utils';
+import { isInstantWithinTariffPeriod } from '@pazarsync/utils';
 
 import { type CommissionSourceResolution } from './advantage-tariff.service';
-import { parseStoredBands, type StoredBand } from './commission-tariff.types';
-
-/**
- * Normalizes a stored commission bound (İstanbul wall-clock-as-UTC) to the true instant,
- * so it is comparable with the list's true-instant `startsAt`. Mirrors the Flash resolver's
- * `boundToInstantMs` — the ONE reconciliation point between the two time frames.
- */
-function boundToInstantMs(bound: Date | null): number | null {
-  return bound === null ? null : businessZoneEpochToInstant(bound.getTime()).getTime();
-}
+import { parseStoredTariffBands, type StoredTariffBand } from '@pazarsync/profit';
 
 interface CoveringPeriod {
   readonly id: string;
   readonly dateRangeLabel: string;
   readonly startsAt: Date | null;
   readonly endsAt: Date | null;
-  readonly startMs: number | null;
-  readonly endMs: number | null;
 }
 
 interface CoveringWeek {
   readonly tariffId: string;
   readonly tariffName: string;
-  readonly startMs: number | null;
-  readonly endMs: number | null;
+  readonly startsAt: Date | null;
+  readonly endsAt: Date | null;
   readonly periods: ReadonlyArray<CoveringPeriod>;
 }
 
@@ -91,8 +80,6 @@ export async function resolveCommissionSourceCovering(
   storeId: string,
   anchor: Date,
 ): Promise<CommissionSourceResolution | null> {
-  const anchorMs = anchor.getTime();
-
   let tariffs;
   try {
     tariffs = await prisma.commissionTariff.findMany({
@@ -124,25 +111,29 @@ export async function resolveCommissionSourceCovering(
   const weeks: CoveringWeek[] = tariffs.map((t) => ({
     tariffId: t.id,
     tariffName: t.name,
-    startMs: boundToInstantMs(t.weekStartsAt),
-    endMs: boundToInstantMs(t.weekEndsAt),
+    startsAt: t.weekStartsAt,
+    endsAt: t.weekEndsAt,
     periods: t.periods.map((p) => ({
       id: p.id,
       dateRangeLabel: p.dateRangeLabel,
       startsAt: p.startsAt,
       endsAt: p.endsAt,
-      startMs: boundToInstantMs(p.startsAt),
-      endMs: boundToInstantMs(p.endsAt),
     })),
   }));
 
   const week = weeks.find(
-    (w) => w.startMs !== null && w.endMs !== null && w.startMs <= anchorMs && anchorMs < w.endMs,
+    (w) =>
+      w.startsAt !== null &&
+      w.endsAt !== null &&
+      isInstantWithinTariffPeriod({ startsAt: w.startsAt, endsAt: w.endsAt }, anchor),
   );
   if (week === undefined) return null;
 
   const sub = week.periods.find(
-    (p) => p.startMs !== null && p.endMs !== null && p.startMs <= anchorMs && anchorMs < p.endMs,
+    (p) =>
+      p.startsAt !== null &&
+      p.endsAt !== null &&
+      isInstantWithinTariffPeriod({ startsAt: p.startsAt, endsAt: p.endsAt }, anchor),
   );
   const period = sub ?? week.periods[0];
   if (period === undefined) return null;
@@ -157,8 +148,8 @@ export async function resolveCommissionSourceCovering(
     mapPrismaError(err);
   }
 
-  const bandsByBarcode = new Map<string, StoredBand[]>();
-  for (const item of items) bandsByBarcode.set(item.barcode, parseStoredBands(item.bands));
+  const bandsByBarcode = new Map<string, StoredTariffBand[]>();
+  for (const item of items) bandsByBarcode.set(item.barcode, parseStoredTariffBands(item.bands));
 
   return {
     tariffId: week.tariffId,

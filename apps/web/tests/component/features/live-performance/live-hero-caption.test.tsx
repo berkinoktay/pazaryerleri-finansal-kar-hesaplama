@@ -10,6 +10,8 @@ import { render, screen } from '../../../helpers/render';
 // so this source file stays ASCII; numeric/format assertions are ASCII already.
 const yesterdayLabel = trMessages.livePerformance.chart.yesterdayLabel;
 const netProfitLabel = trMessages.livePerformance.kpis.netProfit;
+// The em-dash shown for a missing figure, built from its code point to keep this file ASCII.
+const EM_DASH = String.fromCodePoint(0x2014);
 
 // A full LivePerformanceKpis fixture; each test overrides only the fields the
 // caption reads (net profit today/yesterday + pending order count).
@@ -76,5 +78,18 @@ describe('LiveHeroCaption', () => {
 
     expect(screen.getByText(yesterdayLabel)).toBeInTheDocument();
     expect(screen.queryByText(/%/)).toBeNull();
+  });
+
+  it('shows a dash for yesterday and no delta chip when yesterday had no costed order', () => {
+    // The API sends netProfitYesterday null when no order of yesterday is costed;
+    // a zero figure would read as a real 0 TL profit, so the caption shows a dash.
+    render(
+      <LiveHeroCaption kpis={{ ...BASE, netProfitToday: '20.00', netProfitYesterday: null }} />,
+    );
+
+    expect(screen.getByText(yesterdayLabel)).toBeInTheDocument();
+    expect(screen.getByText(EM_DASH)).toBeInTheDocument();
+    expect(screen.queryByText(/%/)).toBeNull();
+    expect(screen.queryByText(/0,00/)).toBeNull();
   });
 });

@@ -203,3 +203,27 @@ INSERT INTO "shipping_barem_tariffs" (id, carrier_id, min_order_amount, max_orde
 SELECT gen_random_uuid(), c.id, bd.min_amount, bd.max_amount, bd.price_net, '2026-03-26'::date, now(), now()
 FROM barem_data bd
 JOIN carriers c ON c.code = bd.carrier_code;
+
+-- --- Backfill: shipping_carriers.order_cargo_names (seed-owned; NOT part of the
+-- original migration body above) ---
+-- The order_cargo_names column was added by a later migration
+-- (20261105094822_shipping_carrier_order_cargo_names). This file is owned by the db
+-- seed and test-support scripts, which replay the whole seed section on a fresh/reset
+-- DB (db push does not run migration SQL), so the backfill lives here too to keep a
+-- re-seed in sync with the migration. The values are the exact cargoProviderName
+-- strings Trendyol writes on orders/packages (the getProviders "Name" column); the
+-- order profit path matches an order's cargo name against these OR the display name.
+-- The carriers above were just inserted with the column default (empty array), so
+-- these UPDATEs run after. U& escapes keep the new rows byte-identical to the migration
+-- twin (20261105094822), which is ASCII-only; earlier rows of this seed predate that
+-- convention.
+UPDATE "shipping_carriers" SET "order_cargo_names" = ARRAY[U&'Yurti\00E7i Kargo Marketplace'] WHERE "platform" = 'TRENDYOL' AND "code" = 'YKMP';
+UPDATE "shipping_carriers" SET "order_cargo_names" = ARRAY['Aras Kargo Marketplace'] WHERE "platform" = 'TRENDYOL' AND "code" = 'ARASMP';
+UPDATE "shipping_carriers" SET "order_cargo_names" = ARRAY[U&'S\00FCrat Kargo Marketplace'] WHERE "platform" = 'TRENDYOL' AND "code" = 'SURATMP';
+UPDATE "shipping_carriers" SET "order_cargo_names" = ARRAY['DHL eCommerce Marketplace'] WHERE "platform" = 'TRENDYOL' AND "code" = 'DHLECOMMP';
+UPDATE "shipping_carriers" SET "order_cargo_names" = ARRAY['Trendyol Express Marketplace'] WHERE "platform" = 'TRENDYOL' AND "code" = 'TEXMP';
+UPDATE "shipping_carriers" SET "order_cargo_names" = ARRAY['PTT Kargo Marketplace'] WHERE "platform" = 'TRENDYOL' AND "code" = 'PTTMP';
+UPDATE "shipping_carriers" SET "order_cargo_names" = ARRAY['Kolay Gelsin Marketplace'] WHERE "platform" = 'TRENDYOL' AND "code" = 'SENDEOMP';
+UPDATE "shipping_carriers" SET "order_cargo_names" = ARRAY['Horoz Kargo Marketplace'] WHERE "platform" = 'TRENDYOL' AND "code" = 'HOROZMP';
+UPDATE "shipping_carriers" SET "order_cargo_names" = ARRAY['CEVA Marketplace'] WHERE "platform" = 'TRENDYOL' AND "code" = 'CEVAMP';
+UPDATE "shipping_carriers" SET "order_cargo_names" = ARRAY['Ceva Tedarik Marketplace'] WHERE "platform" = 'TRENDYOL' AND "code" = 'CEVATEDARIK';

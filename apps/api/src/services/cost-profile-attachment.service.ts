@@ -1,7 +1,13 @@
 import { prisma } from '@pazarsync/db';
 import type { CostProfile, Prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
-import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
+import {
+  buildCalcCheckLines,
+  enqueueProfitRecomputeForVariants,
+  resolveOrderCalculability,
+} from '@pazarsync/profit';
+import { getBusinessDateAnchor } from '@pazarsync/utils';
 
 import {
   CostProfileArchivedCannotAttachError,
@@ -138,6 +144,13 @@ async function assertSameStore(
  * discipline). Forward-only — never reverts PROMOTING → PENDING. The PR-C promote
  * worker then writes the PROMOTING entries to `orders` on its next tick.
  *
+ * Cost-window scope (Berkin 2026-11-03): only a buffer row whose order day has NOT
+ * ended yet (same-day or later) is flipped. A past-day row's cost window is already
+ * closed, so the day-end flush -- not a late cost attach -- graduates it under the
+ * cost-window rule (excluded unless its cost was timely). This is defense in depth
+ * for the promote-tick exclusion check: a late cost must never promote a past-day
+ * entry here.
+ *
  * Returns the number of entries flipped (surfaced to the UI as
  * `bufferEntriesPromoted` for the "X sipariş kâr hesabına eklendi" toast).
  */
@@ -146,6 +159,11 @@ async function flipBufferForVariants(
   orgId: string,
   variantIds: string[],
 ): Promise<number> {
+  // Business-day anchor for the same-day guard on the flip update below. order_date
+  // is a DATE anchor, so this reuses the exact DATE comparison the day-end flush uses
+  // (orderDate < todayAnchor == past day) rather than a raw-SQL date cast.
+  const todayAnchor = getBusinessDateAnchor(new Date());
+
   const variants = await tx.productVariant.findMany({
     where: { id: { in: variantIds }, organizationId: orgId },
     select: { barcode: true, storeId: true },
@@ -190,7 +208,17 @@ async function flipBufferForVariants(
 
     if (promotableIds.length > 0) {
       const result = await tx.livePerformanceBuffer.updateMany({
-        where: { id: { in: promotableIds }, status: 'PENDING' },
+        // Same-day guard (cost-window rule): flip only rows whose order day has not
+        // ended. A past-day row stays PENDING for the day-end flush to graduate (and
+        // exclude unless its cost was timely); a late cost attach must not promote it.
+        // organizationId is defense in depth: the candidate ids already come from a
+        // tenant-filtered query, but every buffer write pins the org (CLAUDE.md).
+        where: {
+          id: { in: promotableIds },
+          organizationId: orgId,
+          status: 'PENDING',
+          orderDate: { gte: todayAnchor },
+        },
         data: { status: 'PROMOTING' },
       });
       promoted += result.count;
@@ -233,13 +261,19 @@ export async function attachCostProfiles(
     })),
   );
 
-  // One transaction: create the links + flip any now-calculable buffer entries.
+  // One transaction: create the links + flip any now-calculable buffer entries +
+  // queue a profit recompute for the affected variants' orders (COST_CHANGED).
   return await prisma.$transaction(async (tx) => {
     const result = await tx.productVariantCostProfile.createMany({
       data,
       skipDuplicates: true,
     });
     const bufferEntriesPromoted = await flipBufferForVariants(tx, orgId, variantIds);
+    await enqueueProfitRecomputeForVariants(tx, {
+      organizationId: orgId,
+      variantIds,
+      reason: ProfitRecomputeReason.COST_CHANGED,
+    });
     return { attached: result.count, bufferEntriesPromoted };
   });
 }
@@ -262,12 +296,24 @@ export async function detachCostProfiles(
   await guardProfiles(orgId, profileIds, accessibleStoreIds);
   await guardVariants(orgId, variantIds, accessibleStoreIds);
 
-  const result = await prisma.productVariantCostProfile.deleteMany({
-    where: {
-      profileId: { in: profileIds },
-      productVariantId: { in: variantIds },
+  // One transaction: remove the links + queue a profit recompute for the
+  // detached variants' orders (COST_CHANGED). The detach ran without a
+  // transaction before this slice; wrapping it keeps the mark atomic with the
+  // delete so a crash cannot drop one without the other.
+  const result = await prisma.$transaction(async (tx) => {
+    const deleted = await tx.productVariantCostProfile.deleteMany({
+      where: {
+        profileId: { in: profileIds },
+        productVariantId: { in: variantIds },
+        organizationId: orgId,
+      },
+    });
+    await enqueueProfitRecomputeForVariants(tx, {
       organizationId: orgId,
-    },
+      variantIds,
+      reason: ProfitRecomputeReason.COST_CHANGED,
+    });
+    return deleted;
   });
 
   return { detached: result.count };
@@ -328,7 +374,13 @@ export async function replaceCostProfilesForVariants(
 
     // Re-evaluate buffer calculability after the final link state is set. A
     // clear (empty profileIds) leaves variants cost-missing → flip is a no-op.
-    return await flipBufferForVariants(tx, orgId, variantIds);
+    const promoted = await flipBufferForVariants(tx, orgId, variantIds);
+    await enqueueProfitRecomputeForVariants(tx, {
+      organizationId: orgId,
+      variantIds,
+      reason: ProfitRecomputeReason.COST_CHANGED,
+    });
+    return promoted;
   });
 
   return {

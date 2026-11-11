@@ -79,6 +79,25 @@ describe('LiveKpiRow', () => {
     expect(screen.queryByText(/maliyet bekliyor/)).toBeNull();
   });
 
+  it('shows a dash for margin and profit/cost ratio when today has no costed order', async () => {
+    // The API sends the four ratios as null when the day has no costed order;
+    // a 0% figure would read as a real zero margin, so the cells show a dash.
+    server.use(
+      http.get(URL, () =>
+        HttpResponse.json({
+          ...KPIS,
+          marginToday: null,
+          profitCostRatioToday: null,
+        }),
+      ),
+    );
+
+    render(<LiveKpiRow orgId={ORG_ID} storeId={STORE_ID} />);
+
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+    expect(screen.getAllByText('—')).toHaveLength(2);
+  });
+
   it('OFF state (no MarginColoringProvider): the loaded margin value carries no inline color — default foreground, matching the pre-margin-coloring StatCard', async () => {
     // The margin-coloring feature tints the VALUE via an inline `color` style
     // (marginColorStyle), NOT a tone class, and only when the preference is on.

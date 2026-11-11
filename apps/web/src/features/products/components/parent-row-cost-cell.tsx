@@ -230,7 +230,7 @@ export function ParentRowCostCell({
                 {availableProfiles.map((profile) => (
                   <CommandItem
                     key={profile.id}
-                    value={`${profile.name} ${profile.currency} ${profile.amountGross}`}
+                    value={`${profile.name} ${profile.amountGross}`}
                     onSelect={() => handleAttachToAll(profile.id)}
                     className="gap-sm flex items-center"
                     disabled={attachMutation.isPending}
@@ -241,7 +241,6 @@ export function ParentRowCostCell({
                     </span>
                     <ProfileAmount
                       amount={profile.amountGross}
-                      currency={profile.currency}
                       className="text-muted-foreground shrink-0 text-xs"
                     />
                   </CommandItem>

@@ -63,20 +63,4 @@ describe('computeCostAggregate', () => {
     expect(result!.withProfiles).toBe(2);
     expect(result!.withoutProfiles).toBe(1);
   });
-
-  it('excludes variants with profileCount > 0 but null currentCostTry from range calc', () => {
-    // Edge case: variant has profiles but FX rate is stale — currentCostTry is null.
-    const variants = [
-      makeVariant({ profileCount: 1, currentCostTry: '100.00', costStatus: 'OK' }),
-      makeVariant({ profileCount: 1, currentCostTry: null, costStatus: 'FX_STALE' }),
-    ];
-    const result = computeCostAggregate(variants);
-    expect(result).not.toBeNull();
-    // Only the variant with a real cost value participates in min/max.
-    expect(result!.min).toBe(100);
-    expect(result!.max).toBe(100);
-    expect(result!.isSame).toBe(true);
-    // Both variants count as "with profiles".
-    expect(result!.withProfiles).toBe(2);
-  });
 });

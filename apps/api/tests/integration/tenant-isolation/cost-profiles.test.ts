@@ -42,9 +42,7 @@ describe('Tenant isolation — cost-profile routes', () => {
         name: 'Org B COGS',
         type: 'COGS',
         amountGross: new Decimal('15.00'),
-        currency: 'TRY',
         vatRate: 0,
-        fxRateMode: 'AUTO',
       },
     });
     await prisma.costProfileVersion.create({
@@ -55,9 +53,7 @@ describe('Tenant isolation — cost-profile routes', () => {
         name: profile.name,
         type: profile.type,
         amountGross: profile.amountGross,
-        currency: profile.currency,
         vatRate: profile.vatRate,
-        fxRateMode: profile.fxRateMode,
         changedFields: [],
       },
     });
@@ -86,9 +82,7 @@ describe('Tenant isolation — cost-profile routes', () => {
         name: 'Org A COGS',
         type: 'COGS',
         amountGross: new Decimal('10.00'),
-        currency: 'TRY',
         vatRate: 0,
-        fxRateMode: 'AUTO',
       },
     });
 

@@ -5,5 +5,10 @@
     "outDir": "dist",
     "noEmit": true
   },
-  "include": ["src/**/*", "vitest.config.ts", "vitest.unit.config.ts"]
+  "include": [
+    "src/**/*",
+    "scripts/enqueue-profit-recompute.ts",
+    "vitest.config.ts",
+    "vitest.unit.config.ts"
+  ]
 }

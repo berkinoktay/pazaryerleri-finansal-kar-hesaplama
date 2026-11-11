@@ -37,11 +37,6 @@ const THEME_OPTIONS: readonly ThemeOption[] = [
   { value: 'system', labelKey: 'themeCardSystem' },
 ] as const;
 
-const CURRENCY_OPTIONS = [
-  { value: 'TRY', labelKey: 'currencyTRY' },
-  { value: 'USD', labelKey: 'currencyUSD' },
-] as const;
-
 const NUMBER_OPTIONS = [
   { value: 'dot-comma', labelKey: 'numberDotComma' },
   { value: 'comma-point', labelKey: 'numberCommaPoint' },
@@ -172,7 +167,7 @@ function ThemeCard({
  * setTheme. SSR-safe: selected state is only computed after mount
  * (useIsMounted gate) so server and first client render are byte-identical.
  *
- * "Bicimler" — draft block: currency / number / date selects in a row.
+ * "Bicimler" — draft block: number / date selects in a row.
  * Save action fires the "coming soon" toast.
  *
  * "Klavye kisayollari" — draft block: enable switch + shortcut list.
@@ -190,7 +185,6 @@ export function PreferencesSettings(): React.ReactElement {
     : null;
 
   // Draft formats state — not persisted yet.
-  const [currency, setCurrency] = useState<string>('TRY');
   const [numberFmt, setNumberFmt] = useState<string>('dot-comma');
   const [dateFmt, setDateFmt] = useState<string>('dmy');
 
@@ -275,26 +269,7 @@ export function PreferencesSettings(): React.ReactElement {
           }}
         >
           <CardContent>
-            <div className="gap-lg grid sm:grid-cols-3">
-              {/* Para birimi */}
-              <div className="gap-3xs flex flex-col">
-                <label htmlFor="pref-currency" className="text-foreground text-sm font-medium">
-                  {t('formats.currencyLabel')}
-                </label>
-                <Select value={currency} onValueChange={setCurrency}>
-                  <SelectTrigger id="pref-currency" aria-label={t('formats.currencyLabel')}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CURRENCY_OPTIONS.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>
-                        {t(`formats.${o.labelKey}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
+            <div className="gap-lg grid sm:grid-cols-2">
               {/* Sayi bicimi */}
               <div className="gap-3xs flex flex-col">
                 <label htmlFor="pref-number" className="text-foreground text-sm font-medium">

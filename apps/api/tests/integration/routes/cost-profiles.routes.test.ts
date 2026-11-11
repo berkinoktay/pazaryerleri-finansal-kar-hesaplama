@@ -34,9 +34,7 @@ describe('Cost profile routes', () => {
         name: opts.name ?? 'Test COGS',
         type: 'COGS',
         amountGross: new Decimal('25.50'),
-        currency: 'TRY',
         vatRate: 18,
-        fxRateMode: 'AUTO',
       },
     });
   }
@@ -144,9 +142,7 @@ describe('Cost profile routes', () => {
           name: 'Hammadde COGS',
           type: 'COGS',
           amountGross: '25.50',
-          currency: 'TRY',
           vatRate: 18,
-          fxRateMode: 'AUTO',
         }),
       });
       expect(res.status).toBe(201);
@@ -191,27 +187,6 @@ describe('Cost profile routes', () => {
       expect(second.status).toBe(409);
       const err = (await second.json()) as { code: string };
       expect(err.code).toBe('COST_PROFILE_NAME_TAKEN');
-    });
-
-    it('returns 422 when MANUAL fxRateMode is missing manualFxRate', async () => {
-      const user = await createAuthenticatedTestUser();
-      const org = await createOrganization();
-      await createMembership(org.id, user.id);
-      const store = await createStore(org.id);
-
-      const res = await app.request(`/v1/organizations/${org.id}/cost-profiles`, {
-        method: 'POST',
-        headers: { Authorization: bearer(user.accessToken), 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          storeId: store.id,
-          name: 'X',
-          type: 'COGS',
-          amountGross: '10.00',
-          currency: 'USD',
-          fxRateMode: 'MANUAL',
-        }),
-      });
-      expect(res.status).toBe(422);
     });
   });
 
@@ -330,9 +305,7 @@ describe('Cost profile routes', () => {
           name: profile.name,
           type: profile.type,
           amountGross: profile.amountGross,
-          currency: profile.currency,
           vatRate: profile.vatRate,
-          fxRateMode: profile.fxRateMode,
           changedFields: [],
         },
       });

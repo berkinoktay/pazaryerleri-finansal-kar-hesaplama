@@ -8,8 +8,6 @@
  * ücretler 'ALL' kapsamında; oran değişirse yeni effectiveFrom row eklenir
  * (eski'nin effectiveTo set'lenir); bu fonksiyon `at` tarihine göre doğru
  * sürümü seçer.
- *
- * `applyEstimateOnOrderCreate` çağırır: PSF + Stopaj için `at = order.orderDate`.
  */
 
 import type { OrderFeeType, Platform, Prisma } from '@pazarsync/db';
@@ -21,6 +19,24 @@ export class FeeDefinitionNotFoundError extends Error {
   ) {
     super(`No active FeeDefinition for ${platform}/${feeType}`);
     this.name = 'FeeDefinitionNotFoundError';
+  }
+}
+
+/** The amount column of a fee definition a used fee requires. */
+export type FeeDefinitionAmountField = 'fixedAmountNet' | 'rateOfSale';
+
+/**
+ * A fee definition that a parcel or scenario actually uses exists for the date but
+ * is missing the amount column it needs (a FIXED fee without `fixedAmountNet`, a
+ * RATE_OF_SALE fee without `rateOfSale`).
+ */
+export class IncompleteFeeDefinitionError extends Error {
+  constructor(
+    public readonly feeType: OrderFeeType,
+    public readonly field: FeeDefinitionAmountField,
+  ) {
+    super(`${feeType} fee definition is missing ${field}`);
+    this.name = 'IncompleteFeeDefinitionError';
   }
 }
 
@@ -57,44 +73,4 @@ export async function resolveFeeDefinition(tx: Prisma.TransactionClient, args: R
     throw new FeeDefinitionNotFoundError(args.platform, args.feeType);
   }
   return def;
-}
-
-/**
- * Platform Hizmet Bedeli muafiyet kuralı:
- *   - micro === true (mikro ihracat) → PSF = 0
- *   - Tüm OrderItem.productVariant.isDigital === true → PSF = 0
- *
- * İADE NOTU (Berkin kararı 2026-06-20): RETURNED durumu PSF'yi MUAF ETMEZ.
- * PSF siparişin ilk anında BİR KEZ kesilir ve sipariş iade olsa da x1 kalır
- * (asla x2 olmaz — tek PLATFORM_SERVICE ESTIMATE satırı, skip-if-exists). Otoritatif
- * kuraldaki "iade paketinde PSF uygulanmaz" = iade paketi İKİNCİ bir PSF doğurmaz;
- * orijinal x1 durur. Eski `status === 'RETURNED' → 0` dalı bu kuralla çelişiyordu
- * (sıfırdan-RETURNED siparişte PSF'yi yanlışlıkla siliyordu) → kaldırıldı. profit-formula.md §2.4.
- *
- * `applyEstimateOnOrderCreate` PSF OrderFee yazmadan önce kontrol eder.
- */
-interface OrderForPsfExempt {
-  micro: boolean;
-  items: Array<{
-    productVariant: { isDigital: boolean } | null;
-  }>;
-}
-
-export function isPsfExempt(order: OrderForPsfExempt): boolean {
-  if (order.micro === true) return true;
-  if (order.items.length === 0) return false;
-  return order.items.every((item) => item.productVariant?.isDigital === true);
-}
-
-/**
- * Mikro ihracat (Trendyol marketplace `micro=true`) ayırt edici yordamı —
- * `isPsfExempt`'in kardeşi. Mikro ihracat finansal modeli normal siparişten ayrılır:
- *   - Satış KDV'si %0 (ihracat istisnası 3065/11-1-a) — kaynakta sıfırlanır (upsert-order).
- *   - PSF uygulanmaz (yukarıda `isPsfExempt` zaten true döner).
- *   - "Uluslararası Hizmet Bedeli" (%6) kesilir; iadede "Yurt Dışı İade Operasyon Bedeli".
- *   - Komisyon + kargo Türkiye içiyle AYNI (değişmez).
- * Tek doğruluk kaynağı: tüm kâr yolları (estimate/settled/breakdown/claim) bunu çağırır.
- */
-export function isMicroExport(order: { micro: boolean }): boolean {
-  return order.micro === true;
 }

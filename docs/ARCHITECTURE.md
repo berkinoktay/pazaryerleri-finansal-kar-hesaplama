@@ -44,7 +44,6 @@
 │                     BACKGROUND LAYER                                │
 │  ┌───────────────────────────┴───────────────────────────────────┐  │
 │  │  sync-worker (Node): claims SyncLog jobs (SKIP LOCKED)        │  │
-│  │  Edge Functions (Deno): fx-rates-sync only                    │  │
 │  └───────────────────────────┬───────────────────────────────────┘  │
 │                              │ HTTP API calls                       │
 ├──────────────────────────────┼──────────────────────────────────────┤
@@ -287,10 +286,6 @@ pazaryerleri-finansal-kar-hesaplama-saas/
 │       └── package.json
 │
 ├── supabase/
-│   ├── functions/                    # Edge Functions (Deno), fx-rates-sync only
-│   │   ├── fx-rates-sync/            # TCMB USD/EUR to fx_rates (daily, pg_cron)
-│   │   │   └── index.ts
-│   │   └── _shared/                 # Shared Deno modules (placeholder, empty)
 │   ├── sql/                          # SQL scripts (not managed by Prisma)
 │   │   ├── rls-policies.sql          # Row-Level Security policies
 │   │   ├── pg-cron-setup.sql         # Cron job definitions
@@ -312,6 +307,24 @@ pazaryerleri-finansal-kar-hesaplama-saas/
 ---
 
 ## 4. Database Schema
+
+> **Durum notu (2026-11-11):** Bu bölümdeki varlık şeması ve Prisma özeti tasarım dönemindendir ve
+> ayrıntıda eskimiştir; otorite `packages/db/prisma/schema.prisma` dosyasıdır. Kâr motoru yeniden
+> yapılanmasıyla (`docs/plans/2026-10-29-profit-engine-design.md`) `settlements`, `settlement_items`,
+> `order_fees`, `commission_invoices` ve `org_period_fees` tabloları ile `orders`/`order_items`
+> üzerindeki tahmini ve kesin kâr, komisyon ve maliyet kopyası kolonları **kaldırıldı**. Kâr verisi
+> artık şu tablolarda yaşar (hepsi `organization_id` taşır ve RLS altındadır):
+>
+> | Tablo | Ne tutar |
+> | --- | --- |
+> | `profit_lines` | Koli ya da kalem başına her gelir/gider satırı (tür, kesinlik, kaynak, brüt, KDV) |
+> | `profit_line_allocations` | Koli düzeyindeki satırın kalemlere kuruşu kuruşuna payı |
+> | `order_profit_statements` | Koli başına `ESTIMATE` ve `BEST_KNOWN` görünümlerinin toplamları, kâr durumu, uyarılar, motor sürümü |
+> | `marketplace_finance_records` | Pazaryerinden gelen ham hakediş, fatura ve kargo faturası kayıtları |
+> | `profit_recompute_queue` | Yeniden hesap kuyruğu (sync-worker tiki boşaltır) |
+>
+> Diyagramdaki `settlements`/`settlement_items` kutuları ve `orders` üzerindeki `net_profit` gibi
+> kolonlar tarihsel çizimdir; bugün karşılıkları yukarıdaki tablolardır.
 
 ### Entity Relationship Diagram
 
@@ -450,22 +463,6 @@ enum OrderStatus {
   RETURNED
 }
 
-enum SettlementStatus {
-  PENDING
-  VERIFIED
-  DISCREPANCY
-}
-
-enum SettlementItemType {
-  SALE
-  RETURN
-  COMMISSION
-  SHIPPING
-  SERVICE_FEE
-  PROMOTION
-  OTHER
-}
-
 enum ExpenseCategory {
   PRODUCT_COST
   ADVERTISING
@@ -554,7 +551,6 @@ model Store {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   products     Product[]
   orders       Order[]
-  settlements  Settlement[]
   syncLogs     SyncLog[]
 
   @@unique([organizationId, platform, externalAccountId])  // one marketplace account per org
@@ -622,38 +618,6 @@ model OrderItem {
   @@map("order_items")
 }
 
-model Settlement {
-  id                   String           @id @default(uuid()) @db.Uuid
-  organizationId       String           @map("organization_id") @db.Uuid
-  storeId              String           @map("store_id") @db.Uuid
-  platformSettlementId String?          @map("platform_settlement_id")
-  periodStart          DateTime         @map("period_start")
-  periodEnd            DateTime         @map("period_end")
-  grossAmount          Decimal          @map("gross_amount") @db.Decimal(12, 2)
-  netAmount            Decimal          @map("net_amount") @db.Decimal(12, 2)
-  status               SettlementStatus @default(PENDING)
-  createdAt            DateTime         @default(now()) @map("created_at")
-  updatedAt            DateTime         @updatedAt @map("updated_at")
-
-  store Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  items SettlementItem[]
-
-  @@index([organizationId])
-  @@map("settlements")
-}
-
-model SettlementItem {
-  id           String             @id @default(uuid()) @db.Uuid
-  settlementId String             @map("settlement_id") @db.Uuid
-  orderId      String?            @map("order_id") @db.Uuid
-  amount       Decimal            @db.Decimal(12, 2)
-  type         SettlementItemType
-
-  settlement Settlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
-
-  @@map("settlement_items")
-}
-
 model Expense {
   id             String          @id @default(uuid()) @db.Uuid
   organizationId String          @map("organization_id") @db.Uuid
@@ -698,7 +662,7 @@ model SyncLog {
 | `orders`               | `(store_id, platform_order_id)` UNIQUE                    | Dedup marketplace orders        |
 | `orders`               | `organization_id`                                         | Tenant isolation                |
 | `orders`               | `order_date`                                              | Date range queries for reports  |
-| `settlements`          | `organization_id`                                         | Tenant isolation                |
+| `order_profit_statements` | `(organization_id, store_id, order_id, view)` | Tenant isolation + one statement per parcel and view |
 | `expenses`             | `organization_id`                                         | Tenant isolation                |
 | `sync_logs`            | `(store_id, started_at)`                                  | Sync history lookups            |
 | `organization_members` | `(organization_id, user_id)` UNIQUE                       | Membership lookup               |
@@ -803,8 +767,8 @@ DELETE /v1/organizations/:orgId/expenses/:expenseId         → Delete expense
 #### Settlements (store-scoped)
 
 ```
-GET    /v1/organizations/:orgId/stores/:storeId/settlements               → List settlements
-GET    /v1/organizations/:orgId/stores/:storeId/settlements/:settlementId → Settlement detail with items
+GET    /v1/organizations/:orgId/stores/:storeId/settlements               → Planned: list the raw finance records of a period
+GET    /v1/organizations/:orgId/stores/:storeId/settlements/:settlementId → Planned: one record with the profit lines it produced
 ```
 
 #### Reconciliation (store-scoped)
@@ -1040,7 +1004,6 @@ calls.
 | `sync-settlements-6h`                 | `30 */6 * * *` | `SETTLEMENTS`      | 60-day window, idempotent per-row anchors         |
 | `sync-claims-6h`                      | `45 */6 * * *` | `CLAIMS`           | Returns/refunds, offset from settlements          |
 | `live-performance-buffer-daily-reset` | `0 21 * * *`   | (SQL function)     | 21:00 UTC = 00:00 business time                   |
-| `fx-rates-sync-daily`                 | `0 13 * * 1-5` | (Edge Function)    | Only cron that leaves the DB, via `pg_net`        |
 
 `sync-products-changes-hourly` has one extra condition: a store is enqueued only
 once it has a COMPLETED full `PRODUCTS` scan (an `EXISTS` gate), so no run starts
@@ -1054,21 +1017,18 @@ ticks, which is harmless because the active slot is per store and sync type.
 
 Türkiye is permanent GMT+3 (no DST), and pg_cron has no per-job timezone, so each
 local wall-clock time is hardcoded as its UTC equivalent: `0 0 * * *` = 03:00
-Istanbul, `0 21 * * *` = 00:00 Istanbul, `0 13 * * 1-5` = 16:00 Istanbul.
+Istanbul, `0 21 * * *` = 00:00 Istanbul.
 
 The buffer daily reset calls `reset_live_performance_buffer()`, which deletes
 ONLY `PERMANENT_FAILED` Live Performance buffer entries older than 7 days —
 un-graduatable rows the worker could never write to `orders`. Recoverable entries
 are graduated into `orders` by the worker, never deleted by this cron.
 
-### Edge Functions: fx-rates only
+### No Edge Functions
 
-`supabase/functions/` holds a single active function, `fx-rates-sync` (Deno): it
-fetches TCMB USD/EUR rates and upserts `fx_rates`, triggered by the
-`fx-rates-sync-daily` cron via `pg_net`. There is **no** `sync-trendyol` /
-`sync-hepsiburada` Edge Function — marketplace order/product/settlement sync is
-owned entirely by `apps/sync-worker`. Earlier boilerplate Edge stubs that implied
-an edge sync path were removed.
+The product runs no Supabase Edge Functions. All background work is either a
+`pg_cron` job (enqueue or a scheduled SQL function) or marketplace sync owned
+entirely by `apps/sync-worker`.
 
 ### Marketplace coverage
 
@@ -1157,44 +1117,37 @@ Component → useOrders() hook → ordersApi.list() → fetch(/v1/org/:id/stores
 ### Order Profitability Calculation
 
 ```
-Order from Marketplace
+Koli (order) + kalemler + kabul edilen iadeler + mağaza ayarları + referans verisi
 │
-├── Revenue
-│   └── total_amount (what customer paid)
+├── Tahmin satırları (kural; packages/profit/src/marketplaces/<pazaryeri>/)
+│   ├── SALE, COMMISSION (KDV dahil satış × oran), SERVICE_FEE, SHIPPING (desi/Barem)
+│   ├── COST (maliyet profili sürümü, karma KDV), STOPPAGE (net satış × %1)
+│   └── iade: SALE_RETURN, COMMISSION_REFUND, COST_RETURN, STOPPAGE_REFUND, RETURN_SHIPPING
 │
-├── Deductions (from marketplace)
-│   ├── commission_amount (category-based %)
-│   ├── shipping_cost (desi-based)
-│   ├── platform_fee (weekly service charge, prorated)
-│   └── vat_amount
+├── Kesin satırlar (ham kayıt; marketplace_finance_records → map-records)
+│   └── hakediş, komisyon faturası, kargo faturası satırları aynı türlerle, ACTUAL kesinlikte
 │
-├── Costs (user-entered)
-│   ├── product cost_price × quantity (from products table)
-│   ├── packaging cost (from expenses, prorated)
-│   └── advertising cost (from expenses, prorated)
+├── Seçim (core/select-lines): her yuvada en kesin satır → BEST_KNOWN; yalnız tahminler → ESTIMATE
 │
-└── Net Profit = Revenue - Deductions - Costs
+└── Tablo (core/profit-statement): toplamlar, Net KDV (tahsil − indirilecek, ayara göre klamp),
+    Net Kâr, marjlar, kâr durumu → order_profit_statements (iki görünüm); satırlar → profit_lines
 ```
 
 ### Reconciliation Flow
 
 ```
-Expected (from orders)              Actual (from settlements)
-┌────────────────────┐              ┌────────────────────┐
-│ Sum of delivered    │              │ Settlement report   │
-│ order net amounts   │              │ from marketplace   │
-│ in period          │              │ for same period     │
-└────────┬───────────┘              └────────┬───────────┘
-         │                                   │
-         └──────────┬───────────────────────┘
-                    │
-              ┌─────┴─────┐
-              │ Match?     │
-              └─────┬─────┘
-              YES   │   NO
-              ┌─────┴─────┐
-              │ VERIFIED   │  DISCREPANCY (show diff)
-              └───────────┘
+sync-worker hakediş tiki                         kâr yeniden hesabı
+┌────────────────────────────┐                   ┌──────────────────────────────┐
+│ Trendyol hakediş/fatura    │  ham kayıt yaz    │ profit_recompute_queue        │
+│ kayıtlarını çek            │ ───────────────▶  │ (koli kimliğiyle)             │
+│ (marketplace_finance_      │  sonra bağla      │                              │
+│  records, idempotent)      │ ───────────────▶  │ tik: koliyi yeniden hesapla  │
+└────────────────────────────┘                   └──────────────┬───────────────┘
+                                                                │
+                                              ACTUAL satırlar tahminin yerini alır;
+                                              deriveReconciliationStatus:
+                                              NOT_SETTLED → PARTIALLY_SETTLED → FULLY_SETTLED
+                                              (kalan tahmin satırı yoksa FULLY)
 ```
 
 ### Context Switching Flow

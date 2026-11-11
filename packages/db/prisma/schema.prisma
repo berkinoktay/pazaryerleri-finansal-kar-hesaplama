@@ -56,22 +56,6 @@ enum OrderStatus {
   RETURNED
 }
 
-enum SettlementStatus {
-  PENDING
-  VERIFIED
-  DISCREPANCY
-}
-
-enum SettlementItemType {
-  SALE
-  RETURN
-  COMMISSION
-  SHIPPING
-  SERVICE_FEE
-  PROMOTION
-  OTHER
-}
-
 enum ExpenseCategory {
   PRODUCT_COST
   ADVERTISING
@@ -131,17 +115,6 @@ enum CostProfileType {
   OTHER
 }
 
-enum Currency {
-  TRY
-  USD
-  EUR
-}
-
-enum FxRateMode {
-  AUTO
-  MANUAL
-}
-
 enum ShippingTariffSource {
   TRENDYOL_CONTRACT
   OWN_CONTRACT
@@ -156,10 +129,10 @@ enum CommissionRuleKind {
   CATEGORY_BRAND
 }
 
-// Sipariş mutabakat durumu — kar hesaplama V1 (docs/plans/2026-05-18-profit-calculation-design.md §3.1).
-// NOT_SETTLED: ESTIMATE OrderFee'ler yazılı, henüz SETTLEMENT yok.
-// PARTIALLY_SETTLED: Bazı SETTLEMENT/CARGO_INVOICE OrderFee'ler var, Sale.paymentOrderId henüz null.
-// FULLY_SETTLED: Sale paymentOrderId dolu, settledNetProfit yazıldı.
+// Reconciliation state of a parcel, derived by the profit engine from its lines
+// (packages/profit/src/core/profit-status.ts) and stored on order_profit_statements.
+// NOT_SETTLED: no actual settlement line yet. PARTIALLY_SETTLED: some settlement
+// or cargo-invoice actuals landed. FULLY_SETTLED: no settlement-required estimate left.
 enum ReconciliationStatus {
   NOT_SETTLED
   PARTIALLY_SETTLED
@@ -174,11 +147,9 @@ enum ProfitExclusionReason {
   LEGACY_BACKFILL // spec öncesi null-kârla yazılmış mevcut satırlar (migration)
 }
 
-// OrderFee tipi — pazaryeri ücretlerinin tek kaynağı (design §3.3).
-// İki kategori: sipariş-düzeyi (OrderFee tablosuna yazılır) ve org-düzeyi
-// (OrgPeriodFee tablosuna yazılır — Reklam, Penalty, Notification, COMMISSION_INVOICE).
-// PLATFORM_SERVICE + PLATFORM_SERVICE_FAST ayrı FeeDefinition row'larıyla seçilir;
-// FAST yalnızca fastDelivery=true + deliveredOnTime=true durumda uygulanır (§3.4).
+// Fee type catalog of fee_definitions (reference data): the system fee definitions
+// the profit engine reads (platform service fee tiers, stoppage, commission VAT,
+// export fees). The profit lines themselves are typed by ProfitLineType.
 enum OrderFeeType {
   SHIPPING
   PLATFORM_SERVICE
@@ -202,31 +173,13 @@ enum OrderFeeType {
   PENALTY_SUPPLY_FAILURE
   NOTIFICATION_FEE
   COMMISSION_INVOICE
-  // Mikro ihracat (Order.micro=true) — marketplace ihracat siparişlerine özgü iki ücret:
-  // INTERNATIONAL_SERVICE: ürün satışı üzerinden %6 KDV-dahil "Uluslararası Hizmet Bedeli"
-  //   (PSF mikro ihracatta uygulanmaz; bunun yerine bu ücret kesilir). Tahmin yolunda yazılır.
-  // OVERSEAS_RETURN_OPERATION: iadede satış reverse edilmez, ayrıca (satış−komisyon)×%35/%30
-  //   "Yurt Dışı İade Operasyon Bedeli" kesilir (iade yolunda yazılır).
+  // Export sale (Order.isExportSale = true): the two fees specific to a marketplace export order.
+  // INTERNATIONAL_SERVICE: 6% VAT-inclusive "international service fee" on the product sale
+  //   (replaces the platform service fee, which an export order does not pay). Estimate path.
+  // OVERSEAS_RETURN_OPERATION: a return does not reverse the sale; an extra
+  //   (sale - commission) x 35% / 30% "overseas return operation fee" is charged. Return path.
   INTERNATIONAL_SERVICE
   OVERSEAS_RETURN_OPERATION
-}
-
-// OrderFee'nin kaynağı — audit + reconciliation algoritması için kritik (§3.3).
-// ESTIMATE: applyEstimateOnOrderCreate (T+0 deterministic).
-// SETTLEMENT: settlements/otherfinancials API'sinden.
-// CARGO_INVOICE: cargo-invoice/{serial}/items per-order match.
-// USER_OVERRIDE: kullanıcı düzeltti. MANUAL_ENTRY: kullanıcı ekledi (reklam vs.).
-enum OrderFeeSource {
-  ESTIMATE
-  SETTLEMENT
-  CARGO_INVOICE
-  USER_OVERRIDE
-  MANUAL_ENTRY
-}
-
-enum OrderFeeDirection {
-  DEBIT
-  CREDIT
 }
 
 // FeeDefinition hesap türü — sistem-düzeyi ücret tanımları (§3.4).
@@ -313,6 +266,106 @@ enum ProductVariantStatus {
   ARCHIVED
 }
 
+// --- Profit engine (docs/plans/2026-10-29-profit-engine-design.md) ---
+// Marketplace-agnostic profit line types. A new expense type means one value here
+// plus one entry in PROFIT_LINE_CATALOG (the compiler enforces it).
+enum ProfitLineType {
+  SALE
+  MARKETPLACE_DISCOUNT_CONTRIBUTION
+  SALE_RETURN
+  COST_COGS
+  COST_PACKAGING
+  COST_SHIPPING
+  COST_SOFTWARE
+  COST_MARKETING
+  COST_OTHER
+  COST_RETURN
+  COMMISSION
+  COMMISSION_REFUND
+  SHIPPING
+  RETURN_SHIPPING
+  SERVICE_FEE
+  PAYMENT_SERVICE_FEE
+  INTERNATIONAL_SERVICE_FEE
+  INTERNATIONAL_OPERATION_FEE
+  PENALTY
+  ADJUSTMENT_INCOME
+  ADJUSTMENT_EXPENSE
+  STOPPAGE
+  STOPPAGE_REFUND
+  SELLER_ORDER_EXPENSE
+}
+
+enum ProfitLineCertainty {
+  ESTIMATE
+  ACTUAL
+  USER_OVERRIDE
+}
+
+enum ProfitLineSource {
+  RULE
+  MARKETPLACE_RECORD
+  CARGO_INVOICE
+  SELLER_INPUT
+  USER
+}
+
+enum ProfitLineLevel {
+  PARCEL
+  ITEM
+}
+
+enum ProfitStatus {
+  NOT_COMPUTABLE
+  ESTIMATED
+  PARTIALLY_SETTLED
+  SETTLED
+  CANCELLED
+  EXCLUDED
+}
+
+enum ProfitIssueCode {
+  MISSING_COST
+  SHIPPING_ESTIMATE_UNAVAILABLE
+  UNMAPPED_MARKETPLACE_RECORD
+  MISSING_COMMISSION_RATE
+  AMBIGUOUS_RECORD_MATCH
+  CARRIER_NOT_RECOGNIZED
+  SELLER_CARGO_AGREEMENT_ESTIMATE
+}
+
+// How a profit statement is computed: ESTIMATE from estimate-only lines, BEST_KNOWN from the best available.
+enum ProfitStatementView {
+  ESTIMATE
+  BEST_KNOWN
+}
+
+// Measure used to split a parcel-level profit line down to its items.
+enum ProfitAllocationBasis {
+  STANDALONE_AMOUNT
+  EQUAL
+  SALE_SHARE
+}
+
+// Which family a raw marketplace finance record belongs to.
+enum FinanceRecordFamily {
+  SETTLEMENT
+  OTHER_FINANCIAL
+  CARGO_INVOICE_ITEM
+}
+
+// Why an order was enqueued for a profit recompute; set by whichever producer wrote the request.
+enum ProfitRecomputeReason {
+  ORDER_CHANGED
+  CLAIM_CHANGED
+  FINANCE_RECORD
+  COST_CHANGED
+  SETTINGS_CHANGED
+  REFERENCE_CHANGED
+  STALE_STATEMENT
+  MANUAL
+}
+
 // ─── Models ──────────────────────────────────────────
 
 model UserProfile {
@@ -335,7 +388,6 @@ model Organization {
   id        String   @id @default(uuid()) @db.Uuid
   name      String
   slug      String   @unique
-  currency  String   @default("TRY")
   timezone  String   @default("Europe/Istanbul")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -413,7 +465,6 @@ model Store {
   orders                 Order[]
   expenses               Expense[]
   costProfiles           CostProfile[]
-  settlements            Settlement[]
   syncLogs               SyncLog[]
   webhookEvents          WebhookEvent[]
   defaultShippingCarrier ShippingCarrier?        @relation(fields: [defaultShippingCarrierId], references: [id], onDelete: SetNull)
@@ -424,13 +475,12 @@ model Store {
   flashProductLists      FlashProductList[]
   discountLists          DiscountList[]
   marketplaceCampaigns   MarketplaceCampaignList[]
-  orgPeriodFees          OrgPeriodFee[]
-  commissionInvoices     CommissionInvoice[]
   memberAccess           MemberStoreAccess[]
   livePerformanceBuffer  LivePerformanceBuffer[]
   orderClaims            OrderClaim[]
   catalogBarcodeMisses   CatalogBarcodeMiss[]
   priceChangeLogs        PriceChangeLog[]
+  financeRecords         MarketplaceFinanceRecord[]
 
   @@unique([organizationId, platform, externalAccountId])
   @@index([organizationId])
@@ -631,12 +681,9 @@ model Order {
   platformOrderId String      @map("platform_order_id")
   orderDate       DateTime    @map("order_date")
   status          OrderStatus
-  // ESKİ ÜCRET KOLONLARI (totalAmount, commissionAmount, shippingCost, platformFee,
-  // vatAmount, netProfit) PR-5c'de SİLİNDİ (2026-05-19). Yeni convention için:
-  // - Satış: saleSubtotalNet + saleVatTotal (aşağıda PR-5a)
-  // - Komisyon: OrderItem.grossCommissionAmountNet/VatAmount (PR-3)
-  // - Kargo/PSF/Stopaj: OrderFee tablosunda (PR-1)
-  // - Kar: estimatedNetProfit / settledNetProfit (PR-5a, write-once + mutable)
+  // Money on the order is the GROSS sale snapshot (sale*, list*, sellerDiscount*
+  // below). Every fee, cost and profit figure lives in the profit tables
+  // (profit_lines, order_profit_statements); no profit column is kept here.
 
   // Trendyol data-input alanları (sync handler PR-6'da set eder, design §3.1).
   // agreedDeliveryDate: getShipmentPackages endpoint direkt field.
@@ -656,10 +703,11 @@ model Order {
   // fastDeliveryType: "TodayDelivery"|"SameDayShipping"|"FastDelivery" — sipariş
   //   seviyesinde yalnız PROD'da dolar (stage "" → null). Per-tip kriterin kaynağı
   //   (hibrit tasarım 2026-06-14): "fast mı + tip" siparişten, cutoff üründen.
-  // micro: getShipmentPackages direkt boolean (mikro ihracat) — PSF muafiyeti.
+  // isExportSale: marketplace-neutral export (cross-border) sale flag; Trendyol maps
+  //   its getShipmentPackages `micro` boolean (micro export, PSF exempt) here.
   fastDelivery       Boolean   @default(false) @map("fast_delivery")
   fastDeliveryType   String?   @map("fast_delivery_type")
-  micro              Boolean   @default(false) @map("micro")
+  isExportSale       Boolean   @default(false) @map("is_export_sale")
 
   // ─── GROSS konvansiyon: sipariş-seviyesi agregat alanlar (2026-06-16) ──────
   // Paket toplamları mapper'dan doğrudan gelir (Trendyol packageGrossAmount/
@@ -673,46 +721,14 @@ model Order {
   sellerDiscountGross    Decimal? @map("seller_discount_gross") @db.Decimal(12, 2)
   sellerDiscountVat      Decimal? @map("seller_discount_vat") @db.Decimal(12, 2)
 
-  // Marj yüzdeleri — backend hesaplanıp persist edilir (sıralanabilir + kayıtlı).
-  // estimatedSaleMarginPct = estimatedNetProfit / saleGross × 100 (saleGross=0→null).
-  // settledSaleMarginPct   = settledNetProfit  / saleGross × 100.
-  // estimatedCostMarkupPct = estimatedNetProfit / Σ costGross × 100.
-  // settledCostMarkupPct   = settledNetProfit  / Σ costGross × 100.
-  estimatedSaleMarginPct Decimal? @map("estimated_sale_margin_pct") @db.Decimal(8, 4)
-  settledSaleMarginPct   Decimal? @map("settled_sale_margin_pct") @db.Decimal(8, 4)
-  estimatedCostMarkupPct Decimal? @map("estimated_cost_markup_pct") @db.Decimal(8, 4)
-  settledCostMarkupPct   Decimal? @map("settled_cost_markup_pct") @db.Decimal(8, 4)
-
   // Promosyon gösterimi (YAGNI — spec ekleme #3). Opsiyonel JSON dizisi:
   // [{ "displayName": "Satıcı İndirimi", "amountGross": "48.01" }, ...].
   // Mapper null döner indirim yoksa; upsert null'a dokunmaz.
   promotionDisplays      Json?    @map("promotion_displays")
 
-  // İki aşamalı kar (design §4.1):
-  // - estimatedNetProfit: T+0 applyEstimateOnOrderCreate yazar, write-once (PR-9 trigger).
-  // - settledNetProfit:   T+~5+ recomputeSettledProfit yazar, mutable (iade güncellemeleri).
-  //
-  // INVARIANT (2026-06-14 karar — Hakediş Kontrolü temeli): İKİSİ DE satıcının
-  // HAK ETTİĞİ net kârdır (effectiveSale + Trendyol'un yetkili komisyon/kargosu,
-  // doğru oranlarla). Trendyol'un GERÇEKTE ÖDEDİĞİ tutar DEĞİLDİR. Bu kolonlar
-  // ASLA underpaid bir actual-payout'a sessizce ÇEKİLMEZ. Beklenen (bu kolonlar)
-  // vs gerçek-yatan (Trendyol payout) farkı = gelecek "Hakediş Kontrolü" epiği;
-  // farkı itiraz-edilebilir kalem olarak gösterir, satıcı İtiraz/Göz ardı seçer.
-  // "Çek" kararı satıcınındır, sistemin değil. (OrderItem.settledSaleAmount =
-  // mutabakatın actual-satış çıpası.)
-  estimatedNetProfit   Decimal?             @map("estimated_net_profit") @db.Decimal(12, 2)
-  settledNetProfit     Decimal?             @map("settled_net_profit") @db.Decimal(12, 2)
-
-  // Net KDV (output − input KDV) — computeProfit'in ürettiği netVat. estimatedNetProfit /
-  // settledNetProfit ile AYNI yaşam döngüsü (estimate refinable, settled mutable; ikisi de
-  // profit-excluded'da yazılmaz → null kalır). Frontend kâr dökümünde "Net KDV" satırını
-  // backend-hesaplı gösterir (frontend ASLA türetmez). Net KDV negatif olabilir → CHECK yok.
-  estimatedNetVat      Decimal?             @map("estimated_net_vat") @db.Decimal(12, 2)
-  settledNetVat        Decimal?             @map("settled_net_vat") @db.Decimal(12, 2)
-
   // ─── Kâr formülü ayar snapshot'ı (snapshot-at-create, forward-only) ──────
-  // applyEstimateOnOrderCreate sipariş İLK hesaplanırken mağazanın o anki
-  // Store.profitSettings'ini çözüp buraya YAZAR (write-once). Sonraki TÜM hesaplar
+  // The order writer resolves the store's Store.profitSettings when the order is
+  // first written and stores them here (write-once). Every later computation
   // (kargo rafinesi re-entry + settlement recompute) bu snapshot'ı okur, canlı ayarı
   // DEĞİL. Mağaza ayarı değişince yalnız BUNDAN SONRA yaratılan siparişler etkilenir;
   // geçmiş sipariş asla yeniden hesaplanmaz (maliyet snapshot'ıyla aynı felsefe).
@@ -721,24 +737,21 @@ model Order {
   snapshotIncludeStopaj         Boolean?            @map("snapshot_include_stopaj")
   snapshotIncludeNegativeNetVat Boolean?            @map("snapshot_include_negative_net_vat")
 
-  // ─── Kâr dondurma (spec 2026-06-12 cost-deadline-profit-freeze) ──────
-  // Maliyet penceresi (sipariş gününün sonu, İstanbul) kaçırıldıysa sipariş
-  // KALICI olarak kâr evreninin dışında: estimatedNetProfit sonsuza dek null,
-  // settledNetProfit hesaplanmaz (karar K1); ciro raporlanır. Geri dönüş yok —
-  // reject_profit_freeze_breach trigger'ı + CHECK her yolu kapatır.
+  // ─── Profit exclusion (design 2026-10-29 profit-engine §8.3) ─────────
+  // Stamped automatically when an order's cost misses its business day (owner
+  // decision 2026-11-03): COST_DEADLINE_MISSED at the day-end buffer graduation,
+  // LATE_UNCOSTED_ARRIVAL when a past-day order arrives without a timely cost.
+  // LEGACY_BACKFILL (the old 2026-06-12 profit-freeze backfill; no writer stamps
+  // it today) is an automatic reason too, so "automatic exclusions" covers all
+  // three.
+  // Automatic exclusions are PERMANENT -- trg_reject_automatic_exclusion_change in
+  // supabase/sql/triggers.sql rejects clearing or re-pointing them; a future
+  // user-chosen exclusion will carry its own reversible reason. While stamped the
+  // engine writes an EXCLUDED profit statement (no net profit, revenue still
+  // counted). The pair check
+  // (orders_profit_exclusion_pair_check) keeps stamp and reason together.
   profitExcludedAt      DateTime?              @map("profit_excluded_at")
   profitExclusionReason ProfitExclusionReason? @map("profit_exclusion_reason")
-
-  // Durum makinesi: NOT_SETTLED → PARTIALLY_SETTLED → FULLY_SETTLED (design §6.1).
-  // İlk SETTLEMENT/CARGO_INVOICE OrderFee yazıldığında PARTIALLY_SETTLED, Sale
-  // satırının paymentOrderId'si dolu görüldüğünde FULLY_SETTLED.
-  reconciliationStatus ReconciliationStatus @default(NOT_SETTLED) @map("reconciliation_status")
-
-  // PaymentOrder bağlantısı — mutabakat sinyali (§3.7). Sale.paymentOrderId dolu
-  // görüldüğünde Order'a yansıtılır → handlePaymentOrderEntry tetiklenir →
-  // cycle'daki PSF/Stopaj ESTIMATE'leri SETTLEMENT'a confirm + recomputeSettledProfit.
-  paymentOrderId BigInt?   @map("payment_order_id")
-  paymentDate    DateTime? @map("payment_date")
 
   // Türetilmiş: actualDeliveryDate <= agreedDeliveryDate → true (Bugün Kargoda PSF).
   // applyEstimate hesaplaması: inferDeliveredOnTime(order) — null = henüz delivered değil.
@@ -787,17 +800,24 @@ model Order {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  store  Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  items  OrderItem[]
-  fees   OrderFee[]
-  claims OrderClaim[]
+  store                  Store                   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  items                  OrderItem[]
+  claims                 OrderClaim[]
+  profitLines            ProfitLine[]
+  profitStatements       OrderProfitStatement[]
+  profitRecomputeRequest ProfitRecomputeRequest?
 
   @@unique([storeId, platformOrderId])
+  // Composite reference target for the profit tables: profit_lines and
+  // order_profit_statements bind (order_id, organization_id, store_id) to this,
+  // so a profit row whose tenant differs from its order's is rejected at the DB
+  // (tenant-isolation defense in depth). id alone is already unique; this triple
+  // only exists to back those foreign keys.
+  @@unique([id, organizationId, storeId])
   @@index([organizationId])
-  @@index([organizationId, reconciliationStatus])
   @@index([orderDate])
+  @@index([storeId, orderDate])
   @@index([platformOrderNumber])
-  @@index([storeId, paymentOrderId])
   // Kargo faturası eşleştirmesi: parcelUniqueId == cargoTrackingNumber lookup.
   @@index([storeId, cargoTrackingNumber])
   @@map("orders")
@@ -834,87 +854,29 @@ model OrderItem {
   lineSellerDiscountGross Decimal @default(0) @map("line_seller_discount_gross") @db.Decimal(12, 2)
   saleVatRate             Decimal @default(0) @map("sale_vat_rate") @db.Decimal(5, 2)
 
-  // Komisyon (gross + oran)
-  // commissionRate: Trendyol per-line commission rate (%).
-  // commissionGross: hesaplanan gross komisyon tutarı (effectiveSale × rate).
-  // refundedCommissionGross: iade edilen komisyon (gross). default(0) = iade yok.
-  // commissionVatRate: komisyon KDV oranı (DB-driven, default %20 — denetim A #331).
-  // estimatedCommissionGross (write-once): T+0 tahmin — settlement gelince korunur.
-  // settledCommissionGross (mutable): Trendyol'un Settlement'ta yazdığı gerçek değer.
-  commissionRate           Decimal  @map("commission_rate") @db.Decimal(5, 2)
-  commissionGross          Decimal  @default(0) @map("commission_gross") @db.Decimal(12, 2)
-  refundedCommissionGross  Decimal  @default(0) @map("refunded_commission_gross") @db.Decimal(12, 2)
-  commissionVatRate        Decimal  @default(20) @map("commission_vat_rate") @db.Decimal(5, 2)
-  estimatedCommissionGross Decimal? @map("estimated_commission_gross") @db.Decimal(12, 2)
-  settledCommissionGross   Decimal? @map("settled_commission_gross") @db.Decimal(12, 2)
+  // The commission rate the marketplace order line itself carried; null when the
+  // line carried none. The category fallback is never written here, so the
+  // profit loader can read a raw rate and resolve the chain itself.
+  orderCommissionRatePct Decimal? @map("order_commission_rate_pct") @db.Decimal(5, 2)
 
-  // Settlement ACTUAL çıpası — Trendyol'un Sale settlement'ta kredilediği GERÇEK
-  // satış tutarı (KDV-dahil ham `credit`; handleSale yazar, T+~5). KÂRA GİRMEZ:
-  // estimated/settled kâr HAK EDİLEN'den (effectiveSale) hesaplanır, bu kolondan
-  // DEĞİL. Yalnız gelecek "Hakediş Kontrolü" mutabakatının çıpası — beklenen
-  // (effectiveSale) vs gerçek (bu kolon) karşılaştırıp "eksik satış bedeli"
-  // tespit edecek. Null: settlement gelmeden önce (2026-06-14 temel atımı).
-  settledSaleAmount Decimal? @map("settled_sale_amount") @db.Decimal(12, 2)
-
-  // Maliyet anlık kopyası (gross + KDV oranı).
-  // Tümü nullable: maliyet snapshot eksik durumda kar hesabı null kalır.
-  unitCostSnapshotGross   Decimal? @map("unit_cost_snapshot_gross") @db.Decimal(12, 2)
-  unitCostSnapshotVatRate Decimal? @map("unit_cost_snapshot_vat_rate") @db.Decimal(5, 2)
-
-  // Maliyet snapshot zamanı — write-once, variant bağlanınca set edilir.
-  snapshotCapturedAt DateTime? @map("snapshot_captured_at")
-
-  // Komisyon faturası referansı (design §3.8 iki aşamalı populate):
-  // - serialNumber: Sale satırı T+~5'te direkt yazar (raw "DCF...").
-  // - id: T+~7 Komisyon Faturası otherfinancials kaydı geldiğinde backfill FK.
-  commissionInvoiceSerialNumber String? @map("commission_invoice_serial_number")
-  commissionInvoiceId           String? @map("commission_invoice_id") @db.Uuid
-
-  costSnapshotComponents OrderItemCostSnapshotComponent[]
   claimItems             OrderClaimItem[]
+  profitLines            ProfitLine[]
+  profitLineAllocations  ProfitLineAllocation[]
 
   order             Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productVariant    ProductVariant?    @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
-  commissionInvoice CommissionInvoice? @relation(fields: [commissionInvoiceId], references: [id], onDelete: SetNull)
 
-  @@index([organizationId, snapshotCapturedAt])
-  @@index([commissionInvoiceId])
+  @@index([orderId])
+  // Every tenant table carries an organization_id-leading index (docs/SECURITY.md).
+  @@index([organizationId])
+  // product_variant_id is a FK (onDelete: SetNull) with no index; the profit queue's variants scope (enqueueProfitRecomputeForVariants in packages/profit/src/persistence/recompute-queue.ts) probes it.
+  @@index([productVariantId])
+  // barcode is probed by the barcodes scope (enqueueProfitRecomputeForBarcodes, used by commission tariff import and delete).
+  @@index([barcode])
   // Resolution kuyruğu index'i PARTIAL (WHERE product_variant_id IS NULL) —
   // Prisma kısmi index yazamadığı için check-constraints.sql + migration
   // aynasında yaşar (order_items_resolution_due_idx).
   @@map("order_items")
-}
-
-model Settlement {
-  id                   String           @id @default(uuid()) @db.Uuid
-  organizationId       String           @map("organization_id") @db.Uuid
-  storeId              String           @map("store_id") @db.Uuid
-  platformSettlementId String?          @map("platform_settlement_id")
-  periodStart          DateTime         @map("period_start")
-  periodEnd            DateTime         @map("period_end")
-  grossAmount          Decimal          @map("gross_amount") @db.Decimal(12, 2)
-  netAmount            Decimal          @map("net_amount") @db.Decimal(12, 2)
-  status               SettlementStatus @default(PENDING)
-  createdAt            DateTime         @default(now()) @map("created_at")
-  updatedAt            DateTime         @updatedAt @map("updated_at")
-
-  store Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  items SettlementItem[]
-
-  @@index([organizationId])
-  @@map("settlements")
-}
-
-model SettlementItem {
-  id           String             @id @default(uuid()) @db.Uuid
-  settlementId String             @map("settlement_id") @db.Uuid
-  orderId      String?            @map("order_id") @db.Uuid
-  amount       Decimal            @db.Decimal(12, 2)
-  type         SettlementItemType
-
-  settlement Settlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
-
-  @@map("settlement_items")
 }
 
 model CostProfile {
@@ -932,10 +894,7 @@ model CostProfile {
   // KDV oranı satış KDV'sinden bağımsız olabilir (tedarikçi %20 / satış %10).
   // KDV'siz maliyet → vatRate=0. @default(0): dev truncate+re-sync için (pre-launch).
   amountGross    Decimal         @default(0) @map("amount_gross") @db.Decimal(12, 2)
-  currency       Currency        @default(TRY)
   vatRate        Decimal         @default(0) @map("vat_rate") @db.Decimal(5, 2)
-  fxRateMode     FxRateMode      @default(AUTO) @map("fx_rate_mode")
-  manualFxRate   Decimal?        @map("manual_fx_rate") @db.Decimal(14, 6)
   note           String?
   archivedAt     DateTime?       @map("archived_at")
   createdBy      String?         @map("created_by") @db.Uuid
@@ -947,7 +906,6 @@ model CostProfile {
   store              Store                            @relation(fields: [storeId], references: [id], onDelete: Cascade)
   versions           CostProfileVersion[]
   variantLinks       ProductVariantCostProfile[]
-  snapshotComponents OrderItemCostSnapshotComponent[]
 
   // Names are unique PER STORE (not per org): two stores may each have a "Kargo
   // Kutusu" profile. Deleting a store cascades its profiles.
@@ -967,15 +925,14 @@ model CostProfileVersion {
   // GROSS konvansiyon (2026-06-16): CostProfile mirror — versiyonlar da GROSS saklar.
   // @default(0): dev truncate+re-sync için (pre-launch).
   amountGross    Decimal         @default(0) @map("amount_gross") @db.Decimal(12, 2)
-  currency       Currency
   vatRate        Decimal         @map("vat_rate") @db.Decimal(5, 2)
-  fxRateMode     FxRateMode      @map("fx_rate_mode")
-  manualFxRate   Decimal?        @map("manual_fx_rate") @db.Decimal(14, 6)
   note           String?
   archivedAt     DateTime?       @map("archived_at")
   changedFields  String[]        @map("changed_fields")
   changedBy      String?         @map("changed_by") @db.Uuid
   changedAt      DateTime        @default(now()) @map("changed_at")
+  // When this version starts to apply; the DB default is the instant of the operation that created the version -- create, update, archive or restore -- so the API service needs no change.
+  effectiveFrom  DateTime        @default(now()) @map("effective_from")
   changeReason   String?         @map("change_reason")
 
   profile CostProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
@@ -1006,54 +963,6 @@ model ProductVariantCostProfile {
   @@index([profileId])
   @@index([organizationId, productVariantId], map: "idx_pvcp_org_product_variant")
   @@map("product_variant_cost_profiles")
-}
-
-model OrderItemCostSnapshotComponent {
-  id             String          @id @default(uuid()) @db.Uuid
-  orderItemId    String          @map("order_item_id") @db.Uuid
-  organizationId String          @map("organization_id") @db.Uuid
-  profileId      String          @map("profile_id") @db.Uuid
-  profileName    String          @map("profile_name")
-  profileType    CostProfileType @map("profile_type")
-  // GROSS konvansiyon (2026-06-16): amount(net)+vatAmount → amountGross+vatRate.
-  // FX: amountInTryGross replaces amountInTry+vatAmountInTry.
-  // Net türetilir: amountGross × 100/(100+vatRate).
-  // @default(0): dev truncate+re-sync için (pre-launch); snapshot sync yazar.
-  amountGross      Decimal    @default(0) @map("amount_gross") @db.Decimal(12, 2)
-  currency         Currency
-  vatRate          Decimal    @default(0) @map("vat_rate") @db.Decimal(5, 2)
-  amountInTryGross Decimal    @default(0) @map("amount_in_try_gross") @db.Decimal(12, 2)
-  fxRateMode       FxRateMode @map("fx_rate_mode")
-  fxRateUsed     Decimal         @map("fx_rate_used") @db.Decimal(14, 6)
-  fxRateSource   String          @map("fx_rate_source")
-
-  orderItem OrderItem   @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
-  // Cascade (not Restrict): a cost profile is store-scoped and only ever
-  // hard-deleted when its store is disconnected — at which point this snapshot
-  // component's order item is being deleted too (OrderItem cascades from the
-  // same store). Restrict here deadlocked the store-delete cascade. Historical
-  // integrity is unaffected: this row carries denormalized profileName/amounts
-  // and dies with its order regardless (disconnect wipes the whole store).
-  profile   CostProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
-
-  @@index([orderItemId])
-  @@index([organizationId, profileType], map: "idx_oi_cost_snapshot_org_profile_type")
-  @@index([organizationId, profileId], map: "idx_oi_cost_snapshot_org_profile_id")
-  @@map("order_item_cost_snapshot_components")
-}
-
-model FxRate {
-  id        String   @id @default(uuid()) @db.Uuid
-  currency  Currency
-  rateDate  DateTime @map("rate_date") @db.Date
-  rateToTry Decimal  @map("rate_to_try") @db.Decimal(14, 6)
-  source    String
-  fetchedAt DateTime @default(now()) @map("fetched_at")
-
-  @@unique([currency, rateDate])
-  // Note: no separate DESC index — Postgres B-tree is bidirectional; the unique
-  // index above is used for "latest rate per currency" queries via backward scan.
-  @@map("fx_rates")
 }
 
 model Expense {
@@ -1209,6 +1118,8 @@ model ShippingCarrier {
   externalId                       Int      @map("external_id")
   code                             String
   displayName                      String   @map("display_name")
+  // The exact cargoProviderName values Trendyol writes on orders and packages for this carrier; the order profit path matches against these and the display name.
+  orderCargoNames                  String[] @default([]) @map("order_cargo_names")
   taxNumber                        String?  @map("tax_number")
   supportsBaremDestek              Boolean  @default(true) @map("supports_barem_destek")
   maxBaremDesi                     Int      @default(10) @map("max_barem_desi")
@@ -1888,7 +1799,6 @@ model FeeDefinition {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  fees OrderFee[]
 
   @@unique([platform, feeType, effectiveFrom])
   @@index([platform, effectiveFrom])
@@ -1919,76 +1829,241 @@ model MicroExportReturnFeeTier {
   @@map("micro_export_return_fee_tiers")
 }
 
-// Sipariş paket-düzeyi ücret satırı — tüm pazaryeri ücretleri (komisyon hariç,
-// o OrderItem'da) burada (design §3.3). source ESTIMATE/SETTLEMENT/CARGO_INVOICE
-// karışık yaşar, recomputeSettledProfit filtreyle toplar. PSF/Stopaj ESTIMATE
-// satırları PaymentOrder geldiğinde SETTLEMENT'a confirm edilir (§3.7 — confirmedAt
-// + confirmedBy bunu izler). organizationId denormalize: insert sırasında stamp.
-//
-// Idempotency (#297): kaynak-bazlı kimlik kolonlarda yaşar, externalRef JSONB
-// AUDIT-ONLY'dir — hiçbir okuma yolu JSONB path filtresi kullanamaz.
-//   SETTLEMENT     → trendyolTransactionId (Return üçlüsü aynı id'yi paylaşır,
-//                    bacaklar feeType ile ayrışır)
-//   CARGO_INVOICE  → invoiceSerialNumber + parcelUniqueId (fatura satırı kimliği)
-//   derived        → derivedFrom marker ('fast-delivery' — Trendyol satırı yok,
-//                    client-side türetilen düzeltme)
-// Partial unique indexler Prisma'da ifade edilemez; check-constraints.sql'de
-// (governance) + tanıtan migration'da aynalanmış halde yaşar.
-model OrderFee {
-  id              String  @id @default(uuid()) @db.Uuid
-  orderId         String  @map("order_id") @db.Uuid
-  organizationId  String  @map("organization_id") @db.Uuid
-  feeDefinitionId String? @map("fee_definition_id") @db.Uuid
+// One profit line of a parcel (rebuild, phase 3A). Holds a single income or
+// expense entry produced by the profit engine. Written only by the profit
+// writer, never by the legacy path. store_id is stamped from the parent order
+// and gates RLS.
+model ProfitLine {
+  id             String  @id @default(uuid()) @db.Uuid
+  organizationId String  @map("organization_id") @db.Uuid
+  storeId        String  @map("store_id") @db.Uuid
+  orderId        String  @map("order_id") @db.Uuid
+  orderItemId    String? @map("order_item_id") @db.Uuid
 
-  feeType   OrderFeeType      @map("fee_type")
-  source    OrderFeeSource
-  direction OrderFeeDirection
+  type      ProfitLineType
+  level     ProfitLineLevel
+  certainty ProfitLineCertainty
+  source    ProfitLineSource
 
-  // GROSS konvansiyon (2026-06-16): amountNet + vatAmount → amountGross + vatRate.
-  // net/vat API katmanında türetilir (amountGross × vatRate / (100+vatRate)).
-  // source (ESTIMATE/SETTLEMENT/CARGO_INVOICE) → isEstimate API'de türetilir.
-  amountGross Decimal @default(0) @map("amount_gross") @db.Decimal(12, 2)
-  vatRate     Decimal @default(0) @map("vat_rate") @db.Decimal(5, 2)
+  amountGross Decimal  @map("amount_gross") @db.Decimal(14, 2)
+  amountVat   Decimal  @map("amount_vat") @db.Decimal(14, 2)
+  vatRatePct  Decimal? @map("vat_rate_pct") @db.Decimal(7, 4)
 
-  displayName String? @map("display_name")
-  externalRef Json?   @map("external_ref")
+  inputs Json
 
-  trendyolTransactionId String? @map("trendyol_transaction_id")
-  invoiceSerialNumber   String? @map("invoice_serial_number")
-  parcelUniqueId        String? @map("parcel_unique_id")
-  derivedFrom           String? @map("derived_from")
+  externalRecordId   String? @map("external_record_id")
+  externalRecordType String? @map("external_record_type")
 
-  // #299: which returned UNIT this settlement fee belongs to. Nullable —
-  // populated only for the Return trio when the claim row is already
-  // synced; the unconditional backfill in return.ts heals the
-  // settlements-before-claims cron ordering (:30 vs :45). UI in V2.
-  orderClaimItemId String? @map("order_claim_item_id") @db.Uuid
+  engineVersion Int @map("engine_version")
 
-  capturedAt  DateTime  @default(now()) @map("captured_at")
-  // confirmedAt + confirmedBy: PSF/Stopaj ESTIMATE → SETTLEMENT confirmation
-  // PaymentOrder ('Ödeme') entry geldiğinde set'lenir (§3.7). Amount comparison
-  // yapılmaz — presence check yeterli (deterministic Trendyol kuralı T+0'da
-  // hesaplandı).
-  confirmedAt DateTime? @map("confirmed_at")
-  confirmedBy String?   @map("confirmed_by")
-
+  createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  definition     FeeDefinition?  @relation(fields: [feeDefinitionId], references: [id], onDelete: SetNull)
-  orderClaimItem OrderClaimItem? @relation(fields: [orderClaimItemId], references: [id], onDelete: SetNull)
+  // Composite tenant-bound reference: the line's (order, organization, store)
+  // must match an orders row exactly, so a line cannot point at an order of a
+  // different tenant. References orders' @@unique([id, organizationId, storeId]).
+  order       Order                  @relation(fields: [orderId, organizationId, storeId], references: [id, organizationId, storeId], onDelete: Cascade)
+  orderItem   OrderItem?             @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  allocations ProfitLineAllocation[]
 
-  @@index([organizationId, feeType])
-  @@index([orderId, feeType, source])
-  @@index([orderClaimItemId])
-  @@map("order_fees")
+  @@index([orderId])
+  @@index([orderItemId])
+  @@index([organizationId])
+  @@index([storeId, type])
+  @@map("profit_lines")
 }
 
-// İade talep görünürlüğü — Trendyol getclaims endpoint Settlement Return'den
-// ÖNCE iade talebini gösteriyor (design §3.6). Kar hesabını DOĞRUDAN etkilemez;
-// UI'da "iade riski" badge için kullanılır. Settlement Return geldiğinde resolved
-// set edilir + REFUND_DEDUCTION / COMMISSION_REFUND / RETURN_SHIPPING OrderFee
-// satırları yazılır. trendyolClaimId order başına unique.
+// One share of a parcel-level profit line pushed down to a single order item
+// (rebuild, phase 3A). Lets both statement views be summed per item. Written
+// only by the profit writer. store_id is stamped from the parent order and
+// gates RLS.
+model ProfitLineAllocation {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  storeId        String @map("store_id") @db.Uuid
+  profitLineId   String @map("profit_line_id") @db.Uuid
+  orderItemId    String @map("order_item_id") @db.Uuid
+
+  amountGross Decimal               @map("amount_gross") @db.Decimal(14, 2)
+  amountVat   Decimal               @map("amount_vat") @db.Decimal(14, 2)
+  basis       ProfitAllocationBasis
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  profitLine ProfitLine @relation(fields: [profitLineId], references: [id], onDelete: Cascade)
+  orderItem  OrderItem  @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  @@index([profitLineId])
+  @@index([orderItemId])
+  @@index([organizationId])
+  @@map("profit_line_allocations")
+}
+
+// One computed profit statement for a parcel, per view (rebuild, phase 3A).
+// Holds the rolled-up sale/cost/VAT/stoppage totals, the resolved settings
+// snapshot and a content hash for idempotent rewrites. Written only by the
+// profit writer. store_id is stamped from the parent order and gates RLS.
+model OrderProfitStatement {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  storeId        String @map("store_id") @db.Uuid
+  orderId        String @map("order_id") @db.Uuid
+
+  view   ProfitStatementView
+  status ProfitStatus
+
+  // How far this statement's selected lines have reconciled with the marketplace.
+  // The engine derives it from the selected lines (deriveReconciliationStatus),
+  // independently of `status`: it reports progress even for an excluded, cancelled
+  // or not-computable order. The ESTIMATE view is always NOT_SETTLED.
+  reconciliationStatus ReconciliationStatus @default(NOT_SETTLED) @map("reconciliation_status")
+
+  saleGross     Decimal @map("sale_gross") @db.Decimal(14, 2)
+  costGross     Decimal @map("cost_gross") @db.Decimal(14, 2)
+  vatOutput     Decimal @map("vat_output") @db.Decimal(14, 2)
+  vatInput      Decimal @map("vat_input") @db.Decimal(14, 2)
+  vatNet        Decimal @map("vat_net") @db.Decimal(14, 2)
+  vatEffective  Decimal @map("vat_effective") @db.Decimal(14, 2)
+  stoppageGross Decimal @map("stoppage_gross") @db.Decimal(14, 2)
+
+  stoppageIncluded Boolean @map("stoppage_included")
+
+  netProfit Decimal? @map("net_profit") @db.Decimal(14, 2)
+
+  saleMarginPct Decimal? @map("sale_margin_pct") @db.Decimal(12, 4)
+  costMarkupPct Decimal? @map("cost_markup_pct") @db.Decimal(12, 4)
+
+  issues           Json
+  settingsSnapshot Json @map("settings_snapshot")
+
+  engineVersion Int      @map("engine_version")
+  contentHash   String   @map("content_hash")
+  computedAt    DateTime @map("computed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Composite tenant-bound reference: the statement's (order, organization, store)
+  // must match an orders row exactly, so a statement cannot point at an order of a
+  // different tenant. References orders' @@unique([id, organizationId, storeId]).
+  order Order @relation(fields: [orderId, organizationId, storeId], references: [id, organizationId, storeId], onDelete: Cascade)
+
+  @@unique([orderId, view])
+  @@index([storeId, status])
+  @@index([organizationId])
+  @@map("order_profit_statements")
+}
+
+// A raw marketplace finance record (settlement line, other-financial entry or
+// cargo-invoice item) kept verbatim for the engine to match against a parcel
+// (rebuild, phase 3A). Shared by every marketplace, so the matching keys are
+// text, never BigInt. Written only by the profit writer / sync handlers.
+// store_id is stamped from the store and gates RLS.
+//
+// Unique key is (store_id, family, record_id). A cargo-invoice item has no
+// vendor id, so its recordId is "<invoice serial>:<parcelUniqueId>"; its item
+// label can change on a re-scan, which is why the label (transactionType) is
+// not part of the key.
+model MarketplaceFinanceRecord {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  storeId        String @map("store_id") @db.Uuid
+
+  platform Platform
+  family   FinanceRecordFamily
+
+  transactionType String @map("transaction_type")
+  recordId        String @map("record_id")
+
+  // The invoice or document serial the record belongs to. For CARGO_INVOICE_ITEM
+  // rows this is the cargo invoice serial, which the Trendyol mapper uses as
+  // TrendyolCargoInvoiceItem.invoiceSerial; settlement rows may carry the
+  // commission invoice serial.
+  invoiceSerial String? @map("invoice_serial")
+
+  orderNumber       String? @map("order_number")
+  shipmentPackageId String? @map("shipment_package_id")
+  barcode           String?
+  paymentOrderId    String? @map("payment_order_id")
+  parcelUniqueId    String? @map("parcel_unique_id")
+
+  transactionDate DateTime? @map("transaction_date")
+
+  debt             Decimal? @db.Decimal(14, 2)
+  credit           Decimal? @db.Decimal(14, 2)
+  commissionAmount Decimal? @map("commission_amount") @db.Decimal(14, 2)
+  amountGross      Decimal? @map("amount_gross") @db.Decimal(14, 2)
+  desi             Decimal? @db.Decimal(8, 2)
+
+  payload   Json
+  fetchedAt DateTime @map("fetched_at")
+
+  // true from the moment an ingest inserts or changes this row until the post-commit
+  // bind pass has enqueued the orders it binds to (outbox flag; see
+  // bindPendingFinanceRecords). The bind pass clears it. Every pre-existing row is
+  // false: the one-phase ingest that wrote it had already bound its orders.
+  bindPending Boolean @default(false) @map("bind_pending")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  // Written mostly by raw SQL (the finance-record ingest), so updated_at carries
+  // a DB default on top of @updatedAt. Raw UPDATEs must still set it explicitly.
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, family, recordId])
+  @@index([storeId, shipmentPackageId])
+  @@index([storeId, orderNumber])
+  @@index([storeId, paymentOrderId])
+  @@index([storeId, parcelUniqueId])
+  // The bind pass claims this store's still-pending rows; the btree range
+  // (store_id, true) stays small because almost every row is false.
+  @@index([storeId, bindPending])
+  @@index([organizationId])
+  // The settlement cron's prune DELETE filters by (store_id, family, transaction_type)
+  // and a transaction_date range; this index serves it directly. The name is set
+  // explicitly because the default would exceed Postgres' 63-char identifier limit.
+  @@index([storeId, family, transactionType, transactionDate], map: "marketplace_finance_records_prune_idx")
+  @@map("marketplace_finance_records")
+}
+
+// One row per order that must have its profit recomputed (rebuild, phase 3B).
+// Every producer writes it inside its own transaction; the sync-worker tick
+// drains it with FOR UPDATE SKIP LOCKED. store_id gates RLS.
+model ProfitRecomputeRequest {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  storeId        String @map("store_id") @db.Uuid
+  orderId        String @unique @map("order_id") @db.Uuid
+
+  reason ProfitRecomputeReason
+
+  requestedAt   DateTime @default(now()) @map("requested_at")
+  nextAttemptAt DateTime @default(now()) @map("next_attempt_at")
+  attempts      Int      @default(0)
+  lastError     String?  @map("last_error")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  // Written mostly by raw SQL (INSERT ... ON CONFLICT and the drain's UPDATEs),
+  // so updated_at carries a DB default on top of @updatedAt. Raw UPDATEs must
+  // still set it explicitly.
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  // The claim orders by next_attempt_at, id.
+  @@index([nextAttemptAt, id])
+  @@index([storeId])
+  @@index([organizationId])
+  @@map("profit_recompute_queue")
+}
+
+// Return-claim visibility: the Trendyol claims endpoint shows a claim BEFORE the
+// settlement's Return record arrives (design section 3.6). A claim does not change the
+// profit by itself; the UI shows it as a "return risk" badge. An ACCEPTED claim makes the
+// profit engine write the return lines (SALE_RETURN / COMMISSION_REFUND / RETURN_SHIPPING
+// and so on). marketplaceClaimId (the marketplace's claim id) is unique per order.
 //
 // #298: storeId denormalize (insert sırasında parent order'dan stamp) — tenant
 // filtreleme artık `order: { storeId }` parent-walk'u değil doğrudan kolon;
@@ -2001,7 +2076,8 @@ model OrderClaim {
   organizationId      String   @map("organization_id") @db.Uuid
   storeId             String   @map("store_id") @db.Uuid
   orderId             String   @map("order_id") @db.Uuid
-  trendyolClaimId     String   @map("trendyol_claim_id")
+  // The marketplace's own claim id (Trendyol: claimId).
+  marketplaceClaimId  String   @map("marketplace_claim_id")
   claimDate           DateTime @map("claim_date")
   cargoProviderName   String?  @map("cargo_provider_name")
   cargoTrackingNumber BigInt?  @map("cargo_tracking_number")
@@ -2019,10 +2095,12 @@ model OrderClaim {
   order Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
   items OrderClaimItem[]
 
-  @@unique([orderId, trendyolClaimId])
+  @@unique([orderId, marketplaceClaimId])
   @@index([organizationId, resolved])
   @@index([storeId, orderShipmentPackageId])
   @@index([storeId, resolved])
+  // A cargo-invoice finance record binds a claim by its cargo tracking number (packages/profit/src/persistence/finance-records.ts).
+  @@index([storeId, cargoTrackingNumber])
   @@map("order_claims")
 }
 
@@ -2032,28 +2110,28 @@ model OrderClaim {
 // reasonName Türkçe label (Trendyol'dan direkt). orderItemId nullable çünkü
 // match her zaman olmayabilir (item-level eşleme PR-13 sync worker'ında).
 model OrderClaimItem {
-  id                  String    @id @default(uuid()) @db.Uuid
-  claimId             String    @map("claim_id") @db.Uuid
-  orderItemId         String?   @map("order_item_id") @db.Uuid
-  trendyolClaimItemId String    @map("trendyol_claim_item_id")
-  reasonCode          String    @map("reason_code")
-  reasonName          String    @map("reason_name")
-  status              String
-  acceptedBySeller    Boolean   @map("accepted_by_seller")
-  autoApproveDate     DateTime? @map("auto_approve_date")
-  resolved            Boolean
+  id                     String    @id @default(uuid()) @db.Uuid
+  claimId                String    @map("claim_id") @db.Uuid
+  orderItemId            String?   @map("order_item_id") @db.Uuid
+  marketplaceClaimItemId String    @map("marketplace_claim_item_id")
+  reasonCode             String    @map("reason_code")
+  reasonName             String    @map("reason_name")
+  status                 String
+  acceptedBySeller       Boolean   @map("accepted_by_seller")
+  autoApproveDate        DateTime? @map("auto_approve_date")
+  resolved               Boolean
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   claim     OrderClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
   orderItem OrderItem? @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
-  fees      OrderFee[]
 
-  // trendyolClaimItemId is Trendyol's per-UNIT claimLineItem UUID (a 3-unit
-  // return produces 3 rows) — the upsert idempotency anchor for the CLAIMS
-  // sync worker. Covers the old claim_id lookup index too.
-  @@unique([claimId, trendyolClaimItemId])
+  // marketplaceClaimItemId is the marketplace's claim item id (Trendyol: the
+  // per-UNIT claimLineItem UUID, so a 3-unit return produces 3 rows); the upsert
+  // idempotency anchor for the CLAIMS sync worker. Covers the old claim_id lookup
+  // index too.
+  @@unique([claimId, marketplaceClaimItemId])
   @@index([orderItemId])
   @@map("order_claim_items")
 }
@@ -2092,77 +2170,6 @@ model CatalogBarcodeMiss {
   @@index([organizationId])
   @@index([storeId, nextRetryAt])
   @@map("catalog_barcode_miss")
-}
-
-// Organizasyon-düzeyi ücretler — sipariş'e attribute EDİLEMEYEN faturalar
-// (design §3.7). Reklam Bedeli (org-wide Roboost), Penalty/Notification fee'leri
-// (KDV=0), PSF/Stopaj audit kayıtları (period-level invoice scope ≠ cycle scope).
-// Kar hesabını ETKİLEMEZ — yalnız audit/transparency için. paymentOrderId hangi
-// PaymentOrder cycle'ında basıldığını tutar (V2 monthly aggregate variance audit
-// bu kayıtları kullanır).
-model OrgPeriodFee {
-  id             String   @id @default(uuid()) @db.Uuid
-  organizationId String   @map("organization_id") @db.Uuid
-  storeId        String   @map("store_id") @db.Uuid
-  paymentOrderId BigInt   @map("payment_order_id")
-  paymentDate    DateTime @map("payment_date")
-
-  feeType OrderFeeType   @map("fee_type")
-  source  OrderFeeSource
-
-  // GROSS konvansiyon (2026-06-16, Bölüm E Task 20): amountNet + vatAmount → amountGross + vatRate.
-  // Net türetilir: amountGross × 100 / (100 + vatRate). PSF vatRate=20; Stoppage vatRate=0.
-  amountGross Decimal @map("amount_gross") @db.Decimal(12, 2)
-  vatRate     Decimal @map("vat_rate") @db.Decimal(5, 2)
-
-  invoiceSerialNumber String? @map("invoice_serial_number")
-  description         String?
-  externalRef         Json?   @map("external_ref")
-
-  // #297: settlement satırı kimliği — idempotency okuması bu kolondan,
-  // externalRef audit-only. Partial unique (organization_id, fee_type,
-  // trendyol_transaction_id) check-constraints.sql'de yaşar.
-  trendyolTransactionId String? @map("trendyol_transaction_id")
-
-  capturedAt DateTime @default(now()) @map("captured_at")
-
-  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
-
-  @@index([organizationId, paymentOrderId])
-  @@index([organizationId, feeType, paymentDate])
-  @@index([storeId, paymentDate])
-  @@map("org_period_fees")
-}
-
-// Haftalık komisyon faturası aggregate (design §3.8). Trendyol Sale satırlarındaki
-// commissionInvoiceSerialNumber (DCF...) bu tabloya bağlanır. İki aşamalı populate:
-// (1) T+~5 Sale satırı OrderItem.commissionInvoiceSerialNumber'a string yazar,
-// (2) T+~7 'Komisyon Faturası' otherfinancials kaydı geldiğinde CommissionInvoice
-// row'u upsert edilir + OrderItem.commissionInvoiceId backfill (PR-3'te).
-// orderItems back-relation PR-3'te eklenir (OrderItem.commissionInvoiceId FK
-// ile birlikte).
-model CommissionInvoice {
-  id                   String    @id @default(uuid()) @db.Uuid
-  organizationId       String    @map("organization_id") @db.Uuid
-  storeId              String    @map("store_id") @db.Uuid
-  trendyolSerialNumber String    @map("trendyol_serial_number")
-  periodStart          DateTime  @map("period_start")
-  periodEnd            DateTime  @map("period_end")
-  totalNet             Decimal   @map("total_net") @db.Decimal(14, 2)
-  totalVat             Decimal   @map("total_vat") @db.Decimal(14, 2)
-  paymentOrderId       BigInt?   @map("payment_order_id")
-  paymentDate          DateTime? @map("payment_date")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  store      Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  // PR-3'te eklendi: OrderItem.commissionInvoiceId FK ile birlikte iki yönlü relation.
-  orderItems OrderItem[]
-
-  @@unique([storeId, trendyolSerialNumber])
-  @@index([organizationId, periodStart])
-  @@map("commission_invoices")
 }
 
 // PR-C1: Trendyol webhook event idempotency log + raw audit trail.
