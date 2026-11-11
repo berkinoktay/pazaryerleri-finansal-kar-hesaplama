@@ -22,8 +22,8 @@
 //
 // Assertions:
 //   - Store older than 60d: 4 slices, every window ≤ 15 days, union ≈ 60 days,
-//     and a T-35d Sale row (falls inside the 3rd chunk) reaches handleSale
-//     and backfills Order.paymentOrderId.
+//     and a T-35d Sale row (falls inside the 3rd chunk) is stored as a raw
+//     finance record carrying its paymentOrderId.
 //   - Fresh store (createdAt = yesterday): exactly ONE slice, starting at
 //     store.createdAt.
 
@@ -231,7 +231,7 @@ describe('processSettlementsChunk — scan window coverage', () => {
 
     // Mock fetcher mirrors Trendyol's date filter: a row is only yielded
     // when its transactionDate falls inside the requested chunk window.
-    // This means the T-35d row reaches the dispatcher exactly once —
+    // This means the T-35d row reaches the raw-record ingest exactly once —
     // via the chunk that covers T-45..T-30.
     const mockFetchers = {
       fetchSettlements: async function* (

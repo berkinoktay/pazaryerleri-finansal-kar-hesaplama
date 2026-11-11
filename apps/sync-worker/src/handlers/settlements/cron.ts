@@ -39,9 +39,8 @@
 // recompute, then clears the flag. A re-poll that finds a row unchanged stores nothing
 // and flags nothing, so it enqueues no recompute -- only inserted or changed rows reach
 // the queue, and binding after the store commit closes the race where a settlement is
-// stored before its order exists. The legacy per-row handlers (dispatchSettlementRow /
-// dispatchOtherFinancialRow / handleCargoInvoiceItems) and the end-of-cycle
-// reconciliation bump are no longer called; their files stay until phase 5.
+// stored before its order exists. The legacy per-row settlement and cargo-invoice
+// handlers and the end-of-cycle reconciliation bump were deleted in phase 5.
 //
 // Phase 3D pruning: the raw store is keyed by (store_id, family, record_id), and
 // Trendyol renews record ids (it did on 3 Aug 2026), so a renewed id lands as a second
@@ -129,8 +128,9 @@ const FINANCE_PRUNE_EDGE_TOLERANCE_MS = 86_400_000;
 // Sale credit, so it nets out of the sale), and DiscountCancel / CouponCancel are credits
 // that give a discount or coupon back -- every reversal observed came with a Return and
 // reverses its return legs. Pruning (previous commit) covers these types too, so a renewed
-// id drops its stale row. The remaining rare types stay enumerated in dispatcher.ts (audit
-// log fall-through) but the cron loop still skips them until live rows appear.
+// id drops its stale row. The remaining rare types stay enumerated as UNVERIFIED in the
+// engine's settlement-records.ts record-kind map, but the cron loop still skips them until
+// live rows appear.
 const SETTLEMENT_TYPES = [
   'Sale',
   'Discount',

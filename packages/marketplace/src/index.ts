@@ -96,14 +96,10 @@ export {
   type FetchOtherFinancialsOpts,
 } from './trendyol/settlements';
 export {
-  classifySettlementTransaction,
-  classifyOtherFinancialTransaction,
   classifyDeductionInvoice,
   getCargoInvoiceSerial,
-  type SettlementDispatchTarget,
-  type OtherFinancialDispatchTarget,
   type DeductionInvoiceSubClass,
-} from './trendyol/settlements-dispatcher';
+} from './trendyol/cargo-invoice-serial';
 export {
   CARGO_INVOICE_PAGE_SIZE,
   fetchAllCargoInvoiceItems,

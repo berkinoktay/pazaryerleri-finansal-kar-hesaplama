@@ -26,6 +26,7 @@ import {
 import { encryptCredentials, syncLog } from '@pazarsync/sync-core';
 import type {
   CargoInvoiceItem,
+  FetchCargoInvoiceItemsOpts,
   FetchOtherFinancialsOpts,
   FetchSettlementsOpts,
   FinancialScanSummary,
@@ -461,6 +462,54 @@ describe('processSettlementsChunk — raw finance-record ingest', () => {
     });
     expect(itemRows).toHaveLength(2);
     expect(itemRows.map((row) => row.recordId)).toEqual(['INV-1:7000001', 'INV-1:7000002']);
+  });
+
+  it('pre-fetches a cargo invoice by its serial and queues the order its item binds by tracking number', async () => {
+    // Moved here in phase 5 with the legacy cargo-invoice handler tests. The cargo invoice row is
+    // the only input: the cron fetches the invoice items by the row's serial (its id),
+    // stores the row and its item raw, and the item's parcel id binds the order through
+    // its cargo tracking number -- no settlement row names the order.
+    const { storeId, orderId, syncLogId } = await buildScenario();
+    const cargoTracking = 7_330_032_270_766_345n;
+    await prisma.order.update({
+      where: { id: orderId },
+      data: { cargoTrackingNumber: cargoTracking },
+    });
+
+    const requestedSerials: string[] = [];
+    const syncLogRow = await prisma.syncLog.findUniqueOrThrow({ where: { id: syncLogId } });
+    const result = await processSettlementsChunk(
+      { syncLog: syncLogRow, cursor: null, workerId: WORKER_ID },
+      {
+        ...makeMockFetchers({
+          otherFinancials: { DeductionInvoices: [cargoInvoiceRow('INV-SERIAL-1')] },
+        }),
+        fetchCargoInvoiceItems: async (
+          opts: FetchCargoInvoiceItemsOpts,
+        ): Promise<CargoInvoiceItem[]> => {
+          requestedSerials.push(opts.invoiceSerialNumber);
+          return [cargoItem(Number(cargoTracking), 93.05, 1)];
+        },
+      },
+    );
+    expect(result.kind).toBe('done');
+    expect([...new Set(requestedSerials)]).toEqual(['INV-SERIAL-1']);
+
+    // The invoice row itself plus its one item are stored raw.
+    const invoiceRow = await prisma.marketplaceFinanceRecord.findFirstOrThrow({
+      where: { storeId, family: FinanceRecordFamily.OTHER_FINANCIAL },
+    });
+    expect(invoiceRow.transactionType).toBe('DeductionInvoices');
+    const itemRows = await prisma.marketplaceFinanceRecord.findMany({
+      where: { storeId, family: FinanceRecordFamily.CARGO_INVOICE_ITEM },
+    });
+    expect(itemRows.map((row) => row.recordId)).toEqual([
+      `INV-SERIAL-1:${cargoTracking.toString()}`,
+    ]);
+
+    // The order the cargo item binds to (by tracking number) is enqueued for a recompute.
+    const queued = await prisma.profitRecomputeRequest.findUniqueOrThrow({ where: { orderId } });
+    expect(queued.reason).toBe(ProfitRecomputeReason.FINANCE_RECORD);
   });
 
   it('a re-run of the same window stores no duplicate rows', async () => {
