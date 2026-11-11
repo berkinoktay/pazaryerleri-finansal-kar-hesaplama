@@ -41,9 +41,6 @@ function mappedFor(platformOrderId: string, barcode: string): Prisma.InputJsonVa
         lineSellerDiscountGross: '0',
         saleVatRate: '18',
         commissionRate: '15',
-        commissionGross: '15.00',
-        refundedCommissionGross: '0',
-        commissionVatRate: '20',
       },
     ],
   } as unknown as Prisma.InputJsonValue;

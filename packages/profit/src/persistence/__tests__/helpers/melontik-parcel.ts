@@ -74,7 +74,6 @@ export async function truncateAll(): Promise<void> {
        order_profit_statements,
        profit_recompute_queue,
        marketplace_finance_records,
-       order_fees,
        order_claim_items,
        order_claims,
        order_items,
@@ -432,13 +431,9 @@ async function createOrderItem(params: {
       lineSaleGross: lineSaleGrossOverride ?? item.saleGross,
       lineSellerDiscountGross: lineSellerDiscountGrossOverride ?? item.sellerDiscountGross,
       saleVatRate: item.saleVatRate,
-      // The golden parcel's commission resolves from the ORDER source, so the raw
-      // column carries the same rate; the legacy commissionRate column stays filled
-      // for back-compat but the loader no longer reads it.
-      commissionRate: item.commissionRate,
+      // The golden parcel's commission resolves from the ORDER source: the raw
+      // order commission column carries the spec's rate.
       orderCommissionRatePct: item.commissionRate,
-      commissionGross: '0',
-      commissionVatRate: '20',
     },
   });
   return created.id;

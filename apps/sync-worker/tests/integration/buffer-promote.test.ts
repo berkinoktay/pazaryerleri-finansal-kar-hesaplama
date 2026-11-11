@@ -71,9 +71,6 @@ function buildMappedOrder(over: {
         lineSellerDiscountGross: '0.00',
         saleVatRate: '18',
         commissionRate: '15',
-        commissionGross: '15.00',
-        refundedCommissionGross: '0.00',
-        commissionVatRate: '20',
       },
     ],
   };

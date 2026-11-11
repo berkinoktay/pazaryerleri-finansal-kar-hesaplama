@@ -125,7 +125,6 @@ async function buildScenario(storeCreatedAt: Date): Promise<BuiltCtx> {
       // GROSS CONVENTION (2026-06-16, Bölüm E Task 20): saleGross/saleVat.
       saleGross: new Decimal('120.00'),
       saleVat: new Decimal('20.00'),
-      reconciliationStatus: 'NOT_SETTLED',
     },
   });
 
@@ -135,13 +134,10 @@ async function buildScenario(storeCreatedAt: Date): Promise<BuiltCtx> {
       organizationId: org.id,
       productVariantId: variant.id,
       quantity: 1,
-      // GROSS CONVENTION (2026-06-16): lineListGross/lineSaleGross; commissionGross replaces
-      // grossCommissionAmountNet (12.00 gross). saleVatRate replaces unitVatRate.
+      // GROSS CONVENTION (2026-06-16): lineListGross/lineSaleGross; saleVatRate replaces unitVatRate.
       lineListGross: new Decimal('120.00'),
       lineSaleGross: new Decimal('120.00'),
       saleVatRate: new Decimal('20.00'),
-      commissionRate: new Decimal('10.00'),
-      commissionGross: new Decimal('12.00'),
     },
   });
 

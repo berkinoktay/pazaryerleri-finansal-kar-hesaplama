@@ -8,8 +8,7 @@
 // unique index (order_items_order_platform_line_uniq in check-constraints.sql)
 // makes a duplicate (order_id, platform_line_id) row impossible at the schema
 // layer — the DB-layer safety belt against a future bug that would otherwise
-// double-count a line's revenue/profit. Mirrors the fee-idempotency guard suite
-// (order-fee-unique-guards.test.ts).
+// double-count a line's revenue/profit.
 //
 // Requires `pnpm db:push` / `pnpm db:test-setup` (chains apply-policies →
 // check-constraints.sql) against the local Supabase before running — same
@@ -40,9 +39,9 @@ async function buildOrder(): Promise<{ orderId: string; organizationId: string }
   return { orderId: order.id, organizationId: org.id };
 }
 
-// commissionRate is the only required non-default OrderItem money column; the
-// rest default to 0. platformLineId is the DB guard's second key column.
-const ITEM = { quantity: 1, commissionRate: '10.00' } as const;
+// Every OrderItem money column defaults to 0. platformLineId is the DB guard's
+// second key column.
+const ITEM = { quantity: 1 } as const;
 
 describe('order_items dedup unique guard', () => {
   beforeAll(async () => {

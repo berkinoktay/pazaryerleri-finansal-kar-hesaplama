@@ -409,8 +409,6 @@ export async function upsertOrderWithSnapshot(
           // Micro export -> sale VAT rate 0% (export exemption), consistent with
           // Order.saleVat = 0 on a micro order.
           saleVatRate: microExport ? new Decimal(0) : new Decimal(line.saleVatRate),
-          // TEMPORARY: the legacy NOT NULL column is dropped in the next task; nothing reads it.
-          commissionRate: new Decimal(0),
           // Raw order commission rate (phase 3B): the line's OWN rate, null when the
           // line carried no commission of its own. The loader reads this column and
           // treats null/zero as "unknown", falling back to the category rule.

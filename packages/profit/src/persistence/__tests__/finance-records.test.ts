@@ -154,9 +154,6 @@ async function createOrderWithItem(params: {
       lineSaleGross: '100.00',
       lineSellerDiscountGross: '0',
       saleVatRate: '10',
-      commissionRate: '19',
-      commissionGross: '0',
-      commissionVatRate: '20',
     },
   });
   return order.id;

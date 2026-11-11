@@ -1,7 +1,7 @@
 // Boot-time DDL guard: the correctness-critical schema that lives only in
 // supabase/sql (NOT in Prisma migrations) must exist in a properly bootstrapped
 // database. assertCriticalDdl is the worker's fail-fast boot check; a DB missing
-// any of it silently loses duplicate-job protection / fee idempotency (wrong
+// any of it silently loses duplicate-job protection / order-line dedup (wrong
 // profit numbers, no error) OR drops the frontend's realtime surfaces (REST
 // works, channel SUBSCRIBED, zero events).
 //
@@ -53,7 +53,7 @@ describe('assertCriticalDdl (boot-time DDL guard)', () => {
     });
 
     it('reports only the genuinely-missing names, not the ones that exist', async () => {
-      const bogus = 'order_fees_not_a_real_index_abc';
+      const bogus = 'order_items_not_a_real_index_abc';
       // A mix of one real (present) index + one bogus name -> only the bogus name
       // is reported missing, proving the checker subtracts present from expected.
       await expect(assertIndexesExist(prisma, [REQUIRED_INDEXES[0], bogus])).rejects.toMatchObject({

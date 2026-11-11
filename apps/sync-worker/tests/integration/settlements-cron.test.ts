@@ -133,8 +133,6 @@ async function buildScenario(opts: { storeCreatedAt?: Date } = {}): Promise<Simp
       lineSaleGross: new Decimal('120.00'),
       lineSellerDiscountGross: new Decimal('0'),
       saleVatRate: new Decimal('20.00'),
-      commissionRate: new Decimal('10.00'),
-      commissionGross: new Decimal('12.00'),
     },
   });
 

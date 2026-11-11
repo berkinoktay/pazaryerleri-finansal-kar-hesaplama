@@ -1,7 +1,7 @@
 // Realtime tenant isolation for sync_logs (spec §12 T1).
 //
 // The REST/RLS path is already covered by sync-logs-org.test.ts and
-// settlements-synclogs.rls.test.ts. The Realtime/postgres_changes path
+// synclogs.rls.test.ts. The Realtime/postgres_changes path
 // is a different code path inside Supabase (logical decoding emits the
 // row, the Realtime server filters by the channel filter + RLS) — so
 // it needs its own evaluator.

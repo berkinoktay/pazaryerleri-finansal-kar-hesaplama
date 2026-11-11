@@ -26,11 +26,8 @@ const TENANT_TABLES = [
   'live_performance_buffer',
   'webhook_events',
   'sync_logs',
-  'settlement_items',
-  'settlements',
   'order_claim_items',
   'order_claims',
-  'order_fees',
   // Profit engine persistence (rebuild, phase 3A) — children of orders/items/stores,
   // listed before their parents; TRUNCATE CASCADE would reach them anyway.
   'profit_line_allocations',
@@ -39,8 +36,6 @@ const TENANT_TABLES = [
   'marketplace_finance_records',
   // Profit recompute queue (rebuild, phase 3B): child of orders.
   'profit_recompute_queue',
-  'org_period_fees',
-  'commission_invoices',
   'order_items',
   'orders',
   'product_variant_cost_profiles',

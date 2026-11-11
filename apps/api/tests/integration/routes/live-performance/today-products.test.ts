@@ -73,14 +73,13 @@ async function sellInOrders(
   storeId: string,
   variantId: string,
   // GROSS konvansiyon: lineSaleGross = LINE total (× quantity). quantity 1 olduğu
-  // için per-unit değerle aynı; unitCostSnapshotGross per-unit kalır.
-  opts: { count: number; lineSaleGross: string; unitCostSnapshotGross?: string },
+  // için per-unit değerle aynı.
+  opts: { count: number; lineSaleGross: string },
 ): Promise<void> {
   for (let i = 0; i < opts.count; i += 1) {
     const order = await createOrder(orgId, storeId, {
       orderDate: todayAt(10),
       saleGross: opts.lineSaleGross,
-      estimatedNetProfit: opts.unitCostSnapshotGross !== undefined ? '5.00' : null,
     });
     await prisma.orderItem.create({
       data: {
@@ -88,10 +87,7 @@ async function sellInOrders(
         organizationId: orgId,
         productVariantId: variantId,
         quantity: 1,
-        commissionRate: '10.00',
-        commissionGross: '12.00',
         lineSaleGross: opts.lineSaleGross,
-        unitCostSnapshotGross: opts.unitCostSnapshotGross ?? null,
       },
     });
   }
@@ -321,8 +317,6 @@ describe('GET /v1/.../live-performance/today-products', () => {
         organizationId: org.id,
         productVariantId: costedId,
         quantity: 1,
-        commissionRate: '10.00',
-        commissionGross: '12.00',
         lineSaleGross: '60.00',
       },
     });
@@ -441,8 +435,6 @@ describe('GET /v1/.../live-performance/today-products', () => {
         organizationId: org.id,
         productVariantId: variantId,
         quantity: 1,
-        commissionRate: '10.00',
-        commissionGross: '12.00',
         lineSaleGross: '60.00',
       },
     });
@@ -513,8 +505,6 @@ describe('GET /v1/.../live-performance/today-products', () => {
         organizationId: org.id,
         productVariantId: variantId,
         quantity: 1,
-        commissionRate: '10.00',
-        commissionGross: '12.00',
         lineSaleGross: '60.00',
       },
     });
@@ -535,8 +525,6 @@ describe('GET /v1/.../live-performance/today-products', () => {
         organizationId: org.id,
         productVariantId: variantId,
         quantity: 1,
-        commissionRate: '10.00',
-        commissionGross: '12.00',
         lineSaleGross: '60.00',
       },
     });
@@ -594,8 +582,6 @@ describe('GET /v1/.../live-performance/today-products', () => {
         organizationId: org.id,
         productVariantId: variantId,
         quantity: 1,
-        commissionRate: '10.00',
-        commissionGross: '12.00',
         lineSaleGross: '60.00',
       },
     });
@@ -611,8 +597,6 @@ describe('GET /v1/.../live-performance/today-products', () => {
         organizationId: org.id,
         productVariantId: variantId,
         quantity: 1,
-        commissionRate: '10.00',
-        commissionGross: '12.00',
         lineSaleGross: '60.00',
       },
     });
@@ -668,8 +652,6 @@ describe('GET /v1/.../live-performance/today-products', () => {
         organizationId: org.id,
         productVariantId: variantId,
         quantity: 1,
-        commissionRate: '10.00',
-        commissionGross: '12.00',
         lineSaleGross: '60.00',
       },
     });

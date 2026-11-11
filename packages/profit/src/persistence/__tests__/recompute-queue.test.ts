@@ -63,9 +63,6 @@ async function addOrderItemForVariant(params: {
       lineSaleGross: '100',
       lineSellerDiscountGross: '0',
       saleVatRate: '10',
-      commissionRate: '19',
-      commissionGross: '0',
-      commissionVatRate: '20',
     },
   });
 }
@@ -82,7 +79,6 @@ async function addOrderItemWithBarcode(params: {
       organizationId: params.organizationId,
       quantity: 1,
       barcode: params.barcode,
-      commissionRate: '19',
     },
   });
 }

@@ -8,9 +8,6 @@
 //   1. Partial indexes (Prisma 7 has no native WHERE-clause syntax):
 //        - one-active-job-per-(store, sync_type) UNIQUE: duplicate sync jobs run
 //          in parallel and double-write orders/fees;
-//        - fee idempotency UNIQUE: a racing settlement re-poll or a late cost
-//          re-entry double-books a fee row and corrupts the write-once profit
-//          numbers;
 //        - order_items dedup UNIQUE (defense-in-depth): a future bug slipping
 //          past the app-layer findFirst + the processing lease would double-count
 //          revenue/profit for the same (order, line);
@@ -35,17 +32,13 @@ import type { PrismaClient } from '@pazarsync/db';
 // (NOT in Prisma migrations). Keep this list in sync with its two canonical
 // source files:
 //   supabase/sql/rls-policies.sql      -> sync_logs_active_slot_uniq
-//   supabase/sql/check-constraints.sql -> order_fees_estimate_fee_type_uniq,
-//                                         org_period_fees_settlement_row_uniq,
-//                                         order_items_order_platform_line_uniq,
+//   supabase/sql/check-constraints.sql -> order_items_order_platform_line_uniq,
 //                                         webhook_events_unprocessed_idx
-// The first four are UNIQUE guards; webhook_events_unprocessed_idx is a
+// The first two are UNIQUE guards; webhook_events_unprocessed_idx is a
 // non-unique queue-scan index registered here so a db reset that skips
 // supabase/sql can't silently drop the webhook ingest queue's scan support.
 export const REQUIRED_INDEXES = [
   'sync_logs_active_slot_uniq',
-  'order_fees_estimate_fee_type_uniq',
-  'org_period_fees_settlement_row_uniq',
   'order_items_order_platform_line_uniq',
   'webhook_events_unprocessed_idx',
 ] as const;
@@ -92,7 +85,7 @@ function buildMessage(missing: MissingDdl): string {
     parts.push(
       `missing partial index(es): ${missing.indexes.join(', ')} ` +
         `(without them the worker silently loses duplicate-job protection, ` +
-        `fee idempotency -> wrong profit numbers, or webhook ingest-queue scan ` +
+        `order-line dedup -> double-counted revenue, or webhook ingest-queue scan ` +
         `support, no error)`,
     );
   }

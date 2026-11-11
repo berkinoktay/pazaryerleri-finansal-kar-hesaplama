@@ -249,26 +249,6 @@ CREATE POLICY order_items_org_member_read ON order_items
     )
   );
 
--- ─── settlements ───────────────────────────────────────────────────────
-ALTER TABLE settlements ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS settlements_org_member_read ON settlements;
-CREATE POLICY settlements_org_member_read ON settlements
-  FOR SELECT TO authenticated
-  USING (can_access_store(store_id));
-
--- ─── settlement_items — reach via parent settlement ────────────────────
-ALTER TABLE settlement_items ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS settlement_items_org_member_read ON settlement_items;
-CREATE POLICY settlement_items_org_member_read ON settlement_items
-  FOR SELECT TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM settlements
-      WHERE settlements.id = settlement_items.settlement_id
-        AND can_access_store(settlements.store_id)
-    )
-  );
-
 -- ─── sync_logs — store-scoped, Realtime-exposed ───────────────────────
 -- sync_logs carries store_id directly, so the policy gates on
 -- can_access_store(store_id). Supabase Realtime's postgres_changes evaluator
@@ -500,26 +480,6 @@ CREATE POLICY marketplace_campaign_items_store_read ON marketplace_campaign_item
   FOR SELECT TO authenticated
   USING (can_access_store(store_id));
 
--- ─── Profit Calculation V1 — PR-1 ──────────────────────────────────────
--- design: docs/plans/2026-05-18-profit-calculation-design.md §3, §8
--- guide:  docs/plans/2026-05-19-profit-calc-implementation-guide.md
-
--- ─── order_fees — reach via parent order ───────────────────────────────
--- Sipariş paket-düzeyi ücret satırları (PSF, Stopaj, Shipping, vs.). No
--- store_id of its own; walk up to the parent order and gate on that order's
--- store access.
-ALTER TABLE order_fees ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS order_fees_org_member_read ON order_fees;
-CREATE POLICY order_fees_org_member_read ON order_fees
-  FOR SELECT TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM orders
-      WHERE orders.id = order_fees.order_id
-        AND can_access_store(orders.store_id)
-    )
-  );
-
 -- ─── order_claims — store-scoped ───────────────────────────────────────
 -- İade talep görünürlüğü; getclaims sync worker (PR-13) yazar. store_id
 -- denormalize (#298) — parent-walk yerine doğrudan can_access_store(store_id),
@@ -546,26 +506,6 @@ CREATE POLICY order_claim_items_org_member_read ON order_claim_items
         AND can_access_store(order_claims.store_id)
     )
   );
-
--- ─── org_period_fees — store-scoped ────────────────────────────────────
--- Mağaza-düzeyi dönem ücretleri (Reklam, Penalty, Notification, PSF/Stopaj
--- audit). Settlement worker (PR-7) yazar; store_id taşır → store access ile
--- gate'lenir, böylece bir mağazaya erişimi olmayan üye o mağazanın ücretlerini görmez.
-ALTER TABLE org_period_fees ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS org_period_fees_org_member_read ON org_period_fees;
-CREATE POLICY org_period_fees_org_member_read ON org_period_fees
-  FOR SELECT TO authenticated
-  USING (can_access_store(store_id));
-
--- ─── commission_invoices — store-scoped ────────────────────────────────
--- Trendyol haftalık komisyon faturası aggregate. otherfinancials 'Komisyon
--- Faturası' kayıtlarından oluşturulur (PR-7). store_id taşır → store access
--- ile gate'lenir. OrderItem.commissionInvoiceId FK PR-3'te eklenir.
-ALTER TABLE commission_invoices ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS commission_invoices_org_member_read ON commission_invoices;
-CREATE POLICY commission_invoices_org_member_read ON commission_invoices
-  FOR SELECT TO authenticated
-  USING (can_access_store(store_id));
 
 -- ─── fee_definitions — global reference, public read ──────────────────
 -- Pazaryeri × ücret tipi başına sistem-düzeyi tanım. Tüm seller'lara aynı

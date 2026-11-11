@@ -162,8 +162,6 @@ describe('RLS — org-scoped tables', () => {
           orderId: orderA.id,
           quantity: 1,
           lineSaleGross: '10',
-          commissionRate: '10',
-          commissionGross: '1',
         },
       }),
       prisma.orderItem.create({
@@ -171,8 +169,6 @@ describe('RLS — org-scoped tables', () => {
           orderId: orderB.id,
           quantity: 1,
           lineSaleGross: '10',
-          commissionRate: '10',
-          commissionGross: '1',
         },
       }),
     ]);

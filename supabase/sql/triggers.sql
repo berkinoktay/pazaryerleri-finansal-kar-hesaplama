@@ -41,57 +41,13 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_new_user();
 
--- ─── reject_snapshot_update ────────────────────────────────────────────
--- Enforces write-once semantics on order_items snapshot columns. Once
--- these fields transition from NULL to a value at order arrival
--- (cost-snapshot.service.ts captures them in the same transaction as
--- the OrderItem INSERT), they are frozen forever — any subsequent
--- UPDATE that would change them is rejected with SQLSTATE 42501. This
--- is the load-bearing safety net for the spec's "past calculations
--- remain unaltered" rule (cost-profiles spec §5.7); app-layer guards
--- in the snapshot service can be bypassed by future code, the trigger
--- catches every path including raw SQL, migrations, and seeds.
---
--- Guarded columns (GROSS convention 2026-06-16):
---   - unit_cost_snapshot_gross    (GROSS maliyet snapshot)
---   - unit_cost_snapshot_vat_rate (effective denormalized rate)
---   - snapshot_captured_at        (capture timestamp)
---
--- Not SECURITY DEFINER: the trigger needs to run with the privileges
--- of the UPDATE caller, not as postgres — its job is to deny, not to
--- bypass authorization.
-CREATE OR REPLACE FUNCTION public.reject_snapshot_update()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  IF OLD.unit_cost_snapshot_gross IS NOT NULL AND
-     NEW.unit_cost_snapshot_gross IS DISTINCT FROM OLD.unit_cost_snapshot_gross THEN
-    RAISE EXCEPTION 'unit_cost_snapshot_gross is write-once'
-      USING ERRCODE = '42501',
-            HINT = 'Past order calculations are immutable by design.';
-  END IF;
-  IF OLD.unit_cost_snapshot_vat_rate IS NOT NULL AND
-     NEW.unit_cost_snapshot_vat_rate IS DISTINCT FROM OLD.unit_cost_snapshot_vat_rate THEN
-    RAISE EXCEPTION 'unit_cost_snapshot_vat_rate is write-once'
-      USING ERRCODE = '42501',
-            HINT = 'Past order calculations are immutable by design.';
-  END IF;
-  IF OLD.snapshot_captured_at IS NOT NULL AND
-     NEW.snapshot_captured_at IS DISTINCT FROM OLD.snapshot_captured_at THEN
-    RAISE EXCEPTION 'snapshot_captured_at is write-once'
-      USING ERRCODE = '42501',
-            HINT = 'Past order calculations are immutable by design.';
-  END IF;
-  RETURN NEW;
-END;
-$$;
-
+-- ─── order_items cost snapshot write-once (tombstone) ─────────────────
+-- The unit_cost_snapshot_* columns and their write-once trigger were dropped in
+-- phase 5 of the profit-engine rebuild (migration 20261111104912); the engine
+-- reads cost profile versions directly. These lines clear the trigger and its
+-- function on a database that still carries them.
 DROP TRIGGER IF EXISTS order_items_snapshot_immutable ON order_items;
-CREATE TRIGGER order_items_snapshot_immutable
-  BEFORE UPDATE ON order_items
-  FOR EACH ROW
-  EXECUTE FUNCTION public.reject_snapshot_update();
+DROP FUNCTION IF EXISTS public.reject_snapshot_update();
 
 -- ─── estimated_net_profit write-once GEVŞETİLDİ (2026-06-13) ───────────
 -- PR-9'daki write-once kilidi KALDIRILDI. Gerekçe (design 2026-06-13 §5):
@@ -99,10 +55,8 @@ CREATE TRIGGER order_items_snapshot_immutable
 -- rafine olur (T+0 ürün-desi → kargoya verilince cargoDeci). Bu yüzden
 -- estimated_net_profit ("tahmini kâr") GÜNCELLENEBİLİR olmalı.
 --
--- MALİYET-DONDURMA korunur: order_items snapshot immutability (yukarıdaki
--- reject_snapshot_update) maliyetin değişmezliğini garanti eder; estimate
--- recompute her zaman donmuş maliyeti kullanır. Dışlama artık kalıcı değil
--- (design 2026-10-29 §8.3): kâr-dışı siparişin kâr kolonları donuk tutulmaz.
+-- The estimated_net_profit column itself was dropped in phase 5 of the
+-- profit-engine rebuild (migration 20261111104912).
 DROP TRIGGER IF EXISTS orders_estimated_net_profit_write_once ON orders;
 DROP FUNCTION IF EXISTS public.reject_estimated_net_profit_update();
 

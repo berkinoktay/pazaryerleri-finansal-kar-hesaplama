@@ -178,8 +178,6 @@ describe('Orders — tenant isolation', () => {
         barcode,
         platformLineId: 9301n,
         quantity: 1,
-        commissionRate: '10.00',
-        commissionGross: '12.00',
       },
     });
     // A stored best-known statement keeps the detail on its read path rather than
@@ -202,8 +200,6 @@ describe('Orders — tenant isolation', () => {
         barcode,
         platformLineId: 9302n,
         quantity: 1,
-        commissionRate: '10.00',
-        commissionGross: '12.00',
       },
     });
     await createProfitStatement(orderB.id, orgB.id, storeB.id, { view: 'BEST_KNOWN' });

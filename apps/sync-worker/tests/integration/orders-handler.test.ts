@@ -314,7 +314,6 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     // null before this fix). Assert the computed relationship, not a hardcoded bool.
     expect(order.deliveredOnTime).toBe(DELIVERED_DATE_MS <= AGREED_DATE_MS);
     expect(order.fastDelivery).toBe(false);
-    expect(order.reconciliationStatus).toBe('NOT_SETTLED');
     // Phase 3B: the order write enqueues a profit recompute; nothing is estimated inline.
     const queued = await prisma.profitRecomputeRequest.findUnique({
       where: { orderId: order.id },

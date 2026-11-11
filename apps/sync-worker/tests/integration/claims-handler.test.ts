@@ -124,13 +124,10 @@ async function buildScenario(): Promise<BuiltCtx> {
       orderId: order.id,
       organizationId: org.id,
       quantity: 3,
-      // GROSS CONVENTION (2026-06-16): lineListGross/lineSaleGross; commissionGross replaces
-      // grossCommissionAmountNet (12.00 gross = 10.00 net × 1.20). saleVatRate replaces unitVatRate.
+      // GROSS CONVENTION (2026-06-16): lineListGross/lineSaleGross; saleVatRate replaces unitVatRate.
       lineListGross: new Decimal('120.00'),
       lineSaleGross: new Decimal('120.00'),
       saleVatRate: new Decimal('20.00'),
-      commissionRate: new Decimal('10.00'),
-      commissionGross: new Decimal('12.00'),
       platformLineId: PLATFORM_LINE_ID,
     },
   });

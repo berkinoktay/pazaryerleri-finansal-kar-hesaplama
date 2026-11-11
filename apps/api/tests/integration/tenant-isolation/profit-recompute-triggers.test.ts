@@ -51,8 +51,6 @@ async function orderCarryingFixtureBarcode(orgId: string, storeId: string): Prom
       organizationId: orgId,
       quantity: 1,
       lineSaleGross: '0.00',
-      commissionRate: '0.00',
-      commissionGross: '0.00',
       barcode: FIXTURE_BARCODE,
     },
   });

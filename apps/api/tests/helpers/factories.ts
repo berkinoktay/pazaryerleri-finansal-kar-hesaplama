@@ -6,8 +6,6 @@ import type {
   FeeCalculationKind,
   FinanceRecordFamily,
   MemberRole,
-  OrderFeeDirection,
-  OrderFeeSource,
   OrderFeeType,
   OrderStatus,
   Platform,
@@ -31,13 +29,7 @@ import { prisma } from './db';
 // '../helpers/factories'` without reaching into @pazarsync/db directly —
 // the helpers module is the canonical seam for tests, and this avoids
 // every test file growing a second package import.
-export type {
-  FeeCalculationKind,
-  MemberRole,
-  OrderFeeDirection,
-  OrderFeeSource,
-  OrderFeeType,
-} from '@pazarsync/db';
+export type { FeeCalculationKind, MemberRole, OrderFeeType } from '@pazarsync/db';
 
 export interface CreateUserProfileOverrides {
   id?: string;
@@ -143,10 +135,6 @@ export interface CreateOrderOverrides {
   platformOrderNumber?: string | null;
   saleGross?: string | null;
   saleVat?: string | null;
-  estimatedNetProfit?: string | null;
-  // Persist edilen marj (estimatedNetProfit / saleGross × 100). Live-performance +
-  // order detayı bu kolondan okur (render-time hesap yok). null = henüz hesaplanmadı.
-  estimatedSaleMarginPct?: string | null;
   // Promosyon adları + brüt tutarları (spec ekleme #3). Order upsert'in yazdığı
   // JSON; liste/detay/canlı-performans bu kolondan servis eder. null = indirimsiz.
   promotionDisplays?: { displayName: string; amountGross: string }[] | null;
@@ -170,8 +158,6 @@ export async function createOrder(
       status: overrides.status ?? 'DELIVERED',
       saleGross: overrides.saleGross ?? null,
       saleVat: overrides.saleVat ?? null,
-      estimatedNetProfit: overrides.estimatedNetProfit ?? null,
-      estimatedSaleMarginPct: overrides.estimatedSaleMarginPct ?? null,
       // Omit (undefined) → column stays SQL NULL, matching the order upsert's
       // no-promotion write. A provided array is stored verbatim as JSON.
       promotionDisplays: overrides.promotionDisplays ?? undefined,
@@ -182,20 +168,15 @@ export async function createOrder(
 
 export interface CreateOrderItemOverrides {
   quantity?: number;
-  // GROSS CONVENTION (2026-06-16): lineSaleGross replaces unitPrice; commissionGross
-  // replaces commissionAmount. unitCostSnapshotGross (KDV-dahil) replaces unitCostSnapshotNet.
+  // GROSS CONVENTION (2026-06-16): lineSaleGross replaces unitPrice.
   lineSaleGross?: string;
-  commissionRate?: string;
-  commissionGross?: string;
-  // GROSS cost snapshot — drives the costed-cost aggregate. null = cost-missing line.
-  unitCostSnapshotGross?: string | null;
   productVariantId?: string | null;
 }
 
 /**
- * One order line. `quantity` feeds "units sold"; `unitCostSnapshotGross` (KDV-dahil)
- * feeds the costed-cost denominator of the Kâr/Maliyet ratio. Money columns default
- * to zero — tests that only exercise aggregates don't depend on them.
+ * One order line. `quantity` feeds "units sold". Money columns default to zero;
+ * commission and cost figures live on profit lines (`createProfitLine`), not on
+ * the item.
  */
 export async function createOrderItem(
   orderId: string,
@@ -208,9 +189,6 @@ export async function createOrderItem(
       organizationId,
       quantity: overrides.quantity ?? 1,
       lineSaleGross: overrides.lineSaleGross ?? '0.00',
-      commissionRate: overrides.commissionRate ?? '0.00',
-      commissionGross: overrides.commissionGross ?? '0.00',
-      unitCostSnapshotGross: overrides.unitCostSnapshotGross ?? null,
       productVariantId: overrides.productVariantId ?? null,
     },
   });
@@ -245,40 +223,6 @@ export async function createFeeDefinition(
       defaultVatRate: overrides.defaultVatRate ?? '20.00',
       effectiveFrom: overrides.effectiveFrom ?? new Date('2026-01-01'),
       isRequired: overrides.isRequired ?? false,
-    },
-  });
-}
-
-export async function createOrderFee(
-  orderId: string,
-  organizationId: string,
-  overrides: {
-    feeType?: OrderFeeType;
-    source?: OrderFeeSource;
-    direction?: OrderFeeDirection;
-    // GROSS CONVENTION (2026-06-16): amountGross (KDV-dahil) + vatRate. Net = gross × 100/(100+rate).
-    amountGross?: string;
-    vatRate?: string;
-    feeDefinitionId?: string | null;
-    // SETTLEMENT rows carry the Trendyol row id (#297 idempotency column).
-    trendyolTransactionId?: string | null;
-    // Omit to take the DB default (now()); set to place a fee outside a
-    // capturedAt-windowed aggregate (e.g. the claims summary period).
-    capturedAt?: Date;
-  } = {},
-) {
-  return prisma.orderFee.create({
-    data: {
-      orderId,
-      organizationId,
-      feeDefinitionId: overrides.feeDefinitionId ?? null,
-      feeType: overrides.feeType ?? 'PLATFORM_SERVICE',
-      source: overrides.source ?? 'ESTIMATE',
-      direction: overrides.direction ?? 'DEBIT',
-      amountGross: overrides.amountGross ?? '13.19',
-      vatRate: overrides.vatRate ?? '20.00',
-      trendyolTransactionId: overrides.trendyolTransactionId ?? null,
-      ...(overrides.capturedAt !== undefined ? { capturedAt: overrides.capturedAt } : {}),
     },
   });
 }
@@ -334,58 +278,6 @@ export async function createOrderClaimItem(
   });
 }
 
-export async function createOrgPeriodFee(
-  organizationId: string,
-  storeId: string,
-  overrides: {
-    paymentOrderId?: bigint;
-    paymentDate?: Date;
-    feeType?: OrderFeeType;
-    source?: OrderFeeSource;
-    // GROSS CONVENTION (2026-06-16, Bölüm E Task 20): amountGross + vatRate.
-    // Default: 60.00 gross (50.00 net × 1.20) at vatRate=20.
-    amountGross?: string;
-    vatRate?: string;
-  } = {},
-) {
-  return prisma.orgPeriodFee.create({
-    data: {
-      organizationId,
-      storeId,
-      paymentOrderId: overrides.paymentOrderId ?? BigInt(1000000),
-      paymentDate: overrides.paymentDate ?? new Date(),
-      feeType: overrides.feeType ?? 'ADVERTISING',
-      source: overrides.source ?? 'SETTLEMENT',
-      amountGross: overrides.amountGross ?? '60.00',
-      vatRate: overrides.vatRate ?? '20.00',
-    },
-  });
-}
-
-export async function createCommissionInvoice(
-  organizationId: string,
-  storeId: string,
-  overrides: {
-    trendyolSerialNumber?: string;
-    periodStart?: Date;
-    periodEnd?: Date;
-    totalNet?: string;
-    totalVat?: string;
-  } = {},
-) {
-  return prisma.commissionInvoice.create({
-    data: {
-      organizationId,
-      storeId,
-      trendyolSerialNumber: overrides.trendyolSerialNumber ?? `DCF${randomUUID().slice(0, 13)}`,
-      periodStart: overrides.periodStart ?? new Date('2026-05-01'),
-      periodEnd: overrides.periodEnd ?? new Date('2026-05-07'),
-      totalNet: overrides.totalNet ?? '1000.00',
-      totalVat: overrides.totalVat ?? '200.00',
-    },
-  });
-}
-
 // ─── Trendyol webhook (PR-C1) ──────────────────────────────────────────
 
 export async function createWebhookEvent(
@@ -425,7 +317,7 @@ export async function createCostProfile(
 ) {
   // GROSS konvansiyon (2026-06-16): amountGross is GROSS (KDV-dahil) + vatRate.
   // A cost snapshot captured from this profile is fully specified (gross + rate),
-  // which is what the estimate path needs to compute a non-null estimatedNetProfit.
+  // which is what the profit engine needs to compute a non-null net profit.
   //
   // storeId is required on the model (cost profiles are store-scoped). Tests that
   // attach a profile to a variant MUST pass the variant's storeId so both share a

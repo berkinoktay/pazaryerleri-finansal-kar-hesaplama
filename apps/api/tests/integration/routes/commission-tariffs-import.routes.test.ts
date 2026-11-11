@@ -240,8 +240,6 @@ describe('POST .../commission-tariffs/import — profit recompute queueing', () 
         organizationId: ctx.orgId,
         quantity: 1,
         lineSaleGross: '0.00',
-        commissionRate: '0.00',
-        commissionGross: '0.00',
         barcode: MATCHED_BARCODE,
       },
     });
@@ -254,8 +252,6 @@ describe('POST .../commission-tariffs/import — profit recompute queueing', () 
         organizationId: ctx.orgId,
         quantity: 1,
         lineSaleGross: '0.00',
-        commissionRate: '0.00',
-        commissionGross: '0.00',
         barcode: 'NOT-IN-FIXTURE-ZZZ',
       },
     });

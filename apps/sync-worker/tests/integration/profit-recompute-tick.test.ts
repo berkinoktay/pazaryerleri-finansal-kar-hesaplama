@@ -126,16 +126,11 @@ async function buildCostedOrder(tag: string): Promise<CostedOrderCtx> {
       barcode: `bar-${tag}`,
       platformLineId: BigInt(Math.floor(Math.random() * 1_000_000_000)),
       quantity: 1,
-      commissionRate: new Decimal('10.00'),
       orderCommissionRatePct: new Decimal('10.00'),
       lineListGross: new Decimal('1100.00'),
       lineSaleGross: new Decimal('1100.00'),
       lineSellerDiscountGross: new Decimal('0.00'),
       saleVatRate: new Decimal('10.00'),
-      commissionGross: new Decimal('110.00'),
-      refundedCommissionGross: new Decimal('0.00'),
-      commissionVatRate: new Decimal('20.00'),
-      estimatedCommissionGross: new Decimal('110.00'),
     },
   });
 

@@ -87,10 +87,7 @@ export async function seedCalculableTrendyolOrder(orgId: string, storeId: string
       lineSaleGross: '240.00',
       lineSellerDiscountGross: '0.00',
       saleVatRate: '20.00',
-      commissionRate: '19.00',
       orderCommissionRatePct: '19.00',
-      commissionGross: '0',
-      commissionVatRate: '20.00',
     },
   });
   return order.id;

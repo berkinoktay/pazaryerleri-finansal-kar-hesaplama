@@ -145,16 +145,11 @@ async function buildScenario(): Promise<ScenarioCtx> {
       barcode: ITEM_BARCODE,
       platformLineId: PLATFORM_LINE_ID,
       quantity: 1,
-      commissionRate: new Decimal('10.00'),
       orderCommissionRatePct: new Decimal('10.00'),
       lineListGross: new Decimal('1100.00'),
       lineSaleGross: new Decimal('1100.00'),
       lineSellerDiscountGross: new Decimal('0.00'),
       saleVatRate: new Decimal('10.00'),
-      commissionGross: new Decimal('110.00'),
-      refundedCommissionGross: new Decimal('0.00'),
-      commissionVatRate: new Decimal('20.00'),
-      estimatedCommissionGross: new Decimal('110.00'),
     },
   });
 

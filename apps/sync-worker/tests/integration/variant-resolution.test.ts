@@ -100,15 +100,10 @@ async function buildUnresolvedOrder(
         barcode,
         platformLineId: BigInt(Math.floor(Math.random() * 1_000_000)),
         quantity: 1,
-        commissionRate: new Decimal('10.00'),
         lineListGross: new Decimal('120.00'),
         lineSaleGross: new Decimal('120.00'),
         lineSellerDiscountGross: new Decimal('0.00'),
         saleVatRate: new Decimal('20.00'),
-        commissionGross: new Decimal('12.00'),
-        refundedCommissionGross: new Decimal('0.00'),
-        commissionVatRate: new Decimal('20.00'),
-        estimatedCommissionGross: new Decimal('12.00'),
       },
     });
     itemIds.push(item.id);

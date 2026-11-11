@@ -196,14 +196,13 @@ describe('loadTrendyolParcel', () => {
     expect(shipping.amount.vat.toFixed(2)).toBe('16.39');
   });
 
-  it('reads the order commission rate from the raw column, not the fallback-filled one', async () => {
+  it('falls past the ORDER source when the raw order commission rate is null', async () => {
     const parcel = await seedMelontikParcel();
-    // A category fallback would have left commissionRate at 21 while the order line
-    // itself carried no rate: orderCommissionRatePct stays null and must win over the
-    // legacy column, so the commission chain never resolves to the ORDER source.
+    // The order line carried no rate of its own: orderCommissionRatePct stays null,
+    // so the commission chain never resolves to the ORDER source.
     await prisma.orderItem.updateMany({
       where: { orderId: parcel.orderId },
-      data: { commissionRate: '21.00', orderCommissionRatePct: null },
+      data: { orderCommissionRatePct: null },
     });
     // Give both variants a synced product rate so the chain still has a non-ORDER
     // source to fall to (resolveTrendyolCommissionRate: PRODUCT_SYNC).
@@ -875,9 +874,6 @@ describe('loadTrendyolParcel', () => {
         lineSaleGross: '100.00',
         lineSellerDiscountGross: '0',
         saleVatRate: '10',
-        commissionRate: '19',
-        commissionGross: '0',
-        commissionVatRate: '20',
       },
     });
 
@@ -1045,9 +1041,6 @@ describe('loadTrendyolParcel', () => {
         lineSaleGross: '100.00',
         lineSellerDiscountGross: '0',
         saleVatRate: '10',
-        commissionRate: '19',
-        commissionGross: '0',
-        commissionVatRate: '20',
       },
     });
 

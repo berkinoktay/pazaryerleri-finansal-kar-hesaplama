@@ -40,7 +40,6 @@ describe('Tenant isolation: live-performance endpoints', () => {
       await createOrder(orgB.id, storeB.id, {
         orderDate: new Date(),
         saleGross: '1000.00',
-        estimatedNetProfit: '300.00',
       });
 
       const res = await app.request(

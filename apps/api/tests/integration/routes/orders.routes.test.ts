@@ -998,8 +998,6 @@ describe('Order routes', () => {
           barcode: '8680000000001',
           platformLineId: 9001n,
           quantity: 1,
-          commissionRate: '10.00',
-          commissionGross: '12.00',
         },
       });
 
@@ -1051,8 +1049,6 @@ describe('Order routes', () => {
           barcode: 'GAP-CONFIRMED',
           platformLineId: 9101n,
           quantity: 1,
-          commissionRate: '10.00',
-          commissionGross: '12.00',
         },
       });
       // Unmatched line B: barcode has NO miss row → vendorMissing=false.
@@ -1064,8 +1060,6 @@ describe('Order routes', () => {
           barcode: 'AWAITING-MATCH',
           platformLineId: 9102n,
           quantity: 1,
-          commissionRate: '10.00',
-          commissionGross: '12.00',
         },
       });
       await prisma.catalogBarcodeMiss.create({
@@ -1138,8 +1132,6 @@ describe('Order routes', () => {
           barcode: 'MATCHED-BC',
           platformLineId: 9201n,
           quantity: 1,
-          commissionRate: '10.00',
-          commissionGross: '12.00',
         },
       });
       await prisma.catalogBarcodeMiss.create({
@@ -1352,8 +1344,6 @@ describe('Order routes', () => {
           barcode: 'BC-HB-1',
           platformLineId: 7901n,
           quantity: 1,
-          commissionRate: '10.00',
-          commissionGross: '12.00',
         },
       });
 
@@ -1402,8 +1392,6 @@ describe('Order routes', () => {
           barcode: 'BC-ITEM-1',
           platformLineId: 7001n,
           quantity: 2,
-          commissionRate: '10.00',
-          commissionGross: '0',
         },
       });
       const item2 = await prisma.orderItem.create({
@@ -1414,8 +1402,6 @@ describe('Order routes', () => {
           barcode: 'BC-ITEM-2',
           platformLineId: 7002n,
           quantity: 1,
-          commissionRate: '15.00',
-          commissionGross: '0',
         },
       });
 
@@ -1512,8 +1498,6 @@ describe('Order routes', () => {
           barcode: 'BC-NOFEES-1',
           platformLineId: 7301n,
           quantity: 1,
-          commissionRate: '10.00',
-          commissionGross: '12.00',
         },
       });
 
@@ -1568,8 +1552,6 @@ describe('Order routes', () => {
           barcode: 'BC-CORRUPT-1',
           platformLineId: 7501n,
           quantity: 1,
-          commissionRate: '10.00',
-          commissionGross: '12.00',
         },
       });
       await createProfitStatement(order.id, org.id, store.id, {
@@ -1687,8 +1669,6 @@ describe('Order routes', () => {
           barcode: 'BC-EXCLUDED-1',
           platformLineId: 7401n,
           quantity: 2,
-          commissionRate: '10.00',
-          commissionGross: '0',
         },
       });
       // A cost line survives the exclusion, so the item's unit cost is still shown.
@@ -1826,9 +1806,6 @@ describe('Order routes', () => {
           barcode: 'BC-REFUND-1',
           platformLineId: 7501n,
           quantity: 1,
-          commissionRate: '20.00',
-          commissionGross: '28.00',
-          refundedCommissionGross: '8.40',
         },
       });
       const keptItem = await prisma.orderItem.create({
@@ -1839,9 +1816,6 @@ describe('Order routes', () => {
           barcode: 'BC-REFUND-2',
           platformLineId: 7502n,
           quantity: 1,
-          commissionRate: '20.00',
-          commissionGross: '28.00',
-          refundedCommissionGross: '8.40',
         },
       });
       for (const item of [returnedItem, keptItem]) {
@@ -1903,8 +1877,6 @@ describe('Order routes', () => {
           barcode: 'BC-CANCEL-1',
           platformLineId: 7601n,
           quantity: 1,
-          commissionRate: '19.50',
-          commissionGross: '28.00',
         },
       });
       await createProfitStatement(order.id, org.id, store.id, {
