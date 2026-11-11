@@ -30,7 +30,7 @@ type PromotionDisplay = NonNullable<
 export interface OrderProfitSummaryProps {
   breakdown: ProfitBreakdownData | null;
   promotionDisplays?: PromotionDisplay[] | null;
-  micro?: boolean;
+  isExportSale?: boolean;
 }
 
 /**
@@ -45,7 +45,7 @@ export interface OrderProfitSummaryProps {
 export function OrderProfitSummary({
   breakdown,
   promotionDisplays,
-  micro = false,
+  isExportSale = false,
 }: OrderProfitSummaryProps): React.ReactElement {
   const t = useTranslations('profitBreakdown');
   const formatter = useFormatter();
@@ -65,7 +65,7 @@ export function OrderProfitSummary({
       <CardHeader>
         <div className="gap-xs flex flex-wrap items-center">
           <CardTitle>{t('title')}</CardTitle>
-          {micro ? (
+          {isExportSale ? (
             <Badge tone="neutral" size="sm">
               {t('microExport')}
             </Badge>
@@ -114,7 +114,7 @@ export function OrderProfitSummary({
                 <AllocationLine label={t('incomeSaleVat')} muted>
                   <Currency value={breakdown.saleVat} />
                 </AllocationLine>
-                {micro ? (
+                {isExportSale ? (
                   <p className="text-muted-foreground text-2xs">{t('exportVatExemption')}</p>
                 ) : null}
               </dl>

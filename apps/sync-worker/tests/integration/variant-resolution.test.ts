@@ -145,7 +145,7 @@ function buildMappedOrder(args: {
     actualShipDate: null,
     fastDelivery: false,
     fastDeliveryType: null,
-    micro: false,
+    isExportSale: false,
     estimatedDeliveryStartDate: null,
     estimatedDeliveryEndDate: null,
     cargoProviderName: null,

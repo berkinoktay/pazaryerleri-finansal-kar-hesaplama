@@ -77,7 +77,7 @@ function buildMapped(over: {
     actualShipDate: null,
     fastDelivery: false,
     fastDeliveryType: null,
-    micro: false,
+    isExportSale: false,
     estimatedDeliveryStartDate: null,
     estimatedDeliveryEndDate: null,
     cargoProviderName: null,

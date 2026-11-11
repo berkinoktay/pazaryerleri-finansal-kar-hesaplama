@@ -26,7 +26,7 @@ interface ClaimListItemResult {
   id: string;
   orderId: string;
   platformOrderNumber: string | null;
-  trendyolClaimId: string;
+  marketplaceClaimId: string;
   claimDate: string;
   resolved: boolean;
   derivedStatus: DerivedClaimStatus;
@@ -82,7 +82,7 @@ function buildClaimListWhere(
 
   if (filters.q !== undefined) {
     where.OR = [
-      { trendyolClaimId: { contains: filters.q, mode: 'insensitive' } },
+      { marketplaceClaimId: { contains: filters.q, mode: 'insensitive' } },
       { order: { platformOrderNumber: { contains: filters.q, mode: 'insensitive' } } },
     ];
   }
@@ -142,7 +142,7 @@ export async function listClaims(
       id: row.id,
       orderId: row.orderId,
       platformOrderNumber: row.order.platformOrderNumber,
-      trendyolClaimId: row.trendyolClaimId,
+      marketplaceClaimId: row.marketplaceClaimId,
       claimDate: row.claimDate.toISOString(),
       resolved: row.resolved,
       derivedStatus: deriveClaimStatus(

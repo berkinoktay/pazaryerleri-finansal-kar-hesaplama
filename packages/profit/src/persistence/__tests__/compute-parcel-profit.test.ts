@@ -236,7 +236,7 @@ async function seedHepsiburadaOrder(): Promise<{ organizationId: string; orderId
       platformOrderId: `hb-${randomUUID().slice(0, 8)}`,
       orderDate: new Date('2026-10-28T09:00:00Z'),
       status: 'DELIVERED',
-      micro: false,
+      isExportSale: false,
       fastDelivery: false,
       fastDeliveryType: null,
       usesSellerCargoAgreement: false,

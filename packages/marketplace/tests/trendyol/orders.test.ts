@@ -229,6 +229,11 @@ describe('mapTrendyolShipmentPackage — fast-delivery type + estimated window c
     expect(mapped.fastDeliveryType).toBeNull();
   });
 
+  it('maps the raw micro flag to the marketplace-neutral isExportSale', () => {
+    expect(mapTrendyolShipmentPackage(buildPackage({ micro: true })).isExportSale).toBe(true);
+    expect(mapTrendyolShipmentPackage(buildPackage({ micro: false })).isExportSale).toBe(false);
+  });
+
   it('captures estimatedDelivery window as raw-epoch Dates (GMT passthrough)', () => {
     const start = Date.UTC(2026, 5, 12, 15, 57, 28);
     const end = Date.UTC(2026, 5, 13, 11, 38, 56);

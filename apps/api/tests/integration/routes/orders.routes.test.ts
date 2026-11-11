@@ -294,6 +294,40 @@ describe('Order routes', () => {
       expect(byId.get(noPromo.id)).toBeNull();
     });
 
+    it('flags an export order with isExportSale on the list row and the detail', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      const exportOrder = await createOrder(org.id, store.id, {
+        orderDate: new Date('2026-04-02T10:00:00Z'),
+        isExportSale: true,
+      });
+      const domestic = await createOrder(org.id, store.id, {
+        orderDate: new Date('2026-04-01T10:00:00Z'),
+      });
+
+      const list = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
+        headers: { Authorization: bearer(user.accessToken) },
+      });
+      expect(list.status).toBe(200);
+      const listBody = await list.json();
+      expect(listBody.data).toEqual([
+        expect.objectContaining({ id: exportOrder.id, isExportSale: true }),
+        expect.objectContaining({ id: domestic.id, isExportSale: false }),
+      ]);
+
+      const detail = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/${exportOrder.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(detail.status).toBe(200);
+      expect(await detail.json()).toEqual(
+        expect.objectContaining({ id: exportOrder.id, isExportSale: true }),
+      );
+    });
+
     it('sorts by saleMarginPct ascending and descending via sort=marginPct', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
@@ -1009,7 +1043,7 @@ describe('Order routes', () => {
       const body = (await res.json()) as {
         id: string;
         store: { id: string; platform: string };
-        claims: { trendyolClaimId: string; items: { reasonCode: string }[] }[];
+        claims: { marketplaceClaimId: string; items: { reasonCode: string }[] }[];
         saleGross: string | null;
         items: { barcode: string | null; variant: unknown }[];
         profitExcludedAt: string | null;

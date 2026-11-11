@@ -201,7 +201,7 @@ export function OrderDetailClient({
       <OrderProfitSummary
         breakdown={order.profitBreakdown}
         promotionDisplays={order.promotionDisplays}
-        micro={order.micro}
+        isExportSale={order.isExportSale}
       />
     </div>
   );

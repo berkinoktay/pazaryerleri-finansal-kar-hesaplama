@@ -163,7 +163,7 @@ export async function processClaimsChunk(
       syncLog.error('claims.upsert.failed', {
         syncLogId: log.id,
         storeId: store.id,
-        trendyolClaimId: raw.id,
+        marketplaceClaimId: raw.id,
         errorMessage: err instanceof Error ? err.message : String(err),
       });
     }
@@ -232,7 +232,7 @@ async function upsertClaim(
   if (order === null) {
     syncLog.warn('claims.order.unmatched', {
       storeId,
-      trendyolClaimId: claim.trendyolClaimId,
+      marketplaceClaimId: claim.marketplaceClaimId,
       orderNumber: claim.orderNumber,
       orderOutboundPackageId: claim.orderOutboundPackageId,
     });
@@ -243,14 +243,14 @@ async function upsertClaim(
   // DIFFERENT order row of the same store (e.g. an early fallback match
   // before the real package synced, or Trendyol enriching a formerly
   // id-less claim), move the existing row instead of creating a
-  // duplicate — the unique key is (orderId, trendyolClaimId), so a
+  // duplicate; the unique key is (orderId, marketplaceClaimId), so a
   // plain upsert under the new order would silently double-count the
   // return. Stale item links are nulled; the item pass below re-resolves
   // them against the new order's lines. storeId is the denormalized
   // column (#298) — no parent-walk.
   const existing = await tx.orderClaim.findFirst({
     where: {
-      trendyolClaimId: claim.trendyolClaimId,
+      marketplaceClaimId: claim.marketplaceClaimId,
       orderId: { not: order.id },
       storeId,
     },
@@ -260,7 +260,7 @@ async function upsertClaim(
   if (existing !== null) {
     syncLog.warn('claims.order.reanchored', {
       storeId,
-      trendyolClaimId: claim.trendyolClaimId,
+      marketplaceClaimId: claim.marketplaceClaimId,
       fromOrderId: existing.orderId,
       toOrderId: order.id,
     });
@@ -287,7 +287,10 @@ async function upsertClaim(
   // onto this order). Drives both the write diff below and the recompute decision.
   const stored = await tx.orderClaim.findUnique({
     where: {
-      orderId_trendyolClaimId: { orderId: order.id, trendyolClaimId: claim.trendyolClaimId },
+      orderId_marketplaceClaimId: {
+        orderId: order.id,
+        marketplaceClaimId: claim.marketplaceClaimId,
+      },
       organizationId: order.organizationId,
       storeId,
     },
@@ -301,7 +304,7 @@ async function upsertClaim(
       externalRef: true,
       items: {
         select: {
-          trendyolClaimItemId: true,
+          marketplaceClaimItemId: true,
           status: true,
           orderItemId: true,
           acceptedBySeller: true,
@@ -330,7 +333,7 @@ async function upsertClaim(
       });
       orderItemId = orderItem?.id ?? null;
     }
-    resolvedLinks.set(item.trendyolClaimItemId, orderItemId);
+    resolvedLinks.set(item.marketplaceClaimItemId, orderItemId);
   }
 
   // Minimal NON-PII audit ref. Never the raw payload (it carries customer
@@ -357,7 +360,7 @@ async function upsertClaim(
         organizationId: order.organizationId,
         storeId,
         orderId: order.id,
-        trendyolClaimId: claim.trendyolClaimId,
+        marketplaceClaimId: claim.marketplaceClaimId,
         claimDate: claim.claimDate,
         cargoProviderName: claim.cargoProviderName,
         cargoTrackingNumber:
@@ -401,16 +404,16 @@ async function upsertClaim(
   //    live state, refreshed by every scan that changes it (CRUD's U —
   //    claims are not snapshots).
   const storedItems = new Map(
-    (stored?.items ?? []).map((item) => [item.trendyolClaimItemId, item]),
+    (stored?.items ?? []).map((item) => [item.marketplaceClaimItemId, item]),
   );
   for (const item of claim.items) {
-    const orderItemId = resolvedLinks.get(item.trendyolClaimItemId) ?? null;
-    const storedItem = storedItems.get(item.trendyolClaimItemId);
+    const orderItemId = resolvedLinks.get(item.marketplaceClaimItemId) ?? null;
+    const storedItem = storedItems.get(item.marketplaceClaimItemId);
 
     if (storedItem === undefined) {
       const row = {
         orderItemId,
-        trendyolClaimItemId: item.trendyolClaimItemId,
+        marketplaceClaimItemId: item.marketplaceClaimItemId,
         reasonCode: item.reasonCode,
         reasonName: item.reasonName,
         status: item.status,
@@ -421,7 +424,7 @@ async function upsertClaim(
       await tx.orderClaimItem.create({ data: { claimId, ...row } });
       wrote = true;
       // A payload repeating a unit id updates that row instead of hitting the unique key.
-      storedItems.set(item.trendyolClaimItemId, row);
+      storedItems.set(item.marketplaceClaimItemId, row);
       continue;
     }
 
@@ -443,14 +446,17 @@ async function upsertClaim(
     if (Object.keys(changedItem).length > 0) {
       await tx.orderClaimItem.update({
         where: {
-          claimId_trendyolClaimItemId: { claimId, trendyolClaimItemId: item.trendyolClaimItemId },
+          claimId_marketplaceClaimItemId: {
+            claimId,
+            marketplaceClaimItemId: item.marketplaceClaimItemId,
+          },
         },
         data: changedItem,
       });
       wrote = true;
       // Keep the map current so a payload repeating a unit id compares against what was
       // just written (last one wins, as on create).
-      storedItems.set(item.trendyolClaimItemId, { ...storedItem, ...changedItem });
+      storedItems.set(item.marketplaceClaimItemId, { ...storedItem, ...changedItem });
     }
   }
 

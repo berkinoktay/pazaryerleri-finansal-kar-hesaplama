@@ -544,7 +544,8 @@ export interface MappedOrder {
    * "SameDayShipping" / "TodayDelivery"; fast değil/boş → null). Kriter hangi
    * tip kuralını uygulayacağını buradan bilir (2026-06-14 hibrit tasarım). */
   fastDeliveryType: string | null;
-  micro: boolean;
+  /** Marketplace-neutral export sale flag; mapped from the package's `micro` boolean. */
+  isExportSale: boolean;
   /** Trendyol tahmini teslim penceresi (PROD'da dolu; stage'de 0 → null). */
   estimatedDeliveryStartDate: Date | null;
   estimatedDeliveryEndDate: Date | null;

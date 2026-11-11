@@ -12,7 +12,7 @@ export const listClaimsQuerySchema = TablePaginationQuerySchema.extend({
   from: z.coerce.date().optional().openapi({ description: 'claimDate >= (ISO date).' }),
   to: z.coerce.date().optional().openapi({ description: 'claimDate <= (ISO date).' }),
   q: z.string().trim().min(1).max(120).optional().openapi({
-    description: 'Substring search over platformOrderNumber and trendyolClaimId.',
+    description: "Substring search over platformOrderNumber and the marketplace's claim id.",
   }),
 }).openapi('ListClaimsQuery');
 export type ListClaimsQuery = z.infer<typeof listClaimsQuerySchema>;
@@ -55,7 +55,7 @@ export const ClaimListItemSchema = z
     id: z.string().uuid(),
     orderId: z.string().uuid(),
     platformOrderNumber: z.string().nullable(),
-    trendyolClaimId: z.string(),
+    marketplaceClaimId: z.string().openapi({ description: "The marketplace's claim id." }),
     claimDate: z.string().datetime(),
     resolved: z.boolean(),
     derivedStatus: DerivedClaimStatusSchema,

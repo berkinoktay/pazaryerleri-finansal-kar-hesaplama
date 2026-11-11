@@ -75,7 +75,7 @@ describe('OrderProfitSummary', () => {
           platformServiceGross: '0.00',
           internationalServiceGross: '60.00',
         })}
-        micro
+        isExportSale
       />,
     );
     expect(screen.getByText(pb.exportVatExemption)).toBeInTheDocument();

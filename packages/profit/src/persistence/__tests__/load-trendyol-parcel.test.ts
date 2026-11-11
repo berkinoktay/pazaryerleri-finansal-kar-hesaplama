@@ -350,7 +350,7 @@ describe('loadTrendyolParcel', () => {
         organizationId: parcel.organizationId,
         storeId: parcel.storeId,
         orderId: parcel.orderId,
-        trendyolClaimId: `claim-${randomUUID().slice(0, 8)}`,
+        marketplaceClaimId: `claim-${randomUUID().slice(0, 8)}`,
         claimDate: new Date(),
         resolved: false,
       },
@@ -362,7 +362,7 @@ describe('loadTrendyolParcel', () => {
         data: {
           claimId: claim.id,
           orderItemId: parcel.itemA,
-          trendyolClaimItemId: `acc-${randomUUID()}`,
+          marketplaceClaimItemId: `acc-${randomUUID()}`,
           reasonCode: 'DAMAGEDITEM',
           reasonName: 'reason',
           status: 'Accepted',
@@ -375,7 +375,7 @@ describe('loadTrendyolParcel', () => {
       data: {
         claimId: claim.id,
         orderItemId: parcel.itemB,
-        trendyolClaimItemId: `rej-${randomUUID()}`,
+        marketplaceClaimItemId: `rej-${randomUUID()}`,
         reasonCode: 'DAMAGEDITEM',
         reasonName: 'reason',
         status: 'Rejected',
@@ -656,7 +656,7 @@ describe('loadTrendyolParcel', () => {
   });
 
   it('resolves the micro-export fees and overseas return tiers for an export order', async () => {
-    const parcel = await seedMelontikParcel({ micro: true });
+    const parcel = await seedMelontikParcel({ isExportSale: true });
     // The international-service fee definition the export path resolves.
     await prisma.feeDefinition.create({
       data: {
@@ -700,7 +700,7 @@ describe('loadTrendyolParcel', () => {
         organizationId: parcel.organizationId,
         storeId: parcel.storeId,
         orderId: parcel.orderId,
-        trendyolClaimId: `claim-${randomUUID().slice(0, 8)}`,
+        marketplaceClaimId: `claim-${randomUUID().slice(0, 8)}`,
         claimDate: new Date(),
         resolved: false,
         orderShipmentPackageId: returnPackageId,

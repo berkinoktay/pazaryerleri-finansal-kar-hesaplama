@@ -20,7 +20,7 @@ export interface StoredClaimForChange {
   readonly orderShipmentPackageId: string | null;
   readonly cargoTrackingNumber: bigint | null;
   readonly items: readonly {
-    readonly trendyolClaimItemId: string;
+    readonly marketplaceClaimItemId: string;
     readonly status: string;
     readonly orderItemId: string | null;
   }[];
@@ -57,12 +57,12 @@ export function claimProfitInputsChanged(
     return true;
   }
 
-  const storedItems = new Map(stored.items.map((item) => [item.trendyolClaimItemId, item]));
+  const storedItems = new Map(stored.items.map((item) => [item.marketplaceClaimItemId, item]));
   for (const item of incoming.items) {
-    const storedItem = storedItems.get(item.trendyolClaimItemId);
+    const storedItem = storedItems.get(item.marketplaceClaimItemId);
     if (storedItem === undefined) return true;
     if (storedItem.status !== item.status) return true;
-    const link = resolvedLinks.get(item.trendyolClaimItemId) ?? null;
+    const link = resolvedLinks.get(item.marketplaceClaimItemId) ?? null;
     if (link !== null && link !== storedItem.orderItemId) return true;
   }
 

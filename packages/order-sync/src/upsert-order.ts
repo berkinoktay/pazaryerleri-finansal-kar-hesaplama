@@ -42,7 +42,7 @@ import { decrementVariantStock, isOrderOnBusinessToday } from './stock';
  * GROSS convention native (2026-06-16):
  *   - Order: saleGross/saleVat/listGross/sellerDiscountGross (+ sellerDiscountVat)
  *     aggregate'ı MappedOrder paket toplamlarından. promotionDisplays UI gösterimi.
- *     agreedDeliveryDate, actualDeliveryDate, fastDelivery, micro direct API.
+ *     agreedDeliveryDate, actualDeliveryDate, fastDelivery, isExportSale direct API.
  *   - OrderItem: lineListGross/lineSaleGross/lineSellerDiscountGross/saleVatRate +
  *     orderCommissionRatePct (the line's own raw commission rate, null when the line
  *     carried none). The profit engine derives every commission amount from that rate;
@@ -74,6 +74,17 @@ export interface UpsertOrderOpts {
    * toast pipeline never reads it — stamping it on update would be meaningless.
    */
   promotedFromBuffer?: boolean;
+}
+
+/**
+ * The order's export-sale flag. `order` also arrives as live-performance buffer
+ * JSONB (buffer-promote), and a row buffered before the micro -> isExportSale rename
+ * carries the flag under the legacy `micro` key with no `isExportSale`; that row
+ * falls back to the legacy key so its export VAT treatment survives the rename.
+ */
+function resolveIsExportSale(order: MappedOrder): boolean {
+  if (typeof order.isExportSale === 'boolean') return order.isExportSale;
+  return 'micro' in order && order.micro === true;
 }
 
 export async function upsertOrderWithSnapshot(
@@ -148,12 +159,12 @@ export async function upsertOrderWithSnapshot(
       existingOrder === null ? storeRow?.profitSettings : undefined,
     );
 
-    // Mikro ihracat (Trendyol marketplace `micro=true`): satış KDV'den müstesnadır
+    // Mikro ihracat (isExportSale; Trendyol marketplace `micro=true`): satış KDV'den müstesnadır
     // (ihracat istisnası, 3065 sayılı KDV Kanunu 11/1-a — e-arşiv fatura tipi "İstisna").
     // KDV'yi KAYNAKTA sıfırlarız (Order.saleVat + OrderItem.saleVatRate + sellerDiscountVat):
     // depolanan değer GERÇEKTİR (distorsiyon değil), tüm kâr yolları (estimate/settled/
     // breakdown) + liste/özet otomatik doğru olur. Komisyon/kargo TR içiyle aynı kalır.
-    const microExport = order.micro === true;
+    const microExport = resolveIsExportSale(order);
 
     // sellerDiscountVat: satıcı indirimi KDV'si — per-line GERÇEK satış KDV oranından
     // türetilir (hardcoded %20 DEĞİL). %10 satışlarda (Türk bayrağı, kitap) %20
@@ -225,7 +236,7 @@ export async function upsertOrderWithSnapshot(
         // fastDeliveryType: sipariş-seviyesi tip (PROD'da dolu). Eski buffer
         // JSONB'sinde UNDEFINED olabilir → ?? null.
         fastDeliveryType: order.fastDeliveryType ?? null,
-        micro: order.micro,
+        isExportSale: microExport,
         // PR-8 kargo alanları (research 2026-06-09). DİKKAT: `mappedOrder`
         // buffer'dan JSONB olarak da gelir — yeni alanlar eski kayıtlarda
         // UNDEFINED'dır (null değil). Bu yüzden tüm korumalar gevşek `!= null`

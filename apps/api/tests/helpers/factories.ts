@@ -141,6 +141,8 @@ export interface CreateOrderOverrides {
   // Buffer-graduation marker: non-null when the order came from the
   // live-performance buffer (drives the notification summary's isPromotion flag).
   promotedFromBufferAt?: Date | null;
+  // Export (cross-border) sale flag; Trendyol micro export orders.
+  isExportSale?: boolean;
 }
 
 export async function createOrder(
@@ -162,6 +164,7 @@ export async function createOrder(
       // no-promotion write. A provided array is stored verbatim as JSON.
       promotionDisplays: overrides.promotionDisplays ?? undefined,
       promotedFromBufferAt: overrides.promotedFromBufferAt ?? null,
+      isExportSale: overrides.isExportSale ?? false,
     },
   });
 }
@@ -232,7 +235,7 @@ export async function createOrderClaim(
   storeId: string,
   orderId: string,
   overrides: {
-    trendyolClaimId?: string;
+    marketplaceClaimId?: string;
     claimDate?: Date;
     resolved?: boolean;
     orderShipmentPackageId?: string | null;
@@ -243,7 +246,7 @@ export async function createOrderClaim(
       organizationId,
       storeId,
       orderId,
-      trendyolClaimId: overrides.trendyolClaimId ?? `claim-${randomUUID().slice(0, 8)}`,
+      marketplaceClaimId: overrides.marketplaceClaimId ?? `claim-${randomUUID().slice(0, 8)}`,
       claimDate: overrides.claimDate ?? new Date(),
       resolved: overrides.resolved ?? false,
       orderShipmentPackageId: overrides.orderShipmentPackageId ?? null,
@@ -255,7 +258,7 @@ export async function createOrderClaimItem(
   claimId: string,
   overrides: {
     orderItemId?: string | null;
-    trendyolClaimItemId?: string;
+    marketplaceClaimItemId?: string;
     reasonCode?: string;
     reasonName?: string;
     status?: string;
@@ -267,8 +270,8 @@ export async function createOrderClaimItem(
     data: {
       claimId,
       orderItemId: overrides.orderItemId ?? null,
-      trendyolClaimItemId:
-        overrides.trendyolClaimItemId ?? `claim-item-${randomUUID().slice(0, 8)}`,
+      marketplaceClaimItemId:
+        overrides.marketplaceClaimItemId ?? `claim-item-${randomUUID().slice(0, 8)}`,
       reasonCode: overrides.reasonCode ?? 'DAMAGEDITEM',
       reasonName: overrides.reasonName ?? 'Hasarlı Ürün',
       status: overrides.status ?? 'Pending',

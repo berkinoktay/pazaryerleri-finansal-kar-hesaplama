@@ -215,7 +215,9 @@ export const OrderListItemSchema = z
     deliveredOnTime: z.boolean().nullable().openapi({
       description: 'Delivery SLA outcome: true on-time, false late, null not delivered yet.',
     }),
-    micro: z.boolean(),
+    isExportSale: z.boolean().openapi({
+      description: 'True for an export (cross-border) sale; Trendyol micro export orders.',
+    }),
     itemCount: z.number().int().nonnegative().openapi({
       description: 'Number of OrderItems on this order.',
       example: 2,
@@ -439,7 +441,7 @@ const OrderClaimItemDetailSchema = z
 const OrderClaimDetailSchema = z
   .object({
     id: z.string().uuid(),
-    trendyolClaimId: z.string(),
+    marketplaceClaimId: z.string().openapi({ description: "The marketplace's claim id." }),
     claimDate: z.string().datetime(),
     cargoProviderName: z.string().nullable(),
     cargoTrackingNumber: z
@@ -605,7 +607,9 @@ export const OrderDetailSchema = z
     actualDeliveryDate: z.string().datetime().nullable(),
     deliveredOnTime: z.boolean().nullable(),
     fastDelivery: z.boolean(),
-    micro: z.boolean(),
+    isExportSale: z.boolean().openapi({
+      description: 'True for an export (cross-border) sale; Trendyol micro export orders.',
+    }),
 
     // GROSS konvansiyon (2026-06-16): saleSubtotalNet/saleVatTotal → saleGross/saleVat/listGross.
     saleGross: z

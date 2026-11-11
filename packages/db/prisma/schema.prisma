@@ -173,7 +173,7 @@ enum OrderFeeType {
   PENALTY_SUPPLY_FAILURE
   NOTIFICATION_FEE
   COMMISSION_INVOICE
-  // Mikro ihracat (Order.micro=true) — marketplace ihracat siparişlerine özgü iki ücret:
+  // Mikro ihracat (Order.isExportSale=true) — marketplace ihracat siparişlerine özgü iki ücret:
   // INTERNATIONAL_SERVICE: ürün satışı üzerinden %6 KDV-dahil "Uluslararası Hizmet Bedeli"
   //   (PSF mikro ihracatta uygulanmaz; bunun yerine bu ücret kesilir). Tahmin yolunda yazılır.
   // OVERSEAS_RETURN_OPERATION: iadede satış reverse edilmez, ayrıca (satış−komisyon)×%35/%30
@@ -703,10 +703,11 @@ model Order {
   // fastDeliveryType: "TodayDelivery"|"SameDayShipping"|"FastDelivery" — sipariş
   //   seviyesinde yalnız PROD'da dolar (stage "" → null). Per-tip kriterin kaynağı
   //   (hibrit tasarım 2026-06-14): "fast mı + tip" siparişten, cutoff üründen.
-  // micro: getShipmentPackages direkt boolean (mikro ihracat) — PSF muafiyeti.
+  // isExportSale: marketplace-neutral export (cross-border) sale flag; Trendyol maps
+  //   its getShipmentPackages `micro` boolean (micro export, PSF exempt) here.
   fastDelivery       Boolean   @default(false) @map("fast_delivery")
   fastDeliveryType   String?   @map("fast_delivery_type")
-  micro              Boolean   @default(false) @map("micro")
+  isExportSale       Boolean   @default(false) @map("is_export_sale")
 
   // ─── GROSS konvansiyon: sipariş-seviyesi agregat alanlar (2026-06-16) ──────
   // Paket toplamları mapper'dan doğrudan gelir (Trendyol packageGrossAmount/
@@ -866,6 +867,8 @@ model OrderItem {
   productVariant    ProductVariant?    @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
 
   @@index([orderId])
+  // Every tenant table carries an organization_id-leading index (docs/SECURITY.md).
+  @@index([organizationId])
   // product_variant_id is a FK (onDelete: SetNull) with no index; the profit queue's variants scope (enqueueProfitRecomputeForVariants in packages/profit/src/persistence/recompute-queue.ts) probes it.
   @@index([productVariantId])
   // barcode is probed by the barcodes scope (enqueueProfitRecomputeForBarcodes, used by commission tariff import and delete).
@@ -2060,7 +2063,7 @@ model ProfitRecomputeRequest {
 // ÖNCE iade talebini gösteriyor (design §3.6). Kar hesabını DOĞRUDAN etkilemez;
 // UI'da "iade riski" badge için kullanılır. Kabul edilen iade, kâr motorunun
 // iade satırlarını (SALE_RETURN / COMMISSION_REFUND / RETURN_SHIPPING vb.)
-// üretir. trendyolClaimId order başına unique.
+// üretir. marketplaceClaimId (the marketplace's claim id) is unique per order.
 //
 // #298: storeId denormalize (insert sırasında parent order'dan stamp) — tenant
 // filtreleme artık `order: { storeId }` parent-walk'u değil doğrudan kolon;
@@ -2073,7 +2076,8 @@ model OrderClaim {
   organizationId      String   @map("organization_id") @db.Uuid
   storeId             String   @map("store_id") @db.Uuid
   orderId             String   @map("order_id") @db.Uuid
-  trendyolClaimId     String   @map("trendyol_claim_id")
+  // The marketplace's own claim id (Trendyol: claimId).
+  marketplaceClaimId  String   @map("marketplace_claim_id")
   claimDate           DateTime @map("claim_date")
   cargoProviderName   String?  @map("cargo_provider_name")
   cargoTrackingNumber BigInt?  @map("cargo_tracking_number")
@@ -2091,7 +2095,7 @@ model OrderClaim {
   order Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
   items OrderClaimItem[]
 
-  @@unique([orderId, trendyolClaimId])
+  @@unique([orderId, marketplaceClaimId])
   @@index([organizationId, resolved])
   @@index([storeId, orderShipmentPackageId])
   @@index([storeId, resolved])
@@ -2106,16 +2110,16 @@ model OrderClaim {
 // reasonName Türkçe label (Trendyol'dan direkt). orderItemId nullable çünkü
 // match her zaman olmayabilir (item-level eşleme PR-13 sync worker'ında).
 model OrderClaimItem {
-  id                  String    @id @default(uuid()) @db.Uuid
-  claimId             String    @map("claim_id") @db.Uuid
-  orderItemId         String?   @map("order_item_id") @db.Uuid
-  trendyolClaimItemId String    @map("trendyol_claim_item_id")
-  reasonCode          String    @map("reason_code")
-  reasonName          String    @map("reason_name")
-  status              String
-  acceptedBySeller    Boolean   @map("accepted_by_seller")
-  autoApproveDate     DateTime? @map("auto_approve_date")
-  resolved            Boolean
+  id                     String    @id @default(uuid()) @db.Uuid
+  claimId                String    @map("claim_id") @db.Uuid
+  orderItemId            String?   @map("order_item_id") @db.Uuid
+  marketplaceClaimItemId String    @map("marketplace_claim_item_id")
+  reasonCode             String    @map("reason_code")
+  reasonName             String    @map("reason_name")
+  status                 String
+  acceptedBySeller       Boolean   @map("accepted_by_seller")
+  autoApproveDate        DateTime? @map("auto_approve_date")
+  resolved               Boolean
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -2123,10 +2127,11 @@ model OrderClaimItem {
   claim     OrderClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
   orderItem OrderItem? @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
 
-  // trendyolClaimItemId is Trendyol's per-UNIT claimLineItem UUID (a 3-unit
-  // return produces 3 rows) — the upsert idempotency anchor for the CLAIMS
-  // sync worker. Covers the old claim_id lookup index too.
-  @@unique([claimId, trendyolClaimItemId])
+  // marketplaceClaimItemId is the marketplace's claim item id (Trendyol: the
+  // per-UNIT claimLineItem UUID, so a 3-unit return produces 3 rows); the upsert
+  // idempotency anchor for the CLAIMS sync worker. Covers the old claim_id lookup
+  // index too.
+  @@unique([claimId, marketplaceClaimItemId])
   @@index([orderItemId])
   @@map("order_claim_items")
 }

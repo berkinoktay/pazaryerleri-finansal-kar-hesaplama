@@ -921,8 +921,9 @@
             ],
             "description": "Delivery SLA outcome: true on-time, false late, null not delivered yet."
           },
-          "micro": {
-            "type": "boolean"
+          "isExportSale": {
+            "type": "boolean",
+            "description": "True for an export (cross-border) sale; Trendyol micro export orders."
           },
           "itemCount": {
             "type": "integer",
@@ -971,7 +972,7 @@
           "promotionDisplays",
           "fastDelivery",
           "deliveredOnTime",
-          "micro",
+          "isExportSale",
           "itemCount",
           "profitExcludedAt",
           "profitExclusionReason"
@@ -1123,8 +1124,9 @@
           "fastDelivery": {
             "type": "boolean"
           },
-          "micro": {
-            "type": "boolean"
+          "isExportSale": {
+            "type": "boolean",
+            "description": "True for an export (cross-border) sale; Trendyol micro export orders."
           },
           "saleGross": {
             "type": [
@@ -1260,7 +1262,7 @@
           "actualDeliveryDate",
           "deliveredOnTime",
           "fastDelivery",
-          "micro",
+          "isExportSale",
           "saleGross",
           "saleVat",
           "listGross",
@@ -1656,8 +1658,9 @@
             "type": "string",
             "format": "uuid"
           },
-          "trendyolClaimId": {
-            "type": "string"
+          "marketplaceClaimId": {
+            "type": "string",
+            "description": "The marketplace's claim id."
           },
           "claimDate": {
             "type": "string",
@@ -1688,7 +1691,7 @@
         },
         "required": [
           "id",
-          "trendyolClaimId",
+          "marketplaceClaimId",
           "claimDate",
           "cargoProviderName",
           "cargoTrackingNumber",
@@ -1838,8 +1841,9 @@
               "null"
             ]
           },
-          "trendyolClaimId": {
-            "type": "string"
+          "marketplaceClaimId": {
+            "type": "string",
+            "description": "The marketplace's claim id."
           },
           "claimDate": {
             "type": "string",
@@ -1896,7 +1900,7 @@
           "id",
           "orderId",
           "platformOrderNumber",
-          "trendyolClaimId",
+          "marketplaceClaimId",
           "claimDate",
           "resolved",
           "derivedStatus",
@@ -11029,7 +11033,7 @@
           "Claims"
         ],
         "summary": "List return claims for a store",
-        "description": "Returns paginated return claims (Trendyol iade talepleri) sorted by claimDate desc, with composable filters: status tab (open/resolved), date range (from/to on claimDate), and a substring search (q) over platformOrderNumber and trendyolClaimId. Each row carries derived fields (derivedStatus, scope, product/reason summaries) so the UI renders without recomputation. Populated by the 6h CLAIMS sync worker.",
+        "description": "Returns paginated return claims (Trendyol iade talepleri) sorted by claimDate desc, with composable filters: status tab (open/resolved), date range (from/to on claimDate), and a substring search (q) over platformOrderNumber and the marketplace's claim id (marketplaceClaimId). Each row carries derived fields (derivedStatus, scope, product/reason summaries) so the UI renders without recomputation. Populated by the 6h CLAIMS sync worker.",
         "security": [
           {
             "bearerAuth": []
@@ -11127,10 +11131,10 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 120,
-              "description": "Substring search over platformOrderNumber and trendyolClaimId."
+              "description": "Substring search over platformOrderNumber and the marketplace's claim id."
             },
             "required": false,
-            "description": "Substring search over platformOrderNumber and trendyolClaimId.",
+            "description": "Substring search over platformOrderNumber and the marketplace's claim id.",
             "name": "q",
             "in": "query"
           }

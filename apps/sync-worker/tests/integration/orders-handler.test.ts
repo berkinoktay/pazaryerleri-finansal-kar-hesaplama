@@ -3,7 +3,7 @@
 // Drives the chunk loop with a mocked Trendyol `getShipmentPackagesStream`
 // response and verifies:
 //   1. Order rows created (GROSS convention: saleGross, saleVat, listGross,
-//      sellerDiscountGross, agreedDeliveryDate, fastDelivery, micro, platformOrderNumber)
+//      sellerDiscountGross, agreedDeliveryDate, fastDelivery, isExportSale, platformOrderNumber)
 //   2. OrderItem rows created with gross columns (lineListGross/lineSaleGross/
 //      lineSellerDiscountGross/saleVatRate) + the raw orderCommissionRatePct
 //   3. Variant lookup by barcode (or null for unmatched)
@@ -161,7 +161,7 @@ function buildDirectMapped(over: {
     actualShipDate: null,
     fastDelivery: false,
     fastDeliveryType: null,
-    micro: false,
+    isExportSale: false,
     estimatedDeliveryStartDate: null,
     estimatedDeliveryEndDate: null,
     cargoProviderName: null,
@@ -940,7 +940,7 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       actualShipDate: new Date('2026-05-19T12:00:00Z'),
       fastDelivery: true,
       fastDeliveryType: 'FastDelivery',
-      micro: false,
+      isExportSale: false,
       estimatedDeliveryStartDate: new Date('2026-05-20T08:00:00Z'),
       estimatedDeliveryEndDate: new Date('2026-05-20T18:00:00Z'),
       cargoProviderName: 'Trendyol Express Marketplace',
@@ -1240,7 +1240,7 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       actualShipDate: null,
       fastDelivery: false,
       fastDeliveryType: null,
-      micro: false,
+      isExportSale: false,
       estimatedDeliveryStartDate: null,
       estimatedDeliveryEndDate: null,
       cargoProviderName: null,
@@ -1298,7 +1298,7 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       actualShipDate: null,
       fastDelivery: false,
       fastDeliveryType: null,
-      micro: false,
+      isExportSale: false,
       estimatedDeliveryStartDate: null,
       estimatedDeliveryEndDate: null,
       cargoProviderName: null,
@@ -1363,7 +1363,7 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       actualShipDate: null,
       fastDelivery: false,
       fastDeliveryType: null,
-      micro: false,
+      isExportSale: false,
       estimatedDeliveryStartDate: null,
       estimatedDeliveryEndDate: null,
       usesSellerCargoAgreement: false,
@@ -1456,7 +1456,7 @@ describe('upsertOrderWithSnapshot — out-of-order guard (freshness)', () => {
       actualShipDate: null,
       fastDelivery: false,
       fastDeliveryType: null,
-      micro: false,
+      isExportSale: false,
       estimatedDeliveryStartDate: null,
       estimatedDeliveryEndDate: null,
       cargoProviderName: null,
@@ -1763,7 +1763,7 @@ describe('upsertOrderWithSnapshot — optimistic stock decrement (product freshn
       actualShipDate: null,
       fastDelivery: false,
       fastDeliveryType: null,
-      micro: false,
+      isExportSale: false,
       estimatedDeliveryStartDate: null,
       estimatedDeliveryEndDate: null,
       cargoProviderName: null,

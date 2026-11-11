@@ -254,7 +254,7 @@ export function mapTrendyolShipmentPackage(pkg: TrendyolShipmentPackage): Mapped
     actualShipDate,
     fastDelivery: pkg.fastDelivery,
     fastDeliveryType: normalizeFastDeliveryType(pkg.fastDeliveryType),
-    micro: pkg.micro,
+    isExportSale: pkg.micro,
     // PR-8 kargo alanları (research 2026-06-09). cargoTrackingNumber/cargoDeci
     // raw String() — toFixed KULLANMA (tracking no bir kimliktir, desi Trendyol
     // ne verdiyse o). originShipmentDate true UTC → RAW (normalize edilmez;

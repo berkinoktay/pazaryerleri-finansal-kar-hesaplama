@@ -130,8 +130,9 @@ export interface TrendyolClaimsResponse {
 // ─── Mapped domain shapes (PII dropped here) ────────────────────────────
 
 export interface MappedClaimItem {
-  /** claimItems[].id — per-unit UUID, upsert anchor with the parent claim. */
-  trendyolClaimItemId: string;
+  /** The marketplace claim item id (claimItems[].id, a per-unit UUID); upsert
+   * anchor with the parent claim. */
+  marketplaceClaimItemId: string;
   /** items[].orderLine.id as string — resolves OrderItem.platformLineId. */
   orderLineId: string | null;
   reasonCode: string;
@@ -143,7 +144,8 @@ export interface MappedClaimItem {
 }
 
 export interface MappedClaim {
-  trendyolClaimId: string;
+  /** The marketplace claim id (Trendyol: claim.id). */
+  marketplaceClaimId: string;
   orderNumber: string;
   /** Primary order-match key (== Order.platformOrderId), string form. */
   orderOutboundPackageId: string | null;
@@ -190,7 +192,7 @@ export function mapTrendyolClaim(claim: TrendyolClaim): MappedClaim {
           ? ci.trendyolClaimItemReason
           : null;
       items.push({
-        trendyolClaimItemId: ci.id,
+        marketplaceClaimItemId: ci.id,
         orderLineId,
         reasonCode: reason !== null ? reason.code : UNKNOWN_REASON_CODE,
         reasonName: reason?.name ?? '',
@@ -203,7 +205,7 @@ export function mapTrendyolClaim(claim: TrendyolClaim): MappedClaim {
   }
 
   return {
-    trendyolClaimId: claim.id,
+    marketplaceClaimId: claim.id,
     orderNumber: claim.orderNumber,
     orderOutboundPackageId:
       claim.orderOutboundPackageId != null ? String(claim.orderOutboundPackageId) : null,

@@ -244,7 +244,7 @@ export async function loadTrendyolParcel(
   // --- Reference: fees, shipping, commission rules ---
   const fees = await loadFeeParams(tx, {
     orderDate,
-    isExport: order.micro,
+    isExport: order.isExportSale,
     fastDeliveryType: order.fastDeliveryType,
   });
   // The order's own carrier (the one Trendyol assigned, named by cargoProviderName)
@@ -312,7 +312,7 @@ export async function loadTrendyolParcel(
       orderDate,
       businessDate,
       isCancelled: order.status === OrderStatus.CANCELLED,
-      isExportSale: order.micro,
+      isExportSale: order.isExportSale,
       measuredDesi: decOrNull(order.cargoDeci),
       items,
     },

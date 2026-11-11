@@ -27,9 +27,10 @@ const listClaimsRoute = createRoute({
   description:
     'Returns paginated return claims (Trendyol iade talepleri) sorted by claimDate desc, ' +
     'with composable filters: status tab (open/resolved), date range (from/to on claimDate), ' +
-    'and a substring search (q) over platformOrderNumber and trendyolClaimId. Each row ' +
-    'carries derived fields (derivedStatus, scope, product/reason summaries) so the UI ' +
-    'renders without recomputation. Populated by the 6h CLAIMS sync worker.',
+    "and a substring search (q) over platformOrderNumber and the marketplace's claim id " +
+    '(marketplaceClaimId). Each row carries derived fields (derivedStatus, scope, ' +
+    'product/reason summaries) so the UI renders without recomputation. Populated by the ' +
+    '6h CLAIMS sync worker.',
   security: [{ bearerAuth: [] }],
   request: {
     params: storeScopeParams,

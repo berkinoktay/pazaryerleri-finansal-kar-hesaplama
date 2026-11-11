@@ -73,7 +73,7 @@ const ORDER = {
   actualDeliveryDate: null,
   deliveredOnTime: null,
   fastDelivery: false,
-  micro: false,
+  isExportSale: false,
   saleGross: '200.00',
   saleVat: '33.33',
   listGross: '200.00',

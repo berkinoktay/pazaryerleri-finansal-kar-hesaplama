@@ -26,6 +26,18 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Marketplace-neutral field names on orders and claims.** Three wire fields are renamed; types
+  and values are unchanged:
+  - `micro` becomes `isExportSale` on the order list rows and the order detail
+    (`GET /v1/organizations/{orgId}/stores/{storeId}/orders`, `.../orders/{orderId}`).
+  - `claims[].trendyolClaimId` becomes `claims[].marketplaceClaimId` on the order detail.
+  - `trendyolClaimId` becomes `marketplaceClaimId` on the claim list rows
+    (`GET /v1/organizations/{orgId}/stores/{storeId}/claims`); the `q` search covers the renamed
+    field.
+
+  The backing columns were renamed with the same meaning (`orders.is_export_sale`,
+  `order_claims.marketplace_claim_id`, `order_claim_items.marketplace_claim_item_id`). Breaking;
+  the web client ships the matching change in the same PR.
 - **Order detail item commission rates and amounts are nullable and read from the profit lines
   only** (`GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}`).
   `items[].commissionRate` and `items[].commissionVatRate` are now `string | null`: both come from

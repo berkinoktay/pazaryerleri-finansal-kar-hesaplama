@@ -292,7 +292,7 @@ export interface SeedMelontikOptions {
   readonly status?: OrderStatus;
   readonly cargoTrackingNumber?: bigint | null;
   /** Marks the order as a micro-export (international) sale. */
-  readonly micro?: boolean;
+  readonly isExportSale?: boolean;
   /** Same-day/fast delivery flags, used by the service-fee tier tests. */
   readonly fastDelivery?: boolean;
   readonly fastDeliveryType?: string | null;
@@ -354,7 +354,7 @@ export async function seedMelontikParcel(opts: SeedMelontikOptions = {}): Promis
       platformOrderId,
       orderDate: MELONTIK.orderDate,
       status: opts.status ?? 'DELIVERED',
-      micro: opts.micro ?? false,
+      isExportSale: opts.isExportSale ?? false,
       fastDelivery: opts.fastDelivery ?? false,
       fastDeliveryType: opts.fastDeliveryType ?? null,
       usesSellerCargoAgreement: false,
@@ -689,7 +689,7 @@ export async function seedBareOrder(params: {
       platformOrderId: `bare-${randomUUID().slice(0, 8)}`,
       orderDate: params.orderDate ?? MELONTIK.orderDate,
       status: params.status ?? 'DELIVERED',
-      micro: false,
+      isExportSale: false,
       fastDelivery: false,
       fastDeliveryType: null,
       usesSellerCargoAgreement: false,

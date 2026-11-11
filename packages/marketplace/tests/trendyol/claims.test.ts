@@ -93,7 +93,7 @@ describe('mapTrendyolClaim', () => {
   it('maps the stage-captured wire shape to the domain claim', () => {
     const mapped = mapTrendyolClaim(claim());
 
-    expect(mapped.trendyolClaimId).toBe('d5ee3431-a0ba-4242-83d4-d834c12e3931');
+    expect(mapped.marketplaceClaimId).toBe('d5ee3431-a0ba-4242-83d4-d834c12e3931');
     expect(mapped.orderNumber).toBe('950608199');
     expect(mapped.orderOutboundPackageId).toBe('91982453');
     expect(mapped.orderShipmentPackageId).toBe('91982454');
@@ -104,7 +104,7 @@ describe('mapTrendyolClaim', () => {
     expect(mapped.items).toHaveLength(1);
 
     const item = mapped.items[0];
-    expect(item?.trendyolClaimItemId).toBe('7a0243f7-1994-405d-9299-93cd8d03a731');
+    expect(item?.marketplaceClaimItemId).toBe('7a0243f7-1994-405d-9299-93cd8d03a731');
     expect(item?.orderLineId).toBe('10230838');
     expect(item?.reasonCode).toBe('ABANDON');
     expect(item?.reasonName).toBe('Vazgeçtim');
@@ -167,7 +167,7 @@ describe('mapTrendyolClaim', () => {
       }),
     );
 
-    expect(mapped.items.map((i) => i.trendyolClaimItemId)).toEqual(['u1', 'u2', 'u3']);
+    expect(mapped.items.map((i) => i.marketplaceClaimItemId)).toEqual(['u1', 'u2', 'u3']);
     expect(new Set(mapped.items.map((i) => i.orderLineId))).toEqual(new Set(['10230838']));
   });
 

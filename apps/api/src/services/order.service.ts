@@ -248,7 +248,7 @@ function toOrderListItem(row: OrderListRow): OrderListItemResponse {
     promotionDisplays: toPromotionDisplays(row.promotionDisplays),
     fastDelivery: row.fastDelivery,
     deliveredOnTime: row.deliveredOnTime,
-    micro: row.micro,
+    isExportSale: row.isExportSale,
     itemCount: row._count.items,
     // Kâr-dışı satırında sebep + tarih gösterimi için. Hesaplanan siparişlerde null.
     profitExcludedAt: row.profitExcludedAt?.toISOString() ?? null,
@@ -796,7 +796,7 @@ export async function getOrderById(
     actualDeliveryDate: row.actualDeliveryDate?.toISOString() ?? null,
     deliveredOnTime: row.deliveredOnTime,
     fastDelivery: row.fastDelivery,
-    micro: row.micro,
+    isExportSale: row.isExportSale,
 
     // Sale parity: the detail's top-level sale reads the same profit field the list row
     // does (best-known sale, else the order's sale, '0' for a cancelled order with no
@@ -881,7 +881,7 @@ export async function getOrderById(
 
     claims: row.claims.map((claim) => ({
       id: claim.id,
-      trendyolClaimId: claim.trendyolClaimId,
+      marketplaceClaimId: claim.marketplaceClaimId,
       claimDate: claim.claimDate.toISOString(),
       cargoProviderName: claim.cargoProviderName,
       cargoTrackingNumber: claim.cargoTrackingNumber?.toString() ?? null,

@@ -242,7 +242,7 @@ describe('processClaimsChunk', () => {
     expect(result).toEqual({ kind: 'done', finalCount: 1 });
 
     const claim = await prisma.orderClaim.findUniqueOrThrow({
-      where: { orderId_trendyolClaimId: { orderId: ctx.orderId, trendyolClaimId: CLAIM_ID } },
+      where: { orderId_marketplaceClaimId: { orderId: ctx.orderId, marketplaceClaimId: CLAIM_ID } },
       include: { items: true },
     });
     expect(claim.organizationId).toBe(ctx.organizationId);
@@ -297,7 +297,7 @@ describe('processClaimsChunk', () => {
     await runChunk(ctx.syncLogId, [accepted]);
 
     const claim = await prisma.orderClaim.findUniqueOrThrow({
-      where: { orderId_trendyolClaimId: { orderId: ctx.orderId, trendyolClaimId: CLAIM_ID } },
+      where: { orderId_marketplaceClaimId: { orderId: ctx.orderId, marketplaceClaimId: CLAIM_ID } },
       include: { items: true },
     });
     expect(claim.resolved).toBe(true);
@@ -318,7 +318,7 @@ describe('processClaimsChunk', () => {
     ]);
     expect(result).toEqual({ kind: 'done', finalCount: 1 });
 
-    const claim = await prisma.orderClaim.findFirst({ where: { trendyolClaimId: CLAIM_ID } });
+    const claim = await prisma.orderClaim.findFirst({ where: { marketplaceClaimId: CLAIM_ID } });
     expect(claim?.orderId).toBe(ctx.orderId);
   });
 
@@ -523,13 +523,13 @@ describe('processClaimsChunk', () => {
     await prisma.profitRecomputeRequest.deleteMany({ where: { storeId: ctx.storeId } });
 
     const claimBefore = await prisma.orderClaim.findFirstOrThrow({
-      where: { storeId: ctx.storeId, trendyolClaimId: CLAIM_ID },
+      where: { storeId: ctx.storeId, marketplaceClaimId: CLAIM_ID },
       select: { id: true, updatedAt: true },
     });
     const itemsBefore = await prisma.orderClaimItem.findMany({
       where: { claimId: claimBefore.id },
-      select: { trendyolClaimItemId: true, updatedAt: true },
-      orderBy: { trendyolClaimItemId: 'asc' },
+      select: { marketplaceClaimItemId: true, updatedAt: true },
+      orderBy: { marketplaceClaimItemId: 'asc' },
     });
     expect(itemsBefore).toHaveLength(2);
 
@@ -543,8 +543,8 @@ describe('processClaimsChunk', () => {
     });
     const itemsAfter = await prisma.orderClaimItem.findMany({
       where: { claimId: claimBefore.id },
-      select: { trendyolClaimItemId: true, updatedAt: true },
-      orderBy: { trendyolClaimItemId: 'asc' },
+      select: { marketplaceClaimItemId: true, updatedAt: true },
+      orderBy: { marketplaceClaimItemId: 'asc' },
     });
     expect(claimAfter.updatedAt).toEqual(claimBefore.updatedAt);
     expect(itemsAfter).toEqual(itemsBefore);
@@ -555,7 +555,7 @@ describe('processClaimsChunk', () => {
 
     await runChunk(ctx.syncLogId, [makeWireClaim({ orderShipmentPackageId: undefined })]);
     const sparse = await prisma.orderClaim.findFirstOrThrow({
-      where: { storeId: ctx.storeId, trendyolClaimId: CLAIM_ID },
+      where: { storeId: ctx.storeId, marketplaceClaimId: CLAIM_ID },
       select: { orderShipmentPackageId: true },
     });
     expect(sparse.orderShipmentPackageId).toBeNull();
@@ -564,7 +564,7 @@ describe('processClaimsChunk', () => {
     await runChunk(ctx.syncLogId, [makeWireClaim()]);
 
     const filled = await prisma.orderClaim.findFirstOrThrow({
-      where: { storeId: ctx.storeId, trendyolClaimId: CLAIM_ID },
+      where: { storeId: ctx.storeId, marketplaceClaimId: CLAIM_ID },
       select: { orderShipmentPackageId: true },
     });
     expect(filled.orderShipmentPackageId).toBe('91982454');
@@ -591,7 +591,7 @@ describe('processClaimsChunk', () => {
     expect(result).toEqual({ kind: 'done', finalCount: 1 });
     const claims = await prisma.orderClaim.findMany();
     expect(claims).toHaveLength(1);
-    expect(claims[0]?.trendyolClaimId).toBe(CLAIM_ID);
+    expect(claims[0]?.marketplaceClaimId).toBe(CLAIM_ID);
   });
 
   it('throws when EVERY claim in the window fails (systemic failure must not look COMPLETED)', async () => {
@@ -623,7 +623,7 @@ describe('processClaimsChunk', () => {
     await runChunk(ctx.syncLogId, [makeWireClaim({ items: [] })]);
 
     const claim = await prisma.orderClaim.findFirstOrThrow({
-      where: { trendyolClaimId: CLAIM_ID },
+      where: { marketplaceClaimId: CLAIM_ID },
     });
     expect(claim.resolved).toBe(true);
   });

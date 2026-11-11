@@ -30,7 +30,7 @@ function mappedFor(platformOrderId: string, barcode: string): Prisma.InputJsonVa
     agreedDeliveryDate: null,
     actualDeliveryDate: null,
     fastDelivery: false,
-    micro: false,
+    isExportSale: false,
     lines: [
       {
         barcode,

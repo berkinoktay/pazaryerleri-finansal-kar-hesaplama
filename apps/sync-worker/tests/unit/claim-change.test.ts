@@ -18,7 +18,7 @@ const STATUS_ACCEPTED = 'Accepted';
 
 function mappedItem(over: Partial<MappedClaimItem> = {}): MappedClaimItem {
   return {
-    trendyolClaimItemId: CLAIM_ITEM_ID,
+    marketplaceClaimItemId: CLAIM_ITEM_ID,
     orderLineId: '10230838',
     reasonCode: 'ABANDON',
     reasonName: 'Abandon',
@@ -32,7 +32,7 @@ function mappedItem(over: Partial<MappedClaimItem> = {}): MappedClaimItem {
 
 function mappedClaim(over: Partial<MappedClaim> = {}): MappedClaim {
   return {
-    trendyolClaimId: 'claim-1',
+    marketplaceClaimId: 'claim-1',
     orderNumber: '950608199',
     orderOutboundPackageId: '91982453',
     orderShipmentPackageId: RETURN_PACKAGE_ID,
@@ -51,7 +51,7 @@ function storedClaim(over: Partial<StoredClaimForChange> = {}): StoredClaimForCh
     orderShipmentPackageId: RETURN_PACKAGE_ID,
     cargoTrackingNumber: BigInt(CARGO_TRACKING_NUMBER),
     items: [
-      { trendyolClaimItemId: CLAIM_ITEM_ID, status: STATUS_WAITING, orderItemId: ORDER_ITEM_ID },
+      { marketplaceClaimItemId: CLAIM_ITEM_ID, status: STATUS_WAITING, orderItemId: ORDER_ITEM_ID },
     ],
     ...over,
   };
@@ -78,7 +78,7 @@ describe('claimProfitInputsChanged', () => {
 
   it('is true when an incoming claim item is not stored yet', () => {
     const incoming = mappedClaim({
-      items: [mappedItem(), mappedItem({ trendyolClaimItemId: 'unit-2' })],
+      items: [mappedItem(), mappedItem({ marketplaceClaimItemId: 'unit-2' })],
     });
     const resolved = new Map([
       [CLAIM_ITEM_ID, ORDER_ITEM_ID],
@@ -97,7 +97,7 @@ describe('claimProfitInputsChanged', () => {
       true,
     );
     const unlinked = storedClaim({
-      items: [{ trendyolClaimItemId: CLAIM_ITEM_ID, status: STATUS_WAITING, orderItemId: null }],
+      items: [{ marketplaceClaimItemId: CLAIM_ITEM_ID, status: STATUS_WAITING, orderItemId: null }],
     });
     expect(claimProfitInputsChanged(unlinked, mappedClaim(), links(ORDER_ITEM_ID))).toBe(true);
   });
