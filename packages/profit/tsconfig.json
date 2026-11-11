@@ -7,7 +7,6 @@
   },
   "include": [
     "src/**/*",
-    "scripts/snapshot-legacy-profit.ts",
     "scripts/enqueue-profit-recompute.ts",
     "vitest.config.ts",
     "vitest.unit.config.ts"

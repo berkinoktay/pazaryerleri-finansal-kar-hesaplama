@@ -2,8 +2,9 @@ import { z } from '@hono/zod-openapi';
 
 /**
  * Per-store profit-formula toggles. SNAPSHOT-AT-CREATE: a change only affects orders
- * created AFTER it — historical orders keep their stored values (see @pazarsync/profit
- * estimate-on-order-create snapshot logic).
+ * created AFTER it. The order write freezes the settings into the
+ * `Order.snapshotIncludeStopaj` / `Order.snapshotIncludeNegativeNetVat` columns, and the
+ * profit engine reads those columns (@pazarsync/profit persistence/load-trendyol-parcel).
  *
  * GET returns the RESOLVED shape (defaults applied: includeStopaj=true,
  * includeNegativeNetVat=false). PATCH accepts a partial object and shallow-merges it

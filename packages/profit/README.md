@@ -12,25 +12,40 @@ floating-point error and breaks the product's core promise. This is enforced by
 
 ## Estimates are optimistic; settlement reconciles
 
-`estimate-on-order-create` computes a **best-case** profit at order time (the
-successful commission tier, nominal cargo). It is intentionally optimistic —
-failed tiers and real fees aren't known yet. `recompute-settled-profit` later
-replaces the estimate with the **actual** values from the marketplace settlement
-invoice. Never treat an on-create estimate as final.
+A parcel's profit is built from two kinds of lines. **Estimate** lines come from rules
+-- the marketplace's commission, fee and shipping parameters -- and exist as soon as the
+order does. They are intentionally optimistic (the successful commission tier, nominal
+cargo), because failed tiers and real fees are not known yet. **Actual** lines come from
+the raw marketplace records (settlement, other-financial and cargo-invoice rows) as they
+arrive. `selectLines` keeps the most certain line in every slot, so an actual replaces
+the estimate it settles in the `BEST_KNOWN` view. The `ESTIMATE` view ignores marketplace
+actuals on purpose; never treat an `ESTIMATE` view as final.
 
 ## Shape
 
-Pure functions — no I/O, no DB, unit-testable in isolation. `profit-formula` is
-the core; the `resolve-*` / `infer-*` helpers feed it. Marketplace parameters
-(commission baremler, desi limits, fee thresholds) live in DB rows, never baked
-into code or enum names.
+- `core/` -- the marketplace-agnostic line model: profit lines and their catalog,
+  `selectLines`, allocation, issues, status, the profit statement and the scenario price
+  solver. Pure, no I/O.
+- `tax/` -- the Turkish tax module (VAT, stoppage, net VAT). Pure.
+- `marketplaces/` -- per-marketplace estimators and the mapper from raw marketplace
+  records to actual lines (Trendyol today). Pure.
+- `persistence/` -- the database edge: the parcel and scenario loaders, the parcel
+  recompute writer, the finance-record ingest and the recompute queue. Every query is
+  scoped to the caller's organization and store.
+- `read/` -- helpers that turn stored lines, statements and issues back into engine
+  types and display breakdowns.
+- `shipping/` -- the shared Barem-vs-desi tariff resolution (`resolveTariffForDesi`).
+
+A few small helpers sit at the top level: `infer-shipped-same-day`, `resolve-fee-definition`
+and the calculability helpers used when an order is taken in. Marketplace parameters
+(commission bands, desi limits, fee thresholds) live in DB rows, never baked into code or
+enum names.
 
 See the root `CLAUDE.md` for the shared money/decimal standards.
 
 ## Profit line core (rebuild, phase 1)
 
-A marketplace-agnostic rebuild of the profit computation lives alongside the legacy
-`computeProfit`, not yet wired into any caller. It is organized in two pure folders:
+The marketplace-agnostic core of the profit computation is organized in two pure folders:
 
 - `core/` holds the line model (`createProfitLine`, the `PROFIT_LINE_CATALOG` line-type
   catalog, the single `selectLines` rule, per-item allocation of parcel-level lines,

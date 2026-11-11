@@ -33,13 +33,16 @@ import {
   type ScenarioPriceTarget,
   type ScenarioSolveFailure,
   type ShippingUnavailableReason,
-  type SolveReason,
 } from '@pazarsync/profit';
 
-// Quote-level failure reason -- superset of the engine's SolveReason. NOT_CALCULABLE is
-// quote-only: no price produced a computable statement (shipping or commission missing),
-// so the solver found no priceable point.
-export type QuoteReason = SolveReason | 'NOT_CALCULABLE';
+// Quote-level failure reason, mirrored by QuoteReasonSchema in product-pricing.validator.
+// NOT_CALCULABLE: no price produced a computable statement (shipping or commission
+// missing), so the solver found no priceable point.
+export type QuoteReason =
+  | 'NOT_PRICE_SENSITIVE'
+  | 'UNREACHABLE_TARGET'
+  | 'NO_COST'
+  | 'NOT_CALCULABLE';
 import { InvalidReferenceError, mapPrismaError } from '@pazarsync/sync-core';
 
 import { deriveCalculable } from './product-pricing-assembly';
