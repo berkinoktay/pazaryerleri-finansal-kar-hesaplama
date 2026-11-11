@@ -19,7 +19,6 @@ export {
   type ShippingEstimate,
 } from './shipping/resolve-tariff';
 export { grossToVat } from './money';
-export { resolveCommissionRate, type ResolvedCommissionRate } from './resolve-commission-rate';
 
 // Profit line core (rebuild, phase 1) -- docs/plans/2026-10-29-profit-engine-design.md
 export { roundMoney, roundPercent } from './money';

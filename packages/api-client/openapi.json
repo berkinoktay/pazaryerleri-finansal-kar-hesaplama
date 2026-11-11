@@ -1225,21 +1225,6 @@
             "description": "Settlement progression, read from the order's best-known profit statement; NOT_SETTLED when the order has no statement yet. NOT_SETTLED = no settlement applied, PARTIALLY_SETTLED = settlement started, FULLY_SETTLED = settlement fully reconciled.",
             "example": "PARTIALLY_SETTLED"
           },
-          "paymentOrderId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Deprecated: always null."
-          },
-          "paymentDate": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "Deprecated: always null."
-          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -1253,13 +1238,6 @@
             "items": {
               "$ref": "#/components/schemas/OrderItemDetail"
             }
-          },
-          "fees": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OrderFeeDetail"
-            },
-            "description": "Deprecated: always an empty array."
           },
           "claims": {
             "type": "array",
@@ -1294,12 +1272,9 @@
           "profitExcludedAt",
           "profitExclusionReason",
           "reconciliationStatus",
-          "paymentOrderId",
-          "paymentDate",
           "createdAt",
           "updatedAt",
           "items",
-          "fees",
           "claims"
         ]
       },
@@ -1538,19 +1513,25 @@
           },
           "commissionGross": {
             "type": "string",
-            "description": "Commission incl. VAT (decimal string), from the order's best-known COMMISSION lines; '0.00' when none (e.g. a cancelled order). Falls back to the item's own commission column only when the profit part is empty (a platform the engine cannot compute, or a profit read that failed)."
+            "description": "Commission incl. VAT (decimal string), from the order's best-known COMMISSION lines; '0.00' when none (e.g. a cancelled order)."
           },
           "commissionRate": {
-            "type": "string",
-            "description": "Commission rate % (decimal string) from the profit lines; falls back to the item's own commission rate column when no line supplies it."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Commission rate % (decimal string) from the order's profit lines; null when no line supplies it."
           },
           "commissionVatRate": {
-            "type": "string",
-            "description": "Commission VAT rate %, decimal string."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Commission VAT rate % (decimal string) from the same profit line; null when no line supplies it."
           },
           "refundedCommissionGross": {
             "type": "string",
-            "description": "Refunded commission incl. VAT (decimal string), from the best-known COMMISSION_REFUND lines; '0.00' when none. Falls back to the item's own column only when the profit part is empty (a platform the engine cannot compute, or a profit read that failed)."
+            "description": "Refunded commission incl. VAT (decimal string), from the best-known COMMISSION_REFUND lines; '0.00' when none."
           },
           "estimatedCommissionGross": {
             "type": [
@@ -1571,22 +1552,14 @@
               "string",
               "null"
             ],
-            "description": "Unit cost incl. VAT (decimal string) from the order's best-known profit lines; '0.00' when no cost line exists; null when a MISSING_COST issue covers the item or the profit cannot be computed."
+            "description": "Unit cost incl. VAT (decimal string) from the order's best-known profit lines; '0.00' when no cost line exists; null when the quantity is not positive, a MISSING_COST issue covers the item, or the profit cannot be computed."
           },
           "unitCostSnapshotVatRate": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Unit cost VAT rate % (decimal string) from the order's best-known profit lines; null when no cost line exists."
-          },
-          "commissionInvoiceSerialNumber": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Deprecated: always null.",
-            "example": "DCF2024000123"
+            "description": "Unit cost VAT rate % (decimal string) from the order's best-known profit lines; null when no cost line exists, when the cost lines carry different VAT rates, or when the profit cannot be computed."
           },
           "barcode": {
             "type": [
@@ -1619,7 +1592,6 @@
           "settledCommissionGross",
           "unitCostSnapshotGross",
           "unitCostSnapshotVatRate",
-          "commissionInvoiceSerialNumber",
           "barcode",
           "vendorMissing",
           "variant"
@@ -1670,110 +1642,6 @@
           "marketplaceProductCode"
         ],
         "description": "Joined product variant data. Null while the line is unmatched (variant-resolution links it)."
-      },
-      "OrderFeeDetail": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "feeType": {
-            "type": "string",
-            "enum": [
-              "SHIPPING",
-              "PLATFORM_SERVICE",
-              "PLATFORM_SERVICE_FAST",
-              "STOPPAGE",
-              "RETURN_SHIPPING",
-              "REFUND_DEDUCTION",
-              "COMMISSION_REFUND",
-              "COST_RETURN",
-              "STOPPAGE_REFUND",
-              "PROVISION_ADJUSTMENT",
-              "MANUAL_REFUND",
-              "REVENUE_ADJUSTMENT",
-              "COMMISSION_ADJUSTMENT",
-              "CUSTOM",
-              "ADVERTISING",
-              "PENALTY_DEFECTIVE",
-              "PENALTY_WRONG_PRODUCT",
-              "PENALTY_MISSING_PRODUCT",
-              "PENALTY_LATE_DELIVERY",
-              "PENALTY_SUPPLY_FAILURE",
-              "NOTIFICATION_FEE",
-              "COMMISSION_INVOICE",
-              "INTERNATIONAL_SERVICE",
-              "OVERSEAS_RETURN_OPERATION"
-            ],
-            "description": "Fee category (PLATFORM_SERVICE, SHIPPING, STOPPAGE, COMMISSION_REFUND, …).",
-            "example": "PLATFORM_SERVICE"
-          },
-          "source": {
-            "type": "string",
-            "enum": [
-              "ESTIMATE",
-              "SETTLEMENT",
-              "CARGO_INVOICE",
-              "USER_OVERRIDE",
-              "MANUAL_ENTRY"
-            ],
-            "description": "Origin of the fee row (ESTIMATE deterministic, SETTLEMENT vendor, …).",
-            "example": "ESTIMATE"
-          },
-          "direction": {
-            "type": "string",
-            "enum": [
-              "DEBIT",
-              "CREDIT"
-            ],
-            "description": "DEBIT reduces seller revenue; CREDIT refunds/positive adjustments.",
-            "example": "DEBIT"
-          },
-          "amountGross": {
-            "type": "string",
-            "description": "Fee amount incl. VAT (decimal string)."
-          },
-          "vatRate": {
-            "type": "string",
-            "description": "VAT rate %, decimal string."
-          },
-          "isEstimate": {
-            "type": "boolean",
-            "description": "True when the row is a deterministic T+0 ESTIMATE (not yet confirmed by a vendor settlement/invoice). Drives the \"Tahmini\" vs \"Gerçek fatura\" badge."
-          },
-          "displayName": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "example": "Hizmet Bedeli (PSF)"
-          },
-          "capturedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "confirmedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "When the row transitioned from ESTIMATE to its SETTLEMENT pair. PaymentOrder entry triggers this for PSF/STOPPAGE. Null for un-confirmed ESTIMATE rows."
-          }
-        },
-        "required": [
-          "id",
-          "feeType",
-          "source",
-          "direction",
-          "amountGross",
-          "vatRate",
-          "isEstimate",
-          "displayName",
-          "capturedAt",
-          "confirmedAt"
-        ]
       },
       "OrderClaimDetail": {
         "type": "object",
@@ -10863,8 +10731,8 @@
         "tags": [
           "Orders"
         ],
-        "summary": "Get a single order with items, fees, and claims",
-        "description": "Returns the full Order graph required by the detail surface: OrderItems with joined variant + product image, OrderFee timeline (capturedAt asc), and OrderClaim list (populated by the CLAIMS sync worker every 6 hours).",
+        "summary": "Get a single order with items, profit, and claims",
+        "description": "Returns the full Order graph required by the detail surface: OrderItems with joined variant + product image, the profit breakdown and per-item cost and commission figures read from profit_lines, and OrderClaim list (populated by the CLAIMS sync worker every 6 hours).",
         "security": [
           {
             "bearerAuth": []
@@ -10995,7 +10863,7 @@
           "Claims"
         ],
         "summary": "Return-claims KPI summary for a store",
-        "description": "KPI strip data for the returns page: current open-claim count, resolved count in the period, and the financial totals of the return trio (REFUND_DEDUCTION / COMMISSION_REFUND / COST_RETURN) captured in the period. Count KPIs use claimDate; financial KPIs use OrderFee.capturedAt. Period defaults to the last 30 days.",
+        "description": "KPI strip data for the returns page: current open-claim count, resolved count in the period, and the financial totals of the return trio (SALE_RETURN / COMMISSION_REFUND / COST_RETURN) from profit_lines dated into the period. Count KPIs use claimDate; financial KPIs use the settlement record's transaction date. Period defaults to the last 30 days.",
         "security": [
           {
             "bearerAuth": []

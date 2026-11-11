@@ -16,8 +16,9 @@ const ZERO = new Decimal(0);
 /**
  * The per-item cost and commission figures the order detail shows for one line. Unit
  * cost and its VAT rate come from the item's best-known cost lines; the commission
- * amount from the best-known commission line, the rate from the estimate; the settled
- * commission is set only when the best-known commission came from a marketplace record.
+ * amount from the best-known commission line, the rate and its VAT rate from the
+ * estimate commission line that carries the rate; the settled commission is set only
+ * when the best-known commission came from a marketplace record.
  * The refunded commission is the item's best-known COMMISSION_REFUND lines (a returned
  * item's commission given back), read the same way the commission is.
  */
@@ -26,6 +27,7 @@ export interface ItemProfitValues {
   readonly unitCostVatRate: string | null;
   readonly commissionGross: string | null;
   readonly commissionRate: string | null;
+  readonly commissionVatRate: string | null;
   readonly estimatedCommissionGross: string | null;
   readonly settledCommissionGross: string | null;
   readonly refundedCommissionGross: string | null;
@@ -48,12 +50,14 @@ export function itemProfitValues(input: {
 
   const bestKnownForItem = bestKnownLines.filter((line) => line.orderItemId === orderItemId);
   const estimateForItem = estimateLines.filter((line) => line.orderItemId === orderItemId);
+  const rateSource = rateCarryingCommissionLine(estimateForItem);
 
   return {
     unitCostGross: unitCostGrossOf(bestKnownForItem, orderItemId, quantity, issues),
     unitCostVatRate: sharedCostVatRate(bestKnownForItem),
     commissionGross: commissionGrossOf(bestKnownForItem),
-    commissionRate: commissionRateOf(estimateForItem),
+    commissionRate: rateSource?.ratePct ?? null,
+    commissionVatRate: rateSource?.line.vatRatePct?.toString() ?? null,
     estimatedCommissionGross: commissionGrossOf(estimateForItem),
     settledCommissionGross: settledCommissionGrossOf(bestKnownForItem),
     refundedCommissionGross: refundedCommissionGrossOf(bestKnownForItem),
@@ -132,15 +136,21 @@ function commissionGrossOf(lines: readonly ProfitLine[]): string | null {
   return commissionLines.reduce((sum, line) => sum.add(line.amount.gross), ZERO).toFixed(2);
 }
 
-/** The estimate commission line's rate input as a string; null when there is none. */
-function commissionRateOf(estimateLines: readonly ProfitLine[]): string | null {
+/**
+ * The first estimate commission line carrying a string `ratePct` input, with that rate;
+ * null when there is none. The item's commission rate and commission VAT rate both come
+ * from this one line.
+ */
+function rateCarryingCommissionLine(
+  estimateLines: readonly ProfitLine[],
+): { readonly ratePct: string; readonly line: ProfitLine } | null {
   for (const line of estimateLines) {
     if (line.type !== ProfitLineType.COMMISSION) {
       continue;
     }
     const rate = line.inputs['ratePct'];
     if (typeof rate === 'string') {
-      return rate;
+      return { ratePct: rate, line };
     }
   }
   return null;

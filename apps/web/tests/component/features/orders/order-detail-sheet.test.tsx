@@ -85,12 +85,9 @@ const ORDER = {
   profitExcludedAt: null,
   profitExclusionReason: null,
   reconciliationStatus: 'NOT_SETTLED',
-  paymentOrderId: null,
-  paymentDate: null,
   createdAt: '2026-06-20T10:00:00.000Z',
   updatedAt: '2026-06-20T10:00:00.000Z',
   items: [],
-  fees: [],
   claims: [],
 };
 

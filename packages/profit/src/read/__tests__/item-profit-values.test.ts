@@ -35,13 +35,14 @@ function costLine(params: {
   });
 }
 
-/** A commission line with a certainty/source and an optional estimate rate input. */
+/** A commission line with a certainty/source, an optional rate input and VAT rate. */
 function commissionLine(params: {
   readonly orderItemId: string;
   readonly gross: string;
   readonly certainty: ProfitLineCertainty;
   readonly source: ProfitLineSource;
   readonly ratePct?: string;
+  readonly vatRatePct?: string;
 }): ProfitLine {
   return createProfitLine({
     type: ProfitLineType.COMMISSION,
@@ -50,7 +51,7 @@ function commissionLine(params: {
     certainty: params.certainty,
     source: params.source,
     amount: { gross: new Decimal(params.gross), vat: new Decimal('0') },
-    vatRatePct: null,
+    vatRatePct: params.vatRatePct === undefined ? null : new Decimal(params.vatRatePct),
     inputs: params.ratePct === undefined ? {} : { ratePct: params.ratePct },
     externalRecord: null,
   });
@@ -302,6 +303,83 @@ describe('itemProfitValues', () => {
     expect(values.commissionRate).toBe('19');
     expect(values.estimatedCommissionGross).toBe('28.00');
     expect(values.settledCommissionGross).toBe('30.00');
+  });
+
+  it('takes the commission VAT rate from the same estimate line as the rate', () => {
+    const values = itemProfitValues({
+      orderItemId: ITEM,
+      quantity: 1,
+      bestKnownLines: [],
+      estimateLines: [
+        // No rate input: skipped, so its VAT rate must not be reported.
+        commissionLine({
+          orderItemId: ITEM,
+          gross: '5.00',
+          certainty: ProfitLineCertainty.ESTIMATE,
+          source: ProfitLineSource.RULE,
+          vatRatePct: '18',
+        }),
+        commissionLine({
+          orderItemId: ITEM,
+          gross: '28.00',
+          certainty: ProfitLineCertainty.ESTIMATE,
+          source: ProfitLineSource.RULE,
+          ratePct: '19',
+          vatRatePct: '20',
+        }),
+        // Another item's line must not count toward this item.
+        commissionLine({
+          orderItemId: OTHER_ITEM,
+          gross: '9.00',
+          certainty: ProfitLineCertainty.ESTIMATE,
+          source: ProfitLineSource.RULE,
+          ratePct: '7',
+          vatRatePct: '10',
+        }),
+      ],
+      issues: [],
+    });
+
+    expect(values.commissionRate).toBe('19');
+    expect(values.commissionVatRate).toBe('20');
+  });
+
+  it('reports a null commission VAT rate when the rate line has none or no line has a rate', () => {
+    const noVat = itemProfitValues({
+      orderItemId: ITEM,
+      quantity: 1,
+      bestKnownLines: [],
+      estimateLines: [
+        commissionLine({
+          orderItemId: ITEM,
+          gross: '28.00',
+          certainty: ProfitLineCertainty.ESTIMATE,
+          source: ProfitLineSource.RULE,
+          ratePct: '19',
+        }),
+      ],
+      issues: [],
+    });
+    expect(noVat.commissionRate).toBe('19');
+    expect(noVat.commissionVatRate).toBeNull();
+
+    const noRateLine = itemProfitValues({
+      orderItemId: ITEM,
+      quantity: 1,
+      bestKnownLines: [],
+      estimateLines: [
+        commissionLine({
+          orderItemId: ITEM,
+          gross: '28.00',
+          certainty: ProfitLineCertainty.ESTIMATE,
+          source: ProfitLineSource.RULE,
+          vatRatePct: '20',
+        }),
+      ],
+      issues: [],
+    });
+    expect(noRateLine.commissionRate).toBeNull();
+    expect(noRateLine.commissionVatRate).toBeNull();
   });
 
   it('reports a settled commission only for a marketplace record', () => {

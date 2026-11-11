@@ -2,7 +2,6 @@ import { prisma } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import { hadCostWithinOrderDay, stampCostWindowExclusions } from '@pazarsync/order-sync';
 import { getBusinessDayRange } from '@pazarsync/utils';
-import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -364,51 +363,6 @@ function runStamp(params: {
   );
 }
 
-// The eight denormalized legacy profit columns the backfill must clear when it
-// excludes an order, so an excluded order can never surface a net profit or margin
-// through the legacy readers. Seed values are arbitrary non-null figures.
-const LEGACY_PROFIT_COLUMNS = [
-  'estimatedNetProfit',
-  'estimatedNetVat',
-  'estimatedSaleMarginPct',
-  'estimatedCostMarkupPct',
-  'settledNetProfit',
-  'settledNetVat',
-  'settledSaleMarginPct',
-  'settledCostMarkupPct',
-] as const;
-
-const LEGACY_PROFIT_SEED: Record<(typeof LEGACY_PROFIT_COLUMNS)[number], string> = {
-  estimatedNetProfit: '50.00',
-  estimatedNetVat: '8.00',
-  estimatedSaleMarginPct: '12.5000',
-  estimatedCostMarkupPct: '25.0000',
-  settledNetProfit: '45.00',
-  settledNetVat: '7.00',
-  settledSaleMarginPct: '11.2500',
-  settledCostMarkupPct: '22.5000',
-};
-
-// Write all eight legacy profit columns onto an order so a later run can prove the
-// backfill either clears them (when it excludes the order) or leaves them untouched.
-async function seedLegacyProfit(orderId: string): Promise<void> {
-  await prisma.order.update({ where: { id: orderId }, data: { ...LEGACY_PROFIT_SEED } });
-}
-
-async function expectLegacyProfitCleared(orderId: string): Promise<void> {
-  const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-  for (const column of LEGACY_PROFIT_COLUMNS) {
-    expect(order[column]).toBeNull();
-  }
-}
-
-async function expectLegacyProfitUnchanged(orderId: string): Promise<void> {
-  const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-  for (const column of LEGACY_PROFIT_COLUMNS) {
-    expect(order[column]?.toString()).toBe(new Decimal(LEGACY_PROFIT_SEED[column]).toString());
-  }
-}
-
 describe('stampCostWindowExclusions', () => {
   beforeAll(async () => {
     await ensureDbReachable();
@@ -446,68 +400,6 @@ describe('stampCostWindowExclusions', () => {
     expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
     const queued = await prisma.profitRecomputeRequest.findUnique({ where: { orderId } });
     expect(queued?.reason).toBe(ProfitRecomputeReason.MANUAL);
-  });
-
-  it('clears the legacy profit columns of an order it excludes', async () => {
-    const org = await createOrganization();
-    const store = await createStore(org.id);
-    const variantId = await createVariant(org.id, store.id, 'EAN13-BF-CLEAR');
-    // Cost attached after the day end -> the window was missed; we had the order in
-    // time (created_at before the day end), so the reason is COST_DEADLINE_MISSED.
-    await attachCost({
-      orgId: org.id,
-      storeId: store.id,
-      variantId,
-      attachedAt: TOO_LATE,
-      versionEffectiveFrom: TOO_LATE,
-    });
-    const orderId = await createPastDayOrder({
-      orgId: org.id,
-      storeId: store.id,
-      variantId,
-      createdAt: IN_TIME,
-    });
-    // An existing order can already carry legacy profit figures (a live writer wrote
-    // them before the backfill excludes it); the backfill must null them all.
-    await seedLegacyProfit(orderId);
-
-    const result = await runStamp({ organizationId: org.id, storeId: store.id });
-
-    expect(result).toEqual({ costDeadlineMissed: 1, lateUncostedArrival: 0 });
-    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    expect(order.profitExcludedAt).not.toBeNull();
-    expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
-    await expectLegacyProfitCleared(orderId);
-  });
-
-  it('keeps the legacy profit columns of an order it leaves alone', async () => {
-    const org = await createOrganization();
-    const store = await createStore(org.id);
-    const variantId = await createVariant(org.id, store.id, 'EAN13-BF-KEEP');
-    // Timely costed -> the window is satisfied, so the backfill never touches it and
-    // its legacy profit figures must survive the run intact.
-    await attachCost({
-      orgId: org.id,
-      storeId: store.id,
-      variantId,
-      attachedAt: IN_TIME,
-      versionEffectiveFrom: IN_TIME,
-    });
-    const orderId = await createPastDayOrder({
-      orgId: org.id,
-      storeId: store.id,
-      variantId,
-      createdAt: IN_TIME,
-    });
-    await seedLegacyProfit(orderId);
-
-    const result = await runStamp({ organizationId: org.id, storeId: store.id });
-
-    expect(result).toEqual({ costDeadlineMissed: 0, lateUncostedArrival: 0 });
-    expect(
-      (await prisma.order.findUniqueOrThrow({ where: { id: orderId } })).profitExcludedAt,
-    ).toBeNull();
-    await expectLegacyProfitUnchanged(orderId);
   });
 
   it('stamps a late arrival as LATE_UNCOSTED_ARRIVAL', async () => {
@@ -622,17 +514,14 @@ describe('stampCostWindowExclusions', () => {
       variantId,
       createdAt: IN_TIME,
     });
-    await seedLegacyProfit(orderId);
 
     const result = await runStamp({ organizationId: org.id, storeId: store.id, dryRun: true });
 
-    // The count reflects what a real run would stamp, but nothing is written --
-    // including the legacy profit columns, which stay exactly as seeded.
+    // The count reflects what a real run would stamp, but nothing is written.
     expect(result).toEqual({ costDeadlineMissed: 1, lateUncostedArrival: 0 });
     expect(
       (await prisma.order.findUniqueOrThrow({ where: { id: orderId } })).profitExcludedAt,
     ).toBeNull();
-    await expectLegacyProfitUnchanged(orderId);
     expect(await prisma.profitRecomputeRequest.count({ where: { storeId: store.id } })).toBe(0);
   });
 

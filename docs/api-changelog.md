@@ -17,9 +17,22 @@ section "Versioning" for details.
   in Turkish lira only, so there is no exchange-rate surface. The route, its
   `FxRatesLatestResponse` and `FxRateEntry` component schemas, and the `FxRates` tag are gone.
   Breaking; the web client ships the matching change in the same PR.
+- **Order detail fee and payment-order fields**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}`). `fees` (always an empty
+  array), `paymentOrderId` and `paymentDate` (always null), and the per-item
+  `commissionInvoiceSerialNumber` (always null) are gone, together with the `OrderFeeDetail`
+  component schema. The order list never carried them. Breaking; the web client ships the matching
+  change in the same PR.
 
 ### Changed
 
+- **Order detail item commission rates are nullable and read from the profit lines only**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}`). `items[].commissionRate`
+  and `items[].commissionVatRate` are now `string | null`: both come from the order's estimate
+  commission profit line (the VAT rate from the same line as the rate) and are null when no line
+  supplies them. The fallback to the item's legacy columns is gone: for a platform the engine
+  cannot compute, `commissionGross` and `refundedCommissionGross` read `'0.00'` and the two rates
+  read null instead of the stored item values. Profit amounts are unchanged.
 - **Scenario screens are priced by the profit engine.** Product pricing (list and quote), commission
   tariffs and Plus commission tariffs (detail and estimate), advantage product labels and flash
   products (detail and estimate), discount lists (detail and estimate) and marketplace campaigns

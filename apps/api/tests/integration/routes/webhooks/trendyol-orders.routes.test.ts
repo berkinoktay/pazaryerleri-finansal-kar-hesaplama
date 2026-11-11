@@ -32,7 +32,7 @@ const WEBHOOK_USER = 'pazarsync-deadbeef00000000';
 const WEBHOOK_PASS = 'A'.repeat(43); // 43-char base64url-shaped password (test only)
 
 // Webhook order dates must fall after the FeeDefinition seed (effectiveFrom
-// 2026-05-18) so applyEstimateOnOrderCreate can resolve PSF/Stopaj rows.
+// 2026-05-18) so the profit engine can resolve its fee rows.
 const ORDER_DATE_MS = Date.UTC(2026, 4, 19);
 const LAST_MODIFIED_MS = Date.UTC(2026, 4, 20);
 const DELIVERED_AT_MS = Date.UTC(2026, 4, 20, 12);

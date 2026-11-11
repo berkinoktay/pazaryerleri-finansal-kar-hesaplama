@@ -27,72 +27,14 @@ import { Decimal } from 'decimal.js';
 
 import { refreshProductAggregates } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
-import type { Platform, Prisma, ProfitExclusionReason } from '@pazarsync/db';
+import type { Prisma, ProfitExclusionReason } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
-import { enqueueProfitRecompute, resolveCommissionRate } from '@pazarsync/profit';
+import { enqueueProfitRecompute } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 import { resolveProfitSettings } from '@pazarsync/utils';
 
 import { decrementVariantStock, isOrderOnBusinessToday } from './stock';
-
-/**
- * Resolve the effective commission for a mapped line, applying the DB category
- * base_rate fallback when the webhook carried no commission of its own.
- *
- * Precedence:
- *   1. commissionKnown !== false (true OR legacy-undefined) → trust the mapped
- *      commission values as-is (existing behavior; no DB read).
- *   2. commissionKnown === false with a categoryId and a known platform → look
- *      up the category base_rate (sellerSegment=null) and recompute
- *      commissionGross/refundedCommissionGross with mapLine's exact formula.
- *   3. Category has no rule in the DB (resolver returns null) → keep the mapped
- *      0 fallback (unchanged legacy behavior) and warn.
- */
-async function resolveEffectiveCommission(
-  line: MappedOrder['lines'][number],
-  platform: Platform | null,
-  tx: Prisma.TransactionClient,
-): Promise<{
-  commissionRate: Decimal;
-  commissionGross: Decimal;
-  refundedCommissionGross: Decimal;
-}> {
-  // commissionKnown !== false (true veya legacy undefined) -> mapped degerleri KULLAN (mevcut davranis).
-  if (line.commissionKnown !== false || line.categoryId === null || platform === null) {
-    return {
-      commissionRate: new Decimal(line.commissionRate),
-      commissionGross: new Decimal(line.commissionGross),
-      refundedCommissionGross: new Decimal(line.refundedCommissionGross),
-    };
-  }
-  // Webhook komisyon tasimadi -> DB kategori base_rate fallback (sellerSegment=null).
-  const resolved = await resolveCommissionRate(
-    { platform, categoryId: BigInt(line.categoryId), brandId: null, sellerSegment: null },
-    tx,
-  );
-  if (resolved === null) {
-    syncLog.warn('orders.commission-fallback-miss', {
-      barcode: line.barcode,
-      categoryId: line.categoryId,
-    });
-    return {
-      commissionRate: new Decimal(line.commissionRate),
-      commissionGross: new Decimal(line.commissionGross),
-      refundedCommissionGross: new Decimal(line.refundedCommissionGross),
-    };
-  }
-  const rate = resolved.rate;
-  // mapLine ile AYNI formul: commissionGross = rate x lineListGross / 100; refunded = rate x lineSellerDiscountGross / 100.
-  return {
-    commissionRate: rate,
-    commissionGross: new Decimal(line.lineListGross).mul(rate).div(100).toDecimalPlaces(2),
-    refundedCommissionGross: new Decimal(line.lineSellerDiscountGross)
-      .mul(rate)
-      .div(100)
-      .toDecimalPlaces(2),
-  };
-}
 
 /**
  * Persist a single mapped order + its items in one transaction.
@@ -102,9 +44,10 @@ async function resolveEffectiveCommission(
  *     aggregate'ı MappedOrder paket toplamlarından. promotionDisplays UI gösterimi.
  *     agreedDeliveryDate, actualDeliveryDate, fastDelivery, micro direct API.
  *   - OrderItem: lineListGross/lineSaleGross/lineSellerDiscountGross/saleVatRate +
- *     commissionGross/refundedCommissionGross/commissionVatRate +
- *     estimatedCommissionGross (write-once #340) + orderCommissionRatePct (the line's
- *     own raw rate). Variant lookup by barcode (storeId scoped).
+ *     orderCommissionRatePct (the line's own raw commission rate, null when the line
+ *     carried none). The profit engine derives every commission amount from that rate;
+ *     no commission or cost amount is stored on the item. Variant lookup by barcode
+ *     (storeId scoped).
  *   - Snapshot-at-create: the store's resolved profit settings are copied onto the
  *     order on CREATE only (forward-only; an UPDATE never rewrites them).
  *   - enqueueProfitRecompute (`@pazarsync/profit`): the last step of the tx on
@@ -185,18 +128,14 @@ export async function upsertOrderWithSnapshot(
       return;
     }
 
-    // Store read (Gorev 4 review): one read serves both the create-only profit-settings
-    // snapshot and the commission fallback's platform lookup below. It stays lazy -- the
-    // read happens only on a genuine create (existingOrder === null) or when at least one
-    // line arrived without a commission (commissionKnown === false) and needs the DB
-    // category base_rate fallback -- so the hot update path with full commissions takes no
-    // extra query.
-    const needsCommissionFallback = order.lines.some((l) => l.commissionKnown === false);
+    // Store read: serves only the create-only profit-settings snapshot below, so it
+    // stays lazy -- the read happens only on a genuine create (existingOrder === null)
+    // and the hot update path takes no extra query.
     const storeRow =
-      existingOrder === null || needsCommissionFallback
+      existingOrder === null
         ? await tx.store.findUnique({
             where: { id: storeId },
-            select: { profitSettings: true, platform: true },
+            select: { profitSettings: true },
           })
         : null;
 
@@ -356,13 +295,6 @@ export async function upsertOrderWithSnapshot(
       },
     });
 
-    // Commission fallback needs the store platform only when at least one line arrived
-    // without a commission (commissionKnown === false). It was already resolved by the
-    // single store read above (storeRow), so the hot intake path takes no extra query.
-    const storePlatform: Platform | null = needsCommissionFallback
-      ? (storeRow?.platform ?? null)
-      : null;
-
     // Optimistic between-scans stock: the distinct products whose variant stock
     // we decrement below (one first-insert per line). Recomputed once after the
     // loop so Product.totalStock stays consistent with the touched variants.
@@ -421,12 +353,7 @@ export async function upsertOrderWithSnapshot(
                 ],
               }
             : { orderId: upserted.id, productVariantId: variant?.id ?? null },
-        select: {
-          id: true,
-          platformLineId: true,
-          commissionGross: true,
-          settledCommissionGross: true,
-        },
+        select: { id: true, platformLineId: true },
       });
       if (existing !== null) {
         // Self-heal: legacy anahtarla yakalanan satıra platform kimliğini
@@ -440,39 +367,14 @@ export async function upsertOrderWithSnapshot(
         }
         // Two-phase webhook (#426): a later event that finally carries the line's own
         // commission (commissionKnown === true) refreshes the raw order_commission_rate_pct
-        // column the loader reads. While the parcel is not yet settled it ALSO refreshes the
-        // legacy estimate-side commission columns, but only when the recomputed commission
-        // differs from the stored value. Decision (Gorev 4 review): fold both into ONE
-        // tx.orderItem.update so a refreshed line is a single write -- the raw rate always
-        // moves, the legacy columns only when they changed. Once the parcel is settled
-        // (settledCommissionGross set) the legacy columns are frozen, so only the raw rate is
-        // written in its own update. The freshness guard above already dropped any strictly-
+        // column the loader reads. The freshness guard above already dropped any strictly-
         // older event, so only a newer-or-equal event reaches here; the profit recompute is
         // enqueued once at the end of this function.
         if (line.commissionKnown === true) {
-          if (existing.settledCommissionGross === null) {
-            const eff = await resolveEffectiveCommission(line, storePlatform, tx);
-            const legacyChanged = !eff.commissionGross.equals(
-              new Decimal(existing.commissionGross),
-            );
-            await tx.orderItem.update({
-              where: { id: existing.id },
-              data: {
-                orderCommissionRatePct: new Decimal(line.commissionRate),
-                ...(legacyChanged && {
-                  commissionRate: eff.commissionRate,
-                  commissionGross: eff.commissionGross,
-                  refundedCommissionGross: eff.refundedCommissionGross,
-                  estimatedCommissionGross: eff.commissionGross,
-                }),
-              },
-            });
-          } else {
-            await tx.orderItem.update({
-              where: { id: existing.id },
-              data: { orderCommissionRatePct: new Decimal(line.commissionRate) },
-            });
-          }
+          await tx.orderItem.update({
+            where: { id: existing.id },
+            data: { orderCommissionRatePct: new Decimal(line.commissionRate) },
+          });
         }
         continue;
       }
@@ -487,11 +389,6 @@ export async function upsertOrderWithSnapshot(
         });
       }
 
-      // Commission with DB category base_rate fallback when the line carried no
-      // real commission (commissionKnown === false). Otherwise the mapped values
-      // pass through unchanged.
-      const eff = await resolveEffectiveCommission(line, storePlatform, tx);
-
       await tx.orderItem.create({
         data: {
           orderId: upserted.id,
@@ -503,39 +400,22 @@ export async function upsertOrderWithSnapshot(
           // undefined'dır — BigInt(undefined) fırlatır.
           platformLineId: line.platformLineId != null ? BigInt(line.platformLineId) : null,
           barcode: line.barcode,
-          // GROSS konvansiyon (2026-06-16): satır para değerleri GROSS (KDV-dahil).
-          // Satış: lineListGross (liste×adet) / lineSaleGross (effectiveSale) /
-          // lineSellerDiscountGross (satıcı indirimi) + saleVatRate. Komisyon:
-          // commissionRate × lineListGross = commissionGross (LİSTE brüt) + ayrı
-          // refundedCommissionGross (satıcı-indirim payının komisyon iadesi); effective
-          // = gross − refunded = effectiveSale × rate (net-satış tabanı #332, çift-düşme
-          // YOK — taban liste, indirim yalnız refunded'da düşülür).
+          // GROSS convention (2026-06-16): line money values are GROSS (VAT included).
+          // Sale: lineListGross (list x quantity) / lineSaleGross (effective sale) /
+          // lineSellerDiscountGross (seller discount) + saleVatRate.
           lineListGross: new Decimal(line.lineListGross),
           lineSaleGross: new Decimal(line.lineSaleGross),
           lineSellerDiscountGross: new Decimal(line.lineSellerDiscountGross),
-          // Mikro ihracat → satış KDV oranı %0 (ihracat istisnası). build-profit-breakdown
-          // saleVat'i bu orandan türetir → micro siparişte 0 (Order.saleVat=0 ile tutarlı).
+          // Micro export -> sale VAT rate 0% (export exemption), consistent with
+          // Order.saleVat = 0 on a micro order.
           saleVatRate: microExport ? new Decimal(0) : new Decimal(line.saleVatRate),
-          commissionRate: eff.commissionRate,
-          commissionGross: eff.commissionGross,
-          refundedCommissionGross: eff.refundedCommissionGross,
-          commissionVatRate: new Decimal(line.commissionVatRate),
-          // Komisyon TAHMİNİ (#340): T+0'da mapper değeri — webhook komisyon taşımazsa
-          // kategori base_rate fallback'i (resolveEffectiveCommission). Sonraki webhook
-          // gerçek komisyonu getirince settlement'a kadar TAZELENİR (mevcut-satır dalı);
-          // settledCommissionGross yazılınca donar. Hakediş Kontrolü tahmin-vs-gerçek tabanı
-          // (recompute-settled önce settledCommissionGross'u, yoksa bunu okur).
-          estimatedCommissionGross: eff.commissionGross,
+          // TEMPORARY: the legacy NOT NULL column is dropped in the next task; nothing reads it.
+          commissionRate: new Decimal(0),
           // Raw order commission rate (phase 3B): the line's OWN rate, null when the
-          // line carried no commission of its own. Never the category fallback that
-          // resolveEffectiveCommission may produce in eff.commissionRate — the loader
-          // reads this column and treats null/zero as "unknown".
+          // line carried no commission of its own. The loader reads this column and
+          // treats null/zero as "unknown", falling back to the category rule.
           orderCommissionRatePct:
             line.commissionKnown === false ? null : new Decimal(line.commissionRate),
-          // The legacy cost snapshot columns stay null: the profit engine reads cost
-          // profiles directly, never these columns. They are removed in phase 5.
-          unitCostSnapshotGross: null,
-          unitCostSnapshotVatRate: null,
         },
       });
 

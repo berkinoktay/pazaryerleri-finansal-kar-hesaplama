@@ -20,7 +20,6 @@ import {
   createOrder,
   createOrderClaim,
   createOrderClaimItem,
-  createOrderFee,
   createOrganization,
   createProfitLine,
   createProfitStatement,
@@ -973,21 +972,12 @@ describe('Order routes', () => {
       expect(res.status).toBe(404);
     });
 
-    it('returns the order with its claims and an empty fee list', async () => {
+    it('returns the order with its claims and no fee or payment-order fields', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
       const order = await seedSimpleOrder(org.id, store.id);
-
-      // A stored order_fee must NOT surface: the detail serves fees as [] now
-      // (decision 9), so this proves the fee list is empty even when rows exist.
-      await createOrderFee(order.id, org.id, {
-        feeType: 'PLATFORM_SERVICE',
-        source: 'ESTIMATE',
-        amountGross: '13.19',
-        vatRate: '20.00',
-      });
 
       const claim = await createOrderClaim(org.id, store.id, order.id, { resolved: false });
       await createOrderClaimItem(claim.id, {
@@ -1021,7 +1011,6 @@ describe('Order routes', () => {
       const body = (await res.json()) as {
         id: string;
         store: { id: string; platform: string };
-        fees: { feeType: string; amountGross: string }[];
         claims: { trendyolClaimId: string; items: { reasonCode: string }[] }[];
         saleGross: string | null;
         items: { barcode: string | null; variant: unknown }[];
@@ -1031,8 +1020,10 @@ describe('Order routes', () => {
       expect(body.id).toBe(order.id);
       expect(body.store.id).toBe(store.id);
       expect(body.saleGross).toBe('240');
-      // fees[] is always empty now, even though an order_fee row exists.
-      expect(body.fees).toEqual([]);
+      // The fee list and the payment-order fields left the wire contract.
+      expect(body).not.toHaveProperty('fees');
+      expect(body).not.toHaveProperty('paymentOrderId');
+      expect(body).not.toHaveProperty('paymentDate');
       expect(body.claims).toHaveLength(1);
       expect(body.claims[0]?.items[0]?.reasonCode).toBe('DAMAGEDITEM');
       // Unmatched line: variant null, the item-level barcode carries the trace.
@@ -1343,7 +1334,7 @@ describe('Order routes', () => {
       expect(await prisma.orderProfitStatement.count({ where: { orderId } })).toBe(0);
     });
 
-    it('returns no breakdown for a platform the engine cannot compute', async () => {
+    it('returns no breakdown and null item rates for a platform the engine cannot compute', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
@@ -1351,14 +1342,42 @@ describe('Order routes', () => {
       // returns a null breakdown instead of raising a 500.
       const store = await createStore(org.id, { platform: 'HEPSIBURADA' });
       const order = await createOrder(org.id, store.id);
+      // The legacy item columns hold a rate and amount; with no line context the
+      // detail must not fall back to them.
+      const item = await prisma.orderItem.create({
+        data: {
+          orderId: order.id,
+          organizationId: org.id,
+          productVariantId: null,
+          barcode: 'BC-HB-1',
+          platformLineId: 7901n,
+          quantity: 1,
+          commissionRate: '10.00',
+          commissionGross: '12.00',
+        },
+      });
 
       const res = await app.request(
         `/v1/organizations/${org.id}/stores/${store.id}/orders/${order.id}`,
         { headers: { Authorization: bearer(user.accessToken) } },
       );
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { profitBreakdown: unknown };
+      const body = (await res.json()) as {
+        profitBreakdown: unknown;
+        items: {
+          id: string;
+          commissionGross: string;
+          commissionRate: string | null;
+          commissionVatRate: string | null;
+          refundedCommissionGross: string;
+        }[];
+      };
       expect(body.profitBreakdown).toBeNull();
+      const hbItem = body.items.find((i) => i.id === item.id);
+      expect(hbItem?.commissionRate).toBeNull();
+      expect(hbItem?.commissionVatRate).toBeNull();
+      expect(hbItem?.commissionGross).toBe('0.00');
+      expect(hbItem?.refundedCommissionGross).toBe('0.00');
     });
 
     it('returns item cost and commission from the profit lines', async () => {
@@ -1449,7 +1468,8 @@ describe('Order routes', () => {
           unitCostSnapshotGross: string | null;
           unitCostSnapshotVatRate: string | null;
           commissionGross: string;
-          commissionRate: string;
+          commissionRate: string | null;
+          commissionVatRate: string | null;
           estimatedCommissionGross: string | null;
           settledCommissionGross: string | null;
         }[];
@@ -1460,9 +1480,11 @@ describe('Order routes', () => {
       // Unit cost: the cost line's gross divided by the quantity (100 / 2).
       expect(i1?.unitCostSnapshotGross).toBe('50.00');
       expect(i1?.unitCostSnapshotVatRate).toBe('20');
-      // Amount from the best-known (actual) line; rate from the estimate's inputs.ratePct.
+      // Amount from the best-known (actual) line; rate from the estimate's inputs.ratePct
+      // and the commission VAT rate from that same estimate line.
       expect(i1?.commissionGross).toBe('24.00');
       expect(i1?.commissionRate).toBe('19');
+      expect(i1?.commissionVatRate).toBe('20');
       expect(i1?.estimatedCommissionGross).toBe('20.00');
       expect(i1?.settledCommissionGross).toBe('24.00');
       // MISSING_COST names item 2 → its unit cost is null.
@@ -1871,7 +1893,8 @@ describe('Order routes', () => {
       });
 
       // The legacy column still holds the pre-cancel commission (28); the statement has
-      // no commission line, so the item's commission is zero, not the column.
+      // no commission line, so the item's commission is zero and its rate null, never
+      // the column.
       const item = await prisma.orderItem.create({
         data: {
           orderId: order.id,
@@ -1902,12 +1925,13 @@ describe('Order routes', () => {
         { headers: { Authorization: bearer(user.accessToken) } },
       );
       expect(res.status).toBe(200);
-      const body: { items: { id: string; commissionGross: string; commissionRate: string }[] } =
-        await res.json();
+      const body: {
+        items: { id: string; commissionGross: string; commissionRate: string | null }[];
+      } = await res.json();
       const cancelledItem = body.items.find((i) => i.id === item.id);
       expect(cancelledItem?.commissionGross).toBe('0.00');
-      // The rate stays informational: with no estimate commission line it is the column.
-      expect(cancelledItem?.commissionRate).toBe('19.5');
+      // No estimate commission line supplies a rate, so it is null.
+      expect(cancelledItem?.commissionRate).toBeNull();
     });
 
     it('lists the profit issues of the best-known statement', async () => {

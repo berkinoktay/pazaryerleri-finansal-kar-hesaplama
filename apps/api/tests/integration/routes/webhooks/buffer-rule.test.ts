@@ -166,9 +166,8 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
   beforeEach(async () => {
     _resetRateLimitStoreForTests();
     await truncateAll();
-    // Late-arrival cost-missing now persists to orders, which runs
-    // applyEstimateOnOrderCreate (PSF + Stopaj ESTIMATE fees) — needs the
-    // FeeDefinition seed even though the estimate itself stays null (no cost).
+    // Late-arrival cost-missing now persists to orders; the FeeDefinition seed keeps
+    // the reference data complete for the profit engine.
     await ensureFeeDefinitions();
   });
 

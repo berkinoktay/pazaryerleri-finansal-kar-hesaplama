@@ -4,7 +4,7 @@
  * Real DB. The handler is invoked directly (no timer). The vendor side is the
  * only thing guarded — a global.fetch tripwire throws so no test can leak a live
  * catalog lookup; every barcode used here is either catalogued (no vendor call)
- * or the payload fails before intake (fee resolution throws).
+ * or the payload fails before intake (a simulated transient DB fault).
  *
  * Times are written onto rows (nextProcessAt / processAttempts) instead of faking
  * a clock: the lease + backoff decisions run against the DB `now()`, so seeding a
@@ -170,9 +170,11 @@ describe('processWebhookEventsBatch', () => {
     const event = await createWebhookEvent(org.id, store.id, {
       rawPayload: makeWebhookPayload(),
     });
-    // Remove the COMMISSION_INVOICE definition the processor resolves FIRST so
-    // fee resolution throws — a TRANSIENT fault (missing seed, not a bad payload).
-    await prisma.feeDefinition.deleteMany({ where: { feeType: 'COMMISSION_INVOICE' } });
+    // Fail the intake's order-write transaction once -- a TRANSIENT fault (DB, not a
+    // bad payload).
+    vi.spyOn(prisma, '$transaction').mockRejectedValueOnce(
+      new Error('simulated transient DB fault'),
+    );
 
     const before = Date.now();
     const firstClosed = await processWebhookEventsBatch(prisma);
@@ -188,9 +190,8 @@ describe('processWebhookEventsBatch', () => {
     expect(afterFail.nextProcessAt!.getTime()).toBeLessThan(before + 5 * 60_000);
     expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
 
-    // Seed returns and the backoff window elapses (simulated by clearing the
-    // retry gate) → the next tick replays the SAME row to completion.
-    await ensureFeeDefinitions();
+    // The fault was one-shot and the backoff window elapses (simulated by clearing
+    // the retry gate) → the next tick replays the SAME row to completion.
     await prisma.webhookEvent.update({
       where: { id: event.id },
       data: { nextProcessAt: new Date(Date.now() - 1_000) },
@@ -222,8 +223,10 @@ describe('processWebhookEventsBatch', () => {
       where: { id: event.id },
       data: { processAttempts: 4, nextProcessAt: new Date(Date.now() - 1_000) },
     });
-    // Force the processing failure at fee resolution.
-    await prisma.feeDefinition.deleteMany({ where: { feeType: 'COMMISSION_INVOICE' } });
+    // Force the processing failure at the intake's order-write transaction.
+    vi.spyOn(prisma, '$transaction').mockRejectedValueOnce(
+      new Error('simulated transient DB fault'),
+    );
 
     const closed = await processWebhookEventsBatch(prisma);
 

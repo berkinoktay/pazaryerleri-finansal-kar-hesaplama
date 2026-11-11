@@ -455,8 +455,9 @@ export interface TrendyolOrdersStreamResponse {
 //                             (fallback: lineGrossAmount × quantity when absent)
 //   lineSellerDiscountGross = Σ discountDetails.lineItemSellerDiscount
 //   lineListGross           = lineGrossAmount × quantity
-//   commissionGross         = commissionRate × lineSaleGross   (net-sale base #332)
-//   refundedCommissionGross = commissionRate × lineSellerDiscountGross  (T+0 estimate)
+//
+// Commission: only the raw line rate (commissionRate) is carried; the profit engine
+// derives every commission amount and its VAT itself.
 //
 // Invariant: Σ lineSaleGross = packageTotalPrice → syncLog.warn on mismatch
 // (no silent drift). Intra-line scalar-vs-details drift is EXPECTED (no warn).
@@ -477,27 +478,22 @@ export interface MappedOrderLine {
   lineSaleGross: string;
   lineSellerDiscountGross: string;
   saleVatRate: string;
-  commissionRate: string;
-  commissionGross: string;
   /**
-   * T+0 estimate of the commission Trendyol refunds on the seller-discount
-   * portion (research §7.3): commissionRate × lineSellerDiscountGross. Settlement
-   * (handleDiscount) overwrites with the real Discount line. 0 when no discount.
+   * The line's raw commission rate % (decimal string). It feeds only the
+   * `OrderItem.orderCommissionRatePct` raw column; the profit engine computes the
+   * commission itself. "0" when the payload omits it (see `commissionKnown`).
    */
-  refundedCommissionGross: string;
-  /** Commission VAT rate %, DB-driven default (#331); net split derived downstream. */
-  commissionVatRate: string;
+  commissionRate: string;
   /**
-   * Trendyol lines[].productCategoryId — stringified for boundary parity with the
-   * other id/money fields (downstream converts to BigInt). null when the payload
-   * omits it. Used by order-intake to fall back to a DB category commission rate
-   * when the line carries no commission of its own.
+   * Trendyol lines[].productCategoryId -- stringified for boundary parity with the
+   * other id/money fields. null when the payload omits it. Carried on the DTO only;
+   * order intake does not persist it.
    */
   categoryId: string | null;
   /**
    * True only when Trendyol actually carried a commission rate on the line.
-   * When false, commissionRate/commissionGross are the defensive 0 fallback (not a
-   * real zero), signalling order-intake to resolve the rate from the category.
+   * When false, commissionRate is the defensive 0 fallback (not a real zero), so
+   * order intake stores a null raw rate and the engine falls back to the category.
    */
   commissionKnown: boolean;
 }

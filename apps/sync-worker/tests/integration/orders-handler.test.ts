@@ -5,11 +5,10 @@
 //   1. Order rows created (GROSS convention: saleGross, saleVat, listGross,
 //      sellerDiscountGross, agreedDeliveryDate, fastDelivery, micro, platformOrderNumber)
 //   2. OrderItem rows created with gross columns (lineListGross/lineSaleGross/
-//      lineSellerDiscountGross/saleVatRate, commissionGross/refundedCommissionGross/
-//      commissionVatRate, estimatedCommissionGross write-once)
+//      lineSellerDiscountGross/saleVatRate) + the raw orderCommissionRatePct
 //   3. Variant lookup by barcode (or null for unmatched)
 //   4. Idempotency (re-sync same page → no duplicates)
-//   5. applyEstimateOnOrderCreate plug-in — PSF + Stopaj ESTIMATE OrderFee
+//   5. Profit recompute enqueue on every order write
 //   6. Stream cursor advance within a chunk (hasMore + nextCursor)
 //   7. Chunk transition (hasMore=false → chunkIndex+1, streamCursor=null)
 //   8. Window contract — 14-day per-call cap (vendor enforced)
@@ -65,7 +64,7 @@ function jsonResponse(body: unknown): Response {
 }
 
 // Test order dates fall after FeeDefinition seed `effectiveFrom`
-// (2026-05-18), otherwise `resolveFeeDefinition` rejects T+0 estimate.
+// (2026-05-18), otherwise the profit drain's `resolveFeeDefinition` rejects them.
 const ORDER_DATE_MS = Date.UTC(2026, 4, 19); // 2026-05-19
 const AGREED_DATE_MS = Date.UTC(2026, 4, 20);
 const DELIVERED_DATE_MS = Date.UTC(2026, 4, 20, 12);
@@ -181,9 +180,6 @@ function buildDirectMapped(over: {
         lineSellerDiscountGross: '0.00',
         saleVatRate: '20',
         commissionRate: over.commissionRate ?? '10',
-        commissionGross: '12.00',
-        refundedCommissionGross: '0.00',
-        commissionVatRate: '20',
         categoryId: null,
         commissionKnown: over.commissionKnown ?? true,
       },
@@ -267,7 +263,7 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     // 14-day windows — the behavior these chunk-mechanics tests assert.
     process.env = { ...ORIGINAL_ENV, SYNC_HISTORICAL_BACKFILL_DAYS: '90' };
     await truncateAll();
-    // applyEstimateOnOrderCreate PSF + Stopaj FeeDefinition rows ister.
+    // The profit drain resolves its fee definitions (PSF, stoppage, ...) from these rows.
     await ensureFeeDefinitions();
   });
 
@@ -319,8 +315,7 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(order.deliveredOnTime).toBe(DELIVERED_DATE_MS <= AGREED_DATE_MS);
     expect(order.fastDelivery).toBe(false);
     expect(order.reconciliationStatus).toBe('NOT_SETTLED');
-    // Phase 3B: the order write enqueues a profit recompute instead of the legacy
-    // inline estimate — no ESTIMATE OrderFee rows, no estimatedNetProfit written here.
+    // Phase 3B: the order write enqueues a profit recompute; nothing is estimated inline.
     const queued = await prisma.profitRecomputeRequest.findUnique({
       where: { orderId: order.id },
     });
@@ -329,16 +324,12 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     const items = await prisma.orderItem.findMany({ where: { orderId: order.id } });
     expect(items).toHaveLength(1);
     const item = items[0]!;
-    // GROSS: lineSaleGross = lineGrossAmount × qty (120); commissionGross =
-    // lineSaleGross × commissionRate (120 × 10% = 12).
+    // GROSS: lineSaleGross = lineGrossAmount × qty (120). Only the raw line rate is
+    // stored; the engine computes the commission itself.
     expect(new Decimal(item.lineSaleGross).toString()).toBe('120');
     expect(new Decimal(item.lineListGross).toString()).toBe('120');
     expect(new Decimal(item.lineSellerDiscountGross).toString()).toBe('0');
-    expect(new Decimal(item.commissionGross).toString()).toBe('12');
-    expect(new Decimal(item.commissionRate).toString()).toBe('10');
-    // Komisyon TAHMİNİ donuk kopyası yazıldı (= T+0 gross değer; settlement bunu KORUR).
-    expect(new Decimal(item.estimatedCommissionGross!).toString()).toBe('12');
-    expect(new Decimal(item.refundedCommissionGross).toString()).toBe('0');
+    expect(new Decimal(item.orderCommissionRatePct!).toString()).toBe('10');
   });
 
   it('stream page with a zero-id (Awaiting) package next to a normal one → only the normal one persists', async () => {
@@ -420,8 +411,7 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(new Decimal(order.saleVat!).toString()).toBe('25');
     expect(new Decimal(order.listGross!).toString()).toBe('200');
     expect(new Decimal(order.sellerDiscountGross!).toString()).toBe('50');
-    // Phase 3B: the write enqueues a recompute (the discount double-count is pinned
-    // by the item columns below, not by an inline estimate anymore).
+    // Phase 3B: the write enqueues a recompute (no inline estimate anymore).
     const queued = await prisma.profitRecomputeRequest.findUnique({
       where: { orderId: order.id },
     });
@@ -432,14 +422,7 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(new Decimal(item.lineSaleGross).toString()).toBe('150');
     expect(new Decimal(item.lineListGross).toString()).toBe('200');
     expect(new Decimal(item.lineSellerDiscountGross).toString()).toBe('50');
-    // commissionGross = lineListGross × commissionRate = 200 × 10% = 20 (LİSTE tabanı; Bug-1 fix).
-    // refundedCommissionGross = lineSellerDiscountGross × rate = 50 × 10% = 5.
-    // Efektif komisyon = gross − refunded = 20 − 5 = 15 (net-satış tabanı #332).
-    expect(new Decimal(item.commissionGross).toString()).toBe('20');
-    expect(new Decimal(item.refundedCommissionGross).toString()).toBe('5');
-    expect(
-      new Decimal(item.commissionGross).sub(new Decimal(item.refundedCommissionGross)).toString(),
-    ).toBe('15');
+    expect(new Decimal(item.orderCommissionRatePct!).toString()).toBe('10');
   });
 
   it('variant barcode match: OrderItem.productVariantId set when barcode exists', async () => {
@@ -749,51 +732,58 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(await prisma.orderItem.count()).toBe(1);
   });
 
-  it('re-sync does NOT clobber a settled working value nor re-stamp the frozen estimate (write-once)', async () => {
-    // En kritik veri-kaybı senaryosu — feature'ın var olma sebebi (GROSS):
-    //   (1) intake estimatedCommissionGross=12 (write-once) + commissionGross=12 yazar,
-    //   (2) settlement settledCommissionGross'u FARKLI bir gerçeğe (15) yazar,
-    //   (3) rutin re-sync aynı sipariş sayfasını tekrar getirir.
-    // upsert-order'ın write-once `continue` dalı regrese ederse re-sync satırı yeniden
-    // yazar. Bu test kilitler: settledCommissionGross 15 KALIR, estimatedCommissionGross 12
-    // DONUK kalır, satır SAYISI 1 (yeni satır yok).
-    const { store, log } = await setupStoreAndSyncLog(['EAN13-ORD-001']);
+  it('raw commission rate: a line without commission stays null, a line with one stores it', async () => {
+    const { store, log } = await setupStoreAndSyncLog(['EAN13-RATE-YES', 'EAN13-RATE-NO']);
+
+    const withRate = makeShipmentPackage({
+      shipmentPackageId: 3734026901,
+      orderNumber: '11101228501',
+      lines: [
+        {
+          lineId: 11,
+          barcode: 'EAN13-RATE-YES',
+          quantity: 1,
+          lineUnitPrice: 120,
+          lineGrossAmount: 120,
+          lineSellerDiscount: 0,
+          vatRate: 20,
+          commission: 17,
+        },
+      ],
+    });
+    // The payload omits `commission` (the sparse-webhook shape).
+    const withoutRate = makeShipmentPackage({
+      shipmentPackageId: 3734026902,
+      orderNumber: '11101228502',
+      lines: [
+        {
+          lineId: 12,
+          barcode: 'EAN13-RATE-NO',
+          quantity: 1,
+          lineUnitPrice: 120,
+          lineGrossAmount: 120,
+          lineSellerDiscount: 0,
+          vatRate: 20,
+        },
+      ],
+    });
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       jsonResponse(
-        makeStreamResponse({ hasMore: false, nextCursor: null, content: [makeShipmentPackage()] }),
-      ),
-    );
-    await processOrdersChunk({ syncLog: log, cursor: null });
-    vi.restoreAllMocks();
-
-    const item = await prisma.orderItem.findFirstOrThrow({
-      where: { order: { storeId: store.id } },
-    });
-    // commissionGross = lineSaleGross × rate = 120 × 10% = 12; estimate donuk kopya.
-    expect(item.commissionGross.toFixed(2)).toBe('12.00');
-    expect(item.estimatedCommissionGross?.toFixed(2)).toBe('12.00');
-
-    // Settlement gerçeği settledCommissionGross'a FARKLI bir değer yazar (tahmine dokunmaz).
-    await prisma.orderItem.update({
-      where: { id: item.id },
-      data: { settledCommissionGross: new Decimal('15.00') },
-    });
-
-    // Rutin re-sync — AYNI sayfa, AYNI veri → mevcut-kalem (write-once) dalına girmeli.
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      jsonResponse(
-        makeStreamResponse({ hasMore: false, nextCursor: null, content: [makeShipmentPackage()] }),
+        makeStreamResponse({ hasMore: false, nextCursor: null, content: [withRate, withoutRate] }),
       ),
     );
     await processOrdersChunk({ syncLog: log, cursor: null });
 
-    expect(await prisma.orderItem.count()).toBe(1); // yeni satır yaratılmadı
-    const after = await prisma.orderItem.findUniqueOrThrow({ where: { id: item.id } });
-    // Settled çalışan değer KORUNDU — re-sync mapper'ın 12'sine geri ezmedi.
-    expect(after.settledCommissionGross?.toFixed(2)).toBe('15.00');
-    // Donuk tahmin yeniden damgalanmadı.
-    expect(after.estimatedCommissionGross?.toFixed(2)).toBe('12.00');
+    const yesItem = await prisma.orderItem.findFirstOrThrow({
+      where: { order: { storeId: store.id, platformOrderId: '3734026901' } },
+    });
+    expect(new Decimal(yesItem.orderCommissionRatePct!).toString()).toBe('17');
+
+    const noItem = await prisma.orderItem.findFirstOrThrow({
+      where: { order: { storeId: store.id, platformOrderId: '3734026902' } },
+    });
+    expect(noItem.orderCommissionRatePct).toBeNull();
   });
 
   it('cursor advance within chunk: hasMore + nextCursor → streamCursor updated, chunkIndex unchanged', async () => {
@@ -971,9 +961,6 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
           lineSellerDiscountGross: '0.00',
           saleVatRate: '20',
           commissionRate: '10',
-          commissionGross: '12.00',
-          refundedCommissionGross: '0.00',
-          commissionVatRate: '20',
           categoryId: null,
           commissionKnown: true,
         },
@@ -1002,13 +989,49 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
 
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
     expect(new Decimal(item.lineSaleGross).toString()).toBe('120');
-    expect(new Decimal(item.commissionGross).toString()).toBe('12');
-    // estimatedCommissionGross = T+0 gross snapshot (write-once #340).
-    expect(new Decimal(item.estimatedCommissionGross!).toString()).toBe('12');
+    expect(new Decimal(item.orderCommissionRatePct!).toString()).toBe('10');
     expect(item.productVariantId).not.toBeNull();
     // PR-8 line trail.
     expect(item.platformLineId).toBe(10328256n);
     expect(item.barcode).toBe('EAN13-DIRECT');
+  });
+
+  it('fills the raw commission rate when a later event brings the commission', async () => {
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-TWOPHASE']);
+
+    // The first event carries no commission of its own -> the raw column stays null.
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildDirectMapped({
+        platformOrderId: 'twophase-1',
+        barcode: 'EAN13-TWOPHASE',
+        lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
+        commissionKnown: false,
+        commissionRate: '0',
+      }),
+    );
+    const before = await prisma.orderItem.findFirstOrThrow({
+      where: { order: { storeId: store.id, platformOrderId: 'twophase-1' } },
+    });
+    expect(before.orderCommissionRatePct).toBeNull();
+
+    // A newer event finally carries the line's own commission -> the raw column fills
+    // on the existing item (no second item).
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildDirectMapped({
+        platformOrderId: 'twophase-1',
+        barcode: 'EAN13-TWOPHASE',
+        lastModifiedDate: new Date('2026-05-19T12:00:00Z'),
+        commissionKnown: true,
+        commissionRate: '20',
+      }),
+    );
+    const after = await prisma.orderItem.findUniqueOrThrow({ where: { id: before.id } });
+    expect(new Decimal(after.orderCommissionRatePct!).toString()).toBe('20');
+    expect(await prisma.orderItem.count({ where: { orderId: before.orderId } })).toBe(1);
   });
 
   it('enqueues a profit recompute when an order is created or updated', async () => {
@@ -1240,9 +1263,6 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
           // %10 satış KDV oranı — Bug 2'nin can alıcı noktası.
           saleVatRate: '10',
           commissionRate: '10',
-          commissionGross: '9.90',
-          refundedCommissionGross: '1.10',
-          commissionVatRate: '20',
           categoryId: null,
           commissionKnown: true,
         },
@@ -1301,9 +1321,6 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
           lineSellerDiscountGross: '11.00',
           saleVatRate: '10', // %10 → 11 × 10/110 = 1.00
           commissionRate: '10',
-          commissionGross: '9.90',
-          refundedCommissionGross: '1.10',
-          commissionVatRate: '20',
           categoryId: null,
           commissionKnown: true,
         },
@@ -1316,9 +1333,6 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
           lineSellerDiscountGross: '12.00',
           saleVatRate: '20', // %20 → 12 × 20/120 = 2.00
           commissionRate: '10',
-          commissionGross: '11.00',
-          refundedCommissionGross: '1.20',
-          commissionVatRate: '20',
           categoryId: null,
           commissionKnown: true,
         },
@@ -1370,9 +1384,6 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
           lineSellerDiscountGross: '0.00',
           saleVatRate: '20',
           commissionRate: '10',
-          commissionGross: '12.00',
-          refundedCommissionGross: '0.00',
-          commissionVatRate: '20',
           categoryId: null,
           commissionKnown: true,
         },
@@ -1469,9 +1480,6 @@ describe('upsertOrderWithSnapshot — out-of-order guard (freshness)', () => {
           lineSellerDiscountGross: '0.00',
           saleVatRate: '20',
           commissionRate: '10',
-          commissionGross: '12.00',
-          refundedCommissionGross: '0.00',
-          commissionVatRate: '20',
           categoryId: null,
           commissionKnown: true,
         },
@@ -1774,9 +1782,6 @@ describe('upsertOrderWithSnapshot — optimistic stock decrement (product freshn
         lineSellerDiscountGross: '0.00',
         saleVatRate: '20',
         commissionRate: '10',
-        commissionGross: '12.00',
-        refundedCommissionGross: '0.00',
-        commissionVatRate: '20',
         categoryId: null,
         commissionKnown: true,
       })),

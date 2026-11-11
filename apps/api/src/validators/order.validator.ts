@@ -1,9 +1,6 @@
 import { z } from '@hono/zod-openapi';
 
 import {
-  OrderFeeDirection,
-  OrderFeeSource,
-  OrderFeeType,
   OrderStatus,
   Platform,
   ProfitExclusionReason,
@@ -28,21 +25,6 @@ const ReconciliationStatusSchema = z.enum(ReconciliationStatus).openapi({
     'the order has no statement yet. NOT_SETTLED = no settlement applied, PARTIALLY_SETTLED = ' +
     'settlement started, FULLY_SETTLED = settlement fully reconciled.',
   example: 'PARTIALLY_SETTLED',
-});
-
-const OrderFeeTypeSchema = z.enum(OrderFeeType).openapi({
-  description: 'Fee category (PLATFORM_SERVICE, SHIPPING, STOPPAGE, COMMISSION_REFUND, …).',
-  example: 'PLATFORM_SERVICE',
-});
-
-const OrderFeeSourceSchema = z.enum(OrderFeeSource).openapi({
-  description: 'Origin of the fee row (ESTIMATE deterministic, SETTLEMENT vendor, …).',
-  example: 'ESTIMATE',
-});
-
-const OrderFeeDirectionSchema = z.enum(OrderFeeDirection).openapi({
-  description: 'DEBIT reduces seller revenue; CREDIT refunds/positive adjustments.',
-  example: 'DEBIT',
 });
 
 const PlatformSchema = z.enum(Platform).openapi({
@@ -127,7 +109,7 @@ export type OrderSummaryQuery = Omit<ListOrdersQuery, 'page' | 'perPage' | 'sort
 // ─── List item ─────────────────────────────────────────────────────────────
 
 /**
- * Compact row for the orders table. The list does not embed items/fees/claims —
+ * Compact row for the orders table. The list does not embed items/claims —
  * those land via the detail endpoint to keep payloads bounded.
  */
 export const OrderListItemSchema = z
@@ -347,27 +329,32 @@ const OrderItemDetailSchema = z
     lineSellerDiscountGross: z
       .string()
       .openapi({ description: 'Seller discount incl. VAT (decimal string).' }),
-    // Komisyon (gross + oran) — always present (default 0 in schema).
+    // Commission (gross + rates) from the profit lines.
     commissionGross: z.string().openapi({
       description:
         "Commission incl. VAT (decimal string), from the order's best-known COMMISSION lines; " +
-        "'0.00' when none (e.g. a cancelled order). Falls back to the item's own commission " +
-        'column only when the profit part is empty (a platform the engine cannot compute, or a ' +
-        'profit read that failed).',
+        "'0.00' when none (e.g. a cancelled order).",
     }),
-    commissionRate: z.string().openapi({
-      description:
-        "Commission rate % (decimal string) from the profit lines; falls back to the item's own " +
-        'commission rate column when no line supplies it.',
-    }),
+    commissionRate: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          "Commission rate % (decimal string) from the order's profit lines; null when no line " +
+          'supplies it.',
+      }),
     commissionVatRate: z
       .string()
-      .openapi({ description: 'Commission VAT rate %, decimal string.' }),
+      .nullable()
+      .openapi({
+        description:
+          'Commission VAT rate % (decimal string) from the same profit line; null when no line ' +
+          'supplies it.',
+      }),
     refundedCommissionGross: z.string().openapi({
       description:
         'Refunded commission incl. VAT (decimal string), from the best-known COMMISSION_REFUND ' +
-        "lines; '0.00' when none. Falls back to the item's own column only when the profit " +
-        'part is empty (a platform the engine cannot compute, or a profit read that failed).',
+        "lines; '0.00' when none.",
     }),
     estimatedCommissionGross: z
       .string()
@@ -385,15 +372,14 @@ const OrderItemDetailSchema = z
           'Settled commission incl. VAT (decimal string) from the settlement profit lines; null ' +
           'until settlement.',
       }),
-    // Cost snapshot (gross + VAT rate) — null when the variant has no cost profile attached.
     unitCostSnapshotGross: z
       .string()
       .nullable()
       .openapi({
         description:
           "Unit cost incl. VAT (decimal string) from the order's best-known profit lines; '0.00' " +
-          'when no cost line exists; null when a MISSING_COST issue covers the item or the profit ' +
-          'cannot be computed.',
+          'when no cost line exists; null when the quantity is not positive, a MISSING_COST issue ' +
+          'covers the item, or the profit cannot be computed.',
       }),
     unitCostSnapshotVatRate: z
       .string()
@@ -401,13 +387,9 @@ const OrderItemDetailSchema = z
       .openapi({
         description:
           "Unit cost VAT rate % (decimal string) from the order's best-known profit lines; null when " +
-          'no cost line exists.',
+          'no cost line exists, when the cost lines carry different VAT rates, or when the profit ' +
+          'cannot be computed.',
       }),
-    // Komisyon Faturası anchor (Sale satırı yazdığında set'lenir).
-    commissionInvoiceSerialNumber: z
-      .string()
-      .nullable()
-      .openapi({ description: 'Deprecated: always null.', example: 'DCF2024000123' }),
     barcode: z.string().nullable().openapi({
       description:
         'Vendor barcode on the order line — the only product trace while productVariantId is null (unmatched line).',
@@ -427,36 +409,6 @@ const OrderItemDetailSchema = z
     }),
   })
   .openapi('OrderItemDetail');
-
-const OrderFeeDetailSchema = z
-  .object({
-    id: z.string().uuid(),
-    feeType: OrderFeeTypeSchema,
-    source: OrderFeeSourceSchema,
-    direction: OrderFeeDirectionSchema,
-    // GROSS konvansiyon (2026-06-16): amountNet+vatAmount → amountGross+vatRate.
-    // net türetilir (amountGross × 100/(100+vatRate)). isEstimate = source==='ESTIMATE'
-    // → tahmin/gerçek-fatura rozetini frontend bu boolean'dan çizer (türetmez).
-    amountGross: z.string().openapi({ description: 'Fee amount incl. VAT (decimal string).' }),
-    vatRate: z.string().openapi({ description: 'VAT rate %, decimal string.' }),
-    isEstimate: z.boolean().openapi({
-      description:
-        'True when the row is a deterministic T+0 ESTIMATE (not yet confirmed by a vendor ' +
-        'settlement/invoice). Drives the "Tahmini" vs "Gerçek fatura" badge.',
-    }),
-    displayName: z.string().nullable().openapi({ example: 'Hizmet Bedeli (PSF)' }),
-    capturedAt: z.string().datetime(),
-    confirmedAt: z
-      .string()
-      .datetime()
-      .nullable()
-      .openapi({
-        description:
-          'When the row transitioned from ESTIMATE to its SETTLEMENT pair. PaymentOrder entry ' +
-          'triggers this for PSF/STOPPAGE. Null for un-confirmed ESTIMATE rows.',
-      }),
-  })
-  .openapi('OrderFeeDetail');
 
 const OrderClaimItemDetailSchema = z
   .object({
@@ -712,20 +664,11 @@ export const OrderDetailSchema = z
     }),
 
     reconciliationStatus: ReconciliationStatusSchema,
-    paymentOrderId: z.string().nullable().openapi({
-      description: 'Deprecated: always null.',
-    }),
-    paymentDate: z.string().datetime().nullable().openapi({
-      description: 'Deprecated: always null.',
-    }),
 
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
 
     items: z.array(OrderItemDetailSchema),
-    fees: z.array(OrderFeeDetailSchema).openapi({
-      description: 'Deprecated: always an empty array.',
-    }),
     claims: z.array(OrderClaimDetailSchema).openapi({
       description: 'Return claims, synced from Trendyol getClaims by the CLAIMS worker (6h).',
     }),

@@ -40,8 +40,8 @@ interface CostedOrderCtx {
 }
 
 /**
- * A Trendyol store with one costed, computable order (mirrors the proven claims /
- * commission-fallback setup): a catalog variant with an active cost-profile version,
+ * A Trendyol store with one costed, computable order (mirrors the proven claims
+ * setup): a catalog variant with an active cost-profile version,
  * the SENDEOMP return carrier as the store default, a dimensional weight for the
  * shipping estimate, and the order line carrying its own commission rate. Draining
  * it writes a full best-known statement.

@@ -39,10 +39,9 @@ interface BuiltCtx {
 }
 
 /**
- * Seeds FeeDefinition rows needed by estimateReturnOnClaim + applyEstimateOnOrderCreate
- * (called via the backstop trigger added in Task 7). Without these, any claim scan
- * that transitions items to Accepted throws FeeDefinitionNotFoundError inside the
- * transaction and counts as `failed` rather than `written`.
+ * Seeds the FeeDefinition rows the profit engine resolves when it computes an order.
+ * The claim scan itself only enqueues a profit recompute, so nothing in this file
+ * reads them; they keep the fixture a complete reference set.
  */
 async function seedFeeDefinitions(): Promise<void> {
   await prisma.feeDefinition.createMany({
@@ -90,10 +89,7 @@ async function buildScenario(): Promise<BuiltCtx> {
   const org = await createOrganization();
   await createMembership(org.id, user.id);
 
-  // FeeDefinitions required by the Task-7 backstop trigger: when a scan transitions
-  // items to Accepted, estimateReturnOnClaim (and applyEstimateOnOrderCreate) resolve
-  // fee definitions. Without these, the upsert transaction throws and the claim is
-  // counted as `failed` rather than `written`.
+  // Reference fee definitions (see seedFeeDefinitions).
   await seedFeeDefinitions();
 
   const credentials = encryptCredentials({ supplierId: '2738', apiKey: 'k', apiSecret: 's' });

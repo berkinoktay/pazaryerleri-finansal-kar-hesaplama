@@ -531,8 +531,8 @@ interface OrderProfitLineContext {
  * Everything the order detail needs from the profit layer: the profit fields
  * (reconciliation status, estimated / settled net profit), the best-known breakdown,
  * and the per-item line context. lineContext is null only when the engine cannot
- * compute this platform's profit at all, in which case every item falls back to its
- * own columns and the value-only figures are null.
+ * compute this platform's profit at all, in which case every item takes the all-null
+ * EMPTY_ITEM_PROFIT_VALUES.
  */
 interface OrderProfitDetail {
   readonly fields: OrderProfitFields;
@@ -549,6 +549,7 @@ const EMPTY_ITEM_PROFIT_VALUES: ItemProfitValues = {
   unitCostVatRate: null,
   commissionGross: null,
   commissionRate: null,
+  commissionVatRate: null,
   estimatedCommissionGross: null,
   settledCommissionGross: null,
   refundedCommissionGross: null,
@@ -774,7 +775,7 @@ export async function getOrderById(
   // The profit fields, the breakdown and the per-item cost/commission values all read
   // the order's profit statements and lines (decisions 1, 6-8). When no best-known
   // statement is stored yet, loadOrderProfitDetail computes them read-only in the
-  // request. The legacy order columns and order_fees are no longer read here.
+  // request.
   const profit = await loadOrderProfitDetail(orgId, storeId, row);
 
   return {
@@ -823,17 +824,13 @@ export async function getOrderById(
     profitExclusionReason: row.profitExclusionReason,
 
     reconciliationStatus: profit.fields.reconciliationStatus,
-    // fees[] is always empty and paymentOrderId/paymentDate always null in the wire
-    // contract now (Faz 4A decision 9); both fall away entirely in Faz 5.
-    paymentOrderId: null,
-    paymentDate: null,
 
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
 
     items: row.items.map((item) => {
-      // Cost and commission figures come from the profit lines (decision 7). An
-      // unsupported platform (no line context) leaves every figure null/column.
+      // Cost and commission figures come from the profit lines alone (decision 7). An
+      // unsupported platform (no line context) leaves every figure null.
       const values =
         profit.lineContext === null
           ? EMPTY_ITEM_PROFIT_VALUES
@@ -844,37 +841,23 @@ export async function getOrderById(
               estimateLines: profit.lineContext.estimateLines,
               issues: profit.lineContext.issues,
             });
-      // With a line context, a commission amount or refund no line supplies is zero (a
-      // cancelled order's commission, an item that was not returned), so a stale legacy
-      // column never shows; the rate is informational and still falls back to the
-      // item's column. Without one, all three keep the item's own columns.
-      const commission =
-        profit.lineContext === null
-          ? {
-              gross: item.commissionGross.toString(),
-              rate: item.commissionRate.toString(),
-              refundedGross: item.refundedCommissionGross.toString(),
-            }
-          : {
-              gross: values.commissionGross ?? ZERO_MONEY,
-              rate: values.commissionRate ?? item.commissionRate.toString(),
-              refundedGross: values.refundedCommissionGross ?? ZERO_MONEY,
-            };
       return {
         id: item.id,
         quantity: item.quantity,
         lineSaleGross: item.lineSaleGross.toString(),
         saleVatRate: item.saleVatRate.toString(),
         lineSellerDiscountGross: item.lineSellerDiscountGross.toString(),
-        commissionGross: commission.gross,
-        commissionRate: commission.rate,
-        commissionVatRate: item.commissionVatRate.toString(),
-        refundedCommissionGross: commission.refundedGross,
+        // A commission amount or refund no line supplies is zero (a cancelled order's
+        // commission, an item that was not returned); the two rates are informational
+        // and stay null when no line supplies them.
+        commissionGross: values.commissionGross ?? ZERO_MONEY,
+        commissionRate: values.commissionRate,
+        commissionVatRate: values.commissionVatRate,
+        refundedCommissionGross: values.refundedCommissionGross ?? ZERO_MONEY,
         estimatedCommissionGross: values.estimatedCommissionGross,
         settledCommissionGross: values.settledCommissionGross,
         unitCostSnapshotGross: values.unitCostGross,
         unitCostSnapshotVatRate: values.unitCostVatRate,
-        commissionInvoiceSerialNumber: null,
         barcode: item.barcode,
         // Only an unmatched line (no variant) with a confirmed catalog gap is true;
         // matched lines are always false.
@@ -894,10 +877,6 @@ export async function getOrderById(
               },
       };
     }),
-
-    // Always empty in the wire contract now (decision 9); the fee timeline falls away
-    // in Faz 5.
-    fees: [],
 
     claims: row.claims.map((claim) => ({
       id: claim.id,

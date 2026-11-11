@@ -48,7 +48,7 @@ function buildMapped(over: {
   lines?: Array<{ barcode: string; platformLineId: string }>;
 }): MappedOrder {
   // GROSS konvansiyon (2026-06-16): MappedOrderLine gross alanlar.
-  // lineSaleGross 100 = net 84.75 + KDV 15.25 (%18). commissionGross 15 (gross).
+  // lineSaleGross 100 = net 84.75 + KDV 15.25 (%18). Raw commission rate 15%.
   const lineTemplate = {
     quantity: 1,
     lineListGross: '100',
@@ -56,9 +56,6 @@ function buildMapped(over: {
     lineSellerDiscountGross: '0',
     saleVatRate: '18',
     commissionRate: '15',
-    commissionGross: '15',
-    refundedCommissionGross: '0',
-    commissionVatRate: '20',
     categoryId: null,
     commissionKnown: true,
   };
@@ -606,8 +603,7 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
 
     // One unmatched line makes the order cost_missing — both lines persist, and the
     // past-day order is excluded as a whole (LATE_UNCOSTED_ARRIVAL). The matched line
-    // keeps its variant identity; the upsert captures no cost snapshot (the recompute
-    // writer owns costs).
+    // keeps its variant identity.
     expect(outcome).toEqual({ kind: 'persisted', reason: 'late_uncosted_arrival' });
     const items = await prisma.orderItem.findMany({
       where: { order: { storeId: store.id, platformOrderId: 'mixed-1' } },
@@ -617,10 +613,8 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     const [matched, unmatched] = items;
     expect(matched!.barcode).toBe('EAN13-MIX-OK');
     expect(matched!.productVariantId).not.toBeNull();
-    expect(matched!.unitCostSnapshotGross).toBeNull();
     expect(unmatched!.barcode).toBe('UNKNOWN-MIX');
     expect(unmatched!.productVariantId).toBeNull();
-    expect(unmatched!.unitCostSnapshotGross).toBeNull();
     const order = await prisma.order.findFirstOrThrow({
       where: { storeId: store.id, platformOrderId: 'mixed-1' },
     });

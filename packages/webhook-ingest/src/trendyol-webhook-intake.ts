@@ -4,8 +4,8 @@
  * Extracted from `apps/api` so the receiver route and the (future) worker
  * consumer tick share ONE implementation. The route owns HTTP concerns (auth,
  * idempotency-row lifecycle, status codes); this pipeline owns the "given a
- * persisted WebhookEvent row, process it" work: status mapping, fee resolution,
- * payload mapping, catalog repair, intake dispatch, and the RETURNED -> CLAIMS
+ * persisted WebhookEvent row, process it" work: status mapping, payload
+ * mapping, catalog repair, intake dispatch, and the RETURNED -> CLAIMS
  * acceleration.
  *
  * Error contract (drives the receiver's HTTP behaviour):
@@ -13,7 +13,7 @@
  *     return normally (the route replies 200 — retrying would never help):
  *       · unknown status  -> mark `processedAt`, skip intake.
  *       · payload-map fail -> mark `processedAt` + `processingError`.
- *   - TRANSIENT failures (fee resolution, intake, DB) PROPAGATE out. The route
+ *   - TRANSIENT failures (intake, DB) PROPAGATE out. The route
  *     records `processingError` and rethrows -> 500 -> Trendyol replays the
  *     delivery in ~5 minutes, turning its retry into our replay engine.
  */
@@ -27,9 +27,7 @@ import {
   type TrendyolShipmentPackage,
 } from '@pazarsync/marketplace';
 import { intakeOrder } from '@pazarsync/order-sync';
-import { resolveFeeDefinition } from '@pazarsync/profit';
 import { syncLog, syncLogService, SyncInProgressError } from '@pazarsync/sync-core';
-import { businessZoneEpochToInstant } from '@pazarsync/utils';
 
 import { mapTrendyolWebhookPayload } from './trendyol-orders.mapper';
 
@@ -73,25 +71,9 @@ export async function processTrendyolWebhookEvent(
   }
 
   // ─── Build MappedOrder + dispatch ──────────────────────────────────────
-  // Commission VAT rate comes from the DB (audit A — fee_definitions
-  // ALL/COMMISSION_INVOICE). `at` = the order's date (payload.orderDate,
-  // normalized the same way as the mapper): the settlement handlers also
-  // resolve by order.orderDate, so the T+0 estimate and the reconciliation use
-  // the same rate. Missing -> loud throw (missing seed = misconfiguration) —
-  // this is TRANSIENT and propagates out (route rethrow -> Trendyol retries).
-  const commissionVatDef = await resolveFeeDefinition(prisma, {
-    platform: store.platform,
-    feeType: 'COMMISSION_INVOICE',
-    at: businessZoneEpochToInstant(payload.orderDate),
-  });
-
   let mapped: MappedOrder;
   try {
-    mapped = mapTrendyolWebhookPayload(
-      payload,
-      mappedStatus,
-      Number(commissionVatDef.defaultVatRate),
-    );
+    mapped = mapTrendyolWebhookPayload(payload, mappedStatus);
   } catch (err) {
     // Deterministic payload defect: retrying the same body never helps, so we
     // mark the event terminal (handled-but-unprocessable) and return — the
@@ -184,7 +166,7 @@ export async function processTrendyolWebhookEvent(
   }
 
   // Clear any stale `processingError` from an earlier TRANSIENT attempt: a prior
-  // pass may have written a fault note (e.g. fee resolution failed) before this
+  // pass may have written a fault note (e.g. the intake write failed) before this
   // replay succeeded, and leaving that note on a now-processed row is misleading in
   // the audit trail (live observation, issue #458). The deterministic dead-end
   // stamps (unknown status, payload-map failure) are unaffected — they return

@@ -250,14 +250,6 @@ export async function stampCostWindowExclusions(
  * all inside the caller's transaction. The update is guarded by
  * `profit_excluded_at IS NULL` (plus the org + store filter) so it only ever ADDS
  * an exclusion -- it can never overwrite one, matching the permanence trigger.
- *
- * The same update clears the eight denormalized legacy profit columns: an excluded
- * order carries no legacy profit figure. The live profit writers skip an already
- * excluded order, but this backfill excludes EXISTING orders that may already carry
- * one, so it nulls them atomically with the stamp -- otherwise an excluded order
- * would still leak a net profit. The legacy readers (order list summary, the
- * cost-status segment, the loss-only filter, and live performance) read these
- * columns until they move to the new profit statements.
  */
 async function stampAndEnqueue(
   tx: Prisma.TransactionClient,
@@ -283,17 +275,6 @@ async function stampAndEnqueue(
     data: {
       profitExcludedAt: now,
       profitExclusionReason: reason,
-      // Clear the eight denormalized legacy profit columns in the SAME guarded
-      // update so a backfilled exclusion can never leak a net profit or margin
-      // through the legacy readers (see the docstring above).
-      estimatedNetProfit: null,
-      estimatedNetVat: null,
-      estimatedSaleMarginPct: null,
-      estimatedCostMarkupPct: null,
-      settledNetProfit: null,
-      settledNetVat: null,
-      settledSaleMarginPct: null,
-      settledCostMarkupPct: null,
     },
   });
   await enqueueProfitRecompute(tx, {

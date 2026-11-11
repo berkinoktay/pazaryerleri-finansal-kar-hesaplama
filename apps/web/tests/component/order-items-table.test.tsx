@@ -22,7 +22,6 @@ function makeItem(overrides: Partial<OrderItemDetail> = {}): OrderItemDetail {
     settledCommissionGross: null,
     unitCostSnapshotGross: null,
     unitCostSnapshotVatRate: null,
-    commissionInvoiceSerialNumber: null,
     barcode: null,
     vendorMissing: false,
     variant: {
