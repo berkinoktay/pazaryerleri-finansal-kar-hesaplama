@@ -2004,7 +2004,8 @@ describe('Order routes', () => {
         );
         expect(item?.commissionGross).toBeNull();
         expect(item?.commissionRate).toBeNull();
-        expect(item?.refundedCommissionGross).toBeNull();
+        // Not returned: nothing to give back, so the refund is a known zero.
+        expect(item?.refundedCommissionGross).toBe('0.00');
       }
     });
 

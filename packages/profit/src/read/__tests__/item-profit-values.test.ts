@@ -57,6 +57,24 @@ function commissionLine(params: {
   });
 }
 
+/** A sale-return line for one item (the accepted return reversing its sale). */
+function saleReturnLine(params: {
+  readonly orderItemId: string;
+  readonly gross: string;
+}): ProfitLine {
+  return createProfitLine({
+    type: ProfitLineType.SALE_RETURN,
+    level: ProfitLineLevel.ITEM,
+    orderItemId: params.orderItemId,
+    certainty: ProfitLineCertainty.ESTIMATE,
+    source: ProfitLineSource.RULE,
+    amount: { gross: new Decimal(params.gross), vat: new Decimal('0') },
+    vatRatePct: null,
+    inputs: {},
+    externalRecord: null,
+  });
+}
+
 /** A commission refund line for one item (the returned item's commission given back). */
 function commissionRefundLine(params: {
   readonly orderItemId: string;
@@ -139,7 +157,8 @@ describe('itemProfitValues', () => {
       issues,
     });
     expect(named.commissionGross).toBeNull();
-    expect(named.refundedCommissionGross).toBeNull();
+    // Not returned: there is nothing to give back, so the refund is a known zero.
+    expect(named.refundedCommissionGross).toBe('0.00');
     expect(named.commissionRate).toBeNull();
     expect(named.estimatedCommissionGross).toBeNull();
     expect(named.settledCommissionGross).toBeNull();
@@ -169,8 +188,45 @@ describe('itemProfitValues', () => {
         issues,
       });
       expect(values.commissionGross).toBeNull();
-      expect(values.refundedCommissionGross).toBeNull();
+      expect(values.refundedCommissionGross).toBe('0.00');
     }
+  });
+
+  it('reports a null commission refund for a returned item whose commission is unknown', () => {
+    // The customer returned the item, the rate never resolved, so the engine wrote neither a
+    // commission nor a refund line: the refund owed is unknown, not zero.
+    const issues: ProfitIssue[] = [
+      { code: ProfitIssueCode.MISSING_COMMISSION_RATE, orderItemId: ITEM, detail: null },
+    ];
+    const returned = itemProfitValues({
+      orderItemId: ITEM,
+      quantity: 1,
+      bestKnownLines: [saleReturnLine({ orderItemId: ITEM, gross: '140.00' })],
+      estimateLines: [],
+      issues,
+    });
+    expect(returned.commissionGross).toBeNull();
+    expect(returned.refundedCommissionGross).toBeNull();
+
+    // Once the settlement brings the sale's real commission the refund is a known zero
+    // until its own record lands (the commission is known, only the refund line is pending).
+    const settledSale = itemProfitValues({
+      orderItemId: ITEM,
+      quantity: 1,
+      bestKnownLines: [
+        saleReturnLine({ orderItemId: ITEM, gross: '140.00' }),
+        commissionLine({
+          orderItemId: ITEM,
+          gross: '28.00',
+          certainty: ProfitLineCertainty.ACTUAL,
+          source: ProfitLineSource.MARKETPLACE_RECORD,
+        }),
+      ],
+      estimateLines: [],
+      issues,
+    });
+    expect(settledSale.commissionGross).toBe('28.00');
+    expect(settledSale.refundedCommissionGross).toBe('0.00');
   });
 
   it('reports the settled commission even while a MISSING_COMMISSION_RATE issue covers the item', () => {

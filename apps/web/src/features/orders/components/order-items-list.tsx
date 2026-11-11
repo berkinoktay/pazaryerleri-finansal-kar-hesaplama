@@ -106,7 +106,8 @@ export function OrderItemsList({
                       <MetaCol
                         label={t('meta.commissionAmount')}
                         value={
-                          // Null = the order's profit part is empty (not a zero commission).
+                          // Null = the order's profit part is empty or the item's commission
+                          // rate could not be resolved (not a zero commission).
                           item.commissionGross !== null ? (
                             <Currency value={item.commissionGross} />
                           ) : (

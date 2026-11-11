@@ -77,8 +77,16 @@ export function itemProfitValues(input: {
     // MISSING_COMMISSION_RATE issue covers (the engine writes no line for it).
     estimatedCommissionGross: commissionGrossOf(estimateForItem),
     settledCommissionGross: settledCommissionGrossOf(bestKnownForItem),
-    refundedCommissionGross: refundedCommissionGrossOf(bestKnownForItem, commissionUnknown),
+    refundedCommissionGross: refundedCommissionGrossOf(
+      bestKnownForItem,
+      commissionUnknown && hasAcceptedReturn(bestKnownForItem),
+    ),
   };
+}
+
+/** True when the best-known view carries a sale-return line for the item (an accepted return). */
+function hasAcceptedReturn(lines: readonly ProfitLine[]): boolean {
+  return lines.some((line) => line.type === ProfitLineType.SALE_RETURN);
 }
 
 /** The item's product-cost expense lines (COST_* without COST_RETURN), by catalog spec. */
@@ -201,16 +209,18 @@ function settledCommissionGrossOf(lines: readonly ProfitLine[]): string | null {
 
 /**
  * The item's commission refund line(s) gross summed as a string. With no refund line it is
- * null when the item's commission itself is unknown (nothing known to give back), else
- * "0.00".
+ * null only when a refund is actually owed but cannot be known: the item was returned and
+ * its commission is unknown (no rate, so the engine wrote no refund line either). An item
+ * that was not returned has nothing to give back, so it is "0.00" even when its commission
+ * is unknown.
  */
 function refundedCommissionGrossOf(
   lines: readonly ProfitLine[],
-  commissionUnknown: boolean,
+  refundUnknown: boolean,
 ): string | null {
   const refundLines = lines.filter((line) => line.type === ProfitLineType.COMMISSION_REFUND);
   if (refundLines.length === 0) {
-    return commissionUnknown ? null : ZERO_AMOUNT;
+    return refundUnknown ? null : ZERO_AMOUNT;
   }
   return refundLines.reduce((sum, line) => sum.add(line.amount.gross), ZERO).toFixed(2);
 }
