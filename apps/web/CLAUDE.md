@@ -607,6 +607,18 @@ The root `<html>` already carries `suppressHydrationWarning` because `next-theme
 
    **Fix — all presets live in `src/i18n/formats.ts`.** Consume by name (`'short'`, `'long'`, `'date'`, `'currency'`, `'percentDelta'`, …), never by inline options. Add a new preset here before using it.
 
+5. **Reading aggregate React Query cache state during render** (`useIsFetching`, `useIsMutating`, `queryClient.isFetching()`) — the "spinning refresh button" mismatch. These hooks hand React the SAME live function as their server snapshot, so the hydration render returns the client cache's current count. The server never fetches (its markup is always idle), but a layout-level provider that fetches in an effect (`NewOrderNotifierProvider`'s baseline `fetchQuery`) commits before a page segment behind a `loading.tsx` boundary hydrates — so the page's hydration render sees a non-zero count and bakes `disabled` / `animate-spin` into markup the server rendered idle.
+
+   **Fix — gate on mount, hooks stay unconditional:**
+
+   ```tsx
+   const mounted = useIsMounted();
+   const liveFetchCount = useIsFetching({ queryKey: liveKeys.all });
+   const isFetching = mounted && liveFetchCount > 0; // never `mounted && useIsFetching(...)`
+   ```
+
+   The hydration render matches the server; the post-mount re-render surfaces the in-flight state. Per-query observer flags from `useQuery` (`isFetching`, `isPending`) are NOT affected — their optimistic first-render result is identical on both sides.
+
 **The SSR-safety toolkit (shared):**
 
 | Utility          | Location                          | Use for                                                                     |
@@ -621,6 +633,7 @@ The root `<html>` already carries `suppressHydrationWarning` because `next-theme
 - [ ] No reading `theme`, `resolvedTheme`, `localStorage`, `window.matchMedia` during render without a mount gate or CSS-only alternative.
 - [ ] No interactive elements (`<button>`, `<a>`) nested inside another interactive element — Radix triggers ARE buttons; use `role="button"` spans for addon actions.
 - [ ] Date / number strings come from `useFormatter()` with a named preset from `formats.ts`, never hand-rolled `Intl.DateTimeFormat`.
+- [ ] No `useIsFetching` / `useIsMutating` / `queryClient.isFetching()` value drives an attribute or class without a `useIsMounted()` gate — a layout-level provider may already be fetching when the page hydrates.
 
 ### Design system showcase
 

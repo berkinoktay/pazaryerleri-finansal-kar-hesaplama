@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusDot, type StatusDotProps } from '@/components/ui/status-dot';
 import { type RealtimeHealth } from '@/lib/supabase/realtime';
+import { useIsMounted } from '@/lib/use-is-mounted';
 import { cn } from '@/lib/utils';
 
 import { useQueryState } from 'nuqs';
@@ -65,7 +66,17 @@ export function LivePerformancePageClient({
   const tCommon = useTranslations('common');
   const { health } = useNewOrderNotifier();
   const queryClient = useQueryClient();
-  const isFetching = useIsFetching({ queryKey: liveKeys.all }) > 0;
+  const mounted = useIsMounted();
+  // The refresh control derives from `useIsFetching`, which counts the CLIENT
+  // cache. The server never fetches, so its markup is always idle — but the
+  // dashboard layout's NewOrderNotifierProvider starts a live query (its
+  // baseline `fetchQuery`) before this segment hydrates (the route group's
+  // loading boundary hydrates the page after the layout has committed), and
+  // `useIsFetching` reads that live count during the hydration render too.
+  // Gate on mount so the first client render matches the server; the
+  // post-mount re-render then surfaces the in-flight state.
+  const liveFetchCount = useIsFetching({ queryKey: liveKeys.all });
+  const isFetching = mounted && liveFetchCount > 0;
   const [selected, setSelected] = React.useState<LiveOrderRow | null>(null);
 
   // The page client reads the KPI query itself to drive the header hero
