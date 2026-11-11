@@ -26,6 +26,10 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Description-only updates (no wire change).** The order detail `unitCostSnapshotGross` and
+  `unitCostSnapshotVatRate` descriptions, the order GET summary and the claim list and summary
+  descriptions now say the values come from the profit lines (`profit_lines`), not from the
+  dropped legacy columns or the `order_fees` table.
 - **Marketplace-neutral field names on orders and claims.** Three wire fields are renamed; types
   and values are unchanged:
   - `micro` becomes `isExportSale` on the order list rows and the order detail

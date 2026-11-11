@@ -327,7 +327,7 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(new Decimal(item.lineSaleGross).toString()).toBe('120');
     expect(new Decimal(item.lineListGross).toString()).toBe('120');
     expect(new Decimal(item.lineSellerDiscountGross).toString()).toBe('0');
-    expect(new Decimal(item.orderCommissionRatePct!).toString()).toBe('10');
+    expect(item.orderCommissionRatePct?.toString()).toBe('10');
   });
 
   it('stream page with a zero-id (Awaiting) package next to a normal one → only the normal one persists', async () => {
@@ -420,7 +420,7 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(new Decimal(item.lineSaleGross).toString()).toBe('150');
     expect(new Decimal(item.lineListGross).toString()).toBe('200');
     expect(new Decimal(item.lineSellerDiscountGross).toString()).toBe('50');
-    expect(new Decimal(item.orderCommissionRatePct!).toString()).toBe('10');
+    expect(item.orderCommissionRatePct?.toString()).toBe('10');
   });
 
   it('variant barcode match: OrderItem.productVariantId set when barcode exists', async () => {
@@ -776,7 +776,7 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     const yesItem = await prisma.orderItem.findFirstOrThrow({
       where: { order: { storeId: store.id, platformOrderId: '3734026901' } },
     });
-    expect(new Decimal(yesItem.orderCommissionRatePct!).toString()).toBe('17');
+    expect(yesItem.orderCommissionRatePct?.toString()).toBe('17');
 
     const noItem = await prisma.orderItem.findFirstOrThrow({
       where: { order: { storeId: store.id, platformOrderId: '3734026902' } },
@@ -986,7 +986,7 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
 
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
     expect(new Decimal(item.lineSaleGross).toString()).toBe('120');
-    expect(new Decimal(item.orderCommissionRatePct!).toString()).toBe('10');
+    expect(item.orderCommissionRatePct?.toString()).toBe('10');
     expect(item.productVariantId).not.toBeNull();
     // PR-8 line trail.
     expect(item.platformLineId).toBe(10328256n);
@@ -1027,7 +1027,7 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       }),
     );
     const after = await prisma.orderItem.findUniqueOrThrow({ where: { id: before.id } });
-    expect(new Decimal(after.orderCommissionRatePct!).toString()).toBe('20');
+    expect(after.orderCommissionRatePct?.toString()).toBe('20');
     expect(await prisma.orderItem.count({ where: { orderId: before.orderId } })).toBe(1);
   });
 

@@ -159,11 +159,11 @@ export async function upsertOrderWithSnapshot(
       existingOrder === null ? storeRow?.profitSettings : undefined,
     );
 
-    // Mikro ihracat (isExportSale; Trendyol marketplace `micro=true`): satış KDV'den müstesnadır
-    // (ihracat istisnası, 3065 sayılı KDV Kanunu 11/1-a — e-arşiv fatura tipi "İstisna").
-    // KDV'yi KAYNAKTA sıfırlarız (Order.saleVat + OrderItem.saleVatRate + sellerDiscountVat):
-    // depolanan değer GERÇEKTİR (distorsiyon değil), tüm kâr yolları (estimate/settled/
-    // breakdown) + liste/özet otomatik doğru olur. Komisyon/kargo TR içiyle aynı kalır.
+    // Export sale (isExportSale; Trendyol marketplace `micro=true`): the sale is exempt from
+    // VAT (export exemption, Turkish VAT law 3065 article 11/1-a; e-invoice type "Istisna").
+    // The VAT is zeroed AT THE SOURCE (Order.saleVat, OrderItem.saleVatRate, sellerDiscountVat)
+    // so the stored value is the real one and every profit path, list and summary reads it as
+    // is. Commission and shipping stay the same as a domestic sale.
     const microExport = resolveIsExportSale(order);
 
     // sellerDiscountVat: satıcı indirimi KDV'si — per-line GERÇEK satış KDV oranından
