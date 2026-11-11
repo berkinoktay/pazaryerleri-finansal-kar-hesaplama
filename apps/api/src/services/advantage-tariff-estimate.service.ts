@@ -17,10 +17,10 @@ import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
 import type { Store as PrismaStore } from '@pazarsync/db';
+import { loadCommissionRulesForCategories, resolveTrendyolCategoryRate } from '@pazarsync/profit';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { NotFoundError } from '../lib/errors';
-import { resolveCommissionRate } from './commission-rate-resolver';
 import {
   computeAdvantageEstimate,
   resolveCommission,
@@ -108,13 +108,15 @@ export async function estimateAdvantageItemPrice(
   const bands = source?.bandsByBarcode.get(item.barcode) ?? null;
   let categoryRate: Decimal | null = null;
   if (category !== null && category.categoryId !== null) {
-    const resolved = await resolveCommissionRate({
-      platform: store.platform,
-      categoryId: category.categoryId,
-      brandId: category.brandId,
-      sellerSegment: null,
+    const commissionRules = await loadCommissionRulesForCategories(prisma, {
+      categoryIds: [category.categoryId],
     });
-    categoryRate = resolved?.rate ?? null;
+    const resolved = resolveTrendyolCategoryRate({
+      rules: commissionRules,
+      categoryId: category.categoryId.toString(),
+      brandId: category.brandId === null ? null : category.brandId.toString(),
+    });
+    categoryRate = resolved?.ratePct ?? null;
   }
   const commissionInputs: ItemCommissionInputs = { bands, categoryRate };
 

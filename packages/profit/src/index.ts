@@ -122,6 +122,7 @@ export {
   type TrendyolShippingTariff,
 } from './marketplaces/trendyol/trendyol-inputs';
 export {
+  resolveTrendyolCategoryRate,
   resolveTrendyolCommissionRate,
   type ResolvedTrendyolCommissionRate,
   type TrendyolCommissionRateSource,
@@ -219,6 +220,8 @@ export {
   loadTrendyolScenarioBases,
   type ScenarioLoadResult,
 } from './persistence/load-trendyol-scenario';
+// Category commission rules for the scenario screens' fallback rate (rebuild, phase 5) -- docs/plans/2026-11-11-profit-engine-faz-5-plan.md
+export { loadCommissionRulesForCategories } from './persistence/trendyol-reference-loaders';
 export { isTrendyolBaremEligible } from './marketplaces/trendyol/barem-eligibility';
 export {
   ParcelNotFoundError,

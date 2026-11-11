@@ -73,13 +73,35 @@ export function resolveTrendyolCommissionRate(params: {
     return { ratePct: item.syncedCommissionRatePct, source: 'PRODUCT_SYNC' };
   }
 
+  if (item.categoryId === null) {
+    return null;
+  }
+  return resolveTrendyolCategoryRate({
+    rules,
+    categoryId: item.categoryId,
+    brandId: item.brandId,
+  });
+}
+
+/**
+ * The category rung of the commission chain on its own: the lowest of the
+ * category+brand rule (only when `brandId` is given) and the category rule, with
+ * CATEGORY winning a tie. Returns null when neither rule exists. The scenario screens
+ * call this directly for their category fallback rate, so they and the order chain
+ * share one rule.
+ */
+export function resolveTrendyolCategoryRate(params: {
+  readonly rules: TrendyolCommissionRules;
+  readonly categoryId: string;
+  readonly brandId: string | null;
+}): { ratePct: Decimal; source: 'CATEGORY' | 'CATEGORY_BRAND' } | null {
+  const { rules, categoryId, brandId } = params;
+
   const brandRate =
-    item.categoryId !== null && item.brandId !== null
-      ? (rules.categoryBrandRatePct.get(trendyolCategoryBrandKey(item.categoryId, item.brandId)) ??
-        null)
+    brandId !== null
+      ? (rules.categoryBrandRatePct.get(trendyolCategoryBrandKey(categoryId, brandId)) ?? null)
       : null;
-  const categoryRate =
-    item.categoryId !== null ? (rules.categoryRatePct.get(item.categoryId) ?? null) : null;
+  const categoryRate = rules.categoryRatePct.get(categoryId) ?? null;
 
   if (brandRate !== null && categoryRate !== null) {
     return brandRate.lt(categoryRate)

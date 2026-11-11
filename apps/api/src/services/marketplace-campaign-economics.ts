@@ -18,9 +18,9 @@ import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
 import type { Prisma, Store as PrismaStore } from '@pazarsync/db';
+import { loadCommissionRulesForCategories, resolveTrendyolCategoryRate } from '@pazarsync/profit';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
-import { resolveCommissionRate } from './commission-rate-resolver';
 import { resolveDiscountCommissionSource } from './discount-commission-source';
 import type { DiscountCommissionInputs } from './discount-math-commons';
 import { loadScreenScenarioBases, screenScenarioBaseFor } from './scenario-screen-commons';
@@ -135,17 +135,17 @@ export async function resolveCampaignEconomics(
     if (categoryId === null) continue;
     distinctCatKeys.set(categoryRateKey(categoryId, brandId), { categoryId, brandId });
   }
-  await Promise.all(
-    [...distinctCatKeys].map(async ([key, { categoryId, brandId }]) => {
-      const resolved = await resolveCommissionRate({
-        platform: store.platform,
-        categoryId,
-        brandId,
-        sellerSegment: null,
-      });
-      categoryRateByKey.set(key, resolved?.rate ?? null);
-    }),
-  );
+  const commissionRules = await loadCommissionRulesForCategories(prisma, {
+    categoryIds: [...distinctCatKeys.values()].map((ref) => ref.categoryId),
+  });
+  for (const [key, { categoryId, brandId }] of distinctCatKeys) {
+    const resolved = resolveTrendyolCategoryRate({
+      rules: commissionRules,
+      categoryId: categoryId.toString(),
+      brandId: brandId === null ? null : brandId.toString(),
+    });
+    categoryRateByKey.set(key, resolved?.ratePct ?? null);
+  }
 
   const byItemId = new Map<string, CampaignItemEconomics>();
   for (const item of items) {

@@ -3,9 +3,10 @@
 // Each loader reads one kind of input (costs, fees, shipping, commission rules)
 // for a SET of keys in a single query, so a caller that needs
 // many variants in one pass issues a constant number of queries. This module is
-// internal to the persistence layer and is never re-exported from the package
-// index. Reads only; every store-scoped table is filtered by store and every
-// org-scoped table by organization.
+// internal to the persistence layer; the package index re-exports only
+// `loadCommissionRulesForCategories`, which the scenario screens use for their
+// category fallback rate. Reads only; every store-scoped table is filtered by store
+// and every org-scoped table by organization.
 
 import { Decimal } from 'decimal.js';
 import type { OrderFeeType, Prisma } from '@pazarsync/db';

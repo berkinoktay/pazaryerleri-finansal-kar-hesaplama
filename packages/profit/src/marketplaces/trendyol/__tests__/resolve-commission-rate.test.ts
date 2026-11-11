@@ -1,3 +1,4 @@
+import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -5,10 +6,15 @@ import {
   trendyolReference,
 } from '../../../__tests__/fixtures/trendyol-reference';
 import {
+  resolveTrendyolCategoryRate,
   resolveTrendyolCommissionRate,
   type ResolvedTrendyolCommissionRate,
 } from '../resolve-commission-rate';
-import { type TrendyolItemAttributes } from '../trendyol-inputs';
+import {
+  trendyolCategoryBrandKey,
+  type TrendyolCommissionRules,
+  type TrendyolItemAttributes,
+} from '../trendyol-inputs';
 
 const rules = trendyolReference().commission;
 
@@ -113,6 +119,98 @@ describe('resolveTrendyolCommissionRate', () => {
         brandId: null,
       }),
     );
+    expect(result).toBeNull();
+  });
+});
+
+describe('resolveTrendyolCategoryRate', () => {
+  const CATEGORY_ID = '411';
+  const BRAND_ID = '16';
+
+  function categoryRules(params: {
+    readonly categoryRate: string | null;
+    readonly brandRate: string | null;
+  }): TrendyolCommissionRules {
+    const categoryRatePct = new Map<string, Decimal>();
+    const categoryBrandRatePct = new Map<string, Decimal>();
+    if (params.categoryRate !== null) {
+      categoryRatePct.set(CATEGORY_ID, new Decimal(params.categoryRate));
+    }
+    if (params.brandRate !== null) {
+      categoryBrandRatePct.set(
+        trendyolCategoryBrandKey(CATEGORY_ID, BRAND_ID),
+        new Decimal(params.brandRate),
+      );
+    }
+    return { categoryRatePct, categoryBrandRatePct };
+  }
+
+  it('uses the category rule when it is the only rule', () => {
+    const result = resolveTrendyolCategoryRate({
+      rules: categoryRules({ categoryRate: '8', brandRate: null }),
+      categoryId: CATEGORY_ID,
+      brandId: BRAND_ID,
+    });
+    expect(result?.ratePct.toString()).toBe('8');
+    expect(result?.source).toBe('CATEGORY');
+  });
+
+  it('uses the category+brand rule when it is the only rule', () => {
+    const result = resolveTrendyolCategoryRate({
+      rules: categoryRules({ categoryRate: null, brandRate: '5' }),
+      categoryId: CATEGORY_ID,
+      brandId: BRAND_ID,
+    });
+    expect(result?.ratePct.toString()).toBe('5');
+    expect(result?.source).toBe('CATEGORY_BRAND');
+  });
+
+  it('picks the category+brand rule when it is lower than the category rule', () => {
+    const result = resolveTrendyolCategoryRate({
+      rules: categoryRules({ categoryRate: '8', brandRate: '5' }),
+      categoryId: CATEGORY_ID,
+      brandId: BRAND_ID,
+    });
+    expect(result?.ratePct.toString()).toBe('5');
+    expect(result?.source).toBe('CATEGORY_BRAND');
+  });
+
+  it('picks the category rule when it is lower than the category+brand rule', () => {
+    const result = resolveTrendyolCategoryRate({
+      rules: categoryRules({ categoryRate: '5', brandRate: '8' }),
+      categoryId: CATEGORY_ID,
+      brandId: BRAND_ID,
+    });
+    expect(result?.ratePct.toString()).toBe('5');
+    expect(result?.source).toBe('CATEGORY');
+  });
+
+  it('picks the category rule on a tie', () => {
+    const result = resolveTrendyolCategoryRate({
+      rules: categoryRules({ categoryRate: '8', brandRate: '8' }),
+      categoryId: CATEGORY_ID,
+      brandId: BRAND_ID,
+    });
+    expect(result?.ratePct.toString()).toBe('8');
+    expect(result?.source).toBe('CATEGORY');
+  });
+
+  it('ignores the category+brand rule when the brand id is null', () => {
+    const result = resolveTrendyolCategoryRate({
+      rules: categoryRules({ categoryRate: '8', brandRate: '5' }),
+      categoryId: CATEGORY_ID,
+      brandId: null,
+    });
+    expect(result?.ratePct.toString()).toBe('8');
+    expect(result?.source).toBe('CATEGORY');
+  });
+
+  it('returns null when no rule matches', () => {
+    const result = resolveTrendyolCategoryRate({
+      rules: categoryRules({ categoryRate: null, brandRate: null }),
+      categoryId: CATEGORY_ID,
+      brandId: BRAND_ID,
+    });
     expect(result).toBeNull();
   });
 });

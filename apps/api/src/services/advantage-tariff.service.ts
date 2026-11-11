@@ -22,8 +22,12 @@ import { mapPrismaError } from '@pazarsync/sync-core';
 import { isInstantWithinTariffPeriod, tariffBoundToInstant } from '@pazarsync/utils';
 
 import { NotFoundError } from '../lib/errors';
-import { resolveCommissionRate } from './commission-rate-resolver';
-import { parseStoredTariffBands, type StoredTariffBand } from '@pazarsync/profit';
+import {
+  loadCommissionRulesForCategories,
+  parseStoredTariffBands,
+  resolveTrendyolCategoryRate,
+  type StoredTariffBand,
+} from '@pazarsync/profit';
 import {
   computeAdvantageItemTiers,
   type ComputedAdvantageItem,
@@ -310,17 +314,17 @@ export async function getAdvantageTariffDetail(
     if (categoryId === null) continue;
     distinctCatKeys.set(`${categoryId}:${brandId ?? 'null'}`, { categoryId, brandId });
   }
-  await Promise.all(
-    [...distinctCatKeys].map(async ([key, { categoryId, brandId }]) => {
-      const resolved = await resolveCommissionRate({
-        platform: store.platform,
-        categoryId,
-        brandId,
-        sellerSegment: null,
-      });
-      categoryRateByKey.set(key, resolved?.rate ?? null);
-    }),
-  );
+  const commissionRules = await loadCommissionRulesForCategories(prisma, {
+    categoryIds: [...distinctCatKeys.values()].map((ref) => ref.categoryId),
+  });
+  for (const [key, { categoryId, brandId }] of distinctCatKeys) {
+    const resolved = resolveTrendyolCategoryRate({
+      rules: commissionRules,
+      categoryId: categoryId.toString(),
+      brandId: brandId === null ? null : brandId.toString(),
+    });
+    categoryRateByKey.set(key, resolved?.ratePct ?? null);
+  }
 
   // --- One scenario-base load for the whole tariff; scenario date = now ---
   const bases = await loadScreenScenarioBases({

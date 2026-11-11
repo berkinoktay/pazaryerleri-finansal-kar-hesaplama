@@ -17,10 +17,10 @@ import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
 import type { Store as PrismaStore } from '@pazarsync/db';
+import { loadCommissionRulesForCategories, resolveTrendyolCategoryRate } from '@pazarsync/profit';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { NotFoundError } from '../lib/errors';
-import { resolveCommissionRate } from './commission-rate-resolver';
 import { resolveDiscountCommissionSource } from './discount-commission-source';
 import { computeDiscountEstimate, type ComputedDiscountEstimate } from './discount-compute.service';
 import {
@@ -129,13 +129,16 @@ export async function estimateDiscountItem(
       productRate = new Decimal(variantRow.syncedCommissionRate.toString());
     }
     if (variantRow !== null && variantRow.product.categoryId !== null) {
-      const resolved = await resolveCommissionRate({
-        platform: store.platform,
-        categoryId: variantRow.product.categoryId,
-        brandId: variantRow.product.brandId,
-        sellerSegment: null,
+      const { categoryId, brandId } = variantRow.product;
+      const commissionRules = await loadCommissionRulesForCategories(prisma, {
+        categoryIds: [categoryId],
       });
-      categoryRate = resolved?.rate ?? null;
+      const resolved = resolveTrendyolCategoryRate({
+        rules: commissionRules,
+        categoryId: categoryId.toString(),
+        brandId: brandId === null ? null : brandId.toString(),
+      });
+      categoryRate = resolved?.ratePct ?? null;
     }
   }
 
