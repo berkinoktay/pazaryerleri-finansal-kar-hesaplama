@@ -310,7 +310,7 @@ pazaryerleri-finansal-kar-hesaplama-saas/
 
 > **Durum notu (2026-11-11):** Bu bölümdeki varlık şeması ve Prisma özeti tasarım dönemindendir ve
 > ayrıntıda eskimiştir; otorite `packages/db/prisma/schema.prisma` dosyasıdır. Kâr motoru yeniden
-> yapılanmasıyla (`docs/plans/2026-10-29-profit-engine-design.md`) `settlements`, `settlement_items`,
+> yapılanmasıyla (`docs/plans/archive/2026-10-29-profit-engine-design.md`) `settlements`, `settlement_items`,
 > `order_fees`, `commission_invoices` ve `org_period_fees` tabloları ile `orders`/`order_items`
 > üzerindeki tahmini ve kesin kâr, komisyon ve maliyet kopyası kolonları **kaldırıldı**. Kâr verisi
 > artık şu tablolarda yaşar (hepsi `organization_id` taşır ve RLS altındadır):
