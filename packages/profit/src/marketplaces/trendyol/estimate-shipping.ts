@@ -84,8 +84,9 @@ export function parcelDesi(
 /**
  * Resolves the VAT-exclusive (net) shipping tariff for a desi and basket. The desi
  * lookup key is `ceil(desi)` as an integer string. The Barem limit uses the
- * unrounded desi on purpose; only the tariff-table key is rounded up. Pure mirror of
- * the legacy `resolveTariffForDesi`, without the database.
+ * unrounded desi on purpose; only the tariff-table key is rounded up. The engine's pure
+ * counterpart of `resolveTariffForDesi` (which only the products list's variant
+ * estimator uses), without the database.
  */
 export function resolveTrendyolShippingNet(params: {
   readonly desi: Decimal;

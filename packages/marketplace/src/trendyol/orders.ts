@@ -356,7 +356,6 @@ export function mapLine(
     // Raw line commission rate only; the profit engine computes the commission
     // itself (VAT-inclusive sale x rate).
     commissionRate: commissionRate.toString(),
-    categoryId: line.productCategoryId != null ? String(line.productCategoryId) : null,
     commissionKnown: line.commission !== undefined && line.commission !== null,
   };
 }

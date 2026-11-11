@@ -3692,14 +3692,6 @@
         "title": "Sipariş kalemi yok",
         "description": "Sipariş senkronu kalemleri henüz çekmedi."
       },
-      "columns": {
-        "variant": "Varyant",
-        "quantity": "Adet",
-        "lineSaleGross": "Satır tutarı (KDV dahil)",
-        "commissionGross": "Komisyon (KDV dahil)",
-        "refundedCommissionGross": "İade kom. (KDV dahil)",
-        "unitCostSnapshotGross": "Maliyet (KDV dahil)"
-      },
       "unknownVariant": "Varyant bağlı değil",
       "costMissing": "Maliyet eksik",
       "costFrozen": "Kâr hesabı dışı"

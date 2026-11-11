@@ -323,19 +323,17 @@ describe('mapLine — GROSS output', () => {
 
   // commissionKnown tells order intake whether the rate is real: a line that
   // carries no commission stores a null raw rate instead of the defensive 0.
-  it('flags commissionKnown false and carries categoryId when commission is absent', () => {
+  it('flags commissionKnown false when commission is absent', () => {
     // `commission: undefined` mirrors the sparse-webhook case (rate not carried).
-    const line = buildLine({ commission: undefined, productCategoryId: 411 });
+    const line = buildLine({ commission: undefined });
     const m = mapLine(line, { shipmentPackageId: 1 });
     expect(m.commissionKnown).toBe(false);
-    expect(m.categoryId).toBe('411');
   });
 
-  it('flags commissionKnown true and stringifies categoryId when commission is present', () => {
-    const line = buildLine({ commission: 20, productCategoryId: 626 });
+  it('flags commissionKnown true when commission is present', () => {
+    const line = buildLine({ commission: 20 });
     const m = mapLine(line, { shipmentPackageId: 1 });
     expect(m.commissionKnown).toBe(true);
-    expect(m.categoryId).toBe('626');
     expect(m.commissionRate).toBe('20');
   });
 });

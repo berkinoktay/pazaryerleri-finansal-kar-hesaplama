@@ -3,13 +3,11 @@ import { prisma } from '@pazarsync/db';
 import { ProfitStatementView, ProfitStatus, type OrderStatus } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import {
-  computeParcelProfit,
   itemProfitValues,
   loadOrderProfitLines,
   parseStoredIssues,
   roundPercent,
   selectLines,
-  UnsupportedPlatformError,
 } from '@pazarsync/profit';
 import { getBusinessDateAnchor, getBusinessDayRange, getBusinessHour } from '@pazarsync/utils';
 import Decimal from 'decimal.js';
@@ -177,17 +175,15 @@ async function resolveLiveEstimates(
     }
     computedCount += 1;
     // Sequential on purpose (see above): one computation holds the connection at a time.
-    try {
-      const computed = await computeParcelProfit(prisma, {
-        organizationId: orgId,
-        orderId: order.id,
-      });
-      const estimate = toLiveEstimate(computed.estimate);
-      if (estimate !== null) estimates.set(order.id, estimate);
-    } catch (err) {
-      // A platform the engine cannot compute yet (e.g. Hepsiburada): expected, no log.
-      if (!(err instanceof UnsupportedPlatformError)) failures.record(err, order.id);
-    }
+    const computed = await computeParcelProfitForRead({
+      organizationId: orgId,
+      orderId: order.id,
+      surface: 'live-performance',
+      failures,
+    });
+    if (computed === null) continue;
+    const estimate = toLiveEstimate(computed.estimate);
+    if (estimate !== null) estimates.set(order.id, estimate);
   }
 
   failures.flush();

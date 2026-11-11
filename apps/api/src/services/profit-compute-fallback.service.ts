@@ -5,6 +5,8 @@ import {
   type ComputedParcelProfit,
 } from '@pazarsync/profit';
 
+import type { RequestFailureLog } from './scenario-screen-commons';
+
 /**
  * A read surface that must keep its page up when a parcel's profit cannot be derived for
  * display. The order detail, the new-order notification and live performance (today's
@@ -70,18 +72,28 @@ export function logProfitReadFailure(params: {
  * id so support can trace the line, then returns null so the caller renders the empty
  * profit section. The error is never rethrown: the owner has chosen the open page over
  * the 500.
+ *
+ * A caller that computes many orders in one request passes its `failures` sink: the
+ * failure is then recorded there (with the order id) instead of logged, and the caller
+ * flushes the sink once after its loop, so a systemic failure is one log line per
+ * request, not one per order.
  */
 export async function computeParcelProfitForRead(params: {
   readonly organizationId: string;
   readonly orderId: string;
   readonly surface: ProfitReadSurface;
+  readonly failures?: RequestFailureLog;
 }): Promise<ComputedParcelProfit | null> {
-  const { organizationId, orderId, surface } = params;
+  const { organizationId, orderId, surface, failures } = params;
   try {
     return await computeParcelProfit(prisma, { organizationId, orderId });
   } catch (err) {
     if (err instanceof UnsupportedPlatformError) {
       // A platform the engine cannot compute yet (e.g. Hepsiburada): expected, no log.
+      return null;
+    }
+    if (failures !== undefined) {
+      failures.record(err, orderId);
       return null;
     }
     logProfitReadFailure({ surface, organizationId, orderId, err });

@@ -1797,8 +1797,8 @@ describe('Order routes', () => {
         saleGross: '280.00',
       });
 
-      // Both items carry a stale legacy refund column (8.40, the discount's commission).
-      // Only the returned item has a COMMISSION_REFUND line.
+      // Both items carry a 28.00 commission line; only the returned item has a
+      // COMMISSION_REFUND line, so only it reports a refunded commission.
       const returnedItem = await prisma.orderItem.create({
         data: {
           orderId: order.id,
@@ -1867,9 +1867,8 @@ describe('Order routes', () => {
         saleGross: '140.00',
       });
 
-      // The legacy column still holds the pre-cancel commission (28); the statement has
-      // no commission line, so the item's commission is zero and its rate null, never
-      // the column.
+      // The cancelled statement has no commission line, so the item's commission is zero
+      // and its rate null.
       const item = await prisma.orderItem.create({
         data: {
           orderId: order.id,

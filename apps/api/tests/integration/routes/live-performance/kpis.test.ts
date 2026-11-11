@@ -76,7 +76,6 @@ function buildMapped(platformOrderId: string, orderDate: Date): MappedOrder {
         lineSellerDiscountGross: '0.00',
         saleVatRate: '18',
         commissionRate: '15',
-        categoryId: null,
         commissionKnown: true,
       },
     ],

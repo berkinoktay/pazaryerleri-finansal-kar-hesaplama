@@ -51,10 +51,10 @@ export interface LegacyProfitScenario {
 }
 
 /**
- * The inputs behind the twelve legacy `computeProfit` scenarios in
- * `src/__tests__/profit-formula.test.ts`. Each entry is one `it` from that file:
- * its `input` is that test's exact input (including the `includeNegativeNetVat`
- * flag) and its `name` is the legacy `it` title. Where the legacy file shares a
+ * The inputs behind the twelve legacy `computeProfit` scenarios of the former
+ * `src/__tests__/profit-formula.test.ts` (deleted with the legacy engine). Each entry
+ * is one `it` from that file: its `input` is that test's exact input (including the
+ * `includeNegativeNetVat` flag) and its `name` is the legacy `it` title. Where the legacy file shares a
  * base input across several `it`s and only varies the flag, each `it` is written
  * out here as its own scenario with the flag it used. The three legacy titles
  * that were written in Turkish are translated to English here (the only source

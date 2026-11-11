@@ -71,4 +71,14 @@ describe('TRENDYOL record kind tables', () => {
     // A prototype key must never be mistaken for a transaction type.
     expect(isTrendyolTransactionType('toString')).toBe(false);
   });
+
+  it('spells the Trendyol-funded discount and coupon types with the finance doc casing', () => {
+    // The Trendyol finance API is case-sensitive: TyDiscount -> 200, TYDiscount -> 400.
+    for (const type of ['TyDiscount', 'TyDiscountCancel', 'TyCoupon', 'TyCouponCancel']) {
+      expect(isTrendyolTransactionType(type)).toBe(true);
+    }
+    for (const type of ['TYDiscount', 'TYDiscountCancel', 'TYCoupon', 'TYCouponCancel']) {
+      expect(isTrendyolTransactionType(type)).toBe(false);
+    }
+  });
 });

@@ -158,4 +158,3 @@ export {
   type RemoteWebhook,
 } from './trendyol/webhook-reconcile';
 export { decryptStoreCredentials, StoreCredentialShapeError } from './lib/store-credentials';
-export { commissionVatDivisor } from './trendyol/constants';

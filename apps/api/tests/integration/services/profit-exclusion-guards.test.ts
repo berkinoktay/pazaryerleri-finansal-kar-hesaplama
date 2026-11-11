@@ -14,10 +14,9 @@
  *   - orders_profit_exclusion_pair_check (CHECK): the stamp and its reason must
  *     be written together, on both INSERT and UPDATE.
  *
- * Assert style follows the house pattern (order-immutability.test.ts /
- * cost-snapshot-immutability.test.ts): match the rejection message so we prove
- * it was OUR guard (the trigger message, the constraint name), not a generic
- * error.
+ * Assert style follows the house pattern (order-immutability.test.ts): match the
+ * rejection message so we prove it was OUR guard (the trigger message, the
+ * constraint name), not a generic error.
  */
 
 import { randomUUID } from 'node:crypto';

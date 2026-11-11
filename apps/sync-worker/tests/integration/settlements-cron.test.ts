@@ -797,7 +797,6 @@ describe('processSettlementsChunk — raw finance-record ingest', () => {
           lineSellerDiscountGross: a.sellerDiscountGross,
           saleVatRate: a.saleVatRate,
           commissionRate: a.commissionRate,
-          categoryId: null,
           commissionKnown: true,
         },
       ],

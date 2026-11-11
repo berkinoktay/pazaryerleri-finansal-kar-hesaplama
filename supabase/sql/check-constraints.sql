@@ -71,8 +71,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS order_items_order_platform_line_uniq
 -- Performance ONLY — deliberately NOT a boot invariant. It is intentionally
 -- absent from the worker's REQUIRED_INDEXES DDL assertions
 -- (apps/sync-worker/src/lib/ddl-assertions.ts), which guard the
--- correctness-critical partial UNIQUE indexes (duplicate-job / fee
--- idempotency): a missing performance index degrades claim speed, never
+-- correctness-critical partial UNIQUE indexes (duplicate-job / order-line
+-- dedup): a missing performance index degrades claim speed, never
 -- correctness, so failing boot over it would be wrong.
 CREATE INDEX IF NOT EXISTS sync_logs_claim_order_idx
   ON sync_logs ((COALESCE(next_attempt_at, started_at)))

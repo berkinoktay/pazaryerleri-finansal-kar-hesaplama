@@ -39,7 +39,7 @@ const app = createApp();
 const CATEGORY_ID = 597n;
 const BRAND_ID = 2032n;
 
-/** Seed a CATEGORY commission rate so resolveCommissionRate returns a rate. */
+/** Seed a CATEGORY commission rate so the scenario loader resolves a category rate for the variant. */
 async function seedCommissionRate(): Promise<void> {
   await prisma.marketplaceCommissionRate.create({
     data: {

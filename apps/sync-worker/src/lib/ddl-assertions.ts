@@ -7,7 +7,7 @@
 //
 //   1. Partial indexes (Prisma 7 has no native WHERE-clause syntax):
 //        - one-active-job-per-(store, sync_type) UNIQUE: duplicate sync jobs run
-//          in parallel and double-write orders/fees;
+//          in parallel and double-write orders;
 //        - order_items dedup UNIQUE (defense-in-depth): a future bug slipping
 //          past the app-layer findFirst + the processing lease would double-count
 //          revenue/profit for the same (order, line);

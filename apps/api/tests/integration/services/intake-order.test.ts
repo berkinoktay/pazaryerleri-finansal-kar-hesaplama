@@ -56,7 +56,6 @@ function buildMapped(over: {
     lineSellerDiscountGross: '0',
     saleVatRate: '18',
     commissionRate: '15',
-    categoryId: null,
     commissionKnown: true,
   };
   return {

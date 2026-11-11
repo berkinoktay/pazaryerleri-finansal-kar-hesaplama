@@ -136,7 +136,6 @@ function buildMappedForIntake(over: {
         lineSellerDiscountGross: '0.00',
         saleVatRate: '18',
         commissionRate: commissionKnown ? '15' : '0',
-        categoryId: null,
         commissionKnown,
       },
     ],

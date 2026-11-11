@@ -758,15 +758,9 @@ importers:
       '@pazarsync/order-sync':
         specifier: workspace:*
         version: link:../order-sync
-      '@pazarsync/profit':
-        specifier: workspace:*
-        version: link:../profit
       '@pazarsync/sync-core':
         specifier: workspace:*
         version: link:../sync-core
-      '@pazarsync/utils':
-        specifier: workspace:*
-        version: link:../utils
       zod:
         specifier: 'catalog:'
         version: 4.6.7

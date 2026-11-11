@@ -180,7 +180,6 @@ function buildDirectMapped(over: {
         lineSellerDiscountGross: '0.00',
         saleVatRate: '20',
         commissionRate: over.commissionRate ?? '10',
-        categoryId: null,
         commissionKnown: over.commissionKnown ?? true,
       },
     ],
@@ -960,7 +959,6 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
           lineSellerDiscountGross: '0.00',
           saleVatRate: '20',
           commissionRate: '10',
-          categoryId: null,
           commissionKnown: true,
         },
       ],
@@ -1262,7 +1260,6 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
           // %10 satış KDV oranı — Bug 2'nin can alıcı noktası.
           saleVatRate: '10',
           commissionRate: '10',
-          categoryId: null,
           commissionKnown: true,
         },
       ],
@@ -1320,7 +1317,6 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
           lineSellerDiscountGross: '11.00',
           saleVatRate: '10', // %10 → 11 × 10/110 = 1.00
           commissionRate: '10',
-          categoryId: null,
           commissionKnown: true,
         },
         {
@@ -1332,7 +1328,6 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
           lineSellerDiscountGross: '12.00',
           saleVatRate: '20', // %20 → 12 × 20/120 = 2.00
           commissionRate: '10',
-          categoryId: null,
           commissionKnown: true,
         },
       ],
@@ -1383,7 +1378,6 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
           lineSellerDiscountGross: '0.00',
           saleVatRate: '20',
           commissionRate: '10',
-          categoryId: null,
           commissionKnown: true,
         },
       ],
@@ -1481,7 +1475,6 @@ describe('upsertOrderWithSnapshot — out-of-order guard (freshness)', () => {
           lineSellerDiscountGross: '0.00',
           saleVatRate: '20',
           commissionRate: over.commissionRate ?? '10',
-          categoryId: null,
           commissionKnown: true,
         },
       ],
@@ -1788,7 +1781,6 @@ describe('upsertOrderWithSnapshot — optimistic stock decrement (product freshn
         lineSellerDiscountGross: '0.00',
         saleVatRate: '20',
         commissionRate: '10',
-        categoryId: null,
         commissionKnown: true,
       })),
     };

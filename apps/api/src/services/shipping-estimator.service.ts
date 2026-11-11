@@ -3,9 +3,9 @@
  *
  * Prepares the variant's inputs - desi = `dimensionalWeightOverride ?? syncedDimensionalWeight`
  * (synced is non-null, >= 0), Barem range = `variant.salePrice`, fast-eligibility via
- * `hasFastDeliverySetup` - and delegates the Barem-vs-desi tariff resolution to the
- * shared `resolveTariffForDesi` (in `@pazarsync/profit`), the single source of truth
- * also used by the order-level estimator (`estimateShippingCostForOrder`).
+ * `hasFastDeliverySetup` - and delegates the Barem-vs-desi tariff resolution to
+ * `resolveTariffForDesi` (in `@pazarsync/profit`). This variant estimator is that
+ * resolver's only caller; the profit engine's pure counterpart is `resolveTrendyolShippingNet`.
  *
  * Outcomes: STORE_NOT_FOUND / NO_CARRIER / OWN_CONTRACT_EMPTY / DESI_OVERFLOW, or a
  * `ShippingEstimate` (NORMAL / BAREM / OWN_CONTRACT). All money via `decimal.js`;
@@ -17,12 +17,12 @@ import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
 
-// --- Types + shared core (single source: @pazarsync/profit) -----------------
+// --- Types + tariff resolver (source: @pazarsync/profit) ---------------------
 // The Barem-vs-desi resolver `resolveTariffForDesi` and the ShippingEstimate /
-// EstimateOutcome types live in @pazarsync/profit (the core shared with the
-// order-level estimator). The types are re-exported here so the existing
-// apps/api consumers (products-list, the SQL CTE, the validator) keep their
-// import paths.
+// EstimateOutcome types live in @pazarsync/profit; this variant estimator is the
+// resolver's only caller (the engine's pure counterpart is resolveTrendyolShippingNet).
+// The types are re-exported here so the existing apps/api consumers (products-list,
+// the SQL CTE, the validator) keep their import paths.
 import { isTrendyolBaremEligible, resolveTariffForDesi } from '@pazarsync/profit';
 import type {
   EstimateOutcome,

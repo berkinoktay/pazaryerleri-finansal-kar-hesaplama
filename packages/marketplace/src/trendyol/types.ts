@@ -485,12 +485,6 @@ export interface MappedOrderLine {
    */
   commissionRate: string;
   /**
-   * Trendyol lines[].productCategoryId -- stringified for boundary parity with the
-   * other id/money fields. null when the payload omits it. Carried on the DTO only;
-   * order intake does not persist it.
-   */
-  categoryId: string | null;
-  /**
    * True only when Trendyol actually carried a commission rate on the line.
    * When false, commissionRate is the defensive 0 fallback (not a real zero), so
    * order intake stores a null raw rate and the engine falls back to the category.

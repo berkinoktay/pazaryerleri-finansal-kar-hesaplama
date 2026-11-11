@@ -30,8 +30,10 @@ actuals on purpose; never treat an `ESTIMATE` view as final.
 - `marketplaces/` -- per-marketplace estimators and the mapper from raw marketplace
   records to actual lines (Trendyol today). Pure.
 - `persistence/` -- the database edge: the parcel and scenario loaders, the parcel
-  recompute writer, the finance-record ingest and the recompute queue. Every query is
-  scoped to the caller's organization and store.
+  recompute writer, the finance-record ingest and the recompute queue. Order-bound
+  tenant queries filter by the order's organization and store; the worker's queue claim
+  and stale-statement scan are deliberately system-wide (they run for every
+  organization), and the reference loaders read platform-global tables.
 - `read/` -- helpers that turn stored lines, statements and issues back into engine
   types and display breakdowns.
 - `shipping/` -- the shared Barem-vs-desi tariff resolution (`resolveTariffForDesi`).
@@ -73,8 +75,8 @@ return legs — and returns the lines, the issues, and the active/returned item 
 lines and confirms the estimates through two independent payment cycles (the sale
 cycle and the return cycle), each gated on its own payment order. The catalog's
 `allocationScope` decides whether a parcel-level line is split across the active items
-or the returned items. Nothing calls this module yet; phase 3 wires the database
-loader and the callers to it. A second golden test pins the melontik parcel end to end
+or the returned items. Phase 3 wired the database loader and the callers to it. A
+second golden test pins the melontik parcel end to end
 through the module, including the ESTIMATED -> PARTIALLY_SETTLED -> SETTLED transition.
 
 ## Scenario and price solver (rebuild, phase 2B)
@@ -87,8 +89,7 @@ lowest unit price that meets a target margin, markup or net profit: it splits th
 axis at the marketplace's breakpoints and at the net VAT kink, solves each segment in
 closed form from two samples, and resolves the candidate with a bounded noise-aware
 kurus scan -- no binary search. The audit report's worked examples are pinned as golden
-tests.
-Nothing calls this yet; phase 4 wires the pricing and campaign screens to it.
+tests. Phase 4 wired the pricing and campaign screens to it.
 
 ## Persistence (rebuild, phase 3A)
 
