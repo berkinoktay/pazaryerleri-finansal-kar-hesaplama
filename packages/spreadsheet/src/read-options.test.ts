@@ -52,4 +52,26 @@ describe('resolveReadOptions', () => {
       });
     },
   );
+
+  it('carries a sheet selector', () => {
+    expect(resolveReadOptions({ sheet: { by: 'name', name: 'Veri' } })).toMatchObject({
+      sheet: { by: 'name', name: 'Veri' },
+    });
+    expect(resolveReadOptions({ sheet: { by: 'index', index: 0 } })).toMatchObject({
+      sheet: { by: 'index', index: 0 },
+    });
+  });
+
+  it('throws when both a sheet selector and a sheet name are given', () => {
+    expect(() =>
+      resolveReadOptions({ sheet: { by: 'index', index: 0 }, sheetName: 'Veri' }),
+    ).toThrow(Error);
+  });
+
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'throws for the sheet index %s',
+    (bad) => {
+      expect(() => resolveReadOptions({ sheet: { by: 'index', index: bad } })).toThrow(Error);
+    },
+  );
 });

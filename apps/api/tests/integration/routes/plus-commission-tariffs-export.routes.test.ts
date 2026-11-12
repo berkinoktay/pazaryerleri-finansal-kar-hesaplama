@@ -311,6 +311,53 @@ describe('plus-commission-tariff export', () => {
     expect(cellText(row ?? [], firstPeriod.computedCommissionCol)).toBe(originalThreeCommission);
   });
 
+  it('lets the higher-sortOrder row win when a period repeats a barcode, whatever the insert order', async () => {
+    const ctx = await setupStore();
+    const tariffId = await importFixture(ctx, FIXTURE_SINGLE, 'trendyol-plus-tariff.xlsx');
+
+    // A single-period tariff whose period lists the same barcode TWICE, both opted into
+    // Plus with a different custom price. The rows are inserted in REVERSE sortOrder (1
+    // first, then 0), so insertion/heap order alone would let the sortOrder-0 row win the
+    // barcode -> price map. The export's item orderBy (sortOrder asc, as the detail screen
+    // lists them) must make the sortOrder-1 row, listed last, the one that is written.
+    const periods = await prisma.plusCommissionTariffPeriod.findMany({ where: { tariffId } });
+    expect(periods).toHaveLength(1);
+    const periodId = periods[0]?.id;
+    if (periodId === undefined) return;
+    await prisma.plusCommissionTariffItem.deleteMany({ where: { periodId } });
+    const mkItem = async (sortOrder: number, customPrice: string): Promise<void> => {
+      await prisma.plusCommissionTariffItem.create({
+        data: {
+          organizationId: ctx.orgId,
+          storeId: ctx.storeId,
+          periodId,
+          barcode: SINGLE_BARCODE,
+          productTitle: 'Test',
+          sortOrder,
+          currentPrice: '300.00',
+          commissionBasePrice: '300.00',
+          currentCommissionPct: '19',
+          plusPriceUpperLimit: '300.00',
+          plusCommissionPct: '15',
+          plusCommissionBasePrice: '300.00',
+          plusSelected: true,
+          customPrice,
+        },
+      });
+    };
+    await mkItem(1, '250.00');
+    await mkItem(0, '200.00');
+
+    const res = await exportTariff(ctx, tariffId);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain(XLSX_MIME_FRAGMENT);
+
+    const { grid, layout } = await readParsed(Buffer.from(await res.arrayBuffer()));
+    const row = rowFor(grid, layout, SINGLE_BARCODE);
+    expect(row).toBeDefined();
+    expect(num(row, layout.plusPriceSelection)).toBe(250);
+  });
+
   it('exports the source verbatim (one xlsx, no 409) when nothing is opted in', async () => {
     const ctx = await setupStore();
     const tariffId = await importFixture(ctx, FIXTURE_SINGLE, 'trendyol-plus-tariff.xlsx');

@@ -170,8 +170,8 @@ function numberCell(value: number): XlsxCellValue {
 describe('kampanya export — servis seviyesinde satır hizalama', () => {
   const layout = resolveMarketplaceCampaignLayout(SYNTHETIC_HEADER)!;
 
-  // Dört veri satırı: B-002'nin maksimum fiyatı YOK — gerçek import'un (parseRow) atlayacağı
-  // satır tam olarak bu; kalan üçü MAX / CUSTOM / NONE seçimlerinin karışımı.
+  // Dört veri satırı: B-002'nin maksimum fiyatı YOK — gerçek import'un (parseCampaignRow)
+  // atlayacağı satır tam olarak bu; kalan üçü MAX / CUSTOM / NONE seçimlerinin karışımı.
   const rows = [
     dataRow({
       [layout.barcode]: textCell('A-001'),

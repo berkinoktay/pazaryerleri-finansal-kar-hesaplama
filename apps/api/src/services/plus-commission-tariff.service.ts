@@ -153,8 +153,10 @@ export async function getPlusTariffDetail(
             items: {
               // Excel row order (`sortOrder`, set at import), barcode breaking ties —
               // the detail lists products exactly as in the uploaded file and
-              // identically across sub-period tabs (same product → same sortOrder).
-              orderBy: [{ sortOrder: 'asc' }, { barcode: 'asc' }],
+              // identically across sub-period tabs (same product → same sortOrder). id
+              // makes the order total, so the export (same orderBy) resolves a
+              // repeated barcode the same way.
+              orderBy: [{ sortOrder: 'asc' }, { barcode: 'asc' }, { id: 'asc' }],
               select: {
                 id: true,
                 productVariantId: true,

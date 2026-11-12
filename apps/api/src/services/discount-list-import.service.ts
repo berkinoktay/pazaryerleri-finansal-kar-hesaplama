@@ -36,7 +36,10 @@ interface ParsedDiscountRow {
   included: boolean;
 }
 
-function parseRow(row: readonly unknown[], layout: DiscountListLayout): ParsedDiscountRow | null {
+export function parseDiscountListRow(
+  row: readonly unknown[],
+  layout: DiscountListLayout,
+): ParsedDiscountRow | null {
   const barcode = cellText(row, layout.barcode);
   if (barcode === null) return null;
   const currentPrice = cellCurrencyDecimalString(row, layout.currentPrice);
@@ -113,7 +116,7 @@ export async function importDiscountList(
   const parsed: ParsedDiscountRow[] = [];
   let skippedRows = 0;
   for (const row of grid.slice(1)) {
-    const parsedRow = parseRow(row, layout);
+    const parsedRow = parseDiscountListRow(row, layout);
     if (parsedRow === null) {
       skippedRows += 1;
       continue;

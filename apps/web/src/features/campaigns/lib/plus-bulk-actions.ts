@@ -5,8 +5,8 @@ import type { PlusBand, PlusTariffRow } from './adapt-plus-tariff';
 /**
  * Chosen Plus option per row: `'plus'` = joined AT THE CEILING, `null`/absent = not
  * joined at the ceiling. A single-valued sibling of the commission `SelectionMap`
- * (`Record<string, string | null>`) so the shared whole-week export preview reads a
- * row's choice the same way.
+ * (`Record<string, string | null>`); the export preview reads it through
+ * `resolvePlusExportPrice` in export-preview.ts.
  *
  * This pairs with {@link PlusCustomPriceMap}: the two maps are MUTUALLY EXCLUSIVE per
  * row — a row is either ceiling-joined (`selection[id] === 'plus'`), custom-joined

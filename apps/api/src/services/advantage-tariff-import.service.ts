@@ -73,7 +73,7 @@ function buildStarTiers(
   return tiers;
 }
 
-function parseRow(
+export function parseAdvantageTariffRow(
   row: readonly unknown[],
   layout: AdvantageTariffLayout,
 ): ParsedAdvantageRow | null {
@@ -155,7 +155,7 @@ export async function importAdvantageTariff(
   const parsed: ParsedAdvantageRow[] = [];
   let skippedRows = 0;
   for (const row of grid.slice(1)) {
-    const parsedRow = parseRow(row, layout);
+    const parsedRow = parseAdvantageTariffRow(row, layout);
     if (parsedRow === null) {
       skippedRows += 1;
       continue;

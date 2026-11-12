@@ -90,7 +90,10 @@ function bandsForPeriod(
   return bands;
 }
 
-function parseRow(row: readonly unknown[], layout: TariffLayout): ParsedRow | null {
+export function parseCommissionTariffRow(
+  row: readonly unknown[],
+  layout: TariffLayout,
+): ParsedRow | null {
   const { fixed } = layout;
   const barcode = cellText(row, fixed.barcode);
   if (barcode === null) return null;
@@ -177,7 +180,7 @@ export async function importTariff(input: ImportTariffInput): Promise<ImportTari
   const parsed: ParsedRow[] = [];
   let skippedRows = 0;
   for (const row of grid.slice(1)) {
-    const parsedRow = parseRow(row, layout);
+    const parsedRow = parseCommissionTariffRow(row, layout);
     if (parsedRow === null) {
       skippedRows += 1;
       continue;

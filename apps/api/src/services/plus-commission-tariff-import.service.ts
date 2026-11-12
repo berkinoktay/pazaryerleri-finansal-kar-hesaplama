@@ -49,7 +49,10 @@ interface ParsedPlusRow {
   periodOffers: ReadonlyArray<string>;
 }
 
-function parseRow(row: readonly unknown[], layout: PlusTariffLayout): ParsedPlusRow | null {
+export function parsePlusTariffRow(
+  row: readonly unknown[],
+  layout: PlusTariffLayout,
+): ParsedPlusRow | null {
   const barcode = cellText(row, layout.barcode);
   if (barcode === null) return null;
   // Prefer Model Kodu, then Satıcı Stok Kodu — same order as the product import.
@@ -149,7 +152,7 @@ export async function importPlusTariff(
   const parsed: ParsedPlusRow[] = [];
   let skippedRows = 0;
   for (const row of grid.slice(1)) {
-    const parsedRow = parseRow(row, layout);
+    const parsedRow = parsePlusTariffRow(row, layout);
     if (parsedRow === null) {
       skippedRows += 1;
       continue;

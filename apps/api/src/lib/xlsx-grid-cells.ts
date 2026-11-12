@@ -1,19 +1,14 @@
 // Shared readers + header helpers for a `readWorkbookGrid` result (grid cells are
 // `string | number | boolean | Date | null`). Used by every campaign-tariff
 // import/export/layout path so they read Trendyol's cells identically.
+//
+// A thin shim over the engine's cell readers (`@pazarsync/spreadsheet` cells.ts) that
+// keeps the names the services import today. Named wrappers, not `export *`: the
+// engine's `cellInt` takes a mode, and the engine's other exports do not belong here.
 
-import { normalizeDecimalString } from '@pazarsync/spreadsheet';
+import { cellDecimal, cellInt as cellIntByMode } from '@pazarsync/spreadsheet';
 
-/** Trimmed string, or null for an empty/absent/non-textual cell. Numbers coerce to their string form. */
-export function cellText(row: readonly unknown[], idx: number): string | null {
-  const value = row[idx];
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    return trimmed === '' ? null : trimmed;
-  }
-  if (typeof value === 'number') return String(value);
-  return null;
-}
+export { cellText, findHeader, normalizeHeader } from '@pazarsync/spreadsheet';
 
 /**
  * A decimal string ("777.1", "-4.12"), or null when the cell is empty/non-numeric.
@@ -21,63 +16,19 @@ export function cellText(row: readonly unknown[], idx: number): string | null {
  * decimal is kept. The cells are usually already numeric.
  */
 export function cellDecimalString(row: readonly unknown[], idx: number): string | null {
-  const value = row[idx];
-  if (typeof value === 'number') return value.toString();
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (trimmed === '') return null;
-    const normalized = trimmed.includes(',')
-      ? trimmed.replace(/\./g, '').replace(',', '.')
-      : trimmed;
-    return /^-?\d+(\.\d+)?$/.test(normalized) ? normalized : null;
-  }
-  return null;
+  return cellDecimal(row, idx, 'plain');
 }
 
 /**
  * Like `cellDecimalString`, but currency-aware: strips ₺/$/% and a trailing "TL"
- * before resolving Turkish separators (via the spreadsheet package's shared
- * normalizer). Needed by the Discounts sheet, whose "Güncel Satış Fiyatı" column
- * is TEXT like "250 ₺" — `cellDecimalString` would reject it.
+ * before resolving Turkish separators. Needed by the Discounts sheet, whose
+ * "Güncel Satış Fiyatı" column is TEXT like "250 ₺"; `cellDecimalString` would reject it.
  */
 export function cellCurrencyDecimalString(row: readonly unknown[], idx: number): string | null {
-  const value = row[idx];
-  if (typeof value === 'number') return value.toString();
-  if (typeof value === 'string') {
-    let normalized = normalizeDecimalString(value);
-    if (normalized === '') return null;
-    // Turkish dot-only thousands ("1.250 ₺" → 1250, "1.250.000 ₺" → 1250000): after the
-    // currency strip, a value with dots but NO comma whose every dot delimits a 3-digit group
-    // is a thousands-formatted integer, not a decimal — strip the dots before validating.
-    // normalizeDecimalString leaves a comma-less string's dots intact, so they survive to here.
-    // A 2-digit tail like "1.25" fails this pattern and stays a decimal.
-    if (/^\d{1,3}(\.\d{3})+$/.test(normalized)) {
-      normalized = normalized.replace(/\./g, '');
-    }
-    return /^-?\d+(\.\d+)?$/.test(normalized) ? normalized : null;
-  }
-  return null;
+  return cellDecimal(row, idx, 'currency');
 }
 
 /** An integer, or null when the cell is empty/non-numeric. Truncates a decimal. */
 export function cellInt(row: readonly unknown[], idx: number): number | null {
-  const decimal = cellDecimalString(row, idx);
-  return decimal === null ? null : Math.trunc(Number(decimal));
-}
-
-/**
- * Normalizes a header value for exact comparison: NFC-normalize + trim + collapse
- * internal whitespace (JS `\s` already covers NBSP U+00A0), so header matching is
- * exact regardless of stray spacing.
- */
-export function normalizeHeader(value: unknown): string {
-  return String(value ?? '')
-    .normalize('NFC')
-    .trim()
-    .replace(/\s+/g, ' ');
-}
-
-/** Index of a header in an ALREADY-normalized header row, or -1 when absent. */
-export function findHeader(normalizedHeaders: readonly string[], target: string): number {
-  return normalizedHeaders.indexOf(normalizeHeader(target));
+  return cellIntByMode(row, idx, 'truncate');
 }

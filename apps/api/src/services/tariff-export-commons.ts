@@ -15,19 +15,21 @@
 // The two pure functions here — `planExportFiles` (the bucketing) and
 // `bundleForDownload` (one lone .xlsx, or a .zip of several window files) — hold NO
 // vertical-specific knowledge: the caller supplies the per-period barcode→price maps
-// and the file base name. The byte-preserving cell patching itself lives per vertical
-// (each writes its own cell set) on top of the plan this module produces.
+// and the file base name. The bucketing itself is the shared `planWindowFiles`
+// (`@pazarsync/utils`, shared with the web export preview); `planExportFiles` only
+// adds the Trendyol labels and filename suffixes on top. The byte-preserving cell
+// patching itself lives per vertical (each writes its own cell set) on top of the
+// plan this module produces.
 
 import { zipSync } from 'fflate';
+
+import { planWindowFiles } from '@pazarsync/utils';
 
 import { ConflictError } from '../lib/errors';
 
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 export const ZIP_MIME = 'application/zip';
 
-// A Trendyol tariff spans a week; the whole-week label falls back to this when the
-// sub-periods' day counts don't add up (a header lacked its "(N Gün)" count).
-const DEFAULT_WEEK_DAYS = 7;
 // Trendyol's own "Tarife Seçimi" fill value for an N-day window, e.g. "7 Günlük
 // Fiyat" (confirmed from Trendyol's filled exports); the seller re-uploads verbatim.
 const WINDOW_SELECTION_LABEL_UNIT = 'Günlük Fiyat';
@@ -99,68 +101,21 @@ export interface ExportFilePlan {
  * goes in that period's `"{dayCount} Günlük Fiyat"` file (so a 3-Gün≠4-Gün product
  * lands in BOTH). A single-period (full-week) tariff yields one day-suffixed file.
  * `pricesByBarcode` holds only SELECTED products, so an unselected bucket yields no file.
+ *
+ * An adapter over the shared `planWindowFiles`: it does the bucketing (week length =
+ * the sum of the sub-period day counts, else a Trendyol tariff week), and this
+ * function turns each file's numeric day count into the Trendyol "{N} Günlük Fiyat"
+ * label and the "{N}-gunluk" filename suffix. A lone full-week file still carries
+ * the suffix so a non-zip download tells the seller which window it is.
  */
 export function planExportFiles(periods: ReadonlyArray<PeriodSelection>): ExportFilePlan[] {
-  if (periods.length === 0) return [];
-  // The whole-week label = the sum of the sub-period day counts (3 + 4 = 7); falls
-  // back to a Trendyol tariff week.
-  const weekDayCount = periods.reduce((sum, p) => sum + (p.dayCount ?? 0), 0) || DEFAULT_WEEK_DAYS;
-
-  // Full-week (single-period) tariff → one file, every product "{dayCount} Günlük Fiyat".
-  // Still carries the "{dayCount}-gunluk" filename suffix so a lone (non-zip) download
-  // tells the seller which window it is.
-  if (periods.length === 1) {
-    const only = periods[0];
-    if (only === undefined || only.pricesByBarcode.size === 0) return [];
-    const dayCount = only.dayCount ?? weekDayCount;
+  const windowPeriods = periods.map((p) => ({ dayCount: p.dayCount, picks: p.pricesByBarcode }));
+  return planWindowFiles(windowPeriods).map((file) => {
+    const selection = windowSelectionLabel(file.dayCount);
     const rows = new Map<string, RowPatch>();
-    for (const [barcode, price] of only.pricesByBarcode) {
-      rows.set(barcode, { newPrice: price, selection: windowSelectionLabel(dayCount) });
-    }
-    return [{ suffix: windowSuffix(dayCount), rows, periodIndices: [0] }];
-  }
-
-  const wholeWeek = new Map<string, RowPatch>();
-  const perPeriod = periods.map(() => new Map<string, RowPatch>());
-
-  const barcodes = new Set<string>();
-  for (const period of periods) for (const bc of period.pricesByBarcode.keys()) barcodes.add(bc);
-
-  for (const barcode of barcodes) {
-    const prices = periods.map((p) => p.pricesByBarcode.get(barcode) ?? null);
-    const chosen = prices.filter((p): p is string => p !== null);
-    const first = chosen[0];
-    if (first === undefined) continue;
-
-    // Selected in every sub-period at the same price → one whole-week ("7 Günlük") row.
-    if (chosen.length === periods.length && chosen.every((p) => p === first)) {
-      wholeWeek.set(barcode, { newPrice: first, selection: windowSelectionLabel(weekDayCount) });
-      continue;
-    }
-    // Otherwise each selected period's price goes in its own window file.
-    prices.forEach((price, i) => {
-      if (price === null) return;
-      const dayCount = periods[i]?.dayCount ?? weekDayCount;
-      perPeriod[i]?.set(barcode, { newPrice: price, selection: windowSelectionLabel(dayCount) });
-    });
-  }
-
-  const files: ExportFilePlan[] = [];
-  periods.forEach((period, i) => {
-    const rows = perPeriod[i];
-    if (rows === undefined || rows.size === 0) return;
-    files.push({ suffix: windowSuffix(period.dayCount ?? weekDayCount), rows, periodIndices: [i] });
+    for (const [barcode, price] of file.picks) rows.set(barcode, { newPrice: price, selection });
+    return { suffix: windowSuffix(file.dayCount), rows, periodIndices: file.periodIndices };
   });
-  if (wholeWeek.size > 0) {
-    files.push({
-      suffix: windowSuffix(weekDayCount),
-      rows: wholeWeek,
-      // The whole-week file represents every sub-period (one price, but one commission
-      // cell per period for verticals that write them).
-      periodIndices: periods.map((_, i) => i),
-    });
-  }
-  return files;
 }
 
 // ─── One HTTP download from the produced files ───────────────────────────────

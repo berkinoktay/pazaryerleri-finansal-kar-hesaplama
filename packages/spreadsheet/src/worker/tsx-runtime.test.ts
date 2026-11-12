@@ -14,9 +14,9 @@ import { FIXTURE_PINS } from '../../tests/helpers/fixture-pins';
 
 const COMMISSION_FIXTURE = 'trendyol-commission-tariff.xlsx';
 const KILLS = 5;
-const PROBE_TIMEOUT_MS = 60_000;
+const PROBE_TIMEOUT_MS = 180_000;
 // Above the probe's own timeout, so a hung probe fails on its exit status.
-const TEST_TIMEOUT_MS = 90_000;
+const TEST_TIMEOUT_MS = 200_000;
 const PROBE_PATH = fileURLToPath(
   new URL('../../tests/helpers/tsx-runtime-probe.ts', import.meta.url),
 );

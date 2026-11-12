@@ -41,12 +41,21 @@ export function setGridWorkerHostForTests(host: GridWorkerHost | null): void {
 }
 
 /**
- * Runs the upload security gate and returns the raw 2D cell grid of the named sheet
- * (falling back to the first sheet), built straight from the gate's DOM (see
- * read-grid.ts), in a worker thread with a heap and a time limit. Throws
- * SpreadsheetFileError: the gate's codes, `CORRUPT_FILE` if the workbook cannot be
- * read, or `PAYLOAD_TOO_LARGE` with `meta.reason` when a worker limit kills the parse
- * (workerLimitReason). Consumers map columns by position or by their own header
+ * Runs the upload security gate and returns the raw 2D cell grid of one sheet, built
+ * straight from the gate's DOM (see read-grid.ts), in a worker thread with a heap and
+ * a time limit. The sheet:
+ *   - `sheet` (strict): the first sheet with that exact name, or the sheet at that
+ *     index among the workbook's named sheets (hidden ones included); none →
+ *     `SHEET_NOT_FOUND`, and a sheet that breaks a reader rule → `CORRUPT_FILE`,
+ *     never another sheet;
+ *   - `sheetName` (legacy): the named sheet, falling back to the first sheet when it
+ *     is missing or breaks a reader rule;
+ *   - neither: the first sheet.
+ * Passing both `sheet` and `sheetName`, or an index that is not a non-negative
+ * integer, throws Error before the call is queued (a caller bug). Throws
+ * SpreadsheetFileError: the gate's codes, `SHEET_NOT_FOUND`, `CORRUPT_FILE` if the
+ * workbook cannot be read, or `PAYLOAD_TOO_LARGE` with `meta.reason` when a worker
+ * limit kills the parse (workerLimitReason). Consumers map columns by position or by their own header
  * lookup. Calls run one at a time per process; with MAX_QUEUED_PARSES calls already in
  * flight it rejects at once with `ENGINE_BUSY`, and a call that waits longer than
  * PARSE_QUEUE_MAX_WAIT_MS for its turn rejects with `ENGINE_BUSY` too.

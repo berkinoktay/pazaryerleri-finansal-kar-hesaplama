@@ -18,6 +18,7 @@ import {
   type GridWorkerHost,
   type GridWorkerLimits,
 } from './grid-worker-host';
+import { isGridWorkerRequest } from './protocol';
 
 // The worker host runs readUploadGrid in a worker thread with a heap limit and a time
 // limit. Each test opens its own host and closes it afterwards.
@@ -30,6 +31,10 @@ const PRODUCTION_LIMITS: GridWorkerLimits = {
 // A heap the DOM of a 5 000 x 40 sheet of numbers (about 440 MB) cannot fit in, while
 // the sheet itself passes the gate (DOM weight about 4.46 million).
 const SMALL_HEAP_MB = 128;
+// A memory-kill run must not hit the time limit first: under check:all load the DOM
+// build up to the 128 MB heap took 42 s once, past the 30 s production limit.
+const MEMORY_KILL_TIMEOUT_MS = 120_000;
+const MEMORY_KILL_TEST_TIMEOUT_MS = 180_000;
 const SMALL_YOUNG_GENERATION_MB = 32;
 const OOM_ROWS = 5_000;
 const OOM_COLUMNS = 40;
@@ -88,6 +93,29 @@ describe('createGridWorkerHost', () => {
     expect(file.equals(before)).toBe(true);
   });
 
+  it('reads the sheet a selector picks in the worker exactly as in-process', async () => {
+    const host = openHost(PRODUCTION_LIMITS);
+    const file = buildXlsxFixture([
+      { name: 'Help', xml: worksheetXml([['help text']]) },
+      { name: 'Veri', xml: worksheetXml(TWO_ROWS) },
+    ]);
+    const byIndex = resolveReadOptions({ sheet: { by: 'index', index: 1 } });
+
+    const grid = await host.run(file, byIndex);
+
+    expect(grid).toEqual(TWO_ROWS);
+    expect(grid).toEqual(readUploadGrid(file, byIndex));
+    const missing = fileErrorOf(
+      await rejectionOf(
+        host.run(file, resolveReadOptions({ sheet: { by: 'name', name: 'Nope' } })),
+      ),
+    );
+    expect({ code: missing.code, meta: missing.meta }).toEqual({
+      code: 'SHEET_NOT_FOUND',
+      meta: { by: 'name' },
+    });
+  });
+
   it('rebuilds SpreadsheetFileError with its code and meta', async () => {
     const host = openHost(PRODUCTION_LIMITS);
     const threeRows = buildXlsxFixture([
@@ -107,23 +135,29 @@ describe('createGridWorkerHost', () => {
     expect(fileErrorOf(await rejectionOf(host.run(NOT_A_ZIP, options))).code).toBe('NOT_XLSX');
   });
 
-  it('turns an out-of-memory kill into PAYLOAD_TOO_LARGE and recovers', async () => {
-    const host = openHost({
-      ...PRODUCTION_LIMITS,
-      maxOldGenerationSizeMb: SMALL_HEAP_MB,
-      maxYoungGenerationSizeMb: SMALL_YOUNG_GENERATION_MB,
-    });
-    const tooBig = buildXlsxFixture([
-      { name: 'Sheet1', xml: worksheetXml(numberRows(OOM_ROWS, OOM_COLUMNS)) },
-    ]);
+  it(
+    'turns an out-of-memory kill into PAYLOAD_TOO_LARGE and recovers',
+    async () => {
+      const host = openHost({
+        ...PRODUCTION_LIMITS,
+        // Generous, so only memory can kill it, even on a loaded machine.
+        timeoutMs: MEMORY_KILL_TIMEOUT_MS,
+        maxOldGenerationSizeMb: SMALL_HEAP_MB,
+        maxYoungGenerationSizeMb: SMALL_YOUNG_GENERATION_MB,
+      });
+      const tooBig = buildXlsxFixture([
+        { name: 'Sheet1', xml: worksheetXml(numberRows(OOM_ROWS, OOM_COLUMNS)) },
+      ]);
 
-    const err = fileErrorOf(await rejectionOf(host.run(tooBig, options)));
+      const err = fileErrorOf(await rejectionOf(host.run(tooBig, options)));
 
-    expect(err.code).toBe('PAYLOAD_TOO_LARGE');
-    expect(workerLimitReason(err)).toBe('worker-memory');
-    expect(err.meta).toMatchObject({ limitMb: SMALL_HEAP_MB });
-    await expect(host.run(twoRowFile(), options)).resolves.toEqual(TWO_ROWS);
-  });
+      expect(err.code).toBe('PAYLOAD_TOO_LARGE');
+      expect(workerLimitReason(err)).toBe('worker-memory');
+      expect(err.meta).toMatchObject({ limitMb: SMALL_HEAP_MB });
+      await expect(host.run(twoRowFile(), options)).resolves.toEqual(TWO_ROWS);
+    },
+    MEMORY_KILL_TEST_TIMEOUT_MS,
+  );
 
   it('turns a timeout into PAYLOAD_TOO_LARGE', async () => {
     const host = openHost({ ...PRODUCTION_LIMITS, timeoutMs: 1 });
@@ -155,6 +189,25 @@ describe('createGridWorkerHost', () => {
     );
     expect(err.code).toBe('PAYLOAD_TOO_LARGE');
     expect(err.meta).toEqual({ cap: MAX_GRID_TEXT_LENGTH });
+  });
+});
+
+describe('isGridWorkerRequest', () => {
+  it('accepts a sheet selector, and refuses one with a sheet name or a bad index', () => {
+    const bytes = new ArrayBuffer(0);
+    const sheet = { by: 'index', index: 1 } as const;
+
+    expect(isGridWorkerRequest({ id: 1, bytes, options: { ...options, sheet } })).toBe(true);
+    expect(
+      isGridWorkerRequest({ id: 1, bytes, options: { ...options, sheet, sheetName: 'Veri' } }),
+    ).toBe(false);
+    expect(
+      isGridWorkerRequest({
+        id: 1,
+        bytes,
+        options: { ...options, sheet: { by: 'index', index: -1 } },
+      }),
+    ).toBe(false);
   });
 });
 

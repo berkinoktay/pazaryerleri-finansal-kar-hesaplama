@@ -87,7 +87,7 @@ export function resolveFlashExportCells(item: FlashExportItem): FlashExportCells
 
 /**
  * True when the import kept an item for this data row (so it must consume one item when
- * zipping). Mirrors `flash-product-import`'s `parseRow` skip rules: a barcode + a
+ * zipping). Mirrors `flash-product-import`'s `parseFlashProductRow` skip rules: a barcode + a
  * current price + at least one offer (24h or 3h). Kept in sync with that contract.
  */
 function isImportedFlashRow(row: readonly unknown[], layout: FlashProductLayout): boolean {

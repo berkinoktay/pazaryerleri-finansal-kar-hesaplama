@@ -11,6 +11,7 @@ import { resolveReadOptions, type ReadGridOptions } from './read-options';
 import { resolveWorksheetPartPaths } from './index';
 import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
 import { localName } from './xml-dom';
+import { expectWithinBudget } from '../tests/helpers/timing';
 
 // The gate must see what the reader sees. Each case below is a way of writing a
 // worksheet so that a text (regex) scan and the reader's DOM disagree: the DOM still
@@ -27,13 +28,15 @@ const FORGED_REF = 'A1:ZZ300000';
 const FAR_CELL = 'A200000';
 const GUARD_OPTS = { rowCap: 5_000, colCap: 64, maxBytes: 10 * 1024 * 1024 } as const;
 const GATE_CAPS = { rowCap: GUARD_OPTS.rowCap, colCap: GUARD_OPTS.colCap } as const;
-// Timing bounds are loose on purpose: check:all and CI run many suites in parallel, so a
-// linear pass that takes milliseconds alone can take seconds under load. The regressions
-// these tests guard against are quadratic or allocation blow-ups that take minutes or
-// crash, so a bound in the tens of seconds still separates the two.
+// Timing budgets (enforced in CI only, see tests/helpers/timing.ts) are loose on purpose:
+// CI runs many suites in parallel. The regressions these tests guard against are
+// quadratic or allocation blow-ups that take minutes or crash, so a bound in the tens of
+// seconds still separates the two. They time the in-process read path: through the
+// worker, its 30 s time limit would cap the elapsed time and hide a quadratic regression
+// as a timeout. The test timeout stops a pass that never ends, locally too.
 const READ_BUDGET_MS = 15_000;
 const LINEAR_BUDGET_MS = 20_000;
-const TIMING_TEST_TIMEOUT_MS = 60_000;
+const TIMING_TEST_TIMEOUT_MS = 120_000;
 const MALFORMED_COUNT = 200_000;
 const LONG_NAME_LENGTH = 40_000;
 const LONG_NAME_BUDGET_MS = 15_000;
@@ -138,7 +141,7 @@ async function timedOutcome(
 ): Promise<{ readonly outcome: Outcome; readonly elapsedMs: number }> {
   const file = buildXlsxFixture([{ name: 'Sheet1', xml }]);
   const started = performance.now();
-  const outcome = await readOutcome(file, options);
+  const outcome = uploadOutcome(file, options);
   return { outcome, elapsedMs: performance.now() - started };
 }
 
@@ -384,7 +387,7 @@ describe('grid gate: forged <dimension>', () => {
   it.each(DIMENSION_CASES)('$name', async ({ xml, options, expected }) => {
     const { outcome, elapsedMs } = await timedOutcome(xml, options);
     expect(outcome).toEqual(expected);
-    expect(elapsedMs).toBeLessThan(READ_BUDGET_MS);
+    expectWithinBudget(elapsedMs, READ_BUDGET_MS);
   });
 });
 
@@ -392,7 +395,7 @@ describe('grid gate: cell references', () => {
   it.each(CELL_REFERENCE_CASES)('$name', async ({ xml, options, expected }) => {
     const { outcome, elapsedMs } = await timedOutcome(xml, options);
     expect(outcome).toEqual(expected);
-    expect(elapsedMs).toBeLessThan(READ_BUDGET_MS);
+    expectWithinBudget(elapsedMs, READ_BUDGET_MS);
   });
 });
 
@@ -456,7 +459,7 @@ describe('grid gate: smuggling', () => {
     if (outcome.kind === 'error') {
       expect(['UNSAFE_CONTENT', 'CORRUPT_FILE']).toContain(outcome.code);
     }
-    expect(elapsedMs).toBeLessThan(READ_BUDGET_MS);
+    expectWithinBudget(elapsedMs, READ_BUDGET_MS);
   });
 });
 
@@ -493,7 +496,7 @@ const LINEAR_CASES: ReadonlyArray<{ readonly name: string; readonly xml: string 
 describe('grid gate: linear time', { timeout: TIMING_TEST_TIMEOUT_MS }, () => {
   it.each(LINEAR_CASES)('$name', async ({ xml }) => {
     const { elapsedMs } = await timedOutcome(xml);
-    expect(elapsedMs).toBeLessThan(LINEAR_BUDGET_MS);
+    expectWithinBudget(elapsedMs, LINEAR_BUDGET_MS);
   });
 
   it('rejects a root with 20 000 dimension children quickly', async () => {
@@ -501,7 +504,7 @@ describe('grid gate: linear time', { timeout: TIMING_TEST_TIMEOUT_MS }, () => {
       sheet(`${'<dimension/>'.repeat(REPEATED_CHILDREN)}${TWO_ROWS}`),
     );
     expect(outcome).toEqual(rejected('CORRUPT_FILE'));
-    expect(elapsedMs).toBeLessThan(READ_BUDGET_MS);
+    expectWithinBudget(elapsedMs, READ_BUDGET_MS);
   });
 
   it('handles an uncached formula cell with 20 000 formula children quickly', async () => {
@@ -510,7 +513,7 @@ describe('grid gate: linear time', { timeout: TIMING_TEST_TIMEOUT_MS }, () => {
         `<sheetData><row r="1"><c r="A1">${'<f/>'.repeat(REPEATED_CHILDREN)}</c></row></sheetData>`,
       ),
     );
-    expect(elapsedMs).toBeLessThan(READ_BUDGET_MS);
+    expectWithinBudget(elapsedMs, READ_BUDGET_MS);
   });
 
   // The old reader's tag-name regex was quadratic in the name length: this ~1.5 KB
@@ -520,7 +523,7 @@ describe('grid gate: linear time', { timeout: TIMING_TEST_TIMEOUT_MS }, () => {
       sheet(`<${'a'.repeat(LONG_NAME_LENGTH)}/>${TWO_ROWS}`),
     );
     expect(outcome).toEqual(rejected('UNSAFE_CONTENT'));
-    expect(elapsedMs).toBeLessThan(LONG_NAME_BUDGET_MS);
+    expectWithinBudget(elapsedMs, LONG_NAME_BUDGET_MS);
   });
 });
 

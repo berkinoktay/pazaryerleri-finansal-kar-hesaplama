@@ -7,9 +7,24 @@ import {
   DEFAULT_ROW_CAP,
 } from './constants';
 
-/** What a consumer may ask of readWorkbookGrid; every limit is optional and clamped. */
+/**
+ * The sheet to read, strictly: by its exact name (the first match), or by its 0-based
+ * position among the workbook's named `<sheet>` entries in document order, hidden and
+ * very hidden ones included. A selector that matches no sheet is SHEET_NOT_FOUND;
+ * there is no fallback to the first sheet.
+ */
+export type SheetSelector =
+  | { readonly by: 'name'; readonly name: string }
+  | { readonly by: 'index'; readonly index: number };
+
+/**
+ * What a consumer may ask of readWorkbookGrid; every limit is optional and clamped.
+ * `sheet` selects strictly; `sheetName` is the legacy lookup, which falls back to the
+ * first sheet. At most one of them may be given.
+ */
 export interface ReadGridOptions {
   readonly sheetName?: string;
+  readonly sheet?: SheetSelector;
   readonly rowCap?: number;
   readonly colCap?: number;
   readonly maxBytes?: number;
@@ -18,6 +33,7 @@ export interface ReadGridOptions {
 /** ReadGridOptions with every limit set: the default, or the override within its ceiling. */
 export interface ResolvedReadOptions {
   readonly sheetName?: string;
+  readonly sheet?: SheetSelector;
   readonly rowCap: number;
   readonly colCap: number;
   readonly maxBytes: number;
@@ -34,12 +50,38 @@ function limit(override: number | undefined, fallback: number, ceiling: number):
 }
 
 /**
+ * A copy of `sheet` with only the selector's own fields (it crosses to the parse
+ * worker). Throws Error for an index that is not a non-negative integer: a programmer
+ * error, not a property of the file.
+ */
+function resolveSheet(sheet: SheetSelector): SheetSelector {
+  switch (sheet.by) {
+    case 'name':
+      return { by: 'name', name: sheet.name };
+    case 'index':
+      if (!Number.isInteger(sheet.index) || sheet.index < 0) {
+        throw new Error(`Sheet index must be a non-negative integer, got ${String(sheet.index)}`);
+      }
+      return { by: 'index', index: sheet.index };
+    default: {
+      const _exhaustive: never = sheet;
+      throw new Error(`Unhandled sheet selector: ${String(_exhaustive)}`);
+    }
+  }
+}
+
+/**
  * Fills in the default limits and clamps every override to its absolute ceiling: the
- * engine owns the limits.
+ * engine owns the limits. Throws Error, before any parse is queued, when both `sheet`
+ * and `sheetName` are given or the sheet index is not a non-negative integer.
  */
 export function resolveReadOptions(options: ReadGridOptions): ResolvedReadOptions {
+  if (options.sheet !== undefined && options.sheetName !== undefined) {
+    throw new Error('Pass either sheet or sheetName, not both');
+  }
   return {
     sheetName: options.sheetName,
+    sheet: options.sheet === undefined ? undefined : resolveSheet(options.sheet),
     rowCap: limit(options.rowCap, DEFAULT_ROW_CAP, ABSOLUTE_MAX_ROWS),
     colCap: limit(options.colCap, DEFAULT_COL_CAP, ABSOLUTE_MAX_COLS),
     maxBytes: limit(options.maxBytes, DEFAULT_MAX_BYTES, ABSOLUTE_MAX_BYTES),
