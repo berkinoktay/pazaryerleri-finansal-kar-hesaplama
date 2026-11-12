@@ -13,8 +13,9 @@ import { testWorkers } from '@pazarsync/vitest-config';
 const here = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.resolve(here, '../../.env') });
 
+// Integration-only config (tests/integration/**). DB-free unit tests have their
+// own vitest.unit.config.ts, which runs files in parallel.
 // Redirect DATABASE_URL at the isolated test DB (see packages/db/src/test-env.ts).
-// Harmless for the unit tests this same config includes — they never touch the DB.
 remapDatabaseUrlToTestDb();
 
 export default defineConfig({
@@ -29,7 +30,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['tests/**/*.test.ts', 'src/**/*.test.ts'],
+    include: ['tests/integration/**/*.test.ts'],
     // The RLS suite is deliberately excluded here and run via its own config
     // (`vitest.rls.config.ts`, script `test:integration:rls`). RLS tests exercise
     // policies through PostgREST/GoTrue, which only serve the dev "postgres" DB,
@@ -48,7 +49,7 @@ export default defineConfig({
     // After the whole vitest run completes, restore seed data so the
     // developer's browser session (logged in as berkin / demo) sees the
     // usual orgs and stores instead of an empty state. Skipped in CI and
-    // when PAZARSYNC_SKIP_RESEED=1 (set by `test:unit` — no DB touched).
+    // when PAZARSYNC_SKIP_RESEED=1.
     // vitest uses the `globalSetup` hook; the file exports `setup` (no-op)
     // and a `teardown` that shells out to `pnpm db:seed`.
     globalSetup: [path.resolve(here, './tests/global-teardown.ts')],

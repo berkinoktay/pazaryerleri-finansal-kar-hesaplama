@@ -9,8 +9,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test:unit": "PAZARSYNC_SKIP_RESEED=1 vitest run src --passWithNoTests",
-    "test:integration": "vitest run tests/integration --passWithNoTests",
+    "test:unit": "vitest run --config vitest.unit.config.ts --passWithNoTests",
+    "test:integration": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "clean": "rm -rf .turbo"

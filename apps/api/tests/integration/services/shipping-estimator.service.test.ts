@@ -14,8 +14,9 @@
 import { prisma } from '@pazarsync/db';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { ensureDbReachable, truncateAll } from '../../../tests/helpers/db';
-import { estimateShippingCostForVariant } from '../shipping-estimator.service';
+import { estimateShippingCostForVariant } from '@/services/shipping-estimator.service';
+
+import { ensureDbReachable, truncateAll } from '../../helpers/db';
 
 // ─── Test-data builders ──────────────────────────────────────────────────────
 
