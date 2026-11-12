@@ -18,10 +18,8 @@
   },
   "dependencies": {
     "@xmldom/xmldom": "^0.9.12",
-    "decimal.js": "catalog:",
     "fflate": "^0.8.3",
-    "read-excel-file": "9.2.0",
-    "write-excel-file": "4.1.1"
+    "tsx": "catalog:"
   },
   "devDependencies": {
     "@pazarsync/eslint-config": "workspace:*",

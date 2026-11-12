@@ -12,10 +12,18 @@
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate';
 import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
+import { buildXlsxFixture } from '@pazarsync/spreadsheet/testing';
 import { syncLog } from '@pazarsync/sync-core';
 
 import { ConflictError } from '@/lib/errors';
-import { patchXlsxCells, type XlsxCellValue } from '@/lib/xlsx-patch';
+import {
+  columnIndex,
+  columnLetter,
+  findCellSpans,
+  findRowSpans,
+  patchXlsxCells,
+  type XlsxCellValue,
+} from '@/lib/xlsx-patch';
 
 // Fixed, row-free detail the client receives when the stored file and the export
 // plan disagree; the row numbers go to the server log only.
@@ -304,5 +312,187 @@ describe('patchXlsxCells — value validation', () => {
     expect(() =>
       patchXlsxCells(toZip(PREFIXED_WS), patches(99, 1, { kind: 'inlineStr', value: 'Evet' })),
     ).toThrow(ConflictError);
+  });
+});
+
+// The patcher's former row and cell regexes, kept verbatim as the oracle the linear
+// scanners must agree with. They backtrack: on a part holding many `<row ` (or, inside
+// a row, `<c `) starts with no closing tag, every start rescans to the end of the text.
+const ROW_RE = /<(?:\w+:)?row\b[^>]*>[\s\S]*?<\/(?:\w+:)?row>/g;
+const CELL_RE = /<(?:\w+:)?c\b[^>]*\/>|<(?:\w+:)?c\b[^>]*>[\s\S]*?<\/(?:\w+:)?c>/g;
+
+const FUZZ_SEED = 519;
+const FUZZ_CASE_COUNT = 5_000;
+const FUZZ_MAX_TOKENS = 14;
+const FUZZ_TOKENS = [
+  '<row',
+  '<x:row',
+  '<rowx',
+  '<row:x',
+  ' r="1"',
+  '>',
+  '/>',
+  '</row>',
+  '</x:row>',
+  '</row >',
+  '<c',
+  '<x:c',
+  '<cc',
+  '</c>',
+  '</x:c>',
+  '<!--',
+  '-->',
+  'v',
+  ' ',
+] as const;
+
+// mulberry32 constants: the state increment and the 2^32 divisor that maps to [0, 1).
+const MULBERRY32_INCREMENT = 0x6d2b79f5;
+const UINT32_RANGE = 2 ** 32;
+
+const UNTERMINATED_START_COUNT = 200_000;
+const FILLER_LENGTH = 1024 * 1024;
+// The linear scanners take milliseconds on these inputs and the regexes take hours,
+// so the bound tells the two apart with a wide margin even on a loaded machine.
+const LINEAR_SCAN_BUDGET_MS = 2_000;
+// The regex oracle only ever runs on this small version of the crafted shape.
+const SMALL_START_COUNT = 20;
+const SMALL_FILLER_LENGTH = 64;
+
+const SPREADSHEET_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+
+/** mulberry32: a tiny seeded PRNG, so every run checks the same strings. */
+function mulberry32(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state + MULBERRY32_INCREMENT) | 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / UINT32_RANGE;
+  };
+}
+
+/** FUZZ_CASE_COUNT strings of 0 to FUZZ_MAX_TOKENS tokens each, the same on every run. */
+function randomTokenStrings(): string[] {
+  const random = mulberry32(FUZZ_SEED);
+  const pick = (count: number): number => Math.floor(random() * count);
+  return Array.from({ length: FUZZ_CASE_COUNT }, () => {
+    let text = '';
+    const tokenCount = pick(FUZZ_MAX_TOKENS + 1);
+    for (let n = 0; n < tokenCount; n++) text += FUZZ_TOKENS[pick(FUZZ_TOKENS.length)] ?? '';
+    return text;
+  });
+}
+
+/** The spans a global regex matches, as `[start, end]` offsets. */
+function regexSpans(text: string, pattern: RegExp): Array<readonly [number, number]> {
+  return [...text.matchAll(pattern)].map((m): readonly [number, number] => [
+    m.index,
+    m.index + m[0].length,
+  ]);
+}
+
+/** A comment holding `count` unterminated `start` tags followed by filler. */
+function startsComment(start: string, count: number, fillerLength: number): string {
+  return `<!--${start.repeat(count)}${'x'.repeat(fillerLength)}-->`;
+}
+
+/** One real cell, then a comment of unterminated `<c ` starts before the row closes. */
+function craftedRow(count: number, fillerLength: number): string {
+  return `<row r="1"><c r="A1"><v>1</v></c>${startsComment('<c ', count, fillerLength)}</row>`;
+}
+
+/** The crafted row, followed by a comment of unterminated `<row ` starts. */
+function craftedSheet(
+  count: number,
+  fillerLength: number,
+): { readonly xml: string; readonly rowComment: string } {
+  const rowComment = startsComment('<row ', count, fillerLength);
+  const xml =
+    `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="${SPREADSHEET_NS}"><sheetData>` +
+    `${craftedRow(count, fillerLength)}${rowComment}</sheetData></worksheet>`;
+  return { xml, rowComment };
+}
+
+/**
+ * The former regex patch path for one number cell of an unprefixed row, run inline as
+ * the oracle. Only ever called on the small crafted sheet: on the full one it takes hours.
+ */
+function regexPatchedWorksheet(xml: string, rowNum: number, colIdx: number, value: string): string {
+  return xml.replace(ROW_RE, (rowXml: string) => {
+    if (Number(/\br="(\d+)"/.exec(rowXml)?.[1]) !== rowNum) return rowXml;
+    const byCol = new Map<number, string>();
+    for (const match of rowXml.matchAll(CELL_RE)) {
+      const letters = /\br="([A-Z]+)\d+"/.exec(match[0])?.[1];
+      if (letters !== undefined) byCol.set(columnIndex(letters), match[0]);
+    }
+    byCol.set(colIdx, `<c r="${columnLetter(colIdx)}${rowNum}"><v>${value}</v></c>`);
+    const openTag = /<(?:\w+:)?row\b[^>]*>/.exec(rowXml)?.[0] ?? '';
+    const body = [...byCol.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, cell]) => cell)
+      .join('');
+    return `${openTag}${body}</row>`;
+  });
+}
+
+describe('patchXlsxCells — linear row and cell scans', { timeout: 60_000 }, () => {
+  it('finds exactly the row spans ROW_RE finds', () => {
+    for (const text of randomTokenStrings()) {
+      expect(findRowSpans(text), text).toEqual(regexSpans(text, ROW_RE));
+    }
+  });
+
+  it('finds exactly the cell spans CELL_RE finds', () => {
+    for (const text of randomTokenStrings()) {
+      expect(findCellSpans(text), text).toEqual(regexSpans(text, CELL_RE));
+    }
+  });
+
+  it('scans 200 000 unterminated row starts in linear time', () => {
+    const { xml } = craftedSheet(UNTERMINATED_START_COUNT, FILLER_LENGTH);
+    const rowStart = xml.indexOf('<row r="1">');
+    const rowEnd = xml.indexOf('</row>') + '</row>'.length;
+
+    const started = performance.now();
+    const spans = findRowSpans(xml);
+    const elapsedMs = performance.now() - started;
+
+    expect(spans).toEqual([[rowStart, rowEnd]]);
+    expect(elapsedMs).toBeLessThan(LINEAR_SCAN_BUDGET_MS);
+  });
+
+  it('scans 200 000 unterminated cell starts in linear time', () => {
+    const rowXml = craftedRow(UNTERMINATED_START_COUNT, FILLER_LENGTH);
+    const cellStart = rowXml.indexOf('<c r="A1">');
+    const cellEnd = rowXml.indexOf('</c>') + '</c>'.length;
+
+    const started = performance.now();
+    const spans = findCellSpans(rowXml);
+    const elapsedMs = performance.now() - started;
+
+    expect(spans).toEqual([[cellStart, cellEnd]]);
+    expect(elapsedMs).toBeLessThan(LINEAR_SCAN_BUDGET_MS);
+  });
+
+  it('patches a row of the crafted sheet quickly and identically', () => {
+    const rowPatches = patches(1, 1, { kind: 'number', value: '42' });
+    const small = craftedSheet(SMALL_START_COUNT, SMALL_FILLER_LENGTH);
+    const large = craftedSheet(UNTERMINATED_START_COUNT, FILLER_LENGTH);
+    const largeFile = buildXlsxFixture([{ name: 'Sheet1', xml: large.xml }]);
+
+    const started = performance.now();
+    const out = patchXlsxCells(largeFile, rowPatches);
+    const elapsedMs = performance.now() - started;
+
+    const expectedSmall = regexPatchedWorksheet(small.xml, 1, 1, '42');
+    const smallFile = buildXlsxFixture([{ name: 'Sheet1', xml: small.xml }]);
+    expect(worksheetOf(patchXlsxCells(smallFile, rowPatches))).toBe(expectedSmall);
+    // The patched row keeps only its cells, so its comment goes; the comment after the
+    // row is copied through. The large output is therefore the oracle's small output
+    // with that trailing comment scaled up.
+    expect(worksheetOf(out)).toBe(expectedSmall.replace(small.rowComment, () => large.rowComment));
+    expect(elapsedMs).toBeLessThan(LINEAR_SCAN_BUDGET_MS);
   });
 });

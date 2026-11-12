@@ -97,7 +97,7 @@ describe('assertSafeXmlContent', () => {
 });
 
 describe('isXmlPart', () => {
-  // read-excel-file opens exactly the entries ending in .xml or .xml.rels.
+  // The gate keeps exactly the entries ending in .xml or .xml.rels.
   it.each([
     ['[Content_Types].xml', true],
     ['xl/worksheets/sheet1.xml', true],

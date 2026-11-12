@@ -8,7 +8,7 @@ const ROWS = [
 ] as const;
 
 describe('buildXlsxFixture', () => {
-  it('builds a workbook read-excel-file can read', async () => {
+  it('builds a workbook the grid reader can read', async () => {
     const file = buildXlsxFixture([{ name: 'Ürünler', xml: worksheetXml(ROWS) }]);
     const grid = await readWorkbookGrid(file, { sheetName: 'Ürünler' });
     expect(grid).toEqual([

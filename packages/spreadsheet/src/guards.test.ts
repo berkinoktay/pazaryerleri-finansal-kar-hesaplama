@@ -1,9 +1,9 @@
-import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
-import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate';
+import { zipSync, unzipSync, strToU8 } from 'fflate';
 import { SpreadsheetFileError } from './errors';
 import {
   MAX_DECOMPRESSED_BYTES,
+  MAX_WORKBOOK_RELS_BYTES,
   MAX_XMLNS_DECLARATIONS_PER_PART,
   MAX_XML_DOM_WEIGHT,
   MAX_XML_NAME_LENGTH,
@@ -13,12 +13,11 @@ import {
   XML_ELEMENT_WEIGHT,
   XML_TEXT_NODE_WEIGHT,
 } from './constants';
-import { prepareUploadForRead } from './guards';
+import { openUpload, type GuardOpts } from './guards';
 import { readWorkbookGrid } from './parse';
-import { exportToXlsx } from './export';
-import { miniProductsSchema, type MiniProductsRow } from '../tests/fixtures/mini-schemas';
-import { Decimal } from 'decimal.js';
+import { checkUploadParts } from './read-grid';
 import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
+import { entriesText, grownFixtureText, numberRows } from '../tests/helpers/workbooks';
 
 const opts = { rowCap: 5000, colCap: 64, maxBytes: 10 * 1024 * 1024 };
 
@@ -46,6 +45,11 @@ const TRENDYOL_COLUMNS = 35;
 const WIDEST_TRENDYOL_FIXTURE = 'trendyol-commission-tariff.xlsx';
 const BASIC_ROWS = [['Barkod'], ['B1']];
 const BASIC_SHEET = { name: 'Sheet1', xml: worksheetXml(BASIC_ROWS) };
+// A six-column product sheet: string keys and titles, numeric money columns.
+const PRODUCT_SHEET_NAME = 'Urunler';
+const PRODUCT_HEADER = ['Key', 'Barcode', 'Title', 'Cost', 'Price', 'Profit'];
+const PRODUCT_ROW_1 = ['V1', '1', 't', 1, 2, 1];
+const PRODUCT_ROW_2 = ['V2', '2', 't2', 2, 3, 1];
 const IMAGE_BYTES = 1024 * 1024;
 const SMALL_DECOMPRESSED_CAP = 64 * 1024;
 // A declared uncompressed size far beyond any real entry (2 GiB - 1, below the
@@ -101,7 +105,7 @@ function u32(value: number): Buffer {
 /**
  * A stored (uncompressed) zip whose central directory is written from `central`
  * (default: one record per local entry). CRCs are zero: neither fflate path
- * checks them, and the read copy is re-zipped with real ones.
+ * checks them.
  */
 function storedZip(entries: readonly StoredEntry[], central?: readonly CentralRecord[]): Buffer {
   const locals: Buffer[] = [];
@@ -219,13 +223,6 @@ function domWeight(text: string): number {
   );
 }
 
-// `rows` rows of `columns` numbers each, header row included.
-function numberRows(rows: number, columns: number): number[][] {
-  return Array.from({ length: rows }, (_, r) =>
-    Array.from({ length: columns }, (_, c) => r * columns + c),
-  );
-}
-
 // Column letters for 1-based `column` (1 -> A, 27 -> AA).
 function columnLetters(column: number): string {
   let out = '';
@@ -259,25 +256,6 @@ function sharedStringSheet(rows: number, columns: number): { sheet: string; stri
     sheet: `<worksheet xmlns="${SPREADSHEET_NS}"><sheetData>${body}</sheetData></worksheet>`,
     strings: `<sst xmlns="${SPREADSHEET_NS}">${strings.join('')}</sst>`,
   };
-}
-
-// The reader parts of a real export, its sheet's rows repeated until it holds `rows`
-// rows (the rels, workbook, styles and shared strings parts unchanged), joined.
-function grownFixtureText(file: string, rows: number): string {
-  const path = new URL(`../../../apps/api/tests/fixtures/${file}`, import.meta.url);
-  const upload = readFileSync(path);
-  const sheet = entriesText(upload, [SHEET_PART]);
-  const start = sheet.indexOf('<sheetData>') + '<sheetData>'.length;
-  const end = sheet.indexOf('</sheetData>');
-  const fixtureRows = sheet.slice(start, end).match(/<row\b[\s\S]*?<\/row>\s*/g) ?? [];
-  const grown = Array.from({ length: rows }, (_, i) => fixtureRows[i % fixtureRows.length]);
-  const others = entriesText(upload, [
-    WORKBOOK_RELS_PART,
-    WORKBOOK_PART,
-    STYLES_PART,
-    SHARED_STRINGS_PART,
-  ]);
-  return sheet.slice(0, start) + grown.join('') + sheet.slice(end) + others;
 }
 
 type Relationship = readonly [type: string, target: string];
@@ -323,18 +301,6 @@ function withStyles(styles: string): Buffer {
   return workbookWith([SHEET_RELATIONSHIP, STYLES_RELATIONSHIP], { [STYLES_PART]: styles });
 }
 
-// Text of the named entries of `file`, joined.
-function entriesText(file: Buffer, names: readonly string[]): string {
-  const entries = unzipSync(new Uint8Array(file));
-  return names
-    .map((name) => {
-      const bytes = entries[name];
-      if (bytes === undefined) throw new Error(`entry missing: ${name}`);
-      return strFromU8(bytes);
-    })
-    .join('');
-}
-
 // The reader parts of a one-sheet workbook with a shared strings part.
 const SHARED_STRINGS_READER_PARTS: readonly string[] = [
   WORKBOOK_RELS_PART,
@@ -343,9 +309,9 @@ const SHARED_STRINGS_READER_PARTS: readonly string[] = [
   SHARED_STRINGS_PART,
 ];
 
-// Names of the entries in the read copy of `file`, sorted.
-function readCopyNames(file: Buffer, o: Parameters<typeof prepareUploadForRead>[1]): string[] {
-  return Object.keys(unzipSync(new Uint8Array(prepareUploadForRead(file, o)))).sort();
+// Names of the reader parts the gate returns for `file`, sorted.
+function readerPartNames(file: Buffer, o: GuardOpts): string[] {
+  return Object.keys(openUpload(file, o)).sort();
 }
 
 // Excel's drawing part for `pictures` pictures: three declarations on the root plus
@@ -397,14 +363,20 @@ function partWithXmlns(count: number): string {
   return `<sst>${'<e xmlns:p="u">'.repeat(count)}${'</e>'.repeat(count)}</sst>`;
 }
 
-// Type-safe helper: run prepareUploadForRead and return the error if it throws SpreadsheetFileError,
-// null if it succeeds, or re-throw anything unexpected.
-function catchGuard(
-  file: Buffer,
-  o: Parameters<typeof prepareUploadForRead>[1],
-): SpreadsheetFileError | null {
+// The product sheet: the header row followed by `rows`.
+function productsFile(rows: ReadonlyArray<ReadonlyArray<string | number>>): Buffer {
+  return buildXlsxFixture([
+    { name: PRODUCT_SHEET_NAME, xml: worksheetXml([PRODUCT_HEADER, ...rows]) },
+  ]);
+}
+
+// Type-safe helper: run the gate alone (openUpload, then checkUploadParts: every
+// reader part parsed strictly and checked, no grid built) and return the error if it
+// throws SpreadsheetFileError, null if it succeeds, or re-throw anything unexpected.
+// Reader rules are not checked, so a workbook without sheets passes.
+function catchGuard(file: Buffer, o: GuardOpts): SpreadsheetFileError | null {
   try {
-    prepareUploadForRead(file, o);
+    checkUploadParts(openUpload(file, o), { rowCap: o.rowCap, colCap: o.colCap });
     return null;
   } catch (e) {
     if (e instanceof SpreadsheetFileError) return e;
@@ -412,7 +384,7 @@ function catchGuard(
   }
 }
 
-describe('prepareUploadForRead', () => {
+describe('upload gate', () => {
   it('rejects a non-zip (no PK magic) as NOT_XLSX', () => {
     const err = catchGuard(Buffer.from('hello world'), opts);
     expect(err).toBeInstanceOf(SpreadsheetFileError);
@@ -433,59 +405,19 @@ describe('prepareUploadForRead', () => {
     expect(err?.code).toBe('PAYLOAD_TOO_LARGE');
   });
 
-  it('accepts a real generated xlsx without throwing', async () => {
-    const rows: MiniProductsRow[] = [
-      {
-        variantKey: 'V1',
-        barcode: '1',
-        title: 't',
-        cost: new Decimal('1'),
-        price: new Decimal('2'),
-        profit: new Decimal('1'),
-      },
-    ];
-    const buf = await exportToXlsx(miniProductsSchema, rows);
-    expect(() => prepareUploadForRead(buf, opts)).not.toThrow();
+  it('accepts a well-formed xlsx without throwing', () => {
+    const buf = productsFile([PRODUCT_ROW_1]);
+    expect(catchGuard(buf, opts)).toBeNull();
   });
 
-  it('rejects cells beyond colCap as COL_CAP_EXCEEDED', async () => {
-    const rows: MiniProductsRow[] = [
-      {
-        variantKey: 'V1',
-        barcode: '1',
-        title: 't',
-        cost: new Decimal('1'),
-        price: new Decimal('2'),
-        profit: new Decimal('1'),
-      },
-    ];
-    const buf = await exportToXlsx(miniProductsSchema, rows);
-    const err = catchGuard(buf, { ...opts, colCap: 2 });
+  it('rejects cells beyond colCap as COL_CAP_EXCEEDED', () => {
+    const err = catchGuard(productsFile([PRODUCT_ROW_1]), { ...opts, colCap: 2 });
     expect(err).toBeInstanceOf(SpreadsheetFileError);
     expect(err?.code).toBe('COL_CAP_EXCEEDED');
   });
 
-  it('rejects cells beyond rowCap as ROW_CAP_EXCEEDED', async () => {
-    const rows: MiniProductsRow[] = [
-      {
-        variantKey: 'V1',
-        barcode: '1',
-        title: 't',
-        cost: new Decimal('1'),
-        price: new Decimal('2'),
-        profit: new Decimal('1'),
-      },
-      {
-        variantKey: 'V2',
-        barcode: '2',
-        title: 't2',
-        cost: new Decimal('2'),
-        price: new Decimal('3'),
-        profit: new Decimal('1'),
-      },
-    ];
-    const buf = await exportToXlsx(miniProductsSchema, rows);
-    const err = catchGuard(buf, { ...opts, rowCap: 1 });
+  it('rejects cells beyond rowCap as ROW_CAP_EXCEEDED', () => {
+    const err = catchGuard(productsFile([PRODUCT_ROW_1, PRODUCT_ROW_2]), { ...opts, rowCap: 1 });
     expect(err).toBeInstanceOf(SpreadsheetFileError);
     expect(err?.code).toBe('ROW_CAP_EXCEEDED');
   });
@@ -634,15 +566,70 @@ describe('prepareUploadForRead', () => {
     expect(catchGuard(file, SMALL_BUDGET)?.code).toBe('PAYLOAD_TOO_LARGE');
   });
 
-  // read-excel-file opens only entries ending in .xml or .xml.rels; `_rels/.rels`
-  // is neither, so it is neither budgeted nor part of the read copy.
+  // xmldom builds an attribute without a value (`<z a0 a1/>`) after only a warning, so
+  // the strict parse keeps it as a node; with no '=' to charge, each such name is
+  // charged as an attribute instead.
+  it('charges attributes that have no value', () => {
+    const count = Math.ceil(SMALL_WEIGHT / XML_ATTRIBUTE_WEIGHT) + 1;
+    const names = Array.from({ length: count }, (_, i) => `a${i}`);
+    const withElement = (element: string): Buffer =>
+      buildXlsxFixture([
+        {
+          name: 'Sheet1',
+          xml: worksheetXml(BASIC_ROWS).replace('<sheetData>', `${element}<sheetData>`),
+        },
+      ]);
+
+    expect(catchGuard(withElement(`<z ${names.join(' ')}/>`), SMALL_BUDGET)?.code).toBe(
+      'PAYLOAD_TOO_LARGE',
+    );
+    // The same names with values weigh the same; without attributes it fits.
+    expect(
+      catchGuard(withElement(`<z ${names.map((n) => `${n}=""`).join(' ')}/>`), SMALL_BUDGET)?.code,
+    ).toBe('PAYLOAD_TOO_LARGE');
+    expect(catchGuard(withElement('<z/>'), SMALL_BUDGET)).toBeNull();
+  });
+
+  it('does not count names inside quoted values or around a spaced equals sign', () => {
+    const count = Math.ceil(SMALL_WEIGHT / XML_ATTRIBUTE_WEIGHT) + 1;
+    const words = Array.from({ length: count }, (_, i) => `w${i}`).join(' ');
+    const file = buildXlsxFixture([
+      {
+        name: 'Sheet1',
+        xml: worksheetXml(BASIC_ROWS).replace('<sheetData>', `<z a = "${words}"/><sheetData>`),
+      },
+    ]);
+    expect(catchGuard(file, SMALL_BUDGET)).toBeNull();
+  });
+
+  // The export resolves worksheet parts from the rels on the main thread, outside the
+  // parse worker, so the rels part has its own byte cap.
+  it('rejects workbook rels over MAX_WORKBOOK_RELS_BYTES as PAYLOAD_TOO_LARGE', () => {
+    const relsWithComment = (length: number): string =>
+      relsXml([SHEET_RELATIONSHIP]).replace(
+        '</Relationships>',
+        `<!--${'x'.repeat(length)}--></Relationships>`,
+      );
+    const over = buildXlsxFixture([BASIC_SHEET], {
+      [WORKBOOK_RELS_PART]: relsWithComment(MAX_WORKBOOK_RELS_BYTES),
+    });
+    const under = buildXlsxFixture([BASIC_SHEET], {
+      [WORKBOOK_RELS_PART]: relsWithComment(MAX_WORKBOOK_RELS_BYTES / 2),
+    });
+
+    expect(catchGuard(over, opts)?.code).toBe('PAYLOAD_TOO_LARGE');
+    expect(catchGuard(under, opts)).toBeNull();
+  });
+
+  // The reader opens only entries ending in .xml or .xml.rels that the workbook rels
+  // name; `_rels/.rels` is neither, so it is neither budgeted nor a reader part.
   it('ignores an entry the reader never opens', () => {
     const file = buildXlsxFixture([BASIC_SHEET], {
       '_rels/.rels': partWithElements(SMALL_WEIGHT),
       'xl/media/image1.png': 'not xml <<<',
     });
-    const copy = prepareUploadForRead(file, SMALL_BUDGET);
-    const names = Object.keys(unzipSync(new Uint8Array(copy)));
+    const names = Object.keys(openUpload(file, SMALL_BUDGET));
+    expect(catchGuard(file, SMALL_BUDGET)).toBeNull();
     expect(names).not.toContain('_rels/.rels');
     expect(names).not.toContain('xl/media/image1.png');
   });
@@ -757,23 +744,21 @@ describe('prepareUploadForRead', () => {
     expect(catchGuard(withSharedStrings(sharedStrings), opts)).toBeNull();
   });
 
-  it('returns a fresh read copy holding exactly the parts the reader opens', () => {
+  it('returns exactly the parts the reader opens', () => {
     const file = buildXlsxFixture([
       { name: 'Sheet1', xml: worksheetXml([['Barkod'], ['B1']], { dimension: 'A1:B2' }) },
     ]);
-    const copy = prepareUploadForRead(file, opts);
-    expect(copy).not.toBe(file);
-    expect(Object.keys(unzipSync(new Uint8Array(copy))).sort()).toEqual(
+    expect(readerPartNames(file, opts)).toEqual(
       [WORKBOOK_RELS_PART, WORKBOOK_PART, SHEET_PART].sort(),
     );
   });
 });
 
-// read-excel-file 9.2.0 opens `xl/_rels/workbook.xml.rels`, `xl/workbook.xml` and
-// the Target of every relationship typed styles, sharedStrings or worksheet
-// (parseSpreadsheetContents.js, parseFilePaths.js). The gate budgets, scans,
-// parses and copies exactly those parts; every other entry is ignored.
-describe('prepareUploadForRead: the parts the reader opens', () => {
+// The reader opens `xl/_rels/workbook.xml.rels`, `xl/workbook.xml` and the Target of
+// every relationship typed styles, sharedStrings or worksheet (reader contract,
+// section 1). The gate budgets, scans, parses and returns exactly those parts; every
+// other entry is ignored.
+describe('upload gate: the parts the reader opens', () => {
   // The audit file: an element bomb over the whole weight budget in a part no
   // relationship names.
   it('never parses a part the workbook rels do not name', async () => {
@@ -782,14 +767,14 @@ describe('prepareUploadForRead: the parts the reader opens', () => {
     });
 
     expect(await readWorkbookGrid(file)).toEqual(BASIC_ROWS);
-    expect(readCopyNames(file, SMALL_BUDGET)).not.toContain('xl/junk.xml');
+    expect(readerPartNames(file, SMALL_BUDGET)).not.toContain('xl/junk.xml');
   });
 
   it('leaves out a part named by a relationship of another type', () => {
     const file = workbookWith([SHEET_RELATIONSHIP, [THEME_REL, 'theme/theme1.xml']], {
       'xl/theme/theme1.xml': '<a:theme xmlns:a="urn:x"/>',
     });
-    expect(readCopyNames(file, opts)).toEqual(
+    expect(readerPartNames(file, opts)).toEqual(
       [WORKBOOK_RELS_PART, WORKBOOK_PART, SHEET_PART].sort(),
     );
   });
@@ -807,7 +792,7 @@ describe('prepareUploadForRead: the parts the reader opens', () => {
       },
     ]);
 
-    expect(readCopyNames(file, opts)).toEqual(
+    expect(readerPartNames(file, opts)).toEqual(
       [WORKBOOK_RELS_PART, WORKBOOK_PART, 'xl/worksheets/data.xml'].sort(),
     );
     expect(await readWorkbookGrid(file)).toEqual(BASIC_ROWS);
@@ -818,7 +803,7 @@ describe('prepareUploadForRead: the parts the reader opens', () => {
       [WORKBOOK_RELS_PART]: relsXml([SHEET_RELATIONSHIP, SHARED_STRINGS_RELATIONSHIP], 'p'),
       [SHARED_STRINGS_PART]: `<sst xmlns="${SPREADSHEET_NS}"/>`,
     });
-    expect(readCopyNames(file, opts)).toContain(SHARED_STRINGS_PART);
+    expect(readerPartNames(file, opts)).toContain(SHARED_STRINGS_PART);
   });
 
   it.each<[string, Buffer]>([
@@ -932,7 +917,7 @@ describe('prepareUploadForRead: the parts the reader opens', () => {
 });
 
 // Hand-built stored (method 0) archives whose central directory can disagree with
-// the local entries. The read copy comes from the local stream; the central
+// the local entries. The reader parts come from the local stream; the central
 // directory is only listed (never inflated) and must describe the same entries.
 const MINIMAL_PARTS: readonly StoredEntry[] = [
   { name: '[Content_Types].xml', text: '<Types/>' },
@@ -945,7 +930,7 @@ const EXTRA_PART = 3;
 const IMAGE_ENTRY = 4;
 const KEPT_RECORDS: readonly CentralRecord[] = [{ local: 0 }, { local: 1 }, { local: 2 }];
 
-describe('prepareUploadForRead: central directory', () => {
+describe('upload gate: central directory', () => {
   it('accepts a stored archive whose central directory matches its local entries', () => {
     expect(catchGuard(storedZip(MINIMAL_PARTS), opts)).toBeNull();
   });

@@ -13,18 +13,23 @@ export const ABSOLUTE_MAX_BYTES = 25 * 1024 * 1024;
 // allocates and inflates on every click when it unzips the stored upload whole.
 export const MAX_DECOMPRESSED_BYTES = 64 * 1024 * 1024;
 export const MAX_ZIP_ENTRIES = 64;
+// Raw bytes of xl/_rels/workbook.xml.rels. A real one lists a handful of parts in a
+// few KB (each relationship is about 150 B, and an upload holds at most
+// MAX_ZIP_ENTRIES entries). The export resolves the worksheet parts from this part on
+// the API's main thread, outside the parse worker, so its DOM must stay small there.
+export const MAX_WORKBOOK_RELS_BYTES = 64 * 1024;
 // Total decompressed bytes of the entries named .xml or .xml.rels (the only entries
-// whose content the gate keeps), counted while streaming and re-checked on the
-// serialized read copy. Real exports are about 0.2 MB and a full 5 000 x 64 sheet of
-// short values about 20 MB; 32 MiB keeps headroom while bounding the text the gate
-// holds.
+// whose content the gate keeps), counted while streaming. Nothing is re-serialized,
+// so this also bounds the XML the reader parses. Real exports are about 0.2 MB and a
+// full 5 000 x 64 sheet of short values about 20 MB; 32 MiB keeps headroom while
+// bounding the text the gate holds.
 export const MAX_XML_TOTAL_BYTES = 32 * 1024 * 1024;
-// The ceilings below apply to the raw bytes of the parts read-excel-file opens (the
+// The ceilings below apply to the raw bytes of the parts the grid reader opens (the
 // workbook rels, the workbook and the styles, shared strings and worksheet parts the
 // rels name), before any XML is parsed. Other entries are never parsed.
 // Longest element name (prefix included, in bytes). The longest name in real exports
-// is 19; the cap bounds the per-element cost of the reader's quadratic tag-name regex
-// by a constant factor.
+// is 19; the cap first bounded the per-element cost of the old reader's quadratic
+// tag-name regex, and still keeps every name the gate and the reader handle short.
 export const MAX_XML_NAME_LENGTH = 32;
 // DOM weight: what the xmldom DOM of the reader parts will cost in heap, estimated on
 // raw bytes before anything is parsed. One unit is about 100 B. Measured with
@@ -64,16 +69,29 @@ export const MAX_XMLNS_DECLARATIONS_PER_PART = 256;
 // the limit bounds the wait instead: one tenant's burst of large uploads cannot keep
 // every other tenant's import or export waiting for minutes.
 export const MAX_QUEUED_PARSES = 8;
+// How long a parse may wait in the queue for its turn; beyond it the call gives up
+// with ENGINE_BUSY and its slot is freed. With up to MAX_QUEUED_PARSES calls ahead,
+// the queue alone could otherwise hold a caller for several parse durations.
+export const PARSE_QUEUE_MAX_WAIT_MS = 20_000;
+// Every parse runs in one long-lived worker thread with these limits (see
+// worker/grid-worker-host.ts). A parse that exhausts the heap or runs past the time
+// limit kills only the worker. The limits are a backstop, not the defence: one
+// allocation larger than the remaining heap headroom plus about 16 MB still aborts the
+// whole process, and memory outside the V8 heap (upload bytes, decoded text) is not
+// counted, so every cap above stays. In budget, a parse peaks at about 760 MB (about
+// 570 MB of DOM, up to 64 MB of worksheet source and of shared-string source, and up to
+// about 60 MB of grid text), hence 1 024 MB of old generation.
+export const GRID_WORKER_MAX_OLD_GENERATION_MB = 1024;
+export const GRID_WORKER_MAX_YOUNG_GENERATION_MB = 64;
+export const GRID_WORKER_TIMEOUT_MS = 30_000;
+// Total length (UTF-16 code units) of every string cell of a returned grid. The grid
+// is copied out of the worker, and the copy does not share repeated strings: 200 000
+// cells referencing one 32 KB shared string would copy to about 6.4 GB.
+export const MAX_GRID_TEXT_LENGTH = 16 * 1024 * 1024;
 // Excel caps a custom number format code at 255 characters.
 export const MAX_FORMAT_CODE_LENGTH = 255;
-export const MAX_CELL_TEXT_LENGTH = 32_767; // Excel cell limit
-export const MAX_ERROR_VALUE_LENGTH = 256; // CellError.value is truncated at the surface
 // SpreadsheetFileError meta `cause` is truncated: library messages may quote the input.
 export const MAX_ERROR_CAUSE_LENGTH = 200;
 
 // 'PK\x03\x04' — zip local-file-header signature (xlsx is a zip).
 export const XLSX_MAGIC: readonly number[] = [0x50, 0x4b, 0x03, 0x04];
-export const XLSX_EXTENSION = '.xlsx';
-
-// Formula/CSV injection: text cells starting with these characters (first non-whitespace) are neutralized.
-export const FORMULA_PREFIX_CHARS: readonly string[] = ['=', '+', '-', '@', '\t', '\r', '\n'];
