@@ -5,6 +5,8 @@ import { remapDatabaseUrlToTestDb } from '@pazarsync/db/test-env';
 import { config as loadEnv } from 'dotenv';
 import { defineConfig } from 'vitest/config';
 
+import { testWorkers } from '@pazarsync/vitest-config';
+
 // Local-dev convenience: pull DATABASE_URL etc. from the workspace-root .env
 // so `pnpm --filter @pazarsync/profit test:integration` works without
 // exporting env vars by hand. CI sets these via the workflow `env:` block,
@@ -22,6 +24,7 @@ export default defineConfig({
     // Integration tests share one Postgres DB and TRUNCATE between tests.
     // Running test files in parallel would race on TRUNCATE.
     fileParallelism: false,
+    maxWorkers: testWorkers(), // inert while fileParallelism is false
     globals: false,
     environment: 'node',
     // Seed the shipping reference fixture once (carriers + tariffs) so tests can

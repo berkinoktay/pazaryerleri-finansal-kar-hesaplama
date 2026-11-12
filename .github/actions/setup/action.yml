@@ -6,9 +6,9 @@ inputs:
       Persist the turbo cache across runs via actions/cache. Only for jobs whose
       tasks are a pure function of hashed inputs (typecheck, lint, build, unit,
       component). NEVER enable for the integration job: test:integration is
-      cacheable in turbo.json but its hash cannot see out-of-package inputs
-      (supabase/sql/*.sql, supabase/config.toml), so a warm cache could silently
-      SKIP the RLS/tenant-isolation suites after a policy change.
+      cacheable in turbo.json and its hash now covers supabase/sql/**, but it
+      still cannot see supabase/config.toml or the database state, so a warm
+      cache could silently SKIP the RLS/tenant-isolation suites.
     required: false
     default: 'false'
 runs:
@@ -30,9 +30,22 @@ runs:
         # Exact key never hits twice (sha-scoped) — the restore-key prefix does the
         # real work: newest cache from this branch, else from main (GitHub scopes
         # cross-branch restores to the base branch automatically).
-        key: turbo-${{ runner.os }}-${{ github.sha }}
+        #
+        # The key is scoped per JOB. With one shared key, every parallel job raced
+        # to save the same entry: the first finisher (typecheck) won and the rest
+        # failed with "Unable to reserve cache", so lint/unit/component/build never
+        # persisted their turbo outputs and re-ran from scratch on every push.
+        key: turbo-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
         restore-keys: |
-          turbo-${{ runner.os }}-
+          turbo-${{ runner.os }}-${{ github.job }}-
+    # Each save re-uploads everything it restored plus the new entries, so the
+    # blob only grows. Drop artifacts CREATED more than two weeks ago (turbo
+    # never touches an entry on a hit, so mtime is creation time): an entry that
+    # is still in use is simply rebuilt once — a few seconds — and re-cached.
+    - name: Prune stale turbo cache entries
+      if: ${{ inputs.turbo-cache == 'true' }}
+      run: find .turbo/cache -type f -mtime +14 -delete 2>/dev/null || true
+      shell: bash
     - run: pnpm install --frozen-lockfile
       shell: bash
     - name: Generate Prisma client

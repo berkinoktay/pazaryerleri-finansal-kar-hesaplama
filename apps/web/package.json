@@ -75,6 +75,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@pazarsync/vitest-config": "workspace:*",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6",
     "@testing-library/react": "^16",

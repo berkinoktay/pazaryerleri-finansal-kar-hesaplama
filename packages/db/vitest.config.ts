@@ -3,6 +3,7 @@ import path from 'node:path';
 import { config as loadEnv } from 'dotenv';
 import { defineConfig } from 'vitest/config';
 
+import { testWorkers } from '@pazarsync/vitest-config';
 import { remapDatabaseUrlToTestDb } from './src/test-env';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -19,5 +20,6 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/**/*.test.ts'],
     fileParallelism: false,
+    maxWorkers: testWorkers(), // inert while fileParallelism is false
   },
 });

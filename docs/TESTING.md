@@ -24,7 +24,7 @@ rules inline.
 11. [Test Helpers Reference](#11-test-helpers-reference)
 12. [Common Pitfalls](#12-common-pitfalls)
 13. [Running Tests Locally](#13-running-tests-locally)
-14. [CI Behavior](#14-ci-behavior)
+14. [Gates and CI Behavior](#14-gates-and-ci-behavior)
 
 ---
 
@@ -299,7 +299,7 @@ Guidance:
 ## 12. Common Pitfalls
 
 - **Forgetting `beforeEach(truncateAll)`** → tests pass individually but interfere when run together. Symptom: works locally, fails in CI (different test order).
-- **Parallel test files racing on the shared DB** → with Vitest's default file parallelism, two integration test files both calling `truncateAll` in `beforeEach` will race: file A's `TRUNCATE … CASCADE` wipes the rows file B just inserted. The fix lives in `apps/api/vitest.config.ts` as `test.fileParallelism: false`. Don't remove that line without replacing it with schema-per-worker isolation.
+- **Parallel test files racing on the shared DB** → with Vitest's default file parallelism, two integration test files both calling `truncateAll` in `beforeEach` will race: file A's `TRUNCATE … CASCADE` wipes the rows file B just inserted. The fix lives in `apps/api/vitest.config.ts` as `test.fileParallelism: false`. Don't remove that line without replacing it with schema-per-worker isolation. And never set `VITEST_MAX_WORKERS` — it overrides `fileParallelism: false` (see §14).
 - **Using jsdom for tests that need MSW interception** → jsdom 29 isolates `fetch` inside its own per-realm context, so requests issued from the test never reach the Node-level undici fetch that MSW patches. Result: MSW handlers are silently bypassed and the test hangs (success path) or passes for the wrong reason (error path). `apps/web/vitest.config.ts` uses `environment: "happy-dom"` for this reason — happy-dom uses Node's native fetch and MSW intercepts cleanly. If you ever switch back to jsdom, your hook tests will start hanging.
 - **Using `as any` in tests** → defeats the entire purpose of typed mocks. Fix the types instead.
 - **Snapshot tests** → AVOID. Fragile, hide intent, pollute diffs. Use explicit `toMatchObject` instead.
@@ -325,17 +325,22 @@ Without these two, `apps/web` typecheck and any test that imports `@pazarsync/db
 ### Day-to-day commands
 
 ```bash
-# Fast iteration (no DB needed)
-pnpm test:unit
+# Fast iteration (no DB needed): the files you touched, then the affected gate
+pnpm --filter @pazarsync/api exec vitest run tests/unit/lib/errors.test.ts
+pnpm check:affected   # typecheck + lint + unit tests for changed packages, format, audits
 
-# Full suite — needs local Supabase + the isolated test DB
+# Integration — needs local Supabase + the isolated test DB. CI runs the whole
+# suite on every backend PR; locally run the files your change touches.
 supabase start
-pnpm db:push          # apply schema to the dev "postgres" DB (RLS suite target)
+pnpm db:push          # apply schema to the dev "postgres" DB
 pnpm db:test-setup    # one-time: create + prepare the isolated test DB
-pnpm test:integration # runs against TEST_DATABASE_URL, never the dev DB
+pnpm --filter @pazarsync/api exec vitest run tests/integration/routes/store.routes.test.ts
+pnpm test:integration # whole suite, one package at a time; runs against TEST_DATABASE_URL
 
-# RLS suite (runs against the dev "postgres" DB via PostgREST — opt-in locally)
-pnpm --filter @pazarsync/api test:integration:rls
+# RLS suite: CI only. It runs against the dev "postgres" DB via PostgREST and
+# TRUNCATEs its tenant tables; its config refuses to load without an explicit
+# opt-in that only CI sets. Never run it locally without a full pg_dump backup
+# of the dev data and the owner's go-ahead.
 
 # Watch mode (during dev)
 pnpm test:watch
@@ -353,27 +358,42 @@ supabase stop
 
 ---
 
-## 14. CI Behavior
+## 14. Gates and CI Behavior
 
-`.github/workflows/ci.yml`'s `test` job:
+### Three layers
 
-1. Installs deps with `--frozen-lockfile`.
-2. Runs `pnpm db:generate` and `pnpm api:sync` so anything imported by tests is present before they run.
-3. Runs `pnpm test:unit` first (fast feedback, no DB needed).
-4. If unit tests pass: brings up Supabase local via `supabase/setup-cli@v1` + `supabase start`, applies the schema with `pnpm db:push`, then runs `pnpm test:integration`.
-5. Calls `supabase stop` with `if: always()` so the cleanup runs even when a step above failed; nothing leaks between job invocations.
+| Layer              | Runs                                                                                                     | Scope                                    |
+| ------------------ | -------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| pre-commit (husky) | `lint-staged` (prettier on staged files)                                                                 | staged files                             |
+| pre-push (husky)   | `turbo run typecheck lint test:unit --affected`, 3 tasks at a time, 2 vitest workers each                | changed packages + their dependents      |
+| CI (the authority) | typecheck + OpenAPI drift, lint + format + repo audits, build, unit, component, integration + RLS suites | everything; only CI decides "green"      |
 
-Total time: ~3 minutes. Failing tests block PR merge if branch protection is enabled.
+The pre-push gate compares the current working tree (not the pushed ref range — same as the old gate) against `origin/main` (override with `TURBO_SCM_BASE`). If that ref can't be resolved it checks every package instead. Component, integration and slow suites never run on push — CI runs them. Escape hatch for a WIP push: `git push --no-verify`.
+
+### CI jobs (`.github/workflows/ci.yml`)
+
+- **Typecheck** — `pnpm typecheck`, plus a `git diff --exit-code packages/api-client/openapi.json` drift check (the setup composite already ran `api:sync`).
+- **Lint** — every workspace's `lint`, `format:check`, and the repo audits (`audit:boundaries`, `audit:errors`, `audit:lint`, `audit:money`, `audit:no-barrel`, `audit:test-hygiene`). CI is the only place the audits are enforced.
+- **Unit / Component** — `turbo run test:unit|test:component --concurrency=2`.
+- **Integration** — fresh Supabase local, `db:push`, migration drift check, `turbo run test:integration --concurrency=1`, then the RLS suite with `PAZARSYNC_ALLOW_DEV_DB_TRUNCATE=1` against the disposable job DB. On a pull request it only runs when something outside `apps/web` changed; every non-docs push to `main` runs it.
+- **Change detection** — `dorny/paths-filter` with `predicate-quantifier: 'some-with-excludes'`; docs-only changes skip build, unit, component and integration.
+- **Dependency-aware caching** — every check task depends on turbo's `transit` node, so a change inside a package invalidates the cached results of every package that depends on it (without it, a dependent's `typecheck` / tests were replayed from cache as green).
+- **Turbo cache** — persisted per job (`turbo-<os>-<job>-<sha>`), entries older than 14 days are pruned before saving. The integration job never uses it (its hash can't see every out-of-package input).
 
 No coverage thresholds. The reviewer's question is "does this PR have the tests it should have?", not "is coverage above 80%?".
 
-### Local mirror commands
+### Resource bounds: `PAZARSYNC_TEST_WORKERS`
 
-Two root scripts mirror what CI runs and give you the same gate locally:
+Every vitest config sets `maxWorkers: testWorkers()` from `@pazarsync/vitest-config`. Defaults: 2 workers in CI, 50% of the cores locally. Override with `PAZARSYNC_TEST_WORKERS=<count>` or `<percent>%` (turbo passes it through).
 
-| Script            | Runs                                                              | DB needed?                   | Use when                                      |
-| ----------------- | ----------------------------------------------------------------- | ---------------------------- | --------------------------------------------- |
-| `pnpm check:all`  | typecheck + lint + `test:unit` + format check                     | No                           | **Before each commit** — fast loop            |
-| `pnpm check:full` | typecheck + lint + full `test` (incl. integration) + format check | Yes (`supabase start` first) | **Before opening a PR** — full parity with CI |
+Never use `VITEST_MAX_WORKERS`: vitest applies it after the config is resolved, so it silently overrides `fileParallelism: false` and lets DB-backed files race on the shared test database. `@pazarsync/vitest-config` deletes it on import.
 
-`check:all` is the pre-commit gate; `check:full` is the pre-PR gate.
+### Local commands
+
+| Script                | Runs                                                                                          | DB needed?                   | Use when                                        |
+| --------------------- | --------------------------------------------------------------------------------------------- | ---------------------------- | ----------------------------------------------- |
+| `pnpm check:affected` | the pre-push gate (affected typecheck + lint + `test:unit`) + format check + audits           | No                           | Before each commit                              |
+| `pnpm check:all`      | typecheck + lint + `test:unit` + `test:component` for every package (bounded) + format + audits | No                           | On demand — full local mirror of CI's fast jobs |
+| `pnpm check:full`     | `check:all` + `test:integration` (one package at a time) + migration drift check              | Yes (`supabase start` first) | On demand — full parity with CI                 |
+
+Day to day, run the test files your change touches (`pnpm --filter <pkg> exec vitest run <file>`), then `pnpm check:affected`; the pre-push gate and CI do the rest. Root `test:unit` / `test` / `test:integration` are bounded too (`--concurrency=3` with 2 workers, or one package at a time for anything that touches the database).

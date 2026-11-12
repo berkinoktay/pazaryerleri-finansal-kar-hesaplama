@@ -1,4 +1,7 @@
-# Heavier validation before sharing code. Mirrors CI's fast jobs (typecheck +
-# lint + unit tests + format check) — no DB needed. If you intentionally need
-# to push WIP that won't pass, use `git push --no-verify`.
-pnpm check:all
+# Fast, affected-only gate (typecheck + lint + unit tests for changed packages
+# and their dependents) — see scripts/check-affected.sh. Component, integration
+# and slow suites run in CI, which is the single authority. The full local gate
+# is still available on demand: `pnpm check:all`.
+#
+# Escape hatch for a WIP push that is known not to pass: git push --no-verify
+sh scripts/check-affected.sh

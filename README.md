@@ -101,9 +101,9 @@ pnpm db:studio              # open Prisma Studio
 pnpm api:sync               # regenerate OpenAPI spec + typed client
 
 pnpm test:unit              # fast — no DB
-pnpm test                   # full — needs `supabase start`
-pnpm check:all              # pre-commit gate (typecheck + lint + unit + format)
-pnpm check:full             # pre-PR gate  (above + integration tests + migration drift check)
+pnpm check:affected         # pre-commit gate — changed packages only (typecheck + lint + unit) + format + audits
+pnpm check:all              # on demand — every package incl. component tests, bounded
+pnpm check:full             # on demand — check:all + integration tests + migration drift check (needs `supabase start`)
 ```
 
 ---
@@ -152,7 +152,7 @@ This is a private project. Internal workflow:
 - Branch naming: `feature/...`, `fix/...`, `refactor/...`, `docs/...`
 - Conventional commits (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`)
 - All changes go through PR — `main` is protected
-- Run `pnpm check:full` (with Supabase running) before opening a PR; CI mirrors this
+- Run `pnpm check:affected` before committing; `git push` re-runs the same affected gate and CI is the single authority for every suite (see `docs/TESTING.md` §14)
 
 ---
 

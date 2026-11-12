@@ -13,9 +13,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Detects whether the PR/push touches any non-docs files. The `test` and
-  # `build` jobs gate on this so that docs-only changes skip the slow Supabase
-  # spin-up / build entirely. typecheck, lint, and api-spec-sync stay
+  # Detects what the PR/push touches. `code` = any non-docs file: build, unit
+  # and component gate on it so docs-only changes skip them. `backend` = code
+  # outside apps/web: the Supabase-backed integration job gates on it for PRs,
+  # because no integration suite exercises apps/web. Every non-docs push to main
+  # runs the integration job (see its `if`). typecheck and lint stay
   # unconditional — they're fast and useful even on docs PRs.
   changes:
     name: Detect non-docs changes
@@ -29,38 +31,29 @@ jobs:
       contents: read
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      backend: ${{ steps.filter.outputs.backend }}
     steps:
       - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v4
         id: filter
         with:
+          # Without this the default ('some') counts a file as matching when it
+          # hits ANY rule — '**' matches everything, so the '!' exclusions never
+          # excluded anything and docs-only PRs ran every job. With
+          # 'some-with-excludes' a file must hit '**' and none of the '!' rules.
+          predicate-quantifier: 'some-with-excludes'
           filters: |
             code:
               - '**'
               - '!**/*.md'
               - '!docs/**'
               - '!.github/**/*.md'
-
-  api-spec-sync:
-    name: OpenAPI spec is in sync
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6
-      # Composite runs api:sync; the step below fails if the committed OpenAPI
-      # spec drifted from what api:sync produces. The generated types under
-      # src/generated/ are gitignored, so `git diff` can never see them — they
-      # are regenerated fresh here, and a drift in them surfaces as a downstream
-      # typecheck/build failure, not as a diff. So we only gate on openapi.json.
-      - uses: ./.github/actions/setup
-      - name: Fail if the OpenAPI spec drifted
-        run: |
-          if ! git diff --exit-code packages/api-client/openapi.json; then
-            echo ""
-            echo "::error::OpenAPI spec is out of sync."
-            echo "::error::Run 'pnpm api:sync' locally and commit the result."
-            exit 1
-          fi
+            backend:
+              - '**'
+              - '!**/*.md'
+              - '!docs/**'
+              - '!.github/**/*.md'
+              - '!apps/web/**'
 
   typecheck:
     name: Typecheck all packages
@@ -71,6 +64,19 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           turbo-cache: 'true'
+      # The setup composite already ran api:sync, so the committed OpenAPI spec
+      # can be checked here without paying for a separate job's install. The
+      # generated types under src/generated/ are gitignored, so `git diff` can
+      # never see them — a drift there surfaces as a typecheck/build failure.
+      # So we only gate on openapi.json.
+      - name: Fail if the OpenAPI spec drifted
+        run: |
+          if ! git diff --exit-code packages/api-client/openapi.json; then
+            echo ""
+            echo "::error::OpenAPI spec is out of sync."
+            echo "::error::Run 'pnpm api:sync' locally and commit the result."
+            exit 1
+          fi
       - run: pnpm typecheck
 
   lint:
@@ -89,6 +95,12 @@ jobs:
       - run: pnpm turbo run lint --filter='@pazarsync/*'
       - name: Format check
         run: pnpm format:check
+      # Repo-wide audits (feature boundaries, error codes, lint coverage, money,
+      # barrels, test hygiene). They used to run only inside the local pre-push
+      # `check:all`; now that pre-push is affected-only, CI is where they are
+      # enforced.
+      - name: Repo audits
+        run: pnpm audit:all
 
   build:
     name: Build all apps
@@ -207,8 +219,10 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           turbo-cache: 'true'
+      # Two turbo tasks at a time, two vitest workers each (CI default from
+      # @pazarsync/vitest-config) — sized for the 2-vCPU runner.
       - name: Run unit tests
-        run: pnpm test:unit
+        run: pnpm turbo run test:unit --concurrency=2
 
   component-tests:
     name: Component tests
@@ -223,15 +237,19 @@ jobs:
         with:
           turbo-cache: 'true'
       - name: Run component tests
-        run: pnpm test:component
+        run: pnpm turbo run test:component --concurrency=2
 
   test:
     name: Integration tests
     needs: changes
     # Skipped jobs report as "Skipped" (counts as success for branch
     # protection), unlike workflow-level paths-ignore which leaves
-    # required checks pending forever.
-    if: needs.changes.outputs.code == 'true'
+    # required checks pending forever. On a PR it runs only when something
+    # outside apps/web changed (no integration suite exercises the web app);
+    # every non-docs push to main runs it, so main stays fully verified.
+    if: >-
+      needs.changes.outputs.backend == 'true' ||
+      (github.event_name == 'push' && needs.changes.outputs.code == 'true')
     runs-on: ubuntu-latest
     # Only the integration suite runs here now (unit/component moved to their
     # own jobs); on a cold cache Supabase spin-up + db:push + the suite
@@ -240,7 +258,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       # No turbo cache here — deliberately; see the setup action's turbo-cache
-      # input docs (integration hash can't see supabase/sql or config.toml).
+      # input docs (the integration hash covers supabase/sql but still can't see
+      # supabase/config.toml or the database state the suite runs against).
       - uses: ./.github/actions/setup
 
       # DB integration tests run against a fresh local Supabase instance
@@ -342,7 +361,9 @@ jobs:
           # PostgREST/GoTrue, which only serve the "postgres" DB) and runs via its
           # own config here. It shares this env block; in CI DATABASE_URL already
           # IS the disposable per-job postgres DB, so no separate DB is needed.
-          pnpm --filter @pazarsync/api test:integration:rls
+          # The RLS config refuses to load without this explicit opt-in (it
+          # TRUNCATEs whatever DB it points at); only this disposable CI DB gets it.
+          PAZARSYNC_ALLOW_DEV_DB_TRUNCATE=1 pnpm --filter @pazarsync/api test:integration:rls
         env:
           NODE_ENV: test
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
@@ -426,7 +447,7 @@ jobs:
     if: always()
     needs:
       [
-        api-spec-sync,
+        changes,
         typecheck,
         lint,
         build,

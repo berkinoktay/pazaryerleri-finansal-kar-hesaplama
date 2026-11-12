@@ -41,6 +41,7 @@
   },
   "devDependencies": {
     "@pazarsync/eslint-config": "workspace:*",
+    "@pazarsync/vitest-config": "workspace:*",
     "@types/node": "catalog:",
     "@vitest/ui": "catalog:",
     "dotenv": "catalog:",

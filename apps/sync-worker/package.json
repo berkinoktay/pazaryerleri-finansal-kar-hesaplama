@@ -26,11 +26,12 @@
     "decimal.js": "catalog:"
   },
   "devDependencies": {
+    "@pazarsync/eslint-config": "workspace:*",
+    "@pazarsync/vitest-config": "workspace:*",
     "dotenv": "catalog:",
+    "eslint": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:",
-    "@pazarsync/eslint-config": "workspace:*",
-    "eslint": "catalog:"
+    "vitest": "catalog:"
   }
 }

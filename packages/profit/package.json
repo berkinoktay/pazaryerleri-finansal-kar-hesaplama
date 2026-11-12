@@ -23,10 +23,11 @@
     "decimal.js": "catalog:"
   },
   "devDependencies": {
-    "typescript": "catalog:",
-    "vitest": "catalog:",
     "@pazarsync/eslint-config": "workspace:*",
+    "@pazarsync/vitest-config": "workspace:*",
+    "dotenv": "catalog:",
     "eslint": "catalog:",
-    "dotenv": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }
