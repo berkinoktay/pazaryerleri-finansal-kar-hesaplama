@@ -5,7 +5,7 @@ import { configureWorkerDatabases, remapDatabaseUrlToTestDb } from '@pazarsync/d
 import { config as loadEnv } from 'dotenv';
 import { defineConfig } from 'vitest/config';
 
-import { testWorkers } from '@pazarsync/vitest-config';
+import { INTEGRATION_TEST_TIMEOUT_MS, testWorkers } from '@pazarsync/vitest-config';
 
 // Local-dev convenience: pull DATABASE_URL etc. from the workspace-root .env
 // so `pnpm --filter @pazarsync/sync-core test:unit` works without exporting
@@ -24,8 +24,9 @@ const workerDatabases = configureWorkerDatabases('synccore');
 export default defineConfig({
   test: {
     include: ['tests/integration/**/*.test.ts'],
-    fileParallelism: false,
-    maxWorkers: testWorkers(), // inert while fileParallelism is false
+    // Files run in parallel, each worker on its own database clone.
+    maxWorkers: testWorkers(),
+    testTimeout: INTEGRATION_TEST_TIMEOUT_MS,
     globals: false,
     environment: 'node',
     globalSetup: [workerDatabases.globalSetup],

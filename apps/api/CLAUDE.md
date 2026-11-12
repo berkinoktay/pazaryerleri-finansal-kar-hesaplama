@@ -424,7 +424,7 @@ apps/api/tests/
 
 Full patterns in `docs/TESTING.md`. The most important ones:
 
-- **Two configs, two folders**: `tests/unit/**` runs under `vitest.unit.config.ts` (no DB, no `.env`, files in parallel — `pnpm --filter @pazarsync/api test:unit`); `tests/integration/**` runs under `vitest.config.ts` (isolated test DB, serial). A test file anywhere else — e.g. `src/**/__tests__/` — matches neither config and never runs; `pnpm audit:test-config` fails on it.
+- **Two configs, two folders**: `tests/unit/**` runs under `vitest.unit.config.ts` (no DB, no `.env`, files in parallel — `pnpm --filter @pazarsync/api test:unit`); `tests/integration/**` runs under `vitest.config.ts` (files in parallel, each worker on its own clone of the test DB template — run `pnpm db:test-setup` after schema or `supabase/sql` changes). A test file anywhere else — e.g. `src/**/__tests__/` — matches neither config and never runs; `pnpm audit:test-config` fails on it.
 - **Path alias**: import from `src/` via `@/...` (not `../../../src/...`). `tsconfig.json` declares `paths: { "@/*": ["./src/*"] }` and both vitest configs mirror it under `resolve.alias` so both typecheck and runtime resolve the alias. Relative imports are still the norm for cross-test helpers (`../../helpers/db`) since they're short and local.
 - **DB integration pattern**: every DB test does `await ensureDbReachable()` in `beforeAll`, `await truncateAll()` in `beforeEach` (see `tests/helpers/db.ts`)
 - **Test data factories**: use `createOrganization`, `createStore`, `createOrder`, etc. from `tests/helpers/factories.ts` — never hand-construct Prisma create payloads in tests
@@ -448,7 +448,7 @@ The workspace-root `.env` is auto-loaded by `apps/api/vitest.config.ts` via dote
 - ❌ Hand-rolled JWTs in tests — use `createAuthenticatedTestUser()` and `bearer()` from `tests/helpers/auth.ts`. The helper creates a real Supabase Auth user via the admin API and returns a real access token, so tests exercise the actual `supabase.auth.getUser` verification path.
 - ❌ Shipping auth-touching changes without the manual smoke test — `pnpm dev --filter @pazarsync/api`, sign in via the `/auth/v1/token?grant_type=password` Supabase endpoint as a seed user, confirm `GET /v1/organizations` returns 200 with real data. Integration tests mint their own tokens; only an end-to-end sign-in catches drift between what Supabase emits and what the backend accepts. PR #25 shipped broken because this step was skipped.
 - ❌ Skipping the tenant-isolation test for a "trivial" endpoint — there is no trivial multi-tenant endpoint
-- ❌ Removing `fileParallelism: false` from `vitest.config.ts` — integration tests share one DB; parallel files race on `truncateAll`
+- ❌ Pointing an integration config at a shared database instead of wiring it with `configureWorkerDatabases()` — files run in parallel, and only the per-worker clones keep one file's `truncateAll` from wiping another file's rows
 
 ## No Utility Duplication
 

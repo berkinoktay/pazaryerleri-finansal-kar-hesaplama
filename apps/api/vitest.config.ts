@@ -4,7 +4,7 @@ import { configureWorkerDatabases, remapDatabaseUrlToTestDb } from '@pazarsync/d
 import { config as loadEnv } from 'dotenv';
 import { configDefaults, defineConfig } from 'vitest/config';
 
-import { testWorkers } from '@pazarsync/vitest-config';
+import { INTEGRATION_TEST_TIMEOUT_MS, testWorkers } from '@pazarsync/vitest-config';
 
 // Local-dev convenience: pull DATABASE_URL etc. from the workspace-root .env
 // so `pnpm --filter @pazarsync/api test` works without exporting env vars by
@@ -38,15 +38,12 @@ export default defineConfig({
     // policies through PostgREST/GoTrue, which only serve the dev "postgres" DB,
     // so they must NOT be remapped at the isolated test DB like everything else.
     exclude: [...configDefaults.exclude, 'tests/integration/rls/**'],
-    // Integration tests share one Postgres DB and TRUNCATE between tests.
-    // Each worker has its own database clone, but files still run one at a
-    // time for now: parallel files are turned on in a separate step.
-    fileParallelism: false,
-    // Pool size from the shared policy (@pazarsync/vitest-config). Inert while
-    // fileParallelism is false (vitest forces one worker). Importing the policy
-    // still matters here: it deletes VITEST_MAX_WORKERS, which would otherwise
-    // override fileParallelism:false.
+    // Files run in parallel: every worker has its own database clone, so one
+    // file's `truncateAll` can never touch another file's rows. Pool size from
+    // the shared policy (@pazarsync/vitest-config); the globalSetup creates
+    // exactly one clone per worker.
     maxWorkers: testWorkers(),
+    testTimeout: INTEGRATION_TEST_TIMEOUT_MS,
     // Clone the template once per worker (first), then the dev-DB auth purge.
     globalSetup: [
       workerDatabases.globalSetup,

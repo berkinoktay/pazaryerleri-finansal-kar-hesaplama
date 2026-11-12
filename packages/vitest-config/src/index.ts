@@ -14,15 +14,23 @@
 // because turbo starts up to 3 of them together.
 //
 // VITEST_MAX_WORKERS is deliberately neutralized on import: vitest applies it
-// after the config is resolved, so it would silently override both
-// `maxWorkers` and `fileParallelism: false` — the latter is what keeps the
-// DB-backed suites from racing on the shared test database. That is why the
-// DB-backed configs import this module even though their own `maxWorkers` is
-// inert while `fileParallelism` is false.
+// after the config is resolved, so it would silently override `maxWorkers`
+// (the integration globalSetup creates exactly one database clone per
+// configured worker) and `fileParallelism: false` where a suite still needs it
+// (spreadsheet time budgets, the RLS suite on the shared dev DB).
 delete process.env['VITEST_MAX_WORKERS'];
 
 // At least 1: vitest treats a maxWorkers of 0 as "unset" and falls back to one
 // worker per core, which would silently undo the cap.
+/**
+ * Per-test timeout for DB-backed integration suites. Their tests make real
+ * Postgres round-trips and real GoTrue sign-ups / sign-ins (bcrypt), and with
+ * files in parallel every worker shares the one GoTrue container — a test that
+ * takes ~1 s alone can pass 5 s (vitest's default) when four workers sign users
+ * up at once. 15 s absorbs that contention and still fails a genuine hang.
+ */
+export const INTEGRATION_TEST_TIMEOUT_MS = 15_000;
+
 const WORKER_COUNT_RE = /^[1-9]\d*$/;
 const WORKER_PERCENT_RE = /^[1-9]\d*%$/;
 const CI_DEFAULT_WORKERS = 2;
