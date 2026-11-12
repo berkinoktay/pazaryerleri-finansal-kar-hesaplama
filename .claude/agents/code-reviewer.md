@@ -1,7 +1,7 @@
 ---
 name: code-reviewer
 description: Tamamlanan bir değişikliği taze bağlamla ve salt-okunur olarak denetler. Diff'i özgün istekle ve proje kurallarıyla karşılaştırır. Doğruluk, tenant izolasyonu, para hesabı ve kural ihlallerini dosya:satır bulgusu olarak raporlar. Dosya değiştirmez.
-model: opus
+model: claude-opus-5-5
 effort: xhigh
 tools: Read, Grep, Glob, Bash
 disallowedTools: Write, Edit

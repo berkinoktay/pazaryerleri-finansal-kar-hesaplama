@@ -1,7 +1,7 @@
 ---
 name: implementer
 description: Orkestratörün verdiği tek, kesin uygulama adımını hayata geçirir. Mimari veya planlama kararı vermez, kapsamı genişletmez. Bitirmeden önce değiştirdiği paketlerin typecheck, lint ve birim testleri otomatik bir kapıdan geçer.
-model: opus
+model: claude-opus-5-5
 effort: xhigh
 tools: Read, Write, Edit, Bash, Grep, Glob, Skill
 hooks:

@@ -2,7 +2,7 @@
 name: supabase-schema-architect
 description: Supabase database schema design specialist. Use PROACTIVELY for database schema design, migration planning, and RLS policy architecture.
 tools: Read, Write, Edit, Bash, Grep, Glob, Skill
-model: opus
+model: claude-opus-5-5
 effort: xhigh
 skills:
   - supabase:supabase-postgres-best-practices
