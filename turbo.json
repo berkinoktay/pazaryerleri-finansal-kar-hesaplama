@@ -1,6 +1,7 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "globalDependencies": ["tsconfig.base.json"],
+  "globalPassThroughEnv": ["PAZARSYNC_TEST_WORKERS"],
   "tasks": {
     "dev": {
       "dependsOn": ["^generate", "generate"],
@@ -11,11 +12,14 @@
       "dependsOn": ["^build", "^generate", "generate"],
       "outputs": [".next/**", "dist/**"]
     },
+    "transit": {
+      "dependsOn": ["^transit"]
+    },
     "typecheck": {
-      "dependsOn": ["^generate", "generate"]
+      "dependsOn": ["transit", "^generate", "generate"]
     },
     "lint": {
-      "dependsOn": []
+      "dependsOn": ["transit"]
     },
     "clean": {
       "cache": false
@@ -29,7 +33,7 @@
       "outputs": ["generated/prisma/**"]
     },
     "test": {
-      "dependsOn": ["codegen", "^generate", "generate"],
+      "dependsOn": ["transit", "codegen", "^generate", "generate"],
       "outputs": [],
       "env": [
         "NODE_ENV",
@@ -55,7 +59,7 @@
       ]
     },
     "test:unit": {
-      "dependsOn": ["^generate", "generate"],
+      "dependsOn": ["transit", "^generate", "generate"],
       "outputs": [],
       "env": [
         "NODE_ENV",
@@ -73,7 +77,7 @@
       ]
     },
     "test:component": {
-      "dependsOn": ["^generate", "generate"],
+      "dependsOn": ["transit", "^generate", "generate"],
       "outputs": [],
       "env": [
         "NODE_ENV",
@@ -91,7 +95,8 @@
       ]
     },
     "test:integration": {
-      "dependsOn": ["^generate", "generate"],
+      "dependsOn": ["transit", "^generate", "generate"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/supabase/sql/**"],
       "outputs": [],
       "env": [
         "NODE_ENV",
