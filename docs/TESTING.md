@@ -299,7 +299,9 @@ Guidance:
 ## 12. Common Pitfalls
 
 - **Forgetting `beforeEach(truncateAll)`** → tests pass individually but interfere when run together. Symptom: works locally, fails in CI (different test order).
-- **Parallel test files racing on the shared DB** → with Vitest's default file parallelism, two integration test files both calling `truncateAll` in `beforeEach` will race: file A's `TRUNCATE … CASCADE` wipes the rows file B just inserted. The fix lives in `apps/api/vitest.config.ts` as `test.fileParallelism: false`. Don't remove that line without replacing it with schema-per-worker isolation. And never set `VITEST_MAX_WORKERS` — it overrides `fileParallelism: false` (see §14).
+- **Parallel test files racing on a shared DB** → two integration test files both calling `truncateAll` in `beforeEach` race if they share a database: file A's `TRUNCATE … CASCADE` wipes the rows file B just inserted. Every integration config is wired with `configureWorkerDatabases()` (`@pazarsync/db/test-env`), so each vitest worker runs against its own clone of the test DB template (`<TEST_DATABASE_URL db>_<package>_w<N>`, created by a globalSetup, dropped after the run). Never point a worker at a shared DB, and never set `VITEST_MAX_WORKERS` (see §14).
+- **"Test DB template is out of date"** → the template (`<TEST_DATABASE_URL db>_tpl`) is stamped with a fingerprint of `schema.prisma`, `supabase/sql/*.sql` and the reference/fixture seeders. After changing any of them, run `pnpm db:test-setup` again. Keep the clones of a failed run for inspection with `PAZARSYNC_KEEP_TEST_DBS=1`.
+- **"Could not clone … into …"** → a session is connected to the template (psql, Prisma Studio). `pnpm db:test-setup` seals the template (`ALLOW_CONNECTIONS false`), so this only happens before the first setup run.
 - **Using jsdom for tests that need MSW interception** → jsdom 29 isolates `fetch` inside its own per-realm context, so requests issued from the test never reach the Node-level undici fetch that MSW patches. Result: MSW handlers are silently bypassed and the test hangs (success path) or passes for the wrong reason (error path). `apps/web/vitest.config.ts` uses `environment: "happy-dom"` for this reason — happy-dom uses Node's native fetch and MSW intercepts cleanly. If you ever switch back to jsdom, your hook tests will start hanging.
 - **Using `as any` in tests** → defeats the entire purpose of typed mocks. Fix the types instead.
 - **Snapshot tests** → AVOID. Fragile, hide intent, pollute diffs. Use explicit `toMatchObject` instead.
@@ -333,7 +335,7 @@ pnpm check:affected   # typecheck + lint + unit tests for changed packages, form
 # suite on every backend PR; locally run the files your change touches.
 supabase start
 pnpm db:push          # apply schema to the dev "postgres" DB
-pnpm db:test-setup    # one-time: create + prepare the isolated test DB
+pnpm db:test-setup    # build the clone template; re-run after schema / supabase/sql changes
 pnpm --filter @pazarsync/api exec vitest run tests/integration/routes/store.routes.test.ts
 pnpm test:integration # whole suite, one package at a time; runs against TEST_DATABASE_URL
 
@@ -375,7 +377,7 @@ The pre-push gate compares the current working tree (not the pushed ref range �
 - **Typecheck** — `pnpm typecheck`, plus a `git diff --exit-code packages/api-client/openapi.json` drift check (the setup composite already ran `api:sync`).
 - **Lint** — every workspace's `lint`, `format:check`, and the repo audits (`audit:boundaries`, `audit:errors`, `audit:lint`, `audit:money`, `audit:no-barrel`, `audit:test-hygiene`, `audit:test-config`). CI is the only place the audits are enforced. `audit:test-config` fails when a vitest config does not take its pool size from `@pazarsync/vitest-config`, when a package runs vitest without a config, or when a test file sits outside the directories its package's configs include (it would never run).
 - **Unit / Component** — `turbo run test:unit|test:component --concurrency=2`. Packages that also have DB-backed tests keep DB-free unit tests in a separate `vitest.unit.config.ts` (no `.env`, no DB remap, no globalSetup, files in parallel); `vitest.config.ts` there is integration-only and stays serial.
-- **Integration** — fresh Supabase local, `db:push`, migration drift check, `turbo run test:integration --concurrency=1`, then the RLS suite with `PAZARSYNC_ALLOW_DEV_DB_TRUNCATE=1` against the disposable job DB. On a pull request it only runs when something outside `apps/web` changed; every non-docs push to `main` runs it.
+- **Integration** — fresh Supabase local, `db:push`, migration drift check, `pnpm db:test-setup` (builds the `pazarsync_test_tpl` clone template), `turbo run test:integration --concurrency=1` (each worker on its own clone), then the RLS suite with `PAZARSYNC_ALLOW_DEV_DB_TRUNCATE=1` against the disposable job DB. On a pull request it only runs when something outside `apps/web` changed; every non-docs push to `main` runs it.
 - **Change detection** — `dorny/paths-filter` with `predicate-quantifier: 'some-with-excludes'`; docs-only changes skip build, unit, component and integration.
 - **Dependency-aware caching** — every check task depends on turbo's `transit` node, so a change inside a package invalidates the cached results of every package that depends on it (without it, a dependent's `typecheck` / tests were replayed from cache as green).
 - **Turbo cache** — persisted per job (`turbo-<os>-<job>-<sha>`), entries older than 14 days are pruned before saving. The integration job never uses it (its hash can't see every out-of-package input).

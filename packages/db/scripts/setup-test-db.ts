@@ -11,8 +11,12 @@
 //      (auth schema, auth.uid(), a stub auth.users, the supabase_realtime
 //      publication) — the local Supabase services (PostgREST/GoTrue/Realtime)
 //      only ever attach to the "postgres" DB, so this DB has none of them.
-//   3. `prisma db push` → apply-policies → seed:reference, each with
-//      DATABASE_URL overridden to the test DB.
+//   3. `prisma db push` → apply-policies → seed:reference → test fixtures, each
+//      with DATABASE_URL overridden to the test DB.
+//   4. Stamp the template with a fingerprint of its inputs and seal it
+//      (ALLOW_CONNECTIONS false). Integration runs never use this database
+//      directly: each vitest worker gets its own clone of it (see
+//      src/test-db-clones.ts), which needs a template nobody is connected to.
 //
 // Run with: `pnpm db:test-setup`. Safe to re-run (every step is idempotent).
 
@@ -24,7 +28,8 @@ import { promisify } from 'node:util';
 import { config as loadEnv } from 'dotenv';
 import { Client } from 'pg';
 
-import { extractDbName } from '../src/test-env';
+import { templateComment } from '../src/test-db-template';
+import { extractDbName, templateDatabaseUrl } from '../src/test-env';
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -50,6 +55,40 @@ async function ensureDatabaseExists(devUrl: string, dbName: string): Promise<boo
     // CREATE DATABASE cannot be parameterized.
     await client.query(`CREATE DATABASE ${client.escapeIdentifier(dbName)}`);
     return true;
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * Open or seal the template. Sealed (ALLOW_CONNECTIONS false) it can still be
+ * cloned — that is how template0 works — but no stray session can connect and
+ * block a clone or dirty it. Runs on the dev server's maintenance connection.
+ */
+async function setTemplateConnections(
+  devUrl: string,
+  dbName: string,
+  allow: boolean,
+): Promise<void> {
+  const client = new Client({ connectionString: devUrl });
+  await client.connect();
+  try {
+    await client.query(
+      `ALTER DATABASE ${client.escapeIdentifier(dbName)} ALLOW_CONNECTIONS ${allow ? 'true' : 'false'}`,
+    );
+  } finally {
+    await client.end();
+  }
+}
+
+/** Record which schema/SQL/seeder versions this template was built from. */
+async function stampTemplate(devUrl: string, dbName: string): Promise<void> {
+  const client = new Client({ connectionString: devUrl });
+  await client.connect();
+  try {
+    await client.query(
+      `COMMENT ON DATABASE ${client.escapeIdentifier(dbName)} IS ${client.escapeLiteral(templateComment())}`,
+    );
   } finally {
     await client.end();
   }
@@ -141,13 +180,22 @@ if (dbName === 'postgres') {
   process.exit(1);
 }
 
-const created = await ensureDatabaseExists(devUrl, dbName);
-await applySupabaseShim(testUrl);
+// Everything below builds the clone TEMPLATE (`<test db>_tpl`), not the test DB
+// named in TEST_DATABASE_URL: integration runs clone the template once per
+// worker. Keeping the template apart means older code still using the base DB
+// directly can neither block a clone nor dirty the template.
+const templateUrl = templateDatabaseUrl(testUrl);
+const templateName = extractDbName(templateUrl);
+
+const created = await ensureDatabaseExists(devUrl, templateName);
+// A previous run sealed the template; open it while we rebuild it.
+await setTemplateConnections(devUrl, templateName, true);
+await applySupabaseShim(templateUrl);
 
 const childEnv: NodeJS.ProcessEnv = {
   ...process.env,
-  DATABASE_URL: testUrl,
-  DIRECT_URL: testUrl,
+  DATABASE_URL: templateUrl,
+  DIRECT_URL: templateUrl,
 };
 
 // Apply the Prisma schema to the test DB. `--url` overrides the datasource from
@@ -157,7 +205,7 @@ const childEnv: NodeJS.ProcessEnv = {
 const pushOut = await runStep(
   'db push',
   'pnpm',
-  ['exec', 'prisma', 'db', 'push', '--url', testUrl],
+  ['exec', 'prisma', 'db', 'push', '--url', templateUrl],
   childEnv,
 );
 
@@ -178,8 +226,22 @@ const seedOut = await runStep(
   childEnv,
 );
 
+const fixturesOut = await runStep(
+  'test fixtures',
+  'pnpm',
+  ['exec', 'tsx', 'scripts/seed-test-fixtures.ts'],
+  childEnv,
+);
+
+await stampTemplate(devUrl, templateName);
+await setTemplateConnections(devUrl, templateName, false);
+
 console.log('\n=== Test DB setup complete ===');
-console.log(`Database: ${dbName} (${created ? 'created' : 'already existed'})`);
+console.log(
+  `Clone template: ${templateName} (${created ? 'created' : 'already existed'}), stamped and sealed. ` +
+    'Integration runs clone it once per vitest worker.',
+);
 console.log(`Schema push:\n${pushOut}`);
 console.log(`Policies (RLS/triggers/functions/constraints/realtime):\n${policiesOut}`);
 console.log(`Reference seed:\n${seedOut}`);
+console.log(`Test fixtures:\n${fixturesOut}`);

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { remapDatabaseUrlToTestDb } from '@pazarsync/db/test-env';
+import { configureWorkerDatabases, remapDatabaseUrlToTestDb } from '@pazarsync/db/test-env';
 import { config as loadEnv } from 'dotenv';
 import { defineConfig } from 'vitest/config';
 
@@ -17,19 +17,21 @@ loadEnv({ path: path.resolve(here, '../../.env') });
 
 // Redirect DATABASE_URL at the isolated test DB (see packages/db/src/test-env.ts).
 // This config is integration-only; unit tests use vitest.unit.config.ts (no DB).
+// Every worker gets its own clone of the test DB template, which already
+// carries the shipping reference fixture (SENDEOMP carrier) these tests use.
 remapDatabaseUrlToTestDb();
+const workerDatabases = configureWorkerDatabases('profit');
 
 export default defineConfig({
   test: {
-    // Integration tests share one Postgres DB and TRUNCATE between tests.
-    // Running test files in parallel would race on TRUNCATE.
+    // Each worker has its own database clone; parallel files are turned on in a
+    // separate step.
     fileParallelism: false,
     maxWorkers: testWorkers(), // inert while fileParallelism is false
     globals: false,
     environment: 'node',
-    // Seed the shipping reference fixture once (carriers + tariffs) so tests can
-    // look up the seeded SENDEOMP carrier. Read-only fixture, never truncated.
-    globalSetup: [path.resolve(here, './src/__tests__/global-setup.ts')],
+    globalSetup: [workerDatabases.globalSetup],
+    setupFiles: workerDatabases.setupFiles,
     // Only integration tests — unit tests run via `test:unit` which uses
     // default vitest config (no DB needed, no dotenv required).
     include: [
