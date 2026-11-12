@@ -29,6 +29,19 @@ export const RATE_LIMITS = {
    * every 5 minutes, so throttling a flood never loses an event, it defers it.
    */
   WEBHOOK: { max: 120, windowSec: 60, keyPrefix: 'webhook' },
+  /**
+   * Spreadsheet import route limit. Each import accepts a body of up to
+   * 10 MiB, unzips it and parses every sheet, so it is far heavier than a
+   * normal request. A seller's real usage is a few files a minute; 10 leaves
+   * room for retries while capping how much parse work one user can queue.
+   */
+  FILE_IMPORT: { max: 10, windowSec: 60, keyPrefix: 'file-import' },
+  /**
+   * Spreadsheet export route limit. Each export reopens the stored workbook
+   * and patches it, which is cheaper than an import but still real CPU and
+   * memory per request — hence looser than FILE_IMPORT, tighter than GLOBAL.
+   */
+  FILE_EXPORT: { max: 20, windowSec: 60, keyPrefix: 'file-export' },
 } as const;
 
 /**
@@ -39,9 +52,11 @@ export const RATE_LIMITS = {
  */
 export const RATE_LIMIT_INTERNAL = {
   /**
-   * In-memory bucket eviction cap. Beyond this, the oldest-inserted key
-   * is dropped (cheap LRU). Sized to comfortably hold one window of
-   * traffic at the global rate without unbounded growth on a single pod.
+   * In-memory bucket eviction cap, applied separately to the user-keyed map
+   * and the `keyResolver`-keyed map. Beyond this, the least recently used
+   * key of that map is dropped (true LRU: every hit re-inserts its bucket).
+   * Sized to comfortably hold one window of traffic at the global rate
+   * without unbounded growth on a single pod.
    */
   MAX_IN_MEMORY_BUCKETS: 10_000,
 } as const;

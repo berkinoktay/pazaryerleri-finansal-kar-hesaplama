@@ -6,7 +6,8 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/build-xlsx.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -16,6 +17,7 @@
     "clean": "rm -rf .turbo"
   },
   "dependencies": {
+    "@xmldom/xmldom": "^0.9.12",
     "decimal.js": "catalog:",
     "fflate": "^0.8.3",
     "read-excel-file": "9.2.0",

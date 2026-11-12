@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { RATE_LIMIT_INTERNAL } from '../../../src/config/rate-limits';
 import { RateLimitedError } from '../../../src/lib/errors';
 import {
   _resetRateLimitStoreForTests,
@@ -11,16 +12,17 @@ interface TestVariables {
   Variables: { userId: string };
 }
 
-function appFor(
-  userId: string | null,
-  opts: { max: number; windowSec: number; keyPrefix?: string },
-) {
-  const app = new Hono<TestVariables>();
-  app.use('*', async (c, next) => {
-    if (userId !== null) c.set('userId', userId);
-    await next();
-  });
-  app.use('*', rateLimit(opts));
+interface TestLimitOptions {
+  max: number;
+  windowSec: number;
+  keyPrefix?: string;
+}
+
+const MAX_BUCKETS = RATE_LIMIT_INTERNAL.MAX_IN_MEMORY_BUCKETS;
+/** How often the busy user re-touches its bucket while other keys churn. */
+const TOUCH_EVERY = 1_000;
+
+function withTestRoute(app: Hono<TestVariables>): Hono<TestVariables> {
   app.get('/test', (c) => c.text('ok'));
   app.onError((err, c) => {
     if (err instanceof RateLimitedError) {
@@ -29,6 +31,35 @@ function appFor(
     return c.json({ code: 'UNEXPECTED', message: err.message }, 500);
   });
   return app;
+}
+
+function appFor(userId: string | null, opts: TestLimitOptions) {
+  const app = new Hono<TestVariables>();
+  app.use('*', async (c, next) => {
+    if (userId !== null) c.set('userId', userId);
+    await next();
+  });
+  app.use('*', rateLimit(opts));
+  return withTestRoute(app);
+}
+
+/** Like `appFor`, but the user id comes from the `x-user` header so one app serves many users. */
+function appForUserHeader(opts: TestLimitOptions) {
+  const app = new Hono<TestVariables>();
+  app.use('*', async (c, next) => {
+    const userId = c.req.header('x-user');
+    if (userId !== undefined) c.set('userId', userId);
+    await next();
+  });
+  app.use('*', rateLimit(opts));
+  return withTestRoute(app);
+}
+
+/** Unauthenticated app: the identity comes from a `keyResolver` reading the `x-key` header. */
+function appForResolverKey(opts: TestLimitOptions) {
+  const app = new Hono<TestVariables>();
+  app.use('*', rateLimit({ ...opts, keyResolver: (c) => c.req.header('x-key') ?? '' }));
+  return withTestRoute(app);
 }
 
 describe('rateLimit middleware', () => {
@@ -97,5 +128,47 @@ describe('rateLimit middleware', () => {
     for (let i = 0; i < 10; i++) {
       expect((await app.request('/test')).status).toBe(200);
     }
+  });
+
+  it('a recently used bucket survives eviction', async () => {
+    const app = appForUserHeader({ max: 3, windowSec: 60, keyPrefix: 'test' });
+    const asUser = (userId: string) => app.request('/test', { headers: { 'x-user': userId } });
+
+    for (let i = 0; i < 3; i++) {
+      expect((await asUser('user-a')).status).toBe(200);
+    }
+
+    // Push MAX_BUCKETS + 1 other user keys through the same map. Every
+    // TOUCH_EVERY keys user A makes another (rejected) request, which must
+    // keep its bucket among the most recently used and out of eviction.
+    for (let i = 0; i <= MAX_BUCKETS; i++) {
+      if (i % TOUCH_EVERY === 0) {
+        expect((await asUser('user-a')).status).toBe(429);
+      }
+      expect((await asUser(`churn-user-${i}`)).status).toBe(200);
+    }
+
+    expect((await asUser('user-a')).status).toBe(429);
+  });
+
+  it('resolver keys never evict user buckets', async () => {
+    const userApp = appFor('user-a', { max: 3, windowSec: 60, keyPrefix: 'test' });
+    const resolverApp = appForResolverKey({ max: 3, windowSec: 60, keyPrefix: 'test' });
+
+    for (let i = 0; i < 3; i++) {
+      expect((await userApp.request('/test')).status).toBe(200);
+    }
+    expect((await userApp.request('/test')).status).toBe(429);
+
+    // An unauthenticated caller floods MAX_BUCKETS + 1 distinct resolver
+    // identities (e.g. random storeIds on the webhook route).
+    for (let i = 0; i <= MAX_BUCKETS; i++) {
+      const res = await resolverApp.request('/test', {
+        headers: { 'x-key': `forged-store-${i}` },
+      });
+      expect(res.status).toBe(200);
+    }
+
+    expect((await userApp.request('/test')).status).toBe(429);
   });
 });

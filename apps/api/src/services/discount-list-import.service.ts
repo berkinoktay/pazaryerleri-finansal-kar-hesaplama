@@ -10,10 +10,12 @@
 // verbatim export (only the participation column is patched back on export).
 
 import { prisma } from '@pazarsync/db';
-import { mapPrismaError } from '@pazarsync/sync-core';
-import { readWorkbookGrid, SpreadsheetFileError, type SheetData } from '@pazarsync/spreadsheet';
+import { readWorkbookGrid, type SheetData } from '@pazarsync/spreadsheet';
 
+import { IMPORT_TX_OPTIONS } from '../config/workbook-limits';
 import { ValidationError } from '../lib/errors';
+import { mapTransactionError } from '../lib/map-transaction-error';
+import { mapUploadedFileError } from '../lib/spreadsheet-errors';
 import { cellCurrencyDecimalString, cellText } from '../lib/xlsx-grid-cells';
 import {
   DISCOUNT_INCLUDED_YES,
@@ -97,10 +99,7 @@ export async function importDiscountList(
   try {
     grid = await readWorkbookGrid(input.file, { sheetName: DISCOUNT_SHEET_NAME });
   } catch (err) {
-    if (err instanceof SpreadsheetFileError) {
-      throw new ValidationError([{ field: 'file', code: err.code }]);
-    }
-    throw err;
+    mapUploadedFileError(err);
   }
 
   if (grid.length < 2) {
@@ -177,7 +176,7 @@ export async function importDiscountList(
       }));
       await tx.discountListItem.createMany({ data: itemsData });
       return { listId: list.id, itemCount: itemsData.length };
-    });
+    }, IMPORT_TX_OPTIONS);
 
     return {
       listId,
@@ -188,6 +187,6 @@ export async function importDiscountList(
       skippedRows,
     };
   } catch (err) {
-    mapPrismaError(err);
+    mapTransactionError(err);
   }
 }

@@ -1,12 +1,17 @@
 import { type ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { WORKBOOK_UPLOAD_MAX_BYTES, WORKBOOK_UPLOAD_MAX_MB } from '@pazarsync/utils';
+
 import { DiscountUploadDialog } from '@/features/campaigns/components/discount-upload-dialog';
+import { extractFileErrorCode } from '@/features/campaigns/lib/upload-error';
+import { ApiError } from '@/lib/api-error';
 
 import trMessages from '../../messages/tr.json';
 import { render, screen } from '../helpers/render';
 
 const UPLOAD = trMessages.discountsPage.upload;
+const ERRORS = UPLOAD.errors;
 const FIELDS = UPLOAD.fields;
 const TYPES = trMessages.discountsPage.types;
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -151,6 +156,45 @@ describe('<DiscountUploadDialog>', () => {
     }
     expect(screen.queryByRole('option', { name: '1' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: '5' })).not.toBeInTheDocument();
+  });
+
+  it('shows the too-large message inline for a 413 PAYLOAD_TOO_LARGE import error', () => {
+    // Wired like the list client: the 413 problem has no `errors[]`, and the global toast
+    // pipeline silences PAYLOAD_TOO_LARGE, so the dialog is the only place the seller sees it.
+    const error = new ApiError(413, 'PAYLOAD_TOO_LARGE', 'detail', {
+      type: 'about:blank',
+      title: 'Payload Too Large',
+      status: 413,
+      code: 'PAYLOAD_TOO_LARGE',
+      detail: 'detail',
+    });
+    renderDialog({ errorCode: extractFileErrorCode(error), submitError: error });
+
+    expect(screen.getByText(ERRORS.tooLarge)).toBeInTheDocument();
+  });
+
+  it('maps an UNSAFE_CONTENT rejection to the not-readable message', () => {
+    renderDialog({ errorCode: 'UNSAFE_CONTENT' });
+
+    expect(screen.getByText(ERRORS.notReadable)).toBeInTheDocument();
+  });
+
+  it('shows the shared workbook upload limit in megabytes in the hint', () => {
+    renderDialog();
+
+    const expected = UPLOAD.hint.replace('{maxMb}', String(WORKBOOK_UPLOAD_MAX_MB));
+    expect(screen.getByText(expected)).toBeInTheDocument();
+  });
+
+  it('accepts a file right at the shared workbook upload limit', async () => {
+    const { user } = renderDialog();
+
+    const atLimit = new File([new Uint8Array(WORKBOOK_UPLOAD_MAX_BYTES)], 'buyuk.xlsx', {
+      type: XLSX_TYPE,
+    });
+    await user.upload(fileInput(), atLimit);
+
+    expect(screen.getByRole('button', { name: UPLOAD.submit })).toBeEnabled();
   });
 
   it('keeps submit disabled until a file is chosen', async () => {

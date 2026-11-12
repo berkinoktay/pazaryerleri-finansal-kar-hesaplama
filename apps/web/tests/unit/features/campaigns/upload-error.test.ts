@@ -50,6 +50,11 @@ describe('extractFileErrorCode', () => {
     expect(extractFileErrorCode(apiError(422, 'VALIDATION_ERROR', issues))).toBeNull();
   });
 
+  it('returns PAYLOAD_TOO_LARGE for a 413 problem', () => {
+    // The body-limit 413 carries no `errors[]`; the code itself is the file rejection.
+    expect(extractFileErrorCode(apiError(413, 'PAYLOAD_TOO_LARGE'))).toBe('PAYLOAD_TOO_LARGE');
+  });
+
   it('is null for any non-validation error', () => {
     expect(extractFileErrorCode(apiError(500, 'INTERNAL_ERROR'))).toBeNull();
     expect(extractFileErrorCode(undefined)).toBeNull();

@@ -196,7 +196,7 @@ async function setupStoreWithMatch(): Promise<Ctx> {
   };
 }
 
-function importRequest(ctx: Ctx): Request {
+function importRequest(ctx: Ctx, commissionSourceTariffId = ctx.commissionTariffId): Request {
   const form = new FormData();
   form.append(
     'file',
@@ -205,7 +205,7 @@ function importRequest(ctx: Ctx): Request {
   );
   // Pin the commission tariff (week) at upload — the seller's explicit choice of
   // which commission tariff supplies the reduced rates (no silent auto-resolution).
-  form.append('commissionSourceTariffId', ctx.commissionTariffId);
+  form.append('commissionSourceTariffId', commissionSourceTariffId);
   return new Request(
     `http://local/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/advantage-tariffs/import`,
     { method: 'POST', headers: { Authorization: bearer(ctx.accessToken) }, body: form },
@@ -283,5 +283,47 @@ describe('POST .../advantage-tariffs/import - real Trendyol fixture + commission
     const unmatched = body.items.find((i) => i.barcode !== MATCHED_BARCODE);
     expect(unmatched?.calculable).toBe(false);
     expect(unmatched?.reason).toBe('NO_PRODUCT');
+  });
+});
+
+interface ProblemWire {
+  status: number;
+  code: string;
+  errors?: { field: string; code: string }[];
+}
+
+describe('POST .../advantage-tariffs/import - commissionSourceTariffId form field', () => {
+  let ctx: Ctx;
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+    ctx = await setupStoreWithMatch();
+  });
+
+  // The upload dialog sends an empty string for the "category commission" choice;
+  // tightening the field to a UUID must keep accepting it.
+  it('accepts an empty commissionSourceTariffId', async () => {
+    const res = await app.request(importRequest(ctx, ''));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as ImportWire;
+
+    const tariff = await prisma.advantageTariff.findUnique({
+      where: { id: body.tariffId },
+      select: { commissionSourceTariffId: true },
+    });
+    expect(tariff?.commissionSourceTariffId).toBeNull();
+  });
+
+  // A non-UUID used to reach Postgres as a uuid filter and fail with a 500.
+  it('rejects a non-UUID commissionSourceTariffId with 422', async () => {
+    const res = await app.request(importRequest(ctx, 'not-a-uuid'));
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as ProblemWire;
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors?.map((e) => e.field)).toContain('commissionSourceTariffId');
+    expect(body.errors?.find((e) => e.field === 'commissionSourceTariffId')?.code).toBe(
+      'INVALID_COMMISSION_SOURCE',
+    );
   });
 });

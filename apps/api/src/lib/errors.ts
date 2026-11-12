@@ -145,3 +145,57 @@ export class ForbiddenError extends Error {
     this.name = 'ForbiddenError';
   }
 }
+
+// --- Upload / import transport errors ---------------------------------------
+// Raised by the workbook upload guard and the import services. They describe
+// the request transport (body size, content type) or server capacity, not the
+// file contents, so each has its own stable wire code instead of folding into
+// VALIDATION_ERROR.
+
+/**
+ * Thrown when a request body exceeds the upload size limit. `meta.maxBytes`
+ * carries the user-facing limit (the file limit, not the multipart envelope)
+ * so the frontend can render it.
+ */
+export class PayloadTooLargeError extends Error {
+  readonly status = 413 as const;
+  readonly code = 'PAYLOAD_TOO_LARGE' as const;
+  readonly meta: { maxBytes: number };
+
+  constructor(maxBytes: number) {
+    super(`Request body exceeds the ${maxBytes.toString()}-byte limit`);
+    this.name = 'PayloadTooLargeError';
+    this.meta = { maxBytes };
+  }
+}
+
+/**
+ * Thrown when a request arrives with a content type the route does not accept
+ * (e.g. a JSON body on a multipart file-upload route).
+ */
+export class UnsupportedMediaTypeError extends Error {
+  readonly status = 415 as const;
+  readonly code = 'UNSUPPORTED_MEDIA_TYPE' as const;
+
+  constructor(message = 'Unsupported request content type') {
+    super(message);
+    this.name = 'UnsupportedMediaTypeError';
+  }
+}
+
+/**
+ * Thrown when an import transaction cannot get a database slot in time
+ * (transaction start/timeout or connection-pool wait). Transient: paired with
+ * a `Retry-After` header so the client can retry after `retryAfterSeconds`.
+ */
+export class ImportBusyError extends Error {
+  readonly status = 503 as const;
+  readonly code = 'IMPORT_BUSY' as const;
+  readonly retryAfterSeconds: number;
+
+  constructor(retryAfterSeconds: number) {
+    super('The server is busy and could not process the import');
+    this.name = 'ImportBusyError';
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}

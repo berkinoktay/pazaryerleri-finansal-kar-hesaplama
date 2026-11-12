@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { Decimal } from 'decimal.js';
 import { exportToXlsx } from './export';
-import { parseXlsx } from './parse';
+import { parseXlsx, readWorkbookGrid } from './parse';
+import { SpreadsheetFileError } from './errors';
+import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
 import {
   miniProductsSchema,
   miniTariffSchema,
@@ -10,7 +12,7 @@ import {
 } from '../tests/fixtures/mini-schemas';
 import { defineColumn } from './define-column';
 import type { SheetSchema } from './types';
-import { MAX_ERROR_VALUE_LENGTH } from './constants';
+import { MAX_ERROR_VALUE_LENGTH, MAX_QUEUED_PARSES } from './constants';
 
 const rows: MiniProductsRow[] = [
   {
@@ -176,5 +178,50 @@ describe('parseXlsx', () => {
     const data = result.rows.at(0)?.data;
     // rate3 must survive the round-trip: 0.19 → export 19 → parse 0.19.
     expect((data?.rate3 as Decimal | undefined)?.toString()).toBe('0.19');
+  });
+});
+
+// Parses run one at a time per process; beyond MAX_QUEUED_PARSES calls in flight
+// (running or waiting) a new call is refused at once instead of queueing.
+describe('readWorkbookGrid: queue limit', () => {
+  const QUEUE_ROWS = [['Barkod'], ['B1']];
+  const queueFile = buildXlsxFixture([{ name: 'Sheet1', xml: worksheetXml(QUEUE_ROWS) }]);
+  const notAZip = Buffer.from('not a zip');
+
+  function codeOf(e: unknown): string | null {
+    return e instanceof SpreadsheetFileError ? e.code : null;
+  }
+
+  it('allows 8 calls in flight', () => {
+    expect(MAX_QUEUED_PARSES).toBe(8);
+  });
+
+  it('refuses one call more than the limit with ENGINE_BUSY without waiting', async () => {
+    let settled = 0;
+    const inFlight = Array.from({ length: MAX_QUEUED_PARSES }, () =>
+      readWorkbookGrid(queueFile).finally(() => {
+        settled += 1;
+      }),
+    );
+
+    const refused = await readWorkbookGrid(queueFile).then(() => null, codeOf);
+
+    expect(refused).toBe('ENGINE_BUSY');
+    expect(settled).toBe(0);
+    await expect(Promise.all(inFlight)).resolves.toEqual(
+      Array.from({ length: MAX_QUEUED_PARSES }, () => QUEUE_ROWS),
+    );
+  });
+
+  it('accepts a full queue again once it drains, failed calls included', async () => {
+    const failing = Array.from({ length: MAX_QUEUED_PARSES }, () =>
+      readWorkbookGrid(notAZip).then(() => null, codeOf),
+    );
+    expect(await Promise.all(failing)).toEqual(
+      Array.from({ length: MAX_QUEUED_PARSES }, () => 'NOT_XLSX'),
+    );
+
+    const again = Array.from({ length: MAX_QUEUED_PARSES }, () => readWorkbookGrid(queueFile));
+    await expect(Promise.all(again)).resolves.toHaveLength(MAX_QUEUED_PARSES);
   });
 });

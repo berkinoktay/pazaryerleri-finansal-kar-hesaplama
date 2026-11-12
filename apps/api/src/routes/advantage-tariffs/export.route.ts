@@ -2,10 +2,16 @@ import { createRoute, z } from '@hono/zod-openapi';
 
 import { CAPABILITIES } from '@pazarsync/utils';
 
+import { RATE_LIMITS } from '../../config/rate-limits';
 import { createSubApp } from '../../lib/create-hono-app';
 import { assertCapability } from '../../lib/require-capability';
 import { requireStoreAccess } from '../../lib/require-store-access';
-import { Common429Response, ProblemDetailsSchema } from '../../openapi';
+import { rateLimit } from '../../middleware/rate-limit.middleware';
+import {
+  Common429Response,
+  ProblemDetailsSchema,
+  WORKBOOK_EXPORT_ERROR_RESPONSES,
+} from '../../openapi';
 import { exportAdvantageTariff } from '../../services/advantage-tariff-export.service';
 import { AdvantageTariffIdPathSchema } from '../../validators/advantage-tariff.validator';
 
@@ -25,6 +31,7 @@ const exportAdvantageTariffRoute = createRoute({
     'Returns 409 if the tariff has no stored source file (or it is unreadable / lacks the writable ' +
     'column).',
   security: [{ bearerAuth: [] }],
+  middleware: [rateLimit(RATE_LIMITS.FILE_EXPORT)] as const,
   request: { params: AdvantageTariffIdPathSchema },
   responses: {
     200: {
@@ -49,6 +56,7 @@ const exportAdvantageTariffRoute = createRoute({
       content: { 'application/json': { schema: ProblemDetailsSchema } },
       description: 'Tariff has no stored source file to export',
     },
+    ...WORKBOOK_EXPORT_ERROR_RESPONSES,
     429: Common429Response,
   },
 });

@@ -17,9 +17,10 @@
 
 import { prisma, Prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
-import { readWorkbookGrid, SpreadsheetFileError, type SheetData } from '@pazarsync/spreadsheet';
+import { readWorkbookGrid, type SheetData } from '@pazarsync/spreadsheet';
 
 import { ConflictError, NotFoundError } from '../lib/errors';
+import { mapStoredFileError } from '../lib/spreadsheet-errors';
 import { cellCurrencyDecimalString, cellText } from '../lib/xlsx-grid-cells';
 import { patchXlsxCells, type XlsxCellValue } from '../lib/xlsx-patch';
 import {
@@ -164,10 +165,7 @@ export async function exportMarketplaceCampaign(
     // The stored source parsed cleanly at import; if the bytes no longer read, that is a
     // conflict with the stored server state (409), not our bug (500) — the same contract as
     // the recognizable-format guard just below.
-    if (err instanceof SpreadsheetFileError) {
-      throw new ConflictError('Stored marketplace campaign file could not be read');
-    }
-    throw err;
+    mapStoredFileError(err, 'Stored marketplace campaign file could not be read');
   }
   const layout = resolveMarketplaceCampaignLayout(grid[0] ?? []);
   if (layout === null) {

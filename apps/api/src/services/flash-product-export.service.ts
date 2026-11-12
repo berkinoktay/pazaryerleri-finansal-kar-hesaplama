@@ -23,9 +23,10 @@
 
 import { Prisma, prisma, type FlashOfferType } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
-import { readWorkbookGrid, SpreadsheetFileError, type SheetData } from '@pazarsync/spreadsheet';
+import { readWorkbookGrid, type SheetData } from '@pazarsync/spreadsheet';
 
 import { ConflictError, NotFoundError } from '../lib/errors';
+import { mapStoredFileError } from '../lib/spreadsheet-errors';
 import { cellDecimalString, cellText } from '../lib/xlsx-grid-cells';
 import { patchXlsxCells, type XlsxCellValue } from '../lib/xlsx-patch';
 import { resolveFlashProductLayout, type FlashProductLayout } from './flash-product-layout';
@@ -142,10 +143,7 @@ export async function exportFlashProducts(
     // The stored source parsed cleanly at import; if the bytes no longer read, that is
     // a conflict with the stored server state (409), not our bug (500) — the same
     // contract as the recognizable-format / missing-column guards just below.
-    if (err instanceof SpreadsheetFileError) {
-      throw new ConflictError('Stored flash product file could not be read');
-    }
-    throw err;
+    mapStoredFileError(err, 'Stored flash product file could not be read');
   }
   const layout = resolveFlashProductLayout(grid[0] ?? []);
   if (layout === null) {

@@ -206,10 +206,14 @@ export const ImportAdvantageTariffFormSchema = z.object({
     description: 'Trendyol Avantajlı Ürün Etiketleri .xlsx',
   }),
   name: z.string().optional().openapi({ description: 'İsteğe bağlı görünen ad; yoksa dosya adı.' }),
-  commissionSourceTariffId: z.string().optional().openapi({
-    description:
-      'Bu avantajlının komisyonunu okuyacağı komisyon tarifesi (hafta). Boş = kategori komisyonu.',
-  }),
+  commissionSourceTariffId: z
+    // A malformed id surfaces with the same code the service uses for an unknown source.
+    .union([z.string().uuid({ error: 'INVALID_COMMISSION_SOURCE' }), z.literal('')])
+    .optional()
+    .openapi({
+      description:
+        'Bu avantajlının komisyonunu okuyacağı komisyon tarifesi (hafta). Boş = kategori komisyonu.',
+    }),
 });
 
 export const ImportAdvantageTariffResponseSchema = z

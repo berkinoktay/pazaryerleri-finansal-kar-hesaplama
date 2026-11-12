@@ -18,10 +18,11 @@ import {
   ABSOLUTE_MAX_COLS,
   DEFAULT_MAX_BYTES,
   ABSOLUTE_MAX_BYTES,
+  MAX_ERROR_CAUSE_LENGTH,
   MAX_ERROR_VALUE_LENGTH,
+  MAX_QUEUED_PARSES,
 } from './constants';
-import { assertValidUpload } from './guards';
-import { normalizeWorkbookForRead } from './normalize-workbook';
+import { prepareUploadForRead } from './guards';
 
 // Property bag for a parsed data row: contains only the key + editable fields
 // whose values were coerced by coerceInbound. The generic TRow is erased at runtime;
@@ -57,13 +58,47 @@ export interface ReadGridOptions {
   readonly maxBytes?: number;
 }
 
+// One parse at a time per process. The gate builds an xmldom DOM of up to about
+// 570 MB (MAX_XML_DOM_WEIGHT) and so does the reader, whose readSheet is async: without
+// this queue the gate of one upload can run while another upload's reader still holds
+// its DOM, and peak memory grows with the number of uploads in flight. Queued, the
+// peak stays at about one parse (~600 MB). At most MAX_QUEUED_PARSES calls are in
+// flight (running or waiting); one more is refused at once with ENGINE_BUSY.
+let parseQueue: Promise<void> = Promise.resolve();
+let parsesInFlight = 0;
+
 /**
- * Runs the upload security guards, strips any bogus single-cell <dimension>, and
- * returns the raw 2D cell grid for the named sheet (falling back to the first
- * sheet). Throws `CORRUPT_FILE` if the workbook cannot be read. This is the
- * shared reader behind `parseXlsx`; consumers parsing a fixed-layout vendor file
- * with DUPLICATE column headers (which header matching cannot disambiguate) use
- * it directly and map columns by position.
+ * Runs `task` after every earlier task has settled; a failed task does not stop the
+ * queue. Throws SpreadsheetFileError ENGINE_BUSY, without queueing, when
+ * MAX_QUEUED_PARSES tasks are already in flight.
+ */
+function runOneAtATime<T>(task: () => Promise<T>): Promise<T> {
+  if (parsesInFlight >= MAX_QUEUED_PARSES) {
+    throw new SpreadsheetFileError('ENGINE_BUSY', 'Workbook parse queue is full', {
+      cap: MAX_QUEUED_PARSES,
+    });
+  }
+  parsesInFlight += 1;
+  const run = parseQueue.then(task).finally(() => {
+    parsesInFlight -= 1;
+  });
+  parseQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/**
+ * Runs the upload security guards, which return the read copy (every <dimension>
+ * removed, every cell reference validated and capped, uncached formulas emptied,
+ * archive re-zipped; see guards.ts and read-copy.ts), and returns the raw 2D cell
+ * grid for the named sheet (falling back to the first sheet). Throws
+ * `CORRUPT_FILE` if the workbook cannot be read. This is the shared reader behind
+ * `parseXlsx`; consumers parsing a fixed-layout vendor file with DUPLICATE column
+ * headers (which header matching cannot disambiguate) use it directly and map
+ * columns by position. Calls run one at a time per process (see parseQueue); with
+ * MAX_QUEUED_PARSES calls already in flight it rejects at once with `ENGINE_BUSY`.
  */
 export async function readWorkbookGrid(
   file: Buffer,
@@ -72,30 +107,34 @@ export async function readWorkbookGrid(
   const rowCap = Math.min(options.rowCap ?? DEFAULT_ROW_CAP, ABSOLUTE_MAX_ROWS);
   const colCap = Math.min(options.colCap ?? DEFAULT_COL_CAP, ABSOLUTE_MAX_COLS);
   const maxBytes = Math.min(options.maxBytes ?? DEFAULT_MAX_BYTES, ABSOLUTE_MAX_BYTES);
-  // Pre-read security guards: size, magic, streaming zip-bomb, structural, dimension caps.
-  assertValidUpload(file, { rowCap, colCap, maxBytes });
-
-  // A bogus single-cell <dimension> is stripped first so exporters that mis-write
-  // it (e.g. Trendyol) don't make read-excel-file drop every data row.
-  const normalized = normalizeWorkbookForRead(file);
-  try {
-    return options.sheetName !== undefined
-      ? await readSheet(normalized, options.sheetName)
-      : await readSheet(normalized);
-  } catch {
+  return runOneAtATime(async () => {
+    // Security guards (size, magic, streaming zip-bomb, structure, part budgets,
+    // content scan, row/col/cell caps) and the read copy in one step. The reader
+    // parses only this copy, never the raw upload: a forged or vendor-mangled
+    // <dimension> must not size the grid, and the caps hold for exactly the cells the
+    // reader will find.
+    const readCopy = prepareUploadForRead(file, { rowCap, colCap, maxBytes });
     try {
-      return await readSheet(normalized);
-    } catch (e) {
-      throw new SpreadsheetFileError('CORRUPT_FILE', 'Cannot read workbook', { cause: String(e) });
+      return options.sheetName !== undefined
+        ? await readSheet(readCopy, options.sheetName)
+        : await readSheet(readCopy);
+    } catch {
+      try {
+        return await readSheet(readCopy);
+      } catch (e) {
+        throw new SpreadsheetFileError('CORRUPT_FILE', 'Cannot read workbook', {
+          cause: String(e).slice(0, MAX_ERROR_CAUSE_LENGTH),
+        });
+      }
     }
-  }
+  });
 }
 
 export async function parseXlsx<TRow>(
   schema: SheetSchema<TRow>,
   file: Buffer,
 ): Promise<ParsedResult<TRow>> {
-  // Step 1: guards + read raw 2D grid (bogus dimensions stripped), via the shared reader.
+  // Step 1: guards + read raw 2D grid from the read copy, via the shared reader.
   const rowCap = Math.min(schema.options.rowCap ?? DEFAULT_ROW_CAP, ABSOLUTE_MAX_ROWS);
   const grid = await readWorkbookGrid(file, {
     sheetName: schema.options.sheetName,
@@ -125,8 +164,8 @@ export async function parseXlsx<TRow>(
     rawHeaderRow,
   );
 
-  // Step 4: Post-read row cap check (defense in depth — pre-read dimension cap is the first line;
-  // this catches discrepancies between sheet dimensions and actual data rows parsed).
+  // Step 4: Post-read row cap check (defense in depth: the read copy's per-cell row cap is
+  // the first line and counts the header row; this one counts data rows below the header).
   const dataRowCount = grid.length - (headerIdx + 1);
   if (dataRowCount > rowCap) {
     throw new SpreadsheetFileError(

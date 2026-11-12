@@ -16,9 +16,10 @@ import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
-import { readWorkbookGrid } from '@pazarsync/spreadsheet';
+import { readWorkbookGrid, type SheetData } from '@pazarsync/spreadsheet';
 
 import { ConflictError, NotFoundError } from '../lib/errors';
+import { mapStoredFileError } from '../lib/spreadsheet-errors';
 import { cellText } from '../lib/xlsx-grid-cells';
 import { patchXlsxCells, type XlsxCellValue } from '../lib/xlsx-patch';
 import { bandPrice } from './commission-tariff-compute.service';
@@ -146,7 +147,15 @@ export async function exportTariff(
   const plans = planExportFiles(periodSelections);
 
   const source = Buffer.from(tariff.sourceFile);
-  const grid = await readWorkbookGrid(source, { sheetName: SHEET_NAME });
+  let grid: SheetData;
+  try {
+    grid = await readWorkbookGrid(source, { sheetName: SHEET_NAME });
+  } catch (err) {
+    // The stored source parsed cleanly at import; if the bytes no longer read, that is
+    // a conflict with the stored server state (409), not our bug (500); the same
+    // contract as the recognizable-format guard just below.
+    mapStoredFileError(err, 'Stored tariff file could not be read');
+  }
   const layout = resolveTariffLayout(grid[0] ?? []);
   if (layout === null) {
     throw new ConflictError('Stored tariff file is not a recognizable Trendyol export');

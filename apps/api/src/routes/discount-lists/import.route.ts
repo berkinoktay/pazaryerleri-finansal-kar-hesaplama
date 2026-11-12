@@ -1,11 +1,17 @@
 import { createRoute } from '@hono/zod-openapi';
 
-import { CAPABILITIES } from '@pazarsync/utils';
-
 import { createSubApp } from '../../lib/create-hono-app';
-import { assertCapability } from '../../lib/require-capability';
-import { requireStoreAccess } from '../../lib/require-store-access';
-import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
+import {
+  requireStoreAccessContext,
+  type StoreAccessVariables,
+  WORKBOOK_IMPORT_MIDDLEWARE,
+} from '../../middleware/workbook-upload.middleware';
+import {
+  Common429Response,
+  ProblemDetailsSchema,
+  RateLimitHeaders,
+  WORKBOOK_IMPORT_ERROR_RESPONSES,
+} from '../../openapi';
 import { importDiscountList } from '../../services/discount-list-import.service';
 import {
   DiscountListStorePathSchema,
@@ -13,7 +19,7 @@ import {
   ImportDiscountListResponseSchema,
 } from '../../validators/discount-list.validator';
 
-const app = createSubApp<{ Variables: { userId: string } }>();
+const app = createSubApp<{ Variables: StoreAccessVariables }>();
 
 const importDiscountListRoute = createRoute({
   method: 'post',
@@ -30,6 +36,7 @@ const importDiscountListRoute = createRoute({
     'are skipped. Returns counts: items, matched/unmatched products, skipped rows. Rejects a file ' +
     'whose header layout does not match the expected İndirimler export (422 VALIDATION_ERROR).',
   security: [{ bearerAuth: [] }],
+  middleware: WORKBOOK_IMPORT_MIDDLEWARE,
   request: {
     params: DiscountListStorePathSchema,
     body: {
@@ -59,6 +66,7 @@ const importDiscountListRoute = createRoute({
       content: { 'application/json': { schema: ProblemDetailsSchema } },
       description: 'File missing/unreadable, config invalid, or not the expected discount format',
     },
+    ...WORKBOOK_IMPORT_ERROR_RESPONSES,
     429: Common429Response,
   },
 });
@@ -66,8 +74,7 @@ const importDiscountListRoute = createRoute({
 app.openapi(importDiscountListRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId } = c.req.valid('param');
-  const { role } = await requireStoreAccess(userId, orgId, storeId);
-  assertCapability(role, CAPABILITIES.DATA_WRITE);
+  requireStoreAccessContext(c, orgId, storeId);
 
   const { file, name, ...config } = c.req.valid('form');
   const buffer = Buffer.from(await file.arrayBuffer());

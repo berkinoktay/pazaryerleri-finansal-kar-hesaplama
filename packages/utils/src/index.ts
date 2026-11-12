@@ -27,3 +27,4 @@ export {
   isInstantWithinTariffPeriod,
   tariffBoundToInstant,
 } from './tariff-period';
+export { WORKBOOK_UPLOAD_MAX_BYTES, WORKBOOK_UPLOAD_MAX_MB } from './workbook';

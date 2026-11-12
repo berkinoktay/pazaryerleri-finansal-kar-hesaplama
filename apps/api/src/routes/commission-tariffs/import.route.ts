@@ -1,11 +1,17 @@
 import { createRoute } from '@hono/zod-openapi';
 
-import { CAPABILITIES } from '@pazarsync/utils';
-
 import { createSubApp } from '../../lib/create-hono-app';
-import { assertCapability } from '../../lib/require-capability';
-import { requireStoreAccess } from '../../lib/require-store-access';
-import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
+import {
+  requireStoreAccessContext,
+  type StoreAccessVariables,
+  WORKBOOK_IMPORT_MIDDLEWARE,
+} from '../../middleware/workbook-upload.middleware';
+import {
+  Common429Response,
+  ProblemDetailsSchema,
+  RateLimitHeaders,
+  WORKBOOK_IMPORT_ERROR_RESPONSES,
+} from '../../openapi';
 import { importTariff } from '../../services/commission-tariff-import.service';
 import {
   ImportTariffFormSchema,
@@ -13,7 +19,7 @@ import {
   TariffStorePathSchema,
 } from '../../validators/commission-tariff.validator';
 
-const app = createSubApp<{ Variables: { userId: string } }>();
+const app = createSubApp<{ Variables: StoreAccessVariables }>();
 
 const importTariffRoute = createRoute({
   method: 'post',
@@ -28,6 +34,7 @@ const importTariffRoute = createRoute({
     'read. Returns counts: products, periods, items, matched/unmatched products, skipped rows. ' +
     'Rejects a file whose header layout does not match the expected export (422 VALIDATION_ERROR).',
   security: [{ bearerAuth: [] }],
+  middleware: WORKBOOK_IMPORT_MIDDLEWARE,
   request: {
     params: TariffStorePathSchema,
     body: {
@@ -57,6 +64,7 @@ const importTariffRoute = createRoute({
       content: { 'application/json': { schema: ProblemDetailsSchema } },
       description: 'File missing, unreadable, or not the expected tariff format',
     },
+    ...WORKBOOK_IMPORT_ERROR_RESPONSES,
     429: Common429Response,
   },
 });
@@ -64,8 +72,7 @@ const importTariffRoute = createRoute({
 app.openapi(importTariffRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId } = c.req.valid('param');
-  const { role } = await requireStoreAccess(userId, orgId, storeId);
-  assertCapability(role, CAPABILITIES.DATA_WRITE);
+  requireStoreAccessContext(c, orgId, storeId);
 
   const { file, name } = c.req.valid('form');
   const buffer = Buffer.from(await file.arrayBuffer());

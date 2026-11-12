@@ -4,25 +4,59 @@
 // case is a regression guard: matching with unprefixed tag regexes silently
 // patched nothing, so the seller's chosen rows never became "Evet".
 //
-// We build the minimal zip the patcher needs (it only unzips `xl/worksheets/*.xml`)
-// via fflate and inspect the re-zipped worksheet XML directly, so the assertions can
-// pin the exact prefixed OOXML the patched cell must emit.
+// We build the minimal zip the patcher needs (the workbook rels plus the worksheet
+// they name; it patches only those) via fflate and inspect the re-zipped worksheet
+// XML directly, so the assertions can pin the exact prefixed OOXML the patched cell
+// must emit.
 
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
+import { syncLog } from '@pazarsync/sync-core';
+
+import { ConflictError } from '@/lib/errors';
 import { patchXlsxCells, type XlsxCellValue } from '@/lib/xlsx-patch';
 
-const SHEET = 'xl/worksheets/sheet1.xml';
+// Fixed, row-free detail the client receives when the stored file and the export
+// plan disagree; the row numbers go to the server log only.
+const ROWS_MISMATCH_DETAIL = 'Stored workbook rows do not match the export plan';
 
-function toZip(worksheetXml: string): Buffer {
-  return Buffer.from(zipSync({ [SHEET]: strToU8(worksheetXml) }));
+/** Swallows the mismatch warning so it neither clutters the run nor escapes the spy. */
+function silenceWarn(): MockInstance<typeof syncLog.warn> {
+  return vi.spyOn(syncLog, 'warn').mockImplementation(() => undefined);
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+const SHEET = 'xl/worksheets/sheet1.xml';
+const WORKBOOK_RELS = 'xl/_rels/workbook.xml.rels';
+// Workbook rels naming sheet1 only, the way the reader resolves it (`xl/` + Target).
+const WORKBOOK_RELS_XML =
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+  '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+  '<Relationship Id="rId1" ' +
+  'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" ' +
+  'Target="worksheets/sheet1.xml"/></Relationships>';
+
+function toZip(worksheetXml: string, extra: Readonly<Record<string, string>> = {}): Buffer {
+  const files: Record<string, Uint8Array> = {
+    [WORKBOOK_RELS]: strToU8(WORKBOOK_RELS_XML),
+    [SHEET]: strToU8(worksheetXml),
+  };
+  for (const [name, text] of Object.entries(extra)) files[name] = strToU8(text);
+  return Buffer.from(zipSync(files));
+}
+
+function entryOf(zip: Buffer, name: string): string {
+  const bytes = unzipSync(new Uint8Array(zip))[name];
+  if (bytes === undefined) throw new Error(`entry missing: ${name}`);
+  return strFromU8(bytes);
 }
 
 function worksheetOf(zip: Buffer): string {
-  const bytes = unzipSync(new Uint8Array(zip))[SHEET];
-  if (bytes === undefined) throw new Error('worksheet entry missing');
-  return strFromU8(bytes);
+  return entryOf(zip, SHEET);
 }
 
 function patches(
@@ -120,18 +154,155 @@ describe('patchXlsxCells — namespace-prefixed worksheets', () => {
   // dropped the seller's choice (the "all-Hayır export" bug). The patcher must throw
   // rather than stream back unpatched bytes.
   it('throws when a target row is absent from every worksheet (no silent data loss)', () => {
+    silenceWarn();
     expect(() =>
       patchXlsxCells(toZip(PREFIXED_WS), patches(99, 1, { kind: 'inlineStr', value: 'Evet' })),
-    ).toThrow(/matched 0 of 1 target rows.*unmatched rows: 99/);
+    ).toThrow(ROWS_MISMATCH_DETAIL);
   });
 
   it('throws on a partial miss even when some rows matched', () => {
+    silenceWarn();
     const rowPatches = new Map([
       [2, new Map([[1, { kind: 'inlineStr', value: 'Evet' } satisfies XlsxCellValue]])],
       [7, new Map([[1, { kind: 'inlineStr', value: 'Evet' } satisfies XlsxCellValue]])],
     ]);
-    expect(() => patchXlsxCells(toZip(PREFIXED_WS), rowPatches)).toThrow(
-      /matched 1 of 2 target rows.*unmatched rows: 7/,
+    expect(() => patchXlsxCells(toZip(PREFIXED_WS), rowPatches)).toThrow(ROWS_MISMATCH_DETAIL);
+  });
+
+  // A large mismatch must not ship thousands of row numbers to the client: the error
+  // detail stays fixed, and the counts plus a short sample of the missing rows go to
+  // the server log (no cell content, nothing else from the file).
+  it('keeps row numbers out of the error and logs counts with at most 10 unmatched rows', () => {
+    const warnSpy = silenceWarn();
+    const unmatched = Array.from({ length: 15 }, (_, i) => 100 + i);
+    const evet = new Map([[1, { kind: 'inlineStr', value: 'Evet' } satisfies XlsxCellValue]]);
+    const rowPatches = new Map([[2, evet]]);
+    for (const row of unmatched) rowPatches.set(row, evet);
+
+    let thrown: unknown;
+    try {
+      patchXlsxCells(toZip(PREFIXED_WS), rowPatches);
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(ConflictError);
+    if (!(thrown instanceof ConflictError)) return;
+    expect(thrown.message).toBe(ROWS_MISMATCH_DETAIL);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith('xlsx-patch.rows-unmatched', {
+      matchedRowCount: 1,
+      targetRowCount: 16,
+      unmatchedRowSample: unmatched.slice(0, 10),
+    });
+  });
+});
+
+// Only the worksheets the workbook rels name were parsed and bounded by the upload
+// gate. A part under xl/worksheets/ that no relationship names was never checked, so
+// it may hold anything; the patcher copies it through untouched instead of scanning it.
+const UNNAMED_SHEET = 'xl/worksheets/sheet9.xml';
+const UNCLOSED_ROW_COUNT = 200_000;
+// Loose on purpose: skipping the part takes milliseconds, scanning 200 000 unclosed
+// rows with the row regex is quadratic and takes minutes.
+// Raised further for parallel test runs (check:all, CI): still far below the minutes
+// the quadratic scan takes.
+const PATCH_BUDGET_MS = 15_000;
+
+describe('patchXlsxCells — only the worksheets the workbook rels name', { timeout: 60_000 }, () => {
+  it('leaves a worksheet the rels do not name byte-for-byte, even with a matching row', () => {
+    const zip = toZip(UNPREFIXED_WS, { [UNNAMED_SHEET]: UNPREFIXED_WS });
+    const out = patchXlsxCells(zip, patches(2, 1, { kind: 'inlineStr', value: 'Evet' }));
+    expect(worksheetOf(out)).toContain('<c r="B2" t="inlineStr"><is><t>Evet</t></is></c>');
+    expect(entryOf(out, UNNAMED_SHEET)).toBe(UNPREFIXED_WS);
+  });
+
+  it('skips an unnamed worksheet full of unclosed rows in linear time', () => {
+    const unclosed = `<worksheet><sheetData>${'<row r="1">'.repeat(UNCLOSED_ROW_COUNT)}`;
+    const zip = toZip(UNPREFIXED_WS, { [UNNAMED_SHEET]: unclosed });
+    const started = performance.now();
+    const out = patchXlsxCells(zip, patches(2, 1, { kind: 'inlineStr', value: 'Evet' }));
+    const elapsedMs = performance.now() - started;
+    expect(entryOf(out, UNNAMED_SHEET)).toBe(unclosed);
+    expect(elapsedMs).toBeLessThan(PATCH_BUDGET_MS);
+  });
+
+  it('refuses a target row that only an unnamed worksheet carries', () => {
+    silenceWarn();
+    const zip = toZip(UNPREFIXED_WS.replace(/<row r="2">[\s\S]*?<\/row>/, ''), {
+      [UNNAMED_SHEET]: UNPREFIXED_WS,
+    });
+    expect(() => patchXlsxCells(zip, patches(2, 1, { kind: 'inlineStr', value: 'Evet' }))).toThrow(
+      ConflictError,
     );
+  });
+});
+
+// The patcher writes values straight into worksheet XML, so anything that is not a
+// plain decimal (number cells) or not a legal XML 1.0 character (text cells) would
+// either corrupt the file or be read back differently by Trendyol. Both fail before
+// any byte is produced.
+describe('patchXlsxCells — value validation', () => {
+  it('rejects an exponent-notation number', () => {
+    expect(() =>
+      patchXlsxCells(toZip(PREFIXED_WS), patches(2, 0, { kind: 'number', value: '1e-7' })),
+    ).toThrow('invalid number cell value');
+  });
+
+  it('rejects NaN', () => {
+    expect(() =>
+      patchXlsxCells(toZip(PREFIXED_WS), patches(2, 0, { kind: 'number', value: 'NaN' })),
+    ).toThrow('invalid number cell value');
+  });
+
+  it('rejects a comma decimal', () => {
+    expect(() =>
+      patchXlsxCells(toZip(PREFIXED_WS), patches(2, 0, { kind: 'number', value: '12,50' })),
+    ).toThrow('invalid number cell value');
+  });
+
+  it('accepts plain decimal numbers', () => {
+    for (const value of ['0', '-0.50', '360.00', '15.4', '1200']) {
+      const out = worksheetOf(
+        patchXlsxCells(toZip(PREFIXED_WS), patches(2, 0, { kind: 'number', value })),
+      );
+      expect(out).toContain(`<x:c r="A2"><x:v>${value}</x:v></x:c>`);
+    }
+  });
+
+  it('rejects a control character in text', () => {
+    expect(() =>
+      patchXlsxCells(
+        toZip(PREFIXED_WS),
+        patches(2, 1, { kind: 'inlineStr', value: `Ev${String.fromCharCode(0x01)}et` }),
+      ),
+    ).toThrow('invalid text cell value');
+  });
+
+  it.each([
+    ['carriage return', String.fromCharCode(0x0d)],
+    ['U+FFFE', String.fromCharCode(0xfffe)],
+    ['U+FFFF', String.fromCharCode(0xffff)],
+    ['lone high surrogate', String.fromCharCode(0xd800)],
+    ['lone low surrogate', String.fromCharCode(0xdc00)],
+  ])('rejects a %s in text', (_label, bad) => {
+    expect(() =>
+      patchXlsxCells(toZip(PREFIXED_WS), patches(2, 1, { kind: 'inlineStr', value: `A${bad}B` })),
+    ).toThrow('invalid text cell value');
+  });
+
+  it('keeps TAB, LF and astral characters in text', () => {
+    const value = `a${String.fromCharCode(0x09)}b${String.fromCharCode(0x0a)}c${String.fromCodePoint(0x1f600)}`;
+    const out = worksheetOf(
+      patchXlsxCells(toZip(PREFIXED_WS), patches(2, 1, { kind: 'inlineStr', value })),
+    );
+    expect(out).toContain(`<x:t>${value}</x:t>`);
+  });
+
+  it('unmatched rows throw ConflictError', () => {
+    silenceWarn();
+    expect(() =>
+      patchXlsxCells(toZip(PREFIXED_WS), patches(99, 1, { kind: 'inlineStr', value: 'Evet' })),
+    ).toThrow(ConflictError);
   });
 });

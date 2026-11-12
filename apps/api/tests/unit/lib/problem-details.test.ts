@@ -5,15 +5,18 @@ import { EncryptionKeyError } from '@pazarsync/sync-core';
 import {
   ConflictError,
   ForbiddenError,
+  ImportBusyError,
   InvalidReferenceError,
   MarketplaceAccessError,
   MarketplaceAuthError,
   MarketplaceUnreachable,
   MarketplaceWriteFailedError,
   NotFoundError,
+  PayloadTooLargeError,
   RateLimitedError,
   SyncInProgressError,
   UnauthorizedError,
+  UnsupportedMediaTypeError,
   ValidationError,
 } from '@/lib/errors';
 import { problemDetailsForError } from '@/lib/problem-details';
@@ -105,6 +108,44 @@ describe('problemDetailsForError — extended error classes', () => {
     expect(headers).toEqual({ 'Retry-After': '45' });
   });
 
+  it('maps PayloadTooLargeError to 413 with meta.maxBytes', () => {
+    const maxBytes = 10 * 1024 * 1024;
+    const { body, status, headers } = problemDetailsForError(new PayloadTooLargeError(maxBytes));
+    expect(status).toBe(413);
+    expect(headers).toBeUndefined();
+    expect(body).toMatchObject({
+      type: 'https://api.pazarsync.com/errors/payload-too-large',
+      title: 'Payload too large',
+      status: 413,
+      code: 'PAYLOAD_TOO_LARGE',
+      meta: { maxBytes },
+    });
+    expect(body.detail.length).toBeGreaterThan(0);
+  });
+
+  it('maps UnsupportedMediaTypeError to 415', () => {
+    const { body, status } = problemDetailsForError(new UnsupportedMediaTypeError());
+    expect(status).toBe(415);
+    expect(body).toMatchObject({
+      type: 'https://api.pazarsync.com/errors/unsupported-media-type',
+      status: 415,
+      code: 'UNSUPPORTED_MEDIA_TYPE',
+    });
+    expect(body.detail.length).toBeGreaterThan(0);
+  });
+
+  it('maps ImportBusyError to 503 with Retry-After', () => {
+    const { body, status, headers } = problemDetailsForError(new ImportBusyError(5));
+    expect(status).toBe(503);
+    expect(headers).toEqual({ 'Retry-After': '5' });
+    expect(body).toMatchObject({
+      type: 'https://api.pazarsync.com/errors/import-busy',
+      status: 503,
+      code: 'IMPORT_BUSY',
+    });
+    expect(body.detail.length).toBeGreaterThan(0);
+  });
+
   it('maps EncryptionKeyError to 500 SERVER_CONFIG_ERROR without leaking the message', () => {
     const { body, status } = problemDetailsForError(
       new EncryptionKeyError('ENCRYPTION_KEY must be hex-encoded'),
@@ -169,25 +210,28 @@ describe('problemDetailsForError — marketplace errors', () => {
 });
 
 describe('problemDetailsForError — Hono HTTPException passthrough', () => {
-  it('maps a 400 HTTPException (malformed body) to 400 MALFORMED_REQUEST', () => {
+  it('maps a 400 HTTPException (malformed body) to 400 MALFORMED_REQUEST with a fixed detail', () => {
     const { body, status } = problemDetailsForError(
       new HTTPException(400, { message: 'Malformed JSON in request body' }),
     );
     expect(status).toBe(400);
+    // The library message is never echoed; the detail is a fixed string.
     expect(body).toEqual({
       type: 'https://api.pazarsync.com/errors/malformed-request',
       title: 'Malformed request',
       status: 400,
       code: 'MALFORMED_REQUEST',
-      detail: 'Malformed JSON in request body',
+      detail: 'The request body could not be parsed',
     });
   });
 
-  it('maps a non-400 4xx HTTPException to its status with HTTP_ERROR', () => {
-    const { body, status } = problemDetailsForError(new HTTPException(413, {}));
+  it('maps a non-400 4xx HTTPException to its status with HTTP_ERROR and a fixed detail', () => {
+    const { body, status } = problemDetailsForError(
+      new HTTPException(413, { message: 'Payload Too Large' }),
+    );
     expect(status).toBe(413);
     expect(body.code).toBe('HTTP_ERROR');
-    // Empty message falls back to a generic detail (never leaks internals).
+    // The library message is never echoed (never leaks internals).
     expect(body.detail).toBe('The request could not be processed');
   });
 });

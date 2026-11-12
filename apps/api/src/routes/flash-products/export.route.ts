@@ -2,10 +2,16 @@ import { createRoute, z } from '@hono/zod-openapi';
 
 import { CAPABILITIES } from '@pazarsync/utils';
 
+import { RATE_LIMITS } from '../../config/rate-limits';
 import { createSubApp } from '../../lib/create-hono-app';
 import { assertCapability } from '../../lib/require-capability';
 import { requireStoreAccess } from '../../lib/require-store-access';
-import { Common429Response, ProblemDetailsSchema } from '../../openapi';
+import { rateLimit } from '../../middleware/rate-limit.middleware';
+import {
+  Common429Response,
+  ProblemDetailsSchema,
+  WORKBOOK_EXPORT_ERROR_RESPONSES,
+} from '../../openapi';
 import { exportFlashProducts } from '../../services/flash-product-export.service';
 import { XLSX_MIME } from '../../services/tariff-export-commons';
 import { FlashProductListPathSchema } from '../../validators/flash-product.validator';
@@ -27,6 +33,7 @@ const exportFlashProductsRoute = createRoute({
     'exported. Returns 409 if the list has no stored source file (or it is unreadable / lacks the ' +
     'writable column).',
   security: [{ bearerAuth: [] }],
+  middleware: [rateLimit(RATE_LIMITS.FILE_EXPORT)] as const,
   request: { params: FlashProductListPathSchema },
   responses: {
     200: {
@@ -51,6 +58,7 @@ const exportFlashProductsRoute = createRoute({
       content: { 'application/json': { schema: ProblemDetailsSchema } },
       description: 'List has no stored source file to export',
     },
+    ...WORKBOOK_EXPORT_ERROR_RESPONSES,
     429: Common429Response,
   },
 });

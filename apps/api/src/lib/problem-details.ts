@@ -12,16 +12,19 @@ import {
   CostProfileNotFoundError,
   CostProfileVariantOrgMismatchError,
   ForbiddenError,
+  ImportBusyError,
   InvalidReferenceError,
   MarketplaceAccessError,
   MarketplaceAuthError,
   MarketplaceUnreachable,
   MarketplaceWriteFailedError,
   NotFoundError,
+  PayloadTooLargeError,
   RateLimitedError,
   ShippingCarrierPlatformMismatchError,
   SyncInProgressError,
   UnauthorizedError,
+  UnsupportedMediaTypeError,
   ValidationError,
   type ValidationIssue,
 } from './errors';
@@ -324,15 +327,61 @@ function classify(err: unknown): ProblemDetailsResult {
       },
     };
   }
+  // --- Upload / import transport errors ---
+  if (err instanceof PayloadTooLargeError) {
+    return {
+      status: 413,
+      body: {
+        type: `${TYPE_BASE}/payload-too-large`,
+        title: 'Payload too large',
+        status: 413,
+        code: 'PAYLOAD_TOO_LARGE',
+        detail: err.message,
+        meta: { maxBytes: err.meta.maxBytes },
+      },
+    };
+  }
+  if (err instanceof UnsupportedMediaTypeError) {
+    return {
+      status: 415,
+      body: {
+        type: `${TYPE_BASE}/unsupported-media-type`,
+        title: 'Unsupported media type',
+        status: 415,
+        code: 'UNSUPPORTED_MEDIA_TYPE',
+        detail: err.message,
+      },
+    };
+  }
+  if (err instanceof ImportBusyError) {
+    return {
+      status: 503,
+      headers: { 'Retry-After': err.retryAfterSeconds.toString() },
+      body: {
+        type: `${TYPE_BASE}/import-busy`,
+        title: 'Import busy',
+        status: 503,
+        code: 'IMPORT_BUSY',
+        detail: err.message,
+      },
+    };
+  }
   // Hono-native HTTPException (e.g. a malformed-JSON body parse failure throws
   // a 400 before any route handler runs). Without this branch such throws
   // collapse to a generic 500, masking a deterministic client error as a
   // server fault. Kept last so the domain error classes above (which all
   // extend `Error`, not `HTTPException`) match first.
+  //
+  // The exception's own message is never echoed: it is library-authored text
+  // (parser and middleware internals) that can change between Hono releases
+  // and may describe server internals. The detail is a fixed string instead;
+  // `code` and `type` still tell the client what went wrong.
   if (err instanceof HTTPException) {
     const status = err.status;
     const isMalformed = status === 400;
-    const detail = err.message.length > 0 ? err.message : 'The request could not be processed';
+    const detail = isMalformed
+      ? 'The request body could not be parsed'
+      : 'The request could not be processed';
     return {
       status,
       body: {

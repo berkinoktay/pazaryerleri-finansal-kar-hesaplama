@@ -15,12 +15,13 @@ import { ConflictError, InvalidReferenceError, NotFoundError } from './errors';
  * to stay resilient to Prisma 7's driver-adapter wrapping and to avoid a
  * runtime import cycle through `@pazarsync/db`.
  */
-interface PrismaKnownRequestErrorShape {
+export interface PrismaKnownRequestErrorShape {
   code: string;
   meta?: Record<string, unknown>;
 }
 
-function isPrismaKnownRequestError(err: unknown): err is PrismaKnownRequestErrorShape {
+/** True when `err` carries a Prisma error code (`P####`); structural, no `instanceof`. */
+export function isPrismaKnownRequestError(err: unknown): err is PrismaKnownRequestErrorShape {
   return (
     typeof err === 'object' &&
     err !== null &&
