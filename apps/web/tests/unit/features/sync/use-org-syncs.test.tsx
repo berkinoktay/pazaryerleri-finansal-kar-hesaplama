@@ -26,6 +26,35 @@ interface MockOptions {
   onHealthChange?: (health: RealtimeHealth) => void;
 }
 
+// The real outage poll waits 10 s. Tests that must observe (or rule out)
+// outage polling shrink it to FAST_OUTAGE_POLL_MS by setting
+// `pollTiming.outageMs`; the decision table itself stays real (it has its own
+// unit test in sync-refetch-interval.test.ts). null = production timing.
+const FAST_OUTAGE_POLL_MS = 100;
+// Long enough for several fast outage polls — a quiet window proves no polling.
+const QUIET_WINDOW_MS = 500;
+const pollTiming = vi.hoisted(() => {
+  const state: { outageMs: number | null } = { outageMs: null };
+  return state;
+});
+
+vi.mock('@/features/sync/lib/sync-refetch-interval', async () => {
+  const actual = await vi.importActual<typeof import('@/features/sync/lib/sync-refetch-interval')>(
+    '@/features/sync/lib/sync-refetch-interval',
+  );
+  return {
+    ...actual,
+    computeSyncRefetchInterval: (
+      ...args: Parameters<typeof actual.computeSyncRefetchInterval>
+    ): number | false => {
+      const interval = actual.computeSyncRefetchInterval(...args);
+      return interval === actual.OUTAGE_POLL_INTERVAL_MS && pollTiming.outageMs !== null
+        ? pollTiming.outageMs
+        : interval;
+    },
+  };
+});
+
 vi.mock('@/lib/supabase/realtime', async () => {
   const actual =
     await vi.importActual<typeof import('@/lib/supabase/realtime')>('@/lib/supabase/realtime');
@@ -77,6 +106,7 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 beforeEach(() => {
+  pollTiming.outageMs = null;
   unsubscribeMock.mockClear();
   emitRealtimeEvent = () => {};
   emitHealthChange = () => {};
@@ -133,7 +163,8 @@ describe('useOrgSyncs', () => {
     expect(result.current.activeSyncs[0]?.organizationId).toBe(ORG_ID);
   });
 
-  it('does not poll while no active syncs exist in the cache', async () => {
+  it('does not poll while the channel is healthy and no active syncs exist in the cache', async () => {
+    pollTiming.outageMs = FAST_OUTAGE_POLL_MS;
     let getCount = 0;
     server.use(
       http.get(`http://localhost:3001/v1/organizations/${ORG_ID}/sync-logs`, () => {
@@ -152,12 +183,17 @@ describe('useOrgSyncs', () => {
     );
 
     const { result } = renderHook(() => useOrgSyncs(), { wrapper });
+    // The provider starts `connecting`, which polls unconditionally (outage
+    // tempo). Report healthy right away so only the no-active-rows rule decides.
+    act(() => {
+      emitHealthChange('healthy');
+    });
     await waitFor(() => expect(result.current.recentSyncs).toHaveLength(1));
     expect(getCount).toBe(1);
 
-    // Wait past one polling interval (2s) — handler must NOT be re-hit
-    // since refetchInterval returns false when no row is active.
-    await new Promise<void>((resolve) => setTimeout(resolve, 2_500));
+    // Several fast outage intervals pass — the handler must NOT be re-hit
+    // because refetchInterval returns false for healthy + no active row.
+    await new Promise<void>((resolve) => setTimeout(resolve, QUIET_WINDOW_MS));
     expect(getCount).toBe(1);
   });
 
@@ -178,17 +214,17 @@ describe('useOrgSyncs', () => {
     expect(getCount).toBe(1);
 
     // Drive the channel into `errored` — without a healthy gate, polling
-    // is the only thing keeping the cache fresh.
+    // is the only thing keeping the cache fresh. Fast timing is switched on
+    // only now, so the hydrate count above is not raced by `connecting` polls.
+    pollTiming.outageMs = FAST_OUTAGE_POLL_MS;
     act(() => {
       emitHealthChange('errored');
     });
 
-    // POLLING_INTERVAL_MS is 10 s; wait ~12 s for at least one poll.
-    await waitFor(() => expect(getCount).toBeGreaterThanOrEqual(2), {
-      timeout: 12_000,
-      interval: 250,
-    });
-  }, 15_000);
+    // The outage-entry edge alone refetches once (count 2); reaching 3 proves
+    // the interval is actually polling.
+    await waitFor(() => expect(getCount).toBeGreaterThanOrEqual(3), { timeout: 2_000 });
+  });
 
   it('does NOT poll while the Realtime channel is healthy even if a sync is active', async () => {
     let getCount = 0;
@@ -207,16 +243,16 @@ describe('useOrgSyncs', () => {
     expect(getCount).toBe(1);
 
     // Channel reports healthy — Realtime is delivering events directly,
-    // so the polling fallback should be off.
+    // so the outage poll must be off (only the 30 s reconcile remains).
+    pollTiming.outageMs = FAST_OUTAGE_POLL_MS;
     act(() => {
       emitHealthChange('healthy');
     });
 
-    // Wait noticeably longer than the polling interval (10 s); handler
-    // must NOT be hit again. Sub-interval wait would prove nothing.
-    await new Promise<void>((resolve) => setTimeout(resolve, 11_000));
+    // Several fast outage intervals pass; the handler must NOT be hit again.
+    await new Promise<void>((resolve) => setTimeout(resolve, QUIET_WINDOW_MS));
     expect(getCount).toBe(1);
-  }, 15_000);
+  });
 
   it('fires invalidateQueries on outage entry AND on `errored` → `healthy` recovery', async () => {
     let getCount = 0;
