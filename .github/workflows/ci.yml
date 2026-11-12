@@ -344,23 +344,28 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
           DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
 
-      # `--concurrency=1` is load-bearing: every package's integration
-      # tests share the same local Supabase DB and call `truncateAll()`
-      # in `beforeEach`. With turbo's default parallelism (numCpus),
-      # multiple packages' suites race on the shared DB and intermittently
-      # fail with P2003 ForeignKeyConstraintViolation when one suite's
-      # `truncateAll` wipes another suite's setup mid-test. Serializing
-      # across packages keeps each suite's transactional isolation
-      # intact. Local devs typically run a single package's tests at a
-      # time so the package.json alias stays parallel-friendly; we only
-      # serialize in CI where every package runs together.
+      # Build the clone template (pazarsync_test_tpl: schema, policies, reference
+      # seed, fixtures — then stamped and sealed). Every integration worker gets
+      # its own copy of it. It cannot be the "postgres" DB: GoTrue, PostgREST and
+      # Realtime keep connections open there, and a connected database can't be
+      # used as a CREATE DATABASE template.
+      - name: Build the integration-test DB template
+        run: pnpm db:test-setup
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/pazarsync_test
+
+      # `--concurrency=1`: one package at a time, so packages don't compete for
+      # the runner's two vCPUs with the database itself. Each package's workers
+      # run against their own clones of the template, so the suites no longer
+      # share rows.
       - name: Run integration tests
         run: |
           pnpm turbo run test:integration --concurrency=1
           # The RLS suite is excluded from the main integration config (it drives
           # PostgREST/GoTrue, which only serve the "postgres" DB) and runs via its
-          # own config here. It shares this env block; in CI DATABASE_URL already
-          # IS the disposable per-job postgres DB, so no separate DB is needed.
+          # own config here, against DATABASE_URL (the disposable per-job postgres DB).
           # The RLS config refuses to load without this explicit opt-in (it
           # TRUNCATEs whatever DB it points at); only this disposable CI DB gets it.
           PAZARSYNC_ALLOW_DEV_DB_TRUNCATE=1 pnpm --filter @pazarsync/api test:integration:rls
@@ -368,11 +373,9 @@ jobs:
           NODE_ENV: test
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
           DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
-          # Isolated test DB. In CI there is no second DB to provision — the
-          # per-job Supabase instance is already disposable — so this points at
-          # the SAME postgres DB the schema was pushed to. One code path: the
-          # vitest remap sets DATABASE_URL := TEST_DATABASE_URL (a no-op here).
-          TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          # Base name of the integration-test databases: the template built above
+          # is pazarsync_test_tpl, each worker's clone pazarsync_test_<pkg>_w<N>.
+          TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/pazarsync_test
           # NODE_ENV is validated at boot by apps/api/src/lib/env.ts —
           # 'test' is the recognised mode for CI runs (alongside
           # production, staging, development). Production must set this

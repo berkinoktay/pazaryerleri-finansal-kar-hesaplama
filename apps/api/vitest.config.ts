@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { remapDatabaseUrlToTestDb } from '@pazarsync/db/test-env';
+import { configureWorkerDatabases, remapDatabaseUrlToTestDb } from '@pazarsync/db/test-env';
 import { config as loadEnv } from 'dotenv';
 import { configDefaults, defineConfig } from 'vitest/config';
 
@@ -15,8 +15,10 @@ loadEnv({ path: path.resolve(here, '../../.env') });
 
 // Integration-only config (tests/integration/**). DB-free unit tests have their
 // own vitest.unit.config.ts, which runs files in parallel.
-// Redirect DATABASE_URL at the isolated test DB (see packages/db/src/test-env.ts).
+// Redirect DATABASE_URL at the isolated test DB (see packages/db/src/test-env.ts),
+// then give every worker its own clone of it (packages/db/src/test-db-clones.ts).
 remapDatabaseUrlToTestDb();
+const workerDatabases = configureWorkerDatabases('api');
 
 export default defineConfig({
   resolve: {
@@ -37,21 +39,20 @@ export default defineConfig({
     // so they must NOT be remapped at the isolated test DB like everything else.
     exclude: [...configDefaults.exclude, 'tests/integration/rls/**'],
     // Integration tests share one Postgres DB and TRUNCATE between tests.
-    // Running test files in parallel forks would race: file A's TRUNCATE
-    // wipes the data file B just inserted in its beforeEach. Tests within
-    // a single file still run in order, so TRUNCATE in beforeEach is safe.
+    // Each worker has its own database clone, but files still run one at a
+    // time for now: parallel files are turned on in a separate step.
     fileParallelism: false,
     // Pool size from the shared policy (@pazarsync/vitest-config). Inert while
     // fileParallelism is false (vitest forces one worker). Importing the policy
     // still matters here: it deletes VITEST_MAX_WORKERS, which would otherwise
-    // override fileParallelism:false and let files race on the shared DB.
+    // override fileParallelism:false.
     maxWorkers: testWorkers(),
-    // After the whole vitest run completes, restore seed data so the
-    // developer's browser session (logged in as berkin / demo) sees the
-    // usual orgs and stores instead of an empty state. Skipped in CI and
-    // when PAZARSYNC_SKIP_RESEED=1.
-    // vitest uses the `globalSetup` hook; the file exports `setup` (no-op)
-    // and a `teardown` that shells out to `pnpm db:seed`.
-    globalSetup: [path.resolve(here, './tests/global-teardown.ts')],
+    // Clone the template once per worker (first), then the dev-DB auth purge.
+    globalSetup: [
+      workerDatabases.globalSetup,
+      path.resolve(here, './tests/integration-global-setup.ts'),
+    ],
+    // Points each worker's DATABASE_URL at its clone before any test imports Prisma.
+    setupFiles: workerDatabases.setupFiles,
   },
 });

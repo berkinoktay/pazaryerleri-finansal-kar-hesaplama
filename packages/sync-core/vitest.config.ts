@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { remapDatabaseUrlToTestDb } from '@pazarsync/db/test-env';
+import { configureWorkerDatabases, remapDatabaseUrlToTestDb } from '@pazarsync/db/test-env';
 import { config as loadEnv } from 'dotenv';
 import { defineConfig } from 'vitest/config';
 
@@ -16,8 +16,10 @@ loadEnv({ path: path.resolve(here, '../../.env') });
 
 // Integration-only config (tests/integration/**). DB-free unit tests have their
 // own vitest.unit.config.ts, which runs files in parallel.
-// Redirect DATABASE_URL at the isolated test DB (see packages/db/src/test-env.ts).
+// Redirect DATABASE_URL at the isolated test DB (see packages/db/src/test-env.ts),
+// then give every worker its own clone of it (packages/db/src/test-db-clones.ts).
 remapDatabaseUrlToTestDb();
+const workerDatabases = configureWorkerDatabases('synccore');
 
 export default defineConfig({
   test: {
@@ -26,5 +28,7 @@ export default defineConfig({
     maxWorkers: testWorkers(), // inert while fileParallelism is false
     globals: false,
     environment: 'node',
+    globalSetup: [workerDatabases.globalSetup],
+    setupFiles: workerDatabases.setupFiles,
   },
 });
