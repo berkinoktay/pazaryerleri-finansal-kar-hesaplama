@@ -327,4 +327,24 @@ describe('commission-tariff export + variable periods', () => {
     expect(Number(text(patched, layout.newTsf))).toBe(777.09);
     expect(text(patched, layout.tariffSelection)).toBe('7 Günlük Fiyat');
   });
+
+  it('returns 409 when the stored source file is unreadable', async () => {
+    const ctx = await setupStore();
+    // Seed a tariff directly with stored bytes that are not a workbook at all.
+    const tariff = await prisma.commissionTariff.create({
+      data: {
+        organizationId: ctx.orgId,
+        storeId: ctx.storeId,
+        name: 'Unreadable Source Tariff',
+        sourceFile: new Uint8Array(Buffer.from('not a workbook')),
+      },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/commission-tariffs/${tariff.id}/export`,
+      { method: 'POST', headers: { Authorization: bearer(ctx.accessToken) } },
+    );
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe('CONFLICT');
+  });
 });

@@ -345,6 +345,17 @@ if (!store) return c.json({ type: '.../not-found', title: 'Not Found', status: 4
 
 ---
 
+
+### File Uploads (Excel workbooks)
+
+Seller-uploaded `.xlsx` files are untrusted input parsed on the API process. One malformed file can take the process down for every tenant, so the upload path is defence-in-depth:
+
+- **Before the body is read.** Import routes declare `createRoute({ middleware: WORKBOOK_IMPORT_MIDDLEWARE })` (`apps/api/src/middleware/workbook-upload.middleware.ts`): per-user `FILE_IMPORT` rate limit, then store access + `DATA_WRITE`, then a `multipart/form-data` check (415, a free header check that runs before any body byte is counted), then a body limit of `WORKBOOK_UPLOAD_MAX_BYTES` (`@pazarsync/utils`) plus the multipart envelope (413 `PAYLOAD_TOO_LARGE`). Handlers still call `requireStoreAccessContext` so a skipped middleware can never leave a handler unauthorised. Export routes carry the `FILE_EXPORT` rate limit.
+- **Inside the engine** (`@pazarsync/spreadsheet` `prepareUploadForRead`): byte cap, zip magic, streaming inflate with a real-byte ceiling, entry count, central directory checked against the streamed entries, XML budgets (total bytes, element/attribute/namespace counts, element name length), DTD/entity refusal (`UNSAFE_CONTENT`), then a read copy rebuilt from the same DOM parser the reader uses: every part the reader opens is strictly parsed, `<dimension>` is removed, cell references are validated and capped, uncached formulas are emptied, number formats are canonicalised. The reader never sees the raw upload.
+- **Never trust declared sizes.** Grid size, zip sizes and sheet dimensions in the file are attacker-controlled; caps are computed from what is actually parsed.
+- **Stored bytes are private.** `source_file` columns are hidden from the scoped Supabase client by column privileges (`supabase/sql/rls-policies.sql`); only the API (service role) reads them.
+- **Writing back.** The byte patcher writes only validated numbers and text from a closed vocabulary; it never echoes user-supplied strings into cells.
+
 ## 7. Database Security (RLS)
 
 Policies live in [`supabase/sql/rls-policies.sql`](../supabase/sql/rls-policies.sql). Applied automatically by `pnpm db:push` (which chains into `pnpm db:apply-policies`). Every tenant-scoped table has `ENABLE ROW LEVEL SECURITY` plus at least one SELECT policy. The coverage test in `apps/api/tests/integration/rls/coverage.rls.test.ts` fails CI if any table is missing.
@@ -496,6 +507,13 @@ Before merging any PR that touches user data, credentials, or cross-tenant code:
 - [ ] New tables have `organization_id` column and RLS policy enabled
 - [ ] Migration file includes the RLS policy SQL
 - [ ] RLS tested with a second tenant to confirm isolation
+
+### File Uploads
+
+- [ ] Upload routes authorise and cap the body in route middleware, before the form validator buffers it
+- [ ] Parsed files go through `@pazarsync/spreadsheet` (never a raw xlsx/xml parser on user bytes)
+- [ ] Sizes, counts and dimensions declared inside the file are never trusted
+- [ ] Stored raw files are not readable through the scoped Supabase client
 
 ### Transport
 

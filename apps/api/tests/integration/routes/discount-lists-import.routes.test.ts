@@ -17,6 +17,7 @@ import { prisma } from '@pazarsync/db';
 
 import { createApp } from '@/app';
 import { patchXlsxCells, type XlsxCellValue } from '@/lib/xlsx-patch';
+import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -116,6 +117,12 @@ function rowPatch(
 ): Map<number, Map<number, XlsxCellValue>> {
   return new Map([[excelRow, new Map(cells)]]);
 }
+
+// This file sends more imports than RATE_LIMITS.FILE_IMPORT allows per minute with the
+// same pooled user; reset the in-memory limiter so each test starts with a fresh bucket.
+beforeEach(() => {
+  _resetRateLimitStoreForTests();
+});
 
 describe('POST .../discount-lists/import - happy path', () => {
   let ctx: Ctx;

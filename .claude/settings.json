@@ -5,6 +5,9 @@
     "learning-output-style@claude-plugins-official": false,
     "postman@claude-plugins-official": false
   },
+  "env": {
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5-5"
+  },
   "permissions": {
     "ask": [
       "Bash(git stash)",

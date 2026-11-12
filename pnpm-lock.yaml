@@ -659,6 +659,9 @@ importers:
 
   packages/spreadsheet:
     dependencies:
+      '@xmldom/xmldom':
+        specifier: ^0.9.12
+        version: 0.9.12
       decimal.js:
         specifier: 'catalog:'
         version: 10.6.0

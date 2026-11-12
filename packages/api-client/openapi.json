@@ -16272,6 +16272,26 @@
               }
             }
           },
+          "413": {
+            "description": "Request body exceeds the upload size limit (PAYLOAD_TOO_LARGE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request body is not multipart/form-data (UNSUPPORTED_MEDIA_TYPE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "422": {
             "description": "File missing, unreadable, or not the expected tariff format",
             "content": {
@@ -16284,6 +16304,26 @@
           },
           "429": {
             "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server is too busy to run the import right now (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -16406,6 +16446,26 @@
           },
           "429": {
             "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server is too busy to read the stored workbook right now (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -17210,6 +17270,26 @@
               }
             }
           },
+          "413": {
+            "description": "Request body exceeds the upload size limit (PAYLOAD_TOO_LARGE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request body is not multipart/form-data (UNSUPPORTED_MEDIA_TYPE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "422": {
             "description": "File missing, unreadable, or not the expected tariff format",
             "content": {
@@ -17222,6 +17302,26 @@
           },
           "429": {
             "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server is too busy to run the import right now (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -17344,6 +17444,26 @@
           },
           "429": {
             "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server is too busy to read the stored workbook right now (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -18074,7 +18194,18 @@
                     "description": "İsteğe bağlı görünen ad; yoksa dosya adı."
                   },
                   "commissionSourceTariffId": {
-                    "type": "string",
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          ""
+                        ]
+                      }
+                    ],
                     "description": "Bu avantajlının komisyonunu okuyacağı komisyon tarifesi (hafta). Boş = kategori komisyonu."
                   }
                 },
@@ -18152,6 +18283,26 @@
               }
             }
           },
+          "413": {
+            "description": "Request body exceeds the upload size limit (PAYLOAD_TOO_LARGE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request body is not multipart/form-data (UNSUPPORTED_MEDIA_TYPE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "422": {
             "description": "File missing, unreadable, or not the expected tariff format",
             "content": {
@@ -18164,6 +18315,26 @@
           },
           "429": {
             "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server is too busy to run the import right now (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -18280,6 +18451,26 @@
           },
           "429": {
             "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server is too busy to read the stored workbook right now (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -19235,6 +19426,26 @@
               }
             }
           },
+          "413": {
+            "description": "Request body exceeds the upload size limit (PAYLOAD_TOO_LARGE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request body is not multipart/form-data (UNSUPPORTED_MEDIA_TYPE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "422": {
             "description": "File missing, unreadable, or not the expected flash format",
             "content": {
@@ -19247,6 +19458,26 @@
           },
           "429": {
             "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server is too busy to run the import right now (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -19674,6 +19905,26 @@
           },
           "429": {
             "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server is too busy to read the stored workbook right now (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -20206,6 +20457,26 @@
               }
             }
           },
+          "413": {
+            "description": "Request body exceeds the upload size limit (PAYLOAD_TOO_LARGE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request body is not multipart/form-data (UNSUPPORTED_MEDIA_TYPE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "422": {
             "description": "File missing/unreadable, config invalid, or not the expected discount format",
             "content": {
@@ -20218,6 +20489,26 @@
           },
           "429": {
             "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server is too busy to run the import right now (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -21038,6 +21329,26 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "The server is too busy to read the stored workbook right now (IMPORT_BUSY)",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         }
       }
@@ -21332,6 +21643,26 @@
               }
             }
           },
+          "413": {
+            "description": "Request body exceeds the upload size limit (PAYLOAD_TOO_LARGE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request body is not multipart/form-data (UNSUPPORTED_MEDIA_TYPE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "422": {
             "description": "File missing/unreadable, config invalid, or not the expected campaign format",
             "content": {
@@ -21344,6 +21675,26 @@
           },
           "429": {
             "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server is too busy to run the import right now (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -22298,6 +22649,26 @@
           },
           "429": {
             "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server is too busy to read the stored workbook right now (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {

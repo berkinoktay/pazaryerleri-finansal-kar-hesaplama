@@ -13,8 +13,13 @@ const DEFAULT_STALE_TIME_MS = 30_000;
  * Codes handled elsewhere — must NOT trigger the global toast:
  *   - UNAUTHENTICATED → SessionExpiredHandler (sign-out + redirect)
  *   - VALIDATION_ERROR → forms render field-level errors inline
+ *   - PAYLOAD_TOO_LARGE → the file upload dialog shows the size error inline
  */
-const SILENT_CODES: ReadonlySet<string> = new Set(['UNAUTHENTICATED', 'VALIDATION_ERROR']);
+const SILENT_CODES: ReadonlySet<string> = new Set([
+  'UNAUTHENTICATED',
+  'VALIDATION_ERROR',
+  'PAYLOAD_TOO_LARGE',
+]);
 
 /**
  * Codes with a matching i18n entry under common.errors.<CODE>.
@@ -44,6 +49,8 @@ type KnownErrorKey =
   | 'SHIPPING_CARRIER_REQUIRED_FOR_TRENDYOL_CONTRACT'
   | 'SHIPPING_CARRIER_PLATFORM_MISMATCH'
   | 'SHIPPING_CARRIER_NOT_FOUND'
+  | 'UNSUPPORTED_MEDIA_TYPE'
+  | 'IMPORT_BUSY'
   | 'generic';
 
 const KNOWN_CODES: ReadonlySet<string> = new Set<KnownErrorKey>([
@@ -69,6 +76,8 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<KnownErrorKey>([
   'SHIPPING_CARRIER_REQUIRED_FOR_TRENDYOL_CONTRACT',
   'SHIPPING_CARRIER_PLATFORM_MISMATCH',
   'SHIPPING_CARRIER_NOT_FOUND',
+  'UNSUPPORTED_MEDIA_TYPE',
+  'IMPORT_BUSY',
 ]);
 
 /**

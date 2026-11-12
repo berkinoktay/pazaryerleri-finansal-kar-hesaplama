@@ -10,10 +10,12 @@
 // Commission Tariff at compute time (see advantage-tariff-compute.service.ts).
 
 import { prisma } from '@pazarsync/db';
-import { mapPrismaError } from '@pazarsync/sync-core';
-import { readWorkbookGrid, SpreadsheetFileError, type SheetData } from '@pazarsync/spreadsheet';
+import { readWorkbookGrid, type SheetData } from '@pazarsync/spreadsheet';
 
+import { IMPORT_TX_OPTIONS } from '../config/workbook-limits';
 import { ValidationError } from '../lib/errors';
+import { mapTransactionError } from '../lib/map-transaction-error';
+import { mapUploadedFileError } from '../lib/spreadsheet-errors';
 import { cellDecimalString, cellInt, cellText } from '../lib/xlsx-grid-cells';
 import {
   resolveAdvantageTariffLayout,
@@ -139,10 +141,7 @@ export async function importAdvantageTariff(
   try {
     grid = await readWorkbookGrid(input.file, { sheetName: SHEET_NAME });
   } catch (err) {
-    if (err instanceof SpreadsheetFileError) {
-      throw new ValidationError([{ field: 'file', code: err.code }]);
-    }
-    throw err;
+    mapUploadedFileError(err);
   }
 
   if (grid.length < 2) {
@@ -232,7 +231,7 @@ export async function importAdvantageTariff(
       }));
       await tx.advantageTariffItem.createMany({ data: itemsData });
       return { tariffId: tariff.id, itemCount: itemsData.length };
-    });
+    }, IMPORT_TX_OPTIONS);
 
     return {
       tariffId,
@@ -243,6 +242,6 @@ export async function importAdvantageTariff(
       skippedRows,
     };
   } catch (err) {
-    mapPrismaError(err);
+    mapTransactionError(err);
   }
 }

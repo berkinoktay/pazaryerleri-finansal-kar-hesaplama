@@ -6,10 +6,25 @@
 // Domain-agnostic: the caller decides WHICH cells (by 1-based Excel row + 0-based
 // column) get WHICH value; this module does the fflate unzip → per-worksheet
 // row-rewrite → zip. Shared by every campaign-tariff export path.
+//
+// The source is a stored upload that passed the spreadsheet upload gate, which
+// inflates every entry and proves each declared size real, so unzipping it whole
+// allocates at most the gate's decompression cap. Only the worksheets the workbook
+// rels name are rewritten: those are the parts the gate parsed and bounded.
 
 import { unzipSync, zipSync, strToU8, strFromU8 } from 'fflate';
 
-const WORKSHEET_PREFIX = 'xl/worksheets/';
+import { resolveWorksheetPartPaths } from '@pazarsync/spreadsheet';
+import { syncLog } from '@pazarsync/sync-core';
+
+import { ConflictError } from './errors';
+
+// Client-facing detail for a row mismatch. Fixed on purpose: the unmatched row
+// numbers can run into the thousands, so they go to the server log instead.
+const ROWS_MISMATCH_DETAIL = 'Stored workbook rows do not match the export plan';
+
+// How many unmatched row numbers the mismatch log line carries.
+const UNMATCHED_ROW_LOG_SAMPLE = 10;
 
 /** The value written into a patched cell — a numeric `<v>` or an inline string. */
 export type XlsxCellValue =
@@ -36,6 +51,59 @@ export function columnIndex(letters: string): number {
   let n = 0;
   for (const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 64);
   return n - 1;
+}
+
+// ─── Value validation ───────────────────────────────────────────────────────
+
+// A number cell's `<v>` must be a plain decimal: optional minus, no leading zeros,
+// optional fraction, no exponent, no grouping or comma separator. Anything else
+// (`1e-7`, `NaN`, `12,50`) would be written verbatim and read back wrong or not at all.
+const PLAIN_DECIMAL_RE = /^-?(0|[1-9]\d*)(\.\d+)?$/;
+
+const TAB = 0x09;
+const LF = 0x0a;
+const FIRST_NON_CONTROL = 0x20;
+const SURROGATE_MIN = 0xd800;
+const SURROGATE_MAX = 0xdfff;
+const NON_CHARACTERS: ReadonlySet<number> = new Set([0xfffe, 0xffff]);
+
+/**
+ * Whether one code point may appear in a patched text cell. Follows the XML 1.0
+ * `Char` production (no C0 controls other than TAB/LF, no U+FFFE/U+FFFF, no lone
+ * surrogate) and additionally refuses CR: every XML parser normalizes a literal CR
+ * to LF, so it could never be read back as written. Iterating a string with
+ * `for...of` yields a valid surrogate pair as one astral code point, so only an
+ * unpaired surrogate reaches the surrogate range here.
+ */
+function isAllowedTextCodePoint(codePoint: number): boolean {
+  if (codePoint === TAB || codePoint === LF) return true;
+  if (codePoint < FIRST_NON_CONTROL) return false;
+  if (codePoint >= SURROGATE_MIN && codePoint <= SURROGATE_MAX) return false;
+  return !NON_CHARACTERS.has(codePoint);
+}
+
+function isAllowedText(text: string): boolean {
+  for (const char of text) {
+    const codePoint = char.codePointAt(0);
+    if (codePoint === undefined || !isAllowedTextCodePoint(codePoint)) return false;
+  }
+  return true;
+}
+
+/** Throws before any byte is written when a patch value cannot be represented safely. */
+function assertWritableValue(value: XlsxCellValue): void {
+  switch (value.kind) {
+    case 'number':
+      if (!PLAIN_DECIMAL_RE.test(value.value)) throw new Error('invalid number cell value');
+      return;
+    case 'inlineStr':
+      if (!isAllowedText(value.value)) throw new Error('invalid text cell value');
+      return;
+    default: {
+      const _exhaustive: never = value;
+      throw new Error(`Unhandled cell value kind: ${String(_exhaustive)}`);
+    }
+  }
 }
 
 function xmlEscape(text: string): string {
@@ -101,24 +169,39 @@ function patchRow(
 }
 
 /**
- * Patches every listed row's cells across all worksheets, leaving everything else
- * byte-for-byte intact. Returns the source unchanged when there is nothing to patch.
+ * Patches every listed row's cells across the worksheets the workbook rels name
+ * (resolved the way the reader resolves them), leaving everything else byte-for-byte
+ * intact. Any other entry, including a part under `xl/worksheets/` no relationship
+ * names, is copied through without being scanned: the upload gate never parsed it,
+ * so the row regex must not run over it. Returns the source unchanged when there is
+ * nothing to patch.
  *
  * Fails LOUD when a requested row is never matched in ANY worksheet: a full or partial
  * miss (e.g. a tag-regex mismatch that quietly skipped every `<row>`) would otherwise
  * return unpatched bytes and silently drop the seller's choices — the "all-Hayır export"
  * class of bug. Callers build `rowPatches` only for rows that exist in the source grid,
- * so a missed row always means the patch machinery failed, never a bogus request.
+ * so a missed row always means the patch machinery failed, never a bogus request; it
+ * surfaces as `ConflictError` (409) because the stored file no longer matches the
+ * rows it was imported with. The error detail is fixed; the matched/target counts and
+ * the first few unmatched row numbers are logged as a warning (never cell content).
+ *
+ * Every value is validated before the archive is touched: a `number` must be a plain
+ * decimal and an `inlineStr` must contain only characters XML text can carry; either
+ * violation throws a plain `Error` (a caller bug, not seller input).
  */
 export function patchXlsxCells(source: Buffer, rowPatches: XlsxRowPatches): Buffer {
   if (rowPatches.size === 0) return source;
+  for (const cells of rowPatches.values()) {
+    for (const value of cells.values()) assertWritableValue(value);
+  }
 
   // Row numbers actually matched + rewritten, accumulated across ALL worksheets (a
   // target row may live in only one sheet), so the shortfall check below is global.
   const matchedRows = new Set<number>();
   const entries = unzipSync(new Uint8Array(source));
-  for (const [name, bytes] of Object.entries(entries)) {
-    if (!name.startsWith(WORKSHEET_PREFIX) || !name.endsWith('.xml')) continue;
+  for (const name of resolveWorksheetPartPaths(entries)) {
+    const bytes = entries[name];
+    if (bytes === undefined) continue;
     const xml = strFromU8(bytes).replace(ROW_RE, (rowXml: string) => {
       const rowNum = ROW_NUM_RE.exec(rowXml);
       if (rowNum?.[1] === undefined) return rowXml;
@@ -133,10 +216,12 @@ export function patchXlsxCells(source: Buffer, rowPatches: XlsxRowPatches): Buff
 
   const missing = [...rowPatches.keys()].filter((row) => !matchedRows.has(row));
   if (missing.length > 0) {
-    throw new Error(
-      `xlsx patch matched ${matchedRows.size} of ${rowPatches.size} target rows; ` +
-        `unmatched rows: ${missing.join(', ')}`,
-    );
+    syncLog.warn('xlsx-patch.rows-unmatched', {
+      matchedRowCount: matchedRows.size,
+      targetRowCount: rowPatches.size,
+      unmatchedRowSample: missing.slice(0, UNMATCHED_ROW_LOG_SAMPLE),
+    });
+    throw new ConflictError(ROWS_MISMATCH_DETAIL);
   }
 
   return Buffer.from(zipSync(entries));

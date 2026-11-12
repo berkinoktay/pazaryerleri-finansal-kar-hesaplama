@@ -26,6 +26,32 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Campaign workbook import routes are guarded before the body is read**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs|advantage-tariffs|flash-products|discount-lists|marketplace-campaigns}/import`).
+  Store access and the `DATA_WRITE` capability are now checked in route middleware, so a caller who
+  may not write to the store gets 403/404 without the multipart body being buffered. New responses:
+  `413 PAYLOAD_TOO_LARGE` (`meta.maxBytes`, body above the 10 MiB file limit plus the multipart
+  envelope), `415 UNSUPPORTED_MEDIA_TYPE` (body is not `multipart/form-data`), `503 IMPORT_BUSY`
+  with `Retry-After` (the import transaction timed out or the connection pool was exhausted), and
+  `429` after 10 imports per minute per user. The upload validator may now reject a file with
+  `{ field: 'file', code: 'UNSAFE_CONTENT' }` (DTD or entity declarations, unknown entity
+  references, over-long element names, excessive namespace declarations) and stricter
+  `CORRUPT_FILE` / `PAYLOAD_TOO_LARGE` / `ROW_CAP_EXCEEDED` / `COL_CAP_EXCEEDED` outcomes for crafted
+  archives. Valid Trendyol files are unaffected. A concurrent duplicate commission or Plus tariff
+  week now answers `422 DUPLICATE_TARIFF_WEEK` instead of a 409 naming database columns. A
+  malformed `commissionSourceTariffId` on the advantage import answers `422` with
+  `INVALID_COMMISSION_SOURCE` instead of a 500. Non-breaking for well-behaved clients.
+- **Campaign workbook export routes are rate limited** (`POST .../{tariffId|listId|campaignId}/export`
+  on the same six resources): `429` after 20 exports per minute per user. Commission and Plus
+  tariff exports of an unreadable stored file now answer `409 CONFLICT` instead of a 500. A stored
+  file whose rows no longer match the export plan answers `409 CONFLICT` with a fixed `detail`
+  (row numbers are logged server-side, not returned).
+- **Workbook reads are serialised per API process.** Imports and exports wait for one another; when
+  too many are already waiting, the request answers `503 IMPORT_BUSY` with `Retry-After` instead of
+  queuing indefinitely.
+- **Generic HTTP errors no longer echo library messages.** `400 MALFORMED_REQUEST` and other
+  pass-through HTTP errors carry fixed `detail` texts.
+
 - **Description-only updates (no wire change).** The order detail `unitCostSnapshotGross` and
   `unitCostSnapshotVatRate` descriptions, the order GET summary and the claim list and summary
   descriptions now say the values come from the profit lines (`profit_lines`), not from the

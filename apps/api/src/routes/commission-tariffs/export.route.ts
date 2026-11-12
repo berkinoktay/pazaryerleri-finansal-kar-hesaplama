@@ -2,10 +2,16 @@ import { createRoute, z } from '@hono/zod-openapi';
 
 import { CAPABILITIES } from '@pazarsync/utils';
 
+import { RATE_LIMITS } from '../../config/rate-limits';
 import { createSubApp } from '../../lib/create-hono-app';
 import { assertCapability } from '../../lib/require-capability';
 import { requireStoreAccess } from '../../lib/require-store-access';
-import { Common429Response, ProblemDetailsSchema } from '../../openapi';
+import { rateLimit } from '../../middleware/rate-limit.middleware';
+import {
+  Common429Response,
+  ProblemDetailsSchema,
+  WORKBOOK_EXPORT_ERROR_RESPONSES,
+} from '../../openapi';
 import {
   bundleForDownload,
   exportTariff,
@@ -31,6 +37,7 @@ const exportTariffRoute = createRoute({
     'ones, bundled into a single .zip. Marks the tariff exported. Returns 409 if the tariff has ' +
     'no stored source file.',
   security: [{ bearerAuth: [] }],
+  middleware: [rateLimit(RATE_LIMITS.FILE_EXPORT)] as const,
   request: { params: TariffIdPathSchema },
   responses: {
     200: {
@@ -58,6 +65,7 @@ const exportTariffRoute = createRoute({
       content: { 'application/json': { schema: ProblemDetailsSchema } },
       description: 'Tariff has no stored source file to export',
     },
+    ...WORKBOOK_EXPORT_ERROR_RESPONSES,
     429: Common429Response,
   },
 });

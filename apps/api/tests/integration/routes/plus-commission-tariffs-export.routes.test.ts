@@ -343,4 +343,21 @@ describe('plus-commission-tariff export', () => {
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe('CONFLICT');
   });
+
+  it('returns 409 when the stored source file is unreadable', async () => {
+    const ctx = await setupStore();
+    // Seed a tariff directly with stored bytes that are not a workbook at all.
+    const tariff = await prisma.plusCommissionTariff.create({
+      data: {
+        organizationId: ctx.orgId,
+        storeId: ctx.storeId,
+        name: 'Unreadable Source Plus Tariff',
+        sourceFile: new Uint8Array(Buffer.from('not a workbook')),
+      },
+    });
+
+    const res = await exportTariff(ctx, tariff.id);
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe('CONFLICT');
+  });
 });

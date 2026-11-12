@@ -21,10 +21,17 @@
  * - `VALIDATION_ERROR`: forms render field-level inline errors via
  *   `form.setError`. A toast on the same submit would compete with
  *   the inline error and obscure which field is wrong.
+ * - `PAYLOAD_TOO_LARGE`: only the workbook upload routes return it, and the
+ *   upload dialog renders the size error inline next to the file picker.
+ *   A toast would duplicate that message.
  *
  * The audit accepts these as legitimately absent from `KNOWN_CODES`.
  */
-export const SILENT_CODES: ReadonlySet<string> = new Set(['UNAUTHENTICATED', 'VALIDATION_ERROR']);
+export const SILENT_CODES: ReadonlySet<string> = new Set([
+  'UNAUTHENTICATED',
+  'VALIDATION_ERROR',
+  'PAYLOAD_TOO_LARGE',
+]);
 
 /**
  * Keys under `common.errors.*` that don't correspond to a backend or

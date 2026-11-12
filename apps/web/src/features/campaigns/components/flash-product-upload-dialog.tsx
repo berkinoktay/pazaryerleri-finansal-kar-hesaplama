@@ -3,6 +3,8 @@
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { WORKBOOK_UPLOAD_MAX_BYTES, WORKBOOK_UPLOAD_MAX_MB } from '@pazarsync/utils';
+
 import { FileUpload } from '@/components/patterns/file-upload';
 import { Button } from '@/components/ui/button';
 import {
@@ -14,8 +16,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-
-const MAX_SIZE_BYTES = 5 * 1024 * 1024;
 
 /**
  * Maps a backend file-rejection code to its localized message key bucket. Flash-specific
@@ -31,6 +31,7 @@ function useFileErrorMessage(): (code: string | null | undefined) => string | nu
         return null;
       case 'NOT_XLSX':
       case 'CORRUPT_FILE':
+      case 'UNSAFE_CONTENT':
         return t('notReadable');
       case 'EMPTY_FLASH_FILE':
         return t('empty');
@@ -106,9 +107,9 @@ export function FlashProductUploadDialog({
           <FileUpload
             value={file}
             accept=".xlsx"
-            maxSize={MAX_SIZE_BYTES}
+            maxSize={WORKBOOK_UPLOAD_MAX_BYTES}
             prompt={t('prompt')}
-            hint={t('hint')}
+            hint={t('hint', { maxMb: WORKBOOK_UPLOAD_MAX_MB })}
             ctaLabel={t('cta')}
             error={fileErrorMessage(errorCode)}
             onChange={(next) => {

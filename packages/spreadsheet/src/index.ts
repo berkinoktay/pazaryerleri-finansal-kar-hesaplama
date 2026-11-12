@@ -6,5 +6,5 @@ export { normalizeDecimalString } from './coerce';
 export { sanitizeCellText } from './sanitize';
 export { exportToXlsx } from './export';
 export { parseXlsx, readWorkbookGrid, type ReadGridOptions } from './parse';
-export { normalizeWorkbookForRead } from './normalize-workbook';
+export { resolveWorksheetPartPaths } from './read-copy';
 export type { SheetData } from 'read-excel-file/node';

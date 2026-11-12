@@ -16,10 +16,12 @@
 // — the engine's commission rate IS a percent.
 
 import { prisma } from '@pazarsync/db';
-import { mapPrismaError } from '@pazarsync/sync-core';
-import { readWorkbookGrid, SpreadsheetFileError, type SheetData } from '@pazarsync/spreadsheet';
+import { readWorkbookGrid, type SheetData } from '@pazarsync/spreadsheet';
 
+import { IMPORT_TX_OPTIONS } from '../config/workbook-limits';
 import { ValidationError } from '../lib/errors';
+import { isUniqueViolationOn, mapTransactionError } from '../lib/map-transaction-error';
+import { mapUploadedFileError } from '../lib/spreadsheet-errors';
 import { parseTariffPeriodLabel } from '../lib/tariff-period';
 import { cellDecimalString, cellInt, cellText } from '../lib/xlsx-grid-cells';
 import { resolvePlusTariffLayout, type PlusTariffLayout } from './plus-commission-tariff-layout';
@@ -133,10 +135,7 @@ export async function importPlusTariff(
   try {
     grid = await readWorkbookGrid(input.file, { sheetName: SHEET_NAME });
   } catch (err) {
-    if (err instanceof SpreadsheetFileError) {
-      throw new ValidationError([{ field: 'file', code: err.code }]);
-    }
-    throw err;
+    mapUploadedFileError(err);
   }
 
   if (grid.length < 2) {
@@ -287,7 +286,7 @@ export async function importPlusTariff(
         items += itemsData.length;
       }
       return { tariffId: tariff.id, itemCount: items };
-    });
+    }, IMPORT_TX_OPTIONS);
 
     return {
       tariffId,
@@ -299,6 +298,12 @@ export async function importPlusTariff(
       skippedRows,
     };
   } catch (err) {
-    mapPrismaError(err);
+    // Two concurrent uploads of the same week both pass the overlap pre-check
+    // above; the store/week unique index then rejects the later insert. Report it
+    // exactly like the pre-check does instead of a 409 that names the columns.
+    if (isUniqueViolationOn(err, 'week_starts_at')) {
+      throw new ValidationError([{ field: 'file', code: 'DUPLICATE_TARIFF_WEEK' }]);
+    }
+    mapTransactionError(err);
   }
 }

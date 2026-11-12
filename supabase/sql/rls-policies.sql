@@ -645,3 +645,81 @@ DROP POLICY IF EXISTS profit_recompute_queue_org_member_read ON profit_recompute
 CREATE POLICY profit_recompute_queue_org_member_read ON profit_recompute_queue
   FOR SELECT TO authenticated
   USING (can_access_store(store_id));
+
+-- --- Campaign parent tables: hide the raw uploaded workbook (source_file) ---
+-- commission_tariffs, plus_commission_tariffs, advantage_tariffs,
+-- flash_product_lists, discount_lists and marketplace_campaign_lists keep the
+-- seller's uploaded .xlsx bytes in `source_file` so export can byte-patch the
+-- marketplace's exact file. Those bytes are competitive pricing intelligence and
+-- the API hands them out only to DATA_WRITE callers, yet the row policies above
+-- (can_access_store) let every member who can see the store, VIEWER included,
+-- read the whole row through PostgREST. The column is therefore withheld at the
+-- privilege layer; the row policies stay exactly as they are.
+--
+-- Why a column-level `REVOKE SELECT (source_file)` alone does nothing: Postgres
+-- grants access when EITHER the table-level OR the column-level privilege is
+-- present, and the grant baseline at the top of this file re-grants table-level
+-- SELECT on every public table to `authenticated` on every apply. So this block
+-- drops the table-level SELECT (a table-level REVOKE also clears every
+-- column-level SELECT grant on that table) and then grants SELECT back column by
+-- column, on every column except source_file.
+--
+-- The column list is regenerated from information_schema on every
+-- `pnpm db:apply-policies`, so a new column needs no edit here. A column added by
+-- a migration between two applies starts with no grant for `authenticated`, i.e.
+-- closed until the next apply (the safe direction); `db:deploy` chains the apply
+-- right after `migrate deploy`. If `source_file` is ever renamed or moved, the
+-- first guard below fails the apply instead of silently granting the renamed
+-- column. The last guard checks the EFFECTIVE privilege afterwards, so a grant
+-- this block cannot see (another grantor, PUBLIC) fails the apply loudly rather
+-- than leaving the bytes readable.
+--
+-- `anon` loses table-level SELECT and gets nothing back (no policy targets it).
+-- INSERT/UPDATE/DELETE grants are unchanged; service_role and the postgres role
+-- keep full access. A scoped-client `.select('*')` on these tables now fails
+-- with 42501, so scoped reads must name their columns.
+--
+-- Must stay BELOW the grant baseline. apply-policies sends this file as a single
+-- query, which Postgres runs as one implicit transaction, so the baseline's
+-- re-grant is never visible to another session.
+DO $$
+DECLARE
+  _table text;
+  _columns text;
+BEGIN
+  FOREACH _table IN ARRAY ARRAY[
+    'commission_tariffs',
+    'plus_commission_tariffs',
+    'advantage_tariffs',
+    'flash_product_lists',
+    'discount_lists',
+    'marketplace_campaign_lists'
+  ]
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1
+        FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = _table
+         AND column_name = 'source_file'
+    ) THEN
+      RAISE EXCEPTION 'public.%.source_file not found; update the source_file privilege block in rls-policies.sql', _table;
+    END IF;
+
+    SELECT string_agg(quote_ident(column_name), ', ' ORDER BY ordinal_position)
+      INTO _columns
+      FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = _table
+       AND column_name <> 'source_file';
+
+    EXECUTE format('REVOKE SELECT ON public.%I FROM authenticated, anon', _table);
+    EXECUTE format('GRANT SELECT (%s) ON public.%I TO authenticated', _columns, _table);
+
+    IF has_column_privilege('authenticated', format('public.%I', _table), 'source_file', 'SELECT')
+       OR has_column_privilege('anon', format('public.%I', _table), 'source_file', 'SELECT') THEN
+      RAISE EXCEPTION 'public.%.source_file is still readable by the scoped client after the privilege reset', _table;
+    END IF;
+  END LOOP;
+END
+$$;

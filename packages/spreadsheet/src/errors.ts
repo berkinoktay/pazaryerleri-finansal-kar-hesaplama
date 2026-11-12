@@ -6,7 +6,10 @@ export type SpreadsheetFileErrorCode =
   | 'SHEET_NOT_FOUND'
   | 'ROW_CAP_EXCEEDED'
   | 'COL_CAP_EXCEEDED'
-  | 'PAYLOAD_TOO_LARGE';
+  | 'PAYLOAD_TOO_LARGE'
+  | 'UNSAFE_CONTENT'
+  // Not about the file: the parse queue is full; the caller may retry later.
+  | 'ENGINE_BUSY';
 
 /** Neutral file-level error; decoupled from api/domain. Consumer route maps it to its own RFC 7807 response. */
 export class SpreadsheetFileError extends Error {

@@ -37,14 +37,15 @@ Sen ana oturumsun ve uygulayıcılar da Opus'ta çalışıyor. Bu yüzden işi d
 
 | İş                                               | Ajan                        | Model                    |
 | ------------------------------------------------ | --------------------------- | ------------------------ |
-| Uygulama adımı (varsayılan)                      | `implementer`               | opus (frontmatter)       |
-| Prisma şeması, migration, RLS politikası         | `supabase-schema-architect` | opus                     |
-| Kök nedeni bilinmeyen hata, flake analizi        | `debugger`                  | opus                     |
-| Adım denetimi                                    | `code-reviewer`             | opus                     |
+| Uygulama adımı (varsayılan)                      | `implementer`               | Opus 5.5 (frontmatter)   |
+| Prisma şeması, migration, RLS politikası         | `supabase-schema-architect` | Opus 5.5                 |
+| Kök nedeni bilinmeyen hata, flake analizi        | `debugger`                  | Opus 5.5                 |
+| Adım denetimi                                    | `code-reviewer`             | Opus 5.5                 |
 | Kapanış denetimi (yalnızca riskli işte, bir kez) | `code-reviewer`             | çağrıda `model: "fable"` |
 | Geniş keşif (dosya dökümü değil, sonuç lazım)    | `Explore`                   | varsayılan               |
 
 - **Model kuralı:** ajan çağrısında `model: "sonnet"` ya da `model: "haiku"` verme. Berkin'in kararı: önemli iş her zaman en güçlü modelde yapılır.
+- **Opus sürümü sabit:** ajan tanımlarında `model: claude-opus-5-5` yazar. Proje `settings.json` dosyası da `ANTHROPIC_DEFAULT_OPUS_MODEL` ile `opus` takma adını Opus 5.5'e bağlar. Bu yüzden `/model opus` ve çağrıdaki `model: "opus"` da Opus 5.5'e gider. Yeni bir Opus sürümüne geçmek Berkin'in kararıdır; bu iki yer birlikte güncellenir.
 - `superpowers:subagent-driven-development` kullanma, çünkü genel amaçlı ajanlara düşük model atıyor.
 - Workflow aracını yalnızca Berkin açıkça isterse aç, küçük boyutta tut.
 - `Explore`'a dar ve net bir kapsam ver ("şu klasörde şunu bul") ve yalnızca sonucu iste. Kapsamsız tarama çok uzun sürüyor.
