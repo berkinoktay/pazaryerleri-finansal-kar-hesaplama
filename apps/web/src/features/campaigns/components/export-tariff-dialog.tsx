@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
-import type { ExportPreviewFile } from '../lib/whole-week';
+import type { ExportPreviewFile } from '../lib/export-preview';
 
 /**
  * All localized copy the dialog renders, passed in by the caller (the {@link
@@ -78,9 +78,11 @@ export function ExportTariffDialog({
         </DialogHeader>
 
         <ul className="gap-2xs flex flex-col">
-          {files.map((file) => (
+          {/* Keyed by position: the list is a fixed, ordered plan, and two files can
+              share a day count (a legacy null day count falls back to the week). */}
+          {files.map((file, index) => (
             <li
-              key={file.dayCount}
+              key={index}
               className="gap-sm border-border bg-card px-md py-sm flex items-center justify-between rounded-lg border"
             >
               <span className="gap-sm flex min-w-0 items-center">

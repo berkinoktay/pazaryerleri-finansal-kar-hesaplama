@@ -54,7 +54,7 @@ export function resolveCampaignExportPrice(item: {
 
 /**
  * True when the import kept an item for this data row (so it must consume one item when
- * zipping). Mirrors `marketplace-campaign-import`'s `parseRow` skip rule BİREBİR: barkod +
+ * zipping). Mirrors `marketplace-campaign-import`'s `parseCampaignRow` skip rule BİREBİR: barkod +
  * mevcut fiyat + maksimum fiyat okunabilir olmalı. Kept in sync with that contract — a drift
  * here (e.g. a dropped condition) makes this predicate keep MORE rows than the real import
  * did, shifting every subsequent row's alignment. Exported so the contract can be pinned by

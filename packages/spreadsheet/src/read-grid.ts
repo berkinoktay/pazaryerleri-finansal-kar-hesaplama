@@ -8,7 +8,7 @@ import { SpreadsheetFileError } from './errors';
 import type { CellValue, SheetData } from './grid-types';
 import { openUpload, type UploadParts } from './guards';
 import { checkPart, type CellVisitor, type GridCaps } from './part-checks';
-import type { ResolvedReadOptions } from './read-options';
+import type { ResolvedReadOptions, SheetSelector } from './read-options';
 import {
   extractRelationships,
   WORKBOOK_PART,
@@ -33,10 +33,25 @@ import { corruptPart, firstChildNamed, parsePart } from './xml-dom';
 // Gate errors win over reader errors: a rule the reader would break (ReaderRuleError)
 // is held until every part has passed checkPart. A named sheet that cannot be read
 // falls back to the first sheet, as the old pipeline's wrapper did; a sheet that
-// still cannot be read is CORRUPT_FILE.
+// still cannot be read is CORRUPT_FILE. A strict selector (`sheet`) never falls back:
+// a sheet it does not find is SHEET_NOT_FOUND, raised only after every part has passed
+// checkPart and no reader rule is held; a selected sheet that cannot be read is
+// CORRUPT_FILE.
 
 const SHEET_DATA = 'sheetData';
 const READ_FAILED_MESSAGE = 'Cannot read workbook';
+const SHEET_NOT_FOUND_MESSAGE = 'Selected sheet not found';
+
+/** Which sheet readGrid reads: strictly by `sheet`, else by `sheetName` (see chooseSheet). */
+interface SheetRequest {
+  readonly sheetName?: string;
+  readonly sheet?: SheetSelector;
+}
+
+/** readGrid's options: the sheet to read and the gate's caps. */
+interface GridReadOptions extends SheetRequest {
+  readonly caps: GridCaps;
+}
 
 /** Called with each part's root before its checks; returns the visitor for its cells. */
 type PartHandler = (
@@ -70,10 +85,14 @@ interface ScanState {
   conversion: Conversion | null;
 }
 
-/** The sheet to read, and whether its failure falls back to the first sheet. */
+/**
+ * The sheet to read, whether its failure falls back to the first sheet, and, when a
+ * strict selector matches no sheet, the selector's kind (else null).
+ */
 interface SheetChoice {
   readonly sheet: SheetEntry | undefined;
   readonly fallback: boolean;
+  readonly missing: SheetSelector['by'] | null;
 }
 
 function partRoot(parts: UploadParts, path: string): Element {
@@ -139,16 +158,14 @@ function readBookPart(
   path: string,
   root: Element,
   relationships: WorkbookRelationships,
-  sheetName: string | undefined,
+  request: SheetRequest,
 ): void {
   if (path === WORKBOOK_PART) {
     holdReaderError(state, () => {
       const workbook = extractWorkbook(root);
       state.workbook = workbook;
-      state.targetPath = worksheetPath(
-        relationships,
-        chooseSheet(workbook.sheets, sheetName).sheet,
-      );
+      // A missing strict sheet has no target: nothing is converted during the scan.
+      state.targetPath = worksheetPath(relationships, chooseSheet(workbook.sheets, request).sheet);
     });
   }
   if (path === relationships.sharedStringsPath) {
@@ -164,13 +181,39 @@ function readBookPart(
 }
 
 /**
- * The first sheet named `sheetName`, else the first sheet. Only a named sheet after
- * the first falls back: an unknown name already reads the first sheet.
+ * With a strict `sheet` selector, the sheet it selects, never a fallback; a selector
+ * that matches no sheet is `missing`, except in an empty sheet list, which reads as
+ * CORRUPT_FILE as before. Otherwise the first sheet named `sheetName`, else the first
+ * sheet. Only a named sheet after the first falls back: an unknown name already reads
+ * the first sheet.
  */
-function chooseSheet(sheets: readonly SheetEntry[], sheetName: string | undefined): SheetChoice {
+function chooseSheet(sheets: readonly SheetEntry[], request: SheetRequest): SheetChoice {
+  const { sheet: selector, sheetName } = request;
+  if (selector !== undefined) {
+    const sheet = selectSheet(sheets, selector);
+    const missing = sheet === undefined && sheets.length > 0 ? selector.by : null;
+    return { sheet, fallback: false, missing };
+  }
   const index = sheetName === undefined ? -1 : sheets.findIndex((s) => s.name === sheetName);
-  if (index < 0) return { sheet: sheets[0], fallback: false };
-  return { sheet: sheets[index], fallback: index > 0 };
+  if (index < 0) return { sheet: sheets[0], fallback: false, missing: null };
+  return { sheet: sheets[index], fallback: index > 0, missing: null };
+}
+
+/** The first sheet named exactly as `selector` says, or the sheet at its index. */
+function selectSheet(
+  sheets: readonly SheetEntry[],
+  selector: SheetSelector,
+): SheetEntry | undefined {
+  switch (selector.by) {
+    case 'name':
+      return sheets.find((s) => s.name === selector.name);
+    case 'index':
+      return sheets[selector.index];
+    default: {
+      const _exhaustive: never = selector;
+      throw new Error(`Unhandled sheet selector: ${String(_exhaustive)}`);
+    }
+  }
 }
 
 /** The worksheet part `sheet` reads from, or null when its relation is not a worksheet. */
@@ -277,12 +320,13 @@ function cannotRead(cause: ReaderRuleError): SpreadsheetFileError {
   });
 }
 
+function sheetNotFound(by: SheetSelector['by']): SpreadsheetFileError {
+  return new SpreadsheetFileError('SHEET_NOT_FOUND', SHEET_NOT_FOUND_MESSAGE, { by });
+}
+
 /** The body of readGrid; see readGrid. */
-function readGridParts(
-  parts: UploadParts,
-  options: { readonly sheetName?: string; readonly caps: GridCaps },
-): SheetData {
-  const { sheetName, caps } = options;
+function readGridParts(parts: UploadParts, options: GridReadOptions): SheetData {
+  const { caps } = options;
   const state: ScanState = {
     held: null,
     workbook: null,
@@ -293,7 +337,7 @@ function readGridParts(
   };
 
   const relationships = scanParts(parts, caps, (path, root, rels) => {
-    readBookPart(state, path, root, rels, sheetName);
+    readBookPart(state, path, root, rels, options);
     const workbook = state.workbook;
     // Every book part is scanned before any other part, so `held` and the workbook are
     // final here. A worksheet that is also a book part is converted after the scan.
@@ -308,8 +352,10 @@ function readGridParts(
   if (state.held !== null) throw cannotRead(state.held);
   const workbook = state.workbook;
   if (workbook === null) throw cannotRead(new ReaderRuleError('Workbook part was not read'));
+  const choice = chooseSheet(workbook.sheets, options);
+  // Only now: every part has passed checkPart and no reader rule is held.
+  if (choice.missing !== null) throw sheetNotFound(choice.missing);
   const context = cellContext(state, workbook);
-  const choice = chooseSheet(workbook.sheets, sheetName);
   let conversion =
     state.conversion ?? convertSheet(parts, caps, relationships, choice.sheet, context);
   if (conversion.failure !== null && choice.fallback) {
@@ -320,14 +366,13 @@ function readGridParts(
 }
 
 /**
- * The grid of the sheet named `sheetName` (else the first sheet) of the reader parts
- * `parts` (see the header). Throws SpreadsheetFileError: every gate error checkPart
- * raises, before any reader error; CORRUPT_FILE when the workbook cannot be read.
+ * The grid of the sheet `options` selects (strictly by `sheet`, else named `sheetName`
+ * with the first-sheet fallback) of the reader parts `parts` (see the header). Throws
+ * SpreadsheetFileError: every gate error checkPart raises, before any reader error;
+ * CORRUPT_FILE when the workbook cannot be read; SHEET_NOT_FOUND `{ by }` when a strict
+ * selector matches no sheet.
  */
-export function readGrid(
-  parts: UploadParts,
-  options: { readonly sheetName?: string; readonly caps: GridCaps },
-): SheetData {
+export function readGrid(parts: UploadParts, options: GridReadOptions): SheetData {
   try {
     return readGridParts(parts, options);
   } catch (e) {
@@ -377,9 +422,10 @@ export function assertGridTextWithinCap(grid: SheetData): void {
  * workbook cannot be read.
  */
 export function readUploadGrid(file: Uint8Array, options: ResolvedReadOptions): SheetData {
-  const { sheetName, rowCap, colCap, maxBytes } = options;
+  const { sheetName, sheet, rowCap, colCap, maxBytes } = options;
   const grid = readGrid(openUpload(file, { rowCap, colCap, maxBytes }), {
     sheetName,
+    sheet,
     caps: { rowCap, colCap },
   });
   assertGridTextWithinCap(grid);

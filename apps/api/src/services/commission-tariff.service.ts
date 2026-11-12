@@ -144,8 +144,9 @@ export async function getTariffDetail(
               // exactly as in the uploaded file — matching Trendyol's own screen — and
               // identically across sub-period tabs (same product → same sortOrder in every
               // period). Barcode breaks any tie (e.g. legacy rows imported before the
-              // column existed, all defaulting to 0).
-              orderBy: [{ sortOrder: 'asc' }, { barcode: 'asc' }],
+              // column existed, all defaulting to 0); id makes the order total, so the
+              // export (same orderBy) resolves a repeated barcode the same way.
+              orderBy: [{ sortOrder: 'asc' }, { barcode: 'asc' }, { id: 'asc' }],
               select: {
                 id: true,
                 productVariantId: true,

@@ -64,6 +64,8 @@ describe('readWorkbookGrid: worker kills', () => {
   const SMALL_YOUNG_GENERATION_MB = 32;
   const OOM_ROWS = 5_000;
   const OOM_COLUMNS = 40;
+  const MEMORY_KILL_TIMEOUT_MS = 120_000;
+  const MEMORY_KILL_TEST_TIMEOUT_MS = 180_000;
   let host: GridWorkerHost | null = null;
 
   afterEach(async () => {
@@ -76,24 +78,29 @@ describe('readWorkbookGrid: worker kills', () => {
     return e instanceof SpreadsheetFileError ? workerLimitReason(e) : null;
   }
 
-  it('releases the queue slot after a worker kill', async () => {
-    host = createGridWorkerHost({
-      maxOldGenerationSizeMb: SMALL_HEAP_MB,
-      maxYoungGenerationSizeMb: SMALL_YOUNG_GENERATION_MB,
-      timeoutMs: GRID_WORKER_TIMEOUT_MS,
-    });
-    setGridWorkerHostForTests(host);
-    const tooBig = buildXlsxFixture([
-      { name: 'Sheet1', xml: worksheetXml(numberRows(OOM_ROWS, OOM_COLUMNS)) },
-    ]);
-    const small = buildXlsxFixture([{ name: 'Sheet1', xml: worksheetXml(QUEUE_ROWS) }]);
+  it(
+    'parses the next call on a fresh worker after a kill',
+    async () => {
+      host = createGridWorkerHost({
+        maxOldGenerationSizeMb: SMALL_HEAP_MB,
+        maxYoungGenerationSizeMb: SMALL_YOUNG_GENERATION_MB,
+        // Generous, so only memory can kill the first parse, even on a loaded machine.
+        timeoutMs: MEMORY_KILL_TIMEOUT_MS,
+      });
+      setGridWorkerHostForTests(host);
+      const tooBig = buildXlsxFixture([
+        { name: 'Sheet1', xml: worksheetXml(numberRows(OOM_ROWS, OOM_COLUMNS)) },
+      ]);
+      const small = buildXlsxFixture([{ name: 'Sheet1', xml: worksheetXml(QUEUE_ROWS) }]);
 
-    const killed = readWorkbookGrid(tooBig).then(() => null, reasonOf);
-    const next = readWorkbookGrid(small);
-
-    expect(await killed).toBe('worker-memory');
-    await expect(next).resolves.toEqual(QUEUE_ROWS);
-  });
+      // One after the other, not queued together: under load the killed parse can take
+      // longer than the queue's wait limit, which would refuse a call queued behind it.
+      // The queue's own slot release is pinned in parse-queue.test.ts.
+      expect(await readWorkbookGrid(tooBig).then(() => null, reasonOf)).toBe('worker-memory');
+      await expect(readWorkbookGrid(small)).resolves.toEqual(QUEUE_ROWS);
+    },
+    MEMORY_KILL_TEST_TIMEOUT_MS,
+  );
 });
 
 // CI only: the grown workbook builds about 460 MB of DOM in the worker, which freezes

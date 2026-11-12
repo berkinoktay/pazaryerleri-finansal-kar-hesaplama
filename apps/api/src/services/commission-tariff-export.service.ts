@@ -103,6 +103,10 @@ export async function exportTariff(
           select: {
             dayCount: true,
             items: {
+              // The detail screen's total order (Excel row order, then barcode, then
+              // id), so when a file repeats a barcode the last row deterministically
+              // wins the per-period price map, the same row the detail screen lists last.
+              orderBy: [{ sortOrder: 'asc' }, { barcode: 'asc' }, { id: 'asc' }],
               select: {
                 barcode: true,
                 selectedBand: true,

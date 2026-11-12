@@ -11,7 +11,7 @@
 // time; `currentCommissionPct` (the "Mevcut Komisyon" column) is the flat fallback.
 
 import { prisma } from '@pazarsync/db';
-import { readWorkbookGrid, type SheetData } from '@pazarsync/spreadsheet';
+import { cellInstant, readWorkbookGrid, type SheetData } from '@pazarsync/spreadsheet';
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
 
 import { IMPORT_TX_OPTIONS } from '../config/workbook-limits';
@@ -25,43 +25,14 @@ const SHEET_NAME = 'TeklifÜrünleri';
 
 // Trendyol stamps the offer windows as "08/07/2026 00:00" text (Istanbul wall
 // clock). Parsed into the true instant via the business-timezone helper.
-const FLASH_DATE_RE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})$/;
-
-/** Parses a "dd/MM/yyyy HH:mm" Istanbul wall-clock string into the true instant, or null. */
-function parseFlashDateTime(text: string): Date | null {
-  const match = FLASH_DATE_RE.exec(text.trim());
-  if (match === null) return null;
-  const [, day, month, year, hour, minute] = match;
-  if (
-    day === undefined ||
-    month === undefined ||
-    year === undefined ||
-    hour === undefined ||
-    minute === undefined
-  ) {
-    return null;
-  }
-  const epochAsIfUtc = Date.UTC(
-    Number(year),
-    Number(month) - 1,
-    Number(day),
-    Number(hour),
-    Number(minute),
-  );
-  return businessZoneEpochToInstant(epochAsIfUtc);
-}
-
 /** A window date cell → instant. Handles the usual text cell and a defensive real-date cell. */
 export function parseFlashWindowCell(row: readonly unknown[], idx: number): Date | null {
-  if (idx < 0) return null;
-  const raw = row[idx];
   // the grid reader yields date-formatted cells as a naive UTC Date (the Istanbul
   // wall-clock components embedded as if they were UTC), so it reads ~3h ahead of the
-  // real instant. Normalise it through the SAME business-zone frame as the text path,
-  // otherwise a window near a sub-period boundary lands in the wrong commission band.
-  if (raw instanceof Date) return businessZoneEpochToInstant(raw.getTime());
-  const text = cellText(row, idx);
-  return text === null ? null : parseFlashDateTime(text);
+  // real instant. `cellInstant` normalises it through the SAME business-zone frame as
+  // the text path, otherwise a window near a sub-period boundary lands in the wrong
+  // commission band. An Invalid Date cell reads as null.
+  return cellInstant(row, idx, 'dd/MM/yyyy HH:mm', businessZoneEpochToInstant);
 }
 
 interface ParsedFlashOffer {
@@ -114,7 +85,10 @@ interface ParsedFlashRow {
   externalId: string | null;
 }
 
-function parseRow(row: readonly unknown[], layout: FlashProductLayout): ParsedFlashRow | null {
+export function parseFlashProductRow(
+  row: readonly unknown[],
+  layout: FlashProductLayout,
+): ParsedFlashRow | null {
   const barcode = cellText(row, layout.barcode);
   if (barcode === null) return null;
   const currentPrice = cellDecimalString(row, layout.currentPrice);
@@ -200,7 +174,7 @@ export async function importFlashProducts(
   const parsed: ParsedFlashRow[] = [];
   let skippedRows = 0;
   for (const row of grid.slice(1)) {
-    const parsedRow = parseRow(row, layout);
+    const parsedRow = parseFlashProductRow(row, layout);
     if (parsedRow === null) {
       skippedRows += 1;
       continue;

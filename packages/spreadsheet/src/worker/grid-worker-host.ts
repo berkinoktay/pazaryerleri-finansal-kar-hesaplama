@@ -210,6 +210,7 @@ export function createGridWorkerHost(limits: GridWorkerLimits): GridWorkerHost {
         bytes: copy.buffer,
         options: {
           sheetName: options.sheetName,
+          sheet: options.sheet,
           rowCap: options.rowCap,
           colCap: options.colCap,
           maxBytes: options.maxBytes,

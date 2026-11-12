@@ -328,6 +328,54 @@ describe('commission-tariff export + variable periods', () => {
     expect(text(patched, layout.tariffSelection)).toBe('7 Günlük Fiyat');
   });
 
+  it('lets the higher-sortOrder row win when a period repeats a barcode, whatever the insert order', async () => {
+    const ctx = await setupStore();
+    const tariffId = await importFixture(ctx, FIXTURE_2P, 'tariff.xlsx');
+
+    // A single-period tariff whose period lists the matched barcode TWICE, each row with
+    // its own selected band + price. The rows are inserted in REVERSE sortOrder (1 first,
+    // then 0), so insertion/heap order alone would let the sortOrder-0 row win the
+    // barcode -> price map. The export's item orderBy (sortOrder asc, as the detail screen
+    // lists them) must make the sortOrder-1 row, listed last, the one that is written.
+    const periods = await prisma.commissionTariffPeriod.findMany({ where: { tariffId } });
+    expect(periods).toHaveLength(1);
+    const periodId = periods[0]?.id;
+    if (periodId === undefined) return;
+    await prisma.commissionTariffItem.deleteMany({ where: { periodId } });
+    const mkItem = async (sortOrder: number, sel: BandSel): Promise<void> => {
+      await prisma.commissionTariffItem.create({
+        data: {
+          organizationId: ctx.orgId,
+          storeId: ctx.storeId,
+          periodId,
+          barcode: MATCHED_BARCODE,
+          productTitle: 'Test',
+          sortOrder,
+          currentPrice: '285.00',
+          currentCommissionPct: '0.19',
+          bands: [{ key: sel.band, upperLimit: sel.price, commissionPct: '19' }],
+          selectedBand: sel.band,
+        },
+      });
+    };
+    await mkItem(1, { band: 'band2', price: '777.09' });
+    await mkItem(0, { band: 'band3', price: '900.00' });
+
+    const res = await app.request(
+      `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/commission-tariffs/${tariffId}/export`,
+      { method: 'POST', headers: { Authorization: bearer(ctx.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('spreadsheetml');
+
+    const grid = await readWorkbookGrid(Buffer.from(await res.arrayBuffer()));
+    const layout = resolveLayout(grid[0] ?? []);
+    expect(layout).not.toBeNull();
+    if (layout === null) return;
+    const patched = grid.slice(1).find((r) => text(r, layout.fixed.barcode) === MATCHED_BARCODE);
+    expect(Number(text(patched, layout.newTsf))).toBe(777.09);
+  });
+
   it('returns 409 when the stored source file is unreadable', async () => {
     const ctx = await setupStore();
     // Seed a tariff directly with stored bytes that are not a workbook at all.

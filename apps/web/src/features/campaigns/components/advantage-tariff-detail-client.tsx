@@ -32,7 +32,7 @@ import {
 import { summarizeAdvantageSelection } from '../lib/advantage-tariff-summary';
 import { downloadBlob } from '../lib/download-blob';
 import { TariffScopeProvider } from '../lib/tariff-scope';
-import type { ExportPreviewFile } from '../lib/whole-week';
+import type { ExportPreviewFile } from '../lib/export-preview';
 import { AdvantageCommissionSourceHeader } from './advantage-commission-source-header';
 import { AdvantageCommissionWarning } from './advantage-commission-warning';
 import { AdvantageTariffsMobileCards } from './advantage-tariffs-mobile-cards';

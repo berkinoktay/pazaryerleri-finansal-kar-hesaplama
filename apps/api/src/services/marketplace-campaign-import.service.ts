@@ -46,7 +46,7 @@ export interface ParsedCampaignRow {
  * zorunludur çünkü hem birinci fiyat seçeneği hem özel fiyatın tavanıdır — o olmadan
  * satır hiçbir şekilde kampanyaya katılamaz.
  */
-function parseRow(
+export function parseCampaignRow(
   row: readonly unknown[],
   layout: MarketplaceCampaignLayout,
 ): ParsedCampaignRow | null {
@@ -101,7 +101,7 @@ export function parseCampaignRows(
   const rows: ParsedCampaignRow[] = [];
   let skippedRows = 0;
   for (const row of grid.slice(1)) {
-    const parsed = parseRow(row, layout);
+    const parsed = parseCampaignRow(row, layout);
     if (parsed === null) {
       skippedRows += 1;
       continue;

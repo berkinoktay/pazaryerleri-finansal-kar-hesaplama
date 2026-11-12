@@ -43,7 +43,7 @@ export interface ExportDiscountListResult {
 
 /**
  * True when the import kept an item for this data row (so it must consume one item when
- * zipping). Mirrors `discount-list-import`'s `parseRow` skip rules: a barcode + a
+ * zipping). Mirrors `discount-list-import`'s `parseDiscountListRow` skip rules: a barcode + a
  * currency-parsable current price. Kept in sync with that contract.
  */
 function isImportedDiscountRow(row: readonly unknown[], layout: DiscountListLayout): boolean {

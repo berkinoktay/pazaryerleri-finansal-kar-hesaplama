@@ -37,7 +37,7 @@ import {
 import { summarizeFlashSelection } from '../lib/flash-product-summary';
 import { downloadBlob } from '../lib/download-blob';
 import { TariffScopeProvider } from '../lib/tariff-scope';
-import type { ExportPreviewFile } from '../lib/whole-week';
+import type { ExportPreviewFile } from '../lib/export-preview';
 import { ExportTariffDialog } from './export-tariff-dialog';
 import { FlashProductsMobileCards } from './flash-products-mobile-cards';
 import { FlashProductsSummary } from './flash-products-summary';

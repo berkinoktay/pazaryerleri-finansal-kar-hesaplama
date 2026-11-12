@@ -99,4 +99,34 @@ describe('ExportTariffDialog', () => {
     );
     expect(screen.queryByText(/ZIP/)).not.toBeInTheDocument();
   });
+
+  it('renders two files with the same day count without a duplicate-key warning', () => {
+    // A legacy null day count can tag two files alike; the list keys by position.
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      render(
+        <ExportTariffDialog
+          open
+          onOpenChange={vi.fn()}
+          files={[
+            { dayCount: 4, count: 1 },
+            { dayCount: 4, count: 2 },
+          ]}
+          labels={LABELS}
+          isSaving={false}
+          isDownloading={false}
+          onConfirm={vi.fn()}
+        />,
+      );
+      expect(screen.getAllByText('4 Günlük Fiyat')).toHaveLength(2);
+      expect(screen.getByText('1 ürün')).toBeInTheDocument();
+      expect(screen.getByText('2 ürün')).toBeInTheDocument();
+      const duplicateKeyWarnings = consoleError.mock.calls.filter((args) =>
+        args.some((arg) => typeof arg === 'string' && arg.includes('same key')),
+      );
+      expect(duplicateKeyWarnings).toEqual([]);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
 });

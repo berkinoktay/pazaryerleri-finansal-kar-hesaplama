@@ -4,9 +4,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_COL_CAP, DEFAULT_MAX_BYTES, DEFAULT_ROW_CAP } from './constants';
 import { SpreadsheetFileError, type SpreadsheetFileErrorCode } from './errors';
+import type { SheetData } from './grid-types';
 import { openUpload, type UploadParts } from './guards';
 import { checkUploadParts, readGrid } from './read-grid';
+import type { SheetSelector } from './read-options';
 import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
+import { expectWithinBudget } from '../tests/helpers/timing';
 
 const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>';
 const SPREADSHEET_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
@@ -32,7 +35,8 @@ const CAPS = { rowCap: OPTS.rowCap, colCap: OPTS.colCap } as const;
 const LONG_STRING_SPACES = 8 * 1024 * 1024;
 const SHARED_STRING_CELLS = 20_000;
 const SHARED_STRING_COLUMNS = 50;
-const LINEAR_TRIM_BUDGET_MS = 5_000;
+// Enforced in CI only (tests/helpers/timing.ts); re-trimming per cell would take hours.
+const LINEAR_TRIM_BUDGET_MS = 20_000;
 // A format code far beyond Excel's 255 and many xfs pointing at it: classified once per
 // xf, this took seconds; the gate must reject it before any classification.
 const LONG_FORMAT_CODE = 100_000;
@@ -77,6 +81,21 @@ function errorCodeOf(run: () => unknown): SpreadsheetFileErrorCode | null {
     if (e instanceof SpreadsheetFileError) return e.code;
     throw e;
   }
+}
+
+function fileErrorOf(run: () => unknown): SpreadsheetFileError {
+  try {
+    run();
+  } catch (e) {
+    if (e instanceof SpreadsheetFileError) return e;
+    throw e;
+  }
+  throw new Error('expected a SpreadsheetFileError');
+}
+
+/** A `<sheet>` entry whose relation is `rId{n}`; `attributes` go after sheetId. */
+function sheetEntry(name: string, n: number, attributes = ''): string {
+  return `<sheet name="${name}" sheetId="${n}"${attributes} r:id="rId${n}"/>`;
 }
 
 afterEach(() => {
@@ -151,8 +170,161 @@ describe('readGrid', () => {
 
       expect(grid).toHaveLength(rowCount);
       expect(grid[rowCount - 1]?.[SHARED_STRING_COLUMNS - 1]).toBe('x');
-      expect(elapsedMs).toBeLessThan(LINEAR_TRIM_BUDGET_MS);
+      expectWithinBudget(elapsedMs, LINEAR_TRIM_BUDGET_MS);
     });
+  });
+});
+
+describe('readGrid: strict sheet selection', () => {
+  const DATA_ROWS = [['Barkod'], ['B1']];
+  // A cell the reader rejects (a boolean that is not 0 or 1).
+  const BROKEN_ROW = '<row r="1"><c r="A1" t="b"><v>yes</v></c></row>';
+
+  function helpFirstFile(): Buffer {
+    return buildXlsxFixture([
+      { name: 'Help', xml: worksheetXml([['help text']]) },
+      { name: 'Veri', xml: worksheetXml(DATA_ROWS) },
+    ]);
+  }
+
+  function readWith(file: Buffer, sheet: SheetSelector): SheetData {
+    return readGrid(openUpload(file, OPTS), { sheet, caps: CAPS });
+  }
+
+  it('reads the sheet a name or an index selects, past a help sheet', () => {
+    const file = helpFirstFile();
+
+    expect(readWith(file, { by: 'name', name: 'Veri' })).toEqual(DATA_ROWS);
+    expect(readWith(file, { by: 'index', index: 1 })).toEqual(DATA_ROWS);
+    expect(readWith(file, { by: 'index', index: 0 })).toEqual([['help text']]);
+  });
+
+  it('takes the first of two sheets with the same name', () => {
+    const file = buildXlsxFixture([
+      { name: 'Veri', xml: worksheetXml(DATA_ROWS) },
+      { name: 'Veri', xml: worksheetXml([['second']]) },
+    ]);
+
+    expect(readWith(file, { by: 'name', name: 'Veri' })).toEqual(DATA_ROWS);
+  });
+
+  it('counts hidden and very hidden sheets in the index', () => {
+    const parts: UploadParts = {
+      [RELS_PART]: strToU8(
+        relsOf(
+          relationship('rId1', 'worksheet', 'worksheets/sheet1.xml'),
+          relationship('rId2', 'worksheet', 'worksheets/sheet2.xml'),
+          relationship('rId3', 'worksheet', 'worksheets/sheet3.xml'),
+        ),
+      ),
+      [WORKBOOK_PART]: strToU8(
+        workbookOf(
+          sheetEntry('Hidden', 1, ' state="hidden"') +
+            sheetEntry('VeryHidden', 2, ' state="veryHidden"') +
+            sheetEntry('Visible', 3),
+        ),
+      ),
+      [SHEET_PART]: strToU8(worksheetXml([['hidden']])),
+      'xl/worksheets/sheet2.xml': strToU8(worksheetXml([['very hidden']])),
+      'xl/worksheets/sheet3.xml': strToU8(worksheetXml([['visible']])),
+    };
+    const readIndex = (index: number): SheetData =>
+      readGrid(parts, { sheet: { by: 'index', index }, caps: CAPS });
+
+    expect(readIndex(0)).toEqual([['hidden']]);
+    expect(readIndex(1)).toEqual([['very hidden']]);
+    expect(readIndex(2)).toEqual([['visible']]);
+  });
+
+  it('reads a sheet whose relation is not a worksheet as CORRUPT_FILE', () => {
+    const parts: UploadParts = {
+      [RELS_PART]: strToU8(
+        relsOf(
+          relationship('rId1', 'worksheet', 'worksheets/sheet1.xml'),
+          relationship('rId2', 'chartsheet', 'chartsheets/sheet1.xml'),
+        ),
+      ),
+      [WORKBOOK_PART]: strToU8(workbookOf(sheetEntry('Data', 1) + sheetEntry('Chart', 2))),
+      [SHEET_PART]: strToU8(worksheetXml([['d']])),
+    };
+
+    expect(
+      errorCodeOf(() => readGrid(parts, { sheet: { by: 'index', index: 1 }, caps: CAPS })),
+    ).toBe('CORRUPT_FILE');
+    expect(
+      errorCodeOf(() => readGrid(parts, { sheet: { by: 'name', name: 'Chart' }, caps: CAPS })),
+    ).toBe('CORRUPT_FILE');
+  });
+
+  it('throws SHEET_NOT_FOUND for an index beyond the list or a name no sheet has', () => {
+    const file = helpFirstFile();
+
+    const byIndex = fileErrorOf(() => readWith(file, { by: 'index', index: 2 }));
+    expect(byIndex.code).toBe('SHEET_NOT_FOUND');
+    expect(byIndex.meta).toEqual({ by: 'index' });
+    const byName = fileErrorOf(() => readWith(file, { by: 'name', name: 'Nope' }));
+    expect(byName.code).toBe('SHEET_NOT_FOUND');
+    expect(byName.meta).toEqual({ by: 'name' });
+    // The name must match exactly.
+    expect(errorCodeOf(() => readWith(file, { by: 'name', name: 'veri' }))).toBe('SHEET_NOT_FOUND');
+  });
+
+  it('reports a gate error, then a held reader error, before a missing sheet', () => {
+    const beyondRow = DEFAULT_ROW_CAP + 2;
+    const capViolation = buildXlsxFixture([
+      { name: 'A', xml: worksheetXml([['a']]) },
+      {
+        name: 'B',
+        xml: worksheet(`<row r="${beyondRow}"><c r="A${beyondRow}"><v>1</v></c></row>`),
+      },
+    ]);
+    const brokenStrings: UploadParts = {
+      [RELS_PART]: strToU8(
+        relsOf(
+          relationship('rId1', 'worksheet', 'worksheets/sheet1.xml'),
+          relationship('rId2', 'sharedStrings', 'sharedStrings.xml'),
+        ),
+      ),
+      [WORKBOOK_PART]: strToU8(workbookOf(sheetEntry('S', 1))),
+      [SHEET_PART]: strToU8(worksheetXml([[1]])),
+      // A run without text breaks the reader.
+      [SHARED_STRINGS_PART]: strToU8(
+        `${XML_DECLARATION}<sst xmlns="${SPREADSHEET_NS}"><si><r/></si></sst>`,
+      ),
+    };
+
+    expect(errorCodeOf(() => readWith(capViolation, { by: 'name', name: 'Missing' }))).toBe(
+      'ROW_CAP_EXCEEDED',
+    );
+    expect(errorCodeOf(() => readWith(capViolation, { by: 'index', index: 5 }))).toBe(
+      'ROW_CAP_EXCEEDED',
+    );
+    expect(
+      errorCodeOf(() =>
+        readGrid(brokenStrings, { sheet: { by: 'name', name: 'Missing' }, caps: CAPS }),
+      ),
+    ).toBe('CORRUPT_FILE');
+  });
+
+  it('reads a broken selected sheet as CORRUPT_FILE, without falling back to the first sheet', () => {
+    const file = buildXlsxFixture([
+      { name: 'A', xml: worksheetXml([['a']]) },
+      { name: 'B', xml: worksheet(BROKEN_ROW) },
+    ]);
+
+    // The legacy sheetName path falls back to the first sheet.
+    expect(readGrid(openUpload(file, OPTS), { sheetName: 'B', caps: CAPS })).toEqual([['a']]);
+    expect(errorCodeOf(() => readWith(file, { by: 'name', name: 'B' }))).toBe('CORRUPT_FILE');
+    expect(errorCodeOf(() => readWith(file, { by: 'index', index: 1 }))).toBe('CORRUPT_FILE');
+  });
+
+  it('reads a workbook without named sheets as CORRUPT_FILE, not SHEET_NOT_FOUND', () => {
+    const file = buildXlsxFixture([{ name: 'Sheet1', xml: worksheetXml([['a']]) }], {
+      [WORKBOOK_PART]: workbookOf(''),
+    });
+
+    expect(errorCodeOf(() => readWith(file, { by: 'index', index: 0 }))).toBe('CORRUPT_FILE');
+    expect(errorCodeOf(() => readWith(file, { by: 'name', name: 'Sheet1' }))).toBe('CORRUPT_FILE');
   });
 });
 
@@ -188,7 +360,7 @@ describe('readGrid: gate before reader work', () => {
 
     const started = performance.now();
     expect(errorCodeOf(() => readGrid(parts, { caps: CAPS }))).toBe('UNSAFE_CONTENT');
-    expect(performance.now() - started).toBeLessThan(GATE_FIRST_BUDGET_MS);
+    expectWithinBudget(performance.now() - started, GATE_FIRST_BUDGET_MS);
   });
 });
 

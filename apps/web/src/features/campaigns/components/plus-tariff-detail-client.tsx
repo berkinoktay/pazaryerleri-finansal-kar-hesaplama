@@ -33,7 +33,7 @@ import {
 } from '../lib/plus-bulk-actions';
 import { summarizePlusSelection } from '../lib/plus-tariff-summary';
 import { TariffScopeProvider } from '../lib/tariff-scope';
-import { computeExportPreview } from '../lib/whole-week';
+import { computeExportPreview, resolvePlusExportPrice } from '../lib/export-preview';
 import { ExportTariffDialog } from './export-tariff-dialog';
 import { PeriodTabs } from './period-tabs';
 import { PlusTariffStatusBadge, STATUS_TONE } from './plus-tariff-status-badge';
@@ -312,7 +312,9 @@ export function PlusTariffDetailClient({
   );
   // Which window files (3/4/7-günlük) the export will produce + their product counts —
   // the pre-download preview shown in the export dialog. Mirrors the backend bucketing.
-  const previewFiles = computeExportPreview(periods, selection, customPrices);
+  const previewFiles = computeExportPreview(periods, (row) =>
+    resolvePlusExportPrice(row, selection, customPrices),
+  );
   const filteredRows = filterPlusRows(periodRows, selection, customPrices, filters);
   const categories = distinct(periodRows.map((row) => row.category));
   const brands = distinct(periodRows.map((row) => row.brand));

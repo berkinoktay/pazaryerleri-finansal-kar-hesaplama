@@ -35,7 +35,7 @@ import { toDetailTemplate } from '../lib/adapt-tariff';
 import { findBand, summarizeSelection } from '../lib/commission-tariff-summary';
 import { downloadBlob } from '../lib/download-blob';
 import { TariffScopeProvider } from '../lib/tariff-scope';
-import { computeExportPreview } from '../lib/whole-week';
+import { computeExportPreview, resolveCommissionExportPrice } from '../lib/export-preview';
 import { CommissionTariffStatusBadge, STATUS_TONE } from './commission-tariff-status-badge';
 import { CommissionTariffsMobileCards } from './commission-tariffs-mobile-cards';
 import { CommissionTariffsSummary } from './commission-tariffs-summary';
@@ -320,7 +320,9 @@ export function CommissionTariffDetailClient({
   );
   // Which window files (3/4/7-günlük) the export will produce + their product counts —
   // the pre-download preview shown in the export dialog. Mirrors the backend bucketing.
-  const previewFiles = computeExportPreview(periods, selection, customPrices);
+  const previewFiles = computeExportPreview(periods, (row) =>
+    resolveCommissionExportPrice(row, selection, customPrices),
+  );
   const filteredRows = filterRows(periodRows, selection, filters);
   const categories = distinct(periodRows.map((row) => row.category));
   const brands = distinct(periodRows.map((row) => row.brand));

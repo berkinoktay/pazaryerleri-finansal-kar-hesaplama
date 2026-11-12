@@ -1,7 +1,6 @@
 import {
   GRID_WORKER_MAX_OLD_GENERATION_MB,
   GRID_WORKER_MAX_YOUNG_GENERATION_MB,
-  GRID_WORKER_TIMEOUT_MS,
 } from '../../src/constants';
 import { SpreadsheetFileError } from '../../src/errors';
 import { readWorkbookGrid } from '../../src/parse';
@@ -25,6 +24,7 @@ const KILLS = 5;
 const KILL_TIMEOUT_MS = 1;
 // Passes the gate (DOM weight about 4.46 M) but needs about 440 MB of DOM.
 const SMALL_HEAP_MB = 128;
+const MEMORY_KILL_TIMEOUT_MS = 120_000;
 const SMALL_YOUNG_GENERATION_MB = 32;
 const OOM_ROWS = 5_000;
 const OOM_COLUMNS = 40;
@@ -58,7 +58,8 @@ await killer.close();
 const smallHeap = createGridWorkerHost({
   maxOldGenerationSizeMb: SMALL_HEAP_MB,
   maxYoungGenerationSizeMb: SMALL_YOUNG_GENERATION_MB,
-  timeoutMs: GRID_WORKER_TIMEOUT_MS,
+  // Generous, so only memory can kill it, even on a loaded machine.
+  timeoutMs: MEMORY_KILL_TIMEOUT_MS,
 });
 const tooBig = buildXlsxFixture([
   { name: 'Sheet1', xml: worksheetXml(numberRows(OOM_ROWS, OOM_COLUMNS)) },
