@@ -17,10 +17,40 @@ export default defineConfig({
     },
   },
   test: {
-    environment: 'happy-dom',
     maxWorkers: testWorkers(),
     globals: false,
-    setupFiles: ['./tests/setup.ts'],
-    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
+    // The file extension picks the environment: `.ts` unit tests are pure logic
+    // and run in plain node (no happy-dom, no jest-dom, no MSW server — that
+    // setup used to cost more than the tests themselves); `.tsx` unit tests and
+    // every component test render React and get the DOM + MSW setup.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'unit-node',
+          environment: 'node',
+          include: ['tests/unit/**/*.test.ts'],
+          setupFiles: ['./tests/setup-node.ts'],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'unit-dom',
+          environment: 'happy-dom',
+          include: ['tests/unit/**/*.test.tsx'],
+          setupFiles: ['./tests/setup.ts'],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'component',
+          environment: 'happy-dom',
+          include: ['tests/component/**/*.test.{ts,tsx}'],
+          setupFiles: ['./tests/setup.ts'],
+        },
+      },
+    ],
   },
 });

@@ -805,8 +805,23 @@ Frontend tests live in `apps/web/tests/`, organized by category:
 apps/web/tests/
 ├── unit/                   # Hook tests, pure utility tests
 ├── component/              # React component tests via RTL
-└── helpers/                # render, msw
+├── helpers/                # render, msw
+└── tooling/                # test-runner plugins (e.g. per-icon hugeicons imports)
 ```
+
+### The file extension picks the environment
+
+`apps/web/vitest.config.ts` defines three projects:
+
+| Project     | Files                         | Environment | Setup                                    |
+| ----------- | ----------------------------- | ----------- | ---------------------------------------- |
+| `unit-node` | `tests/unit/**/*.test.ts`     | node        | `tests/setup-node.ts` (no DOM, no MSW)   |
+| `unit-dom`  | `tests/unit/**/*.test.tsx`    | happy-dom   | `tests/setup.ts` (jest-dom + MSW server) |
+| `component` | `tests/component/**/*.test.*` | happy-dom   | `tests/setup.ts`                         |
+
+- A pure unit test (lib function, mapper, config) is a `.ts` file — it skips the DOM and MSW setup, which used to cost more than the test itself.
+- Anything that calls `renderHook` / `render`, touches `document` / `window`, or needs MSW is a `.tsx` file, even without JSX. `fetch()` throws in the node project, so a misplaced HTTP test fails loudly.
+- `pnpm --filter @pazarsync/web test:unit` runs `unit-node` + `unit-dom`; `test:component` runs `component`.
 
 ### Stack
 
