@@ -102,7 +102,7 @@ Pay special attention to the **highest-value, hardest-to-grep** rules:
   a heuristic — **confirm a suspected `feature → feature` violation by running
   `pnpm audit:boundaries`**, which prints the authoritative verdict (this is the
   CI gate; running this one targeted audit to verify a finding is fine — it is
-  not the same as folding `check:all` into the review). Note the audit only sees
+  not the same as folding `check:affected` into the review). Note the audit only sees
   `feature → feature` edges; a `patterns/ → features/` inversion is real but
   invisible to it, so catch that one by reading the imports.
 
@@ -222,7 +222,7 @@ Sonuç: <X> engelleyici · <Y> uyarı · <Z> öneri · <K> otomatik düzeltildi
 
 ---
 Sonuç: <"PR'a hazır görünüyor" | "Önce N engelleyiciyi çöz"> ·
-Hatırlatma: commit öncesi `pnpm check:all` mekanik kapıyı ayrıca çalıştırır.
+Hatırlatma: commit öncesi `pnpm check:affected` mekanik kapıyı ayrıca çalıştırır.
 ```
 
 If there are zero findings, say so plainly and confirm the diff looks clean
@@ -232,7 +232,7 @@ against the documented rules — don't manufacture suggestions to fill the repor
 
 - This skill reviews **conventions and UI/UX rules**. It deliberately does NOT
   run `pnpm typecheck` / `eslint` / tests as a review step — those mechanical
-  gates already run in `pnpm check:all`. The only typecheck it runs is to verify
+  gates already run in `pnpm check:affected` and in CI. The only typecheck it runs is to verify
   its own auto-fixes.
 - The report is in Turkish; code identifiers and class names stay verbatim.
 - The skill is read-only except for the narrow auto-fixes — it never opens a PR,

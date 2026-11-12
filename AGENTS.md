@@ -76,11 +76,13 @@ pnpm db:check-drift              # fail if replaying prisma/migrations does not 
 pnpm db:seed                     # seed
 pnpm api:sync                    # regenerate the OpenAPI spec + typed api-client (run after backend route changes)
 
-pnpm test:unit                   # fast, no DB — run on every change
-supabase start && pnpm test:integration   # needs local Postgres (port 54322) + pnpm db:push first
+pnpm --filter <pkg> exec vitest run <file>   # the tests your change touches — default way to verify
+supabase start && pnpm test:integration   # whole integration suite (needs local Postgres + pnpm db:test-setup); CI runs it on every backend PR
 
-pnpm check:all                   # pre-commit gate — static checks + fast tests + audits, no DB
-pnpm check:full                  # pre-PR gate — check:all + integration suite + migration drift check (needs `supabase start`)
+pnpm check:affected              # pre-commit gate — changed packages: typecheck + lint + unit, format, audits; no DB
+pnpm check:all                   # on demand — every package incl. component tests, bounded; no DB
+pnpm check:full                  # on demand — check:all + integration suite + migration drift check (needs `supabase start`)
+# Never run the RLS suite (apps/api/tests/integration/rls) — it TRUNCATEs the dev DB; only CI runs it.
 ```
 
 ## Before touching a marketplace integration

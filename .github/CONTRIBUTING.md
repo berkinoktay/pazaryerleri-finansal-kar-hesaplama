@@ -26,14 +26,16 @@
 
 ## Push öncesi yerel kapı
 
-`pnpm check:all` pre-push hook'unda otomatik koşar (DB'siz, hızlı):
+Pre-push hook'u yalnız **etkilenen paketleri** denetler (`scripts/check-affected.sh`, DB'siz). `origin/main`'e göre değişen paketler ve onlara bağımlı paketler için `typecheck` + `lint` + `test:unit` koşar. Aynı anda en fazla 3 görev çalışır, her Vitest 2 işçi kullanır; böylece makine yorulmaz.
 
-- `typecheck` + `lint` + `test:unit` + **`test:component`** + `format:check` + `audit:boundaries` + `audit:errors`
+Commit öncesi aynı kapıyı elle koşmak için `pnpm check:affected` kullanılır. Bu komut ayrıca `format:check` ve repo denetimlerini (`pnpm audit:all`) da çalıştırır.
 
-Yavaş kapılar yalnız CI'da koşar:
+Diğer kapıların tek hakemi CI'dır:
 
-- **build** (`pnpm build` — next build + api bundle)
-- **integration** testleri (Supabase gerektirir; lokalde `supabase start && pnpm check:full`)
+- **component** testleri, **build** (`pnpm build` — next build + api bundle) ve repo denetimleri
+- **integration** ve **RLS** testleri (Supabase gerektirir). PR yalnız `apps/web`'e dokunuyorsa entegrasyon işi atlanır; `main`'e yapılan ve yalnız dokümandan ibaret olmayan her push'ta koşar. Yalnız dokümana dokunan değişikliklerde build ve test işleri hiç koşmaz.
+
+Tüm paketleri yerelde denetlemek istersen `pnpm check:all` (bileşen testleri dahil) ya da `supabase start && pnpm check:full` (entegrasyon dahil) kullanabilirsin. İkisi de kendiliğinden çalışmaz.
 
 > WIP push gerekiyorsa `git push --no-verify` ile hook atlanabilir — ama CI yine de PR üzerinde tam kapıyı çalıştırır.
 

@@ -76,7 +76,8 @@ When adding a NEW dependency: install whatever `latest` resolves to (no `@x.y.z`
 │   ├── sync-core/        # Sync primitives: job claim, checkpoint, crypto wrappers, logger, sync-log service
 │   ├── crypto-core/      # Dependency-free AES-256-GCM envelope (shared by sync-core + db seed)
 │   ├── order-sync/       # Idempotent order upsert (marketplace payload → domain Order)
-│   └── profit/           # Profit engine: formula, on-create estimates, settlement reconcile, fee resolution
+│   ├── profit/           # Profit engine: formula, on-create estimates, settlement reconcile, fee resolution
+│   └── vitest-config/    # Shared test-runner policy (worker cap via PAZARSYNC_TEST_WORKERS) for every vitest config
 ├── supabase/
 │   └── sql/              # RLS policies, pg_cron setup, DB functions
 ├── docs/                 # Local-only knowledge base (gitignored)
@@ -166,9 +167,10 @@ pnpm format                 # Format all files
 # API contract codegen (run after backend route/schema changes)
 pnpm api:sync               # Regenerate OpenAPI spec + typed @pazarsync/api-client
 
-# Pre-commit / pre-PR gates
-pnpm check:all              # Pre-commit gate — static checks + fast tests + audits, no DB needed
-pnpm check:full             # Pre-PR gate — check:all + integration suite + migration drift check (needs `supabase start`)
+# Gates (CI is the single authority; see docs/TESTING.md §14)
+pnpm check:affected         # Daily pre-commit gate — typecheck + lint + unit tests for changed packages (+ dependents), format check, repo audits; no DB. The pre-push hook runs only its typecheck + lint + unit part.
+pnpm check:all              # On demand — every package incl. component tests, bounded (3 tasks × 2 workers); no DB
+pnpm check:full             # On demand — check:all + integration suite + migration drift check (needs `supabase start`)
 
 # Supabase (CLI, not a pnpm script)
 supabase start              # Start local Supabase (Postgres on port 54322)
@@ -493,12 +495,13 @@ Non-negotiable rules:
 
 Commands:
 
-- `pnpm test:unit` — fast (no DB), run on every change
-- `pnpm test:integration` — slow (needs `supabase start` + `pnpm db:push`), run before commits
-- `pnpm test` — both
+- `pnpm --filter <pkg> exec vitest run <file>` — the files your change touches; the default way to verify a change
+- `pnpm --filter <pkg> test:unit` — one package's DB-free tests
+- `pnpm test:integration` — the whole integration suite (needs `supabase start` + `pnpm db:test-setup`); CI runs it on every PR that touches backend code, so locally run only the integration files your change touches
 - `pnpm test:watch` — watch mode
-- `pnpm check:all` — pre-commit gate: static checks + fast tests + audits, no DB
-- `pnpm check:full` — pre-PR gate: everything in `check:all` plus the integration suite (needs Supabase local)
+- `pnpm check:affected` — daily pre-commit gate: affected typecheck + lint + unit tests, format check, repo audits; no DB
+- `pnpm check:all` / `pnpm check:full` — on-demand full local mirrors of CI (without / with the integration suite)
+- Worker count: every vitest config reads `PAZARSYNC_TEST_WORKERS` (default 2 in CI, 50% locally). Never set `VITEST_MAX_WORKERS` — it overrides `fileParallelism: false` on the DB-backed suites.
 
 ## No Utility Duplication
 
@@ -559,7 +562,7 @@ The audit downgrades type-only edges to `warn` by default; treat the warn list a
 
 ### Enforcement: the audit script
 
-Run on every push (`pre-push` via `pnpm check:all`) and in CI:
+Enforced in CI (lint job, via `pnpm audit:all`) and run locally by `pnpm check:affected` / `check:all`:
 
 ```bash
 pnpm audit:boundaries          # human-readable report
@@ -580,6 +583,7 @@ If you genuinely need a cross-feature edge (e.g. a `dashboard` feature that aggr
 - `@pazarsync/sync-core` — Sync engine primitives: job claim, checkpoint, credential-crypto wrappers (envelope in `@pazarsync/crypto-core`), logger, `sync-log` service, `mapPrismaError`
 - `@pazarsync/order-sync` — Idempotent order upsert (marketplace payload → domain `Order`)
 - `@pazarsync/profit` — Profit calculation engine: formula, on-order-create estimates, settlement reconciliation, fee resolution, calculability inference
+- `@pazarsync/vitest-config` — Shared test-runner policy: `testWorkers()` sizes every vitest pool from `PAZARSYNC_TEST_WORKERS` (2 in CI, 50% locally) and neutralizes `VITEST_MAX_WORKERS`. Every vitest config sets `maxWorkers: testWorkers()`
 
 **API request/response contracts** are generated into `@pazarsync/api-client` from backend Zod schemas (see `docs/plans/archive/2026-04-16-api-docs-design.md`). **Domain enums** (Platform, OrderStatus, MemberRole, …) come from `@pazarsync/db` — Prisma 7 emits them as TypeScript types during `pnpm db:generate`.
 
@@ -655,13 +659,16 @@ Rule of thumb: if a person reads it as prose, write clear Turkish sentences. If 
 
 ## Verification
 
-- After editing any source file, run the affected package's tests:
-  - `pnpm --filter <package> test:unit` — for any logic change
-  - `pnpm --filter <package> test:integration` — for any route, service, or DB query change (needs `supabase start`)
+- After editing any source file, run the tests that exercise the change:
+  - the test files you touched or that cover the changed code: `pnpm --filter <package> exec vitest run <file>`
+  - `pnpm --filter <package> test:unit` — for a logic change in a package
+  - for a route, service, or DB query change: the matching integration files (needs `supabase start`). The full integration suite is CI's job.
 - After adding a new endpoint, write the integration test in the same PR. Do NOT merge route code without its test.
 - After adding a new org-scoped endpoint, write the multi-tenancy isolation test in the same PR (see `docs/TESTING.md` § "Multi-Tenancy Test Pattern").
-- **Before committing**: run `pnpm check:all` — the static checks, fast tests, and audits. Fast, no DB required.
-- **Before opening a PR**: run `supabase start && pnpm check:full` — same as `check:all` plus the integration suite. Mirrors what CI runs.
+- **Before committing**: run `pnpm check:affected` — typecheck, lint and unit tests for the changed packages (and their dependents), format check, repo audits. No DB required.
+- **Before opening a PR**: `git push` re-runs the affected typecheck + lint + unit part (format and audits are enforced again in CI); CI is the single authority for the component, integration and RLS suites. Wait for CI to be green (`gh pr checks <n> --watch` must exit 0).
+- **Never run the RLS suite** (`tests/integration/rls/**`) — it TRUNCATEs the dev database; its config refuses to load without `PAZARSYNC_ALLOW_DEV_DB_TRUNCATE=1`, which only CI sets.
+- Start any test run that can exceed ~60 s in the background, one heavy run at a time — parallel heavy runs freeze the developer machine and turn green suites red.
 - Never commit with failing tests. If a test reveals a bug in your work, fix the bug — don't disable the test.
 - Never commit with skipped tests (`it.skip`, `describe.skip`) without:
   - A code comment explaining why it's skipped, AND
@@ -670,12 +677,12 @@ Rule of thumb: if a person reads it as prose, write clear Turkish sentences. If 
 
 ## Pre-Commit Skill Workflow
 
-Before running `pnpm check:all`, apply skills in this order on all changed code:
+Before running `pnpm check:affected`, apply skills in this order on all changed code:
 
 1. Run `/code-review` on all changed code. It covers correctness bugs AND the reuse / simplification / efficiency cleanups, so it supersedes the old `/simplify` step (which was quality-only and never hunted bugs). Apply findings with `--fix` (or by hand); raise the effort (`high` / `ultra`) for a deeper, broader pass on larger or higher-risk diffs. `/simplify` stays available for a cleanup-only pass when you explicitly do NOT want bug-hunting, but `/code-review` is the default pre-commit gate.
 2. After `/code-review` finishes, run `/vercel-react-best-practices` on changed React/Next.js code, and `supabase-postgres-best-practices` on changed database code (if applicable).
 3. If the change touches `apps/web` (frontend), run `/frontend-pr-review` before opening the PR — do not skip this just because the diff looks small. It is the PazarSync-specific convention & UI/UX gate (defined in `.claude/skills/frontend-pr-review/`): it reviews the changed frontend diff against this repo's own living rules (root + `apps/web/CLAUDE.md`, `docs/SECURITY.md`, and the design memories), reports violations by severity (blocker / warning / suggestion), and auto-fixes only the unambiguous ones. It complements `/code-review` (general bug hunting) — it does not replace it.
-4. After all skill fixes are done, run `pnpm check:all` and fix every error.
+4. After all skill fixes are done, run `pnpm check:affected` and fix every error.
 
 ## Bug Fix Workflow
 

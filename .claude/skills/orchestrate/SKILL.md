@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-description: Onaylanmış bir planı uygulama aşamasında yürütür. Ana oturum (Opus 5.5) orkestratör olur. Özellik işini implementer ajanlarına sırayla devreder ve her adımı Opus ile denetletir. Riskli işte kapanışta bir kez Fable ile denetletir. İşi check:all kapısıyla bitirir. Berkin çok adımlı bir iş, özellik geliştirme ya da "planla ve uygulat" istediğinde ve plan hazır olduğunda bu modu aç.
+description: Onaylanmış bir planı uygulama aşamasında yürütür. Ana oturum (Opus 5.5) orkestratör olur. Özellik işini implementer ajanlarına sırayla devreder ve her adımı Opus ile denetletir. Riskli işte kapanışta bir kez Fable ile denetletir. İşi check:affected kapısıyla bitirir; tam takımların hakemi CI'dır. Berkin çok adımlı bir iş, özellik geliştirme ya da "planla ve uygulat" istediğinde ve plan hazır olduğunda bu modu aç.
 ---
 
 # Orkestrasyon: uygulama aşaması
@@ -29,7 +29,7 @@ Sen ana oturumsun ve uygulayıcılar da Opus'ta çalışıyor. Bu yüzden işi d
 İşin türüne göre kimin yapacağı:
 
 - **Özellik işi** birden fazla dosyaya dokunur, yeni davranış ekler ya da test yazımı gerektirir. Bu iş `implementer`'a gider.
-- **Küçük düzeltmeyi kendin yap.** Kapanış kapısında çıkan hatalar ve birkaç satırlık tek dosya değişiklikleri buna girer. Bu değişiklikler de kapanıştaki `check:all`'dan geçer.
+- **Küçük düzeltmeyi kendin yap.** Kapanış kapısında çıkan hatalar ve birkaç satırlık tek dosya değişiklikleri buna girer. Bu değişiklikler de kapanıştaki `check:affected`'tan geçer.
 - **Türkçe kullanıcı metnini** (i18n değerleri, Türkçe doküman) kendin yaz ya da metni brifte birebir ver. Alt ajanlar çok baytlı karakterleri bozabiliyor.
 - **Akış ve operasyon işlerinde ajan açma:** onay, merge, "devam", commit, PR ve tek komutluk koşuları kendin yap.
 
@@ -70,7 +70,7 @@ Sen ana oturumsun ve uygulayıcılar da Opus'ta çalışıyor. Bu yüzden işi d
    2. `/code-review` (yerleşik komut). Bulguları uygula ya da `--fix` kullan.
    3. React kodu değiştiyse `/vercel-react-best-practices`, veritabanı kodu değiştiyse `supabase:supabase-postgres-best-practices` çalıştır.
    4. `apps/web` değiştiyse `/frontend-pr-review` çalıştır.
-   5. `pnpm check:all` komutunu kendin ve tek başına koş; başka ağır süreç çalışırken koşma. Kırmızıysa küçük hatayı kendin düzelt, büyüğünü devret, sonra yeniden koş.
+   5. `pnpm check:affected` komutunu kendin ve tek başına koş; başka ağır süreç çalışırken koşma. Bu komut değişen paketlerde ve onlara bağlı paketlerde tip denetimi, lint ve birim testlerini, ayrıca biçim kontrolünü ve repo denetimlerini çalıştırır. Kırmızıysa küçük hatayı kendin düzelt, büyüğünü devret, sonra yeniden koş. Bileşen, entegrasyon ve RLS takımlarının hakemi CI'dır; yerelde yalnız değişikliğe dokunan dosyaları koş ve PR'da `gh pr checks <n> --watch` sıfır çıkış koduyla bitene kadar bekle.
 
    Kapı yeşil olmadan "tamamlandı" deme.
 
@@ -108,5 +108,5 @@ Odak: <bu adımda özellikle bakılacak risk>
 
 ## 5. Yasaklar
 
-- `tests/integration/rls` takımını hiçbir ajana koşturma. Bu takım geliştirme veritabanını siliyor.
+- `tests/integration/rls` takımını hiçbir ajana koşturma. Bu takım geliştirme veritabanını siliyor. Config'i artık `PAZARSYNC_ALLOW_DEV_DB_TRUNCATE=1` olmadan yüklenmiyor; bu değişkeni yerelde hiçbir brife yazma.
 - Git durumunu değiştiren komutlar (commit, stash, checkout, reset, rebase, merge) yalnızca ana oturumda ve Berkin'in onayıyla çalışır. Proje ayarları bunların çoğu için zaten onay soruyor.
