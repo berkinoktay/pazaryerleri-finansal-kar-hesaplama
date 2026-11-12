@@ -1,22 +1,21 @@
-import { realpathSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { strFromU8, strToU8, unzipSync, zipSync, type Unzipped } from 'fflate';
-import { readSheet, type SheetData } from 'read-excel-file/node';
+import { strToU8, unzipSync, type Unzipped } from 'fflate';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { MAX_FORMAT_CODE_LENGTH } from './constants';
-import { DATE_FORMAT_CODE, NUMBER_FORMAT_CODE } from './date-format';
+import { MAX_FORMAT_CODE_LENGTH, MAX_WORKBOOK_RELS_BYTES } from './constants';
 import { SpreadsheetFileError, type SpreadsheetFileErrorCode } from './errors';
-import { prepareUploadForRead } from './guards';
-import { readWorkbookGrid, type ReadGridOptions } from './parse';
-import { buildReadCopy, localName } from './read-copy';
+import type { SheetData } from './grid-types';
+import { openUpload } from './guards';
+import { readWorkbookGrid } from './parse';
+import { checkUploadParts, readUploadGrid } from './read-grid';
+import { resolveReadOptions, type ReadGridOptions } from './read-options';
 import { resolveWorksheetPartPaths } from './index';
 import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
+import { localName } from './xml-dom';
 
-// The gate must see what read-excel-file sees. Each case below is a way of writing
-// a worksheet so that a text (regex) scan and the reader's DOM disagree: the
-// reader still finds the forged <dimension> or the far-away cell, the regex did
-// not. Every case goes through the real read path and must end in a
+// The gate must see what the reader sees. Each case below is a way of writing a
+// worksheet so that a text (regex) scan and the reader's DOM disagree: the DOM still
+// holds the forged <dimension> or the far-away cell, the regex did not. Every case
+// goes through the real read path and must end in a
 // SpreadsheetFileError or a tiny grid, quickly. The forged refs are full size
 // (A1:ZZ300000 is a 300 000 x 702 grid); a gate that misses one would crash the
 // test run, so the dimension cases are only meaningful against the DOM gate.
@@ -27,6 +26,7 @@ const SHEET_PART = 'xl/worksheets/sheet1.xml';
 const FORGED_REF = 'A1:ZZ300000';
 const FAR_CELL = 'A200000';
 const GUARD_OPTS = { rowCap: 5_000, colCap: 64, maxBytes: 10 * 1024 * 1024 } as const;
+const GATE_CAPS = { rowCap: GUARD_OPTS.rowCap, colCap: GUARD_OPTS.colCap } as const;
 // Timing bounds are loose on purpose: check:all and CI run many suites in parallel, so a
 // linear pass that takes milliseconds alone can take seconds under load. The regressions
 // these tests guard against are quadratic or allocation blow-ups that take minutes or
@@ -47,6 +47,7 @@ const SHEET_RELATIONSHIP = `<Relationship Id="rId1" Type="${OFFICE_REL}/workshee
 const SHARED_STRINGS_RELATIONSHIP = `<Relationship Id="rId2" Type="${OFFICE_REL}/sharedStrings" Target="sharedStrings.xml"/>`;
 // Excel serial date 45000 (2023-03-15); any custom date format makes it a Date.
 const SERIAL_DATE = 45_000;
+const SERIAL_DATE_AS_DATE = new Date('2023-03-15T00:00:00.000Z');
 
 const TWO_ROW_GRID: SheetData = [['Barkod'], ['X1']];
 
@@ -105,6 +106,32 @@ async function readOutcome(file: Buffer, options: ReadGridOptions = {}): Promise
   }
 }
 
+/** The in-process read path (gate, then reader) with the default limits. */
+function uploadOutcome(file: Buffer, options: ReadGridOptions = {}): Outcome {
+  try {
+    return grid(readUploadGrid(file, resolveReadOptions(options)));
+  } catch (e) {
+    if (e instanceof SpreadsheetFileError) return rejected(e.code);
+    throw e;
+  }
+}
+
+/** The gate alone: every reader part parsed strictly and checked, no grid built. */
+function gateOutcome(file: Buffer): SpreadsheetFileErrorCode | null {
+  try {
+    checkUploadParts(openUpload(file, GUARD_OPTS), GATE_CAPS);
+    return null;
+  } catch (e) {
+    if (e instanceof SpreadsheetFileError) return e.code;
+    throw e;
+  }
+}
+
+/** Names of the reader parts the gate returns for `file`. */
+function readerPartNames(file: Buffer): string[] {
+  return Object.keys(openUpload(file, GUARD_OPTS));
+}
+
 async function timedOutcome(
   xml: string,
   options: ReadGridOptions = {},
@@ -122,17 +149,6 @@ function relsOf(...relationships: readonly string[]): string {
 
 /** Workbook rels naming sheet1 and the shared strings part. */
 const SHARED_STRINGS_RELS = relsOf(SHEET_RELATIONSHIP, SHARED_STRINGS_RELATIONSHIP);
-
-/** Entry text of the read copy that prepareUploadForRead returns. */
-function readCopyEntries(file: Buffer): Record<string, Uint8Array> {
-  return unzipSync(new Uint8Array(prepareUploadForRead(file, GUARD_OPTS)));
-}
-
-function entryText(entries: Record<string, Uint8Array>, name: string): string {
-  const bytes = entries[name];
-  if (bytes === undefined) throw new Error(`entry missing: ${name}`);
-  return strFromU8(bytes);
-}
 
 const DIMENSION_CASES: readonly ReadCase[] = [
   {
@@ -364,7 +380,7 @@ const FORMULA_CASES: readonly ReadCase[] = [
   },
 ];
 
-describe('read copy: forged <dimension>', () => {
+describe('grid gate: forged <dimension>', () => {
   it.each(DIMENSION_CASES)('$name', async ({ xml, options, expected }) => {
     const { outcome, elapsedMs } = await timedOutcome(xml, options);
     expect(outcome).toEqual(expected);
@@ -372,7 +388,7 @@ describe('read copy: forged <dimension>', () => {
   });
 });
 
-describe('read copy: cell references', () => {
+describe('grid gate: cell references', () => {
   it.each(CELL_REFERENCE_CASES)('$name', async ({ xml, options, expected }) => {
     const { outcome, elapsedMs } = await timedOutcome(xml, options);
     expect(outcome).toEqual(expected);
@@ -380,16 +396,16 @@ describe('read copy: cell references', () => {
   });
 });
 
-describe('read copy: formula cells', () => {
+describe('grid gate: formula cells', () => {
   it.each(FORMULA_CASES)('$name', async ({ xml, options, expected }) => {
     const { outcome } = await timedOutcome(xml, options);
     expect(outcome).toEqual(expected);
   });
 });
 
-describe('read copy: a worksheet stored under a .xml.rels name', () => {
-  // read-excel-file opens every entry ending in .xml or .xml.rels and resolves a
-  // sheet from the workbook rels Target, so the gate must treat such a part as a
+describe('grid gate: a worksheet stored under a .xml.rels name', () => {
+  // The reader opens every entry ending in .xml or .xml.rels and resolves a sheet
+  // from the workbook rels Target, so the gate must treat such a part as a
   // worksheet too.
   function relsSheet(xml: string): Buffer {
     return buildXlsxFixture([
@@ -397,7 +413,7 @@ describe('read copy: a worksheet stored under a .xml.rels name', () => {
     ]);
   }
 
-  it('removes its dimension, so the reader sizes the grid from its cells', async () => {
+  it('ignores its dimension, so the reader sizes the grid from its cells', async () => {
     const file = relsSheet(
       worksheetXml(
         [
@@ -408,7 +424,7 @@ describe('read copy: a worksheet stored under a .xml.rels name', () => {
       ),
     );
 
-    expect(entryText(readCopyEntries(file), RELS_SHEET_PART)).not.toContain('dimension');
+    expect(readerPartNames(file)).toContain(RELS_SHEET_PART);
     expect(await readOutcome(file)).toEqual(
       grid([
         ['Barkod', 'B'],
@@ -430,7 +446,7 @@ describe('read copy: a worksheet stored under a .xml.rels name', () => {
   });
 });
 
-describe('read copy: smuggling', () => {
+describe('grid gate: smuggling', () => {
   it('rejects a DOCTYPE assembled around nested dimensions', async () => {
     const xml =
       `${XML_DECLARATION}<!DOC<dimension/>TYPE worksheet [<!ENT<dimension/>ITY a "XYZ">]>` +
@@ -474,7 +490,7 @@ const LINEAR_CASES: ReadonlyArray<{ readonly name: string; readonly xml: string 
   },
 ];
 
-describe('read copy: linear time', { timeout: TIMING_TEST_TIMEOUT_MS }, () => {
+describe('grid gate: linear time', { timeout: TIMING_TEST_TIMEOUT_MS }, () => {
   it.each(LINEAR_CASES)('$name', async ({ xml }) => {
     const { elapsedMs } = await timedOutcome(xml);
     expect(elapsedMs).toBeLessThan(LINEAR_BUDGET_MS);
@@ -497,8 +513,8 @@ describe('read copy: linear time', { timeout: TIMING_TEST_TIMEOUT_MS }, () => {
     expect(elapsedMs).toBeLessThan(READ_BUDGET_MS);
   });
 
-  // read-excel-file's own tag-name regex is quadratic in the name length: this
-  // ~1.5 KB upload kept the reader busy for about two seconds before the name cap.
+  // The old reader's tag-name regex was quadratic in the name length: this ~1.5 KB
+  // upload kept it busy for about two seconds before the name cap.
   it('rejects a tiny upload with a very long element name before the reader sees it', async () => {
     const { outcome, elapsedMs } = await timedOutcome(
       sheet(`<${'a'.repeat(LONG_NAME_LENGTH)}/>${TWO_ROWS}`),
@@ -509,7 +525,7 @@ describe('read copy: linear time', { timeout: TIMING_TEST_TIMEOUT_MS }, () => {
 });
 
 describe('localName', () => {
-  // Must match read-excel-file's getTagName, `tagName.replace(/.+:/, '')`.
+  // Must match the old reader's getTagName, `tagName.replace(/.+:/, '')`.
   it.each(['c', 'x:c', 'ü:dimension', 'sheetData', 'a:b:c', ':c', 'x:'])('%s', (tagName) => {
     expect(localName(tagName)).toBe(tagName.replace(/.+:/, ''));
   });
@@ -566,6 +582,13 @@ describe('resolveWorksheetPartPaths', () => {
     );
   });
 
+  it('rejects workbook rels over MAX_WORKBOOK_RELS_BYTES before parsing them', () => {
+    const entries = entriesOf(`${SHEET_RELATIONSHIP}<!--${'x'.repeat(MAX_WORKBOOK_RELS_BYTES)}-->`);
+    expect(() => resolveWorksheetPartPaths(entries)).toThrow(
+      expect.objectContaining({ code: 'PAYLOAD_TOO_LARGE' }),
+    );
+  });
+
   it('rejects workbook rels that are not well-formed as CORRUPT_FILE', () => {
     const entries = entriesOf(SHEET_RELATIONSHIP);
     entries['xl/_rels/workbook.xml.rels'] = strToU8('<Relationships>');
@@ -575,27 +598,18 @@ describe('resolveWorksheetPartPaths', () => {
   });
 });
 
-describe('read copy contents', () => {
-  it('re-serializes parts without sheetData and keeps their content', () => {
-    const sharedStrings = `${XML_DECLARATION}<sst xmlns="${SPREADSHEET_NS}" count="0"/>`;
-    const file = buildXlsxFixture([{ name: 'Sheet1', xml: sheet(TWO_ROWS) }], {
-      'xl/_rels/workbook.xml.rels': SHARED_STRINGS_RELS,
-      'xl/sharedStrings.xml': sharedStrings,
-    });
-
-    expect(entryText(readCopyEntries(file), 'xl/sharedStrings.xml')).toBe(sharedStrings);
-  });
-
+describe('grid gate: reader parts', () => {
   it('leaves out an XML part no workbook relationship names, whatever it holds', () => {
     const file = buildXlsxFixture([{ name: 'Sheet1', xml: sheet(TWO_ROWS) }], {
       'xl/custom/notes.xml': `<notes><dimension ref="${FORGED_REF}"/></notes>`,
       'xl/custom/broken.xml': '<notes><open></notes>',
     });
 
-    const names = Object.keys(readCopyEntries(file));
+    const names = readerPartNames(file);
 
     expect(names).not.toContain('xl/custom/notes.xml');
     expect(names).not.toContain('xl/custom/broken.xml');
+    expect(gateOutcome(file)).toBeNull();
   });
 
   it('rejects a part the reader opens that is not well-formed', () => {
@@ -603,7 +617,7 @@ describe('read copy contents', () => {
       'xl/_rels/workbook.xml.rels': SHARED_STRINGS_RELS,
       'xl/sharedStrings.xml': '<sst><open></sst>',
     });
-    expect(() => readCopyEntries(file)).toThrow(SpreadsheetFileError);
+    expect(gateOutcome(file)).toBe('CORRUPT_FILE');
   });
 
   it('leaves out every entry the reader never opens', () => {
@@ -612,7 +626,7 @@ describe('read copy contents', () => {
       'xl/printerSettings/printerSettings1.bin': 'binary',
     });
 
-    const names = Object.keys(readCopyEntries(file));
+    const names = readerPartNames(file);
 
     expect(names).not.toContain('xl/media/image1.png');
     expect(names).not.toContain('xl/printerSettings/printerSettings1.bin');
@@ -620,7 +634,7 @@ describe('read copy contents', () => {
     expect(names).toContain('xl/_rels/workbook.xml.rels');
   });
 
-  it('removes the dimension from every part that carries sheetData, whatever its path', () => {
+  it('ignores the dimension of every part that carries sheetData, whatever its path', () => {
     const file = buildXlsxFixture([
       { name: 'A', xml: sheet(`<dimension ref="A1"/>${TWO_ROWS}`) },
       {
@@ -631,65 +645,19 @@ describe('read copy contents', () => {
       },
     ]);
 
-    const entries = readCopyEntries(file);
-
-    expect(entryText(entries, SHEET_PART)).not.toContain('dimension');
-    expect(entryText(entries, 'xl/custom/s.xml')).not.toContain('dimension');
+    expect(uploadOutcome(file, { sheetName: 'A' })).toEqual(grid(TWO_ROW_GRID));
+    expect(uploadOutcome(file, { sheetName: 'B' })).toEqual(grid(TWO_ROW_GRID));
   });
 
-  it('empties an uncached formula cell but keeps its other attributes and prefix', () => {
+  it('reads an uncached formula cell as empty, whatever its prefix, type and style', () => {
     const xml =
       `${XML_DECLARATION}<x:worksheet${X_PREFIX_NS}><x:sheetData><x:row r="1">` +
       '<x:c r="A1" s="42" t="str"><x:f>IF(ISBLANK(B1),"","Hayir")</x:f></x:c>' +
+      '<x:c r="B1" t="inlineStr"><x:is><x:t>keep</x:t></x:is></x:c>' +
       '</x:row></x:sheetData></x:worksheet>';
     const file = buildXlsxFixture([{ name: 'Sheet1', xml }]);
 
-    const text = entryText(readCopyEntries(file), SHEET_PART);
-
-    expect(text).toContain('<x:row r="1"><x:c r="A1" s="42"/></x:row>');
-    expect(text).not.toContain('ISBLANK');
-    expect(text).not.toContain('t="str"');
-  });
-
-  it('always re-zips the archive, even when no part changes', () => {
-    const readerParts: Record<string, string> = {
-      'xl/_rels/workbook.xml.rels': relsOf(SHARED_STRINGS_RELATIONSHIP),
-      'xl/workbook.xml': `${XML_DECLARATION}<workbook/>`,
-      'xl/sharedStrings.xml': `${XML_DECLARATION}<sst count="0"/>`,
-    };
-    const entries: Record<string, Uint8Array> = {};
-    for (const [name, text] of Object.entries(readerParts)) entries[name] = strToU8(text);
-    // Stored (level 0) input: a real re-zip deflates it, so the bytes must differ.
-    const contentTypes = strToU8(`${XML_DECLARATION}<Types/>`);
-    const file = Buffer.from(
-      zipSync({ ...entries, '[Content_Types].xml': contentTypes }, { level: 0 }),
-    );
-
-    const out = prepareUploadForRead(file, GUARD_OPTS);
-
-    expect(out.equals(file)).toBe(false);
-    expect(unzipSync(new Uint8Array(out))).toEqual(entries);
-  });
-});
-
-describe('read copy: characters the reader would normalize', () => {
-  // xmldom turns CR, CRLF, NEL, LS and PS into LF while reading. In the DOM such a
-  // character can only come from a character reference, and the serializer writes
-  // it back raw, so the reader would read a LF where the upload had the character.
-  it.each([
-    ['a carriage return', 'a&#13;b', 'a\rb'],
-    ['a CRLF pair', 'a&#13;&#10;b', 'a\r\nb'],
-    ['a next-line character', 'a&#x85;b', 'a\u0085b'],
-    ['a line separator', 'a&#x2028;b', 'a\u2028b'],
-    ['a paragraph separator', 'a&#x2029;b', 'a\u2029b'],
-  ])('keeps %s referenced in inline text', async (_label, text, expected) => {
-    const file = buildXlsxFixture([
-      {
-        name: 'Sheet1',
-        xml: sheet(`<sheetData><row r="1">${inlineCell('A1', text)}</row></sheetData>`),
-      },
-    ]);
-    expect(await readOutcome(file)).toEqual(grid([[expected]]));
+    expect(uploadOutcome(file)).toEqual(grid([[null, 'keep']]));
   });
 });
 
@@ -722,33 +690,12 @@ function styledWorkbook(formatCodes: readonly string[], root?: string): Buffer {
   );
 }
 
-describe('read copy: number formats', () => {
-  const FORMAT_CODES = ['dd.mm.yyyy', '#,##0.00 &quot;TL&quot;', '[$-41F]d mmmm yyyy;@', '0.00'];
-
-  it('rewrites every format code to one of the two canonical codes', () => {
-    const text = entryText(readCopyEntries(styledWorkbook(FORMAT_CODES)), STYLES_PART);
-    const codes = [...text.matchAll(/formatCode="([^"]*)"/g)].map((match) => match[1]);
-    expect(codes).toEqual([
-      DATE_FORMAT_CODE,
-      NUMBER_FORMAT_CODE,
-      DATE_FORMAT_CODE,
-      NUMBER_FORMAT_CODE,
-    ]);
-  });
-
-  // read-excel-file does not check the root name of the part its styles
-  // relationship points at, so the rewrite follows the reader's path instead.
-  it('rewrites the format codes of a styles part whatever its root is named', () => {
+describe('grid gate: number formats', () => {
+  // The reader does not check the root name of the part its styles relationship
+  // points at, so the format codes count whatever the root is named.
+  it('reads the format codes of a styles part whatever its root is named', () => {
     const file = styledWorkbook(['dd.mm.yyyy', '0.00'], 'notStyles');
-    const text = entryText(readCopyEntries(file), STYLES_PART);
-    expect(text).toContain(`formatCode="${DATE_FORMAT_CODE}"`);
-    expect(text).not.toContain('dd.mm.yyyy');
-  });
-
-  it('reads the same cells as the reader reads from the upload', async () => {
-    const file = styledWorkbook(FORMAT_CODES);
-    const fromUpload = await readSheet(file);
-    expect(await readOutcome(file)).toEqual(grid(fromUpload));
+    expect(uploadOutcome(file)).toEqual(grid([[SERIAL_DATE_AS_DATE, SERIAL_DATE]]));
   });
 
   it('rejects a format code longer than Excel allows as UNSAFE_CONTENT', async () => {
@@ -762,12 +709,14 @@ describe('read copy: number formats', () => {
   });
 });
 
-describe('read copy: a broken styles part', () => {
+describe('grid gate: a broken styles part', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('is rejected as CORRUPT_FILE without writing to the console', async () => {
+  // In-process (readUploadGrid), so the console spies see every write the read
+  // path could make.
+  it('is rejected as CORRUPT_FILE without writing to the console', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -776,43 +725,9 @@ describe('read copy: a broken styles part', () => {
       [STYLES_PART]: `<styleSheet xmlns="${SPREADSHEET_NS}">${'<1x/>'.repeat(100)}<cellXfs><xf/></cellXfs></styleSheet>`,
     });
 
-    expect(await readOutcome(file)).toEqual(rejected('CORRUPT_FILE'));
+    expect(uploadOutcome(file)).toEqual(rejected('CORRUPT_FILE'));
     expect(error).not.toHaveBeenCalled();
     expect(warn).not.toHaveBeenCalled();
     expect(log).not.toHaveBeenCalled();
-  });
-});
-
-describe('read copy: serialized size', () => {
-  // xmldom writes every '"' of a single-quoted attribute as '&quot;' (6 bytes), so
-  // the copy can outgrow the upload; the serialized parts are budgeted again.
-  const QUOTES = 1_000;
-  const xml = `<worksheet junk='${'"'.repeat(QUOTES)}'><sheetData/></worksheet>`;
-  const entries = { 'xl/worksheets/sheet1.xml': strToU8(xml) };
-  const caps = { rowCap: 10, colCap: 2 };
-
-  it('rejects a copy whose serialized parts exceed the budget as PAYLOAD_TOO_LARGE', () => {
-    let code: SpreadsheetFileErrorCode | null = null;
-    try {
-      buildReadCopy(entries, { ...caps, maxXmlBytes: xml.length * 2 });
-    } catch (e) {
-      if (!(e instanceof SpreadsheetFileError)) throw e;
-      code = e.code;
-    }
-    expect(code).toBe('PAYLOAD_TOO_LARGE');
-  });
-
-  it('accepts the same copy under a budget that fits it', () => {
-    expect(() => buildReadCopy(entries, { ...caps, maxXmlBytes: xml.length * 7 })).not.toThrow();
-  });
-});
-
-describe('the gate and the reader parse with the same xmldom', () => {
-  it('read-excel-file resolves the same @xmldom/xmldom package as this package', () => {
-    const requireFromHere = createRequire(import.meta.url);
-    const ours = requireFromHere.resolve('@xmldom/xmldom/package.json');
-    const readerPackage = requireFromHere.resolve('read-excel-file/package.json');
-    const theirs = createRequire(readerPackage).resolve('@xmldom/xmldom/package.json');
-    expect(realpathSync(theirs)).toBe(realpathSync(ours));
   });
 });

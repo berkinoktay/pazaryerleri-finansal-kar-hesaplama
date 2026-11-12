@@ -55,7 +55,7 @@ function parseFlashDateTime(text: string): Date | null {
 export function parseFlashWindowCell(row: readonly unknown[], idx: number): Date | null {
   if (idx < 0) return null;
   const raw = row[idx];
-  // read-excel-file yields date-formatted cells as a naive UTC Date (the Istanbul
+  // the grid reader yields date-formatted cells as a naive UTC Date (the Istanbul
   // wall-clock components embedded as if they were UTC), so it reads ~3h ahead of the
   // real instant. Normalise it through the SAME business-zone frame as the text path,
   // otherwise a window near a sub-period boundary lands in the wrong commission band.

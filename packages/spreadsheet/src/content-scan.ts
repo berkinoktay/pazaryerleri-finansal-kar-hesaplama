@@ -1,8 +1,9 @@
 import { strFromU8, type Unzipped } from 'fflate';
 import { SpreadsheetFileError } from './errors';
 
-// Zip entries the xlsx reader opens and parses as XML: read-excel-file's
-// filterZipArchiveEntry keeps exactly the names ending in `.xml` or `.xml.rels`.
+// Zip entries whose content the gate keeps and the grid reader may parse as XML:
+// exactly the names ending in `.xml` or `.xml.rels` (the rule read-excel-file's
+// filterZipArchiveEntry used, kept so the same parts are read).
 const XML_PART_SUFFIXES: readonly string[] = ['.xml', '.xml.rels'];
 
 // A DOCTYPE or ENTITY declaration can define entities that expand exponentially

@@ -4,8 +4,10 @@ import { ProblemDetailsSchema } from './error-schemas';
 
 /**
  * Error responses shared by every workbook import route, raised by the
- * pre-body upload guard (413, 415) and by the import transaction (503).
- * Spread into a route's `responses` next to its own status codes.
+ * pre-body upload guard (413, 415) and as 503 when the import cannot run now: the
+ * parse queue is full or waited too long, the parse worker hit its time limit, or
+ * the import transaction timed out. Spread into a route's `responses` next to its
+ * own status codes.
  */
 export const WORKBOOK_IMPORT_ERROR_RESPONSES = {
   413: {
@@ -18,7 +20,8 @@ export const WORKBOOK_IMPORT_ERROR_RESPONSES = {
   },
   503: {
     content: { 'application/json': { schema: ProblemDetailsSchema } },
-    description: 'The server is too busy to run the import right now (IMPORT_BUSY)',
+    description:
+      'The server is too busy to run the import right now: the parse queue is full or waited too long, the parse hit its time limit, or the import transaction timed out (IMPORT_BUSY)',
     headers: z.object({
       'Retry-After': z.number().int().openapi({ description: 'Seconds to wait before retrying' }),
     }),
@@ -27,12 +30,14 @@ export const WORKBOOK_IMPORT_ERROR_RESPONSES = {
 
 /**
  * Error responses shared by every workbook export route: the stored workbook is
- * re-read through the same per-process parse queue, which answers 503 when full.
+ * re-read through the same per-process parse queue and worker, which answer 503 when
+ * the queue is full or waited too long, or the worker hit its memory or time limit.
  */
 export const WORKBOOK_EXPORT_ERROR_RESPONSES = {
   503: {
     content: { 'application/json': { schema: ProblemDetailsSchema } },
-    description: 'The server is too busy to read the stored workbook right now (IMPORT_BUSY)',
+    description:
+      'The server is too busy to read the stored workbook right now: the parse queue is full or waited too long, or the parse hit its memory or time limit (IMPORT_BUSY)',
     headers: z.object({
       'Retry-After': z.number().int().openapi({ description: 'Seconds to wait before retrying' }),
     }),

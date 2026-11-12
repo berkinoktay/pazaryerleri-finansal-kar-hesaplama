@@ -1,41 +1,75 @@
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { DOMParser } from '@xmldom/xmldom';
 import { strFromU8, unzipSync } from 'fflate';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import {
-  DATE_FORMAT_CODE,
-  NUMBER_FORMAT_CODE,
-  canonicalFormatCode,
-  isReaderDateFormat,
-} from './date-format';
+import { BUILTIN_DATE_FORMAT_IDS, excelSerialToDate, isReaderDateFormat } from './date-format';
 
-// The read copy rewrites every custom number format to one of two canonical codes.
-// That is only safe if our classifier and the reader's agree on every input, so
-// the reader's own module (read-excel-file/modules/xlsx/isDateFormat.js) is loaded
-// from its absolute file path and compared against ours.
+// A custom number format decides whether a numeric cell reads as a date, so our
+// classifier must agree with the old reader's on every input. The old reader's own
+// module (9.2.0, modules/xlsx/isDateFormat.js) used to be loaded here and compared
+// against ours; its answers were recorded once, from that module, for every input
+// below, so the comparison outlives the dependency.
 
-type DateFormatClassifier = (template: string) => unknown;
+// The old reader's isDateFormat, recorded: format code -> classified as a date.
+const READER_DATE_FORMAT_RESULTS: ReadonlyMap<string, boolean> = new Map([
+  ['0.00', false],
+  ['dd/mm/yyyy', true],
+  ['[$-41F]dd.mm.yyyy;@', true],
+  ['#,##0.00 "TL"', false],
+  ['hh:mm:ss', true],
+  ['General', false],
+  ['mmm-yy', true],
+  ['yyyy-mm-dd hh:mm', true],
+  ['', false],
+  ['@', false],
+  ['yyyy-mm-dd', true],
+  ['0', false],
+  ['d/m/yyyy', true],
+  ['m/d/yy h:mm', true],
+  ['h:mm AM/PM', true],
+  ['h:mm:ss am/pm', true],
+  ['[h]:mm:ss', false],
+  ['mm:ss.0', false],
+  ['DD.MM.YYYY', true],
+  ['[$-414]mmmm\\ yyyy;@', true],
+  ['[$-x-sysdate]dddd, mmmm dd, yyyy', false],
+  ['[$-404]e/m/d', true],
+  ['0%', false],
+  ['0.00%', false],
+  ['#,##0', false],
+  ['$#,##0.00', false],
+  ['#,##0.00_);(#,##0.00)', false],
+  ['0.00E+00', false],
+  ['# ?/?', false],
+  ['[Red]0.00', false],
+  ['yyyy', true],
+  ['dddd', false],
+  ['e', true],
+  ['am/pm', true],
+  ['yyyy-mm-dd;@', true],
+  ['[$-tr-TR]d mmmm yyyy', true],
+  ['"TL"#,##0', false],
+  ['dd/mm/yyyy hh:mm:ss', true],
+  ['yyyy"y"m"m"d"d"', false],
+  [';@', false],
+  ['[$-]yyyy', false],
+  [' ', false],
+  ['-', false],
+  ['mm-dd-yy', true],
+  ['dd;@;@', false],
+  ['YYYY-MM-DD', true],
+  ['_-* #,##0.00 _T_L_-;-* #,##0.00 _T_L_-;_-* "-"?? _T_L_-;_-@_-', false],
+]);
 
-interface ClassifierModule {
-  readonly default: DateFormatClassifier;
+/** The recorded reader answer for `code`; throws when no answer was recorded for it. */
+function readerIsDateFormat(code: string): boolean {
+  const recorded = READER_DATE_FORMAT_RESULTS.get(code);
+  if (recorded === undefined) {
+    throw new Error(`No recorded reader classification for ${JSON.stringify(code)}`);
+  }
+  return recorded;
 }
-
-function isClassifierModule(value: unknown): value is ClassifierModule {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'default' in value &&
-    typeof value.default === 'function'
-  );
-}
-
-const requireFromHere = createRequire(import.meta.url);
-const READER_ROOT = dirname(requireFromHere.resolve('read-excel-file/package.json'));
-const READER_IS_DATE_FORMAT = join(READER_ROOT, 'modules', 'xlsx', 'isDateFormat.js');
 
 const FIXTURE_FILES: readonly string[] = [
   'trendyol-commission-tariff.xlsx',
@@ -113,16 +147,6 @@ function fixtureFormatCodes(file: string): string[] {
   return codes;
 }
 
-let readerIsDateFormat: DateFormatClassifier = () => {
-  throw new Error('reader classifier not loaded');
-};
-
-beforeAll(async () => {
-  const loaded: unknown = await import(pathToFileURL(READER_IS_DATE_FORMAT).href);
-  if (!isClassifierModule(loaded)) throw new Error('reader isDateFormat module has no default');
-  readerIsDateFormat = loaded.default;
-});
-
 describe('isReaderDateFormat', () => {
   const fixtureCodes = FIXTURE_FILES.flatMap(fixtureFormatCodes);
 
@@ -138,16 +162,33 @@ describe('isReaderDateFormat', () => {
   );
 });
 
-describe('canonicalFormatCode', () => {
-  it('the reader classifies the canonical date code as a date', () => {
-    expect(readerIsDateFormat(DATE_FORMAT_CODE)).toBe(true);
+describe('BUILTIN_DATE_FORMAT_IDS', () => {
+  it.each([14, 22, 45, 47])('holds the built-in date format id %i', (id) => {
+    expect(BUILTIN_DATE_FORMAT_IDS.has(id)).toBe(true);
   });
 
-  it('the reader classifies the canonical number code as not a date', () => {
-    expect(readerIsDateFormat(NUMBER_FORMAT_CODE)).toBe(false);
+  it.each([0, 2, 49])('does not hold the non-date format id %i', (id) => {
+    expect(BUILTIN_DATE_FORMAT_IDS.has(id)).toBe(false);
   });
 
-  it.each(HAND_PICKED_FORMAT_CODES)('keeps the reader classification of %j', (code) => {
-    expect(readerIsDateFormat(canonicalFormatCode(code))).toBe(readerIsDateFormat(code));
+  it("holds exactly the reader's built-in date format ids", () => {
+    const readerIds = [
+      ...[14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47],
+      ...[27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 50, 51, 52, 53, 54, 55, 56, 57, 58],
+      ...[71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81],
+    ];
+    expect([...BUILTIN_DATE_FORMAT_IDS].sort((a, b) => a - b)).toEqual(
+      readerIds.sort((a, b) => a - b),
+    );
+  });
+});
+
+describe('excelSerialToDate', () => {
+  it('has no leap-year correction before 1900-03-01', () => {
+    expect(excelSerialToDate(59, false).toISOString()).toBe('1900-02-27T00:00:00.000Z');
+  });
+
+  it('reads a time-only serial as a UTC wall clock on 1899-12-30', () => {
+    expect(excelSerialToDate(0.25, false).toISOString()).toBe('1899-12-30T06:00:00.000Z');
   });
 });

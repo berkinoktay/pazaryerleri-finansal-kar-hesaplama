@@ -1,7 +1,12 @@
-import { Unzip, UnzipInflate, strFromU8, unzipSync, zipSync, type Unzipped } from 'fflate';
+import { Unzip, UnzipInflate, strFromU8, unzipSync } from 'fflate';
 import { SpreadsheetFileError } from './errors';
 import { assertSafeXmlContent, isXmlPart } from './content-scan';
-import { buildReadCopy, readerPartPaths, WORKBOOK_PART, WORKBOOK_RELS_PART } from './read-copy';
+import {
+  assertWorkbookRelsWithinCap,
+  readerPartPaths,
+  WORKBOOK_PART,
+  WORKBOOK_RELS_PART,
+} from './workbook-parts';
 import {
   XLSX_MAGIC,
   MAX_ZIP_ENTRIES,
@@ -22,6 +27,8 @@ const TAG_OPEN_BYTE = 0x3c;
 const TAG_CLOSE_BYTE = 0x3e;
 // '=' as a byte: every attribute carries one, so the count bounds the attribute nodes.
 const EQUALS_BYTE = 0x3d;
+const DOUBLE_QUOTE_BYTE = 0x22;
+const SINGLE_QUOTE_BYTE = 0x27;
 // After '<': '!' opens a comment, CDATA or DOCTYPE (the content scan rejects the
 // latter), '?' a processing instruction. Neither is an element name.
 const MARKUP_DECLARATION_BYTE = 0x21;
@@ -35,7 +42,7 @@ const XMLNS_BYTES: readonly number[] = [0x78, 0x6d, 0x6c, 0x6e, 0x73];
 // Zip bytes fed to the streaming inflater per push; see streamArchive.
 const STREAM_CHUNK_BYTES = 8 * 1024;
 
-interface GuardOpts {
+export interface GuardOpts {
   rowCap: number;
   colCap: number;
   maxBytes: number;
@@ -44,6 +51,9 @@ interface GuardOpts {
   /** Callers may LOWER this below MAX_XML_DOM_WEIGHT (e.g. in tests); higher values are clamped. */
   maxDomWeight?: number;
 }
+
+/** The reader parts of an upload, by entry name, in the order the gate picked them. */
+export type UploadParts = Readonly<Record<string, Uint8Array>>;
 
 /** What the local-header stream delivered. */
 interface StreamedArchive {
@@ -61,7 +71,7 @@ interface XmlDomWeight {
   total: number;
 }
 
-function hasXlsxMagic(file: Buffer): boolean {
+function hasXlsxMagic(file: Uint8Array): boolean {
   // XLSX_MAGIC = [0x50, 0x4b, 0x03, 0x04] — zip local-file-header signature.
   // With noUncheckedIndexedAccess, file[i] is number | undefined; comparing to
   // number is valid strict equality (undefined === 0x50 is false, so every() returns false).
@@ -330,28 +340,100 @@ function addDomWeight(name: string, weight: XmlDomWeight, amount: number): void 
 }
 
 /**
+ * The start tag being scanned: whether one is open, the quote that opened the
+ * attribute value being read (0 outside a value), and its attribute names and '='
+ * separators so far, both counted outside quoted values.
+ */
+interface StartTagScan {
+  open: boolean;
+  quote: number;
+  names: number;
+  equals: number;
+}
+
+function newStartTag(): StartTagScan {
+  return { open: false, quote: 0, names: 0, equals: 0 };
+}
+
+function isXmlWhitespace(byte: number | undefined): boolean {
+  return byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d;
+}
+
+/**
+ * Follows one byte of an open start tag. An attribute name starts at a byte that
+ * follows whitespace outside a quoted value and is not '=', '/', '>' or a quote; the
+ * element name right after '<' follows no whitespace, so it is not counted. A '>'
+ * outside a quoted value closes the tag.
+ */
+function observeStartTagByte(
+  name: string,
+  weight: XmlDomWeight,
+  tag: StartTagScan,
+  byte: number,
+  previous: number | undefined,
+): void {
+  if (tag.quote !== 0) {
+    if (byte === tag.quote) tag.quote = 0;
+    return;
+  }
+  if (byte === DOUBLE_QUOTE_BYTE || byte === SINGLE_QUOTE_BYTE) {
+    tag.quote = byte;
+  } else if (byte === EQUALS_BYTE) {
+    tag.equals += 1;
+  } else if (byte === TAG_CLOSE_BYTE) {
+    endStartTag(name, weight, tag);
+  } else if (byte !== END_TAG_BYTE && !isXmlWhitespace(byte) && isXmlWhitespace(previous)) {
+    tag.names += 1;
+  }
+}
+
+/**
+ * Closes the open start tag, if any. Every attribute with a value was charged at its
+ * '=' byte; an attribute WITHOUT a value (`<z a1 a2/>`, which xmldom accepts with
+ * only a warning yet still builds as a node) has no '=', so each name beyond the '='
+ * count is charged here. A real workbook has one '=' per attribute, so its weight
+ * does not change.
+ */
+function endStartTag(name: string, weight: XmlDomWeight, tag: StartTagScan): void {
+  if (!tag.open) return;
+  const valueless = tag.names - tag.equals;
+  if (valueless > 0) addDomWeight(name, weight, valueless * XML_ATTRIBUTE_WEIGHT);
+  tag.open = false;
+  tag.quote = 0;
+  tag.names = 0;
+  tag.equals = 0;
+}
+
+/**
  * Budgets on the raw bytes of one part the reader opens, before any XML is decoded
  * or parsed (the total size is capped while streaming). One linear pass:
  *   - the DOM weight of the part is added to the running total of all reader parts,
  *     at most MAX_XML_DOM_WEIGHT (PAYLOAD_TOO_LARGE): XML_ELEMENT_WEIGHT per element
- *     start tag, XML_ATTRIBUTE_WEIGHT per '=' byte and XML_TEXT_NODE_WEIGHT per text
+ *     start tag, XML_ATTRIBUTE_WEIGHT per '=' byte (plus one per attribute without a
+ *     value, see endStartTag) and XML_TEXT_NODE_WEIGHT per text
  *     run (a '>' followed by anything but '<'), comment, CDATA section or
- *     processing instruction. This bounds the heap of the DOM the read copy and the
- *     reader each build;
+ *     processing instruction. This bounds the heap of the DOM the reader builds;
  *   - no element name, start or end tag, longer than MAX_XML_NAME_LENGTH bytes
- *     (UNSAFE_CONTENT). read-excel-file finds elements with `tagName.replace(/.+:/,
+ *     (UNSAFE_CONTENT). The old reader found elements with `tagName.replace(/.+:/,
  *     '')`, which is quadratic in the name length: a ~1.5 KB upload holding one
  *     40 000-byte name kept it busy for seconds. Bytes are at least characters, so
- *     the byte cap also caps the characters the regex sees;
+ *     the byte cap also caps the characters of every name;
  *   - at most MAX_XMLNS_DECLARATIONS_PER_PART occurrences of 'xmlns' in this part
  *     (UNSAFE_CONTENT): xmldom's namespace lookup is quadratic in nested declarations.
  */
 function chargeXmlPart(name: string, bytes: Uint8Array, weight: XmlDomWeight): void {
   let declarations = 0;
+  const startTag = newStartTag();
   for (let i = 0; i < bytes.length; i += 1) {
     const byte = bytes[i];
+    if (byte === undefined) break;
     if (byte === TAG_OPEN_BYTE) {
-      addDomWeight(name, weight, tagWeight(bytes, i + 1));
+      // A '<' before the previous start tag closed (not well-formed; the strict parse
+      // rejects it later) still settles that tag's attributes.
+      endStartTag(name, weight, startTag);
+      const markupWeight = tagWeight(bytes, i + 1);
+      startTag.open = markupWeight === XML_ELEMENT_WEIGHT;
+      addDomWeight(name, weight, markupWeight);
       if (elementNameLength(bytes, i + 1) > MAX_XML_NAME_LENGTH) {
         throw new SpreadsheetFileError(
           'UNSAFE_CONTENT',
@@ -359,7 +441,10 @@ function chargeXmlPart(name: string, bytes: Uint8Array, weight: XmlDomWeight): v
           { entry: name, cap: MAX_XML_NAME_LENGTH },
         );
       }
-    } else if (byte === TAG_CLOSE_BYTE) {
+      continue;
+    }
+    if (startTag.open) observeStartTagByte(name, weight, startTag, byte, bytes[i - 1]);
+    if (byte === TAG_CLOSE_BYTE) {
       if (startsText(bytes, i + 1)) addDomWeight(name, weight, XML_TEXT_NODE_WEIGHT);
     } else if (byte === EQUALS_BYTE) {
       addDomWeight(name, weight, XML_ATTRIBUTE_WEIGHT);
@@ -374,10 +459,11 @@ function chargeXmlPart(name: string, bytes: Uint8Array, weight: XmlDomWeight): v
       }
     }
   }
+  endStartTag(name, weight, startTag);
 }
 
 /**
- * Picks out the parts read-excel-file 9.2.0 opens (parseSpreadsheetContents.js):
+ * Picks out the parts the grid reader opens (reader contract, section 1):
  * `xl/_rels/workbook.xml.rels`, `xl/workbook.xml`, then every styles, shared strings
  * and worksheet part the rels name (readerPartPaths). Each part is budgeted
  * (chargeXmlPart) and content-scanned (assertSafeXmlContent) on its raw bytes when
@@ -390,7 +476,7 @@ function chargeXmlPart(name: string, bytes: Uint8Array, weight: XmlDomWeight): v
 function selectReaderParts(
   contents: ReadonlyMap<string, Uint8Array<ArrayBuffer>>,
   opts: GuardOpts,
-): Unzipped {
+): UploadParts {
   const weight = xmlDomWeight(opts);
   const selected = new Map<string, Uint8Array<ArrayBuffer>>();
   const pick = (name: string): Uint8Array<ArrayBuffer> => {
@@ -408,15 +494,18 @@ function selectReaderParts(
   };
 
   const rels = pick(WORKBOOK_RELS_PART);
+  assertWorkbookRelsWithinCap(rels);
   pick(WORKBOOK_PART);
   for (const path of readerPartPaths(strFromU8(rels))) pick(path);
   return Object.fromEntries(selected);
 }
 
 /**
- * Validates an xlsx Buffer and returns the READ copy: the only bytes the grid
- * reader ever parses. The raw upload never reaches the reader; every path either
- * throws SpreadsheetFileError or returns the rebuilt copy (no fail-open).
+ * Validates an xlsx upload on its bytes and returns the parts the grid reader opens:
+ * the only bytes the reader ever parses. Every path either throws
+ * SpreadsheetFileError or returns the parts (no fail-open). The parts are views of
+ * the inflated content; the upload itself is not copied. The DOM checks run when
+ * the parts are parsed (checkPart in part-checks.ts).
  *
  * Check order:
  *   1. Compressed file size cap (no attacker-controlled metadata involved).
@@ -432,8 +521,8 @@ function selectReaderParts(
  *      same entries as the stream, with the same size for every entry. Nothing is
  *      ever unzipped from the directory, so overlapping or repeated records cannot
  *      make the gate inflate one stream many times, and the reader (which parses
- *      only the re-zipped copy) cannot see entries the gate did not. The export
- *      unzips the stored upload whole, so its allocations stay within the cap.
+ *      only these parts) cannot see entries the gate did not. The export unzips the
+ *      stored upload whole, so its allocations stay within the cap.
  *   6. selectReaderParts: the parts the reader opens (the workbook rels, the
  *      workbook, and the styles, shared strings and worksheet parts the rels name),
  *      each checked on its raw bytes before any DOM is built: the DOM weight of all
@@ -441,18 +530,13 @@ function selectReaderParts(
  *      then the content scan (assertSafeXmlContent rejects a
  *      DOCTYPE, an ENTITY declaration or an unknown entity reference:
  *      UNSAFE_CONTENT). A part the rels name that is not in the archive is
- *      CORRUPT_FILE. Every other entry is left alone.
- *   7. buildReadCopy: every reader part is parsed with the reader's own XML parser
- *      (@xmldom/xmldom), rewritten by the reader's own element rules and serialized
- *      back; see read-copy.ts.
- *   8. zipSync of the rebuilt parts into the returned Buffer. Entries the reader
- *      never opens (images, drawings, document properties, `_rels/.rels`) are left
- *      out.
+ *      CORRUPT_FILE. Every other entry is left alone; the parts come back in the
+ *      order they were picked.
  *
- * Throws SpreadsheetFileError on any violation. This function is INTERNAL; it is
- * wired into readWorkbookGrid and is not part of the public package surface.
+ * Throws SpreadsheetFileError on any violation. INTERNAL: not part of the public
+ * package surface.
  */
-export function prepareUploadForRead(file: Buffer, opts: GuardOpts): Buffer {
+export function openUpload(file: Uint8Array, opts: GuardOpts): UploadParts {
   // 1. Compressed size cap
   if (file.length > opts.maxBytes) {
     throw new SpreadsheetFileError(
@@ -477,8 +561,7 @@ export function prepareUploadForRead(file: Buffer, opts: GuardOpts): Buffer {
     opts.maxDecompressedBytes ?? MAX_DECOMPRESSED_BYTES,
     MAX_DECOMPRESSED_BYTES,
   );
-  const bytes = new Uint8Array(file);
-  const streamed = streamArchive(bytes, effectiveDecompCap);
+  const streamed = streamArchive(file, effectiveDecompCap);
 
   // 4. Structural check: presence of required xlsx part names.
   if (!streamed.names.has('[Content_Types].xml') || !streamed.names.has(WORKBOOK_PART)) {
@@ -490,20 +573,8 @@ export function prepareUploadForRead(file: Buffer, opts: GuardOpts): Buffer {
   }
 
   // 5. The central directory must agree with the stream.
-  assertCentralDirectoryMatches(listCentralDirectory(bytes), streamed);
+  assertCentralDirectoryMatches(listCentralDirectory(file), streamed);
 
   // 6. The parts the reader opens, budgeted and content-scanned on raw bytes.
-  const readerParts = selectReaderParts(streamed.contents, opts);
-
-  // 7. The read copy, built from the reader's own DOM.
-  const readCopy = buildReadCopy(readerParts, { rowCap: opts.rowCap, colCap: opts.colCap });
-
-  // 8. Re-zip.
-  try {
-    return Buffer.from(zipSync(readCopy));
-  } catch (e) {
-    throw new SpreadsheetFileError('CORRUPT_FILE', 'Cannot re-zip the read copy', {
-      cause: causeOf(e),
-    });
-  }
+  return selectReaderParts(streamed.contents, opts);
 }

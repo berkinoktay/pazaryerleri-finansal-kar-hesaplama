@@ -662,18 +662,12 @@ importers:
       '@xmldom/xmldom':
         specifier: ^0.9.12
         version: 0.9.12
-      decimal.js:
-        specifier: 'catalog:'
-        version: 10.6.0
       fflate:
         specifier: ^0.8.3
         version: 0.8.3
-      read-excel-file:
-        specifier: 9.2.0
-        version: 9.2.0
-      write-excel-file:
-        specifier: 4.1.1
-        version: 4.1.1
+      tsx:
+        specifier: 'catalog:'
+        version: 4.21.0
     devDependencies:
       '@pazarsync/eslint-config':
         specifier: workspace:*
@@ -5133,9 +5127,6 @@ packages:
     resolution: {integrity: sha512-pyFS63ptit/P5WqUkt+UUfe+4oevH+bFeIiPPdfb0pFeYEu/1ELnJu5l+5EcTKYL5M7zaAa7S8ddywgXypqKCw==}
     engines: {node: '>= 0.4'}
 
-  node-int64@0.4.0:
-    resolution: {integrity: sha512-O5lz91xSOeoXP6DulyHfllpq+Eg00MWitZIbtPfoSEvqIHdl5gfcY6hYzDWnj0qD5tz52PI08u9qUvSVeUBeHw==}
-
   node-releases@2.0.59:
     resolution: {integrity: sha512-5qr2okC4ItAI0hG5SaV0HoYMpnM/Y6+Oqr7AmPYy/2uEoGvS+GbSKLeRxSS1uAdu59yz0ouzcuXievSgg///WA==}
     engines: {node: '>=18'}
@@ -5577,10 +5568,6 @@ packages:
   react@19.2.6:
     resolution: {integrity: sha512-sfWGGfavi0xr8Pg0sVsyHMAOziVYKgPLNrS7ig+ivMNb3wbCBw3KxtflsGBAwD3gYQlE/AEZsTLgToRrSCjb0Q==}
     engines: {node: '>=0.10.0'}
-
-  read-excel-file@9.2.0:
-    resolution: {integrity: sha512-jwSi8Q9oCmswrYMkuiKvJ6VdHbAXGQnANSOaHBNQZEm2XvaXx8d0t/V7oepgHqT9YWxlQE3HEuCtDZq8BZBmvw==}
-    engines: {node: '>=18'}
 
   readdirp@4.1.2:
     resolution: {integrity: sha512-GDhwkLfywWL2s6vEjyhri+eXmfH6j1L7JE27WhqLeYzoh/A3DBaYGEj2H/HFZCn/kMfim73FXxEJTw06WtxQwg==}
@@ -6115,10 +6102,6 @@ packages:
   until-async@3.0.2:
     resolution: {integrity: sha512-IiSk4HlzAMqTUseHHe3VhIGyuFmN90zMTpD3Z3y8jeQbzLIq500MVM7Jq2vUAnTKAFPJrqwkzr6PoTcPhGcOiw==}
 
-  unzipper-esm@0.13.2:
-    resolution: {integrity: sha512-lt8GtgDYV8YcAFZNQuLyR2QvHI8C/TstpgsdjUn9ZxiWLJgn+e5uW6DsO3e/HUJVuWD57ZLLFMZ9xk26tePuHQ==}
-    engines: {node: '>=8.0.0'}
-
   update-browserslist-db@1.3.4:
     resolution: {integrity: sha512-t8wonIOdQyOjtPd2VktlBu6QjTVTks6v8bSi7kd0r2Vll8TK1JYDZtRRdbmCHOAMphkZgrzK+L+vXK4pyZ8t4A==}
     hasBin: true
@@ -6318,10 +6301,6 @@ packages:
 
   wrap-ansi@9.0.2:
     resolution: {integrity: sha512-42AtmgqjV+X1VpdOfyTGOYRi0/zsoLqtXQckTmqTeybT+BDIbM/Guxo7x3pE2vtpr1ok6xRqM9OpBe+Jyoqyww==}
-    engines: {node: '>=18'}
-
-  write-excel-file@4.1.1:
-    resolution: {integrity: sha512-MUnCnNtQrcZek832ZcU24uU0rSphFmKPD1DvIjXOlygVb93CV7Tme6H3jUTkxsMmjB2W7HIzERzjqTi5kui71A==}
     engines: {node: '>=18'}
 
   ws@8.20.0:
@@ -10630,8 +10609,6 @@ snapshots:
       object.entries: 1.1.9
       semver: 6.3.1
 
-  node-int64@0.4.0: {}
-
   node-releases@2.0.59: {}
 
   nuqs@2.8.9(next@16.4.2(@babel/core@7.29.7)(@types/node@20.19.41)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react@19.2.6):
@@ -11045,12 +11022,6 @@ snapshots:
       '@types/react': 19.2.14
 
   react@19.2.6: {}
-
-  read-excel-file@9.2.0:
-    dependencies:
-      '@xmldom/xmldom': 0.9.12
-      fflate: 0.8.3
-      unzipper-esm: 0.13.2
 
   readdirp@4.1.2: {}
 
@@ -11722,11 +11693,6 @@ snapshots:
 
   until-async@3.0.2: {}
 
-  unzipper-esm@0.13.2:
-    dependencies:
-      graceful-fs: 4.2.11
-      node-int64: 0.4.0
-
   update-browserslist-db@1.3.4(browserslist@4.29.4):
     dependencies:
       browserslist: 4.29.4
@@ -11926,10 +11892,6 @@ snapshots:
       ansi-styles: 6.2.3
       string-width: 7.2.0
       strip-ansi: 7.2.0
-
-  write-excel-file@4.1.1:
-    dependencies:
-      fflate: 0.8.3
 
   ws@8.20.0: {}
 

@@ -125,16 +125,165 @@ function cellXml(prefix: string, colIdx: number, rowNum: number, value: XlsxCell
     : `<${prefix}c r="${ref}" t="inlineStr"><${prefix}is><${prefix}t>${xmlEscape(value.value)}</${prefix}t></${prefix}is></${prefix}c>`;
 }
 
+// ─── Linear tag scans ───────────────────────────────────────────────────────
+
+// Rows and cells are found by forward scans rather than regexes. The regexes they
+// replace (`<(?:\w+:)?row\b[^>]*>[\s\S]*?<\/(?:\w+:)?row>` and the cell equivalent with
+// a self-closing alternative) rescan to the end of the text for every start tag without
+// a closing tag, so a comment holding many `<row ` starts blocked the event loop for
+// hours. The scans visit exactly the spans those regexes matched, in O(length): they
+// keep the optional `\w+:` namespace prefix, so prefixed vendor files (`<x:row>`,
+// `<x:c>`) match too.
+
+const ROW_TAG = 'row';
+const CELL_TAG = 'c';
+const TAG_OPEN = '<';
+const TAG_CLOSE = '>';
+const CLOSING_TAG_OPEN = '</';
+const PREFIX_SEPARATOR = ':';
+const SELF_CLOSING_MARK = '/';
+
+const CHAR_0 = 0x30;
+const CHAR_9 = 0x39;
+const CHAR_UPPER_A = 0x41;
+const CHAR_UPPER_Z = 0x5a;
+const CHAR_LOWER_A = 0x61;
+const CHAR_LOWER_Z = 0x7a;
+const CHAR_UNDERSCORE = 0x5f;
+
+/** Whether a UTF-16 code unit is a regex `\w` character (no `u` flag): `[A-Za-z0-9_]`. */
+function isWordChar(code: number): boolean {
+  return (
+    (code >= CHAR_0 && code <= CHAR_9) ||
+    (code >= CHAR_UPPER_A && code <= CHAR_UPPER_Z) ||
+    (code >= CHAR_LOWER_A && code <= CHAR_LOWER_Z) ||
+    code === CHAR_UNDERSCORE
+  );
+}
+
+/** End of the maximal `\w` run that starts at `from` (`from` itself when there is none). */
+function wordRunEnd(xml: string, from: number): number {
+  let end = from;
+  while (end < xml.length && isWordChar(xml.charCodeAt(end))) end++;
+  return end;
+}
+
+/** Whether `name` sits at `at` followed by a non-`\w` character or the end (`name\b`). */
+function isNameAt(xml: string, at: number, name: string): boolean {
+  if (!xml.startsWith(name, at)) return false;
+  const after = at + name.length;
+  return after === xml.length || !isWordChar(xml.charCodeAt(after));
+}
+
+/**
+ * Whether `<(?:\w+:)?name\b` matches at `start`, which indexes a `<`. The prefix route
+ * (a maximal `\w` run, then `:`, then the name) is tried before the bare name, as the
+ * regex does; only the maximal run can be followed by `:`.
+ */
+function isOpenTagAt(xml: string, start: number, name: string): boolean {
+  const runEnd = wordRunEnd(xml, start + 1);
+  if (runEnd > start + 1 && xml[runEnd] === PREFIX_SEPARATOR && isNameAt(xml, runEnd + 1, name)) {
+    return true;
+  }
+  return isNameAt(xml, start + 1, name);
+}
+
+/** End of the first `<\/(?:\w+:)?name>` that starts at or after `from`, or -1 when none does. */
+function closingTagEnd(xml: string, from: number, name: string): number {
+  const tail = `${name}${TAG_CLOSE}`;
+  let cursor = from;
+  while (cursor < xml.length) {
+    const at = xml.indexOf(CLOSING_TAG_OPEN, cursor);
+    if (at === -1) return -1;
+    const nameStart = at + CLOSING_TAG_OPEN.length;
+    const runEnd = wordRunEnd(xml, nameStart);
+    if (
+      runEnd > nameStart &&
+      xml[runEnd] === PREFIX_SEPARATOR &&
+      xml.startsWith(tail, runEnd + 1)
+    ) {
+      return runEnd + 1 + tail.length;
+    }
+    if (xml.startsWith(tail, nameStart)) return nameStart + tail.length;
+    cursor = at + 1;
+  }
+  return -1;
+}
+
+/**
+ * The `[start, end)` spans of every `<row>` element, exactly the spans the regex
+ * `/<(?:\w+:)?row\b[^>]*>[\s\S]*?<\/(?:\w+:)?row>/g` visits, in O(length). A row runs
+ * from its start tag to the first closing row tag after the start tag's first `>`.
+ */
+export function findRowSpans(xml: string): Array<readonly [start: number, end: number]> {
+  const spans: Array<readonly [start: number, end: number]> = [];
+  let cursor = 0;
+  while (cursor < xml.length) {
+    const start = xml.indexOf(TAG_OPEN, cursor);
+    if (start === -1) break;
+    if (!isOpenTagAt(xml, start, ROW_TAG)) {
+      cursor = start + 1;
+      continue;
+    }
+    // Any later start shares this '>' or sits past it, so when this start finds no
+    // '>' or no closing tag, no later start can find one either.
+    const gt = xml.indexOf(TAG_CLOSE, start);
+    if (gt === -1) break;
+    const end = closingTagEnd(xml, gt + 1, ROW_TAG);
+    if (end === -1) break;
+    spans.push([start, end]);
+    cursor = end;
+  }
+  return spans;
+}
+
+/**
+ * The `[start, end)` spans of every `<c>` element in one row, exactly the matches of
+ * `/<(?:\w+:)?c\b[^>]*\/>|<(?:\w+:)?c\b[^>]*>[\s\S]*?<\/(?:\w+:)?c>/g`, in O(length).
+ * A start tag ending in `/>` is a whole cell; otherwise the cell runs to the first
+ * closing cell tag after the start tag's first `>`.
+ */
+export function findCellSpans(rowXml: string): Array<readonly [start: number, end: number]> {
+  const spans: Array<readonly [start: number, end: number]> = [];
+  let cursor = 0;
+  // A closing-tag search that fails from one offset fails from every later offset too.
+  let noCloseFrom = Infinity;
+  while (cursor < rowXml.length) {
+    const start = rowXml.indexOf(TAG_OPEN, cursor);
+    if (start === -1) break;
+    if (!isOpenTagAt(rowXml, start, CELL_TAG)) {
+      cursor = start + 1;
+      continue;
+    }
+    const gt = rowXml.indexOf(TAG_CLOSE, start);
+    if (gt === -1) break;
+    if (rowXml[gt - 1] === SELF_CLOSING_MARK) {
+      spans.push([start, gt + 1]);
+      cursor = gt + 1;
+      continue;
+    }
+    const end = gt + 1 >= noCloseFrom ? -1 : closingTagEnd(rowXml, gt + 1, CELL_TAG);
+    if (end === -1) {
+      // Every start in (start, gt] shares this '>' and fails the same way. A later
+      // self-closing cell needs no closing tag, so the scan goes on past it.
+      noCloseFrom = Math.min(noCloseFrom, gt + 1);
+      cursor = gt + 1;
+      continue;
+    }
+    spans.push([start, end]);
+    cursor = end;
+  }
+  return spans;
+}
+
 // ─── XML row patching ────────────────────────────────────────────────────────
 
-// Tag regexes tolerate an optional `\w+:` namespace prefix so prefixed vendor files
-// (`<x:row>`, `<x:c>`) match too. The `r="..."` attribute is prefix-independent, so
-// CELL_REF_RE / ROW_NUM_RE stay as-is. ROW_PREFIX_RE captures the row's own prefix
-// (with the colon) so patched cells can be emitted under the same namespace.
-const CELL_RE = /<(?:\w+:)?c\b[^>]*\/>|<(?:\w+:)?c\b[^>]*>[\s\S]*?<\/(?:\w+:)?c>/g;
+// The remaining regexes run on a single row or cell span only. The `r="..."` attribute
+// is prefix-independent, so CELL_REF_RE / ROW_NUM_RE stay as-is. ROW_PREFIX_RE captures
+// the row's own prefix (with the colon) so patched cells can be emitted under the same
+// namespace.
 const CELL_REF_RE = /\br="([A-Z]+)\d+"/;
 const ROW_OPEN_RE = /<(?:\w+:)?row\b[^>]*>/;
-const ROW_RE = /<(?:\w+:)?row\b[^>]*>[\s\S]*?<\/(?:\w+:)?row>/g;
 const ROW_NUM_RE = /\br="(\d+)"/;
 const ROW_PREFIX_RE = /<(\w+:)?row\b/;
 
@@ -145,10 +294,8 @@ function patchRow(
   cells: ReadonlyMap<number, XlsxCellValue>,
 ): string {
   const byCol = new Map<number, string>();
-  let match: RegExpExecArray | null;
-  CELL_RE.lastIndex = 0;
-  while ((match = CELL_RE.exec(rowXml)) !== null) {
-    const xml = match[0];
+  for (const [start, end] of findCellSpans(rowXml)) {
+    const xml = rowXml.slice(start, end);
     const ref = CELL_REF_RE.exec(xml);
     if (ref?.[1] === undefined) continue;
     byCol.set(columnIndex(ref[1]), xml);
@@ -173,7 +320,7 @@ function patchRow(
  * (resolved the way the reader resolves them), leaving everything else byte-for-byte
  * intact. Any other entry, including a part under `xl/worksheets/` no relationship
  * names, is copied through without being scanned: the upload gate never parsed it,
- * so the row regex must not run over it. Returns the source unchanged when there is
+ * so the row scan must not run over it. Returns the source unchanged when there is
  * nothing to patch.
  *
  * Fails LOUD when a requested row is never matched in ANY worksheet: a full or partial
@@ -198,20 +345,30 @@ export function patchXlsxCells(source: Buffer, rowPatches: XlsxRowPatches): Buff
   // Row numbers actually matched + rewritten, accumulated across ALL worksheets (a
   // target row may live in only one sheet), so the shortfall check below is global.
   const matchedRows = new Set<number>();
+  const rewriteRow = (rowXml: string): string => {
+    const rowNum = ROW_NUM_RE.exec(rowXml);
+    if (rowNum?.[1] === undefined) return rowXml;
+    const parsed = Number(rowNum[1]);
+    const cells = rowPatches.get(parsed);
+    if (cells === undefined) return rowXml;
+    matchedRows.add(parsed);
+    return patchRow(rowXml, parsed, cells);
+  };
+
   const entries = unzipSync(new Uint8Array(source));
   for (const name of resolveWorksheetPartPaths(entries)) {
     const bytes = entries[name];
     if (bytes === undefined) continue;
-    const xml = strFromU8(bytes).replace(ROW_RE, (rowXml: string) => {
-      const rowNum = ROW_NUM_RE.exec(rowXml);
-      if (rowNum?.[1] === undefined) return rowXml;
-      const parsed = Number(rowNum[1]);
-      const cells = rowPatches.get(parsed);
-      if (cells === undefined) return rowXml;
-      matchedRows.add(parsed);
-      return patchRow(rowXml, parsed, cells);
-    });
-    entries[name] = strToU8(xml);
+    // Everything between the row spans is copied through verbatim.
+    const xml = strFromU8(bytes);
+    const parts: string[] = [];
+    let copiedTo = 0;
+    for (const [start, end] of findRowSpans(xml)) {
+      parts.push(xml.slice(copiedTo, start), rewriteRow(xml.slice(start, end)));
+      copiedTo = end;
+    }
+    parts.push(xml.slice(copiedTo));
+    entries[name] = strToU8(parts.join(''));
   }
 
   const missing = [...rowPatches.keys()].filter((row) => !matchedRows.has(row));

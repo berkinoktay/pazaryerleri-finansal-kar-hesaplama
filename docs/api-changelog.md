@@ -49,6 +49,15 @@ section "Versioning" for details.
 - **Workbook reads are serialised per API process.** Imports and exports wait for one another; when
   too many are already waiting, the request answers `503 IMPORT_BUSY` with `Retry-After` instead of
   queuing indefinitely.
+- **Workbook parses run in an isolated, limited worker.** The six campaign workbook import and export
+  routes are affected; valid files are unaffected. The responses are:
+  - an uploaded workbook that exhausts the parse worker's memory or time limit answers `422`
+    with `{ field: 'file', code: 'PAYLOAD_TOO_LARGE' }`;
+  - a parse that waits more than 20 s in the parse queue answers `503 IMPORT_BUSY` with
+    `Retry-After`;
+  - an export whose stored file hits a worker limit answers `503 IMPORT_BUSY` instead of `409`.
+
+  Before, such a file could crash or stall the API process. Non-breaking for well-behaved clients.
 - **Generic HTTP errors no longer echo library messages.** `400 MALFORMED_REQUEST` and other
   pass-through HTTP errors carry fixed `detail` texts.
 
