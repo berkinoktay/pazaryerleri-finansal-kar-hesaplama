@@ -501,7 +501,7 @@ Commands:
 - `pnpm test:watch` — watch mode
 - `pnpm check:affected` — daily pre-commit gate: affected typecheck + lint + unit tests, format check, repo audits; no DB
 - `pnpm check:all` / `pnpm check:full` — on-demand full local mirrors of CI (without / with the integration suite)
-- Worker count: every vitest config reads `PAZARSYNC_TEST_WORKERS` (default 2 in CI, 50% locally). Never set `VITEST_MAX_WORKERS` — it overrides `fileParallelism: false` on the DB-backed suites.
+- Worker count: every vitest config reads `PAZARSYNC_TEST_WORKERS` (default 2 in CI, 50% locally). Never set `VITEST_MAX_WORKERS` — vitest applies it after the config, overriding `maxWorkers` (integration suites create exactly one database clone per configured worker) and `fileParallelism: false` where a suite still needs it.
 
 ## No Utility Duplication
 

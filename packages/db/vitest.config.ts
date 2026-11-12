@@ -3,7 +3,7 @@ import path from 'node:path';
 import { config as loadEnv } from 'dotenv';
 import { defineConfig } from 'vitest/config';
 
-import { testWorkers } from '@pazarsync/vitest-config';
+import { INTEGRATION_TEST_TIMEOUT_MS, testWorkers } from '@pazarsync/vitest-config';
 import { configureWorkerDatabases, remapDatabaseUrlToTestDb } from './src/test-env';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -20,8 +20,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts'],
-    fileParallelism: false,
-    maxWorkers: testWorkers(), // inert while fileParallelism is false
+    // Files run in parallel, each worker on its own database clone.
+    maxWorkers: testWorkers(),
+    testTimeout: INTEGRATION_TEST_TIMEOUT_MS,
     globalSetup: [workerDatabases.globalSetup],
     setupFiles: workerDatabases.setupFiles,
   },

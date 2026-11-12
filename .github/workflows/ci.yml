@@ -229,8 +229,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    # ~10m on a slow runner; the headroom absorbs suite growth.
-    timeout-minutes: 20
+    # ~4-5m since per-icon test imports (#523); the headroom absorbs suite
+    # growth and a slow runner without letting a hung run idle for 20 minutes.
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup
