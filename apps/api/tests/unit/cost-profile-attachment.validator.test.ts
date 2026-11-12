@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { attachmentBodySchema, replaceBodySchema } from '../cost-profile-attachment.validator';
+import {
+  attachmentBodySchema,
+  replaceBodySchema,
+} from '@/validators/cost-profile-attachment.validator';
 
 const VALID_UUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
 const ANOTHER_UUID = 'b4e2c1a0-9d3f-47e5-8a1b-6c5d4e3f2a1b';

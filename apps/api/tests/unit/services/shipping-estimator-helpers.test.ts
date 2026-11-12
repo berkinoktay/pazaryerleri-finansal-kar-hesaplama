@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { hasFastDeliverySetup } from '../shipping-estimator.service';
+import { hasFastDeliverySetup } from '@/services/shipping-estimator.service';
 
 describe('hasFastDeliverySetup', () => {
   const carrier = { maxBaremEligibleDeliveryDuration: 1 };

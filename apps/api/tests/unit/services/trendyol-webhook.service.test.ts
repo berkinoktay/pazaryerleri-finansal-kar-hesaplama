@@ -8,7 +8,7 @@ import {
   registerStoreWebhook,
   rotateStoreWebhookSecret,
   unregisterStoreWebhook,
-} from '../trendyol-webhook.service';
+} from '@/services/webhooks/trendyol-webhook.service';
 
 const TRENDYOL_CREDS = {
   supplierId: '2738',

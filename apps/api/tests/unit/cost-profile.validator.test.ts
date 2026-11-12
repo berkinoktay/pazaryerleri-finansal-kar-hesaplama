@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { createCostProfileSchema, listCostProfilesQuerySchema } from '../cost-profile.validator';
+import {
+  createCostProfileSchema,
+  listCostProfilesQuerySchema,
+} from '@/validators/cost-profile.validator';
 
 // A cost profile is store-scoped: both schemas require a storeId.
 const STORE_ID = '00000000-0000-4000-8000-000000000000';

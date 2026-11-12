@@ -373,8 +373,8 @@ The pre-push gate compares the current working tree (not the pushed ref range �
 ### CI jobs (`.github/workflows/ci.yml`)
 
 - **Typecheck** — `pnpm typecheck`, plus a `git diff --exit-code packages/api-client/openapi.json` drift check (the setup composite already ran `api:sync`).
-- **Lint** — every workspace's `lint`, `format:check`, and the repo audits (`audit:boundaries`, `audit:errors`, `audit:lint`, `audit:money`, `audit:no-barrel`, `audit:test-hygiene`). CI is the only place the audits are enforced.
-- **Unit / Component** — `turbo run test:unit|test:component --concurrency=2`.
+- **Lint** — every workspace's `lint`, `format:check`, and the repo audits (`audit:boundaries`, `audit:errors`, `audit:lint`, `audit:money`, `audit:no-barrel`, `audit:test-hygiene`, `audit:test-config`). CI is the only place the audits are enforced. `audit:test-config` fails when a vitest config does not take its pool size from `@pazarsync/vitest-config`, when a package runs vitest without a config, or when a test file sits outside the directories its package's configs include (it would never run).
+- **Unit / Component** — `turbo run test:unit|test:component --concurrency=2`. Packages that also have DB-backed tests keep DB-free unit tests in a separate `vitest.unit.config.ts` (no `.env`, no DB remap, no globalSetup, files in parallel); `vitest.config.ts` there is integration-only and stays serial.
 - **Integration** — fresh Supabase local, `db:push`, migration drift check, `turbo run test:integration --concurrency=1`, then the RLS suite with `PAZARSYNC_ALLOW_DEV_DB_TRUNCATE=1` against the disposable job DB. On a pull request it only runs when something outside `apps/web` changed; every non-docs push to `main` runs it.
 - **Change detection** — `dorny/paths-filter` with `predicate-quantifier: 'some-with-excludes'`; docs-only changes skip build, unit, component and integration.
 - **Dependency-aware caching** — every check task depends on turbo's `transit` node, so a change inside a package invalidates the cached results of every package that depends on it (without it, a dependent's `typecheck` / tests were replayed from cache as green).

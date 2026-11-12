@@ -8,9 +8,9 @@
     "start": "tsx src/index.ts",
     "dev": "tsx watch --env-file=../../.env src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:unit": "PAZARSYNC_SKIP_RESEED=1 vitest run tests/unit",
-    "test:integration": "vitest run tests/integration",
+    "test": "pnpm run test:unit && pnpm run test:integration",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:integration": "vitest run",
     "lint": "eslint .",
     "clean": "rm -rf .turbo"
   },
