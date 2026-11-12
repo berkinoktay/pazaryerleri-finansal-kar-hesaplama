@@ -1,5 +1,7 @@
 import { defineConfig } from 'vitest/config';
 
+import { testWorkers } from '@pazarsync/vitest-config';
+
 // DB-free unit tests for packages/db (src/**/*.test.ts).
 // Deliberately SEPARATE from vitest.config.ts: that config calls
 // remapDatabaseUrlToTestDb() at load time (the integration path), which both
@@ -10,5 +12,6 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    maxWorkers: testWorkers(),
   },
 });

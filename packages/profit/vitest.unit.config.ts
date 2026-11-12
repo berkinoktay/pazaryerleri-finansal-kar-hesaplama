@@ -1,8 +1,11 @@
 import { defineConfig } from 'vitest/config';
 
+import { testWorkers } from '@pazarsync/vitest-config';
+
 export default defineConfig({
   test: {
     environment: 'node',
+    maxWorkers: testWorkers(),
     // Unit tests only: exclude the integration test that requires a real DB.
     include: ['src/**/__tests__/*.test.ts'],
     exclude: [

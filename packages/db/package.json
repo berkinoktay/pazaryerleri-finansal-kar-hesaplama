@@ -41,6 +41,7 @@
   "devDependencies": {
     "@pazarsync/crypto-core": "workspace:*",
     "@pazarsync/eslint-config": "workspace:*",
+    "@pazarsync/vitest-config": "workspace:*",
     "@prisma/client": "^7.8.0",
     "@types/pg": "^8.11.0",
     "decimal.js": "catalog:",

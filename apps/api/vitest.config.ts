@@ -4,6 +4,8 @@ import { remapDatabaseUrlToTestDb } from '@pazarsync/db/test-env';
 import { config as loadEnv } from 'dotenv';
 import { configDefaults, defineConfig } from 'vitest/config';
 
+import { testWorkers } from '@pazarsync/vitest-config';
+
 // Local-dev convenience: pull DATABASE_URL etc. from the workspace-root .env
 // so `pnpm --filter @pazarsync/api test` works without exporting env vars by
 // hand. CI sets these via the workflow `env:` block, so a missing .env there
@@ -38,6 +40,11 @@ export default defineConfig({
     // wipes the data file B just inserted in its beforeEach. Tests within
     // a single file still run in order, so TRUNCATE in beforeEach is safe.
     fileParallelism: false,
+    // Pool size from the shared policy (@pazarsync/vitest-config). Inert while
+    // fileParallelism is false (vitest forces one worker). Importing the policy
+    // still matters here: it deletes VITEST_MAX_WORKERS, which would otherwise
+    // override fileParallelism:false and let files race on the shared DB.
+    maxWorkers: testWorkers(),
     // After the whole vitest run completes, restore seed data so the
     // developer's browser session (logged in as berkin / demo) sees the
     // usual orgs and stores instead of an empty state. Skipped in CI and

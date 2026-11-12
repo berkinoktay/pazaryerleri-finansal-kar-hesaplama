@@ -5,6 +5,8 @@ import { remapDatabaseUrlToTestDb } from '@pazarsync/db/test-env';
 import { config as loadEnv } from 'dotenv';
 import { defineConfig } from 'vitest/config';
 
+import { testWorkers } from '@pazarsync/vitest-config';
+
 // Local-dev convenience: pull DATABASE_URL etc. from the workspace-root .env
 // so `pnpm --filter @pazarsync/sync-core test:unit` works without exporting
 // env vars by hand. CI sets these via the workflow `env:` block, so a missing
@@ -20,6 +22,7 @@ remapDatabaseUrlToTestDb();
 export default defineConfig({
   test: {
     fileParallelism: false,
+    maxWorkers: testWorkers(), // inert while fileParallelism is false
     globals: false,
     environment: 'node',
   },
