@@ -378,9 +378,10 @@ describe('fetchSettlements — error paths', () => {
       startDate: new Date('2026-05-01T00:00:00Z'),
       endDate: new Date('2026-05-10T00:00:00Z'),
       transactionType: 'Sale',
+      initialBackoffMs: 1,
     });
     await expect(gen.next()).rejects.toBeInstanceOf(RateLimitedError);
-  }, 30_000);
+  });
 
   it('throws MarketplaceUnreachable on persistent network error', async () => {
     fetchSpy.mockRejectedValue(new TypeError('fetch failed'));
@@ -391,9 +392,10 @@ describe('fetchSettlements — error paths', () => {
       startDate: new Date('2026-05-01T00:00:00Z'),
       endDate: new Date('2026-05-10T00:00:00Z'),
       transactionType: 'Sale',
+      initialBackoffMs: 1,
     });
     await expect(gen.next()).rejects.toBeInstanceOf(MarketplaceUnreachable);
-  }, 30_000);
+  });
 
   it('aborts when AbortSignal is triggered before request', async () => {
     const controller = new AbortController();

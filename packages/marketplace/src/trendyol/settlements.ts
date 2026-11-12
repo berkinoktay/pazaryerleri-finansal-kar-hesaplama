@@ -217,6 +217,8 @@ export interface FetchFinancialOpts {
   startDate: Date;
   endDate: Date;
   signal?: AbortSignal;
+  /** Test hook: backoff base (default 1s). */
+  initialBackoffMs?: number;
 }
 
 export interface FetchSettlementsOpts extends FetchFinancialOpts {
@@ -289,7 +291,12 @@ export async function* fetchSettlements(
   assertWindow(opts.startDate, opts.endDate);
   const env = opts.environment ?? 'PRODUCTION';
   const base = opts.baseUrl ?? baseUrlFor(env);
-  const deps: FetcherDeps = { credentials: opts.credentials, env, signal: opts.signal };
+  const deps: FetcherDeps = {
+    credentials: opts.credentials,
+    env,
+    signal: opts.signal,
+    initialBackoffMs: opts.initialBackoffMs,
+  };
 
   let page = 0;
   let processedSoFar = 0;
@@ -335,7 +342,12 @@ export async function* fetchOtherFinancials(
   assertWindow(opts.startDate, opts.endDate);
   const env = opts.environment ?? 'PRODUCTION';
   const base = opts.baseUrl ?? baseUrlFor(env);
-  const deps: FetcherDeps = { credentials: opts.credentials, env, signal: opts.signal };
+  const deps: FetcherDeps = {
+    credentials: opts.credentials,
+    env,
+    signal: opts.signal,
+    initialBackoffMs: opts.initialBackoffMs,
+  };
 
   let page = 0;
   let processedSoFar = 0;
