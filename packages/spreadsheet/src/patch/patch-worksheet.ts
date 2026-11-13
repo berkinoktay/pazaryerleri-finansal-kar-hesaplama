@@ -15,7 +15,7 @@ import {
   INVALID_PATCH_REQUEST,
   needsSpacePreserve,
 } from './cell-values';
-import type { CellPatch, CellPatchValue } from './patch-request';
+import { copyCellPatch, type CellPatch, type CellPatchValue } from './patch-request';
 import { MALFORMED_SHEET_REASONS, PATCH_LIMIT_REASONS } from './reasons';
 import { indexWorksheet, valueAt, type SheetIndex } from './sheet-index';
 import {
@@ -196,7 +196,9 @@ class CellPatcher {
   private groupRow = NO_ROW;
   private groupRowName: string | null = null;
   // New cells of a self-closing group row: written as one edit when the group ends.
+  // Their bytes count toward the early exit as each is planned, not when it is written.
   private readonly reopenedCells: string[] = [];
+  private reopenedBytes = 0;
 
   // At most one edit per patch: replace part bytes [start, end) with the piece.
   private readonly editStart: number[] = [];
@@ -219,8 +221,10 @@ class CellPatcher {
 
   run(): WorksheetPatchResult {
     for (let position = 0; position < this.patches.length; position += 1) {
-      const patch = this.patches[position];
-      if (patch === undefined) throw invalidRequest(`patch ${position} is missing`);
+      const given = this.patches[position];
+      if (given === undefined) throw invalidRequest(`patch ${position} is missing`);
+      // Checked and written from one plain copy: every field is read exactly once.
+      const patch = copyCellPatch(given);
       this.checkPatch(patch);
       this.apply(patch);
     }
@@ -301,8 +305,9 @@ class CellPatcher {
     const start = valueAt(this.index.rowStart, row);
     const end = valueAt(this.index.rowEnd, row);
     const tail = `>${this.reopenedCells.join('')}</${this.rowName(row)}>`;
-    this.record(start, end, bytesThenText(this.bytes, start, end - EMPTY_TAG_CLOSE.length, tail));
     this.reopenedCells.length = 0;
+    this.reopenedBytes = 0;
+    this.record(start, end, bytesThenText(this.bytes, start, end - EMPTY_TAG_CLOSE.length, tail));
   }
 
   /** The qualified name of the group row's start tag; scanned once per group. */
@@ -349,6 +354,10 @@ class CellPatcher {
     const rowTagEnd = valueAt(this.index.rowTagEnd, row);
     if (valueAt(this.index.rowEnd, row) === rowTagEnd) {
       this.reopenedCells.push(cell);
+      this.reopenedBytes += utf8Length(cell);
+      if (this.addedBytes + this.reopenedBytes > this.options.maxBytes) {
+        throw growthError(this.options.maxBytes);
+      }
       return;
     }
     const at = this.insertOffset(row, nextRowFirstCell, rowTagEnd);

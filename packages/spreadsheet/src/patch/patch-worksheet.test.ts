@@ -5,7 +5,7 @@ import { expectWithinBudget, LINEAR_BUDGET_MS } from '../../tests/helpers/timing
 import { SpreadsheetFileError, type SpreadsheetFileErrorCode } from '../errors';
 import { cellKey, columnLetters } from '../sheet-meta';
 import { parsePart } from '../xml-dom';
-import type { CellPatch } from './patch-request';
+import type { CellPatch, CellPatchValue } from './patch-request';
 import {
   applyCellPatches,
   patchedPartCap,
@@ -123,6 +123,36 @@ describe('applyCellPatches: precondition', () => {
   it.each(cases)('throws before writing anything for %s', (_, patches) => {
     expect(() => patchWorksheetXml(part, patches)).toThrow('Invalid patch request');
   });
+
+  it('checks a patch that follows one on a missing row', () => {
+    expect(() => patchWorksheetXml(part, [num(9, 0, '1'), num(9, 1, '1</v>')])).toThrow(
+      'Invalid patch request',
+    );
+  });
+
+  it('checks a patch that follows a rejected formula target', () => {
+    const formulaRow = sheet('<row r="2"><c r="A2"><f>1+1</f><v>2</v></c></row>');
+    expect(() => patchWorksheetXml(formulaRow, [num(2, 0, '1'), num(2, 1, '1</v>')])).toThrow(
+      'Invalid patch request',
+    );
+  });
+
+  it('writes the value it checked when a getter answers differently on a second read', () => {
+    let reads = 0;
+    const shifty: CellPatch = {
+      excelRow: 2,
+      col: 0,
+      get value(): CellPatchValue {
+        reads += 1;
+        return reads === 1
+          ? { kind: 'number', value: '1' }
+          : { kind: 'number', value: '1</v></c><c r="Z9"><f>EVIL()</f></c><c r="A2"><v>1' };
+      },
+    };
+    const out = sheetDataOf(wellFormed(patchWorksheetXml(sheet(ROWS_2_AND_3), [shifty])));
+    expect(out).not.toContain('EVIL');
+    expect(out.startsWith('<row r="2"><c r="A2"><v>1</v></c><c r="B2">')).toBe(true);
+  });
 });
 
 describe('applyCellPatches: order of errors', () => {
@@ -217,6 +247,33 @@ describe('applyCellPatches: existing cells', () => {
     ).toBe('<row r="2"><c r="B2" s="7" cm="1" foo="a&amp;b"><v>4</v></c></row>');
   });
 
+  it("writes the children of an overwritten cell with the cell's own prefix", () => {
+    expect(
+      patched(
+        '<row r="2"><x:c r="A2" t="s"><x:v>1</x:v></x:c></row>',
+        [num(2, 0, '5'), num(2, 1, '6')],
+        undefined,
+        PREFIXED_ROOT,
+      ),
+    ).toBe('<row r="2"><x:c r="A2"><x:v>5</x:v></x:c><c r="B2"><v>6</v></c></row>');
+    expect(
+      patched(
+        '<row r="2"><x:c r="A2" t="s"><x:v>1</x:v></x:c></row>',
+        [text(2, 0, 'y')],
+        undefined,
+        PREFIXED_ROOT,
+      ),
+    ).toBe('<row r="2"><x:c r="A2" t="inlineStr"><x:is><x:t>y</x:t></x:is></x:c></row>');
+  });
+
+  it('copies each kept attribute from its name through its closing quote', () => {
+    expect(
+      patched(`<row r="2"><c r="B2"\n  s = '7'\tfoo="a>b"  t="s" ><v>1</v></c></row>`, [
+        num(2, 1, '5'),
+      ]),
+    ).toBe(`<row r="2"><c r="B2" s = '7' foo="a>b"><v>5</v></c></row>`);
+  });
+
   it('drops only the attribute named exactly t, whatever its quoting and spacing', () => {
     expect(
       patched(`<row r="2"><c r="B2" t = 's' xmlns:t="urn:t" t:t="x"><v>3</v></c></row>`, [
@@ -307,6 +364,19 @@ describe('applyCellPatches: formulas', () => {
 });
 
 describe('applyCellPatches: inserts', () => {
+  it('keeps edits in order across self-closing and open rows', () => {
+    expect(
+      patched('<row r="2"/><row r="3"><c r="A3"/></row><row r="4"/>', [
+        num(2, 0, '1'),
+        num(3, 1, '2'),
+        num(4, 0, '3'),
+      ]),
+    ).toBe(
+      '<row r="2"><c r="A2"><v>1</v></c></row><row r="3"><c r="A3"/><c r="B3"><v>2</v></c></row>' +
+        '<row r="4"><c r="A4"><v>3</v></c></row>',
+    );
+  });
+
   it('inserts before the first cell with a greater column', () => {
     expect(patched('<row r="2"><c r="A2"/><c r="C2"/></row>', [num(2, 1, '5')])).toBe(
       '<row r="2"><c r="A2"/><c r="B2"><v>5</v></c><c r="C2"/></row>',
@@ -481,6 +551,20 @@ describe('applyCellPatches: missing rows', () => {
 });
 
 describe('applyCellPatches: growth cap', () => {
+  // The early exit fires at the first new cell past the cap, before the walk reaches
+  // the invalid second patch: the same in a self-closing row as in an open one.
+  it.each(['<row r="2"/>', '<row r="2"></row>'])(
+    'stops at the first new cell past maxBytes in %s',
+    (row) => {
+      const patches = [text(2, 0, 'x'.repeat(LONG_VALUE_LENGTH)), num(2, 1, '1</v>')];
+      expectFileError(
+        () => applyCellPatches(indexWorksheet(sheet(row)), patches, capped(LONG_VALUE_LENGTH)),
+        'PAYLOAD_TOO_LARGE',
+        { reason: PATCH_LIMIT_REASONS.GROWTH, cap: LONG_VALUE_LENGTH },
+      );
+    },
+  );
+
   it('computes the cap from the source size', () => {
     expect(patchedPartCap(1_000)).toBe(66_536);
     expect(patchedPartCap(1_000_000)).toBe(1_500_000);

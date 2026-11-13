@@ -163,15 +163,19 @@ function compareCells(a: CellPatch, b: CellPatch): number {
   return a.excelRow - b.excelRow || a.col - b.col;
 }
 
+/**
+ * A fresh plain copy of a patch: each field read once, extra properties dropped. Code
+ * that validates a patch and then writes it uses the copy for both, so an object
+ * whose getters answer differently on a second read cannot pass one value and write
+ * another.
+ */
+export function copyCellPatch(patch: CellPatch): CellPatch {
+  return { excelRow: patch.excelRow, col: patch.col, value: copyValue(patch.value) };
+}
+
 /** A sorted copy of one output; two patches on one cell are refused. */
 function resolveOutput(output: readonly CellPatch[], index: number): CellPatch[] {
-  const sorted = output.map(
-    (patch): CellPatch => ({
-      excelRow: patch.excelRow,
-      col: patch.col,
-      value: copyValue(patch.value),
-    }),
-  );
+  const sorted = output.map(copyCellPatch);
   sorted.sort(compareCells);
   for (let i = 1; i < sorted.length; i += 1) {
     const previous = sorted[i - 1];
