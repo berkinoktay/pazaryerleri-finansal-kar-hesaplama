@@ -1,4 +1,5 @@
 import {
+  ABSOLUTE_MAX_COLS,
   MAX_PATCH_ANCHORS,
   MAX_PATCH_CELLS,
   MAX_PATCH_OUTPUTS,
@@ -61,6 +62,7 @@ function invalid(detail: string): Error {
 function assertCounts(
   outputs: readonly (readonly CellPatch[])[],
   anchors: readonly PatchAnchor[],
+  formulaColumns: readonly number[],
 ): void {
   if (outputs.length < 1 || outputs.length > MAX_PATCH_OUTPUTS) {
     throw invalid(`expected 1 to ${MAX_PATCH_OUTPUTS} outputs, got ${outputs.length}`);
@@ -72,6 +74,9 @@ function assertCounts(
   }
   if (anchors.length > MAX_PATCH_ANCHORS) {
     throw invalid(`${anchors.length} anchors exceed ${MAX_PATCH_ANCHORS}`);
+  }
+  if (formulaColumns.length > ABSOLUTE_MAX_COLS) {
+    throw invalid(`${formulaColumns.length} formula columns exceed ${ABSOLUTE_MAX_COLS}`);
   }
 }
 
@@ -224,7 +229,7 @@ function assertAnchorExpected(anchor: PatchAnchor): void {
 export function resolvePatchRequest(options: PatchWorkbookOptions): ResolvedPatchRequest {
   const anchors = options.anchors ?? [];
   const formulaColumns = options.overwriteFormulaColumns ?? [];
-  assertCounts(options.outputs, anchors);
+  assertCounts(options.outputs, anchors, formulaColumns);
   const read = resolveReadOptions(options);
   assertTextBudget(options.outputs, anchors);
   assertRanges(options.outputs, anchors, formulaColumns, read);

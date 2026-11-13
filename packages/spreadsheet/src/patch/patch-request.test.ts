@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_ROW_CAP, MAX_PATCH_TEXT_LENGTH } from '../constants';
+import {
+  ABSOLUTE_MAX_COLS,
+  DEFAULT_COL_CAP,
+  DEFAULT_ROW_CAP,
+  MAX_PATCH_REQUEST_TEXT_LENGTH,
+  MAX_PATCH_TEXT_LENGTH,
+} from '../constants';
 import {
   isResolvedPatchRequest,
   resolvePatchRequest,
@@ -17,7 +23,12 @@ const OVER_BUDGET_ANCHORS = 513;
 // 8 x 62 501 is just above the 500 000 cell budget.
 const OUTPUTS_AT_CAP = 8;
 const CELLS_PER_OUTPUT_OVER_CAP = 62_501;
-const DEFAULT_COLS = 64;
+// 8 x 62 500 is exactly the 500 000 cell budget.
+const CELLS_PER_OUTPUT_AT_CAP = 62_500;
+const WIDE_ROW_CAP = 20_000;
+// 512 x 32 767 plus 512 units is exactly the 16 M request budget.
+const LONG_TEXTS_AT_BUDGET = Math.floor(MAX_PATCH_REQUEST_TEXT_LENGTH / MAX_PATCH_TEXT_LENGTH);
+const BUDGET_REMAINDER = MAX_PATCH_REQUEST_TEXT_LENGTH % MAX_PATCH_TEXT_LENGTH;
 
 function num(excelRow: number, col: number, value = '1'): CellPatch {
   return { excelRow, col, value: { kind: 'number', value } };
@@ -29,6 +40,19 @@ function text(excelRow: number, col: number, value: string): CellPatch {
 
 function anchor(excelRow: number, col: number, expected: string): PatchAnchor {
   return { excelRow, col, expected };
+}
+
+function cellsOnGrid(count: number): CellPatch[] {
+  return Array.from({ length: count }, (_, i) =>
+    num(Math.floor(i / DEFAULT_COL_CAP) + 1, i % DEFAULT_COL_CAP),
+  );
+}
+
+/** An array of `length` holes; `every` would skip them, an indexed walk does not. */
+function sparse(length: number): unknown[] {
+  const holes: unknown[] = [];
+  holes.length = length;
+  return holes;
 }
 
 describe('resolvePatchRequest', () => {
@@ -66,6 +90,34 @@ describe('resolvePatchRequest', () => {
     expect(resolved.anchors).toEqual([]);
   });
 
+  it('accepts the last row and the last column the read options allow', () => {
+    const resolved = resolvePatchRequest({
+      outputs: [[num(DEFAULT_ROW_CAP + 1, 0), num(1, DEFAULT_COL_CAP - 1)]],
+    });
+    expect(resolved.outputs).toEqual([[num(1, DEFAULT_COL_CAP - 1), num(DEFAULT_ROW_CAP + 1, 0)]]);
+  });
+
+  it('accepts exactly the cell budget across all outputs', () => {
+    const cells = cellsOnGrid(CELLS_PER_OUTPUT_AT_CAP);
+    const outputs = Array.from({ length: OUTPUTS_AT_CAP }, () => cells);
+    expect(() => resolvePatchRequest({ outputs, rowCap: WIDE_ROW_CAP })).not.toThrow();
+  });
+
+  it('accepts patch text of exactly the request budget', () => {
+    const patches = Array.from({ length: LONG_TEXTS_AT_BUDGET }, (_, i) =>
+      text(i + 1, 0, LONG_TEXT),
+    );
+    patches.push(text(LONG_TEXTS_AT_BUDGET + 1, 0, 'x'.repeat(BUDGET_REMAINDER)));
+    expect(() => resolvePatchRequest({ outputs: [patches] })).not.toThrow();
+  });
+
+  it('throws for more formula columns than any sheet can hold', () => {
+    const overwriteFormulaColumns = Array.from({ length: ABSOLUTE_MAX_COLS + 1 }, () => 0);
+    expect(() => resolvePatchRequest({ outputs: [[]], overwriteFormulaColumns })).toThrow(
+      'formula columns exceed',
+    );
+  });
+
   it('allows the same cell in two outputs', () => {
     expect(() => resolvePatchRequest({ outputs: [[num(1, 0)], [num(1, 0)]] })).not.toThrow();
   });
@@ -77,7 +129,7 @@ describe('resolvePatchRequest', () => {
     ['excelRow 1.5', { outputs: [[num(1.5, 0)]] }],
     ['excelRow rowCap + 2', { outputs: [[num(DEFAULT_ROW_CAP + 2, 0)]] }],
     ['col -1', { outputs: [[num(1, -1)]] }],
-    ['col 64', { outputs: [[num(1, DEFAULT_COLS)]] }],
+    ['col 64', { outputs: [[num(1, DEFAULT_COL_CAP)]] }],
     ['the same cell twice in one output', { outputs: [[num(3, 4), num(3, 4)]] }],
     ['the value 1e-7', { outputs: [[num(1, 0, '1e-7')]] }],
     ['an empty anchor', { outputs: [[]], anchors: [anchor(1, 0, '')] }],
@@ -88,11 +140,11 @@ describe('resolvePatchRequest', () => {
   });
 
   it('throws when all outputs together exceed the cell budget', () => {
-    const cells = Array.from({ length: CELLS_PER_OUTPUT_OVER_CAP }, (_, i) =>
-      num(Math.floor(i / DEFAULT_COLS) + 1, i % DEFAULT_COLS),
-    );
+    const cells = cellsOnGrid(CELLS_PER_OUTPUT_OVER_CAP);
     const outputs = Array.from({ length: OUTPUTS_AT_CAP }, () => cells);
-    expect(() => resolvePatchRequest({ outputs, rowCap: 20_000 })).toThrow('Invalid patch request');
+    expect(() => resolvePatchRequest({ outputs, rowCap: WIDE_ROW_CAP })).toThrow(
+      'Invalid patch request',
+    );
   });
 
   it('throws on the text budget for many long text patches', () => {
@@ -154,6 +206,9 @@ describe('isResolvedPatchRequest', () => {
     ],
     ['a read whose rowCap is 0', { ...cloned, read: { ...cloned.read, rowCap: 0 } }],
     ['a read whose rowCap is 1.5', { ...cloned, read: { ...cloned.read, rowCap: 1.5 } }],
+    ['sparse outputs', { ...cloned, outputs: sparse(1) }],
+    ['sparse formula columns', { ...cloned, overwriteFormulaColumns: sparse(1) }],
+    ['sparse anchors', { ...cloned, anchors: sparse(1) }],
   ])('rejects %s', (_label, value) => {
     expect(isResolvedPatchRequest(value)).toBe(false);
   });
