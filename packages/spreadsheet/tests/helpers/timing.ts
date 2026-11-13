@@ -13,3 +13,10 @@ export function expectWithinBudget(elapsedMs: number, budgetMs: number): void {
   if (!ENFORCE_TIME_BUDGETS) return;
   expect(elapsedMs).toBeLessThan(budgetMs);
 }
+
+/**
+ * Bound for a linear pass over the largest crafted input of a test. Loose on purpose
+ * (CI runs suites side by side); the regressions it guards against are quadratic or
+ * allocation blow-ups that take minutes or crash, so tens of seconds still separate them.
+ */
+export const LINEAR_BUDGET_MS = 20_000;

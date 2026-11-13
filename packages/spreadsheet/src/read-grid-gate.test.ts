@@ -11,7 +11,7 @@ import { resolveReadOptions, type ReadGridOptions } from './read-options';
 import { resolveWorksheetPartPaths } from './index';
 import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
 import { localName } from './xml-dom';
-import { expectWithinBudget } from '../tests/helpers/timing';
+import { expectWithinBudget, LINEAR_BUDGET_MS } from '../tests/helpers/timing';
 
 // The gate must see what the reader sees. Each case below is a way of writing a
 // worksheet so that a text (regex) scan and the reader's DOM disagree: the DOM still
@@ -35,7 +35,6 @@ const GATE_CAPS = { rowCap: GUARD_OPTS.rowCap, colCap: GUARD_OPTS.colCap } as co
 // worker, its 30 s time limit would cap the elapsed time and hide a quadratic regression
 // as a timeout. The test timeout stops a pass that never ends, locally too.
 const READ_BUDGET_MS = 15_000;
-const LINEAR_BUDGET_MS = 20_000;
 const TIMING_TEST_TIMEOUT_MS = 120_000;
 const MALFORMED_COUNT = 200_000;
 const LONG_NAME_LENGTH = 40_000;
