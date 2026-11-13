@@ -2,7 +2,6 @@ import { Buffer } from 'node:buffer';
 
 import {
   ABSOLUTE_MAX_COLS,
-  PATCH_ERROR_ROW_SAMPLE,
   PATCH_GROWTH_DENOMINATOR,
   PATCH_GROWTH_FLOOR_BYTES,
   PATCH_GROWTH_NUMERATOR,
@@ -17,6 +16,7 @@ import {
 } from './cell-values';
 import { copyCellPatch, type CellPatch, type CellPatchValue } from './patch-request';
 import { MALFORMED_SHEET_REASONS, PATCH_LIMIT_REASONS } from './reasons';
+import { RejectedRows } from './rejected-rows';
 import { indexWorksheet, type SheetIndex } from './sheet-index';
 import {
   ATTRIBUTE_NAME_END,
@@ -161,22 +161,6 @@ function bytesThenText(bytes: Uint8Array, start: number, end: number, text: stri
   return piece;
 }
 
-/**
- * Patches rejected for one reason: how many, and the first PATCH_ERROR_ROW_SAMPLE
- * distinct rows among them. The walk meets rows in ascending order, so comparing with
- * the last listed row is enough to keep the list distinct and ascending.
- */
-class RejectedPatches {
-  count = 0;
-  readonly rows: number[] = [];
-
-  add(row: number): void {
-    this.count += 1;
-    if (this.rows.length >= PATCH_ERROR_ROW_SAMPLE) return;
-    if (this.rows[this.rows.length - 1] !== row) this.rows.push(row);
-  }
-}
-
 class CellPatcher {
   private readonly index: SheetIndex;
   private readonly bytes: Uint8Array;
@@ -209,9 +193,11 @@ class CellPatcher {
   private addedBytes = 0;
   private formulasRemoved = 0;
 
-  private readonly missingRows = new RejectedPatches();
-  private readonly sharedFormulas = new RejectedPatches();
-  private readonly formulaTargets = new RejectedPatches();
+  // Patches rejected for each reason. The walk meets rows in ascending order, so each
+  // add is constant time.
+  private readonly missingRows = new RejectedRows();
+  private readonly sharedFormulas = new RejectedRows();
+  private readonly formulaTargets = new RejectedRows();
 
   constructor(index: SheetIndex, patches: readonly CellPatch[], options: WorksheetPatchOptions) {
     this.index = index;
@@ -506,7 +492,7 @@ class CellPatcher {
 
   private formulaError(
     reason: FormulaReason,
-    rejected: RejectedPatches,
+    rejected: RejectedRows,
     what: string,
   ): SpreadsheetFileError {
     return new SpreadsheetFileError(

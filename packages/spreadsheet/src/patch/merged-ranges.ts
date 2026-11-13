@@ -1,9 +1,11 @@
+import { ABSOLUTE_MAX_COLS, ABSOLUTE_MAX_ROWS } from '../constants';
 import { SpreadsheetFileError } from '../errors';
 import type { GridCaps } from '../part-checks';
 import { colRefToNumber } from '../sheet-meta';
-import { RejectedRows } from './anchors';
 import type { CellPatch } from './patch-request';
 import { MALFORMED_SHEET_REASONS } from './reasons';
+import { RejectedRows } from './rejected-rows';
+import { valueAt } from './xml-lexer';
 
 // The merged-range check of the export patch path: a value written into a merged cell
 // other than its range's top-left corner is hidden by the merge, so such a target is
@@ -41,13 +43,6 @@ function malformedRef(): SpreadsheetFileError {
   );
 }
 
-/** `array[index]`; a throw when the index is out of range (every index here is computed in range). */
-function countAt(array: Int32Array | Uint8Array, index: number): number {
-  const value = array[index];
-  if (value === undefined) throw new Error(`Merge area index ${index} is out of range`);
-  return value;
-}
-
 /** The corners of `ref` as [first column letters, first row, last letters, last row], or a throw. */
 function refParts(ref: string): readonly [string, string, string, string] {
   const match = MERGE_REF.exec(ref);
@@ -57,7 +52,18 @@ function refParts(ref: string): readonly [string, string, string, string] {
   return [firstLetters, firstDigits, match?.[3] ?? firstLetters, match?.[4] ?? firstDigits];
 }
 
+/**
+ * The area of `caps`. Its typed arrays live outside the worker's heap limits, so caps
+ * past the absolute ceilings are a caller bug (resolveReadOptions clamps them and
+ * isResolvedReadOptions refuses them): a plain Error, before anything is allocated.
+ */
 function createArea(caps: GridCaps): MergeArea {
+  if (caps.rowCap > ABSOLUTE_MAX_ROWS || caps.colCap > ABSOLUTE_MAX_COLS) {
+    throw new Error(
+      `Merge area caps ${caps.rowCap} rows x ${caps.colCap} columns exceed ` +
+        `${ABSOLUTE_MAX_ROWS} x ${ABSOLUTE_MAX_COLS}`,
+    );
+  }
   const lastRow = caps.rowCap + 1;
   const lastCol = caps.colCap;
   const width = lastCol + DIFFERENCE_MARGIN;
@@ -75,7 +81,7 @@ function createArea(caps: GridCaps): MergeArea {
 /** Adds `delta` to the difference at 0-based `row`, `col`. */
 function addDifference(area: MergeArea, row: number, col: number, delta: number): void {
   const index = row * area.width + col;
-  area.coverage[index] = countAt(area.coverage, index) + delta;
+  area.coverage[index] = valueAt(area.coverage, index) + delta;
 }
 
 /** Orders the corners of `ref`, clips the range to the area and adds it. */
@@ -107,8 +113,8 @@ function sumCoverage(area: MergeArea): void {
     let running = 0;
     for (let col = 0; col < width; col += 1) {
       const index = start + col;
-      running += countAt(coverage, index);
-      coverage[index] = row === 0 ? running : running + countAt(coverage, index - width);
+      running += valueAt(coverage, index);
+      coverage[index] = row === 0 ? running : running + valueAt(coverage, index - width);
     }
   }
 }
@@ -122,9 +128,9 @@ function areaIndex(area: MergeArea, row: number, column: number): number {
 
 /** True when a target at `index` is covered by a range and is not the top-left corner of its only range. */
 function isHidden(area: MergeArea, index: number): boolean {
-  const covered = countAt(area.coverage, index);
+  const covered = valueAt(area.coverage, index);
   if (covered === 0) return false;
-  return covered !== 1 || countAt(area.corners, index) !== CORNER;
+  return covered !== 1 || valueAt(area.corners, index) !== CORNER;
 }
 
 /**

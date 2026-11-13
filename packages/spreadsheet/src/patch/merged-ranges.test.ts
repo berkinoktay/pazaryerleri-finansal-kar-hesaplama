@@ -170,6 +170,26 @@ describe('assertTargetsOutsideMerges: clipping', () => {
   });
 });
 
+describe('assertTargetsOutsideMerges: caps past the absolute ceilings', () => {
+  const ROW_CAP_ABOVE: GridCaps = { rowCap: ABSOLUTE_MAX_ROWS + 1, colCap: ABSOLUTE_MAX_COLS };
+  const COL_CAP_ABOVE: GridCaps = { rowCap: ABSOLUTE_MAX_ROWS, colCap: ABSOLUTE_MAX_COLS + 1 };
+
+  it.each([
+    ['rowCap', ROW_CAP_ABOVE],
+    ['colCap', COL_CAP_ABOVE],
+  ])('throws a plain Error, a caller bug, for a %s above its ceiling', (_name, caps) => {
+    let thrown: unknown = null;
+    try {
+      assertTargetsOutsideMerges(B2_C3, [[target(2, COL_B)]], caps);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).not.toBeInstanceOf(SpreadsheetFileError);
+    expect(String(thrown)).toContain('exceed');
+  });
+});
+
 describe('assertTargetsOutsideMerges: linear time', { timeout: LINEAR_TEST_TIMEOUT_MS }, () => {
   it('checks 200 000 targets against 200 000 ranges', () => {
     const rows = MANY_TARGETS / TARGET_COLUMNS;

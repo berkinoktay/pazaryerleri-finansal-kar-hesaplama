@@ -130,8 +130,11 @@ export function localNameIs(bytes: Uint8Array, markup: XmlMarkup, name: string):
   return bytesEqualAscii(bytes, localNameStart(bytes, markup), markup.nameEnd, name);
 }
 
-/** `list[index]`, or a throw when the index is out of range (no `undefined` reaches the caller). */
-export function valueAt(list: readonly number[], index: number): number {
+/**
+ * `list[index]` (a number list or a typed array), or a throw when the index is out of
+ * range (no `undefined` reaches the caller).
+ */
+export function valueAt(list: ArrayLike<number>, index: number): number {
   const value = list[index];
   if (value === undefined) throw new Error(`Index ${index} is out of range`);
   return value;

@@ -87,9 +87,21 @@ describe('isResolvedReadOptions', () => {
     ).toBe(true);
   });
 
+  it('accepts every limit at its absolute ceiling', () => {
+    const ceilings = resolveReadOptions({
+      rowCap: ABSOLUTE_MAX_ROWS,
+      colCap: ABSOLUTE_MAX_COLS,
+      maxBytes: ABSOLUTE_MAX_BYTES,
+    });
+    expect(isResolvedReadOptions(structuredClone(ceilings))).toBe(true);
+  });
+
   it.each([
     ['a rowCap of 0', { ...base, rowCap: 0 }],
     ['a colCap of 1.5', { ...base, colCap: 1.5 }],
+    ['a rowCap above its ceiling', { ...base, rowCap: ABSOLUTE_MAX_ROWS + 1 }],
+    ['a colCap above its ceiling', { ...base, colCap: ABSOLUTE_MAX_COLS + 1 }],
+    ['a maxBytes above its ceiling', { ...base, maxBytes: ABSOLUTE_MAX_BYTES + 1 }],
     [
       'a sheet together with a sheetName',
       { ...base, sheet: { by: 'name', name: 'S' }, sheetName: 'S' },

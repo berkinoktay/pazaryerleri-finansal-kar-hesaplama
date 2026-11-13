@@ -39,12 +39,17 @@ import { childElements, corruptPart, firstChildNamed, localName, parsePart } fro
 // checkPart and no reader rule is held; a selected sheet that cannot be read is
 // CORRUPT_FILE.
 // readSheet (the export patch path) also reports which part the grid came from, the
-// position of every cell it placed and the worksheet's merged ranges. readGrid does
-// not track them: its work, allocations and errors are those of the grid alone.
+// position of every cell it placed and the worksheet's merged ranges: the union of
+// every `mergeCells` block a sheet holds, directly or inside `AlternateContent`, so no
+// block can hide a range (collecting them never throws, so it cannot change which
+// sheet is read). readGrid does not track them: its work, allocations and errors are
+// those of the grid alone.
 
 const SHEET_DATA = 'sheetData';
 const MERGE_CELLS = 'mergeCells';
 const MERGE_CELL = 'mergeCell';
+// Markup compatibility's wrapper (`mc:AlternateContent`): Excel applies one of its branches.
+const ALTERNATE_CONTENT = 'AlternateContent';
 const REF_ATTRIBUTE = 'ref';
 const MISSING_REF = '';
 // The part of a conversion whose sheet is not a worksheet: it has failed, so its part
@@ -64,7 +69,11 @@ export interface SheetReading {
   readonly partIsBookPart: boolean;
   /** `cellKey(row, column)` of every cell the reader placed, in document order. */
   readonly cellKeys: readonly number[];
-  /** The raw `ref` of every `mergeCell` under the part's first `mergeCells` child, in document order ('' when absent). */
+  /**
+   * The raw `ref` ('' when absent) of every `mergeCell` under every direct `mergeCells`
+   * child of the part's root and under every `mergeCells` inside a direct
+   * `AlternateContent` child, any namespace, in document order.
+   */
   readonly mergeRefs: readonly string[];
 }
 
@@ -275,14 +284,45 @@ function cellContext(state: ScanState, workbook: WorkbookInfo): CellContext {
   };
 }
 
-/** The raw `ref` of every `mergeCell` under the first direct `mergeCells` child of `root`. */
+/**
+ * Appends to `refs`, in document order, the raw `ref` of every `mergeCell` element
+ * inside a `mergeCells` element of the subtree of `top` (`top` included), each once;
+ * names by local name, any namespace. Iterative, so deep nesting cannot overflow the
+ * stack, and it never throws.
+ */
+function collectMergeRefs(top: Element, refs: string[]): void {
+  // Parallel stacks: an element still to visit, and whether a `mergeCells` encloses it.
+  const pending: Element[] = [top];
+  const enclosed: boolean[] = [false];
+  for (let element = pending.pop(); element !== undefined; element = pending.pop()) {
+    const inMergeCells = enclosed.pop() ?? false;
+    const name = localName(element.tagName);
+    if (inMergeCells && name === MERGE_CELL) {
+      refs.push(element.getAttribute(REF_ATTRIBUTE) ?? MISSING_REF);
+    }
+    const childrenEnclosed = inMergeCells || name === MERGE_CELLS;
+    const children = childElements(element);
+    for (let i = children.length - 1; i >= 0; i -= 1) {
+      const child = children[i];
+      if (child === undefined) continue;
+      pending.push(child);
+      enclosed.push(childrenEnclosed);
+    }
+  }
+}
+
+/**
+ * The raw `ref` of every `mergeCell` that Excel could apply, in document order: those
+ * under every direct `mergeCells` child of `root` and under every `mergeCells` inside a
+ * direct `AlternateContent` child, whatever their namespaces. Taking the union, a
+ * decoy block or a second block cannot hide a range from the merged-target check:
+ * more targets are refused, none is missed.
+ */
 function mergeRefsOf(root: Element): string[] {
   const refs: string[] = [];
-  const mergeCells = firstChildNamed(root, MERGE_CELLS);
-  if (mergeCells === null) return refs;
-  for (const child of childElements(mergeCells)) {
-    if (localName(child.tagName) !== MERGE_CELL) continue;
-    refs.push(child.getAttribute(REF_ATTRIBUTE) ?? MISSING_REF);
+  for (const child of childElements(root)) {
+    const name = localName(child.tagName);
+    if (name === MERGE_CELLS || name === ALTERNATE_CONTENT) collectMergeRefs(child, refs);
   }
   return refs;
 }

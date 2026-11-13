@@ -332,6 +332,9 @@ describe('readGrid: unexpected exceptions', () => {
 
 describe('readSheet', () => {
   const SECOND_SHEET_PART = 'xl/worksheets/sheet2.xml';
+  const SHEET_DATA_END = '</sheetData>';
+  const MARKUP_COMPATIBILITY_NS = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+  const ONE_CELL_ROW = '<row r="1"><c r="A1"><v>1</v></c></row>';
   // Two cells, then a cell the reader rejects (a boolean that is not 0 or 1).
   const ROW_BROKEN_AFTER_TWO_CELLS =
     '<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c><c r="C1" t="b"><v>yes</v></c></row>';
@@ -369,10 +372,18 @@ describe('readSheet', () => {
     expect(reading.partPath).toBe(SHEET_PART);
   });
 
-  it('reports the first sheet and its own cells when a named sheet breaks a reader rule', () => {
+  it('reports the first sheet, its own cells and merges when a named sheet breaks a reader rule', () => {
+    const first = worksheetXml([['a'], ['b']]).replace(
+      SHEET_DATA_END,
+      `${SHEET_DATA_END}<mergeCells><mergeCell ref="A5:B6"/></mergeCells>`,
+    );
+    const broken = worksheetWith(
+      ROW_BROKEN_AFTER_TWO_CELLS,
+      '<mergeCells><mergeCell ref="C1:D2"/></mergeCells>',
+    );
     const file = buildXlsxFixture([
-      { name: 'A', xml: worksheetXml([['a'], ['b']]) },
-      { name: 'B', xml: worksheet(ROW_BROKEN_AFTER_TWO_CELLS) },
+      { name: 'A', xml: first },
+      { name: 'B', xml: broken },
     ]);
 
     const reading = readSheet(openUpload(file, OPTS), { sheetName: 'B', caps: CAPS });
@@ -380,6 +391,7 @@ describe('readSheet', () => {
     expect(reading.grid).toEqual([['a'], ['b']]);
     expect(reading.partPath).toBe(SHEET_PART);
     expect(reading.cellKeys).toEqual([cellKey(1, 1), cellKey(2, 1)]);
+    expect(reading.mergeRefs).toEqual(['A5:B6']);
   });
 
   it('lists the key of every cell the reader placed, in document order', () => {
@@ -403,15 +415,46 @@ describe('readSheet', () => {
     expect(readGrid(openUpload(file, OPTS), { caps: CAPS })).toEqual(reading.grid);
   });
 
-  it('takes merge refs from the first mergeCells only, a missing ref as empty', () => {
+  it('takes merge refs from every mergeCells block, a missing ref as empty', () => {
     const xml = worksheetWith(
-      '<row r="1"><c r="A1"><v>1</v></c></row>',
+      ONE_CELL_ROW,
       '<mergeCells><mergeCell ref="B2:C3"/><mergeCell/></mergeCells>' +
         '<mergeCells><mergeCell ref="E5:F6"/></mergeCells>',
     );
     const file = buildXlsxFixture([{ name: 'S', xml }]);
 
-    expect(readSheet(openUpload(file, OPTS), { caps: CAPS }).mergeRefs).toEqual(['B2:C3', '']);
+    expect(readSheet(openUpload(file, OPTS), { caps: CAPS }).mergeRefs).toEqual([
+      'B2:C3',
+      '',
+      'E5:F6',
+    ]);
+  });
+
+  it('keeps the real merge refs after a decoy block in a foreign namespace', () => {
+    const xml = worksheetWith(
+      ONE_CELL_ROW,
+      '<d:mergeCells xmlns:d="urn:decoy"><d:mergeCell ref="Z99"/></d:mergeCells>' +
+        '<mergeCells><mergeCell ref="B2:C3"/></mergeCells>',
+    );
+    const file = buildXlsxFixture([{ name: 'S', xml }]);
+
+    const reading = readSheet(openUpload(file, OPTS), { caps: CAPS });
+
+    expect(reading.mergeRefs).toEqual(['Z99', 'B2:C3']);
+    expect(readGrid(openUpload(file, OPTS), { caps: CAPS })).toEqual(reading.grid);
+  });
+
+  it('takes merge refs from both branches of an AlternateContent block', () => {
+    const xml = worksheetWith(
+      ONE_CELL_ROW,
+      `<mc:AlternateContent xmlns:mc="${MARKUP_COMPATIBILITY_NS}">` +
+        '<mc:Choice Requires="x14"><mergeCells><mergeCell ref="B2:C3"/></mergeCells></mc:Choice>' +
+        '<mc:Fallback><mergeCells><mergeCell ref="E5:F6"/></mergeCells></mc:Fallback>' +
+        '</mc:AlternateContent>',
+    );
+    const file = buildXlsxFixture([{ name: 'S', xml }]);
+
+    expect(readSheet(openUpload(file, OPTS), { caps: CAPS }).mergeRefs).toEqual(['B2:C3', 'E5:F6']);
   });
 
   it('lists no merge refs for a sheet without mergeCells', () => {

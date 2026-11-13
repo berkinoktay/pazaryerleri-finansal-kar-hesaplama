@@ -1,9 +1,8 @@
 import { cellText } from '../cells';
-import { PATCH_ERROR_ROW_SAMPLE } from '../constants';
 import { SpreadsheetFileError } from '../errors';
 import type { CellValue, SheetData } from '../grid-types';
 import type { PatchAnchor } from './patch-request';
-import { valueAt } from './xml-lexer';
+import { RejectedRows } from './rejected-rows';
 
 // The anchor check of the export patch path: before any byte is written, every
 // anchor cell of the reader's grid must read, through `cellText`, exactly as the
@@ -11,26 +10,6 @@ import { valueAt } from './xml-lexer';
 // its patches from; one error reports every failing anchor.
 
 const NO_ROW: readonly CellValue[] = [];
-
-/**
- * Rejected cells of one error: how many, and the PATCH_ERROR_ROW_SAMPLE smallest
- * distinct rows among them, ascending, whatever order the rows arrive in. Each add
- * costs at most PATCH_ERROR_ROW_SAMPLE steps, and nothing grows with the count.
- */
-export class RejectedRows {
-  count = 0;
-  readonly rows: number[] = [];
-
-  add(row: number): void {
-    this.count += 1;
-    const rows = this.rows;
-    let at = rows.length;
-    while (at > 0 && valueAt(rows, at - 1) > row) at -= 1;
-    if (at >= PATCH_ERROR_ROW_SAMPLE || rows[at - 1] === row) return;
-    rows.splice(at, 0, row);
-    if (rows.length > PATCH_ERROR_ROW_SAMPLE) rows.pop();
-  }
-}
 
 /**
  * Throws SpreadsheetFileError ROW_ANCHOR_MISMATCH `{ count, rows }` unless every anchor

@@ -101,15 +101,24 @@ function isSheetSelector(value: unknown): value is SheetSelector {
   }
 }
 
-/** Resolved options; a strict `sheet` selector and a legacy `sheetName` never travel together. */
+/** A limit resolveReadOptions could have produced: a positive integer within `ceiling`. */
+function isLimitWithin(value: unknown, ceiling: number): boolean {
+  return isPositiveInteger(value) && value <= ceiling;
+}
+
+/**
+ * Resolved options; a strict `sheet` selector and a legacy `sheetName` never travel
+ * together, and every limit is within its absolute ceiling (the caps size what the
+ * worker allocates, some of it outside its heap limits).
+ */
 export function isResolvedReadOptions(value: unknown): value is ResolvedReadOptions {
   return (
     isRecord(value) &&
     (value.sheetName === undefined || typeof value.sheetName === 'string') &&
     (value.sheet === undefined || isSheetSelector(value.sheet)) &&
     (value.sheet === undefined || value.sheetName === undefined) &&
-    isPositiveInteger(value.rowCap) &&
-    isPositiveInteger(value.colCap) &&
-    isPositiveInteger(value.maxBytes)
+    isLimitWithin(value.rowCap, ABSOLUTE_MAX_ROWS) &&
+    isLimitWithin(value.colCap, ABSOLUTE_MAX_COLS) &&
+    isLimitWithin(value.maxBytes, ABSOLUTE_MAX_BYTES)
   );
 }
