@@ -31,7 +31,7 @@ import { resolveReadOptions, type ReadGridOptions } from '../read-options';
 import { buildXlsxFixture, worksheetXml } from '../testing/build-xlsx';
 import { patchFixture, type PatchFixtureOptions } from '../testing/patch-fixture';
 import { resolvePatchRequest, type CellPatch, type ResolvedPatchRequest } from './patch-request';
-import { assertOutputBudget, assertSameCells, assertSameViews, patchUpload } from './patch-upload';
+import { assertOutputBudget, assertSameCells, patchUpload } from './patch-upload';
 import { readZipLayout } from './raw-zip';
 import {
   MALFORMED_SHEET_REASONS,
@@ -387,29 +387,6 @@ describe('assertSameCells', () => {
   });
 });
 
-describe('assertSameViews', () => {
-  const file = book(ONE_CELL);
-  const parts = openUpload(file, GUARD_OPTS);
-  const layout = readZipLayout(file);
-  const sheetBytes = parts[SHEET_PART];
-  if (sheetBytes === undefined) throw new Error(`no part named ${SHEET_PART}`);
-
-  it('passes the parts the gate read', () => {
-    expect(() => assertSameViews(file, layout, parts)).not.toThrow();
-  });
-
-  it.each<[string, Uint8Array]>([
-    ['one byte changed', Uint8Array.from(sheetBytes, (byte, at) => (at === 0 ? byte ^ 1 : byte))],
-    ['one byte appended', Uint8Array.from([...sheetBytes, 0x20])],
-  ])('refuses a worksheet part with %s', (_, changed) => {
-    expectFileError(
-      () => assertSameViews(file, layout, { ...parts, [SHEET_PART]: changed }),
-      'CORRUPT_FILE',
-      { reason: ZIP_REJECT_REASONS.VIEW_MISMATCH, entry: SHEET_PART },
-    );
-  });
-});
-
 describe('patchUpload: crafted archives through the pipeline', () => {
   const patches: readonly CellPatch[] = [num(2, 1, '5')];
 
@@ -447,9 +424,10 @@ describe('patchUpload: crafted archives through the pipeline', () => {
   });
 
   it('refuses an entry with a 12-byte unsigned data descriptor in the gate', () => {
-    // The stream ends this entry (the last one before the directory) 16 bytes before
-    // the directory record signature, so the gate cannot inflate it and refuses the
-    // file before the layout check runs; raw-zip.test.ts pins the layout's own refusal.
+    // The stream would end this entry (the last one before the directory) 16 bytes
+    // before the directory record signature and fail to inflate it; the gate's layout
+    // check, which runs before the stream, refuses the file first. raw-zip.test.ts pins
+    // the layout's own refusal.
     const { file } = unsignedDescriptorArchive(UNSIGNED_DESCRIPTOR_32_LENGTH);
     const error = fileErrorOf(() => patchFixture(file, patches));
     const gateError = fileErrorOf(() => openUpload(file, GUARD_OPTS));
@@ -501,36 +479,6 @@ describe('patchUpload: a request that did not come through resolvePatchRequest',
     expect(() => patchUpload(Buffer.from('nope'), handBuilt(patch))).toThrow(
       'Invalid patch request',
     );
-  });
-});
-
-describe('assertSameViews on a hidden tile behind the layout check', () => {
-  it('other-sheet: refuses the tile', () => {
-    const { file, layout } = hiddenTileArchive('other-sheet');
-    const parts = openUpload(file, GUARD_OPTS);
-    expectFileError(() => assertSameViews(file, layout, parts), 'CORRUPT_FILE', {
-      reason: ZIP_REJECT_REASONS.VIEW_MISMATCH,
-      entry: SHEET_PART,
-    });
-  });
-
-  it('bomb: refuses the tile within the bounded-inflate budget', () => {
-    const { file, layout } = hiddenTileArchive('bomb');
-    const parts = openUpload(file, GUARD_OPTS);
-    const started = performance.now();
-    const error = fileErrorOf(() => assertSameViews(file, layout, parts));
-    // The workbook is two rows; an unbounded inflate of the tile takes more than a second.
-    expectWithinBudget(performance.now() - started, BOUNDED_INFLATE_BUDGET_MS);
-    expect(error.code).toBe('CORRUPT_FILE');
-    expect(error.meta).toMatchObject({ reason: ZIP_REJECT_REASONS.VIEW_MISMATCH });
-  });
-
-  it('same-sheet: the views compare equal', () => {
-    // The tile holds the real sheet, so every content comparison passes: the layout
-    // rule carries the guarantee, and this check does not.
-    const { file, layout } = hiddenTileArchive('same-sheet');
-    const parts = openUpload(file, GUARD_OPTS);
-    expect(() => assertSameViews(file, layout, parts)).not.toThrow();
   });
 });
 

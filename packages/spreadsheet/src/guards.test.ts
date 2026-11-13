@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { zipSync, unzipSync, strToU8 } from 'fflate';
-import { SpreadsheetFileError } from './errors';
+import { zipSync, unzipSync, strToU8, type Unzipped } from 'fflate';
+import { SpreadsheetFileError, type SpreadsheetFileErrorCode } from './errors';
 import {
   MAX_DECOMPRESSED_BYTES,
   MAX_WORKBOOK_RELS_BYTES,
@@ -15,9 +15,15 @@ import {
 } from './constants';
 import { openUpload, type GuardOpts } from './guards';
 import { readWorkbookGrid } from './parse';
+import { UNSAFE_CONTENT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
 import { checkUploadParts } from './read-grid';
 import { columnLetters } from './sheet-meta';
 import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
+import {
+  PACKAGE_PART_CASES,
+  SAFE_PART_CASES,
+  UNSAFE_PART_CASES,
+} from '../tests/helpers/package-parts';
 import { entriesText, grownFixtureText, numberRows } from '../tests/helpers/workbooks';
 
 const opts = { rowCap: 5000, colCap: 64, maxBytes: 10 * 1024 * 1024 };
@@ -29,6 +35,12 @@ const WORKSHEET_REL = `${OFFICE_REL}/worksheet`;
 const SHARED_STRINGS_REL = `${OFFICE_REL}/sharedStrings`;
 const STYLES_REL = `${OFFICE_REL}/styles`;
 const THEME_REL = `${OFFICE_REL}/theme`;
+const OFFICE_DOCUMENT_REL = `${OFFICE_REL}/officeDocument`;
+const EXTENDED_PROPERTIES_REL = `${OFFICE_REL}/extended-properties`;
+// A relationship type no rule knows, short enough to pad a part cheaply.
+const PADDING_REL = 'urn:pad';
+const ROOT_RELS_PART = '_rels/.rels';
+const UPPER_CASE_ROOT_RELS_PART = '_RELS/.rels';
 const WORKBOOK_RELS_PART = 'xl/_rels/workbook.xml.rels';
 const WORKBOOK_PART = 'xl/workbook.xml';
 const SHEET_PART = 'xl/worksheets/sheet1.xml';
@@ -253,6 +265,8 @@ type Relationship = readonly [type: string, target: string];
 const SHEET_RELATIONSHIP: Relationship = [WORKSHEET_REL, 'worksheets/sheet1.xml'];
 const SHARED_STRINGS_RELATIONSHIP: Relationship = [SHARED_STRINGS_REL, 'sharedStrings.xml'];
 const STYLES_RELATIONSHIP: Relationship = [STYLES_REL, 'styles.xml'];
+// The root relationship buildXlsxFixture writes.
+const OFFICE_DOCUMENT_RELATIONSHIP: Relationship = [OFFICE_DOCUMENT_REL, WORKBOOK_PART];
 
 // A workbook rels part holding one Relationship per entry, in order.
 function relsXml(relationships: readonly Relationship[], prefix = ''): string {
@@ -469,13 +483,16 @@ describe('upload gate', () => {
   });
 
   // The central-directory size never sizes an allocation any more: the entries
-  // come from the stream, and a directory that disagrees with it is corrupt.
+  // come from the stream, and a directory that disagrees with it is corrupt. No
+  // canonical archive can hold this disagreement: the zip layout check, which runs
+  // before the stream, finds the record and its local header disagreeing first.
   it('rejects a central-directory size that disagrees with the stream as CORRUPT_FILE', () => {
     const file = buildXlsxFixture([{ name: 'Sheet1', xml: worksheetXml([['Barkod'], ['B1']]) }]);
     const patched = patchCentralUncompressedSize(file, 'xl/worksheets/sheet1.xml', 0x7fffffff);
     const err = catchGuard(patched, opts);
     expect(err).toBeInstanceOf(SpreadsheetFileError);
     expect(err?.code).toBe('CORRUPT_FILE');
+    expect(err?.meta).toMatchObject({ reason: ZIP_REJECT_REASONS.LAYOUT });
   });
 
   it('rejects a shared-strings element bomb beyond the element budget as PAYLOAD_TOO_LARGE', () => {
@@ -612,10 +629,16 @@ describe('upload gate', () => {
   });
 
   // The reader opens only entries ending in .xml or .xml.rels that the workbook rels
-  // name; `_rels/.rels` is neither, so it is neither budgeted nor a reader part.
+  // name; `_rels/.rels` is neither, so it is neither budgeted nor a reader part. It is
+  // a valid root relationships part, padded with relationships of another type to a
+  // weight the budget would refuse.
   it('ignores an entry the reader never opens', () => {
+    const padding = Array.from(
+      { length: Math.ceil(SMALL_WEIGHT / (XML_ELEMENT_WEIGHT + 3 * XML_ATTRIBUTE_WEIGHT)) },
+      (_, i): Relationship => [PADDING_REL, `p${i}`],
+    );
     const file = buildXlsxFixture([BASIC_SHEET], {
-      '_rels/.rels': partWithElements(SMALL_WEIGHT),
+      '_rels/.rels': relsXml([OFFICE_DOCUMENT_RELATIONSHIP, ...padding]),
       'xl/media/image1.png': 'not xml <<<',
     });
     const names = Object.keys(openUpload(file, SMALL_BUDGET));
@@ -991,5 +1014,202 @@ describe('upload gate: central directory', () => {
   ])('rejects two local %s with the same name as CORRUPT_FILE', (_label, name) => {
     const parts = [...MINIMAL_PARTS, { name, text: 'again' }];
     expect(catchGuard(storedZip(parts), opts)?.code).toBe('CORRUPT_FILE');
+  });
+});
+
+// A part the root relationships may name instead of the workbook.
+const OTHER_PART = 'xl/other.xml';
+const BOMB_BYTES = 300_000;
+const BOMB_CAP = 1_000;
+
+/** The gate's error for `file` has `code` and `meta.reason`. */
+function expectGateReason(file: Buffer, code: SpreadsheetFileErrorCode, reason: string): void {
+  const err = catchGuard(file, opts);
+  expect(err?.code).toBe(code);
+  expect(err?.meta).toMatchObject({ reason });
+}
+
+/** The entries of `file` as `edit` returns them, zipped again. */
+function rezipped(file: Buffer, edit: (entries: Unzipped) => Unzipped): Buffer {
+  return Buffer.from(zipSync(edit(unzipSync(new Uint8Array(file)))));
+}
+
+/** The one-sheet workbook with `rootRels` as its root relationships part, plus `parts`. */
+function withRootRels(rootRels: string, parts: Readonly<Record<string, string>> = {}): Buffer {
+  return buildXlsxFixture([BASIC_SHEET], { [ROOT_RELS_PART]: rootRels, ...parts });
+}
+
+/** A root relationships part holding `relationship` as it is written. */
+function rootRelsWith(relationship: string): string {
+  return relsXml([]).replace('</Relationships>', `${relationship}</Relationships>`);
+}
+
+/** The one-sheet workbook with its root relationships part stored under `name` only. */
+function withRootRelsNamed(name: string): Buffer {
+  return rezipped(buildXlsxFixture([BASIC_SHEET]), (entries) =>
+    Object.fromEntries(
+      Object.entries(entries).map(([entry, bytes]) => [
+        entry === ROOT_RELS_PART ? name : entry,
+        bytes,
+      ]),
+    ),
+  );
+}
+
+// The package's root relationships must name xl/workbook.xml as its office document,
+// the part the reader opens: otherwise Excel would open another workbook than the one
+// the gate read.
+describe('upload gate: root relationships', () => {
+  it('accepts the root relationships buildXlsxFixture writes', () => {
+    expect(catchGuard(buildXlsxFixture([BASIC_SHEET]), opts)).toBeNull();
+  });
+
+  it('accepts an archive without root relationships', () => {
+    const file = rezipped(buildXlsxFixture([BASIC_SHEET]), (entries) =>
+      Object.fromEntries(Object.entries(entries).filter(([name]) => name !== ROOT_RELS_PART)),
+    );
+    expect(catchGuard(file, opts)).toBeNull();
+  });
+
+  it.each<[string, string]>([
+    ['an absolute Target', relsXml([[OFFICE_DOCUMENT_REL, `/${WORKBOOK_PART}`]])],
+    [
+      'TargetMode="Internal"',
+      rootRelsWith(
+        `<Relationship Id="rId1" Type="${OFFICE_DOCUMENT_REL}" Target="${WORKBOOK_PART}" TargetMode="Internal"/>`,
+      ),
+    ],
+  ])('accepts %s', (_label, rootRels) => {
+    expect(catchGuard(withRootRels(rootRels), opts)).toBeNull();
+  });
+
+  it.each<[string, Buffer]>([
+    [
+      'an officeDocument Target that names another part of the archive',
+      withRootRels(relsXml([[OFFICE_DOCUMENT_REL, OTHER_PART]]), { [OTHER_PART]: '<workbook/>' }),
+    ],
+    [
+      'a second officeDocument relationship that names another part',
+      withRootRels(relsXml([OFFICE_DOCUMENT_RELATIONSHIP, [OFFICE_DOCUMENT_REL, OTHER_PART]]), {
+        [OTHER_PART]: '<workbook/>',
+      }),
+    ],
+    [
+      'no officeDocument relationship',
+      withRootRels(relsXml([[EXTENDED_PROPERTIES_REL, 'docProps/app.xml']])),
+    ],
+    [
+      'TargetMode="External"',
+      withRootRels(
+        rootRelsWith(
+          `<Relationship Id="rId1" Type="${OFFICE_DOCUMENT_REL}" Target="${WORKBOOK_PART}" TargetMode="External"/>`,
+        ),
+      ),
+    ],
+    [
+      'an unquoted attribute',
+      withRootRels(
+        rootRelsWith(
+          `<Relationship Id=rId1 Type="${OFFICE_DOCUMENT_REL}" Target="${WORKBOOK_PART}"/>`,
+        ),
+      ),
+    ],
+    [
+      'a Target written with a character reference',
+      withRootRels(relsXml([[OFFICE_DOCUMENT_REL, 'xl/workbook&#46;xml']])),
+    ],
+    [
+      'an officeDocument Type in another ASCII case beside the real one',
+      withRootRels(
+        relsXml([OFFICE_DOCUMENT_RELATIONSHIP, [`${OFFICE_REL}/OfficeDocument`, OTHER_PART]]),
+        { [OTHER_PART]: '<workbook/>' },
+      ),
+    ],
+    [
+      'an entry named _RELS/.rels beside _rels/.rels',
+      buildXlsxFixture([BASIC_SHEET], {
+        [UPPER_CASE_ROOT_RELS_PART]: relsXml([OFFICE_DOCUMENT_RELATIONSHIP]),
+      }),
+    ],
+    ['an entry named _RELS/.rels alone', withRootRelsNamed(UPPER_CASE_ROOT_RELS_PART)],
+  ])('refuses %s as CORRUPT_FILE', (_label, file) => {
+    expectGateReason(file, 'CORRUPT_FILE', ZIP_REJECT_REASONS.ROOT_RELS);
+  });
+
+  it('refuses a DOCTYPE in the root relationships as UNSAFE_CONTENT', () => {
+    const rootRels = relsXml([OFFICE_DOCUMENT_RELATIONSHIP]).replace(
+      '<Relationships',
+      '<!DOCTYPE r [<!ENTITY x "y">]><Relationships',
+    );
+    expect(catchGuard(withRootRels(rootRels), opts)?.code).toBe('UNSAFE_CONTENT');
+  });
+
+  it('refuses an unsafe relationship type in the root relationships as UNSAFE_CONTENT', () => {
+    const rootRels = relsXml([OFFICE_DOCUMENT_RELATIONSHIP, [`${OFFICE_REL}/oleObject`, 'a.bin']]);
+    expectGateReason(withRootRels(rootRels), 'UNSAFE_CONTENT', UNSAFE_CONTENT_REASONS.UNSAFE_PART);
+  });
+
+  it('refuses root relationships over MAX_WORKBOOK_RELS_BYTES as PAYLOAD_TOO_LARGE', () => {
+    const rootRels = relsXml([OFFICE_DOCUMENT_RELATIONSHIP]).replace(
+      '</Relationships>',
+      `<!--${'x'.repeat(MAX_WORKBOOK_RELS_BYTES)}--></Relationships>`,
+    );
+    expect(catchGuard(withRootRels(rootRels), opts)?.code).toBe('PAYLOAD_TOO_LARGE');
+  });
+});
+
+// The byte-preserving export would hand a macro, an embedded object or an external
+// link one member uploaded to every other member unchanged.
+describe('upload gate: unsafe parts by name', () => {
+  it.each([
+    'xl/vbaProject.bin',
+    'XL/VBAPROJECT.BIN',
+    'xl/externalLinks/externalLink1.xml',
+    'xl/embeddings/oleObject1.bin',
+  ])('refuses an entry named %s as UNSAFE_CONTENT', (name) => {
+    expectGateReason(
+      buildXlsxFixture([BASIC_SHEET], { [name]: '<x/>' }),
+      'UNSAFE_CONTENT',
+      UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+    );
+  });
+
+  it('accepts an entry named xl/media/image1.png', () => {
+    expect(
+      catchGuard(buildXlsxFixture([BASIC_SHEET], { 'xl/media/image1.png': 'png' }), opts),
+    ).toBeNull();
+  });
+
+  // The names come from the zip layout, before the stream inflates anything: an entry
+  // that inflates past the decompression cap is refused for its name, not its size.
+  it('refuses the name before inflating the entry', () => {
+    const file = buildXlsxFixture([BASIC_SHEET], { 'xl/vbaProject.bin': '0'.repeat(BOMB_BYTES) });
+    const err = catchGuard(file, { ...opts, maxDecompressedBytes: BOMB_CAP });
+    expect(err?.code).toBe('UNSAFE_CONTENT');
+    expect(err?.meta).toMatchObject({ reason: UNSAFE_CONTENT_REASONS.UNSAFE_PART });
+  });
+});
+
+// Excel finds a macro, an external link or an embedded object through the content
+// types and the relationships, never through the part's name.
+describe('upload gate: unsafe parts by declared type', () => {
+  it.each(UNSAFE_PART_CASES)('refuses $label as UNSAFE_CONTENT', ({ entries }) => {
+    expectGateReason(
+      buildXlsxFixture([BASIC_SHEET], entries),
+      'UNSAFE_CONTENT',
+      UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+    );
+  });
+
+  it.each(PACKAGE_PART_CASES)('refuses $label as CORRUPT_FILE', ({ entries }) => {
+    expectGateReason(
+      buildXlsxFixture([BASIC_SHEET], entries),
+      'CORRUPT_FILE',
+      ZIP_REJECT_REASONS.PACKAGE_PART,
+    );
+  });
+
+  it.each(SAFE_PART_CASES)('accepts $label', ({ entries }) => {
+    expect(catchGuard(buildXlsxFixture([BASIC_SHEET], entries), opts)).toBeNull();
   });
 });

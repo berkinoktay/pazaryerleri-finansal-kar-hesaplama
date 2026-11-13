@@ -23,28 +23,32 @@ export function isXmlPart(name: string): boolean {
 }
 
 /**
- * Rejects an unzipped xlsx whose XML parts declare a DOCTYPE or ENTITY (any case),
- * or reference an entity other than the five predefined ones and numeric character
- * references. Throws SpreadsheetFileError('UNSAFE_CONTENT') naming the offending entry.
+ * Rejects one XML part, whatever its name, that declares a DOCTYPE or ENTITY (any
+ * case), or references an entity other than the five predefined ones and numeric
+ * character references. Throws SpreadsheetFileError('UNSAFE_CONTENT') naming `name`.
+ */
+export function assertSafeXmlPart(name: string, bytes: Uint8Array): void {
+  const xml = strFromU8(bytes);
+
+  if (DTD_DECLARATION.test(xml)) {
+    throw new SpreadsheetFileError('UNSAFE_CONTENT', 'Workbook part declares a DOCTYPE or ENTITY', {
+      entry: name,
+    });
+  }
+  if (UNKNOWN_ENTITY_REFERENCE.test(xml)) {
+    throw new SpreadsheetFileError('UNSAFE_CONTENT', 'Workbook part references an unknown entity', {
+      entry: name,
+    });
+  }
+}
+
+/**
+ * Rejects an unzipped xlsx whose XML parts (isXmlPart) fail assertSafeXmlPart. Throws
+ * SpreadsheetFileError('UNSAFE_CONTENT') naming the offending entry.
  */
 export function assertSafeXmlContent(entries: Unzipped): void {
   for (const [name, bytes] of Object.entries(entries)) {
     if (!isXmlPart(name)) continue;
-    const xml = strFromU8(bytes);
-
-    if (DTD_DECLARATION.test(xml)) {
-      throw new SpreadsheetFileError(
-        'UNSAFE_CONTENT',
-        'Workbook part declares a DOCTYPE or ENTITY',
-        { entry: name },
-      );
-    }
-    if (UNKNOWN_ENTITY_REFERENCE.test(xml)) {
-      throw new SpreadsheetFileError(
-        'UNSAFE_CONTENT',
-        'Workbook part references an unknown entity',
-        { entry: name },
-      );
-    }
+    assertSafeXmlPart(name, bytes);
   }
 }

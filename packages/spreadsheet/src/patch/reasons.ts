@@ -1,5 +1,6 @@
-// `meta.reason` vocabularies of the errors the export patch path throws. A reason
-// names the rule that refused the file; the meta never carries cell text.
+// `meta.reason` vocabularies of the errors the export patch path and the upload gate
+// throw. A reason names the rule that refused the file; the meta never carries cell
+// text.
 
 /** Reasons of MALFORMED_SHEET. */
 export const MALFORMED_SHEET_REASONS = {
@@ -29,7 +30,7 @@ export const PATCH_LIMIT_REASONS = {
   OUTPUT: 'patch-output',
 } as const;
 
-/** Reasons of CORRUPT_FILE raised by the patch path's zip checks. */
+/** Reasons of CORRUPT_FILE raised by the zip and package checks of the gate and the patch path. */
 export const ZIP_REJECT_REASONS = {
   LAYOUT: 'zip-layout',
   ZIP64: 'zip64',
@@ -37,4 +38,11 @@ export const ZIP_REJECT_REASONS = {
   METHOD: 'zip-method',
   VIEW_MISMATCH: 'zip-view-mismatch',
   PACKAGE_PART: 'package-part',
+  ROOT_RELS: 'root-rels',
+} as const;
+
+/** Reasons of UNSAFE_CONTENT raised by the package checks of the gate. */
+export const UNSAFE_CONTENT_REASONS = {
+  // A macro, an embedded object, an ActiveX control or an external link.
+  UNSAFE_PART: 'unsafe-part',
 } as const;

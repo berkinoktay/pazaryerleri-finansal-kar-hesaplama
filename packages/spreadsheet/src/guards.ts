@@ -1,10 +1,22 @@
 import { Unzip, UnzipInflate, strFromU8, unzipSync } from 'fflate';
 import { SpreadsheetFileError } from './errors';
-import { assertSafeXmlContent, isXmlPart } from './content-scan';
+import { assertSafeXmlContent, assertSafeXmlPart, isXmlPart } from './content-scan';
+import { cutRootChildren, literalAttributeText } from './patch/calc-chain';
+import { readZipLayout, type ZipLayout } from './patch/raw-zip';
+import { ZIP_REJECT_REASONS } from './patch/reasons';
+import { foldAsciiCase, metaEntryName } from './patch/shared';
+import { localNameIs, type XmlMarkup } from './patch/xml-lexer';
+import { assertSameViews } from './patch/zip-views';
+import {
+  assertNoUnsafePackageParts,
+  assertNoUnsafePartNames,
+  assertSafeRelationshipType,
+} from './unsafe-parts';
 import {
   assertWorkbookRelsWithinCap,
   CONTENT_TYPES_PART,
   readerPartPaths,
+  ROOT_RELS_PART,
   WORKBOOK_PART,
   WORKBOOK_RELS_PART,
 } from './workbook-parts';
@@ -13,6 +25,7 @@ import {
   MAX_ZIP_ENTRIES,
   MAX_DECOMPRESSED_BYTES,
   MAX_ERROR_CAUSE_LENGTH,
+  MAX_WORKBOOK_RELS_BYTES,
   MAX_XMLNS_DECLARATIONS_PER_PART,
   MAX_XML_DOM_WEIGHT,
   MAX_XML_NAME_LENGTH,
@@ -42,6 +55,23 @@ const NAME_END_BYTES: ReadonlySet<number> = new Set([0x20, 0x09, 0x0d, 0x0a, 0x2
 const XMLNS_BYTES: readonly number[] = [0x78, 0x6d, 0x6c, 0x6e, 0x73];
 // Zip bytes fed to the streaming inflater per push; see streamArchive.
 const STREAM_CHUNK_BYTES = 8 * 1024;
+// The officeDocument relationship type, transitional and strict: the root relationship
+// that names the workbook part.
+const OFFICE_DOCUMENT_RELATIONSHIP_TYPES: readonly string[] = [
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument',
+  'http://purl.oclc.org/ooxml/officeDocument/relationships/officeDocument',
+];
+const FOLDED_OFFICE_DOCUMENT_RELATIONSHIP_TYPES: ReadonlySet<string> = new Set(
+  OFFICE_DOCUMENT_RELATIONSHIP_TYPES.map(foldAsciiCase),
+);
+const RELATIONSHIP = 'Relationship';
+const TYPE_ATTRIBUTE = 'Type';
+const TARGET_ATTRIBUTE = 'Target';
+const TARGET_MODE_ATTRIBUTE = 'TargetMode';
+// The only TargetMode a root relationship to the workbook may carry, when it has one.
+const INTERNAL_TARGET_MODE = 'Internal';
+// A root relationship Target is relative to the package root; one leading '/' is the same.
+const PACKAGE_ROOT_PREFIX = '/';
 
 export interface GuardOpts {
   rowCap: number;
@@ -56,10 +86,18 @@ export interface GuardOpts {
 /** The reader parts of an upload, by entry name, in the order the gate picked them. */
 export type UploadParts = Readonly<Record<string, Uint8Array>>;
 
+/** The reader parts of an upload and the zip layout the gate walked. */
+export interface OpenedUpload {
+  readonly parts: UploadParts;
+  readonly layout: ZipLayout;
+}
+
 /** What the local-header stream delivered. */
 interface StreamedArchive {
   /** Content of every entry named .xml / .xml.rels (the only entries kept), by name. */
   readonly contents: ReadonlyMap<string, Uint8Array<ArrayBuffer>>;
+  /** Content of the entry named exactly `_rels/.rels`, kept beside `contents`; null without one. */
+  readonly rootRels: Uint8Array<ArrayBuffer> | null;
   /** Name of every entry (names are unique). */
   readonly names: ReadonlySet<string>;
   /** Inflated byte count of every entry, by name. */
@@ -102,15 +140,16 @@ function concatChunks(chunks: readonly Uint8Array<ArrayBuffer>[]): Uint8Array<Ar
 /**
  * Inflates EVERY entry of the archive from its local headers with fflate's
  * streaming Unzip and returns the real inflated size and name of every entry, plus
- * the content of every entry named `.xml` or `.xml.rels`. Any other entry (an
- * image, a binary part) is inflated only to count its bytes, which are dropped as
- * they arrive: the export unzips the stored upload whole and allocates each
- * entry's declared size, so every entry must be measured here, not only the parts
- * the reader opens. The ceilings fire from REAL inflated bytes, never from a size
- * field the upload declares:
+ * the content of every entry named `.xml` or `.xml.rels`, and of the root
+ * relationships part (`_rels/.rels`, kept apart). Any other entry (an image, a binary
+ * part) is inflated only to count its bytes, which are dropped on arrival: the
+ * export unzips the stored upload whole and allocates each entry's declared size, so
+ * every entry must be measured here, not only the parts the reader opens. The
+ * ceilings fire from REAL inflated bytes, never from a size field the upload declares:
  *   - more than MAX_ZIP_ENTRIES entries, every entry together beyond
- *     `decompressedCap`, or the .xml / .xml.rels entries together beyond
- *     MAX_XML_TOTAL_BYTES: PAYLOAD_TOO_LARGE;
+ *     `decompressedCap`, the .xml / .xml.rels entries together beyond
+ *     MAX_XML_TOTAL_BYTES, or the root relationships part beyond
+ *     MAX_WORKBOOK_RELS_BYTES: PAYLOAD_TOO_LARGE;
  *   - a repeated entry name, an entry that does not finish, or fflate's own error:
  *     CORRUPT_FILE.
  *
@@ -123,11 +162,13 @@ function concatChunks(chunks: readonly Uint8Array<ArrayBuffer>[]): Uint8Array<Ar
  */
 function streamArchive(bytes: Uint8Array, decompressedCap: number): StreamedArchive {
   const chunksByName = new Map<string, Uint8Array<ArrayBuffer>[]>();
+  const rootRelsChunks: Uint8Array<ArrayBuffer>[] = [];
   const names = new Set<string>();
   const sizes = new Map<string, number>();
   const unfinished = new Set<string>();
   let inflatedBytes = 0;
   let xmlBytes = 0;
+  let rootRelsBytes = 0;
   let abortReason: SpreadsheetFileError | null = null;
 
   const unzipper = new Unzip();
@@ -149,9 +190,11 @@ function streamArchive(bytes: Uint8Array, decompressedCap: number): StreamedArch
     names.add(name);
     sizes.set(name, 0);
     unfinished.add(name);
-    // Only .xml / .xml.rels content is kept; any other entry is counted and dropped.
+    // Only .xml / .xml.rels content is kept, and the root relationships part apart
+    // (it is neither); any other entry is counted and dropped.
     const kept: Uint8Array<ArrayBuffer>[] | null = isXmlPart(name) ? [] : null;
     if (kept !== null) chunksByName.set(name, kept);
+    const isRootRels = name === ROOT_RELS_PART;
 
     f.ondata = (err, chunk, final) => {
       if (abortReason !== null) return;
@@ -170,6 +213,19 @@ function streamArchive(bytes: Uint8Array, decompressedCap: number): StreamedArch
           'Decompressed size exceeds cap',
           { cap: decompressedCap },
         );
+        return;
+      }
+      if (isRootRels) {
+        rootRelsBytes += chunk.length;
+        if (rootRelsBytes > MAX_WORKBOOK_RELS_BYTES) {
+          abortReason = new SpreadsheetFileError(
+            'PAYLOAD_TOO_LARGE',
+            `Root relationships part exceeds ${MAX_WORKBOOK_RELS_BYTES}B`,
+            { entry: ROOT_RELS_PART, cap: MAX_WORKBOOK_RELS_BYTES },
+          );
+          return;
+        }
+        rootRelsChunks.push(chunk);
         return;
       }
       if (kept === null) return;
@@ -207,7 +263,8 @@ function streamArchive(bytes: Uint8Array, decompressedCap: number): StreamedArch
 
   const contents = new Map<string, Uint8Array<ArrayBuffer>>();
   for (const [name, chunks] of chunksByName) contents.set(name, concatChunks(chunks));
-  return { contents, names, sizes };
+  const rootRels = names.has(ROOT_RELS_PART) ? concatChunks(rootRelsChunks) : null;
+  return { contents, rootRels, names, sizes };
 }
 
 /**
@@ -501,30 +558,166 @@ function selectReaderParts(
   return Object.fromEntries(selected);
 }
 
+/** CORRUPT_FILE `{ reason: 'root-rels', entry }`. */
+function rootRelsError(entry: string, message: string): SpreadsheetFileError {
+  return corruptArchive(message, {
+    reason: ZIP_REJECT_REASONS.ROOT_RELS,
+    entry: metaEntryName(entry),
+  });
+}
+
+function isPackagePartError(error: unknown): error is SpreadsheetFileError {
+  return (
+    error instanceof SpreadsheetFileError && error.meta.reason === ZIP_REJECT_REASONS.PACKAGE_PART
+  );
+}
+
+/**
+ * Whether the root relationship scanned into `markup` is an officeDocument one that
+ * names the workbook part: no TargetMode but `Internal`, and a Target that, with one
+ * leading '/' removed, is exactly `xl/workbook.xml`. Its Type was checked by the caller.
+ */
+function namesWorkbookPart(
+  bytes: Uint8Array,
+  markup: XmlMarkup,
+  attributes: readonly number[],
+): boolean {
+  const mode = literalAttributeText(
+    bytes,
+    markup,
+    attributes,
+    TARGET_MODE_ATTRIBUTE,
+    ROOT_RELS_PART,
+  );
+  if (mode !== null && mode !== INTERNAL_TARGET_MODE) return false;
+  const target = literalAttributeText(bytes, markup, attributes, TARGET_ATTRIBUTE, ROOT_RELS_PART);
+  if (target === null) return false;
+  const path = target.startsWith(PACKAGE_ROOT_PREFIX)
+    ? target.slice(PACKAGE_ROOT_PREFIX.length)
+    : target;
+  return path === WORKBOOK_PART;
+}
+
+/**
+ * Whether the direct child scanned into `markup` is an officeDocument relationship
+ * that names the workbook part. Throws UNSAFE_CONTENT `unsafe-part` for a relationship
+ * to an active part; CORRUPT_FILE `root-rels` for an officeDocument relationship that
+ * names anything else, and for a Type that is an officeDocument type only once trimmed
+ * and ASCII-folded (a loose reader would follow it).
+ */
+function isWorkbookRelationship(
+  bytes: Uint8Array,
+  markup: XmlMarkup,
+  attributes: readonly number[],
+): boolean {
+  if (!localNameIs(bytes, markup, RELATIONSHIP)) return false;
+  const type = literalAttributeText(bytes, markup, attributes, TYPE_ATTRIBUTE, ROOT_RELS_PART);
+  if (type === null) return false;
+  assertSafeRelationshipType(type, ROOT_RELS_PART);
+  if (OFFICE_DOCUMENT_RELATIONSHIP_TYPES.includes(type)) {
+    if (namesWorkbookPart(bytes, markup, attributes)) return true;
+    throw rootRelsError(
+      ROOT_RELS_PART,
+      'Root relationships part has an officeDocument relationship to another part',
+    );
+  }
+  if (!FOLDED_OFFICE_DOCUMENT_RELATIONSHIP_TYPES.has(foldAsciiCase(type.trim()))) return false;
+  throw rootRelsError(
+    ROOT_RELS_PART,
+    'Root relationships part has an officeDocument Type in another ASCII case or with spaces',
+  );
+}
+
+/** The officeDocument relationships of the root relationships part, every one checked. */
+function workbookRelationshipCount(bytes: Uint8Array): number {
+  let count = 0;
+  cutRootChildren(bytes, ROOT_RELS_PART, (markup, attributes) => {
+    if (isWorkbookRelationship(bytes, markup, attributes)) count += 1;
+    return false;
+  });
+  return count;
+}
+
+/**
+ * The root relationships rule: the office document the package's root relationships
+ * part names, when there is one, is `xl/workbook.xml` (the part the reader opens), so
+ * no opener starts from another workbook. An archive without the part is accepted: no
+ * package a marketplace can open lacks it, so there is no second workbook to disagree
+ * with. Otherwise, after the content scan (UNSAFE_CONTENT), the part is walked with the
+ * strict lexer the calcChain cut uses, and it must hold at least one officeDocument
+ * relationship, every one of them to the workbook part (isWorkbookRelationship); a
+ * relationship to an active part is UNSAFE_CONTENT `unsafe-part`. Anything else, markup
+ * outside the lexer's subset or a value it cannot compare included: CORRUPT_FILE
+ * `root-rels`. So is an entry whose name is `_rels/.rels` only once ASCII-folded (OPC
+ * folds part names): the gate must not ignore a part another reader may follow.
+ */
+function assertRootRelationships(names: ReadonlySet<string>, rootRels: Uint8Array | null): void {
+  for (const name of names) {
+    if (name === ROOT_RELS_PART || foldAsciiCase(name) !== ROOT_RELS_PART) continue;
+    throw rootRelsError(name, 'Root relationships part is named in another ASCII case');
+  }
+  if (rootRels === null) return;
+  assertSafeXmlPart(ROOT_RELS_PART, rootRels);
+  let count: number;
+  try {
+    count = workbookRelationshipCount(rootRels);
+  } catch (error) {
+    // The walk's own errors name the package part; here they are the root rels rule's.
+    if (!isPackagePartError(error)) throw error;
+    throw rootRelsError(ROOT_RELS_PART, error.message);
+  }
+  if (count === 0) {
+    throw rootRelsError(ROOT_RELS_PART, 'Root relationships part names no office document');
+  }
+}
+
 /**
  * Validates an xlsx upload on its bytes and returns the parts the grid reader opens:
  * the only bytes the reader ever parses. Every path either throws
  * SpreadsheetFileError or returns the parts (no fail-open). The parts are views of
  * the inflated content; the upload itself is not copied. The DOM checks run when
- * the parts are parsed (checkPart in part-checks.ts).
+ * the parts are parsed (checkPart in part-checks.ts). See openUploadWithLayout for the
+ * checks and their order.
+ *
+ * Throws SpreadsheetFileError on any violation. INTERNAL: not part of the public
+ * package surface.
+ */
+export function openUpload(file: Uint8Array, opts: GuardOpts): UploadParts {
+  return openUploadWithLayout(file, opts).parts;
+}
+
+/**
+ * openUpload, which also returns the zip layout it walked: the export patch path
+ * rewrites the archive from that layout, so a job walks it once.
  *
  * Check order:
  *   1. Compressed file size cap (no attacker-controlled metadata involved).
  *   2. Magic bytes: zip local-file-header PK\x03\x04 signature.
- *   3. streamArchive: the ONLY source of entry content. Inflates every entry from
+ *   3. readZipLayout: the only archive shape the export accepts (CORRUPT_FILE with a
+ *      zip reason otherwise), so the stream below and the directory the export reads
+ *      visit the same entries at the same offsets. Bounds-checked reads only; nothing
+ *      is inflated, so it runs before the stream.
+ *   4. assertNoUnsafePartNames on the layout's names (UNSAFE_CONTENT `unsafe-part`):
+ *      a macro project, an external link or an embedded object by its usual name.
+ *      Nothing is inflated.
+ *   5. streamArchive: the ONLY source of entry content. Inflates every entry from
  *      the local headers and keeps only the content of the entries named .xml /
- *      .xml.rels (any other entry is counted and dropped), with real-byte ceilings:
- *      entry count, all inflated bytes clamped to MAX_DECOMPRESSED_BYTES, the kept
- *      bytes to MAX_XML_TOTAL_BYTES.
- *   4. Structural check: entry list must contain [Content_Types].xml + xl/workbook.xml.
+ *      .xml.rels, and of `_rels/.rels` apart (any other entry is counted and dropped),
+ *      with real-byte ceilings: entry count, all inflated bytes clamped to
+ *      MAX_DECOMPRESSED_BYTES, the kept bytes to MAX_XML_TOTAL_BYTES, the root
+ *      relationships part to MAX_WORKBOOK_RELS_BYTES.
+ *   6. Structural check: entry list must contain [Content_Types].xml + xl/workbook.xml.
  *      Magic bytes alone only prove "is a zip"; a .docx or .jar also starts with PK.
- *   5. Central directory: listed without inflating anything, and it must name the
+ *   7. Central directory: listed without inflating anything, and it must name the
  *      same entries as the stream, with the same size for every entry. Nothing is
  *      ever unzipped from the directory, so overlapping or repeated records cannot
  *      make the gate inflate one stream many times, and the reader (which parses
  *      only these parts) cannot see entries the gate did not. The export unzips the
  *      stored upload whole, so its allocations stay within the cap.
- *   6. selectReaderParts: the parts the reader opens (the workbook rels, the
+ *   8. assertNoUnsafePackageParts on the streamed content: the content types and every
+ *      kept relationships part declare no active part (UNSAFE_CONTENT `unsafe-part`),
+ *      and no entry is spelled in another ASCII case than a part this rule walks.
+ *   9. selectReaderParts: the parts the reader opens (the workbook rels, the
  *      workbook, and the styles, shared strings and worksheet parts the rels name),
  *      each checked on its raw bytes before any DOM is built: the DOM weight of all
  *      of them together, element-name length and namespace declarations per part,
@@ -533,11 +726,15 @@ function selectReaderParts(
  *      UNSAFE_CONTENT). A part the rels name that is not in the archive is
  *      CORRUPT_FILE. Every other entry is left alone; the parts come back in the
  *      order they were picked.
+ *  10. assertSameViews: every reader part equals the directory's entry of that name
+ *      (CORRUPT_FILE `zip-view-mismatch`), each inflate bounded by the declared size.
+ *  11. assertRootRelationships: the root relationships part names xl/workbook.xml
+ *      (CORRUPT_FILE `root-rels`).
  *
  * Throws SpreadsheetFileError on any violation. INTERNAL: not part of the public
  * package surface.
  */
-export function openUpload(file: Uint8Array, opts: GuardOpts): UploadParts {
+export function openUploadWithLayout(file: Uint8Array, opts: GuardOpts): OpenedUpload {
   // 1. Compressed size cap
   if (file.length > opts.maxBytes) {
     throw new SpreadsheetFileError(
@@ -556,7 +753,13 @@ export function openUpload(file: Uint8Array, opts: GuardOpts): UploadParts {
     );
   }
 
-  // 3. Streaming inflate: the entry content. effectiveDecompCap clamps the caller's
+  // 3. The zip layout the export reads; nothing is inflated.
+  const layout = readZipLayout(file);
+
+  // 4. Active parts by their usual names, before anything is inflated.
+  assertNoUnsafePartNames(layout.entries.map((entry) => entry.name));
+
+  // 5. Streaming inflate: the entry content. effectiveDecompCap clamps the caller's
   //    override downward only.
   const effectiveDecompCap = Math.min(
     opts.maxDecompressedBytes ?? MAX_DECOMPRESSED_BYTES,
@@ -564,7 +767,7 @@ export function openUpload(file: Uint8Array, opts: GuardOpts): UploadParts {
   );
   const streamed = streamArchive(file, effectiveDecompCap);
 
-  // 4. Structural check: presence of required xlsx part names.
+  // 6. Structural check: presence of required xlsx part names.
   if (!streamed.names.has(CONTENT_TYPES_PART) || !streamed.names.has(WORKBOOK_PART)) {
     throw new SpreadsheetFileError(
       'NOT_XLSX',
@@ -573,9 +776,19 @@ export function openUpload(file: Uint8Array, opts: GuardOpts): UploadParts {
     );
   }
 
-  // 5. The central directory must agree with the stream.
+  // 7. The central directory must agree with the stream.
   assertCentralDirectoryMatches(listCentralDirectory(file), streamed);
 
-  // 6. The parts the reader opens, budgeted and content-scanned on raw bytes.
-  return selectReaderParts(streamed.contents, opts);
+  // 8. Active parts by their declared content and relationship types.
+  assertNoUnsafePackageParts(streamed.names, streamed.contents);
+
+  // 9. The parts the reader opens, budgeted and content-scanned on raw bytes.
+  const parts = selectReaderParts(streamed.contents, opts);
+
+  // 10. Each reader part is the directory's entry of that name.
+  assertSameViews(file, layout, parts);
+
+  // 11. The root relationships name the workbook the reader opens.
+  assertRootRelationships(streamed.names, streamed.rootRels);
+  return { parts, layout };
 }

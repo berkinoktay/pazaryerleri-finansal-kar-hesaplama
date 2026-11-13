@@ -65,6 +65,7 @@ export { patchWorkbook } from './patch/patch-workbook';
 export {
   MALFORMED_SHEET_REASONS,
   PATCH_LIMIT_REASONS,
+  UNSAFE_CONTENT_REASONS,
   UNSUPPORTED_ENCODING_REASONS,
   ZIP_REJECT_REASONS,
 } from './patch/reasons';

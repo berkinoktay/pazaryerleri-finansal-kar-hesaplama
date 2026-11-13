@@ -44,6 +44,10 @@ import {
 // Bytes between markups are never read: a leading byte order mark is skipped by the
 // search for the first '<' and kept in the result with the other untouched runs.
 // Each result is assembled once, from the source minus the cut elements.
+//
+// The walker (cutRootChildren) and the attribute reader (literalAttributeText) are
+// also the upload gate's: it walks the content types and every relationships part with
+// them (unsafe-parts.ts, guards.ts), so the gate and this file read those parts alike.
 
 export interface CalcChainRemoval {
   /** Zip entry names of the calcChain parts the workbook rels name, distinct. */
@@ -67,7 +71,7 @@ interface ElementCuts {
 }
 
 /** Whether the direct child of the root just scanned into `markup` is to be cut. */
-type ChildSelector = (markup: XmlMarkup, attributes: readonly number[]) => boolean;
+export type ChildSelector = (markup: XmlMarkup, attributes: readonly number[]) => boolean;
 
 const CALC_CHAIN_RELATIONSHIP_TYPES: readonly string[] = [
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain',
@@ -98,7 +102,8 @@ const FOLDED_CALC_CHAIN_RELATIONSHIP_TYPES: ReadonlySet<string> = new Set(
   CALC_CHAIN_RELATIONSHIP_TYPES.map(foldAsciiCase),
 );
 
-function packagePartError(entry: string, detail: string): SpreadsheetFileError {
+/** CORRUPT_FILE `{ reason: 'package-part', entry }`, the message `Package part <detail>`. */
+export function packagePartError(entry: string, detail: string): SpreadsheetFileError {
   return new SpreadsheetFileError('CORRUPT_FILE', `Package part ${detail}`, {
     reason: ZIP_REJECT_REASONS.PACKAGE_PART,
     entry: metaEntryName(entry),
@@ -156,6 +161,25 @@ function literalValue(
   return { start, end };
 }
 
+/**
+ * The value of the scanned tag's only attribute named exactly `name`, decoded; null
+ * when it has none. Read only from a value whose bytes are what XML reads, so the text
+ * can be compared: CORRUPT_FILE `package-part` for `entry` when the attribute repeats
+ * or its value holds a reference, a TAB, an LF or a CR.
+ */
+export function literalAttributeText(
+  bytes: Uint8Array,
+  markup: XmlMarkup,
+  attributes: readonly number[],
+  name: string,
+  entry: string,
+): string | null {
+  const attribute = onlyAttribute(bytes, markup, attributes, name, entry);
+  if (attribute === NO_ATTRIBUTE) return null;
+  const value = literalValue(bytes, attributes, attribute, entry, name);
+  return VALUE_DECODER.decode(bytes.subarray(value.start, value.end));
+}
+
 function isCalcChainType(bytes: Uint8Array, start: number, end: number): boolean {
   return CALC_CHAIN_RELATIONSHIP_TYPES.some((type) => bytesEqualAscii(bytes, start, end, type));
 }
@@ -195,9 +219,14 @@ function hasCalcChainContentType(
  * Walks every markup of `bytes` with the lexer and asks `select` about each direct
  * child of the root; a selected child is cut from its '<' to the end of the element.
  * CORRUPT_FILE `package-part` for `entry` on a lexer error, an end tag outside the
- * root, a second root element, or a root that never closes.
+ * root, a second root element, or a root that never closes. A caller that only reads
+ * the children selects none; an error `select` throws passes through unchanged.
  */
-function cutRootChildren(bytes: Uint8Array, entry: string, select: ChildSelector): ElementCuts {
+export function cutRootChildren(
+  bytes: Uint8Array,
+  entry: string,
+  select: ChildSelector,
+): ElementCuts {
   const markup = createMarkup();
   const attributes: number[] = [];
   const starts: number[] = [];

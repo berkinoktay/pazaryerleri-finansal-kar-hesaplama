@@ -449,10 +449,9 @@ describe('entryContent: bounded by the declared size', () => {
 });
 
 describe.each(TILE_KINDS)('the hidden tile: %s', (kind) => {
-  it('passes the import gate, which reads the real sheet', () => {
-    const { file, realSheet } = hiddenTileArchive(kind);
-    // Pins today's import gate, which accepts this file. Flips to toThrow when PR 3 adds the zip-layout and view checks to the import gate.
-    expect(openUpload(file, GUARD_OPTS)[SHEET_PART]).toEqual(realSheet);
+  it('is refused by the import gate', () => {
+    const { file } = hiddenTileArchive(kind);
+    expectRejected(() => openUpload(file, GUARD_OPTS), ZIP_REJECT_REASONS.LAYOUT);
   });
 
   it('is refused by the signature rule', () => {
@@ -682,10 +681,9 @@ describe('readZipLayout: the local crc and sizes of a bit-3 entry', () => {
 });
 
 describe.each(ZIP64_SKIP_COPIES)('the zip64 local skip, the copy of the sheet: %s', (copy) => {
-  it('passes the import gate, which reads the real sheet', () => {
-    const { file, realSheet } = zip64SkipArchive(copy);
-    // Pins today's import gate, which accepts this file. Flips to toThrow when PR 3 adds the zip-layout and view checks to the import gate.
-    expect(openUpload(file, GUARD_OPTS)[SHEET_PART]).toEqual(realSheet);
+  it('is refused by the import gate', () => {
+    const { file } = zip64SkipArchive(copy);
+    expectRejected(() => openUpload(file, GUARD_OPTS), ZIP_REJECT_REASONS.ZIP64);
   });
 
   it('is refused by the local zip64 rule', () => {
@@ -731,10 +729,9 @@ describe('readZipLayout: the signature rule on a real file', () => {
 });
 
 describe('the hidden entry', () => {
-  it('reads one sheet to the stream and another to the directory, and is refused', () => {
-    const { file, realSheet, otherSheet } = hiddenEntryArchive();
-    // Pins today's import gate, which accepts this file. Flips to toThrow when PR 3 adds the zip-layout and view checks to the import gate.
-    expect(openUpload(file, GUARD_OPTS)[SHEET_PART]).toEqual(realSheet);
+  it('reads one sheet to the stream and another to the directory, and is refused by the import gate', () => {
+    const { file, otherSheet } = hiddenEntryArchive();
+    expectRejected(() => openUpload(file, GUARD_OPTS), ZIP_REJECT_REASONS.LAYOUT);
     expect(unzipSync(file)[SHEET_PART]).toEqual(otherSheet);
     expectRejected(() => readZipLayout(file), ZIP_REJECT_REASONS.LAYOUT);
   });
@@ -751,10 +748,9 @@ const DIRECTORY_SIGNATURE_ARCHIVES: readonly [string, () => DirectorySignatureAr
 describe.each(DIRECTORY_SIGNATURE_ARCHIVES)(
   'a local header signature in the directory: %s',
   (_, build) => {
-    it('passes the import gate', () => {
+    it('is refused by the import gate', () => {
       const { file } = build();
-      // Pins today's import gate, which accepts this file. Flips to toThrow when PR 3 adds the zip-layout and view checks to the import gate.
-      expect(() => openUpload(file, GUARD_OPTS)).not.toThrow();
+      expectRejected(() => openUpload(file, GUARD_OPTS), ZIP_REJECT_REASONS.LAYOUT);
     });
 
     it('is refused by readZipLayout', () => {

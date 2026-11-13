@@ -26,6 +26,17 @@ section "Versioning" for details.
 
 ### Changed
 
+- **The campaign workbook upload gate checks the zip layout, the root relationships and active
+  parts** (`POST /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs|advantage-tariffs|flash-products|discount-lists|marketplace-campaigns}/import`).
+  An upload whose zip archive is not laid out the way the export reads it (a gap, an overlap or a
+  hidden entry, a local header that disagrees with its directory record, an archive comment, zip64
+  structures), or whose root relationships part (`_rels/.rels`) does not name `xl/workbook.xml` as
+  its office document, answers `422` with `{ field: 'file', code: 'CORRUPT_FILE' }`. A workbook
+  that declares a macro, an embedded object, an ActiveX control or an external link, found by its
+  content type, its relationship type or its part name, answers `422` with
+  `{ field: 'file', code: 'UNSAFE_CONTENT' }`. The six export routes read the stored file through
+  the same gate: a stored file with either condition answers `409 CONFLICT`. Valid Trendyol files
+  are unaffected.
 - **Campaign workbook import routes are guarded before the body is read**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs|advantage-tariffs|flash-products|discount-lists|marketplace-campaigns}/import`).
   Store access and the `DATA_WRITE` capability are now checked in route middleware, so a caller who
