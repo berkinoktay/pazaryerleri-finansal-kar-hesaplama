@@ -9,13 +9,21 @@ import type { CellValue, SheetData } from './grid-types';
 import { openUpload, type UploadParts } from './guards';
 import { checkPart, type CellVisitor, type GridCaps } from './part-checks';
 import type { ResolvedReadOptions, SheetSelector } from './read-options';
+import { cellKey } from './sheet-meta';
 import {
   extractRelationships,
   WORKBOOK_PART,
   WORKBOOK_RELS_PART,
   type WorkbookRelationships,
 } from './workbook-parts';
-import { corruptPart, firstChildNamed, parsePart } from './xml-dom';
+import {
+  childElements,
+  corruptPart,
+  firstChildNamed,
+  isElement,
+  localName,
+  parsePart,
+} from './xml-dom';
 
 // The grid reader: builds a worksheet's grid straight from the gate's DOM, by the
 // exact rules of the 9.2.0 reader library it replaced (reader contract). Every part
@@ -37,10 +45,55 @@ import { corruptPart, firstChildNamed, parsePart } from './xml-dom';
 // a sheet it does not find is SHEET_NOT_FOUND, raised only after every part has passed
 // checkPart and no reader rule is held; a selected sheet that cannot be read is
 // CORRUPT_FILE.
+// readSheet (the export patch path) also reports which part the grid came from, the
+// position of every cell it placed, the worksheet's merged ranges (the union of every
+// `mergeCells` block a sheet holds, directly or inside `AlternateContent`, so no block
+// can hide a range) and the range of every array or data table formula of a placed
+// cell. Collecting them never throws, so it cannot change which sheet is read.
+// readGrid does not track them: its work, allocations and errors are those of the
+// grid alone.
 
 const SHEET_DATA = 'sheetData';
+const MERGE_CELLS = 'mergeCells';
+const MERGE_CELL = 'mergeCell';
+// Markup compatibility's wrapper (`mc:AlternateContent`): Excel applies one of its branches.
+const ALTERNATE_CONTENT = 'AlternateContent';
+const REF_ATTRIBUTE = 'ref';
+const MISSING_REF = '';
+const FORMULA = 'f';
+const FORMULA_TYPE_ATTRIBUTE = 't';
+// Formula types whose `ref` spans cells that hold no `f` of their own. A shared
+// formula's other cells each carry an `f`, which the patcher sees.
+const RANGE_FORMULA_TYPES: ReadonlySet<string> = new Set(['array', 'dataTable']);
+// The part of a conversion whose sheet is not a worksheet: it has failed, so its part
+// is never reported.
+const NO_PART = '';
+// What an untracked conversion records: nothing.
+const NOT_TRACKED: readonly never[] = [];
 const READ_FAILED_MESSAGE = 'Cannot read workbook';
 const SHEET_NOT_FOUND_MESSAGE = 'Selected sheet not found';
+
+/** A sheet as readSheet reads it: the grid, and what the export patch path checks it against. */
+export interface SheetReading {
+  readonly grid: SheetData;
+  /** The worksheet part the grid was converted from (the first sheet's when the legacy fallback applied). */
+  readonly partPath: string;
+  /** That part is also the rels, the workbook, the shared strings or the styles part (crafted rels). */
+  readonly partIsBookPart: boolean;
+  /** `cellKey(row, column)` of every cell the reader placed, in document order. */
+  readonly cellKeys: readonly number[];
+  /**
+   * The raw `ref` ('' when absent) of every `mergeCell` under every direct `mergeCells`
+   * child of the part's root and under every `mergeCells` inside a direct
+   * `AlternateContent` child, any namespace, in document order.
+   */
+  readonly mergeRefs: readonly string[];
+  /**
+   * The raw `ref` ('' when absent) of every `f` (any namespace) that is a direct child
+   * of a placed cell and whose `t` is "array" or "dataTable", in document order.
+   */
+  readonly formulaRangeRefs: readonly string[];
+}
 
 /** Which sheet readGrid reads: strictly by `sheet`, else by `sheetName` (see chooseSheet). */
 interface SheetRequest {
@@ -60,11 +113,21 @@ type PartHandler = (
   relationships: WorkbookRelationships,
 ) => CellVisitor | undefined;
 
-/** A worksheet being converted: the values placed so far, and the first rule it broke. */
+/**
+ * A worksheet being converted: its part, the values placed so far, and the first rule
+ * it broke; when tracked, also the key of every placed cell, its merge refs and the
+ * formula range refs of its placed cells.
+ */
 interface Conversion {
+  readonly partPath: string;
   /** Values by 0-based row, then column; a hole is a cell that was never placed. */
   readonly placed: (CellValue[] | undefined)[];
   failure: ReaderRuleError | null;
+  /** Null when the conversion is not tracked. */
+  readonly cellKeys: number[] | null;
+  readonly mergeRefs: readonly string[];
+  /** Null when the conversion is not tracked. */
+  readonly formulaRangeRefs: string[] | null;
 }
 
 interface WorkbookInfo {
@@ -242,17 +305,90 @@ function cellContext(state: ScanState, workbook: WorkbookInfo): CellContext {
   };
 }
 
-/** A conversion of the worksheet under `root`; a root without `sheetData` breaks the reader. */
-function startConversion(root: Element): Conversion {
+/**
+ * Appends to `refs`, in document order, the raw `ref` of every `mergeCell` element
+ * inside a `mergeCells` element of the subtree of `top` (`top` included), each once;
+ * names by local name, any namespace. Iterative, so deep nesting cannot overflow the
+ * stack, and it never throws.
+ */
+function collectMergeRefs(top: Element, refs: string[]): void {
+  // Parallel stacks: an element still to visit, and whether a `mergeCells` encloses it.
+  const pending: Element[] = [top];
+  const enclosed: boolean[] = [false];
+  for (let element = pending.pop(); element !== undefined; element = pending.pop()) {
+    const inMergeCells = enclosed.pop() ?? false;
+    const name = localName(element.tagName);
+    if (inMergeCells && name === MERGE_CELL) {
+      refs.push(element.getAttribute(REF_ATTRIBUTE) ?? MISSING_REF);
+    }
+    const childrenEnclosed = inMergeCells || name === MERGE_CELLS;
+    const children = childElements(element);
+    for (let i = children.length - 1; i >= 0; i -= 1) {
+      const child = children[i];
+      if (child === undefined) continue;
+      pending.push(child);
+      enclosed.push(childrenEnclosed);
+    }
+  }
+}
+
+/**
+ * The raw `ref` of every `mergeCell` that Excel could apply, in document order: those
+ * under every direct `mergeCells` child of `root` and under every `mergeCells` inside a
+ * direct `AlternateContent` child, whatever their namespaces. Taking the union, a
+ * decoy block or a second block cannot hide a range from the merged-target check:
+ * more targets are refused, none is missed.
+ */
+function mergeRefsOf(root: Element): string[] {
+  const refs: string[] = [];
+  for (const child of childElements(root)) {
+    const name = localName(child.tagName);
+    if (name === MERGE_CELLS || name === ALTERNATE_CONTENT) collectMergeRefs(child, refs);
+  }
+  return refs;
+}
+
+/**
+ * Appends to `refs`, in document order, the raw `ref` ('' when absent) of every
+ * direct child of `cell` whose local name is `f` and whose `t` is an array or data
+ * table type, any namespace. No list of children is built, and it never throws.
+ */
+function collectFormulaRangeRefs(cell: Element, refs: string[]): void {
+  for (const child of cell.childNodes) {
+    if (!isElement(child) || localName(child.tagName) !== FORMULA) continue;
+    const type = child.getAttribute(FORMULA_TYPE_ATTRIBUTE);
+    if (type === null || !RANGE_FORMULA_TYPES.has(type)) continue;
+    refs.push(child.getAttribute(REF_ATTRIBUTE) ?? MISSING_REF);
+  }
+}
+
+/**
+ * A conversion of the worksheet part `partPath` under `root`; a root without
+ * `sheetData` breaks the reader. Only a tracked conversion reads the merge refs.
+ */
+function startConversion(partPath: string, root: Element, track: boolean): Conversion {
   const failure =
     firstChildNamed(root, SHEET_DATA) === null
       ? new ReaderRuleError('Worksheet has no sheetData')
       : null;
-  return { placed: [], failure };
+  return {
+    partPath,
+    placed: [],
+    failure,
+    cellKeys: track ? [] : null,
+    mergeRefs: track ? mergeRefsOf(root) : NOT_TRACKED,
+    formulaRangeRefs: track ? [] : null,
+  };
 }
 
-/** Places each checked cell's value; after the first broken rule, values are not computed. */
+/**
+ * Places each checked cell's value, and records its key and its formula range refs
+ * when the conversion is tracked; after the first broken rule, values are not
+ * computed.
+ */
 function collectCells(conversion: Conversion, context: CellContext): CellVisitor {
+  const keys = conversion.cellKeys;
+  const formulaRanges = conversion.formulaRangeRefs;
   return (cell, _row, position) => {
     if (conversion.failure !== null) return;
     let value: CellValue;
@@ -265,6 +401,8 @@ function collectCells(conversion: Conversion, context: CellContext): CellVisitor
     }
     const line = (conversion.placed[position.row - 1] ??= []);
     line[position.col - 1] = value;
+    if (keys !== null) keys.push(cellKey(position.row, position.col));
+    if (formulaRanges !== null) collectFormulaRangeRefs(cell, formulaRanges);
   };
 }
 
@@ -275,13 +413,21 @@ function convertSheet(
   relationships: WorkbookRelationships,
   sheet: SheetEntry | undefined,
   context: CellContext,
+  track: boolean,
 ): Conversion {
   const path = worksheetPath(relationships, sheet);
   if (path === null) {
-    return { placed: [], failure: new ReaderRuleError('Sheet is not a worksheet') };
+    return {
+      partPath: NO_PART,
+      placed: [],
+      failure: new ReaderRuleError('Sheet is not a worksheet'),
+      cellKeys: null,
+      mergeRefs: NOT_TRACKED,
+      formulaRangeRefs: null,
+    };
   }
   const root = partRoot(parts, path);
-  const conversion = startConversion(root);
+  const conversion = startConversion(path, root, track);
   checkPart(path, root, caps, collectCells(conversion, context));
   return conversion;
 }
@@ -324,8 +470,12 @@ function sheetNotFound(by: SheetSelector['by']): SpreadsheetFileError {
   return new SpreadsheetFileError('SHEET_NOT_FOUND', SHEET_NOT_FOUND_MESSAGE, { by });
 }
 
-/** The body of readGrid; see readGrid. */
-function readGridParts(parts: UploadParts, options: GridReadOptions): SheetData {
+/**
+ * The body of readGrid and readSheet; see readGrid. With `track`, the conversions
+ * record their cell keys, merge refs and formula range refs; without it, the reading
+ * carries none.
+ */
+function readGridParts(parts: UploadParts, options: GridReadOptions, track: boolean): SheetReading {
   const { caps } = options;
   const state: ScanState = {
     held: null,
@@ -343,7 +493,7 @@ function readGridParts(parts: UploadParts, options: GridReadOptions): SheetData 
     // final here. A worksheet that is also a book part is converted after the scan.
     if (state.held !== null || workbook === null) return undefined;
     if (path !== state.targetPath || isBookPath(rels, path)) return undefined;
-    const conversion = startConversion(root);
+    const conversion = startConversion(path, root, track);
     state.conversion = conversion;
     if (conversion.failure !== null) return undefined;
     return collectCells(conversion, cellContext(state, workbook));
@@ -357,12 +507,34 @@ function readGridParts(parts: UploadParts, options: GridReadOptions): SheetData 
   if (choice.missing !== null) throw sheetNotFound(choice.missing);
   const context = cellContext(state, workbook);
   let conversion =
-    state.conversion ?? convertSheet(parts, caps, relationships, choice.sheet, context);
+    state.conversion ?? convertSheet(parts, caps, relationships, choice.sheet, context, track);
   if (conversion.failure !== null && choice.fallback) {
-    conversion = convertSheet(parts, caps, relationships, workbook.sheets[0], context);
+    conversion = convertSheet(parts, caps, relationships, workbook.sheets[0], context, track);
   }
   if (conversion.failure !== null) throw cannotRead(conversion.failure);
-  return assembleGrid(conversion.placed);
+  return {
+    grid: assembleGrid(conversion.placed),
+    partPath: conversion.partPath,
+    partIsBookPart: isBookPath(relationships, conversion.partPath),
+    cellKeys: conversion.cellKeys ?? NOT_TRACKED,
+    mergeRefs: conversion.mergeRefs,
+    formulaRangeRefs: conversion.formulaRangeRefs ?? NOT_TRACKED,
+  };
+}
+
+/** readGridParts, with an exception nothing here anticipated turned into CORRUPT_FILE. */
+function readParts(parts: UploadParts, options: GridReadOptions, track: boolean): SheetReading {
+  try {
+    return readGridParts(parts, options, track);
+  } catch (e) {
+    if (e instanceof SpreadsheetFileError) throw e;
+    // The old pipeline turned any failure of its reader into CORRUPT_FILE. An
+    // exception nothing here anticipated (a TypeError, a RangeError from deep nesting)
+    // means this file cannot be read; it must not surface as a 500.
+    throw new SpreadsheetFileError('CORRUPT_FILE', READ_FAILED_MESSAGE, {
+      cause: String(e).slice(0, MAX_ERROR_CAUSE_LENGTH),
+    });
+  }
 }
 
 /**
@@ -373,17 +545,16 @@ function readGridParts(parts: UploadParts, options: GridReadOptions): SheetData 
  * selector matches no sheet.
  */
 export function readGrid(parts: UploadParts, options: GridReadOptions): SheetData {
-  try {
-    return readGridParts(parts, options);
-  } catch (e) {
-    if (e instanceof SpreadsheetFileError) throw e;
-    // The old pipeline turned any failure of its reader into CORRUPT_FILE. An
-    // exception nothing here anticipated (a TypeError, a RangeError from deep nesting)
-    // means this file cannot be read; it must not surface as a 500.
-    throw new SpreadsheetFileError('CORRUPT_FILE', READ_FAILED_MESSAGE, {
-      cause: String(e).slice(0, MAX_ERROR_CAUSE_LENGTH),
-    });
-  }
+  return readParts(parts, options, false).grid;
+}
+
+/**
+ * readGrid's reading of the same sheet, with the same errors, plus the part it came
+ * from, the key of every cell it placed, its merge refs and its formula range refs
+ * (see SheetReading).
+ */
+export function readSheet(parts: UploadParts, options: GridReadOptions): SheetReading {
+  return readParts(parts, options, true);
 }
 
 /**

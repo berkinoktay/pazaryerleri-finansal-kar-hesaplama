@@ -63,18 +63,19 @@ export const MAX_XML_DOM_WEIGHT = 5_000_000;
 // 0.25 s instead of 0.09 s. Excel repeats a declaration on every
 // x14:conditionalFormatting, so a real worksheet can carry 70 or more.
 export const MAX_XMLNS_DECLARATIONS_PER_PART = 256;
-// Workbook parses in flight per process (the running one plus those waiting), beyond
-// which a new call is refused with ENGINE_BUSY instead of queueing. Parses run one at
-// a time, so the process peak memory stays at about one parse whatever the limit;
-// the limit bounds the wait instead: one tenant's burst of large uploads cannot keep
-// every other tenant's import or export waiting for minutes.
+// Workbook jobs in flight per process (the running one plus those waiting), beyond
+// which a new call is refused with ENGINE_BUSY instead of queueing. Reads
+// (readWorkbookGrid) and patches (patchWorkbook) share one queue, so this bounds them
+// together. Jobs run one at a time, so the process peak memory stays at about one
+// parse whatever the limit; the limit bounds the wait instead: one tenant's burst of
+// large uploads cannot keep every other tenant's import or export waiting for minutes.
 export const MAX_QUEUED_PARSES = 8;
-// How long a parse may wait in the queue for its turn; beyond it the call gives up
-// with ENGINE_BUSY and its slot is freed. With up to MAX_QUEUED_PARSES calls ahead,
-// the queue alone could otherwise hold a caller for several parse durations.
+// How long a read or a patch may wait in the shared queue for its turn; beyond it the
+// call gives up with ENGINE_BUSY and its slot is freed. With up to MAX_QUEUED_PARSES
+// calls ahead, the queue alone could otherwise hold a caller for several job durations.
 export const PARSE_QUEUE_MAX_WAIT_MS = 20_000;
-// Every parse runs in one long-lived worker thread with these limits (see
-// worker/grid-worker-host.ts). A parse that exhausts the heap or runs past the time
+// Every read and every patch runs in one long-lived worker thread with these limits
+// (see worker/grid-worker-host.ts). A job that exhausts the heap or runs past the time
 // limit kills only the worker. The limits are a backstop, not the defence: one
 // allocation larger than the remaining heap headroom plus about 16 MB still aborts the
 // whole process, and memory outside the V8 heap (upload bytes, decoded text) is not
@@ -92,6 +93,34 @@ export const MAX_GRID_TEXT_LENGTH = 16 * 1024 * 1024;
 export const MAX_FORMAT_CODE_LENGTH = 255;
 // SpreadsheetFileError meta `cause` is truncated: library messages may quote the input.
 export const MAX_ERROR_CAUSE_LENGTH = 200;
+
+// Export patch path (patchWorkbook). Every request is validated on the main thread
+// before it is queued, then structured-cloned into the parse worker.
+// Output files of one job: one per period plus the whole-week file; a week has at
+// most 7 periods.
+export const MAX_PATCH_OUTPUTS = 8;
+// Cell patches of all outputs of one job together; the request is cloned into the
+// worker.
+export const MAX_PATCH_CELLS = 500_000;
+// Anchor cells of one job: a few per data row; ABSOLUTE_MAX_ROWS is 20 000.
+export const MAX_PATCH_ANCHORS = 100_000;
+// Excel's cell text limit (UTF-16 code units). Also caps an anchor's `expected`.
+export const MAX_PATCH_TEXT_LENGTH = 32_767;
+// Characters of a number value.
+export const MAX_PATCH_NUMBER_LENGTH = 64;
+// UTF-16 code units of every patch value and every anchor `expected` of one request
+// together (the size of MAX_GRID_TEXT_LENGTH). A structured clone does not share
+// repeated strings; without this cap the per-value and per-count caps admit about
+// 16 G units.
+export const MAX_PATCH_REQUEST_TEXT_LENGTH = 16 * 1024 * 1024;
+// Bytes of all changed outputs of one job together: ArrayBuffer memory, which the
+// worker's resource limits do not count.
+export const MAX_PATCH_OUTPUT_TOTAL_BYTES = 128 * 1024 * 1024;
+// The patcher's own limits and constants live in patch/limits.ts, outside the
+// package's exports.
+// Multiplier of the row in cellKey; above ABSOLUTE_MAX_COLS, so every 1-based
+// (row, column) pair maps to a distinct number that sorts in row-major order.
+export const CELL_KEY_BASE = 1024;
 
 // 'PK\x03\x04' — zip local-file-header signature (xlsx is a zip).
 export const XLSX_MAGIC: readonly number[] = [0x50, 0x4b, 0x03, 0x04];

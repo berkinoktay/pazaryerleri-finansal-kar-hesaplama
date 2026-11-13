@@ -2,18 +2,23 @@ import { Worker } from 'node:worker_threads';
 
 import { SpreadsheetFileError } from '../errors';
 import type { SheetData } from '../grid-types';
+import type { ResolvedPatchRequest } from '../patch/patch-request';
 import type { ResolvedReadOptions } from '../read-options';
 import { isGridWorkerResponse, type GridWorkerRequest, type GridWorkerResponse } from './protocol';
 
-// Runs readUploadGrid in one long-lived worker thread with a heap limit and a time
-// limit, so a parse that exhausts either kills only the worker, not the API:
+// Runs readUploadGrid (`run`) and patchUpload (`patch`) in one long-lived worker
+// thread with a heap limit and a time limit, so a job that exhausts either kills only
+// the worker, not the API:
 //   - the worker is spawned on the first run, through grid-worker-entry.mjs (which
 //     registers tsx), with an empty execArgv so tests and production load it alike;
 //   - it is ref()ed while a job is in flight and unref()ed when idle, so it never
 //     holds the process open;
 //   - after a kill or a crash it is discarded, and the next run spawns a fresh one;
 //   - every job settles exactly once; a settlement that ends the worker waits for
-//     terminate(), so the next spawn never overlaps a dying heap.
+//     terminate(), so the next spawn never overlaps a dying heap;
+//   - one job at a time, whatever its kind; an answer of the wrong kind, a patch
+//     answer whose file count differs from the outputs sent, or one whose files repeat
+//     a buffer or hold a resizable one (protocol.ts), is an invalid message.
 // The limits are a backstop: one allocation larger than the remaining heap headroom
 // plus about 16 MB still aborts the whole process, and memory outside the V8 heap is
 // not counted, so the gate's caps stay the primary defence (constants.ts).
@@ -36,6 +41,14 @@ export interface GridWorkerHost {
    * time limit kills it (see workerLimitReason). One job at a time.
    */
   run(file: Uint8Array, options: ResolvedReadOptions): Promise<SheetData>;
+  /**
+   * Patches `file` in the worker; null marks an output that changes nothing. Same
+   * limits, kills and one-job rule as `run`.
+   */
+  patch(
+    file: Uint8Array,
+    request: ResolvedPatchRequest,
+  ): Promise<(Uint8Array<ArrayBuffer> | null)[]>;
   /** Terminates the worker, if any, and waits until it is gone. */
   close(): Promise<void>;
 }
@@ -58,24 +71,70 @@ export function workerLimitReason(error: SpreadsheetFileError): WorkerLimitReaso
   return null;
 }
 
+/** The success answer a job waits for: a grid, or one file per output it sent. */
+export type ExpectedAnswer =
+  | { readonly kind: 'grid' }
+  | { readonly kind: 'patched'; readonly outputs: number };
+
+/**
+ * Whether `response` is an answer the job may settle with: an error answer always, a
+ * success only of the expected kind and size.
+ */
+export function answersJob(expected: ExpectedAnswer, response: GridWorkerResponse): boolean {
+  switch (response.kind) {
+    case 'file-error':
+    case 'failure':
+      return true;
+    case 'grid':
+      return expected.kind === 'grid';
+    case 'patched':
+      return expected.kind === 'patched' && response.files.length === expected.outputs;
+    default: {
+      const _exhaustive: never = response;
+      throw new Error(`Unhandled grid worker response: ${String(_exhaustive)}`);
+    }
+  }
+}
+
+type SuccessAnswer = Extract<GridWorkerResponse, { readonly kind: 'grid' | 'patched' }>;
+
 interface Job {
   readonly id: number;
   readonly worker: Worker;
-  readonly resolve: (grid: SheetData) => void;
+  readonly expected: ExpectedAnswer;
+  readonly resolve: (answer: SuccessAnswer) => void;
   readonly reject: (error: Error) => void;
   readonly timer: ReturnType<typeof setTimeout>;
   /** Set once a settlement has started; every later event is ignored. */
   claimed: boolean;
 }
 
+const INVALID_MESSAGE = 'Workbook parse worker sent an invalid message';
+
 function isOutOfMemory(error: Error): boolean {
   return 'code' in error && error.code === OUT_OF_MEMORY_CODE;
+}
+
+// The job only settles with an answer answersJob accepted, so the kind always matches
+// in the two functions below; the throw is not reached.
+
+function gridOf(answer: SuccessAnswer): SheetData {
+  if (answer.kind === 'grid') return answer.grid;
+  throw new Error('A grid job settled with patched files');
+}
+
+function filesOf(answer: SuccessAnswer): (Uint8Array<ArrayBuffer> | null)[] {
+  if (answer.kind === 'patched') {
+    return answer.files.map((file) => (file === null ? null : new Uint8Array(file)));
+  }
+  throw new Error('A patch job settled with a grid');
 }
 
 function settleWithResponse(job: Job, response: GridWorkerResponse): void {
   switch (response.kind) {
     case 'grid':
-      job.resolve(response.grid);
+    case 'patched':
+      job.resolve(response);
       return;
     case 'file-error':
       job.reject(new SpreadsheetFileError(response.code, response.message, { ...response.meta }));
@@ -130,8 +189,12 @@ export function createGridWorkerHost(limits: GridWorkerLimits): GridWorkerHost {
   function onMessage(source: Worker, message: unknown): void {
     const claimed = claim(source);
     if (claimed === null) return;
-    if (!isGridWorkerResponse(message) || message.id !== claimed.id) {
-      killThenReject(source, claimed, new Error('Workbook parse worker sent an invalid message'));
+    if (
+      !isGridWorkerResponse(message) ||
+      message.id !== claimed.id ||
+      !answersJob(claimed.expected, message)
+    ) {
+      killThenReject(source, claimed, new Error(INVALID_MESSAGE));
       return;
     }
     source.unref();
@@ -141,7 +204,7 @@ export function createGridWorkerHost(limits: GridWorkerLimits): GridWorkerHost {
   function onMessageError(source: Worker): void {
     const claimed = claim(source);
     if (claimed === null) return;
-    killThenReject(source, claimed, new Error('Workbook parse worker sent an invalid message'));
+    killThenReject(source, claimed, new Error(INVALID_MESSAGE));
   }
 
   function onError(source: Worker, error: Error): void {
@@ -194,20 +257,51 @@ export function createGridWorkerHost(limits: GridWorkerLimits): GridWorkerHost {
     return created;
   }
 
+  /**
+   * Posts the request `requestOf` builds around a copy of `file` and arms the timer.
+   * Throws ONE_JOB_AT_A_TIME while a job of either kind is in flight.
+   */
+  function start(
+    file: Uint8Array,
+    expected: ExpectedAnswer,
+    requestOf: (id: number, bytes: ArrayBuffer) => GridWorkerRequest,
+  ): Promise<SuccessAnswer> {
+    if (job !== null) throw new Error(ONE_JOB_AT_A_TIME);
+    const target = worker ?? spawn();
+    worker = target;
+    // A copy is transferred, never the caller's buffer: callers reuse it after the
+    // job, and a transferred buffer is detached on the sending side.
+    const copy = new Uint8Array(file.byteLength);
+    copy.set(file);
+    const id = nextId;
+    nextId += 1;
+    const request = requestOf(id, copy.buffer);
+    return new Promise<SuccessAnswer>((resolve, reject) => {
+      target.ref();
+      try {
+        target.postMessage(request, [copy.buffer]);
+      } catch (e) {
+        target.unref();
+        throw e;
+      }
+      job = {
+        id,
+        worker: target,
+        expected,
+        resolve,
+        reject,
+        timer: setTimeout(() => onTimeout(target), limits.timeoutMs),
+        claimed: false,
+      };
+    });
+  }
+
   return {
     async run(file: Uint8Array, options: ResolvedReadOptions): Promise<SheetData> {
-      if (job !== null) throw new Error(ONE_JOB_AT_A_TIME);
-      const target = worker ?? spawn();
-      worker = target;
-      // A copy is transferred, never the caller's buffer: callers reuse it after the
-      // parse, and a transferred buffer is detached on the sending side.
-      const copy = new Uint8Array(file.byteLength);
-      copy.set(file);
-      const id = nextId;
-      nextId += 1;
-      const request: GridWorkerRequest = {
+      const answer = await start(file, { kind: 'grid' }, (id, bytes) => ({
         id,
-        bytes: copy.buffer,
+        kind: 'grid',
+        bytes,
         options: {
           sheetName: options.sheetName,
           sheet: options.sheet,
@@ -215,24 +309,22 @@ export function createGridWorkerHost(limits: GridWorkerLimits): GridWorkerHost {
           colCap: options.colCap,
           maxBytes: options.maxBytes,
         },
-      };
-      return new Promise<SheetData>((resolve, reject) => {
-        target.ref();
-        try {
-          target.postMessage(request, [copy.buffer]);
-        } catch (e) {
-          target.unref();
-          throw e;
-        }
-        job = {
-          id,
-          worker: target,
-          resolve,
-          reject,
-          timer: setTimeout(() => onTimeout(target), limits.timeoutMs),
-          claimed: false,
-        };
-      });
+      }));
+      return gridOf(answer);
+    },
+
+    async patch(
+      file: Uint8Array,
+      request: ResolvedPatchRequest,
+    ): Promise<(Uint8Array<ArrayBuffer> | null)[]> {
+      const expected: ExpectedAnswer = { kind: 'patched', outputs: request.outputs.length };
+      const answer = await start(file, expected, (id, bytes) => ({
+        id,
+        kind: 'patch',
+        bytes,
+        request,
+      }));
+      return filesOf(answer);
     },
 
     async close(): Promise<void> {

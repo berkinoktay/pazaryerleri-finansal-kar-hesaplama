@@ -1,5 +1,7 @@
 import { zipSync, strToU8 } from 'fflate';
 
+import { columnLetters } from '../sheet-meta';
+
 // Test-only builder for hand-shaped .xlsx packages. Engine tests use it to craft
 // the exact XML a hostile or unusual workbook carries (namespace prefixes,
 // relocated worksheet parts, bogus <dimension> refs) without a binary fixture.
@@ -19,9 +21,6 @@ const WORKBOOK_CONTENT_TYPE =
 const WORKSHEET_CONTENT_TYPE =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml';
 
-const ALPHABET_SIZE = 26;
-const CHAR_CODE_BEFORE_A = 64; // 'A' is 65, so column 1 maps to 'A'
-
 export interface XlsxFixtureSheet {
   readonly name: string;
   readonly xml: string;
@@ -40,18 +39,6 @@ function escapeXml(text: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
-}
-
-/** 1-based column number to Excel column letters (1 -> A, 27 -> AA). */
-function columnLetters(column: number): string {
-  let out = '';
-  let rest = column;
-  while (rest > 0) {
-    const remainder = (rest - 1) % ALPHABET_SIZE;
-    out = String.fromCharCode(CHAR_CODE_BEFORE_A + 1 + remainder) + out;
-    rest = Math.floor((rest - 1) / ALPHABET_SIZE);
-  }
-  return out;
 }
 
 function cellXml(p: string, ref: string, value: FixtureCell): string {

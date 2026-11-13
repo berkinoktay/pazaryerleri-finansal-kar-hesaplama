@@ -37,7 +37,7 @@ function tsxCliPath(): string {
 
 describe('the grid worker under the tsx CLI', () => {
   it(
-    'reads a fixture, survives time and memory kills and reads it again on a respawned worker',
+    'reads and patches a fixture, survives time and memory kills and reads it again on a respawned worker',
     () => {
       const pin = FIXTURE_PINS.find((p) => p.file === COMMISSION_FIXTURE);
       if (pin === undefined) throw new Error(`no pin for ${COMMISSION_FIXTURE}`);
@@ -50,6 +50,7 @@ describe('the grid worker under the tsx CLI', () => {
       expect(result.status, result.stderr).toBe(0);
       expect(result.stdout.trim().split('\n')).toEqual([
         `grid ${pin.gridSha256}`,
+        'patch 123.45',
         ...Array.from({ length: KILLS }, () => 'kill worker-timeout'),
         'kill worker-memory',
         `grid ${pin.gridSha256}`,

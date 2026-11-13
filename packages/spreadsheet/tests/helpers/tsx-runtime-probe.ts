@@ -4,15 +4,18 @@ import {
 } from '../../src/constants';
 import { SpreadsheetFileError } from '../../src/errors';
 import { readWorkbookGrid } from '../../src/parse';
+import { patchWorkbook } from '../../src/patch/patch-workbook';
 import { resolveReadOptions } from '../../src/read-options';
 import { buildXlsxFixture, worksheetXml } from '../../src/testing/build-xlsx';
 import { createGridWorkerHost, workerLimitReason } from '../../src/worker/grid-worker-host';
 import { FIXTURE_PINS, gridSha256, readFixture } from './fixture-pins';
+import { num } from './patch-helpers';
 import { numberRows } from './workbooks';
 
 // Run by src/worker/tsx-runtime.test.ts under the real tsx CLI, the way production
 // starts the API (`tsx src/index.ts`), outside vitest. Prints one line per step:
 //   grid <sha256>   the commission fixture read through readWorkbookGrid (default host)
+//   patch <value>   AB2 of the fixture patched through patchWorkbook, then read back
 //   kill <reason>   a run on a host with a 1 ms time limit; each kill respawns its worker
 //   kill <reason>   a run on a host with a 128 MB heap, killed for memory
 //   grid <sha256>   the fixture read on that SAME host: its worker really respawned
@@ -28,6 +31,9 @@ const MEMORY_KILL_TIMEOUT_MS = 120_000;
 const SMALL_YOUNG_GENERATION_MB = 32;
 const OOM_ROWS = 5_000;
 const OOM_COLUMNS = 40;
+// Column AB (0-based) and the number the probe writes into its second row.
+const PATCHED_COLUMN = 27;
+const PATCHED_VALUE = '123.45';
 
 const pin = FIXTURE_PINS.find((p) => p.file === COMMISSION_FIXTURE);
 if (pin === undefined) throw new Error(`no pin for ${COMMISSION_FIXTURE}`);
@@ -40,6 +46,14 @@ function outcomeOf(e: unknown): string {
 }
 
 process.stdout.write(`grid ${gridSha256(await readWorkbookGrid(file, readOptions))}\n`);
+
+const [patched] = await patchWorkbook(file, {
+  ...readOptions,
+  outputs: [[num(2, PATCHED_COLUMN, PATCHED_VALUE)]],
+});
+if (patched === undefined) throw new Error('patchWorkbook answered no output for one patch list');
+const patchedGrid = await readWorkbookGrid(patched, readOptions);
+process.stdout.write(`patch ${String(patchedGrid[1]?.[PATCHED_COLUMN])}\n`);
 
 const killer = createGridWorkerHost({
   maxOldGenerationSizeMb: GRID_WORKER_MAX_OLD_GENERATION_MB,

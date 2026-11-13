@@ -6,8 +6,9 @@ import { DEFAULT_COL_CAP, DEFAULT_MAX_BYTES, DEFAULT_ROW_CAP } from './constants
 import { SpreadsheetFileError, type SpreadsheetFileErrorCode } from './errors';
 import type { SheetData } from './grid-types';
 import { openUpload, type UploadParts } from './guards';
-import { checkUploadParts, readGrid } from './read-grid';
+import { checkUploadParts, readGrid, readSheet } from './read-grid';
 import type { SheetSelector } from './read-options';
+import { cellKey, columnLetters } from './sheet-meta';
 import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
 import { expectWithinBudget } from '../tests/helpers/timing';
 
@@ -42,8 +43,6 @@ const LINEAR_TRIM_BUDGET_MS = 20_000;
 const LONG_FORMAT_CODE = 100_000;
 const XFS_POINTING_AT_FORMAT = 2_000;
 const GATE_FIRST_BUDGET_MS = 1_000;
-const ALPHABET_SIZE = 26;
-const CHAR_CODE_A = 65;
 
 function worksheet(rows: string): string {
   return `${XML_DECLARATION}<worksheet xmlns="${SPREADSHEET_NS}"><sheetData>${rows}</sheetData></worksheet>`;
@@ -62,15 +61,6 @@ function workbookOf(sheets: string): string {
     `${XML_DECLARATION}<workbook xmlns="${SPREADSHEET_NS}" xmlns:r="${OFFICE_RELATIONSHIPS_NS}">` +
     `<sheets>${sheets}</sheets></workbook>`
   );
-}
-
-/** 1-based column number to Excel column letters (1 -> A, 27 -> AA). */
-function columnLetters(column: number): string {
-  let out = '';
-  for (let rest = column; rest > 0; rest = Math.floor((rest - 1) / ALPHABET_SIZE)) {
-    out = String.fromCharCode(CHAR_CODE_A + ((rest - 1) % ALPHABET_SIZE)) + out;
-  }
-  return out;
 }
 
 function errorCodeOf(run: () => unknown): SpreadsheetFileErrorCode | null {
@@ -337,6 +327,216 @@ describe('readGrid: unexpected exceptions', () => {
     });
 
     expect(errorCodeOf(() => readGrid(parts, { caps: CAPS }))).toBe('CORRUPT_FILE');
+  });
+});
+
+describe('readSheet', () => {
+  const SECOND_SHEET_PART = 'xl/worksheets/sheet2.xml';
+  const SHEET_DATA_END = '</sheetData>';
+  const MARKUP_COMPATIBILITY_NS = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+  const ONE_CELL_ROW = '<row r="1"><c r="A1"><v>1</v></c></row>';
+  // Two cells, then a cell the reader rejects (a boolean that is not 0 or 1).
+  const ROW_BROKEN_AFTER_TWO_CELLS =
+    '<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c><c r="C1" t="b"><v>yes</v></c></row>';
+
+  /** A worksheet whose root holds `sheetData` with `rows`, then `afterSheetData`. */
+  function worksheetWith(rows: string, afterSheetData: string): string {
+    return `${XML_DECLARATION}<worksheet xmlns="${SPREADSHEET_NS}"><sheetData>${rows}</sheetData>${afterSheetData}</worksheet>`;
+  }
+
+  it('reports the part of the sheet an index selects', () => {
+    const file = buildXlsxFixture([
+      { name: 'A', xml: worksheetXml([['a']]) },
+      { name: 'B', xml: worksheetXml([['b']]) },
+    ]);
+
+    const reading = readSheet(openUpload(file, OPTS), {
+      sheet: { by: 'index', index: 1 },
+      caps: CAPS,
+    });
+
+    expect(reading.grid).toEqual([['b']]);
+    expect(reading.partPath).toBe(SECOND_SHEET_PART);
+    expect(reading.partIsBookPart).toBe(false);
+  });
+
+  it('reports the first sheet for a legacy sheetName no sheet has', () => {
+    const file = buildXlsxFixture([
+      { name: 'A', xml: worksheetXml([['a']]) },
+      { name: 'B', xml: worksheetXml([['b']]) },
+    ]);
+
+    const reading = readSheet(openUpload(file, OPTS), { sheetName: 'Missing', caps: CAPS });
+
+    expect(reading.grid).toEqual([['a']]);
+    expect(reading.partPath).toBe(SHEET_PART);
+  });
+
+  it('reports the first sheet, its own cells and merges when a named sheet breaks a reader rule', () => {
+    const first = worksheetXml([['a'], ['b']]).replace(
+      SHEET_DATA_END,
+      `${SHEET_DATA_END}<mergeCells><mergeCell ref="A5:B6"/></mergeCells>`,
+    );
+    const broken = worksheetWith(
+      ROW_BROKEN_AFTER_TWO_CELLS,
+      '<mergeCells><mergeCell ref="C1:D2"/></mergeCells>',
+    );
+    const file = buildXlsxFixture([
+      { name: 'A', xml: first },
+      { name: 'B', xml: broken },
+    ]);
+
+    const reading = readSheet(openUpload(file, OPTS), { sheetName: 'B', caps: CAPS });
+
+    expect(reading.grid).toEqual([['a'], ['b']]);
+    expect(reading.partPath).toBe(SHEET_PART);
+    expect(reading.cellKeys).toEqual([cellKey(1, 1), cellKey(2, 1)]);
+    expect(reading.mergeRefs).toEqual(['A5:B6']);
+  });
+
+  it('lists the key of every cell the reader placed, in document order', () => {
+    const file = buildXlsxFixture([{ name: 'S', xml: worksheetXml([['a', null, 'c'], [1]]) }]);
+
+    const reading = readSheet(openUpload(file, OPTS), { caps: CAPS });
+
+    expect(reading.cellKeys).toEqual([1025, 1027, 2049]);
+  });
+
+  it('lists the merge refs, and reads the same grid as readGrid', () => {
+    const xml = worksheetWith(
+      '<row r="2"><c r="B2"><v>1</v></c></row>',
+      '<mergeCells count="1"><mergeCell ref="B2:C3"/></mergeCells>',
+    );
+    const file = buildXlsxFixture([{ name: 'S', xml }]);
+
+    const reading = readSheet(openUpload(file, OPTS), { caps: CAPS });
+
+    expect(reading.mergeRefs).toEqual(['B2:C3']);
+    expect(readGrid(openUpload(file, OPTS), { caps: CAPS })).toEqual(reading.grid);
+  });
+
+  it('takes merge refs from every mergeCells block, a missing ref as empty', () => {
+    const xml = worksheetWith(
+      ONE_CELL_ROW,
+      '<mergeCells><mergeCell ref="B2:C3"/><mergeCell/></mergeCells>' +
+        '<mergeCells><mergeCell ref="E5:F6"/></mergeCells>',
+    );
+    const file = buildXlsxFixture([{ name: 'S', xml }]);
+
+    expect(readSheet(openUpload(file, OPTS), { caps: CAPS }).mergeRefs).toEqual([
+      'B2:C3',
+      '',
+      'E5:F6',
+    ]);
+  });
+
+  it('keeps the real merge refs after a decoy block in a foreign namespace', () => {
+    const xml = worksheetWith(
+      ONE_CELL_ROW,
+      '<d:mergeCells xmlns:d="urn:decoy"><d:mergeCell ref="Z99"/></d:mergeCells>' +
+        '<mergeCells><mergeCell ref="B2:C3"/></mergeCells>',
+    );
+    const file = buildXlsxFixture([{ name: 'S', xml }]);
+
+    const reading = readSheet(openUpload(file, OPTS), { caps: CAPS });
+
+    expect(reading.mergeRefs).toEqual(['Z99', 'B2:C3']);
+    expect(readGrid(openUpload(file, OPTS), { caps: CAPS })).toEqual(reading.grid);
+  });
+
+  it('takes merge refs from both branches of an AlternateContent block', () => {
+    const xml = worksheetWith(
+      ONE_CELL_ROW,
+      `<mc:AlternateContent xmlns:mc="${MARKUP_COMPATIBILITY_NS}">` +
+        '<mc:Choice Requires="x14"><mergeCells><mergeCell ref="B2:C3"/></mergeCells></mc:Choice>' +
+        '<mc:Fallback><mergeCells><mergeCell ref="E5:F6"/></mergeCells></mc:Fallback>' +
+        '</mc:AlternateContent>',
+    );
+    const file = buildXlsxFixture([{ name: 'S', xml }]);
+
+    expect(readSheet(openUpload(file, OPTS), { caps: CAPS }).mergeRefs).toEqual(['B2:C3', 'E5:F6']);
+  });
+
+  it('lists no merge refs for a sheet without mergeCells', () => {
+    const file = buildXlsxFixture([{ name: 'S', xml: worksheetXml([['a']]) }]);
+
+    expect(readSheet(openUpload(file, OPTS), { caps: CAPS }).mergeRefs).toEqual([]);
+  });
+
+  it('lists the ref of every array and data table formula, not of plain or shared ones', () => {
+    const xml = worksheetWith(
+      '<row r="1">' +
+        '<c r="A1"><f>1+1</f><v>2</v></c>' +
+        '<c r="B1"><f t="shared" ref="B1:B2" si="0">A1</f><v>2</v></c>' +
+        '<c r="C1"><f t="array" ref="C1:C2">A1:A2*2</f><v>4</v></c>' +
+        '<c r="D1"><f t="dataTable" ref="D1:E2" dt2D="0" dtr="0" r1="A1"/><v>0</v></c>' +
+        '<c r="F1"><f t="array">A1</f><v>2</v></c>' +
+        '</row>' +
+        '<row r="2"><c r="B2"><f t="shared" si="0"/><v>3</v></c><c r="C2"><v>5</v></c></row>',
+      '',
+    );
+    const file = buildXlsxFixture([{ name: 'S', xml }]);
+
+    const reading = readSheet(openUpload(file, OPTS), { caps: CAPS });
+
+    expect(reading.formulaRangeRefs).toEqual(['C1:C2', 'D1:E2', '']);
+    expect(readGrid(openUpload(file, OPTS), { caps: CAPS })).toEqual(reading.grid);
+  });
+
+  it('lists the formula ranges of the first sheet when a named sheet breaks a reader rule', () => {
+    const first = worksheetWith(
+      '<row r="1"><c r="A1"><f t="array" ref="A1:A3">1</f><v>1</v></c></row>',
+      '',
+    );
+    const broken = worksheetWith(
+      '<row r="1"><c r="A1"><f t="array" ref="A1:B2">1</f><v>1</v></c>' +
+        '<c r="C1" t="b"><v>yes</v></c></row>',
+      '',
+    );
+    const file = buildXlsxFixture([
+      { name: 'A', xml: first },
+      { name: 'B', xml: broken },
+    ]);
+
+    const reading = readSheet(openUpload(file, OPTS), { sheetName: 'B', caps: CAPS });
+
+    expect(reading.partPath).toBe(SHEET_PART);
+    expect(reading.formulaRangeRefs).toEqual(['A1:A3']);
+  });
+
+  it('lists no formula ranges for a sheet without array or data table formulas', () => {
+    const file = buildXlsxFixture([{ name: 'S', xml: worksheetXml([['a']]) }]);
+
+    expect(readSheet(openUpload(file, OPTS), { caps: CAPS }).formulaRangeRefs).toEqual([]);
+  });
+
+  it('flags a worksheet part that is also a book part', () => {
+    const parts: UploadParts = {
+      [RELS_PART]: strToU8(
+        relsOf(
+          relationship('rId1', 'worksheet', 'styles.xml'),
+          relationship('rId2', 'styles', 'styles.xml'),
+        ),
+      ),
+      [WORKBOOK_PART]: strToU8(workbookOf(sheetEntry('S', 1))),
+      [STYLES_PART]: strToU8(worksheetXml([['a']])),
+    };
+
+    const reading = readSheet(parts, { caps: CAPS });
+
+    expect(reading.grid).toEqual([['a']]);
+    expect(reading.partPath).toBe(STYLES_PART);
+    expect(reading.partIsBookPart).toBe(true);
+  });
+
+  it('reports an exception nothing anticipated as CORRUPT_FILE, as readGrid does', () => {
+    const file = buildXlsxFixture([{ name: 'S', xml: worksheetXml([['a']]) }]);
+    const parts = openUpload(file, OPTS);
+    vi.spyOn(Element.prototype, 'getAttribute').mockImplementation(() => {
+      throw new TypeError('unexpected');
+    });
+
+    expect(errorCodeOf(() => readSheet(parts, { caps: CAPS }))).toBe('CORRUPT_FILE');
   });
 });
 

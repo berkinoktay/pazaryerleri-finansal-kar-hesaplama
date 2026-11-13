@@ -16,6 +16,7 @@ import {
 import { openUpload, type GuardOpts } from './guards';
 import { readWorkbookGrid } from './parse';
 import { checkUploadParts } from './read-grid';
+import { columnLetters } from './sheet-meta';
 import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
 import { entriesText, grownFixtureText, numberRows } from '../tests/helpers/workbooks';
 
@@ -221,17 +222,6 @@ function domWeight(text: string): number {
     XML_ATTRIBUTE_WEIGHT * count(/=/g) +
     XML_TEXT_NODE_WEIGHT * (count(/>(?=[^<])/g) + count(/<[!?]/g))
   );
-}
-
-// Column letters for 1-based `column` (1 -> A, 27 -> AA).
-function columnLetters(column: number): string {
-  let out = '';
-  let rest = column;
-  while (rest > 0) {
-    out = String.fromCharCode(65 + ((rest - 1) % 26)) + out;
-    rest = Math.floor((rest - 1) / 26);
-  }
-  return out;
 }
 
 // A sheet whose odd columns hold distinct shared strings and even columns numbers,

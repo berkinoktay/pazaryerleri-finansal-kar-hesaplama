@@ -17,6 +17,10 @@ const ALL: Record<SpreadsheetFileErrorCode, true> = {
   PAYLOAD_TOO_LARGE: true,
   UNSAFE_CONTENT: true,
   ENGINE_BUSY: true,
+  MALFORMED_SHEET: true,
+  UNSUPPORTED_ENCODING: true,
+  ROW_NOT_FOUND: true,
+  ROW_ANCHOR_MISMATCH: true,
 };
 
 describe('SPREADSHEET_FILE_ERROR_CODES', () => {

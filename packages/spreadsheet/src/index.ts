@@ -55,6 +55,19 @@ export type {
   RowPredicate,
 } from './layout/types';
 export { readWorkbookGrid } from './parse';
+export type {
+  CellPatch,
+  CellPatchValue,
+  PatchAnchor,
+  PatchWorkbookOptions,
+} from './patch/patch-request';
+export { patchWorkbook } from './patch/patch-workbook';
+export {
+  MALFORMED_SHEET_REASONS,
+  PATCH_LIMIT_REASONS,
+  UNSUPPORTED_ENCODING_REASONS,
+  ZIP_REJECT_REASONS,
+} from './patch/reasons';
 export type { ReadGridOptions, SheetSelector } from './read-options';
 export { resolveWorksheetPartPaths } from './workbook-parts';
 export { WORKER_LIMIT_REASONS, workerLimitReason } from './worker/grid-worker-host';

@@ -38,6 +38,8 @@ const UNREACHABLE_WORKSHEET_ID = '__proto__';
 /** The two parts the reader always opens, by these exact names. */
 export const WORKBOOK_RELS_PART = 'xl/_rels/workbook.xml.rels';
 export const WORKBOOK_PART = 'xl/workbook.xml';
+/** The package's content types part; the gate requires it, the reader never opens it. */
+export const CONTENT_TYPES_PART = '[Content_Types].xml';
 
 /** What the workbook rels tell the reader. */
 export interface WorkbookRelationships {
@@ -50,7 +52,7 @@ export interface WorkbookRelationships {
 }
 
 /** The zip entry name read-excel-file's getFilePath maps a relationship Target to. */
-function readerFilePath(target: string): string {
+export function readerFilePath(target: string): string {
   return target.startsWith(ABSOLUTE_TARGET_PREFIX)
     ? target.slice(ABSOLUTE_TARGET_PREFIX.length)
     : `${RELATIVE_TARGET_BASE}${target}`;
