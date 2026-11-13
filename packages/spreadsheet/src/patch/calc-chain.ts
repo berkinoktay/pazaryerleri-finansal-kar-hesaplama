@@ -97,7 +97,7 @@ const VALUE_DECODER = new TextDecoder('utf-8', { ignoreBOM: true });
  * folding OPC compares part names under. Never toLowerCase, which also folds letters
  * outside ASCII (U+212A KELVIN SIGN becomes 'k').
  */
-function foldAsciiCase(text: string): string {
+export function foldAsciiCase(text: string): string {
   return text.replace(ASCII_UPPER_CASE_LETTER, (letter) =>
     String.fromCharCode(letter.charCodeAt(0) + ASCII_CASE_OFFSET),
   );

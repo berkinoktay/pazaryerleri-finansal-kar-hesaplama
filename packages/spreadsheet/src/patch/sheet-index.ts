@@ -23,9 +23,6 @@ import {
   type XmlMarkup,
 } from './xml-lexer';
 
-// Defined once, in the lexer; kept reachable from here for callers that walk a SheetIndex.
-export { valueAt } from './xml-lexer';
-
 // The rows and cells of one worksheet part, found the way the reader finds them
 // (part-checks.ts): the first direct child of the root whose local name is
 // `sheetData`, its direct children named `row`, their direct children named `c`. The

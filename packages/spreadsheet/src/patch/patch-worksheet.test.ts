@@ -13,7 +13,8 @@ import {
   type WorksheetPatchOptions,
 } from './patch-worksheet';
 import { MALFORMED_SHEET_REASONS, PATCH_LIMIT_REASONS } from './reasons';
-import { cellKeysOf, indexWorksheet, valueAt } from './sheet-index';
+import { cellKeysOf, indexWorksheet } from './sheet-index';
+import { valueAt } from './xml-lexer';
 
 const decoder = new TextDecoder();
 
