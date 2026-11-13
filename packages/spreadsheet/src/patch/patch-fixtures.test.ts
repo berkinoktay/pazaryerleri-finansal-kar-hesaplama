@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { FIXTURE_PINS, readFixture, type FixturePin } from '../../tests/helpers/fixture-pins';
+import { fileErrorOf } from '../../tests/helpers/errors';
+import {
+  FIXTURE_PINS,
+  pinOf,
+  readFixture,
+  type FixturePin,
+} from '../../tests/helpers/fixture-pins';
 import { num, text } from '../../tests/helpers/patch-helpers';
-import { SpreadsheetFileError } from '../errors';
+import { rawSegment } from '../../tests/helpers/workbooks';
 import type { CellValue, SheetData } from '../grid-types';
 import { openUpload } from '../guards';
 import { readSheet, readUploadGrid } from '../read-grid';
@@ -116,12 +122,6 @@ function planOf(pin: FixturePin): FixturePatchPlan {
   return plan;
 }
 
-function pinOf(file: string): FixturePin {
-  const pin = FIXTURE_PINS.find((candidate) => candidate.file === file);
-  if (pin === undefined) throw new Error(`no fixture pin for ${file}`);
-  return pin;
-}
-
 function numberValue(excelRow: number, col: number): string {
   return `${excelRow}.${String(col).padStart(COLUMN_DIGITS, '0')}`;
 }
@@ -181,24 +181,6 @@ function entryNamed(layout: ZipLayout, name: string): ZipEntry {
   const entry = layout.entries.find((candidate) => candidate.name === name);
   if (entry === undefined) throw new Error(`no entry named ${name}`);
   return entry;
-}
-
-function rawSegment(file: Uint8Array, entry: ZipEntry): Buffer {
-  return Buffer.from(
-    file.buffer,
-    file.byteOffset + entry.headerOffset,
-    entry.segmentEnd - entry.headerOffset,
-  );
-}
-
-function fileErrorOf(run: () => unknown): SpreadsheetFileError {
-  try {
-    run();
-  } catch (error) {
-    if (error instanceof SpreadsheetFileError) return error;
-    throw error;
-  }
-  throw new Error('Expected a SpreadsheetFileError');
 }
 
 describe.each(FIXTURE_PINS)('patchFixture on $file', (pin) => {

@@ -1,6 +1,7 @@
 import { unzipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 
+import { fileErrorOf } from '../../tests/helpers/errors';
 import { FIXTURE_PINS, readFixture } from '../../tests/helpers/fixture-pins';
 import { MAIN_NAMESPACE, sheet } from '../../tests/helpers/patch-helpers';
 import { expectWithinBudget, LINEAR_BUDGET_MS } from '../../tests/helpers/timing';
@@ -58,16 +59,6 @@ function withDeclaration(declaration: string, body = ROW_A1): Uint8Array {
 /** `sheet(body)` with the first `from` replaced by `to`. */
 function editedSheet(body: string, from: string, to: string, rootAttributes?: string): Uint8Array {
   return encoder.encode(sheetText(body, rootAttributes).replace(from, to));
-}
-
-function fileErrorOf(run: () => unknown): SpreadsheetFileError {
-  try {
-    run();
-  } catch (error) {
-    if (error instanceof SpreadsheetFileError) return error;
-    throw error;
-  }
-  throw new Error('Expected a SpreadsheetFileError');
 }
 
 function expectMalformed(bytes: Uint8Array, reason: string): void {

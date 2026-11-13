@@ -1,22 +1,30 @@
-import { strFromU8, unzipSync } from 'fflate';
+import { createHash } from 'node:crypto';
+import { strFromU8, unzipSync, zipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 
-import { FIXTURE_PINS, readFixture, type FixturePin } from '../../tests/helpers/fixture-pins';
+import { fileErrorOf } from '../../tests/helpers/errors';
+import { pinOf, readFixture } from '../../tests/helpers/fixture-pins';
 import { clear, MAIN_NAMESPACE, num, text } from '../../tests/helpers/patch-helpers';
 import { BOUNDED_INFLATE_BUDGET_MS, expectWithinBudget } from '../../tests/helpers/timing';
 import {
   hiddenEntryArchive,
   hiddenTileArchive,
   type HiddenTileKind,
+  rawSegment,
   unsignedDescriptorArchive,
   zip64SkipArchive,
   type Zip64SkipCopy,
 } from '../../tests/helpers/workbooks';
-import { MAX_PATCH_OUTPUT_TOTAL_BYTES, MAX_PATCH_TEXT_LENGTH } from '../constants';
-import { SpreadsheetFileError, type SpreadsheetFileErrorCode } from '../errors';
+import {
+  ABSOLUTE_MAX_BYTES,
+  MAX_PATCH_OUTPUT_TOTAL_BYTES,
+  MAX_PATCH_OUTPUTS,
+  MAX_PATCH_TEXT_LENGTH,
+} from '../constants';
+import type { SpreadsheetFileErrorCode } from '../errors';
 import type { SheetData } from '../grid-types';
 import { openUpload } from '../guards';
-import { readUploadGrid } from '../read-grid';
+import { readSheet, readUploadGrid } from '../read-grid';
 import { resolveReadOptions, type ReadGridOptions } from '../read-options';
 import { buildXlsxFixture, worksheetXml } from '../testing/build-xlsx';
 import { patchFixture, type PatchFixtureOptions } from '../testing/patch-fixture';
@@ -38,14 +46,21 @@ const CONTENT_TYPES_NS = 'http://schemas.openxmlformats.org/package/2006/content
 const CALC_CHAIN_CONTENT_TYPE =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml';
 
+const VML_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.vmlDrawing';
+const PNG_CONTENT_TYPE = 'image/png';
+
 const SHEET_PART = 'xl/worksheets/sheet1.xml';
 const SECOND_SHEET_PART = 'xl/worksheets/sheet2.xml';
+const SHEET_RELS_PART = 'xl/worksheets/_rels/sheet1.xml.rels';
 const RELS_PART = 'xl/_rels/workbook.xml.rels';
 const CONTENT_TYPES_PART = '[Content_Types].xml';
 const CALC_CHAIN_PART = 'xl/calcChain.xml';
 const STYLES_PART = 'xl/styles.xml';
 const APP_PROPERTIES_PART = 'docProps/app.xml';
+const BLOB_PART = 'xl/media/blob.bin';
 const DISCOUNT_FIXTURE = 'trendyol-discount-products.xlsx';
+// Bytes of a part other relationships use; the tests only compare them.
+const SHARED_PART_BYTES = 'not a calcChain';
 
 const DEFAULT_READ = resolveReadOptions({});
 const GUARD_OPTS = {
@@ -63,6 +78,16 @@ const TWO_ROWS = '<row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="A2"><v
 const INERT_FORMULA_TEXT = "=cmd|' /C calc'!A0";
 // A date serial the kept date style turns into a Date.
 const DATE_SERIAL = '45000';
+// fflate's level for a stored (not deflated) entry.
+const STORED_LEVEL = 0;
+const SHA256_HEX_LENGTH = 64;
+const MIB = 1024 * 1024;
+// An upload this far under the read byte cap: a long incompressible text adds more.
+const READ_CAP_MARGIN = 1024;
+// About 16.5 MiB per output, under a raised read cap: seven outputs fit in
+// MAX_PATCH_OUTPUT_TOTAL_BYTES (128 MiB), eight do not.
+const LARGE_UPLOAD_BYTES = (33 * MIB) / 2;
+const LARGE_READ_MAX_BYTES = 20 * MIB;
 
 /** A worksheet part in the main namespace whose sheetData holds `body`; `after` follows the sheetData. */
 function worksheet(body: string, after = ''): string {
@@ -86,18 +111,35 @@ function relsOf(...relationships: readonly string[]): string {
   return `${XML_DECLARATION}<Relationships xmlns="${PACKAGE_RELATIONSHIPS_NS}">${relationships.join('')}</Relationships>`;
 }
 
-function readBack(file: Uint8Array, options: ReadGridOptions = {}): SheetData {
-  return readUploadGrid(file, resolveReadOptions(options));
+/** A content types part: the rels and xml Defaults, then `defaults`, then `children`. */
+function contentTypesOf(children: readonly string[], defaults: readonly string[] = []): string {
+  return (
+    `${XML_DECLARATION}<Types xmlns="${CONTENT_TYPES_NS}">` +
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+    '<Default Extension="xml" ContentType="application/xml"/>' +
+    `${defaults.join('')}${children.join('')}</Types>`
+  );
 }
 
-function fileErrorOf(run: () => unknown): SpreadsheetFileError {
-  try {
-    run();
-  } catch (error) {
-    if (error instanceof SpreadsheetFileError) return error;
-    throw error;
-  }
-  throw new Error('Expected a SpreadsheetFileError');
+/** `file` plus a stored entry of zero bytes, sized so that the archive is `length` bytes long. */
+function withStoredBlob(file: Buffer, length: number): Buffer {
+  const entries = unzipSync(file);
+  const empty = zipSync({ ...entries, [BLOB_PART]: [new Uint8Array(0), { level: STORED_LEVEL }] });
+  const blob = new Uint8Array(length - empty.length);
+  return Buffer.from(zipSync({ ...entries, [BLOB_PART]: [blob, { level: STORED_LEVEL }] }));
+}
+
+/** `length` hex digits, sha256 digests of counters: text deflate cannot shrink much. */
+function hexText(length: number): string {
+  return Array.from({ length: Math.ceil(length / SHA256_HEX_LENGTH) }, (_, counter) =>
+    createHash('sha256').update(String(counter)).digest('hex'),
+  )
+    .join('')
+    .slice(0, length);
+}
+
+function readBack(file: Uint8Array, options: ReadGridOptions = {}): SheetData {
+  return readUploadGrid(file, resolveReadOptions(options));
 }
 
 function expectFileError(
@@ -116,21 +158,16 @@ function expectReason(run: () => unknown, code: SpreadsheetFileErrorCode, reason
   expect(error.meta).toMatchObject({ reason });
 }
 
-function pinOf(file: string): FixturePin {
-  const pin = FIXTURE_PINS.find((candidate) => candidate.file === file);
-  if (pin === undefined) throw new Error(`no fixture pin for ${file}`);
-  return pin;
-}
-
 /** Local header, data and data descriptor of the entry named `name`. */
-function rawSegment(file: Uint8Array, name: string): Uint8Array {
+function segmentNamed(file: Uint8Array, name: string): Buffer {
   const entry = readZipLayout(file).entries.find((candidate) => candidate.name === name);
   if (entry === undefined) throw new Error(`no entry named ${name}`);
-  return file.subarray(entry.headerOffset, entry.segmentEnd);
+  return rawSegment(file, entry);
 }
 
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-  return Buffer.from(a.buffer, a.byteOffset, a.byteLength).equals(b);
+/** Whether the entry named `name` has the same raw segment in both archives. */
+function sameSegment(out: Uint8Array, source: Uint8Array, name: string): boolean {
+  return segmentNamed(out, name).equals(segmentNamed(source, name));
 }
 
 function entryText(file: Uint8Array, name: string): string {
@@ -492,18 +529,14 @@ describe('patchUpload: sheet selection', () => {
 
   it('patches the sheet a strict selector names', () => {
     const out = patchFixture(file, patches, { sheet: { by: 'name', name: 'Data' } });
-    expect(sameBytes(rawSegment(out, SHEET_PART), rawSegment(file, SHEET_PART))).toBe(true);
-    expect(sameBytes(rawSegment(out, SECOND_SHEET_PART), rawSegment(file, SECOND_SHEET_PART))).toBe(
-      false,
-    );
+    expect(sameSegment(out, file, SHEET_PART)).toBe(true);
+    expect(sameSegment(out, file, SECOND_SHEET_PART)).toBe(false);
     expect(readBack(out, { sheet: { by: 'name', name: 'Data' } })).toEqual([[5], ['b']]);
   });
 
   it('patches the first sheet when a legacy name matches none', () => {
     const out = patchFixture(file, patches, { sheetName: 'Nope' });
-    expect(sameBytes(rawSegment(out, SECOND_SHEET_PART), rawSegment(file, SECOND_SHEET_PART))).toBe(
-      true,
-    );
+    expect(sameSegment(out, file, SECOND_SHEET_PART)).toBe(true);
     expect(readBack(out, { sheet: { by: 'name', name: 'Help' } })).toEqual([[5]]);
   });
 
@@ -544,6 +577,25 @@ describe('patchUpload: order of errors', () => {
         relationship('rId2', 'sharedStrings', 'worksheets/sheet1.xml'),
       ),
     });
+    expectFileError(() => patchFixture(file, [num(1, 0, '1')]), 'MALFORMED_SHEET', {
+      reason: MALFORMED_SHEET_REASONS.TARGET_PART,
+    });
+  });
+
+  it('refuses a worksheet part that is also the content types part', () => {
+    // The content types part is no book part, so only its name refuses it: the calcChain
+    // cut may rewrite that part.
+    const types = contentTypesOf([`<sheetData xmlns="${MAIN_NAMESPACE}">${ONE_CELL}</sheetData>`]);
+    const file = buildXlsxFixture(
+      [{ name: 'Sheet1', xml: worksheet(ONE_CELL), relTarget: `/${CONTENT_TYPES_PART}` }],
+      { [CONTENT_TYPES_PART]: types },
+    );
+    const reading = readSheet(openUpload(file, GUARD_OPTS), {
+      caps: { rowCap: DEFAULT_READ.rowCap, colCap: DEFAULT_READ.colCap },
+    });
+    expect(reading.grid).toEqual([[7]]);
+    expect(reading.partPath).toBe(CONTENT_TYPES_PART);
+    expect(reading.partIsBookPart).toBe(false);
     expectFileError(() => patchFixture(file, [num(1, 0, '1')]), 'MALFORMED_SHEET', {
       reason: MALFORMED_SHEET_REASONS.TARGET_PART,
     });
@@ -600,15 +652,6 @@ describe('patchUpload: calcChain', () => {
     '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
   const calcChainOverride = `<Override PartName="/xl/calcChain.xml" ContentType="${CALC_CHAIN_CONTENT_TYPE}"/>`;
 
-  function contentTypesOf(overrides: readonly string[]): string {
-    return (
-      `${XML_DECLARATION}<Types xmlns="${CONTENT_TYPES_NS}">` +
-      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
-      '<Default Extension="xml" ContentType="application/xml"/>' +
-      `${overrides.join('')}</Types>`
-    );
-  }
-
   /** The formula workbook with a calcChain relationship to `target` and the given Overrides. */
   function calcChainBook(target: string, overrides: readonly string[]): Buffer {
     return bookOf(formulaSheet, {
@@ -643,7 +686,7 @@ describe('patchUpload: calcChain', () => {
   it('keeps the chain when no formula is overwritten', () => {
     const out = patchFixture(file, [num(2, 0, '4')], flaggedB);
     for (const name of [CALC_CHAIN_PART, RELS_PART, CONTENT_TYPES_PART]) {
-      expect(sameBytes(rawSegment(out, name), rawSegment(file, name))).toBe(true);
+      expect(sameSegment(out, file, name)).toBe(true);
     }
   });
 
@@ -672,6 +715,61 @@ describe('patchUpload: calcChain', () => {
       entry: 'xl/Worksheets/Sheet1.xml',
     });
   });
+
+  // A Target is free text and may name a part other relationships use, typed by a
+  // Default only. With no Override of the calcChain content type, nothing confirms it
+  // is a calcChain: its relationship is cut (no opener loads it as one) and its entry
+  // stays.
+  it.each<[target: string, extension: string, contentType: string, relationshipType: string]>([
+    ['media/image1.png', 'png', PNG_CONTENT_TYPE, 'image'],
+    ['drawings/vmlDrawing1.vml', 'vml', VML_CONTENT_TYPE, 'vmlDrawing'],
+  ])(
+    'keeps a part a calcChain Target names without a calcChain Override: %s',
+    (target, extension, contentType, relationshipType) => {
+      const part = `xl/${target}`;
+      const sheetTarget = `../${target}`;
+      const file = bookOf(formulaSheet, {
+        [RELS_PART]: relsOf(
+          relationship('rId1', 'worksheet', 'worksheets/sheet1.xml'),
+          relationship('rId2', 'calcChain', target),
+        ),
+        [CONTENT_TYPES_PART]: contentTypesOf(
+          [workbookOverride, worksheetOverride],
+          [`<Default Extension="${extension}" ContentType="${contentType}"/>`],
+        ),
+        [SHEET_RELS_PART]: relsOf(relationship('rId1', relationshipType, sheetTarget)),
+        [part]: SHARED_PART_BYTES,
+      });
+
+      const out = patchFixture(file, [num(2, 1, '5')], flaggedB);
+
+      expect(entryText(out, RELS_PART)).not.toContain('calcChain');
+      expect(sameSegment(out, file, part)).toBe(true);
+      // The sheet relationship still resolves: it is unchanged, and its Target's entry is there.
+      expect(sameSegment(out, file, SHEET_RELS_PART)).toBe(true);
+      expect(entryText(out, SHEET_RELS_PART)).toContain(`Target="${sheetTarget}"`);
+      expect(readZipLayout(out).entries.map((entry) => entry.name)).toContain(part);
+      expect(readBack(out)).toEqual([
+        [1, null],
+        [3, 5],
+      ]);
+    },
+  );
+
+  it('drops the entry of a calcChain Override that matches the Target in another ASCII case', () => {
+    // The Target names 'xl/CalcChain.xml'; the Override and the entry spell it
+    // 'xl/calcChain.xml'. OPC compares part names folding ASCII case, so the cut
+    // Override confirms the entry, which goes with it.
+    const crafted = calcChainBook('CalcChain.xml', [
+      workbookOverride,
+      worksheetOverride,
+      calcChainOverride,
+    ]);
+    const out = patchFixture(crafted, [num(2, 1, '5')], flaggedB);
+    expect(unzipSync(out)[CALC_CHAIN_PART]).toBeUndefined();
+    expect(entryText(out, RELS_PART)).not.toContain('calcChain');
+    expect(entryText(out, CONTENT_TYPES_PART)).not.toContain('calcChain');
+  });
 });
 
 describe('patchUpload: unchanged outputs', () => {
@@ -689,6 +787,22 @@ describe('patchUpload: unchanged outputs', () => {
 
   it('patchFixture returns the source itself', () => {
     expect(patchFixture(file, [clear(1, 1)])).toBe(file);
+  });
+});
+
+describe('patchFixture: defaults', () => {
+  const file = book('<row r="1"><c r="A1"><f>1+1</f><v>2</v></c></row>');
+
+  it('overwrites a formula in any column when no column is flagged', () => {
+    expect(readBack(patchFixture(file, [num(1, 0, '9')]))).toEqual([[9]]);
+  });
+
+  it('keeps the formula policy when the columns are given', () => {
+    expectReason(
+      () => patchFixture(file, [num(1, 0, '9')], { overwriteFormulaColumns: [] }),
+      'MALFORMED_SHEET',
+      MALFORMED_SHEET_REASONS.FORMULA_TARGET,
+    );
   });
 });
 
@@ -718,6 +832,58 @@ describe('patchUpload: caps', () => {
         cap: MAX_PATCH_OUTPUT_TOTAL_BYTES,
       },
     );
+  });
+
+  it('refuses an output the gate would refuse under the same read byte cap', () => {
+    // The upload sits READ_CAP_MARGIN bytes under the cap; a text deflate cannot shrink
+    // much makes the output longer than the cap.
+    const length = DEFAULT_READ.maxBytes - READ_CAP_MARGIN;
+    const nearCap = withStoredBlob(book(ONE_CELL), length);
+    expect(nearCap.length).toBe(length);
+    expect(readBack(patchFixture(nearCap, [num(1, 0, '9')]))).toEqual([[9]]);
+    expectFileError(
+      () => patchFixture(nearCap, [text(1, 0, hexText(MAX_PATCH_TEXT_LENGTH))]),
+      'PAYLOAD_TOO_LARGE',
+      { reason: PATCH_LIMIT_REASONS.OUTPUT, cap: DEFAULT_READ.maxBytes },
+    );
+  });
+});
+
+// Builds outputs of about 16.5 MiB each, 132 MiB at once.
+describe.runIf(process.env.CI === 'true')('patchUpload: the bytes of all outputs together', () => {
+  let large: Buffer | undefined;
+
+  // Built on first use: a skipped suite still runs this callback to collect its tests.
+  function largeUpload(): Buffer {
+    large ??= withStoredBlob(book(ONE_CELL), LARGE_UPLOAD_BYTES);
+    return large;
+  }
+
+  /** `count` outputs, each with one changed cell. */
+  function request(count: number): ResolvedPatchRequest {
+    return resolvePatchRequest({
+      maxBytes: LARGE_READ_MAX_BYTES,
+      outputs: Array.from({ length: count }, () => [num(1, 0, '9')]),
+    });
+  }
+
+  it('raises the read cap within its ceiling', () => {
+    expect(LARGE_READ_MAX_BYTES).toBeLessThanOrEqual(ABSOLUTE_MAX_BYTES);
+    expect(request(1).read.maxBytes).toBe(LARGE_READ_MAX_BYTES);
+  });
+
+  it('refuses eight outputs beyond the total', () => {
+    expectFileError(
+      () => patchUpload(largeUpload(), request(MAX_PATCH_OUTPUTS)),
+      'PAYLOAD_TOO_LARGE',
+      { reason: PATCH_LIMIT_REASONS.OUTPUT, cap: MAX_PATCH_OUTPUT_TOTAL_BYTES },
+    );
+  });
+
+  it('writes seven outputs within the total', () => {
+    const outputs = patchUpload(largeUpload(), request(MAX_PATCH_OUTPUTS - 1));
+    expect(outputs).toHaveLength(MAX_PATCH_OUTPUTS - 1);
+    for (const output of outputs) expect(output).toBeInstanceOf(Uint8Array);
   });
 });
 

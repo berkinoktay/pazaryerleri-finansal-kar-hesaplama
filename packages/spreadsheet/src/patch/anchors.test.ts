@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { SpreadsheetFileError } from '../errors';
+import { fileErrorOf } from '../../tests/helpers/errors';
 import type { SheetData } from '../grid-types';
 import { assertAnchorsMatch } from './anchors';
 import type { PatchAnchor } from './patch-request';
@@ -10,16 +10,6 @@ const FAILING_ROWS = 12;
 
 function anchor(excelRow: number, expected: string, col = 0): PatchAnchor {
   return { excelRow, col, expected };
-}
-
-function fileErrorOf(run: () => unknown): SpreadsheetFileError {
-  try {
-    run();
-  } catch (error) {
-    if (error instanceof SpreadsheetFileError) return error;
-    throw error;
-  }
-  throw new Error('Expected a SpreadsheetFileError');
 }
 
 function expectMismatch(

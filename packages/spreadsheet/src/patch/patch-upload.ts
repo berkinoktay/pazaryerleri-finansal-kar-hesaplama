@@ -38,8 +38,9 @@ import { cellKeysOf, indexWorksheet } from './sheet-index';
 //   7. no target inside a merged range;
 //   8. each output's patches, applied to the index;
 //   9. a changed output is the archive with the converted part replaced and, when a
-//      formula was overwritten, the calcChain cut; the bytes of all outputs together
-//      are capped.
+//      formula was overwritten, the calcChain cut; each output must fit the read byte
+//      cap it will be read back under, and the bytes of all outputs together are
+//      capped.
 // The patched part is built from the bytes the reader parsed, never from the
 // directory's copy.
 
@@ -128,6 +129,19 @@ export function assertOutputBudget(totalBytes: number): void {
   );
 }
 
+/**
+ * PAYLOAD_TOO_LARGE `{ reason: 'patch-output', cap: maxBytes }` for an output longer
+ * than the read byte cap: the gate would refuse it under the same read options.
+ */
+function assertWithinReadCap(outputBytes: number, maxBytes: number): void {
+  if (outputBytes <= maxBytes) return;
+  throw new SpreadsheetFileError(
+    'PAYLOAD_TOO_LARGE',
+    `Patched output of ${outputBytes}B exceeds the ${maxBytes}B read cap`,
+    { reason: PATCH_LIMIT_REASONS.OUTPUT, cap: maxBytes },
+  );
+}
+
 /** MALFORMED_SHEET `target-part` when the converted part is also a part the rewrite may replace. */
 function assertPatchablePart(reading: SheetReading): void {
   if (!reading.partIsBookPart && reading.partPath !== CONTENT_TYPES_PART) return;
@@ -139,11 +153,11 @@ function assertPatchablePart(reading: SheetReading): void {
 }
 
 /**
- * CORRUPT_FILE `package-part` for a calcChain path that names a part every output
- * needs, compared folding ASCII case (the way OPC compares part names): the converted part,
- * any reader part, the content types, or any relationships part. A Target is free
- * text; dropping such a path would lose that part, or put a drop and a replace on
- * the same entry.
+ * CORRUPT_FILE `package-part` for a calcChain path or cut part name that names a part
+ * every output needs, compared folding ASCII case (the way OPC compares part names):
+ * the converted part, any reader part, the content types, or any relationships part.
+ * A Target is free text; dropping such a path would lose that part, or put a drop and
+ * a replace on the same entry.
  */
 function assertDroppable(paths: readonly string[], parts: UploadParts, partPath: string): void {
   const needed = new Set<string>([foldAsciiCase(partPath), foldAsciiCase(CONTENT_TYPES_PART)]);
@@ -161,9 +175,13 @@ function assertDroppable(paths: readonly string[], parts: UploadParts, partPath:
 
 /**
  * The changes that cut the calcChain: the workbook rels and the content types without
- * it, and a drop of each calcChain path that is exactly an entry name. Empty when the
- * workbook rels name no calcChain part. The content types come from the directory's
- * view (the gate keeps no copy of that part), bounded by entryContent and only lexed.
+ * it, and a drop of each entry whose name, folding ASCII case, is a part whose
+ * calcChain Override was cut. A path the rels name with no such Override keeps its
+ * entry: its relationship is cut, so no opener loads it as a calcChain, and the part
+ * may be one other relationships use (a crafted Target can name any part). Empty when
+ * the workbook rels name no calcChain part. The content types come from the
+ * directory's view (the gate keeps no copy of that part), bounded by entryContent,
+ * read only when the rels name a calcChain, and only lexed.
  */
 function calcChainChanges(
   file: Uint8Array,
@@ -178,15 +196,17 @@ function calcChainChanges(
     throw new Error('The gate passed an upload without workbook rels or content types');
   }
   const changes = new Map<string, ZipChange>();
-  const plan = planCalcChainRemoval(workbookRels, entryContent(file, contentTypes));
+  const plan = planCalcChainRemoval(workbookRels, () => entryContent(file, contentTypes));
   if (plan === null) return changes;
-  assertDroppable(plan.paths, parts, partPath);
+  assertDroppable([...plan.paths, ...plan.cutParts], parts, partPath);
   changes.set(WORKBOOK_RELS_PART, { kind: 'replace', content: plan.workbookRels });
   if (plan.contentTypes !== null) {
     changes.set(CONTENT_TYPES_PART, { kind: 'replace', content: plan.contentTypes });
   }
-  for (const path of plan.paths) {
-    if (entries.has(path)) changes.set(path, DROP);
+  if (plan.cutParts.length === 0) return changes;
+  const cutParts = new Set(plan.cutParts.map(foldAsciiCase));
+  for (const name of entries.keys()) {
+    if (cutParts.has(foldAsciiCase(name))) changes.set(name, DROP);
   }
   return changes;
 }
@@ -198,8 +218,8 @@ function calcChainChanges(
  * a zip reason from the layout, the view check or the calcChain cut;
  * ROW_ANCHOR_MISMATCH; MALFORMED_SHEET and UNSUPPORTED_ENCODING from the index, the
  * cell cross-check, the merged-range check and the patcher; ROW_NOT_FOUND;
- * PAYLOAD_TOO_LARGE for a patched part beyond its growth cap or outputs beyond
- * MAX_PATCH_OUTPUT_TOTAL_BYTES together.
+ * PAYLOAD_TOO_LARGE for a patched part beyond its growth cap, an output beyond the
+ * read byte cap, or outputs beyond MAX_PATCH_OUTPUT_TOTAL_BYTES together.
  */
 export function patchUpload(
   file: Uint8Array,
@@ -234,6 +254,9 @@ export function patchUpload(
   };
   const entries = entriesByName(layout);
   let calcChain: ReadonlyMap<string, ZipChange> | undefined;
+  // The calcChain replacements are the same content objects in every output, so each
+  // is deflated once per job.
+  const deflated = new Map<Uint8Array, Uint8Array>();
   let totalBytes = 0;
   const outputs: (Uint8Array<ArrayBuffer> | null)[] = [];
   for (const patches of request.outputs) {
@@ -248,7 +271,11 @@ export function patchUpload(
       for (const [name, change] of calcChain) changes.set(name, change);
     }
     changes.set(partPath, { kind: 'replace', content: result.bytes });
-    const archive = rewriteZip(file, layout, changes);
+    const archive = rewriteZip(file, layout, changes, deflated);
+    // The patched part is this output's own: keeping it would hold every output's
+    // part in memory until the job ends.
+    deflated.delete(result.bytes);
+    assertWithinReadCap(archive.length, read.maxBytes);
     totalBytes += archive.length;
     assertOutputBudget(totalBytes);
     outputs.push(archive);

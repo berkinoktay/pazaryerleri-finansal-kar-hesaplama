@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { fileErrorOf } from '../../tests/helpers/errors';
 import { num } from '../../tests/helpers/patch-helpers';
 import { expectWithinBudget, LINEAR_BUDGET_MS } from '../../tests/helpers/timing';
 import {
@@ -33,16 +34,6 @@ const LINEAR_TEST_TIMEOUT_MS = 120_000;
 /** A patch on row `excelRow`, 0-based column `col`. */
 function target(excelRow: number, col: number): CellPatch {
   return num(excelRow, col, '1');
-}
-
-function fileErrorOf(run: () => unknown): SpreadsheetFileError {
-  try {
-    run();
-  } catch (error) {
-    if (error instanceof SpreadsheetFileError) return error;
-    throw error;
-  }
-  throw new Error('Expected a SpreadsheetFileError');
 }
 
 function expectMalformed(run: () => unknown, meta: Record<string, unknown>): void {

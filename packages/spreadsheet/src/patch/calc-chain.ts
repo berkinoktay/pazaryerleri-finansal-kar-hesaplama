@@ -22,7 +22,7 @@ import {
 // calcChain removal of the export path. A patch that drops a formula leaves Excel's
 // calculation chain naming a cell that has none, so the chain goes: its relationship
 // is cut from the workbook rels and its Override from the content types, and the
-// caller drops the parts themselves.
+// caller drops the parts whose Override was cut (the confirmed calcChain parts).
 //
 // Both parts are walked with the strict lexer, every markup of them, with a depth
 // counter. The content types part is not a reader part: the gate never budgeted or
@@ -47,6 +47,12 @@ import {
 export interface CalcChainRemoval {
   /** Zip entry names of the calcChain parts the workbook rels name, distinct. */
   readonly paths: readonly string[];
+  /**
+   * The PartName of every Override that was cut, without its leading '/', decoded and
+   * not folded, distinct. Each carries exactly the calcChain content type, so these are
+   * the confirmed calcChain parts; a path with no such Override may name any part.
+   */
+  readonly cutParts: readonly string[];
   /** The workbook rels without those relationships. */
   readonly workbookRels: Uint8Array;
   /** The content types without their Override elements; null when there was none to cut. */
@@ -322,10 +328,16 @@ function calcChainRelationshipSelector(
 
 /**
  * Selects an `Override` whose PartName, folded in ASCII case, is in `partNames` (one
- * decode, one fold, one lookup). CORRUPT_FILE when such an Override does not carry
- * exactly the calcChain content type, or any Override repeats PartName or ContentType.
+ * decode, one fold, one lookup), and adds that PartName without its leading '/' to
+ * `cutParts` once. CORRUPT_FILE when such an Override does not carry exactly the
+ * calcChain content type, or any Override repeats PartName or ContentType.
  */
-function overrideSelector(bytes: Uint8Array, partNames: ReadonlySet<string>): ChildSelector {
+function overrideSelector(
+  bytes: Uint8Array,
+  partNames: ReadonlySet<string>,
+  cutParts: string[],
+  seen: Set<string>,
+): ChildSelector {
   return (markup, attributes) => {
     if (!localNameIs(bytes, markup, OVERRIDE)) return false;
     const partName = onlyAttribute(
@@ -350,13 +362,19 @@ function overrideSelector(bytes: Uint8Array, partNames: ReadonlySet<string>): Ch
       CONTENT_TYPES_PART,
       PART_NAME_ATTRIBUTE,
     );
-    const folded = foldAsciiCase(VALUE_DECODER.decode(bytes.subarray(value.start, value.end)));
-    if (!partNames.has(folded)) return false;
+    const name = VALUE_DECODER.decode(bytes.subarray(value.start, value.end));
+    if (!partNames.has(foldAsciiCase(name))) return false;
     if (!hasCalcChainContentType(bytes, attributes, contentType)) {
       throw packagePartError(
         CONTENT_TYPES_PART,
         'has an Override of a calcChain path without the calcChain content type',
       );
+    }
+    // Every name in `partNames` starts with the prefix, which folding leaves alone.
+    const part = name.slice(PART_NAME_PREFIX.length);
+    if (!seen.has(part)) {
+      seen.add(part);
+      cutParts.push(part);
     }
     return true;
   };
@@ -367,10 +385,12 @@ function overrideSelector(bytes: Uint8Array, partNames: ReadonlySet<string>): Ch
  * relationships whose raw Type is a calcChain type, and the content types' Override
  * elements whose PartName is '/' + one of their entry names, folding ASCII case, and
  * whose raw ContentType is the calcChain content type. Null when the rels name no
- * calcChain part; the content types are then not read at all.
+ * calcChain part; `contentTypes` is then never called, so the caller reads (and may
+ * inflate) that part only when there is something to cut in it.
  *
  * The paths are attacker-chosen (Target is free text); this function only reports
- * them, the caller decides whether dropping them is safe.
+ * them, and the PartNames of the Overrides it cut, and the caller decides what is safe
+ * to drop.
  *
  * Throws SpreadsheetFileError CORRUPT_FILE `{ reason: 'package-part', entry }` for a
  * part outside the lexer's strict subset, with a broken element structure, with a
@@ -381,7 +401,7 @@ function overrideSelector(bytes: Uint8Array, partNames: ReadonlySet<string>): Ch
  */
 export function planCalcChainRemoval(
   workbookRels: Uint8Array,
-  contentTypes: Uint8Array,
+  contentTypes: () => Uint8Array,
 ): CalcChainRemoval | null {
   const paths: string[] = [];
   const relsCuts = cutRootChildren(
@@ -393,14 +413,17 @@ export function planCalcChainRemoval(
   const partNames: ReadonlySet<string> = new Set(
     paths.map((path) => foldAsciiCase(PART_NAME_PREFIX + path)),
   );
+  const types = contentTypes();
+  const cutParts: string[] = [];
   const overrideCuts = cutRootChildren(
-    contentTypes,
+    types,
     CONTENT_TYPES_PART,
-    overrideSelector(contentTypes, partNames),
+    overrideSelector(types, partNames, cutParts, new Set()),
   );
   return {
     paths,
+    cutParts,
     workbookRels: withoutCuts(workbookRels, relsCuts),
-    contentTypes: overrideCuts.starts.length === 0 ? null : withoutCuts(contentTypes, overrideCuts),
+    contentTypes: overrideCuts.starts.length === 0 ? null : withoutCuts(types, overrideCuts),
   };
 }

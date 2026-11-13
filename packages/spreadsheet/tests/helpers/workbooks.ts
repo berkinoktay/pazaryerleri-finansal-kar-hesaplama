@@ -94,6 +94,15 @@ export function grownFixtureWorkbook(file: string, rows: number): Buffer {
   return Buffer.from(zipSync(entries));
 }
 
+/** Local header, data and data descriptor of `entry`: a view into `file`, never a copy. */
+export function rawSegment(file: Uint8Array, entry: ZipEntry): Buffer {
+  return Buffer.from(
+    file.buffer,
+    file.byteOffset + entry.headerOffset,
+    entry.segmentEnd - entry.headerOffset,
+  );
+}
+
 // Crafted archives of the zip layout tests, most of them with a central directory that
 // reads another worksheet than the local-header stream does. All are written by hand:
 // local headers of 30 bytes plus the name (version 20), directory records of 46 bytes

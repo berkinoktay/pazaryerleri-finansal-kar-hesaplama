@@ -2,12 +2,14 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { crc32, deflateRawSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 
+import { fileErrorOf } from '../../tests/helpers/errors';
 import { FIXTURE_PINS, readFixture } from '../../tests/helpers/fixture-pins';
 import { BOUNDED_INFLATE_BUDGET_MS, expectWithinBudget } from '../../tests/helpers/timing';
 import {
   hiddenEntryArchive,
   hiddenTileArchive,
   type HiddenTileKind,
+  rawSegment,
   unsignedDescriptorArchive,
   type UnsignedDescriptorLength,
   zip64SkipArchive,
@@ -35,6 +37,7 @@ import {
 import { ZIP_REJECT_REASONS } from './reasons';
 
 const SHEET_PART = 'xl/worksheets/sheet1.xml';
+const WORKBOOK_RELS_PART = 'xl/_rels/workbook.xml.rels';
 const APP_PROPERTIES_PART = 'docProps/app.xml';
 // Every entry carries flag bit 3 and a 16-byte data descriptor.
 const COMMISSION_FIXTURE = 'trendyol-commission-tariff.xlsx';
@@ -94,16 +97,6 @@ const DEFLATED = 8;
 const UNKNOWN_METHOD = 99;
 const ZIP64_SIZE = 0xffffffff;
 
-function fileErrorOf(run: () => unknown): SpreadsheetFileError {
-  try {
-    run();
-  } catch (error) {
-    if (error instanceof SpreadsheetFileError) return error;
-    throw error;
-  }
-  throw new Error('Expected a SpreadsheetFileError');
-}
-
 function expectRejected(run: () => unknown, reason: string): SpreadsheetFileError {
   const error = fileErrorOf(run);
   expect(error.code).toBe('CORRUPT_FILE');
@@ -125,9 +118,14 @@ function physicalOrder(layout: ZipLayout): ZipEntry[] {
   return [...layout.entries].sort((a, b) => a.headerOffset - b.headerOffset);
 }
 
-/** Local header, data and data descriptor of `entry`. */
-function rawSegment(file: Uint8Array, entry: ZipEntry): Uint8Array {
-  return file.subarray(entry.headerOffset, entry.segmentEnd);
+/** A deflate cache for rewriteZip that counts what it stores: one store per deflate. */
+class CountingDeflateCache extends Map<Uint8Array, Uint8Array> {
+  stores = 0;
+
+  override set(content: Uint8Array, data: Uint8Array): this {
+    this.stores += 1;
+    return super.set(content, data);
+  }
 }
 
 function descriptorLength(entry: ZipEntry): number {
@@ -290,6 +288,31 @@ describe('rewriteZip: replace', () => {
     }
 
     expect(openUpload(out, GUARD_OPTS)[SHEET_PART]).toEqual(content);
+  });
+});
+
+describe('rewriteZip: deflate cache', () => {
+  it('deflates each replaced content once across calls and writes the same bytes', () => {
+    const file = smallWorkbook();
+    const layout = readZipLayout(file);
+    const sheetBytes = unzipSync(file)[SHEET_PART];
+    if (sheetBytes === undefined) throw new Error(`no ${SHEET_PART}`);
+    const shared = probed(sheetBytes);
+    const first = new Map<string, ZipChange>([[SHEET_PART, { kind: 'replace', content: shared }]]);
+    const second = new Map<string, ZipChange>([
+      [SHEET_PART, { kind: 'replace', content: shared }],
+      [WORKBOOK_RELS_PART, { kind: 'replace', content: strToU8(PROBE) }],
+    ]);
+    const cache = new CountingDeflateCache();
+
+    const cachedFirst = rewriteZip(file, layout, first, cache);
+    const cachedSecond = rewriteZip(file, layout, second, cache);
+
+    expect(sameBytes(cachedFirst, rewriteZip(file, layout, first))).toBe(true);
+    expect(sameBytes(cachedSecond, rewriteZip(file, layout, second))).toBe(true);
+    // Three replacements of two content objects: two deflates.
+    expect(cache.size).toBe(2);
+    expect(cache.stores).toBe(2);
   });
 });
 

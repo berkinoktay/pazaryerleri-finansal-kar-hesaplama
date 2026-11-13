@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
+import { fileErrorOf } from '../../tests/helpers/errors';
 import { clear, MAIN_NAMESPACE, num, sheet, text } from '../../tests/helpers/patch-helpers';
 import { expectWithinBudget, LINEAR_BUDGET_MS } from '../../tests/helpers/timing';
-import { SpreadsheetFileError, type SpreadsheetFileErrorCode } from '../errors';
+import type { SpreadsheetFileErrorCode } from '../errors';
 import { cellKey, columnLetters } from '../sheet-meta';
 import { parsePart } from '../xml-dom';
 import type { CellPatch, CellPatchValue } from './patch-request';
@@ -78,16 +79,6 @@ function patched(
 
 function capped(maxBytes: number): WorksheetPatchOptions {
   return { overwriteFormulaColumns: NO_FORMULA_COLUMNS, maxBytes };
-}
-
-function fileErrorOf(run: () => unknown): SpreadsheetFileError {
-  try {
-    run();
-  } catch (error) {
-    if (error instanceof SpreadsheetFileError) return error;
-    throw error;
-  }
-  throw new Error('Expected a SpreadsheetFileError');
 }
 
 function expectFileError(

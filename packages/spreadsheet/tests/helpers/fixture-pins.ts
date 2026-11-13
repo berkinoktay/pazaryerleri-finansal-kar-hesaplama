@@ -87,6 +87,13 @@ export const FIXTURE_PINS: readonly FixturePin[] = [
   },
 ];
 
+/** The pin of the committed fixture named `file`. */
+export function pinOf(file: string): FixturePin {
+  const pin = FIXTURE_PINS.find((candidate) => candidate.file === file);
+  if (pin === undefined) throw new Error(`no fixture pin for ${file}`);
+  return pin;
+}
+
 /** The bytes of a committed fixture under apps/api/tests/fixtures. */
 export function readFixture(file: string): Buffer {
   return readFileSync(new URL(`../../../../apps/api/tests/fixtures/${file}`, import.meta.url));

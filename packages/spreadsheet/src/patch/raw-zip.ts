@@ -645,7 +645,25 @@ interface PlannedEntry {
 
 const COPY_PLAN: EntryPlan = { kind: 'copy' };
 
-function planOf(change: ZipChange | undefined): EntryPlan {
+/**
+ * The deflated bytes of `content`: from `cache` when it holds this content object,
+ * otherwise deflated now and added to `cache` (when one is given).
+ */
+function deflatedContent(
+  content: Uint8Array,
+  cache: Map<Uint8Array, Uint8Array> | undefined,
+): Uint8Array {
+  const cached = cache?.get(content);
+  if (cached !== undefined) return cached;
+  const data = deflateSync(content, { level: PATCHED_PART_DEFLATE_LEVEL });
+  cache?.set(content, data);
+  return data;
+}
+
+function planOf(
+  change: ZipChange | undefined,
+  deflated: Map<Uint8Array, Uint8Array> | undefined,
+): EntryPlan {
   if (change === undefined) return COPY_PLAN;
   switch (change.kind) {
     case 'drop':
@@ -654,7 +672,7 @@ function planOf(change: ZipChange | undefined): EntryPlan {
       return {
         kind: 'replace',
         content: change.content,
-        data: deflateSync(change.content, { level: PATCHED_PART_DEFLATE_LEVEL }),
+        data: deflatedContent(change.content, deflated),
         crc32: crc32(change.content),
       };
     default: {
@@ -782,11 +800,17 @@ function writeEndRecord(
   view.setUint32(at + END_DIRECTORY_OFFSET, directory.offset, LITTLE_ENDIAN);
 }
 
-/** A new archive: unchanged entries as raw bytes, `changes` applied by entry name. */
+/**
+ * A new archive: unchanged entries as raw bytes, `changes` applied by entry name.
+ * `deflated`, when given, maps a replaced content object to its deflated bytes and is
+ * filled here: a content met again, by identity, in this or a later call is not
+ * deflated again. A content must not change once it has been passed with a cache.
+ */
 export function rewriteZip(
   file: Uint8Array,
   layout: ZipLayout,
   changes: ReadonlyMap<string, ZipChange>,
+  deflated?: Map<Uint8Array, Uint8Array>,
 ): Uint8Array<ArrayBuffer> {
   const names = new Set(layout.entries.map((entry) => entry.name));
   for (const name of changes.keys()) {
@@ -800,7 +824,7 @@ export function rewriteZip(
   const fileView = viewOf(file);
   const planned: PlannedEntry[] = layout.entries.map((entry) => ({
     entry,
-    plan: planOf(changes.get(entry.name)),
+    plan: planOf(changes.get(entry.name), deflated),
     nameLength: u16(fileView, entry.headerOffset + LOCAL_NAME_LENGTH),
     headerOffset: FILE_START,
   }));

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { fileErrorOf } from '../../tests/helpers/errors';
 import { expectWithinBudget, LINEAR_BUDGET_MS } from '../../tests/helpers/timing';
-import { SpreadsheetFileError } from '../errors';
 import { CONTENT_TYPES_PART, WORKBOOK_RELS_PART } from '../workbook-parts';
 import { childElements, parsePart } from '../xml-dom';
 import { planCalcChainRemoval, type CalcChainRemoval } from './calc-chain';
@@ -56,23 +56,13 @@ function typesText(body: string): string {
 }
 
 function plan(rels: string, types: string): CalcChainRemoval | null {
-  return planCalcChainRemoval(encoder.encode(rels), encoder.encode(types));
+  return planCalcChainRemoval(encoder.encode(rels), () => encoder.encode(types));
 }
 
 function planned(rels: string, types: string): CalcChainRemoval {
   const result = plan(rels, types);
   if (result === null) throw new Error('Expected a calcChain removal');
   return result;
-}
-
-function fileErrorOf(run: () => unknown): SpreadsheetFileError {
-  try {
-    run();
-  } catch (error) {
-    if (error instanceof SpreadsheetFileError) return error;
-    throw error;
-  }
-  throw new Error('Expected a SpreadsheetFileError');
 }
 
 function expectPackagePartError(entry: string, run: () => unknown): void {
@@ -113,6 +103,7 @@ describe('planCalcChainRemoval: cuts', () => {
     const result = planned(rels, types);
 
     expect(result.paths).toEqual([CALC_CHAIN_PATH]);
+    expect(result.cutParts).toEqual([CALC_CHAIN_PATH]);
     expect(relationshipsOf(result.workbookRels)).toEqual([
       ['Relationship', 'rId1', WORKSHEET_TYPE, 'worksheets/sheet1.xml'],
     ]);
@@ -131,6 +122,19 @@ describe('planCalcChainRemoval: cuts', () => {
       '<Override PartName="/xl/calc&#67;hain.xml"/><Override PartName=x/><<',
     );
     expect(plan(relsText(WORKSHEET_REL), brokenTypes)).toBeNull();
+  });
+
+  it('reads the content types only when the rels name a calcChain', () => {
+    let reads = 0;
+    const contentTypes = (): Uint8Array => {
+      reads += 1;
+      return encoder.encode(typesText(CALC_CHAIN_OVERRIDE));
+    };
+    expect(planCalcChainRemoval(encoder.encode(relsText(WORKSHEET_REL)), contentTypes)).toBeNull();
+    expect(reads).toBe(0);
+    const rels = encoder.encode(relsText(`${WORKSHEET_REL}${CALC_CHAIN_REL}`));
+    expect(planCalcChainRemoval(rels, contentTypes)?.cutParts).toEqual([CALC_CHAIN_PATH]);
+    expect(reads).toBe(1);
   });
 
   it('maps an absolute Target to the same entry name', () => {
@@ -171,6 +175,7 @@ describe('planCalcChainRemoval: cuts', () => {
     );
     expect(result.paths).toEqual([CALC_CHAIN_PATH]);
     expect(result.contentTypes).toBeNull();
+    expect(result.cutParts).toEqual([]);
     expect(decoder.decode(result.workbookRels)).toBe(relsText(WORKSHEET_REL));
   });
 
@@ -234,6 +239,8 @@ describe('planCalcChainRemoval: Override matching', () => {
     const result = planned(relsText(CALC_CHAIN_REL), typesText(`${SHEET_OVERRIDE}${upperCase}`));
 
     expect(result.paths).toEqual([CALC_CHAIN_PATH]);
+    // The PartName as written, not folded: the caller folds when it matches entries.
+    expect(result.cutParts).toEqual(['XL/CALCCHAIN.XML']);
     expect(contentTypesText(result)).toBe(typesText(SHEET_OVERRIDE));
   });
 
