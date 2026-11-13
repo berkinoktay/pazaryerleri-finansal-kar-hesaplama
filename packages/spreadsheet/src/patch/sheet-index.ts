@@ -5,7 +5,7 @@ import { SpreadsheetFileError } from '../errors';
 import { cellKey, colRefToNumber } from '../sheet-meta';
 import { SPREADSHEET_MAIN_NAMESPACES } from './limits';
 import { MALFORMED_SHEET_REASONS, UNSUPPORTED_ENCODING_REASONS } from './reasons';
-import { bytesEqualAt } from './shared';
+import { ASCII_CASE_OFFSET, bytesEqualAt } from './shared';
 import {
   ATTRIBUTE_NAME_END,
   ATTRIBUTE_NAME_START,
@@ -101,7 +101,6 @@ const UTF8_BYTE_ORDER_MARK: readonly number[] = [0xef, 0xbb, 0xbf];
 
 // The lowest first digit of a row reference.
 const DIGIT_ONE = 0x31;
-const ASCII_CASE_OFFSET = 0x20;
 const DECIMAL_BASE = 10;
 // A row reference is [1-9][0-9]{0,6}; a cell reference puts 1 to 3 letters before it.
 const MAX_ROW_REFERENCE_DIGITS = 7;

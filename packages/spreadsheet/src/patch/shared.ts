@@ -46,3 +46,6 @@ export function viewMismatch(entryName: string, message: string): SpreadsheetFil
     entry: metaEntryName(entryName),
   });
 }
+
+/** What turns an upper-case ASCII letter (a byte or a UTF-16 code unit) into its lower case. */
+export const ASCII_CASE_OFFSET = 0x20;

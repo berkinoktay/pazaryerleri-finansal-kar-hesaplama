@@ -1,7 +1,7 @@
 import { SpreadsheetFileError } from '../errors';
 import { CONTENT_TYPES_PART, readerFilePath, WORKBOOK_RELS_PART } from '../workbook-parts';
 import { ZIP_REJECT_REASONS } from './reasons';
-import { metaEntryName } from './shared';
+import { ASCII_CASE_OFFSET, metaEntryName } from './shared';
 import {
   ATTRIBUTE_NAME_END,
   ATTRIBUTE_NAME_START,
@@ -87,9 +87,8 @@ const NO_ATTRIBUTE = -1;
 // '&' opens a character or entity reference inside an attribute value.
 const AMPERSAND = 0x26;
 
-// The upper-case ASCII letters and nothing else, and what turns one into its lower case.
+// The upper-case ASCII letters and nothing else.
 const ASCII_UPPER_CASE_LETTER = /[A-Z]/g;
-const ASCII_CASE_OFFSET = 0x20;
 
 // Depth (open elements) at which the root's tag, and its direct children's tags, are met.
 const ROOT_DEPTH = 0;

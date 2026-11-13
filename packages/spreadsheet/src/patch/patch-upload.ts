@@ -22,8 +22,8 @@ import { bytesEqualAt, metaEntryName, viewMismatch } from './shared';
 import { cellKeysOf, indexWorksheet } from './sheet-index';
 
 // The export patch path, sync and in-process: one stored upload in, one archive per
-// output out. Cheap checks run before the DOM, and nothing is written before every
-// check has passed:
+// output out. Cheap checks run before the DOM, and no archive is returned before
+// every check has passed:
 //   0. every patch target lies inside the read caps (resolvePatchRequest checked it
 //      on the main thread; a request that did not come through there is checked
 //      here, because the merged-range check below looks only inside the caps);
@@ -40,8 +40,9 @@ import { cellKeysOf, indexWorksheet } from './sheet-index';
 //   7. no target inside a merged range;
 //   8. each output's patches, applied to the index;
 //   9. a changed output is the archive with the converted part replaced and, when a
-//      formula was overwritten, the calcChain cut; the bytes of all outputs together
-//      are capped.
+//      formula was overwritten, the calcChain cut. rewriteZip refuses an output whose
+//      directory region would hold a local-header signature (the gate's stream would
+//      read it); the bytes of all outputs together are capped.
 // The patched part is built from the bytes the reader parsed, never from the
 // directory's copy.
 //
@@ -205,7 +206,8 @@ function calcChainChanges(
  * nothing (the stored file itself). See the top of this file for the order of the
  * checks. Throws Error('Invalid patch request: ...') first for a patch target outside
  * the read caps. Throws SpreadsheetFileError: every gate and reader error;
- * CORRUPT_FILE with a zip reason from the layout, the view check or the calcChain cut;
+ * CORRUPT_FILE with a zip reason from the layout, the view check, the calcChain cut or
+ * the output's own directory check;
  * ROW_ANCHOR_MISMATCH; MALFORMED_SHEET and UNSUPPORTED_ENCODING from the index, the
  * cell cross-check, the merged-range check and the patcher; ROW_NOT_FOUND;
  * PAYLOAD_TOO_LARGE for a patched part beyond its growth cap, or outputs beyond
