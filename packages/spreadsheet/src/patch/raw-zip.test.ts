@@ -6,10 +6,13 @@ import { fileErrorOf } from '../../tests/helpers/errors';
 import { FIXTURE_PINS, readFixture } from '../../tests/helpers/fixture-pins';
 import { BOUNDED_INFLATE_BUDGET_MS, expectWithinBudget } from '../../tests/helpers/timing';
 import {
+  type DirectorySignatureArchive,
   hiddenEntryArchive,
   hiddenTileArchive,
   type HiddenTileKind,
   rawSegment,
+  sizeFlipArchive,
+  swallowedEntryArchive,
   unsignedDescriptorArchive,
   type UnsignedDescriptorLength,
   zip64SkipArchive,
@@ -96,6 +99,14 @@ const UTF8_FLAG = 0x0800;
 const DEFLATED = 8;
 const UNKNOWN_METHOD = 99;
 const ZIP64_SIZE = 0xffffffff;
+// 'PK' read as a little-endian 16-bit field, and the 16-bit field that completes it to
+// a local header signature right after it ('\x03\x04').
+const PK_FIELD = 0x4b50;
+const SIGNATURE_TAIL_FIELD = 0x0403;
+const LOW_HALF_MASK = 0xffff;
+// More than enough counters to find a content whose crc has a given low half (one in
+// 65 536 does).
+const CRC_SEARCH_LIMIT = 1 << 22;
 
 function expectRejected(run: () => unknown, reason: string): SpreadsheetFileError {
   const error = fileErrorOf(run);
@@ -722,5 +733,85 @@ describe('the hidden entry', () => {
     expect(openUpload(file, GUARD_OPTS)[SHEET_PART]).toEqual(realSheet);
     expect(unzipSync(file)[SHEET_PART]).toEqual(otherSheet);
     expectRejected(() => readZipLayout(file), ZIP_REJECT_REASONS.LAYOUT);
+  });
+});
+
+// Past the last entry the gate's stream searches the directory for a local header
+// signature too; whether it reads one as an entry or stops at it can depend on fields
+// a rewrite changes (see tests/helpers/workbooks.ts).
+const DIRECTORY_SIGNATURE_ARCHIVES: readonly [string, () => DirectorySignatureArchive][] = [
+  ['a fake entry hidden behind an incomplete header in another record', swallowedEntryArchive],
+  ['a bare signature that the next record completes once a size changes', sizeFlipArchive],
+];
+
+describe.each(DIRECTORY_SIGNATURE_ARCHIVES)(
+  'a local header signature in the directory: %s',
+  (_, build) => {
+    it('passes the import gate', () => {
+      const { file } = build();
+      // Pins today's import gate, which accepts this file. Flips to toThrow when PR 3 adds the zip-layout and view checks to the import gate.
+      expect(() => openUpload(file, GUARD_OPTS)).not.toThrow();
+    });
+
+    it('is refused by readZipLayout', () => {
+      const { file } = build();
+      const error = expectRejected(() => readZipLayout(file), ZIP_REJECT_REASONS.LAYOUT);
+      expect(error.message).toBe('Zip directory holds a local header signature');
+      expect(error.meta).toEqual({ reason: ZIP_REJECT_REASONS.LAYOUT });
+    });
+
+    it('is laid out as the directory describes it once the signatures are zeroed', () => {
+      const { file, layout, plantedSignatures } = build();
+      for (const at of plantedSignatures) {
+        expect([...file.subarray(at, at + SIGNATURE_LENGTH)]).toEqual(LOCAL_HEADER_SIGNATURE);
+      }
+      expect(readZipLayout(withZeroedSignatures(file, plantedSignatures))).toEqual(layout);
+    });
+
+    it('is refused by rewriteZip, which checks its own output', () => {
+      // The layout the directory describes, which readZipLayout refuses: rewriteZip
+      // copies the records as they are and finds the signature in what it wrote.
+      const { file, layout } = build();
+      const error = expectRejected(
+        () => rewriteZip(file, layout, new Map<string, ZipChange>()),
+        ZIP_REJECT_REASONS.LAYOUT,
+      );
+      expect(error.meta).toEqual({ reason: ZIP_REJECT_REASONS.LAYOUT });
+    });
+  },
+);
+
+/** A content whose crc32 has `lowHalf` as its low 16 bits. */
+function contentWithCrcLowHalf(lowHalf: number): Uint8Array {
+  for (let counter = 0; counter < CRC_SEARCH_LIMIT; counter += 1) {
+    const content = strToU8(`${PROBE}${counter}`);
+    if ((crc32(content) & LOW_HALF_MASK) === lowHalf) return content;
+  }
+  throw new Error('no content with that crc found');
+}
+
+describe('rewriteZip: a local header signature its own fields spell', () => {
+  it('refuses a new crc that completes a signature with the record date in front of it', () => {
+    // A record keeps its date and takes the replaced entry's crc right after it: a date
+    // that reads 'PK' and a crc whose low half reads '\x03\x04' spell a local header
+    // signature across the two fields. The source directory holds none.
+    const file = edited(smallWorkbook(), (copy, layout) => {
+      copy.writeUInt16LE(PK_FIELD, entryNamed(layout, SHEET_PART).recordOffset + RECORD_DATE);
+    });
+    const layout = readZipLayout(file);
+    const changes = new Map<string, ZipChange>([
+      [SHEET_PART, { kind: 'replace', content: contentWithCrcLowHalf(SIGNATURE_TAIL_FIELD) }],
+    ]);
+
+    const error = expectRejected(
+      () => rewriteZip(file, layout, changes),
+      ZIP_REJECT_REASONS.LAYOUT,
+    );
+    expect(error.message).toBe('Zip rewrite puts a local header signature into its directory');
+    expect(error.meta).toEqual({ reason: ZIP_REJECT_REASONS.LAYOUT });
+
+    // Control: the same replacement behind the archive's own date is written.
+    const plain = smallWorkbook();
+    expect(() => rewriteZip(plain, readZipLayout(plain), changes)).not.toThrow();
   });
 });

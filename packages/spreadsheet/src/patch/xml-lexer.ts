@@ -56,16 +56,16 @@ export const ATTRIBUTE_VALUE_END = 3;
 
 // XML's S production, and nothing else: xmldom also takes U+0080 and every byte
 // below 0x20, which this lexer refuses.
-const SPACE = 0x20;
+export const SPACE = 0x20;
 const TAB = 0x09;
 const LF = 0x0a;
 const CR = 0x0d;
 
-const TAG_OPEN = 0x3c; // '<'
+export const TAG_OPEN = 0x3c; // '<'
 const TAG_CLOSE = 0x3e; // '>'
 const SLASH = 0x2f; // '/': opens an end tag after '<', closes an empty tag before '>'
 const BANG = 0x21; // '!': opens a comment, CDATA section or DTD declaration after '<'
-const QUESTION = 0x3f; // '?': opens a processing instruction after '<'
+export const QUESTION = 0x3f; // '?': opens a processing instruction after '<'
 const EQUALS = 0x3d;
 const DOUBLE_QUOTE = 0x22;
 const SINGLE_QUOTE = 0x27;
@@ -73,10 +73,10 @@ const COLON = 0x3a;
 const UNDERSCORE = 0x5f;
 const HYPHEN = 0x2d;
 const PERIOD = 0x2e;
-const DIGIT_ZERO = 0x30;
-const DIGIT_NINE = 0x39;
-const UPPER_A = 0x41;
-const UPPER_Z = 0x5a;
+export const DIGIT_ZERO = 0x30;
+export const DIGIT_NINE = 0x39;
+export const UPPER_A = 0x41;
+export const UPPER_Z = 0x5a;
 const LOWER_A = 0x61;
 const LOWER_Z = 0x7a;
 const MAX_ASCII = 0x7f;
@@ -91,6 +91,9 @@ const COMMENT_DASHES = '--';
 const COMMENT_CLOSE = '-->';
 const CDATA_OPEN = '<![CDATA[';
 const CDATA_CLOSE = ']]>';
+
+/** Decodes a name this lexer accepted: names are ASCII, which UTF-8 decodes unchanged. */
+export const NAME_DECODER = new TextDecoder();
 
 export function createMarkup(): XmlMarkup {
   return { kind: 'opaque', start: 0, end: 0, nameStart: 0, nameEnd: 0, attributeCount: 0 };

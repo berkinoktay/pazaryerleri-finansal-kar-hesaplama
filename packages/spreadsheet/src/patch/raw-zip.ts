@@ -2,14 +2,11 @@ import { Buffer } from 'node:buffer';
 import { crc32, inflateRawSync } from 'node:zlib';
 import { deflateSync, strFromU8 } from 'fflate';
 
-import {
-  MAX_DECOMPRESSED_BYTES,
-  MAX_ERROR_CAUSE_LENGTH,
-  MAX_ZIP_ENTRIES,
-  PATCHED_PART_DEFLATE_LEVEL,
-} from '../constants';
+import { MAX_DECOMPRESSED_BYTES, MAX_ZIP_ENTRIES } from '../constants';
 import { SpreadsheetFileError } from '../errors';
+import { PATCHED_PART_DEFLATE_LEVEL } from './limits';
 import { ZIP_REJECT_REASONS } from './reasons';
+import { bytesEqualAt, metaEntryName, viewMismatch } from './shared';
 
 // The zip side of the export patch path: a strict reader of the archive's layout, the
 // path's only inflate (bounded by the size an entry declares), and a writer that copies
@@ -22,8 +19,9 @@ import { ZIP_REJECT_REASONS } from './reasons';
 // size of 0xFFFFFFFF included), a directory that ends where the end record starts,
 // entries that tile the bytes before the directory with no gap or overlap, local
 // headers and data descriptors that agree with their records, data descriptors that
-// start with their signature, and none of the signatures at which the stream ends an
-// entry inside the segment of an entry that carries a data descriptor (flag bit 3).
+// start with their signature, none of the signatures at which the stream ends an
+// entry inside the segment of an entry that carries a data descriptor (flag bit 3),
+// and no local header signature anywhere from the directory to the end of the file.
 //
 // The stream ends a bit-3 entry at the first of those signatures and steps a fixed
 // length past it. When a local size is 0xFFFFFFFF and a zip64 extra field holds it,
@@ -33,6 +31,14 @@ import { ZIP_REJECT_REASONS } from './reasons';
 // descriptor right before the directory (where a drop can move any entry) streams with
 // the wrong data end. Hence no local size of 0xFFFFFFFF, and only the signed 16- and
 // 24-byte data descriptors.
+//
+// Past the last entry the stream keeps searching for a local header signature,
+// through the directory and the end record. One that fits before the end of the file
+// is an entry the directory does not list; one whose name and extra field run past
+// the end makes the stream stop there and miss every later one. A record's extra field
+// or comment can hold either, and which of the two a signature is can depend on fields
+// a rewrite changes (the next record's sizes). So rewriteZip checks its own output's
+// directory the same way: it never returns an archive the gate would read otherwise.
 //
 // Nothing here inflates with fflate: its sync inflate and unzip decode a deflate stream
 // to its end and drop the overflow, whatever size the directory declares.
@@ -216,7 +222,7 @@ interface DirectoryRecord {
 
 function zipError(reason: ZipRejectReason, message: string, entry?: string): SpreadsheetFileError {
   const meta: Record<string, unknown> =
-    entry === undefined ? { reason } : { reason, entry: entry.slice(0, MAX_ERROR_CAUSE_LENGTH) };
+    entry === undefined ? { reason } : { reason, entry: metaEntryName(entry) };
   return new SpreadsheetFileError('CORRUPT_FILE', message, meta);
 }
 
@@ -356,13 +362,6 @@ function readRecords(file: Uint8Array, view: DataView, end: EndRecord): Director
   return records;
 }
 
-function sameBytes(file: Uint8Array, a: number, b: number, length: number): boolean {
-  for (let i = 0; i < length; i += 1) {
-    if (file[a + i] !== file[b + i]) return false;
-  }
-  return true;
-}
-
 /**
  * No local size of 0xFFFFFFFF: with a zip64 extra field the stream reads its sizes
  * from there and, with bit 3, steps over a zip64 data descriptor into the next entry.
@@ -479,6 +478,20 @@ function assertNoStreamStop(
 }
 
 /**
+ * Whether a local header signature stands anywhere in [directoryOffset, end of
+ * `file`): the directory and the end record, a signature spelled across two fields
+ * included. One forward search; nothing is copied.
+ */
+function directoryHoldsLocalHeader(file: Uint8Array, directoryOffset: number): boolean {
+  const directory = Buffer.from(
+    file.buffer,
+    file.byteOffset + directoryOffset,
+    file.byteLength - directoryOffset,
+  );
+  return directory.indexOf(LOCAL_HEADER_SIGNATURE_BYTES) !== NOT_FOUND;
+}
+
+/**
  * The entry of `record`, whose segment runs from its local header to `segmentEnd` (the
  * next entry's header, or the directory). Cheap header checks first, then the data
  * descriptor, then the signature search.
@@ -502,7 +515,7 @@ function readEntry(
   if (dataEnd > segmentEnd) throw layoutError('Zip entry overlaps the next one', name);
   if (
     nameLength !== record.nameLength ||
-    !sameBytes(file, at + LOCAL_HEADER_LENGTH, record.nameOffset, nameLength)
+    !bytesEqualAt(file, at + LOCAL_HEADER_LENGTH, file, record.nameOffset, nameLength)
   ) {
     throw layoutError('Zip local header names another entry', name);
   }
@@ -576,22 +589,21 @@ function tileEntries(
  * the top of this file). Throws CORRUPT_FILE with `meta.reason` (`zip-layout`,
  * `zip64`, `zip-encrypted`, `zip-method`) and, when the fault lies in one entry, its
  * name in `meta.entry`. Every read is bounds-checked; nothing is inflated or copied.
+ * A local header signature in the directory or the end record is `zip-layout` with no
+ * entry; it is looked for last, after the entries.
  */
 export function readZipLayout(file: Uint8Array): ZipLayout {
   const view = viewOf(file);
   const end = readEndRecord(view);
   const records = readRecords(file, view, end);
   const entries = tileEntries(file, view, end, records);
+  if (directoryHoldsLocalHeader(file, end.directoryOffset)) {
+    throw layoutError('Zip directory holds a local header signature');
+  }
   return { entries, directoryOffset: end.directoryOffset, endRecordOffset: end.endRecordOffset };
 }
 
-function viewMismatch(entry: ZipEntry): SpreadsheetFileError {
-  return zipError(
-    ZIP_REJECT_REASONS.VIEW_MISMATCH,
-    'Zip entry does not inflate to its declared size',
-    entry.name,
-  );
-}
+const INFLATE_MISMATCH = 'Zip entry does not inflate to its declared size';
 
 function inflateBounded(raw: Uint8Array, entry: ZipEntry): Uint8Array {
   try {
@@ -602,7 +614,7 @@ function inflateBounded(raw: Uint8Array, entry: ZipEntry): Uint8Array {
   } catch {
     // Overflow, bad data or a stream that ends early: the gate proved that the stream's
     // entry of this name inflates to exactly the declared size, so this is not it.
-    throw viewMismatch(entry);
+    throw viewMismatch(entry.name, INFLATE_MISMATCH);
   }
 }
 
@@ -620,7 +632,7 @@ export function entryContent(file: Uint8Array, entry: ZipEntry): Uint8Array {
   } else {
     throw zipError(ZIP_REJECT_REASONS.METHOD, 'Zip entry uses an unsupported method', entry.name);
   }
-  if (content.length !== entry.uncompressedSize) throw viewMismatch(entry);
+  if (content.length !== entry.uncompressedSize) throw viewMismatch(entry.name, INFLATE_MISMATCH);
   return content;
 }
 
@@ -805,6 +817,8 @@ function writeEndRecord(
  * `deflated`, when given, maps a replaced content object to its deflated bytes and is
  * filled here: a content met again, by identity, in this or a later call is not
  * deflated again. A content must not change once it has been passed with a cache.
+ * Throws CORRUPT_FILE `{ reason: 'zip-layout' }` instead of returning an archive whose
+ * directory or end record holds a local header signature (readZipLayout's own rule).
  */
 export function rewriteZip(
   file: Uint8Array,
@@ -816,7 +830,7 @@ export function rewriteZip(
   for (const name of changes.keys()) {
     if (!names.has(name)) {
       throw new Error(
-        `Zip rewrite changes an entry the archive does not have: ${name.slice(0, MAX_ERROR_CAUSE_LENGTH)}`,
+        `Zip rewrite changes an entry the archive does not have: ${metaEntryName(name)}`,
       );
     }
   }
@@ -853,5 +867,11 @@ export function rewriteZip(
     offset: directoryOffset,
     size: directorySize,
   });
+  // The rewritten offsets, crc and sizes (and the end record's fields) may spell a
+  // local header signature, alone or across two fields; the gate's stream would read
+  // such an archive another way (see the top of this file).
+  if (directoryHoldsLocalHeader(out, directoryOffset)) {
+    throw layoutError('Zip rewrite puts a local header signature into its directory');
+  }
   return out;
 }

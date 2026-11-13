@@ -5,11 +5,11 @@ import { fileErrorOf } from '../../tests/helpers/errors';
 import { FIXTURE_PINS, readFixture } from '../../tests/helpers/fixture-pins';
 import { MAIN_NAMESPACE, sheet } from '../../tests/helpers/patch-helpers';
 import { expectWithinBudget, LINEAR_BUDGET_MS } from '../../tests/helpers/timing';
-import { SPREADSHEET_MAIN_NAMESPACES } from '../constants';
 import { SpreadsheetFileError } from '../errors';
 import { cellKey, columnLetters } from '../sheet-meta';
 import { parsePart } from '../xml-dom';
 import { resolveWorksheetPartPaths } from '../workbook-parts';
+import { SPREADSHEET_MAIN_NAMESPACES } from './limits';
 import { MALFORMED_SHEET_REASONS, UNSUPPORTED_ENCODING_REASONS } from './reasons';
 import { cellKeysOf, indexWorksheet } from './sheet-index';
 

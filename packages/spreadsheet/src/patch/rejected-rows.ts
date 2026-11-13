@@ -1,4 +1,4 @@
-import { PATCH_ERROR_ROW_SAMPLE } from '../constants';
+import { PATCH_ERROR_ROW_SAMPLE } from './limits';
 import { valueAt } from './xml-lexer';
 
 // The `{ count, rows }` meta of the export patch path's rejections (anchors, merged

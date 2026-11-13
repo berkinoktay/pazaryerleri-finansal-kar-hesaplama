@@ -1,23 +1,19 @@
 import { Buffer } from 'node:buffer';
 
+import { ABSOLUTE_MAX_COLS } from '../constants';
+import { SpreadsheetFileError } from '../errors';
+import { columnLetters } from '../sheet-meta';
+import { assertWritableValue, escapeXmlText, needsSpacePreserve } from './cell-values';
 import {
-  ABSOLUTE_MAX_COLS,
   PATCH_GROWTH_DENOMINATOR,
   PATCH_GROWTH_FLOOR_BYTES,
   PATCH_GROWTH_NUMERATOR,
-} from '../constants';
-import { SpreadsheetFileError } from '../errors';
-import { columnLetters } from '../sheet-meta';
-import {
-  assertWritableValue,
-  escapeXmlText,
-  INVALID_PATCH_REQUEST,
-  needsSpacePreserve,
-} from './cell-values';
+} from './limits';
 import { copyCellPatch, type CellPatch, type CellPatchValue } from './patch-request';
 import { MALFORMED_SHEET_REASONS, PATCH_LIMIT_REASONS } from './reasons';
 import { RejectedRows } from './rejected-rows';
-import { indexWorksheet, type SheetIndex } from './sheet-index';
+import { invalidPatchRequest } from './shared';
+import type { SheetIndex } from './sheet-index';
 import {
   ATTRIBUTE_NAME_END,
   ATTRIBUTE_NAME_START,
@@ -26,8 +22,11 @@ import {
   bytesEqualAscii,
   createMarkup,
   localNameIs,
+  NAME_DECODER,
   nextMarkup,
   scanMarkup,
+  SPACE,
+  TAG_OPEN,
   valueAt,
   type XmlMarkup,
 } from './xml-lexer';
@@ -77,8 +76,6 @@ const SPACE_PRESERVE = ' xml:space="preserve"';
 const PREFIX_SEPARATOR = ':';
 const NO_PREFIX = '';
 const EMPTY_TAG_CLOSE = '/>';
-const TAG_OPEN = 0x3c; // '<'
-const SPACE = 0x20;
 // An attribute's bytes run from its name through the quote after its value.
 const CLOSING_QUOTE_LENGTH = 1;
 // Before any patch: every real patch (row >= 1, column >= 0) comes after it.
@@ -87,12 +84,6 @@ const NO_PREVIOUS_COLUMN = -1;
 const NO_ROW = -1;
 
 const encoder = new TextEncoder();
-// Names are ASCII (the lexer refuses any other byte in a name), so UTF-8 decodes them as is.
-const NAME_DECODER = new TextDecoder();
-
-function invalidRequest(detail: string): Error {
-  return new Error(`${INVALID_PATCH_REQUEST}${detail}`);
-}
 
 function growthError(cap: number): SpreadsheetFileError {
   return new SpreadsheetFileError(
@@ -209,7 +200,7 @@ class CellPatcher {
   run(): WorksheetPatchResult {
     for (let position = 0; position < this.patches.length; position += 1) {
       const given = this.patches[position];
-      if (given === undefined) throw invalidRequest(`patch ${position} is missing`);
+      if (given === undefined) throw invalidPatchRequest(`patch ${position} is missing`);
       // Checked and written from one plain copy: every field is read exactly once.
       const patch = copyCellPatch(given);
       this.checkPatch(patch);
@@ -229,15 +220,17 @@ class CellPatcher {
   private checkPatch(patch: CellPatch): void {
     const { excelRow, col } = patch;
     if (!Number.isInteger(excelRow) || excelRow < 1) {
-      throw invalidRequest(`patch row ${String(excelRow)} is not an integer of at least 1`);
+      throw invalidPatchRequest(`patch row ${String(excelRow)} is not an integer of at least 1`);
     }
     if (!Number.isInteger(col) || col < 0 || col >= ABSOLUTE_MAX_COLS) {
-      throw invalidRequest(`patch column ${String(col)} is outside 0..${ABSOLUTE_MAX_COLS - 1}`);
+      throw invalidPatchRequest(
+        `patch column ${String(col)} is outside 0..${ABSOLUTE_MAX_COLS - 1}`,
+      );
     }
     const after =
       excelRow > this.previousRow || (excelRow === this.previousRow && col > this.previousColumn);
     if (!after) {
-      throw invalidRequest(
+      throw invalidPatchRequest(
         `patch on row ${excelRow}, column ${col} is out of order or repeats a cell`,
       );
     }
@@ -549,21 +542,4 @@ export function applyCellPatches(
   options: WorksheetPatchOptions,
 ): WorksheetPatchResult {
   return new CellPatcher(index, patches, options).run();
-}
-
-/**
- * Test convenience: index + apply with `patchedPartCap`; returns the part's bytes.
- * It skips the reader's well-formedness check (the index has no name stack, so it
- * accepts an end tag whose name does not match its start tag): use it in tests only.
- */
-export function patchWorksheetXml(
-  xml: Uint8Array,
-  patches: readonly CellPatch[],
-  overwriteFormulaColumns: readonly number[] = [],
-): Uint8Array {
-  const result = applyCellPatches(indexWorksheet(xml), patches, {
-    overwriteFormulaColumns: new Set(overwriteFormulaColumns),
-    maxBytes: patchedPartCap(xml.length),
-  });
-  return result.bytes;
 }

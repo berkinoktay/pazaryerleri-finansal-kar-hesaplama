@@ -14,7 +14,8 @@ import {
 } from '../read-options';
 import { cellKey } from '../sheet-meta';
 import { isRecord } from '../wire-guards';
-import { INVALID_PATCH_REQUEST, assertWritableValue } from './cell-values';
+import { assertWritableValue } from './cell-values';
+import { invalidPatchRequest } from './shared';
 
 /**
  * What a patch writes into one cell. A `number` value is a plain decimal string; with
@@ -60,28 +61,26 @@ export interface ResolvedPatchRequest {
   readonly overwriteFormulaColumns: readonly number[];
 }
 
-function invalid(detail: string): Error {
-  return new Error(`${INVALID_PATCH_REQUEST}${detail}`);
-}
-
 function assertCounts(
   outputs: readonly (readonly CellPatch[])[],
   anchors: readonly PatchAnchor[],
   formulaColumns: readonly number[],
 ): void {
   if (outputs.length < 1 || outputs.length > MAX_PATCH_OUTPUTS) {
-    throw invalid(`expected 1 to ${MAX_PATCH_OUTPUTS} outputs, got ${outputs.length}`);
+    throw invalidPatchRequest(`expected 1 to ${MAX_PATCH_OUTPUTS} outputs, got ${outputs.length}`);
   }
   let cells = 0;
   for (const output of outputs) cells += output.length;
   if (cells > MAX_PATCH_CELLS) {
-    throw invalid(`${cells} cell patches exceed ${MAX_PATCH_CELLS}`);
+    throw invalidPatchRequest(`${cells} cell patches exceed ${MAX_PATCH_CELLS}`);
   }
   if (anchors.length > MAX_PATCH_ANCHORS) {
-    throw invalid(`${anchors.length} anchors exceed ${MAX_PATCH_ANCHORS}`);
+    throw invalidPatchRequest(`${anchors.length} anchors exceed ${MAX_PATCH_ANCHORS}`);
   }
   if (formulaColumns.length > ABSOLUTE_MAX_COLS) {
-    throw invalid(`${formulaColumns.length} formula columns exceed ${ABSOLUTE_MAX_COLS}`);
+    throw invalidPatchRequest(
+      `${formulaColumns.length} formula columns exceed ${ABSOLUTE_MAX_COLS}`,
+    );
   }
 }
 
@@ -114,7 +113,7 @@ function assertTextBudget(
   }
   for (const anchor of anchors) total += anchor.expected.length;
   if (total > MAX_PATCH_REQUEST_TEXT_LENGTH) {
-    throw invalid(
+    throw invalidPatchRequest(
       `patch and anchor text exceeds ${MAX_PATCH_REQUEST_TEXT_LENGTH} UTF-16 code units`,
     );
   }
@@ -122,16 +121,31 @@ function assertTextBudget(
 
 function assertColumn(col: number, read: ResolvedReadOptions, what: string): void {
   if (!Number.isInteger(col) || col < 0 || col >= read.colCap) {
-    throw invalid(`${what} column ${String(col)} is outside 0..${read.colCap - 1}`);
+    throw invalidPatchRequest(`${what} column ${String(col)} is outside 0..${read.colCap - 1}`);
   }
 }
 
 function assertCell(excelRow: number, col: number, read: ResolvedReadOptions, what: string): void {
   const lastRow = read.rowCap + 1;
   if (!Number.isInteger(excelRow) || excelRow < 1 || excelRow > lastRow) {
-    throw invalid(`${what} row ${String(excelRow)} is outside 1..${lastRow}`);
+    throw invalidPatchRequest(`${what} row ${String(excelRow)} is outside 1..${lastRow}`);
   }
   assertColumn(col, read, what);
+}
+
+/**
+ * Throws Error('Invalid patch request: ...') unless every patch of `outputs` targets
+ * an integer row in 1..rowCap + 1 and an integer column in 0..colCap - 1 of `read`.
+ * One pass over the patches. resolvePatchRequest runs it on the main thread;
+ * patchUpload runs it again first, for a request that did not come through there.
+ */
+export function assertPatchTargets(
+  outputs: readonly (readonly CellPatch[])[],
+  read: ResolvedReadOptions,
+): void {
+  for (const output of outputs) {
+    for (const patch of output) assertCell(patch.excelRow, patch.col, read, 'patch');
+  }
 }
 
 function assertRanges(
@@ -140,9 +154,7 @@ function assertRanges(
   formulaColumns: readonly number[],
   read: ResolvedReadOptions,
 ): void {
-  for (const output of outputs) {
-    for (const patch of output) assertCell(patch.excelRow, patch.col, read, 'patch');
-  }
+  assertPatchTargets(outputs, read);
   for (const anchor of anchors) assertCell(anchor.excelRow, anchor.col, read, 'anchor');
   for (const col of formulaColumns) assertColumn(col, read, 'formula');
 }
@@ -186,7 +198,7 @@ function resolveOutput(output: readonly CellPatch[], index: number): CellPatch[]
     const previous = sorted[i - 1];
     const current = sorted[i];
     if (previous !== undefined && current !== undefined && compareCells(previous, current) === 0) {
-      throw invalid(
+      throw invalidPatchRequest(
         `output ${index} patches row ${current.excelRow}, column ${current.col} more than once`,
       );
     }
@@ -200,7 +212,7 @@ function resolveAnchors(anchors: readonly PatchAnchor[]): PatchAnchor[] {
   return anchors.map((anchor): PatchAnchor => {
     const key = cellKey(anchor.excelRow, anchor.col + 1);
     if (seen.has(key)) {
-      throw invalid(`two anchors on row ${anchor.excelRow}, column ${anchor.col}`);
+      throw invalidPatchRequest(`two anchors on row ${anchor.excelRow}, column ${anchor.col}`);
     }
     seen.add(key);
     return { excelRow: anchor.excelRow, col: anchor.col, expected: anchor.expected };
@@ -215,15 +227,19 @@ function resolveFormulaColumns(columns: readonly number[]): number[] {
 function assertAnchorExpected(anchor: PatchAnchor): void {
   const { expected } = anchor;
   if (expected.length === 0) {
-    throw invalid(`anchor on row ${anchor.excelRow}, column ${anchor.col} expects an empty cell`);
+    throw invalidPatchRequest(
+      `anchor on row ${anchor.excelRow}, column ${anchor.col} expects an empty cell`,
+    );
   }
   if (expected.length > MAX_PATCH_TEXT_LENGTH) {
-    throw invalid(
+    throw invalidPatchRequest(
       `anchor on row ${anchor.excelRow}, column ${anchor.col} expects ${expected.length} characters, above ${MAX_PATCH_TEXT_LENGTH}`,
     );
   }
   if (expected !== expected.trim()) {
-    throw invalid(`anchor on row ${anchor.excelRow}, column ${anchor.col} expects untrimmed text`);
+    throw invalidPatchRequest(
+      `anchor on row ${anchor.excelRow}, column ${anchor.col} expects untrimmed text`,
+    );
   }
 }
 

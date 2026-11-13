@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { PATCH_ERROR_ROW_SAMPLE } from '../constants';
+import { PATCH_ERROR_ROW_SAMPLE } from './limits';
 import { RejectedRows } from './rejected-rows';
 
 describe('RejectedRows', () => {

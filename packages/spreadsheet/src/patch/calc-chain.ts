@@ -1,7 +1,7 @@
-import { MAX_ERROR_CAUSE_LENGTH } from '../constants';
 import { SpreadsheetFileError } from '../errors';
 import { CONTENT_TYPES_PART, readerFilePath, WORKBOOK_RELS_PART } from '../workbook-parts';
 import { ZIP_REJECT_REASONS } from './reasons';
+import { metaEntryName } from './shared';
 import {
   ATTRIBUTE_NAME_END,
   ATTRIBUTE_NAME_START,
@@ -14,6 +14,7 @@ import {
   localNameIs,
   nextMarkup,
   scanMarkup,
+  SPACE,
   valueAt,
   XmlLexError,
   type XmlMarkup,
@@ -83,7 +84,6 @@ const CONTENT_TYPE_ATTRIBUTE = 'ContentType';
 // An Override's PartName is the entry name with a leading '/'.
 const PART_NAME_PREFIX = '/';
 const NO_ATTRIBUTE = -1;
-const SPACE = 0x20;
 // '&' opens a character or entity reference inside an attribute value.
 const AMPERSAND = 0x26;
 
@@ -116,7 +116,7 @@ const FOLDED_CALC_CHAIN_RELATIONSHIP_TYPES: ReadonlySet<string> = new Set(
 function packagePartError(entry: string, detail: string): SpreadsheetFileError {
   return new SpreadsheetFileError('CORRUPT_FILE', `Package part ${detail}`, {
     reason: ZIP_REJECT_REASONS.PACKAGE_PART,
-    entry: entry.slice(0, MAX_ERROR_CAUSE_LENGTH),
+    entry: metaEntryName(entry),
   });
 }
 

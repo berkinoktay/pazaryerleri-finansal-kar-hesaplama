@@ -1,18 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
 import { fileErrorOf } from '../../tests/helpers/errors';
-import { clear, MAIN_NAMESPACE, num, sheet, text } from '../../tests/helpers/patch-helpers';
+import {
+  clear,
+  MAIN_NAMESPACE,
+  num,
+  patchWorksheetXml,
+  sheet,
+  text,
+} from '../../tests/helpers/patch-helpers';
 import { expectWithinBudget, LINEAR_BUDGET_MS } from '../../tests/helpers/timing';
 import type { SpreadsheetFileErrorCode } from '../errors';
 import { cellKey, columnLetters } from '../sheet-meta';
 import { parsePart } from '../xml-dom';
 import type { CellPatch, CellPatchValue } from './patch-request';
-import {
-  applyCellPatches,
-  patchedPartCap,
-  patchWorksheetXml,
-  type WorksheetPatchOptions,
-} from './patch-worksheet';
+import { applyCellPatches, patchedPartCap, type WorksheetPatchOptions } from './patch-worksheet';
 import { MALFORMED_SHEET_REASONS, PATCH_LIMIT_REASONS } from './reasons';
 import { cellKeysOf, indexWorksheet } from './sheet-index';
 import { valueAt } from './xml-lexer';

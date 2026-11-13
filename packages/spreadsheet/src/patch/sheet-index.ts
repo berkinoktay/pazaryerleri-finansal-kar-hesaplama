@@ -1,9 +1,11 @@
 import { isUtf8 } from 'node:buffer';
 
-import { ABSOLUTE_MAX_COLS, SPREADSHEET_MAIN_NAMESPACES } from '../constants';
+import { ABSOLUTE_MAX_COLS } from '../constants';
 import { SpreadsheetFileError } from '../errors';
 import { cellKey, colRefToNumber } from '../sheet-meta';
+import { SPREADSHEET_MAIN_NAMESPACES } from './limits';
 import { MALFORMED_SHEET_REASONS, UNSUPPORTED_ENCODING_REASONS } from './reasons';
+import { bytesEqualAt } from './shared';
 import {
   ATTRIBUTE_NAME_END,
   ATTRIBUTE_NAME_START,
@@ -12,12 +14,18 @@ import {
   attributeField,
   bytesEqualAscii,
   createMarkup,
+  DIGIT_NINE,
+  DIGIT_ZERO,
   isXmlSpace,
   localNameIs,
   localNameStart,
+  NAME_DECODER,
   nextMarkup,
+  QUESTION,
   scanDeclaration,
   scanMarkup,
+  UPPER_A,
+  UPPER_Z,
   valueAt,
   XmlLexError,
   type XmlMarkup,
@@ -91,13 +99,8 @@ const ENCODING_PSEUDO_ATTRIBUTE = 'encoding';
 const UTF8_ENCODING_NAME = 'utf-8';
 const UTF8_BYTE_ORDER_MARK: readonly number[] = [0xef, 0xbb, 0xbf];
 
-// '?': opens a processing instruction after '<'.
-const QUESTION = 0x3f;
-const DIGIT_ZERO = 0x30;
+// The lowest first digit of a row reference.
 const DIGIT_ONE = 0x31;
-const DIGIT_NINE = 0x39;
-const UPPER_A = 0x41;
-const UPPER_Z = 0x5a;
 const ASCII_CASE_OFFSET = 0x20;
 const DECIMAL_BASE = 10;
 // A row reference is [1-9][0-9]{0,6}; a cell reference puts 1 to 3 letters before it.
@@ -110,9 +113,6 @@ const ROOT_DEPTH = 0;
 const SHEET_DATA_DEPTH = 1;
 const ROW_DEPTH = 2;
 const CELL_DEPTH = 3;
-
-// Names are ASCII (the lexer refuses any other byte in a name), so UTF-8 decodes them as is.
-const NAME_DECODER = new TextDecoder();
 
 function malformedSheet(
   reason: MalformedSheetReason,
@@ -159,21 +159,6 @@ function bytesEqualAsciiIgnoreCase(
   for (let index = 0; index < lowerText.length; index += 1) {
     const byte = bytes[start + index];
     if (byte === undefined || lowerAscii(byte) !== lowerText.charCodeAt(index)) return false;
-  }
-  return true;
-}
-
-/** Whether bytes [start, end) equal bytes [otherStart, otherEnd) of the same part. */
-function bytesEqualRange(
-  bytes: Uint8Array,
-  start: number,
-  end: number,
-  otherStart: number,
-  otherEnd: number,
-): boolean {
-  if (end - start !== otherEnd - otherStart) return false;
-  for (let index = 0; index < end - start; index += 1) {
-    if (bytes[start + index] !== bytes[otherStart + index]) return false;
   }
   return true;
 }
@@ -466,13 +451,10 @@ class WorksheetIndexer {
     let digits = start;
     while (digits < end && isUpperLetter(this.bytes[digits])) digits += 1;
     const letters = digits - start;
-    const rowMatches = bytesEqualRange(
-      this.bytes,
-      digits,
-      end,
-      this.rowReferenceStart,
-      this.rowReferenceEnd,
-    );
+    const rowDigits = this.rowReferenceEnd - this.rowReferenceStart;
+    const rowMatches =
+      end - digits === rowDigits &&
+      bytesEqualAt(this.bytes, digits, this.bytes, this.rowReferenceStart, rowDigits);
     if (letters < 1 || letters > MAX_COLUMN_LETTERS || !rowMatches) {
       throw malformedSheet(
         MALFORMED_SHEET_REASONS.CELL_REF,

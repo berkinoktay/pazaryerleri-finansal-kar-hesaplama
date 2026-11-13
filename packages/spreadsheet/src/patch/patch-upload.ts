@@ -1,6 +1,4 @@
-import { Buffer } from 'node:buffer';
-
-import { MAX_ERROR_CAUSE_LENGTH, MAX_PATCH_OUTPUT_TOTAL_BYTES } from '../constants';
+import { MAX_PATCH_OUTPUT_TOTAL_BYTES } from '../constants';
 import { SpreadsheetFileError } from '../errors';
 import { openUpload, type UploadParts } from '../guards';
 import type { GridCaps } from '../part-checks';
@@ -9,7 +7,7 @@ import { CONTENT_TYPES_PART, WORKBOOK_RELS_PART } from '../workbook-parts';
 import { assertAnchorsMatch } from './anchors';
 import { foldAsciiCase, planCalcChainRemoval } from './calc-chain';
 import { assertTargetsOutsideMerges } from './merged-ranges';
-import type { ResolvedPatchRequest } from './patch-request';
+import { assertPatchTargets, type ResolvedPatchRequest } from './patch-request';
 import { applyCellPatches, patchedPartCap, type WorksheetPatchOptions } from './patch-worksheet';
 import {
   entryContent,
@@ -20,11 +18,15 @@ import {
   type ZipLayout,
 } from './raw-zip';
 import { MALFORMED_SHEET_REASONS, PATCH_LIMIT_REASONS, ZIP_REJECT_REASONS } from './reasons';
+import { bytesEqualAt, metaEntryName, viewMismatch } from './shared';
 import { cellKeysOf, indexWorksheet } from './sheet-index';
 
 // The export patch path, sync and in-process: one stored upload in, one archive per
 // output out. Cheap checks run before the DOM, and nothing is written before every
 // check has passed:
+//   0. every patch target lies inside the read caps (resolvePatchRequest checked it
+//      on the main thread; a request that did not come through there is checked
+//      here, because the merged-range check below looks only inside the caps);
 //   1. the gate (openUpload): the same checks a grid read runs;
 //   2. the zip layout (readZipLayout), then the view check: every part the gate
 //      returned equals the directory's entry of that name. Neither builds a DOM, so a
@@ -52,26 +54,13 @@ import { cellKeysOf, indexWorksheet } from './sheet-index';
 // a calcChain path never drops one.
 const RELATIONSHIPS_PART_SUFFIX = '.rels';
 const DROP: ZipChange = { kind: 'drop' };
-
-function entryMeta(name: string): string {
-  return name.slice(0, MAX_ERROR_CAUSE_LENGTH);
-}
-
-function viewMismatch(name: string, detail: string): SpreadsheetFileError {
-  return new SpreadsheetFileError('CORRUPT_FILE', `Zip entry of a reader part ${detail}`, {
-    reason: ZIP_REJECT_REASONS.VIEW_MISMATCH,
-    entry: entryMeta(name),
-  });
-}
+// How the view check's messages start.
+const READER_PART_ENTRY = 'Zip entry of a reader part';
 
 function entriesByName(layout: ZipLayout): Map<string, ZipEntry> {
   const entries = new Map<string, ZipEntry>();
   for (const entry of layout.entries) entries.set(entry.name, entry);
   return entries;
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-  return Buffer.from(a.buffer, a.byteOffset, a.byteLength).equals(b);
 }
 
 /**
@@ -107,15 +96,24 @@ export function assertSameViews(file: Uint8Array, layout: ZipLayout, parts: Uplo
   const pairs: (readonly [ZipEntry, Uint8Array])[] = [];
   for (const [name, bytes] of Object.entries(parts)) {
     const entry = entries.get(name);
-    if (entry === undefined) throw viewMismatch(name, 'is missing from the central directory');
+    if (entry === undefined) {
+      throw viewMismatch(name, `${READER_PART_ENTRY} is missing from the central directory`);
+    }
     if (entry.uncompressedSize !== bytes.length) {
-      throw viewMismatch(name, 'declares another length than the part the gate read');
+      throw viewMismatch(
+        name,
+        `${READER_PART_ENTRY} declares another length than the part the gate read`,
+      );
     }
     pairs.push([entry, bytes]);
   }
   for (const [entry, bytes] of pairs) {
-    if (!sameBytes(entryContent(file, entry), bytes)) {
-      throw viewMismatch(entry.name, 'holds other bytes than the part the gate read');
+    const content = entryContent(file, entry);
+    if (content.length !== bytes.length || !bytesEqualAt(content, 0, bytes, 0, bytes.length)) {
+      throw viewMismatch(
+        entry.name,
+        `${READER_PART_ENTRY} holds other bytes than the part the gate read`,
+      );
     }
   }
 }
@@ -159,7 +157,7 @@ function assertDroppable(paths: readonly string[], parts: UploadParts, partPath:
     throw new SpreadsheetFileError(
       'CORRUPT_FILE',
       'Workbook calcChain relationship names a part the output needs',
-      { reason: ZIP_REJECT_REASONS.PACKAGE_PART, entry: entryMeta(path) },
+      { reason: ZIP_REJECT_REASONS.PACKAGE_PART, entry: metaEntryName(path) },
     );
   }
 }
@@ -205,8 +203,9 @@ function calcChainChanges(
 /**
  * One entry per output of `request`: the new archive, or null when the output changes
  * nothing (the stored file itself). See the top of this file for the order of the
- * checks. Throws SpreadsheetFileError: every gate and reader error; CORRUPT_FILE with
- * a zip reason from the layout, the view check or the calcChain cut;
+ * checks. Throws Error('Invalid patch request: ...') first for a patch target outside
+ * the read caps. Throws SpreadsheetFileError: every gate and reader error;
+ * CORRUPT_FILE with a zip reason from the layout, the view check or the calcChain cut;
  * ROW_ANCHOR_MISMATCH; MALFORMED_SHEET and UNSUPPORTED_ENCODING from the index, the
  * cell cross-check, the merged-range check and the patcher; ROW_NOT_FOUND;
  * PAYLOAD_TOO_LARGE for a patched part beyond its growth cap, or outputs beyond
@@ -218,6 +217,7 @@ export function patchUpload(
   request: ResolvedPatchRequest,
 ): (Uint8Array<ArrayBuffer> | null)[] {
   const { read } = request;
+  assertPatchTargets(request.outputs, read);
   const caps: GridCaps = { rowCap: read.rowCap, colCap: read.colCap };
   const parts = openUpload(file, {
     rowCap: read.rowCap,

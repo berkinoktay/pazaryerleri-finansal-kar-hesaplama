@@ -1,8 +1,6 @@
 import { MAX_PATCH_NUMBER_LENGTH, MAX_PATCH_TEXT_LENGTH } from '../constants';
 import type { CellPatchValue } from './patch-request';
-
-// Message prefix of every request-validation error: a caller bug, not a file error.
-export const INVALID_PATCH_REQUEST = 'Invalid patch request: ';
+import { invalidPatchRequest } from './shared';
 
 // A number cell's `<v>` must be a plain decimal: optional minus, no leading zeros,
 // optional fraction, no exponent, no grouping or comma separator. Anything else
@@ -50,34 +48,30 @@ function fractionDigits(value: string): number {
 
 function assertWritableNumber(value: string, scale: number | undefined): void {
   if (value.length > MAX_PATCH_NUMBER_LENGTH) {
-    throw new Error(
-      `${INVALID_PATCH_REQUEST}number value is ${value.length} characters long, above ${MAX_PATCH_NUMBER_LENGTH}`,
+    throw invalidPatchRequest(
+      `number value is ${value.length} characters long, above ${MAX_PATCH_NUMBER_LENGTH}`,
     );
   }
   if (!PLAIN_DECIMAL_RE.test(value)) {
-    throw new Error(`${INVALID_PATCH_REQUEST}number value is not a plain decimal`);
+    throw invalidPatchRequest('number value is not a plain decimal');
   }
   if (scale === undefined) return;
   if (!Number.isInteger(scale) || scale < 0) {
-    throw new Error(
-      `${INVALID_PATCH_REQUEST}number scale must be a non-negative integer, got ${String(scale)}`,
-    );
+    throw invalidPatchRequest(`number scale must be a non-negative integer, got ${String(scale)}`);
   }
   if (fractionDigits(value) !== scale) {
-    throw new Error(
-      `${INVALID_PATCH_REQUEST}number value does not have exactly ${scale} fraction digits`,
-    );
+    throw invalidPatchRequest(`number value does not have exactly ${scale} fraction digits`);
   }
 }
 
 function assertWritableTextValue(value: string): void {
   if (value.length > MAX_PATCH_TEXT_LENGTH) {
-    throw new Error(
-      `${INVALID_PATCH_REQUEST}text value is ${value.length} characters long, above ${MAX_PATCH_TEXT_LENGTH}`,
+    throw invalidPatchRequest(
+      `text value is ${value.length} characters long, above ${MAX_PATCH_TEXT_LENGTH}`,
     );
   }
   if (!isWritableText(value)) {
-    throw new Error(`${INVALID_PATCH_REQUEST}text value holds a character XML cannot carry`);
+    throw invalidPatchRequest('text value holds a character XML cannot carry');
   }
 }
 

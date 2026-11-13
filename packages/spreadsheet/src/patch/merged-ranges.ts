@@ -141,7 +141,9 @@ function isHidden(area: MergeArea, index: number): boolean {
  * `{ count, rows }`, where `count` is the number of rejected patches over all outputs
  * and `rows` the first PATCH_ERROR_ROW_SAMPLE distinct rows among them, ascending. A
  * target whose row or column is not an integer inside the caps is not looked up: no
- * clipped range holds it, and the patcher rejects it afterwards.
+ * clipped range holds it. The cell patcher would still write it (it checks only row
+ * >= 1 and column < ABSOLUTE_MAX_COLS), so patchUpload refuses a target outside the
+ * caps before this check runs (resolvePatchRequest already did on the main thread).
  */
 export function assertTargetsOutsideMerges(
   mergeRefs: readonly string[],

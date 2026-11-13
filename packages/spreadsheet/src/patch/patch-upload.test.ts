@@ -11,6 +11,8 @@ import {
   hiddenTileArchive,
   type HiddenTileKind,
   rawSegment,
+  sizeFlipArchive,
+  swallowedEntryArchive,
   unsignedDescriptorArchive,
   zip64SkipArchive,
   type Zip64SkipCopy,
@@ -462,6 +464,43 @@ describe('patchUpload: crafted archives through the pipeline', () => {
       reason: ZIP_REJECT_REASONS.LAYOUT,
       entry: SHEET_PART,
     });
+  });
+
+  // Both pass today's gate. Without the directory rule the call succeeded and handed back
+  // an archive the gate refuses: here the formula overwrite drops the calcChain record
+  // and the header in it that hid a second worksheet entry from the stream...
+  it('refuses a fake entry hidden behind an incomplete header in the calcChain record', () => {
+    expectFileError(
+      () => patchFixture(swallowedEntryArchive().file, [num(2, 1, '9')]),
+      'CORRUPT_FILE',
+      { reason: ZIP_REJECT_REASONS.LAYOUT },
+    );
+  });
+
+  // ...and here the new cell grows the worksheet past 64 KiB, which completes the bare
+  // signature in front of its record.
+  it('refuses a bare signature in a record comment that a size change completes', () => {
+    expectFileError(() => patchFixture(sizeFlipArchive().file, [num(2, 2, '9')]), 'CORRUPT_FILE', {
+      reason: ZIP_REJECT_REASONS.LAYOUT,
+    });
+  });
+});
+
+describe('patchUpload: a request that did not come through resolvePatchRequest', () => {
+  /** Built by hand, so none of resolvePatchRequest's checks ran on it. */
+  function handBuilt(patch: CellPatch): ResolvedPatchRequest {
+    return { read: DEFAULT_READ, anchors: [], outputs: [[patch]], overwriteFormulaColumns: [] };
+  }
+
+  it.each<[string, CellPatch]>([
+    ['a row past rowCap + 1', num(DEFAULT_READ.rowCap + 2, 0, '1')],
+    ['a column at colCap', num(1, DEFAULT_READ.colCap, '1')],
+  ])('refuses %s before any other check', (_, patch) => {
+    expect(() => patchUpload(book(ONE_CELL), handBuilt(patch))).toThrow('Invalid patch request');
+    // Before the gate too: bytes that are no workbook at all get the same error.
+    expect(() => patchUpload(Buffer.from('nope'), handBuilt(patch))).toThrow(
+      'Invalid patch request',
+    );
   });
 });
 

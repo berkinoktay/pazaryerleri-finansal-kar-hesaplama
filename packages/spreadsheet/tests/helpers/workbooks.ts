@@ -4,6 +4,7 @@ import { crc32, deflateRawSync } from 'node:zlib';
 import type { ZipEntry, ZipLayout } from '../../src/patch/raw-zip';
 import { buildXlsxFixture, worksheetXml } from '../../src/testing/build-xlsx';
 import { readFixture } from './fixture-pins';
+import { MAIN_NAMESPACE, sheet } from './patch-helpers';
 
 // Workbooks the size tests grow from the committed fixtures, shared by the gate tests
 // (guards.test.ts) and the worker tests.
@@ -214,6 +215,8 @@ interface WrittenEntry {
   readonly headerOffset: number;
   readonly dataOffset: number;
   readonly segmentEnd: number;
+  /** The extra field of its directory record; none when absent. */
+  readonly extra?: Buffer;
   /** The comment of its directory record; none when absent. */
   readonly comment?: Buffer;
 }
@@ -266,6 +269,7 @@ function localHeader(name: string, fields: ZipFields, extra: Buffer = Buffer.all
 
 function directoryRecord(entry: WrittenEntry): Buffer {
   const nameBytes = Buffer.from(entry.name);
+  const extra = entry.extra ?? Buffer.alloc(0);
   const comment = entry.comment ?? Buffer.alloc(0);
   const record = littleEndian([
     [ZIP_DIRECTORY_RECORD_SIGNATURE, U32],
@@ -279,14 +283,14 @@ function directoryRecord(entry: WrittenEntry): Buffer {
     [entry.fields.compressedSize, U32],
     [entry.fields.uncompressedSize, U32],
     [nameBytes.length, U16],
-    [ZIP_ZERO, U16], // extra length
+    [extra.length, U16],
     [comment.length, U16],
     [ZIP_ZERO, U16], // disk number
     [ZIP_ZERO, U16], // internal attributes
     [ZIP_ZERO, U32], // external attributes
     [entry.headerOffset, U32],
   ]);
-  return Buffer.concat([record, nameBytes, comment]);
+  return Buffer.concat([record, nameBytes, extra, comment]);
 }
 
 function endRecord(count: number, directorySize: number, directoryOffset: number): Buffer {
@@ -716,4 +720,192 @@ export function unsignedDescriptorArchive(length: UnsignedDescriptorLength): Cra
     return { name, fields, headerOffset, dataOffset, segmentEnd: body.length };
   });
   return closeArchive(body, written);
+}
+
+// Crafted archives with a local header signature in the central directory. Past the
+// last entry the gate's stream keeps searching for one, through the directory
+// (Unzip.prototype.push in fflate). A signature whose header, name and extra field fit
+// before the end of the file starts an entry the directory does not list; one whose
+// name or extra field runs past the end makes the stream stop there and read nothing
+// after it. Every entry has no data descriptor, and both archives pass today's gate.
+
+const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>';
+const CALC_CHAIN_PART = 'xl/calcChain.xml';
+const CALC_CHAIN_RELATIONSHIP =
+  '<Relationship Id="rIdCalcChain" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>';
+const CALC_CHAIN_OVERRIDE =
+  '<Override PartName="/xl/calcChain.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml"/>';
+const CALC_CHAIN_XML = `${XML_DECLARATION}<calcChain xmlns="${MAIN_NAMESPACE}"><c r="B2" i="1"/></calcChain>`;
+// Cell B2 holds the formula the calcChain names.
+const FORMULA_SHEET_BODY =
+  '<row r="1"><c r="A1"><v>1</v></c></row>' +
+  '<row r="2"><c r="A2"><v>3</v></c><c r="B2"><f>1+1</f><v>2</v></c></row>';
+const PLAIN_SHEET_BODY =
+  '<row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="A2"><v>2</v></c></row>';
+const RELATIONSHIPS_END_TAG = '</Relationships>';
+const TYPES_END_TAG = '</Types>';
+const WORKSHEET_END_TAG = '</worksheet>';
+const COMMENT_OPEN = '<!--';
+const COMMENT_CLOSE = '-->';
+const COMMENT_FILLER = 'x';
+// A central directory record without its name, extra field and comment.
+const ZIP_RECORD_FIXED_LENGTH = 46;
+// A name length no archive here has bytes left for after the header that declares it.
+const UNREACHABLE_NAME_LENGTH = 0xffff;
+// The values a 16-bit field can hold. A fake header in front of a record takes the low
+// half of the record's 32-bit uncompressed size for its extra length.
+const SIXTEEN_BIT_RANGE = 0x10000;
+// The worksheet of sizeFlipArchive is this many bytes short of SIXTEEN_BIT_RANGE.
+const SIZE_FLIP_HEADROOM = 6;
+const SIZE_FLIP_SHEET_BYTES = SIXTEEN_BIT_RANGE - SIZE_FLIP_HEADROOM;
+
+export interface DirectorySignatureArchive extends CraftedArchive {
+  /** Offsets in `file` of the local header signatures planted in the directory. */
+  readonly plantedSignatures: readonly number[];
+}
+
+/** `xml` with `child` inserted right before its last `endTag`. */
+function insertBefore(xml: string, endTag: string, child: string): string {
+  const at = xml.lastIndexOf(endTag);
+  if (at === -1) throw new Error(`no ${endTag} to insert before`);
+  return `${xml.slice(0, at)}${child}${xml.slice(at)}`;
+}
+
+function entryOf(entries: Readonly<Record<string, Uint8Array>>, name: string): Uint8Array {
+  const bytes = entries[name];
+  if (bytes === undefined) throw new Error(`entry missing: ${name}`);
+  return bytes;
+}
+
+function layoutEntry(layout: ZipLayout, name: string): ZipEntry {
+  const entry = layout.entries.find((candidate) => candidate.name === name);
+  if (entry === undefined) throw new Error(`entry missing from the layout: ${name}`);
+  return entry;
+}
+
+/** The entries of a one-sheet workbook whose worksheet part is `sheetBytes`, in directory order. */
+function workbookEntries(sheetBytes: Uint8Array): Record<string, Uint8Array> {
+  const workbook = buildXlsxFixture([{ name: HIDDEN_SHEET_NAME, xml: strFromU8(sheetBytes) }]);
+  return unzipSync(new Uint8Array(workbook));
+}
+
+/** A worksheet part of exactly `length` bytes: `body`, then a filler comment before the end tag. */
+function paddedSheet(body: string, length: number): Uint8Array {
+  const xml = strFromU8(sheet(body));
+  const filler = length - xml.length - COMMENT_OPEN.length - COMMENT_CLOSE.length;
+  const comment = `${COMMENT_OPEN}${COMMENT_FILLER.repeat(filler)}${COMMENT_CLOSE}`;
+  const bytes = strToU8(insertBefore(xml, WORKSHEET_END_TAG, comment));
+  if (bytes.length !== length) throw new Error(`the padded sheet has ${bytes.length} bytes`);
+  return bytes;
+}
+
+/** A 30-byte local header with no name or extra bytes, whose name length is UNREACHABLE_NAME_LENGTH. */
+function incompleteLocalHeader(): Buffer {
+  return littleEndian([
+    [ZIP_LOCAL_HEADER_SIGNATURE, U32],
+    [ZIP_ZERO, U16], // version
+    [ZIP_ZERO, U16], // flags
+    [ZIP_ZERO, U16], // method
+    [ZIP_ZERO, U16], // time
+    [ZIP_ZERO, U16], // date
+    [ZIP_ZERO, U32], // crc
+    [ZIP_ZERO, U32], // compressed size
+    [ZIP_ZERO, U32], // uncompressed size
+    [UNREACHABLE_NAME_LENGTH, U16],
+    [ZIP_ZERO, U16], // extra length
+  ]);
+}
+
+/** Every entry of `contents`, in order, deflated without a data descriptor. */
+function appendAll(body: ArchiveBody, contents: readonly [string, Uint8Array][]): WrittenEntry[] {
+  return contents.map(([name, content]) => appendDeflated(body, name, content));
+}
+
+/**
+ * The swallowed entry: a workbook whose cell B2 holds a formula that its calcChain
+ * names. Two local header signatures sit in its directory:
+ *   - the extra field of the calcChain record is a local header whose name length runs
+ *     past the end of the file, so the stream stops there;
+ *   - the comment of the docProps/app.xml record, which follows, is a complete local
+ *     entry of xl/worksheets/sheet1.xml, which the stream therefore never reads.
+ * Overwriting the formula of B2 drops the calcChain entry, its record and the header in
+ * it: the stream of such an output reads the planted entry, a second worksheet entry of
+ * that name, and the gate refuses it.
+ */
+export function swallowedEntryArchive(): DirectorySignatureArchive {
+  const sheetBytes = sheet(FORMULA_SHEET_BODY);
+  const workbook = workbookEntries(sheetBytes);
+  const rels = strFromU8(entryOf(workbook, WORKBOOK_RELS_PART));
+  const types = strFromU8(entryOf(workbook, CONTENT_TYPES_PART));
+  // Spread first: the rels and the content types keep their place, the new parts follow.
+  const contents: Record<string, Uint8Array> = {
+    ...workbook,
+    [WORKBOOK_RELS_PART]: strToU8(
+      insertBefore(rels, RELATIONSHIPS_END_TAG, CALC_CHAIN_RELATIONSHIP),
+    ),
+    [CONTENT_TYPES_PART]: strToU8(insertBefore(types, TYPES_END_TAG, CALC_CHAIN_OVERRIDE)),
+    [CALC_CHAIN_PART]: strToU8(CALC_CHAIN_XML),
+    [HIDDEN_PROPERTIES_PART]: strToU8(HIDDEN_PROPERTIES),
+  };
+  const body = new ArchiveBody();
+  const written = appendAll(body, Object.entries(contents));
+
+  const sheetData = deflateRawSync(sheetBytes);
+  const plantedEntry = Buffer.concat([
+    localHeader(SHEET_PART, deflatedFields(sheetBytes, sheetData)),
+    sheetData,
+  ]);
+  const directory = written.map((entry): WrittenEntry => {
+    if (entry.name === CALC_CHAIN_PART) return { ...entry, extra: incompleteLocalHeader() };
+    if (entry.name === HIDDEN_PROPERTIES_PART) return { ...entry, comment: plantedEntry };
+    return entry;
+  });
+  const { file, layout } = closeArchive(body, directory);
+  const calcChain = layoutEntry(layout, CALC_CHAIN_PART);
+  const properties = layoutEntry(layout, HIDDEN_PROPERTIES_PART);
+  return {
+    file,
+    layout,
+    plantedSignatures: [
+      calcChain.recordOffset + ZIP_RECORD_FIXED_LENGTH + Buffer.byteLength(CALC_CHAIN_PART),
+      properties.recordOffset + properties.recordLength - plantedEntry.length,
+    ],
+  };
+}
+
+/**
+ * The size flip: a one-sheet workbook with docProps/app.xml right before the worksheet,
+ * in the body and in the directory. The comment of the docProps/app.xml record is a
+ * bare local header signature, so the stream reads the worksheet's record behind it as
+ * the rest of a local header, whose extra length is the low 16 bits of the worksheet's
+ * uncompressed size. The worksheet is SIZE_FLIP_HEADROOM bytes short of 64 KiB, so that
+ * length runs past the end of the file and the stream stops there. A patch that adds
+ * more than SIZE_FLIP_HEADROOM bytes to the worksheet wraps those 16 bits to a small
+ * number: the stream of such an output reads a complete entry there (its method is the
+ * record's version, 20), and the gate refuses it.
+ */
+export function sizeFlipArchive(): DirectorySignatureArchive {
+  const sheetBytes = paddedSheet(PLAIN_SHEET_BODY, SIZE_FLIP_SHEET_BYTES);
+  const others = Object.entries(workbookEntries(sheetBytes)).filter(
+    ([name]) => name !== SHEET_PART,
+  );
+  const body = new ArchiveBody();
+  const written = appendAll(body, [
+    ...others,
+    [HIDDEN_PROPERTIES_PART, strToU8(HIDDEN_PROPERTIES)],
+    [SHEET_PART, sheetBytes],
+  ]);
+
+  const signature = littleEndian([[ZIP_LOCAL_HEADER_SIGNATURE, U32]]);
+  const directory = written.map(
+    (entry): WrittenEntry =>
+      entry.name === HIDDEN_PROPERTIES_PART ? { ...entry, comment: signature } : entry,
+  );
+  const { file, layout } = closeArchive(body, directory);
+  const properties = layoutEntry(layout, HIDDEN_PROPERTIES_PART);
+  return {
+    file,
+    layout,
+    plantedSignatures: [properties.recordOffset + properties.recordLength - signature.length],
+  };
 }
