@@ -18,8 +18,10 @@ function patchesSomething(patches: readonly CellPatch[]): boolean {
 
 /**
  * One Buffer per `options.outputs` entry, in order. An output that changes nothing is
- * `file` itself. Throws Error for an invalid request (before queueing). Rejects with
- * SpreadsheetFileError: every code a read can raise, plus MALFORMED_SHEET,
+ * `file` itself. When every output is empty, nothing is queued and neither the anchors
+ * nor the file are checked (the request itself is still validated): `file` is returned
+ * for each output as it is. Throws Error for an invalid request (before queueing).
+ * Rejects with SpreadsheetFileError: every code a read can raise, plus MALFORMED_SHEET,
  * UNSUPPORTED_ENCODING, ROW_NOT_FOUND, ROW_ANCHOR_MISMATCH, ENGINE_BUSY, and
  * PAYLOAD_TOO_LARGE with a worker or a patch reason.
  */

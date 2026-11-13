@@ -7,10 +7,15 @@ import { GRID_WORKER_TIMEOUT_MS, MAX_PATCH_OUTPUTS, MAX_QUEUED_PARSES } from '..
 import { SpreadsheetFileError } from '../errors';
 import type { CellValue, SheetData } from '../grid-types';
 import { readWorkbookGrid, setGridWorkerHostForTests } from '../parse';
+import { cellKey } from '../sheet-meta';
 import { buildXlsxFixture, worksheetXml } from '../testing/build-xlsx';
 import type { GridWorkerHost } from '../worker/grid-worker-host';
-import type { CellPatch, PatchWorkbookOptions } from './patch-request';
+import type { CellPatch, PatchWorkbookOptions, ResolvedPatchRequest } from './patch-request';
+import { patchUpload } from './patch-upload';
 import { patchWorkbook } from './patch-workbook';
+import { entryContent, readZipLayout } from './raw-zip';
+import { cellKeysOf, indexWorksheet, type SheetIndex } from './sheet-index';
+import { valueAt } from './xml-lexer';
 
 // patchWorkbook validates the request on the main thread, sends only the outputs that
 // patch something to the worker, through the queue reads use, and maps the answers
@@ -56,19 +61,43 @@ function throwingHost(): RecordingHost {
   return { host, jobs };
 }
 
-/** A host whose patch answers one item fewer than the outputs it was sent. */
-function shortAnswerHost(): GridWorkerHost {
+/** A host whose patch answers `extra` items more than the outputs it was sent (fewer when negative). */
+function miscountingHost(extra: number): GridWorkerHost {
   return {
     run(): Promise<SheetData> {
       throw new Error('No read may run on this host');
     },
     patch(_file, request): Promise<(Uint8Array<ArrayBuffer> | null)[]> {
-      return Promise.resolve(request.outputs.slice(1).map(() => null));
+      return Promise.resolve(Array.from({ length: request.outputs.length + extra }, () => null));
     },
     close(): Promise<void> {
       return Promise.resolve();
     },
   };
+}
+
+interface InProcessHost {
+  readonly host: GridWorkerHost;
+  /** Every patch request the host was sent, in order. */
+  readonly requests: ResolvedPatchRequest[];
+}
+
+/** A host that records each patch request and answers it in-process with patchUpload, the job the worker runs. */
+function inProcessHost(): InProcessHost {
+  const requests: ResolvedPatchRequest[] = [];
+  const host: GridWorkerHost = {
+    run(): Promise<SheetData> {
+      throw new Error('No read may run on this host');
+    },
+    patch(file, request): Promise<(Uint8Array<ArrayBuffer> | null)[]> {
+      requests.push(request);
+      return Promise.resolve(patchUpload(file, request));
+    },
+    close(): Promise<void> {
+      return Promise.resolve();
+    },
+  };
+  return { host, requests };
 }
 
 function codeOf(e: unknown): string | null {
@@ -103,22 +132,35 @@ describe('patchWorkbook: outputs', () => {
     expect(jobs).toEqual([]);
   });
 
-  it('maps an empty output to the stored file and a patched one to its archive', async () => {
+  it('sends only the non-empty outputs and maps the answers back by position', async () => {
     const file = readFixture(COMMISSION_FIXTURE);
+    const first = num(2, COLUMN_AB, '123.45');
+    const second = num(2, COLUMN_AB, '678.9');
+    const { host, requests } = inProcessHost();
+    setGridWorkerHostForTests(host);
 
     const outputs = await patchWorkbook(file, {
       ...commissionRead,
-      outputs: [[], [num(2, COLUMN_AB, '123.45')]],
+      outputs: [[], [first], [], [second]],
     });
 
-    expect(outputs).toHaveLength(2);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.outputs).toEqual([[first], [second]]);
+    expect(outputs).toHaveLength(4);
     expect(outputs[0]).toBe(file);
-    const patched = outputs[1];
-    if (patched === undefined) throw new Error('no second output');
-    expect(patched).not.toBe(file);
+    expect(outputs[2]).toBe(file);
+    const [, patchedFirst, , patchedSecond] = outputs;
+    if (patchedFirst === undefined || patchedSecond === undefined) throw new Error('no outputs');
+    expect(patchedFirst).not.toBe(file);
+    expect(patchedSecond).not.toBe(file);
+    // Read back through the worker, not the in-process host.
+    setGridWorkerHostForTests(null);
     const source = await readWorkbookGrid(file, commissionRead);
-    expect(await readWorkbookGrid(patched, commissionRead)).toEqual(
+    expect(await readWorkbookGrid(patchedFirst, commissionRead)).toEqual(
       withCell(source, 1, COLUMN_AB, 123.45),
+    );
+    expect(await readWorkbookGrid(patchedSecond, commissionRead)).toEqual(
+      withCell(source, 1, COLUMN_AB, 678.9),
     );
   });
 
@@ -135,7 +177,7 @@ describe('patchWorkbook: outputs', () => {
 
   it('rejects a short answer and never hands back the stored file for it', async () => {
     const file = readFixture(COMMISSION_FIXTURE);
-    setGridWorkerHostForTests(shortAnswerHost());
+    setGridWorkerHostForTests(miscountingHost(-1));
 
     const error = await rejectionOf(
       patchWorkbook(file, {
@@ -145,6 +187,17 @@ describe('patchWorkbook: outputs', () => {
 
     expect(error).toBeInstanceOf(Error);
     expect(error).not.toBeInstanceOf(SpreadsheetFileError);
+  });
+
+  it('rejects an overlong answer', async () => {
+    const file = readFixture(COMMISSION_FIXTURE);
+    setGridWorkerHostForTests(miscountingHost(1));
+
+    await expect(
+      patchWorkbook(file, {
+        outputs: [[num(2, COLUMN_AB, '1')], [num(2, COLUMN_AB, '2')]],
+      }),
+    ).rejects.toThrow('Patch worker answered 3 files for 2 outputs');
   });
 
   it("leaves the caller's Buffer unchanged and readable", async () => {
@@ -171,6 +224,18 @@ describe('patchWorkbook: one queue with reads', () => {
     const reads = Array.from({ length: MAX_QUEUED_PARSES }, () => readWorkbookGrid(small));
 
     expect(await patchWorkbook(small, SMALL_PATCH).then(() => null, codeOf)).toBe('ENGINE_BUSY');
+    await expect(Promise.all(reads)).resolves.toEqual(
+      Array.from({ length: MAX_QUEUED_PARSES }, () => QUEUE_ROWS),
+    );
+  });
+
+  it('rejects an invalid patch request without queueing it, even with the queue full', async () => {
+    const reads = Array.from({ length: MAX_QUEUED_PARSES }, () => readWorkbookGrid(small));
+
+    // Validated before the queue is asked: the caller bug, never ENGINE_BUSY.
+    await expect(patchWorkbook(small, { outputs: [[num(2, 0, '1e-7')]] })).rejects.toThrow(
+      'Invalid patch request: ',
+    );
     await expect(Promise.all(reads)).resolves.toEqual(
       Array.from({ length: MAX_QUEUED_PARSES }, () => QUEUE_ROWS),
     );
@@ -223,13 +288,53 @@ describe('patchWorkbook: anchors', () => {
 // the owner's machine. The 30 s worker limit is proven at the output cap, not below it.
 describe.runIf(process.env.CI === 'true')('patchWorkbook: production limits', () => {
   const GROWN_ROWS = 5_001;
-  const LAST_DATA_ROW_INDEX = GROWN_ROWS - 1;
   const PRODUCTION_LIMITS_TEST_TIMEOUT_MS = 180_000;
   const TEXT_VALUE = 'patched';
+  // The commission fixture's worksheet part, the one grownFixtureWorkbook grows.
+  const SHEET_PART = 'xl/worksheets/sheet1.xml';
+  const decoder = new TextDecoder();
+
+  interface RawCell {
+    /** The cell's start tag. */
+    readonly tag: string;
+    /** Everything after the start tag, its end tag included. */
+    readonly rest: string;
+  }
 
   /** The number output `output` writes into column AB. */
   function numberOf(output: number): string {
     return `${output + 1}.25`;
+  }
+
+  /** The index of the worksheet part of `output`, taken from its directory entry with a bounded inflate. */
+  function sheetIndexOf(output: Uint8Array): SheetIndex {
+    const entry = readZipLayout(output).entries.find((candidate) => candidate.name === SHEET_PART);
+    if (entry === undefined) throw new Error(`entry missing: ${SHEET_PART}`);
+    return indexWorksheet(entryContent(output, entry));
+  }
+
+  /** The raw text of the cell at `excelRow` and 0-based `col`. */
+  function rawCell(index: SheetIndex, excelRow: number, col: number): RawCell {
+    const at = cellKeysOf(index).indexOf(cellKey(excelRow, col + 1));
+    if (at === -1) throw new Error(`no cell at row ${excelRow}, column ${col}`);
+    const tagEnd = valueAt(index.cellTagEnd, at);
+    return {
+      tag: decoder.decode(index.bytes.subarray(valueAt(index.cellStart, at), tagEnd)),
+      rest: decoder.decode(index.bytes.subarray(tagEnd, valueAt(index.cellEnd, at))),
+    };
+  }
+
+  // Checked on the raw worksheet part, not through readWorkbookGrid: the grown source
+  // already sits at 98% of the gate's DOM-weight cap, and the written values push an
+  // output past it, so a re-read through the import caps is refused. Outputs are not
+  // bound by the import caps (see patch-upload.ts); the layout, the bounded inflate and
+  // the worksheet index read the part without them.
+  function expectLastRowPatched(output: Uint8Array, outputIndex: number): void {
+    const index = sheetIndexOf(output);
+    expect(rawCell(index, GROWN_ROWS, COLUMN_AB).rest).toBe(`<v>${numberOf(outputIndex)}</v></c>`);
+    const textCell = rawCell(index, GROWN_ROWS, COLUMN_AE);
+    expect(textCell.tag).toContain(' t="inlineStr"');
+    expect(textCell.rest).toBe(`<is><t>${TEXT_VALUE}</t></is></c>`);
   }
 
   /** Columns AB and AE of every data row. */
@@ -259,12 +364,8 @@ describe.runIf(process.env.CI === 'true')('patchWorkbook: production limits', ()
       const first = patched[0];
       const last = patched[MAX_PATCH_OUTPUTS - 1];
       if (first === undefined || last === undefined) throw new Error('missing outputs');
-      const firstGrid = await readWorkbookGrid(first, commissionRead);
-      expect(firstGrid[LAST_DATA_ROW_INDEX]?.[COLUMN_AB]).toBe(Number(numberOf(0)));
-      const lastGrid = await readWorkbookGrid(last, commissionRead);
-      expect(lastGrid[LAST_DATA_ROW_INDEX]?.[COLUMN_AB]).toBe(
-        Number(numberOf(MAX_PATCH_OUTPUTS - 1)),
-      );
+      expectLastRowPatched(first, 0);
+      expectLastRowPatched(last, MAX_PATCH_OUTPUTS - 1);
     },
     PRODUCTION_LIMITS_TEST_TIMEOUT_MS,
   );

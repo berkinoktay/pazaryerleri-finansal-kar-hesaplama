@@ -397,6 +397,12 @@ describe('isGridWorkerRequest', () => {
   });
 });
 
+// lib ES2022 declares no resizable ArrayBuffer; the runtime builds one from the options.
+interface ResizableArrayBufferConstructor {
+  new (byteLength: number, options: { readonly maxByteLength: number }): ArrayBuffer;
+}
+const ResizableArrayBuffer: ResizableArrayBufferConstructor = ArrayBuffer;
+
 describe('isGridWorkerResponse', () => {
   it('accepts patched files only when each is an ArrayBuffer or null', () => {
     expect(
@@ -405,6 +411,24 @@ describe('isGridWorkerResponse', () => {
     expect(isGridWorkerResponse({ id: 1, kind: 'patched', files: [new Uint8Array(1)] })).toBe(
       false,
     );
+  });
+
+  it('refuses patched files that repeat one buffer', () => {
+    const buffer = new ArrayBuffer(1);
+    expect(
+      isGridWorkerResponse({ id: 1, kind: 'patched', files: [buffer, null, new ArrayBuffer(1)] }),
+    ).toBe(true);
+    expect(isGridWorkerResponse({ id: 1, kind: 'patched', files: [null, null] })).toBe(true);
+    expect(isGridWorkerResponse({ id: 1, kind: 'patched', files: [buffer, null, buffer] })).toBe(
+      false,
+    );
+  });
+
+  it('refuses a patched file that is a resizable buffer', () => {
+    const resizable = new ResizableArrayBuffer(1, { maxByteLength: 2 });
+    const resizableFlag: unknown = Reflect.get(resizable, 'resizable');
+    expect(resizableFlag).toBe(true);
+    expect(isGridWorkerResponse({ id: 1, kind: 'patched', files: [resizable] })).toBe(false);
   });
 });
 

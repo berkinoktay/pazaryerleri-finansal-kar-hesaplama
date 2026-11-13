@@ -834,18 +834,23 @@ describe('patchUpload: caps', () => {
     );
   });
 
-  it('refuses an output the gate would refuse under the same read byte cap', () => {
+  it('writes an output longer than the read byte cap, which the import gate then refuses', () => {
+    // Export outputs are bounded by the patch growth cap and the total output budget,
+    // not by the import caps: an output goes to the marketplace, not back through our
+    // import gate. Re-importing such an output is refused at upload time instead.
     // The upload sits READ_CAP_MARGIN bytes under the cap; a text deflate cannot shrink
     // much makes the output longer than the cap.
     const length = DEFAULT_READ.maxBytes - READ_CAP_MARGIN;
     const nearCap = withStoredBlob(book(ONE_CELL), length);
     expect(nearCap.length).toBe(length);
-    expect(readBack(patchFixture(nearCap, [num(1, 0, '9')]))).toEqual([[9]]);
-    expectFileError(
-      () => patchFixture(nearCap, [text(1, 0, hexText(MAX_PATCH_TEXT_LENGTH))]),
-      'PAYLOAD_TOO_LARGE',
-      { reason: PATCH_LIMIT_REASONS.OUTPUT, cap: DEFAULT_READ.maxBytes },
-    );
+
+    const out = patchFixture(nearCap, [text(1, 0, hexText(MAX_PATCH_TEXT_LENGTH))]);
+
+    expect(out.length).toBeGreaterThan(DEFAULT_READ.maxBytes);
+    expectFileError(() => readBack(out), 'PAYLOAD_TOO_LARGE', {
+      maxBytes: DEFAULT_READ.maxBytes,
+      received: out.length,
+    });
   });
 });
 

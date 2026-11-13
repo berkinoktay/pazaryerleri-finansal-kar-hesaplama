@@ -16,8 +16,9 @@ import { isGridWorkerResponse, type GridWorkerRequest, type GridWorkerResponse }
 //   - after a kill or a crash it is discarded, and the next run spawns a fresh one;
 //   - every job settles exactly once; a settlement that ends the worker waits for
 //     terminate(), so the next spawn never overlaps a dying heap;
-//   - one job at a time, whatever its kind; an answer of the wrong kind, or a patch
-//     answer whose file count differs from the outputs sent, is an invalid message.
+//   - one job at a time, whatever its kind; an answer of the wrong kind, a patch
+//     answer whose file count differs from the outputs sent, or one whose files repeat
+//     a buffer or hold a resizable one (protocol.ts), is an invalid message.
 // The limits are a backstop: one allocation larger than the remaining heap headroom
 // plus about 16 MB still aborts the whole process, and memory outside the V8 heap is
 // not counted, so the gate's caps stay the primary defence (constants.ts).

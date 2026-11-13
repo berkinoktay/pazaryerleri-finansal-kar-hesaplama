@@ -38,11 +38,15 @@ import { cellKeysOf, indexWorksheet } from './sheet-index';
 //   7. no target inside a merged range;
 //   8. each output's patches, applied to the index;
 //   9. a changed output is the archive with the converted part replaced and, when a
-//      formula was overwritten, the calcChain cut; each output must fit the read byte
-//      cap it will be read back under, and the bytes of all outputs together are
-//      capped.
+//      formula was overwritten, the calcChain cut; the bytes of all outputs together
+//      are capped.
 // The patched part is built from the bytes the reader parsed, never from the
 // directory's copy.
+//
+// An output is not bound by the import caps (read.maxBytes, the DOM weight): it goes
+// to the marketplace, not back through our import gate, and those caps bound what our
+// own parse may cost. Its size is bounded by the patch growth cap of its part
+// (patchedPartCap) and by MAX_PATCH_OUTPUT_TOTAL_BYTES for the whole job.
 
 // Every relationships part ends with this, the package's root relationships included;
 // a calcChain path never drops one.
@@ -129,19 +133,6 @@ export function assertOutputBudget(totalBytes: number): void {
   );
 }
 
-/**
- * PAYLOAD_TOO_LARGE `{ reason: 'patch-output', cap: maxBytes }` for an output longer
- * than the read byte cap: the gate would refuse it under the same read options.
- */
-function assertWithinReadCap(outputBytes: number, maxBytes: number): void {
-  if (outputBytes <= maxBytes) return;
-  throw new SpreadsheetFileError(
-    'PAYLOAD_TOO_LARGE',
-    `Patched output of ${outputBytes}B exceeds the ${maxBytes}B read cap`,
-    { reason: PATCH_LIMIT_REASONS.OUTPUT, cap: maxBytes },
-  );
-}
-
 /** MALFORMED_SHEET `target-part` when the converted part is also a part the rewrite may replace. */
 function assertPatchablePart(reading: SheetReading): void {
   if (!reading.partIsBookPart && reading.partPath !== CONTENT_TYPES_PART) return;
@@ -218,8 +209,9 @@ function calcChainChanges(
  * a zip reason from the layout, the view check or the calcChain cut;
  * ROW_ANCHOR_MISMATCH; MALFORMED_SHEET and UNSUPPORTED_ENCODING from the index, the
  * cell cross-check, the merged-range check and the patcher; ROW_NOT_FOUND;
- * PAYLOAD_TOO_LARGE for a patched part beyond its growth cap, an output beyond the
- * read byte cap, or outputs beyond MAX_PATCH_OUTPUT_TOTAL_BYTES together.
+ * PAYLOAD_TOO_LARGE for a patched part beyond its growth cap, or outputs beyond
+ * MAX_PATCH_OUTPUT_TOTAL_BYTES together. An output may be larger than the import caps
+ * allow (see the top of this file).
  */
 export function patchUpload(
   file: Uint8Array,
@@ -275,7 +267,6 @@ export function patchUpload(
     // The patched part is this output's own: keeping it would hold every output's
     // part in memory until the job ends.
     deflated.delete(result.bytes);
-    assertWithinReadCap(archive.length, read.maxBytes);
     totalBytes += archive.length;
     assertOutputBudget(totalBytes);
     outputs.push(archive);

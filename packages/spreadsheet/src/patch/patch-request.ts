@@ -40,6 +40,11 @@ export interface PatchAnchor {
 }
 
 export interface PatchWorkbookOptions extends ReadGridOptions {
+  /**
+   * Cells the file must hold before any output is written. When every output is
+   * empty, nothing is queued: neither the anchors nor the file are checked (the request
+   * itself is still validated), and the file is returned as it is.
+   */
   readonly anchors?: readonly PatchAnchor[];
   /** One patch list per output file; an empty list means "the stored file itself". */
   readonly outputs: readonly (readonly CellPatch[])[];

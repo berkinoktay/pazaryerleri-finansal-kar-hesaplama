@@ -28,8 +28,8 @@ export type GridWorkerRequest =
 
 /**
  * The answer to the request with the same `id`. `patched` holds one item per output
- * of the request, in order: the new archive (transferred), or null when the output
- * changes nothing.
+ * of the request, in order: the new archive (transferred; a fixed-length buffer that
+ * no other item repeats), or null when the output changes nothing.
  */
 export type GridWorkerResponse =
   | { readonly id: number; readonly kind: 'grid'; readonly grid: SheetData }
@@ -68,15 +68,29 @@ export function isGridWorkerRequest(value: unknown): value is GridWorkerRequest 
 }
 
 /**
- * True when `value` is an array whose every item is an ArrayBuffer or null. Indexed,
- * not `every`, so a sparse array (a hole reads as `undefined`) is rejected. The
- * number of items is the host's to check: only it knows how many outputs it sent.
+ * Whether `buffer` can change its length (lib ES2022 does not declare `resizable`). A
+ * view without a fixed length on such a buffer follows every resize.
+ */
+function isResizable(buffer: ArrayBuffer): boolean {
+  return 'resizable' in buffer && buffer.resizable === true;
+}
+
+/**
+ * True when `value` is an array whose every item is null or an ArrayBuffer of its own:
+ * of fixed length, and not repeated (a structured clone keeps identity, so a buffer
+ * posted twice arrives as one object in both places, and two outputs would share its
+ * bytes). Indexed, not `every`, so a sparse array (a hole reads as `undefined`) is
+ * rejected. The number of items is the host's to check: only it knows how many
+ * outputs it sent.
  */
 function isPatchedFiles(value: unknown): value is (ArrayBuffer | null)[] {
   if (!Array.isArray(value)) return false;
+  const seen = new Set<ArrayBuffer>();
   for (let i = 0; i < value.length; i += 1) {
     const item: unknown = value[i];
-    if (item !== null && !(item instanceof ArrayBuffer)) return false;
+    if (item === null) continue;
+    if (!(item instanceof ArrayBuffer) || isResizable(item) || seen.has(item)) return false;
+    seen.add(item);
   }
   return true;
 }
