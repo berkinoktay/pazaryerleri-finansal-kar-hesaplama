@@ -73,7 +73,14 @@ describe('scanMarkup: offsets', () => {
   it('reads a start tag with a double- and a single-quoted attribute', () => {
     const attributes: number[] = [];
     const { markup } = scanFirst(`<c r="A1" s='3'>`, attributes);
-    expect(markup).toEqual({ kind: 'start', start: 0, end: 16, nameStart: 1, nameEnd: 2 });
+    expect(markup).toEqual({
+      kind: 'start',
+      start: 0,
+      end: 16,
+      nameStart: 1,
+      nameEnd: 2,
+      attributeCount: 2,
+    });
     expect(attributes).toEqual([3, 4, 6, 8, 10, 11, 13, 14]);
   });
 
@@ -89,7 +96,14 @@ describe('scanMarkup: offsets', () => {
 
   it('reads an end tag with whitespace before its ">"', () => {
     const { bytes, markup } = scanFirst('</x:row >');
-    expect(markup).toEqual({ kind: 'end', start: 0, end: 9, nameStart: 2, nameEnd: 7 });
+    expect(markup).toEqual({
+      kind: 'end',
+      start: 0,
+      end: 9,
+      nameStart: 2,
+      nameEnd: 7,
+      attributeCount: 0,
+    });
     expect(localNameStart(bytes, markup)).toBe(4);
   });
 
@@ -103,6 +117,7 @@ describe('scanMarkup: offsets', () => {
     const { bytes, markup } = scanFirst('<row\n\tr = "1"\r\n>', attributes);
     expect(markup.kind).toBe('start');
     expect(markup.end).toBe(bytes.length);
+    expect(markup.attributeCount).toBe(1);
     expect(attributes).toHaveLength(ATTRIBUTE_FIELDS);
     expect(attributeAt(bytes, attributes, 0)).toEqual({ name: 'r', value: '1' });
   });
@@ -116,11 +131,27 @@ describe('scanMarkup: offsets', () => {
     expect(attributeAt(bytes, attributes, 1)).toEqual({ name: 'r', value: 'A1' });
   });
 
-  it('clears the attribute list before every scan', () => {
+  it('counts no attributes for a markup that is not a start or empty tag', () => {
     const attributes: number[] = [];
     scanFirst('<c r="A1" s="2">', attributes);
-    scanFirst('</c>', attributes);
-    expect(attributes).toEqual([]);
+    for (const text of ['</c>', '<!-- x -->', '<![CDATA[x]]>', '<?p x?>']) {
+      expect(scanFirst(text, attributes).markup.attributeCount).toBe(0);
+    }
+  });
+
+  it('writes from the start of the list and never shrinks it', () => {
+    const attributes: number[] = [];
+    const markup = createMarkup();
+    const wide = encoder.encode('<c r="A1" s="2" t="n">');
+    scanMarkup(wide, 0, markup, attributes);
+    expect(markup.attributeCount).toBe(3);
+    const narrow = encoder.encode('<c r="B1"/>');
+    scanMarkup(narrow, 0, markup, attributes);
+    expect(markup.attributeCount).toBe(1);
+    expect(attributes).toHaveLength(3 * ATTRIBUTE_FIELDS);
+    expect(attributeAt(narrow, attributes, 0)).toEqual({ name: 'r', value: 'B1' });
+    scanMarkup(narrow, 0, markup);
+    expect(markup.attributeCount).toBe(1);
   });
 
   it('scans a markup at a non-zero offset', () => {
@@ -129,7 +160,14 @@ describe('scanMarkup: offsets', () => {
     const at = nextMarkup(bytes, 0);
     expect(at).toBe(2);
     scanMarkup(bytes, at, markup);
-    expect(markup).toEqual({ kind: 'empty', start: 2, end: 13, nameStart: 3, nameEnd: 4 });
+    expect(markup).toEqual({
+      kind: 'empty',
+      start: 2,
+      end: 13,
+      nameStart: 3,
+      nameEnd: 4,
+      attributeCount: 1,
+    });
     expect(nextMarkup(bytes, markup.end)).toBe(-1);
   });
 });
@@ -137,7 +175,14 @@ describe('scanMarkup: offsets', () => {
 describe('scanMarkup: opaque markup', () => {
   it('ends a comment at its "-->" and never reads the markup inside it', () => {
     const { bytes, markup } = scanFirst('<!-- <row r="9"> -->x');
-    expect(markup).toEqual({ kind: 'opaque', start: 0, end: 20, nameStart: 0, nameEnd: 0 });
+    expect(markup).toEqual({
+      kind: 'opaque',
+      start: 0,
+      end: 20,
+      nameStart: 0,
+      nameEnd: 0,
+      attributeCount: 0,
+    });
     expect(nextMarkup(bytes, markup.end)).toBe(-1);
   });
 
@@ -158,6 +203,16 @@ describe('scanMarkup: opaque markup', () => {
     expect(textOf(bytes, markup.nameStart, markup.nameEnd)).toBe('p');
   });
 
+  it('reads a processing instruction whose target is followed by "?>" or whitespace', () => {
+    const closed = scanFirst('<?p?>');
+    expect(closed.markup.kind).toBe('opaque');
+    expect(closed.markup.end).toBe(5);
+    expect(textOf(closed.bytes, closed.markup.nameStart, closed.markup.nameEnd)).toBe('p');
+    const spaced = scanFirst('<?p\t?>');
+    expect(spaced.markup.end).toBe(spaced.bytes.length);
+    expect(textOf(spaced.bytes, spaced.markup.nameStart, spaced.markup.nameEnd)).toBe('p');
+  });
+
   it('reads a comment whose body starts with "-" as one comment', () => {
     const { bytes, markup } = scanFirst('<!---><row r="1"/>-->');
     expect(markup.kind).toBe('opaque');
@@ -170,6 +225,7 @@ describe('scanDeclaration', () => {
     const { bytes, markup } = scanFirst(`<?xml version="1.0" encoding='UTF-8' standalone="yes"?>`);
     const attributes: number[] = [];
     scanDeclaration(bytes, markup, attributes);
+    expect(markup.attributeCount).toBe(3);
     expect(attributes).toHaveLength(3 * ATTRIBUTE_FIELDS);
     expect(attributeAt(bytes, attributes, 0)).toEqual({ name: 'version', value: '1.0' });
     expect(attributeAt(bytes, attributes, 1)).toEqual({ name: 'encoding', value: 'UTF-8' });
@@ -216,6 +272,9 @@ describe('scanMarkup: rejected markup', () => {
     ['an unclosed processing instruction', '<?p x'],
     ['"--" inside a comment', '<!-- a -- b -->'],
     ['a processing instruction without a target', '<?>'],
+    // Stricter than the plan's wording, as XML and xmldom require: S or '?>' after the target.
+    ['a "?" right after a processing instruction target', '<?p?x ?>'],
+    ['a "<" right after a processing instruction target', '<?p<c/>?>'],
   ])('rejects %s', (_label, input) => {
     expect(() => scanFirst(input)).toThrow(XmlLexError);
   });

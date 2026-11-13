@@ -11,7 +11,9 @@
 //
 // Linear: every delimiter search moves forward from where the construct started and
 // is never repeated from an earlier offset, a tag is walked once, and a scan
-// allocates nothing (the attribute list is the caller's, reused across calls).
+// allocates nothing: the attribute list is the caller's, written from index 0 and
+// never shrunk, so its backing store is reused across calls (truncating it would
+// drop the store and make the next write allocate a new one).
 
 /** Package-internal: callers turn it into a SpreadsheetFileError with their own code. */
 export class XmlLexError extends Error {
@@ -35,10 +37,22 @@ export interface XmlMarkup {
   /** Qualified name; the target for a processing instruction; `start` for a comment or CDATA. */
   nameStart: number;
   nameEnd: number;
+  /**
+   * Attributes of a start or empty tag (or, after `scanDeclaration`, pseudo-attributes
+   * of a declaration); 0 for every other kind. Only the first
+   * `attributeCount * ATTRIBUTE_FIELDS` entries of the attribute list belong to this
+   * markup: the list is never shrunk, so entries past them are left from earlier scans.
+   */
+  attributeCount: number;
 }
 
 /** Offsets written per attribute: nameStart, nameEnd, valueStart, valueEnd (the value without its quotes). */
 export const ATTRIBUTE_FIELDS = 4;
+/** Offset of each field from an attribute's first entry (`attribute * ATTRIBUTE_FIELDS`). */
+export const ATTRIBUTE_NAME_START = 0;
+export const ATTRIBUTE_NAME_END = 1;
+export const ATTRIBUTE_VALUE_START = 2;
+export const ATTRIBUTE_VALUE_END = 3;
 
 // XML's S production, and nothing else: xmldom also takes U+0080 and every byte
 // below 0x20, which this lexer refuses.
@@ -79,7 +93,7 @@ const CDATA_OPEN = '<![CDATA[';
 const CDATA_CLOSE = ']]>';
 
 export function createMarkup(): XmlMarkup {
-  return { kind: 'opaque', start: 0, end: 0, nameStart: 0, nameEnd: 0 };
+  return { kind: 'opaque', start: 0, end: 0, nameStart: 0, nameEnd: 0, attributeCount: 0 };
 }
 
 /** Offset of the next '<' at or after `from`, or -1. */
@@ -111,7 +125,8 @@ export function localNameStart(bytes: Uint8Array, markup: XmlMarkup): number {
   return markup.nameStart;
 }
 
-function isWhitespace(byte: number | undefined): boolean {
+/** XML's S production: space, tab, line feed, carriage return. */
+export function isXmlSpace(byte: number | undefined): boolean {
   return byte === SPACE || byte === TAB || byte === LF || byte === CR;
 }
 
@@ -136,7 +151,7 @@ function isNameByte(byte: number | undefined): boolean {
 
 function skipWhitespace(bytes: Uint8Array, from: number): number {
   let at = from;
-  while (isWhitespace(bytes[at])) at += 1;
+  while (isXmlSpace(bytes[at])) at += 1;
   return at;
 }
 
@@ -195,15 +210,16 @@ function scanQuotedValue(bytes: Uint8Array, from: number, limit: number, quote: 
 
 /**
  * Reads one attribute whose name starts at `from`: name, S*, '=', S*, a quoted value.
- * Appends its four offsets to `attributes` when given; returns the offset just past
- * the closing quote. `limit` bounds the value (the end of the bytes, or the '?>' of
- * an XML declaration).
+ * Writes its four offsets as attribute `index` of `attributes` when given; returns the
+ * offset just past the closing quote. `limit` bounds the value (the end of the bytes,
+ * or the '?>' of an XML declaration).
  */
 function scanAttribute(
   bytes: Uint8Array,
   from: number,
   limit: number,
   attributes: number[] | undefined,
+  index: number,
 ): number {
   const nameEnd = scanName(bytes, from);
   const equals = skipWhitespace(bytes, nameEnd);
@@ -215,7 +231,14 @@ function scanAttribute(
   }
   const valueStart = open + 1;
   const valueEnd = scanQuotedValue(bytes, valueStart, limit, quote);
-  attributes?.push(from, nameEnd, valueStart, valueEnd);
+  if (attributes !== undefined) {
+    // In order from `base`, which is at most the list's length: no holes, no shrink.
+    const base = index * ATTRIBUTE_FIELDS;
+    attributes[base + ATTRIBUTE_NAME_START] = from;
+    attributes[base + ATTRIBUTE_NAME_END] = nameEnd;
+    attributes[base + ATTRIBUTE_VALUE_START] = valueStart;
+    attributes[base + ATTRIBUTE_VALUE_END] = valueEnd;
+  }
   return valueEnd + 1;
 }
 
@@ -232,6 +255,7 @@ function setMarkup(
   into.end = end;
   into.nameStart = nameStart;
   into.nameEnd = nameEnd;
+  into.attributeCount = 0;
 }
 
 /** `<` name, then (S+ attribute)*, S*, then '>' or '/>'. */
@@ -244,22 +268,26 @@ function scanElementTag(
   const nameStart = at + 1;
   const nameEnd = scanName(bytes, nameStart);
   let position = nameEnd;
+  let count = 0;
   for (;;) {
     const next = skipWhitespace(bytes, position);
     const byte = bytes[next];
     if (byte === TAG_CLOSE) {
       setMarkup(into, 'start', at, next + 1, nameStart, nameEnd);
+      into.attributeCount = count;
       return;
     }
     if (byte === SLASH) {
       if (bytes[next + 1] !== TAG_CLOSE) throw new XmlLexError('Expected ">" after "/"', next + 1);
       setMarkup(into, 'empty', at, next + EMPTY_TAG_CLOSE.length, nameStart, nameEnd);
+      into.attributeCount = count;
       return;
     }
     if (byte === undefined) throw new XmlLexError('Tag is not closed', at);
     // An attribute must follow whitespace: '<c r="A1"s="1">' is refused here.
     if (next === position) throw new XmlLexError('Expected whitespace, ">" or "/>"', next);
-    position = scanAttribute(bytes, next, bytes.length, attributes);
+    position = scanAttribute(bytes, next, bytes.length, attributes, count);
+    count += 1;
   }
 }
 
@@ -311,20 +339,23 @@ function scanProcessingInstruction(bytes: Uint8Array, at: number, into: XmlMarku
   const nameEnd = scanName(bytes, nameStart);
   const close = indexOfAscii(bytes, nameEnd, PI_CLOSE);
   if (close === -1) throw new XmlLexError('Processing instruction is not closed', at);
-  if (close !== nameEnd && !isWhitespace(bytes[nameEnd])) {
+  if (close !== nameEnd && !isXmlSpace(bytes[nameEnd])) {
     throw new XmlLexError('Expected whitespace after a processing instruction target', nameEnd);
   }
   setMarkup(into, 'opaque', at, close + PI_CLOSE.length, nameStart, nameEnd);
 }
 
-/** Reads the markup at the '<' at `at` into `into`. With `attributes`, clears it and fills it for a start or empty tag. */
+/**
+ * Reads the markup at the '<' at `at` into `into`. For a start or empty tag, sets
+ * `into.attributeCount` and, with `attributes`, writes their offsets from index 0
+ * (see `XmlMarkup.attributeCount`); the list is never shrunk.
+ */
 export function scanMarkup(
   bytes: Uint8Array,
   at: number,
   into: XmlMarkup,
   attributes?: number[],
 ): void {
-  if (attributes !== undefined) attributes.length = 0;
   if (bytes[at] !== TAG_OPEN) throw new XmlLexError('Expected "<"', at);
   const next = bytes[at + 1];
   if (next === SLASH) {
@@ -342,21 +373,30 @@ export function scanMarkup(
   scanElementTag(bytes, at, into, attributes);
 }
 
-/** The pseudo-attributes of an XML declaration already scanned into `markup`, by the attribute grammar. */
+/**
+ * The pseudo-attributes of an XML declaration already scanned into `markup`, by the
+ * attribute grammar: written to `attributes` from index 0, counted in
+ * `markup.attributeCount`.
+ */
 export function scanDeclaration(bytes: Uint8Array, markup: XmlMarkup, attributes: number[]): void {
-  attributes.length = 0;
+  markup.attributeCount = 0;
   if (markup.kind !== 'opaque' || bytes[markup.start + 1] !== QUESTION) {
     throw new XmlLexError('Expected a processing instruction', markup.start);
   }
   // The '?' of the closing '?>': no name, whitespace or value can run past it.
   const limit = markup.end - PI_CLOSE.length;
   let position = markup.nameEnd;
+  let count = 0;
   for (;;) {
     const next = skipWhitespace(bytes, position);
-    if (next === limit) return;
+    if (next === limit) {
+      markup.attributeCount = count;
+      return;
+    }
     if (next === position) {
       throw new XmlLexError('Expected whitespace before a pseudo-attribute', next);
     }
-    position = scanAttribute(bytes, next, limit, attributes);
+    position = scanAttribute(bytes, next, limit, attributes, count);
+    count += 1;
   }
 }

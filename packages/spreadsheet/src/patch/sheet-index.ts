@@ -6,8 +6,13 @@ import { cellKey, colRefToNumber } from '../sheet-meta';
 import { MALFORMED_SHEET_REASONS, UNSUPPORTED_ENCODING_REASONS } from './reasons';
 import {
   ATTRIBUTE_FIELDS,
+  ATTRIBUTE_NAME_END,
+  ATTRIBUTE_NAME_START,
+  ATTRIBUTE_VALUE_END,
+  ATTRIBUTE_VALUE_START,
   bytesEqualAscii,
   createMarkup,
+  isXmlSpace,
   localNameStart,
   nextMarkup,
   scanDeclaration,
@@ -84,11 +89,6 @@ const ENCODING_PSEUDO_ATTRIBUTE = 'encoding';
 const UTF8_ENCODING_NAME = 'utf-8';
 const UTF8_BYTE_ORDER_MARK: readonly number[] = [0xef, 0xbb, 0xbf];
 
-// XML's S production: the only bytes allowed between markups outside the root.
-const SPACE = 0x20;
-const TAB = 0x09;
-const LF = 0x0a;
-const CR = 0x0d;
 // '?': opens a processing instruction after '<'.
 const QUESTION = 0x3f;
 const DIGIT_ZERO = 0x30;
@@ -101,12 +101,6 @@ const DECIMAL_BASE = 10;
 // A row reference is [1-9][0-9]{0,6}; a cell reference puts 1 to 3 letters before it.
 const MAX_ROW_REFERENCE_DIGITS = 7;
 const MAX_COLUMN_LETTERS = 3;
-
-// Offsets of one attribute's fields from its first field (see ATTRIBUTE_FIELDS).
-const NAME_START_FIELD = 0;
-const NAME_END_FIELD = 1;
-const VALUE_START_FIELD = 2;
-const VALUE_END_FIELD = 3;
 
 // Depth (open elements) at which each tracked element's tag is met; the element is
 // closed by the end tag that brings the depth back to the same value.
@@ -148,10 +142,6 @@ function valueAt(list: readonly number[], index: number): number {
 
 function setLast(list: number[], value: number): void {
   list[list.length - 1] = value;
-}
-
-function isXmlSpace(byte: number | undefined): boolean {
-  return byte === SPACE || byte === TAB || byte === LF || byte === CR;
 }
 
 function isUpperLetter(byte: number | undefined): boolean {
@@ -369,10 +359,10 @@ class WorksheetIndexer {
 
   /** Number of attributes of the markup the last scan read. */
   private attributeCount(): number {
-    return this.attributes.length / ATTRIBUTE_FIELDS;
+    return this.markup.attributeCount;
   }
 
-  /** One field (NAME_START_FIELD ... VALUE_END_FIELD) of attribute `attribute`, 0-based. */
+  /** One field (ATTRIBUTE_NAME_START ... ATTRIBUTE_VALUE_END) of attribute `attribute`, 0-based. */
   private attributeField(attribute: number, field: number): number {
     return valueAt(this.attributes, attribute * ATTRIBUTE_FIELDS + field);
   }
@@ -382,8 +372,8 @@ class WorksheetIndexer {
     scanDeclaration(this.bytes, this.markup, this.attributes);
     for (let attribute = 0; attribute < this.attributeCount(); attribute += 1) {
       if (!this.attributeNameIs(attribute, ENCODING_PSEUDO_ATTRIBUTE)) continue;
-      const valueStart = this.attributeField(attribute, VALUE_START_FIELD);
-      const valueEnd = this.attributeField(attribute, VALUE_END_FIELD);
+      const valueStart = this.attributeField(attribute, ATTRIBUTE_VALUE_START);
+      const valueEnd = this.attributeField(attribute, ATTRIBUTE_VALUE_END);
       if (bytesEqualAsciiIgnoreCase(this.bytes, valueStart, valueEnd, UTF8_ENCODING_NAME)) continue;
       throw unsupportedEncoding(
         UNSUPPORTED_ENCODING_REASONS.DECLARATION,
@@ -420,8 +410,8 @@ class WorksheetIndexer {
     const scope = this.scopeOf(this.sheetDataScope);
     this.assertMainNamespace(scope);
     const reference = this.referenceAttribute(MALFORMED_SHEET_REASONS.ROW_REF);
-    const valueStart = this.attributeField(reference, VALUE_START_FIELD);
-    const valueEnd = this.attributeField(reference, VALUE_END_FIELD);
+    const valueStart = this.attributeField(reference, ATTRIBUTE_VALUE_START);
+    const valueEnd = this.attributeField(reference, ATTRIBUTE_VALUE_END);
     const rowNumber = parseRowReference(this.bytes, valueStart, valueEnd);
     if (rowNumber === null) {
       throw malformedSheet(MALFORMED_SHEET_REASONS.ROW_REF, start, 'has a malformed row reference');
@@ -453,8 +443,8 @@ class WorksheetIndexer {
     this.assertMainNamespace(scope);
     const reference = this.referenceAttribute(MALFORMED_SHEET_REASONS.CELL_REF);
     const column = this.cellReferenceColumn(
-      this.attributeField(reference, VALUE_START_FIELD),
-      this.attributeField(reference, VALUE_END_FIELD),
+      this.attributeField(reference, ATTRIBUTE_VALUE_START),
+      this.attributeField(reference, ATTRIBUTE_VALUE_END),
     );
     if (column <= this.lastColumn) {
       throw malformedSheet(
@@ -522,8 +512,8 @@ class WorksheetIndexer {
   }
 
   private isPrefixedReference(attribute: number): boolean {
-    const nameStart = this.attributeField(attribute, NAME_START_FIELD);
-    const nameEnd = this.attributeField(attribute, NAME_END_FIELD);
+    const nameStart = this.attributeField(attribute, ATTRIBUTE_NAME_START);
+    const nameEnd = this.attributeField(attribute, ATTRIBUTE_NAME_END);
     const suffixStart = nameEnd - PREFIXED_REFERENCE_SUFFIX.length;
     return (
       suffixStart > nameStart &&
@@ -535,8 +525,8 @@ class WorksheetIndexer {
   private attributeNameIs(attribute: number, name: string): boolean {
     return bytesEqualAscii(
       this.bytes,
-      this.attributeField(attribute, NAME_START_FIELD),
-      this.attributeField(attribute, NAME_END_FIELD),
+      this.attributeField(attribute, ATTRIBUTE_NAME_START),
+      this.attributeField(attribute, ATTRIBUTE_NAME_END),
       name,
     );
   }
@@ -561,8 +551,8 @@ class WorksheetIndexer {
     let bindings: Map<string, boolean> | null = null;
     for (let attribute = 0; attribute < this.attributeCount(); attribute += 1) {
       const prefix = this.declaredPrefix(
-        this.attributeField(attribute, NAME_START_FIELD),
-        this.attributeField(attribute, NAME_END_FIELD),
+        this.attributeField(attribute, ATTRIBUTE_NAME_START),
+        this.attributeField(attribute, ATTRIBUTE_NAME_END),
       );
       if (prefix === null) continue;
       bindings ??= new Map();
@@ -573,8 +563,8 @@ class WorksheetIndexer {
           'declares one namespace prefix twice on an element',
         );
       }
-      const valueStart = this.attributeField(attribute, VALUE_START_FIELD);
-      const valueEnd = this.attributeField(attribute, VALUE_END_FIELD);
+      const valueStart = this.attributeField(attribute, ATTRIBUTE_VALUE_START);
+      const valueEnd = this.attributeField(attribute, ATTRIBUTE_VALUE_END);
       bindings.set(prefix, isMainNamespace(this.bytes, valueStart, valueEnd));
     }
     return bindings === null ? parent : { bindings, parent };
