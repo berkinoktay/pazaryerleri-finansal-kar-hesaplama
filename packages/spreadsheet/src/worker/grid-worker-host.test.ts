@@ -7,18 +7,24 @@ import {
   MAX_GRID_TEXT_LENGTH,
 } from '../constants';
 import { SpreadsheetFileError } from '../errors';
+import { resolvePatchRequest, type ResolvedPatchRequest } from '../patch/patch-request';
+import { patchUpload } from '../patch/patch-upload';
+import { MALFORMED_SHEET_REASONS } from '../patch/reasons';
 import { assertGridTextWithinCap, readUploadGrid } from '../read-grid';
 import { resolveReadOptions } from '../read-options';
 import { buildXlsxFixture, worksheetXml } from '../testing/build-xlsx';
-import { readFixture } from '../../tests/helpers/fixture-pins';
+import { pinOf, readFixture } from '../../tests/helpers/fixture-pins';
+import { clear, MAIN_NAMESPACE, num, text } from '../../tests/helpers/patch-helpers';
 import { numberRows } from '../../tests/helpers/workbooks';
 import {
+  answersJob,
   createGridWorkerHost,
   workerLimitReason,
+  type ExpectedAnswer,
   type GridWorkerHost,
   type GridWorkerLimits,
 } from './grid-worker-host';
-import { isGridWorkerRequest } from './protocol';
+import { isGridWorkerRequest, isGridWorkerResponse, type GridWorkerResponse } from './protocol';
 
 // The worker host runs readUploadGrid in a worker thread with a heap limit and a time
 // limit. Each test opens its own host and closes it afterwards.
@@ -41,7 +47,14 @@ const OOM_COLUMNS = 40;
 const COMMISSION_FIXTURE = 'trendyol-commission-tariff.xlsx';
 const TWO_ROWS = [['Barkod'], ['B1']];
 const NOT_A_ZIP = Buffer.from([1, 2, 3, 4]);
+const ONE_JOB_AT_A_TIME = 'GridWorkerHost runs one job at a time';
+const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>';
+// The commission fixture's columns AB and AE (0-based).
+const COLUMN_AB = 27;
+const COLUMN_AE = 30;
 const options = resolveReadOptions({});
+// Changes the second row of twoRowFile.
+const TWO_ROW_PATCH = resolvePatchRequest({ outputs: [[text(2, 0, 'B2')]] });
 
 const hosts: GridWorkerHost[] = [];
 
@@ -80,6 +93,17 @@ function fileErrorOf(value: unknown): SpreadsheetFileError {
     throw new Error(`expected a SpreadsheetFileError, got ${String(value)}`);
   }
   return value;
+}
+
+/** The host's patch error and the in-process one, as code and meta. */
+async function patchErrorsOf(
+  host: GridWorkerHost,
+  file: Buffer,
+  request: ResolvedPatchRequest,
+): Promise<{ readonly worker: SpreadsheetFileError; readonly local: SpreadsheetFileError }> {
+  const worker = fileErrorOf(await rejectionOf(host.patch(file, request)));
+  const local = fileErrorOf(thrownBy(() => patchUpload(file, request)));
+  return { worker, local };
 }
 
 describe('createGridWorkerHost', () => {
@@ -174,8 +198,102 @@ describe('createGridWorkerHost', () => {
     const file = twoRowFile();
 
     const first = host.run(file, options);
-    await expect(host.run(file, options)).rejects.toThrow('GridWorkerHost runs one job at a time');
+    await expect(host.run(file, options)).rejects.toThrow(ONE_JOB_AT_A_TIME);
     await expect(first).resolves.toEqual(TWO_ROWS);
+  });
+
+  it('patches a fixture in the worker exactly as in-process', async () => {
+    const file = readFixture(COMMISSION_FIXTURE);
+    const before = Buffer.from(file);
+    const host = openHost(PRODUCTION_LIMITS);
+    const request = resolvePatchRequest({
+      sheetName: pinOf(COMMISSION_FIXTURE).sheetName,
+      outputs: [[num(2, COLUMN_AB, '123.45'), text(2, COLUMN_AE, 'patched')]],
+    });
+
+    const patched = await host.patch(file, request);
+
+    expect(patched).toHaveLength(1);
+    expect(patched[0]).toBeInstanceOf(Uint8Array);
+    expect(patched).toEqual(patchUpload(file, request));
+    // The worker gets a copy: the caller's buffer is neither detached nor changed.
+    expect(file.equals(before)).toBe(true);
+  });
+
+  it('returns null for an output that changes nothing', async () => {
+    const host = openHost(PRODUCTION_LIMITS);
+    const request = resolvePatchRequest({ outputs: [[clear(1, 5)], [num(2, 1, '5')]] });
+
+    const patched = await host.patch(twoRowFile(), request);
+
+    expect(patched).toHaveLength(2);
+    expect(patched[0]).toBeNull();
+    expect(patched[1]).toBeInstanceOf(Uint8Array);
+  });
+
+  it('rebuilds a patch error with its code and meta', async () => {
+    const host = openHost(PRODUCTION_LIMITS);
+    const commission = readFixture(COMMISSION_FIXTURE);
+    const mismatch = resolvePatchRequest({
+      sheetName: pinOf(COMMISSION_FIXTURE).sheetName,
+      anchors: [{ excelRow: 2, col: 0, expected: 'NOT THE CELL TEXT' }],
+      outputs: [[num(2, COLUMN_AB, '1')]],
+    });
+
+    const anchor = await patchErrorsOf(host, commission, mismatch);
+
+    expect(anchor.worker.code).toBe('ROW_ANCHOR_MISMATCH');
+    expect({ code: anchor.worker.code, meta: anchor.worker.meta }).toEqual({
+      code: anchor.local.code,
+      meta: anchor.local.meta,
+    });
+
+    // The reader reads this sheet; the strict lexer refuses the space in `/ >`.
+    const spacedClose = buildXlsxFixture([
+      {
+        name: 'Sheet1',
+        xml:
+          `${XML_DECLARATION}<worksheet xmlns="${MAIN_NAMESPACE}"><sheetData>` +
+          '<row r="1" / ><row r="2"><c r="A2"><v>7</v></c></row></sheetData></worksheet>',
+      },
+    ]);
+    const markup = await patchErrorsOf(
+      host,
+      spacedClose,
+      resolvePatchRequest({ outputs: [[num(2, 0, '8')]] }),
+    );
+
+    expect(markup.worker.code).toBe('MALFORMED_SHEET');
+    expect(markup.worker.meta).toMatchObject({ reason: MALFORMED_SHEET_REASONS.MARKUP });
+    expect({ code: markup.worker.code, meta: markup.worker.meta }).toEqual({
+      code: markup.local.code,
+      meta: markup.local.meta,
+    });
+  });
+
+  it('turns a timeout during a patch into PAYLOAD_TOO_LARGE', async () => {
+    const host = openHost({ ...PRODUCTION_LIMITS, timeoutMs: 1 });
+
+    const err = fileErrorOf(await rejectionOf(host.patch(twoRowFile(), TWO_ROW_PATCH)));
+
+    expect(err.code).toBe('PAYLOAD_TOO_LARGE');
+    expect(workerLimitReason(err)).toBe('worker-timeout');
+    expect(err.meta).toMatchObject({ timeoutMs: 1 });
+  });
+
+  it('refuses a patch while a read is in flight, and the reverse', async () => {
+    const host = openHost(PRODUCTION_LIMITS);
+    const file = twoRowFile();
+
+    const read = host.run(file, options);
+    await expect(host.patch(file, TWO_ROW_PATCH)).rejects.toThrow(ONE_JOB_AT_A_TIME);
+    await expect(read).resolves.toEqual(TWO_ROWS);
+
+    const patch = host.patch(file, TWO_ROW_PATCH);
+    await expect(host.run(file, options)).rejects.toThrow(ONE_JOB_AT_A_TIME);
+    const patched = await patch;
+    expect(patched).toHaveLength(1);
+    expect(patched[0]).toBeInstanceOf(Uint8Array);
   });
 
   it('caps the grid text', () => {
@@ -192,22 +310,135 @@ describe('createGridWorkerHost', () => {
   });
 });
 
+// CI only: `run` and `patch` share the kill path by construction, and filling the
+// 128 MB heap once more took 42 s under load on the owner's machine.
+describe.runIf(process.env.CI === 'true')(
+  'createGridWorkerHost: memory kill during a patch',
+  () => {
+    it(
+      'turns an out-of-memory kill during a patch into PAYLOAD_TOO_LARGE and recovers',
+      async () => {
+        const host = openHost({
+          ...PRODUCTION_LIMITS,
+          // Generous, so only memory can kill it, even on a loaded machine.
+          timeoutMs: MEMORY_KILL_TIMEOUT_MS,
+          maxOldGenerationSizeMb: SMALL_HEAP_MB,
+          maxYoungGenerationSizeMb: SMALL_YOUNG_GENERATION_MB,
+        });
+        const tooBig = buildXlsxFixture([
+          { name: 'Sheet1', xml: worksheetXml(numberRows(OOM_ROWS, OOM_COLUMNS)) },
+        ]);
+        const request = resolvePatchRequest({ outputs: [[num(2, 0, '1')]] });
+
+        const err = fileErrorOf(await rejectionOf(host.patch(tooBig, request)));
+
+        expect(err.code).toBe('PAYLOAD_TOO_LARGE');
+        expect(workerLimitReason(err)).toBe('worker-memory');
+        expect(err.meta).toMatchObject({ limitMb: SMALL_HEAP_MB });
+        await expect(host.patch(twoRowFile(), TWO_ROW_PATCH)).resolves.toHaveLength(1);
+      },
+      MEMORY_KILL_TEST_TIMEOUT_MS,
+    );
+  },
+);
+
 describe('isGridWorkerRequest', () => {
+  const bytes = new ArrayBuffer(0);
+
   it('accepts a sheet selector, and refuses one with a sheet name or a bad index', () => {
-    const bytes = new ArrayBuffer(0);
     const sheet = { by: 'index', index: 1 } as const;
 
-    expect(isGridWorkerRequest({ id: 1, bytes, options: { ...options, sheet } })).toBe(true);
     expect(
-      isGridWorkerRequest({ id: 1, bytes, options: { ...options, sheet, sheetName: 'Veri' } }),
+      isGridWorkerRequest({ id: 1, kind: 'grid', bytes, options: { ...options, sheet } }),
+    ).toBe(true);
+    expect(
+      isGridWorkerRequest({
+        id: 1,
+        kind: 'grid',
+        bytes,
+        options: { ...options, sheet, sheetName: 'Veri' },
+      }),
     ).toBe(false);
     expect(
       isGridWorkerRequest({
         id: 1,
+        kind: 'grid',
         bytes,
         options: { ...options, sheet: { by: 'index', index: -1 } },
       }),
     ).toBe(false);
+  });
+
+  it('refuses a message without kind', () => {
+    expect(isGridWorkerRequest({ id: 1, bytes, options })).toBe(false);
+    expect(isGridWorkerRequest({ id: 1, bytes, request: TWO_ROW_PATCH })).toBe(false);
+  });
+
+  it('accepts a patch request built by resolvePatchRequest, and refuses a broken one', () => {
+    const message = { id: 1, kind: 'patch', bytes, request: TWO_ROW_PATCH } as const;
+    const unknownKind = { excelRow: 2, col: 0, value: { kind: 'formula', value: '1' } };
+
+    expect(isGridWorkerRequest(message)).toBe(true);
+    expect(
+      isGridWorkerRequest({ ...message, request: { ...TWO_ROW_PATCH, outputs: 'none' } }),
+    ).toBe(false);
+    expect(
+      isGridWorkerRequest({ ...message, request: { ...TWO_ROW_PATCH, outputs: [[unknownKind]] } }),
+    ).toBe(false);
+    expect(
+      isGridWorkerRequest({
+        ...message,
+        request: { ...TWO_ROW_PATCH, read: { ...TWO_ROW_PATCH.read, rowCap: 0 } },
+      }),
+    ).toBe(false);
+    // A patch body under the grid kind, and read options under the patch kind.
+    expect(isGridWorkerRequest({ ...message, kind: 'grid' })).toBe(false);
+    expect(isGridWorkerRequest({ id: 1, kind: 'patch', bytes, options })).toBe(false);
+  });
+});
+
+describe('isGridWorkerResponse', () => {
+  it('accepts patched files only when each is an ArrayBuffer or null', () => {
+    expect(
+      isGridWorkerResponse({ id: 1, kind: 'patched', files: [new ArrayBuffer(1), null] }),
+    ).toBe(true);
+    expect(isGridWorkerResponse({ id: 1, kind: 'patched', files: [new Uint8Array(1)] })).toBe(
+      false,
+    );
+  });
+});
+
+describe('answersJob', () => {
+  const PATCH_JOB: ExpectedAnswer = { kind: 'patched', outputs: 2 };
+  const GRID_JOB: ExpectedAnswer = { kind: 'grid' };
+  const grid: GridWorkerResponse = { id: 1, kind: 'grid', grid: [] };
+  const fileError: GridWorkerResponse = {
+    id: 1,
+    kind: 'file-error',
+    code: 'NOT_XLSX',
+    message: 'Not an xlsx',
+    meta: {},
+  };
+  const failure: GridWorkerResponse = { id: 1, kind: 'failure', name: 'Error', message: 'boom' };
+
+  function patched(files: number): GridWorkerResponse {
+    return { id: 1, kind: 'patched', files: Array.from({ length: files }, () => null) };
+  }
+
+  it('settles a patch job only with one file per output sent, or with an error answer', () => {
+    expect(answersJob(PATCH_JOB, patched(2))).toBe(true);
+    expect(answersJob(PATCH_JOB, patched(1))).toBe(false);
+    expect(answersJob(PATCH_JOB, patched(3))).toBe(false);
+    expect(answersJob(PATCH_JOB, grid)).toBe(false);
+    expect(answersJob(PATCH_JOB, fileError)).toBe(true);
+    expect(answersJob(PATCH_JOB, failure)).toBe(true);
+  });
+
+  it('settles a grid job only with a grid, or with an error answer', () => {
+    expect(answersJob(GRID_JOB, grid)).toBe(true);
+    expect(answersJob(GRID_JOB, patched(2))).toBe(false);
+    expect(answersJob(GRID_JOB, fileError)).toBe(true);
+    expect(answersJob(GRID_JOB, failure)).toBe(true);
   });
 });
 

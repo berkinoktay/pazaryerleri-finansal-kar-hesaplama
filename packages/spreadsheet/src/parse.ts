@@ -10,9 +10,10 @@ import { createParseQueue } from './parse-queue';
 import { resolveReadOptions, type ReadGridOptions } from './read-options';
 import { createGridWorkerHost, type GridWorkerHost } from './worker/grid-worker-host';
 
-// One parse at a time per process, at most MAX_QUEUED_PARSES in flight, none waiting
-// longer than PARSE_QUEUE_MAX_WAIT_MS (see parse-queue.ts). The queue stays on the
-// main thread; each parse runs in the worker host's single worker.
+// One job at a time per process, at most MAX_QUEUED_PARSES in flight, none waiting
+// longer than PARSE_QUEUE_MAX_WAIT_MS (see parse-queue.ts). Reads and patches share
+// this one queue and the one host below, so the limits bound them together. The queue
+// stays on the main thread; each job runs in the worker host's single worker.
 const runParse = createParseQueue({
   maxInFlight: MAX_QUEUED_PARSES,
   maxWaitMs: PARSE_QUEUE_MAX_WAIT_MS,
@@ -41,6 +42,16 @@ export function setGridWorkerHostForTests(host: GridWorkerHost | null): void {
 }
 
 /**
+ * Runs `job` on the process's grid worker host once its turn in the queue comes (the
+ * one queue reads and patches share). Rejects with SpreadsheetFileError ENGINE_BUSY
+ * when the queue is full or the job waited too long, or with what `job` rejects with.
+ * Not exported from the package.
+ */
+export async function runOnGridWorker<T>(job: (host: GridWorkerHost) => Promise<T>): Promise<T> {
+  return runParse(async () => job(gridWorkerHost()));
+}
+
+/**
  * Runs the upload security gate and returns the raw 2D cell grid of one sheet, built
  * straight from the gate's DOM (see read-grid.ts), in a worker thread with a heap and
  * a time limit. The sheet:
@@ -56,14 +67,15 @@ export function setGridWorkerHostForTests(host: GridWorkerHost | null): void {
  * SpreadsheetFileError: the gate's codes, `SHEET_NOT_FOUND`, `CORRUPT_FILE` if the
  * workbook cannot be read, or `PAYLOAD_TOO_LARGE` with `meta.reason` when a worker
  * limit kills the parse (workerLimitReason). Consumers map columns by position or by their own header
- * lookup. Calls run one at a time per process; with MAX_QUEUED_PARSES calls already in
- * flight it rejects at once with `ENGINE_BUSY`, and a call that waits longer than
- * PARSE_QUEUE_MAX_WAIT_MS for its turn rejects with `ENGINE_BUSY` too.
+ * lookup. Calls run one at a time per process, in the queue patchWorkbook shares; with
+ * MAX_QUEUED_PARSES calls of either kind already in flight it rejects at once with
+ * `ENGINE_BUSY`, and a call that waits longer than PARSE_QUEUE_MAX_WAIT_MS for its turn
+ * rejects with `ENGINE_BUSY` too.
  */
 export async function readWorkbookGrid(
   file: Buffer,
   options: ReadGridOptions = {},
 ): Promise<SheetData> {
   const resolved = resolveReadOptions(options);
-  return runParse(async () => gridWorkerHost().run(file, resolved));
+  return runOnGridWorker(async (host) => host.run(file, resolved));
 }

@@ -63,18 +63,19 @@ export const MAX_XML_DOM_WEIGHT = 5_000_000;
 // 0.25 s instead of 0.09 s. Excel repeats a declaration on every
 // x14:conditionalFormatting, so a real worksheet can carry 70 or more.
 export const MAX_XMLNS_DECLARATIONS_PER_PART = 256;
-// Workbook parses in flight per process (the running one plus those waiting), beyond
-// which a new call is refused with ENGINE_BUSY instead of queueing. Parses run one at
-// a time, so the process peak memory stays at about one parse whatever the limit;
-// the limit bounds the wait instead: one tenant's burst of large uploads cannot keep
-// every other tenant's import or export waiting for minutes.
+// Workbook jobs in flight per process (the running one plus those waiting), beyond
+// which a new call is refused with ENGINE_BUSY instead of queueing. Reads
+// (readWorkbookGrid) and patches (patchWorkbook) share one queue, so this bounds them
+// together. Jobs run one at a time, so the process peak memory stays at about one
+// parse whatever the limit; the limit bounds the wait instead: one tenant's burst of
+// large uploads cannot keep every other tenant's import or export waiting for minutes.
 export const MAX_QUEUED_PARSES = 8;
-// How long a parse may wait in the queue for its turn; beyond it the call gives up
-// with ENGINE_BUSY and its slot is freed. With up to MAX_QUEUED_PARSES calls ahead,
-// the queue alone could otherwise hold a caller for several parse durations.
+// How long a read or a patch may wait in the shared queue for its turn; beyond it the
+// call gives up with ENGINE_BUSY and its slot is freed. With up to MAX_QUEUED_PARSES
+// calls ahead, the queue alone could otherwise hold a caller for several job durations.
 export const PARSE_QUEUE_MAX_WAIT_MS = 20_000;
-// Every parse runs in one long-lived worker thread with these limits (see
-// worker/grid-worker-host.ts). A parse that exhausts the heap or runs past the time
+// Every read and every patch runs in one long-lived worker thread with these limits
+// (see worker/grid-worker-host.ts). A job that exhausts the heap or runs past the time
 // limit kills only the worker. The limits are a backstop, not the defence: one
 // allocation larger than the remaining heap headroom plus about 16 MB still aborts the
 // whole process, and memory outside the V8 heap (upload bytes, decoded text) is not
