@@ -94,10 +94,11 @@ export function grownFixtureWorkbook(file: string, rows: number): Buffer {
   return Buffer.from(zipSync(entries));
 }
 
-// Crafted archives of the zip layout tests: a central directory that reads another
-// worksheet than the local-header stream does. Both are written by hand: local headers
-// of 30 bytes plus the name (version 20), directory records of 46 bytes plus the name,
-// a 22-byte end record; no extra field, no comment, time and date zero.
+// Crafted archives of the zip layout tests, most of them with a central directory that
+// reads another worksheet than the local-header stream does. All are written by hand:
+// local headers of 30 bytes plus the name (version 20), directory records of 46 bytes
+// plus the name, a 22-byte end record; no extra field or comment unless noted, time and
+// date zero.
 
 const ZIP_LOCAL_HEADER_SIGNATURE = 0x04034b50; // 'PK\x03\x04'
 const ZIP_DIRECTORY_RECORD_SIGNATURE = 0x02014b50; // 'PK\x01\x02'
@@ -117,7 +118,17 @@ const ZIP_DATA_DESCRIPTOR_FLAG = 0x0008;
 const ZIP_ZERO = 0;
 // A data descriptor after its signature: the crc and two 32-bit sizes.
 const ZIP_DESCRIPTOR_FIELDS_LENGTH = 12;
+// A 32-bit size at its maximum: the size is in the zip64 extra field.
+const ZIP64_SIZE = 0xffffffff;
+// The zip64 extended information extra field: its tag, then both 64-bit sizes.
+const ZIP64_EXTRA_TAG = 1;
+const ZIP64_EXTRA_SIZES_LENGTH = 16;
+// Unsigned data descriptors, by length: the crc, then both sizes in 32 bits or in 64.
+const UNSIGNED_DESCRIPTOR_32_LENGTH = 12;
+const UNSIGNED_DESCRIPTOR_64_LENGTH = 20;
+const ZIP_SIGNATURE_LENGTH = U32;
 
+const CONTENT_TYPES_PART = '[Content_Types].xml';
 const HIDDEN_BLOB_PART = 'xl/media/blob.bin';
 const HIDDEN_PROPERTIES_PART = 'docProps/app.xml';
 const HIDDEN_PROPERTIES = '<Properties/>';
@@ -132,6 +143,20 @@ export const HIDDEN_BOMB_BYTES = 300 * 1024 * 1024;
 
 /** What the hidden tile of hiddenTileArchive holds. */
 export type HiddenTileKind = 'other-sheet' | 'bomb' | 'same-sheet';
+
+/** Where zip64SkipArchive hides the copy of the worksheet entry that the stream reads. */
+export type Zip64SkipCopy = 'record-comment' | 'trailing-bytes';
+
+// The entry right after docProps/app.xml, which the stream of zip64SkipArchive misses.
+const ZIP64_SKIP_MISSED_ENTRY: Readonly<Record<Zip64SkipCopy, string>> = {
+  'record-comment': SHEET_PART,
+  'trailing-bytes': CONTENT_TYPES_PART,
+};
+
+/** The length of the unsigned data descriptor of unsignedDescriptorArchive. */
+export type UnsignedDescriptorLength =
+  | typeof UNSIGNED_DESCRIPTOR_32_LENGTH
+  | typeof UNSIGNED_DESCRIPTOR_64_LENGTH;
 
 export interface HiddenEntryArchive {
   readonly file: Buffer;
@@ -152,6 +177,18 @@ export interface HiddenTileArchive {
   readonly plantedSignatures: readonly [number, number];
 }
 
+export interface Zip64SkipArchive {
+  readonly file: Buffer;
+  /** What both the stream and the central directory read for `xl/worksheets/sheet1.xml`. */
+  readonly realSheet: Uint8Array;
+}
+
+export interface CraftedArchive {
+  readonly file: Buffer;
+  /** What the central directory describes, written out by hand: every entry, in directory order. */
+  readonly layout: ZipLayout;
+}
+
 /** What a local header or a directory record declares. */
 interface ZipFields {
   readonly flags: number;
@@ -168,6 +205,8 @@ interface WrittenEntry {
   readonly headerOffset: number;
   readonly dataOffset: number;
   readonly segmentEnd: number;
+  /** The comment of its directory record; none when absent. */
+  readonly comment?: Buffer;
 }
 
 type ZipField = readonly [value: number, width: typeof U16 | typeof U32];
@@ -198,7 +237,7 @@ function littleEndian(fields: readonly ZipField[]): Buffer {
   return bytes;
 }
 
-function localHeader(name: string, fields: ZipFields): Buffer {
+function localHeader(name: string, fields: ZipFields, extra: Buffer = Buffer.alloc(0)): Buffer {
   const nameBytes = Buffer.from(name);
   const header = littleEndian([
     [ZIP_LOCAL_HEADER_SIGNATURE, U32],
@@ -211,13 +250,14 @@ function localHeader(name: string, fields: ZipFields): Buffer {
     [fields.compressedSize, U32],
     [fields.uncompressedSize, U32],
     [nameBytes.length, U16],
-    [ZIP_ZERO, U16], // extra length
+    [extra.length, U16],
   ]);
-  return Buffer.concat([header, nameBytes]);
+  return Buffer.concat([header, nameBytes, extra]);
 }
 
 function directoryRecord(entry: WrittenEntry): Buffer {
   const nameBytes = Buffer.from(entry.name);
+  const comment = entry.comment ?? Buffer.alloc(0);
   const record = littleEndian([
     [ZIP_DIRECTORY_RECORD_SIGNATURE, U32],
     [ZIP_VERSION, U16], // version made by
@@ -231,13 +271,13 @@ function directoryRecord(entry: WrittenEntry): Buffer {
     [entry.fields.uncompressedSize, U32],
     [nameBytes.length, U16],
     [ZIP_ZERO, U16], // extra length
-    [ZIP_ZERO, U16], // comment length
+    [comment.length, U16],
     [ZIP_ZERO, U16], // disk number
     [ZIP_ZERO, U16], // internal attributes
     [ZIP_ZERO, U32], // external attributes
     [entry.headerOffset, U32],
   ]);
-  return Buffer.concat([record, nameBytes]);
+  return Buffer.concat([record, nameBytes, comment]);
 }
 
 function endRecord(count: number, directorySize: number, directoryOffset: number): Buffer {
@@ -273,20 +313,36 @@ function deflatedFields(content: Uint8Array, data: Buffer): ZipFields {
   };
 }
 
-/** Appends a local header without a data descriptor, then the deflated `content`. */
-function appendDeflated(body: ArchiveBody, name: string, content: Uint8Array): WrittenEntry {
-  const data = deflateRawSync(content);
-  const fields = deflatedFields(content, data);
+/** Appends a local header of `fields` without a data descriptor, then `data`. */
+function appendEntry(
+  body: ArchiveBody,
+  name: string,
+  fields: ZipFields,
+  data: Buffer,
+): WrittenEntry {
   const headerOffset = body.append(localHeader(name, fields));
   const dataOffset = body.append(data);
   return { name, fields, headerOffset, dataOffset, segmentEnd: body.length };
 }
 
+/** Appends a local header without a data descriptor, then the deflated `content`. */
+function appendDeflated(body: ArchiveBody, name: string, content: Uint8Array): WrittenEntry {
+  const data = deflateRawSync(content);
+  return appendEntry(body, name, deflatedFields(content, data), data);
+}
+
+/** A deflated entry with flag bit 3, as its record and data descriptor declare it. */
+function bit3Fields(content: Uint8Array, data: Buffer): ZipFields {
+  return { ...deflatedFields(content, data), flags: ZIP_DATA_DESCRIPTOR_FLAG };
+}
+
+/** What a bit-3 local header declares: the flags and method, its crc and sizes left 0. */
+function deferredFields(fields: ZipFields): ZipFields {
+  return { ...fields, crc32: ZIP_ZERO, compressedSize: ZIP_ZERO, uncompressedSize: ZIP_ZERO };
+}
+
 /** `body`, then a directory record per entry of `entries` in that order, then the end record. */
-function closeArchive(
-  body: ArchiveBody,
-  entries: readonly WrittenEntry[],
-): { readonly file: Buffer; readonly layout: ZipLayout } {
+function closeArchive(body: ArchiveBody, entries: readonly WrittenEntry[]): CraftedArchive {
   const directoryOffset = body.length;
   const records: Buffer[] = [];
   const described: ZipEntry[] = [];
@@ -505,4 +561,150 @@ export function hiddenTileArchive(tile: HiddenTileKind): HiddenTileArchive {
     tile: hidden,
     plantedSignatures: [fakeDescriptorOffset, fakeDescriptorOffset + fakeDescriptor.length],
   };
+}
+
+/**
+ * Appends `docProps/app.xml` with flag bit 3: a local header whose crc is 0 and whose
+ * sizes are 0xFFFFFFFF, with a zip64 extra field (both 64-bit sizes zero); then its
+ * deflated data and a real 16-byte data descriptor. Its record carries the real crc and
+ * sizes. The stream reads the descriptor as a zip64 one and resumes 4 bytes into the
+ * next local header.
+ */
+function appendZip64Properties(body: ArchiveBody): WrittenEntry {
+  const properties = strToU8(HIDDEN_PROPERTIES);
+  const data = deflateRawSync(properties);
+  const fields = bit3Fields(properties, data);
+  const zip64Extra = Buffer.concat([
+    littleEndian([
+      [ZIP64_EXTRA_TAG, U16],
+      [ZIP64_EXTRA_SIZES_LENGTH, U16],
+    ]),
+    Buffer.alloc(ZIP64_EXTRA_SIZES_LENGTH),
+  ]);
+  const localFields: ZipFields = {
+    ...deferredFields(fields),
+    compressedSize: ZIP64_SIZE,
+    uncompressedSize: ZIP64_SIZE,
+  };
+  const headerOffset = body.append(localHeader(HIDDEN_PROPERTIES_PART, localFields, zip64Extra));
+  const dataOffset = body.append(data);
+  body.append(dataDescriptor(fields));
+  return {
+    name: HIDDEN_PROPERTIES_PART,
+    fields,
+    headerOffset,
+    dataOffset,
+    segmentEnd: body.length,
+  };
+}
+
+/**
+ * The zip64 local skip (`A` is `docProps/app.xml`, `W` the worksheet entry, `Y` its
+ * content). `A` comes from appendZip64Properties, so the stream never reads the entry
+ * right after it and scans on for the next local header signature, which `copy` plants:
+ *   - 'record-comment': `W` right after `A`; the comment of `W`'s directory record holds
+ *     a complete local entry of `W` with `Y`;
+ *   - 'trailing-bytes': `[Content_Types].xml` (`B`, an entry without bit 3) right after
+ *     `A`, then `W`. After the end of its deflate stream, `B`'s data holds a complete
+ *     local entry of `B`, then one of `W` with `Y`, whose compressed size also covers
+ *     the signature of the real `W`'s local header.
+ * Every header, descriptor, size and offset agrees with the directory, which tiles the
+ * file without a gap; both the stream and the directory read `Y` for `W`, but the
+ * stream from the planted copy, which a rewrite of `W` does not reach.
+ */
+export function zip64SkipArchive(copy: Zip64SkipCopy): Zip64SkipArchive {
+  const { entries, realSheet } = hiddenBase();
+  const body = new ArchiveBody();
+  const missed = ZIP64_SKIP_MISSED_ENTRY[copy];
+  const written = Object.entries(entries)
+    .filter(([name]) => name !== SHEET_PART && name !== missed)
+    .map(([name, content]) => appendDeflated(body, name, content));
+  const properties = appendZip64Properties(body);
+  const sheetData = deflateRawSync(realSheet);
+  const sheetFields = deflatedFields(realSheet, sheetData);
+
+  switch (copy) {
+    case 'record-comment': {
+      const sheet = appendEntry(body, SHEET_PART, sheetFields, sheetData);
+      const comment = Buffer.concat([localHeader(SHEET_PART, sheetFields), sheetData]);
+      const { file } = closeArchive(body, [...written, properties, { ...sheet, comment }]);
+      return { file, realSheet };
+    }
+    case 'trailing-bytes': {
+      const contentTypes = entries[CONTENT_TYPES_PART];
+      if (contentTypes === undefined) throw new Error(`entry missing: ${CONTENT_TYPES_PART}`);
+      const contentTypesData = deflateRawSync(contentTypes);
+      const contentTypesFields = deflatedFields(contentTypes, contentTypesData);
+      const sheetCopyFields: ZipFields = {
+        ...sheetFields,
+        compressedSize: sheetData.length + ZIP_SIGNATURE_LENGTH,
+      };
+      const data = Buffer.concat([
+        contentTypesData,
+        localHeader(CONTENT_TYPES_PART, contentTypesFields),
+        contentTypesData,
+        localHeader(SHEET_PART, sheetCopyFields),
+        sheetData,
+      ]);
+      const contentTypesEntry = appendEntry(
+        body,
+        CONTENT_TYPES_PART,
+        { ...contentTypesFields, compressedSize: data.length },
+        data,
+      );
+      const sheet = appendEntry(body, SHEET_PART, sheetFields, sheetData);
+      const { file } = closeArchive(body, [...written, properties, contentTypesEntry, sheet]);
+      return { file, realSheet };
+    }
+    default: {
+      const unhandled: never = copy;
+      throw new Error(`Unhandled zip64 skip copy: ${String(unhandled)}`);
+    }
+  }
+}
+
+/** An unsigned data descriptor of `length` bytes: the crc, then both sizes. */
+function unsignedDescriptor(fields: ZipFields, length: UnsignedDescriptorLength): Buffer {
+  switch (length) {
+    case UNSIGNED_DESCRIPTOR_32_LENGTH:
+      return littleEndian([
+        [fields.crc32, U32],
+        [fields.compressedSize, U32],
+        [fields.uncompressedSize, U32],
+      ]);
+    case UNSIGNED_DESCRIPTOR_64_LENGTH:
+      // Each size in 64 bits: its 32-bit value, then a zero high half.
+      return littleEndian([
+        [fields.crc32, U32],
+        [fields.compressedSize, U32],
+        [ZIP_ZERO, U32],
+        [fields.uncompressedSize, U32],
+        [ZIP_ZERO, U32],
+      ]);
+    default: {
+      const unhandled: never = length;
+      throw new Error(`Unhandled unsigned descriptor length: ${String(unhandled)}`);
+    }
+  }
+}
+
+/**
+ * The base workbook with its worksheet entry written with flag bit 3 (local crc and
+ * sizes 0) and an unsigned data descriptor of `length` bytes that agrees with its
+ * record; every other entry has no descriptor. Only the missing descriptor signature
+ * sets it apart from an archive readZipLayout accepts.
+ */
+export function unsignedDescriptorArchive(length: UnsignedDescriptorLength): CraftedArchive {
+  const { entries } = hiddenBase();
+  const body = new ArchiveBody();
+  const written = Object.entries(entries).map(([name, content]) => {
+    if (name !== SHEET_PART) return appendDeflated(body, name, content);
+    const data = deflateRawSync(content);
+    const fields = bit3Fields(content, data);
+    const headerOffset = body.append(localHeader(name, deferredFields(fields)));
+    const dataOffset = body.append(data);
+    body.append(unsignedDescriptor(fields, length));
+    return { name, fields, headerOffset, dataOffset, segmentEnd: body.length };
+  });
+  return closeArchive(body, written);
 }

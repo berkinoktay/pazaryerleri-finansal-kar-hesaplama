@@ -8,6 +8,10 @@ import {
   hiddenEntryArchive,
   hiddenTileArchive,
   type HiddenTileKind,
+  unsignedDescriptorArchive,
+  type UnsignedDescriptorLength,
+  zip64SkipArchive,
+  type Zip64SkipCopy,
 } from '../../tests/helpers/workbooks';
 import {
   DEFAULT_COL_CAP,
@@ -48,6 +52,10 @@ const GUARD_OPTS = {
 const PROBE = '<!--probe-->';
 const WORKSHEET_END_TAG = '</worksheet>';
 const TILE_KINDS: readonly HiddenTileKind[] = ['other-sheet', 'bomb', 'same-sheet'];
+const ZIP64_SKIP_COPIES: readonly Zip64SkipCopy[] = ['record-comment', 'trailing-bytes'];
+const UNSIGNED_DESCRIPTOR_LENGTHS: readonly UnsignedDescriptorLength[] = [12, 20];
+// A compressed size that runs far past the end of any fixture.
+const OUT_OF_BOUNDS_SIZE = 0x40000000;
 const LONG_NAME_LENGTH = 1_000;
 const SHORT_STREAM_BYTES = 3;
 const GAP_LENGTH = 4;
@@ -506,34 +514,69 @@ describe('readZipLayout: rejected archives', () => {
         }),
     ],
     [
-      'two records of one name',
-      () =>
-        edited(
-          Buffer.from(zipSync({ 'a.xml': strToU8('<a/>'), 'b.xml': strToU8('<b/>') })),
-          (copy, layout) => {
-            copy.write('a', entryNamed(layout, 'b.xml').recordOffset + RECORD_NAME);
-          },
-        ),
-    ],
-    [
       'a file one byte short',
       () => {
         const file = smallWorkbook();
         return file.subarray(0, file.length - 1);
       },
     ],
-    [
-      `a record count of ${MAX_ZIP_ENTRIES + 1}`,
-      () =>
-        edited(smallWorkbook(), (copy, layout) => {
-          copy.writeUInt16LE(MAX_ZIP_ENTRIES + 1, layout.endRecordOffset + END_DISK_ENTRIES);
-          copy.writeUInt16LE(MAX_ZIP_ENTRIES + 1, layout.endRecordOffset + END_TOTAL_ENTRIES);
-        }),
-    ],
   ])('zip-layout: %s', (_, build) => {
     const file = build();
     expectRejected(() => readZipLayout(file), ZIP_REJECT_REASONS.LAYOUT);
   });
+
+  it('zip-layout: two entries of one name in both their local headers and their records', () => {
+    const file = edited(
+      Buffer.from(zipSync({ 'a.xml': strToU8('<a/>'), 'b.xml': strToU8('<b/>') })),
+      (copy, layout) => {
+        const entry = entryNamed(layout, 'b.xml');
+        copy.write('a', entry.headerOffset + LOCAL_NAME);
+        copy.write('a', entry.recordOffset + RECORD_NAME);
+      },
+    );
+    const error = expectRejected(() => readZipLayout(file), ZIP_REJECT_REASONS.LAYOUT);
+    expect(error.message).toBe('Zip directory repeats an entry name');
+    expect(error.meta).toEqual({ reason: ZIP_REJECT_REASONS.LAYOUT, entry: 'a.xml' });
+  });
+
+  it(`zip-layout: an archive of ${MAX_ZIP_ENTRIES + 1} entries`, () => {
+    const file = zipSync(
+      Object.fromEntries(
+        Array.from({ length: MAX_ZIP_ENTRIES + 1 }, (_, i) => [`part${i}.xml`, strToU8('<p/>')]),
+      ),
+    );
+    expect(Object.keys(unzipSync(file))).toHaveLength(MAX_ZIP_ENTRIES + 1);
+    const error = expectRejected(() => readZipLayout(file), ZIP_REJECT_REASONS.LAYOUT);
+    expect(error.message).toBe('Zip end record declares an entry count it cannot have');
+  });
+
+  it('zip-layout, not a RangeError: an entry that starts past the directory', () => {
+    // The entry before the last declares data that ends one descriptor short of the
+    // last entry's new offset, far past the end of the file.
+    const original = readFixture(COMMISSION_FIXTURE);
+    const [before, last] = physicalOrder(readZipLayout(original)).slice(-2);
+    if (before === undefined || last === undefined) throw new Error('the fixture has one entry');
+    const file = Buffer.from(original);
+    file.writeUInt32LE(OUT_OF_BOUNDS_SIZE, before.recordOffset + RECORD_COMPRESSED_SIZE);
+    file.writeUInt32LE(
+      before.dataOffset + OUT_OF_BOUNDS_SIZE + descriptorLength(before),
+      last.recordOffset + RECORD_HEADER_OFFSET,
+    );
+    // fileErrorOf rethrows anything but a SpreadsheetFileError, a RangeError included.
+    const error = expectRejected(() => readZipLayout(file), ZIP_REJECT_REASONS.LAYOUT);
+    expect(error.message).toBe('Zip entry starts inside the directory');
+    expect(error.meta).toEqual({ reason: ZIP_REJECT_REASONS.LAYOUT, entry: before.name });
+  });
+
+  it.each(UNSIGNED_DESCRIPTOR_LENGTHS)(
+    'zip-layout: a bit-3 entry with a %i-byte unsigned data descriptor',
+    (length) => {
+      const { file, layout } = unsignedDescriptorArchive(length);
+      expect(descriptorLength(entryNamed(layout, SHEET_PART))).toBe(length);
+      const error = expectRejected(() => readZipLayout(file), ZIP_REJECT_REASONS.LAYOUT);
+      expect(error.meta).toEqual({ reason: ZIP_REJECT_REASONS.LAYOUT, entry: SHEET_PART });
+    },
+  );
 
   it('zip64: a record whose compressed size is 0xFFFFFFFF', () => {
     const file = edited(smallWorkbook(), (copy, layout) => {
@@ -562,6 +605,55 @@ describe('readZipLayout: rejected archives', () => {
       copy.writeUInt16LE(UNKNOWN_METHOD, entry.headerOffset + LOCAL_METHOD);
     });
     expectRejected(() => readZipLayout(file), ZIP_REJECT_REASONS.METHOD);
+  });
+});
+
+// The local crc and sizes of a bit-3 entry: the offset of each in the local header, and
+// the value its record declares.
+const DEFERRED_LOCAL_FIELDS: readonly [string, number, (entry: ZipEntry) => number][] = [
+  ['crc', LOCAL_CRC, (entry) => entry.crc32],
+  ['compressed size', LOCAL_COMPRESSED_SIZE, (entry) => entry.compressedSize],
+  ['uncompressed size', LOCAL_UNCOMPRESSED_SIZE, (entry) => entry.uncompressedSize],
+];
+
+describe('readZipLayout: the local crc and sizes of a bit-3 entry', () => {
+  it.each(DEFERRED_LOCAL_FIELDS)(
+    'refuses a local %s that is neither 0 nor the value of the record',
+    (_, field, recordValue) => {
+      const original = readFixture(COMMISSION_FIXTURE);
+      const entry = entryNamed(readZipLayout(original), SHEET_PART);
+      expect(entry.flags & DATA_DESCRIPTOR_FLAG).toBe(DATA_DESCRIPTOR_FLAG);
+      expect(original.readUInt32LE(entry.headerOffset + field)).toBe(0);
+
+      const file = Buffer.from(original);
+      file.writeUInt32LE((recordValue(entry) ^ 1) >>> 0, entry.headerOffset + field);
+      const error = expectRejected(() => readZipLayout(file), ZIP_REJECT_REASONS.LAYOUT);
+      expect(error.meta).toEqual({ reason: ZIP_REJECT_REASONS.LAYOUT, entry: SHEET_PART });
+    },
+  );
+
+  it('accepts a local crc and sizes that are the values of the record', () => {
+    const file = edited(readFixture(COMMISSION_FIXTURE), (copy, layout) => {
+      const entry = entryNamed(layout, SHEET_PART);
+      for (const [, field, recordValue] of DEFERRED_LOCAL_FIELDS) {
+        copy.writeUInt32LE(recordValue(entry), entry.headerOffset + field);
+      }
+    });
+    expect(() => readZipLayout(file)).not.toThrow();
+  });
+});
+
+describe.each(ZIP64_SKIP_COPIES)('the zip64 local skip, the copy of the sheet: %s', (copy) => {
+  it('passes the import gate, which reads the real sheet', () => {
+    const { file, realSheet } = zip64SkipArchive(copy);
+    // Pins today's import gate, which accepts this file. Flips to toThrow when PR 3 adds the zip-layout and view checks to the import gate.
+    expect(openUpload(file, GUARD_OPTS)[SHEET_PART]).toEqual(realSheet);
+  });
+
+  it('is refused by the local zip64 rule', () => {
+    const { file } = zip64SkipArchive(copy);
+    const error = expectRejected(() => readZipLayout(file), ZIP_REJECT_REASONS.ZIP64);
+    expect(error.meta).toEqual({ reason: ZIP_REJECT_REASONS.ZIP64, entry: APP_PROPERTIES_PART });
   });
 });
 

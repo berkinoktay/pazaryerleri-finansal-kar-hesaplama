@@ -18,11 +18,21 @@ import { ZIP_REJECT_REASONS } from './reasons';
 // The import gate reads entries from the local-header stream (fflate's Unzip); the
 // writer needs byte ranges, which only the central directory gives. readZipLayout
 // accepts only an archive in which both walks visit the same entries at the same
-// offsets: an end record at the very end with no comment, no zip64 structure, a
-// directory that ends where the end record starts, entries that tile the bytes before
-// the directory with no gap or overlap, local headers and data descriptors that agree
-// with their records, and none of the signatures at which the stream ends an entry
-// inside the segment of an entry that carries a data descriptor (flag bit 3).
+// offsets: an end record at the very end with no comment, no zip64 structure (a local
+// size of 0xFFFFFFFF included), a directory that ends where the end record starts,
+// entries that tile the bytes before the directory with no gap or overlap, local
+// headers and data descriptors that agree with their records, data descriptors that
+// start with their signature, and none of the signatures at which the stream ends an
+// entry inside the segment of an entry that carries a data descriptor (flag bit 3).
+//
+// The stream ends a bit-3 entry at the first of those signatures and steps a fixed
+// length past it. When a local size is 0xFFFFFFFF and a zip64 extra field holds it,
+// the stream steps the length of a zip64 descriptor, into the next local header, and
+// never reads that entry. At a directory record signature it ends the data 16 bytes
+// earlier, where a signed 16-byte descriptor starts, so an entry with an unsigned
+// descriptor right before the directory (where a drop can move any entry) streams with
+// the wrong data end. Hence no local size of 0xFFFFFFFF, and only the signed 16- and
+// 24-byte data descriptors.
 //
 // Nothing here inflates with fflate: its sync inflate and unzip decode a deflate stream
 // to its end and drop the overflow, whatever size the directory declares.
@@ -135,31 +145,30 @@ const SINGLE_DISK = 0;
 const NO_COMMENT = 0;
 const NO_EXTRA_FIELD = 0;
 const NO_TAIL = 0;
-const NO_SIGNATURE = 0;
+// What a bit-3 local header may hold in place of its crc and sizes, which its data
+// descriptor carries.
+const DEFERRED_FIELD = 0;
 const FILE_START = 0;
 const NOT_FOUND = -1;
 // inflateRawSync's maxOutputLength must be at least 1.
 const MIN_MAX_OUTPUT_LENGTH = 1;
 
-/** A data descriptor: optional signature, then the crc and two sizes of 32 or 64 bits. */
+/** A data descriptor: its signature, then the crc and two sizes of 32 or 64 bits. */
 interface DescriptorForm {
-  readonly signed: boolean;
   readonly sizeWidth: number;
 }
 
+// The signed forms only: the unsigned ones are refused (see the top of this file).
 const DESCRIPTOR_FORMS: readonly DescriptorForm[] = [
-  { signed: false, sizeWidth: U32_WIDTH },
-  { signed: true, sizeWidth: U32_WIDTH },
-  { signed: false, sizeWidth: U64_WIDTH },
-  { signed: true, sizeWidth: U64_WIDTH },
+  { sizeWidth: U32_WIDTH },
+  { sizeWidth: U64_WIDTH },
 ];
 
 function descriptorLength(form: DescriptorForm): number {
-  const signature = form.signed ? SIGNATURE_LENGTH : NO_SIGNATURE;
-  return signature + U32_WIDTH + form.sizeWidth + form.sizeWidth;
+  return SIGNATURE_LENGTH + U32_WIDTH + form.sizeWidth + form.sizeWidth;
 }
 
-// 12, 16, 20 and 24 bytes.
+// 16 and 24 bytes.
 const DESCRIPTOR_FORM_BY_LENGTH: ReadonlyMap<number, DescriptorForm> = new Map(
   DESCRIPTOR_FORMS.map((form): [number, DescriptorForm] => [descriptorLength(form), form]),
 );
@@ -354,6 +363,24 @@ function sameBytes(file: Uint8Array, a: number, b: number, length: number): bool
   return true;
 }
 
+/**
+ * No local size of 0xFFFFFFFF: with a zip64 extra field the stream reads its sizes
+ * from there and, with bit 3, steps over a zip64 data descriptor into the next entry.
+ */
+function assertNoLocalZip64(view: DataView, record: DirectoryRecord): void {
+  const at = record.headerOffset;
+  if (
+    u32(view, at + LOCAL_COMPRESSED_SIZE) === ZIP64_FIELD ||
+    u32(view, at + LOCAL_UNCOMPRESSED_SIZE) === ZIP64_FIELD
+  ) {
+    throw zipError(
+      ZIP_REJECT_REASONS.ZIP64,
+      'Zip local header defers a size to zip64',
+      record.name,
+    );
+  }
+}
+
 /** Without bit 3: nothing after the data, and the local crc and sizes are the record's. */
 function assertLocalSizes(view: DataView, record: DirectoryRecord, tail: number): void {
   const at = record.headerOffset;
@@ -369,6 +396,27 @@ function assertLocalSizes(view: DataView, record: DirectoryRecord, tail: number)
   }
 }
 
+/** Whether the local field at `at` is left to the data descriptor or is `expected`. */
+function deferredOrEquals(view: DataView, at: number, expected: number): boolean {
+  const value = u32(view, at);
+  return value === DEFERRED_FIELD || value === expected;
+}
+
+/** With bit 3: the local crc and each local size are 0 or the record's. */
+function assertDeferredLocalFields(view: DataView, record: DirectoryRecord): void {
+  const at = record.headerOffset;
+  if (
+    !deferredOrEquals(view, at + LOCAL_CRC, record.crc32) ||
+    !deferredOrEquals(view, at + LOCAL_COMPRESSED_SIZE, record.compressedSize) ||
+    !deferredOrEquals(view, at + LOCAL_UNCOMPRESSED_SIZE, record.uncompressedSize)
+  ) {
+    throw layoutError(
+      'Zip local header of a bit-3 entry declares another crc or size',
+      record.name,
+    );
+  }
+}
+
 /** Whether the size at `at` (32 bits, or 64 with a zero high half) is `expected`. */
 function sizeEquals(view: DataView, at: number, width: number, expected: number): boolean {
   if (width === U64_WIDTH && u32(view, at + U32_WIDTH) !== 0) return false;
@@ -376,7 +424,7 @@ function sizeEquals(view: DataView, at: number, width: number, expected: number)
 }
 
 /**
- * With bit 3: the `tail` bytes after the data are one data descriptor (12, 16, 20 or
+ * With bit 3: the `tail` bytes after the data are one signed data descriptor (16 or
  * 24 bytes) whose crc and sizes are the record's.
  */
 function assertDataDescriptor(
@@ -384,18 +432,15 @@ function assertDataDescriptor(
   record: DirectoryRecord,
   dataEnd: number,
   tail: number,
-): DescriptorForm {
+): void {
   const form = DESCRIPTOR_FORM_BY_LENGTH.get(tail);
   if (form === undefined) {
     throw layoutError('Zip data descriptor has no valid length', record.name);
   }
-  let at = dataEnd;
-  if (form.signed) {
-    if (u32(view, at) !== DATA_DESCRIPTOR_SIGNATURE) {
-      throw layoutError('Zip data descriptor has no signature', record.name);
-    }
-    at += SIGNATURE_LENGTH;
+  if (u32(view, dataEnd) !== DATA_DESCRIPTOR_SIGNATURE) {
+    throw layoutError('Zip data descriptor has no signature', record.name);
   }
+  let at = dataEnd + SIGNATURE_LENGTH;
   const crcMatches = u32(view, at) === record.crc32;
   at += U32_WIDTH;
   const compressedMatches = sizeEquals(view, at, form.sizeWidth, record.compressedSize);
@@ -404,25 +449,24 @@ function assertDataDescriptor(
   if (!crcMatches || !compressedMatches || !uncompressedMatches) {
     throw layoutError('Zip data descriptor disagrees with its record', record.name);
   }
-  return form;
 }
 
 /**
  * With bit 3, the signature rule: no STREAM_STOP_SIGNATURES in the segment
- * [dataOffset, segmentEnd) but the descriptor's own signature, right after the data in
- * the signed forms. The stream would end the entry at any other one, so the directory
- * and the stream would read different entries from here on. Each signature is searched
- * in the segment only, at most twice; nothing is copied or inflated.
+ * [dataOffset, segmentEnd) but the descriptor's own signature, right after the data.
+ * The stream would end the entry at any other one, so the directory and the stream
+ * would read different entries from here on. Each signature is searched in the segment
+ * only, at most twice; nothing is copied or inflated.
  */
 function assertNoStreamStop(
   file: Uint8Array,
   record: DirectoryRecord,
   dataOffset: number,
   segmentEnd: number,
-  form: DescriptorForm,
 ): void {
   const segment = Buffer.from(file.buffer, file.byteOffset + dataOffset, segmentEnd - dataOffset);
-  const ownSignature = form.signed ? record.compressedSize : NOT_FOUND;
+  // Offset of the descriptor's signature in the segment.
+  const ownSignature = record.compressedSize;
   for (const signature of STREAM_STOP_SIGNATURES) {
     let hit = segment.indexOf(signature);
     if (signature === DATA_DESCRIPTOR_SIGNATURE_BYTES && hit === ownSignature) {
@@ -468,6 +512,7 @@ function readEntry(
   ) {
     throw layoutError('Zip local header disagrees with its record', name);
   }
+  assertNoLocalZip64(view, record);
   if (record.method === METHOD_STORED && record.compressedSize !== record.uncompressedSize) {
     throw layoutError('Stored zip entry declares two sizes', name);
   }
@@ -475,8 +520,9 @@ function readEntry(
   if ((record.flags & FLAG_DATA_DESCRIPTOR) === 0) {
     assertLocalSizes(view, record, tail);
   } else {
-    const form = assertDataDescriptor(view, record, dataEnd, tail);
-    assertNoStreamStop(file, record, dataOffset, segmentEnd, form);
+    assertDeferredLocalFields(view, record);
+    assertDataDescriptor(view, record, dataEnd, tail);
+    assertNoStreamStop(file, record, dataOffset, segmentEnd);
   }
   return {
     name,
