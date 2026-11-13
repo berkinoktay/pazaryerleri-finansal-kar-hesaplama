@@ -7,6 +7,7 @@ import { expectWithinBudget, LINEAR_BUDGET_MS } from '../../tests/helpers/timing
 import { SPREADSHEET_MAIN_NAMESPACES } from '../constants';
 import { SpreadsheetFileError } from '../errors';
 import { cellKey, columnLetters } from '../sheet-meta';
+import { parsePart } from '../xml-dom';
 import { resolveWorksheetPartPaths } from '../workbook-parts';
 import { MALFORMED_SHEET_REASONS, UNSUPPORTED_ENCODING_REASONS } from './reasons';
 import { cellKeysOf, indexWorksheet } from './sheet-index';
@@ -180,6 +181,12 @@ describe('indexWorksheet: opaque and skipped content', () => {
   ])('indexes one row and one cell past %s', (_label, body) => {
     expectOneCellA1(sheet(body));
   });
+
+  it('accepts comments and processing instructions before and after the root', () => {
+    const part = sheetText(ROW_A1);
+    const root = part.slice(DECLARATION.length);
+    expectOneCellA1(encoder.encode(`${DECLARATION}<!-- a -->\n<?p q?>${root}\n<!-- b --><?p r?>`));
+  });
 });
 
 describe('indexWorksheet: rejected row references', () => {
@@ -247,6 +254,11 @@ describe('indexWorksheet: rejected namespaces', () => {
       editedSheet(ROW_A1, '<sheetData>', '<sheetData xmlns="">'),
     ],
     ['the reserved xml prefix', sheet('<xml:row r="1"><xml:c r="A1"/></xml:row>')],
+    ['the reserved xmlns prefix', sheet('<xmlns:row r="1"/>')],
+    [
+      'one prefix declared twice on a row',
+      sheet(`<x:row xmlns:x="${MAIN_NAMESPACE}" xmlns:x="${MAIN_NAMESPACE}" r="1"/>`),
+    ],
   ])('namespace: %s', (_label, bytes) => {
     expectMalformed(bytes, MALFORMED_SHEET_REASONS.NAMESPACE);
   });
@@ -276,8 +288,32 @@ describe('indexWorksheet: rejected structure', () => {
     // repeats the root's name.
     ['an extra root end tag', encoder.encode(`${EMPTY_SHEET}</worksheet>`)],
     ['an extra prefixed root end tag', encoder.encode(`${EMPTY_PREFIXED_SHEET}</x:worksheet>`)],
+    ['an upper-case XML declaration', withDeclaration('<?XML version="1.0"?>')],
   ])('structure: %s', (_label, bytes) => {
     expectMalformed(bytes, MALFORMED_SHEET_REASONS.STRUCTURE);
+  });
+});
+
+// The index counts depth and does not compare end-tag names; the reader's strict
+// parse, which always runs first, refuses every such part. Pinned here so a laxer
+// xmldom fails this file instead of letting the index see another tree.
+describe('parsePart refuses what the index does not check', () => {
+  it.each<[string, string]>([
+    ['an end tag naming another open element', '<row r="1"><c r="A1"></row></c></row>'],
+    ['crossed end tags inside a cell', '<row r="1"><c r="A1"><v>1</c></v></row>'],
+    ['an end tag in another case', '<row r="1"><c r="A1"></C></row>'],
+    ['an end tag with another prefix', '<row r="1"><c r="A1"></x:c></row>'],
+    ['an attribute given twice', '<row r="1"><c r="A1" s="1" s="2"/></row>'],
+  ])('%s', (_label, body) => {
+    expect(() => parsePart('xl/worksheets/sheet1.xml', sheetText(body))).toThrow(
+      SpreadsheetFileError,
+    );
+  });
+
+  it('refuses an XML declaration that is not at the very start', () => {
+    expect(() => parsePart('xl/worksheets/sheet1.xml', `\n${sheetText(ROW_A1)}`)).toThrow(
+      SpreadsheetFileError,
+    );
   });
 });
 
@@ -335,6 +371,7 @@ describe('indexWorksheet: encoding', () => {
   it.each([
     '<?xml version="1.0" encoding="ISO-8859-1"?>',
     `<?xml version="1.0" encoding='UTF-16'?>`,
+    '<?xml version="1.0" encoding="UTF-8" encoding="ISO-8859-1"?>',
   ])('refuses the declaration %s', (declaration) => {
     const error = fileErrorOf(() => indexWorksheet(withDeclaration(declaration)));
     expect(error.code).toBe('UNSUPPORTED_ENCODING');

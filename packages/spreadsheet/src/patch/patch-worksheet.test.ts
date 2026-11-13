@@ -217,6 +217,14 @@ describe('applyCellPatches: existing cells', () => {
     ).toBe('<row r="2"><c r="B2" s="7" cm="1" foo="a&amp;b"><v>4</v></c></row>');
   });
 
+  it('drops only the attribute named exactly t, whatever its quoting and spacing', () => {
+    expect(
+      patched(`<row r="2"><c r="B2" t = 's' xmlns:t="urn:t" t:t="x"><v>3</v></c></row>`, [
+        num(2, 1, '4'),
+      ]),
+    ).toBe('<row r="2"><c r="B2" xmlns:t="urn:t" t:t="x"><v>4</v></c></row>');
+  });
+
   it('clears a cell to a self-closing tag', () => {
     expect(patched('<row r="2"><c r="B2" s="7" t="n"><v>3</v></c></row>', [clear(2, 1)])).toBe(
       '<row r="2"><c r="B2" s="7"/></row>',

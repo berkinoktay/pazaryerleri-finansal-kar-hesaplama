@@ -603,7 +603,16 @@ class WorksheetIndexer {
 }
 
 /**
- * Rows and cells of one worksheet part, in one pass. Throws SpreadsheetFileError:
+ * Rows and cells of one worksheet part, in one pass.
+ *
+ * Precondition: the part has already passed the reader's strict parse (`parsePart`).
+ * The index counts depth and never compares an end tag's name with its start tag's,
+ * nor checks the declaration's position, the root's prefix binding or repeated
+ * attributes other than `r`; xmldom refuses all of those, and the patch pipeline
+ * always runs the reader on the same bytes first. Without that parse a crossed end
+ * tag such as `<c r="A1"><v>1</c></v>` gives a wrong cell range.
+ *
+ * Throws SpreadsheetFileError:
  * UNSUPPORTED_ENCODING `{ reason }` for bytes that are not UTF-8 or a declaration of
  * another encoding; MALFORMED_SHEET `{ reason, offset }` otherwise (`markup` for a
  * tag outside the lexer's strict subset).
