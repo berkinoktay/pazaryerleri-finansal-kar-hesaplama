@@ -34,7 +34,7 @@ import {
 // The cell patcher of the export path: writes one output's cell patches into a
 // worksheet part through its index (sheet-index.ts), as byte edits. Untouched bytes
 // are copied, never decoded and re-encoded; a rebuilt cell keeps the source bytes of
-// its attributes.
+// the attributes it keeps (all but its type and its value and cell metadata).
 //
 // One pass merges the patch list with the index. Rows of both go up, and inside a row
 // so do cells and patches, so no patch searches for its row or its cell. The same pass
@@ -71,6 +71,17 @@ type FormulaReason =
 
 const FORMULA_ELEMENT = 'f';
 const TYPE_ATTRIBUTE = 't';
+// Value metadata (a rich value, a picture in a cell) and cell metadata (the dynamic
+// array formula flag): both describe the content a rebuilt cell replaces.
+const VALUE_METADATA_ATTRIBUTE = 'vm';
+const CELL_METADATA_ATTRIBUTE = 'cm';
+// Attributes a rebuilt cell drops, by exact qualified name: the new value writes its
+// own type, and the metadata would point Excel at the old content.
+const DROPPED_CELL_ATTRIBUTES: ReadonlySet<string> = new Set([
+  TYPE_ATTRIBUTE,
+  VALUE_METADATA_ATTRIBUTE,
+  CELL_METADATA_ATTRIBUTE,
+]);
 const INLINE_STRING_TYPE = ' t="inlineStr"';
 const SPACE_PRESERVE = ' xml:space="preserve"';
 const PREFIX_SEPARATOR = ':';
@@ -159,6 +170,8 @@ class CellPatcher {
   private readonly options: WorksheetPatchOptions;
   private readonly markup: XmlMarkup = createMarkup();
   private readonly attributes: number[] = [];
+  // The attributes of the cell being rebuilt that it keeps, by their index.
+  private readonly keptAttributes: number[] = [];
 
   private previousRow = NO_PREVIOUS_ROW;
   private previousColumn = NO_PREVIOUS_COLUMN;
@@ -408,20 +421,32 @@ class CellPatcher {
     );
   }
 
+  /** Whether attribute `attribute` of the last scanned tag is named exactly `t`, `vm` or `cm`. */
+  private isDroppedAttribute(attribute: number): boolean {
+    const nameStart = attributeField(this.attributes, attribute, ATTRIBUTE_NAME_START);
+    const nameEnd = attributeField(this.attributes, attribute, ATTRIBUTE_NAME_END);
+    return DROPPED_CELL_ATTRIBUTES.has(
+      NAME_DECODER.decode(this.bytes.subarray(nameStart, nameEnd)),
+    );
+  }
+
   /**
    * The cell at `start` rebuilt: '<' and its qualified name; every attribute not
-   * named exactly `t`, each as one space and its source bytes from the name through
-   * the closing quote; then the value's type, content and close.
+   * named exactly `t`, `vm` or `cm`, each one space and its source bytes from the name
+   * through the closing quote; then the value's type, content and close.
    */
   private rebuiltCell(start: number, value: CellPatchValue): Uint8Array {
     const bytes = this.bytes;
     const markup = this.markup;
+    const kept = this.keptAttributes;
     scanMarkup(bytes, start, markup, this.attributes);
     const { nameStart, nameEnd, attributeCount } = markup;
     const tail = rebuiltCellTail(NAME_DECODER.decode(bytes.subarray(nameStart, nameEnd)), value);
     let size = 1 + (nameEnd - nameStart) + utf8Length(tail);
+    kept.length = 0;
     for (let attribute = 0; attribute < attributeCount; attribute += 1) {
-      if (this.isTypeAttribute(attribute)) continue;
+      if (this.isDroppedAttribute(attribute)) continue;
+      kept.push(attribute);
       const attributeStart = attributeField(this.attributes, attribute, ATTRIBUTE_NAME_START);
       size += 1 + this.attributeEnd(attribute) - attributeStart;
     }
@@ -429,8 +454,7 @@ class CellPatcher {
     piece[0] = TAG_OPEN;
     piece.set(bytes.subarray(nameStart, nameEnd), 1);
     let at = 1 + nameEnd - nameStart;
-    for (let attribute = 0; attribute < attributeCount; attribute += 1) {
-      if (this.isTypeAttribute(attribute)) continue;
+    for (const attribute of kept) {
       const attributeStart = attributeField(this.attributes, attribute, ATTRIBUTE_NAME_START);
       const attributeEnd = this.attributeEnd(attribute);
       piece[at] = SPACE;

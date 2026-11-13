@@ -1,7 +1,7 @@
 import { SpreadsheetFileError } from '../errors';
 import { CONTENT_TYPES_PART, readerFilePath, WORKBOOK_RELS_PART } from '../workbook-parts';
 import { ZIP_REJECT_REASONS } from './reasons';
-import { ASCII_CASE_OFFSET, metaEntryName } from './shared';
+import { foldAsciiCase, metaEntryName } from './shared';
 import {
   ATTRIBUTE_NAME_END,
   ATTRIBUTE_NAME_START,
@@ -87,26 +87,12 @@ const NO_ATTRIBUTE = -1;
 // '&' opens a character or entity reference inside an attribute value.
 const AMPERSAND = 0x26;
 
-// The upper-case ASCII letters and nothing else.
-const ASCII_UPPER_CASE_LETTER = /[A-Z]/g;
-
 // Depth (open elements) at which the root's tag, and its direct children's tags, are met.
 const ROOT_DEPTH = 0;
 const CHILD_DEPTH = 1;
 
 // A value may start with U+FEFF, which the default decoder would drop.
 const VALUE_DECODER = new TextDecoder('utf-8', { ignoreBOM: true });
-
-/**
- * `text` with A-Z turned into a-z and every other code unit kept: the ASCII case
- * folding OPC compares part names under. Never toLowerCase, which also folds letters
- * outside ASCII (U+212A KELVIN SIGN becomes 'k').
- */
-export function foldAsciiCase(text: string): string {
-  return text.replace(ASCII_UPPER_CASE_LETTER, (letter) =>
-    String.fromCharCode(letter.charCodeAt(0) + ASCII_CASE_OFFSET),
-  );
-}
 
 const FOLDED_CALC_CHAIN_RELATIONSHIP_TYPES: ReadonlySet<string> = new Set(
   CALC_CHAIN_RELATIONSHIP_TYPES.map(foldAsciiCase),

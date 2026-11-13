@@ -657,36 +657,42 @@ interface PlannedEntry {
 
 const COPY_PLAN: EntryPlan = { kind: 'copy' };
 
+/** What rewriteZip computes once per replaced content object: its deflated bytes and its crc32. */
+export interface DeflatedContent {
+  readonly data: Uint8Array;
+  readonly crc: number;
+}
+
 /**
- * The deflated bytes of `content`: from `cache` when it holds this content object,
- * otherwise deflated now and added to `cache` (when one is given).
+ * The deflated bytes and crc32 of `content`: from `cache` when it holds this content
+ * object, otherwise computed now and added to `cache` (when one is given).
  */
 function deflatedContent(
   content: Uint8Array,
-  cache: Map<Uint8Array, Uint8Array> | undefined,
-): Uint8Array {
+  cache: Map<Uint8Array, DeflatedContent> | undefined,
+): DeflatedContent {
   const cached = cache?.get(content);
   if (cached !== undefined) return cached;
-  const data = deflateSync(content, { level: PATCHED_PART_DEFLATE_LEVEL });
-  cache?.set(content, data);
-  return data;
+  const computed: DeflatedContent = {
+    data: deflateSync(content, { level: PATCHED_PART_DEFLATE_LEVEL }),
+    crc: crc32(content),
+  };
+  cache?.set(content, computed);
+  return computed;
 }
 
 function planOf(
   change: ZipChange | undefined,
-  deflated: Map<Uint8Array, Uint8Array> | undefined,
+  deflated: Map<Uint8Array, DeflatedContent> | undefined,
 ): EntryPlan {
   if (change === undefined) return COPY_PLAN;
   switch (change.kind) {
     case 'drop':
       return change;
-    case 'replace':
-      return {
-        kind: 'replace',
-        content: change.content,
-        data: deflatedContent(change.content, deflated),
-        crc32: crc32(change.content),
-      };
+    case 'replace': {
+      const { data, crc } = deflatedContent(change.content, deflated);
+      return { kind: 'replace', content: change.content, data, crc32: crc };
+    }
     default: {
       const unhandled: never = change;
       throw new Error(`Unhandled zip change: ${JSON.stringify(unhandled)}`);
@@ -814,9 +820,10 @@ function writeEndRecord(
 
 /**
  * A new archive: unchanged entries as raw bytes, `changes` applied by entry name.
- * `deflated`, when given, maps a replaced content object to its deflated bytes and is
- * filled here: a content met again, by identity, in this or a later call is not
- * deflated again. A content must not change once it has been passed with a cache.
+ * `deflated`, when given, maps a replaced content object to its deflated bytes and
+ * crc32 and is filled here: a content met again, by identity, in this or a later call
+ * is neither deflated nor checksummed again. A content must not change once it has
+ * been passed with a cache.
  * Throws CORRUPT_FILE `{ reason: 'zip-layout' }` instead of returning an archive whose
  * directory or end record holds a local header signature (readZipLayout's own rule).
  */
@@ -824,7 +831,7 @@ export function rewriteZip(
   file: Uint8Array,
   layout: ZipLayout,
   changes: ReadonlyMap<string, ZipChange>,
-  deflated?: Map<Uint8Array, Uint8Array>,
+  deflated?: Map<Uint8Array, DeflatedContent>,
 ): Uint8Array<ArrayBuffer> {
   const names = new Set(layout.entries.map((entry) => entry.name));
   for (const name of changes.keys()) {

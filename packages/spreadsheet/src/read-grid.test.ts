@@ -463,6 +463,53 @@ describe('readSheet', () => {
     expect(readSheet(openUpload(file, OPTS), { caps: CAPS }).mergeRefs).toEqual([]);
   });
 
+  it('lists the ref of every array and data table formula, not of plain or shared ones', () => {
+    const xml = worksheetWith(
+      '<row r="1">' +
+        '<c r="A1"><f>1+1</f><v>2</v></c>' +
+        '<c r="B1"><f t="shared" ref="B1:B2" si="0">A1</f><v>2</v></c>' +
+        '<c r="C1"><f t="array" ref="C1:C2">A1:A2*2</f><v>4</v></c>' +
+        '<c r="D1"><f t="dataTable" ref="D1:E2" dt2D="0" dtr="0" r1="A1"/><v>0</v></c>' +
+        '<c r="F1"><f t="array">A1</f><v>2</v></c>' +
+        '</row>' +
+        '<row r="2"><c r="B2"><f t="shared" si="0"/><v>3</v></c><c r="C2"><v>5</v></c></row>',
+      '',
+    );
+    const file = buildXlsxFixture([{ name: 'S', xml }]);
+
+    const reading = readSheet(openUpload(file, OPTS), { caps: CAPS });
+
+    expect(reading.formulaRangeRefs).toEqual(['C1:C2', 'D1:E2', '']);
+    expect(readGrid(openUpload(file, OPTS), { caps: CAPS })).toEqual(reading.grid);
+  });
+
+  it('lists the formula ranges of the first sheet when a named sheet breaks a reader rule', () => {
+    const first = worksheetWith(
+      '<row r="1"><c r="A1"><f t="array" ref="A1:A3">1</f><v>1</v></c></row>',
+      '',
+    );
+    const broken = worksheetWith(
+      '<row r="1"><c r="A1"><f t="array" ref="A1:B2">1</f><v>1</v></c>' +
+        '<c r="C1" t="b"><v>yes</v></c></row>',
+      '',
+    );
+    const file = buildXlsxFixture([
+      { name: 'A', xml: first },
+      { name: 'B', xml: broken },
+    ]);
+
+    const reading = readSheet(openUpload(file, OPTS), { sheetName: 'B', caps: CAPS });
+
+    expect(reading.partPath).toBe(SHEET_PART);
+    expect(reading.formulaRangeRefs).toEqual(['A1:A3']);
+  });
+
+  it('lists no formula ranges for a sheet without array or data table formulas', () => {
+    const file = buildXlsxFixture([{ name: 'S', xml: worksheetXml([['a']]) }]);
+
+    expect(readSheet(openUpload(file, OPTS), { caps: CAPS }).formulaRangeRefs).toEqual([]);
+  });
+
   it('flags a worksheet part that is also a book part', () => {
     const parts: UploadParts = {
       [RELS_PART]: strToU8(

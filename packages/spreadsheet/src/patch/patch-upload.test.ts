@@ -679,6 +679,46 @@ describe('patchUpload: merged cells', () => {
   });
 });
 
+describe('patchUpload: array formula ranges', () => {
+  // E2 holds the array formula of E2:E4; E3 and E4 hold only their cached values, no f.
+  const arrayFormulaRows =
+    '<row r="2"><c r="D2"><v>1</v></c><c r="E2"><f t="array" ref="E2:E4">D2:D4*2</f><v>2</v></c></row>' +
+    '<row r="3"><c r="D3"><v>2</v></c><c r="E3"><v>4</v></c></row>' +
+    '<row r="4"><c r="D4"><v>3</v></c><c r="E4"><v>6</v></c></row>';
+  const COL_D = 3;
+  const COL_E = 4;
+
+  it('refuses a target inside the range on a cell that holds no formula', () => {
+    expectFileError(
+      () => patchFixture(book(arrayFormulaRows), [num(3, COL_E, '5')]),
+      'MALFORMED_SHEET',
+      {
+        reason: MALFORMED_SHEET_REASONS.SHARED_FORMULA,
+        count: 1,
+        rows: [3],
+      },
+    );
+  });
+
+  it('refuses every cell of the range, the top-left one included', () => {
+    const patches = [num(2, COL_E, '5'), num(3, COL_E, '5'), num(4, COL_E, '5')];
+    expectFileError(() => patchFixture(book(arrayFormulaRows), patches), 'MALFORMED_SHEET', {
+      reason: MALFORMED_SHEET_REASONS.SHARED_FORMULA,
+      count: 3,
+      rows: [2, 3, 4],
+    });
+  });
+
+  it('patches a cell outside the range', () => {
+    expect(readBack(patchFixture(book(arrayFormulaRows), [num(3, COL_D, '9')]))).toEqual([
+      [null, null, null, null, null],
+      [null, null, null, 1, 2],
+      [null, null, null, 9, 4],
+      [null, null, null, 3, 6],
+    ]);
+  });
+});
+
 describe('patchUpload: calcChain', () => {
   const formulaSheet = worksheet(
     '<row r="1"><c r="A1"><v>1</v></c></row>' +

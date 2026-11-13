@@ -47,5 +47,18 @@ export function viewMismatch(entryName: string, message: string): SpreadsheetFil
   });
 }
 
-/** What turns an upper-case ASCII letter (a byte or a UTF-16 code unit) into its lower case. */
-export const ASCII_CASE_OFFSET = 0x20;
+/** What turns the code unit of an upper-case ASCII letter into its lower case. */
+const ASCII_CASE_OFFSET = 0x20;
+// The upper-case ASCII letters and nothing else.
+const ASCII_UPPER_CASE_LETTER = /[A-Z]/g;
+
+/**
+ * `text` with A-Z turned into a-z and every other code unit kept: the ASCII case
+ * folding OPC compares part names under, and XML an encoding name. Never
+ * toLowerCase, which also folds letters outside ASCII (U+212A KELVIN SIGN becomes 'k').
+ */
+export function foldAsciiCase(text: string): string {
+  return text.replace(ASCII_UPPER_CASE_LETTER, (letter) =>
+    String.fromCharCode(letter.charCodeAt(0) + ASCII_CASE_OFFSET),
+  );
+}

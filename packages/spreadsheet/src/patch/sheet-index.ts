@@ -5,7 +5,7 @@ import { SpreadsheetFileError } from '../errors';
 import { cellKey, colRefToNumber } from '../sheet-meta';
 import { SPREADSHEET_MAIN_NAMESPACES } from './limits';
 import { MALFORMED_SHEET_REASONS, UNSUPPORTED_ENCODING_REASONS } from './reasons';
-import { ASCII_CASE_OFFSET, bytesEqualAt } from './shared';
+import { bytesEqualAt, foldAsciiCase } from './shared';
 import {
   ATTRIBUTE_NAME_END,
   ATTRIBUTE_NAME_START,
@@ -143,23 +143,19 @@ function isUpperLetter(byte: number | undefined): boolean {
   return byte !== undefined && byte >= UPPER_A && byte <= UPPER_Z;
 }
 
-function lowerAscii(byte: number): number {
-  return byte >= UPPER_A && byte <= UPPER_Z ? byte + ASCII_CASE_OFFSET : byte;
-}
-
-/** Whether bytes [start, end) are `lowerText` (lower-case ASCII), ignoring ASCII case. */
-function bytesEqualAsciiIgnoreCase(
+/**
+ * Whether bytes [start, end) are `lowerText` (lower-case ASCII), ignoring ASCII case:
+ * decoded, then folded. The lengths are compared first, so only ASCII bytes can match,
+ * and a byte order mark the decoder drops cannot make a longer value equal.
+ */
+function bytesEqualFolded(
   bytes: Uint8Array,
   start: number,
   end: number,
   lowerText: string,
 ): boolean {
   if (end - start !== lowerText.length) return false;
-  for (let index = 0; index < lowerText.length; index += 1) {
-    const byte = bytes[start + index];
-    if (byte === undefined || lowerAscii(byte) !== lowerText.charCodeAt(index)) return false;
-  }
-  return true;
+  return foldAsciiCase(NAME_DECODER.decode(bytes.subarray(start, end))) === lowerText;
 }
 
 function startsWithByteOrderMark(bytes: Uint8Array): boolean {
@@ -324,7 +320,7 @@ class WorksheetIndexer {
   private visitOpaque(): void {
     if (!this.isProcessingInstruction()) return;
     const { nameStart, nameEnd } = this.markup;
-    if (!bytesEqualAsciiIgnoreCase(this.bytes, nameStart, nameEnd, XML_DECLARATION_TARGET)) return;
+    if (!bytesEqualFolded(this.bytes, nameStart, nameEnd, XML_DECLARATION_TARGET)) return;
     throw malformedStructure(this.markup.start, 'has an XML declaration after its first markup');
   }
 
@@ -355,7 +351,7 @@ class WorksheetIndexer {
       if (!this.attributeNameIs(attribute, ENCODING_PSEUDO_ATTRIBUTE)) continue;
       const valueStart = attributeField(this.attributes, attribute, ATTRIBUTE_VALUE_START);
       const valueEnd = attributeField(this.attributes, attribute, ATTRIBUTE_VALUE_END);
-      if (bytesEqualAsciiIgnoreCase(this.bytes, valueStart, valueEnd, UTF8_ENCODING_NAME)) continue;
+      if (bytesEqualFolded(this.bytes, valueStart, valueEnd, UTF8_ENCODING_NAME)) continue;
       throw unsupportedEncoding(
         UNSUPPORTED_ENCODING_REASONS.DECLARATION,
         'declares an encoding other than UTF-8',

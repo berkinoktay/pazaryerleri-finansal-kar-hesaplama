@@ -5,20 +5,21 @@ import type { GridCaps } from '../part-checks';
 import { readSheet, type SheetReading } from '../read-grid';
 import { CONTENT_TYPES_PART, WORKBOOK_RELS_PART } from '../workbook-parts';
 import { assertAnchorsMatch } from './anchors';
-import { foldAsciiCase, planCalcChainRemoval } from './calc-chain';
-import { assertTargetsOutsideMerges } from './merged-ranges';
+import { planCalcChainRemoval } from './calc-chain';
+import { assertTargetsOutsideFormulaRanges, assertTargetsOutsideMerges } from './merged-ranges';
 import { assertPatchTargets, type ResolvedPatchRequest } from './patch-request';
 import { applyCellPatches, patchedPartCap, type WorksheetPatchOptions } from './patch-worksheet';
 import {
   entryContent,
   readZipLayout,
   rewriteZip,
+  type DeflatedContent,
   type ZipChange,
   type ZipEntry,
   type ZipLayout,
 } from './raw-zip';
 import { MALFORMED_SHEET_REASONS, PATCH_LIMIT_REASONS, ZIP_REJECT_REASONS } from './reasons';
-import { bytesEqualAt, metaEntryName, viewMismatch } from './shared';
+import { bytesEqualAt, foldAsciiCase, metaEntryName, viewMismatch } from './shared';
 import { cellKeysOf, indexWorksheet } from './sheet-index';
 
 // The export patch path, sync and in-process: one stored upload in, one archive per
@@ -37,7 +38,9 @@ import { cellKeysOf, indexWorksheet } from './sheet-index';
 //   5. the converted part must not be one the rewrite may also replace;
 //   6. the worksheet index on the same bytes, which must list the cells the reader
 //      placed, in the same order (the index assumes the reader's strict parse passed);
-//   7. no target inside a merged range;
+//   7. no target inside a merged range (its top-left corner excepted), nor anywhere in
+//      the range of an array or data table formula (only its top-left cell holds the
+//      `f`, so the patcher alone would write the others);
 //   8. each output's patches, applied to the index;
 //   9. a changed output is the archive with the converted part replaced and, when a
 //      formula was overwritten, the calcChain cut. rewriteZip refuses an output whose
@@ -209,7 +212,8 @@ function calcChainChanges(
  * CORRUPT_FILE with a zip reason from the layout, the view check, the calcChain cut or
  * the output's own directory check;
  * ROW_ANCHOR_MISMATCH; MALFORMED_SHEET and UNSUPPORTED_ENCODING from the index, the
- * cell cross-check, the merged-range check and the patcher; ROW_NOT_FOUND;
+ * cell cross-check, the merged-range and formula-range checks and the patcher;
+ * ROW_NOT_FOUND;
  * PAYLOAD_TOO_LARGE for a patched part beyond its growth cap, or outputs beyond
  * MAX_PATCH_OUTPUT_TOTAL_BYTES together. An output may be larger than the import caps
  * allow (see the top of this file).
@@ -241,6 +245,7 @@ export function patchUpload(
   const index = indexWorksheet(source);
   assertSameCells(reading.cellKeys, cellKeysOf(index));
   assertTargetsOutsideMerges(reading.mergeRefs, request.outputs, caps);
+  assertTargetsOutsideFormulaRanges(reading.formulaRangeRefs, request.outputs, caps);
 
   const options: WorksheetPatchOptions = {
     overwriteFormulaColumns: new Set(request.overwriteFormulaColumns),
@@ -249,8 +254,8 @@ export function patchUpload(
   const entries = entriesByName(layout);
   let calcChain: ReadonlyMap<string, ZipChange> | undefined;
   // The calcChain replacements are the same content objects in every output, so each
-  // is deflated once per job.
-  const deflated = new Map<Uint8Array, Uint8Array>();
+  // is deflated and checksummed once per job.
+  const deflated = new Map<Uint8Array, DeflatedContent>();
   let totalBytes = 0;
   const outputs: (Uint8Array<ArrayBuffer> | null)[] = [];
   for (const patches of request.outputs) {

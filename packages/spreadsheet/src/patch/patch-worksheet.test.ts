@@ -233,12 +233,24 @@ describe('applyCellPatches: existing cells', () => {
     );
   });
 
-  it('keeps every attribute but t verbatim and in order', () => {
+  it('keeps every attribute but t, vm and cm verbatim and in order', () => {
     expect(
       patched('<row r="2"><c r="B2" s="7" cm="1" foo="a&amp;b" t="n"><v>3</v></c></row>', [
         num(2, 1, '4'),
       ]),
-    ).toBe('<row r="2"><c r="B2" s="7" cm="1" foo="a&amp;b"><v>4</v></c></row>');
+    ).toBe('<row r="2"><c r="B2" s="7" foo="a&amp;b"><v>4</v></c></row>');
+  });
+
+  it('drops the value metadata vm of the replaced content, and keeps x:vm and xmlns:vm', () => {
+    expect(
+      patched(
+        '<row r="2"><c r="B2" s="7" vm="1" xmlns:x="urn:x" x:vm="2" xmlns:vm="urn:vm" t="e">' +
+          '<v>#VALUE!</v></c></row>',
+        [num(2, 1, '4')],
+      ),
+    ).toBe(
+      '<row r="2"><c r="B2" s="7" xmlns:x="urn:x" x:vm="2" xmlns:vm="urn:vm"><v>4</v></c></row>',
+    );
   });
 
   it("writes the children of an overwritten cell with the cell's own prefix", () => {
@@ -422,7 +434,7 @@ describe('applyCellPatches: inserts', () => {
     ).toBe('<x:row r="2"><x:c r="A2"/><x:c r="B2"><x:v>5</x:v></x:c></x:row>');
   });
 
-  it('writes the reference of column 27 as AB', () => {
+  it('writes the reference of 0-based column 27 (Excel column 28) as AB', () => {
     expect(patched('<row r="2"></row>', [num(2, 27, '1')])).toBe(
       '<row r="2"><c r="AB2"><v>1</v></c></row>',
     );

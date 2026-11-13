@@ -13,6 +13,7 @@ export const MALFORMED_SHEET_REASONS = {
   FORMULA_TARGET: 'formula-target',
   SHARED_FORMULA: 'shared-formula',
   MERGED_TARGET: 'merged-target',
+  // A malformed range ref: of a merged range, or of an array or data table formula.
   MERGE_REF: 'merge-ref',
 } as const;
 

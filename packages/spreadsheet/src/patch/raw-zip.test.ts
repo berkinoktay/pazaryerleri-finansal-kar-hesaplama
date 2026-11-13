@@ -30,6 +30,7 @@ import { SpreadsheetFileError } from '../errors';
 import { openUpload } from '../guards';
 import { buildXlsxFixture, worksheetXml } from '../testing/build-xlsx';
 import {
+  type DeflatedContent,
   entryContent,
   readZipLayout,
   rewriteZip,
@@ -129,13 +130,13 @@ function physicalOrder(layout: ZipLayout): ZipEntry[] {
   return [...layout.entries].sort((a, b) => a.headerOffset - b.headerOffset);
 }
 
-/** A deflate cache for rewriteZip that counts what it stores: one store per deflate. */
-class CountingDeflateCache extends Map<Uint8Array, Uint8Array> {
+/** A deflate cache for rewriteZip that counts what it stores: one store per deflate and crc. */
+class CountingDeflateCache extends Map<Uint8Array, DeflatedContent> {
   stores = 0;
 
-  override set(content: Uint8Array, data: Uint8Array): this {
+  override set(content: Uint8Array, deflated: DeflatedContent): this {
     this.stores += 1;
-    return super.set(content, data);
+    return super.set(content, deflated);
   }
 }
 
@@ -303,16 +304,17 @@ describe('rewriteZip: replace', () => {
 });
 
 describe('rewriteZip: deflate cache', () => {
-  it('deflates each replaced content once across calls and writes the same bytes', () => {
+  it('deflates and checksums each replaced content once across calls and writes the same bytes', () => {
     const file = smallWorkbook();
     const layout = readZipLayout(file);
     const sheetBytes = unzipSync(file)[SHEET_PART];
     if (sheetBytes === undefined) throw new Error(`no ${SHEET_PART}`);
     const shared = probed(sheetBytes);
+    const rels = strToU8(PROBE);
     const first = new Map<string, ZipChange>([[SHEET_PART, { kind: 'replace', content: shared }]]);
     const second = new Map<string, ZipChange>([
       [SHEET_PART, { kind: 'replace', content: shared }],
-      [WORKBOOK_RELS_PART, { kind: 'replace', content: strToU8(PROBE) }],
+      [WORKBOOK_RELS_PART, { kind: 'replace', content: rels }],
     ]);
     const cache = new CountingDeflateCache();
 
@@ -321,9 +323,11 @@ describe('rewriteZip: deflate cache', () => {
 
     expect(sameBytes(cachedFirst, rewriteZip(file, layout, first))).toBe(true);
     expect(sameBytes(cachedSecond, rewriteZip(file, layout, second))).toBe(true);
-    // Three replacements of two content objects: two deflates.
+    // Three replacements of two content objects: two deflates, two crcs.
     expect(cache.size).toBe(2);
     expect(cache.stores).toBe(2);
+    expect(cache.get(shared)?.crc).toBe(crc32(shared));
+    expect(cache.get(rels)?.crc).toBe(crc32(rels));
   });
 });
 

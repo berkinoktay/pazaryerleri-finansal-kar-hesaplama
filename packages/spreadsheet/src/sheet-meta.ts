@@ -2,11 +2,13 @@ import { CELL_KEY_BASE } from './constants';
 
 const ALPHABET_SIZE = 26;
 const CHAR_CODE_A = 65;
+// 'A' is column 1, so a letter's column is its code minus the code just before 'A'.
+const CHAR_CODE_BEFORE_A = CHAR_CODE_A - 1;
 
 /** Converts an Excel column-letter reference (e.g. "AI") to a 1-based column number. */
 export function colRefToNumber(ref: string): number {
   let n = 0;
-  for (const ch of ref) n = n * 26 + (ch.charCodeAt(0) - 64);
+  for (const ch of ref) n = n * ALPHABET_SIZE + (ch.charCodeAt(0) - CHAR_CODE_BEFORE_A);
   return n;
 }
 

@@ -12,7 +12,7 @@ import {
 import { SpreadsheetFileError } from '../errors';
 import type { GridCaps } from '../part-checks';
 import { columnLetters } from '../sheet-meta';
-import { assertTargetsOutsideMerges } from './merged-ranges';
+import { assertTargetsOutsideFormulaRanges, assertTargetsOutsideMerges } from './merged-ranges';
 import type { CellPatch } from './patch-request';
 import { MALFORMED_SHEET_REASONS } from './reasons';
 
@@ -25,6 +25,8 @@ const COL_A = 0;
 const COL_B = 1;
 const COL_C = 2;
 const COL_D = 3;
+const COL_E = 4;
+const COL_F = 5;
 
 const MANY_REFS = 200_000;
 const MANY_TARGETS = 200_000;
@@ -178,6 +180,64 @@ describe('assertTargetsOutsideMerges: caps past the absolute ceilings', () => {
     expect(thrown).toBeInstanceOf(Error);
     expect(thrown).not.toBeInstanceOf(SpreadsheetFileError);
     expect(String(thrown)).toContain('exceed');
+  });
+});
+
+describe('assertTargetsOutsideFormulaRanges', () => {
+  const E2_E4 = ['E2:E4'];
+
+  function sharedFormula(count: number, rows: readonly number[]): Record<string, unknown> {
+    return { reason: MALFORMED_SHEET_REASONS.SHARED_FORMULA, count, rows };
+  }
+
+  it.each([
+    ['E2 (the top-left cell)', 2],
+    ['E3', 3],
+    ['E4', 4],
+  ])('rejects a target on %s of the range E2:E4', (_name, row) => {
+    expectMalformed(
+      () => assertTargetsOutsideFormulaRanges(E2_E4, [[target(row, COL_E)]], CAPS),
+      sharedFormula(1, [row]),
+    );
+  });
+
+  it.each([
+    ['D3', 3, COL_D],
+    ['F3', 3, COL_F],
+    ['E1', 1, COL_E],
+    ['E5', 5, COL_E],
+  ])('passes a target on %s, outside the range', (_name, row, col) => {
+    expect(() =>
+      assertTargetsOutsideFormulaRanges(E2_E4, [[target(row, col)]], CAPS),
+    ).not.toThrow();
+  });
+
+  it('rejects the cell of a single-cell range', () => {
+    expectMalformed(
+      () => assertTargetsOutsideFormulaRanges(['E2'], [[target(2, COL_E)]], CAPS),
+      sharedFormula(1, [2]),
+    );
+  });
+
+  it('counts rejected patches over all outputs and lists their distinct rows', () => {
+    const outputs = [
+      [target(2, COL_E), target(3, COL_D), target(3, COL_E)],
+      [target(3, COL_E), target(4, COL_E)],
+    ];
+    expectMalformed(
+      () => assertTargetsOutsideFormulaRanges(E2_E4, outputs, CAPS),
+      sharedFormula(4, [2, 3, 4]),
+    );
+  });
+
+  it('passes anything when there are no ranges', () => {
+    expect(() => assertTargetsOutsideFormulaRanges([], [[target(3, COL_E)]], CAPS)).not.toThrow();
+  });
+
+  it.each(['', 'E2:', 'e2:e4', 'E$2:E$4'])('rejects the reference %j with merge-ref', (ref) => {
+    expectMalformed(() => assertTargetsOutsideFormulaRanges([ref], [[]], CAPS), {
+      reason: MALFORMED_SHEET_REASONS.MERGE_REF,
+    });
   });
 });
 
