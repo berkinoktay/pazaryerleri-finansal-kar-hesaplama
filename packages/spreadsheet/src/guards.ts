@@ -3,6 +3,7 @@ import { SpreadsheetFileError } from './errors';
 import { assertSafeXmlContent, isXmlPart } from './content-scan';
 import {
   assertWorkbookRelsWithinCap,
+  CONTENT_TYPES_PART,
   readerPartPaths,
   WORKBOOK_PART,
   WORKBOOK_RELS_PART,
@@ -564,10 +565,10 @@ export function openUpload(file: Uint8Array, opts: GuardOpts): UploadParts {
   const streamed = streamArchive(file, effectiveDecompCap);
 
   // 4. Structural check: presence of required xlsx part names.
-  if (!streamed.names.has('[Content_Types].xml') || !streamed.names.has(WORKBOOK_PART)) {
+  if (!streamed.names.has(CONTENT_TYPES_PART) || !streamed.names.has(WORKBOOK_PART)) {
     throw new SpreadsheetFileError(
       'NOT_XLSX',
-      'Not an xlsx file — missing required workbook parts ([Content_Types].xml, xl/workbook.xml)',
+      `Not an xlsx file — missing required workbook parts (${CONTENT_TYPES_PART}, xl/workbook.xml)`,
       { found: [...streamed.names] },
     );
   }
