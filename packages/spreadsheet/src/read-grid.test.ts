@@ -6,9 +6,9 @@ import { DEFAULT_COL_CAP, DEFAULT_MAX_BYTES, DEFAULT_ROW_CAP } from './constants
 import { SpreadsheetFileError, type SpreadsheetFileErrorCode } from './errors';
 import type { SheetData } from './grid-types';
 import { openUpload, type UploadParts } from './guards';
-import { checkUploadParts, readGrid } from './read-grid';
+import { checkUploadParts, readGrid, readSheet } from './read-grid';
 import type { SheetSelector } from './read-options';
-import { columnLetters } from './sheet-meta';
+import { cellKey, columnLetters } from './sheet-meta';
 import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
 import { expectWithinBudget } from '../tests/helpers/timing';
 
@@ -327,6 +327,126 @@ describe('readGrid: unexpected exceptions', () => {
     });
 
     expect(errorCodeOf(() => readGrid(parts, { caps: CAPS }))).toBe('CORRUPT_FILE');
+  });
+});
+
+describe('readSheet', () => {
+  const SECOND_SHEET_PART = 'xl/worksheets/sheet2.xml';
+  // Two cells, then a cell the reader rejects (a boolean that is not 0 or 1).
+  const ROW_BROKEN_AFTER_TWO_CELLS =
+    '<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c><c r="C1" t="b"><v>yes</v></c></row>';
+
+  /** A worksheet whose root holds `sheetData` with `rows`, then `afterSheetData`. */
+  function worksheetWith(rows: string, afterSheetData: string): string {
+    return `${XML_DECLARATION}<worksheet xmlns="${SPREADSHEET_NS}"><sheetData>${rows}</sheetData>${afterSheetData}</worksheet>`;
+  }
+
+  it('reports the part of the sheet an index selects', () => {
+    const file = buildXlsxFixture([
+      { name: 'A', xml: worksheetXml([['a']]) },
+      { name: 'B', xml: worksheetXml([['b']]) },
+    ]);
+
+    const reading = readSheet(openUpload(file, OPTS), {
+      sheet: { by: 'index', index: 1 },
+      caps: CAPS,
+    });
+
+    expect(reading.grid).toEqual([['b']]);
+    expect(reading.partPath).toBe(SECOND_SHEET_PART);
+    expect(reading.partIsBookPart).toBe(false);
+  });
+
+  it('reports the first sheet for a legacy sheetName no sheet has', () => {
+    const file = buildXlsxFixture([
+      { name: 'A', xml: worksheetXml([['a']]) },
+      { name: 'B', xml: worksheetXml([['b']]) },
+    ]);
+
+    const reading = readSheet(openUpload(file, OPTS), { sheetName: 'Missing', caps: CAPS });
+
+    expect(reading.grid).toEqual([['a']]);
+    expect(reading.partPath).toBe(SHEET_PART);
+  });
+
+  it('reports the first sheet and its own cells when a named sheet breaks a reader rule', () => {
+    const file = buildXlsxFixture([
+      { name: 'A', xml: worksheetXml([['a'], ['b']]) },
+      { name: 'B', xml: worksheet(ROW_BROKEN_AFTER_TWO_CELLS) },
+    ]);
+
+    const reading = readSheet(openUpload(file, OPTS), { sheetName: 'B', caps: CAPS });
+
+    expect(reading.grid).toEqual([['a'], ['b']]);
+    expect(reading.partPath).toBe(SHEET_PART);
+    expect(reading.cellKeys).toEqual([cellKey(1, 1), cellKey(2, 1)]);
+  });
+
+  it('lists the key of every cell the reader placed, in document order', () => {
+    const file = buildXlsxFixture([{ name: 'S', xml: worksheetXml([['a', null, 'c'], [1]]) }]);
+
+    const reading = readSheet(openUpload(file, OPTS), { caps: CAPS });
+
+    expect(reading.cellKeys).toEqual([1025, 1027, 2049]);
+  });
+
+  it('lists the merge refs, and reads the same grid as readGrid', () => {
+    const xml = worksheetWith(
+      '<row r="2"><c r="B2"><v>1</v></c></row>',
+      '<mergeCells count="1"><mergeCell ref="B2:C3"/></mergeCells>',
+    );
+    const file = buildXlsxFixture([{ name: 'S', xml }]);
+
+    const reading = readSheet(openUpload(file, OPTS), { caps: CAPS });
+
+    expect(reading.mergeRefs).toEqual(['B2:C3']);
+    expect(readGrid(openUpload(file, OPTS), { caps: CAPS })).toEqual(reading.grid);
+  });
+
+  it('takes merge refs from the first mergeCells only, a missing ref as empty', () => {
+    const xml = worksheetWith(
+      '<row r="1"><c r="A1"><v>1</v></c></row>',
+      '<mergeCells><mergeCell ref="B2:C3"/><mergeCell/></mergeCells>' +
+        '<mergeCells><mergeCell ref="E5:F6"/></mergeCells>',
+    );
+    const file = buildXlsxFixture([{ name: 'S', xml }]);
+
+    expect(readSheet(openUpload(file, OPTS), { caps: CAPS }).mergeRefs).toEqual(['B2:C3', '']);
+  });
+
+  it('lists no merge refs for a sheet without mergeCells', () => {
+    const file = buildXlsxFixture([{ name: 'S', xml: worksheetXml([['a']]) }]);
+
+    expect(readSheet(openUpload(file, OPTS), { caps: CAPS }).mergeRefs).toEqual([]);
+  });
+
+  it('flags a worksheet part that is also a book part', () => {
+    const parts: UploadParts = {
+      [RELS_PART]: strToU8(
+        relsOf(
+          relationship('rId1', 'worksheet', 'styles.xml'),
+          relationship('rId2', 'styles', 'styles.xml'),
+        ),
+      ),
+      [WORKBOOK_PART]: strToU8(workbookOf(sheetEntry('S', 1))),
+      [STYLES_PART]: strToU8(worksheetXml([['a']])),
+    };
+
+    const reading = readSheet(parts, { caps: CAPS });
+
+    expect(reading.grid).toEqual([['a']]);
+    expect(reading.partPath).toBe(STYLES_PART);
+    expect(reading.partIsBookPart).toBe(true);
+  });
+
+  it('reports an exception nothing anticipated as CORRUPT_FILE, as readGrid does', () => {
+    const file = buildXlsxFixture([{ name: 'S', xml: worksheetXml([['a']]) }]);
+    const parts = openUpload(file, OPTS);
+    vi.spyOn(Element.prototype, 'getAttribute').mockImplementation(() => {
+      throw new TypeError('unexpected');
+    });
+
+    expect(errorCodeOf(() => readSheet(parts, { caps: CAPS }))).toBe('CORRUPT_FILE');
   });
 });
 
