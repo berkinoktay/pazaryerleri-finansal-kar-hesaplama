@@ -6,6 +6,7 @@ import {
   DEFAULT_MAX_BYTES,
   DEFAULT_ROW_CAP,
 } from './constants';
+import { isPositiveInteger, isRecord } from './wire-guards';
 
 /**
  * The sheet to read, strictly: by its exact name (the first match), or by its 0-based
@@ -86,4 +87,29 @@ export function resolveReadOptions(options: ReadGridOptions): ResolvedReadOption
     colCap: limit(options.colCap, DEFAULT_COL_CAP, ABSOLUTE_MAX_COLS),
     maxBytes: limit(options.maxBytes, DEFAULT_MAX_BYTES, ABSOLUTE_MAX_BYTES),
   };
+}
+
+function isSheetSelector(value: unknown): value is SheetSelector {
+  if (!isRecord(value)) return false;
+  switch (value.by) {
+    case 'name':
+      return typeof value.name === 'string';
+    case 'index':
+      return typeof value.index === 'number' && Number.isInteger(value.index) && value.index >= 0;
+    default:
+      return false;
+  }
+}
+
+/** Resolved options; a strict `sheet` selector and a legacy `sheetName` never travel together. */
+export function isResolvedReadOptions(value: unknown): value is ResolvedReadOptions {
+  return (
+    isRecord(value) &&
+    (value.sheetName === undefined || typeof value.sheetName === 'string') &&
+    (value.sheet === undefined || isSheetSelector(value.sheet)) &&
+    (value.sheet === undefined || value.sheetName === undefined) &&
+    isPositiveInteger(value.rowCap) &&
+    isPositiveInteger(value.colCap) &&
+    isPositiveInteger(value.maxBytes)
+  );
 }

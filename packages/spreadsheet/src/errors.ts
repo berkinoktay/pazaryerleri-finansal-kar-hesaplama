@@ -8,6 +8,12 @@ export const SPREADSHEET_FILE_ERROR_CODES = [
   'UNSAFE_CONTENT',
   // Not about the file: the parse queue is full; the caller may retry later.
   'ENGINE_BUSY',
+  // Only the export patch path throws these four; their HTTP mapping arrives with
+  // the first consumer (PR 3).
+  'MALFORMED_SHEET',
+  'UNSUPPORTED_ENCODING',
+  'ROW_NOT_FOUND',
+  'ROW_ANCHOR_MISMATCH',
 ] as const;
 
 export type SpreadsheetFileErrorCode = (typeof SPREADSHEET_FILE_ERROR_CODES)[number];

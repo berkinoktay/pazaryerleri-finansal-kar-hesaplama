@@ -8,6 +8,7 @@ import type { SheetData } from './grid-types';
 import { openUpload, type UploadParts } from './guards';
 import { checkUploadParts, readGrid } from './read-grid';
 import type { SheetSelector } from './read-options';
+import { columnLetters } from './sheet-meta';
 import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
 import { expectWithinBudget } from '../tests/helpers/timing';
 
@@ -42,8 +43,6 @@ const LINEAR_TRIM_BUDGET_MS = 20_000;
 const LONG_FORMAT_CODE = 100_000;
 const XFS_POINTING_AT_FORMAT = 2_000;
 const GATE_FIRST_BUDGET_MS = 1_000;
-const ALPHABET_SIZE = 26;
-const CHAR_CODE_A = 65;
 
 function worksheet(rows: string): string {
   return `${XML_DECLARATION}<worksheet xmlns="${SPREADSHEET_NS}"><sheetData>${rows}</sheetData></worksheet>`;
@@ -62,15 +61,6 @@ function workbookOf(sheets: string): string {
     `${XML_DECLARATION}<workbook xmlns="${SPREADSHEET_NS}" xmlns:r="${OFFICE_RELATIONSHIPS_NS}">` +
     `<sheets>${sheets}</sheets></workbook>`
   );
-}
-
-/** 1-based column number to Excel column letters (1 -> A, 27 -> AA). */
-function columnLetters(column: number): string {
-  let out = '';
-  for (let rest = column; rest > 0; rest = Math.floor((rest - 1) / ALPHABET_SIZE)) {
-    out = String.fromCharCode(CHAR_CODE_A + ((rest - 1) % ALPHABET_SIZE)) + out;
-  }
-  return out;
 }
 
 function errorCodeOf(run: () => unknown): SpreadsheetFileErrorCode | null {

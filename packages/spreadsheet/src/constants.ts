@@ -93,5 +93,45 @@ export const MAX_FORMAT_CODE_LENGTH = 255;
 // SpreadsheetFileError meta `cause` is truncated: library messages may quote the input.
 export const MAX_ERROR_CAUSE_LENGTH = 200;
 
+// Export patch path (patchWorkbook). Every request is validated on the main thread
+// before it is queued, then structured-cloned into the parse worker.
+// Output files of one job: one per period plus the whole-week file; a week has at
+// most 7 periods.
+export const MAX_PATCH_OUTPUTS = 8;
+// Cell patches of all outputs of one job together; the request is cloned into the
+// worker.
+export const MAX_PATCH_CELLS = 500_000;
+// Anchor cells of one job: a few per data row; ABSOLUTE_MAX_ROWS is 20 000.
+export const MAX_PATCH_ANCHORS = 100_000;
+// Excel's cell text limit (UTF-16 code units). Also caps an anchor's `expected`.
+export const MAX_PATCH_TEXT_LENGTH = 32_767;
+// Characters of a number value.
+export const MAX_PATCH_NUMBER_LENGTH = 64;
+// UTF-16 code units of every patch value and every anchor `expected` of one request
+// together (the size of MAX_GRID_TEXT_LENGTH). A structured clone does not share
+// repeated strings; without this cap the per-value and per-count caps admit about
+// 16 G units.
+export const MAX_PATCH_REQUEST_TEXT_LENGTH = 16 * 1024 * 1024;
+// A patched worksheet part may grow to 1.5x its source...
+export const PATCH_GROWTH_NUMERATOR = 3;
+export const PATCH_GROWTH_DENOMINATOR = 2;
+// ...or to its source plus this, whichever is larger (small sheets, inserted cells).
+export const PATCH_GROWTH_FLOOR_BYTES = 64 * 1024;
+// Bytes of all changed outputs of one job together: ArrayBuffer memory, which the
+// worker's resource limits do not count.
+export const MAX_PATCH_OUTPUT_TOTAL_BYTES = 128 * 1024 * 1024;
+// Row numbers a patch error's meta carries (the first ones, ascending).
+export const PATCH_ERROR_ROW_SAMPLE = 10;
+// fflate deflate level for a rewritten zip entry.
+export const PATCHED_PART_DEFLATE_LEVEL = 6;
+// Multiplier of the row in cellKey; above ABSOLUTE_MAX_COLS, so every 1-based
+// (row, column) pair maps to a distinct number that sorts in row-major order.
+export const CELL_KEY_BASE = 1024;
+// SpreadsheetML main namespaces: transitional and strict.
+export const SPREADSHEET_MAIN_NAMESPACES: readonly string[] = [
+  'http://schemas.openxmlformats.org/spreadsheetml/2006/main',
+  'http://purl.oclc.org/ooxml/spreadsheetml/main',
+];
+
 // 'PK\x03\x04' — zip local-file-header signature (xlsx is a zip).
 export const XLSX_MAGIC: readonly number[] = [0x50, 0x4b, 0x03, 0x04];

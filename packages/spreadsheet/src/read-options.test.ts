@@ -8,7 +8,7 @@ import {
   DEFAULT_MAX_BYTES,
   DEFAULT_ROW_CAP,
 } from './constants';
-import { resolveReadOptions } from './read-options';
+import { isResolvedReadOptions, resolveReadOptions } from './read-options';
 
 describe('resolveReadOptions', () => {
   it('fills in the default limits', () => {
@@ -74,4 +74,29 @@ describe('resolveReadOptions', () => {
       expect(() => resolveReadOptions({ sheet: { by: 'index', index: bad } })).toThrow(Error);
     },
   );
+});
+
+describe('isResolvedReadOptions', () => {
+  const base = resolveReadOptions({});
+
+  it('accepts resolved options after a structured clone', () => {
+    expect(
+      isResolvedReadOptions(
+        structuredClone(resolveReadOptions({ sheet: { by: 'index', index: 1 } })),
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ['a rowCap of 0', { ...base, rowCap: 0 }],
+    ['a colCap of 1.5', { ...base, colCap: 1.5 }],
+    [
+      'a sheet together with a sheetName',
+      { ...base, sheet: { by: 'name', name: 'S' }, sheetName: 'S' },
+    ],
+    ['a negative sheet index', { ...base, sheet: { by: 'index', index: -1 } }],
+    ['null', null],
+  ])('rejects %s', (_label, value) => {
+    expect(isResolvedReadOptions(value)).toBe(false);
+  });
 });
