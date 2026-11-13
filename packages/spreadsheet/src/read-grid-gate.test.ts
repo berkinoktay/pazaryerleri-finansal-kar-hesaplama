@@ -11,6 +11,8 @@ import { resolveReadOptions, type ReadGridOptions } from './read-options';
 import { resolveWorksheetPartPaths } from './index';
 import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
 import { localName } from './xml-dom';
+import { ZIP_REJECT_REASONS } from './patch/reasons';
+import { fileErrorOf } from '../tests/helpers/errors';
 import { expectWithinBudget, LINEAR_BUDGET_MS } from '../tests/helpers/timing';
 
 // The gate must see what the reader sees. Each case below is a way of writing a
@@ -407,15 +409,27 @@ describe('grid gate: formula cells', () => {
 
 describe('grid gate: a worksheet stored under a .xml.rels name', () => {
   // The reader opens every entry ending in .xml or .xml.rels and resolves a sheet
-  // from the workbook rels Target, so the gate must treat such a part as a
-  // worksheet too.
+  // from the workbook rels Target. The gate walks every entry named .rels as a
+  // relationships part, whose schema has no element below a Relationship, so a
+  // worksheet with rows stored under such a name is refused before the reader opens
+  // it: neither its forged dimension nor its far cells reach the grid.
   function relsSheet(xml: string): Buffer {
     return buildXlsxFixture([
       { name: 'Sheet1', xml, partPath: RELS_SHEET_PART, relTarget: RELS_SHEET_TARGET },
     ]);
   }
 
-  it('ignores its dimension, so the reader sizes the grid from its cells', async () => {
+  async function expectRefusedAsPackagePart(file: Buffer): Promise<void> {
+    const error = fileErrorOf(() => openUpload(file, GUARD_OPTS));
+    expect(error.code).toBe('CORRUPT_FILE');
+    expect(error.meta).toEqual({
+      reason: ZIP_REJECT_REASONS.PACKAGE_PART,
+      entry: RELS_SHEET_PART,
+    });
+    expect(await readOutcome(file)).toEqual(rejected('CORRUPT_FILE'));
+  }
+
+  it('refuses one with a forged dimension before the reader sizes its grid', async () => {
     const file = relsSheet(
       worksheetXml(
         [
@@ -425,26 +439,15 @@ describe('grid gate: a worksheet stored under a .xml.rels name', () => {
         { dimension: 'A1:A1' },
       ),
     );
-
-    expect(readerPartNames(file)).toContain(RELS_SHEET_PART);
-    expect(await readOutcome(file)).toEqual(
-      grid([
-        ['Barkod', 'B'],
-        ['X1', 'Y'],
-      ]),
-    );
+    await expectRefusedAsPackagePart(file);
   });
 
-  it('caps its cells', async () => {
+  it('refuses one with cells beyond the caps before the reader reads them', async () => {
     const xml = sheet(
       `<sheetData><row r="1">${inlineCell('A1', 'Barkod')}</row>` +
         `<row r="9000">${inlineCell('CZ9000', 'far')}</row></sheetData>`,
     );
-    const outcome = await readOutcome(relsSheet(xml));
-    expect(outcome.kind).toBe('error');
-    if (outcome.kind === 'error') {
-      expect(['ROW_CAP_EXCEEDED', 'COL_CAP_EXCEEDED']).toContain(outcome.code);
-    }
+    await expectRefusedAsPackagePart(relsSheet(xml));
   });
 });
 

@@ -15,6 +15,7 @@ import {
 } from './constants';
 import { openUpload, type GuardOpts } from './guards';
 import { readWorkbookGrid } from './parse';
+import { readZipLayout } from './patch/raw-zip';
 import { UNSAFE_CONTENT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
 import { checkUploadParts } from './read-grid';
 import { columnLetters } from './sheet-meta';
@@ -23,6 +24,7 @@ import {
   PACKAGE_PART_CASES,
   SAFE_PART_CASES,
   UNSAFE_PART_CASES,
+  utf7Markup,
 } from '../tests/helpers/package-parts';
 import { entriesText, grownFixtureText, numberRows } from '../tests/helpers/workbooks';
 
@@ -46,6 +48,15 @@ const WORKBOOK_PART = 'xl/workbook.xml';
 const SHEET_PART = 'xl/worksheets/sheet1.xml';
 const SHARED_STRINGS_PART = 'xl/sharedStrings.xml';
 const STYLES_PART = 'xl/styles.xml';
+// A worksheet stored under a relationships part name that is not .xml.rels.
+const BIN_RELS_SHEET_PART = 'xl/worksheets/data.rels';
+const BIN_RELS_SHEET_TARGET = 'worksheets/data.rels';
+const SHEET_RELS_PART = 'xl/worksheets/_rels/sheet1.xml.rels';
+const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>';
+const UTF7_DECLARATION = '<?xml version="1.0" encoding="UTF-7"?>';
+// 'e' with an acute accent in Latin-1: a UTF-8 lead byte that no continuation byte follows here.
+const LATIN1_E_ACUTE = 0xe9;
+const LOCAL_UNCOMPRESSED_SIZE_OFFSET = 22;
 // A DOM-weight budget small enough for hand-built parts to cross.
 const SMALL_WEIGHT = 10_000;
 const SMALL_BUDGET = { ...opts, maxDomWeight: SMALL_WEIGHT };
@@ -90,6 +101,7 @@ const FAST_REJECT_MS = 15_000;
 const LOCAL_FILE_SIGNATURE = 0x04034b50; // 'PK\x03\x04'
 const ZIP_VERSION = 20;
 const STORED_METHOD = 0;
+const DEFLATED_METHOD = 8;
 
 interface StoredEntry {
   readonly name: string;
@@ -221,6 +233,17 @@ function patchCentralUncompressedSize(file: Buffer, entryName: string, size: num
     return out;
   }
   throw new Error(`central directory entry not found: ${entryName}`);
+}
+
+// Writes `size` into the uncompressed-size field of the entry's local header and of its
+// central directory record alike, so the zip layout still agrees with itself.
+function withDeclaredSize(file: Buffer, entryName: string, size: number): Buffer {
+  const entry = readZipLayout(file).entries.find((candidate) => candidate.name === entryName);
+  if (entry === undefined) throw new Error(`zip entry not found: ${entryName}`);
+  const out = Buffer.from(file);
+  out.writeUInt32LE(size, entry.headerOffset + LOCAL_UNCOMPRESSED_SIZE_OFFSET);
+  out.writeUInt32LE(size, entry.recordOffset + CENTRAL_UNCOMPRESSED_SIZE_OFFSET);
+  return out;
 }
 
 // The DOM weight of `text`, counted with regexes independently of the gate's byte
@@ -712,6 +735,8 @@ describe('upload gate', () => {
     const err = catchGuard(breakEndOfCentralDirectory(file), opts);
     expect(err).toBeInstanceOf(SpreadsheetFileError);
     expect(err?.code).toBe('CORRUPT_FILE');
+    // The zip layout check, which runs before the stream, now refuses it first.
+    expect(err?.meta).toMatchObject({ reason: ZIP_REJECT_REASONS.LAYOUT });
   });
 
   it('caps the decompressed size of all XML parts together at 32 MiB', () => {
@@ -790,6 +815,17 @@ describe('upload gate: the parts the reader opens', () => {
     expect(readerPartNames(file, opts)).toEqual(
       [WORKBOOK_RELS_PART, WORKBOOK_PART, SHEET_PART].sort(),
     );
+  });
+
+  // The stream keeps every relationships part for the type rule; one not named
+  // .xml / .xml.rels is never a reader part, so a sheet stored there is missing.
+  it('never opens a kept relationships part named .rels only as a worksheet', () => {
+    const file = workbookWith([[WORKSHEET_REL, BIN_RELS_SHEET_TARGET]], {
+      [BIN_RELS_SHEET_PART]: `<worksheet xmlns="${SPREADSHEET_NS}"><sheetData/></worksheet>`,
+    });
+    const err = catchGuard(file, opts);
+    expect(err?.code).toBe('CORRUPT_FILE');
+    expect(err?.meta).toEqual({ entry: BIN_RELS_SHEET_PART });
   });
 
   it.each([
@@ -931,7 +967,9 @@ describe('upload gate: the parts the reader opens', () => {
 
 // Hand-built stored (method 0) archives whose central directory can disagree with
 // the local entries. The reader parts come from the local stream; the central
-// directory is only listed (never inflated) and must describe the same entries.
+// directory is never inflated and must describe the same entries. readZipLayout, which
+// runs before the stream, refuses each of these disagreements; only a declared size the
+// data does not inflate to gets past it, and the gate's own size check refuses that.
 const MINIMAL_PARTS: readonly StoredEntry[] = [
   { name: '[Content_Types].xml', text: '<Types/>' },
   { name: 'xl/workbook.xml', text: '<workbook/>' },
@@ -976,7 +1014,8 @@ describe('upload gate: central directory', () => {
       [...KEPT_RECORDS, { local: EXTRA_PART, originalSize: 1 }, { local: IMAGE_ENTRY }],
     ],
   ])('rejects a central directory that %s as CORRUPT_FILE', (_label, central) => {
-    expect(catchGuard(storedZip(MINIMAL_PARTS, central), opts)?.code).toBe('CORRUPT_FILE');
+    // The zip layout check, which runs before the stream, now refuses it first.
+    expectGateReason(storedZip(MINIMAL_PARTS, central), 'CORRUPT_FILE', ZIP_REJECT_REASONS.LAYOUT);
   });
 
   // Every entry is inflated, so every declared size is checked against real bytes:
@@ -992,7 +1031,9 @@ describe('upload gate: central directory', () => {
         { local: EXTRA_PART },
         { local: IMAGE_ENTRY, originalSize },
       ];
-      expect(catchGuard(storedZip(MINIMAL_PARTS, central), opts)?.code).toBe('CORRUPT_FILE');
+      // The zip layout check, which runs before the stream, now refuses it first.
+      const file = storedZip(MINIMAL_PARTS, central);
+      expectGateReason(file, 'CORRUPT_FILE', ZIP_REJECT_REASONS.LAYOUT);
     },
   );
 
@@ -1005,7 +1046,8 @@ describe('upload gate: central directory', () => {
     for (let i = 0; i < MAX_ZIP_ENTRIES; i += 1) {
       central.push({ local: EXTRA_PART, name: `xl/copy${i}.xml` });
     }
-    expect(catchGuard(storedZip(MINIMAL_PARTS, central), opts)?.code).toBe('CORRUPT_FILE');
+    // The zip layout check, which runs before the stream, now refuses it first.
+    expectGateReason(storedZip(MINIMAL_PARTS, central), 'CORRUPT_FILE', ZIP_REJECT_REASONS.LAYOUT);
   });
 
   it.each([
@@ -1013,12 +1055,36 @@ describe('upload gate: central directory', () => {
     ['entries the gate never inflates', 'xl/media/image1.png'],
   ])('rejects two local %s with the same name as CORRUPT_FILE', (_label, name) => {
     const parts = [...MINIMAL_PARTS, { name, text: 'again' }];
-    expect(catchGuard(storedZip(parts), opts)?.code).toBe('CORRUPT_FILE');
+    // The zip layout check, which runs before the stream, now refuses it first.
+    expectGateReason(storedZip(parts), 'CORRUPT_FILE', ZIP_REJECT_REASONS.LAYOUT);
   });
+
+  // readZipLayout inflates nothing: a deflated entry whose local header and directory
+  // record agree on a size its data does not inflate to passes it, and only the gate's
+  // comparison with the bytes the stream inflated refuses it.
+  it.each([
+    ['a smaller', 1],
+    ['a far larger', LARGE_DECLARED_SIZE],
+  ])(
+    'rejects a deflated entry whose headers both declare %s size as CORRUPT_FILE',
+    (_label, size) => {
+      const file = withDeclaredSize(buildXlsxFixture([BASIC_SHEET]), SHEET_PART, size);
+      expect(readZipLayout(file).entries.find((entry) => entry.name === SHEET_PART)).toMatchObject({
+        method: DEFLATED_METHOD,
+        uncompressedSize: size,
+      });
+      const err = catchGuard(file, opts);
+      expect(err?.code).toBe('CORRUPT_FILE');
+      expect(err?.meta).toEqual({ declared: size, actual: Buffer.byteLength(BASIC_SHEET.xml) });
+    },
+  );
 });
 
 // A part the root relationships may name instead of the workbook.
 const OTHER_PART = 'xl/other.xml';
+const OTHER_WORKBOOK_RELATIONSHIP = `<Relationship Id="rId2" Type="${OFFICE_DOCUMENT_REL}" Target="${OTHER_PART}"/>`;
+const THUMBNAIL_REL =
+  'http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail';
 const BOMB_BYTES = 300_000;
 const BOMB_CAP = 1_000;
 
@@ -1132,8 +1198,51 @@ describe('upload gate: root relationships', () => {
       }),
     ],
     ['an entry named _RELS/.rels alone', withRootRelsNamed(UPPER_CASE_ROOT_RELS_PART)],
+    ['only an XML declaration', withRootRels(XML_DECLARATION)],
+    [
+      'a UTF-7 declaration hiding a second officeDocument relationship',
+      withRootRels(
+        relsXml([OFFICE_DOCUMENT_RELATIONSHIP])
+          .replace(XML_DECLARATION, UTF7_DECLARATION)
+          .replace(
+            '</Relationships>',
+            `${utf7Markup(OTHER_WORKBOOK_RELATIONSHIP)}</Relationships>`,
+          ),
+        { [OTHER_PART]: '<workbook/>' },
+      ),
+    ],
+    [
+      'a second officeDocument relationship below a direct child of the root',
+      withRootRels(
+        relsXml([OFFICE_DOCUMENT_RELATIONSHIP]).replace(
+          '</Relationships>',
+          `<W>${OTHER_WORKBOOK_RELATIONSHIP}</W></Relationships>`,
+        ),
+        { [OTHER_PART]: '<workbook/>' },
+      ),
+    ],
   ])('refuses %s as CORRUPT_FILE', (_label, file) => {
     expectGateReason(file, 'CORRUPT_FILE', ZIP_REJECT_REASONS.ROOT_RELS);
+  });
+
+  it('refuses root relationships whose bytes are not UTF-8 as CORRUPT_FILE', () => {
+    const text = relsXml([OFFICE_DOCUMENT_RELATIONSHIP]);
+    const bytes = strToU8(text);
+    // A Latin-1 byte inside an Id value: the lexer accepts any byte there.
+    bytes[text.indexOf('rId1')] = LATIN1_E_ACUTE;
+    const file = rezipped(buildXlsxFixture([BASIC_SHEET]), (entries) => ({
+      ...entries,
+      [ROOT_RELS_PART]: bytes,
+    }));
+    expectGateReason(file, 'CORRUPT_FILE', ZIP_REJECT_REASONS.ROOT_RELS);
+  });
+
+  it('refuses an external relationship beside the office document as UNSAFE_CONTENT', () => {
+    const rootRels = relsXml([OFFICE_DOCUMENT_RELATIONSHIP]).replace(
+      '</Relationships>',
+      `<Relationship Id="rId2" Type="${THUMBNAIL_REL}" Target="file://evil.example/t.jpeg" TargetMode="External"/></Relationships>`,
+    );
+    expectGateReason(withRootRels(rootRels), 'UNSAFE_CONTENT', UNSAFE_CONTENT_REASONS.UNSAFE_PART);
   });
 
   it('refuses a DOCTYPE in the root relationships as UNSAFE_CONTENT', () => {
@@ -1211,5 +1320,17 @@ describe('upload gate: unsafe parts by declared type', () => {
 
   it.each(SAFE_PART_CASES)('accepts $label', ({ entries }) => {
     expect(catchGuard(buildXlsxFixture([BASIC_SHEET], entries), opts)).toBeNull();
+  });
+
+  it('refuses a relationships part whose bytes are not UTF-8 as CORRUPT_FILE', () => {
+    const text = relsXml([[`${OFFICE_REL}/image`, '../media/image1.png']]);
+    const bytes = strToU8(text);
+    // A Latin-1 byte inside a Target value: the lexer accepts any byte there.
+    bytes[text.indexOf('image1.png')] = LATIN1_E_ACUTE;
+    const file = rezipped(buildXlsxFixture([BASIC_SHEET]), (entries) => ({
+      ...entries,
+      [SHEET_RELS_PART]: bytes,
+    }));
+    expectGateReason(file, 'CORRUPT_FILE', ZIP_REJECT_REASONS.PACKAGE_PART);
   });
 });

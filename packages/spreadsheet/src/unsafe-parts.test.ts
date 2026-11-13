@@ -17,9 +17,15 @@ import { UNSAFE_CONTENT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
 import {
   assertNoUnsafePackageParts,
   assertNoUnsafePartNames,
+  isRelationshipsPartName,
   UNSAFE_CONTENT_TYPE_MARKERS,
   UNSAFE_RELATIONSHIP_TYPE_ENDINGS,
 } from './unsafe-parts';
+
+/** Whether the gate's stream keeps the content of entry `name` (the root relationships part aside). */
+function isKept(name: string): boolean {
+  return isXmlPart(name) || isRelationshipsPartName(name);
+}
 
 /**
  * The type rule on a minimal package (content types and workbook rels) plus `entries`:
@@ -33,7 +39,7 @@ function checkEntries(entries: Readonly<Record<string, string>>): void {
   };
   const contents = new Map<string, Uint8Array>();
   for (const [name, text] of Object.entries(all)) {
-    if (isXmlPart(name)) contents.set(name, strToU8(text));
+    if (isKept(name)) contents.set(name, strToU8(text));
   }
   assertNoUnsafePackageParts(Object.keys(all), contents);
 }
@@ -57,7 +63,7 @@ describe('assertNoUnsafePackageParts', () => {
 
   it.each(FIXTURE_PINS)('accepts the package parts of $file', (pin) => {
     const entries = unzipSync(new Uint8Array(readFixture(pin.file)));
-    const contents = new Map(Object.entries(entries).filter(([name]) => isXmlPart(name)));
+    const contents = new Map(Object.entries(entries).filter(([name]) => isKept(name)));
     expect(() => assertNoUnsafePackageParts(Object.keys(entries), contents)).not.toThrow();
   });
 
@@ -76,6 +82,10 @@ describe('assertNoUnsafePackageParts', () => {
       'externallink',
       'oleobject',
       'activex',
+      'macrosheet',
+      'dialogsheet',
+      'connections+xml',
+      'querytable+xml',
     ]);
     expect(UNSAFE_RELATIONSHIP_TYPE_ENDINGS).toEqual([
       'vbaproject',
@@ -85,7 +95,25 @@ describe('assertNoUnsafePackageParts', () => {
       'control',
       'xlmacrosheet',
       'dialogsheet',
+      'xlintlmacrosheet',
+      'connections',
+      'querytable',
     ]);
+  });
+});
+
+describe('isRelationshipsPartName', () => {
+  it.each([
+    ['xl/worksheets/_rels/sheet1.xml.rels', true],
+    ['xl/charts/_rels/chart1.bin.rels', true],
+    ['xl/_rels/vbaData.rels', true],
+    ['xl/worksheets/_rels/sheet1.xml.RELS', true],
+    ['_rels/.rels', true],
+    ['xl/workbook.xml', false],
+    ['xl/media/a.relsx', false],
+    ['xl/media/rels', false],
+  ])('reads %s as a relationships part: %s', (name, expected) => {
+    expect(isRelationshipsPartName(name)).toBe(expected);
   });
 });
 

@@ -571,8 +571,9 @@ describe('patchUpload: order of errors', () => {
 
   it('refuses a worksheet part that is also the content types part', () => {
     // The content types part is no book part, so only its name refuses it: the calcChain
-    // cut may rewrite that part.
-    const types = contentTypesOf([`<sheetData xmlns="${MAIN_NAMESPACE}">${ONE_CELL}</sheetData>`]);
+    // cut may rewrite that part. Its sheet data is empty: the gate refuses an element
+    // below a direct child of the content types root, so a row there never reaches here.
+    const types = contentTypesOf([`<sheetData xmlns="${MAIN_NAMESPACE}"/>`]);
     const file = buildXlsxFixture(
       [{ name: 'Sheet1', xml: worksheet(ONE_CELL), relTarget: `/${CONTENT_TYPES_PART}` }],
       { [CONTENT_TYPES_PART]: types },
@@ -580,7 +581,7 @@ describe('patchUpload: order of errors', () => {
     const reading = readSheet(openUpload(file, GUARD_OPTS), {
       caps: { rowCap: DEFAULT_READ.rowCap, colCap: DEFAULT_READ.colCap },
     });
-    expect(reading.grid).toEqual([[7]]);
+    expect(reading.grid).toEqual([]);
     expect(reading.partPath).toBe(CONTENT_TYPES_PART);
     expect(reading.partIsBookPart).toBe(false);
     expectFileError(() => patchFixture(file, [num(1, 0, '1')]), 'MALFORMED_SHEET', {

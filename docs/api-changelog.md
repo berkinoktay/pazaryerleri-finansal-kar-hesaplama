@@ -31,12 +31,17 @@ section "Versioning" for details.
   An upload whose zip archive is not laid out the way the export reads it (a gap, an overlap or a
   hidden entry, a local header that disagrees with its directory record, an archive comment, zip64
   structures), or whose root relationships part (`_rels/.rels`) does not name `xl/workbook.xml` as
-  its office document, answers `422` with `{ field: 'file', code: 'CORRUPT_FILE' }`. A workbook
-  that declares a macro, an embedded object, an ActiveX control or an external link, found by its
-  content type, its relationship type or its part name, answers `422` with
-  `{ field: 'file', code: 'UNSAFE_CONTENT' }`. The six export routes read the stored file through
-  the same gate: a stored file with either condition answers `409 CONFLICT`. Valid Trendyol files
-  are unaffected.
+  its office document, answers `422` with `{ field: 'file', code: 'CORRUPT_FILE' }`. So does a
+  workbook whose content types or relationships parts cannot be read whole: bytes that are not
+  UTF-8, a declaration of another encoding, no root element, or an element nested below a direct
+  child of the root. A workbook that declares a macro, an Excel 4.0 macro or international macro
+  sheet, a dialog sheet, an embedded object, an ActiveX control, an external link, a data
+  connection or a query table, found by its content type, its relationship type (in every
+  relationships part, also those of parts not named `.xml`) or its part name, or that holds a
+  relationship whose `TargetMode` points outside the package (a linked picture, an OLE link;
+  hyperlinks excepted), answers `422` with `{ field: 'file', code: 'UNSAFE_CONTENT' }`. The six
+  export routes read the stored file through the same gate: a stored file with any of these
+  conditions answers `409 CONFLICT`. Valid Trendyol files are unaffected.
 - **Campaign workbook import routes are guarded before the body is read**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs|advantage-tariffs|flash-products|discount-lists|marketplace-campaigns}/import`).
   Store access and the `DATA_WRITE` capability are now checked in route middleware, so a caller who

@@ -16,6 +16,8 @@ const BYTE_ORDER_MARK = String.fromCharCode(0xfeff);
 // U+212A KELVIN SIGN: toLowerCase maps it to 'k', ASCII case folding leaves it.
 const KELVIN_SIGN = String.fromCharCode(0x212a);
 const UTF8_BYTE_ORDER_MARK = [0xef, 0xbb, 0xbf];
+// 'e' with an acute accent in Latin-1: a UTF-8 lead byte that no continuation byte follows here.
+const LATIN1_E_ACUTE = 0xe9;
 
 const OFFICE_RELATIONSHIPS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const WORKSHEET_TYPE = `${OFFICE_RELATIONSHIPS}/worksheet`;
@@ -190,18 +192,9 @@ describe('planCalcChainRemoval: cuts', () => {
   });
 
   it('cuts a Relationship with an end tag up to that end tag', () => {
-    const rel = `<Relationship Id="rId2" Type="${CALC_CHAIN_TYPE}" Target="calcChain.xml"><x><y/></x></Relationship>`;
+    const rel = `<Relationship Id="rId2" Type="${CALC_CHAIN_TYPE}" Target="calcChain.xml"><!--x--></Relationship>`;
     const result = planned(relsText(`${rel}${WORKSHEET_REL}`), typesText(CALC_CHAIN_OVERRIDE));
     expect(decoder.decode(result.workbookRels)).toBe(relsText(WORKSHEET_REL));
-  });
-
-  it('cuts only direct children of the root', () => {
-    const nestedRel = `<Group>${CALC_CHAIN_REL}</Group>`;
-    expect(plan(relsText(`${WORKSHEET_REL}${nestedRel}`), typesText(''))).toBeNull();
-
-    const nestedOverride = `<Group>${CALC_CHAIN_OVERRIDE}</Group>`;
-    const result = planned(relsText(CALC_CHAIN_REL), typesText(nestedOverride));
-    expect(result.contentTypes).toBeNull();
   });
 
   it('reads the Target of a non-calcChain relationship as it is', () => {
@@ -298,6 +291,20 @@ describe('planCalcChainRemoval: refusals', () => {
   it('refuses a content types part whose root never closes', () => {
     const types = typesText(CALC_CHAIN_OVERRIDE).replace('</Types>', '');
     expectPackagePartError(CONTENT_TYPES_PART, () => plan(relsText(CALC_CHAIN_REL), types));
+  });
+
+  // Neither schema has an element below a direct child of the root; the walk would not
+  // read one, so a part holding one is refused instead of cut around.
+  it('refuses an element below a direct child of the root', () => {
+    const nestedRel = `<Group>${CALC_CHAIN_REL}</Group>`;
+    expectPackagePartError(WORKBOOK_RELS_PART, () =>
+      plan(relsText(`${WORKSHEET_REL}${nestedRel}`), typesText('')),
+    );
+
+    const nestedOverride = `<Group>${CALC_CHAIN_OVERRIDE}</Group>`;
+    expectPackagePartError(CONTENT_TYPES_PART, () =>
+      plan(relsText(CALC_CHAIN_REL), typesText(nestedOverride)),
+    );
   });
 
   it('refuses a relationship Type holding a character reference', () => {
@@ -479,6 +486,68 @@ describe('planCalcChainRemoval: values it cannot classify', () => {
     ['a second root element', `${typesText(CALC_CHAIN_OVERRIDE)}<Types/>`],
   ])('refuses a content types part with %s', (_shape, types) => {
     expectPackagePartError(CONTENT_TYPES_PART, () => plan(relsText(CALC_CHAIN_REL), types));
+  });
+});
+
+// The walk must read a part the way every reader does, or it cannot vouch for what the
+// part declares: a UTF-7 reader decodes '+ADw-' as '<'.
+describe('planCalcChainRemoval: parts the walk cannot read whole', () => {
+  it.each([
+    ['only an XML declaration', DECLARATION],
+    ['nothing at all', ''],
+    ['only a comment', '<!--x-->'],
+  ])('refuses a rels part with %s, which has no root element', (_shape, rels) => {
+    expectPackagePartError(WORKBOOK_RELS_PART, () => plan(rels, typesText('')));
+  });
+
+  it('refuses a content types part with no root element', () => {
+    expectPackagePartError(CONTENT_TYPES_PART, () => plan(relsText(CALC_CHAIN_REL), DECLARATION));
+  });
+
+  it.each([
+    ['UTF-7', '<?xml version="1.0" encoding="UTF-7"?>'],
+    ['UTF-16', "<?xml version='1.0' encoding='UTF-16'?>"],
+    ['ISO-8859-1', '<?xml version="1.0" encoding="ISO-8859-1" standalone="yes"?>'],
+  ])('refuses a rels part that declares %s', (_encoding, declaration) => {
+    const rels = relsText(`${WORKSHEET_REL}${CALC_CHAIN_REL}`).replace(DECLARATION, declaration);
+    expectPackagePartError(WORKBOOK_RELS_PART, () => plan(rels, typesText('')));
+  });
+
+  it('refuses a content types part that declares UTF-7', () => {
+    const types = typesText(CALC_CHAIN_OVERRIDE).replace(
+      DECLARATION,
+      '<?xml version="1.0" encoding="UTF-7"?>',
+    );
+    expectPackagePartError(CONTENT_TYPES_PART, () => plan(relsText(CALC_CHAIN_REL), types));
+  });
+
+  it.each([
+    ['in lower case', '<?xml version="1.0" encoding="utf-8"?>'],
+    ['by omission', '<?xml version="1.0"?>'],
+  ])('accepts a declaration that names UTF-8 %s', (_shape, declaration) => {
+    const rels = relsText(`${WORKSHEET_REL}${CALC_CHAIN_REL}`).replace(DECLARATION, declaration);
+    expect(planned(rels, typesText(CALC_CHAIN_OVERRIDE)).paths).toEqual([CALC_CHAIN_PATH]);
+  });
+
+  it.each([
+    ['after the root element', `${relsText(CALC_CHAIN_REL)}${DECLARATION}`],
+    ['in another ASCII case', relsText(CALC_CHAIN_REL).replace('<?xml ', '<?XML ')],
+    [
+      'with a malformed pseudo-attribute',
+      relsText(CALC_CHAIN_REL).replace('version="1.0"', 'version'),
+    ],
+  ])('refuses an xml processing instruction %s', (_shape, rels) => {
+    expectPackagePartError(WORKBOOK_RELS_PART, () => plan(rels, typesText('')));
+  });
+
+  it('refuses a rels part whose bytes are not UTF-8', () => {
+    // A Latin-1 byte inside a Target value: the lexer accepts any byte there.
+    const text = relsText(`${WORKSHEET_REL}${CALC_CHAIN_REL}`);
+    const rels = encoder.encode(text);
+    rels[text.indexOf('sheet1.xml')] = LATIN1_E_ACUTE;
+    expectPackagePartError(WORKBOOK_RELS_PART, () =>
+      planCalcChainRemoval(rels, () => encoder.encode(typesText(CALC_CHAIN_OVERRIDE))),
+    );
   });
 });
 
