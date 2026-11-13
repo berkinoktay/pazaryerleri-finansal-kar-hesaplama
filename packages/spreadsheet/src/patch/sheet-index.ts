@@ -134,7 +134,8 @@ function malformedStructure(offset: number, detail: string): SpreadsheetFileErro
   return malformedSheet(MALFORMED_SHEET_REASONS.STRUCTURE, offset, detail);
 }
 
-function valueAt(list: readonly number[], index: number): number {
+/** `list[index]`, or a throw when the index is out of range (no `undefined` reaches the caller). */
+export function valueAt(list: readonly number[], index: number): number {
   const value = list[index];
   if (value === undefined) throw new Error(`Index ${index} is out of range`);
   return value;
