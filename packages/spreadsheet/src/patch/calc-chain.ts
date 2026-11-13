@@ -2,19 +2,19 @@ import { MAX_ERROR_CAUSE_LENGTH } from '../constants';
 import { SpreadsheetFileError } from '../errors';
 import { CONTENT_TYPES_PART, readerFilePath, WORKBOOK_RELS_PART } from '../workbook-parts';
 import { ZIP_REJECT_REASONS } from './reasons';
-import { valueAt } from './sheet-index';
 import {
-  ATTRIBUTE_FIELDS,
   ATTRIBUTE_NAME_END,
   ATTRIBUTE_NAME_START,
   ATTRIBUTE_VALUE_END,
   ATTRIBUTE_VALUE_START,
+  attributeField,
   bytesEqualAscii,
   createMarkup,
   isXmlSpace,
-  localNameStart,
+  localNameIs,
   nextMarkup,
   scanMarkup,
+  valueAt,
   XmlLexError,
   type XmlMarkup,
 } from './xml-lexer';
@@ -32,6 +32,13 @@ import {
 // a TAB, LF or CR, which attribute-value normalization turns into a space) cannot be
 // classified that way and is refused instead of read as "not calcChain". So is a
 // repeated attribute: the content types part never meets a parser that would refuse it.
+//
+// Part names are compared folding ASCII case (A-Z to a-z, nothing else), as OPC
+// compares them. A Target is free text, so a calcChain path may name any part: an
+// Override is cut only when it also carries exactly the calcChain content type, and
+// one that names such a path with any other content type is refused. Cutting it would
+// leave that part (the workbook itself, for `Target="Workbook.xml"`) on a Default
+// content type, and Excel could not open the output.
 //
 // Bytes between markups are never read: a leading byte order mark is skipped by the
 // search for the first '<' and kept in the result with the other untouched runs.
@@ -59,17 +66,24 @@ const CALC_CHAIN_RELATIONSHIP_TYPES: readonly string[] = [
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain',
   'http://purl.oclc.org/ooxml/officeDocument/relationships/calcChain',
 ];
+const CALC_CHAIN_CONTENT_TYPE =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml';
 const RELATIONSHIP = 'Relationship';
 const TYPE_ATTRIBUTE = 'Type';
 const TARGET_ATTRIBUTE = 'Target';
 const OVERRIDE = 'Override';
 const PART_NAME_ATTRIBUTE = 'PartName';
+const CONTENT_TYPE_ATTRIBUTE = 'ContentType';
 // An Override's PartName is the entry name with a leading '/'.
 const PART_NAME_PREFIX = '/';
 const NO_ATTRIBUTE = -1;
 const SPACE = 0x20;
 // '&' opens a character or entity reference inside an attribute value.
 const AMPERSAND = 0x26;
+
+// The upper-case ASCII letters and nothing else, and what turns one into its lower case.
+const ASCII_UPPER_CASE_LETTER = /[A-Z]/g;
+const ASCII_CASE_OFFSET = 0x20;
 
 // Depth (open elements) at which the root's tag, and its direct children's tags, are met.
 const ROOT_DEPTH = 0;
@@ -78,15 +92,26 @@ const CHILD_DEPTH = 1;
 // A value may start with U+FEFF, which the default decoder would drop.
 const VALUE_DECODER = new TextDecoder('utf-8', { ignoreBOM: true });
 
+/**
+ * `text` with A-Z turned into a-z and every other code unit kept: the ASCII case
+ * folding OPC compares part names under. Never toLowerCase, which also folds letters
+ * outside ASCII (U+212A KELVIN SIGN becomes 'k').
+ */
+function foldAsciiCase(text: string): string {
+  return text.replace(ASCII_UPPER_CASE_LETTER, (letter) =>
+    String.fromCharCode(letter.charCodeAt(0) + ASCII_CASE_OFFSET),
+  );
+}
+
+const FOLDED_CALC_CHAIN_RELATIONSHIP_TYPES: ReadonlySet<string> = new Set(
+  CALC_CHAIN_RELATIONSHIP_TYPES.map(foldAsciiCase),
+);
+
 function packagePartError(entry: string, detail: string): SpreadsheetFileError {
   return new SpreadsheetFileError('CORRUPT_FILE', `Package part ${detail}`, {
     reason: ZIP_REJECT_REASONS.PACKAGE_PART,
     entry: entry.slice(0, MAX_ERROR_CAUSE_LENGTH),
   });
-}
-
-function attributeField(attributes: readonly number[], attribute: number, field: number): number {
-  return valueAt(attributes, attribute * ATTRIBUTE_FIELDS + field);
 }
 
 /**
@@ -144,8 +169,35 @@ function isCalcChainType(bytes: Uint8Array, start: number, end: number): boolean
   return CALC_CHAIN_RELATIONSHIP_TYPES.some((type) => bytesEqualAscii(bytes, start, end, type));
 }
 
-function localNameIs(bytes: Uint8Array, markup: XmlMarkup, name: string): boolean {
-  return bytesEqualAscii(bytes, localNameStart(bytes, markup), markup.nameEnd, name);
+/**
+ * Whether Type bytes [start, end) name a calcChain type once trimmed of S and folded
+ * in ASCII case. Asked only of a Type that is not one byte for byte: a reader that
+ * compares loosely would still find that chain, which is then never cut, so such a
+ * Type is refused rather than left in place (fail closed).
+ */
+function namesCalcChainLoosely(bytes: Uint8Array, start: number, end: number): boolean {
+  let from = start;
+  let to = end;
+  while (from < to && isXmlSpace(bytes[from])) from += 1;
+  while (to > from && isXmlSpace(bytes[to - 1])) to -= 1;
+  const folded = foldAsciiCase(VALUE_DECODER.decode(bytes.subarray(from, to)));
+  return FOLDED_CALC_CHAIN_RELATIONSHIP_TYPES.has(folded);
+}
+
+/** Whether attribute `contentType` exists and its raw value is exactly the calcChain content type. */
+function hasCalcChainContentType(
+  bytes: Uint8Array,
+  attributes: readonly number[],
+  contentType: number,
+): boolean {
+  if (contentType === NO_ATTRIBUTE) return false;
+  // Raw bytes: a value holding a reference, TAB, LF or CR is never equal, so it is refused too.
+  return bytesEqualAscii(
+    bytes,
+    attributeField(attributes, contentType, ATTRIBUTE_VALUE_START),
+    attributeField(attributes, contentType, ATTRIBUTE_VALUE_END),
+    CALC_CHAIN_CONTENT_TYPE,
+  );
 }
 
 /**
@@ -226,7 +278,8 @@ function withoutCuts(bytes: Uint8Array, cuts: ElementCuts): Uint8Array {
 
 /**
  * Selects a `Relationship` whose raw Type is a calcChain type, and adds the entry
- * name its Target maps to (readerFilePath) to `paths` once.
+ * name its Target maps to (readerFilePath) to `paths` once. CORRUPT_FILE for a Type
+ * that names calcChain only once trimmed and folded in ASCII case.
  */
 function calcChainRelationshipSelector(
   bytes: Uint8Array,
@@ -239,7 +292,13 @@ function calcChainRelationshipSelector(
     const target = onlyAttribute(bytes, markup, attributes, TARGET_ATTRIBUTE, WORKBOOK_RELS_PART);
     if (type === NO_ATTRIBUTE) return false;
     const typeValue = literalValue(bytes, attributes, type, WORKBOOK_RELS_PART, TYPE_ATTRIBUTE);
-    if (!isCalcChainType(bytes, typeValue.start, typeValue.end)) return false;
+    if (!isCalcChainType(bytes, typeValue.start, typeValue.end)) {
+      if (!namesCalcChainLoosely(bytes, typeValue.start, typeValue.end)) return false;
+      throw packagePartError(
+        WORKBOOK_RELS_PART,
+        'has a calcChain relationship Type in another ASCII case or with surrounding spaces',
+      );
+    }
     if (target === NO_ATTRIBUTE) {
       throw packagePartError(WORKBOOK_RELS_PART, 'has a calcChain relationship without a Target');
     }
@@ -261,7 +320,11 @@ function calcChainRelationshipSelector(
   };
 }
 
-/** Selects an `Override` whose raw PartName is in `partNames`: one decode, one lookup. */
+/**
+ * Selects an `Override` whose PartName, folded in ASCII case, is in `partNames` (one
+ * decode, one fold, one lookup). CORRUPT_FILE when such an Override does not carry
+ * exactly the calcChain content type, or any Override repeats PartName or ContentType.
+ */
 function overrideSelector(bytes: Uint8Array, partNames: ReadonlySet<string>): ChildSelector {
   return (markup, attributes) => {
     if (!localNameIs(bytes, markup, OVERRIDE)) return false;
@@ -272,6 +335,13 @@ function overrideSelector(bytes: Uint8Array, partNames: ReadonlySet<string>): Ch
       PART_NAME_ATTRIBUTE,
       CONTENT_TYPES_PART,
     );
+    const contentType = onlyAttribute(
+      bytes,
+      markup,
+      attributes,
+      CONTENT_TYPE_ATTRIBUTE,
+      CONTENT_TYPES_PART,
+    );
     if (partName === NO_ATTRIBUTE) return false;
     const value = literalValue(
       bytes,
@@ -280,23 +350,34 @@ function overrideSelector(bytes: Uint8Array, partNames: ReadonlySet<string>): Ch
       CONTENT_TYPES_PART,
       PART_NAME_ATTRIBUTE,
     );
-    return partNames.has(VALUE_DECODER.decode(bytes.subarray(value.start, value.end)));
+    const folded = foldAsciiCase(VALUE_DECODER.decode(bytes.subarray(value.start, value.end)));
+    if (!partNames.has(folded)) return false;
+    if (!hasCalcChainContentType(bytes, attributes, contentType)) {
+      throw packagePartError(
+        CONTENT_TYPES_PART,
+        'has an Override of a calcChain path without the calcChain content type',
+      );
+    }
+    return true;
   };
 }
 
 /**
  * The calcChain parts the workbook rels name, and both parts without them: the
  * relationships whose raw Type is a calcChain type, and the content types' Override
- * elements whose raw PartName is '/' + one of their entry names. Null when the rels
- * name no calcChain part; the content types are then not read at all.
+ * elements whose PartName is '/' + one of their entry names, folding ASCII case, and
+ * whose raw ContentType is the calcChain content type. Null when the rels name no
+ * calcChain part; the content types are then not read at all.
  *
  * The paths are attacker-chosen (Target is free text); this function only reports
  * them, the caller decides whether dropping them is safe.
  *
  * Throws SpreadsheetFileError CORRUPT_FILE `{ reason: 'package-part', entry }` for a
  * part outside the lexer's strict subset, with a broken element structure, with a
- * repeated Type, Target or PartName, with a value it cannot compare as raw bytes, or
- * with a calcChain relationship that has no Target.
+ * repeated Type, Target, PartName or ContentType, with a value it cannot compare as
+ * raw bytes, with a calcChain relationship that has no Target, with a Type that names
+ * calcChain only in another ASCII case or with surrounding spaces, or with an
+ * Override that names a calcChain path without the calcChain content type.
  */
 export function planCalcChainRemoval(
   workbookRels: Uint8Array,
@@ -309,7 +390,9 @@ export function planCalcChainRemoval(
     calcChainRelationshipSelector(workbookRels, paths, new Set()),
   );
   if (relsCuts.starts.length === 0) return null;
-  const partNames: ReadonlySet<string> = new Set(paths.map((path) => PART_NAME_PREFIX + path));
+  const partNames: ReadonlySet<string> = new Set(
+    paths.map((path) => foldAsciiCase(PART_NAME_PREFIX + path)),
+  );
   const overrideCuts = cutRootChildren(
     contentTypes,
     CONTENT_TYPES_PART,

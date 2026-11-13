@@ -11,8 +11,10 @@ const encoder = new TextEncoder();
 // Keeps a leading byte order mark, so a decoded result can be compared with its source.
 const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
 
-// Built from a code unit so the source file stays ASCII.
+// Built from code units so the source file stays ASCII.
 const BYTE_ORDER_MARK = String.fromCharCode(0xfeff);
+// U+212A KELVIN SIGN: toLowerCase maps it to 'k', ASCII case folding leaves it.
+const KELVIN_SIGN = String.fromCharCode(0x212a);
 const UTF8_BYTE_ORDER_MARK = [0xef, 0xbb, 0xbf];
 
 const OFFICE_RELATIONSHIPS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
@@ -27,6 +29,8 @@ const WORKSHEET_CONTENT_TYPE =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml';
 const CALC_CHAIN_CONTENT_TYPE =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml';
+const WORKBOOK_CONTENT_TYPE =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml';
 const DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
 
 const CALC_CHAIN_PATH = 'xl/calcChain.xml';
@@ -34,6 +38,7 @@ const WORKSHEET_REL = `<Relationship Id="rId1" Type="${WORKSHEET_TYPE}" Target="
 const CALC_CHAIN_REL = `<Relationship Id="rId2" Type="${CALC_CHAIN_TYPE}" Target="calcChain.xml"/>`;
 const SHEET_OVERRIDE = `<Override PartName="/xl/worksheets/sheet1.xml" ContentType="${WORKSHEET_CONTENT_TYPE}"/>`;
 const CALC_CHAIN_OVERRIDE = `<Override PartName="/xl/calcChain.xml" ContentType="${CALC_CHAIN_CONTENT_TYPE}"/>`;
+const WORKBOOK_OVERRIDE = `<Override PartName="/xl/workbook.xml" ContentType="${WORKBOOK_CONTENT_TYPE}"/>`;
 
 const MANY_ELEMENTS = 200_000;
 const CALC_CHAIN_PARTS = 300;
@@ -215,6 +220,51 @@ describe('planCalcChainRemoval: cuts', () => {
       UTF8_BYTE_ORDER_MARK,
     );
   });
+
+  it('keeps a U+FEFF that starts a Target in the path', () => {
+    const rel = `<Relationship Id="rId2" Type="${CALC_CHAIN_TYPE}" Target="${BYTE_ORDER_MARK}calcChain.xml"/>`;
+    const result = planned(relsText(rel), typesText(''));
+    expect(result.paths).toEqual([`xl/${BYTE_ORDER_MARK}calcChain.xml`]);
+  });
+});
+
+describe('planCalcChainRemoval: Override matching', () => {
+  it('cuts an Override whose PartName differs from the path in ASCII case only', () => {
+    const upperCase = `<Override PartName="/XL/CALCCHAIN.XML" ContentType="${CALC_CHAIN_CONTENT_TYPE}"/>`;
+    const result = planned(relsText(CALC_CHAIN_REL), typesText(`${SHEET_OVERRIDE}${upperCase}`));
+
+    expect(result.paths).toEqual([CALC_CHAIN_PATH]);
+    expect(contentTypesText(result)).toBe(typesText(SHEET_OVERRIDE));
+  });
+
+  it('cuts an Override with an end tag up to that end tag', () => {
+    const override = `<Override PartName="/xl/calcChain.xml" ContentType="${CALC_CHAIN_CONTENT_TYPE}"></Override>`;
+    const result = planned(relsText(CALC_CHAIN_REL), typesText(`${override}${SHEET_OVERRIDE}`));
+    expect(contentTypesText(result)).toBe(typesText(SHEET_OVERRIDE));
+  });
+
+  it('leaves an Override inside a comment', () => {
+    const commented = `<!--${CALC_CHAIN_OVERRIDE}-->`;
+    const result = planned(
+      relsText(CALC_CHAIN_REL),
+      typesText(`${commented}${CALC_CHAIN_OVERRIDE}`),
+    );
+    expect(contentTypesText(result)).toBe(typesText(commented));
+  });
+
+  it.each([
+    ['the calcChain content type', CALC_CHAIN_CONTENT_TYPE],
+    ['the workbook content type', WORKBOOK_CONTENT_TYPE],
+  ])('never folds a KELVIN SIGN in a PartName to "k" (%s)', (_contentType, contentType) => {
+    // toLowerCase would turn this PartName into '/xl/calckhain.xml', the path the rels
+    // name; ASCII case folding keeps it another name, so the Override is left alone.
+    const rel = `<Relationship Id="rId2" Type="${CALC_CHAIN_TYPE}" Target="calckhain.xml"/>`;
+    const override = `<Override PartName="/xl/calc${KELVIN_SIGN}hain.xml" ContentType="${contentType}"/>`;
+    const result = planned(relsText(rel), typesText(override));
+
+    expect(result.paths).toEqual(['xl/calckhain.xml']);
+    expect(result.contentTypes).toBeNull();
+  });
 });
 
 describe('planCalcChainRemoval: refusals', () => {
@@ -299,6 +349,129 @@ describe('planCalcChainRemoval: refusals', () => {
     expectPackagePartError(CONTENT_TYPES_PART, () =>
       plan(relsText(CALC_CHAIN_REL), typesText(override)),
     );
+  });
+});
+
+describe('planCalcChainRemoval: a calcChain path naming another part', () => {
+  it('refuses to cut the workbook Override a crafted calcChain Target names', () => {
+    // '/xl/Workbook.xml' is a valid OPC spelling of the workbook part name. Cutting its
+    // Override would leave the workbook on the Default xml content type: a file Excel
+    // cannot open, from a call that reported success.
+    const rel = `<Relationship Id="r9" Type="${CALC_CHAIN_TYPE}" Target="Workbook.xml"/>`;
+    const override = `<Override PartName="/xl/Workbook.xml" ContentType="${WORKBOOK_CONTENT_TYPE}"/>`;
+    expectPackagePartError(CONTENT_TYPES_PART, () =>
+      plan(relsText(`${WORKSHEET_REL}${rel}`), typesText(`${override}${SHEET_OVERRIDE}`)),
+    );
+  });
+
+  it('refuses a Target that names the workbook Override in another ASCII case', () => {
+    const rel = `<Relationship Id="r9" Type="${CALC_CHAIN_TYPE}" Target="WORKBOOK.xml"/>`;
+    expectPackagePartError(CONTENT_TYPES_PART, () =>
+      plan(relsText(`${WORKSHEET_REL}${rel}`), typesText(`${WORKBOOK_OVERRIDE}${SHEET_OVERRIDE}`)),
+    );
+  });
+
+  it.each([
+    ['no ContentType', '<Override PartName="/xl/calcChain.xml"/>'],
+    [
+      'another content type',
+      `<Override PartName="/xl/calcChain.xml" ContentType="${WORKSHEET_CONTENT_TYPE}"/>`,
+    ],
+    [
+      'a ContentType holding a character reference',
+      `<Override PartName="/xl/calcChain.xml" ContentType="${CALC_CHAIN_CONTENT_TYPE.replace('+', '&#43;')}"/>`,
+    ],
+    [
+      'a ContentType holding a tab',
+      `<Override PartName="/xl/calcChain.xml" ContentType="\t${CALC_CHAIN_CONTENT_TYPE}"/>`,
+    ],
+    [
+      'a repeated ContentType',
+      `<Override PartName="/xl/calcChain.xml" ContentType="${CALC_CHAIN_CONTENT_TYPE}" ContentType="${CALC_CHAIN_CONTENT_TYPE}"/>`,
+    ],
+  ])('refuses an Override of the calcChain path with %s', (_shape, override) => {
+    expectPackagePartError(CONTENT_TYPES_PART, () =>
+      plan(relsText(CALC_CHAIN_REL), typesText(override)),
+    );
+  });
+});
+
+describe('planCalcChainRemoval: values it cannot classify', () => {
+  it.each([
+    ['in upper case', CALC_CHAIN_TYPE.toUpperCase()],
+    ['in lower case', CALC_CHAIN_TYPE.toLowerCase()],
+    ['after a space', ` ${CALC_CHAIN_TYPE}`],
+    ['before a space', `${STRICT_CALC_CHAIN_TYPE} `],
+  ])('refuses a calcChain relationship Type written %s', (_shape, type) => {
+    const rel = `<Relationship Id="rId2" Type="${type}" Target="calcChain.xml"/>`;
+    expectPackagePartError(WORKBOOK_RELS_PART, () =>
+      plan(relsText(`${WORKSHEET_REL}${rel}`), typesText('')),
+    );
+  });
+
+  it.each([
+    [
+      'a carriage return in a Type',
+      `<Relationship Id="rId2" Type="${CALC_CHAIN_TYPE}\r" Target="calcChain.xml"/>`,
+    ],
+    [
+      'a tab in a Type',
+      `<Relationship Id="rId2" Type="${CALC_CHAIN_TYPE}\t" Target="calcChain.xml"/>`,
+    ],
+    [
+      'a line feed in a Type',
+      `<Relationship Id="rId2" Type="\n${CALC_CHAIN_TYPE}" Target="calcChain.xml"/>`,
+    ],
+    [
+      'a carriage return in a calcChain Target',
+      `<Relationship Id="rId2" Type="${CALC_CHAIN_TYPE}" Target="calc\rChain.xml"/>`,
+    ],
+  ])('refuses a rels part with %s', (_shape, rel) => {
+    expectPackagePartError(WORKBOOK_RELS_PART, () => plan(relsText(rel), typesText('')));
+  });
+
+  it('refuses an Override PartName holding a carriage return', () => {
+    const override = `<Override PartName="/xl/calc\rChain.xml" ContentType="${CALC_CHAIN_CONTENT_TYPE}"/>`;
+    expectPackagePartError(CONTENT_TYPES_PART, () =>
+      plan(relsText(CALC_CHAIN_REL), typesText(override)),
+    );
+  });
+
+  it.each([
+    [
+      'a repeated PartName',
+      `<Override PartName="/xl/worksheets/sheet1.xml" PartName="/xl/worksheets/sheet2.xml" ContentType="${WORKSHEET_CONTENT_TYPE}"/>`,
+    ],
+    [
+      'a repeated ContentType',
+      `<Override PartName="/xl/worksheets/sheet1.xml" ContentType="${WORKSHEET_CONTENT_TYPE}" ContentType="${WORKSHEET_CONTENT_TYPE}"/>`,
+    ],
+  ])('refuses an Override of another part with %s', (_shape, override) => {
+    expectPackagePartError(CONTENT_TYPES_PART, () =>
+      plan(relsText(CALC_CHAIN_REL), typesText(`${override}${CALC_CHAIN_OVERRIDE}`)),
+    );
+  });
+
+  it.each([
+    [
+      'a repeated Type',
+      `<Relationship Id="rId1" Type="${WORKSHEET_TYPE}" Type="${WORKSHEET_TYPE}" Target="worksheets/sheet1.xml"/>`,
+    ],
+    [
+      'a repeated Target',
+      `<Relationship Id="rId1" Type="${WORKSHEET_TYPE}" Target="worksheets/sheet1.xml" Target="worksheets/sheet2.xml"/>`,
+    ],
+  ])('refuses a non-calcChain Relationship with %s', (_shape, rel) => {
+    expectPackagePartError(WORKBOOK_RELS_PART, () =>
+      plan(relsText(`${rel}${CALC_CHAIN_REL}`), typesText('')),
+    );
+  });
+
+  it.each([
+    ['an end tag outside the root', `${typesText(CALC_CHAIN_OVERRIDE)}</Types>`],
+    ['a second root element', `${typesText(CALC_CHAIN_OVERRIDE)}<Types/>`],
+  ])('refuses a content types part with %s', (_shape, types) => {
+    expectPackagePartError(CONTENT_TYPES_PART, () => plan(relsText(CALC_CHAIN_REL), types));
   });
 });
 

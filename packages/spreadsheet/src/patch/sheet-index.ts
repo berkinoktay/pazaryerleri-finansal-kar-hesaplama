@@ -5,21 +5,26 @@ import { SpreadsheetFileError } from '../errors';
 import { cellKey, colRefToNumber } from '../sheet-meta';
 import { MALFORMED_SHEET_REASONS, UNSUPPORTED_ENCODING_REASONS } from './reasons';
 import {
-  ATTRIBUTE_FIELDS,
   ATTRIBUTE_NAME_END,
   ATTRIBUTE_NAME_START,
   ATTRIBUTE_VALUE_END,
   ATTRIBUTE_VALUE_START,
+  attributeField,
   bytesEqualAscii,
   createMarkup,
   isXmlSpace,
+  localNameIs,
   localNameStart,
   nextMarkup,
   scanDeclaration,
   scanMarkup,
+  valueAt,
   XmlLexError,
   type XmlMarkup,
 } from './xml-lexer';
+
+// Defined once, in the lexer; kept reachable from here for callers that walk a SheetIndex.
+export { valueAt } from './xml-lexer';
 
 // The rows and cells of one worksheet part, found the way the reader finds them
 // (part-checks.ts): the first direct child of the root whose local name is
@@ -132,13 +137,6 @@ function unsupportedEncoding(
 
 function malformedStructure(offset: number, detail: string): SpreadsheetFileError {
   return malformedSheet(MALFORMED_SHEET_REASONS.STRUCTURE, offset, detail);
-}
-
-/** `list[index]`, or a throw when the index is out of range (no `undefined` reaches the caller). */
-export function valueAt(list: readonly number[], index: number): number {
-  const value = list[index];
-  if (value === undefined) throw new Error(`Index ${index} is out of range`);
-  return value;
 }
 
 function setLast(list: number[], value: number): void {
@@ -306,12 +304,18 @@ class WorksheetIndexer {
 
   /** A start or empty tag met at the current depth. */
   private visitElement(): void {
+    const { bytes, markup } = this;
     const met = this.depth;
-    if (met === ROOT_DEPTH) this.openRoot();
-    else if (met === SHEET_DATA_DEPTH && this.localNameIs(SHEET_DATA)) this.openSheetData();
-    else if (met === ROW_DEPTH && this.sheetDataOpen && this.localNameIs(ROW)) this.openRow();
-    else if (met === CELL_DEPTH && this.rowOpen && this.localNameIs(CELL)) this.openCell();
-    if (this.markup.kind === 'start') this.depth += 1;
+    if (met === ROOT_DEPTH) {
+      this.openRoot();
+    } else if (met === SHEET_DATA_DEPTH && localNameIs(bytes, markup, SHEET_DATA)) {
+      this.openSheetData();
+    } else if (met === ROW_DEPTH && this.sheetDataOpen && localNameIs(bytes, markup, ROW)) {
+      this.openRow();
+    } else if (met === CELL_DEPTH && this.rowOpen && localNameIs(bytes, markup, CELL)) {
+      this.openCell();
+    }
+    if (markup.kind === 'start') this.depth += 1;
   }
 
   private visitEndTag(): void {
@@ -355,17 +359,12 @@ class WorksheetIndexer {
     );
   }
 
-  // Attribute access. Every read of the attributes the last scan filled goes through
-  // these two methods, so where the count and the offsets come from changes in one place.
+  // Attribute access. The count of the attributes the last scan filled comes from this
+  // method, each of their offsets from the lexer's attributeField over this.attributes.
 
   /** Number of attributes of the markup the last scan read. */
   private attributeCount(): number {
     return this.markup.attributeCount;
-  }
-
-  /** One field (ATTRIBUTE_NAME_START ... ATTRIBUTE_VALUE_END) of attribute `attribute`, 0-based. */
-  private attributeField(attribute: number, field: number): number {
-    return valueAt(this.attributes, attribute * ATTRIBUTE_FIELDS + field);
   }
 
   /** An `encoding` pseudo-attribute must name UTF-8, ignoring ASCII case. */
@@ -373,8 +372,8 @@ class WorksheetIndexer {
     scanDeclaration(this.bytes, this.markup, this.attributes);
     for (let attribute = 0; attribute < this.attributeCount(); attribute += 1) {
       if (!this.attributeNameIs(attribute, ENCODING_PSEUDO_ATTRIBUTE)) continue;
-      const valueStart = this.attributeField(attribute, ATTRIBUTE_VALUE_START);
-      const valueEnd = this.attributeField(attribute, ATTRIBUTE_VALUE_END);
+      const valueStart = attributeField(this.attributes, attribute, ATTRIBUTE_VALUE_START);
+      const valueEnd = attributeField(this.attributes, attribute, ATTRIBUTE_VALUE_END);
       if (bytesEqualAsciiIgnoreCase(this.bytes, valueStart, valueEnd, UTF8_ENCODING_NAME)) continue;
       throw unsupportedEncoding(
         UNSUPPORTED_ENCODING_REASONS.DECLARATION,
@@ -411,8 +410,8 @@ class WorksheetIndexer {
     const scope = this.scopeOf(this.sheetDataScope);
     this.assertMainNamespace(scope);
     const reference = this.referenceAttribute(MALFORMED_SHEET_REASONS.ROW_REF);
-    const valueStart = this.attributeField(reference, ATTRIBUTE_VALUE_START);
-    const valueEnd = this.attributeField(reference, ATTRIBUTE_VALUE_END);
+    const valueStart = attributeField(this.attributes, reference, ATTRIBUTE_VALUE_START);
+    const valueEnd = attributeField(this.attributes, reference, ATTRIBUTE_VALUE_END);
     const rowNumber = parseRowReference(this.bytes, valueStart, valueEnd);
     if (rowNumber === null) {
       throw malformedSheet(MALFORMED_SHEET_REASONS.ROW_REF, start, 'has a malformed row reference');
@@ -444,8 +443,8 @@ class WorksheetIndexer {
     this.assertMainNamespace(scope);
     const reference = this.referenceAttribute(MALFORMED_SHEET_REASONS.CELL_REF);
     const column = this.cellReferenceColumn(
-      this.attributeField(reference, ATTRIBUTE_VALUE_START),
-      this.attributeField(reference, ATTRIBUTE_VALUE_END),
+      attributeField(this.attributes, reference, ATTRIBUTE_VALUE_START),
+      attributeField(this.attributes, reference, ATTRIBUTE_VALUE_END),
     );
     if (column <= this.lastColumn) {
       throw malformedSheet(
@@ -513,8 +512,8 @@ class WorksheetIndexer {
   }
 
   private isPrefixedReference(attribute: number): boolean {
-    const nameStart = this.attributeField(attribute, ATTRIBUTE_NAME_START);
-    const nameEnd = this.attributeField(attribute, ATTRIBUTE_NAME_END);
+    const nameStart = attributeField(this.attributes, attribute, ATTRIBUTE_NAME_START);
+    const nameEnd = attributeField(this.attributes, attribute, ATTRIBUTE_NAME_END);
     const suffixStart = nameEnd - PREFIXED_REFERENCE_SUFFIX.length;
     return (
       suffixStart > nameStart &&
@@ -526,8 +525,8 @@ class WorksheetIndexer {
   private attributeNameIs(attribute: number, name: string): boolean {
     return bytesEqualAscii(
       this.bytes,
-      this.attributeField(attribute, ATTRIBUTE_NAME_START),
-      this.attributeField(attribute, ATTRIBUTE_NAME_END),
+      attributeField(this.attributes, attribute, ATTRIBUTE_NAME_START),
+      attributeField(this.attributes, attribute, ATTRIBUTE_NAME_END),
       name,
     );
   }
@@ -552,8 +551,8 @@ class WorksheetIndexer {
     let bindings: Map<string, boolean> | null = null;
     for (let attribute = 0; attribute < this.attributeCount(); attribute += 1) {
       const prefix = this.declaredPrefix(
-        this.attributeField(attribute, ATTRIBUTE_NAME_START),
-        this.attributeField(attribute, ATTRIBUTE_NAME_END),
+        attributeField(this.attributes, attribute, ATTRIBUTE_NAME_START),
+        attributeField(this.attributes, attribute, ATTRIBUTE_NAME_END),
       );
       if (prefix === null) continue;
       bindings ??= new Map();
@@ -564,8 +563,8 @@ class WorksheetIndexer {
           'declares one namespace prefix twice on an element',
         );
       }
-      const valueStart = this.attributeField(attribute, ATTRIBUTE_VALUE_START);
-      const valueEnd = this.attributeField(attribute, ATTRIBUTE_VALUE_END);
+      const valueStart = attributeField(this.attributes, attribute, ATTRIBUTE_VALUE_START);
+      const valueEnd = attributeField(this.attributes, attribute, ATTRIBUTE_VALUE_END);
       bindings.set(prefix, isMainNamespace(this.bytes, valueStart, valueEnd));
     }
     return bindings === null ? parent : { bindings, parent };
@@ -585,11 +584,6 @@ class WorksheetIndexer {
       start,
       'has a sheet element outside the SpreadsheetML main namespace',
     );
-  }
-
-  private localNameIs(name: string): boolean {
-    const localStart = localNameStart(this.bytes, this.markup);
-    return bytesEqualAscii(this.bytes, localStart, this.markup.nameEnd, name);
   }
 
   /** Outside the root only S bytes may stand between markups. */

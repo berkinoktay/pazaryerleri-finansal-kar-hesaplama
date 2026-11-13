@@ -3,12 +3,18 @@ import { describe, expect, it } from 'vitest';
 import { expectWithinBudget, LINEAR_BUDGET_MS } from '../../tests/helpers/timing';
 import {
   ATTRIBUTE_FIELDS,
+  ATTRIBUTE_NAME_START,
+  ATTRIBUTE_VALUE_END,
+  ATTRIBUTE_VALUE_START,
+  attributeField,
   bytesEqualAscii,
   createMarkup,
+  localNameIs,
   localNameStart,
   nextMarkup,
   scanDeclaration,
   scanMarkup,
+  valueAt,
   XmlLexError,
   type XmlMarkup,
 } from './xml-lexer';
@@ -287,6 +293,42 @@ describe('bytesEqualAscii', () => {
     expect(bytesEqualAscii(bytes, 1, 4, 'rows')).toBe(false);
     expect(bytesEqualAscii(bytes, 1, 3, 'row')).toBe(false);
     expect(bytesEqualAscii(bytes, 9, 12, 'x">')).toBe(false);
+  });
+});
+
+describe('valueAt', () => {
+  it('reads an entry and throws past either end of the list', () => {
+    const list = [7, 8, 9];
+    expect(valueAt(list, 0)).toBe(7);
+    expect(valueAt(list, 2)).toBe(9);
+    expect(() => valueAt(list, 3)).toThrow('Index 3 is out of range');
+    expect(() => valueAt(list, -1)).toThrow('Index -1 is out of range');
+  });
+});
+
+describe('attributeField', () => {
+  it('reads one field of one attribute and throws past the filled list', () => {
+    const attributes: number[] = [];
+    scanFirst(`<c r="A1" s='3'>`, attributes);
+    expect(attributeField(attributes, 0, ATTRIBUTE_VALUE_START)).toBe(6);
+    expect(attributeField(attributes, 1, ATTRIBUTE_NAME_START)).toBe(10);
+    expect(attributeField(attributes, 1, ATTRIBUTE_VALUE_END)).toBe(14);
+    expect(() => attributeField(attributes, 2, ATTRIBUTE_NAME_START)).toThrow(
+      'Index 8 is out of range',
+    );
+  });
+});
+
+describe('localNameIs', () => {
+  it('compares the local name after any prefix, exactly', () => {
+    const prefixed = scanFirst('<x:row r="2"/>');
+    expect(localNameIs(prefixed.bytes, prefixed.markup, 'row')).toBe(true);
+    expect(localNameIs(prefixed.bytes, prefixed.markup, 'x:row')).toBe(false);
+    expect(localNameIs(prefixed.bytes, prefixed.markup, 'ro')).toBe(false);
+
+    const plain = scanFirst('<row r="1">');
+    expect(localNameIs(plain.bytes, plain.markup, 'row')).toBe(true);
+    expect(localNameIs(plain.bytes, plain.markup, 'Row')).toBe(false);
   });
 });
 

@@ -17,17 +17,18 @@ import {
 } from './cell-values';
 import { copyCellPatch, type CellPatch, type CellPatchValue } from './patch-request';
 import { MALFORMED_SHEET_REASONS, PATCH_LIMIT_REASONS } from './reasons';
-import { indexWorksheet, valueAt, type SheetIndex } from './sheet-index';
+import { indexWorksheet, type SheetIndex } from './sheet-index';
 import {
-  ATTRIBUTE_FIELDS,
   ATTRIBUTE_NAME_END,
   ATTRIBUTE_NAME_START,
   ATTRIBUTE_VALUE_END,
+  attributeField,
   bytesEqualAscii,
   createMarkup,
-  localNameStart,
+  localNameIs,
   nextMarkup,
   scanMarkup,
+  valueAt,
   type XmlMarkup,
 } from './xml-lexer';
 
@@ -408,8 +409,7 @@ class CellPatcher {
   }
 
   private isFormulaElement(): boolean {
-    const localStart = localNameStart(this.bytes, this.markup);
-    return bytesEqualAscii(this.bytes, localStart, this.markup.nameEnd, FORMULA_ELEMENT);
+    return localNameIs(this.bytes, this.markup, FORMULA_ELEMENT);
   }
 
   private hasTypeAttribute(): boolean {
@@ -423,14 +423,10 @@ class CellPatcher {
   private isTypeAttribute(attribute: number): boolean {
     return bytesEqualAscii(
       this.bytes,
-      this.attributeField(attribute, ATTRIBUTE_NAME_START),
-      this.attributeField(attribute, ATTRIBUTE_NAME_END),
+      attributeField(this.attributes, attribute, ATTRIBUTE_NAME_START),
+      attributeField(this.attributes, attribute, ATTRIBUTE_NAME_END),
       TYPE_ATTRIBUTE,
     );
-  }
-
-  private attributeField(attribute: number, field: number): number {
-    return valueAt(this.attributes, attribute * ATTRIBUTE_FIELDS + field);
   }
 
   /**
@@ -447,8 +443,8 @@ class CellPatcher {
     let size = 1 + (nameEnd - nameStart) + utf8Length(tail);
     for (let attribute = 0; attribute < attributeCount; attribute += 1) {
       if (this.isTypeAttribute(attribute)) continue;
-      size +=
-        1 + this.attributeEnd(attribute) - this.attributeField(attribute, ATTRIBUTE_NAME_START);
+      const attributeStart = attributeField(this.attributes, attribute, ATTRIBUTE_NAME_START);
+      size += 1 + this.attributeEnd(attribute) - attributeStart;
     }
     const piece = new Uint8Array(size);
     piece[0] = TAG_OPEN;
@@ -456,7 +452,7 @@ class CellPatcher {
     let at = 1 + nameEnd - nameStart;
     for (let attribute = 0; attribute < attributeCount; attribute += 1) {
       if (this.isTypeAttribute(attribute)) continue;
-      const attributeStart = this.attributeField(attribute, ATTRIBUTE_NAME_START);
+      const attributeStart = attributeField(this.attributes, attribute, ATTRIBUTE_NAME_START);
       const attributeEnd = this.attributeEnd(attribute);
       piece[at] = SPACE;
       piece.set(bytes.subarray(attributeStart, attributeEnd), at + 1);
@@ -468,7 +464,7 @@ class CellPatcher {
 
   /** Just past the closing quote of attribute `attribute`. */
   private attributeEnd(attribute: number): number {
-    return this.attributeField(attribute, ATTRIBUTE_VALUE_END) + CLOSING_QUOTE_LENGTH;
+    return attributeField(this.attributes, attribute, ATTRIBUTE_VALUE_END) + CLOSING_QUOTE_LENGTH;
   }
 
   private record(start: number, end: number, piece: Uint8Array): void {

@@ -125,6 +125,30 @@ export function localNameStart(bytes: Uint8Array, markup: XmlMarkup): number {
   return markup.nameStart;
 }
 
+/** Whether the scanned tag's local name (after any prefix) is exactly the ASCII `name`. */
+export function localNameIs(bytes: Uint8Array, markup: XmlMarkup, name: string): boolean {
+  return bytesEqualAscii(bytes, localNameStart(bytes, markup), markup.nameEnd, name);
+}
+
+/** `list[index]`, or a throw when the index is out of range (no `undefined` reaches the caller). */
+export function valueAt(list: readonly number[], index: number): number {
+  const value = list[index];
+  if (value === undefined) throw new Error(`Index ${index} is out of range`);
+  return value;
+}
+
+/**
+ * One field (ATTRIBUTE_NAME_START ... ATTRIBUTE_VALUE_END) of attribute `attribute`
+ * (0-based) of an attribute list the last scan filled; a throw past its entries.
+ */
+export function attributeField(
+  attributes: readonly number[],
+  attribute: number,
+  field: number,
+): number {
+  return valueAt(attributes, attribute * ATTRIBUTE_FIELDS + field);
+}
+
 /** XML's S production: space, tab, line feed, carriage return. */
 export function isXmlSpace(byte: number | undefined): boolean {
   return byte === SPACE || byte === TAB || byte === LF || byte === CR;
