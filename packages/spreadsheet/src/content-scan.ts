@@ -2,7 +2,7 @@ import { isUtf8 } from 'node:buffer';
 
 import { strFromU8 } from 'fflate';
 import { SpreadsheetFileError } from './errors';
-import { formulaTextRefusal } from './formula-scan';
+import { formulaTextRefusal, type QuotedSection } from './formula-scan';
 import { UNSAFE_CONTENT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
 import { bytesEqualAt, foldAsciiCase, metaEntryName, unsafeContentError } from './patch/shared';
 import {
@@ -19,6 +19,7 @@ import {
   isXmlDeclaration,
   isXmlSpace,
   localNameStart,
+  NAME_DECODER,
   nextMarkup,
   QUESTION,
   scanMarkup,
@@ -70,21 +71,34 @@ const NO_BYTE = -1;
 
 // Formula fields (spec section 2.1 item 7). In every XML part, whatever its root element
 // and path, the gate reads every field Excel evaluates: the text of the
-// FORMULA_ELEMENT_NAMES elements and the value of the FORMULA_ATTRIBUTE_NAMES
-// attributes, local names compared ignoring their prefix and ASCII case (so a reader
+// FORMULA_ELEMENT_NAMES elements, the value of the FORMULA_ATTRIBUTE_NAMES attributes,
+// and the value of the ELEMENT_FORMULA_ATTRIBUTE_NAMES attributes on their one element
+// (a conditional format value object's `val`, a hyperlink's `location`, a camera tool's
+// `cellRange`), local names compared ignoring their prefix and ASCII case (so a reader
 // that ignores case finds no field the gate skipped). Each field is decoded (the five
 // predefined references and every character reference replaced) and must pass
-// formula-scan.ts. An element field must hold text
-// only, up to its own end tag: a comment, CDATA section, processing instruction or child
-// element could split a name or hide it from a text scan, and Excel writes none. An
+// formula-scan.ts; in the `formula` attribute of a PIVOT_FORMULA_ELEMENT_NAMES element
+// (a pivot calculated field or item) a quoted section is a field name, not a sheet name.
+// An element field must hold text only, up to its own end tag: a comment, CDATA section,
+// processing instruction or child element could split a name or hide it from a text
+// scan. The one exception is the shape Excel 2010+ writes for a data validation list or
+// a conditional format that reaches another sheet (`<x14:formula1><xm:f>Lists!$A$2:$A$20
+// </xm:f></x14:formula1>`): exactly one child element whose local name is `f`, holding
+// text only, with nothing but white space around it; that inner text is the field. An
 // empty field passes.
+// An Office Math fraction is also named `f` (an equation in a text box writes
+// `<m:f><m:fPr/>...</m:f>`), so an element in the OMML_NAMESPACE is not a formula field.
+// The walk keeps the namespace declarations in scope (NamespaceScopes); a binding counts
+// only while every end tag closes the innermost open element, so markup whose nesting
+// the walk cannot follow leaves every `f` a field.
 // A macro assignment needs code the gate never accepts, so a non-empty
 // MACRO_ATTRIBUTE_NAMES attribute or FmlaMacro element is refused (Excel writes
 // `macro=""` on every shape), and an element of ACTIVE_ELEMENT_NAMES (an embedded
 // object, a control, a web publishing item) is refused wherever it stands.
 // Where the strict lexer refuses markup that a lenient or a non-ASCII reading accepts,
 // the walk cannot tell where the fields are from there on, so the part is refused when
-// anything after that point could open a field element or name a field attribute.
+// anything after that point could open a field element, an element with a field
+// attribute of its own, or name a field attribute.
 // Every pass is linear in the part; the formula fields are read without a regular
 // expression (formula-scan.ts).
 const FORMULA_ELEMENT_NAMES: readonly string[] = [
@@ -111,6 +125,18 @@ const FORMULA_ATTRIBUTE_NAMES: readonly string[] = [
   'fmlaGroup',
   'fmlaPict',
 ];
+// Attributes that are formula fields on one element only: [element, attribute].
+const ELEMENT_FORMULA_ATTRIBUTE_NAMES: readonly (readonly [element: string, attribute: string])[] =
+  [
+    ['cfvo', 'val'],
+    ['hyperlink', 'location'],
+    ['cameraTool', 'cellRange'],
+  ];
+// Elements whose `formula` attribute names pivot fields in its quoted sections.
+const PIVOT_FORMULA_ELEMENT_NAMES: readonly string[] = ['cacheField', 'calculatedItem'];
+const PIVOT_FORMULA_ATTRIBUTE_NAME = 'formula';
+// The local name of the one child element a formula field may hold (see the header).
+const INNER_FORMULA_ELEMENT_NAME = 'f';
 const MACRO_ATTRIBUTE_NAMES: readonly string[] = ['macro', 'fmlaMacro'];
 const MACRO_ELEMENT_NAMES: readonly string[] = ['FmlaMacro'];
 const ACTIVE_ELEMENT_NAMES: readonly string[] = [
@@ -124,9 +150,41 @@ const ACTIVE_ELEMENT_NAMES: readonly string[] = [
 // A namespace declaration is not an attribute: `xmlns`, or the `xmlns` prefix.
 const NAMESPACE_DECLARATION = 'xmlns';
 const NAMESPACE_DECLARATION_PREFIX = 'xmlns:';
+// Office Math Markup Language: its elements are never formula fields (see the header).
+const OMML_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/math';
+// The key of the default namespace among the prefixes of NamespaceScopes.
+const DEFAULT_NAMESPACE_KEY = '';
+// Numbers NamespaceScopes.open holds per open element: name start, name end, and
+// whether it declared namespaces (DECLARED or NOT_DECLARED).
+const DECLARED = 1;
+const NOT_DECLARED = 0;
 
 /** Lower-case ASCII names, by length. */
 type NameSet = ReadonlyMap<number, readonly string[]>;
+
+/** One namespace binding: the element that declared it and whether it names OMML_NAMESPACE. */
+interface NamespaceBinding {
+  readonly element: number;
+  omml: boolean;
+}
+
+/**
+ * The namespace declarations in scope while one part is walked. A declaration is
+ * compared byte for byte: one written with a reference names another namespace. A
+ * prefix declared twice on one element names OMML only when both declarations do.
+ */
+interface NamespaceScopes {
+  /** Per prefix (DEFAULT_NAMESPACE_KEY for the default namespace), its bindings, innermost last. */
+  readonly bindings: Map<string, NamespaceBinding[]>;
+  /** The prefixes each declaring element in scope bound, innermost last. */
+  readonly declared: string[][];
+  /** The open elements, outermost first: name start, name end, DECLARED or NOT_DECLARED. */
+  readonly open: number[];
+  /** Serial number of the next element that declares namespaces. */
+  nextElement: number;
+  /** An end tag closed something else than the innermost open element: no binding counts. */
+  broken: boolean;
+}
 
 // Bytes of the loose element name check (looseLocalStart): the delimiters that end a
 // name under any reading, and the prefix separator.
@@ -206,6 +264,18 @@ function nameSet(names: readonly string[]): NameSet {
 
 const FORMULA_ELEMENTS = nameSet(FORMULA_ELEMENT_NAMES);
 const FORMULA_ATTRIBUTES = nameSet(FORMULA_ATTRIBUTE_NAMES);
+const ELEMENT_FORMULA_ATTRIBUTES: readonly (readonly [element: NameSet, attribute: NameSet])[] =
+  ELEMENT_FORMULA_ATTRIBUTE_NAMES.map<readonly [NameSet, NameSet]>(([element, attribute]) => [
+    nameSet([element]),
+    nameSet([attribute]),
+  ]);
+// Every element that carries a field attribute of its own.
+const FIELD_ATTRIBUTE_ELEMENTS = nameSet(
+  ELEMENT_FORMULA_ATTRIBUTE_NAMES.map(([element]) => element),
+);
+const PIVOT_FORMULA_ELEMENTS = nameSet(PIVOT_FORMULA_ELEMENT_NAMES);
+const PIVOT_FORMULA_ATTRIBUTE = nameSet([PIVOT_FORMULA_ATTRIBUTE_NAME]);
+const INNER_FORMULA_ELEMENT = nameSet([INNER_FORMULA_ELEMENT_NAME]);
 const MACRO_ATTRIBUTES = nameSet(MACRO_ATTRIBUTE_NAMES);
 const MACRO_ELEMENTS = nameSet(MACRO_ELEMENT_NAMES);
 const ACTIVE_ELEMENTS = nameSet(ACTIVE_ELEMENT_NAMES);
@@ -410,8 +480,15 @@ export function decodeXmlText(raw: Uint8Array): string | null {
   return decoded + text.slice(from);
 }
 
-/** Decodes formula field bytes `raw` and checks them (formula-scan.ts); UNSAFE_CONTENT `unsafe-formula` otherwise. */
-function assertSafeFormulaField(entry: string, raw: Uint8Array): void {
+/**
+ * Decodes formula field bytes `raw` and checks them (formula-scan.ts), its quoted
+ * sections read as `quoted`; UNSAFE_CONTENT `unsafe-formula` otherwise.
+ */
+function assertSafeFormulaField(
+  entry: string,
+  raw: Uint8Array,
+  quoted: QuotedSection = 'sheet-name',
+): void {
   const text = decodeXmlText(raw);
   if (text === null) {
     throw unsafeFormula(
@@ -419,8 +496,27 @@ function assertSafeFormulaField(entry: string, raw: Uint8Array): void {
       'Workbook part holds a formula with a reference the scan cannot decode',
     );
   }
-  const refusal = formulaTextRefusal(text);
+  const refusal = formulaTextRefusal(text, quoted);
   if (refusal !== null) throw unsafeFormula(entry, refusal);
+}
+
+function notTextOnly(entry: string): SpreadsheetFileError {
+  return unsafeFormula(entry, 'Workbook part holds a formula field with something other than text');
+}
+
+/** Whether the end tag scanned into `markup` closes the element named by bytes [nameStart, nameEnd). */
+function closesElement(
+  bytes: Uint8Array,
+  markup: XmlMarkup,
+  nameStart: number,
+  nameEnd: number,
+): boolean {
+  const nameLength = nameEnd - nameStart;
+  return (
+    markup.kind === 'end' &&
+    markup.nameEnd - markup.nameStart === nameLength &&
+    bytesEqualAt(bytes, nameStart, bytes, markup.nameStart, nameLength)
+  );
 }
 
 /**
@@ -430,21 +526,63 @@ function assertSafeFormulaField(entry: string, raw: Uint8Array): void {
  */
 function textOnlyContentEnd(entry: string, bytes: Uint8Array, markup: XmlMarkup): number {
   const nameStart = markup.nameStart;
-  const nameLength = markup.nameEnd - markup.nameStart;
+  const nameEnd = markup.nameEnd;
   const close = nextMarkup(bytes, markup.end);
   const textOnly =
-    close !== -1 &&
-    lexes(bytes, close, markup) &&
-    markup.kind === 'end' &&
-    markup.nameEnd - markup.nameStart === nameLength &&
-    bytesEqualAt(bytes, nameStart, bytes, markup.nameStart, nameLength);
-  if (!textOnly) {
-    throw unsafeFormula(
-      entry,
-      'Workbook part holds a formula field with something other than text',
-    );
-  }
+    close !== -1 && lexes(bytes, close, markup) && closesElement(bytes, markup, nameStart, nameEnd);
+  if (!textOnly) throw notTextOnly(entry);
   return close;
+}
+
+/** Whether bytes [start, end) are XML white space only. */
+function isXmlSpaceOnly(bytes: Uint8Array, start: number, end: number): boolean {
+  for (let at = start; at < end; at += 1) {
+    if (!isXmlSpace(bytes[at])) return false;
+  }
+  return true;
+}
+
+/**
+ * Checks the content of the formula field element whose start tag is scanned into
+ * `markup`, up to its own end tag (left in `markup`): text that passes the scan, or
+ * exactly one child element whose local name is `f`, with safe attributes and text only
+ * that passes the scan, and nothing but white space around it (see the header).
+ * UNSAFE_CONTENT `unsafe-formula` otherwise.
+ */
+function assertSafeFieldContent(
+  entry: string,
+  bytes: Uint8Array,
+  markup: XmlMarkup,
+  attributes: number[],
+): void {
+  const nameStart = markup.nameStart;
+  const nameEnd = markup.nameEnd;
+  const contentStart = markup.end;
+  const next = nextMarkup(bytes, contentStart);
+  if (next === -1 || !lexes(bytes, next, markup, attributes)) throw notTextOnly(entry);
+  if (closesElement(bytes, markup, nameStart, nameEnd)) {
+    assertSafeFormulaField(entry, bytes.subarray(contentStart, next));
+    return;
+  }
+  const innerChild =
+    markup.kind === 'start' &&
+    isNameIn(bytes, localNameStart(bytes, markup), markup.nameEnd, INNER_FORMULA_ELEMENT) &&
+    isXmlSpaceOnly(bytes, contentStart, next);
+  if (!innerChild) throw notTextOnly(entry);
+  for (let attribute = 0; attribute < markup.attributeCount; attribute += 1) {
+    assertSafeAttribute(entry, bytes, attributes, attribute, null, 'sheet-name');
+  }
+  const innerStart = markup.end;
+  const innerClose = textOnlyContentEnd(entry, bytes, markup);
+  assertSafeFormulaField(entry, bytes.subarray(innerStart, innerClose));
+  const innerEnd = markup.end;
+  const close = nextMarkup(bytes, innerEnd);
+  const closed =
+    close !== -1 &&
+    isXmlSpaceOnly(bytes, innerEnd, close) &&
+    lexes(bytes, close, markup) &&
+    closesElement(bytes, markup, nameStart, nameEnd);
+  if (!closed) throw notTextOnly(entry);
 }
 
 /** Whether attribute name bytes [start, end) declare a namespace: `xmlns` or `xmlns:` and a prefix. */
@@ -463,12 +601,18 @@ function localPartStart(bytes: Uint8Array, start: number, end: number): number {
   return local;
 }
 
-/** Checks attribute `attribute` of the scanned tag: a formula field passes the scan, a macro is empty. */
+/**
+ * Checks attribute `attribute` of the scanned tag: a formula field (a FORMULA_ATTRIBUTES
+ * attribute, or the `elementField` attribute of this element) passes the scan, its
+ * `formula` attribute read with quoted sections as `formulaQuotes`; a macro is empty.
+ */
 function assertSafeAttribute(
   entry: string,
   bytes: Uint8Array,
   attributes: readonly number[],
   attribute: number,
+  elementField: NameSet | null,
+  formulaQuotes: QuotedSection,
 ): void {
   const nameStart = attributeField(attributes, attribute, ATTRIBUTE_NAME_START);
   const nameEnd = attributeField(attributes, attribute, ATTRIBUTE_NAME_END);
@@ -479,22 +623,36 @@ function assertSafeAttribute(
   if (isNameIn(bytes, localStart, nameEnd, MACRO_ATTRIBUTES)) {
     throw unsafeFormula(entry, 'Workbook part assigns a macro');
   }
-  if (isNameIn(bytes, localStart, nameEnd, FORMULA_ATTRIBUTES)) {
-    assertSafeFormulaField(entry, bytes.subarray(valueStart, valueEnd));
+  const field =
+    isNameIn(bytes, localStart, nameEnd, FORMULA_ATTRIBUTES) ||
+    (elementField !== null && isNameIn(bytes, localStart, nameEnd, elementField));
+  if (!field) return;
+  const quoted = isNameIn(bytes, localStart, nameEnd, PIVOT_FORMULA_ATTRIBUTE)
+    ? formulaQuotes
+    : 'sheet-name';
+  assertSafeFormulaField(entry, bytes.subarray(valueStart, valueEnd), quoted);
+}
+
+/** The field attribute of its own the element whose local name is bytes [start, end) carries, or null. */
+function elementFormulaAttribute(bytes: Uint8Array, start: number, end: number): NameSet | null {
+  for (const [element, attribute] of ELEMENT_FORMULA_ATTRIBUTES) {
+    if (isNameIn(bytes, start, end, element)) return attribute;
   }
+  return null;
 }
 
 /**
  * Checks the start or empty tag scanned into `markup` with its `attributes` (see the
  * formula field header): no active element, every field attribute safe, and, for a
- * start tag of a field element, text only up to its own end tag (left in `markup`) that
- * passes the scan, empty for a macro element.
+ * start tag of a field element outside the OMML namespace (`scopes`), its content up to
+ * its own end tag (left in `markup`; assertSafeFieldContent), empty for a macro element.
  */
 function assertSafeElement(
   entry: string,
   bytes: Uint8Array,
   markup: XmlMarkup,
-  attributes: readonly number[],
+  attributes: number[],
+  scopes: NamespaceScopes,
 ): void {
   const localStart = localNameStart(bytes, markup);
   const localEnd = markup.nameEnd;
@@ -504,8 +662,12 @@ function assertSafeElement(
       'Workbook part holds an embedded object, a control or a web publishing item',
     );
   }
+  const elementField = elementFormulaAttribute(bytes, localStart, localEnd);
+  const formulaQuotes: QuotedSection = isNameIn(bytes, localStart, localEnd, PIVOT_FORMULA_ELEMENTS)
+    ? 'field-name'
+    : 'sheet-name';
   for (let attribute = 0; attribute < markup.attributeCount; attribute += 1) {
-    assertSafeAttribute(entry, bytes, attributes, attribute);
+    assertSafeAttribute(entry, bytes, attributes, attribute, elementField, formulaQuotes);
   }
   if (markup.kind !== 'start') return;
   const contentStart = markup.end;
@@ -516,8 +678,109 @@ function assertSafeElement(
     return;
   }
   if (!isNameIn(bytes, localStart, localEnd, FORMULA_ELEMENTS)) return;
-  const close = textOnlyContentEnd(entry, bytes, markup);
-  assertSafeFormulaField(entry, bytes.subarray(contentStart, close));
+  if (inOmmlNamespace(scopes, bytes, markup)) return;
+  assertSafeFieldContent(entry, bytes, markup, attributes);
+}
+
+function createNamespaceScopes(): NamespaceScopes {
+  return { bindings: new Map(), declared: [], open: [], nextElement: 0, broken: false };
+}
+
+/**
+ * Adds the namespace declarations of the start or empty tag scanned into `markup` to
+ * `scopes`; whether it declared any (they must be released with releaseNamespaces).
+ */
+function declareNamespaces(
+  scopes: NamespaceScopes,
+  bytes: Uint8Array,
+  markup: XmlMarkup,
+  attributes: readonly number[],
+): boolean {
+  if (scopes.broken) return false;
+  const element = scopes.nextElement;
+  // Allocated at the first declaration only: most elements declare none.
+  let prefixes: string[] | null = null;
+  for (let attribute = 0; attribute < markup.attributeCount; attribute += 1) {
+    const nameStart = attributeField(attributes, attribute, ATTRIBUTE_NAME_START);
+    const nameEnd = attributeField(attributes, attribute, ATTRIBUTE_NAME_END);
+    if (!isNamespaceDeclaration(bytes, nameStart, nameEnd)) continue;
+    const key =
+      nameEnd === nameStart + NAMESPACE_DECLARATION.length
+        ? DEFAULT_NAMESPACE_KEY
+        : NAME_DECODER.decode(
+            bytes.subarray(nameStart + NAMESPACE_DECLARATION_PREFIX.length, nameEnd),
+          );
+    const omml = bytesEqualAscii(
+      bytes,
+      attributeField(attributes, attribute, ATTRIBUTE_VALUE_START),
+      attributeField(attributes, attribute, ATTRIBUTE_VALUE_END),
+      OMML_NAMESPACE,
+    );
+    const stack = scopes.bindings.get(key) ?? [];
+    scopes.bindings.set(key, stack);
+    const innermost = stack.at(-1);
+    if (innermost !== undefined && innermost.element === element) {
+      innermost.omml = innermost.omml && omml;
+      continue;
+    }
+    stack.push({ element, omml });
+    prefixes ??= [];
+    prefixes.push(key);
+  }
+  if (prefixes === null) return false;
+  scopes.nextElement += 1;
+  scopes.declared.push(prefixes);
+  return true;
+}
+
+/** Removes the bindings of the innermost declaring element from `scopes`. */
+function releaseNamespaces(scopes: NamespaceScopes): void {
+  const prefixes = scopes.declared.pop() ?? [];
+  for (const key of prefixes) scopes.bindings.get(key)?.pop();
+}
+
+/** Makes the start tag at bytes [nameStart, nameEnd) the innermost open element. */
+function openElement(
+  scopes: NamespaceScopes,
+  nameStart: number,
+  nameEnd: number,
+  declared: boolean,
+): void {
+  if (scopes.broken) return;
+  scopes.open.push(nameStart, nameEnd, declared ? DECLARED : NOT_DECLARED);
+}
+
+/**
+ * Closes the innermost open element with the end tag scanned into `markup`, releasing
+ * its bindings; when the end tag names another element (or none is open), no binding
+ * counts from there on.
+ */
+function closeElement(scopes: NamespaceScopes, bytes: Uint8Array, markup: XmlMarkup): void {
+  if (scopes.broken) return;
+  const declared = scopes.open.pop();
+  const nameEnd = scopes.open.pop();
+  const nameStart = scopes.open.pop();
+  if (
+    declared === undefined ||
+    nameEnd === undefined ||
+    nameStart === undefined ||
+    !closesElement(bytes, markup, nameStart, nameEnd)
+  ) {
+    scopes.broken = true;
+    return;
+  }
+  if (declared === DECLARED) releaseNamespaces(scopes);
+}
+
+/** Whether the element scanned into `markup` is in OMML_NAMESPACE by the bindings of `scopes`. */
+function inOmmlNamespace(scopes: NamespaceScopes, bytes: Uint8Array, markup: XmlMarkup): boolean {
+  if (scopes.broken) return false;
+  const localStart = localNameStart(bytes, markup);
+  const key =
+    localStart === markup.nameStart
+      ? DEFAULT_NAMESPACE_KEY
+      : NAME_DECODER.decode(bytes.subarray(markup.nameStart, localStart - 1));
+  return scopes.bindings.get(key)?.at(-1)?.omml === true;
 }
 
 /** A byte inside a loose element name: anything above a space but `<`, `>`, `/`, `=` and quotes. */
@@ -552,10 +815,11 @@ function strictNameEnd(bytes: Uint8Array, start: number): number {
 
 /**
  * After markup the strict lexer refuses at `from`, refuses the part when any '<' from
- * there on could open a field, macro or active element (the strict-name head of its
- * loose local name, which a reader that stops at U+0080 or a non-ASCII letter reads, is
- * one), or any run of name bytes is a field or macro attribute name. Linear: every loose
- * name stops before the next '<', every run of name bytes is read once.
+ * there on could open a field, macro or active element or an element with a field
+ * attribute of its own (the strict-name head of its loose local name, which a reader
+ * that stops at U+0080 or a non-ASCII letter reads, is one), or any run of name bytes is
+ * a field or macro attribute name. Linear: every loose name stops before the next '<',
+ * every run of name bytes is read once.
  */
 function assertNoFieldAfter(entry: string, bytes: Uint8Array, from: number): void {
   for (let at = from; at !== -1; at = nextMarkup(bytes, at + 1)) {
@@ -566,6 +830,7 @@ function assertNoFieldAfter(entry: string, bytes: Uint8Array, from: number): voi
     }
     if (
       isNameIn(bytes, localStart, headEnd, FORMULA_ELEMENTS) ||
+      isNameIn(bytes, localStart, headEnd, FIELD_ATTRIBUTE_ELEMENTS) ||
       isNameIn(bytes, localStart, headEnd, MACRO_ELEMENTS)
     ) {
       throw unsafeFormula(entry, 'Workbook part holds a formula the strict lexer cannot read');
@@ -592,18 +857,40 @@ function assertNoFieldAfter(entry: string, bytes: Uint8Array, from: number): voi
  * Throws SpreadsheetFileError UNSAFE_CONTENT `{ reason, entry }` when XML part `entry`
  * holds a formula field that fails the scan, a macro assignment (`unsafe-formula`) or an
  * active element (`unsafe-part`), or, past markup the strict lexer refuses, anything
- * that could be one (see the formula field header). Every markup of the part is read.
+ * that could be one (see the formula field header). Every markup of the part is read,
+ * the namespace declarations in scope kept on the way.
  */
 function assertSafeFields(entry: string, bytes: Uint8Array): void {
   const markup = createMarkup();
   const attributes: number[] = [];
+  const scopes = createNamespaceScopes();
   for (let at = nextMarkup(bytes, 0); at !== -1; at = nextMarkup(bytes, markup.end)) {
     if (!lexes(bytes, at, markup, attributes)) {
       assertNoFieldAfter(entry, bytes, at);
       return;
     }
-    if (markup.kind === 'start' || markup.kind === 'empty') {
-      assertSafeElement(entry, bytes, markup, attributes);
+    const kind = markup.kind;
+    switch (kind) {
+      case 'start':
+      case 'empty': {
+        const nameStart = markup.nameStart;
+        const nameEnd = markup.nameEnd;
+        const declared = declareNamespaces(scopes, bytes, markup, attributes);
+        assertSafeElement(entry, bytes, markup, attributes, scopes);
+        // A field or macro element was read through its end tag, now in `markup`.
+        if (markup.kind === 'start') openElement(scopes, nameStart, nameEnd, declared);
+        else if (declared) releaseNamespaces(scopes);
+        break;
+      }
+      case 'end':
+        closeElement(scopes, bytes, markup);
+        break;
+      case 'opaque':
+        break;
+      default: {
+        const _exhaustive: never = kind;
+        throw new Error(`Unhandled markup kind: ${String(_exhaustive)}`);
+      }
     }
   }
 }

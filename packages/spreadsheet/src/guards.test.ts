@@ -1504,6 +1504,59 @@ function drawingWith(shape: string): string {
   );
 }
 
+const MS_RICH_DATA_REL = 'http://schemas.microsoft.com/office/2017/06/relationships';
+const RICH_DATA_NS = 'http://schemas.microsoft.com/office/spreadsheetml/2017/richdata';
+const WEB_IMAGE_NS = 'http://schemas.microsoft.com/office/spreadsheetml/2020/richdatawebimage';
+const RICH_VALUE_CONTENT_TYPE = 'application/vnd.ms-excel.rdrichvalue';
+const CONTENT_TYPES_PART = '[Content_Types].xml';
+
+/**
+ * The workbook a rich-data web image cell is stored in (cell A1 shows a picture Excel
+ * loads from its address), the rich-data parts in `xl/<folder>`.
+ */
+function richDataWebImageBook(folder: string): Buffer {
+  const dir = `xl/${folder}`;
+  const contentTypes =
+    `${XML_DECLARATION}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+    '<Default Extension="xml" ContentType="application/xml"/>' +
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+    '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+    '<Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>' +
+    `<Override PartName="/${dir}/rdrichvalue.xml" ContentType="${RICH_VALUE_CONTENT_TYPE}+xml"/>` +
+    `<Override PartName="/${dir}/rdrichvaluestructure.xml" ContentType="${RICH_VALUE_CONTENT_TYPE}structure+xml"/>` +
+    `<Override PartName="/${dir}/rdRichValueWebImage.xml" ContentType="${RICH_VALUE_CONTENT_TYPE}webimage+xml"/></Types>`;
+  const external = ' TargetMode="External"/>';
+  return workbookWith(
+    [
+      SHEET_RELATIONSHIP,
+      [`${OFFICE_REL}/sheetMetadata`, 'metadata.xml'],
+      [`${MS_RICH_DATA_REL}/rdRichValue`, `${folder}/rdrichvalue.xml`],
+      [`${MS_RICH_DATA_REL}/rdRichValueStructure`, `${folder}/rdrichvaluestructure.xml`],
+      [
+        'http://schemas.microsoft.com/office/2020/07/relationships/rdRichValueWebImage',
+        `${folder}/rdRichValueWebImage.xml`,
+      ],
+    ],
+    {
+      [CONTENT_TYPES_PART]: contentTypes,
+      [SHEET_PART]: sheetWithAfter('').replace('<c r="A1">', '<c r="A1" t="e" vm="1">'),
+      'xl/metadata.xml':
+        `${XML_DECLARATION}<metadata xmlns="${SPREADSHEET_NS}" xmlns:xlrd="${RICH_DATA_NS}">` +
+        '<metadataTypes count="1"><metadataType name="XLRICHVALUE" minSupportedVersion="120000"/></metadataTypes>' +
+        '<futureMetadata name="XLRICHVALUE" count="1"><bk><extLst><ext uri="{3e2802c4-a4d2-4d8b-9148-e3be6c30e623}"><xlrd:rvb i="0"/></ext></extLst></bk></futureMetadata>' +
+        '<valueMetadata count="1"><bk><rc t="1" v="0"/></bk></valueMetadata></metadata>',
+      [`${dir}/rdrichvaluestructure.xml`]: `${XML_DECLARATION}<rvStructures xmlns="${RICH_DATA_NS}" count="1"><s t="_webimage"><k n="WebImageIdentifier" t="i"/><k n="CalcOrigin" t="i"/></s></rvStructures>`,
+      [`${dir}/rdrichvalue.xml`]: `${XML_DECLARATION}<rvData xmlns="${RICH_DATA_NS}" count="1"><rv s="0"><v>0</v><v>5</v></rv></rvData>`,
+      [`${dir}/rdRichValueWebImage.xml`]: `${XML_DECLARATION}<webImagesSrd xmlns="${WEB_IMAGE_NS}" xmlns:r="${OFFICE_REL}"><webImageSrd><address r:id="rId1"/><moreImagesAddress r:id="rId2"/></webImageSrd></webImagesSrd>`,
+      [`${dir}/_rels/rdRichValueWebImage.xml.rels`]: relsXml([
+        [HYPERLINK_REL, 'https://evil.example/pixel.png?who=opened'],
+        [HYPERLINK_REL, 'https://evil.example/more'],
+      ]).replaceAll('"/>', `"${external}`),
+    },
+  );
+}
+
 // Every field Excel evaluates as a formula, in every XML part, and the elements of
 // embedded objects, controls and web publishing, wherever they stand.
 describe('upload gate: formula fields and active elements of every part', () => {
@@ -1659,6 +1712,32 @@ describe('upload gate: formula fields and active elements of every part', () => 
       ),
     });
     expectGateEntry(file, 'UNSAFE_CONTENT', UNSAFE_CONTENT_REASONS.UNSAFE_PART, imageRels);
+  });
+
+  // The whole rich-data web image Excel writes, in its own folder and moved beside the
+  // worksheets: the hyperlink exception follows the part's content, not its path.
+  it.each(['richData', 'worksheets'])(
+    'refuses a whole rich-data web image package stored in xl/%s as UNSAFE_CONTENT unsafe-part',
+    (folder) => {
+      const imageRels = `xl/${folder}/_rels/rdRichValueWebImage.xml.rels`;
+      expectGateEntry(
+        richDataWebImageBook(folder),
+        'UNSAFE_CONTENT',
+        UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+        imageRels,
+      );
+    },
+  );
+
+  it('refuses XML maps bound to a remote file as UNSAFE_CONTENT unsafe-part', () => {
+    const file = workbookWith([SHEET_RELATIONSHIP, [`${OFFICE_REL}/xmlMaps`, 'xmlMaps.xml']], {
+      'xl/xmlMaps.xml':
+        `${XML_DECLARATION}<MapInfo xmlns="${SPREADSHEET_NS}" SelectionNamespaces=""><Schema ID="Schema1">` +
+        '<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"><xsd:import namespace="urn:x" schemaLocation="https://evil.example/s.xsd"/>' +
+        '<xsd:element name="root"/></xsd:schema></Schema>' +
+        '<Map ID="1" Name="root_Map" RootElement="root" SchemaID="Schema1"><DataBinding FileBinding="true" FileBindingName="https://evil.example/data.xml" DataBindingLoadMode="1"/></Map></MapInfo>',
+    });
+    expectGateEntry(file, 'UNSAFE_CONTENT', UNSAFE_CONTENT_REASONS.UNSAFE_PART, WORKBOOK_RELS_PART);
   });
 
   it('refuses a picture whose click opens an external hyperlink of its drawing', () => {

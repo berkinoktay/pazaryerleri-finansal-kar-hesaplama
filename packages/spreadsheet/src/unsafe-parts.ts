@@ -9,13 +9,21 @@ import {
 } from './patch/calc-chain';
 import { UNSAFE_CONTENT_REASONS } from './patch/reasons';
 import { foldAsciiCase, unsafeContentError } from './patch/shared';
-import { localNameIs, type XmlMarkup } from './patch/xml-lexer';
+import {
+  createMarkup,
+  localNameIs,
+  nextMarkup,
+  scanMarkup,
+  XmlLexError,
+  type XmlMarkup,
+} from './patch/xml-lexer';
 import { CONTENT_TYPES_PART, UNSAFE_PART_NAMES, UNSAFE_PART_PREFIXES } from './workbook-parts';
 
 // Active package parts: a macro project, a macro, international macro or dialog sheet,
 // an embedded object or package, an ActiveX control, an external link, a data
 // connection or query table, an Office web add-in or its task pane, a custom ribbon
-// (customUI) or attached toolbars, and any relationship to content outside the package.
+// (customUI) or attached toolbars, XML maps (which bind remote data), and any
+// relationship to content outside the package.
 // The byte-preserving export hands every part of a stored upload unchanged to whoever
 // exports it, so the gate refuses such a part wherever it sits in the archive, found the
 // way Excel finds it:
@@ -28,7 +36,10 @@ import { CONTENT_TYPES_PART, UNSAFE_PART_NAMES, UNSAFE_PART_PREFIXES } from './w
 //     a web image), except a hyperlink of a worksheet to an http, https or mailto
 //     address, which only opens when the reader clicks the cell; and an internal Target
 //     that is a URI with a scheme, a drive letter, a network path or holds a backslash
-//     leaves the package all the same;
+//     leaves the package all the same. Whose relationships part it is is decided by
+//     content, not by path: `X/_rels/Y.rels` belongs to `X/Y`, and it is a worksheet's
+//     only when `X/Y` is a kept XML part whose root element's local name is `worksheet`
+//     and no other entry has its name in another ASCII case (sourceKind);
 //   - by its name, a second line only (assertNoUnsafePartNames): a relationship Target
 //     is free text, so `xl/x/a.xml` can be an external link.
 // Each part is content-scanned, then walked with the strict lexer the calcChain cut
@@ -48,6 +59,7 @@ export const UNSAFE_CONTENT_TYPE_MARKERS: readonly string[] = [
   'querytable+xml',
   'webextension',
   'customui',
+  'xmlmaps',
 ];
 /** ASCII-folded last segments of the relationship types of active parts, compared whole. */
 export const UNSAFE_RELATIONSHIP_TYPE_ENDINGS: readonly string[] = [
@@ -65,7 +77,11 @@ export const UNSAFE_RELATIONSHIP_TYPE_ENDINGS: readonly string[] = [
   'webextensiontaskpanes',
   'extensibility',
   'attachedtoolbars',
+  'xmlmaps',
 ];
+
+/** What a relationships part belongs to: a worksheet, or anything else (the package included). */
+export type RelationshipsSourceKind = 'worksheet' | 'other';
 
 const UNSAFE_ENDINGS: ReadonlySet<string> = new Set(UNSAFE_RELATIONSHIP_TYPE_ENDINGS);
 // Every relationships part ends with this; an XML part's relationships part with the second.
@@ -81,8 +97,11 @@ const TARGET_MODE_ATTRIBUTE = 'TargetMode';
 const INTERNAL_TARGET_MODE = 'Internal';
 // The ASCII-folded last Type segment of the one relationship that may point outside.
 const HYPERLINK_TYPE_ENDING = 'hyperlink';
-// The relationships part of a worksheet: this folder, a name without '/', XML_RELS_SUFFIX.
-const WORKSHEET_RELS_FOLDER = 'xl/worksheets/_rels/';
+// A relationships part `X/_rels/Y.rels` belongs to the part `X/Y`.
+const PATH_SEPARATOR = '/';
+const RELS_FOLDER = '_rels/';
+// The local name of a worksheet part's root element.
+const WORKSHEET_ROOT = 'worksheet';
 // The ASCII-folded starts of the only targets an external worksheet hyperlink may have.
 const HYPERLINK_TARGET_STARTS: readonly string[] = ['http://', 'https://', 'mailto:'];
 const DEFAULT = 'Default';
@@ -136,12 +155,60 @@ export function assertSafeRelationshipType(type: string, entry: string): void {
   throw unsafePartError(entry, 'Workbook declares a relationship to an active part');
 }
 
-/** Whether `entry`, ASCII-folded, is `xl/worksheets/_rels/<name>.xml.rels`, `<name>` holding no '/'. */
-function isWorksheetRelationshipsPart(entry: string): boolean {
-  const folded = foldAsciiCase(entry);
-  if (!folded.startsWith(WORKSHEET_RELS_FOLDER) || !folded.endsWith(XML_RELS_SUFFIX)) return false;
-  const name = folded.slice(WORKSHEET_RELS_FOLDER.length, -XML_RELS_SUFFIX.length);
-  return name.length > 0 && !name.includes(TYPE_SEGMENT_SEPARATOR);
+/**
+ * The part relationships part `entry` belongs to: `X/Y` for `X/_rels/Y.rels` (X may be
+ * empty, Y may not). Null for any other name, the root relationships part `_rels/.rels`
+ * included (it belongs to the package).
+ */
+function relationshipsSource(entry: string): string | null {
+  if (!entry.endsWith(RELS_SUFFIX)) return null;
+  const fileStart = entry.lastIndexOf(PATH_SEPARATOR) + 1;
+  const folderStart = fileStart - RELS_FOLDER.length;
+  const source = entry.slice(fileStart, entry.length - RELS_SUFFIX.length);
+  const inRelsFolder =
+    folderStart >= 0 &&
+    entry.startsWith(RELS_FOLDER, folderStart) &&
+    (folderStart === 0 || entry.charAt(folderStart - 1) === PATH_SEPARATOR);
+  if (!inRelsFolder || source.length === 0) return null;
+  return entry.slice(0, folderStart) + source;
+}
+
+/**
+ * Whether the root element of XML part `bytes`, its first element past any declaration,
+ * comment or processing instruction, has the local name `worksheet`. False when the
+ * strict lexer refuses the markup before it. Reads up to the root's start tag only.
+ */
+function hasWorksheetRoot(bytes: Uint8Array): boolean {
+  const markup = createMarkup();
+  try {
+    for (let at = nextMarkup(bytes, 0); at !== -1; at = nextMarkup(bytes, markup.end)) {
+      scanMarkup(bytes, at, markup);
+      if (markup.kind === 'start' || markup.kind === 'empty') {
+        return localNameIs(bytes, markup, WORKSHEET_ROOT);
+      }
+      if (markup.kind === 'end') return false;
+    }
+  } catch (error) {
+    if (error instanceof XmlLexError) return false;
+    throw error;
+  }
+  return false;
+}
+
+/**
+ * What relationships part `entry` belongs to (see the header): `worksheet` when its
+ * source part is a kept XML part (`contents`) whose root is a worksheet and no other
+ * entry's ASCII-folded name (`foldedNameCounts`) is the source's; `other` otherwise.
+ */
+function sourceKind(
+  entry: string,
+  contents: ReadonlyMap<string, Uint8Array>,
+  foldedNameCounts: ReadonlyMap<string, number>,
+): RelationshipsSourceKind {
+  const source = relationshipsSource(entry);
+  if (source === null || foldedNameCounts.get(foldAsciiCase(source)) !== 1) return 'other';
+  const bytes = contents.get(source);
+  return bytes !== undefined && hasWorksheetRoot(bytes) ? 'worksheet' : 'other';
 }
 
 function isAsciiLetter(code: number): boolean {
@@ -188,16 +255,14 @@ function leavesPackage(target: string): boolean {
   );
 }
 
-/** Whether an external relationship of `type` in `entry` to `target` is a worksheet hyperlink to a web or mail address. */
+/** Whether an external relationship of `type` in a relationships part of `source` to `target` is a worksheet hyperlink to a web or mail address. */
 function isWorksheetWebHyperlink(
   type: string | null,
-  entry: string,
+  source: RelationshipsSourceKind,
   target: string | null,
 ): boolean {
-  if (type === null || target === null) return false;
-  if (foldedLastSegment(type) !== HYPERLINK_TYPE_ENDING || !isWorksheetRelationshipsPart(entry)) {
-    return false;
-  }
+  if (type === null || target === null || source !== 'worksheet') return false;
+  if (foldedLastSegment(type) !== HYPERLINK_TYPE_ENDING) return false;
   const folded = foldAsciiCase(target);
   return HYPERLINK_TARGET_STARTS.some((start) => folded.startsWith(start));
 }
@@ -223,10 +288,10 @@ function relationshipTarget(
 /**
  * Throws SpreadsheetFileError UNSAFE_CONTENT `{ reason: 'unsafe-part', entry }` when the
  * Relationship scanned into `markup`, of `type` (null without one) and read from
- * relationships part `entry`, reaches outside the package:
+ * relationships part `entry`, which belongs to a part of `source` kind (sourceKind),
+ * reaches outside the package:
  *   - it has a TargetMode that is not exactly `Internal`, unless its type's last '/'
- *     segment, ASCII-folded, is exactly `hyperlink`, `entry` is a worksheet's
- *     relationships part (`xl/worksheets/_rels/<name>.xml.rels`, ASCII-folded) and its
+ *     segment, ASCII-folded, is exactly `hyperlink`, `source` is `worksheet` and its
  *     Target, ASCII-folded, starts with `http://`, `https://` or `mailto:`;
  *   - or it is internal and its decoded Target, trimmed of controls and spaces, starts
  *     with a URI scheme or a drive letter, starts with `//`, or holds a backslash.
@@ -239,11 +304,12 @@ export function assertSafeTarget(
   attributes: readonly number[],
   type: string | null,
   entry: string,
+  source: RelationshipsSourceKind,
 ): void {
   const mode = literalAttributeText(bytes, markup, attributes, TARGET_MODE_ATTRIBUTE, entry);
   const target = relationshipTarget(bytes, markup, attributes, entry);
   if (mode !== null && mode !== INTERNAL_TARGET_MODE) {
-    if (isWorksheetWebHyperlink(type, entry, target)) return;
+    if (isWorksheetWebHyperlink(type, source, target)) return;
     throw unsafePartError(entry, 'Workbook declares a relationship to external content');
   }
   if (target !== null && leavesPackage(target)) {
@@ -315,12 +381,16 @@ function contentTypeSelector(bytes: Uint8Array): ChildSelector {
 }
 
 /** Refuses a Relationship whose Type names an active part, or whose target reaches outside the package. */
-function relationshipSelector(bytes: Uint8Array, entry: string): ChildSelector {
+function relationshipSelector(
+  bytes: Uint8Array,
+  entry: string,
+  source: RelationshipsSourceKind,
+): ChildSelector {
   return (markup, attributes) => {
     if (!localNameIs(bytes, markup, RELATIONSHIP)) return false;
     const type = literalAttributeText(bytes, markup, attributes, TYPE_ATTRIBUTE, entry);
     if (type !== null) assertSafeRelationshipType(type, entry);
-    assertSafeTarget(bytes, markup, attributes, type, entry);
+    assertSafeTarget(bytes, markup, attributes, type, entry, source);
     return false;
   };
 }
@@ -337,7 +407,7 @@ function walkPart(entry: string, bytes: Uint8Array, select: ChildSelector): void
  * (assertWalkedSpelling), no Default or Override of the content types part whose
  * ContentType holds a marker, and no Relationship of a kept relationships part (every
  * kept entry named `.rels`) whose Type ends in an unsafe segment or whose target reaches
- * outside the package (assertSafeTarget).
+ * outside the package (assertSafeTarget, told what the part belongs to by sourceKind).
  *
  * Throws SpreadsheetFileError: UNSAFE_CONTENT `{ reason: 'unsafe-part', entry }` for an
  * unsafe declaration; UNSAFE_CONTENT when the content scan refuses a part it walks;
@@ -352,12 +422,19 @@ export function assertNoUnsafePackageParts(
   names: Iterable<string>,
   contents: ReadonlyMap<string, Uint8Array>,
 ): void {
-  for (const name of names) assertWalkedSpelling(name);
+  const foldedNameCounts = new Map<string, number>();
+  for (const name of names) {
+    assertWalkedSpelling(name);
+    const folded = foldAsciiCase(name);
+    foldedNameCounts.set(folded, (foldedNameCounts.get(folded) ?? 0) + 1);
+  }
   const contentTypes = contents.get(CONTENT_TYPES_PART);
   if (contentTypes !== undefined) {
     walkPart(CONTENT_TYPES_PART, contentTypes, contentTypeSelector(contentTypes));
   }
   for (const [name, bytes] of contents) {
-    if (isRelationshipsPartName(name)) walkPart(name, bytes, relationshipSelector(bytes, name));
+    if (!isRelationshipsPartName(name)) continue;
+    const source = sourceKind(name, contents, foldedNameCounts);
+    walkPart(name, bytes, relationshipSelector(bytes, name, source));
   }
 }

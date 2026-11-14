@@ -37,9 +37,16 @@ const IMAGE_REL = `${OFFICE_REL}/image`;
 const OFFICE_DOCUMENT_RELATIONSHIP = `<Relationship Id="rId1" Type="${OFFICE_REL}/officeDocument" Target="xl/workbook.xml"/>`;
 // The web address an external hyperlink of a worksheet may have.
 const WEB_TARGET = 'https://example.com/a';
+const SPREADSHEET_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+const WEB_IMAGE_NS = 'http://schemas.microsoft.com/office/spreadsheetml/2020/richdatawebimage';
+// A rich-data web image part: its address is a relationship of its own rels part.
+const WEB_IMAGE_XML = `${XML_DECLARATION}<webImagesSrd xmlns="${WEB_IMAGE_NS}" xmlns:r="${OFFICE_REL}"><webImageSrd><address r:id="rId9"/></webImageSrd></webImagesSrd>`;
 
 export const CONTENT_TYPES_PART = '[Content_Types].xml';
 export const WORKBOOK_RELS_PART = 'xl/_rels/workbook.xml.rels';
+/** The worksheet part of the one-sheet workbook, and a worksheet to put there or elsewhere. */
+export const SHEET_PART = 'xl/worksheets/sheet1.xml';
+export const WORKSHEET_XML = `${XML_DECLARATION}<worksheet xmlns="${SPREADSHEET_NS}"><sheetData/></worksheet>`;
 const ROOT_RELS_PART = '_rels/.rels';
 const SHEET_RELS_PART = 'xl/worksheets/_rels/sheet1.xml.rels';
 const DRAWING_RELS_PART = 'xl/drawings/_rels/drawing1.xml.rels';
@@ -344,6 +351,44 @@ export const UNSAFE_PART_CASES: readonly PackagePartCase[] = [
     label: 'attached toolbars named by the workbook rels',
     entries: workbookRelationship(ATTACHED_TOOLBARS_REL),
   },
+  {
+    label: 'XML maps named by the workbook rels',
+    entries: workbookRelationship(`${OFFICE_REL}/xmlMaps`),
+  },
+  {
+    label: 'an Override whose content type names XML maps',
+    entries: contentTypes(
+      WORKBOOK_CONTENT_TYPE,
+      override(`${SPREADSHEETML_CONTENT_TYPE}.xmlMaps+xml`),
+    ),
+  },
+  {
+    label:
+      'an external https hyperlink in the rels of a rich-data web image moved into xl/worksheets',
+    entries: {
+      'xl/worksheets/rdRichValueWebImage.xml': WEB_IMAGE_XML,
+      'xl/worksheets/_rels/rdRichValueWebImage.xml.rels': relationshipsXml(
+        relationship(HYPERLINK_REL, 'https://evil.example/pixel.png', EXTERNAL_TARGET_MODE),
+      ),
+    },
+  },
+  {
+    label: 'an external https hyperlink in worksheet rels whose worksheet the package lacks',
+    entries: {
+      'xl/worksheets/_rels/sheet9.xml.rels': relationshipsXml(
+        relationship(HYPERLINK_REL, WEB_TARGET, EXTERNAL_TARGET_MODE),
+      ),
+    },
+  },
+  {
+    label: 'an external https hyperlink of a worksheet another entry names in another ASCII case',
+    entries: {
+      'xl/worksheets/SHEET1.xml': WEB_IMAGE_XML,
+      [SHEET_RELS_PART]: relationshipsXml(
+        relationship(HYPERLINK_REL, WEB_TARGET, EXTERNAL_TARGET_MODE),
+      ),
+    },
+  },
   ...[
     'file://evil.example/share/x.xlsx',
     '\\\\evil.example\\share\\payload.exe',
@@ -575,5 +620,14 @@ export const SAFE_PART_CASES: readonly PackagePartCase[] = [
   {
     label: 'an internal image Target holding a colon after a path segment',
     entries: drawingImage('../media/a:b.png'),
+  },
+  {
+    label: 'an external https hyperlink of a worksheet stored outside xl/worksheets',
+    entries: {
+      'xl/x/s.xml': WORKSHEET_XML,
+      'xl/x/_rels/s.xml.rels': relationshipsXml(
+        relationship(HYPERLINK_REL, WEB_TARGET, EXTERNAL_TARGET_MODE),
+      ),
+    },
   },
 ];

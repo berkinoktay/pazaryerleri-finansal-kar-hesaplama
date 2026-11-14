@@ -8,9 +8,11 @@ import {
   contentTypesXml,
   PACKAGE_PART_CASES,
   SAFE_PART_CASES,
+  SHEET_PART,
   UNSAFE_PART_CASES,
   WORKBOOK_RELS_PART,
   workbookRels,
+  WORKSHEET_XML,
 } from '../tests/helpers/package-parts';
 import { entryContentKind } from './content-scan';
 import { UNSAFE_CONTENT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
@@ -28,13 +30,14 @@ function isKept(content: Uint8Array): boolean {
 }
 
 /**
- * The type rule on a minimal package (content types and workbook rels) plus `entries`:
- * the name of every entry, the content of those the gate's stream keeps.
+ * The type rule on a minimal package (content types, workbook rels and the worksheet)
+ * plus `entries`: the name of every entry, the content of those the gate's stream keeps.
  */
 function checkEntries(entries: Readonly<Record<string, string>>): void {
   const all: Record<string, string> = {
     [CONTENT_TYPES_PART]: contentTypesXml(),
     [WORKBOOK_RELS_PART]: workbookRels(),
+    [SHEET_PART]: WORKSHEET_XML,
     ...entries,
   };
   const contents = new Map<string, Uint8Array>();
@@ -89,6 +92,7 @@ describe('assertNoUnsafePackageParts', () => {
       'querytable+xml',
       'webextension',
       'customui',
+      'xmlmaps',
     ]);
     expect(UNSAFE_RELATIONSHIP_TYPE_ENDINGS).toEqual([
       'vbaproject',
@@ -105,6 +109,7 @@ describe('assertNoUnsafePackageParts', () => {
       'webextensiontaskpanes',
       'extensibility',
       'attachedtoolbars',
+      'xmlmaps',
     ]);
   });
 });

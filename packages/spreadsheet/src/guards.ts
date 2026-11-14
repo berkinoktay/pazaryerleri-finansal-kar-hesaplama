@@ -21,6 +21,7 @@ import {
   assertNoUnsafePartNames,
   assertSafeRelationshipType,
   assertSafeTarget,
+  type RelationshipsSourceKind,
 } from './unsafe-parts';
 import {
   assertWorkbookRelsWithinCap,
@@ -82,6 +83,8 @@ const TARGET_MODE_ATTRIBUTE = 'TargetMode';
 const INTERNAL_TARGET_MODE = 'Internal';
 // A root relationship Target is relative to the package root; one leading '/' is the same.
 const PACKAGE_ROOT_PREFIX = '/';
+// The root relationships part belongs to the package, never to a worksheet.
+const ROOT_RELS_SOURCE: RelationshipsSourceKind = 'other';
 
 export interface GuardOpts {
   rowCap: number;
@@ -598,7 +601,7 @@ function isWorkbookRelationship(
   if (!localNameIs(bytes, markup, RELATIONSHIP)) return false;
   const type = literalAttributeText(bytes, markup, attributes, TYPE_ATTRIBUTE, ROOT_RELS_PART);
   if (type === null) {
-    assertSafeTarget(bytes, markup, attributes, type, ROOT_RELS_PART);
+    assertSafeTarget(bytes, markup, attributes, type, ROOT_RELS_PART, ROOT_RELS_SOURCE);
     return false;
   }
   assertSafeRelationshipType(type, ROOT_RELS_PART);
@@ -615,7 +618,7 @@ function isWorkbookRelationship(
       'Root relationships part has an officeDocument Type in another ASCII case or with spaces',
     );
   }
-  assertSafeTarget(bytes, markup, attributes, type, ROOT_RELS_PART);
+  assertSafeTarget(bytes, markup, attributes, type, ROOT_RELS_PART, ROOT_RELS_SOURCE);
   return false;
 }
 
