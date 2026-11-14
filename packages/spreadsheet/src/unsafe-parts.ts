@@ -1,4 +1,10 @@
-import { assertSafeXmlPart, decodeXmlText, type ExternalHyperlinkIds } from './content-scan';
+import {
+  assertSafeXmlPart,
+  decodeXmlText,
+  opensLooseElement,
+  type ExternalHyperlinkIds,
+  type WorksheetHyperlinkIds,
+} from './content-scan';
 import type { SpreadsheetFileError } from './errors';
 import {
   attributeValueBytes,
@@ -7,11 +13,19 @@ import {
   packagePartError,
   type ChildSelector,
 } from './patch/calc-chain';
+import { SPREADSHEET_MAIN_NAMESPACES } from './patch/limits';
 import { UNSAFE_CONTENT_REASONS } from './patch/reasons';
-import { foldAsciiCase, unsafeContentError } from './patch/shared';
+import { bytesEqualAt, foldAsciiCase, unsafeContentError } from './patch/shared';
 import {
+  ATTRIBUTE_NAME_END,
+  ATTRIBUTE_NAME_START,
+  ATTRIBUTE_VALUE_END,
+  ATTRIBUTE_VALUE_START,
+  attributeField,
+  bytesEqualAscii,
   createMarkup,
   localNameIs,
+  localNameStart,
   nextMarkup,
   scanMarkup,
   XmlLexError,
@@ -29,9 +43,17 @@ import { CONTENT_TYPES_PART, UNSAFE_PART_NAMES, UNSAFE_PART_PREFIXES } from './w
 // exports it, so the gate refuses such a part wherever it sits in the archive, found the
 // way Excel finds it:
 //   - by its content type: every Default and Override of the content types part;
-//   - by its relationship type: every Relationship of every relationships part (every
-//     entry whose ASCII-folded name ends with .rels, whatever the part it belongs to:
-//     `chart1.bin.rels` is followed like `chart1.xml.rels`);
+//   - by its relationship type: every Relationship of every relationships part, chosen
+//     by its content and by its name: every kept XML part whose root element is
+//     `Relationships` in the package relationships namespace (or, when the strict lexer
+//     cannot read its markup up to its root, that holds any element a lenient reader
+//     names `Relationships`), whatever its name (a reader that folds part
+//     names in Unicode takes `sheet1.xml.rel` and a long s for `sheet1.xml.rels`), and
+//     every entry whose ASCII-folded name ends with .rels, whatever the part it belongs
+//     to (`chart1.bin.rels` is followed like `chart1.xml.rels`). A digital signature
+//     relationship (a Type that holds `/digital-signature/`: origin, signature,
+//     certificate) is refused too: verifying a signature on open may fetch the
+//     certificate's revocation and issuer URLs;
 //   - by its target (assertSafeTarget): a relationship whose TargetMode is not
 //     `Internal` loads content from outside the package (a linked picture, an OLE link,
 //     a web image), except a hyperlink of a worksheet to an http, https or mailto
@@ -41,16 +63,18 @@ import { CONTENT_TYPES_PART, UNSAFE_PART_NAMES, UNSAFE_PART_PREFIXES } from './w
 //     and line breaks a URL parser removes) leaves the package all the same. Whose
 //     relationships part it is is decided by content, not by path: `X/_rels/Y.rels`
 //     belongs to `X/Y`, and it is a worksheet's only when `X/Y` is a kept XML part whose
-//     root element's local name is `worksheet` and no other entry has its name in
-//     another ASCII case (worksheetSource);
+//     root element is `worksheet` in a SpreadsheetML main namespace (transitional or
+//     strict, bound by a declaration on the root itself) and no other entry has its name
+//     in another ASCII case (worksheetSource);
 //   - by its name, a second line only (assertNoUnsafePartNames): a relationship Target
 //     is free text, so `xl/x/a.xml` can be an external link.
 // Each part is content-scanned, then walked with the strict lexer the calcChain cut
 // uses (cutRootChildren), every markup of it; nothing reaches a DOM, and each walk is
 // one linear pass over bytes the decompression cap already bounds. The walk of a
 // worksheet's relationships part also reads which relationship ids name an external
-// hyperlink and nothing else (ExternalHyperlinkIds): for a hyperlink with one of them,
-// the content scan takes the `location` for a URL fragment, not a formula.
+// hyperlink, and which name one and nothing else (ExternalHyperlinkIds): only a
+// hyperlink of the worksheet may name the first, and for a hyperlink with one of the
+// second the content scan takes the `location` for a URL fragment, not a formula.
 
 /** ASCII-folded fragments of the content types of active parts: a content type that holds one is refused. */
 export const UNSAFE_CONTENT_TYPE_MARKERS: readonly string[] = [
@@ -109,8 +133,20 @@ const HYPERLINK_TYPE_ENDING = 'hyperlink';
 // A relationships part `X/_rels/Y.rels` belongs to the part `X/Y`.
 const PATH_SEPARATOR = '/';
 const RELS_FOLDER = '_rels/';
-// The local name of a worksheet part's root element.
+// The local name of a worksheet part's root element; its namespace is one of
+// SPREADSHEET_MAIN_NAMESPACES.
 const WORKSHEET_ROOT = 'worksheet';
+// The root element of a relationships part, and its namespace (Open Packaging
+// Conventions; the same in strict documents).
+const RELATIONSHIPS_ROOT = 'Relationships';
+const PACKAGE_RELATIONSHIPS_NAMESPACES: readonly string[] = [
+  'http://schemas.openxmlformats.org/package/2006/relationships',
+];
+// A namespace declaration: `xmlns` for the default namespace, `xmlns:` and a prefix.
+const NAMESPACE_DECLARATION = 'xmlns';
+const NAMESPACE_DECLARATION_PREFIX = 'xmlns:';
+// What every digital signature relationship Type holds, ASCII-folded.
+const DIGITAL_SIGNATURE_TYPE_SEGMENT = '/digital-signature/';
 // The ASCII-folded starts of the only targets an external worksheet hyperlink may have.
 const HYPERLINK_TARGET_STARTS: readonly string[] = ['http://', 'https://', 'mailto:'];
 const DEFAULT = 'Default';
@@ -139,9 +175,14 @@ export function isRelationshipsPartName(name: string): boolean {
  * Throws SpreadsheetFileError UNSAFE_CONTENT `{ reason: 'unsafe-part', entry }` when
  * relationship Type text names an active part: its last '/' segment, trimmed and
  * ASCII-folded, equals one of UNSAFE_RELATIONSHIP_TYPE_ENDINGS (`packageOther` does not
- * end in `package`). `entry` is the relationships part the Type was read from.
+ * end in `package`), or, ASCII-folded, it holds `/digital-signature/` (a signature
+ * origin, signature or certificate: see the header). `entry` is the relationships part
+ * the Type was read from.
  */
 export function assertSafeRelationshipType(type: string, entry: string): void {
+  if (foldAsciiCase(type).includes(DIGITAL_SIGNATURE_TYPE_SEGMENT)) {
+    throw unsafePartError(entry, 'Workbook declares a digital signature');
+  }
   if (!UNSAFE_ENDINGS.has(foldedLastSegment(type.trim()))) return;
   throw unsafePartError(entry, 'Workbook declares a relationship to an active part');
 }
@@ -164,26 +205,109 @@ function relationshipsSource(entry: string): string | null {
   return entry.slice(0, folderStart) + source;
 }
 
+/** What the root element of an XML part is to rootElementMatch: the one asked for, another (or none), or unknown. */
+type RootMatch = 'match' | 'other' | 'unreadable';
+
+/**
+ * Whether attribute name bytes [start, end) declare the prefix of `prefixLength` bytes
+ * at `prefixStart`: `xmlns` for no prefix, `xmlns:` and those bytes otherwise.
+ */
+function declaresPrefix(
+  bytes: Uint8Array,
+  start: number,
+  end: number,
+  prefixStart: number,
+  prefixLength: number,
+): boolean {
+  if (prefixLength === 0) return bytesEqualAscii(bytes, start, end, NAMESPACE_DECLARATION);
+  const prefixEnd = start + NAMESPACE_DECLARATION_PREFIX.length;
+  return (
+    end - prefixEnd === prefixLength &&
+    bytesEqualAscii(bytes, start, prefixEnd, NAMESPACE_DECLARATION_PREFIX) &&
+    bytesEqualAt(bytes, prefixEnd, bytes, prefixStart, prefixLength)
+  );
+}
+
+/**
+ * Whether the start tag scanned into `markup`, a root element, binds its own prefix (the
+ * default namespace without one) to one of `namespaces` by declarations on itself, the
+ * only ones in scope at the root: at least one, and each names one of them, compared as
+ * raw bytes (a value written with a reference never matches).
+ */
+function bindsOwnNamespace(
+  bytes: Uint8Array,
+  markup: XmlMarkup,
+  attributes: readonly number[],
+  namespaces: readonly string[],
+): boolean {
+  const localStart = localNameStart(bytes, markup);
+  const prefixLength = localStart === markup.nameStart ? 0 : localStart - 1 - markup.nameStart;
+  let bound = false;
+  for (let attribute = 0; attribute < markup.attributeCount; attribute += 1) {
+    const nameStart = attributeField(attributes, attribute, ATTRIBUTE_NAME_START);
+    const nameEnd = attributeField(attributes, attribute, ATTRIBUTE_NAME_END);
+    if (!declaresPrefix(bytes, nameStart, nameEnd, markup.nameStart, prefixLength)) continue;
+    const valueStart = attributeField(attributes, attribute, ATTRIBUTE_VALUE_START);
+    const valueEnd = attributeField(attributes, attribute, ATTRIBUTE_VALUE_END);
+    if (!namespaces.some((namespace) => bytesEqualAscii(bytes, valueStart, valueEnd, namespace))) {
+      return false;
+    }
+    bound = true;
+  }
+  return bound;
+}
+
 /**
  * Whether the root element of XML part `bytes`, its first element past any declaration,
- * comment or processing instruction, has the local name `worksheet`. False when the
- * strict lexer refuses the markup before it. Reads up to the root's start tag only.
+ * comment or processing instruction, has the local name `localName` in one of
+ * `namespaces` (bindsOwnNamespace): 'match' when it does, 'unreadable' when the strict
+ * lexer refuses the markup up to and including the root's start tag, 'other' for any
+ * other root, or none. Reads up to the root's start tag only.
  */
-function hasWorksheetRoot(bytes: Uint8Array): boolean {
+function rootElementMatch(
+  bytes: Uint8Array,
+  localName: string,
+  namespaces: readonly string[],
+): RootMatch {
   const markup = createMarkup();
+  const attributes: number[] = [];
   try {
     for (let at = nextMarkup(bytes, 0); at !== -1; at = nextMarkup(bytes, markup.end)) {
-      scanMarkup(bytes, at, markup);
+      scanMarkup(bytes, at, markup, attributes);
       if (markup.kind === 'start' || markup.kind === 'empty') {
-        return localNameIs(bytes, markup, WORKSHEET_ROOT);
+        const match =
+          localNameIs(bytes, markup, localName) &&
+          bindsOwnNamespace(bytes, markup, attributes, namespaces);
+        return match ? 'match' : 'other';
       }
-      if (markup.kind === 'end') return false;
+      if (markup.kind === 'end') return 'other';
     }
   } catch (error) {
-    if (error instanceof XmlLexError) return false;
+    if (error instanceof XmlLexError) return 'unreadable';
     throw error;
   }
-  return false;
+  return 'other';
+}
+
+/**
+ * Whether the root element of XML part `bytes` is `worksheet` in a SpreadsheetML main
+ * namespace (rootElementMatch); false when the strict lexer cannot read up to it.
+ */
+function hasWorksheetRoot(bytes: Uint8Array): boolean {
+  return rootElementMatch(bytes, WORKSHEET_ROOT, SPREADSHEET_MAIN_NAMESPACES) === 'match';
+}
+
+/**
+ * Whether kept XML entry `name`, of content `bytes`, is a relationships part the gate
+ * walks (see the header): its name says so (isRelationshipsPartName), or its root element
+ * is `Relationships` in the package relationships namespace, or the strict lexer cannot
+ * read up to its root and a lenient reader finds an element named so (opensLooseElement).
+ */
+function isRelationshipsPart(name: string, bytes: Uint8Array): boolean {
+  if (isRelationshipsPartName(name)) return true;
+  const root = rootElementMatch(bytes, RELATIONSHIPS_ROOT, PACKAGE_RELATIONSHIPS_NAMESPACES);
+  if (root === 'unreadable') return opensLooseElement(bytes, RELATIONSHIPS_ROOT);
+  return root === 'match';
 }
 
 /**
@@ -364,16 +488,24 @@ function isExternalHyperlink(
   return mode === EXTERNAL_TARGET_MODE;
 }
 
+/** What the walk of a worksheet's relationships part records of each relationship Id. */
+interface HyperlinkRecord {
+  /** Per Id, whether every Relationship of it so far is an external hyperlink. */
+  readonly onlyExternal: Map<string, boolean>;
+  /** The Ids at least one Relationship of which is an external hyperlink. */
+  readonly external: Set<string>;
+}
+
 /**
  * Refuses a Relationship whose Type names an active part, or whose target reaches outside
  * the package. With `hyperlinks` (a worksheet's relationships part), records for each Id
- * whether every Relationship of that Id is an external hyperlink.
+ * whether every Relationship of that Id is an external hyperlink, and whether one is.
  */
 function relationshipSelector(
   bytes: Uint8Array,
   entry: string,
   source: RelationshipsSourceKind,
-  hyperlinks: Map<string, boolean> | null,
+  hyperlinks: HyperlinkRecord | null,
 ): ChildSelector {
   return (markup, attributes) => {
     if (!localNameIs(bytes, markup, RELATIONSHIP)) return false;
@@ -384,18 +516,19 @@ function relationshipSelector(
     const id = relationshipId(bytes, markup, attributes, entry);
     if (id === null) return false;
     const external = isExternalHyperlink(bytes, markup, attributes, type, entry);
-    hyperlinks.set(id, external && (hyperlinks.get(id) ?? true));
+    hyperlinks.onlyExternal.set(id, external && (hyperlinks.onlyExternal.get(id) ?? true));
+    if (external) hyperlinks.external.add(id);
     return false;
   };
 }
 
-/** The ids `hyperlinks` (relationshipSelector) found to be external hyperlinks only. */
-function externalHyperlinkIds(hyperlinks: ReadonlyMap<string, boolean>): ReadonlySet<string> {
-  const ids = new Set<string>();
-  for (const [id, external] of hyperlinks) {
-    if (external) ids.add(id);
+/** The ids `hyperlinks` (relationshipSelector) found to be external hyperlinks, only or among others. */
+function worksheetHyperlinkIds(hyperlinks: HyperlinkRecord): WorksheetHyperlinkIds {
+  const onlyExternal = new Set<string>();
+  for (const [id, external] of hyperlinks.onlyExternal) {
+    if (external) onlyExternal.add(id);
   }
-  return ids;
+  return { onlyExternal, external: hyperlinks.external };
 }
 
 /** The content scan, then one lexer walk that selects nothing. */
@@ -409,11 +542,12 @@ function walkPart(entry: string, bytes: Uint8Array, select: ChildSelector): void
  * the gate keeps: no entry spelled in another ASCII case than a part the rule walks
  * (assertWalkedSpelling), no Default or Override of the content types part whose
  * ContentType holds a marker, and no Relationship of a kept relationships part (every
- * kept entry named `.rels`) whose Type ends in an unsafe segment or whose target reaches
- * outside the package (assertSafeTarget, told what the part belongs to by
- * worksheetSource). Returns, per worksheet that has a relationships part, the ids that
- * part gives an external hyperlink and nothing else (ExternalHyperlinkIds, for the
- * content scan's hyperlink rule).
+ * kept entry named `.rels` or whose root is a package Relationships element:
+ * isRelationshipsPart) whose Type ends in an unsafe segment or names a digital
+ * signature, or whose target reaches outside the package (assertSafeTarget, told what
+ * the part belongs to by worksheetSource). Returns, per worksheet that has a
+ * relationships part, the ids that part gives an external hyperlink, and those it gives
+ * one and nothing else (ExternalHyperlinkIds, for the content scan's hyperlink rules).
  *
  * Throws SpreadsheetFileError: UNSAFE_CONTENT `{ reason: 'unsafe-part', entry }` for an
  * unsafe declaration; UNSAFE_CONTENT when the content scan refuses a part it walks;
@@ -439,17 +573,17 @@ export function assertNoUnsafePackageParts(
   if (contentTypes !== undefined) {
     walkPart(CONTENT_TYPES_PART, contentTypes, contentTypeSelector(contentTypes));
   }
-  const externalHyperlinks = new Map<string, ReadonlySet<string>>();
+  const externalHyperlinks = new Map<string, WorksheetHyperlinkIds>();
   for (const [name, bytes] of contents) {
-    if (!isRelationshipsPartName(name)) continue;
+    if (!isRelationshipsPart(name, bytes)) continue;
     const worksheet = worksheetSource(name, contents, foldedNameCounts);
     if (worksheet === null) {
       walkPart(name, bytes, relationshipSelector(bytes, name, 'other', null));
       continue;
     }
-    const hyperlinks = new Map<string, boolean>();
+    const hyperlinks: HyperlinkRecord = { onlyExternal: new Map(), external: new Set() };
     walkPart(name, bytes, relationshipSelector(bytes, name, 'worksheet', hyperlinks));
-    externalHyperlinks.set(worksheet, externalHyperlinkIds(hyperlinks));
+    externalHyperlinks.set(worksheet, worksheetHyperlinkIds(hyperlinks));
   }
   return externalHyperlinks;
 }

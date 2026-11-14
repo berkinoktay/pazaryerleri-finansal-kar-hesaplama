@@ -50,8 +50,8 @@ section "Versioning" for details.
   rows, answers `422` with `{ field: 'file', code: 'CORRUPT_FILE' }`. The gate now scans every zip
   entry whose content is XML, whatever its name (a worksheet stored as `.bin`, a VML drawing, a
   theme stored as `.dat`), not only the parts the reader opens. An entry that is not UTF-8 XML
-  text (invalid UTF-8, a U+0000 character, a UTF-16 or UTF-32 byte order mark or layout, an XML
-  declaration of another encoding such as UTF-7), or an entry named `.xml`, `.rels` or `.vml` that
+  text (invalid UTF-8, a U+0000 character, a UTF-16 or UTF-32 byte order mark or layout, an
+  EBCDIC XML declaration, an XML declaration of another encoding such as UTF-7), or an entry named `.xml`, `.rels` or `.vml` that
   does not hold XML, answers `422` with `{ field: 'file', code: 'CORRUPT_FILE' }`. Every formula
   field of every scanned part is checked, read with its character references decoded: cell
   formulas, defined names, data validation and conditional format formulas, table column formulas,
@@ -62,7 +62,10 @@ section "Versioning" for details.
   the `#fragment` of a web address, not as a formula, only when the hyperlink's relationship id
   names a relationship of its own worksheet's relationships part whose type is `hyperlink` and
   whose `TargetMode` is `External`; a missing id, an id the part lacks, an internal hyperlink or a
-  relationship of another type leaves the location checked as a formula. A formula
+  relationship of another type leaves the location checked as a formula. Any other element of the
+  worksheet whose relationship id (an `id` attribute of any prefix) names such an external
+  hyperlink, such as a sheet background `<picture r:id>`, answers `422` with
+  `{ field: 'file', code: 'UNSAFE_CONTENT' }`. A formula
   may call only functions of a fixed allow list of pure math, text, logical, lookup and date
   functions (`IF`, `SUM`, `VLOOKUP`, `XLOOKUP`, `OFFSET`,
   `SEARCH` and similar); a call to any other function (`WEBSERVICE`, `HYPERLINK`, `IMAGE`, `RTD`,
@@ -81,13 +84,16 @@ section "Versioning" for details.
   CDATA, a processing instruction or an element; the one child element Excel 2010+ writes in a
   cross-sheet data validation or conditional format, `<xm:f>`, is read as the formula). A macro
   assignment (a non-empty `macro` or `fmlaMacro` attribute, a non-empty `FmlaMacro` element), a
-  VML control script (a `ScriptText` element holding anything but white space), an `src`,
-  `href` or `althref` attribute of any prefix (a VML picture, fill or shape link, an SVG image
-  link) or an `xml:base` whose value is not relative (a URI scheme, a drive letter written `C:`
+  VML control script (a `ScriptText` element holding anything but white space), an SVG or HTML
+  `script` element, an `src` attribute or an attribute whose name ends in `href` (`href`,
+  `althref`, `xlink:href` and the like), of any prefix (a VML picture, fill or shape link, an SVG
+  image link), or an `xml:base` whose value is not relative (a URI scheme, a drive letter written `C:`
   or `C|`, a leading `//` or any backslash, read past the tabs and line breaks a URL parser
-  removes; an `src`, `href` or `althref` may hold a `data:image/` URI, any other `data:` URI is
+  removes; an `src` or `href` attribute may hold a `data:image/` URI, any other `data:` URI is
   refused), a style attribute or style element whose CSS holds `@import`, a backslash or a
-  `url()` with an absolute target, an `xml-stylesheet` processing instruction, an
+  `url()` with an absolute target, any other attribute value that holds a `url()` with an absolute
+  target or a backslash after its first `url(` (an SVG `fill`, `filter`, `clip-path`, `mask`,
+  `cursor` or `marker-*` attribute; `url(#id)` passes), an `xml-stylesheet` processing instruction, an
   embedded object, a form or ActiveX control, a web publishing item, an Office web add-in, a
   custom ribbon, attached toolbars or XML maps (which bind data from a remote file), more than 256
   namespace declarations in scope at once in one scanned part (declarations that go out of scope
@@ -97,13 +103,19 @@ section "Versioning" for details.
   `422` `UNSAFE_CONTENT` too. A relationship that points outside the package now passes only when it is
   a hyperlink to an `http`, `https` or `mailto` address in the relationships part of a worksheet,
   decided by the part's content (the part the relationships belong to has a `worksheet` root
-  element), not by its path; any other external relationship (a drawing or rich-data hyperlink, a
+  element in the SpreadsheetML main namespace, transitional or strict, declared on that root), not
+  by its path; any other external relationship (a drawing or rich-data hyperlink, a
   web image, a file share, a rich-data part moved beside the worksheets), and an internal one whose
   target is a URI with a scheme, a drive letter (`C:` or `C|`), a network path or holds a
   backslash, read past the tabs and line breaks a URL parser removes (the rule the URL attributes
-  follow), answers `422` `UNSAFE_CONTENT`. The six export routes read the stored file through the
-  same gate: a stored file with any of these conditions answers `409 CONFLICT`. Valid Trendyol files
-  are unaffected.
+  follow), answers `422` `UNSAFE_CONTENT`. A relationships part is recognised by its content as
+  well as by its name: every scanned entry whose root element is `Relationships` in the package
+  relationships namespace is checked by these rules whatever it is named (`sheet1.xml.rel` with a
+  long s, `sheet1.xml%2Erels`). A digital signature relationship (a signature origin, signature or
+  certificate) answers `422` `UNSAFE_CONTENT` too: verifying a signature can fetch the
+  certificate's revocation and issuer addresses. The six export routes read the stored file through
+  the same gate: a stored file with any of these conditions answers `409 CONFLICT`. Valid Trendyol
+  files are unaffected.
 - **Campaign workbook import routes are guarded before the body is read**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs|advantage-tariffs|flash-products|discount-lists|marketplace-campaigns}/import`).
   Store access and the `DATA_WRITE` capability are now checked in route middleware, so a caller who

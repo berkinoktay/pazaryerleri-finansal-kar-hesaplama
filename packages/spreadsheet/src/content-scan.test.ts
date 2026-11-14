@@ -123,6 +123,20 @@ function fileErrorOf(run: () => unknown): SpreadsheetFileError | null {
   }
 }
 
+/**
+ * The external hyperlink ids of worksheet `part`: `ids` it gives an external hyperlink
+ * and nothing else, `amongOthers` one among other relationships.
+ */
+function hyperlinkIdsOf(
+  part: string,
+  ids: readonly string[],
+  amongOthers: readonly string[] = [],
+): ExternalHyperlinkIds {
+  return new Map([
+    [part, { onlyExternal: new Set(ids), external: new Set([...ids, ...amongOthers]) }],
+  ]);
+}
+
 function gateError(file: Buffer): SpreadsheetFileError | null {
   return fileErrorOf(() => openUpload(file, GUARD_OPTS));
 }
@@ -611,7 +625,7 @@ describe('assertSafeXmlContent: the formula allow list', () => {
 
   it('pins the allow list: sorted upper-case ASCII names, no function that reaches outside', () => {
     expect(SAFE_FORMULA_FUNCTIONS).toEqual([...SAFE_FORMULA_FUNCTIONS].sort());
-    for (const name of SAFE_FORMULA_FUNCTIONS) expect(name).toMatch(/^[A-Z][A-Z.]*$/);
+    for (const name of SAFE_FORMULA_FUNCTIONS) expect(name).toMatch(/^[A-Z][A-Z0-9.]*$/);
     // Every function the eight real files call, in any formula field.
     expect(SAFE_FORMULA_FUNCTIONS).toEqual(
       expect.arrayContaining([
@@ -659,6 +673,113 @@ describe('assertSafeXmlContent: the formula allow list', () => {
       expect(SAFE_FORMULA_FUNCTIONS).not.toContain(name);
     }
     expect(SAFE_FORMULA_FUNCTIONS.filter((name) => name.startsWith('IMPORT'))).toEqual([]);
+  });
+
+  // Pure functions a seller's sheet may call: nothing outside the workbook is reached.
+  it.each([
+    'LOOKUP',
+    'TRANSPOSE',
+    'NA',
+    'RAND',
+    'RANDBETWEEN',
+    'RANDARRAY',
+    'TEXTBEFORE',
+    'TEXTAFTER',
+    'TEXTSPLIT',
+    'VSTACK',
+    'HSTACK',
+    'TAKE',
+    'DROP',
+    'CHOOSECOLS',
+    'CHOOSEROWS',
+    'EXPAND',
+    'TOCOL',
+    'TOROW',
+    'WRAPROWS',
+    'WRAPCOLS',
+    'AGGREGATE',
+    'STDEV',
+    'STDEV.S',
+    'STDEV.P',
+    'VAR',
+    'VAR.S',
+    'VAR.P',
+    'PERCENTILE',
+    'PERCENTILE.INC',
+    'PERCENTILE.EXC',
+    'QUARTILE',
+    'QUARTILE.INC',
+    'MODE',
+    'MODE.SNGL',
+    'ADDRESS',
+    'ISOWEEKNUM',
+    'PI',
+    'LN',
+    'LOG',
+    'LOG10',
+    'EXP',
+    'AVERAGEA',
+    'MAXA',
+    'MINA',
+    'FORMULATEXT',
+    'ISFORMULA',
+    'ISREF',
+    'ROUNDUP',
+    'ROUNDDOWN',
+    'GCD',
+    'LCM',
+    'COMBIN',
+    'FACT',
+    'SUMSQ',
+    'EVEN',
+    'ODD',
+    'DOLLAR',
+    'CEILING.PRECISE',
+    'FLOOR.PRECISE',
+    'DAYS360',
+    'YEARFRAC',
+    'NETWORKDAYS.INTL',
+    'WORKDAY.INTL',
+    'DATEDIF',
+  ])('accepts a call of the pure function %s', (name) => {
+    expect(SAFE_FORMULA_FUNCTIONS).toContain(name);
+    expect(formulaError(`${name}(A1,B1:B9)`)).toBeNull();
+    expect(formulaError(`_xlfn.${name}(A1)`)).toBeNull();
+  });
+
+  it.each([
+    'WEBSERVICE',
+    'FILTERXML',
+    'ENCODEURL',
+    'IMAGE',
+    'RTD',
+    'CALL',
+    'REGISTER',
+    'REGISTER.ID',
+    'EXEC',
+    'HYPERLINK',
+    'INDIRECT',
+    'CELL',
+    'INFO',
+    'STOCKHISTORY',
+    'TRANSLATE',
+    'DETECTLANGUAGE',
+    'PY',
+    'COPILOT',
+    'DDE',
+    'SQL.REQUEST',
+    'LAMBDA',
+    'LET',
+    'MAP',
+    'REDUCE',
+    'SCAN',
+    'BYROW',
+    'BYCOL',
+    'MAKEARRAY',
+    'ISOMITTED',
+    'IMPORTXML',
+  ])('still refuses a call of %s', (name) => {
+    expectUnsafeFormula(formulaError(`${name}(A1)`));
   });
 
   it('accepts a call of every function of the allow list, with and without _xlfn.', () => {
@@ -1001,6 +1122,61 @@ const SVG_REFUSALS: readonly LabelledXml[] = [
     'an SVG style attribute that imports a sheet in another case',
     '<rect width="1" height="1" style="@IMPORT &quot;http://evil/a.css&quot;"/>',
   ],
+  // The CSS of a style element is read piece by piece.
+  [
+    'an SVG style element whose @import a comment splits',
+    '<style>@im<!--x-->port "http://evil/a.css";</style>',
+  ],
+  [
+    'an SVG style element whose url( ) target a child element splits from its url(',
+    '<style>rect{fill:url( <g/>"<g/>ht<!--x-->tp://evil/p.svg#g")}</style>',
+  ],
+  [
+    'an SVG style element whose CSS escape stands in a later piece',
+    '<style>rect{fill:red}<g/>.b{fill:\\75rl(x)}</style>',
+  ],
+  [
+    'an SVG style element whose url( ) target starts a comment past a CDATA section',
+    '<style>rect{fill:url(<![CDATA[/]]>*x*/)}</style>',
+  ],
+  // Any attribute value is CSS to an SVG renderer.
+  ...[
+    'fill="url(http://evil.example/p.svg#g)"',
+    'filter="url(http://evil.example/f.svg#f)"',
+    'clip-path="url(//evil.example/c.svg#c)"',
+    'mask="URL(file://evil.example/s/m.svg#m)"',
+    'cursor="url(http://evil.example/c.cur),auto"',
+    'marker-end="url(\\\\evil.example\\s\\m.svg#m)"',
+    'fill="url( &quot;https://evil.example/p.svg#g&quot; )"',
+    'fill="url(h\\74tp://evil.example/p.svg#g)"',
+    'fill="url(#a) url(\\\\evil.example\\s\\m.svg#m)"',
+    'fill="&#117;rl(http://evil.example/p.svg#g)"',
+    'fill="url&#40;http://evil.example/p.svg#g)"',
+    'fill="url(/*x*/)"',
+  ].map(
+    (attribute): LabelledXml => [
+      `an SVG shape whose ${attribute} loads a resource`,
+      `<rect width="1" height="1" ${attribute}/>`,
+    ],
+  ),
+  ['an SVG script', '<script>fetch("http://evil.example/")</script>'],
+  ['an empty SVG script in another case and namespace', '<s:SCRIPT xmlns:s="urn:s"/>'],
+  [
+    'an SVG image whose href-ending attribute is a web address',
+    '<image width="1" height="1" xmlns:n="urn:n" n:newhref="http://evil.example/x.png"/>',
+  ],
+  // Past markup the strict lexer refuses, anything that could load a resource refuses.
+  ...[
+    '<rect width="1" height="1" fill="url(#a)"/>',
+    '<rect width="1" height="1" fill="&#35;a"/>',
+    '<image width="1" height="1" n:newhref="x.png"/>',
+    '<script/>',
+  ].map(
+    (content): LabelledXml => [
+      `${content} past markup the strict lexer refuses`,
+      `<${LONG_S}/>${content}`,
+    ],
+  ),
 ];
 
 /** A line chart whose one series reads its values from the formula `formula` (XML text). */
@@ -1545,6 +1721,21 @@ describe('assertSafeXmlContent: formula fields in every part', () => {
       ),
     ],
     [
+      'SVG paints, filters and clip paths from fragments of the image',
+      SVG_PART,
+      svgWith(
+        '<rect width="1" height="1" fill="url(#grad1)" filter="url( \'#f1\' )" clip-path="URL(#c)"/>' +
+          '<style>.a{fill:url(<!--x-->#g)}</style>',
+      ),
+    ],
+    [
+      'attribute values with parentheses or a backslash but no url(',
+      VML_PART,
+      vmlShapes(
+        '<v:shape id="s" type="#_x0000_t75" o:title="Logo (v2) C:\\logo" alt="f(x) = urlx"/>',
+      ),
+    ],
+    [
       'a drawing shape style as Excel writes it',
       DRAWING_PART,
       drawingWith(
@@ -1558,7 +1749,7 @@ describe('assertSafeXmlContent: formula fields in every part', () => {
     expect(scanError(entriesOf({ [entry]: xml }))).toBeNull();
   });
 
-  const EXTERNAL_RID1: ExternalHyperlinkIds = new Map([[SHEET_PART, new Set(['rId1'])]]);
+  const EXTERNAL_RID1 = hyperlinkIdsOf(SHEET_PART, ['rId1']);
 
   it.each<[label: string, attributes: string, location: string]>([
     ...URL_FRAGMENTS.map((location): [string, string, string] => [
@@ -1588,7 +1779,7 @@ describe('assertSafeXmlContent: formula fields in every part', () => {
     [
       'the external hyperlink ids of another part',
       'r:id="rId1"',
-      new Map([[SECOND_SHEET_PART, new Set(['rId1'])]]),
+      hyperlinkIdsOf(SECOND_SHEET_PART, ['rId1']),
     ],
     [
       'a second relationship id that is not one',
@@ -1601,6 +1792,53 @@ describe('assertSafeXmlContent: formula fields in every part', () => {
       [SHEET_PART]: worksheetWithAfter(hyperlinkWith(attributes, EVIL_CALL)),
     });
     expectUnsafeFormula(scanError(entries, hyperlinks));
+  });
+
+  // Only a hyperlink may name an external hyperlink of its part.
+  it.each<[label: string, after: string, hyperlinks: ExternalHyperlinkIds]>([
+    ['a sheet background picture', '<picture r:id="rId1"/>', EXTERNAL_RID1],
+    [
+      'a drawing, the id in another ASCII case of its name',
+      '<drawing r:Id="rId1"/>',
+      EXTERNAL_RID1,
+    ],
+    ['a picture whose id is written with a reference', '<picture r:id="rId&#49;"/>', EXTERNAL_RID1],
+    [
+      'a picture whose id prefix is bound to the strict relationships namespace',
+      '<picture xmlns:s="http://purl.oclc.org/ooxml/officeDocument/relationships" s:id="rId1"/>',
+      EXTERNAL_RID1,
+    ],
+    [
+      'a picture whose id names an external hyperlink among other relationships',
+      '<picture r:id="rId4"/>',
+      hyperlinkIdsOf(SHEET_PART, [], ['rId4']),
+    ],
+    [
+      'a picture past markup the strict lexer refuses',
+      `<${LONG_S}/><picture r:id="rId9"/>`,
+      EXTERNAL_RID1,
+    ],
+  ])('refuses %s that names an external hyperlink', (_label, after, hyperlinks) => {
+    expectUnsafePart(scanError(entriesOf({ [SHEET_PART]: worksheetWithAfter(after) }), hyperlinks));
+  });
+
+  it.each<[label: string, after: string, hyperlinks: ExternalHyperlinkIds]>([
+    ['a drawing of another id', '<drawing r:id="rId2"/>', EXTERNAL_RID1],
+    ['an id with no prefix', '<sheetView id="rId1"/>', EXTERNAL_RID1],
+    [
+      'a picture of an id another part gives an external hyperlink',
+      '<picture r:id="rId1"/>',
+      hyperlinkIdsOf(SECOND_SHEET_PART, ['rId1']),
+    ],
+    [
+      'a picture past markup the strict lexer refuses, the part with no external hyperlink',
+      `<${LONG_S}/><picture r:id="rId1"/>`,
+      new Map(),
+    ],
+  ])('accepts %s', (_label, after, hyperlinks) => {
+    expect(
+      scanError(entriesOf({ [SHEET_PART]: worksheetWithAfter(after) }), hyperlinks),
+    ).toBeNull();
   });
 });
 
@@ -1695,6 +1933,17 @@ describe('assertSafeXmlContent: namespace declarations', () => {
     const part = siblingDeclarations(MAX_XMLNS_DECLARATIONS_PER_PART * 4);
 
     expect(scanError(entriesOf({ [NAMESPACE_PART]: part }))).toBeNull();
+  });
+
+  // A prefix is dropped with its last binding, so distinct prefixes declared one after
+  // the other hold no memory; one bound again names its new namespace.
+  it('accepts sibling elements that each declare a new prefix, and binds a dropped prefix again', () => {
+    const count = MAX_XMLNS_DECLARATIONS_PER_PART * 4;
+    const siblings = Array.from({ length: count }, (_, index) => `<e xmlns:p${index}="u"/>`);
+    const rebound = `<r><e xmlns:m="${OMML_NS}"/><g xmlns:m="urn:x"><m:f>${EVIL_CALL}</m:f></g></r>`;
+
+    expect(scanError(entriesOf({ [NAMESPACE_PART]: `<r>${siblings.join('')}</r>` }))).toBeNull();
+    expectUnsafeFormula(scanError(entriesOf({ [NAMESPACE_PART]: rebound })), NAMESPACE_PART);
   });
 
   it.each([85, 500])('accepts a drawing with %i pictures as Excel 2016+ writes them', (count) => {
@@ -2032,7 +2281,22 @@ describe('upload gate: hyperlinks to web pages', () => {
       expectUnsafeFormula(gateError(bookWithSheetHyperlink(id, EVIL_CALL, relationships)));
     },
   );
+
+  it('refuses a sheet background picture that names an external hyperlink', () => {
+    const file = buildXlsxFixture(
+      [{ name: 'Sheet1', xml: worksheetWithAfter('<picture r:id="rId1"/>') }],
+      {
+        [SHEET_RELS_PART]: `${UTF8_DECLARATION}<Relationships xmlns="${RELATIONSHIPS_NS}">${WEB_HYPERLINK_RELATIONSHIP}</Relationships>`,
+      },
+    );
+
+    expectUnsafePart(gateError(file));
+  });
 });
+
+// `<?xml version` in EBCDIC (code page 037): its first four bytes are the signature an
+// XML reader detects EBCDIC by.
+const EBCDIC_DECLARATION = '\x4c\x6f\xa7\x94\x93\x40\xa5\x85\x99\xa2\x89\x96\x95';
 
 function latin1Bytes(text: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(text, (character) => character.charCodeAt(0));
@@ -2058,12 +2322,22 @@ describe('entryContentKind', () => {
     ['UTF-16 big endian without a mark', latin1Bytes('\x00<\x00?'), 'misencoded'],
     ['UTF-32 big endian without a mark', latin1Bytes('\x00\x00\x00<'), 'misencoded'],
     ['white space and U+0000 before <', latin1Bytes(' \x00<\x00'), 'misencoded'],
+    ['an EBCDIC XML declaration', latin1Bytes(EBCDIC_DECLARATION), 'misencoded'],
+    ['the EBCDIC signature alone', latin1Bytes('\x4c\x6f\xa7\x94'), 'misencoded'],
   ])('reads %s', (_label, bytes, kind) => {
     expect(entryContentKind(bytes)).toBe(kind);
   });
 
   it('reads the same kind byte by byte as whole', () => {
-    for (const text of ['<a/>', '\xef\xbb\xbf<a/>', '  png', '\xff\xfe<\x00', '\x00<', '<']) {
+    for (const text of [
+      '<a/>',
+      '\xef\xbb\xbf<a/>',
+      '  png',
+      '\xff\xfe<\x00',
+      '\x00<',
+      '<',
+      EBCDIC_DECLARATION,
+    ]) {
       const bytes = latin1Bytes(text);
       const sniff = createEntryContentSniff();
       for (const byte of bytes) feedEntryContentSniff(sniff, Uint8Array.of(byte));
@@ -2080,6 +2354,12 @@ describe('assertSafeXmlContent: entries chosen by content', () => {
     'xl/A.VML',
   ])('refuses %s holding no XML as CORRUPT_FILE part-encoding', (entry) => {
     expectPartEncoding(scanError(entriesOf({ [entry]: 'not xml' })), entry);
+  });
+
+  it('refuses an EBCDIC entry whatever its name as CORRUPT_FILE part-encoding', () => {
+    const entry = 'xl/worksheets/sheet2.dat';
+
+    expectPartEncoding(scanError({ [entry]: latin1Bytes(EBCDIC_DECLARATION) }), entry);
   });
 
   it('refuses a UTF-16 entry whatever its name as CORRUPT_FILE part-encoding', () => {

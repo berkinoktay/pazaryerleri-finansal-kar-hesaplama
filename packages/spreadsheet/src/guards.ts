@@ -711,14 +711,15 @@ export function openUpload(file: Uint8Array, opts: GuardOpts): UploadParts {
  *      times. An unzip of the stored upload that allocates the declared sizes stays
  *      within the cap.
  *   8. assertEntryContentKind on every entry's content kind: no XML the scans cannot
- *      read (UTF-16 or UTF-32), and no entry named .xml, .rels or .vml that does not hold
+ *      read (UTF-16, UTF-32 or EBCDIC), and no entry named .xml, .rels or .vml that does not hold
  *      XML (CORRUPT_FILE `part-encoding`).
  *   9. assertNoUnsafePackageParts on the streamed content: the content types and every
- *      kept relationships part declare no active part and no relationship that reaches
- *      outside the package (UNSAFE_CONTENT `unsafe-part`), each walked part is read
+ *      kept relationships part (by its name or by its root element) declare no active
+ *      part, no digital signature and no relationship that reaches outside the package
+ *      (UNSAFE_CONTENT `unsafe-part`), each walked part is read
  *      whole (CORRUPT_FILE `package-part` otherwise), and no entry is spelled in another
  *      ASCII case than a part this rule walks. It returns the ids each worksheet's own
- *      relationships part gives an external hyperlink.
+ *      relationships part gives an external hyperlink (only, or among others).
  *  10. assertSafeXmlContent on EVERY kept XML entry, whatever its name and whatever the
  *      relationships say about it (a worksheet no relationship of the exact type names,
  *      a VML drawing, or the entry behind a Target alias, is still handed on by the
@@ -727,7 +728,8 @@ export function openUpload(file: Uint8Array, opts: GuardOpts): UploadParts {
  *      outside the allow list, a macro assignment, an active element or a URL outside
  *      the package: UNSAFE_CONTENT), a hyperlink `location` taken for a URL fragment
  *      only when the hyperlink's relationship id is one of the external hyperlink ids
- *      of step 9. Linear in bytes the stream already capped; no DOM is built.
+ *      of step 9, and no other element naming one of them. Linear in bytes the stream
+ *      already capped; no DOM is built.
  *  11. selectReaderParts: the parts the reader opens (the workbook rels, the
  *      workbook, and the styles, shared strings and worksheet parts the rels name),
  *      each checked on its raw bytes before any DOM is built: the DOM weight of all

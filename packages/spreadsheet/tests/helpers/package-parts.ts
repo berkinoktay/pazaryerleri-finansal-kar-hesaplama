@@ -38,9 +38,19 @@ const OFFICE_DOCUMENT_RELATIONSHIP = `<Relationship Id="rId1" Type="${OFFICE_REL
 // The web address an external hyperlink of a worksheet may have.
 const WEB_TARGET = 'https://example.com/a';
 const SPREADSHEET_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+const STRICT_SPREADSHEET_NS = 'http://purl.oclc.org/ooxml/spreadsheetml/main';
+// The relationship types of a digital signature: its origin, a signature, a certificate.
+const DIGITAL_SIGNATURE_REL =
+  'http://schemas.openxmlformats.org/package/2006/relationships/digital-signature';
+const SIGNATURE_RELS_PART = '_xmlsignatures/_rels/origin.sigs.rels';
+// LATIN SMALL LETTER LONG S: a reader that folds part names in Unicode reads it as s.
+const LONG_S = '\u017f';
+// A rich-data web image part, the one whose relationships part WEB_IMAGE_RELS_PART is.
+const WEB_IMAGE_PART = 'xl/richData/rdRichValueWebImage.xml';
 const WEB_IMAGE_NS = 'http://schemas.microsoft.com/office/spreadsheetml/2020/richdatawebimage';
 // A rich-data web image part: its address is a relationship of its own rels part.
 const WEB_IMAGE_XML = `${XML_DECLARATION}<webImagesSrd xmlns="${WEB_IMAGE_NS}" xmlns:r="${OFFICE_REL}"><webImageSrd><address r:id="rId9"/></webImageSrd></webImagesSrd>`;
+const WEB_IMAGES = `<webImagesSrd xmlns="${WEB_IMAGE_NS}" xmlns:r="${OFFICE_REL}"><webImageSrd><address r:id="rId9"/></webImageSrd></webImagesSrd>`;
 
 export const CONTENT_TYPES_PART = '[Content_Types].xml';
 export const WORKBOOK_RELS_PART = 'xl/_rels/workbook.xml.rels';
@@ -130,6 +140,49 @@ function rootRelationship(type: string): Readonly<Record<string, string>> {
 function drawingImage(target: string, attributes = ''): Readonly<Record<string, string>> {
   return { [DRAWING_RELS_PART]: relationshipsXml(relationship(IMAGE_REL, target, attributes)) };
 }
+
+/**
+ * A rich-data web image part wrapped in the root start tag `rootStart` (closed by
+ * `rootEnd`), and its relationships part with an external https hyperlink.
+ */
+function webImageUnderRoot(rootStart: string, rootEnd: string): Readonly<Record<string, string>> {
+  return {
+    [WEB_IMAGE_PART]: `${XML_DECLARATION}${rootStart}${WEB_IMAGES}${rootEnd}`,
+    [WEB_IMAGE_RELS_PART]: relationshipsXml(
+      relationship(HYPERLINK_REL, 'https://evil.example/pixel.png', EXTERNAL_TARGET_MODE),
+    ),
+  };
+}
+
+/** An external image relationship in a relationships part of the worksheet named `name`. */
+function externalImageIn(name: string): Readonly<Record<string, string>> {
+  return {
+    [name]: relationshipsXml(
+      relationship(IMAGE_REL, 'https://evil.example/x.png', EXTERNAL_TARGET_MODE),
+    ),
+  };
+}
+
+// Root elements named worksheet that are no SpreadsheetML worksheet: label, start and end tag.
+const NON_WORKSHEET_ROOTS: readonly (readonly [label: string, start: string, end: string])[] = [
+  ['in another namespace', '<x:worksheet xmlns:x="urn:other">', '</x:worksheet>'],
+  ['in no namespace', '<worksheet>', '</worksheet>'],
+  [
+    'whose namespace is written with a character reference',
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/m&#97;in">',
+    '</worksheet>',
+  ],
+  [
+    'whose own prefix is bound to another namespace than the default',
+    `<x:worksheet xmlns:x="urn:other" xmlns="${SPREADSHEET_NS}">`,
+    '</x:worksheet>',
+  ],
+  [
+    'an ignorable wrapper',
+    '<ign:worksheet xmlns:ign="urn:ign" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="ign" mc:ProcessContent="ign:worksheet">',
+    '</ign:worksheet>',
+  ],
+];
 
 function contentTypes(workbookType: string, children = ''): Readonly<Record<string, string>> {
   return { [CONTENT_TYPES_PART]: contentTypesXml(workbookType, children) };
@@ -461,6 +514,44 @@ export const UNSAFE_PART_CASES: readonly PackagePartCase[] = [
     label: 'an image relationship with TargetMode="Internal" to a web address',
     entries: drawingImage('https://evil.example/x.png', ' TargetMode="Internal"'),
   },
+  ...NON_WORKSHEET_ROOTS.map(
+    ([label, rootStart, rootEnd]): PackagePartCase => ({
+      label: `an external https hyperlink of a web image part whose worksheet root is ${label}`,
+      entries: webImageUnderRoot(rootStart, rootEnd),
+    }),
+  ),
+  {
+    label: `an external image in a worksheet's relationships part named .rel and a long s`,
+    entries: externalImageIn(`xl/worksheets/_rels/sheet1.xml.rel${LONG_S}`),
+  },
+  {
+    label: "an external image in a worksheet's relationships part named .xml%2Erels",
+    entries: externalImageIn('xl/worksheets/_rels/sheet1.xml%2Erels'),
+  },
+  {
+    label: 'an external image in a relationships part named like an image',
+    entries: externalImageIn('xl/media/image9.png'),
+  },
+  {
+    label: 'a digital signature origin named by the root relationships',
+    entries: rootRelationship(`${DIGITAL_SIGNATURE_REL}/origin`),
+  },
+  ...['signature', 'certificate'].map(
+    (kind): PackagePartCase => ({
+      label: `a digital signature ${kind} relationship in another ASCII case`,
+      entries: {
+        [SIGNATURE_RELS_PART]: relationshipsXml(
+          relationship(`${DIGITAL_SIGNATURE_REL.toUpperCase()}/${kind}`, 'sig1.xml'),
+        ),
+      },
+    }),
+  ),
+  // The content scan, which runs first, reads every attribute value a reference could
+  // turn into a url( and refuses one it cannot decode.
+  {
+    label: 'a Target holding a character reference past U+10FFFF',
+    entries: drawingImage('../media/image&#1114112;.png'),
+  },
 ];
 
 /** Refused with CORRUPT_FILE `package-part`. */
@@ -534,8 +625,12 @@ export const PACKAGE_PART_CASES: readonly PackagePartCase[] = [
     },
   },
   {
-    label: 'a Target holding a character reference past U+10FFFF',
-    entries: drawingImage('../media/image&#1114112;.png'),
+    label: 'a relationships part named .rel and a long s whose root the strict lexer refuses',
+    entries: {
+      [`xl/worksheets/_rels/sheet1.xml.rel${LONG_S}`]: relationshipsXml(
+        relationship(IMAGE_REL, 'https://evil.example/x.png', EXTERNAL_TARGET_MODE),
+      ).replace('<Relationships ', `<Relationships xmlns:${LONG_S}="urn:x" `),
+    },
   },
   {
     label: 'a Relationship with two Target attributes',
@@ -625,6 +720,24 @@ export const SAFE_PART_CASES: readonly PackagePartCase[] = [
   {
     label: 'an internal image Target holding a colon after a path segment',
     entries: drawingImage('../media/a:b.png'),
+  },
+  {
+    label: 'an external https hyperlink of a worksheet in the strict SpreadsheetML namespace',
+    entries: {
+      'xl/x/s.xml': WORKSHEET_XML.replace(SPREADSHEET_NS, STRICT_SPREADSHEET_NS),
+      'xl/x/_rels/s.xml.rels': relationshipsXml(
+        relationship(HYPERLINK_REL, WEB_TARGET, EXTERNAL_TARGET_MODE),
+      ),
+    },
+  },
+  {
+    label: 'an external https hyperlink of a worksheet whose prefixed root binds its prefix',
+    entries: {
+      'xl/x/s.xml': `${XML_DECLARATION}<x:worksheet xmlns:x="${SPREADSHEET_NS}"><x:sheetData/></x:worksheet>`,
+      'xl/x/_rels/s.xml.rels': relationshipsXml(
+        relationship(HYPERLINK_REL, WEB_TARGET, EXTERNAL_TARGET_MODE),
+      ),
+    },
   },
   {
     label: 'an external https hyperlink of a worksheet stored outside xl/worksheets',

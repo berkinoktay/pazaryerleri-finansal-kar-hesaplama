@@ -29,7 +29,12 @@ import {
   XmlLexError,
   type XmlMarkup,
 } from './patch/xml-lexer';
-import { isAbsoluteUrl, startsAbsoluteUrl } from './url-target';
+import {
+  createUrlStartReader,
+  isAbsoluteUrl,
+  readUrlStart,
+  type UrlStartReader,
+} from './url-target';
 
 // The entries the grid reader may open: exactly the names ending in `.xml` or
 // `.xml.rels` (the rule read-excel-file's filterZipArchiveEntry used, kept so the same
@@ -52,9 +57,10 @@ const UNKNOWN_ENTITY_REFERENCE = /&(?!(?:amp|lt|gt|quot|apos);|#\d+;|#x[0-9a-fA-
 // on unchanged, and an opener finds a part by its relationship, not by its name, so the
 // gate chooses the parts it scans by their content: an entry is XML when, after an
 // optional UTF-8 byte order mark, its first byte that is not XML white space is '<'.
-// An entry that starts with a UTF-16 or UTF-32 byte order mark, or whose first '<' has
-// a U+0000 byte right before or after it (UTF-16 or UTF-32 text without one), is XML
-// the scans cannot read: CORRUPT_FILE `part-encoding`. So is an entry named `.xml`,
+// An entry that starts with a UTF-16 or UTF-32 byte order mark or with `<?xm` in EBCDIC
+// (the signature by which an XML reader detects an EBCDIC declaration), or whose first
+// '<' has a U+0000 byte right before or after it (UTF-16 or UTF-32 text without a
+// mark), is XML the scans cannot read: CORRUPT_FILE `part-encoding`. So is an entry named `.xml`,
 // `.rels` or `.vml` (ASCII case folded) whose content is not XML. The decision reads the
 // first bytes only, chunk by chunk (EntryContentSniff), so the stream keeps nothing of
 // an image or another binary entry.
@@ -67,6 +73,8 @@ const OTHER_BYTE_ORDER_MARKS: readonly (readonly number[])[] = [
   [0xff, 0xfe],
   [0x00, 0x00, 0xfe, 0xff],
 ];
+// `<?xm` in EBCDIC: the first bytes of an XML declaration written in it.
+const EBCDIC_DECLARATION_START: readonly number[] = [0x4c, 0x6f, 0xa7, 0x94];
 // The first bytes held until the byte order mark is read: the longest mark.
 const BYTE_ORDER_MARK_LENGTH = 4;
 const NO_BYTE = -1;
@@ -85,7 +93,12 @@ const NO_BYTE = -1;
 // (ExternalHyperlinkIds, read by unsafe-parts.ts by the worksheet source rule). Then the
 // hyperlink leads to the relationship's URL and Excel keeps that URL's #fragment in
 // `location` (https://site/page#part: Target https://site/page, location `part`), which
-// is no formula. Each field is decoded (the five
+// is no formula. No other element may name an external hyperlink of its part: an
+// element whose local name is not `hyperlink` with a prefixed attribute whose local
+// name is `id` (ASCII case ignored, whatever namespace its prefix is bound to) and whose
+// decoded value names a relationship of the part's relationships part that is an
+// external hyperlink (a worksheet `<picture r:id>` would load its background from the
+// web) is refused, UNSAFE_CONTENT `unsafe-part`. Each field is decoded (the five
 // predefined references and every character reference replaced) and must pass
 // formula-scan.ts; in the `formula` attribute of a PIVOT_FORMULA_ELEMENT_NAMES element
 // (a pivot calculated field or item) a quoted section is a field name, not a sheet name.
@@ -98,8 +111,11 @@ const NO_BYTE = -1;
 // empty field passes.
 // An Office Math fraction is also named `f` (an equation in a text box writes
 // `<m:f><m:fPr/>...</m:f>`), so an element in the OMML_NAMESPACE is not a formula field.
-// The walk keeps the namespace declarations in scope (NamespaceScopes) in bounded
-// memory. It keeps the qualified name of every open element (two offsets into the
+// The walk keeps the namespace declarations in scope (NamespaceScopes): a prefix is held
+// only while a declaration of it is in scope, and its key is dropped with its last
+// binding, so the prefixes held at once never outnumber the declarations in scope, which
+// MAX_XMLNS_DECLARATIONS_PER_PART caps. It keeps the qualified name of every open
+// element (two offsets into the
 // part) up to MAX_TRACKED_ELEMENT_DEPTH open elements, and every end tag must name the
 // innermost open element, byte for byte. An end tag that names another element (a
 // lenient reader may close an ancestor there), an end tag with no element open, or an
@@ -114,11 +130,13 @@ const NO_BYTE = -1;
 // A macro assignment needs code the gate never accepts, so a non-empty
 // MACRO_ATTRIBUTE_NAMES attribute or FmlaMacro element is refused (Excel writes
 // `macro=""` on every shape), and an element of ACTIVE_ELEMENT_NAMES (an embedded
-// object, a control, a web publishing item) is refused wherever it stands. So is a
+// object, a control, a web publishing item, a `script` of SVG or HTML) is refused
+// wherever it stands. So is a
 // SCRIPT_ELEMENT_NAMES element (a VML control's script) that holds anything but white
 // space.
-// URLs. A URL_ATTRIBUTE_NAMES attribute (`src`, `href` or `althref`, any prefix: VML's
-// v:imagedata@src, @o:href, @o:althref, v:fill@src, a shape's href, SVG's xlink:href)
+// URLs. A URL attribute (`src`, or any local name that ends with URL_ATTRIBUTE_SUFFIX
+// `href`, ASCII case ignored, any prefix: VML's v:imagedata@src, @o:href, @o:althref,
+// v:fill@src, a shape's href, SVG's xlink:href)
 // or a BASE_URL_ATTRIBUTE_NAMES attribute (`base`: xml:base) names a resource outside
 // the relationships, so its decoded value must be relative by the rule of url-target.ts
 // (no URI scheme, drive letter, leading '//' or backslash). The one exception is a URL
@@ -130,14 +148,22 @@ const NO_BYTE = -1;
 // on their own) must load nothing: it may hold no
 // `@import`, no backslash (a CSS escape can spell either name) and no `url(` whose
 // target, past CSS white space and an optional quote, is absolute by that rule or
-// starts a comment. A STYLESHEET_INSTRUCTION_NAMES processing instruction
+// starts a comment. The text of a style element is read piece by piece (CssScan), in
+// constant memory: nothing of it is kept but how much of `@import` and `url(` its last
+// code units spell and where the last `url(` target stands. Any other attribute value,
+// whatever its name, is CSS to an SVG renderer (`fill`, `filter`, `clip-path`, `mask`,
+// `cursor`, `marker-*`), so it may hold no `url(` whose target is absolute or starts a
+// comment either, nor a backslash from its first `url(` on (a CSS escape can spell a
+// scheme); `url(#local)` passes. A STYLESHEET_INSTRUCTION_NAMES processing instruction
 // (`xml-stylesheet`) is refused wherever it stands. Each refusal is UNSAFE_CONTENT
 // `unsafe-part`.
 // Where the strict lexer refuses markup that a lenient or a non-ASCII reading accepts,
 // the walk cannot tell where the fields are from there on, so the part is refused when
 // anything after that point could open a field, macro, script or active element or an
 // element with a field attribute of its own, or name a field, macro, URL, base or style
-// attribute, a style element or a stylesheet instruction; inside a style element the
+// attribute, a style element or a stylesheet instruction, or when it holds a `url(`
+// (ASCII case ignored) or a character reference (which could spell one), or, in a part
+// with external hyperlinks, a prefixed `id` name; inside a style element the
 // part is refused at once.
 // Every pass is linear in the part; the formula fields are read without a regular
 // expression (formula-scan.ts).
@@ -185,7 +211,9 @@ const RELATIONSHIP_ID_ATTRIBUTE = 'id';
 const MACRO_ATTRIBUTE_NAMES: readonly string[] = ['macro', 'fmlaMacro'];
 const MACRO_ELEMENT_NAMES: readonly string[] = ['FmlaMacro'];
 const SCRIPT_ELEMENT_NAMES: readonly string[] = ['ScriptText'];
-const URL_ATTRIBUTE_NAMES: readonly string[] = ['src', 'href', 'althref'];
+const URL_ATTRIBUTE_NAMES: readonly string[] = ['src'];
+// Every attribute whose ASCII-folded local name ends with this is a URL attribute too.
+const URL_ATTRIBUTE_SUFFIX = 'href';
 const BASE_URL_ATTRIBUTE_NAMES: readonly string[] = ['base'];
 // The ASCII-folded start of the one data: URI a URL attribute may hold (see the header).
 const DATA_IMAGE_URL_START = 'data:image/';
@@ -200,6 +228,7 @@ const ACTIVE_ELEMENT_NAMES: readonly string[] = [
   'controls',
   'webPublishItem',
   'webPublishObject',
+  'script',
 ];
 // A namespace declaration is not an attribute: `xmlns`, or the `xmlns` prefix.
 const NAMESPACE_DECLARATION = 'xmlns';
@@ -214,16 +243,22 @@ const DEFAULT_NAMESPACE_KEY = '';
 /** The most open elements the walk follows the nesting of (see the header). */
 export const MAX_TRACKED_ELEMENT_DEPTH = 512;
 
+/** The relationship ids a worksheet's own relationships part gives an external hyperlink (see the header). */
+export interface WorksheetHyperlinkIds {
+  /** The ids it gives an external hyperlink and nothing else: a hyperlink with one keeps a URL fragment in its `location`. */
+  readonly onlyExternal: ReadonlySet<string>;
+  /** The ids it gives an external hyperlink, among others or not: no element but a hyperlink may name one. */
+  readonly external: ReadonlySet<string>;
+}
+
 /**
  * Per worksheet part name, the relationship ids its own relationships part gives an
- * external hyperlink and nothing else (assertNoUnsafePackageParts reads them): a
- * hyperlink of that part with one of them keeps a URL fragment in its `location`, not a
- * formula (see the header).
+ * external hyperlink (assertNoUnsafePackageParts reads them; see the header).
  */
-export type ExternalHyperlinkIds = ReadonlyMap<string, ReadonlySet<string>>;
+export type ExternalHyperlinkIds = ReadonlyMap<string, WorksheetHyperlinkIds>;
 
 const NO_EXTERNAL_HYPERLINKS: ExternalHyperlinkIds = new Map();
-const NO_HYPERLINK_IDS: ReadonlySet<string> = new Set();
+const NO_HYPERLINK_IDS: WorksheetHyperlinkIds = { onlyExternal: new Set(), external: new Set() };
 
 /** Lower-case ASCII names, by length. */
 type NameSet = ReadonlyMap<number, readonly string[]>;
@@ -277,11 +312,44 @@ interface NamespaceScopes {
 // The level of StyleText while the walk is inside no style element.
 const OUTSIDE_STYLE = -1;
 
-/** The CSS text of the style element the walk is inside (see the header). */
+/** Where a CssScan stands after the `url(` it read last. */
+type CssUrlPhase =
+  // No `url(` target is being read.
+  | 'none'
+  // Past `url(`: CSS white space is skipped.
+  | 'space'
+  // Past `url(` and white space, a '/': a '*' next opens a comment.
+  | 'slash'
+  // In the target, past an optional quote: its start is read (UrlStartReader).
+  | 'target';
+
+/**
+ * CSS text read one piece at a time, in constant memory (see the URL header): how much
+ * of `@import` and of `url(` its last code units spell, ASCII case ignored, and where the
+ * target of its last `url(` stands. Create with createCssScan, feed with feedCss;
+ * `loads` once the text read so far loads a resource (loadsCssResource).
+ */
+interface CssScan {
+  /** A style: a backslash anywhere, and an `@import`, load. Any other attribute value: a backslash from its first `url(` on. */
+  readonly style: boolean;
+  /** How many code units of CSS_IMPORT the last code units spell. */
+  importMatched: number;
+  /** How many code units of CSS_URL_OPEN the last code units spell. */
+  urlMatched: number;
+  phase: CssUrlPhase;
+  /** The start of the target of the last `url(`, read while `phase` is 'target'. */
+  target: UrlStartReader;
+  /** A `url(` was read. */
+  urlSeen: boolean;
+  loads: boolean;
+}
+
+/** The style element the walk is inside (see the header). */
 interface StyleText {
   /** How many elements were open around the style element; OUTSIDE_STYLE for none. */
   level: number;
-  text: string;
+  /** Its CSS text read so far. */
+  css: CssScan;
 }
 
 // Bytes of the loose element name check (looseLocalStart): the delimiters that end a
@@ -296,11 +364,17 @@ const UPPER_A = 0x41;
 const UPPER_Z = 0x5a;
 const ASCII_CASE_OFFSET = 0x20;
 
-// The CSS a style may not hold (loadsCssResource), compared ASCII-folded.
+// The CSS a style may not hold (loadsCssResource), compared ASCII-folded. Neither
+// pattern repeats its first code unit, which advanceMatch relies on.
 const CSS_IMPORT = '@import';
 const CSS_URL_OPEN = 'url(';
-const CSS_ESCAPE = '\\';
-const CSS_COMMENT_OPEN = '/*';
+// A backslash: a CSS escape.
+const CSS_ESCAPE = 0x5c;
+// A '/' then this opens a CSS comment.
+const ASTERISK = 0x2a;
+// The bytes a value needs to hold `url(` once decoded: '(' itself, or the '&' of a reference.
+const PARENTHESIS_OPEN = 0x28;
+const AMPERSAND = 0x26;
 // CSS white space (space, tab, line feed, carriage return, form feed) and quotes.
 const CSS_SPACE: ReadonlySet<number> = new Set([0x20, 0x09, 0x0a, 0x0d, 0x0c]);
 const CSS_QUOTES: ReadonlySet<number> = new Set([0x22, 0x27]);
@@ -387,6 +461,7 @@ const PIVOT_FORMULA_ELEMENTS = nameSet(PIVOT_FORMULA_ELEMENT_NAMES);
 const PIVOT_FORMULA_ATTRIBUTE = nameSet([PIVOT_FORMULA_ATTRIBUTE_NAME]);
 const INNER_FORMULA_ELEMENT = nameSet([INNER_FORMULA_ELEMENT_NAME]);
 const URL_FRAGMENT_ELEMENTS = nameSet(URL_FRAGMENT_ELEMENT_NAMES);
+const RELATIONSHIP_IDS = nameSet([RELATIONSHIP_ID_ATTRIBUTE]);
 const MACRO_ATTRIBUTES = nameSet(MACRO_ATTRIBUTE_NAMES);
 const MACRO_ELEMENTS = nameSet(MACRO_ELEMENT_NAMES);
 const SCRIPT_ELEMENTS = nameSet(SCRIPT_ELEMENT_NAMES);
@@ -472,10 +547,13 @@ function sniffLeadingByte(sniff: EntryContentSniff, byte: number): void {
   sniff.kind = 'other';
 }
 
-/** Reads the held first bytes: a UTF-16 or UTF-32 mark decides, a UTF-8 one is skipped. */
+/** Reads the held first bytes: a UTF-16 or UTF-32 mark or an EBCDIC declaration decides, a UTF-8 mark is skipped. */
 function readHead(sniff: EntryContentSniff): void {
   sniff.headRead = true;
-  if (OTHER_BYTE_ORDER_MARKS.some((mark) => startsWithBytes(sniff.head, mark))) {
+  const misencoded =
+    OTHER_BYTE_ORDER_MARKS.some((mark) => startsWithBytes(sniff.head, mark)) ||
+    startsWithBytes(sniff.head, EBCDIC_DECLARATION_START);
+  if (misencoded) {
     sniff.kind = 'misencoded';
     return;
   }
@@ -531,7 +609,7 @@ function partEncodingError(entry: string, detail: string): SpreadsheetFileError 
  */
 export function assertEntryContentKind(name: string, kind: EntryContentKind): void {
   if (kind === 'misencoded') {
-    throw partEncodingError(name, 'is UTF-16 or UTF-32 text, which the scans cannot read');
+    throw partEncodingError(name, 'is UTF-16, UTF-32 or EBCDIC text, which the scans cannot read');
   }
   if (kind === 'xml') return;
   const folded = foldAsciiCase(name);
@@ -749,36 +827,110 @@ function assertRelativeUrl(entry: string, raw: Uint8Array, dataImage: boolean): 
   }
 }
 
-/**
- * Whether decoded CSS text `css` may load a resource (see the header): a backslash
- * anywhere, an `@import`, or a `url(` whose target, past CSS white space and an optional
- * quote, starts an absolute URL (startsAbsoluteUrl, which stops at the quote or ')'
- * that ends the target) or a comment. ASCII case is ignored. Linear: each `url(` is read
- * up to the code unit that decides, which is never past the next `url(`'s parenthesis.
- */
-function loadsCssResource(css: string): boolean {
-  if (css.includes(CSS_ESCAPE)) return true;
-  const folded = foldAsciiCase(css);
-  if (folded.includes(CSS_IMPORT)) return true;
-  for (
-    let open = folded.indexOf(CSS_URL_OPEN);
-    open !== -1;
-    open = folded.indexOf(CSS_URL_OPEN, open + CSS_URL_OPEN.length)
-  ) {
-    let start = open + CSS_URL_OPEN.length;
-    while (start < css.length && CSS_SPACE.has(css.charCodeAt(start))) start += 1;
-    if (css.startsWith(CSS_COMMENT_OPEN, start)) return true;
-    if (CSS_QUOTES.has(css.charCodeAt(start))) start += 1;
-    if (startsAbsoluteUrl(css, start)) return true;
-  }
-  return false;
+/** A new CssScan, nothing read yet; `style` says whether the text is a style (see CssScan). */
+function createCssScan(style: boolean): CssScan {
+  return {
+    style,
+    importMatched: 0,
+    urlMatched: 0,
+    phase: 'none',
+    target: createUrlStartReader(),
+    urlSeen: false,
+    loads: false,
+  };
 }
 
-/** Decoded CSS text `css` loads nothing (loadsCssResource), or UNSAFE_CONTENT `unsafe-part`. */
-function assertSafeStyle(entry: string, css: string): void {
-  if (loadsCssResource(css)) {
-    throw unsafePart(entry, 'Workbook part holds a style that loads a resource');
+/** `code` with an ASCII capital letter folded to lower case. */
+function foldAsciiCode(code: number): number {
+  return code >= UPPER_A && code <= UPPER_Z ? code + ASCII_CASE_OFFSET : code;
+}
+
+/**
+ * How many code units of `pattern` the text spells after `code` (folded), given that it
+ * spelled `matched` of them before. Exact for a pattern whose first code unit does not
+ * repeat in it (CSS_IMPORT, CSS_URL_OPEN): no shorter match can then be pending.
+ */
+function advanceMatch(pattern: string, matched: number, code: number): number {
+  if (code === pattern.charCodeAt(matched)) return matched + 1;
+  return code === pattern.charCodeAt(0) ? 1 : 0;
+}
+
+/**
+ * Reads `code` into the target of the last `url(` (see loadsCssResource): past CSS
+ * white space, a `/*` loads; past an optional quote, the start of the target is read
+ * (readUrlStart) and an absolute one loads. A '(' always decides a pending target, so
+ * one is pending at a time.
+ */
+function readCssUrlTarget(scan: CssScan, code: number): void {
+  const phase = scan.phase;
+  switch (phase) {
+    case 'none':
+      return;
+    case 'space':
+      if (CSS_SPACE.has(code)) return;
+      if (code === SLASH) {
+        scan.phase = 'slash';
+        return;
+      }
+      scan.target = createUrlStartReader();
+      scan.phase = 'target';
+      if (CSS_QUOTES.has(code)) return;
+      break;
+    case 'slash':
+      if (code === ASTERISK) {
+        scan.loads = true;
+        return;
+      }
+      scan.target = createUrlStartReader();
+      readUrlStart(scan.target, SLASH);
+      scan.phase = 'target';
+      break;
+    case 'target':
+      break;
+    default: {
+      const _exhaustive: never = phase;
+      throw new Error(`Unhandled CSS url phase: ${String(_exhaustive)}`);
+    }
   }
+  const verdict = readUrlStart(scan.target, code);
+  if (verdict === 'absolute') scan.loads = true;
+  if (verdict !== 'pending') scan.phase = 'none';
+}
+
+/** Reads the next piece `text` of the CSS of `scan`, up to the code unit that makes it load. */
+function feedCss(scan: CssScan, text: string): void {
+  for (let at = 0; at < text.length && !scan.loads; at += 1) {
+    const code = text.charCodeAt(at);
+    if (code === CSS_ESCAPE && (scan.style || scan.urlSeen)) {
+      scan.loads = true;
+      return;
+    }
+    readCssUrlTarget(scan, code);
+    const folded = foldAsciiCode(code);
+    scan.urlMatched = advanceMatch(CSS_URL_OPEN, scan.urlMatched, folded);
+    if (scan.urlMatched === CSS_URL_OPEN.length) {
+      scan.urlMatched = 0;
+      scan.urlSeen = true;
+      scan.phase = 'space';
+    }
+    if (!scan.style) continue;
+    scan.importMatched = advanceMatch(CSS_IMPORT, scan.importMatched, folded);
+    if (scan.importMatched === CSS_IMPORT.length) scan.loads = true;
+  }
+}
+
+/**
+ * Whether decoded CSS text `css` may load a resource (see the header): a `url(` whose
+ * target, past CSS white space and an optional quote, starts an absolute URL
+ * (readUrlStart, which decides before the quote or ')' that ends the target) or a
+ * comment; in a `style`, also a backslash anywhere or an `@import`, and in any other
+ * attribute value a backslash from its first `url(` on. ASCII case is ignored. One pass
+ * (feedCss); a style element's text is fed piece by piece instead.
+ */
+function loadsCssResource(css: string, style: boolean): boolean {
+  const scan = createCssScan(style);
+  feedCss(scan, css);
+  return scan.loads;
 }
 
 /** Decodes style attribute value bytes `raw`: CSS that loads nothing, or UNSAFE_CONTENT `unsafe-part`. */
@@ -787,7 +939,33 @@ function assertSafeStyleAttribute(entry: string, raw: Uint8Array): void {
   if (text === null) {
     throw unsafePart(entry, 'Workbook part holds a style the scan cannot decode');
   }
-  assertSafeStyle(entry, text);
+  if (loadsCssResource(text, true)) {
+    throw unsafePart(entry, 'Workbook part holds a style that loads a resource');
+  }
+}
+
+/**
+ * The value bytes `raw` of an attribute that is no style hold no `url(` that loads a
+ * resource (loadsCssResource), or UNSAFE_CONTENT `unsafe-part`; so does a value that
+ * cannot be decoded. Only a value with a '(' or a reference can hold one once decoded,
+ * so no other is decoded.
+ */
+function assertNoCssUrl(entry: string, raw: Uint8Array): void {
+  if (!raw.includes(PARENTHESIS_OPEN) && !raw.includes(AMPERSAND)) return;
+  const text = decodeXmlText(raw);
+  if (text === null) {
+    throw unsafePart(entry, 'Workbook part holds an attribute value the scan cannot decode');
+  }
+  if (loadsCssResource(text, false)) {
+    throw unsafePart(entry, 'Workbook part holds a url() that loads a resource');
+  }
+}
+
+/** Whether the attribute whose local name is bytes [start, end) names a URL: `src`, or any name that ends with `href` (ASCII case ignored). */
+function isUrlAttributeName(bytes: Uint8Array, start: number, end: number): boolean {
+  if (isNameIn(bytes, start, end, URL_ATTRIBUTES)) return true;
+  const suffixStart = end - URL_ATTRIBUTE_SUFFIX.length;
+  return suffixStart >= start && spellsFolded(bytes, suffixStart, URL_ATTRIBUTE_SUFFIX);
 }
 
 /** Whether attribute name bytes [start, end) declare a namespace: `xmlns` or `xmlns:` and a prefix. */
@@ -810,8 +988,8 @@ function localPartStart(bytes: Uint8Array, start: number, end: number): number {
  * Checks attribute `attribute` of the scanned tag: a formula field (a FORMULA_ATTRIBUTES
  * attribute, or the `elementField` attribute of this element) passes the scan, its
  * `formula` attribute read with quoted sections as `formulaQuotes`; a macro is empty; a
- * URL attribute is relative or an image data URI, a base URL relative; a style loads
- * nothing.
+ * style loads nothing; any other value holds no `url(` that loads a resource, and a URL
+ * attribute is relative or an image data URI, a base URL relative.
  */
 function assertSafeAttribute(
   entry: string,
@@ -830,16 +1008,18 @@ function assertSafeAttribute(
   if (isNameIn(bytes, localStart, nameEnd, MACRO_ATTRIBUTES)) {
     throw unsafeFormula(entry, 'Workbook part assigns a macro');
   }
-  if (isNameIn(bytes, localStart, nameEnd, URL_ATTRIBUTES)) {
-    assertRelativeUrl(entry, bytes.subarray(valueStart, valueEnd), true);
+  const raw = bytes.subarray(valueStart, valueEnd);
+  if (isNameIn(bytes, localStart, nameEnd, STYLES)) {
+    assertSafeStyleAttribute(entry, raw);
+    return;
+  }
+  assertNoCssUrl(entry, raw);
+  if (isUrlAttributeName(bytes, localStart, nameEnd)) {
+    assertRelativeUrl(entry, raw, true);
     return;
   }
   if (isNameIn(bytes, localStart, nameEnd, BASE_URL_ATTRIBUTES)) {
-    assertRelativeUrl(entry, bytes.subarray(valueStart, valueEnd), false);
-    return;
-  }
-  if (isNameIn(bytes, localStart, nameEnd, STYLES)) {
-    assertSafeStyleAttribute(entry, bytes.subarray(valueStart, valueEnd));
+    assertRelativeUrl(entry, raw, false);
     return;
   }
   const field =
@@ -849,7 +1029,7 @@ function assertSafeAttribute(
   const quoted = isNameIn(bytes, localStart, nameEnd, PIVOT_FORMULA_ATTRIBUTE)
     ? formulaQuotes
     : 'sheet-name';
-  assertSafeFormulaField(entry, bytes.subarray(valueStart, valueEnd), quoted);
+  assertSafeFormulaField(entry, raw, quoted);
 }
 
 /** The field attribute of its own the element whose local name is bytes [start, end) carries, or null. */
@@ -861,12 +1041,47 @@ function elementFormulaAttribute(bytes: Uint8Array, start: number, end: number):
 }
 
 /**
+ * Refuses, UNSAFE_CONTENT `unsafe-part`, the tag scanned into `markup`, of an element
+ * that is no hyperlink, when it names an external hyperlink of its part (see the
+ * header): a prefixed attribute whose local name is `id` (ASCII case ignored, any
+ * namespace) and whose decoded value is one of `externalIds`, or cannot be decoded.
+ */
+function assertNoExternalHyperlinkId(
+  entry: string,
+  bytes: Uint8Array,
+  markup: XmlMarkup,
+  attributes: readonly number[],
+  externalIds: ReadonlySet<string>,
+): void {
+  if (externalIds.size === 0) return;
+  for (let attribute = 0; attribute < markup.attributeCount; attribute += 1) {
+    const nameStart = attributeField(attributes, attribute, ATTRIBUTE_NAME_START);
+    const nameEnd = attributeField(attributes, attribute, ATTRIBUTE_NAME_END);
+    const localStart = localPartStart(bytes, nameStart, nameEnd);
+    if (localStart === nameStart || !isNameIn(bytes, localStart, nameEnd, RELATIONSHIP_IDS)) {
+      continue;
+    }
+    const id = decodeXmlText(
+      bytes.subarray(
+        attributeField(attributes, attribute, ATTRIBUTE_VALUE_START),
+        attributeField(attributes, attribute, ATTRIBUTE_VALUE_END),
+      ),
+    );
+    if (id === null || externalIds.has(id)) {
+      throw unsafePart(entry, 'Workbook part names an external hyperlink from another element');
+    }
+  }
+}
+
+/**
  * Checks the start or empty tag scanned into `markup` with its `attributes` (see the
- * formula field header): no active element, every field attribute safe (a hyperlink's
- * `location` unless its relationship ids by `scopes` are `externalHyperlinkIds` of this
- * part), and, for a start tag of a field element outside the OMML namespace (`scopes`),
- * its content up to its own end tag (left in `markup`; assertSafeFieldContent), empty
- * for a macro element, white space only for a script element.
+ * formula field header): no active element, no element but a hyperlink that names an
+ * external hyperlink of this part (`hyperlinkIds`), every field attribute safe (a
+ * hyperlink's `location` unless its relationship ids by `scopes` are only external
+ * hyperlinks of this part), and, for a start tag of a field element outside the OMML
+ * namespace (`scopes`), its content up to its own end tag (left in `markup`;
+ * assertSafeFieldContent), empty for a macro element, white space only for a script
+ * element.
  */
 function assertSafeElement(
   entry: string,
@@ -874,19 +1089,23 @@ function assertSafeElement(
   markup: XmlMarkup,
   attributes: number[],
   scopes: NamespaceScopes,
-  externalHyperlinkIds: ReadonlySet<string>,
+  hyperlinkIds: WorksheetHyperlinkIds,
 ): void {
   const localStart = localNameStart(bytes, markup);
   const localEnd = markup.nameEnd;
   if (isNameIn(bytes, localStart, localEnd, ACTIVE_ELEMENTS)) {
     throw unsafePart(
       entry,
-      'Workbook part holds an embedded object, a control or a web publishing item',
+      'Workbook part holds an embedded object, a control, a script or a web publishing item',
     );
   }
+  const hyperlink = isNameIn(bytes, localStart, localEnd, URL_FRAGMENT_ELEMENTS);
+  if (!hyperlink) {
+    assertNoExternalHyperlinkId(entry, bytes, markup, attributes, hyperlinkIds.external);
+  }
   const urlFragment =
-    isNameIn(bytes, localStart, localEnd, URL_FRAGMENT_ELEMENTS) &&
-    leadsToExternalHyperlink(scopes, bytes, markup, attributes, externalHyperlinkIds);
+    hyperlink &&
+    leadsToExternalHyperlink(scopes, bytes, markup, attributes, hyperlinkIds.onlyExternal);
   const elementField = urlFragment ? null : elementFormulaAttribute(bytes, localStart, localEnd);
   const formulaQuotes: QuotedSection = isNameIn(bytes, localStart, localEnd, PIVOT_FORMULA_ELEMENTS)
     ? 'field-name'
@@ -982,9 +1201,17 @@ function declareNamespaces(
   return prefixes;
 }
 
-/** Removes the bindings of `prefixes`, the innermost of each, from `scopes`. */
+/**
+ * Removes the bindings of `prefixes`, the innermost of each, from `scopes`, and a prefix
+ * whose last binding that was: only prefixes in scope stay held (see the header).
+ */
 function releaseNamespaces(scopes: NamespaceScopes, prefixes: readonly string[]): void {
-  for (const key of prefixes) scopes.bindings.get(key)?.pop();
+  for (const key of prefixes) {
+    const stack = scopes.bindings.get(key);
+    if (stack === undefined) continue;
+    stack.pop();
+    if (stack.length === 0) scopes.bindings.delete(key);
+  }
 }
 
 /**
@@ -1127,6 +1354,23 @@ function looseLocalStart(bytes: Uint8Array, nameStart: number): number {
   return localStart;
 }
 
+/**
+ * Whether any '<' of `bytes` opens an element whose loose local name (looseLocalStart:
+ * the name a lenient reader takes, past its last ':') is `localName`, ASCII case
+ * ignored. For a part the strict lexer cannot read. Linear: every loose name stops
+ * before the next '<'.
+ */
+export function opensLooseElement(bytes: Uint8Array, localName: string): boolean {
+  const names = nameSet([localName]);
+  for (let at = nextMarkup(bytes, 0); at !== -1; at = nextMarkup(bytes, at + 1)) {
+    const localStart = looseLocalStart(bytes, at + 1);
+    let localEnd = localStart;
+    while (isLooseNameByte(bytes[localEnd])) localEnd += 1;
+    if (isNameIn(bytes, localStart, localEnd, names)) return true;
+  }
+  return false;
+}
+
 /** The end of the run of bytes the strict lexer takes into a name (ASCII letters, digits, '_', '-', '.') from `start`. */
 function strictNameEnd(bytes: Uint8Array, start: number): number {
   let at = start;
@@ -1138,12 +1382,19 @@ function strictNameEnd(bytes: Uint8Array, start: number): number {
  * After markup the strict lexer refuses at `from`, refuses the part when any '<' from
  * there on could open a field, macro, script or active element or an element with a
  * field attribute of its own (the strict-name head of its loose local name, which a
- * reader that stops at U+0080 or a non-ASCII letter reads, is one), or any run of name
+ * reader that stops at U+0080 or a non-ASCII letter reads, is one), any run of name
  * bytes is a field, macro, URL, base URL or style name or a stylesheet instruction
- * target. Linear: every loose name stops before the next '<', every run of name bytes
- * is read once.
+ * target, or ends a `url(` (ASCII case ignored), any `&#` opens a character reference
+ * (it could spell one), or, with `externalIds` (the part's external hyperlinks), a run
+ * after a ':' is `id`. Linear: every loose name stops before the next '<', every run of
+ * name bytes is read once.
  */
-function assertNoFieldAfter(entry: string, bytes: Uint8Array, from: number): void {
+function assertNoFieldAfter(
+  entry: string,
+  bytes: Uint8Array,
+  from: number,
+  externalIds: ReadonlySet<string>,
+): void {
   for (let at = from; at !== -1; at = nextMarkup(bytes, at + 1)) {
     const localStart = looseLocalStart(bytes, at + 1);
     const headEnd = strictNameEnd(bytes, localStart);
@@ -1162,6 +1413,9 @@ function assertNoFieldAfter(entry: string, bytes: Uint8Array, from: number): voi
   let at = from;
   while (at < bytes.length) {
     if (!isNameByte(bytes[at])) {
+      if (bytes[at] === AMPERSAND && bytes[at + 1] === HASH) {
+        throw unsafePart(entry, 'Workbook part holds a reference the strict lexer cannot read');
+      }
       at += 1;
       continue;
     }
@@ -1172,12 +1426,17 @@ function assertNoFieldAfter(entry: string, bytes: Uint8Array, from: number): voi
     ) {
       throw unsafeFormula(entry, 'Workbook part holds a formula the strict lexer cannot read');
     }
-    if (
-      isNameIn(bytes, at, end, URL_ATTRIBUTES) ||
+    const urlOpen = end - (CSS_URL_OPEN.length - 1);
+    const link =
+      isUrlAttributeName(bytes, at, end) ||
       isNameIn(bytes, at, end, BASE_URL_ATTRIBUTES) ||
       isNameIn(bytes, at, end, STYLES) ||
-      isNameIn(bytes, at, end, STYLESHEET_INSTRUCTIONS)
-    ) {
+      isNameIn(bytes, at, end, STYLESHEET_INSTRUCTIONS) ||
+      (urlOpen >= at && spellsFolded(bytes, urlOpen, CSS_URL_OPEN)) ||
+      (externalIds.size > 0 &&
+        bytes[at - 1] === COLON &&
+        isNameIn(bytes, at, end, RELATIONSHIP_IDS));
+    if (link) {
       throw unsafePart(entry, 'Workbook part holds a link the strict lexer cannot read');
     }
     at = end;
@@ -1192,32 +1451,38 @@ function isStylesheetInstruction(bytes: Uint8Array, markup: XmlMarkup): boolean 
   );
 }
 
-/** Adds the character data bytes `raw`, decoded, to the CSS text of `style`; UNSAFE_CONTENT `unsafe-part` when it cannot be decoded. */
+/** Feeds the character data bytes `raw`, decoded, to the CSS of `style`; UNSAFE_CONTENT `unsafe-part` when it cannot be decoded. */
 function addStyleText(entry: string, style: StyleText, raw: Uint8Array): void {
   if (raw.length === 0) return;
   const text = decodeXmlText(raw);
   if (text === null) {
     throw unsafePart(entry, 'Workbook part holds a style the scan cannot decode');
   }
-  style.text += text;
+  feedCss(style.css, text);
 }
 
-/** Adds the text of the CDATA section scanned into `markup`, if it is one, to the CSS text of `style`. */
+/** Feeds the text of the CDATA section scanned into `markup`, if it is one, to the CSS of `style`. */
 function addStyleCdata(bytes: Uint8Array, markup: XmlMarkup, style: StyleText): void {
   if (!bytesEqualAscii(bytes, markup.start, markup.start + CDATA_OPEN.length, CDATA_OPEN)) return;
-  style.text += FIELD_DECODER.decode(
-    bytes.subarray(markup.start + CDATA_OPEN.length, markup.end - CDATA_CLOSE_LENGTH),
+  feedCss(
+    style.css,
+    FIELD_DECODER.decode(
+      bytes.subarray(markup.start + CDATA_OPEN.length, markup.end - CDATA_CLOSE_LENGTH),
+    ),
   );
 }
 
 /**
- * The CSS text of the style element that ended (or of the rest of the part, when the
- * walk lost the nesting inside it) loads nothing: assertSafeStyle, then `style` leaves it.
+ * The CSS of the style element that ended (or of the rest of the part, when the walk
+ * lost the nesting inside it) loads nothing (loadsCssResource), or UNSAFE_CONTENT
+ * `unsafe-part`; then `style` leaves it.
  */
 function endStyle(entry: string, style: StyleText): void {
-  assertSafeStyle(entry, style.text);
+  if (style.css.loads) {
+    throw unsafePart(entry, 'Workbook part holds a style that loads a resource');
+  }
   style.level = OUTSIDE_STYLE;
-  style.text = '';
+  style.css = createCssScan(true);
 }
 
 /**
@@ -1228,19 +1493,20 @@ function endStyle(entry: string, style: StyleText): void {
  * lexer refuses, anything that could be one (see the formula field header);
  * UNSAFE_CONTENT `{ entry, cap }` when it holds more than MAX_XMLNS_DECLARATIONS_PER_PART
  * namespace declarations in scope at once. A hyperlink's `location` is a URL fragment
- * only with relationship ids of `externalHyperlinkIds`. Every markup of the part is
- * read, the open elements and the namespace declarations in scope kept on the way, and
- * the text of a style element gathered up to its end tag.
+ * only with relationship ids that `hyperlinkIds` gives only an external hyperlink, and
+ * no other element may name one it gives one. Every markup of the part is read, the
+ * open elements and the namespace declarations in scope kept on the way, and the text
+ * of a style element read piece by piece up to its end tag.
  */
 function assertSafeFields(
   entry: string,
   bytes: Uint8Array,
-  externalHyperlinkIds: ReadonlySet<string>,
+  hyperlinkIds: WorksheetHyperlinkIds,
 ): void {
   const markup = createMarkup();
   const attributes: number[] = [];
   const scopes = createNamespaceScopes();
-  const style: StyleText = { level: OUTSIDE_STYLE, text: '' };
+  const style: StyleText = { level: OUTSIDE_STYLE, css: createCssScan(true) };
   let textStart = 0;
   for (let at = nextMarkup(bytes, 0); at !== -1; at = nextMarkup(bytes, markup.end)) {
     const inStyle = style.level !== OUTSIDE_STYLE;
@@ -1249,7 +1515,7 @@ function assertSafeFields(
       if (inStyle) {
         throw unsafePart(entry, 'Workbook part holds a style the strict lexer cannot read');
       }
-      assertNoFieldAfter(entry, bytes, at);
+      assertNoFieldAfter(entry, bytes, at, hyperlinkIds.external);
       return;
     }
     const kind = markup.kind;
@@ -1263,7 +1529,7 @@ function assertSafeFields(
         const inScopeBefore = scopes.declarationsInScope;
         const prefixes = declareNamespaces(entry, scopes, bytes, markup, attributes);
         const declarations = scopes.declarationsInScope - inScopeBefore;
-        assertSafeElement(entry, bytes, markup, attributes, scopes, externalHyperlinkIds);
+        assertSafeElement(entry, bytes, markup, attributes, scopes, hyperlinkIds);
         // A field, macro or script element was read through its end tag, now in `markup`.
         if (markup.kind !== 'start') {
           endUnopenedElement(scopes, prefixes, declarations);
@@ -1302,15 +1568,16 @@ function assertSafeFields(
  * active element, URL outside the package, style that loads a resource or stylesheet
  * instruction, or more than MAX_XMLNS_DECLARATIONS_PER_PART namespace declarations in
  * scope at once (see the formula field header). A hyperlink's `location` is taken for
- * a URL fragment only when its relationship ids are among `externalHyperlinkIds` (those
- * of this part, ExternalHyperlinkIds; none by default).
+ * a URL fragment only when its relationship ids are among those `hyperlinkIds` gives
+ * only an external hyperlink, and no other element may name one it gives an external
+ * hyperlink (those of this part, ExternalHyperlinkIds; none by default).
  * Throws SpreadsheetFileError('UNSAFE_CONTENT') naming `name`; a field refusal also
  * carries its reason (`unsafe-formula` or `unsafe-part`), the namespace refusal the cap.
  */
 export function assertSafeXmlPart(
   name: string,
   bytes: Uint8Array,
-  externalHyperlinkIds: ReadonlySet<string> = NO_HYPERLINK_IDS,
+  hyperlinkIds: WorksheetHyperlinkIds = NO_HYPERLINK_IDS,
 ): void {
   const xml = strFromU8(bytes);
 
@@ -1324,7 +1591,7 @@ export function assertSafeXmlPart(
       entry: name,
     });
   }
-  assertSafeFields(name, bytes, externalHyperlinkIds);
+  assertSafeFields(name, bytes, hyperlinkIds);
 }
 
 /**

@@ -77,7 +77,7 @@ describe('assertNoUnsafePackageParts', () => {
   });
 
   // The content scan reads a hyperlink's location as a URL fragment only for these ids.
-  it('returns the ids a worksheet relationships part gives an external hyperlink and nothing else', () => {
+  it('returns the ids a worksheet relationships part gives an external hyperlink, only or among others', () => {
     const relationship = (id: string, type: string, target: string, mode = ''): string =>
       `<Relationship Id="${id}" Type="${OFFICE_REL}/${type}" Target="${target}"${mode}/>`;
     const external = ' TargetMode="External"';
@@ -92,7 +92,12 @@ describe('assertNoUnsafePackageParts', () => {
       '</Relationships>';
 
     expect(checkEntries({ [SHEET_RELS_PART]: sheetRels })).toEqual(
-      new Map([[SHEET_PART, new Set(['rId1', 'rId5'])]]),
+      new Map([
+        [
+          SHEET_PART,
+          { onlyExternal: new Set(['rId1', 'rId5']), external: new Set(['rId1', 'rId4', 'rId5']) },
+        ],
+      ]),
     );
     expect(checkEntries({})).toEqual(new Map());
   });

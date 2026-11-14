@@ -5,8 +5,10 @@
 // reads one in a path), or when, past those leading code units, it starts with '//' (a
 // network path), with a drive letter written C| (C|/x is C:/x to a URL parser), or with a
 // URI scheme up to its ':' (an ASCII letter, then letters, digits, '+', '-' or '.'; the
-// drive letter C: is one). Shared by the content scan (URL attributes and styles) and
-// the relationship Target rule.
+// drive letter C: is one). Shared by the content scan (URL attributes, styles and the
+// `url(` of any attribute value) and the relationship Target rule. The start of a URL
+// is read one code unit at a time (UrlStartReader), so the content scan can read the
+// text of a style that comes in pieces without joining them.
 
 const BACKSLASH = '\\';
 const SLASH = 0x2f;
@@ -25,6 +27,34 @@ const LOWER_Z = 0x7a;
 const DIGIT_ZERO = 0x30;
 const DIGIT_NINE = 0x39;
 
+/** Where an incremental read of the start of a URL stands (UrlStartReader). */
+type UrlStartPhase =
+  // Before the first code unit a URL parser keeps: C0 controls and spaces are skipped.
+  | 'lead'
+  // Past a first '/': a second one makes a network path.
+  | 'slash'
+  // Past a first ASCII letter: '|' makes a drive letter, ':' a scheme (C: among them).
+  | 'letter'
+  // Past two or more scheme characters: ':' ends a scheme.
+  | 'scheme';
+
+/** What the code units read so far say: the URL starts outside the package, it does not, or not yet known. */
+export type UrlStartVerdict = 'absolute' | 'relative' | 'pending';
+
+/**
+ * The start of a URL read one code unit at a time (see startsAbsoluteUrl), so a caller
+ * that gets its text in pieces keeps no copy of it. Create with createUrlStartReader,
+ * feed with readUrlStart until it decides; text that ends while it is pending is
+ * relative.
+ */
+export interface UrlStartReader {
+  phase: UrlStartPhase;
+}
+
+export function createUrlStartReader(): UrlStartReader {
+  return { phase: 'lead' };
+}
+
 function isAsciiLetter(code: number): boolean {
   return (code >= UPPER_A && code <= UPPER_Z) || (code >= LOWER_A && code <= LOWER_Z);
 }
@@ -38,33 +68,54 @@ function isSchemeCharacter(code: number): boolean {
   );
 }
 
-/** The index of the first code unit of `value` from `at` that a URL parser keeps (not URL_REMOVED). */
-function keptUrlIndex(value: string, at: number): number {
-  let index = at;
-  while (index < value.length && URL_REMOVED.has(value.charCodeAt(index))) index += 1;
-  return index;
+/**
+ * Reads code unit `code`, the next of the URL start `reader` stands in: the verdict
+ * once it decides, 'pending' before. Past the C0 controls and spaces a URL parser drops,
+ * a start of '//', a drive letter written C|, or a URI scheme up to its ':' is absolute,
+ * anything else relative; URL_REMOVED code units past the first kept one are skipped.
+ */
+export function readUrlStart(reader: UrlStartReader, code: number): UrlStartVerdict {
+  const phase = reader.phase;
+  switch (phase) {
+    case 'lead':
+      if (code <= SPACE) return 'pending';
+      if (code === SLASH) {
+        reader.phase = 'slash';
+        return 'pending';
+      }
+      if (!isAsciiLetter(code)) return 'relative';
+      reader.phase = 'letter';
+      return 'pending';
+    case 'slash':
+      if (URL_REMOVED.has(code)) return 'pending';
+      return code === SLASH ? 'absolute' : 'relative';
+    case 'letter':
+    case 'scheme':
+      if (URL_REMOVED.has(code)) return 'pending';
+      if (code === COLON || (phase === 'letter' && code === DRIVE_LETTER_BAR)) return 'absolute';
+      if (!isSchemeCharacter(code)) return 'relative';
+      reader.phase = 'scheme';
+      return 'pending';
+    default: {
+      const _exhaustive: never = phase;
+      throw new Error(`Unhandled URL start phase: ${String(_exhaustive)}`);
+    }
+  }
 }
 
 /**
  * Whether the text of `value` from `from` starts a URL outside the package (see the
  * header), its backslashes left to the caller: past the C0 controls and spaces a URL
  * parser drops, a start of '//', a drive letter written C|, or a URI scheme up to its
- * ':' (C: among them), URL_REMOVED code units skipped. Reads up to the first code unit
- * that decides, so a caller may pass a longer text whose URL ends at a quote or a ')'.
+ * ':' (C: among them), URL_REMOVED code units skipped (readUrlStart). Reads up to the
+ * first code unit that decides, so a caller may pass a longer text whose URL ends at a
+ * quote or a ')'.
  */
 export function startsAbsoluteUrl(value: string, from: number): boolean {
-  let start = from;
-  while (start < value.length && value.charCodeAt(start) <= SPACE) start += 1;
-  if (start >= value.length) return false;
-  const first = value.charCodeAt(start);
-  const next = keptUrlIndex(value, start + 1);
-  if (first === SLASH) return next < value.length && value.charCodeAt(next) === SLASH;
-  if (!isAsciiLetter(first)) return false;
-  if (next < value.length && value.charCodeAt(next) === DRIVE_LETTER_BAR) return true;
-  for (let at = next; at < value.length; at = keptUrlIndex(value, at + 1)) {
-    const code = value.charCodeAt(at);
-    if (code === COLON) return true;
-    if (!isSchemeCharacter(code)) return false;
+  const reader = createUrlStartReader();
+  for (let at = from; at < value.length; at += 1) {
+    const verdict = readUrlStart(reader, value.charCodeAt(at));
+    if (verdict !== 'pending') return verdict === 'absolute';
   }
   return false;
 }
