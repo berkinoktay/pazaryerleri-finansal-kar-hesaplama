@@ -930,12 +930,28 @@ describe('upload gate: the parts the reader opens', () => {
       },
     ],
     [
-      'a part over the namespace-declaration cap',
-      { 'xl/custom/ns.xml': partWithXmlns(MAX_XMLNS_DECLARATIONS_PER_PART + 1) },
+      'a part the reader never opens at the namespace-declaration cap',
+      { 'xl/custom/ns.xml': partWithXmlns(MAX_XMLNS_DECLARATIONS_PER_PART) },
     ],
   ])('accepts %s', async (_label, parts) => {
     const file = buildXlsxFixture([BASIC_SHEET], parts);
     expect(await readWorkbookGrid(file)).toEqual(BASIC_ROWS);
+  });
+
+  // The content scan keeps the namespace bindings of every kept XML part in memory
+  // bounded by the cap, so a part the reader never opens is held to it too, with the
+  // error the reader parts get.
+  it('refuses a part the reader never opens over the namespace-declaration cap', () => {
+    const entry = 'xl/custom/ns.xml';
+    const file = buildXlsxFixture([BASIC_SHEET], {
+      [entry]: partWithXmlns(MAX_XMLNS_DECLARATIONS_PER_PART + 1),
+    });
+    const err = catchGuard(file, opts);
+    expect(err?.code).toBe('UNSAFE_CONTENT');
+    expect(err?.meta).toEqual({ entry, cap: MAX_XMLNS_DECLARATIONS_PER_PART });
+    expect(err?.message).toBe(
+      `Workbook part '${entry}' has more than ${MAX_XMLNS_DECLARATIONS_PER_PART} namespace declarations`,
+    );
   });
 
   // The export hands every part on unchanged, so every kept XML part is content-scanned,

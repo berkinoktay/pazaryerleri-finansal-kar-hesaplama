@@ -8,6 +8,7 @@ import {
   feedEntryContentSniff,
   finishEntryContentSniff,
   isXmlPart,
+  tooManyNamespaceDeclarations,
   type EntryContentKind,
 } from './content-scan';
 import { cutRootChildren, literalAttributeText } from './patch/calc-chain';
@@ -464,7 +465,9 @@ function endStartTag(name: string, weight: XmlDomWeight, tag: StartTagScan): voi
  *     40 000-byte name kept it busy for seconds. Bytes are at least characters, so
  *     the byte cap also caps the characters of every name;
  *   - at most MAX_XMLNS_DECLARATIONS_PER_PART occurrences of 'xmlns' in this part
- *     (UNSAFE_CONTENT): xmldom's namespace lookup is quadratic in nested declarations.
+ *     (UNSAFE_CONTENT, tooManyNamespaceDeclarations: the error the content scan raises
+ *     for more declarations in any kept XML part): xmldom's namespace lookup is
+ *     quadratic in nested declarations.
  */
 function chargeXmlPart(name: string, bytes: Uint8Array, weight: XmlDomWeight): void {
   let declarations = 0;
@@ -496,11 +499,7 @@ function chargeXmlPart(name: string, bytes: Uint8Array, weight: XmlDomWeight): v
     } else if (byte === XMLNS_BYTES[0] && startsWithBytes(bytes, i, XMLNS_BYTES)) {
       declarations += 1;
       if (declarations > MAX_XMLNS_DECLARATIONS_PER_PART) {
-        throw new SpreadsheetFileError(
-          'UNSAFE_CONTENT',
-          `Workbook part '${name}' has more than ${MAX_XMLNS_DECLARATIONS_PER_PART} namespace declarations`,
-          { entry: name, cap: MAX_XMLNS_DECLARATIONS_PER_PART },
-        );
+        throw tooManyNamespaceDeclarations(name);
       }
     }
   }

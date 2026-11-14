@@ -1,6 +1,7 @@
 import { isUtf8 } from 'node:buffer';
 
 import { strFromU8 } from 'fflate';
+import { MAX_XMLNS_DECLARATIONS_PER_PART } from './constants';
 import { SpreadsheetFileError } from './errors';
 import { formulaTextRefusal, type QuotedSection } from './formula-scan';
 import { UNSAFE_CONTENT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
@@ -75,7 +76,12 @@ const NO_BYTE = -1;
 // and the value of the ELEMENT_FORMULA_ATTRIBUTE_NAMES attributes on their one element
 // (a conditional format value object's `val`, a hyperlink's `location`, a camera tool's
 // `cellRange`), local names compared ignoring their prefix and ASCII case (so a reader
-// that ignores case finds no field the gate skipped). Each field is decoded (the five
+// that ignores case finds no field the gate skipped). A hyperlink's `location` is a
+// field only when the hyperlink has no relationship id (an `id` attribute whose prefix
+// is bound to RELATIONSHIPS_NAMESPACE where it stands): with one, the hyperlink leads to
+// the relationship's URL and Excel keeps that URL's #fragment in `location`
+// (https://site/page#part: Target https://site/page, location `part`), which is no
+// formula. Each field is decoded (the five
 // predefined references and every character reference replaced) and must pass
 // formula-scan.ts; in the `formula` attribute of a PIVOT_FORMULA_ELEMENT_NAMES element
 // (a pivot calculated field or item) a quoted section is a field name, not a sheet name.
@@ -88,17 +94,30 @@ const NO_BYTE = -1;
 // empty field passes.
 // An Office Math fraction is also named `f` (an equation in a text box writes
 // `<m:f><m:fPr/>...</m:f>`), so an element in the OMML_NAMESPACE is not a formula field.
-// The walk keeps the namespace declarations in scope (NamespaceScopes); a binding counts
-// only while every end tag closes the innermost open element, so markup whose nesting
-// the walk cannot follow leaves every `f` a field.
+// The walk keeps the namespace declarations in scope (NamespaceScopes) in memory bounded
+// by MAX_XMLNS_DECLARATIONS_PER_PART: it counts the open elements and keeps an entry
+// only for an open element that declares namespaces, and a part with more declarations
+// than that is refused with the error the reader parts get for it
+// (tooManyNamespaceDeclarations). A binding counts only while every end tag that returns
+// to the level of a declaring element names it, and no end tag at another level names an
+// open declaring element; markup whose nesting the walk cannot follow leaves every `f` a
+// field and every hyperlink `location` a formula.
 // A macro assignment needs code the gate never accepts, so a non-empty
 // MACRO_ATTRIBUTE_NAMES attribute or FmlaMacro element is refused (Excel writes
 // `macro=""` on every shape), and an element of ACTIVE_ELEMENT_NAMES (an embedded
-// object, a control, a web publishing item) is refused wherever it stands.
+// object, a control, a web publishing item) is refused wherever it stands. So is a
+// SCRIPT_ELEMENT_NAMES element (a VML control's script) that holds anything but white
+// space.
+// A URL_ATTRIBUTE_NAMES attribute (`src` or `href`, any prefix: VML's v:imagedata@src,
+// @o:href, v:fill@src, a shape's href) names a resource outside the relationships, so
+// its decoded value must be relative: one that starts, past the C0 controls and spaces
+// a URL parser drops, with a URI scheme (an ASCII letter, then letters, digits, '+',
+// '-' or '.', then ':'; the drive letter C: is one), a drive letter written C|, or '//',
+// or that holds a backslash anywhere, is refused with UNSAFE_CONTENT `unsafe-part`.
 // Where the strict lexer refuses markup that a lenient or a non-ASCII reading accepts,
 // the walk cannot tell where the fields are from there on, so the part is refused when
-// anything after that point could open a field element, an element with a field
-// attribute of its own, or name a field attribute.
+// anything after that point could open a field, macro, script or active element or an
+// element with a field attribute of its own, or name a field, macro or URL attribute.
 // Every pass is linear in the part; the formula fields are read without a regular
 // expression (formula-scan.ts).
 const FORMULA_ELEMENT_NAMES: readonly string[] = [
@@ -106,6 +125,7 @@ const FORMULA_ELEMENT_NAMES: readonly string[] = [
   'formula',
   'formula1',
   'formula2',
+  'oldFormula',
   'calculatedColumnFormula',
   'totalsRowFormula',
   'definedName',
@@ -137,8 +157,14 @@ const PIVOT_FORMULA_ELEMENT_NAMES: readonly string[] = ['cacheField', 'calculate
 const PIVOT_FORMULA_ATTRIBUTE_NAME = 'formula';
 // The local name of the one child element a formula field may hold (see the header).
 const INNER_FORMULA_ELEMENT_NAME = 'f';
+// Elements whose field attribute is a URL fragment when they carry a relationship id.
+const URL_FRAGMENT_ELEMENT_NAMES: readonly string[] = ['hyperlink'];
+// The local name of a relationship id attribute (`r:id`), compared exactly.
+const RELATIONSHIP_ID_ATTRIBUTE = 'id';
 const MACRO_ATTRIBUTE_NAMES: readonly string[] = ['macro', 'fmlaMacro'];
 const MACRO_ELEMENT_NAMES: readonly string[] = ['FmlaMacro'];
+const SCRIPT_ELEMENT_NAMES: readonly string[] = ['ScriptText'];
+const URL_ATTRIBUTE_NAMES: readonly string[] = ['src', 'href'];
 const ACTIVE_ELEMENT_NAMES: readonly string[] = [
   'oleObject',
   'oleObjects',
@@ -152,37 +178,60 @@ const NAMESPACE_DECLARATION = 'xmlns';
 const NAMESPACE_DECLARATION_PREFIX = 'xmlns:';
 // Office Math Markup Language: its elements are never formula fields (see the header).
 const OMML_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/math';
+// The namespace of a relationship id (see the header).
+const RELATIONSHIPS_NAMESPACE =
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 // The key of the default namespace among the prefixes of NamespaceScopes.
 const DEFAULT_NAMESPACE_KEY = '';
-// Numbers NamespaceScopes.open holds per open element: name start, name end, and
-// whether it declared namespaces (DECLARED or NOT_DECLARED).
-const DECLARED = 1;
-const NOT_DECLARED = 0;
 
 /** Lower-case ASCII names, by length. */
 type NameSet = ReadonlyMap<number, readonly string[]>;
 
-/** One namespace binding: the element that declared it and whether it names OMML_NAMESPACE. */
+/** The namespaces the walk tells apart; every other one is 'other'. */
+type KnownNamespace = 'omml' | 'relationships' | 'other';
+
+const KNOWN_NAMESPACES: readonly (readonly [uri: string, namespace: KnownNamespace])[] = [
+  [OMML_NAMESPACE, 'omml'],
+  [RELATIONSHIPS_NAMESPACE, 'relationships'],
+];
+
+/** One namespace binding: the level of the element that declared it and the namespace it names. */
 interface NamespaceBinding {
-  readonly element: number;
-  omml: boolean;
+  readonly level: number;
+  namespace: KnownNamespace;
+}
+
+/** An open element that declares namespaces. */
+interface DeclaringElement {
+  /** How many elements are open around it. */
+  readonly level: number;
+  /** Its name: bytes [nameStart, nameEnd) of the part, and their text. */
+  readonly nameStart: number;
+  readonly nameEnd: number;
+  readonly name: string;
+  /** The prefixes it bound (DEFAULT_NAMESPACE_KEY for the default namespace). */
+  readonly prefixes: readonly string[];
 }
 
 /**
- * The namespace declarations in scope while one part is walked. A declaration is
- * compared byte for byte: one written with a reference names another namespace. A
- * prefix declared twice on one element names OMML only when both declarations do.
+ * The namespace declarations in scope while one part is walked, in memory bounded by
+ * MAX_XMLNS_DECLARATIONS_PER_PART (see the header). A declaration is compared byte for
+ * byte: one written with a reference names another namespace. A prefix declared twice
+ * on one element names a known namespace only when both declarations name it.
  */
 interface NamespaceScopes {
   /** Per prefix (DEFAULT_NAMESPACE_KEY for the default namespace), its bindings, innermost last. */
   readonly bindings: Map<string, NamespaceBinding[]>;
-  /** The prefixes each declaring element in scope bound, innermost last. */
-  readonly declared: string[][];
-  /** The open elements, outermost first: name start, name end, DECLARED or NOT_DECLARED. */
-  readonly open: number[];
-  /** Serial number of the next element that declares namespaces. */
-  nextElement: number;
-  /** An end tag closed something else than the innermost open element: no binding counts. */
+  /** The open elements that declare namespaces, innermost last. */
+  readonly declaring: DeclaringElement[];
+  /** How many open declaring elements have each name, and each name length in bytes. */
+  readonly declaringNames: Map<string, number>;
+  readonly declaringNameLengths: Map<number, number>;
+  /** How many elements are open. */
+  depth: number;
+  /** The namespace declarations of the part read so far. */
+  declarations: number;
+  /** The walk lost the nesting of the part: no binding counts. */
   broken: boolean;
 }
 
@@ -197,6 +246,16 @@ const COLON = 0x3a;
 const UPPER_A = 0x41;
 const UPPER_Z = 0x5a;
 const ASCII_CASE_OFFSET = 0x20;
+
+// Code units of the URL attribute reading (isAbsoluteUrl).
+const BACKSLASH_TEXT = '\\';
+// What a URL parser removes wherever it stands: ASCII tab and line breaks.
+const URL_REMOVED: ReadonlySet<number> = new Set([0x09, 0x0a, 0x0d]);
+// The punctuation a URI scheme may hold after its first letter: '+', '-' and '.'.
+const URL_SCHEME_PUNCTUATION: ReadonlySet<number> = new Set([0x2b, 0x2d, 0x2e]);
+// What follows the letter of a drive letter besides ':' (C|/x is C:/x to a URL parser).
+const DRIVE_LETTER_BAR = 0x7c;
+const LOWER_Z = 0x7a;
 
 // The scans read a kept XML part in UTF-8. A part that another reader decodes in
 // another encoding could hold markup or a formula the scans never see (UTF-7 writes
@@ -276,8 +335,11 @@ const FIELD_ATTRIBUTE_ELEMENTS = nameSet(
 const PIVOT_FORMULA_ELEMENTS = nameSet(PIVOT_FORMULA_ELEMENT_NAMES);
 const PIVOT_FORMULA_ATTRIBUTE = nameSet([PIVOT_FORMULA_ATTRIBUTE_NAME]);
 const INNER_FORMULA_ELEMENT = nameSet([INNER_FORMULA_ELEMENT_NAME]);
+const URL_FRAGMENT_ELEMENTS = nameSet(URL_FRAGMENT_ELEMENT_NAMES);
 const MACRO_ATTRIBUTES = nameSet(MACRO_ATTRIBUTE_NAMES);
 const MACRO_ELEMENTS = nameSet(MACRO_ELEMENT_NAMES);
+const SCRIPT_ELEMENTS = nameSet(SCRIPT_ELEMENT_NAMES);
+const URL_ATTRIBUTES = nameSet(URL_ATTRIBUTE_NAMES);
 const ACTIVE_ELEMENTS = nameSet(ACTIVE_ELEMENT_NAMES);
 
 /** Whether the entry `name` is one the grid reader may open: named `.xml` or `.xml.rels`. */
@@ -314,6 +376,19 @@ function unsafeFormula(entry: string, message: string): SpreadsheetFileError {
 
 function unsafePart(entry: string, message: string): SpreadsheetFileError {
   return unsafeContentError(UNSAFE_CONTENT_REASONS.UNSAFE_PART, entry, message);
+}
+
+/**
+ * UNSAFE_CONTENT `{ entry, cap }`: part `entry` holds more than
+ * MAX_XMLNS_DECLARATIONS_PER_PART namespace declarations. The one error both the
+ * content scan of every kept XML part and the budget of the reader parts raise.
+ */
+export function tooManyNamespaceDeclarations(entry: string): SpreadsheetFileError {
+  return new SpreadsheetFileError(
+    'UNSAFE_CONTENT',
+    `Workbook part '${entry}' has more than ${MAX_XMLNS_DECLARATIONS_PER_PART} namespace declarations`,
+    { entry, cap: MAX_XMLNS_DECLARATIONS_PER_PART },
+  );
 }
 
 /** A new sniff for one entry, nothing read yet. */
@@ -585,6 +660,77 @@ function assertSafeFieldContent(
   if (!closed) throw notTextOnly(entry);
 }
 
+/**
+ * Reads the content of the script element whose start tag is scanned into `markup` up
+ * to its own end tag (left in `markup`): white space only, or UNSAFE_CONTENT
+ * `unsafe-formula`.
+ */
+function assertNoScript(entry: string, bytes: Uint8Array, markup: XmlMarkup): void {
+  const nameStart = markup.nameStart;
+  const nameEnd = markup.nameEnd;
+  const contentStart = markup.end;
+  const close = nextMarkup(bytes, contentStart);
+  const empty =
+    close !== -1 &&
+    isXmlSpaceOnly(bytes, contentStart, close) &&
+    lexes(bytes, close, markup) &&
+    closesElement(bytes, markup, nameStart, nameEnd);
+  if (!empty) throw unsafeFormula(entry, 'Workbook part holds a script');
+}
+
+function isAsciiLetter(code: number): boolean {
+  const lower = foldAsciiByte(code) ?? NOT_A_DIGIT;
+  return lower >= LOWER_A && lower <= LOWER_Z;
+}
+
+/** What a URI scheme holds after its first letter: ASCII letters, digits, '+', '-' and '.'. */
+function isSchemeCharacter(code: number): boolean {
+  return (
+    isAsciiLetter(code) ||
+    (code >= DIGIT_ZERO && code <= DIGIT_NINE) ||
+    URL_SCHEME_PUNCTUATION.has(code)
+  );
+}
+
+/** The index of the first code unit of `value` from `at` that a URL parser keeps (not URL_REMOVED). */
+function keptUrlIndex(value: string, at: number): number {
+  let index = at;
+  while (index < value.length && URL_REMOVED.has(value.charCodeAt(index))) index += 1;
+  return index;
+}
+
+/**
+ * Whether the decoded URL attribute text `value` names something outside the package
+ * (see the header): a backslash anywhere, or, past the C0 controls and spaces a URL
+ * parser drops from its front, a start of '//', a drive letter written C|, or a URI
+ * scheme up to its ':' (C: among them). URL_REMOVED code units are skipped. One pass.
+ */
+function isAbsoluteUrl(value: string): boolean {
+  if (value.includes(BACKSLASH_TEXT)) return true;
+  let start = 0;
+  while (start < value.length && value.charCodeAt(start) <= SPACE) start += 1;
+  if (start >= value.length) return false;
+  const first = value.charCodeAt(start);
+  const next = keptUrlIndex(value, start + 1);
+  if (first === SLASH) return next < value.length && value.charCodeAt(next) === SLASH;
+  if (!isAsciiLetter(first)) return false;
+  if (next < value.length && value.charCodeAt(next) === DRIVE_LETTER_BAR) return true;
+  for (let at = next; at < value.length; at = keptUrlIndex(value, at + 1)) {
+    const code = value.charCodeAt(at);
+    if (code === COLON) return true;
+    if (!isSchemeCharacter(code)) return false;
+  }
+  return false;
+}
+
+/** Decodes URL attribute value bytes `raw`: a relative URL, or UNSAFE_CONTENT `unsafe-part`. */
+function assertRelativeUrl(entry: string, raw: Uint8Array): void {
+  const text = decodeXmlText(raw);
+  if (text === null || isAbsoluteUrl(text)) {
+    throw unsafePart(entry, 'Workbook part links to a resource outside the package');
+  }
+}
+
 /** Whether attribute name bytes [start, end) declare a namespace: `xmlns` or `xmlns:` and a prefix. */
 function isNamespaceDeclaration(bytes: Uint8Array, start: number, end: number): boolean {
   if (bytesEqualAscii(bytes, start, end, NAMESPACE_DECLARATION)) return true;
@@ -604,7 +750,8 @@ function localPartStart(bytes: Uint8Array, start: number, end: number): number {
 /**
  * Checks attribute `attribute` of the scanned tag: a formula field (a FORMULA_ATTRIBUTES
  * attribute, or the `elementField` attribute of this element) passes the scan, its
- * `formula` attribute read with quoted sections as `formulaQuotes`; a macro is empty.
+ * `formula` attribute read with quoted sections as `formulaQuotes`; a macro is empty; a
+ * URL attribute is relative.
  */
 function assertSafeAttribute(
   entry: string,
@@ -622,6 +769,10 @@ function assertSafeAttribute(
   const localStart = localPartStart(bytes, nameStart, nameEnd);
   if (isNameIn(bytes, localStart, nameEnd, MACRO_ATTRIBUTES)) {
     throw unsafeFormula(entry, 'Workbook part assigns a macro');
+  }
+  if (isNameIn(bytes, localStart, nameEnd, URL_ATTRIBUTES)) {
+    assertRelativeUrl(entry, bytes.subarray(valueStart, valueEnd));
+    return;
   }
   const field =
     isNameIn(bytes, localStart, nameEnd, FORMULA_ATTRIBUTES) ||
@@ -643,9 +794,11 @@ function elementFormulaAttribute(bytes: Uint8Array, start: number, end: number):
 
 /**
  * Checks the start or empty tag scanned into `markup` with its `attributes` (see the
- * formula field header): no active element, every field attribute safe, and, for a
- * start tag of a field element outside the OMML namespace (`scopes`), its content up to
- * its own end tag (left in `markup`; assertSafeFieldContent), empty for a macro element.
+ * formula field header): no active element, every field attribute safe (a hyperlink's
+ * `location` only when it has no relationship id by `scopes`), and, for a start tag of
+ * a field element outside the OMML namespace (`scopes`), its content up to its own end
+ * tag (left in `markup`; assertSafeFieldContent), empty for a macro element, white
+ * space only for a script element.
  */
 function assertSafeElement(
   entry: string,
@@ -662,7 +815,10 @@ function assertSafeElement(
       'Workbook part holds an embedded object, a control or a web publishing item',
     );
   }
-  const elementField = elementFormulaAttribute(bytes, localStart, localEnd);
+  const urlFragment =
+    isNameIn(bytes, localStart, localEnd, URL_FRAGMENT_ELEMENTS) &&
+    hasRelationshipId(scopes, bytes, markup, attributes);
+  const elementField = urlFragment ? null : elementFormulaAttribute(bytes, localStart, localEnd);
   const formulaQuotes: QuotedSection = isNameIn(bytes, localStart, localEnd, PIVOT_FORMULA_ELEMENTS)
     ? 'field-name'
     : 'sheet-name';
@@ -677,110 +833,203 @@ function assertSafeElement(
     }
     return;
   }
+  if (isNameIn(bytes, localStart, localEnd, SCRIPT_ELEMENTS)) {
+    assertNoScript(entry, bytes, markup);
+    return;
+  }
   if (!isNameIn(bytes, localStart, localEnd, FORMULA_ELEMENTS)) return;
   if (inOmmlNamespace(scopes, bytes, markup)) return;
   assertSafeFieldContent(entry, bytes, markup, attributes);
 }
 
 function createNamespaceScopes(): NamespaceScopes {
-  return { bindings: new Map(), declared: [], open: [], nextElement: 0, broken: false };
+  return {
+    bindings: new Map(),
+    declaring: [],
+    declaringNames: new Map(),
+    declaringNameLengths: new Map(),
+    depth: 0,
+    declarations: 0,
+    broken: false,
+  };
+}
+
+/** Adds `delta` to the count of `key` in `counts`, dropping a count that reaches zero. */
+function addCount<Key>(counts: Map<Key, number>, key: Key, delta: number): void {
+  const count = (counts.get(key) ?? 0) + delta;
+  if (count === 0) counts.delete(key);
+  else counts.set(key, count);
+}
+
+/** The namespace the declaration value bytes [start, end) name. */
+function knownNamespace(bytes: Uint8Array, start: number, end: number): KnownNamespace {
+  for (const [uri, namespace] of KNOWN_NAMESPACES) {
+    if (bytesEqualAscii(bytes, start, end, uri)) return namespace;
+  }
+  return 'other';
 }
 
 /**
- * Adds the namespace declarations of the start or empty tag scanned into `markup` to
- * `scopes`; whether it declared any (they must be released with releaseNamespaces).
+ * Counts the namespace declarations of the start or empty tag scanned into `markup`
+ * against MAX_XMLNS_DECLARATIONS_PER_PART for part `entry` (tooManyNamespaceDeclarations
+ * past it) and, while bindings count, binds them in `scopes` at the current level. The
+ * prefixes it bound (to release with releaseNamespaces), or null for none.
  */
 function declareNamespaces(
+  entry: string,
   scopes: NamespaceScopes,
   bytes: Uint8Array,
   markup: XmlMarkup,
   attributes: readonly number[],
-): boolean {
-  if (scopes.broken) return false;
-  const element = scopes.nextElement;
-  // Allocated at the first declaration only: most elements declare none.
+): string[] | null {
+  const level = scopes.depth;
+  // Allocated at the first binding only: most elements declare none.
   let prefixes: string[] | null = null;
   for (let attribute = 0; attribute < markup.attributeCount; attribute += 1) {
     const nameStart = attributeField(attributes, attribute, ATTRIBUTE_NAME_START);
     const nameEnd = attributeField(attributes, attribute, ATTRIBUTE_NAME_END);
     if (!isNamespaceDeclaration(bytes, nameStart, nameEnd)) continue;
+    scopes.declarations += 1;
+    if (scopes.declarations > MAX_XMLNS_DECLARATIONS_PER_PART) {
+      throw tooManyNamespaceDeclarations(entry);
+    }
+    if (scopes.broken) continue;
     const key =
       nameEnd === nameStart + NAMESPACE_DECLARATION.length
         ? DEFAULT_NAMESPACE_KEY
         : NAME_DECODER.decode(
             bytes.subarray(nameStart + NAMESPACE_DECLARATION_PREFIX.length, nameEnd),
           );
-    const omml = bytesEqualAscii(
+    const namespace = knownNamespace(
       bytes,
       attributeField(attributes, attribute, ATTRIBUTE_VALUE_START),
       attributeField(attributes, attribute, ATTRIBUTE_VALUE_END),
-      OMML_NAMESPACE,
     );
     const stack = scopes.bindings.get(key) ?? [];
     scopes.bindings.set(key, stack);
     const innermost = stack.at(-1);
-    if (innermost !== undefined && innermost.element === element) {
-      innermost.omml = innermost.omml && omml;
+    // Only this element binds at this level: every element bound before at it is closed.
+    if (innermost !== undefined && innermost.level === level) {
+      if (innermost.namespace !== namespace) innermost.namespace = 'other';
       continue;
     }
-    stack.push({ element, omml });
+    stack.push({ level, namespace });
     prefixes ??= [];
     prefixes.push(key);
   }
-  if (prefixes === null) return false;
-  scopes.nextElement += 1;
-  scopes.declared.push(prefixes);
-  return true;
+  return prefixes;
 }
 
-/** Removes the bindings of the innermost declaring element from `scopes`. */
-function releaseNamespaces(scopes: NamespaceScopes): void {
-  const prefixes = scopes.declared.pop() ?? [];
+/** Removes the bindings of `prefixes`, the innermost of each, from `scopes`. */
+function releaseNamespaces(scopes: NamespaceScopes, prefixes: readonly string[]): void {
   for (const key of prefixes) scopes.bindings.get(key)?.pop();
 }
 
-/** Makes the start tag at bytes [nameStart, nameEnd) the innermost open element. */
+/**
+ * Opens the element whose start tag names bytes [nameStart, nameEnd), which bound
+ * `prefixes`: one level deeper, and an entry when it declared namespaces.
+ */
 function openElement(
   scopes: NamespaceScopes,
+  bytes: Uint8Array,
   nameStart: number,
   nameEnd: number,
-  declared: boolean,
+  prefixes: readonly string[] | null,
 ): void {
   if (scopes.broken) return;
-  scopes.open.push(nameStart, nameEnd, declared ? DECLARED : NOT_DECLARED);
+  if (prefixes !== null) {
+    const name = NAME_DECODER.decode(bytes.subarray(nameStart, nameEnd));
+    scopes.declaring.push({ level: scopes.depth, nameStart, nameEnd, name, prefixes });
+    addCount(scopes.declaringNames, name, 1);
+    addCount(scopes.declaringNameLengths, nameEnd - nameStart, 1);
+  }
+  scopes.depth += 1;
 }
 
 /**
- * Closes the innermost open element with the end tag scanned into `markup`, releasing
- * its bindings; when the end tag names another element (or none is open), no binding
- * counts from there on.
+ * Whether the end tag scanned into `markup` names an open declaring element. One lookup:
+ * the name is decoded only when an open declaring element has its length.
+ */
+function namesDeclaringElement(
+  scopes: NamespaceScopes,
+  bytes: Uint8Array,
+  markup: XmlMarkup,
+): boolean {
+  if (!scopes.declaringNameLengths.has(markup.nameEnd - markup.nameStart)) return false;
+  const name = NAME_DECODER.decode(bytes.subarray(markup.nameStart, markup.nameEnd));
+  return scopes.declaringNames.has(name);
+}
+
+/**
+ * Closes the innermost open element with the end tag scanned into `markup`. Back at the
+ * level of a declaring element, the end tag must name it, and releases its bindings;
+ * at any other level it must name no open declaring element (a reader that recovers
+ * from bad nesting would close that one there). Otherwise, or with no element open, no
+ * binding counts from there on.
  */
 function closeElement(scopes: NamespaceScopes, bytes: Uint8Array, markup: XmlMarkup): void {
   if (scopes.broken) return;
-  const declared = scopes.open.pop();
-  const nameEnd = scopes.open.pop();
-  const nameStart = scopes.open.pop();
-  if (
-    declared === undefined ||
-    nameEnd === undefined ||
-    nameStart === undefined ||
-    !closesElement(bytes, markup, nameStart, nameEnd)
-  ) {
+  if (scopes.depth === 0) {
     scopes.broken = true;
     return;
   }
-  if (declared === DECLARED) releaseNamespaces(scopes);
+  scopes.depth -= 1;
+  const innermost = scopes.declaring.at(-1);
+  if (innermost === undefined || innermost.level !== scopes.depth) {
+    if (namesDeclaringElement(scopes, bytes, markup)) scopes.broken = true;
+    return;
+  }
+  if (!closesElement(bytes, markup, innermost.nameStart, innermost.nameEnd)) {
+    scopes.broken = true;
+    return;
+  }
+  scopes.declaring.pop();
+  addCount(scopes.declaringNames, innermost.name, -1);
+  addCount(scopes.declaringNameLengths, innermost.nameEnd - innermost.nameStart, -1);
+  releaseNamespaces(scopes, innermost.prefixes);
+}
+
+/** The namespace the innermost binding of prefix `key` names in `scopes`, or null when none counts. */
+function boundNamespace(scopes: NamespaceScopes, key: string): KnownNamespace | null {
+  if (scopes.broken) return null;
+  return scopes.bindings.get(key)?.at(-1)?.namespace ?? null;
 }
 
 /** Whether the element scanned into `markup` is in OMML_NAMESPACE by the bindings of `scopes`. */
 function inOmmlNamespace(scopes: NamespaceScopes, bytes: Uint8Array, markup: XmlMarkup): boolean {
-  if (scopes.broken) return false;
   const localStart = localNameStart(bytes, markup);
   const key =
     localStart === markup.nameStart
       ? DEFAULT_NAMESPACE_KEY
       : NAME_DECODER.decode(bytes.subarray(markup.nameStart, localStart - 1));
-  return scopes.bindings.get(key)?.at(-1)?.omml === true;
+  return boundNamespace(scopes, key) === 'omml';
+}
+
+/**
+ * Whether the tag scanned into `markup` has a relationship id: a non-empty attribute
+ * whose local name is exactly RELATIONSHIP_ID_ATTRIBUTE and whose prefix is bound to
+ * RELATIONSHIPS_NAMESPACE by `scopes`.
+ */
+function hasRelationshipId(
+  scopes: NamespaceScopes,
+  bytes: Uint8Array,
+  markup: XmlMarkup,
+  attributes: readonly number[],
+): boolean {
+  for (let attribute = 0; attribute < markup.attributeCount; attribute += 1) {
+    const nameStart = attributeField(attributes, attribute, ATTRIBUTE_NAME_START);
+    const nameEnd = attributeField(attributes, attribute, ATTRIBUTE_NAME_END);
+    const localStart = localPartStart(bytes, nameStart, nameEnd);
+    const candidate =
+      localStart > nameStart &&
+      attributeField(attributes, attribute, ATTRIBUTE_VALUE_START) !==
+        attributeField(attributes, attribute, ATTRIBUTE_VALUE_END) &&
+      bytesEqualAscii(bytes, localStart, nameEnd, RELATIONSHIP_ID_ATTRIBUTE);
+    if (!candidate) continue;
+    const key = NAME_DECODER.decode(bytes.subarray(nameStart, localStart - 1));
+    if (boundNamespace(scopes, key) === 'relationships') return true;
+  }
+  return false;
 }
 
 /** A byte inside a loose element name: anything above a space but `<`, `>`, `/`, `=` and quotes. */
@@ -815,11 +1064,11 @@ function strictNameEnd(bytes: Uint8Array, start: number): number {
 
 /**
  * After markup the strict lexer refuses at `from`, refuses the part when any '<' from
- * there on could open a field, macro or active element or an element with a field
- * attribute of its own (the strict-name head of its loose local name, which a reader
- * that stops at U+0080 or a non-ASCII letter reads, is one), or any run of name bytes is
- * a field or macro attribute name. Linear: every loose name stops before the next '<',
- * every run of name bytes is read once.
+ * there on could open a field, macro, script or active element or an element with a
+ * field attribute of its own (the strict-name head of its loose local name, which a
+ * reader that stops at U+0080 or a non-ASCII letter reads, is one), or any run of name
+ * bytes is a field, macro or URL attribute name. Linear: every loose name stops before
+ * the next '<', every run of name bytes is read once.
  */
 function assertNoFieldAfter(entry: string, bytes: Uint8Array, from: number): void {
   for (let at = from; at !== -1; at = nextMarkup(bytes, at + 1)) {
@@ -831,7 +1080,8 @@ function assertNoFieldAfter(entry: string, bytes: Uint8Array, from: number): voi
     if (
       isNameIn(bytes, localStart, headEnd, FORMULA_ELEMENTS) ||
       isNameIn(bytes, localStart, headEnd, FIELD_ATTRIBUTE_ELEMENTS) ||
-      isNameIn(bytes, localStart, headEnd, MACRO_ELEMENTS)
+      isNameIn(bytes, localStart, headEnd, MACRO_ELEMENTS) ||
+      isNameIn(bytes, localStart, headEnd, SCRIPT_ELEMENTS)
     ) {
       throw unsafeFormula(entry, 'Workbook part holds a formula the strict lexer cannot read');
     }
@@ -849,16 +1099,21 @@ function assertNoFieldAfter(entry: string, bytes: Uint8Array, from: number): voi
     ) {
       throw unsafeFormula(entry, 'Workbook part holds a formula the strict lexer cannot read');
     }
+    if (isNameIn(bytes, at, end, URL_ATTRIBUTES)) {
+      throw unsafePart(entry, 'Workbook part holds a link the strict lexer cannot read');
+    }
     at = end;
   }
 }
 
 /**
  * Throws SpreadsheetFileError UNSAFE_CONTENT `{ reason, entry }` when XML part `entry`
- * holds a formula field that fails the scan, a macro assignment (`unsafe-formula`) or an
- * active element (`unsafe-part`), or, past markup the strict lexer refuses, anything
- * that could be one (see the formula field header). Every markup of the part is read,
- * the namespace declarations in scope kept on the way.
+ * holds a formula field that fails the scan, a macro assignment or a script
+ * (`unsafe-formula`), an active element or a URL outside the package (`unsafe-part`),
+ * or, past markup the strict lexer refuses, anything that could be one (see the formula
+ * field header); UNSAFE_CONTENT `{ entry, cap }` when it holds more than
+ * MAX_XMLNS_DECLARATIONS_PER_PART namespace declarations. Every markup of the part is
+ * read, the namespace declarations in scope kept on the way.
  */
 function assertSafeFields(entry: string, bytes: Uint8Array): void {
   const markup = createMarkup();
@@ -875,11 +1130,11 @@ function assertSafeFields(entry: string, bytes: Uint8Array): void {
       case 'empty': {
         const nameStart = markup.nameStart;
         const nameEnd = markup.nameEnd;
-        const declared = declareNamespaces(scopes, bytes, markup, attributes);
+        const prefixes = declareNamespaces(entry, scopes, bytes, markup, attributes);
         assertSafeElement(entry, bytes, markup, attributes, scopes);
-        // A field or macro element was read through its end tag, now in `markup`.
-        if (markup.kind === 'start') openElement(scopes, nameStart, nameEnd, declared);
-        else if (declared) releaseNamespaces(scopes);
+        // A field, macro or script element was read through its end tag, now in `markup`.
+        if (markup.kind === 'start') openElement(scopes, bytes, nameStart, nameEnd, prefixes);
+        else if (prefixes !== null) releaseNamespaces(scopes, prefixes);
         break;
       }
       case 'end':
@@ -898,10 +1153,11 @@ function assertSafeFields(entry: string, bytes: Uint8Array): void {
 /**
  * Rejects one XML part, whatever its name, that declares a DOCTYPE or ENTITY (any
  * case), references an entity other than the five predefined ones and numeric
- * character references, or holds an unsafe formula field, macro assignment or active
- * element (see the formula field header). Throws SpreadsheetFileError('UNSAFE_CONTENT')
- * naming `name`; a field refusal also carries its reason (`unsafe-formula` or
- * `unsafe-part`).
+ * character references, or holds an unsafe formula field, macro assignment, script,
+ * active element or URL outside the package, or more than
+ * MAX_XMLNS_DECLARATIONS_PER_PART namespace declarations (see the formula field header).
+ * Throws SpreadsheetFileError('UNSAFE_CONTENT') naming `name`; a field refusal also
+ * carries its reason (`unsafe-formula` or `unsafe-part`), the namespace refusal the cap.
  */
 export function assertSafeXmlPart(name: string, bytes: Uint8Array): void {
   const xml = strFromU8(bytes);
