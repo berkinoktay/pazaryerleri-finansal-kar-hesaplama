@@ -13,10 +13,16 @@ import { unzipSync } from 'fflate';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import { readWorkbookGrid } from '@pazarsync/spreadsheet';
+import {
+  columnIndex,
+  readWorkbookGrid,
+  resolveLayout,
+  type ColumnKey,
+  type ResolvedLayout,
+} from '@pazarsync/spreadsheet';
 
 import { createApp } from '@/app';
-import { resolveTariffLayout as resolveLayout } from '@/services/commission-tariff-layout';
+import { trendyolCommissionTariffLayout } from '@/workbooks/formats/trendyol/commission-tariff.layout';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -63,6 +69,16 @@ function text(row: readonly unknown[] | undefined, idx: number): string | null {
   const v = row?.[idx];
   if (v === null || v === undefined) return null;
   return String(v);
+}
+
+type CommissionColumn = ColumnKey<typeof trendyolCommissionTariffLayout>;
+
+// A named column of the commission layout. The tests read only columns the fixtures
+// carry, so an absent one fails loudly instead of reading nothing.
+function column(layout: ResolvedLayout, key: CommissionColumn): number {
+  const index = columnIndex(trendyolCommissionTariffLayout, layout, key);
+  if (index === null) throw new Error(`commission export has no ${key} column`);
+  return index;
 }
 
 interface BandSel {
@@ -165,21 +181,22 @@ describe('commission-tariff export + variable periods', () => {
     // Re-parse the produced file and verify the patch landed on the right row.
     const out = Buffer.from(await res.arrayBuffer());
     const grid = await readWorkbookGrid(out);
-    const layout = resolveLayout(grid[0] ?? []);
+    const layout = resolveLayout(trendyolCommissionTariffLayout, grid);
     expect(layout).not.toBeNull();
     if (layout === null) return;
 
     const dataRows = grid.slice(1);
-    const patched = dataRows.find((r) => text(r, layout.fixed.barcode) === MATCHED_BARCODE);
-    expect(Number(text(patched, layout.newTsf))).toBe(777.09);
-    expect(text(patched, layout.tariffSelection)).toBe('4 Günlük Fiyat');
+    const patched = dataRows.find((r) => text(r, column(layout, 'barcode')) === MATCHED_BARCODE);
+    expect(Number(text(patched, column(layout, 'newTsf')))).toBe(777.09);
+    expect(text(patched, column(layout, 'tariffSelection'))).toBe('4 Günlük Fiyat');
 
     // A different, unselected product keeps an empty YENİ TSF.
     const untouched = dataRows.find(
       (r) =>
-        text(r, layout.fixed.barcode) !== MATCHED_BARCODE && text(r, layout.fixed.barcode) !== null,
+        text(r, column(layout, 'barcode')) !== MATCHED_BARCODE &&
+        text(r, column(layout, 'barcode')) !== null,
     );
-    expect(text(untouched, layout.newTsf)).toBeNull();
+    expect(text(untouched, column(layout, 'newTsf'))).toBeNull();
 
     // The tariff is now marked exported.
     const listed = await prisma.commissionTariff.findUnique({ where: { id: tariffId } });
@@ -200,12 +217,14 @@ describe('commission-tariff export + variable periods', () => {
     expect(res.headers.get('content-type')).toContain('spreadsheetml');
 
     const grid = await readWorkbookGrid(Buffer.from(await res.arrayBuffer()));
-    const layout = resolveLayout(grid[0] ?? []);
+    const layout = resolveLayout(trendyolCommissionTariffLayout, grid);
     expect(layout).not.toBeNull();
     if (layout === null) return;
-    const matched = grid.slice(1).find((r) => text(r, layout.fixed.barcode) === MATCHED_BARCODE);
+    const matched = grid
+      .slice(1)
+      .find((r) => text(r, column(layout, 'barcode')) === MATCHED_BARCODE);
     // Untouched: no YENİ TSF written for any product.
-    expect(text(matched, layout.newTsf)).toBeNull();
+    expect(text(matched, column(layout, 'newTsf'))).toBeNull();
   });
 
   it('exports band 1 lower limit ("ve üzeri" boundary), not the current price', async () => {
@@ -237,11 +256,13 @@ describe('commission-tariff export + variable periods', () => {
 
     const out = Buffer.from(await res.arrayBuffer());
     const grid = await readWorkbookGrid(out);
-    const layout = resolveLayout(grid[0] ?? []);
+    const layout = resolveLayout(trendyolCommissionTariffLayout, grid);
     expect(layout).not.toBeNull();
     if (layout === null) return;
-    const patched = grid.slice(1).find((r) => text(r, layout.fixed.barcode) === MATCHED_BARCODE);
-    expect(Number(text(patched, layout.newTsf))).toBe(600.0);
+    const patched = grid
+      .slice(1)
+      .find((r) => text(r, column(layout, 'barcode')) === MATCHED_BARCODE);
+    expect(Number(text(patched, column(layout, 'newTsf')))).toBe(600.0);
   });
 
   // Reads the matched product's patched (newTsf, tariffSelection) from one zip entry.
@@ -251,12 +272,12 @@ describe('commission-tariff export + variable periods', () => {
   ): Promise<{ newTsf: number; selection: string | null }> {
     if (name === undefined) throw new Error('expected zip entry missing');
     const grid = await readWorkbookGrid(Buffer.from(entries[name] ?? new Uint8Array()));
-    const layout = resolveLayout(grid[0] ?? []);
+    const layout = resolveLayout(trendyolCommissionTariffLayout, grid);
     if (layout === null) throw new Error('unreadable export');
-    const row = grid.slice(1).find((r) => text(r, layout.fixed.barcode) === MATCHED_BARCODE);
+    const row = grid.slice(1).find((r) => text(r, column(layout, 'barcode')) === MATCHED_BARCODE);
     return {
-      newTsf: Number(text(row, layout.newTsf)),
-      selection: text(row, layout.tariffSelection),
+      newTsf: Number(text(row, column(layout, 'newTsf'))),
+      selection: text(row, column(layout, 'tariffSelection')),
     };
   }
 
@@ -320,12 +341,14 @@ describe('commission-tariff export + variable periods', () => {
     expect(res.headers.get('content-disposition')).toContain('7-gunluk');
 
     const grid = await readWorkbookGrid(Buffer.from(await res.arrayBuffer()));
-    const layout = resolveLayout(grid[0] ?? []);
+    const layout = resolveLayout(trendyolCommissionTariffLayout, grid);
     expect(layout).not.toBeNull();
     if (layout === null) return;
-    const patched = grid.slice(1).find((r) => text(r, layout.fixed.barcode) === MATCHED_BARCODE);
-    expect(Number(text(patched, layout.newTsf))).toBe(777.09);
-    expect(text(patched, layout.tariffSelection)).toBe('7 Günlük Fiyat');
+    const patched = grid
+      .slice(1)
+      .find((r) => text(r, column(layout, 'barcode')) === MATCHED_BARCODE);
+    expect(Number(text(patched, column(layout, 'newTsf')))).toBe(777.09);
+    expect(text(patched, column(layout, 'tariffSelection'))).toBe('7 Günlük Fiyat');
   });
 
   it('lets the higher-sortOrder row win when a period repeats a barcode, whatever the insert order', async () => {
@@ -369,11 +392,13 @@ describe('commission-tariff export + variable periods', () => {
     expect(res.headers.get('content-type')).toContain('spreadsheetml');
 
     const grid = await readWorkbookGrid(Buffer.from(await res.arrayBuffer()));
-    const layout = resolveLayout(grid[0] ?? []);
+    const layout = resolveLayout(trendyolCommissionTariffLayout, grid);
     expect(layout).not.toBeNull();
     if (layout === null) return;
-    const patched = grid.slice(1).find((r) => text(r, layout.fixed.barcode) === MATCHED_BARCODE);
-    expect(Number(text(patched, layout.newTsf))).toBe(777.09);
+    const patched = grid
+      .slice(1)
+      .find((r) => text(r, column(layout, 'barcode')) === MATCHED_BARCODE);
+    expect(Number(text(patched, column(layout, 'newTsf')))).toBe(777.09);
   });
 
   it('returns 409 when the stored source file is unreadable', async () => {

@@ -23,4 +23,24 @@ export default [
       ],
     },
   },
+  {
+    // The spreadsheet testing entry patches in-process, without the parse worker
+    // and its queue. Production code must never reach it; tests and the entry
+    // itself may.
+    files: ['**/src/**'],
+    ignores: ['**/*.test.ts', '**/src/testing/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@pazarsync/spreadsheet/testing',
+              message: 'Test-only: it patches in-process, without the parse worker.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 ];

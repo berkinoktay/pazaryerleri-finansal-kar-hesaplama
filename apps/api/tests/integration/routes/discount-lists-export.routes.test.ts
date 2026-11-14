@@ -17,10 +17,9 @@ import { zipSync, strToU8 } from 'fflate';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import { readWorkbookGrid } from '@pazarsync/spreadsheet';
+import { cellText, readWorkbookGrid } from '@pazarsync/spreadsheet';
 
 import { createApp } from '@/app';
-import { cellText } from '@/lib/xlsx-grid-cells';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
