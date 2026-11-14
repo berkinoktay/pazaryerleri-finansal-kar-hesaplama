@@ -26,6 +26,8 @@ import {
   createMarkup,
   localNameIs,
   localNameStart,
+  NAMESPACE_DECLARATION,
+  NAMESPACE_DECLARATION_PREFIX,
   nextMarkup,
   scanMarkup,
   XmlLexError,
@@ -44,10 +46,12 @@ import { CONTENT_TYPES_PART, UNSAFE_PART_NAMES, UNSAFE_PART_PREFIXES } from './w
 // way Excel finds it:
 //   - by its content type: every Default and Override of the content types part;
 //   - by its relationship type: every Relationship of every relationships part, chosen
-//     by its content and by its name: every kept XML part whose root element is
-//     `Relationships` in the package relationships namespace (or, when the strict lexer
-//     cannot read its markup up to its root, that holds any element a lenient reader
-//     names `Relationships`), whatever its name (a reader that folds part
+//     by its content and by its name: every kept XML part, whatever its name, whose
+//     root element's local name is `Relationships` in any namespace (a reader may ignore
+//     the namespace, and one written with a character reference is the package
+//     namespace to a reader that decodes it) or, when the strict lexer cannot read its
+//     markup up to its root, that holds any element a lenient reader names
+//     `Relationships` (a reader that folds part
 //     names in Unicode takes `sheet1.xml.rel` and a long s for `sheet1.xml.rels`), and
 //     every entry whose ASCII-folded name ends with .rels, whatever the part it belongs
 //     to (`chart1.bin.rels` is followed like `chart1.xml.rels`). A digital signature
@@ -136,15 +140,9 @@ const RELS_FOLDER = '_rels/';
 // The local name of a worksheet part's root element; its namespace is one of
 // SPREADSHEET_MAIN_NAMESPACES.
 const WORKSHEET_ROOT = 'worksheet';
-// The root element of a relationships part, and its namespace (Open Packaging
-// Conventions; the same in strict documents).
+// The local name of the root element of a relationships part (Open Packaging
+// Conventions); its namespace is not compared (see the header).
 const RELATIONSHIPS_ROOT = 'Relationships';
-const PACKAGE_RELATIONSHIPS_NAMESPACES: readonly string[] = [
-  'http://schemas.openxmlformats.org/package/2006/relationships',
-];
-// A namespace declaration: `xmlns` for the default namespace, `xmlns:` and a prefix.
-const NAMESPACE_DECLARATION = 'xmlns';
-const NAMESPACE_DECLARATION_PREFIX = 'xmlns:';
 // What every digital signature relationship Type holds, ASCII-folded.
 const DIGITAL_SIGNATURE_TYPE_SEGMENT = '/digital-signature/';
 // The ASCII-folded starts of the only targets an external worksheet hyperlink may have.
@@ -260,14 +258,15 @@ function bindsOwnNamespace(
 /**
  * Whether the root element of XML part `bytes`, its first element past any declaration,
  * comment or processing instruction, has the local name `localName` in one of
- * `namespaces` (bindsOwnNamespace): 'match' when it does, 'unreadable' when the strict
- * lexer refuses the markup up to and including the root's start tag, 'other' for any
- * other root, or none. Reads up to the root's start tag only.
+ * `namespaces` (bindsOwnNamespace), in any namespace when `namespaces` is null: 'match'
+ * when it does, 'unreadable' when the strict lexer refuses the markup up to and
+ * including the root's start tag, 'other' for any other root, or none. Reads up to the
+ * root's start tag only.
  */
 function rootElementMatch(
   bytes: Uint8Array,
   localName: string,
-  namespaces: readonly string[],
+  namespaces: readonly string[] | null,
 ): RootMatch {
   const markup = createMarkup();
   const attributes: number[] = [];
@@ -277,7 +276,7 @@ function rootElementMatch(
       if (markup.kind === 'start' || markup.kind === 'empty') {
         const match =
           localNameIs(bytes, markup, localName) &&
-          bindsOwnNamespace(bytes, markup, attributes, namespaces);
+          (namespaces === null || bindsOwnNamespace(bytes, markup, attributes, namespaces));
         return match ? 'match' : 'other';
       }
       if (markup.kind === 'end') return 'other';
@@ -299,13 +298,14 @@ function hasWorksheetRoot(bytes: Uint8Array): boolean {
 
 /**
  * Whether kept XML entry `name`, of content `bytes`, is a relationships part the gate
- * walks (see the header): its name says so (isRelationshipsPartName), or its root element
- * is `Relationships` in the package relationships namespace, or the strict lexer cannot
- * read up to its root and a lenient reader finds an element named so (opensLooseElement).
+ * walks (see the header): its name says so (isRelationshipsPartName), or the local name
+ * of its root element is `Relationships`, whatever its namespace, or the strict lexer
+ * cannot read up to its root and a lenient reader finds an element named so
+ * (opensLooseElement).
  */
 function isRelationshipsPart(name: string, bytes: Uint8Array): boolean {
   if (isRelationshipsPartName(name)) return true;
-  const root = rootElementMatch(bytes, RELATIONSHIPS_ROOT, PACKAGE_RELATIONSHIPS_NAMESPACES);
+  const root = rootElementMatch(bytes, RELATIONSHIPS_ROOT, null);
   if (root === 'unreadable') return opensLooseElement(bytes, RELATIONSHIPS_ROOT);
   return root === 'match';
 }
@@ -542,7 +542,7 @@ function walkPart(entry: string, bytes: Uint8Array, select: ChildSelector): void
  * the gate keeps: no entry spelled in another ASCII case than a part the rule walks
  * (assertWalkedSpelling), no Default or Override of the content types part whose
  * ContentType holds a marker, and no Relationship of a kept relationships part (every
- * kept entry named `.rels` or whose root is a package Relationships element:
+ * kept entry named `.rels` or whose root element's local name is Relationships:
  * isRelationshipsPart) whose Type ends in an unsafe segment or names a digital
  * signature, or whose target reaches outside the package (assertSafeTarget, told what
  * the part belongs to by worksheetSource). Returns, per worksheet that has a

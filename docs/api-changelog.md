@@ -85,22 +85,45 @@ section "Versioning" for details.
   cross-sheet data validation or conditional format, `<xm:f>`, is read as the formula). A macro
   assignment (a non-empty `macro` or `fmlaMacro` attribute, a non-empty `FmlaMacro` element), a
   VML control script (a `ScriptText` element holding anything but white space), an SVG or HTML
-  `script` element, an `src` attribute or an attribute whose name ends in `href` (`href`,
+  `script`, `foreignObject`, `iframe`, `object` or `embed` element, an XML Events `handler` or
+  `listener` element, an event handler attribute (a name that starts with `on`, in any case), an
+  SVG animation element (`set`, `animate`, `animateMotion`, `animateTransform` or `animateColor`,
+  in any case: an animation can point a link at any address) or an attribute that names a web
+  resource (`data`, `srcset`, `poster`, `background`, `action`, `formaction`, `codebase`,
+  `archive`, `longdesc`, `usemap`, `cite`, `profile`, `manifest` or `ping`, in any case and
+  whatever its value) on an SVG, XHTML or XML Events element, on any element of a part whose root
+  element is `svg`, or on any element once the scan cannot follow the element nesting (elsewhere a
+  spreadsheet `set` element, such as a pivot cache's OLAP set, and a VML `data` attribute pass),
+  an `src` attribute or an attribute whose name ends in `href` (`href`,
   `althref`, `xlink:href` and the like), of any prefix (a VML picture, fill or shape link, an SVG
   image link), or an `xml:base` whose value is not relative (a URI scheme, a drive letter written `C:`
   or `C|`, a leading `//` or any backslash, read past the tabs and line breaks a URL parser
-  removes; an `src` or `href` attribute may hold a `data:image/` URI, any other `data:` URI is
-  refused), a style attribute or style element whose CSS holds `@import`, a backslash or a
-  `url()` with an absolute target, any other attribute value that holds a `url()` with an absolute
-  target or a backslash after its first `url(` (an SVG `fill`, `filter`, `clip-path`, `mask`,
-  `cursor` or `marker-*` attribute; `url(#id)` passes), an `xml-stylesheet` processing instruction, an
-  embedded object, a form or ActiveX control, a web publishing item, an Office web add-in, a
+  removes; an `src` or `href` attribute of an `image` or `imagedata` element may hold a `data:`
+  URI of a PNG, JPEG, GIF or BMP image (`image/png`, `image/jpeg`, `image/jpg`, `image/gif`,
+  `image/bmp`), any other `data:` URI, an SVG image `image/svg+xml` included, is refused), a
+  style attribute or style element whose CSS holds `@import`, a backslash or a quoted string that
+  starts with an absolute URL, any CSS (a style, or any other attribute value such as an SVG
+  `fill`, `filter`, `clip-path`, `mask`, `cursor` or `marker-*` attribute) whose `url()` target is
+  anything but a `#fragment` of the document (a relative, absolute, `data:` or empty target;
+  `url(#id)` passes) or that calls `image-set()`, `-webkit-image-set()`, `image()`, `src()` or
+  `cross-fade()` (in every attribute value, so a data validation prompt such as `image(s)` is
+  refused too), each function name read the way a CSS tokenizer reads it: CSS escapes are decoded
+  (`\75rl(`, `u\72l(` and `image\2dset(` spell `url(` and `image-set(`), a name that only ends
+  with one of these (`xurl(`, `-webkit-image-set(`) counts too, and a backslash that spells no
+  such call passes (a VML title `C:\logo`, the folder path Excel writes into a workbook such as
+  `C:\Users\u\Desktop\Yeni klasor (2)\`, a picture description such as `C:\x\Trendyol(1).png`),
+  any other attribute value with a backslash after its first `url(`, an `xml-stylesheet`
+  processing instruction, an embedded object, a form or ActiveX control, a web publishing item, an Office web add-in, a
   custom ribbon, attached toolbars or XML maps (which bind data from a remote file), more than 256
   namespace declarations in scope at once in one scanned part (declarations that go out of scope
   when their element closes, such as the three Excel writes per picture of a drawing, no longer
   add up; the parts the reader opens keep their limit of 256 declarations in all),
   and a DOCTYPE, an ENTITY declaration or an unknown entity reference in any scanned part answer
-  `422` `UNSAFE_CONTENT` too. A relationship that points outside the package now passes only when it is
+  `422` `UNSAFE_CONTENT` too. Past markup the scan's strict XML reader cannot read, the rest of the
+  part fails closed: it answers `422` `UNSAFE_CONTENT` when it holds anything that could be one of
+  these, among them any name that starts with `on` (in any case, even in text), any SVG animation
+  or web resource name, any of these CSS calls (escapes decoded) and any character reference.
+  A relationship that points outside the package now passes only when it is
   a hyperlink to an `http`, `https` or `mailto` address in the relationships part of a worksheet,
   decided by the part's content (the part the relationships belong to has a `worksheet` root
   element in the SpreadsheetML main namespace, transitional or strict, declared on that root), not
@@ -109,9 +132,9 @@ section "Versioning" for details.
   target is a URI with a scheme, a drive letter (`C:` or `C|`), a network path or holds a
   backslash, read past the tabs and line breaks a URL parser removes (the rule the URL attributes
   follow), answers `422` `UNSAFE_CONTENT`. A relationships part is recognised by its content as
-  well as by its name: every scanned entry whose root element is `Relationships` in the package
-  relationships namespace is checked by these rules whatever it is named (`sheet1.xml.rel` with a
-  long s, `sheet1.xml%2Erels`). A digital signature relationship (a signature origin, signature or
+  well as by its name: every scanned entry whose root element's local name is `Relationships`,
+  whatever its namespace (one written with a character reference included), is checked by these
+  rules whatever it is named (`sheet1.xml.rel` with a long s, `sheet1.xml%2Erels`). A digital signature relationship (a signature origin, signature or
   certificate) answers `422` `UNSAFE_CONTENT` too: verifying a signature can fetch the
   certificate's revocation and issuer addresses. The six export routes read the stored file through
   the same gate: a stored file with any of these conditions answers `409 CONFLICT`. Valid Trendyol

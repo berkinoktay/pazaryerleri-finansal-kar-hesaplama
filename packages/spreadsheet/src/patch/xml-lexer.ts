@@ -99,6 +99,11 @@ const ENCODING_PSEUDO_ATTRIBUTE = 'encoding';
 // The only encoding a declaration may name, compared ignoring ASCII case.
 const UTF8_ENCODING_NAME = 'utf-8';
 
+/** The attribute name that declares the default namespace. */
+export const NAMESPACE_DECLARATION = 'xmlns';
+/** How the name of an attribute that declares a prefix starts; the prefix follows. */
+export const NAMESPACE_DECLARATION_PREFIX = 'xmlns:';
+
 /** Decodes a name this lexer accepted: names are ASCII, which UTF-8 decodes unchanged. */
 export const NAME_DECODER = new TextDecoder();
 

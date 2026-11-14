@@ -429,6 +429,15 @@ describe('assertSafeXmlContent: formula fields', () => {
     expect(scanError(entriesOf({ [SHEET_PART]: xml }))).toBeNull();
   });
 
+  it('accepts Windows paths with parentheses after markup the strict lexer cannot read', () => {
+    const xml = worksheetWithCell('<v>1</v>').replace(
+      '<c r="A1">',
+      '<c r="A1"t="n"><z descr="C:\\x\\Trendyol(1).png" title="C:\\Users\\u\\Desktop\\Yeni klasor (2)\\"/>',
+    );
+
+    expect(scanError(entriesOf({ [SHEET_PART]: xml }))).toBeNull();
+  });
+
   it('refuses an unsafe formula in a workbook at the upload gate', () => {
     const file = buildXlsxFixture([
       { name: 'Sheet1', xml: worksheetWithFormula('<f>_xlfn.WEBSERVICE("http://x")</f>') },
@@ -1072,6 +1081,11 @@ const VML_URL_REFUSALS: readonly LabelledXml[] = [
     'a VML shape style that loads a picture from a network path',
     `<v:shape id="s" style="fill:url('\\\\evil\\x')"/>`,
   ],
+  ['a VML shape style that loads a relative picture', '<v:shape id="s" style="fill:url(x.png)"/>'],
+  [
+    'a VML fill whose src is an image data URI',
+    '<v:shape id="c" type="#_x0000_t202"><v:fill src="data:image/png;base64,AA" type="frame"/></v:shape>',
+  ],
 ];
 
 const SVG_PART = 'xl/media/image2.svg';
@@ -1153,24 +1167,117 @@ const SVG_REFUSALS: readonly LabelledXml[] = [
     'fill="&#117;rl(http://evil.example/p.svg#g)"',
     'fill="url&#40;http://evil.example/p.svg#g)"',
     'fill="url(/*x*/)"',
+    // Only a url( target that starts with '#' passes: relative, data: and empty load.
+    'fill="url(p.svg#g)"',
+    'fill="url( &quot;media/p.svg#g&quot; )"',
+    'fill="url(data:image/svg+xml;base64,PHN2Zz4=)"',
+    'fill="url()"',
+    'fill="url(&quot;&quot;)"',
+    'fill="url("',
+    // CSS functions that load an image whatever they are given.
+    'fill="image-set(&quot;a.png&quot; 1x)"',
+    'fill="-webkit-image-set(a.png 1x)"',
+    'fill="IMAGE(a.png)"',
+    'mask="src(&quot;m.svg&quot;)"',
+    'fill="cross-fade(a.png, b.png)"',
+    // A CSS escape spells url( or a function name before its '('.
+    'fill="\\75rl(http://evil/x)"',
+    'fill="\\75rl(x)"',
+    'fill="\\000075 rl(x)"',
+    'fill="u\\72l(x)"',
+    'fill="ur\\6c(x)"',
+    'fill="\\75 \\72 \\6c(x)"',
+    'fill="\\u\\r\\l(x)"',
+    'fill="\\69mage(x)"',
+    'fill="image\\2dset(x)"',
+    'fill="\\75&#13;&#10;rl(x)"',
+    // A name that ends with url or a loading function name counts, in any case.
+    'fill="-webkit-image-set(x)"',
+    'fill="URL(x)"',
+    'fill="xurl(x)"',
+    // A backslash before a newline is no CSS escape: the scan reads on through it.
+    'fill="u\\\nrl(x)"',
+    'fill="u\\&#13;&#10;rl(x)"',
   ].map(
     (attribute): LabelledXml => [
       `an SVG shape whose ${attribute} loads a resource`,
       `<rect width="1" height="1" ${attribute}/>`,
     ],
   ),
+  ...[
+    '<style>rect{fill:url(p.svg#g)}</style>',
+    '<style>rect{fill:url(</style>',
+    '<style>rect{background:image-set("a.png" 1x)}</style>',
+    '<style>rect{background:Image("a.png")}</style>',
+    '<style><![CDATA[rect{background:cross-fade(url(#a), url(#b))}]]></style>',
+    '<style>rect{--u:"https://evil.example/"}</style>',
+    "<style>/* ' */ rect{--u:'//evil.example/x'}</style>",
+    '<style>rect{--u:"ht<g/>tp://evil.example/"}</style>',
+    `<rect width="1" height="1" style="--u:'http://evil.example/'"/>`,
+    '<rect width="1" height="1" style="fill:url(p.svg#g)"/>',
+  ].map((content): LabelledXml => [`an SVG style that loads a resource: ${content}`, content]),
   ['an SVG script', '<script>fetch("http://evil.example/")</script>'],
   ['an empty SVG script in another case and namespace', '<s:SCRIPT xmlns:s="urn:s"/>'],
+  ...[
+    '<foreignObject width="1" height="1"/>',
+    '<iframe/>',
+    '<object data="x.svg"/>',
+    '<EMBED src="x.png"/>',
+    '<ev:listener xmlns:ev="http://www.w3.org/2001/xml-events" event="click"/>',
+    '<ev:handler xmlns:ev="http://www.w3.org/2001/xml-events"/>',
+  ].map((content): LabelledXml => [`an active SVG element ${content}`, content]),
+  ...[
+    '<rect width="1" height="1" onclick="location=1"/>',
+    '<rect width="1" height="1" ONMOUSEOVER="location=1"/>',
+    '<rect width="1" height="1" xmlns:n="urn:n" n:onload="location=1"/>',
+    '<x:rect xmlns:x="urn:x" onclick="location=1"/>',
+  ].map((content): LabelledXml => [`an SVG event handler ${content}`, content]),
+  // SMIL animation can point an href at any URL.
+  ...[
+    '<set attributeName="href" to="http://e/x"/>',
+    '<animate attributeName="href" values="http://e/x"/>',
+    '<animateMotion dur="1s"/>',
+    '<ANIMATETRANSFORM/>',
+    '<x:animateColor xmlns:x="urn:x"/>',
+  ].map((content): LabelledXml => [`an SVG animation ${content}`, content]),
+  // An attribute that names a web resource is refused whatever its value.
+  ...[
+    '<image width="1" height="1" data="x"/>',
+    '<image width="1" height="1" srcset="a 1x"/>',
+    '<image width="1" height="1" DATA=""/>',
+    '<rect width="1" height="1" xmlns:x="urn:x" x:background="u"/>',
+  ].map((content): LabelledXml => [`an SVG web resource attribute ${content}`, content]),
   [
     'an SVG image whose href-ending attribute is a web address',
     '<image width="1" height="1" xmlns:n="urn:n" n:newhref="http://evil.example/x.png"/>',
   ],
+  // A data: URI passes only as a raster image of an image element.
+  ...[
+    '<image width="1" height="1" xlink:href="data:image/svg+xml;base64,PHN2Zz4="/>',
+    '<image width="1" height="1" href="data:text/html,x"/>',
+    '<image width="1" height="1" href="data:image/png"/>',
+    '<image width="1" height="1" href=" data:image/png;base64,AA"/>',
+    '<image width="1" height="1" href="data:image/png+x;base64,AA"/>',
+    '<IMAGE width="1" height="1" href="data:image/png;base64,AA"/>',
+    '<use xlink:href="data:image/png;base64,iVBORw0KGgo="/>',
+  ].map((content): LabelledXml => [`an SVG data URI ${content}`, content]),
   // Past markup the strict lexer refuses, anything that could load a resource refuses.
   ...[
     '<rect width="1" height="1" fill="url(#a)"/>',
     '<rect width="1" height="1" fill="&#35;a"/>',
     '<image width="1" height="1" n:newhref="x.png"/>',
     '<script/>',
+    '<rect width="1" height="1" onclick="x"/>',
+    '<rect width="1" height="1" fill="image(x.png)"/>',
+    '<rect width="1" height="1" fill="-webkit-image-set(x.png 1x)"/>',
+    '<rect width="1" height="1" fill="\\75 rl(x)"/>',
+    '<rect width="1" height="1" fill="ur\\6c(x)"/>',
+    '<rect width="1" height="1" fill="\\u\\r\\l(x)"/>',
+    '<rect width="1" height="1" fill="image\\2dset(x)"/>',
+    '<rect width="1" height="1" fill="u\\\nrl(x)"/>',
+    '<iframe/>',
+    '<set attributeName="fill" to="red"/>',
+    '<rect width="1" height="1" data="x"/>',
   ].map(
     (content): LabelledXml => [
       `${content} past markup the strict lexer refuses`,
@@ -1512,6 +1619,108 @@ describe('assertSafeXmlContent: formula fields in every part', () => {
       SHEET_PART,
       worksheetWithAfter('<?XML-Stylesheet type="text/xsl" href="a.xsl"?>'),
     ],
+    // An on* attribute is an event handler on an SVG, XHTML or XML Events element, in a
+    // part whose root is svg, and wherever the walk cannot follow the nesting.
+    [
+      'an SVG root in another case and namespace whose shape has an event handler',
+      SVG_PART,
+      '<SVG xmlns="urn:x"><rect onclick="x"/></SVG>',
+    ],
+    ['an SVG root with an onload handler', SVG_PART, `<svg ${SVG_NAMESPACES} onload="x"/>`],
+    [
+      'an SVG element with an event handler in a drawing',
+      DRAWING_PART,
+      drawingWith('<s:rect xmlns:s="http://www.w3.org/2000/svg" onclick="x"/>'),
+    ],
+    [
+      'an XHTML element in the default namespace with an event handler in a drawing',
+      DRAWING_PART,
+      drawingWith('<div xmlns="http://www.w3.org/1999/xhtml"><p onmouseover="x"/></div>'),
+    ],
+    [
+      'an XML Events element with an event handler',
+      DRAWING_PART,
+      drawingWith('<e:x xmlns:e="http://www.w3.org/2001/xml-events" onactivate="x"/>'),
+    ],
+    [
+      'an SVG element whose namespace is written with a character reference',
+      DRAWING_PART,
+      drawingWith('<s:rect xmlns:s="http://www.w3.org/2000/sv&#103;" onclick="x"/>'),
+    ],
+    [
+      'an element whose namespace the scan cannot decode',
+      DRAWING_PART,
+      drawingWith('<s:rect xmlns:s="urn:&#1114112;" onclick="x"/>'),
+    ],
+    [
+      'an element whose prefix is declared twice, once for SVG',
+      DRAWING_PART,
+      drawingWith('<s:rect xmlns:s="urn:x" xmlns:s="http://www.w3.org/2000/svg" onclick="x"/>'),
+    ],
+    [
+      'an event handler past an end tag with no element open',
+      DRAWING_PART,
+      `${UTF8_DECLARATION}<a></a></b><c onclick="x"/>`,
+    ],
+    [
+      'an event handler on the f inside an x14 data validation formula',
+      SHEET_PART,
+      worksheetWithAfter(
+        '<x14:dataValidation xmlns:x14="urn:x14" xmlns:xm="urn:xm"><x14:formula1><xm:f onclick="x">A1</xm:f></x14:formula1></x14:dataValidation>',
+      ),
+    ],
+    // SVG animation and web resource attributes, in the scope of the event handlers.
+    [
+      'an SVG set that points an href at a web address in a drawing',
+      DRAWING_PART,
+      drawingWith(
+        '<svg:set xmlns:svg="http://www.w3.org/2000/svg" attributeName="href" to="http://e/x"/>',
+      ),
+    ],
+    [
+      'an SVG animate in a drawing',
+      DRAWING_PART,
+      drawingWith(
+        '<s:animate xmlns:s="http://www.w3.org/2000/svg" attributeName="href" values="http://e/x"/>',
+      ),
+    ],
+    [
+      'an SVG animateMotion in a drawing',
+      DRAWING_PART,
+      drawingWith('<s:animateMotion xmlns:s="http://www.w3.org/2000/svg" dur="1s"/>'),
+    ],
+    [
+      'a set in an SVG root of another namespace',
+      SVG_PART,
+      '<svg xmlns="urn:x"><set attributeName="href" to="http://e/x"/></svg>',
+    ],
+    [
+      'a set past an end tag with no element open',
+      DRAWING_PART,
+      `${UTF8_DECLARATION}<a></a></b><set attributeName="x" to="y"/>`,
+    ],
+    [
+      'an SVG image with a data attribute in a drawing',
+      DRAWING_PART,
+      drawingWith('<svg:image xmlns:svg="http://www.w3.org/2000/svg" data="x"/>'),
+    ],
+    [
+      'an XHTML form action in a drawing',
+      DRAWING_PART,
+      drawingWith('<h:form xmlns:h="http://www.w3.org/1999/xhtml" action="x"/>'),
+    ],
+    [
+      'an empty XHTML ping in another case',
+      DRAWING_PART,
+      drawingWith('<h:a xmlns:h="http://www.w3.org/1999/xhtml" PING=""/>'),
+    ],
+    [
+      'a data attribute on the f inside an x14 data validation formula',
+      SHEET_PART,
+      worksheetWithAfter(
+        '<x14:dataValidation xmlns:x14="urn:x14" xmlns:xm="urn:xm"><x14:formula1><xm:f data="x">A1</xm:f></x14:formula1></x14:dataValidation>',
+      ),
+    ],
   ])('refuses %s as unsafe-part', (_label, entry, xml) => {
     expectUnsafePart(scanError(entriesOf({ [entry]: xml })), entry);
   });
@@ -1736,6 +1945,46 @@ describe('assertSafeXmlContent: formula fields in every part', () => {
       ),
     ],
     [
+      'a VML title holding a backslash and no (',
+      VML_PART,
+      vmlShapes('<v:shape id="s" type="#_x0000_t75" o:title="C:\\logo"/>'),
+    ],
+    [
+      'SVG colours written as functions, with no backslash',
+      SVG_PART,
+      svgWith('<rect width="1" height="1" fill="rgb(1,2,3)" stroke="hsl(0, 0%, 0%)"/>'),
+    ],
+    [
+      'SVG url( ) fragments past quotes and white space, and quoted font names',
+      SVG_PART,
+      svgWith(
+        `<rect width="1" height="1" fill="url( ' #f2' )"/>` +
+          `<style>.a{fill:url(\n"#g"\n)} text{font-family:"Arial", 'Times New Roman'}</style>`,
+      ),
+    ],
+    [
+      'raster image data URIs on SVG images, in any media type case',
+      SVG_PART,
+      svgWith(
+        '<image width="1" height="1" href="data:image/BMP;base64,Qk0="/>' +
+          '<image width="1" height="1" xlink:href="data:image/jpg,x"/>',
+      ),
+    ],
+    [
+      'a raster image data URI on a VML image',
+      VML_PART,
+      vmlShapes(
+        '<v:shape id="h" type="#_x0000_t75"><v:imagedata src="data:image/gif;base64,R0lGOD" o:title=""/></v:shape>',
+      ),
+    ],
+    [
+      'on attributes and prefixes outside the event handler namespaces',
+      DRAWING_PART,
+      drawingWith(
+        '<a:x xmlns:a="urn:a" on="t" onx="1"/><z xmlns:one="http://www.w3.org/2000/svg"/>',
+      ),
+    ],
+    [
       'a drawing shape style as Excel writes it',
       DRAWING_PART,
       drawingWith(
@@ -1744,6 +1993,58 @@ describe('assertSafeXmlContent: formula fields in every part', () => {
           '<a:fillRef idx="1"><a:schemeClr val="accent1"/></a:fillRef>' +
           '<a:fontRef idx="minor"><a:schemeClr val="lt1"/></a:fontRef></xdr:style></xdr:sp>',
       ),
+    ],
+    // Windows paths: a backslash that spells no CSS call passes.
+    [
+      'the absolute path Excel writes into a workbook saved in a folder with parentheses',
+      WORKBOOK_PART,
+      workbookWith(
+        `<mc:AlternateContent xmlns:mc="${MARKUP_COMPATIBILITY_NS}"><mc:Choice Requires="x15">` +
+          '<x15ac:absPath xmlns:x15ac="http://schemas.microsoft.com/office/spreadsheetml/2010/11/ac" ' +
+          'url="C:\\Users\\u\\Desktop\\Yeni klasor (2)\\"/></mc:Choice></mc:AlternateContent>',
+      ),
+    ],
+    [
+      'a picture description holding a path whose file name has parentheses',
+      DRAWING_PART,
+      drawingWith(
+        '<xdr:pic macro=""><xdr:nvPicPr><xdr:cNvPr id="2" name="Picture 1" descr="C:\\x\\Trendyol(1).png"/></xdr:nvPicPr></xdr:pic>',
+      ),
+    ],
+    [
+      'a picture description holding a path with parentheses after a space and after hex letters',
+      DRAWING_PART,
+      drawingWith(
+        '<xdr:pic macro=""><xdr:nvPicPr><xdr:cNvPr id="2" name="Picture 1" descr="C:\\a\\b (1)\\c(2).png"/></xdr:nvPicPr></xdr:pic>',
+      ),
+    ],
+    [
+      'a picture description holding a path with no parenthesis',
+      DRAWING_PART,
+      drawingWith(
+        '<xdr:pic macro=""><xdr:nvPicPr><xdr:cNvPr id="2" name="Picture 1" descr="C:\\logo"/></xdr:nvPicPr></xdr:pic>',
+      ),
+    ],
+    [
+      'a defined name comment holding a path with parentheses',
+      WORKBOOK_PART,
+      workbookWith(
+        '<definedNames><definedName name="x" comment="C:\\x\\y(1)">A1</definedName></definedNames>',
+      ),
+    ],
+    // SVG animation names and web resource attributes outside the web namespaces.
+    [
+      'an OLAP set in a pivot cache definition',
+      PIVOT_CACHE_PART,
+      `${UTF8_DECLARATION}<pivotCacheDefinition xmlns="${SPREADSHEET_NS}" refreshOnLoad="0">` +
+        '<cacheFields count="1"><cacheField name="x" numFmtId="0"/></cacheFields><tupleCache><sets count="1">' +
+        '<set count="1" maxRank="1" setDefinition="{[Product].[All]}"><tpls c="1"><tpl fld="0" item="0"/></tpls></set>' +
+        '</sets></tupleCache></pivotCacheDefinition>',
+    ],
+    [
+      'data and action attributes of a custom namespace',
+      DRAWING_PART,
+      drawingWith('<c:x xmlns:c="urn:custom" data="1" action="go" c:data="2" c:ping=""/>'),
     ],
   ])('accepts %s', (_label, entry, xml) => {
     expect(scanError(entriesOf({ [entry]: xml }))).toBeNull();
@@ -1839,6 +2140,29 @@ describe('assertSafeXmlContent: formula fields in every part', () => {
     expect(
       scanError(entriesOf({ [SHEET_PART]: worksheetWithAfter(after) }), hyperlinks),
     ).toBeNull();
+  });
+});
+
+// A character reference past U+10FFFF: no character, so the scan cannot decode it.
+const UNDECODABLE_REFERENCE = '&#1114112;';
+
+// An attribute value the scan cannot decode is a corrupt part, the error the
+// relationships walk gives a Target it cannot decode.
+describe('assertSafeXmlContent: attribute values the scan cannot decode', () => {
+  it.each<[label: string, after: string, hyperlinks: ExternalHyperlinkIds]>([
+    ['any attribute', `<z a="${UNDECODABLE_REFERENCE}"/>`, new Map()],
+    ['a style attribute', `<z style="fill:${UNDECODABLE_REFERENCE}"/>`, new Map()],
+    ['a src attribute', `<z src="x${UNDECODABLE_REFERENCE}.png"/>`, new Map()],
+    [
+      'the relationship id of a picture in a part with external hyperlinks',
+      `<picture r:id="rId${UNDECODABLE_REFERENCE}"/>`,
+      hyperlinkIdsOf(SHEET_PART, ['rId1']),
+    ],
+  ])('refuses %s as CORRUPT_FILE package-part', (_label, after, hyperlinks) => {
+    const error = scanError(entriesOf({ [SHEET_PART]: worksheetWithAfter(after) }), hyperlinks);
+
+    expect(error?.code).toBe('CORRUPT_FILE');
+    expect(error?.meta).toEqual({ reason: ZIP_REJECT_REASONS.PACKAGE_PART, entry: SHEET_PART });
   });
 });
 

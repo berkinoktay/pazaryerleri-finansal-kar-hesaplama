@@ -23,6 +23,8 @@ import {
   localNameIs,
   localNameStart,
   NAME_DECODER,
+  NAMESPACE_DECLARATION,
+  NAMESPACE_DECLARATION_PREFIX,
   nextMarkup,
   scanMarkup,
   UPPER_A,
@@ -89,8 +91,6 @@ const CELL = 'c';
 const REFERENCE_ATTRIBUTE = 'r';
 // How the name of a prefixed `r` attribute ends; refused, as a repeated `r` is.
 const PREFIXED_REFERENCE_SUFFIX = ':r';
-const DEFAULT_NAMESPACE_DECLARATION = 'xmlns';
-const PREFIX_DECLARATION_START = 'xmlns:';
 const DEFAULT_NAMESPACE_PREFIX = '';
 // Reserved by XML; neither is ever bound to a namespace the filter accepts.
 const RESERVED_PREFIXES: ReadonlySet<string> = new Set(['xml', 'xmlns']);
@@ -469,12 +469,14 @@ class WorksheetIndexer {
 
   /** The prefix an `xmlns` / `xmlns:p` attribute name declares ('' for the default), else null. */
   private declaredPrefix(nameStart: number, nameEnd: number): string | null {
-    if (bytesEqualAscii(this.bytes, nameStart, nameEnd, DEFAULT_NAMESPACE_DECLARATION)) {
+    if (bytesEqualAscii(this.bytes, nameStart, nameEnd, NAMESPACE_DECLARATION)) {
       return DEFAULT_NAMESPACE_PREFIX;
     }
-    const prefixStart = nameStart + PREFIX_DECLARATION_START.length;
+    const prefixStart = nameStart + NAMESPACE_DECLARATION_PREFIX.length;
     if (prefixStart >= nameEnd) return null;
-    if (!bytesEqualAscii(this.bytes, nameStart, prefixStart, PREFIX_DECLARATION_START)) return null;
+    if (!bytesEqualAscii(this.bytes, nameStart, prefixStart, NAMESPACE_DECLARATION_PREFIX)) {
+      return null;
+    }
     return NAME_DECODER.decode(this.bytes.subarray(prefixStart, nameEnd));
   }
 

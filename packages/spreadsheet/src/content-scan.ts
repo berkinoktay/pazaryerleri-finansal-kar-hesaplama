@@ -4,6 +4,7 @@ import { strFromU8 } from 'fflate';
 import { MAX_XMLNS_DECLARATIONS_PER_PART } from './constants';
 import { SpreadsheetFileError } from './errors';
 import { formulaTextRefusal, type QuotedSection } from './formula-scan';
+import { packagePartError } from './patch/calc-chain';
 import { UNSAFE_CONTENT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
 import { bytesEqualAt, foldAsciiCase, metaEntryName, unsafeContentError } from './patch/shared';
 import {
@@ -21,6 +22,8 @@ import {
   isXmlSpace,
   localNameStart,
   NAME_DECODER,
+  NAMESPACE_DECLARATION,
+  NAMESPACE_DECLARATION_PREFIX,
   nextMarkup,
   QUESTION,
   scanMarkup,
@@ -130,41 +133,82 @@ const NO_BYTE = -1;
 // A macro assignment needs code the gate never accepts, so a non-empty
 // MACRO_ATTRIBUTE_NAMES attribute or FmlaMacro element is refused (Excel writes
 // `macro=""` on every shape), and an element of ACTIVE_ELEMENT_NAMES (an embedded
-// object, a control, a web publishing item, a `script` of SVG or HTML) is refused
+// object, a control, a web publishing item; SVG and HTML `script`, `foreignObject`,
+// `iframe`, `object` and `embed`; an XML Events `handler` or `listener`) is refused
 // wherever it stands. So is a
 // SCRIPT_ELEMENT_NAMES element (a VML control's script) that holds anything but white
 // space.
+// Event handlers. An attribute whose ASCII-folded local name starts with
+// EVENT_HANDLER_PREFIX `on` (a namespace declaration aside) runs script in an SVG or
+// HTML renderer, so it is refused on an element in an EVENT_HANDLER_NAMESPACES namespace
+// (SVG, XHTML, XML Events) by the bindings in scope (a declaration read decoded, one the
+// scan cannot decode taken for one of them), on every element of a part one of whose
+// top-level elements has the local name SVG_ROOT_NAME `svg` (ASCII case ignored), on
+// every element once the walk cannot follow the nesting, and on the one child element
+// of a formula field (whose own declarations the walk does not follow). Elsewhere VML's
+// `on` attribute (`<v:shadow on="t">`) passes.
+// Web content. In the same scope, an SVG_ANIMATION_ELEMENT_NAMES element (`set`,
+// `animate`, `animateMotion`, `animateTransform`, `animateColor`: SMIL animation can point
+// an href at any URL; local names compared ignoring ASCII case) is refused, and so is an
+// attribute whose ASCII-folded local name, any prefix, is one of
+// WEB_RESOURCE_ATTRIBUTE_NAMES (`data`, `srcset`, `poster`, `action`, `ping` and the like:
+// a web renderer loads or sends to what it names), whatever its value. Elsewhere an OOXML
+// `set` (a pivot cache's OLAP set) and a `data` attribute (VML's `<o:idmap data="1">`)
+// pass.
 // URLs. A URL attribute (`src`, or any local name that ends with URL_ATTRIBUTE_SUFFIX
 // `href`, ASCII case ignored, any prefix: VML's v:imagedata@src, @o:href, @o:althref,
 // v:fill@src, a shape's href, SVG's xlink:href)
 // or a BASE_URL_ATTRIBUTE_NAMES attribute (`base`: xml:base) names a resource outside
 // the relationships, so its decoded value must be relative by the rule of url-target.ts
 // (no URI scheme, drive letter, leading '//' or backslash). The one exception is a URL
-// attribute whose ASCII-folded value starts with DATA_IMAGE_URL_START (an image the
-// value holds, which fetches nothing); any other `data:` is refused. A style (the value
-// of a STYLE_NAMES attribute, and the text and CDATA content of a STYLE_NAMES element up
-// to its own end tag, or to the end of the part when the walk cannot follow the nesting
-// there, its descendants' included but for the formula, macro and script fields scanned
-// on their own) must load nothing: it may hold no
-// `@import`, no backslash (a CSS escape can spell either name) and no `url(` whose
-// target, past CSS white space and an optional quote, is absolute by that rule or
-// starts a comment. The text of a style element is read piece by piece (CssScan), in
-// constant memory: nothing of it is kept but how much of `@import` and `url(` its last
-// code units spell and where the last `url(` target stands. Any other attribute value,
-// whatever its name, is CSS to an SVG renderer (`fill`, `filter`, `clip-path`, `mask`,
-// `cursor`, `marker-*`), so it may hold no `url(` whose target is absolute or starts a
-// comment either, nor a backslash from its first `url(` on (a CSS escape can spell a
-// scheme); `url(#local)` passes. A STYLESHEET_INSTRUCTION_NAMES processing instruction
-// (`xml-stylesheet`) is refused wherever it stands. Each refusal is UNSAFE_CONTENT
-// `unsafe-part`.
+// attribute of an IMAGE_ELEMENT_NAMES element (`image`, `imagedata`, local names
+// compared exactly) whose value is a `data:` URI of a DATA_IMAGE_MEDIA_TYPES raster
+// image (DATA_URL_SCHEME and the media type up to its ';' or ',', ASCII case ignored):
+// an image the value holds, which fetches nothing and runs no script. Any other `data:`,
+// an SVG image's (`image/svg+xml`) included, is refused.
+// CSS. A style (the value of a STYLE_NAMES attribute, and the text and CDATA content of
+// a STYLE_NAMES element up to its own end tag, or to the end of the part when the walk
+// cannot follow the nesting there, its descendants' included but for the formula, macro
+// and script fields scanned on their own) and any other attribute value, whatever its
+// name (CSS to an SVG renderer: `fill`, `filter`, `clip-path`, `mask`, `cursor`,
+// `marker-*`), must load nothing. Neither may hold a `url(` whose target, past CSS white
+// space, an optional quote and CSS white space again, does not start with '#': only a
+// fragment of the document (`url(#grad1)`) passes, a relative, absolute, `data:` or
+// empty target (or a CSS text that ends inside the target) loads; nor a call of a
+// CSS_LOADING_FUNCTIONS function (`image-set`, `image`, `src`, `cross-fade`), wherever
+// it stands. A call is read the way a CSS tokenizer reads a function name (CssNameRun):
+// the run of identifier code points (ASCII letters, digits, '-', '_', any non-ASCII code
+// point, and escapes) right before a '(' is decoded (a backslash and one to
+// MAX_CSS_HEX_DIGITS hexadecimal digits, then one optional CSS white space, stand for
+// that code point; a backslash and any other code point but a newline for that code
+// point; a backslash and a newline, no escape to CSS, is taken for nothing inside the
+// run, which fails closed), and a run whose decoded text, ASCII case ignored, ends with
+// `url` opens a `url(` target and one that ends with a CSS_LOADING_FUNCTIONS name calls
+// it (`\75rl(`, `u\72l(`, `image\2dset(`, `-webkit-image-set(` and `xurl(` all count).
+// A style may also hold no `@import`, no backslash (a CSS escape can spell any name) and
+// no quoted string whose content starts a URL that is absolute by the rule of
+// url-target.ts (read past every quote, so a quote inside a comment cannot hide the
+// string that follows). Any other attribute value may hold no backslash from its first
+// `url(` on; a backslash that spells no call (a VML title `C:\logo`, a picture
+// description `C:\x\Trendyol(1).png`) passes. The text of a style element is read
+// piece by piece (CssScan), in constant memory: nothing of it is kept but the end of the
+// identifier run its last code units spell, how much of `@import` they spell, where the
+// last `url(` target stands and how the text past its last quote starts. A
+// STYLESHEET_INSTRUCTION_NAMES processing instruction (`xml-stylesheet`) is refused
+// wherever it stands. Each refusal is UNSAFE_CONTENT `unsafe-part`.
+// An attribute value that holds a reference the scan cannot decode (a character
+// reference past U+10FFFF) is CORRUPT_FILE `package-part`, the error the relationships
+// walk gives a Target it cannot decode.
 // Where the strict lexer refuses markup that a lenient or a non-ASCII reading accepts,
-// the walk cannot tell where the fields are from there on, so the part is refused when
-// anything after that point could open a field, macro, script or active element or an
-// element with a field attribute of its own, or name a field, macro, URL, base or style
-// attribute, a style element or a stylesheet instruction, or when it holds a `url(`
-// (ASCII case ignored) or a character reference (which could spell one), or, in a part
-// with external hyperlinks, a prefixed `id` name; inside a style element the
-// part is refused at once.
+// the walk cannot tell where the fields are, or which elements a web renderer reads,
+// from there on, so the part is refused when anything after that point could open a
+// field, macro, script, active or SVG animation element or an element with a field
+// attribute of its own, or name a field, macro, URL, base, style or web resource
+// attribute, an event handler (any name that starts with `on`), a style element or a
+// stylesheet instruction, or when it holds a call of `url(` or a CSS_LOADING_FUNCTIONS
+// function (its bytes read by CssNameRun, escapes decoded) or a character reference
+// (which could spell one), or, in a part with external hyperlinks, a prefixed `id`
+// name; inside a style element the part is refused at once.
 // Every pass is linear in the part; the formula fields are read without a regular
 // expression (formula-scan.ts).
 const FORMULA_ELEMENT_NAMES: readonly string[] = [
@@ -215,8 +259,19 @@ const URL_ATTRIBUTE_NAMES: readonly string[] = ['src'];
 // Every attribute whose ASCII-folded local name ends with this is a URL attribute too.
 const URL_ATTRIBUTE_SUFFIX = 'href';
 const BASE_URL_ATTRIBUTE_NAMES: readonly string[] = ['base'];
-// The ASCII-folded start of the one data: URI a URL attribute may hold (see the header).
-const DATA_IMAGE_URL_START = 'data:image/';
+// The one data: URIs a URL attribute may hold, on an IMAGE_ELEMENT_NAMES element only
+// (see the header): the scheme, then one of these media types up to the first of
+// DATA_MEDIA_TYPE_ENDS, compared ASCII-folded.
+const DATA_URL_SCHEME = 'data:';
+const DATA_IMAGE_MEDIA_TYPES: readonly string[] = [
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/gif',
+  'image/bmp',
+];
+const DATA_MEDIA_TYPE_ENDS: readonly string[] = [';', ','];
+const IMAGE_ELEMENT_NAMES: readonly string[] = ['image', 'imagedata'];
 // Attributes and elements whose value or text is CSS.
 const STYLE_NAMES: readonly string[] = ['style'];
 // Processing instruction targets that load a resource.
@@ -229,10 +284,50 @@ const ACTIVE_ELEMENT_NAMES: readonly string[] = [
   'webPublishItem',
   'webPublishObject',
   'script',
+  'foreignObject',
+  'iframe',
+  'object',
+  'embed',
+  'handler',
+  'listener',
 ];
-// A namespace declaration is not an attribute: `xmlns`, or the `xmlns` prefix.
-const NAMESPACE_DECLARATION = 'xmlns';
-const NAMESPACE_DECLARATION_PREFIX = 'xmlns:';
+// An attribute whose ASCII-folded local name starts with this is an event handler (see
+// the header).
+const EVENT_HANDLER_PREFIX = 'on';
+// The namespaces a web renderer reads (event handlers and web content, see the header):
+// SVG, XHTML, XML Events.
+const EVENT_HANDLER_NAMESPACES: readonly string[] = [
+  'http://www.w3.org/2000/svg',
+  'http://www.w3.org/1999/xhtml',
+  'http://www.w3.org/2001/xml-events',
+];
+// The local name of a top-level element that makes every element of its part web content.
+const SVG_ROOT_NAME = 'svg';
+// SVG animation elements (see the header).
+const SVG_ANIMATION_ELEMENT_NAMES: readonly string[] = [
+  'set',
+  'animate',
+  'animateMotion',
+  'animateTransform',
+  'animateColor',
+];
+// Attributes that name a resource a web renderer loads or sends to (see the header).
+const WEB_RESOURCE_ATTRIBUTE_NAMES: readonly string[] = [
+  'data',
+  'srcset',
+  'poster',
+  'background',
+  'action',
+  'formaction',
+  'codebase',
+  'archive',
+  'longdesc',
+  'usemap',
+  'cite',
+  'profile',
+  'manifest',
+  'ping',
+];
 // Office Math Markup Language: its elements are never formula fields (see the header).
 const OMML_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/math';
 // The namespace of a relationship id (see the header).
@@ -263,8 +358,8 @@ const NO_HYPERLINK_IDS: WorksheetHyperlinkIds = { onlyExternal: new Set(), exter
 /** Lower-case ASCII names, by length. */
 type NameSet = ReadonlyMap<number, readonly string[]>;
 
-/** The namespaces the walk tells apart; every other one is 'other'. */
-type KnownNamespace = 'omml' | 'relationships' | 'other';
+/** The namespaces the walk tells apart ('scripted': one of EVENT_HANDLER_NAMESPACES); every other one is 'other'. */
+type KnownNamespace = 'omml' | 'relationships' | 'scripted' | 'other';
 
 const KNOWN_NAMESPACES: readonly (readonly [uri: string, namespace: KnownNamespace])[] = [
   [OMML_NAMESPACE, 'omml'],
@@ -290,9 +385,11 @@ interface DeclaringElement {
 /**
  * The namespace declarations in scope while one part is walked, in memory bounded by
  * MAX_TRACKED_ELEMENT_DEPTH and MAX_XMLNS_DECLARATIONS_PER_PART (see the header). A
- * declaration is compared byte for byte: one written with a reference names another
- * namespace. A prefix declared twice on one element names a known namespace only when
- * both declarations name it.
+ * declaration is compared byte for byte with the OMML and relationships namespaces: one
+ * written with a reference names another namespace. It names an EVENT_HANDLER_NAMESPACES
+ * namespace ('scripted') when its decoded value is one, or cannot be decoded. A prefix
+ * declared twice on one element names the OMML or relationships namespace only when
+ * both declarations name it, and an event handler namespace when either does.
  */
 interface NamespaceScopes {
   /** Per prefix (DEFAULT_NAMESPACE_KEY for the default namespace), its bindings, innermost last. */
@@ -316,29 +413,59 @@ const OUTSIDE_STYLE = -1;
 type CssUrlPhase =
   // No `url(` target is being read.
   | 'none'
-  // Past `url(`: CSS white space is skipped.
-  | 'space'
-  // Past `url(` and white space, a '/': a '*' next opens a comment.
-  | 'slash'
-  // In the target, past an optional quote: its start is read (UrlStartReader).
-  | 'target';
+  // Past `url(`: CSS white space is skipped; a quote may follow.
+  | 'open'
+  // Past `url(` and a quote: CSS white space is skipped.
+  | 'quoted';
+
+/** What a '(' read by readCssName ends (see the CSS header): no call, a `url(`, or a call of a CSS_LOADING_FUNCTIONS function. */
+type CssCall = 'none' | 'url' | 'loading';
+
+/** Where a CssNameRun stands in a CSS escape. */
+type CssEscapePhase =
+  // In no escape.
+  | 'none'
+  // Past a backslash.
+  | 'open'
+  // Past a backslash and hexadecimal digits (`hexDigits` of them, worth `hexValue`).
+  | 'hex'
+  // Past a carriage return that ended an escape: a line feed right after it is part of it.
+  | 'carriage-return';
 
 /**
- * CSS text read one piece at a time, in constant memory (see the URL header): how much
- * of `@import` and of `url(` its last code units spell, ASCII case ignored, and where the
- * target of its last `url(` stands. Create with createCssScan, feed with feedCss;
- * `loads` once the text read so far loads a resource (loadsCssResource).
+ * The run of CSS identifier code points that ends at the code unit read last, its escapes
+ * decoded (see the CSS header), in constant memory: its last CSS_NAME_TAIL_LENGTH code
+ * points, ASCII-folded, in a ring. Create with createCssNameRun, feed with readCssName.
+ */
+interface CssNameRun {
+  /** The ring of its last code points; `next` is where the next one goes. */
+  readonly tail: number[];
+  next: number;
+  /** How many code points the ring holds; 0 when no run ends at the code unit read last. */
+  length: number;
+  escape: CssEscapePhase;
+  hexValue: number;
+  hexDigits: number;
+}
+
+/**
+ * CSS text read one piece at a time, in constant memory (see the CSS header): the end of
+ * the identifier run its last code units spell, how much of `@import` they spell, ASCII
+ * case ignored, where the target of its last `url(` stands, and, in a style, how the
+ * text past its last quote starts. Create with createCssScan, feed with feedCss, end
+ * with finishCss; `loads` once the text read so far loads a resource (loadsCssResource).
  */
 interface CssScan {
-  /** A style: a backslash anywhere, and an `@import`, load. Any other attribute value: a backslash from its first `url(` on. */
+  /** A style: a backslash anywhere, an `@import` and a quoted absolute URL load too. Any other attribute value: a backslash from its first `url(` on. */
   readonly style: boolean;
   /** How many code units of CSS_IMPORT the last code units spell. */
   importMatched: number;
-  /** How many code units of CSS_URL_OPEN the last code units spell. */
-  urlMatched: number;
+  /** The identifier run that ends at the last code unit. */
+  readonly name: CssNameRun;
   phase: CssUrlPhase;
-  /** The start of the target of the last `url(`, read while `phase` is 'target'. */
-  target: UrlStartReader;
+  /** In a style, the start of the text past the last quote (the content of a string, when the quote opens one), read while `quotedPending`. */
+  quoted: UrlStartReader;
+  quotedPending: boolean;
   /** A `url(` was read. */
   urlSeen: boolean;
   loads: boolean;
@@ -364,15 +491,34 @@ const UPPER_A = 0x41;
 const UPPER_Z = 0x5a;
 const ASCII_CASE_OFFSET = 0x20;
 
-// The CSS a style may not hold (loadsCssResource), compared ASCII-folded. Neither
-// pattern repeats its first code unit, which advanceMatch relies on.
+// The CSS a style may not hold (loadsCssResource), compared ASCII-folded. The pattern
+// does not repeat its first code unit, which advanceMatch relies on.
 const CSS_IMPORT = '@import';
-const CSS_URL_OPEN = 'url(';
-// A backslash: a CSS escape.
+// The function whose target the scan reads, and the CSS functions that load an image
+// whatever they are given (see the header): an identifier run that ends with one of
+// them, ASCII case ignored, names it (`-webkit-image-set` ends with `image-set`).
+const CSS_URL_FUNCTION = 'url';
+const CSS_LOADING_FUNCTIONS: readonly string[] = ['image-set', 'image', 'src', 'cross-fade'];
+// How many code points of an identifier run CssNameRun keeps: the longest name it is
+// compared with.
+const CSS_NAME_TAIL_LENGTH = Math.max(
+  CSS_URL_FUNCTION.length,
+  ...CSS_LOADING_FUNCTIONS.map((name) => name.length),
+);
+// A backslash: a CSS escape. Its hexadecimal form holds at most this many digits.
 const CSS_ESCAPE = 0x5c;
-// A '/' then this opens a CSS comment.
-const ASTERISK = 0x2a;
-// The bytes a value needs to hold `url(` once decoded: '(' itself, or the '&' of a reference.
+const MAX_CSS_HEX_DIGITS = 6;
+// The code points of a CSS identifier besides ASCII letters and digits (see the header).
+const HYPHEN = 0x2d;
+const UNDERSCORE = 0x5f;
+const FIRST_NON_ASCII = 0x80;
+const LOWER_Z = 0x7a;
+// CSS newlines: a backslash before one is no escape. A carriage return and the line
+// feed right after it are one newline.
+const LINE_FEED = 0x0a;
+const CARRIAGE_RETURN = 0x0d;
+const FORM_FEED = 0x0c;
+// The bytes a value needs to hold a call once decoded: '(' itself, or the '&' of a reference.
 const PARENTHESIS_OPEN = 0x28;
 const AMPERSAND = 0x26;
 // CSS white space (space, tab, line feed, carriage return, form feed) and quotes.
@@ -402,7 +548,8 @@ const PREDEFINED_ENTITIES: ReadonlyMap<string, string> = new Map([
 ]);
 // The longest predefined entity name.
 const MAX_PREDEFINED_ENTITY_LENGTH = 4;
-// A character reference: '#', then decimal digits, or 'x' and hexadecimal digits.
+// A character reference: '#', then decimal digits, or 'x' and hexadecimal digits. A
+// `url(` target that starts with '#' is a fragment of the document (see the CSS header).
 const HASH = 0x23;
 const LOWER_X = 0x78;
 const DIGIT_ZERO = 0x30;
@@ -470,6 +617,9 @@ const BASE_URL_ATTRIBUTES = nameSet(BASE_URL_ATTRIBUTE_NAMES);
 const STYLES = nameSet(STYLE_NAMES);
 const STYLESHEET_INSTRUCTIONS = nameSet(STYLESHEET_INSTRUCTION_NAMES);
 const ACTIVE_ELEMENTS = nameSet(ACTIVE_ELEMENT_NAMES);
+const SVG_ROOT = nameSet([SVG_ROOT_NAME]);
+const SVG_ANIMATION_ELEMENTS = nameSet(SVG_ANIMATION_ELEMENT_NAMES);
+const WEB_RESOURCE_ATTRIBUTES = nameSet(WEB_RESOURCE_ATTRIBUTE_NAMES);
 
 /** Whether the entry `name` is one the grid reader may open: named `.xml` or `.xml.rels`. */
 export function isXmlPart(name: string): boolean {
@@ -489,6 +639,16 @@ function spellsFolded(bytes: Uint8Array, start: number, lowerName: string): bool
   return true;
 }
 
+/** Whether bytes [start, end) start with `lowerPrefix` (lower-case ASCII), ignoring ASCII case. */
+function startsWithFolded(
+  bytes: Uint8Array,
+  start: number,
+  end: number,
+  lowerPrefix: string,
+): boolean {
+  return end - start >= lowerPrefix.length && spellsFolded(bytes, start, lowerPrefix);
+}
+
 /** Whether bytes [start, end) spell a name of `names`, ignoring ASCII case. Nothing is allocated. */
 function isNameIn(bytes: Uint8Array, start: number, end: number, names: NameSet): boolean {
   const candidates = names.get(end - start);
@@ -505,6 +665,11 @@ function unsafeFormula(entry: string, message: string): SpreadsheetFileError {
 
 function unsafePart(entry: string, message: string): SpreadsheetFileError {
   return unsafeContentError(UNSAFE_CONTENT_REASONS.UNSAFE_PART, entry, message);
+}
+
+/** CORRUPT_FILE `package-part` for part `entry`: an attribute value holds a reference the scan cannot decode (see the header). */
+function undecodableAttribute(entry: string): SpreadsheetFileError {
+  return packagePartError(entry, 'holds an attribute value the scan cannot decode');
 }
 
 /**
@@ -776,8 +941,9 @@ function assertSafeFieldContent(
     isNameIn(bytes, localNameStart(bytes, markup), markup.nameEnd, INNER_FORMULA_ELEMENT) &&
     isXmlSpaceOnly(bytes, contentStart, next);
   if (!innerChild) throw notTextOnly(entry);
+  assertNoWebContent(entry, bytes, markup, attributes);
   for (let attribute = 0; attribute < markup.attributeCount; attribute += 1) {
-    assertSafeAttribute(entry, bytes, attributes, attribute, null, 'sheet-name');
+    assertSafeAttribute(entry, bytes, attributes, attribute, null, 'sheet-name', false);
   }
   const innerStart = markup.end;
   const innerClose = textOnlyContentEnd(entry, bytes, markup);
@@ -811,20 +977,160 @@ function assertNoScript(entry: string, bytes: Uint8Array, markup: XmlMarkup): vo
 }
 
 /**
- * Decodes URL attribute value bytes `raw`: a relative URL, or, with `dataImage`, a value
- * whose ASCII-folded text starts with DATA_IMAGE_URL_START; UNSAFE_CONTENT `unsafe-part`
- * otherwise.
+ * Whether decoded URL text `text` is a `data:` URI of a raster image (see the header):
+ * DATA_URL_SCHEME, then one of DATA_IMAGE_MEDIA_TYPES up to the first of
+ * DATA_MEDIA_TYPE_ENDS, ASCII case ignored.
+ */
+function isRasterDataImage(text: string): boolean {
+  if (foldAsciiCase(text.slice(0, DATA_URL_SCHEME.length)) !== DATA_URL_SCHEME) return false;
+  for (let at = DATA_URL_SCHEME.length; at < text.length; at += 1) {
+    if (!DATA_MEDIA_TYPE_ENDS.includes(text.charAt(at))) continue;
+    return DATA_IMAGE_MEDIA_TYPES.includes(foldAsciiCase(text.slice(DATA_URL_SCHEME.length, at)));
+  }
+  return false;
+}
+
+/**
+ * Decodes URL attribute value bytes `raw`: a relative URL, or, with `dataImage` (a URL
+ * attribute of an IMAGE_ELEMENT_NAMES element), a raster image `data:` URI
+ * (isRasterDataImage); UNSAFE_CONTENT `unsafe-part` otherwise, CORRUPT_FILE
+ * `package-part` when it cannot be decoded.
  */
 function assertRelativeUrl(entry: string, raw: Uint8Array, dataImage: boolean): void {
   const text = decodeXmlText(raw);
-  if (text === null) {
-    throw unsafePart(entry, 'Workbook part links to a resource the scan cannot decode');
-  }
-  const head = foldAsciiCase(text.slice(0, DATA_IMAGE_URL_START.length));
-  if (dataImage && head === DATA_IMAGE_URL_START) return;
+  if (text === null) throw undecodableAttribute(entry);
+  if (dataImage && isRasterDataImage(text)) return;
   if (isAbsoluteUrl(text)) {
     throw unsafePart(entry, 'Workbook part links to a resource outside the package');
   }
+}
+
+/** A new CssNameRun, nothing read yet. */
+function createCssNameRun(): CssNameRun {
+  return {
+    tail: new Array<number>(CSS_NAME_TAIL_LENGTH).fill(NUL),
+    next: 0,
+    length: 0,
+    escape: 'none',
+    hexValue: 0,
+    hexDigits: 0,
+  };
+}
+
+/** Whether `code` is a CSS identifier code point: an ASCII letter or digit, '-', '_', or any non-ASCII code point. */
+function isCssNameCode(code: number): boolean {
+  const folded = foldAsciiByte(code) ?? code;
+  return (
+    (folded >= LOWER_A && folded <= LOWER_Z) ||
+    (code >= DIGIT_ZERO && code <= DIGIT_NINE) ||
+    code === HYPHEN ||
+    code === UNDERSCORE ||
+    code >= FIRST_NON_ASCII
+  );
+}
+
+/** Adds code point `code`, ASCII-folded, to the end of `run`. */
+function appendCssName(run: CssNameRun, code: number): void {
+  run.tail[run.next] = foldAsciiByte(code) ?? code;
+  run.next = (run.next + 1) % CSS_NAME_TAIL_LENGTH;
+  run.length = Math.min(run.length + 1, CSS_NAME_TAIL_LENGTH);
+}
+
+/** Whether the decoded, ASCII-folded run `run` ends with `lowerName` (lower-case ASCII). */
+function cssNameEndsWith(run: CssNameRun, lowerName: string): boolean {
+  if (lowerName.length > run.length) return false;
+  const start = run.next - lowerName.length + CSS_NAME_TAIL_LENGTH;
+  for (let index = 0; index < lowerName.length; index += 1) {
+    const code = run.tail[(start + index) % CSS_NAME_TAIL_LENGTH];
+    if (code !== lowerName.charCodeAt(index)) return false;
+  }
+  return true;
+}
+
+/** The call a '(' right after `run` makes (see the CSS header). */
+function cssCallOf(run: CssNameRun): CssCall {
+  if (cssNameEndsWith(run, CSS_URL_FUNCTION)) return 'url';
+  return CSS_LOADING_FUNCTIONS.some((name) => cssNameEndsWith(run, name)) ? 'loading' : 'none';
+}
+
+/**
+ * Reads `code` right after a backslash of `run`: a newline is no escape and adds nothing
+ * (the run goes on), a hexadecimal digit starts a code point, any other code point
+ * stands for itself.
+ */
+function readEscapeStart(run: CssNameRun, code: number): void {
+  run.escape = 'none';
+  if (code === CARRIAGE_RETURN) {
+    run.escape = 'carriage-return';
+    return;
+  }
+  if (code === LINE_FEED || code === FORM_FEED) return;
+  const digit = digitValue(code, HEXADECIMAL_RADIX);
+  if (digit === NOT_A_DIGIT) {
+    appendCssName(run, code);
+    return;
+  }
+  run.escape = 'hex';
+  run.hexValue = digit;
+  run.hexDigits = 1;
+}
+
+/**
+ * Reads `code` past the hexadecimal digits of an escape of `run`: one more digit, up to
+ * MAX_CSS_HEX_DIGITS; otherwise the escape ends with the code point they spell, and one
+ * CSS white space right after it is part of it. Whether `code` was part of the escape.
+ */
+function readHexEscape(run: CssNameRun, code: number): boolean {
+  const digit = digitValue(code, HEXADECIMAL_RADIX);
+  if (digit !== NOT_A_DIGIT && run.hexDigits < MAX_CSS_HEX_DIGITS) {
+    run.hexValue = run.hexValue * HEXADECIMAL_RADIX + digit;
+    run.hexDigits += 1;
+    return true;
+  }
+  run.escape = 'none';
+  appendCssName(run, run.hexValue);
+  if (code === CARRIAGE_RETURN) {
+    run.escape = 'carriage-return';
+    return true;
+  }
+  return CSS_SPACE.has(code);
+}
+
+/**
+ * Reads code unit `code` into `run` (see the CSS header): the call a '(' makes right
+ * after the run, 'none' for any other code unit. Constant time and memory.
+ */
+function readCssName(run: CssNameRun, code: number): CssCall {
+  const escape = run.escape;
+  switch (escape) {
+    case 'none':
+      break;
+    case 'open':
+      readEscapeStart(run, code);
+      return 'none';
+    case 'hex':
+      if (readHexEscape(run, code)) return 'none';
+      break;
+    case 'carriage-return':
+      run.escape = 'none';
+      if (code === LINE_FEED) return 'none';
+      break;
+    default: {
+      const _exhaustive: never = escape;
+      throw new Error(`Unhandled CSS escape phase: ${String(_exhaustive)}`);
+    }
+  }
+  if (code === CSS_ESCAPE) {
+    run.escape = 'open';
+    return 'none';
+  }
+  if (isCssNameCode(code)) {
+    appendCssName(run, code);
+    return 'none';
+  }
+  const call = code === PARENTHESIS_OPEN ? cssCallOf(run) : 'none';
+  run.length = 0;
+  return call;
 }
 
 /** A new CssScan, nothing read yet; `style` says whether the text is a style (see CssScan). */
@@ -832,23 +1138,19 @@ function createCssScan(style: boolean): CssScan {
   return {
     style,
     importMatched: 0,
-    urlMatched: 0,
+    name: createCssNameRun(),
     phase: 'none',
-    target: createUrlStartReader(),
+    quoted: createUrlStartReader(),
+    quotedPending: false,
     urlSeen: false,
     loads: false,
   };
 }
 
-/** `code` with an ASCII capital letter folded to lower case. */
-function foldAsciiCode(code: number): number {
-  return code >= UPPER_A && code <= UPPER_Z ? code + ASCII_CASE_OFFSET : code;
-}
-
 /**
  * How many code units of `pattern` the text spells after `code` (folded), given that it
  * spelled `matched` of them before. Exact for a pattern whose first code unit does not
- * repeat in it (CSS_IMPORT, CSS_URL_OPEN): no shorter match can then be pending.
+ * repeat in it (CSS_IMPORT): no shorter match can then be pending.
  */
 function advanceMatch(pattern: string, matched: number, code: number): number {
   if (code === pattern.charCodeAt(matched)) return matched + 1;
@@ -856,108 +1158,130 @@ function advanceMatch(pattern: string, matched: number, code: number): number {
 }
 
 /**
- * Reads `code` into the target of the last `url(` (see loadsCssResource): past CSS
- * white space, a `/*` loads; past an optional quote, the start of the target is read
- * (readUrlStart) and an absolute one loads. A '(' always decides a pending target, so
- * one is pending at a time.
+ * Reads `code` into the target of the last `url(` (see the CSS header): past CSS white
+ * space, an optional quote and CSS white space again, a '#' passes and anything else
+ * loads. Either decides the target, so one is pending at a time.
  */
 function readCssUrlTarget(scan: CssScan, code: number): void {
   const phase = scan.phase;
   switch (phase) {
     case 'none':
       return;
-    case 'space':
+    case 'open':
       if (CSS_SPACE.has(code)) return;
-      if (code === SLASH) {
-        scan.phase = 'slash';
+      if (CSS_QUOTES.has(code)) {
+        scan.phase = 'quoted';
         return;
       }
-      scan.target = createUrlStartReader();
-      scan.phase = 'target';
-      if (CSS_QUOTES.has(code)) return;
       break;
-    case 'slash':
-      if (code === ASTERISK) {
-        scan.loads = true;
-        return;
-      }
-      scan.target = createUrlStartReader();
-      readUrlStart(scan.target, SLASH);
-      scan.phase = 'target';
-      break;
-    case 'target':
+    case 'quoted':
+      if (CSS_SPACE.has(code)) return;
       break;
     default: {
       const _exhaustive: never = phase;
       throw new Error(`Unhandled CSS url phase: ${String(_exhaustive)}`);
     }
   }
-  const verdict = readUrlStart(scan.target, code);
-  if (verdict === 'absolute') scan.loads = true;
-  if (verdict !== 'pending') scan.phase = 'none';
+  scan.phase = 'none';
+  if (code !== HASH) scan.loads = true;
+}
+
+/**
+ * Reads `code` of a style into the start of the text past its last quote (see the CSS
+ * header): an absolute one loads (readUrlStart). A quote starts that text anew, so one
+ * is pending at a time.
+ */
+function readQuotedStart(scan: CssScan, code: number): void {
+  if (scan.quotedPending) {
+    const verdict = readUrlStart(scan.quoted, code);
+    if (verdict === 'absolute') scan.loads = true;
+    if (verdict !== 'pending') scan.quotedPending = false;
+  }
+  if (!CSS_QUOTES.has(code)) return;
+  scan.quoted = createUrlStartReader();
+  scan.quotedPending = true;
+}
+
+/** Reads code unit `code` of the CSS of `scan` (see the CSS header). */
+function readCssCode(scan: CssScan, code: number): void {
+  if (code === CSS_ESCAPE && (scan.style || scan.urlSeen)) {
+    scan.loads = true;
+    return;
+  }
+  readCssUrlTarget(scan, code);
+  if (scan.style) readQuotedStart(scan, code);
+  const call = readCssName(scan.name, code);
+  switch (call) {
+    case 'none':
+      break;
+    case 'url':
+      scan.urlSeen = true;
+      scan.phase = 'open';
+      break;
+    case 'loading':
+      scan.loads = true;
+      break;
+    default: {
+      const _exhaustive: never = call;
+      throw new Error(`Unhandled CSS call: ${String(_exhaustive)}`);
+    }
+  }
+  if (!scan.style) return;
+  scan.importMatched = advanceMatch(CSS_IMPORT, scan.importMatched, foldAsciiByte(code) ?? code);
+  if (scan.importMatched === CSS_IMPORT.length) scan.loads = true;
 }
 
 /** Reads the next piece `text` of the CSS of `scan`, up to the code unit that makes it load. */
 function feedCss(scan: CssScan, text: string): void {
   for (let at = 0; at < text.length && !scan.loads; at += 1) {
-    const code = text.charCodeAt(at);
-    if (code === CSS_ESCAPE && (scan.style || scan.urlSeen)) {
-      scan.loads = true;
-      return;
-    }
-    readCssUrlTarget(scan, code);
-    const folded = foldAsciiCode(code);
-    scan.urlMatched = advanceMatch(CSS_URL_OPEN, scan.urlMatched, folded);
-    if (scan.urlMatched === CSS_URL_OPEN.length) {
-      scan.urlMatched = 0;
-      scan.urlSeen = true;
-      scan.phase = 'space';
-    }
-    if (!scan.style) continue;
-    scan.importMatched = advanceMatch(CSS_IMPORT, scan.importMatched, folded);
-    if (scan.importMatched === CSS_IMPORT.length) scan.loads = true;
+    readCssCode(scan, text.charCodeAt(at));
   }
 }
 
+/** Ends the CSS of `scan`: a text that ends inside a `url(` target loads (an empty target). */
+function finishCss(scan: CssScan): void {
+  if (scan.phase !== 'none') scan.loads = true;
+}
+
 /**
- * Whether decoded CSS text `css` may load a resource (see the header): a `url(` whose
- * target, past CSS white space and an optional quote, starts an absolute URL
- * (readUrlStart, which decides before the quote or ')' that ends the target) or a
- * comment; in a `style`, also a backslash anywhere or an `@import`, and in any other
- * attribute value a backslash from its first `url(` on. ASCII case is ignored. One pass
- * (feedCss); a style element's text is fed piece by piece instead.
+ * Whether decoded CSS text `css` may load a resource (see the CSS header): a `url(` whose
+ * target does not start with '#', or a call of a CSS_LOADING_FUNCTIONS function, either
+ * read with its escapes decoded (CssNameRun); in a `style`, also a backslash anywhere, an
+ * `@import` or a quoted absolute URL, and in any other attribute value a backslash from
+ * its first `url(` on. ASCII case is ignored. One pass (feedCss); a style element's text
+ * is fed piece by piece instead.
  */
 function loadsCssResource(css: string, style: boolean): boolean {
   const scan = createCssScan(style);
   feedCss(scan, css);
+  finishCss(scan);
   return scan.loads;
 }
 
-/** Decodes style attribute value bytes `raw`: CSS that loads nothing, or UNSAFE_CONTENT `unsafe-part`. */
+/**
+ * Decodes style attribute value bytes `raw`: CSS that loads nothing, or UNSAFE_CONTENT
+ * `unsafe-part`; CORRUPT_FILE `package-part` when it cannot be decoded.
+ */
 function assertSafeStyleAttribute(entry: string, raw: Uint8Array): void {
   const text = decodeXmlText(raw);
-  if (text === null) {
-    throw unsafePart(entry, 'Workbook part holds a style the scan cannot decode');
-  }
+  if (text === null) throw undecodableAttribute(entry);
   if (loadsCssResource(text, true)) {
     throw unsafePart(entry, 'Workbook part holds a style that loads a resource');
   }
 }
 
 /**
- * The value bytes `raw` of an attribute that is no style hold no `url(` that loads a
- * resource (loadsCssResource), or UNSAFE_CONTENT `unsafe-part`; so does a value that
- * cannot be decoded. Only a value with a '(' or a reference can hold one once decoded,
- * so no other is decoded.
+ * The value bytes `raw` of an attribute that is no style hold no CSS that loads a
+ * resource (loadsCssResource), or UNSAFE_CONTENT `unsafe-part`; CORRUPT_FILE
+ * `package-part` when they cannot be decoded. Only a value with a '(' or a reference
+ * can hold a call once decoded, so no other is decoded.
  */
 function assertNoCssUrl(entry: string, raw: Uint8Array): void {
   if (!raw.includes(PARENTHESIS_OPEN) && !raw.includes(AMPERSAND)) return;
   const text = decodeXmlText(raw);
-  if (text === null) {
-    throw unsafePart(entry, 'Workbook part holds an attribute value the scan cannot decode');
-  }
+  if (text === null) throw undecodableAttribute(entry);
   if (loadsCssResource(text, false)) {
-    throw unsafePart(entry, 'Workbook part holds a url() that loads a resource');
+    throw unsafePart(entry, 'Workbook part holds CSS that loads a resource');
   }
 }
 
@@ -988,8 +1312,9 @@ function localPartStart(bytes: Uint8Array, start: number, end: number): number {
  * Checks attribute `attribute` of the scanned tag: a formula field (a FORMULA_ATTRIBUTES
  * attribute, or the `elementField` attribute of this element) passes the scan, its
  * `formula` attribute read with quoted sections as `formulaQuotes`; a macro is empty; a
- * style loads nothing; any other value holds no `url(` that loads a resource, and a URL
- * attribute is relative or an image data URI, a base URL relative.
+ * style loads nothing; any other value holds no CSS that loads a resource, and a URL
+ * attribute is relative, or a raster image data URI on an `imageElement` (an
+ * IMAGE_ELEMENT_NAMES element), a base URL relative.
  */
 function assertSafeAttribute(
   entry: string,
@@ -998,6 +1323,7 @@ function assertSafeAttribute(
   attribute: number,
   elementField: NameSet | null,
   formulaQuotes: QuotedSection,
+  imageElement: boolean,
 ): void {
   const nameStart = attributeField(attributes, attribute, ATTRIBUTE_NAME_START);
   const nameEnd = attributeField(attributes, attribute, ATTRIBUTE_NAME_END);
@@ -1015,7 +1341,7 @@ function assertSafeAttribute(
   }
   assertNoCssUrl(entry, raw);
   if (isUrlAttributeName(bytes, localStart, nameEnd)) {
-    assertRelativeUrl(entry, raw, true);
+    assertRelativeUrl(entry, raw, imageElement);
     return;
   }
   if (isNameIn(bytes, localStart, nameEnd, BASE_URL_ATTRIBUTES)) {
@@ -1044,7 +1370,8 @@ function elementFormulaAttribute(bytes: Uint8Array, start: number, end: number):
  * Refuses, UNSAFE_CONTENT `unsafe-part`, the tag scanned into `markup`, of an element
  * that is no hyperlink, when it names an external hyperlink of its part (see the
  * header): a prefixed attribute whose local name is `id` (ASCII case ignored, any
- * namespace) and whose decoded value is one of `externalIds`, or cannot be decoded.
+ * namespace) and whose decoded value is one of `externalIds`. CORRUPT_FILE
+ * `package-part` when such an attribute cannot be decoded.
  */
 function assertNoExternalHyperlinkId(
   entry: string,
@@ -1067,10 +1394,46 @@ function assertNoExternalHyperlinkId(
         attributeField(attributes, attribute, ATTRIBUTE_VALUE_END),
       ),
     );
-    if (id === null || externalIds.has(id)) {
+    if (id === null) throw undecodableAttribute(entry);
+    if (externalIds.has(id)) {
       throw unsafePart(entry, 'Workbook part names an external hyperlink from another element');
     }
   }
+}
+
+/**
+ * Refuses, UNSAFE_CONTENT `unsafe-part`, the tag scanned into `markup` of an element a
+ * web renderer reads (see the header) when it is an SVG animation element, or when one
+ * of its attributes, a namespace declaration aside, is an event handler (its ASCII-folded
+ * local name starts with EVENT_HANDLER_PREFIX) or a WEB_RESOURCE_ATTRIBUTE_NAMES
+ * attribute, whatever its value.
+ */
+function assertNoWebContent(
+  entry: string,
+  bytes: Uint8Array,
+  markup: XmlMarkup,
+  attributes: readonly number[],
+): void {
+  if (isNameIn(bytes, localNameStart(bytes, markup), markup.nameEnd, SVG_ANIMATION_ELEMENTS)) {
+    throw unsafePart(entry, 'Workbook part holds an SVG animation');
+  }
+  for (let attribute = 0; attribute < markup.attributeCount; attribute += 1) {
+    const nameStart = attributeField(attributes, attribute, ATTRIBUTE_NAME_START);
+    const nameEnd = attributeField(attributes, attribute, ATTRIBUTE_NAME_END);
+    if (isNamespaceDeclaration(bytes, nameStart, nameEnd)) continue;
+    const localStart = localPartStart(bytes, nameStart, nameEnd);
+    if (startsWithFolded(bytes, localStart, nameEnd, EVENT_HANDLER_PREFIX)) {
+      throw unsafePart(entry, 'Workbook part holds an event handler');
+    }
+    if (isNameIn(bytes, localStart, nameEnd, WEB_RESOURCE_ATTRIBUTES)) {
+      throw unsafePart(entry, 'Workbook part holds an attribute that names a web resource');
+    }
+  }
+}
+
+/** Whether the local name bytes [start, end) are one of IMAGE_ELEMENT_NAMES, compared exactly. */
+function isImageElement(bytes: Uint8Array, start: number, end: number): boolean {
+  return IMAGE_ELEMENT_NAMES.some((name) => bytesEqualAscii(bytes, start, end, name));
 }
 
 /**
@@ -1096,7 +1459,7 @@ function assertSafeElement(
   if (isNameIn(bytes, localStart, localEnd, ACTIVE_ELEMENTS)) {
     throw unsafePart(
       entry,
-      'Workbook part holds an embedded object, a control, a script or a web publishing item',
+      'Workbook part holds an embedded object, a control, a frame, a script or a web publishing item',
     );
   }
   const hyperlink = isNameIn(bytes, localStart, localEnd, URL_FRAGMENT_ELEMENTS);
@@ -1110,8 +1473,17 @@ function assertSafeElement(
   const formulaQuotes: QuotedSection = isNameIn(bytes, localStart, localEnd, PIVOT_FORMULA_ELEMENTS)
     ? 'field-name'
     : 'sheet-name';
+  const imageElement = isImageElement(bytes, localStart, localEnd);
   for (let attribute = 0; attribute < markup.attributeCount; attribute += 1) {
-    assertSafeAttribute(entry, bytes, attributes, attribute, elementField, formulaQuotes);
+    assertSafeAttribute(
+      entry,
+      bytes,
+      attributes,
+      attribute,
+      elementField,
+      formulaQuotes,
+      imageElement,
+    );
   }
   if (markup.kind !== 'start') return;
   const contentStart = markup.end;
@@ -1126,7 +1498,7 @@ function assertSafeElement(
     return;
   }
   if (!isNameIn(bytes, localStart, localEnd, FORMULA_ELEMENTS)) return;
-  if (inOmmlNamespace(scopes, bytes, markup)) return;
+  if (elementNamespace(scopes, bytes, markup) === 'omml') return;
   assertSafeFieldContent(entry, bytes, markup, attributes);
 }
 
@@ -1141,12 +1513,26 @@ function createNamespaceScopes(): NamespaceScopes {
   };
 }
 
-/** The namespace the declaration value bytes [start, end) name. */
+/**
+ * The namespace the declaration value bytes [start, end) name (see NamespaceScopes):
+ * OMML or relationships compared byte for byte, 'scripted' when the decoded value is
+ * one of EVENT_HANDLER_NAMESPACES or cannot be decoded.
+ */
 function knownNamespace(bytes: Uint8Array, start: number, end: number): KnownNamespace {
   for (const [uri, namespace] of KNOWN_NAMESPACES) {
     if (bytesEqualAscii(bytes, start, end, uri)) return namespace;
   }
-  return 'other';
+  const uri = decodeXmlText(bytes.subarray(start, end));
+  return uri === null || EVENT_HANDLER_NAMESPACES.includes(uri) ? 'scripted' : 'other';
+}
+
+/**
+ * The namespace a prefix declared twice on one element names, by its `first` and
+ * `second` declarations (see NamespaceScopes).
+ */
+function mergedNamespace(first: KnownNamespace, second: KnownNamespace): KnownNamespace {
+  if (first === second) return first;
+  return first === 'scripted' || second === 'scripted' ? 'scripted' : 'other';
 }
 
 /**
@@ -1191,7 +1577,7 @@ function declareNamespaces(
     const innermost = stack.at(-1);
     // Only this element binds at this level: every element bound before at it is closed.
     if (innermost !== undefined && innermost.level === level) {
-      if (innermost.namespace !== namespace) innermost.namespace = 'other';
+      innermost.namespace = mergedNamespace(innermost.namespace, namespace);
       continue;
     }
     stack.push({ level, namespace });
@@ -1286,14 +1672,27 @@ function boundNamespace(scopes: NamespaceScopes, key: string): KnownNamespace | 
   return scopes.bindings.get(key)?.at(-1)?.namespace ?? null;
 }
 
-/** Whether the element scanned into `markup` is in OMML_NAMESPACE by the bindings of `scopes`. */
-function inOmmlNamespace(scopes: NamespaceScopes, bytes: Uint8Array, markup: XmlMarkup): boolean {
+/** The namespace the element scanned into `markup` is in by the bindings of `scopes`, or null when none counts. */
+function elementNamespace(
+  scopes: NamespaceScopes,
+  bytes: Uint8Array,
+  markup: XmlMarkup,
+): KnownNamespace | null {
   const localStart = localNameStart(bytes, markup);
   const key =
     localStart === markup.nameStart
       ? DEFAULT_NAMESPACE_KEY
       : NAME_DECODER.decode(bytes.subarray(markup.nameStart, localStart - 1));
-  return boundNamespace(scopes, key) === 'omml';
+  return boundNamespace(scopes, key);
+}
+
+/**
+ * Whether a web renderer reads the element scanned into `markup` by `scopes` (see the
+ * header): it is in an EVENT_HANDLER_NAMESPACES namespace, or the walk lost the nesting
+ * and no binding counts.
+ */
+function isWebElement(scopes: NamespaceScopes, bytes: Uint8Array, markup: XmlMarkup): boolean {
+  return scopes.broken || elementNamespace(scopes, bytes, markup) === 'scripted';
 }
 
 /**
@@ -1380,14 +1779,16 @@ function strictNameEnd(bytes: Uint8Array, start: number): number {
 
 /**
  * After markup the strict lexer refuses at `from`, refuses the part when any '<' from
- * there on could open a field, macro, script or active element or an element with a
- * field attribute of its own (the strict-name head of its loose local name, which a
- * reader that stops at U+0080 or a non-ASCII letter reads, is one), any run of name
- * bytes is a field, macro, URL, base URL or style name or a stylesheet instruction
- * target, or ends a `url(` (ASCII case ignored), any `&#` opens a character reference
- * (it could spell one), or, with `externalIds` (the part's external hyperlinks), a run
- * after a ':' is `id`. Linear: every loose name stops before the next '<', every run of
- * name bytes is read once.
+ * there on could open a field, macro, script, active or SVG animation element or an
+ * element with a field attribute of its own (the strict-name head of its loose local
+ * name, which a reader that stops at U+0080 or a non-ASCII letter reads, is one), any
+ * run of name bytes is a field, macro, URL, base URL, style or web resource attribute
+ * name or a stylesheet instruction target or starts with EVENT_HANDLER_PREFIX (an event
+ * handler), ASCII case ignored, any '(' makes a call of `url(` or a
+ * CSS_LOADING_FUNCTIONS function (every byte read by one CssNameRun, escapes decoded),
+ * any `&#` opens a character reference (it could spell one), or, with `externalIds`
+ * (the part's external hyperlinks), a run after a ':' is `id`. Linear: every loose name
+ * stops before the next '<', every byte is read once more.
  */
 function assertNoFieldAfter(
   entry: string,
@@ -1398,7 +1799,10 @@ function assertNoFieldAfter(
   for (let at = from; at !== -1; at = nextMarkup(bytes, at + 1)) {
     const localStart = looseLocalStart(bytes, at + 1);
     const headEnd = strictNameEnd(bytes, localStart);
-    if (isNameIn(bytes, localStart, headEnd, ACTIVE_ELEMENTS)) {
+    if (
+      isNameIn(bytes, localStart, headEnd, ACTIVE_ELEMENTS) ||
+      isNameIn(bytes, localStart, headEnd, SVG_ANIMATION_ELEMENTS)
+    ) {
       throw unsafePart(entry, 'Workbook part holds an active element the strict lexer cannot read');
     }
     if (
@@ -1410,29 +1814,37 @@ function assertNoFieldAfter(
       throw unsafeFormula(entry, 'Workbook part holds a formula the strict lexer cannot read');
     }
   }
+  const cssName = createCssNameRun();
   let at = from;
   while (at < bytes.length) {
-    if (!isNameByte(bytes[at])) {
-      if (bytes[at] === AMPERSAND && bytes[at + 1] === HASH) {
+    const byte = bytes[at];
+    if (byte === undefined) break;
+    if (!isNameByte(byte)) {
+      if (byte === AMPERSAND && bytes[at + 1] === HASH) {
         throw unsafePart(entry, 'Workbook part holds a reference the strict lexer cannot read');
+      }
+      if (readCssName(cssName, byte) !== 'none') {
+        throw unsafePart(entry, 'Workbook part holds a CSS call the strict lexer cannot read');
       }
       at += 1;
       continue;
     }
     const end = strictNameEnd(bytes, at);
+    // No name byte is a '(': none of them ends a call.
+    for (const nameByte of bytes.subarray(at, end)) readCssName(cssName, nameByte);
     if (
       isNameIn(bytes, at, end, FORMULA_ATTRIBUTES) ||
       isNameIn(bytes, at, end, MACRO_ATTRIBUTES)
     ) {
       throw unsafeFormula(entry, 'Workbook part holds a formula the strict lexer cannot read');
     }
-    const urlOpen = end - (CSS_URL_OPEN.length - 1);
     const link =
       isUrlAttributeName(bytes, at, end) ||
       isNameIn(bytes, at, end, BASE_URL_ATTRIBUTES) ||
       isNameIn(bytes, at, end, STYLES) ||
+      isNameIn(bytes, at, end, WEB_RESOURCE_ATTRIBUTES) ||
       isNameIn(bytes, at, end, STYLESHEET_INSTRUCTIONS) ||
-      (urlOpen >= at && spellsFolded(bytes, urlOpen, CSS_URL_OPEN)) ||
+      startsWithFolded(bytes, at, end, EVENT_HANDLER_PREFIX) ||
       (externalIds.size > 0 &&
         bytes[at - 1] === COLON &&
         isNameIn(bytes, at, end, RELATIONSHIP_IDS));
@@ -1478,6 +1890,7 @@ function addStyleCdata(bytes: Uint8Array, markup: XmlMarkup, style: StyleText): 
  * `unsafe-part`; then `style` leaves it.
  */
 function endStyle(entry: string, style: StyleText): void {
+  finishCss(style.css);
   if (style.css.loads) {
     throw unsafePart(entry, 'Workbook part holds a style that loads a resource');
   }
@@ -1488,11 +1901,13 @@ function endStyle(entry: string, style: StyleText): void {
 /**
  * Throws SpreadsheetFileError UNSAFE_CONTENT `{ reason, entry }` when XML part `entry`
  * holds a formula field that fails the scan, a macro assignment or a script
- * (`unsafe-formula`), an active element, a URL outside the package, a style that loads a
- * resource or a stylesheet instruction (`unsafe-part`), or, past markup the strict
- * lexer refuses, anything that could be one (see the formula field header);
+ * (`unsafe-formula`), an active element, an event handler or other web content, a URL
+ * outside the package, CSS that loads a resource or a stylesheet instruction
+ * (`unsafe-part`), or, past markup
+ * the strict lexer refuses, anything that could be one (see the formula field header);
  * UNSAFE_CONTENT `{ entry, cap }` when it holds more than MAX_XMLNS_DECLARATIONS_PER_PART
- * namespace declarations in scope at once. A hyperlink's `location` is a URL fragment
+ * namespace declarations in scope at once; CORRUPT_FILE `package-part` for an attribute
+ * value it cannot decode. A hyperlink's `location` is a URL fragment
  * only with relationship ids that `hyperlinkIds` gives only an external hyperlink, and
  * no other element may name one it gives one. Every markup of the part is read, the
  * open elements and the namespace declarations in scope kept on the way, and the text
@@ -1507,6 +1922,8 @@ function assertSafeFields(
   const attributes: number[] = [];
   const scopes = createNamespaceScopes();
   const style: StyleText = { level: OUTSIDE_STYLE, css: createCssScan(true) };
+  // A top-level element of the part is `svg`: every element in it is web content.
+  let svgPart = false;
   let textStart = 0;
   for (let at = nextMarkup(bytes, 0); at !== -1; at = nextMarkup(bytes, markup.end)) {
     const inStyle = style.level !== OUTSIDE_STYLE;
@@ -1524,11 +1941,16 @@ function assertSafeFields(
       case 'empty': {
         const nameStart = markup.nameStart;
         const nameEnd = markup.nameEnd;
-        const opensStyle =
-          kind === 'start' && isNameIn(bytes, localNameStart(bytes, markup), nameEnd, STYLES);
+        const localStart = localNameStart(bytes, markup);
+        const opensStyle = kind === 'start' && isNameIn(bytes, localStart, nameEnd, STYLES);
+        svgPart ||=
+          !scopes.broken && scopes.depth === 0 && isNameIn(bytes, localStart, nameEnd, SVG_ROOT);
         const inScopeBefore = scopes.declarationsInScope;
         const prefixes = declareNamespaces(entry, scopes, bytes, markup, attributes);
         const declarations = scopes.declarationsInScope - inScopeBefore;
+        if (svgPart || isWebElement(scopes, bytes, markup)) {
+          assertNoWebContent(entry, bytes, markup, attributes);
+        }
         assertSafeElement(entry, bytes, markup, attributes, scopes, hyperlinkIds);
         // A field, macro or script element was read through its end tag, now in `markup`.
         if (markup.kind !== 'start') {
@@ -1565,14 +1987,17 @@ function assertSafeFields(
  * Rejects one XML part, whatever its name, that declares a DOCTYPE or ENTITY (any
  * case), references an entity other than the five predefined ones and numeric
  * character references, or holds an unsafe formula field, macro assignment, script,
- * active element, URL outside the package, style that loads a resource or stylesheet
- * instruction, or more than MAX_XMLNS_DECLARATIONS_PER_PART namespace declarations in
- * scope at once (see the formula field header). A hyperlink's `location` is taken for
+ * active element, event handler or other web content, URL outside the package, CSS that
+ * loads a resource or stylesheet instruction, or more than
+ * MAX_XMLNS_DECLARATIONS_PER_PART namespace declarations in scope at once (see the
+ * formula field header). A hyperlink's
+ * `location` is taken for
  * a URL fragment only when its relationship ids are among those `hyperlinkIds` gives
  * only an external hyperlink, and no other element may name one it gives an external
  * hyperlink (those of this part, ExternalHyperlinkIds; none by default).
  * Throws SpreadsheetFileError('UNSAFE_CONTENT') naming `name`; a field refusal also
  * carries its reason (`unsafe-formula` or `unsafe-part`), the namespace refusal the cap.
+ * An attribute value the scan cannot decode is CORRUPT_FILE `package-part`.
  */
 export function assertSafeXmlPart(
   name: string,

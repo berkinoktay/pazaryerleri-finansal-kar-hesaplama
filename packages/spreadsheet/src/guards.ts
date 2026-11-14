@@ -15,7 +15,7 @@ import { cutRootChildren, literalAttributeText } from './patch/calc-chain';
 import { readZipLayout, type ZipLayout } from './patch/raw-zip';
 import { ZIP_REJECT_REASONS } from './patch/reasons';
 import { foldAsciiCase, metaEntryName } from './patch/shared';
-import { localNameIs, type XmlMarkup } from './patch/xml-lexer';
+import { localNameIs, NAMESPACE_DECLARATION, type XmlMarkup } from './patch/xml-lexer';
 import { assertSameViews } from './patch/zip-views';
 import {
   assertNoUnsafePackageParts,
@@ -63,8 +63,9 @@ const PROCESSING_INSTRUCTION_BYTE = 0x3f;
 const END_TAG_BYTE = 0x2f;
 // Bytes that end an element name: space, tab, CR, LF, '/', '>'.
 const NAME_END_BYTES: ReadonlySet<number> = new Set([0x20, 0x09, 0x0d, 0x0a, 0x2f, 0x3e]);
-// 'xmlns': every namespace declaration attribute starts with these bytes.
-const XMLNS_BYTES: readonly number[] = [0x78, 0x6d, 0x6c, 0x6e, 0x73];
+// Every namespace declaration attribute starts with these bytes: NAMESPACE_DECLARATION,
+// encoded once.
+const XMLNS_BYTES: readonly number[] = Array.from(new TextEncoder().encode(NAMESPACE_DECLARATION));
 // Zip bytes fed to the streaming inflater per push; see streamArchive.
 const STREAM_CHUNK_BYTES = 8 * 1024;
 // The officeDocument relationship type, transitional and strict: the root relationship

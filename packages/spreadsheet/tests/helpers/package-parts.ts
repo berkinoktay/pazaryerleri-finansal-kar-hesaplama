@@ -154,14 +154,25 @@ function webImageUnderRoot(rootStart: string, rootEnd: string): Readonly<Record<
   };
 }
 
-/** An external image relationship in a relationships part of the worksheet named `name`. */
-function externalImageIn(name: string): Readonly<Record<string, string>> {
+/**
+ * An external image relationship in a relationships part of the worksheet named `name`,
+ * its Relationships root declaring the default namespace `namespace`.
+ */
+function externalImageIn(
+  name: string,
+  namespace = RELATIONSHIPS_NS,
+): Readonly<Record<string, string>> {
   return {
     [name]: relationshipsXml(
       relationship(IMAGE_REL, 'https://evil.example/x.png', EXTERNAL_TARGET_MODE),
-    ),
+    ).replace(RELATIONSHIPS_NS, namespace),
   };
 }
+
+// The package relationships namespace written with a character reference: its colon,
+// and its last letter.
+const REFERENCED_COLON_RELATIONSHIPS_NS = RELATIONSHIPS_NS.replace(':', '&#58;');
+const REFERENCED_S_RELATIONSHIPS_NS = `${RELATIONSHIPS_NS.slice(0, -1)}&#115;`;
 
 // Root elements named worksheet that are no SpreadsheetML worksheet: label, start and end tag.
 const NON_WORKSHEET_ROOTS: readonly (readonly [label: string, start: string, end: string])[] = [
@@ -532,6 +543,25 @@ export const UNSAFE_PART_CASES: readonly PackagePartCase[] = [
     label: 'an external image in a relationships part named like an image',
     entries: externalImageIn('xl/media/image9.png'),
   },
+  // A part whose root's local name is Relationships is walked whatever its namespace.
+  {
+    label: 'an external image in a part named .rel and a long s, its namespace colon a reference',
+    entries: externalImageIn(
+      `xl/worksheets/_rels/sheet1.xml.rel${LONG_S}`,
+      REFERENCED_COLON_RELATIONSHIPS_NS,
+    ),
+  },
+  {
+    label: 'an external image in a part named .xml%2Erels, its namespace last letter a reference',
+    entries: externalImageIn(
+      'xl/worksheets/_rels/sheet1.xml%2Erels',
+      REFERENCED_S_RELATIONSHIPS_NS,
+    ),
+  },
+  {
+    label: 'an external image in a part named like an image, its root in another namespace',
+    entries: externalImageIn('xl/media/image9.png', 'urn:other'),
+  },
   {
     label: 'a digital signature origin named by the root relationships',
     entries: rootRelationship(`${DIGITAL_SIGNATURE_REL}/origin`),
@@ -546,12 +576,6 @@ export const UNSAFE_PART_CASES: readonly PackagePartCase[] = [
       },
     }),
   ),
-  // The content scan, which runs first, reads every attribute value a reference could
-  // turn into a url( and refuses one it cannot decode.
-  {
-    label: 'a Target holding a character reference past U+10FFFF',
-    entries: drawingImage('../media/image&#1114112;.png'),
-  },
 ];
 
 /** Refused with CORRUPT_FILE `package-part`. */
@@ -623,6 +647,12 @@ export const PACKAGE_PART_CASES: readonly PackagePartCase[] = [
         `<W>${relationship(`${OFFICE_REL}/oleObject`, '../x/a.bin')}</W>`,
       ),
     },
+  },
+  // The content scan, which runs first, gives an attribute value it cannot decode the
+  // error the walk gives such a Target.
+  {
+    label: 'a Target holding a character reference past U+10FFFF',
+    entries: drawingImage('../media/image&#1114112;.png'),
   },
   {
     label: 'a relationships part named .rel and a long s whose root the strict lexer refuses',
