@@ -33,10 +33,38 @@ const MISSING_VALUE_TEXT = 'undefined';
 // A style index the reader's `styles[s]` lookup can find is a canonical array index.
 const STYLE_INDEX = /^(0|[1-9]\d*)$/;
 
-/** A cell breaks one of the reader's rules. Package-internal: never leaves read-grid.ts. */
+/**
+ * Every reader rule a workbook can break, by a stable key, with the message its
+ * ReaderRuleError carries. The key reaches the caller as CORRUPT_FILE's `meta.rule`;
+ * the message only inside `meta.cause`.
+ */
+export const READER_RULES = {
+  inlineStringStructure: 'Unsupported inline string cell structure',
+  sharedStringIndex: 'Invalid or out-of-bounds shared string index',
+  booleanValue: 'Unsupported boolean cell value',
+  dateValue: 'Unsupported date cell value',
+  numericValue: 'Invalid numeric cell value',
+  cellStyleNotFound: 'Cell style not found',
+  formulaStringWithoutValue: 'Formula string cell has no value',
+  cellTypeNotSupported: 'Cell type not supported',
+  workbookWithoutSheets: 'Workbook has no sheets element',
+  sharedStringRunWithoutText: 'Shared string run has no text',
+  numberFormatIdBreaksReader: 'Number format id breaks the reader',
+  worksheetWithoutSheetData: 'Worksheet has no sheetData',
+  alternateContentInSheetData: 'Worksheet has AlternateContent inside its sheet data',
+  sheetNotWorksheet: 'Sheet is not a worksheet',
+  workbookPartNotRead: 'Workbook part was not read',
+} as const;
+
+export type ReaderRule = keyof typeof READER_RULES;
+
+/**
+ * A cell breaks one of the reader's rules. Package-internal: the error never leaves
+ * read-grid.ts; its `rule` does, as CORRUPT_FILE's `meta.rule`.
+ */
 export class ReaderRuleError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(readonly rule: ReaderRule) {
+    super(READER_RULES[rule]);
     this.name = 'ReaderRuleError';
   }
 }
@@ -71,11 +99,11 @@ function firstElementChild(parent: Node): Element | null {
 function inlineStringValue(cell: Element): string | null {
   const inline = firstElementChild(cell);
   if (inline === null || localName(inline.tagName) !== INLINE_STRING) {
-    throw new ReaderRuleError('Unsupported inline string cell structure');
+    throw new ReaderRuleError('inlineStringStructure');
   }
   const text = firstElementChild(inline);
   if (text === null || localName(text.tagName) !== INLINE_TEXT) {
-    throw new ReaderRuleError('Unsupported inline string cell structure');
+    throw new ReaderRuleError('inlineStringStructure');
   }
   return trimmedOrNull(textOf(text));
 }
@@ -87,7 +115,7 @@ function sharedStringValue(raw: string | undefined, context: CellContext): strin
       ? context.sharedStrings[index]
       : undefined;
   if (value === undefined) {
-    throw new ReaderRuleError('Invalid or out-of-bounds shared string index');
+    throw new ReaderRuleError('sharedStringIndex');
   }
   return value;
 }
@@ -95,19 +123,19 @@ function sharedStringValue(raw: string | undefined, context: CellContext): strin
 function booleanValue(raw: string | undefined): boolean {
   if (raw === TRUE_VALUE) return true;
   if (raw === FALSE_VALUE) return false;
-  throw new ReaderRuleError('Unsupported boolean cell value');
+  throw new ReaderRuleError('booleanValue');
 }
 
 function dateValue(raw: string | undefined): Date | null {
   if (raw === undefined) return null;
   const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) throw new ReaderRuleError('Unsupported date cell value');
+  if (Number.isNaN(date.getTime())) throw new ReaderRuleError('dateValue');
   return date;
 }
 
 function numberOf(raw: string): number {
   const value = Number(raw);
-  if (Number.isNaN(value)) throw new ReaderRuleError('Invalid numeric cell value');
+  if (Number.isNaN(value)) throw new ReaderRuleError('numericValue');
   return value;
 }
 
@@ -120,7 +148,7 @@ function hasDateStyle(cell: Element, context: CellContext): boolean {
   const style = attributeOf(cell, STYLE_ATTRIBUTE);
   if (style === null || style === '') return false;
   if (!STYLE_INDEX.test(style) || Number(style) >= context.xfIsDate.length) {
-    throw new ReaderRuleError('Cell style not found');
+    throw new ReaderRuleError('cellStyleNotFound');
   }
   return context.xfIsDate[Number(style)] === true;
 }
@@ -146,7 +174,7 @@ export function cellValue(cell: Element, context: CellContext): CellValue {
   const raw = valueElement === null ? undefined : textOf(valueElement);
   switch (type) {
     case 'str':
-      if (raw === undefined) throw new ReaderRuleError('Formula string cell has no value');
+      if (raw === undefined) throw new ReaderRuleError('formulaStringWithoutValue');
       return trimmedOrNull(raw);
     case 'inlineStr':
       return inlineStringValue(cell);
@@ -163,6 +191,6 @@ export function cellValue(cell: Element, context: CellContext): CellValue {
     case DEFAULT_TYPE:
       return numericValue(raw, isDate, context);
     default:
-      throw new ReaderRuleError('Cell type not supported');
+      throw new ReaderRuleError('cellTypeNotSupported');
   }
 }

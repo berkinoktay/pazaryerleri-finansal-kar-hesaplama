@@ -384,9 +384,9 @@ function holdsAlternateContent(sheetData: Element): boolean {
 /** The reader rule a worksheet root breaks before any cell is read, or null. */
 function sheetDataFailure(root: Element): ReaderRuleError | null {
   const sheetData = firstChildNamed(root, SHEET_DATA);
-  if (sheetData === null) return new ReaderRuleError('Worksheet has no sheetData');
+  if (sheetData === null) return new ReaderRuleError('worksheetWithoutSheetData');
   if (holdsAlternateContent(sheetData)) {
-    return new ReaderRuleError('Worksheet has AlternateContent inside its sheet data');
+    return new ReaderRuleError('alternateContentInSheetData');
   }
   return null;
 }
@@ -447,7 +447,7 @@ function convertSheet(
     return {
       partPath: NO_PART,
       placed: [],
-      failure: new ReaderRuleError('Sheet is not a worksheet'),
+      failure: new ReaderRuleError('sheetNotWorksheet'),
       cellKeys: null,
       mergeRefs: NOT_TRACKED,
       formulaRangeRefs: null,
@@ -490,6 +490,7 @@ function assembleGrid(placed: readonly (readonly CellValue[] | undefined)[]): Sh
 function cannotRead(cause: ReaderRuleError): SpreadsheetFileError {
   return new SpreadsheetFileError('CORRUPT_FILE', READ_FAILED_MESSAGE, {
     cause: String(cause).slice(0, MAX_ERROR_CAUSE_LENGTH),
+    rule: cause.rule,
   });
 }
 
@@ -528,7 +529,7 @@ function readGridParts(parts: UploadParts, options: GridReadOptions, track: bool
 
   if (state.held !== null) throw cannotRead(state.held);
   const workbook = state.workbook;
-  if (workbook === null) throw cannotRead(new ReaderRuleError('Workbook part was not read'));
+  if (workbook === null) throw cannotRead(new ReaderRuleError('workbookPartNotRead'));
   const choice = chooseSheet(workbook.sheets, options);
   // Only now: every part has passed checkPart and no reader rule is held.
   if (choice.missing !== null) throw sheetNotFound(choice.missing);

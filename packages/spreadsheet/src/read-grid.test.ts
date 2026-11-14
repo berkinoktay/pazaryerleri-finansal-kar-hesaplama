@@ -361,6 +361,7 @@ describe('readGrid: cell styles and AlternateContent in the sheet data', () => {
 
     expect(error.code).toBe('CORRUPT_FILE');
     expect(String(error.meta.cause)).toContain('Cell style not found');
+    expect(error.meta.rule).toBe('cellStyleNotFound');
   });
 
   it('reads an empty cell with an existing style index as null', () => {
@@ -381,6 +382,9 @@ describe('readGrid: cell styles and AlternateContent in the sheet data', () => {
 
     expect(errorCodeOf(() => readGrid(parts, { caps: CAPS }))).toBe('CORRUPT_FILE');
     expect(errorCodeOf(() => readSheet(parts, { caps: CAPS }))).toBe('CORRUPT_FILE');
+    expect(fileErrorOf(() => readGrid(parts, { caps: CAPS })).meta.rule).toBe(
+      'alternateContentInSheetData',
+    );
   });
 
   it('refuses AlternateContent directly under a row', () => {

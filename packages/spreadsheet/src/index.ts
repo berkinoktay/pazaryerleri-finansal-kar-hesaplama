@@ -69,6 +69,8 @@ export {
   UNSUPPORTED_ENCODING_REASONS,
   ZIP_REJECT_REASONS,
 } from './patch/reasons';
+export { READER_RULES } from './cell-value';
+export type { ReaderRule } from './cell-value';
 export type { ReadGridOptions, SheetSelector } from './read-options';
 export { resolveWorksheetPartPaths } from './workbook-parts';
 export { WORKER_LIMIT_REASONS, workerLimitReason } from './worker/grid-worker-host';
