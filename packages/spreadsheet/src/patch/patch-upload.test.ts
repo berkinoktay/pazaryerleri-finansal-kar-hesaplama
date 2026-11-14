@@ -33,12 +33,7 @@ import { patchFixture, type PatchFixtureOptions } from '../testing/patch-fixture
 import { resolvePatchRequest, type CellPatch, type ResolvedPatchRequest } from './patch-request';
 import { assertOutputBudget, assertSameCells, patchUpload } from './patch-upload';
 import { readZipLayout } from './raw-zip';
-import {
-  MALFORMED_SHEET_REASONS,
-  PATCH_LIMIT_REASONS,
-  UNSUPPORTED_ENCODING_REASONS,
-  ZIP_REJECT_REASONS,
-} from './reasons';
+import { MALFORMED_SHEET_REASONS, PATCH_LIMIT_REASONS, ZIP_REJECT_REASONS } from './reasons';
 
 const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>';
 const PACKAGE_RELATIONSHIPS_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
@@ -61,8 +56,10 @@ const STYLES_PART = 'xl/styles.xml';
 const APP_PROPERTIES_PART = 'docProps/app.xml';
 const BLOB_PART = 'xl/media/blob.bin';
 const DISCOUNT_FIXTURE = 'trendyol-discount-products.xlsx';
-// Bytes of a part other relationships use; the tests only compare them.
+// Bytes of a part other relationships use; the tests only compare them. The gate reads a
+// part named .vml for XML, so the VML drawing holds an XML root.
 const SHARED_PART_BYTES = 'not a calcChain';
+const SHARED_VML_BYTES = '<xml>not a calcChain</xml>';
 
 const DEFAULT_READ = resolveReadOptions({});
 const GUARD_OPTS = {
@@ -223,12 +220,6 @@ const READER_ACCEPTS_PATCHER_REFUSES: readonly (readonly [
     MALFORMED_SHEET_REASONS.MARKUP,
   ],
   [
-    'NUL as tag whitespace',
-    '<row r="1"><c\u0000r="A1"><v>7</v></c></row>',
-    [[7]],
-    MALFORMED_SHEET_REASONS.MARKUP,
-  ],
-  [
     'a vertical tab as tag whitespace',
     '<row r="1"><c\u000Br="A1"><v>7</v></c></row>',
     [[7]],
@@ -312,12 +303,6 @@ describe('patchUpload: the reader accepts, the patcher refuses', () => {
 
   it.each<[string, string, SpreadsheetFileErrorCode, string]>([
     [
-      'a declaration of another encoding',
-      `<?xml version="1.0" encoding="ISO-8859-1"?><worksheet xmlns="${MAIN_NAMESPACE}"><sheetData>${ONE_CELL}</sheetData></worksheet>`,
-      'UNSUPPORTED_ENCODING',
-      UNSUPPORTED_ENCODING_REASONS.DECLARATION,
-    ],
-    [
       'a second sheetData holding another value',
       worksheet(ONE_CELL, '<sheetData><row r="1"><c r="A1"><v>8</v></c></row></sheetData>'),
       'MALFORMED_SHEET',
@@ -327,6 +312,21 @@ describe('patchUpload: the reader accepts, the patcher refuses', () => {
     const file = bookOf(xml);
     expect(readBack(file)).toEqual([[7]]);
     expectReason(() => patchFixture(file, [num(1, 0, '1')]), code, reason);
+  });
+
+  // The reader used to read these and the patcher refused them; the gate now refuses
+  // every kept XML part that is not UTF-8 text, so the read refuses them too.
+  it.each<[string, string]>([
+    [
+      'a declaration of another encoding',
+      `<?xml version="1.0" encoding="ISO-8859-1"?><worksheet xmlns="${MAIN_NAMESPACE}"><sheetData>${ONE_CELL}</sheetData></worksheet>`,
+    ],
+    ['NUL as tag whitespace', worksheet('<row r="1"><c\u0000r="A1"><v>7</v></c></row>')],
+  ])('the gate refuses %s as CORRUPT_FILE part-encoding', (_, xml) => {
+    const file = bookOf(xml);
+    const meta = { reason: ZIP_REJECT_REASONS.PART_ENCODING, entry: SHEET_PART };
+    expectFileError(() => readBack(file), 'CORRUPT_FILE', meta);
+    expectFileError(() => patchFixture(file, [num(1, 0, '1')]), 'CORRUPT_FILE', meta);
   });
 
   it('runs the reader before the index: crossed end tags are the reader error', () => {
@@ -748,12 +748,20 @@ describe('patchUpload: calcChain', () => {
   // Default only. With no Override of the calcChain content type, nothing confirms it
   // is a calcChain: its relationship is cut (no opener loads it as one) and its entry
   // stays.
-  it.each<[target: string, extension: string, contentType: string, relationshipType: string]>([
-    ['media/image1.png', 'png', PNG_CONTENT_TYPE, 'image'],
-    ['drawings/vmlDrawing1.vml', 'vml', VML_CONTENT_TYPE, 'vmlDrawing'],
+  it.each<
+    [
+      target: string,
+      extension: string,
+      contentType: string,
+      relationshipType: string,
+      partBytes: string,
+    ]
+  >([
+    ['media/image1.png', 'png', PNG_CONTENT_TYPE, 'image', SHARED_PART_BYTES],
+    ['drawings/vmlDrawing1.vml', 'vml', VML_CONTENT_TYPE, 'vmlDrawing', SHARED_VML_BYTES],
   ])(
     'keeps a part a calcChain Target names without a calcChain Override: %s',
-    (target, extension, contentType, relationshipType) => {
+    (target, extension, contentType, relationshipType, partBytes) => {
       const part = `xl/${target}`;
       const sheetTarget = `../${target}`;
       const file = bookOf(formulaSheet, {
@@ -766,7 +774,7 @@ describe('patchUpload: calcChain', () => {
           [`<Default Extension="${extension}" ContentType="${contentType}"/>`],
         ),
         [SHEET_RELS_PART]: relsOf(relationship('rId1', relationshipType, sheetTarget)),
-        [part]: SHARED_PART_BYTES,
+        [part]: partBytes,
       });
 
       const out = patchFixture(file, [num(2, 1, '5')], flaggedB);

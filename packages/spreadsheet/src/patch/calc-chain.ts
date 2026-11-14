@@ -187,6 +187,26 @@ export function literalAttributeText(
   return VALUE_DECODER.decode(bytes.subarray(value.start, value.end));
 }
 
+/**
+ * The raw bytes of the value of the scanned tag's only attribute named exactly `name`,
+ * references and line breaks left in; null when it has none. CORRUPT_FILE
+ * `package-part` for `entry` when the attribute repeats.
+ */
+export function attributeValueBytes(
+  bytes: Uint8Array,
+  markup: XmlMarkup,
+  attributes: readonly number[],
+  name: string,
+  entry: string,
+): Uint8Array | null {
+  const attribute = onlyAttribute(bytes, markup, attributes, name, entry);
+  if (attribute === NO_ATTRIBUTE) return null;
+  return bytes.subarray(
+    attributeField(attributes, attribute, ATTRIBUTE_VALUE_START),
+    attributeField(attributes, attribute, ATTRIBUTE_VALUE_END),
+  );
+}
+
 function isCalcChainType(bytes: Uint8Array, start: number, end: number): boolean {
   return CALC_CHAIN_RELATIONSHIP_TYPES.some((type) => bytesEqualAscii(bytes, start, end, type));
 }

@@ -59,8 +59,9 @@ const GUARD_OPTS = {
   maxBytes: DEFAULT_MAX_BYTES,
 };
 
-// Every rule of the gate, the zip layout, the view check, the root relationships and
-// the unsafe parts included, accepts a seller's normal file.
+// Every rule of the gate, the zip layout, the view check, the root relationships, the
+// unsafe parts and the worksheet formula scan included, accepts a seller's normal file.
+// The reads above also pass the reader's style and AlternateContent rules.
 describe('fixtures pass the upload gate', () => {
   it.each(FIXTURE_PINS)('$file', (fixture) => {
     expect(() => openUpload(readFixture(fixture.file), GUARD_OPTS)).not.toThrow();

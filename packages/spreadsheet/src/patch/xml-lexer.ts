@@ -176,7 +176,8 @@ function isNameStartByte(byte: number | undefined): boolean {
   );
 }
 
-function isNameByte(byte: number | undefined): boolean {
+/** A byte this lexer accepts in a name after its first: an ASCII letter or digit, '_', '-' or '.'. */
+export function isNameByte(byte: number | undefined): boolean {
   if (byte === undefined) return false;
   return (
     isNameStartByte(byte) ||

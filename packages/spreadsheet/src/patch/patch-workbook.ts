@@ -7,6 +7,7 @@ import {
   type PatchWorkbookOptions,
   type ResolvedPatchRequest,
 } from './patch-request';
+import { invalidPatchRequest } from './shared';
 
 // The public export patch path: the request is validated on the main thread, only the
 // outputs that patch something are sent, and the job runs in the parse worker through
@@ -19,11 +20,14 @@ function patchesSomething(patches: readonly CellPatch[]): boolean {
 /**
  * One Buffer per `options.outputs` entry, in order. An output that changes nothing is
  * `file` itself. When every output is empty, nothing is queued and neither the anchors
- * nor the file are checked (the request itself is still validated): `file` is returned
- * for each output as it is. Throws Error for an invalid request (before queueing).
- * Rejects with SpreadsheetFileError: every code a read can raise, plus MALFORMED_SHEET,
- * UNSUPPORTED_ENCODING, ROW_NOT_FOUND, ROW_ANCHOR_MISMATCH, ENGINE_BUSY, and
- * PAYLOAD_TOO_LARGE with a worker or a patch reason.
+ * nor the file are checked (the request itself is still validated): `file` itself is
+ * returned for each output. Throws Error for an invalid request (before queueing),
+ * including a legacy `sheetName` lookup without anchors when an output patches
+ * something: that lookup falls back to the first sheet, so only anchors can prove the
+ * patched rows are the rows the caller read. Rejects with SpreadsheetFileError: every
+ * code a read can raise, plus MALFORMED_SHEET, UNSUPPORTED_ENCODING, ROW_NOT_FOUND,
+ * ROW_ANCHOR_MISMATCH, ENGINE_BUSY, and PAYLOAD_TOO_LARGE with a worker or a patch
+ * reason.
  */
 export async function patchWorkbook(
   file: Buffer,
@@ -32,6 +36,9 @@ export async function patchWorkbook(
   const request = resolvePatchRequest(options);
   const sent = request.outputs.filter(patchesSomething);
   if (sent.length === 0) return request.outputs.map(() => file);
+  if (request.read.sheetName !== undefined && request.anchors.length === 0) {
+    throw invalidPatchRequest('sheetName needs at least one anchor');
+  }
 
   const job: ResolvedPatchRequest = { ...request, outputs: sent };
   const answers = await runOnGridWorker(async (host) => host.patch(file, job));

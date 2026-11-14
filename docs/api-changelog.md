@@ -42,6 +42,41 @@ section "Versioning" for details.
   hyperlinks excepted), answers `422` with `{ field: 'file', code: 'UNSAFE_CONTENT' }`. The six
   export routes read the stored file through the same gate: a stored file with any of these
   conditions answers `409 CONFLICT`. Valid Trendyol files are unaffected.
+- **The campaign workbook upload gate checks cell styles, the sheet data, every formula field
+  against an allow list, the parts it scans by their content, and relationship targets**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs|advantage-tariffs|flash-products|discount-lists|marketplace-campaigns}/import`).
+  An upload whose read sheet has a cell, an empty one included, whose style index names no
+  `cellXfs` entry, or an `AlternateContent` element directly inside its sheet data or one of its
+  rows, answers `422` with `{ field: 'file', code: 'CORRUPT_FILE' }`. The gate now scans every zip
+  entry whose content is XML, whatever its name (a worksheet stored as `.bin`, a VML drawing, a
+  theme stored as `.dat`), not only the parts the reader opens. An entry that is not UTF-8 XML
+  text (invalid UTF-8, a U+0000 character, a UTF-16 or UTF-32 byte order mark or layout, an XML
+  declaration of another encoding such as UTF-7), or an entry named `.xml`, `.rels` or `.vml` that
+  does not hold XML, answers `422` with `{ field: 'file', code: 'CORRUPT_FILE' }`. Every formula
+  field of every scanned part is checked, read with its character references decoded: cell
+  formulas, defined names, data validation and conditional format formulas, table column formulas,
+  chart series formulas, pivot cache formulas, and the formula attributes and elements of shapes,
+  form controls and VML drawings. A formula may call only functions of a fixed allow list of pure
+  math, text, logical, lookup and date functions (`IF`, `SUM`, `VLOOKUP`, `XLOOKUP`, `OFFSET`,
+  `SEARCH` and similar); a call to any other function (`WEBSERVICE`, `HYPERLINK`, `IMAGE`, `RTD`,
+  `INDIRECT`, `LAMBDA`, every `IMPORT*` name and every unknown name included), in any Unicode case
+  or compatibility form, answers `422` with `{ field: 'file', code: 'UNSAFE_CONTENT' }`. So does a
+  formula that holds a name behind an internal Excel prefix other than `_xlfn.` and `_xlws.`
+  (`_xludf.`, `_xleta.`, `_xlpm.`, `_xlnm.`), an `_xHHHH_` escape, a Unicode format character
+  outside a string literal, a DDE link (`|`), a reference into another workbook (`[1]Sheet1!A1`,
+  or a path, URL or `[` inside a quoted sheet name), a string literal, quoted sheet name or
+  structured reference that never closes, more than 32 768 characters, or anything but text (a
+  comment, CDATA, a processing instruction or an element). A macro assignment (a non-empty
+  `macro` or `fmlaMacro` attribute, a non-empty `FmlaMacro` element), an embedded object, a form
+  or ActiveX control, a web publishing item, an Office web add-in, a custom ribbon or attached
+  toolbars, and a DOCTYPE, an ENTITY declaration or an unknown entity reference in any scanned part
+  answer `422` `UNSAFE_CONTENT` too. A relationship that points outside the package now passes
+  only when it is a hyperlink of a worksheet to an `http`, `https` or `mailto` address; any other
+  external relationship (a drawing or rich-data hyperlink, a web image, a file share), and an
+  internal one whose target is a URI with a scheme, a drive letter, a network path or holds a
+  backslash, answers `422` `UNSAFE_CONTENT`. The six export routes read the stored file through the
+  same gate: a stored file with any of these conditions answers `409 CONFLICT`. Valid Trendyol files
+  are unaffected.
 - **Campaign workbook import routes are guarded before the body is read**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs|advantage-tariffs|flash-products|discount-lists|marketplace-campaigns}/import`).
   Store access and the `DATA_WRITE` capability are now checked in route middleware, so a caller who

@@ -38,6 +38,9 @@ import {
 //   3. the selected worksheet's cells are converted while checkPart walks them
 //      (cell-value.ts); a worksheet that is also a book part (crafted rels) is
 //      parsed again and converted after the walk.
+// A converted worksheet whose `sheetData`, or one of its `row` children, has a direct
+// `AlternateContent` child (any namespace) breaks a reader rule: the reader and the
+// patcher's index skip it, Excel may apply one of its branches.
 // Gate errors win over reader errors: a rule the reader would break (ReaderRuleError)
 // is held until every part has passed checkPart. A named sheet that cannot be read
 // falls back to the first sheet, as the old pipeline's wrapper did; a sheet that
@@ -54,6 +57,7 @@ import {
 // grid alone.
 
 const SHEET_DATA = 'sheetData';
+const ROW = 'row';
 const MERGE_CELLS = 'mergeCells';
 const MERGE_CELL = 'mergeCell';
 // Markup compatibility's wrapper (`mc:AlternateContent`): Excel applies one of its branches.
@@ -363,14 +367,37 @@ function collectFormulaRangeRefs(cell: Element, refs: string[]): void {
 }
 
 /**
+ * Whether `sheetData` or one of its `row` children (by local name) has a direct child
+ * whose local name is `AlternateContent`, any namespace. One pass over the children of
+ * the sheet data and of its rows; it never throws.
+ */
+function holdsAlternateContent(sheetData: Element): boolean {
+  for (const child of sheetData.childNodes) {
+    if (!isElement(child)) continue;
+    const name = localName(child.tagName);
+    if (name === ALTERNATE_CONTENT) return true;
+    if (name === ROW && firstChildNamed(child, ALTERNATE_CONTENT) !== null) return true;
+  }
+  return false;
+}
+
+/** The reader rule a worksheet root breaks before any cell is read, or null. */
+function sheetDataFailure(root: Element): ReaderRuleError | null {
+  const sheetData = firstChildNamed(root, SHEET_DATA);
+  if (sheetData === null) return new ReaderRuleError('Worksheet has no sheetData');
+  if (holdsAlternateContent(sheetData)) {
+    return new ReaderRuleError('Worksheet has AlternateContent inside its sheet data');
+  }
+  return null;
+}
+
+/**
  * A conversion of the worksheet part `partPath` under `root`; a root without
- * `sheetData` breaks the reader. Only a tracked conversion reads the merge refs.
+ * `sheetData`, or with `AlternateContent` directly inside its sheet data or one of its
+ * rows, breaks the reader. Only a tracked conversion reads the merge refs.
  */
 function startConversion(partPath: string, root: Element, track: boolean): Conversion {
-  const failure =
-    firstChildNamed(root, SHEET_DATA) === null
-      ? new ReaderRuleError('Worksheet has no sheetData')
-      : null;
+  const failure = sheetDataFailure(root);
   return {
     partPath,
     placed: [],

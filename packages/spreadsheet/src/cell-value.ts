@@ -12,6 +12,10 @@ import { attributeOf, firstChildNamed, isElement, localName, textOf } from './xm
 //   - numbers are read with `Number`, like the reader's parseNumberDefault;
 //   - every input the reader throws on throws ReaderRuleError here, so the caller
 //     can fall back to the first sheet or report CORRUPT_FILE as the old path did.
+// One rule is stricter than that reader: every cell that carries a style index must
+// name an existing `cellXfs` entry, an empty cell included (the reader looked the
+// style up for a numeric value only). The export patch path keeps a cell's style when
+// it writes into it, so a style Excel cannot find must be refused at upload.
 
 const VALUE = 'v';
 const FORMULA = 'f';
@@ -107,7 +111,11 @@ function numberOf(raw: string): number {
   return value;
 }
 
-/** Whether the cell's style formats a date; a style the reader cannot find throws. */
+/**
+ * Whether the cell's style formats a date; a cell without a style index (or with an
+ * empty one) has none. A style index that is not a canonical index of an existing
+ * `cellXfs` entry throws.
+ */
 function hasDateStyle(cell: Element, context: CellContext): boolean {
   const style = attributeOf(cell, STYLE_ATTRIBUTE);
   if (style === null || style === '') return false;
@@ -117,17 +125,20 @@ function hasDateStyle(cell: Element, context: CellContext): boolean {
   return context.xfIsDate[Number(style)] === true;
 }
 
-function numericValue(cell: Element, raw: string | undefined, context: CellContext): CellValue {
+function numericValue(raw: string | undefined, isDate: boolean, context: CellContext): CellValue {
   if (raw === undefined) return null;
-  if (hasDateStyle(cell, context)) return excelSerialToDate(numberOf(raw), context.epoch1904);
+  if (isDate) return excelSerialToDate(numberOf(raw), context.epoch1904);
   return numberOf(raw);
 }
 
 /**
- * The grid value of one worksheet cell, by read-excel-file 9.2.0's rules (see the
- * header). Throws ReaderRuleError wherever that reader throws.
+ * The grid value of one worksheet cell, by read-excel-file 9.2.0's rules plus the
+ * style rule (see the header). Throws ReaderRuleError wherever that reader throws, and
+ * for a style index no `cellXfs` entry has, on every cell.
  */
 export function cellValue(cell: Element, context: CellContext): CellValue {
+  // Looked up before anything else: an empty cell and an uncached formula cell too.
+  const isDate = hasDateStyle(cell, context);
   // PR 1's read copy emptied these cells; the old reader then saw an untyped empty cell.
   if (isUncachedFormulaCell(cell)) return null;
   const type = attributeOf(cell, TYPE_ATTRIBUTE) || DEFAULT_TYPE;
@@ -150,7 +161,7 @@ export function cellValue(cell: Element, context: CellContext): CellValue {
     case 'd':
       return dateValue(raw);
     case DEFAULT_TYPE:
-      return numericValue(cell, raw, context);
+      return numericValue(raw, isDate, context);
     default:
       throw new ReaderRuleError('Cell type not supported');
   }

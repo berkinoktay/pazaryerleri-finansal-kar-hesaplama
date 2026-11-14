@@ -660,7 +660,19 @@ describe('grid gate: reader parts', () => {
       '<x:c r="A1" s="42" t="str"><x:f>IF(ISBLANK(B1),"","Hayir")</x:f></x:c>' +
       '<x:c r="B1" t="inlineStr"><x:is><x:t>keep</x:t></x:is></x:c>' +
       '</x:row></x:sheetData></x:worksheet>';
-    const file = buildXlsxFixture([{ name: 'Sheet1', xml }]);
+    // Style 42 exists: every styled cell, an uncached formula cell too, must name a
+    // cellXfs entry.
+    const styleCount = 43;
+    const styles =
+      `${XML_DECLARATION}<styleSheet xmlns="${SPREADSHEET_NS}">` +
+      `<cellXfs>${'<xf numFmtId="0"/>'.repeat(styleCount)}</cellXfs></styleSheet>`;
+    const file = buildXlsxFixture([{ name: 'Sheet1', xml }], {
+      'xl/_rels/workbook.xml.rels': relsOf(
+        SHEET_RELATIONSHIP,
+        `<Relationship Id="rId9" Type="${OFFICE_REL}/styles" Target="styles.xml"/>`,
+      ),
+      [STYLES_PART]: styles,
+    });
 
     expect(uploadOutcome(file)).toEqual(grid([[null, 'keep']]));
   });

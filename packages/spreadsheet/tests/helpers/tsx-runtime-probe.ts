@@ -5,7 +5,7 @@ import {
 import { SpreadsheetFileError } from '../../src/errors';
 import { readWorkbookGrid } from '../../src/parse';
 import { patchWorkbook } from '../../src/patch/patch-workbook';
-import { resolveReadOptions } from '../../src/read-options';
+import { resolveReadOptions, type ReadGridOptions } from '../../src/read-options';
 import { buildXlsxFixture, worksheetXml } from '../../src/testing/build-xlsx';
 import { createGridWorkerHost, workerLimitReason } from '../../src/worker/grid-worker-host';
 import { FIXTURE_PINS, gridSha256, readFixture } from './fixture-pins';
@@ -37,8 +37,10 @@ const PATCHED_VALUE = '123.45';
 
 const pin = FIXTURE_PINS.find((p) => p.file === COMMISSION_FIXTURE);
 if (pin === undefined) throw new Error(`no pin for ${COMMISSION_FIXTURE}`);
+if (pin.sheetName === undefined) throw new Error(`no sheet name pinned for ${COMMISSION_FIXTURE}`);
 const file = readFixture(pin.file);
-const readOptions = { sheetName: pin.sheetName };
+// The strict selector: patchWorkbook refuses the legacy sheetName lookup without anchors.
+const readOptions: ReadGridOptions = { sheet: { by: 'name', name: pin.sheetName } };
 
 function outcomeOf(e: unknown): string {
   if (e instanceof SpreadsheetFileError) return workerLimitReason(e) ?? e.code;

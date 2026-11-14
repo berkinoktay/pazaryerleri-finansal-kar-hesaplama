@@ -1,16 +1,23 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { pinOf, readFixture } from '../../tests/helpers/fixture-pins';
+import { pinOf, readFixture, type FixturePin } from '../../tests/helpers/fixture-pins';
 import { num, text } from '../../tests/helpers/patch-helpers';
 import { grownFixtureWorkbook } from '../../tests/helpers/workbooks';
+import { cellText } from '../cells';
 import { GRID_WORKER_TIMEOUT_MS, MAX_PATCH_OUTPUTS, MAX_QUEUED_PARSES } from '../constants';
 import { SpreadsheetFileError } from '../errors';
 import type { CellValue, SheetData } from '../grid-types';
 import { readWorkbookGrid, setGridWorkerHostForTests } from '../parse';
+import type { SheetSelector } from '../read-options';
 import { cellKey } from '../sheet-meta';
 import { buildXlsxFixture, worksheetXml } from '../testing/build-xlsx';
 import type { GridWorkerHost } from '../worker/grid-worker-host';
-import type { CellPatch, PatchWorkbookOptions, ResolvedPatchRequest } from './patch-request';
+import type {
+  CellPatch,
+  PatchAnchor,
+  PatchWorkbookOptions,
+  ResolvedPatchRequest,
+} from './patch-request';
 import { patchUpload } from './patch-upload';
 import { patchWorkbook } from './patch-workbook';
 import { entryContent, readZipLayout } from './raw-zip';
@@ -29,8 +36,14 @@ const COLUMN_AE = 30;
 const QUEUE_ROWS = [['Barkod'], ['B1']];
 const SMALL_PATCH: PatchWorkbookOptions = { outputs: [[text(2, 0, 'B2')]] };
 
+/** The strict selector of the sheet `pin` names: a patch without anchors never falls back. */
+function strictRead(pin: FixturePin): { readonly sheet: SheetSelector } {
+  if (pin.sheetName === undefined) throw new Error(`no sheet name pinned for ${pin.file}`);
+  return { sheet: { by: 'name', name: pin.sheetName } };
+}
+
 const commissionPin = pinOf(COMMISSION_FIXTURE);
-const commissionRead = { sheetName: commissionPin.sheetName };
+const commissionRead = strictRead(commissionPin);
 
 afterEach(() => {
   setGridWorkerHostForTests(null);
@@ -262,7 +275,7 @@ describe('patchWorkbook: anchors', () => {
 
   function anchored(expected: string): PatchWorkbookOptions {
     return {
-      sheetName: pin.sheetName,
+      ...strictRead(pin),
       anchors: [{ excelRow: 2, col: BARCODE_COLUMN, expected }],
       outputs: [[text(2, WRITTEN_COLUMN, 'x')]],
     };
@@ -281,6 +294,71 @@ describe('patchWorkbook: anchors', () => {
     if (!(error instanceof SpreadsheetFileError)) throw new Error(`unexpected ${String(error)}`);
     expect(error.code).toBe('ROW_ANCHOR_MISMATCH');
     expect(error.meta.rows).toEqual([2]);
+  });
+});
+
+// The legacy sheetName lookup falls back to the first sheet, so a patch through it must
+// prove its rows with anchors; the strict selector never falls back.
+describe('patchWorkbook: the legacy sheetName lookup needs anchors', () => {
+  const pin = pinOf(DISCOUNT_FIXTURE);
+  const file = readFixture(DISCOUNT_FIXTURE);
+  // The discount fixture's barcode column (0-based) and a free column to write.
+  const BARCODE_COLUMN = 4;
+  const WRITTEN_COLUMN = 8;
+  const NO_ANCHOR_ERROR = 'Invalid patch request: sheetName needs at least one anchor';
+
+  it('refuses sheetName with a patch and no anchors before anything is queued', async () => {
+    const { host, jobs } = throwingHost();
+    setGridWorkerHostForTests(host);
+    const outputs = [[text(2, WRITTEN_COLUMN, 'x')]];
+
+    await expect(patchWorkbook(file, { sheetName: pin.sheetName, outputs })).rejects.toThrow(
+      NO_ANCHOR_ERROR,
+    );
+    await expect(
+      patchWorkbook(file, { sheetName: pin.sheetName, anchors: [], outputs }),
+    ).rejects.toThrow(NO_ANCHOR_ERROR);
+    expect(jobs).toEqual([]);
+  });
+
+  it('runs sheetName with an anchor', async () => {
+    const { host, requests } = inProcessHost();
+    setGridWorkerHostForTests(host);
+
+    const [output] = await patchWorkbook(file, {
+      sheetName: pin.sheetName,
+      anchors: [{ excelRow: 2, col: BARCODE_COLUMN, expected: pin.firstBarcode }],
+      outputs: [[text(2, WRITTEN_COLUMN, 'x')]],
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(output).toBeInstanceOf(Buffer);
+    expect(output).not.toBe(file);
+  });
+
+  it('runs the strict sheet selector without anchors', async () => {
+    const { host, requests } = inProcessHost();
+    setGridWorkerHostForTests(host);
+
+    const [output] = await patchWorkbook(file, {
+      ...strictRead(pin),
+      outputs: [[text(2, WRITTEN_COLUMN, 'x')]],
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(output).toBeInstanceOf(Buffer);
+    expect(output).not.toBe(file);
+  });
+
+  it('returns the stored file for sheetName with only empty outputs, with no job', async () => {
+    const { host, jobs } = throwingHost();
+    setGridWorkerHostForTests(host);
+
+    const outputs = await patchWorkbook(file, { sheetName: pin.sheetName, outputs: [[]] });
+
+    expect(outputs).toEqual([file]);
+    expect(outputs[0]).toBe(file);
+    expect(jobs).toEqual([]);
   });
 });
 
@@ -366,6 +444,58 @@ describe.runIf(process.env.CI === 'true')('patchWorkbook: production limits', ()
       if (first === undefined || last === undefined) throw new Error('missing outputs');
       expectLastRowPatched(first, 0);
       expectLastRowPatched(last, MAX_PATCH_OUTPUTS - 1);
+    },
+    PRODUCTION_LIMITS_TEST_TIMEOUT_MS,
+  );
+
+  // The widest values the API's import rehearsal writes: the largest probe number (ten
+  // integer nines, a dot, two fraction nines) into the new price column (AB) and the
+  // longest label the two tariff formats write into the tariff selection column (AE),
+  // every data row anchored on its barcode, as the export anchors it.
+  const PROBE_NUMBER = '9999999999.99';
+  const PROBE_LABEL = '7 G\u00fcnl\u00fck Fiyat';
+  // The commission fixture's barcode column (0-based).
+  const BARCODE_COLUMN = 1;
+
+  /** One anchor per data row: the barcode of the fixture row `growSheet` copied into it. */
+  function barcodeAnchors(source: SheetData): PatchAnchor[] {
+    const anchors: PatchAnchor[] = [];
+    for (let excelRow = 2; excelRow <= GROWN_ROWS; excelRow += 1) {
+      const expected = cellText(source[(excelRow - 1) % commissionPin.rows] ?? [], BARCODE_COLUMN);
+      if (expected === null) throw new Error(`no barcode for row ${excelRow}`);
+      anchors.push({ excelRow, col: BARCODE_COLUMN, expected });
+    }
+    return anchors;
+  }
+
+  it(
+    'patches the widest rehearsal values into every anchored data row of the grown commission workbook in under half the time limit',
+    async () => {
+      const source = await readWorkbookGrid(readFixture(COMMISSION_FIXTURE), commissionRead);
+      const file = grownFixtureWorkbook(COMMISSION_FIXTURE, GROWN_ROWS);
+      const patches: CellPatch[] = [];
+      for (let excelRow = 2; excelRow <= GROWN_ROWS; excelRow += 1) {
+        patches.push(num(excelRow, COLUMN_AB, PROBE_NUMBER));
+        patches.push(text(excelRow, COLUMN_AE, PROBE_LABEL));
+      }
+
+      const started = performance.now();
+      const patched = await patchWorkbook(file, {
+        ...commissionRead,
+        anchors: barcodeAnchors(source),
+        outputs: [patches],
+      });
+      const elapsed = performance.now() - started;
+
+      expect(patched).toHaveLength(1);
+      expect(elapsed).toBeLessThan(GRID_WORKER_TIMEOUT_MS / 2);
+      const [output] = patched;
+      if (output === undefined) throw new Error('missing output');
+      const index = sheetIndexOf(output);
+      expect(rawCell(index, GROWN_ROWS, COLUMN_AB).rest).toBe(`<v>${PROBE_NUMBER}</v></c>`);
+      const labelCell = rawCell(index, GROWN_ROWS, COLUMN_AE);
+      expect(labelCell.tag).toContain(' t="inlineStr"');
+      expect(labelCell.rest).toBe(`<is><t>${PROBE_LABEL}</t></is></c>`);
     },
     PRODUCTION_LIMITS_TEST_TIMEOUT_MS,
   );

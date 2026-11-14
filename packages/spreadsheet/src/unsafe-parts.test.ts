@@ -12,7 +12,7 @@ import {
   WORKBOOK_RELS_PART,
   workbookRels,
 } from '../tests/helpers/package-parts';
-import { isXmlPart } from './content-scan';
+import { entryContentKind } from './content-scan';
 import { UNSAFE_CONTENT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
 import {
   assertNoUnsafePackageParts,
@@ -22,9 +22,9 @@ import {
   UNSAFE_RELATIONSHIP_TYPE_ENDINGS,
 } from './unsafe-parts';
 
-/** Whether the gate's stream keeps the content of entry `name` (the root relationships part aside). */
-function isKept(name: string): boolean {
-  return isXmlPart(name) || isRelationshipsPartName(name);
+/** Whether the gate's stream keeps the content of an entry: it holds XML, whatever its name. */
+function isKept(content: Uint8Array): boolean {
+  return entryContentKind(content) === 'xml';
 }
 
 /**
@@ -39,7 +39,8 @@ function checkEntries(entries: Readonly<Record<string, string>>): void {
   };
   const contents = new Map<string, Uint8Array>();
   for (const [name, text] of Object.entries(all)) {
-    if (isKept(name)) contents.set(name, strToU8(text));
+    const content = strToU8(text);
+    if (isKept(content)) contents.set(name, content);
   }
   assertNoUnsafePackageParts(Object.keys(all), contents);
 }
@@ -63,7 +64,7 @@ describe('assertNoUnsafePackageParts', () => {
 
   it.each(FIXTURE_PINS)('accepts the package parts of $file', (pin) => {
     const entries = unzipSync(new Uint8Array(readFixture(pin.file)));
-    const contents = new Map(Object.entries(entries).filter(([name]) => isKept(name)));
+    const contents = new Map(Object.entries(entries).filter(([, content]) => isKept(content)));
     expect(() => assertNoUnsafePackageParts(Object.keys(entries), contents)).not.toThrow();
   });
 
@@ -86,6 +87,8 @@ describe('assertNoUnsafePackageParts', () => {
       'dialogsheet',
       'connections+xml',
       'querytable+xml',
+      'webextension',
+      'customui',
     ]);
     expect(UNSAFE_RELATIONSHIP_TYPE_ENDINGS).toEqual([
       'vbaproject',
@@ -98,6 +101,10 @@ describe('assertNoUnsafePackageParts', () => {
       'xlintlmacrosheet',
       'connections',
       'querytable',
+      'webextension',
+      'webextensiontaskpanes',
+      'extensibility',
+      'attachedtoolbars',
     ]);
   });
 });

@@ -23,11 +23,29 @@ const VBA_PROJECT_DEFAULT =
 const EXTERNAL_TARGET_MODE = ' TargetMode="External"';
 // A file share an external relationship would load from.
 const SHARE_TARGET = 'file://evil.example/share/a.png';
+// The relationship types of an Office web add-in, its task pane, a custom ribbon
+// (customUI, the 2006 and the 2007 type) and attached toolbars.
+const MS_2011_REL = 'http://schemas.microsoft.com/office/2011/relationships';
+const WEB_EXTENSION_REL = `${MS_2011_REL}/webextension`;
+const WEB_EXTENSION_TASK_PANES_REL = `${MS_2011_REL}/webextensiontaskpanes`;
+const CUSTOM_UI_2006_REL = `${MS_REL}/ui/extensibility`;
+const CUSTOM_UI_2007_REL =
+  'http://schemas.microsoft.com/office/2007/relationships/ui/extensibility';
+const ATTACHED_TOOLBARS_REL = `${MS_REL}/attachedToolbars`;
+const HYPERLINK_REL = `${OFFICE_REL}/hyperlink`;
+const IMAGE_REL = `${OFFICE_REL}/image`;
+const OFFICE_DOCUMENT_RELATIONSHIP = `<Relationship Id="rId1" Type="${OFFICE_REL}/officeDocument" Target="xl/workbook.xml"/>`;
+// The web address an external hyperlink of a worksheet may have.
+const WEB_TARGET = 'https://example.com/a';
 
 export const CONTENT_TYPES_PART = '[Content_Types].xml';
 export const WORKBOOK_RELS_PART = 'xl/_rels/workbook.xml.rels';
+const ROOT_RELS_PART = '_rels/.rels';
 const SHEET_RELS_PART = 'xl/worksheets/_rels/sheet1.xml.rels';
 const DRAWING_RELS_PART = 'xl/drawings/_rels/drawing1.xml.rels';
+const TASK_PANES_RELS_PART = 'xl/webextensions/_rels/taskpanes.xml.rels';
+const WEB_IMAGE_RELS_PART = 'xl/richData/_rels/rdRichValueWebImage.xml.rels';
+const CHART_SHEET_RELS_PART = 'xl/chartsheets/_rels/sheet1.xml.rels';
 // Where the cases put a part whose name says nothing about what it is.
 const MOVED_PART = 'xl/x/a.xml';
 // Relationships parts of parts that are not named .xml: a chart stored as .bin, a VML
@@ -85,9 +103,25 @@ function workbookRelationship(type: string): Readonly<Record<string, string>> {
   };
 }
 
-/** A sheet rels part holding one relationship of `type`. */
-function sheetRelationship(type: string, attributes = ''): Readonly<Record<string, string>> {
-  return { [SHEET_RELS_PART]: relationshipsXml(relationship(type, '../x/a.xml', attributes)) };
+/** A sheet rels part holding one relationship of `type` to `target`. */
+function sheetRelationship(
+  type: string,
+  attributes = '',
+  target = '../x/a.xml',
+): Readonly<Record<string, string>> {
+  return { [SHEET_RELS_PART]: relationshipsXml(relationship(type, target, attributes)) };
+}
+
+/** Root relationships naming the workbook and, with a relationship of `type`, a part. */
+function rootRelationship(type: string): Readonly<Record<string, string>> {
+  return {
+    [ROOT_RELS_PART]: relationshipsXml(OFFICE_DOCUMENT_RELATIONSHIP, relationship(type, 'x/a.xml')),
+  };
+}
+
+/** A drawing rels part holding one image relationship to `target`, with `attributes`. */
+function drawingImage(target: string, attributes = ''): Readonly<Record<string, string>> {
+  return { [DRAWING_RELS_PART]: relationshipsXml(relationship(IMAGE_REL, target, attributes)) };
 }
 
 function contentTypes(workbookType: string, children = ''): Readonly<Record<string, string>> {
@@ -265,6 +299,118 @@ export const UNSAFE_PART_CASES: readonly PackagePartCase[] = [
       [BIN_SHEET_RELS_PART]: relationshipsXml(relationship(`${OFFICE_REL}/control`, '../x/ax.xml')),
     },
   },
+  {
+    label: 'an Office add-in task pane named by the root relationships',
+    entries: rootRelationship(WEB_EXTENSION_TASK_PANES_REL),
+  },
+  {
+    label: 'a web add-in relationship in the rels of its task pane part',
+    entries: {
+      [TASK_PANES_RELS_PART]: relationshipsXml(
+        relationship(WEB_EXTENSION_REL, 'webextension1.xml'),
+      ),
+    },
+  },
+  {
+    label: 'an Override of the web add-in content type',
+    entries: contentTypes(
+      WORKBOOK_CONTENT_TYPE,
+      override('application/vnd.ms-office.webextension+xml'),
+    ),
+  },
+  {
+    label: 'an Override of the web add-in task pane content type',
+    entries: contentTypes(
+      WORKBOOK_CONTENT_TYPE,
+      override('application/vnd.ms-office.webextensiontaskpanes+xml'),
+    ),
+  },
+  {
+    label: 'a custom ribbon of the 2007 customUI type named by the root relationships',
+    entries: rootRelationship(CUSTOM_UI_2007_REL),
+  },
+  {
+    label: 'a custom ribbon of the 2006 customUI type named by the root relationships',
+    entries: rootRelationship(CUSTOM_UI_2006_REL),
+  },
+  {
+    label: 'an Override of a customUI content type',
+    entries: contentTypes(
+      WORKBOOK_CONTENT_TYPE,
+      override('application/vnd.ms-office.customUI+xml'),
+    ),
+  },
+  {
+    label: 'attached toolbars named by the workbook rels',
+    entries: workbookRelationship(ATTACHED_TOOLBARS_REL),
+  },
+  ...[
+    'file://evil.example/share/x.xlsx',
+    '\\\\evil.example\\share\\payload.exe',
+    'ms-excel:ofe|u|https://evil.example/x.xlsm',
+    'search-ms:query=x&amp;crumb=location:\\\\evil.example\\s',
+    'javascript:alert(1)',
+    ` ${WEB_TARGET}`,
+  ].map(
+    (target): PackagePartCase => ({
+      label: `an external worksheet hyperlink to ${target}`,
+      entries: sheetRelationship(HYPERLINK_REL, EXTERNAL_TARGET_MODE, target),
+    }),
+  ),
+  {
+    label: 'an external https hyperlink in the rels of a drawing (a picture hlinkClick)',
+    entries: {
+      [DRAWING_RELS_PART]: relationshipsXml(
+        relationship(HYPERLINK_REL, WEB_TARGET, EXTERNAL_TARGET_MODE),
+      ),
+    },
+  },
+  {
+    label: 'an external hyperlink to a file share in the rels of a drawing (a blip r:link)',
+    entries: {
+      [DRAWING_RELS_PART]: relationshipsXml(
+        relationship(HYPERLINK_REL, '\\\\evil.example\\s\\pixel.png', EXTERNAL_TARGET_MODE),
+      ),
+    },
+  },
+  {
+    label: 'an external https hyperlink in the rels of a rich-data web image',
+    entries: {
+      [WEB_IMAGE_RELS_PART]: relationshipsXml(
+        relationship(HYPERLINK_REL, 'https://evil.example/pixel.png', EXTERNAL_TARGET_MODE),
+      ),
+    },
+  },
+  {
+    label: 'an external https hyperlink in the rels of a chart sheet',
+    entries: {
+      [CHART_SHEET_RELS_PART]: relationshipsXml(
+        relationship(HYPERLINK_REL, WEB_TARGET, EXTERNAL_TARGET_MODE),
+      ),
+    },
+  },
+  ...[
+    'http://evil.example/track.png',
+    'https://evil.example/track.png',
+    'file://///evil.example/s/p.png',
+    '\\\\evil.example\\s\\x.png',
+    '//evil.example/s/x.png',
+    'C:x.png',
+    'C:\\Users\\Public\\x.png',
+    '..\\media\\image1.png',
+    'ms-excel:ofe|u|x',
+    ' http://evil.example/x.png',
+    'http&#58;//evil.example/x.png',
+  ].map(
+    (target): PackagePartCase => ({
+      label: `an internal image Target ${target}`,
+      entries: drawingImage(target),
+    }),
+  ),
+  {
+    label: 'an image relationship with TargetMode="Internal" to a web address',
+    entries: drawingImage('https://evil.example/x.png', ' TargetMode="Internal"'),
+  },
 ];
 
 /** Refused with CORRUPT_FILE `package-part`. */
@@ -337,6 +483,18 @@ export const PACKAGE_PART_CASES: readonly PackagePartCase[] = [
       ),
     },
   },
+  {
+    label: 'a Target holding a character reference past U+10FFFF',
+    entries: drawingImage('../media/image&#1114112;.png'),
+  },
+  {
+    label: 'a Relationship with two Target attributes',
+    entries: {
+      [DRAWING_RELS_PART]: relationshipsXml(
+        `<Relationship Id="rId9" Type="${IMAGE_REL}" Target="../media/a.png" Target="http://evil.example/a.png"/>`,
+      ),
+    },
+  },
 ];
 
 /** Accepted. */
@@ -374,7 +532,7 @@ export const SAFE_PART_CASES: readonly PackagePartCase[] = [
   },
   {
     label: 'a hyperlink relationship whose type ends in HYPERLINK with TargetMode="External"',
-    entries: sheetRelationship(`${OFFICE_REL}/HYPERLINK`, EXTERNAL_TARGET_MODE),
+    entries: sheetRelationship(`${OFFICE_REL}/HYPERLINK`, EXTERNAL_TARGET_MODE, WEB_TARGET),
   },
   {
     label: 'an image relationship with TargetMode="Internal"',
@@ -399,5 +557,23 @@ export const SAFE_PART_CASES: readonly PackagePartCase[] = [
         relationship(`${OFFICE_REL}/image`, '../media/image1.png'),
       ).replace('UTF-8', 'utf-8'),
     },
+  },
+  {
+    label: 'external worksheet hyperlinks to http, https and mailto addresses, in any ASCII case',
+    entries: {
+      [SHEET_RELS_PART]: relationshipsXml(
+        relationship(HYPERLINK_REL, 'http://example.com/a', EXTERNAL_TARGET_MODE),
+        relationship(HYPERLINK_REL, 'HTTPS://EXAMPLE.COM/B', EXTERNAL_TARGET_MODE),
+        relationship(HYPERLINK_REL, 'mailto:seller@example.com', EXTERNAL_TARGET_MODE),
+      ),
+    },
+  },
+  {
+    label: 'an internal image Target from the package root',
+    entries: drawingImage('/xl/media/image1.png'),
+  },
+  {
+    label: 'an internal image Target holding a colon after a path segment',
+    entries: drawingImage('../media/a:b.png'),
   },
 ];

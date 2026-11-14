@@ -91,6 +91,11 @@ export const GRID_WORKER_TIMEOUT_MS = 30_000;
 export const MAX_GRID_TEXT_LENGTH = 16 * 1024 * 1024;
 // Excel caps a custom number format code at 255 characters.
 export const MAX_FORMAT_CODE_LENGTH = 255;
+// UTF-16 code units of one decoded formula field the upload gate reads (formula-scan.ts).
+// Excel caps a formula at 8 192 characters; the stored text adds the `_xlfn.` prefixes of
+// newer functions, so four times that leaves headroom while bounding the NFKC form the
+// scan builds, which can be eighteen times longer than the text.
+export const MAX_FORMULA_TEXT_LENGTH = 32 * 1024;
 // SpreadsheetFileError meta `cause` is truncated: library messages may quote the input.
 export const MAX_ERROR_CAUSE_LENGTH = 200;
 

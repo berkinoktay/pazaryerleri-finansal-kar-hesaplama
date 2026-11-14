@@ -39,10 +39,21 @@ export const ZIP_REJECT_REASONS = {
   VIEW_MISMATCH: 'zip-view-mismatch',
   PACKAGE_PART: 'package-part',
   ROOT_RELS: 'root-rels',
+  // A kept XML part that is not UTF-8 text, or whose declaration names another encoding.
+  PART_ENCODING: 'part-encoding',
 } as const;
 
-/** Reasons of UNSAFE_CONTENT raised by the package checks of the gate. */
+/** Reasons of UNSAFE_CONTENT raised by the package and content checks of the gate. */
 export const UNSAFE_CONTENT_REASONS = {
-  // A macro, an embedded object, an ActiveX control or an external link.
+  // A macro, an embedded object, an ActiveX or form control, an add-in, a web publishing
+  // item, an external link, or a relationship to content outside the package.
   UNSAFE_PART: 'unsafe-part',
+  // A formula field that calls a function outside the safe list, holds a DDE or external
+  // workbook reference, an escape or a format character, or content the scan cannot
+  // read; or a macro assignment.
+  UNSAFE_FORMULA: 'unsafe-formula',
 } as const;
+
+/** One of UNSAFE_CONTENT_REASONS. */
+export type UnsafeContentReason =
+  (typeof UNSAFE_CONTENT_REASONS)[keyof typeof UNSAFE_CONTENT_REASONS];

