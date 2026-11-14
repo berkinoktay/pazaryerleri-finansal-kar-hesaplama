@@ -446,6 +446,11 @@ export const UNSAFE_PART_CASES: readonly PackagePartCase[] = [
     'ms-excel:ofe|u|x',
     ' http://evil.example/x.png',
     'http&#58;//evil.example/x.png',
+    'ht&#9;tp://evil.example/x.png',
+    'http&#10;://evil.example/x.png',
+    'f&#13;ile://evil.example/s/x.png',
+    '/&#9;/evil.example/s/x.png',
+    'C|/Users/Public/x.png',
   ].map(
     (target): PackagePartCase => ({
       label: `an internal image Target ${target}`,

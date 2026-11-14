@@ -14,7 +14,7 @@ import {
   workbookRels,
   WORKSHEET_XML,
 } from '../tests/helpers/package-parts';
-import { entryContentKind } from './content-scan';
+import { entryContentKind, type ExternalHyperlinkIds } from './content-scan';
 import { UNSAFE_CONTENT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
 import {
   assertNoUnsafePackageParts,
@@ -24,6 +24,10 @@ import {
   UNSAFE_RELATIONSHIP_TYPE_ENDINGS,
 } from './unsafe-parts';
 
+const RELATIONSHIPS_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
+const OFFICE_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const SHEET_RELS_PART = 'xl/worksheets/_rels/sheet1.xml.rels';
+
 /** Whether the gate's stream keeps the content of an entry: it holds XML, whatever its name. */
 function isKept(content: Uint8Array): boolean {
   return entryContentKind(content) === 'xml';
@@ -32,8 +36,9 @@ function isKept(content: Uint8Array): boolean {
 /**
  * The type rule on a minimal package (content types, workbook rels and the worksheet)
  * plus `entries`: the name of every entry, the content of those the gate's stream keeps.
+ * Returns the external hyperlink ids the rule read.
  */
-function checkEntries(entries: Readonly<Record<string, string>>): void {
+function checkEntries(entries: Readonly<Record<string, string>>): ExternalHyperlinkIds {
   const all: Record<string, string> = {
     [CONTENT_TYPES_PART]: contentTypesXml(),
     [WORKBOOK_RELS_PART]: workbookRels(),
@@ -45,7 +50,7 @@ function checkEntries(entries: Readonly<Record<string, string>>): void {
     const content = strToU8(text);
     if (isKept(content)) contents.set(name, content);
   }
-  assertNoUnsafePackageParts(Object.keys(all), contents);
+  return assertNoUnsafePackageParts(Object.keys(all), contents);
 }
 
 describe('assertNoUnsafePackageParts', () => {
@@ -69,6 +74,27 @@ describe('assertNoUnsafePackageParts', () => {
     const entries = unzipSync(new Uint8Array(readFixture(pin.file)));
     const contents = new Map(Object.entries(entries).filter(([, content]) => isKept(content)));
     expect(() => assertNoUnsafePackageParts(Object.keys(entries), contents)).not.toThrow();
+  });
+
+  // The content scan reads a hyperlink's location as a URL fragment only for these ids.
+  it('returns the ids a worksheet relationships part gives an external hyperlink and nothing else', () => {
+    const relationship = (id: string, type: string, target: string, mode = ''): string =>
+      `<Relationship Id="${id}" Type="${OFFICE_REL}/${type}" Target="${target}"${mode}/>`;
+    const external = ' TargetMode="External"';
+    const sheetRels =
+      `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="${RELATIONSHIPS_NS}">` +
+      relationship('rId1', 'hyperlink', 'https://example.com/a', external) +
+      relationship('rId2', 'hyperlink', '#Sheet1!A1') +
+      relationship('rId3', 'image', '../media/image1.png') +
+      relationship('rId4', 'hyperlink', 'https://example.com/b', external) +
+      relationship('rId4', 'image', '../media/image1.png') +
+      relationship('rId&#53;', 'hyperlink', 'mailto:a@example.com', external) +
+      '</Relationships>';
+
+    expect(checkEntries({ [SHEET_RELS_PART]: sheetRels })).toEqual(
+      new Map([[SHEET_PART, new Set(['rId1', 'rId5'])]]),
+    );
+    expect(checkEntries({})).toEqual(new Map());
   });
 
   // The lexer refuses a DOCTYPE too; the content scan runs first, so it keeps its code.

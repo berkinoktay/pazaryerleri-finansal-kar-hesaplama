@@ -717,14 +717,17 @@ export function openUpload(file: Uint8Array, opts: GuardOpts): UploadParts {
  *      kept relationships part declare no active part and no relationship that reaches
  *      outside the package (UNSAFE_CONTENT `unsafe-part`), each walked part is read
  *      whole (CORRUPT_FILE `package-part` otherwise), and no entry is spelled in another
- *      ASCII case than a part this rule walks.
+ *      ASCII case than a part this rule walks. It returns the ids each worksheet's own
+ *      relationships part gives an external hyperlink.
  *  10. assertSafeXmlContent on EVERY kept XML entry, whatever its name and whatever the
  *      relationships say about it (a worksheet no relationship of the exact type names,
  *      a VML drawing, or the entry behind a Target alias, is still handed on by the
  *      export): UTF-8 text only (CORRUPT_FILE `part-encoding`), then the content scan (a
  *      DOCTYPE, an ENTITY declaration, an unknown entity reference, a formula field
- *      outside the allow list, a macro assignment or an active element: UNSAFE_CONTENT).
- *      Linear in bytes the stream already capped; no DOM is built.
+ *      outside the allow list, a macro assignment, an active element or a URL outside
+ *      the package: UNSAFE_CONTENT), a hyperlink `location` taken for a URL fragment
+ *      only when the hyperlink's relationship id is one of the external hyperlink ids
+ *      of step 9. Linear in bytes the stream already capped; no DOM is built.
  *  11. selectReaderParts: the parts the reader opens (the workbook rels, the
  *      workbook, and the styles, shared strings and worksheet parts the rels name),
  *      each checked on its raw bytes before any DOM is built: the DOM weight of all
@@ -788,10 +791,10 @@ export function openUploadWithLayout(file: Uint8Array, opts: GuardOpts): OpenedU
   for (const [name, kind] of streamed.kinds) assertEntryContentKind(name, kind);
 
   // 9. Active parts by their declared content and relationship types.
-  assertNoUnsafePackageParts(streamed.names, streamed.contents);
+  const externalHyperlinks = assertNoUnsafePackageParts(streamed.names, streamed.contents);
 
   // 10. Every kept XML part, the reader's or not: UTF-8 text, then the content scan.
-  assertSafeXmlContent(streamed.contents);
+  assertSafeXmlContent(streamed.contents, externalHyperlinks);
 
   // 11. The parts the reader opens, budgeted on raw bytes.
   const parts = selectReaderParts(streamed.contents, opts);

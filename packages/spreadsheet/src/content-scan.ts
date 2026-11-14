@@ -29,6 +29,7 @@ import {
   XmlLexError,
   type XmlMarkup,
 } from './patch/xml-lexer';
+import { isAbsoluteUrl, startsAbsoluteUrl } from './url-target';
 
 // The entries the grid reader may open: exactly the names ending in `.xml` or
 // `.xml.rels` (the rule read-excel-file's filterZipArchiveEntry used, kept so the same
@@ -76,12 +77,15 @@ const NO_BYTE = -1;
 // and the value of the ELEMENT_FORMULA_ATTRIBUTE_NAMES attributes on their one element
 // (a conditional format value object's `val`, a hyperlink's `location`, a camera tool's
 // `cellRange`), local names compared ignoring their prefix and ASCII case (so a reader
-// that ignores case finds no field the gate skipped). A hyperlink's `location` is a
-// field only when the hyperlink has no relationship id (an `id` attribute whose prefix
-// is bound to RELATIONSHIPS_NAMESPACE where it stands): with one, the hyperlink leads to
-// the relationship's URL and Excel keeps that URL's #fragment in `location`
-// (https://site/page#part: Target https://site/page, location `part`), which is no
-// formula. Each field is decoded (the five
+// that ignores case finds no field the gate skipped). A hyperlink's `location` is no
+// field only when the hyperlink leads to an external hyperlink of its part: it has a
+// relationship id (an `id` attribute whose prefix is bound to RELATIONSHIPS_NAMESPACE
+// where it stands), and every one it has names a relationship of the part's own
+// relationships part whose type ends in `hyperlink` and whose TargetMode is `External`
+// (ExternalHyperlinkIds, read by unsafe-parts.ts by the worksheet source rule). Then the
+// hyperlink leads to the relationship's URL and Excel keeps that URL's #fragment in
+// `location` (https://site/page#part: Target https://site/page, location `part`), which
+// is no formula. Each field is decoded (the five
 // predefined references and every character reference replaced) and must pass
 // formula-scan.ts; in the `formula` attribute of a PIVOT_FORMULA_ELEMENT_NAMES element
 // (a pivot calculated field or item) a quoted section is a field name, not a sheet name.
@@ -94,30 +98,47 @@ const NO_BYTE = -1;
 // empty field passes.
 // An Office Math fraction is also named `f` (an equation in a text box writes
 // `<m:f><m:fPr/>...</m:f>`), so an element in the OMML_NAMESPACE is not a formula field.
-// The walk keeps the namespace declarations in scope (NamespaceScopes) in memory bounded
-// by MAX_XMLNS_DECLARATIONS_PER_PART: it counts the open elements and keeps an entry
-// only for an open element that declares namespaces, and a part with more declarations
-// than that is refused with the error the reader parts get for it
-// (tooManyNamespaceDeclarations). A binding counts only while every end tag that returns
-// to the level of a declaring element names it, and no end tag at another level names an
-// open declaring element; markup whose nesting the walk cannot follow leaves every `f` a
-// field and every hyperlink `location` a formula.
+// The walk keeps the namespace declarations in scope (NamespaceScopes) in bounded
+// memory. It keeps the qualified name of every open element (two offsets into the
+// part) up to MAX_TRACKED_ELEMENT_DEPTH open elements, and every end tag must name the
+// innermost open element, byte for byte. An end tag that names another element (a
+// lenient reader may close an ancestor there), an end tag with no element open, or an
+// element opened past that depth leaves the walk unable to follow the nesting: from
+// there on to the end of the part no binding counts, so every `f` is a field and every
+// hyperlink `location` a formula. A part that has more than
+// MAX_XMLNS_DECLARATIONS_PER_PART declarations in scope at once (those of the open
+// elements and of the element being read; once the walk cannot follow the nesting,
+// every declaration read from there on stays counted) is refused with the error the
+// reader parts get for more declarations in all (tooManyNamespaceDeclarations); the
+// reader parts keep that cap on every declaration they hold (guards.ts).
 // A macro assignment needs code the gate never accepts, so a non-empty
 // MACRO_ATTRIBUTE_NAMES attribute or FmlaMacro element is refused (Excel writes
 // `macro=""` on every shape), and an element of ACTIVE_ELEMENT_NAMES (an embedded
 // object, a control, a web publishing item) is refused wherever it stands. So is a
 // SCRIPT_ELEMENT_NAMES element (a VML control's script) that holds anything but white
 // space.
-// A URL_ATTRIBUTE_NAMES attribute (`src` or `href`, any prefix: VML's v:imagedata@src,
-// @o:href, v:fill@src, a shape's href) names a resource outside the relationships, so
-// its decoded value must be relative: one that starts, past the C0 controls and spaces
-// a URL parser drops, with a URI scheme (an ASCII letter, then letters, digits, '+',
-// '-' or '.', then ':'; the drive letter C: is one), a drive letter written C|, or '//',
-// or that holds a backslash anywhere, is refused with UNSAFE_CONTENT `unsafe-part`.
+// URLs. A URL_ATTRIBUTE_NAMES attribute (`src`, `href` or `althref`, any prefix: VML's
+// v:imagedata@src, @o:href, @o:althref, v:fill@src, a shape's href, SVG's xlink:href)
+// or a BASE_URL_ATTRIBUTE_NAMES attribute (`base`: xml:base) names a resource outside
+// the relationships, so its decoded value must be relative by the rule of url-target.ts
+// (no URI scheme, drive letter, leading '//' or backslash). The one exception is a URL
+// attribute whose ASCII-folded value starts with DATA_IMAGE_URL_START (an image the
+// value holds, which fetches nothing); any other `data:` is refused. A style (the value
+// of a STYLE_NAMES attribute, and the text and CDATA content of a STYLE_NAMES element up
+// to its own end tag, or to the end of the part when the walk cannot follow the nesting
+// there, its descendants' included but for the formula, macro and script fields scanned
+// on their own) must load nothing: it may hold no
+// `@import`, no backslash (a CSS escape can spell either name) and no `url(` whose
+// target, past CSS white space and an optional quote, is absolute by that rule or
+// starts a comment. A STYLESHEET_INSTRUCTION_NAMES processing instruction
+// (`xml-stylesheet`) is refused wherever it stands. Each refusal is UNSAFE_CONTENT
+// `unsafe-part`.
 // Where the strict lexer refuses markup that a lenient or a non-ASCII reading accepts,
 // the walk cannot tell where the fields are from there on, so the part is refused when
 // anything after that point could open a field, macro, script or active element or an
-// element with a field attribute of its own, or name a field, macro or URL attribute.
+// element with a field attribute of its own, or name a field, macro, URL, base or style
+// attribute, a style element or a stylesheet instruction; inside a style element the
+// part is refused at once.
 // Every pass is linear in the part; the formula fields are read without a regular
 // expression (formula-scan.ts).
 const FORMULA_ELEMENT_NAMES: readonly string[] = [
@@ -164,7 +185,14 @@ const RELATIONSHIP_ID_ATTRIBUTE = 'id';
 const MACRO_ATTRIBUTE_NAMES: readonly string[] = ['macro', 'fmlaMacro'];
 const MACRO_ELEMENT_NAMES: readonly string[] = ['FmlaMacro'];
 const SCRIPT_ELEMENT_NAMES: readonly string[] = ['ScriptText'];
-const URL_ATTRIBUTE_NAMES: readonly string[] = ['src', 'href'];
+const URL_ATTRIBUTE_NAMES: readonly string[] = ['src', 'href', 'althref'];
+const BASE_URL_ATTRIBUTE_NAMES: readonly string[] = ['base'];
+// The ASCII-folded start of the one data: URI a URL attribute may hold (see the header).
+const DATA_IMAGE_URL_START = 'data:image/';
+// Attributes and elements whose value or text is CSS.
+const STYLE_NAMES: readonly string[] = ['style'];
+// Processing instruction targets that load a resource.
+const STYLESHEET_INSTRUCTION_NAMES: readonly string[] = ['xml-stylesheet'];
 const ACTIVE_ELEMENT_NAMES: readonly string[] = [
   'oleObject',
   'oleObjects',
@@ -183,6 +211,19 @@ const RELATIONSHIPS_NAMESPACE =
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 // The key of the default namespace among the prefixes of NamespaceScopes.
 const DEFAULT_NAMESPACE_KEY = '';
+/** The most open elements the walk follows the nesting of (see the header). */
+export const MAX_TRACKED_ELEMENT_DEPTH = 512;
+
+/**
+ * Per worksheet part name, the relationship ids its own relationships part gives an
+ * external hyperlink and nothing else (assertNoUnsafePackageParts reads them): a
+ * hyperlink of that part with one of them keeps a URL fragment in its `location`, not a
+ * formula (see the header).
+ */
+export type ExternalHyperlinkIds = ReadonlyMap<string, ReadonlySet<string>>;
+
+const NO_EXTERNAL_HYPERLINKS: ExternalHyperlinkIds = new Map();
+const NO_HYPERLINK_IDS: ReadonlySet<string> = new Set();
 
 /** Lower-case ASCII names, by length. */
 type NameSet = ReadonlyMap<number, readonly string[]>;
@@ -205,34 +246,42 @@ interface NamespaceBinding {
 interface DeclaringElement {
   /** How many elements are open around it. */
   readonly level: number;
-  /** Its name: bytes [nameStart, nameEnd) of the part, and their text. */
-  readonly nameStart: number;
-  readonly nameEnd: number;
-  readonly name: string;
   /** The prefixes it bound (DEFAULT_NAMESPACE_KEY for the default namespace). */
   readonly prefixes: readonly string[];
+  /** How many namespace declarations it holds. */
+  readonly declarations: number;
 }
 
 /**
  * The namespace declarations in scope while one part is walked, in memory bounded by
- * MAX_XMLNS_DECLARATIONS_PER_PART (see the header). A declaration is compared byte for
- * byte: one written with a reference names another namespace. A prefix declared twice
- * on one element names a known namespace only when both declarations name it.
+ * MAX_TRACKED_ELEMENT_DEPTH and MAX_XMLNS_DECLARATIONS_PER_PART (see the header). A
+ * declaration is compared byte for byte: one written with a reference names another
+ * namespace. A prefix declared twice on one element names a known namespace only when
+ * both declarations name it.
  */
 interface NamespaceScopes {
   /** Per prefix (DEFAULT_NAMESPACE_KEY for the default namespace), its bindings, innermost last. */
   readonly bindings: Map<string, NamespaceBinding[]>;
   /** The open elements that declare namespaces, innermost last. */
   readonly declaring: DeclaringElement[];
-  /** How many open declaring elements have each name, and each name length in bytes. */
-  readonly declaringNames: Map<string, number>;
-  readonly declaringNameLengths: Map<number, number>;
+  /** The qualified name of each open element, outermost first: its nameStart and nameEnd offsets. */
+  readonly openNames: number[];
   /** How many elements are open. */
   depth: number;
-  /** The namespace declarations of the part read so far. */
-  declarations: number;
+  /** The namespace declarations in scope (see the header). */
+  declarationsInScope: number;
   /** The walk lost the nesting of the part: no binding counts. */
   broken: boolean;
+}
+
+// The level of StyleText while the walk is inside no style element.
+const OUTSIDE_STYLE = -1;
+
+/** The CSS text of the style element the walk is inside (see the header). */
+interface StyleText {
+  /** How many elements were open around the style element; OUTSIDE_STYLE for none. */
+  level: number;
+  text: string;
 }
 
 // Bytes of the loose element name check (looseLocalStart): the delimiters that end a
@@ -247,15 +296,17 @@ const UPPER_A = 0x41;
 const UPPER_Z = 0x5a;
 const ASCII_CASE_OFFSET = 0x20;
 
-// Code units of the URL attribute reading (isAbsoluteUrl).
-const BACKSLASH_TEXT = '\\';
-// What a URL parser removes wherever it stands: ASCII tab and line breaks.
-const URL_REMOVED: ReadonlySet<number> = new Set([0x09, 0x0a, 0x0d]);
-// The punctuation a URI scheme may hold after its first letter: '+', '-' and '.'.
-const URL_SCHEME_PUNCTUATION: ReadonlySet<number> = new Set([0x2b, 0x2d, 0x2e]);
-// What follows the letter of a drive letter besides ':' (C|/x is C:/x to a URL parser).
-const DRIVE_LETTER_BAR = 0x7c;
-const LOWER_Z = 0x7a;
+// The CSS a style may not hold (loadsCssResource), compared ASCII-folded.
+const CSS_IMPORT = '@import';
+const CSS_URL_OPEN = 'url(';
+const CSS_ESCAPE = '\\';
+const CSS_COMMENT_OPEN = '/*';
+// CSS white space (space, tab, line feed, carriage return, form feed) and quotes.
+const CSS_SPACE: ReadonlySet<number> = new Set([0x20, 0x09, 0x0a, 0x0d, 0x0c]);
+const CSS_QUOTES: ReadonlySet<number> = new Set([0x22, 0x27]);
+// A CDATA section's delimiters: its text lies between them.
+const CDATA_OPEN = '<![CDATA[';
+const CDATA_CLOSE_LENGTH = 3;
 
 // The scans read a kept XML part in UTF-8. A part that another reader decodes in
 // another encoding could hold markup or a formula the scans never see (UTF-7 writes
@@ -340,6 +391,9 @@ const MACRO_ATTRIBUTES = nameSet(MACRO_ATTRIBUTE_NAMES);
 const MACRO_ELEMENTS = nameSet(MACRO_ELEMENT_NAMES);
 const SCRIPT_ELEMENTS = nameSet(SCRIPT_ELEMENT_NAMES);
 const URL_ATTRIBUTES = nameSet(URL_ATTRIBUTE_NAMES);
+const BASE_URL_ATTRIBUTES = nameSet(BASE_URL_ATTRIBUTE_NAMES);
+const STYLES = nameSet(STYLE_NAMES);
+const STYLESHEET_INSTRUCTIONS = nameSet(STYLESHEET_INSTRUCTION_NAMES);
 const ACTIVE_ELEMENTS = nameSet(ACTIVE_ELEMENT_NAMES);
 
 /** Whether the entry `name` is one the grid reader may open: named `.xml` or `.xml.rels`. */
@@ -678,57 +732,62 @@ function assertNoScript(entry: string, bytes: Uint8Array, markup: XmlMarkup): vo
   if (!empty) throw unsafeFormula(entry, 'Workbook part holds a script');
 }
 
-function isAsciiLetter(code: number): boolean {
-  const lower = foldAsciiByte(code) ?? NOT_A_DIGIT;
-  return lower >= LOWER_A && lower <= LOWER_Z;
-}
-
-/** What a URI scheme holds after its first letter: ASCII letters, digits, '+', '-' and '.'. */
-function isSchemeCharacter(code: number): boolean {
-  return (
-    isAsciiLetter(code) ||
-    (code >= DIGIT_ZERO && code <= DIGIT_NINE) ||
-    URL_SCHEME_PUNCTUATION.has(code)
-  );
-}
-
-/** The index of the first code unit of `value` from `at` that a URL parser keeps (not URL_REMOVED). */
-function keptUrlIndex(value: string, at: number): number {
-  let index = at;
-  while (index < value.length && URL_REMOVED.has(value.charCodeAt(index))) index += 1;
-  return index;
+/**
+ * Decodes URL attribute value bytes `raw`: a relative URL, or, with `dataImage`, a value
+ * whose ASCII-folded text starts with DATA_IMAGE_URL_START; UNSAFE_CONTENT `unsafe-part`
+ * otherwise.
+ */
+function assertRelativeUrl(entry: string, raw: Uint8Array, dataImage: boolean): void {
+  const text = decodeXmlText(raw);
+  if (text === null) {
+    throw unsafePart(entry, 'Workbook part links to a resource the scan cannot decode');
+  }
+  const head = foldAsciiCase(text.slice(0, DATA_IMAGE_URL_START.length));
+  if (dataImage && head === DATA_IMAGE_URL_START) return;
+  if (isAbsoluteUrl(text)) {
+    throw unsafePart(entry, 'Workbook part links to a resource outside the package');
+  }
 }
 
 /**
- * Whether the decoded URL attribute text `value` names something outside the package
- * (see the header): a backslash anywhere, or, past the C0 controls and spaces a URL
- * parser drops from its front, a start of '//', a drive letter written C|, or a URI
- * scheme up to its ':' (C: among them). URL_REMOVED code units are skipped. One pass.
+ * Whether decoded CSS text `css` may load a resource (see the header): a backslash
+ * anywhere, an `@import`, or a `url(` whose target, past CSS white space and an optional
+ * quote, starts an absolute URL (startsAbsoluteUrl, which stops at the quote or ')'
+ * that ends the target) or a comment. ASCII case is ignored. Linear: each `url(` is read
+ * up to the code unit that decides, which is never past the next `url(`'s parenthesis.
  */
-function isAbsoluteUrl(value: string): boolean {
-  if (value.includes(BACKSLASH_TEXT)) return true;
-  let start = 0;
-  while (start < value.length && value.charCodeAt(start) <= SPACE) start += 1;
-  if (start >= value.length) return false;
-  const first = value.charCodeAt(start);
-  const next = keptUrlIndex(value, start + 1);
-  if (first === SLASH) return next < value.length && value.charCodeAt(next) === SLASH;
-  if (!isAsciiLetter(first)) return false;
-  if (next < value.length && value.charCodeAt(next) === DRIVE_LETTER_BAR) return true;
-  for (let at = next; at < value.length; at = keptUrlIndex(value, at + 1)) {
-    const code = value.charCodeAt(at);
-    if (code === COLON) return true;
-    if (!isSchemeCharacter(code)) return false;
+function loadsCssResource(css: string): boolean {
+  if (css.includes(CSS_ESCAPE)) return true;
+  const folded = foldAsciiCase(css);
+  if (folded.includes(CSS_IMPORT)) return true;
+  for (
+    let open = folded.indexOf(CSS_URL_OPEN);
+    open !== -1;
+    open = folded.indexOf(CSS_URL_OPEN, open + CSS_URL_OPEN.length)
+  ) {
+    let start = open + CSS_URL_OPEN.length;
+    while (start < css.length && CSS_SPACE.has(css.charCodeAt(start))) start += 1;
+    if (css.startsWith(CSS_COMMENT_OPEN, start)) return true;
+    if (CSS_QUOTES.has(css.charCodeAt(start))) start += 1;
+    if (startsAbsoluteUrl(css, start)) return true;
   }
   return false;
 }
 
-/** Decodes URL attribute value bytes `raw`: a relative URL, or UNSAFE_CONTENT `unsafe-part`. */
-function assertRelativeUrl(entry: string, raw: Uint8Array): void {
-  const text = decodeXmlText(raw);
-  if (text === null || isAbsoluteUrl(text)) {
-    throw unsafePart(entry, 'Workbook part links to a resource outside the package');
+/** Decoded CSS text `css` loads nothing (loadsCssResource), or UNSAFE_CONTENT `unsafe-part`. */
+function assertSafeStyle(entry: string, css: string): void {
+  if (loadsCssResource(css)) {
+    throw unsafePart(entry, 'Workbook part holds a style that loads a resource');
   }
+}
+
+/** Decodes style attribute value bytes `raw`: CSS that loads nothing, or UNSAFE_CONTENT `unsafe-part`. */
+function assertSafeStyleAttribute(entry: string, raw: Uint8Array): void {
+  const text = decodeXmlText(raw);
+  if (text === null) {
+    throw unsafePart(entry, 'Workbook part holds a style the scan cannot decode');
+  }
+  assertSafeStyle(entry, text);
 }
 
 /** Whether attribute name bytes [start, end) declare a namespace: `xmlns` or `xmlns:` and a prefix. */
@@ -751,7 +810,8 @@ function localPartStart(bytes: Uint8Array, start: number, end: number): number {
  * Checks attribute `attribute` of the scanned tag: a formula field (a FORMULA_ATTRIBUTES
  * attribute, or the `elementField` attribute of this element) passes the scan, its
  * `formula` attribute read with quoted sections as `formulaQuotes`; a macro is empty; a
- * URL attribute is relative.
+ * URL attribute is relative or an image data URI, a base URL relative; a style loads
+ * nothing.
  */
 function assertSafeAttribute(
   entry: string,
@@ -771,7 +831,15 @@ function assertSafeAttribute(
     throw unsafeFormula(entry, 'Workbook part assigns a macro');
   }
   if (isNameIn(bytes, localStart, nameEnd, URL_ATTRIBUTES)) {
-    assertRelativeUrl(entry, bytes.subarray(valueStart, valueEnd));
+    assertRelativeUrl(entry, bytes.subarray(valueStart, valueEnd), true);
+    return;
+  }
+  if (isNameIn(bytes, localStart, nameEnd, BASE_URL_ATTRIBUTES)) {
+    assertRelativeUrl(entry, bytes.subarray(valueStart, valueEnd), false);
+    return;
+  }
+  if (isNameIn(bytes, localStart, nameEnd, STYLES)) {
+    assertSafeStyleAttribute(entry, bytes.subarray(valueStart, valueEnd));
     return;
   }
   const field =
@@ -795,10 +863,10 @@ function elementFormulaAttribute(bytes: Uint8Array, start: number, end: number):
 /**
  * Checks the start or empty tag scanned into `markup` with its `attributes` (see the
  * formula field header): no active element, every field attribute safe (a hyperlink's
- * `location` only when it has no relationship id by `scopes`), and, for a start tag of
- * a field element outside the OMML namespace (`scopes`), its content up to its own end
- * tag (left in `markup`; assertSafeFieldContent), empty for a macro element, white
- * space only for a script element.
+ * `location` unless its relationship ids by `scopes` are `externalHyperlinkIds` of this
+ * part), and, for a start tag of a field element outside the OMML namespace (`scopes`),
+ * its content up to its own end tag (left in `markup`; assertSafeFieldContent), empty
+ * for a macro element, white space only for a script element.
  */
 function assertSafeElement(
   entry: string,
@@ -806,6 +874,7 @@ function assertSafeElement(
   markup: XmlMarkup,
   attributes: number[],
   scopes: NamespaceScopes,
+  externalHyperlinkIds: ReadonlySet<string>,
 ): void {
   const localStart = localNameStart(bytes, markup);
   const localEnd = markup.nameEnd;
@@ -817,7 +886,7 @@ function assertSafeElement(
   }
   const urlFragment =
     isNameIn(bytes, localStart, localEnd, URL_FRAGMENT_ELEMENTS) &&
-    hasRelationshipId(scopes, bytes, markup, attributes);
+    leadsToExternalHyperlink(scopes, bytes, markup, attributes, externalHyperlinkIds);
   const elementField = urlFragment ? null : elementFormulaAttribute(bytes, localStart, localEnd);
   const formulaQuotes: QuotedSection = isNameIn(bytes, localStart, localEnd, PIVOT_FORMULA_ELEMENTS)
     ? 'field-name'
@@ -846,19 +915,11 @@ function createNamespaceScopes(): NamespaceScopes {
   return {
     bindings: new Map(),
     declaring: [],
-    declaringNames: new Map(),
-    declaringNameLengths: new Map(),
+    openNames: [],
     depth: 0,
-    declarations: 0,
+    declarationsInScope: 0,
     broken: false,
   };
-}
-
-/** Adds `delta` to the count of `key` in `counts`, dropping a count that reaches zero. */
-function addCount<Key>(counts: Map<Key, number>, key: Key, delta: number): void {
-  const count = (counts.get(key) ?? 0) + delta;
-  if (count === 0) counts.delete(key);
-  else counts.set(key, count);
 }
 
 /** The namespace the declaration value bytes [start, end) name. */
@@ -870,10 +931,11 @@ function knownNamespace(bytes: Uint8Array, start: number, end: number): KnownNam
 }
 
 /**
- * Counts the namespace declarations of the start or empty tag scanned into `markup`
- * against MAX_XMLNS_DECLARATIONS_PER_PART for part `entry` (tooManyNamespaceDeclarations
- * past it) and, while bindings count, binds them in `scopes` at the current level. The
- * prefixes it bound (to release with releaseNamespaces), or null for none.
+ * Counts the namespace declarations of the start or empty tag scanned into `markup` into
+ * the declarations in scope, at most MAX_XMLNS_DECLARATIONS_PER_PART for part `entry`
+ * (tooManyNamespaceDeclarations past it), and, while bindings count, binds them in
+ * `scopes` at the current level. The prefixes it bound (to release with
+ * releaseNamespaces), or null for none.
  */
 function declareNamespaces(
   entry: string,
@@ -889,8 +951,8 @@ function declareNamespaces(
     const nameStart = attributeField(attributes, attribute, ATTRIBUTE_NAME_START);
     const nameEnd = attributeField(attributes, attribute, ATTRIBUTE_NAME_END);
     if (!isNamespaceDeclaration(bytes, nameStart, nameEnd)) continue;
-    scopes.declarations += 1;
-    if (scopes.declarations > MAX_XMLNS_DECLARATIONS_PER_PART) {
+    scopes.declarationsInScope += 1;
+    if (scopes.declarationsInScope > MAX_XMLNS_DECLARATIONS_PER_PART) {
       throw tooManyNamespaceDeclarations(entry);
     }
     if (scopes.broken) continue;
@@ -926,67 +988,69 @@ function releaseNamespaces(scopes: NamespaceScopes, prefixes: readonly string[])
 }
 
 /**
+ * Ends an element that never opens (an empty tag, or one read through its end tag),
+ * which bound `prefixes` and held `declarations` namespace declarations: they leave
+ * scope. Once the walk lost the nesting, declarations never leave scope.
+ */
+function endUnopenedElement(
+  scopes: NamespaceScopes,
+  prefixes: readonly string[] | null,
+  declarations: number,
+): void {
+  if (scopes.broken) return;
+  if (prefixes !== null) releaseNamespaces(scopes, prefixes);
+  scopes.declarationsInScope -= declarations;
+}
+
+/**
  * Opens the element whose start tag names bytes [nameStart, nameEnd), which bound
- * `prefixes`: one level deeper, and an entry when it declared namespaces.
+ * `prefixes` and held `declarations` namespace declarations: its name on the stack of
+ * open names, one level deeper, and an entry when it declared namespaces. Past
+ * MAX_TRACKED_ELEMENT_DEPTH open elements, no binding counts from there on.
  */
 function openElement(
   scopes: NamespaceScopes,
-  bytes: Uint8Array,
   nameStart: number,
   nameEnd: number,
   prefixes: readonly string[] | null,
+  declarations: number,
 ): void {
   if (scopes.broken) return;
-  if (prefixes !== null) {
-    const name = NAME_DECODER.decode(bytes.subarray(nameStart, nameEnd));
-    scopes.declaring.push({ level: scopes.depth, nameStart, nameEnd, name, prefixes });
-    addCount(scopes.declaringNames, name, 1);
-    addCount(scopes.declaringNameLengths, nameEnd - nameStart, 1);
+  if (scopes.depth === MAX_TRACKED_ELEMENT_DEPTH) {
+    scopes.broken = true;
+    return;
   }
+  if (declarations > 0) {
+    scopes.declaring.push({ level: scopes.depth, prefixes: prefixes ?? [], declarations });
+  }
+  scopes.openNames.push(nameStart, nameEnd);
   scopes.depth += 1;
 }
 
 /**
- * Whether the end tag scanned into `markup` names an open declaring element. One lookup:
- * the name is decoded only when an open declaring element has its length.
- */
-function namesDeclaringElement(
-  scopes: NamespaceScopes,
-  bytes: Uint8Array,
-  markup: XmlMarkup,
-): boolean {
-  if (!scopes.declaringNameLengths.has(markup.nameEnd - markup.nameStart)) return false;
-  const name = NAME_DECODER.decode(bytes.subarray(markup.nameStart, markup.nameEnd));
-  return scopes.declaringNames.has(name);
-}
-
-/**
- * Closes the innermost open element with the end tag scanned into `markup`. Back at the
- * level of a declaring element, the end tag must name it, and releases its bindings;
- * at any other level it must name no open declaring element (a reader that recovers
- * from bad nesting would close that one there). Otherwise, or with no element open, no
- * binding counts from there on.
+ * Closes the innermost open element with the end tag scanned into `markup`, which must
+ * name it byte for byte, and releases the bindings and declarations of a declaring one.
+ * An end tag that names another element, or one with no element open, leaves no binding
+ * counting from there on.
  */
 function closeElement(scopes: NamespaceScopes, bytes: Uint8Array, markup: XmlMarkup): void {
   if (scopes.broken) return;
-  if (scopes.depth === 0) {
+  const nameEnd = scopes.openNames.pop();
+  const nameStart = scopes.openNames.pop();
+  if (
+    nameStart === undefined ||
+    nameEnd === undefined ||
+    !closesElement(bytes, markup, nameStart, nameEnd)
+  ) {
     scopes.broken = true;
     return;
   }
   scopes.depth -= 1;
   const innermost = scopes.declaring.at(-1);
-  if (innermost === undefined || innermost.level !== scopes.depth) {
-    if (namesDeclaringElement(scopes, bytes, markup)) scopes.broken = true;
-    return;
-  }
-  if (!closesElement(bytes, markup, innermost.nameStart, innermost.nameEnd)) {
-    scopes.broken = true;
-    return;
-  }
+  if (innermost === undefined || innermost.level !== scopes.depth) return;
   scopes.declaring.pop();
-  addCount(scopes.declaringNames, innermost.name, -1);
-  addCount(scopes.declaringNameLengths, innermost.nameEnd - innermost.nameStart, -1);
   releaseNamespaces(scopes, innermost.prefixes);
+  scopes.declarationsInScope -= innermost.declarations;
 }
 
 /** The namespace the innermost binding of prefix `key` names in `scopes`, or null when none counts. */
@@ -1006,30 +1070,38 @@ function inOmmlNamespace(scopes: NamespaceScopes, bytes: Uint8Array, markup: Xml
 }
 
 /**
- * Whether the tag scanned into `markup` has a relationship id: a non-empty attribute
- * whose local name is exactly RELATIONSHIP_ID_ATTRIBUTE and whose prefix is bound to
- * RELATIONSHIPS_NAMESPACE by `scopes`.
+ * Whether the tag scanned into `markup` leads to an external hyperlink of its part: it
+ * has a relationship id (a non-empty attribute whose local name is exactly
+ * RELATIONSHIP_ID_ATTRIBUTE and whose prefix is bound to RELATIONSHIPS_NAMESPACE by
+ * `scopes`), and the decoded value of every one it has is one of `externalHyperlinkIds`.
  */
-function hasRelationshipId(
+function leadsToExternalHyperlink(
   scopes: NamespaceScopes,
   bytes: Uint8Array,
   markup: XmlMarkup,
   attributes: readonly number[],
+  externalHyperlinkIds: ReadonlySet<string>,
 ): boolean {
+  if (externalHyperlinkIds.size === 0) return false;
+  let found = false;
   for (let attribute = 0; attribute < markup.attributeCount; attribute += 1) {
     const nameStart = attributeField(attributes, attribute, ATTRIBUTE_NAME_START);
     const nameEnd = attributeField(attributes, attribute, ATTRIBUTE_NAME_END);
+    const valueStart = attributeField(attributes, attribute, ATTRIBUTE_VALUE_START);
+    const valueEnd = attributeField(attributes, attribute, ATTRIBUTE_VALUE_END);
     const localStart = localPartStart(bytes, nameStart, nameEnd);
     const candidate =
       localStart > nameStart &&
-      attributeField(attributes, attribute, ATTRIBUTE_VALUE_START) !==
-        attributeField(attributes, attribute, ATTRIBUTE_VALUE_END) &&
+      valueStart !== valueEnd &&
       bytesEqualAscii(bytes, localStart, nameEnd, RELATIONSHIP_ID_ATTRIBUTE);
     if (!candidate) continue;
     const key = NAME_DECODER.decode(bytes.subarray(nameStart, localStart - 1));
-    if (boundNamespace(scopes, key) === 'relationships') return true;
+    if (boundNamespace(scopes, key) !== 'relationships') continue;
+    const id = decodeXmlText(bytes.subarray(valueStart, valueEnd));
+    if (id === null || !externalHyperlinkIds.has(id)) return false;
+    found = true;
   }
-  return false;
+  return found;
 }
 
 /** A byte inside a loose element name: anything above a space but `<`, `>`, `/`, `=` and quotes. */
@@ -1067,8 +1139,9 @@ function strictNameEnd(bytes: Uint8Array, start: number): number {
  * there on could open a field, macro, script or active element or an element with a
  * field attribute of its own (the strict-name head of its loose local name, which a
  * reader that stops at U+0080 or a non-ASCII letter reads, is one), or any run of name
- * bytes is a field, macro or URL attribute name. Linear: every loose name stops before
- * the next '<', every run of name bytes is read once.
+ * bytes is a field, macro, URL, base URL or style name or a stylesheet instruction
+ * target. Linear: every loose name stops before the next '<', every run of name bytes
+ * is read once.
  */
 function assertNoFieldAfter(entry: string, bytes: Uint8Array, from: number): void {
   for (let at = from; at !== -1; at = nextMarkup(bytes, at + 1)) {
@@ -1099,28 +1172,83 @@ function assertNoFieldAfter(entry: string, bytes: Uint8Array, from: number): voi
     ) {
       throw unsafeFormula(entry, 'Workbook part holds a formula the strict lexer cannot read');
     }
-    if (isNameIn(bytes, at, end, URL_ATTRIBUTES)) {
+    if (
+      isNameIn(bytes, at, end, URL_ATTRIBUTES) ||
+      isNameIn(bytes, at, end, BASE_URL_ATTRIBUTES) ||
+      isNameIn(bytes, at, end, STYLES) ||
+      isNameIn(bytes, at, end, STYLESHEET_INSTRUCTIONS)
+    ) {
       throw unsafePart(entry, 'Workbook part holds a link the strict lexer cannot read');
     }
     at = end;
   }
 }
 
+/** Whether the opaque markup scanned into `markup` is a processing instruction that loads a resource. */
+function isStylesheetInstruction(bytes: Uint8Array, markup: XmlMarkup): boolean {
+  return (
+    bytes[markup.start + 1] === QUESTION &&
+    isNameIn(bytes, markup.nameStart, markup.nameEnd, STYLESHEET_INSTRUCTIONS)
+  );
+}
+
+/** Adds the character data bytes `raw`, decoded, to the CSS text of `style`; UNSAFE_CONTENT `unsafe-part` when it cannot be decoded. */
+function addStyleText(entry: string, style: StyleText, raw: Uint8Array): void {
+  if (raw.length === 0) return;
+  const text = decodeXmlText(raw);
+  if (text === null) {
+    throw unsafePart(entry, 'Workbook part holds a style the scan cannot decode');
+  }
+  style.text += text;
+}
+
+/** Adds the text of the CDATA section scanned into `markup`, if it is one, to the CSS text of `style`. */
+function addStyleCdata(bytes: Uint8Array, markup: XmlMarkup, style: StyleText): void {
+  if (!bytesEqualAscii(bytes, markup.start, markup.start + CDATA_OPEN.length, CDATA_OPEN)) return;
+  style.text += FIELD_DECODER.decode(
+    bytes.subarray(markup.start + CDATA_OPEN.length, markup.end - CDATA_CLOSE_LENGTH),
+  );
+}
+
+/**
+ * The CSS text of the style element that ended (or of the rest of the part, when the
+ * walk lost the nesting inside it) loads nothing: assertSafeStyle, then `style` leaves it.
+ */
+function endStyle(entry: string, style: StyleText): void {
+  assertSafeStyle(entry, style.text);
+  style.level = OUTSIDE_STYLE;
+  style.text = '';
+}
+
 /**
  * Throws SpreadsheetFileError UNSAFE_CONTENT `{ reason, entry }` when XML part `entry`
  * holds a formula field that fails the scan, a macro assignment or a script
- * (`unsafe-formula`), an active element or a URL outside the package (`unsafe-part`),
- * or, past markup the strict lexer refuses, anything that could be one (see the formula
- * field header); UNSAFE_CONTENT `{ entry, cap }` when it holds more than
- * MAX_XMLNS_DECLARATIONS_PER_PART namespace declarations. Every markup of the part is
- * read, the namespace declarations in scope kept on the way.
+ * (`unsafe-formula`), an active element, a URL outside the package, a style that loads a
+ * resource or a stylesheet instruction (`unsafe-part`), or, past markup the strict
+ * lexer refuses, anything that could be one (see the formula field header);
+ * UNSAFE_CONTENT `{ entry, cap }` when it holds more than MAX_XMLNS_DECLARATIONS_PER_PART
+ * namespace declarations in scope at once. A hyperlink's `location` is a URL fragment
+ * only with relationship ids of `externalHyperlinkIds`. Every markup of the part is
+ * read, the open elements and the namespace declarations in scope kept on the way, and
+ * the text of a style element gathered up to its end tag.
  */
-function assertSafeFields(entry: string, bytes: Uint8Array): void {
+function assertSafeFields(
+  entry: string,
+  bytes: Uint8Array,
+  externalHyperlinkIds: ReadonlySet<string>,
+): void {
   const markup = createMarkup();
   const attributes: number[] = [];
   const scopes = createNamespaceScopes();
+  const style: StyleText = { level: OUTSIDE_STYLE, text: '' };
+  let textStart = 0;
   for (let at = nextMarkup(bytes, 0); at !== -1; at = nextMarkup(bytes, markup.end)) {
+    const inStyle = style.level !== OUTSIDE_STYLE;
+    if (inStyle) addStyleText(entry, style, bytes.subarray(textStart, at));
     if (!lexes(bytes, at, markup, attributes)) {
+      if (inStyle) {
+        throw unsafePart(entry, 'Workbook part holds a style the strict lexer cannot read');
+      }
       assertNoFieldAfter(entry, bytes, at);
       return;
     }
@@ -1130,36 +1258,60 @@ function assertSafeFields(entry: string, bytes: Uint8Array): void {
       case 'empty': {
         const nameStart = markup.nameStart;
         const nameEnd = markup.nameEnd;
+        const opensStyle =
+          kind === 'start' && isNameIn(bytes, localNameStart(bytes, markup), nameEnd, STYLES);
+        const inScopeBefore = scopes.declarationsInScope;
         const prefixes = declareNamespaces(entry, scopes, bytes, markup, attributes);
-        assertSafeElement(entry, bytes, markup, attributes, scopes);
+        const declarations = scopes.declarationsInScope - inScopeBefore;
+        assertSafeElement(entry, bytes, markup, attributes, scopes, externalHyperlinkIds);
         // A field, macro or script element was read through its end tag, now in `markup`.
-        if (markup.kind === 'start') openElement(scopes, bytes, nameStart, nameEnd, prefixes);
-        else if (prefixes !== null) releaseNamespaces(scopes, prefixes);
+        if (markup.kind !== 'start') {
+          endUnopenedElement(scopes, prefixes, declarations);
+          break;
+        }
+        if (opensStyle && !inStyle) style.level = scopes.depth;
+        openElement(scopes, nameStart, nameEnd, prefixes, declarations);
         break;
       }
       case 'end':
         closeElement(scopes, bytes, markup);
+        if (inStyle && !scopes.broken && scopes.depth === style.level) endStyle(entry, style);
         break;
       case 'opaque':
+        if (isStylesheetInstruction(bytes, markup)) {
+          throw unsafePart(entry, 'Workbook part holds a stylesheet instruction');
+        }
+        if (inStyle) addStyleCdata(bytes, markup, style);
         break;
       default: {
         const _exhaustive: never = kind;
         throw new Error(`Unhandled markup kind: ${String(_exhaustive)}`);
       }
     }
+    textStart = markup.end;
   }
+  if (style.level === OUTSIDE_STYLE) return;
+  addStyleText(entry, style, bytes.subarray(textStart));
+  endStyle(entry, style);
 }
 
 /**
  * Rejects one XML part, whatever its name, that declares a DOCTYPE or ENTITY (any
  * case), references an entity other than the five predefined ones and numeric
  * character references, or holds an unsafe formula field, macro assignment, script,
- * active element or URL outside the package, or more than
- * MAX_XMLNS_DECLARATIONS_PER_PART namespace declarations (see the formula field header).
+ * active element, URL outside the package, style that loads a resource or stylesheet
+ * instruction, or more than MAX_XMLNS_DECLARATIONS_PER_PART namespace declarations in
+ * scope at once (see the formula field header). A hyperlink's `location` is taken for
+ * a URL fragment only when its relationship ids are among `externalHyperlinkIds` (those
+ * of this part, ExternalHyperlinkIds; none by default).
  * Throws SpreadsheetFileError('UNSAFE_CONTENT') naming `name`; a field refusal also
  * carries its reason (`unsafe-formula` or `unsafe-part`), the namespace refusal the cap.
  */
-export function assertSafeXmlPart(name: string, bytes: Uint8Array): void {
+export function assertSafeXmlPart(
+  name: string,
+  bytes: Uint8Array,
+  externalHyperlinkIds: ReadonlySet<string> = NO_HYPERLINK_IDS,
+): void {
   const xml = strFromU8(bytes);
 
   if (DTD_DECLARATION.test(xml)) {
@@ -1172,7 +1324,7 @@ export function assertSafeXmlPart(name: string, bytes: Uint8Array): void {
       entry: name,
     });
   }
-  assertSafeFields(name, bytes);
+  assertSafeFields(name, bytes, externalHyperlinkIds);
 }
 
 /**
@@ -1218,16 +1370,20 @@ function assertUtf8Text(entry: string, bytes: Uint8Array): void {
  * first bytes (assertEntryContentKind: CORRUPT_FILE `part-encoding` for XML the scans
  * cannot read or a name that promises XML it does not hold), and each XML entry must
  * be UTF-8 text (assertUtf8Text: CORRUPT_FILE `part-encoding`) and pass
- * assertSafeXmlPart (UNSAFE_CONTENT), checked for its encoding first. Every XML entry is
+ * assertSafeXmlPart (UNSAFE_CONTENT), checked for its encoding first, with the external
+ * hyperlink ids `externalHyperlinks` gives its name (none by default). Every XML entry is
  * checked, whatever its name and whether a relationship names it or not: the export
  * hands each of them on unchanged.
  */
-export function assertSafeXmlContent(entries: Iterable<readonly [string, Uint8Array]>): void {
+export function assertSafeXmlContent(
+  entries: Iterable<readonly [string, Uint8Array]>,
+  externalHyperlinks: ExternalHyperlinkIds = NO_EXTERNAL_HYPERLINKS,
+): void {
   for (const [name, bytes] of entries) {
     const kind = entryContentKind(bytes);
     assertEntryContentKind(name, kind);
     if (kind !== 'xml') continue;
     assertUtf8Text(name, bytes);
-    assertSafeXmlPart(name, bytes);
+    assertSafeXmlPart(name, bytes, externalHyperlinks.get(name) ?? NO_HYPERLINK_IDS);
   }
 }

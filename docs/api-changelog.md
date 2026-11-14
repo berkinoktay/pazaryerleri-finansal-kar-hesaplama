@@ -57,8 +57,12 @@ section "Versioning" for details.
   formulas, defined names, data validation and conditional format formulas, table column formulas,
   chart series formulas, pivot cache formulas, the formula attributes and elements of shapes,
   form controls and VML drawings, the values of conditional format value objects (color scales,
-  data bars, icon sets), hyperlink locations inside the workbook, camera tool ranges and the old
-  formulas (`oldFormula`) of a shared workbook's revision log. A formula
+  data bars, icon sets), hyperlink locations, camera tool ranges and the old
+  formulas (`oldFormula`) of a shared workbook's revision log. A hyperlink's location is read as
+  the `#fragment` of a web address, not as a formula, only when the hyperlink's relationship id
+  names a relationship of its own worksheet's relationships part whose type is `hyperlink` and
+  whose `TargetMode` is `External`; a missing id, an id the part lacks, an internal hyperlink or a
+  relationship of another type leaves the location checked as a formula. A formula
   may call only functions of a fixed allow list of pure math, text, logical, lookup and date
   functions (`IF`, `SUM`, `VLOOKUP`, `XLOOKUP`, `OFFSET`,
   `SEARCH` and similar); a call to any other function (`WEBSERVICE`, `HYPERLINK`, `IMAGE`, `RTD`,
@@ -77,20 +81,27 @@ section "Versioning" for details.
   CDATA, a processing instruction or an element; the one child element Excel 2010+ writes in a
   cross-sheet data validation or conditional format, `<xm:f>`, is read as the formula). A macro
   assignment (a non-empty `macro` or `fmlaMacro` attribute, a non-empty `FmlaMacro` element), a
-  VML control script (a `ScriptText` element holding anything but white space), an `src` or
-  `href` attribute of any prefix (a VML picture, fill or shape link) whose value is not relative
-  (a URI scheme, a drive letter, a leading `//` or any backslash), an
+  VML control script (a `ScriptText` element holding anything but white space), an `src`,
+  `href` or `althref` attribute of any prefix (a VML picture, fill or shape link, an SVG image
+  link) or an `xml:base` whose value is not relative (a URI scheme, a drive letter written `C:`
+  or `C|`, a leading `//` or any backslash, read past the tabs and line breaks a URL parser
+  removes; an `src`, `href` or `althref` may hold a `data:image/` URI, any other `data:` URI is
+  refused), a style attribute or style element whose CSS holds `@import`, a backslash or a
+  `url()` with an absolute target, an `xml-stylesheet` processing instruction, an
   embedded object, a form or ActiveX control, a web publishing item, an Office web add-in, a
   custom ribbon, attached toolbars or XML maps (which bind data from a remote file), more than 256
-  namespace declarations in one scanned part (the limit the parts the reader opens already had),
+  namespace declarations in scope at once in one scanned part (declarations that go out of scope
+  when their element closes, such as the three Excel writes per picture of a drawing, no longer
+  add up; the parts the reader opens keep their limit of 256 declarations in all),
   and a DOCTYPE, an ENTITY declaration or an unknown entity reference in any scanned part answer
   `422` `UNSAFE_CONTENT` too. A relationship that points outside the package now passes only when it is
   a hyperlink to an `http`, `https` or `mailto` address in the relationships part of a worksheet,
   decided by the part's content (the part the relationships belong to has a `worksheet` root
   element), not by its path; any other external relationship (a drawing or rich-data hyperlink, a
   web image, a file share, a rich-data part moved beside the worksheets), and an internal one whose
-  target is a URI with a scheme, a drive letter, a network path or holds a backslash, answers `422`
-  `UNSAFE_CONTENT`. The six export routes read the stored file through the
+  target is a URI with a scheme, a drive letter (`C:` or `C|`), a network path or holds a
+  backslash, read past the tabs and line breaks a URL parser removes (the rule the URL attributes
+  follow), answers `422` `UNSAFE_CONTENT`. The six export routes read the stored file through the
   same gate: a stored file with any of these conditions answers `409 CONFLICT`. Valid Trendyol files
   are unaffected.
 - **Campaign workbook import routes are guarded before the body is read**

@@ -16,7 +16,9 @@ import {
   feedEntryContentSniff,
   finishEntryContentSniff,
   isXmlPart,
+  MAX_TRACKED_ELEMENT_DEPTH,
   type EntryContentKind,
+  type ExternalHyperlinkIds,
 } from './content-scan';
 import { SpreadsheetFileError } from './errors';
 import { SAFE_FORMULA_FUNCTIONS } from './formula-scan';
@@ -94,11 +96,15 @@ function entriesOf(parts: Readonly<Record<string, string>>): Unzipped {
   return out;
 }
 
-// Returns the SpreadsheetFileError the scan throws, null when it passes, and
-// re-throws anything unexpected.
-function scanError(entries: Unzipped): SpreadsheetFileError | null {
+// Returns the SpreadsheetFileError the scan throws (given the external hyperlink ids
+// `externalHyperlinks`, none by default), null when it passes, and re-throws anything
+// unexpected.
+function scanError(
+  entries: Unzipped,
+  externalHyperlinks: ExternalHyperlinkIds = new Map(),
+): SpreadsheetFileError | null {
   try {
-    assertSafeXmlContent(Object.entries(entries));
+    assertSafeXmlContent(Object.entries(entries), externalHyperlinks);
     return null;
   } catch (e) {
     if (e instanceof SpreadsheetFileError) return e;
@@ -732,6 +738,7 @@ const PIVOT_TABLE_PART = 'xl/pivotTables/pivotTable1.xml';
 const CHART_PART = 'xl/charts/chart1.xml';
 const CHART_NS = 'http://schemas.openxmlformats.org/drawingml/2006/chart';
 const OMML_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/math';
+const MARKUP_COMPATIBILITY_NS = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
 // An Office Math fraction a/b, as Excel writes an equation; `m` must name OMML_NS.
 const OMML_FRACTION =
   '<m:oMath><m:f><m:fPr><m:ctrlPr/></m:fPr><m:num><m:r><m:t>a</m:t></m:r></m:num>' +
@@ -777,8 +784,9 @@ const PIVOT_FIELD_REFUSALS: readonly LabelledXml[] = [
   ['holding a quoted field name that never closes', "'Fiyat/Adet*2"],
 ];
 
-// Levels of elements that declare no namespace, opened around an Office Math fraction.
-const DEEP_NESTING = 1000;
+// Levels of elements that declare no namespace, opened around an Office Math fraction:
+// deep, yet with the part's own elements within the depth the walk follows.
+const DEEP_NESTING = MAX_TRACKED_ELEMENT_DEPTH - 16;
 
 /** `inner` inside DEEP_NESTING levels of elements that declare no namespace. */
 function deeplyNested(inner: string): string {
@@ -820,6 +828,10 @@ const OMML_FIELD_REFUSALS: readonly LabelledXml[] = [
   [
     'after the element binding OMML closed past deep nesting',
     `<a xmlns:m="${OMML_NS}">${deeplyNested(OMML_FRACTION)}</a><m:f>${EVIL_CALL}</m:f>`,
+  ],
+  [
+    'past an end tag that names an ancestor that declares nothing',
+    `<c r="A1"><p><z xmlns="${OMML_NS}"><q></p><f>${EVIL_CALL}</f></z></c>`,
   ],
 ];
 
@@ -919,6 +931,76 @@ const VML_URL_REFUSALS: readonly LabelledXml[] = [
   ],
   ['a src holding a backslash after a relative start', '<v:imagedata src="media\\x.png"/>'],
   ['an href in another case', '<v:shape id="s" HREF="mailto:a@evil.example"/>'],
+  [
+    'a VML image whose o:althref is a network path',
+    '<v:shape id="h" type="#_x0000_t75"><v:imagedata o:relid="rId9" o:althref="\\\\evil\\s\\x.png"/></v:shape>',
+  ],
+  [
+    'a VML fill whose o:althref is a web address',
+    '<v:shape id="c" type="#_x0000_t202"><v:fill o:althref="http://evil/bg.png" type="frame"/></v:shape>',
+  ],
+  [
+    'a VML image whose xml:base is a file share',
+    '<v:shape id="h" type="#_x0000_t75"><v:imagedata xml:base="file://evil/share/" src="logo.png"/></v:shape>',
+  ],
+  [
+    'an xml:base that is an image data URI',
+    '<v:shape id="h" xml:base="data:image/png;base64,AA"/>',
+  ],
+  [
+    'a VML shape style that loads a picture from a network path',
+    `<v:shape id="s" style="fill:url('\\\\evil\\x')"/>`,
+  ],
+];
+
+const SVG_PART = 'xl/media/image2.svg';
+const SVG_NAMESPACES =
+  'xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"';
+
+/** An SVG image (an `svg` root, no declaration) holding `content`. */
+function svgWith(content: string): string {
+  return `<svg ${SVG_NAMESPACES} width="10" height="10">${content}</svg>`;
+}
+
+// SVG content that loads a resource from outside the package.
+const SVG_REFUSALS: readonly LabelledXml[] = [
+  [
+    'an SVG image whose xlink:href is an HTML data URI',
+    '<image width="1" height="1" xlink:href="data:text/html;base64,PHNjcmlwdD4="/>',
+  ],
+  ['an SVG style element that imports a sheet', '<style>@import url("http://evil/a.css");</style>'],
+  [
+    'an SVG style element whose url( ) target is unquoted and absolute',
+    '<style>rect{fill:url(http://evil/p.svg#g)}</style>',
+  ],
+  [
+    'an SVG style element whose CDATA holds an absolute url( )',
+    "<style><![CDATA[rect{fill:url( 'https://evil/p.svg#g')}]]></style>",
+  ],
+  [
+    'an SVG style element whose url( is split by a comment',
+    '<style>rect{fill:ur<!--x-->l(//evil/p.svg#g)}</style>',
+  ],
+  [
+    'an SVG style element whose url( ) target starts with a CSS comment',
+    '<style>rect{fill:url(/**/"http://evil/p.svg#g")}</style>',
+  ],
+  [
+    'an SVG style element holding a CSS escape',
+    '<style>rect{fill:\\75rl(http://evil/p.svg#g)}</style>',
+  ],
+  [
+    'an SVG style element whose text a child element splits',
+    '<style>rect{fill:ur<g/>l(http://evil/p.svg#g)}</style>',
+  ],
+  [
+    'an SVG style attribute whose url( ) target is a network path',
+    `<rect width="1" height="1" style="fill:url('\\\\evil\\x')"/>`,
+  ],
+  [
+    'an SVG style attribute that imports a sheet in another case',
+    '<rect width="1" height="1" style="@IMPORT &quot;http://evil/a.css&quot;"/>',
+  ],
 ];
 
 /** A line chart whose one series reads its values from the formula `formula` (XML text). */
@@ -1239,6 +1321,21 @@ describe('assertSafeXmlContent: formula fields in every part', () => {
         '<a:x xmlns:a="urn:a" xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="https://evil.example/"/>',
       ),
     ],
+    ...SVG_REFUSALS.map(([label, content]): [string, string, string] => [
+      label,
+      SVG_PART,
+      svgWith(content),
+    ]),
+    [
+      'an SVG image with a stylesheet instruction',
+      SVG_PART,
+      `<?xml-stylesheet href="http://evil/a.css"?>${svgWith('')}`,
+    ],
+    [
+      'a stylesheet instruction in a worksheet, its target in another case',
+      SHEET_PART,
+      worksheetWithAfter('<?XML-Stylesheet type="text/xsl" href="a.xsl"?>'),
+    ],
   ])('refuses %s as unsafe-part', (_label, entry, xml) => {
     expectUnsafePart(scanError(entriesOf({ [entry]: xml })), entry);
   });
@@ -1385,18 +1482,6 @@ describe('assertSafeXmlContent: formula fields in every part', () => {
         `<a14:m xmlns:a14="urn:a14" xmlns:m="${OMML_NS}">${deeplyNested(OMML_FRACTION)}</a14:m>`,
       ),
     ],
-    ...URL_FRAGMENTS.map((location): [string, string, string] => [
-      `a hyperlink with a relationship id whose location keeps the URL fragment ${location}`,
-      SHEET_PART,
-      worksheetWithAfter(hyperlinkWith('r:id="rId1"', location)),
-    ]),
-    [
-      'a hyperlink with a relationship id whose prefix the hyperlink binds',
-      SHEET_PART,
-      worksheetWithAfter(
-        hyperlinkWith(`xmlns:rel="${OFFICE_RELATIONSHIPS_NS}" rel:id="rId1"`, "Ali's"),
-      ),
-    ],
     ['the data names of an Excel 2016+ chart', CHART_EX_PART, chartExWith('_xlchart.v1.0')],
     [
       'a revision log old formula holding a range',
@@ -1423,8 +1508,99 @@ describe('assertSafeXmlContent: formula fields in every part', () => {
       ),
     ],
     ['empty VML scripts', VML_PART, vmlWith('<x:ScriptText/><x:ScriptText> \n </x:ScriptText>')],
+    [
+      'relative VML alternative and base links',
+      VML_PART,
+      vmlShapes(
+        '<v:shape id="h" type="#_x0000_t75" xml:base="media/"><v:imagedata src="x.png" o:althref="y.png"/>' +
+          '<v:fill o:althref="" type="frame"/></v:shape>',
+      ),
+    ],
+    [
+      'an Office Math fraction after a nested AlternateContent that declares nothing',
+      DRAWING_PART,
+      drawingWith(
+        `<mc:AlternateContent xmlns:mc="${MARKUP_COMPATIBILITY_NS}" xmlns:m="${OMML_NS}"><mc:Choice Requires="a14">` +
+          '<mc:AlternateContent><mc:Choice Requires="a14"/></mc:AlternateContent>' +
+          `${OMML_FRACTION}</mc:Choice></mc:AlternateContent>`,
+      ),
+    ],
+    [
+      'an SVG logo whose picture is an image data URI, in either case',
+      SVG_PART,
+      svgWith(
+        '<defs><pattern id="p0" width="1" height="1"><use xlink:href="#image0"/></pattern>' +
+          '<image id="image0" width="1" height="1" xlink:href="data:image/png;base64,iVBORw0KGgo="/>' +
+          '<image id="image1" width="1" height="1" href="DATA:IMAGE/jpeg;base64,/9j/4AAQ"/></defs>' +
+          '<rect width="1" height="1" fill="url(#p0)"/>',
+      ),
+    ],
+    [
+      'SVG styles whose url( ) targets are fragments',
+      SVG_PART,
+      svgWith(
+        '<style>/* Logo */ .a{fill:url(#grad1)} .b{fill:url( "#grad2" )}</style>' +
+          "<style><![CDATA[.c{fill:url('#grad3')}]]></style>" +
+          '<rect class="a" width="1" height="1" style="fill:url(#grad1)"/>',
+      ),
+    ],
+    [
+      'a drawing shape style as Excel writes it',
+      DRAWING_PART,
+      drawingWith(
+        '<xdr:sp macro="" textlink="" xmlns:a="urn:a"><xdr:style>' +
+          '<a:lnRef idx="2"><a:schemeClr val="accent1"><a:shade val="50000"/></a:schemeClr></a:lnRef>' +
+          '<a:fillRef idx="1"><a:schemeClr val="accent1"/></a:fillRef>' +
+          '<a:fontRef idx="minor"><a:schemeClr val="lt1"/></a:fontRef></xdr:style></xdr:sp>',
+      ),
+    ],
   ])('accepts %s', (_label, entry, xml) => {
     expect(scanError(entriesOf({ [entry]: xml }))).toBeNull();
+  });
+
+  const EXTERNAL_RID1: ExternalHyperlinkIds = new Map([[SHEET_PART, new Set(['rId1'])]]);
+
+  it.each<[label: string, attributes: string, location: string]>([
+    ...URL_FRAGMENTS.map((location): [string, string, string] => [
+      `whose location keeps the URL fragment ${location}`,
+      'r:id="rId1"',
+      location,
+    ]),
+    [
+      'whose relationship id prefix the hyperlink binds',
+      `xmlns:rel="${OFFICE_RELATIONSHIPS_NS}" rel:id="rId1"`,
+      "Ali's",
+    ],
+    ['whose relationship id is written with a reference', 'r:id="rId&#49;"', "Ali's"],
+  ])(
+    'accepts a hyperlink to an external hyperlink of its part %s',
+    (_label, attributes, location) => {
+      const entries = entriesOf({
+        [SHEET_PART]: worksheetWithAfter(hyperlinkWith(attributes, location)),
+      });
+      expect(scanError(entries, EXTERNAL_RID1)).toBeNull();
+    },
+  );
+
+  it.each<[label: string, attributes: string, hyperlinks: ExternalHyperlinkIds]>([
+    ['an id its part does not give an external hyperlink', 'r:id="rId99"', EXTERNAL_RID1],
+    ['no external hyperlink ids at all', 'r:id="rId1"', new Map()],
+    [
+      'the external hyperlink ids of another part',
+      'r:id="rId1"',
+      new Map([[SECOND_SHEET_PART, new Set(['rId1'])]]),
+    ],
+    [
+      'a second relationship id that is not one',
+      'r:id="rId1" xmlns:q="' + OFFICE_RELATIONSHIPS_NS + '" q:id="rId2"',
+      EXTERNAL_RID1,
+    ],
+    ['an id in another ASCII case', 'r:id="RID1"', EXTERNAL_RID1],
+  ])('scans the location of a hyperlink with %s as a formula', (_label, attributes, hyperlinks) => {
+    const entries = entriesOf({
+      [SHEET_PART]: worksheetWithAfter(hyperlinkWith(attributes, EVIL_CALL)),
+    });
+    expectUnsafeFormula(scanError(entries, hyperlinks));
   });
 });
 
@@ -1446,22 +1622,65 @@ function siblingDeclarations(count: number): string {
   return `<r>${'<e xmlns:p="u"/>'.repeat(count)}</r>`;
 }
 
-function expectTooManyNamespaceDeclarations(error: SpreadsheetFileError | null): void {
+function expectTooManyNamespaceDeclarations(
+  error: SpreadsheetFileError | null,
+  entry = NAMESPACE_PART,
+): void {
   expect(error?.code).toBe('UNSAFE_CONTENT');
-  expect(error?.meta).toEqual({ entry: NAMESPACE_PART, cap: MAX_XMLNS_DECLARATIONS_PER_PART });
+  expect(error?.meta).toEqual({ entry, cap: MAX_XMLNS_DECLARATIONS_PER_PART });
   expect(error?.message).toBe(
-    `Workbook part '${NAMESPACE_PART}' has more than ${MAX_XMLNS_DECLARATIONS_PER_PART} namespace declarations`,
+    `Workbook part '${entry}' has more than ${MAX_XMLNS_DECLARATIONS_PER_PART} namespace declarations`,
   );
 }
 
-// The walk keeps an entry per element that declares namespaces, never per open
-// element, so its memory is bounded by the declaration cap every kept XML part is held
-// to, with the error the reader parts get for it.
+const DRAWING_MAIN_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+
+/**
+ * One anchored picture the way Excel 2016+ writes it: three namespace declarations
+ * (a16 on the creation id, r on the blip, a14 on useLocalDpi), each out of scope once
+ * its element closes.
+ */
+function excelPicture(index: number): string {
+  return (
+    '<xdr:twoCellAnchor editAs="oneCell"><xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff>' +
+    `<xdr:row>${index}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>1</xdr:col>` +
+    `<xdr:colOff>0</xdr:colOff><xdr:row>${index + 1}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>` +
+    `<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="${index + 2}" name="Picture ${index + 1}"><a:extLst>` +
+    '<a:ext uri="{FF2B5EF4-FFF2-40B4-BE49-F238E27FC236}"><a16:creationId ' +
+    `xmlns:a16="http://schemas.microsoft.com/office/drawing/2014/main" id="{${String(index).padStart(8, '0')}-1111-2222-3333-444444444444}"/>` +
+    '</a:ext></a:extLst></xdr:cNvPr><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>' +
+    `<xdr:blipFill><a:blip xmlns:r="${OFFICE_RELATIONSHIPS_NS}" r:embed="rId1"><a:extLst>` +
+    '<a:ext uri="{28A0092B-C50C-407E-A947-70E740481C1C}"><a14:useLocalDpi ' +
+    'xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main" val="0"/></a:ext></a:extLst>' +
+    '</a:blip><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:xfrm><a:off x="0" y="0"/>' +
+    '<a:ext cx="609600" cy="609600"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>' +
+    '</xdr:pic><xdr:clientData/></xdr:twoCellAnchor>'
+  );
+}
+
+/** A drawing part holding `count` pictures as Excel 2016+ writes them. */
+function drawingWithPictures(count: number): string {
+  const pictures = Array.from({ length: count }, (_, index) => excelPicture(index));
+  return (
+    `${UTF8_DECLARATION}<xdr:wsDr xmlns:xdr="${DRAWING_NS}" xmlns:a="${DRAWING_MAIN_NS}">` +
+    `${pictures.join('')}</xdr:wsDr>`
+  );
+}
+
+/** `inner` inside `depth` levels of elements that declare no namespace. */
+function nestedIn(depth: number, inner: string): string {
+  return `${'<g>'.repeat(depth)}${inner}${'</g>'.repeat(depth)}`;
+}
+
+// The walk keeps the qualified name of every open element up to
+// MAX_TRACKED_ELEMENT_DEPTH, and an entry per open element that declares namespaces, so
+// its memory is bounded; a part may hold at most MAX_XMLNS_DECLARATIONS_PER_PART
+// declarations in scope at once, with the error the reader parts get for more
+// declarations in all (they keep that cap on every declaration).
 describe('assertSafeXmlContent: namespace declarations', () => {
   it.each([
     ['nested', nestedDeclarations],
     ['on one element', prefixesOnOneElement],
-    ['on sibling elements', siblingDeclarations],
   ])('accepts declarations %s up to the cap and refuses one more', (_label, part) => {
     const atCap = scanError(entriesOf({ [NAMESPACE_PART]: part(MAX_XMLNS_DECLARATIONS_PER_PART) }));
     const overCap = scanError(
@@ -1472,21 +1691,59 @@ describe('assertSafeXmlContent: namespace declarations', () => {
     expectTooManyNamespaceDeclarations(overCap);
   });
 
+  it('accepts declarations on sibling elements well past the cap: each leaves scope', () => {
+    const part = siblingDeclarations(MAX_XMLNS_DECLARATIONS_PER_PART * 4);
+
+    expect(scanError(entriesOf({ [NAMESPACE_PART]: part }))).toBeNull();
+  });
+
+  it.each([85, 500])('accepts a drawing with %i pictures as Excel 2016+ writes them', (count) => {
+    expect(scanError(entriesOf({ [DRAWING_PART]: drawingWithPictures(count) }))).toBeNull();
+  });
+
+  it('keeps the cap on every declaration of a part the reader opens, at the gate', () => {
+    const siblings = '<e xmlns:p="u"/>'.repeat(MAX_XMLNS_DECLARATIONS_PER_PART + 1);
+    const readerPart = buildXlsxFixture([{ name: 'Sheet1', xml: worksheetWithAfter(siblings) }]);
+    const otherPart = buildXlsxFixture([{ name: 'Sheet1', xml: worksheetWithCell('<v>1</v>') }], {
+      [DRAWING_PART]: drawingWith(siblings),
+    });
+
+    expectTooManyNamespaceDeclarations(gateError(readerPart), SHEET_PART);
+    expect(gateError(otherPart)).toBeNull();
+  });
+
   it('counts the declarations past nesting the walk cannot follow', () => {
     const part = `<a></a></b>${siblingDeclarations(MAX_XMLNS_DECLARATIONS_PER_PART + 1)}`;
 
     expectTooManyNamespaceDeclarations(scanError(entriesOf({ [NAMESPACE_PART]: part })));
   });
 
-  it('follows the bindings through deep nesting', () => {
-    const depth = 100_000;
-    const nested = (inner: string): string =>
-      `${'<g>'.repeat(depth)}${inner}${'</g>'.repeat(depth)}`;
-    const fraction = `<r xmlns:m="${OMML_NS}">${nested(OMML_FRACTION)}</r>`;
-    const afterClose = `<r><a xmlns:m="${OMML_NS}">${nested('')}</a><m:f>${EVIL_CALL}</m:f></r>`;
+  it('follows the bindings through nesting up to the depth it tracks', () => {
+    // The root and the fraction's own five levels stay within the tracked depth.
+    const depth = MAX_TRACKED_ELEMENT_DEPTH - 8;
+    const fraction = `<r xmlns:m="${OMML_NS}">${nestedIn(depth, OMML_FRACTION)}</r>`;
+    const afterClose = `<r><a xmlns:m="${OMML_NS}">${nestedIn(depth, '')}</a><m:f>${EVIL_CALL}</m:f></r>`;
 
     expect(scanError(entriesOf({ [NAMESPACE_PART]: fraction }))).toBeNull();
     expectUnsafeFormula(scanError(entriesOf({ [NAMESPACE_PART]: afterClose })), NAMESPACE_PART);
+  });
+
+  it('reads every f as a field past the depth it tracks', () => {
+    const fraction = (depth: number): string =>
+      `<r xmlns:m="${OMML_NS}">${nestedIn(depth, OMML_FRACTION)}</r>`;
+
+    expectUnsafeFormula(
+      scanError(entriesOf({ [NAMESPACE_PART]: fraction(MAX_TRACKED_ELEMENT_DEPTH) })),
+      NAMESPACE_PART,
+    );
+    expectUnsafeFormula(
+      scanError(entriesOf({ [NAMESPACE_PART]: fraction(100_000) })),
+      NAMESPACE_PART,
+    );
+  });
+
+  it('pins the tracked depth', () => {
+    expect(MAX_TRACKED_ELEMENT_DEPTH).toBe(512);
   });
 });
 
@@ -1720,23 +1977,61 @@ describe('upload gate: every kept worksheet part is scanned', () => {
 /** `text` as bytes: each code unit one byte (every code unit here is below 0x100). */
 const HYPERLINK_REL_TYPE = `${OFFICE_RELATIONSHIPS_NS}/hyperlink`;
 
+const SHEET_RELS_PART = 'xl/worksheets/_rels/sheet1.xml.rels';
+const WEB_HYPERLINK_RELATIONSHIP = `<Relationship Id="rId1" Type="${HYPERLINK_REL_TYPE}" Target="https://www.example.com/urun/123" TargetMode="External"/>`;
+const IMAGE_RELATIONSHIP = `<Relationship Id="rId1" Type="${OFFICE_RELATIONSHIPS_NS}/image" Target="../media/image1.png"/>`;
+
+/**
+ * A one-sheet workbook whose hyperlink has the relationship id `id` and keeps
+ * `location`, the sheet's relationships part holding `relationships` (none when null).
+ */
+function bookWithSheetHyperlink(
+  id: string,
+  location: string,
+  relationships: string | null,
+): Buffer {
+  const parts: Record<string, string> =
+    relationships === null
+      ? {}
+      : {
+          [SHEET_RELS_PART]: `${UTF8_DECLARATION}<Relationships xmlns="${RELATIONSHIPS_NS}">${relationships}</Relationships>`,
+        };
+  return buildXlsxFixture(
+    [{ name: 'Sheet1', xml: worksheetWithAfter(hyperlinkWith(`r:id="${id}"`, location)) }],
+    parts,
+  );
+}
+
 /** A one-sheet workbook whose hyperlink leads to a web page and keeps `location`. */
 function bookWithWebHyperlink(location: string): Buffer {
-  return buildXlsxFixture(
-    [{ name: 'Sheet1', xml: worksheetWithAfter(hyperlinkWith('r:id="rId1"', location)) }],
-    {
-      'xl/worksheets/_rels/sheet1.xml.rels':
-        `${UTF8_DECLARATION}<Relationships xmlns="${RELATIONSHIPS_NS}">` +
-        `<Relationship Id="rId1" Type="${HYPERLINK_REL_TYPE}" Target="https://www.example.com/urun/123" TargetMode="External"/>` +
-        '</Relationships>',
-    },
-  );
+  return bookWithSheetHyperlink('rId1', location, WEB_HYPERLINK_RELATIONSHIP);
 }
 
 describe('upload gate: hyperlinks to web pages', () => {
   it.each(URL_FRAGMENTS)('accepts the URL fragment %s in the location', (location) => {
     expect(gateError(bookWithWebHyperlink(location))).toBeNull();
   });
+
+  it.each<[label: string, id: string, relationships: string | null]>([
+    ['an id its relationships part lacks', 'rId99', WEB_HYPERLINK_RELATIONSHIP],
+    ['an id while the sheet has no relationships part', 'rId1', null],
+    [
+      'an internal hyperlink',
+      'rId1',
+      `<Relationship Id="rId1" Type="${HYPERLINK_REL_TYPE}" Target="#Sheet1!A1"/>`,
+    ],
+    ['an image', 'rId1', IMAGE_RELATIONSHIP],
+    [
+      'an external hyperlink and an image',
+      'rId1',
+      `${WEB_HYPERLINK_RELATIONSHIP}${IMAGE_RELATIONSHIP}`,
+    ],
+  ])(
+    'scans the location of a hyperlink whose relationship id names %s as a formula',
+    (_label, id, relationships) => {
+      expectUnsafeFormula(gateError(bookWithSheetHyperlink(id, EVIL_CALL, relationships)));
+    },
+  );
 });
 
 function latin1Bytes(text: string): Uint8Array<ArrayBuffer> {
