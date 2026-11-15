@@ -75,6 +75,11 @@ const BIN_SHEET_RELS_PART = 'xl/worksheets/_rels/s2.bin.rels';
 export interface PackagePartCase {
   readonly label: string;
   readonly entries: Readonly<Record<string, string>>;
+  /**
+   * An entry name is not a canonical part name: the gate refuses it by that name
+   * (CORRUPT_FILE `entry-name`) before this rule runs; the rule alone still refuses it.
+   */
+  readonly nonCanonicalName?: true;
 }
 
 /** One Relationship element; `attributes` follow the Target as they are. */
@@ -326,14 +331,6 @@ export const UNSAFE_PART_CASES: readonly PackagePartCase[] = [
     },
   },
   {
-    label: 'an image relationship with TargetMode="external" in lower case',
-    entries: {
-      [DRAWING_RELS_PART]: relationshipsXml(
-        relationship(`${OFFICE_REL}/image`, SHARE_TARGET, ' TargetMode="external"'),
-      ),
-    },
-  },
-  {
     label: 'a relationship without a Type with TargetMode="External"',
     entries: {
       [SHEET_RELS_PART]: relationshipsXml(
@@ -534,10 +531,12 @@ export const UNSAFE_PART_CASES: readonly PackagePartCase[] = [
   {
     label: `an external image in a worksheet's relationships part named .rel and a long s`,
     entries: externalImageIn(`xl/worksheets/_rels/sheet1.xml.rel${LONG_S}`),
+    nonCanonicalName: true,
   },
   {
     label: "an external image in a worksheet's relationships part named .xml%2Erels",
     entries: externalImageIn('xl/worksheets/_rels/sheet1.xml%2Erels'),
+    nonCanonicalName: true,
   },
   {
     label: 'an external image in a relationships part named like an image',
@@ -550,6 +549,7 @@ export const UNSAFE_PART_CASES: readonly PackagePartCase[] = [
       `xl/worksheets/_rels/sheet1.xml.rel${LONG_S}`,
       REFERENCED_COLON_RELATIONSHIPS_NS,
     ),
+    nonCanonicalName: true,
   },
   {
     label: 'an external image in a part named .xml%2Erels, its namespace last letter a reference',
@@ -557,6 +557,7 @@ export const UNSAFE_PART_CASES: readonly PackagePartCase[] = [
       'xl/worksheets/_rels/sheet1.xml%2Erels',
       REFERENCED_S_RELATIONSHIPS_NS,
     ),
+    nonCanonicalName: true,
   },
   {
     label: 'an external image in a part named like an image, its root in another namespace',
@@ -603,10 +604,25 @@ export const PACKAGE_PART_CASES: readonly PackagePartCase[] = [
   {
     label: 'a second content types part spelled [content_types].xml',
     entries: { '[content_types].xml': contentTypesXml() },
+    nonCanonicalName: true,
   },
   {
     label: 'a TargetMode written with a character reference',
     entries: sheetRelationship(`${OFFICE_REL}/image`, ' TargetMode="Ext&#101;rnal"'),
+  },
+  // A TargetMode is exactly Internal or External: a reader may take any other spelling
+  // for either, while the gate decides with one of them.
+  ...['external', 'EXTERNAL', 'External ', 'internal'].map((mode) => ({
+    label: `an image relationship with TargetMode="${mode}"`,
+    entries: {
+      [DRAWING_RELS_PART]: relationshipsXml(
+        relationship(`${OFFICE_REL}/image`, SHARE_TARGET, ` TargetMode="${mode}"`),
+      ),
+    },
+  })),
+  {
+    label: 'a worksheet hyperlink relationship with TargetMode="external" in lower case',
+    entries: sheetRelationship(HYPERLINK_REL, ' TargetMode="external"', WEB_TARGET),
   },
   {
     label: 'content types holding only the XML declaration',
@@ -661,6 +677,7 @@ export const PACKAGE_PART_CASES: readonly PackagePartCase[] = [
         relationship(IMAGE_REL, 'https://evil.example/x.png', EXTERNAL_TARGET_MODE),
       ).replace('<Relationships ', `<Relationships xmlns:${LONG_S}="urn:x" `),
     },
+    nonCanonicalName: true,
   },
   {
     label: 'a Relationship with two Target attributes',

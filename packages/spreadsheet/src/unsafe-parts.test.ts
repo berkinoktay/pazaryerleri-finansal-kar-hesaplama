@@ -19,6 +19,7 @@ import { UNSAFE_CONTENT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
 import {
   assertNoUnsafePackageParts,
   assertNoUnsafePartNames,
+  contentScanPlan,
   isRelationshipsPartName,
   UNSAFE_CONTENT_TYPE_MARKERS,
   UNSAFE_RELATIONSHIP_TYPE_ENDINGS,
@@ -88,7 +89,7 @@ describe('assertNoUnsafePackageParts', () => {
       relationship('rId3', 'image', '../media/image1.png') +
       relationship('rId4', 'hyperlink', 'https://example.com/b', external) +
       relationship('rId4', 'image', '../media/image1.png') +
-      relationship('rId&#53;', 'hyperlink', 'mailto:a@example.com', external) +
+      relationship('rId5', 'hyperlink', 'mailto:a@example.com', external) +
       '</Relationships>';
 
     expect(checkEntries({ [SHEET_RELS_PART]: sheetRels })).toEqual(
@@ -100,6 +101,24 @@ describe('assertNoUnsafePackageParts', () => {
       ]),
     );
     expect(checkEntries({})).toEqual(new Map());
+  });
+
+  // The content scan compares the Id with the ids a worksheet names, so it is read
+  // literally: a reference or a white space character XML would replace refuses.
+  it.each([
+    ['a character reference', 'rId&#49;'],
+    ['a TAB', 'rId\t1'],
+    ['an LF', 'rId\n1'],
+    ['a CR', 'rId\r1'],
+  ])('refuses a relationship Id holding %s as CORRUPT_FILE package-part', (_label, id) => {
+    const sheetRels =
+      `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="${RELATIONSHIPS_NS}">` +
+      `<Relationship Id="${id}" Type="${OFFICE_REL}/hyperlink" Target="https://example.com/a" TargetMode="External"/>` +
+      '</Relationships>';
+
+    const error = fileErrorOf(() => checkEntries({ [SHEET_RELS_PART]: sheetRels }));
+    expect(error.code).toBe('CORRUPT_FILE');
+    expect(error.meta).toEqual({ reason: ZIP_REJECT_REASONS.PACKAGE_PART, entry: SHEET_RELS_PART });
   });
 
   // The lexer refuses a DOCTYPE too; the content scan runs first, so it keeps its code.
@@ -142,6 +161,36 @@ describe('assertNoUnsafePackageParts', () => {
       'attachedtoolbars',
       'xmlmaps',
     ]);
+  });
+});
+
+// Each kept XML part gets one content scan: the package walk scans the parts it walks,
+// chosen by name or by root element, and the content scan of the gate skips them. The
+// root relationships part is not a kept entry; the root relationships rule scans it.
+describe('contentScanPlan', () => {
+  const RELATIONSHIPS_ROOT = `<Relationships xmlns="${RELATIONSHIPS_NS}"/>`;
+  const OTHER_ROOT = '<a/>';
+
+  it.each([
+    [
+      'a .rels name with a Relationships root',
+      'xl/x/_rels/a.xml.rels',
+      RELATIONSHIPS_ROOT,
+      'package-walk',
+    ],
+    ['a .rels name with another root', 'xl/x/_rels/a.xml.rels', OTHER_ROOT, 'package-walk'],
+    ['another name with a Relationships root', 'xl/x/a.xml', RELATIONSHIPS_ROOT, 'package-walk'],
+    [
+      'another name with a relationships root in another ASCII case',
+      'xl/x/a.xml',
+      '<RELATIONSHIPS/>',
+      'package-walk',
+    ],
+    ['the content types part', CONTENT_TYPES_PART, contentTypesXml(), 'package-walk'],
+    ['another name with another root', 'xl/x/a.xml', OTHER_ROOT, 'content-scan'],
+    ['the worksheet', SHEET_PART, WORKSHEET_XML, 'content-scan'],
+  ])('gives %s one scan', (_label, name, xml, step) => {
+    expect(contentScanPlan(new Map([[name, strToU8(xml)]]))).toEqual(new Map([[name, step]]));
   });
 });
 

@@ -96,6 +96,17 @@ export const MAX_FORMAT_CODE_LENGTH = 255;
 // newer functions, so four times that leaves headroom while bounding the NFKC form the
 // scan builds, which can be eighteen times longer than the text.
 export const MAX_FORMULA_TEXT_LENGTH = 32 * 1024;
+// UTF-16 code units of formula text the upload gate reads in one upload: every formula
+// field of every part, counted raw and in NFKC form; beyond it PAYLOAD_TOO_LARGE
+// `formula-scan-budget`. The scan's cost grows with these units whatever the parts look
+// like, and each field is bounded on its own (MAX_FORMULA_TEXT_LENGTH) but their number
+// is not. Real exports charge at most 70 000 units, the 5 000-row commission source the
+// size tests build about 5.9 million; the budget is four times that. In process, fields
+// of U+FDFA up to the budget take about 1.4 s and the costliest shape measured (U+FDFB
+// and U+3000 pairs) about 2.2 s, close to a legitimate parse of that 5 000-row source
+// (about 1.8 s), so a crafted upload holds the shared queue about as long as a real
+// large one does.
+export const MAX_FORMULA_SCAN_UNITS = 24_000_000;
 // SpreadsheetFileError meta `cause` is truncated: library messages may quote the input.
 export const MAX_ERROR_CAUSE_LENGTH = 200;
 

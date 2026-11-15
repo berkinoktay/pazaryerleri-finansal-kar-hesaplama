@@ -4,25 +4,34 @@ import {
   assertEntryContentKind,
   assertSafeXmlContent,
   assertSafeXmlPart,
+  assertUtf8Text,
   createEntryContentSniff,
+  createFormulaScanBudget,
   feedEntryContentSniff,
   finishEntryContentSniff,
   isXmlPart,
+  NO_HYPERLINK_IDS,
   tooManyNamespaceDeclarations,
   type EntryContentKind,
+  type FormulaScanBudget,
 } from './content-scan';
-import { cutRootChildren, literalAttributeText } from './patch/calc-chain';
-import { readZipLayout, type ZipLayout } from './patch/raw-zip';
+import { cutRootChildren, literalAttributeText, type ChildSelector } from './patch/calc-chain';
+import { entryNameByteLength, readZipLayout, type ZipLayout } from './patch/raw-zip';
 import { ZIP_REJECT_REASONS } from './patch/reasons';
-import { foldAsciiCase, metaEntryName } from './patch/shared';
+import { foldAsciiCase, metaEntryName, viewMismatch } from './patch/shared';
 import { localNameIs, NAMESPACE_DECLARATION, type XmlMarkup } from './patch/xml-lexer';
 import { assertSameViews } from './patch/zip-views';
 import {
   assertNoUnsafePackageParts,
   assertNoUnsafePartNames,
+  assertRelationshipElementSpelling,
   assertSafeRelationshipType,
   assertSafeTarget,
+  contentScanPlan,
+  relationshipsRootCheck,
+  relationshipTargetMode,
   type RelationshipsSourceKind,
+  type RelationshipTargetMode,
 } from './unsafe-parts';
 import {
   assertWorkbookRelsWithinCap,
@@ -80,13 +89,18 @@ const FOLDED_OFFICE_DOCUMENT_RELATIONSHIP_TYPES: ReadonlySet<string> = new Set(
 const RELATIONSHIP = 'Relationship';
 const TYPE_ATTRIBUTE = 'Type';
 const TARGET_ATTRIBUTE = 'Target';
-const TARGET_MODE_ATTRIBUTE = 'TargetMode';
-// The only TargetMode a root relationship to the workbook may carry, when it has one.
-const INTERNAL_TARGET_MODE = 'Internal';
 // A root relationship Target is relative to the package root; one leading '/' is the same.
 const PACKAGE_ROOT_PREFIX = '/';
 // The root relationships part belongs to the package, never to a worksheet.
 const ROOT_RELS_SOURCE: RelationshipsSourceKind = 'other';
+// The entry name rule (assertCanonicalEntryNames): '/'-separated segments of these
+// characters only, none of them '.' or '..'.
+const ENTRY_NAME_SEGMENT = /^[A-Za-z0-9._~-]+$/;
+const ENTRY_NAME_SEPARATOR = '/';
+const CURRENT_FOLDER_SEGMENT = '.';
+const PARENT_FOLDER_SEGMENT = '..';
+// The declared size of the only entry whose name may end with ENTRY_NAME_SEPARATOR.
+const EMPTY_ENTRY_SIZE = 0;
 
 export interface GuardOpts {
   rowCap: number;
@@ -96,6 +110,8 @@ export interface GuardOpts {
   maxDecompressedBytes?: number;
   /** Callers may LOWER this below MAX_XML_DOM_WEIGHT (e.g. in tests); higher values are clamped. */
   maxDomWeight?: number;
+  /** Callers may LOWER this below MAX_FORMULA_SCAN_UNITS (e.g. in tests); higher values are clamped. */
+  maxFormulaScanUnits?: number;
 }
 
 /** The reader parts of an upload, by entry name, in the order the gate picked them. */
@@ -146,6 +162,49 @@ function corruptArchive(message: string, meta: Record<string, unknown> = {}): Sp
   return new SpreadsheetFileError('CORRUPT_FILE', message, meta);
 }
 
+/**
+ * Whether `name`, the name of an entry `empty` or not, is a canonical part name: exactly
+ * the content types part's name, or '/'-separated segments of ENTRY_NAME_SEGMENT
+ * characters, none of them empty (no leading '/', no '//'), '.' or '..'. A single
+ * trailing '/' (a folder entry) is accepted on an empty entry only.
+ */
+function isCanonicalEntryName(name: string, empty: boolean): boolean {
+  if (name === CONTENT_TYPES_PART) return true;
+  const isFolder = empty && name.endsWith(ENTRY_NAME_SEPARATOR);
+  const path = isFolder ? name.slice(0, -ENTRY_NAME_SEPARATOR.length) : name;
+  return path
+    .split(ENTRY_NAME_SEPARATOR)
+    .every(
+      (segment) =>
+        ENTRY_NAME_SEGMENT.test(segment) &&
+        segment !== CURRENT_FOLDER_SEGMENT &&
+        segment !== PARENT_FOLDER_SEGMENT,
+    );
+}
+
+/**
+ * The entry name rule, on the names of the zip layout only: nothing is inflated. Every
+ * entry name must be a canonical part name (isCanonicalEntryName) whose byte length
+ * equals its character count (the name the stream decodes drops a leading byte order
+ * mark another reader keeps). Otherwise CORRUPT_FILE `{ reason: 'entry-name',
+ * entry }`: the gate compares part names exactly, string to string, and a name a packaging
+ * reader resolves another way (a backslash, a leading '/', a percent escape, a letter
+ * outside ASCII that folds to an ASCII one, an ECMA-376 interleaved piece such as
+ * `name/[0].piece` it joins into one part) would reach a part the gate never read.
+ */
+function assertCanonicalEntryNames(file: Uint8Array, layout: ZipLayout): void {
+  for (const entry of layout.entries) {
+    const canonical =
+      isCanonicalEntryName(entry.name, entry.uncompressedSize === EMPTY_ENTRY_SIZE) &&
+      entryNameByteLength(file, entry) === entry.name.length;
+    if (canonical) continue;
+    throw corruptArchive('Zip entry name is not a canonical part name', {
+      reason: ZIP_REJECT_REASONS.ENTRY_NAME,
+      entry: metaEntryName(entry.name),
+    });
+  }
+}
+
 function concatChunks(chunks: readonly Uint8Array<ArrayBuffer>[]): Uint8Array<ArrayBuffer> {
   const first = chunks[0];
   if (chunks.length === 1 && first !== undefined) return first;
@@ -176,7 +235,11 @@ function concatChunks(chunks: readonly Uint8Array<ArrayBuffer>[]): Uint8Array<Ar
  *     MAX_WORKBOOK_RELS_BYTES: PAYLOAD_TOO_LARGE;
  *   - an entry that does not finish, or fflate's own error: CORRUPT_FILE.
  * The entries are those of the zip layout readZipLayout accepted, whose names are
- * unique, so the stream meets each name once.
+ * unique, so the stream meets each name once and meets `layoutEntries` entries. A
+ * backstop holds both, fail closed: a name the stream meets twice, or another number of
+ * entries than `layoutEntries`, is CORRUPT_FILE `zip-view-mismatch`.
+ * INTERNAL, exported for its tests only: readZipLayout refuses every archive known to
+ * break either before the stream runs.
  *
  * abortReason is set (not thrown) inside the callbacks: fflate catches a throw from
  * ondata and re-delivers it as the `err` argument, losing the original code. The
@@ -185,13 +248,18 @@ function concatChunks(chunks: readonly Uint8Array<ArrayBuffer>[]): Uint8Array<Ar
  * boundaries; a small chunk bounds the overshoot to ~STREAM_CHUNK_BYTES x the
  * maximum deflate ratio.
  */
-function streamArchive(bytes: Uint8Array, decompressedCap: number): StreamedArchive {
+export function streamArchive(
+  bytes: Uint8Array,
+  layoutEntries: number,
+  decompressedCap: number,
+): StreamedArchive {
   const chunksByName = new Map<string, Uint8Array<ArrayBuffer>[]>();
   const rootRelsChunks: Uint8Array<ArrayBuffer>[] = [];
   const names = new Set<string>();
   const sizes = new Map<string, number>();
   const kinds = new Map<string, EntryContentKind>();
   const unfinished = new Set<string>();
+  let streamedEntries = 0;
   let inflatedBytes = 0;
   let xmlBytes = 0;
   let rootRelsBytes = 0;
@@ -208,6 +276,11 @@ function streamArchive(bytes: Uint8Array, decompressedCap: number): StreamedArch
         entries: names.size + 1,
       });
       return; // f.start() is not called: no callbacks fire for this entry.
+    }
+    streamedEntries += 1;
+    if (names.has(name)) {
+      abortReason = viewMismatch(name, 'Zip stream meets an entry name twice');
+      return;
     }
     names.add(name);
     sizes.set(name, 0);
@@ -293,6 +366,13 @@ function streamArchive(bytes: Uint8Array, decompressedCap: number): StreamedArch
   }
   if (abortReason !== null) throw abortReason;
   if (unfinished.size > 0) throw corruptArchive('Zip entry ends before its data does');
+  if (streamedEntries !== layoutEntries) {
+    throw corruptArchive('Zip stream meets another number of entries than the directory lists', {
+      reason: ZIP_REJECT_REASONS.VIEW_MISMATCH,
+      streamed: streamedEntries,
+      listed: layoutEntries,
+    });
+  }
 
   const contents = new Map<string, Uint8Array<ArrayBuffer>>();
   for (const [name, chunks] of chunksByName) contents.set(name, concatChunks(chunks));
@@ -512,8 +592,9 @@ function chargeXmlPart(name: string, bytes: Uint8Array, weight: XmlDomWeight): v
  * `xl/_rels/workbook.xml.rels`, `xl/workbook.xml`, then every styles, shared strings
  * and worksheet part the rels name (readerPartPaths). Each part is budgeted
  * (chargeXmlPart) on its raw bytes when it is picked; every kept XML part, these
- * included, was content-scanned before (assertSafeXmlContent), so the rels are checked
- * before they are parsed to resolve the rest. A part counts once however many
+ * included, was content-scanned before (once: by the package walk or by
+ * assertSafeXmlContent), so the rels are checked before they are parsed to resolve the
+ * rest. A part counts once however many
  * relationships name it. A part the reader would look up and not find (missing, or not
  * a kept entry named .xml / .xml.rels: the other kept entries are scanned, never read)
  * is CORRUPT_FILE, the error the reader would fail with. No other entry is budgeted,
@@ -545,6 +626,13 @@ function selectReaderParts(
   return Object.fromEntries(selected);
 }
 
+/** Every XML part the gate kept and scans, by name: the kept XML entries, then `_rels/.rels`. */
+function keptXmlParts(streamed: StreamedArchive): (readonly [string, Uint8Array])[] {
+  const kept: (readonly [string, Uint8Array])[] = [...streamed.contents];
+  if (streamed.rootRels !== null) kept.push([ROOT_RELS_PART, streamed.rootRels]);
+  return kept;
+}
+
 /** CORRUPT_FILE `{ reason: 'root-rels', entry }`. */
 function rootRelsError(entry: string, message: string): SpreadsheetFileError {
   return corruptArchive(message, {
@@ -553,30 +641,40 @@ function rootRelsError(entry: string, message: string): SpreadsheetFileError {
   });
 }
 
-function isPackagePartError(error: unknown): error is SpreadsheetFileError {
-  return (
-    error instanceof SpreadsheetFileError && error.meta.reason === ZIP_REJECT_REASONS.PACKAGE_PART
-  );
+// The reasons the root relationships rule names `root-rels` instead: the part cannot be
+// read whole (the lexer walk's), or is not UTF-8 text (assertUtf8Text's).
+const ROOT_RELS_READ_REASONS: ReadonlySet<unknown> = new Set([
+  ZIP_REJECT_REASONS.PACKAGE_PART,
+  ZIP_REJECT_REASONS.PART_ENCODING,
+]);
+
+function isRootRelsReadError(error: unknown): error is SpreadsheetFileError {
+  return error instanceof SpreadsheetFileError && ROOT_RELS_READ_REASONS.has(error.meta.reason);
+}
+
+/** `read()` on the root relationships part, its read errors named `root-rels` (rootRelsError). */
+function readingRootRels<T>(read: () => T): T {
+  try {
+    return read();
+  } catch (error) {
+    if (!isRootRelsReadError(error)) throw error;
+    throw rootRelsError(ROOT_RELS_PART, error.message);
+  }
 }
 
 /**
- * Whether the root relationship scanned into `markup` is an officeDocument one that
- * names the workbook part: no TargetMode but `Internal`, and a Target that, with one
- * leading '/' removed, is exactly `xl/workbook.xml`. Its Type was checked by the caller.
+ * Whether the root relationship scanned into `markup`, of TargetMode `mode`
+ * (relationshipTargetMode), is an officeDocument one that names the workbook part: it is
+ * internal, and its Target, with one leading '/' removed, is exactly `xl/workbook.xml`.
+ * Its Type was checked by the caller.
  */
 function namesWorkbookPart(
   bytes: Uint8Array,
   markup: XmlMarkup,
   attributes: readonly number[],
+  mode: RelationshipTargetMode,
 ): boolean {
-  const mode = literalAttributeText(
-    bytes,
-    markup,
-    attributes,
-    TARGET_MODE_ATTRIBUTE,
-    ROOT_RELS_PART,
-  );
-  if (mode !== null && mode !== INTERNAL_TARGET_MODE) return false;
+  if (mode !== 'internal') return false;
   const target = literalAttributeText(bytes, markup, attributes, TARGET_ATTRIBUTE, ROOT_RELS_PART);
   if (target === null) return false;
   const path = target.startsWith(PACKAGE_ROOT_PREFIX)
@@ -591,22 +689,27 @@ function namesWorkbookPart(
  * relationship to an active part or to content outside the package (assertSafeTarget);
  * CORRUPT_FILE `root-rels` for an officeDocument relationship that names anything else
  * (an external one included), and for a Type that is an officeDocument type only once
- * trimmed and ASCII-folded (a loose reader would follow it).
+ * trimmed and ASCII-folded (a loose reader would follow it). The TargetMode is read once
+ * (relationshipTargetMode: any value but `Internal` or `External` is refused, named
+ * `root-rels` by the caller).
  */
 function isWorkbookRelationship(
   bytes: Uint8Array,
   markup: XmlMarkup,
   attributes: readonly number[],
 ): boolean {
+  assertRelationshipElementSpelling(bytes, markup, ROOT_RELS_PART);
   if (!localNameIs(bytes, markup, RELATIONSHIP)) return false;
   const type = literalAttributeText(bytes, markup, attributes, TYPE_ATTRIBUTE, ROOT_RELS_PART);
   if (type === null) {
-    assertSafeTarget(bytes, markup, attributes, type, ROOT_RELS_PART, ROOT_RELS_SOURCE);
+    const mode = relationshipTargetMode(bytes, markup, attributes, ROOT_RELS_PART);
+    assertSafeTarget(bytes, markup, attributes, type, mode, ROOT_RELS_PART, ROOT_RELS_SOURCE);
     return false;
   }
   assertSafeRelationshipType(type, ROOT_RELS_PART);
+  const mode = relationshipTargetMode(bytes, markup, attributes, ROOT_RELS_PART);
   if (OFFICE_DOCUMENT_RELATIONSHIP_TYPES.includes(type)) {
-    if (namesWorkbookPart(bytes, markup, attributes)) return true;
+    if (namesWorkbookPart(bytes, markup, attributes, mode)) return true;
     throw rootRelsError(
       ROOT_RELS_PART,
       'Root relationships part has an officeDocument relationship to another part',
@@ -618,17 +721,27 @@ function isWorkbookRelationship(
       'Root relationships part has an officeDocument Type in another ASCII case or with spaces',
     );
   }
-  assertSafeTarget(bytes, markup, attributes, type, ROOT_RELS_PART, ROOT_RELS_SOURCE);
+  assertSafeTarget(bytes, markup, attributes, type, mode, ROOT_RELS_PART, ROOT_RELS_SOURCE);
   return false;
 }
 
-/** The officeDocument relationships of the root relationships part, every one checked. */
+/**
+ * The officeDocument relationships of the root relationships part, every one checked;
+ * its root and every child named a relationships element only in another ASCII case
+ * refused (assertRelationshipElementSpelling).
+ */
 function workbookRelationshipCount(bytes: Uint8Array): number {
   let count = 0;
-  cutRootChildren(bytes, ROOT_RELS_PART, (markup, attributes) => {
+  const countWorkbookRelationship: ChildSelector = (markup, attributes) => {
     if (isWorkbookRelationship(bytes, markup, attributes)) count += 1;
     return false;
-  });
+  };
+  cutRootChildren(
+    bytes,
+    ROOT_RELS_PART,
+    countWorkbookRelationship,
+    relationshipsRootCheck(bytes, ROOT_RELS_PART),
+  );
   return count;
 }
 
@@ -637,31 +750,34 @@ function workbookRelationshipCount(bytes: Uint8Array): number {
  * part names, when there is one, is `xl/workbook.xml` (the part the reader opens), so
  * no opener starts from another workbook. An archive without the part is accepted: no
  * package a marketplace can open lacks it, so there is no second workbook to disagree
- * with. Otherwise, after the content scan (UNSAFE_CONTENT), the part is walked with the
+ * with. Otherwise the part must be UTF-8 text by the rule every kept XML part follows
+ * (assertUtf8Text: valid UTF-8, no U+0000, no declaration of another encoding); then,
+ * after the content scan (UNSAFE_CONTENT; its formula fields charged to `budget`, the
+ * upload's), it is walked with the
  * strict lexer the calcChain cut uses, and it must hold at least one officeDocument
  * relationship, every one of them to the workbook part (isWorkbookRelationship); any
  * other relationship to an active part or to external content is UNSAFE_CONTENT
- * `unsafe-part`. Anything else, a part the walk cannot read whole (not UTF-8, another
- * declared encoding, no root element, an element below a relationship), markup outside
- * the lexer's subset or a value it cannot compare included: CORRUPT_FILE `root-rels`.
+ * `unsafe-part`. Anything else, a part that is not UTF-8 text or that the walk cannot
+ * read whole (no root element, an element below a relationship, a relationships element
+ * named in another ASCII case), markup outside the lexer's subset or a value it cannot
+ * compare included: CORRUPT_FILE `root-rels`.
  * So is an entry whose name is `_rels/.rels` only once ASCII-folded (OPC folds part
  * names): the gate must not ignore a part another reader may follow.
  */
-function assertRootRelationships(names: ReadonlySet<string>, rootRels: Uint8Array | null): void {
+function assertRootRelationships(
+  names: ReadonlySet<string>,
+  rootRels: Uint8Array | null,
+  budget: FormulaScanBudget,
+): void {
   for (const name of names) {
     if (name === ROOT_RELS_PART || foldAsciiCase(name) !== ROOT_RELS_PART) continue;
     throw rootRelsError(name, 'Root relationships part is named in another ASCII case');
   }
   if (rootRels === null) return;
-  assertSafeXmlPart(ROOT_RELS_PART, rootRels);
-  let count: number;
-  try {
-    count = workbookRelationshipCount(rootRels);
-  } catch (error) {
-    // The walk's own errors name the package part; here they are the root rels rule's.
-    if (!isPackagePartError(error)) throw error;
-    throw rootRelsError(ROOT_RELS_PART, error.message);
-  }
+  // The UTF-8 text rule of every kept XML part, then the content scan, then the walk.
+  readingRootRels(() => assertUtf8Text(ROOT_RELS_PART, rootRels));
+  assertSafeXmlPart(ROOT_RELS_PART, rootRels, NO_HYPERLINK_IDS, budget);
+  const count = readingRootRels(() => workbookRelationshipCount(rootRels));
   if (count === 0) {
     throw rootRelsError(ROOT_RELS_PART, 'Root relationships part names no office document');
   }
@@ -693,54 +809,69 @@ export function openUpload(file: Uint8Array, opts: GuardOpts): UploadParts {
  *      zip reason otherwise), so the stream below and the directory the export reads
  *      visit the same entries at the same offsets. Bounds-checked reads only; nothing
  *      is inflated, so it runs before the stream.
- *   4. assertNoUnsafePartNames on the layout's names (UNSAFE_CONTENT `unsafe-part`):
+ *   4. assertCanonicalEntryNames on the layout's names (CORRUPT_FILE `entry-name`):
+ *      every name is `[Content_Types].xml` or '/'-separated segments of
+ *      [A-Za-z0-9._~-], none empty, '.' or '..', and its byte length equals its
+ *      character count; a trailing '/' only on an empty entry. Nothing is inflated.
+ *   5. assertNoUnsafePartNames on the layout's names (UNSAFE_CONTENT `unsafe-part`):
  *      a macro project, an external link or an embedded object by its usual name.
  *      Nothing is inflated.
- *   5. streamArchive: the ONLY source of entry content. Inflates every entry from
+ *   6. streamArchive: the ONLY source of entry content. Inflates every entry from
  *      the local headers, reads the first bytes of each to tell its content kind, and
  *      keeps only the content of the entries whose content is XML, whatever their name,
  *      and of `_rels/.rels` apart (any other entry is counted and dropped), with
  *      real-byte ceilings: entry count, all inflated bytes clamped to
  *      MAX_DECOMPRESSED_BYTES, the kept bytes to MAX_XML_TOTAL_BYTES, the root
- *      relationships part to MAX_WORKBOOK_RELS_BYTES.
- *   6. Structural check: entry list must contain [Content_Types].xml + xl/workbook.xml.
+ *      relationships part to MAX_WORKBOOK_RELS_BYTES. A name the stream meets twice, or
+ *      another number of entries than the layout lists, is CORRUPT_FILE
+ *      `zip-view-mismatch` (a backstop: readZipLayout refuses both first).
+ *   7. Structural check: entry list must contain [Content_Types].xml + xl/workbook.xml.
  *      Magic bytes alone only prove "is a zip"; a .docx or .jar also starts with PK.
- *   7. Central directory sizes: every entry of the layout (read from the directory,
+ *   8. Central directory sizes: every entry of the layout (read from the directory,
  *      which readZipLayout proved names the same entries as the local headers) declares
  *      the size the stream inflated. Nothing is ever unzipped from the directory, so
  *      overlapping or repeated records cannot make the gate inflate one stream many
  *      times. An unzip of the stored upload that allocates the declared sizes stays
  *      within the cap.
- *   8. assertEntryContentKind on every entry's content kind: no XML the scans cannot
+ *   9. assertEntryContentKind on every entry's content kind: no XML the scans cannot
  *      read (UTF-16, UTF-32 or EBCDIC), and no entry named .xml, .rels or .vml that does not hold
  *      XML (CORRUPT_FILE `part-encoding`).
- *   9. assertNoUnsafePackageParts on the streamed content: the content types and every
- *      kept relationships part (by its name or by its root element) declare no active
- *      part, no digital signature and no relationship that reaches outside the package
- *      (UNSAFE_CONTENT `unsafe-part`), each walked part is read
- *      whole (CORRUPT_FILE `package-part` otherwise), and no entry is spelled in another
- *      ASCII case than a part this rule walks. It returns the ids each worksheet's own
- *      relationships part gives an external hyperlink (only, or among others).
- *  10. assertSafeXmlContent on EVERY kept XML entry, whatever its name and whatever the
+ *  10. assertNoUnsafePackageParts on the streamed content: the content types and every
+ *      kept relationships part (by its name or by its root element; contentScanPlan
+ *      names them) declare no active part, no digital signature and no relationship that
+ *      reaches outside the package (UNSAFE_CONTENT `unsafe-part`), each walked part is
+ *      content-scanned (the content scan of step 11, run here so each part is scanned
+ *      once) and read whole (CORRUPT_FILE `package-part` otherwise, a relationships
+ *      element named in another ASCII case and a TargetMode other than `Internal` or
+ *      `External` included), and no entry is spelled in another ASCII case than a part
+ *      this rule walks. It returns the ids each worksheet's own relationships part gives
+ *      an external hyperlink (only, or among others).
+ *  11. assertSafeXmlContent on EVERY kept XML entry, whatever its name and whatever the
  *      relationships say about it (a worksheet no relationship of the exact type names,
  *      a VML drawing, or the entry behind a Target alias, is still handed on by the
- *      export): UTF-8 text only (CORRUPT_FILE `part-encoding`), then the content scan (a
+ *      export): UTF-8 text only (CORRUPT_FILE `part-encoding`), then, for every entry
+ *      step 10 did not content-scan (the same plan decides), the content scan (a
  *      DOCTYPE, an ENTITY declaration, an unknown entity reference, a formula field
  *      outside the allow list, a macro assignment, an active element or a URL outside
  *      the package: UNSAFE_CONTENT), a hyperlink `location` taken for a URL fragment
  *      only when the hyperlink's relationship id is one of the external hyperlink ids
- *      of step 9, and no other element naming one of them. Linear in bytes the stream
- *      already capped; no DOM is built.
- *  11. selectReaderParts: the parts the reader opens (the workbook rels, the
+ *      of step 10, and no other element naming one of them. Linear in bytes the stream
+ *      already capped; no DOM is built. The formula fields the content scans of steps
+ *      10, 11 and 14 read, raw and in NFKC form, are charged to one budget per upload,
+ *      MAX_FORMULA_SCAN_UNITS or the caller's lower `maxFormulaScanUnits`
+ *      (PAYLOAD_TOO_LARGE `formula-scan-budget` beyond it).
+ *  12. selectReaderParts: the parts the reader opens (the workbook rels, the
  *      workbook, and the styles, shared strings and worksheet parts the rels name),
  *      each checked on its raw bytes before any DOM is built: the DOM weight of all
  *      of them together, element-name length and namespace declarations per part. A
  *      part the rels name that is not in the archive is CORRUPT_FILE. Every other entry
  *      is left out; the parts come back in the order they were picked.
- *  12. assertSameViews: every reader part equals the directory's entry of that name
- *      (CORRUPT_FILE `zip-view-mismatch`), each inflate bounded by the declared size.
- *  13. assertRootRelationships: the root relationships part names xl/workbook.xml
- *      (CORRUPT_FILE `root-rels`).
+ *  13. assertSameViews: every kept XML part (the reader parts among them) and the root
+ *      relationships part equals the directory's entry of that name, inflated by zlib
+ *      instead of fflate (CORRUPT_FILE `zip-view-mismatch`), each inflate bounded by the
+ *      declared size: the scans judged bytes a second inflater reads the same way.
+ *  14. assertRootRelationships: the root relationships part is UTF-8 text, passes the
+ *      content scan (its one scan) and names xl/workbook.xml (CORRUPT_FILE `root-rels`).
  *
  * Throws SpreadsheetFileError on any violation. INTERNAL: not part of the public
  * package surface.
@@ -767,18 +898,21 @@ export function openUploadWithLayout(file: Uint8Array, opts: GuardOpts): OpenedU
   // 3. The zip layout the export reads; nothing is inflated.
   const layout = readZipLayout(file);
 
-  // 4. Active parts by their usual names, before anything is inflated.
+  // 4. Canonical entry names, before anything is inflated.
+  assertCanonicalEntryNames(file, layout);
+
+  // 5. Active parts by their usual names, before anything is inflated.
   assertNoUnsafePartNames(layout.entries.map((entry) => entry.name));
 
-  // 5. Streaming inflate: the entry content. effectiveDecompCap clamps the caller's
+  // 6. Streaming inflate: the entry content. effectiveDecompCap clamps the caller's
   //    override downward only.
   const effectiveDecompCap = Math.min(
     opts.maxDecompressedBytes ?? MAX_DECOMPRESSED_BYTES,
     MAX_DECOMPRESSED_BYTES,
   );
-  const streamed = streamArchive(file, effectiveDecompCap);
+  const streamed = streamArchive(file, layout.entries.length, effectiveDecompCap);
 
-  // 6. Structural check: presence of required xlsx part names.
+  // 7. Structural check: presence of required xlsx part names.
   if (!streamed.names.has(CONTENT_TYPES_PART) || !streamed.names.has(WORKBOOK_PART)) {
     throw new SpreadsheetFileError(
       'NOT_XLSX',
@@ -787,25 +921,35 @@ export function openUploadWithLayout(file: Uint8Array, opts: GuardOpts): OpenedU
     );
   }
 
-  // 7. Every size the central directory declares is the size the stream inflated.
+  // 8. Every size the central directory declares is the size the stream inflated.
   assertCentralDirectoryMatches(layout, streamed);
 
-  // 8. Every entry holds XML the scans read, or no XML and a name that promises none.
+  // 9. Every entry holds XML the scans read, or no XML and a name that promises none.
   for (const [name, kind] of streamed.kinds) assertEntryContentKind(name, kind);
 
-  // 9. Active parts by their declared content and relationship types.
-  const externalHyperlinks = assertNoUnsafePackageParts(streamed.names, streamed.contents);
+  // 10. Active parts by their declared content and relationship types; the parts it
+  //     walks are content-scanned there, the others in step 11, each once.
+  const formulaBudget = createFormulaScanBudget(opts.maxFormulaScanUnits);
+  const scanPlan = contentScanPlan(streamed.contents);
+  const externalHyperlinks = assertNoUnsafePackageParts(
+    streamed.names,
+    streamed.contents,
+    scanPlan,
+    formulaBudget,
+  );
 
-  // 10. Every kept XML part, the reader's or not: UTF-8 text, then the content scan.
-  assertSafeXmlContent(streamed.contents, externalHyperlinks);
+  // 11. Every kept XML part, the reader's or not: UTF-8 text, then the content scan of
+  //     every part step 10 did not scan.
+  assertSafeXmlContent(streamed.contents, externalHyperlinks, formulaBudget, scanPlan);
 
-  // 11. The parts the reader opens, budgeted on raw bytes.
+  // 12. The parts the reader opens, budgeted on raw bytes.
   const parts = selectReaderParts(streamed.contents, opts);
 
-  // 12. Each reader part is the directory's entry of that name.
-  assertSameViews(file, layout, parts);
+  // 13. Each kept XML part, the reader's and the root relationships included, is the
+  //     directory's entry of that name.
+  assertSameViews(file, layout, keptXmlParts(streamed));
 
-  // 13. The root relationships name the workbook the reader opens.
-  assertRootRelationships(streamed.names, streamed.rootRels);
+  // 14. The root relationships name the workbook the reader opens.
+  assertRootRelationships(streamed.names, streamed.rootRels, formulaBudget);
   return { parts, layout };
 }

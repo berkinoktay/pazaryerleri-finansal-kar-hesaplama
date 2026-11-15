@@ -3,6 +3,8 @@ import { zipSync, unzipSync, strToU8, type Unzipped } from 'fflate';
 import { SpreadsheetFileError, type SpreadsheetFileErrorCode } from './errors';
 import {
   MAX_DECOMPRESSED_BYTES,
+  MAX_FORMULA_SCAN_UNITS,
+  MAX_FORMULA_TEXT_LENGTH,
   MAX_WORKBOOK_RELS_BYTES,
   MAX_XMLNS_DECLARATIONS_PER_PART,
   MAX_XML_DOM_WEIGHT,
@@ -13,20 +15,29 @@ import {
   XML_ELEMENT_WEIGHT,
   XML_TEXT_NODE_WEIGHT,
 } from './constants';
-import { openUpload, type GuardOpts } from './guards';
+import { openUpload, streamArchive, type GuardOpts } from './guards';
 import { readWorkbookGrid } from './parse';
 import { readZipLayout } from './patch/raw-zip';
-import { UNSAFE_CONTENT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
+import { UNSAFE_CONTENT_REASONS, UPLOAD_LIMIT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
 import { checkUploadParts } from './read-grid';
 import { columnLetters } from './sheet-meta';
 import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
 import {
+  contentTypesXml,
   PACKAGE_PART_CASES,
   SAFE_PART_CASES,
   UNSAFE_PART_CASES,
   utf7Markup,
+  type PackagePartCase,
 } from '../tests/helpers/package-parts';
-import { entriesText, grownFixtureText, numberRows } from '../tests/helpers/workbooks';
+import { fileErrorOf } from '../tests/helpers/errors';
+import { expectWithinBudget, FORMULA_SCAN_BUDGET_MS } from '../tests/helpers/timing';
+import {
+  entriesText,
+  grownFixtureText,
+  numberRows,
+  rawDeflateArchive,
+} from '../tests/helpers/workbooks';
 
 const opts = { rowCap: 5000, colCap: 64, maxBytes: 10 * 1024 * 1024 };
 
@@ -106,6 +117,8 @@ const DEFLATED_METHOD = 8;
 interface StoredEntry {
   readonly name: string;
   readonly text: string;
+  /** General purpose flags of its local header and directory record; none by default. */
+  readonly flags?: number;
 }
 
 /** One central-directory record pointing at local entry `local`; `name`/`originalSize` override. */
@@ -142,7 +155,7 @@ function storedZip(entries: readonly StoredEntry[], central?: readonly CentralRe
     const header = Buffer.concat([
       u32(LOCAL_FILE_SIGNATURE),
       u16(ZIP_VERSION),
-      u16(0),
+      u16(entry.flags ?? 0),
       u16(STORED_METHOD),
       u16(0),
       u16(0),
@@ -170,7 +183,7 @@ function storedZip(entries: readonly StoredEntry[], central?: readonly CentralRe
       u32(CENTRAL_DIRECTORY_SIGNATURE),
       u16(ZIP_VERSION),
       u16(ZIP_VERSION),
-      u16(0),
+      u16(entry.flags ?? 0),
       u16(STORED_METHOD),
       u16(0),
       u16(0),
@@ -1258,6 +1271,18 @@ describe('upload gate: root relationships', () => {
     expectGateReason(file, 'CORRUPT_FILE', ZIP_REJECT_REASONS.ROOT_RELS);
   });
 
+  // The UTF-8 text rule of every kept XML part: U+0000 is valid UTF-8, and the lexer
+  // walk reads a comment without looking inside it.
+  it('refuses root relationships holding U+0000 inside a comment as CORRUPT_FILE', () => {
+    const rootRels = relsXml([OFFICE_DOCUMENT_RELATIONSHIP]).replace(
+      '</Relationships>',
+      '<!--a\u0000b--></Relationships>',
+    );
+    const err = catchGuard(withRootRels(rootRels), opts);
+    expect(err?.code).toBe('CORRUPT_FILE');
+    expect(err?.meta).toEqual({ reason: ZIP_REJECT_REASONS.ROOT_RELS, entry: ROOT_RELS_PART });
+  });
+
   it('refuses an external relationship beside the office document as UNSAFE_CONTENT', () => {
     const rootRels = relsXml([OFFICE_DOCUMENT_RELATIONSHIP]).replace(
       '</Relationships>',
@@ -1287,6 +1312,15 @@ describe('upload gate: root relationships', () => {
     expect(catchGuard(withRootRels(rootRels), opts)?.code).toBe('PAYLOAD_TOO_LARGE');
   });
 });
+
+function isNonCanonicallyNamed(testCase: PackagePartCase): boolean {
+  return testCase.nonCanonicalName === true;
+}
+
+/** The cases whose entry names the gate's entry name rule accepts. */
+function canonicallyNamed(cases: readonly PackagePartCase[]): readonly PackagePartCase[] {
+  return cases.filter((testCase) => !isNonCanonicallyNamed(testCase));
+}
 
 // The byte-preserving export would hand a macro, an embedded object or an external
 // link one member uploaded to every other member unchanged.
@@ -1323,21 +1357,36 @@ describe('upload gate: unsafe parts by name', () => {
 // Excel finds a macro, an external link or an embedded object through the content
 // types and the relationships, never through the part's name.
 describe('upload gate: unsafe parts by declared type', () => {
-  it.each(UNSAFE_PART_CASES)('refuses $label as UNSAFE_CONTENT', ({ entries }) => {
-    expectGateReason(
-      buildXlsxFixture([BASIC_SHEET], entries),
-      'UNSAFE_CONTENT',
-      UNSAFE_CONTENT_REASONS.UNSAFE_PART,
-    );
-  });
+  it.each(canonicallyNamed(UNSAFE_PART_CASES))(
+    'refuses $label as UNSAFE_CONTENT',
+    ({ entries }) => {
+      expectGateReason(
+        buildXlsxFixture([BASIC_SHEET], entries),
+        'UNSAFE_CONTENT',
+        UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      );
+    },
+  );
 
-  it.each(PACKAGE_PART_CASES)('refuses $label as CORRUPT_FILE', ({ entries }) => {
+  it.each(canonicallyNamed(PACKAGE_PART_CASES))('refuses $label as CORRUPT_FILE', ({ entries }) => {
     expectGateReason(
       buildXlsxFixture([BASIC_SHEET], entries),
       'CORRUPT_FILE',
       ZIP_REJECT_REASONS.PACKAGE_PART,
     );
   });
+
+  // The entry name rule runs before anything is inflated, so these never reach the rule.
+  it.each([...UNSAFE_PART_CASES, ...PACKAGE_PART_CASES].filter(isNonCanonicallyNamed))(
+    'refuses $label by its entry name as CORRUPT_FILE',
+    ({ entries }) => {
+      expectGateReason(
+        buildXlsxFixture([BASIC_SHEET], entries),
+        'CORRUPT_FILE',
+        ZIP_REJECT_REASONS.ENTRY_NAME,
+      );
+    },
+  );
 
   it.each(SAFE_PART_CASES)('accepts $label', ({ entries }) => {
     expect(catchGuard(buildXlsxFixture([BASIC_SHEET], entries), opts)).toBeNull();
@@ -1792,5 +1841,465 @@ describe('upload gate: formula fields and active elements of every part', () => 
       { 'xl/drawings/drawing1.xml': drawingWith('<xdr:sp macro="" textlink=""/>') },
     );
     expect(catchGuard(file, opts)).toBeNull();
+  });
+});
+
+// ECMA-376 Part 2 interleaving: a packaging reader that joins `name/[0].piece` ...
+// `name/[n].last.piece` (in any ASCII case) into one part `name` reads a part the gate
+// never saw whole.
+const FIRST_PIECE = '/[0].piece';
+const LAST_PIECE = '/[1].last.piece';
+const SECOND_SHEET_PART = 'xl/worksheets/sheet2.xml';
+const OLE_OBJECT_REL = `${OFFICE_REL}/oleObject`;
+// The general purpose flag that marks a UTF-8 entry name (bit 11).
+const UTF8_NAME_FLAG = 0x0800;
+// LATIN SMALL LETTER LONG S: a reader that folds names in Unicode reads it as 's'.
+const LONG_S = String.fromCodePoint(0x17f);
+
+/** `text` split after its first '<' into the two pieces of part `name`. */
+function pieces(name: string, text: string): Record<string, string> {
+  const at = text.indexOf('<') + 1;
+  return {
+    [`${name}${FIRST_PIECE}`]: text.slice(0, at),
+    [`${name}${LAST_PIECE}`]: text.slice(at),
+  };
+}
+
+const PIECED_SHEET_RELS = relsXml([[OLE_OBJECT_REL, '../embeddings/oleObject1.bin']]);
+const STRICT_SECOND_SHEET_RELS = relsXml([
+  SHEET_RELATIONSHIP,
+  [STRICT_WORKSHEET_REL, 'worksheets/sheet2.xml'],
+]);
+const TWO_SHEET_WORKBOOK = `${WORKBOOK_WITH_ONE_SHEET_START.replace(
+  '</sheets>',
+  '<sheet name="Sheet2" sheetId="2" r:id="rId2"/></sheets>',
+)}</workbook>`;
+const OTHER_WORKBOOK = `${WORKBOOK_WITH_ONE_SHEET_START}<definedNames><definedName name="x">${EVIL_CALL}</definedName></definedNames></workbook>`;
+
+/** The one-sheet workbook with its root relationships naming xl/other.xml, both in pieces. */
+function piecedRootRelsBook(): Buffer {
+  const pieced = {
+    ...pieces(ROOT_RELS_PART, relsXml([[OFFICE_DOCUMENT_REL, OTHER_PART]])),
+    ...pieces(OTHER_PART, OTHER_WORKBOOK),
+    'xl/_rels/other.xml.rels': relsXml([SHEET_RELATIONSHIP]),
+  };
+  return rezipped(buildXlsxFixture([BASIC_SHEET]), (entries) => ({
+    ...Object.fromEntries(Object.entries(entries).filter(([name]) => name !== ROOT_RELS_PART)),
+    ...Object.fromEntries(Object.entries(pieced).map(([name, text]) => [name, strToU8(text)])),
+  }));
+}
+
+describe('upload gate: entry names', () => {
+  it('refuses the pieces of a worksheet rels part whose whole is UNSAFE_CONTENT', () => {
+    const sheet = sheetWithAfter('<picture r:id="rId1"/>');
+    expectGateReason(
+      bookWith(sheet, { [SHEET_RELS_PART]: PIECED_SHEET_RELS }),
+      'UNSAFE_CONTENT',
+      UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+    );
+    expectGateEntry(
+      bookWith(sheet, pieces(SHEET_RELS_PART, PIECED_SHEET_RELS)),
+      'CORRUPT_FILE',
+      ZIP_REJECT_REASONS.ENTRY_NAME,
+      `${SHEET_RELS_PART}${FIRST_PIECE}`,
+    );
+  });
+
+  it('refuses the pieces of a WEBSERVICE worksheet named by the Strict type', () => {
+    const parts = {
+      [WORKBOOK_RELS_PART]: STRICT_SECOND_SHEET_RELS,
+      [WORKBOOK_PART]: TWO_SHEET_WORKBOOK,
+    };
+    expectGateReason(
+      bookWith(sheetWithAfter(''), { ...parts, [SECOND_SHEET_PART]: EVIL_SHEET_XML }),
+      'UNSAFE_CONTENT',
+      UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+    );
+    expectGateEntry(
+      bookWith(sheetWithAfter(''), { ...parts, ...pieces(SECOND_SHEET_PART, EVIL_SHEET_XML) }),
+      'CORRUPT_FILE',
+      ZIP_REJECT_REASONS.ENTRY_NAME,
+      `${SECOND_SHEET_PART}${FIRST_PIECE}`,
+    );
+  });
+
+  it('refuses root relationships in pieces that name another workbook in pieces', () => {
+    expectGateEntry(
+      piecedRootRelsBook(),
+      'CORRUPT_FILE',
+      ZIP_REJECT_REASONS.ENTRY_NAME,
+      `${ROOT_RELS_PART}${FIRST_PIECE}`,
+    );
+  });
+
+  it.each<[string, string]>([
+    ['an upper-case piece', `${SHEET_RELS_PART}/[0].PIECE`],
+    ['a backslash', 'xl\\vbaProject.bin'],
+    ['a backslash in the root relationships name', '_rels\\.rels'],
+    ['a leading slash', `/${ROOT_RELS_PART}`],
+    ['an empty segment', 'xl//worksheets/sheet2.xml'],
+    ['a parent segment', 'xl/worksheets/../x.xml'],
+    ['a current segment', 'xl/./x.xml'],
+    ['a percent escape', '_rels/%2Erels'],
+    ['a long s that folds to s', `${SHEET_RELS_PART.slice(0, -1)}${LONG_S}`],
+    ['a space', 'xl/media/image 1.png'],
+  ])('refuses an entry name with %s as CORRUPT_FILE entry-name', (_label, name) => {
+    expectGateEntry(
+      buildXlsxFixture([BASIC_SHEET], { [name]: '<x/>' }),
+      'CORRUPT_FILE',
+      ZIP_REJECT_REASONS.ENTRY_NAME,
+      name,
+    );
+  });
+
+  it('accepts a name made of every character the rule allows', () => {
+    const file = buildXlsxFixture([BASIC_SHEET], { 'xl/media/Image-1_a~b.c.png': 'png' });
+    expect(catchGuard(file, opts)).toBeNull();
+  });
+
+  it('accepts an empty folder entry and refuses one that carries bytes', () => {
+    expect(catchGuard(buildXlsxFixture([BASIC_SHEET], { 'xl/media/': '' }), opts)).toBeNull();
+    // Stored (method 0), the way most zip tools write a folder.
+    const storedFolder = storedZip([...MINIMAL_PARTS, { name: 'xl/media/', text: '' }]);
+    expect(catchGuard(storedFolder, opts)).toBeNull();
+    expectGateEntry(
+      buildXlsxFixture([BASIC_SHEET], { 'xl/media/': 'x' }),
+      'CORRUPT_FILE',
+      ZIP_REJECT_REASONS.ENTRY_NAME,
+      'xl/media/',
+    );
+  });
+
+  it('refuses a UTF-8 name whose leading byte order mark the stream drops', () => {
+    const file = storedZip([
+      ...MINIMAL_PARTS,
+      { name: `${BYTE_ORDER_MARK}xl/x.xml`, text: '<x/>', flags: UTF8_NAME_FLAG },
+    ]);
+    // The name the layout and the stream decode is canonical; its bytes are not.
+    expect(readZipLayout(file).entries.map((entry) => entry.name)).toContain('xl/x.xml');
+    expectGateEntry(file, 'CORRUPT_FILE', ZIP_REJECT_REASONS.ENTRY_NAME, 'xl/x.xml');
+  });
+
+  it('refuses a bad name before inflating anything', () => {
+    const file = buildXlsxFixture([BASIC_SHEET], { 'xl\\x.bin': '0'.repeat(BOMB_BYTES) });
+    const err = catchGuard(file, { ...opts, maxDecompressedBytes: BOMB_CAP });
+    expect(err?.code).toBe('CORRUPT_FILE');
+    expect(err?.meta).toMatchObject({ reason: ZIP_REJECT_REASONS.ENTRY_NAME });
+  });
+});
+
+// readZipLayout refuses every archive that would break the backstop before the stream
+// runs (the central directory tests above), so it is tested on the stream alone.
+describe('upload gate: the stream meets the entries the directory lists', () => {
+  const valid = storedZip(MINIMAL_PARTS);
+  const listed = readZipLayout(valid).entries.length;
+
+  it('passes a stream that meets every listed entry once', () => {
+    expect(() => streamArchive(valid, listed, MAX_DECOMPRESSED_BYTES)).not.toThrow();
+  });
+
+  it('refuses a name the stream meets twice as CORRUPT_FILE zip-view-mismatch', () => {
+    const twice = storedZip([...MINIMAL_PARTS, { name: 'xl/extra.xml', text: 'again' }]);
+    expectGateReason(twice, 'CORRUPT_FILE', ZIP_REJECT_REASONS.LAYOUT);
+    const error = fileErrorOf(() =>
+      streamArchive(twice, MINIMAL_PARTS.length + 1, MAX_DECOMPRESSED_BYTES),
+    );
+    expect(error.code).toBe('CORRUPT_FILE');
+    expect(error.meta).toEqual({
+      reason: ZIP_REJECT_REASONS.VIEW_MISMATCH,
+      entry: 'xl/extra.xml',
+    });
+  });
+
+  it.each([
+    ['fewer', 1],
+    ['more', -1],
+  ])('refuses a stream that meets %s entries than listed as CORRUPT_FILE', (_label, offset) => {
+    const error = fileErrorOf(() => streamArchive(valid, listed + offset, MAX_DECOMPRESSED_BYTES));
+    expect(error.code).toBe('CORRUPT_FILE');
+    expect(error.meta).toEqual({
+      reason: ZIP_REJECT_REASONS.VIEW_MISMATCH,
+      streamed: listed,
+      listed: listed + offset,
+    });
+  });
+});
+
+// A stored deflate block (BTYPE 00) declares its length twice: LEN, then NLEN, its one's
+// complement. fflate's stream inflates the block whatever NLEN holds; zlib refuses one
+// whose NLEN is wrong, as other inflaters may.
+const FINAL_STORED_BLOCK = 0x01;
+const SIXTEEN_BITS = 0xffff;
+const WRONG_NLEN = 0;
+const OTHER_XML_PART = 'xl/x/a.xml';
+const OTHER_XML = '<a/>';
+
+/** One final stored deflate block holding `content`; NLEN is `nlen`, its right value by default. */
+function storedDeflateBlock(content: Uint8Array, nlen = ~content.length & SIXTEEN_BITS): Buffer {
+  return Buffer.concat([
+    Buffer.from([FINAL_STORED_BLOCK]),
+    u16(content.length),
+    u16(nlen),
+    content,
+  ]);
+}
+
+/** The content of entry `name` of `file`. */
+function entryBytes(file: Buffer, name: string): Uint8Array {
+  const bytes = unzipSync(new Uint8Array(file))[name];
+  if (bytes === undefined) throw new Error(`entry missing: ${name}`);
+  return bytes;
+}
+
+describe('upload gate: every kept XML part is the directory entry zlib inflates', () => {
+  const book = buildXlsxFixture([BASIC_SHEET], { [OTHER_XML_PART]: OTHER_XML });
+
+  it('accepts a part the reader never opens written as a valid stored block', () => {
+    const data = storedDeflateBlock(strToU8(OTHER_XML));
+    expect(catchGuard(rawDeflateArchive(book, OTHER_XML_PART, data), opts)).toBeNull();
+  });
+
+  it.each([
+    ['a part the reader never opens', OTHER_XML_PART],
+    ['the root relationships part', ROOT_RELS_PART],
+    ['a reader part', SHEET_PART],
+  ])('refuses %s whose stored block has a wrong NLEN as CORRUPT_FILE', (_label, name) => {
+    const data = storedDeflateBlock(entryBytes(book, name), WRONG_NLEN);
+    expectGateEntry(
+      rawDeflateArchive(book, name, data),
+      'CORRUPT_FILE',
+      ZIP_REJECT_REASONS.VIEW_MISMATCH,
+      name,
+    );
+  });
+});
+
+const EXTERNAL_IMAGE_RELATIONSHIP = `Id="rId1" Type="${OFFICE_REL}/image" Target="https://evil.example/x.png" TargetMode="External"/>`;
+
+/** A relationships part whose root is `root` and whose one child is `child`, both as written. */
+function relsWithNames(root: string, child: string): string {
+  return `${XML_DECLARATION}<${root} xmlns="${RELATIONSHIPS_NS}"><${child} ${EXTERNAL_IMAGE_RELATIONSHIP}</${root}>`;
+}
+
+// The walk reads Relationship and Relationships by their exact local names; a reader that
+// ignores the case of element names would follow one the walk skipped.
+describe('upload gate: relationships elements in another ASCII case', () => {
+  it.each<[string, string, string, string]>([
+    ['a lower-case Relationship', SHEET_RELS_PART, 'Relationships', 'relationship'],
+    ['an upper-case root', SHEET_RELS_PART, 'RELATIONSHIPS', 'Relationship'],
+    ['a prefixed upper-case Relationship', SHEET_RELS_PART, 'Relationships', 'r:RELATIONSHIP'],
+    [
+      'a lower-case root of a part not named .rels',
+      OTHER_XML_PART,
+      'relationships',
+      'Relationship',
+    ],
+  ])('refuses %s as CORRUPT_FILE package-part', (_label, entry, root, child) => {
+    const rels = relsWithNames(root, child).replace(
+      `xmlns="${RELATIONSHIPS_NS}"`,
+      `xmlns="${RELATIONSHIPS_NS}" xmlns:r="${RELATIONSHIPS_NS}"`,
+    );
+    expectGateEntry(
+      buildXlsxFixture([BASIC_SHEET], { [entry]: rels }),
+      'CORRUPT_FILE',
+      ZIP_REJECT_REASONS.PACKAGE_PART,
+      entry,
+    );
+  });
+
+  it.each<[string, string]>([
+    [
+      'a lower-case Relationship',
+      relsXml([OFFICE_DOCUMENT_RELATIONSHIP]).replace(
+        '</Relationships>',
+        `<relationship Id="rId2" Type="${OFFICE_DOCUMENT_REL}" Target="${OTHER_PART}"/></Relationships>`,
+      ),
+    ],
+    [
+      'an upper-case root',
+      relsXml([OFFICE_DOCUMENT_RELATIONSHIP]).replaceAll('Relationships', 'RELATIONSHIPS'),
+    ],
+  ])('refuses %s in the root relationships as CORRUPT_FILE root-rels', (_label, rootRels) => {
+    expectGateEntry(
+      withRootRels(rootRels, { [OTHER_PART]: '<workbook/>' }),
+      'CORRUPT_FILE',
+      ZIP_REJECT_REASONS.ROOT_RELS,
+      ROOT_RELS_PART,
+    );
+  });
+});
+
+// One budget per upload bounds the formula text the content scans read: every field, raw
+// and in NFKC form, in every part (MAX_FORMULA_SCAN_UNITS, or a lower maxFormulaScanUnits).
+const FORMULA_PART = 'xl/x/a.xml';
+// The code units the gate charges for this field: eight raw, eight in NFKC form.
+const BUDGET_FIELD = 'SUM(1,2)';
+// The costliest field shape measured for its charge: U+FDFB, whose NFKC form is eight
+// code units, and an ideographic space, which NFKC turns into a space.
+const COSTLY_FIELD_PAIR = '\ufdfb\u3000';
+// How many fields the closing review's upload held.
+const NFKC_PROBE_FIELDS = 330;
+
+/** What the gate charges for a formula field of decoded text `text`: its code units, raw and in NFKC form. */
+function formulaScanUnits(text: string): number {
+  return text.length + text.normalize('NFKC').length;
+}
+
+/** A part whose root holds `count` formula fields of text `text`. */
+function formulaFieldsPart(text: string, count: number, root = 'a'): string {
+  return `${XML_DECLARATION}<${root}>${`<f>${text}</f>`.repeat(count)}</${root}>`;
+}
+
+/** The gate with a formula scan budget of `units`. */
+function withFormulaBudget(units: number): GuardOpts {
+  return { ...opts, maxFormulaScanUnits: units };
+}
+
+describe('upload gate: the formula scan budget', () => {
+  const field = `<f>${BUDGET_FIELD}</f>`;
+  const units = formulaScanUnits(BUDGET_FIELD);
+
+  it('charges nothing for a workbook without formulas', () => {
+    expect(catchGuard(buildXlsxFixture([BASIC_SHEET]), withFormulaBudget(0))).toBeNull();
+  });
+
+  // The upload that held the parse worker for 13 s (26 s from a relationships part, which
+  // was scanned twice): fields of 32 768 U+FDFA, whose NFKC form is eighteen times longer,
+  // in a part the reader never opens. The first field is refused before it is read.
+  it.each([FORMULA_PART, 'xl/x/_rels/a.xml.rels'])(
+    'refuses fields whose NFKC form is too long in %s as UNSAFE_CONTENT unsafe-formula',
+    (entry) => {
+      const ligatures = 'ﷺ'.repeat(MAX_FORMULA_TEXT_LENGTH);
+      const file = buildXlsxFixture([BASIC_SHEET], {
+        [entry]: formulaFieldsPart(ligatures, NFKC_PROBE_FIELDS),
+      });
+
+      expectGateEntry(file, 'UNSAFE_CONTENT', UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA, entry);
+    },
+  );
+
+  // Each kept XML part is content-scanned once, by the package walk or by the content scan
+  // of the other parts, so a budget of exactly its field passes and one unit less refuses.
+  it.each<[label: string, entry: string, xml: string]>([
+    [
+      'a .rels name with a Relationships root',
+      'xl/x/_rels/a.xml.rels',
+      relsXml([]).replace('</Relationships>', `${field}</Relationships>`),
+    ],
+    ['a .rels name with another root', 'xl/x/_rels/a.xml.rels', formulaFieldsPart(BUDGET_FIELD, 1)],
+    [
+      'another name with a Relationships root',
+      FORMULA_PART,
+      relsXml([]).replace('</Relationships>', `${field}</Relationships>`),
+    ],
+    ['the content types part', '[Content_Types].xml', contentTypesXml(undefined, field)],
+    [
+      'the root relationships part',
+      ROOT_RELS_PART,
+      relsXml([OFFICE_DOCUMENT_RELATIONSHIP]).replace(
+        '</Relationships>',
+        `${field}</Relationships>`,
+      ),
+    ],
+    ['a part of no other kind', FORMULA_PART, formulaFieldsPart(BUDGET_FIELD, 1)],
+  ])('content-scans %s once', (_label, entry, xml) => {
+    const file = buildXlsxFixture([BASIC_SHEET], { [entry]: xml });
+
+    expect(catchGuard(file, withFormulaBudget(units))).toBeNull();
+    const err = catchGuard(file, withFormulaBudget(units - 1));
+    expect(err?.code).toBe('PAYLOAD_TOO_LARGE');
+    expect(err?.meta).toEqual({
+      reason: UPLOAD_LIMIT_REASONS.FORMULA_SCAN_BUDGET,
+      entry,
+      cap: units - 1,
+    });
+  });
+
+  it('charges the fields of the reader parts and of the other parts to one budget', () => {
+    const definedNames = `<definedNames><definedName name="n">${BUDGET_FIELD}</definedName></definedNames>`;
+    const file = buildXlsxFixture([BASIC_SHEET], {
+      [WORKBOOK_PART]: `${WORKBOOK_WITH_ONE_SHEET_START}${definedNames}</workbook>`,
+      [FORMULA_PART]: formulaFieldsPart(BUDGET_FIELD, 1),
+    });
+
+    expect(catchGuard(file, withFormulaBudget(2 * units))).toBeNull();
+    expect(catchGuard(file, withFormulaBudget(2 * units - 1))?.meta).toEqual({
+      reason: UPLOAD_LIMIT_REASONS.FORMULA_SCAN_BUDGET,
+      entry: FORMULA_PART,
+      cap: 2 * units - 1,
+    });
+  });
+
+  it('clamps a maxFormulaScanUnits above MAX_FORMULA_SCAN_UNITS', () => {
+    const longField = 'A'.repeat(MAX_FORMULA_TEXT_LENGTH);
+    const count = Math.floor(MAX_FORMULA_SCAN_UNITS / formulaScanUnits(longField)) + 1;
+    const file = buildXlsxFixture([BASIC_SHEET], {
+      [FORMULA_PART]: formulaFieldsPart(longField, count),
+    });
+
+    expect(catchGuard(file, withFormulaBudget(2 * MAX_FORMULA_SCAN_UNITS))?.meta).toEqual({
+      reason: UPLOAD_LIMIT_REASONS.FORMULA_SCAN_BUDGET,
+      entry: FORMULA_PART,
+      cap: MAX_FORMULA_SCAN_UNITS,
+    });
+  });
+
+  it('refuses formula fields past MAX_FORMULA_SCAN_UNITS split over a reader part and another part', () => {
+    const longField = 'A'.repeat(MAX_FORMULA_TEXT_LENGTH);
+    const fieldUnits = formulaScanUnits(longField);
+    const half = Math.floor(MAX_FORMULA_SCAN_UNITS / fieldUnits / 2);
+    const rest = Math.floor(MAX_FORMULA_SCAN_UNITS / fieldUnits) - half;
+    const definedNames = Array.from(
+      { length: half },
+      (_, i) => `<definedName name="n${i}">${longField}</definedName>`,
+    ).join('');
+    const book = (otherFields: number): Buffer =>
+      buildXlsxFixture([BASIC_SHEET], {
+        [WORKBOOK_PART]: `${WORKBOOK_WITH_ONE_SHEET_START}<definedNames>${definedNames}</definedNames></workbook>`,
+        [FORMULA_PART]: formulaFieldsPart(longField, otherFields),
+      });
+
+    expect(catchGuard(book(rest), opts)).toBeNull();
+    const err = catchGuard(book(rest + 1), opts);
+    expect(err?.code).toBe('PAYLOAD_TOO_LARGE');
+    expect(err?.meta).toEqual({
+      reason: UPLOAD_LIMIT_REASONS.FORMULA_SCAN_BUDGET,
+      entry: FORMULA_PART,
+      cap: MAX_FORMULA_SCAN_UNITS,
+    });
+  });
+
+  // A part named .rels may be a worksheet whose own relationships part names an external
+  // hyperlink: the package walk reads those ids before it content-scans the part, which
+  // no later step scans again.
+  it('refuses a picture naming an external hyperlink in a worksheet stored under a .rels name', () => {
+    const sheetPart = 'xl/worksheets/s.rels';
+    const file = buildXlsxFixture([BASIC_SHEET], {
+      [sheetPart]: `${XML_DECLARATION}<worksheet xmlns="${SPREADSHEET_NS}" xmlns:r="${OFFICE_REL}"><sheetData/><picture r:id="rId1"/></worksheet>`,
+      'xl/worksheets/_rels/s.rels.rels': relsXml([
+        [HYPERLINK_REL, 'https://example.com/a'],
+      ]).replace('/>', ' TargetMode="External"/>'),
+    });
+
+    expectGateEntry(file, 'UNSAFE_CONTENT', UNSAFE_CONTENT_REASONS.UNSAFE_PART, sheetPart);
+  });
+
+  // The wall-clock bound is enforced in CI only (expectWithinBudget); locally the file is
+  // still read and accepted.
+  it('reads formula fields of the costliest shape measured up to the budget', () => {
+    const fieldText = COSTLY_FIELD_PAIR.repeat(
+      Math.floor(MAX_FORMULA_TEXT_LENGTH / COSTLY_FIELD_PAIR.normalize('NFKC').length),
+    );
+    const fieldUnits = formulaScanUnits(fieldText);
+    const count = Math.floor(MAX_FORMULA_SCAN_UNITS / fieldUnits);
+    const file = buildXlsxFixture([BASIC_SHEET], {
+      [FORMULA_PART]: formulaFieldsPart(fieldText, count),
+    });
+
+    expect(fieldText.normalize('NFKC').length).toBeLessThanOrEqual(MAX_FORMULA_TEXT_LENGTH);
+    expect(count * fieldUnits).toBeGreaterThan(MAX_FORMULA_SCAN_UNITS - fieldUnits);
+    const started = performance.now();
+    expect(catchGuard(file, opts)).toBeNull();
+    expectWithinBudget(performance.now() - started, FORMULA_SCAN_BUDGET_MS);
   });
 });

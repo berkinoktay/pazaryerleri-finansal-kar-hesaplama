@@ -54,8 +54,10 @@ import { MAX_FORMULA_TEXT_LENGTH } from './constants';
 //     passes (Imports!A1, RTD:RTD, a bare CALL).
 // A name is a maximal run of Unicode letters, combining marks, digits, '_' and '.',
 // compared after NFKC normalisation and Unicode upper-casing. A text longer than
-// MAX_FORMULA_TEXT_LENGTH is refused before it is read: Excel writes none, and the NFKC
-// form of a long text can grow eighteenfold.
+// MAX_FORMULA_TEXT_LENGTH is refused before it is normalised, and a text whose NFKC form
+// is longer before either reading (formulaReadings): Excel writes neither, the NFKC form
+// of a text can be eighteen times longer (U+FDFA), and the raw reading normalises every
+// name it meets again, so a short text of such letters costs what a long one does.
 
 /**
  * Upper-case ASCII names of the built-in functions a formula may call, sorted: pure
@@ -285,6 +287,8 @@ const INTERNAL_PREFIX_START = '_XL';
 // through (_xlchart.v1.0); such a name passes when it is not called.
 const CHART_DATA_NAME_START = '_XLCHART.';
 const NORMAL_FORM = 'NFKC';
+// Why a field longer than MAX_FORMULA_TEXT_LENGTH, raw or in NFKC form, is refused.
+const FORMULA_TOO_LONG = 'Formula is longer than Excel writes one';
 
 // UTF-16 code units (ASCII).
 const QUOTE = 0x22; // '"': opens and closes a string literal, doubled inside one
@@ -650,18 +654,35 @@ function readingRefusal(text: string, quoted: QuotedSection): string | null {
   return null;
 }
 
+/** A decoded formula field and its NFKC form, each at most MAX_FORMULA_TEXT_LENGTH code units long. */
+export interface FormulaReadings {
+  readonly text: string;
+  readonly normal: string;
+}
+
 /**
- * Why the decoded formula field text `text` is refused (a fixed English message), or
- * null when both its readings pass: unchanged and in NFKC form (see the header). Its
- * apostrophe-quoted sections name what `quoted` says: sheets unless told otherwise.
+ * The decoded formula field text `text` and its NFKC form, or why the field is refused
+ * (a fixed English message): either is longer than MAX_FORMULA_TEXT_LENGTH (see the
+ * header). The text is measured before it is normalised, so no long text is normalised.
  */
-export function formulaTextRefusal(
-  text: string,
+export function formulaReadings(text: string): FormulaReadings | string {
+  if (text.length > MAX_FORMULA_TEXT_LENGTH) return FORMULA_TOO_LONG;
+  const normal = text.normalize(NORMAL_FORM);
+  if (normal.length > MAX_FORMULA_TEXT_LENGTH) return FORMULA_TOO_LONG;
+  return { text, normal };
+}
+
+/**
+ * Why the formula field `readings` (formulaReadings) is refused (a fixed English
+ * message), or null when both its readings pass: unchanged and in NFKC form (see the
+ * header). Its apostrophe-quoted sections name what `quoted` says: sheets unless told
+ * otherwise.
+ */
+export function formulaReadingsRefusal(
+  readings: FormulaReadings,
   quoted: QuotedSection = 'sheet-name',
 ): string | null {
-  if (text.length > MAX_FORMULA_TEXT_LENGTH) return 'Formula is longer than Excel writes one';
-  const refusal = readingRefusal(text, quoted);
+  const refusal = readingRefusal(readings.text, quoted);
   if (refusal !== null) return refusal;
-  const normal = text.normalize(NORMAL_FORM);
-  return normal === text ? null : readingRefusal(normal, quoted);
+  return readings.normal === readings.text ? null : readingRefusal(readings.normal, quoted);
 }

@@ -30,6 +30,16 @@ export const PATCH_LIMIT_REASONS = {
   OUTPUT: 'patch-output',
 } as const;
 
+/**
+ * Reasons of PAYLOAD_TOO_LARGE raised by the upload gate. Its byte, entry and DOM weight
+ * caps carry none; a reason names a cap that bounds the gate's own work instead.
+ */
+export const UPLOAD_LIMIT_REASONS = {
+  // The formula fields of all parts together, raw and in NFKC form, exceed what the gate
+  // reads of one upload (MAX_FORMULA_SCAN_UNITS).
+  FORMULA_SCAN_BUDGET: 'formula-scan-budget',
+} as const;
+
 /** Reasons of CORRUPT_FILE raised by the zip and package checks of the gate and the patch path. */
 export const ZIP_REJECT_REASONS = {
   LAYOUT: 'zip-layout',
@@ -41,6 +51,8 @@ export const ZIP_REJECT_REASONS = {
   ROOT_RELS: 'root-rels',
   // A kept XML part that is not UTF-8 text, or whose declaration names another encoding.
   PART_ENCODING: 'part-encoding',
+  // An entry name that is not a canonical part name (see the entry name rule in guards.ts).
+  ENTRY_NAME: 'entry-name',
 } as const;
 
 /** Reasons of UNSAFE_CONTENT raised by the package and content checks of the gate. */

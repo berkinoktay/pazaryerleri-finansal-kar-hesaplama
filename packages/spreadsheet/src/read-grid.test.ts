@@ -398,6 +398,22 @@ describe('readGrid: cell styles and AlternateContent in the sheet data', () => {
     expect(errorCodeOf(() => readSheet(parts, { caps: CAPS }))).toBe('CORRUPT_FILE');
   });
 
+  // Any depth below sheetData: Excel may apply a branch the reader never looked at.
+  it.each([
+    ['inside a cell', `<row r="1"><c r="A1">${alternateContent('<v>2</v>')}<v>1</v></c></row>`],
+    [
+      'inside the inline string of a cell',
+      `<row r="1"><c r="A1" t="inlineStr"><is>${alternateContent('<t>b</t>')}<t>a</t></is></c></row>`,
+    ],
+  ])('refuses AlternateContent %s', (_label, rows) => {
+    const parts = styledParts(worksheet(rows));
+
+    expect(errorCodeOf(() => readSheet(parts, { caps: CAPS }))).toBe('CORRUPT_FILE');
+    expect(fileErrorOf(() => readGrid(parts, { caps: CAPS })).meta.rule).toBe(
+      'alternateContentInSheetData',
+    );
+  });
+
   it('still reads AlternateContent under the root next to sheetData', () => {
     const parts = styledParts(
       worksheetWith(

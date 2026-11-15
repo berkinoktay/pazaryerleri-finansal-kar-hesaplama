@@ -80,6 +80,11 @@ interface ElementCuts {
 /** Whether the direct child of the root just scanned into `markup` is to be cut. */
 export type ChildSelector = (markup: XmlMarkup, attributes: readonly number[]) => boolean;
 
+/** Checks the start tag of the root element just scanned into `markup`; throws to refuse it. */
+export type RootCheck = (markup: XmlMarkup) => void;
+
+const NO_ROOT_CHECK: RootCheck = () => undefined;
+
 const CALC_CHAIN_RELATIONSHIP_TYPES: readonly string[] = [
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain',
   'http://purl.oclc.org/ooxml/officeDocument/relationships/calcChain',
@@ -273,12 +278,14 @@ function assertUtf8Declaration(
  * element, an element below a direct child of the root (neither the content types nor
  * the relationships schema has one, and the walk would not read it), or a root that
  * never closes. A caller that only reads the children selects none; an error `select`
- * throws passes through unchanged.
+ * or `checkRoot` (given the root's start tag, none by default) throws passes through
+ * unchanged.
  */
 export function cutRootChildren(
   bytes: Uint8Array,
   entry: string,
   select: ChildSelector,
+  checkRoot: RootCheck = NO_ROOT_CHECK,
 ): ElementCuts {
   if (!isUtf8(bytes)) throw packagePartError(entry, 'is not valid UTF-8');
   const markup = createMarkup();
@@ -299,6 +306,7 @@ export function cutRootChildren(
           if (depth === ROOT_DEPTH) {
             if (rootSeen) throw packagePartError(entry, 'has an element after the root element');
             rootSeen = true;
+            checkRoot(markup);
           } else if (depth > CHILD_DEPTH) {
             throw packagePartError(entry, 'has an element below a direct child of the root');
           } else if (select(markup, attributes)) {

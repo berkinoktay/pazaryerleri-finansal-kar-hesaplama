@@ -722,6 +722,23 @@ export function unsignedDescriptorArchive(length: UnsignedDescriptorLength): Cra
   return closeArchive(body, written);
 }
 
+/**
+ * The entries of `file` again, each deflated, but `name`, whose compressed data is
+ * `data` unchanged (a deflate stream the caller wrote by hand), declared with the crc
+ * and length of that entry's content in `file`. No data descriptors: readZipLayout
+ * accepts it whatever `data` inflates to.
+ */
+export function rawDeflateArchive(file: Uint8Array, name: string, data: Buffer): Buffer {
+  const body = new ArchiveBody();
+  const written = Object.entries(unzipSync(file)).map(([entry, content]) =>
+    entry === name
+      ? appendEntry(body, entry, deflatedFields(content, data), data)
+      : appendDeflated(body, entry, content),
+  );
+  if (!written.some((entry) => entry.name === name)) throw new Error(`entry missing: ${name}`);
+  return closeArchive(body, written).file;
+}
+
 // Crafted archives with a local header signature in the central directory. Past the
 // last entry the gate's stream keeps searching for one, through the directory
 // (Unzip.prototype.push in fflate). A signature whose header, name and extra field fit

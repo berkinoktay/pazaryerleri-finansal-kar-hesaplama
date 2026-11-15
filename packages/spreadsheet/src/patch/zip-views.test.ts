@@ -45,7 +45,7 @@ describe('assertSameViews', () => {
   if (sheetBytes === undefined) throw new Error(`no part named ${SHEET_PART}`);
 
   it('passes the parts the gate read', () => {
-    expect(() => assertSameViews(file, layout, parts)).not.toThrow();
+    expect(() => assertSameViews(file, layout, Object.entries(parts))).not.toThrow();
   });
 
   it.each<[string, Uint8Array]>([
@@ -53,7 +53,7 @@ describe('assertSameViews', () => {
     ['one byte appended', Uint8Array.from([...sheetBytes, 0x20])],
   ])('refuses a worksheet part with %s', (_, changed) => {
     const error = fileErrorOf(() =>
-      assertSameViews(file, layout, { ...parts, [SHEET_PART]: changed }),
+      assertSameViews(file, layout, Object.entries({ ...parts, [SHEET_PART]: changed })),
     );
     expect(error.code).toBe('CORRUPT_FILE');
     expect(error.meta).toEqual({ reason: ZIP_REJECT_REASONS.VIEW_MISMATCH, entry: SHEET_PART });
@@ -64,7 +64,7 @@ describe('assertSameViews on a hidden tile behind the layout check', () => {
   it('other-sheet: refuses the tile', () => {
     const archive = hiddenTileArchive('other-sheet');
     const error = fileErrorOf(() =>
-      assertSameViews(archive.file, archive.layout, streamedParts(archive)),
+      assertSameViews(archive.file, archive.layout, Object.entries(streamedParts(archive))),
     );
     expect(error.code).toBe('CORRUPT_FILE');
     expect(error.meta).toEqual({ reason: ZIP_REJECT_REASONS.VIEW_MISMATCH, entry: SHEET_PART });
@@ -74,7 +74,9 @@ describe('assertSameViews on a hidden tile behind the layout check', () => {
     const archive = hiddenTileArchive('bomb');
     const parts = streamedParts(archive);
     const started = performance.now();
-    const error = fileErrorOf(() => assertSameViews(archive.file, archive.layout, parts));
+    const error = fileErrorOf(() =>
+      assertSameViews(archive.file, archive.layout, Object.entries(parts)),
+    );
     // The workbook is two rows; an unbounded inflate of the tile takes more than a second.
     expectWithinBudget(performance.now() - started, BOUNDED_INFLATE_BUDGET_MS);
     expect(error.code).toBe('CORRUPT_FILE');
@@ -86,7 +88,7 @@ describe('assertSameViews on a hidden tile behind the layout check', () => {
     // rule carries the guarantee, and this check does not.
     const archive = hiddenTileArchive('same-sheet');
     expect(() =>
-      assertSameViews(archive.file, archive.layout, streamedParts(archive)),
+      assertSameViews(archive.file, archive.layout, Object.entries(streamedParts(archive))),
     ).not.toThrow();
   });
 });

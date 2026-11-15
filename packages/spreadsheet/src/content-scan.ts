@@ -1,11 +1,16 @@
 import { isUtf8 } from 'node:buffer';
 
 import { strFromU8 } from 'fflate';
-import { MAX_XMLNS_DECLARATIONS_PER_PART } from './constants';
+import { MAX_FORMULA_SCAN_UNITS, MAX_XMLNS_DECLARATIONS_PER_PART } from './constants';
 import { SpreadsheetFileError } from './errors';
-import { formulaTextRefusal, type QuotedSection } from './formula-scan';
+import {
+  formulaReadings,
+  formulaReadingsRefusal,
+  type FormulaReadings,
+  type QuotedSection,
+} from './formula-scan';
 import { packagePartError } from './patch/calc-chain';
-import { UNSAFE_CONTENT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
+import { UNSAFE_CONTENT_REASONS, UPLOAD_LIMIT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
 import { bytesEqualAt, foldAsciiCase, metaEntryName, unsafeContentError } from './patch/shared';
 import {
   ATTRIBUTE_NAME_END,
@@ -101,10 +106,17 @@ const NO_BYTE = -1;
 // name is `id` (ASCII case ignored, whatever namespace its prefix is bound to) and whose
 // decoded value names a relationship of the part's relationships part that is an
 // external hyperlink (a worksheet `<picture r:id>` would load its background from the
-// web) is refused, UNSAFE_CONTENT `unsafe-part`. Each field is decoded (the five
+// web) is refused, UNSAFE_CONTENT `unsafe-part`. Both rules compare a relationship id
+// read the way an XML processor reads an attribute value (XML 1.0 sections 2.11 and
+// 3.3.3, attributeValueText): each literal CR LF pair, CR, LF and TAB is one space, a
+// referenced one stays itself. Each field is decoded (the five
 // predefined references and every character reference replaced) and must pass
 // formula-scan.ts; in the `formula` attribute of a PIVOT_FORMULA_ELEMENT_NAMES element
 // (a pivot calculated field or item) a quoted section is a field name, not a sheet name.
+// What the formula scan reads of one upload is bounded (FormulaScanBudget): the code
+// units of every field it scans, raw and in NFKC form, in every part together, at most
+// MAX_FORMULA_SCAN_UNITS, beyond which the upload is PAYLOAD_TOO_LARGE
+// `formula-scan-budget`.
 // An element field must hold text only, up to its own end tag: a comment, CDATA section,
 // processing instruction or child element could split a name or hide it from a text
 // scan. The one exception is the shape Excel 2010+ writes for a data validation list or
@@ -352,8 +364,24 @@ export interface WorksheetHyperlinkIds {
  */
 export type ExternalHyperlinkIds = ReadonlyMap<string, WorksheetHyperlinkIds>;
 
+/**
+ * The step of the gate that content-scans a kept XML part, the one content scan it gets:
+ * the package walk (assertNoUnsafePackageParts in unsafe-parts.ts, which scans the parts
+ * it walks), or the content scan of every other kept part (assertSafeXmlContent).
+ */
+export type ContentScanStep = 'package-walk' | 'content-scan';
+
+/** The ContentScanStep of each kept XML part, by name (contentScanPlan in unsafe-parts.ts). */
+export type ContentScanPlan = ReadonlyMap<string, ContentScanStep>;
+
 const NO_EXTERNAL_HYPERLINKS: ExternalHyperlinkIds = new Map();
-const NO_HYPERLINK_IDS: WorksheetHyperlinkIds = { onlyExternal: new Set(), external: new Set() };
+/** The external hyperlink ids of a part that has none. */
+export const NO_HYPERLINK_IDS: WorksheetHyperlinkIds = {
+  onlyExternal: new Set(),
+  external: new Set(),
+};
+// The plan of a content scan that scans every entry it is given.
+const SCAN_EVERY_PART: ContentScanPlan = new Map();
 
 /** Lower-case ASCII names, by length. */
 type NameSet = ReadonlyMap<number, readonly string[]>;
@@ -563,6 +591,21 @@ const NOT_A_DIGIT = -1;
 const MAX_CODE_POINT = 0x10ffff;
 // A field may start with U+FEFF, which the default decoder would drop.
 const FIELD_DECODER = new TextDecoder('utf-8', { ignoreBOM: true });
+// The literal white space an XML processor turns into one space in an attribute value
+// (XML 1.0 sections 2.11 and 3.3.3): a CR LF pair, then a lone CR, LF or TAB.
+const ATTRIBUTE_VALUE_BREAKS = /\r\n|[\t\n\r]/g;
+const ATTRIBUTE_VALUE_SPACE = ' ';
+
+/**
+ * What the formula scan of one upload has read and may read, in UTF-16 code units: every
+ * formula field it scans, raw and in NFKC form, in every part together (see the formula
+ * field header). Create with createFormulaScanBudget.
+ */
+export interface FormulaScanBudget {
+  /** MAX_FORMULA_SCAN_UNITS, or lower. */
+  readonly limit: number;
+  used: number;
+}
 
 /** What the first bytes of a zip entry say it holds (see "Which entries are XML"). */
 export type EntryContentKind = 'xml' | 'other' | 'misencoded';
@@ -835,7 +878,23 @@ function referenceText(text: string, start: number, end: number): string | null 
  * reference (its text is unknown).
  */
 export function decodeXmlText(raw: Uint8Array): string | null {
-  const text = FIELD_DECODER.decode(raw);
+  return replaceReferences(FIELD_DECODER.decode(raw));
+}
+
+/**
+ * The value an XML processor reads from raw attribute value bytes `raw` (XML 1.0 sections
+ * 2.11 and 3.3.3): each literal CR LF pair, CR, LF and TAB turned into one space, then
+ * every predefined and character reference replaced (a referenced line break stays one);
+ * null when it holds any other reference.
+ */
+function attributeValueText(raw: Uint8Array): string | null {
+  return replaceReferences(
+    FIELD_DECODER.decode(raw).replace(ATTRIBUTE_VALUE_BREAKS, ATTRIBUTE_VALUE_SPACE),
+  );
+}
+
+/** `text` with every predefined and character reference replaced; null when it holds any other reference. */
+function replaceReferences(text: string): string | null {
   let decoded = '';
   let from = 0;
   for (
@@ -853,12 +912,46 @@ export function decodeXmlText(raw: Uint8Array): string | null {
 }
 
 /**
+ * A formula scan budget of `limit` code units (MAX_FORMULA_SCAN_UNITS by default; a
+ * higher limit is clamped to it), nothing read yet.
+ */
+export function createFormulaScanBudget(limit = MAX_FORMULA_SCAN_UNITS): FormulaScanBudget {
+  return { limit: Math.min(limit, MAX_FORMULA_SCAN_UNITS), used: 0 };
+}
+
+/**
+ * Adds the code units of formula field `readings`, raw and in NFKC form, to `budget`
+ * before they are read: PAYLOAD_TOO_LARGE `{ reason: 'formula-scan-budget', entry, cap }`
+ * when the upload's fields together go past its limit.
+ */
+function chargeFormulaScan(
+  entry: string,
+  budget: FormulaScanBudget,
+  readings: FormulaReadings,
+): void {
+  budget.used += readings.text.length + readings.normal.length;
+  if (budget.used <= budget.limit) return;
+  throw new SpreadsheetFileError(
+    'PAYLOAD_TOO_LARGE',
+    `Workbook formula fields exceed ${budget.limit} code units to scan`,
+    {
+      reason: UPLOAD_LIMIT_REASONS.FORMULA_SCAN_BUDGET,
+      entry: metaEntryName(entry),
+      cap: budget.limit,
+    },
+  );
+}
+
+/**
  * Decodes formula field bytes `raw` and checks them (formula-scan.ts), its quoted
- * sections read as `quoted`; UNSAFE_CONTENT `unsafe-formula` otherwise.
+ * sections read as `quoted`, charging `budget` before they are read; UNSAFE_CONTENT
+ * `unsafe-formula` otherwise (a field longer than MAX_FORMULA_TEXT_LENGTH, raw or in
+ * NFKC form, included), PAYLOAD_TOO_LARGE past the budget (chargeFormulaScan).
  */
 function assertSafeFormulaField(
   entry: string,
   raw: Uint8Array,
+  budget: FormulaScanBudget,
   quoted: QuotedSection = 'sheet-name',
 ): void {
   const text = decodeXmlText(raw);
@@ -868,7 +961,10 @@ function assertSafeFormulaField(
       'Workbook part holds a formula with a reference the scan cannot decode',
     );
   }
-  const refusal = formulaTextRefusal(text, quoted);
+  const readings = formulaReadings(text);
+  if (typeof readings === 'string') throw unsafeFormula(entry, readings);
+  chargeFormulaScan(entry, budget, readings);
+  const refusal = formulaReadingsRefusal(readings, quoted);
   if (refusal !== null) throw unsafeFormula(entry, refusal);
 }
 
@@ -926,6 +1022,7 @@ function assertSafeFieldContent(
   bytes: Uint8Array,
   markup: XmlMarkup,
   attributes: number[],
+  budget: FormulaScanBudget,
 ): void {
   const nameStart = markup.nameStart;
   const nameEnd = markup.nameEnd;
@@ -933,7 +1030,7 @@ function assertSafeFieldContent(
   const next = nextMarkup(bytes, contentStart);
   if (next === -1 || !lexes(bytes, next, markup, attributes)) throw notTextOnly(entry);
   if (closesElement(bytes, markup, nameStart, nameEnd)) {
-    assertSafeFormulaField(entry, bytes.subarray(contentStart, next));
+    assertSafeFormulaField(entry, bytes.subarray(contentStart, next), budget);
     return;
   }
   const innerChild =
@@ -943,11 +1040,11 @@ function assertSafeFieldContent(
   if (!innerChild) throw notTextOnly(entry);
   assertNoWebContent(entry, bytes, markup, attributes);
   for (let attribute = 0; attribute < markup.attributeCount; attribute += 1) {
-    assertSafeAttribute(entry, bytes, attributes, attribute, null, 'sheet-name', false);
+    assertSafeAttribute(entry, bytes, attributes, attribute, null, 'sheet-name', false, budget);
   }
   const innerStart = markup.end;
   const innerClose = textOnlyContentEnd(entry, bytes, markup);
-  assertSafeFormulaField(entry, bytes.subarray(innerStart, innerClose));
+  assertSafeFormulaField(entry, bytes.subarray(innerStart, innerClose), budget);
   const innerEnd = markup.end;
   const close = nextMarkup(bytes, innerEnd);
   const closed =
@@ -1314,7 +1411,7 @@ function localPartStart(bytes: Uint8Array, start: number, end: number): number {
  * `formula` attribute read with quoted sections as `formulaQuotes`; a macro is empty; a
  * style loads nothing; any other value holds no CSS that loads a resource, and a URL
  * attribute is relative, or a raster image data URI on an `imageElement` (an
- * IMAGE_ELEMENT_NAMES element), a base URL relative.
+ * IMAGE_ELEMENT_NAMES element), a base URL relative. A field is charged to `budget`.
  */
 function assertSafeAttribute(
   entry: string,
@@ -1324,6 +1421,7 @@ function assertSafeAttribute(
   elementField: NameSet | null,
   formulaQuotes: QuotedSection,
   imageElement: boolean,
+  budget: FormulaScanBudget,
 ): void {
   const nameStart = attributeField(attributes, attribute, ATTRIBUTE_NAME_START);
   const nameEnd = attributeField(attributes, attribute, ATTRIBUTE_NAME_END);
@@ -1355,7 +1453,7 @@ function assertSafeAttribute(
   const quoted = isNameIn(bytes, localStart, nameEnd, PIVOT_FORMULA_ATTRIBUTE)
     ? formulaQuotes
     : 'sheet-name';
-  assertSafeFormulaField(entry, raw, quoted);
+  assertSafeFormulaField(entry, raw, budget, quoted);
 }
 
 /** The field attribute of its own the element whose local name is bytes [start, end) carries, or null. */
@@ -1370,8 +1468,8 @@ function elementFormulaAttribute(bytes: Uint8Array, start: number, end: number):
  * Refuses, UNSAFE_CONTENT `unsafe-part`, the tag scanned into `markup`, of an element
  * that is no hyperlink, when it names an external hyperlink of its part (see the
  * header): a prefixed attribute whose local name is `id` (ASCII case ignored, any
- * namespace) and whose decoded value is one of `externalIds`. CORRUPT_FILE
- * `package-part` when such an attribute cannot be decoded.
+ * namespace) and whose value, read by attributeValueText, is one of `externalIds`.
+ * CORRUPT_FILE `package-part` when such an attribute cannot be decoded.
  */
 function assertNoExternalHyperlinkId(
   entry: string,
@@ -1388,7 +1486,7 @@ function assertNoExternalHyperlinkId(
     if (localStart === nameStart || !isNameIn(bytes, localStart, nameEnd, RELATIONSHIP_IDS)) {
       continue;
     }
-    const id = decodeXmlText(
+    const id = attributeValueText(
       bytes.subarray(
         attributeField(attributes, attribute, ATTRIBUTE_VALUE_START),
         attributeField(attributes, attribute, ATTRIBUTE_VALUE_END),
@@ -1444,7 +1542,7 @@ function isImageElement(bytes: Uint8Array, start: number, end: number): boolean 
  * hyperlinks of this part), and, for a start tag of a field element outside the OMML
  * namespace (`scopes`), its content up to its own end tag (left in `markup`;
  * assertSafeFieldContent), empty for a macro element, white space only for a script
- * element.
+ * element. Every formula field is charged to `budget`.
  */
 function assertSafeElement(
   entry: string,
@@ -1453,6 +1551,7 @@ function assertSafeElement(
   attributes: number[],
   scopes: NamespaceScopes,
   hyperlinkIds: WorksheetHyperlinkIds,
+  budget: FormulaScanBudget,
 ): void {
   const localStart = localNameStart(bytes, markup);
   const localEnd = markup.nameEnd;
@@ -1483,6 +1582,7 @@ function assertSafeElement(
       elementField,
       formulaQuotes,
       imageElement,
+      budget,
     );
   }
   if (markup.kind !== 'start') return;
@@ -1499,7 +1599,7 @@ function assertSafeElement(
   }
   if (!isNameIn(bytes, localStart, localEnd, FORMULA_ELEMENTS)) return;
   if (elementNamespace(scopes, bytes, markup) === 'omml') return;
-  assertSafeFieldContent(entry, bytes, markup, attributes);
+  assertSafeFieldContent(entry, bytes, markup, attributes, budget);
 }
 
 function createNamespaceScopes(): NamespaceScopes {
@@ -1699,7 +1799,8 @@ function isWebElement(scopes: NamespaceScopes, bytes: Uint8Array, markup: XmlMar
  * Whether the tag scanned into `markup` leads to an external hyperlink of its part: it
  * has a relationship id (a non-empty attribute whose local name is exactly
  * RELATIONSHIP_ID_ATTRIBUTE and whose prefix is bound to RELATIONSHIPS_NAMESPACE by
- * `scopes`), and the decoded value of every one it has is one of `externalHyperlinkIds`.
+ * `scopes`), and the value of every one it has, read by attributeValueText, is one of
+ * `externalHyperlinkIds`.
  */
 function leadsToExternalHyperlink(
   scopes: NamespaceScopes,
@@ -1723,7 +1824,7 @@ function leadsToExternalHyperlink(
     if (!candidate) continue;
     const key = NAME_DECODER.decode(bytes.subarray(nameStart, localStart - 1));
     if (boundNamespace(scopes, key) !== 'relationships') continue;
-    const id = decodeXmlText(bytes.subarray(valueStart, valueEnd));
+    const id = attributeValueText(bytes.subarray(valueStart, valueEnd));
     if (id === null || !externalHyperlinkIds.has(id)) return false;
     found = true;
   }
@@ -1917,6 +2018,7 @@ function assertSafeFields(
   entry: string,
   bytes: Uint8Array,
   hyperlinkIds: WorksheetHyperlinkIds,
+  budget: FormulaScanBudget,
 ): void {
   const markup = createMarkup();
   const attributes: number[] = [];
@@ -1951,7 +2053,7 @@ function assertSafeFields(
         if (svgPart || isWebElement(scopes, bytes, markup)) {
           assertNoWebContent(entry, bytes, markup, attributes);
         }
-        assertSafeElement(entry, bytes, markup, attributes, scopes, hyperlinkIds);
+        assertSafeElement(entry, bytes, markup, attributes, scopes, hyperlinkIds, budget);
         // A field, macro or script element was read through its end tag, now in `markup`.
         if (markup.kind !== 'start') {
           endUnopenedElement(scopes, prefixes, declarations);
@@ -1994,15 +2096,18 @@ function assertSafeFields(
  * `location` is taken for
  * a URL fragment only when its relationship ids are among those `hyperlinkIds` gives
  * only an external hyperlink, and no other element may name one it gives an external
- * hyperlink (those of this part, ExternalHyperlinkIds; none by default).
+ * hyperlink (those of this part, ExternalHyperlinkIds; none by default). Every formula
+ * field is charged to `budget`, the upload's (a fresh one by default).
  * Throws SpreadsheetFileError('UNSAFE_CONTENT') naming `name`; a field refusal also
  * carries its reason (`unsafe-formula` or `unsafe-part`), the namespace refusal the cap.
- * An attribute value the scan cannot decode is CORRUPT_FILE `package-part`.
+ * An attribute value the scan cannot decode is CORRUPT_FILE `package-part`; formula
+ * fields past the budget PAYLOAD_TOO_LARGE `formula-scan-budget`.
  */
 export function assertSafeXmlPart(
   name: string,
   bytes: Uint8Array,
   hyperlinkIds: WorksheetHyperlinkIds = NO_HYPERLINK_IDS,
+  budget: FormulaScanBudget = createFormulaScanBudget(),
 ): void {
   const xml = strFromU8(bytes);
 
@@ -2016,7 +2121,7 @@ export function assertSafeXmlPart(
       entry: name,
     });
   }
-  assertSafeFields(name, bytes, hyperlinkIds);
+  assertSafeFields(name, bytes, hyperlinkIds, budget);
 }
 
 /**
@@ -2044,7 +2149,7 @@ function keepsUtf8(bytes: Uint8Array, at: number): boolean {
  * kept XML part `entry` is UTF-8 text (see the encoding header above): valid UTF-8, no
  * U+0000, and a first markup that keeps it in UTF-8 (keepsUtf8).
  */
-function assertUtf8Text(entry: string, bytes: Uint8Array): void {
+export function assertUtf8Text(entry: string, bytes: Uint8Array): void {
   if (!isUtf8(bytes) || bytes.includes(NUL)) {
     throw partEncodingError(entry, 'is not UTF-8 text');
   }
@@ -2063,19 +2168,25 @@ function assertUtf8Text(entry: string, bytes: Uint8Array): void {
  * cannot read or a name that promises XML it does not hold), and each XML entry must
  * be UTF-8 text (assertUtf8Text: CORRUPT_FILE `part-encoding`) and pass
  * assertSafeXmlPart (UNSAFE_CONTENT), checked for its encoding first, with the external
- * hyperlink ids `externalHyperlinks` gives its name (none by default). Every XML entry is
- * checked, whatever its name and whether a relationship names it or not: the export
- * hands each of them on unchanged.
+ * hyperlink ids `externalHyperlinks` gives its name (none by default) and the upload's
+ * formula scan `budget` (a fresh one by default). Every XML entry is checked, whatever
+ * its name and whether a relationship names it or not: the export hands each of them on
+ * unchanged. An entry `plan` gives to the package walk ('package-walk', contentScanPlan)
+ * was content-scanned there: it is checked for its kind and its encoding only, so no
+ * part is content-scanned twice (by default every entry is scanned here).
  */
 export function assertSafeXmlContent(
   entries: Iterable<readonly [string, Uint8Array]>,
   externalHyperlinks: ExternalHyperlinkIds = NO_EXTERNAL_HYPERLINKS,
+  budget: FormulaScanBudget = createFormulaScanBudget(),
+  plan: ContentScanPlan = SCAN_EVERY_PART,
 ): void {
   for (const [name, bytes] of entries) {
     const kind = entryContentKind(bytes);
     assertEntryContentKind(name, kind);
     if (kind !== 'xml') continue;
     assertUtf8Text(name, bytes);
-    assertSafeXmlPart(name, bytes, externalHyperlinks.get(name) ?? NO_HYPERLINK_IDS);
+    if (plan.get(name) === 'package-walk') continue;
+    assertSafeXmlPart(name, bytes, externalHyperlinks.get(name) ?? NO_HYPERLINK_IDS, budget);
   }
 }

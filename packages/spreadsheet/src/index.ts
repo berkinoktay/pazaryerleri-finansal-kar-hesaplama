@@ -67,6 +67,7 @@ export {
   PATCH_LIMIT_REASONS,
   UNSAFE_CONTENT_REASONS,
   UNSUPPORTED_ENCODING_REASONS,
+  UPLOAD_LIMIT_REASONS,
   ZIP_REJECT_REASONS,
 } from './patch/reasons';
 export { READER_RULES } from './cell-value';

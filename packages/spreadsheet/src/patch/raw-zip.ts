@@ -603,6 +603,15 @@ export function readZipLayout(file: Uint8Array): ZipLayout {
   return { entries, directoryOffset: end.directoryOffset, endRecordOffset: end.endRecordOffset };
 }
 
+/**
+ * The byte length of the entry's name, read from its local header (readZipLayout proved
+ * the directory record holds the same bytes). `ZipEntry.name` is those bytes decoded,
+ * a leading byte order mark dropped, so it can be shorter.
+ */
+export function entryNameByteLength(file: Uint8Array, entry: ZipEntry): number {
+  return u16(viewOf(file), entry.headerOffset + LOCAL_NAME_LENGTH);
+}
+
 const INFLATE_MISMATCH = 'Zip entry does not inflate to its declared size';
 
 function inflateBounded(raw: Uint8Array, entry: ZipEntry): Uint8Array {

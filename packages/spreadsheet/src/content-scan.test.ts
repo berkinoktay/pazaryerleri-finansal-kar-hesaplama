@@ -806,6 +806,26 @@ describe('assertSafeXmlContent: the formula allow list', () => {
     expectUnsafeFormula(formulaError(`${atCap}0`));
   });
 
+  // The scan also reads the NFKC form, eighteen times longer for U+FDFA, so that form is
+  // held to the same length, with the error a long raw field gets.
+  it('refuses a formula whose NFKC form is longer than MAX_FORMULA_TEXT_LENGTH', () => {
+    const ligature = String.fromCodePoint(0xfdfa);
+    const growth = ligature.normalize('NFKC').length;
+    const atCap = ligature.repeat(Math.floor(MAX_FORMULA_TEXT_LENGTH / growth));
+    const overCap = `${atCap}${ligature}`;
+    const longRaw = formulaError('1'.repeat(MAX_FORMULA_TEXT_LENGTH + 1));
+
+    expect(growth).toBe(18);
+    expect(atCap.normalize('NFKC').length).toBeLessThanOrEqual(MAX_FORMULA_TEXT_LENGTH);
+    expect(overCap.normalize('NFKC').length).toBeGreaterThan(MAX_FORMULA_TEXT_LENGTH);
+    expect(overCap.length).toBeLessThan(MAX_FORMULA_TEXT_LENGTH);
+    expect(formulaError(atCap)).toBeNull();
+    const error = formulaError(overCap);
+    expectUnsafeFormula(error);
+    expectUnsafeFormula(longRaw);
+    expect(error?.message).toBe(longRaw?.message);
+  });
+
   // A quantified Unicode class over a run of millions of letters overflowed V8's
   // backtracking stack; the refusal must stay a file error.
   it('refuses a five-million-letter non-ASCII name as a file error, in the scan and the gate', () => {
@@ -2461,18 +2481,23 @@ describe('upload gate: every kept worksheet part is scanned', () => {
     expectUnsafeFormula(gateError(bookWithSecondSheetType(type, EVIL_SHEET)), SECOND_SHEET_PART);
   });
 
+  // The reader would read a clean sheet at the alias entry and Excel the formula at the
+  // entry the alias resolves to; the entry name rule now refuses the alias entry by its
+  // name, before anything is scanned.
   it.each([
     ['./worksheets/sheet2.xml', 'xl/./worksheets/sheet2.xml'],
     ['worksheets/sheet%32.xml', 'xl/worksheets/sheet%32.xml'],
   ])(
-    'refuses a formula in the entry a Target alias %s names, the reader reading a clean one',
+    'refuses the entry a Target alias %s names by its name, a formula beside it',
     (relTarget, partPath) => {
       const file = buildXlsxFixture(
         [FIRST_SHEET, { name: 'S2', xml: CLEAN_SHEET, partPath, relTarget }],
         { [SECOND_SHEET_PART]: EVIL_SHEET },
       );
 
-      expectUnsafeFormula(gateError(file), SECOND_SHEET_PART);
+      const error = gateError(file);
+      expect(error?.code).toBe('CORRUPT_FILE');
+      expect(error?.meta).toEqual({ reason: ZIP_REJECT_REASONS.ENTRY_NAME, entry: partPath });
     },
   );
 
@@ -2615,6 +2640,69 @@ describe('upload gate: hyperlinks to web pages', () => {
     );
 
     expectUnsafePart(gateError(file));
+  });
+
+  /** A one-sheet workbook whose sheet holds `element` after its data, and whose relationships part holds `relationship`. */
+  function bookWithSheetElement(element: string, relationship: string): Buffer {
+    return buildXlsxFixture([{ name: 'Sheet1', xml: worksheetWithAfter(element) }], {
+      [SHEET_RELS_PART]: `${UTF8_DECLARATION}<Relationships xmlns="${RELATIONSHIPS_NS}">${relationship}</Relationships>`,
+    });
+  }
+
+  const SHEET_ID_ELEMENTS: readonly string[] = ['picture', 'legacyDrawing'];
+
+  it.each(SHEET_ID_ELEMENTS)('refuses a sheet %s that names an external hyperlink', (element) => {
+    expectUnsafePart(
+      gateError(bookWithSheetElement(`<${element} r:id="rId1"/>`, WEB_HYPERLINK_RELATIONSHIP)),
+    );
+  });
+
+  // The TargetMode is read once, for the external target rule and for the hyperlink ids
+  // alike: a spelling other than Internal or External, which a reader may still take for
+  // External, is refused instead of passing one rule and missing the other.
+  it.each(
+    ['external', 'EXTERNAL', 'External '].flatMap((mode) =>
+      SHEET_ID_ELEMENTS.map((element) => [mode, element]),
+    ),
+  )(
+    'refuses TargetMode="%s" on the hyperlink a sheet %s names as CORRUPT_FILE package-part',
+    (mode, element) => {
+      const relationship = WEB_HYPERLINK_RELATIONSHIP.replace(
+        'TargetMode="External"',
+        `TargetMode="${mode}"`,
+      );
+      const error = gateError(bookWithSheetElement(`<${element} r:id="rId1"/>`, relationship));
+
+      expect(error?.code).toBe('CORRUPT_FILE');
+      expect(error?.meta).toEqual({
+        reason: ZIP_REJECT_REASONS.PACKAGE_PART,
+        entry: SHEET_RELS_PART,
+      });
+    },
+  );
+
+  it('refuses a relationship Id holding a TAB as CORRUPT_FILE package-part', () => {
+    const relationship = WEB_HYPERLINK_RELATIONSHIP.replace('Id="rId1"', 'Id="rId\t1"');
+    const error = gateError(bookWithSheetElement('<picture r:id="rId 1"/>', relationship));
+
+    expect(error?.code).toBe('CORRUPT_FILE');
+    expect(error?.meta).toEqual({
+      reason: ZIP_REJECT_REASONS.PACKAGE_PART,
+      entry: SHEET_RELS_PART,
+    });
+  });
+
+  // An XML processor reads a literal LF, CR LF pair, CR or TAB in an attribute value as
+  // one space, so `r:id` written with a line break names the Id written with a space.
+  it.each([
+    ['an LF', 'rId\n1'],
+    ['a CR LF pair', 'rId\r\n1'],
+    ['a CR', 'rId\r1'],
+    ['a TAB', 'rId\t1'],
+  ])('refuses a sheet picture whose r:id holds %s naming an external hyperlink', (_label, id) => {
+    const relationship = WEB_HYPERLINK_RELATIONSHIP.replace('Id="rId1"', 'Id="rId 1"');
+
+    expectUnsafePart(gateError(bookWithSheetElement(`<picture r:id="${id}"/>`, relationship)));
   });
 });
 
