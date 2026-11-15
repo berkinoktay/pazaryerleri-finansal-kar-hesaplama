@@ -40,7 +40,7 @@ const FIXTURE = readFileSync(
   new URL('../../fixtures/marketplace-campaign-sample.xlsx', import.meta.url),
 );
 
-// Facts of the vendor fixture (see tests/unit/services/marketplace-campaign-import.test.ts).
+// Facts of the vendor fixture (see tests/unit/workbooks/formats/marketplace-campaign-list.format.test.ts).
 const FIXTURE_ROWS = 68;
 const FIXTURE_MATCHED_BARCODE = '211537788423';
 

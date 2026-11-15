@@ -46,12 +46,16 @@ apps/api/
 │   ├── openapi/                 # Shared OpenAPI components (errors, pagination, rate-limit, security)
 │   ├── middleware/              # auth, org-context, rate-limit, request-id
 │   ├── config/                  # Static backend config (e.g. rate-limits.ts)
+│   ├── workbooks/               # Campaign workbook pipeline: adapters, formats, generic import/export, route factory
 │   └── lib/                     # Backend-only utilities (crypto, errors, problem-details, map-prisma-error, …)
 └── scripts/
+    ├── audit-stored-workbooks.ts # Read-only deploy audit of stored campaign workbooks
     └── dump-openapi.ts          # Build-time spec writer → packages/api-client/openapi.json
 ```
 
 > **Marketplace adapters do NOT live in this app.** Trendyol/Hepsiburada HTTP clients, mappers, the `MarketplaceAdapter` interface, and the `getAdapter` registry are in **`@pazarsync/marketplace`** (`packages/marketplace`), shared with `apps/sync-worker`. The api imports from there: `import { getAdapter } from '@pazarsync/marketplace'`.
+
+> **Campaign workbooks live in `src/workbooks/`**: the adapter contract, one format file per marketplace file, the generic import and export, and the route factory that mounts each page's two workbook routes into its `routes/<segment>/index.ts`. Their read-only deploy audit is `scripts/audit-stored-workbooks.ts` (`pnpm --filter @pazarsync/api audit:stored-workbooks`). See [Campaign workbooks](#campaign-workbooks-appsapisrcworkbooks) below.
 
 ```typescript
 // ❌ Bad — business logic in route handler
@@ -320,6 +324,41 @@ import { getAdapter } from '@pazarsync/marketplace';
 const adapter = getAdapter(store);
 const orders = await adapter.fetchOrders({ since: lastSyncAt });
 ```
+
+## Campaign workbooks (`apps/api/src/workbooks/`)
+
+Every campaign page that imports a marketplace `.xlsx` and exports it back with the seller's choices written in runs on one generic pipeline. The generic code never knows which page it runs for. Security rules: `docs/SECURITY.md` section 6, "File Uploads (Excel workbooks)". Tests: `docs/TESTING.md` section 15.
+
+- **Adapter contract** (`adapter.ts`): one `WorkbookVerticalAdapter` per page, in `verticals/<page>.adapter.ts`, holding what a page cannot express as data: `page`; `parentTable` (the `@@map` name, data for tests and logs, never interpolated into SQL); `formats`; `formSchema` and `readForm`; `inspect` (the page's own checks, before the rehearsal); `persist` (the parent and item rows, inside the import transaction); `load` (one `findFirst` scoped by `{ id, organizationId, storeId }`); `pick` and `resolveWriteBack` (what each written cell holds); `touchExported` (a scoped `updateMany`); `countLists` (a typed scoped count for the quota); `legacyCodes` (the wire codes the page answered before the pipeline, kept until the web moves). Its `http` block holds the OpenAPI texts and path schemas of the two routes.
+- **Formats** (`format.ts`, `formats/trendyol/<page>.format.ts`): one format per marketplace file version, built with `defineFormat`, which checks at module load that every write column's probe passes its own value rule and that no `exportRequires` group is empty. A format names its `sheet` (a strict selector), `layout` (its `*.layout.ts`), `keep` rule, `anchor` column, `fingerprint`, `mapRow`, `writeBack` columns with their value rules, `defaultName` and `filename` policy. It takes `id`, `platform`, `page` and `fingerprint` from its summary in `formats/registry.ts`, so each value has one copy.
+- **Registry and selection** (`formats/registry.ts`, `select-format.ts`): `FORMAT_SUMMARIES` lists every registered format (id, platform, page, fingerprint) as static data. `selectFormat` takes the first of the page's formats for the store's platform whose sheet exists, has a data row and resolves the format's layout. When none does, `diagnoseWorkbook` looks for another page whose fingerprint the header row carries (`WRONG_FILE_FOR_PAGE`, sent as the page's `legacyCodes` entry, with `meta.detectedPage`); the other outcomes and their order are in the `selectFormat` doc comment.
+- **Route factory** (`route-factory.ts`): `createWorkbookImportRoute(adapter)` and `createWorkbookExportRoute(adapter)` build a page's two routes behind `WORKBOOK_IMPORT_MIDDLEWARE` and `WORKBOOK_EXPORT_MIDDLEWARE`, and run the pipeline with the ids and platform of the store record `requireStoreAccessContext` returns. `routes/<segment>/index.ts` mounts each where the page's old route was, so the OpenAPI path order is stable.
+- **Generic import** (`importWorkbook`, `import-workbook.ts`), in order:
+  1. pick the format (`selectFormat`);
+  2. read the rows (`readRows`: keep rule, anchor, `mapRow`) and resolve the write columns (`resolveWriteColumns`);
+  3. count the rows a seller already filled in (`countPrefilled`);
+  4. `adapter.inspect`;
+  5. rehearse the export on the upload (`buildRehearsal` and `patchWorkbook`, output dropped);
+  6. match the anchors to the store's product variants;
+  7. derive the stored name (`deriveName`);
+  8. one transaction: `acquireImportLock`, `assertUploadQuota`, `adapter.persist`;
+  9. `adapter.toResponse`.
+
+  Steps 1 to 5 map every file problem to a 422 on `file` (`toUploadError`).
+
+- **Generic export** (`exportWorkbook`, `export-workbook.ts`), in order:
+  1. `adapter.load` with the store's scope;
+  2. the stored file's format by `source_format_id` (`selectFormat` when it is null), its sheet read strictly, its write columns (`resolveStoredWorkbook`);
+  3. the patch plan (`planExport`, `export-plan.ts`);
+  4. `patchWorkbook`, at most `MAX_PATCH_OUTPUTS` files per call;
+  5. the file names and the download (`download.ts`);
+  6. `adapter.touchExported` through `assertScopedWrite`.
+
+  Every engine call goes through `toStoredFileError`: a 409 with `meta.reason`, or a 503 when the parse queue is busy (`ENGINE_BUSY`).
+
+- **A new marketplace file for a page** is a format file, its summary in `formats/registry.ts`, the format in its adapter's `formats`, and a real fixture under `tests/fixtures/`. The registry test (`tests/unit/workbooks/registry.test.ts`) fails until its `FIXTURE_PAGES` classifies the fixture. The limit: an adapter's formats share one layout type, row type and write keys (`S`, `TRow`, `TWrite` in `adapter.ts`), so a format whose layout type the contract does not yet express needs contract work first. `TRENDYOL_FORMAT_SUMMARIES` holds one summary per page, so a second Trendyol version of one page changes the registry's shape too.
+- **Turkish text**: format files and the registry are ASCII. Every Turkish value they use (sheet names, default names, written labels, yes-flags, fingerprints) comes from `formats/trendyol/labels.ts`; column headers live in each page's `*.layout.ts`.
+- **Test-only engine entry**: `@pazarsync/spreadsheet/testing` (`patchFixture`, the fixture builders) patches in-process, without the parse worker. The `no-restricted-imports` rule in `packages/eslint-config/base.js` refuses it under `src/**`; test files may import it.
 
 ## Prisma 7 Conventions
 

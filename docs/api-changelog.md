@@ -332,7 +332,9 @@ section "Versioning" for details.
     with `{ field: 'file', code: 'PAYLOAD_TOO_LARGE' }`;
   - a parse that waits more than 20 s in the parse queue answers `503 IMPORT_BUSY` with
     `Retry-After`;
-  - an export whose stored file hits a worker limit answers `503 IMPORT_BUSY` instead of `409`.
+  - an export whose stored file hits a worker limit answers `503 IMPORT_BUSY` instead of `409`
+    (superseded: it now answers `409` with `meta.reason` `STORED_FILE_UNREADABLE`, see "Workbook
+    exports run through the generic workbook export").
 
   Before, such a file could crash or stall the API process. Non-breaking for well-behaved clients.
 - **Generic HTTP errors no longer echo library messages.** `400 MALFORMED_REQUEST` and other
