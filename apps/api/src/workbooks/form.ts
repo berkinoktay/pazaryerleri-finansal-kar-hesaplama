@@ -14,12 +14,17 @@ export const NAME_INVALID_CHARACTERS = 'NAME_INVALID_CHARACTERS';
 const CONTROL_OR_FORMAT_RE = /[\p{Cc}\p{Cf}]/gu;
 const NO_CONTROL_OR_FORMAT_RE = /^[^\p{Cc}\p{Cf}]*$/u;
 
-/** A typed list name on the wire; each rule's message is its field issue code. */
+/**
+ * A typed list name on the wire; each rule's message is its field issue code. The
+ * spec's `pattern` is given by hand: the generator writes a flagged regex with its
+ * `/u` suffix, a pattern no value matches.
+ */
 export const NameSchema: z.ZodString = z
   .string()
   .trim()
   .max(UPLOAD_NAME_MAX_LENGTH, NAME_TOO_LONG)
-  .regex(NO_CONTROL_OR_FORMAT_RE, NAME_INVALID_CHARACTERS);
+  .regex(NO_CONTROL_OR_FORMAT_RE, NAME_INVALID_CHARACTERS)
+  .openapi({ pattern: NO_CONTROL_OR_FORMAT_RE.source });
 
 /** `text` without its control (`\p{Cc}`) and format (`\p{Cf}`) characters. */
 export function stripControlAndFormat(text: string): string {

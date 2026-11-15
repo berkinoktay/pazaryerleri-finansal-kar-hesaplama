@@ -70,15 +70,20 @@
 //   - per table, the count of rows whose `name` is longer than UPLOAD_NAME_MAX_LENGTH
 //     characters and the count whose `source_filename` is (`char_length`: characters, as
 //     varchar counts them, never bytes; a null file name is not counted);
+//   - per table, the count of rows whose `name` the API's name rule (`NameSchema`)
+//     refuses for a control or format character: the legacy import only trimmed a
+//     name, and the web's edit dialogs send the stored name back on every save, so the
+//     update routes would answer such a list 422 NAME_INVALID_CHARACTERS until it is
+//     renamed. This one query reads the names; the check runs here, in the API's own rule;
 //   - per table, the store ids holding more than MAX_LISTS_PER_STORE_PAGE rows, and the
 //     store ids whose stored files (`octet_length` of `source_file`) over all six tables
 //     sum to more than STORE_UPLOAD_QUOTA_BYTES.
-// The limits are the API's own constants, imported. Only table names, counts and store
-// ids are printed, never a name, a file name or a cell. Any count above 0 or any store
-// id listed sets exit code 1: a name over the limit aborts the migration that limits
-// it, and a store over a quota is the owner's decision. The three queries are static
-// text: the six table names are written out (the tables of gate mode), only the limits
-// are bound.
+// The limits and the name rule are the API's own, imported. Only table names, counts
+// and store ids are printed, never a name, a file name or a cell. Any count above 0 or
+// any store id listed sets exit code 1: a name over the limit aborts the migration that
+// limits it, a name with such a character blocks its list's edits, and a store over a
+// quota is the owner's decision. The four queries are static text: the six table names
+// are written out (the tables of gate mode), only the limits are bound.
 //
 // Usage, once before the migration and once after it:
 //   AUDIT_DATABASE_URL='<direct or session connection string>' pnpm --filter @pazarsync/api audit:stored-workbooks
@@ -105,13 +110,15 @@ import {
 } from '@pazarsync/spreadsheet';
 import { WORKBOOK_PAGES, type WorkbookPage } from '@pazarsync/utils';
 
-// The one value import from src/: the limits module imports nothing, so loading it
-// cannot build the @pazarsync/db pool before main() makes DATABASE_URL read-only.
+// The value imports from src/: the limits module imports nothing and the name rule
+// imports only zod and the limits, so loading them cannot build the @pazarsync/db pool
+// before main() makes DATABASE_URL read-only.
 import {
   MAX_LISTS_PER_STORE_PAGE,
   STORE_UPLOAD_QUOTA_BYTES,
   UPLOAD_NAME_MAX_LENGTH,
 } from '../src/config/workbook-limits';
+import { NAME_INVALID_CHARACTERS, NameSchema } from '../src/workbooks/form';
 // Types only, for the same reason: each of these modules loads @pazarsync/db (directly,
 // or through @pazarsync/sync-core), so main() imports them only after DATABASE_URL is
 // read-only (loadFullMode).
@@ -728,6 +735,16 @@ function isStoreIdRow(value: unknown): value is { storeId: string } {
   return isRecord(value) && typeof value['storeId'] === 'string';
 }
 
+/** One stored list name and its table; read only to be counted, never printed. */
+interface StoredNameRow {
+  readonly table: string;
+  readonly name: string;
+}
+
+function isStoredNameRow(value: unknown): value is StoredNameRow {
+  return isRecord(value) && typeof value['table'] === 'string' && typeof value['name'] === 'string';
+}
+
 /** The rows of a query as `guard` reads them; any other shape is fatal. */
 function rowsOf<T>(rows: unknown, guard: (value: unknown) => value is T, query: string): T[] {
   if (!Array.isArray(rows)) throw new Error(`The ${query} query returned no rows array`);
@@ -780,6 +797,39 @@ async function longNameCounts(db: PrismaClient): Promise<LongNameRow[]> {
       (count(*) FILTER (WHERE char_length("source_filename") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "fileNames"
     FROM "marketplace_campaign_lists"`;
   return rowsOf(rows, isLongNameRow, 'name length');
+}
+
+/** True when the API's name rule refuses `name` for a control or format character. */
+function refusedForCharacters(name: string): boolean {
+  const parsed = NameSchema.safeParse(name);
+  return (
+    !parsed.success &&
+    parsed.error.issues.some((issue) => issue.message === NAME_INVALID_CHARACTERS)
+  );
+}
+
+/**
+ * Per parent table: the count of rows whose `name` the API's name rule refuses for a
+ * control or format character. The names are read and checked here, never printed.
+ */
+async function invalidCharacterNameCounts(db: PrismaClient): Promise<Map<string, number>> {
+  const rows: unknown = await db.$queryRaw`
+    SELECT 'commission_tariffs' AS "table", "name"::text AS "name" FROM "commission_tariffs"
+    UNION ALL
+    SELECT 'plus_commission_tariffs' AS "table", "name"::text AS "name" FROM "plus_commission_tariffs"
+    UNION ALL
+    SELECT 'advantage_tariffs' AS "table", "name"::text AS "name" FROM "advantage_tariffs"
+    UNION ALL
+    SELECT 'flash_product_lists' AS "table", "name"::text AS "name" FROM "flash_product_lists"
+    UNION ALL
+    SELECT 'discount_lists' AS "table", "name"::text AS "name" FROM "discount_lists"
+    UNION ALL
+    SELECT 'marketplace_campaign_lists' AS "table", "name"::text AS "name" FROM "marketplace_campaign_lists"`;
+  const counts = new Map<string, number>();
+  for (const row of rowsOf(rows, isStoredNameRow, 'name characters')) {
+    if (refusedForCharacters(row.name)) counts.set(row.table, (counts.get(row.table) ?? 0) + 1);
+  }
+  return counts;
 }
 
 /** Per parent table: the stores holding more than MAX_LISTS_PER_STORE_PAGE rows. */
@@ -859,6 +909,15 @@ async function auditNamesAndQuota(db: PrismaClient, tables: readonly string[]): 
     console.log(`  ${table}: name ${row.names}, source_filename ${row.fileNames}`);
     if (row.names > 0) findings += 1;
     if (row.fileNames > 0) findings += 1;
+  }
+
+  const invalidNames = await invalidCharacterNameCounts(db);
+  for (const table of invalidNames.keys()) assertKnownTable(table, known, 'name characters');
+  console.log('names with a control or format character:');
+  for (const table of tables) {
+    const count = invalidNames.get(table) ?? 0;
+    console.log(`  ${table}: ${count}`);
+    if (count > 0) findings += 1;
   }
 
   const overLists = await storesOverListLimit(db);

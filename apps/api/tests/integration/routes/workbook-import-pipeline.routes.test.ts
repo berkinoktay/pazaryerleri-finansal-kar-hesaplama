@@ -1,5 +1,5 @@
 // The generic workbook import through the discount route, its first consumer:
-//   - the stored format id and the stored file name rule;
+//   - the stored format id, the stored file name rule and the typed name rule;
 //   - a write-back column a seller made unwritable (a shared formula, an array formula,
 //     a merged range) is refused at upload with 422 MALFORMED_SHEET, not at the first
 //     export, and nothing is stored;
@@ -59,6 +59,9 @@ const ProblemSchema = z.object({
   errors: z.array(z.object({ field: z.string(), code: z.string() })).optional(),
 });
 
+// The whole body of a 422, field issues as sent (meta included), for a strict pin.
+const RawValidationSchema = z.object({ code: z.string(), errors: z.array(z.unknown()) });
+
 const ImportSchema = z.object({ listId: z.string(), name: z.string(), itemCount: z.number() });
 
 const GrantedSchema = z.array(z.object({ granted: z.number() }));
@@ -82,10 +85,12 @@ function importRequest(
   file: Buffer,
   filename = 'trendyol_indirimler.xlsx',
   path: { orgId: string; storeId: string } = ctx,
+  typedName?: string,
 ): Request {
   const form = new FormData();
   form.append('file', new Blob([new Uint8Array(file)]), filename);
   for (const [key, value] of Object.entries(NET_CONFIG)) form.append(key, value);
+  if (typedName !== undefined) form.append('name', typedName);
   return new Request(
     `http://local/v1/organizations/${path.orgId}/stores/${path.storeId}/discount-lists/import`,
     { method: 'POST', headers: { Authorization: bearer(ctx.accessToken) }, body: form },
@@ -254,6 +259,51 @@ describe('generic workbook import on the discount route', () => {
       select: { sourceFilename: true, name: true },
     });
     expect(list).toEqual({ sourceFilename: null, name: TRENDYOL_DEFAULT_NAMES.DISCOUNT_LIST });
+  });
+
+  it('refuses a typed name above 120 characters with 422 NAME_TOO_LONG, and stores nothing', async () => {
+    const ctx = await setupStore();
+    const typedName = 'n'.repeat(UPLOAD_NAME_MAX_LENGTH + 1);
+
+    const res = await app.request(importRequest(ctx, FIXTURE, undefined, ctx, typedName));
+
+    expect(res.status).toBe(422);
+    const body = RawValidationSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toStrictEqual([
+      { field: 'name', code: 'NAME_TOO_LONG', meta: { zodCode: 'too_big' } },
+    ]);
+    expect(await prisma.discountList.count()).toBe(0);
+  });
+
+  it('refuses a typed name holding a bidi override with 422 NAME_INVALID_CHARACTERS', async () => {
+    const ctx = await setupStore();
+
+    const res = await app.request(importRequest(ctx, FIXTURE, undefined, ctx, `Liste ${RLO}1`));
+
+    expect(res.status).toBe(422);
+    const body = RawValidationSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toStrictEqual([
+      { field: 'name', code: 'NAME_INVALID_CHARACTERS', meta: { zodCode: 'invalid_format' } },
+    ]);
+    expect(await prisma.discountList.count()).toBe(0);
+  });
+
+  it('imports a typed name of exactly 120 characters and stores it unchanged', async () => {
+    const ctx = await setupStore();
+    const typedName = 'n'.repeat(UPLOAD_NAME_MAX_LENGTH);
+
+    const res = await app.request(importRequest(ctx, FIXTURE, undefined, ctx, typedName));
+
+    expect(res.status).toBe(201);
+    const { listId, name } = ImportSchema.parse(await res.json());
+    expect(name).toBe(typedName);
+    const list = await prisma.discountList.findFirst({
+      where: { id: listId, organizationId: ctx.orgId, storeId: ctx.storeId },
+      select: { name: true },
+    });
+    expect(list).toEqual({ name: typedName });
   });
 
   describe('refuses a participation column the export could not write, and stores nothing', () => {

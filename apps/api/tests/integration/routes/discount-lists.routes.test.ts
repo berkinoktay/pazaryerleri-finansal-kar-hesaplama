@@ -9,12 +9,14 @@
 // items' per-order discount cost. These tests lock the config round-trip, the real
 // scenario shape, the PATCH validator gate, and the delete cascade.
 
+import { z } from '@hono/zod-openapi';
 import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 
 import { createApp } from '@/app';
+import { UPLOAD_NAME_MAX_LENGTH } from '@/config/workbook-limits';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -30,6 +32,9 @@ const CAMPAIGN_WINDOW = {
   startsAt: '2026-07-21T05:00:00.000Z',
   endsAt: '2026-07-28T04:59:00.000Z',
 } as const;
+
+// The whole body of a 422, field issues as sent (meta included), for a strict pin.
+const RawValidationSchema = z.object({ code: z.string(), errors: z.array(z.unknown()) });
 
 interface ScenarioWire {
   price: string;
@@ -398,6 +403,37 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
     const body = (await res.json()) as { code: string; errors: { field: string; code: string }[] };
     expect(body.code).toBe('VALIDATION_ERROR');
     expect(body.errors.some((e) => e.field === 'value' && e.code === 'VALUE_TOO_LARGE')).toBe(true);
+  });
+
+  it('rejects a name above 120 characters with 422 NAME_TOO_LONG and leaves the list as it was', async () => {
+    const listScope = { id: fx.listId, organizationId: fx.orgId, storeId: fx.storeId };
+    const select = { name: true, updatedAt: true } as const;
+    const before = await prisma.discountList.findFirst({ where: listScope, select });
+    if (before === null) throw new Error('the seeded list is gone');
+
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'n'.repeat(UPLOAD_NAME_MAX_LENGTH + 1),
+          discountType: 'CONDITIONAL_BASKET',
+          valueKind: 'AMOUNT',
+          value: '20',
+          minBasketAmount: '150',
+          ...CAMPAIGN_WINDOW,
+        }),
+      },
+    );
+
+    expect(res.status).toBe(422);
+    const body = RawValidationSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toStrictEqual([
+      { field: 'name', code: 'NAME_TOO_LONG', meta: { zodCode: 'too_big' } },
+    ]);
+    expect(await prisma.discountList.findFirst({ where: listScope, select })).toEqual(before);
   });
 
   it('deletes the list (204), then the detail 404s and the list is empty', async () => {

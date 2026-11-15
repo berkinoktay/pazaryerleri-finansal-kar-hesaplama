@@ -50,9 +50,13 @@ section "Versioning" for details.
     takes the page's default name instead of the file name stem (a commission or Plus commission
     tariff first takes its first period's date range label, as it did when the file name had no
     stem).
-  - A typed `name` drops control and format characters and is cut to 120 characters (code
-    points); before, it was only trimmed. A typed name left empty by that falls back to the file
-    name stem, then to the page's default name.
+  - A typed `name` is trimmed and then checked: over 120 characters answers `422` with
+    `{ field: 'name', code: 'NAME_TOO_LONG' }`, a control or format character (`\p{Cc}`,
+    `\p{Cf}`, a bidi override for instance) answers `422` with
+    `{ field: 'name', code: 'NAME_INVALID_CHARACTERS' }`; nothing is stored. Before, it was only
+    trimmed and stored at any length. A name empty after trimming still falls back to the file
+    name stem, then to the page's default name. The `name` form field gains `maxLength: 120` and
+    a `pattern` in the OpenAPI spec.
   - The page's invalid-format answer (`INVALID_DISCOUNT_FORMAT` for discount lists,
     `INVALID_CAMPAIGN_FORMAT` for marketplace campaign lists, `INVALID_FLASH_FORMAT` for flash
     product lists, `INVALID_ADVANTAGE_TARIFF_FORMAT` for advantage tariffs,
@@ -100,6 +104,16 @@ section "Versioning" for details.
   - On advantage tariffs the commission source (`commissionSourceTariffId`) is checked after the
     file's rows are read, with the same field error (`INVALID_COMMISSION_SOURCE`): an upload that
     is both a refused file and names another store's commission tariff answers the file error.
+- **Discount list and marketplace campaign list names follow the import's name rule**
+  (`PATCH /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}`,
+  `PATCH /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}`). A `name`
+  is trimmed and stored trimmed; a whitespace-only name now answers the `422` an empty name
+  already got; over 120 characters answers `422` `NAME_TOO_LONG` and a control or format
+  character `422` `NAME_INVALID_CHARACTERS` on `field: 'name'`, and nothing changes. Before, any
+  non-empty string was stored as sent. A list stored before this rule with such a character in its name
+  answers the same `422` while its stored name is sent back unchanged. The body's `name` gains
+  `maxLength: 120` and a `pattern` in the OpenAPI spec. The `name` and `source_filename` columns
+  of the six campaign list tables become `varchar(120)`.
 - **Workbook exports run through the generic workbook export**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}/export`,
   `POST /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/export`,

@@ -15,6 +15,7 @@ import type { Prisma } from '@pazarsync/db';
 import { CampaignPriceSelection, DiscountType, DiscountValueKind } from '@pazarsync/db/enums';
 
 import type { DiscountConfig } from '../services/discount-math-commons';
+import { NameSchema } from '../workbooks/form';
 import { refineDiscountConfig } from './discount-list.validator';
 import { QuoteBreakdownSchema } from './product-pricing.validator';
 
@@ -227,7 +228,7 @@ export const ImportMarketplaceCampaignFormSchema = MarketplaceCampaignConfigFiel
     format: 'binary',
     description: 'Trendyol Kampanyalar ürün seçim dosyası (.xlsx)',
   }),
-  name: z.string().optional().openapi({ description: 'İsteğe bağlı görünen ad; yoksa dosya adı.' }),
+  name: NameSchema.optional().openapi({ description: 'İsteğe bağlı görünen ad; yoksa dosya adı.' }),
 });
 
 export const ImportMarketplaceCampaignResponseSchema = z
@@ -552,7 +553,7 @@ export const UpdateCampaignSelectionsResponseSchema = z
 // body still runs refineDiscountConfig + the funding>100 check via the base schema's
 // superRefine; nothing here re-applies them.
 export const UpdateMarketplaceCampaignBodySchema = MarketplaceCampaignConfigFieldsSchema.extend({
-  name: z.string().min(1).optional(),
+  name: NameSchema.min(1).optional(),
 }).openapi('UpdateMarketplaceCampaignBody');
 
 export const UpdateMarketplaceCampaignResponseSchema = z

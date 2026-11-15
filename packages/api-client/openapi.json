@@ -6851,7 +6851,9 @@
           },
           "name": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 120,
+            "pattern": "^[^\\p{Cc}\\p{Cf}]*$"
           }
         },
         "required": [
@@ -7634,7 +7636,9 @@
           },
           "name": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 120,
+            "pattern": "^[^\\p{Cc}\\p{Cf}]*$"
           }
         },
         "required": [
@@ -16195,6 +16199,8 @@
                   },
                   "name": {
                     "type": "string",
+                    "maxLength": 120,
+                    "pattern": "^[^\\p{Cc}\\p{Cf}]*$",
                     "description": "İsteğe bağlı görünen ad; yoksa dosya adı."
                   }
                 },
@@ -17203,6 +17209,8 @@
                   },
                   "name": {
                     "type": "string",
+                    "maxLength": 120,
+                    "pattern": "^[^\\p{Cc}\\p{Cf}]*$",
                     "description": "İsteğe bağlı görünen ad; yoksa dosya adı."
                   }
                 },
@@ -18211,6 +18219,8 @@
                   },
                   "name": {
                     "type": "string",
+                    "maxLength": 120,
+                    "pattern": "^[^\\p{Cc}\\p{Cf}]*$",
                     "description": "İsteğe bağlı görünen ad; yoksa dosya adı."
                   },
                   "commissionSourceTariffId": {
@@ -19379,6 +19389,8 @@
                   },
                   "name": {
                     "type": "string",
+                    "maxLength": 120,
+                    "pattern": "^[^\\p{Cc}\\p{Cf}]*$",
                     "description": "İsteğe bağlı görünen ad; yoksa dosya adı."
                   }
                 },
@@ -20419,6 +20431,8 @@
                   },
                   "name": {
                     "type": "string",
+                    "maxLength": 120,
+                    "pattern": "^[^\\p{Cc}\\p{Cf}]*$",
                     "description": "İsteğe bağlı görünen ad; yoksa dosya adı."
                   }
                 },
@@ -21615,6 +21629,8 @@
                   },
                   "name": {
                     "type": "string",
+                    "maxLength": 120,
+                    "pattern": "^[^\\p{Cc}\\p{Cf}]*$",
                     "description": "İsteğe bağlı görünen ad; yoksa dosya adı."
                   }
                 },
