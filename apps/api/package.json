@@ -17,7 +17,7 @@
     "test:integration:rls": "vitest run --config vitest.rls.config.ts --passWithNoTests",
     "test:watch": "vitest --config vitest.unit.config.ts",
     "openapi:dump": "tsx scripts/dump-openapi.ts",
-    "audit:stored-workbooks": "tsx --env-file-if-exists=../../.env scripts/audit-stored-workbooks.ts",
+    "audit:stored-workbooks": "tsx scripts/audit-stored-workbooks.ts",
     "gen:encryption-key": "tsx scripts/gen-encryption-key.ts"
   },
   "dependencies": {

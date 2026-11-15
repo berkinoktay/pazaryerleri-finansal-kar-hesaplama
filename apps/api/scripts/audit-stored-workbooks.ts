@@ -5,12 +5,14 @@
 // the selector the page's legacy export service passes today (what the stricter gate
 // now refuses) and with the page's strict selector (named sheet, or the first sheet
 // by index). Per table it prints the `source_format_id` groups, the count of stored
-// files without a format id, the number of stored files and, per selector, the files
-// that passed and the refused ones grouped by engine code and reason with their
-// record ids. A CORRUPT_FILE whose `meta.rule` names the reader rule the file broke
-// (a READER_RULES key) is grouped as `CORRUPT_FILE rule:<rule>`. It never prints a
-// file name, a list name, a cell or an engine error message (`meta.cause` included):
-// only allowlisted engine reasons and reader rule keys reach the output.
+// files without a format id, the table's total row count next to the number of stored
+// files (a run against an empty or wrong database shows its zeros there) and, per
+// selector, the files that passed and the refused ones grouped by engine code and
+// reason with their record ids. A CORRUPT_FILE whose `meta.rule` names the reader
+// rule the file broke (a READER_RULES key) is grouped under `CORRUPT_FILE rule:<rule>`.
+// It never prints a file name, a list name, a cell or an engine error message
+// (`meta.cause` included): only allowlisted engine reasons and reader rule keys reach
+// the output.
 //
 // A file the legacy selector reads while the strict selector refuses it as
 // CORRUPT_FILE was read through the legacy fallback to the first sheet: its named
@@ -23,22 +25,29 @@
 // it queries through starts with `default_transaction_read_only=on`, and it stops
 // before reading a row unless the database confirms the session is read-only.
 //
-// It connects with DIRECT_URL, else DATABASE_URL (an empty value counts as unset),
-// and prints only the `host:port` of that URL and which variable it came from. Before
-// connecting it refuses a URL to the transaction pooler (port 6543, or `pgbouncer=true`
-// in any case): the read-only startup option is not guaranteed to reach the server
-// connections behind it. Use the direct connection or the session pooler.
+// It connects with AUDIT_DATABASE_URL and nothing else: it never falls back to
+// DATABASE_URL or DIRECT_URL and reads no .env file, so it cannot audit another
+// database than the one the operator names. An unset or empty AUDIT_DATABASE_URL is a
+// fatal error that names the variable. Before connecting it refuses a URL that is not
+// postgres:// or postgresql://, a URL whose authority leaves out the host or the port
+// (pg would take them from PGHOST and PGPORT), a URL with a `host`, `hostaddr` or
+// `port` query parameter in any letter case (pg reads those in place of the
+// authority), and a URL to the transaction pooler (port 6543 in the authority, or
+// `pgbouncer=true` in any case): the read-only startup option is not guaranteed to
+// reach the server connections behind it. Use the direct connection or the session
+// pooler. It prints the `host:port` of the URL and the database name the server
+// reports, never the URL or its password.
 //
 // It runs before and after the migration that adds `source_format_id` (looked up in
 // the `public` schema): before it (the deploy order runs it against the live database
 // first) the format id lines are skipped. Exit code 1 when a stored file is refused
 // with the legacy selector (what the stricter gate changes for an export today), when
 // a file is listed as "legacy passed, named sheet unreadable", when a table holds a
-// format id other than its expected one, or on a fatal error (a pooler URL included);
-// 0 otherwise.
+// format id other than its expected one, or on a fatal error (an unset
+// AUDIT_DATABASE_URL and a refused URL included); 0 otherwise.
 //
-// Usage (DIRECT_URL or DATABASE_URL from the environment, else from the repo-root .env):
-//   pnpm --filter @pazarsync/api audit:stored-workbooks
+// Usage, once before the migration and once after it:
+//   AUDIT_DATABASE_URL='<direct or session connection string>' pnpm --filter @pazarsync/api audit:stored-workbooks
 
 // Type only: a value import would load the package, and build its pool, before main()
 // makes DATABASE_URL read-only.
@@ -52,6 +61,7 @@ import {
   SpreadsheetFileError,
   UNSAFE_CONTENT_REASONS,
   UNSUPPORTED_ENCODING_REASONS,
+  UPLOAD_LIMIT_REASONS,
   WORKER_LIMIT_REASONS,
   ZIP_REJECT_REASONS,
   type ReadGridOptions,
@@ -59,10 +69,17 @@ import {
 } from '@pazarsync/spreadsheet';
 import { WORKBOOK_PAGES, type WorkbookPage } from '@pazarsync/utils';
 
+/** The one variable the audit takes its connection URL from; no other variable stands in. */
+const AUDIT_URL_VARIABLE = 'AUDIT_DATABASE_URL';
 /** The variable @pazarsync/db builds its pool from. */
 const DATABASE_URL_VARIABLE = 'DATABASE_URL';
-/** Where the connection URL comes from, in this order: the direct connection first. */
-const CONNECTION_URL_VARIABLES = ['DIRECT_URL', DATABASE_URL_VARIABLE] as const;
+/** The URL schemes of a Postgres connection string. */
+const POSTGRES_PROTOCOLS: ReadonlySet<string> = new Set(['postgres:', 'postgresql:']);
+/**
+ * Query parameters pg (or libpq) reads in place of the URL's host or port, compared on
+ * the decoded name in any letter case.
+ */
+const AUTHORITY_OVERRIDE_PARAMS: ReadonlySet<string> = new Set(['host', 'hostaddr', 'port']);
 /** The port of Supabase's transaction pooler. */
 const TRANSACTION_POOLER_PORT = '6543';
 /** The query parameter that marks a pgbouncer (transaction pooler) URL, compared in any case. */
@@ -100,6 +117,7 @@ const KNOWN_REASONS: ReadonlySet<string> = new Set([
   ...Object.values(PATCH_LIMIT_REASONS),
   ...Object.values(UNSAFE_CONTENT_REASONS),
   ...Object.values(UNSUPPORTED_ENCODING_REASONS),
+  ...Object.values(UPLOAD_LIMIT_REASONS),
   ...Object.values(WORKER_LIMIT_REASONS),
   ...Object.values(ZIP_REJECT_REASONS),
 ]);
@@ -109,14 +127,6 @@ const KNOWN_READER_RULES: ReadonlySet<string> = new Set(Object.keys(READER_RULES
 
 const HAS_STORED_FILE = { sourceFile: { not: null } } as const;
 const STORED_FILE_WITHOUT_FORMAT = { sourceFile: { not: null }, sourceFormatId: null } as const;
-
-type ConnectionUrlVariable = (typeof CONNECTION_URL_VARIABLES)[number];
-
-/** The connection URL the audit uses and the variable it came from. */
-interface ConnectionUrl {
-  readonly url: string;
-  readonly variable: ConnectionUrlVariable;
-}
 
 /** One row of `GROUP BY source_format_id` over a whole table. */
 interface FormatGroupRow {
@@ -132,6 +142,8 @@ interface StoredWorkbookTable {
   readonly legacyRead: ReadGridOptions;
   /** The strict selector of the page's workbook format. */
   readonly strictRead: ReadGridOptions;
+  /** Every row of the table, with or without a stored file. */
+  readonly rowCount: () => Promise<number>;
   readonly storedFileIds: () => Promise<string[]>;
   readonly storedFile: (id: string) => Promise<Uint8Array | null>;
   /** Each binds the groupBy result to a local: a contextual return type derails its inference. */
@@ -172,21 +184,42 @@ function idsOf(rows: readonly { readonly id: string }[]): string[] {
   return rows.map((row) => row.id);
 }
 
-/** DIRECT_URL, else DATABASE_URL, with the variable it came from; an empty value counts as unset. */
-function chooseConnectionUrl(): ConnectionUrl {
-  for (const variable of CONNECTION_URL_VARIABLES) {
-    const url = process.env[variable];
-    if (url !== undefined && url !== '') return { url, variable };
+/** The parsed AUDIT_DATABASE_URL; unset, empty or unparsable is fatal, naming the variable only. */
+function readAuditUrl(): URL {
+  const raw = process.env[AUDIT_URL_VARIABLE];
+  if (raw === undefined || raw === '') {
+    throw new Error(
+      `${AUDIT_URL_VARIABLE} is not set; pass the direct or session connection string in it`,
+    );
   }
-  throw new Error(`Neither ${CONNECTION_URL_VARIABLES.join(' nor ')} is set`);
+  try {
+    return new URL(raw);
+  } catch (err) {
+    throw new Error(`${AUDIT_URL_VARIABLE} is not a valid URL`, { cause: err });
+  }
 }
 
-/** The parsed connection URL; a URL that does not parse is named by its variable only. */
-function parseConnectionUrl(connection: ConnectionUrl): URL {
-  try {
-    return new URL(connection.url);
-  } catch (err) {
-    throw new Error(`${connection.variable} is not a valid URL`, { cause: err });
+/**
+ * Refuses a URL whose server pg would not take from its authority: another scheme, an
+ * empty host or port (pg falls back to PGHOST and PGPORT), or a `host`, `hostaddr` or
+ * `port` query parameter in any letter case (pg reads those in place of the authority).
+ * The error names the canonical parameter, never its value or the URL.
+ */
+function assertAuthorityNamesTheServer(url: URL): void {
+  if (!POSTGRES_PROTOCOLS.has(url.protocol)) {
+    throw new Error(`${AUDIT_URL_VARIABLE} is not a postgres:// or postgresql:// URL`);
+  }
+  if (url.hostname === '' || url.port === '') {
+    throw new Error(`${AUDIT_URL_VARIABLE} must name both its host and its port`);
+  }
+  for (const name of url.searchParams.keys()) {
+    const canonical = name.toLowerCase();
+    if (AUTHORITY_OVERRIDE_PARAMS.has(canonical)) {
+      throw new Error(
+        `${AUDIT_URL_VARIABLE} carries the "${canonical}" query parameter, which overrides ` +
+          'the host or port of the URL; remove it',
+      );
+    }
   }
 }
 
@@ -202,14 +235,14 @@ function isTransactionPoolerUrl(url: URL): boolean {
 }
 
 /** `url` with the read-only session option added to the startup options it may carry. */
-function withReadOnlySessions(url: string): string {
-  const parsed = new URL(url);
-  const existing = parsed.searchParams.get(PG_OPTIONS_PARAM);
-  parsed.searchParams.set(
+function withReadOnlySessions(url: URL): string {
+  const target = new URL(url);
+  const existing = target.searchParams.get(PG_OPTIONS_PARAM);
+  target.searchParams.set(
     PG_OPTIONS_PARAM,
     existing === null ? READ_ONLY_SESSION_OPTION : `${existing} ${READ_ONLY_SESSION_OPTION}`,
   );
-  return parsed.toString();
+  return target.toString();
 }
 
 /** The database name, once the server confirms the session's transactions are read-only. */
@@ -260,6 +293,7 @@ function storedWorkbookTables(db: PrismaClient): readonly StoredWorkbookTable[] 
       page: WORKBOOK_PAGES.COMMISSION_TARIFF,
       legacyRead: { sheetName: COMMISSION_TARIFF_SHEET },
       strictRead: { sheet: { by: 'name', name: COMMISSION_TARIFF_SHEET } },
+      rowCount: async () => db.commissionTariff.count(),
       storedFileIds: async () =>
         idsOf(
           await db.commissionTariff.findMany({
@@ -286,6 +320,7 @@ function storedWorkbookTables(db: PrismaClient): readonly StoredWorkbookTable[] 
       page: WORKBOOK_PAGES.PLUS_COMMISSION_TARIFF,
       legacyRead: { sheetName: PLUS_COMMISSION_TARIFF_SHEET },
       strictRead: { sheet: { by: 'name', name: PLUS_COMMISSION_TARIFF_SHEET } },
+      rowCount: async () => db.plusCommissionTariff.count(),
       storedFileIds: async () =>
         idsOf(
           await db.plusCommissionTariff.findMany({
@@ -312,6 +347,7 @@ function storedWorkbookTables(db: PrismaClient): readonly StoredWorkbookTable[] 
       page: WORKBOOK_PAGES.ADVANTAGE_TARIFF,
       legacyRead: { sheetName: ADVANTAGE_TARIFF_SHEET },
       strictRead: { sheet: { by: 'name', name: ADVANTAGE_TARIFF_SHEET } },
+      rowCount: async () => db.advantageTariff.count(),
       storedFileIds: async () =>
         idsOf(
           await db.advantageTariff.findMany({
@@ -338,6 +374,7 @@ function storedWorkbookTables(db: PrismaClient): readonly StoredWorkbookTable[] 
       page: WORKBOOK_PAGES.FLASH_PRODUCT_LIST,
       legacyRead: { sheetName: FLASH_PRODUCT_LIST_SHEET },
       strictRead: { sheet: { by: 'name', name: FLASH_PRODUCT_LIST_SHEET } },
+      rowCount: async () => db.flashProductList.count(),
       storedFileIds: async () =>
         idsOf(
           await db.flashProductList.findMany({
@@ -364,6 +401,7 @@ function storedWorkbookTables(db: PrismaClient): readonly StoredWorkbookTable[] 
       page: WORKBOOK_PAGES.DISCOUNT_LIST,
       legacyRead: { sheetName: DISCOUNT_LIST_SHEET },
       strictRead: { sheet: { by: 'name', name: DISCOUNT_LIST_SHEET } },
+      rowCount: async () => db.discountList.count(),
       storedFileIds: async () =>
         idsOf(
           await db.discountList.findMany({
@@ -391,6 +429,7 @@ function storedWorkbookTables(db: PrismaClient): readonly StoredWorkbookTable[] 
       page: WORKBOOK_PAGES.MARKETPLACE_CAMPAIGN_LIST,
       legacyRead: {},
       strictRead: { sheet: { by: 'index', index: FIRST_SHEET_INDEX } },
+      rowCount: async () => db.marketplaceCampaignList.count(),
       storedFileIds: async () =>
         idsOf(
           await db.marketplaceCampaignList.findMany({
@@ -518,6 +557,7 @@ async function auditTable(
     console.log('  source_format_id: column absent (migration not applied yet)');
   }
 
+  const rows = await table.rowCount();
   const ids = await table.storedFileIds();
   const legacy = createTally();
   const strict = createTally();
@@ -540,7 +580,7 @@ async function auditTable(
     }
   }
 
-  console.log(`  stored files: ${ids.length}, gone during the run: ${gone}`);
+  console.log(`  rows: ${rows}, stored files: ${ids.length}, gone during the run: ${gone}`);
   printTally('legacy selector', legacy);
   printTally('strict selector', strict);
   const unreadable = idCount(namedSheetUnreadable);
@@ -554,22 +594,24 @@ async function auditTable(
 }
 
 async function main(): Promise<void> {
-  const connection = chooseConnectionUrl();
-  const parsed = parseConnectionUrl(connection);
-  if (isTransactionPoolerUrl(parsed)) {
+  // Every check runs on this one parsed URL, and the pool's URL is built from it.
+  const url = readAuditUrl();
+  assertAuthorityNamesTheServer(url);
+  if (isTransactionPoolerUrl(url)) {
     throw new Error(
-      `${connection.variable} points at the transaction pooler (port ${TRANSACTION_POOLER_PORT} ` +
+      `${AUDIT_URL_VARIABLE} points at the transaction pooler (port ${TRANSACTION_POOLER_PORT} ` +
         `or ${PGBOUNCER_PARAM}=${PGBOUNCER_ON}), which does not guarantee the read-only session; ` +
         'use the direct connection or the session pooler',
     );
   }
-  process.env[DATABASE_URL_VARIABLE] = withReadOnlySessions(connection.url);
+  process.env[DATABASE_URL_VARIABLE] = withReadOnlySessions(url);
   // Imported only now: the package builds its pool from DATABASE_URL when it loads.
   const { prisma } = await import('@pazarsync/db');
   try {
     const dbName = await confirmReadOnly(prisma);
     console.log(
-      `database ${dbName} on ${parsed.host} (from ${connection.variable}): read-only session`,
+      `database ${dbName} on ${url.hostname}:${url.port} (from ${AUDIT_URL_VARIABLE}): ` +
+        'read-only session',
     );
     const withFormatColumn = await hasSourceFormatColumn(prisma);
     let failed = false;
