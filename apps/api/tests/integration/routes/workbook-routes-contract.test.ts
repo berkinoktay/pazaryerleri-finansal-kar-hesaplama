@@ -101,6 +101,43 @@ const CONTRACT_ROWS: readonly ContractRow[] = [
     otherPage: 'ADVANTAGE_TARIFF',
     wrongFileCode: 'INVALID_PLUS_TARIFF_FORMAT',
   },
+  {
+    segment: 'commission-tariffs',
+    idParam: 'tariffId',
+    fixture: 'trendyol-commission-tariff.xlsx',
+    form: {},
+    // The commission sheet is read by name; the Plus file has none of that name, so the
+    // diagnosis reads its first sheet, the Plus product sheet.
+    otherPageFixture: 'trendyol-plus-tariff.xlsx',
+    otherPage: 'PLUS_COMMISSION_TARIFF',
+    wrongFileCode: 'INVALID_TARIFF_FORMAT',
+  },
+];
+
+/**
+ * The two tariff pages share headers (barcode, current price, tariff selection), so each
+ * page's real file is also tried on the other page's route, both directions: the
+ * diagnosis must still name the right page.
+ */
+const TARIFF_CROSS_ROWS: readonly ContractRow[] = [
+  {
+    segment: 'plus-commission-tariffs',
+    idParam: 'tariffId',
+    fixture: 'trendyol-plus-tariff.xlsx',
+    form: {},
+    otherPageFixture: 'trendyol-commission-tariff.xlsx',
+    otherPage: 'COMMISSION_TARIFF',
+    wrongFileCode: 'INVALID_PLUS_TARIFF_FORMAT',
+  },
+  {
+    segment: 'commission-tariffs',
+    idParam: 'tariffId',
+    fixture: 'trendyol-commission-tariff.xlsx',
+    form: {},
+    otherPageFixture: 'trendyol-plus-tariff-3ve4.xlsx',
+    otherPage: 'PLUS_COMMISSION_TARIFF',
+    wrongFileCode: 'INVALID_TARIFF_FORMAT',
+  },
 ];
 
 const NOT_XLSX = Buffer.from('this is plain text, not a zip archive');
@@ -275,3 +312,31 @@ describe.each(CONTRACT_ROWS)('workbook import contract: $segment', (row) => {
     expect(path?.post).toBeDefined();
   });
 });
+
+describe.each(TARIFF_CROSS_ROWS)(
+  'workbook import contract: the other tariff page file on $segment',
+  (row) => {
+    beforeAll(async () => {
+      await ensureDbReachable();
+    });
+
+    beforeEach(async () => {
+      await truncateAll();
+    });
+
+    it(`names ${row.otherPage} and writes nothing`, async () => {
+      const ctx = await setupStore();
+      const before = await workbookRowCounts();
+
+      const res = await app.request(importRequest(ctx, row, fixture(row.otherPageFixture)));
+
+      expect(res.status).toBe(422);
+      const body = IssuesSchema.parse(await res.json());
+      expect(body.errors).toHaveLength(1);
+      expect(body.errors[0]?.field).toBe('file');
+      expect(body.errors[0]?.code).toBe(row.wrongFileCode);
+      expect(body.errors[0]?.meta?.['detectedPage']).toBe(row.otherPage);
+      expect(await workbookRowCounts()).toEqual(before);
+    });
+  },
+);

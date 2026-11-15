@@ -46,9 +46,9 @@
 // format id other than its expected one, or on a fatal error (an unset
 // AUDIT_DATABASE_URL and a refused URL included); 0 otherwise.
 //
-// Full mode runs after gate mode, once the migration has run, for every table whose
-// page is on the generic workbook pipeline (FULL_MODE_ADAPTERS; a table without an
-// adapter prints that full mode is skipped for it). Per stored file, one at a time, it
+// Full mode runs after gate mode, once the migration has run, for every table: all six
+// pages are on the generic workbook pipeline (FULL_MODE_ADAPTERS; a table without an
+// adapter is a fatal error). Per stored file, one at a time, it
 // runs the production export path, never a copy of it: the adapter's `load` with the
 // row's own organization and store, `resolveStoredWorkbook` (the format by
 // `source_format_id` or by selection, the strict sheet read, the layout, the write
@@ -821,6 +821,7 @@ async function loadFullMode(): Promise<readonly RecordAuditor[]> {
     flash,
     advantage,
     plus,
+    commission,
   ] = await Promise.all([
     import('../src/workbooks/export-workbook'),
     import('../src/workbooks/export-plan'),
@@ -833,6 +834,7 @@ async function loadFullMode(): Promise<readonly RecordAuditor[]> {
     import('../src/workbooks/verticals/flash-product-list.adapter'),
     import('../src/workbooks/verticals/advantage-tariff.adapter'),
     import('../src/workbooks/verticals/plus-commission-tariff.adapter'),
+    import('../src/workbooks/verticals/commission-tariff.adapter'),
   ]);
   const engine: FullModeEngine = {
     resolveStoredWorkbook: exportWorkbook.resolveStoredWorkbook,
@@ -851,6 +853,7 @@ async function loadFullMode(): Promise<readonly RecordAuditor[]> {
     recordAuditor(engine, flash.flashProductListAdapter),
     recordAuditor(engine, advantage.advantageTariffAdapter),
     recordAuditor(engine, plus.plusCommissionTariffAdapter),
+    recordAuditor(engine, commission.commissionTariffAdapter),
   ];
 }
 
@@ -921,10 +924,9 @@ async function main(): Promise<void> {
       const auditors = await loadFullMode();
       for (const [table, gate] of gates) {
         const auditor = auditors.find((candidate) => candidate.table === table);
-        if (auditor === undefined) {
-          console.log(`${table} full mode: skipped (the page is not on the generic pipeline yet)`);
-          continue;
-        }
+        // Every page is on the generic pipeline, so a table without an auditor is a bug
+        // in this script, never a page that has not moved yet.
+        if (auditor === undefined) throw new Error(`${table} has no full-mode auditor`);
         if ((await auditTableFullMode(auditor, gate)) > 0) failed = true;
       }
     } else {

@@ -31,6 +31,7 @@ import { createApp } from '@/app';
 import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware';
 import type { StoreScope } from '@/workbooks/adapter';
 import { advantageTariffAdapter } from '@/workbooks/verticals/advantage-tariff.adapter';
+import { commissionTariffAdapter } from '@/workbooks/verticals/commission-tariff.adapter';
 import { discountListAdapter } from '@/workbooks/verticals/discount-list.adapter';
 import { flashProductListAdapter } from '@/workbooks/verticals/flash-product-list.adapter';
 import { marketplaceCampaignListAdapter } from '@/workbooks/verticals/marketplace-campaign-list.adapter';
@@ -73,6 +74,7 @@ const CampaignImportSchema = z.object({ campaignId: z.string() });
 const FlashImportSchema = z.object({ listId: z.string() });
 const AdvantageImportSchema = z.object({ tariffId: z.string() });
 const PlusImportSchema = z.object({ tariffId: z.string() });
+const CommissionImportSchema = z.object({ tariffId: z.string() });
 
 const ADVANTAGE_ROW: IsolationRow = {
   segment: 'advantage-tariffs',
@@ -156,6 +158,23 @@ const ISOLATION_ROWS: readonly IsolationRow[] = [
     exportedAt: async (id) =>
       (
         await prisma.plusCommissionTariff.findUnique({
+          where: { id },
+          select: { exportedAt: true },
+        })
+      )?.exportedAt ?? null,
+  },
+  {
+    segment: 'commission-tariffs',
+    fixture: 'trendyol-commission-tariff.xlsx',
+    form: {},
+    importedId: (body) => CommissionImportSchema.parse(body).tariffId,
+    load: (scope, id) => commissionTariffAdapter.load(scope, id),
+    touchExported: (scope, id) => commissionTariffAdapter.touchExported(scope, id),
+    countLists: (scope) =>
+      prisma.$transaction((tx) => commissionTariffAdapter.countLists(tx, scope)),
+    exportedAt: async (id) =>
+      (
+        await prisma.commissionTariff.findUnique({
           where: { id },
           select: { exportedAt: true },
         })

@@ -8,13 +8,16 @@
 // verbatim — validity only needs coarse ordering, not exact timezone math.
 
 // The week of a tariff upload lives here too: the period blocks filled on the first
-// data row (resolveTariffWeek), the week they span, and the query for a tariff of the
-// same store whose week overlaps it (findOverlappingWeek).
+// data row (resolveTariffWeek), the week they span, the window labels its export can
+// write (requireWritableWindows), and the query for a tariff of the same store whose
+// week overlaps it (findOverlappingWeek).
 
-import { tariffBoundToInstant } from '@pazarsync/utils';
+import { tariffBoundToInstant, tariffWeekDays } from '@pazarsync/utils';
 
 import type { StoreScope } from './adapter';
+import type { WriteValueSpec } from './format';
 import { WorkbookFileRejection } from './workbook-errors';
+import { requireWritableValue } from './write-columns';
 
 export type TariffValidity = 'active' | 'upcoming' | 'past';
 
@@ -216,4 +219,24 @@ export async function findOverlappingWeek(
     },
     select: { id: true },
   });
+}
+
+/**
+ * Checks every window label the export of `week` can write against the tariff
+ * selection column's rule: one per stored period, and the whole week's, whose length
+ * is `tariffWeekDays` of the stored day counts (the day count `planWindowFiles` gives
+ * the whole-week file). The day counts come from the file's headers, so a window the
+ * export could not write is refused at upload.
+ *
+ * Throws SpreadsheetFileError MALFORMED_SHEET (reason UNWRITABLE_VALUE_REASON) for a
+ * window label `write.spec` refuses, such as one wider than the column's probe.
+ */
+export function requireWritableWindows(
+  week: TariffWeek,
+  write: { readonly spec: WriteValueSpec; readonly label: (dayCount: number) => string },
+): void {
+  const dayCounts = week.present.map((period) => period.dayCount);
+  for (const days of [...dayCounts, tariffWeekDays(dayCounts)]) {
+    requireWritableValue(write.spec, write.label(days));
+  }
 }

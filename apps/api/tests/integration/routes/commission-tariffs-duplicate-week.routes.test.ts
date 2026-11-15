@@ -12,15 +12,23 @@
 
 import { readFileSync } from 'node:fs';
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 
 import { createApp } from '@/app';
+import { findOverlappingWeek } from '@/workbooks/tariff-week';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization, createStore } from '../../helpers/factories';
+
+// The week overlap query, wrapped in a spy that runs the real query: the persist
+// re-check case answers one call itself (see that case). Every other case runs it as is.
+vi.mock('@/workbooks/tariff-week', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/workbooks/tariff-week')>();
+  return { ...actual, findOverlappingWeek: vi.fn(actual.findOverlappingWeek) };
+});
 
 const app = createApp();
 
@@ -30,6 +38,7 @@ const FIXTURE = readFileSync(
 
 const WEEK_MS = 7 * 86_400_000;
 const ONE_MINUTE_MS = 60_000;
+const DAY_MS = 86_400_000;
 
 interface Ctx {
   accessToken: string;
@@ -114,5 +123,61 @@ describe('commission-tariffs import — one-tariff-per-week overlap guard', () =
 
     const res = await app.request(importRequest(ctx));
     expect(res.status).toBe(201);
+  });
+
+  // The persist re-check. The unique index only refuses an equal week_starts_at, so a
+  // committed tariff whose week overlaps with a different start is caught by the overlap
+  // query alone. Two concurrent uploads both pass the inspect pre-check before either
+  // commits; this case recreates that honestly: the tariff is committed first, and the
+  // first overlap query of the upload (the inspect pre-check, made with prisma) answers
+  // null. The second one, persist's re-check inside the import transaction, runs the real
+  // query and must refuse the upload with nothing written.
+  it('refuses an overlapping week with another start in the import transaction, writing nothing', async () => {
+    const probe = await setupStore();
+    const probeRes = await app.request(importRequest(probe));
+    expect(probeRes.status).toBe(201);
+    const probeWeek = await prisma.commissionTariff.findFirst({
+      where: { organizationId: probe.orgId, storeId: probe.storeId },
+      select: { weekStartsAt: true, weekEndsAt: true },
+    });
+    const start = probeWeek?.weekStartsAt ?? null;
+    const end = probeWeek?.weekEndsAt ?? null;
+    if (start === null || end === null) {
+      throw new Error('fixture week did not parse: the overlap re-check cannot be exercised');
+    }
+
+    const ctx = await setupStore();
+    const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
+    const overlapping = await prisma.commissionTariff.create({
+      data: {
+        ...scope,
+        name: 'Overlapping week',
+        weekStartsAt: new Date(start.getTime() + DAY_MS),
+        weekEndsAt: new Date(end.getTime() + DAY_MS),
+      },
+      select: { id: true },
+    });
+
+    const overlapQuery = vi.mocked(findOverlappingWeek);
+    overlapQuery.mockClear();
+    overlapQuery.mockImplementationOnce(async () => null);
+
+    const res = await app.request(importRequest(ctx));
+
+    expect(res.status).toBe(422);
+    const body: unknown = await res.json();
+    expect(body).toMatchObject({
+      code: 'VALIDATION_ERROR',
+      errors: [{ field: 'file', code: 'DUPLICATE_TARIFF_WEEK' }],
+    });
+    // The inspect call answered null; the persist re-check found the committed tariff.
+    expect(overlapQuery).toHaveBeenCalledTimes(2);
+    expect(overlapQuery.mock.settledResults).toEqual([
+      { type: 'fulfilled', value: null },
+      { type: 'fulfilled', value: { id: overlapping.id } },
+    ]);
+    expect(await prisma.commissionTariff.count({ where: scope })).toBe(1);
+    expect(await prisma.commissionTariffPeriod.count({ where: scope })).toBe(0);
+    expect(await prisma.commissionTariffItem.count({ where: scope })).toBe(0);
   });
 });

@@ -18,7 +18,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { prisma } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 
-import { importTariff } from '@/services/commission-tariff-import.service';
+import { importTariff } from '@/workbooks/verticals/commission-tariff.adapter';
 import { deleteTariff } from '@/services/commission-tariff.service';
 import { updateCostProfile } from '@/services/cost-profile.service';
 import { updateShippingConfig } from '@/services/shipping-config.service';

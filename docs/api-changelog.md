@@ -27,9 +27,10 @@ section "Versioning" for details.
 ### Changed
 
 - **Workbook imports run through the generic workbook import**
-  (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products|advantage-tariffs|plus-commission-tariffs}/import`).
-  Each change below applies to discount lists, marketplace campaign lists, flash product lists,
-  advantage tariffs and Plus commission tariffs now, and to commission tariffs as that page moves:
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products|advantage-tariffs|plus-commission-tariffs|commission-tariffs}/import`).
+  Each change below applies to all six pages (discount lists, marketplace campaign lists, flash
+  product lists, advantage tariffs, Plus commission tariffs and commission tariffs) unless it
+  names one:
   - The import route can answer `409` with `code: 'CONFLICT'` and `meta.reason`
     `IMPORT_IN_PROGRESS` (another import of the same store and page is running) or
     `UPLOAD_QUOTA_EXCEEDED` (the store already holds 50 lists of the page, or its stored source
@@ -46,15 +47,17 @@ section "Versioning" for details.
     at upload instead of failing the first export; nothing is stored.
   - The stored source file name drops control and format characters and path separators and is
     cut to 120 characters; a name that does not end in `.xlsx` is not stored, and the list then
-    takes the page's default name instead of the file name stem (a Plus commission tariff first
-    takes its first period's date range label, as it did when the file name had no stem).
+    takes the page's default name instead of the file name stem (a commission or Plus commission
+    tariff first takes its first period's date range label, as it did when the file name had no
+    stem).
   - A typed `name` drops control and format characters and is cut to 120 characters (code
     points); before, it was only trimmed. A typed name left empty by that falls back to the file
     name stem, then to the page's default name.
   - The page's invalid-format answer (`INVALID_DISCOUNT_FORMAT` for discount lists,
     `INVALID_CAMPAIGN_FORMAT` for marketplace campaign lists, `INVALID_FLASH_FORMAT` for flash
     product lists, `INVALID_ADVANTAGE_TARIFF_FORMAT` for advantage tariffs,
-    `INVALID_PLUS_TARIFF_FORMAT` for Plus commission tariffs) now always carries
+    `INVALID_PLUS_TARIFF_FORMAT` for Plus commission tariffs, `INVALID_TARIFF_FORMAT` for
+    commission tariffs) now always carries
     `errors[0].meta`
     with `detectedFormatId`, `detectedPlatform` and `detectedPage`; each is `null` when the file
     matches no known page. Before, a file that matched no page carried no `meta`.
@@ -70,13 +73,23 @@ section "Versioning" for details.
     Excel float residue such as `15.400000000000002` is kept and exported as `15.4`. Before, a
     negative Plus value was stored and exported, and a ceiling with more than 10 integer digits
     failed the import with `500`.
-  - A Plus commission tariff file whose header gives a period of 10 or more days, or whose
-    periods add up to 10 or more days, answers `422` with
+  - A commission tariff file whose current price on a kept row is negative or has more than 10
+    integer digits, or whose band price (the band's upper limit, else its lower limit, for every
+    band that has a commission in any period) is negative or has more than 10 integer digits,
+    answers `422` with
+    `{ field: 'file', code: 'MALFORMED_SHEET' }`; nothing is stored. The export writes the
+    selected band's price, or the current price, into the new price column. Before, a negative
+    or over-wide band price was stored and written into that cell on export, and a current price
+    with more than 10 integer digits failed the import with `500`. A band without a commission
+    in any period is not stored, so its limits are not checked.
+  - A commission or Plus commission tariff file whose header gives a period of 10 or more days,
+    or whose periods add up to 10 or more days, answers `422` with
     `{ field: 'file', code: 'MALFORMED_SHEET' }`; nothing is stored. Before, the file was stored
     and its export wrote a tariff selection label wider than the column's own. This check runs
     before the tariff week check, so such a file whose week is already taken answers
     `MALFORMED_SHEET`, not `DUPLICATE_TARIFF_WEEK`.
-  - A Plus commission tariff import checks the tariff week again inside its write transaction.
+  - A commission or Plus commission tariff import checks the tariff week again inside its write
+    transaction.
     Two uploads of overlapping weeks that start on different days, sent at the same time, no
     longer both store: the later one answers the duplicate week error (`DUPLICATE_TARIFF_WEEK`).
   - On advantage tariffs the commission source (`commissionSourceTariffId`) is checked after the
@@ -87,9 +100,9 @@ section "Versioning" for details.
   `POST /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/export`,
   `POST /v1/organizations/{orgId}/stores/{storeId}/flash-products/{listId}/export`,
   `POST /v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/{tariffId}/export`,
-  `POST /v1/organizations/{orgId}/stores/{storeId}/plus-commission-tariffs/{tariffId}/export`).
-  Each change below applies to discount lists, marketplace campaign lists, flash product lists,
-  advantage tariffs and Plus commission tariffs now, and to commission tariffs as that page moves:
+  `POST /v1/organizations/{orgId}/stores/{storeId}/plus-commission-tariffs/{tariffId}/export`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/export`).
+  Each change below applies to all six pages unless it names one:
   - The export writes only into the page's own sheet. Before, the same rows and columns were
     patched on every worksheet of the stored workbook.
   - Store access is checked before the record id in the path is validated: a malformed id answers
@@ -109,6 +122,9 @@ section "Versioning" for details.
   - A list whose items no longer pair with the stored file's kept rows (a different count, or a
     different barcode at a position) is refused with `409` `ROW_MISMATCH`. Before, those rows were
     skipped and the rest exported.
+  - A commission tariff whose file holds two periods with the same day count, and whose export
+    writes a different price into each, answers `409` `EXPORT_FILENAME_COLLISION`. Before, both
+    window files took the same name and the `.zip` kept only one of them.
   - Advantage tariff items are read in a fixed order (sort order, then barcode, then id). When two
     items with one barcode both carry a price, the later one in that order is written; before,
     the database's unspecified row order decided.
@@ -119,10 +135,12 @@ section "Versioning" for details.
     lists, or to the list name for advantage tariffs, which before served the raw stored name),
     plus `Content-Length`,
     `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. Flash product lists keep their
-    fixed `flas-urunler.xlsx`, and Plus commission tariffs their fixed
-    `plus-komisyon-tarifesi-<N>-gunluk.xlsx` or `plus-komisyon-tarifesi.zip`; their header gains
-    the ASCII `filename` beside the `filename*` it already sent. A Plus `.zip` of window files
-    now stores its entries without compression; the entry names are unchanged. The ASCII `filename` keeps
+    fixed `flas-urunler.xlsx`, Plus commission tariffs their fixed
+    `plus-komisyon-tarifesi-<N>-gunluk.xlsx` or `plus-komisyon-tarifesi.zip`, and commission
+    tariffs their fixed `urun-komisyon-tarifesi-<N>-gunluk.xlsx` or `urun-komisyon-tarifesi.zip`;
+    their header gains the ASCII `filename` beside the `filename*` it already sent. A commission
+    or Plus `.zip` of window files now stores its entries without compression; the entry names
+    are unchanged. The ASCII `filename` keeps
     only letters, digits, spaces and `. _ ( ) -`; every other character becomes `_`, so header
     parameter syntax in an upload name (`;`, `=`, `*`, `'`, `%`) never reaches it.
 - **The campaign workbook upload gate checks the zip layout, the root relationships and active

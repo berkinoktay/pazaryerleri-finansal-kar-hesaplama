@@ -12,6 +12,7 @@ import {
 } from '@/workbooks/download';
 import type { FilenamePolicy } from '@/workbooks/format';
 import { TRENDYOL_DEFAULT_NAMES } from '@/workbooks/formats/trendyol/labels';
+import { WorkbookInvariantError } from '@/workbooks/workbook-errors';
 
 const FIXED: FilenamePolicy = { kind: 'fixed', base: 'flas-urunler' };
 const WINDOW: FilenamePolicy = {
@@ -147,6 +148,12 @@ describe('bundleDownload', () => {
     expect(
       conflictReason(() => bundleDownload(FIXED, [ONE, { ...TWO, filename: ONE.filename }])),
     ).toBe('EXPORT_FILENAME_COLLISION');
+  });
+
+  // Ported from the deleted commission-tariff-export-plan.test.ts: an export always plans
+  // at least one file, so none is our own bug.
+  it('throws WorkbookInvariantError when there is no file to deliver', () => {
+    expect(() => bundleDownload(WINDOW, [])).toThrow(WorkbookInvariantError);
   });
 });
 

@@ -9,7 +9,6 @@
 
 import { prisma, type Prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
-import { TARIFF_WEEK_DAYS } from '@pazarsync/utils';
 
 import { isUniqueViolationOn } from '../../lib/map-transaction-error';
 import {
@@ -32,21 +31,21 @@ import { XLSX_MIME, ZIP_MIME } from '../download';
 import { NO_LABEL, tariffSelectionLabel } from '../formats/trendyol/labels';
 import {
   PLUS_PRICE_SCALE,
-  TARIFF_SELECTION_WRITE,
   trendyolPlusCommissionTariffFormat,
   type PlusCommissionTariffRow,
   type PlusCommissionTariffWriteKey,
 } from '../formats/trendyol/plus-commission-tariff.format';
 import type { trendyolPlusCommissionTariffLayout } from '../formats/trendyol/plus-commission-tariff.layout';
+import { TARIFF_SELECTION_WRITE } from '../formats/trendyol/tariff-window';
 import { createManyChunked } from '../import-rows';
 import {
   findOverlappingWeek,
+  requireWritableWindows,
   resolveTariffWeek,
   WEEK_UNIQUE_COLUMN,
   type TariffWeek,
 } from '../tariff-week';
 import { WorkbookFileRejection, WorkbookInvariantError } from '../workbook-errors';
-import { requireWritableValue } from '../write-columns';
 
 /** What the export reads of one Plus item. */
 export interface PlusCommissionTariffExportItem {
@@ -111,24 +110,6 @@ export function resolvePlusExportPrice(
 }
 
 /**
- * Every window label the export can write for `week`, checked against the tariff
- * selection column's rule: one per stored period, and the whole week's, whose length
- * `planWindowFiles` (`@pazarsync/utils` window-plan.ts) takes as the sum of the day
- * counts, or TARIFF_WEEK_DAYS when they sum to 0. The day counts come from the file's
- * headers, so a window the export could not write is refused at upload.
- *
- * Throws SpreadsheetFileError MALFORMED_SHEET (reason UNWRITABLE_VALUE_REASON) for a
- * window wider than the column's probe (ten days or more).
- */
-function requireWritableWindows(week: TariffWeek): void {
-  const dayCounts = week.present.map((period) => period.dayCount);
-  const weekDays = dayCounts.reduce((sum, days) => sum + days, 0) || TARIFF_WEEK_DAYS;
-  for (const days of [...dayCounts, weekDays]) {
-    requireWritableValue(TARIFF_SELECTION_WRITE, tariffSelectionLabel(days));
-  }
-}
-
-/**
  * The week of the upload: the period blocks filled on the first data row, each window
  * label they give checked as the export writes it, then the scoped overlap query.
  * Throws WorkbookFileRejection NO_PERIOD when no period label is filled,
@@ -153,7 +134,7 @@ async function inspectTariffWeek({
           label: period.text('label'),
         }));
   const week = resolveTariffWeek(firstRowPeriods, now);
-  requireWritableWindows(week);
+  requireWritableWindows(week, { spec: TARIFF_SELECTION_WRITE, label: tariffSelectionLabel });
   let overlapping;
   try {
     overlapping = await findOverlappingWeek(prisma.plusCommissionTariff, scope, week);

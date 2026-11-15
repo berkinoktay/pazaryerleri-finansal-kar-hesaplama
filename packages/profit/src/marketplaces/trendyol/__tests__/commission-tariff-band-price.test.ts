@@ -1,8 +1,7 @@
 import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
-import { bandPrice } from '@/services/commission-tariff-compute.service';
-import type { StoredTariffBand } from '@pazarsync/profit';
+import { bandPrice, type StoredTariffBand } from '../stored-tariff-bands';
 
 /** Terse band builder — defaults both limits to null, override what the case needs. */
 function band(

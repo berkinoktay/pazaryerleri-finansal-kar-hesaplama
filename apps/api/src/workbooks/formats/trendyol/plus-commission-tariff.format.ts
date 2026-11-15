@@ -9,16 +9,12 @@
 
 import { Decimal } from 'decimal.js';
 
-import { TARIFF_WEEK_DAYS } from '@pazarsync/utils';
-
 import { defineFormat, type WriteValueSpec } from '../../format';
 import { requireWritableValue } from '../../write-columns';
 import { TRENDYOL_FORMAT_SUMMARIES } from '../registry';
 import {
   NO_LABEL,
-  TARIFF_SELECTION_PATTERN,
   TARIFF_WINDOW_LABEL_UNIT,
-  tariffSelectionLabel,
   TRENDYOL_DEFAULT_NAMES,
   TRENDYOL_SHEET_NAMES,
 } from './labels';
@@ -26,6 +22,7 @@ import {
   trendyolPlusCommissionTariffKeep,
   trendyolPlusCommissionTariffLayout,
 } from './plus-commission-tariff.layout';
+import { TARIFF_SELECTION_WRITE, TARIFF_WINDOW_FILE_UNIT } from './tariff-window';
 
 /**
  * One kept product row of the Plus file. Prices and percents are decimal strings as
@@ -71,12 +68,6 @@ const PLUS_OFFER_SCALE = 4;
 /** The download base name; the window suffix (`-7-gunluk`) is added per file. */
 const PLUS_EXPORT_BASE_NAME = 'plus-komisyon-tarifesi';
 
-/**
- * The unit of a window file's name suffix, as in `-3-gunluk`. Exported for the commission
- * tariff format, whose window files are named the same way.
- */
-export const TARIFF_WINDOW_FILE_UNIT = 'gunluk';
-
 /** What a blank or unreadable decimal cell reads as, as the import always stored it. */
 const BLANK_DECIMAL = '0';
 
@@ -93,16 +84,6 @@ const PLUS_PRICE_SELECTION_WRITE: WriteValueSpec = {
  * stored digit (`Decimal.toFixed()`). Every period offer is read against it too.
  */
 const COMPUTED_COMMISSION_WRITE: WriteValueSpec = { kind: 'number' };
-
-/**
- * The tariff selection column's write rule: `<days> Gunluk Fiyat`, at most a whole week
- * wide. The adapter reads every window label an upload's periods give against it too.
- */
-export const TARIFF_SELECTION_WRITE: WriteValueSpec = {
-  kind: 'text',
-  pattern: TARIFF_SELECTION_PATTERN,
-  probe: tariffSelectionLabel(TARIFF_WEEK_DAYS),
-};
 
 /** The cancel column's write rule: the opt-in confirms the offer, so it is never cancelled. */
 const CANCELLED_WRITE: WriteValueSpec = { kind: 'text', allow: [NO_LABEL] };

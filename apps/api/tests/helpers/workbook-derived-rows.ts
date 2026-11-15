@@ -2,10 +2,9 @@
 // no row, so each vertical also needs rows built from its fixture's first kept row with
 // some cells blanked or rewritten: they put the fallback chains of a row mapper and the
 // dropping side of every keep rule under test. The cases were moved verbatim out of
-// tests/unit/workbooks/trendyol-layouts.test.ts so they outlive the legacy parsers (the
-// discount, campaign, flash, advantage and Plus blocks have since gained kept cases,
-// whose golden the legacy parser wrote); `derivedGrid` builds the grid a format test
-// reads them from.
+// tests/unit/workbooks/trendyol-layouts.test.ts, since deleted, so they outlive the
+// legacy parsers (every block has since gained kept cases, whose golden the legacy
+// parser wrote); `derivedGrid` builds the grid a format test reads them from.
 
 import {
   columnIndex,
@@ -54,6 +53,131 @@ export interface DerivedRow<S extends LayoutSpec> {
 
 const COMMISSION_DERIVED: readonly DerivedRow<typeof trendyolCommissionTariffLayout>[] = [
   { name: 'a blank barcode', cells: [['barcode', null]], kept: false },
+  // Added after the move, so the derived golden pins every mapping rule of the commission
+  // row: the stock code chain (the model code, else the seller stock code, else null),
+  // the title fallback, the truncated stock, the '0' of a blank current price and
+  // current commission, a blank commission base price kept null, a blank or unreadable
+  // bracket limit, a blank period commission, the first period block filled, the plain
+  // grammar of the decimal cells (decimal comma, dot-only text, a lira suffix that does
+  // not read, a number in exponent form), a number barcode, a whitespace barcode, and
+  // values the export never writes, which the import does not check. The fixture row's
+  // seller stock code and first (3-day) period block are blank; its prices, limits and
+  // commissions are number cells.
+  { name: 'a whitespace barcode', cells: [['barcode', '   ']], kept: false },
+  { name: 'a number barcode', cells: [['barcode', 8690000000001]], kept: true },
+  {
+    name: 'a model code beside a seller stock code',
+    cells: [['sellerStockCode', 'SELLER-1']],
+    kept: true,
+  },
+  {
+    name: 'a blank model code beside a seller stock code',
+    cells: [
+      ['modelCode', null],
+      ['sellerStockCode', 'SELLER-1'],
+    ],
+    kept: true,
+  },
+  {
+    name: 'a blank model code and seller stock code',
+    cells: [
+      ['modelCode', null],
+      ['sellerStockCode', null],
+    ],
+    kept: true,
+  },
+  {
+    name: 'a blank title and blank optional columns',
+    cells: [
+      ['productTitle', null],
+      ['size', null],
+      ['category', null],
+      ['brand', null],
+      ['stock', null],
+    ],
+    kept: true,
+  },
+  { name: 'a number category', cells: [['category', 42]], kept: true },
+  { name: 'a decimal stock number', cells: [['stock', 12.7]], kept: true },
+  { name: 'a decimal stock text', cells: [['stock', '12.7']], kept: true },
+  { name: 'a non-numeric stock text', cells: [['stock', 'many']], kept: true },
+  { name: 'a blank current price', cells: [['currentPrice', null]], kept: true },
+  { name: 'a blank commission base price', cells: [['commissionBasePrice', null]], kept: true },
+  { name: 'a blank current commission', cells: [['currentCommission', null]], kept: true },
+  { name: 'a blank band 2 upper limit', cells: [['band2Upper', null]], kept: true },
+  {
+    name: 'a blank band 1 lower limit and band 4 upper limit',
+    cells: [
+      ['band1Lower', null],
+      ['band4Upper', null],
+    ],
+    kept: true,
+  },
+  { name: 'an unreadable band 3 lower limit', cells: [['band3Lower', 'none']], kept: true },
+  {
+    name: 'a blank commission in the filled period',
+    cells: [],
+    blockCells: [{ block: 'periods', index: 1, column: 'comm3', value: null }],
+    kept: true,
+  },
+  {
+    name: 'a filled first period block',
+    cells: [],
+    blockCells: [
+      { block: 'periods', index: 0, column: 'label', value: '23 Haziran 08.00-26 Haziran 07.59' },
+      { block: 'periods', index: 0, column: 'comm1', value: 19 },
+      { block: 'periods', index: 0, column: 'comm2', value: '12,5' },
+      { block: 'periods', index: 0, column: 'comm4', value: 9.2 },
+    ],
+    kept: true,
+  },
+  {
+    name: 'dot thousands with a decimal comma',
+    cells: [
+      ['currentPrice', '1.234,56'],
+      ['commissionBasePrice', '1.199,99'],
+      ['currentCommission', '19,5'],
+      ['band1Lower', '1.234,57'],
+      ['band2Upper', '1.234,56'],
+      ['band2Lower', '1.199,99'],
+    ],
+    blockCells: [{ block: 'periods', index: 1, column: 'comm2', value: '12,5' }],
+    kept: true,
+  },
+  {
+    name: 'dot-only text prices',
+    cells: [
+      ['currentPrice', '1.250'],
+      ['band4Upper', '1.100'],
+    ],
+    kept: true,
+  },
+  {
+    name: 'lira-suffixed prices and commission',
+    cells: [
+      ['currentPrice', '360 TL'],
+      ['commissionBasePrice', '350 TL'],
+      ['band3Upper', '292 TL'],
+    ],
+    blockCells: [{ block: 'periods', index: 1, column: 'comm1', value: '15 TL' }],
+    kept: true,
+  },
+  {
+    name: 'a number in exponent form',
+    cells: [],
+    blockCells: [{ block: 'periods', index: 1, column: 'comm2', value: 1e-7 }],
+    kept: true,
+  },
+  {
+    name: 'negative values the export never writes',
+    cells: [
+      ['commissionBasePrice', '-2'],
+      ['currentCommission', -1],
+      ['band2Lower', -4],
+    ],
+    blockCells: [{ block: 'periods', index: 1, column: 'comm4', value: -3 }],
+    kept: true,
+  },
 ];
 
 const PLUS_CANCEL_NUMBER_ONE: DerivedRow<typeof trendyolPlusCommissionTariffLayout> = {
@@ -458,7 +582,7 @@ const CAMPAIGN_DERIVED: readonly DerivedRow<typeof trendyolMarketplaceCampaignLi
 ];
 
 // Exported as a list: the blocks above keep the exact bytes they had in the layout test,
-// apart from the cases added to the discount, campaign, flash, advantage and Plus blocks.
+// apart from the cases added to every block since the move.
 export {
   ADVANTAGE_DERIVED,
   CAMPAIGN_DERIVED,

@@ -33,9 +33,9 @@ vi.setConfig({ testTimeout: DIFFERENTIAL_TEST_TIMEOUT_MS });
 
 // --- Copied service constants -----------------------------------------------
 
-// tariff-export-commons.ts WINDOW_SELECTION_LABEL_UNIT.
+// The tariff window label unit (formats/trendyol/labels.ts TARIFF_WINDOW_LABEL_UNIT).
 const WINDOW_SELECTION_LABEL_UNIT = 'G\u00fcnl\u00fck Fiyat';
-// commission-tariff-export.service.ts SHEET_NAME.
+// The commission tariff sheet name (formats/trendyol/labels.ts TRENDYOL_SHEET_NAMES).
 const COMMISSION_SHEET_NAME = 'KomisyonTarifeleri\u00dcr\u00fcnleri';
 // The Plus sheet name and the no-cancel label (formats/trendyol/labels.ts).
 const PLUS_SHEET_NAME = 'TyPlus\u00dcr\u00fcnleri';
@@ -115,7 +115,7 @@ function isEven(excelRow: number): boolean {
   return excelRow % 2 === 0;
 }
 
-/** Trendyol's N-day selection label, built as tariff-export-commons.ts builds it. */
+/** Trendyol's N-day selection label, built as formats/trendyol/labels.ts builds it. */
 function windowLabel(days: number): string {
   return `${days} ${WINDOW_SELECTION_LABEL_UNIT}`;
 }
