@@ -1207,6 +1207,10 @@ model CommissionTariff {
   // The raw uploaded .xlsx bytes, kept so export can patch the seller's chosen
   // price + tariff selection back into Trendyol's EXACT file (re-uploaded verbatim).
   sourceFile     Bytes?    @map("source_file")
+  // The workbook format that read sourceFile (e.g. TRENDYOL:COMMISSION_TARIFF:v1).
+  // Backfilled for files stored before the column; until imports write it, a file
+  // stored later keeps it null and its format is selected again on export.
+  sourceFormatId String?   @map("source_format_id") @db.VarChar(64)
   // The tariff's overall week window = min(period.startsAt) … max(period.endsAt),
   // full datetime (consecutive weeks touch at a 1-minute gap, e.g. 07.59 → 08.00,
   // so DATE alone is not unique — the time matters). Enforces ONE tariff per week
@@ -1321,6 +1325,8 @@ model PlusCommissionTariff {
   name           String
   sourceFilename String?   @map("source_filename")
   sourceFile     Bytes?    @map("source_file")
+  // The workbook format that read sourceFile (see CommissionTariff.sourceFormatId).
+  sourceFormatId String?   @map("source_format_id") @db.VarChar(64)
   // The tariff's overall week window = min(period.startsAt) … max(period.endsAt),
   // full datetime (consecutive weeks touch at a 1-minute gap, e.g. 07.59 → 08.00,
   // so DATE alone is not unique — the time matters). Enforces ONE Plus tariff per
@@ -1438,6 +1444,8 @@ model AdvantageTariff {
   sourceFilename String?   @map("source_filename")
   // Raw uploaded .xlsx bytes, kept so export byte-patches Trendyol's EXACT file.
   sourceFile     Bytes?    @map("source_file")
+  // The workbook format that read sourceFile (see CommissionTariff.sourceFormatId).
+  sourceFormatId String?   @map("source_format_id") @db.VarChar(64)
   // Commission source override: null = auto (the store's active-period commission
   // tariff at read time); set = the seller pinned a specific CommissionTariff.
   // SetNull so deleting the commission tariff falls back to auto, never orphans.
@@ -1526,6 +1534,8 @@ model FlashProductList {
   sourceFilename String?   @map("source_filename")
   // Raw uploaded .xlsx bytes, kept so export byte-patches Trendyol's EXACT file.
   sourceFile     Bytes?    @map("source_file")
+  // The workbook format that read sourceFile (see CommissionTariff.sourceFormatId).
+  sourceFormatId String?   @map("source_format_id") @db.VarChar(64)
   exportedAt     DateTime? @map("exported_at")
   createdBy      String?   @map("created_by") @db.Uuid
   createdAt      DateTime  @default(now()) @map("created_at")
@@ -1618,6 +1628,8 @@ model DiscountList {
   sourceFilename String?   @map("source_filename")
   // Raw uploaded .xlsx bytes, kept so export byte-patches Trendyol's EXACT file.
   sourceFile     Bytes?    @map("source_file")
+  // The workbook format that read sourceFile (see CommissionTariff.sourceFormatId).
+  sourceFormatId String?   @map("source_format_id") @db.VarChar(64)
   exportedAt     DateTime? @map("exported_at")
   createdBy      String?   @map("created_by") @db.Uuid
   createdAt      DateTime  @default(now()) @map("created_at")
@@ -1706,6 +1718,8 @@ model MarketplaceCampaignList {
   sourceFilename String?   @map("source_filename")
   // Ham .xlsx byte'ları: export Trendyol'un TAM dosyasını byte-koruyarak yamalar.
   sourceFile     Bytes?    @map("source_file")
+  // The workbook format that read sourceFile (see CommissionTariff.sourceFormatId).
+  sourceFormatId String?   @map("source_format_id") @db.VarChar(64)
   exportedAt     DateTime? @map("exported_at")
   createdBy      String?   @map("created_by") @db.Uuid
   createdAt      DateTime  @default(now()) @map("created_at")

@@ -5,7 +5,7 @@ import { SpreadsheetFileError } from '../errors';
 import { cellKey, colRefToNumber } from '../sheet-meta';
 import { SPREADSHEET_MAIN_NAMESPACES } from './limits';
 import { MALFORMED_SHEET_REASONS, UNSUPPORTED_ENCODING_REASONS } from './reasons';
-import { bytesEqualAt, foldAsciiCase } from './shared';
+import { bytesEqualAt } from './shared';
 import {
   ATTRIBUTE_NAME_END,
   ATTRIBUTE_NAME_START,
@@ -14,15 +14,18 @@ import {
   attributeField,
   bytesEqualAscii,
   createMarkup,
+  declaresUtf8,
   DIGIT_NINE,
   DIGIT_ZERO,
+  hasDeclarationTarget,
+  isXmlDeclaration,
   isXmlSpace,
   localNameIs,
   localNameStart,
   NAME_DECODER,
+  NAMESPACE_DECLARATION,
+  NAMESPACE_DECLARATION_PREFIX,
   nextMarkup,
-  QUESTION,
-  scanDeclaration,
   scanMarkup,
   UPPER_A,
   UPPER_Z,
@@ -88,15 +91,9 @@ const CELL = 'c';
 const REFERENCE_ATTRIBUTE = 'r';
 // How the name of a prefixed `r` attribute ends; refused, as a repeated `r` is.
 const PREFIXED_REFERENCE_SUFFIX = ':r';
-const DEFAULT_NAMESPACE_DECLARATION = 'xmlns';
-const PREFIX_DECLARATION_START = 'xmlns:';
 const DEFAULT_NAMESPACE_PREFIX = '';
 // Reserved by XML; neither is ever bound to a namespace the filter accepts.
 const RESERVED_PREFIXES: ReadonlySet<string> = new Set(['xml', 'xmlns']);
-const XML_DECLARATION_TARGET = 'xml';
-const ENCODING_PSEUDO_ATTRIBUTE = 'encoding';
-// The only encoding a declaration may name, compared ignoring ASCII case.
-const UTF8_ENCODING_NAME = 'utf-8';
 const UTF8_BYTE_ORDER_MARK: readonly number[] = [0xef, 0xbb, 0xbf];
 
 // The lowest first digit of a row reference.
@@ -141,21 +138,6 @@ function setLast(list: number[], value: number): void {
 
 function isUpperLetter(byte: number | undefined): boolean {
   return byte !== undefined && byte >= UPPER_A && byte <= UPPER_Z;
-}
-
-/**
- * Whether bytes [start, end) are `lowerText` (lower-case ASCII), ignoring ASCII case:
- * decoded, then folded. The lengths are compared first, so only ASCII bytes can match,
- * and a byte order mark the decoder drops cannot make a longer value equal.
- */
-function bytesEqualFolded(
-  bytes: Uint8Array,
-  start: number,
-  end: number,
-  lowerText: string,
-): boolean {
-  if (end - start !== lowerText.length) return false;
-  return foldAsciiCase(NAME_DECODER.decode(bytes.subarray(start, end))) === lowerText;
 }
 
 function startsWithByteOrderMark(bytes: Uint8Array): boolean {
@@ -235,7 +217,7 @@ class WorksheetIndexer {
       if (this.depth === ROOT_DEPTH) this.assertSpaceOnly(position, at === -1 ? bytes.length : at);
       if (at === -1) break;
       scanMarkup(bytes, at, this.markup, this.attributes);
-      if (first && this.isXmlDeclaration()) this.checkDeclaration();
+      if (first && isXmlDeclaration(bytes, this.markup)) this.checkDeclaration();
       else this.visit();
       first = false;
       position = this.markup.end;
@@ -318,22 +300,8 @@ class WorksheetIndexer {
 
   /** A comment, CDATA section or processing instruction: never looked into. */
   private visitOpaque(): void {
-    if (!this.isProcessingInstruction()) return;
-    const { nameStart, nameEnd } = this.markup;
-    if (!bytesEqualFolded(this.bytes, nameStart, nameEnd, XML_DECLARATION_TARGET)) return;
+    if (!hasDeclarationTarget(this.bytes, this.markup)) return;
     throw malformedStructure(this.markup.start, 'has an XML declaration after its first markup');
-  }
-
-  private isProcessingInstruction(): boolean {
-    return this.markup.kind === 'opaque' && this.bytes[this.markup.start + 1] === QUESTION;
-  }
-
-  private isXmlDeclaration(): boolean {
-    const { nameStart, nameEnd } = this.markup;
-    return (
-      this.isProcessingInstruction() &&
-      bytesEqualAscii(this.bytes, nameStart, nameEnd, XML_DECLARATION_TARGET)
-    );
   }
 
   // Attribute access. The count of the attributes the last scan filled comes from this
@@ -346,17 +314,11 @@ class WorksheetIndexer {
 
   /** An `encoding` pseudo-attribute must name UTF-8, ignoring ASCII case. */
   private checkDeclaration(): void {
-    scanDeclaration(this.bytes, this.markup, this.attributes);
-    for (let attribute = 0; attribute < this.attributeCount(); attribute += 1) {
-      if (!this.attributeNameIs(attribute, ENCODING_PSEUDO_ATTRIBUTE)) continue;
-      const valueStart = attributeField(this.attributes, attribute, ATTRIBUTE_VALUE_START);
-      const valueEnd = attributeField(this.attributes, attribute, ATTRIBUTE_VALUE_END);
-      if (bytesEqualFolded(this.bytes, valueStart, valueEnd, UTF8_ENCODING_NAME)) continue;
-      throw unsupportedEncoding(
-        UNSUPPORTED_ENCODING_REASONS.DECLARATION,
-        'declares an encoding other than UTF-8',
-      );
-    }
+    if (declaresUtf8(this.bytes, this.markup, this.attributes)) return;
+    throw unsupportedEncoding(
+      UNSUPPORTED_ENCODING_REASONS.DECLARATION,
+      'declares an encoding other than UTF-8',
+    );
   }
 
   private openRoot(): void {
@@ -507,12 +469,14 @@ class WorksheetIndexer {
 
   /** The prefix an `xmlns` / `xmlns:p` attribute name declares ('' for the default), else null. */
   private declaredPrefix(nameStart: number, nameEnd: number): string | null {
-    if (bytesEqualAscii(this.bytes, nameStart, nameEnd, DEFAULT_NAMESPACE_DECLARATION)) {
+    if (bytesEqualAscii(this.bytes, nameStart, nameEnd, NAMESPACE_DECLARATION)) {
       return DEFAULT_NAMESPACE_PREFIX;
     }
-    const prefixStart = nameStart + PREFIX_DECLARATION_START.length;
+    const prefixStart = nameStart + NAMESPACE_DECLARATION_PREFIX.length;
     if (prefixStart >= nameEnd) return null;
-    if (!bytesEqualAscii(this.bytes, nameStart, prefixStart, PREFIX_DECLARATION_START)) return null;
+    if (!bytesEqualAscii(this.bytes, nameStart, prefixStart, NAMESPACE_DECLARATION_PREFIX)) {
+      return null;
+    }
     return NAME_DECODER.decode(this.bytes.subarray(prefixStart, nameEnd));
   }
 

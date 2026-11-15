@@ -12,11 +12,18 @@ import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import { readWorkbookGrid } from '@pazarsync/spreadsheet';
+import {
+  cellText,
+  columnIndex,
+  readWorkbookGrid,
+  resolveLayout,
+  type ColumnIndex,
+  type ColumnKey,
+  type ResolvedLayout,
+} from '@pazarsync/spreadsheet';
 
 import { createApp } from '@/app';
-import { cellText } from '@/lib/xlsx-grid-cells';
-import { resolveAdvantageTariffLayout } from '@/services/advantage-tariff-layout';
+import { trendyolAdvantageTariffLayout } from '@/workbooks/formats/trendyol/advantage-tariff.layout';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -62,6 +69,14 @@ async function importFixture(ctx: Ctx): Promise<string> {
   return ((await res.json()) as { tariffId: string }).tariffId;
 }
 
+type AdvantageColumn = ColumnKey<typeof trendyolAdvantageTariffLayout>;
+
+// A named column of the advantage layout; null when the layout did not resolve or an
+// optional column is absent.
+function column(layout: ResolvedLayout | null, key: AdvantageColumn): ColumnIndex {
+  return layout === null ? null : columnIndex(trendyolAdvantageTariffLayout, layout, key);
+}
+
 describe('advantage-tariff export', () => {
   beforeEach(async () => {
     await ensureDbReachable();
@@ -99,12 +114,14 @@ describe('advantage-tariff export', () => {
     // Round-trip the exported file back through the reader and assert the chosen
     // new price was patched into the "YENİ TSF (FİYAT GÜNCELLE)" cell for the row.
     const grid = await readWorkbookGrid(out, { sheetName: SHEET_NAME });
-    const layout = resolveAdvantageTariffLayout(grid[0] ?? []);
+    const layout = resolveLayout(trendyolAdvantageTariffLayout, grid);
     expect(layout).not.toBeNull();
-    const dataRow = grid.slice(1).find((r) => cellText(r, layout?.barcode ?? -1) === item?.barcode);
+    const dataRow = grid
+      .slice(1)
+      .find((r) => cellText(r, column(layout, 'barcode')) === item?.barcode);
     expect(dataRow).toBeDefined();
     // Numeric cell: compare by value (trailing zeros normalize on read).
-    expect(Number(cellText(dataRow ?? [], layout?.newTsf ?? -1))).toBe(Number(NEW_PRICE));
+    expect(Number(cellText(dataRow ?? [], column(layout, 'newTsf')))).toBe(Number(NEW_PRICE));
 
     // The tariff is now marked exported.
     const listed = await prisma.advantageTariff.findUnique({ where: { id: tariffId } });
@@ -138,12 +155,16 @@ describe('advantage-tariff export', () => {
 
     const out = Buffer.from(await res.arrayBuffer());
     const grid = await readWorkbookGrid(out, { sheetName: SHEET_NAME });
-    const layout = resolveAdvantageTariffLayout(grid[0] ?? []);
+    const layout = resolveLayout(trendyolAdvantageTariffLayout, grid);
     expect(layout).not.toBeNull();
-    const dataRow = grid.slice(1).find((r) => cellText(r, layout?.barcode ?? -1) === item?.barcode);
+    const dataRow = grid
+      .slice(1)
+      .find((r) => cellText(r, column(layout, 'barcode')) === item?.barcode);
     expect(dataRow).toBeDefined();
     // The custom price landed in the "YENİ TSF (FİYAT GÜNCELLE)" cell for the row.
-    expect(Number(cellText(dataRow ?? [], layout?.newTsf ?? -1))).toBe(Number(CUSTOM_ONLY_PRICE));
+    expect(Number(cellText(dataRow ?? [], column(layout, 'newTsf')))).toBe(
+      Number(CUSTOM_ONLY_PRICE),
+    );
 
     // And the tariff is marked exported (a custom-only selection is a real selection).
     const listed = await prisma.advantageTariff.findUnique({ where: { id: tariffId } });

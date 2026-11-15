@@ -22,6 +22,14 @@ export function expectWithinBudget(elapsedMs: number, budgetMs: number): void {
 export const LINEAR_BUDGET_MS = 20_000;
 
 /**
+ * Bound for the gate reading formula fields up to MAX_FORMULA_SCAN_UNITS in the costliest
+ * shape measured: about 2 s alone on the owner's machine, where one upload of fields
+ * whose NFKC form was not capped held the parse worker for 13 s, and 26 s when a part was
+ * scanned twice. Tighter than LINEAR_BUDGET_MS, which would let those through.
+ */
+export const FORMULA_SCAN_BUDGET_MS = 10_000;
+
+/**
  * Bound for one inflate whose output is capped by a declared size. The capped inflate
  * stops in under a millisecond where an unbounded one decodes the whole stream and
  * takes a second or more, so the gap stays wide on a loaded runner.

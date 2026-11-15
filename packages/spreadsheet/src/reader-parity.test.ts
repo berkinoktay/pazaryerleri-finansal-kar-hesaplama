@@ -13,7 +13,8 @@ import { FIXTURE_PINS, gridSha256, readFixture } from '../tests/helpers/fixture-
 // the engine replaced) and reviewed against the reader contract; while that pipeline
 // existed, each case was asserted on both readers. The cases named "divergence" are
 // the accepted differences from the old pipeline (crafted files only, listed in the
-// PR body): there the old pipeline read the cell as the number 5.
+// PR body): the old pipeline read the two style index cells as the number 5, and the
+// valueless cell with an unknown style as null.
 
 const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>';
 const SPREADSHEET_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
@@ -465,9 +466,9 @@ const DATE_CASES: readonly ParityCase[] = [
     expected: CORRUPT,
   },
   {
-    name: 'a style on a valueless cell is not looked up',
+    name: 'divergence: a style on a valueless cell is looked up',
     file: oneSheet(row(1, '<c r="A1" s="9"/>', inline('B1', 'b'))),
-    expected: [[null, 'b']],
+    expected: CORRUPT,
   },
   {
     name: 'date1904="1" uses the 1904 system',

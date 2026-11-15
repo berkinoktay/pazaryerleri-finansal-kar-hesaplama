@@ -7,17 +7,18 @@
 // and persistence — including the feature's novelty that the SAME product spans
 // several rows (different dates) and each row is its own item. The real fixture
 // carries only 24h offers, so the 3h + both-offer + skip scenarios are derived from
-// it via `patchXlsxCells` (the byte-preserving cell patcher used by the export tests).
+// it via `patchFixture` (the engine's test-only run of the export patch path).
 
 import { readFileSync } from 'node:fs';
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { type CellPatch, type CellPatchValue, type SheetSelector } from '@pazarsync/spreadsheet';
+import { patchFixture } from '@pazarsync/spreadsheet/testing';
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
 
 import { createApp } from '@/app';
-import { patchXlsxCells, type XlsxCellValue } from '@/lib/xlsx-patch';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -49,6 +50,9 @@ const COL_OFFER_24_PRICE = 10;
 const COL_OFFER_3_PRICE = 11;
 const COL_OFFER_3_START = 15;
 const COL_OFFER_3_END = 16;
+
+// The fixture holds a single sheet; the fixture patcher selects it strictly by position.
+const FIRST_SHEET: SheetSelector = { by: 'index', index: 0 };
 
 interface ImportWire {
   listId: string;
@@ -94,11 +98,8 @@ async function importFile(ctx: Ctx, file: Buffer): Promise<ImportWire> {
 }
 
 /** Builds a one-row cell patch for the byte-preserving fixture manipulation. */
-function rowPatch(
-  excelRow: number,
-  cells: [number, XlsxCellValue][],
-): Map<number, Map<number, XlsxCellValue>> {
-  return new Map([[excelRow, new Map(cells)]]);
+function rowPatch(excelRow: number, cells: [number, CellPatchValue][]): CellPatch[] {
+  return cells.map(([col, value]) => ({ excelRow, col, value }));
 }
 
 describe('POST .../flash-products/import - real Trendyol fixture', () => {
@@ -189,13 +190,14 @@ describe('POST .../flash-products/import - derived offer scenarios', () => {
   it('parses a 3h offer (price + window) alongside the 24h offer on the same row', async () => {
     const ctx = await setupStore(false);
     // Add a 3h offer to the first data row (Excel row 2): price + window dates.
-    const patched = patchXlsxCells(
+    const patched = patchFixture(
       FIXTURE,
       rowPatch(2, [
         [COL_OFFER_3_PRICE, { kind: 'number', value: '99.90' }],
-        [COL_OFFER_3_START, { kind: 'inlineStr', value: '08/07/2026 09:00' }],
-        [COL_OFFER_3_END, { kind: 'inlineStr', value: '08/07/2026 12:00' }],
+        [COL_OFFER_3_START, { kind: 'text', value: '08/07/2026 09:00' }],
+        [COL_OFFER_3_END, { kind: 'text', value: '08/07/2026 12:00' }],
       ]),
+      { sheet: FIRST_SHEET },
     );
     const result = await importFile(ctx, patched);
     expect(result.itemCount).toBe(TOTAL_ROWS);
@@ -218,9 +220,10 @@ describe('POST .../flash-products/import - derived offer scenarios', () => {
   it('skips a row whose 24h and 3h offers are both empty', async () => {
     const ctx = await setupStore(false);
     // Blank the first row's 24h price; it has no 3h offer → the row is skipped.
-    const patched = patchXlsxCells(
+    const patched = patchFixture(
       FIXTURE,
-      rowPatch(2, [[COL_OFFER_24_PRICE, { kind: 'inlineStr', value: '' }]]),
+      rowPatch(2, [[COL_OFFER_24_PRICE, { kind: 'text', value: '' }]]),
+      { sheet: FIRST_SHEET },
     );
     const result = await importFile(ctx, patched);
     expect(result.skippedRows).toBe(1);

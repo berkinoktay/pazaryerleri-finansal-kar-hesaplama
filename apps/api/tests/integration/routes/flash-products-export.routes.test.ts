@@ -17,11 +17,15 @@ import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import { readWorkbookGrid } from '@pazarsync/spreadsheet';
+import {
+  cellText,
+  readWorkbookGrid,
+  type CellPatch,
+  type CellPatchValue,
+} from '@pazarsync/spreadsheet';
+import { patchFixture } from '@pazarsync/spreadsheet/testing';
 
 import { createApp } from '@/app';
-import { cellText } from '@/lib/xlsx-grid-cells';
-import { patchXlsxCells, type XlsxCellValue } from '@/lib/xlsx-patch';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -65,11 +69,8 @@ async function setupStore(): Promise<Ctx> {
 }
 
 /** Builds a one-row cell patch for the byte-preserving fixture manipulation (F2 pattern). */
-function rowPatch(
-  excelRow: number,
-  cells: [number, XlsxCellValue][],
-): Map<number, Map<number, XlsxCellValue>> {
-  return new Map([[excelRow, new Map(cells)]]);
+function rowPatch(excelRow: number, cells: [number, CellPatchValue][]): CellPatch[] {
+  return cells.map(([col, value]) => ({ excelRow, col, value }));
 }
 
 async function importFile(ctx: Ctx, file: Buffer): Promise<string> {
@@ -115,13 +116,14 @@ describe('flash-products export', () => {
 
     // Add a 3h offer to Excel row 3 (sortOrder 1) so an H3 selection is faithful; the
     // real fixture carries only 24h offers. Adding a 3h offer keeps the row as one item.
-    const source = patchXlsxCells(
+    const source = patchFixture(
       FIXTURE,
       rowPatch(3, [
         [COL_OFFER_3_PRICE, { kind: 'number', value: '99.90' }],
-        [COL_OFFER_3_START, { kind: 'inlineStr', value: '08/07/2026 09:00' }],
-        [COL_OFFER_3_END, { kind: 'inlineStr', value: '08/07/2026 12:00' }],
+        [COL_OFFER_3_START, { kind: 'text', value: '08/07/2026 09:00' }],
+        [COL_OFFER_3_END, { kind: 'text', value: '08/07/2026 12:00' }],
       ]),
+      { sheet: { by: 'name', name: SHEET_NAME } },
     );
     const listId = await importFile(ctx, source);
 

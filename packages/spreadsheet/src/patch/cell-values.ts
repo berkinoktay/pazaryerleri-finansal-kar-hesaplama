@@ -16,6 +16,9 @@ const SURROGATE_MIN = 0xd800;
 const SURROGATE_MAX = 0xdfff;
 const NON_CHARACTER_FFFE = 0xfffe;
 const NON_CHARACTER_FFFF = 0xffff;
+// Excel's escape of a character in cell text: it decodes `_x0041_` into 'A' when it
+// opens the file, while neither the reader nor the writer escapes or decodes it.
+const EXCEL_CHARACTER_ESCAPE_RE = /_x[0-9A-Fa-f]{4}_/;
 
 /**
  * Whether one code point may appear in a written text cell. Follows the XML 1.0
@@ -32,8 +35,13 @@ function isWritableCodePoint(codePoint: number): boolean {
   return codePoint !== NON_CHARACTER_FFFE && codePoint !== NON_CHARACTER_FFFF;
 }
 
-/** Every code point is an XML 1.0 `Char` other than CR, U+FFFE and U+FFFF; TAB and LF pass. */
+/**
+ * Every code point is an XML 1.0 `Char` other than CR, U+FFFE and U+FFFF (TAB and LF
+ * pass), and the text holds no `_xHHHH_` escape: Excel would decode it on open, so the
+ * cell would not read back unchanged.
+ */
 export function isWritableText(text: string): boolean {
+  if (EXCEL_CHARACTER_ESCAPE_RE.test(text)) return false;
   for (const char of text) {
     const codePoint = char.codePointAt(0);
     if (codePoint === undefined || !isWritableCodePoint(codePoint)) return false;
@@ -71,7 +79,9 @@ function assertWritableTextValue(value: string): void {
     );
   }
   if (!isWritableText(value)) {
-    throw invalidPatchRequest('text value holds a character XML cannot carry');
+    throw invalidPatchRequest(
+      'text value holds a character XML cannot carry or an Excel _xHHHH_ escape',
+    );
   }
 }
 

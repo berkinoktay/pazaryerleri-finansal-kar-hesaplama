@@ -60,6 +60,7 @@ describe('assertWritableValue: text', () => {
     LONE_HIGH_SURROGATE,
     `a${LONE_LOW_SURROGATE}`,
     'x'.repeat(32_768),
+    '_x0041_',
   ])('rejects text %#', (value) => {
     expect(() => assertWritableValue({ kind: 'text', value })).toThrow('Invalid patch request');
   });
@@ -75,6 +76,17 @@ describe('isWritableText', () => {
   it('accepts TAB and LF, rejects CR', () => {
     expect(isWritableText('a\tb\nc')).toBe(true);
     expect(isWritableText('a\rb')).toBe(false);
+  });
+
+  // Excel decodes `_xHHHH_` into one character when it opens the file.
+  it.each([
+    ['_x0041_', false],
+    ['a_x000D_b', false],
+    ['_x00', true],
+    ['_xZZZZ_', true],
+    ['Evet', true],
+  ])('%j -> %s', (text, expected) => {
+    expect(isWritableText(text)).toBe(expected);
   });
 });
 

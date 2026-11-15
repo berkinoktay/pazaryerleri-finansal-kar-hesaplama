@@ -1,3 +1,5 @@
+import { isUtf8 } from 'node:buffer';
+
 import { SpreadsheetFileError } from '../errors';
 import { CONTENT_TYPES_PART, readerFilePath, WORKBOOK_RELS_PART } from '../workbook-parts';
 import { ZIP_REJECT_REASONS } from './reasons';
@@ -10,6 +12,9 @@ import {
   attributeField,
   bytesEqualAscii,
   createMarkup,
+  declaresUtf8,
+  hasDeclarationTarget,
+  isXmlDeclaration,
   isXmlSpace,
   localNameIs,
   nextMarkup,
@@ -28,7 +33,9 @@ import {
 // Both parts are walked with the strict lexer, every markup of them, with a depth
 // counter. The content types part is not a reader part: the gate never budgeted or
 // parsed it, so it must never reach a DOM. Only direct children of the root are
-// looked at, by local name, as the reader finds relationships. Attribute values are
+// looked at, by local name, as the reader finds relationships; a part the walk cannot
+// read whole is refused: bytes that are not UTF-8, a declaration of another encoding,
+// no root element, or an element below a direct child of the root. Attribute values are
 // compared as raw bytes; a value whose bytes are not what XML reads (a reference, or
 // a TAB, LF or CR, which attribute-value normalization turns into a space) cannot be
 // classified that way and is refused instead of read as "not calcChain". So is a
@@ -44,6 +51,10 @@ import {
 // Bytes between markups are never read: a leading byte order mark is skipped by the
 // search for the first '<' and kept in the result with the other untouched runs.
 // Each result is assembled once, from the source minus the cut elements.
+//
+// The walker (cutRootChildren) and the attribute reader (literalAttributeText) are
+// also the upload gate's: it walks the content types and every relationships part with
+// them (unsafe-parts.ts, guards.ts), so the gate and this file read those parts alike.
 
 export interface CalcChainRemoval {
   /** Zip entry names of the calcChain parts the workbook rels name, distinct. */
@@ -67,7 +78,12 @@ interface ElementCuts {
 }
 
 /** Whether the direct child of the root just scanned into `markup` is to be cut. */
-type ChildSelector = (markup: XmlMarkup, attributes: readonly number[]) => boolean;
+export type ChildSelector = (markup: XmlMarkup, attributes: readonly number[]) => boolean;
+
+/** Checks the start tag of the root element just scanned into `markup`; throws to refuse it. */
+export type RootCheck = (markup: XmlMarkup) => void;
+
+const NO_ROOT_CHECK: RootCheck = () => undefined;
 
 const CALC_CHAIN_RELATIONSHIP_TYPES: readonly string[] = [
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain',
@@ -98,7 +114,8 @@ const FOLDED_CALC_CHAIN_RELATIONSHIP_TYPES: ReadonlySet<string> = new Set(
   CALC_CHAIN_RELATIONSHIP_TYPES.map(foldAsciiCase),
 );
 
-function packagePartError(entry: string, detail: string): SpreadsheetFileError {
+/** CORRUPT_FILE `{ reason: 'package-part', entry }`, the message `Package part <detail>`. */
+export function packagePartError(entry: string, detail: string): SpreadsheetFileError {
   return new SpreadsheetFileError('CORRUPT_FILE', `Package part ${detail}`, {
     reason: ZIP_REJECT_REASONS.PACKAGE_PART,
     entry: metaEntryName(entry),
@@ -156,6 +173,45 @@ function literalValue(
   return { start, end };
 }
 
+/**
+ * The value of the scanned tag's only attribute named exactly `name`, decoded; null
+ * when it has none. Read only from a value whose bytes are what XML reads, so the text
+ * can be compared: CORRUPT_FILE `package-part` for `entry` when the attribute repeats
+ * or its value holds a reference, a TAB, an LF or a CR.
+ */
+export function literalAttributeText(
+  bytes: Uint8Array,
+  markup: XmlMarkup,
+  attributes: readonly number[],
+  name: string,
+  entry: string,
+): string | null {
+  const attribute = onlyAttribute(bytes, markup, attributes, name, entry);
+  if (attribute === NO_ATTRIBUTE) return null;
+  const value = literalValue(bytes, attributes, attribute, entry, name);
+  return VALUE_DECODER.decode(bytes.subarray(value.start, value.end));
+}
+
+/**
+ * The raw bytes of the value of the scanned tag's only attribute named exactly `name`,
+ * references and line breaks left in; null when it has none. CORRUPT_FILE
+ * `package-part` for `entry` when the attribute repeats.
+ */
+export function attributeValueBytes(
+  bytes: Uint8Array,
+  markup: XmlMarkup,
+  attributes: readonly number[],
+  name: string,
+  entry: string,
+): Uint8Array | null {
+  const attribute = onlyAttribute(bytes, markup, attributes, name, entry);
+  if (attribute === NO_ATTRIBUTE) return null;
+  return bytes.subarray(
+    attributeField(attributes, attribute, ATTRIBUTE_VALUE_START),
+    attributeField(attributes, attribute, ATTRIBUTE_VALUE_END),
+  );
+}
+
 function isCalcChainType(bytes: Uint8Array, start: number, end: number): boolean {
   return CALC_CHAIN_RELATIONSHIP_TYPES.some((type) => bytesEqualAscii(bytes, start, end, type));
 }
@@ -192,12 +248,46 @@ function hasCalcChainContentType(
 }
 
 /**
+ * A processing instruction whose target is `xml` in any ASCII case must be the first
+ * markup, its target exactly `xml`, and name no encoding but UTF-8 (the worksheet
+ * index's rule): bytes another reader decodes in another encoding (UTF-7 spells '<' as
+ * `+ADw-`) could hold markup this walk never sees. CORRUPT_FILE `package-part` otherwise.
+ */
+function assertUtf8Declaration(
+  bytes: Uint8Array,
+  markup: XmlMarkup,
+  attributes: number[],
+  entry: string,
+  first: boolean,
+): void {
+  if (!hasDeclarationTarget(bytes, markup)) return;
+  if (!first || !isXmlDeclaration(bytes, markup)) {
+    throw packagePartError(entry, 'has an xml processing instruction that is not its declaration');
+  }
+  if (!declaresUtf8(bytes, markup, attributes)) {
+    throw packagePartError(entry, 'declares an encoding other than UTF-8');
+  }
+}
+
+/**
  * Walks every markup of `bytes` with the lexer and asks `select` about each direct
  * child of the root; a selected child is cut from its '<' to the end of the element.
- * CORRUPT_FILE `package-part` for `entry` on a lexer error, an end tag outside the
- * root, a second root element, or a root that never closes.
+ * The part must be read exactly as the walk reads it, so CORRUPT_FILE `package-part`
+ * for `entry` when its bytes are not UTF-8 or its declaration names another encoding,
+ * on a lexer error, an end tag outside the root, a second root element, no root
+ * element, an element below a direct child of the root (neither the content types nor
+ * the relationships schema has one, and the walk would not read it), or a root that
+ * never closes. A caller that only reads the children selects none; an error `select`
+ * or `checkRoot` (given the root's start tag, none by default) throws passes through
+ * unchanged.
  */
-function cutRootChildren(bytes: Uint8Array, entry: string, select: ChildSelector): ElementCuts {
+export function cutRootChildren(
+  bytes: Uint8Array,
+  entry: string,
+  select: ChildSelector,
+  checkRoot: RootCheck = NO_ROOT_CHECK,
+): ElementCuts {
+  if (!isUtf8(bytes)) throw packagePartError(entry, 'is not valid UTF-8');
   const markup = createMarkup();
   const attributes: number[] = [];
   const starts: number[] = [];
@@ -205,6 +295,7 @@ function cutRootChildren(bytes: Uint8Array, entry: string, select: ChildSelector
   let depth = ROOT_DEPTH;
   let rootSeen = false;
   let cutOpen = false;
+  let first = true;
   try {
     for (let at = nextMarkup(bytes, 0); at !== -1; at = nextMarkup(bytes, markup.end)) {
       scanMarkup(bytes, at, markup, attributes);
@@ -215,7 +306,10 @@ function cutRootChildren(bytes: Uint8Array, entry: string, select: ChildSelector
           if (depth === ROOT_DEPTH) {
             if (rootSeen) throw packagePartError(entry, 'has an element after the root element');
             rootSeen = true;
-          } else if (depth === CHILD_DEPTH && select(markup, attributes)) {
+            checkRoot(markup);
+          } else if (depth > CHILD_DEPTH) {
+            throw packagePartError(entry, 'has an element below a direct child of the root');
+          } else if (select(markup, attributes)) {
             starts.push(markup.start);
             if (kind === 'empty') ends.push(markup.end);
             else cutOpen = true;
@@ -233,17 +327,20 @@ function cutRootChildren(bytes: Uint8Array, entry: string, select: ChildSelector
           }
           break;
         case 'opaque':
+          assertUtf8Declaration(bytes, markup, attributes, entry, first);
           break;
         default: {
           const _exhaustive: never = kind;
           throw new Error(`Unhandled markup kind: ${String(_exhaustive)}`);
         }
       }
+      first = false;
     }
   } catch (error) {
     if (!(error instanceof XmlLexError)) throw error;
     throw packagePartError(entry, `has markup outside the strict subset: ${error.message}`);
   }
+  if (!rootSeen) throw packagePartError(entry, 'has no root element');
   if (depth !== ROOT_DEPTH) throw packagePartError(entry, 'ends inside the root element');
   return { starts, ends };
 }

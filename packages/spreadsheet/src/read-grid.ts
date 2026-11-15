@@ -1,4 +1,4 @@
-import type { Element } from '@xmldom/xmldom';
+import type { Element, Node } from '@xmldom/xmldom';
 import { strFromU8 } from 'fflate';
 
 import { extractSharedStrings, extractWorkbook, extractXfIsDate, type SheetEntry } from './book';
@@ -38,6 +38,9 @@ import {
 //   3. the selected worksheet's cells are converted while checkPart walks them
 //      (cell-value.ts); a worksheet that is also a book part (crafted rels) is
 //      parsed again and converted after the walk.
+// A converted worksheet whose `sheetData` holds an `AlternateContent` element (any
+// namespace) anywhere below it, inside a row or a cell included, breaks a reader rule:
+// the reader and the patcher's index skip it, Excel may apply one of its branches.
 // Gate errors win over reader errors: a rule the reader would break (ReaderRuleError)
 // is held until every part has passed checkPart. A named sheet that cannot be read
 // falls back to the first sheet, as the old pipeline's wrapper did; a sheet that
@@ -363,14 +366,54 @@ function collectFormulaRangeRefs(cell: Element, refs: string[]): void {
 }
 
 /**
+ * Whether `sheetData` holds an element whose local name is `AlternateContent`, any
+ * namespace, anywhere below it (in a row, a cell or deeper). One pass over its
+ * descendants in document order, iterative (deep nesting cannot overflow the stack) and
+ * with no list built per element; it never throws.
+ */
+function holdsAlternateContent(sheetData: Element): boolean {
+  let node: Node | null = sheetData.firstChild;
+  while (node !== null && node !== sheetData) {
+    if (isElement(node) && localName(node.tagName) === ALTERNATE_CONTENT) return true;
+    node = nextInSubtree(node, sheetData);
+  }
+  return false;
+}
+
+/**
+ * The node after `node` in document order within the subtree of `top`: its first child,
+ * else the next sibling of it or of its nearest ancestor below `top` that has one; `top`
+ * itself once the subtree is done.
+ */
+function nextInSubtree(node: Node, top: Node): Node {
+  if (node.firstChild !== null) return node.firstChild;
+  let current: Node = node;
+  while (current !== top) {
+    if (current.nextSibling !== null) return current.nextSibling;
+    const parent = current.parentNode;
+    if (parent === null) return top;
+    current = parent;
+  }
+  return top;
+}
+
+/** The reader rule a worksheet root breaks before any cell is read, or null. */
+function sheetDataFailure(root: Element): ReaderRuleError | null {
+  const sheetData = firstChildNamed(root, SHEET_DATA);
+  if (sheetData === null) return new ReaderRuleError('worksheetWithoutSheetData');
+  if (holdsAlternateContent(sheetData)) {
+    return new ReaderRuleError('alternateContentInSheetData');
+  }
+  return null;
+}
+
+/**
  * A conversion of the worksheet part `partPath` under `root`; a root without
- * `sheetData` breaks the reader. Only a tracked conversion reads the merge refs.
+ * `sheetData`, or with `AlternateContent` anywhere inside its sheet data, breaks the
+ * reader. Only a tracked conversion reads the merge refs.
  */
 function startConversion(partPath: string, root: Element, track: boolean): Conversion {
-  const failure =
-    firstChildNamed(root, SHEET_DATA) === null
-      ? new ReaderRuleError('Worksheet has no sheetData')
-      : null;
+  const failure = sheetDataFailure(root);
   return {
     partPath,
     placed: [],
@@ -420,7 +463,7 @@ function convertSheet(
     return {
       partPath: NO_PART,
       placed: [],
-      failure: new ReaderRuleError('Sheet is not a worksheet'),
+      failure: new ReaderRuleError('sheetNotWorksheet'),
       cellKeys: null,
       mergeRefs: NOT_TRACKED,
       formulaRangeRefs: null,
@@ -463,6 +506,7 @@ function assembleGrid(placed: readonly (readonly CellValue[] | undefined)[]): Sh
 function cannotRead(cause: ReaderRuleError): SpreadsheetFileError {
   return new SpreadsheetFileError('CORRUPT_FILE', READ_FAILED_MESSAGE, {
     cause: String(cause).slice(0, MAX_ERROR_CAUSE_LENGTH),
+    rule: cause.rule,
   });
 }
 
@@ -501,7 +545,7 @@ function readGridParts(parts: UploadParts, options: GridReadOptions, track: bool
 
   if (state.held !== null) throw cannotRead(state.held);
   const workbook = state.workbook;
-  if (workbook === null) throw cannotRead(new ReaderRuleError('Workbook part was not read'));
+  if (workbook === null) throw cannotRead(new ReaderRuleError('workbookPartNotRead'));
   const choice = chooseSheet(workbook.sheets, options);
   // Only now: every part has passed checkPart and no reader rule is held.
   if (choice.missing !== null) throw sheetNotFound(choice.missing);

@@ -7,16 +7,17 @@
 // The discount CONFIG (type + parameters) is NOT in the file — it rides in on the
 // multipart form and is validated by the shared config validator, so the invalid-config
 // cases exercise that gate too. The corrupt-format case blanks the required "Barkod"
-// header via `patchXlsxCells` (the byte-preserving cell patcher used by the export tests).
+// header via `patchFixture` (the engine's test-only run of the export patch path).
 
 import { readFileSync } from 'node:fs';
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { type CellPatch, type CellPatchValue, type SheetSelector } from '@pazarsync/spreadsheet';
+import { patchFixture } from '@pazarsync/spreadsheet/testing';
 
 import { createApp } from '@/app';
-import { patchXlsxCells, type XlsxCellValue } from '@/lib/xlsx-patch';
 import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
@@ -44,6 +45,9 @@ const INCLUDED_BARCODE = 'DISC-BC-4';
 // 0-based grid columns of the "Barkod" and "Güncel Satış Fiyatı" headers (Excel row 1).
 const COL_BARCODE = 4;
 const COL_PRICE = 6;
+
+// The fixture holds a single sheet; the fixture patcher selects it strictly by position.
+const FIRST_SHEET: SheetSelector = { by: 'index', index: 0 };
 
 // Both campaign dates are required on every config write.
 const START_AT = '2026-07-21T05:00:00.000Z';
@@ -111,11 +115,8 @@ async function importFile(
 }
 
 /** Builds a one-row cell patch for the byte-preserving fixture manipulation. */
-function rowPatch(
-  excelRow: number,
-  cells: [number, XlsxCellValue][],
-): Map<number, Map<number, XlsxCellValue>> {
-  return new Map([[excelRow, new Map(cells)]]);
+function rowPatch(excelRow: number, cells: [number, CellPatchValue][]): CellPatch[] {
+  return cells.map(([col, value]) => ({ excelRow, col, value }));
 }
 
 // This file sends more imports than RATE_LIMITS.FILE_IMPORT allows per minute with the
@@ -244,9 +245,10 @@ describe('POST .../discount-lists/import - rejects invalid input', () => {
   it('rejects a file whose header layout is not the İndirimler export with 422 INVALID_DISCOUNT_FORMAT', async () => {
     const ctx = await setupStore(false);
     // Blank the required "Barkod" header so the layout no longer resolves.
-    const corrupt = patchXlsxCells(
+    const corrupt = patchFixture(
       FIXTURE,
-      rowPatch(1, [[COL_BARCODE, { kind: 'inlineStr', value: 'Bozuk' }]]),
+      rowPatch(1, [[COL_BARCODE, { kind: 'text', value: 'Bozuk' }]]),
+      { sheet: FIRST_SHEET },
     );
     const res = await app.request(importRequest(ctx, corrupt, { ...NET_CONFIG }));
     expect(res.status).toBe(422);
@@ -269,9 +271,10 @@ describe('POST .../discount-lists/import - skips unparseable rows', () => {
   it('counts a row with an unparseable price in skippedRows instead of persisting it', async () => {
     const ctx = await setupStore(true);
     // Break the SECOND data row's (unmatched DISC-BC-2) price cell — the matched row survives.
-    const broken = patchXlsxCells(
+    const broken = patchFixture(
       FIXTURE,
-      rowPatch(3, [[COL_PRICE, { kind: 'inlineStr', value: 'fiyat yok' }]]),
+      rowPatch(3, [[COL_PRICE, { kind: 'text', value: 'fiyat yok' }]]),
+      { sheet: FIRST_SHEET },
     );
     const imported = await importFile(ctx, broken, { ...NET_CONFIG });
     expect(imported.skippedRows).toBe(1);

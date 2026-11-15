@@ -98,8 +98,10 @@ describe('cellValue', () => {
     expect(() => read('<c t="n"><v>12abc</v></c>')).toThrow(ReaderRuleError);
   });
 
-  it('n: no value is null without consulting the style', () => {
-    expect(read('<c s="9"/>')).toBeNull();
+  it('looks the style up on every cell, a valueless one included', () => {
+    expect(() => read('<c s="9"/>')).toThrow(ReaderRuleError);
+    expect(() => read('<c s="9" t="s"/>')).toThrow(ReaderRuleError);
+    expect(read('<c s="1"/>', DATE_STYLES)).toBeNull();
   });
 
   it('n: a date-styled number becomes a UTC Date, shifted for the 1904 system', () => {

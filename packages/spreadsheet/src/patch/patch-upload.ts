@@ -1,6 +1,6 @@
 import { MAX_PATCH_OUTPUT_TOTAL_BYTES } from '../constants';
 import { SpreadsheetFileError } from '../errors';
-import { openUpload, type UploadParts } from '../guards';
+import { openUploadWithLayout, type UploadParts } from '../guards';
 import type { GridCaps } from '../part-checks';
 import { readSheet, type SheetReading } from '../read-grid';
 import { CONTENT_TYPES_PART, WORKBOOK_RELS_PART } from '../workbook-parts';
@@ -11,16 +11,15 @@ import { assertPatchTargets, type ResolvedPatchRequest } from './patch-request';
 import { applyCellPatches, patchedPartCap, type WorksheetPatchOptions } from './patch-worksheet';
 import {
   entryContent,
-  readZipLayout,
   rewriteZip,
   type DeflatedContent,
   type ZipChange,
   type ZipEntry,
-  type ZipLayout,
 } from './raw-zip';
 import { MALFORMED_SHEET_REASONS, PATCH_LIMIT_REASONS, ZIP_REJECT_REASONS } from './reasons';
-import { bytesEqualAt, foldAsciiCase, metaEntryName, viewMismatch } from './shared';
+import { foldAsciiCase, metaEntryName } from './shared';
 import { cellKeysOf, indexWorksheet } from './sheet-index';
+import { entriesByName } from './zip-views';
 
 // The export patch path, sync and in-process: one stored upload in, one archive per
 // output out. Cheap checks run before the DOM, and no archive is returned before
@@ -28,10 +27,11 @@ import { cellKeysOf, indexWorksheet } from './sheet-index';
 //   0. every patch target lies inside the read caps (resolvePatchRequest checked it
 //      on the main thread; a request that did not come through there is checked
 //      here, because the merged-range check below looks only inside the caps);
-//   1. the gate (openUpload): the same checks a grid read runs;
-//   2. the zip layout (readZipLayout), then the view check: every part the gate
-//      returned equals the directory's entry of that name. Neither builds a DOM, so a
-//      stored file the layout refuses costs no full parse;
+//   1. the gate (openUploadWithLayout): the same checks a grid read runs;
+//   2. among them, the zip layout (readZipLayout), then the view check: every part the
+//      gate returned equals the directory's entry of that name. Neither builds a DOM,
+//      so a stored file the layout refuses costs no full parse, and the gate hands
+//      back the layout it walked, so a job walks it once;
 //   3. the reader (readSheet) on the gate's parts; its grid never leaves the job, so
 //      the grid text cap does not apply;
 //   4. the caller's anchors, on the reader's grid;
@@ -58,14 +58,6 @@ import { cellKeysOf, indexWorksheet } from './sheet-index';
 // a calcChain path never drops one.
 const RELATIONSHIPS_PART_SUFFIX = '.rels';
 const DROP: ZipChange = { kind: 'drop' };
-// How the view check's messages start.
-const READER_PART_ENTRY = 'Zip entry of a reader part';
-
-function entriesByName(layout: ZipLayout): Map<string, ZipEntry> {
-  const entries = new Map<string, ZipEntry>();
-  for (const entry of layout.entries) entries.set(entry.name, entry);
-  return entries;
-}
 
 /**
  * Throws SpreadsheetFileError MALFORMED_SHEET `{ reason: 'reader-mismatch',
@@ -87,39 +79,6 @@ export function assertSameCells(readerKeys: readonly number[], indexKeys: readon
       indexCells: indexKeys.length,
     },
   );
-}
-
-/**
- * Throws SpreadsheetFileError CORRUPT_FILE `{ reason: 'zip-view-mismatch', entry }`
- * unless every part of `parts` equals the content of the directory's entry of that
- * name. Every entry must exist and declare its part's length before anything is
- * inflated; the inflate is bounded by that length (entryContent).
- */
-export function assertSameViews(file: Uint8Array, layout: ZipLayout, parts: UploadParts): void {
-  const entries = entriesByName(layout);
-  const pairs: (readonly [ZipEntry, Uint8Array])[] = [];
-  for (const [name, bytes] of Object.entries(parts)) {
-    const entry = entries.get(name);
-    if (entry === undefined) {
-      throw viewMismatch(name, `${READER_PART_ENTRY} is missing from the central directory`);
-    }
-    if (entry.uncompressedSize !== bytes.length) {
-      throw viewMismatch(
-        name,
-        `${READER_PART_ENTRY} declares another length than the part the gate read`,
-      );
-    }
-    pairs.push([entry, bytes]);
-  }
-  for (const [entry, bytes] of pairs) {
-    const content = entryContent(file, entry);
-    if (content.length !== bytes.length || !bytesEqualAt(content, 0, bytes, 0, bytes.length)) {
-      throw viewMismatch(
-        entry.name,
-        `${READER_PART_ENTRY} holds other bytes than the part the gate read`,
-      );
-    }
-  }
 }
 
 /**
@@ -225,14 +184,11 @@ export function patchUpload(
   const { read } = request;
   assertPatchTargets(request.outputs, read);
   const caps: GridCaps = { rowCap: read.rowCap, colCap: read.colCap };
-  const parts = openUpload(file, {
+  const { parts, layout } = openUploadWithLayout(file, {
     rowCap: read.rowCap,
     colCap: read.colCap,
     maxBytes: read.maxBytes,
   });
-
-  const layout = readZipLayout(file);
-  assertSameViews(file, layout, parts);
 
   const reading = readSheet(parts, { sheetName: read.sheetName, sheet: read.sheet, caps });
   assertAnchorsMatch(reading.grid, request.anchors);

@@ -52,7 +52,7 @@ export function extractWorkbook(root: Element): {
   readonly epoch1904: boolean;
 } {
   const sheetList = firstChildNamed(root, SHEETS);
-  if (sheetList === null) throw new ReaderRuleError('Workbook has no sheets element');
+  if (sheetList === null) throw new ReaderRuleError('workbookWithoutSheets');
   const sheets: SheetEntry[] = [];
   for (const sheet of childrenNamed(sheetList, SHEET)) {
     const name = attributeOf(sheet, NAME_ATTRIBUTE);
@@ -82,7 +82,7 @@ export function extractSharedStrings(root: Element): (string | null)[] {
     const runs: string[] = [];
     for (const run of childrenNamed(item, RUN)) {
       const runText = firstChildNamed(run, TEXT);
-      if (runText === null) throw new ReaderRuleError('Shared string run has no text');
+      if (runText === null) throw new ReaderRuleError('sharedStringRunWithoutText');
       runs.push(textOf(runText));
     }
     strings.push(trimmedOrNull(runs.join('')));
@@ -98,7 +98,7 @@ function numberFormatIsDate(root: Element): Map<string, boolean> {
   for (const numFmt of childrenNamed(numFmts, NUMBER_FORMAT)) {
     // A missing id is the key 'null', as in the reader's array.
     const id = String(attributeOf(numFmt, NUMBER_FORMAT_ID_ATTRIBUTE));
-    if (id === ARRAY_LENGTH_KEY) throw new ReaderRuleError('Number format id breaks the reader');
+    if (id === ARRAY_LENGTH_KEY) throw new ReaderRuleError('numberFormatIdBreaksReader');
     // Classified once per format, not once per xf that points at it: an xf count
     // times a format length would otherwise be quadratic work.
     const template = attributeOf(numFmt, FORMAT_CODE_ATTRIBUTE);

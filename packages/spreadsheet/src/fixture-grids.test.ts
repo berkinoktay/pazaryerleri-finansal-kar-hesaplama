@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import { DEFAULT_COL_CAP, DEFAULT_MAX_BYTES, DEFAULT_ROW_CAP } from './constants';
 import type { SheetData } from './grid-types';
+import { openUpload } from './guards';
 import { readWorkbookGrid } from './parse';
 import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
 import { FIXTURE_PINS, gridSha256, readFixture } from '../tests/helpers/fixture-pins';
@@ -48,6 +50,21 @@ describe('fixture grids are unchanged', () => {
       firstBarcode: fixture.firstBarcode,
     });
     expect(gridSha256(grid)).toBe(fixture.gridSha256);
+  });
+});
+
+const GUARD_OPTS = {
+  rowCap: DEFAULT_ROW_CAP,
+  colCap: DEFAULT_COL_CAP,
+  maxBytes: DEFAULT_MAX_BYTES,
+};
+
+// Every rule of the gate, the zip layout, the view check, the root relationships, the
+// unsafe parts and the worksheet formula scan included, accepts a seller's normal file.
+// The reads above also pass the reader's style and AlternateContent rules.
+describe('fixtures pass the upload gate', () => {
+  it.each(FIXTURE_PINS)('$file', (fixture) => {
+    expect(() => openUpload(readFixture(fixture.file), GUARD_OPTS)).not.toThrow();
   });
 });
 

@@ -12,6 +12,10 @@ import { attributeOf, firstChildNamed, isElement, localName, textOf } from './xm
 //   - numbers are read with `Number`, like the reader's parseNumberDefault;
 //   - every input the reader throws on throws ReaderRuleError here, so the caller
 //     can fall back to the first sheet or report CORRUPT_FILE as the old path did.
+// One rule is stricter than that reader: every cell that carries a style index must
+// name an existing `cellXfs` entry, an empty cell included (the reader looked the
+// style up for a numeric value only). The export patch path keeps a cell's style when
+// it writes into it, so a style Excel cannot find must be refused at upload.
 
 const VALUE = 'v';
 const FORMULA = 'f';
@@ -29,10 +33,38 @@ const MISSING_VALUE_TEXT = 'undefined';
 // A style index the reader's `styles[s]` lookup can find is a canonical array index.
 const STYLE_INDEX = /^(0|[1-9]\d*)$/;
 
-/** A cell breaks one of the reader's rules. Package-internal: never leaves read-grid.ts. */
+/**
+ * Every reader rule a workbook can break, by a stable key, with the message its
+ * ReaderRuleError carries. The key reaches the caller as CORRUPT_FILE's `meta.rule`;
+ * the message only inside `meta.cause`.
+ */
+export const READER_RULES = {
+  inlineStringStructure: 'Unsupported inline string cell structure',
+  sharedStringIndex: 'Invalid or out-of-bounds shared string index',
+  booleanValue: 'Unsupported boolean cell value',
+  dateValue: 'Unsupported date cell value',
+  numericValue: 'Invalid numeric cell value',
+  cellStyleNotFound: 'Cell style not found',
+  formulaStringWithoutValue: 'Formula string cell has no value',
+  cellTypeNotSupported: 'Cell type not supported',
+  workbookWithoutSheets: 'Workbook has no sheets element',
+  sharedStringRunWithoutText: 'Shared string run has no text',
+  numberFormatIdBreaksReader: 'Number format id breaks the reader',
+  worksheetWithoutSheetData: 'Worksheet has no sheetData',
+  alternateContentInSheetData: 'Worksheet has AlternateContent inside its sheet data',
+  sheetNotWorksheet: 'Sheet is not a worksheet',
+  workbookPartNotRead: 'Workbook part was not read',
+} as const;
+
+export type ReaderRule = keyof typeof READER_RULES;
+
+/**
+ * A cell breaks one of the reader's rules. Package-internal: the error never leaves
+ * read-grid.ts; its `rule` does, as CORRUPT_FILE's `meta.rule`.
+ */
 export class ReaderRuleError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(readonly rule: ReaderRule) {
+    super(READER_RULES[rule]);
     this.name = 'ReaderRuleError';
   }
 }
@@ -67,11 +99,11 @@ function firstElementChild(parent: Node): Element | null {
 function inlineStringValue(cell: Element): string | null {
   const inline = firstElementChild(cell);
   if (inline === null || localName(inline.tagName) !== INLINE_STRING) {
-    throw new ReaderRuleError('Unsupported inline string cell structure');
+    throw new ReaderRuleError('inlineStringStructure');
   }
   const text = firstElementChild(inline);
   if (text === null || localName(text.tagName) !== INLINE_TEXT) {
-    throw new ReaderRuleError('Unsupported inline string cell structure');
+    throw new ReaderRuleError('inlineStringStructure');
   }
   return trimmedOrNull(textOf(text));
 }
@@ -83,7 +115,7 @@ function sharedStringValue(raw: string | undefined, context: CellContext): strin
       ? context.sharedStrings[index]
       : undefined;
   if (value === undefined) {
-    throw new ReaderRuleError('Invalid or out-of-bounds shared string index');
+    throw new ReaderRuleError('sharedStringIndex');
   }
   return value;
 }
@@ -91,43 +123,50 @@ function sharedStringValue(raw: string | undefined, context: CellContext): strin
 function booleanValue(raw: string | undefined): boolean {
   if (raw === TRUE_VALUE) return true;
   if (raw === FALSE_VALUE) return false;
-  throw new ReaderRuleError('Unsupported boolean cell value');
+  throw new ReaderRuleError('booleanValue');
 }
 
 function dateValue(raw: string | undefined): Date | null {
   if (raw === undefined) return null;
   const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) throw new ReaderRuleError('Unsupported date cell value');
+  if (Number.isNaN(date.getTime())) throw new ReaderRuleError('dateValue');
   return date;
 }
 
 function numberOf(raw: string): number {
   const value = Number(raw);
-  if (Number.isNaN(value)) throw new ReaderRuleError('Invalid numeric cell value');
+  if (Number.isNaN(value)) throw new ReaderRuleError('numericValue');
   return value;
 }
 
-/** Whether the cell's style formats a date; a style the reader cannot find throws. */
+/**
+ * Whether the cell's style formats a date; a cell without a style index (or with an
+ * empty one) has none. A style index that is not a canonical index of an existing
+ * `cellXfs` entry throws.
+ */
 function hasDateStyle(cell: Element, context: CellContext): boolean {
   const style = attributeOf(cell, STYLE_ATTRIBUTE);
   if (style === null || style === '') return false;
   if (!STYLE_INDEX.test(style) || Number(style) >= context.xfIsDate.length) {
-    throw new ReaderRuleError('Cell style not found');
+    throw new ReaderRuleError('cellStyleNotFound');
   }
   return context.xfIsDate[Number(style)] === true;
 }
 
-function numericValue(cell: Element, raw: string | undefined, context: CellContext): CellValue {
+function numericValue(raw: string | undefined, isDate: boolean, context: CellContext): CellValue {
   if (raw === undefined) return null;
-  if (hasDateStyle(cell, context)) return excelSerialToDate(numberOf(raw), context.epoch1904);
+  if (isDate) return excelSerialToDate(numberOf(raw), context.epoch1904);
   return numberOf(raw);
 }
 
 /**
- * The grid value of one worksheet cell, by read-excel-file 9.2.0's rules (see the
- * header). Throws ReaderRuleError wherever that reader throws.
+ * The grid value of one worksheet cell, by read-excel-file 9.2.0's rules plus the
+ * style rule (see the header). Throws ReaderRuleError wherever that reader throws, and
+ * for a style index no `cellXfs` entry has, on every cell.
  */
 export function cellValue(cell: Element, context: CellContext): CellValue {
+  // Looked up before anything else: an empty cell and an uncached formula cell too.
+  const isDate = hasDateStyle(cell, context);
   // PR 1's read copy emptied these cells; the old reader then saw an untyped empty cell.
   if (isUncachedFormulaCell(cell)) return null;
   const type = attributeOf(cell, TYPE_ATTRIBUTE) || DEFAULT_TYPE;
@@ -135,7 +174,7 @@ export function cellValue(cell: Element, context: CellContext): CellValue {
   const raw = valueElement === null ? undefined : textOf(valueElement);
   switch (type) {
     case 'str':
-      if (raw === undefined) throw new ReaderRuleError('Formula string cell has no value');
+      if (raw === undefined) throw new ReaderRuleError('formulaStringWithoutValue');
       return trimmedOrNull(raw);
     case 'inlineStr':
       return inlineStringValue(cell);
@@ -150,8 +189,8 @@ export function cellValue(cell: Element, context: CellContext): CellValue {
     case 'd':
       return dateValue(raw);
     case DEFAULT_TYPE:
-      return numericValue(cell, raw, context);
+      return numericValue(raw, isDate, context);
     default:
-      throw new ReaderRuleError('Cell type not supported');
+      throw new ReaderRuleError('cellTypeNotSupported');
   }
 }

@@ -1,3 +1,5 @@
+import { foldAsciiCase } from './shared';
+
 // Strict byte lexer of the export patch path: reads one markup at a time, as byte
 // offsets into a worksheet part, and accepts only a strict subset of XML.
 //
@@ -91,6 +93,16 @@ const COMMENT_DASHES = '--';
 const COMMENT_CLOSE = '-->';
 const CDATA_OPEN = '<![CDATA[';
 const CDATA_CLOSE = ']]>';
+// The target of an XML declaration, and the pseudo-attribute that names its encoding.
+const XML_DECLARATION_TARGET = 'xml';
+const ENCODING_PSEUDO_ATTRIBUTE = 'encoding';
+// The only encoding a declaration may name, compared ignoring ASCII case.
+const UTF8_ENCODING_NAME = 'utf-8';
+
+/** The attribute name that declares the default namespace. */
+export const NAMESPACE_DECLARATION = 'xmlns';
+/** How the name of an attribute that declares a prefix starts; the prefix follows. */
+export const NAMESPACE_DECLARATION_PREFIX = 'xmlns:';
 
 /** Decodes a name this lexer accepted: names are ASCII, which UTF-8 decodes unchanged. */
 export const NAME_DECODER = new TextDecoder();
@@ -169,7 +181,8 @@ function isNameStartByte(byte: number | undefined): boolean {
   );
 }
 
-function isNameByte(byte: number | undefined): boolean {
+/** A byte this lexer accepts in a name after its first: an ASCII letter or digit, '_', '-' or '.'. */
+export function isNameByte(byte: number | undefined): boolean {
   if (byte === undefined) return false;
   return (
     isNameStartByte(byte) ||
@@ -429,4 +442,62 @@ export function scanDeclaration(bytes: Uint8Array, markup: XmlMarkup, attributes
     position = scanAttribute(bytes, next, limit, attributes, count);
     count += 1;
   }
+}
+
+/**
+ * Whether bytes [start, end) are `lowerText` (lower-case ASCII), ignoring ASCII case:
+ * decoded, then folded. The lengths are compared first, so only ASCII bytes can match,
+ * and a byte order mark the decoder drops cannot make a longer value equal.
+ */
+export function bytesEqualFolded(
+  bytes: Uint8Array,
+  start: number,
+  end: number,
+  lowerText: string,
+): boolean {
+  if (end - start !== lowerText.length) return false;
+  return foldAsciiCase(NAME_DECODER.decode(bytes.subarray(start, end))) === lowerText;
+}
+
+/** Whether the markup scanned into `markup` is a processing instruction. */
+function isProcessingInstruction(bytes: Uint8Array, markup: XmlMarkup): boolean {
+  return markup.kind === 'opaque' && bytes[markup.start + 1] === QUESTION;
+}
+
+/** Whether `markup` is a processing instruction whose target is exactly `xml`: an XML declaration. */
+export function isXmlDeclaration(bytes: Uint8Array, markup: XmlMarkup): boolean {
+  return (
+    isProcessingInstruction(bytes, markup) &&
+    bytesEqualAscii(bytes, markup.nameStart, markup.nameEnd, XML_DECLARATION_TARGET)
+  );
+}
+
+/**
+ * Whether `markup` is a processing instruction whose target is `xml` in any ASCII case:
+ * a target XML reserves for the declaration that may open a document.
+ */
+export function hasDeclarationTarget(bytes: Uint8Array, markup: XmlMarkup): boolean {
+  return (
+    isProcessingInstruction(bytes, markup) &&
+    bytesEqualFolded(bytes, markup.nameStart, markup.nameEnd, XML_DECLARATION_TARGET)
+  );
+}
+
+/**
+ * Whether the XML declaration scanned into `markup` names no encoding but UTF-8 (ASCII
+ * case ignored); one without an `encoding` pseudo-attribute does. Its pseudo-attributes
+ * are read into `attributes` (scanDeclaration), so an XmlLexError is thrown when they
+ * do not follow the attribute grammar.
+ */
+export function declaresUtf8(bytes: Uint8Array, markup: XmlMarkup, attributes: number[]): boolean {
+  scanDeclaration(bytes, markup, attributes);
+  for (let attribute = 0; attribute < markup.attributeCount; attribute += 1) {
+    const nameStart = attributeField(attributes, attribute, ATTRIBUTE_NAME_START);
+    const nameEnd = attributeField(attributes, attribute, ATTRIBUTE_NAME_END);
+    if (!bytesEqualAscii(bytes, nameStart, nameEnd, ENCODING_PSEUDO_ATTRIBUTE)) continue;
+    const valueStart = attributeField(attributes, attribute, ATTRIBUTE_VALUE_START);
+    const valueEnd = attributeField(attributes, attribute, ATTRIBUTE_VALUE_END);
+    if (!bytesEqualFolded(bytes, valueStart, valueEnd, UTF8_ENCODING_NAME)) return false;
+  }
+  return true;
 }

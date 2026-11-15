@@ -40,6 +40,14 @@ export const WORKBOOK_RELS_PART = 'xl/_rels/workbook.xml.rels';
 export const WORKBOOK_PART = 'xl/workbook.xml';
 /** The package's content types part; the gate requires it, the reader never opens it. */
 export const CONTENT_TYPES_PART = '[Content_Types].xml';
+/** The package's root relationships part; the gate checks that it names the workbook part. */
+export const ROOT_RELS_PART = '_rels/.rels';
+// Entry names of active parts, ASCII-folded: a macro project, and anything under the
+// external link and embedded object folders. A second line behind the content and
+// relationship types (unsafe-parts.ts): Excel finds a part by its relationship, not by
+// its name.
+export const UNSAFE_PART_NAMES: readonly string[] = ['xl/vbaproject.bin'];
+export const UNSAFE_PART_PREFIXES: readonly string[] = ['xl/externallinks/', 'xl/embeddings/'];
 
 /** What the workbook rels tell the reader. */
 export interface WorkbookRelationships {

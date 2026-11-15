@@ -318,6 +318,115 @@ describe('readGrid: strict sheet selection', () => {
   });
 });
 
+// The patcher keeps a cell's style and never looks inside AlternateContent, so the
+// reader refuses what the export could not write back faithfully.
+describe('readGrid: cell styles and AlternateContent in the sheet data', () => {
+  const MARKUP_COMPATIBILITY_NS = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+  const TWO_XF_STYLES =
+    `${XML_DECLARATION}<styleSheet xmlns="${SPREADSHEET_NS}">` +
+    '<cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="0"/></cellXfs></styleSheet>';
+  const FIRST_ROW = '<row r="1"><c r="A1"><v>1</v></c></row>';
+
+  function alternateContent(inner: string): string {
+    return (
+      `<mc:AlternateContent xmlns:mc="${MARKUP_COMPATIBILITY_NS}">` +
+      `<mc:Choice Requires="x14">${inner}</mc:Choice></mc:AlternateContent>`
+    );
+  }
+
+  /** A one-sheet workbook with two cellXfs entries whose worksheet part is `xml`. */
+  function styledParts(xml: string): UploadParts {
+    return {
+      [RELS_PART]: strToU8(
+        relsOf(
+          relationship('rId1', 'worksheet', 'worksheets/sheet1.xml'),
+          relationship('rId2', 'styles', 'styles.xml'),
+        ),
+      ),
+      [WORKBOOK_PART]: strToU8(workbookOf(sheetEntry('S', 1))),
+      [SHEET_PART]: strToU8(xml),
+      [STYLES_PART]: strToU8(TWO_XF_STYLES),
+    };
+  }
+
+  /** A worksheet whose root holds `sheetData` with `rows`, then `afterSheetData`. */
+  function worksheetWith(rows: string, afterSheetData: string): string {
+    return `${XML_DECLARATION}<worksheet xmlns="${SPREADSHEET_NS}"><sheetData>${rows}</sheetData>${afterSheetData}</worksheet>`;
+  }
+
+  it('refuses an empty cell whose style index names no cellXfs entry', () => {
+    const parts = styledParts(worksheet(`${FIRST_ROW}<row r="2"><c r="A2" s="9"/></row>`));
+
+    const error = fileErrorOf(() => readGrid(parts, { caps: CAPS }));
+
+    expect(error.code).toBe('CORRUPT_FILE');
+    expect(String(error.meta.cause)).toContain('Cell style not found');
+    expect(error.meta.rule).toBe('cellStyleNotFound');
+  });
+
+  it('reads an empty cell with an existing style index as null', () => {
+    const parts = styledParts(
+      worksheet(`${FIRST_ROW}<row r="2"><c r="A2" s="1"/><c r="B2"><v>5</v></c></row>`),
+    );
+
+    expect(readGrid(parts, { caps: CAPS })).toEqual([
+      [1, null],
+      [null, 5],
+    ]);
+  });
+
+  it('refuses AlternateContent directly under sheetData', () => {
+    const parts = styledParts(
+      worksheet(`${FIRST_ROW}${alternateContent('<row r="2"><c r="A2"><v>2</v></c></row>')}`),
+    );
+
+    expect(errorCodeOf(() => readGrid(parts, { caps: CAPS }))).toBe('CORRUPT_FILE');
+    expect(errorCodeOf(() => readSheet(parts, { caps: CAPS }))).toBe('CORRUPT_FILE');
+    expect(fileErrorOf(() => readGrid(parts, { caps: CAPS })).meta.rule).toBe(
+      'alternateContentInSheetData',
+    );
+  });
+
+  it('refuses AlternateContent directly under a row', () => {
+    const parts = styledParts(
+      worksheet(
+        `<row r="1"><c r="A1"><v>1</v></c>${alternateContent('<c r="B1"><v>2</v></c>')}</row>`,
+      ),
+    );
+
+    expect(errorCodeOf(() => readGrid(parts, { caps: CAPS }))).toBe('CORRUPT_FILE');
+    expect(errorCodeOf(() => readSheet(parts, { caps: CAPS }))).toBe('CORRUPT_FILE');
+  });
+
+  // Any depth below sheetData: Excel may apply a branch the reader never looked at.
+  it.each([
+    ['inside a cell', `<row r="1"><c r="A1">${alternateContent('<v>2</v>')}<v>1</v></c></row>`],
+    [
+      'inside the inline string of a cell',
+      `<row r="1"><c r="A1" t="inlineStr"><is>${alternateContent('<t>b</t>')}<t>a</t></is></c></row>`,
+    ],
+  ])('refuses AlternateContent %s', (_label, rows) => {
+    const parts = styledParts(worksheet(rows));
+
+    expect(errorCodeOf(() => readSheet(parts, { caps: CAPS }))).toBe('CORRUPT_FILE');
+    expect(fileErrorOf(() => readGrid(parts, { caps: CAPS })).meta.rule).toBe(
+      'alternateContentInSheetData',
+    );
+  });
+
+  it('still reads AlternateContent under the root next to sheetData', () => {
+    const parts = styledParts(
+      worksheetWith(
+        FIRST_ROW,
+        alternateContent('<mergeCells><mergeCell ref="B2:C3"/></mergeCells>'),
+      ),
+    );
+
+    expect(readGrid(parts, { caps: CAPS })).toEqual([[1]]);
+    expect(readSheet(parts, { caps: CAPS }).mergeRefs).toEqual(['B2:C3']);
+  });
+});
+
 describe('readGrid: unexpected exceptions', () => {
   it('reports an exception nothing anticipated as CORRUPT_FILE, as the old reader did', () => {
     const file = buildXlsxFixture([{ name: 'S', xml: worksheetXml([['a']]) }]);

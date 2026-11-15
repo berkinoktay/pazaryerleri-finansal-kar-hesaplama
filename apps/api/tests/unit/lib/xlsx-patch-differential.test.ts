@@ -25,11 +25,6 @@ import { patchFixture } from '@pazarsync/spreadsheet/testing';
 import { describe, expect, it, vi } from 'vitest';
 
 import { patchXlsxCells, type XlsxCellValue, type XlsxRowPatches } from '@/lib/xlsx-patch';
-import {
-  DISCOUNT_INCLUDED_NO,
-  DISCOUNT_INCLUDED_YES,
-  DISCOUNT_SHEET_NAME,
-} from '@/services/discount-list-layout';
 
 // The reads run in the engine's worker; its cold start alone can pass vitest's 5 s
 // default under load, so this file waits longer. A real hang still fails.
@@ -57,6 +52,10 @@ const FLASH_UPDATE_LABELS: readonly string[] = [
   FLASH_UPDATE_LABEL_3H,
   FLASH_UPDATE_LABEL_CUSTOM,
 ];
+// discount-list-layout.ts DISCOUNT_SHEET_NAME, DISCOUNT_INCLUDED_YES and DISCOUNT_INCLUDED_NO.
+const DISCOUNT_SHEET_NAME = '\u00dcr\u00fcnler';
+const DISCOUNT_INCLUDED_YES = 'Evet';
+const DISCOUNT_INCLUDED_NO = 'Hay\u0131r';
 
 // --- Value rules ------------------------------------------------------------
 

@@ -31,14 +31,9 @@ import { resolveReadOptions, type ReadGridOptions } from '../read-options';
 import { buildXlsxFixture, worksheetXml } from '../testing/build-xlsx';
 import { patchFixture, type PatchFixtureOptions } from '../testing/patch-fixture';
 import { resolvePatchRequest, type CellPatch, type ResolvedPatchRequest } from './patch-request';
-import { assertOutputBudget, assertSameCells, assertSameViews, patchUpload } from './patch-upload';
+import { assertOutputBudget, assertSameCells, patchUpload } from './patch-upload';
 import { readZipLayout } from './raw-zip';
-import {
-  MALFORMED_SHEET_REASONS,
-  PATCH_LIMIT_REASONS,
-  UNSUPPORTED_ENCODING_REASONS,
-  ZIP_REJECT_REASONS,
-} from './reasons';
+import { MALFORMED_SHEET_REASONS, PATCH_LIMIT_REASONS, ZIP_REJECT_REASONS } from './reasons';
 
 const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>';
 const PACKAGE_RELATIONSHIPS_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
@@ -61,8 +56,10 @@ const STYLES_PART = 'xl/styles.xml';
 const APP_PROPERTIES_PART = 'docProps/app.xml';
 const BLOB_PART = 'xl/media/blob.bin';
 const DISCOUNT_FIXTURE = 'trendyol-discount-products.xlsx';
-// Bytes of a part other relationships use; the tests only compare them.
+// Bytes of a part other relationships use; the tests only compare them. The gate reads a
+// part named .vml for XML, so the VML drawing holds an XML root.
 const SHARED_PART_BYTES = 'not a calcChain';
+const SHARED_VML_BYTES = '<xml>not a calcChain</xml>';
 
 const DEFAULT_READ = resolveReadOptions({});
 const GUARD_OPTS = {
@@ -223,12 +220,6 @@ const READER_ACCEPTS_PATCHER_REFUSES: readonly (readonly [
     MALFORMED_SHEET_REASONS.MARKUP,
   ],
   [
-    'NUL as tag whitespace',
-    '<row r="1"><c\u0000r="A1"><v>7</v></c></row>',
-    [[7]],
-    MALFORMED_SHEET_REASONS.MARKUP,
-  ],
-  [
     'a vertical tab as tag whitespace',
     '<row r="1"><c\u000Br="A1"><v>7</v></c></row>',
     [[7]],
@@ -312,12 +303,6 @@ describe('patchUpload: the reader accepts, the patcher refuses', () => {
 
   it.each<[string, string, SpreadsheetFileErrorCode, string]>([
     [
-      'a declaration of another encoding',
-      `<?xml version="1.0" encoding="ISO-8859-1"?><worksheet xmlns="${MAIN_NAMESPACE}"><sheetData>${ONE_CELL}</sheetData></worksheet>`,
-      'UNSUPPORTED_ENCODING',
-      UNSUPPORTED_ENCODING_REASONS.DECLARATION,
-    ],
-    [
       'a second sheetData holding another value',
       worksheet(ONE_CELL, '<sheetData><row r="1"><c r="A1"><v>8</v></c></row></sheetData>'),
       'MALFORMED_SHEET',
@@ -327,6 +312,21 @@ describe('patchUpload: the reader accepts, the patcher refuses', () => {
     const file = bookOf(xml);
     expect(readBack(file)).toEqual([[7]]);
     expectReason(() => patchFixture(file, [num(1, 0, '1')]), code, reason);
+  });
+
+  // The reader used to read these and the patcher refused them; the gate now refuses
+  // every kept XML part that is not UTF-8 text, so the read refuses them too.
+  it.each<[string, string]>([
+    [
+      'a declaration of another encoding',
+      `<?xml version="1.0" encoding="ISO-8859-1"?><worksheet xmlns="${MAIN_NAMESPACE}"><sheetData>${ONE_CELL}</sheetData></worksheet>`,
+    ],
+    ['NUL as tag whitespace', worksheet('<row r="1"><c\u0000r="A1"><v>7</v></c></row>')],
+  ])('the gate refuses %s as CORRUPT_FILE part-encoding', (_, xml) => {
+    const file = bookOf(xml);
+    const meta = { reason: ZIP_REJECT_REASONS.PART_ENCODING, entry: SHEET_PART };
+    expectFileError(() => readBack(file), 'CORRUPT_FILE', meta);
+    expectFileError(() => patchFixture(file, [num(1, 0, '1')]), 'CORRUPT_FILE', meta);
   });
 
   it('runs the reader before the index: crossed end tags are the reader error', () => {
@@ -387,29 +387,6 @@ describe('assertSameCells', () => {
   });
 });
 
-describe('assertSameViews', () => {
-  const file = book(ONE_CELL);
-  const parts = openUpload(file, GUARD_OPTS);
-  const layout = readZipLayout(file);
-  const sheetBytes = parts[SHEET_PART];
-  if (sheetBytes === undefined) throw new Error(`no part named ${SHEET_PART}`);
-
-  it('passes the parts the gate read', () => {
-    expect(() => assertSameViews(file, layout, parts)).not.toThrow();
-  });
-
-  it.each<[string, Uint8Array]>([
-    ['one byte changed', Uint8Array.from(sheetBytes, (byte, at) => (at === 0 ? byte ^ 1 : byte))],
-    ['one byte appended', Uint8Array.from([...sheetBytes, 0x20])],
-  ])('refuses a worksheet part with %s', (_, changed) => {
-    expectFileError(
-      () => assertSameViews(file, layout, { ...parts, [SHEET_PART]: changed }),
-      'CORRUPT_FILE',
-      { reason: ZIP_REJECT_REASONS.VIEW_MISMATCH, entry: SHEET_PART },
-    );
-  });
-});
-
 describe('patchUpload: crafted archives through the pipeline', () => {
   const patches: readonly CellPatch[] = [num(2, 1, '5')];
 
@@ -447,9 +424,10 @@ describe('patchUpload: crafted archives through the pipeline', () => {
   });
 
   it('refuses an entry with a 12-byte unsigned data descriptor in the gate', () => {
-    // The stream ends this entry (the last one before the directory) 16 bytes before
-    // the directory record signature, so the gate cannot inflate it and refuses the
-    // file before the layout check runs; raw-zip.test.ts pins the layout's own refusal.
+    // The stream would end this entry (the last one before the directory) 16 bytes
+    // before the directory record signature and fail to inflate it; the gate's layout
+    // check, which runs before the stream, refuses the file first. raw-zip.test.ts pins
+    // the layout's own refusal.
     const { file } = unsignedDescriptorArchive(UNSIGNED_DESCRIPTOR_32_LENGTH);
     const error = fileErrorOf(() => patchFixture(file, patches));
     const gateError = fileErrorOf(() => openUpload(file, GUARD_OPTS));
@@ -501,36 +479,6 @@ describe('patchUpload: a request that did not come through resolvePatchRequest',
     expect(() => patchUpload(Buffer.from('nope'), handBuilt(patch))).toThrow(
       'Invalid patch request',
     );
-  });
-});
-
-describe('assertSameViews on a hidden tile behind the layout check', () => {
-  it('other-sheet: refuses the tile', () => {
-    const { file, layout } = hiddenTileArchive('other-sheet');
-    const parts = openUpload(file, GUARD_OPTS);
-    expectFileError(() => assertSameViews(file, layout, parts), 'CORRUPT_FILE', {
-      reason: ZIP_REJECT_REASONS.VIEW_MISMATCH,
-      entry: SHEET_PART,
-    });
-  });
-
-  it('bomb: refuses the tile within the bounded-inflate budget', () => {
-    const { file, layout } = hiddenTileArchive('bomb');
-    const parts = openUpload(file, GUARD_OPTS);
-    const started = performance.now();
-    const error = fileErrorOf(() => assertSameViews(file, layout, parts));
-    // The workbook is two rows; an unbounded inflate of the tile takes more than a second.
-    expectWithinBudget(performance.now() - started, BOUNDED_INFLATE_BUDGET_MS);
-    expect(error.code).toBe('CORRUPT_FILE');
-    expect(error.meta).toMatchObject({ reason: ZIP_REJECT_REASONS.VIEW_MISMATCH });
-  });
-
-  it('same-sheet: the views compare equal', () => {
-    // The tile holds the real sheet, so every content comparison passes: the layout
-    // rule carries the guarantee, and this check does not.
-    const { file, layout } = hiddenTileArchive('same-sheet');
-    const parts = openUpload(file, GUARD_OPTS);
-    expect(() => assertSameViews(file, layout, parts)).not.toThrow();
   });
 });
 
@@ -623,8 +571,9 @@ describe('patchUpload: order of errors', () => {
 
   it('refuses a worksheet part that is also the content types part', () => {
     // The content types part is no book part, so only its name refuses it: the calcChain
-    // cut may rewrite that part.
-    const types = contentTypesOf([`<sheetData xmlns="${MAIN_NAMESPACE}">${ONE_CELL}</sheetData>`]);
+    // cut may rewrite that part. Its sheet data is empty: the gate refuses an element
+    // below a direct child of the content types root, so a row there never reaches here.
+    const types = contentTypesOf([`<sheetData xmlns="${MAIN_NAMESPACE}"/>`]);
     const file = buildXlsxFixture(
       [{ name: 'Sheet1', xml: worksheet(ONE_CELL), relTarget: `/${CONTENT_TYPES_PART}` }],
       { [CONTENT_TYPES_PART]: types },
@@ -632,7 +581,7 @@ describe('patchUpload: order of errors', () => {
     const reading = readSheet(openUpload(file, GUARD_OPTS), {
       caps: { rowCap: DEFAULT_READ.rowCap, colCap: DEFAULT_READ.colCap },
     });
-    expect(reading.grid).toEqual([[7]]);
+    expect(reading.grid).toEqual([]);
     expect(reading.partPath).toBe(CONTENT_TYPES_PART);
     expect(reading.partIsBookPart).toBe(false);
     expectFileError(() => patchFixture(file, [num(1, 0, '1')]), 'MALFORMED_SHEET', {
@@ -799,12 +748,20 @@ describe('patchUpload: calcChain', () => {
   // Default only. With no Override of the calcChain content type, nothing confirms it
   // is a calcChain: its relationship is cut (no opener loads it as one) and its entry
   // stays.
-  it.each<[target: string, extension: string, contentType: string, relationshipType: string]>([
-    ['media/image1.png', 'png', PNG_CONTENT_TYPE, 'image'],
-    ['drawings/vmlDrawing1.vml', 'vml', VML_CONTENT_TYPE, 'vmlDrawing'],
+  it.each<
+    [
+      target: string,
+      extension: string,
+      contentType: string,
+      relationshipType: string,
+      partBytes: string,
+    ]
+  >([
+    ['media/image1.png', 'png', PNG_CONTENT_TYPE, 'image', SHARED_PART_BYTES],
+    ['drawings/vmlDrawing1.vml', 'vml', VML_CONTENT_TYPE, 'vmlDrawing', SHARED_VML_BYTES],
   ])(
     'keeps a part a calcChain Target names without a calcChain Override: %s',
-    (target, extension, contentType, relationshipType) => {
+    (target, extension, contentType, relationshipType, partBytes) => {
       const part = `xl/${target}`;
       const sheetTarget = `../${target}`;
       const file = bookOf(formulaSheet, {
@@ -817,7 +774,7 @@ describe('patchUpload: calcChain', () => {
           [`<Default Extension="${extension}" ContentType="${contentType}"/>`],
         ),
         [SHEET_RELS_PART]: relsOf(relationship('rId1', relationshipType, sheetTarget)),
-        [part]: SHARED_PART_BYTES,
+        [part]: partBytes,
       });
 
       const out = patchFixture(file, [num(2, 1, '5')], flaggedB);
