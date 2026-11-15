@@ -155,3 +155,14 @@ export const WORKBOOK_IMPORT_MIDDLEWARE: [
   requireMultipart(),
   workbookBodyLimit(),
 ];
+
+/**
+ * The guard chain for every workbook export route: the rate limit first (in-memory and
+ * cheapest), then store access + capability, so the handler sees `storeAccess` typed.
+ * An export has no request body, so the content type and body size guards do not apply.
+ * Typed as a mutable tuple for the same reason as WORKBOOK_IMPORT_MIDDLEWARE.
+ */
+export const WORKBOOK_EXPORT_MIDDLEWARE: [WorkbookImportMiddleware, WorkbookImportMiddleware] = [
+  rateLimit(RATE_LIMITS.FILE_EXPORT),
+  storeAccessMiddleware(CAPABILITIES.DATA_WRITE),
+];

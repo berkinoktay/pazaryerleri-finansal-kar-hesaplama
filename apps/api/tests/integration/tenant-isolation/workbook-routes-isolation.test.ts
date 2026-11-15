@@ -1,6 +1,5 @@
 // Tenant isolation of the workbook routes on the generic pipeline, one row per page
-// (each vertical adds its row as it moves; the export cases arrive with the generic
-// export). The import gate:
+// (each vertical adds its row as it moves). The import gate:
 //   - a non-member of the organization is refused with 403 before the engine reads a
 //     byte of the file;
 //   - another organization's store under the caller's organization path, and a store
@@ -8,9 +7,19 @@
 //     (SECURITY.md 3, existence non-disclosure) and write nothing;
 //   - the rightful member's import of the same file succeeds, so the 404s are the
 //     tenant gate and not a file that could never import.
+// The export gate, on a victim list seeded through the import route with the real file:
+//   - another organization's record id, and a sibling store's record id, under the
+//     caller's OWN store path are 404 and leave the victim unexported: this is the
+//     request that reaches the adapter's `load`, scoped by the store record;
+//   - another organization's store path, and a store without a grant, are 404; a
+//     non-member is 403;
+//   - the rightful member's export succeeds and marks the list exported;
+//   - at the adapter level, `load`, `touchExported` and `countLists` see nothing of
+//     another organization or a sibling store.
 
 import { readFileSync } from 'node:fs';
 
+import { z } from '@hono/zod-openapi';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
@@ -18,6 +27,8 @@ import { readWorkbookGrid } from '@pazarsync/spreadsheet';
 
 import { createApp } from '@/app';
 import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware';
+import type { StoreScope } from '@/workbooks/adapter';
+import { discountListAdapter } from '@/workbooks/verticals/discount-list.adapter';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -41,7 +52,17 @@ interface IsolationRow {
   readonly segment: string;
   readonly fixture: string;
   readonly form: Readonly<Record<string, string>>;
+  /** The record id of an import response. */
+  readonly importedId: (body: unknown) => string;
+  /** The adapter's scoped reads and writes, narrowed to what the export cases call. */
+  readonly load: (scope: StoreScope, id: string) => Promise<unknown>;
+  readonly touchExported: (scope: StoreScope, id: string) => Promise<{ count: number }>;
+  readonly countLists: (scope: StoreScope) => Promise<number>;
+  /** The record's `exportedAt`, read by id for the assertions only. */
+  readonly exportedAt: (id: string) => Promise<Date | null>;
 }
+
+const DiscountImportSchema = z.object({ listId: z.string() });
 
 const ISOLATION_ROWS: readonly IsolationRow[] = [
   {
@@ -54,6 +75,13 @@ const ISOLATION_ROWS: readonly IsolationRow[] = [
       startsAt: '2026-07-21T05:00:00.000Z',
       endsAt: '2026-07-28T04:59:00.000Z',
     },
+    importedId: (body) => DiscountImportSchema.parse(body).listId,
+    load: (scope, id) => discountListAdapter.load(scope, id),
+    touchExported: (scope, id) => discountListAdapter.touchExported(scope, id),
+    countLists: (scope) => prisma.$transaction((tx) => discountListAdapter.countLists(tx, scope)),
+    exportedAt: async (id) =>
+      (await prisma.discountList.findUnique({ where: { id }, select: { exportedAt: true } }))
+        ?.exportedAt ?? null,
   },
 ];
 
@@ -167,5 +195,165 @@ describe.each(ISOLATION_ROWS)('workbook import isolation: $segment', (row) => {
 
     expect(res.status).toBe(201);
     expect(engineRead).toHaveBeenCalled();
+  });
+});
+
+function exportRequest(
+  accessToken: string,
+  path: { orgId: string; storeId: string },
+  row: IsolationRow,
+  recordId: string,
+): Request {
+  return new Request(
+    `http://local/v1/organizations/${path.orgId}/stores/${path.storeId}/${row.segment}/${recordId}/export`,
+    { method: 'POST', headers: { Authorization: bearer(accessToken) } },
+  );
+}
+
+interface Tenant {
+  readonly accessToken: string;
+  readonly orgId: string;
+  readonly storeId: string;
+}
+
+/** A user who owns a new organization with one store. */
+async function ownerTenant(): Promise<Tenant> {
+  const user = await createAuthenticatedTestUser();
+  const org = await createOrganization();
+  await createMembership(org.id, user.id);
+  const store = await createStore(org.id);
+  return { accessToken: user.accessToken, orgId: org.id, storeId: store.id };
+}
+
+/** The victim record, imported through the route with the real file. */
+async function seedVictim(tenant: Tenant, row: IsolationRow): Promise<string> {
+  const res = await app.request(importRequest(tenant.accessToken, tenant, row));
+  expect(res.status).toBe(201);
+  return row.importedId(await res.json());
+}
+
+const ProblemCodeSchema = z.object({ code: z.string() });
+
+/**
+ * A 404 problem response that offers no download: a JSON NOT_FOUND body (the app
+ * sends every problem as `application/json`), no spreadsheet and no attachment.
+ */
+async function expectNotFoundProblem(res: Response): Promise<void> {
+  expect(res.status).toBe(404);
+  expect(res.headers.get('content-type') ?? '').toContain('application/json');
+  expect(res.headers.get('content-disposition')).toBeNull();
+  const raw = Buffer.from(await res.arrayBuffer());
+  expect(raw.subarray(0, 2).toString('latin1')).not.toBe('PK');
+  expect(ProblemCodeSchema.parse(JSON.parse(raw.toString('utf8'))).code).toBe('NOT_FOUND');
+}
+
+describe.each(ISOLATION_ROWS)('workbook export isolation: $segment', (row) => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("answers another organization's record id under the caller's own store path with 404", async () => {
+    const victim = await ownerTenant();
+    const victimId = await seedVictim(victim, row);
+    const attacker = await ownerTenant();
+
+    const res = await app.request(exportRequest(attacker.accessToken, attacker, row, victimId));
+
+    await expectNotFoundProblem(res);
+    expect(await row.exportedAt(victimId)).toBeNull();
+  });
+
+  it("answers a sibling store's record id under the caller's other store path with 404", async () => {
+    const owner = await ownerTenant();
+    const victimId = await seedVictim(owner, row);
+    const sibling = await createStore(owner.orgId);
+
+    const res = await app.request(
+      exportRequest(owner.accessToken, { orgId: owner.orgId, storeId: sibling.id }, row, victimId),
+    );
+
+    await expectNotFoundProblem(res);
+    expect(await row.exportedAt(victimId)).toBeNull();
+  });
+
+  it("answers another organization's store path with 404", async () => {
+    const victim = await ownerTenant();
+    const victimId = await seedVictim(victim, row);
+    const attacker = await ownerTenant();
+
+    const res = await app.request(
+      exportRequest(
+        attacker.accessToken,
+        { orgId: attacker.orgId, storeId: victim.storeId },
+        row,
+        victimId,
+      ),
+    );
+
+    await expectNotFoundProblem(res);
+    expect(await row.exportedAt(victimId)).toBeNull();
+  });
+
+  it('answers a store of its own organization without a grant with 404', async () => {
+    const owner = await ownerTenant();
+    const victimId = await seedVictim(owner, row);
+    const user = await createAuthenticatedTestUser();
+    const member = await createMembership(owner.orgId, user.id, 'MEMBER');
+    const granted = await createStore(owner.orgId);
+    await createMemberStoreAccess(owner.orgId, member.id, granted.id);
+
+    const res = await app.request(exportRequest(user.accessToken, owner, row, victimId));
+
+    await expectNotFoundProblem(res);
+    expect(await row.exportedAt(victimId)).toBeNull();
+  });
+
+  it('refuses a non-member with 403', async () => {
+    const owner = await ownerTenant();
+    const victimId = await seedVictim(owner, row);
+    const outsider = await createAuthenticatedTestUser();
+
+    const res = await app.request(exportRequest(outsider.accessToken, owner, row, victimId));
+
+    expect(res.status).toBe(403);
+    expect(await row.exportedAt(victimId)).toBeNull();
+  });
+
+  it("exports the rightful member's record and marks it exported", async () => {
+    const owner = await ownerTenant();
+    const victimId = await seedVictim(owner, row);
+
+    const res = await app.request(exportRequest(owner.accessToken, owner, row, victimId));
+
+    expect(res.status).toBe(200);
+    const body = Buffer.from(await res.arrayBuffer());
+    expect(body.subarray(0, 2).toString('ascii')).toBe('PK');
+    expect(await row.exportedAt(victimId)).not.toBeNull();
+  });
+
+  it('scopes the adapter reads and writes to the store record', async () => {
+    const owner = await ownerTenant();
+    const victimId = await seedVictim(owner, row);
+    const sibling = await createStore(owner.orgId);
+    const other = await ownerTenant();
+    const ownScope: StoreScope = { organizationId: owner.orgId, storeId: owner.storeId };
+    const foreignScope: StoreScope = { organizationId: other.orgId, storeId: other.storeId };
+    // The victim's organization with a store that does not hold the record.
+    const siblingScope: StoreScope = { organizationId: owner.orgId, storeId: sibling.id };
+    // The victim's store under another organization's id.
+    const crossedScope: StoreScope = { organizationId: other.orgId, storeId: owner.storeId };
+
+    expect(await row.load(ownScope, victimId)).not.toBeNull();
+    for (const scope of [foreignScope, siblingScope, crossedScope]) {
+      expect(await row.load(scope, victimId)).toBeNull();
+      expect(await row.touchExported(scope, victimId)).toEqual({ count: 0 });
+      expect(await row.countLists(scope)).toBe(0);
+    }
+    expect(await row.exportedAt(victimId)).toBeNull();
+    expect(await row.countLists(ownScope)).toBe(1);
   });
 });

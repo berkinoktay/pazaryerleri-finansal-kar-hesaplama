@@ -26,9 +26,11 @@ import { zipSync } from 'fflate';
 import { planWindowFiles } from '@pazarsync/utils';
 
 import { ConflictError } from '../lib/errors';
+import { XLSX_MIME, ZIP_MIME } from '../workbooks/download';
 
-export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-export const ZIP_MIME = 'application/zip';
+// The MIME types live with the generic download; re-exported for the export routes and
+// services that still read them from here.
+export { XLSX_MIME, ZIP_MIME };
 
 // Trendyol's own "Tarife Seçimi" fill value for an N-day window, e.g. "7 Günlük
 // Fiyat" (confirmed from Trendyol's filled exports); the seller re-uploads verbatim.

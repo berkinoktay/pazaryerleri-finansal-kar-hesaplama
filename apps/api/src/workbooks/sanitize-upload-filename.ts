@@ -11,10 +11,13 @@ const XLSX_EXTENSION_RE = /\.xlsx$/i;
 const XLSX_EXTENSION_LENGTH = '.xlsx'.length;
 const PATH_SEPARATORS_RE = /[/\\]/g;
 
-const ASCII_PRINTABLE_FIRST = 0x20;
-const ASCII_PRINTABLE_LAST = 0x7e;
+// Every character outside the few the quoted `filename` fallback keeps. Parameter
+// syntax (`;`, `=`, `*`, `'`, `%`) never stays: a client that reads the header without
+// honoring the quotes would take a `filename*=` inside the fallback as the parameter,
+// and save the file under a name and extension the uploader chose. The `u` flag makes
+// an astral character one match.
+const ASCII_FALLBACK_UNSAFE_RE = /[^A-Za-z0-9 ._()-]/gu;
 const ASCII_PLACEHOLDER = '_';
-const QUOTED_STRING_SPECIALS: ReadonlySet<string> = new Set(['"', '\\']);
 // Left as they are by encodeURIComponent, but not allowed in an RFC 8187 value.
 const RFC8187_EXTRA_RE = /['()*!]/g;
 // An unpaired surrogate would make encodeURIComponent throw.
@@ -41,11 +44,7 @@ export function sanitizeUploadFilename(raw: string): string | null {
 }
 
 function asciiFallback(filename: string): string {
-  return Array.from(filename, (char) => {
-    const codePoint = char.codePointAt(0) ?? 0;
-    const printable = codePoint >= ASCII_PRINTABLE_FIRST && codePoint <= ASCII_PRINTABLE_LAST;
-    return printable && !QUOTED_STRING_SPECIALS.has(char) ? char : ASCII_PLACEHOLDER;
-  }).join('');
+  return filename.replace(ASCII_FALLBACK_UNSAFE_RE, ASCII_PLACEHOLDER);
 }
 
 function percentEncode(char: string): string {
@@ -60,9 +59,10 @@ function rfc8187Value(filename: string): string {
 }
 
 /**
- * `attachment; filename="<ascii>"; filename*=UTF-8''<enc>`: `<ascii>` has every
- * character outside 0x20..0x7E, and `"` and `\`, replaced by `_`; `<enc>` is the name
- * percent-encoded per RFC 8187.
+ * `attachment; filename="<ascii>"; filename*=UTF-8''<enc>`: `<ascii>` keeps ASCII
+ * letters, digits, space and `.`, `_`, `(`, `)`, `-`, and has every other character
+ * (one per code point) replaced by `_`, so it never holds a quote, a backslash or
+ * parameter syntax; `<enc>` is the name percent-encoded per RFC 8187.
  */
 export function contentDisposition(filename: string): string {
   return `attachment; filename="${asciiFallback(filename)}"; filename*=UTF-8''${rfc8187Value(filename)}`;

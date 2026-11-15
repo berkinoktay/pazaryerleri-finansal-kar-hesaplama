@@ -1,7 +1,7 @@
-// The wire contract every workbook import route keeps on the generic pipeline, one row
-// per page (each vertical adds its row as it moves): bytes that are not an xlsx, and
-// another page's real file, are refused on `file` without writing a row, and the route
-// is in the OpenAPI document.
+// The wire contract every workbook route keeps on the generic pipeline, one row per page
+// (each vertical adds its row as it moves): on import, bytes that are not an xlsx, and
+// another page's real file, are refused on `file` without writing a row; on export, a
+// viewer may not download; both routes are in the OpenAPI document.
 
 import { readFileSync } from 'node:fs';
 
@@ -15,12 +15,19 @@ import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization, createStore } from '../../helpers/factories';
+import {
+  createMemberStoreAccess,
+  createMembership,
+  createOrganization,
+  createStore,
+} from '../../helpers/factories';
 
 const app = createApp();
 
 interface ContractRow {
   readonly segment: string;
+  /** The record id's path parameter of the export route. */
+  readonly idParam: string;
   readonly fixture: string;
   readonly form: Readonly<Record<string, string>>;
   /** A real file of another page, and what this route answers for it. */
@@ -32,6 +39,7 @@ interface ContractRow {
 const CONTRACT_ROWS: readonly ContractRow[] = [
   {
     segment: 'discount-lists',
+    idParam: 'listId',
     fixture: 'trendyol-discount-products.xlsx',
     form: {
       discountType: 'NET',
@@ -187,6 +195,33 @@ describe.each(CONTRACT_ROWS)('workbook import contract: $segment', (row) => {
     const document = app.getOpenAPI31Document(OPENAPI_INFO);
     const path =
       document.paths?.[`/v1/organizations/{orgId}/stores/{storeId}/${row.segment}/import`];
+
+    expect(path?.post).toBeDefined();
+  });
+
+  it('refuses a viewer granted the store on the export route with 403', async () => {
+    const viewer = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    const member = await createMembership(org.id, viewer.id, 'VIEWER');
+    const store = await createStore(org.id);
+    await createMemberStoreAccess(org.id, member.id, store.id);
+
+    const res = await app.request(
+      new Request(
+        `http://local/v1/organizations/${org.id}/stores/${store.id}/${row.segment}/${crypto.randomUUID()}/export`,
+        { method: 'POST', headers: { Authorization: bearer(viewer.accessToken) } },
+      ),
+    );
+
+    expect(res.status).toBe(403);
+  });
+
+  it('has the export route in the OpenAPI document', () => {
+    const document = app.getOpenAPI31Document(OPENAPI_INFO);
+    const path =
+      document.paths?.[
+        `/v1/organizations/{orgId}/stores/{storeId}/${row.segment}/{${row.idParam}}/export`
+      ];
 
     expect(path?.post).toBeDefined();
   });

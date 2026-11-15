@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { cleanDisplayName, NameSchema } from '@/workbooks/form';
 import { contentDisposition, sanitizeUploadFilename } from '@/workbooks/sanitize-upload-filename';
 
+import { webClientFilename } from '../../helpers/web-client-filename';
+
 // Every non-ASCII character is built from its code point, so this file stays ASCII and
 // holds no invisible bidi or control character.
 const DOTTED_CAPITAL_I = String.fromCodePoint(0x0130);
@@ -19,6 +21,13 @@ const ASTRAL = String.fromCodePoint(0x1f600);
 // 'Indirim Subat.XLSX' with its Turkish letters, precomposed (NFC) and decomposed (NFD).
 const TURKISH_NAME_NFC = `${DOTTED_CAPITAL_I}ndirim ${S_CEDILLA_CAPITAL}ubat.XLSX`;
 const TURKISH_NAME_NFD = `I${COMBINING_DOT_ABOVE}ndirim S${COMBINING_CEDILLA}ubat.XLSX`;
+
+// An upload name that sanitizes to itself but carries header parameter syntax: copied
+// as it is into the quoted fallback, its `filename*=` is the first one the web client
+// finds, and the browser saves `setup.exe`.
+const SMUGGLED_NAME = "rapor;filename*=UTF-8''setup.exe;.xlsx";
+// The whole header: the quoted ASCII fallback, then the RFC 8187 name.
+const DISPOSITION_RE = /^attachment; filename="([^"]*)"; filename\*=UTF-8''([^;]+)$/;
 
 function codePoints(text: string): number {
   return Array.from(text).length;
@@ -128,5 +137,29 @@ describe('contentDisposition', () => {
     const header = contentDisposition(`a${String.fromCodePoint(0xd800)}.xlsx`);
     expect(header).toContain('filename="a_.xlsx"');
     expect(header).toContain("filename*=UTF-8''a%EF%BF%BD.xlsx");
+  });
+
+  it('keeps parameter syntax out of the ASCII fallback, so the web client reads the whole name', () => {
+    expect(sanitizeUploadFilename(SMUGGLED_NAME)).toBe(SMUGGLED_NAME);
+
+    const header = contentDisposition(SMUGGLED_NAME);
+
+    const parts = DISPOSITION_RE.exec(header);
+    expect(parts?.[1]).toBe('rapor_filename__UTF-8__setup.exe_.xlsx');
+    expect(parts?.[2]).toBe('rapor%3Bfilename%2A%3DUTF-8%27%27setup.exe%3B.xlsx');
+    // The first `filename*=` is the parameter, after the fallback's closing quote.
+    expect(header.indexOf('filename*=')).toBeGreaterThan(header.lastIndexOf('"'));
+    expect(webClientFilename(header)).toBe(SMUGGLED_NAME);
+  });
+
+  it("replaces ; = * ' and % in the ASCII fallback", () => {
+    expect(contentDisposition("a;b=c*d'e%f.xlsx")).toContain('filename="a_b_c_d_e_f.xlsx"');
+  });
+
+  it('keeps only letters, digits, space and . _ ( ) - in the ASCII fallback', () => {
+    expect(contentDisposition('Rapor-1 (v2)_son.xlsx')).toContain(
+      'filename="Rapor-1 (v2)_son.xlsx"',
+    );
+    expect(contentDisposition('a,b+c&d#e~f.xlsx')).toContain('filename="a_b_c_d_e_f.xlsx"');
   });
 });

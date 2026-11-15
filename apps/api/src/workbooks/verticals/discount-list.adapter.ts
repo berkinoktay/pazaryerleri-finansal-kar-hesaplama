@@ -1,8 +1,12 @@
 // The discount list page on the generic workbook pipeline. The file says which
 // products are in the campaign; the discount configuration (type and parameters)
-// comes with the upload form and is written onto the list row.
+// comes with the upload form and is written onto the list row. The export pairs the
+// list's items with the file's kept rows by position and writes each product's
+// participation back where it differs from the file.
 
-import { XLSX_MIME } from '../../services/tariff-export-commons';
+import { prisma } from '@pazarsync/db';
+import { mapPrismaError } from '@pazarsync/sync-core';
+
 import {
   DiscountListPathSchema,
   DiscountListStorePathSchema,
@@ -11,14 +15,29 @@ import {
   type DiscountConfigFields,
   type ImportDiscountListResponse,
 } from '../../validators/discount-list.validator';
-import type { WorkbookHttpSpec, WorkbookImportAdapter } from '../adapter';
+import type {
+  CellWrite,
+  ExportSource,
+  StoreScope,
+  WorkbookHttpSpec,
+  WorkbookVerticalAdapter,
+  WriteContext,
+} from '../adapter';
+import { XLSX_MIME } from '../download';
 import {
   trendyolDiscountListFormat,
   type DiscountListRow,
   type DiscountListWriteKey,
 } from '../formats/trendyol/discount-list.format';
 import type { trendyolDiscountListLayout } from '../formats/trendyol/discount-list.layout';
+import { NO_LABEL, YES_LABEL } from '../formats/trendyol/labels';
 import { createManyChunked } from '../import-rows';
+
+/** What the export reads of one list item. */
+export interface DiscountListExportItem {
+  readonly barcode: string;
+  readonly included: boolean;
+}
 
 /** A count field of the form (validated as digits) as the list's Int column; null when absent. */
 function intOrNull(value: string | undefined): number | null {
@@ -57,11 +76,58 @@ const DISCOUNT_LIST_HTTP: WorkbookHttpSpec = {
   exportMimes: [XLSX_MIME],
 };
 
-export const discountListImportAdapter: WorkbookImportAdapter<
+/** The list and its items in sortOrder, one group; null when the list is not in the scope. */
+async function loadDiscountList(
+  { organizationId, storeId }: StoreScope,
+  id: string,
+): Promise<ExportSource<DiscountListExportItem> | null> {
+  let list;
+  try {
+    list = await prisma.discountList.findFirst({
+      where: { id, organizationId, storeId },
+      select: {
+        name: true,
+        sourceFile: true,
+        sourceFilename: true,
+        sourceFormatId: true,
+        items: { orderBy: { sortOrder: 'asc' }, select: { barcode: true, included: true } },
+      },
+    });
+  } catch (err) {
+    mapPrismaError(err);
+  }
+  if (list === null) return null;
+  return {
+    name: list.name,
+    sourceFile: list.sourceFile,
+    sourceFilename: list.sourceFilename,
+    sourceFormatId: list.sourceFormatId,
+    groups: [{ tag: null, items: list.items }],
+  };
+}
+
+/**
+ * The participation cell, written only where the item's choice differs from the file:
+ * an included item whose row does not read the yes label gets it; an excluded item
+ * whose row reads it gets the no label.
+ */
+function discountWriteBack(
+  ctx: WriteContext<DiscountListExportItem, DiscountListWriteKey>,
+): readonly CellWrite<DiscountListWriteKey>[] {
+  const item = ctx.items[0]?.item;
+  if (item === undefined) return [];
+  const sourceIncluded = ctx.source.text('included') === YES_LABEL;
+  if (item.included && !sourceIncluded) return [{ key: 'included', value: YES_LABEL }];
+  if (!item.included && sourceIncluded) return [{ key: 'included', value: NO_LABEL }];
+  return [];
+}
+
+export const discountListAdapter: WorkbookVerticalAdapter<
   typeof trendyolDiscountListLayout,
   DiscountListRow,
   DiscountConfigFields,
   undefined,
+  DiscountListExportItem,
   ImportDiscountListResponse,
   DiscountListWriteKey
 > = {
@@ -135,4 +201,16 @@ export const discountListImportAdapter: WorkbookImportAdapter<
     unmatched: outcome.rowCount - outcome.matchedRows,
     skippedRows: outcome.skippedRows,
   }),
+  load: loadDiscountList,
+  notFoundResource: 'DiscountList',
+  files: 'single',
+  anchorOf: (item) => item.barcode,
+  // cursor-zip pairs by position; the pick is never read.
+  pick: () => null,
+  resolveWriteBack: discountWriteBack,
+  touchExported: ({ organizationId, storeId }, id) =>
+    prisma.discountList.updateMany({
+      where: { id, organizationId, storeId },
+      data: { exportedAt: new Date() },
+    }),
 };

@@ -16465,7 +16465,7 @@
             }
           },
           "503": {
-            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or waited too long, or the parse hit its memory or time limit (IMPORT_BUSY)",
+            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or the job waited too long in it (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -17463,7 +17463,7 @@
             }
           },
           "503": {
-            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or waited too long, or the parse hit its memory or time limit (IMPORT_BUSY)",
+            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or the job waited too long in it (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -18470,7 +18470,7 @@
             }
           },
           "503": {
-            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or waited too long, or the parse hit its memory or time limit (IMPORT_BUSY)",
+            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or the job waited too long in it (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -19924,7 +19924,7 @@
             }
           },
           "503": {
-            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or waited too long, or the parse hit its memory or time limit (IMPORT_BUSY)",
+            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or the job waited too long in it (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -21341,7 +21341,7 @@
             }
           },
           "503": {
-            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or waited too long, or the parse hit its memory or time limit (IMPORT_BUSY)",
+            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or the job waited too long in it (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -22678,7 +22678,7 @@
             }
           },
           "503": {
-            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or waited too long, or the parse hit its memory or time limit (IMPORT_BUSY)",
+            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or the job waited too long in it (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {

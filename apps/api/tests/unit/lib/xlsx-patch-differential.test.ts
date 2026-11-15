@@ -52,7 +52,7 @@ const FLASH_UPDATE_LABELS: readonly string[] = [
   FLASH_UPDATE_LABEL_3H,
   FLASH_UPDATE_LABEL_CUSTOM,
 ];
-// discount-list-layout.ts DISCOUNT_SHEET_NAME, DISCOUNT_INCLUDED_YES and DISCOUNT_INCLUDED_NO.
+// The discount sheet name and participation labels (formats/trendyol/labels.ts).
 const DISCOUNT_SHEET_NAME = '\u00dcr\u00fcnler';
 const DISCOUNT_INCLUDED_YES = 'Evet';
 const DISCOUNT_INCLUDED_NO = 'Hay\u0131r';

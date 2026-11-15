@@ -52,6 +52,30 @@ section "Versioning" for details.
     carries `errors[0].meta` with `detectedFormatId`, `detectedPlatform` and `detectedPage`; each
     is `null` when the file matches no known page. Before, a file that matched no page carried no
     `meta`.
+- **Workbook exports run through the generic workbook export**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}/export`). Each change
+  below applies to discount lists now, and to the other five pages as they move:
+  - Every export condition answers `409` with `code: 'CONFLICT'` and a `meta.reason`:
+    `STORED_FILE_MISSING` (no stored source file), `STORED_FILE_UNREADABLE` (the stored file no
+    longer passes the workbook gate or the patcher), `STORED_FILE_UNRECOGNIZED` (its format id is
+    unknown, its named sheet is missing or its header no longer resolves), `NO_WRITEBACK_COLUMN`,
+    `ROW_MISMATCH`, `ROW_ANCHOR_MISMATCH`, `ROW_NOT_FOUND` and `EXPORT_FILENAME_COLLISION`.
+  - A parse worker that hits its memory or time limit while reading or patching a stored file
+    answers `409` with `meta.reason` `STORED_FILE_UNREADABLE`, no longer `503`. `503` `IMPORT_BUSY`
+    now means only that the parse queue is full or the job waited too long in it; the `503`
+    description of all six export routes says so.
+  - The stored file's named sheet is read strictly, with no first-sheet fallback: a stored file
+    without it answers `409` `STORED_FILE_UNRECOGNIZED`.
+  - A list whose items no longer pair with the stored file's kept rows (a different count, or a
+    different barcode at a position) is refused with `409` `ROW_MISMATCH`. Before, those rows were
+    skipped and the rest exported.
+  - Downloads carry `Content-Disposition` with both an ASCII `filename` and an RFC 8187
+    `filename*`, built from the stored upload name once control and format characters and path
+    separators are dropped (a stored name that does not end in `.xlsx` falls back to the page's
+    file name, `indirimler.xlsx` for discount lists), plus `Content-Length`,
+    `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. The ASCII `filename` keeps
+    only letters, digits, spaces and `. _ ( ) -`; every other character becomes `_`, so header
+    parameter syntax in an upload name (`;`, `=`, `*`, `'`, `%`) never reaches it.
 - **The campaign workbook upload gate checks the zip layout, the root relationships and active
   parts** (`POST /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs|advantage-tariffs|flash-products|discount-lists|marketplace-campaigns}/import`).
   An upload whose zip archive is not laid out the way the export reads it (a gap, an overlap or a
