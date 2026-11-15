@@ -43,8 +43,9 @@
 // first) the format id lines are skipped. Exit code 1 when a stored file is refused
 // with the legacy selector (what the stricter gate changes for an export today), when
 // a file is listed as "legacy passed, named sheet unreadable", when a table holds a
-// format id other than its expected one, or on a fatal error (an unset
-// AUDIT_DATABASE_URL and a refused URL included); 0 otherwise.
+// format id other than its expected one, when the name and quota outputs (below) show a
+// count above 0 or a store id, or on a fatal error (an unset AUDIT_DATABASE_URL and a
+// refused URL included); 0 otherwise.
 //
 // Full mode runs after gate mode, once the migration has run, for every table: all six
 // pages are on the generic workbook pipeline (FULL_MODE_ADAPTERS; a table without an
@@ -62,6 +63,22 @@
 // (page, record id, engine code and engine reason; never a file name or cell content).
 // A record can carry two reasons (the rehearsal's and the plan's), so the reason
 // counts can add up to more than the refused count.
+//
+// The name and quota outputs run on every run, after gate mode and before full mode, in
+// SQL only (no stored file is read), and work before and after the migration that limits
+// `name` and `source_filename` to varchar(120):
+//   - per table, the count of rows whose `name` is longer than UPLOAD_NAME_MAX_LENGTH
+//     characters and the count whose `source_filename` is (`char_length`: characters, as
+//     varchar counts them, never bytes; a null file name is not counted);
+//   - per table, the store ids holding more than MAX_LISTS_PER_STORE_PAGE rows, and the
+//     store ids whose stored files (`octet_length` of `source_file`) over all six tables
+//     sum to more than STORE_UPLOAD_QUOTA_BYTES.
+// The limits are the API's own constants, imported. Only table names, counts and store
+// ids are printed, never a name, a file name or a cell. Any count above 0 or any store
+// id listed sets exit code 1: a name over the limit aborts the migration that limits
+// it, and a store over a quota is the owner's decision. The three queries are static
+// text: the six table names are written out (the tables of gate mode), only the limits
+// are bound.
 //
 // Usage, once before the migration and once after it:
 //   AUDIT_DATABASE_URL='<direct or session connection string>' pnpm --filter @pazarsync/api audit:stored-workbooks
@@ -88,9 +105,16 @@ import {
 } from '@pazarsync/spreadsheet';
 import { WORKBOOK_PAGES, type WorkbookPage } from '@pazarsync/utils';
 
-// Types only, for the same reason: every value module under src/ loads @pazarsync/db
-// (directly, or through @pazarsync/sync-core), so main() imports them only after
-// DATABASE_URL is read-only (loadFullMode).
+// The one value import from src/: the limits module imports nothing, so loading it
+// cannot build the @pazarsync/db pool before main() makes DATABASE_URL read-only.
+import {
+  MAX_LISTS_PER_STORE_PAGE,
+  STORE_UPLOAD_QUOTA_BYTES,
+  UPLOAD_NAME_MAX_LENGTH,
+} from '../src/config/workbook-limits';
+// Types only, for the same reason: each of these modules loads @pazarsync/db (directly,
+// or through @pazarsync/sync-core), so main() imports them only after DATABASE_URL is
+// read-only (loadFullMode).
 import type { WorkbookVerticalAdapter } from '../src/workbooks/adapter';
 import type { planExport } from '../src/workbooks/export-plan';
 import type { resolveStoredWorkbook, StoredWorkbook } from '../src/workbooks/export-workbook';
@@ -670,6 +694,195 @@ async function auditTable(
   };
 }
 
+// --- Name lengths and quota: SQL only, every run -------------------------------------
+
+/** One table's rows whose `name`, and whose `source_filename`, is over the length limit. */
+interface LongNameRow {
+  readonly table: string;
+  readonly names: number;
+  readonly fileNames: number;
+}
+
+/** A store over a limit; `table` is the page's table for the per-page list limit. */
+interface StoreOverLimitRow {
+  readonly table: string;
+  readonly storeId: string;
+}
+
+function isLongNameRow(value: unknown): value is LongNameRow {
+  return (
+    isRecord(value) &&
+    typeof value['table'] === 'string' &&
+    typeof value['names'] === 'number' &&
+    typeof value['fileNames'] === 'number'
+  );
+}
+
+function isStoreOverLimitRow(value: unknown): value is StoreOverLimitRow {
+  return (
+    isRecord(value) && typeof value['table'] === 'string' && typeof value['storeId'] === 'string'
+  );
+}
+
+function isStoreIdRow(value: unknown): value is { storeId: string } {
+  return isRecord(value) && typeof value['storeId'] === 'string';
+}
+
+/** The rows of a query as `guard` reads them; any other shape is fatal. */
+function rowsOf<T>(rows: unknown, guard: (value: unknown) => value is T, query: string): T[] {
+  if (!Array.isArray(rows)) throw new Error(`The ${query} query returned no rows array`);
+  return rows.map((row) => {
+    if (!guard(row)) throw new Error(`The ${query} query returned an unexpected row`);
+    return row;
+  });
+}
+
+/** Refuses a row naming a table outside gate mode's fixed list. */
+function assertKnownTable(table: string, tables: ReadonlySet<string>, query: string): void {
+  if (!tables.has(table)) throw new Error(`The ${query} query named an unknown table`);
+}
+
+/**
+ * Per parent table: the rows whose `name`, and the rows whose `source_filename`, are
+ * longer than UPLOAD_NAME_MAX_LENGTH characters. `char_length` counts characters on
+ * `text` and `varchar` alike; a null `source_filename` is not counted. One row per table,
+ * zeros included.
+ */
+async function longNameCounts(db: PrismaClient): Promise<LongNameRow[]> {
+  const rows: unknown = await db.$queryRaw`
+    SELECT 'commission_tariffs' AS "table",
+      (count(*) FILTER (WHERE char_length("name") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "names",
+      (count(*) FILTER (WHERE char_length("source_filename") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "fileNames"
+    FROM "commission_tariffs"
+    UNION ALL
+    SELECT 'plus_commission_tariffs' AS "table",
+      (count(*) FILTER (WHERE char_length("name") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "names",
+      (count(*) FILTER (WHERE char_length("source_filename") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "fileNames"
+    FROM "plus_commission_tariffs"
+    UNION ALL
+    SELECT 'advantage_tariffs' AS "table",
+      (count(*) FILTER (WHERE char_length("name") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "names",
+      (count(*) FILTER (WHERE char_length("source_filename") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "fileNames"
+    FROM "advantage_tariffs"
+    UNION ALL
+    SELECT 'flash_product_lists' AS "table",
+      (count(*) FILTER (WHERE char_length("name") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "names",
+      (count(*) FILTER (WHERE char_length("source_filename") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "fileNames"
+    FROM "flash_product_lists"
+    UNION ALL
+    SELECT 'discount_lists' AS "table",
+      (count(*) FILTER (WHERE char_length("name") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "names",
+      (count(*) FILTER (WHERE char_length("source_filename") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "fileNames"
+    FROM "discount_lists"
+    UNION ALL
+    SELECT 'marketplace_campaign_lists' AS "table",
+      (count(*) FILTER (WHERE char_length("name") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "names",
+      (count(*) FILTER (WHERE char_length("source_filename") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "fileNames"
+    FROM "marketplace_campaign_lists"`;
+  return rowsOf(rows, isLongNameRow, 'name length');
+}
+
+/** Per parent table: the stores holding more than MAX_LISTS_PER_STORE_PAGE rows. */
+async function storesOverListLimit(db: PrismaClient): Promise<StoreOverLimitRow[]> {
+  const rows: unknown = await db.$queryRaw`
+    SELECT 'commission_tariffs' AS "table", "store_id"::text AS "storeId"
+    FROM "commission_tariffs"
+    GROUP BY "store_id" HAVING count(*) > ${MAX_LISTS_PER_STORE_PAGE}::int
+    UNION ALL
+    SELECT 'plus_commission_tariffs' AS "table", "store_id"::text AS "storeId"
+    FROM "plus_commission_tariffs"
+    GROUP BY "store_id" HAVING count(*) > ${MAX_LISTS_PER_STORE_PAGE}::int
+    UNION ALL
+    SELECT 'advantage_tariffs' AS "table", "store_id"::text AS "storeId"
+    FROM "advantage_tariffs"
+    GROUP BY "store_id" HAVING count(*) > ${MAX_LISTS_PER_STORE_PAGE}::int
+    UNION ALL
+    SELECT 'flash_product_lists' AS "table", "store_id"::text AS "storeId"
+    FROM "flash_product_lists"
+    GROUP BY "store_id" HAVING count(*) > ${MAX_LISTS_PER_STORE_PAGE}::int
+    UNION ALL
+    SELECT 'discount_lists' AS "table", "store_id"::text AS "storeId"
+    FROM "discount_lists"
+    GROUP BY "store_id" HAVING count(*) > ${MAX_LISTS_PER_STORE_PAGE}::int
+    UNION ALL
+    SELECT 'marketplace_campaign_lists' AS "table", "store_id"::text AS "storeId"
+    FROM "marketplace_campaign_lists"
+    GROUP BY "store_id" HAVING count(*) > ${MAX_LISTS_PER_STORE_PAGE}::int
+    ORDER BY "table", "storeId"`;
+  return rowsOf(rows, isStoreOverLimitRow, 'list limit');
+}
+
+/**
+ * The stores whose stored files over all six parent tables sum to more than
+ * STORE_UPLOAD_QUOTA_BYTES: the sum the upload quota compares, per store.
+ */
+async function storesOverByteQuota(db: PrismaClient): Promise<string[]> {
+  const rows: unknown = await db.$queryRaw`
+    SELECT "store_id"::text AS "storeId"
+    FROM (
+      SELECT "store_id", octet_length("source_file") AS "bytes" FROM "commission_tariffs"
+      UNION ALL
+      SELECT "store_id", octet_length("source_file") AS "bytes" FROM "plus_commission_tariffs"
+      UNION ALL
+      SELECT "store_id", octet_length("source_file") AS "bytes" FROM "advantage_tariffs"
+      UNION ALL
+      SELECT "store_id", octet_length("source_file") AS "bytes" FROM "flash_product_lists"
+      UNION ALL
+      SELECT "store_id", octet_length("source_file") AS "bytes" FROM "discount_lists"
+      UNION ALL
+      SELECT "store_id", octet_length("source_file") AS "bytes" FROM "marketplace_campaign_lists"
+    ) AS "stored"
+    GROUP BY "store_id"
+    HAVING sum("bytes") > ${STORE_UPLOAD_QUOTA_BYTES}::bigint
+    ORDER BY "store_id"`;
+  return rowsOf(rows, isStoreIdRow, 'byte quota').map((row) => row.storeId);
+}
+
+/**
+ * Prints the name length counts and the stores over a quota, by gate mode's tables;
+ * returns how many findings it printed (each count above 0 and each store id is one).
+ */
+async function auditNamesAndQuota(db: PrismaClient, tables: readonly string[]): Promise<number> {
+  const known = new Set(tables);
+  let findings = 0;
+
+  const longNames = await longNameCounts(db);
+  const longByTable = new Map<string, LongNameRow>();
+  for (const row of longNames) {
+    assertKnownTable(row.table, known, 'name length');
+    longByTable.set(row.table, row);
+  }
+  console.log(`names over ${UPLOAD_NAME_MAX_LENGTH} characters (name, source_filename):`);
+  for (const table of tables) {
+    const row = longByTable.get(table);
+    if (row === undefined) throw new Error(`The name length query left out ${table}`);
+    console.log(`  ${table}: name ${row.names}, source_filename ${row.fileNames}`);
+    if (row.names > 0) findings += 1;
+    if (row.fileNames > 0) findings += 1;
+  }
+
+  const overLists = await storesOverListLimit(db);
+  const storesByTable: IdGroups = new Map();
+  for (const row of overLists) {
+    assertKnownTable(row.table, known, 'list limit');
+    addId(storesByTable, row.table, row.storeId);
+  }
+  console.log(`stores over ${MAX_LISTS_PER_STORE_PAGE} lists on one page:`);
+  for (const table of tables) {
+    const storeIds = storesByTable.get(table) ?? [];
+    console.log(`  ${table}: ${storeIds.length} [${storeIds.join(', ')}]`);
+    findings += storeIds.length;
+  }
+
+  const overBytes = await storesOverByteQuota(db);
+  console.log(
+    `stores over ${STORE_UPLOAD_QUOTA_BYTES} stored bytes across the six tables: ` +
+      `${overBytes.length} [${overBytes.join(', ')}]`,
+  );
+  findings += overBytes.length;
+  return findings;
+}
+
 // --- Full mode: the generic export path on every stored file of a moved page ---------
 
 /** The production functions full mode runs, imported after DATABASE_URL is read-only. */
@@ -919,6 +1132,9 @@ async function main(): Promise<void> {
         failed = true;
       }
     }
+
+    // Every run, before full mode: SQL only, over the tables gate mode audited.
+    if ((await auditNamesAndQuota(prisma, [...gates.keys()])) > 0) failed = true;
 
     if (withFormatColumn) {
       const auditors = await loadFullMode();
