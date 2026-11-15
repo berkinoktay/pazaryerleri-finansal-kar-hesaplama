@@ -3,14 +3,15 @@
 // some cells blanked or rewritten: they put the fallback chains of a row mapper and the
 // dropping side of every keep rule under test. The cases were moved verbatim out of
 // tests/unit/workbooks/trendyol-layouts.test.ts so they outlive the legacy parsers (the
-// discount, campaign, flash and advantage blocks have since gained kept cases, whose
-// golden the legacy parser wrote); `derivedGrid` builds the grid a format test reads
-// them from.
+// discount, campaign, flash, advantage and Plus blocks have since gained kept cases,
+// whose golden the legacy parser wrote); `derivedGrid` builds the grid a format test
+// reads them from.
 
 import {
   columnIndex,
   evaluate,
   resolveLayout,
+  type BlockKey,
   type CellValue,
   type ColumnKey,
   type LayoutSpec,
@@ -26,13 +27,27 @@ import type { trendyolMarketplaceCampaignListLayout } from '@/workbooks/formats/
 import type { trendyolPlusCommissionTariffLayout } from '@/workbooks/formats/trendyol/plus-commission-tariff.layout';
 import {
   CAMPAIGN_TARIFF_FLAG_YES,
+  NO_LABEL,
   TARIFF_FLAG_YES_FOLDED,
 } from '@/workbooks/formats/trendyol/labels';
+
+/**
+ * A cell inside a repeated block that a derived row overwrites: the block, its position
+ * among the resolved blocks of that key (0 is the first), and the block column.
+ */
+export interface DerivedBlockCell<S extends LayoutSpec> {
+  readonly block: BlockKey<S>;
+  readonly index: number;
+  readonly column: string;
+  readonly value: CellValue;
+}
 
 /** A data row derived from a fixture's first kept row by overwriting some of its cells. */
 export interface DerivedRow<S extends LayoutSpec> {
   readonly name: string;
   readonly cells: ReadonlyArray<readonly [ColumnKey<S>, CellValue]>;
+  /** Cells inside a repeated block, written after `cells`. */
+  readonly blockCells?: readonly DerivedBlockCell<S>[];
   /** Whether the import keeps the row, so a case cannot drift to the other side unnoticed. */
   readonly kept: boolean;
 }
@@ -57,6 +72,123 @@ const PLUS_DERIVED: readonly DerivedRow<typeof trendyolPlusCommissionTariffLayou
   { name: 'a blank barcode', cells: [['barcode', null]], kept: false },
   PLUS_CANCEL_NUMBER_ONE,
   PLUS_CANCEL_TEXT_ZERO,
+  // Added after the move, so the derived golden pins every mapping rule of the Plus row:
+  // the three fallback chains (stock code, commission base price, Plus commission base
+  // price) with their first cell blank and with every cell blank, the '0' of each blank
+  // decimal, a blank period offer, the title fallback, the truncated stock, the plain
+  // grammar of the decimal cells (decimal comma, dot-only text, a lira suffix that does
+  // not read), the numeric cancel flag, a number barcode, a whitespace barcode, and
+  // values the export never writes, which the import does not check. The fixture row's
+  // prices, limits and offers are number cells.
+  { name: 'a whitespace barcode', cells: [['barcode', '   ']], kept: false },
+  { name: 'a blank model code', cells: [['modelCode', null]], kept: true },
+  {
+    name: 'a blank model code and seller stock code',
+    cells: [
+      ['modelCode', null],
+      ['sellerStockCode', null],
+    ],
+    kept: true,
+  },
+  { name: 'a blank commission base price', cells: [['commissionBasePrice', null]], kept: true },
+  {
+    name: 'a blank commission base price and current price',
+    cells: [
+      ['commissionBasePrice', null],
+      ['currentPrice', null],
+    ],
+    kept: true,
+  },
+  {
+    name: 'a blank Plus commission base price',
+    cells: [['plusCommissionBasePrice', null]],
+    kept: true,
+  },
+  {
+    name: 'a blank Plus commission base price and Plus price upper limit',
+    cells: [
+      ['plusCommissionBasePrice', null],
+      ['plusPriceUpperLimit', null],
+    ],
+    kept: true,
+  },
+  { name: 'a blank current price', cells: [['currentPrice', null]], kept: true },
+  { name: 'a blank current commission', cells: [['currentCommission', null]], kept: true },
+  { name: 'a blank Plus price upper limit', cells: [['plusPriceUpperLimit', null]], kept: true },
+  {
+    name: 'a blank period offer',
+    cells: [],
+    blockCells: [{ block: 'periods', index: 0, column: 'offer', value: null }],
+    kept: true,
+  },
+  {
+    name: 'a zero period offer',
+    cells: [],
+    blockCells: [{ block: 'periods', index: 0, column: 'offer', value: 0 }],
+    kept: true,
+  },
+  {
+    name: 'a blank title and blank optional columns',
+    cells: [
+      ['productTitle', null],
+      ['size', null],
+      ['category', null],
+      ['brand', null],
+      ['stock', null],
+      ['externalId', null],
+      ['tariffGroup', null],
+      ['cancelled', null],
+    ],
+    kept: true,
+  },
+  { name: 'a decimal stock number', cells: [['stock', 12.7]], kept: true },
+  { name: 'a decimal stock text', cells: [['stock', '12.7']], kept: true },
+  { name: 'a non-numeric stock text', cells: [['stock', 'many']], kept: true },
+  {
+    name: 'dot thousands with a decimal comma',
+    cells: [
+      ['currentPrice', '1.234,56'],
+      ['commissionBasePrice', '1.199,99'],
+      ['plusPriceUpperLimit', '1.099,95'],
+      ['plusCommissionBasePrice', '1.000,5'],
+      ['currentCommission', '19,5'],
+    ],
+    blockCells: [{ block: 'periods', index: 0, column: 'offer', value: '12,5' }],
+    kept: true,
+  },
+  {
+    name: 'dot-only text prices',
+    cells: [
+      ['currentPrice', '1.250'],
+      ['plusPriceUpperLimit', '1.100'],
+    ],
+    kept: true,
+  },
+  {
+    name: 'lira-suffixed prices and offer',
+    cells: [
+      ['currentPrice', '360 TL'],
+      ['commissionBasePrice', '350 TL'],
+      ['plusPriceUpperLimit', '292 TL'],
+    ],
+    blockCells: [{ block: 'periods', index: 0, column: 'offer', value: '15 TL' }],
+    kept: true,
+  },
+  { name: 'the text "1" in the cancel cell', cells: [['cancelled', '1']], kept: true },
+  { name: 'a fraction in the cancel cell', cells: [['cancelled', 0.5]], kept: true },
+  { name: 'a negative number in the cancel cell', cells: [['cancelled', -1]], kept: true },
+  { name: 'the no label in the cancel cell', cells: [['cancelled', NO_LABEL]], kept: true },
+  { name: 'a number barcode', cells: [['barcode', 8690000000001]], kept: true },
+  {
+    name: 'negative values the export never writes',
+    cells: [
+      ['currentPrice', -5],
+      ['commissionBasePrice', '-2'],
+      ['currentCommission', -1],
+      ['plusCommissionBasePrice', -3],
+    ],
+    kept: true,
+  },
 ];
 
 const ADVANTAGE_DERIVED: readonly DerivedRow<typeof trendyolAdvantageTariffLayout>[] = [
@@ -326,7 +458,7 @@ const CAMPAIGN_DERIVED: readonly DerivedRow<typeof trendyolMarketplaceCampaignLi
 ];
 
 // Exported as a list: the blocks above keep the exact bytes they had in the layout test,
-// apart from the cases added to the discount, campaign, flash and advantage blocks.
+// apart from the cases added to the discount, campaign, flash, advantage and Plus blocks.
 export {
   ADVANTAGE_DERIVED,
   CAMPAIGN_DERIVED,
@@ -341,8 +473,8 @@ export {
 
 /**
  * `fixtureGrid` plus one row per case: each a copy of the fixture's first data row that
- * passes `keep`, with the case's cells written over it. The keep rule chooses the row,
- * not a legacy parser, so the helper outlives the legacy code.
+ * passes `keep`, with the case's cells, then its block cells, written over it. The keep
+ * rule chooses the row, not a legacy parser, so the helper outlives the legacy code.
  */
 export function derivedGrid<S extends LayoutSpec>(
   spec: S,
@@ -362,6 +494,13 @@ export function derivedGrid<S extends LayoutSpec>(
       const col = columnIndex(spec, layout, key);
       if (col === null) throw new Error(`Derived column "${key}" did not resolve`);
       row[col] = value;
+    }
+    for (const cell of testCase.blockCells ?? []) {
+      const col = layout.blocks.get(cell.block)?.[cell.index]?.columns.get(cell.column);
+      if (col === undefined) {
+        throw new Error(`Derived block column "${cell.block}.${cell.column}" did not resolve`);
+      }
+      row[col] = cell.value;
     }
     return row;
   });

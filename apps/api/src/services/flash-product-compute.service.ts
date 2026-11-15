@@ -25,7 +25,7 @@ import {
   type TrendyolScenarioBase,
 } from '@pazarsync/profit';
 
-import { resolveValidity, type TariffValidity } from '../lib/tariff-period';
+import { resolveValidity, type TariffValidity } from '../workbooks/tariff-week';
 import {
   evaluateScreenScenario,
   formatMarginPct2,

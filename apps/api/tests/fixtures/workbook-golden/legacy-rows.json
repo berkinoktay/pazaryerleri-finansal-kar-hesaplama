@@ -46,5 +46,24 @@
       "skippedRows": 3,
       "sha256": "ff218f8242b13d67e09af305bebad8cd2ecd1408138c274adc955f0b70a5059e"
     }
+  },
+  "trendyol-plus-tariff-3ve4.xlsx": {
+    "real": {
+      "keptRows": 33,
+      "skippedRows": 0,
+      "sha256": "022081a68cdb4242dc9577d704f1e3cb619eba95c1f0eea3e2ccab4c94064f06"
+    }
+  },
+  "trendyol-plus-tariff.xlsx": {
+    "real": {
+      "keptRows": 55,
+      "skippedRows": 0,
+      "sha256": "2dabda6a5ad860ee679ff6d457aba1f4cece93ffe704a8f45310e16da8e8c1a5"
+    },
+    "derived": {
+      "keptRows": 81,
+      "skippedRows": 2,
+      "sha256": "94f874a4d94fb58fd4ef2e1bd2aab9b02f3ed62c378e02a8436d1060524a9160"
+    }
   }
 }

@@ -3,7 +3,7 @@
 // item into TrendyolCommissionBand inputs. The wire (request/response) contract
 // still lives in the backend validators; this file holds only the persisted band
 // JSON shape and the type guard that reads it. Period validity + Trendyol
-// period-label parsing stay in the backend's `lib/tariff-period.ts`.
+// period-label parsing stay in the backend's `workbooks/tariff-week.ts`.
 
 import { Decimal } from 'decimal.js';
 import type { Prisma } from '@pazarsync/db';

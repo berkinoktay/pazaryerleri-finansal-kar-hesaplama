@@ -16,7 +16,7 @@ import { Prisma, prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { NotFoundError } from '../lib/errors';
-import { resolveValidity, tariffBoundInstantOrNull } from '../lib/tariff-period';
+import { resolveValidity, tariffBoundInstantOrNull } from '../workbooks/tariff-week';
 import {
   computePlusItem,
   type ComputedPlusItem,

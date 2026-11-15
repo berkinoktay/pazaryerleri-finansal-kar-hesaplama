@@ -820,6 +820,7 @@ async function loadFullMode(): Promise<readonly RecordAuditor[]> {
     campaign,
     flash,
     advantage,
+    plus,
   ] = await Promise.all([
     import('../src/workbooks/export-workbook'),
     import('../src/workbooks/export-plan'),
@@ -831,6 +832,7 @@ async function loadFullMode(): Promise<readonly RecordAuditor[]> {
     import('../src/workbooks/verticals/marketplace-campaign-list.adapter'),
     import('../src/workbooks/verticals/flash-product-list.adapter'),
     import('../src/workbooks/verticals/advantage-tariff.adapter'),
+    import('../src/workbooks/verticals/plus-commission-tariff.adapter'),
   ]);
   const engine: FullModeEngine = {
     resolveStoredWorkbook: exportWorkbook.resolveStoredWorkbook,
@@ -848,6 +850,7 @@ async function loadFullMode(): Promise<readonly RecordAuditor[]> {
     recordAuditor(engine, campaign.marketplaceCampaignListAdapter),
     recordAuditor(engine, flash.flashProductListAdapter),
     recordAuditor(engine, advantage.advantageTariffAdapter),
+    recordAuditor(engine, plus.plusCommissionTariffAdapter),
   ];
 }
 

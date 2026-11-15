@@ -8,10 +8,13 @@
 // DIFFERENT prices yields a 3-gunluk + 4-gunluk zip, each patched with its own window
 // label + that period's reduced commission; the SAME price in both collapses to a
 // single 7-gunluk file carrying both periods' commission cells. A tariff with no
-// stored source file returns 409.
+// stored source file returns 409. At import, a value the export would write back is
+// checked as the export writes it: an Excel float residue offer is stored and exported
+// rounded, a negative Plus price ceiling is refused with 422 and nothing is stored.
 
 import { readFileSync } from 'node:fs';
 
+import { z } from '@hono/zod-openapi';
 import { unzipSync } from 'fflate';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -443,5 +446,87 @@ describe('plus-commission-tariff export', () => {
     const res = await exportTariff(ctx, tariff.id);
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe('CONFLICT');
+  });
+});
+
+const ProblemSchema = z.object({
+  code: z.string(),
+  errors: z.array(z.object({ field: z.string(), code: z.string() })).optional(),
+});
+
+describe('plus-commission-tariff import: a value the export writes back', () => {
+  // Sheet row 2, the first kept row of the single-period fixture, is SINGLE_BARCODE's.
+  const FIRST_KEPT_ROW = 2;
+
+  beforeEach(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+  });
+
+  /** The single-period fixture with one number cell of its first kept row replaced. */
+  async function singleWithCell(
+    col: (layout: ResolvedLayout) => ColumnIndex,
+    value: string,
+  ): Promise<Buffer> {
+    const { grid, layout } = await readParsed(FIXTURE_SINGLE);
+    expect(cellText(grid[FIRST_KEPT_ROW - 1] ?? [], column(layout, 'barcode'))).toBe(
+      SINGLE_BARCODE,
+    );
+    const target = col(layout);
+    if (target === null) throw new Error('the fixture has no such column');
+    return patchFixture(
+      FIXTURE_SINGLE,
+      [{ excelRow: FIRST_KEPT_ROW, col: target, value: { kind: 'number', value } }],
+      { sheet: { by: 'name', name: SHEET_NAME } },
+    );
+  }
+
+  function offerColumn(layout: ResolvedLayout): ColumnIndex {
+    return layout.blocks.get('periods')?.[0]?.columns.get('offer') ?? null;
+  }
+
+  it('stores an Excel float residue offer rounded to four decimals and exports the rounded value', async () => {
+    const ctx = await setupStore();
+    const file = await singleWithCell(offerColumn, '15.400000000000002');
+
+    const tariffId = await importFixture(ctx, file, 'trendyol-plus-tariff.xlsx');
+    const item = await prisma.plusCommissionTariffItem.findFirst({
+      where: { storeId: ctx.storeId, barcode: SINGLE_BARCODE },
+    });
+    expect(item?.plusCommissionPct.toString()).toBe('15.4');
+    await prisma.plusCommissionTariffItem.update({
+      where: { id: item?.id },
+      data: { plusSelected: true },
+    });
+
+    const res = await exportTariff(ctx, tariffId);
+    expect(res.status).toBe(200);
+    const { grid, layout } = await readParsed(Buffer.from(await res.arrayBuffer()));
+    const row = rowFor(grid, layout, SINGLE_BARCODE);
+    expect(cellText(row ?? [], periodsOf(layout)[0]?.computedCommissionCol ?? null)).toBe('15.4');
+  });
+
+  it('refuses a negative Plus price ceiling with 422 MALFORMED_SHEET and stores nothing', async () => {
+    const ctx = await setupStore();
+    const file = await singleWithCell((layout) => column(layout, 'plusPriceUpperLimit'), '-5');
+
+    const form = new FormData();
+    form.append('file', new Blob([new Uint8Array(file)]), 'trendyol-plus-tariff.xlsx');
+    const res = await app.request(
+      new Request(
+        `http://local/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/plus-commission-tariffs/import`,
+        { method: 'POST', headers: { Authorization: bearer(ctx.accessToken) }, body: form },
+      ),
+    );
+
+    expect(res.status).toBe(422);
+    const body = ProblemSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual([{ field: 'file', code: 'MALFORMED_SHEET' }]);
+    expect(
+      await prisma.plusCommissionTariff.count({
+        where: { organizationId: ctx.orgId, storeId: ctx.storeId },
+      }),
+    ).toBe(0);
   });
 });

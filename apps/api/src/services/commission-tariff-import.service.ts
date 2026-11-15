@@ -23,7 +23,7 @@ import { IMPORT_TX_OPTIONS } from '../config/workbook-limits';
 import { ValidationError } from '../lib/errors';
 import { isUniqueViolationOn, mapTransactionError } from '../lib/map-transaction-error';
 import { mapUploadedFileError } from '../lib/spreadsheet-errors';
-import { parseTariffPeriodLabel } from '../lib/tariff-period';
+import { parseTariffPeriodLabel } from '../workbooks/tariff-week';
 import { cellDecimalString, cellInt, cellText } from '../lib/xlsx-grid-cells';
 import { resolveTariffLayout, type TariffLayout } from './commission-tariff-layout';
 

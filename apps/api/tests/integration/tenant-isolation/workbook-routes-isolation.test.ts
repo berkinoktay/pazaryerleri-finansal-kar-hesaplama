@@ -34,6 +34,7 @@ import { advantageTariffAdapter } from '@/workbooks/verticals/advantage-tariff.a
 import { discountListAdapter } from '@/workbooks/verticals/discount-list.adapter';
 import { flashProductListAdapter } from '@/workbooks/verticals/flash-product-list.adapter';
 import { marketplaceCampaignListAdapter } from '@/workbooks/verticals/marketplace-campaign-list.adapter';
+import { plusCommissionTariffAdapter } from '@/workbooks/verticals/plus-commission-tariff.adapter';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -71,6 +72,7 @@ const DiscountImportSchema = z.object({ listId: z.string() });
 const CampaignImportSchema = z.object({ campaignId: z.string() });
 const FlashImportSchema = z.object({ listId: z.string() });
 const AdvantageImportSchema = z.object({ tariffId: z.string() });
+const PlusImportSchema = z.object({ tariffId: z.string() });
 
 const ADVANTAGE_ROW: IsolationRow = {
   segment: 'advantage-tariffs',
@@ -142,6 +144,23 @@ const ISOLATION_ROWS: readonly IsolationRow[] = [
         ?.exportedAt ?? null,
   },
   ADVANTAGE_ROW,
+  {
+    segment: 'plus-commission-tariffs',
+    fixture: 'trendyol-plus-tariff.xlsx',
+    form: {},
+    importedId: (body) => PlusImportSchema.parse(body).tariffId,
+    load: (scope, id) => plusCommissionTariffAdapter.load(scope, id),
+    touchExported: (scope, id) => plusCommissionTariffAdapter.touchExported(scope, id),
+    countLists: (scope) =>
+      prisma.$transaction((tx) => plusCommissionTariffAdapter.countLists(tx, scope)),
+    exportedAt: async (id) =>
+      (
+        await prisma.plusCommissionTariff.findUnique({
+          where: { id },
+          select: { exportedAt: true },
+        })
+      )?.exportedAt ?? null,
+  },
 ];
 
 function importRequest(

@@ -27,27 +27,12 @@ import {
   resolveTariffLayout,
   type TariffLayout,
 } from '@/services/commission-tariff-layout';
-import { parsePlusTariffRow } from '@/services/plus-commission-tariff-import.service';
-import {
-  resolvePlusTariffLayout,
-  type PlusTariffLayout,
-} from '@/services/plus-commission-tariff-layout';
 import {
   trendyolCommissionTariffKeep,
   trendyolCommissionTariffLayout,
 } from '@/workbooks/formats/trendyol/commission-tariff.layout';
-import {
-  trendyolPlusCommissionTariffKeep,
-  trendyolPlusCommissionTariffLayout,
-} from '@/workbooks/formats/trendyol/plus-commission-tariff.layout';
 
-import {
-  COMMISSION_DERIVED,
-  PLUS_CANCEL_NUMBER_ONE,
-  PLUS_CANCEL_TEXT_ZERO,
-  PLUS_DERIVED,
-  type DerivedRow,
-} from '../../helpers/workbook-derived-rows';
+import { COMMISSION_DERIVED, type DerivedRow } from '../../helpers/workbook-derived-rows';
 
 // Cross-validates the Trendyol layouts written as data against the hand-written
 // resolvers and row parsers they are meant to replace, for every vertical whose legacy
@@ -71,7 +56,6 @@ const SERVICE_ZERO = '0';
 
 // Sheet names, copied from the import services.
 const COMMISSION_SHEET = 'KomisyonTarifeleriÜrünleri';
-const PLUS_SHEET = 'TyPlusÜrünleri';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -445,174 +429,5 @@ describe('Trendyol commission tariff layout', () => {
       (block) => block.tag,
     );
     expect(tags).toEqual([3, 4]);
-  });
-});
-
-// ─── Plus commission tariff ─────────────────────────────────────────────────
-
-function adaptPlus(resolved: ResolvedLayout | null): PlusTariffLayout | null {
-  if (resolved === null) return null;
-  const spec = trendyolPlusCommissionTariffLayout;
-  const col = (key: ColumnKey<typeof spec>): number =>
-    legacyIndex(columnIndex(spec, resolved, key));
-  return {
-    productTitle: col('productTitle'),
-    barcode: col('barcode'),
-    sellerStockCode: col('sellerStockCode'),
-    size: col('size'),
-    modelCode: col('modelCode'),
-    category: col('category'),
-    brand: col('brand'),
-    stock: col('stock'),
-    currentPrice: col('currentPrice'),
-    commissionBasePrice: col('commissionBasePrice'),
-    currentCommission: col('currentCommission'),
-    plusPriceUpperLimit: col('plusPriceUpperLimit'),
-    plusCommissionBasePrice: col('plusCommissionBasePrice'),
-    externalId: col('externalId'),
-    tariffGroup: col('tariffGroup'),
-    cancelled: col('cancelled'),
-    plusPriceSelection: col('plusPriceSelection'),
-    tariffSelection: col('tariffSelection'),
-    periods: blocksOf(spec, resolved, 'periods').map((block) => ({
-      dayCount: block.tag,
-      labelCol: blockColumn(block, 'label'),
-      offerCol: blockColumn(block, 'offer'),
-      computedCommissionCol: legacyIndex(block.lookups.get('computedCommission')),
-    })),
-  };
-}
-
-const PLUS = vertical({
-  spec: trendyolPlusCommissionTariffLayout,
-  keep: trendyolPlusCommissionTariffKeep,
-  legacyResolve: resolvePlusTariffLayout,
-  adapt: adaptPlus,
-  legacyParse: parsePlusTariffRow,
-  serviceFields: (parsed) => ({
-    barcode: parsed.barcode,
-    cancelled: parsed.cancelled,
-    periodOffers: parsed.periodOffers,
-  }),
-  readerFields: (reader) => ({
-    barcode: reader.text('barcode'),
-    cancelled: reader.numericFlag('cancelled'),
-    periodOffers: reader.blocks('periods').map((period) => period.decimal('offer') ?? SERVICE_ZERO),
-  }),
-});
-
-// Copied verbatim from tests/unit/plus-commission-tariff-layout.test.ts.
-const PLUS_HEADER: readonly string[] = [
-  'Ürün İsmi',
-  'Ürün Id',
-  'Barkod',
-  'Satıcı Stok Kodu',
-  'Beden',
-  'Model Kodu',
-  'Kategori',
-  'Marka',
-  'Stok',
-  'Güncel TSF',
-  'Komisyona Esas Fiyat',
-  'Güncel Komisyon',
-  'Plus Fiyat Üst Limiti',
-  'Tarih Aralığı (7 Gün)',
-  'Plus Komisyon Teklifi',
-  'Plus Komisyona Esas Fiyatı',
-  'Plus Fiyat Seçimi',
-  'Tarife Seçimi',
-  'Hesaplanan Komisyon (7 Gün)',
-  'İptal',
-  'External Id',
-  'Tarife Grubu',
-];
-
-const PLUS_HEADER_MULTI: readonly string[] = [
-  'Ürün İsmi',
-  'Ürün Id',
-  'Barkod',
-  'Satıcı Stok Kodu',
-  'Beden',
-  'Model Kodu',
-  'Kategori',
-  'Marka',
-  'Stok',
-  'Güncel TSF',
-  'Komisyona Esas Fiyat',
-  'Güncel Komisyon',
-  'Plus Fiyat Üst Limiti',
-  'Tarih Aralığı (3 Gün)',
-  'Plus Komisyon Teklifi',
-  'Tarih Aralığı (4 Gün)',
-  'Plus Komisyon Teklifi',
-  'Plus Komisyona Esas Fiyatı',
-  'Plus Fiyat Seçimi',
-  'Tarife Seçimi',
-  'External Id',
-  'Hesaplanan Komisyon (3 Gün)',
-  'Hesaplanan Komisyon (4 Gün)',
-  'İptal',
-  'Tarife Grubu',
-  '3 Gün Tarih Aralığı',
-  '4 Gün Tarih Aralığı',
-  '7 Gün Tarih Aralığı',
-  'External Id (3 Gün)',
-  'External Id (4 Gün)',
-  'External Id (7 Gün)',
-];
-
-const PLUS_HEADERS: readonly HeaderCase[] = [
-  { name: 'single-period header', header: PLUS_HEADER, resolves: true },
-  { name: 'two-period header with decoys', header: PLUS_HEADER_MULTI, resolves: true },
-  {
-    name: 'header without computed-commission columns',
-    header: PLUS_HEADER.filter((h) => !h.startsWith('Hesaplanan Komisyon')),
-    resolves: true,
-  },
-  {
-    name: 'header with the lower-case period spelling',
-    header: PLUS_HEADER.map((h) => (h === 'Tarih Aralığı (7 Gün)' ? 'Tarih aralığı (7 Gün)' : h)),
-    resolves: true,
-  },
-  {
-    name: 'header whose period is not followed by the offer column',
-    header: PLUS_HEADER.map((h) => (h === 'Plus Komisyon Teklifi' ? 'Bir Başka Kolon' : h)),
-    resolves: false,
-  },
-  {
-    name: 'header without a period',
-    header: PLUS_HEADER.filter((h) => !h.startsWith('Tarih')),
-    resolves: false,
-  },
-  {
-    name: 'header missing Barkod',
-    header: PLUS_HEADER.filter((h) => h !== 'Barkod'),
-    resolves: false,
-  },
-  { name: 'non-Plus header', header: ['not', 'a', 'plus', 'header'], resolves: false },
-];
-
-const PLUS_FILE = 'trendyol-plus-tariff.xlsx';
-
-describe('Trendyol Plus commission tariff layout', () => {
-  describeFixture(PLUS, PLUS_FILE, PLUS_SHEET);
-  describeFixture(PLUS, 'trendyol-plus-tariff-3ve4.xlsx', PLUS_SHEET);
-  describeHeaders(PLUS, PLUS_HEADERS);
-  describeDerivedRows(PLUS, PLUS_DERIVED, PLUS_FILE, PLUS_SHEET);
-
-  it('reads the cancel cell like the import: the number 1 cancels, the text "0" does not', async () => {
-    const grid = await readFixture(PLUS_FILE, PLUS_SHEET);
-    const spec = trendyolPlusCommissionTariffLayout;
-    const layout = present(resolveLayout(spec, grid), 'layout');
-    const legacy = present(resolvePlusTariffLayout(grid[0] ?? []), 'legacy layout');
-    const cancelled = (derived: DerivedRow<typeof spec>): unknown => {
-      const row = deriveRow(PLUS, grid, derived);
-      return {
-        service: parsePlusTariffRow(row, legacy)?.cancelled,
-        reader: createRowReader(spec, layout, row, READER_OPTIONS).numericFlag('cancelled'),
-      };
-    };
-    expect(cancelled(PLUS_CANCEL_NUMBER_ONE)).toEqual({ service: true, reader: true });
-    expect(cancelled(PLUS_CANCEL_TEXT_ZERO)).toEqual({ service: false, reader: false });
   });
 });

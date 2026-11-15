@@ -17,7 +17,7 @@ import { mapPrismaError } from '@pazarsync/sync-core';
 import { enqueueProfitRecomputeForBarcodes, parseStoredTariffBands } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
-import { resolveValidity, tariffBoundInstantOrNull } from '../lib/tariff-period';
+import { resolveValidity, tariffBoundInstantOrNull } from '../workbooks/tariff-week';
 import { computeItemBands, type ComputedItemBands } from './commission-tariff-compute.service';
 import {
   createRequestFailureLog,

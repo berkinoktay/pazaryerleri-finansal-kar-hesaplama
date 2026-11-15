@@ -37,7 +37,7 @@ vi.setConfig({ testTimeout: DIFFERENTIAL_TEST_TIMEOUT_MS });
 const WINDOW_SELECTION_LABEL_UNIT = 'G\u00fcnl\u00fck Fiyat';
 // commission-tariff-export.service.ts SHEET_NAME.
 const COMMISSION_SHEET_NAME = 'KomisyonTarifeleri\u00dcr\u00fcnleri';
-// plus-commission-tariff-export.service.ts SHEET_NAME and NOT_CANCELLED.
+// The Plus sheet name and the no-cancel label (formats/trendyol/labels.ts).
 const PLUS_SHEET_NAME = 'TyPlus\u00dcr\u00fcnleri';
 const PLUS_NOT_CANCELLED = 'Hay\u0131r';
 // The advantage sheet name (formats/trendyol/labels.ts).
