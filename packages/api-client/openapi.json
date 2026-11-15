@@ -20457,6 +20457,16 @@
               }
             }
           },
+          "409": {
+            "description": "Another import of this page is running, or the store's upload quota is reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "413": {
             "description": "Request body exceeds the upload size limit (PAYLOAD_TOO_LARGE)",
             "content": {

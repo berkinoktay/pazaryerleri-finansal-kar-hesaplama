@@ -1,0 +1,14 @@
+{
+  "trendyol-discount-products.xlsx": {
+    "real": {
+      "keptRows": 4,
+      "skippedRows": 0,
+      "sha256": "41c2f07440a6862788bf5a74992d389961c5e5459755c8d050e6fc8c4ee5ba08"
+    },
+    "derived": {
+      "keptRows": 6,
+      "skippedRows": 2,
+      "sha256": "20ce56a5ec4a65e98e35c515ff9c083795a7d1ceb564bd4b460c3b47514aeae4"
+    }
+  }
+}

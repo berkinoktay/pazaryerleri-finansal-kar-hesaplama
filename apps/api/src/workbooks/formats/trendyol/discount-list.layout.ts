@@ -2,9 +2,9 @@
 // by header. The participation header carries the vendor's own typo; the typo is named
 // first, so it wins whenever it appears, even to the right of the corrected spelling
 // (names are tried in order). The current price is text like "250 TL", so it reads
-// with the currency grammar. The legacy resolver (services/discount-list-layout.ts)
-// stays in use until the vertical moves onto this file;
-// tests/unit/workbooks/trendyol-layouts.test.ts keeps the two in lockstep.
+// with the currency grammar. The discount import reads through this file; the legacy
+// resolver (services/discount-list-layout.ts) serves only the export until it moves
+// onto the generic export too.
 
 import {
   all,

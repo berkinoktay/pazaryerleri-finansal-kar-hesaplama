@@ -26,6 +26,32 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Workbook imports run through the generic workbook import**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/import`). Each change below
+  applies to discount lists now, and to the other five pages as they move:
+  - The import route can answer `409` with `code: 'CONFLICT'` and `meta.reason`
+    `IMPORT_IN_PROGRESS` (another import of the same store and page is running) or
+    `UPLOAD_QUOTA_EXCEEDED` (the store already holds 50 lists of the page, or its stored source
+    files plus the upload would exceed 200 MiB). The `409` response is added to the route's
+    OpenAPI entry.
+  - A Hepsiburada store answers `422` with `{ field: 'file', code: 'UNSUPPORTED_PLATFORM_FORMAT' }`.
+  - The named sheet is selected strictly, with no first-sheet fallback: a workbook without it
+    answers `422` with `{ field: 'file', code: 'SHEET_NOT_FOUND' }`, or with the page's
+    invalid-format code (`INVALID_DISCOUNT_FORMAT` for discount lists) and `meta.detectedPage`
+    when its first sheet is another page's file.
+  - A write-back column under a shared formula, an array formula or a merged range, or a barcode
+    cell longer than 256 characters, answers `422` with `{ field: 'file', code: 'MALFORMED_SHEET' }`
+    at upload instead of failing the first export; nothing is stored.
+  - The stored source file name drops control and format characters and path separators and is
+    cut to 120 characters; a name that does not end in `.xlsx` is not stored, and the list then
+    takes the page's default name instead of the file name stem.
+  - A typed `name` drops control and format characters and is cut to 120 characters (code
+    points); before, it was only trimmed. A typed name left empty by that falls back to the file
+    name stem, then to the page's default name.
+  - The page's invalid-format answer (`INVALID_DISCOUNT_FORMAT` for discount lists) now always
+    carries `errors[0].meta` with `detectedFormatId`, `detectedPlatform` and `detectedPage`; each
+    is `null` when the file matches no known page. Before, a file that matched no page carried no
+    `meta`.
 - **The campaign workbook upload gate checks the zip layout, the root relationships and active
   parts** (`POST /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs|advantage-tariffs|flash-products|discount-lists|marketplace-campaigns}/import`).
   An upload whose zip archive is not laid out the way the export reads it (a gap, an overlap or a

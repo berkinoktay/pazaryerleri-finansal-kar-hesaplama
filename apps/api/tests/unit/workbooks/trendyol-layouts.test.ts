@@ -37,12 +37,6 @@ import {
   resolveTariffLayout,
   type TariffLayout,
 } from '@/services/commission-tariff-layout';
-import { parseDiscountListRow } from '@/services/discount-list-import.service';
-import {
-  DISCOUNT_INCLUDED_YES,
-  resolveDiscountListLayout,
-  type DiscountListLayout,
-} from '@/services/discount-list-layout';
 import { parseFlashProductRow } from '@/services/flash-product-import.service';
 import {
   resolveFlashProductLayout,
@@ -68,10 +62,6 @@ import {
   trendyolCommissionTariffLayout,
 } from '@/workbooks/formats/trendyol/commission-tariff.layout';
 import {
-  trendyolDiscountListKeep,
-  trendyolDiscountListLayout,
-} from '@/workbooks/formats/trendyol/discount-list.layout';
-import {
   trendyolFlashProductListKeep,
   trendyolFlashProductListLayout,
 } from '@/workbooks/formats/trendyol/flash-product-list.layout';
@@ -84,11 +74,25 @@ import {
   trendyolPlusCommissionTariffLayout,
 } from '@/workbooks/formats/trendyol/plus-commission-tariff.layout';
 
-// Cross-validates the six Trendyol layouts written as data against the hand-written
-// resolvers and row parsers they are meant to replace:
+import {
+  ADVANTAGE_DERIVED,
+  CAMPAIGN_DERIVED,
+  CAMPAIGN_LIRA_TEXT,
+  COMMISSION_DERIVED,
+  FLASH_DERIVED,
+  PLUS_CANCEL_NUMBER_ONE,
+  PLUS_CANCEL_TEXT_ZERO,
+  PLUS_DERIVED,
+  type DerivedRow,
+} from '../../helpers/workbook-derived-rows';
+
+// Cross-validates the Trendyol layouts written as data against the hand-written
+// resolvers and row parsers they are meant to replace, for every vertical whose legacy
+// parser still exists (a vertical that moved onto the generic pipeline keeps its cases
+// in its format test under tests/unit/workbooks/formats/):
 //   - layout parity: resolveLayout, adapted to the legacy shape (an absent column is
 //     -1 there, null here), deep-equals the legacy resolver on every fixture header row
-//     and on every header array of the six legacy layout tests (copied verbatim; those
+//     and on every header array of the legacy layout tests (copied verbatim; those
 //     files stay unchanged);
 //   - keep parity: the layout's keep rule holds on exactly the rows the import keeps;
 //   - row-reader parity: on every kept row, the typed row reader reads the same values
@@ -110,7 +114,6 @@ const COMMISSION_SHEET = 'KomisyonTarifeleriÜrünleri';
 const PLUS_SHEET = 'TyPlusÜrünleri';
 const ADVANTAGE_SHEET = 'YıldızlıÜrünEtiketleri';
 const FLASH_SHEET = 'TeklifÜrünleri';
-const DISCOUNT_SHEET = 'Ürünler';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -265,14 +268,6 @@ function describeHeaders<S extends LayoutSpec, L, P>(
   it.each(cases)('resolves the $name like the legacy resolver', (testCase) => {
     expectHeaderParity(v, testCase);
   });
-}
-
-/** A data row derived from a fixture's first kept row by overwriting some of its cells. */
-interface DerivedRow<S extends LayoutSpec> {
-  readonly name: string;
-  readonly cells: ReadonlyArray<readonly [ColumnKey<S>, CellValue]>;
-  /** Whether the import keeps the row, so a case cannot drift to the other side unnoticed. */
-  readonly kept: boolean;
 }
 
 /** The first data row of `grid` that the import keeps. */
@@ -479,10 +474,6 @@ const COMMISSION_HEADERS: readonly HeaderCase[] = [
 
 const COMMISSION_FILE = 'trendyol-commission-tariff.xlsx';
 
-const COMMISSION_DERIVED: readonly DerivedRow<typeof trendyolCommissionTariffLayout>[] = [
-  { name: 'a blank barcode', cells: [['barcode', null]], kept: false },
-];
-
 describe('Trendyol commission tariff layout', () => {
   describeFixture(COMMISSION, COMMISSION_FILE, COMMISSION_SHEET);
   describeFixture(COMMISSION, 'trendyol-tariff-1period.xlsx', COMMISSION_SHEET);
@@ -645,24 +636,6 @@ const PLUS_HEADERS: readonly HeaderCase[] = [
 
 const PLUS_FILE = 'trendyol-plus-tariff.xlsx';
 
-const PLUS_CANCEL_NUMBER_ONE: DerivedRow<typeof trendyolPlusCommissionTariffLayout> = {
-  name: 'the number 1 in the cancel cell',
-  cells: [['cancelled', 1]],
-  kept: true,
-};
-
-const PLUS_CANCEL_TEXT_ZERO: DerivedRow<typeof trendyolPlusCommissionTariffLayout> = {
-  name: 'the text "0" in the cancel cell',
-  cells: [['cancelled', '0']],
-  kept: true,
-};
-
-const PLUS_DERIVED: readonly DerivedRow<typeof trendyolPlusCommissionTariffLayout>[] = [
-  { name: 'a blank barcode', cells: [['barcode', null]], kept: false },
-  PLUS_CANCEL_NUMBER_ONE,
-  PLUS_CANCEL_TEXT_ZERO,
-];
-
 describe('Trendyol Plus commission tariff layout', () => {
   describeFixture(PLUS, PLUS_FILE, PLUS_SHEET);
   describeFixture(PLUS, 'trendyol-plus-tariff-3ve4.xlsx', PLUS_SHEET);
@@ -774,11 +747,6 @@ const ADVANTAGE_HEADERS: readonly HeaderCase[] = [
     resolves: false,
   },
   { name: 'non-Advantage header', header: ['not', 'an', 'advantage', 'header'], resolves: false },
-];
-
-const ADVANTAGE_DERIVED: readonly DerivedRow<typeof trendyolAdvantageTariffLayout>[] = [
-  { name: 'a blank barcode', cells: [['barcode', null]], kept: false },
-  { name: 'a blank current price', cells: [['currentPrice', null]], kept: false },
 ];
 
 describe('Trendyol advantage tariff layout', () => {
@@ -928,27 +896,6 @@ const FLASH_HEADERS: readonly HeaderCase[] = [
 
 const FLASH_FILE = 'trendyol-flash-products.xlsx';
 
-const FLASH_DERIVED: readonly DerivedRow<typeof trendyolFlashProductListLayout>[] = [
-  { name: 'a blank barcode', cells: [['barcode', null]], kept: false },
-  { name: 'a blank current price', cells: [['currentPrice', null]], kept: false },
-  {
-    name: 'neither offer price',
-    cells: [
-      ['offer24Price', null],
-      ['offer3Price', null],
-    ],
-    kept: false,
-  },
-  {
-    name: 'only a 3-hour offer price',
-    cells: [
-      ['offer24Price', null],
-      ['offer3Price', 149.9],
-    ],
-    kept: true,
-  },
-];
-
 describe('Trendyol flash product list layout', () => {
   describeFixture(FLASH, FLASH_FILE, FLASH_SHEET);
   describeHeaders(FLASH, FLASH_HEADERS);
@@ -957,42 +904,7 @@ describe('Trendyol flash product list layout', () => {
 
 // ─── Discount list ──────────────────────────────────────────────────────────
 
-function adaptDiscount(resolved: ResolvedLayout | null): DiscountListLayout | null {
-  if (resolved === null) return null;
-  const spec = trendyolDiscountListLayout;
-  const col = (key: ColumnKey<typeof spec>): number =>
-    legacyIndex(columnIndex(spec, resolved, key));
-  return {
-    externalId: col('externalId'),
-    productTitle: col('productTitle'),
-    brand: col('brand'),
-    color: col('color'),
-    barcode: col('barcode'),
-    modelCode: col('modelCode'),
-    currentPrice: col('currentPrice'),
-    included: col('included'),
-  };
-}
-
-const DISCOUNT = vertical({
-  spec: trendyolDiscountListLayout,
-  keep: trendyolDiscountListKeep,
-  legacyResolve: resolveDiscountListLayout,
-  adapt: adaptDiscount,
-  legacyParse: parseDiscountListRow,
-  serviceFields: (parsed) => ({
-    barcode: parsed.barcode,
-    currentPrice: parsed.currentPrice,
-    included: parsed.included,
-  }),
-  readerFields: (reader) => ({
-    barcode: reader.text('barcode'),
-    currentPrice: reader.decimal('currentPrice'),
-    included: reader.flag('included', { yes: DISCOUNT_INCLUDED_YES, compare: 'exact' }),
-  }),
-});
-
-// Copied verbatim from tests/unit/services/discount-list-layout.test.ts.
+// The real Trendyol discount header: the campaign layout must not resolve it.
 const DISCOUNT_HEADER: readonly string[] = [
   'Trendyol Ürün ID',
   'Ürün Bilgisi',
@@ -1004,53 +916,6 @@ const DISCOUNT_HEADER: readonly string[] = [
   'Buybox',
   'Kampayaya Dahil Edilsin Mi?',
 ];
-
-const DISCOUNT_HEADERS: readonly HeaderCase[] = [
-  { name: 'real header', header: DISCOUNT_HEADER, resolves: true },
-  { name: 'reversed header', header: [...DISCOUNT_HEADER].reverse(), resolves: true },
-  {
-    name: 'header missing Barkod',
-    header: DISCOUNT_HEADER.filter((h) => h !== 'Barkod'),
-    resolves: false,
-  },
-  {
-    name: 'header missing the participation column',
-    header: DISCOUNT_HEADER.filter((h) => h !== 'Kampayaya Dahil Edilsin Mi?'),
-    resolves: false,
-  },
-  {
-    name: 'header with only the corrected participation spelling',
-    header: DISCOUNT_HEADER.map((h) =>
-      h === 'Kampayaya Dahil Edilsin Mi?' ? 'Kampanyaya Dahil Edilsin Mi?' : h,
-    ),
-    resolves: true,
-  },
-];
-
-const DISCOUNT_FILE = 'trendyol-discount-products.xlsx';
-
-const DISCOUNT_DERIVED: readonly DerivedRow<typeof trendyolDiscountListLayout>[] = [
-  { name: 'a blank barcode', cells: [['barcode', null]], kept: false },
-  { name: 'a blank current price', cells: [['currentPrice', null]], kept: false },
-];
-
-describe('Trendyol discount list layout', () => {
-  describeFixture(DISCOUNT, DISCOUNT_FILE, DISCOUNT_SHEET);
-  describeHeaders(DISCOUNT, DISCOUNT_HEADERS);
-  describeDerivedRows(DISCOUNT, DISCOUNT_DERIVED, DISCOUNT_FILE, DISCOUNT_SHEET);
-
-  it('takes the vendor typo over the corrected spelling, even when the typo sits to its right', () => {
-    const header = [
-      'Barkod',
-      'Güncel Satış Fiyatı',
-      'Kampanyaya Dahil Edilsin Mi?',
-      'Kampayaya Dahil Edilsin Mi?',
-    ];
-    const layout = present(resolveLayout(trendyolDiscountListLayout, headerGrid(header)), 'layout');
-    expect(columnIndex(trendyolDiscountListLayout, layout, 'included')).toBe(3);
-    expectHeaderParity(DISCOUNT, { name: 'both spellings', header, resolves: true });
-  });
-});
 
 // ─── Marketplace campaign list ──────────────────────────────────────────────
 
@@ -1137,31 +1002,6 @@ const CAMPAIGN_HEADERS: readonly HeaderCase[] = [
 ];
 
 const CAMPAIGN_FILE = 'marketplace-campaign-sample.xlsx';
-
-/** Dot-thousands lira text: the currency grammar reads 1250, the plain grammar nothing. */
-const CAMPAIGN_LIRA_TEXT: DerivedRow<typeof trendyolMarketplaceCampaignListLayout> = {
-  name: 'dot-thousands lira text prices',
-  cells: [
-    ['currentPrice', '1.250 ₺'],
-    ['maxPrice', '1.250 ₺'],
-  ],
-  kept: true,
-};
-
-const CAMPAIGN_DERIVED: readonly DerivedRow<typeof trendyolMarketplaceCampaignListLayout>[] = [
-  { name: 'a blank barcode', cells: [['barcode', null]], kept: false },
-  { name: 'a blank current price', cells: [['currentPrice', null]], kept: false },
-  { name: 'a blank maximum price', cells: [['maxPrice', null]], kept: false },
-  CAMPAIGN_LIRA_TEXT,
-  {
-    name: 'TL-prefixed text prices',
-    cells: [
-      ['currentPrice', 'TL 250'],
-      ['maxPrice', 'TL 250'],
-    ],
-    kept: false,
-  },
-];
 
 describe('Trendyol marketplace campaign list layout', () => {
   describeFixture(CAMPAIGN, CAMPAIGN_FILE);
