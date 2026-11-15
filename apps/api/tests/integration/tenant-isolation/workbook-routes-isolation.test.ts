@@ -29,6 +29,7 @@ import { createApp } from '@/app';
 import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware';
 import type { StoreScope } from '@/workbooks/adapter';
 import { discountListAdapter } from '@/workbooks/verticals/discount-list.adapter';
+import { flashProductListAdapter } from '@/workbooks/verticals/flash-product-list.adapter';
 import { marketplaceCampaignListAdapter } from '@/workbooks/verticals/marketplace-campaign-list.adapter';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
@@ -65,6 +66,7 @@ interface IsolationRow {
 
 const DiscountImportSchema = z.object({ listId: z.string() });
 const CampaignImportSchema = z.object({ campaignId: z.string() });
+const FlashImportSchema = z.object({ listId: z.string() });
 
 const ISOLATION_ROWS: readonly IsolationRow[] = [
   {
@@ -108,6 +110,19 @@ const ISOLATION_ROWS: readonly IsolationRow[] = [
           select: { exportedAt: true },
         })
       )?.exportedAt ?? null,
+  },
+  {
+    segment: 'flash-products',
+    fixture: 'trendyol-flash-products.xlsx',
+    form: {},
+    importedId: (body) => FlashImportSchema.parse(body).listId,
+    load: (scope, id) => flashProductListAdapter.load(scope, id),
+    touchExported: (scope, id) => flashProductListAdapter.touchExported(scope, id),
+    countLists: (scope) =>
+      prisma.$transaction((tx) => flashProductListAdapter.countLists(tx, scope)),
+    exportedAt: async (id) =>
+      (await prisma.flashProductList.findUnique({ where: { id }, select: { exportedAt: true } }))
+        ?.exportedAt ?? null,
   },
 ];
 

@@ -131,8 +131,8 @@ const CORRUPT_FILE_CODE: SpreadsheetFileErrorCode = 'CORRUPT_FILE';
 const READER_RULE_PREFIX = 'rule:';
 
 // The sheet names the legacy import and export services read (their private SHEET_NAME
-// constants; for the discount page, whose services are gone, the sheet its format
-// names), written with escapes so this file stays ASCII.
+// constants; for the pages whose services are gone, the sheet their formats name),
+// written with escapes so this file stays ASCII.
 const COMMISSION_TARIFF_SHEET = 'KomisyonTarifeleri\u00dcr\u00fcnleri';
 const PLUS_COMMISSION_TARIFF_SHEET = 'TyPlus\u00dcr\u00fcnleri';
 const ADVANTAGE_TARIFF_SHEET = 'Y\u0131ld\u0131zl\u0131\u00dcr\u00fcnEtiketleri';
@@ -818,6 +818,7 @@ async function loadFullMode(): Promise<readonly RecordAuditor[]> {
     workbookErrors,
     discount,
     campaign,
+    flash,
   ] = await Promise.all([
     import('../src/workbooks/export-workbook'),
     import('../src/workbooks/export-plan'),
@@ -827,6 +828,7 @@ async function loadFullMode(): Promise<readonly RecordAuditor[]> {
     import('../src/workbooks/workbook-errors'),
     import('../src/workbooks/verticals/discount-list.adapter'),
     import('../src/workbooks/verticals/marketplace-campaign-list.adapter'),
+    import('../src/workbooks/verticals/flash-product-list.adapter'),
   ]);
   const engine: FullModeEngine = {
     resolveStoredWorkbook: exportWorkbook.resolveStoredWorkbook,
@@ -842,6 +844,7 @@ async function loadFullMode(): Promise<readonly RecordAuditor[]> {
   return [
     recordAuditor(engine, discount.discountListAdapter),
     recordAuditor(engine, campaign.marketplaceCampaignListAdapter),
+    recordAuditor(engine, flash.flashProductListAdapter),
   ];
 }
 

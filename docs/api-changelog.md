@@ -27,9 +27,9 @@ section "Versioning" for details.
 ### Changed
 
 - **Workbook imports run through the generic workbook import**
-  (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns}/import`).
-  Each change below applies to discount lists and marketplace campaign lists now, and to the other
-  four pages as they move:
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products}/import`).
+  Each change below applies to discount lists, marketplace campaign lists and flash product lists
+  now, and to the other three pages as they move:
   - The import route can answer `409` with `code: 'CONFLICT'` and `meta.reason`
     `IMPORT_IN_PROGRESS` (another import of the same store and page is running) or
     `UPLOAD_QUOTA_EXCEEDED` (the store already holds 50 lists of the page, or its stored source
@@ -51,7 +51,8 @@ section "Versioning" for details.
     points); before, it was only trimmed. A typed name left empty by that falls back to the file
     name stem, then to the page's default name.
   - The page's invalid-format answer (`INVALID_DISCOUNT_FORMAT` for discount lists,
-    `INVALID_CAMPAIGN_FORMAT` for marketplace campaign lists) now always carries `errors[0].meta`
+    `INVALID_CAMPAIGN_FORMAT` for marketplace campaign lists, `INVALID_FLASH_FORMAT` for flash
+    product lists) now always carries `errors[0].meta`
     with `detectedFormatId`, `detectedPlatform` and `detectedPage`; each is `null` when the file
     matches no known page. Before, a file that matched no page carried no `meta`.
   - A marketplace campaign file whose maximum price on a kept row is negative or has more than 10
@@ -60,9 +61,10 @@ section "Versioning" for details.
     wrote the negative value into the campaign price cell.
 - **Workbook exports run through the generic workbook export**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}/export`,
-  `POST /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/export`).
-  Each change below applies to discount lists and marketplace campaign lists now, and to the other
-  four pages as they move:
+  `POST /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/export`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/flash-products/{listId}/export`).
+  Each change below applies to discount lists, marketplace campaign lists and flash product lists
+  now, and to the other three pages as they move:
   - Store access is checked before the record id in the path is validated: a malformed id answers
     the store access error (`403` or `404`) to a caller without write access to the store, and
     `422` only to a caller with it. Before, the id was validated first.
@@ -85,7 +87,9 @@ section "Versioning" for details.
     separators are dropped (a stored name that does not end in `.xlsx` falls back to the page's
     file name, `indirimler.xlsx` for discount lists and `kampanya.xlsx` for marketplace campaign
     lists), plus `Content-Length`,
-    `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. The ASCII `filename` keeps
+    `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. Flash product lists keep their
+    fixed `flas-urunler.xlsx`; their header gains the ASCII `filename` beside the `filename*` it
+    already sent. The ASCII `filename` keeps
     only letters, digits, spaces and `. _ ( ) -`; every other character becomes `_`, so header
     parameter syntax in an upload name (`;`, `=`, `*`, `'`, `%`) never reaches it.
 - **The campaign workbook upload gate checks the zip layout, the root relationships and active

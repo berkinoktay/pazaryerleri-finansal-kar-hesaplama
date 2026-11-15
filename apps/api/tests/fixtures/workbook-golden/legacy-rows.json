@@ -22,5 +22,17 @@
       "skippedRows": 2,
       "sha256": "20ce56a5ec4a65e98e35c515ff9c083795a7d1ceb564bd4b460c3b47514aeae4"
     }
+  },
+  "trendyol-flash-products.xlsx": {
+    "real": {
+      "keptRows": 122,
+      "skippedRows": 0,
+      "sha256": "883e5638486ac5539df9d37b2e4a783617c63a315c9dbeac13cf92cfd654d02d"
+    },
+    "derived": {
+      "keptRows": 138,
+      "skippedRows": 3,
+      "sha256": "ff218f8242b13d67e09af305bebad8cd2ecd1408138c274adc955f0b70a5059e"
+    }
   }
 }

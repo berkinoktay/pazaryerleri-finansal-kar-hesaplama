@@ -42,7 +42,7 @@ const PLUS_SHEET_NAME = 'TyPlus\u00dcr\u00fcnleri';
 const PLUS_NOT_CANCELLED = 'Hay\u0131r';
 // advantage-tariff-export.service.ts SHEET_NAME.
 const ADVANTAGE_SHEET_NAME = 'Y\u0131ld\u0131zl\u0131\u00dcr\u00fcnEtiketleri';
-// flash-product-export.service.ts SHEET_NAME and the three update labels, in source order.
+// The flash sheet name and the three update labels (formats/trendyol/labels.ts), in allow-list order.
 const FLASH_SHEET_NAME = 'Teklif\u00dcr\u00fcnleri';
 const FLASH_UPDATE_LABEL_24H = '24 Saat';
 const FLASH_UPDATE_LABEL_3H = '3 Saat';

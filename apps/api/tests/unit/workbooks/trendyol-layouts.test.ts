@@ -19,7 +19,6 @@ import {
   type RowPredicate,
   type RowReader,
   type SheetData,
-  type WallClockPattern,
 } from '@pazarsync/spreadsheet';
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
 import { describe, expect, it, vi } from 'vitest';
@@ -35,11 +34,6 @@ import {
   resolveTariffLayout,
   type TariffLayout,
 } from '@/services/commission-tariff-layout';
-import { parseFlashProductRow } from '@/services/flash-product-import.service';
-import {
-  resolveFlashProductLayout,
-  type FlashProductLayout,
-} from '@/services/flash-product-layout';
 import { parsePlusTariffRow } from '@/services/plus-commission-tariff-import.service';
 import {
   resolvePlusTariffLayout,
@@ -54,10 +48,6 @@ import {
   trendyolCommissionTariffLayout,
 } from '@/workbooks/formats/trendyol/commission-tariff.layout';
 import {
-  trendyolFlashProductListKeep,
-  trendyolFlashProductListLayout,
-} from '@/workbooks/formats/trendyol/flash-product-list.layout';
-import {
   trendyolPlusCommissionTariffKeep,
   trendyolPlusCommissionTariffLayout,
 } from '@/workbooks/formats/trendyol/plus-commission-tariff.layout';
@@ -65,7 +55,6 @@ import {
 import {
   ADVANTAGE_DERIVED,
   COMMISSION_DERIVED,
-  FLASH_DERIVED,
   PLUS_CANCEL_NUMBER_ONE,
   PLUS_CANCEL_TEXT_ZERO,
   PLUS_DERIVED,
@@ -88,7 +77,6 @@ import {
 //     rewritten, which puts the dropping side of every keep rule under test.
 
 const FIXTURES_DIR = resolve(__dirname, '../../fixtures');
-const WALL_CLOCK: WallClockPattern = 'dd/MM/yyyy HH:mm';
 const READER_OPTIONS = { toInstant: businessZoneEpochToInstant };
 /** The services' own fallback for a blank decimal cell. */
 const SERVICE_ZERO = '0';
@@ -99,7 +87,6 @@ const EVET_FOLDED: FlagRule = { yes: 'evet', compare: 'casefold-tr' };
 const COMMISSION_SHEET = 'KomisyonTarifeleriÜrünleri';
 const PLUS_SHEET = 'TyPlusÜrünleri';
 const ADVANTAGE_SHEET = 'YıldızlıÜrünEtiketleri';
-const FLASH_SHEET = 'TeklifÜrünleri';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -771,119 +758,4 @@ describe('Trendyol advantage tariff layout', () => {
     ).toBe(true);
     expect(parseAdvantageTariffRow(withPrice, legacy)).not.toBeNull();
   });
-});
-
-// ─── Flash product list ─────────────────────────────────────────────────────
-
-function adaptFlash(resolved: ResolvedLayout | null): FlashProductLayout | null {
-  if (resolved === null) return null;
-  const spec = trendyolFlashProductListLayout;
-  const col = (key: ColumnKey<typeof spec>): number =>
-    legacyIndex(columnIndex(spec, resolved, key));
-  return {
-    modelCode: col('modelCode'),
-    barcode: col('barcode'),
-    productTitle: col('productTitle'),
-    category: col('category'),
-    brand: col('brand'),
-    stock: col('stock'),
-    currentPrice: col('currentPrice'),
-    customerPrice: col('customerPrice'),
-    currentCommission: col('currentCommission'),
-    updatedPrice: col('updatedPrice'),
-    customFlashPrice: col('customFlashPrice'),
-    offer24Price: col('offer24Price'),
-    offer24Start: col('offer24Start'),
-    offer24End: col('offer24End'),
-    offer3Price: col('offer3Price'),
-    offer3Start: col('offer3Start'),
-    offer3End: col('offer3End'),
-    commissionTariffFlag: col('commissionTariffFlag'),
-    campaignedProduct: col('campaignedProduct'),
-    externalId: col('externalId'),
-  };
-}
-
-/** An offer the way the flash import builds it: present when its price reads. */
-function readerOffer(
-  price: string | null,
-  startsAt: Date | null,
-  endsAt: Date | null,
-): { price: string; startsAt: Date | null; endsAt: Date | null } | null {
-  return price === null ? null : { price, startsAt, endsAt };
-}
-
-const FLASH = vertical({
-  spec: trendyolFlashProductListLayout,
-  keep: trendyolFlashProductListKeep,
-  legacyResolve: resolveFlashProductLayout,
-  adapt: adaptFlash,
-  legacyParse: parseFlashProductRow,
-  serviceFields: (parsed) => ({
-    barcode: parsed.barcode,
-    currentPrice: parsed.currentPrice,
-    offer24: parsed.offer24,
-    offer3: parsed.offer3,
-  }),
-  readerFields: (reader) => ({
-    barcode: reader.text('barcode'),
-    currentPrice: reader.decimal('currentPrice'),
-    offer24: readerOffer(
-      reader.decimal('offer24Price'),
-      reader.instant('offer24Start', WALL_CLOCK),
-      reader.instant('offer24End', WALL_CLOCK),
-    ),
-    offer3: readerOffer(
-      reader.decimal('offer3Price'),
-      reader.instant('offer3Start', WALL_CLOCK),
-      reader.instant('offer3End', WALL_CLOCK),
-    ),
-  }),
-});
-
-// Copied verbatim from tests/unit/flash-product-layout.test.ts.
-const FLASH_HEADER: readonly string[] = [
-  'Model Kodu',
-  'Barkod',
-  'Ürün Adı',
-  'Kategori',
-  'Marka',
-  'Stok',
-  'Mevcut Fiyat',
-  'Müşterinin Gördüğü Fiyat',
-  'Mevcut Komisyon',
-  'Güncellenecek Fiyat',
-  '24 Saat Fiyat',
-  '3 Saat Fiyat',
-  'Senin Belirlediğin Flaş Fiyatı',
-  '24 Saat Flaş Başlangıç Tarihi',
-  '24 Saat Flaş Bitiş Tarihi',
-  '3 Saat Flaş Başlangıç Tarihi',
-  '3 Saat Flaş Bitiş Tarihi',
-  'Ürün Komisyon Tarife Seçeneği',
-  'Kampanyalı Ürün',
-  'Ürün Id',
-];
-
-const FLASH_HEADERS: readonly HeaderCase[] = [
-  { name: 'real header', header: FLASH_HEADER, resolves: true },
-  {
-    name: 'header missing Barkod',
-    header: FLASH_HEADER.filter((h) => h !== 'Barkod'),
-    resolves: false,
-  },
-  {
-    name: 'header missing an offer price column',
-    header: FLASH_HEADER.filter((h) => h !== '3 Saat Fiyat'),
-    resolves: false,
-  },
-  { name: 'non-Flash header', header: ['not', 'a', 'flash', 'header'], resolves: false },
-];
-
-const FLASH_FILE = 'trendyol-flash-products.xlsx';
-
-describe('Trendyol flash product list layout', () => {
-  describeFixture(FLASH, FLASH_FILE, FLASH_SHEET);
-  describeHeaders(FLASH, FLASH_HEADERS);
-  describeDerivedRows(FLASH, FLASH_DERIVED, FLASH_FILE, FLASH_SHEET);
 });

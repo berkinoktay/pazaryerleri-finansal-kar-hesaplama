@@ -3,8 +3,8 @@
 // some cells blanked or rewritten: they put the fallback chains of a row mapper and the
 // dropping side of every keep rule under test. The cases were moved verbatim out of
 // tests/unit/workbooks/trendyol-layouts.test.ts so they outlive the legacy parsers (the
-// discount and campaign blocks have since gained kept cases, whose golden the legacy
-// parser wrote); `derivedGrid` builds the grid a format test reads them from.
+// discount, campaign and flash blocks have since gained kept cases, whose golden the
+// legacy parser wrote); `derivedGrid` builds the grid a format test reads them from.
 
 import {
   columnIndex,
@@ -79,6 +79,79 @@ const FLASH_DERIVED: readonly DerivedRow<typeof trendyolFlashProductListLayout>[
     cells: [
       ['offer24Price', null],
       ['offer3Price', 149.9],
+    ],
+    kept: true,
+  },
+  // Added after the move, so the derived golden pins every mapping rule of the flash
+  // row: the offer each price makes and its window (text, date, unreadable), the
+  // customer price and commission fallbacks, the folded tariff flag, the truncated
+  // stock and the title fallback.
+  {
+    name: 'only a 24-hour offer price',
+    cells: [
+      ['offer24Price', 199.9],
+      ['offer3Price', null],
+    ],
+    kept: true,
+  },
+  {
+    name: 'both offers, the 3-hour window as text',
+    cells: [
+      ['offer3Price', 99.9],
+      ['offer3Start', '08/07/2026 09:00'],
+      ['offer3End', '08/07/2026 12:00'],
+    ],
+    kept: true,
+  },
+  {
+    name: 'a 3-hour window without a 3-hour price',
+    cells: [
+      ['offer3Price', null],
+      ['offer3Start', '08/07/2026 09:00'],
+      ['offer3End', '08/07/2026 12:00'],
+    ],
+    kept: true,
+  },
+  {
+    name: 'an unreadable window start beside a readable end',
+    cells: [['offer24Start', 'not a window']],
+    kept: true,
+  },
+  {
+    name: 'date-typed window cells, the end an invalid date',
+    cells: [
+      ['offer24Start', new Date(Date.UTC(2026, 6, 8, 9, 0))],
+      ['offer24End', new Date(Number.NaN)],
+    ],
+    kept: true,
+  },
+  { name: 'a decimal-comma text offer price', cells: [['offer24Price', '179,47']], kept: true },
+  {
+    name: 'a TL-suffixed text 24-hour price beside a 3-hour price',
+    cells: [
+      ['offer24Price', '179 TL'],
+      ['offer3Price', 99.9],
+    ],
+    kept: true,
+  },
+  { name: 'a blank customer price', cells: [['customerPrice', null]], kept: true },
+  { name: 'a blank current commission', cells: [['currentCommission', null]], kept: true },
+  { name: 'the tariff flag VAR', cells: [['commissionTariffFlag', 'VAR']], kept: true },
+  { name: 'the tariff flag Yok', cells: [['commissionTariffFlag', 'Yok']], kept: true },
+  { name: 'a decimal stock number', cells: [['stock', 12.7]], kept: true },
+  { name: 'a decimal stock text', cells: [['stock', '12.7']], kept: true },
+  { name: 'a non-numeric stock text', cells: [['stock', 'many']], kept: true },
+  {
+    name: 'a blank title and blank optional columns',
+    cells: [
+      ['productTitle', null],
+      ['modelCode', null],
+      ['category', null],
+      ['brand', null],
+      ['stock', null],
+      ['commissionTariffFlag', null],
+      ['campaignedProduct', null],
+      ['externalId', null],
     ],
     kept: true,
   },
@@ -158,7 +231,7 @@ const CAMPAIGN_DERIVED: readonly DerivedRow<typeof trendyolMarketplaceCampaignLi
 ];
 
 // Exported as a list: the blocks above keep the exact bytes they had in the layout test,
-// apart from the kept cases added to the discount block and to the campaign block.
+// apart from the kept cases added to the discount, campaign and flash blocks.
 export {
   ADVANTAGE_DERIVED,
   CAMPAIGN_DERIVED,
