@@ -17,6 +17,7 @@ import { mapPrismaError } from '@pazarsync/sync-core';
 import { enqueueProfitRecomputeForBarcodes, parseStoredTariffBands } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
+import { assertScopedWrite } from '../workbooks/scoped-write';
 import { resolveValidity, tariffBoundInstantOrNull } from '../workbooks/tariff-week';
 import { computeItemBands, type ComputedItemBands } from './commission-tariff-compute.service';
 import {
@@ -326,7 +327,13 @@ export async function deleteTariff(
       });
       const barcodes = items.map((item) => item.barcode);
 
-      await tx.commissionTariff.delete({ where: { id: tariffId } });
+      await assertScopedWrite(
+        tx.commissionTariff.deleteMany({
+          where: { id: tariffId, organizationId: orgId, storeId },
+        }),
+        'CommissionTariff',
+        tariffId,
+      );
 
       await enqueueProfitRecomputeForBarcodes(tx, {
         organizationId: orgId,

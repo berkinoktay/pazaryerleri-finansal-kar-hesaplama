@@ -22,6 +22,7 @@ import { mapPrismaError } from '@pazarsync/sync-core';
 import { isInstantWithinTariffPeriod, tariffBoundToInstant } from '@pazarsync/utils';
 
 import { NotFoundError } from '../lib/errors';
+import { assertScopedWrite } from '../workbooks/scoped-write';
 import { parseStoredTariffBands, type StoredTariffBand } from '@pazarsync/profit';
 import {
   computeAdvantageItemTiers,
@@ -432,11 +433,13 @@ export async function deleteAdvantageTariff(
     throw new NotFoundError('AdvantageTariff', tariffId);
   }
 
-  try {
-    await prisma.advantageTariff.delete({ where: { id: tariffId } });
-  } catch (err) {
-    mapPrismaError(err);
-  }
+  await assertScopedWrite(
+    prisma.advantageTariff.deleteMany({
+      where: { id: tariffId, organizationId: orgId, storeId },
+    }),
+    'AdvantageTariff',
+    tariffId,
+  );
 }
 
 // --- Save selections ---
@@ -512,13 +515,13 @@ export async function updateAdvantageCommissionSource(
     }
   }
 
-  try {
-    await prisma.advantageTariff.update({
-      where: { id: tariffId },
+  await assertScopedWrite(
+    prisma.advantageTariff.updateMany({
+      where: { id: tariffId, organizationId: orgId, storeId },
       data: { commissionSourceTariffId },
-    });
-    return { commissionSourceTariffId };
-  } catch (err) {
-    mapPrismaError(err);
-  }
+    }),
+    'AdvantageTariff',
+    tariffId,
+  );
+  return { commissionSourceTariffId };
 }

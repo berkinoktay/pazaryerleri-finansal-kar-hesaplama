@@ -26,6 +26,7 @@ import { CampaignPriceSelection } from '@pazarsync/db/enums';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { NotFoundError, ValidationError, type ValidationIssue } from '../lib/errors';
+import { assertScopedWrite } from '../workbooks/scoped-write';
 import { scenarioPresentation } from './discount-math-commons';
 import { computeCampaignItem } from './marketplace-campaign-compute.service';
 import { resolveCampaignEconomics, EMPTY_ITEM_ECONOMICS } from './marketplace-campaign-economics';
@@ -379,9 +380,8 @@ export async function updateMarketplaceCampaign(
   }
 
   try {
-    const updated = await prisma.marketplaceCampaignList.update({
-      where: { id: campaignId },
-      data: {
+    const updated = await prisma.$transaction(async (tx) => {
+      const data = {
         discountType: patch.discountType,
         valueKind: patch.valueKind ?? null,
         value: patch.value ?? null,
@@ -395,8 +395,22 @@ export async function updateMarketplaceCampaign(
         startsAt: patch.startsAt ?? null,
         endsAt: patch.endsAt ?? null,
         ...(patch.name !== undefined ? { name: patch.name } : {}),
-      },
-      select: { id: true },
+      };
+      await assertScopedWrite(
+        tx.marketplaceCampaignList.updateMany({
+          where: { id: campaignId, organizationId: orgId, storeId },
+          data,
+        }),
+        'MarketplaceCampaign',
+        campaignId,
+      );
+      // updateMany returns no row: the stored id is read back in the same transaction.
+      const row = await tx.marketplaceCampaignList.findFirst({
+        where: { id: campaignId, organizationId: orgId, storeId },
+        select: { id: true },
+      });
+      if (row === null) throw new NotFoundError('MarketplaceCampaign', campaignId);
+      return row;
     });
     return { id: updated.id };
   } catch (err) {
@@ -472,11 +486,15 @@ export async function updateCampaignSelections(
         });
         // Bump the parent so `listMarketplaceCampaigns` (ordered by updatedAt desc) floats the
         // edited campaign to the top — a selection save otherwise only touches item rows.
-        // Ownership is proven by the findFirst above.
-        await tx.marketplaceCampaignList.update({
-          where: { id: campaignId },
-          data: { updatedAt: new Date() },
-        });
+        // The bump carries its own scope.
+        await assertScopedWrite(
+          tx.marketplaceCampaignList.updateMany({
+            where: { id: campaignId, organizationId: orgId, storeId },
+            data: { updatedAt: new Date() },
+          }),
+          'MarketplaceCampaign',
+          campaignId,
+        );
         return result.count;
       });
       return { updated };
@@ -526,10 +544,14 @@ export async function updateCampaignSelections(
           AND i.list_id = ${campaignId}::uuid
       `;
       // Same parent bump as the all/none path.
-      await tx.marketplaceCampaignList.update({
-        where: { id: campaignId },
-        data: { updatedAt: new Date() },
-      });
+      await assertScopedWrite(
+        tx.marketplaceCampaignList.updateMany({
+          where: { id: campaignId, organizationId: orgId, storeId },
+          data: { updatedAt: new Date() },
+        }),
+        'MarketplaceCampaign',
+        campaignId,
+      );
       return count;
     });
     return { updated };
@@ -553,9 +575,11 @@ export async function deleteMarketplaceCampaign(
     throw new NotFoundError('MarketplaceCampaign', campaignId);
   }
 
-  try {
-    await prisma.marketplaceCampaignList.delete({ where: { id: campaignId } });
-  } catch (err) {
-    mapPrismaError(err);
-  }
+  await assertScopedWrite(
+    prisma.marketplaceCampaignList.deleteMany({
+      where: { id: campaignId, organizationId: orgId, storeId },
+    }),
+    'MarketplaceCampaign',
+    campaignId,
+  );
 }

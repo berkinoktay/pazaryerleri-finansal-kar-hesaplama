@@ -270,6 +270,18 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
   });
 
   it('full-replaces the config on PATCH and reflects it in the detail', async () => {
+    // The PATCH moves the list's updatedAt forward: start it at an old instant.
+    const listScope = { id: fx.listId, organizationId: fx.orgId, storeId: fx.storeId };
+    const oldUpdatedAt = new Date('2020-01-01T00:00:00.000Z');
+    await prisma.discountList.updateMany({ where: listScope, data: { updatedAt: oldUpdatedAt } });
+    const before = await prisma.discountList.findFirst({
+      where: listScope,
+      select: { updatedAt: true },
+    });
+    if (before?.updatedAt.getTime() !== oldUpdatedAt.getTime()) {
+      throw new Error('the list did not start at the old updatedAt');
+    }
+
     const patch = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,
       {
@@ -287,6 +299,11 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
     );
     expect(patch.status).toBe(200);
     expect(((await patch.json()) as { id: string }).id).toBe(fx.listId);
+    const after = await prisma.discountList.findFirst({
+      where: listScope,
+      select: { updatedAt: true },
+    });
+    expect(after?.updatedAt.getTime()).toBeGreaterThan(oldUpdatedAt.getTime());
 
     const res = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,
@@ -384,11 +401,17 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
   });
 
   it('deletes the list (204), then the detail 404s and the list is empty', async () => {
+    // The items go with the list: the database cascades the scoped delete.
+    const itemCount = async (): Promise<number> =>
+      prisma.discountListItem.count({ where: { listId: fx.listId } });
+    expect(await itemCount()).toBeGreaterThan(0);
+
     const del = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,
       { method: 'DELETE', headers: { Authorization: bearer(fx.accessToken) } },
     );
     expect(del.status).toBe(204);
+    expect(await itemCount()).toBe(0);
 
     const detail = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,

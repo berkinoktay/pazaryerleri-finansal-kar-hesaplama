@@ -158,6 +158,35 @@ describe('PATCH .../discount-lists/{listId}/selections', () => {
     expect([...included.values()].every((v) => v === true)).toBe(true);
   });
 
+  it("mode 'all' leaves an item of another store of the organization untouched, even under the same list id", async () => {
+    const s = await seedListWithItems();
+    // A row no import writes: this list's id, a sibling store's scope. Nothing in the schema
+    // ties an item's store to its list's, so only the write's own storeId keeps it out.
+    const sibling = await createStore(s.orgId);
+    const stray = await prisma.discountListItem.create({
+      data: {
+        organizationId: s.orgId,
+        storeId: sibling.id,
+        listId: s.listId,
+        productTitle: 'Stray item',
+        barcode: 'BC-STRAY',
+        currentPrice: '100.00',
+        included: false,
+        sortOrder: 3,
+      },
+    });
+
+    const res = await patchSelections(s, { mode: 'all' });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ updated: 3 });
+    const strayAfter = await prisma.discountListItem.findUnique({
+      where: { id: stray.id },
+      select: { included: true },
+    });
+    expect(strayAfter?.included).toBe(false);
+  });
+
   it("mode 'none' excludes every item", async () => {
     const s = await seedListWithItems();
     // Start with one included so 'none' has something to clear.

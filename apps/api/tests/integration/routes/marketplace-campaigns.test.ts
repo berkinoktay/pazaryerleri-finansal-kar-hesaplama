@@ -678,6 +678,21 @@ describe('Marketplace Campaigns - list / detail / config PATCH / selections / de
   });
 
   it('FULL-REPLACES the config on PATCH — an omitted funding rate is reset to zero', async () => {
+    // The PATCH moves the campaign's updatedAt forward: start it at an old instant.
+    const campaignScope = { id: fx.campaignId, organizationId: fx.orgId, storeId: fx.storeId };
+    const oldUpdatedAt = new Date('2020-01-01T00:00:00.000Z');
+    await prisma.marketplaceCampaignList.updateMany({
+      where: campaignScope,
+      data: { updatedAt: oldUpdatedAt },
+    });
+    const before = await prisma.marketplaceCampaignList.findFirst({
+      where: campaignScope,
+      select: { updatedAt: true },
+    });
+    if (before?.updatedAt.getTime() !== oldUpdatedAt.getTime()) {
+      throw new Error('the campaign did not start at the old updatedAt');
+    }
+
     const patch = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/marketplace-campaigns/${fx.campaignId}`,
       {
@@ -698,6 +713,11 @@ describe('Marketplace Campaigns - list / detail / config PATCH / selections / de
     );
     expect(patch.status).toBe(200);
     expect(((await patch.json()) as { id: string }).id).toBe(fx.campaignId);
+    const after = await prisma.marketplaceCampaignList.findFirst({
+      where: campaignScope,
+      select: { updatedAt: true },
+    });
+    expect(after?.updatedAt.getTime()).toBeGreaterThan(oldUpdatedAt.getTime());
 
     const body = await fetchDetail();
     expect(body.name).toBe('Sepet Kampanyası');

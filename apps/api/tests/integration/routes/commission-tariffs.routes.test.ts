@@ -509,11 +509,23 @@ describe('Commission Tariffs — list / detail / delete', () => {
   });
 
   it('deletes the tariff and then lists empty', async () => {
+    // The periods and items go with the tariff: the database cascades the scoped delete.
+    const periods = await prisma.commissionTariffPeriod.findMany({
+      where: { tariffId: fx.tariffId },
+      select: { id: true },
+    });
+    const periodIds = periods.map((period) => period.id);
+    const childCount = async (): Promise<number> =>
+      (await prisma.commissionTariffPeriod.count({ where: { id: { in: periodIds } } })) +
+      (await prisma.commissionTariffItem.count({ where: { periodId: { in: periodIds } } }));
+    expect(await childCount()).toBeGreaterThan(periodIds.length);
+
     const del = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/commission-tariffs/${fx.tariffId}`,
       { method: 'DELETE', headers: { Authorization: bearer(fx.accessToken) } },
     );
     expect(del.status).toBe(204);
+    expect(await childCount()).toBe(0);
 
     const res = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/commission-tariffs`,
