@@ -29,6 +29,9 @@ export const WRITE_COLUMN_CLASH_REASONS = {
   SHARED_TAG: 'write-column-tag',
 } as const;
 
+/** `meta.reason` of the MALFORMED_SHEET `requireWritableValue` throws. */
+export const UNWRITABLE_VALUE_REASON = 'unwritable-value';
+
 // A written number: a plain non-negative decimal (the engine's PLAIN_DECIMAL_RE
 // without the sign). Group 1 is the integer part, group 2 the fraction digits.
 const UNSIGNED_DECIMAL_RE = /^(0|[1-9]\d*)(?:\.(\d+))?$/;
@@ -162,39 +165,32 @@ export function probeValue(spec: WriteValueSpec): CellPatchValue {
     : { kind: 'number', value, scale: spec.scale };
 }
 
-function assertWriteNumber(scale: number | undefined, value: string): void {
-  const match = UNSIGNED_DECIMAL_RE.exec(value);
-  if (match === null) {
-    throw new WorkbookInvariantError('A written number is not a plain non-negative decimal');
-  }
-  const integer = match[1] ?? '';
-  const fraction = match[2] ?? '';
-  if (integer.length > PROBE_INTEGER_DIGITS) {
-    throw new WorkbookInvariantError(
-      `A written number has more than ${PROBE_INTEGER_DIGITS} integer digits`,
-    );
-  }
-  if (scale !== undefined && fraction.length !== scale) {
-    throw new WorkbookInvariantError(
-      `A written number does not have exactly ${scale} fraction digits`,
-    );
-  }
-}
-
-function assertWriteKind(spec: WriteValueSpec, value: string): void {
+/**
+ * Why a column of `spec` may not receive `value`, or null when it may. The kind rule
+ * comes first, the width against `probeText(spec)` last. The value never appears in
+ * the message.
+ */
+function writeValueProblem(spec: WriteValueSpec, value: string): string | null {
   if (spec.kind === 'number') {
-    assertWriteNumber(spec.scale, value);
-    return;
-  }
-  if ('pattern' in spec) {
-    if (!spec.pattern.test(value)) {
-      throw new WorkbookInvariantError('A written text does not match its column pattern');
+    const match = UNSIGNED_DECIMAL_RE.exec(value);
+    if (match === null) return 'A written number is not a plain non-negative decimal';
+    const integer = match[1] ?? '';
+    const fraction = match[2] ?? '';
+    if (integer.length > PROBE_INTEGER_DIGITS) {
+      return `A written number has more than ${PROBE_INTEGER_DIGITS} integer digits`;
     }
-    return;
+    if (spec.scale !== undefined && fraction.length !== spec.scale) {
+      return `A written number does not have exactly ${spec.scale} fraction digits`;
+    }
+  } else if ('pattern' in spec) {
+    if (!spec.pattern.test(value)) return 'A written text does not match its column pattern';
+  } else if (!spec.allow.includes(value)) {
+    return "A written text is not in its column's allow list";
   }
-  if (!spec.allow.includes(value)) {
-    throw new WorkbookInvariantError("A written text is not in its column's allow list");
+  if (utf8Length(value) > utf8Length(probeText(spec))) {
+    return 'A written value is wider than the rehearsal probe of its column';
   }
+  return null;
 }
 
 /**
@@ -206,10 +202,22 @@ function assertWriteKind(spec: WriteValueSpec, value: string): void {
  * never appears in the message.
  */
 export function assertWriteValue(spec: WriteValueSpec, value: string): void {
-  assertWriteKind(spec, value);
-  if (utf8Length(value) > utf8Length(probeText(spec))) {
-    throw new WorkbookInvariantError(
-      'A written value is wider than the rehearsal probe of its column',
-    );
-  }
+  const problem = writeValueProblem(spec, value);
+  if (problem !== null) throw new WorkbookInvariantError(problem);
+}
+
+/**
+ * `value`, read from the uploaded file, when a column of `spec` may receive it under
+ * the export's own rule (`assertWriteValue`). A value an export may later write into
+ * a column of `spec` (the campaign maximum price today; tier and band prices of later
+ * pages) is refused at upload unless that rule would accept it, so a stored list never
+ * holds a value its export cannot write.
+ *
+ * Throws SpreadsheetFileError MALFORMED_SHEET (reason UNWRITABLE_VALUE_REASON), a 422
+ * on `file` at upload. The value never appears in the message.
+ */
+export function requireWritableValue(spec: WriteValueSpec, value: string): string {
+  const problem = writeValueProblem(spec, value);
+  if (problem !== null) throw malformed(UNWRITABLE_VALUE_REASON, problem);
+  return value;
 }

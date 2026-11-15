@@ -3,8 +3,8 @@
 // some cells blanked or rewritten: they put the fallback chains of a row mapper and the
 // dropping side of every keep rule under test. The cases were moved verbatim out of
 // tests/unit/workbooks/trendyol-layouts.test.ts so they outlive the legacy parsers (the
-// discount block has since gained two kept cases, whose golden the legacy parser wrote);
-// `derivedGrid` builds the grid a format test reads them from.
+// discount and campaign blocks have since gained kept cases, whose golden the legacy
+// parser wrote); `derivedGrid` builds the grid a format test reads them from.
 
 import {
   columnIndex,
@@ -23,6 +23,10 @@ import type { trendyolDiscountListLayout } from '@/workbooks/formats/trendyol/di
 import type { trendyolFlashProductListLayout } from '@/workbooks/formats/trendyol/flash-product-list.layout';
 import type { trendyolMarketplaceCampaignListLayout } from '@/workbooks/formats/trendyol/marketplace-campaign-list.layout';
 import type { trendyolPlusCommissionTariffLayout } from '@/workbooks/formats/trendyol/plus-commission-tariff.layout';
+import {
+  CAMPAIGN_TARIFF_FLAG_YES,
+  TARIFF_FLAG_YES_FOLDED,
+} from '@/workbooks/formats/trendyol/labels';
 
 /** A data row derived from a fixture's first kept row by overwriting some of its cells. */
 export interface DerivedRow<S extends LayoutSpec> {
@@ -122,10 +126,39 @@ const CAMPAIGN_DERIVED: readonly DerivedRow<typeof trendyolMarketplaceCampaignLi
     ],
     kept: false,
   },
+  // Added after the move, so the derived golden pins every mapping rule of the campaign
+  // row: the title falls back to the barcode, a stock that is not a plain integer reads
+  // as null, and the tariff flag compares exactly (a lower-case yes is not a yes).
+  {
+    name: 'a blank title and blank optional columns',
+    cells: [
+      ['productTitle', null],
+      ['productCode', null],
+      ['category', null],
+      ['brand', null],
+      ['color', null],
+      ['size', null],
+      ['stockCode', null],
+      ['externalId', null],
+    ],
+    kept: true,
+  },
+  { name: 'a decimal stock text', cells: [['stock', '12.5']], kept: true },
+  { name: 'a decimal stock number', cells: [['stock', 12.5]], kept: true },
+  {
+    name: 'a lower-case tariff flag',
+    cells: [['commissionTariffFlag', TARIFF_FLAG_YES_FOLDED]],
+    kept: true,
+  },
+  {
+    name: 'a tariff flag',
+    cells: [['commissionTariffFlag', CAMPAIGN_TARIFF_FLAG_YES]],
+    kept: true,
+  },
 ];
 
 // Exported as a list: the blocks above keep the exact bytes they had in the layout test,
-// apart from the two kept cases added to the discount block.
+// apart from the kept cases added to the discount block and to the campaign block.
 export {
   ADVANTAGE_DERIVED,
   CAMPAIGN_DERIVED,

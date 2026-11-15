@@ -29,6 +29,7 @@ import { createApp } from '@/app';
 import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware';
 import type { StoreScope } from '@/workbooks/adapter';
 import { discountListAdapter } from '@/workbooks/verticals/discount-list.adapter';
+import { marketplaceCampaignListAdapter } from '@/workbooks/verticals/marketplace-campaign-list.adapter';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -63,6 +64,7 @@ interface IsolationRow {
 }
 
 const DiscountImportSchema = z.object({ listId: z.string() });
+const CampaignImportSchema = z.object({ campaignId: z.string() });
 
 const ISOLATION_ROWS: readonly IsolationRow[] = [
   {
@@ -82,6 +84,30 @@ const ISOLATION_ROWS: readonly IsolationRow[] = [
     exportedAt: async (id) =>
       (await prisma.discountList.findUnique({ where: { id }, select: { exportedAt: true } }))
         ?.exportedAt ?? null,
+  },
+  {
+    segment: 'marketplace-campaigns',
+    fixture: 'marketplace-campaign-sample.xlsx',
+    form: {
+      discountType: 'NET',
+      valueKind: 'PERCENT',
+      value: '10',
+      trendyolFundingPct: '40',
+      startsAt: '2026-09-10T09:00:00.000Z',
+      endsAt: '2026-09-14T09:00:00.000Z',
+    },
+    importedId: (body) => CampaignImportSchema.parse(body).campaignId,
+    load: (scope, id) => marketplaceCampaignListAdapter.load(scope, id),
+    touchExported: (scope, id) => marketplaceCampaignListAdapter.touchExported(scope, id),
+    countLists: (scope) =>
+      prisma.$transaction((tx) => marketplaceCampaignListAdapter.countLists(tx, scope)),
+    exportedAt: async (id) =>
+      (
+        await prisma.marketplaceCampaignList.findUnique({
+          where: { id },
+          select: { exportedAt: true },
+        })
+      )?.exportedAt ?? null,
   },
 ];
 

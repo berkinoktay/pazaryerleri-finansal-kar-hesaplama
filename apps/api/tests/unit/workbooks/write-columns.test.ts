@@ -15,6 +15,7 @@ import { syncLog } from '@pazarsync/sync-core';
 import { WORKBOOK_PAGES } from '@pazarsync/utils';
 
 import { ValidationError } from '@/lib/errors';
+import { problemDetailsForError } from '@/lib/problem-details';
 import { defineFormat, type WriteValueSpec } from '@/workbooks/format';
 import {
   FLASH_CUSTOM_PRICE_LABEL,
@@ -25,7 +26,9 @@ import {
   missingExportRequirement,
   overwriteFormulaColumns,
   probeValue,
+  requireWritableValue,
   resolveWriteColumns,
+  UNWRITABLE_VALUE_REASON,
   WRITE_COLUMN_CLASH_REASONS,
 } from '@/workbooks/write-columns';
 import { toUploadError, WorkbookInvariantError } from '@/workbooks/workbook-errors';
@@ -329,6 +332,41 @@ describe('assertWriteValue', () => {
     expect(() => assertWriteValue(spec, '77 x')).toThrow(WorkbookInvariantError);
     expect(() => assertWriteValue(spec, '77 x')).toThrow(WIDER_THAN_PROBE);
     expect(() => assertWriteValue(spec, '7 x')).not.toThrow();
+  });
+});
+
+describe('requireWritableValue', () => {
+  const scaled: WriteValueSpec = { kind: 'number', scale: 2 };
+
+  it.each(['149.90', '0.00', '9999999999.99'])('returns %s at scale 2', (value) => {
+    expect(requireWritableValue(scaled, value)).toBe(value);
+  });
+
+  // Negative, negative zero, and eleven integer digits: values the export could not write.
+  it.each(['-5.00', '-0.00', '10000000000.00'])(
+    'refuses %s at scale 2 with MALFORMED_SHEET, the value kept out of the message',
+    (value) => {
+      const err = captureThrow(() => requireWritableValue(scaled, value));
+      expect(err).toBeInstanceOf(SpreadsheetFileError);
+      if (!(err instanceof SpreadsheetFileError)) return;
+      expect(err.code).toBe('MALFORMED_SHEET');
+      expect(err.meta).toEqual({ reason: UNWRITABLE_VALUE_REASON });
+      expect(err.meta['reason']).toBe('unwritable-value');
+      expect(err.message).not.toContain(value);
+    },
+  );
+
+  it('is a 422 on `file` at upload, never a 500', () => {
+    vi.spyOn(syncLog, 'info').mockImplementation(() => undefined);
+    const err = captureThrow(() => requireWritableValue(scaled, '-5.00'));
+
+    const mapped = captureThrow(() =>
+      toUploadError(err, {}, { page: WORKBOOK_PAGES.MARKETPLACE_CAMPAIGN_LIST }),
+    );
+    expect(mapped).toBeInstanceOf(ValidationError);
+    if (!(mapped instanceof ValidationError)) return;
+    expect(mapped.issues).toEqual([{ field: 'file', code: 'MALFORMED_SHEET' }]);
+    expect(problemDetailsForError(mapped).status).toBe(422);
   });
 });
 

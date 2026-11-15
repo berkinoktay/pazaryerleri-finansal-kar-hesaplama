@@ -1,4 +1,16 @@
 {
+  "marketplace-campaign-sample.xlsx": {
+    "real": {
+      "keptRows": 68,
+      "skippedRows": 0,
+      "sha256": "d75d464a1a5d71738d39ae591b41322982540f2cdd1924ce3289d2b35c5e9226"
+    },
+    "derived": {
+      "keptRows": 74,
+      "skippedRows": 4,
+      "sha256": "64c167bd232163c3a58e7577556f6b83316e5ab4f997bff9de156090fd2b5246"
+    }
+  },
   "trendyol-discount-products.xlsx": {
     "real": {
       "keptRows": 4,

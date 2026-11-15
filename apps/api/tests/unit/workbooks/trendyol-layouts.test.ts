@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import {
-  cellDecimal,
   columnIndex,
   createRowReader,
   evaluate,
@@ -23,7 +22,6 @@ import {
   type WallClockPattern,
 } from '@pazarsync/spreadsheet';
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
-import { Decimal } from 'decimal.js';
 import { describe, expect, it, vi } from 'vitest';
 
 import { parseAdvantageTariffRow } from '@/services/advantage-tariff-import.service';
@@ -42,12 +40,6 @@ import {
   resolveFlashProductLayout,
   type FlashProductLayout,
 } from '@/services/flash-product-layout';
-import { parseCampaignRow } from '@/services/marketplace-campaign-import.service';
-import {
-  CAMPAIGN_TARIFF_FLAG_YES,
-  resolveMarketplaceCampaignLayout,
-  type MarketplaceCampaignLayout,
-} from '@/services/marketplace-campaign-layout';
 import { parsePlusTariffRow } from '@/services/plus-commission-tariff-import.service';
 import {
   resolvePlusTariffLayout,
@@ -66,18 +58,12 @@ import {
   trendyolFlashProductListLayout,
 } from '@/workbooks/formats/trendyol/flash-product-list.layout';
 import {
-  trendyolMarketplaceCampaignListKeep,
-  trendyolMarketplaceCampaignListLayout,
-} from '@/workbooks/formats/trendyol/marketplace-campaign-list.layout';
-import {
   trendyolPlusCommissionTariffKeep,
   trendyolPlusCommissionTariffLayout,
 } from '@/workbooks/formats/trendyol/plus-commission-tariff.layout';
 
 import {
   ADVANTAGE_DERIVED,
-  CAMPAIGN_DERIVED,
-  CAMPAIGN_LIRA_TEXT,
   COMMISSION_DERIVED,
   FLASH_DERIVED,
   PLUS_CANCEL_NUMBER_ONE,
@@ -900,121 +886,4 @@ describe('Trendyol flash product list layout', () => {
   describeFixture(FLASH, FLASH_FILE, FLASH_SHEET);
   describeHeaders(FLASH, FLASH_HEADERS);
   describeDerivedRows(FLASH, FLASH_DERIVED, FLASH_FILE, FLASH_SHEET);
-});
-
-// ─── Discount list ──────────────────────────────────────────────────────────
-
-// The real Trendyol discount header: the campaign layout must not resolve it.
-const DISCOUNT_HEADER: readonly string[] = [
-  'Trendyol Ürün ID',
-  'Ürün Bilgisi',
-  'Marka',
-  'Renk',
-  'Barkod',
-  'Model Kodu',
-  'Güncel Satış Fiyatı',
-  'Buybox',
-  'Kampayaya Dahil Edilsin Mi?',
-];
-
-// ─── Marketplace campaign list ──────────────────────────────────────────────
-
-function adaptCampaign(resolved: ResolvedLayout | null): MarketplaceCampaignLayout | null {
-  if (resolved === null) return null;
-  const spec = trendyolMarketplaceCampaignListLayout;
-  const col = (key: ColumnKey<typeof spec>): number =>
-    legacyIndex(columnIndex(spec, resolved, key));
-  return {
-    barcode: col('barcode'),
-    productTitle: col('productTitle'),
-    productCode: col('productCode'),
-    category: col('category'),
-    brand: col('brand'),
-    color: col('color'),
-    size: col('size'),
-    stockCode: col('stockCode'),
-    stock: col('stock'),
-    currentPrice: col('currentPrice'),
-    maxPrice: col('maxPrice'),
-    campaignPrice: col('campaignPrice'),
-    commissionTariffFlag: col('commissionTariffFlag'),
-    externalId: col('externalId'),
-  };
-}
-
-/** The campaign import's own 2-place normalization of a read price (decimal.js, no float). */
-function toServiceCents(value: string | null): string | null {
-  return value === null ? null : new Decimal(value).toFixed(2);
-}
-
-const CAMPAIGN = vertical({
-  spec: trendyolMarketplaceCampaignListLayout,
-  keep: trendyolMarketplaceCampaignListKeep,
-  legacyResolve: resolveMarketplaceCampaignLayout,
-  adapt: adaptCampaign,
-  legacyParse: parseCampaignRow,
-  serviceFields: (parsed) => ({
-    barcode: parsed.barcode,
-    stock: parsed.stock,
-    currentPrice: parsed.currentPrice,
-    maxPrice: parsed.maxPrice,
-    hasCommissionTariff: parsed.hasCommissionTariff,
-  }),
-  readerFields: (reader) => ({
-    barcode: reader.text('barcode'),
-    stock: reader.int('stock', 'strict'),
-    currentPrice: toServiceCents(reader.decimal('currentPrice')),
-    maxPrice: toServiceCents(reader.decimal('maxPrice')),
-    hasCommissionTariff: reader.flag('commissionTariffFlag', {
-      yes: CAMPAIGN_TARIFF_FLAG_YES,
-      compare: 'exact',
-    }),
-  }),
-});
-
-// Copied verbatim from tests/unit/services/marketplace-campaign-layout.test.ts.
-const CAMPAIGN_HEADER: readonly string[] = [
-  'Barkod',
-  'Ürün Adı',
-  'Ürün Kodu',
-  'Kategori',
-  'Marka',
-  'Renk',
-  'Beden',
-  'Stok Kodu',
-  'Mevcut Stok',
-  'Mevcut Satış Fiyatı',
-  'Maksimum Girebileceğin Fiyat',
-  'Kampanyalı Satış Fiyatı',
-  'Ürün Komisyon Tarifesi',
-  'ListingId',
-];
-
-const CAMPAIGN_HEADERS: readonly HeaderCase[] = [
-  { name: 'real header', header: CAMPAIGN_HEADER, resolves: true },
-  { name: 'reversed header', header: [...CAMPAIGN_HEADER].reverse(), resolves: true },
-  ...CAMPAIGN_HEADER.map((missing) => ({
-    name: `header missing "${missing}"`,
-    header: CAMPAIGN_HEADER.filter((h) => h !== missing),
-    resolves: false,
-  })),
-  { name: 'discount header', header: DISCOUNT_HEADER, resolves: false },
-];
-
-const CAMPAIGN_FILE = 'marketplace-campaign-sample.xlsx';
-
-describe('Trendyol marketplace campaign list layout', () => {
-  describeFixture(CAMPAIGN, CAMPAIGN_FILE);
-  describeHeaders(CAMPAIGN, CAMPAIGN_HEADERS);
-  describeDerivedRows(CAMPAIGN, CAMPAIGN_DERIVED, CAMPAIGN_FILE);
-
-  it('reads a dot-thousands lira text price only with the currency grammar', async () => {
-    const grid = await readFixture(CAMPAIGN_FILE);
-    const spec = trendyolMarketplaceCampaignListLayout;
-    const layout = present(resolveLayout(spec, grid), 'layout');
-    const row = deriveRow(CAMPAIGN, grid, CAMPAIGN_LIRA_TEXT);
-    const reader = createRowReader(spec, layout, row, READER_OPTIONS);
-    expect([reader.decimal('currentPrice'), reader.decimal('maxPrice')]).toEqual(['1250', '1250']);
-    expect(cellDecimal(row, columnIndex(spec, layout, 'currentPrice'), 'plain')).toBeNull();
-  });
 });

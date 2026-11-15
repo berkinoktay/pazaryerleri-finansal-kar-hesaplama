@@ -52,6 +52,22 @@ const CONTRACT_ROWS: readonly ContractRow[] = [
     otherPage: 'PLUS_COMMISSION_TARIFF',
     wrongFileCode: 'INVALID_DISCOUNT_FORMAT',
   },
+  {
+    segment: 'marketplace-campaigns',
+    idParam: 'campaignId',
+    fixture: 'marketplace-campaign-sample.xlsx',
+    form: {
+      discountType: 'NET',
+      valueKind: 'PERCENT',
+      value: '10',
+      trendyolFundingPct: '40',
+      startsAt: '2026-09-10T09:00:00.000Z',
+      endsAt: '2026-09-14T09:00:00.000Z',
+    },
+    otherPageFixture: 'trendyol-discount-products.xlsx',
+    otherPage: 'DISCOUNT_LIST',
+    wrongFileCode: 'INVALID_CAMPAIGN_FORMAT',
+  },
 ];
 
 const NOT_XLSX = Buffer.from('this is plain text, not a zip archive');

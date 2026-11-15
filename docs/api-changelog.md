@@ -27,8 +27,9 @@ section "Versioning" for details.
 ### Changed
 
 - **Workbook imports run through the generic workbook import**
-  (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/import`). Each change below
-  applies to discount lists now, and to the other five pages as they move:
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns}/import`).
+  Each change below applies to discount lists and marketplace campaign lists now, and to the other
+  four pages as they move:
   - The import route can answer `409` with `code: 'CONFLICT'` and `meta.reason`
     `IMPORT_IN_PROGRESS` (another import of the same store and page is running) or
     `UPLOAD_QUOTA_EXCEEDED` (the store already holds 50 lists of the page, or its stored source
@@ -38,7 +39,8 @@ section "Versioning" for details.
   - The named sheet is selected strictly, with no first-sheet fallback: a workbook without it
     answers `422` with `{ field: 'file', code: 'SHEET_NOT_FOUND' }`, or with the page's
     invalid-format code (`INVALID_DISCOUNT_FORMAT` for discount lists) and `meta.detectedPage`
-    when its first sheet is another page's file.
+    when its first sheet is another page's file. Marketplace campaign files are read by position
+    (the sheet name follows the campaign), so their first sheet is always the one read.
   - A write-back column under a shared formula, an array formula or a merged range, or a barcode
     cell longer than 256 characters, answers `422` with `{ field: 'file', code: 'MALFORMED_SHEET' }`
     at upload instead of failing the first export; nothing is stored.
@@ -48,13 +50,22 @@ section "Versioning" for details.
   - A typed `name` drops control and format characters and is cut to 120 characters (code
     points); before, it was only trimmed. A typed name left empty by that falls back to the file
     name stem, then to the page's default name.
-  - The page's invalid-format answer (`INVALID_DISCOUNT_FORMAT` for discount lists) now always
-    carries `errors[0].meta` with `detectedFormatId`, `detectedPlatform` and `detectedPage`; each
-    is `null` when the file matches no known page. Before, a file that matched no page carried no
-    `meta`.
+  - The page's invalid-format answer (`INVALID_DISCOUNT_FORMAT` for discount lists,
+    `INVALID_CAMPAIGN_FORMAT` for marketplace campaign lists) now always carries `errors[0].meta`
+    with `detectedFormatId`, `detectedPlatform` and `detectedPage`; each is `null` when the file
+    matches no known page. Before, a file that matched no page carried no `meta`.
+  - A marketplace campaign file whose maximum price on a kept row is negative or has more than 10
+    integer digits answers `422` with `{ field: 'file', code: 'MALFORMED_SHEET' }`; nothing is
+    stored. Before, the file was stored, and an export that chose the maximum price for that row
+    wrote the negative value into the campaign price cell.
 - **Workbook exports run through the generic workbook export**
-  (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}/export`). Each change
-  below applies to discount lists now, and to the other five pages as they move:
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}/export`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/export`).
+  Each change below applies to discount lists and marketplace campaign lists now, and to the other
+  four pages as they move:
+  - Store access is checked before the record id in the path is validated: a malformed id answers
+    the store access error (`403` or `404`) to a caller without write access to the store, and
+    `422` only to a caller with it. Before, the id was validated first.
   - Every export condition answers `409` with `code: 'CONFLICT'` and a `meta.reason`:
     `STORED_FILE_MISSING` (no stored source file), `STORED_FILE_UNREADABLE` (the stored file no
     longer passes the workbook gate or the patcher), `STORED_FILE_UNRECOGNIZED` (its format id is
@@ -72,7 +83,8 @@ section "Versioning" for details.
   - Downloads carry `Content-Disposition` with both an ASCII `filename` and an RFC 8187
     `filename*`, built from the stored upload name once control and format characters and path
     separators are dropped (a stored name that does not end in `.xlsx` falls back to the page's
-    file name, `indirimler.xlsx` for discount lists), plus `Content-Length`,
+    file name, `indirimler.xlsx` for discount lists and `kampanya.xlsx` for marketplace campaign
+    lists), plus `Content-Length`,
     `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. The ASCII `filename` keeps
     only letters, digits, spaces and `. _ ( ) -`; every other character becomes `_`, so header
     parameter syntax in an upload name (`;`, `=`, `*`, `'`, `%`) never reaches it.

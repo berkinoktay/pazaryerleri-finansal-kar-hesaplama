@@ -809,16 +809,25 @@ function recordAuditor<
  * DATABASE_URL held before main() made it read-only, and break the read-only guarantee.
  */
 async function loadFullMode(): Promise<readonly RecordAuditor[]> {
-  const [exportWorkbook, exportPlan, importRows, rehearsal, errors, workbookErrors, discount] =
-    await Promise.all([
-      import('../src/workbooks/export-workbook'),
-      import('../src/workbooks/export-plan'),
-      import('../src/workbooks/import-rows'),
-      import('../src/workbooks/rehearsal'),
-      import('../src/lib/errors'),
-      import('../src/workbooks/workbook-errors'),
-      import('../src/workbooks/verticals/discount-list.adapter'),
-    ]);
+  const [
+    exportWorkbook,
+    exportPlan,
+    importRows,
+    rehearsal,
+    errors,
+    workbookErrors,
+    discount,
+    campaign,
+  ] = await Promise.all([
+    import('../src/workbooks/export-workbook'),
+    import('../src/workbooks/export-plan'),
+    import('../src/workbooks/import-rows'),
+    import('../src/workbooks/rehearsal'),
+    import('../src/lib/errors'),
+    import('../src/workbooks/workbook-errors'),
+    import('../src/workbooks/verticals/discount-list.adapter'),
+    import('../src/workbooks/verticals/marketplace-campaign-list.adapter'),
+  ]);
   const engine: FullModeEngine = {
     resolveStoredWorkbook: exportWorkbook.resolveStoredWorkbook,
     readRows: importRows.readRows,
@@ -830,7 +839,10 @@ async function loadFullMode(): Promise<readonly RecordAuditor[]> {
       err instanceof workbookErrors.WorkbookFileRejection ? err.code : null,
   };
   // FULL_MODE_ADAPTERS: each vertical appends its adapter as it moves.
-  return [recordAuditor(engine, discount.discountListAdapter)];
+  return [
+    recordAuditor(engine, discount.discountListAdapter),
+    recordAuditor(engine, campaign.marketplaceCampaignListAdapter),
+  ];
 }
 
 /** Full mode over one table's stored records, one file at a time; returns the refused count. */
