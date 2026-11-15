@@ -213,6 +213,38 @@ describe('importWorkbook: what persist throws', () => {
 
     expect(await rejection(importWorkbook(adapter, INPUT))).toBe(conflict);
   });
+
+  it('turns a value out of range for its column (P2020) into MALFORMED_SHEET on file', async () => {
+    const warn = vi.spyOn(syncLog, 'warn').mockImplementation(() => undefined);
+    const info = vi.spyOn(syncLog, 'info').mockImplementation(() => undefined);
+    // The driver's message quotes the cell value; no log line may carry it.
+    const cellValue = '3000000000';
+    const outOfRange = Object.assign(
+      new Error(`value "${cellValue}" is out of range for type integer`),
+      { code: 'P2020', meta: { modelName: 'CommissionTariffItem' } },
+    );
+    const adapter = fakeAdapter(async () => {
+      throw outOfRange;
+    });
+
+    const err = await rejection(importWorkbook(adapter, INPUT));
+
+    expect(fileIssues(err)).toEqual([{ field: 'file', code: 'MALFORMED_SHEET' }]);
+    expect(warn.mock.calls).toEqual([
+      ['workbook.import.value-out-of-range', { page: PAGE, prismaCode: 'P2020' }],
+    ]);
+    expect(JSON.stringify([warn.mock.calls, info.mock.calls])).not.toContain(cellValue);
+  });
+
+  it('leaves another Prisma code to the transaction mapper', async () => {
+    // A write conflict: mapPrismaError rethrows it untouched.
+    const conflict = Object.assign(new Error('write conflict'), { code: 'P2034' });
+    const adapter = fakeAdapter(async () => {
+      throw conflict;
+    });
+
+    expect(await rejection(importWorkbook(adapter, INPUT))).toBe(conflict);
+  });
 });
 
 describe('importWorkbook: a file without a write-back column', () => {

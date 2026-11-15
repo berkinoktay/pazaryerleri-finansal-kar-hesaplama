@@ -16,12 +16,14 @@ import {
   columnIndex,
   readWorkbookGrid,
   resolveLayout,
+  SpreadsheetFileError,
   type CellValue,
   type SheetData,
 } from '@pazarsync/spreadsheet';
 import { patchFixture } from '@pazarsync/spreadsheet/testing';
 import { describe, expect, it, vi } from 'vitest';
 
+import { VALUE_OUT_OF_RANGE_REASON } from '@/workbooks/column-range';
 import { FORMAT_SUMMARIES } from '@/workbooks/formats/registry';
 import {
   trendyolFlashProductListFormat,
@@ -223,6 +225,15 @@ async function realSelection(file: Buffer = FIXTURE) {
     read: (bytes, sheet) => readWorkbookGrid(bytes, { sheet }),
     summaries: FORMAT_SUMMARIES,
   });
+}
+
+function captureThrow(fn: () => unknown): unknown {
+  try {
+    fn();
+  } catch (err) {
+    return err;
+  }
+  throw new Error('expected the function to throw');
 }
 
 describe('Trendyol flash product format: headers', () => {
@@ -505,6 +516,15 @@ describe('Trendyol flash product format: the row fallbacks', () => {
     ['a blank cell', null, null],
   ])('reads a stock of %s as %s (truncated)', (_name, expected, cell) => {
     expect(mapOne({ [COL.stock]: cell }).stock).toBe(expected);
+  });
+
+  it('refuses a stock of 1e20, past its integer column, with MALFORMED_SHEET value-out-of-range', () => {
+    const err = captureThrow(() => mapOne({ [COL.stock]: 1e20 }));
+
+    expect(err).toBeInstanceOf(SpreadsheetFileError);
+    if (!(err instanceof SpreadsheetFileError)) return;
+    expect(err.code).toBe('MALFORMED_SHEET');
+    expect(err.meta).toEqual({ reason: VALUE_OUT_OF_RANGE_REASON });
   });
 
   it('falls back to the barcode for a blank title and reads blank optional columns as null', () => {

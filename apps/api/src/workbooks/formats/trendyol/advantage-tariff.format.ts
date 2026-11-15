@@ -11,6 +11,7 @@ import { Decimal } from 'decimal.js';
 import type { ColumnKey, RowReader } from '@pazarsync/spreadsheet';
 
 import type { StarTierKey } from '../../../services/advantage-tariff.types';
+import { requireStorableInt } from '../../column-range';
 import { defineFormat, type WriteValueSpec } from '../../format';
 import { WorkbookInvariantError } from '../../workbook-errors';
 import { requireWritableValue } from '../../write-columns';
@@ -132,7 +133,7 @@ export const trendyolAdvantageTariffFormat = defineFormat({
       brand: reader.text('brand'),
       size: reader.text('size'),
       modelCode,
-      stock: reader.int('stock', 'truncate'),
+      stock: requireStorableInt(reader.int('stock', 'truncate')),
       currentPrice,
       customerPrice: reader.decimal('customerPrice') ?? currentPrice,
       hasCommissionTariff: reader.flag('commissionTariffFlag', {

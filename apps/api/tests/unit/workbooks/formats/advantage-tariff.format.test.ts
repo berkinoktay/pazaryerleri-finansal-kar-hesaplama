@@ -26,6 +26,7 @@ import { patchFixture } from '@pazarsync/spreadsheet/testing';
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
 import { describe, expect, it, vi } from 'vitest';
 
+import { VALUE_OUT_OF_RANGE_REASON } from '@/workbooks/column-range';
 import { FORMAT_SUMMARIES } from '@/workbooks/formats/registry';
 import {
   buildStarTiers,
@@ -588,6 +589,15 @@ describe('Trendyol advantage tariff format: the row fallbacks and flags', () => 
     ['a blank cell', null, null],
   ])('reads a stock of %s as %s (truncated)', (_name, expected, cell) => {
     expect(mapOne({ [COL.stock]: cell }).stock).toBe(expected);
+  });
+
+  it('refuses a stock of 1e20, past its integer column, with MALFORMED_SHEET value-out-of-range', () => {
+    const err = captureThrow(() => mapOne({ [COL.stock]: 1e20 }));
+
+    expect(err).toBeInstanceOf(SpreadsheetFileError);
+    if (!(err instanceof SpreadsheetFileError)) return;
+    expect(err.code).toBe('MALFORMED_SHEET');
+    expect(err.meta).toEqual({ reason: VALUE_OUT_OF_RANGE_REASON });
   });
 
   it('stores the model code as the stock code too', () => {

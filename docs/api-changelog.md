@@ -82,6 +82,11 @@ section "Versioning" for details.
     or over-wide band price was stored and written into that cell on export, and a current price
     with more than 10 integer digits failed the import with `500`. A band without a commission
     in any period is not stored, so its limits are not checked.
+  - A number read from the file that does not fit its database column answers `422` with
+    `{ field: 'file', code: 'MALFORMED_SHEET' }`; nothing is stored. Examples: a Plus period offer
+    or a commission tariff's current commission of 100 or more, a price the export never writes
+    back with more than 10 integer digits, a stock outside the integer range. Before, the import
+    failed with `500`.
   - A commission or Plus commission tariff file whose header gives a period of 10 or more days,
     or whose periods add up to 10 or more days, answers `422` with
     `{ field: 'file', code: 'MALFORMED_SHEET' }`; nothing is stored. Before, the file was stored

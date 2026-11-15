@@ -7,6 +7,7 @@
 
 import { Decimal } from 'decimal.js';
 
+import { requireStorableInt } from '../../column-range';
 import { defineFormat, type WriteValueSpec } from '../../format';
 import { WorkbookInvariantError } from '../../workbook-errors';
 import { requireWritableValue } from '../../write-columns';
@@ -73,7 +74,7 @@ export const trendyolMarketplaceCampaignListFormat = defineFormat({
     color: reader.text('color'),
     size: reader.text('size'),
     stockCode: reader.text('stockCode'),
-    stock: reader.int('stock', 'strict'),
+    stock: requireStorableInt(reader.int('stock', 'strict')),
     currentPrice: requiredPrice(reader.decimal('currentPrice'), 'current price'),
     maxPrice: requireWritableValue(
       CAMPAIGN_PRICE_WRITE,

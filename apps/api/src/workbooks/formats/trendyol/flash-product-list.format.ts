@@ -7,6 +7,7 @@
 
 import type { RowReader, WallClockPattern } from '@pazarsync/spreadsheet';
 
+import { requireStorableInt } from '../../column-range';
 import { defineFormat, type WriteValueSpec } from '../../format';
 import { WorkbookInvariantError } from '../../workbook-errors';
 import { TRENDYOL_FORMAT_SUMMARIES } from '../registry';
@@ -114,7 +115,7 @@ export const trendyolFlashProductListFormat = defineFormat({
       productTitle: reader.text('productTitle') ?? anchor,
       category: reader.text('category'),
       brand: reader.text('brand'),
-      stock: reader.int('stock', 'truncate'),
+      stock: requireStorableInt(reader.int('stock', 'truncate')),
       currentPrice,
       customerPrice: reader.decimal('customerPrice') ?? currentPrice,
       // The flat fallback commission; the real export always fills it.

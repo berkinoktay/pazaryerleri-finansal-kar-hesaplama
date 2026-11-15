@@ -23,6 +23,7 @@ import { patchFixture } from '@pazarsync/spreadsheet/testing';
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
 import { describe, expect, it, vi } from 'vitest';
 
+import { VALUE_OUT_OF_RANGE_REASON } from '@/workbooks/column-range';
 import { FORMAT_SUMMARIES } from '@/workbooks/formats/registry';
 import {
   CAMPAIGN_TARIFF_FLAG_YES,
@@ -344,6 +345,25 @@ describe('Trendyol marketplace campaign format: the keep rule and row order', ()
     expect(
       cellDecimal(row, columnIndex(format.layout, layout, 'currentPrice'), 'plain'),
     ).toBeNull();
+  });
+});
+
+describe('Trendyol marketplace campaign format: a stock its column cannot hold', () => {
+  // A row the keep rule keeps: a barcode, a current price and a maximum price.
+  function stockRow(stock: CellValue): CellValue[] {
+    return dataRow({ 0: 'BC-1', 1: 'Product', 8: stock, 9: 100, 10: 90, 12: 'Yok', 13: 'x' });
+  }
+
+  it('refuses a stock of 1e20, past its integer column, with MALFORMED_SHEET value-out-of-range', () => {
+    // The same row with a small stock is kept, so the refusal is the stock's.
+    expect(readRows(gridSelection([[...FULL_HEADER], stockRow(5)])).rows[0]?.data.stock).toBe(5);
+
+    const err = captureThrow(() => readRows(gridSelection([[...FULL_HEADER], stockRow(1e20)])));
+
+    expect(err).toBeInstanceOf(SpreadsheetFileError);
+    if (!(err instanceof SpreadsheetFileError)) return;
+    expect(err.code).toBe('MALFORMED_SHEET');
+    expect(err.meta).toEqual({ reason: VALUE_OUT_OF_RANGE_REASON });
   });
 });
 

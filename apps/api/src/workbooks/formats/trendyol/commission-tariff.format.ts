@@ -10,6 +10,7 @@ import { Decimal } from 'decimal.js';
 
 import { bandPrice, parseStoredTariffBands } from '@pazarsync/profit';
 
+import { requireStorableInt } from '../../column-range';
 import { defineFormat, type WriteValueSpec } from '../../format';
 import { requireWritableValue } from '../../write-columns';
 import { TRENDYOL_FORMAT_SUMMARIES } from '../registry';
@@ -192,7 +193,7 @@ export const trendyolCommissionTariffFormat = defineFormat({
       productTitle: reader.text('productTitle') ?? anchor,
       category: reader.text('category'),
       brand: reader.text('brand'),
-      stock: reader.int('stock', 'truncate'),
+      stock: requireStorableInt(reader.int('stock', 'truncate')),
       currentPrice,
       commissionBasePrice: reader.decimal('commissionBasePrice'),
       currentCommissionPct: reader.decimal('currentCommission') ?? BLANK_DECIMAL,

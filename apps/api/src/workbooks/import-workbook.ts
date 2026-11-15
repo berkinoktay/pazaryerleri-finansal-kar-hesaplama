@@ -14,12 +14,18 @@
 
 import { prisma } from '@pazarsync/db';
 import type { Platform } from '@pazarsync/db/enums';
-import { patchWorkbook, readWorkbookGrid, type LayoutSpec } from '@pazarsync/spreadsheet';
-import { syncLog } from '@pazarsync/sync-core';
+import {
+  patchWorkbook,
+  readWorkbookGrid,
+  SpreadsheetFileError,
+  type LayoutSpec,
+} from '@pazarsync/spreadsheet';
+import { isPrismaKnownRequestError, syncLog } from '@pazarsync/sync-core';
 
 import { IMPORT_TX_OPTIONS } from '../config/workbook-limits';
 import { mapTransactionError } from '../lib/map-transaction-error';
 import type { ImportedRow, ParentFields, StoreScope, WorkbookImportAdapter } from './adapter';
+import { VALUE_OUT_OF_RANGE_REASON } from './column-range';
 import { FORMAT_SUMMARIES } from './formats/registry';
 import { countPrefilled, deriveName, readRows } from './import-rows';
 import { buildRehearsal, rehearsalTargets } from './rehearsal';
@@ -40,6 +46,17 @@ export interface ImportWorkbookInput<TConfig> {
   readonly config: TConfig;
   readonly now: Date;
 }
+
+/**
+ * Prisma's code for a value out of range for its column type (Postgres 22003): a number
+ * read from the file that its column cannot hold, such as a percent of 100 or more in a
+ * numeric(6,4) column (an integer column's range is checked at the read, see
+ * column-range.ts). The import checks a decimal only against what the export may write,
+ * which can be wider than the column, so the insert is the first to refuse it. The value
+ * is the file's, so the upload answers as an unwritable value does (422 MALFORMED_SHEET
+ * on `file`) instead of a 500.
+ */
+const PRISMA_VALUE_OUT_OF_RANGE = 'P2020';
 
 /** What steps 1 to 5 found in the upload. */
 interface CheckedUpload<S extends LayoutSpec, TRow, TMeta, TWrite extends string> {
@@ -110,8 +127,10 @@ async function checkUpload<
 /**
  * The catch of the write transaction: a file rejection `persist` raises on purpose
  * (the in-transaction week re-check), or a unique violation the adapter recognises as
- * one, is a 422 on `file`; everything else goes through `mapTransactionError`, which
- * lets a domain error (the lock's or the quota's conflict) through untouched.
+ * one, is a 422 on `file`; a value out of range for its column is the upload's
+ * MALFORMED_SHEET on `file` (the transaction rolled back, nothing is stored);
+ * everything else goes through `mapTransactionError`, which lets a domain error (the
+ * lock's or the quota's conflict) through untouched.
  */
 function rethrowPersistError<
   S extends LayoutSpec,
@@ -125,6 +144,20 @@ function rethrowPersistError<
   if (err instanceof WorkbookFileRejection) toUploadError(err, adapter.legacyCodes, context);
   const code = adapter.rejectionForUniqueViolation(err);
   if (code !== null) toUploadError(new WorkbookFileRejection(code), adapter.legacyCodes, context);
+  if (isPrismaKnownRequestError(err) && err.code === PRISMA_VALUE_OUT_OF_RANGE) {
+    // The page and the code only: the driver's message quotes the cell value.
+    syncLog.warn('workbook.import.value-out-of-range', {
+      page: adapter.page,
+      prismaCode: err.code,
+    });
+    toUploadError(
+      new SpreadsheetFileError('MALFORMED_SHEET', 'A file value is out of range for its column', {
+        reason: VALUE_OUT_OF_RANGE_REASON,
+      }),
+      adapter.legacyCodes,
+      context,
+    );
+  }
   mapTransactionError(err);
 }
 

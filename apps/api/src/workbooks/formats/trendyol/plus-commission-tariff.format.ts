@@ -9,6 +9,7 @@
 
 import { Decimal } from 'decimal.js';
 
+import { requireStorableInt } from '../../column-range';
 import { defineFormat, type WriteValueSpec } from '../../format';
 import { requireWritableValue } from '../../write-columns';
 import { TRENDYOL_FORMAT_SUMMARIES } from '../registry';
@@ -142,7 +143,7 @@ export const trendyolPlusCommissionTariffFormat = defineFormat({
       brand: reader.text('brand'),
       size: reader.text('size'),
       modelCode,
-      stock: reader.int('stock', 'truncate'),
+      stock: requireStorableInt(reader.int('stock', 'truncate')),
       currentPrice: currentPrice ?? BLANK_DECIMAL,
       commissionBasePrice: reader.decimal('commissionBasePrice') ?? currentPrice ?? BLANK_DECIMAL,
       currentCommissionPct: reader.decimal('currentCommission') ?? BLANK_DECIMAL,
