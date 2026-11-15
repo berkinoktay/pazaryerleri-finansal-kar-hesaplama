@@ -51,6 +51,18 @@ function workerTimeoutKill(): SpreadsheetFileError {
   });
 }
 
+function workerMemoryKill(): SpreadsheetFileError {
+  return new SpreadsheetFileError('PAYLOAD_TOO_LARGE', 'Workbook parse ran out of worker memory', {
+    reason: WORKER_LIMIT_REASONS.MEMORY,
+    limitMb: 1024,
+  });
+}
+
+/** A file over the engine's size cap: PAYLOAD_TOO_LARGE with no worker reason. */
+function sizeCapRefusal(): SpreadsheetFileError {
+  return new SpreadsheetFileError('PAYLOAD_TOO_LARGE', 'Workbook is too large', { cap: 1024 });
+}
+
 function uploadIssues(err: unknown): unknown {
   const thrown = captureThrow(() => toUploadError(err, {}, UPLOAD));
   if (!(thrown instanceof ValidationError)) {
@@ -121,6 +133,26 @@ describe('toUploadError', () => {
       reason: 'worker-timeout',
       code: 'PAYLOAD_TOO_LARGE',
     });
+  });
+
+  it('logs a worker memory kill once and maps it to a 422 PAYLOAD_TOO_LARGE', () => {
+    spyInfo();
+    const warnSpy = spyWarn();
+    expect(uploadIssues(workerMemoryKill())).toEqual([
+      { field: 'file', code: 'PAYLOAD_TOO_LARGE' },
+    ]);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith('spreadsheet.worker-limit', {
+      reason: 'worker-memory',
+      code: 'PAYLOAD_TOO_LARGE',
+    });
+  });
+
+  it('logs no worker limit for a PAYLOAD_TOO_LARGE without a worker reason', () => {
+    spyInfo();
+    const warnSpy = spyWarn();
+    expect(uploadIssues(sizeCapRefusal())).toEqual([{ field: 'file', code: 'PAYLOAD_TOO_LARGE' }]);
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it('maps MALFORMED_SHEET to a 422 MALFORMED_SHEET without the engine meta', () => {
@@ -202,14 +234,47 @@ describe('toStoredFileError', () => {
     );
   });
 
-  it('maps a worker timeout kill to STORED_FILE_UNREADABLE', () => {
+  it('maps a worker timeout kill to STORED_FILE_UNREADABLE and logs the worker limit once', () => {
     const warnSpy = spyWarn();
     expect(storedReason(workerTimeoutKill())).toBe('STORED_FILE_UNREADABLE');
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    expect(warnSpy).toHaveBeenCalledWith('spreadsheet.worker-limit', {
+      reason: 'worker-timeout',
+      code: 'PAYLOAD_TOO_LARGE',
+    });
     expect(warnSpy).toHaveBeenCalledWith('workbook.stored-file-rejected', {
       page: PAGE,
       recordId: RECORD_ID,
       code: 'PAYLOAD_TOO_LARGE',
       reason: 'worker-timeout',
+    });
+  });
+
+  it('maps a worker memory kill to STORED_FILE_UNREADABLE and logs the worker limit once', () => {
+    const warnSpy = spyWarn();
+    expect(storedReason(workerMemoryKill())).toBe('STORED_FILE_UNREADABLE');
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    expect(warnSpy).toHaveBeenCalledWith('spreadsheet.worker-limit', {
+      reason: 'worker-memory',
+      code: 'PAYLOAD_TOO_LARGE',
+    });
+    expect(warnSpy).toHaveBeenCalledWith('workbook.stored-file-rejected', {
+      page: PAGE,
+      recordId: RECORD_ID,
+      code: 'PAYLOAD_TOO_LARGE',
+      reason: 'worker-memory',
+    });
+  });
+
+  it('logs no worker limit for a PAYLOAD_TOO_LARGE without a worker reason', () => {
+    const warnSpy = spyWarn();
+    expect(storedReason(sizeCapRefusal())).toBe('STORED_FILE_UNREADABLE');
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith('workbook.stored-file-rejected', {
+      page: PAGE,
+      recordId: RECORD_ID,
+      code: 'PAYLOAD_TOO_LARGE',
+      reason: null,
     });
   });
 

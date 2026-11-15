@@ -54,7 +54,7 @@ function engineReason(err: SpreadsheetFileError): string | null {
   return typeof reason === 'string' ? reason : null;
 }
 
-/** Logs the worker limit (memory or time) that killed a parse, as the engine callers always have. */
+/** Logs the worker limit (memory or time) that killed a parse: the API's one place for that log. */
 function logWorkerLimit(err: SpreadsheetFileError): void {
   const reason = workerLimitReason(err);
   if (reason !== null) syncLog.warn('spreadsheet.worker-limit', { reason, code: err.code });

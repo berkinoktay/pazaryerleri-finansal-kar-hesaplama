@@ -16,13 +16,13 @@ import {
   type WallClockPattern,
 } from './cells';
 
-// Pins the cell readers that moved here from apps/api/src/lib/xlsx-grid-cells.ts. The
+// Pins the cell readers that moved here from the API's former grid-cell helpers. The
 // string grammars keep every quirk of the old readers on purpose; only the number path
 // changed: plain notation instead of exponent form, and non-finite values read as absent.
 
 const WALL_CLOCK: WallClockPattern = 'dd/MM/yyyy HH:mm';
 
-describe('cellDecimal, currency grammar (ported from xlsx-grid-cells.test.ts)', () => {
+describe('cellDecimal, currency grammar (ported from the API grid-cell tests)', () => {
   it('strips the lira sign suffix', () => {
     expect(cellDecimal(['250 ₺'], 0, 'currency')).toBe('250');
   });
