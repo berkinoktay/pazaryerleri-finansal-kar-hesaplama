@@ -220,9 +220,16 @@ jobs:
         with:
           turbo-cache: 'true'
       # Two turbo tasks at a time, two vitest workers each (CI default from
-      # @pazarsync/vitest-config) — sized for the 2-vCPU runner.
+      # @pazarsync/vitest-config) — sized for the 2-vCPU runner. The spreadsheet
+      # package runs alone afterwards: its CI-only budget tests time wall-clock work
+      # in a parse worker (packages/spreadsheet/tests/helpers/timing.ts), and when
+      # another package's suite shares the CPU (every package misses the turbo cache
+      # once a shared config changes) the 8-output patch of the grown workbook took
+      # 16-20 s against a 15 s budget; with the other suites cached it took 7-9 s.
       - name: Run unit tests
-        run: pnpm turbo run test:unit --concurrency=2
+        run: |
+          pnpm turbo run test:unit --concurrency=2 --filter='!@pazarsync/spreadsheet'
+          pnpm turbo run test:unit --filter=@pazarsync/spreadsheet
 
   component-tests:
     name: Component tests
