@@ -7,6 +7,8 @@
 
 import type { WorkbookPage } from '@pazarsync/utils';
 
+import type { Fingerprint } from '../../format';
+
 /**
  * The sheet each page reads by name. The marketplace campaign file is read by index 0:
  * its sheet name follows the campaign.
@@ -28,9 +30,6 @@ export const TRENDYOL_DEFAULT_NAMES: Readonly<Record<WorkbookPage, string>> = {
   DISCOUNT_LIST: 'İndirim Listesi',
   MARKETPLACE_CAMPAIGN_LIST: 'Kampanya',
 };
-
-/** Four or more headers of a page's sheet; at least FINGERPRINT_MIN_HEADERS of them recognise its file. */
-export type Fingerprint = readonly [string, string, string, ...string[]];
 
 /** The headers that recognise each page's file on another page's route (diagnoseWorkbook). */
 export const TRENDYOL_FINGERPRINTS: Readonly<Record<WorkbookPage, Fingerprint>> = {

@@ -34,3 +34,40 @@ export const IMPORT_TX_OPTIONS = { maxWait: 5_000, timeout: 30_000 } as const;
  * usually freed up.
  */
 export const IMPORT_BUSY_RETRY_AFTER_SECONDS = 5;
+
+/**
+ * How many headers of another format's fingerprint a header row must carry before
+ * an upload on the wrong page names that format (`diagnoseWorkbook`).
+ */
+export const FINGERPRINT_MIN_HEADERS = 3;
+
+/** Lists one store may hold on one workbook page; the next import is refused. */
+export const MAX_LISTS_PER_STORE_PAGE = 50;
+
+/**
+ * Bytes of stored source files one store may hold across every workbook page, the
+ * incoming file included: 200 MiB.
+ */
+export const STORE_UPLOAD_QUOTA_BYTES = 200 * 1024 * 1024;
+
+/** Item rows one `createMany` call of an import writes. */
+export const IMPORT_INSERT_CHUNK_ROWS = 1000;
+
+/** Longest stored list name and stored upload file name, in code points. */
+export const UPLOAD_NAME_MAX_LENGTH = 120;
+
+/** Longest stored workbook format id (`source_format_id` column width). */
+export const SOURCE_FORMAT_ID_MAX_LENGTH = 64;
+
+/**
+ * Longest anchor text (the barcode cell) an import accepts. A longer anchor is a
+ * malformed sheet: it keeps every patch request well under the engine's text budget.
+ */
+export const MAX_ANCHOR_TEXT_LENGTH = 256;
+
+/**
+ * Integer digits of the widest number an export may write, and of the probe the
+ * import rehearsal writes. Covers the `@db.Decimal(12, 2)` price columns of the six
+ * workbook item tables (10 integer digits).
+ */
+export const PROBE_INTEGER_DIGITS = 10;

@@ -12,6 +12,8 @@
  * they are API-only — the sync worker does not handle cost profiles.
  */
 
+import { ConflictError } from '@pazarsync/sync-core';
+
 export {
   ConflictError,
   InvalidReferenceError,
@@ -197,5 +199,54 @@ export class ImportBusyError extends Error {
     super('The server is busy and could not process the import');
     this.name = 'ImportBusyError';
     this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+// --- Workbook import / export conflicts --------------------------------------
+// The 409 conditions of the workbook pipeline. They leave as `CONFLICT` with a
+// `meta.reason` until the frontend learns their own codes; the class declares no
+// `code` of its own on purpose, so it stays a plain `CONFLICT` on the wire.
+
+export const WORKBOOK_CONFLICT_REASONS = [
+  'IMPORT_IN_PROGRESS',
+  'UPLOAD_QUOTA_EXCEEDED',
+  'STORED_FILE_MISSING',
+  'STORED_FILE_UNREADABLE',
+  'STORED_FILE_UNRECOGNIZED',
+  'NO_WRITEBACK_COLUMN',
+  'ROW_MISMATCH',
+  'ROW_ANCHOR_MISMATCH',
+  'ROW_NOT_FOUND',
+  'EXPORT_FILENAME_COLLISION',
+] as const;
+
+export type WorkbookConflictReason = (typeof WORKBOOK_CONFLICT_REASONS)[number];
+
+/** The fixed English `detail` of each reason; never built from file or engine content. */
+export const WORKBOOK_CONFLICT_DETAILS: Readonly<Record<WorkbookConflictReason, string>> = {
+  IMPORT_IN_PROGRESS: 'Another import of this page is running for the store',
+  UPLOAD_QUOTA_EXCEEDED: 'The store has reached its workbook upload quota',
+  STORED_FILE_MISSING: 'The list has no stored source file',
+  STORED_FILE_UNREADABLE: 'The stored source file can no longer be read',
+  STORED_FILE_UNRECOGNIZED: 'The stored source file does not match a known workbook format',
+  NO_WRITEBACK_COLUMN: 'The stored source file has no column the export can write',
+  ROW_MISMATCH: 'The rows of the stored file no longer match the items of the list',
+  ROW_ANCHOR_MISMATCH: 'A row of the stored file no longer holds the expected product',
+  ROW_NOT_FOUND: 'A row of the stored file that the export must write is missing',
+  EXPORT_FILENAME_COLLISION: 'Two files of the export would get the same name',
+};
+
+/**
+ * A workbook import or export that conflicts with the stored server state. Extends
+ * `ConflictError`, so every `instanceof ConflictError` guard still matches it;
+ * problem-details.ts checks it first to add `meta.reason`.
+ */
+export class WorkbookConflictError extends ConflictError {
+  readonly reason: WorkbookConflictReason;
+
+  constructor(reason: WorkbookConflictReason) {
+    super(WORKBOOK_CONFLICT_DETAILS[reason]);
+    this.name = 'WorkbookConflictError';
+    this.reason = reason;
   }
 }
