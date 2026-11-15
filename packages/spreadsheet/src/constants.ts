@@ -9,14 +9,18 @@ export const ABSOLUTE_MAX_BYTES = 25 * 1024 * 1024;
 // Total decompressed bytes of every entry in the upload, counted while streaming.
 // An upload is at most 10 MiB and real files inflate to about 0.2 MB; images are
 // already compressed, so they do not grow when inflated. The gate also checks every
-// declared entry size against the real one, so this cap bounds what the export
-// allocates and inflates on every click when it unzips the stored upload whole.
+// declared entry size against the real one, and the export patch path inflates an
+// entry only up to its declared size and refuses one that declares more than this cap
+// (entryContent in patch/raw-zip.ts), so this cap also bounds what an export inflates.
 export const MAX_DECOMPRESSED_BYTES = 64 * 1024 * 1024;
 export const MAX_ZIP_ENTRIES = 64;
-// Raw bytes of xl/_rels/workbook.xml.rels. A real one lists a handful of parts in a
-// few KB (each relationship is about 150 B, and an upload holds at most
-// MAX_ZIP_ENTRIES entries). The export resolves the worksheet parts from this part on
-// the API's main thread, outside the parse worker, so its DOM must stay small there.
+// Raw bytes of xl/_rels/workbook.xml.rels, and of the root relationships part
+// _rels/.rels, which the stream keeps apart from MAX_XML_TOTAL_BYTES. A real one lists
+// a handful of parts in a few KB (each relationship is about 150 B, and an upload holds
+// at most MAX_ZIP_ENTRIES entries), so the gate refuses a larger one
+// (PAYLOAD_TOO_LARGE): the root relationships part while streaming it, the workbook
+// rels before it builds a DOM from them (selectReaderParts). The gate runs inside the
+// parse worker, on every read and every patch alike.
 export const MAX_WORKBOOK_RELS_BYTES = 64 * 1024;
 // Total decompressed bytes of the entries named .xml or .xml.rels (the only entries
 // whose content the gate keeps), counted while streaming. Nothing is re-serialized,

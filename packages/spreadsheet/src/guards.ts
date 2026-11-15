@@ -225,10 +225,11 @@ function concatChunks(chunks: readonly Uint8Array<ArrayBuffer>[]): Uint8Array<Ar
  * and of the root relationships part (`_rels/.rels`, kept apart). Each entry's first
  * bytes are held, counted with the kept ones, until they decide its kind; any other
  * entry (an image, a binary part) is inflated only to count its bytes, which are dropped
- * once its kind is known: the export unzips the stored upload whole and allocates each
- * entry's declared size, so every entry must be measured here, not only the parts the
- * reader opens. The ceilings fire from REAL inflated bytes, never from a size field the
- * upload declares:
+ * once its kind is known. Every entry is measured, not only the parts the reader opens,
+ * so the decompression cap counts all of them and step 8 of openUploadWithLayout can
+ * prove each declared size real: the export patcher inflates the parts it rewrites with
+ * their declared size as the output bound (entryContent). The ceilings fire from REAL
+ * inflated bytes, never from a size field the upload declares:
  *   - more than MAX_ZIP_ENTRIES entries, every entry together beyond
  *     `decompressedCap`, the kept and the undecided entries but the root relationships
  *     part together beyond MAX_XML_TOTAL_BYTES, or the root relationships part beyond
@@ -385,8 +386,9 @@ export function streamArchive(
  * bytes the stream actually inflated. Otherwise CORRUPT_FILE: readZipLayout proves the
  * directory and the local headers name the same entries with the same sizes, but it
  * inflates nothing, so a deflated entry whose headers all declare a size its data does
- * not inflate to passes it. With every declared size proven real, an unzip of the stored
- * upload that allocates the declared sizes allocates at most the decompression cap.
+ * not inflate to passes it. With every declared size proven real, the export patcher's
+ * inflate, bounded by each entry's declared size (entryContent), allocates at most the
+ * decompression cap.
  */
 function assertCentralDirectoryMatches(layout: ZipLayout, streamed: StreamedArchive): void {
   for (const entry of layout.entries) {
@@ -831,8 +833,8 @@ export function openUpload(file: Uint8Array, opts: GuardOpts): UploadParts {
  *      which readZipLayout proved names the same entries as the local headers) declares
  *      the size the stream inflated. Nothing is ever unzipped from the directory, so
  *      overlapping or repeated records cannot make the gate inflate one stream many
- *      times. An unzip of the stored upload that allocates the declared sizes stays
- *      within the cap.
+ *      times. The export patcher's inflate, bounded by each entry's declared size
+ *      (entryContent), stays within the cap.
  *   9. assertEntryContentKind on every entry's content kind: no XML the scans cannot
  *      read (UTF-16, UTF-32 or EBCDIC), and no entry named .xml, .rels or .vml that does not hold
  *      XML (CORRUPT_FILE `part-encoding`).
