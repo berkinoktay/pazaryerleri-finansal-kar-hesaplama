@@ -11,6 +11,18 @@
       "sha256": "64c167bd232163c3a58e7577556f6b83316e5ab4f997bff9de156090fd2b5246"
     }
   },
+  "trendyol-advantage-tariff.xlsx": {
+    "real": {
+      "keptRows": 71,
+      "skippedRows": 0,
+      "sha256": "6e0f98cec7887919412f3a39edf78f3bf1e8b70e4c25c408229034ecd5e9cb90"
+    },
+    "derived": {
+      "keptRows": 91,
+      "skippedRows": 3,
+      "sha256": "8ba0500ecec874b6bf63bfed058eb408429d1d9ce79eee036ead808d59084306"
+    }
+  },
   "trendyol-discount-products.xlsx": {
     "real": {
       "keptRows": 4,

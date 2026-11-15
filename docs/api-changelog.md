@@ -27,9 +27,9 @@ section "Versioning" for details.
 ### Changed
 
 - **Workbook imports run through the generic workbook import**
-  (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products}/import`).
-  Each change below applies to discount lists, marketplace campaign lists and flash product lists
-  now, and to the other three pages as they move:
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products|advantage-tariffs}/import`).
+  Each change below applies to discount lists, marketplace campaign lists, flash product lists and
+  advantage tariffs now, and to the other two pages as they move:
   - The import route can answer `409` with `code: 'CONFLICT'` and `meta.reason`
     `IMPORT_IN_PROGRESS` (another import of the same store and page is running) or
     `UPLOAD_QUOTA_EXCEEDED` (the store already holds 50 lists of the page, or its stored source
@@ -52,19 +52,28 @@ section "Versioning" for details.
     name stem, then to the page's default name.
   - The page's invalid-format answer (`INVALID_DISCOUNT_FORMAT` for discount lists,
     `INVALID_CAMPAIGN_FORMAT` for marketplace campaign lists, `INVALID_FLASH_FORMAT` for flash
-    product lists) now always carries `errors[0].meta`
+    product lists, `INVALID_ADVANTAGE_TARIFF_FORMAT` for advantage tariffs) now always carries
+    `errors[0].meta`
     with `detectedFormatId`, `detectedPlatform` and `detectedPage`; each is `null` when the file
     matches no known page. Before, a file that matched no page carried no `meta`.
   - A marketplace campaign file whose maximum price on a kept row is negative or has more than 10
     integer digits answers `422` with `{ field: 'file', code: 'MALFORMED_SHEET' }`; nothing is
     stored. Before, the file was stored, and an export that chose the maximum price for that row
-    wrote the negative value into the campaign price cell.
+    wrote the negative value into the campaign price cell. The same holds for an advantage tariff
+    file whose star tier upper limit on a kept row is negative or has more than 10 integer digits
+    (the export writes the selected tier's upper limit).
+  - On advantage tariffs the commission source (`commissionSourceTariffId`) is checked after the
+    file's rows are read, with the same field error (`INVALID_COMMISSION_SOURCE`): an upload that
+    is both a refused file and names another store's commission tariff answers the file error.
 - **Workbook exports run through the generic workbook export**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}/export`,
   `POST /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/export`,
-  `POST /v1/organizations/{orgId}/stores/{storeId}/flash-products/{listId}/export`).
-  Each change below applies to discount lists, marketplace campaign lists and flash product lists
-  now, and to the other three pages as they move:
+  `POST /v1/organizations/{orgId}/stores/{storeId}/flash-products/{listId}/export`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/{tariffId}/export`).
+  Each change below applies to discount lists, marketplace campaign lists, flash product lists and
+  advantage tariffs now, and to the other two pages as they move:
+  - The export writes only into the page's own sheet. Before, the same rows and columns were
+    patched on every worksheet of the stored workbook.
   - Store access is checked before the record id in the path is validated: a malformed id answers
     the store access error (`403` or `404`) to a caller without write access to the store, and
     `422` only to a caller with it. Before, the id was validated first.
@@ -82,11 +91,15 @@ section "Versioning" for details.
   - A list whose items no longer pair with the stored file's kept rows (a different count, or a
     different barcode at a position) is refused with `409` `ROW_MISMATCH`. Before, those rows were
     skipped and the rest exported.
+  - Advantage tariff items are read in a fixed order (sort order, then barcode, then id). When two
+    items with one barcode both carry a price, the later one in that order is written; before,
+    the database's unspecified row order decided.
   - Downloads carry `Content-Disposition` with both an ASCII `filename` and an RFC 8187
     `filename*`, built from the stored upload name once control and format characters and path
     separators are dropped (a stored name that does not end in `.xlsx` falls back to the page's
     file name, `indirimler.xlsx` for discount lists and `kampanya.xlsx` for marketplace campaign
-    lists), plus `Content-Length`,
+    lists, or to the list name for advantage tariffs, which before served the raw stored name),
+    plus `Content-Length`,
     `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. Flash product lists keep their
     fixed `flas-urunler.xlsx`; their header gains the ASCII `filename` beside the `filename*` it
     already sent. The ASCII `filename` keeps

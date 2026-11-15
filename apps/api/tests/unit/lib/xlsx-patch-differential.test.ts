@@ -40,7 +40,7 @@ const COMMISSION_SHEET_NAME = 'KomisyonTarifeleri\u00dcr\u00fcnleri';
 // plus-commission-tariff-export.service.ts SHEET_NAME and NOT_CANCELLED.
 const PLUS_SHEET_NAME = 'TyPlus\u00dcr\u00fcnleri';
 const PLUS_NOT_CANCELLED = 'Hay\u0131r';
-// advantage-tariff-export.service.ts SHEET_NAME.
+// The advantage sheet name (formats/trendyol/labels.ts).
 const ADVANTAGE_SHEET_NAME = 'Y\u0131ld\u0131zl\u0131\u00dcr\u00fcnEtiketleri';
 // The flash sheet name and the three update labels (formats/trendyol/labels.ts), in allow-list order.
 const FLASH_SHEET_NAME = 'Teklif\u00dcr\u00fcnleri';

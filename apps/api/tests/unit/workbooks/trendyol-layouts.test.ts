@@ -5,14 +5,12 @@ import {
   columnIndex,
   createRowReader,
   evaluate,
-  normalizeHeader,
   readWorkbookGrid,
   resolveLayout,
   type BlockKey,
   type CellRow,
   type CellValue,
   type ColumnKey,
-  type FlagRule,
   type LayoutSpec,
   type ResolvedBlock,
   type ResolvedLayout,
@@ -23,11 +21,6 @@ import {
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
 import { describe, expect, it, vi } from 'vitest';
 
-import { parseAdvantageTariffRow } from '@/services/advantage-tariff-import.service';
-import {
-  resolveAdvantageTariffLayout,
-  type AdvantageTariffLayout,
-} from '@/services/advantage-tariff-layout';
 import { parseCommissionTariffRow } from '@/services/commission-tariff-import.service';
 import {
   FIXED_COLUMNS,
@@ -40,10 +33,6 @@ import {
   type PlusTariffLayout,
 } from '@/services/plus-commission-tariff-layout';
 import {
-  trendyolAdvantageTariffKeep,
-  trendyolAdvantageTariffLayout,
-} from '@/workbooks/formats/trendyol/advantage-tariff.layout';
-import {
   trendyolCommissionTariffKeep,
   trendyolCommissionTariffLayout,
 } from '@/workbooks/formats/trendyol/commission-tariff.layout';
@@ -53,7 +42,6 @@ import {
 } from '@/workbooks/formats/trendyol/plus-commission-tariff.layout';
 
 import {
-  ADVANTAGE_DERIVED,
   COMMISSION_DERIVED,
   PLUS_CANCEL_NUMBER_ONE,
   PLUS_CANCEL_TEXT_ZERO,
@@ -80,13 +68,10 @@ const FIXTURES_DIR = resolve(__dirname, '../../fixtures');
 const READER_OPTIONS = { toInstant: businessZoneEpochToInstant };
 /** The services' own fallback for a blank decimal cell. */
 const SERVICE_ZERO = '0';
-const VAR_FOLDED: FlagRule = { yes: 'var', compare: 'casefold-tr' };
-const EVET_FOLDED: FlagRule = { yes: 'evet', compare: 'casefold-tr' };
 
 // Sheet names, copied from the import services.
 const COMMISSION_SHEET = 'KomisyonTarifeleriÜrünleri';
 const PLUS_SHEET = 'TyPlusÜrünleri';
-const ADVANTAGE_SHEET = 'YıldızlıÜrünEtiketleri';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -629,133 +614,5 @@ describe('Trendyol Plus commission tariff layout', () => {
     };
     expect(cancelled(PLUS_CANCEL_NUMBER_ONE)).toEqual({ service: true, reader: true });
     expect(cancelled(PLUS_CANCEL_TEXT_ZERO)).toEqual({ service: false, reader: false });
-  });
-});
-
-// ─── Advantage tariff ───────────────────────────────────────────────────────
-
-function adaptAdvantage(resolved: ResolvedLayout | null): AdvantageTariffLayout | null {
-  if (resolved === null) return null;
-  const spec = trendyolAdvantageTariffLayout;
-  const col = (key: ColumnKey<typeof spec>): number =>
-    legacyIndex(columnIndex(spec, resolved, key));
-  return {
-    productTitle: col('productTitle'),
-    barcode: col('barcode'),
-    size: col('size'),
-    modelCode: col('modelCode'),
-    category: col('category'),
-    brand: col('brand'),
-    stock: col('stock'),
-    commissionTariffFlag: col('commissionTariffFlag'),
-    tier1Upper: col('tier1Upper'),
-    tier1Lower: col('tier1Lower'),
-    tier2Upper: col('tier2Upper'),
-    tier2Lower: col('tier2Lower'),
-    tier3Upper: col('tier3Upper'),
-    customerPrice: col('customerPrice'),
-    currentPrice: col('currentPrice'),
-    newTsf: col('newTsf'),
-    applyUntilEnd: col('applyUntilEnd'),
-    externalId: col('externalId'),
-    tariffGroup: col('tariffGroup'),
-  };
-}
-
-const ADVANTAGE = vertical({
-  spec: trendyolAdvantageTariffLayout,
-  keep: trendyolAdvantageTariffKeep,
-  legacyResolve: resolveAdvantageTariffLayout,
-  adapt: adaptAdvantage,
-  legacyParse: parseAdvantageTariffRow,
-  serviceFields: (parsed) => ({
-    barcode: parsed.barcode,
-    currentPrice: parsed.currentPrice,
-    hasCommissionTariff: parsed.hasCommissionTariff,
-    applyUntilEnd: parsed.applyUntilEnd,
-  }),
-  readerFields: (reader) => ({
-    barcode: reader.text('barcode'),
-    currentPrice: reader.decimal('currentPrice'),
-    hasCommissionTariff: reader.flag('commissionTariffFlag', VAR_FOLDED),
-    applyUntilEnd: reader.flag('applyUntilEnd', EVET_FOLDED),
-  }),
-});
-
-const ADVANTAGE_FILE = 'trendyol-advantage-tariff.xlsx';
-
-// Copied verbatim from tests/unit/advantage-tariff-layout.test.ts.
-const ADVANTAGE_HEADER: readonly string[] = [
-  'ÜRÜN İSMİ',
-  'BARKOD',
-  'BEDEN',
-  'MODEL KODU',
-  'KATEGORİ',
-  'MARKA',
-  'STOK',
-  'KOMİSYON TARİFESİ',
-  '1 YILDIZ ÜST FİYAT',
-  '1 YILDIZ ALT FİYAT',
-  '2 YILDIZ ÜST FİYAT',
-  '2 YILDIZ ALT FİYAT',
-  '3 YILDIZ ÜST FİYAT',
-  'MÜŞTERİNİN GÖRDÜĞÜ FİYAT',
-  'TRENDYOL SATIŞ FİYATI',
-  'YENİ TSF (FİYAT GÜNCELLE)',
-  'Tarife Sonuna Kadar Uygula',
-  'EXTERNAL ID',
-  'TARİFE GRUBU',
-];
-
-const ADVANTAGE_HEADERS: readonly HeaderCase[] = [
-  { name: 'real header', header: ADVANTAGE_HEADER, resolves: true },
-  {
-    name: 'header missing BARKOD',
-    header: ADVANTAGE_HEADER.filter((h) => h !== 'BARKOD'),
-    resolves: false,
-  },
-  {
-    name: 'header missing a star threshold',
-    header: ADVANTAGE_HEADER.filter((h) => h !== '3 YILDIZ ÜST FİYAT'),
-    resolves: false,
-  },
-  { name: 'non-Advantage header', header: ['not', 'an', 'advantage', 'header'], resolves: false },
-];
-
-describe('Trendyol advantage tariff layout', () => {
-  describeFixture(ADVANTAGE, ADVANTAGE_FILE, ADVANTAGE_SHEET);
-  describeHeaders(ADVANTAGE, ADVANTAGE_HEADERS);
-  describeDerivedRows(ADVANTAGE, ADVANTAGE_DERIVED, ADVANTAGE_FILE, ADVANTAGE_SHEET);
-
-  it('reads the same fields when the optional apply-until-end flag column is absent', async () => {
-    const grid = await readFixture(ADVANTAGE_FILE, ADVANTAGE_SHEET);
-    const dropAt = (grid[0] ?? []).findIndex(
-      (cell) => normalizeHeader(cell) === 'Tarife Sonuna Kadar Uygula',
-    );
-    expect(dropAt).toBeGreaterThanOrEqual(0);
-    const withoutFlag = grid.map((row) => row.filter((_, index) => index !== dropAt));
-    expectReaderParity(ADVANTAGE, withoutFlag);
-  });
-
-  it('does not keep a row with a barcode but no current price', () => {
-    const layout = present(
-      resolveLayout(trendyolAdvantageTariffLayout, headerGrid(ADVANTAGE_HEADER)),
-      'layout',
-    );
-    const legacy = present(resolveAdvantageTariffLayout(ADVANTAGE_HEADER), 'legacy layout');
-    const withoutPrice = ADVANTAGE_HEADER.map((h) => (h === 'BARKOD' ? '8690000000001' : null));
-    const withPrice = ADVANTAGE_HEADER.map((h) => {
-      if (h === 'BARKOD') return '8690000000001';
-      return h === 'TRENDYOL SATIŞ FİYATI' ? 250 : null;
-    });
-
-    expect(
-      evaluate(trendyolAdvantageTariffKeep, withoutPrice, trendyolAdvantageTariffLayout, layout),
-    ).toBe(false);
-    expect(parseAdvantageTariffRow(withoutPrice, legacy)).toBeNull();
-    expect(
-      evaluate(trendyolAdvantageTariffKeep, withPrice, trendyolAdvantageTariffLayout, layout),
-    ).toBe(true);
-    expect(parseAdvantageTariffRow(withPrice, legacy)).not.toBeNull();
   });
 });

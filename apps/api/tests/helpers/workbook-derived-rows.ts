@@ -3,8 +3,9 @@
 // some cells blanked or rewritten: they put the fallback chains of a row mapper and the
 // dropping side of every keep rule under test. The cases were moved verbatim out of
 // tests/unit/workbooks/trendyol-layouts.test.ts so they outlive the legacy parsers (the
-// discount, campaign and flash blocks have since gained kept cases, whose golden the
-// legacy parser wrote); `derivedGrid` builds the grid a format test reads them from.
+// discount, campaign, flash and advantage blocks have since gained kept cases, whose
+// golden the legacy parser wrote); `derivedGrid` builds the grid a format test reads
+// them from.
 
 import {
   columnIndex,
@@ -61,6 +62,100 @@ const PLUS_DERIVED: readonly DerivedRow<typeof trendyolPlusCommissionTariffLayou
 const ADVANTAGE_DERIVED: readonly DerivedRow<typeof trendyolAdvantageTariffLayout>[] = [
   { name: 'a blank barcode', cells: [['barcode', null]], kept: false },
   { name: 'a blank current price', cells: [['currentPrice', null]], kept: false },
+  // Added after the move, so the derived golden pins every mapping rule of the advantage
+  // row: the star tiers (a tier without an upper limit is skipped, a lower limit that
+  // does not read is left out, a row without any tier), both case-folded yes flags and
+  // the column each one reads, the plain grammar of the price and limit cells (number
+  // cells, dot thousands with a decimal comma, a dot-only text, a lira suffix), the
+  // customer price fallback, the truncated stock, a number barcode and the title
+  // fallback. The fixture row's prices and limits are decimal-comma texts.
+  { name: 'tier 2 without an upper limit', cells: [['tier2Upper', null]], kept: true },
+  {
+    name: 'tiers 1 and 2 without a readable lower limit',
+    cells: [
+      ['tier1Lower', null],
+      ['tier2Lower', 'none'],
+    ],
+    kept: true,
+  },
+  {
+    name: 'no tier at all',
+    cells: [
+      ['tier1Upper', null],
+      ['tier2Upper', null],
+      ['tier3Upper', null],
+    ],
+    kept: true,
+  },
+  { name: 'the tariff flag VAR', cells: [['commissionTariffFlag', 'VAR']], kept: true },
+  { name: 'the tariff flag Yok', cells: [['commissionTariffFlag', 'Yok']], kept: true },
+  { name: 'the apply-until-end flag EVET', cells: [['applyUntilEnd', 'EVET']], kept: true },
+  { name: 'the apply-until-end flag evet', cells: [['applyUntilEnd', 'evet']], kept: true },
+  { name: 'a blank apply-until-end flag', cells: [['applyUntilEnd', null]], kept: true },
+  {
+    name: 'each yes text in the other flag',
+    cells: [
+      ['commissionTariffFlag', 'Evet'],
+      ['applyUntilEnd', 'Var'],
+    ],
+    kept: true,
+  },
+  {
+    name: 'number price and limit cells',
+    cells: [
+      ['currentPrice', 399.9],
+      ['customerPrice', 379],
+      ['tier1Upper', 350],
+      ['tier1Lower', 300.5],
+    ],
+    kept: true,
+  },
+  {
+    name: 'dot thousands with a decimal comma',
+    cells: [
+      ['currentPrice', '1.234,56'],
+      ['tier1Upper', '1.199,99'],
+    ],
+    kept: true,
+  },
+  { name: 'a dot-only text limit', cells: [['tier3Upper', '1.250']], kept: true },
+  { name: 'a lira-suffixed current price', cells: [['currentPrice', '360 TL']], kept: false },
+  { name: 'a lira-suffixed tier limit', cells: [['tier1Upper', '292 TL']], kept: true },
+  {
+    name: 'a blank customer price',
+    cells: [
+      ['customerPrice', null],
+      ['currentPrice', '399,90'],
+    ],
+    kept: true,
+  },
+  {
+    name: 'a lira-suffixed customer price',
+    cells: [
+      ['customerPrice', '350 TL'],
+      ['currentPrice', 410],
+    ],
+    kept: true,
+  },
+  { name: 'a decimal stock number', cells: [['stock', 12.7]], kept: true },
+  { name: 'a decimal stock text', cells: [['stock', '12.7']], kept: true },
+  { name: 'a non-numeric stock text', cells: [['stock', 'many']], kept: true },
+  { name: 'a number barcode', cells: [['barcode', 8690000000001]], kept: true },
+  {
+    name: 'a blank title and blank optional columns',
+    cells: [
+      ['productTitle', null],
+      ['size', null],
+      ['modelCode', null],
+      ['category', null],
+      ['brand', null],
+      ['stock', null],
+      ['commissionTariffFlag', null],
+      ['externalId', null],
+      ['tariffGroup', null],
+    ],
+    kept: true,
+  },
 ];
 
 const FLASH_DERIVED: readonly DerivedRow<typeof trendyolFlashProductListLayout>[] = [
@@ -231,7 +326,7 @@ const CAMPAIGN_DERIVED: readonly DerivedRow<typeof trendyolMarketplaceCampaignLi
 ];
 
 // Exported as a list: the blocks above keep the exact bytes they had in the layout test,
-// apart from the kept cases added to the discount, campaign and flash blocks.
+// apart from the cases added to the discount, campaign, flash and advantage blocks.
 export {
   ADVANTAGE_DERIVED,
   CAMPAIGN_DERIVED,

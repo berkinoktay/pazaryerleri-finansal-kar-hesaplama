@@ -79,6 +79,17 @@ const CONTRACT_ROWS: readonly ContractRow[] = [
     otherPage: 'MARKETPLACE_CAMPAIGN_LIST',
     wrongFileCode: 'INVALID_FLASH_FORMAT',
   },
+  {
+    segment: 'advantage-tariffs',
+    idParam: 'tariffId',
+    fixture: 'trendyol-advantage-tariff.xlsx',
+    form: {},
+    // The advantage sheet is read by name; the flash file has none of that name, so the
+    // diagnosis reads its first sheet, the flash offer sheet.
+    otherPageFixture: 'trendyol-flash-products.xlsx',
+    otherPage: 'FLASH_PRODUCT_LIST',
+    wrongFileCode: 'INVALID_ADVANTAGE_TARIFF_FORMAT',
+  },
 ];
 
 const NOT_XLSX = Buffer.from('this is plain text, not a zip archive');

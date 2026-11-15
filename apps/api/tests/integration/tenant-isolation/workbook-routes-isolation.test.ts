@@ -16,6 +16,8 @@
 //   - the rightful member's export succeeds and marks the list exported;
 //   - at the adapter level, `load`, `touchExported` and `countLists` see nothing of
 //     another organization or a sibling store.
+// The advantage upload's commission source: a commission tariff of another organization
+// or of a sibling store is refused on the field, and nothing is stored.
 
 import { readFileSync } from 'node:fs';
 
@@ -28,6 +30,7 @@ import { readWorkbookGrid } from '@pazarsync/spreadsheet';
 import { createApp } from '@/app';
 import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware';
 import type { StoreScope } from '@/workbooks/adapter';
+import { advantageTariffAdapter } from '@/workbooks/verticals/advantage-tariff.adapter';
 import { discountListAdapter } from '@/workbooks/verticals/discount-list.adapter';
 import { flashProductListAdapter } from '@/workbooks/verticals/flash-product-list.adapter';
 import { marketplaceCampaignListAdapter } from '@/workbooks/verticals/marketplace-campaign-list.adapter';
@@ -67,6 +70,20 @@ interface IsolationRow {
 const DiscountImportSchema = z.object({ listId: z.string() });
 const CampaignImportSchema = z.object({ campaignId: z.string() });
 const FlashImportSchema = z.object({ listId: z.string() });
+const AdvantageImportSchema = z.object({ tariffId: z.string() });
+
+const ADVANTAGE_ROW: IsolationRow = {
+  segment: 'advantage-tariffs',
+  fixture: 'trendyol-advantage-tariff.xlsx',
+  form: {},
+  importedId: (body) => AdvantageImportSchema.parse(body).tariffId,
+  load: (scope, id) => advantageTariffAdapter.load(scope, id),
+  touchExported: (scope, id) => advantageTariffAdapter.touchExported(scope, id),
+  countLists: (scope) => prisma.$transaction((tx) => advantageTariffAdapter.countLists(tx, scope)),
+  exportedAt: async (id) =>
+    (await prisma.advantageTariff.findUnique({ where: { id }, select: { exportedAt: true } }))
+      ?.exportedAt ?? null,
+};
 
 const ISOLATION_ROWS: readonly IsolationRow[] = [
   {
@@ -124,6 +141,7 @@ const ISOLATION_ROWS: readonly IsolationRow[] = [
       (await prisma.flashProductList.findUnique({ where: { id }, select: { exportedAt: true } }))
         ?.exportedAt ?? null,
   },
+  ADVANTAGE_ROW,
 ];
 
 function importRequest(
@@ -396,5 +414,90 @@ describe.each(ISOLATION_ROWS)('workbook export isolation: $segment', (row) => {
     }
     expect(await row.exportedAt(victimId)).toBeNull();
     expect(await row.countLists(ownScope)).toBe(1);
+  });
+});
+
+const IssuesSchema = z.object({
+  code: z.string(),
+  errors: z.array(z.object({ field: z.string(), code: z.string() })),
+});
+
+/** A commission tariff of one store: the week an advantage upload may name as its source. */
+async function commissionTariffOf(organizationId: string, storeId: string): Promise<string> {
+  const tariff = await prisma.commissionTariff.create({
+    data: { organizationId, storeId, name: 'Commission source' },
+    select: { id: true },
+  });
+  return tariff.id;
+}
+
+function advantageImportWithSource(tenant: Tenant, commissionSourceTariffId: string): Request {
+  return importRequest(tenant.accessToken, tenant, {
+    ...ADVANTAGE_ROW,
+    form: { commissionSourceTariffId },
+  });
+}
+
+async function expectInvalidCommissionSource(res: Response): Promise<void> {
+  expect(res.status).toBe(422);
+  const body = IssuesSchema.parse(await res.json());
+  expect(body.code).toBe('VALIDATION_ERROR');
+  expect(body.errors).toEqual([
+    { field: 'commissionSourceTariffId', code: 'INVALID_COMMISSION_SOURCE' },
+  ]);
+}
+
+// The advantage upload names the commission tariff (week) whose bands supply the reduced
+// commission. The adapter's `inspect` looks it up with the store record's scope, so a
+// tariff of another organization, or of a sibling store, is a field error under the
+// caller's OWN store path (the request that reaches the lookup), and nothing is stored.
+describe('workbook import isolation: advantage-tariffs commission source', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("refuses another organization's commission tariff with 422 and writes nothing", async () => {
+    const owner = await ownerTenant();
+    const other = await ownerTenant();
+    const foreignSource = await commissionTariffOf(other.orgId, other.storeId);
+    const before = await workbookRowCounts();
+
+    const res = await app.request(advantageImportWithSource(owner, foreignSource));
+
+    await expectInvalidCommissionSource(res);
+    expect(await workbookRowCounts()).toEqual(before);
+  });
+
+  it("refuses a sibling store's commission tariff with 422 and writes nothing", async () => {
+    // An OWNER may reach both stores of the organization; the lookup is still scoped to
+    // the store the upload is for.
+    const owner = await ownerTenant();
+    const sibling = await createStore(owner.orgId);
+    const siblingSource = await commissionTariffOf(owner.orgId, sibling.id);
+    const before = await workbookRowCounts();
+
+    const res = await app.request(advantageImportWithSource(owner, siblingSource));
+
+    await expectInvalidCommissionSource(res);
+    expect(await workbookRowCounts()).toEqual(before);
+  });
+
+  it("stores the commission tariff of the caller's own store", async () => {
+    const owner = await ownerTenant();
+    const ownSource = await commissionTariffOf(owner.orgId, owner.storeId);
+
+    const res = await app.request(advantageImportWithSource(owner, ownSource));
+
+    expect(res.status).toBe(201);
+    const id = ADVANTAGE_ROW.importedId(await res.json());
+    const stored = await prisma.advantageTariff.findUnique({
+      where: { id },
+      select: { commissionSourceTariffId: true },
+    });
+    expect(stored?.commissionSourceTariffId).toBe(ownSource);
   });
 });
