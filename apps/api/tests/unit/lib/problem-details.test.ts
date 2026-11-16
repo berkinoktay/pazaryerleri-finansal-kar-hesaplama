@@ -18,6 +18,8 @@ import {
   UnauthorizedError,
   UnsupportedMediaTypeError,
   ValidationError,
+  WORKBOOK_CONFLICT_DETAILS,
+  WORKBOOK_CONFLICT_REASONS,
   WorkbookConflictError,
 } from '@/lib/errors';
 import { problemDetailsForError } from '@/lib/problem-details';
@@ -73,17 +75,25 @@ describe('problemDetailsForError — extended error classes', () => {
     expect(body.code).toBe('CONFLICT');
   });
 
-  it('maps WorkbookConflictError to 409 CONFLICT with meta.reason and the fixed detail of its reason', () => {
+  it('maps WorkbookConflictError to 409 with its reason as the code and the fixed detail of its reason', () => {
     const { body, status } = problemDetailsForError(new WorkbookConflictError('ROW_MISMATCH'));
     expect(status).toBe(409);
     expect(body).toEqual({
       type: 'https://api.pazarsync.com/errors/conflict',
       title: 'Conflict',
       status: 409,
-      code: 'CONFLICT',
+      code: 'ROW_MISMATCH',
       detail: 'The rows of the stored file no longer match the items of the list',
-      meta: { reason: 'ROW_MISMATCH' },
     });
+  });
+
+  it.each(WORKBOOK_CONFLICT_REASONS)('answers %s as its own 409 code', (reason) => {
+    const { body, status } = problemDetailsForError(new WorkbookConflictError(reason));
+    expect(status).toBe(409);
+    expect(body.status).toBe(409);
+    expect(body.code).toBe(reason);
+    expect(body.detail).toBe(WORKBOOK_CONFLICT_DETAILS[reason]);
+    expect('meta' in body).toBe(false);
   });
 
   it('maps SyncInProgressError to 409 SYNC_IN_PROGRESS with syncType + storeId meta', () => {

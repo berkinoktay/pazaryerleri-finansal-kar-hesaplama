@@ -14,9 +14,9 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { UPLOAD_NAME_MAX_LENGTH } from '@pazarsync/utils';
 
 import { createApp } from '@/app';
-import { UPLOAD_NAME_MAX_LENGTH } from '@/config/workbook-limits';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -433,6 +433,71 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
     expect(body.errors).toStrictEqual([
       { field: 'name', code: 'NAME_TOO_LONG', meta: { zodCode: 'too_big' } },
     ]);
+    expect(await prisma.discountList.findFirst({ where: listScope, select })).toEqual(before);
+  });
+
+  it('rejects a whitespace-only name with 422 NAME_REQUIRED and leaves the list as it was', async () => {
+    const listScope = { id: fx.listId, organizationId: fx.orgId, storeId: fx.storeId };
+    const select = { name: true, updatedAt: true } as const;
+    const before = await prisma.discountList.findFirst({ where: listScope, select });
+    if (before === null) throw new Error('the seeded list is gone');
+
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: '   ',
+          discountType: 'CONDITIONAL_BASKET',
+          valueKind: 'AMOUNT',
+          value: '20',
+          minBasketAmount: '150',
+          ...CAMPAIGN_WINDOW,
+        }),
+      },
+    );
+
+    expect(res.status).toBe(422);
+    const body = RawValidationSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'name', code: 'NAME_REQUIRED' })]),
+    );
+    expect(await prisma.discountList.findFirst({ where: listScope, select })).toEqual(before);
+  });
+
+  it('rejects a start date in the year 0 with 422 DATE_OUT_OF_RANGE and leaves the list as it was', async () => {
+    const listScope = { id: fx.listId, organizationId: fx.orgId, storeId: fx.storeId };
+    const select = { startsAt: true, updatedAt: true } as const;
+    const before = await prisma.discountList.findFirst({ where: listScope, select });
+    if (before === null) throw new Error('the seeded list is gone');
+
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          discountType: 'CONDITIONAL_BASKET',
+          valueKind: 'AMOUNT',
+          value: '20',
+          minBasketAmount: '150',
+          ...CAMPAIGN_WINDOW,
+          startsAt: '0000-01-01T00:00:00Z',
+        }),
+      },
+    );
+
+    expect(res.status).toBe(422);
+    const body = RawValidationSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: 'startsAt', code: 'DATE_OUT_OF_RANGE' }),
+      ]),
+    );
+    expect(body.errors).not.toContainEqual(expect.objectContaining({ field: 'file' }));
     expect(await prisma.discountList.findFirst({ where: listScope, select })).toEqual(before);
   });
 

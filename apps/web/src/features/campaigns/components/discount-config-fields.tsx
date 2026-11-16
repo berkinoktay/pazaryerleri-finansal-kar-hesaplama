@@ -6,7 +6,8 @@ import { type UseFormReturn } from 'react-hook-form';
 
 import { DiscountType } from '@pazarsync/db/enums';
 
-import { type DiscountConfigFormValues } from '../lib/discount-config';
+import { useServerFieldErrors } from '../hooks/use-server-field-errors';
+import { visibleConfigFields, type DiscountConfigFormValues } from '../lib/discount-config';
 import { validationIssues } from '../lib/upload-error';
 import {
   ConfigNameField,
@@ -26,7 +27,7 @@ const DISCOUNT_TYPE_OPTIONS: readonly DiscountType[] = [
 ];
 
 // The RHF-backed form fields — a backend VALIDATION_ERROR whose `field` is one of these maps to
-// a `form.setError`; `file` (owned by the upload dialog's errorCode path) and `name` (local
+// a `form.setError`; `file` (owned by the upload dialog's file error) and `name` (local
 // state, rendered inline) are handled outside this set so no issue renders twice.
 const RHF_FIELD_NAMES = [
   'discountType',
@@ -41,8 +42,14 @@ const RHF_FIELD_NAMES = [
   'endsAt',
 ] as const satisfies readonly (keyof DiscountConfigFormValues)[];
 
-function isRhfFieldName(field: string): field is (typeof RHF_FIELD_NAMES)[number] {
-  return RHF_FIELD_NAMES.some((name) => name === field);
+/**
+ * The fields of this section that have a message slot on screen for the given kurgu: the name,
+ * the kurgu picker, ONLY the parameters that kurgu shows, and the window. A parameter the kurgu
+ * hides has no slot (its `form.setError` would be invisible), so the dialog lists its issue
+ * itself (`UploadUnplacedIssues`).
+ */
+export function placedConfigFields(discountType: DiscountType): readonly string[] {
+  return ['name', 'discountType', ...visibleConfigFields(discountType), 'startsAt', 'endsAt'];
 }
 
 export interface DiscountConfigFieldsProps {
@@ -92,17 +99,11 @@ export function DiscountConfigFields({
 
   // Surface backend VALIDATION_ERROR field issues inline (the global toast pipeline silences
   // VALIDATION_ERROR). Config fields are pushed into RHF via form.setError → FormMessage; `name`
-  // is derived above; `file` belongs to the upload dialog's errorCode path, so no issue renders
+  // is derived above; `file` belongs to the upload dialog's file error, so no issue renders
   // twice. The client zod schema mirrors the backend gate 1:1, so in practice this only fires for
   // backend-only checks or a genuine client/backend drift. (Canonical pattern from
   // apps/web/CLAUDE.md — an effect is required because setError writes into external RHF state.)
-  React.useEffect(() => {
-    for (const issue of validationIssues(submitError)) {
-      if (isRhfFieldName(issue.field)) {
-        form.setError(issue.field, { type: 'server', message: issue.code });
-      }
-    }
-  }, [submitError, form]);
+  useServerFieldErrors(form, submitError, RHF_FIELD_NAMES);
 
   return (
     <div className="gap-md flex flex-col">

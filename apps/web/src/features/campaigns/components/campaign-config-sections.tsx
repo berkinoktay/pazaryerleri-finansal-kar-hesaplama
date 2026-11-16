@@ -5,6 +5,7 @@ import * as React from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 import { DiscountType, DiscountValueKind } from '@pazarsync/db/enums';
+import { STORABLE_YEAR_MAX, STORABLE_YEAR_MIN, UPLOAD_NAME_MAX_LENGTH } from '@pazarsync/utils';
 
 import { DateInput } from '@/components/patterns/date-input';
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
@@ -22,6 +23,7 @@ import {
   localWallClockAsBusinessZoneIso,
 } from '@/lib/business-timezone-date';
 
+import { useUploadFieldErrorMessage } from '../hooks/use-upload-field-error-message';
 import {
   NTH_INDEX_OPTIONS,
   visibleConfigFields,
@@ -120,6 +122,12 @@ export function useConfigFieldErrorMessage(): (code: string) => string {
         return t('percentOver100');
       case 'END_BEFORE_START':
         return t('endBeforeStart');
+      // The window date codes come from the server only: the date picker cannot produce a
+      // malformed date or a year outside the storable ones.
+      case 'INVALID_DATE':
+        return t('dateInvalid');
+      case 'DATE_OUT_OF_RANGE':
+        return t('dateOutOfRange', { min: STORABLE_YEAR_MIN, max: STORABLE_YEAR_MAX });
       // Magnitude-bound + BUY_X_PAY_Y out-of-range codes (backend + client mirror) share the
       // generic "value out of range" copy — the dependent Selects make these unreachable in the
       // UI, so they only surface on a raw API 422; a precise per-bound key would be dead weight.
@@ -150,7 +158,7 @@ export function ConfigNameField({
   onChange,
   serverError,
 }: ConfigNameFieldProps): React.ReactElement {
-  const configFieldError = useConfigFieldErrorMessage();
+  const nameError = useUploadFieldErrorMessage();
   const id = React.useId();
 
   return (
@@ -159,12 +167,13 @@ export function ConfigNameField({
       <Input
         id={id}
         value={value}
+        maxLength={UPLOAD_NAME_MAX_LENGTH}
         invalid={serverError !== null}
         onChange={(event) => onChange(event.target.value)}
       />
       {serverError !== null ? (
         <p className="text-2xs text-destructive font-medium" role="alert">
-          {configFieldError(serverError)}
+          {nameError(serverError)}
         </p>
       ) : null}
     </div>
@@ -190,12 +199,13 @@ export function ConfigTypeField({
 }: ConfigTypeFieldProps): React.ReactElement {
   const form = useFormContext<DiscountConfigFormValues>();
   const tTypes = useTranslations('discountsPage.types');
+  const configFieldError = useConfigFieldErrorMessage();
 
   return (
     <FormField
       control={form.control}
       name="discountType"
-      render={({ field }) => (
+      render={({ field, fieldState }) => (
         <FormItem>
           <FormLabel>{label}</FormLabel>
           <Select
@@ -206,7 +216,7 @@ export function ConfigTypeField({
             }}
           >
             <FormControl>
-              <SelectTrigger>
+              <SelectTrigger invalid={fieldState.error !== undefined}>
                 <SelectValue />
               </SelectTrigger>
             </FormControl>
@@ -218,6 +228,7 @@ export function ConfigTypeField({
               ))}
             </SelectContent>
           </Select>
+          <FormMessage render={configFieldError} />
         </FormItem>
       )}
     />

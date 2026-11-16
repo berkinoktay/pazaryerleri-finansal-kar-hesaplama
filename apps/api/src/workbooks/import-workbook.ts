@@ -183,9 +183,9 @@ function rethrowPersistError<
   TWrite extends string,
 >(adapter: WorkbookImportAdapter<S, TRow, TConfig, TMeta, TResponse, TWrite>, err: unknown): never {
   const context = { page: adapter.page };
-  if (err instanceof WorkbookFileRejection) toUploadError(err, adapter.legacyCodes, context);
+  if (err instanceof WorkbookFileRejection) toUploadError(err, context);
   const code = adapter.rejectionForUniqueViolation(err);
-  if (code !== null) toUploadError(new WorkbookFileRejection(code), adapter.legacyCodes, context);
+  if (code !== null) toUploadError(new WorkbookFileRejection(code), context);
   if (isPrismaKnownRequestError(err) && err.code === PRISMA_VALUE_OUT_OF_RANGE) {
     // The page and the code only: the driver's message quotes the cell value.
     syncLog.warn('workbook.import.value-out-of-range', {
@@ -196,7 +196,6 @@ function rethrowPersistError<
       new SpreadsheetFileError('MALFORMED_SHEET', 'A file value is out of range for its column', {
         reason: VALUE_OUT_OF_RANGE_REASON,
       }),
-      adapter.legacyCodes,
       context,
     );
   }
@@ -208,7 +207,6 @@ function rethrowPersistError<
       new SpreadsheetFileError('MALFORMED_SHEET', 'A file value cannot be stored in its column', {
         reason: VALUE_NOT_STORABLE_REASON,
       }),
-      adapter.legacyCodes,
       context,
     );
   }
@@ -236,7 +234,7 @@ export async function importWorkbook<
   try {
     checked = await checkUpload(adapter, input, scope);
   } catch (err) {
-    toUploadError(err, adapter.legacyCodes, { page: adapter.page });
+    toUploadError(err, { page: adapter.page });
   }
   const { selected, rows, meta } = checked;
 

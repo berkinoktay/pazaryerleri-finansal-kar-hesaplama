@@ -3,7 +3,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -21,7 +21,8 @@ import type { DiscountListDetail } from '../api/get-discount-list-detail.api';
 import type { UpdateDiscountListBody } from '../api/update-discount-list.api';
 import { useUpdateDiscountList } from '../hooks/use-update-discount-list';
 import { discountConfigFormSchema, type DiscountConfigFormValues } from '../lib/discount-config';
-import { DiscountConfigFields } from './discount-config-fields';
+import { DiscountConfigFields, placedConfigFields } from './discount-config-fields';
+import { UploadUnplacedIssues } from './upload-unplaced-issues';
 
 /**
  * Converts a saved list's config (numbers + nullable fields) into the string-based form values
@@ -79,12 +80,18 @@ export function DiscountConfigEditDialog({
     resolver: zodResolver(discountConfigFormSchema),
     defaultValues: toFormDefaults(list),
   });
+  // The kurgu decides which parameters have an input, so it decides which issues are unplaced.
+  const discountType = useWatch({ control: form.control, name: 'discountType' });
 
   const handleValid = (values: DiscountConfigFormValues): void => {
+    // A rename is sent only when the seller changed the name. The comparison is on the raw
+    // input, before trimming: `trim()` strips a leading U+FEFF, so a name stored before the name
+    // rule would compare as changed, be resent, and the API would refuse every save of the list.
     const trimmedName = name.trim();
+    const nameChanged = name !== list.name && trimmedName !== '';
     const body: UpdateDiscountListBody = {
       ...values,
-      name: trimmedName === '' ? undefined : trimmedName,
+      ...(nameChanged ? { name: trimmedName } : {}),
     };
     update.mutate(body, { onSuccess: () => onOpenChange(false) });
   };
@@ -104,12 +111,18 @@ export function DiscountConfigEditDialog({
             className="gap-md flex min-h-0 flex-1 flex-col"
           >
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <DiscountConfigFields
-                form={form}
-                nameValue={name}
-                onNameChange={setName}
-                submitError={update.error}
-              />
+              <div className="gap-md flex flex-col">
+                <DiscountConfigFields
+                  form={form}
+                  nameValue={name}
+                  onNameChange={setName}
+                  submitError={update.error}
+                />
+                <UploadUnplacedIssues
+                  error={update.error}
+                  placedFields={placedConfigFields(discountType)}
+                />
+              </div>
             </div>
 
             <DialogFooter className="shrink-0">

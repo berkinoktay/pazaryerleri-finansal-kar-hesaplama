@@ -357,6 +357,6 @@ describe('discount-lists export', () => {
 
     const res = await app.request(exportRequest(ctx, list.id));
     expect(res.status).toBe(409);
-    expect(((await res.json()) as { code: string }).code).toBe('CONFLICT');
+    expect(((await res.json()) as { code: string }).code).toBe('STORED_FILE_MISSING');
   });
 });

@@ -7,7 +7,8 @@ import { filenameFromDisposition } from '@/features/campaigns/api/binary-downloa
  * header. It has three branches, each locked below:
  *   (a) the RFC 5987 `filename*=UTF-8''<pct-encoded>` form — our backend's format,
  *   (b) the plain `filename="..."` fallback when the RFC 5987 form is absent,
- *   (c) the defensive branches — no header, or malformed percent-encoding — both null.
+ *   (c) the defensive branches — no header, or a malformed percent-encoding with no plain
+ *       `filename` to fall back to — both null.
  */
 describe('filenameFromDisposition', () => {
   describe('RFC 5987 filename*=UTF-8 branch (percent-decoded)', () => {
@@ -57,6 +58,67 @@ describe('filenameFromDisposition', () => {
       const header = "attachment; filename*=UTF-8''%zz-broken.xlsx";
 
       expect(filenameFromDisposition(header)).toBeNull();
+    });
+  });
+
+  describe("reads only the header's own filename* and filename parameters", () => {
+    // Built from its code point, so these cases stay ASCII.
+    const SMALL_U_DIAERESIS = String.fromCodePoint(0x00fc);
+
+    const CASES: ReadonlyArray<{
+      readonly why: string;
+      readonly header: string;
+      readonly expected: string | null;
+    }> = [
+      {
+        why: 'keeps a quoted filename whole when its value holds filename*= and ;',
+        header: `attachment; filename="rapor;filename*=UTF-8''setup.exe;.xlsx"`,
+        expected: "rapor;filename*=UTF-8''setup.exe;.xlsx",
+      },
+      {
+        why: 'prefers filename* whatever the parameter order',
+        header: 'attachment; filename="a.xlsx"; filename*=UTF-8\'\'%C3%BCr%C3%BCn.xlsx',
+        expected: `${SMALL_U_DIAERESIS}r${SMALL_U_DIAERESIS}n.xlsx`,
+      },
+      {
+        why: 'ignores a parameter whose name only ends in filename*',
+        header: 'attachment; x-filename*=UTF-8\'\'evil.exe; filename="a.xlsx"',
+        expected: 'a.xlsx',
+      },
+      {
+        why: 'compares the parameter name and the charset case-insensitively',
+        header: "attachment; FILENAME*=utf-8''a.xlsx",
+        expected: 'a.xlsx',
+      },
+      {
+        why: 'unescapes a quoted pair in a quoted filename',
+        header: 'attachment; filename="a\\"b.xlsx"',
+        expected: 'a"b.xlsx',
+      },
+      {
+        why: 'does not split at a semicolon after an escaped quote inside a quoted filename',
+        header: 'attachment; filename="a\\";b.xlsx"',
+        expected: 'a";b.xlsx',
+      },
+      {
+        why: 'falls back to filename when filename* does not decode',
+        header: 'attachment; filename*=UTF-8\'\'%zz.xlsx; filename="b.xlsx"',
+        expected: 'b.xlsx',
+      },
+      {
+        why: 'answers null when filename* does not decode and there is no filename',
+        header: "attachment; filename*=UTF-8''%zz.xlsx",
+        expected: null,
+      },
+      {
+        why: 'answers null for an empty quoted filename',
+        header: 'attachment; filename=""',
+        expected: null,
+      },
+    ];
+
+    it.each(CASES)('$why', ({ header, expected }) => {
+      expect(filenameFromDisposition(header)).toBe(expected);
     });
   });
 });

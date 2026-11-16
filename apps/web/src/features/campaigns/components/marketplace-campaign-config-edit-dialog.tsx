@@ -3,7 +3,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -24,7 +24,11 @@ import {
   type CampaignConfigFormInput,
   type CampaignConfigFormValues,
 } from '../lib/marketplace-campaign-config';
-import { MarketplaceCampaignConfigFields } from './marketplace-campaign-config-fields';
+import {
+  MarketplaceCampaignConfigFields,
+  placedConfigFields,
+} from './marketplace-campaign-config-fields';
+import { UploadUnplacedIssues } from './upload-unplaced-issues';
 
 /**
  * The saved config (numbers + nullable fields) as the string-based form values: null → undefined
@@ -87,11 +91,17 @@ export function MarketplaceCampaignConfigEditDialog({
     resolver: zodResolver(campaignConfigFormSchema),
     defaultValues: toFormDefaults(header),
   });
+  // The kurgu decides which parameters have an input, so it decides which issues are unplaced.
+  const discountType = useWatch({ control: form.control, name: 'discountType' });
 
   const handleValid = (values: CampaignConfigFormValues): void => {
+    // A rename is sent only when the seller changed the name. The comparison is on the raw
+    // input, before trimming: `trim()` strips a leading U+FEFF, so a name stored before the name
+    // rule would compare as changed, be resent, and the API would refuse every save of it.
     const trimmedName = name.trim();
+    const nameChanged = name !== header.name && trimmedName !== '';
     update.mutate(
-      { ...values, name: trimmedName === '' ? undefined : trimmedName },
+      { ...values, ...(nameChanged ? { name: trimmedName } : {}) },
       { onSuccess: () => onOpenChange(false) },
     );
   };
@@ -111,12 +121,18 @@ export function MarketplaceCampaignConfigEditDialog({
             className="gap-md flex min-h-0 flex-1 flex-col"
           >
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <MarketplaceCampaignConfigFields
-                form={form}
-                nameValue={name}
-                onNameChange={setName}
-                submitError={update.error}
-              />
+              <div className="gap-md flex flex-col">
+                <MarketplaceCampaignConfigFields
+                  form={form}
+                  nameValue={name}
+                  onNameChange={setName}
+                  submitError={update.error}
+                />
+                <UploadUnplacedIssues
+                  error={update.error}
+                  placedFields={placedConfigFields(discountType)}
+                />
+              </div>
             </div>
 
             <DialogFooter className="shrink-0">

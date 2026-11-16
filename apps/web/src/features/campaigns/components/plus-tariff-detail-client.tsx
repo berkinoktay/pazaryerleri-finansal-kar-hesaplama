@@ -5,6 +5,8 @@ import { useTranslations } from 'next-intl';
 import { parseAsFloat, parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
 
+import { WORKBOOK_PAGES } from '@pazarsync/utils';
+
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { PageHeader } from '@/components/patterns/page-header';
@@ -14,7 +16,7 @@ import { useRouter } from '@/i18n/navigation';
 import { ApiError } from '@/lib/api-error';
 
 import { useDeletePlusTariff } from '../hooks/use-delete-plus-tariff';
-import { useExportPlusTariff } from '../hooks/use-export-plus-tariff';
+import { useExportWorkbook } from '../hooks/use-export-workbook';
 import { usePlusTariffDetail } from '../hooks/use-plus-tariff-detail';
 import { useUpdatePlusSelections } from '../hooks/use-update-plus-selections';
 import { toPlusTariffView } from '../lib/adapt-plus-tariff';
@@ -73,7 +75,11 @@ export function PlusTariffDetailClient({
   const router = useRouter();
   const detail = usePlusTariffDetail(orgId ?? '', storeId, tariffId);
   const updateSelections = useUpdatePlusSelections(orgId ?? '', storeId ?? '', tariffId);
-  const exportTariff = useExportPlusTariff(orgId ?? '', storeId ?? '');
+  const exportTariff = useExportWorkbook(
+    WORKBOOK_PAGES.PLUS_COMMISSION_TARIFF,
+    orgId ?? '',
+    storeId ?? '',
+  );
   const deleteTariff = useDeletePlusTariff(orgId ?? '', storeId ?? '');
 
   const view = React.useMemo(

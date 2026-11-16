@@ -591,7 +591,7 @@ describe('commission tariff adapter: form, name, response and the week index', (
         matchedRows: 1,
         matchedDistinct: 1,
         skippedRows: 0,
-        prefilledRows: 0,
+        prefilledRows: 7,
         meta: week,
       }),
     ).toEqual({
@@ -602,6 +602,7 @@ describe('commission tariff adapter: form, name, response and the week index', (
       matched: 1,
       unmatched: 54,
       skippedRows: 0,
+      prefilledRows: 7,
     });
   });
 
@@ -616,15 +617,6 @@ describe('commission tariff adapter: form, name, response and the week index', (
     );
     expect(adapter.rejectionForUniqueViolation(violation(['period_id', 'barcode']))).toBeNull();
     expect(adapter.rejectionForUniqueViolation(new Error('boom'))).toBeNull();
-  });
-
-  it('maps the legacy wire codes of the page', () => {
-    expect(adapter.legacyCodes).toEqual({
-      EMPTY_FILE: 'EMPTY_TARIFF_FILE',
-      WRONG_FILE_FOR_PAGE: 'INVALID_TARIFF_FORMAT',
-      NO_PERIOD: 'NO_TARIFF_PERIOD',
-      DUPLICATE_WEEK: 'DUPLICATE_TARIFF_WEEK',
-    });
   });
 });
 

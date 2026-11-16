@@ -211,10 +211,6 @@ export const advantageTariffAdapter: WorkbookVerticalAdapter<
     };
   },
   formats: [trendyolAdvantageTariffFormat],
-  legacyCodes: {
-    EMPTY_FILE: 'EMPTY_TARIFF_FILE',
-    WRONG_FILE_FOR_PAGE: 'INVALID_ADVANTAGE_TARIFF_FORMAT',
-  },
   inspect: inspectCommissionSource,
   nameFallback: () => null,
   persist: async (tx, { parent, rows, variantIdByAnchor, config }) => {
@@ -265,6 +261,7 @@ export const advantageTariffAdapter: WorkbookVerticalAdapter<
     matched: outcome.matchedRows,
     unmatched: outcome.rowCount - outcome.matchedRows,
     skippedRows: outcome.skippedRows,
+    prefilledRows: outcome.prefilledRows,
   }),
   load: loadAdvantageTariff,
   notFoundResource: 'AdvantageTariff',

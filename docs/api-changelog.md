@@ -31,17 +31,25 @@ section "Versioning" for details.
   Each change below applies to all six pages (discount lists, marketplace campaign lists, flash
   product lists, advantage tariffs, Plus commission tariffs and commission tariffs) unless it
   names one:
-  - The import route can answer `409` with `code: 'CONFLICT'` and `meta.reason`
-    `IMPORT_IN_PROGRESS` (another import of the same store and page is running) or
-    `UPLOAD_QUOTA_EXCEEDED` (the store already holds 50 lists of the page, or its stored source
-    files plus the upload would exceed 200 MiB). The `409` response is added to the route's
-    OpenAPI entry.
+  - The import route can answer `409` with `code` `IMPORT_IN_PROGRESS` (another import of the
+    same store and page is running) or `UPLOAD_QUOTA_EXCEEDED` (the store already holds 50 lists
+    of the page, or its stored source files plus the upload would exceed 200 MiB). The `409`
+    response is added to the route's OpenAPI entry.
   - A Hepsiburada store answers `422` with `{ field: 'file', code: 'UNSUPPORTED_PLATFORM_FORMAT' }`.
+  - A refused file answers the file code under its own name on every page, in place of the
+    page's old code (breaking; the web ships the matching change in the same release):
+    `WRONG_FILE_FOR_PAGE` in place of the six invalid-format codes (`INVALID_DISCOUNT_FORMAT`,
+    `INVALID_CAMPAIGN_FORMAT`, `INVALID_FLASH_FORMAT`, `INVALID_ADVANTAGE_TARIFF_FORMAT`,
+    `INVALID_PLUS_TARIFF_FORMAT`, `INVALID_TARIFF_FORMAT`); `EMPTY_FILE` in place of
+    `EMPTY_DISCOUNT_FILE`, `EMPTY_CAMPAIGN_FILE`, `EMPTY_FLASH_FILE` and `EMPTY_TARIFF_FILE`;
+    `NO_PERIOD` in place of `NO_TARIFF_PERIOD`; `DUPLICATE_WEEK` in place of
+    `DUPLICATE_TARIFF_WEEK`. A client that matched the old codes must match the new ones.
   - The named sheet is selected strictly, with no first-sheet fallback: a workbook without it
-    answers `422` with `{ field: 'file', code: 'SHEET_NOT_FOUND' }`, or with the page's
-    invalid-format code (`INVALID_DISCOUNT_FORMAT` for discount lists) and `meta.detectedPage`
-    when its first sheet is another page's file. Marketplace campaign files are read by position
-    (the sheet name follows the campaign), so their first sheet is always the one read.
+    answers `422` with `{ field: 'file', code: 'SHEET_NOT_FOUND' }`, or with
+    `{ field: 'file', code: 'WRONG_FILE_FOR_PAGE' }` and `meta` (`detectedFormatId`,
+    `detectedPlatform`, `detectedPage`) when its first sheet is another page's file. Marketplace
+    campaign files are read by position (the sheet name follows the campaign), so their first
+    sheet is always the one read.
   - A write-back column under a shared formula, an array formula or a merged range, or a barcode
     cell longer than 256 characters, answers `422` with `{ field: 'file', code: 'MALFORMED_SHEET' }`
     at upload instead of failing the first export; nothing is stored.
@@ -57,14 +65,10 @@ section "Versioning" for details.
     trimmed and stored at any length. A name empty after trimming still falls back to the file
     name stem, then to the page's default name. The `name` form field gains `maxLength: 120` and
     a `pattern` in the OpenAPI spec.
-  - The page's invalid-format answer (`INVALID_DISCOUNT_FORMAT` for discount lists,
-    `INVALID_CAMPAIGN_FORMAT` for marketplace campaign lists, `INVALID_FLASH_FORMAT` for flash
-    product lists, `INVALID_ADVANTAGE_TARIFF_FORMAT` for advantage tariffs,
-    `INVALID_PLUS_TARIFF_FORMAT` for Plus commission tariffs, `INVALID_TARIFF_FORMAT` for
-    commission tariffs) now always carries
-    `errors[0].meta`
-    with `detectedFormatId`, `detectedPlatform` and `detectedPage`; each is `null` when the file
-    matches no known page. Before, a file that matched no page carried no `meta`.
+  - The wrong-file answer (`WRONG_FILE_FOR_PAGE`, on every page) now always carries
+    `errors[0].meta` with `detectedFormatId`, `detectedPlatform` and `detectedPage`; each is
+    `null` when the file matches no known page. Before, a file that matched no page carried no
+    `meta`.
   - A marketplace campaign file whose maximum price on a kept row is negative or has more than 10
     integer digits answers `422` with `{ field: 'file', code: 'MALFORMED_SHEET' }`; nothing is
     stored. Before, the file was stored, and an export that chose the maximum price for that row
@@ -101,26 +105,36 @@ section "Versioning" for details.
     `{ field: 'file', code: 'MALFORMED_SHEET' }`; nothing is stored. Before, the file was stored
     and its export wrote a tariff selection label wider than the column's own. This check runs
     before the tariff week check, so such a file whose week is already taken answers
-    `MALFORMED_SHEET`, not `DUPLICATE_TARIFF_WEEK`. A period header of 0 days, or more than seven
+    `MALFORMED_SHEET`, not `DUPLICATE_WEEK`. A period header of 0 days, or more than seven
     periods with data, answers the same `422`; before, such a file was stored and every zero-day
     period became its own export file.
   - A commission or Plus commission tariff import checks the tariff week again inside its write
     transaction.
     Two uploads of overlapping weeks that start on different days, sent at the same time, no
-    longer both store: the later one answers the duplicate week error (`DUPLICATE_TARIFF_WEEK`).
+    longer both store: the later one answers the duplicate week error (`DUPLICATE_WEEK`).
   - On advantage tariffs the commission source (`commissionSourceTariffId`) is checked after the
     file's rows are read, with the same field error (`INVALID_COMMISSION_SOURCE`): an upload that
     is both a refused file and names another store's commission tariff answers the file error.
-- **Discount list and marketplace campaign list names follow the import's name rule**
+- **Discount list and marketplace campaign list names follow the import's name rule, and their
+  window dates answer field codes**
   (`PATCH /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}`,
   `PATCH /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}`). A `name`
-  is trimmed and stored trimmed; a whitespace-only name now answers the `422` an empty name
-  already got; over 120 characters answers `422` `NAME_TOO_LONG` and a control or format
-  character `422` `NAME_INVALID_CHARACTERS` on `field: 'name'`, and nothing changes. Before, any
-  non-empty string was stored as sent. A list stored before this rule with such a character in its name
+  is trimmed and stored trimmed; an empty or whitespace-only name answers `422` with
+  `{ field: 'name', code: 'NAME_REQUIRED' }`; over 120 characters answers `422` `NAME_TOO_LONG`
+  and a control or format character `422` `NAME_INVALID_CHARACTERS` on `field: 'name'`, and
+  nothing changes. Before, any non-empty string was stored as sent, and an empty name answered a
+  Zod sentence as its code. A list stored before this rule with such a character in its name
   answers the same `422` while its stored name is sent back unchanged. The body's `name` gains
   `maxLength: 120` and a `pattern` in the OpenAPI spec. The `name` and `source_filename` columns
   of the six campaign list tables become `varchar(120)`.
+  The window dates `startsAt` and `endsAt` of the discount and campaign config, on these two
+  routes and on the two imports
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/import`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/import`), answer `422`
+  with `code: 'INVALID_DATE'` on their field for a value that is not an ISO date time with an
+  offset, and `DATE_OUT_OF_RANGE` for one whose UTC year is outside 1900 to 9999; nothing is
+  stored or changed. Before, a malformed date answered a Zod sentence as its code, a year below 1
+  failed at the database write with `500`, and any other year was stored as sent.
 - **Workbook exports run through the generic workbook export**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}/export`,
   `POST /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/export`,
@@ -134,13 +148,15 @@ section "Versioning" for details.
   - Store access is checked before the record id in the path is validated: a malformed id answers
     the store access error (`403` or `404`) to a caller without write access to the store, and
     `422` only to a caller with it. Before, the id was validated first.
-  - Every export condition answers `409` with `code: 'CONFLICT'` and a `meta.reason`:
+  - Every export condition answers `409` with a `code` of its own, in place of `CONFLICT`
+    (breaking; the web ships the matching change in the same release):
     `STORED_FILE_MISSING` (no stored source file), `STORED_FILE_UNREADABLE` (the stored file no
     longer passes the workbook gate or the patcher), `STORED_FILE_UNRECOGNIZED` (its format id is
     unknown, its named sheet is missing or its header no longer resolves), `NO_WRITEBACK_COLUMN`,
-    `ROW_MISMATCH`, `ROW_ANCHOR_MISMATCH`, `ROW_NOT_FOUND` and `EXPORT_FILENAME_COLLISION`.
+    `ROW_MISMATCH`, `ROW_ANCHOR_MISMATCH`, `ROW_NOT_FOUND` and `EXPORT_FILENAME_COLLISION`. A
+    client that matched `CONFLICT` must match these codes.
   - A parse worker that hits its memory or time limit while reading or patching a stored file
-    answers `409` with `meta.reason` `STORED_FILE_UNREADABLE`, no longer `503`. `503` `IMPORT_BUSY`
+    answers `409` `STORED_FILE_UNREADABLE`, no longer `503`. `503` `IMPORT_BUSY`
     now means only that the parse queue is full or the job waited too long in it; the `503`
     description of all six export routes says so.
   - The stored file's named sheet is read strictly, with no first-sheet fallback: a stored file
@@ -152,12 +168,12 @@ section "Versioning" for details.
     writes a different price into each, answers `409` `EXPORT_FILENAME_COLLISION`. Before, both
     window files took the same name and the `.zip` kept only one of them. The names are checked
     before anything is patched.
-  - A plan of more files than one engine call patches (`MAX_PATCH_OUTPUTS`) answers `409` with
-    `meta.reason` `STORED_FILE_UNREADABLE` before anything is patched. Only a commission or Plus
+  - A plan of more files than one engine call patches (`MAX_PATCH_OUTPUTS`) answers `409`
+    `STORED_FILE_UNREADABLE` before anything is patched. Only a commission or Plus
     tariff stored before its periods were checked at upload can plan that many window files.
   - A list stored before the upload checked its values can hold one the export's write rule
     refuses (a negative marketplace campaign maximum price, a tariff window wider than nine
-    days). Its export answers `409` with `meta.reason` `STORED_FILE_UNREADABLE` instead of `500`.
+    days). Its export answers `409` `STORED_FILE_UNREADABLE` instead of `500`.
   - Advantage tariff items are read in a fixed order (sort order, then barcode, then id). When two
     items with one barcode both carry a price, the later one in that order is written; before,
     the database's unspecified row order decided.
@@ -209,7 +225,9 @@ section "Versioning" for details.
   except a worksheet's hyperlink to an `http`, `https` or `mailto` address, answers `422` with
   `{ field: 'file', code: 'UNSAFE_CONTENT' }`. The six
   export routes read the stored file through the same gate: a stored file with any of these
-  conditions answers `409 CONFLICT`. Valid Trendyol files are unaffected.
+  conditions answers `409 CONFLICT`. _(Superseded within this Unreleased: such a stored file now
+  answers `409` `STORED_FILE_UNREADABLE`; see "Workbook exports run through the generic workbook
+  export".)_ Valid Trendyol files are unaffected.
 - **The campaign workbook upload gate checks cell styles, the sheet data, every formula field
   against an allow list, the parts it scans by their content, and relationship targets**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs|advantage-tariffs|flash-products|discount-lists|marketplace-campaigns}/import`).
@@ -315,8 +333,10 @@ section "Versioning" for details.
   above. A digital signature relationship (a signature origin, signature or
   certificate) answers `422` `UNSAFE_CONTENT` too: verifying a signature can fetch the
   certificate's revocation and issuer addresses. The six export routes read the stored file through
-  the same gate: a stored file with any of these conditions answers `409 CONFLICT`. Valid Trendyol
-  files are unaffected.
+  the same gate: a stored file with any of these conditions answers `409 CONFLICT`. _(Superseded
+  within this Unreleased: such a stored file now answers `409` `STORED_FILE_UNREADABLE`; see
+  "Workbook exports run through the generic workbook export".)_ Valid Trendyol files are
+  unaffected.
 - **Campaign workbook import routes are guarded before the body is read**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs|advantage-tariffs|flash-products|discount-lists|marketplace-campaigns}/import`).
   Store access and the `DATA_WRITE` capability are now checked in route middleware, so a caller who
@@ -329,14 +349,19 @@ section "Versioning" for details.
   references, over-long element names, excessive namespace declarations) and stricter
   `CORRUPT_FILE` / `PAYLOAD_TOO_LARGE` / `ROW_CAP_EXCEEDED` / `COL_CAP_EXCEEDED` outcomes for crafted
   archives. Valid Trendyol files are unaffected. A concurrent duplicate commission or Plus tariff
-  week now answers `422 DUPLICATE_TARIFF_WEEK` instead of a 409 naming database columns. A
+  week now answers `422 DUPLICATE_TARIFF_WEEK` instead of a 409 naming database columns.
+  _(Superseded within this Unreleased: that code is now `DUPLICATE_WEEK`; see "Workbook imports
+  run through the generic workbook import".)_ A
   malformed `commissionSourceTariffId` on the advantage import answers `422` with
   `INVALID_COMMISSION_SOURCE` instead of a 500. Non-breaking for well-behaved clients.
 - **Campaign workbook export routes are rate limited** (`POST .../{tariffId|listId|campaignId}/export`
   on the same six resources): `429` after 20 exports per minute per user. Commission and Plus
   tariff exports of an unreadable stored file now answer `409 CONFLICT` instead of a 500. A stored
   file whose rows no longer match the export plan answers `409 CONFLICT` with a fixed `detail`
-  (row numbers are logged server-side, not returned).
+  (row numbers are logged server-side, not returned). _(Superseded within this Unreleased: an
+  unreadable stored file now answers `409` `STORED_FILE_UNREADABLE`, and rows that no longer
+  match answer `409` `ROW_MISMATCH`, `ROW_ANCHOR_MISMATCH` or `ROW_NOT_FOUND`; see "Workbook
+  exports run through the generic workbook export".)_
 - **Workbook reads are serialised per API process.** Imports and exports wait for one another; when
   too many are already waiting, the request answers `503 IMPORT_BUSY` with `Retry-After` instead of
   queuing indefinitely.
@@ -347,7 +372,7 @@ section "Versioning" for details.
   - a parse that waits more than 20 s in the parse queue answers `503 IMPORT_BUSY` with
     `Retry-After`;
   - an export whose stored file hits a worker limit answers `503 IMPORT_BUSY` instead of `409`
-    (superseded: it now answers `409` with `meta.reason` `STORED_FILE_UNREADABLE`, see "Workbook
+    (superseded: it now answers `409` `STORED_FILE_UNREADABLE`, see "Workbook
     exports run through the generic workbook export").
 
   Before, such a file could crash or stall the API process. Non-breaking for well-behaved clients.
@@ -751,6 +776,14 @@ section "Versioning" for details.
 
 ### Added
 
+- **The six workbook import responses carry `prefilledRows`**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products|advantage-tariffs|plus-commission-tariffs|commission-tariffs}/import`).
+  `prefilledRows` (integer, required) is the number of kept rows that already held a choice in
+  a column the export writes and the import does not read as a choice. Those values stay in the
+  exported file unless a choice is made for the row. The `ImportTariffResponse`,
+  `ImportPlusTariffResponse`, `ImportAdvantageTariffResponse`, `ImportFlashProductsResponse`,
+  `ImportDiscountListResponse` and `ImportMarketplaceCampaignResponse` component schemas gain
+  the property. Additive.
 - **`SyncLogResponse.syncType` and `SyncFreshness.syncType` gained `PRODUCTS_CHANGES`**
   (both sync-log list endpoints, `GET /v1/organizations/{orgId}/sync-logs` and
   `GET /v1/organizations/{orgId}/stores/{storeId}/sync-logs`, plus the single sync-log
@@ -781,7 +814,9 @@ section "Versioning" for details.
     current price or a maximum price are skipped. **201** →
     `ImportMarketplaceCampaignResponse` `{ campaignId, name, itemCount, matched, unmatched,
     skippedRows }`. A file whose header layout is not the campaign export is **422**
-    `VALIDATION_ERROR` (`file` / `INVALID_CAMPAIGN_FORMAT`).
+    `VALIDATION_ERROR` (`file` / `INVALID_CAMPAIGN_FORMAT`). _(Superseded within this Unreleased:
+    the code is now `WRONG_FILE_FOR_PAGE`; see "Workbook imports run through the generic workbook
+    import".)_
   - `GET .../marketplace-campaigns` — `MarketplaceCampaignListResponse` `{ data:
     MarketplaceCampaignListItem[] }`, newest first: the full configuration (including
     `trendyolFundingPct`), `itemCount`, `selectedCount` (items whose price choice is not
@@ -863,7 +898,9 @@ section "Versioning" for details.
   alignment zips the campaign's `sortOrder`-ordered items against the file's imported
   (non-skipped) data rows with a barcode defensive guard. Marks the campaign exported. **409**
   `CONFLICT` when the campaign kept no stored source file (or it is unreadable / not a
-  recognizable Kampanyalar export). `DATA_WRITE` capability.
+  recognizable Kampanyalar export). `DATA_WRITE` capability. _(Superseded within this
+  Unreleased: these now answer `409` `STORED_FILE_MISSING`, `STORED_FILE_UNREADABLE` or
+  `STORED_FILE_UNRECOGNIZED`; see "Workbook exports run through the generic workbook export".)_
 
 - **Discount list import endpoint**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/import`) — Fifth
@@ -877,7 +914,9 @@ section "Versioning" for details.
   such as `VALUE_REQUIRED`, `MIN_BASKET_REQUIRED`, `NTH_INDEX_OUT_OF_RANGE` (2–4),
   `PAY_MUST_BE_LESS_THAN_BUY`, `FIXED_PRICE_ONLY_FOR_NTH`, `PERCENT_OVER_100`,
   `END_BEFORE_START`; file rejections use `field:"file"` codes (`EMPTY_DISCOUNT_FILE`,
-  `INVALID_DISCOUNT_FORMAT`, plus the shared upload guards). Columns are resolved by
+  `INVALID_DISCOUNT_FORMAT`, plus the shared upload guards). _(Superseded within this Unreleased:
+  these are now `EMPTY_FILE` and `WRONG_FILE_FOR_PAGE`; see "Workbook imports run through the
+  generic workbook import".)_ Columns are resolved by
   header NAME (Trendyol's own "Kampayaya" typo matched verbatim, corrected spelling
   accepted as fallback); the "Güncel Satış Fiyatı" TEXT column ("250 ₺" style) is
   currency-parsed; a row already marked "Evet" imports as included. **201**
@@ -922,6 +961,9 @@ section "Versioning" for details.
     cell is byte-for-byte intact and a list with no changes vs. the original streams back
     verbatim. Marks the list exported. **409** `CONFLICT` when the list kept no stored source
     file (or it is unreadable / not a recognizable İndirimler export). `DATA_WRITE` capability.
+    _(Superseded within this Unreleased: these now answer `409` `STORED_FILE_MISSING`,
+    `STORED_FILE_UNREADABLE` or `STORED_FILE_UNRECOGNIZED`; see "Workbook exports run through the
+    generic workbook export".)_
 - **Generic manual-sync trigger endpoint** (`POST /v1/organizations/{orgId}/stores/{storeId}/syncs`).
   Enqueues a PENDING MANUAL `SyncLog` for the `syncType` chosen in the body
   (`{ "syncType": "ORDERS" | "PRODUCTS" | "SETTLEMENTS" | "CLAIMS" }`) and returns
@@ -1195,6 +1237,8 @@ section "Versioning" for details.
   profit is computed later, on read. Returns counts `{ tariffId, productCount, periodCount,
   itemCount, matched, unmatched, skippedRows }`. Store-scoped (`DATA_WRITE`). A file whose header
   layout does not match the expected export → `422 VALIDATION_ERROR` (`INVALID_TARIFF_FORMAT`).
+  _(Superseded within this Unreleased: the code is now `WRONG_FILE_FOR_PAGE`; see "Workbook
+  imports run through the generic workbook import".)_
   (Engine note: `@pazarsync/spreadsheet` now strips a bogus single-cell `<dimension>` that
   Trendyol writes, which otherwise made the reader drop every data row.)
 

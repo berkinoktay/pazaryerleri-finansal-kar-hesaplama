@@ -3,12 +3,14 @@
 //     reads the stored file once;
 //   - nothing an export reads surfaces as a 500: bytes that are not a workbook, a
 //     format id no adapter knows, a renamed sheet, a byte after the zip end record and
-//     a row that no longer matches its item are each a 409 CONFLICT with a reason, and
+//     a row that no longer matches its item are each a 409 with its reason as the code, and
 //     the list is not marked exported;
 //   - a list whose choices match the stored file streams the stored bytes back;
 //   - the download carries the hardened headers and never the raw stored name;
 //   - the patch step: a write-back cell a stored file holds under a shared formula is
-//     409 STORED_FILE_UNREADABLE, a full parse queue is 503 IMPORT_BUSY.
+//     409 STORED_FILE_UNREADABLE, a full parse queue is 503 IMPORT_BUSY;
+//   - a stored file holding active content (a macro project part, a WEBSERVICE
+//     formula) is 409 STORED_FILE_UNREADABLE, and no byte of it is handed out.
 // And, on the pages whose stored records can hold what the export cannot write:
 //   - a legacy commission tariff whose window files share a name is 409
 //     EXPORT_FILENAME_COLLISION, and one that plans more files than one engine call
@@ -29,6 +31,7 @@ import {
   patchWorkbook,
   readWorkbookGrid,
   SpreadsheetFileError,
+  UNSAFE_CONTENT_REASONS,
 } from '@pazarsync/spreadsheet';
 import { syncLog } from '@pazarsync/sync-core';
 import { WORKBOOK_PAGES } from '@pazarsync/utils';
@@ -41,6 +44,7 @@ import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization, createStore } from '../../helpers/factories';
 import { webClientFilename } from '../../helpers/web-client-filename';
+import { macroFixture, unsafeFormulaFixture } from '../../helpers/workbook-unsafe-fixtures';
 
 // The engine itself, with its grid read and its patch wrapped in spies.
 vi.mock('@pazarsync/spreadsheet', async (importOriginal) => {
@@ -61,6 +65,8 @@ const FIXTURE = readFileSync(
 );
 const IMPORT_FILENAME = 'trendyol_indirimler.xlsx';
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+// The content type of every problem body (`c.json` in problem-details.ts).
+const JSON_MIME = 'application/json';
 
 const NET_CONFIG = {
   discountType: 'NET',
@@ -78,10 +84,7 @@ const RLO_PERCENT_ENCODED = '%E2%80%AE';
 const SMUGGLED_NAME = "rapor;filename*=UTF-8''setup.exe;.xlsx";
 
 const ImportSchema = z.object({ listId: z.string() });
-const ProblemSchema = z.object({
-  code: z.string(),
-  meta: z.object({ reason: z.string().optional() }).optional(),
-});
+const ProblemSchema = z.object({ code: z.string() });
 
 interface Ctx {
   accessToken: string;
@@ -150,15 +153,18 @@ async function updateList(
   expect(count).toBe(1);
 }
 
-/** Answers 409 CONFLICT with `reason`, and the list is still not marked exported. */
-async function expectConflict(ctx: Ctx, listId: string, reason: string): Promise<void> {
+/**
+ * Answers 409 with `reason` as its code, and the list is still not marked exported.
+ * Returns the response, its body already read.
+ */
+async function expectConflict(ctx: Ctx, listId: string, reason: string): Promise<Response> {
   const res = await app.request(exportRequest(ctx, listId));
 
   expect(res.status).toBe(409);
   const body = ProblemSchema.parse(await res.json());
-  expect(body.code).toBe('CONFLICT');
-  expect(body.meta?.reason).toBe(reason);
+  expect(body.code).toBe(reason);
   expect((await storedList(ctx, listId)).exportedAt).toBeNull();
+  return res;
 }
 
 /** The fixture with its discount sheet renamed in the workbook part. */
@@ -397,6 +403,43 @@ describe('generic workbook export on the discount route', () => {
     expect(enginePatch).toHaveBeenCalledTimes(1);
     expect((await storedList(ctx, listId)).exportedAt).toBeNull();
   });
+
+  it.each([
+    [
+      'a macro project',
+      (source: Buffer) => macroFixture(source),
+      UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+    ],
+    [
+      'a WEBSERVICE formula',
+      (source: Buffer) => unsafeFormulaFixture(source, DISCOUNT_SHEET_PART),
+      UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+    ],
+  ] as const)(
+    'answers a stored file with %s with 409 STORED_FILE_UNREADABLE and hands out no byte of it',
+    async (_name, build, reason) => {
+      const ctx = await setupStore();
+      const listId = await importFile(ctx);
+      await updateList(ctx, listId, { sourceFile: new Uint8Array(build(FIXTURE)) });
+      const warn = vi.spyOn(syncLog, 'warn').mockImplementation(() => undefined);
+
+      const res = await expectConflict(ctx, listId, 'STORED_FILE_UNREADABLE');
+
+      // A problem body, never the workbook.
+      expect(res.headers.get('content-type')).toBe(JSON_MIME);
+      expect(storedFileRejections(warn)).toEqual([
+        [
+          'workbook.stored-file-rejected',
+          {
+            page: WORKBOOK_PAGES.DISCOUNT_LIST,
+            recordId: listId,
+            code: 'UNSAFE_CONTENT',
+            reason,
+          },
+        ],
+      ]);
+    },
+  );
 });
 
 // A legacy commission tariff: a stored record of the period model the upload no longer
@@ -489,8 +532,7 @@ describe('generic workbook export of a legacy commission tariff', () => {
 
     expect(res.status).toBe(409);
     const body = ProblemSchema.parse(await res.json());
-    expect(body.code).toBe('CONFLICT');
-    expect(body.meta?.reason).toBe('EXPORT_FILENAME_COLLISION');
+    expect(body.code).toBe('EXPORT_FILENAME_COLLISION');
     expect(enginePatch).not.toHaveBeenCalled();
     expect(await tariffExportedAt(ctx, tariffId)).toBeNull();
   });
@@ -507,8 +549,7 @@ describe('generic workbook export of a legacy commission tariff', () => {
 
     expect(res.status).toBe(409);
     const body = ProblemSchema.parse(await res.json());
-    expect(body.code).toBe('CONFLICT');
-    expect(body.meta?.reason).toBe('STORED_FILE_UNREADABLE');
+    expect(body.code).toBe('STORED_FILE_UNREADABLE');
     expect(enginePatch).not.toHaveBeenCalled();
     expect(storedFileRejections(warn)).toEqual([
       [
@@ -596,8 +637,7 @@ describe('generic workbook export of a legacy marketplace campaign list', () => 
 
     expect(res.status).toBe(409);
     const body = ProblemSchema.parse(await res.json());
-    expect(body.code).toBe('CONFLICT');
-    expect(body.meta?.reason).toBe('STORED_FILE_UNREADABLE');
+    expect(body.code).toBe('STORED_FILE_UNREADABLE');
     expect(enginePatch).not.toHaveBeenCalled();
     expect(storedFileRejections(warn)).toEqual([
       [

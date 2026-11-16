@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 
 import { Platform } from '@pazarsync/db/enums';
 import { readWorkbookGrid, type SheetSelector } from '@pazarsync/spreadsheet';
-import { WORKBOOK_PAGES, type WorkbookPage } from '@pazarsync/utils';
+import { UPLOAD_NAME_MAX_LENGTH, WORKBOOK_PAGES, type WorkbookPage } from '@pazarsync/utils';
 import { describe, expect, it, vi } from 'vitest';
 
 import { trendyolAdvantageTariffFormat } from '@/workbooks/formats/trendyol/advantage-tariff.format';
@@ -16,7 +16,7 @@ import { trendyolFlashProductListFormat } from '@/workbooks/formats/trendyol/fla
 import { trendyolMarketplaceCampaignListFormat } from '@/workbooks/formats/trendyol/marketplace-campaign-list.format';
 import { trendyolPlusCommissionTariffFormat } from '@/workbooks/formats/trendyol/plus-commission-tariff.format';
 import { cleanDisplayName } from '@/workbooks/form';
-import { SOURCE_FORMAT_ID_MAX_LENGTH, UPLOAD_NAME_MAX_LENGTH } from '@/config/workbook-limits';
+import { SOURCE_FORMAT_ID_MAX_LENGTH } from '@/config/workbook-limits';
 import { FORMAT_SUMMARIES, type FormatSummary } from '@/workbooks/formats/registry';
 import { diagnoseWorkbook } from '@/workbooks/select-format';
 import { WORKBOOK_PARENT_TABLES, type WorkbookParentTable } from '@/workbooks/upload-quota';
@@ -26,7 +26,6 @@ import { discountListAdapter } from '@/workbooks/verticals/discount-list.adapter
 import { flashProductListAdapter } from '@/workbooks/verticals/flash-product-list.adapter';
 import { marketplaceCampaignListAdapter } from '@/workbooks/verticals/marketplace-campaign-list.adapter';
 import { plusCommissionTariffAdapter } from '@/workbooks/verticals/plus-commission-tariff.adapter';
-import { WORKBOOK_FILE_CODES, type LegacyCodes } from '@/workbooks/workbook-errors';
 
 import {
   readMigrationSql,
@@ -112,7 +111,6 @@ interface AdapterFacts {
   readonly page: WorkbookPage;
   readonly parentTable: WorkbookParentTable;
   readonly formats: readonly FormatSummary[];
-  readonly legacyCodes: LegacyCodes;
 }
 
 /** The six adapters the route modules mount, one per page. */
@@ -126,8 +124,6 @@ const ADAPTERS: readonly AdapterFacts[] = [
 ];
 
 const ADAPTER_FORMATS: readonly FormatSummary[] = ADAPTERS.flatMap((adapter) => adapter.formats);
-
-const FILE_CODES: readonly string[] = WORKBOOK_FILE_CODES;
 
 /** The format id the backfills write: the Trendyol format of the first version. */
 const BACKFILLED_FORMAT_VERSION_SUFFIX = ':v1';
@@ -220,12 +216,6 @@ describe('composition root', () => {
     expect(FORMAT_SUMMARIES.filter((summary) => summary.platform === Platform.HEPSIBURADA)).toEqual(
       [],
     );
-  });
-
-  it.each(Object.values(WORKBOOK_PAGES))('%s: every legacy code key is a file code', (page) => {
-    for (const key of Object.keys(adapterOf(page).legacyCodes)) {
-      expect(FILE_CODES).toContain(key);
-    }
   });
 
   it('gives each adapter its own parent table from WORKBOOK_PARENT_TABLES', () => {

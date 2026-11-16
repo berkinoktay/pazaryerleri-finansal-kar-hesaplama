@@ -6,6 +6,8 @@ import { parseAsBoolean, parseAsString, useQueryStates } from 'nuqs';
 import * as React from 'react';
 import { toast } from 'sonner';
 
+import { WORKBOOK_PAGES } from '@pazarsync/utils';
+
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { PageHeader } from '@/components/patterns/page-header';
@@ -17,7 +19,7 @@ import { ApiError } from '@/lib/api-error';
 
 import type { TargetMarginResult } from '../api/suggest-target-margin.api';
 import { useDeleteMarketplaceCampaign } from '../hooks/use-delete-marketplace-campaign';
-import { useExportMarketplaceCampaign } from '../hooks/use-export-marketplace-campaign';
+import { useExportWorkbook } from '../hooks/use-export-workbook';
 import { useMarketplaceCampaignDetail } from '../hooks/use-marketplace-campaign-detail';
 import { useUpdateCampaignSelections } from '../hooks/use-update-campaign-selections';
 import {
@@ -90,7 +92,8 @@ export function MarketplaceCampaignDetailClient({
     storeId ?? '',
     campaignId,
   );
-  const { mutate: exportCampaign, isPending: exporting } = useExportMarketplaceCampaign(
+  const { mutate: exportCampaign, isPending: exporting } = useExportWorkbook(
+    WORKBOOK_PAGES.MARKETPLACE_CAMPAIGN_LIST,
     orgId ?? '',
     storeId ?? '',
   );

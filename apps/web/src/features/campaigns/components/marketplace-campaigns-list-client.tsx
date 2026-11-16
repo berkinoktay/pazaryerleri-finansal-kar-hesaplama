@@ -3,20 +3,25 @@
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { WORKBOOK_PAGES } from '@pazarsync/utils';
+
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Button } from '@/components/ui/button';
 import { Link, useRouter } from '@/i18n/navigation';
 
+import type { WorkbookImportInput } from '../api/workbook-endpoints';
 import { useDeleteMarketplaceCampaign } from '../hooks/use-delete-marketplace-campaign';
-import { useExportMarketplaceCampaign } from '../hooks/use-export-marketplace-campaign';
-import { useImportMarketplaceCampaign } from '../hooks/use-import-marketplace-campaign';
+import { useExportWorkbook } from '../hooks/use-export-workbook';
+import { useImportWorkbook } from '../hooks/use-import-workbook';
 import { useMarketplaceCampaigns } from '../hooks/use-marketplace-campaigns';
+import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
 import { downloadBlob } from '../lib/download-blob';
-import { extractFileErrorCode } from '../lib/upload-error';
-import { MarketplaceCampaignUploadDialog } from './marketplace-campaign-upload-dialog';
+import { WORKBOOK_VERTICALS } from '../lib/workbook-verticals';
 import { MarketplaceCampaignsListView } from './marketplace-campaigns-list-view';
+import { WorkbookUploadDialog } from './workbook-upload-dialog';
 
-const DETAIL_BASE = '/campaigns/marketplace-campaigns';
+const PAGE = WORKBOOK_PAGES.MARKETPLACE_CAMPAIGN_LIST;
+const DETAIL_BASE = WORKBOOK_VERTICALS[PAGE].detailBase;
 
 /**
  * Data-bound LIST screen for Kampanyalar. Resolves org/store from the server (passed as props),
@@ -39,13 +44,14 @@ export function MarketplaceCampaignsListClient({
   // and `handleExport` feeds the row actions → the table's columns, whose rebuild remounts every
   // cell (closing an open row menu).
   const { mutate: deleteCampaign } = useDeleteMarketplaceCampaign(orgId ?? '', storeId ?? '');
-  const { mutate: exportCampaign } = useExportMarketplaceCampaign(orgId ?? '', storeId ?? '');
+  const { mutate: exportCampaign } = useExportWorkbook(PAGE, orgId ?? '', storeId ?? '');
   const {
     mutate: importCampaign,
     isPending: importing,
     error: importError,
     reset: resetImport,
-  } = useImportMarketplaceCampaign(orgId ?? '', storeId ?? '');
+  } = useImportWorkbook(PAGE, orgId ?? '', storeId ?? '');
+  const warnPrefilled = usePrefilledWarning();
   const [uploadOpen, setUploadOpen] = React.useState(false);
 
   const items = React.useMemo(() => list.data ?? [], [list.data]);
@@ -55,21 +61,17 @@ export function MarketplaceCampaignsListClient({
     [router],
   );
 
-  const handleImport = React.useCallback<
-    React.ComponentProps<typeof MarketplaceCampaignUploadDialog>['onSubmit']
-  >(
-    (config, file, name) => {
-      importCampaign(
-        { file, name, config },
-        {
-          onSuccess: (result) => {
-            setUploadOpen(false);
-            openDetail(result.campaignId);
-          },
+  const handleImport = React.useCallback(
+    (input: WorkbookImportInput): void => {
+      importCampaign(input, {
+        onSuccess: (result) => {
+          setUploadOpen(false);
+          warnPrefilled(result.prefilledRows);
+          openDetail(result.id);
         },
-      );
+      });
     },
-    [importCampaign, openDetail],
+    [importCampaign, openDetail, warnPrefilled],
   );
 
   const handleExport = React.useCallback(
@@ -127,15 +129,16 @@ export function MarketplaceCampaignsListClient({
         onExport={handleExport}
         onDelete={handleDelete}
       />
-      <MarketplaceCampaignUploadDialog
+      <WorkbookUploadDialog
+        page={PAGE}
         open={uploadOpen}
         onOpenChange={(next) => {
           if (!next) resetImport();
           setUploadOpen(next);
         }}
+        scope={{ orgId, storeId }}
         onSubmit={handleImport}
         submitting={importing}
-        errorCode={extractFileErrorCode(importError)}
         submitError={importError}
         onResetError={resetImport}
       />

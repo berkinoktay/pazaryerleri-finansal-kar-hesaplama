@@ -194,7 +194,7 @@ describe('resolveWriteColumns', () => {
     expect(err.meta).toEqual({ reason: WRITE_COLUMN_CLASH_REASONS.SHARED_TAG });
 
     const mapped = captureThrow(() =>
-      toUploadError(err, {}, { page: WORKBOOK_PAGES.PLUS_COMMISSION_TARIFF }),
+      toUploadError(err, { page: WORKBOOK_PAGES.PLUS_COMMISSION_TARIFF }),
     );
     expect(mapped).toBeInstanceOf(ValidationError);
     if (!(mapped instanceof ValidationError)) return;
@@ -211,7 +211,7 @@ describe('resolveWriteColumns', () => {
     expect(err.meta).toEqual({ reason: WRITE_COLUMN_CLASH_REASONS.SHARED_COLUMN });
 
     const mapped = captureThrow(() =>
-      toUploadError(err, {}, { page: WORKBOOK_PAGES.PLUS_COMMISSION_TARIFF }),
+      toUploadError(err, { page: WORKBOOK_PAGES.PLUS_COMMISSION_TARIFF }),
     );
     expect(mapped).toBeInstanceOf(ValidationError);
     if (!(mapped instanceof ValidationError)) return;
@@ -361,7 +361,7 @@ describe('requireWritableValue', () => {
     const err = captureThrow(() => requireWritableValue(scaled, '-5.00'));
 
     const mapped = captureThrow(() =>
-      toUploadError(err, {}, { page: WORKBOOK_PAGES.MARKETPLACE_CAMPAIGN_LIST }),
+      toUploadError(err, { page: WORKBOOK_PAGES.MARKETPLACE_CAMPAIGN_LIST }),
     );
     expect(mapped).toBeInstanceOf(ValidationError);
     if (!(mapped instanceof ValidationError)) return;

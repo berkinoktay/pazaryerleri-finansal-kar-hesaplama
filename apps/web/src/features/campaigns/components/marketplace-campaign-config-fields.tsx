@@ -4,6 +4,8 @@ import { useTranslations } from 'next-intl';
 import * as React from 'react';
 import { type UseFormReturn } from 'react-hook-form';
 
+import type { DiscountType } from '@pazarsync/db/enums';
+
 import {
   FormControl,
   FormDescription,
@@ -14,6 +16,8 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 
+import { useServerFieldErrors } from '../hooks/use-server-field-errors';
+import { visibleConfigFields } from '../lib/discount-config';
 import {
   CAMPAIGN_DISCOUNT_TYPES,
   type CampaignConfigFormInput,
@@ -29,7 +33,7 @@ import {
 } from './campaign-config-sections';
 
 // The RHF-backed form fields — a backend VALIDATION_ERROR whose `field` is one of these maps to
-// a `form.setError`; `file` (owned by the upload dialog's errorCode path) and `name` (local
+// a `form.setError`; `file` (owned by the upload dialog's file error) and `name` (local
 // state, rendered inline) are handled outside this set so no issue renders twice.
 const RHF_FIELD_NAMES = [
   'discountType',
@@ -45,8 +49,21 @@ const RHF_FIELD_NAMES = [
   'endsAt',
 ] as const satisfies readonly (keyof CampaignConfigFormInput)[];
 
-function isRhfFieldName(field: string): field is (typeof RHF_FIELD_NAMES)[number] {
-  return RHF_FIELD_NAMES.some((name) => name === field);
+/**
+ * The fields of this section that have a message slot on screen for the given kurgu: the name,
+ * the kurgu picker, ONLY the parameters that kurgu shows, the funding rate and the window. A
+ * parameter the kurgu hides has no slot (its `form.setError` would be invisible), so the dialog
+ * lists its issue itself (`UploadUnplacedIssues`).
+ */
+export function placedConfigFields(discountType: DiscountType): readonly string[] {
+  return [
+    'name',
+    'discountType',
+    ...visibleConfigFields(discountType),
+    'trendyolFundingPct',
+    'startsAt',
+    'endsAt',
+  ];
 }
 
 /** The funding-rate codes on top of the shared kurgu buckets. */
@@ -109,13 +126,7 @@ export function MarketplaceCampaignConfigFields({
 
   // Backend VALIDATION_ERROR field issues → inline messages (see DiscountConfigFields for the
   // full rationale; an effect is required because setError writes into external RHF state).
-  React.useEffect(() => {
-    for (const issue of validationIssues(submitError)) {
-      if (isRhfFieldName(issue.field)) {
-        form.setError(issue.field, { type: 'server', message: issue.code });
-      }
-    }
-  }, [submitError, form]);
+  useServerFieldErrors(form, submitError, RHF_FIELD_NAMES);
 
   return (
     <div className="gap-md flex flex-col">

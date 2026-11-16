@@ -5,6 +5,8 @@ import { useTranslations } from 'next-intl';
 import { parseAsFloat, parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
 
+import { WORKBOOK_PAGES } from '@pazarsync/utils';
+
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { PageHeader } from '@/components/patterns/page-header';
@@ -15,7 +17,7 @@ import { ApiError } from '@/lib/api-error';
 
 import { useCommissionTariffDetail } from '../hooks/use-commission-tariff-detail';
 import { useDeleteTariff } from '../hooks/use-delete-tariff';
-import { useExportTariff } from '../hooks/use-export-tariff';
+import { useExportWorkbook } from '../hooks/use-export-workbook';
 import { useUpdateSelections } from '../hooks/use-update-selections';
 import { asBandKey } from '../lib/band-key';
 import {
@@ -73,7 +75,11 @@ export function CommissionTariffDetailClient({
   const router = useRouter();
   const detail = useCommissionTariffDetail(orgId ?? '', storeId, tariffId);
   const updateSelections = useUpdateSelections(orgId ?? '', storeId ?? '', tariffId);
-  const exportTariff = useExportTariff(orgId ?? '', storeId ?? '');
+  const exportTariff = useExportWorkbook(
+    WORKBOOK_PAGES.COMMISSION_TARIFF,
+    orgId ?? '',
+    storeId ?? '',
+  );
   const deleteTariff = useDeleteTariff(orgId ?? '', storeId ?? '');
 
   const template = React.useMemo(

@@ -3,20 +3,25 @@
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { WORKBOOK_PAGES } from '@pazarsync/utils';
+
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Button } from '@/components/ui/button';
 import { Link, useRouter } from '@/i18n/navigation';
 
+import type { WorkbookImportInput } from '../api/workbook-endpoints';
 import { useAdvantageTariffList } from '../hooks/use-advantage-tariff-list';
 import { useDeleteAdvantageTariff } from '../hooks/use-delete-advantage-tariff';
-import { useExportAdvantageTariff } from '../hooks/use-export-advantage-tariff';
-import { useImportAdvantageTariff } from '../hooks/use-import-advantage-tariff';
+import { useExportWorkbook } from '../hooks/use-export-workbook';
+import { useImportWorkbook } from '../hooks/use-import-workbook';
+import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
 import { downloadBlob } from '../lib/download-blob';
-import { extractFileErrorCode } from '../lib/upload-error';
-import { AdvantageTariffUploadDialog } from './advantage-tariff-upload-dialog';
+import { WORKBOOK_VERTICALS } from '../lib/workbook-verticals';
 import { AdvantageTariffsListView } from './advantage-tariffs-list-view';
+import { WorkbookUploadDialog } from './workbook-upload-dialog';
 
-const DETAIL_BASE = '/campaigns/product-labels';
+const PAGE = WORKBOOK_PAGES.ADVANTAGE_TARIFF;
+const DETAIL_BASE = WORKBOOK_VERTICALS[PAGE].detailBase;
 
 /**
  * Data-bound LIST screen for Advantage product labels. Resolves org/store from
@@ -36,9 +41,10 @@ export function AdvantageTariffsListClient({
   const tCommon = useTranslations('common');
   const router = useRouter();
   const list = useAdvantageTariffList(orgId ?? '', storeId);
-  const importTariff = useImportAdvantageTariff(orgId ?? '', storeId ?? '');
+  const importTariff = useImportWorkbook(PAGE, orgId ?? '', storeId ?? '');
   const deleteTariff = useDeleteAdvantageTariff(orgId ?? '', storeId ?? '');
-  const exportTariff = useExportAdvantageTariff(orgId ?? '', storeId ?? '');
+  const exportTariff = useExportWorkbook(PAGE, orgId ?? '', storeId ?? '');
+  const warnPrefilled = usePrefilledWarning();
   const [uploadOpen, setUploadOpen] = React.useState(false);
 
   const items = React.useMemo(() => list.data ?? [], [list.data]);
@@ -49,18 +55,16 @@ export function AdvantageTariffsListClient({
   );
 
   const handleImport = React.useCallback(
-    (file: File, commissionSourceTariffId: string | undefined): void => {
-      importTariff.mutate(
-        { file, commissionSourceTariffId },
-        {
-          onSuccess: (result) => {
-            setUploadOpen(false);
-            openDetail(result.tariffId);
-          },
+    (input: WorkbookImportInput): void => {
+      importTariff.mutate(input, {
+        onSuccess: (result) => {
+          setUploadOpen(false);
+          warnPrefilled(result.prefilledRows);
+          openDetail(result.id);
         },
-      );
+      });
     },
-    [importTariff, openDetail],
+    [importTariff, openDetail, warnPrefilled],
   );
 
   const handleExport = React.useCallback(
@@ -121,17 +125,17 @@ export function AdvantageTariffsListClient({
         onExport={handleExport}
         onDelete={handleDelete}
       />
-      <AdvantageTariffUploadDialog
+      <WorkbookUploadDialog
+        page={PAGE}
         open={uploadOpen}
-        orgId={orgId}
-        storeId={storeId}
         onOpenChange={(next) => {
           if (!next) importTariff.reset();
           setUploadOpen(next);
         }}
-        onFile={handleImport}
+        scope={{ orgId, storeId }}
+        onSubmit={handleImport}
         submitting={importTariff.isPending}
-        errorCode={extractFileErrorCode(importTariff.error)}
+        submitError={importTariff.error}
         onResetError={() => importTariff.reset()}
       />
     </>

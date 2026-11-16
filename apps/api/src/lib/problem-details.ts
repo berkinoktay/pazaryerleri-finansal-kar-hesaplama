@@ -29,6 +29,7 @@ import {
   type ValidationIssue,
   WORKBOOK_CONFLICT_DETAILS,
   WorkbookConflictError,
+  type WorkbookConflictReason,
 } from './errors';
 
 /**
@@ -86,6 +87,24 @@ export interface ProblemDetailsOptions {
 }
 
 const TYPE_BASE = 'https://api.pazarsync.com/errors';
+
+/**
+ * Each workbook conflict's wire code. Written out so the error-code audit sees ten emit
+ * sites; the mapped type makes a missing or misspelt reason a compile error.
+ */
+const WORKBOOK_CONFLICT_PROBLEMS: { readonly [R in WorkbookConflictReason]: { readonly code: R } } =
+  {
+    IMPORT_IN_PROGRESS: { code: 'IMPORT_IN_PROGRESS' },
+    UPLOAD_QUOTA_EXCEEDED: { code: 'UPLOAD_QUOTA_EXCEEDED' },
+    STORED_FILE_MISSING: { code: 'STORED_FILE_MISSING' },
+    STORED_FILE_UNREADABLE: { code: 'STORED_FILE_UNREADABLE' },
+    STORED_FILE_UNRECOGNIZED: { code: 'STORED_FILE_UNRECOGNIZED' },
+    NO_WRITEBACK_COLUMN: { code: 'NO_WRITEBACK_COLUMN' },
+    ROW_MISMATCH: { code: 'ROW_MISMATCH' },
+    ROW_ANCHOR_MISMATCH: { code: 'ROW_ANCHOR_MISMATCH' },
+    ROW_NOT_FOUND: { code: 'ROW_NOT_FOUND' },
+    EXPORT_FILENAME_COLLISION: { code: 'EXPORT_FILENAME_COLLISION' },
+  };
 
 export function problemDetailsForError(
   err: unknown,
@@ -199,8 +218,9 @@ function classify(err: unknown): ProblemDetailsResult {
       },
     };
   }
-  // A workbook conflict is a ConflictError subclass: checked first so it keeps its
-  // reason. The detail comes from the fixed table, never from the error message.
+  // A workbook conflict is a ConflictError subclass: checked first so it answers its
+  // reason as its own code. The detail comes from the fixed table, never from the
+  // error message.
   if (err instanceof WorkbookConflictError) {
     return {
       status: 409,
@@ -208,9 +228,8 @@ function classify(err: unknown): ProblemDetailsResult {
         type: `${TYPE_BASE}/conflict`,
         title: 'Conflict',
         status: 409,
-        code: 'CONFLICT',
+        code: WORKBOOK_CONFLICT_PROBLEMS[err.reason].code,
         detail: WORKBOOK_CONFLICT_DETAILS[err.reason],
-        meta: { reason: err.reason },
       },
     };
   }

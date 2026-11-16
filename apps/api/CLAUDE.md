@@ -190,15 +190,18 @@ export type OrderListInput = z.infer<typeof orderListSchema>;
 
 Domain error vocabulary (`apps/api/src/lib/errors.ts`) — every error thrown in a route/service/middleware must be one of these (or bubble up to INTERNAL_ERROR):
 
-| Class                   | HTTP | `code`              | When to use                                                               |
-| ----------------------- | ---- | ------------------- | ------------------------------------------------------------------------- |
-| `UnauthorizedError`     | 401  | `UNAUTHENTICATED`   | Auth middleware — missing/expired/invalid Bearer token                    |
-| `ForbiddenError`        | 403  | `FORBIDDEN`         | Role/membership check fails, or cross-tenant access attempt               |
-| `NotFoundError`         | 404  | `NOT_FOUND`         | Resource doesn't exist (or user cannot see it — don't leak existence)     |
-| `ConflictError`         | 409  | `CONFLICT`          | Uniqueness violation user can fix (duplicate slug, already-invited email) |
-| `ValidationError`       | 422  | `VALIDATION_ERROR`  | Semantic validation failures with field-level issues (auto from Zod)      |
-| `InvalidReferenceError` | 422  | `INVALID_REFERENCE` | FK target doesn't exist (e.g. posting an order under a non-member store)  |
-| `RateLimitedError`      | 429  | `RATE_LIMITED`      | Our own rate limit hit — paired with `Retry-After` header                 |
+| Class                   | HTTP | `code`              | When to use                                                                           |
+| ----------------------- | ---- | ------------------- | ------------------------------------------------------------------------------------- |
+| `UnauthorizedError`     | 401  | `UNAUTHENTICATED`   | Auth middleware — missing/expired/invalid Bearer token                                |
+| `ForbiddenError`        | 403  | `FORBIDDEN`         | Role/membership check fails, or cross-tenant access attempt                           |
+| `NotFoundError`         | 404  | `NOT_FOUND`         | Resource doesn't exist (or user cannot see it — don't leak existence)                 |
+| `ConflictError`         | 409  | `CONFLICT`          | Uniqueness violation user can fix (duplicate slug, already-invited email)             |
+| `ValidationError`       | 422  | `VALIDATION_ERROR`  | Semantic validation failures with field-level issues (auto from Zod)                  |
+| `InvalidReferenceError` | 422  | `INVALID_REFERENCE` | FK target doesn't exist (e.g. posting an order under a non-member store)              |
+| `RateLimitedError`      | 429  | `RATE_LIMITED`      | Our own rate limit hit — paired with `Retry-After` header                             |
+| `WorkbookConflictError` | 409  | its reason          | A campaign workbook conflict; its codes are the literal table in `problem-details.ts` |
+
+`WorkbookConflictError` keeps `err.code` `CONFLICT` for `instanceof ConflictError` readers, but the wire `code` is its reason, taken from the literal `WORKBOOK_CONFLICT_PROBLEMS` table so `pnpm audit:errors` sees every code. A new reason needs, in the same commit, its literal there, its `tr`/`en` translation under `common.errors` and its `KNOWN_CODES` entry in `apps/web/src/providers/query-provider.tsx`.
 
 Unknown throws collapse to 500 `INTERNAL_ERROR` via `problemDetailsForError` with `console.error` logging.
 
@@ -329,9 +332,9 @@ const orders = await adapter.fetchOrders({ since: lastSyncAt });
 
 Every campaign page that imports a marketplace `.xlsx` and exports it back with the seller's choices written in runs on one generic pipeline. The generic code never knows which page it runs for. Security rules: `docs/SECURITY.md` section 6, "File Uploads (Excel workbooks)". Tests: `docs/TESTING.md` section 15.
 
-- **Adapter contract** (`adapter.ts`): one `WorkbookVerticalAdapter` per page, in `verticals/<page>.adapter.ts`, holding what a page cannot express as data: `page`; `parentTable` (the `@@map` name, data for tests and logs, never interpolated into SQL); `formats`; `formSchema` and `readForm`; `inspect` (the page's own checks, before the rehearsal); `persist` (the parent and item rows, inside the import transaction); `load` (one `findFirst` scoped by `{ id, organizationId, storeId }`); `pick` and `resolveWriteBack` (what each written cell holds); `touchExported` (a scoped `updateMany`); `countLists` (a typed scoped count for the quota); `legacyCodes` (the wire codes the page answered before the pipeline, kept until the web moves). Its `http` block holds the OpenAPI texts and path schemas of the two routes.
+- **Adapter contract** (`adapter.ts`): one `WorkbookVerticalAdapter` per page, in `verticals/<page>.adapter.ts`, holding what a page cannot express as data: `page`; `parentTable` (the `@@map` name, data for tests and logs, never interpolated into SQL); `formats`; `formSchema` and `readForm`; `inspect` (the page's own checks, before the rehearsal); `persist` (the parent and item rows, inside the import transaction); `load` (one `findFirst` scoped by `{ id, organizationId, storeId }`); `pick` and `resolveWriteBack` (what each written cell holds); `touchExported` (a scoped `updateMany`); `countLists` (a typed scoped count for the quota). Its `http` block holds the OpenAPI texts and path schemas of the two routes.
 - **Formats** (`format.ts`, `formats/trendyol/<page>.format.ts`): one format per marketplace file version, built with `defineFormat`, which checks at module load that every write column's probe passes its own value rule and that no `exportRequires` group is empty. A format names its `sheet` (a strict selector), `layout` (its `*.layout.ts`), `keep` rule, `anchor` column, `fingerprint`, `mapRow`, `writeBack` columns with their value rules, `defaultName` and `filename` policy. It takes `id`, `platform`, `page` and `fingerprint` from its summary in `formats/registry.ts`, so each value has one copy.
-- **Registry and selection** (`formats/registry.ts`, `select-format.ts`): `FORMAT_SUMMARIES` lists every registered format (id, platform, page, fingerprint) as static data. `selectFormat` takes the first of the page's formats for the store's platform whose sheet exists, has a data row and resolves the format's layout. When none does, `diagnoseWorkbook` looks for another page whose fingerprint the header row carries (`WRONG_FILE_FOR_PAGE`, sent as the page's `legacyCodes` entry, with `meta.detectedPage`); the other outcomes and their order are in the `selectFormat` doc comment.
+- **Registry and selection** (`formats/registry.ts`, `select-format.ts`): `FORMAT_SUMMARIES` lists every registered format (id, platform, page, fingerprint) as static data. `selectFormat` takes the first of the page's formats for the store's platform whose sheet exists, has a data row and resolves the format's layout. When none does, `diagnoseWorkbook` looks for another page whose fingerprint the header row carries (`WRONG_FILE_FOR_PAGE` on every page, with `meta.detectedPage`); the other outcomes and their order are in the `selectFormat` doc comment.
 - **Route factory** (`route-factory.ts`): `createWorkbookImportRoute(adapter)` and `createWorkbookExportRoute(adapter)` build a page's two routes behind `WORKBOOK_IMPORT_MIDDLEWARE` and `WORKBOOK_EXPORT_MIDDLEWARE`, and run the pipeline with the ids and platform of the store record `requireStoreAccessContext` returns. `routes/<segment>/index.ts` mounts each where the page's old route was, so the OpenAPI path order is stable.
 - **Generic import** (`importWorkbook`, `import-workbook.ts`), in order:
   1. pick the format (`selectFormat`);
@@ -354,7 +357,7 @@ Every campaign page that imports a marketplace `.xlsx` and exports it back with 
   5. one `patchWorkbook` call for every planned file, then the download (`download.ts`);
   6. `adapter.touchExported` through `assertScopedWrite`.
 
-  Every engine call goes through `toStoredFileError`: a 409 with `meta.reason`, or a 503 when the parse queue is busy (`ENGINE_BUSY`).
+  Every engine call goes through `toStoredFileError`: a 409 with its own `code` (a `WorkbookConflictError` reason), or a 503 when the parse queue is busy (`ENGINE_BUSY`).
 
 - **A new marketplace file for a page** is a format file, its summary in `formats/registry.ts`, the format in its adapter's `formats`, and a real fixture under `tests/fixtures/`. The registry test (`tests/unit/workbooks/registry.test.ts`) fails until its `FIXTURE_PAGES` classifies the fixture. The limit: an adapter's formats share one layout type, row type and write keys (`S`, `TRow`, `TWrite` in `adapter.ts`), so a format whose layout type the contract does not yet express needs contract work first. `TRENDYOL_FORMAT_SUMMARIES` holds one summary per page, so a second Trendyol version of one page changes the registry's shape too.
 - **Turkish text**: format files and the registry are ASCII. Every Turkish value they use (sheet names, default names, written labels, yes-flags, fingerprints) comes from `formats/trendyol/labels.ts`; column headers live in each page's `*.layout.ts`.

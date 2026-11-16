@@ -237,12 +237,6 @@ export const commissionTariffAdapter: WorkbookVerticalAdapter<
     return { file, name, config: undefined };
   },
   formats: [trendyolCommissionTariffFormat],
-  legacyCodes: {
-    EMPTY_FILE: 'EMPTY_TARIFF_FILE',
-    WRONG_FILE_FOR_PAGE: 'INVALID_TARIFF_FORMAT',
-    NO_PERIOD: 'NO_TARIFF_PERIOD',
-    DUPLICATE_WEEK: 'DUPLICATE_TARIFF_WEEK',
-  },
   inspect: inspectTariffWeek,
   nameFallback: (week) => week.present[0]?.label ?? null,
   persist: async (tx, { parent, rows, variantIdByAnchor, distinctAnchors, meta: week }) => {
@@ -323,6 +317,7 @@ export const commissionTariffAdapter: WorkbookVerticalAdapter<
     matched: outcome.matchedRows,
     unmatched: outcome.rowCount - outcome.matchedRows,
     skippedRows: outcome.skippedRows,
+    prefilledRows: outcome.prefilledRows,
   }),
   load: loadCommissionTariff,
   notFoundResource: 'CommissionTariff',

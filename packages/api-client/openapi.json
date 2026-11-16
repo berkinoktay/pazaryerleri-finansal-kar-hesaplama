@@ -4689,6 +4689,9 @@
           },
           "skippedRows": {
             "type": "integer"
+          },
+          "prefilledRows": {
+            "type": "integer"
           }
         },
         "required": [
@@ -4698,7 +4701,8 @@
           "itemCount",
           "matched",
           "unmatched",
-          "skippedRows"
+          "skippedRows",
+          "prefilledRows"
         ]
       },
       "UpdateSelectionsResponse": {
@@ -5180,6 +5184,9 @@
           },
           "skippedRows": {
             "type": "integer"
+          },
+          "prefilledRows": {
+            "type": "integer"
           }
         },
         "required": [
@@ -5189,7 +5196,8 @@
           "itemCount",
           "matched",
           "unmatched",
-          "skippedRows"
+          "skippedRows",
+          "prefilledRows"
         ]
       },
       "UpdatePlusSelectionsResponse": {
@@ -5582,6 +5590,9 @@
           },
           "skippedRows": {
             "type": "integer"
+          },
+          "prefilledRows": {
+            "type": "integer"
           }
         },
         "required": [
@@ -5590,7 +5601,8 @@
           "itemCount",
           "matched",
           "unmatched",
-          "skippedRows"
+          "skippedRows",
+          "prefilledRows"
         ]
       },
       "UpdateAdvantageSelectionsResponse": {
@@ -6167,6 +6179,9 @@
           },
           "skippedRows": {
             "type": "integer"
+          },
+          "prefilledRows": {
+            "type": "integer"
           }
         },
         "required": [
@@ -6176,7 +6191,8 @@
           "itemCount",
           "matched",
           "unmatched",
-          "skippedRows"
+          "skippedRows",
+          "prefilledRows"
         ]
       },
       "UpdateFlashSelectionsResponse": {
@@ -6739,6 +6755,9 @@
           },
           "skippedRows": {
             "type": "integer"
+          },
+          "prefilledRows": {
+            "type": "integer"
           }
         },
         "required": [
@@ -6747,7 +6766,8 @@
           "itemCount",
           "matched",
           "unmatched",
-          "skippedRows"
+          "skippedRows",
+          "prefilledRows"
         ]
       },
       "UpdateDiscountSelectionsResponse": {
@@ -7501,6 +7521,9 @@
           },
           "skippedRows": {
             "type": "integer"
+          },
+          "prefilledRows": {
+            "type": "integer"
           }
         },
         "required": [
@@ -7509,7 +7532,8 @@
           "itemCount",
           "matched",
           "unmatched",
-          "skippedRows"
+          "skippedRows",
+          "prefilledRows"
         ]
       },
       "UpdateCampaignSelectionsResponse": {

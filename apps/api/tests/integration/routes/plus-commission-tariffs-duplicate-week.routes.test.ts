@@ -2,7 +2,7 @@
 // one-tariff-per-week guard. A Plus upload's week window is [min period start …
 // max period end]. A new upload whose window OVERLAPS an existing tariff's window
 // for the store is rejected (422 VALIDATION_ERROR, field `file`, code
-// `DUPLICATE_TARIFF_WEEK`). Back-to-back weeks only TOUCH (the previous week ends
+// `DUPLICATE_WEEK`). Back-to-back weeks only TOUCH (the previous week ends
 // 07.59, the next starts 08.00 — a 1-minute gap), so they do NOT overlap and are
 // allowed.
 //
@@ -86,7 +86,7 @@ describe('plus-commission-tariffs import — one-tariff-per-week overlap guard',
     await truncateAll();
   });
 
-  it('rejects a second upload of the same week with DUPLICATE_TARIFF_WEEK', async () => {
+  it('rejects a second upload of the same week with DUPLICATE_WEEK', async () => {
     const ctx = await setupStore();
 
     const first = await app.request(importRequest(ctx));
@@ -98,7 +98,7 @@ describe('plus-commission-tariffs import — one-tariff-per-week overlap guard',
     const body = (await second.json()) as ValidationWire;
     expect(body.code).toBe('VALIDATION_ERROR');
     expect(body.errors[0]?.field).toBe('file');
-    expect(body.errors[0]?.code).toBe('DUPLICATE_TARIFF_WEEK');
+    expect(body.errors[0]?.code).toBe('DUPLICATE_WEEK');
   });
 
   it('allows a back-to-back (1-minute-gap) week', async () => {
@@ -182,7 +182,7 @@ describe('plus-commission-tariffs import — one-tariff-per-week overlap guard',
     const body: unknown = await res.json();
     expect(body).toMatchObject({
       code: 'VALIDATION_ERROR',
-      errors: [{ field: 'file', code: 'DUPLICATE_TARIFF_WEEK' }],
+      errors: [{ field: 'file', code: 'DUPLICATE_WEEK' }],
     });
     // The inspect ran no overlap query; the persist re-check found the committed tariff.
     expect(inspectWeek).toHaveBeenCalledTimes(1);

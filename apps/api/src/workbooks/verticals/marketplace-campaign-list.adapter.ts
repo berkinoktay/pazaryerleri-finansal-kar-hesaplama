@@ -174,10 +174,6 @@ export const marketplaceCampaignListAdapter: WorkbookVerticalAdapter<
     return { file, name, config };
   },
   formats: [trendyolMarketplaceCampaignListFormat],
-  legacyCodes: {
-    EMPTY_FILE: 'EMPTY_CAMPAIGN_FILE',
-    WRONG_FILE_FOR_PAGE: 'INVALID_CAMPAIGN_FORMAT',
-  },
   inspect: async () => undefined,
   nameFallback: () => null,
   persist: async (tx, { parent, rows, variantIdByAnchor, config }) => {
@@ -238,6 +234,7 @@ export const marketplaceCampaignListAdapter: WorkbookVerticalAdapter<
     matched: outcome.matchedRows,
     unmatched: outcome.rowCount - outcome.matchedRows,
     skippedRows: outcome.skippedRows,
+    prefilledRows: outcome.prefilledRows,
   }),
   load: loadMarketplaceCampaign,
   notFoundResource: 'MarketplaceCampaignList',

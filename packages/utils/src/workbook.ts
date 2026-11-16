@@ -17,3 +17,21 @@ const BYTES_PER_MB = 1024 * 1024;
  * cannot drift apart.
  */
 export const WORKBOOK_UPLOAD_MAX_MB = WORKBOOK_UPLOAD_MAX_BYTES / BYTES_PER_MB;
+
+/**
+ * Longest stored list name and stored upload file name, in code points.
+ *
+ * One number for both sides: the API's name rule (`NameSchema`) and its stored-name
+ * truncation read it, and the web name inputs use it as their `maxLength` and in the
+ * "name too long" message.
+ */
+export const UPLOAD_NAME_MAX_LENGTH = 120;
+
+// The UTC years a stored instant may have. A year below 1 reaches Postgres in a form it
+// refuses (measured with Prisma 7 and @prisma/adapter-pg: 22007, and 22009 near the
+// earliest JavaScript date), a 500 at the insert; a year such as 50 or 10000 would be
+// stored as read, and no real campaign window lies outside these years either. One pair
+// for both sides: the API's date rules read it, and the web names the two years in its
+// "date out of range" message.
+export const STORABLE_YEAR_MIN = 1900;
+export const STORABLE_YEAR_MAX = 9999;

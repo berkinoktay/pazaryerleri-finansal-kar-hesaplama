@@ -14,13 +14,9 @@ import {
   type LayoutSpec,
   type RowReader,
 } from '@pazarsync/spreadsheet';
-import { businessZoneEpochToInstant } from '@pazarsync/utils';
+import { businessZoneEpochToInstant, UPLOAD_NAME_MAX_LENGTH } from '@pazarsync/utils';
 
-import {
-  IMPORT_INSERT_CHUNK_ROWS,
-  MAX_ANCHOR_TEXT_LENGTH,
-  UPLOAD_NAME_MAX_LENGTH,
-} from '../config/workbook-limits';
+import { IMPORT_INSERT_CHUNK_ROWS, MAX_ANCHOR_TEXT_LENGTH } from '../config/workbook-limits';
 import type { ImportedRow } from './adapter';
 import type { WriteValueSpec } from './format';
 import { cleanDisplayName } from './form';

@@ -164,10 +164,6 @@ export const flashProductListAdapter: WorkbookVerticalAdapter<
     return { file, name, config: undefined };
   },
   formats: [trendyolFlashProductListFormat],
-  legacyCodes: {
-    EMPTY_FILE: 'EMPTY_FLASH_FILE',
-    WRONG_FILE_FOR_PAGE: 'INVALID_FLASH_FORMAT',
-  },
   inspect: async () => undefined,
   nameFallback: () => null,
   persist: async (tx, { parent, rows, variantIdByAnchor }) => {
@@ -223,6 +219,7 @@ export const flashProductListAdapter: WorkbookVerticalAdapter<
     matched: outcome.matchedDistinct,
     unmatched: outcome.distinctCount - outcome.matchedDistinct,
     skippedRows: outcome.skippedRows,
+    prefilledRows: outcome.prefilledRows,
   }),
   load: loadFlashProductList,
   notFoundResource: 'FlashProductList',

@@ -5,6 +5,8 @@ import { useTranslations } from 'next-intl';
 import { parseAsFloat, parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
 
+import { WORKBOOK_PAGES } from '@pazarsync/utils';
+
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { PageHeader } from '@/components/patterns/page-header';
@@ -15,7 +17,7 @@ import { ApiError } from '@/lib/api-error';
 
 import { useAdvantageTariffDetail } from '../hooks/use-advantage-tariff-detail';
 import { useDeleteAdvantageTariff } from '../hooks/use-delete-advantage-tariff';
-import { useExportAdvantageTariff } from '../hooks/use-export-advantage-tariff';
+import { useExportWorkbook } from '../hooks/use-export-workbook';
 import { useUpdateAdvantageSelections } from '../hooks/use-update-advantage-selections';
 import { toAdvantageTariffView, type NonNullStarTierKey } from '../lib/adapt-advantage-tariff';
 import {
@@ -75,7 +77,11 @@ export function AdvantageTariffDetailClient({
   const router = useRouter();
   const detail = useAdvantageTariffDetail(orgId ?? '', storeId, tariffId);
   const updateSelections = useUpdateAdvantageSelections(orgId ?? '', storeId ?? '', tariffId);
-  const exportTariff = useExportAdvantageTariff(orgId ?? '', storeId ?? '');
+  const exportTariff = useExportWorkbook(
+    WORKBOOK_PAGES.ADVANTAGE_TARIFF,
+    orgId ?? '',
+    storeId ?? '',
+  );
   const deleteTariff = useDeleteAdvantageTariff(orgId ?? '', storeId ?? '');
 
   const view = React.useMemo(

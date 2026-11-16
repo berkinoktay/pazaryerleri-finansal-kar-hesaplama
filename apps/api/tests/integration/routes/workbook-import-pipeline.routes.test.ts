@@ -8,7 +8,9 @@
 //     the path (the lock key is the stored store id);
 //   - a Hepsiburada store has no discount format;
 //   - a text cell holding U+0000, which Postgres cannot store, is refused at upload
-//     with 422 MALFORMED_SHEET, never a 500, and nothing is stored.
+//     with 422 MALFORMED_SHEET, never a 500, and nothing is stored;
+//   - active content (a macro project part, a WEBSERVICE formula) is refused at upload
+//     with 422 UNSAFE_CONTENT, and nothing is stored.
 
 import { readFileSync } from 'node:fs';
 
@@ -23,14 +25,15 @@ import {
   columnIndex,
   readWorkbookGrid,
   resolveLayout,
+  UNSAFE_CONTENT_REASONS,
   type CellValue,
   type SheetData,
 } from '@pazarsync/spreadsheet';
 import { buildXlsxFixture } from '@pazarsync/spreadsheet/testing';
-import { WORKBOOK_PAGES } from '@pazarsync/utils';
+import { UPLOAD_NAME_MAX_LENGTH, WORKBOOK_PAGES } from '@pazarsync/utils';
 
 import { createApp } from '@/app';
-import { MAX_LISTS_PER_STORE_PAGE, UPLOAD_NAME_MAX_LENGTH } from '@/config/workbook-limits';
+import { MAX_LISTS_PER_STORE_PAGE } from '@/config/workbook-limits';
 import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware';
 import { trendyolDiscountListFormat } from '@/workbooks/formats/trendyol/discount-list.format';
 import { TRENDYOL_DEFAULT_NAMES, TRENDYOL_SHEET_NAMES } from '@/workbooks/formats/trendyol/labels';
@@ -40,6 +43,11 @@ import { importLockKey, WORKBOOK_IMPORT_LOCK_SEED } from '@/workbooks/upload-quo
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization, createStore } from '../../helpers/factories';
+import {
+  macroFixture,
+  rezippedFixture,
+  unsafeFormulaFixture,
+} from '../../helpers/workbook-unsafe-fixtures';
 
 const app = createApp();
 
@@ -68,7 +76,6 @@ const RLO = String.fromCodePoint(0x202e);
 
 const ProblemSchema = z.object({
   code: z.string(),
-  meta: z.object({ reason: z.string().optional() }).optional(),
   errors: z.array(z.object({ field: z.string(), code: z.string() })).optional(),
 });
 
@@ -428,8 +435,7 @@ describe('generic workbook import on the discount route', () => {
 
     expect(res.status).toBe(409);
     const body = await problem(res);
-    expect(body.code).toBe('CONFLICT');
-    expect(body.meta?.reason).toBe('UPLOAD_QUOTA_EXCEEDED');
+    expect(body.code).toBe('UPLOAD_QUOTA_EXCEEDED');
     expect(
       await prisma.discountList.count({
         where: { organizationId: ctx.orgId, storeId: ctx.storeId },
@@ -471,8 +477,7 @@ describe('generic workbook import on the discount route', () => {
 
     expect(res.status).toBe(409);
     const body = await problem(res);
-    expect(body.code).toBe('CONFLICT');
-    expect(body.meta?.reason).toBe('IMPORT_IN_PROGRESS');
+    expect(body.code).toBe('IMPORT_IN_PROGRESS');
     expect(await prisma.discountList.count()).toBe(0);
   });
 
@@ -489,7 +494,7 @@ describe('generic workbook import on the discount route', () => {
     );
 
     expect(locked.status).toBe(409);
-    expect((await problem(locked)).meta?.reason).toBe('IMPORT_IN_PROGRESS');
+    expect((await problem(locked)).code).toBe('IMPORT_IN_PROGRESS');
 
     const free = await app.request(importRequest(ctx, FIXTURE, undefined, upper));
 
@@ -539,6 +544,50 @@ describe('generic workbook import on the discount route', () => {
         'workbook.import.value-not-storable',
         expect.anything(),
       );
+    });
+  });
+
+  describe('refuses active content at upload', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it.each([
+      [
+        'a macro project part',
+        (source: Buffer) => macroFixture(source),
+        UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      ],
+      [
+        'a WEBSERVICE formula',
+        (source: Buffer) => unsafeFormulaFixture(source, DISCOUNT_SHEET_PART),
+        UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+      ],
+    ] as const)('%s: 422 UNSAFE_CONTENT, and nothing is stored', async (_name, build, reason) => {
+      const ctx = await setupStore();
+      const info = vi.spyOn(syncLog, 'info');
+
+      const res = await app.request(importRequest(ctx, build(FIXTURE)));
+
+      expect(res.status).toBe(422);
+      const body = RawValidationSchema.parse(await res.json());
+      expect(body.code).toBe('VALIDATION_ERROR');
+      expect(body.errors).toStrictEqual([{ field: 'file', code: 'UNSAFE_CONTENT' }]);
+      expect(await prisma.discountList.count()).toBe(0);
+      expect(await prisma.discountListItem.count()).toBe(0);
+      expect(info).toHaveBeenCalledWith('workbook.upload-rejected', {
+        page: WORKBOOK_PAGES.DISCOUNT_LIST,
+        code: 'UNSAFE_CONTENT',
+        reason,
+      });
+    });
+
+    it('imports the fixture rebuilt by the same helper without the addition (control)', async () => {
+      const ctx = await setupStore();
+
+      const res = await app.request(importRequest(ctx, rezippedFixture(FIXTURE)));
+
+      expect(res.status).toBe(201);
     });
   });
 

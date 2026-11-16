@@ -5,6 +5,8 @@ import { useTranslations } from 'next-intl';
 import { parseAsFloat, parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
 
+import { WORKBOOK_PAGES } from '@pazarsync/utils';
+
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { PageHeader } from '@/components/patterns/page-header';
@@ -15,7 +17,7 @@ import { ApiError } from '@/lib/api-error';
 
 import { useFlashProductDetail } from '../hooks/use-flash-product-detail';
 import { useDeleteFlashProducts } from '../hooks/use-delete-flash-products';
-import { useExportFlashProducts } from '../hooks/use-export-flash-products';
+import { useExportWorkbook } from '../hooks/use-export-workbook';
 import { useUpdateFlashSelections } from '../hooks/use-update-flash-selections';
 import {
   OFFER_KEY_TO_ENUM,
@@ -77,7 +79,11 @@ export function FlashProductDetailClient({
   const router = useRouter();
   const detail = useFlashProductDetail(orgId ?? '', storeId, listId);
   const updateSelections = useUpdateFlashSelections(orgId ?? '', storeId ?? '', listId);
-  const exportList = useExportFlashProducts(orgId ?? '', storeId ?? '');
+  const exportList = useExportWorkbook(
+    WORKBOOK_PAGES.FLASH_PRODUCT_LIST,
+    orgId ?? '',
+    storeId ?? '',
+  );
   const deleteList = useDeleteFlashProducts(orgId ?? '', storeId ?? '');
 
   const view = React.useMemo(

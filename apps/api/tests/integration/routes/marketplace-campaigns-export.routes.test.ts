@@ -54,7 +54,6 @@ const CUSTOM_PRICE = '599.90';
 const ImportSchema = z.object({ campaignId: z.string() });
 const ProblemSchema = z.object({
   code: z.string(),
-  meta: z.object({ reason: z.string().optional() }).optional(),
   errors: z.array(z.object({ field: z.string(), code: z.string() })).optional(),
 });
 
@@ -217,8 +216,7 @@ describe('POST .../marketplace-campaigns/{campaignId}/export', () => {
 
     expect(res.status).toBe(409);
     const body = ProblemSchema.parse(await res.json());
-    expect(body.code).toBe('CONFLICT');
-    expect(body.meta?.reason).toBe('ROW_MISMATCH');
+    expect(body.code).toBe('ROW_MISMATCH');
     expect((await storedCampaign(ctx, campaignId)).exportedAt).toBeNull();
   });
 

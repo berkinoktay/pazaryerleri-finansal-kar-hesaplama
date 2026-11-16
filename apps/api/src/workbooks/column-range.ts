@@ -4,6 +4,7 @@
 // import-workbook.ts) where only the database can.
 
 import { SpreadsheetFileError } from '@pazarsync/spreadsheet';
+import { STORABLE_YEAR_MAX, STORABLE_YEAR_MIN } from '@pazarsync/utils';
 
 /** `meta.reason` of the MALFORMED_SHEET a value out of range for its column answers. */
 export const VALUE_OUT_OF_RANGE_REASON = 'value-out-of-range';
@@ -39,12 +40,16 @@ export function requireStorableInt(value: number | null): number | null {
   );
 }
 
-// The UTC years a stored instant may have. A year below 1 reaches Postgres in a form it
-// refuses (measured with Prisma 7 and @prisma/adapter-pg: 22007, and 22009 near the
-// earliest JavaScript date), a 500 at the insert; a year such as 50 or 10000 would be
-// stored as read, and no real campaign window lies outside these years either.
-export const STORABLE_YEAR_MIN = 1900;
-export const STORABLE_YEAR_MAX = 9999;
+/**
+ * Whether `value` is a valid date whose UTC year is within
+ * STORABLE_YEAR_MIN..STORABLE_YEAR_MAX (`@pazarsync/utils`): the one copy of the range a
+ * stored instant may have, for a date read from a file and a date a seller typed alike.
+ */
+export function isStorableYear(value: Date): boolean {
+  const year = value.getUTCFullYear();
+  // An invalid date's year is NaN, outside every range.
+  return year >= STORABLE_YEAR_MIN && year <= STORABLE_YEAR_MAX;
+}
 
 /**
  * `value`, a date a format read for a timestamp column, unchanged when it is null or a
@@ -56,9 +61,7 @@ export const STORABLE_YEAR_MAX = 9999;
  */
 export function requireStorableInstant(value: Date | null): Date | null {
   if (value === null) return null;
-  const year = value.getUTCFullYear();
-  if (year >= STORABLE_YEAR_MIN && year <= STORABLE_YEAR_MAX) return value;
-  // An invalid date's year is NaN, outside every range.
+  if (isStorableYear(value)) return value;
   throw new SpreadsheetFileError(
     'MALFORMED_SHEET',
     'A file date is out of range for its timestamp column',

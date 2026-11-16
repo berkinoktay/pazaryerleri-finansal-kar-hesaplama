@@ -140,10 +140,6 @@ export const discountListAdapter: WorkbookVerticalAdapter<
     return { file, name, config };
   },
   formats: [trendyolDiscountListFormat],
-  legacyCodes: {
-    EMPTY_FILE: 'EMPTY_DISCOUNT_FILE',
-    WRONG_FILE_FOR_PAGE: 'INVALID_DISCOUNT_FORMAT',
-  },
   inspect: async () => undefined,
   nameFallback: () => null,
   persist: async (tx, { parent, rows, variantIdByAnchor, config }) => {
@@ -196,6 +192,7 @@ export const discountListAdapter: WorkbookVerticalAdapter<
     matched: outcome.matchedRows,
     unmatched: outcome.rowCount - outcome.matchedRows,
     skippedRows: outcome.skippedRows,
+    prefilledRows: outcome.prefilledRows,
   }),
   load: loadDiscountList,
   notFoundResource: 'DiscountList',
