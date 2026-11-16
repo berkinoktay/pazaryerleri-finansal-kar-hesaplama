@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { WORKBOOK_UPLOAD_MAX_BYTES, WORKBOOK_UPLOAD_MAX_MB } from '@pazarsync/utils';
 
 import { DiscountUploadDialog } from '@/features/campaigns/components/discount-upload-dialog';
-import { extractFileErrorCode } from '@/features/campaigns/lib/upload-error';
 import { ApiError } from '@/lib/api-error';
 
 import trMessages from '../../messages/tr.json';
@@ -177,15 +176,23 @@ describe('<DiscountUploadDialog>', () => {
       code: 'PAYLOAD_TOO_LARGE',
       detail: 'detail',
     });
-    renderDialog({ errorCode: extractFileErrorCode(error), submitError: error });
+    renderDialog({ submitError: error });
 
-    expect(screen.getByText(ERRORS.tooLarge)).toBeInTheDocument();
+    expect(screen.getByText(SHARED.errors.tooLarge)).toBeInTheDocument();
   });
 
-  it('maps an UNSAFE_CONTENT rejection to the not-readable message', () => {
-    renderDialog({ errorCode: 'UNSAFE_CONTENT' });
+  it('maps an UNSAFE_CONTENT rejection to its own unsafe-content message', () => {
+    renderDialog({ submitError: validationApiError([{ field: 'file', code: 'UNSAFE_CONTENT' }]) });
 
-    expect(screen.getByText(ERRORS.notReadable)).toBeInTheDocument();
+    expect(screen.getByText(SHARED.errors.unsafe)).toBeInTheDocument();
+  });
+
+  it("shows the page's own wrong-format message for a WRONG_FILE_FOR_PAGE file issue", () => {
+    renderDialog({
+      submitError: validationApiError([{ field: 'file', code: 'WRONG_FILE_FOR_PAGE' }]),
+    });
+
+    expect(screen.getByText(ERRORS.wrongFormat)).toBeInTheDocument();
   });
 
   it('shows the shared workbook upload limit in megabytes in the hint', () => {

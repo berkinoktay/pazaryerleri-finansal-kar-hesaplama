@@ -6,25 +6,15 @@
 
 import { SpreadsheetFileError, workerLimitReason } from '@pazarsync/spreadsheet';
 import { syncLog } from '@pazarsync/sync-core';
-import type { WorkbookPage } from '@pazarsync/utils';
+import type { WorkbookFileCode, WorkbookPage } from '@pazarsync/utils';
 
 import { IMPORT_BUSY_RETRY_AFTER_SECONDS } from '../config/workbook-limits';
 import { ImportBusyError, ValidationError, WorkbookConflictError } from '../lib/errors';
 
-/** Why an uploaded workbook is refused, beyond what the engine itself refuses. */
-export const WORKBOOK_FILE_CODES = [
-  'UNSUPPORTED_PLATFORM_FORMAT',
-  'SHEET_NOT_FOUND',
-  'WRONG_FILE_FOR_PAGE',
-  'EMPTY_FILE',
-  'NO_PERIOD',
-  'DUPLICATE_WEEK',
-  'PREFILLED_SELECTIONS',
-] as const;
-
-export type WorkbookFileCode = (typeof WORKBOOK_FILE_CODES)[number];
-
-/** A workbook the pipeline refuses: a 422 on `file` for an upload (`toUploadError`). */
+/**
+ * A workbook the pipeline refuses, with one of the `WORKBOOK_FILE_CODES` of
+ * `@pazarsync/utils`: a 422 on `file` for an upload (`toUploadError`).
+ */
 export class WorkbookFileRejection extends Error {
   readonly code: WorkbookFileCode;
   readonly meta: Readonly<Record<string, string | number | null>>;
@@ -45,9 +35,6 @@ export class WorkbookInvariantError extends Error {
   }
 }
 
-/** The wire codes a page answered before this pipeline, kept per file code until the web moves. */
-export type LegacyCodes = Readonly<Partial<Record<WorkbookFileCode, string>>>;
-
 /** The engine meta's `reason`, when it is a string: a fixed rule name, never file content. */
 function engineReason(err: SpreadsheetFileError): string | null {
   const reason = err.meta['reason'];
@@ -62,18 +49,14 @@ function logWorkerLimit(err: SpreadsheetFileError): void {
 
 /**
  * For everything an import throws before its transaction. A `WorkbookFileRejection`
- * becomes a 422 on `file` with its code (or the page's legacy code) and its meta. An
- * engine `ENGINE_BUSY` is the 503 `ImportBusyError`; any other engine code, a worker
- * kill included, is a 422 on `file` carrying the engine code and logged as
- * `workbook.upload-rejected`. Anything else is rethrown untouched.
+ * becomes a 422 on `file` with its own code and its meta. An engine `ENGINE_BUSY` is the
+ * 503 `ImportBusyError`; any other engine code, a worker kill included, is a 422 on
+ * `file` carrying the engine code and logged as `workbook.upload-rejected`. Anything else
+ * is rethrown untouched.
  */
-export function toUploadError(
-  err: unknown,
-  legacy: LegacyCodes,
-  context: { readonly page: WorkbookPage },
-): never {
+export function toUploadError(err: unknown, context: { readonly page: WorkbookPage }): never {
   if (err instanceof WorkbookFileRejection) {
-    const code = legacy[err.code] ?? err.code;
+    const { code } = err;
     const meta = { ...err.meta };
     throw new ValidationError([
       Object.keys(meta).length === 0 ? { field: 'file', code } : { field: 'file', code, meta },

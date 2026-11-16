@@ -105,6 +105,12 @@ describe('<AdvantageTariffUploadDialog>', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(SHARED.errors.field);
   });
 
+  it("shows the page's own wrong-format message for a WRONG_FILE_FOR_PAGE file issue", async () => {
+    renderDialog(vi.fn(), validationApiError([{ field: 'file', code: 'WRONG_FILE_FOR_PAGE' }]));
+
+    expect(await screen.findByText(UPLOAD.errors.wrongFormat)).toBeInTheDocument();
+  });
+
   it('default-pins the nearest-upcoming week and submits it once a file is chosen', async () => {
     mockCommissionList([
       tariff('t-active', '2026-07-01T05:00:00Z', '2026-07-08T04:59:00Z', 'active'),

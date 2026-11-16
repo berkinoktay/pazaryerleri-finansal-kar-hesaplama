@@ -3,7 +3,11 @@
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { WORKBOOK_UPLOAD_MAX_BYTES, WORKBOOK_UPLOAD_MAX_MB } from '@pazarsync/utils';
+import {
+  WORKBOOK_PAGES,
+  WORKBOOK_UPLOAD_MAX_BYTES,
+  WORKBOOK_UPLOAD_MAX_MB,
+} from '@pazarsync/utils';
 
 import { FileUpload } from '@/components/patterns/file-upload';
 import { Button } from '@/components/ui/button';
@@ -17,43 +21,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
+import { useWorkbookErrorMessage } from '../hooks/use-workbook-error-message';
 import { UploadUnplacedIssues } from './upload-unplaced-issues';
 
 /** The dropzone is this dialog's only message slot; any other field issue is listed under it. */
 const PLACED_FIELDS: readonly string[] = ['file'];
-
-/**
- * Maps a backend file-rejection code to its localized message key bucket. Flash-specific
- * codes are `EMPTY_FLASH_FILE` / `INVALID_FLASH_FORMAT`; the rest are the shared upload
- * codes every vertical raises.
- */
-function useFileErrorMessage(): (code: string | null | undefined) => string | null {
-  const t = useTranslations('flashProductsPage.upload.errors');
-  return (code) => {
-    switch (code) {
-      case null:
-      case undefined:
-        return null;
-      case 'NOT_XLSX':
-      case 'CORRUPT_FILE':
-      case 'UNSAFE_CONTENT':
-        return t('notReadable');
-      case 'EMPTY_FLASH_FILE':
-        return t('empty');
-      case 'ROW_CAP_EXCEEDED':
-      case 'COL_CAP_EXCEEDED':
-      case 'PAYLOAD_TOO_LARGE':
-        return t('tooLarge');
-      case 'SHEET_NOT_FOUND':
-      case 'INVALID_FLASH_FORMAT':
-      case 'MISSING_REQUIRED_HEADERS':
-      case 'AMBIGUOUS_HEADERS':
-        return t('wrongFormat');
-      default:
-        return t('generic');
-    }
-  };
-}
 
 export interface FlashProductUploadDialogProps {
   open: boolean;
@@ -62,9 +34,10 @@ export interface FlashProductUploadDialogProps {
   onFile: (file: File) => void;
   /** True while the import request is in flight (drives the submit button). */
   submitting?: boolean;
-  /** Backend file-rejection code (from `extractFileErrorCode`), shown inline. */
-  errorCode?: string | null;
-  /** The import mutation's error; its field issues on anything but the file are listed inline. */
+  /**
+   * The import mutation's error: its file rejection is shown on the dropzone, and its field
+   * issues on anything but the file are listed under it.
+   */
   submitError?: Error | null;
   /** Clears the last import error when the seller picks a different file. */
   onResetError?: () => void;
@@ -82,14 +55,13 @@ export function FlashProductUploadDialog({
   onOpenChange,
   onFile,
   submitting = false,
-  errorCode,
   submitError,
   onResetError,
 }: FlashProductUploadDialogProps): React.ReactElement {
   const t = useTranslations('flashProductsPage.upload');
   const tUpload = useTranslations('campaignUpload');
   const tCommon = useTranslations('common');
-  const fileErrorMessage = useFileErrorMessage();
+  const fileErrorMessage = useWorkbookErrorMessage(WORKBOOK_PAGES.FLASH_PRODUCT_LIST);
 
   const [file, setFile] = React.useState<File | null>(null);
 
@@ -123,7 +95,7 @@ export function FlashProductUploadDialog({
             errorWrongType={tUpload('fileErrors.wrongType')}
             errorTooLarge={tUpload('fileErrors.tooLarge', { maxMb: WORKBOOK_UPLOAD_MAX_MB })}
             removeLabel={tUpload('removeFile')}
-            error={fileErrorMessage(errorCode)}
+            error={fileErrorMessage(submitError)}
             onChange={(next) => {
               setFile(next);
               onResetError?.();

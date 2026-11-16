@@ -69,7 +69,7 @@ describe('requireStorableInt', () => {
     const err = captureThrow(() => requireStorableInt(3e9));
 
     const mapped = captureThrow(() =>
-      toUploadError(err, {}, { page: WORKBOOK_PAGES.COMMISSION_TARIFF }),
+      toUploadError(err, { page: WORKBOOK_PAGES.COMMISSION_TARIFF }),
     );
     expect(mapped).toBeInstanceOf(ValidationError);
     if (!(mapped instanceof ValidationError)) return;

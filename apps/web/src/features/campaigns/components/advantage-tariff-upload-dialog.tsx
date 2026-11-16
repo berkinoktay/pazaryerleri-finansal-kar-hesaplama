@@ -3,7 +3,11 @@
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { WORKBOOK_UPLOAD_MAX_BYTES, WORKBOOK_UPLOAD_MAX_MB } from '@pazarsync/utils';
+import {
+  WORKBOOK_PAGES,
+  WORKBOOK_UPLOAD_MAX_BYTES,
+  WORKBOOK_UPLOAD_MAX_MB,
+} from '@pazarsync/utils';
 
 import { FileUpload } from '@/components/patterns/file-upload';
 import { Badge } from '@/components/ui/badge';
@@ -30,6 +34,7 @@ import { cn } from '@/lib/utils';
 import type { CommissionTariffListItem } from '../api/list-tariffs.api';
 import { useCommissionTariffLabel } from '../hooks/use-commission-tariff-label';
 import { useCommissionTariffList } from '../hooks/use-commission-tariff-list';
+import { useWorkbookErrorMessage } from '../hooks/use-workbook-error-message';
 import { UploadUnplacedIssues } from './upload-unplaced-issues';
 
 const COMMISSION_TARIFFS_PATH = '/campaigns/product-commission-tariffs';
@@ -88,42 +93,13 @@ export interface AdvantageTariffUploadDialogProps {
   onFile: (file: File, commissionSourceTariffId: string | undefined) => void;
   /** True while the import request is in flight (drives the submit button). */
   submitting?: boolean;
-  /** Backend file-rejection code (from `extractFileErrorCode`), shown inline. */
-  errorCode?: string | null;
-  /** The import mutation's error; its field issues on anything but the file are listed inline. */
+  /**
+   * The import mutation's error: its file rejection is shown on the dropzone, and its field
+   * issues on anything but the file are listed under it.
+   */
   submitError?: Error | null;
   /** Clears the last import error when the seller picks a different file. */
   onResetError?: () => void;
-}
-
-/** Maps a backend file-rejection code to its localized message key bucket. */
-function useFileErrorMessage(): (code: string | null | undefined) => string | null {
-  const t = useTranslations('productLabelsPage.upload.errors');
-  return (code) => {
-    switch (code) {
-      case null:
-      case undefined:
-        return null;
-      case 'NOT_XLSX':
-      case 'CORRUPT_FILE':
-      case 'UNSAFE_CONTENT':
-        return t('notReadable');
-      case 'EMPTY_TARIFF_FILE':
-        return t('empty');
-      case 'ROW_CAP_EXCEEDED':
-      case 'COL_CAP_EXCEEDED':
-      case 'PAYLOAD_TOO_LARGE':
-        return t('tooLarge');
-      case 'SHEET_NOT_FOUND':
-      case 'INVALID_ADVANTAGE_TARIFF_FORMAT':
-      case 'INVALID_TARIFF_FORMAT':
-      case 'MISSING_REQUIRED_HEADERS':
-      case 'AMBIGUOUS_HEADERS':
-        return t('wrongFormat');
-      default:
-        return t('generic');
-    }
-  };
 }
 
 /**
@@ -141,7 +117,6 @@ export function AdvantageTariffUploadDialog({
   storeId,
   onFile,
   submitting = false,
-  errorCode,
   submitError,
   onResetError,
 }: AdvantageTariffUploadDialogProps): React.ReactElement {
@@ -149,7 +124,7 @@ export function AdvantageTariffUploadDialog({
   const tUpload = useTranslations('campaignUpload');
   const tSource = useTranslations('productLabelsPage.upload.commissionSource');
   const tCommon = useTranslations('common');
-  const fileErrorMessage = useFileErrorMessage();
+  const fileErrorMessage = useWorkbookErrorMessage(WORKBOOK_PAGES.ADVANTAGE_TARIFF);
   const commissionList = useCommissionTariffList(orgId, storeId);
   const commissionTariffLabel = useCommissionTariffLabel();
 
@@ -214,7 +189,7 @@ export function AdvantageTariffUploadDialog({
                 errorWrongType={tUpload('fileErrors.wrongType')}
                 errorTooLarge={tUpload('fileErrors.tooLarge', { maxMb: WORKBOOK_UPLOAD_MAX_MB })}
                 removeLabel={tUpload('removeFile')}
-                error={fileErrorMessage(errorCode)}
+                error={fileErrorMessage(submitError)}
                 onChange={(next) => {
                   setFile(next);
                   onResetError?.();

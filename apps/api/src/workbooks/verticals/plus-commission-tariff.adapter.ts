@@ -234,12 +234,6 @@ export const plusCommissionTariffAdapter: WorkbookVerticalAdapter<
     return { file, name, config: undefined };
   },
   formats: [trendyolPlusCommissionTariffFormat],
-  legacyCodes: {
-    EMPTY_FILE: 'EMPTY_TARIFF_FILE',
-    WRONG_FILE_FOR_PAGE: 'INVALID_PLUS_TARIFF_FORMAT',
-    NO_PERIOD: 'NO_TARIFF_PERIOD',
-    DUPLICATE_WEEK: 'DUPLICATE_TARIFF_WEEK',
-  },
   inspect: inspectTariffWeek,
   nameFallback: (week) => week.present[0]?.label ?? null,
   persist: async (tx, { parent, rows, variantIdByAnchor, meta: week }) => {

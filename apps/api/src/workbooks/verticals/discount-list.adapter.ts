@@ -140,10 +140,6 @@ export const discountListAdapter: WorkbookVerticalAdapter<
     return { file, name, config };
   },
   formats: [trendyolDiscountListFormat],
-  legacyCodes: {
-    EMPTY_FILE: 'EMPTY_DISCOUNT_FILE',
-    WRONG_FILE_FOR_PAGE: 'INVALID_DISCOUNT_FORMAT',
-  },
   inspect: async () => undefined,
   nameFallback: () => null,
   persist: async (tx, { parent, rows, variantIdByAnchor, config }) => {

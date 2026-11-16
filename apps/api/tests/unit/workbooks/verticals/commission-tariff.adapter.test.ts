@@ -617,15 +617,6 @@ describe('commission tariff adapter: form, name, response and the week index', (
     expect(adapter.rejectionForUniqueViolation(violation(['period_id', 'barcode']))).toBeNull();
     expect(adapter.rejectionForUniqueViolation(new Error('boom'))).toBeNull();
   });
-
-  it('maps the legacy wire codes of the page', () => {
-    expect(adapter.legacyCodes).toEqual({
-      EMPTY_FILE: 'EMPTY_TARIFF_FILE',
-      WRONG_FILE_FOR_PAGE: 'INVALID_TARIFF_FORMAT',
-      NO_PERIOD: 'NO_TARIFF_PERIOD',
-      DUPLICATE_WEEK: 'DUPLICATE_TARIFF_WEEK',
-    });
-  });
 });
 
 describe('commission tariff adapter: importTariff outside the route', () => {

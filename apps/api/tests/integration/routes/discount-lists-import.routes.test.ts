@@ -264,7 +264,7 @@ describe('POST .../discount-lists/import - rejects invalid input', () => {
     expect(await prisma.discountList.count()).toBe(0);
   });
 
-  it('rejects a file whose header layout is not the İndirimler export with 422 INVALID_DISCOUNT_FORMAT', async () => {
+  it('rejects a file whose header layout is not the İndirimler export with 422 WRONG_FILE_FOR_PAGE', async () => {
     const ctx = await setupStore(false);
     // Blank the required "Barkod" header so the layout no longer resolves.
     const corrupt = patchFixture(
@@ -278,7 +278,7 @@ describe('POST .../discount-lists/import - rejects invalid input', () => {
     expect(body.code).toBe('VALIDATION_ERROR');
     expect(body.errors).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ field: 'file', code: 'INVALID_DISCOUNT_FORMAT' }),
+        expect.objectContaining({ field: 'file', code: 'WRONG_FILE_FOR_PAGE' }),
       ]),
     );
   });

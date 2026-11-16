@@ -12,7 +12,6 @@ import { useDeleteTariff } from '../hooks/use-delete-tariff';
 import { useExportTariff } from '../hooks/use-export-tariff';
 import { useImportTariff } from '../hooks/use-import-tariff';
 import { downloadBlob } from '../lib/download-blob';
-import { extractFileErrorCode } from '../lib/upload-error';
 import { CommissionTariffsListView } from './commission-tariffs-list-view';
 import { CommissionTariffUploadDialog } from './commission-tariff-upload-dialog';
 
@@ -130,7 +129,6 @@ export function CommissionTariffsListClient({
         }}
         onFile={handleImport}
         submitting={importTariff.isPending}
-        errorCode={extractFileErrorCode(importTariff.error)}
         submitError={importTariff.error}
         onResetError={() => importTariff.reset()}
       />

@@ -14,7 +14,7 @@ export interface ImportTariffVars {
  * Mutation hook for uploading a commission-tariff Excel. On success invalidates
  * the store's tariff list so the new upload appears. No custom onError — the
  * global QueryProvider pipeline toasts; the upload form surfaces VALIDATION_ERROR
- * field issues inline (INVALID_TARIFF_FORMAT / EMPTY_TARIFF_FILE / …).
+ * field issues inline (WRONG_FILE_FOR_PAGE / EMPTY_FILE / NO_PERIOD…).
  */
 export function useImportTariff(
   orgId: string,

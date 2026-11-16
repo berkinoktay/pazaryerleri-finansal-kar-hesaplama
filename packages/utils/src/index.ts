@@ -34,6 +34,13 @@ export {
   WORKBOOK_UPLOAD_MAX_BYTES,
   WORKBOOK_UPLOAD_MAX_MB,
 } from './workbook';
+export {
+  isWorkbookUploadFileCode,
+  WORKBOOK_ENGINE_FILE_CODES,
+  WORKBOOK_FILE_CODES,
+  type WorkbookFileCode,
+  type WorkbookUploadFileCode,
+} from './workbook-codes';
 export { WORKBOOK_PAGES, type WorkbookPage } from './workbook-pages';
 export {
   planWindowFiles,

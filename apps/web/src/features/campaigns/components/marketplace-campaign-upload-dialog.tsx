@@ -6,7 +6,11 @@ import * as React from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 
 import { DiscountType } from '@pazarsync/db/enums';
-import { WORKBOOK_UPLOAD_MAX_BYTES, WORKBOOK_UPLOAD_MAX_MB } from '@pazarsync/utils';
+import {
+  WORKBOOK_PAGES,
+  WORKBOOK_UPLOAD_MAX_BYTES,
+  WORKBOOK_UPLOAD_MAX_MB,
+} from '@pazarsync/utils';
 
 import { FileUpload } from '@/components/patterns/file-upload';
 import { Button } from '@/components/ui/button';
@@ -21,6 +25,7 @@ import {
 } from '@/components/ui/dialog';
 import { Form } from '@/components/ui/form';
 
+import { useWorkbookErrorMessage } from '../hooks/use-workbook-error-message';
 import {
   campaignConfigFormSchema,
   type CampaignConfigFormInput,
@@ -32,39 +37,6 @@ import {
 } from './marketplace-campaign-config-fields';
 import { UploadUnplacedIssues } from './upload-unplaced-issues';
 
-/**
- * Maps a backend file-rejection code to its localized message key bucket. Campaign-specific
- * codes are `EMPTY_CAMPAIGN_FILE` / `INVALID_CAMPAIGN_FORMAT`; the rest are the shared upload
- * codes every vertical raises.
- */
-function useFileErrorMessage(): (code: string | null | undefined) => string | null {
-  const t = useTranslations('marketplaceCampaignsPage.upload.errors');
-  return (code) => {
-    switch (code) {
-      case null:
-      case undefined:
-        return null;
-      case 'NOT_XLSX':
-      case 'CORRUPT_FILE':
-      case 'UNSAFE_CONTENT':
-        return t('notReadable');
-      case 'EMPTY_CAMPAIGN_FILE':
-        return t('empty');
-      case 'ROW_CAP_EXCEEDED':
-      case 'COL_CAP_EXCEEDED':
-      case 'PAYLOAD_TOO_LARGE':
-        return t('tooLarge');
-      case 'SHEET_NOT_FOUND':
-      case 'INVALID_CAMPAIGN_FORMAT':
-      case 'MISSING_REQUIRED_HEADERS':
-      case 'AMBIGUOUS_HEADERS':
-        return t('wrongFormat');
-      default:
-        return t('generic');
-    }
-  };
-}
-
 export interface MarketplaceCampaignUploadDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -75,12 +47,11 @@ export interface MarketplaceCampaignUploadDialogProps {
   onSubmit: (config: CampaignConfigFormValues, file: File, name?: string) => void;
   /** True while the import request is in flight (drives the submit button). */
   submitting?: boolean;
-  /** Backend file-rejection code (from `extractFileErrorCode`), shown inline. */
-  errorCode?: string | null;
   /**
-   * The import mutation's error. On a `VALIDATION_ERROR` its `problem.errors[]` are walked into
-   * inline field messages by {@link MarketplaceCampaignConfigFields}; an issue no input owns is
-   * listed under the dropzone.
+   * The import mutation's error. Its file rejection is shown on the dropzone; on a
+   * `VALIDATION_ERROR` its other `problem.errors[]` are walked into inline field messages by
+   * {@link MarketplaceCampaignConfigFields}, and an issue no input owns is listed under the
+   * dropzone.
    */
   submitError?: Error | null;
   /** Clears the last import error when the seller picks a different file. */
@@ -99,14 +70,13 @@ export function MarketplaceCampaignUploadDialog({
   onOpenChange,
   onSubmit,
   submitting = false,
-  errorCode,
   submitError,
   onResetError,
 }: MarketplaceCampaignUploadDialogProps): React.ReactElement {
   const t = useTranslations('marketplaceCampaignsPage.upload');
   const tUpload = useTranslations('campaignUpload');
   const tCommon = useTranslations('common');
-  const fileErrorMessage = useFileErrorMessage();
+  const fileErrorMessage = useWorkbookErrorMessage(WORKBOOK_PAGES.MARKETPLACE_CAMPAIGN_LIST);
 
   const [file, setFile] = React.useState<File | null>(null);
   const [name, setName] = React.useState('');
@@ -161,7 +131,7 @@ export function MarketplaceCampaignUploadDialog({
                   errorWrongType={tUpload('fileErrors.wrongType')}
                   errorTooLarge={tUpload('fileErrors.tooLarge', { maxMb: WORKBOOK_UPLOAD_MAX_MB })}
                   removeLabel={tUpload('removeFile')}
-                  error={fileErrorMessage(errorCode)}
+                  error={fileErrorMessage(submitError)}
                   onChange={(next) => {
                     setFile(next);
                     onResetError?.();

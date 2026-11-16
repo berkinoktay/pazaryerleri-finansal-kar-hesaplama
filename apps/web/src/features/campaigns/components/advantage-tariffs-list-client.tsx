@@ -12,7 +12,6 @@ import { useDeleteAdvantageTariff } from '../hooks/use-delete-advantage-tariff';
 import { useExportAdvantageTariff } from '../hooks/use-export-advantage-tariff';
 import { useImportAdvantageTariff } from '../hooks/use-import-advantage-tariff';
 import { downloadBlob } from '../lib/download-blob';
-import { extractFileErrorCode } from '../lib/upload-error';
 import { AdvantageTariffUploadDialog } from './advantage-tariff-upload-dialog';
 import { AdvantageTariffsListView } from './advantage-tariffs-list-view';
 
@@ -131,7 +130,6 @@ export function AdvantageTariffsListClient({
         }}
         onFile={handleImport}
         submitting={importTariff.isPending}
-        errorCode={extractFileErrorCode(importTariff.error)}
         submitError={importTariff.error}
         onResetError={() => importTariff.reset()}
       />

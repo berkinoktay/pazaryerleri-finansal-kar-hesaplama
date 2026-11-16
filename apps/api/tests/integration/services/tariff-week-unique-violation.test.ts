@@ -1,7 +1,7 @@
 // Pins the real shape of a unique-constraint violation (P2002) as Prisma 7 with the
 // pg driver adapter reports it, against the actual `@@unique([storeId, weekStartsAt])`
 // on `commission_tariffs`. The import services rely on `isUniqueViolationOn` to turn a
-// concurrent duplicate-week upload into DUPLICATE_TARIFF_WEEK instead of a 409 that
+// concurrent duplicate-week upload into DUPLICATE_WEEK instead of a 409 that
 // leaks column names, so the helper must be proven against what the database really
 // emits rather than against a hand-built fake.
 //

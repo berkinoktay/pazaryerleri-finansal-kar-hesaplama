@@ -16,6 +16,11 @@ function makeXlsxFile(name = 'flas-urunler.xlsx'): File {
   return new File(['pk'], name, { type: XLSX_TYPE });
 }
 
+/** The 422 a list client hands the dialog for a refused file. */
+function fileIssue(code: string): Error {
+  return validationApiError([{ field: 'file', code }]);
+}
+
 /** The dropzone's hidden `<input type="file">` (sr-only, no label). */
 function fileInput(): HTMLInputElement {
   const input = document.querySelector('input[type="file"]');
@@ -49,19 +54,19 @@ describe('<FlashProductUploadDialog>', () => {
     expect(onFile.mock.calls[0]?.[0]).toBe(file);
   });
 
-  it('localizes the EMPTY_FLASH_FILE rejection code', () => {
-    renderDialog({ errorCode: 'EMPTY_FLASH_FILE' });
+  it("localizes the EMPTY_FILE rejection code with the page's own offer-row message", () => {
+    renderDialog({ submitError: fileIssue('EMPTY_FILE') });
     expect(screen.getByText(ERRORS.empty)).toBeInTheDocument();
   });
 
-  it('localizes the INVALID_FLASH_FORMAT rejection code', () => {
-    renderDialog({ errorCode: 'INVALID_FLASH_FORMAT' });
+  it('localizes the WRONG_FILE_FOR_PAGE rejection code', () => {
+    renderDialog({ submitError: fileIssue('WRONG_FILE_FOR_PAGE') });
     expect(screen.getByText(ERRORS.wrongFormat)).toBeInTheDocument();
   });
 
   it('falls back to the generic message for an unknown rejection code', () => {
-    renderDialog({ errorCode: 'SOME_UNKNOWN_CODE' });
-    expect(screen.getByText(ERRORS.generic)).toBeInTheDocument();
+    renderDialog({ submitError: fileIssue('SOME_UNKNOWN_CODE') });
+    expect(screen.getByText(SHARED.errors.generic)).toBeInTheDocument();
   });
 
   it('shows the name refusal of a 422 that has no file issue', () => {
@@ -82,7 +87,7 @@ describe('<FlashProductUploadDialog>', () => {
 
   it('clears the last import error when the seller picks a different file', async () => {
     const onResetError = vi.fn();
-    const { user } = renderDialog({ errorCode: 'EMPTY_FLASH_FILE', onResetError });
+    const { user } = renderDialog({ submitError: fileIssue('EMPTY_FILE'), onResetError });
 
     // The error copy is shown initially …
     expect(screen.getByText(ERRORS.empty)).toBeInTheDocument();

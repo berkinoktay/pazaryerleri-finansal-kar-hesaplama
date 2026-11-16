@@ -12,7 +12,6 @@ import { useDeleteFlashProducts } from '../hooks/use-delete-flash-products';
 import { useExportFlashProducts } from '../hooks/use-export-flash-products';
 import { useImportFlashProducts } from '../hooks/use-import-flash-products';
 import { downloadBlob } from '../lib/download-blob';
-import { extractFileErrorCode } from '../lib/upload-error';
 import { FlashProductUploadDialog } from './flash-product-upload-dialog';
 import { FlashProductsListView } from './flash-products-list-view';
 
@@ -128,7 +127,6 @@ export function FlashProductsListClient({
         }}
         onFile={handleImport}
         submitting={importList.isPending}
-        errorCode={extractFileErrorCode(importList.error)}
         submitError={importList.error}
         onResetError={() => importList.reset()}
       />

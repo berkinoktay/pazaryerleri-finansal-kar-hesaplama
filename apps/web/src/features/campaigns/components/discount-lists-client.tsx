@@ -12,7 +12,6 @@ import { useDiscountLists } from '../hooks/use-discount-lists';
 import { useExportDiscountList } from '../hooks/use-export-discount-list';
 import { useImportDiscountList } from '../hooks/use-import-discount-list';
 import { downloadBlob } from '../lib/download-blob';
-import { extractFileErrorCode } from '../lib/upload-error';
 import { DiscountListsView } from './discount-lists-view';
 import { DiscountUploadDialog } from './discount-upload-dialog';
 
@@ -130,7 +129,6 @@ export function DiscountsListClient({
         }}
         onSubmit={handleImport}
         submitting={importList.isPending}
-        errorCode={extractFileErrorCode(importList.error)}
         submitError={importList.error}
         onResetError={() => importList.reset()}
       />

@@ -30,10 +30,9 @@ interface ContractRow {
   readonly idParam: string;
   readonly fixture: string;
   readonly form: Readonly<Record<string, string>>;
-  /** A real file of another page, and what this route answers for it. */
+  /** A real file of another page, and the page this route must name for it. */
   readonly otherPageFixture: string;
   readonly otherPage: string;
-  readonly wrongFileCode: string;
 }
 
 const CONTRACT_ROWS: readonly ContractRow[] = [
@@ -50,7 +49,6 @@ const CONTRACT_ROWS: readonly ContractRow[] = [
     },
     otherPageFixture: 'trendyol-plus-tariff.xlsx',
     otherPage: 'PLUS_COMMISSION_TARIFF',
-    wrongFileCode: 'INVALID_DISCOUNT_FORMAT',
   },
   {
     segment: 'marketplace-campaigns',
@@ -66,7 +64,6 @@ const CONTRACT_ROWS: readonly ContractRow[] = [
     },
     otherPageFixture: 'trendyol-discount-products.xlsx',
     otherPage: 'DISCOUNT_LIST',
-    wrongFileCode: 'INVALID_CAMPAIGN_FORMAT',
   },
   {
     segment: 'flash-products',
@@ -77,7 +74,6 @@ const CONTRACT_ROWS: readonly ContractRow[] = [
     // diagnosis reads its first sheet, the campaign product sheet.
     otherPageFixture: 'marketplace-campaign-sample.xlsx',
     otherPage: 'MARKETPLACE_CAMPAIGN_LIST',
-    wrongFileCode: 'INVALID_FLASH_FORMAT',
   },
   {
     segment: 'advantage-tariffs',
@@ -88,7 +84,6 @@ const CONTRACT_ROWS: readonly ContractRow[] = [
     // diagnosis reads its first sheet, the flash offer sheet.
     otherPageFixture: 'trendyol-flash-products.xlsx',
     otherPage: 'FLASH_PRODUCT_LIST',
-    wrongFileCode: 'INVALID_ADVANTAGE_TARIFF_FORMAT',
   },
   {
     segment: 'plus-commission-tariffs',
@@ -99,7 +94,6 @@ const CONTRACT_ROWS: readonly ContractRow[] = [
     // diagnosis reads its first sheet, the star label sheet.
     otherPageFixture: 'trendyol-advantage-tariff.xlsx',
     otherPage: 'ADVANTAGE_TARIFF',
-    wrongFileCode: 'INVALID_PLUS_TARIFF_FORMAT',
   },
   {
     segment: 'commission-tariffs',
@@ -110,7 +104,6 @@ const CONTRACT_ROWS: readonly ContractRow[] = [
     // diagnosis reads its first sheet, the Plus product sheet.
     otherPageFixture: 'trendyol-plus-tariff.xlsx',
     otherPage: 'PLUS_COMMISSION_TARIFF',
-    wrongFileCode: 'INVALID_TARIFF_FORMAT',
   },
 ];
 
@@ -127,7 +120,6 @@ const TARIFF_CROSS_ROWS: readonly ContractRow[] = [
     form: {},
     otherPageFixture: 'trendyol-commission-tariff.xlsx',
     otherPage: 'COMMISSION_TARIFF',
-    wrongFileCode: 'INVALID_PLUS_TARIFF_FORMAT',
   },
   {
     segment: 'commission-tariffs',
@@ -136,7 +128,6 @@ const TARIFF_CROSS_ROWS: readonly ContractRow[] = [
     form: {},
     otherPageFixture: 'trendyol-plus-tariff-3ve4.xlsx',
     otherPage: 'PLUS_COMMISSION_TARIFF',
-    wrongFileCode: 'INVALID_TARIFF_FORMAT',
   },
 ];
 
@@ -264,8 +255,9 @@ describe.each(CONTRACT_ROWS)('workbook import contract: $segment', (row) => {
     const body = IssuesSchema.parse(await res.json());
     expect(body.errors).toHaveLength(1);
     expect(body.errors[0]?.field).toBe('file');
-    expect(body.errors[0]?.code).toBe(row.wrongFileCode);
+    expect(body.errors[0]?.code).toBe('WRONG_FILE_FOR_PAGE');
     expect(body.errors[0]?.meta?.['detectedPage']).toBe(row.otherPage);
+    expect(body.errors[0]?.meta?.['detectedFormatId']).toMatch(/.+/);
     expect(await workbookRowCounts()).toEqual(before);
   });
 
@@ -334,7 +326,7 @@ describe.each(TARIFF_CROSS_ROWS)(
       const body = IssuesSchema.parse(await res.json());
       expect(body.errors).toHaveLength(1);
       expect(body.errors[0]?.field).toBe('file');
-      expect(body.errors[0]?.code).toBe(row.wrongFileCode);
+      expect(body.errors[0]?.code).toBe('WRONG_FILE_FOR_PAGE');
       expect(body.errors[0]?.meta?.['detectedPage']).toBe(row.otherPage);
       expect(await workbookRowCounts()).toEqual(before);
     });

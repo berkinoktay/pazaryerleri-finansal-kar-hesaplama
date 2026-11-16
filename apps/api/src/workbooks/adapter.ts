@@ -8,11 +8,10 @@ import type { z } from '@hono/zod-openapi';
 
 import type { Prisma } from '@pazarsync/db';
 import type { LayoutSpec, RowReader } from '@pazarsync/spreadsheet';
-import type { WorkbookPage } from '@pazarsync/utils';
+import type { WorkbookFileCode, WorkbookPage } from '@pazarsync/utils';
 
 import type { WorkbookFormat, WorkbookFormatId } from './format';
 import type { WorkbookParentTable } from './upload-quota';
-import type { LegacyCodes, WorkbookFileCode } from './workbook-errors';
 
 /** The tenant a workbook operation runs for, taken from the verified store record. */
 export interface StoreScope {
@@ -150,8 +149,6 @@ export interface WorkbookImportAdapter<
     readonly config: TConfig;
   };
   readonly formats: readonly WorkbookFormat<S, TRow, TWrite>[];
-  /** The wire codes this page answered before the pipeline; removed with the web move. */
-  readonly legacyCodes: LegacyCodes;
   inspect(ctx: InspectContext<S, TRow, TConfig>): Promise<TMeta>;
   nameFallback(meta: TMeta): string | null;
   persist(

@@ -12,7 +12,6 @@ import { useExportMarketplaceCampaign } from '../hooks/use-export-marketplace-ca
 import { useImportMarketplaceCampaign } from '../hooks/use-import-marketplace-campaign';
 import { useMarketplaceCampaigns } from '../hooks/use-marketplace-campaigns';
 import { downloadBlob } from '../lib/download-blob';
-import { extractFileErrorCode } from '../lib/upload-error';
 import { MarketplaceCampaignUploadDialog } from './marketplace-campaign-upload-dialog';
 import { MarketplaceCampaignsListView } from './marketplace-campaigns-list-view';
 
@@ -135,7 +134,6 @@ export function MarketplaceCampaignsListClient({
         }}
         onSubmit={handleImport}
         submitting={importing}
-        errorCode={extractFileErrorCode(importError)}
         submitError={importError}
         onResetError={resetImport}
       />

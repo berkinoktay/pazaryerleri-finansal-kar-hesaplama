@@ -37,11 +37,20 @@ section "Versioning" for details.
     files plus the upload would exceed 200 MiB). The `409` response is added to the route's
     OpenAPI entry.
   - A Hepsiburada store answers `422` with `{ field: 'file', code: 'UNSUPPORTED_PLATFORM_FORMAT' }`.
+  - A refused file answers the file code under its own name on every page, in place of the
+    page's old code (breaking; the web ships the matching change in the same release):
+    `WRONG_FILE_FOR_PAGE` in place of the six invalid-format codes (`INVALID_DISCOUNT_FORMAT`,
+    `INVALID_CAMPAIGN_FORMAT`, `INVALID_FLASH_FORMAT`, `INVALID_ADVANTAGE_TARIFF_FORMAT`,
+    `INVALID_PLUS_TARIFF_FORMAT`, `INVALID_TARIFF_FORMAT`); `EMPTY_FILE` in place of
+    `EMPTY_DISCOUNT_FILE`, `EMPTY_CAMPAIGN_FILE`, `EMPTY_FLASH_FILE` and `EMPTY_TARIFF_FILE`;
+    `NO_PERIOD` in place of `NO_TARIFF_PERIOD`; `DUPLICATE_WEEK` in place of
+    `DUPLICATE_TARIFF_WEEK`. A client that matched the old codes must match the new ones.
   - The named sheet is selected strictly, with no first-sheet fallback: a workbook without it
-    answers `422` with `{ field: 'file', code: 'SHEET_NOT_FOUND' }`, or with the page's
-    invalid-format code (`INVALID_DISCOUNT_FORMAT` for discount lists) and `meta.detectedPage`
-    when its first sheet is another page's file. Marketplace campaign files are read by position
-    (the sheet name follows the campaign), so their first sheet is always the one read.
+    answers `422` with `{ field: 'file', code: 'SHEET_NOT_FOUND' }`, or with
+    `{ field: 'file', code: 'WRONG_FILE_FOR_PAGE' }` and `meta` (`detectedFormatId`,
+    `detectedPlatform`, `detectedPage`) when its first sheet is another page's file. Marketplace
+    campaign files are read by position (the sheet name follows the campaign), so their first
+    sheet is always the one read.
   - A write-back column under a shared formula, an array formula or a merged range, or a barcode
     cell longer than 256 characters, answers `422` with `{ field: 'file', code: 'MALFORMED_SHEET' }`
     at upload instead of failing the first export; nothing is stored.
@@ -57,14 +66,10 @@ section "Versioning" for details.
     trimmed and stored at any length. A name empty after trimming still falls back to the file
     name stem, then to the page's default name. The `name` form field gains `maxLength: 120` and
     a `pattern` in the OpenAPI spec.
-  - The page's invalid-format answer (`INVALID_DISCOUNT_FORMAT` for discount lists,
-    `INVALID_CAMPAIGN_FORMAT` for marketplace campaign lists, `INVALID_FLASH_FORMAT` for flash
-    product lists, `INVALID_ADVANTAGE_TARIFF_FORMAT` for advantage tariffs,
-    `INVALID_PLUS_TARIFF_FORMAT` for Plus commission tariffs, `INVALID_TARIFF_FORMAT` for
-    commission tariffs) now always carries
-    `errors[0].meta`
-    with `detectedFormatId`, `detectedPlatform` and `detectedPage`; each is `null` when the file
-    matches no known page. Before, a file that matched no page carried no `meta`.
+  - The wrong-file answer (`WRONG_FILE_FOR_PAGE`, on every page) now always carries
+    `errors[0].meta` with `detectedFormatId`, `detectedPlatform` and `detectedPage`; each is
+    `null` when the file matches no known page. Before, a file that matched no page carried no
+    `meta`.
   - A marketplace campaign file whose maximum price on a kept row is negative or has more than 10
     integer digits answers `422` with `{ field: 'file', code: 'MALFORMED_SHEET' }`; nothing is
     stored. Before, the file was stored, and an export that chose the maximum price for that row
@@ -101,13 +106,13 @@ section "Versioning" for details.
     `{ field: 'file', code: 'MALFORMED_SHEET' }`; nothing is stored. Before, the file was stored
     and its export wrote a tariff selection label wider than the column's own. This check runs
     before the tariff week check, so such a file whose week is already taken answers
-    `MALFORMED_SHEET`, not `DUPLICATE_TARIFF_WEEK`. A period header of 0 days, or more than seven
+    `MALFORMED_SHEET`, not `DUPLICATE_WEEK`. A period header of 0 days, or more than seven
     periods with data, answers the same `422`; before, such a file was stored and every zero-day
     period became its own export file.
   - A commission or Plus commission tariff import checks the tariff week again inside its write
     transaction.
     Two uploads of overlapping weeks that start on different days, sent at the same time, no
-    longer both store: the later one answers the duplicate week error (`DUPLICATE_TARIFF_WEEK`).
+    longer both store: the later one answers the duplicate week error (`DUPLICATE_WEEK`).
   - On advantage tariffs the commission source (`commissionSourceTariffId`) is checked after the
     file's rows are read, with the same field error (`INVALID_COMMISSION_SOURCE`): an upload that
     is both a refused file and names another store's commission tariff answers the file error.

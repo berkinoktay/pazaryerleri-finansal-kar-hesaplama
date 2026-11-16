@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
-import { SpreadsheetFileError, WORKER_LIMIT_REASONS } from '@pazarsync/spreadsheet';
+import {
+  SPREADSHEET_FILE_ERROR_CODES,
+  SpreadsheetFileError,
+  WORKER_LIMIT_REASONS,
+} from '@pazarsync/spreadsheet';
 import { syncLog } from '@pazarsync/sync-core';
-import { WORKBOOK_PAGES } from '@pazarsync/utils';
+import { WORKBOOK_ENGINE_FILE_CODES, WORKBOOK_PAGES } from '@pazarsync/utils';
 
 import {
   ImportBusyError,
@@ -65,7 +69,7 @@ function sizeCapRefusal(): SpreadsheetFileError {
 }
 
 function uploadIssues(err: unknown): unknown {
-  const thrown = captureThrow(() => toUploadError(err, {}, UPLOAD));
+  const thrown = captureThrow(() => toUploadError(err, UPLOAD));
   if (!(thrown instanceof ValidationError)) {
     throw new Error(`expected a ValidationError, got ${String(thrown)}`);
   }
@@ -85,39 +89,38 @@ afterEach(() => {
 });
 
 describe('toUploadError', () => {
-  it('replaces a rejection code with its legacy code', () => {
+  it('keeps a rejection code as it is, without a meta when it has none', () => {
     const thrown = captureThrow(() =>
-      toUploadError(
-        new WorkbookFileRejection('EMPTY_FILE'),
-        { EMPTY_FILE: 'EMPTY_DISCOUNT_FILE' },
-        UPLOAD,
-      ),
+      toUploadError(new WorkbookFileRejection('EMPTY_FILE'), UPLOAD),
     );
     expect(thrown).toBeInstanceOf(ValidationError);
     if (!(thrown instanceof ValidationError)) return;
-    expect(thrown.issues).toEqual([{ field: 'file', code: 'EMPTY_DISCOUNT_FILE' }]);
+    expect(thrown.issues).toEqual([{ field: 'file', code: 'EMPTY_FILE' }]);
   });
 
-  it('keeps a rejection code without a legacy entry, with its meta', () => {
+  it('keeps a rejection code as it is, with its meta', () => {
     const meta = {
       detectedFormatId: 'TRENDYOL:FLASH_PRODUCT_LIST:v1',
       detectedPlatform: 'TRENDYOL',
       detectedPage: 'FLASH_PRODUCT_LIST',
     };
     const thrown = captureThrow(() =>
-      toUploadError(
-        new WorkbookFileRejection('WRONG_FILE_FOR_PAGE', meta),
-        { EMPTY_FILE: 'EMPTY_DISCOUNT_FILE' },
-        UPLOAD,
-      ),
+      toUploadError(new WorkbookFileRejection('WRONG_FILE_FOR_PAGE', meta), UPLOAD),
     );
     expect(thrown).toBeInstanceOf(ValidationError);
     if (!(thrown instanceof ValidationError)) return;
     expect(thrown.issues).toEqual([{ field: 'file', code: 'WRONG_FILE_FOR_PAGE', meta }]);
   });
 
+  it('knows every engine code a file issue can carry: the engine list without ENGINE_BUSY', () => {
+    // @pazarsync/utils cannot import the engine, so its copy of the list is pinned here.
+    expect([...WORKBOOK_ENGINE_FILE_CODES].sort()).toEqual(
+      SPREADSHEET_FILE_ERROR_CODES.filter((code) => code !== 'ENGINE_BUSY').sort(),
+    );
+  });
+
   it('maps ENGINE_BUSY to a 503 with Retry-After 5', () => {
-    const thrown = captureThrow(() => toUploadError(busy(), {}, UPLOAD));
+    const thrown = captureThrow(() => toUploadError(busy(), UPLOAD));
     expect(thrown).toBeInstanceOf(ImportBusyError);
     const { status, headers } = problemDetailsForError(thrown);
     expect(status).toBe(503);
@@ -162,7 +165,7 @@ describe('toUploadError', () => {
       reason: 'shared-formula',
       entry: 'xl/worksheets/sheet1.xml',
     });
-    const thrown = captureThrow(() => toUploadError(err, {}, UPLOAD));
+    const thrown = captureThrow(() => toUploadError(err, UPLOAD));
     expect(thrown).toBeInstanceOf(ValidationError);
     if (!(thrown instanceof ValidationError)) return;
     expect(thrown.issues).toEqual([{ field: 'file', code: 'MALFORMED_SHEET' }]);
@@ -178,7 +181,7 @@ describe('toUploadError', () => {
       entry: 'xl/worksheets/sheet1.xml',
       cell: 'B2',
     });
-    captureThrow(() => toUploadError(err, {}, UPLOAD));
+    captureThrow(() => toUploadError(err, UPLOAD));
     expect(infoSpy).toHaveBeenCalledTimes(1);
     expect(infoSpy).toHaveBeenCalledWith('workbook.upload-rejected', {
       page: PAGE,
@@ -190,11 +193,7 @@ describe('toUploadError', () => {
   it('logs a null reason when the engine meta carries no string reason', () => {
     const infoSpy = spyInfo();
     captureThrow(() =>
-      toUploadError(
-        new SpreadsheetFileError('NOT_XLSX', 'Not a workbook', { reason: 7 }),
-        {},
-        UPLOAD,
-      ),
+      toUploadError(new SpreadsheetFileError('NOT_XLSX', 'Not a workbook', { reason: 7 }), UPLOAD),
     );
     expect(infoSpy).toHaveBeenCalledWith('workbook.upload-rejected', {
       page: PAGE,
@@ -205,9 +204,9 @@ describe('toUploadError', () => {
 
   it('rethrows anything else untouched', () => {
     const plain = new Error('boom');
-    expect(captureThrow(() => toUploadError(plain, {}, UPLOAD))).toBe(plain);
+    expect(captureThrow(() => toUploadError(plain, UPLOAD))).toBe(plain);
     const invariant = new WorkbookInvariantError('anchor missing');
-    expect(captureThrow(() => toUploadError(invariant, {}, UPLOAD))).toBe(invariant);
+    expect(captureThrow(() => toUploadError(invariant, UPLOAD))).toBe(invariant);
   });
 });
 

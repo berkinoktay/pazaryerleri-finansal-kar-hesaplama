@@ -160,9 +160,7 @@ describe('readRows', () => {
     expect(err).toBeInstanceOf(SpreadsheetFileError);
     expect(err instanceof SpreadsheetFileError ? err.code : null).toBe('MALFORMED_SHEET');
 
-    const mapped = captureThrow(() =>
-      toUploadError(err, {}, { page: WORKBOOK_PAGES.DISCOUNT_LIST }),
-    );
+    const mapped = captureThrow(() => toUploadError(err, { page: WORKBOOK_PAGES.DISCOUNT_LIST }));
     expect(mapped).toBeInstanceOf(ValidationError);
     expect(mapped instanceof ValidationError ? mapped.issues : null).toEqual([
       { field: 'file', code: 'MALFORMED_SHEET' },
@@ -186,9 +184,7 @@ describe('readRows', () => {
       expect(err.meta['reason']).toBe('nul-character');
       expect(err.message.includes(NUL)).toBe(false);
 
-      const mapped = captureThrow(() =>
-        toUploadError(err, {}, { page: WORKBOOK_PAGES.DISCOUNT_LIST }),
-      );
+      const mapped = captureThrow(() => toUploadError(err, { page: WORKBOOK_PAGES.DISCOUNT_LIST }));
       expect(mapped instanceof ValidationError ? mapped.issues : null).toEqual([
         { field: 'file', code: 'MALFORMED_SHEET' },
       ]);

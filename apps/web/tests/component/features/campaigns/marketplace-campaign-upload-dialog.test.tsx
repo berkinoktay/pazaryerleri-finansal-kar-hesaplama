@@ -198,6 +198,14 @@ describe('<MarketplaceCampaignUploadDialog>', () => {
     expect(screen.queryByText(SHARED.errors.field)).not.toBeInTheDocument();
   });
 
+  it("shows the page's own wrong-format message for a WRONG_FILE_FOR_PAGE file issue", () => {
+    renderDialog({
+      submitError: validationApiError([{ field: 'file', code: 'WRONG_FILE_FOR_PAGE' }]),
+    });
+
+    expect(screen.getByText(UPLOAD.errors.wrongFormat)).toBeInTheDocument();
+  });
+
   it('shows the shared wrong-type message for a file that is not an .xlsx', () => {
     renderDialog();
 

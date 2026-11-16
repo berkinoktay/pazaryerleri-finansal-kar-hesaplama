@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { useImportMarketplaceCampaign } from '@/features/campaigns/hooks/use-import-marketplace-campaign';
 import type { CampaignConfigFormValues } from '@/features/campaigns/lib/marketplace-campaign-config';
-import { extractFileErrorCode } from '@/features/campaigns/lib/upload-error';
+import { extractFileIssue } from '@/features/campaigns/lib/upload-error';
 
 import { createTestQueryClient } from '../../helpers/render';
 import { HttpResponse, http, server } from '../../helpers/msw';
@@ -140,7 +140,7 @@ describe('useImportMarketplaceCampaign', () => {
             status: 422,
             code: 'VALIDATION_ERROR',
             detail: 'invalid campaign file',
-            errors: [{ field: 'file', code: 'INVALID_CAMPAIGN_FORMAT' }],
+            errors: [{ field: 'file', code: 'WRONG_FILE_FOR_PAGE' }],
           },
           { status: 422, headers: { 'content-type': 'application/problem+json' } },
         ),
@@ -154,6 +154,9 @@ describe('useImportMarketplaceCampaign', () => {
     result.current.mutate({ file, config: CAMPAIGN_CONFIG });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(extractFileErrorCode(result.current.error)).toBe('INVALID_CAMPAIGN_FORMAT');
+    expect(extractFileIssue(result.current.error)).toEqual({
+      code: 'WRONG_FILE_FOR_PAGE',
+      meta: {},
+    });
   });
 });

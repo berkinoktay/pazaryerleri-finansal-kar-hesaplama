@@ -15,7 +15,7 @@ import type { WorkbookImportAdapter } from '@/workbooks/adapter';
 import { VALUE_NOT_STORABLE_REASON } from '@/workbooks/column-range';
 import { defineFormat } from '@/workbooks/format';
 import { importWorkbook, type ImportWorkbookInput } from '@/workbooks/import-workbook';
-import { WorkbookFileRejection, type LegacyCodes } from '@/workbooks/workbook-errors';
+import { WorkbookFileRejection } from '@/workbooks/workbook-errors';
 
 const mocks = vi.hoisted(() => ({
   transaction: vi.fn(),
@@ -91,7 +91,6 @@ type Response = z.infer<typeof ResponseSchema>;
 
 function fakeAdapter(
   persist: () => Promise<{ parentId: string; itemCount: number }>,
-  legacyCodes: LegacyCodes = {},
 ): WorkbookImportAdapter<typeof layout, { barcode: string }, null, null, Response, 'selection'> {
   return {
     page: PAGE,
@@ -121,7 +120,6 @@ function fakeAdapter(
       throw new Error('not used by importWorkbook');
     },
     formats: [FORMAT],
-    legacyCodes,
     inspect: async () => null,
     nameFallback: () => null,
     persist,
@@ -170,20 +168,7 @@ afterEach(() => {
 });
 
 describe('importWorkbook: what persist throws', () => {
-  it('turns a DUPLICATE_WEEK rejection into the legacy code when the adapter maps it', async () => {
-    const adapter = fakeAdapter(
-      async () => {
-        throw new WorkbookFileRejection('DUPLICATE_WEEK');
-      },
-      { DUPLICATE_WEEK: 'DUPLICATE_TARIFF_WEEK' },
-    );
-
-    const err = await rejection(importWorkbook(adapter, INPUT));
-
-    expect(fileIssues(err)).toEqual([{ field: 'file', code: 'DUPLICATE_TARIFF_WEEK' }]);
-  });
-
-  it('keeps the DUPLICATE_WEEK code when the adapter maps none', async () => {
+  it('turns a DUPLICATE_WEEK rejection into a DUPLICATE_WEEK file issue', async () => {
     const adapter = fakeAdapter(async () => {
       throw new WorkbookFileRejection('DUPLICATE_WEEK');
     });
@@ -193,17 +178,14 @@ describe('importWorkbook: what persist throws', () => {
     expect(fileIssues(err)).toEqual([{ field: 'file', code: 'DUPLICATE_WEEK' }]);
   });
 
-  it('turns a unique violation the adapter claims into the same file issue', async () => {
-    const adapter = fakeAdapter(
-      async () => {
-        throw UNIQUE_VIOLATION;
-      },
-      { DUPLICATE_WEEK: 'DUPLICATE_TARIFF_WEEK' },
-    );
+  it('turns a unique violation the adapter claims into the same DUPLICATE_WEEK file issue', async () => {
+    const adapter = fakeAdapter(async () => {
+      throw UNIQUE_VIOLATION;
+    });
 
     const err = await rejection(importWorkbook(adapter, INPUT));
 
-    expect(fileIssues(err)).toEqual([{ field: 'file', code: 'DUPLICATE_TARIFF_WEEK' }]);
+    expect(fileIssues(err)).toEqual([{ field: 'file', code: 'DUPLICATE_WEEK' }]);
   });
 
   it('lets a WorkbookConflictError through unchanged', async () => {

@@ -12,7 +12,6 @@ import { useExportPlusTariff } from '../hooks/use-export-plus-tariff';
 import { useImportPlusTariff } from '../hooks/use-import-plus-tariff';
 import { usePlusTariffList } from '../hooks/use-plus-tariff-list';
 import { downloadBlob } from '../lib/download-blob';
-import { extractFileErrorCode } from '../lib/upload-error';
 import { PlusTariffsListView } from './plus-tariffs-list-view';
 import { PlusTariffUploadDialog } from './plus-tariff-upload-dialog';
 
@@ -130,7 +129,6 @@ export function PlusTariffsListClient({
         }}
         onFile={handleImport}
         submitting={importTariff.isPending}
-        errorCode={extractFileErrorCode(importTariff.error)}
         submitError={importTariff.error}
         onResetError={() => importTariff.reset()}
       />

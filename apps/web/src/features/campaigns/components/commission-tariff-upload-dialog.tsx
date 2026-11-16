@@ -3,7 +3,11 @@
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { WORKBOOK_UPLOAD_MAX_BYTES, WORKBOOK_UPLOAD_MAX_MB } from '@pazarsync/utils';
+import {
+  WORKBOOK_PAGES,
+  WORKBOOK_UPLOAD_MAX_BYTES,
+  WORKBOOK_UPLOAD_MAX_MB,
+} from '@pazarsync/utils';
 
 import { FileUpload } from '@/components/patterns/file-upload';
 import { Button } from '@/components/ui/button';
@@ -17,6 +21,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
+import { useWorkbookErrorMessage } from '../hooks/use-workbook-error-message';
 import { UploadUnplacedIssues } from './upload-unplaced-issues';
 
 const STEP_KEYS = ['step1', 'step2', 'step3'] as const;
@@ -31,45 +36,13 @@ export interface CommissionTariffUploadDialogProps {
   onFile: (file: File) => void;
   /** True while the import request is in flight (drives the submit button). */
   submitting?: boolean;
-  /** Backend file-rejection code (from `extractFileErrorCode`), shown inline. */
-  errorCode?: string | null;
-  /** The import mutation's error; its field issues on anything but the file are listed inline. */
+  /**
+   * The import mutation's error: its file rejection is shown on the dropzone, and its field
+   * issues on anything but the file are listed under it.
+   */
   submitError?: Error | null;
   /** Clears the last import error when the seller picks a different file. */
   onResetError?: () => void;
-}
-
-/** Maps a backend file-rejection code to its localized message key bucket. */
-function useFileErrorMessage(): (code: string | null | undefined) => string | null {
-  const t = useTranslations('commissionTariffsPage.upload.errors');
-  return (code) => {
-    switch (code) {
-      case null:
-      case undefined:
-        return null;
-      case 'NOT_XLSX':
-      case 'CORRUPT_FILE':
-      case 'UNSAFE_CONTENT':
-        return t('notReadable');
-      case 'EMPTY_TARIFF_FILE':
-        return t('empty');
-      case 'NO_TARIFF_PERIOD':
-        return t('noPeriod');
-      case 'DUPLICATE_TARIFF_WEEK':
-        return t('DUPLICATE_TARIFF_WEEK');
-      case 'ROW_CAP_EXCEEDED':
-      case 'COL_CAP_EXCEEDED':
-      case 'PAYLOAD_TOO_LARGE':
-        return t('tooLarge');
-      case 'SHEET_NOT_FOUND':
-      case 'INVALID_TARIFF_FORMAT':
-      case 'MISSING_REQUIRED_HEADERS':
-      case 'AMBIGUOUS_HEADERS':
-        return t('wrongFormat');
-      default:
-        return t('generic');
-    }
-  };
 }
 
 /**
@@ -85,14 +58,13 @@ export function CommissionTariffUploadDialog({
   onOpenChange,
   onFile,
   submitting = false,
-  errorCode,
   submitError,
   onResetError,
 }: CommissionTariffUploadDialogProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage.upload');
   const tUpload = useTranslations('campaignUpload');
   const tCommon = useTranslations('common');
-  const fileErrorMessage = useFileErrorMessage();
+  const fileErrorMessage = useWorkbookErrorMessage(WORKBOOK_PAGES.COMMISSION_TARIFF);
 
   const [file, setFile] = React.useState<File | null>(null);
 
@@ -127,7 +99,7 @@ export function CommissionTariffUploadDialog({
           errorWrongType={tUpload('fileErrors.wrongType')}
           errorTooLarge={tUpload('fileErrors.tooLarge', { maxMb: WORKBOOK_UPLOAD_MAX_MB })}
           removeLabel={tUpload('removeFile')}
-          error={fileErrorMessage(errorCode)}
+          error={fileErrorMessage(submitError)}
           onChange={(next) => {
             setFile(next);
             onResetError?.();
