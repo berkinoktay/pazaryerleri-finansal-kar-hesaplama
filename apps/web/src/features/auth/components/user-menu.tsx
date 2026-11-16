@@ -35,7 +35,7 @@ import { Link } from '@/i18n/navigation';
 import { useLocaleSwitch } from '@/lib/use-locale-switch';
 import { useOrderSoundPref } from '@/lib/use-order-sound-pref';
 import { cn } from '@/lib/utils';
-import { useTheme } from '@/providers/theme-provider';
+import { isThemePreference, type ThemePreference, useTheme } from '@/providers/theme-provider';
 
 type ThemeIcon = typeof Sun03Icon;
 
@@ -45,9 +45,7 @@ const THEME_OPTIONS = [
   { value: 'system', icon: ComputerIcon, labelKey: 'theme.system' },
 ] as const;
 
-// String-keyed so the (string | undefined) theme from next-themes indexes
-// safely without an assertion; falls back to the System icon.
-const THEME_ICON: Record<string, ThemeIcon> = {
+const THEME_ICON: Record<ThemePreference, ThemeIcon> = {
   light: Sun03Icon,
   dark: Moon02Icon,
   system: ComputerIcon,
@@ -110,7 +108,7 @@ export function UserMenu({ placement = 'footer' }: UserMenuProps = {}): React.Re
   // Safe inside the popover: the content only mounts on click (no SSR), so
   // reading `theme` to pick the trigger icon can't cause a hydration mismatch.
   const activeThemeValue = theme ?? 'system';
-  const ActiveThemeIcon = THEME_ICON[activeThemeValue] ?? ComputerIcon;
+  const ActiveThemeIcon = THEME_ICON[activeThemeValue];
   const activeThemeLabel = t(
     THEME_OPTIONS.find((option) => option.value === activeThemeValue)?.labelKey ?? 'theme.system',
   );
@@ -203,7 +201,9 @@ export function UserMenu({ placement = 'footer' }: UserMenuProps = {}): React.Re
               <DropdownMenuContent align="end" sideOffset={6} className="min-w-36">
                 <DropdownMenuRadioGroup
                   value={theme ?? 'system'}
-                  onValueChange={(value) => setTheme(value)}
+                  onValueChange={(value) => {
+                    if (isThemePreference(value)) setTheme(value);
+                  }}
                 >
                   {THEME_OPTIONS.map(({ value, icon: Icon, labelKey }) => (
                     <DropdownMenuRadioItem key={value} value={value} className="gap-xs">
