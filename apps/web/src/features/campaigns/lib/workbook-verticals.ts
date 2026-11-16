@@ -2,6 +2,14 @@ import type { MessageKeys, Messages, NestedKeyOf } from 'next-intl';
 
 import type { WorkbookPage } from '@pazarsync/utils';
 
+import {
+  advantageTariffKeys,
+  commissionTariffKeys,
+  discountListKeys,
+  flashProductKeys,
+  marketplaceCampaignKeys,
+  plusCommissionTariffKeys,
+} from '../query-keys';
 import type { WorkbookErrorBucket } from './workbook-error-bucket';
 
 /**
@@ -11,6 +19,22 @@ import type { WorkbookErrorBucket } from './workbook-error-bucket';
  */
 export type AppMessageKey = MessageKeys<Messages, NestedKeyOf<Messages>>;
 
+/** The query keys an import or export of the page invalidates. */
+export interface WorkbookQueryKeys {
+  lists(orgId: string, storeId: string): readonly unknown[];
+  detail(orgId: string, storeId: string, id: string): readonly unknown[];
+}
+
+/** The fields the page's upload form asks for besides the file. */
+export type WorkbookUploadExtras =
+  | 'none'
+  | 'commissionSource'
+  | 'discountConfig'
+  | 'campaignConfig';
+
+/** How the page's upload dialog lays out its body: one column, or two from `md` up. */
+export type WorkbookUploadLayout = 'stack' | 'split';
+
 /** What the shared workbook upload code needs to know about one campaign page. */
 export interface WorkbookVertical {
   /**
@@ -18,6 +42,15 @@ export interface WorkbookVertical {
    * would say less (the page's file by name, its own empty or duplicate-week wording).
    */
   readonly errorOverrides: Readonly<Partial<Record<WorkbookErrorBucket, AppMessageKey>>>;
+  /** The route of the page's detail screen; a record's id is appended to it. */
+  readonly detailBase: string;
+  readonly keys: WorkbookQueryKeys;
+  readonly extras: WorkbookUploadExtras;
+  readonly layout: WorkbookUploadLayout;
+  /** The class of the upload dialog's content, where the page styles it. */
+  readonly modalClassName: string | undefined;
+  /** Whether the upload dialog shows the three-step guide. */
+  readonly steps: boolean;
 }
 
 /** One entry per page that accepts a marketplace workbook. */
@@ -27,17 +60,35 @@ export const WORKBOOK_VERTICALS: Readonly<Record<WorkbookPage, WorkbookVertical>
       wrongFormat: 'commissionTariffsPage.upload.errors.wrongFormat',
       duplicateWeek: 'commissionTariffsPage.upload.errors.duplicateWeek',
     },
+    detailBase: '/campaigns/product-commission-tariffs',
+    keys: commissionTariffKeys,
+    extras: 'none',
+    layout: 'stack',
+    modalClassName: undefined,
+    steps: true,
   },
   PLUS_COMMISSION_TARIFF: {
     errorOverrides: {
       wrongFormat: 'plusCommissionTariffsPage.upload.errors.wrongFormat',
       duplicateWeek: 'plusCommissionTariffsPage.upload.errors.duplicateWeek',
     },
+    detailBase: '/campaigns/plus-commission-tariffs',
+    keys: plusCommissionTariffKeys,
+    extras: 'none',
+    layout: 'stack',
+    modalClassName: undefined,
+    steps: true,
   },
   ADVANTAGE_TARIFF: {
     errorOverrides: {
       wrongFormat: 'productLabelsPage.upload.errors.wrongFormat',
     },
+    detailBase: '/campaigns/product-labels',
+    keys: advantageTariffKeys,
+    extras: 'commissionSource',
+    layout: 'split',
+    modalClassName: 'advantage-upload-modal',
+    steps: true,
   },
   FLASH_PRODUCT_LIST: {
     errorOverrides: {
@@ -45,15 +96,33 @@ export const WORKBOOK_VERTICALS: Readonly<Record<WorkbookPage, WorkbookVertical>
       // A flash file lists offers, not products: the page names its own rows.
       empty: 'flashProductsPage.upload.errors.empty',
     },
+    detailBase: '/campaigns/flash-products',
+    keys: flashProductKeys,
+    extras: 'none',
+    layout: 'stack',
+    modalClassName: undefined,
+    steps: true,
   },
   DISCOUNT_LIST: {
     errorOverrides: {
       wrongFormat: 'discountsPage.upload.errors.wrongFormat',
     },
+    detailBase: '/campaigns/discounts',
+    keys: discountListKeys,
+    extras: 'discountConfig',
+    layout: 'stack',
+    modalClassName: 'discount-upload-modal',
+    steps: false,
   },
   MARKETPLACE_CAMPAIGN_LIST: {
     errorOverrides: {
       wrongFormat: 'marketplaceCampaignsPage.upload.errors.wrongFormat',
     },
+    detailBase: '/campaigns/marketplace-campaigns',
+    keys: marketplaceCampaignKeys,
+    extras: 'campaignConfig',
+    layout: 'stack',
+    modalClassName: 'marketplace-campaign-upload-modal',
+    steps: false,
   },
 };

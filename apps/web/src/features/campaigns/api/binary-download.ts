@@ -1,13 +1,12 @@
 /**
- * Shared helpers for the tariff binary-download endpoints (commission + Plus). Both
- * export endpoints return a file on success but a JSON ProblemDetails on error, and
- * both name the file (`.xlsx` or `.zip`) in `Content-Disposition`. Keeping the
- * filename parser and the download-file shape here means the two `.api.ts` callers
- * read the header identically.
+ * Shared helpers for the workbook export endpoints of the campaign pages. Every export
+ * endpoint returns a file on success but a JSON ProblemDetails on error, and names the
+ * file (`.xlsx` or `.zip`) in `Content-Disposition`. The filename parser and the
+ * download-file shape live here, read by the one export function (`workbook.api.ts`).
  */
 
 /** A downloaded export: the file bytes plus the server-chosen name (`.xlsx` or `.zip`). */
-export interface TariffExportFile {
+export interface WorkbookExportFile {
   readonly blob: Blob;
   /** From `Content-Disposition`; null if the header is absent (caller falls back). */
   readonly filename: string | null;

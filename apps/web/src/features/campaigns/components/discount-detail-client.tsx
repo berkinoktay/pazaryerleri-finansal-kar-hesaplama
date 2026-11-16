@@ -5,6 +5,8 @@ import { useTranslations } from 'next-intl';
 import { parseAsBoolean, parseAsString, useQueryStates } from 'nuqs';
 import * as React from 'react';
 
+import { WORKBOOK_PAGES } from '@pazarsync/utils';
+
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { PageHeader } from '@/components/patterns/page-header';
@@ -17,7 +19,7 @@ import { ApiError } from '@/lib/api-error';
 import { useDeleteDiscountList } from '../hooks/use-delete-discount-list';
 import { useDiscountListDetail } from '../hooks/use-discount-list-detail';
 import { useEstimateDiscountItem } from '../hooks/use-estimate-discount-item';
-import { useExportDiscountList } from '../hooks/use-export-discount-list';
+import { useExportWorkbook } from '../hooks/use-export-workbook';
 import { useUpdateDiscountSelections } from '../hooks/use-update-discount-selections';
 import { toDiscountListView, type DiscountRow } from '../lib/adapt-discount-list';
 import {
@@ -69,7 +71,7 @@ export function DiscountDetailClient({
 
   const detail = useDiscountListDetail(orgId ?? '', storeId, listId);
   const updateSelections = useUpdateDiscountSelections(orgId ?? '', storeId ?? '', listId);
-  const exportList = useExportDiscountList(orgId ?? '', storeId ?? '');
+  const exportList = useExportWorkbook(WORKBOOK_PAGES.DISCOUNT_LIST, orgId ?? '', storeId ?? '');
   const deleteList = useDeleteDiscountList(orgId ?? '', storeId ?? '');
   const estimate = useEstimateDiscountItem(orgId ?? '', storeId ?? '', listId);
 

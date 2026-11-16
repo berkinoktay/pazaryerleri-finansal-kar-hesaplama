@@ -3,20 +3,24 @@
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { WORKBOOK_PAGES } from '@pazarsync/utils';
+
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Button } from '@/components/ui/button';
 import { Link, useRouter } from '@/i18n/navigation';
 
 import { useFlashProductList } from '../hooks/use-flash-product-list';
 import { useDeleteFlashProducts } from '../hooks/use-delete-flash-products';
-import { useExportFlashProducts } from '../hooks/use-export-flash-products';
-import { useImportFlashProducts } from '../hooks/use-import-flash-products';
+import { useExportWorkbook } from '../hooks/use-export-workbook';
+import { useImportWorkbook } from '../hooks/use-import-workbook';
 import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
 import { downloadBlob } from '../lib/download-blob';
+import { WORKBOOK_VERTICALS } from '../lib/workbook-verticals';
 import { FlashProductUploadDialog } from './flash-product-upload-dialog';
 import { FlashProductsListView } from './flash-products-list-view';
 
-const DETAIL_BASE = '/campaigns/flash-products';
+const PAGE = WORKBOOK_PAGES.FLASH_PRODUCT_LIST;
+const DETAIL_BASE = WORKBOOK_VERTICALS[PAGE].detailBase;
 
 /**
  * Data-bound LIST screen for Flash Products. Resolves org/store from the server (passed as
@@ -35,9 +39,9 @@ export function FlashProductsListClient({
   const tCommon = useTranslations('common');
   const router = useRouter();
   const list = useFlashProductList(orgId ?? '', storeId);
-  const importList = useImportFlashProducts(orgId ?? '', storeId ?? '');
+  const importList = useImportWorkbook(PAGE, orgId ?? '', storeId ?? '');
   const deleteList = useDeleteFlashProducts(orgId ?? '', storeId ?? '');
-  const exportList = useExportFlashProducts(orgId ?? '', storeId ?? '');
+  const exportList = useExportWorkbook(PAGE, orgId ?? '', storeId ?? '');
   const warnPrefilled = usePrefilledWarning();
   const [uploadOpen, setUploadOpen] = React.useState(false);
 
@@ -51,12 +55,12 @@ export function FlashProductsListClient({
   const handleImport = React.useCallback(
     (file: File): void => {
       importList.mutate(
-        { file },
+        { file, fields: {} },
         {
           onSuccess: (result) => {
             setUploadOpen(false);
             warnPrefilled(result.prefilledRows);
-            openDetail(result.listId);
+            openDetail(result.id);
           },
         },
       );

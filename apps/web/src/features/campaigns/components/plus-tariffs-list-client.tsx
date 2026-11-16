@@ -3,20 +3,24 @@
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { WORKBOOK_PAGES } from '@pazarsync/utils';
+
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Button } from '@/components/ui/button';
 import { Link, useRouter } from '@/i18n/navigation';
 
 import { useDeletePlusTariff } from '../hooks/use-delete-plus-tariff';
-import { useExportPlusTariff } from '../hooks/use-export-plus-tariff';
-import { useImportPlusTariff } from '../hooks/use-import-plus-tariff';
+import { useExportWorkbook } from '../hooks/use-export-workbook';
+import { useImportWorkbook } from '../hooks/use-import-workbook';
 import { usePlusTariffList } from '../hooks/use-plus-tariff-list';
 import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
 import { downloadBlob } from '../lib/download-blob';
+import { WORKBOOK_VERTICALS } from '../lib/workbook-verticals';
 import { PlusTariffsListView } from './plus-tariffs-list-view';
 import { PlusTariffUploadDialog } from './plus-tariff-upload-dialog';
 
-const DETAIL_BASE = '/campaigns/plus-commission-tariffs';
+const PAGE = WORKBOOK_PAGES.PLUS_COMMISSION_TARIFF;
+const DETAIL_BASE = WORKBOOK_VERTICALS[PAGE].detailBase;
 
 /**
  * Data-bound LIST screen for Plus Commission Tariffs. Resolves org/store from
@@ -36,9 +40,9 @@ export function PlusTariffsListClient({
   const tCommon = useTranslations('common');
   const router = useRouter();
   const list = usePlusTariffList(orgId ?? '', storeId);
-  const importTariff = useImportPlusTariff(orgId ?? '', storeId ?? '');
+  const importTariff = useImportWorkbook(PAGE, orgId ?? '', storeId ?? '');
   const deleteTariff = useDeletePlusTariff(orgId ?? '', storeId ?? '');
-  const exportTariff = useExportPlusTariff(orgId ?? '', storeId ?? '');
+  const exportTariff = useExportWorkbook(PAGE, orgId ?? '', storeId ?? '');
   const warnPrefilled = usePrefilledWarning();
   const [uploadOpen, setUploadOpen] = React.useState(false);
 
@@ -52,12 +56,12 @@ export function PlusTariffsListClient({
   const handleImport = React.useCallback(
     (file: File): void => {
       importTariff.mutate(
-        { file },
+        { file, fields: {} },
         {
           onSuccess: (result) => {
             setUploadOpen(false);
             warnPrefilled(result.prefilledRows);
-            openDetail(result.tariffId);
+            openDetail(result.id);
           },
         },
       );

@@ -3,20 +3,24 @@
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { WORKBOOK_PAGES } from '@pazarsync/utils';
+
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Button } from '@/components/ui/button';
 import { Link, useRouter } from '@/i18n/navigation';
 
 import { useAdvantageTariffList } from '../hooks/use-advantage-tariff-list';
 import { useDeleteAdvantageTariff } from '../hooks/use-delete-advantage-tariff';
-import { useExportAdvantageTariff } from '../hooks/use-export-advantage-tariff';
-import { useImportAdvantageTariff } from '../hooks/use-import-advantage-tariff';
+import { useExportWorkbook } from '../hooks/use-export-workbook';
+import { useImportWorkbook } from '../hooks/use-import-workbook';
 import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
 import { downloadBlob } from '../lib/download-blob';
+import { WORKBOOK_VERTICALS } from '../lib/workbook-verticals';
 import { AdvantageTariffUploadDialog } from './advantage-tariff-upload-dialog';
 import { AdvantageTariffsListView } from './advantage-tariffs-list-view';
 
-const DETAIL_BASE = '/campaigns/product-labels';
+const PAGE = WORKBOOK_PAGES.ADVANTAGE_TARIFF;
+const DETAIL_BASE = WORKBOOK_VERTICALS[PAGE].detailBase;
 
 /**
  * Data-bound LIST screen for Advantage product labels. Resolves org/store from
@@ -36,9 +40,9 @@ export function AdvantageTariffsListClient({
   const tCommon = useTranslations('common');
   const router = useRouter();
   const list = useAdvantageTariffList(orgId ?? '', storeId);
-  const importTariff = useImportAdvantageTariff(orgId ?? '', storeId ?? '');
+  const importTariff = useImportWorkbook(PAGE, orgId ?? '', storeId ?? '');
   const deleteTariff = useDeleteAdvantageTariff(orgId ?? '', storeId ?? '');
-  const exportTariff = useExportAdvantageTariff(orgId ?? '', storeId ?? '');
+  const exportTariff = useExportWorkbook(PAGE, orgId ?? '', storeId ?? '');
   const warnPrefilled = usePrefilledWarning();
   const [uploadOpen, setUploadOpen] = React.useState(false);
 
@@ -52,12 +56,12 @@ export function AdvantageTariffsListClient({
   const handleImport = React.useCallback(
     (file: File, commissionSourceTariffId: string | undefined): void => {
       importTariff.mutate(
-        { file, commissionSourceTariffId },
+        { file, fields: { commissionSourceTariffId } },
         {
           onSuccess: (result) => {
             setUploadOpen(false);
             warnPrefilled(result.prefilledRows);
-            openDetail(result.tariffId);
+            openDetail(result.id);
           },
         },
       );

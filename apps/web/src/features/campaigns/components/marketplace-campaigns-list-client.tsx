@@ -3,20 +3,24 @@
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { WORKBOOK_PAGES } from '@pazarsync/utils';
+
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Button } from '@/components/ui/button';
 import { Link, useRouter } from '@/i18n/navigation';
 
 import { useDeleteMarketplaceCampaign } from '../hooks/use-delete-marketplace-campaign';
-import { useExportMarketplaceCampaign } from '../hooks/use-export-marketplace-campaign';
-import { useImportMarketplaceCampaign } from '../hooks/use-import-marketplace-campaign';
+import { useExportWorkbook } from '../hooks/use-export-workbook';
+import { useImportWorkbook } from '../hooks/use-import-workbook';
 import { useMarketplaceCampaigns } from '../hooks/use-marketplace-campaigns';
 import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
 import { downloadBlob } from '../lib/download-blob';
+import { WORKBOOK_VERTICALS } from '../lib/workbook-verticals';
 import { MarketplaceCampaignUploadDialog } from './marketplace-campaign-upload-dialog';
 import { MarketplaceCampaignsListView } from './marketplace-campaigns-list-view';
 
-const DETAIL_BASE = '/campaigns/marketplace-campaigns';
+const PAGE = WORKBOOK_PAGES.MARKETPLACE_CAMPAIGN_LIST;
+const DETAIL_BASE = WORKBOOK_VERTICALS[PAGE].detailBase;
 
 /**
  * Data-bound LIST screen for Kampanyalar. Resolves org/store from the server (passed as props),
@@ -39,13 +43,13 @@ export function MarketplaceCampaignsListClient({
   // and `handleExport` feeds the row actions → the table's columns, whose rebuild remounts every
   // cell (closing an open row menu).
   const { mutate: deleteCampaign } = useDeleteMarketplaceCampaign(orgId ?? '', storeId ?? '');
-  const { mutate: exportCampaign } = useExportMarketplaceCampaign(orgId ?? '', storeId ?? '');
+  const { mutate: exportCampaign } = useExportWorkbook(PAGE, orgId ?? '', storeId ?? '');
   const {
     mutate: importCampaign,
     isPending: importing,
     error: importError,
     reset: resetImport,
-  } = useImportMarketplaceCampaign(orgId ?? '', storeId ?? '');
+  } = useImportWorkbook(PAGE, orgId ?? '', storeId ?? '');
   const warnPrefilled = usePrefilledWarning();
   const [uploadOpen, setUploadOpen] = React.useState(false);
 
@@ -61,12 +65,12 @@ export function MarketplaceCampaignsListClient({
   >(
     (config, file, name) => {
       importCampaign(
-        { file, name, config },
+        { file, fields: { name, ...config } },
         {
           onSuccess: (result) => {
             setUploadOpen(false);
             warnPrefilled(result.prefilledRows);
-            openDetail(result.campaignId);
+            openDetail(result.id);
           },
         },
       );

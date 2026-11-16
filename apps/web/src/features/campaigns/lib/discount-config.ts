@@ -214,9 +214,10 @@ export const discountConfigFormSchema =
   discountConfigFieldsSchema.superRefine(refineDiscountConfigForm);
 
 /**
- * The discount configuration the upload/edit form produces (re-homed from
- * `../api/import-discount-list.api`). Inferred from {@link discountConfigFormSchema} so the RHF
- * resolver and the value type never drift.
+ * The discount configuration the upload/edit form produces. It lives here, next to the form
+ * schema, and is the one home of the type: the upload sends it as form fields of the shared
+ * workbook import. Inferred from {@link discountConfigFormSchema} so the RHF resolver and the
+ * value type never drift.
  */
 export type DiscountConfigFormValues = z.infer<typeof discountConfigFormSchema>;
 
