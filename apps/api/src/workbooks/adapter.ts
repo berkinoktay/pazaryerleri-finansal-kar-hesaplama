@@ -50,7 +50,6 @@ export interface PersistContext<TRow, TConfig, TMeta> {
   readonly parent: ParentFields;
   readonly rows: readonly ImportedRow<TRow>[];
   readonly variantIdByAnchor: ReadonlyMap<string, string>;
-  readonly distinctAnchors: readonly string[];
   readonly config: TConfig;
   readonly meta: TMeta;
 }

@@ -26,7 +26,6 @@ import {
   claimProfitRecomputeRequests,
   drainProfitRecomputeQueue,
   enqueueProfitRecompute,
-  enqueueProfitRecomputeForBarcodes,
   enqueueProfitRecomputeForStore,
   enqueueProfitRecomputeForVariants,
   enqueueStaleProfitStatements,
@@ -63,22 +62,6 @@ async function addOrderItemForVariant(params: {
       lineSaleGross: '100',
       lineSellerDiscountGross: '0',
       saleVatRate: '10',
-    },
-  });
-}
-
-/** Adds one order item carrying just a barcode (no variant), for the barcode-scope tests. */
-async function addOrderItemWithBarcode(params: {
-  readonly orderId: string;
-  readonly organizationId: string;
-  readonly barcode: string;
-}): Promise<void> {
-  await prisma.orderItem.create({
-    data: {
-      orderId: params.orderId,
-      organizationId: params.organizationId,
-      quantity: 1,
-      barcode: params.barcode,
     },
   });
 }
@@ -255,111 +238,6 @@ describe('profit recompute queue', () => {
       where: { orderId: siblingOrderId },
     });
     expect(siblingRow).toBeNull();
-  });
-
-  describe('enqueueProfitRecomputeForBarcodes', () => {
-    it('queues the store order whose item carries a listed barcode, with the reason', async () => {
-      const parcel = await seedMelontikParcel();
-
-      const count = await enqueueProfitRecomputeForBarcodes(prisma, {
-        organizationId: parcel.organizationId,
-        storeId: parcel.storeId,
-        reason: ProfitRecomputeReason.REFERENCE_CHANGED,
-        barcodes: [MELONTIK.items.a.barcode],
-      });
-
-      expect(count).toBe(1);
-      expect(await queuedOrderIds()).toEqual([parcel.orderId]);
-      const row = await prisma.profitRecomputeRequest.findUnique({
-        where: { orderId: parcel.orderId },
-      });
-      expect(row?.reason).toBe(ProfitRecomputeReason.REFERENCE_CHANGED);
-    });
-
-    it('does not queue a sibling store order of the same organization carrying the barcode', async () => {
-      const parcel = await seedMelontikParcel();
-      const siblingStoreId = await createAdditionalStore({ organizationId: parcel.organizationId });
-      const siblingOrderId = await seedBareOrder({
-        organizationId: parcel.organizationId,
-        storeId: siblingStoreId,
-      });
-      await addOrderItemWithBarcode({
-        orderId: siblingOrderId,
-        organizationId: parcel.organizationId,
-        barcode: MELONTIK.items.a.barcode,
-      });
-
-      const count = await enqueueProfitRecomputeForBarcodes(prisma, {
-        organizationId: parcel.organizationId,
-        storeId: parcel.storeId,
-        reason: ProfitRecomputeReason.REFERENCE_CHANGED,
-        barcodes: [MELONTIK.items.a.barcode],
-      });
-
-      expect(count).toBe(1);
-      expect(await queuedOrderIds()).toEqual([parcel.orderId]);
-      const siblingRow = await prisma.profitRecomputeRequest.findUnique({
-        where: { orderId: siblingOrderId },
-      });
-      expect(siblingRow).toBeNull();
-    });
-
-    it('does not queue another organization order carrying the same barcode', async () => {
-      const parcel = await seedMelontikParcel();
-      // A second organization whose variant carries the same barcode string.
-      const other = await seedMelontikParcel();
-
-      const count = await enqueueProfitRecomputeForBarcodes(prisma, {
-        organizationId: parcel.organizationId,
-        storeId: parcel.storeId,
-        reason: ProfitRecomputeReason.REFERENCE_CHANGED,
-        barcodes: [MELONTIK.items.a.barcode],
-      });
-
-      expect(count).toBe(1);
-      expect(await queuedOrderIds()).toEqual([parcel.orderId]);
-      const otherRow = await prisma.profitRecomputeRequest.findUnique({
-        where: { orderId: other.orderId },
-      });
-      expect(otherRow).toBeNull();
-    });
-
-    it('leaves out an order of the store whose items carry none of the barcodes', async () => {
-      const parcel = await seedMelontikParcel();
-      const otherOrderId = await seedBareOrder({
-        organizationId: parcel.organizationId,
-        storeId: parcel.storeId,
-      });
-      await addOrderItemWithBarcode({
-        orderId: otherOrderId,
-        organizationId: parcel.organizationId,
-        barcode: 'bc-unrelated',
-      });
-
-      const count = await enqueueProfitRecomputeForBarcodes(prisma, {
-        organizationId: parcel.organizationId,
-        storeId: parcel.storeId,
-        reason: ProfitRecomputeReason.REFERENCE_CHANGED,
-        barcodes: [MELONTIK.items.a.barcode],
-      });
-
-      expect(count).toBe(1);
-      expect(await queuedOrderIds()).toEqual([parcel.orderId]);
-    });
-
-    it('returns 0 and writes no row for an empty barcode list', async () => {
-      const parcel = await seedMelontikParcel();
-
-      const count = await enqueueProfitRecomputeForBarcodes(prisma, {
-        organizationId: parcel.organizationId,
-        storeId: parcel.storeId,
-        reason: ProfitRecomputeReason.REFERENCE_CHANGED,
-        barcodes: [],
-      });
-
-      expect(count).toBe(0);
-      expect(await queuedOrderIds()).toEqual([]);
-    });
   });
 
   it('sweeps orders without a statement or with an old engine version, up to the limit', async () => {

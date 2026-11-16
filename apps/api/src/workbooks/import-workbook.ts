@@ -276,7 +276,6 @@ export async function importWorkbook<
         parent,
         rows,
         variantIdByAnchor,
-        distinctAnchors,
         config: input.config,
         meta,
       });

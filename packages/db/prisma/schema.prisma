@@ -871,7 +871,7 @@ model OrderItem {
   @@index([organizationId])
   // product_variant_id is a FK (onDelete: SetNull) with no index; the profit queue's variants scope (enqueueProfitRecomputeForVariants in packages/profit/src/persistence/recompute-queue.ts) probes it.
   @@index([productVariantId])
-  // barcode is probed by the barcodes scope (enqueueProfitRecomputeForBarcodes, used by commission tariff import and delete).
+  // barcode is probed by the profit loader's sibling-parcel check (packages/profit/src/persistence/load-trendyol-parcel.ts).
   @@index([barcode])
   // Resolution kuyruğu index'i PARTIAL (WHERE product_variant_id IS NULL) —
   // Prisma kısmi index yazamadığı için check-constraints.sql + migration

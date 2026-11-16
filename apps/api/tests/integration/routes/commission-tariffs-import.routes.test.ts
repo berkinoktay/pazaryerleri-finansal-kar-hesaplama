@@ -15,7 +15,6 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import { cellText, columnIndex, readWorkbookGrid, resolveLayout } from '@pazarsync/spreadsheet';
 import { patchFixture } from '@pazarsync/spreadsheet/testing';
 import { syncLog } from '@pazarsync/sync-core';
@@ -254,11 +253,13 @@ describe('POST .../commission-tariffs/import — profit recompute queueing', () 
     await ensureDbReachable();
   });
 
-  it('queues the orders whose barcodes a tariff import covers', async () => {
+  // An order's commission never reads a tariff's bands, so a tariff is not an order
+  // input: nothing is queued, not even an order carrying an imported barcode.
+  it('queues no order, not even one whose barcode the tariff covers', async () => {
     await truncateAll();
     const ctx = await setupStoreWithMatch();
 
-    // An order whose item carries a barcode present in the fixture → must queue.
+    // An order whose item carries a barcode present in the fixture.
     const covered = await createOrder(ctx.orgId, ctx.storeId);
     await prisma.orderItem.create({
       data: {
@@ -270,27 +271,11 @@ describe('POST .../commission-tariffs/import — profit recompute queueing', () 
       },
     });
 
-    // An order whose barcode is not in the fixture → must stay out.
-    const uncovered = await createOrder(ctx.orgId, ctx.storeId);
-    await prisma.orderItem.create({
-      data: {
-        orderId: uncovered.id,
-        organizationId: ctx.orgId,
-        quantity: 1,
-        lineSaleGross: '0.00',
-        barcode: 'NOT-IN-FIXTURE-ZZZ',
-      },
-    });
-
     const res = await app.request(importRequest(ctx));
     expect(res.status).toBe(201);
 
-    const coveredQueued = await prisma.profitRecomputeRequest.findUnique({
-      where: { orderId: covered.id },
-    });
-    expect(coveredQueued?.reason).toBe(ProfitRecomputeReason.REFERENCE_CHANGED);
     expect(
-      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: uncovered.id } }),
+      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: covered.id } }),
     ).toBeNull();
   });
 });

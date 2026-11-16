@@ -32,7 +32,7 @@
 // consuming services stay dumb.
 //
 // CRITICAL timezone frame: commission tariff week/period bounds are persisted as İstanbul
-// WALL-CLOCK-as-UTC (via the commission import's `parsePeriodPart`), while `list.startsAt`
+// WALL-CLOCK-as-UTC (via the tariff import's `parseTariffPeriodLabel`), while `list.startsAt`
 // and `now` are TRUE instants. We mirror the Flash resolver's normalization EXACTLY — each
 // stored bound is reconciled to a true instant with the shared `isInstantWithinTariffPeriod` helper
 // before comparing — so `weekStart <= anchor < weekEnd` (and the sub-period / expiry test) is

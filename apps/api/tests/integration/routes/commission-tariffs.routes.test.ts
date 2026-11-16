@@ -13,12 +13,7 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import {
-  FeeCalculationKind,
-  FeeScope,
-  OrderFeeType,
-  ProfitRecomputeReason,
-} from '@pazarsync/db/enums';
+import { FeeCalculationKind, FeeScope, OrderFeeType } from '@pazarsync/db/enums';
 
 import { createApp } from '@/app';
 
@@ -541,7 +536,9 @@ describe('DELETE .../commission-tariffs/{tariffId} - profit recompute queueing',
     await ensureDbReachable();
   });
 
-  it('queues the orders whose barcodes the deleted tariff covered', async () => {
+  // An order's commission never reads a tariff's bands, so deleting a tariff changes no
+  // order's profit: nothing is queued, not even an order carrying the tariff's barcode.
+  it('queues no order, not even one whose barcode the deleted tariff covered', async () => {
     await truncateAll();
 
     const user = await createAuthenticatedTestUser();
@@ -584,7 +581,7 @@ describe('DELETE .../commission-tariffs/{tariffId} - profit recompute queueing',
       },
     });
 
-    // An order whose item carries the tariff's barcode -> must queue after the delete.
+    // An order whose item carries the tariff's barcode.
     const covered = await createOrder(org.id, store.id);
     await prisma.orderItem.create({
       data: {
@@ -596,19 +593,7 @@ describe('DELETE .../commission-tariffs/{tariffId} - profit recompute queueing',
       },
     });
 
-    // An order whose barcode the tariff never covered -> must stay out.
-    const uncovered = await createOrder(org.id, store.id);
-    await prisma.orderItem.create({
-      data: {
-        orderId: uncovered.id,
-        organizationId: org.id,
-        quantity: 1,
-        lineSaleGross: '0.00',
-        barcode: 'BC-UNRELATED',
-      },
-    });
-
-    // Clear any queue rows left by the setup so the assertion proves the delete's own enqueue.
+    // Clear any queue rows left by the setup so the assertion is about the delete alone.
     await prisma.profitRecomputeRequest.deleteMany();
 
     const del = await app.request(
@@ -617,13 +602,11 @@ describe('DELETE .../commission-tariffs/{tariffId} - profit recompute queueing',
     );
     expect(del.status).toBe(204);
 
-    const coveredQueued = await prisma.profitRecomputeRequest.findUnique({
-      where: { orderId: covered.id },
-    });
-    expect(coveredQueued?.reason).toBe(ProfitRecomputeReason.REFERENCE_CHANGED);
     expect(
-      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: uncovered.id } }),
+      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: covered.id } }),
     ).toBeNull();
+    expect(await prisma.commissionTariff.count({ where: { id: tariff.id } })).toBe(0);
+    expect(await prisma.commissionTariffItem.count({ where: { periodId: period.id } })).toBe(0);
   });
 });
 

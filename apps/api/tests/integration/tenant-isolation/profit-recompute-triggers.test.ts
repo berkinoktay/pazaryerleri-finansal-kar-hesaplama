@@ -1,13 +1,16 @@
 /**
  * Multi-tenancy isolation for the profit-input triggers (Phase 3B, Task 8).
  *
- * Every input change (cost, settings, shipping, desi, tariff, catalog) enqueues
- * a profit recompute for the AFFECTED orders only. The enqueue helpers select
- * orders through an organization (and, where given, store) filter, so a change
- * in one tenant can never pull another tenant's order — or a sibling store's
- * order — into the queue, even when a barcode is shared. These two tests pin
- * that boundary for the two broadest fan-outs: a cost change (by variant) and a
- * shipping-config change (by store).
+ * Every input change (cost, settings, shipping, desi, catalog) enqueues a profit
+ * recompute for the AFFECTED orders only. The enqueue helpers select orders through
+ * an organization (and, where given, store) filter, so a change in one tenant can
+ * never pull another tenant's order — or a sibling store's order — into the queue,
+ * even when a barcode is shared. Two tests pin that boundary for the two broadest
+ * fan-outs: a cost change (by variant) and a shipping-config change (by store).
+ *
+ * A commission tariff is not an order input: an order's commission never reads a
+ * tariff's bands, so its import and delete queue no order at all, not even one of
+ * the acting store.
  */
 
 import { readFileSync } from 'node:fs';
@@ -18,6 +21,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { prisma } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 
+import { NotFoundError } from '@/lib/errors';
 import { importTariff } from '@/workbooks/verticals/commission-tariff.adapter';
 import { deleteTariff } from '@/services/commission-tariff.service';
 import { updateCostProfile } from '@/services/cost-profile.service';
@@ -35,8 +39,8 @@ import {
 } from '../../helpers/factories';
 
 // The real Trendyol "Urun Komisyon Tarifeleri" export; one of its product rows
-// carries the barcode below. Imported/deleted through the service to prove the
-// recompute enqueue stays scoped to the acting organization and store.
+// carries the barcode below. Imported and deleted through the service to prove that
+// neither queues an order, and that a delete stays inside its organization and store.
 const TARIFF_FIXTURE = readFileSync(
   new URL('../../fixtures/trendyol-commission-tariff.xlsx', import.meta.url),
 );
@@ -143,20 +147,29 @@ describe('Tenant isolation — profit recompute triggers', () => {
     expect(queuedSibling).toBeNull();
   });
 
-  it('never queues another organization or a sibling store order on a commission tariff import', async () => {
+  it('queues no order on a commission tariff import or delete, not even one of the acting store', async () => {
     // Org A with two stores, org B with one; each store has an order carrying the
-    // fixture's barcode. The import runs for store A1 only.
+    // fixture's barcode. The import and the delete run for store A1.
     const orgA = await createOrganization();
     const storeA1 = await createStore(orgA.id);
     const storeA2 = await createStore(orgA.id);
     const orgB = await createOrganization();
     const storeB = await createStore(orgB.id);
 
-    const orderA1 = await orderCarryingFixtureBarcode(orgA.id, storeA1.id);
-    const orderA2 = await orderCarryingFixtureBarcode(orgA.id, storeA2.id);
-    const orderB = await orderCarryingFixtureBarcode(orgB.id, storeB.id);
+    const orderIds = [
+      await orderCarryingFixtureBarcode(orgA.id, storeA1.id),
+      await orderCarryingFixtureBarcode(orgA.id, storeA2.id),
+      await orderCarryingFixtureBarcode(orgB.id, storeB.id),
+    ];
+    const queuedOrderIds = async (): Promise<string[]> =>
+      (
+        await prisma.profitRecomputeRequest.findMany({
+          where: { orderId: { in: orderIds } },
+          select: { orderId: true },
+        })
+      ).map((row) => row.orderId);
 
-    await importTariff({
+    const imported = await importTariff({
       organizationId: orgA.id,
       storeId: storeA1.id,
       file: TARIFF_FIXTURE,
@@ -164,30 +177,19 @@ describe('Tenant isolation — profit recompute triggers', () => {
       createdBy: null,
       now: new Date('2026-06-24T00:00:00Z'),
     });
+    expect(await queuedOrderIds()).toEqual([]);
 
-    const queuedA1 = await prisma.profitRecomputeRequest.findUnique({
-      where: { orderId: orderA1 },
-    });
-    expect(queuedA1?.reason).toBe(ProfitRecomputeReason.REFERENCE_CHANGED);
-
-    expect(
-      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: orderA2 } }),
-    ).toBeNull();
-    expect(
-      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: orderB } }),
-    ).toBeNull();
+    await deleteTariff(orgA.id, storeA1.id, imported.tariffId);
+    expect(await queuedOrderIds()).toEqual([]);
+    expect(await prisma.commissionTariff.count({ where: { id: imported.tariffId } })).toBe(0);
   });
 
-  it('never queues another organization or a sibling store order on a commission tariff delete', async () => {
+  it('refuses to delete a tariff of another organization or of a sibling store, as a missing one', async () => {
     const orgA = await createOrganization();
     const storeA1 = await createStore(orgA.id);
     const storeA2 = await createStore(orgA.id);
     const orgB = await createOrganization();
     const storeB = await createStore(orgB.id);
-
-    const orderA1 = await orderCarryingFixtureBarcode(orgA.id, storeA1.id);
-    const orderA2 = await orderCarryingFixtureBarcode(orgA.id, storeA2.id);
-    const orderB = await orderCarryingFixtureBarcode(orgB.id, storeB.id);
 
     const imported = await importTariff({
       organizationId: orgA.id,
@@ -198,22 +200,12 @@ describe('Tenant isolation — profit recompute triggers', () => {
       now: new Date('2026-06-24T00:00:00Z'),
     });
 
-    // The import itself enqueues A1's order; clear the queue so the assertion proves
-    // the delete's own enqueue, not the import's.
-    await prisma.profitRecomputeRequest.deleteMany();
-
-    await deleteTariff(orgA.id, storeA1.id, imported.tariffId);
-
-    const queuedA1 = await prisma.profitRecomputeRequest.findUnique({
-      where: { orderId: orderA1 },
-    });
-    expect(queuedA1?.reason).toBe(ProfitRecomputeReason.REFERENCE_CHANGED);
-
-    expect(
-      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: orderA2 } }),
-    ).toBeNull();
-    expect(
-      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: orderB } }),
-    ).toBeNull();
+    await expect(deleteTariff(orgB.id, storeB.id, imported.tariffId)).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+    await expect(deleteTariff(orgA.id, storeA2.id, imported.tariffId)).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+    expect(await prisma.commissionTariff.count({ where: { id: imported.tariffId } })).toBe(1);
   });
 });

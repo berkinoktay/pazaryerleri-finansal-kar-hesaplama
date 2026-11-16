@@ -14,7 +14,12 @@
 
 import { SpreadsheetFileError } from '@pazarsync/spreadsheet';
 import { mapPrismaError } from '@pazarsync/sync-core';
-import { TARIFF_WEEK_DAYS, tariffBoundToInstant, tariffWeekDays } from '@pazarsync/utils';
+import {
+  getBusinessDateAnchor,
+  TARIFF_WEEK_DAYS,
+  tariffBoundToInstant,
+  tariffWeekDays,
+} from '@pazarsync/utils';
 
 import type { StoreScope } from './adapter';
 import type { WriteValueSpec } from './format';
@@ -69,8 +74,20 @@ const TR_MONTHS: Readonly<Record<string, number>> = {
 
 const PERIOD_PART_RE = /(\d{1,2})\s+(\p{L}+)\s+(\d{1,2})[.:](\d{2})/u;
 
-/** Parses one "DD Ay HH.MM" half of a period label into an instant, or null. */
-export function parsePeriodPart(part: string, year: number): Date | null {
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The year offsets a label's date is tried at around its reference: a year back, the same, a year on. */
+const CANDIDATE_YEAR_OFFSETS = [-1, 0, 1] as const;
+
+/** One "DD Ay HH.MM" half of a period label, without a year (the labels carry none). */
+interface PeriodPart {
+  readonly month: number;
+  readonly day: number;
+  readonly hour: number;
+  readonly minute: number;
+}
+
+function readPeriodPart(part: string): PeriodPart | null {
   const match = PERIOD_PART_RE.exec(part.trim());
   if (match === null) return null;
   const [, dayRaw, monthRaw, hourRaw, minuteRaw] = match;
@@ -84,25 +101,54 @@ export function parsePeriodPart(part: string, year: number): Date | null {
   }
   const month = TR_MONTHS[monthRaw.toLocaleLowerCase('tr')];
   if (month === undefined) return null;
-  return new Date(Date.UTC(year, month, Number(dayRaw), Number(hourRaw), Number(minuteRaw)));
+  return { month, day: Number(dayRaw), hour: Number(hourRaw), minute: Number(minuteRaw) };
+}
+
+/** The part in `year`, or null for a day the month does not have that year (29 Şubat). */
+function periodPartIn(part: PeriodPart, year: number): Date | null {
+  const date = new Date(Date.UTC(year, part.month, part.day, part.hour, part.minute));
+  return date.getUTCMonth() === part.month ? date : null;
+}
+
+/** The part in whichever year around `reference` puts it closest to `reference`. */
+function periodPartClosestTo(part: PeriodPart, reference: Date): Date | null {
+  const referenceYear = reference.getUTCFullYear();
+  let closest: Date | null = null;
+  for (const offset of CANDIDATE_YEAR_OFFSETS) {
+    const candidate = periodPartIn(part, referenceYear + offset);
+    if (candidate === null) continue;
+    const distance = Math.abs(candidate.getTime() - reference.getTime());
+    if (closest === null || distance < Math.abs(closest.getTime() - reference.getTime())) {
+      closest = candidate;
+    }
+  }
+  return closest;
 }
 
 /**
- * Parses a "start-end" period label into instants. `referenceYear` supplies the
- * missing year; if the end falls before the start, it is rolled to the next year.
- * Returns `{ null, null }` when the label is not a two-part dated range.
+ * Parses a "start-end" period label into instants. The label carries no year: the
+ * start takes the year that puts it closest to `reference` (a year back, the same or a
+ * year on), and the end the start's year, rolled to the next one when it would fall
+ * before the start. Returns `{ null, null }` when the label is not a two-part dated
+ * range. `reference` is in the stored frame (Istanbul wall-clock saved as UTC).
  */
 export function parseTariffPeriodLabel(
   label: string,
-  referenceYear: number,
+  reference: Date,
 ): { startsAt: Date | null; endsAt: Date | null } {
   const parts = label.split('-');
   if (parts.length !== 2) return { startsAt: null, endsAt: null };
-  const startsAt = parsePeriodPart(parts[0] ?? '', referenceYear);
-  let endsAt = parsePeriodPart(parts[1] ?? '', referenceYear);
-  if (startsAt !== null && endsAt !== null && endsAt.getTime() < startsAt.getTime()) {
-    endsAt = parsePeriodPart(parts[1] ?? '', referenceYear + 1);
-  }
+  const startPart = readPeriodPart(parts[0] ?? '');
+  const endPart = readPeriodPart(parts[1] ?? '');
+  const startsAt = startPart === null ? null : periodPartClosestTo(startPart, reference);
+  if (endPart === null) return { startsAt, endsAt: null };
+  if (startsAt === null) return { startsAt, endsAt: periodPartClosestTo(endPart, reference) };
+  const startYear = startsAt.getUTCFullYear();
+  const sameYearEnd = periodPartIn(endPart, startYear);
+  const endsAt =
+    sameYearEnd !== null && sameYearEnd.getTime() >= startsAt.getTime()
+      ? sameYearEnd
+      : periodPartIn(endPart, startYear + 1);
   return { startsAt, endsAt };
 }
 
@@ -148,10 +194,17 @@ function latest(dates: readonly (Date | null)[]): Date | null {
 
 /**
  * The periods whose label is filled on the first data row, in block order, each with
- * its best-effort parsed bounds (the labels carry no year: it is `now`'s UTC year), and
- * the week they span: the earliest parsed start and the latest parsed end, each null
- * when no label parsed. A block whose label is blank on the first row carries no data
- * and is left out.
+ * its best-effort parsed bounds, and the week they span: the earliest parsed start and
+ * the latest parsed end, each null when no label parsed. A block whose label is blank
+ * on the first row carries no data and is left out.
+ *
+ * The labels carry no year. The first label that parses takes the year that puts it
+ * closest to the upload day in Istanbul (`now`'s business date), and every later label
+ * the year that puts it closest to that first label's start (its end, when only the end
+ * parses): the periods of one week lie within days of each other, so a week that
+ * crosses New Year gets its two years whether it is uploaded in December or in January.
+ * A week up to about six months before or after the upload day is placed in its own
+ * year.
  *
  * Throws WorkbookFileRejection NO_PERIOD when no label is filled.
  */
@@ -159,11 +212,13 @@ export function resolveTariffWeek(
   firstRowPeriods: readonly { readonly tag: number; readonly label: string | null }[],
   now: Date,
 ): TariffWeek {
-  const year = now.getUTCFullYear();
+  const uploadDay = getBusinessDateAnchor(now);
+  let weekAnchor: Date | null = null;
   const present: PresentPeriod[] = [];
   firstRowPeriods.forEach((period, layoutIndex) => {
     if (period.label === null) return;
-    const { startsAt, endsAt } = parseTariffPeriodLabel(period.label, year);
+    const { startsAt, endsAt } = parseTariffPeriodLabel(period.label, weekAnchor ?? uploadDay);
+    weekAnchor ??= startsAt ?? endsAt;
     present.push({
       label: period.label,
       dayCount: period.tag,
@@ -223,29 +278,55 @@ export async function findOverlappingWeek(
   });
 }
 
-/** `meta.reason` of the MALFORMED_SHEET `requireTariffPeriods` throws. */
+/** `meta.reason` of the MALFORMED_SHEET `requireTariffPeriods` throws for the period blocks. */
 export const TARIFF_PERIODS_REASON = 'tariff-periods';
+
+/** `meta.reason` of the MALFORMED_SHEET `requireTariffPeriods` throws for the parsed dates. */
+export const TARIFF_WEEK_SPAN_REASON = 'tariff-week-span';
 
 /** A period block covers at least one day. */
 const MIN_PERIOD_DAYS = 1;
 
+function hasRepeats(values: readonly (number | string)[]): boolean {
+  return new Set(values).size !== values.length;
+}
+
 /**
- * Checks the present periods of `week` as a week can hold them: each covers at least
- * one day, and there are at most TARIFF_WEEK_DAYS of them. A "(0 Gun)" header adds 0
- * days to the week, so without this check a file could carry any number of empty
- * period blocks, each one a stored period and an export window.
+ * Checks the present periods of `week` as one Trendyol week holds them:
+ * - each period covers at least one day, and their day counts add up to at most
+ *   TARIFF_WEEK_DAYS: a "(0 Gun)" header adds 0 days, so without the first rule a file
+ *   could carry any number of empty period blocks, each a stored period and an export
+ *   window;
+ * - no two periods share a day count or a date-range label: the export names a window
+ *   by its day count, and two periods of one day count cannot both be written back;
+ * - the parsed dates span at most TARIFF_WEEK_DAYS days, from the earliest start to the
+ *   latest end, when both are known.
  *
- * Throws SpreadsheetFileError MALFORMED_SHEET (reason TARIFF_PERIODS_REASON), a 422 on
- * `file` at upload. No value of the file appears in the message.
+ * Throws SpreadsheetFileError MALFORMED_SHEET, a 422 on `file` at upload: reason
+ * TARIFF_PERIODS_REASON for the period blocks, TARIFF_WEEK_SPAN_REASON for the dates.
+ * No value of the file appears in the message.
  */
-export function requireTariffPeriods(week: Pick<TariffWeek, 'present'>): void {
-  const tooMany = week.present.length > TARIFF_WEEK_DAYS;
-  const empty = week.present.some((period) => period.dayCount < MIN_PERIOD_DAYS);
-  if (!tooMany && !empty) return;
+export function requireTariffPeriods(
+  week: Pick<TariffWeek, 'present' | 'weekStartsAt' | 'weekEndsAt'>,
+): void {
+  const dayCounts = week.present.map((period) => period.dayCount);
+  const empty = dayCounts.some((days) => days < MIN_PERIOD_DAYS);
+  const overfull = dayCounts.reduce((sum, days) => sum + days, 0) > TARIFF_WEEK_DAYS;
+  const repeated = hasRepeats(dayCounts) || hasRepeats(week.present.map((period) => period.label));
+  if (empty || overfull || repeated) {
+    throw new SpreadsheetFileError(
+      'MALFORMED_SHEET',
+      'The tariff periods do not fit a week: a period of no days, more days than a week, or a repeated period',
+      { reason: TARIFF_PERIODS_REASON },
+    );
+  }
+  const { weekStartsAt, weekEndsAt } = week;
+  if (weekStartsAt === null || weekEndsAt === null) return;
+  if (weekEndsAt.getTime() - weekStartsAt.getTime() <= TARIFF_WEEK_DAYS * DAY_MS) return;
   throw new SpreadsheetFileError(
     'MALFORMED_SHEET',
-    'The tariff periods do not fit a week: a period of no days, or more periods than days',
-    { reason: TARIFF_PERIODS_REASON },
+    'The tariff period dates span more than a week',
+    { reason: TARIFF_WEEK_SPAN_REASON },
   );
 }
 
@@ -279,9 +360,10 @@ export type FirstRowPeriods = readonly { readonly tag: number; readonly label: s
  * scoped overlap query on `table`.
  *
  * Throws WorkbookFileRejection NO_PERIOD when no period label is filled,
- * SpreadsheetFileError MALFORMED_SHEET when a period has no days, there are more periods
- * than a week has days or a window label could not be written, and WorkbookFileRejection
- * DUPLICATE_WEEK when a tariff of the store already covers part of the week.
+ * SpreadsheetFileError MALFORMED_SHEET when the periods do not fit one week
+ * (`requireTariffPeriods`) or a window label could not be written, and
+ * WorkbookFileRejection DUPLICATE_WEEK when a tariff of the store already covers part of
+ * the week.
  */
 export async function inspectUploadWeek(input: {
   readonly table: TariffWeekTable;
