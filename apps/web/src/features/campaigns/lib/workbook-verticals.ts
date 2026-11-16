@@ -49,8 +49,6 @@ export interface WorkbookVertical {
   readonly layout: WorkbookUploadLayout;
   /** The class of the upload dialog's content, where the page styles it. */
   readonly modalClassName: string | undefined;
-  /** Whether the upload dialog shows the three-step guide. */
-  readonly steps: boolean;
 }
 
 /** One entry per page that accepts a marketplace workbook. */
@@ -65,7 +63,6 @@ export const WORKBOOK_VERTICALS: Readonly<Record<WorkbookPage, WorkbookVertical>
     extras: 'none',
     layout: 'stack',
     modalClassName: undefined,
-    steps: true,
   },
   PLUS_COMMISSION_TARIFF: {
     errorOverrides: {
@@ -77,7 +74,6 @@ export const WORKBOOK_VERTICALS: Readonly<Record<WorkbookPage, WorkbookVertical>
     extras: 'none',
     layout: 'stack',
     modalClassName: undefined,
-    steps: true,
   },
   ADVANTAGE_TARIFF: {
     errorOverrides: {
@@ -88,7 +84,6 @@ export const WORKBOOK_VERTICALS: Readonly<Record<WorkbookPage, WorkbookVertical>
     extras: 'commissionSource',
     layout: 'split',
     modalClassName: 'advantage-upload-modal',
-    steps: true,
   },
   FLASH_PRODUCT_LIST: {
     errorOverrides: {
@@ -101,7 +96,6 @@ export const WORKBOOK_VERTICALS: Readonly<Record<WorkbookPage, WorkbookVertical>
     extras: 'none',
     layout: 'stack',
     modalClassName: undefined,
-    steps: true,
   },
   DISCOUNT_LIST: {
     errorOverrides: {
@@ -112,7 +106,6 @@ export const WORKBOOK_VERTICALS: Readonly<Record<WorkbookPage, WorkbookVertical>
     extras: 'discountConfig',
     layout: 'stack',
     modalClassName: 'discount-upload-modal',
-    steps: false,
   },
   MARKETPLACE_CAMPAIGN_LIST: {
     errorOverrides: {
@@ -123,6 +116,5 @@ export const WORKBOOK_VERTICALS: Readonly<Record<WorkbookPage, WorkbookVertical>
     extras: 'campaignConfig',
     layout: 'stack',
     modalClassName: 'marketplace-campaign-upload-modal',
-    steps: false,
   },
 };

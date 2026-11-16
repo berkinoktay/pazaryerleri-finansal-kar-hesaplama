@@ -216,6 +216,7 @@ interface HarnessProps {
   page: WorkbookPage;
   onSubmit?: (input: WorkbookImportInput) => void;
   onOpenChange?: (open: boolean) => void;
+  submitting?: boolean;
   submitError?: Error | null;
   onResetError?: () => void;
 }
@@ -225,6 +226,7 @@ function Harness({
   page,
   onSubmit = vi.fn(),
   onOpenChange,
+  submitting = false,
   submitError = null,
   onResetError,
 }: HarnessProps): React.ReactElement {
@@ -243,6 +245,7 @@ function Harness({
         }}
         scope={SCOPE}
         onSubmit={onSubmit}
+        submitting={submitting}
         submitError={submitError}
         onResetError={onResetError}
       />
@@ -431,6 +434,76 @@ describe.each(PAGE_ROWS)('<WorkbookUploadDialog page="$page">', (row) => {
   });
 });
 
+// A close or a new file while the import is in flight would reset the import mutation, and
+// the reset drops the success callback that closes the dialog and routes to the new record.
+describe.each(PAGE_ROWS)('<WorkbookUploadDialog page="$page"> while importing', (row) => {
+  it('disables the cancel button', () => {
+    render(<Harness page={row.page} submitting />);
+
+    expect(screen.getByRole('button', { name: COMMON.cancel })).toBeDisabled();
+  });
+
+  it('ignores Escape: the dialog stays open and nothing is reset', async () => {
+    const onOpenChange = vi.fn();
+    const onResetError = vi.fn();
+    const { user } = render(
+      <Harness
+        page={row.page}
+        submitting
+        onOpenChange={onOpenChange}
+        onResetError={onResetError}
+      />,
+    );
+
+    await user.keyboard('{Escape}');
+
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(onResetError).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('accepts no new file in the empty dropzone', async () => {
+    const onResetError = vi.fn();
+    const { user } = render(<Harness page={row.page} submitting onResetError={onResetError} />);
+
+    expect(fileInput()).toBeDisabled();
+    await user.upload(fileInput(), makeXlsxFile());
+
+    expect(screen.queryByRole('button', { name: SHARED.removeFile })).not.toBeInTheDocument();
+    expect(onResetError).not.toHaveBeenCalled();
+  });
+
+  it('keeps the picked file: its remove button is disabled', async () => {
+    const onResetError = vi.fn();
+    const { user, rerender } = render(<Harness page={row.page} onResetError={onResetError} />);
+
+    await user.upload(fileInput(), makeXlsxFile());
+    onResetError.mockClear();
+    rerender(<Harness page={row.page} submitting onResetError={onResetError} />);
+
+    const remove = screen.getByRole('button', { name: SHARED.removeFile });
+    expect(remove).toBeDisabled();
+    await user.click(remove);
+    expect(screen.getByRole('button', { name: SHARED.removeFile })).toBeInTheDocument();
+    expect(onResetError).not.toHaveBeenCalled();
+  });
+
+  it('closes on Escape and clears the error once the import is no longer in flight', async () => {
+    const onOpenChange = vi.fn();
+    const onResetError = vi.fn();
+    const { user } = render(
+      <Harness page={row.page} onOpenChange={onOpenChange} onResetError={onResetError} />,
+    );
+
+    expect(screen.getByRole('button', { name: COMMON.cancel })).toBeEnabled();
+    await user.keyboard('{Escape}');
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(onResetError).toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+
 describe('<WorkbookUploadDialog> dropzone limit', () => {
   it('accepts a file right at the shared workbook upload limit', async () => {
     const { user } = render(<Harness page={WORKBOOK_PAGES.COMMISSION_TARIFF} />);
@@ -502,6 +575,29 @@ describe('<WorkbookUploadDialog page="ADVANTAGE_TARIFF">', () => {
     await user.click(screen.getByText(SOURCE.categoryOption));
 
     expect(submit).toBeEnabled();
+  });
+
+  it('drops the category choice on a close and pins the default tariff again on reopen', async () => {
+    serveCommissionList([ACTIVE_TARIFF, UPCOMING_TARIFF]);
+    const onSubmit = vi.fn<(input: WorkbookImportInput) => void>();
+    const { user } = render(<Harness page={PAGE} onSubmit={onSubmit} />);
+
+    await user.click(await screen.findByText(SOURCE.categoryOption));
+    await user.click(screen.getByRole('button', { name: COMMON.cancel }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'reopen' }));
+
+    const file = makeXlsxFile();
+    await user.upload(fileInput(), file);
+    const submit = screen.getByRole('button', { name: SUBMIT });
+    await waitFor(() => expect(submit).toBeEnabled());
+    await user.click(submit);
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual({
+      file,
+      fields: { commissionSourceTariffId: 't-next' },
+    });
   });
 
   it('emits no commissionSourceTariffId for the category choice', async () => {
@@ -645,6 +741,24 @@ describe.each(CONFIG_ROWS)('<WorkbookUploadDialog page="$page"> config', (row) =
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onOpenChange).not.toHaveBeenCalled();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('starts from an empty name and the default NET config after a close and a reopen', async () => {
+    const { user } = render(<Harness page={row.page} />);
+
+    // The type first: a type change clears the parameters itself, so the value comes after it.
+    await selectOption(user, UPLOAD.typeLabel, TYPES.CONDITIONAL_BASKET);
+    await user.type(screen.getByLabelText(UPLOAD.name), 'Liste');
+    await user.type(screen.getByLabelText(FIELDS.value), '20');
+    expect(screen.getByLabelText(FIELDS.value)).toHaveValue('20');
+
+    await user.click(screen.getByRole('button', { name: COMMON.cancel }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'reopen' }));
+
+    expect(screen.getByLabelText(UPLOAD.name)).toHaveValue('');
+    expect(screen.getByLabelText(UPLOAD.typeLabel)).toHaveTextContent(TYPES.NET);
+    expect(screen.getByLabelText(FIELDS.value)).toHaveValue('');
   });
 
   it('limits the name input to the shared name length', () => {

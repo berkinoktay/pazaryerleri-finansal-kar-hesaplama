@@ -77,8 +77,8 @@ const UPLOAD_DIALOG_TEXTS: Readonly<Record<WorkbookPage, UploadDialogTexts>> = {
 };
 
 /**
- * The guide of each page: null for a page that shows none. Every page has an entry, so a new
- * page cannot set `WORKBOOK_VERTICALS[page].steps` and have its guide silently missing.
+ * The guide of each page: null for a page that shows none. The one source of whether a page
+ * shows the guide; every page has an entry, so a new page must decide it.
  */
 const UPLOAD_STEP_TEXTS: Readonly<Record<WorkbookPage, UploadStepTexts | null>> = {
   COMMISSION_TARIFF: {
@@ -134,7 +134,10 @@ export interface WorkbookUploadFrameProps {
   page: WorkbookPage;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** True while the import request is in flight (drives the submit button). */
+  /**
+   * True while the import request is in flight: drives the submit button, and locks the file,
+   * the cancel button and every close request until the import answers.
+   */
   submitting?: boolean;
   /**
    * The import mutation's error: its file refusal is shown on the dropzone, and its field
@@ -183,10 +186,13 @@ export function WorkbookUploadFrame({
 
   const vertical = WORKBOOK_VERTICALS[page];
   const texts = UPLOAD_DIALOG_TEXTS[page];
-  const stepTexts = vertical.steps ? UPLOAD_STEP_TEXTS[page] : null;
+  const stepTexts = UPLOAD_STEP_TEXTS[page];
   const capped = vertical.modalClassName !== undefined;
 
   const handleOpenChange = (next: boolean): void => {
+    // A close request (Escape, the overlay, the close control) waits for the import: closing
+    // resets the mutation, which drops the success callback that routes to the new record.
+    if (!next && submitting) return;
     // Reset the whole form when the dialog closes, so reopening starts clean.
     if (!next) {
       setFile(null);
@@ -215,6 +221,8 @@ export function WorkbookUploadFrame({
         errorTooLarge={tUpload('fileErrors.tooLarge', { maxMb: WORKBOOK_UPLOAD_MAX_MB })}
         removeLabel={tUpload('removeFile')}
         error={fileErrorMessage(submitError)}
+        // Locked while the import is in flight: a new or removed file resets the mutation.
+        disabled={submitting}
         onChange={(next) => {
           setFile(next);
           onResetError?.();
@@ -273,7 +281,7 @@ export function WorkbookUploadFrame({
 
           <DialogFooter className={cn(capped && CAPPED_DIALOG.footer)}>
             <DialogClose asChild>
-              <Button type="button" variant="ghost">
+              <Button type="button" variant="ghost" disabled={submitting}>
                 {tCommon('cancel')}
               </Button>
             </DialogClose>

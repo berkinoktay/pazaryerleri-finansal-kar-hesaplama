@@ -3,6 +3,8 @@
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { WORKBOOK_PAGES } from '@pazarsync/utils';
+
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -19,8 +21,10 @@ import type { CommissionTariffListItem } from '../api/list-tariffs.api';
 import { useCommissionTariffLabel } from '../hooks/use-commission-tariff-label';
 import { useCommissionTariffList } from '../hooks/use-commission-tariff-list';
 import { useUploadFieldErrorMessage } from '../hooks/use-upload-field-error-message';
+import { WORKBOOK_VERTICALS } from '../lib/workbook-verticals';
 
-const COMMISSION_TARIFFS_PATH = '/campaigns/product-commission-tariffs';
+/** The commission tariff list page, where the seller uploads a tariff. */
+const COMMISSION_TARIFFS_PATH = WORKBOOK_VERTICALS[WORKBOOK_PAGES.COMMISSION_TARIFF].detailBase;
 
 /**
  * Sentinel value of the category commission choice. Radix Select forbids an empty-string value,

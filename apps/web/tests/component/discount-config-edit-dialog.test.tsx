@@ -230,6 +230,19 @@ describe('<DiscountConfigEditDialog>', () => {
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 
+  it('shows a NAME_REQUIRED refusal under the name input and stays open', async () => {
+    capturePatch(validationApiError([{ field: 'name', code: 'NAME_REQUIRED' }]));
+    const { user, onOpenChange } = renderDialog(makeSavableList());
+
+    const input = screen.getByLabelText(UPLOAD.name);
+    await user.clear(input);
+    await user.type(input, 'New name');
+    await user.click(screen.getByRole('button', { name: SAVE_LABEL }));
+
+    expect(await within(nameField()).findByText(SHARED.errors.nameRequired)).toBeInTheDocument();
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
   it('shows the field sentence once for a 422 on fields the form has no input for', async () => {
     capturePatch(
       validationApiError([
