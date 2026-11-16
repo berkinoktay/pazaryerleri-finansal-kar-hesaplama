@@ -136,10 +136,13 @@ export function bundleDownload(
     if (Object.hasOwn(entries, file.filename)) {
       throw new WorkbookConflictError('EXPORT_FILENAME_COLLISION');
     }
-    entries[file.filename] = new Uint8Array(file.file);
+    // A Buffer is a Uint8Array: the zip reads each patched file in place, no copy.
+    entries[file.filename] = file.file;
   }
+  const zipped = zipSync(entries, { level: ZIP_STORE_LEVEL });
   return {
-    body: Buffer.from(zipSync(entries, { level: ZIP_STORE_LEVEL })),
+    // A view of the zip's bytes, not a copy of them.
+    body: Buffer.from(zipped.buffer, zipped.byteOffset, zipped.byteLength),
     filename: zipName(policy, first),
     contentType: ZIP_MIME,
   };

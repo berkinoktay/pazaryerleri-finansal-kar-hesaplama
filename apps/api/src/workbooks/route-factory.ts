@@ -30,6 +30,18 @@ import { WorkbookInvariantError } from './workbook-errors';
 const StorePathIdsSchema = z.object({ orgId: z.string().uuid(), storeId: z.string().uuid() });
 
 /**
+ * The download's bytes as the response body takes them: a view over the same memory
+ * when they sit in an ArrayBuffer (a patched file can be tens of megabytes), a copy
+ * only otherwise.
+ */
+function responseBytes(bytes: Buffer): Uint8Array<ArrayBuffer> {
+  const { buffer } = bytes;
+  return buffer instanceof ArrayBuffer
+    ? new Uint8Array(buffer, bytes.byteOffset, bytes.byteLength)
+    : new Uint8Array(bytes);
+}
+
+/**
  * `POST /organizations/{orgId}/stores/{storeId}/<segment>/import`: the upload guard
  * chain, the page's form, then the generic import. The path ids only select the store
  * access record the middleware verified; the import runs with that record's ids and
@@ -178,7 +190,7 @@ export function createWorkbookExportRoute<S extends LayoutSpec, TRow, TItem, TWr
       recordId,
       store.platform,
     );
-    return c.body(new Uint8Array(bundle.body), 200, downloadHeaders(bundle));
+    return c.body(responseBytes(bundle.body), 200, downloadHeaders(bundle));
   });
 
   return app;
