@@ -15,7 +15,13 @@ import { WORKBOOK_PAGES } from '@pazarsync/utils';
 import { IMPORT_INSERT_CHUNK_ROWS, UPLOAD_NAME_MAX_LENGTH } from '@/config/workbook-limits';
 import { ValidationError } from '@/lib/errors';
 import { defineFormat } from '@/workbooks/format';
-import { countPrefilled, createManyChunked, deriveName, readRows } from '@/workbooks/import-rows';
+import {
+  countPrefilled,
+  createManyChunked,
+  deriveName,
+  NUL_CHARACTER_REASON,
+  readRows,
+} from '@/workbooks/import-rows';
 import { resolveWriteColumns } from '@/workbooks/write-columns';
 import {
   toUploadError,
@@ -90,6 +96,9 @@ function syntheticFormat(keepNeedsBarcode: boolean) {
 
 const FORMAT = syntheticFormat(true);
 
+// U+0000, which Postgres refuses in a text column (22021).
+const NUL = String.fromCodePoint(0);
+
 function row(barcode: CellValue, price: CellValue, writes: readonly CellValue[] = []): CellValue[] {
   return [barcode, price, ...writes];
 }
@@ -158,6 +167,39 @@ describe('readRows', () => {
     expect(mapped instanceof ValidationError ? mapped.issues : null).toEqual([
       { field: 'file', code: 'MALFORMED_SHEET' },
     ]);
+  });
+
+  it.each([
+    ['the anchor of a kept row', [[...HEADER], row(`B-1${NUL}`, 10)]],
+    ['a write column of a kept row', [[...HEADER], row('B-1', 10, [null, `Yes${NUL}`])]],
+    ['a text cell of a row the keep rule skips', [[...HEADER], row('B-1', 10), row(null, NUL)]],
+    ['the last data row', [[...HEADER], row('B-1', 10), row('B-2', 11, [`1${NUL}`])]],
+  ] satisfies readonly (readonly [string, SheetData])[])(
+    'refuses U+0000 in %s as MALFORMED_SHEET nul-character, a 422 on upload',
+    (_name, grid) => {
+      const err = captureThrow(() => readRows(selected(grid)));
+
+      expect(err).toBeInstanceOf(SpreadsheetFileError);
+      if (!(err instanceof SpreadsheetFileError)) return;
+      expect(err.code).toBe('MALFORMED_SHEET');
+      expect(err.meta).toEqual({ reason: NUL_CHARACTER_REASON });
+      expect(err.meta['reason']).toBe('nul-character');
+      expect(err.message.includes(NUL)).toBe(false);
+
+      const mapped = captureThrow(() =>
+        toUploadError(err, {}, { page: WORKBOOK_PAGES.DISCOUNT_LIST }),
+      );
+      expect(mapped instanceof ValidationError ? mapped.issues : null).toEqual([
+        { field: 'file', code: 'MALFORMED_SHEET' },
+      ]);
+    },
+  );
+
+  it('does not read U+0000 in the header row as a data row', () => {
+    // A header cell outside the layout: the data rows start below it.
+    const grid: SheetData = [[...HEADER, `Note${NUL}`], row('B-1', 10)];
+
+    expect(readRows(selected(grid)).rows).toHaveLength(1);
   });
 
   it('accepts an anchor of exactly 256 characters', () => {

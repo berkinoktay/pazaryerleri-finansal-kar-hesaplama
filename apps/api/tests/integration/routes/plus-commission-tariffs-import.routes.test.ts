@@ -273,3 +273,64 @@ describe('POST .../plus-commission-tariffs/import - a number its column cannot h
     expect(await prisma.plusCommissionTariffItem.count({ where: scope })).toBe(0);
   });
 });
+
+// The day count inside a period header, "(N " before the day unit.
+const PERIOD_HEADER_DAYS_RE = /\(\d+ /;
+
+/**
+ * The single-period fixture with the header of its one period rewritten to `days`
+ * days; only the digits of the header change, so the file keeps one block.
+ */
+async function withPeriodDays(days: number): Promise<Buffer> {
+  const format = trendyolPlusCommissionTariffFormat;
+  const grid = await readWorkbookGrid(FIXTURE_7DAY, { sheet: format.sheet });
+  const layout = resolveLayout(format.layout, grid);
+  if (layout === null) throw new Error('unreadable Plus fixture');
+  const blocks = layout.blocks.get('periods') ?? [];
+  expect(blocks).toHaveLength(1);
+  const period = blocks[0];
+  if (period === undefined) throw new Error('the fixture has no period block');
+  const headerText = cellText(grid[layout.headerRowIndex] ?? [], period.anchor);
+  if (headerText === null) throw new Error('the period has no header');
+  const rewritten = headerText.replace(PERIOD_HEADER_DAYS_RE, `(${days} `);
+  expect(rewritten).not.toBe(headerText);
+  const file = patchFixture(
+    FIXTURE_7DAY,
+    [
+      {
+        excelRow: layout.headerRowIndex + 1,
+        col: period.anchor,
+        value: { kind: 'text', value: rewritten },
+      },
+    ],
+    { sheet: format.sheet },
+  );
+  // The rewritten file still resolves, its one period now tagged `days`.
+  const reread = resolveLayout(
+    format.layout,
+    await readWorkbookGrid(file, { sheet: format.sheet }),
+  );
+  expect((reread?.blocks.get('periods') ?? []).map((block) => block.tag)).toEqual([days]);
+  return file;
+}
+
+describe('POST .../plus-commission-tariffs/import - a period of 0 days', () => {
+  beforeEach(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+  });
+
+  it('answers 422 MALFORMED_SHEET on file for a "(0 days)" period header and stores nothing', async () => {
+    const ctx = await setupStore();
+    const file = await withPeriodDays(0);
+
+    const res = await app.request(importRequest(ctx, file, 'trendyol-plus-tariff.xlsx'));
+
+    expect(res.status).toBe(422);
+    const body = ProblemSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual([{ field: 'file', code: 'MALFORMED_SHEET' }]);
+    const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
+    expect(await prisma.plusCommissionTariff.count({ where: scope })).toBe(0);
+  });
+});

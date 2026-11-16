@@ -53,6 +53,7 @@ import { importWorkbook } from '../import-workbook';
 import { createManyChunked } from '../import-rows';
 import {
   findOverlappingWeek,
+  requireTariffPeriods,
   requireWritableWindows,
   resolveTariffWeek,
   WEEK_UNIQUE_COLUMN,
@@ -126,7 +127,8 @@ export function resolveCommissionExportPrice(
  * The week of the upload: the period blocks filled on the first data row, each window
  * label they give checked as the export writes it, then the scoped overlap query.
  * Throws WorkbookFileRejection NO_PERIOD when no period label is filled,
- * SpreadsheetFileError MALFORMED_SHEET when a window label could not be written,
+ * SpreadsheetFileError MALFORMED_SHEET when a period has no days or there are more
+ * periods than a week has days, or when a window label could not be written,
  * WorkbookFileRejection DUPLICATE_WEEK when a tariff of the store already covers part
  * of the week.
  */
@@ -147,6 +149,7 @@ async function inspectTariffWeek({
           label: period.text('label'),
         }));
   const week = resolveTariffWeek(firstRowPeriods, now);
+  requireTariffPeriods(week);
   requireWritableWindows(week, { spec: TARIFF_SELECTION_WRITE, label: tariffSelectionLabel });
   let overlapping;
   try {

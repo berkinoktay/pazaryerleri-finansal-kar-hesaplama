@@ -7,7 +7,7 @@
 
 import type { RowReader, WallClockPattern } from '@pazarsync/spreadsheet';
 
-import { requireStorableInt } from '../../column-range';
+import { requireStorableInstant, requireStorableInt } from '../../column-range';
 import { defineFormat, type WriteValueSpec } from '../../format';
 import { WorkbookInvariantError } from '../../workbook-errors';
 import { TRENDYOL_FORMAT_SUMMARIES } from '../registry';
@@ -76,7 +76,8 @@ type FlashReader = RowReader<typeof trendyolFlashProductListLayout>;
 
 /**
  * One offer of a row: present when its price reads. Its window may still be absent or
- * unreadable; the price is kept either way.
+ * unreadable; the price is kept either way. A window bound that reads as a date its
+ * timestamp column cannot store is refused (`requireStorableInstant`).
  */
 function readOffer(
   reader: FlashReader,
@@ -88,8 +89,8 @@ function readOffer(
   if (offerPrice === null) return null;
   return {
     price: offerPrice,
-    startsAt: reader.instant(start, FLASH_WINDOW_PATTERN),
-    endsAt: reader.instant(end, FLASH_WINDOW_PATTERN),
+    startsAt: requireStorableInstant(reader.instant(start, FLASH_WINDOW_PATTERN)),
+    endsAt: requireStorableInstant(reader.instant(end, FLASH_WINDOW_PATTERN)),
   };
 }
 

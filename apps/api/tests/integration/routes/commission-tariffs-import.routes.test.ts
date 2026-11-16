@@ -367,3 +367,66 @@ describe('POST .../commission-tariffs/import - a number its column cannot hold',
     expect(await prisma.commissionTariffItem.count({ where: scope })).toBe(0);
   });
 });
+
+// The day count inside a period header, "(N " before the day unit.
+const PERIOD_HEADER_DAYS_RE = /\(\d+ /;
+
+/**
+ * The fixture with the header of its present period (the block whose label the first
+ * data row fills) rewritten to `days` days; only the digits of the header change.
+ */
+async function withPresentPeriodDays(days: number): Promise<Buffer> {
+  const format = trendyolCommissionTariffFormat;
+  const grid = await readWorkbookGrid(FIXTURE, { sheet: format.sheet });
+  const layout = resolveLayout(format.layout, grid);
+  if (layout === null) throw new Error('unreadable commission fixture');
+  const headerRow = grid[layout.headerRowIndex] ?? [];
+  const firstRow = grid[layout.headerRowIndex + 1] ?? [];
+  const present = (layout.blocks.get('periods') ?? []).find(
+    (block) => cellText(firstRow, block.columns.get('label') ?? null) !== null,
+  );
+  if (present === undefined) throw new Error('the fixture has no present period');
+  const headerText = cellText(headerRow, present.anchor);
+  if (headerText === null) throw new Error('the present period has no header');
+  const rewritten = headerText.replace(PERIOD_HEADER_DAYS_RE, `(${days} `);
+  expect(rewritten).not.toBe(headerText);
+  const file = patchFixture(
+    FIXTURE,
+    [
+      {
+        excelRow: layout.headerRowIndex + 1,
+        col: present.anchor,
+        value: { kind: 'text', value: rewritten },
+      },
+    ],
+    { sheet: format.sheet },
+  );
+  // The rewritten file still resolves, its present period now tagged `days`.
+  const reread = resolveLayout(
+    format.layout,
+    await readWorkbookGrid(file, { sheet: format.sheet }),
+  );
+  expect((reread?.blocks.get('periods') ?? []).map((block) => block.tag)).toContain(days);
+  return file;
+}
+
+describe('POST .../commission-tariffs/import - a period of 0 days', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  it('answers 422 MALFORMED_SHEET on file for a "(0 days)" period header and stores nothing', async () => {
+    await truncateAll();
+    const ctx = await setupStoreWithMatch();
+    const file = await withPresentPeriodDays(0);
+
+    const res = await app.request(importRequest(ctx, file));
+
+    expect(res.status).toBe(422);
+    const body = ProblemSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual([{ field: 'file', code: 'MALFORMED_SHEET' }]);
+    const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
+    expect(await prisma.commissionTariff.count({ where: scope })).toBe(0);
+  });
+});

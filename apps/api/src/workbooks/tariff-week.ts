@@ -12,7 +12,8 @@
 // write (requireWritableWindows), and the query for a tariff of the same store whose
 // week overlaps it (findOverlappingWeek).
 
-import { tariffBoundToInstant, tariffWeekDays } from '@pazarsync/utils';
+import { SpreadsheetFileError } from '@pazarsync/spreadsheet';
+import { TARIFF_WEEK_DAYS, tariffBoundToInstant, tariffWeekDays } from '@pazarsync/utils';
 
 import type { StoreScope } from './adapter';
 import type { WriteValueSpec } from './format';
@@ -219,6 +220,32 @@ export async function findOverlappingWeek(
     },
     select: { id: true },
   });
+}
+
+/** `meta.reason` of the MALFORMED_SHEET `requireTariffPeriods` throws. */
+export const TARIFF_PERIODS_REASON = 'tariff-periods';
+
+/** A period block covers at least one day. */
+const MIN_PERIOD_DAYS = 1;
+
+/**
+ * Checks the present periods of `week` as a week can hold them: each covers at least
+ * one day, and there are at most TARIFF_WEEK_DAYS of them. A "(0 Gun)" header adds 0
+ * days to the week, so without this check a file could carry any number of empty
+ * period blocks, each one a stored period and an export window.
+ *
+ * Throws SpreadsheetFileError MALFORMED_SHEET (reason TARIFF_PERIODS_REASON), a 422 on
+ * `file` at upload. No value of the file appears in the message.
+ */
+export function requireTariffPeriods(week: Pick<TariffWeek, 'present'>): void {
+  const tooMany = week.present.length > TARIFF_WEEK_DAYS;
+  const empty = week.present.some((period) => period.dayCount < MIN_PERIOD_DAYS);
+  if (!tooMany && !empty) return;
+  throw new SpreadsheetFileError(
+    'MALFORMED_SHEET',
+    'The tariff periods do not fit a week: a period of no days, or more periods than days',
+    { reason: TARIFF_PERIODS_REASON },
+  );
 }
 
 /**

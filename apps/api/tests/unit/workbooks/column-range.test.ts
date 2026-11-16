@@ -9,7 +9,10 @@ import { problemDetailsForError } from '@/lib/problem-details';
 import {
   POSTGRES_INTEGER_MAX,
   POSTGRES_INTEGER_MIN,
+  requireStorableInstant,
   requireStorableInt,
+  STORABLE_YEAR_MAX,
+  STORABLE_YEAR_MIN,
   VALUE_OUT_OF_RANGE_REASON,
 } from '@/workbooks/column-range';
 import { toUploadError } from '@/workbooks/workbook-errors';
@@ -74,4 +77,43 @@ describe('requireStorableInt', () => {
     expect(mapped.issues).toEqual([{ field: 'file', code: 'MALFORMED_SHEET' }]);
     expect(problemDetailsForError(mapped).status).toBe(422);
   });
+});
+
+describe('requireStorableInstant', () => {
+  it('holds the years a stored instant may have', () => {
+    expect([STORABLE_YEAR_MIN, STORABLE_YEAR_MAX]).toEqual([1900, 9999]);
+  });
+
+  it('passes null', () => {
+    expect(requireStorableInstant(null)).toBeNull();
+  });
+
+  it.each([
+    ['the first instant of 1900', '1900-01-01T00:00:00.000Z'],
+    ['the last instant of 9999', '9999-12-31T23:59:59.999Z'],
+    ['a 2026 window start', '2026-07-07T21:00:00.000Z'],
+  ])('returns %s unchanged', (_name, iso) => {
+    const value = new Date(iso);
+
+    expect(requireStorableInstant(value)).toBe(value);
+  });
+
+  it.each([
+    ['the last instant of 1899', new Date('1899-12-31T23:59:59.999Z')],
+    ['the first instant of the year 10000', new Date('+010000-01-01T00:00:00.000Z')],
+    ['the year 50', new Date('0050-07-08T00:00:00.000Z')],
+    ['a year before 1 AD', new Date('-000001-07-08T00:00:00.000Z')],
+    ['an invalid date', new Date(Number.NaN)],
+  ])(
+    'refuses %s with MALFORMED_SHEET value-out-of-range, the value kept out of the message',
+    (_name, value) => {
+      const err = captureThrow(() => requireStorableInstant(value));
+
+      expect(err).toBeInstanceOf(SpreadsheetFileError);
+      if (!(err instanceof SpreadsheetFileError)) return;
+      expect(err.code).toBe('MALFORMED_SHEET');
+      expect(err.meta).toEqual({ reason: VALUE_OUT_OF_RANGE_REASON });
+      expect(err.message).not.toContain(String(value.getUTCFullYear()));
+    },
+  );
 });

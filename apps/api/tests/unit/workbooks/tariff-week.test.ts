@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { SpreadsheetFileError } from '@pazarsync/spreadsheet';
+import { TARIFF_WEEK_DAYS } from '@pazarsync/utils';
+
 import {
   findOverlappingWeek,
   parsePeriodPart,
   parseTariffPeriodLabel,
+  requireTariffPeriods,
   resolveTariffWeek,
   resolveValidity,
+  TARIFF_PERIODS_REASON,
   WEEK_UNIQUE_COLUMN,
   type TariffWeek,
 } from '@/workbooks/tariff-week';
@@ -178,6 +183,64 @@ describe('resolveTariffWeek', () => {
     expect(mixed.present).toHaveLength(2);
     expect(mixed.weekStartsAt?.toISOString()).toBe('2026-07-10T08:00:00.000Z');
     expect(mixed.weekEndsAt?.toISOString()).toBe('2026-07-14T07:59:00.000Z');
+  });
+});
+
+describe('requireTariffPeriods', () => {
+  /** A week whose present periods carry `dayCounts`, in order, with unparsed labels. */
+  function weekOf(dayCounts: readonly number[]): TariffWeek {
+    return {
+      present: dayCounts.map((dayCount, index) => ({
+        label: `period ${index + 1}`,
+        dayCount,
+        startsAt: null,
+        endsAt: null,
+        sortOrder: index,
+        layoutIndex: index,
+      })),
+      weekStartsAt: null,
+      weekEndsAt: null,
+    };
+  }
+
+  function oneDayPeriods(count: number): number[] {
+    return Array.from({ length: count }, () => 1);
+  }
+
+  function refusalOf(week: TariffWeek): SpreadsheetFileError {
+    try {
+      requireTariffPeriods(week);
+    } catch (err) {
+      if (err instanceof SpreadsheetFileError) return err;
+      throw err;
+    }
+    throw new Error('expected a SpreadsheetFileError');
+  }
+
+  it('passes the real split week and the real single-period week', () => {
+    expect(() => requireTariffPeriods(weekOf([3, 4]))).not.toThrow();
+    expect(() => requireTariffPeriods(weekOf([7]))).not.toThrow();
+  });
+
+  it('refuses a period of 0 days with MALFORMED_SHEET tariff-periods', () => {
+    for (const dayCounts of [[0], [3, 0, 4]]) {
+      const err = refusalOf(weekOf(dayCounts));
+
+      expect(err.code).toBe('MALFORMED_SHEET');
+      expect(err.meta).toEqual({ reason: TARIFF_PERIODS_REASON });
+      expect(err.meta['reason']).toBe('tariff-periods');
+    }
+  });
+
+  it('passes seven 1-day periods, a whole week of them', () => {
+    expect(() => requireTariffPeriods(weekOf(oneDayPeriods(TARIFF_WEEK_DAYS)))).not.toThrow();
+  });
+
+  it('refuses eight 1-day periods, more periods than a week has days', () => {
+    const err = refusalOf(weekOf(oneDayPeriods(TARIFF_WEEK_DAYS + 1)));
+
+    expect(err.code).toBe('MALFORMED_SHEET');
+    expect(err.meta).toEqual({ reason: TARIFF_PERIODS_REASON });
   });
 });
 

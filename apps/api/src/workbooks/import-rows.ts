@@ -31,6 +31,12 @@ import type { ResolvedWriteColumn } from './write-columns';
 /** `meta.reason` of the MALFORMED_SHEET a too-long anchor cell raises. */
 export const ANCHOR_TOO_LONG_REASON = 'anchor-too-long';
 
+/** `meta.reason` of the MALFORMED_SHEET a text cell holding U+0000 raises. */
+export const NUL_CHARACTER_REASON = 'nul-character';
+
+// U+0000: a cell reads it from `&#0;`, and a Postgres text column refuses it (22021).
+const NUL_CHARACTER = String.fromCodePoint(0);
+
 const READER_OPTIONS = { toInstant: businessZoneEpochToInstant };
 const XLSX_EXTENSION_RE = /\.xlsx$/i;
 
@@ -48,13 +54,20 @@ export interface ReadRowsResult<S extends LayoutSpec, TRow> {
   readonly anchoredRows: readonly AnchoredRow[];
 }
 
+/** True when a text cell of `row` holds U+0000. */
+function holdsNulCharacter(row: CellRow): boolean {
+  return row.some((value) => typeof value === 'string' && value.includes(NUL_CHARACTER));
+}
+
 /**
  * The data rows of the selected sheet (every row below the header), through the
  * format: a row that fails the keep rule is skipped; a kept row is mapped with its
  * anchor. `excelRow` is the 1-based sheet row (grid index + 1).
  *
- * Throws SpreadsheetFileError MALFORMED_SHEET for an anchor cell longer than
- * MAX_ANCHOR_TEXT_LENGTH (kept or not: the export may anchor on it),
+ * Throws SpreadsheetFileError MALFORMED_SHEET for a text cell holding U+0000 in any
+ * data row, kept or not, checked before anything reads the row (no text a row stores,
+ * its anchor included, may carry one into a database query), for an anchor cell longer
+ * than MAX_ANCHOR_TEXT_LENGTH (kept or not: the export may anchor on it),
  * WorkbookInvariantError for a kept row without an anchor (the keep rule must imply
  * it), and WorkbookFileRejection EMPTY_FILE when no row is kept.
  */
@@ -71,6 +84,11 @@ export function readRows<S extends LayoutSpec, TRow, TWrite extends string>(
 
   for (let index = firstDataIndex; index < grid.length; index += 1) {
     const row = grid[index] ?? [];
+    if (holdsNulCharacter(row)) {
+      throw new SpreadsheetFileError('MALFORMED_SHEET', 'A data row holds a U+0000 character', {
+        reason: NUL_CHARACTER_REASON,
+      });
+    }
     const excelRow = index + 1;
     const reader = createRowReader(format.layout, layout, row, READER_OPTIONS);
     if (index === firstDataIndex) firstDataRow = reader;

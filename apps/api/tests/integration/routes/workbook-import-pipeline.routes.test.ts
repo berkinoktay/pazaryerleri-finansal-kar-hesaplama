@@ -6,22 +6,35 @@
 //   - the store's list quota counts this store only;
 //   - one import of a store and page at a time, whatever the letter case of the ids in
 //     the path (the lock key is the stored store id);
-//   - a Hepsiburada store has no discount format.
+//   - a Hepsiburada store has no discount format;
+//   - a text cell holding U+0000, which Postgres cannot store, is refused at upload
+//     with 422 MALFORMED_SHEET, never a 500, and nothing is stored.
 
 import { readFileSync } from 'node:fs';
 
 import { z } from '@hono/zod-openapi';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import { readWorkbookGrid, type CellValue, type SheetData } from '@pazarsync/spreadsheet';
+import { syncLog } from '@pazarsync/sync-core';
+import {
+  cellText,
+  columnIndex,
+  readWorkbookGrid,
+  resolveLayout,
+  type CellValue,
+  type SheetData,
+} from '@pazarsync/spreadsheet';
 import { buildXlsxFixture } from '@pazarsync/spreadsheet/testing';
 import { WORKBOOK_PAGES } from '@pazarsync/utils';
 
 import { createApp } from '@/app';
 import { MAX_LISTS_PER_STORE_PAGE, UPLOAD_NAME_MAX_LENGTH } from '@/config/workbook-limits';
 import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware';
+import { trendyolDiscountListFormat } from '@/workbooks/formats/trendyol/discount-list.format';
 import { TRENDYOL_DEFAULT_NAMES, TRENDYOL_SHEET_NAMES } from '@/workbooks/formats/trendyol/labels';
+import { NUL_CHARACTER_REASON } from '@/workbooks/import-rows';
 import { importLockKey, WORKBOOK_IMPORT_LOCK_SEED } from '@/workbooks/upload-quota';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
@@ -138,6 +151,44 @@ function discountSheet(grid: SheetData, included: (excelRow: number) => string, 
     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
     `<sheetData>${rows.join('')}</sheetData>${tail}</worksheet>`;
   return buildXlsxFixture([{ name: TRENDYOL_SHEET_NAMES.DISCOUNT_LIST, xml }]);
+}
+
+// A text cell holding U+0000, edited into the real fixture's bytes.
+
+const NUL = String.fromCodePoint(0);
+// U+0000 as the character reference a worksheet carries; the engine reads it as text.
+const NUL_REFERENCE = '&#0;';
+// The fixture's one worksheet part.
+const DISCOUNT_SHEET_PART = 'xl/worksheets/sheet1.xml';
+
+/**
+ * The real fixture with one cell of its first data row (a shared string there) turned
+ * into an inline string: the cell's own text followed by U+0000. Only that cell's XML
+ * changes; every other entry keeps its bytes.
+ */
+function withNulInFirstDataRow(grid: SheetData, key: 'barcode' | 'productTitle'): Buffer {
+  const format = trendyolDiscountListFormat;
+  const layout = resolveLayout(format.layout, grid);
+  if (layout === null) throw new Error('unreadable discount fixture');
+  const col = columnIndex(format.layout, layout, key);
+  if (col === null) throw new Error(`the fixture has no ${key} column`);
+  const excelRow = layout.headerRowIndex + 2;
+  const original = cellText(grid[excelRow - 1] ?? [], col);
+  if (original === null) throw new Error(`the first data row has no ${key}`);
+  const ref = `${COLUMN_LETTERS.charAt(col)}${excelRow}`;
+
+  const entries = unzipSync(new Uint8Array(FIXTURE));
+  const part = entries[DISCOUNT_SHEET_PART];
+  if (part === undefined) throw new Error('the fixture has no discount worksheet part');
+  const xml = strFromU8(part);
+  const cell = new RegExp(`<c r="${ref}"[^>]*>.*?</c>`);
+  const edited = xml.replace(
+    cell,
+    `<c r="${ref}" t="inlineStr"><is><t>${escapeXml(original)}${NUL_REFERENCE}</t></is></c>`,
+  );
+  if (edited === xml) throw new Error(`the fixture has no cell ${ref}`);
+  entries[DISCOUNT_SHEET_PART] = strToU8(edited);
+  return Buffer.from(zipSync(entries));
 }
 
 // The import lock, held by another transaction.
@@ -449,6 +500,46 @@ describe('generic workbook import on the discount route', () => {
       select: { organizationId: true, storeId: true },
     });
     expect(list).toEqual({ organizationId: ctx.orgId, storeId: ctx.storeId });
+  });
+
+  describe('refuses a text cell holding U+0000 before anything stores or queries it', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it.each([
+      ['a product name cell', 'productTitle'],
+      ['the barcode cell', 'barcode'],
+    ] as const)('U+0000 in %s: 422 MALFORMED_SHEET, never a 500', async (_name, key) => {
+      const ctx = await setupStore();
+      const file = withNulInFirstDataRow(realGrid, key);
+      // The engine reads the reference as text: the cell holds U+0000.
+      const grid = await readWorkbookGrid(file, { sheet: trendyolDiscountListFormat.sheet });
+      const layout = resolveLayout(trendyolDiscountListFormat.layout, grid);
+      const col =
+        layout === null ? null : columnIndex(trendyolDiscountListFormat.layout, layout, key);
+      expect(cellText(grid[1] ?? [], col)?.endsWith(NUL)).toBe(true);
+      const info = vi.spyOn(syncLog, 'info');
+      const warn = vi.spyOn(syncLog, 'warn');
+
+      const res = await app.request(importRequest(ctx, file));
+
+      expect(res.status).toBe(422);
+      const body = await problem(res);
+      expect(body.code).toBe('VALIDATION_ERROR');
+      expect(body.errors).toEqual([{ field: 'file', code: 'MALFORMED_SHEET' }]);
+      expect(await prisma.discountList.count()).toBe(0);
+      // readRows refused it, not the database: the persist safety net never ran.
+      expect(info).toHaveBeenCalledWith('workbook.upload-rejected', {
+        page: WORKBOOK_PAGES.DISCOUNT_LIST,
+        code: 'MALFORMED_SHEET',
+        reason: NUL_CHARACTER_REASON,
+      });
+      expect(warn).not.toHaveBeenCalledWith(
+        'workbook.import.value-not-storable',
+        expect.anything(),
+      );
+    });
   });
 
   it('answers a Hepsiburada store with 422 UNSUPPORTED_PLATFORM_FORMAT', async () => {

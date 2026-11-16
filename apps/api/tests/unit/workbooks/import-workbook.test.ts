@@ -12,6 +12,7 @@ import { WORKBOOK_PAGES } from '@pazarsync/utils';
 
 import { ValidationError, WorkbookConflictError } from '@/lib/errors';
 import type { WorkbookImportAdapter } from '@/workbooks/adapter';
+import { VALUE_NOT_STORABLE_REASON } from '@/workbooks/column-range';
 import { defineFormat } from '@/workbooks/format';
 import { importWorkbook, type ImportWorkbookInput } from '@/workbooks/import-workbook';
 import { WorkbookFileRejection, type LegacyCodes } from '@/workbooks/workbook-errors';
@@ -234,6 +235,91 @@ describe('importWorkbook: what persist throws', () => {
       ['workbook.import.value-out-of-range', { page: PAGE, prismaCode: 'P2020' }],
     ]);
     expect(JSON.stringify([warn.mock.calls, info.mock.calls])).not.toContain(cellValue);
+  });
+
+  describe('a Postgres data exception (SQLSTATE class 22) the insert raises', () => {
+    // The driver's message quotes the cell value; no log line may carry it.
+    const MESSAGE = 'invalid byte sequence for encoding "UTF8": 0x00 near the cell value';
+
+    /**
+     * A database error as Prisma 7 + @prisma/adapter-pg raise it from a typed write that
+     * no Prisma code covers (measured for 22021, 22007 and 22009): a DriverAdapterError
+     * with no `code` of its own and the SQLSTATE in `cause.originalCode` and `cause.code`.
+     */
+    function driverAdapterError(sqlState: string): Error {
+      const err = new Error(MESSAGE, {
+        cause: {
+          originalCode: sqlState,
+          originalMessage: MESSAGE,
+          kind: 'postgres',
+          code: sqlState,
+          severity: 'ERROR',
+          message: MESSAGE,
+        },
+      });
+      err.name = 'DriverAdapterError';
+      return Object.assign(err, { clientVersion: '7.8.0' });
+    }
+
+    /**
+     * The same failure when Prisma maps it to a code of its own (measured: 22001 as
+     * P2000): the driver adapter error sits under `meta.driverAdapterError`.
+     */
+    function wrappedDriverAdapterError(prismaCode: string, sqlState: string): Error {
+      return Object.assign(new Error(MESSAGE), {
+        name: 'PrismaClientKnownRequestError',
+        code: prismaCode,
+        meta: {
+          modelName: 'DiscountListItem',
+          driverAdapterError: new Error(MESSAGE, {
+            cause: { originalCode: sqlState, originalMessage: MESSAGE, kind: 'LengthMismatch' },
+          }),
+        },
+        clientVersion: '7.8.0',
+      });
+    }
+
+    it.each([
+      ['22021 (U+0000 in a text column)', driverAdapterError('22021'), '22021'],
+      ['22007 (a date the driver formats badly)', driverAdapterError('22007'), '22007'],
+      ['22001 wrapped as P2000', wrappedDriverAdapterError('P2000', '22001'), '22001'],
+    ])(
+      'turns %s into MALFORMED_SHEET value-not-storable on file',
+      async (_name, thrown, sqlState) => {
+        const warn = vi.spyOn(syncLog, 'warn').mockImplementation(() => undefined);
+        const info = vi.spyOn(syncLog, 'info').mockImplementation(() => undefined);
+        const adapter = fakeAdapter(async () => {
+          throw thrown;
+        });
+
+        const err = await rejection(importWorkbook(adapter, INPUT));
+
+        expect(fileIssues(err)).toEqual([{ field: 'file', code: 'MALFORMED_SHEET' }]);
+        expect(warn.mock.calls).toEqual([
+          ['workbook.import.value-not-storable', { page: PAGE, sqlState }],
+        ]);
+        expect(info.mock.calls).toEqual([
+          [
+            'workbook.upload-rejected',
+            { page: PAGE, code: 'MALFORMED_SHEET', reason: VALUE_NOT_STORABLE_REASON },
+          ],
+        ]);
+        expect(VALUE_NOT_STORABLE_REASON).toBe('value-not-storable');
+        expect(JSON.stringify([warn.mock.calls, info.mock.calls])).not.toContain('cell value');
+      },
+    );
+
+    it.each([
+      ['40001 (a serialization failure)', '40001'],
+      ['23505 (a unique violation no adapter claims)', '23505'],
+    ])('rethrows %s unchanged', async (_name, sqlState) => {
+      const thrown = driverAdapterError(sqlState);
+      const adapter = fakeAdapter(async () => {
+        throw thrown;
+      });
+
+      expect(await rejection(importWorkbook(adapter, INPUT))).toBe(thrown);
+    });
   });
 
   it('leaves another Prisma code to the transaction mapper', async () => {

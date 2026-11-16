@@ -25,7 +25,7 @@ import { isPrismaKnownRequestError, syncLog } from '@pazarsync/sync-core';
 import { IMPORT_TX_OPTIONS } from '../config/workbook-limits';
 import { mapTransactionError } from '../lib/map-transaction-error';
 import type { ImportedRow, ParentFields, StoreScope, WorkbookImportAdapter } from './adapter';
-import { VALUE_OUT_OF_RANGE_REASON } from './column-range';
+import { VALUE_NOT_STORABLE_REASON, VALUE_OUT_OF_RANGE_REASON } from './column-range';
 import { FORMAT_SUMMARIES } from './formats/registry';
 import { countPrefilled, deriveName, readRows } from './import-rows';
 import { buildRehearsal, rehearsalTargets } from './rehearsal';
@@ -57,6 +57,47 @@ export interface ImportWorkbookInput<TConfig> {
  * on `file`) instead of a 500.
  */
 const PRISMA_VALUE_OUT_OF_RANGE = 'P2020';
+
+/**
+ * A Postgres data exception: SQLSTATE class 22 (a value its column type refuses, such as
+ * 22021 for U+0000 in a text column or 22007 for a date the driver cannot format).
+ */
+const DATA_EXCEPTION_SQLSTATE_RE = /^22[0-9A-Z]{3}$/;
+
+/** The `cause` of a driver adapter error: Postgres' SQLSTATE in `originalCode`. */
+interface DriverAdapterCause {
+  readonly originalCode: string;
+}
+
+/** True when `value` carries a driver adapter `cause` whose `originalCode` is a string. */
+function isDriverAdapterFailure(value: unknown): value is { readonly cause: DriverAdapterCause } {
+  if (typeof value !== 'object' || value === null || !('cause' in value)) return false;
+  const { cause } = value;
+  return (
+    typeof cause === 'object' &&
+    cause !== null &&
+    'originalCode' in cause &&
+    typeof cause.originalCode === 'string'
+  );
+}
+
+/**
+ * The SQLSTATE of a database error raised through Prisma 7 and @prisma/adapter-pg, or
+ * null. Measured against Postgres: a typed write whose failure Prisma maps to no code of
+ * its own (22021, 22007, 22009) rejects with the adapter's DriverAdapterError itself,
+ * which has no `code` and carries `cause: { originalCode, code, kind: 'postgres', ... }`;
+ * a failure Prisma maps to a P code (22001 as P2000, 23505 as P2002) rejects with a
+ * PrismaClientKnownRequestError holding that same DriverAdapterError under
+ * `meta.driverAdapterError`. Both carry the SQLSTATE in `cause.originalCode`.
+ */
+function postgresSqlState(err: unknown): string | null {
+  if (isDriverAdapterFailure(err)) return err.cause.originalCode;
+  if (typeof err !== 'object' || err === null || !('meta' in err)) return null;
+  const { meta } = err;
+  if (typeof meta !== 'object' || meta === null || !('driverAdapterError' in meta)) return null;
+  const { driverAdapterError } = meta;
+  return isDriverAdapterFailure(driverAdapterError) ? driverAdapterError.cause.originalCode : null;
+}
 
 /** What steps 1 to 5 found in the upload. */
 interface CheckedUpload<S extends LayoutSpec, TRow, TMeta, TWrite extends string> {
@@ -127,10 +168,11 @@ async function checkUpload<
 /**
  * The catch of the write transaction: a file rejection `persist` raises on purpose
  * (the in-transaction week re-check), or a unique violation the adapter recognises as
- * one, is a 422 on `file`; a value out of range for its column is the upload's
- * MALFORMED_SHEET on `file` (the transaction rolled back, nothing is stored);
- * everything else goes through `mapTransactionError`, which lets a domain error (the
- * lock's or the quota's conflict) through untouched.
+ * one, is a 422 on `file`; a value out of range for its column (P2020), and any other
+ * Postgres data exception (SQLSTATE class 22), is the upload's MALFORMED_SHEET on
+ * `file` (the transaction rolled back, nothing is stored); everything else goes
+ * through `mapTransactionError`, which lets a domain error (the lock's or the quota's
+ * conflict) through untouched.
  */
 function rethrowPersistError<
   S extends LayoutSpec,
@@ -153,6 +195,18 @@ function rethrowPersistError<
     toUploadError(
       new SpreadsheetFileError('MALFORMED_SHEET', 'A file value is out of range for its column', {
         reason: VALUE_OUT_OF_RANGE_REASON,
+      }),
+      adapter.legacyCodes,
+      context,
+    );
+  }
+  const sqlState = postgresSqlState(err);
+  if (sqlState !== null && DATA_EXCEPTION_SQLSTATE_RE.test(sqlState)) {
+    // The page and the SQLSTATE only: the driver's message can quote the cell value.
+    syncLog.warn('workbook.import.value-not-storable', { page: adapter.page, sqlState });
+    toUploadError(
+      new SpreadsheetFileError('MALFORMED_SHEET', 'A file value cannot be stored in its column', {
+        reason: VALUE_NOT_STORABLE_REASON,
       }),
       adapter.legacyCodes,
       context,

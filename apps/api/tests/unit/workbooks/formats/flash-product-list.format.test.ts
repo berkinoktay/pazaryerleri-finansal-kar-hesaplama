@@ -440,6 +440,24 @@ describe('Trendyol flash product format: offers and their windows', () => {
     });
   });
 
+  it.each([
+    // A date cell (a negative serial, or a t="d" ISO date) holds the wall clock as UTC; a
+    // year below 100 or below 1 reads as such.
+    ['a date cell in the year 50', COL.offer24Start, new Date('0050-07-08T00:00:00.000Z')],
+    ['a date cell before 1 AD', COL.offer24End, new Date('-000001-07-08T00:00:00.000Z')],
+    ['a 3-hour window in the year 10000', COL.offer3End, new Date('+010000-07-08T00:00:00.000Z')],
+  ])(
+    'refuses %s, a date its timestamp column cannot store, with MALFORMED_SHEET value-out-of-range',
+    (_name, col, cell) => {
+      const err = captureThrow(() => mapOne({ [COL.offer3Price]: 99.9, [col]: cell }));
+
+      expect(err).toBeInstanceOf(SpreadsheetFileError);
+      if (!(err instanceof SpreadsheetFileError)) return;
+      expect(err.code).toBe('MALFORMED_SHEET');
+      expect(err.meta).toEqual({ reason: VALUE_OUT_OF_RANGE_REASON });
+    },
+  );
+
   it('reads no window when the sheet has no window columns', () => {
     const header = FULL_HEADER.filter((_, col) => col < COL.offer24Start || col > COL.offer3End);
 
