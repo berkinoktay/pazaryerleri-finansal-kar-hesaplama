@@ -259,7 +259,6 @@ export { visibleProfitIssues } from './read/visible-profit-issues';
 export {
   enqueueProfitRecompute,
   enqueueProfitRecomputeForVariants,
-  enqueueProfitRecomputeForBarcodes,
   enqueueProfitRecomputeForStore,
   enqueueStaleProfitStatements,
   claimProfitRecomputeRequests,

@@ -26,6 +26,25 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Commission and Plus commission tariff weeks across New Year**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs}/import`).
+  The period labels of a Trendyol tariff file carry no year. Each label used to take the UTC year
+  of the upload, so a week crossing New Year was stored with a wrong year (a 365-day week, or one
+  a year ahead). Now the first label takes the year (previous, same or next) that puts it closest
+  to the upload day in Istanbul, and every later label the year closest to that first label. The
+  stored `weekStartsAt`, `weekEndsAt` and period bounds, and the `validity` derived from them,
+  follow. A week up to about six months before or after the upload day is placed in its own year.
+- **Commission and Plus commission tariff uploads refuse a week that does not fit one Trendyol
+  week** (same routes): periods that repeat a day count or a date-range label, day counts that add
+  up to more than 7, or parsed dates that span more than 7 days answer `422` with
+  `{ field: 'file', code: 'MALFORMED_SHEET' }`. The server log's `workbook.upload-rejected` line
+  names the rule (`tariff-periods`, or `tariff-week-span` for the dates); the response carries no
+  reason. Such files were accepted before and failed at export.
+- **Commission tariff import and delete no longer queue a profit recompute**
+  (`POST .../commission-tariffs/import`, `DELETE .../commission-tariffs/{tariffId}`). An order's
+  commission never reads a tariff's bands, so the recompute found nothing to change. No response
+  changes.
+
 - **Workbook imports run through the generic workbook import**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products|advantage-tariffs|plus-commission-tariffs|commission-tariffs}/import`).
   Each change below applies to all six pages (discount lists, marketplace campaign lists, flash

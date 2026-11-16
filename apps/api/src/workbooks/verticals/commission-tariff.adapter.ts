@@ -4,20 +4,15 @@
 // periods whose label is filled on the first row are stored, each with one item per
 // product row in sheet order carrying that period's bands, starting without a choice;
 // one tariff per week and store (an upload whose week overlaps a stored one is refused,
-// before the import transaction and again inside it), and the import queues a profit
-// recompute for the orders of the barcodes it covers. The export writes each chosen
-// product's price and the window's tariff selection into every row that carries its
-// barcode, one file per window.
+// before the import transaction and again inside it); the import queues no profit
+// recompute, since an order's commission never reads a tariff's bands. The export
+// writes each chosen product's price and the window's tariff selection into every row
+// that carries its barcode, one file per window.
 
 import { Decimal } from 'decimal.js';
 
 import { prisma, type Prisma } from '@pazarsync/db';
-import { ProfitRecomputeReason } from '@pazarsync/db/enums';
-import {
-  bandPrice,
-  enqueueProfitRecomputeForBarcodes,
-  parseStoredTariffBands,
-} from '@pazarsync/profit';
+import { bandPrice, parseStoredTariffBands } from '@pazarsync/profit';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { NotFoundError } from '../../lib/errors';
@@ -239,7 +234,10 @@ export const commissionTariffAdapter: WorkbookVerticalAdapter<
   formats: [trendyolCommissionTariffFormat],
   inspect: inspectTariffWeek,
   nameFallback: (week) => week.present[0]?.label ?? null,
-  persist: async (tx, { parent, rows, variantIdByAnchor, distinctAnchors, meta: week }) => {
+  // No order is queued for a profit recompute: an order's commission never reads a
+  // tariff's bands (resolveTrendyolCommissionRate in @pazarsync/profit), only the
+  // campaign screens do, and they compute on read.
+  persist: async (tx, { parent, rows, variantIdByAnchor, meta: week }) => {
     const scope: StoreScope = { organizationId: parent.organizationId, storeId: parent.storeId };
     await assertNoOverlappingWeek(tx.commissionTariff, scope, week);
     const tariff = await tx.commissionTariff.create({
@@ -295,16 +293,6 @@ export const commissionTariffAdapter: WorkbookVerticalAdapter<
       );
       itemCount += items.length;
     }
-    // A new tariff is a backdated commission input for every order whose items carry one
-    // of the imported barcodes: their commission now resolves through the tariff bands.
-    // One statement scoped to the organization and the store queues them, so no other
-    // tenant is touched even when another store shares a barcode.
-    await enqueueProfitRecomputeForBarcodes(tx, {
-      organizationId: parent.organizationId,
-      storeId: parent.storeId,
-      barcodes: distinctAnchors,
-      reason: ProfitRecomputeReason.REFERENCE_CHANGED,
-    });
     return { parentId: tariff.id, itemCount };
   },
   rejectionForUniqueViolation: (err) =>

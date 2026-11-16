@@ -34,7 +34,7 @@ import {
   type CommissionTariffWriteKey,
 } from '@/workbooks/formats/trendyol/commission-tariff.format';
 import { TARIFF_WINDOW_LABEL_UNIT } from '@/workbooks/formats/trendyol/labels';
-import type { TariffWeek } from '@/workbooks/tariff-week';
+import { TARIFF_PERIODS_REASON, type TariffWeek } from '@/workbooks/tariff-week';
 import {
   commissionTariffAdapter,
   importTariff,
@@ -42,7 +42,7 @@ import {
   type CommissionTariffExportItem,
 } from '@/workbooks/verticals/commission-tariff.adapter';
 import { WorkbookFileRejection, WorkbookInvariantError } from '@/workbooks/workbook-errors';
-import { resolveWriteColumns, UNWRITABLE_VALUE_REASON } from '@/workbooks/write-columns';
+import { resolveWriteColumns } from '@/workbooks/write-columns';
 
 const mocks = vi.hoisted(() => ({ findTariff: vi.fn(), findStore: vi.fn() }));
 
@@ -500,17 +500,17 @@ describe('commission tariff adapter: the week of the upload (inspect)', () => {
     expect(mocks.findTariff).not.toHaveBeenCalled();
   });
 
-  /** The rejection of an upload whose window label the export could not write (a 422 on `file`). */
-  function expectUnwritableWindow(err: unknown): void {
+  /** The rejection of an upload whose periods do not fit one Trendyol week (a 422 on `file`). */
+  function expectPeriodsRefused(err: unknown): void {
     expect(err).toBeInstanceOf(SpreadsheetFileError);
     if (!(err instanceof SpreadsheetFileError)) return;
     expect(err.code).toBe('MALFORMED_SHEET');
-    expect(err.meta).toEqual({ reason: UNWRITABLE_VALUE_REASON });
+    expect(err.meta).toEqual({ reason: TARIFF_PERIODS_REASON });
   }
 
-  // The tariff selection's probe is the whole week's label, so a window of ten days or
-  // more is wider than the rehearsal proved fits.
-  it('refuses a period of 10 days, whose tariff selection the export could not write, before any query', async () => {
+  // A Trendyol week holds seven days, so a period of ten days, or periods that add up to
+  // ten, are refused before the window labels are checked.
+  it('refuses a period of 10 days, more days than a week holds, before any query', async () => {
     mocks.findTariff.mockResolvedValue(null);
     const firstDataRow = await firstDataRowWithDays(SINGLE, 7, 10);
     expect(firstDataRow.blocks('periods').map((period) => period.tag)).toEqual([10]);
@@ -520,11 +520,11 @@ describe('commission tariff adapter: the week of the upload (inspect)', () => {
       (rejection: unknown) => rejection,
     );
 
-    expectUnwritableWindow(err);
+    expectPeriodsRefused(err);
     expect(mocks.findTariff).not.toHaveBeenCalled();
   });
 
-  it('refuses a split week of 3 and 7 days: its whole-week file would be a 10-day window', async () => {
+  it('refuses a split week of 3 and 7 days, more days than a week holds', async () => {
     mocks.findTariff.mockResolvedValue(null);
     const firstDataRow = await firstDataRowWithDays(
       MULTI,
@@ -543,7 +543,26 @@ describe('commission tariff adapter: the week of the upload (inspect)', () => {
       (rejection: unknown) => rejection,
     );
 
-    expectUnwritableWindow(err);
+    expectPeriodsRefused(err);
+    expect(mocks.findTariff).not.toHaveBeenCalled();
+  });
+
+  it('refuses a split week of two 3-day periods, which the export cannot tell apart', async () => {
+    mocks.findTariff.mockResolvedValue(null);
+    const firstDataRow = await firstDataRowWithDays(
+      MULTI,
+      4,
+      3,
+      '23 Haziran 08.00-26 Haziran 07.59',
+    );
+    expect(firstDataRow.blocks('periods').map((period) => period.tag)).toEqual([3, 3]);
+
+    const err: unknown = await inspect(firstDataRow).then(
+      () => null,
+      (rejection: unknown) => rejection,
+    );
+
+    expectPeriodsRefused(err);
     expect(mocks.findTariff).not.toHaveBeenCalled();
   });
 });
