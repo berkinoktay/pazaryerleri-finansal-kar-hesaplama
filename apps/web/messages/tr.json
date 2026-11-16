@@ -977,22 +977,13 @@
     "upload": {
       "title": "Komisyon tarifesi Excel'ini yükleyin",
       "description": "Trendyol panelinden indirdiğiniz haftalık komisyon tarifesi dosyasını yükleyin; her ürün için fiyat aralıklarına göre kazancınızı hesaplayalım.",
-      "prompt": "Excel dosyasını sürükleyip bırakın",
-      "hint": "XLSX · en fazla {maxMb} MB",
-      "cta": "Dosya seç",
       "stepsTitle": "Nasıl çalışır?",
       "step1": "Trendyol panelinden haftalık komisyon tarifesi Excel'ini indirin",
       "step2": "Dosyayı buraya yükleyin",
       "step3": "Her ürün için hangi fiyat aralığında ne kazanacağınızı görün",
       "submit": "Tarifeyi oluştur",
       "errors": {
-        "notReadable": "Dosya okunamadı — geçerli bir .xlsx dosyası yükleyin.",
         "wrongFormat": "Bu bir Trendyol komisyon tarifesi dosyası değil ya da biçimi tanınmadı.",
-        "empty": "Dosyada ürün satırı bulunamadı.",
-        "noPeriod": "Dosyada tarife dönemi bulunamadı.",
-        "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
-        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin.",
-        "DUPLICATE_TARIFF_WEEK": "Bu tarih aralığı için zaten bir komisyon tarifesi var.",
         "duplicateWeek": "Bu tarih aralığı için zaten bir komisyon tarifesi var."
       }
     },
@@ -1188,22 +1179,13 @@
     "upload": {
       "title": "Plus komisyon Excel'ini yükleyin",
       "description": "Trendyol panelinden indirdiğiniz Plus komisyon dosyasını yükleyin; her ürün için Plus'a katılmanın kârını görün.",
-      "prompt": "Excel dosyasını sürükleyip bırakın",
-      "hint": "XLSX · en fazla {maxMb} MB",
-      "cta": "Dosya seç",
       "stepsTitle": "Nasıl çalışır?",
       "step1": "Trendyol panelinden Plus komisyon Excel'ini indirin",
       "step2": "Dosyayı buraya yükleyin",
       "step3": "Her ürün için Plus'a katılmanın kârlı olup olmadığını görün",
       "submit": "Tarifeyi oluştur",
       "errors": {
-        "notReadable": "Dosya okunamadı — geçerli bir .xlsx dosyası yükleyin.",
         "wrongFormat": "Bu bir Trendyol Plus komisyon dosyası değil ya da biçimi tanınmadı.",
-        "empty": "Dosyada ürün satırı bulunamadı.",
-        "noPeriod": "Dosyada tarife dönemi bulunamadı.",
-        "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
-        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin.",
-        "DUPLICATE_TARIFF_WEEK": "Bu tarih aralığı için zaten bir Plus komisyon tarifesi var.",
         "duplicateWeek": "Bu tarih aralığı için zaten bir Plus komisyon tarifesi var."
       }
     },
@@ -1415,25 +1397,13 @@
     "upload": {
       "title": "Avantajlı Ürün Etiketleri Excel'ini yükleyin",
       "description": "Trendyol panelinden indirdiğiniz Avantajlı Ürün Etiketleri dosyasını yükleyin; her ürün için hangi rozet kademesinin kârlı olduğunu görün.",
-      "prompt": "Excel dosyasını sürükleyip bırakın",
-      "hint": "XLSX · en fazla {maxMb} MB",
-      "cta": "Dosya seç",
       "stepsTitle": "Nasıl çalışır?",
       "step1": "Trendyol panelinden Avantajlı Ürün Etiketleri Excel'ini indirin",
       "step2": "Dosyayı buraya yükleyin",
       "step3": "Her ürün için hangi rozet kademesinin kârlı olduğunu görün",
       "submit": "Tarifeyi oluştur",
-      "empty": "Dosyada ürün satırı bulunamadı.",
-      "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin.",
-      "notReadable": "Dosya okunamadı — geçerli bir .xlsx dosyası yükleyin.",
-      "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
-      "wrongFormat": "Bu bir Trendyol Avantajlı Ürün Etiketleri dosyası değil ya da biçimi tanınmadı.",
       "errors": {
-        "notReadable": "Dosya okunamadı — geçerli bir .xlsx dosyası yükleyin.",
-        "wrongFormat": "Bu bir Trendyol Avantajlı Ürün Etiketleri dosyası değil ya da biçimi tanınmadı.",
-        "empty": "Dosyada ürün satırı bulunamadı.",
-        "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
-        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin."
+        "wrongFormat": "Bu bir Trendyol Avantajlı Ürün Etiketleri dosyası değil ya da biçimi tanınmadı."
       },
       "commissionSource": {
         "title": "Kademe komisyonları nereden hesaplansın?",
@@ -1656,20 +1626,14 @@
     "upload": {
       "title": "Flaş Ürünler Excel'ini yükleyin",
       "description": "Trendyol panelinden indirdiğiniz Flaş Ürünler dosyasını yükleyin; her ürün ve tarih için hangi flaş teklifinin kârlı olduğunu görün.",
-      "prompt": "Excel dosyasını sürükleyip bırakın",
-      "hint": "XLSX · en fazla {maxMb} MB",
-      "cta": "Dosya seç",
       "stepsTitle": "Nasıl çalışır?",
       "step1": "Trendyol panelinden Flaş Ürünler Excel'ini indirin",
       "step2": "Dosyayı buraya yükleyin",
       "step3": "Her ürün ve tarih için hangi flaş teklifinin kârlı olduğunu görün",
       "submit": "Listeyi oluştur",
       "errors": {
-        "notReadable": "Dosya okunamadı — geçerli bir .xlsx dosyası yükleyin.",
         "wrongFormat": "Bu bir Trendyol Flaş Ürünler dosyası değil ya da biçimi tanınmadı.",
-        "empty": "Dosyada teklif satırı bulunamadı.",
-        "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
-        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin."
+        "empty": "Dosyada teklif satırı bulunamadı."
       }
     },
     "noResults": {
@@ -1731,9 +1695,6 @@
     "upload": {
       "title": "İndirimler Excel'ini yükleyin",
       "description": "Trendyol İndirimler panelinden indirdiğiniz ürün seçim dosyasını yükleyin, indirimi ayarlayın ve indirimli fiyattaki kârınızı görün.",
-      "prompt": "Excel dosyasını sürükleyip bırakın",
-      "hint": "XLSX · en fazla {maxMb} MB",
-      "cta": "Dosya seç",
       "name": "Liste adı (isteğe bağlı)",
       "typeLabel": "İndirim türü",
       "fields": {
@@ -1753,11 +1714,7 @@
       },
       "submit": "Listeyi oluştur",
       "errors": {
-        "notReadable": "Dosya okunamadı — geçerli bir .xlsx dosyası yükleyin.",
-        "wrongFormat": "Bu bir Trendyol İndirimler dosyası değil veya biçimi tanınamadı.",
-        "empty": "Dosyada ürün satırı bulunamadı.",
-        "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
-        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin."
+        "wrongFormat": "Bu bir Trendyol İndirimler dosyası değil veya biçimi tanınamadı."
       },
       "fieldErrors": {
         "required": "Bu alan zorunludur.",
@@ -1983,20 +1940,13 @@
     "upload": {
       "title": "Kampanya Excel'ini yükleyin",
       "description": "Trendyol Kampanyalar panelinden indirdiğiniz ürün dosyasını yükleyin; kampanyanın kurgusunu ve Trendyol'un karşılama oranını girin, kampanya fiyatındaki kârınızı görün.",
-      "prompt": "Excel dosyasını sürükleyip bırakın",
-      "hint": "XLSX · en fazla {maxMb} MB",
-      "cta": "Dosya seç",
       "name": "Kampanya adı (isteğe bağlı)",
       "typeLabel": "Kampanya kurgusu",
       "fundingLabel": "Trendyol karşılama oranı (%)",
       "fundingHint": "Trendyol'un indirimin yüzde kaçını karşıladığı; panelde kampanyanın detayında yazar. Boş bırakırsanız 0 sayılır, yani indirimin tamamını siz üstlenirsiniz.",
       "submit": "Kampanyayı oluştur",
       "errors": {
-        "notReadable": "Dosya okunamadı — geçerli bir .xlsx dosyası yükleyin.",
-        "wrongFormat": "Bu bir Trendyol Kampanyalar dosyası değil veya biçimi tanınamadı.",
-        "empty": "Dosyada ürün satırı bulunamadı.",
-        "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
-        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin."
+        "wrongFormat": "Bu bir Trendyol Kampanyalar dosyası değil veya biçimi tanınamadı."
       },
       "fieldErrors": {
         "fundingDecimal": "Geçerli bir oran girin (en fazla 2 ondalık).",

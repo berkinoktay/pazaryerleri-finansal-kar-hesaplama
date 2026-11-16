@@ -977,22 +977,13 @@
     "upload": {
       "title": "Upload the commission tariff Excel",
       "description": "Upload the weekly commission tariff file you downloaded from the Trendyol panel; we'll calculate your profit per price band for each product.",
-      "prompt": "Drag and drop the Excel file",
-      "hint": "XLSX · max {maxMb} MB",
-      "cta": "Choose file",
       "stepsTitle": "How it works",
       "step1": "Download the weekly commission tariff Excel from the Trendyol panel",
       "step2": "Upload the file here",
       "step3": "See what you'll earn at each price band for every product",
       "submit": "Create tariff",
       "errors": {
-        "notReadable": "Couldn't read the file — upload a valid .xlsx.",
         "wrongFormat": "This isn't a Trendyol commission tariff file, or its format wasn't recognized.",
-        "empty": "No product rows found in the file.",
-        "noPeriod": "No tariff period found in the file.",
-        "tooLarge": "File is too large — upload a smaller file.",
-        "generic": "Couldn't upload the file. Please try again.",
-        "DUPLICATE_TARIFF_WEEK": "A commission tariff already exists for this date range.",
         "duplicateWeek": "A commission tariff already exists for this date range."
       }
     },
@@ -1188,22 +1179,13 @@
     "upload": {
       "title": "Upload the Plus commission Excel",
       "description": "Upload the Plus commission file you downloaded from the Trendyol panel; see the profit of joining Plus per product.",
-      "prompt": "Drag and drop the Excel file",
-      "hint": "XLSX · {maxMb} MB max",
-      "cta": "Choose file",
       "stepsTitle": "How it works",
       "step1": "Download the Plus commission Excel from the Trendyol panel",
       "step2": "Upload the file here",
       "step3": "See whether joining Plus is profitable for each product",
       "submit": "Create tariff",
       "errors": {
-        "notReadable": "Could not read the file — upload a valid .xlsx.",
         "wrongFormat": "This is not a Trendyol Plus commission file, or the format is unrecognized.",
-        "empty": "No product rows found in the file.",
-        "noPeriod": "No tariff period found in the file.",
-        "tooLarge": "File too large — upload a smaller file.",
-        "generic": "Could not upload the file. Please try again.",
-        "DUPLICATE_TARIFF_WEEK": "A Plus commission tariff already exists for this date range.",
         "duplicateWeek": "A Plus commission tariff already exists for this date range."
       }
     },
@@ -1415,25 +1397,13 @@
     "upload": {
       "title": "Upload the Advantage Product Labels Excel",
       "description": "Upload the Advantage Product Labels file you downloaded from the Trendyol panel; see which badge tier is profitable for each product.",
-      "prompt": "Drag and drop the Excel file",
-      "hint": "XLSX · max {maxMb} MB",
-      "cta": "Choose file",
       "stepsTitle": "How it works",
       "step1": "Download the Advantage Product Labels Excel from the Trendyol panel",
       "step2": "Upload the file here",
       "step3": "See which badge tier is profitable for each product",
       "submit": "Create tariff",
-      "empty": "No product rows found in the file.",
-      "generic": "Could not upload the file. Please try again.",
-      "notReadable": "Could not read the file — upload a valid .xlsx file.",
-      "tooLarge": "File is too large — upload a smaller file.",
-      "wrongFormat": "This is not a Trendyol Advantage Product Labels file, or its format was not recognized.",
       "errors": {
-        "notReadable": "Could not read the file — upload a valid .xlsx file.",
-        "wrongFormat": "This is not a Trendyol Advantage Product Labels file, or its format was not recognized.",
-        "empty": "No product rows found in the file.",
-        "tooLarge": "File is too large — upload a smaller file.",
-        "generic": "Could not upload the file. Please try again."
+        "wrongFormat": "This is not a Trendyol Advantage Product Labels file, or its format was not recognized."
       },
       "commissionSource": {
         "title": "Where should tier commissions be calculated from?",
@@ -1656,20 +1626,14 @@
     "upload": {
       "title": "Upload the Flash Products Excel",
       "description": "Upload the Flash Products file you downloaded from the Trendyol panel; see which flash offer is profitable for each product and date.",
-      "prompt": "Drag and drop the Excel file",
-      "hint": "XLSX · up to {maxMb} MB",
-      "cta": "Choose file",
       "stepsTitle": "How it works",
       "step1": "Download the Flash Products Excel from the Trendyol panel",
       "step2": "Upload the file here",
       "step3": "See which flash offer is profitable for each product and date",
       "submit": "Create list",
       "errors": {
-        "notReadable": "The file could not be read — upload a valid .xlsx file.",
         "wrongFormat": "This is not a Trendyol Flash Products file or its format was not recognized.",
-        "empty": "No offer rows found in the file.",
-        "tooLarge": "The file is too large — upload a smaller file.",
-        "generic": "The file could not be uploaded. Please try again."
+        "empty": "No offer rows found in the file."
       }
     },
     "noResults": {
@@ -1731,9 +1695,6 @@
     "upload": {
       "title": "Upload the Discounts Excel",
       "description": "Upload the product-selection file you downloaded from the Trendyol Discounts panel, set the discount, and see your profit at the discounted price.",
-      "prompt": "Drag and drop the Excel file",
-      "hint": "XLSX · up to {maxMb} MB",
-      "cta": "Choose file",
       "name": "List name (optional)",
       "typeLabel": "Discount type",
       "fields": {
@@ -1753,11 +1714,7 @@
       },
       "submit": "Create list",
       "errors": {
-        "notReadable": "The file could not be read — upload a valid .xlsx file.",
-        "wrongFormat": "This is not a Trendyol Discounts file or its format was not recognized.",
-        "empty": "No product rows found in the file.",
-        "tooLarge": "The file is too large — upload a smaller file.",
-        "generic": "The file could not be uploaded. Please try again."
+        "wrongFormat": "This is not a Trendyol Discounts file or its format was not recognized."
       },
       "fieldErrors": {
         "required": "This field is required.",
@@ -1983,20 +1940,13 @@
     "upload": {
       "title": "Upload the campaign Excel",
       "description": "Upload the product file you downloaded from the Trendyol Campaigns panel, set the campaign type and Trendyol's funding rate, and see your profit at the campaign price.",
-      "prompt": "Drag and drop the Excel file",
-      "hint": "XLSX · up to {maxMb} MB",
-      "cta": "Choose file",
       "name": "Campaign name (optional)",
       "typeLabel": "Campaign type",
       "fundingLabel": "Trendyol funding rate (%)",
       "fundingHint": "The share of the discount Trendyol covers, shown in the campaign's details in the panel. Left empty it counts as 0, meaning you bear the whole discount.",
       "submit": "Create campaign",
       "errors": {
-        "notReadable": "The file could not be read — upload a valid .xlsx file.",
-        "wrongFormat": "This is not a Trendyol Campaigns file or its format was not recognized.",
-        "empty": "No product rows found in the file.",
-        "tooLarge": "The file is too large — upload a smaller file.",
-        "generic": "The file could not be uploaded. Please try again."
+        "wrongFormat": "This is not a Trendyol Campaigns file or its format was not recognized."
       },
       "fieldErrors": {
         "fundingDecimal": "Enter a valid rate (up to 2 decimals).",
