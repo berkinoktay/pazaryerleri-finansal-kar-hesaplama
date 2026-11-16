@@ -28,6 +28,8 @@ export {
   tariffBoundToInstant,
 } from './tariff-period';
 export {
+  STORABLE_YEAR_MAX,
+  STORABLE_YEAR_MIN,
   UPLOAD_NAME_MAX_LENGTH,
   WORKBOOK_UPLOAD_MAX_BYTES,
   WORKBOOK_UPLOAD_MAX_MB,

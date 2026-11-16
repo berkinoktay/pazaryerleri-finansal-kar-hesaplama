@@ -276,6 +276,29 @@ describe('<DiscountUploadDialog>', () => {
     expect(screen.queryByText(SHARED.errors.field)).not.toBeInTheDocument();
   });
 
+  it('shows a DATE_OUT_OF_RANGE refusal with the two years written as plain numbers', async () => {
+    renderDialog({
+      submitError: validationApiError([{ field: 'startsAt', code: 'DATE_OUT_OF_RANGE' }]),
+    });
+
+    expect(
+      await screen.findByText(
+        UPLOAD.fieldErrors.dateOutOfRange.replace('{min}', '1900').replace('{max}', '9999'),
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/1\.900|9\.999/)).not.toBeInTheDocument();
+    expect(screen.queryByText(SHARED.errors.field)).not.toBeInTheDocument();
+  });
+
+  it('shows an INVALID_DATE refusal under the date', async () => {
+    renderDialog({
+      submitError: validationApiError([{ field: 'startsAt', code: 'INVALID_DATE' }]),
+    });
+
+    expect(await screen.findByText(UPLOAD.fieldErrors.dateInvalid)).toBeInTheDocument();
+    expect(screen.queryByText(SHARED.errors.field)).not.toBeInTheDocument();
+  });
+
   it('shows the shared wrong-type message for a file that is not an .xlsx', () => {
     renderDialog();
 

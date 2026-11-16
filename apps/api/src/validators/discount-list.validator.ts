@@ -15,7 +15,7 @@ import type { Prisma } from '@pazarsync/db';
 import { DiscountType, DiscountValueKind } from '@pazarsync/db/enums';
 
 import type { DiscountConfig } from '../services/discount-math-commons';
-import { NameSchema } from '../workbooks/form';
+import { NameSchema, RequiredNameSchema, WindowInstantSchema } from '../workbooks/form';
 import { QuoteBreakdownSchema } from './product-pricing.validator';
 
 // ─── Shared enums ───────────────────────────────────────────────────────────
@@ -58,8 +58,8 @@ export const DiscountConfigFieldsSchema = z.object({
   buyQuantity: z.string().regex(INT_RE, 'INVALID_BUY_QUANTITY').optional(),
   payQuantity: z.string().regex(INT_RE, 'INVALID_PAY_QUANTITY').optional(),
   nthIndex: z.string().regex(INT_RE, 'INVALID_NTH_INDEX').optional(),
-  startsAt: z.string().datetime({ offset: true }).optional(),
-  endsAt: z.string().datetime({ offset: true }).optional(),
+  startsAt: WindowInstantSchema.optional(),
+  endsAt: WindowInstantSchema.optional(),
 });
 
 export type DiscountConfigFields = z.infer<typeof DiscountConfigFieldsSchema>;
@@ -508,7 +508,7 @@ export const UpdateDiscountSelectionsResponseSchema = z
   .openapi('UpdateDiscountSelectionsResponse');
 
 export const UpdateDiscountListBodySchema = DiscountConfigFieldsSchema.extend({
-  name: NameSchema.min(1).optional(),
+  name: RequiredNameSchema.optional(),
 })
   .superRefine(refineDiscountConfig)
   .openapi('UpdateDiscountListBody');

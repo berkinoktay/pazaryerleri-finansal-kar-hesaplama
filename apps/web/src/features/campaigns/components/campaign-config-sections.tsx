@@ -5,7 +5,7 @@ import * as React from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 import { DiscountType, DiscountValueKind } from '@pazarsync/db/enums';
-import { UPLOAD_NAME_MAX_LENGTH } from '@pazarsync/utils';
+import { STORABLE_YEAR_MAX, STORABLE_YEAR_MIN, UPLOAD_NAME_MAX_LENGTH } from '@pazarsync/utils';
 
 import { DateInput } from '@/components/patterns/date-input';
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
@@ -122,6 +122,12 @@ export function useConfigFieldErrorMessage(): (code: string) => string {
         return t('percentOver100');
       case 'END_BEFORE_START':
         return t('endBeforeStart');
+      // The window date codes come from the server only: the date picker cannot produce a
+      // malformed date or a year outside the storable ones.
+      case 'INVALID_DATE':
+        return t('dateInvalid');
+      case 'DATE_OUT_OF_RANGE':
+        return t('dateOutOfRange', { min: STORABLE_YEAR_MIN, max: STORABLE_YEAR_MAX });
       // Magnitude-bound + BUY_X_PAY_Y out-of-range codes (backend + client mirror) share the
       // generic "value out of range" copy — the dependent Selects make these unreachable in the
       // UI, so they only surface on a raw API 422; a precise per-bound key would be dead weight.

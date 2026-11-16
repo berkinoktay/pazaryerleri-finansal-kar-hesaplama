@@ -2,17 +2,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SpreadsheetFileError } from '@pazarsync/spreadsheet';
 import { syncLog } from '@pazarsync/sync-core';
-import { WORKBOOK_PAGES } from '@pazarsync/utils';
+import { STORABLE_YEAR_MAX, STORABLE_YEAR_MIN, WORKBOOK_PAGES } from '@pazarsync/utils';
 
 import { ValidationError } from '@/lib/errors';
 import { problemDetailsForError } from '@/lib/problem-details';
 import {
+  isStorableYear,
   POSTGRES_INTEGER_MAX,
   POSTGRES_INTEGER_MIN,
   requireStorableInstant,
   requireStorableInt,
-  STORABLE_YEAR_MAX,
-  STORABLE_YEAR_MIN,
   VALUE_OUT_OF_RANGE_REASON,
 } from '@/workbooks/column-range';
 import { toUploadError } from '@/workbooks/workbook-errors';
@@ -76,6 +75,28 @@ describe('requireStorableInt', () => {
     if (!(mapped instanceof ValidationError)) return;
     expect(mapped.issues).toEqual([{ field: 'file', code: 'MALFORMED_SHEET' }]);
     expect(problemDetailsForError(mapped).status).toBe(422);
+  });
+});
+
+describe('isStorableYear', () => {
+  it.each([
+    ['the first instant of 1900', '1900-01-01T00:00:00Z'],
+    ['the last instant of 9999', '9999-12-31T23:59:59Z'],
+  ])('accepts %s', (_name, iso) => {
+    expect(isStorableYear(new Date(iso))).toBe(true);
+  });
+
+  it.each([
+    ['the last instant of 1899', '1899-12-31T23:59:59Z'],
+    ['the year 0', '0000-01-01T00:00:00Z'],
+    ['the year 50', '0050-06-01T00:00:00Z'],
+    ['a 9999 local time that is the UTC year 10000', '9999-12-31T23:59:59-01:00'],
+  ])('refuses %s', (_name, iso) => {
+    expect(isStorableYear(new Date(iso))).toBe(false);
+  });
+
+  it('refuses an invalid date', () => {
+    expect(isStorableYear(new Date(Number.NaN))).toBe(false);
   });
 });
 

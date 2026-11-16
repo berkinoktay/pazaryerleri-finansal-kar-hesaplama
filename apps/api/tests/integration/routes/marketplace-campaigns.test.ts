@@ -804,6 +804,75 @@ describe('Marketplace Campaigns - list / detail / config PATCH / selections / de
     ).toEqual(before);
   });
 
+  it('rejects a whitespace-only name with 422 NAME_REQUIRED and leaves the campaign as it was', async () => {
+    const campaignScope = { id: fx.campaignId, organizationId: fx.orgId, storeId: fx.storeId };
+    const select = { name: true, updatedAt: true } as const;
+    const before = await prisma.marketplaceCampaignList.findFirst({ where: campaignScope, select });
+    if (before === null) throw new Error('the seeded campaign is gone');
+
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/marketplace-campaigns/${fx.campaignId}`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: '   ',
+          discountType: 'CONDITIONAL_BASKET',
+          valueKind: 'PERCENT',
+          value: '10',
+          minBasketAmount: '500',
+          ...CAMPAIGN_WINDOW,
+        }),
+      },
+    );
+
+    expect(res.status).toBe(422);
+    const body = RawValidationSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'name', code: 'NAME_REQUIRED' })]),
+    );
+    expect(
+      await prisma.marketplaceCampaignList.findFirst({ where: campaignScope, select }),
+    ).toEqual(before);
+  });
+
+  it('rejects a start date in the year 0 with 422 DATE_OUT_OF_RANGE and leaves the campaign as it was', async () => {
+    const campaignScope = { id: fx.campaignId, organizationId: fx.orgId, storeId: fx.storeId };
+    const select = { startsAt: true, updatedAt: true } as const;
+    const before = await prisma.marketplaceCampaignList.findFirst({ where: campaignScope, select });
+    if (before === null) throw new Error('the seeded campaign is gone');
+
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/marketplace-campaigns/${fx.campaignId}`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          discountType: 'CONDITIONAL_BASKET',
+          valueKind: 'PERCENT',
+          value: '10',
+          minBasketAmount: '500',
+          ...CAMPAIGN_WINDOW,
+          startsAt: '0000-01-01T00:00:00Z',
+        }),
+      },
+    );
+
+    expect(res.status).toBe(422);
+    const body = RawValidationSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: 'startsAt', code: 'DATE_OUT_OF_RANGE' }),
+      ]),
+    );
+    expect(body.errors).not.toContainEqual(expect.objectContaining({ field: 'file' }));
+    expect(
+      await prisma.marketplaceCampaignList.findFirst({ where: campaignScope, select }),
+    ).toEqual(before);
+  });
+
   it('deletes the campaign (204), then the detail 404s and the list is empty', async () => {
     const del = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/marketplace-campaigns/${fx.campaignId}`,

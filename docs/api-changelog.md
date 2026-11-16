@@ -111,16 +111,26 @@ section "Versioning" for details.
   - On advantage tariffs the commission source (`commissionSourceTariffId`) is checked after the
     file's rows are read, with the same field error (`INVALID_COMMISSION_SOURCE`): an upload that
     is both a refused file and names another store's commission tariff answers the file error.
-- **Discount list and marketplace campaign list names follow the import's name rule**
+- **Discount list and marketplace campaign list names follow the import's name rule, and their
+  window dates answer field codes**
   (`PATCH /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}`,
   `PATCH /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}`). A `name`
-  is trimmed and stored trimmed; a whitespace-only name now answers the `422` an empty name
-  already got; over 120 characters answers `422` `NAME_TOO_LONG` and a control or format
-  character `422` `NAME_INVALID_CHARACTERS` on `field: 'name'`, and nothing changes. Before, any
-  non-empty string was stored as sent. A list stored before this rule with such a character in its name
+  is trimmed and stored trimmed; an empty or whitespace-only name answers `422` with
+  `{ field: 'name', code: 'NAME_REQUIRED' }`; over 120 characters answers `422` `NAME_TOO_LONG`
+  and a control or format character `422` `NAME_INVALID_CHARACTERS` on `field: 'name'`, and
+  nothing changes. Before, any non-empty string was stored as sent, and an empty name answered a
+  Zod sentence as its code. A list stored before this rule with such a character in its name
   answers the same `422` while its stored name is sent back unchanged. The body's `name` gains
   `maxLength: 120` and a `pattern` in the OpenAPI spec. The `name` and `source_filename` columns
   of the six campaign list tables become `varchar(120)`.
+  The window dates `startsAt` and `endsAt` of the discount and campaign config, on these two
+  routes and on the two imports
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/import`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/import`), answer `422`
+  with `code: 'INVALID_DATE'` on their field for a value that is not an ISO date time with an
+  offset, and `DATE_OUT_OF_RANGE` for one whose UTC year is outside 1900 to 9999; nothing is
+  stored or changed. Before, a malformed date answered a Zod sentence as its code, a year below 1
+  failed at the database write with `500`, and any other year was stored as sent.
 - **Workbook exports run through the generic workbook export**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}/export`,
   `POST /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/export`,

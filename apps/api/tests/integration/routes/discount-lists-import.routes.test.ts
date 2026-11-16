@@ -11,6 +11,7 @@
 
 import { readFileSync } from 'node:fs';
 
+import { z } from '@hono/zod-openapi';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
@@ -75,6 +76,9 @@ interface ProblemWire {
   code: string;
   errors?: { field: string; code: string }[];
 }
+
+// The whole body of a 422, field issues as sent (meta included).
+const RawValidationSchema = z.object({ code: z.string(), errors: z.array(z.unknown()) });
 
 interface Ctx {
   accessToken: string;
@@ -240,6 +244,24 @@ describe('POST .../discount-lists/import - rejects invalid input', () => {
     expect(body.errors).toEqual(
       expect.arrayContaining([expect.objectContaining({ field: 'endsAt', code: 'END_REQUIRED' })]),
     );
+  });
+
+  it('rejects an end date in the year 0 with 422 DATE_OUT_OF_RANGE on endsAt and stores nothing', async () => {
+    const ctx = await setupStore(false);
+    const res = await app.request(
+      importRequest(ctx, FIXTURE, { ...NET_CONFIG, endsAt: '0000-01-01T00:00:00Z' }),
+    );
+    expect(res.status).toBe(422);
+    const body = RawValidationSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    // The window rule may add END_BEFORE_START beside it.
+    expect(body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: 'endsAt', code: 'DATE_OUT_OF_RANGE' }),
+      ]),
+    );
+    expect(body.errors).not.toContainEqual(expect.objectContaining({ field: 'file' }));
+    expect(await prisma.discountList.count()).toBe(0);
   });
 
   it('rejects a file whose header layout is not the İndirimler export with 422 INVALID_DISCOUNT_FORMAT', async () => {

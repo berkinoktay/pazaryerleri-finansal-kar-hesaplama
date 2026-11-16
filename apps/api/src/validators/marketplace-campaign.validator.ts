@@ -15,7 +15,7 @@ import type { Prisma } from '@pazarsync/db';
 import { CampaignPriceSelection, DiscountType, DiscountValueKind } from '@pazarsync/db/enums';
 
 import type { DiscountConfig } from '../services/discount-math-commons';
-import { NameSchema } from '../workbooks/form';
+import { NameSchema, RequiredNameSchema, WindowInstantSchema } from '../workbooks/form';
 import { refineDiscountConfig } from './discount-list.validator';
 import { QuoteBreakdownSchema } from './product-pricing.validator';
 
@@ -66,8 +66,8 @@ export const MarketplaceCampaignConfigFieldsSchema = z
       .regex(DECIMAL_RE, 'INVALID_FUNDING_PCT')
       .default('0')
       .openapi({ description: 'Trendyol karşılama oranı (%), 0–100. Varsayılan 0.' }),
-    startsAt: z.string().datetime({ offset: true }).optional(),
-    endsAt: z.string().datetime({ offset: true }).optional(),
+    startsAt: WindowInstantSchema.optional(),
+    endsAt: WindowInstantSchema.optional(),
   })
   .superRefine((val, ctx) => {
     // Kurgu kuralları İndirimler ile birebir aynı — tek gerçek kaynağı yeniden kullan.
@@ -553,7 +553,7 @@ export const UpdateCampaignSelectionsResponseSchema = z
 // body still runs refineDiscountConfig + the funding>100 check via the base schema's
 // superRefine; nothing here re-applies them.
 export const UpdateMarketplaceCampaignBodySchema = MarketplaceCampaignConfigFieldsSchema.extend({
-  name: NameSchema.min(1).optional(),
+  name: RequiredNameSchema.optional(),
 }).openapi('UpdateMarketplaceCampaignBody');
 
 export const UpdateMarketplaceCampaignResponseSchema = z
