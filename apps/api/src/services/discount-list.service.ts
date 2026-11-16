@@ -22,6 +22,7 @@ import type { Store as PrismaStore } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { NotFoundError } from '../lib/errors';
+import { intOrNull } from '../lib/optional-int';
 import { assertScopedWrite } from '../workbooks/scoped-write';
 import { resolveDiscountCommissionSource } from './discount-commission-source';
 import { computeDiscountItem, type ComputedDiscountItem } from './discount-compute.service';
@@ -43,11 +44,6 @@ import {
   type DiscountSelection,
   type UpdateDiscountListBody,
 } from '../validators/discount-list.validator';
-
-/** String config alanını DiscountList Int kolonuna indirir (yoksa null). */
-function intOrNull(value: string | undefined): number | null {
-  return value === undefined ? null : Number(value);
-}
 
 // --- List ---
 

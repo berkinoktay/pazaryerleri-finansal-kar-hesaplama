@@ -52,14 +52,12 @@ import { TARIFF_SELECTION_WRITE } from '../formats/trendyol/tariff-window';
 import { importWorkbook } from '../import-workbook';
 import { createManyChunked } from '../import-rows';
 import {
-  findOverlappingWeek,
-  requireTariffPeriods,
-  requireWritableWindows,
-  resolveTariffWeek,
+  assertNoOverlappingWeek,
+  inspectUploadWeek,
   WEEK_UNIQUE_COLUMN,
   type TariffWeek,
 } from '../tariff-week';
-import { WorkbookFileRejection, WorkbookInvariantError } from '../workbook-errors';
+import { WorkbookInvariantError } from '../workbook-errors';
 
 /** What the export reads of one commission tariff item. */
 export interface CommissionTariffExportItem {
@@ -124,13 +122,8 @@ export function resolveCommissionExportPrice(
 }
 
 /**
- * The week of the upload: the period blocks filled on the first data row, each window
- * label they give checked as the export writes it, then the scoped overlap query.
- * Throws WorkbookFileRejection NO_PERIOD when no period label is filled,
- * SpreadsheetFileError MALFORMED_SHEET when a period has no days or there are more
- * periods than a week has days, or when a window label could not be written,
- * WorkbookFileRejection DUPLICATE_WEEK when a tariff of the store already covers part
- * of the week.
+ * The week of the upload (`inspectUploadWeek`): the period blocks filled on the first
+ * data row, checked as the export writes them, then the scoped overlap query.
  */
 async function inspectTariffWeek({
   scope,
@@ -141,24 +134,19 @@ async function inspectTariffWeek({
   CommissionTariffRow,
   undefined
 >): Promise<TariffWeek> {
-  const firstRowPeriods =
-    firstDataRow === null
-      ? []
-      : firstDataRow.blocks('periods').map((period) => ({
-          tag: period.tag,
-          label: period.text('label'),
-        }));
-  const week = resolveTariffWeek(firstRowPeriods, now);
-  requireTariffPeriods(week);
-  requireWritableWindows(week, { spec: TARIFF_SELECTION_WRITE, label: tariffSelectionLabel });
-  let overlapping;
-  try {
-    overlapping = await findOverlappingWeek(prisma.commissionTariff, scope, week);
-  } catch (err) {
-    mapPrismaError(err);
-  }
-  if (overlapping !== null) throw new WorkbookFileRejection('DUPLICATE_WEEK');
-  return week;
+  return inspectUploadWeek({
+    table: prisma.commissionTariff,
+    scope,
+    now,
+    firstRowPeriods:
+      firstDataRow === null
+        ? []
+        : firstDataRow.blocks('periods').map((period) => ({
+            tag: period.tag,
+            label: period.text('label'),
+          })),
+    write: { spec: TARIFF_SELECTION_WRITE, label: tariffSelectionLabel },
+  });
 }
 
 /**
@@ -259,12 +247,7 @@ export const commissionTariffAdapter: WorkbookVerticalAdapter<
   nameFallback: (week) => week.present[0]?.label ?? null,
   persist: async (tx, { parent, rows, variantIdByAnchor, distinctAnchors, meta: week }) => {
     const scope: StoreScope = { organizationId: parent.organizationId, storeId: parent.storeId };
-    // The unique index only refuses an equal week start; inside the import lock a
-    // concurrent upload's tariff is visible, so an overlap with another start is caught
-    // here.
-    if ((await findOverlappingWeek(tx.commissionTariff, scope, week)) !== null) {
-      throw new WorkbookFileRejection('DUPLICATE_WEEK');
-    }
+    await assertNoOverlappingWeek(tx.commissionTariff, scope, week);
     const tariff = await tx.commissionTariff.create({
       data: {
         organizationId: parent.organizationId,

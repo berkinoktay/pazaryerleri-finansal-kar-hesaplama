@@ -7,6 +7,7 @@
 import { prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
+import { intOrNull } from '../../lib/optional-int';
 import {
   DiscountListPathSchema,
   DiscountListStorePathSchema,
@@ -37,11 +38,6 @@ import { createManyChunked } from '../import-rows';
 export interface DiscountListExportItem {
   readonly barcode: string;
   readonly included: boolean;
-}
-
-/** A count field of the form (validated as digits) as the list's Int column; null when absent. */
-function intOrNull(value: string | undefined): number | null {
-  return value === undefined ? null : Number(value);
 }
 
 const DISCOUNT_LIST_HTTP: WorkbookHttpSpec = {

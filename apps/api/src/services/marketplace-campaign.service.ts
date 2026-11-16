@@ -26,6 +26,7 @@ import { CampaignPriceSelection } from '@pazarsync/db/enums';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { NotFoundError, ValidationError, type ValidationIssue } from '../lib/errors';
+import { intOrNull } from '../lib/optional-int';
 import { assertScopedWrite } from '../workbooks/scoped-write';
 import { scenarioPresentation } from './discount-math-commons';
 import { computeCampaignItem } from './marketplace-campaign-compute.service';
@@ -42,11 +43,6 @@ import {
   type MarketplaceCampaignListItem,
   type UpdateMarketplaceCampaignBody,
 } from '../validators/marketplace-campaign.validator';
-
-/** Reduces a string config field to the list row's Int column (null when absent). */
-function intOrNull(value: string | undefined): number | null {
-  return value === undefined ? null : Number(value);
-}
 
 /**
  * Narrows the SHARED `DiscountType` column down to the five types Kampanyalar exposes on

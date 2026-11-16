@@ -18,17 +18,26 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '@pazarsync/db';
 
 import { createApp } from '@/app';
-import { findOverlappingWeek } from '@/workbooks/tariff-week';
+import {
+  assertNoOverlappingWeek,
+  inspectUploadWeek,
+  resolveTariffWeek,
+} from '@/workbooks/tariff-week';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization, createStore } from '../../helpers/factories';
 
-// The week overlap query, wrapped in a spy that runs the real query: the persist
-// re-check case answers one call itself (see that case). Every other case runs it as is.
+// The two week checks the adapter calls, wrapped in spies that run the real checks: the
+// persist re-check case lets one inspect skip its overlap query (see that case). Every
+// other case runs them as they are.
 vi.mock('@/workbooks/tariff-week', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/workbooks/tariff-week')>();
-  return { ...actual, findOverlappingWeek: vi.fn(actual.findOverlappingWeek) };
+  return {
+    ...actual,
+    inspectUploadWeek: vi.fn(actual.inspectUploadWeek),
+    assertNoOverlappingWeek: vi.fn(actual.assertNoOverlappingWeek),
+  };
 });
 
 const app = createApp();
@@ -157,9 +166,15 @@ describe('plus-commission-tariffs import — one-tariff-per-week overlap guard',
       select: { id: true },
     });
 
-    const overlapQuery = vi.mocked(findOverlappingWeek);
-    overlapQuery.mockClear();
-    overlapQuery.mockImplementationOnce(async () => null);
+    const inspectWeek = vi.mocked(inspectUploadWeek);
+    const persistCheck = vi.mocked(assertNoOverlappingWeek);
+    inspectWeek.mockClear();
+    persistCheck.mockClear();
+    // This inspect resolves the week without its overlap query, as if the overlapping
+    // tariff had committed between the inspect and the import transaction.
+    inspectWeek.mockImplementationOnce(async (input) =>
+      resolveTariffWeek(input.firstRowPeriods, input.now),
+    );
 
     const res = await app.request(importRequest(ctx));
 
@@ -169,12 +184,18 @@ describe('plus-commission-tariffs import — one-tariff-per-week overlap guard',
       code: 'VALIDATION_ERROR',
       errors: [{ field: 'file', code: 'DUPLICATE_TARIFF_WEEK' }],
     });
-    // The inspect call answered null; the persist re-check found the committed tariff.
-    expect(overlapQuery).toHaveBeenCalledTimes(2);
-    expect(overlapQuery.mock.settledResults).toEqual([
-      { type: 'fulfilled', value: null },
-      { type: 'fulfilled', value: { id: overlapping.id } },
+    // The inspect ran no overlap query; the persist re-check found the committed tariff.
+    expect(inspectWeek).toHaveBeenCalledTimes(1);
+    expect(persistCheck).toHaveBeenCalledTimes(1);
+    expect(persistCheck.mock.settledResults).toMatchObject([
+      { type: 'rejected', value: { code: 'DUPLICATE_WEEK' } },
     ]);
+    expect(
+      await prisma.plusCommissionTariff.findFirst({
+        where: { id: overlapping.id },
+        select: { id: true },
+      }),
+    ).toEqual({ id: overlapping.id });
     expect(await prisma.plusCommissionTariff.count({ where: scope })).toBe(1);
     expect(await prisma.plusCommissionTariffPeriod.count({ where: scope })).toBe(0);
     expect(await prisma.plusCommissionTariffItem.count({ where: scope })).toBe(0);

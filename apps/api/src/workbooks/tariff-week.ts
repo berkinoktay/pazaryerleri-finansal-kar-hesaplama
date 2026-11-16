@@ -13,6 +13,7 @@
 // week overlaps it (findOverlappingWeek).
 
 import { SpreadsheetFileError } from '@pazarsync/spreadsheet';
+import { mapPrismaError } from '@pazarsync/sync-core';
 import { TARIFF_WEEK_DAYS, tariffBoundToInstant, tariffWeekDays } from '@pazarsync/utils';
 
 import type { StoreScope } from './adapter';
@@ -265,5 +266,55 @@ export function requireWritableWindows(
   const dayCounts = week.present.map((period) => period.dayCount);
   for (const days of [...dayCounts, tariffWeekDays(dayCounts)]) {
     requireWritableValue(write.spec, write.label(days));
+  }
+}
+
+/** The period blocks of a tariff's first data row: each block's day count and its label. */
+export type FirstRowPeriods = readonly { readonly tag: number; readonly label: string | null }[];
+
+/**
+ * The week of a tariff upload, for both tariff pages' `inspect`: the periods filled on
+ * the first data row (`resolveTariffWeek`), their day counts (`requireTariffPeriods`)
+ * and the window labels the export writes (`requireWritableWindows`) checked, then the
+ * scoped overlap query on `table`.
+ *
+ * Throws WorkbookFileRejection NO_PERIOD when no period label is filled,
+ * SpreadsheetFileError MALFORMED_SHEET when a period has no days, there are more periods
+ * than a week has days or a window label could not be written, and WorkbookFileRejection
+ * DUPLICATE_WEEK when a tariff of the store already covers part of the week.
+ */
+export async function inspectUploadWeek(input: {
+  readonly table: TariffWeekTable;
+  readonly scope: StoreScope;
+  readonly firstRowPeriods: FirstRowPeriods;
+  readonly now: Date;
+  readonly write: { readonly spec: WriteValueSpec; readonly label: (dayCount: number) => string };
+}): Promise<TariffWeek> {
+  const week = resolveTariffWeek(input.firstRowPeriods, input.now);
+  requireTariffPeriods(week);
+  requireWritableWindows(week, input.write);
+  let overlapping;
+  try {
+    overlapping = await findOverlappingWeek(input.table, input.scope, week);
+  } catch (err) {
+    mapPrismaError(err);
+  }
+  if (overlapping !== null) throw new WorkbookFileRejection('DUPLICATE_WEEK');
+  return week;
+}
+
+/**
+ * The overlap check of both tariff pages' `persist`, inside the import transaction.
+ * The unique index only refuses an equal week start; inside the per-store-and-page
+ * import lock a concurrent upload's committed tariff is visible, so an overlap with
+ * another start is caught here. Throws WorkbookFileRejection DUPLICATE_WEEK.
+ */
+export async function assertNoOverlappingWeek(
+  table: TariffWeekTable,
+  scope: StoreScope,
+  week: Pick<TariffWeek, 'weekStartsAt' | 'weekEndsAt'>,
+): Promise<void> {
+  if ((await findOverlappingWeek(table, scope, week)) !== null) {
+    throw new WorkbookFileRejection('DUPLICATE_WEEK');
   }
 }

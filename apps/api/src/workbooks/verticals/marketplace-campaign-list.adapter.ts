@@ -10,6 +10,7 @@ import { prisma, type Prisma } from '@pazarsync/db';
 import { CampaignPriceSelection } from '@pazarsync/db/enums';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
+import { intOrNull } from '../../lib/optional-int';
 import {
   ImportMarketplaceCampaignFormSchema,
   ImportMarketplaceCampaignResponseSchema,
@@ -43,11 +44,6 @@ export interface MarketplaceCampaignExportItem {
   readonly selection: CampaignPriceSelection;
   readonly maxPrice: Prisma.Decimal;
   readonly customPrice: Prisma.Decimal | null;
-}
-
-/** A count field of the form (validated as digits) as the campaign's Int column; null when absent. */
-function intOrNull(value: string | undefined): number | null {
-  return value === undefined ? null : Number(value);
 }
 
 const MARKETPLACE_CAMPAIGN_HTTP: WorkbookHttpSpec = {
