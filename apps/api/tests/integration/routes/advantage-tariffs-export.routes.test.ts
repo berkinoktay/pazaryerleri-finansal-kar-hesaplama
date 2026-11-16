@@ -211,6 +211,6 @@ describe('advantage-tariff export', () => {
       { method: 'POST', headers: { Authorization: bearer(ctx.accessToken) } },
     );
     expect(res.status).toBe(409);
-    expect(((await res.json()) as { code: string }).code).toBe('CONFLICT');
+    expect(((await res.json()) as { code: string }).code).toBe('STORED_FILE_MISSING');
   });
 });

@@ -68,7 +68,6 @@ const RLO = String.fromCodePoint(0x202e);
 
 const ProblemSchema = z.object({
   code: z.string(),
-  meta: z.object({ reason: z.string().optional() }).optional(),
   errors: z.array(z.object({ field: z.string(), code: z.string() })).optional(),
 });
 
@@ -428,8 +427,7 @@ describe('generic workbook import on the discount route', () => {
 
     expect(res.status).toBe(409);
     const body = await problem(res);
-    expect(body.code).toBe('CONFLICT');
-    expect(body.meta?.reason).toBe('UPLOAD_QUOTA_EXCEEDED');
+    expect(body.code).toBe('UPLOAD_QUOTA_EXCEEDED');
     expect(
       await prisma.discountList.count({
         where: { organizationId: ctx.orgId, storeId: ctx.storeId },
@@ -471,8 +469,7 @@ describe('generic workbook import on the discount route', () => {
 
     expect(res.status).toBe(409);
     const body = await problem(res);
-    expect(body.code).toBe('CONFLICT');
-    expect(body.meta?.reason).toBe('IMPORT_IN_PROGRESS');
+    expect(body.code).toBe('IMPORT_IN_PROGRESS');
     expect(await prisma.discountList.count()).toBe(0);
   });
 
@@ -489,7 +486,7 @@ describe('generic workbook import on the discount route', () => {
     );
 
     expect(locked.status).toBe(409);
-    expect((await problem(locked)).meta?.reason).toBe('IMPORT_IN_PROGRESS');
+    expect((await problem(locked)).code).toBe('IMPORT_IN_PROGRESS');
 
     const free = await app.request(importRequest(ctx, FIXTURE, undefined, upper));
 

@@ -203,9 +203,10 @@ export class ImportBusyError extends Error {
 }
 
 // --- Workbook import / export conflicts --------------------------------------
-// The 409 conditions of the workbook pipeline. They leave as `CONFLICT` with a
-// `meta.reason` until the frontend learns their own codes; the class declares no
-// `code` of its own on purpose, so it stays a plain `CONFLICT` on the wire.
+// The 409 conditions of the workbook pipeline. Each leaves with its reason as its own
+// wire code, taken from the literal table in problem-details.ts. The class still
+// declares no `code` of its own on purpose, so `err.code` stays `CONFLICT` for every
+// `instanceof ConflictError` reader; only the wire code comes from the table.
 
 export const WORKBOOK_CONFLICT_REASONS = [
   'IMPORT_IN_PROGRESS',
@@ -238,8 +239,9 @@ export const WORKBOOK_CONFLICT_DETAILS: Readonly<Record<WorkbookConflictReason, 
 
 /**
  * A workbook import or export that conflicts with the stored server state. Extends
- * `ConflictError`, so every `instanceof ConflictError` guard still matches it;
- * problem-details.ts checks it first to add `meta.reason`.
+ * `ConflictError`, so every `instanceof ConflictError` guard still matches it and
+ * `err.code` stays `CONFLICT`; problem-details.ts checks it first and answers its
+ * `reason` as the wire code, from its literal table.
  */
 export class WorkbookConflictError extends ConflictError {
   readonly reason: WorkbookConflictReason;

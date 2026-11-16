@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CommissionTariffUploadDialog } from '@/features/campaigns/components/commission-tariff-upload-dialog';
 
 import trMessages from '../../messages/tr.json';
-import { validationApiError } from '../helpers/api-error';
+import { problemApiError, validationApiError } from '../helpers/api-error';
 import { fireEvent, render, screen } from '../helpers/render';
 
 const UPLOAD = trMessages.commissionTariffsPage.upload;
@@ -79,6 +79,14 @@ describe('<CommissionTariffUploadDialog>', () => {
   it('shows the page message for a duplicate-week rejection', () => {
     render(<Harness submitError={fileIssue('DUPLICATE_WEEK')} />);
     expect(screen.getByText(UPLOAD.errors.duplicateWeek)).toBeInTheDocument();
+  });
+
+  it('shows nothing inline for a 409 import conflict, which the global toast owns', () => {
+    render(<Harness submitError={problemApiError(409, 'IMPORT_IN_PROGRESS')} />);
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(fileInput()).not.toHaveAttribute('aria-invalid');
+    expect(screen.queryByText(SHARED.errors.generic)).not.toBeInTheDocument();
   });
 
   it('falls back to the generic message for an unknown rejection code', () => {

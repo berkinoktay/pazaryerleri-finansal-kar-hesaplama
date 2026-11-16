@@ -428,7 +428,7 @@ describe('plus-commission-tariff export', () => {
 
     const res = await exportTariff(ctx, tariff.id);
     expect(res.status).toBe(409);
-    expect(((await res.json()) as { code: string }).code).toBe('CONFLICT');
+    expect(((await res.json()) as { code: string }).code).toBe('STORED_FILE_MISSING');
   });
 
   it('returns 409 when the stored source file is unreadable', async () => {
@@ -445,7 +445,7 @@ describe('plus-commission-tariff export', () => {
 
     const res = await exportTariff(ctx, tariff.id);
     expect(res.status).toBe(409);
-    expect(((await res.json()) as { code: string }).code).toBe('CONFLICT');
+    expect(((await res.json()) as { code: string }).code).toBe('STORED_FILE_UNREADABLE');
   });
 });
 

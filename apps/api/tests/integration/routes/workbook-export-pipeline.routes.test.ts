@@ -3,7 +3,7 @@
 //     reads the stored file once;
 //   - nothing an export reads surfaces as a 500: bytes that are not a workbook, a
 //     format id no adapter knows, a renamed sheet, a byte after the zip end record and
-//     a row that no longer matches its item are each a 409 CONFLICT with a reason, and
+//     a row that no longer matches its item are each a 409 with its reason as the code, and
 //     the list is not marked exported;
 //   - a list whose choices match the stored file streams the stored bytes back;
 //   - the download carries the hardened headers and never the raw stored name;
@@ -78,10 +78,7 @@ const RLO_PERCENT_ENCODED = '%E2%80%AE';
 const SMUGGLED_NAME = "rapor;filename*=UTF-8''setup.exe;.xlsx";
 
 const ImportSchema = z.object({ listId: z.string() });
-const ProblemSchema = z.object({
-  code: z.string(),
-  meta: z.object({ reason: z.string().optional() }).optional(),
-});
+const ProblemSchema = z.object({ code: z.string() });
 
 interface Ctx {
   accessToken: string;
@@ -150,14 +147,13 @@ async function updateList(
   expect(count).toBe(1);
 }
 
-/** Answers 409 CONFLICT with `reason`, and the list is still not marked exported. */
+/** Answers 409 with `reason` as its code, and the list is still not marked exported. */
 async function expectConflict(ctx: Ctx, listId: string, reason: string): Promise<void> {
   const res = await app.request(exportRequest(ctx, listId));
 
   expect(res.status).toBe(409);
   const body = ProblemSchema.parse(await res.json());
-  expect(body.code).toBe('CONFLICT');
-  expect(body.meta?.reason).toBe(reason);
+  expect(body.code).toBe(reason);
   expect((await storedList(ctx, listId)).exportedAt).toBeNull();
 }
 
@@ -489,8 +485,7 @@ describe('generic workbook export of a legacy commission tariff', () => {
 
     expect(res.status).toBe(409);
     const body = ProblemSchema.parse(await res.json());
-    expect(body.code).toBe('CONFLICT');
-    expect(body.meta?.reason).toBe('EXPORT_FILENAME_COLLISION');
+    expect(body.code).toBe('EXPORT_FILENAME_COLLISION');
     expect(enginePatch).not.toHaveBeenCalled();
     expect(await tariffExportedAt(ctx, tariffId)).toBeNull();
   });
@@ -507,8 +502,7 @@ describe('generic workbook export of a legacy commission tariff', () => {
 
     expect(res.status).toBe(409);
     const body = ProblemSchema.parse(await res.json());
-    expect(body.code).toBe('CONFLICT');
-    expect(body.meta?.reason).toBe('STORED_FILE_UNREADABLE');
+    expect(body.code).toBe('STORED_FILE_UNREADABLE');
     expect(enginePatch).not.toHaveBeenCalled();
     expect(storedFileRejections(warn)).toEqual([
       [
@@ -596,8 +590,7 @@ describe('generic workbook export of a legacy marketplace campaign list', () => 
 
     expect(res.status).toBe(409);
     const body = ProblemSchema.parse(await res.json());
-    expect(body.code).toBe('CONFLICT');
-    expect(body.meta?.reason).toBe('STORED_FILE_UNREADABLE');
+    expect(body.code).toBe('STORED_FILE_UNREADABLE');
     expect(enginePatch).not.toHaveBeenCalled();
     expect(storedFileRejections(warn)).toEqual([
       [

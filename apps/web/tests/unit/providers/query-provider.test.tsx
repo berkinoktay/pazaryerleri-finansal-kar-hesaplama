@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { NextIntlClientProvider } from 'next-intl';
 import { renderHook, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -7,8 +7,25 @@ import { QueryProvider } from '@/providers/query-provider';
 import { ApiError } from '@/lib/api-error';
 
 import trMessages from '../../../messages/tr.json';
+import { problemApiError } from '../../helpers/api-error';
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
+
+/** The workbook conflicts the API answers as a 409, each under its own code. */
+const WORKBOOK_CONFLICT_CODES = [
+  'IMPORT_IN_PROGRESS',
+  'UPLOAD_QUOTA_EXCEEDED',
+  'STORED_FILE_MISSING',
+  'STORED_FILE_UNREADABLE',
+  'STORED_FILE_UNRECOGNIZED',
+  'NO_WRITEBACK_COLUMN',
+  'ROW_MISMATCH',
+  'ROW_ANCHOR_MISMATCH',
+  'ROW_NOT_FOUND',
+  'EXPORT_FILENAME_COLLISION',
+] as const;
+
+const CONFLICT_STATUS = 409;
 vi.mock('sonner', () => ({ toast: { error: toastError, success: vi.fn() } }));
 
 function wrapper({ children }: { children: React.ReactNode }) {
@@ -147,5 +164,39 @@ describe('QueryProvider', () => {
 
     await waitFor(() => expect(toastError).toHaveBeenCalled());
     expect(toastError).toHaveBeenCalledWith('Bağlantı hatası. İnternetini kontrol et.');
+  });
+
+  it.each(WORKBOOK_CONFLICT_CODES)(
+    'toasts the message of the workbook conflict %s once for a rejected mutation',
+    async (code) => {
+      const { result } = renderHook(
+        () =>
+          useMutation({
+            mutationFn: () => Promise.reject(problemApiError(CONFLICT_STATUS, code)),
+          }),
+        { wrapper },
+      );
+      result.current.mutate();
+
+      await waitFor(() => expect(toastError).toHaveBeenCalled());
+      expect(toastError).toHaveBeenCalledTimes(1);
+      expect(toastError).toHaveBeenCalledWith(trMessages.common.errors[code]);
+    },
+  );
+
+  it('toasts the generic message for a 409 code it does not know', async () => {
+    const { result } = renderHook(
+      () =>
+        useMutation({
+          mutationFn: () =>
+            Promise.reject(problemApiError(CONFLICT_STATUS, 'SOME_FUTURE_CONFLICT')),
+        }),
+      { wrapper },
+    );
+    result.current.mutate();
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(toastError).toHaveBeenCalledTimes(1);
+    expect(toastError).toHaveBeenCalledWith(trMessages.common.errors.generic);
   });
 });

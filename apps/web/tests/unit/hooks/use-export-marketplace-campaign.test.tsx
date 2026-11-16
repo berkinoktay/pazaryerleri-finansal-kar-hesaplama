@@ -4,6 +4,7 @@ import { type ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { useExportMarketplaceCampaign } from '@/features/campaigns/hooks/use-export-marketplace-campaign';
+import { ApiError } from '@/lib/api-error';
 
 import { createTestQueryClient } from '../../helpers/render';
 import { HttpResponse, http, server } from '../../helpers/msw';
@@ -103,7 +104,7 @@ describe('useExportMarketplaceCampaign', () => {
             type: 'about:blank',
             title: 'Conflict',
             status: 409,
-            code: 'CONFLICT',
+            code: 'STORED_FILE_MISSING',
             detail: 'no stored source file',
           },
           { status: 409, headers: { 'content-type': 'application/problem+json' } },
@@ -117,5 +118,9 @@ describe('useExportMarketplaceCampaign', () => {
     result.current.mutate(CAMPAIGN_ID);
 
     await waitFor(() => expect(result.current.isError).toBe(true));
+    const error = result.current.error;
+    expect(error).toBeInstanceOf(ApiError);
+    if (!(error instanceof ApiError)) throw new Error('expected ApiError');
+    expect(error.code).toBe('STORED_FILE_MISSING');
   });
 });
