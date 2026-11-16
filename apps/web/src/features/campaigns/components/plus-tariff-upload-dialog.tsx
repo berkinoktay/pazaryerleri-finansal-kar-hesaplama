@@ -17,7 +17,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
+import { UploadUnplacedIssues } from './upload-unplaced-issues';
+
 const STEP_KEYS = ['step1', 'step2', 'step3'] as const;
+
+/** The dropzone is this dialog's only message slot; any other field issue is listed under it. */
+const PLACED_FIELDS: readonly string[] = ['file'];
+
 export interface PlusTariffUploadDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -27,6 +33,8 @@ export interface PlusTariffUploadDialogProps {
   submitting?: boolean;
   /** Backend file-rejection code (from `extractFileErrorCode`), shown inline. */
   errorCode?: string | null;
+  /** The import mutation's error; its field issues on anything but the file are listed inline. */
+  submitError?: Error | null;
   /** Clears the last import error when the seller picks a different file. */
   onResetError?: () => void;
 }
@@ -77,9 +85,11 @@ export function PlusTariffUploadDialog({
   onFile,
   submitting = false,
   errorCode,
+  submitError,
   onResetError,
 }: PlusTariffUploadDialogProps): React.ReactElement {
   const t = useTranslations('plusCommissionTariffsPage.upload');
+  const tUpload = useTranslations('campaignUpload');
   const tCommon = useTranslations('common');
   const fileErrorMessage = useFileErrorMessage();
 
@@ -113,12 +123,16 @@ export function PlusTariffUploadDialog({
           prompt={t('prompt')}
           hint={t('hint', { maxMb: WORKBOOK_UPLOAD_MAX_MB })}
           ctaLabel={t('cta')}
+          errorWrongType={tUpload('fileErrors.wrongType')}
+          errorTooLarge={tUpload('fileErrors.tooLarge', { maxMb: WORKBOOK_UPLOAD_MAX_MB })}
+          removeLabel={tUpload('removeFile')}
           error={fileErrorMessage(errorCode)}
           onChange={(next) => {
             setFile(next);
             onResetError?.();
           }}
         />
+        <UploadUnplacedIssues error={submitError} placedFields={PLACED_FIELDS} />
 
         <div className="border-border bg-surface-subtle gap-sm p-md flex flex-col rounded-lg border">
           <p className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">

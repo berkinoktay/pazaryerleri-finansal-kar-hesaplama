@@ -1,35 +1,46 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractFileErrorCode, validationIssues } from '@/features/campaigns/lib/upload-error';
-import { ApiError, type ProblemDetails } from '@/lib/api-error';
+import {
+  extractFileErrorCode,
+  unplacedIssues,
+  validationIssues,
+} from '@/features/campaigns/lib/upload-error';
+import { ApiError } from '@/lib/api-error';
 
-function apiError(status: number, code: string, errors?: ProblemDetails['errors']): ApiError {
-  return new ApiError(status, code, 'detail', {
-    type: 'about:blank',
-    title: 'title',
-    status,
-    code,
-    detail: 'detail',
-    errors,
-  });
-}
+import { problemApiError, validationApiError } from '../../../helpers/api-error';
 
 const FIELD_ISSUES = [
   { field: 'file', code: 'INVALID_CAMPAIGN_FORMAT' },
   { field: 'trendyolFundingPct', code: 'FUNDING_PCT_OVER_100' },
 ];
 
+/**
+ * A 409 whose problem body still carries field issues: the builders give a non-validation
+ * problem no `errors`, so this one shape is written out.
+ */
+function conflictWithIssues(): ApiError {
+  return new ApiError(409, 'CONFLICT', 'detail', {
+    type: 'about:blank',
+    title: 'title',
+    status: 409,
+    code: 'CONFLICT',
+    detail: 'detail',
+    errors: FIELD_ISSUES,
+  });
+}
+
 describe('validationIssues', () => {
   it('returns the field issues of a VALIDATION_ERROR', () => {
-    expect(validationIssues(apiError(422, 'VALIDATION_ERROR', FIELD_ISSUES))).toEqual(FIELD_ISSUES);
+    expect(validationIssues(validationApiError(FIELD_ISSUES))).toEqual(FIELD_ISSUES);
   });
 
   it('returns no issues for a VALIDATION_ERROR without field issues', () => {
-    expect(validationIssues(apiError(422, 'VALIDATION_ERROR'))).toEqual([]);
+    // `problemApiError` leaves `errors` absent, the shape a bare 422 has on the wire.
+    expect(validationIssues(problemApiError(422, 'VALIDATION_ERROR'))).toEqual([]);
   });
 
   it('returns no issues for any other API error, even one carrying issues', () => {
-    expect(validationIssues(apiError(409, 'CONFLICT', FIELD_ISSUES))).toEqual([]);
+    expect(validationIssues(conflictWithIssues())).toEqual([]);
   });
 
   it('returns no issues for a non-API error or no error', () => {
@@ -38,25 +49,47 @@ describe('validationIssues', () => {
   });
 });
 
+describe('unplacedIssues', () => {
+  it('returns the name issue when only the file has a message slot', () => {
+    const error = validationApiError([{ field: 'name', code: 'NAME_TOO_LONG' }]);
+    expect(unplacedIssues(error, ['file'])).toEqual([{ field: 'name', code: 'NAME_TOO_LONG' }]);
+  });
+
+  it('returns no issues when every issue has a message slot', () => {
+    expect(
+      unplacedIssues(validationApiError(FIELD_ISSUES), ['file', 'trendyolFundingPct']),
+    ).toEqual([]);
+  });
+
+  it('returns no issues for a 409, even one carrying issues', () => {
+    expect(unplacedIssues(conflictWithIssues(), ['file'])).toEqual([]);
+    expect(unplacedIssues(problemApiError(409, 'IMPORT_IN_PROGRESS'), ['file'])).toEqual([]);
+  });
+
+  it('returns no issues for a plain Error', () => {
+    expect(unplacedIssues(new Error('boom'), ['file'])).toEqual([]);
+  });
+});
+
 describe('extractFileErrorCode', () => {
   it('picks the file issue out of a VALIDATION_ERROR', () => {
-    expect(extractFileErrorCode(apiError(422, 'VALIDATION_ERROR', FIELD_ISSUES))).toBe(
-      'INVALID_CAMPAIGN_FORMAT',
-    );
+    expect(extractFileErrorCode(validationApiError(FIELD_ISSUES))).toBe('INVALID_CAMPAIGN_FORMAT');
   });
 
   it('is null when the VALIDATION_ERROR has no file issue', () => {
     const issues = [{ field: 'value', code: 'VALUE_REQUIRED' }];
-    expect(extractFileErrorCode(apiError(422, 'VALIDATION_ERROR', issues))).toBeNull();
+    expect(extractFileErrorCode(validationApiError(issues))).toBeNull();
   });
 
   it('returns PAYLOAD_TOO_LARGE for a 413 problem', () => {
     // The body-limit 413 carries no `errors[]`; the code itself is the file rejection.
-    expect(extractFileErrorCode(apiError(413, 'PAYLOAD_TOO_LARGE'))).toBe('PAYLOAD_TOO_LARGE');
+    expect(extractFileErrorCode(problemApiError(413, 'PAYLOAD_TOO_LARGE'))).toBe(
+      'PAYLOAD_TOO_LARGE',
+    );
   });
 
   it('is null for any non-validation error', () => {
-    expect(extractFileErrorCode(apiError(500, 'INTERNAL_ERROR'))).toBeNull();
+    expect(extractFileErrorCode(problemApiError(500, 'INTERNAL_ERROR'))).toBeNull();
     expect(extractFileErrorCode(undefined)).toBeNull();
   });
 });

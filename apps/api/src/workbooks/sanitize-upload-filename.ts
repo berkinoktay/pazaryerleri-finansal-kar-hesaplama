@@ -2,7 +2,8 @@
 // raw upload name never reaches a response: it can hold path separators, bidi
 // overrides and control characters, and any length.
 
-import { UPLOAD_NAME_MAX_LENGTH } from '../config/workbook-limits';
+import { UPLOAD_NAME_MAX_LENGTH } from '@pazarsync/utils';
+
 import { stripControlAndFormat, truncateCodePoints } from './form';
 
 // ASCII case-insensitive on purpose: without the `u` flag, `i` never folds a non-ASCII

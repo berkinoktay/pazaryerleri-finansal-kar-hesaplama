@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 
 import { Platform } from '@pazarsync/db/enums';
 import { readWorkbookGrid, type SheetSelector } from '@pazarsync/spreadsheet';
-import { WORKBOOK_PAGES, type WorkbookPage } from '@pazarsync/utils';
+import { UPLOAD_NAME_MAX_LENGTH, WORKBOOK_PAGES, type WorkbookPage } from '@pazarsync/utils';
 import { describe, expect, it, vi } from 'vitest';
 
 import { trendyolAdvantageTariffFormat } from '@/workbooks/formats/trendyol/advantage-tariff.format';
@@ -16,7 +16,7 @@ import { trendyolFlashProductListFormat } from '@/workbooks/formats/trendyol/fla
 import { trendyolMarketplaceCampaignListFormat } from '@/workbooks/formats/trendyol/marketplace-campaign-list.format';
 import { trendyolPlusCommissionTariffFormat } from '@/workbooks/formats/trendyol/plus-commission-tariff.format';
 import { cleanDisplayName } from '@/workbooks/form';
-import { SOURCE_FORMAT_ID_MAX_LENGTH, UPLOAD_NAME_MAX_LENGTH } from '@/config/workbook-limits';
+import { SOURCE_FORMAT_ID_MAX_LENGTH } from '@/config/workbook-limits';
 import { FORMAT_SUMMARIES, type FormatSummary } from '@/workbooks/formats/registry';
 import { diagnoseWorkbook } from '@/workbooks/select-format';
 import { WORKBOOK_PARENT_TABLES, type WorkbookParentTable } from '@/workbooks/upload-quota';

@@ -132,6 +132,7 @@ export function AdvantageTariffsListClient({
         onFile={handleImport}
         submitting={importTariff.isPending}
         errorCode={extractFileErrorCode(importTariff.error)}
+        submitError={importTariff.error}
         onResetError={() => importTariff.reset()}
       />
     </>

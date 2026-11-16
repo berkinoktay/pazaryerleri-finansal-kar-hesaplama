@@ -4,7 +4,7 @@
 
 import { z } from '@hono/zod-openapi';
 
-import { UPLOAD_NAME_MAX_LENGTH } from '../config/workbook-limits';
+import { UPLOAD_NAME_MAX_LENGTH } from '@pazarsync/utils';
 
 /** Field issue code of a name above UPLOAD_NAME_MAX_LENGTH. */
 export const NAME_TOO_LONG = 'NAME_TOO_LONG';

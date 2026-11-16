@@ -10,9 +10,9 @@ import {
   type CellValue,
   type SheetData,
 } from '@pazarsync/spreadsheet';
-import { WORKBOOK_PAGES } from '@pazarsync/utils';
+import { UPLOAD_NAME_MAX_LENGTH, WORKBOOK_PAGES } from '@pazarsync/utils';
 
-import { IMPORT_INSERT_CHUNK_ROWS, UPLOAD_NAME_MAX_LENGTH } from '@/config/workbook-limits';
+import { IMPORT_INSERT_CHUNK_ROWS } from '@/config/workbook-limits';
 import { ValidationError } from '@/lib/errors';
 import { defineFormat } from '@/workbooks/format';
 import {

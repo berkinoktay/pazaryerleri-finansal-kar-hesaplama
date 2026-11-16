@@ -27,10 +27,10 @@ import {
   type SheetData,
 } from '@pazarsync/spreadsheet';
 import { buildXlsxFixture } from '@pazarsync/spreadsheet/testing';
-import { WORKBOOK_PAGES } from '@pazarsync/utils';
+import { UPLOAD_NAME_MAX_LENGTH, WORKBOOK_PAGES } from '@pazarsync/utils';
 
 import { createApp } from '@/app';
-import { MAX_LISTS_PER_STORE_PAGE, UPLOAD_NAME_MAX_LENGTH } from '@/config/workbook-limits';
+import { MAX_LISTS_PER_STORE_PAGE } from '@/config/workbook-limits';
 import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware';
 import { trendyolDiscountListFormat } from '@/workbooks/formats/trendyol/discount-list.format';
 import { TRENDYOL_DEFAULT_NAMES, TRENDYOL_SHEET_NAMES } from '@/workbooks/formats/trendyol/labels';

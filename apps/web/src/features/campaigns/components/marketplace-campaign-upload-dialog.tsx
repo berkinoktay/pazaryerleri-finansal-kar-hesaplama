@@ -3,7 +3,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 
 import { DiscountType } from '@pazarsync/db/enums';
 import { WORKBOOK_UPLOAD_MAX_BYTES, WORKBOOK_UPLOAD_MAX_MB } from '@pazarsync/utils';
@@ -26,7 +26,11 @@ import {
   type CampaignConfigFormInput,
   type CampaignConfigFormValues,
 } from '../lib/marketplace-campaign-config';
-import { MarketplaceCampaignConfigFields } from './marketplace-campaign-config-fields';
+import {
+  MarketplaceCampaignConfigFields,
+  placedConfigFields,
+} from './marketplace-campaign-config-fields';
+import { UploadUnplacedIssues } from './upload-unplaced-issues';
 
 /**
  * Maps a backend file-rejection code to its localized message key bucket. Campaign-specific
@@ -75,7 +79,8 @@ export interface MarketplaceCampaignUploadDialogProps {
   errorCode?: string | null;
   /**
    * The import mutation's error. On a `VALIDATION_ERROR` its `problem.errors[]` are walked into
-   * inline field messages by {@link MarketplaceCampaignConfigFields}.
+   * inline field messages by {@link MarketplaceCampaignConfigFields}; an issue no input owns is
+   * listed under the dropzone.
    */
   submitError?: Error | null;
   /** Clears the last import error when the seller picks a different file. */
@@ -99,6 +104,7 @@ export function MarketplaceCampaignUploadDialog({
   onResetError,
 }: MarketplaceCampaignUploadDialogProps): React.ReactElement {
   const t = useTranslations('marketplaceCampaignsPage.upload');
+  const tUpload = useTranslations('campaignUpload');
   const tCommon = useTranslations('common');
   const fileErrorMessage = useFileErrorMessage();
 
@@ -109,6 +115,8 @@ export function MarketplaceCampaignUploadDialog({
     resolver: zodResolver(campaignConfigFormSchema),
     defaultValues: { discountType: DiscountType.NET },
   });
+  // The kurgu decides which parameters have an input, so it decides which issues are unplaced.
+  const discountType = useWatch({ control: form.control, name: 'discountType' });
 
   const handleOpenChange = (next: boolean): void => {
     // Reset the whole form (config + file + name) when the dialog closes so reopening starts clean.
@@ -150,11 +158,18 @@ export function MarketplaceCampaignUploadDialog({
                   prompt={t('prompt')}
                   hint={t('hint', { maxMb: WORKBOOK_UPLOAD_MAX_MB })}
                   ctaLabel={t('cta')}
+                  errorWrongType={tUpload('fileErrors.wrongType')}
+                  errorTooLarge={tUpload('fileErrors.tooLarge', { maxMb: WORKBOOK_UPLOAD_MAX_MB })}
+                  removeLabel={tUpload('removeFile')}
                   error={fileErrorMessage(errorCode)}
                   onChange={(next) => {
                     setFile(next);
                     onResetError?.();
                   }}
+                />
+                <UploadUnplacedIssues
+                  error={submitError}
+                  placedFields={['file', ...placedConfigFields(discountType)]}
                 />
 
                 <MarketplaceCampaignConfigFields

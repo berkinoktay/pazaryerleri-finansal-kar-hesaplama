@@ -1,10 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { WORKBOOK_PAGES, type WorkbookPage } from '@pazarsync/utils';
+import { UPLOAD_NAME_MAX_LENGTH, WORKBOOK_PAGES, type WorkbookPage } from '@pazarsync/utils';
 import { describe, expect, it } from 'vitest';
-
-import { UPLOAD_NAME_MAX_LENGTH } from '@/config/workbook-limits';
 
 import {
   readMigrationSql,

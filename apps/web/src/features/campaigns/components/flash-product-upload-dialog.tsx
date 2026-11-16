@@ -17,6 +17,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
+import { UploadUnplacedIssues } from './upload-unplaced-issues';
+
+/** The dropzone is this dialog's only message slot; any other field issue is listed under it. */
+const PLACED_FIELDS: readonly string[] = ['file'];
+
 /**
  * Maps a backend file-rejection code to its localized message key bucket. Flash-specific
  * codes are `EMPTY_FLASH_FILE` / `INVALID_FLASH_FORMAT`; the rest are the shared upload
@@ -59,6 +64,8 @@ export interface FlashProductUploadDialogProps {
   submitting?: boolean;
   /** Backend file-rejection code (from `extractFileErrorCode`), shown inline. */
   errorCode?: string | null;
+  /** The import mutation's error; its field issues on anything but the file are listed inline. */
+  submitError?: Error | null;
   /** Clears the last import error when the seller picks a different file. */
   onResetError?: () => void;
 }
@@ -76,9 +83,11 @@ export function FlashProductUploadDialog({
   onFile,
   submitting = false,
   errorCode,
+  submitError,
   onResetError,
 }: FlashProductUploadDialogProps): React.ReactElement {
   const t = useTranslations('flashProductsPage.upload');
+  const tUpload = useTranslations('campaignUpload');
   const tCommon = useTranslations('common');
   const fileErrorMessage = useFileErrorMessage();
 
@@ -111,12 +120,16 @@ export function FlashProductUploadDialog({
             prompt={t('prompt')}
             hint={t('hint', { maxMb: WORKBOOK_UPLOAD_MAX_MB })}
             ctaLabel={t('cta')}
+            errorWrongType={tUpload('fileErrors.wrongType')}
+            errorTooLarge={tUpload('fileErrors.tooLarge', { maxMb: WORKBOOK_UPLOAD_MAX_MB })}
+            removeLabel={tUpload('removeFile')}
             error={fileErrorMessage(errorCode)}
             onChange={(next) => {
               setFile(next);
               onResetError?.();
             }}
           />
+          <UploadUnplacedIssues error={submitError} placedFields={PLACED_FIELDS} />
 
           <div className="border-border bg-surface-subtle gap-sm p-md flex flex-col rounded-lg border">
             <p className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">

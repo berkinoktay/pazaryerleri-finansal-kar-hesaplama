@@ -4,9 +4,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { FlashProductUploadDialog } from '@/features/campaigns/components/flash-product-upload-dialog';
 
 import trMessages from '../../messages/tr.json';
+import { validationApiError } from '../helpers/api-error';
 import { render, screen } from '../helpers/render';
 
 const UPLOAD = trMessages.flashProductsPage.upload;
+const SHARED = trMessages.campaignUpload;
 const ERRORS = UPLOAD.errors;
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -60,6 +62,22 @@ describe('<FlashProductUploadDialog>', () => {
   it('falls back to the generic message for an unknown rejection code', () => {
     renderDialog({ errorCode: 'SOME_UNKNOWN_CODE' });
     expect(screen.getByText(ERRORS.generic)).toBeInTheDocument();
+  });
+
+  it('shows the name refusal of a 422 that has no file issue', () => {
+    renderDialog({ submitError: validationApiError([{ field: 'name', code: 'NAME_TOO_LONG' }]) });
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      SHARED.errors.nameTooLong.replace('{max}', '120'),
+    );
+  });
+
+  it('shows the field sentence for an issue on a field the dialog has no input for', () => {
+    renderDialog({
+      submitError: validationApiError([{ field: 'other', code: 'SOME_FUTURE_FIELD_CODE' }]),
+    });
+
+    expect(screen.getByRole('alert')).toHaveTextContent(SHARED.errors.field);
   });
 
   it('clears the last import error when the seller picks a different file', async () => {

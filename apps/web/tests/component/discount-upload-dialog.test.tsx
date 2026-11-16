@@ -8,12 +8,14 @@ import { extractFileErrorCode } from '@/features/campaigns/lib/upload-error';
 import { ApiError } from '@/lib/api-error';
 
 import trMessages from '../../messages/tr.json';
-import { render, screen } from '../helpers/render';
+import { validationApiError } from '../helpers/api-error';
+import { fireEvent, render, screen, waitFor, within } from '../helpers/render';
 
 const UPLOAD = trMessages.discountsPage.upload;
 const ERRORS = UPLOAD.errors;
 const FIELDS = UPLOAD.fields;
 const TYPES = trMessages.discountsPage.types;
+const SHARED = trMessages.campaignUpload;
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 function makeXlsxFile(name = 'indirimler.xlsx'): File {
@@ -25,6 +27,13 @@ function fileInput(): HTMLInputElement {
   const input = document.querySelector('input[type="file"]');
   if (!(input instanceof HTMLInputElement)) throw new Error('file input not found');
   return input;
+}
+
+/** The name input's own block (label, input and its message line). */
+function nameField(): HTMLElement {
+  const block = screen.getByLabelText(UPLOAD.name).parentElement;
+  if (block === null) throw new Error('name field block not found');
+  return block;
 }
 
 function renderDialog(
@@ -195,6 +204,99 @@ describe('<DiscountUploadDialog>', () => {
     await user.upload(fileInput(), atLimit);
 
     expect(screen.getByRole('button', { name: UPLOAD.submit })).toBeEnabled();
+  });
+
+  it('limits the name input to the shared name length', () => {
+    renderDialog();
+
+    expect(screen.getByLabelText(UPLOAD.name)).toHaveAttribute('maxlength', '120');
+  });
+
+  it('shows a NAME_TOO_LONG refusal under the name input, not the generic field message', () => {
+    renderDialog({ submitError: validationApiError([{ field: 'name', code: 'NAME_TOO_LONG' }]) });
+
+    expect(
+      within(nameField()).getByText(SHARED.errors.nameTooLong.replace('{max}', '120')),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(UPLOAD.fieldErrors.generic)).not.toBeInTheDocument();
+  });
+
+  it('shows a NAME_INVALID_CHARACTERS refusal under the name input', () => {
+    renderDialog({
+      submitError: validationApiError([{ field: 'name', code: 'NAME_INVALID_CHARACTERS' }]),
+    });
+
+    expect(within(nameField()).getByText(SHARED.errors.nameInvalidCharacters)).toBeInTheDocument();
+  });
+
+  it('shows the field sentence once for issues on fields the form has no input for', () => {
+    renderDialog({
+      submitError: validationApiError([
+        { field: 'other', code: 'SOME_FUTURE_FIELD_CODE' },
+        { field: 'another', code: 'ANOTHER_FUTURE_FIELD_CODE' },
+      ]),
+    });
+
+    expect(screen.getAllByText(SHARED.errors.field)).toHaveLength(1);
+  });
+
+  it('shows the field sentence for a parameter the current kurgu hides', () => {
+    // NET is the default kurgu and shows no minimum quantity input.
+    renderDialog({
+      submitError: validationApiError([{ field: 'minQuantity', code: 'INVALID_MIN_QUANTITY' }]),
+    });
+
+    expect(screen.queryByLabelText(FIELDS.minQuantity)).not.toBeInTheDocument();
+    expect(screen.getByText(SHARED.errors.field)).toBeInTheDocument();
+  });
+
+  it('shows a value issue under the value input and not as the field sentence', async () => {
+    renderDialog({
+      submitError: validationApiError([{ field: 'value', code: 'INVALID_DISCOUNT_VALUE' }]),
+    });
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(FIELDS.value)).toHaveAccessibleDescription(
+        UPLOAD.fieldErrors.decimal,
+      ),
+    );
+    expect(screen.queryByText(SHARED.errors.field)).not.toBeInTheDocument();
+  });
+
+  it('shows a discountType issue under the kurgu picker', async () => {
+    renderDialog({
+      submitError: validationApiError([{ field: 'discountType', code: 'SOME_TYPE_CODE' }]),
+    });
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(UPLOAD.typeLabel)).toHaveAccessibleDescription(
+        UPLOAD.fieldErrors.generic,
+      ),
+    );
+    expect(screen.queryByText(SHARED.errors.field)).not.toBeInTheDocument();
+  });
+
+  it('shows the shared wrong-type message for a file that is not an .xlsx', () => {
+    renderDialog();
+
+    // userEvent.upload drops a file the input's `accept` refuses before the change event, so
+    // the FileList is wired directly (as in file-upload.test.tsx).
+    const input = fileInput();
+    Object.defineProperty(input, 'files', {
+      value: [new File(['text'], 'notes.txt', { type: 'text/plain' })],
+      configurable: true,
+    });
+    fireEvent.change(input);
+
+    expect(screen.getByText(SHARED.fileErrors.wrongType)).toBeInTheDocument();
+  });
+
+  it('labels the remove button with the shared message', async () => {
+    const { user } = renderDialog();
+
+    await user.upload(fileInput(), makeXlsxFile());
+
+    expect(screen.getByRole('button', { name: SHARED.removeFile })).toBeInTheDocument();
   });
 
   it('keeps submit disabled until a file is chosen', async () => {

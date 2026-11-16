@@ -1,13 +1,28 @@
 import { ApiError, type ProblemDetails } from '@/lib/api-error';
 
+/** One field issue of a backend `422 VALIDATION_ERROR`. */
+export type ValidationFieldIssue = NonNullable<ProblemDetails['errors']>[number];
+
 /**
  * The field issues of a backend `422 VALIDATION_ERROR` (empty for any other error).
  * `VALIDATION_ERROR` is silenced by the global toast pipeline, so the upload and
  * config forms render these issues inline themselves.
  */
-export function validationIssues(error: unknown): NonNullable<ProblemDetails['errors']> {
+export function validationIssues(error: unknown): ValidationFieldIssue[] {
   if (!(error instanceof ApiError) || error.code !== 'VALIDATION_ERROR') return [];
   return error.problem.errors ?? [];
+}
+
+/**
+ * The `VALIDATION_ERROR` issues whose field has no message slot on screen (`placedFields`
+ * lists the fields that have one). A dialog renders these itself, so an issue on a field it
+ * has no input for is never swallowed. Empty for any other error.
+ */
+export function unplacedIssues(
+  error: unknown,
+  placedFields: readonly string[],
+): ValidationFieldIssue[] {
+  return validationIssues(error).filter((issue) => !placedFields.includes(issue.field));
 }
 
 /** Code of the `413` the API answers when an upload body exceeds its size limit. */

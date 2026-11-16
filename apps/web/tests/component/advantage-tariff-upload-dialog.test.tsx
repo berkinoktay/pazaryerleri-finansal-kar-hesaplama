@@ -13,10 +13,12 @@ vi.mock('@/i18n/navigation', () => ({
 import { AdvantageTariffUploadDialog } from '@/features/campaigns/components/advantage-tariff-upload-dialog';
 
 import trMessages from '../../messages/tr.json';
+import { validationApiError } from '../helpers/api-error';
 import { HttpResponse, http, server } from '../helpers/msw';
 import { render, screen, waitFor } from '../helpers/render';
 
 const UPLOAD = trMessages.productLabelsPage.upload;
+const SHARED = trMessages.campaignUpload;
 const SOURCE = UPLOAD.commissionSource;
 const ORG = '00000000-0000-0000-0000-0000000000aa';
 const STORE = '00000000-0000-0000-0000-0000000000bb';
@@ -59,7 +61,7 @@ function tariff(
   };
 }
 
-function renderDialog(onFile = vi.fn()) {
+function renderDialog(onFile = vi.fn(), submitError: Error | null = null) {
   return render(
     <AdvantageTariffUploadDialog
       open
@@ -67,6 +69,7 @@ function renderDialog(onFile = vi.fn()) {
       storeId={STORE}
       onFile={onFile}
       onOpenChange={vi.fn()}
+      submitError={submitError}
     />,
   );
 }
@@ -86,6 +89,20 @@ describe('<AdvantageTariffUploadDialog>', () => {
     // until the seller makes a conscious choice.
     expect(await screen.findByText(SOURCE.empty)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: UPLOAD.submit })).toBeDisabled();
+  });
+
+  it('shows the name refusal of a 422 that has no file issue', async () => {
+    renderDialog(vi.fn(), validationApiError([{ field: 'name', code: 'NAME_TOO_LONG' }]));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      SHARED.errors.nameTooLong.replace('{max}', '120'),
+    );
+  });
+
+  it('shows the field sentence for an issue on a field the dialog has no input for', async () => {
+    renderDialog(vi.fn(), validationApiError([{ field: 'other', code: 'SOME_FUTURE_FIELD_CODE' }]));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(SHARED.errors.field);
   });
 
   it('default-pins the nearest-upcoming week and submits it once a file is chosen', async () => {

@@ -30,8 +30,15 @@ import { cn } from '@/lib/utils';
 import type { CommissionTariffListItem } from '../api/list-tariffs.api';
 import { useCommissionTariffLabel } from '../hooks/use-commission-tariff-label';
 import { useCommissionTariffList } from '../hooks/use-commission-tariff-list';
+import { UploadUnplacedIssues } from './upload-unplaced-issues';
 
 const COMMISSION_TARIFFS_PATH = '/campaigns/product-commission-tariffs';
+
+/**
+ * The dropzone is this dialog's only message slot. The commission source picker has none yet,
+ * so a `commissionSourceTariffId` issue is listed under the dropzone with the other ones.
+ */
+const PLACED_FIELDS: readonly string[] = ['file'];
 
 /**
  * Sentinel Select value for the "Kategori komisyonu" choice — Radix Select
@@ -83,6 +90,8 @@ export interface AdvantageTariffUploadDialogProps {
   submitting?: boolean;
   /** Backend file-rejection code (from `extractFileErrorCode`), shown inline. */
   errorCode?: string | null;
+  /** The import mutation's error; its field issues on anything but the file are listed inline. */
+  submitError?: Error | null;
   /** Clears the last import error when the seller picks a different file. */
   onResetError?: () => void;
 }
@@ -133,9 +142,11 @@ export function AdvantageTariffUploadDialog({
   onFile,
   submitting = false,
   errorCode,
+  submitError,
   onResetError,
 }: AdvantageTariffUploadDialogProps): React.ReactElement {
   const t = useTranslations('productLabelsPage.upload');
+  const tUpload = useTranslations('campaignUpload');
   const tSource = useTranslations('productLabelsPage.upload.commissionSource');
   const tCommon = useTranslations('common');
   const fileErrorMessage = useFileErrorMessage();
@@ -200,12 +211,16 @@ export function AdvantageTariffUploadDialog({
                 prompt={t('prompt')}
                 hint={t('hint', { maxMb: WORKBOOK_UPLOAD_MAX_MB })}
                 ctaLabel={t('cta')}
+                errorWrongType={tUpload('fileErrors.wrongType')}
+                errorTooLarge={tUpload('fileErrors.tooLarge', { maxMb: WORKBOOK_UPLOAD_MAX_MB })}
+                removeLabel={tUpload('removeFile')}
                 error={fileErrorMessage(errorCode)}
                 onChange={(next) => {
                   setFile(next);
                   onResetError?.();
                 }}
               />
+              <UploadUnplacedIssues error={submitError} placedFields={PLACED_FIELDS} />
 
               <div className="border-border bg-surface-subtle gap-sm p-md flex flex-col rounded-lg border">
                 <p className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">

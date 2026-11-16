@@ -4,9 +4,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { PlusTariffUploadDialog } from '@/features/campaigns/components/plus-tariff-upload-dialog';
 
 import trMessages from '../../messages/tr.json';
+import { validationApiError } from '../helpers/api-error';
 import { render, screen } from '../helpers/render';
 
 const UPLOAD = trMessages.plusCommissionTariffsPage.upload;
+const SHARED = trMessages.campaignUpload;
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 function makeXlsxFile(name = 'tarife.xlsx'): File {
@@ -24,10 +26,12 @@ function fileInput(): HTMLInputElement {
 function Harness({
   onFile = vi.fn(),
   errorCode = null,
+  submitError = null,
   onResetError,
 }: {
   onFile?: (file: File) => void;
   errorCode?: string | null;
+  submitError?: Error | null;
   onResetError?: () => void;
 }): React.ReactElement {
   const [open, setOpen] = React.useState(true);
@@ -41,6 +45,7 @@ function Harness({
         onOpenChange={setOpen}
         onFile={onFile}
         errorCode={errorCode}
+        submitError={submitError}
         onResetError={onResetError}
       />
     </>
@@ -88,6 +93,26 @@ describe('<PlusTariffUploadDialog>', () => {
     expect(screen.getByText(UPLOAD.errors.wrongFormat)).toBeInTheDocument();
     await user.upload(fileInput(), makeXlsxFile('duzeltilmis.xlsx'));
     expect(onResetError).toHaveBeenCalled();
+  });
+
+  it('shows the name refusal of a 422 that has no file issue', () => {
+    render(
+      <Harness submitError={validationApiError([{ field: 'name', code: 'NAME_TOO_LONG' }])} />,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      SHARED.errors.nameTooLong.replace('{max}', '120'),
+    );
+  });
+
+  it('shows the field sentence for an issue on a field the dialog has no input for', () => {
+    render(
+      <Harness
+        submitError={validationApiError([{ field: 'other', code: 'SOME_FUTURE_FIELD_CODE' }])}
+      />,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent(SHARED.errors.field);
   });
 
   it('resets the picked file when the dialog is closed, so reopening starts clean', async () => {

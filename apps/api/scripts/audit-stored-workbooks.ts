@@ -114,16 +114,12 @@ import {
   type ReadGridOptions,
   type SpreadsheetFileErrorCode,
 } from '@pazarsync/spreadsheet';
-import { WORKBOOK_PAGES, type WorkbookPage } from '@pazarsync/utils';
+import { UPLOAD_NAME_MAX_LENGTH, WORKBOOK_PAGES, type WorkbookPage } from '@pazarsync/utils';
 
 // The value imports from src/: the limits module imports nothing and the name rule
 // imports only zod and the limits, so loading them cannot build the @pazarsync/db pool
 // before main() makes DATABASE_URL read-only.
-import {
-  MAX_LISTS_PER_STORE_PAGE,
-  STORE_UPLOAD_QUOTA_BYTES,
-  UPLOAD_NAME_MAX_LENGTH,
-} from '../src/config/workbook-limits';
+import { MAX_LISTS_PER_STORE_PAGE, STORE_UPLOAD_QUOTA_BYTES } from '../src/config/workbook-limits';
 import { NAME_INVALID_CHARACTERS, NameSchema } from '../src/workbooks/form';
 // Types only, for the same reason: each of these modules loads @pazarsync/db (directly,
 // or through @pazarsync/sync-core), so main() imports them only after DATABASE_URL is

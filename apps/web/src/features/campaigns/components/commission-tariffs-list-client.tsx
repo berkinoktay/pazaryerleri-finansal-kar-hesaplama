@@ -131,6 +131,7 @@ export function CommissionTariffsListClient({
         onFile={handleImport}
         submitting={importTariff.isPending}
         errorCode={extractFileErrorCode(importTariff.error)}
+        submitError={importTariff.error}
         onResetError={() => importTariff.reset()}
       />
     </>

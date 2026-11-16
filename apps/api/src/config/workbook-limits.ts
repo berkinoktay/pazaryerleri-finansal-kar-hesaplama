@@ -53,9 +53,6 @@ export const STORE_UPLOAD_QUOTA_BYTES = 200 * 1024 * 1024;
 /** Item rows one `createMany` call of an import writes. */
 export const IMPORT_INSERT_CHUNK_ROWS = 1000;
 
-/** Longest stored list name and stored upload file name, in code points. */
-export const UPLOAD_NAME_MAX_LENGTH = 120;
-
 /** Longest stored workbook format id (`source_format_id` column width). */
 export const SOURCE_FORMAT_ID_MAX_LENGTH = 64;
 

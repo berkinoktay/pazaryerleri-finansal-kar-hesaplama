@@ -129,6 +129,7 @@ export function FlashProductsListClient({
         onFile={handleImport}
         submitting={importList.isPending}
         errorCode={extractFileErrorCode(importList.error)}
+        submitError={importList.error}
         onResetError={() => importList.reset()}
       />
     </>

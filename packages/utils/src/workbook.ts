@@ -17,3 +17,12 @@ const BYTES_PER_MB = 1024 * 1024;
  * cannot drift apart.
  */
 export const WORKBOOK_UPLOAD_MAX_MB = WORKBOOK_UPLOAD_MAX_BYTES / BYTES_PER_MB;
+
+/**
+ * Longest stored list name and stored upload file name, in code points.
+ *
+ * One number for both sides: the API's name rule (`NameSchema`) and its stored-name
+ * truncation read it, and the web name inputs use it as their `maxLength` and in the
+ * "name too long" message.
+ */
+export const UPLOAD_NAME_MAX_LENGTH = 120;
