@@ -569,11 +569,11 @@ Area-chart `fillOpacity` is inherently mode-sensitive: a 0.15 alpha that reads a
 
 ### SSR safety — hydration-proof components
 
-The root `<html>` already carries `suppressHydrationWarning` because `next-themes` mutates `class` in a head script before React hydrates. That waiver is **only** for the `<html>` attribute — everywhere else, server and client must render byte-identical markup. Four failure modes we have already shipped and reverted:
+The root `<html>` already carries `suppressHydrationWarning` because the theme provider's pre-paint script (`THEME_INIT_SCRIPT` in `src/providers/theme-provider.tsx`, written into `<head>` through `useServerInsertedHTML`, never rendered as a `<script>` element in the React tree) sets `class` and `color-scheme` before React hydrates. That waiver is **only** for the `<html>` attribute — everywhere else, server and client must render byte-identical markup. Four failure modes we have already shipped and reverted:
 
-1. **Reading `theme` during render** (the "Sun vs. Moon" mismatch). `useTheme()` returns `undefined` on the server, the stored preference on the client. Selecting an icon by `theme === 'dark' ? Moon : Sun` bakes the wrong icon into SSR, the client re-renders the other, hydration fails.
+1. **Reading `theme` during render** (the "Sun vs. Moon" mismatch). `useTheme()` returns `undefined` on the server and in the hydration render, the stored preference right after. Selecting an icon by `theme === 'dark' ? Moon : Sun` bakes the fallback icon into the server HTML and swaps it after hydration, a visible flash for every dark-mode user.
 
-   **Fix — CSS-only toggle** (the shadcn pattern): render BOTH icons always; let the `dark:` variant hide/show one. `next-themes`' head script puts `class="dark"` on `<html>` before hydration, so CSS applies from the first paint.
+   **Fix — CSS-only toggle** (the shadcn pattern): render BOTH icons always; let the `dark:` variant hide/show one. The theme provider's head script puts `class="dark"` on `<html>` before hydration, so CSS applies from the first paint.
 
    ```tsx
    // ❌ Bad — reads theme to decide what to render

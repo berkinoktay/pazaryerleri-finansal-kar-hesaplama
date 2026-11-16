@@ -22,12 +22,10 @@ import { Switch } from '@/components/ui/switch';
 import { DOMAIN_ICONS } from '@/lib/domain-icons';
 import { cn } from '@/lib/utils';
 import { useIsMounted } from '@/lib/use-is-mounted';
-import { useTheme } from '@/providers/theme-provider';
-
-type ThemeValue = 'light' | 'dark' | 'system';
+import { type ThemePreference, useTheme } from '@/providers/theme-provider';
 
 interface ThemeOption {
-  value: ThemeValue;
+  value: ThemePreference;
   labelKey: 'themeCardLight' | 'themeCardDark' | 'themeCardSystem';
 }
 
@@ -97,7 +95,7 @@ function ThemePreviewSystem(): React.ReactElement {
   );
 }
 
-const THEME_PREVIEW: Record<ThemeValue, React.ReactElement> = {
+const THEME_PREVIEW: Record<ThemePreference, React.ReactElement> = {
   light: <ThemePreviewLight />,
   dark: <ThemePreviewDark />,
   system: <ThemePreviewSystem />,
@@ -108,11 +106,11 @@ const THEME_PREVIEW: Record<ThemeValue, React.ReactElement> = {
 // ──────────────────────────────────────────────────────────────
 
 interface ThemeCardProps {
-  value: ThemeValue;
+  value: ThemePreference;
   label: string;
   selectedLabel: string;
   isSelected: boolean;
-  onSelect: (value: ThemeValue) => void;
+  onSelect: (value: ThemePreference) => void;
 }
 
 function ThemeCard({
@@ -163,8 +161,8 @@ function ThemeCard({
 /**
  * Main column of the Tercihler page.
  *
- * "Gorünum" — live block: three visual theme cards wired to next-themes'
- * setTheme. SSR-safe: selected state is only computed after mount
+ * "Gorünum" — live block: three visual theme cards wired to the theme
+ * provider's setTheme. SSR-safe: selected state is only computed after mount
  * (useIsMounted gate) so server and first client render are byte-identical.
  *
  * "Bicimler" — draft block: number / date selects in a row.
@@ -180,9 +178,7 @@ export function PreferencesSettings(): React.ReactElement {
 
   // Derive the active theme value only after mount so SSR renders none-selected
   // and hydration stays byte-identical.
-  const activeTheme: ThemeValue | null = mounted
-    ? ((theme as ThemeValue | undefined) ?? 'system')
-    : null;
+  const activeTheme: ThemePreference | null = mounted ? (theme ?? 'system') : null;
 
   // Draft formats state — not persisted yet.
   const [numberFmt, setNumberFmt] = useState<string>('dot-comma');

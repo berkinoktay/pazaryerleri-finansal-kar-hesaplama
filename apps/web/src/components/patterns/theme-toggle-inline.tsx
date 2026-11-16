@@ -21,8 +21,8 @@ import { useTheme } from '@/providers/theme-provider';
  * SSR safety (apps/web/CLAUDE.md "SSR safety" #1):
  *   - `useTheme()` is NOT read during render to decide what to render.
  *   - Both Sun and Moon icons are always in the DOM, overlaid in a fixed
- *     box; the `dark:` Tailwind variant swaps their opacity. next-themes'
- *     head script writes `class="dark"` on `<html>` before hydration, so
+ *     box; the `dark:` Tailwind variant swaps their opacity. The theme provider's
+ *     pre-paint script writes `class="dark"` on `<html>` before hydration, so
  *     CSS applies from the first paint.
  *   - `aria-pressed` reads `resolvedTheme` only after mount (via
  *     `useIsMounted` gate); pre-mount it falls back to `false`. Hydration

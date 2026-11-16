@@ -16,7 +16,7 @@ import { useTheme } from '@/providers/theme-provider';
  *
  * The trigger does NOT read `theme` during render; it renders BOTH the sun
  * and moon icons simultaneously and lets CSS (`dark:` variant) toggle their
- * visibility. `next-themes` injects a `<script>` into `<head>` that reads
+ * visibility. The theme provider puts a script into `<head>` that reads
  * localStorage and sets `class="dark"` on `<html>` BEFORE React hydrates,
  * so the correct icon is visible from the very first paint and the
  * server-rendered markup matches the client exactly — no hydration mismatch,
