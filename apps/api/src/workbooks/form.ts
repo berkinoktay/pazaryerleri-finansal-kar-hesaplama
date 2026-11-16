@@ -31,10 +31,21 @@ export function stripControlAndFormat(text: string): string {
   return text.replace(CONTROL_OR_FORMAT_RE, '');
 }
 
-/** The first `max` code points of `text`: a surrogate pair is never split. */
+/**
+ * The first `max` code points of `text`: a surrogate pair is never split (a lone
+ * surrogate counts as one code point). It walks the text only up to the cut, so a
+ * multi-megabyte input costs no more than `max` steps.
+ */
 export function truncateCodePoints(text: string, max: number): string {
-  const codePoints = Array.from(text);
-  return codePoints.length <= max ? text : codePoints.slice(0, max).join('');
+  let end = 0;
+  let count = 0;
+  // A string iterates by code point: `char` is one UTF-16 unit or a whole pair.
+  for (const char of text) {
+    if (count >= max) return text.slice(0, end);
+    end += char.length;
+    count += 1;
+  }
+  return text;
 }
 
 /**

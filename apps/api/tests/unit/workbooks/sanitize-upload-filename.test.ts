@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { cleanDisplayName, NameSchema } from '@/workbooks/form';
+import { cleanDisplayName, NameSchema, truncateCodePoints } from '@/workbooks/form';
 import { contentDisposition, sanitizeUploadFilename } from '@/workbooks/sanitize-upload-filename';
 
 import { webClientFilename } from '../../helpers/web-client-filename';
@@ -96,6 +96,24 @@ describe('cleanDisplayName', () => {
 
   it('trims the end a cut leaves', () => {
     expect(cleanDisplayName('abc def', 4)).toBe('abc');
+  });
+});
+
+describe('truncateCodePoints', () => {
+  it('cuts a 1,000,000-character text to its first max code points', () => {
+    const text = 'a'.repeat(1_000_000);
+
+    expect(truncateCodePoints(text, 120)).toBe('a'.repeat(120));
+    expect(truncateCodePoints(text, 1_000_000)).toBe(text);
+  });
+
+  it('keeps an astral character whole when the cut falls inside its surrogate pair', () => {
+    // UTF-16 index 3 is between the two halves of the pair; code point 3 is the pair.
+    const text = `ab${ASTRAL}c`;
+
+    expect(truncateCodePoints(text, 3)).toBe(`ab${ASTRAL}`);
+    expect(truncateCodePoints(text, 2)).toBe('ab');
+    expect(isWellFormedText(truncateCodePoints(text, 3))).toBe(true);
   });
 });
 
