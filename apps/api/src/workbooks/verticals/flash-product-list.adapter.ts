@@ -219,6 +219,7 @@ export const flashProductListAdapter: WorkbookVerticalAdapter<
     matched: outcome.matchedDistinct,
     unmatched: outcome.distinctCount - outcome.matchedDistinct,
     skippedRows: outcome.skippedRows,
+    prefilledRows: outcome.prefilledRows,
   }),
   load: loadFlashProductList,
   notFoundResource: 'FlashProductList',

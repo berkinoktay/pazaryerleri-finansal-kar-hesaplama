@@ -70,6 +70,7 @@ interface ImportWire {
   matched: number;
   unmatched: number;
   skippedRows: number;
+  prefilledRows: number;
 }
 
 interface ProblemWire {
@@ -146,6 +147,10 @@ describe('POST .../discount-lists/import - happy path', () => {
     expect(imported.unmatched).toBe(TOTAL_ROWS - 1);
     expect(imported.skippedRows).toBe(0);
     expect(imported.name).not.toBe('');
+  });
+
+  it('answers prefilledRows 0: its one write column is seeded from the source', () => {
+    expect(imported.prefilledRows).toBe(0);
   });
 
   it('persists the list (with the raw file + config) and one item per row', async () => {

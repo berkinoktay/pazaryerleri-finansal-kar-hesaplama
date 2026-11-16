@@ -261,6 +261,7 @@ export const advantageTariffAdapter: WorkbookVerticalAdapter<
     matched: outcome.matchedRows,
     unmatched: outcome.rowCount - outcome.matchedRows,
     skippedRows: outcome.skippedRows,
+    prefilledRows: outcome.prefilledRows,
   }),
   load: loadAdvantageTariff,
   notFoundResource: 'AdvantageTariff',

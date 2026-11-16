@@ -11,6 +11,7 @@ import { useDeleteDiscountList } from '../hooks/use-delete-discount-list';
 import { useDiscountLists } from '../hooks/use-discount-lists';
 import { useExportDiscountList } from '../hooks/use-export-discount-list';
 import { useImportDiscountList } from '../hooks/use-import-discount-list';
+import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
 import { downloadBlob } from '../lib/download-blob';
 import { DiscountListsView } from './discount-lists-view';
 import { DiscountUploadDialog } from './discount-upload-dialog';
@@ -37,6 +38,7 @@ export function DiscountsListClient({
   const importList = useImportDiscountList(orgId ?? '', storeId ?? '');
   const deleteList = useDeleteDiscountList(orgId ?? '', storeId ?? '');
   const exportList = useExportDiscountList(orgId ?? '', storeId ?? '');
+  const warnPrefilled = usePrefilledWarning();
   const [uploadOpen, setUploadOpen] = React.useState(false);
 
   const items = React.useMemo(() => list.data ?? [], [list.data]);
@@ -55,12 +57,13 @@ export function DiscountsListClient({
         {
           onSuccess: (result) => {
             setUploadOpen(false);
+            warnPrefilled(result.prefilledRows);
             openDetail(result.listId);
           },
         },
       );
     },
-    [importList, openDetail],
+    [importList, openDetail, warnPrefilled],
   );
 
   const handleExport = React.useCallback(

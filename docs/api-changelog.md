@@ -776,6 +776,14 @@ section "Versioning" for details.
 
 ### Added
 
+- **The six workbook import responses carry `prefilledRows`**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products|advantage-tariffs|plus-commission-tariffs|commission-tariffs}/import`).
+  `prefilledRows` (integer, required) is the number of kept rows that already held a choice in
+  a column the export writes and the import does not read as a choice. Those values stay in the
+  exported file unless a choice is made for the row. The `ImportTariffResponse`,
+  `ImportPlusTariffResponse`, `ImportAdvantageTariffResponse`, `ImportFlashProductsResponse`,
+  `ImportDiscountListResponse` and `ImportMarketplaceCampaignResponse` component schemas gain
+  the property. Additive.
 - **`SyncLogResponse.syncType` and `SyncFreshness.syncType` gained `PRODUCTS_CHANGES`**
   (both sync-log list endpoints, `GET /v1/organizations/{orgId}/sync-logs` and
   `GET /v1/organizations/{orgId}/stores/{storeId}/sync-logs`, plus the single sync-log

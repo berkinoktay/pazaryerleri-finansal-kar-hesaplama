@@ -225,6 +225,7 @@ export const ImportAdvantageTariffResponseSchema = z
     matched: z.number().int(),
     unmatched: z.number().int(),
     skippedRows: z.number().int(),
+    prefilledRows: z.number().int(),
   })
   .openapi('ImportAdvantageTariffResponse');
 

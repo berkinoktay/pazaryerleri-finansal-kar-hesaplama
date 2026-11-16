@@ -576,7 +576,7 @@ describe('Plus commission tariff adapter: form, name, response and the week inde
         matchedRows: 5,
         matchedDistinct: 5,
         skippedRows: 1,
-        prefilledRows: 0,
+        prefilledRows: 4,
         meta: week,
       }),
     ).toEqual({
@@ -587,6 +587,7 @@ describe('Plus commission tariff adapter: form, name, response and the week inde
       matched: 5,
       unmatched: 28,
       skippedRows: 1,
+      prefilledRows: 4,
     });
   });
 

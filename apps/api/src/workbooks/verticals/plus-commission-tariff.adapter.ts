@@ -311,6 +311,7 @@ export const plusCommissionTariffAdapter: WorkbookVerticalAdapter<
     matched: outcome.matchedRows,
     unmatched: outcome.rowCount - outcome.matchedRows,
     skippedRows: outcome.skippedRows,
+    prefilledRows: outcome.prefilledRows,
   }),
   load: loadPlusCommissionTariff,
   notFoundResource: 'PlusCommissionTariff',

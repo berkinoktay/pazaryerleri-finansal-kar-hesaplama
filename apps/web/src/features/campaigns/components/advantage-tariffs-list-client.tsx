@@ -11,6 +11,7 @@ import { useAdvantageTariffList } from '../hooks/use-advantage-tariff-list';
 import { useDeleteAdvantageTariff } from '../hooks/use-delete-advantage-tariff';
 import { useExportAdvantageTariff } from '../hooks/use-export-advantage-tariff';
 import { useImportAdvantageTariff } from '../hooks/use-import-advantage-tariff';
+import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
 import { downloadBlob } from '../lib/download-blob';
 import { AdvantageTariffUploadDialog } from './advantage-tariff-upload-dialog';
 import { AdvantageTariffsListView } from './advantage-tariffs-list-view';
@@ -38,6 +39,7 @@ export function AdvantageTariffsListClient({
   const importTariff = useImportAdvantageTariff(orgId ?? '', storeId ?? '');
   const deleteTariff = useDeleteAdvantageTariff(orgId ?? '', storeId ?? '');
   const exportTariff = useExportAdvantageTariff(orgId ?? '', storeId ?? '');
+  const warnPrefilled = usePrefilledWarning();
   const [uploadOpen, setUploadOpen] = React.useState(false);
 
   const items = React.useMemo(() => list.data ?? [], [list.data]);
@@ -54,12 +56,13 @@ export function AdvantageTariffsListClient({
         {
           onSuccess: (result) => {
             setUploadOpen(false);
+            warnPrefilled(result.prefilledRows);
             openDetail(result.tariffId);
           },
         },
       );
     },
-    [importTariff, openDetail],
+    [importTariff, openDetail, warnPrefilled],
   );
 
   const handleExport = React.useCallback(

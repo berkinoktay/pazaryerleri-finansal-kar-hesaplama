@@ -11,6 +11,7 @@ import { useCommissionTariffList } from '../hooks/use-commission-tariff-list';
 import { useDeleteTariff } from '../hooks/use-delete-tariff';
 import { useExportTariff } from '../hooks/use-export-tariff';
 import { useImportTariff } from '../hooks/use-import-tariff';
+import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
 import { downloadBlob } from '../lib/download-blob';
 import { CommissionTariffsListView } from './commission-tariffs-list-view';
 import { CommissionTariffUploadDialog } from './commission-tariff-upload-dialog';
@@ -38,6 +39,7 @@ export function CommissionTariffsListClient({
   const importTariff = useImportTariff(orgId ?? '', storeId ?? '');
   const deleteTariff = useDeleteTariff(orgId ?? '', storeId ?? '');
   const exportTariff = useExportTariff(orgId ?? '', storeId ?? '');
+  const warnPrefilled = usePrefilledWarning();
   const [uploadOpen, setUploadOpen] = React.useState(false);
 
   const items = React.useMemo(() => list.data ?? [], [list.data]);
@@ -54,12 +56,13 @@ export function CommissionTariffsListClient({
         {
           onSuccess: (result) => {
             setUploadOpen(false);
+            warnPrefilled(result.prefilledRows);
             openDetail(result.tariffId);
           },
         },
       );
     },
-    [importTariff, openDetail],
+    [importTariff, openDetail, warnPrefilled],
   );
 
   const handleExport = React.useCallback(

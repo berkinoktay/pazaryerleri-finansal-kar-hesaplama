@@ -44,6 +44,7 @@ function importResponse() {
     matched: 66,
     unmatched: 2,
     skippedRows: 0,
+    prefilledRows: 0,
   };
 }
 

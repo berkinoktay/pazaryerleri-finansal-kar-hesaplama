@@ -12,12 +12,14 @@ import { readFileSync } from 'node:fs';
 
 import { z } from '@hono/zod-openapi';
 import { Decimal } from 'decimal.js';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import { cellText, columnIndex, readWorkbookGrid, resolveLayout } from '@pazarsync/spreadsheet';
 import { patchFixture } from '@pazarsync/spreadsheet/testing';
+import { syncLog } from '@pazarsync/sync-core';
+import { WORKBOOK_PAGES } from '@pazarsync/utils';
 
 import { createApp } from '@/app';
 import { trendyolCommissionTariffFormat } from '@/workbooks/formats/trendyol/commission-tariff.format';
@@ -42,6 +44,7 @@ interface ImportWire {
   matched: number;
   unmatched: number;
   skippedRows: number;
+  prefilledRows: number;
 }
 interface BandWire {
   key: string;
@@ -164,15 +167,34 @@ function importRequest(ctx: Ctx, file: Buffer = FIXTURE): Request {
 describe('POST .../commission-tariffs/import — real Trendyol fixture', () => {
   let ctx: Ctx;
   let imported: ImportWire;
+  // The `workbook.import.prefilled` log lines of the import request.
+  let prefilledLogs: Parameters<typeof syncLog.info>[];
 
   beforeAll(async () => {
     await ensureDbReachable();
     await truncateAll();
     ctx = await setupStoreWithMatch();
 
+    const info = vi.spyOn(syncLog, 'info');
     const res = await app.request(importRequest(ctx));
+    prefilledLogs = info.mock.calls.filter(([event]) => event === 'workbook.import.prefilled');
+    info.mockRestore();
     expect(res.status).toBe(201);
     imported = (await res.json()) as ImportWire;
+  });
+
+  it('answers prefilledRows, the count of filled-in rows the import logs', () => {
+    // The real file arrives with prefilled choice labels: one log line counts them.
+    expect(prefilledLogs).toEqual([
+      [
+        'workbook.import.prefilled',
+        { page: WORKBOOK_PAGES.COMMISSION_TARIFF, count: expect.any(Number) },
+      ],
+    ]);
+    const count = prefilledLogs[0]?.[1]?.['count'];
+    expect(count).toBeGreaterThan(0);
+    expect(Number.isInteger(imported.prefilledRows)).toBe(true);
+    expect(imported.prefilledRows).toBe(count);
   });
 
   it('imports every product row with one period and matches the catalog barcode', () => {

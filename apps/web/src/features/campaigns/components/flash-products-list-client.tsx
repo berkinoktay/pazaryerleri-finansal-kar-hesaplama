@@ -11,6 +11,7 @@ import { useFlashProductList } from '../hooks/use-flash-product-list';
 import { useDeleteFlashProducts } from '../hooks/use-delete-flash-products';
 import { useExportFlashProducts } from '../hooks/use-export-flash-products';
 import { useImportFlashProducts } from '../hooks/use-import-flash-products';
+import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
 import { downloadBlob } from '../lib/download-blob';
 import { FlashProductUploadDialog } from './flash-product-upload-dialog';
 import { FlashProductsListView } from './flash-products-list-view';
@@ -37,6 +38,7 @@ export function FlashProductsListClient({
   const importList = useImportFlashProducts(orgId ?? '', storeId ?? '');
   const deleteList = useDeleteFlashProducts(orgId ?? '', storeId ?? '');
   const exportList = useExportFlashProducts(orgId ?? '', storeId ?? '');
+  const warnPrefilled = usePrefilledWarning();
   const [uploadOpen, setUploadOpen] = React.useState(false);
 
   const items = React.useMemo(() => list.data ?? [], [list.data]);
@@ -53,12 +55,13 @@ export function FlashProductsListClient({
         {
           onSuccess: (result) => {
             setUploadOpen(false);
+            warnPrefilled(result.prefilledRows);
             openDetail(result.listId);
           },
         },
       );
     },
-    [importList, openDetail],
+    [importList, openDetail, warnPrefilled],
   );
 
   const handleExport = React.useCallback(

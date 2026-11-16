@@ -11,6 +11,7 @@ import { useDeleteMarketplaceCampaign } from '../hooks/use-delete-marketplace-ca
 import { useExportMarketplaceCampaign } from '../hooks/use-export-marketplace-campaign';
 import { useImportMarketplaceCampaign } from '../hooks/use-import-marketplace-campaign';
 import { useMarketplaceCampaigns } from '../hooks/use-marketplace-campaigns';
+import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
 import { downloadBlob } from '../lib/download-blob';
 import { MarketplaceCampaignUploadDialog } from './marketplace-campaign-upload-dialog';
 import { MarketplaceCampaignsListView } from './marketplace-campaigns-list-view';
@@ -45,6 +46,7 @@ export function MarketplaceCampaignsListClient({
     error: importError,
     reset: resetImport,
   } = useImportMarketplaceCampaign(orgId ?? '', storeId ?? '');
+  const warnPrefilled = usePrefilledWarning();
   const [uploadOpen, setUploadOpen] = React.useState(false);
 
   const items = React.useMemo(() => list.data ?? [], [list.data]);
@@ -63,12 +65,13 @@ export function MarketplaceCampaignsListClient({
         {
           onSuccess: (result) => {
             setUploadOpen(false);
+            warnPrefilled(result.prefilledRows);
             openDetail(result.campaignId);
           },
         },
       );
     },
-    [importCampaign, openDetail],
+    [importCampaign, openDetail, warnPrefilled],
   );
 
   const handleExport = React.useCallback(

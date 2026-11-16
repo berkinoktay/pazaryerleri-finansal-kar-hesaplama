@@ -37,6 +37,7 @@ function importResponse() {
     matched: 28,
     unmatched: 2,
     skippedRows: 0,
+    prefilledRows: 0,
   };
 }
 

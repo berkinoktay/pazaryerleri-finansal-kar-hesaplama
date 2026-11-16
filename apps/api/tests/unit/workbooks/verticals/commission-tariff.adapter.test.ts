@@ -591,7 +591,7 @@ describe('commission tariff adapter: form, name, response and the week index', (
         matchedRows: 1,
         matchedDistinct: 1,
         skippedRows: 0,
-        prefilledRows: 0,
+        prefilledRows: 7,
         meta: week,
       }),
     ).toEqual({
@@ -602,6 +602,7 @@ describe('commission tariff adapter: form, name, response and the week index', (
       matched: 1,
       unmatched: 54,
       skippedRows: 0,
+      prefilledRows: 7,
     });
   });
 

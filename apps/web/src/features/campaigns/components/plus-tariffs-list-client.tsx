@@ -11,6 +11,7 @@ import { useDeletePlusTariff } from '../hooks/use-delete-plus-tariff';
 import { useExportPlusTariff } from '../hooks/use-export-plus-tariff';
 import { useImportPlusTariff } from '../hooks/use-import-plus-tariff';
 import { usePlusTariffList } from '../hooks/use-plus-tariff-list';
+import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
 import { downloadBlob } from '../lib/download-blob';
 import { PlusTariffsListView } from './plus-tariffs-list-view';
 import { PlusTariffUploadDialog } from './plus-tariff-upload-dialog';
@@ -38,6 +39,7 @@ export function PlusTariffsListClient({
   const importTariff = useImportPlusTariff(orgId ?? '', storeId ?? '');
   const deleteTariff = useDeletePlusTariff(orgId ?? '', storeId ?? '');
   const exportTariff = useExportPlusTariff(orgId ?? '', storeId ?? '');
+  const warnPrefilled = usePrefilledWarning();
   const [uploadOpen, setUploadOpen] = React.useState(false);
 
   const items = React.useMemo(() => list.data ?? [], [list.data]);
@@ -54,12 +56,13 @@ export function PlusTariffsListClient({
         {
           onSuccess: (result) => {
             setUploadOpen(false);
+            warnPrefilled(result.prefilledRows);
             openDetail(result.tariffId);
           },
         },
       );
     },
-    [importTariff, openDetail],
+    [importTariff, openDetail, warnPrefilled],
   );
 
   const handleExport = React.useCallback(
