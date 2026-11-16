@@ -223,7 +223,8 @@
       "ROW_MISMATCH": "The rows of the stored file no longer match the products of this list. Upload the file again.",
       "ROW_ANCHOR_MISMATCH": "A row of the stored file no longer holds the product it held. Upload the file again.",
       "ROW_NOT_FOUND": "A row that must be written is missing from the stored file. Upload the file again.",
-      "EXPORT_FILENAME_COLLISION": "Two periods with the same number of days have different choices, so two files of the export would share one name. Make those choices the same and export again."
+      "EXPORT_FILENAME_COLLISION": "Two periods with the same number of days have different choices, so two files of the export would share one name. Make those choices the same and export again.",
+      "SELECTION_PRICE_UNKNOWN": "One of the price ranges you chose has no known price, so the file was not created. Open the tariff, choose another range or enter a custom price for that product, and export again."
     },
     "unmatchedBadge": "Awaiting match",
     "vendorMissingBadge": "Not in Trendyol catalog",
@@ -812,6 +813,7 @@
       "tooLarge": "The file exceeds the {maxMb} MB size limit."
     },
     "prefilledWarning": "{count, plural, one {# row of the file already had a choice filled in} other {# rows of the file already had a choice filled in}}. They were not taken as your choices; they stay in the file as they are unless you make a choice for those products.",
+    "unknownCurrentPriceWarning": "{count, plural, one {The price of # product} other {The prices of # products}} could not be read from the file. Their current profit is not shown; the price range profits still are.",
     "errors": {
       "notReadable": "The file could not be read. Upload the .xlsx file you downloaded from the marketplace panel without changing its structure.",
       "empty": "No product row was found in the file.",
@@ -839,6 +841,7 @@
     }
   },
   "commissionTariffsPage": {
+    "selectionRefused": "Your choices could not be saved because one of them is no longer valid for its product. Reload the page and choose again.",
     "search": "Search product, model or barcode",
     "actions": {
       "upload": "Upload Excel",
@@ -943,6 +946,10 @@
       "applyBest": "Apply to all"
     },
     "table": {
+      "priceUnknown": "Unknown",
+      "priceUnknownHint": "The current price (GÜNCEL TSF) and the commission base price in the Excel file could not be read, so the current profit and the difference from it are not calculated. You can still choose a price range.",
+      "bandPriceUnknownHint": "This range has no price limit in the file and the product's current price is unknown, so it has no price and cannot be selected.",
+      "bandNotSelectable": "Cannot be selected",
       "product": "Product Details",
       "current": "Current price",
       "currentCommission": "Current commission",

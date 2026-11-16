@@ -11,15 +11,18 @@
 //
 // Scoped by organizationId + storeId + tariff (via the item's period). A cross-tenant or
 // foreign item id is indistinguishable from a missing one (404). A pathological engine
-// input degrades to a logged not-calculable result rather than a 500 (decision 9).
+// input degrades to a logged not-calculable result rather than a 500 (decision 9). The
+// current scenario of an item with no known baseline price (neither a commission-base
+// price nor a current price) has nothing to price: it answers 422 on `scenario`
+// (CURRENT_PRICE_UNKNOWN) instead of pricing a made-up 0.
 
 import { Decimal } from 'decimal.js';
 
-import { prisma } from '@pazarsync/db';
+import { Prisma, prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 import { parseStoredTariffBands } from '@pazarsync/profit';
 
-import { NotFoundError } from '../lib/errors';
+import { NotFoundError, ValidationError } from '../lib/errors';
 import {
   computeItemEstimate,
   type ComputedEstimate,
@@ -41,10 +44,25 @@ export type EstimateItemPriceInput =
   | { readonly mode: 'current' };
 
 /**
+ * The current scenario's price: the item's commission-base price (the customer-seen
+ * price commission is charged on), else its current sale price, as the detail row's
+ * baseline. Null when neither is known (the file's cells were blank, unreadable or 0).
+ */
+export function currentBaselinePrice(item: {
+  readonly commissionBasePrice: Prisma.Decimal | null;
+  readonly currentPrice: Prisma.Decimal | null;
+}): Decimal | null {
+  const price = item.commissionBasePrice ?? item.currentPrice;
+  return price === null ? null : new Decimal(price.toString());
+}
+
+/**
  * Computes the full profit breakdown for one tariff item under `input`. Throws
  * `NotFoundError` when the item does not belong to this tariff/store (non
  * -disclosure). When the item is unmatched or uncostable the result carries
- * `calculable: false` + a `reason` and a null breakdown — never an error.
+ * `calculable: false` + a `reason` and a null breakdown — never an error. Throws
+ * `ValidationError` (`scenario`, CURRENT_PRICE_UNKNOWN) for the current scenario of an
+ * item whose baseline price is unknown (`currentBaselinePrice` is null).
  */
 export async function estimateItemPrice(
   orgId: string,
@@ -79,11 +97,13 @@ export async function estimateItemPrice(
   // Resolve the price + commission source per mode. The 'current' scenario mirrors
   // the detail row's baseline EXACTLY: the commission-base price (customer-seen
   // price, or the sale price when the column predates the import) at the item's
-  // CURRENT commission — so the breakdown equals `currentNetProfit` byte-for-byte.
-  const price =
-    input.mode === 'current'
-      ? new Decimal((item.commissionBasePrice ?? item.currentPrice).toString())
-      : input.price;
+  // CURRENT commission — so the breakdown equals `currentNetProfit` byte-for-byte. With
+  // no baseline price the detail row has no current profit either, so there is nothing
+  // to break down: refuse before loading the scenario bases.
+  const price = input.mode === 'current' ? currentBaselinePrice(item) : input.price;
+  if (price === null) {
+    throw new ValidationError([{ field: 'scenario', code: 'CURRENT_PRICE_UNKNOWN' }]);
+  }
   const commission: EstimateCommission =
     input.mode === 'current'
       ? { kind: 'override', commissionPct: new Decimal(item.currentCommissionPct.toString()) }

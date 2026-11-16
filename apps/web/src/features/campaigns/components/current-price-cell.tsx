@@ -57,6 +57,7 @@ export function CurrentPriceCell({
   return (
     <TariffCurrentCell
       price={price}
+      unknownPriceLabel={t('table.priceUnknown')}
       commissionPct={row.currentCommissionPct}
       commissionLabel={t('table.currentCommission')}
       calculatedLabel={t('table.calculatedProfit')}

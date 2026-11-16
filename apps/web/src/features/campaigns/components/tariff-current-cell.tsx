@@ -7,13 +7,21 @@ import { formatCurrency } from '@pazarsync/utils';
 
 import { ProfitBadge } from '@/components/patterns/profit-badge';
 import { Badge } from '@/components/ui/badge';
-import { formatPercentDisplay } from '@/lib/format-percent';
+import { EM_DASH, formatPercentDisplay } from '@/lib/format-percent';
 import { type MarginScale } from '@/lib/margin-coloring';
 import { cn } from '@/lib/utils';
 
 export interface TariffCurrentCellProps {
-  /** The hero price — the amount the buyer currently sees. Printed via `formatCurrency`. */
-  price: string;
+  /**
+   * The hero price — the amount the buyer currently sees. Printed via `formatCurrency`.
+   * `null` means the price is unknown: the hero shows {@link unknownPriceLabel} (and
+   * {@link unknownPriceHint}) instead, never a made-up amount.
+   */
+  price: string | null;
+  /** What the hero shows when `price` is `null`; defaults to an em-dash. The caller owns the wording. */
+  unknownPriceLabel?: string;
+  /** Optional explanation rendered after {@link unknownPriceLabel} when `price` is `null` (e.g. an `InfoHint`). */
+  unknownPriceHint?: React.ReactNode;
   /** The current commission %; `null` drops the commission line entirely. */
   commissionPct: string | null;
   /** Label before the commission % ("komisyon" / "Güncel komisyon") — the caller owns the wording. */
@@ -71,6 +79,8 @@ const MIN_WIDTH_CLASS: Record<NonNullable<TariffCurrentCellProps['minWidth']>, s
  */
 export function TariffCurrentCell({
   price,
+  unknownPriceLabel,
+  unknownPriceHint,
   commissionPct,
   commissionLabel,
   calculatedLabel,
@@ -103,7 +113,17 @@ export function TariffCurrentCell({
             {bestBadge.label}
           </Badge>
         ) : null}
-        <span className="text-base font-bold tabular-nums">{formatCurrency(price)}</span>
+        {price !== null ? (
+          <span className="text-base font-bold tabular-nums">{formatCurrency(price)}</span>
+        ) : (
+          // Unknown price: a muted label (plus the caller's hint), never a made-up amount.
+          <span className="gap-2xs inline-flex items-center">
+            <span className="text-muted-foreground text-base font-semibold">
+              {unknownPriceLabel ?? EM_DASH}
+            </span>
+            {unknownPriceHint}
+          </span>
+        )}
         {commissionPct !== null ? (
           <span className="text-2xs text-muted-foreground tabular-nums">
             {commissionLabel} {formatPercentDisplay(commissionPct)}

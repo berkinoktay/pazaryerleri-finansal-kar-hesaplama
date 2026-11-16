@@ -7,7 +7,10 @@
 // before the import transaction and again inside it); the import queues no profit
 // recompute, since an order's commission never reads a tariff's bands. The export
 // writes each chosen product's price and the window's tariff selection into every row
-// that carries its barcode, one file per window.
+// that carries its barcode, one file per window. A chosen product whose price is not
+// known (no custom price, and its band has no limit or is not stored while its current
+// price is unknown) refuses the whole export with SELECTION_PRICE_UNKNOWN; the export
+// never writes a price it does not know.
 
 import { Decimal } from 'decimal.js';
 
@@ -15,7 +18,7 @@ import { prisma, type Prisma } from '@pazarsync/db';
 import { bandPrice, parseStoredTariffBands } from '@pazarsync/profit';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
-import { NotFoundError } from '../../lib/errors';
+import { NotFoundError, WorkbookConflictError } from '../../lib/errors';
 import { isUniqueViolationOn } from '../../lib/map-transaction-error';
 import {
   ImportTariffFormSchema,
@@ -59,7 +62,8 @@ export interface CommissionTariffExportItem {
   readonly barcode: string;
   readonly selectedBand: string | null;
   readonly customPrice: Prisma.Decimal | null;
-  readonly currentPrice: Prisma.Decimal;
+  /** Null when the file's current price cell was blank, unreadable or 0. */
+  readonly currentPrice: Prisma.Decimal | null;
   readonly bands: Prisma.JsonValue;
 }
 
@@ -88,12 +92,17 @@ const COMMISSION_TARIFF_HTTP: WorkbookHttpSpec = {
     'whole-week "7 Günlük Fiyat" file for products priced the same in both sub-periods, plus ' +
     '"3 Günlük Fiyat" / "4 Günlük Fiyat" files for period-specific prices), only the non-empty ' +
     'ones, bundled into a single .zip. Marks the tariff exported. Returns 409 if the tariff has ' +
-    'no stored source file.',
+    'no stored source file, and 409 SELECTION_PRICE_UNKNOWN when a selected product without a ' +
+    'custom price has no known price to write (its band has no limit, or the stored bands do ' +
+    'not hold it, while its current price is unknown); then no file is built and the tariff is ' +
+    'not marked exported.',
   exportOk:
     'The patched .xlsx (single file), or a .zip of both window files when a product is priced ' +
     'differently across sub-periods, ready to re-upload to Trendyol',
   export404: 'Tariff or store not found in this organization',
-  export409: 'Tariff has no stored source file to export',
+  export409:
+    'Tariff has no stored source file to export, or a selected product has no known price ' +
+    'to export (SELECTION_PRICE_UNKNOWN)',
   exportMimes: [XLSX_MIME, ZIP_MIME],
 };
 
@@ -102,18 +111,24 @@ const COMMISSION_TARIFF_HTTP: WorkbookHttpSpec = {
  * carries no price, whatever its custom price. A selected item writes its custom price,
  * else the price of its selected stored band (`bandPrice`: the band's upper limit, else
  * its lower limit, else the current price), else, when the stored bands do not hold the
- * selected key, its current price; always with two decimal places.
+ * selected key, its current price; always with two decimal places. A selected item
+ * without a custom price whose price is unknown (a band with neither limit, or a key the
+ * stored bands do not hold, while the current price is unknown) never gets a made-up
+ * price: it throws WorkbookConflictError SELECTION_PRICE_UNKNOWN (409).
  */
 export function resolveCommissionExportPrice(
   item: Pick<CommissionTariffExportItem, 'selectedBand' | 'customPrice' | 'currentPrice' | 'bands'>,
 ): string | null {
   if (item.selectedBand === null) return null;
   if (item.customPrice !== null) return item.customPrice.toFixed(NEW_TSF_SCALE);
+  const currentPrice =
+    item.currentPrice === null ? null : new Decimal(item.currentPrice.toString());
   const band = parseStoredTariffBands(item.bands).find(
     (stored) => stored.key === item.selectedBand,
   );
-  if (band === undefined) return item.currentPrice.toFixed(NEW_TSF_SCALE);
-  return bandPrice(band, new Decimal(item.currentPrice.toString())).toFixed(NEW_TSF_SCALE);
+  const price = band === undefined ? currentPrice : bandPrice(band, currentPrice);
+  if (price === null) throw new WorkbookConflictError('SELECTION_PRICE_UNKNOWN');
+  return price.toFixed(NEW_TSF_SCALE);
 }
 
 /**

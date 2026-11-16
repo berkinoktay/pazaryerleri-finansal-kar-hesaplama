@@ -17,14 +17,18 @@ export type BandKey = 'band1' | 'band2' | 'band3' | 'band4';
  * A price band with its backend-computed profit. Identical in shape to the API's
  * `TariffBandResult` — aliased so the components have a domain name and one place
  * to evolve if the wire ever diverges. `netProfit`/`marginPct` are null when the
- * row is not calculable.
+ * row is not calculable. `price` is null for a band with neither limit when the
+ * row's current price is unknown: such a band has no profit and cannot be selected,
+ * so every consumer must null-guard it.
  */
 export type PriceBand = TariffBandResult;
 
 /**
  * A tariff product row. Identical to the API's `TariffDetailItem`: it already
  * carries `calculable` / `reason`, the server-authoritative `selectedBand` +
- * `customPrice`, `bestBandKey`, and a variable-length `bands` array.
+ * `customPrice`, `bestBandKey`, and a variable-length `bands` array. `currentPrice`
+ * is null when the file's current price could not be read, so every consumer must
+ * null-guard it.
  */
 export type CommissionTariffRow = TariffDetailItem;
 

@@ -40,6 +40,10 @@ function useBandLabel(band: PriceBand): { priceText: string; qualifier: string }
   if (band.lowerLimit !== null) {
     return { priceText: formatCurrency(band.lowerLimit), qualifier: t('aboveQualifier') };
   }
+  // Neither limit: the band's price is the current price, null when that is unknown.
+  if (band.price === null) {
+    return { priceText: t('priceUnknown'), qualifier: '' };
+  }
   return { priceText: formatCurrency(band.price), qualifier: '' };
 }
 
@@ -77,6 +81,8 @@ export function PriceBandCell({
 
   function openBreakdown(): void {
     setBreakdownOpen(true);
+    // A band with no price has nothing to estimate; the dialog opens with no result.
+    if (band.price === null) return;
     estimate.mutate({ itemId: row.id, body: { price: band.price, bandKey: asBandKey(band.key) } });
   }
 

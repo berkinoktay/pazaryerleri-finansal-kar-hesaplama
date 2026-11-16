@@ -24,7 +24,7 @@ import {
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { NotFoundError } from '@/lib/errors';
+import { NotFoundError, WorkbookConflictError, type WorkbookConflictReason } from '@/lib/errors';
 import type { ExportGroup, WriteContext } from '@/workbooks/adapter';
 import { planExport } from '@/workbooks/export-plan';
 import {
@@ -88,15 +88,26 @@ function item(
   selectedBand: string | null,
   customPrice: string | null,
   bands: Prisma.JsonValue = BAND2,
-  currentPrice = '285',
+  currentPrice: string | null = '285',
 ): CommissionTariffExportItem {
   return {
     barcode,
     selectedBand,
     customPrice: customPrice === null ? null : new Prisma.Decimal(customPrice),
-    currentPrice: new Prisma.Decimal(currentPrice),
+    currentPrice: currentPrice === null ? null : new Prisma.Decimal(currentPrice),
     bands,
   };
+}
+
+/** The reason of the WorkbookConflictError `run` throws; null when it returns. */
+function conflictReason(run: () => unknown): WorkbookConflictReason | null {
+  try {
+    run();
+  } catch (err) {
+    if (err instanceof WorkbookConflictError) return err.reason;
+    throw err;
+  }
+  return null;
 }
 
 afterEach(() => {
@@ -183,6 +194,44 @@ describe('commission tariff adapter: the price an item carries (pick)', () => {
     expect(resolveCommissionExportPrice(item('BC-1', 'band1', null, bands, '299.5'))).toBe(
       '299.50',
     );
+  });
+
+  it('refuses a selected band with neither limit when the current price is unknown', () => {
+    const bands: Prisma.JsonValue = [{ key: 'band1', commissionPct: '19' }];
+    const unknown = item('BC-1', 'band1', null, bands, null);
+
+    expect(conflictReason(() => resolveCommissionExportPrice(unknown))).toBe(
+      'SELECTION_PRICE_UNKNOWN',
+    );
+    expect(conflictReason(() => adapter.pick(unknown))).toBe('SELECTION_PRICE_UNKNOWN');
+  });
+
+  it('refuses a selected band the stored bands do not hold when the current price is unknown', () => {
+    expect(
+      conflictReason(() => resolveCommissionExportPrice(item('BC-1', 'band3', null, BAND2, null))),
+    ).toBe('SELECTION_PRICE_UNKNOWN');
+  });
+
+  it('writes the custom price even when the current price is unknown', () => {
+    const bands: Prisma.JsonValue = [{ key: 'band1', commissionPct: '19' }];
+
+    expect(resolveCommissionExportPrice(item('BC-1', 'band1', '249.9', bands, null))).toBe(
+      '249.90',
+    );
+    expect(resolveCommissionExportPrice(item('BC-1', 'band3', '249.9', BAND2, null))).toBe(
+      '249.90',
+    );
+  });
+
+  it('is null for an unselected item whose current price is unknown', () => {
+    expect(resolveCommissionExportPrice(item('BC-1', null, null, BAND2, null))).toBeNull();
+    expect(resolveCommissionExportPrice(item('BC-1', null, '249.9', BAND2, null))).toBeNull();
+  });
+
+  it("writes a limited band's price when the current price is unknown", () => {
+    // band2 has an upper limit: its price; band1 has only a lower limit: that one.
+    expect(resolveCommissionExportPrice(item('BC-1', 'band2', null, BAND2, null))).toBe('777.09');
+    expect(resolveCommissionExportPrice(item('BC-1', 'band1', null, BAND2, null))).toBe('777.10');
   });
 });
 

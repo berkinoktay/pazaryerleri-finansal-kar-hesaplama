@@ -33,4 +33,17 @@ describe('bandPrice', () => {
   it('falls back to the current price only for a band with neither limit', () => {
     expect(bandPrice(band({ key: 'band1' }), new Decimal('285')).toFixed(2)).toBe('285.00');
   });
+
+  it('is null for a band with neither limit when the current price is unknown', () => {
+    expect(bandPrice(band({ key: 'band1' }), null)).toBeNull();
+  });
+
+  it('ignores an unknown current price for a band with a limit', () => {
+    // Upper-limit band: the upper limit is the price, the unknown current price is unused.
+    expect(
+      bandPrice(band({ key: 'band2', lowerLimit: '400', upperLimit: '450' }), null)?.toString(),
+    ).toBe('450');
+    // Lower-only band (open-topped band 1): the lower limit is the price.
+    expect(bandPrice(band({ key: 'band1', lowerLimit: '450' }), null)?.toString()).toBe('450');
+  });
 });

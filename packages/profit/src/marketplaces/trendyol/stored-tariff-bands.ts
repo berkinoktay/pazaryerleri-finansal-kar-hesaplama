@@ -61,8 +61,14 @@ export function parseStoredTariffBands(value: Prisma.JsonValue): StoredTariffBan
  * pins the price-update field to exactly this boundary regardless of the current price, and
  * the band's shown profit is computed at it — so selection, profit, and export all use one
  * number. currentPrice is only a defensive fallback for a band with neither limit.
+ *
+ * The current price may be unknown (null). A band with a limit still has its price;
+ * null means "neither limit and the current price is unknown" -- the band has no price.
+ * A caller holding a known current price gets a plain Decimal back (first overload).
  */
-export function bandPrice(band: StoredTariffBand, currentPrice: Decimal): Decimal {
+export function bandPrice(band: StoredTariffBand, currentPrice: Decimal): Decimal;
+export function bandPrice(band: StoredTariffBand, currentPrice: Decimal | null): Decimal | null;
+export function bandPrice(band: StoredTariffBand, currentPrice: Decimal | null): Decimal | null {
   if (band.upperLimit !== null) return new Decimal(band.upperLimit);
   if (band.lowerLimit !== null) return new Decimal(band.lowerLimit);
   return currentPrice;

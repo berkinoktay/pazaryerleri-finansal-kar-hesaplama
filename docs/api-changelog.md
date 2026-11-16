@@ -26,6 +26,29 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Commission tariff detail: the current price and a band price can be null**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}`).
+  `TariffDetailItem.currentPrice` is null when the file's current price (GÜNCEL TSF) was blank,
+  unreadable or 0. `TariffBandResult.price` is null for a band with neither limit when the
+  current price is unknown; such a band has no profit and cannot be selected. `currentNetProfit`
+  is null when neither the commission base price nor the current price is known, and
+  `calculable: false` with `reason: null` also covers a row with no known price. Breaking for a
+  client that assumed both fields are strings; the web client ships the matching change in the
+  same PR.
+- **Commission tariff export: new 409 code `SELECTION_PRICE_UNKNOWN`**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/export`). When a
+  selected product without a custom price has no known price to write (its selected band has
+  neither limit, or the stored bands do not hold the selected band, while the product's current
+  price is unknown), the export answers `409` with code `SELECTION_PRICE_UNKNOWN` instead of
+  writing a made-up price. No file is built and the tariff is not marked exported. A selected
+  product with a custom price, or with a band that has a limit, still exports as before. The web
+  client localizes the new code under `common.errors.SELECTION_PRICE_UNKNOWN` in the same PR.
+- **Commission tariff estimate: new 422 field code `CURRENT_PRICE_UNKNOWN`**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/items/{itemId}/estimate`).
+  `scenario: "current"` for an item with neither a commission base price nor a current price
+  answers `422 VALIDATION_ERROR` with `errors: [{ field: "scenario", code: "CURRENT_PRICE_UNKNOWN" }]`
+  instead of pricing a made-up 0; the detail row of such an item has no current profit either.
+  The response schema is unchanged, and the band and custom-price modes are unaffected.
 - **Commission and Plus commission tariff weeks across New Year**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs}/import`).
   The period labels of a Trendyol tariff file carry no year. Each label used to take the UTC year

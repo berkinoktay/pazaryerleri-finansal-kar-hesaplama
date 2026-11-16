@@ -109,6 +109,11 @@ export async function listTariffs(
 
 // ─── Detail ──────────────────────────────────────────────────────────────────
 
+/** A stored nullable money column as a `decimal.js` value, null kept as null. */
+function decimalOrNull(value: Prisma.Decimal | null): Decimal | null {
+  return value === null ? null : new Decimal(value.toString());
+}
+
 /**
  * Returns one tariff with per-band profit computed on read. Throws
  * `NotFoundError` when the tariff does not belong to this store (non-disclosure).
@@ -116,7 +121,9 @@ export async function listTariffs(
  * then each item's bands are computed by the scenario engine with the band's
  * commission as an override. A slim org + store scoped variant query supplies the
  * display image only. Per decision 9 a store-wide load failure or a per-item engine
- * throw leaves that profit empty (logged once) rather than failing the request.
+ * throw leaves that profit empty (logged once) rather than failing the request. An item
+ * whose current price is unknown (null) is served with a null `currentPrice`; how its
+ * profits are computed is `computeItemBands`'s rule for an unknown baseline.
  */
 export async function getTariffDetail(
   orgId: string,
@@ -224,11 +231,9 @@ export async function getTariffDetail(
       const base = screenScenarioBaseFor(bases, item.productVariantId);
       const bandParams = {
         bands: parseStoredTariffBands(item.bands),
-        currentPrice: new Decimal(item.currentPrice.toString()),
-        commissionBasePrice:
-          item.commissionBasePrice !== null
-            ? new Decimal(item.commissionBasePrice.toString())
-            : null,
+        // Null when the file's current price cell was blank, unreadable or 0.
+        currentPrice: decimalOrNull(item.currentPrice),
+        commissionBasePrice: decimalOrNull(item.commissionBasePrice),
         currentCommissionPct: new Decimal(item.currentCommissionPct.toString()),
       };
       let computed: ComputedItemBands;
@@ -248,7 +253,7 @@ export async function getTariffDetail(
           item.productVariantId !== null ? (imageMap.get(item.productVariantId) ?? null) : null,
         category: item.category,
         brand: item.brand,
-        currentPrice: item.currentPrice.toFixed(2),
+        currentPrice: bandParams.currentPrice === null ? null : bandParams.currentPrice.toFixed(2),
         commissionBasePrice:
           item.commissionBasePrice !== null ? item.commissionBasePrice.toFixed(2) : null,
         currentCommissionPct: item.currentCommissionPct.toFixed(4),
