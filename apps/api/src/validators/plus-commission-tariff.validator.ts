@@ -11,6 +11,7 @@
 
 import { z } from '@hono/zod-openapi';
 
+import { NameSchema } from '../workbooks/form';
 import { QuoteBreakdownSchema } from './product-pricing.validator';
 
 // ─── Shared enums ───────────────────────────────────────────────────────────
@@ -165,7 +166,7 @@ export const ImportPlusTariffFormSchema = z.object({
   file: z
     .instanceof(File)
     .openapi({ type: 'string', format: 'binary', description: 'Trendyol Plus komisyon .xlsx' }),
-  name: z.string().optional().openapi({ description: 'İsteğe bağlı görünen ad; yoksa dosya adı.' }),
+  name: NameSchema.optional().openapi({ description: 'İsteğe bağlı görünen ad; yoksa dosya adı.' }),
 });
 
 export const ImportPlusTariffResponseSchema = z

@@ -27,6 +27,8 @@ import {
   UnsupportedMediaTypeError,
   ValidationError,
   type ValidationIssue,
+  WORKBOOK_CONFLICT_DETAILS,
+  WorkbookConflictError,
 } from './errors';
 
 /**
@@ -194,6 +196,21 @@ function classify(err: unknown): ProblemDetailsResult {
         status: 404,
         code: 'NOT_FOUND',
         detail: err.message,
+      },
+    };
+  }
+  // A workbook conflict is a ConflictError subclass: checked first so it keeps its
+  // reason. The detail comes from the fixed table, never from the error message.
+  if (err instanceof WorkbookConflictError) {
+    return {
+      status: 409,
+      body: {
+        type: `${TYPE_BASE}/conflict`,
+        title: 'Conflict',
+        status: 409,
+        code: 'CONFLICT',
+        detail: WORKBOOK_CONFLICT_DETAILS[err.reason],
+        meta: { reason: err.reason },
       },
     };
   }

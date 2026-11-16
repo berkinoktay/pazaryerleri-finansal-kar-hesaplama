@@ -14,11 +14,12 @@
 // (`meta.cause` included): only allowlisted engine reasons and reader rule keys reach
 // the output.
 //
-// A file the legacy selector reads while the strict selector refuses it as
-// CORRUPT_FILE was read through the legacy fallback to the first sheet: its named
-// sheet cannot be read. Per table such files are listed again as "legacy passed,
-// named sheet unreadable", grouped by their strict refusal key. A strict
-// SHEET_NOT_FOUND alone is reported in the strict selector's tally only.
+// A file the legacy selector reads while the strict selector refuses it, with any code
+// (a SHEET_NOT_FOUND or a CORRUPT_FILE: the legacy read fell back to the first sheet),
+// is a list whose export answered 200 before the pipeline and answers 409 now, since
+// the export reads only the strict selector's sheet. Per table such files are listed
+// again as "legacy passed, strict selector refused", grouped by their strict refusal
+// key.
 //
 // It reads every tenant's rows on purpose: it is an operator tool, not a request
 // path, so no organization scope applies. It cannot write: every session of the pool
@@ -40,11 +41,55 @@
 //
 // It runs before and after the migration that adds `source_format_id` (looked up in
 // the `public` schema): before it (the deploy order runs it against the live database
-// first) the format id lines are skipped. Exit code 1 when a stored file is refused
-// with the legacy selector (what the stricter gate changes for an export today), when
-// a file is listed as "legacy passed, named sheet unreadable", when a table holds a
-// format id other than its expected one, or on a fatal error (an unset
+// first) the format id lines and full mode are skipped, and one line tells the operator
+// to run the audit again after the migrations, before the API starts. Exit code 1 when
+// a stored file is refused with the legacy selector (what the stricter gate changes for
+// an export today), when a file is listed as "legacy passed, strict selector refused",
+// when a table holds a format id other than its expected one, when the name and quota
+// outputs (below) show a count above 0 or a store id, or on a fatal error (an unset
 // AUDIT_DATABASE_URL and a refused URL included); 0 otherwise.
+//
+// Full mode runs after gate mode, once the migration has run, for every table: all six
+// pages are on the generic workbook pipeline (FULL_MODE_ADAPTERS; a table without an
+// adapter is a fatal error). Per stored file, one at a time, it
+// runs the production export path, never a copy of it: the adapter's `load` with the
+// row's own organization and store, `resolveStoredWorkbook` (the format by
+// `source_format_id` or by selection, the strict sheet read, the layout, the write
+// columns), then `readRows` and the import rehearsal (`buildRehearsal` and
+// `patchWorkbook`, its output dropped), and `planExport` over the record's items with
+// the names and file count the export checks before it patches
+// (`plannedDownloadNames`: EXPORT_FILENAME_COLLISION, or STORED_FILE_UNREADABLE with
+// its `too-many-files` line). It never calls `exportWorkbook` or `touchExported`: those write. Per table it prints
+// the total, the files that passed and, per refusal reason, the count and the record
+// ids; a STORED_FILE_UNREADABLE carries the engine code and reason gate mode's strict
+// read found for that record. A stored value the export's write rule refuses
+// (`planExport`'s UnwritableStoredValueError) is keyed as the export answers it,
+// `STORED_FILE_UNREADABLE unwritable-value`. Any full-mode refusal sets exit code 1.
+// The production path also logs its own `workbook.stored-file-rejected` lines into the
+// same output (page, record id, engine code and engine reason; never a file name or
+// cell content). A record can carry two reasons (the rehearsal's and the plan's), so
+// the reason counts can add up to more than the refused count.
+//
+// The name and quota outputs run on every run, after gate mode and before full mode, in
+// SQL only (no stored file is read), and work before and after the migration that limits
+// `name` and `source_filename` to varchar(120):
+//   - per table, the count of rows whose `name` is longer than UPLOAD_NAME_MAX_LENGTH
+//     characters and the count whose `source_filename` is (`char_length`: characters, as
+//     varchar counts them, never bytes; a null file name is not counted);
+//   - per table, the count of rows whose `name` the API's name rule (`NameSchema`)
+//     refuses for a control or format character: the legacy import only trimmed a
+//     name, and the web's edit dialogs send the stored name back on every save, so the
+//     update routes would answer such a list 422 NAME_INVALID_CHARACTERS until it is
+//     renamed. This one query reads the names; the check runs here, in the API's own rule;
+//   - per table, the store ids holding more than MAX_LISTS_PER_STORE_PAGE rows, and the
+//     store ids whose stored files (`octet_length` of `source_file`) over all six tables
+//     sum to more than STORE_UPLOAD_QUOTA_BYTES.
+// The limits and the name rule are the API's own, imported. Only table names, counts
+// and store ids are printed, never a name, a file name or a cell. Any count above 0 or
+// any store id listed sets exit code 1: a name over the limit aborts the migration that
+// limits it, a name with such a character blocks its list's edits, and a store over a
+// quota is the owner's decision. The four queries are static text: the six table names
+// are written out (the tables of gate mode), only the limits are bound.
 //
 // Usage, once before the migration and once after it:
 //   AUDIT_DATABASE_URL='<direct or session connection string>' pnpm --filter @pazarsync/api audit:stored-workbooks
@@ -56,6 +101,7 @@ import { Platform } from '@pazarsync/db/enums';
 import {
   MALFORMED_SHEET_REASONS,
   PATCH_LIMIT_REASONS,
+  patchWorkbook,
   READER_RULES,
   readWorkbookGrid,
   SpreadsheetFileError,
@@ -64,10 +110,33 @@ import {
   UPLOAD_LIMIT_REASONS,
   WORKER_LIMIT_REASONS,
   ZIP_REJECT_REASONS,
+  type LayoutSpec,
   type ReadGridOptions,
   type SpreadsheetFileErrorCode,
 } from '@pazarsync/spreadsheet';
 import { WORKBOOK_PAGES, type WorkbookPage } from '@pazarsync/utils';
+
+// The value imports from src/: the limits module imports nothing and the name rule
+// imports only zod and the limits, so loading them cannot build the @pazarsync/db pool
+// before main() makes DATABASE_URL read-only.
+import {
+  MAX_LISTS_PER_STORE_PAGE,
+  STORE_UPLOAD_QUOTA_BYTES,
+  UPLOAD_NAME_MAX_LENGTH,
+} from '../src/config/workbook-limits';
+import { NAME_INVALID_CHARACTERS, NameSchema } from '../src/workbooks/form';
+// Types only, for the same reason: each of these modules loads @pazarsync/db (directly,
+// or through @pazarsync/sync-core), so main() imports them only after DATABASE_URL is
+// read-only (loadFullMode).
+import type { WorkbookVerticalAdapter } from '../src/workbooks/adapter';
+import type { planExport } from '../src/workbooks/export-plan';
+import type {
+  plannedDownloadNames,
+  resolveStoredWorkbook,
+  StoredWorkbook,
+} from '../src/workbooks/export-workbook';
+import type { readRows } from '../src/workbooks/import-rows';
+import type { buildRehearsal, rehearsalTargets } from '../src/workbooks/rehearsal';
 
 /** The one variable the audit takes its connection URL from; no other variable stands in. */
 const AUDIT_URL_VARIABLE = 'AUDIT_DATABASE_URL';
@@ -102,9 +171,9 @@ const PARENT_TABLE_COUNT = 6;
 const CORRUPT_FILE_CODE: SpreadsheetFileErrorCode = 'CORRUPT_FILE';
 const READER_RULE_PREFIX = 'rule:';
 
-// The sheet names the legacy import and export services read today (their private
-// SHEET_NAME constants and DISCOUNT_SHEET_NAME), written with escapes so this file
-// stays ASCII.
+// The sheet names the legacy import and export services read (their private SHEET_NAME
+// constants; for the pages whose services are gone, the sheet their formats name),
+// written with escapes so this file stays ASCII.
 const COMMISSION_TARIFF_SHEET = 'KomisyonTarifeleri\u00dcr\u00fcnleri';
 const PLUS_COMMISSION_TARIFF_SHEET = 'TyPlus\u00dcr\u00fcnleri';
 const ADVANTAGE_TARIFF_SHEET = 'Y\u0131ld\u0131zl\u0131\u00dcr\u00fcnEtiketleri';
@@ -127,6 +196,29 @@ const KNOWN_READER_RULES: ReadonlySet<string> = new Set(Object.keys(READER_RULES
 
 const HAS_STORED_FILE = { sourceFile: { not: null } } as const;
 const STORED_FILE_WITHOUT_FORMAT = { sourceFile: { not: null }, sourceFormatId: null } as const;
+/** A stored record's id and own scope, and its store's platform (for format selection). */
+const STORED_RECORD_SELECT = {
+  id: true,
+  organizationId: true,
+  storeId: true,
+  store: { select: { platform: true } },
+} as const;
+
+/** A parent row that holds a stored file: its id, its own scope and its store's platform. */
+interface StoredRecord {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly storeId: string;
+  readonly platform: Platform;
+}
+
+/** The shape STORED_RECORD_SELECT reads. */
+interface StoredRecordRow {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly storeId: string;
+  readonly store: { readonly platform: Platform };
+}
 
 /** One row of `GROUP BY source_format_id` over a whole table. */
 interface FormatGroupRow {
@@ -138,13 +230,14 @@ interface StoredWorkbookTable {
   /** The SQL table name; the report names tables and record ids, never row content. */
   readonly table: string;
   readonly page: WorkbookPage;
-  /** What the page's legacy export service passes to readWorkbookGrid today. */
+  /** What the page's legacy export service passes to readWorkbookGrid (passed, once moved). */
   readonly legacyRead: ReadGridOptions;
   /** The strict selector of the page's workbook format. */
   readonly strictRead: ReadGridOptions;
   /** Every row of the table, with or without a stored file. */
   readonly rowCount: () => Promise<number>;
-  readonly storedFileIds: () => Promise<string[]>;
+  /** The rows that hold a stored file, by id. */
+  readonly storedRecords: () => Promise<readonly StoredRecord[]>;
   readonly storedFile: (id: string) => Promise<Uint8Array | null>;
   /** Each binds the groupBy result to a local: a contextual return type derails its inference. */
   readonly formatGroups: () => Promise<readonly FormatGroupRow[]>;
@@ -154,8 +247,18 @@ interface StoredWorkbookTable {
 /** What one table's audit found that fails the run. */
 interface TableOutcome {
   readonly legacyRefused: number;
-  readonly namedSheetUnreadable: number;
+  /** Files the legacy selector reads and the strict selector refuses: a 409 on export now. */
+  readonly legacyPassedStrictRefused: number;
   readonly unexpectedFormatIds: number;
+}
+
+/** What gate mode hands to full mode for one table. */
+interface GateResult {
+  readonly outcome: TableOutcome;
+  /** The rows that held a stored file when gate mode listed them. */
+  readonly records: readonly StoredRecord[];
+  /** The strict selector's refusal key per refused record id. */
+  readonly strictKeyById: ReadonlyMap<string, string>;
 }
 
 /** Record ids keyed by a report key (`CODE`, `CODE reason` or `CODE rule:<rule>`). */
@@ -180,8 +283,13 @@ function sourceFormatId(page: WorkbookPage): string {
   return `${Platform.TRENDYOL}:${page}:${SOURCE_FORMAT_VERSION}`;
 }
 
-function idsOf(rows: readonly { readonly id: string }[]): string[] {
-  return rows.map((row) => row.id);
+function recordsOf(rows: readonly StoredRecordRow[]): StoredRecord[] {
+  return rows.map((row) => ({
+    id: row.id,
+    organizationId: row.organizationId,
+    storeId: row.storeId,
+    platform: row.store.platform,
+  }));
 }
 
 /** The parsed AUDIT_DATABASE_URL; unset, empty or unparsable is fatal, naming the variable only. */
@@ -294,11 +402,11 @@ function storedWorkbookTables(db: PrismaClient): readonly StoredWorkbookTable[] 
       legacyRead: { sheetName: COMMISSION_TARIFF_SHEET },
       strictRead: { sheet: { by: 'name', name: COMMISSION_TARIFF_SHEET } },
       rowCount: async () => db.commissionTariff.count(),
-      storedFileIds: async () =>
-        idsOf(
+      storedRecords: async () =>
+        recordsOf(
           await db.commissionTariff.findMany({
             where: HAS_STORED_FILE,
-            select: { id: true },
+            select: STORED_RECORD_SELECT,
             orderBy: { id: 'asc' },
           }),
         ),
@@ -321,11 +429,11 @@ function storedWorkbookTables(db: PrismaClient): readonly StoredWorkbookTable[] 
       legacyRead: { sheetName: PLUS_COMMISSION_TARIFF_SHEET },
       strictRead: { sheet: { by: 'name', name: PLUS_COMMISSION_TARIFF_SHEET } },
       rowCount: async () => db.plusCommissionTariff.count(),
-      storedFileIds: async () =>
-        idsOf(
+      storedRecords: async () =>
+        recordsOf(
           await db.plusCommissionTariff.findMany({
             where: HAS_STORED_FILE,
-            select: { id: true },
+            select: STORED_RECORD_SELECT,
             orderBy: { id: 'asc' },
           }),
         ),
@@ -348,11 +456,11 @@ function storedWorkbookTables(db: PrismaClient): readonly StoredWorkbookTable[] 
       legacyRead: { sheetName: ADVANTAGE_TARIFF_SHEET },
       strictRead: { sheet: { by: 'name', name: ADVANTAGE_TARIFF_SHEET } },
       rowCount: async () => db.advantageTariff.count(),
-      storedFileIds: async () =>
-        idsOf(
+      storedRecords: async () =>
+        recordsOf(
           await db.advantageTariff.findMany({
             where: HAS_STORED_FILE,
-            select: { id: true },
+            select: STORED_RECORD_SELECT,
             orderBy: { id: 'asc' },
           }),
         ),
@@ -375,11 +483,11 @@ function storedWorkbookTables(db: PrismaClient): readonly StoredWorkbookTable[] 
       legacyRead: { sheetName: FLASH_PRODUCT_LIST_SHEET },
       strictRead: { sheet: { by: 'name', name: FLASH_PRODUCT_LIST_SHEET } },
       rowCount: async () => db.flashProductList.count(),
-      storedFileIds: async () =>
-        idsOf(
+      storedRecords: async () =>
+        recordsOf(
           await db.flashProductList.findMany({
             where: HAS_STORED_FILE,
-            select: { id: true },
+            select: STORED_RECORD_SELECT,
             orderBy: { id: 'asc' },
           }),
         ),
@@ -402,11 +510,11 @@ function storedWorkbookTables(db: PrismaClient): readonly StoredWorkbookTable[] 
       legacyRead: { sheetName: DISCOUNT_LIST_SHEET },
       strictRead: { sheet: { by: 'name', name: DISCOUNT_LIST_SHEET } },
       rowCount: async () => db.discountList.count(),
-      storedFileIds: async () =>
-        idsOf(
+      storedRecords: async () =>
+        recordsOf(
           await db.discountList.findMany({
             where: HAS_STORED_FILE,
-            select: { id: true },
+            select: STORED_RECORD_SELECT,
             orderBy: { id: 'asc' },
           }),
         ),
@@ -430,11 +538,11 @@ function storedWorkbookTables(db: PrismaClient): readonly StoredWorkbookTable[] 
       legacyRead: {},
       strictRead: { sheet: { by: 'index', index: FIRST_SHEET_INDEX } },
       rowCount: async () => db.marketplaceCampaignList.count(),
-      storedFileIds: async () =>
-        idsOf(
+      storedRecords: async () =>
+        recordsOf(
           await db.marketplaceCampaignList.findMany({
             where: HAS_STORED_FILE,
-            select: { id: true },
+            select: STORED_RECORD_SELECT,
             orderBy: { id: 'asc' },
           }),
         ),
@@ -539,10 +647,17 @@ function unexpectedFormatIds(rows: readonly FormatGroupRow[], expected: string):
     .length;
 }
 
+/** Record id to its refusal key, from a tally keyed by refusal. */
+function keyById(groups: IdGroups): Map<string, string> {
+  const byId = new Map<string, string>();
+  for (const [key, ids] of groups) for (const id of ids) byId.set(id, key);
+  return byId;
+}
+
 async function auditTable(
   table: StoredWorkbookTable,
   withFormatColumn: boolean,
-): Promise<TableOutcome> {
+): Promise<GateResult> {
   const expected = sourceFormatId(table.page);
   console.log(`${table.table} (expected ${expected})`);
   let unexpected = 0;
@@ -558,14 +673,14 @@ async function auditTable(
   }
 
   const rows = await table.rowCount();
-  const ids = await table.storedFileIds();
+  const records = await table.storedRecords();
   const legacy = createTally();
   const strict = createTally();
   // Keyed by the strict refusal key.
-  const namedSheetUnreadable: IdGroups = new Map();
+  const legacyPassedStrictRefused: IdGroups = new Map();
   let gone = 0;
   // One file at a time: each holds the single parse worker for two reads.
-  for (const id of ids) {
+  for (const { id } of records) {
     const stored = await table.storedFile(id);
     if (stored === null) {
       gone += 1;
@@ -574,23 +689,502 @@ async function auditTable(
     const file = Buffer.from(stored);
     const legacyRefusal = await readInto(legacy, id, file, table.legacyRead);
     const strictRefusal = await readInto(strict, id, file, table.strictRead);
-    // The legacy read passed through its fallback to the first sheet.
-    if (legacyRefusal === null && strictRefusal?.code === CORRUPT_FILE_CODE) {
-      addId(namedSheetUnreadable, strictRefusal.key, id);
+    // Any strict refusal of a file the legacy read passed (through its fallback to the
+    // first sheet, for a missing or unreadable named sheet): the export refuses it now.
+    if (legacyRefusal === null && strictRefusal !== null) {
+      addId(legacyPassedStrictRefused, strictRefusal.key, id);
     }
   }
 
-  console.log(`  rows: ${rows}, stored files: ${ids.length}, gone during the run: ${gone}`);
+  console.log(`  rows: ${rows}, stored files: ${records.length}, gone during the run: ${gone}`);
   printTally('legacy selector', legacy);
   printTally('strict selector', strict);
-  const unreadable = idCount(namedSheetUnreadable);
-  console.log(`  legacy passed, named sheet unreadable: ${unreadable}`);
-  printGroups(namedSheetUnreadable);
+  const strictOnlyRefused = idCount(legacyPassedStrictRefused);
+  console.log(`  legacy passed, strict selector refused: ${strictOnlyRefused}`);
+  printGroups(legacyPassedStrictRefused);
   return {
-    legacyRefused: idCount(legacy.refusals),
-    namedSheetUnreadable: unreadable,
-    unexpectedFormatIds: unexpected,
+    outcome: {
+      legacyRefused: idCount(legacy.refusals),
+      legacyPassedStrictRefused: strictOnlyRefused,
+      unexpectedFormatIds: unexpected,
+    },
+    records,
+    strictKeyById: keyById(strict.refusals),
   };
+}
+
+// --- Name lengths and quota: SQL only, every run -------------------------------------
+
+/** One table's rows whose `name`, and whose `source_filename`, is over the length limit. */
+interface LongNameRow {
+  readonly table: string;
+  readonly names: number;
+  readonly fileNames: number;
+}
+
+/** A store over a limit; `table` is the page's table for the per-page list limit. */
+interface StoreOverLimitRow {
+  readonly table: string;
+  readonly storeId: string;
+}
+
+function isLongNameRow(value: unknown): value is LongNameRow {
+  return (
+    isRecord(value) &&
+    typeof value['table'] === 'string' &&
+    typeof value['names'] === 'number' &&
+    typeof value['fileNames'] === 'number'
+  );
+}
+
+function isStoreOverLimitRow(value: unknown): value is StoreOverLimitRow {
+  return (
+    isRecord(value) && typeof value['table'] === 'string' && typeof value['storeId'] === 'string'
+  );
+}
+
+function isStoreIdRow(value: unknown): value is { storeId: string } {
+  return isRecord(value) && typeof value['storeId'] === 'string';
+}
+
+/** One stored list name and its table; read only to be counted, never printed. */
+interface StoredNameRow {
+  readonly table: string;
+  readonly name: string;
+}
+
+function isStoredNameRow(value: unknown): value is StoredNameRow {
+  return isRecord(value) && typeof value['table'] === 'string' && typeof value['name'] === 'string';
+}
+
+/** The rows of a query as `guard` reads them; any other shape is fatal. */
+function rowsOf<T>(rows: unknown, guard: (value: unknown) => value is T, query: string): T[] {
+  if (!Array.isArray(rows)) throw new Error(`The ${query} query returned no rows array`);
+  return rows.map((row) => {
+    if (!guard(row)) throw new Error(`The ${query} query returned an unexpected row`);
+    return row;
+  });
+}
+
+/** Refuses a row naming a table outside gate mode's fixed list. */
+function assertKnownTable(table: string, tables: ReadonlySet<string>, query: string): void {
+  if (!tables.has(table)) throw new Error(`The ${query} query named an unknown table`);
+}
+
+/**
+ * Per parent table: the rows whose `name`, and the rows whose `source_filename`, are
+ * longer than UPLOAD_NAME_MAX_LENGTH characters. `char_length` counts characters on
+ * `text` and `varchar` alike; a null `source_filename` is not counted. One row per table,
+ * zeros included.
+ */
+async function longNameCounts(db: PrismaClient): Promise<LongNameRow[]> {
+  const rows: unknown = await db.$queryRaw`
+    SELECT 'commission_tariffs' AS "table",
+      (count(*) FILTER (WHERE char_length("name") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "names",
+      (count(*) FILTER (WHERE char_length("source_filename") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "fileNames"
+    FROM "commission_tariffs"
+    UNION ALL
+    SELECT 'plus_commission_tariffs' AS "table",
+      (count(*) FILTER (WHERE char_length("name") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "names",
+      (count(*) FILTER (WHERE char_length("source_filename") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "fileNames"
+    FROM "plus_commission_tariffs"
+    UNION ALL
+    SELECT 'advantage_tariffs' AS "table",
+      (count(*) FILTER (WHERE char_length("name") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "names",
+      (count(*) FILTER (WHERE char_length("source_filename") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "fileNames"
+    FROM "advantage_tariffs"
+    UNION ALL
+    SELECT 'flash_product_lists' AS "table",
+      (count(*) FILTER (WHERE char_length("name") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "names",
+      (count(*) FILTER (WHERE char_length("source_filename") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "fileNames"
+    FROM "flash_product_lists"
+    UNION ALL
+    SELECT 'discount_lists' AS "table",
+      (count(*) FILTER (WHERE char_length("name") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "names",
+      (count(*) FILTER (WHERE char_length("source_filename") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "fileNames"
+    FROM "discount_lists"
+    UNION ALL
+    SELECT 'marketplace_campaign_lists' AS "table",
+      (count(*) FILTER (WHERE char_length("name") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "names",
+      (count(*) FILTER (WHERE char_length("source_filename") > ${UPLOAD_NAME_MAX_LENGTH}::int))::int AS "fileNames"
+    FROM "marketplace_campaign_lists"`;
+  return rowsOf(rows, isLongNameRow, 'name length');
+}
+
+/** True when the API's name rule refuses `name` for a control or format character. */
+function refusedForCharacters(name: string): boolean {
+  const parsed = NameSchema.safeParse(name);
+  return (
+    !parsed.success &&
+    parsed.error.issues.some((issue) => issue.message === NAME_INVALID_CHARACTERS)
+  );
+}
+
+/**
+ * Per parent table: the count of rows whose `name` the API's name rule refuses for a
+ * control or format character. The names are read and checked here, never printed.
+ */
+async function invalidCharacterNameCounts(db: PrismaClient): Promise<Map<string, number>> {
+  const rows: unknown = await db.$queryRaw`
+    SELECT 'commission_tariffs' AS "table", "name"::text AS "name" FROM "commission_tariffs"
+    UNION ALL
+    SELECT 'plus_commission_tariffs' AS "table", "name"::text AS "name" FROM "plus_commission_tariffs"
+    UNION ALL
+    SELECT 'advantage_tariffs' AS "table", "name"::text AS "name" FROM "advantage_tariffs"
+    UNION ALL
+    SELECT 'flash_product_lists' AS "table", "name"::text AS "name" FROM "flash_product_lists"
+    UNION ALL
+    SELECT 'discount_lists' AS "table", "name"::text AS "name" FROM "discount_lists"
+    UNION ALL
+    SELECT 'marketplace_campaign_lists' AS "table", "name"::text AS "name" FROM "marketplace_campaign_lists"`;
+  const counts = new Map<string, number>();
+  for (const row of rowsOf(rows, isStoredNameRow, 'name characters')) {
+    if (refusedForCharacters(row.name)) counts.set(row.table, (counts.get(row.table) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/** Per parent table: the stores holding more than MAX_LISTS_PER_STORE_PAGE rows. */
+async function storesOverListLimit(db: PrismaClient): Promise<StoreOverLimitRow[]> {
+  const rows: unknown = await db.$queryRaw`
+    SELECT 'commission_tariffs' AS "table", "store_id"::text AS "storeId"
+    FROM "commission_tariffs"
+    GROUP BY "store_id" HAVING count(*) > ${MAX_LISTS_PER_STORE_PAGE}::int
+    UNION ALL
+    SELECT 'plus_commission_tariffs' AS "table", "store_id"::text AS "storeId"
+    FROM "plus_commission_tariffs"
+    GROUP BY "store_id" HAVING count(*) > ${MAX_LISTS_PER_STORE_PAGE}::int
+    UNION ALL
+    SELECT 'advantage_tariffs' AS "table", "store_id"::text AS "storeId"
+    FROM "advantage_tariffs"
+    GROUP BY "store_id" HAVING count(*) > ${MAX_LISTS_PER_STORE_PAGE}::int
+    UNION ALL
+    SELECT 'flash_product_lists' AS "table", "store_id"::text AS "storeId"
+    FROM "flash_product_lists"
+    GROUP BY "store_id" HAVING count(*) > ${MAX_LISTS_PER_STORE_PAGE}::int
+    UNION ALL
+    SELECT 'discount_lists' AS "table", "store_id"::text AS "storeId"
+    FROM "discount_lists"
+    GROUP BY "store_id" HAVING count(*) > ${MAX_LISTS_PER_STORE_PAGE}::int
+    UNION ALL
+    SELECT 'marketplace_campaign_lists' AS "table", "store_id"::text AS "storeId"
+    FROM "marketplace_campaign_lists"
+    GROUP BY "store_id" HAVING count(*) > ${MAX_LISTS_PER_STORE_PAGE}::int
+    ORDER BY "table", "storeId"`;
+  return rowsOf(rows, isStoreOverLimitRow, 'list limit');
+}
+
+/**
+ * The stores whose stored files over all six parent tables sum to more than
+ * STORE_UPLOAD_QUOTA_BYTES: the sum the upload quota compares, per store.
+ */
+async function storesOverByteQuota(db: PrismaClient): Promise<string[]> {
+  const rows: unknown = await db.$queryRaw`
+    SELECT "store_id"::text AS "storeId"
+    FROM (
+      SELECT "store_id", octet_length("source_file") AS "bytes" FROM "commission_tariffs"
+      UNION ALL
+      SELECT "store_id", octet_length("source_file") AS "bytes" FROM "plus_commission_tariffs"
+      UNION ALL
+      SELECT "store_id", octet_length("source_file") AS "bytes" FROM "advantage_tariffs"
+      UNION ALL
+      SELECT "store_id", octet_length("source_file") AS "bytes" FROM "flash_product_lists"
+      UNION ALL
+      SELECT "store_id", octet_length("source_file") AS "bytes" FROM "discount_lists"
+      UNION ALL
+      SELECT "store_id", octet_length("source_file") AS "bytes" FROM "marketplace_campaign_lists"
+    ) AS "stored"
+    GROUP BY "store_id"
+    HAVING sum("bytes") > ${STORE_UPLOAD_QUOTA_BYTES}::bigint
+    ORDER BY "store_id"`;
+  return rowsOf(rows, isStoreIdRow, 'byte quota').map((row) => row.storeId);
+}
+
+/**
+ * Prints the name length counts and the stores over a quota, by gate mode's tables;
+ * returns how many findings it printed (each count above 0 and each store id is one).
+ */
+async function auditNamesAndQuota(db: PrismaClient, tables: readonly string[]): Promise<number> {
+  const known = new Set(tables);
+  let findings = 0;
+
+  const longNames = await longNameCounts(db);
+  const longByTable = new Map<string, LongNameRow>();
+  for (const row of longNames) {
+    assertKnownTable(row.table, known, 'name length');
+    longByTable.set(row.table, row);
+  }
+  console.log(`names over ${UPLOAD_NAME_MAX_LENGTH} characters (name, source_filename):`);
+  for (const table of tables) {
+    const row = longByTable.get(table);
+    if (row === undefined) throw new Error(`The name length query left out ${table}`);
+    console.log(`  ${table}: name ${row.names}, source_filename ${row.fileNames}`);
+    if (row.names > 0) findings += 1;
+    if (row.fileNames > 0) findings += 1;
+  }
+
+  const invalidNames = await invalidCharacterNameCounts(db);
+  for (const table of invalidNames.keys()) assertKnownTable(table, known, 'name characters');
+  console.log('names with a control or format character:');
+  for (const table of tables) {
+    const count = invalidNames.get(table) ?? 0;
+    console.log(`  ${table}: ${count}`);
+    if (count > 0) findings += 1;
+  }
+
+  const overLists = await storesOverListLimit(db);
+  const storesByTable: IdGroups = new Map();
+  for (const row of overLists) {
+    assertKnownTable(row.table, known, 'list limit');
+    addId(storesByTable, row.table, row.storeId);
+  }
+  console.log(`stores over ${MAX_LISTS_PER_STORE_PAGE} lists on one page:`);
+  for (const table of tables) {
+    const storeIds = storesByTable.get(table) ?? [];
+    console.log(`  ${table}: ${storeIds.length} [${storeIds.join(', ')}]`);
+    findings += storeIds.length;
+  }
+
+  const overBytes = await storesOverByteQuota(db);
+  console.log(
+    `stores over ${STORE_UPLOAD_QUOTA_BYTES} stored bytes across the six tables: ` +
+      `${overBytes.length} [${overBytes.join(', ')}]`,
+  );
+  findings += overBytes.length;
+  return findings;
+}
+
+// --- Full mode: the generic export path on every stored file of a moved page ---------
+
+/** The production functions full mode runs, imported after DATABASE_URL is read-only. */
+interface FullModeEngine {
+  readonly resolveStoredWorkbook: typeof resolveStoredWorkbook;
+  readonly readRows: typeof readRows;
+  readonly rehearsalTargets: typeof rehearsalTargets;
+  readonly buildRehearsal: typeof buildRehearsal;
+  readonly planExport: typeof planExport;
+  readonly plannedDownloadNames: typeof plannedDownloadNames;
+  /** The `reason` of a WorkbookConflictError, else null. */
+  readonly conflictReason: (err: unknown) => string | null;
+  /** The `code` of a WorkbookFileRejection, else null. */
+  readonly fileRejectionCode: (err: unknown) => string | null;
+  /** The `reason` of an UnwritableStoredValueError (planExport's write-value check), else null. */
+  readonly unwritableValueReason: (err: unknown) => string | null;
+}
+
+/** Full mode for one page's table: the refusal keys of one stored record, or null when it is gone. */
+interface RecordAuditor {
+  readonly table: string;
+  readonly audit: (
+    record: StoredRecord,
+    strictKey: string | null,
+  ) => Promise<readonly string[] | null>;
+}
+
+const STORED_FILE_UNREADABLE_REASON = 'STORED_FILE_UNREADABLE';
+const STRICT_READ_PASSED = 'passed';
+const ROWS_STAGE = 'rows';
+const REHEARSAL_STAGE = 'rehearsal';
+
+/**
+ * The report key of an error of the generic path: its conflict reason, file code or
+ * engine key. A stored value the write rule refuses is keyed as the export answers it:
+ * STORED_FILE_UNREADABLE with its reason, never as an unexpected error.
+ */
+function pipelineKey(engine: FullModeEngine, err: unknown): string {
+  const unwritable = engine.unwritableValueReason(err);
+  if (unwritable !== null) return `${STORED_FILE_UNREADABLE_REASON} ${unwritable}`;
+  return engine.conflictReason(err) ?? engine.fileRejectionCode(err) ?? refusalOf(err).key;
+}
+
+/**
+ * The key of a `resolveStoredWorkbook` refusal. Its STORED_FILE_UNREADABLE hides the
+ * engine code, so the key carries what gate mode's strict read found for the record.
+ * When that read passed (the refusal came later, e.g. MALFORMED_SHEET from the write
+ * columns), the engine code is in the `workbook.stored-file-rejected` line that
+ * `toStoredFileError` printed just before.
+ */
+function storedFileKey(engine: FullModeEngine, err: unknown, strictKey: string | null): string {
+  const key = pipelineKey(engine, err);
+  if (key !== STORED_FILE_UNREADABLE_REASON) return key;
+  return `${key} (strict read: ${strictKey ?? STRICT_READ_PASSED})`;
+}
+
+/** The import rehearsal on the stored file: `readRows`, `buildRehearsal`, `patchWorkbook` (dropped). */
+async function rehearsalRefusal<S extends LayoutSpec, TRow, TWrite extends string>(
+  engine: FullModeEngine,
+  align: 'anchor-map' | 'cursor-zip',
+  stored: StoredWorkbook<S, TRow, TWrite>,
+  file: Buffer,
+): Promise<string | null> {
+  let rehearsal;
+  try {
+    const read = engine.readRows(stored);
+    rehearsal = engine.buildRehearsal(
+      stored,
+      engine.rehearsalTargets(align, read),
+      stored.resolved,
+    );
+  } catch (err) {
+    return `${ROWS_STAGE} ${pipelineKey(engine, err)}`;
+  }
+  if (rehearsal.patches.length === 0) return null;
+  try {
+    await patchWorkbook(file, {
+      sheet: stored.format.sheet,
+      anchors: rehearsal.anchors,
+      outputs: [rehearsal.patches],
+      overwriteFormulaColumns: rehearsal.overwriteFormulaColumns,
+    });
+    return null;
+  } catch (err) {
+    return `${REHEARSAL_STAGE} ${refusalOf(err).key}`;
+  }
+}
+
+/**
+ * Full mode for one adapter. Per record: `load` with the record's own scope, then
+ * `resolveStoredWorkbook`; when that passes, the rehearsal and the plan (`planExport`,
+ * then `plannedDownloadNames`: the names and the file count the export checks before it
+ * patches) each add their refusal. Nothing here writes.
+ */
+function recordAuditor<
+  S extends LayoutSpec,
+  TRow,
+  TConfig,
+  TMeta,
+  TItem,
+  TResponse,
+  TWrite extends string,
+>(
+  engine: FullModeEngine,
+  adapter: WorkbookVerticalAdapter<S, TRow, TConfig, TMeta, TItem, TResponse, TWrite>,
+): RecordAuditor {
+  return {
+    table: adapter.parentTable,
+    audit: async (record, strictKey) => {
+      const scope = { organizationId: record.organizationId, storeId: record.storeId };
+      const source = await adapter.load(scope, record.id);
+      if (source === null || source.sourceFile === null) return null;
+      const file = Buffer.from(source.sourceFile);
+
+      let stored: StoredWorkbook<S, TRow, TWrite>;
+      try {
+        stored = await engine.resolveStoredWorkbook({
+          page: adapter.page,
+          formats: adapter.formats,
+          file,
+          sourceFormatId: source.sourceFormatId,
+          platform: record.platform,
+          recordId: record.id,
+        });
+      } catch (err) {
+        return [storedFileKey(engine, err, strictKey)];
+      }
+
+      const refusals: string[] = [];
+      const rehearsal = await rehearsalRefusal(engine, adapter.align, stored, file);
+      if (rehearsal !== null) refusals.push(rehearsal);
+      try {
+        const plan = engine.planExport({ ...stored, groups: source.groups, adapter });
+        engine.plannedDownloadNames(stored.format, source, plan, {
+          page: adapter.page,
+          recordId: record.id,
+        });
+      } catch (err) {
+        refusals.push(pipelineKey(engine, err));
+      }
+      return refusals;
+    },
+  };
+}
+
+/**
+ * The production modules full mode runs, and one auditor per page on the generic
+ * pipeline. Imported only now, like @pazarsync/db in main(): each of them loads
+ * @pazarsync/db (directly, or through @pazarsync/sync-core), whose pool is built from
+ * DATABASE_URL when it loads. A static import would build that pool from whatever
+ * DATABASE_URL held before main() made it read-only, and break the read-only guarantee.
+ */
+async function loadFullMode(): Promise<readonly RecordAuditor[]> {
+  const [
+    exportWorkbook,
+    exportPlan,
+    importRows,
+    rehearsal,
+    errors,
+    workbookErrors,
+    writeColumns,
+    discount,
+    campaign,
+    flash,
+    advantage,
+    plus,
+    commission,
+  ] = await Promise.all([
+    import('../src/workbooks/export-workbook'),
+    import('../src/workbooks/export-plan'),
+    import('../src/workbooks/import-rows'),
+    import('../src/workbooks/rehearsal'),
+    import('../src/lib/errors'),
+    import('../src/workbooks/workbook-errors'),
+    import('../src/workbooks/write-columns'),
+    import('../src/workbooks/verticals/discount-list.adapter'),
+    import('../src/workbooks/verticals/marketplace-campaign-list.adapter'),
+    import('../src/workbooks/verticals/flash-product-list.adapter'),
+    import('../src/workbooks/verticals/advantage-tariff.adapter'),
+    import('../src/workbooks/verticals/plus-commission-tariff.adapter'),
+    import('../src/workbooks/verticals/commission-tariff.adapter'),
+  ]);
+  const engine: FullModeEngine = {
+    resolveStoredWorkbook: exportWorkbook.resolveStoredWorkbook,
+    readRows: importRows.readRows,
+    rehearsalTargets: rehearsal.rehearsalTargets,
+    buildRehearsal: rehearsal.buildRehearsal,
+    planExport: exportPlan.planExport,
+    plannedDownloadNames: exportWorkbook.plannedDownloadNames,
+    conflictReason: (err) => (err instanceof errors.WorkbookConflictError ? err.reason : null),
+    fileRejectionCode: (err) =>
+      err instanceof workbookErrors.WorkbookFileRejection ? err.code : null,
+    unwritableValueReason: (err) =>
+      err instanceof writeColumns.UnwritableStoredValueError ? err.reason : null,
+  };
+  // FULL_MODE_ADAPTERS: each vertical appends its adapter as it moves.
+  return [
+    recordAuditor(engine, discount.discountListAdapter),
+    recordAuditor(engine, campaign.marketplaceCampaignListAdapter),
+    recordAuditor(engine, flash.flashProductListAdapter),
+    recordAuditor(engine, advantage.advantageTariffAdapter),
+    recordAuditor(engine, plus.plusCommissionTariffAdapter),
+    recordAuditor(engine, commission.commissionTariffAdapter),
+  ];
+}
+
+/** Full mode over one table's stored records, one file at a time; returns the refused count. */
+async function auditTableFullMode(auditor: RecordAuditor, gate: GateResult): Promise<number> {
+  const refusals: IdGroups = new Map();
+  let passed = 0;
+  let refused = 0;
+  let gone = 0;
+  for (const record of gate.records) {
+    const keys = await auditor.audit(record, gate.strictKeyById.get(record.id) ?? null);
+    if (keys === null) {
+      gone += 1;
+      continue;
+    }
+    if (keys.length === 0) {
+      passed += 1;
+      continue;
+    }
+    refused += 1;
+    for (const key of keys) addId(refusals, key, record.id);
+  }
+  console.log(
+    `${auditor.table} full mode: total ${gate.records.length}, passed ${passed}, ` +
+      `refused ${refused}, gone during the run ${gone}`,
+  );
+  printGroups(refusals);
+  return refused;
 }
 
 async function main(): Promise<void> {
@@ -615,15 +1209,37 @@ async function main(): Promise<void> {
     );
     const withFormatColumn = await hasSourceFormatColumn(prisma);
     let failed = false;
+    const gates = new Map<string, GateResult>();
     for (const table of storedWorkbookTables(prisma)) {
-      const outcome = await auditTable(table, withFormatColumn);
+      const gate = await auditTable(table, withFormatColumn);
+      gates.set(table.table, gate);
+      const { outcome } = gate;
       if (
         outcome.legacyRefused > 0 ||
-        outcome.namedSheetUnreadable > 0 ||
+        outcome.legacyPassedStrictRefused > 0 ||
         outcome.unexpectedFormatIds > 0
       ) {
         failed = true;
       }
+    }
+
+    // Every run, before full mode: SQL only, over the tables gate mode audited.
+    if ((await auditNamesAndQuota(prisma, [...gates.keys()])) > 0) failed = true;
+
+    if (withFormatColumn) {
+      const auditors = await loadFullMode();
+      for (const [table, gate] of gates) {
+        const auditor = auditors.find((candidate) => candidate.table === table);
+        // Every page is on the generic pipeline, so a table without an auditor is a bug
+        // in this script, never a page that has not moved yet.
+        if (auditor === undefined) throw new Error(`${table} has no full-mode auditor`);
+        if ((await auditTableFullMode(auditor, gate)) > 0) failed = true;
+      }
+    } else {
+      console.log(
+        'full mode: skipped (source_format_id column absent); run this audit again after ' +
+          'the migrations, before the API starts',
+      );
     }
     if (failed) process.exitCode = 1;
   } finally {

@@ -1,4 +1,4 @@
-import { unzipSync } from 'fflate';
+import { strFromU8, unzipSync, type Unzipped } from 'fflate';
 import { describe, expect, it } from 'vitest';
 
 import { fileErrorOf } from '../../tests/helpers/errors';
@@ -8,7 +8,7 @@ import { expectWithinBudget, LINEAR_BUDGET_MS } from '../../tests/helpers/timing
 import { SpreadsheetFileError } from '../errors';
 import { cellKey, columnLetters } from '../sheet-meta';
 import { parsePart } from '../xml-dom';
-import { resolveWorksheetPartPaths } from '../workbook-parts';
+import { extractRelationships, WORKBOOK_RELS_PART } from '../workbook-parts';
 import { SPREADSHEET_MAIN_NAMESPACES } from './limits';
 import { MALFORMED_SHEET_REASONS, UNSUPPORTED_ENCODING_REASONS } from './reasons';
 import { cellKeysOf, indexWorksheet } from './sheet-index';
@@ -381,6 +381,15 @@ describe('indexWorksheet: encoding', () => {
 });
 
 describe('indexWorksheet: real files', () => {
+  /** The worksheet parts the fixture's workbook rels name, each once, as the reader resolves them. */
+  function worksheetPartPaths(file: string, entries: Unzipped): readonly string[] {
+    const rels = entries[WORKBOOK_RELS_PART];
+    if (rels === undefined) throw new Error(`${file}: no workbook rels`);
+    const root = parsePart(WORKBOOK_RELS_PART, strFromU8(rels)).documentElement;
+    if (root === null) throw new Error(`${file}: workbook rels without a root`);
+    return [...new Set(extractRelationships(root).worksheetPathById.values())];
+  }
+
   it('has a cell count for every pinned fixture', () => {
     expect(FIXTURE_CELL_COUNTS).toHaveLength(FIXTURE_PINS.length);
   });
@@ -393,7 +402,7 @@ describe('indexWorksheet: real files', () => {
     })),
   )('$file', ({ file, rows, cells }) => {
     const entries = unzipSync(new Uint8Array(readFixture(file)));
-    const [part, ...others] = resolveWorksheetPartPaths(entries);
+    const [part, ...others] = worksheetPartPaths(file, entries);
     expect(others).toEqual([]);
     const bytes = part === undefined ? undefined : entries[part];
     if (bytes === undefined) throw new Error(`${file}: no worksheet part`);

@@ -42,8 +42,13 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { CampaignPriceSelection } from '@pazarsync/db/enums';
+import { readWorkbookGrid, resolveLayout } from '@pazarsync/spreadsheet';
+import { patchFixture } from '@pazarsync/spreadsheet/testing';
 
 import { createApp } from '@/app';
+import { trendyolMarketplaceCampaignListFormat } from '@/workbooks/formats/trendyol/marketplace-campaign-list.format';
+import { readRows } from '@/workbooks/import-rows';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -139,10 +144,41 @@ interface SeededCampaign {
   readonly itemId: string;
 }
 
+// The victim campaign's stored file: the real sheet with the barcode of its first kept row
+// (sheet row 2, the barcode column A) replaced by VICTIM_BARCODE. The victim item carries
+// a barcode the stored file really holds, so the leak checks look for data a leaked
+// response would contain, and the campaign's items are the file's kept rows in sheet
+// order, so the rightful owner's export pairs every row with its item.
+const VICTIM_ROW = 2;
+const BARCODE_COL = 0;
+const VICTIM_FILE = patchFixture(
+  FIXTURE,
+  [{ excelRow: VICTIM_ROW, col: BARCODE_COL, value: { kind: 'text', value: VICTIM_BARCODE } }],
+  { sheet: { by: 'index', index: 0 } },
+);
+
+/** The kept rows of VICTIM_FILE, read through the campaign format. */
+async function readVictimRows() {
+  const format = trendyolMarketplaceCampaignListFormat;
+  const grid = await readWorkbookGrid(VICTIM_FILE, { sheet: format.sheet });
+  const layout = resolveLayout(format.layout, grid);
+  if (layout === null) throw new Error('the victim file does not resolve');
+  return readRows({ format, grid, layout }).rows;
+}
+
+// Read once for the whole file; every seed reuses the same rows.
+let victimRows: ReturnType<typeof readVictimRows> | undefined;
+
+function victimRowsOnce(): ReturnType<typeof readVictimRows> {
+  victimRows ??= readVictimRows();
+  return victimRows;
+}
+
 /**
- * Seeds a one-item campaign owned by `storeId`, in the state that makes every attack below
- * maximally dangerous: the item already participates at MAX and the campaign keeps the real
- * Trendyol source file, so a leaked export returns an actual spreadsheet rather than a 409.
+ * Seeds a campaign owned by `storeId`, in the state that makes every attack below
+ * maximally dangerous: the victim item already participates at MAX and the campaign keeps
+ * a real Trendyol source file with one item per kept row, so a leaked export returns an
+ * actual spreadsheet rather than a 409.
  */
 async function seedCampaign(organizationId: string, storeId: string): Promise<SeededCampaign> {
   const list = await prisma.marketplaceCampaignList.create({
@@ -157,23 +193,40 @@ async function seedCampaign(organizationId: string, storeId: string): Promise<Se
       startsAt: new Date(CAMPAIGN_WINDOW.startsAt),
       endsAt: new Date(CAMPAIGN_WINDOW.endsAt),
       sourceFilename: 'trendyol_kampanya.xlsx',
-      sourceFile: FIXTURE,
+      sourceFile: new Uint8Array(VICTIM_FILE),
     },
   });
-  const item = await prisma.marketplaceCampaignItem.create({
-    data: {
+  const rows = await victimRowsOnce();
+  await prisma.marketplaceCampaignItem.createMany({
+    data: rows.map((row, position) => {
+      const isVictim = row.excelRow === VICTIM_ROW;
+      return {
+        organizationId,
+        storeId,
+        listId: list.id,
+        barcode: row.data.barcode,
+        productTitle: isVictim ? VICTIM_TITLE : row.data.productTitle,
+        currentPrice: new Decimal(isVictim ? VICTIM_CURRENT_PRICE : row.data.currentPrice),
+        maxPrice: new Decimal(isVictim ? VICTIM_MAX_PRICE : row.data.maxPrice),
+        selection: isVictim ? CampaignPriceSelection.MAX : CampaignPriceSelection.NONE,
+        sortOrder: position,
+      };
+    }),
+  });
+  const victim = await prisma.marketplaceCampaignItem.findFirst({
+    where: {
       organizationId,
       storeId,
       listId: list.id,
-      barcode: VICTIM_BARCODE,
-      productTitle: VICTIM_TITLE,
-      currentPrice: new Decimal(VICTIM_CURRENT_PRICE),
-      maxPrice: new Decimal(VICTIM_MAX_PRICE),
-      selection: 'MAX',
-      sortOrder: 0,
+      sortOrder: rows.findIndex((row) => row.excelRow === VICTIM_ROW),
     },
+    select: { id: true, barcode: true },
   });
-  return { campaignId: list.id, itemId: item.id };
+  if (victim === null) throw new Error('the victim item was not seeded');
+  if (victim.barcode !== VICTIM_BARCODE) {
+    throw new Error('the victim item must carry VICTIM_BARCODE');
+  }
+  return { campaignId: list.id, itemId: victim.id };
 }
 
 /**

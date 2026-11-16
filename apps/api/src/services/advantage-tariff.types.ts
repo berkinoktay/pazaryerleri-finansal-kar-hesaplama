@@ -3,7 +3,7 @@
 // The wire (request/response) contract lives in
 // `validators/advantage-tariff.validator.ts`; this file holds the persisted
 // star-tier JSON shape the service layer reasons with. Period validity + Trendyol
-// period-label parsing are reused from `lib/tariff-period.ts` (via the commission
+// period-label parsing are reused from `workbooks/tariff-week.ts` (via the commission
 // tariff that supplies the rate). Band lookup reuses `@pazarsync/profit`
 // (`StoredTariffBand`, `storedTariffBandForPrice`).
 

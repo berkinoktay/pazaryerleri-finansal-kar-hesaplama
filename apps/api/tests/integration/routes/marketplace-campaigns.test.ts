@@ -20,12 +20,14 @@
 
 import { readFileSync } from 'node:fs';
 
+import { z } from '@hono/zod-openapi';
 import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 
 import { createApp } from '@/app';
+import { UPLOAD_NAME_MAX_LENGTH } from '@/config/workbook-limits';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -38,7 +40,7 @@ const FIXTURE = readFileSync(
   new URL('../../fixtures/marketplace-campaign-sample.xlsx', import.meta.url),
 );
 
-// Facts of the vendor fixture (see tests/unit/services/marketplace-campaign-import.test.ts).
+// Facts of the vendor fixture (see tests/unit/workbooks/formats/marketplace-campaign-list.format.test.ts).
 const FIXTURE_ROWS = 68;
 const FIXTURE_MATCHED_BARCODE = '211537788423';
 
@@ -47,6 +49,9 @@ const CAMPAIGN_WINDOW = {
   startsAt: '2026-07-21T05:00:00.000Z',
   endsAt: '2026-07-28T04:59:00.000Z',
 } as const;
+
+// The whole body of a 422, field issues as sent (meta included), for a strict pin.
+const RawValidationSchema = z.object({ code: z.string(), errors: z.array(z.unknown()) });
 
 const IMAGE_URL = 'https://cdn.example/campaign-1.jpg';
 
@@ -678,6 +683,21 @@ describe('Marketplace Campaigns - list / detail / config PATCH / selections / de
   });
 
   it('FULL-REPLACES the config on PATCH — an omitted funding rate is reset to zero', async () => {
+    // The PATCH moves the campaign's updatedAt forward: start it at an old instant.
+    const campaignScope = { id: fx.campaignId, organizationId: fx.orgId, storeId: fx.storeId };
+    const oldUpdatedAt = new Date('2020-01-01T00:00:00.000Z');
+    await prisma.marketplaceCampaignList.updateMany({
+      where: campaignScope,
+      data: { updatedAt: oldUpdatedAt },
+    });
+    const before = await prisma.marketplaceCampaignList.findFirst({
+      where: campaignScope,
+      select: { updatedAt: true },
+    });
+    if (before?.updatedAt.getTime() !== oldUpdatedAt.getTime()) {
+      throw new Error('the campaign did not start at the old updatedAt');
+    }
+
     const patch = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/marketplace-campaigns/${fx.campaignId}`,
       {
@@ -698,6 +718,11 @@ describe('Marketplace Campaigns - list / detail / config PATCH / selections / de
     );
     expect(patch.status).toBe(200);
     expect(((await patch.json()) as { id: string }).id).toBe(fx.campaignId);
+    const after = await prisma.marketplaceCampaignList.findFirst({
+      where: campaignScope,
+      select: { updatedAt: true },
+    });
+    expect(after?.updatedAt.getTime()).toBeGreaterThan(oldUpdatedAt.getTime());
 
     const body = await fetchDetail();
     expect(body.name).toBe('Sepet Kampanyası');
@@ -744,6 +769,39 @@ describe('Marketplace Campaigns - list / detail / config PATCH / selections / de
     const body = (await res.json()) as ProblemWire;
     expect(body.code).toBe('VALIDATION_ERROR');
     expect(body.errors?.some((e) => e.code === 'FIXED_PRICE_ONLY_FOR_NTH')).toBe(true);
+  });
+
+  it('rejects a name above 120 characters with 422 NAME_TOO_LONG and leaves the campaign as it was', async () => {
+    const campaignScope = { id: fx.campaignId, organizationId: fx.orgId, storeId: fx.storeId };
+    const select = { name: true, updatedAt: true } as const;
+    const before = await prisma.marketplaceCampaignList.findFirst({ where: campaignScope, select });
+    if (before === null) throw new Error('the seeded campaign is gone');
+
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/marketplace-campaigns/${fx.campaignId}`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'n'.repeat(UPLOAD_NAME_MAX_LENGTH + 1),
+          discountType: 'CONDITIONAL_BASKET',
+          valueKind: 'PERCENT',
+          value: '10',
+          minBasketAmount: '500',
+          ...CAMPAIGN_WINDOW,
+        }),
+      },
+    );
+
+    expect(res.status).toBe(422);
+    const body = RawValidationSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toStrictEqual([
+      { field: 'name', code: 'NAME_TOO_LONG', meta: { zodCode: 'too_big' } },
+    ]);
+    expect(
+      await prisma.marketplaceCampaignList.findFirst({ where: campaignScope, select }),
+    ).toEqual(before);
   });
 
   it('deletes the campaign (204), then the detail 404s and the list is empty', async () => {

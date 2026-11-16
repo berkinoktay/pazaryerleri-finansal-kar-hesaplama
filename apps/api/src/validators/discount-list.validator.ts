@@ -15,6 +15,7 @@ import type { Prisma } from '@pazarsync/db';
 import { DiscountType, DiscountValueKind } from '@pazarsync/db/enums';
 
 import type { DiscountConfig } from '../services/discount-math-commons';
+import { NameSchema } from '../workbooks/form';
 import { QuoteBreakdownSchema } from './product-pricing.validator';
 
 // ─── Shared enums ───────────────────────────────────────────────────────────
@@ -183,7 +184,7 @@ export const ImportDiscountListFormSchema = DiscountConfigFieldsSchema.extend({
     format: 'binary',
     description: 'Trendyol İndirimler .xlsx (ürün seçim dosyası)',
   }),
-  name: z.string().optional().openapi({ description: 'İsteğe bağlı görünen ad; yoksa dosya adı.' }),
+  name: NameSchema.optional().openapi({ description: 'İsteğe bağlı görünen ad; yoksa dosya adı.' }),
 }).superRefine(refineDiscountConfig);
 
 export const ImportDiscountListResponseSchema = z
@@ -507,7 +508,7 @@ export const UpdateDiscountSelectionsResponseSchema = z
   .openapi('UpdateDiscountSelectionsResponse');
 
 export const UpdateDiscountListBodySchema = DiscountConfigFieldsSchema.extend({
-  name: z.string().min(1).optional(),
+  name: NameSchema.min(1).optional(),
 })
   .superRefine(refineDiscountConfig)
   .openapi('UpdateDiscountListBody');

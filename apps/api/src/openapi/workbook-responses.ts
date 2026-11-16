@@ -30,14 +30,15 @@ export const WORKBOOK_IMPORT_ERROR_RESPONSES = {
 
 /**
  * Error responses shared by every workbook export route: the stored workbook is
- * re-read through the same per-process parse queue and worker, which answer 503 when
- * the queue is full or waited too long, or the worker hit its memory or time limit.
+ * re-read and patched through the same per-process parse queue, which answers 503 only
+ * when the queue is full or the job waited too long in it. A worker that hits its
+ * memory or time limit on a stored file is a 409 conflict, not a 503.
  */
 export const WORKBOOK_EXPORT_ERROR_RESPONSES = {
   503: {
     content: { 'application/json': { schema: ProblemDetailsSchema } },
     description:
-      'The server is too busy to read the stored workbook right now: the parse queue is full or waited too long, or the parse hit its memory or time limit (IMPORT_BUSY)',
+      'The server is too busy to read the stored workbook right now: the parse queue is full or the job waited too long in it (IMPORT_BUSY)',
     headers: z.object({
       'Retry-After': z.number().int().openapi({ description: 'Seconds to wait before retrying' }),
     }),

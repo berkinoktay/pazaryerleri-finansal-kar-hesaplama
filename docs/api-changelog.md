@@ -26,6 +26,156 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Workbook imports run through the generic workbook import**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products|advantage-tariffs|plus-commission-tariffs|commission-tariffs}/import`).
+  Each change below applies to all six pages (discount lists, marketplace campaign lists, flash
+  product lists, advantage tariffs, Plus commission tariffs and commission tariffs) unless it
+  names one:
+  - The import route can answer `409` with `code: 'CONFLICT'` and `meta.reason`
+    `IMPORT_IN_PROGRESS` (another import of the same store and page is running) or
+    `UPLOAD_QUOTA_EXCEEDED` (the store already holds 50 lists of the page, or its stored source
+    files plus the upload would exceed 200 MiB). The `409` response is added to the route's
+    OpenAPI entry.
+  - A Hepsiburada store answers `422` with `{ field: 'file', code: 'UNSUPPORTED_PLATFORM_FORMAT' }`.
+  - The named sheet is selected strictly, with no first-sheet fallback: a workbook without it
+    answers `422` with `{ field: 'file', code: 'SHEET_NOT_FOUND' }`, or with the page's
+    invalid-format code (`INVALID_DISCOUNT_FORMAT` for discount lists) and `meta.detectedPage`
+    when its first sheet is another page's file. Marketplace campaign files are read by position
+    (the sheet name follows the campaign), so their first sheet is always the one read.
+  - A write-back column under a shared formula, an array formula or a merged range, or a barcode
+    cell longer than 256 characters, answers `422` with `{ field: 'file', code: 'MALFORMED_SHEET' }`
+    at upload instead of failing the first export; nothing is stored.
+  - The stored source file name drops control and format characters and path separators and is
+    cut to 120 characters; a name that does not end in `.xlsx` is not stored, and the list then
+    takes the page's default name instead of the file name stem (a commission or Plus commission
+    tariff first takes its first period's date range label, as it did when the file name had no
+    stem).
+  - A typed `name` is trimmed and then checked: over 120 characters answers `422` with
+    `{ field: 'name', code: 'NAME_TOO_LONG' }`, a control or format character (`\p{Cc}`,
+    `\p{Cf}`, a bidi override for instance) answers `422` with
+    `{ field: 'name', code: 'NAME_INVALID_CHARACTERS' }`; nothing is stored. Before, it was only
+    trimmed and stored at any length. A name empty after trimming still falls back to the file
+    name stem, then to the page's default name. The `name` form field gains `maxLength: 120` and
+    a `pattern` in the OpenAPI spec.
+  - The page's invalid-format answer (`INVALID_DISCOUNT_FORMAT` for discount lists,
+    `INVALID_CAMPAIGN_FORMAT` for marketplace campaign lists, `INVALID_FLASH_FORMAT` for flash
+    product lists, `INVALID_ADVANTAGE_TARIFF_FORMAT` for advantage tariffs,
+    `INVALID_PLUS_TARIFF_FORMAT` for Plus commission tariffs, `INVALID_TARIFF_FORMAT` for
+    commission tariffs) now always carries
+    `errors[0].meta`
+    with `detectedFormatId`, `detectedPlatform` and `detectedPage`; each is `null` when the file
+    matches no known page. Before, a file that matched no page carried no `meta`.
+  - A marketplace campaign file whose maximum price on a kept row is negative or has more than 10
+    integer digits answers `422` with `{ field: 'file', code: 'MALFORMED_SHEET' }`; nothing is
+    stored. Before, the file was stored, and an export that chose the maximum price for that row
+    wrote the negative value into the campaign price cell. The same holds for an advantage tariff
+    file whose star tier upper limit on a kept row is negative or has more than 10 integer digits
+    (the export writes the selected tier's upper limit), and for a Plus commission tariff file
+    whose Plus price ceiling on a kept row is negative or has more than 10 integer digits, or whose
+    period offer is negative (the export writes the ceiling as the Plus price and the offer as
+    the computed commission). An offer is read as it is stored, rounded to four decimals, so an
+    Excel float residue such as `15.400000000000002` is kept and exported as `15.4`. Before, a
+    negative Plus value was stored and exported, and a ceiling with more than 10 integer digits
+    failed the import with `500`.
+  - A commission tariff file whose current price on a kept row is negative or has more than 10
+    integer digits, or whose band price (the band's upper limit, else its lower limit, for every
+    band that has a commission in any period) is negative or has more than 10 integer digits,
+    answers `422` with
+    `{ field: 'file', code: 'MALFORMED_SHEET' }`; nothing is stored. The export writes the
+    selected band's price, or the current price, into the new price column. Before, a negative
+    or over-wide band price was stored and written into that cell on export, and a current price
+    with more than 10 integer digits failed the import with `500`. A band without a commission
+    in any period is not stored, so its limits are not checked.
+  - A number read from the file that does not fit its database column answers `422` with
+    `{ field: 'file', code: 'MALFORMED_SHEET' }`; nothing is stored. Examples: a Plus period offer
+    or a commission tariff's current commission of 100 or more, a price the export never writes
+    back with more than 10 integer digits, a stock outside the integer range. Before, the import
+    failed with `500`.
+  - A file the database could not store answers the same `422` `MALFORMED_SHEET`, and nothing is
+    stored: a text cell anywhere below the header holding the character U+0000 (an XML `&#0;`;
+    before, `500`), a flash product window date that is not a valid date or falls outside the years
+    1900 to 9999 (before, a year below 1 failed with `500` and any other year was stored), and any
+    other value Postgres refuses as a data exception while the rows are written (before, `500`).
+  - A commission or Plus commission tariff file whose header gives a period of 10 or more days,
+    or whose periods add up to 10 or more days, answers `422` with
+    `{ field: 'file', code: 'MALFORMED_SHEET' }`; nothing is stored. Before, the file was stored
+    and its export wrote a tariff selection label wider than the column's own. This check runs
+    before the tariff week check, so such a file whose week is already taken answers
+    `MALFORMED_SHEET`, not `DUPLICATE_TARIFF_WEEK`. A period header of 0 days, or more than seven
+    periods with data, answers the same `422`; before, such a file was stored and every zero-day
+    period became its own export file.
+  - A commission or Plus commission tariff import checks the tariff week again inside its write
+    transaction.
+    Two uploads of overlapping weeks that start on different days, sent at the same time, no
+    longer both store: the later one answers the duplicate week error (`DUPLICATE_TARIFF_WEEK`).
+  - On advantage tariffs the commission source (`commissionSourceTariffId`) is checked after the
+    file's rows are read, with the same field error (`INVALID_COMMISSION_SOURCE`): an upload that
+    is both a refused file and names another store's commission tariff answers the file error.
+- **Discount list and marketplace campaign list names follow the import's name rule**
+  (`PATCH /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}`,
+  `PATCH /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}`). A `name`
+  is trimmed and stored trimmed; a whitespace-only name now answers the `422` an empty name
+  already got; over 120 characters answers `422` `NAME_TOO_LONG` and a control or format
+  character `422` `NAME_INVALID_CHARACTERS` on `field: 'name'`, and nothing changes. Before, any
+  non-empty string was stored as sent. A list stored before this rule with such a character in its name
+  answers the same `422` while its stored name is sent back unchanged. The body's `name` gains
+  `maxLength: 120` and a `pattern` in the OpenAPI spec. The `name` and `source_filename` columns
+  of the six campaign list tables become `varchar(120)`.
+- **Workbook exports run through the generic workbook export**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}/export`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/export`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/flash-products/{listId}/export`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/{tariffId}/export`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/plus-commission-tariffs/{tariffId}/export`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/export`).
+  Each change below applies to all six pages unless it names one:
+  - The export writes only into the page's own sheet. Before, the same rows and columns were
+    patched on every worksheet of the stored workbook.
+  - Store access is checked before the record id in the path is validated: a malformed id answers
+    the store access error (`403` or `404`) to a caller without write access to the store, and
+    `422` only to a caller with it. Before, the id was validated first.
+  - Every export condition answers `409` with `code: 'CONFLICT'` and a `meta.reason`:
+    `STORED_FILE_MISSING` (no stored source file), `STORED_FILE_UNREADABLE` (the stored file no
+    longer passes the workbook gate or the patcher), `STORED_FILE_UNRECOGNIZED` (its format id is
+    unknown, its named sheet is missing or its header no longer resolves), `NO_WRITEBACK_COLUMN`,
+    `ROW_MISMATCH`, `ROW_ANCHOR_MISMATCH`, `ROW_NOT_FOUND` and `EXPORT_FILENAME_COLLISION`.
+  - A parse worker that hits its memory or time limit while reading or patching a stored file
+    answers `409` with `meta.reason` `STORED_FILE_UNREADABLE`, no longer `503`. `503` `IMPORT_BUSY`
+    now means only that the parse queue is full or the job waited too long in it; the `503`
+    description of all six export routes says so.
+  - The stored file's named sheet is read strictly, with no first-sheet fallback: a stored file
+    without it answers `409` `STORED_FILE_UNRECOGNIZED`.
+  - A list whose items no longer pair with the stored file's kept rows (a different count, or a
+    different barcode at a position) is refused with `409` `ROW_MISMATCH`. Before, those rows were
+    skipped and the rest exported.
+  - A commission tariff whose file holds two periods with the same day count, and whose export
+    writes a different price into each, answers `409` `EXPORT_FILENAME_COLLISION`. Before, both
+    window files took the same name and the `.zip` kept only one of them. The names are checked
+    before anything is patched.
+  - A plan of more files than one engine call patches (`MAX_PATCH_OUTPUTS`) answers `409` with
+    `meta.reason` `STORED_FILE_UNREADABLE` before anything is patched. Only a commission or Plus
+    tariff stored before its periods were checked at upload can plan that many window files.
+  - A list stored before the upload checked its values can hold one the export's write rule
+    refuses (a negative marketplace campaign maximum price, a tariff window wider than nine
+    days). Its export answers `409` with `meta.reason` `STORED_FILE_UNREADABLE` instead of `500`.
+  - Advantage tariff items are read in a fixed order (sort order, then barcode, then id). When two
+    items with one barcode both carry a price, the later one in that order is written; before,
+    the database's unspecified row order decided.
+  - Downloads carry `Content-Disposition` with both an ASCII `filename` and an RFC 8187
+    `filename*`, built from the stored upload name once control and format characters and path
+    separators are dropped (a stored name that does not end in `.xlsx` falls back to the page's
+    file name, `indirimler.xlsx` for discount lists and `kampanya.xlsx` for marketplace campaign
+    lists, or to the list name for advantage tariffs, which before served the raw stored name),
+    plus `Content-Length`,
+    `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. Flash product lists keep their
+    fixed `flas-urunler.xlsx`, Plus commission tariffs their fixed
+    `plus-komisyon-tarifesi-<N>-gunluk.xlsx` or `plus-komisyon-tarifesi.zip`, and commission
+    tariffs their fixed `urun-komisyon-tarifesi-<N>-gunluk.xlsx` or `urun-komisyon-tarifesi.zip`;
+    their header gains the ASCII `filename` beside the `filename*` it already sent. A commission
+    or Plus `.zip` of window files now stores its entries without compression; the entry names
+    are unchanged. The ASCII `filename` keeps
+    only letters, digits, spaces and `. _ ( ) -`; every other character becomes `_`, so header
+    parameter syntax in an upload name (`;`, `=`, `*`, `'`, `%`) never reaches it.
 - **The campaign workbook upload gate checks the zip layout, the root relationships and active
   parts** (`POST /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs|advantage-tariffs|flash-products|discount-lists|marketplace-campaigns}/import`).
   An upload whose zip archive is not laid out the way the export reads it (a gap, an overlap or a
@@ -196,7 +346,9 @@ section "Versioning" for details.
     with `{ field: 'file', code: 'PAYLOAD_TOO_LARGE' }`;
   - a parse that waits more than 20 s in the parse queue answers `503 IMPORT_BUSY` with
     `Retry-After`;
-  - an export whose stored file hits a worker limit answers `503 IMPORT_BUSY` instead of `409`.
+  - an export whose stored file hits a worker limit answers `503 IMPORT_BUSY` instead of `409`
+    (superseded: it now answers `409` with `meta.reason` `STORED_FILE_UNREADABLE`, see "Workbook
+    exports run through the generic workbook export").
 
   Before, such a file could crash or stall the API process. Non-breaking for well-behaved clients.
 - **Generic HTTP errors no longer echo library messages.** `400 MALFORMED_REQUEST` and other

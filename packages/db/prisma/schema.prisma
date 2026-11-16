@@ -1202,8 +1202,8 @@ model CommissionTariff {
   id             String    @id @default(uuid()) @db.Uuid
   organizationId String    @map("organization_id") @db.Uuid
   storeId        String    @map("store_id") @db.Uuid
-  name           String
-  sourceFilename String?   @map("source_filename")
+  name           String    @db.VarChar(120)
+  sourceFilename String?   @map("source_filename") @db.VarChar(120)
   // The raw uploaded .xlsx bytes, kept so export can patch the seller's chosen
   // price + tariff selection back into Trendyol's EXACT file (re-uploaded verbatim).
   sourceFile     Bytes?    @map("source_file")
@@ -1322,8 +1322,8 @@ model PlusCommissionTariff {
   id             String    @id @default(uuid()) @db.Uuid
   organizationId String    @map("organization_id") @db.Uuid
   storeId        String    @map("store_id") @db.Uuid
-  name           String
-  sourceFilename String?   @map("source_filename")
+  name           String    @db.VarChar(120)
+  sourceFilename String?   @map("source_filename") @db.VarChar(120)
   sourceFile     Bytes?    @map("source_file")
   // The workbook format that read sourceFile (see CommissionTariff.sourceFormatId).
   sourceFormatId String?   @map("source_format_id") @db.VarChar(64)
@@ -1440,8 +1440,8 @@ model AdvantageTariff {
   id             String    @id @default(uuid()) @db.Uuid
   organizationId String    @map("organization_id") @db.Uuid
   storeId        String    @map("store_id") @db.Uuid
-  name           String
-  sourceFilename String?   @map("source_filename")
+  name           String    @db.VarChar(120)
+  sourceFilename String?   @map("source_filename") @db.VarChar(120)
   // Raw uploaded .xlsx bytes, kept so export byte-patches Trendyol's EXACT file.
   sourceFile     Bytes?    @map("source_file")
   // The workbook format that read sourceFile (see CommissionTariff.sourceFormatId).
@@ -1530,8 +1530,8 @@ model FlashProductList {
   id             String    @id @default(uuid()) @db.Uuid
   organizationId String    @map("organization_id") @db.Uuid
   storeId        String    @map("store_id") @db.Uuid
-  name           String
-  sourceFilename String?   @map("source_filename")
+  name           String    @db.VarChar(120)
+  sourceFilename String?   @map("source_filename") @db.VarChar(120)
   // Raw uploaded .xlsx bytes, kept so export byte-patches Trendyol's EXACT file.
   sourceFile     Bytes?    @map("source_file")
   // The workbook format that read sourceFile (see CommissionTariff.sourceFormatId).
@@ -1609,7 +1609,7 @@ model DiscountList {
   id             String    @id @default(uuid()) @db.Uuid
   organizationId String    @map("organization_id") @db.Uuid
   storeId        String    @map("store_id") @db.Uuid
-  name           String
+  name           String    @db.VarChar(120)
   // ─── İndirim konfigürasyonu (tür başına zorunluluk Zod discriminated union'da;
   //     DB nullable bırakır — şema doğrulamayı validator katmanına bilinçli devreder).
   discountType    DiscountType      @map("discount_type")
@@ -1625,7 +1625,7 @@ model DiscountList {
   // endsAt yalnız bilgi amaçlı.
   startsAt        DateTime?         @map("starts_at")
   endsAt          DateTime?         @map("ends_at")
-  sourceFilename String?   @map("source_filename")
+  sourceFilename String?   @map("source_filename") @db.VarChar(120)
   // Raw uploaded .xlsx bytes, kept so export byte-patches Trendyol's EXACT file.
   sourceFile     Bytes?    @map("source_file")
   // The workbook format that read sourceFile (see CommissionTariff.sourceFormatId).
@@ -1691,7 +1691,7 @@ model MarketplaceCampaignList {
   id             String @id @default(uuid()) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   storeId        String @map("store_id") @db.Uuid
-  name           String
+  name           String @db.VarChar(120)
 
   // Kampanya kurgusu. DiscountType İndirimler ile PAYLAŞIK enum'dur; Kampanyalar
   // altı değerin beşini kullanır (CODE yalnız İndirimler'de görünür). Tür başına
@@ -1715,7 +1715,7 @@ model MarketplaceCampaignList {
   startsAt DateTime? @map("starts_at")
   endsAt   DateTime? @map("ends_at")
 
-  sourceFilename String?   @map("source_filename")
+  sourceFilename String?   @map("source_filename") @db.VarChar(120)
   // Ham .xlsx byte'ları: export Trendyol'un TAM dosyasını byte-koruyarak yamalar.
   sourceFile     Bytes?    @map("source_file")
   // The workbook format that read sourceFile (see CommissionTariff.sourceFormatId).

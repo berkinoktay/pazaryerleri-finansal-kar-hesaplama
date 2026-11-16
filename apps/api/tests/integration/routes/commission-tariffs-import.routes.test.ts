@@ -10,13 +10,17 @@
 
 import { readFileSync } from 'node:fs';
 
+import { z } from '@hono/zod-openapi';
 import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
+import { cellText, columnIndex, readWorkbookGrid, resolveLayout } from '@pazarsync/spreadsheet';
+import { patchFixture } from '@pazarsync/spreadsheet/testing';
 
 import { createApp } from '@/app';
+import { trendyolCommissionTariffFormat } from '@/workbooks/formats/trendyol/commission-tariff.format';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -148,9 +152,9 @@ async function setupStoreWithMatch(): Promise<Ctx> {
   return { accessToken: user.accessToken, orgId: org.id, storeId: store.id };
 }
 
-function importRequest(ctx: Ctx): Request {
+function importRequest(ctx: Ctx, file: Buffer = FIXTURE): Request {
   const form = new FormData();
-  form.append('file', new Blob([FIXTURE]), 'trendyol-commission-tariff.xlsx');
+  form.append('file', new Blob([new Uint8Array(file)]), 'trendyol-commission-tariff.xlsx');
   return new Request(
     `http://local/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/commission-tariffs/import`,
     { method: 'POST', headers: { Authorization: bearer(ctx.accessToken) }, body: form },
@@ -266,5 +270,163 @@ describe('POST .../commission-tariffs/import — profit recompute queueing', () 
     expect(
       await prisma.profitRecomputeRequest.findUnique({ where: { orderId: uncovered.id } }),
     ).toBeNull();
+  });
+});
+
+// The current commission is stored in a numeric(6,4) column and never written back, so
+// the import keeps a commission of 100 and the item insert is the first to refuse it.
+const OVERFLOWING_COMMISSION = '100';
+// Sheet row 2 is the fixture's first kept (barcode-carrying) row.
+const FIRST_KEPT_ROW = 2;
+
+// Strict issues: a `meta` on the file issue would fail the parse.
+const ProblemSchema = z.object({
+  status: z.number(),
+  code: z.string(),
+  errors: z.array(z.strictObject({ field: z.string(), code: z.string() })),
+});
+
+/** The fixture with the current commission of its first kept row replaced. */
+async function withFirstCurrentCommission(value: string): Promise<Buffer> {
+  const format = trendyolCommissionTariffFormat;
+  const grid = await readWorkbookGrid(FIXTURE, { sheet: format.sheet });
+  const layout = resolveLayout(format.layout, grid);
+  if (layout === null) throw new Error('unreadable commission fixture');
+  const barcode = columnIndex(format.layout, layout, 'barcode');
+  expect(cellText(grid[FIRST_KEPT_ROW - 1] ?? [], barcode)).not.toBeNull();
+  const commission = columnIndex(format.layout, layout, 'currentCommission');
+  if (commission === null) throw new Error('the fixture has no current commission column');
+  return patchFixture(
+    FIXTURE,
+    [{ excelRow: FIRST_KEPT_ROW, col: commission, value: { kind: 'number', value } }],
+    { sheet: format.sheet },
+  );
+}
+
+// A stock past even the 64-bit range: Prisma refuses it before the query with a
+// validation error (a 500) unless the row read refuses it first.
+const OVERFLOWING_STOCK = '100000000000000000000';
+
+/** The fixture with the stock of its first kept row replaced. */
+async function withFirstStock(value: string): Promise<Buffer> {
+  const format = trendyolCommissionTariffFormat;
+  const grid = await readWorkbookGrid(FIXTURE, { sheet: format.sheet });
+  const layout = resolveLayout(format.layout, grid);
+  if (layout === null) throw new Error('unreadable commission fixture');
+  const barcode = columnIndex(format.layout, layout, 'barcode');
+  expect(cellText(grid[FIRST_KEPT_ROW - 1] ?? [], barcode)).not.toBeNull();
+  const stock = columnIndex(format.layout, layout, 'stock');
+  if (stock === null) throw new Error('the fixture has no stock column');
+  return patchFixture(
+    FIXTURE,
+    [{ excelRow: FIRST_KEPT_ROW, col: stock, value: { kind: 'number', value } }],
+    { sheet: format.sheet },
+  );
+}
+
+describe('POST .../commission-tariffs/import - a number its column cannot hold', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  it('answers 422 MALFORMED_SHEET on file for a current commission of 100 and stores nothing', async () => {
+    await truncateAll();
+    const ctx = await setupStoreWithMatch();
+    const file = await withFirstCurrentCommission(OVERFLOWING_COMMISSION);
+
+    const res = await app.request(importRequest(ctx, file));
+
+    expect(res.status).toBe(422);
+    const body = ProblemSchema.parse(await res.json());
+    expect(body.status).toBe(422);
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual([{ field: 'file', code: 'MALFORMED_SHEET' }]);
+    // The write transaction rolled back: no tariff, period or item of the store.
+    const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
+    expect(await prisma.commissionTariff.count({ where: scope })).toBe(0);
+    expect(await prisma.commissionTariffPeriod.count({ where: scope })).toBe(0);
+    expect(await prisma.commissionTariffItem.count({ where: scope })).toBe(0);
+  });
+
+  it('answers 422 MALFORMED_SHEET on file for a stock past the 64-bit range and stores nothing', async () => {
+    await truncateAll();
+    const ctx = await setupStoreWithMatch();
+    const file = await withFirstStock(OVERFLOWING_STOCK);
+
+    const res = await app.request(importRequest(ctx, file));
+
+    expect(res.status).toBe(422);
+    const body = ProblemSchema.parse(await res.json());
+    expect(body.status).toBe(422);
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual([{ field: 'file', code: 'MALFORMED_SHEET' }]);
+    // The row read refused the file before the write: no tariff, period or item of the store.
+    const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
+    expect(await prisma.commissionTariff.count({ where: scope })).toBe(0);
+    expect(await prisma.commissionTariffPeriod.count({ where: scope })).toBe(0);
+    expect(await prisma.commissionTariffItem.count({ where: scope })).toBe(0);
+  });
+});
+
+// The day count inside a period header, "(N " before the day unit.
+const PERIOD_HEADER_DAYS_RE = /\(\d+ /;
+
+/**
+ * The fixture with the header of its present period (the block whose label the first
+ * data row fills) rewritten to `days` days; only the digits of the header change.
+ */
+async function withPresentPeriodDays(days: number): Promise<Buffer> {
+  const format = trendyolCommissionTariffFormat;
+  const grid = await readWorkbookGrid(FIXTURE, { sheet: format.sheet });
+  const layout = resolveLayout(format.layout, grid);
+  if (layout === null) throw new Error('unreadable commission fixture');
+  const headerRow = grid[layout.headerRowIndex] ?? [];
+  const firstRow = grid[layout.headerRowIndex + 1] ?? [];
+  const present = (layout.blocks.get('periods') ?? []).find(
+    (block) => cellText(firstRow, block.columns.get('label') ?? null) !== null,
+  );
+  if (present === undefined) throw new Error('the fixture has no present period');
+  const headerText = cellText(headerRow, present.anchor);
+  if (headerText === null) throw new Error('the present period has no header');
+  const rewritten = headerText.replace(PERIOD_HEADER_DAYS_RE, `(${days} `);
+  expect(rewritten).not.toBe(headerText);
+  const file = patchFixture(
+    FIXTURE,
+    [
+      {
+        excelRow: layout.headerRowIndex + 1,
+        col: present.anchor,
+        value: { kind: 'text', value: rewritten },
+      },
+    ],
+    { sheet: format.sheet },
+  );
+  // The rewritten file still resolves, its present period now tagged `days`.
+  const reread = resolveLayout(
+    format.layout,
+    await readWorkbookGrid(file, { sheet: format.sheet }),
+  );
+  expect((reread?.blocks.get('periods') ?? []).map((block) => block.tag)).toContain(days);
+  return file;
+}
+
+describe('POST .../commission-tariffs/import - a period of 0 days', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  it('answers 422 MALFORMED_SHEET on file for a "(0 days)" period header and stores nothing', async () => {
+    await truncateAll();
+    const ctx = await setupStoreWithMatch();
+    const file = await withPresentPeriodDays(0);
+
+    const res = await app.request(importRequest(ctx, file));
+
+    expect(res.status).toBe(422);
+    const body = ProblemSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual([{ field: 'file', code: 'MALFORMED_SHEET' }]);
+    const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
+    expect(await prisma.commissionTariff.count({ where: scope })).toBe(0);
   });
 });

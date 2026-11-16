@@ -1,14 +1,12 @@
-import { strToU8, unzipSync, type Unzipped } from 'fflate';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { MAX_FORMAT_CODE_LENGTH, MAX_WORKBOOK_RELS_BYTES } from './constants';
+import { MAX_FORMAT_CODE_LENGTH } from './constants';
 import { SpreadsheetFileError, type SpreadsheetFileErrorCode } from './errors';
 import type { SheetData } from './grid-types';
 import { openUpload } from './guards';
 import { readWorkbookGrid } from './parse';
 import { checkUploadParts, readUploadGrid } from './read-grid';
 import { resolveReadOptions, type ReadGridOptions } from './read-options';
-import { resolveWorksheetPartPaths } from './index';
 import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
 import { localName } from './xml-dom';
 import { ZIP_REJECT_REASONS } from './patch/reasons';
@@ -25,7 +23,6 @@ import { expectWithinBudget, LINEAR_BUDGET_MS } from '../tests/helpers/timing';
 
 const SPREADSHEET_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>';
-const SHEET_PART = 'xl/worksheets/sheet1.xml';
 const FORGED_REF = 'A1:ZZ300000';
 const FAR_CELL = 'A200000';
 const GUARD_OPTS = { rowCap: 5_000, colCap: 64, maxBytes: 10 * 1024 * 1024 } as const;
@@ -533,73 +530,6 @@ describe('localName', () => {
   // Must match the old reader's getTagName, `tagName.replace(/.+:/, '')`.
   it.each(['c', 'x:c', 'ü:dimension', 'sheetData', 'a:b:c', ':c', 'x:'])('%s', (tagName) => {
     expect(localName(tagName)).toBe(tagName.replace(/.+:/, ''));
-  });
-});
-
-// The worksheet parts the workbook rels name, resolved the way the reader does; the
-// export patcher touches only these.
-describe('resolveWorksheetPartPaths', () => {
-  function entriesOf(
-    relationships: string,
-    extra: Readonly<Record<string, string>> = {},
-  ): Unzipped {
-    return unzipSync(
-      new Uint8Array(
-        buildXlsxFixture([{ name: 'Sheet1', xml: sheet(TWO_ROWS) }], {
-          'xl/_rels/workbook.xml.rels': relsOf(relationships),
-          ...extra,
-        }),
-      ),
-    );
-  }
-
-  it('returns each worksheet Target once, relative and absolute alike', () => {
-    const entries = entriesOf(
-      SHEET_RELATIONSHIP +
-        `<Relationship Id="rId3" Type="${OFFICE_REL}/worksheet" Target="/xl/worksheets/data.xml"/>` +
-        `<Relationship Id="rId4" Type="${OFFICE_REL}/worksheet" Target="worksheets/sheet1.xml"/>`,
-    );
-    expect(resolveWorksheetPartPaths(entries)).toEqual([SHEET_PART, 'xl/worksheets/data.xml']);
-  });
-
-  it('leaves out the styles and shared strings Targets', () => {
-    const entries = entriesOf(
-      SHEET_RELATIONSHIP +
-        SHARED_STRINGS_RELATIONSHIP +
-        `<Relationship Id="rId3" Type="${OFFICE_REL}/styles" Target="styles.xml"/>`,
-    );
-    expect(resolveWorksheetPartPaths(entries)).toEqual([SHEET_PART]);
-  });
-
-  it('leaves out a worksheet part no relationship names', () => {
-    const entries = entriesOf(SHEET_RELATIONSHIP, { 'xl/worksheets/sheet9.xml': sheet(TWO_ROWS) });
-    expect(resolveWorksheetPartPaths(entries)).toEqual([SHEET_PART]);
-  });
-
-  it('rejects an archive without workbook rels as CORRUPT_FILE', () => {
-    const entries = Object.fromEntries(
-      Object.entries(entriesOf(SHEET_RELATIONSHIP)).filter(
-        ([name]) => name !== 'xl/_rels/workbook.xml.rels',
-      ),
-    );
-    expect(() => resolveWorksheetPartPaths(entries)).toThrow(
-      expect.objectContaining({ code: 'CORRUPT_FILE' }),
-    );
-  });
-
-  it('rejects workbook rels over MAX_WORKBOOK_RELS_BYTES before parsing them', () => {
-    const entries = entriesOf(`${SHEET_RELATIONSHIP}<!--${'x'.repeat(MAX_WORKBOOK_RELS_BYTES)}-->`);
-    expect(() => resolveWorksheetPartPaths(entries)).toThrow(
-      expect.objectContaining({ code: 'PAYLOAD_TOO_LARGE' }),
-    );
-  });
-
-  it('rejects workbook rels that are not well-formed as CORRUPT_FILE', () => {
-    const entries = entriesOf(SHEET_RELATIONSHIP);
-    entries['xl/_rels/workbook.xml.rels'] = strToU8('<Relationships>');
-    expect(() => resolveWorksheetPartPaths(entries)).toThrow(
-      expect.objectContaining({ code: 'CORRUPT_FILE' }),
-    );
   });
 });
 

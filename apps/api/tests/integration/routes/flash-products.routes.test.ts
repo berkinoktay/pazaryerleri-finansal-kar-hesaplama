@@ -577,11 +577,17 @@ describe('Flash Products - list / detail / delete', () => {
     );
     expect(foreign.status).toBe(404);
 
+    // The items go with the list: the database cascades the scoped delete.
+    const itemCount = async (): Promise<number> =>
+      prisma.flashProductItem.count({ where: { listId: fx.listId } });
+    expect(await itemCount()).toBeGreaterThan(0);
+
     const del = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/flash-products/${fx.listId}`,
       { method: 'DELETE', headers: { Authorization: bearer(fx.accessToken) } },
     );
     expect(del.status).toBe(204);
+    expect(await itemCount()).toBe(0);
 
     const detail = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/flash-products/${fx.listId}`,

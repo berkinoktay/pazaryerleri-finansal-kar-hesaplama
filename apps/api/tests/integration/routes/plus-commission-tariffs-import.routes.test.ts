@@ -11,12 +11,16 @@
 
 import { readFileSync } from 'node:fs';
 
+import { z } from '@hono/zod-openapi';
 import { Decimal } from 'decimal.js';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { cellText, columnIndex, readWorkbookGrid, resolveLayout } from '@pazarsync/spreadsheet';
+import { patchFixture } from '@pazarsync/spreadsheet/testing';
 
 import { createApp } from '@/app';
+import { trendyolPlusCommissionTariffFormat } from '@/workbooks/formats/trendyol/plus-commission-tariff.format';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -212,5 +216,121 @@ describe('POST .../plus-commission-tariffs/import - real Trendyol fixtures', () 
     // The 3-day block starts the window, the 4-day block ends it.
     expect(tariff?.weekStartsAt?.getTime()).toBe(period3.startsAt?.getTime());
     expect(tariff?.weekEndsAt?.getTime()).toBe(period4.endsAt?.getTime());
+  });
+});
+
+// A period offer is stored in a numeric(6,4) column. The import's write-back check reads
+// it as a plain number, so an offer of 100 reaches the item insert, which cannot hold it.
+const OVERFLOWING_OFFER = '100';
+// Sheet row 2, the first kept row of the single-period fixture, is MATCHED_BARCODE's.
+const FIRST_KEPT_ROW = 2;
+
+// Strict issues: a `meta` on the file issue would fail the parse.
+const ProblemSchema = z.object({
+  status: z.number(),
+  code: z.string(),
+  errors: z.array(z.strictObject({ field: z.string(), code: z.string() })),
+});
+
+/** The single-period fixture with the first period's offer of its first kept row replaced. */
+async function withFirstOffer(value: string): Promise<Buffer> {
+  const format = trendyolPlusCommissionTariffFormat;
+  const grid = await readWorkbookGrid(FIXTURE_7DAY, { sheet: format.sheet });
+  const layout = resolveLayout(format.layout, grid);
+  if (layout === null) throw new Error('unreadable Plus fixture');
+  const barcode = columnIndex(format.layout, layout, 'barcode');
+  expect(cellText(grid[FIRST_KEPT_ROW - 1] ?? [], barcode)).toBe(MATCHED_BARCODE);
+  const offer = layout.blocks.get('periods')?.[0]?.columns.get('offer') ?? null;
+  if (offer === null) throw new Error('the fixture has no offer column');
+  return patchFixture(
+    FIXTURE_7DAY,
+    [{ excelRow: FIRST_KEPT_ROW, col: offer, value: { kind: 'number', value } }],
+    { sheet: format.sheet },
+  );
+}
+
+describe('POST .../plus-commission-tariffs/import - a number its column cannot hold', () => {
+  beforeEach(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+  });
+
+  it('answers 422 MALFORMED_SHEET on file for a period offer of 100 and stores nothing', async () => {
+    const ctx = await setupStore();
+    const file = await withFirstOffer(OVERFLOWING_OFFER);
+
+    const res = await app.request(importRequest(ctx, file, 'trendyol-plus-tariff.xlsx'));
+
+    expect(res.status).toBe(422);
+    const body = ProblemSchema.parse(await res.json());
+    expect(body.status).toBe(422);
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual([{ field: 'file', code: 'MALFORMED_SHEET' }]);
+    // The write transaction rolled back: no tariff, period or item of the store.
+    const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
+    expect(await prisma.plusCommissionTariff.count({ where: scope })).toBe(0);
+    expect(await prisma.plusCommissionTariffPeriod.count({ where: scope })).toBe(0);
+    expect(await prisma.plusCommissionTariffItem.count({ where: scope })).toBe(0);
+  });
+});
+
+// The day count inside a period header, "(N " before the day unit.
+const PERIOD_HEADER_DAYS_RE = /\(\d+ /;
+
+/**
+ * The single-period fixture with the header of its one period rewritten to `days`
+ * days; only the digits of the header change, so the file keeps one block.
+ */
+async function withPeriodDays(days: number): Promise<Buffer> {
+  const format = trendyolPlusCommissionTariffFormat;
+  const grid = await readWorkbookGrid(FIXTURE_7DAY, { sheet: format.sheet });
+  const layout = resolveLayout(format.layout, grid);
+  if (layout === null) throw new Error('unreadable Plus fixture');
+  const blocks = layout.blocks.get('periods') ?? [];
+  expect(blocks).toHaveLength(1);
+  const period = blocks[0];
+  if (period === undefined) throw new Error('the fixture has no period block');
+  const headerText = cellText(grid[layout.headerRowIndex] ?? [], period.anchor);
+  if (headerText === null) throw new Error('the period has no header');
+  const rewritten = headerText.replace(PERIOD_HEADER_DAYS_RE, `(${days} `);
+  expect(rewritten).not.toBe(headerText);
+  const file = patchFixture(
+    FIXTURE_7DAY,
+    [
+      {
+        excelRow: layout.headerRowIndex + 1,
+        col: period.anchor,
+        value: { kind: 'text', value: rewritten },
+      },
+    ],
+    { sheet: format.sheet },
+  );
+  // The rewritten file still resolves, its one period now tagged `days`.
+  const reread = resolveLayout(
+    format.layout,
+    await readWorkbookGrid(file, { sheet: format.sheet }),
+  );
+  expect((reread?.blocks.get('periods') ?? []).map((block) => block.tag)).toEqual([days]);
+  return file;
+}
+
+describe('POST .../plus-commission-tariffs/import - a period of 0 days', () => {
+  beforeEach(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+  });
+
+  it('answers 422 MALFORMED_SHEET on file for a "(0 days)" period header and stores nothing', async () => {
+    const ctx = await setupStore();
+    const file = await withPeriodDays(0);
+
+    const res = await app.request(importRequest(ctx, file, 'trendyol-plus-tariff.xlsx'));
+
+    expect(res.status).toBe(422);
+    const body = ProblemSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual([{ field: 'file', code: 'MALFORMED_SHEET' }]);
+    const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
+    expect(await prisma.plusCommissionTariff.count({ where: scope })).toBe(0);
   });
 });

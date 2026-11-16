@@ -1,5 +1,4 @@
 import type { Element } from '@xmldom/xmldom';
-import { strFromU8, type Unzipped } from 'fflate';
 
 import { MAX_WORKBOOK_RELS_BYTES } from './constants';
 import { SpreadsheetFileError } from './errors';
@@ -27,7 +26,6 @@ const READER_RELATIONSHIP_TYPES: ReadonlySet<string> = new Set([
   SHARED_STRINGS_RELATIONSHIP_TYPE,
   WORKSHEET_RELATIONSHIP_TYPE,
 ]);
-const WORKSHEET_RELATIONSHIP_TYPES: ReadonlySet<string> = new Set([WORKSHEET_RELATIONSHIP_TYPE]);
 // getFilePath: an absolute Target loses its leading '/', a relative one is under xl/.
 const ABSOLUTE_TARGET_PREFIX = '/';
 const RELATIVE_TARGET_BASE = 'xl/';
@@ -105,9 +103,10 @@ export function readerPartPaths(relsXml: string): string[] {
 
 /**
  * The workbook rels part within MAX_WORKBOOK_RELS_BYTES, else PAYLOAD_TOO_LARGE. The
- * export resolves worksheet parts from it on the API's main thread, outside the parse
- * worker, so the gate (at import) and resolveWorksheetPartPaths (at export) both
- * refuse an oversized one before anything parses it.
+ * gate (selectReaderParts in guards.ts) calls it before it parses the rels to find the
+ * parts the reader opens (readerPartPaths). The gate runs inside the parse worker on
+ * every read and every patch, so an export's patch of a stored file checks the same
+ * part again before parsing it.
  */
 export function assertWorkbookRelsWithinCap(rels: Uint8Array): void {
   if (rels.length <= MAX_WORKBOOK_RELS_BYTES) return;
@@ -116,24 +115,6 @@ export function assertWorkbookRelsWithinCap(rels: Uint8Array): void {
     `Workbook rels part exceeds ${MAX_WORKBOOK_RELS_BYTES}B`,
     { entry: WORKBOOK_RELS_PART, cap: MAX_WORKBOOK_RELS_BYTES },
   );
-}
-
-/**
- * Entry names of the worksheet parts the workbook rels of `entries` name, each
- * once, in document order, resolved the way the reader resolves them (see
- * relationshipPartPaths). These are exactly the worksheets the upload gate parsed
- * and bounded; any other entry under `xl/worksheets/` was never checked. Throws
- * SpreadsheetFileError CORRUPT_FILE when the workbook rels part is missing or does
- * not parse; an archive that passed the gate always has well-formed rels. The export
- * calls this on the API's main thread, outside the parse worker, so a rels part over
- * MAX_WORKBOOK_RELS_BYTES is refused (PAYLOAD_TOO_LARGE) before it is parsed; the
- * gate refuses the same part at import.
- */
-export function resolveWorksheetPartPaths(entries: Unzipped): readonly string[] {
-  const rels = entries[WORKBOOK_RELS_PART];
-  if (rels === undefined) throw corruptPart(WORKBOOK_RELS_PART, 'Workbook rels part is missing');
-  assertWorkbookRelsWithinCap(rels);
-  return [...new Set(relationshipPartPaths(strFromU8(rels), WORKSHEET_RELATIONSHIP_TYPES))];
 }
 
 /**

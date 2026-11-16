@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   planWindowFiles,
   TARIFF_WEEK_DAYS,
+  tariffWeekDays,
   type WindowFilePlan,
   type WindowPeriodInput,
 } from '../window-plan';
@@ -10,9 +11,9 @@ import { WORKBOOK_PAGES } from '../workbook-pages';
 
 // The window plan decides which picked key goes into which file: one file per
 // sub-period for period-specific values, plus one whole-week file for keys picked
-// with the identical string in EVERY sub-period. The cases below are the api's
-// `commission-tariff-export-plan.test.ts` cases, ported from labels/suffixes to the
-// numeric `dayCount` this function returns.
+// with the identical string in EVERY sub-period. The cases below are those of the api's
+// former `commission-tariff-export-plan.test.ts` (deleted with the legacy commission
+// export), ported from labels/suffixes to the numeric `dayCount` this function returns.
 
 function period(dayCount: number | null, picks: Record<string, string>): WindowPeriodInput {
   return { dayCount, picks: new Map(Object.entries(picks)) };
@@ -158,6 +159,30 @@ describe('planWindowFiles', () => {
       { dayCount: 4, periodIndices: [0], picks: [['A', '1.00']] },
       { dayCount: 4, periodIndices: [1], picks: [['A', '2.00']] },
     ]);
+  });
+});
+
+describe('tariffWeekDays', () => {
+  it('is the sum of the day counts', () => {
+    expect(tariffWeekDays([3, 4])).toBe(7);
+    expect(tariffWeekDays([7])).toBe(7);
+    expect(tariffWeekDays([3, 7])).toBe(10);
+    expect(tariffWeekDays([2, 2, 3])).toBe(7);
+  });
+
+  it('counts a null day count as 0', () => {
+    expect(tariffWeekDays([null, 4])).toBe(4);
+  });
+
+  it('falls back to the tariff week when the day counts sum to zero', () => {
+    expect(tariffWeekDays([])).toBe(TARIFF_WEEK_DAYS);
+    expect(tariffWeekDays([null, null])).toBe(TARIFF_WEEK_DAYS);
+    expect(tariffWeekDays([0])).toBe(TARIFF_WEEK_DAYS);
+  });
+
+  it('is the day count of the whole-week file planWindowFiles writes', () => {
+    const plans = planWindowFiles([period(3, { A: '1.00' }), period(7, { A: '1.00' })]);
+    expect(plans.map((plan) => plan.dayCount)).toEqual([tariffWeekDays([3, 7])]);
   });
 });
 

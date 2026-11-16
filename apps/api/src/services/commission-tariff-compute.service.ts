@@ -20,7 +20,7 @@
 
 import { Decimal } from 'decimal.js';
 
-import { storedTariffBandForPrice, type StoredTariffBand } from '@pazarsync/profit';
+import { bandPrice, storedTariffBandForPrice, type StoredTariffBand } from '@pazarsync/profit';
 
 import {
   evaluateScreenScenario,
@@ -74,20 +74,6 @@ export interface ComputedItemBands {
 }
 
 const NULL_CURRENT: ComputedCurrentScenario = { netProfit: null, marginPct: null };
-
-/**
- * A band's representative price = the boundary the seller SEES in that column: the upper
- * limit for the bounded bands (2-4, "X ve altı"), else the LOWER limit for the open-topped
- * band 1 ("X ve üzeri" — the cheapest price still in the top band). Trendyol's own panel
- * pins the price-update field to exactly this boundary regardless of the current price, and
- * the band's shown profit is computed at it — so selection, profit, and export all use one
- * number. currentPrice is only a defensive fallback for a band with neither limit.
- */
-export function bandPrice(band: StoredTariffBand, currentPrice: Decimal): Decimal {
-  if (band.upperLimit !== null) return new Decimal(band.upperLimit);
-  if (band.lowerLimit !== null) return new Decimal(band.lowerLimit);
-  return currentPrice;
-}
 
 function nullBandResults(
   bands: ReadonlyArray<StoredTariffBand>,

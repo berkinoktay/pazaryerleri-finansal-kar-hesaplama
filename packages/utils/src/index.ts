@@ -32,6 +32,7 @@ export { WORKBOOK_PAGES, type WorkbookPage } from './workbook-pages';
 export {
   planWindowFiles,
   TARIFF_WEEK_DAYS,
+  tariffWeekDays,
   type WindowFilePlan,
   type WindowPeriodInput,
 } from './window-plan';

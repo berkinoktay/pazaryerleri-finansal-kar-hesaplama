@@ -169,6 +169,7 @@ export {
   trendyolSettlementRecordInput,
 } from './marketplaces/trendyol/finance-record-inputs';
 export {
+  bandPrice,
   parseStoredTariffBands,
   storedTariffBandForPrice,
   type StoredTariffBand,

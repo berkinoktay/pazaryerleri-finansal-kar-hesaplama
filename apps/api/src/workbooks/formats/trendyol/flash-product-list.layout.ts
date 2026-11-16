@@ -1,8 +1,6 @@
 // The Trendyol flash product sheet as layout data. Every column is found by header; a
 // row carries its own 24-hour and 3-hour offers, each with a price and a window. The
-// legacy resolver (services/flash-product-layout.ts) stays in use until the vertical
-// moves onto this file; tests/unit/workbooks/trendyol-layouts.test.ts keeps the two in
-// lockstep.
+// flash import and export both read through this file.
 
 import {
   all,

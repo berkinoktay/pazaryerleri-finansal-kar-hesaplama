@@ -6851,7 +6851,9 @@
           },
           "name": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 120,
+            "pattern": "^[^\\p{Cc}\\p{Cf}]*$"
           }
         },
         "required": [
@@ -7634,7 +7636,9 @@
           },
           "name": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 120,
+            "pattern": "^[^\\p{Cc}\\p{Cf}]*$"
           }
         },
         "required": [
@@ -16195,6 +16199,8 @@
                   },
                   "name": {
                     "type": "string",
+                    "maxLength": 120,
+                    "pattern": "^[^\\p{Cc}\\p{Cf}]*$",
                     "description": "İsteğe bağlı görünen ad; yoksa dosya adı."
                   }
                 },
@@ -16264,6 +16270,16 @@
           },
           "404": {
             "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another import of this page is running, or the store's upload quota is reached",
             "content": {
               "application/json": {
                 "schema": {
@@ -16465,7 +16481,7 @@
             }
           },
           "503": {
-            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or waited too long, or the parse hit its memory or time limit (IMPORT_BUSY)",
+            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or the job waited too long in it (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -17193,6 +17209,8 @@
                   },
                   "name": {
                     "type": "string",
+                    "maxLength": 120,
+                    "pattern": "^[^\\p{Cc}\\p{Cf}]*$",
                     "description": "İsteğe bağlı görünen ad; yoksa dosya adı."
                   }
                 },
@@ -17262,6 +17280,16 @@
           },
           "404": {
             "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another import of this page is running, or the store's upload quota is reached",
             "content": {
               "application/json": {
                 "schema": {
@@ -17463,7 +17491,7 @@
             }
           },
           "503": {
-            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or waited too long, or the parse hit its memory or time limit (IMPORT_BUSY)",
+            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or the job waited too long in it (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -18191,6 +18219,8 @@
                   },
                   "name": {
                     "type": "string",
+                    "maxLength": 120,
+                    "pattern": "^[^\\p{Cc}\\p{Cf}]*$",
                     "description": "İsteğe bağlı görünen ad; yoksa dosya adı."
                   },
                   "commissionSourceTariffId": {
@@ -18275,6 +18305,16 @@
           },
           "404": {
             "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another import of this page is running, or the store's upload quota is reached",
             "content": {
               "application/json": {
                 "schema": {
@@ -18470,7 +18510,7 @@
             }
           },
           "503": {
-            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or waited too long, or the parse hit its memory or time limit (IMPORT_BUSY)",
+            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or the job waited too long in it (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -19349,6 +19389,8 @@
                   },
                   "name": {
                     "type": "string",
+                    "maxLength": 120,
+                    "pattern": "^[^\\p{Cc}\\p{Cf}]*$",
                     "description": "İsteğe bağlı görünen ad; yoksa dosya adı."
                   }
                 },
@@ -19418,6 +19460,16 @@
           },
           "404": {
             "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another import of this page is running, or the store's upload quota is reached",
             "content": {
               "application/json": {
                 "schema": {
@@ -19924,7 +19976,7 @@
             }
           },
           "503": {
-            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or waited too long, or the parse hit its memory or time limit (IMPORT_BUSY)",
+            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or the job waited too long in it (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -20379,6 +20431,8 @@
                   },
                   "name": {
                     "type": "string",
+                    "maxLength": 120,
+                    "pattern": "^[^\\p{Cc}\\p{Cf}]*$",
                     "description": "İsteğe bağlı görünen ad; yoksa dosya adı."
                   }
                 },
@@ -20449,6 +20503,16 @@
           },
           "404": {
             "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another import of this page is running, or the store's upload quota is reached",
             "content": {
               "application/json": {
                 "schema": {
@@ -21331,7 +21395,7 @@
             }
           },
           "503": {
-            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or waited too long, or the parse hit its memory or time limit (IMPORT_BUSY)",
+            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or the job waited too long in it (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -21565,6 +21629,8 @@
                   },
                   "name": {
                     "type": "string",
+                    "maxLength": 120,
+                    "pattern": "^[^\\p{Cc}\\p{Cf}]*$",
                     "description": "İsteğe bağlı görünen ad; yoksa dosya adı."
                   }
                 },
@@ -21635,6 +21701,16 @@
           },
           "404": {
             "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another import of this page is running, or the store's upload quota is reached",
             "content": {
               "application/json": {
                 "schema": {
@@ -22668,7 +22744,7 @@
             }
           },
           "503": {
-            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or waited too long, or the parse hit its memory or time limit (IMPORT_BUSY)",
+            "description": "The server is too busy to read the stored workbook right now: the parse queue is full or the job waited too long in it (IMPORT_BUSY)",
             "headers": {
               "Retry-After": {
                 "schema": {

@@ -645,8 +645,8 @@ describe('upload gate', () => {
     expect(catchGuard(file, SMALL_BUDGET)).toBeNull();
   });
 
-  // The export resolves worksheet parts from the rels on the main thread, outside the
-  // parse worker, so the rels part has its own byte cap.
+  // The gate parses the rels to find the parts the reader opens, so the rels part has
+  // its own byte cap, checked before that parse.
   it('rejects workbook rels over MAX_WORKBOOK_RELS_BYTES as PAYLOAD_TOO_LARGE', () => {
     const relsWithComment = (length: number): string =>
       relsXml([SHEET_RELATIONSHIP]).replace(

@@ -9,12 +9,14 @@
 // items' per-order discount cost. These tests lock the config round-trip, the real
 // scenario shape, the PATCH validator gate, and the delete cascade.
 
+import { z } from '@hono/zod-openapi';
 import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 
 import { createApp } from '@/app';
+import { UPLOAD_NAME_MAX_LENGTH } from '@/config/workbook-limits';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -30,6 +32,9 @@ const CAMPAIGN_WINDOW = {
   startsAt: '2026-07-21T05:00:00.000Z',
   endsAt: '2026-07-28T04:59:00.000Z',
 } as const;
+
+// The whole body of a 422, field issues as sent (meta included), for a strict pin.
+const RawValidationSchema = z.object({ code: z.string(), errors: z.array(z.unknown()) });
 
 interface ScenarioWire {
   price: string;
@@ -270,6 +275,18 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
   });
 
   it('full-replaces the config on PATCH and reflects it in the detail', async () => {
+    // The PATCH moves the list's updatedAt forward: start it at an old instant.
+    const listScope = { id: fx.listId, organizationId: fx.orgId, storeId: fx.storeId };
+    const oldUpdatedAt = new Date('2020-01-01T00:00:00.000Z');
+    await prisma.discountList.updateMany({ where: listScope, data: { updatedAt: oldUpdatedAt } });
+    const before = await prisma.discountList.findFirst({
+      where: listScope,
+      select: { updatedAt: true },
+    });
+    if (before?.updatedAt.getTime() !== oldUpdatedAt.getTime()) {
+      throw new Error('the list did not start at the old updatedAt');
+    }
+
     const patch = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,
       {
@@ -287,6 +304,11 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
     );
     expect(patch.status).toBe(200);
     expect(((await patch.json()) as { id: string }).id).toBe(fx.listId);
+    const after = await prisma.discountList.findFirst({
+      where: listScope,
+      select: { updatedAt: true },
+    });
+    expect(after?.updatedAt.getTime()).toBeGreaterThan(oldUpdatedAt.getTime());
 
     const res = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,
@@ -383,12 +405,49 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
     expect(body.errors.some((e) => e.field === 'value' && e.code === 'VALUE_TOO_LARGE')).toBe(true);
   });
 
+  it('rejects a name above 120 characters with 422 NAME_TOO_LONG and leaves the list as it was', async () => {
+    const listScope = { id: fx.listId, organizationId: fx.orgId, storeId: fx.storeId };
+    const select = { name: true, updatedAt: true } as const;
+    const before = await prisma.discountList.findFirst({ where: listScope, select });
+    if (before === null) throw new Error('the seeded list is gone');
+
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'n'.repeat(UPLOAD_NAME_MAX_LENGTH + 1),
+          discountType: 'CONDITIONAL_BASKET',
+          valueKind: 'AMOUNT',
+          value: '20',
+          minBasketAmount: '150',
+          ...CAMPAIGN_WINDOW,
+        }),
+      },
+    );
+
+    expect(res.status).toBe(422);
+    const body = RawValidationSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toStrictEqual([
+      { field: 'name', code: 'NAME_TOO_LONG', meta: { zodCode: 'too_big' } },
+    ]);
+    expect(await prisma.discountList.findFirst({ where: listScope, select })).toEqual(before);
+  });
+
   it('deletes the list (204), then the detail 404s and the list is empty', async () => {
+    // The items go with the list: the database cascades the scoped delete.
+    const itemCount = async (): Promise<number> =>
+      prisma.discountListItem.count({ where: { listId: fx.listId } });
+    expect(await itemCount()).toBeGreaterThan(0);
+
     const del = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,
       { method: 'DELETE', headers: { Authorization: bearer(fx.accessToken) } },
     );
     expect(del.status).toBe(204);
+    expect(await itemCount()).toBe(0);
 
     const detail = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,

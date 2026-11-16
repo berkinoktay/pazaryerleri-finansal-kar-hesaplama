@@ -33,6 +33,15 @@ export interface WindowFilePlan<K extends string = string> {
 }
 
 /**
+ * The length in days of a tariff week whose sub-periods have `dayCounts`: their sum, a
+ * null count adding 0, or TARIFF_WEEK_DAYS when that sum is 0. It is the day count of
+ * the whole-week file `planWindowFiles` writes.
+ */
+export function tariffWeekDays(dayCounts: readonly (number | null)[]): number {
+  return dayCounts.reduce<number>((sum, days) => sum + (days ?? 0), 0) || TARIFF_WEEK_DAYS;
+}
+
+/**
  * Buckets per-sub-period picks into window files, each emitted only when it has a key.
  *
  * - The week length is the sum of the `dayCount`s (null counts as 0), or the fallback
@@ -49,8 +58,7 @@ export function planWindowFiles<K extends string>(
   periods: readonly WindowPeriodInput<K>[],
 ): WindowFilePlan<K>[] {
   if (periods.length === 0) return [];
-  // The week length is the sum of the day counts, or TARIFF_WEEK_DAYS when they sum to 0.
-  const weekDays = periods.reduce((sum, p) => sum + (p.dayCount ?? 0), 0) || TARIFF_WEEK_DAYS;
+  const weekDays = tariffWeekDays(periods.map((p) => p.dayCount));
 
   if (periods.length === 1) {
     const only = periods[0];

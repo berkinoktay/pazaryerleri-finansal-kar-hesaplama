@@ -1,7 +1,6 @@
 // The Trendyol advantage (star-labelled product) tariff sheet as layout data. Every
-// column is found by header. The legacy resolver (services/advantage-tariff-layout.ts)
-// stays in use until the vertical moves onto this file;
-// tests/unit/workbooks/trendyol-layouts.test.ts keeps the two in lockstep.
+// column is found by header. The advantage import and export both read through this
+// file.
 
 import {
   all,

@@ -18,6 +18,7 @@ import {
   UnauthorizedError,
   UnsupportedMediaTypeError,
   ValidationError,
+  WorkbookConflictError,
 } from '@/lib/errors';
 import { problemDetailsForError } from '@/lib/problem-details';
 
@@ -70,6 +71,19 @@ describe('problemDetailsForError — extended error classes', () => {
     const { body, status } = problemDetailsForError(new ConflictError('slug taken'));
     expect(status).toBe(409);
     expect(body.code).toBe('CONFLICT');
+  });
+
+  it('maps WorkbookConflictError to 409 CONFLICT with meta.reason and the fixed detail of its reason', () => {
+    const { body, status } = problemDetailsForError(new WorkbookConflictError('ROW_MISMATCH'));
+    expect(status).toBe(409);
+    expect(body).toEqual({
+      type: 'https://api.pazarsync.com/errors/conflict',
+      title: 'Conflict',
+      status: 409,
+      code: 'CONFLICT',
+      detail: 'The rows of the stored file no longer match the items of the list',
+      meta: { reason: 'ROW_MISMATCH' },
+    });
   });
 
   it('maps SyncInProgressError to 409 SYNC_IN_PROGRESS with syncType + storeId meta', () => {

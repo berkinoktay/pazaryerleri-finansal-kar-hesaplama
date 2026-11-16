@@ -1,9 +1,8 @@
 // The Trendyol commission tariff sheet as layout data. Columns A-N are fixed positions
 // (four of them guarded by a sentinel header); every period header opens a block of
 // a date-range label and its four commission columns; the tail columns are found by
-// header. The legacy resolver (services/commission-tariff-layout.ts) stays in use until
-// the vertical moves onto this file; tests/unit/workbooks/trendyol-layouts.test.ts
-// keeps the two in lockstep.
+// header. The commission tariff format (commission-tariff.format.ts) reads the file
+// through it; its test pins the resolved columns of both real files.
 
 import {
   block,

@@ -638,11 +638,17 @@ describe('Advantage Product Labels - list / detail / commission-source / delete'
   });
 
   it('deletes the tariff and then lists empty', async () => {
+    // The items go with the tariff: the database cascades the scoped delete.
+    const itemCount = async (): Promise<number> =>
+      prisma.advantageTariffItem.count({ where: { tariffId: fx.tariffId } });
+    expect(await itemCount()).toBeGreaterThan(0);
+
     const del = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/advantage-tariffs/${fx.tariffId}`,
       { method: 'DELETE', headers: { Authorization: bearer(fx.accessToken) } },
     );
     expect(del.status).toBe(204);
+    expect(await itemCount()).toBe(0);
 
     const detail = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/advantage-tariffs/${fx.tariffId}`,

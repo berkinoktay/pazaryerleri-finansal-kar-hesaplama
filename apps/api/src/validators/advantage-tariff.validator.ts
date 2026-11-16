@@ -11,6 +11,7 @@
 
 import { z } from '@hono/zod-openapi';
 
+import { NameSchema } from '../workbooks/form';
 import { QuoteBreakdownSchema } from './product-pricing.validator';
 
 // ─── Shared enums ───────────────────────────────────────────────────────────
@@ -205,7 +206,7 @@ export const ImportAdvantageTariffFormSchema = z.object({
     format: 'binary',
     description: 'Trendyol Avantajlı Ürün Etiketleri .xlsx',
   }),
-  name: z.string().optional().openapi({ description: 'İsteğe bağlı görünen ad; yoksa dosya adı.' }),
+  name: NameSchema.optional().openapi({ description: 'İsteğe bağlı görünen ad; yoksa dosya adı.' }),
   commissionSourceTariffId: z
     // A malformed id surfaces with the same code the service uses for an unknown source.
     .union([z.string().uuid({ error: 'INVALID_COMMISSION_SOURCE' }), z.literal('')])

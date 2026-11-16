@@ -18,6 +18,7 @@ import { Prisma, prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { NotFoundError } from '../lib/errors';
+import { assertScopedWrite } from '../workbooks/scoped-write';
 import {
   buildFlashCommissionResolver,
   type FlashCommissionRequest,
@@ -320,11 +321,13 @@ export async function deleteFlashProductList(
     throw new NotFoundError('FlashProductList', listId);
   }
 
-  try {
-    await prisma.flashProductList.delete({ where: { id: listId } });
-  } catch (err) {
-    mapPrismaError(err);
-  }
+  await assertScopedWrite(
+    prisma.flashProductList.deleteMany({
+      where: { id: listId, organizationId: orgId, storeId },
+    }),
+    'FlashProductList',
+    listId,
+  );
 }
 
 // --- Save selections ---

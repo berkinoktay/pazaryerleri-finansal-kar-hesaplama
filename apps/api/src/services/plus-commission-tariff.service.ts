@@ -16,7 +16,8 @@ import { Prisma, prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { NotFoundError } from '../lib/errors';
-import { resolveValidity, tariffBoundInstantOrNull } from '../lib/tariff-period';
+import { assertScopedWrite } from '../workbooks/scoped-write';
+import { resolveValidity, tariffBoundInstantOrNull } from '../workbooks/tariff-week';
 import {
   computePlusItem,
   type ComputedPlusItem,
@@ -316,11 +317,13 @@ export async function deletePlusTariff(
     throw new NotFoundError('PlusCommissionTariff', tariffId);
   }
 
-  try {
-    await prisma.plusCommissionTariff.delete({ where: { id: tariffId } });
-  } catch (err) {
-    mapPrismaError(err);
-  }
+  await assertScopedWrite(
+    prisma.plusCommissionTariff.deleteMany({
+      where: { id: tariffId, organizationId: orgId, storeId },
+    }),
+    'PlusCommissionTariff',
+    tariffId,
+  );
 }
 
 // ─── Save selections ─────────────────────────────────────────────────────────

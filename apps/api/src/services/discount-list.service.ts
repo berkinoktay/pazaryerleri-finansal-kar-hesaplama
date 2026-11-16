@@ -22,6 +22,8 @@ import type { Store as PrismaStore } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { NotFoundError } from '../lib/errors';
+import { intOrNull } from '../lib/optional-int';
+import { assertScopedWrite } from '../workbooks/scoped-write';
 import { resolveDiscountCommissionSource } from './discount-commission-source';
 import { computeDiscountItem, type ComputedDiscountItem } from './discount-compute.service';
 import { scenarioPresentation, type DiscountCommissionInputs } from './discount-math-commons';
@@ -42,11 +44,6 @@ import {
   type DiscountSelection,
   type UpdateDiscountListBody,
 } from '../validators/discount-list.validator';
-
-/** String config alanını DiscountList Int kolonuna indirir (yoksa null). */
-function intOrNull(value: string | undefined): number | null {
-  return value === undefined ? null : Number(value);
-}
 
 // --- List ---
 
@@ -384,22 +381,34 @@ export async function updateDiscountList(
   }
 
   try {
-    const updated = await prisma.discountList.update({
-      where: { id: listId },
-      data: {
-        discountType: patch.discountType,
-        valueKind: patch.valueKind ?? null,
-        value: patch.value ?? null,
-        minBasketAmount: patch.minBasketAmount ?? null,
-        minQuantity: intOrNull(patch.minQuantity),
-        buyQuantity: intOrNull(patch.buyQuantity),
-        payQuantity: intOrNull(patch.payQuantity),
-        nthIndex: intOrNull(patch.nthIndex),
-        startsAt: patch.startsAt ?? null,
-        endsAt: patch.endsAt ?? null,
-        ...(patch.name !== undefined ? { name: patch.name } : {}),
-      },
-      select: { id: true },
+    const updated = await prisma.$transaction(async (tx) => {
+      await assertScopedWrite(
+        tx.discountList.updateMany({
+          where: { id: listId, organizationId: orgId, storeId },
+          data: {
+            discountType: patch.discountType,
+            valueKind: patch.valueKind ?? null,
+            value: patch.value ?? null,
+            minBasketAmount: patch.minBasketAmount ?? null,
+            minQuantity: intOrNull(patch.minQuantity),
+            buyQuantity: intOrNull(patch.buyQuantity),
+            payQuantity: intOrNull(patch.payQuantity),
+            nthIndex: intOrNull(patch.nthIndex),
+            startsAt: patch.startsAt ?? null,
+            endsAt: patch.endsAt ?? null,
+            ...(patch.name !== undefined ? { name: patch.name } : {}),
+          },
+        }),
+        'DiscountList',
+        listId,
+      );
+      // updateMany returns no row: the stored id is read back in the same transaction.
+      const row = await tx.discountList.findFirst({
+        where: { id: listId, organizationId: orgId, storeId },
+        select: { id: true },
+      });
+      if (row === null) throw new NotFoundError('DiscountList', listId);
+      return row;
     });
     return { id: updated.id };
   } catch (err) {
@@ -439,11 +448,15 @@ export async function updateDiscountSelections(
         });
         // Bump the parent so `listDiscountLists` (ordered by updatedAt desc) floats the
         // edited list to the top — a selection save otherwise only touches item rows,
-        // leaving the list reading as untouched. Ownership is proven by the findFirst above.
-        await tx.discountList.update({
-          where: { id: listId },
-          data: { updatedAt: new Date() },
-        });
+        // leaving the list reading as untouched. The bump carries its own scope.
+        await assertScopedWrite(
+          tx.discountList.updateMany({
+            where: { id: listId, organizationId: orgId, storeId },
+            data: { updatedAt: new Date() },
+          }),
+          'DiscountList',
+          listId,
+        );
         return result.count;
       });
       return { updated };
@@ -476,10 +489,14 @@ export async function updateDiscountSelections(
       `;
       // Same parent bump as the all/none path, so an edited list floats to the top of
       // `listDiscountLists` (ordered by updatedAt desc) instead of reading as untouched.
-      await tx.discountList.update({
-        where: { id: listId },
-        data: { updatedAt: new Date() },
-      });
+      await assertScopedWrite(
+        tx.discountList.updateMany({
+          where: { id: listId, organizationId: orgId, storeId },
+          data: { updatedAt: new Date() },
+        }),
+        'DiscountList',
+        listId,
+      );
       return count;
     });
     return { updated };
@@ -504,9 +521,11 @@ export async function deleteDiscountList(
     throw new NotFoundError('DiscountList', listId);
   }
 
-  try {
-    await prisma.discountList.delete({ where: { id: listId } });
-  } catch (err) {
-    mapPrismaError(err);
-  }
+  await assertScopedWrite(
+    prisma.discountList.deleteMany({
+      where: { id: listId, organizationId: orgId, storeId },
+    }),
+    'DiscountList',
+    listId,
+  );
 }
