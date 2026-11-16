@@ -91,6 +91,25 @@ export function toUploadError(
 }
 
 /**
+ * Refuses a stored file for a rule of the pipeline's own, not an engine refusal: logs
+ * `workbook.stored-file-rejected` with the fields `toStoredFileError` logs (the engine
+ * `code` null, `reason` the given fixed rule name, never a value of the file) and
+ * throws WorkbookConflictError STORED_FILE_UNREADABLE, a 409.
+ */
+export function rejectStoredFile(
+  context: { readonly page: WorkbookPage; readonly recordId: string },
+  reason: string,
+): never {
+  syncLog.warn('workbook.stored-file-rejected', {
+    page: context.page,
+    recordId: context.recordId,
+    code: null,
+    reason,
+  });
+  throw new WorkbookConflictError('STORED_FILE_UNREADABLE');
+}
+
+/**
  * For every engine call of an export, the format selection of a list without a stored
  * format id included. The stored file parsed at import, so a refusal now is a 409
  * conflict with the stored state, never a 500: a row the patch cannot find or match

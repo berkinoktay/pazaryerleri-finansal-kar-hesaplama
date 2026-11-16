@@ -14,11 +14,12 @@
 // (`meta.cause` included): only allowlisted engine reasons and reader rule keys reach
 // the output.
 //
-// A file the legacy selector reads while the strict selector refuses it as
-// CORRUPT_FILE was read through the legacy fallback to the first sheet: its named
-// sheet cannot be read. Per table such files are listed again as "legacy passed,
-// named sheet unreadable", grouped by their strict refusal key. A strict
-// SHEET_NOT_FOUND alone is reported in the strict selector's tally only.
+// A file the legacy selector reads while the strict selector refuses it, with any code
+// (a SHEET_NOT_FOUND or a CORRUPT_FILE: the legacy read fell back to the first sheet),
+// is a list whose export answered 200 before the pipeline and answers 409 now, since
+// the export reads only the strict selector's sheet. Per table such files are listed
+// again as "legacy passed, strict selector refused", grouped by their strict refusal
+// key.
 //
 // It reads every tenant's rows on purpose: it is an operator tool, not a request
 // path, so no organization scope applies. It cannot write: every session of the pool
@@ -40,12 +41,13 @@
 //
 // It runs before and after the migration that adds `source_format_id` (looked up in
 // the `public` schema): before it (the deploy order runs it against the live database
-// first) the format id lines are skipped. Exit code 1 when a stored file is refused
-// with the legacy selector (what the stricter gate changes for an export today), when
-// a file is listed as "legacy passed, named sheet unreadable", when a table holds a
-// format id other than its expected one, when the name and quota outputs (below) show a
-// count above 0 or a store id, or on a fatal error (an unset AUDIT_DATABASE_URL and a
-// refused URL included); 0 otherwise.
+// first) the format id lines and full mode are skipped, and one line tells the operator
+// to run the audit again after the migrations, before the API starts. Exit code 1 when
+// a stored file is refused with the legacy selector (what the stricter gate changes for
+// an export today), when a file is listed as "legacy passed, strict selector refused",
+// when a table holds a format id other than its expected one, when the name and quota
+// outputs (below) show a count above 0 or a store id, or on a fatal error (an unset
+// AUDIT_DATABASE_URL and a refused URL included); 0 otherwise.
 //
 // Full mode runs after gate mode, once the migration has run, for every table: all six
 // pages are on the generic workbook pipeline (FULL_MODE_ADAPTERS; a table without an
@@ -54,15 +56,19 @@
 // row's own organization and store, `resolveStoredWorkbook` (the format by
 // `source_format_id` or by selection, the strict sheet read, the layout, the write
 // columns), then `readRows` and the import rehearsal (`buildRehearsal` and
-// `patchWorkbook`, its output dropped), and `planExport` over the record's items. It
-// never calls `exportWorkbook` or `touchExported`: those write. Per table it prints
+// `patchWorkbook`, its output dropped), and `planExport` over the record's items with
+// the names and file count the export checks before it patches
+// (`plannedDownloadNames`: EXPORT_FILENAME_COLLISION, or STORED_FILE_UNREADABLE with
+// its `too-many-files` line). It never calls `exportWorkbook` or `touchExported`: those write. Per table it prints
 // the total, the files that passed and, per refusal reason, the count and the record
 // ids; a STORED_FILE_UNREADABLE carries the engine code and reason gate mode's strict
-// read found for that record. Any full-mode refusal sets exit code 1. The production
-// path also logs its own `workbook.stored-file-rejected` lines into the same output
-// (page, record id, engine code and engine reason; never a file name or cell content).
-// A record can carry two reasons (the rehearsal's and the plan's), so the reason
-// counts can add up to more than the refused count.
+// read found for that record. A stored value the export's write rule refuses
+// (`planExport`'s UnwritableStoredValueError) is keyed as the export answers it,
+// `STORED_FILE_UNREADABLE unwritable-value`. Any full-mode refusal sets exit code 1.
+// The production path also logs its own `workbook.stored-file-rejected` lines into the
+// same output (page, record id, engine code and engine reason; never a file name or
+// cell content). A record can carry two reasons (the rehearsal's and the plan's), so
+// the reason counts can add up to more than the refused count.
 //
 // The name and quota outputs run on every run, after gate mode and before full mode, in
 // SQL only (no stored file is read), and work before and after the migration that limits
@@ -124,7 +130,11 @@ import { NAME_INVALID_CHARACTERS, NameSchema } from '../src/workbooks/form';
 // read-only (loadFullMode).
 import type { WorkbookVerticalAdapter } from '../src/workbooks/adapter';
 import type { planExport } from '../src/workbooks/export-plan';
-import type { resolveStoredWorkbook, StoredWorkbook } from '../src/workbooks/export-workbook';
+import type {
+  plannedDownloadNames,
+  resolveStoredWorkbook,
+  StoredWorkbook,
+} from '../src/workbooks/export-workbook';
 import type { readRows } from '../src/workbooks/import-rows';
 import type { buildRehearsal, rehearsalTargets } from '../src/workbooks/rehearsal';
 
@@ -237,7 +247,8 @@ interface StoredWorkbookTable {
 /** What one table's audit found that fails the run. */
 interface TableOutcome {
   readonly legacyRefused: number;
-  readonly namedSheetUnreadable: number;
+  /** Files the legacy selector reads and the strict selector refuses: a 409 on export now. */
+  readonly legacyPassedStrictRefused: number;
   readonly unexpectedFormatIds: number;
 }
 
@@ -666,7 +677,7 @@ async function auditTable(
   const legacy = createTally();
   const strict = createTally();
   // Keyed by the strict refusal key.
-  const namedSheetUnreadable: IdGroups = new Map();
+  const legacyPassedStrictRefused: IdGroups = new Map();
   let gone = 0;
   // One file at a time: each holds the single parse worker for two reads.
   for (const { id } of records) {
@@ -678,22 +689,23 @@ async function auditTable(
     const file = Buffer.from(stored);
     const legacyRefusal = await readInto(legacy, id, file, table.legacyRead);
     const strictRefusal = await readInto(strict, id, file, table.strictRead);
-    // The legacy read passed through its fallback to the first sheet.
-    if (legacyRefusal === null && strictRefusal?.code === CORRUPT_FILE_CODE) {
-      addId(namedSheetUnreadable, strictRefusal.key, id);
+    // Any strict refusal of a file the legacy read passed (through its fallback to the
+    // first sheet, for a missing or unreadable named sheet): the export refuses it now.
+    if (legacyRefusal === null && strictRefusal !== null) {
+      addId(legacyPassedStrictRefused, strictRefusal.key, id);
     }
   }
 
   console.log(`  rows: ${rows}, stored files: ${records.length}, gone during the run: ${gone}`);
   printTally('legacy selector', legacy);
   printTally('strict selector', strict);
-  const unreadable = idCount(namedSheetUnreadable);
-  console.log(`  legacy passed, named sheet unreadable: ${unreadable}`);
-  printGroups(namedSheetUnreadable);
+  const strictOnlyRefused = idCount(legacyPassedStrictRefused);
+  console.log(`  legacy passed, strict selector refused: ${strictOnlyRefused}`);
+  printGroups(legacyPassedStrictRefused);
   return {
     outcome: {
       legacyRefused: idCount(legacy.refusals),
-      namedSheetUnreadable: unreadable,
+      legacyPassedStrictRefused: strictOnlyRefused,
       unexpectedFormatIds: unexpected,
     },
     records,
@@ -951,10 +963,13 @@ interface FullModeEngine {
   readonly rehearsalTargets: typeof rehearsalTargets;
   readonly buildRehearsal: typeof buildRehearsal;
   readonly planExport: typeof planExport;
+  readonly plannedDownloadNames: typeof plannedDownloadNames;
   /** The `reason` of a WorkbookConflictError, else null. */
   readonly conflictReason: (err: unknown) => string | null;
   /** The `code` of a WorkbookFileRejection, else null. */
   readonly fileRejectionCode: (err: unknown) => string | null;
+  /** The `reason` of an UnwritableStoredValueError (planExport's write-value check), else null. */
+  readonly unwritableValueReason: (err: unknown) => string | null;
 }
 
 /** Full mode for one page's table: the refusal keys of one stored record, or null when it is gone. */
@@ -971,8 +986,14 @@ const STRICT_READ_PASSED = 'passed';
 const ROWS_STAGE = 'rows';
 const REHEARSAL_STAGE = 'rehearsal';
 
-/** The report key of an error of the generic path: its conflict reason, file code or engine key. */
+/**
+ * The report key of an error of the generic path: its conflict reason, file code or
+ * engine key. A stored value the write rule refuses is keyed as the export answers it:
+ * STORED_FILE_UNREADABLE with its reason, never as an unexpected error.
+ */
 function pipelineKey(engine: FullModeEngine, err: unknown): string {
+  const unwritable = engine.unwritableValueReason(err);
+  if (unwritable !== null) return `${STORED_FILE_UNREADABLE_REASON} ${unwritable}`;
   return engine.conflictReason(err) ?? engine.fileRejectionCode(err) ?? refusalOf(err).key;
 }
 
@@ -1023,8 +1044,9 @@ async function rehearsalRefusal<S extends LayoutSpec, TRow, TWrite extends strin
 
 /**
  * Full mode for one adapter. Per record: `load` with the record's own scope, then
- * `resolveStoredWorkbook`; when that passes, the rehearsal and `planExport` each add
- * their refusal. Nothing here writes.
+ * `resolveStoredWorkbook`; when that passes, the rehearsal and the plan (`planExport`,
+ * then `plannedDownloadNames`: the names and the file count the export checks before it
+ * patches) each add their refusal. Nothing here writes.
  */
 function recordAuditor<
   S extends LayoutSpec,
@@ -1064,7 +1086,11 @@ function recordAuditor<
       const rehearsal = await rehearsalRefusal(engine, adapter.align, stored, file);
       if (rehearsal !== null) refusals.push(rehearsal);
       try {
-        engine.planExport({ ...stored, groups: source.groups, adapter });
+        const plan = engine.planExport({ ...stored, groups: source.groups, adapter });
+        engine.plannedDownloadNames(stored.format, source, plan, {
+          page: adapter.page,
+          recordId: record.id,
+        });
       } catch (err) {
         refusals.push(pipelineKey(engine, err));
       }
@@ -1088,6 +1114,7 @@ async function loadFullMode(): Promise<readonly RecordAuditor[]> {
     rehearsal,
     errors,
     workbookErrors,
+    writeColumns,
     discount,
     campaign,
     flash,
@@ -1101,6 +1128,7 @@ async function loadFullMode(): Promise<readonly RecordAuditor[]> {
     import('../src/workbooks/rehearsal'),
     import('../src/lib/errors'),
     import('../src/workbooks/workbook-errors'),
+    import('../src/workbooks/write-columns'),
     import('../src/workbooks/verticals/discount-list.adapter'),
     import('../src/workbooks/verticals/marketplace-campaign-list.adapter'),
     import('../src/workbooks/verticals/flash-product-list.adapter'),
@@ -1114,9 +1142,12 @@ async function loadFullMode(): Promise<readonly RecordAuditor[]> {
     rehearsalTargets: rehearsal.rehearsalTargets,
     buildRehearsal: rehearsal.buildRehearsal,
     planExport: exportPlan.planExport,
+    plannedDownloadNames: exportWorkbook.plannedDownloadNames,
     conflictReason: (err) => (err instanceof errors.WorkbookConflictError ? err.reason : null),
     fileRejectionCode: (err) =>
       err instanceof workbookErrors.WorkbookFileRejection ? err.code : null,
+    unwritableValueReason: (err) =>
+      err instanceof writeColumns.UnwritableStoredValueError ? err.reason : null,
   };
   // FULL_MODE_ADAPTERS: each vertical appends its adapter as it moves.
   return [
@@ -1185,7 +1216,7 @@ async function main(): Promise<void> {
       const { outcome } = gate;
       if (
         outcome.legacyRefused > 0 ||
-        outcome.namedSheetUnreadable > 0 ||
+        outcome.legacyPassedStrictRefused > 0 ||
         outcome.unexpectedFormatIds > 0
       ) {
         failed = true;
@@ -1205,7 +1236,10 @@ async function main(): Promise<void> {
         if ((await auditTableFullMode(auditor, gate)) > 0) failed = true;
       }
     } else {
-      console.log('full mode: skipped (source_format_id column absent)');
+      console.log(
+        'full mode: skipped (source_format_id column absent); run this audit again after ' +
+          'the migrations, before the API starts',
+      );
     }
     if (failed) process.exitCode = 1;
   } finally {

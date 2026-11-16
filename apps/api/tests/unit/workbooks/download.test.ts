@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { WorkbookConflictError, type WorkbookConflictReason } from '@/lib/errors';
 import {
+  assertDistinctFilenames,
   bundleDownload,
   downloadFilenames,
   downloadHeaders,
@@ -154,6 +155,22 @@ describe('bundleDownload', () => {
   // at least one file, so none is our own bug.
   it('throws WorkbookInvariantError when there is no file to deliver', () => {
     expect(() => bundleDownload(WINDOW, [])).toThrow(WorkbookInvariantError);
+  });
+});
+
+describe('assertDistinctFilenames', () => {
+  it('passes distinct names, one name and none', () => {
+    const names = downloadFilenames(WINDOW, source(null), [3, 4, 7]);
+
+    expect(() => assertDistinctFilenames(names)).not.toThrow();
+    expect(() => assertDistinctFilenames(['a.xlsx'])).not.toThrow();
+    expect(() => assertDistinctFilenames([])).not.toThrow();
+  });
+
+  it('refuses two window files of one day count with EXPORT_FILENAME_COLLISION', () => {
+    const names = downloadFilenames(WINDOW, source(null), [0, 0]);
+
+    expect(conflictReason(() => assertDistinctFilenames(names))).toBe('EXPORT_FILENAME_COLLISION');
   });
 });
 

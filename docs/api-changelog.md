@@ -91,12 +91,19 @@ section "Versioning" for details.
     or a commission tariff's current commission of 100 or more, a price the export never writes
     back with more than 10 integer digits, a stock outside the integer range. Before, the import
     failed with `500`.
+  - A file the database could not store answers the same `422` `MALFORMED_SHEET`, and nothing is
+    stored: a text cell anywhere below the header holding the character U+0000 (an XML `&#0;`;
+    before, `500`), a flash product window date that is not a valid date or falls outside the years
+    1900 to 9999 (before, a year below 1 failed with `500` and any other year was stored), and any
+    other value Postgres refuses as a data exception while the rows are written (before, `500`).
   - A commission or Plus commission tariff file whose header gives a period of 10 or more days,
     or whose periods add up to 10 or more days, answers `422` with
     `{ field: 'file', code: 'MALFORMED_SHEET' }`; nothing is stored. Before, the file was stored
     and its export wrote a tariff selection label wider than the column's own. This check runs
     before the tariff week check, so such a file whose week is already taken answers
-    `MALFORMED_SHEET`, not `DUPLICATE_TARIFF_WEEK`.
+    `MALFORMED_SHEET`, not `DUPLICATE_TARIFF_WEEK`. A period header of 0 days, or more than seven
+    periods with data, answers the same `422`; before, such a file was stored and every zero-day
+    period became its own export file.
   - A commission or Plus commission tariff import checks the tariff week again inside its write
     transaction.
     Two uploads of overlapping weeks that start on different days, sent at the same time, no
@@ -143,7 +150,14 @@ section "Versioning" for details.
     skipped and the rest exported.
   - A commission tariff whose file holds two periods with the same day count, and whose export
     writes a different price into each, answers `409` `EXPORT_FILENAME_COLLISION`. Before, both
-    window files took the same name and the `.zip` kept only one of them.
+    window files took the same name and the `.zip` kept only one of them. The names are checked
+    before anything is patched.
+  - A plan of more files than one engine call patches (`MAX_PATCH_OUTPUTS`) answers `409` with
+    `meta.reason` `STORED_FILE_UNREADABLE` before anything is patched. Only a commission or Plus
+    tariff stored before its periods were checked at upload can plan that many window files.
+  - A list stored before the upload checked its values can hold one the export's write rule
+    refuses (a negative marketplace campaign maximum price, a tariff window wider than nine
+    days). Its export answers `409` with `meta.reason` `STORED_FILE_UNREADABLE` instead of `500`.
   - Advantage tariff items are read in a fixed order (sort order, then barcode, then id). When two
     items with one barcode both carry a price, the later one in that order is written; before,
     the database's unspecified row order decided.

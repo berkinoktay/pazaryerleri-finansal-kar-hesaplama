@@ -91,6 +91,17 @@ export function downloadFilenames(
   }
 }
 
+/**
+ * Throws WorkbookConflictError EXPORT_FILENAME_COLLISION when two of `names` are equal:
+ * a zip would silently keep one of the files. The export checks its names this way
+ * before the engine patches anything.
+ */
+export function assertDistinctFilenames(names: readonly string[]): void {
+  if (new Set(names).size !== names.length) {
+    throw new WorkbookConflictError('EXPORT_FILENAME_COLLISION');
+  }
+}
+
 /** The name of a zip of several files: the policy's base, or the first file's stem. */
 function zipName(policy: FilenamePolicy, first: DownloadFile): string {
   switch (policy.kind) {

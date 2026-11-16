@@ -349,9 +349,9 @@ Every campaign page that imports a marketplace `.xlsx` and exports it back with 
 - **Generic export** (`exportWorkbook`, `export-workbook.ts`), in order:
   1. `adapter.load` with the store's scope;
   2. the stored file's format by `source_format_id` (`selectFormat` when it is null), its sheet read strictly, its write columns (`resolveStoredWorkbook`);
-  3. the patch plan (`planExport`, `export-plan.ts`);
-  4. `patchWorkbook`, at most `MAX_PATCH_OUTPUTS` files per call;
-  5. the file names and the download (`download.ts`);
+  3. the patch plan (`planExport`, `export-plan.ts`; a stored value its write rule refuses is a 409);
+  4. the download names and the file count (`plannedDownloadNames`): a name collision or more than `MAX_PATCH_OUTPUTS` files is a 409, before the engine runs;
+  5. one `patchWorkbook` call for every planned file, then the download (`download.ts`);
   6. `adapter.touchExported` through `assertScopedWrite`.
 
   Every engine call goes through `toStoredFileError`: a 409 with `meta.reason`, or a 503 when the parse queue is busy (`ENGINE_BUSY`).

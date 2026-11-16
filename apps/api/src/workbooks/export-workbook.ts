@@ -3,11 +3,14 @@
 //   1. load the record with the store's scope;
 //   2. find the stored file's format and read its sheet (`resolveStoredWorkbook`);
 //   3. plan the patches (`planExport`);
-//   4. patch the stored bytes, at most MAX_PATCH_OUTPUTS files per engine call;
-//   5. name the files and bundle the download;
-//   6. mark the record exported, with the same scope.
+//   4. name the files: two equal names, or more files than MAX_PATCH_OUTPUTS, refuse
+//      the export before the engine patches anything;
+//   5. patch the stored bytes, every planned file in one engine call;
+//   6. bundle the download;
+//   7. mark the record exported, with the same scope.
 // Nothing an export reads surfaces as a 500: every engine call and the format
-// selection go through `toStoredFileError` (409, or 503 for a full queue).
+// selection go through `toStoredFileError` (409, or 503 for a full queue), and a stored
+// value the write rule refuses is a 409 too (`rejectStoredFile`).
 
 import type { Platform } from '@pazarsync/db/enums';
 import {
@@ -22,14 +25,55 @@ import type { WorkbookPage } from '@pazarsync/utils';
 
 import { NotFoundError, WorkbookConflictError } from '../lib/errors';
 import type { StoreScope, WorkbookExportAdapter } from './adapter';
-import { bundleDownload, downloadFilenames, type DownloadBundle } from './download';
-import { planExport, type ExportPlan } from './export-plan';
-import type { WorkbookFormat } from './format';
+import {
+  assertDistinctFilenames,
+  bundleDownload,
+  downloadFilenames,
+  type DownloadBundle,
+} from './download';
+import { planExport, type ExportPlan, type PlanExportInput } from './export-plan';
+import type { FilenamePolicy, WorkbookFormat } from './format';
 import { FORMAT_SUMMARIES } from './formats/registry';
 import { assertScopedWrite } from './scoped-write';
 import { selectFormat, type SelectedFormat } from './select-format';
-import { toStoredFileError, WorkbookInvariantError } from './workbook-errors';
-import { resolveWriteColumns, type ResolvedWriteColumn } from './write-columns';
+import { rejectStoredFile, toStoredFileError, WorkbookInvariantError } from './workbook-errors';
+import {
+  resolveWriteColumns,
+  UnwritableStoredValueError,
+  type ResolvedWriteColumn,
+} from './write-columns';
+
+/** `reason` of the stored-file refusal of a plan with more files than one engine call patches. */
+export const TOO_MANY_FILES_REASON = 'too-many-files';
+
+/** The page and record an export's refusals are logged with. */
+export interface ExportContext {
+  readonly page: WorkbookPage;
+  readonly recordId: string;
+}
+
+/**
+ * The download names of `plan`, checked before the engine patches anything: two
+ * planned files with one name answer EXPORT_FILENAME_COLLISION (a zip would keep one
+ * of them), and a plan of more than MAX_PATCH_OUTPUTS files is a stored file one
+ * engine call cannot write (logged, 409 STORED_FILE_UNREADABLE). The stored-workbook
+ * audit runs the same check.
+ */
+export function plannedDownloadNames(
+  format: { readonly filename: FilenamePolicy; readonly defaultName: string },
+  source: { readonly name: string; readonly sourceFilename: string | null },
+  plan: ExportPlan,
+  context: ExportContext,
+): string[] {
+  const names = downloadFilenames(
+    format.filename,
+    { name: source.name, sourceFilename: source.sourceFilename, defaultName: format.defaultName },
+    plan.files.map((planned) => planned.dayCount),
+  );
+  assertDistinctFilenames(names);
+  if (plan.files.length > MAX_PATCH_OUTPUTS) rejectStoredFile(context, TOO_MANY_FILES_REASON);
+  return names;
+}
 
 /** A stored file read for export: its format, its grid and layout, its write columns. */
 export interface StoredWorkbook<
@@ -93,29 +137,44 @@ export async function resolveStoredWorkbook<S extends LayoutSpec, TRow, TWrite e
   }
 }
 
-/** Patches the stored file once per planned file, at most MAX_PATCH_OUTPUTS files per call. */
+/**
+ * The patch plan of the stored file. A value the record holds that its write column's
+ * rule refuses (a list stored before the upload checked its values) is a stored file
+ * the export cannot write: logged and answered 409 STORED_FILE_UNREADABLE. Every other
+ * error of the plan, a WorkbookInvariantError included, is rethrown untouched.
+ */
+function planStoredExport<S extends LayoutSpec, TRow, TItem, TWrite extends string>(
+  input: PlanExportInput<S, TRow, TItem, TWrite>,
+  context: ExportContext,
+): ExportPlan {
+  try {
+    return planExport(input);
+  } catch (err) {
+    if (err instanceof UnwritableStoredValueError) rejectStoredFile(context, err.reason);
+    throw err;
+  }
+}
+
+/**
+ * Patches the stored file once per planned file, in one engine call: the caller has
+ * bounded the plan to MAX_PATCH_OUTPUTS files.
+ */
 async function patchPlannedFiles(
   file: Buffer,
   sheet: SheetSelector,
   plan: ExportPlan,
-  context: { readonly page: WorkbookPage; readonly recordId: string },
+  context: ExportContext,
 ): Promise<Buffer[]> {
-  const outputs: Buffer[] = [];
-  for (let start = 0; start < plan.files.length; start += MAX_PATCH_OUTPUTS) {
-    const chunk = plan.files.slice(start, start + MAX_PATCH_OUTPUTS);
-    try {
-      const patched = await patchWorkbook(file, {
-        sheet,
-        anchors: plan.anchors,
-        outputs: chunk.map((planned) => planned.patches),
-        overwriteFormulaColumns: plan.overwriteFormulaColumns,
-      });
-      outputs.push(...patched);
-    } catch (err) {
-      toStoredFileError(err, context);
-    }
+  try {
+    return await patchWorkbook(file, {
+      sheet,
+      anchors: plan.anchors,
+      outputs: plan.files.map((planned) => planned.patches),
+      overwriteFormulaColumns: plan.overwriteFormulaColumns,
+    });
+  } catch (err) {
+    toStoredFileError(err, context);
   }
-  return outputs;
 }
 
 /**
@@ -123,7 +182,9 @@ async function patchPlannedFiles(
  * the verified store record, never from the request path. Throws NotFoundError when the
  * record is not in the scope (or is gone before the `exportedAt` touch), and
  * WorkbookConflictError when it has no stored file or the stored file cannot be
- * exported.
+ * exported: among them EXPORT_FILENAME_COLLISION when two planned files share a name,
+ * and STORED_FILE_UNREADABLE when the plan holds more than MAX_PATCH_OUTPUTS files or a
+ * stored value its write rule refuses, each before the engine patches anything.
  */
 export async function exportWorkbook<S extends LayoutSpec, TRow, TItem, TWrite extends string>(
   adapter: WorkbookExportAdapter<S, TRow, TItem, TWrite>,
@@ -145,18 +206,12 @@ export async function exportWorkbook<S extends LayoutSpec, TRow, TItem, TWrite e
     platform,
     recordId: id,
   });
-  const plan = planExport({ ...stored, groups: source.groups, adapter });
-  const outputs = await patchPlannedFiles(file, stored.format.sheet, plan, context);
+  const plan = planStoredExport({ ...stored, groups: source.groups, adapter }, context);
 
-  const names = downloadFilenames(
-    stored.format.filename,
-    {
-      name: source.name,
-      sourceFilename: source.sourceFilename,
-      defaultName: stored.format.defaultName,
-    },
-    plan.files.map((planned) => planned.dayCount),
-  );
+  // The names and the file count before the engine runs: either can refuse the export.
+  const names = plannedDownloadNames(stored.format, source, plan, context);
+
+  const outputs = await patchPlannedFiles(file, stored.format.sheet, plan, context);
   const bundle = bundleDownload(
     stored.format.filename,
     names.map((filename, index) => {

@@ -199,7 +199,7 @@ function writeValueProblem(spec: WriteValueSpec, value: string): string | null {
  * exactly `scale` fraction digits when given), an allow-list member, or a text that
  * matches the pattern; and, for every kind, no more UTF-8 bytes than `probeText(spec)`,
  * so no export writes a wider value than the import rehearsal proved fits. The value
- * never appears in the message.
+ * never appears in the message. A format's module-load probe check runs it.
  */
 export function assertWriteValue(spec: WriteValueSpec, value: string): void {
   const problem = writeValueProblem(spec, value);
@@ -207,8 +207,35 @@ export function assertWriteValue(spec: WriteValueSpec, value: string): void {
 }
 
 /**
+ * A planned export write its column's rule refuses (`assertPlannedWriteValue`). The
+ * value comes from a stored record, and a record stored before the upload checked its
+ * values can hold one the rule refuses (a negative campaign maximum price, a window
+ * wider than a week): the export answers it as a stored file it cannot write, 409
+ * STORED_FILE_UNREADABLE, never a 500.
+ */
+export class UnwritableStoredValueError extends Error {
+  readonly reason = UNWRITABLE_VALUE_REASON;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnwritableStoredValueError';
+  }
+}
+
+/**
+ * The rule of `assertWriteValue` on a write `planExport` planned from a stored record.
+ * Throws UnwritableStoredValueError (never a plain WorkbookInvariantError) for a value a
+ * column of `spec` may not receive. The value never appears in the message.
+ */
+export function assertPlannedWriteValue(spec: WriteValueSpec, value: string): void {
+  const problem = writeValueProblem(spec, value);
+  if (problem !== null) throw new UnwritableStoredValueError(problem);
+}
+
+/**
  * `value`, read from the uploaded file, when a column of `spec` may receive it under
- * the export's own rule (`assertWriteValue`). A value an export may later write into
+ * the export's own rule (the rule `assertWriteValue` states and the export runs as
+ * `assertPlannedWriteValue`). A value an export may later write into
  * a column of `spec` (the campaign maximum price today; tier and band prices of later
  * pages) is refused at upload unless that rule would accept it, so a stored list never
  * holds a value its export cannot write.

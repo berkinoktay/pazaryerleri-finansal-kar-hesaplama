@@ -34,7 +34,7 @@ import type {
 import type { FilenamePolicy, WorkbookFormat, WriteValueSpec } from './format';
 import { WorkbookInvariantError } from './workbook-errors';
 import {
-  assertWriteValue,
+  assertPlannedWriteValue,
   missingExportRequirement,
   overwriteFormulaColumns,
   type ResolvedWriteColumn,
@@ -326,7 +326,7 @@ function rowPatches<S extends LayoutSpec, TRow, TWrite extends string>(
       }
       continue;
     }
-    assertWriteValue(entry.spec, write.value);
+    assertPlannedWriteValue(entry.spec, write.value);
     if (equalsSource(entry.spec, row.cells, entry.col, write.value)) continue;
     patches.push({ excelRow, col: entry.col, value: patchValue(entry.spec, write.value) });
   }
@@ -382,8 +382,8 @@ function assertPatchTextBudget(
  * Throws WorkbookConflictError NO_WRITEBACK_COLUMN when an `exportRequires` group has
  * no resolved column, ROW_MISMATCH when a cursor-zip file's kept rows and items
  * disagree, STORED_FILE_UNREADABLE when the stored anchors exceed the patcher's text
- * limits; WorkbookInvariantError when the adapter writes a value its column may not
- * receive.
+ * limits; UnwritableStoredValueError when the adapter writes a value its column may not
+ * receive (the record's stored value; `exportWorkbook` answers it with 409).
  */
 export function planExport<S extends LayoutSpec, TRow, TItem, TWrite extends string>(
   input: PlanExportInput<S, TRow, TItem, TWrite>,

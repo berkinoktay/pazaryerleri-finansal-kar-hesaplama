@@ -12,6 +12,7 @@ import {
 } from '@/lib/errors';
 import { problemDetailsForError } from '@/lib/problem-details';
 import {
+  rejectStoredFile,
   toStoredFileError,
   toUploadError,
   WorkbookFileRejection,
@@ -306,5 +307,25 @@ describe('toStoredFileError', () => {
   it('rethrows anything else untouched', () => {
     const plain = new Error('boom');
     expect(captureThrow(() => toStoredFileError(plain, STORED))).toBe(plain);
+  });
+});
+
+describe('rejectStoredFile', () => {
+  it('logs the record with a null engine code and its reason, and answers 409 STORED_FILE_UNREADABLE', () => {
+    const warn = spyWarn();
+
+    const thrown = captureThrow(() => rejectStoredFile(STORED, 'too-many-files'));
+
+    expect(thrown).toBeInstanceOf(WorkbookConflictError);
+    expect(thrown instanceof WorkbookConflictError ? thrown.reason : null).toBe(
+      'STORED_FILE_UNREADABLE',
+    );
+    expect(problemDetailsForError(thrown).status).toBe(409);
+    expect(warn.mock.calls).toEqual([
+      [
+        'workbook.stored-file-rejected',
+        { page: PAGE, recordId: RECORD_ID, code: null, reason: 'too-many-files' },
+      ],
+    ]);
   });
 });

@@ -24,7 +24,11 @@ import { planExport, type ExportPlan } from '@/workbooks/export-plan';
 import { defineFormat, type WorkbookFormat } from '@/workbooks/format';
 import { TARIFF_WINDOW_LABEL_UNIT } from '@/workbooks/formats/trendyol/labels';
 import { WorkbookInvariantError } from '@/workbooks/workbook-errors';
-import { resolveWriteColumns } from '@/workbooks/write-columns';
+import {
+  resolveWriteColumns,
+  UNWRITABLE_VALUE_REASON,
+  UnwritableStoredValueError,
+} from '@/workbooks/write-columns';
 
 // A synthetic sheet: a barcode and a price (the keep rule), two plain write columns
 // (a flag with an allow list and an amount with two decimals) and a repeated period
@@ -506,9 +510,26 @@ describe('planExport, from writes to patches', () => {
     ]);
   });
 
-  it('throws WorkbookInvariantError for a value its column may not receive', () => {
-    expect(() => writesOf([{ key: 'flag', value: 'Maybe' }])).toThrow(WorkbookInvariantError);
-    expect(() => writesOf([{ key: 'amount', value: '15.4' }])).toThrow(WorkbookInvariantError);
+  it('throws UnwritableStoredValueError, not a plain WorkbookInvariantError, for a value its column may not receive', () => {
+    // A stored record's value: a flag outside the allow list, an amount with one
+    // decimal for a two-decimal column, a negative amount.
+    for (const write of [
+      { key: 'flag', value: 'Maybe' },
+      { key: 'amount', value: '15.4' },
+      { key: 'amount', value: '-5.00' },
+    ] as const) {
+      let thrown: unknown = null;
+      try {
+        writesOf([write]);
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(UnwritableStoredValueError);
+      expect(thrown).not.toBeInstanceOf(WorkbookInvariantError);
+      expect(thrown instanceof UnwritableStoredValueError ? thrown.reason : null).toBe(
+        UNWRITABLE_VALUE_REASON,
+      );
+    }
   });
 
   it("lands a block write in its tag's column and drops it when no block has the tag", () => {
