@@ -17,14 +17,15 @@ const BELL = String.fromCodePoint(0x0007);
 const ZERO_WIDTH_SPACE = String.fromCodePoint(0x200b);
 // One astral character: a surrogate pair in UTF-16.
 const ASTRAL = String.fromCodePoint(0x1f600);
+const SMALL_U_DIAERESIS = String.fromCodePoint(0x00fc);
 
 // 'Indirim Subat.XLSX' with its Turkish letters, precomposed (NFC) and decomposed (NFD).
 const TURKISH_NAME_NFC = `${DOTTED_CAPITAL_I}ndirim ${S_CEDILLA_CAPITAL}ubat.XLSX`;
 const TURKISH_NAME_NFD = `I${COMBINING_DOT_ABOVE}ndirim S${COMBINING_CEDILLA}ubat.XLSX`;
 
 // An upload name that sanitizes to itself but carries header parameter syntax: copied
-// as it is into the quoted fallback, its `filename*=` is the first one the web client
-// finds, and the browser saves `setup.exe`.
+// as it is into the quoted fallback, its `filename*=` is the first one a client that
+// searches the whole header finds, and that client saves `setup.exe`.
 const SMUGGLED_NAME = "rapor;filename*=UTF-8''setup.exe;.xlsx";
 // The whole header: the quoted ASCII fallback, then the RFC 8187 name.
 const DISPOSITION_RE = /^attachment; filename="([^"]*)"; filename\*=UTF-8''([^;]+)$/;
@@ -179,5 +180,64 @@ describe('contentDisposition', () => {
       'filename="Rapor-1 (v2)_son.xlsx"',
     );
     expect(contentDisposition('a,b+c&d#e~f.xlsx')).toContain('filename="a_b_c_d_e_f.xlsx"');
+  });
+});
+
+describe('webClientFilename, the web client mirror', () => {
+  // The same cases as apps/web/tests/unit/binary-download.test.ts.
+  const CASES: ReadonlyArray<{
+    readonly why: string;
+    readonly header: string;
+    readonly expected: string | null;
+  }> = [
+    {
+      why: 'keeps a quoted filename whole when its value holds filename*= and ;',
+      header: `attachment; filename="rapor;filename*=UTF-8''setup.exe;.xlsx"`,
+      expected: "rapor;filename*=UTF-8''setup.exe;.xlsx",
+    },
+    {
+      why: 'prefers filename* whatever the parameter order',
+      header: 'attachment; filename="a.xlsx"; filename*=UTF-8\'\'%C3%BCr%C3%BCn.xlsx',
+      expected: `${SMALL_U_DIAERESIS}r${SMALL_U_DIAERESIS}n.xlsx`,
+    },
+    {
+      why: 'ignores a parameter whose name only ends in filename*',
+      header: 'attachment; x-filename*=UTF-8\'\'evil.exe; filename="a.xlsx"',
+      expected: 'a.xlsx',
+    },
+    {
+      why: 'compares the parameter name and the charset case-insensitively',
+      header: "attachment; FILENAME*=utf-8''a.xlsx",
+      expected: 'a.xlsx',
+    },
+    {
+      why: 'unescapes a quoted pair in a quoted filename',
+      header: 'attachment; filename="a\\"b.xlsx"',
+      expected: 'a"b.xlsx',
+    },
+    {
+      why: 'does not split at a semicolon after an escaped quote inside a quoted filename',
+      header: 'attachment; filename="a\\";b.xlsx"',
+      expected: 'a";b.xlsx',
+    },
+    {
+      why: 'falls back to filename when filename* does not decode',
+      header: 'attachment; filename*=UTF-8\'\'%zz.xlsx; filename="b.xlsx"',
+      expected: 'b.xlsx',
+    },
+    {
+      why: 'answers null when filename* does not decode and there is no filename',
+      header: "attachment; filename*=UTF-8''%zz.xlsx",
+      expected: null,
+    },
+    {
+      why: 'answers null for an empty quoted filename',
+      header: 'attachment; filename=""',
+      expected: null,
+    },
+  ];
+
+  it.each(CASES)('$why', ({ header, expected }) => {
+    expect(webClientFilename(header)).toBe(expected);
   });
 });
