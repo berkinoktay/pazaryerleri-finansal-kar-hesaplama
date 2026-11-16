@@ -8,7 +8,9 @@
 //     the path (the lock key is the stored store id);
 //   - a Hepsiburada store has no discount format;
 //   - a text cell holding U+0000, which Postgres cannot store, is refused at upload
-//     with 422 MALFORMED_SHEET, never a 500, and nothing is stored.
+//     with 422 MALFORMED_SHEET, never a 500, and nothing is stored;
+//   - active content (a macro project part, a WEBSERVICE formula) is refused at upload
+//     with 422 UNSAFE_CONTENT, and nothing is stored.
 
 import { readFileSync } from 'node:fs';
 
@@ -23,6 +25,7 @@ import {
   columnIndex,
   readWorkbookGrid,
   resolveLayout,
+  UNSAFE_CONTENT_REASONS,
   type CellValue,
   type SheetData,
 } from '@pazarsync/spreadsheet';
@@ -40,6 +43,11 @@ import { importLockKey, WORKBOOK_IMPORT_LOCK_SEED } from '@/workbooks/upload-quo
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization, createStore } from '../../helpers/factories';
+import {
+  macroFixture,
+  rezippedFixture,
+  unsafeFormulaFixture,
+} from '../../helpers/workbook-unsafe-fixtures';
 
 const app = createApp();
 
@@ -536,6 +544,50 @@ describe('generic workbook import on the discount route', () => {
         'workbook.import.value-not-storable',
         expect.anything(),
       );
+    });
+  });
+
+  describe('refuses active content at upload', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it.each([
+      [
+        'a macro project part',
+        (source: Buffer) => macroFixture(source),
+        UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      ],
+      [
+        'a WEBSERVICE formula',
+        (source: Buffer) => unsafeFormulaFixture(source, DISCOUNT_SHEET_PART),
+        UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+      ],
+    ] as const)('%s: 422 UNSAFE_CONTENT, and nothing is stored', async (_name, build, reason) => {
+      const ctx = await setupStore();
+      const info = vi.spyOn(syncLog, 'info');
+
+      const res = await app.request(importRequest(ctx, build(FIXTURE)));
+
+      expect(res.status).toBe(422);
+      const body = RawValidationSchema.parse(await res.json());
+      expect(body.code).toBe('VALIDATION_ERROR');
+      expect(body.errors).toStrictEqual([{ field: 'file', code: 'UNSAFE_CONTENT' }]);
+      expect(await prisma.discountList.count()).toBe(0);
+      expect(await prisma.discountListItem.count()).toBe(0);
+      expect(info).toHaveBeenCalledWith('workbook.upload-rejected', {
+        page: WORKBOOK_PAGES.DISCOUNT_LIST,
+        code: 'UNSAFE_CONTENT',
+        reason,
+      });
+    });
+
+    it('imports the fixture rebuilt by the same helper without the addition (control)', async () => {
+      const ctx = await setupStore();
+
+      const res = await app.request(importRequest(ctx, rezippedFixture(FIXTURE)));
+
+      expect(res.status).toBe(201);
     });
   });
 
