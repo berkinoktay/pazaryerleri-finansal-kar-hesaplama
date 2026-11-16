@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { Button } from '@/components/ui/button';
 import { Link, useRouter } from '@/i18n/navigation';
 
+import type { WorkbookImportInput } from '../api/workbook-endpoints';
 import { useCommissionTariffList } from '../hooks/use-commission-tariff-list';
 import { useDeleteTariff } from '../hooks/use-delete-tariff';
 import { useExportWorkbook } from '../hooks/use-export-workbook';
@@ -17,7 +18,7 @@ import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
 import { downloadBlob } from '../lib/download-blob';
 import { WORKBOOK_VERTICALS } from '../lib/workbook-verticals';
 import { CommissionTariffsListView } from './commission-tariffs-list-view';
-import { CommissionTariffUploadDialog } from './commission-tariff-upload-dialog';
+import { WorkbookUploadDialog } from './workbook-upload-dialog';
 
 const PAGE = WORKBOOK_PAGES.COMMISSION_TARIFF;
 const DETAIL_BASE = WORKBOOK_VERTICALS[PAGE].detailBase;
@@ -54,17 +55,14 @@ export function CommissionTariffsListClient({
   );
 
   const handleImport = React.useCallback(
-    (file: File): void => {
-      importTariff.mutate(
-        { file, fields: {} },
-        {
-          onSuccess: (result) => {
-            setUploadOpen(false);
-            warnPrefilled(result.prefilledRows);
-            openDetail(result.id);
-          },
+    (input: WorkbookImportInput): void => {
+      importTariff.mutate(input, {
+        onSuccess: (result) => {
+          setUploadOpen(false);
+          warnPrefilled(result.prefilledRows);
+          openDetail(result.id);
         },
-      );
+      });
     },
     [importTariff, openDetail, warnPrefilled],
   );
@@ -128,13 +126,15 @@ export function CommissionTariffsListClient({
         onExport={handleExport}
         onDelete={handleDelete}
       />
-      <CommissionTariffUploadDialog
+      <WorkbookUploadDialog
+        page={PAGE}
         open={uploadOpen}
         onOpenChange={(next) => {
           if (!next) importTariff.reset();
           setUploadOpen(next);
         }}
-        onFile={handleImport}
+        scope={{ orgId, storeId }}
+        onSubmit={handleImport}
         submitting={importTariff.isPending}
         submitError={importTariff.error}
         onResetError={() => importTariff.reset()}

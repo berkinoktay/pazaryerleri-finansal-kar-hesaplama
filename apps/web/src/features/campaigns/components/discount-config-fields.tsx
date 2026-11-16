@@ -6,6 +6,7 @@ import { type UseFormReturn } from 'react-hook-form';
 
 import { DiscountType } from '@pazarsync/db/enums';
 
+import { useServerFieldErrors } from '../hooks/use-server-field-errors';
 import { visibleConfigFields, type DiscountConfigFormValues } from '../lib/discount-config';
 import { validationIssues } from '../lib/upload-error';
 import {
@@ -40,10 +41,6 @@ const RHF_FIELD_NAMES = [
   'startsAt',
   'endsAt',
 ] as const satisfies readonly (keyof DiscountConfigFormValues)[];
-
-function isRhfFieldName(field: string): field is (typeof RHF_FIELD_NAMES)[number] {
-  return RHF_FIELD_NAMES.some((name) => name === field);
-}
 
 /**
  * The fields of this section that have a message slot on screen for the given kurgu: the name,
@@ -106,13 +103,7 @@ export function DiscountConfigFields({
   // twice. The client zod schema mirrors the backend gate 1:1, so in practice this only fires for
   // backend-only checks or a genuine client/backend drift. (Canonical pattern from
   // apps/web/CLAUDE.md — an effect is required because setError writes into external RHF state.)
-  React.useEffect(() => {
-    for (const issue of validationIssues(submitError)) {
-      if (isRhfFieldName(issue.field)) {
-        form.setError(issue.field, { type: 'server', message: issue.code });
-      }
-    }
-  }, [submitError, form]);
+  useServerFieldErrors(form, submitError, RHF_FIELD_NAMES);
 
   return (
     <div className="gap-md flex flex-col">

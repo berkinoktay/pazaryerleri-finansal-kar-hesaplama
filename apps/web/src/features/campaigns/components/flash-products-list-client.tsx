@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { Button } from '@/components/ui/button';
 import { Link, useRouter } from '@/i18n/navigation';
 
+import type { WorkbookImportInput } from '../api/workbook-endpoints';
 import { useFlashProductList } from '../hooks/use-flash-product-list';
 import { useDeleteFlashProducts } from '../hooks/use-delete-flash-products';
 import { useExportWorkbook } from '../hooks/use-export-workbook';
@@ -16,8 +17,8 @@ import { useImportWorkbook } from '../hooks/use-import-workbook';
 import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
 import { downloadBlob } from '../lib/download-blob';
 import { WORKBOOK_VERTICALS } from '../lib/workbook-verticals';
-import { FlashProductUploadDialog } from './flash-product-upload-dialog';
 import { FlashProductsListView } from './flash-products-list-view';
+import { WorkbookUploadDialog } from './workbook-upload-dialog';
 
 const PAGE = WORKBOOK_PAGES.FLASH_PRODUCT_LIST;
 const DETAIL_BASE = WORKBOOK_VERTICALS[PAGE].detailBase;
@@ -53,17 +54,14 @@ export function FlashProductsListClient({
   );
 
   const handleImport = React.useCallback(
-    (file: File): void => {
-      importList.mutate(
-        { file, fields: {} },
-        {
-          onSuccess: (result) => {
-            setUploadOpen(false);
-            warnPrefilled(result.prefilledRows);
-            openDetail(result.id);
-          },
+    (input: WorkbookImportInput): void => {
+      importList.mutate(input, {
+        onSuccess: (result) => {
+          setUploadOpen(false);
+          warnPrefilled(result.prefilledRows);
+          openDetail(result.id);
         },
-      );
+      });
     },
     [importList, openDetail, warnPrefilled],
   );
@@ -126,13 +124,15 @@ export function FlashProductsListClient({
         onExport={handleExport}
         onDelete={handleDelete}
       />
-      <FlashProductUploadDialog
+      <WorkbookUploadDialog
+        page={PAGE}
         open={uploadOpen}
         onOpenChange={(next) => {
           if (!next) importList.reset();
           setUploadOpen(next);
         }}
-        onFile={handleImport}
+        scope={{ orgId, storeId }}
+        onSubmit={handleImport}
         submitting={importList.isPending}
         submitError={importList.error}
         onResetError={() => importList.reset()}

@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { Button } from '@/components/ui/button';
 import { Link, useRouter } from '@/i18n/navigation';
 
+import type { WorkbookImportInput } from '../api/workbook-endpoints';
 import { useDeleteDiscountList } from '../hooks/use-delete-discount-list';
 import { useDiscountLists } from '../hooks/use-discount-lists';
 import { useExportWorkbook } from '../hooks/use-export-workbook';
@@ -17,7 +18,7 @@ import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
 import { downloadBlob } from '../lib/download-blob';
 import { WORKBOOK_VERTICALS } from '../lib/workbook-verticals';
 import { DiscountListsView } from './discount-lists-view';
-import { DiscountUploadDialog } from './discount-upload-dialog';
+import { WorkbookUploadDialog } from './workbook-upload-dialog';
 
 const PAGE = WORKBOOK_PAGES.DISCOUNT_LIST;
 const DETAIL_BASE = WORKBOOK_VERTICALS[PAGE].detailBase;
@@ -52,20 +53,15 @@ export function DiscountsListClient({
     [router],
   );
 
-  const handleImport = React.useCallback<
-    React.ComponentProps<typeof DiscountUploadDialog>['onSubmit']
-  >(
-    (config, file, name) => {
-      importList.mutate(
-        { file, fields: { name, ...config } },
-        {
-          onSuccess: (result) => {
-            setUploadOpen(false);
-            warnPrefilled(result.prefilledRows);
-            openDetail(result.id);
-          },
+  const handleImport = React.useCallback(
+    (input: WorkbookImportInput): void => {
+      importList.mutate(input, {
+        onSuccess: (result) => {
+          setUploadOpen(false);
+          warnPrefilled(result.prefilledRows);
+          openDetail(result.id);
         },
-      );
+      });
     },
     [importList, openDetail, warnPrefilled],
   );
@@ -128,12 +124,14 @@ export function DiscountsListClient({
         onExport={handleExport}
         onDelete={handleDelete}
       />
-      <DiscountUploadDialog
+      <WorkbookUploadDialog
+        page={PAGE}
         open={uploadOpen}
         onOpenChange={(next) => {
           if (!next) importList.reset();
           setUploadOpen(next);
         }}
+        scope={{ orgId, storeId }}
         onSubmit={handleImport}
         submitting={importList.isPending}
         submitError={importList.error}

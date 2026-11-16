@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { Button } from '@/components/ui/button';
 import { Link, useRouter } from '@/i18n/navigation';
 
+import type { WorkbookImportInput } from '../api/workbook-endpoints';
 import { useAdvantageTariffList } from '../hooks/use-advantage-tariff-list';
 import { useDeleteAdvantageTariff } from '../hooks/use-delete-advantage-tariff';
 import { useExportWorkbook } from '../hooks/use-export-workbook';
@@ -16,8 +17,8 @@ import { useImportWorkbook } from '../hooks/use-import-workbook';
 import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
 import { downloadBlob } from '../lib/download-blob';
 import { WORKBOOK_VERTICALS } from '../lib/workbook-verticals';
-import { AdvantageTariffUploadDialog } from './advantage-tariff-upload-dialog';
 import { AdvantageTariffsListView } from './advantage-tariffs-list-view';
+import { WorkbookUploadDialog } from './workbook-upload-dialog';
 
 const PAGE = WORKBOOK_PAGES.ADVANTAGE_TARIFF;
 const DETAIL_BASE = WORKBOOK_VERTICALS[PAGE].detailBase;
@@ -54,17 +55,14 @@ export function AdvantageTariffsListClient({
   );
 
   const handleImport = React.useCallback(
-    (file: File, commissionSourceTariffId: string | undefined): void => {
-      importTariff.mutate(
-        { file, fields: { commissionSourceTariffId } },
-        {
-          onSuccess: (result) => {
-            setUploadOpen(false);
-            warnPrefilled(result.prefilledRows);
-            openDetail(result.id);
-          },
+    (input: WorkbookImportInput): void => {
+      importTariff.mutate(input, {
+        onSuccess: (result) => {
+          setUploadOpen(false);
+          warnPrefilled(result.prefilledRows);
+          openDetail(result.id);
         },
-      );
+      });
     },
     [importTariff, openDetail, warnPrefilled],
   );
@@ -127,15 +125,15 @@ export function AdvantageTariffsListClient({
         onExport={handleExport}
         onDelete={handleDelete}
       />
-      <AdvantageTariffUploadDialog
+      <WorkbookUploadDialog
+        page={PAGE}
         open={uploadOpen}
-        orgId={orgId}
-        storeId={storeId}
         onOpenChange={(next) => {
           if (!next) importTariff.reset();
           setUploadOpen(next);
         }}
-        onFile={handleImport}
+        scope={{ orgId, storeId }}
+        onSubmit={handleImport}
         submitting={importTariff.isPending}
         submitError={importTariff.error}
         onResetError={() => importTariff.reset()}

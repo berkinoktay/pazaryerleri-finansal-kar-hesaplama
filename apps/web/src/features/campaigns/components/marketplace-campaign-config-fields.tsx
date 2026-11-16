@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 
+import { useServerFieldErrors } from '../hooks/use-server-field-errors';
 import { visibleConfigFields } from '../lib/discount-config';
 import {
   CAMPAIGN_DISCOUNT_TYPES,
@@ -47,10 +48,6 @@ const RHF_FIELD_NAMES = [
   'startsAt',
   'endsAt',
 ] as const satisfies readonly (keyof CampaignConfigFormInput)[];
-
-function isRhfFieldName(field: string): field is (typeof RHF_FIELD_NAMES)[number] {
-  return RHF_FIELD_NAMES.some((name) => name === field);
-}
 
 /**
  * The fields of this section that have a message slot on screen for the given kurgu: the name,
@@ -129,13 +126,7 @@ export function MarketplaceCampaignConfigFields({
 
   // Backend VALIDATION_ERROR field issues → inline messages (see DiscountConfigFields for the
   // full rationale; an effect is required because setError writes into external RHF state).
-  React.useEffect(() => {
-    for (const issue of validationIssues(submitError)) {
-      if (isRhfFieldName(issue.field)) {
-        form.setError(issue.field, { type: 'server', message: issue.code });
-      }
-    }
-  }, [submitError, form]);
+  useServerFieldErrors(form, submitError, RHF_FIELD_NAMES);
 
   return (
     <div className="gap-md flex flex-col">
