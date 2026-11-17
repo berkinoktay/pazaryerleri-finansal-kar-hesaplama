@@ -4,6 +4,8 @@ import { type ReactElement, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { WORKBOOK_PAGES } from '@pazarsync/utils';
+
 import { useUnknownPriceWarning } from '@/features/campaigns/hooks/use-unknown-price-warning';
 
 import trMessages from '../../../messages/tr.json';
@@ -32,7 +34,9 @@ afterEach(() => {
 describe('useUnknownPriceWarning', () => {
   it('warns once with the count of rows whose current price was unknown', () => {
     const warning = vi.spyOn(toast, 'warning');
-    const { result } = renderHook(() => useUnknownPriceWarning(), { wrapper });
+    const { result } = renderHook(() => useUnknownPriceWarning(WORKBOOK_PAGES.COMMISSION_TARIFF), {
+      wrapper,
+    });
 
     result.current(UNKNOWN_PRICE_ROWS);
 
@@ -44,7 +48,9 @@ describe('useUnknownPriceWarning', () => {
 
   it('does nothing for 0', () => {
     const warning = vi.spyOn(toast, 'warning');
-    const { result } = renderHook(() => useUnknownPriceWarning(), { wrapper });
+    const { result } = renderHook(() => useUnknownPriceWarning(WORKBOOK_PAGES.COMMISSION_TARIFF), {
+      wrapper,
+    });
 
     result.current(0);
 
@@ -53,10 +59,27 @@ describe('useUnknownPriceWarning', () => {
 
   it('does nothing when the API does not send the count', () => {
     const warning = vi.spyOn(toast, 'warning');
-    const { result } = renderHook(() => useUnknownPriceWarning(), { wrapper });
+    const { result } = renderHook(() => useUnknownPriceWarning(WORKBOOK_PAGES.COMMISSION_TARIFF), {
+      wrapper,
+    });
 
     result.current(undefined);
 
     expect(warning).not.toHaveBeenCalled();
+  });
+
+  it('warns with the Plus message for the Plus page', () => {
+    const warning = vi.spyOn(toast, 'warning');
+    const { result } = renderHook(
+      () => useUnknownPriceWarning(WORKBOOK_PAGES.PLUS_COMMISSION_TARIFF),
+      { wrapper },
+    );
+
+    result.current(UNKNOWN_PRICE_ROWS);
+
+    expect(warning).toHaveBeenCalledTimes(1);
+    expect(warning).toHaveBeenCalledWith(
+      tUpload('plusUnknownPriceWarning', { count: UNKNOWN_PRICE_ROWS }),
+    );
   });
 });

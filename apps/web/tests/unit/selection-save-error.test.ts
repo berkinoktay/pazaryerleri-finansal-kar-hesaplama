@@ -26,6 +26,13 @@ describe('selectionSaveErrorToast', () => {
     },
   );
 
+  it('picks selectionRefused for PLUS_PRICE_UNKNOWN', () => {
+    const error = validationApiError([
+      { field: 'selections.0.selected', code: 'PLUS_PRICE_UNKNOWN' },
+    ]);
+    expect(selectionSaveErrorToast(error)).toBe('selectionRefused');
+  });
+
   it('returns generic for a VALIDATION_ERROR with no band refusal', () => {
     expect(
       selectionSaveErrorToast(

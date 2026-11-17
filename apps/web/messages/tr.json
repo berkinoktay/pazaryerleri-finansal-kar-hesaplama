@@ -224,7 +224,7 @@
       "ROW_ANCHOR_MISMATCH": "Saklanan dosyadaki bir satırda artık aynı ürün yok. Dosyayı yeniden yükle.",
       "ROW_NOT_FOUND": "Yazılması gereken bir satır saklanan dosyada bulunamadı. Dosyayı yeniden yükle.",
       "EXPORT_FILENAME_COLLISION": "Gün sayısı aynı olan iki dönemde farklı seçimler var; dışa aktarılan iki dosya aynı adı alırdı. Bu seçimleri aynı yapıp tekrar dışa aktar.",
-      "SELECTION_PRICE_UNKNOWN": "Seçtiğin fiyat aralıklarından birinin fiyatı bilinmiyor, bu yüzden dosya oluşturulmadı. Tarifeyi açıp o ürün için başka bir aralık seç ya da özel fiyat gir, sonra tekrar dışa aktar."
+      "SELECTION_PRICE_UNKNOWN": "Seçtiğin ürünlerden birinin dosyaya yazılacak fiyatı bilinmiyor, bu yüzden dosya oluşturulmadı. Tarifeyi açıp o ürün için başka bir seçenek seç ya da özel fiyat gir, sonra tekrar dışa aktar."
     },
     "unmatchedBadge": "Eşleşme bekliyor",
     "vendorMissingBadge": "Trendyol kataloğunda yok",
@@ -814,6 +814,7 @@
     },
     "prefilledWarning": "Dosyanın {count, plural, other {# satırında}} önceden yapılmış bir seçim vardı. Bunlar sizin seçiminiz sayılmadı; o ürünler için seçim yapmazsanız dosyada olduğu gibi kalırlar.",
     "unknownCurrentPriceWarning": "Dosyadaki {count, plural, other {# ürünün}} fiyatı okunamadı. Bu ürünlerde güncel kâr gösterilmeyecek; fiyat aralıklarının kârı yine hesaplanır.",
+    "plusUnknownPriceWarning": "Dosyadaki {count, plural, other {# ürünün}} fiyatı okunamadı. Bu fiyatlar bilinmiyor olarak gösterilecek ve onlardan kâr hesaplanmayacak; Plus fiyat üst limiti okunamayan ürün Plus'a yalnız özel fiyatla katılabilir.",
     "errors": {
       "notReadable": "Dosya okunamadı. Pazaryeri panelinden indirdiğiniz .xlsx dosyasını yapısını değiştirmeden yükleyin.",
       "empty": "Dosyada ürün satırı bulunamadı.",
@@ -1056,6 +1057,7 @@
     }
   },
   "plusCommissionTariffsPage": {
+    "selectionRefused": "Seçimlerin kaydedilemedi: biri artık ürünü için geçerli değil. Sayfayı yenileyip yeniden seç.",
     "search": "Ürün, model veya barkod ara",
     "actions": {
       "upload": "Excel Yükle",
@@ -1158,6 +1160,10 @@
       "currentProfitHint": "Hiçbir ürüne Plus uygulamazsan bugünkü tahmini toplam kâr."
     },
     "table": {
+      "priceUnknown": "Bilinmiyor",
+      "priceUnknownHint": "Excel'deki fiyatlar okunamadı; güncel kâr hesaplanmıyor.",
+      "plusPriceUnknownHint": "Dosyadaki Plus fiyat üst limiti okunamadı. Yalnız özel fiyatla katılabilirsin.",
+      "notSelectable": "Seçilemez",
       "product": "Ürün Bilgileri",
       "current": "Güncel fiyat",
       "currentCommission": "Güncel komisyon",
@@ -1173,6 +1179,7 @@
       "enterPrice": "Fiyat girin",
       "enterCost": "Maliyet girin",
       "customPriceHint": "Üst limitin altında bir Plus fiyatı dene",
+      "customPriceHintNoCeiling": "Katılmak istediğin Plus fiyatını gir",
       "selectCustom": "Bu fiyatla katıl",
       "customSelected": "Katıldın",
       "ceilingQualifier": "ve altı"

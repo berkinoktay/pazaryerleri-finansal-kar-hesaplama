@@ -50,4 +50,23 @@ describe('tariff selection body cap', () => {
     expect(over.success).toBe(false);
     expect(over.error?.issues.map((issue) => issue.path.join('.'))).toEqual(['selections']);
   });
+
+  it('refuses a custom price wider than the stored column on both pages', () => {
+    const itemId = itemIds(1)[0];
+    const commission = (customPrice: string): boolean =>
+      UpdateSelectionsBodySchema.safeParse({
+        selections: [{ itemId, band: 'band2', customPrice }],
+      }).success;
+    const plus = (customPrice: string): boolean =>
+      UpdatePlusSelectionsBodySchema.safeParse({
+        selections: [{ itemId, selected: true, customPrice }],
+      }).success;
+
+    // numeric(12,2): ten integer digits fit, eleven overflow the column.
+    for (const accepts of [commission, plus]) {
+      expect(accepts('9999999999.99')).toBe(true);
+      expect(accepts('12345678901')).toBe(false);
+      expect(accepts('12345678901.50')).toBe(false);
+    }
+  });
 });

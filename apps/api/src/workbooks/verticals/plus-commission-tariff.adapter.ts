@@ -6,10 +6,14 @@
 // transaction and again inside it). The export writes each opted-in product's Plus price,
 // the window's tariff selection, the reduced commission of every period the file covers
 // and the no-cancel label into every row that carries its barcode, one file per window.
+// An opted-in product without a custom price whose Plus price upper limit is unknown
+// refuses the whole export with SELECTION_PRICE_UNKNOWN; the export never writes a
+// price it does not know.
 
 import { prisma, type Prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
+import { WorkbookConflictError } from '../../lib/errors';
 import { isUniqueViolationOn } from '../../lib/map-transaction-error';
 import {
   ImportPlusTariffFormSchema,
@@ -51,7 +55,8 @@ export interface PlusCommissionTariffExportItem {
   readonly barcode: string;
   readonly plusSelected: boolean;
   readonly customPrice: Prisma.Decimal | null;
-  readonly plusPriceUpperLimit: Prisma.Decimal;
+  /** Null when the file's Plus price upper limit cell was blank, unreadable or 0. */
+  readonly plusPriceUpperLimit: Prisma.Decimal | null;
   readonly plusCommissionPct: Prisma.Decimal;
 }
 
@@ -71,7 +76,11 @@ const PLUS_COMMISSION_TARIFF_HTTP: WorkbookHttpSpec = {
     'offer: price ceiling + reduced commission) is joined to a ProductVariant by barcode. Stores one ' +
     'tariff with its product rows; profit is computed later on read. Returns counts: products, ' +
     'items, matched/unmatched products, skipped rows. Rejects a file whose header layout does not ' +
-    'match the expected Plus export (422 VALIDATION_ERROR).',
+    'match the expected Plus export (422 VALIDATION_ERROR). A blank, unreadable or 0 current ' +
+    'price, commission base price, Plus price upper limit or Plus commission base price is ' +
+    'stored as null. The response also carries `unknownPriceRows`, the product rows with ' +
+    'neither a commission base price nor a current price, or with no Plus price upper limit ' +
+    '(each row counts once, whatever the number of periods).',
   importCreated: 'Tariff imported',
   import422: 'File missing, unreadable, or not the expected tariff format',
   exportSummary: 'Export the Plus tariff as a re-uploadable Trendyol Excel',
@@ -84,19 +93,25 @@ const PLUS_COMMISSION_TARIFF_HTTP: WorkbookHttpSpec = {
     '"7 Günlük Fiyat" file for products priced the same in both sub-periods — carrying one price but ' +
     'a commission cell per sub-period — plus "3 Günlük Fiyat" / "4 Günlük Fiyat" files for ' +
     'period-specific prices), only the non-empty ones, bundled into a single .zip. Marks the tariff ' +
-    'exported. Returns 409 if the tariff has no stored source file.',
+    'exported. Returns 409 if the tariff has no stored source file, and 409 ' +
+    'SELECTION_PRICE_UNKNOWN when a product that opted in to Plus without a custom price has no ' +
+    'known Plus price upper limit; then no file is built and the tariff is not marked exported.',
   exportOk:
     'The patched .xlsx (single file), or a .zip of the window files when a product is priced ' +
     'differently across sub-periods, ready to re-upload to Trendyol',
   export404: 'Tariff or store not found in this organization',
-  export409: 'Tariff has no stored source file to export',
+  export409:
+    'Tariff has no stored source file to export, or a product that opted in to Plus has no ' +
+    'known price to export (SELECTION_PRICE_UNKNOWN)',
   exportMimes: [XLSX_MIME, ZIP_MIME],
 };
 
 /**
  * The Plus price of one item, or null when it carries none: an item the seller opted
  * into Plus writes its custom price, else the Plus price ceiling, with two decimal
- * places. An item that is not opted in carries no price, whatever its custom price.
+ * places. An item that is not opted in carries no price, whatever its custom price or
+ * ceiling. An opted-in item without a custom price whose ceiling is unknown never gets
+ * a made-up price: it throws WorkbookConflictError SELECTION_PRICE_UNKNOWN (409).
  */
 export function resolvePlusExportPrice(
   item: Pick<
@@ -105,23 +120,38 @@ export function resolvePlusExportPrice(
   >,
 ): string | null {
   if (!item.plusSelected) return null;
-  return (item.customPrice ?? item.plusPriceUpperLimit).toFixed(PLUS_PRICE_SCALE);
+  const price = item.customPrice ?? item.plusPriceUpperLimit;
+  if (price === null) throw new WorkbookConflictError('SELECTION_PRICE_UNKNOWN');
+  return price.toFixed(PLUS_PRICE_SCALE);
+}
+
+/** What the Plus import's `inspect` hands to `persist` and `toResponse`. */
+interface PlusCommissionTariffImportMeta {
+  readonly week: TariffWeek;
+  /**
+   * The kept product rows the seller sees with an unknown price: no baseline price
+   * (neither a commission base price nor a current price) or no Plus price upper limit;
+   * each row counts once, whatever the number of periods.
+   */
+  readonly unknownPriceRows: number;
 }
 
 /**
  * The week of the upload (`inspectUploadWeek`): the period blocks filled on the first
- * data row, checked as the export writes them, then the scoped overlap query.
+ * data row, checked as the export writes them, then the scoped overlap query; and the
+ * count of product rows with no baseline price or no Plus price upper limit.
  */
 async function inspectTariffWeek({
   scope,
   now,
+  rows,
   firstDataRow,
 }: InspectContext<
   typeof trendyolPlusCommissionTariffLayout,
   PlusCommissionTariffRow,
   undefined
->): Promise<TariffWeek> {
-  return inspectUploadWeek({
+>): Promise<PlusCommissionTariffImportMeta> {
+  const week = await inspectUploadWeek({
     table: prisma.plusCommissionTariff,
     scope,
     now,
@@ -134,6 +164,12 @@ async function inspectTariffWeek({
           })),
     write: { spec: TARIFF_SELECTION_WRITE, label: tariffSelectionLabel },
   });
+  // The mapped commission base price already falls back to the current price, so null
+  // there means the row has no baseline price at all.
+  const unknownPriceRows = rows.filter(
+    (row) => row.data.commissionBasePrice === null || row.data.plusPriceUpperLimit === null,
+  ).length;
+  return { week, unknownPriceRows };
 }
 
 /**
@@ -216,7 +252,7 @@ export const plusCommissionTariffAdapter: WorkbookVerticalAdapter<
   typeof trendyolPlusCommissionTariffLayout,
   PlusCommissionTariffRow,
   undefined,
-  TariffWeek,
+  PlusCommissionTariffImportMeta,
   PlusCommissionTariffExportItem,
   ImportPlusTariffResponse,
   PlusCommissionTariffWriteKey
@@ -235,8 +271,8 @@ export const plusCommissionTariffAdapter: WorkbookVerticalAdapter<
   },
   formats: [trendyolPlusCommissionTariffFormat],
   inspect: inspectTariffWeek,
-  nameFallback: (week) => week.present[0]?.label ?? null,
-  persist: async (tx, { parent, rows, variantIdByAnchor, meta: week }) => {
+  nameFallback: ({ week }) => week.present[0]?.label ?? null,
+  persist: async (tx, { parent, rows, variantIdByAnchor, meta: { week } }) => {
     const scope: StoreScope = { organizationId: parent.organizationId, storeId: parent.storeId };
     await assertNoOverlappingWeek(tx.plusCommissionTariff, scope, week);
     const tariff = await tx.plusCommissionTariff.create({
@@ -306,12 +342,13 @@ export const plusCommissionTariffAdapter: WorkbookVerticalAdapter<
   toResponse: (outcome) => ({
     tariffId: outcome.parentId,
     productCount: outcome.rowCount,
-    periodCount: outcome.meta.present.length,
+    periodCount: outcome.meta.week.present.length,
     itemCount: outcome.itemCount,
     matched: outcome.matchedRows,
     unmatched: outcome.rowCount - outcome.matchedRows,
     skippedRows: outcome.skippedRows,
     prefilledRows: outcome.prefilledRows,
+    unknownPriceRows: outcome.meta.unknownPriceRows,
   }),
   load: loadPlusCommissionTariff,
   notFoundResource: 'PlusCommissionTariff',

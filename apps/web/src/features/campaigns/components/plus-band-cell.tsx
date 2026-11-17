@@ -17,6 +17,7 @@ import { TariffBestRibbon } from './tariff-best-ribbon';
 import { TariffOptionCard } from './tariff-option-card';
 import { TariffProfitBlock } from './tariff-profit-block';
 import { TariffSelectFoot } from './tariff-select-foot';
+import { TariffUnknownPrice } from './tariff-unknown-price';
 
 export interface PlusBandCellProps {
   row: PlusTariffRow;
@@ -47,6 +48,13 @@ export interface PlusBandCellProps {
  * `<button>` is invalid HTML and breaks hydration. The badge (and the ribbon) are
  * raised (`z-10`) so the badge's click still reaches it; the price, commission and
  * foot sit below the overlay and select.
+ *
+ * An offer with no price (the file's Plus price upper limit could not be read) shows
+ * "Unknown" with a short explanation line under it, has no profit and never wears the
+ * "best" ribbon. The backend refuses to store a ceiling join without a price, so
+ * while not joined the card has no select target and its foot reads "Cannot be
+ * selected" (the seller can still join with a custom price). If it is already joined,
+ * the overlay stays so the seller can still un-join it.
  */
 export function PlusBandCell({
   row,
@@ -61,39 +69,54 @@ export function PlusBandCell({
   const scope = useTariffScope();
   const estimate = useEstimatePlusItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
+  const priceUnknown = band.price === null;
+  // An offer with no price can only be un-joined, never newly joined at the ceiling.
+  const selectable = !priceUnknown || selected;
 
   function openBreakdown(): void {
     setBreakdownOpen(true);
+    // An unknown ceiling has no price to estimate at: the dialog opens with no result.
+    if (band.price === null) return;
     estimate.mutate({ itemId: row.id, body: { price: band.price } });
   }
 
   return (
-    <TariffOptionCard selected={selected} interactive>
+    <TariffOptionCard selected={selected} interactive={selectable}>
       {/* Stretched-overlay select target. Sibling of the ProfitBadge (never an
           ancestor) so the badge's own <button> is not nested inside it. Price,
-          commission and the foot ring sit below the overlay → clicking them joins. */}
-      <button
-        type="button"
-        aria-pressed={selected}
-        aria-label={selected ? t('joined') : t('join')}
-        onClick={onSelect}
-        // Tailwind v4 strips the native button cursor; the overlay covers the whole
-        // card, so its cursor is what the seller sees hovering the offer.
-        className="focus-visible:shadow-focus absolute inset-0 cursor-pointer rounded-md focus-visible:outline-none"
-      />
+          commission and the foot ring sit below the overlay, so clicking them joins.
+          Absent on an offer that cannot be joined. */}
+      {selectable ? (
+        <button
+          type="button"
+          aria-pressed={selected}
+          aria-label={selected ? t('joined') : t('join')}
+          onClick={onSelect}
+          // Tailwind v4 strips the native button cursor; the overlay covers the whole
+          // card, so its cursor is what the seller sees hovering the offer.
+          className="focus-visible:shadow-focus absolute inset-0 cursor-pointer rounded-md focus-visible:outline-none"
+        />
+      ) : null}
 
       {/* "En kârlı" — a featured ribbon straddling the top border. Absolute, so it
           adds NO height. pointer-events-none → clicking it still joins via the
-          overlay. Only shown when the Plus offer wins the row. */}
-      {isBest ? <TariffBestRibbon label={t('best')} /> : null}
+          overlay. Only shown when the Plus offer wins the row, never on an offer with
+          no price. */}
+      {isBest && !priceUnknown ? <TariffBestRibbon label={t('best')} /> : null}
 
       {/* Ceiling price + its "ve altı" qualifier as one hero unit, then the reduced
-          Plus commission. */}
+          Plus commission. An unknown ceiling reads muted, never as an amount. */}
       <div className="gap-3xs flex min-w-0 flex-col items-start">
-        <span className="gap-x-2xs flex min-w-0 flex-wrap items-baseline">
-          <span className="text-base font-bold tabular-nums">{formatCurrency(band.price)}</span>
-          <span className="text-xs font-normal">{t('ceilingQualifier')}</span>
-        </span>
+        {band.price === null ? (
+          // The unknown label and, on its own line under it, why and the way out
+          // (a custom price): plain text, so it reads on touch devices too.
+          <TariffUnknownPrice label={t('priceUnknown')} hint={t('plusPriceUnknownHint')} />
+        ) : (
+          <span className="gap-x-2xs flex min-w-0 flex-wrap items-baseline">
+            <span className="text-base font-bold tabular-nums">{formatCurrency(band.price)}</span>
+            <span className="text-xs font-normal">{t('ceilingQualifier')}</span>
+          </span>
+        )}
         <span className="text-2xs text-muted-foreground tabular-nums">
           {t('plusCommission')} {formatPercentDisplay(band.commissionPct)}
         </span>
@@ -113,8 +136,14 @@ export function PlusBandCell({
         vsCurrentLabel={t('vsCurrent')}
       />
 
-      {/* Visual foot only — the card overlay owns the click. */}
-      <TariffSelectFoot selected={selected} label={t('join')} selectedLabel={t('joined')} />
+      {/* Visual foot only: the card overlay owns the click. An offer that cannot be
+          joined says so, dimmed like a disabled foot. */}
+      <TariffSelectFoot
+        selected={selected}
+        label={selectable ? t('join') : t('notSelectable')}
+        selectedLabel={t('joined')}
+        disabled={!selectable}
+      />
 
       <PlusTariffBreakdown
         open={breakdownOpen}
@@ -123,8 +152,8 @@ export function PlusBandCell({
         imageUrl={row.imageUrl}
         stockCode={row.stockCode}
         currentNetProfit={row.currentNetProfit}
-        result={estimate.data ?? null}
-        loading={estimate.isPending}
+        result={priceUnknown ? null : (estimate.data ?? null)}
+        loading={priceUnknown ? false : estimate.isPending}
       />
     </TariffOptionCard>
   );

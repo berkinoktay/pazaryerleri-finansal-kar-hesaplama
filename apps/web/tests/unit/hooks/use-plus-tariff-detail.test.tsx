@@ -41,6 +41,26 @@ function detailItem() {
   };
 }
 
+// A row whose prices could not be read from the file: every price is null, so the
+// backend computes no profit for it and the Plus option is never better.
+function unknownPriceItem() {
+  return {
+    ...detailItem(),
+    id: 'aaaaaaaa-bbbb-cccc-dddd-ffffffffffff',
+    barcode: '8681234567891',
+    stockCode: 'SKU-2',
+    currentPrice: null,
+    commissionBasePrice: null,
+    currentNetProfit: null,
+    currentMarginPct: null,
+    plusPriceUpperLimit: null,
+    plus: { price: null, commissionPct: '14.00', netProfit: null, marginPct: null },
+    plusIsBetter: false,
+    calculable: false,
+    reason: null,
+  };
+}
+
 function detailResponse() {
   return {
     id: TARIFF_ID,
@@ -52,7 +72,7 @@ function detailResponse() {
         dateRangeLabel: '30 Haz - 6 Tem',
         dayCount: 7,
         validity: 'active',
-        items: [detailItem()],
+        items: [detailItem(), unknownPriceItem()],
       },
     ],
   };
@@ -71,10 +91,17 @@ describe('usePlusTariffDetail', () => {
     expect(result.current.data?.periods).toHaveLength(1);
     const period = result.current.data?.periods[0];
     expect(period?.dateRangeLabel).toBe('30 Haz - 6 Tem');
-    expect(period?.items).toHaveLength(1);
+    expect(period?.items).toHaveLength(2);
     expect(period?.items[0].plusIsBetter).toBe(true);
     expect(period?.items[0].currentNetProfit).toBe('42.00');
     expect(period?.items[0].plus.netProfit).toBe('58.00');
+    // Unknown prices come through as null, never as a made-up 0.
+    const unknown = period?.items[1];
+    expect(unknown?.currentPrice).toBeNull();
+    expect(unknown?.commissionBasePrice).toBeNull();
+    expect(unknown?.plusPriceUpperLimit).toBeNull();
+    expect(unknown?.plus.price).toBeNull();
+    expect(unknown?.plus.netProfit).toBeNull();
   });
 
   it('does not fetch when tariffId is null (enabled=false path)', () => {

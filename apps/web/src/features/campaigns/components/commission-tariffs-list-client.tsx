@@ -46,7 +46,7 @@ export function CommissionTariffsListClient({
   const deleteTariff = useDeleteTariff(orgId ?? '', storeId ?? '');
   const exportTariff = useExportWorkbook(PAGE, orgId ?? '', storeId ?? '');
   const warnPrefilled = usePrefilledWarning();
-  const warnUnknownPrice = useUnknownPriceWarning();
+  const warnUnknownPrice = useUnknownPriceWarning(PAGE);
   const [uploadOpen, setUploadOpen] = React.useState(false);
 
   const items = React.useMemo(() => list.data ?? [], [list.data]);
@@ -62,7 +62,7 @@ export function CommissionTariffsListClient({
         onSuccess: (result) => {
           setUploadOpen(false);
           warnPrefilled(result.prefilledRows);
-          warnUnknownPrice(result.unknownCurrentPriceRows);
+          warnUnknownPrice(result.unknownPriceRows);
           openDetail(result.id);
         },
       });

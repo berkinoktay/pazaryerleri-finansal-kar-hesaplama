@@ -16,7 +16,13 @@ import { Decimal } from 'decimal.js';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import { cellText, columnIndex, readWorkbookGrid, resolveLayout } from '@pazarsync/spreadsheet';
+import {
+  cellText,
+  columnIndex,
+  readWorkbookGrid,
+  resolveLayout,
+  type CellPatch,
+} from '@pazarsync/spreadsheet';
 import { patchFixture } from '@pazarsync/spreadsheet/testing';
 
 import { createApp } from '@/app';
@@ -332,5 +338,138 @@ describe('POST .../plus-commission-tariffs/import - a period of 0 days', () => {
     expect(body.errors).toEqual([{ field: 'file', code: 'MALFORMED_SHEET' }]);
     const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
     expect(await prisma.plusCommissionTariff.count({ where: scope })).toBe(0);
+  });
+});
+
+/** The price columns a test blanks. */
+type PriceColumn = 'currentPrice' | 'commissionBasePrice' | 'plusPriceUpperLimit';
+
+const ImportedSchema = z.object({ tariffId: z.string() });
+
+/** `fixture` with the `columns` cells of its first kept row (`barcode`'s) cleared. */
+async function withBlankCells(
+  fixture: Buffer,
+  barcode: string,
+  columns: readonly PriceColumn[],
+): Promise<Buffer> {
+  const format = trendyolPlusCommissionTariffFormat;
+  const grid = await readWorkbookGrid(fixture, { sheet: format.sheet });
+  const layout = resolveLayout(format.layout, grid);
+  if (layout === null) throw new Error('unreadable Plus fixture');
+  const barcodeCol = columnIndex(format.layout, layout, 'barcode');
+  expect(cellText(grid[FIRST_KEPT_ROW - 1] ?? [], barcodeCol)).toBe(barcode);
+  const patches = columns.map((key): CellPatch => {
+    const col = columnIndex(format.layout, layout, key);
+    if (col === null) throw new Error(`the fixture has no ${key} column`);
+    return { excelRow: FIRST_KEPT_ROW, col, value: { kind: 'clear' } };
+  });
+  return patchFixture(fixture, patches, { sheet: format.sheet });
+}
+
+describe('POST .../plus-commission-tariffs/import - an unknown price', () => {
+  beforeEach(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+  });
+
+  it('stores a row with a blank Plus price upper limit with plus_price_upper_limit NULL in every period', async () => {
+    const ctx = await setupStore();
+    const file = await withBlankCells(FIXTURE_MULTI, MULTI_BARCODE, ['plusPriceUpperLimit']);
+
+    const res = await app.request(importRequest(ctx, file, 'trendyol-plus-tariff-3ve4.xlsx'));
+
+    expect(res.status).toBe(201);
+    const { tariffId } = ImportedSchema.parse(await res.json());
+    const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
+    const items = await prisma.plusCommissionTariffItem.findMany({
+      where: { ...scope, barcode: MULTI_BARCODE, period: { tariffId } },
+      select: {
+        currentPrice: true,
+        plusPriceUpperLimit: true,
+        plusCommissionBasePrice: true,
+      },
+    });
+    // One item per period, each with the unknown ceiling; the row's own Plus commission
+    // base price is known, so it does not fall back.
+    expect(items).toHaveLength(2);
+    for (const item of items) {
+      expect(item.plusPriceUpperLimit).toBeNull();
+      expect(item.plusCommissionBasePrice?.toString()).toBe('886.78');
+      expect(item.currentPrice?.toString()).toBe('933.45');
+    }
+    // Only that row's items carry an unknown ceiling.
+    expect(
+      await prisma.plusCommissionTariffItem.count({
+        where: { ...scope, plusPriceUpperLimit: null },
+      }),
+    ).toBe(2);
+  });
+
+  it('stores a row with blank current and commission base prices with both columns NULL', async () => {
+    const ctx = await setupStore();
+    const file = await withBlankCells(FIXTURE_7DAY, MATCHED_BARCODE, [
+      'currentPrice',
+      'commissionBasePrice',
+    ]);
+
+    const res = await app.request(importRequest(ctx, file, 'trendyol-plus-tariff.xlsx'));
+
+    expect(res.status).toBe(201);
+    const { tariffId } = ImportedSchema.parse(await res.json());
+    const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
+    const item = await prisma.plusCommissionTariffItem.findFirst({
+      where: { ...scope, barcode: MATCHED_BARCODE, period: { tariffId } },
+      select: {
+        currentPrice: true,
+        commissionBasePrice: true,
+        plusPriceUpperLimit: true,
+        plusCommissionBasePrice: true,
+      },
+    });
+    expect(item).not.toBeNull();
+    expect(item?.currentPrice).toBeNull();
+    expect(item?.commissionBasePrice).toBeNull();
+    // The Plus prices of the same row are untouched.
+    expect(item?.plusPriceUpperLimit?.toString()).toBe('377.66');
+    expect(item?.plusCommissionBasePrice?.toString()).toBe('448.87');
+    // Only that row carries an unknown current price.
+    expect(
+      await prisma.plusCommissionTariffItem.count({ where: { ...scope, currentPrice: null } }),
+    ).toBe(1);
+  });
+});
+
+const UnknownPriceCountSchema = z.object({
+  periodCount: z.number(),
+  unknownPriceRows: z.number(),
+});
+
+describe('POST .../plus-commission-tariffs/import - the unknown price count', () => {
+  beforeEach(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+  });
+
+  it('answers unknownPriceRows 0 for a file whose prices all read', async () => {
+    const ctx = await setupStore();
+
+    const res = await app.request(importRequest(ctx, FIXTURE_7DAY, 'trendyol-plus-tariff.xlsx'));
+
+    expect(res.status).toBe(201);
+    const body = UnknownPriceCountSchema.parse(await res.json());
+    expect(body.unknownPriceRows).toBe(0);
+  });
+
+  it('counts each product row with an unknown price once, whatever the number of periods', async () => {
+    const ctx = await setupStore();
+    const file = await withBlankCells(FIXTURE_MULTI, MULTI_BARCODE, ['plusPriceUpperLimit']);
+
+    const res = await app.request(importRequest(ctx, file, 'trendyol-plus-tariff-3ve4.xlsx'));
+
+    expect(res.status).toBe(201);
+    const body = UnknownPriceCountSchema.parse(await res.json());
+    // Two periods store two items of the row, and the row still counts once.
+    expect(body.periodCount).toBe(2);
+    expect(body.unknownPriceRows).toBe(1);
   });
 });

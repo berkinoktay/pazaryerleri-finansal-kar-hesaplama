@@ -1,7 +1,8 @@
 // The Plus commission tariff adapter on its own: the Plus price each item carries (its
-// pick, literal money cases), what a covered row writes (the price, the window's tariff
-// selection, one computed commission per covered period, the no-cancel label), how the
-// window files and the anchor map pick among periods and repeated barcodes, the week
+// pick, literal money cases, and its refusal of an unknown ceiling), what a covered row
+// writes (the price, the window's tariff selection, one computed commission per covered
+// period, the no-cancel label), how the window files and the anchor map pick among
+// periods and repeated barcodes, the week
 // check of the upload (the database mocked; the persist re-check runs against the real
 // database in plus-commission-tariffs-duplicate-week.routes.test.ts), and the form,
 // name and response.
@@ -24,11 +25,13 @@ import {
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { ExportGroup, WriteContext } from '@/workbooks/adapter';
+import { WorkbookConflictError, type WorkbookConflictReason } from '@/lib/errors';
+import type { ExportGroup, ImportedRow, WriteContext } from '@/workbooks/adapter';
 import { planExport } from '@/workbooks/export-plan';
 import { NO_LABEL, TARIFF_WINDOW_LABEL_UNIT } from '@/workbooks/formats/trendyol/labels';
 import {
   trendyolPlusCommissionTariffFormat,
+  type PlusCommissionTariffRow,
   type PlusCommissionTariffWriteKey,
 } from '@/workbooks/formats/trendyol/plus-commission-tariff.format';
 import { TARIFF_PERIODS_REASON, type TariffWeek } from '@/workbooks/tariff-week';
@@ -74,16 +77,28 @@ function item(
   barcode: string,
   plusSelected: boolean,
   customPrice: string | null,
-  plusPriceUpperLimit = '120',
+  plusPriceUpperLimit: string | null = '120',
   plusCommissionPct = '12.5',
 ): PlusCommissionTariffExportItem {
   return {
     barcode,
     plusSelected,
     customPrice: customPrice === null ? null : new Prisma.Decimal(customPrice),
-    plusPriceUpperLimit: new Prisma.Decimal(plusPriceUpperLimit),
+    plusPriceUpperLimit:
+      plusPriceUpperLimit === null ? null : new Prisma.Decimal(plusPriceUpperLimit),
     plusCommissionPct: new Prisma.Decimal(plusCommissionPct),
   };
+}
+
+/** The reason of the WorkbookConflictError `run` throws; null when it returns. */
+function conflictReason(run: () => unknown): WorkbookConflictReason | null {
+  try {
+    run();
+  } catch (err) {
+    if (err instanceof WorkbookConflictError) return err.reason;
+    throw err;
+  }
+  return null;
 }
 
 afterEach(() => {
@@ -104,6 +119,23 @@ describe('Plus commission tariff adapter: the Plus price an item carries (pick)'
   it('is null for an item that is not selected, even with a custom price', () => {
     expect(resolvePlusExportPrice(item('BC-1', false, null))).toBeNull();
     expect(resolvePlusExportPrice(item('BC-1', false, '99.9'))).toBeNull();
+  });
+
+  it('refuses a selected item without a custom price whose Plus price ceiling is unknown', () => {
+    const unknown = item('BC-1', true, null, null);
+
+    expect(conflictReason(() => resolvePlusExportPrice(unknown))).toBe('SELECTION_PRICE_UNKNOWN');
+    expect(conflictReason(() => adapter.pick(unknown))).toBe('SELECTION_PRICE_UNKNOWN');
+  });
+
+  it('writes the custom price even when the Plus price ceiling is unknown', () => {
+    expect(resolvePlusExportPrice(item('BC-1', true, '99.9', null))).toBe('99.90');
+    expect(adapter.pick(item('BC-1', true, '99.9', null))).toBe('99.90');
+  });
+
+  it('is null for an unselected item whose Plus price ceiling is unknown', () => {
+    expect(resolvePlusExportPrice(item('BC-1', false, null, null))).toBeNull();
+    expect(resolvePlusExportPrice(item('BC-1', false, '99.9', null))).toBeNull();
   });
 });
 
@@ -421,15 +453,55 @@ describe('Plus commission tariff adapter: the week of the upload (inspect)', () 
   const weekStartsAt = new Date('2026-06-30T08:00:00.000Z');
   const weekEndsAt = new Date('2026-07-07T07:59:00.000Z');
 
-  async function inspect(firstDataRow: Awaited<ReturnType<typeof firstDataRowOf>> | null) {
-    return adapter.inspect({ scope: SCOPE, config: undefined, now, rows: [], firstDataRow });
+  async function inspect(
+    firstDataRow: Awaited<ReturnType<typeof firstDataRowOf>> | null,
+    rows: readonly ImportedRow<PlusCommissionTariffRow>[] = [],
+  ) {
+    return adapter.inspect({ scope: SCOPE, config: undefined, now, rows, firstDataRow });
+  }
+
+  /**
+   * A kept product row with the given mapped prices; the mapped commission base price
+   * already holds the current-price fallback.
+   */
+  function productRow(
+    excelRow: number,
+    prices: {
+      readonly currentPrice: string | null;
+      readonly commissionBasePrice: string | null;
+      readonly plusPriceUpperLimit: string | null;
+      readonly plusCommissionBasePrice: string | null;
+    },
+  ): ImportedRow<PlusCommissionTariffRow> {
+    const barcode = `B-${excelRow}`;
+    return {
+      excelRow,
+      anchor: barcode,
+      data: {
+        barcode,
+        stockCode: null,
+        productTitle: barcode,
+        category: null,
+        brand: null,
+        size: null,
+        modelCode: null,
+        stock: null,
+        ...prices,
+        currentCommissionPct: '19',
+        externalId: null,
+        tariffGroup: null,
+        cancelled: false,
+        periodOffers: ['10.7', '13.1'],
+      },
+    };
   }
 
   it("returns the week of the first row's periods when no tariff of the store overlaps it", async () => {
     mocks.findPlusTariff.mockResolvedValue(null);
 
-    const week = await inspect(await firstDataRowOf(SINGLE));
+    const { week, unknownPriceRows } = await inspect(await firstDataRowOf(SINGLE));
 
+    expect(unknownPriceRows).toBe(0);
     expect(week.weekStartsAt).toEqual(weekStartsAt);
     expect(week.weekEndsAt).toEqual(weekEndsAt);
     expect(week.present.map((period) => [period.dayCount, period.layoutIndex])).toEqual([[7, 0]]);
@@ -515,13 +587,46 @@ describe('Plus commission tariff adapter: the week of the upload (inspect)', () 
   it('accepts the split week of the real file: 3 and 4 days, a whole week of 7', async () => {
     mocks.findPlusTariff.mockResolvedValue(null);
 
-    const week = await inspect(await firstDataRowOf(MULTI));
+    const { week } = await inspect(await firstDataRowOf(MULTI));
 
     expect(week.present.map((period) => [period.dayCount, period.layoutIndex])).toEqual([
       [3, 0],
       [4, 1],
     ]);
     expect(mocks.findPlusTariff).toHaveBeenCalledTimes(1);
+  });
+
+  // A row is unknown when its baseline (the commission base price, which already falls
+  // back to the current price) or its Plus price ceiling is null; a row with both
+  // unknown still counts once, and the two periods of the split week do not double it.
+  // An unknown current price beside a known commission base price, or an unknown Plus
+  // commission base price alone, is not counted: the screen shows neither as unknown.
+  it('counts a row with no baseline price or no Plus price ceiling once', async () => {
+    mocks.findPlusTariff.mockResolvedValue(null);
+    const known = {
+      currentPrice: '120',
+      commissionBasePrice: '120',
+      plusPriceUpperLimit: '110',
+      plusCommissionBasePrice: '110',
+    };
+    const rows = [
+      productRow(2, known),
+      productRow(3, { ...known, currentPrice: null, commissionBasePrice: null }),
+      productRow(4, { ...known, plusPriceUpperLimit: null }),
+      productRow(5, {
+        currentPrice: null,
+        commissionBasePrice: null,
+        plusPriceUpperLimit: null,
+        plusCommissionBasePrice: null,
+      }),
+      productRow(6, { ...known, currentPrice: null }),
+      productRow(7, { ...known, plusCommissionBasePrice: null }),
+    ];
+
+    const { week, unknownPriceRows } = await inspect(await firstDataRowOf(MULTI), rows);
+
+    expect(week.present).toHaveLength(2);
+    expect(unknownPriceRows).toBe(3);
   });
 });
 
@@ -561,8 +666,12 @@ describe('Plus commission tariff adapter: form, name, response and the week inde
   });
 
   it("falls back to the first present period's label for the name", () => {
-    expect(adapter.nameFallback(week)).toBe('7 Temmuz 08.00-10 Temmuz 07.59');
-    expect(adapter.nameFallback({ ...week, present: [] })).toBeNull();
+    expect(adapter.nameFallback({ week, unknownPriceRows: 0 })).toBe(
+      '7 Temmuz 08.00-10 Temmuz 07.59',
+    );
+    expect(
+      adapter.nameFallback({ week: { ...week, present: [] }, unknownPriceRows: 0 }),
+    ).toBeNull();
   });
 
   it('answers the counts of the import, with the number of stored periods', () => {
@@ -577,7 +686,7 @@ describe('Plus commission tariff adapter: form, name, response and the week inde
         matchedDistinct: 5,
         skippedRows: 1,
         prefilledRows: 4,
-        meta: week,
+        meta: { week, unknownPriceRows: 3 },
       }),
     ).toEqual({
       tariffId: 'tariff-1',
@@ -588,6 +697,7 @@ describe('Plus commission tariff adapter: form, name, response and the week inde
       unmatched: 28,
       skippedRows: 1,
       prefilledRows: 4,
+      unknownPriceRows: 3,
     });
   });
 

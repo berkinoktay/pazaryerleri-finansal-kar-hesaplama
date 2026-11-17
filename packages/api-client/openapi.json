@@ -4751,7 +4751,7 @@
                     "string",
                     "null"
                   ],
-                  "pattern": "^\\d+(\\.\\d{1,2})?$"
+                  "pattern": "^\\d{1,10}(\\.\\d{1,2})?$"
                 }
               },
               "required": [
@@ -5200,6 +5200,10 @@
           },
           "prefilledRows": {
             "type": "integer"
+          },
+          "unknownPriceRows": {
+            "type": "integer",
+            "description": "The product rows with no baseline price (neither a commission base price nor a current price) or no Plus price upper limit (the cell was blank, unreadable or 0). Their unknown prices show as unknown and are never computed from. Each product row counts once, whatever the number of periods."
           }
         },
         "required": [
@@ -5210,7 +5214,8 @@
           "matched",
           "unmatched",
           "skippedRows",
-          "prefilledRows"
+          "prefilledRows",
+          "unknownPriceRows"
         ]
       },
       "UpdatePlusSelectionsResponse": {
@@ -5244,7 +5249,7 @@
                     "string",
                     "null"
                   ],
-                  "pattern": "^\\d+(\\.\\d{1,2})?$"
+                  "pattern": "^\\d{1,10}(\\.\\d{1,2})?$"
                 }
               },
               "required": [
@@ -5317,7 +5322,7 @@
           "NO_SHIPPING",
           null
         ],
-        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok. reason null + calculable false ise kâr bu kalem için hesaplanamadı (sunucuda loglandı); satır yine de döner."
+        "description": "Why the profit could not be computed: no matching product / no cost / no shipping. calculable false with reason null means the profit could not be computed for this item (the failure was logged on the server, or the row has no known price); the row is still returned."
       },
       "EstimatePlusPriceBody": {
         "type": "object",
@@ -5333,7 +5338,7 @@
             "enum": [
               "current"
             ],
-            "description": "Güncel senaryonun dökümü — item’ın komisyona esas fiyatı + güncel komisyonuyla hesaplanır; price verilmez."
+            "description": "Breakdown of the current scenario: priced at the item's commission base price, else at its current price, under its current commission; send no price. When neither price is known (the file's cells were blank, unreadable or 0) there is nothing to price: 422 on `scenario` with code CURRENT_PRICE_UNKNOWN."
           }
         }
       },
@@ -5437,11 +5442,18 @@
             ]
           },
           "currentPrice": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The seller's current sale price. Null when the file's cell was blank, unreadable or 0."
           },
           "commissionBasePrice": {
-            "type": "string",
-            "description": "Komisyona esas fiyat (müşterinin gördüğü fiyat) — güncel kâr bu fiyattan hesaplanır."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The commission base price (the price the customer sees); the current profit is computed from it. Null when the file's cell was blank, unreadable or 0."
           },
           "currentCommissionPct": {
             "type": "string"
@@ -5451,7 +5463,7 @@
               "string",
               "null"
             ],
-            "description": "Komisyona esas fiyat + güncel komisyonla net kâr; senaryo motoru bu fiyatı güncel komisyon oranıyla değerlendirir ve mağazanın kâr ayarları uygulanır; hesaplanamıyorsa null."
+            "description": "Net profit under the current commission, computed at commissionBasePrice, else at currentPrice; the scenario engine applies the store's profit settings. Null when neither price is known or the profit cannot be computed."
           },
           "currentMarginPct": {
             "type": [
@@ -5460,7 +5472,11 @@
             ]
           },
           "plusPriceUpperLimit": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The Plus price upper limit, the ceiling price to qualify for the Plus commission. Null when the file's cell was blank, unreadable or 0."
           },
           "plus": {
             "$ref": "#/components/schemas/PlusScenario"
@@ -5510,7 +5526,11 @@
         "type": "object",
         "properties": {
           "price": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Gross sale price (TRY) this scenario is computed at. Null when the Plus price upper limit is unknown; the scenario then has no profit."
           },
           "commissionPct": {
             "type": "string"
@@ -17206,7 +17226,7 @@
           "PlusCommissionTariffs"
         ],
         "summary": "Import a Trendyol Plus commission-tariff Excel",
-        "description": "Uploads Trendyol's Plus commission .xlsx (multipart `file`). Every column is resolved by header name; the single 7-day period is folded onto the tariff, and each product row (one Plus offer: price ceiling + reduced commission) is joined to a ProductVariant by barcode. Stores one tariff with its product rows; profit is computed later on read. Returns counts: products, items, matched/unmatched products, skipped rows. Rejects a file whose header layout does not match the expected Plus export (422 VALIDATION_ERROR).",
+        "description": "Uploads Trendyol's Plus commission .xlsx (multipart `file`). Every column is resolved by header name; the single 7-day period is folded onto the tariff, and each product row (one Plus offer: price ceiling + reduced commission) is joined to a ProductVariant by barcode. Stores one tariff with its product rows; profit is computed later on read. Returns counts: products, items, matched/unmatched products, skipped rows. Rejects a file whose header layout does not match the expected Plus export (422 VALIDATION_ERROR). A blank, unreadable or 0 current price, commission base price, Plus price upper limit or Plus commission base price is stored as null. The response also carries `unknownPriceRows`, the product rows with neither a commission base price nor a current price, or with no Plus price upper limit (each row counts once, whatever the number of periods).",
         "security": [
           {
             "bearerAuth": []
@@ -17414,7 +17434,7 @@
           "PlusCommissionTariffs"
         ],
         "summary": "Export the Plus tariff as a re-uploadable Trendyol Excel",
-        "description": "Returns Trendyol's ORIGINAL uploaded file with the seller's Plus choices patched in for every product that opted in to Plus: the chosen Plus price into \"Plus Fiyat Seçimi\", \"{N} Günlük Fiyat\" into \"Tarife Seçimi\", the reduced Plus commission into \"Hesaplanan Komisyon (N Gün)\", and \"Hayır\" into \"İptal\". Every other cell is byte-for-byte unchanged, so the file can be re-uploaded to Trendyol verbatim. A split week yields up to three window files (a whole-week \"7 Günlük Fiyat\" file for products priced the same in both sub-periods — carrying one price but a commission cell per sub-period — plus \"3 Günlük Fiyat\" / \"4 Günlük Fiyat\" files for period-specific prices), only the non-empty ones, bundled into a single .zip. Marks the tariff exported. Returns 409 if the tariff has no stored source file.",
+        "description": "Returns Trendyol's ORIGINAL uploaded file with the seller's Plus choices patched in for every product that opted in to Plus: the chosen Plus price into \"Plus Fiyat Seçimi\", \"{N} Günlük Fiyat\" into \"Tarife Seçimi\", the reduced Plus commission into \"Hesaplanan Komisyon (N Gün)\", and \"Hayır\" into \"İptal\". Every other cell is byte-for-byte unchanged, so the file can be re-uploaded to Trendyol verbatim. A split week yields up to three window files (a whole-week \"7 Günlük Fiyat\" file for products priced the same in both sub-periods — carrying one price but a commission cell per sub-period — plus \"3 Günlük Fiyat\" / \"4 Günlük Fiyat\" files for period-specific prices), only the non-empty ones, bundled into a single .zip. Marks the tariff exported. Returns 409 if the tariff has no stored source file, and 409 SELECTION_PRICE_UNKNOWN when a product that opted in to Plus without a custom price has no known Plus price upper limit; then no file is built and the tariff is not marked exported.",
         "security": [
           {
             "bearerAuth": []
@@ -17498,7 +17518,7 @@
             }
           },
           "409": {
-            "description": "Tariff has no stored source file to export",
+            "description": "Tariff has no stored source file to export, or a product that opted in to Plus has no known price to export (SELECTION_PRICE_UNKNOWN)",
             "content": {
               "application/json": {
                 "schema": {
@@ -17556,7 +17576,7 @@
           "PlusCommissionTariffs"
         ],
         "summary": "Save Plus opt-in + custom prices for tariff items",
-        "description": "Persists the seller's Plus opt-in (selected true/false) and optional custom price per item, in a single bulk update. Items not belonging to this tariff/store are ignored. Selection happens client-side over the backend-computed margins; this only records the result. Returns how many items were updated.",
+        "description": "Persists the seller's Plus opt-in (selected true/false) and optional custom price per item, in a single bulk update. Items not belonging to this tariff/store are ignored. Selection happens client-side over the backend-computed margins; this only records the result. A join without a custom price (`selected: true`, `customPrice: null`) on an item whose Plus price upper limit is unknown (`PLUS_PRICE_UNKNOWN`) refuses the whole request with 422 on `selections.<index>.selected`; nothing is written. A `selected: false` entry and an entry with a custom price are never checked. A custom price of 0 is refused with 422 `INVALID_CUSTOM_PRICE` on `selections.<index>.customPrice`. Returns how many items were updated.",
         "security": [
           {
             "bearerAuth": []
@@ -17669,7 +17689,7 @@
             }
           },
           "422": {
-            "description": "Invalid selection payload",
+            "description": "Invalid selection payload (a custom price of 0 is INVALID_CUSTOM_PRICE), or a join the export could not write (PLUS_PRICE_UNKNOWN on selections.<index>.selected); the whole request is refused and nothing is written",
             "content": {
               "application/json": {
                 "schema": {
@@ -17707,7 +17727,7 @@
           "PlusCommissionTariffs"
         ],
         "summary": "Estimate the profit breakdown for a Plus tariff item",
-        "description": "Computes the full profit breakdown (income + every expense line: commission, shipping, PSF, stoppage, VAT) for ONE Plus tariff item, reusing the same profit engine and resolvers (cost, shipping, fee definitions) the detail view uses - so an estimate at a scenario's price equals that scenario's profit in the detail response. Two modes: pass `price` to price it under the item's reduced Plus commission (the custom-price what-if), or pass `scenario: \"current\"` (no price) to price the item's own commission-base price at its current commission - the breakdown then matches the detail row's `currentNetProfit` exactly. Read-only (POST only because it carries a body); no state changes. When the item is unmatched or uncostable, calculable is false, reason explains why and breakdown is null. Money fields are GROSS decimal strings.",
+        "description": "Computes the full profit breakdown (income + every expense line: commission, shipping, PSF, stoppage, VAT) for ONE Plus tariff item, reusing the same profit engine and resolvers (cost, shipping, fee definitions) the detail view uses - so an estimate at a scenario's price equals that scenario's profit in the detail response. Two modes: pass `price` to price it under the item's reduced Plus commission (the custom-price what-if), or pass `scenario: \"current\"` (no price) to price the item's own commission-base price at its current commission - the breakdown then matches the detail row's `currentNetProfit` exactly. The current scenario uses the item's current price when its commission-base price is unknown; with neither price known it answers 422 (CURRENT_PRICE_UNKNOWN on `scenario`). The price mode needs no stored price, so it works with an unknown Plus price upper limit too. Read-only (POST only because it carries a body); no state changes. When the item is unmatched or uncostable, calculable is false, reason explains why and breakdown is null. Money fields are GROSS decimal strings.",
         "security": [
           {
             "bearerAuth": []
@@ -17829,7 +17849,7 @@
             }
           },
           "422": {
-            "description": "Invalid payload — malformed price (INVALID_CUSTOM_PRICE), a missing price in the custom-price mode (PRICE_REQUIRED), or price sent with scenario:\"current\" (INVALID_ESTIMATE_MODE)",
+            "description": "Invalid payload — malformed price (INVALID_CUSTOM_PRICE), a missing price in the custom-price mode (PRICE_REQUIRED), price sent with scenario:\"current\" (INVALID_ESTIMATE_MODE), or scenario:\"current\" for an item with neither a commission-base price nor a current price (CURRENT_PRICE_UNKNOWN on `scenario`)",
             "content": {
               "application/json": {
                 "schema": {

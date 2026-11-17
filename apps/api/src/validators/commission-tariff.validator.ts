@@ -8,6 +8,7 @@ import { z } from '@hono/zod-openapi';
 
 import { NameSchema } from '../workbooks/form';
 import { MAX_TARIFF_ITEMS } from '../workbooks/tariff-week';
+import { SelectionCustomPriceSchema } from './custom-price';
 import { QuoteBreakdownSchema } from './product-pricing.validator';
 
 // ─── Shared enums ───────────────────────────────────────────────────────────
@@ -196,21 +197,10 @@ export type ImportTariffResponse = z.infer<typeof ImportTariffResponseSchema>;
 
 // ─── Selections (band + custom price) ───────────────────────────────────────
 
-// A custom price that is zero at two decimals (`0`, `0.0`, `0.00`, `000`). Zero is not a
-// real price: stored, it would pass the BAND_PRICE_UNKNOWN check of a band with no price
-// and the export would write 0.00. Matched as text, not parsed: Zod still runs the refine
-// after a failed regex, so the predicate must not throw on a malformed string (that one
-// is left to the regex, which already reports it).
-const ZERO_PRICE_PATTERN = /^0+(\.0{1,2})?$/;
-
 export const TariffSelectionSchema = z.object({
   itemId: z.string().uuid(),
   band: TariffBandKeySchema.nullable(),
-  customPrice: z
-    .string()
-    .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_CUSTOM_PRICE')
-    .refine((value) => !ZERO_PRICE_PATTERN.test(value), 'INVALID_CUSTOM_PRICE')
-    .nullable(),
+  customPrice: SelectionCustomPriceSchema.nullable(),
 });
 
 export const UpdateSelectionsBodySchema = z

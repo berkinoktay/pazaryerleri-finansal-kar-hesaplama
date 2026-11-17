@@ -13,7 +13,9 @@ import { useEstimatePlusItemPrice } from '../hooks/use-estimate-plus-item-price'
 import { usePlusReasonEmptyLabel } from '../hooks/use-plus-reason-label';
 import { plusOffer, type PlusCustomChoice } from '../lib/plus-bulk-actions';
 import type { PlusTariffRow } from '../lib/adapt-plus-tariff';
+import { isPositiveAtCents } from '../lib/positive-at-cents';
 import { useTariffScope } from '../lib/tariff-scope';
+import { MAX_WHAT_IF_PRICE } from '../lib/what-if-price';
 import { PlusTariffBreakdown } from './plus-tariff-breakdown';
 import { TariffBestRibbon } from './tariff-best-ribbon';
 import { TariffOptionCard } from './tariff-option-card';
@@ -107,10 +109,11 @@ export function PlusCustomPriceCell({
   const estimate = useEstimatePlusItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const estimateMutate = estimate.mutate;
   // The Plus offer's ceiling: the seller may try any price up to (and including) it,
-  // never above — that is the whole point of the ceiling.
+  // never above — that is the whole point of the ceiling. An unknown ceiling (no offer,
+  // or a null offer price) caps the input at MAX_WHAT_IF_PRICE instead.
   const offer = plusOffer(row);
   const ceiling = React.useMemo(
-    () => (offer !== undefined ? new Decimal(offer.price) : null),
+    () => (offer !== undefined && offer.price !== null ? new Decimal(offer.price) : null),
     [offer],
   );
   // Seed the input, highest priority first: a surviving DRAFT from the parent's ref
@@ -128,9 +131,11 @@ export function PlusCustomPriceCell({
   // the LATEST call, so an out-of-order older response can never overwrite a newer one.
   const [lastResult, setLastResult] = React.useState<EstimatePlusPriceResult | null>(null);
 
-  // Debounced what-if: fire the estimate ~400ms after the seller stops typing.
+  // Debounced what-if: fire the estimate ~400ms after the seller stops typing. A price that
+  // rounds to 0.00 at two decimals is no price (the selection route refuses it), so it is
+  // never estimated.
   React.useEffect(() => {
-    if (price === null || !price.greaterThan(0)) return undefined;
+    if (price === null || !isPositiveAtCents(price)) return undefined;
     const priceStr = price.toFixed(2);
     const handle = setTimeout(() => {
       estimateMutate(
@@ -163,9 +168,11 @@ export function PlusCustomPriceCell({
   }
 
   // "Seç" is only meaningful once the estimate for the CURRENT typed price is back and
-  // calculable — otherwise there is no confirmed profit to commit.
+  // calculable — otherwise there is no confirmed profit to commit. A price that rounds to
+  // 0.00 never counts, even if an older estimate happens to carry the same 2-dp string.
   const hasEstimate =
     price !== null &&
+    isPositiveAtCents(price) &&
     lastResult !== null &&
     lastResult.calculable &&
     lastResult.price === price.toFixed(2);
@@ -188,7 +195,7 @@ export function PlusCustomPriceCell({
   // "no data". An errored estimate falls back to the default badge, never a stuck skeleton.
   const showEstimateSkeleton =
     price !== null &&
-    price.greaterThan(0) &&
+    isPositiveAtCents(price) &&
     lastResult === null &&
     committedNetProfit === null &&
     !estimate.isError;
@@ -225,7 +232,7 @@ export function PlusCustomPriceCell({
           value={price}
           onChange={handleChange}
           nonNegative
-          max={ceiling ?? undefined}
+          max={ceiling ?? MAX_WHAT_IF_PRICE}
           aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
           placeholder={t('table.enterPrice')}
           className="md:max-w-input-price w-full"
@@ -238,6 +245,9 @@ export function PlusCustomPriceCell({
                 {formatPercentDisplay(lastResult.commissionPct)}
               </span>
             </>
+          ) : ceiling === null ? (
+            // No known ceiling: the usual hint talks about it, so ask for the price plainly.
+            t('table.customPriceHintNoCeiling')
           ) : (
             t('table.customPriceHint')
           )}

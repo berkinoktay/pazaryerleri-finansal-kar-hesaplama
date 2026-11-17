@@ -24,6 +24,7 @@ import {
   loadScreenScenarioBases,
   screenScenarioBaseFor,
 } from './scenario-screen-commons';
+import { decimalOrNull, moneyOrNull } from './tariff-compute-commons';
 import type {
   CommissionTariffDetail,
   CommissionTariffListItem,
@@ -108,11 +109,6 @@ export async function listTariffs(
 }
 
 // ─── Detail ──────────────────────────────────────────────────────────────────
-
-/** A stored nullable money column as a `decimal.js` value, null kept as null. */
-function decimalOrNull(value: Prisma.Decimal | null): Decimal | null {
-  return value === null ? null : new Decimal(value.toString());
-}
 
 /**
  * Returns one tariff with per-band profit computed on read. Throws
@@ -253,9 +249,8 @@ export async function getTariffDetail(
           item.productVariantId !== null ? (imageMap.get(item.productVariantId) ?? null) : null,
         category: item.category,
         brand: item.brand,
-        currentPrice: bandParams.currentPrice === null ? null : bandParams.currentPrice.toFixed(2),
-        commissionBasePrice:
-          item.commissionBasePrice !== null ? item.commissionBasePrice.toFixed(2) : null,
+        currentPrice: moneyOrNull(bandParams.currentPrice),
+        commissionBasePrice: moneyOrNull(item.commissionBasePrice),
         currentCommissionPct: item.currentCommissionPct.toFixed(4),
         currentNetProfit: computed.current.netProfit,
         currentMarginPct: computed.current.marginPct,

@@ -6,7 +6,7 @@
 import { Prisma } from '@pazarsync/db';
 import { describe, expect, it } from 'vitest';
 
-import { currentBaselinePrice } from '@/services/commission-tariff-estimate.service';
+import { currentBaselinePrice } from '@/services/tariff-compute-commons';
 
 describe('currentBaselinePrice', () => {
   it('prefers the commission base price', () => {

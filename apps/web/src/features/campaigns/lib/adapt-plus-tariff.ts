@@ -9,7 +9,12 @@ import type { PlusTariffValidity } from '../types';
  */
 export interface PlusBand {
   key: 'plus';
-  price: string;
+  /**
+   * The Plus price upper limit (the ceiling). `null` means the file's price was unknown:
+   * the offer has no profit, and every consumer must null-guard it before formatting,
+   * estimating or exporting.
+   */
+  price: string | null;
   commissionPct: string;
   netProfit: string | null;
   marginPct: string | null;
@@ -21,7 +26,8 @@ export interface PlusBand {
  * price the buyer sees is `commissionBasePrice`; `currentPrice` is the seller's sale
  * price) plus the single Plus offer folded into a one-element `bands` array. Money is a
  * GROSS decimal STRING and `commissionPct` a PERCENT string — the frontend renders,
- * never computes. Uncalculable rows carry `null` profit/margin.
+ * never computes. Uncalculable rows carry `null` profit/margin. A `null` price means
+ * the file's price was unknown; every consumer must null-guard it.
  */
 export interface PlusTariffRow {
   id: string;
@@ -31,10 +37,13 @@ export interface PlusTariffRow {
   imageUrl: string | null;
   category: string | null;
   brand: string | null;
-  /** The seller's sale price. */
-  currentPrice: string;
-  /** The price the buyer sees — the current net profit is computed from this (never null for Plus). */
-  commissionBasePrice: string;
+  /** The seller's sale price; `null` when unknown (null-guard it). */
+  currentPrice: string | null;
+  /**
+   * The price the buyer sees — the current net profit is computed from this, else from
+   * `currentPrice`. `null` when unknown (null-guard it).
+   */
+  commissionBasePrice: string | null;
   currentCommissionPct: string;
   currentNetProfit: string | null;
   currentMarginPct: string | null;
