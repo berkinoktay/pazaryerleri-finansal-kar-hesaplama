@@ -24,3 +24,14 @@ catalog:
 # Keep in sync with the catalog entry above. See issue #256.
 overrides:
   "@types/node": ^20.19.41
+
+# Advisories the CI dependency-audit gate (`pnpm audit`) skips. Each entry is an accepted,
+# known risk with its reason and the condition to drop it; keep the list short.
+auditConfig:
+  ignoreGhsas:
+    # picomatch <= 4.0.7: ReDoS on crafted single-branch repeated extglobs; no patched
+    # release yet (advisory published 2026-10-19). It reaches the app only through
+    # next-intl -> @parcel/watcher, whose wrapper compiles the ignore globs of next-intl's
+    # message-extractor file watcher: developer-written config, never a request value.
+    # Drop this entry once a patched picomatch ships and the lockfile resolves to it.
+    - GHSA-fc5q-39xc-vjpf
