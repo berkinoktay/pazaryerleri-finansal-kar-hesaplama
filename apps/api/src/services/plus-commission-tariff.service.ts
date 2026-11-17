@@ -15,7 +15,7 @@ import { Decimal } from 'decimal.js';
 import { Prisma, prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
-import { NotFoundError } from '../lib/errors';
+import { NotFoundError, ValidationError, type ValidationIssue } from '../lib/errors';
 import { assertScopedWrite } from '../workbooks/scoped-write';
 import { resolveValidity, tariffBoundInstantOrNull } from '../workbooks/tariff-week';
 import {
@@ -28,6 +28,7 @@ import {
   loadScreenScenarioBases,
   screenScenarioBaseFor,
 } from './scenario-screen-commons';
+import { decimalOrNull, moneyOrNull } from './tariff-compute-commons';
 import type {
   PlusTariffDetail,
   PlusTariffDetailItem,
@@ -129,6 +130,10 @@ export async function listPlusTariffs(
  * commission as an override; a slim org + store scoped query supplies the display
  * image only. Per decision 9 a store-wide load failure or a per-item engine throw
  * leaves that profit empty (logged once) rather than failing the request.
+ *
+ * Every stored price is read through `decimalOrNull`: a price the file's cell left
+ * blank, unreadable or 0 is null, is sent as null on the wire and is never priced
+ * (`computePlusItem` decides what an unknown baseline or ceiling leaves computable).
  */
 export async function getPlusTariffDetail(
   orgId: string,
@@ -239,10 +244,10 @@ export async function getPlusTariffDetail(
       // .service). The custom price is still echoed on the wire (below), exported, and
       // priced free-form by the estimate endpoint.
       const inputs: PlusItemInputs = {
-        currentPrice: new Decimal(item.currentPrice.toString()),
-        commissionBasePrice: new Decimal(item.commissionBasePrice.toString()),
+        currentPrice: decimalOrNull(item.currentPrice),
+        commissionBasePrice: decimalOrNull(item.commissionBasePrice),
         currentCommissionPct: new Decimal(item.currentCommissionPct.toString()),
-        plusPriceUpperLimit: new Decimal(item.plusPriceUpperLimit.toString()),
+        plusPriceUpperLimit: decimalOrNull(item.plusPriceUpperLimit),
         plusCommissionPct: new Decimal(item.plusCommissionPct.toString()),
       };
       let computed: ComputedPlusItem;
@@ -262,18 +267,18 @@ export async function getPlusTariffDetail(
           item.productVariantId !== null ? (imageMap.get(item.productVariantId) ?? null) : null,
         category: item.category,
         brand: item.brand,
-        currentPrice: item.currentPrice.toFixed(2),
-        commissionBasePrice: item.commissionBasePrice.toFixed(2),
+        currentPrice: moneyOrNull(item.currentPrice),
+        commissionBasePrice: moneyOrNull(item.commissionBasePrice),
         currentCommissionPct: item.currentCommissionPct.toFixed(4),
         currentNetProfit: computed.current.netProfit,
         currentMarginPct: computed.current.marginPct,
-        plusPriceUpperLimit: item.plusPriceUpperLimit.toFixed(2),
+        plusPriceUpperLimit: moneyOrNull(item.plusPriceUpperLimit),
         plus: computed.plus,
         plusIsBetter: computed.plusIsBetter,
         calculable: computed.calculable,
         reason: computed.reason,
         selected: item.plusSelected,
-        customPrice: item.customPrice !== null ? item.customPrice.toFixed(2) : null,
+        customPrice: moneyOrNull(item.customPrice),
       };
     });
 
@@ -329,11 +334,66 @@ export async function deletePlusTariff(
 // ─── Save selections ─────────────────────────────────────────────────────────
 
 /**
+ * Refuses, all-or-nothing, a Plus join the export could not write. Each entry joined
+ * without a custom price (`selected: true`, `customPrice: null`) whose item is in this
+ * tariff and store must have a known Plus price upper limit, since the export writes
+ * the ceiling when there is no custom price (`resolvePlusExportPrice`). An unknown
+ * ceiling is `PLUS_PRICE_UNKNOWN` on `selections.<index>.selected`, with the index of
+ * the request array, and every issue comes back together in one `ValidationError`
+ * (422). A `selected: false` entry and an entry with a custom price are never checked.
+ * An item id outside the tariff/store scope is not checked, so a foreign item never
+ * shows up in an error (non-disclosure); the UPDATE skips it.
+ */
+async function assertPlusSelectionsWritable(
+  orgId: string,
+  storeId: string,
+  tariffId: string,
+  selections: ReadonlyArray<PlusTariffSelection>,
+): Promise<void> {
+  const ids = selections
+    .filter((selection) => selection.selected && selection.customPrice === null)
+    .map((selection) => selection.itemId);
+  if (ids.length === 0) return;
+
+  let items;
+  try {
+    items = await prisma.plusCommissionTariffItem.findMany({
+      // `period: { tariffId }` ties each item to THIS tariff, exactly as the UPDATE does.
+      where: { id: { in: ids }, organizationId: orgId, storeId, period: { tariffId } },
+      select: { id: true, plusPriceUpperLimit: true },
+    });
+  } catch (err) {
+    mapPrismaError(err);
+  }
+
+  // Postgres compares uuids whatever their letter case and returns them lower case, so
+  // the lookup is keyed lower case: an upper-case item id is checked, not skipped.
+  const itemsById = new Map(items.map((item) => [item.id.toLowerCase(), item]));
+  const issues: ValidationIssue[] = [];
+  for (const [index, selection] of selections.entries()) {
+    if (!selection.selected || selection.customPrice !== null) continue;
+    const item = itemsById.get(selection.itemId.toLowerCase());
+    if (item === undefined) continue;
+
+    if (item.plusPriceUpperLimit === null) {
+      issues.push({ field: `selections.${index.toString()}.selected`, code: 'PLUS_PRICE_UNKNOWN' });
+    }
+  }
+
+  if (issues.length > 0) {
+    throw new ValidationError(issues);
+  }
+}
+
+/**
  * Persists the seller's Plus opt-in + optional custom price for the given items
  * in ONE bulk UPDATE (a VALUES join). Throws `NotFoundError` when the tariff is
- * not in this store. Each row is gated on `(organization_id, store_id, period ∈
- * tariff)`, so an itemId from another tariff/store is silently skipped — the
- * returned `updated` count reflects only rows that actually matched.
+ * not in this store. Before writing, `assertPlusSelectionsWritable` refuses (422,
+ * nothing written) a join without a custom price on an item whose Plus price upper
+ * limit is unknown. Each row is gated on `(organization_id, store_id, period ∈
+ * tariff)`, so an itemId from another tariff/store is silently skipped (not
+ * updated, not reported) — the returned `updated` count reflects only rows that
+ * actually matched.
  */
 export async function updatePlusSelections(
   orgId: string,
@@ -341,14 +401,21 @@ export async function updatePlusSelections(
   tariffId: string,
   selections: ReadonlyArray<PlusTariffSelection>,
 ): Promise<{ updated: number }> {
-  const tariff = await prisma.plusCommissionTariff.findFirst({
-    where: { id: tariffId, organizationId: orgId, storeId },
-    select: { id: true },
-  });
+  let tariff;
+  try {
+    tariff = await prisma.plusCommissionTariff.findFirst({
+      where: { id: tariffId, organizationId: orgId, storeId },
+      select: { id: true },
+    });
+  } catch (err) {
+    mapPrismaError(err);
+  }
   if (tariff === null) {
     throw new NotFoundError('PlusCommissionTariff', tariffId);
   }
   if (selections.length === 0) return { updated: 0 };
+
+  await assertPlusSelectionsWritable(orgId, storeId, tariffId, selections);
 
   const rows = selections.map(
     (s) => Prisma.sql`(${s.itemId}::uuid, ${s.selected}::boolean, ${s.customPrice}::numeric)`,

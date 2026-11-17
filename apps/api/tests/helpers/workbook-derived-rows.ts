@@ -198,12 +198,14 @@ const PLUS_DERIVED: readonly DerivedRow<typeof trendyolPlusCommissionTariffLayou
   PLUS_CANCEL_TEXT_ZERO,
   // Added after the move, so the derived golden pins every mapping rule of the Plus row:
   // the three fallback chains (stock code, commission base price, Plus commission base
-  // price) with their first cell blank and with every cell blank, the '0' of each blank
-  // decimal, a blank period offer, the title fallback, the truncated stock, the plain
-  // grammar of the decimal cells (decimal comma, dot-only text, a lira suffix that does
-  // not read), the numeric cancel flag, a number barcode, a whitespace barcode, and
-  // values the export never writes, which the import does not check. The fixture row's
-  // prices, limits and offers are number cells.
+  // price) with their first cell blank and with every cell blank, the null of each blank
+  // price and the '0' of each blank percent, a blank period offer, the title fallback,
+  // the truncated stock, the plain grammar of the decimal cells (decimal comma, dot-only
+  // text, a lira suffix that does not read), the numeric cancel flag, a number barcode, a
+  // whitespace barcode, and values the export never writes, which the import does not
+  // check. The fixture row's prices, limits and offers are number cells. A literal 0
+  // price (also read as null) is pinned by the format's unit test only, so the digest
+  // changed for one reason alone when unknown prices became null.
   { name: 'a whitespace barcode', cells: [['barcode', '   ']], kept: false },
   { name: 'a blank model code', cells: [['modelCode', null]], kept: true },
   {

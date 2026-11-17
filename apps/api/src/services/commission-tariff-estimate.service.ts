@@ -18,7 +18,7 @@
 
 import { Decimal } from 'decimal.js';
 
-import { Prisma, prisma } from '@pazarsync/db';
+import { prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 import { parseStoredTariffBands } from '@pazarsync/profit';
 
@@ -30,6 +30,7 @@ import {
 } from './commission-tariff-compute.service';
 import { logProfitReadFailure } from './profit-compute-fallback.service';
 import { loadScreenScenarioBases, screenScenarioBaseFor } from './scenario-screen-commons';
+import { currentBaselinePrice } from './tariff-compute-commons';
 import type { EstimateItemPriceResult } from '../validators/commission-tariff.validator';
 
 /**
@@ -42,19 +43,6 @@ import type { EstimateItemPriceResult } from '../validators/commission-tariff.va
 export type EstimateItemPriceInput =
   | { readonly mode: 'price'; readonly price: Decimal; readonly bandKey: string | null }
   | { readonly mode: 'current' };
-
-/**
- * The current scenario's price: the item's commission-base price (the customer-seen
- * price commission is charged on), else its current sale price, as the detail row's
- * baseline. Null when neither is known (the file's cells were blank, unreadable or 0).
- */
-export function currentBaselinePrice(item: {
-  readonly commissionBasePrice: Prisma.Decimal | null;
-  readonly currentPrice: Prisma.Decimal | null;
-}): Decimal | null {
-  const price = item.commissionBasePrice ?? item.currentPrice;
-  return price === null ? null : new Decimal(price.toString());
-}
 
 /**
  * Computes the full profit breakdown for one tariff item under `input`. Throws

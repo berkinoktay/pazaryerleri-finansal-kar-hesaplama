@@ -6,11 +6,14 @@
 // the detail's `plus.netProfit`; or pass `scenario: 'current'` (no price) - the
 // item's commission-base price at its current commission, which MUST equal the
 // detail row's `currentNetProfit`. An unmatched item degrades to not-calculable; a
-// contradictory or missing payload is a 422.
+// contradictory or missing payload is a 422. An item whose prices are unknown (NULL)
+// still estimates a typed price, and its current scenario answers 422
+// CURRENT_PRICE_UNKNOWN when no baseline price is known.
 //
 // Fixture mirrors plus-commission-tariffs.routes.test.ts: one calculable variant
 // (TRY cost + SENDEOMP shipping + fee defs) plus an unmatched item, under one period.
 
+import { z } from '@hono/zod-openapi';
 import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -26,13 +29,17 @@ import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 const app = createApp();
 
 interface ScenarioWire {
-  price: string;
+  /** Null when the Plus price upper limit is unknown. */
+  price: string | null;
   netProfit: string | null;
 }
 interface DetailItemWire {
   id: string;
   barcode: string;
-  commissionBasePrice: string;
+  // The three prices are null when the file's cell was blank, unreadable or 0.
+  currentPrice: string | null;
+  commissionBasePrice: string | null;
+  plusPriceUpperLimit: string | null;
   currentNetProfit: string | null;
   plus: ScenarioWire;
 }
@@ -61,7 +68,32 @@ interface EstimateFixture {
   tariffId: string;
   matchedItemId: string;
   unmatchedItemId: string;
+  /** Matched; current price, commission base price and Plus ceiling unknown (NULL). */
+  unknownPricesItemId: string;
+  /** Matched; commission base price unknown (NULL), current price 480 like the matched base. */
+  unknownCommissionBaseItemId: string;
 }
+
+/** The stored prices of one seeded item; null is a cell the file left blank, unreadable or 0. */
+interface SeededPrices {
+  readonly currentPrice: string | null;
+  readonly commissionBasePrice: string | null;
+  readonly plusPriceUpperLimit: string | null;
+}
+
+// The estimate responses the unknown-price cases read, parsed rather than cast.
+const ProblemSchema = z.object({
+  code: z.string(),
+  errors: z.array(z.object({ field: z.string(), code: z.string() })).optional(),
+});
+const EstimateResultSchema = z.object({
+  itemId: z.string(),
+  price: z.string(),
+  commissionPct: z.string().nullable(),
+  calculable: z.boolean(),
+  reason: z.string().nullable(),
+  breakdown: z.object({ saleGross: z.string(), netProfit: z.string() }).nullable(),
+});
 
 async function setupFixture(): Promise<EstimateFixture> {
   const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
@@ -192,6 +224,43 @@ async function setupFixture(): Promise<EstimateFixture> {
       sortOrder: 1,
     },
   });
+  // Matched to the same variant, current commission and Plus offer as `matched`; only the
+  // known prices differ.
+  const makeMatchedItem = async (
+    barcode: string,
+    sortOrder: number,
+    prices: SeededPrices,
+  ): Promise<string> => {
+    const item = await prisma.plusCommissionTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        periodId: period.id,
+        productVariantId: variant.id,
+        barcode,
+        productTitle: barcode,
+        currentPrice: prices.currentPrice,
+        commissionBasePrice: prices.commissionBasePrice,
+        currentCommissionPct: '19.0000',
+        plusPriceUpperLimit: prices.plusPriceUpperLimit,
+        plusCommissionPct: '15.4',
+        // The import's fallback: the Plus commission base is the ceiling when unknown.
+        plusCommissionBasePrice: prices.plusPriceUpperLimit,
+        sortOrder,
+      },
+    });
+    return item.id;
+  };
+  const unknownPricesItemId = await makeMatchedItem('BC-EST-NOPRICE', 2, {
+    currentPrice: null,
+    commissionBasePrice: null,
+    plusPriceUpperLimit: null,
+  });
+  const unknownCommissionBaseItemId = await makeMatchedItem('BC-EST-NOBASE', 3, {
+    currentPrice: '480.00',
+    commissionBasePrice: null,
+    plusPriceUpperLimit: '450.00',
+  });
 
   return {
     accessToken: user.accessToken,
@@ -200,6 +269,8 @@ async function setupFixture(): Promise<EstimateFixture> {
     tariffId: tariff.id,
     matchedItemId: matched.id,
     unmatchedItemId: unmatched.id,
+    unknownPricesItemId,
+    unknownCommissionBaseItemId,
   };
 }
 
@@ -353,5 +424,81 @@ describe('Plus Commission Tariffs - item estimate', () => {
     expect(body.code).toBe('VALIDATION_ERROR');
     expect(body.errors[0]?.field).toBe('price');
     expect(body.errors[0]?.code).toBe('INVALID_CUSTOM_PRICE');
+  });
+
+  it('answers 422 CURRENT_PRICE_UNKNOWN on field scenario when neither baseline price is known', async () => {
+    // The detail row has no current profit for this item, so there is no current scenario
+    // to break down: the estimate refuses instead of pricing a made-up 0.
+    const row = await fetchDetailItem(fx, 'BC-EST-NOPRICE');
+    expect(row.currentPrice).toBeNull();
+    expect(row.commissionBasePrice).toBeNull();
+    expect(row.currentNetProfit).toBeNull();
+
+    const res = await app.request(estimateUrl(fx, fx.unknownPricesItemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario: 'current' }),
+    });
+    expect(res.status).toBe(422);
+    const body = ProblemSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual([{ field: 'scenario', code: 'CURRENT_PRICE_UNKNOWN' }]);
+  });
+
+  it('estimates the current scenario from the current price when only the commission base price is unknown', async () => {
+    const row = await fetchDetailItem(fx, 'BC-EST-NOBASE');
+    const matched = await fetchDetailItem(fx, 'BC-EST');
+    expect(row.commissionBasePrice).toBeNull();
+    expect(row.currentPrice).toBe('480.00');
+    // The current price 480 prices it exactly as the matched item's commission base 480.
+    expect(row.currentNetProfit).not.toBeNull();
+    expect(row.currentNetProfit).toBe(matched.currentNetProfit);
+
+    const res = await app.request(estimateUrl(fx, fx.unknownCommissionBaseItemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario: 'current' }),
+    });
+    expect(res.status).toBe(200);
+    const body = EstimateResultSchema.parse(await res.json());
+    expect(body.itemId).toBe(fx.unknownCommissionBaseItemId);
+    expect(body.calculable).toBe(true);
+    expect(body.reason).toBeNull();
+    // Priced on the current price, at the item's current commission.
+    expect(body.price).toBe('480.00');
+    expect(body.breakdown?.saleGross).toBe('480.00');
+    expect(body.commissionPct).toBe('19.0000');
+    // The modal number equals the row's current profit exactly.
+    expect(body.breakdown?.netProfit).toBe(row.currentNetProfit);
+  });
+
+  it('still estimates a custom price for an item whose ceiling is unknown', async () => {
+    const row = await fetchDetailItem(fx, 'BC-EST-NOPRICE');
+    expect(row.plusPriceUpperLimit).toBeNull();
+    expect(row.plus.price).toBeNull();
+    expect(row.plus.netProfit).toBeNull();
+
+    const estimateAt = async (itemId: string): Promise<z.infer<typeof EstimateResultSchema>> => {
+      const res = await app.request(estimateUrl(fx, itemId), {
+        method: 'POST',
+        headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ price: '350.00' }),
+      });
+      expect(res.status).toBe(200);
+      return EstimateResultSchema.parse(await res.json());
+    };
+    // A typed price needs no stored price: it is priced under the item's Plus commission.
+    const body = await estimateAt(fx.unknownPricesItemId);
+    expect(body.itemId).toBe(fx.unknownPricesItemId);
+    expect(body.calculable).toBe(true);
+    expect(body.reason).toBeNull();
+    expect(body.price).toBe('350.00');
+    expect(Number(body.commissionPct)).toBe(15.4);
+    expect(body.breakdown?.saleGross).toBe('350.00');
+    // Same variant, same Plus commission, same price: the fully priced item's figure.
+    const control = await estimateAt(fx.matchedItemId);
+    expect(body.breakdown).not.toBeNull();
+    expect(control.breakdown).not.toBeNull();
+    expect(body.breakdown?.netProfit).toBe(control.breakdown?.netProfit);
   });
 });

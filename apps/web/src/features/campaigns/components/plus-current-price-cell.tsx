@@ -22,14 +22,20 @@ export interface PlusCurrentPriceCellProps {
 /**
  * The Plus-tariff product's CURRENT baseline — the "do nothing" reference the seller
  * compares the Plus offer against. Shows the price the buyer sees (the commission-base
- * price, which the current profit is computed from), its current commission, and the
- * calculated profit as the SAME clickable {@link ProfitBadge} the offer shows.
+ * price, else the sale price; the current profit is computed from the same one), its
+ * current commission, and the calculated profit as the SAME clickable {@link
+ * ProfitBadge} the offer shows.
  * Presentation lives in the shared {@link TariffCurrentCell}; this owns the data, the
  * current-scenario estimate call, and the breakdown modal. Left-aligned and a touch
  * narrower than a card cell (`minWidth="current"`). Renders the starred "En kârlı"
  * badge ONLY when keeping the current price is the row's most profitable choice — so
  * the whole-row marker can land here. No client-side money math — the badge and modal
  * are backend-computed.
+ *
+ * The hero is the commission-base price, else the sale price; either can be unknown.
+ * "Unknown" (with a short explanation line under it, visible on touch too) shows only
+ * when BOTH are unknown. The backend then has no baseline, so the badge stays empty and
+ * its click opens the not-calculable dialog without an estimate request.
  */
 export function PlusCurrentPriceCell({
   row,
@@ -42,8 +48,17 @@ export function PlusCurrentPriceCell({
   const estimate = useEstimatePlusItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
 
+  // DISPLAY choice only (not a calculation): the price the buyer sees, else the sale
+  // price. The backend's current scenario uses the same baseline, so badge/modal/price
+  // stay in sync. Null when both are unknown.
+  const price = row.commissionBasePrice ?? row.currentPrice;
+  const priceUnknown = price === null;
+
   function openBreakdown(): void {
     setBreakdownOpen(true);
+    // No baseline price: the backend would refuse the current scenario, so the dialog
+    // opens on its not-calculable text without a request.
+    if (priceUnknown) return;
     // `scenario: 'current'` — the backend derives BOTH price and commission from the
     // item itself, so the breakdown matches this row's `currentNetProfit` badge.
     estimate.mutate({ itemId: row.id, body: { scenario: 'current' } });
@@ -51,9 +66,10 @@ export function PlusCurrentPriceCell({
 
   return (
     <TariffCurrentCell
-      // The price the buyer sees — the current net profit is computed from it, so
-      // badge/modal/price stay in sync (Plus always carries a commission-base price).
-      price={row.commissionBasePrice}
+      price={price}
+      unknownPriceLabel={t('table.priceUnknown')}
+      // Shown under the unknown label only while the price is unknown.
+      unknownPriceHint={t('table.priceUnknownHint')}
       commissionPct={row.currentCommissionPct}
       commissionLabel={t('table.currentCommission')}
       calculatedLabel={t('table.calculatedProfit')}
@@ -79,8 +95,8 @@ export function PlusCurrentPriceCell({
         imageUrl={row.imageUrl}
         stockCode={row.stockCode}
         currentNetProfit={row.currentNetProfit}
-        result={estimate.data ?? null}
-        loading={estimate.isPending}
+        result={priceUnknown ? null : (estimate.data ?? null)}
+        loading={priceUnknown ? false : estimate.isPending}
       />
     </TariffCurrentCell>
   );

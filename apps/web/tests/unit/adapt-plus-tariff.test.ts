@@ -55,6 +55,57 @@ function detailWithCustomBelowCeiling(): PlusTariffDetail {
   };
 }
 
+type PlusDetailItem = PlusTariffDetail['periods'][number]['items'][number];
+
+/** The base fixture with its single item's fields overridden. */
+function detailWithItem(overrides: Partial<PlusDetailItem>): PlusTariffDetail {
+  const detail = detailWithCustomBelowCeiling();
+  const period = detail.periods[0];
+  const item = period?.items[0];
+  if (period === undefined || item === undefined) {
+    throw new Error('fixture must hold one period with one item');
+  }
+  return { ...detail, periods: [{ ...period, items: [{ ...item, ...overrides }] }] };
+}
+
+describe('toPlusTariffView — unknown prices stay null', () => {
+  it('maps a null plusPriceUpperLimit to a null offer price', () => {
+    const view = toPlusTariffView(
+      detailWithItem({
+        plusPriceUpperLimit: null,
+        plus: { price: null, commissionPct: '15.40', netProfit: null, marginPct: null },
+        plusIsBetter: false,
+      }),
+    );
+    const offer = view.periods[0]?.rows[0]?.bands[0];
+
+    expect(offer?.price).toBeNull();
+    expect(offer?.netProfit).toBeNull();
+    expect(offer?.marginPct).toBeNull();
+    expect(offer?.commissionPct).toBe('15.40');
+  });
+
+  it('keeps null current and commission base prices', () => {
+    const view = toPlusTariffView(
+      detailWithItem({
+        currentPrice: null,
+        commissionBasePrice: null,
+        currentNetProfit: null,
+        currentMarginPct: null,
+        calculable: false,
+        reason: null,
+      }),
+    );
+    const row = view.periods[0]?.rows[0];
+
+    expect(row?.currentPrice).toBeNull();
+    expect(row?.commissionBasePrice).toBeNull();
+    expect(row?.currentNetProfit).toBeNull();
+    // The ceiling is untouched by an unknown current price.
+    expect(row?.bands[0]?.price).toBe('100.00');
+  });
+});
+
 describe('toPlusTariffView — offer band price is the ceiling ground truth', () => {
   it('reads the offer price from plusPriceUpperLimit, not plus.price', () => {
     const view = toPlusTariffView(detailWithCustomBelowCeiling());

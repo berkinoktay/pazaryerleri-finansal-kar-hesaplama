@@ -22,7 +22,7 @@ const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.s
 const FILE_NAME = 'upload.xlsx';
 const LIST_NAME = 'July list';
 const PREFILLED_ROWS = 3;
-const UNKNOWN_CURRENT_PRICE_ROWS = 2;
+const UNKNOWN_PRICE_ROWS = 2;
 const PROBLEM_HEADERS = { 'content-type': 'application/problem+json' };
 const MISSING_DISCOUNT_TYPE = 'importFile: discountType is missing';
 
@@ -36,8 +36,14 @@ interface PageRow {
   readonly keyRoot: string;
   /** Fields the page's form always sends: the two config pages need their discount type. */
   readonly requiredFields: Readonly<Record<string, string>>;
-  /** The unknown current price count only the commission page's response carries and maps. */
-  readonly unknownCurrentPriceRows?: number;
+  /**
+   * The unknown price count only the two tariff pages' responses carry, each under its own
+   * response key; both map it to `unknownPriceRows` of the result.
+   */
+  readonly unknownPrice?: {
+    readonly responseKey: 'unknownCurrentPriceRows' | 'unknownPriceRows';
+    readonly rows: number;
+  };
 }
 
 // Written out here rather than read from the code under test, so a wrong segment, id key or
@@ -49,7 +55,7 @@ const PAGES: readonly PageRow[] = [
     idKey: 'tariffId',
     keyRoot: 'commission-tariffs',
     requiredFields: {},
-    unknownCurrentPriceRows: UNKNOWN_CURRENT_PRICE_ROWS,
+    unknownPrice: { responseKey: 'unknownCurrentPriceRows', rows: UNKNOWN_PRICE_ROWS },
   },
   {
     page: WORKBOOK_PAGES.PLUS_COMMISSION_TARIFF,
@@ -57,6 +63,7 @@ const PAGES: readonly PageRow[] = [
     idKey: 'tariffId',
     keyRoot: 'plus-commission-tariffs',
     requiredFields: {},
+    unknownPrice: { responseKey: 'unknownPriceRows', rows: UNKNOWN_PRICE_ROWS },
   },
   {
     page: WORKBOOK_PAGES.ADVANTAGE_TARIFF,
@@ -106,20 +113,18 @@ function importResponse(row: PageRow): Record<string, unknown> {
     unmatched: 0,
     skippedRows: 0,
     prefilledRows: PREFILLED_ROWS,
-    ...(row.unknownCurrentPriceRows === undefined
+    ...(row.unknownPrice === undefined
       ? {}
-      : { unknownCurrentPriceRows: row.unknownCurrentPriceRows }),
+      : { [row.unknownPrice.responseKey]: row.unknownPrice.rows }),
   };
 }
 
-/** What the hook resolves: the id, the prefilled count, and the commission page's own count. */
+/** What the hook resolves: the id, the prefilled count, and the tariff pages' unknown price count. */
 function expectedResult(row: PageRow): Record<string, unknown> {
   return {
     id: NEW_ID,
     prefilledRows: PREFILLED_ROWS,
-    ...(row.unknownCurrentPriceRows === undefined
-      ? {}
-      : { unknownCurrentPriceRows: row.unknownCurrentPriceRows }),
+    ...(row.unknownPrice === undefined ? {} : { unknownPriceRows: row.unknownPrice.rows }),
   };
 }
 
@@ -165,7 +170,7 @@ describe('useImportWorkbook', () => {
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
       expect(contentType).toMatch(/^multipart\/form-data/);
       expect(fileName).toBe(FILE_NAME);
-      // Strict: a page other than the commission one must not carry the count, not even as
+      // Strict: a page other than the two tariff ones must not carry the count, not even as
       // an undefined key.
       expect(result.current.data).toStrictEqual(expectedResult(row));
     });

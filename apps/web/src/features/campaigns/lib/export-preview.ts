@@ -81,7 +81,13 @@ export function resolveCommissionExportPrice(
 /**
  * The price the Plus export writes for a row, or null when the row is not joined.
  * Mirrors the export (custom price, else the ceiling) and the save rule (joined when
- * custom-priced or ceiling-joined). It only picks server strings; it does no arithmetic.
+ * custom-priced or ceiling-joined).
+ *
+ * A null result for a CEILING-JOINED row means its ceiling is unknown and the backend
+ * export would refuse it (409 `SELECTION_PRICE_UNKNOWN`); the preview then leaves the
+ * row out of every file. The page cannot reach that state: the seed drops such a stored
+ * join (`seedPlusSelection`) and an offer with no price cannot be joined without a
+ * custom price. It only picks server strings; it does no arithmetic.
  */
 export function resolvePlusExportPrice(
   row: PlusTariffRow,

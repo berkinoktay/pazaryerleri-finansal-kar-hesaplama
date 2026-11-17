@@ -5,7 +5,7 @@
 // else the ceiling), the window's tariff selection, the offer of every period the file
 // covers into that period's computed commission column, and the no-cancel label. The
 // ceiling and the offers are written values, so one the export could not write is
-// refused at upload.
+// refused at upload. A blank, unreadable or 0 price is unknown and reads as null.
 
 import { Decimal } from 'decimal.js';
 
@@ -13,6 +13,7 @@ import { requireStorableInt } from '../../column-range';
 import { defineFormat, type WriteValueSpec } from '../../format';
 import { requireWritableValue } from '../../write-columns';
 import { TRENDYOL_FORMAT_SUMMARIES } from '../registry';
+import { knownPrice } from './known-price';
 import {
   NO_LABEL,
   TARIFF_WINDOW_LABEL_UNIT,
@@ -27,7 +28,8 @@ import { TARIFF_SELECTION_WRITE, TARIFF_WINDOW_FILE_UNIT } from './tariff-window
 
 /**
  * One kept product row of the Plus file. Prices and percents are decimal strings as
- * the file holds them; a blank one reads as '0'.
+ * the file holds them. A price is null when it is unknown (a blank, unreadable or 0
+ * cell, see `knownPrice`); a blank or unreadable percent reads as '0'.
  */
 export interface PlusCommissionTariffRow {
   readonly barcode: string;
@@ -38,11 +40,13 @@ export interface PlusCommissionTariffRow {
   readonly size: string | null;
   readonly modelCode: string | null;
   readonly stock: number | null;
-  readonly currentPrice: string;
-  readonly commissionBasePrice: string;
+  readonly currentPrice: string | null;
+  /** The commission base price, else the current price. */
+  readonly commissionBasePrice: string | null;
   readonly currentCommissionPct: string;
-  readonly plusPriceUpperLimit: string;
-  readonly plusCommissionBasePrice: string;
+  readonly plusPriceUpperLimit: string | null;
+  /** The Plus commission base price, else the Plus price ceiling. */
+  readonly plusCommissionBasePrice: string | null;
   readonly externalId: string | null;
   readonly tariffGroup: string | null;
   readonly cancelled: boolean;
@@ -69,7 +73,10 @@ const PLUS_OFFER_SCALE = 4;
 /** The download base name; the window suffix (`-7-gunluk`) is added per file. */
 const PLUS_EXPORT_BASE_NAME = 'plus-komisyon-tarifesi';
 
-/** What a blank or unreadable decimal cell reads as, as the import always stored it. */
+/**
+ * What a blank or unreadable percent cell (the current commission, a period offer) reads
+ * as, as the import always stored it. Prices never read as it: an unknown one is null.
+ */
 const BLANK_DECIMAL = '0';
 
 const SUMMARY = TRENDYOL_FORMAT_SUMMARIES.PLUS_COMMISSION_TARIFF;
@@ -131,8 +138,8 @@ export const trendyolPlusCommissionTariffFormat = defineFormat({
   fingerprint: SUMMARY.fingerprint,
   mapRow: (reader, anchor): PlusCommissionTariffRow => {
     const modelCode = reader.text('modelCode');
-    const currentPrice = reader.decimal('currentPrice');
-    const plusPriceUpperLimit = reader.decimal('plusPriceUpperLimit');
+    const currentPrice = knownPrice(reader.decimal('currentPrice'));
+    const ceiling = knownPrice(reader.decimal('plusPriceUpperLimit'));
     return {
       barcode: anchor,
       // The model code first, then the seller stock code, as the product import reads them.
@@ -144,12 +151,13 @@ export const trendyolPlusCommissionTariffFormat = defineFormat({
       size: reader.text('size'),
       modelCode,
       stock: requireStorableInt(reader.int('stock', 'truncate')),
-      currentPrice: currentPrice ?? BLANK_DECIMAL,
-      commissionBasePrice: reader.decimal('commissionBasePrice') ?? currentPrice ?? BLANK_DECIMAL,
+      currentPrice,
+      // The fallbacks skip an unknown price, so a 0 never stands in for a known one.
+      commissionBasePrice: knownPrice(reader.decimal('commissionBasePrice')) ?? currentPrice,
       currentCommissionPct: reader.decimal('currentCommission') ?? BLANK_DECIMAL,
-      plusPriceUpperLimit: writableCeiling(plusPriceUpperLimit ?? BLANK_DECIMAL),
-      plusCommissionBasePrice:
-        reader.decimal('plusCommissionBasePrice') ?? plusPriceUpperLimit ?? BLANK_DECIMAL,
+      // Only a known ceiling is write-checked: an unknown one is never written.
+      plusPriceUpperLimit: ceiling === null ? null : writableCeiling(ceiling),
+      plusCommissionBasePrice: knownPrice(reader.decimal('plusCommissionBasePrice')) ?? ceiling,
       externalId: reader.text('externalId'),
       tariffGroup: reader.text('tariffGroup'),
       // A number cell: the number 1 cancels, the text "0" does not.

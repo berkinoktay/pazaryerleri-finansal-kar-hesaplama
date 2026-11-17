@@ -4,7 +4,8 @@
 // engine (`@pazarsync/profit`) and hands it the chosen commission as an override -- no
 // financial math is re-implemented. The difference: instead of a 4-band ladder, each
 // Plus item has exactly TWO scenarios:
-//   • CURRENT — the seller's current price @ their current commission (e.g. 19%).
+//   • CURRENT — the commission base price (else the current sale price) @ the
+//               seller's current commission (e.g. 19%).
 //   • PLUS    — the Trendyol Plus price CEILING @ the reduced Plus commission
 //               (e.g. 15.4%). ALWAYS the ceiling: a committed custom Plus price is
 //               a separate what-if that NEVER enters this on-read compute — the
@@ -15,6 +16,11 @@
 // lower ceiling price + lower commission nets more than the status quo — `plusIsBetter`
 // compares the CEILING scenario against the current one. Profit is optimistic (a
 // what-if), like every estimate here.
+//
+// A price the file did not give (blank, unreadable or 0) arrives as null and is never
+// priced: an unknown baseline (commission base price, else current price) leaves the
+// current figures null, and an unknown ceiling leaves the offer with a null price and no
+// profit. `plusIsBetter` needs both profits, so it is false whenever either is unknown.
 
 import { Decimal } from 'decimal.js';
 
@@ -23,6 +29,7 @@ import {
   formatMarginPct2,
   formatMoney2,
   type ScreenScenarioBase,
+  type ScreenScenarioOutcome,
 } from './scenario-screen-commons';
 import { quoteBreakdownFromStatement, type QuoteBreakdown } from './product-pricing.service';
 import { type TariffItemReason } from './tariff-compute-commons';
@@ -30,24 +37,32 @@ import { type TariffItemReason } from './tariff-compute-commons';
 // ─── Inputs the compute reads off one persisted item ────────────────────────
 
 export interface PlusItemInputs {
-  /** Güncel TSF (the seller's current sale price) — echoed on the wire, not priced. */
-  readonly currentPrice: Decimal;
   /**
-   * Komisyona Esas Fiyat — the customer-seen price commission is charged on. The
-   * current ("do nothing") scenario is priced HERE (schema NOT NULL, so there is no
-   * sale-price fallback), matching the product commission tariff's #400 semantics.
+   * Current sale price. Priced only as the fallback baseline when the commission base
+   * price is unknown; null when the file's cell was blank, unreadable or 0.
    */
-  readonly commissionBasePrice: Decimal;
+  readonly currentPrice: Decimal | null;
+  /**
+   * Commission base price: the customer-seen price commission is charged on. The current
+   * ("do nothing") scenario is priced here when it is known, else at `currentPrice`,
+   * matching the product commission tariff's baseline. Null when the file's cell was
+   * blank, unreadable or 0.
+   */
+  readonly commissionBasePrice: Decimal | null;
   readonly currentCommissionPct: Decimal;
-  readonly plusPriceUpperLimit: Decimal;
+  /**
+   * Plus price ceiling the offer is priced at; null when the file's cell was blank,
+   * unreadable or 0, and then the offer is never priced.
+   */
+  readonly plusPriceUpperLimit: Decimal | null;
   readonly plusCommissionPct: Decimal;
 }
 
 // ─── Result shapes (serialized — strings, never float) ──────────────────────
 
 export interface ComputedScenario {
-  /** Gross sale price (TRY) this scenario is computed at. */
-  readonly price: string;
+  /** Gross sale price (TRY) this scenario is computed at; null when the price is unknown. */
+  readonly price: string | null;
   /** Commission PERCENT as stored (e.g. "19", "15.4"). */
   readonly commissionPct: string;
   readonly netProfit: string | null;
@@ -76,12 +91,27 @@ export interface ComputedPlusItem {
 
 const NULL_CURRENT: ComputedCurrentScenario = { netProfit: null, marginPct: null };
 
-function nullScenario(price: Decimal, commissionPct: Decimal): ComputedScenario {
+/** An offer with no profit; its price is null when the ceiling is unknown. */
+function nullScenario(price: Decimal | null, commissionPct: Decimal): ComputedScenario {
   return {
-    price: price.toFixed(2),
+    price: price === null ? null : price.toFixed(2),
     commissionPct: commissionPct.toString(),
     netProfit: null,
     marginPct: null,
+  };
+}
+
+/** The offer evaluated at a known `price`; profit and margin only when it is calculable. */
+function evaluatedScenario(
+  price: Decimal,
+  commissionPct: Decimal,
+  outcome: ScreenScenarioOutcome,
+): ComputedScenario {
+  return {
+    price: price.toFixed(2),
+    commissionPct: commissionPct.toString(),
+    netProfit: outcome.calculable ? formatMoney2(outcome.netProfit) : null,
+    marginPct: outcome.calculable ? formatMarginPct2(outcome.statement.saleMarginPct) : null,
   };
 }
 
@@ -91,11 +121,19 @@ function nullScenario(price: Decimal, commissionPct: Decimal): ComputedScenario 
  * reason (the caller has already logged it), so a matched item under a store-wide degrade
  * never reports NO_PRODUCT. Otherwise an unmatched barcode (`base` no-product) is not
  * calculable (NO_PRODUCT). Otherwise the CURRENT baseline runs at the commission-base price
- * under the current commission and decides the item's calculability; the PLUS scenario
- * runs at the ceiling (`plusPriceUpperLimit`, ALWAYS -- a committed custom price never
- * enters here) under the reduced commission, both passed to the engine as overrides. The
- * engine may throw on a pathological input -- that propagates to the service, which
- * catches it per item.
+ * (else the current price) under the current commission and decides the item's
+ * calculability; the PLUS scenario runs at the ceiling (`plusPriceUpperLimit`, ALWAYS -- a
+ * committed custom price never enters here) under the reduced commission, both passed to
+ * the engine as overrides.
+ *
+ * Unknown (null) prices are never priced:
+ *   - known baseline, unknown ceiling: the current figures as usual, an offer with a null
+ *     price and no profit (not evaluated);
+ *   - unknown baseline, known ceiling: null current figures; the offer is evaluated at the
+ *     ceiling and alone decides calculability (its reason when not calculable);
+ *   - both unknown: not calculable with a null reason and no figures.
+ * `plusIsBetter` is false whenever either price is unknown. The engine may throw on a
+ * pathological input -- that propagates to the service, which catches it per item.
  */
 export function computePlusItem(params: {
   readonly inputs: PlusItemInputs;
@@ -103,7 +141,7 @@ export function computePlusItem(params: {
 }): ComputedPlusItem {
   const { inputs, base } = params;
   // The Plus offer is ALWAYS priced at the ceiling; a committed custom price is echoed
-  // and priced by the estimate endpoint, never read here.
+  // and priced by the estimate endpoint, never read here. Null when the ceiling is unknown.
   const pPrice = inputs.plusPriceUpperLimit;
 
   // A store-wide load failure (already logged) is checked FIRST, so a matched item under a
@@ -128,12 +166,41 @@ export function computePlusItem(params: {
     };
   }
 
-  // Baseline ("do nothing"): the current commission at the COMMISSION-BASE price — the
-  // customer-seen price commission is actually charged on, NOT the sale price. It
-  // decides the item's calculability.
+  // Baseline ("do nothing"): the current commission at the COMMISSION-BASE price -- the
+  // customer-seen price commission is actually charged on -- else at the current sale
+  // price. Null when neither is known.
+  const baseline = inputs.commissionBasePrice ?? inputs.currentPrice;
+
+  if (baseline === null) {
+    // No price to compute the current figures from. A known ceiling is still evaluated and
+    // alone decides calculability; with no current profit, Plus is never "better".
+    if (pPrice === null) {
+      return {
+        calculable: false,
+        reason: null,
+        current: NULL_CURRENT,
+        plus: nullScenario(null, inputs.plusCommissionPct),
+        plusIsBetter: false,
+      };
+    }
+    const offerOutcome = evaluateScreenScenario({
+      base: base.base,
+      unitPrice: pPrice,
+      commissionPct: inputs.plusCommissionPct,
+    });
+    return {
+      calculable: offerOutcome.calculable,
+      reason: offerOutcome.calculable ? null : offerOutcome.reason,
+      current: NULL_CURRENT,
+      plus: evaluatedScenario(pPrice, inputs.plusCommissionPct, offerOutcome),
+      plusIsBetter: false,
+    };
+  }
+
+  // A known baseline decides the item's calculability.
   const currentOutcome = evaluateScreenScenario({
     base: base.base,
-    unitPrice: inputs.commissionBasePrice,
+    unitPrice: baseline,
     commissionPct: inputs.currentCommissionPct,
   });
   if (!currentOutcome.calculable) {
@@ -142,6 +209,22 @@ export function computePlusItem(params: {
       reason: currentOutcome.reason,
       current: NULL_CURRENT,
       plus: nullScenario(pPrice, inputs.plusCommissionPct),
+      plusIsBetter: false,
+    };
+  }
+
+  const current: ComputedCurrentScenario = {
+    netProfit: formatMoney2(currentOutcome.netProfit),
+    marginPct: formatMarginPct2(currentOutcome.statement.saleMarginPct),
+  };
+
+  // An unknown ceiling is never evaluated: the offer has no price and no profit.
+  if (pPrice === null) {
+    return {
+      calculable: true,
+      reason: null,
+      current,
+      plus: nullScenario(null, inputs.plusCommissionPct),
       plusIsBetter: false,
     };
   }
@@ -158,18 +241,8 @@ export function computePlusItem(params: {
   return {
     calculable: true,
     reason: null,
-    current: {
-      netProfit: formatMoney2(currentOutcome.netProfit),
-      marginPct: formatMarginPct2(currentOutcome.statement.saleMarginPct),
-    },
-    plus: {
-      price: pPrice.toFixed(2),
-      commissionPct: inputs.plusCommissionPct.toString(),
-      netProfit: plusOutcome.calculable ? formatMoney2(plusOutcome.netProfit) : null,
-      marginPct: plusOutcome.calculable
-        ? formatMarginPct2(plusOutcome.statement.saleMarginPct)
-        : null,
-    },
+    current,
+    plus: evaluatedScenario(pPrice, inputs.plusCommissionPct, plusOutcome),
     plusIsBetter,
   };
 }

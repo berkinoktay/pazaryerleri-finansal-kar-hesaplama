@@ -66,7 +66,7 @@ function commissionRow(
   };
 }
 
-function plusRow(id: string, barcode: string, ceiling: string): PlusTariffRow {
+function plusRow(id: string, barcode: string, ceiling: string | null): PlusTariffRow {
   return {
     id,
     barcode,
@@ -187,6 +187,16 @@ describe('resolvePlusExportPrice', () => {
 
   it('is null for a row that is not joined', () => {
     expect(resolvePlusExportPrice(row, {}, {})).toBeNull();
+  });
+
+  it('is null for a ceiling-joined row whose ceiling is unknown', () => {
+    const unknown = plusRow('u', 'U', null);
+    expect(resolvePlusExportPrice(unknown, { u: 'plus' }, {})).toBeNull();
+  });
+
+  it('picks the custom price when the ceiling is unknown', () => {
+    const unknown = plusRow('u', 'U', null);
+    expect(resolvePlusExportPrice(unknown, {}, { u: plusCustom('79.90') })).toBe('79.90');
   });
 });
 

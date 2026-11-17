@@ -18,6 +18,7 @@ import {
   trendyolCommissionTariffKeep,
   trendyolCommissionTariffLayout,
 } from './commission-tariff.layout';
+import { knownPrice } from './known-price';
 import { TARIFF_WINDOW_LABEL_UNIT, TRENDYOL_DEFAULT_NAMES, TRENDYOL_SHEET_NAMES } from './labels';
 import { TARIFF_SELECTION_WRITE, TARIFF_WINDOW_FILE_UNIT } from './tariff-window';
 
@@ -72,9 +73,6 @@ const COMMISSION_EXPORT_BASE_NAME = 'urun-komisyon-tarifesi';
 /** What a blank or unreadable current commission reads as, as the import always stored it. */
 const BLANK_DECIMAL = '0';
 
-/** The scale of the stored price columns (numeric(12,2)). */
-const STORED_PRICE_SCALE = 2;
-
 const SUMMARY = TRENDYOL_FORMAT_SUMMARIES.COMMISSION_TARIFF;
 
 /**
@@ -128,16 +126,6 @@ export function bandsForPeriod(
     bands.push(json);
   }
   return bands;
-}
-
-/**
- * A price cell's decimal text, or null when the price is unknown: the cell read as no
- * decimal (`raw` null), or its value is zero at the stored scale. `0.004` would store
- * as `0.00`, which is no price either. Any other value is kept as the file's own text.
- */
-function knownPrice(raw: string | null): string | null {
-  if (raw === null) return null;
-  return new Decimal(raw).toDecimalPlaces(STORED_PRICE_SCALE).isZero() ? null : raw;
 }
 
 /**

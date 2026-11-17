@@ -13,6 +13,7 @@
 // TRENDYOL_CONTRACT) + the fee definitions. Fixture is built once in beforeAll
 // (each Supabase auth user costs ~800 ms). SENDEOMP is ensured by globalSetup.
 
+import { z } from '@hono/zod-openapi';
 import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -28,7 +29,8 @@ import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 const app = createApp();
 
 interface ScenarioWire {
-  price: string;
+  /** Null when the Plus price upper limit is unknown. */
+  price: string | null;
   commissionPct: string;
   netProfit: string | null;
   marginPct: string | null;
@@ -41,12 +43,13 @@ interface ItemWire {
   imageUrl: string | null;
   category: string | null;
   brand: string | null;
-  currentPrice: string;
-  commissionBasePrice: string;
+  // The three prices are null when the file's cell was blank, unreadable or 0.
+  currentPrice: string | null;
+  commissionBasePrice: string | null;
   currentCommissionPct: string;
   currentNetProfit: string | null;
   currentMarginPct: string | null;
-  plusPriceUpperLimit: string;
+  plusPriceUpperLimit: string | null;
   plus: ScenarioWire;
   plusIsBetter: boolean;
   calculable: boolean;
@@ -995,6 +998,320 @@ describe('Plus Commission Tariffs - per-item degrade (decision 9)', () => {
           failedCount: 2,
         }),
       );
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+});
+
+// The detail fields the unknown-price cases read, parsed rather than cast.
+const UnknownPriceItemSchema = z.object({
+  barcode: z.string(),
+  currentPrice: z.string().nullable(),
+  commissionBasePrice: z.string().nullable(),
+  currentNetProfit: z.string().nullable(),
+  currentMarginPct: z.string().nullable(),
+  plusPriceUpperLimit: z.string().nullable(),
+  plus: z.object({
+    price: z.string().nullable(),
+    commissionPct: z.string(),
+    netProfit: z.string().nullable(),
+    marginPct: z.string().nullable(),
+  }),
+  plusIsBetter: z.boolean(),
+  calculable: z.boolean(),
+  reason: z.string().nullable(),
+});
+const UnknownPriceDetailSchema = z.object({
+  periods: z.array(z.object({ items: z.array(UnknownPriceItemSchema) })),
+});
+type UnknownPriceItem = z.infer<typeof UnknownPriceItemSchema>;
+
+/** The stored prices of one seeded item; null is a cell the file left blank, unreadable or 0. */
+interface SeededPrices {
+  readonly currentPrice: string | null;
+  readonly commissionBasePrice: string | null;
+  readonly plusPriceUpperLimit: string | null;
+}
+
+describe('Plus Commission Tariffs - unknown (NULL) prices', () => {
+  // Every row points at the SAME calculable variant, current commission (19) and Plus
+  // offer (15.4), so the rows differ only in which prices are known. CONTROL is fully
+  // priced with the ceiling equal to its baseline, so the lower Plus commission makes Plus
+  // better: a `plusIsBetter: false` on an unknown-price row is then the unknown price at
+  // work, not the numbers. CONTROL_400 is the same product at another price, to show the
+  // fallback baseline is the current price and not just any value. The control rows also
+  // prove the base loaded (not degraded), since a degraded base also answers
+  // `calculable: false` with `reason: null`.
+  const CONTROL = 'BC-PUNK-CTRL';
+  const CONTROL_400 = 'BC-PUNK-CTRL-400';
+  const NO_BASELINE = 'BC-PUNK-NO-BASE';
+  const NO_COMMISSION_BASE = 'BC-PUNK-NO-CBP';
+  const NO_CEILING = 'BC-PUNK-NO-CEIL';
+  const NO_PRICE = 'BC-PUNK-NO-PRICE';
+
+  let accessToken: string;
+  let detailUrl: string;
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing - globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Plus Unknown Price Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'plus-unknown-price-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 8901n,
+        productMainId: 'pm-8901',
+        title: 'Bilinmeyen Fiyat Urunu',
+        categoryId: 597n,
+        categoryName: 'Gomlek',
+        brandId: 2032n,
+        brandName: 'Modline',
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: 89010n,
+        barcode: 'BC-PUNK',
+        stockCode: 'STK-PUNK',
+        salePrice: new Decimal('500.00'),
+        listPrice: new Decimal('500.00'),
+        vatRate: 20,
+        dimensionalWeightOverride: new Decimal('3.0'),
+      },
+    });
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'COGS Unknown Price',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Unknown Price',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+    });
+    // Earlier blocks truncate, and the detail resolves fee definitions unconditionally.
+    await ensureFeeDefinitions();
+
+    const tariff = await prisma.plusCommissionTariff.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Bilinmeyen Fiyat Tarifesi' },
+    });
+    const period = await prisma.plusCommissionTariffPeriod.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: tariff.id,
+        dateRangeLabel: '1 - 7 Temmuz',
+        sortOrder: 0,
+      },
+    });
+    let sort = 0;
+    const makeItem = async (barcode: string, prices: SeededPrices): Promise<void> => {
+      await prisma.plusCommissionTariffItem.create({
+        data: {
+          organizationId: org.id,
+          storeId: store.id,
+          periodId: period.id,
+          productVariantId: variant.id,
+          barcode,
+          productTitle: barcode,
+          currentPrice: prices.currentPrice,
+          commissionBasePrice: prices.commissionBasePrice,
+          currentCommissionPct: '19.0000',
+          plusPriceUpperLimit: prices.plusPriceUpperLimit,
+          plusCommissionPct: '15.4',
+          // The import's fallback: the Plus commission base is the ceiling when unknown.
+          plusCommissionBasePrice: prices.plusPriceUpperLimit,
+          sortOrder: sort++,
+        },
+      });
+    };
+    await makeItem(CONTROL, {
+      currentPrice: '500.00',
+      commissionBasePrice: '500.00',
+      plusPriceUpperLimit: '500.00',
+    });
+    await makeItem(CONTROL_400, {
+      currentPrice: '400.00',
+      commissionBasePrice: '400.00',
+      plusPriceUpperLimit: '400.00',
+    });
+    await makeItem(NO_BASELINE, {
+      currentPrice: null,
+      commissionBasePrice: null,
+      plusPriceUpperLimit: '500.00',
+    });
+    // The current price (400) differs from the ceiling and the variant's sale price (both
+    // 500), so a baseline taken from either of those would price this row like CONTROL.
+    await makeItem(NO_COMMISSION_BASE, {
+      currentPrice: '400.00',
+      commissionBasePrice: null,
+      plusPriceUpperLimit: '500.00',
+    });
+    await makeItem(NO_CEILING, {
+      currentPrice: '500.00',
+      commissionBasePrice: '500.00',
+      plusPriceUpperLimit: null,
+    });
+    await makeItem(NO_PRICE, {
+      currentPrice: null,
+      commissionBasePrice: null,
+      plusPriceUpperLimit: null,
+    });
+
+    accessToken = user.accessToken;
+    detailUrl = `/v1/organizations/${org.id}/stores/${store.id}/plus-commission-tariffs/${tariff.id}`;
+  });
+
+  async function fetchItems(): Promise<readonly UnknownPriceItem[]> {
+    const res = await app.request(detailUrl, { headers: { Authorization: bearer(accessToken) } });
+    expect(res.status).toBe(200);
+    return UnknownPriceDetailSchema.parse(await res.json()).periods[0]?.items ?? [];
+  }
+
+  function itemOf(items: readonly UnknownPriceItem[], barcode: string): UnknownPriceItem {
+    const item = items.find((i) => i.barcode === barcode);
+    if (item === undefined) throw new Error(`detail item ${barcode} missing`);
+    return item;
+  }
+
+  it('returns null prices and a null current profit when neither baseline price is known, with the Plus profit computed', async () => {
+    const items = await fetchItems();
+    const control = itemOf(items, CONTROL);
+    const row = itemOf(items, NO_BASELINE);
+
+    expect(row.currentPrice).toBeNull();
+    expect(row.commissionBasePrice).toBeNull();
+    expect(row.currentNetProfit).toBeNull();
+    expect(row.currentMarginPct).toBeNull();
+    // The offer is still priced at its known ceiling, exactly as the control's.
+    expect(row.plusPriceUpperLimit).toBe('500.00');
+    expect(row.plus.price).toBe('500.00');
+    expect(row.plus.netProfit).not.toBeNull();
+    expect(row.plus.netProfit).toBe(control.plus.netProfit);
+    expect(row.plus.marginPct).toBe(control.plus.marginPct);
+    // The calculable offer decides calculability.
+    expect(row.calculable).toBe(true);
+    expect(row.reason).toBeNull();
+    // Plus wins on the control; with no current profit there is nothing to compare.
+    expect(control.plusIsBetter).toBe(true);
+    expect(row.plusIsBetter).toBe(false);
+  });
+
+  it('computes the current profit from the current price when only the commission base price is unknown', async () => {
+    const items = await fetchItems();
+    const control = itemOf(items, CONTROL);
+    const other = itemOf(items, CONTROL_400);
+    const row = itemOf(items, NO_COMMISSION_BASE);
+
+    expect(row.commissionBasePrice).toBeNull();
+    expect(row.currentPrice).toBe('400.00');
+    expect(row.calculable).toBe(true);
+    expect(row.reason).toBeNull();
+    // Priced at the current price 400: CONTROL_400's figures, not the 500 of the ceiling
+    // or the variant's sale price (CONTROL's figures).
+    expect(row.currentNetProfit).not.toBeNull();
+    expect(row.currentNetProfit).toBe(other.currentNetProfit);
+    expect(row.currentMarginPct).toBe(other.currentMarginPct);
+    expect(row.currentNetProfit).not.toBe(control.currentNetProfit);
+    // Both profits are known, so the Plus offer is priced at its own ceiling as usual.
+    expect(row.plus.price).toBe('500.00');
+    expect(row.plus.netProfit).toBe(control.plus.netProfit);
+  });
+
+  it('returns the Plus offer with price null and no profit when the ceiling is unknown, and plusIsBetter false', async () => {
+    const items = await fetchItems();
+    const control = itemOf(items, CONTROL);
+    const row = itemOf(items, NO_CEILING);
+
+    expect(row.plusPriceUpperLimit).toBeNull();
+    expect(row.plus.price).toBeNull();
+    expect(row.plus.netProfit).toBeNull();
+    expect(row.plus.marginPct).toBeNull();
+    expect(row.plus.commissionPct).toBe('15.4');
+    // The current figures are computed as usual.
+    expect(row.currentPrice).toBe('500.00');
+    expect(row.commissionBasePrice).toBe('500.00');
+    expect(row.currentNetProfit).not.toBeNull();
+    expect(row.currentNetProfit).toBe(control.currentNetProfit);
+    expect(row.currentMarginPct).toBe(control.currentMarginPct);
+    expect(row.calculable).toBe(true);
+    expect(row.reason).toBeNull();
+    // The control (same prices, ceiling known) says Plus is better; an unknown ceiling never does.
+    expect(control.plusIsBetter).toBe(true);
+    expect(row.plusIsBetter).toBe(false);
+  });
+
+  it('returns calculable false with reason null when no price is known', async () => {
+    const items = await fetchItems();
+    const row = itemOf(items, NO_PRICE);
+
+    expect(row.calculable).toBe(false);
+    expect(row.reason).toBeNull();
+    expect(row.currentPrice).toBeNull();
+    expect(row.commissionBasePrice).toBeNull();
+    expect(row.plusPriceUpperLimit).toBeNull();
+    expect(row.currentNetProfit).toBeNull();
+    expect(row.currentMarginPct).toBeNull();
+    expect(row.plus.price).toBeNull();
+    expect(row.plus.netProfit).toBeNull();
+    expect(row.plus.marginPct).toBeNull();
+    expect(row.plusIsBetter).toBe(false);
+    // The same variant prices the control: this is the unknown prices, not a degraded base.
+    expect(itemOf(items, CONTROL).calculable).toBe(true);
+  });
+
+  it('does not log a profit-read failure for a row with an unknown price', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const items = await fetchItems();
+      // The no-price row has the degrade shape (not calculable, reason null) beside a
+      // calculable control on the same variant, yet the degrade path's log never runs.
+      expect(itemOf(items, CONTROL).calculable).toBe(true);
+      const noPrice = itemOf(items, NO_PRICE);
+      expect(noPrice.calculable).toBe(false);
+      expect(noPrice.reason).toBeNull();
+      expect(itemOf(items, NO_BASELINE).calculable).toBe(true);
+      expect(itemOf(items, NO_CEILING).calculable).toBe(true);
+      // An unknown price is not a failure: nothing throws, so nothing is logged.
+      expect(errorSpy).not.toHaveBeenCalled();
     } finally {
       errorSpy.mockRestore();
     }

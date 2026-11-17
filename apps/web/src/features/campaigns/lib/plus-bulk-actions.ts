@@ -75,11 +75,17 @@ export interface PlusTariffFilterState {
 }
 
 /**
- * Apply the row's most profitable option to every listed row ("En kârlıyı seç"):
- * join Plus at the ceiling where the offer beats doing nothing (`plusIsBetter`), and
- * un-join where keeping the current price wins. Uncalculable rows are left untouched
- * (they cannot join). Choosing/clearing always drops any per-row custom price, keeping
- * the two maps mutually exclusive.
+ * Apply the row's most profitable option to every listed row. It follows the row's
+ * 'En karli' marker, as the commission page's bulk select does:
+ *   - an uncalculable row, or an offer with no price (unknown ceiling, which cannot be
+ *     joined without a custom price), is left untouched;
+ *   - when the current profit is unknown, the offer is the row's best only when its own
+ *     profit is strictly positive: the row joins at the ceiling then, otherwise it is
+ *     left untouched;
+ *   - with both profits known, it joins where the offer beats doing nothing
+ *     (`plusIsBetter`) and un-joins where keeping the current price wins.
+ * Choosing/clearing always drops any per-row custom price, keeping the two maps
+ * mutually exclusive. It only ranks backend figures; it does no money arithmetic.
  */
 export function selectBestForAll(
   rows: readonly PlusTariffRow[],
@@ -89,6 +95,14 @@ export function selectBestForAll(
   const customPrices = { ...state.customPrices };
   for (const row of rows) {
     if (!row.calculable) continue;
+    const offer = plusOffer(row);
+    if (offer === undefined || offer.price === null) continue;
+    if (row.currentNetProfit === null) {
+      if (offer.netProfit === null || !new Decimal(offer.netProfit).greaterThan(0)) continue;
+      selection[row.id] = 'plus';
+      customPrices[row.id] = null;
+      continue;
+    }
     selection[row.id] = row.plusIsBetter ? 'plus' : null;
     customPrices[row.id] = null;
   }
@@ -100,7 +114,9 @@ export function selectBestForAll(
  * price/commission (`plusIsBetter`). The useful default: often the lower Plus-ceiling
  * price hurts more than the reduced commission helps, so joining every product is a
  * mistake — this joins only the ones that genuinely win, leaving the rest untouched.
- * Custom-priced rows it touches switch to the ceiling.
+ * Custom-priced rows it touches switch to the ceiling. An offer with no price (unknown
+ * ceiling) is never joined; `plusIsBetter` is already false there, the price check is
+ * defensive.
  */
 export function joinProfitable(
   rows: readonly PlusTariffRow[],
@@ -109,7 +125,8 @@ export function joinProfitable(
   const selection = { ...state.selection };
   const customPrices = { ...state.customPrices };
   for (const row of rows) {
-    if (row.calculable && row.plusIsBetter) {
+    const offerPrice = plusOffer(row)?.price ?? null;
+    if (row.calculable && row.plusIsBetter && offerPrice !== null) {
       selection[row.id] = 'plus';
       customPrices[row.id] = null;
     }

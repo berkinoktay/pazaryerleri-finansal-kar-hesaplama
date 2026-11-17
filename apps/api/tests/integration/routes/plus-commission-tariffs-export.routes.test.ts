@@ -10,7 +10,10 @@
 // single 7-gunluk file carrying both periods' commission cells. A tariff with no
 // stored source file returns 409. At import, a value the export would write back is
 // checked as the export writes it: an Excel float residue offer is stored and exported
-// rounded, a negative Plus price ceiling is refused with 422 and nothing is stored.
+// rounded, a negative Plus price ceiling is refused with 422 and nothing is stored. A
+// product joined without a custom price whose Plus price ceiling is unknown (NULL) refuses
+// the export with 409 SELECTION_PRICE_UNKNOWN; a custom price is still written, and an
+// unjoined row with an unknown ceiling is left as the file had it.
 
 import { readFileSync } from 'node:fs';
 
@@ -33,6 +36,7 @@ import {
 import { patchFixture } from '@pazarsync/spreadsheet/testing';
 
 import { createApp } from '@/app';
+import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware';
 import { trendyolPlusCommissionTariffLayout } from '@/workbooks/formats/trendyol/plus-commission-tariff.layout';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
@@ -528,5 +532,128 @@ describe('plus-commission-tariff import: a value the export writes back', () => 
         where: { organizationId: ctx.orgId, storeId: ctx.storeId },
       }),
     ).toBe(0);
+  });
+});
+
+describe('plus-commission-tariff export: an unknown Plus price upper limit', () => {
+  beforeEach(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+    // With these cases the file sends more imports than RATE_LIMITS.FILE_IMPORT allows per
+    // minute with the same pooled user; give each test a fresh bucket.
+    _resetRateLimitStoreForTests();
+  });
+
+  // Gives the imported SINGLE_BARCODE item an unknown Plus price upper limit (NULL: the
+  // file's cell was blank, unreadable or 0, and so is the Plus commission base it falls
+  // back to) and the given opt-in.
+  async function withUnknownCeiling(
+    ctx: Ctx,
+    data: { readonly plusSelected: boolean; readonly customPrice: string | null },
+  ): Promise<void> {
+    const item = await prisma.plusCommissionTariffItem.findFirst({
+      where: { storeId: ctx.storeId, barcode: SINGLE_BARCODE },
+    });
+    expect(item).not.toBeNull();
+    await prisma.plusCommissionTariffItem.update({
+      where: { id: item?.id },
+      data: {
+        plusPriceUpperLimit: null,
+        plusCommissionBasePrice: null,
+        plusSelected: data.plusSelected,
+        customPrice: data.customPrice,
+      },
+    });
+  }
+
+  async function exportedAt(tariffId: string): Promise<Date | null | undefined> {
+    const stored = await prisma.plusCommissionTariff.findUnique({ where: { id: tariffId } });
+    return stored?.exportedAt;
+  }
+
+  it('answers 409 SELECTION_PRICE_UNKNOWN for a joined item with no custom price and an unknown ceiling, and does not mark the tariff exported', async () => {
+    const ctx = await setupStore();
+    const tariffId = await importFixture(ctx, FIXTURE_SINGLE, 'trendyol-plus-tariff.xlsx');
+
+    // Joined at the ceiling, but the ceiling is unknown: the export must refuse instead of
+    // writing a made-up 0.00.
+    await withUnknownCeiling(ctx, { plusSelected: true, customPrice: null });
+
+    const res = await exportTariff(ctx, tariffId);
+    expect(res.status).toBe(409);
+    expect(ProblemSchema.parse(await res.json()).code).toBe('SELECTION_PRICE_UNKNOWN');
+
+    // No file was built, so the tariff is not marked exported.
+    expect(await exportedAt(tariffId)).toBeNull();
+  });
+
+  it('exports the custom price of an item whose ceiling is unknown', async () => {
+    const ctx = await setupStore();
+    const tariffId = await importFixture(ctx, FIXTURE_SINGLE, 'trendyol-plus-tariff.xlsx');
+
+    // The same unknown ceiling as the 409 case, but the seller typed a custom price: the
+    // custom price is what the export writes.
+    await withUnknownCeiling(ctx, { plusSelected: true, customPrice: '512.34' });
+
+    const res = await exportTariff(ctx, tariffId);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain(XLSX_MIME_FRAGMENT);
+
+    const { grid, layout } = await readParsed(Buffer.from(await res.arrayBuffer()));
+    const row = rowFor(grid, layout, SINGLE_BARCODE);
+    expect(row).toBeDefined();
+    expect(cellText(row ?? [], column(layout, 'plusPriceSelection'))).toBe('512.34');
+    expect(await exportedAt(tariffId)).not.toBeNull();
+  });
+
+  it('exports the other products normally when an item with an unknown ceiling is not joined', async () => {
+    const ctx = await setupStore();
+    const tariffId = await importFixture(ctx, FIXTURE_SINGLE, 'trendyol-plus-tariff.xlsx');
+
+    // SINGLE_BARCODE has an unknown ceiling and is not joined; another product, whose
+    // ceiling the file gives, is joined at its ceiling.
+    await withUnknownCeiling(ctx, { plusSelected: false, customPrice: null });
+    const other = await prisma.plusCommissionTariffItem.findFirst({
+      where: { storeId: ctx.storeId, barcode: { not: SINGLE_BARCODE } },
+      orderBy: { sortOrder: 'asc' },
+    });
+    expect(other).not.toBeNull();
+    if (other === null) return;
+    expect(other.plusPriceUpperLimit).not.toBeNull();
+    if (other.plusPriceUpperLimit === null) return;
+    await prisma.plusCommissionTariffItem.update({
+      where: { id: other.id },
+      data: { plusSelected: true, customPrice: null },
+    });
+
+    const res = await exportTariff(ctx, tariffId);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain(XLSX_MIME_FRAGMENT);
+
+    const { grid, layout } = await readParsed(Buffer.from(await res.arrayBuffer()));
+    // The joined product carries its ceiling.
+    const joined = rowFor(grid, layout, other.barcode);
+    expect(joined).toBeDefined();
+    expect(num(joined, column(layout, 'plusPriceSelection'))).toBe(
+      Number(other.plusPriceUpperLimit),
+    );
+    // The product with the unknown ceiling is left exactly as the source file had it: no
+    // price written (no 0.00), its opt-in cells untouched.
+    const source = await readParsed(FIXTURE_SINGLE);
+    const sourceRow = rowFor(source.grid, source.layout, SINGLE_BARCODE) ?? [];
+    const unknown = rowFor(grid, layout, SINGLE_BARCODE);
+    expect(unknown).toBeDefined();
+    expect(cellText(unknown ?? [], column(layout, 'plusPriceSelection'))).toBeNull();
+    const optInColumns: readonly PlusColumn[] = [
+      'plusPriceSelection',
+      'tariffSelection',
+      'cancelled',
+    ];
+    for (const key of optInColumns) {
+      expect(cellText(unknown ?? [], column(layout, key))).toBe(
+        cellText(sourceRow, column(source.layout, key)),
+      );
+    }
+    expect(await exportedAt(tariffId)).not.toBeNull();
   });
 });

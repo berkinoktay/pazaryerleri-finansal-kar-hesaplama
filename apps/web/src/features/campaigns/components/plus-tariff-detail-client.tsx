@@ -4,6 +4,7 @@ import { ArrowLeft01Icon, Delete02Icon, DownloadCircle01Icon } from 'hugeicons-r
 import { useTranslations } from 'next-intl';
 import { parseAsFloat, parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
+import { toast } from 'sonner';
 
 import { WORKBOOK_PAGES } from '@pazarsync/utils';
 
@@ -28,12 +29,12 @@ import {
   joinProfitable,
   selectBestForAll,
   type PlusCustomChoice,
-  type PlusCustomPriceMap,
-  type PlusSelectionMap,
   type PlusSelectionState,
   type PlusTariffFilterState,
 } from '../lib/plus-bulk-actions';
 import { summarizePlusSelection } from '../lib/plus-tariff-summary';
+import { seedPlusSelection } from '../lib/seed-plus-selection';
+import { selectionSaveErrorToast } from '../lib/selection-save-error';
 import { TariffScopeProvider } from '../lib/tariff-scope';
 import { computeExportPreview, resolvePlusExportPrice } from '../lib/export-preview';
 import { ExportTariffDialog } from './export-tariff-dialog';
@@ -71,6 +72,7 @@ export function PlusTariffDetailClient({
 }): React.ReactElement {
   const tPage = useTranslations('plusCommissionTariffsPage');
   const tCommon = useTranslations('common');
+  const tErrors = useTranslations('common.errors');
   const tExport = useTranslations('plusCommissionTariffsPage.exportDialog');
   const router = useRouter();
   const detail = usePlusTariffDetail(orgId ?? '', storeId, tariffId);
@@ -173,27 +175,10 @@ export function PlusTariffDetailClient({
   // `customPrice` the first time this tariff's data arrives. Adjusting state during
   // render (guarded by the tariff id, so it fires once per tariff) is the
   // React-recommended alternative to a setState-in-effect — no cascading renders.
+  // `seedPlusSelection` drops a stored ceiling join whose ceiling is unknown, so the
+  // next save clears it instead of being refused.
   if (view !== null && view.id !== seededTariffId) {
-    const seedSelection: PlusSelectionMap = {};
-    const seedCustom: PlusCustomPriceMap = {};
-    for (const period of view.periods) {
-      for (const row of period.rows) {
-        if (row.customPrice !== null) {
-          // Custom-joined: restore the confirmed price. Its exact profit isn't in the
-          // detail payload, so approximate the summary with the offer's profit until the
-          // seller re-confirms (which captures the estimate).
-          const offer = row.bands[0];
-          seedCustom[row.id] = {
-            price: row.customPrice,
-            netProfit: offer?.netProfit ?? null,
-            marginPct: offer?.marginPct ?? null,
-          };
-        } else if (row.selected) {
-          seedSelection[row.id] = 'plus';
-        }
-      }
-    }
-    setChoices({ selection: seedSelection, customPrices: seedCustom });
+    setChoices(seedPlusSelection(view.periods));
     setSeededTariffId(view.id);
   }
 
@@ -362,6 +347,15 @@ export function PlusTariffDetailClient({
               setExportOpen(false);
             },
           });
+        },
+        // The global pipeline keeps every VALIDATION_ERROR silent, so say it here; the
+        // export does not start. A join the route cannot export (no custom price on an
+        // offer whose ceiling is unknown) gets its own message; any other validation
+        // issue gets the generic one. Every other code is already toasted globally.
+        onError: (error) => {
+          const toastKind = selectionSaveErrorToast(error);
+          if (toastKind === 'selectionRefused') toast.error(tPage('selectionRefused'));
+          if (toastKind === 'generic') toast.error(tErrors('generic'));
         },
       },
     );

@@ -1,8 +1,9 @@
 // The Trendyol Plus commission tariff format on its own, with no legacy code: the header
 // cases of the old resolver's test and of the Plus block of the layout parity test, the
 // write columns of both real files and the formula columns the export may overwrite,
-// literal rows of the real files, the three fallback chains and the cancel cell, a Plus
-// price ceiling or period offer the export could not write, the permanent golden digests
+// literal rows of the real files, the three fallback chains and the cancel cell, the
+// unknown (null) prices, a Plus price ceiling or period offer the export could not
+// write, the permanent golden digests
 // of tests/fixtures/workbook-golden/legacy-rows.json (written by the legacy import
 // parser before it was deleted), the rows the real files already fill in, and the import
 // rehearsal on both real files. A change to `mapRow` or the keep rule that alters any
@@ -244,6 +245,28 @@ function mapOne(overrides: Readonly<Record<number, CellValue>> = {}): PlusCommis
   const read = readRows(gridSelection([[...PLUS_HEADER], dataRow(overrides)]));
   return present(read.rows[0], 'kept row').data;
 }
+
+/** The four price cells of a synthetic row, each set to `cell`. */
+function allPrices(cell: CellValue): Readonly<Record<number, CellValue>> {
+  return {
+    [COL.currentPrice]: cell,
+    [COL.commissionBasePrice]: cell,
+    [COL.plusPriceUpperLimit]: cell,
+    [COL.plusCommissionBasePrice]: cell,
+  };
+}
+
+/** The four prices of a mapped row: current, commission base, Plus ceiling, Plus commission base. */
+function pricesOf(row: PlusCommissionTariffRow): readonly (string | null)[] {
+  return [
+    row.currentPrice,
+    row.commissionBasePrice,
+    row.plusPriceUpperLimit,
+    row.plusCommissionBasePrice,
+  ];
+}
+
+const NO_PRICES = [null, null, null, null];
 
 function column(layout: ResolvedLayout, key: PlusColumn): number | null {
   return columnIndex(format.layout, layout, key);
@@ -578,24 +601,24 @@ describe('Trendyol Plus commission tariff format: the row fallbacks', () => {
     expect(mapOne({ [COL.modelCode]: null, [COL.sellerStockCode]: null }).stockCode).toBeNull();
   });
 
-  it('reads the commission base price, else the current price, else 0', () => {
+  it('reads the commission base price, else the current price, else null', () => {
     expect(mapOne().commissionBasePrice).toBe('448.87');
     expect(mapOne({ [COL.commissionBasePrice]: null }).commissionBasePrice).toBe('472.5');
     expect(
       mapOne({ [COL.commissionBasePrice]: null, [COL.currentPrice]: null }).commissionBasePrice,
-    ).toBe('0');
+    ).toBeNull();
   });
 
-  it('reads the Plus commission base price, else the Plus price ceiling, else 0', () => {
+  it('reads the Plus commission base price, else the Plus price ceiling, else null', () => {
     expect(mapOne().plusCommissionBasePrice).toBe('440.1');
     expect(mapOne({ [COL.plusCommissionBasePrice]: null }).plusCommissionBasePrice).toBe('377.66');
     expect(
       mapOne({ [COL.plusCommissionBasePrice]: null, [COL.plusPriceUpperLimit]: null })
         .plusCommissionBasePrice,
-    ).toBe('0');
+    ).toBeNull();
   });
 
-  it('reads a blank current price, current commission or Plus price ceiling as 0', () => {
+  it('reads a blank current price or Plus price ceiling as null and a blank current commission as 0', () => {
     const row = mapOne({
       [COL.currentPrice]: null,
       [COL.currentCommission]: null,
@@ -603,10 +626,73 @@ describe('Trendyol Plus commission tariff format: the row fallbacks', () => {
     });
 
     expect([row.currentPrice, row.currentCommissionPct, row.plusPriceUpperLimit]).toEqual([
+      null,
       '0',
-      '0',
-      '0',
+      null,
     ]);
+  });
+
+  // Every price cell is set, so neither base price falls back to a known price.
+  it('reads an unreadable price text as null', () => {
+    expect(pricesOf(mapOne(allPrices('249,90 TL')))).toEqual(NO_PRICES);
+  });
+
+  // The grid reader turns an error cell into '#ERROR_' and its text; a typed '#REF!'
+  // text reads the same way.
+  it.each(['#REF!', '#ERROR_#REF!'])('reads an error cell (%s) as null', (cell) => {
+    expect(pricesOf(mapOne(allPrices(cell)))).toEqual(NO_PRICES);
+  });
+
+  it('reads a date or boolean price cell as null', () => {
+    for (const cell of [new Date(Date.UTC(2026, 6, 1)), true, false]) {
+      expect(pricesOf(mapOne(allPrices(cell)))).toEqual(NO_PRICES);
+    }
+  });
+
+  // 0.004 is zero at the stored scale: it would store as 0.00.
+  it.each([
+    ['the number 0', 0],
+    ['the text 0', '0'],
+    ['the text 0,00', '0,00'],
+    ['the number 0.004', 0.004],
+  ])('reads a literal 0 price (%s) as null', (_name, cell) => {
+    expect(pricesOf(mapOne(allPrices(cell)))).toEqual(NO_PRICES);
+  });
+
+  it('skips a 0 commission base price and falls back to the current price', () => {
+    for (const cell of [0, '0', '0,00', 0.004]) {
+      expect(mapOne({ [COL.commissionBasePrice]: cell }).commissionBasePrice).toBe('472.5');
+    }
+    expect(
+      mapOne({ [COL.commissionBasePrice]: 0, [COL.currentPrice]: 0 }).commissionBasePrice,
+    ).toBeNull();
+  });
+
+  it('skips a 0 Plus commission base price and falls back to the Plus price ceiling', () => {
+    for (const cell of [0, '0', '0,00', 0.004]) {
+      expect(mapOne({ [COL.plusCommissionBasePrice]: cell }).plusCommissionBasePrice).toBe(
+        '377.66',
+      );
+    }
+    expect(
+      mapOne({ [COL.plusCommissionBasePrice]: 0, [COL.plusPriceUpperLimit]: 0 })
+        .plusCommissionBasePrice,
+    ).toBeNull();
+  });
+
+  it("keeps a readable price as the file's text", () => {
+    expect(pricesOf(mapOne())).toEqual(['472.5', '448.87', '377.66', '440.1']);
+    expect(pricesOf(mapOne(allPrices(249.9)))).toEqual(['249.9', '249.9', '249.9', '249.9']);
+    expect(pricesOf(mapOne(allPrices('249,90')))).toEqual(['249.90', '249.90', '249.90', '249.90']);
+    // Not zero at the stored scale: it stores as 0.01.
+    expect(pricesOf(mapOne(allPrices(0.005)))).toEqual(['0.005', '0.005', '0.005', '0.005']);
+  });
+
+  it('still reads a blank current commission and a blank period offer as 0', () => {
+    const row = mapOne({ [COL.currentCommission]: null, [OFFER_COL]: null });
+
+    expect(row.currentCommissionPct).toBe('0');
+    expect(row.periodOffers).toEqual(['0']);
   });
 
   it('reads a blank or unreadable period offer as 0', () => {
@@ -897,8 +983,46 @@ describe('Trendyol Plus commission tariff format: the legacy golden digests', ()
     const read = readRows(gridSelection(grid));
     const real = goldenDigest(SINGLE_FILE, 'real');
     const derived = goldenDigest(SINGLE_FILE, 'derived');
-    const keptCases = PLUS_DERIVED.filter((testCase) => testCase.kept).length;
+    const keptNames = PLUS_DERIVED.filter((testCase) => testCase.kept).map(
+      (testCase) => testCase.name,
+    );
+    const keptCases = keptNames.length;
+    // The kept derived rows follow the fixture's own kept rows, in case order.
+    const derivedRow = (name: string): PlusCommissionTariffRow => {
+      const index = keptNames.indexOf(name);
+      expect(index).toBeGreaterThanOrEqual(0);
+      return present(read.rows[real.keptRows + index], name).data;
+    };
 
+    // An unknown price reads as null: a blank cell, and a text that does not read. A base
+    // price falls back to its known partner and is null only when both are unknown.
+    expect(pricesOf(derivedRow('a blank current price'))).toEqual([
+      null,
+      '448.87',
+      '377.66',
+      '448.87',
+    ]);
+    expect(pricesOf(derivedRow('a blank Plus price upper limit'))).toEqual([
+      '472.5',
+      '448.87',
+      null,
+      '448.87',
+    ]);
+    expect(pricesOf(derivedRow('a blank commission base price and current price'))).toEqual([
+      null,
+      null,
+      '377.66',
+      '448.87',
+    ]);
+    expect(
+      pricesOf(derivedRow('a blank Plus commission base price and Plus price upper limit')),
+    ).toEqual(['472.5', '448.87', null, null]);
+    expect(pricesOf(derivedRow('lira-suffixed prices and offer'))).toEqual([
+      null,
+      null,
+      null,
+      '448.87',
+    ]);
     expect(digest(read)).toEqual(derived);
     // Every derived case lands on the side its `kept` flag names.
     expect(read.rows.length).toBe(real.keptRows + keptCases);

@@ -13,7 +13,9 @@ import { useEstimateItemPrice } from '../hooks/use-estimate-item-price';
 import { useReasonEmptyLabel } from '../hooks/use-reason-label';
 import { asBandKey } from '../lib/band-key';
 import type { CustomChoice } from '../lib/bulk-actions';
+import { isPositiveAtCents } from '../lib/positive-at-cents';
 import { useTariffScope } from '../lib/tariff-scope';
+import { MAX_WHAT_IF_PRICE } from '../lib/what-if-price';
 import type { CommissionTariffRow } from '../types';
 import { CommissionTariffBreakdown } from './commission-tariff-breakdown';
 import { TariffBestRibbon } from './tariff-best-ribbon';
@@ -22,10 +24,6 @@ import { TariffProfitBlock } from './tariff-profit-block';
 import { TariffSelectFoot } from './tariff-select-foot';
 
 const DEBOUNCE_MS = 400;
-// What-if ceiling ≈10M TL — far above any real Trendyol price. Decimal-aware
-// (a separator-free ten-digit entry would otherwise reach ~10 billion and
-// stretch the profit badge past the cell).
-const MAX_WHAT_IF_PRICE = new Decimal('9999999.99');
 
 export interface CustomPriceCellProps {
   row: CommissionTariffRow;
@@ -102,15 +100,6 @@ export interface CustomPriceCellProps {
  * money math — the engine computes the authoritative value
  * (feedback_no_frontend_financial_calculation).
  */
-/**
- * True when the price is still above 0 once rounded to the two decimals it is sent with
- * (`toFixed(2)`). A typed `0,004` is above 0 but goes out as `0.00`, which is no price:
- * the selection route refuses it (422 INVALID_CUSTOM_PRICE).
- */
-function isPositiveAtCents(price: Decimal): boolean {
-  return new Decimal(price.toFixed(2)).greaterThan(0);
-}
-
 export function CustomPriceCell({
   row,
   isSelected,

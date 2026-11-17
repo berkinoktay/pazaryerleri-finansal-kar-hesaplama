@@ -18,11 +18,11 @@ export interface WorkbookImportResult {
   /** Rows that arrived with a choice already filled in (`prefilledRows` of the response). */
   readonly prefilledRows: number;
   /**
-   * Product rows with neither a current price nor a commission base price
-   * (`unknownCurrentPriceRows` of the response). Only the commission tariff endpoint fills it;
-   * every other page leaves it out.
+   * Product rows the seller will see with an unknown price, as the page's response counts
+   * them. Only the two tariff endpoints (commission and Plus) fill it; every other page
+   * leaves it out.
    */
-  readonly unknownCurrentPriceRows?: number;
+  readonly unknownPriceRows?: number;
 }
 
 /** The outcome of one import request, before any error is thrown. */
@@ -105,7 +105,7 @@ export const WORKBOOK_ENDPOINTS: Readonly<Record<WorkbookPage, WorkbookEndpoint>
           : {
               id: data.tariffId,
               prefilledRows: data.prefilledRows,
-              unknownCurrentPriceRows: data.unknownCurrentPriceRows,
+              unknownPriceRows: data.unknownCurrentPriceRows,
             };
       return { result, error, response };
     },
@@ -128,7 +128,13 @@ export const WORKBOOK_ENDPOINTS: Readonly<Record<WorkbookPage, WorkbookEndpoint>
         },
       );
       const result =
-        data === undefined ? undefined : { id: data.tariffId, prefilledRows: data.prefilledRows };
+        data === undefined
+          ? undefined
+          : {
+              id: data.tariffId,
+              prefilledRows: data.prefilledRows,
+              unknownPriceRows: data.unknownPriceRows,
+            };
       return { result, error, response };
     },
     async exportFile(orgId, storeId, id) {

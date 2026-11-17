@@ -18,7 +18,11 @@ function emptyState(): PlusSelectionState {
 }
 
 /** The row's single Plus offer (`bands.length === 1`). */
-function offer(netProfit: string | null, marginPct: string | null, price = '500'): PlusBand {
+function offer(
+  netProfit: string | null,
+  marginPct: string | null,
+  price: string | null = '500',
+): PlusBand {
   return { key: 'plus', price, commissionPct: '13', netProfit, marginPct };
 }
 
@@ -69,6 +73,77 @@ describe('plus bulk-actions', () => {
     const next = selectBestForAll([winner], state);
     expect(next.selection.r1).toBe('plus');
     expect(next.customPrices.r1).toBeNull();
+  });
+
+  it('selectBestForAll joins a profitable offer when the current profit is unknown', () => {
+    const unknownCurrent = row('r6', {
+      currentNetProfit: null,
+      currentMarginPct: null,
+      plusIsBetter: false,
+      bands: [offer('12', '8')],
+    });
+    const state: PlusSelectionState = {
+      selection: {},
+      customPrices: { r6: { price: '450', netProfit: '30', marginPct: '20' } },
+    };
+    const next = selectBestForAll([unknownCurrent], state);
+    expect(next.selection.r6).toBe('plus');
+    expect(next.customPrices.r6).toBeNull();
+  });
+
+  it('selectBestForAll leaves a row untouched when the current profit is unknown and the offer loses', () => {
+    const losing = row('r7', {
+      currentNetProfit: null,
+      currentMarginPct: null,
+      bands: [offer('-4', '-2')],
+    });
+    const breakEven = row('r8', {
+      currentNetProfit: null,
+      currentMarginPct: null,
+      bands: [offer('0', '0')],
+    });
+    const state: PlusSelectionState = {
+      selection: { r7: 'plus' },
+      customPrices: { r8: { price: '450', netProfit: '30', marginPct: '20' } },
+    };
+    const next = selectBestForAll([losing, breakEven], state);
+    // Neither row is overwritten: the existing join and custom price survive as they were.
+    expect(next.selection).toEqual({ r7: 'plus' });
+    expect(next.customPrices).toEqual({
+      r8: { price: '450', netProfit: '30', marginPct: '20' },
+    });
+  });
+
+  it('selectBestForAll never joins an offer with no price', () => {
+    // plusIsBetter is forced true so only the price guard keeps the row out.
+    const noPrice = row('r9', { plusIsBetter: true, bands: [offer('30', '20', null)] });
+    const noPriceUnknownCurrent = row('r10', {
+      currentNetProfit: null,
+      currentMarginPct: null,
+      bands: [offer('30', '20', null)],
+    });
+    const state: PlusSelectionState = {
+      selection: {},
+      customPrices: { r9: { price: '450', netProfit: '30', marginPct: '20' } },
+    };
+    const next = selectBestForAll([noPrice, noPriceUnknownCurrent], state);
+    expect(next.selection.r9).toBeUndefined();
+    expect(next.selection.r10).toBeUndefined();
+    // Untouched, so the custom-priced join on r9 survives.
+    expect(next.customPrices.r9).toEqual({ price: '450', netProfit: '30', marginPct: '20' });
+    expect(next.customPrices.r10).toBeUndefined();
+  });
+
+  it('joinProfitable never joins an offer with no price', () => {
+    // plusIsBetter is forced true so only the price guard keeps the row out.
+    const noPrice = row('r11', { plusIsBetter: true, bands: [offer('30', '20', null)] });
+    const state: PlusSelectionState = {
+      selection: {},
+      customPrices: { r11: { price: '450', netProfit: '30', marginPct: '20' } },
+    };
+    const next = joinProfitable([noPrice], state);
+    expect(next.selection.r11).toBeUndefined();
+    expect(next.customPrices.r11).toEqual({ price: '450', netProfit: '30', marginPct: '20' });
   });
 
   it('joinProfitable joins only the winning rows, leaving the rest untouched', () => {

@@ -11,6 +11,8 @@ import { EM_DASH, formatPercentDisplay } from '@/lib/format-percent';
 import { type MarginScale } from '@/lib/margin-coloring';
 import { cn } from '@/lib/utils';
 
+import { TariffUnknownPrice } from './tariff-unknown-price';
+
 export interface TariffCurrentCellProps {
   /**
    * The hero price — the amount the buyer currently sees. Printed via `formatCurrency`.
@@ -122,14 +124,7 @@ export function TariffCurrentCell({
         ) : (
           // Unknown price: a muted label, never a made-up amount, and the caller's
           // explanation (if any) as its own line under it.
-          <>
-            <span className="text-muted-foreground text-base font-semibold">
-              {unknownPriceLabel ?? EM_DASH}
-            </span>
-            {unknownPriceHint != null ? (
-              <span className="text-2xs text-muted-foreground">{unknownPriceHint}</span>
-            ) : null}
-          </>
+          <TariffUnknownPrice label={unknownPriceLabel ?? EM_DASH} hint={unknownPriceHint} />
         )}
         {commissionPct !== null ? (
           <span className="text-2xs text-muted-foreground tabular-nums">

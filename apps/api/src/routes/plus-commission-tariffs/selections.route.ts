@@ -23,8 +23,12 @@ const updatePlusSelectionsRoute = createRoute({
   description:
     "Persists the seller's Plus opt-in (selected true/false) and optional custom price per item, in " +
     'a single bulk update. Items not belonging to this tariff/store are ignored. Selection happens ' +
-    'client-side over the backend-computed margins; this only records the result. Returns how many ' +
-    'items were updated.',
+    'client-side over the backend-computed margins; this only records the result. A join without a ' +
+    'custom price (`selected: true`, `customPrice: null`) on an item whose Plus price upper limit ' +
+    'is unknown (`PLUS_PRICE_UNKNOWN`) refuses the whole request with 422 on ' +
+    '`selections.<index>.selected`; nothing is written. A `selected: false` entry and an entry with ' +
+    'a custom price are never checked. A custom price of 0 is refused with 422 ' +
+    '`INVALID_CUSTOM_PRICE` on `selections.<index>.customPrice`. Returns how many items were updated.',
   security: [{ bearerAuth: [] }],
   request: {
     params: PlusTariffIdPathSchema,
@@ -53,7 +57,10 @@ const updatePlusSelectionsRoute = createRoute({
     },
     422: {
       content: { 'application/json': { schema: ProblemDetailsSchema } },
-      description: 'Invalid selection payload',
+      description:
+        'Invalid selection payload (a custom price of 0 is INVALID_CUSTOM_PRICE), or a join the ' +
+        'export could not write (PLUS_PRICE_UNKNOWN on selections.<index>.selected); the whole ' +
+        'request is refused and nothing is written',
     },
     429: Common429Response,
   },

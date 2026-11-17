@@ -32,7 +32,10 @@ const estimateRoute = createRoute({
     "that scenario's profit in the detail response. Two modes: pass `price` to price it under the " +
     'item\'s reduced Plus commission (the custom-price what-if), or pass `scenario: "current"` (no ' +
     "price) to price the item's own commission-base price at its current commission - the breakdown " +
-    "then matches the detail row's `currentNetProfit` exactly. Read-only (POST only because it " +
+    "then matches the detail row's `currentNetProfit` exactly. The current scenario uses the " +
+    "item's current price when its commission-base price is unknown; with neither price known it " +
+    'answers 422 (CURRENT_PRICE_UNKNOWN on `scenario`). The price mode needs no stored price, so ' +
+    'it works with an unknown Plus price upper limit too. Read-only (POST only because it ' +
     'carries a body); no state changes. When the item is unmatched or uncostable, calculable is ' +
     'false, reason explains why and breakdown is null. Money fields are GROSS decimal strings.',
   security: [{ bearerAuth: [] }],
@@ -65,8 +68,9 @@ const estimateRoute = createRoute({
       content: { 'application/json': { schema: ProblemDetailsSchema } },
       description:
         'Invalid payload — malformed price (INVALID_CUSTOM_PRICE), a missing price in the ' +
-        'custom-price mode (PRICE_REQUIRED), or price sent with scenario:"current" ' +
-        '(INVALID_ESTIMATE_MODE)',
+        'custom-price mode (PRICE_REQUIRED), price sent with scenario:"current" ' +
+        '(INVALID_ESTIMATE_MODE), or scenario:"current" for an item with neither a ' +
+        'commission-base price nor a current price (CURRENT_PRICE_UNKNOWN on `scenario`)',
     },
     429: Common429Response,
   },

@@ -1,3 +1,4 @@
+import { createTranslator } from 'next-intl';
 import * as React from 'react';
 import { describe, expect, it } from 'vitest';
 
@@ -13,6 +14,14 @@ import { TariffScopeProvider } from '@/features/campaigns/lib/tariff-scope';
 
 import { render, screen, waitFor, within } from '../helpers/render';
 import { HttpResponse, http, server } from '../helpers/msw';
+import trMessages from '../../messages/tr.json';
+
+// Expected strings for the unknown-price test are built from the catalog, never typed.
+const tPlusTable = createTranslator({
+  locale: 'tr',
+  messages: trMessages,
+  namespace: 'plusCommissionTariffsPage.table',
+});
 
 const SCOPE = {
   orgId: '00000000-0000-0000-0000-000000000001',
@@ -522,6 +531,34 @@ describe('PlusTariffsTable — joining the offer is exclusive with a custom pric
     );
     // … and the custom price is no longer selected (its commit button is back).
     expect(screen.getByRole('button', { name: /bu fiyatla katıl/i })).toBeInTheDocument();
+  });
+});
+
+describe('PlusTariffsTable - unknown prices', () => {
+  it('renders a row with unknown prices without crashing', () => {
+    // Neither baseline price nor the Plus price upper limit could be read: the backend
+    // sends null prices and no profit anywhere on the row.
+    const unknownRow: PlusTariffRow = {
+      ...row,
+      currentPrice: null,
+      commissionBasePrice: null,
+      currentNetProfit: null,
+      currentMarginPct: null,
+      plusIsBetter: false,
+      calculable: false,
+      bands: [{ ...offer, price: null, netProfit: null, marginPct: null }],
+    };
+    render(<TableHarness rows={[unknownRow]} />);
+
+    // The unknown label shows twice (the current cell and the offer card), each with
+    // its own caption line.
+    expect(screen.getAllByText(tPlusTable('priceUnknown'))).toHaveLength(2);
+    expect(screen.getByText(tPlusTable('priceUnknownHint'))).toBeInTheDocument();
+    expect(screen.getByText(tPlusTable('plusPriceUnknownHint'))).toBeInTheDocument();
+    // The offer cannot be joined at the ceiling; the custom price card still renders.
+    expect(screen.queryByRole('button', { name: tPlusTable('join') })).toBeNull();
+    expect(screen.getByText(tPlusTable('notSelectable'))).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(tPlusTable('enterPrice'))).toBeInTheDocument();
   });
 });
 

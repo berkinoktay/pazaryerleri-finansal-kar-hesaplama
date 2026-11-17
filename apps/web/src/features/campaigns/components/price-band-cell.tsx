@@ -18,6 +18,7 @@ import { TariffBestRibbon } from './tariff-best-ribbon';
 import { TariffOptionCard } from './tariff-option-card';
 import { TariffProfitBlock } from './tariff-profit-block';
 import { TariffSelectFoot } from './tariff-select-foot';
+import { TariffUnknownPrice } from './tariff-unknown-price';
 
 export interface PriceBandCellProps {
   row: CommissionTariffRow;
@@ -125,10 +126,7 @@ export function PriceBandCell({
         {priceUnknown ? (
           // "Bilinmiyor" and, on its own line under it, why: plain text, so it reads on
           // touch devices too (no hover needed).
-          <>
-            <span className="text-muted-foreground text-base font-semibold">{priceText}</span>
-            <span className="text-2xs text-muted-foreground">{t('bandPriceUnknownHint')}</span>
-          </>
+          <TariffUnknownPrice label={priceText} hint={t('bandPriceUnknownHint')} />
         ) : (
           <span className="gap-x-2xs flex min-w-0 flex-wrap items-baseline">
             <span className="text-base font-bold tabular-nums">{priceText}</span>

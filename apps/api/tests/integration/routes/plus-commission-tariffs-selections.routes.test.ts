@@ -4,8 +4,12 @@
 // interesting properties are: (1) the boolean Plus opt-in + custom price round-trip
 // to the detail and the list's selectedCount, (2) an itemId from another tariff (or
 // another tariff's period) is silently skipped (updated: 0), (3) clearing sets
-// the fields back, and (4) one request saves every item of the largest tariff a week
-// can hold (MAX_TARIFF_ITEMS), while one item more is refused with 422 on `selections`.
+// the fields back, (4) a join the export could not write -- selected without a custom
+// price on an item whose Plus price upper limit is unknown -- refuses the whole request
+// with 422 PLUS_PRICE_UNKNOWN on `selections.<index>.selected` and writes nothing, and a
+// custom price of 0 is refused, and (5) one request saves every item of the largest
+// tariff a week can hold (MAX_TARIFF_ITEMS), while one item more is refused with 422 on
+// `selections`.
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -31,17 +35,22 @@ interface Seeded {
   orgId: string;
   storeId: string;
   tariffId: string;
+  periodId: string;
   item1: string;
   item2: string;
 }
 
-/** Creates a Plus tariff + one period holding `barcodes.length` items. */
+/**
+ * Creates a Plus tariff + one period holding `barcodes.length` items. Every item has
+ * the given Plus price upper limit; null is an item whose ceiling is unknown.
+ */
 async function seedTariff(
   orgId: string,
   storeId: string,
   name: string,
   barcodes: ReadonlyArray<string>,
-): Promise<{ tariffId: string; itemIds: string[] }> {
+  plusPriceUpperLimit: string | null = '90.00',
+): Promise<{ tariffId: string; periodId: string; itemIds: string[] }> {
   const tariff = await prisma.plusCommissionTariff.create({
     data: { organizationId: orgId, storeId, name },
   });
@@ -67,15 +76,15 @@ async function seedTariff(
         currentPrice: '100.00',
         commissionBasePrice: '100.00',
         currentCommissionPct: '19',
-        plusPriceUpperLimit: '90.00',
+        plusPriceUpperLimit,
         plusCommissionPct: '15.4',
-        plusCommissionBasePrice: '90.00',
+        plusCommissionBasePrice: plusPriceUpperLimit,
         sortOrder: sort++,
       },
     });
     itemIds.push(item.id);
   }
-  return { tariffId: tariff.id, itemIds };
+  return { tariffId: tariff.id, periodId: period.id, itemIds };
 }
 
 async function seedTariffWithItems(): Promise<Seeded> {
@@ -86,7 +95,7 @@ async function seedTariffWithItems(): Promise<Seeded> {
   // getPlusTariffDetail resolves fee definitions; restore them after truncateAll.
   await ensureFeeDefinitions();
 
-  const { tariffId, itemIds } = await seedTariff(org.id, store.id, 'Plus Secim Testi', [
+  const { tariffId, periodId, itemIds } = await seedTariff(org.id, store.id, 'Plus Secim Testi', [
     'BC-1',
     'BC-2',
   ]);
@@ -96,10 +105,48 @@ async function seedTariffWithItems(): Promise<Seeded> {
     orgId: org.id,
     storeId: store.id,
     tariffId,
+    periodId,
     item1: itemIds[0] ?? '',
     item2: itemIds[1] ?? '',
   };
 }
+
+/** Adds an item whose Plus price upper limit is unknown (NULL) to the seeded period. */
+async function createUnknownCeilingItem(s: Seeded, barcode: string): Promise<string> {
+  const item = await prisma.plusCommissionTariffItem.create({
+    data: {
+      organizationId: s.orgId,
+      storeId: s.storeId,
+      periodId: s.periodId,
+      barcode,
+      productTitle: 'Unknown ceiling product',
+      currentPrice: '100.00',
+      commissionBasePrice: '100.00',
+      currentCommissionPct: '19',
+      plusPriceUpperLimit: null,
+      plusCommissionPct: '15.4',
+      plusCommissionBasePrice: null,
+      sortOrder: 0,
+    },
+  });
+  return item.id;
+}
+
+async function readSelection(
+  itemId: string,
+): Promise<{ plusSelected: boolean; customPrice: string | null }> {
+  const row = await prisma.plusCommissionTariffItem.findUniqueOrThrow({
+    where: { id: itemId },
+    select: { plusSelected: true, customPrice: true },
+  });
+  return {
+    plusSelected: row.plusSelected,
+    // The stored Decimal as its 2-dp text, so the assertions read like the request.
+    customPrice: row.customPrice === null ? null : row.customPrice.toFixed(2),
+  };
+}
+
+const NO_SELECTION = { plusSelected: false, customPrice: null };
 
 async function patchSelections(s: Seeded, body: unknown): Promise<Response> {
   return app.request(
@@ -202,6 +249,157 @@ describe('PATCH .../plus-commission-tariffs/{id}/selections', () => {
       selections: [{ itemId: s.item1, selected: true, customPrice: 'not-a-price' }],
     });
     expect(res.status).toBe(422);
+  });
+
+  it('rejects a custom price of 0 (422 INVALID_CUSTOM_PRICE)', async () => {
+    const s = await seedTariffWithItems();
+    // The bypass the rule closes: a join on an unknown ceiling, "rescued" by a custom
+    // price of 0, would export 0.00.
+    const unknownItem = await createUnknownCeilingItem(s, 'BC-UNKNOWN');
+
+    for (const customPrice of ['0', '0.0', '0.00', '000']) {
+      const res = await patchSelections(s, {
+        selections: [{ itemId: unknownItem, selected: true, customPrice }],
+      });
+
+      expect(res.status).toBe(422);
+      expect(await res.json()).toMatchObject({
+        code: 'VALIDATION_ERROR',
+        errors: [{ field: 'selections.0.customPrice', code: 'INVALID_CUSTOM_PRICE' }],
+      });
+      expect(await readSelection(unknownItem)).toEqual(NO_SELECTION);
+    }
+
+    // Control: the smallest real price is still accepted.
+    const accepted = await patchSelections(s, {
+      selections: [{ itemId: unknownItem, selected: true, customPrice: '0.01' }],
+    });
+    expect(accepted.status).toBe(200);
+    expect(await readSelection(unknownItem)).toEqual({ plusSelected: true, customPrice: '0.01' });
+  });
+
+  it('refuses a join without a custom price when the Plus price ceiling is unknown (422 PLUS_PRICE_UNKNOWN on selections.0.selected) and writes nothing', async () => {
+    const s = await seedTariffWithItems();
+    const unknownItem = await createUnknownCeilingItem(s, 'BC-UNKNOWN');
+
+    const res = await patchSelections(s, {
+      selections: [{ itemId: unknownItem, selected: true, customPrice: null }],
+    });
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      code: 'VALIDATION_ERROR',
+      errors: [{ field: 'selections.0.selected', code: 'PLUS_PRICE_UNKNOWN' }],
+    });
+    expect(await readSelection(unknownItem)).toEqual(NO_SELECTION);
+  });
+
+  it('accepts a join with a custom price when the Plus price ceiling is unknown', async () => {
+    const s = await seedTariffWithItems();
+    const unknownItem = await createUnknownCeilingItem(s, 'BC-UNKNOWN');
+
+    const res = await patchSelections(s, {
+      selections: [{ itemId: unknownItem, selected: true, customPrice: '120.50' }],
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ updated: 1 });
+    expect(await readSelection(unknownItem)).toEqual({ plusSelected: true, customPrice: '120.50' });
+  });
+
+  it('refuses the whole request when one of several selections is invalid, and reports each by its request index', async () => {
+    const s = await seedTariffWithItems();
+    const unknownJoin = await createUnknownCeilingItem(s, 'BC-UNKNOWN-1');
+    const unknownCleared = await createUnknownCeilingItem(s, 'BC-UNKNOWN-2');
+    const unknownCustom = await createUnknownCeilingItem(s, 'BC-UNKNOWN-3');
+    const unknownJoinLast = await createUnknownCeilingItem(s, 'BC-UNKNOWN-4');
+    // A join left by an older save: the clearing entry at index 2 must not be written.
+    await prisma.plusCommissionTariffItem.update({
+      where: { id: unknownCleared },
+      data: { plusSelected: true, customPrice: '50.00' },
+    });
+
+    // Indexes 0, 2 and 3 are valid on their own (a known ceiling, a clear, a custom
+    // price); indexes 1 and 4 are each refused, and both are reported.
+    const res = await patchSelections(s, {
+      selections: [
+        { itemId: s.item1, selected: true, customPrice: null },
+        { itemId: unknownJoin, selected: true, customPrice: null },
+        { itemId: unknownCleared, selected: false, customPrice: null },
+        { itemId: unknownCustom, selected: true, customPrice: '120.50' },
+        { itemId: unknownJoinLast, selected: true, customPrice: null },
+      ],
+    });
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      code: 'VALIDATION_ERROR',
+      errors: [
+        { field: 'selections.1.selected', code: 'PLUS_PRICE_UNKNOWN' },
+        { field: 'selections.4.selected', code: 'PLUS_PRICE_UNKNOWN' },
+      ],
+    });
+    expect(await readSelection(s.item1)).toEqual(NO_SELECTION);
+    expect(await readSelection(unknownJoin)).toEqual(NO_SELECTION);
+    expect(await readSelection(unknownCleared)).toEqual({
+      plusSelected: true,
+      customPrice: '50.00',
+    });
+    expect(await readSelection(unknownCustom)).toEqual(NO_SELECTION);
+    expect(await readSelection(unknownJoinLast)).toEqual(NO_SELECTION);
+  });
+
+  it('checks an item id sent in upper case', async () => {
+    const s = await seedTariffWithItems();
+    const unknownItem = await createUnknownCeilingItem(s, 'BC-UNKNOWN');
+    // Postgres matches a uuid whatever its letter case, so the UPDATE would write this
+    // row: the check must not skip it as out of scope.
+    const res = await patchSelections(s, {
+      selections: [{ itemId: unknownItem.toUpperCase(), selected: true, customPrice: null }],
+    });
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      code: 'VALIDATION_ERROR',
+      errors: [{ field: 'selections.0.selected', code: 'PLUS_PRICE_UNKNOWN' }],
+    });
+    expect(await readSelection(unknownItem)).toEqual(NO_SELECTION);
+  });
+
+  it('still clears a join on an item whose ceiling is unknown', async () => {
+    const s = await seedTariffWithItems();
+    const unknownItem = await createUnknownCeilingItem(s, 'BC-UNKNOWN');
+    // A join the route would refuse today, left by an older save: clearing it must still
+    // work, since a `selected: false` entry is never checked.
+    await prisma.plusCommissionTariffItem.update({
+      where: { id: unknownItem },
+      data: { plusSelected: true },
+    });
+
+    const res = await patchSelections(s, {
+      selections: [{ itemId: unknownItem, selected: false, customPrice: null }],
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ updated: 1 });
+    expect(await readSelection(unknownItem)).toEqual(NO_SELECTION);
+  });
+
+  it('still ignores an item id from another tariff', async () => {
+    const s = await seedTariffWithItems();
+    // An item of a second tariff in the same store whose ceiling is unknown: on an own
+    // item this join would be refused, so the route must not check (or reveal) it. It
+    // answers 200 and writes nothing.
+    const other = await seedTariff(s.orgId, s.storeId, 'Other Plus tariff', ['BC-OTHER'], null);
+    const otherItem = other.itemIds[0] ?? '';
+
+    const res = await patchSelections(s, {
+      selections: [{ itemId: otherItem, selected: true, customPrice: null }],
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ updated: 0 });
+    expect(await readSelection(otherItem)).toEqual(NO_SELECTION);
   });
 
   // The largest tariff: MAX_TARIFF_PERIODS periods of DEFAULT_ROW_CAP items each. The

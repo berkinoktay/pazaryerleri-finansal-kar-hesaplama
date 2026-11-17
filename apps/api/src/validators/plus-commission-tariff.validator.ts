@@ -13,6 +13,7 @@ import { z } from '@hono/zod-openapi';
 
 import { NameSchema } from '../workbooks/form';
 import { MAX_TARIFF_ITEMS } from '../workbooks/tariff-week';
+import { SelectionCustomPriceSchema } from './custom-price';
 import { QuoteBreakdownSchema } from './product-pricing.validator';
 
 // ─── Shared enums ───────────────────────────────────────────────────────────
@@ -27,8 +28,9 @@ export const PlusTariffItemReasonSchema = z
   .enum(['NO_PRODUCT', 'NO_COST', 'NO_SHIPPING'])
   .openapi('PlusTariffItemReason', {
     description:
-      'Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok. reason null + ' +
-      'calculable false ise kâr bu kalem için hesaplanamadı (sunucuda loglandı); satır yine de döner.',
+      'Why the profit could not be computed: no matching product / no cost / no shipping. ' +
+      'calculable false with reason null means the profit could not be computed for this item ' +
+      '(the failure was logged on the server, or the row has no known price); the row is still returned.',
   });
 
 // ─── Path params ────────────────────────────────────────────────────────────
@@ -87,8 +89,15 @@ export const PlusTariffListResponseSchema = z
 // a given commission percent. Nulls when the item is not calculable.
 export const PlusScenarioSchema = z
   .object({
-    /** Gross sale price (TRY) this scenario is computed at. */
-    price: z.string(),
+    /** Gross sale price (TRY) this scenario is computed at; null when unknown. */
+    price: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Gross sale price (TRY) this scenario is computed at. Null when the Plus price upper ' +
+          'limit is unknown; the scenario then has no profit.',
+      }),
     /** Commission PERCENT as stored (e.g. "19", "15.4"). */
     commissionPct: z.string(),
     netProfit: z.string().nullable(),
@@ -109,24 +118,39 @@ export const PlusTariffDetailItemSchema = z
     category: z.string().nullable(),
     brand: z.string().nullable(),
     /** Güncel TSF (the seller's current sale price). */
-    currentPrice: z.string(),
-    /** Komisyona Esas Fiyat — the customer-seen price the current scenario is priced on. */
-    commissionBasePrice: z.string().openapi({
+    currentPrice: z.string().nullable().openapi({
       description:
-        'Komisyona esas fiyat (müşterinin gördüğü fiyat) — güncel kâr bu fiyattan hesaplanır.',
+        "The seller's current sale price. Null when the file's cell was blank, unreadable or 0.",
     }),
+    /** Komisyona Esas Fiyat — the customer-seen price the current scenario is priced on. */
+    commissionBasePrice: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'The commission base price (the price the customer sees); the current profit is ' +
+          "computed from it. Null when the file's cell was blank, unreadable or 0.",
+      }),
     currentCommissionPct: z.string(),
     currentNetProfit: z
       .string()
       .nullable()
       .openapi({
         description:
-          'Komisyona esas fiyat + güncel komisyonla net kâr; senaryo motoru bu fiyatı güncel ' +
-          'komisyon oranıyla değerlendirir ve mağazanın kâr ayarları uygulanır; hesaplanamıyorsa null.',
+          'Net profit under the current commission, computed at commissionBasePrice, else at ' +
+          "currentPrice; the scenario engine applies the store's profit settings. Null when " +
+          'neither price is known or the profit cannot be computed.',
       }),
     currentMarginPct: z.string().nullable(),
     /** Plus Fiyat Üst Limiti — the ceiling price to qualify for the Plus commission. */
-    plusPriceUpperLimit: z.string(),
+    plusPriceUpperLimit: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'The Plus price upper limit, the ceiling price to qualify for the Plus commission. ' +
+          "Null when the file's cell was blank, unreadable or 0.",
+      }),
     /** Plus price (custom, else the ceiling) @ reduced Plus commission (the offer). */
     plus: PlusScenarioSchema,
     /** True when the Plus scenario nets more profit than the current one. */
@@ -180,6 +204,16 @@ export const ImportPlusTariffResponseSchema = z
     unmatched: z.number().int(),
     skippedRows: z.number().int(),
     prefilledRows: z.number().int(),
+    unknownPriceRows: z
+      .number()
+      .int()
+      .openapi({
+        description:
+          'The product rows with no baseline price (neither a commission base price nor a ' +
+          'current price) or no Plus price upper limit (the cell was blank, unreadable or 0). ' +
+          'Their unknown prices show as unknown and are never computed from. Each product row ' +
+          'counts once, whatever the number of periods.',
+      }),
   })
   .openapi('ImportPlusTariffResponse');
 
@@ -191,10 +225,7 @@ export const PlusTariffSelectionSchema = z.object({
   itemId: z.string().uuid(),
   /** Join this product to Plus (true) or leave it out (false). */
   selected: z.boolean(),
-  customPrice: z
-    .string()
-    .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_CUSTOM_PRICE')
-    .nullable(),
+  customPrice: SelectionCustomPriceSchema.nullable(),
 });
 
 export const UpdatePlusSelectionsBodySchema = z
@@ -216,8 +247,10 @@ export type PlusTariffSelection = z.infer<typeof PlusTariffSelectionSchema>;
 //   1. Custom-price what-if — pass a `price`; the item's reduced Plus commission
 //      is applied at it.
 //   2. Current scenario (`scenario: 'current'`) — pass neither price; the item's
-//      own commission-base price + current commission are used, so the breakdown
-//      matches the detail row's `currentNetProfit` badge byte-for-byte.
+//      own commission-base price (or its current price when the commission-base
+//      price is unknown) + current commission are used, so the breakdown matches
+//      the detail row's `currentNetProfit` badge byte-for-byte. When neither price
+//      is known the service answers 422 on `scenario` (CURRENT_PRICE_UNKNOWN).
 // The full profit breakdown is the SAME shape the Ürün Fiyatlandırma quote returns.
 
 export const EstimatePlusPriceBodySchema = z
@@ -232,8 +265,10 @@ export const EstimatePlusPriceBodySchema = z
       .optional()
       .openapi({
         description:
-          'Güncel senaryonun dökümü — item’ın komisyona esas fiyatı + güncel komisyonuyla ' +
-          'hesaplanır; price verilmez.',
+          "Breakdown of the current scenario: priced at the item's commission base price, else " +
+          'at its current price, under its current commission; send no price. When neither ' +
+          "price is known (the file's cells were blank, unreadable or 0) there is nothing to " +
+          'price: 422 on `scenario` with code CURRENT_PRICE_UNKNOWN.',
       }),
   })
   .superRefine((val, ctx) => {

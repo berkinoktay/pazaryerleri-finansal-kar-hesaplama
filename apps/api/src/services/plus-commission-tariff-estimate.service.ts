@@ -5,31 +5,38 @@
 // view uses (cost, shipping, fee + commission reference) but for ONE variant, then runs
 // the profit engine via `computePlusEstimate`. No financial math lives here -- the engine
 // is reused, so an estimate at the Plus ceiling matches the detail's `plus.netProfit` and
-// the current-scenario breakdown matches the row's `currentNetProfit`.
+// the current-scenario breakdown matches the row's `currentNetProfit` (same price =
+// commission-base price ?? current price, same current commission).
 //
 // Scoped by organizationId + storeId + tariff (via the item's period). A cross-tenant or
 // foreign item id is indistinguishable from a missing one (404). A pathological engine
-// input degrades to a logged not-calculable result rather than a 500 (decision 9).
+// input degrades to a logged not-calculable result rather than a 500 (decision 9). The
+// current scenario of an item with no known baseline price (neither a commission-base
+// price nor a current price) has nothing to price: it answers 422 on `scenario`
+// (CURRENT_PRICE_UNKNOWN) instead of pricing a made-up 0. The price mode needs no stored
+// price, so it works with an unknown Plus price upper limit too.
 
 import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
-import { NotFoundError } from '../lib/errors';
+import { NotFoundError, ValidationError } from '../lib/errors';
 import {
   computePlusEstimate,
   type ComputedPlusEstimate,
 } from './plus-commission-tariff-compute.service';
 import { logProfitReadFailure } from './profit-compute-fallback.service';
 import { loadScreenScenarioBases, screenScenarioBaseFor } from './scenario-screen-commons';
+import { currentBaselinePrice } from './tariff-compute-commons';
 import type { EstimatePlusPriceResult } from '../validators/plus-commission-tariff.validator';
 
 /**
  * Which scenario to price:
  *   - `price`   — an explicit price under the item's reduced Plus commission.
  *   - `current` — the item's own commission-base price at its current commission —
- *                 the "do nothing" baseline the detail shows.
+ *                 the "do nothing" baseline the detail shows. Its current sale price
+ *                 stands in when the commission-base price is unknown.
  */
 export type EstimatePlusPriceInput =
   | { readonly mode: 'price'; readonly price: Decimal }
@@ -39,7 +46,9 @@ export type EstimatePlusPriceInput =
  * Computes the full profit breakdown for one Plus item under `input`. Throws
  * `NotFoundError` when the item does not belong to this tariff/store. When the item
  * is unmatched or uncostable the result carries `calculable: false` + a `reason`
- * and a null breakdown.
+ * and a null breakdown. Throws `ValidationError` (`scenario`, CURRENT_PRICE_UNKNOWN)
+ * for the current scenario of an item whose baseline price is unknown
+ * (`currentBaselinePrice` is null).
  */
 export async function estimatePlusItemPrice(
   orgId: string,
@@ -57,6 +66,7 @@ export async function estimatePlusItemPrice(
       select: {
         id: true,
         productVariantId: true,
+        currentPrice: true,
         commissionBasePrice: true,
         currentCommissionPct: true,
         plusCommissionPct: true,
@@ -71,10 +81,15 @@ export async function estimatePlusItemPrice(
   }
 
   // Resolve the price + commission per mode. The 'current' scenario mirrors the
-  // detail row's baseline EXACTLY: the commission-base price (customer-seen price)
-  // at the item's CURRENT commission — so the breakdown equals `currentNetProfit`.
-  const price =
-    input.mode === 'current' ? new Decimal(item.commissionBasePrice.toString()) : input.price;
+  // detail row's baseline EXACTLY: the commission-base price (customer-seen price,
+  // or the current sale price when it is unknown) at the item's CURRENT commission,
+  // so the breakdown equals `currentNetProfit`. With no baseline price the detail
+  // row has no current profit either, so there is nothing to break down: refuse
+  // before loading the scenario bases.
+  const price = input.mode === 'current' ? currentBaselinePrice(item) : input.price;
+  if (price === null) {
+    throw new ValidationError([{ field: 'scenario', code: 'CURRENT_PRICE_UNKNOWN' }]);
+  }
   const applyCommissionPct =
     input.mode === 'current'
       ? new Decimal(item.currentCommissionPct.toString())
