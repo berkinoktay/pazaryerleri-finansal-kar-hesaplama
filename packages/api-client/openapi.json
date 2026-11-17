@@ -4761,7 +4761,7 @@
               ]
             },
             "minItems": 1,
-            "maxItems": 5000
+            "maxItems": 15000
           }
         },
         "required": [
@@ -5254,7 +5254,7 @@
               ]
             },
             "minItems": 1,
-            "maxItems": 5000
+            "maxItems": 15000
           }
         },
         "required": [

@@ -26,6 +26,12 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Commission and Plus tariff selections take every item of a tariff**
+  (`PATCH /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/selections`,
+  `PATCH /v1/organizations/{orgId}/stores/{storeId}/plus-commission-tariffs/{tariffId}/selections`).
+  `selections` now holds up to 15000 entries instead of 5000. A tariff stores one item per file row
+  in each period of its week, and a week holds at most three periods, so a split week of more than
+  2500 products could not be saved. Not breaking: every request that passed before still passes.
 - **Commission tariff detail: the current price and a band price can be null**
   (`GET /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}`).
   `TariffDetailItem.currentPrice` is null when the file's current price (GÜNCEL TSF) was blank,

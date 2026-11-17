@@ -5,6 +5,7 @@ import { TARIFF_WEEK_DAYS } from '@pazarsync/utils';
 
 import {
   findOverlappingWeek,
+  MAX_TARIFF_PERIODS,
   parseTariffPeriodLabel,
   requireTariffPeriods,
   requireWritableWindows,
@@ -443,6 +444,30 @@ describe('requireTariffPeriods', () => {
         weekEndsAt: new Date('2026-07-07T07:59:00.000Z'),
       }),
     ).not.toThrow();
+  });
+
+  it('passes MAX_TARIFF_PERIODS periods and refuses every week of one period more', () => {
+    /** Every list of `length` day counts, each from 1 to TARIFF_WEEK_DAYS. */
+    function everyWeek(length: number): number[][] {
+      if (length === 0) return [[]];
+      const days = Array.from({ length: TARIFF_WEEK_DAYS }, (_, index) => index + 1);
+      return everyWeek(length - 1).flatMap((week) => days.map((day) => [...week, day]));
+    }
+    const fits = (dayCounts: readonly number[]): boolean => {
+      try {
+        requireTariffPeriods(weekOf(dayCounts));
+        return true;
+      } catch (err) {
+        if (err instanceof SpreadsheetFileError) return false;
+        throw err;
+      }
+    };
+
+    expect(MAX_TARIFF_PERIODS).toBe(3);
+    expect(everyWeek(MAX_TARIFF_PERIODS).some(fits)).toBe(true);
+    // Dropping a period never makes a week invalid, so no week of one period more fitting
+    // means no longer week fits either.
+    expect(everyWeek(MAX_TARIFF_PERIODS + 1).filter(fits)).toEqual([]);
   });
 
   it('refuses dates that span more than a week with MALFORMED_SHEET tariff-week-span', () => {
