@@ -3,14 +3,18 @@
 // Selections are persisted in one bulk update gated on the tariff's PERIODS, so the
 // interesting properties are: (1) the boolean Plus opt-in + custom price round-trip
 // to the detail and the list's selectedCount, (2) an itemId from another tariff (or
-// another tariff's period) is silently skipped (updated: 0), and (3) clearing sets
-// the fields back.
+// another tariff's period) is silently skipped (updated: 0), (3) clearing sets
+// the fields back, and (4) one request saves every item of the largest tariff a week
+// can hold (MAX_TARIFF_ITEMS), while one item more is refused with 422 on `selections`.
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { DEFAULT_ROW_CAP } from '@pazarsync/spreadsheet';
 
 import { createApp } from '@/app';
+import { createManyChunked } from '@/workbooks/import-rows';
+import { MAX_TARIFF_ITEMS, MAX_TARIFF_PERIODS } from '@/workbooks/tariff-week';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -18,6 +22,9 @@ import { createMembership, createOrganization, createStore } from '../../helpers
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
+
+/** Seeding and saving the largest tariff writes tens of thousands of rows. */
+const LARGEST_TARIFF_TIMEOUT_MS = 60_000;
 
 interface Seeded {
   accessToken: string;
@@ -195,5 +202,85 @@ describe('PATCH .../plus-commission-tariffs/{id}/selections', () => {
       selections: [{ itemId: s.item1, selected: true, customPrice: 'not-a-price' }],
     });
     expect(res.status).toBe(422);
+  });
+
+  // The largest tariff: MAX_TARIFF_PERIODS periods of DEFAULT_ROW_CAP items each. The
+  // save binds three values per item in one UPDATE, so this is the case that proves
+  // Postgres takes a full-size save.
+  it(
+    'saves every item of the largest tariff in one request',
+    async () => {
+      const seeded = await seedTariffWithItems();
+      // A tariff of its own in the same store, holding exactly the largest week.
+      const largest = await prisma.plusCommissionTariff.create({
+        data: { organizationId: seeded.orgId, storeId: seeded.storeId, name: 'Largest tariff' },
+      });
+      const s = { ...seeded, tariffId: largest.id };
+      const itemIds: string[] = [];
+      for (let periodIndex = 0; periodIndex < MAX_TARIFF_PERIODS; periodIndex += 1) {
+        const period = await prisma.plusCommissionTariffPeriod.create({
+          data: {
+            organizationId: s.orgId,
+            storeId: s.storeId,
+            tariffId: s.tariffId,
+            dateRangeLabel: `Period ${(periodIndex + 1).toString()}`,
+            sortOrder: periodIndex,
+          },
+        });
+        const items = Array.from({ length: DEFAULT_ROW_CAP }, (_, row) => ({
+          id: crypto.randomUUID(),
+          organizationId: s.orgId,
+          storeId: s.storeId,
+          periodId: period.id,
+          barcode: `BC-${row.toString()}`,
+          productTitle: 'Urun',
+          currentPrice: '100.00',
+          commissionBasePrice: '100.00',
+          currentCommissionPct: '19',
+          plusPriceUpperLimit: '90.00',
+          plusCommissionPct: '15.4',
+          plusCommissionBasePrice: '90.00',
+          sortOrder: row,
+        }));
+        await createManyChunked(items, (chunk) =>
+          prisma.plusCommissionTariffItem.createMany({ data: chunk }),
+        );
+        itemIds.push(...items.map((item) => item.id));
+      }
+      expect(itemIds).toHaveLength(MAX_TARIFF_ITEMS);
+      const stored = await prisma.plusCommissionTariffItem.count({
+        where: { period: { tariffId: s.tariffId } },
+      });
+      expect(stored).toBe(MAX_TARIFF_ITEMS);
+
+      const res = await patchSelections(s, {
+        selections: itemIds.map((itemId) => ({ itemId, selected: true, customPrice: null })),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ updated: MAX_TARIFF_ITEMS });
+      const selected = await prisma.plusCommissionTariffItem.count({
+        where: { period: { tariffId: s.tariffId }, plusSelected: true },
+      });
+      expect(selected).toBe(MAX_TARIFF_ITEMS);
+    },
+    LARGEST_TARIFF_TIMEOUT_MS,
+  );
+
+  it('refuses one selection more than the largest tariff holds with 422 on selections', async () => {
+    const s = await seedTariffWithItems();
+
+    const res = await patchSelections(s, {
+      selections: Array.from({ length: MAX_TARIFF_ITEMS + 1 }, () => ({
+        itemId: crypto.randomUUID(),
+        selected: false,
+        customPrice: null,
+      })),
+    });
+
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { code: string; errors: { field: string }[] };
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors.map((issue) => issue.field)).toEqual(['selections']);
   });
 });

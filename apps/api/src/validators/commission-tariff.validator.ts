@@ -7,6 +7,7 @@
 import { z } from '@hono/zod-openapi';
 
 import { NameSchema } from '../workbooks/form';
+import { MAX_TARIFF_ITEMS } from '../workbooks/tariff-week';
 import { QuoteBreakdownSchema } from './product-pricing.validator';
 
 // ─── Shared enums ───────────────────────────────────────────────────────────
@@ -214,7 +215,7 @@ export const TariffSelectionSchema = z.object({
 
 export const UpdateSelectionsBodySchema = z
   .object({
-    selections: z.array(TariffSelectionSchema).min(1).max(5000),
+    selections: z.array(TariffSelectionSchema).min(1).max(MAX_TARIFF_ITEMS),
   })
   .openapi('UpdateSelectionsBody');
 

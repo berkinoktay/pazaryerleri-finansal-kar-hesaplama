@@ -12,7 +12,7 @@
 // write (requireWritableWindows), and the query for a tariff of the same store whose
 // week overlaps it (findOverlappingWeek).
 
-import { SpreadsheetFileError } from '@pazarsync/spreadsheet';
+import { DEFAULT_ROW_CAP, SpreadsheetFileError } from '@pazarsync/spreadsheet';
 import { mapPrismaError } from '@pazarsync/sync-core';
 import {
   getBusinessDateAnchor,
@@ -286,6 +286,35 @@ export const TARIFF_WEEK_SPAN_REASON = 'tariff-week-span';
 
 /** A period block covers at least one day. */
 const MIN_PERIOD_DAYS = 1;
+
+/**
+ * The most periods `requireTariffPeriods` lets one week hold. Their day counts are
+ * distinct and at least MIN_PERIOD_DAYS each, so N periods take at least
+ * MIN_PERIOD_DAYS + (MIN_PERIOD_DAYS + 1) + ... days, N terms; this is the largest N
+ * whose least days still fit in TARIFF_WEEK_DAYS.
+ */
+export const MAX_TARIFF_PERIODS = mostDistinctPeriods(TARIFF_WEEK_DAYS);
+
+/**
+ * The most items one tariff stores: each period holds one item per kept row of the
+ * upload, and the import reads every upload with the engine's default row cap, so it
+ * refuses a sheet of more than DEFAULT_ROW_CAP rows. A read with its own `rowCap` must
+ * size this from that cap instead. Both tariff pages' selection routes accept this
+ * many, so one save carries every item of the largest tariff; their single UPDATE binds
+ * three values per item, and the selection route tests save this many to prove Postgres
+ * takes it.
+ */
+export const MAX_TARIFF_ITEMS = DEFAULT_ROW_CAP * MAX_TARIFF_PERIODS;
+
+function mostDistinctPeriods(weekDays: number): number {
+  let periods = 0;
+  let leastDays = 0;
+  while (leastDays + MIN_PERIOD_DAYS + periods <= weekDays) {
+    leastDays += MIN_PERIOD_DAYS + periods;
+    periods += 1;
+  }
+  return periods;
+}
 
 function hasRepeats(values: readonly (number | string)[]): boolean {
   return new Set(values).size !== values.length;
