@@ -6,12 +6,15 @@ import { ApiError } from '@/lib/api-error';
  *   - commission tariff: a band the item does not hold (`BAND_NOT_STORED`), or a band
  *     with no price and no custom price (`BAND_PRICE_UNKNOWN`);
  *   - Plus commission tariff: a join with no custom price on an offer whose Plus price
- *     upper limit is unknown (`PLUS_PRICE_UNKNOWN`).
+ *     upper limit is unknown (`PLUS_PRICE_UNKNOWN`), or any join (also with a custom
+ *     price) on an offer whose Plus commission percent is unknown
+ *     (`PLUS_COMMISSION_UNKNOWN`).
  */
 const REFUSED_SELECTION_CODES: ReadonlySet<string> = new Set([
   'BAND_NOT_STORED',
   'BAND_PRICE_UNKNOWN',
   'PLUS_PRICE_UNKNOWN',
+  'PLUS_COMMISSION_UNKNOWN',
 ]);
 
 /** Which toast a failed selection save shows, if any. */

@@ -86,6 +86,12 @@ export interface PlusCustomPriceCellProps {
  * the reduced Plus commission; editing a committed price un-commits it. No client-side
  * money math — the engine computes the authoritative value
  * (feedback_no_frontend_financial_calculation).
+ *
+ * When the offer's Plus commission percent is unknown (the file's cell was blank or
+ * unreadable), the backend refuses both the estimate and any join on the row, also with
+ * a custom price: the input is disabled, no estimate is sent, the hint line explains
+ * why, and the foot stays disabled unless a custom price is already committed (so it
+ * can still be removed).
  */
 export function PlusCustomPriceCell({
   row,
@@ -116,6 +122,9 @@ export function PlusCustomPriceCell({
     () => (offer !== undefined && offer.price !== null ? new Decimal(offer.price) : null),
     [offer],
   );
+  // An unknown Plus commission: the backend refuses the estimate and every join on this
+  // row, so nothing is estimated and nothing new can be committed.
+  const commissionUnknown = offer?.commissionPct === null;
   // Seed the input, highest priority first: a surviving DRAFT from the parent's ref
   // store, then the edit-buffer's committed custom price, then the persisted server
   // value. A `null` draft means the seller deliberately cleared the field — start empty.
@@ -133,9 +142,9 @@ export function PlusCustomPriceCell({
 
   // Debounced what-if: fire the estimate ~400ms after the seller stops typing. A price that
   // rounds to 0.00 at two decimals is no price (the selection route refuses it), so it is
-  // never estimated.
+  // never estimated. Neither is any price while the Plus commission is unknown.
   React.useEffect(() => {
-    if (price === null || !isPositiveAtCents(price)) return undefined;
+    if (commissionUnknown || price === null || !isPositiveAtCents(price)) return undefined;
     const priceStr = price.toFixed(2);
     const handle = setTimeout(() => {
       estimateMutate(
@@ -153,7 +162,7 @@ export function PlusCustomPriceCell({
     return () => {
       clearTimeout(handle);
     };
-  }, [price, row.id, estimateMutate, onEstimate]);
+  }, [commissionUnknown, price, row.id, estimateMutate, onEstimate]);
 
   function handleChange(next: Decimal | null): void {
     setPrice(next);
@@ -176,7 +185,8 @@ export function PlusCustomPriceCell({
     lastResult !== null &&
     lastResult.calculable &&
     lastResult.price === price.toFixed(2);
-  const canSelect = hasEstimate;
+  // An unknown Plus commission never commits (the selection route refuses it).
+  const canSelect = hasEstimate && !commissionUnknown;
   // Show the "Hesaplanan kâr" block only once the card carries a price in the input (a typed
   // draft, or a seeded committed / server price) — an empty card shows just the input + hint
   // + passive foot, never a mute "—" profit chip. Derived from the input state, so a
@@ -193,7 +203,9 @@ export function PlusCustomPriceCell({
   // Skeleton the badge slot while an estimate is on the way: a positive price is in the
   // input, no live result yet, and nothing seeds the figure — so a "—" would misread as
   // "no data". An errored estimate falls back to the default badge, never a stuck skeleton.
+  // An unknown Plus commission sends no estimate at all, so it never skeletons either.
   const showEstimateSkeleton =
+    !commissionUnknown &&
     price !== null &&
     isPositiveAtCents(price) &&
     lastResult === null &&
@@ -236,9 +248,14 @@ export function PlusCustomPriceCell({
           aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
           placeholder={t('table.enterPrice')}
           className="md:max-w-input-price w-full"
+          // No price can be estimated or joined while the Plus commission is unknown.
+          disabled={commissionUnknown}
         />
         <span className="text-2xs text-muted-foreground">
-          {hasEstimate && lastResult.commissionPct != null ? (
+          {commissionUnknown ? (
+            // Why there is no profit and no join: plain text, so it reads on touch too.
+            t('table.plusCommissionUnknownHint')
+          ) : hasEstimate && lastResult.commissionPct != null ? (
             <>
               {t('table.plusCommission')}{' '}
               <span className="text-foreground font-semibold">

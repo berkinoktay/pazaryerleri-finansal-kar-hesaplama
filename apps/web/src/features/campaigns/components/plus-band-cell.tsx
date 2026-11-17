@@ -55,6 +55,14 @@ export interface PlusBandCellProps {
  * while not joined the card has no select target and its foot reads "Cannot be
  * selected" (the seller can still join with a custom price). If it is already joined,
  * the overlay stays so the seller can still un-join it.
+ *
+ * An offer whose Plus commission percent is unknown (the file's cell was blank or
+ * unreadable) shows that line as "Plus commission Unknown" with its own caption under
+ * it, has no profit and never wears the "best" ribbon. The backend refuses any join on
+ * it (also with a custom price), so it cannot be joined either: no select target, a
+ * "Cannot be selected" foot, and the same un-join escape hatch when it is already
+ * joined. With both the price and the commission unknown, both captions show. The
+ * badge click opens the not-calculable dialog without an estimate request.
  */
 export function PlusBandCell({
   row,
@@ -70,13 +78,17 @@ export function PlusBandCell({
   const estimate = useEstimatePlusItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
   const priceUnknown = band.price === null;
-  // An offer with no price can only be un-joined, never newly joined at the ceiling.
-  const selectable = !priceUnknown || selected;
+  const commissionUnknown = band.commissionPct === null;
+  // No ceiling or no Plus commission: nothing to estimate at (the backend refuses both),
+  // no profit, never the row's best, and never newly joinable.
+  const offerUnknown = priceUnknown || commissionUnknown;
+  // An unknown offer can only be un-joined, never newly joined.
+  const selectable = !offerUnknown || selected;
 
   function openBreakdown(): void {
     setBreakdownOpen(true);
-    // An unknown ceiling has no price to estimate at: the dialog opens with no result.
-    if (band.price === null) return;
+    // The dialog opens on its not-calculable text without a request.
+    if (band.price === null || offerUnknown) return;
     estimate.mutate({ itemId: row.id, body: { price: band.price } });
   }
 
@@ -101,25 +113,39 @@ export function PlusBandCell({
       {/* "En kârlı" — a featured ribbon straddling the top border. Absolute, so it
           adds NO height. pointer-events-none → clicking it still joins via the
           overlay. Only shown when the Plus offer wins the row, never on an offer with
-          no price. */}
-      {isBest && !priceUnknown ? <TariffBestRibbon label={t('best')} /> : null}
+          no price or no Plus commission. */}
+      {isBest && !offerUnknown ? <TariffBestRibbon label={t('best')} /> : null}
 
       {/* Ceiling price + its "ve altı" qualifier as one hero unit, then the reduced
           Plus commission. An unknown ceiling reads muted, never as an amount. */}
       <div className="gap-3xs flex min-w-0 flex-col items-start">
         {band.price === null ? (
           // The unknown label and, on its own line under it, why and the way out
-          // (a custom price): plain text, so it reads on touch devices too.
-          <TariffUnknownPrice label={t('priceUnknown')} hint={t('plusPriceUnknownHint')} />
+          // (a custom price): plain text, so it reads on touch devices too. With the Plus
+          // commission unknown too there is no way out (a custom price cannot join
+          // either), so only the commission caption below explains the card.
+          <TariffUnknownPrice
+            label={t('priceUnknown')}
+            hint={band.commissionPct === null ? undefined : t('plusPriceUnknownHint')}
+          />
         ) : (
           <span className="gap-x-2xs flex min-w-0 flex-wrap items-baseline">
             <span className="text-base font-bold tabular-nums">{formatCurrency(band.price)}</span>
             <span className="text-xs font-normal">{t('ceilingQualifier')}</span>
           </span>
         )}
-        <span className="text-2xs text-muted-foreground tabular-nums">
-          {t('plusCommission')} {formatPercentDisplay(band.commissionPct)}
-        </span>
+        {band.commissionPct === null ? (
+          // The unknown commission line and, under it, why it cannot be joined.
+          <TariffUnknownPrice
+            size="line"
+            label={`${t('plusCommission')} ${t('commissionUnknown')}`}
+            hint={t('plusCommissionUnknownHint')}
+          />
+        ) : (
+          <span className="text-2xs text-muted-foreground tabular-nums">
+            {t('plusCommission')} {formatPercentDisplay(band.commissionPct)}
+          </span>
+        )}
       </div>
 
       <TariffProfitBlock
@@ -152,8 +178,8 @@ export function PlusBandCell({
         imageUrl={row.imageUrl}
         stockCode={row.stockCode}
         currentNetProfit={row.currentNetProfit}
-        result={priceUnknown ? null : (estimate.data ?? null)}
-        loading={priceUnknown ? false : estimate.isPending}
+        result={offerUnknown ? null : (estimate.data ?? null)}
+        loading={offerUnknown ? false : estimate.isPending}
       />
     </TariffOptionCard>
   );

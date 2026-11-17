@@ -41,7 +41,12 @@ export interface FlashProductListRow {
   readonly stock: number | null;
   readonly currentPrice: string;
   readonly customerPrice: string;
-  readonly currentCommissionPct: string;
+  /**
+   * The current commission percent, also the flat fallback of an offer no tariff band
+   * covers, or null when it is unknown: the cell is blank or does not read as a decimal.
+   * An unknown percent is never priced at 0%; a readable 0 is a real 0% and stays '0'.
+   */
+  readonly currentCommissionPct: string | null;
   readonly hasCommissionTariff: boolean;
   readonly campaignedProduct: string | null;
   readonly offer24: FlashOffer | null;
@@ -57,9 +62,6 @@ export const FLASH_PRICE_SCALE = 2;
 
 /** Trendyol stamps an offer window as Istanbul wall-clock text. */
 const FLASH_WINDOW_PATTERN: WallClockPattern = 'dd/MM/yyyy HH:mm';
-
-/** The commission percent of a row whose current commission cell is blank. */
-const COMMISSION_PCT_WHEN_BLANK = '0';
 
 const SUMMARY = TRENDYOL_FORMAT_SUMMARIES.FLASH_PRODUCT_LIST;
 
@@ -119,8 +121,9 @@ export const trendyolFlashProductListFormat = defineFormat({
       stock: requireStorableInt(reader.int('stock', 'truncate')),
       currentPrice,
       customerPrice: reader.decimal('customerPrice') ?? currentPrice,
-      // The flat fallback commission; the real export always fills it.
-      currentCommissionPct: reader.decimal('currentCommission') ?? COMMISSION_PCT_WHEN_BLANK,
+      // The flat fallback commission; null when the cell is blank or unreadable (never
+      // 0%), while a readable 0 stays '0'.
+      currentCommissionPct: reader.decimal('currentCommission'),
       hasCommissionTariff: reader.flag('commissionTariffFlag', {
         yes: TARIFF_FLAG_YES_FOLDED,
         compare: 'casefold-tr',

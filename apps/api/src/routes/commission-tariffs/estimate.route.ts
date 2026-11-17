@@ -33,9 +33,13 @@ const estimateRoute = createRoute({
     'commission verbatim (the band-click breakdown modal), pass only `price` to derive the band from ' +
     'it (the custom-price what-if), or pass `scenario: "current"` (no price/bandKey) to price the ' +
     'item’s own commission-base price at its current commission — the breakdown then matches the ' +
-    'detail row’s `currentNetProfit` exactly. Read-only (POST only because it carries a body); no ' +
-    'state changes. When the item is unmatched or uncostable, `calculable` is false, `reason` ' +
-    'explains why and `breakdown` is null. Money fields are GROSS decimal strings.',
+    'detail row’s `currentNetProfit` exactly. The current scenario answers 422 on `scenario` ' +
+    'when the item has neither a commission-base price nor a current price ' +
+    '(CURRENT_PRICE_UNKNOWN, checked first) or when its current commission percent is unknown ' +
+    "(CURRENT_COMMISSION_UNKNOWN: the file's cell was blank or unreadable); the band and " +
+    'custom-price modes never read the current percent. Read-only (POST only because it carries ' +
+    'a body); no state changes. When the item is unmatched or uncostable, `calculable` is ' +
+    'false, `reason` explains why and `breakdown` is null. Money fields are GROSS decimal strings.',
   security: [{ bearerAuth: [] }],
   request: {
     params: TariffItemIdPathSchema,
@@ -67,8 +71,10 @@ const estimateRoute = createRoute({
       description:
         'Invalid payload — malformed price (INVALID_CUSTOM_PRICE), a missing price in a ' +
         'non-current mode (PRICE_REQUIRED), price/bandKey sent with scenario:"current" ' +
-        '(INVALID_ESTIMATE_MODE), or scenario:"current" for an item with neither a ' +
-        'commission-base price nor a current price (CURRENT_PRICE_UNKNOWN on `scenario`)',
+        '(INVALID_ESTIMATE_MODE), scenario:"current" for an item with neither a ' +
+        'commission-base price nor a current price (CURRENT_PRICE_UNKNOWN on `scenario`), or ' +
+        'scenario:"current" for an item whose current commission percent is unknown ' +
+        '(CURRENT_COMMISSION_UNKNOWN on `scenario`)',
     },
     429: Common429Response,
   },

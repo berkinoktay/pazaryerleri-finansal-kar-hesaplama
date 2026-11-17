@@ -14,7 +14,10 @@
 // input degrades to a logged not-calculable result rather than a 500 (decision 9). The
 // current scenario of an item with no known baseline price (neither a commission-base
 // price nor a current price) has nothing to price: it answers 422 on `scenario`
-// (CURRENT_PRICE_UNKNOWN) instead of pricing a made-up 0.
+// (CURRENT_PRICE_UNKNOWN) instead of pricing a made-up 0. The current scenario of an item
+// whose current commission percent is unknown (the file's cell was blank or unreadable)
+// answers 422 on `scenario` (CURRENT_COMMISSION_UNKNOWN) instead of pricing a made-up 0%;
+// the band and custom-price modes never read that percent, so they are unaffected.
 
 import { Decimal } from 'decimal.js';
 
@@ -30,7 +33,7 @@ import {
 } from './commission-tariff-compute.service';
 import { logProfitReadFailure } from './profit-compute-fallback.service';
 import { loadScreenScenarioBases, screenScenarioBaseFor } from './scenario-screen-commons';
-import { currentBaselinePrice } from './tariff-compute-commons';
+import { currentBaselinePrice, decimalOrNull } from './tariff-compute-commons';
 import type { EstimateItemPriceResult } from '../validators/commission-tariff.validator';
 
 /**
@@ -50,7 +53,9 @@ export type EstimateItemPriceInput =
  * -disclosure). When the item is unmatched or uncostable the result carries
  * `calculable: false` + a `reason` and a null breakdown — never an error. Throws
  * `ValidationError` (`scenario`, CURRENT_PRICE_UNKNOWN) for the current scenario of an
- * item whose baseline price is unknown (`currentBaselinePrice` is null).
+ * item whose baseline price is unknown (`currentBaselinePrice` is null), and
+ * (`scenario`, CURRENT_COMMISSION_UNKNOWN) for the current scenario of an item whose
+ * current commission percent is unknown; the price check comes first.
  */
 export async function estimateItemPrice(
   orgId: string,
@@ -86,16 +91,23 @@ export async function estimateItemPrice(
   // the detail row's baseline EXACTLY: the commission-base price (customer-seen
   // price, or the sale price when the column predates the import) at the item's
   // CURRENT commission — so the breakdown equals `currentNetProfit` byte-for-byte. With
-  // no baseline price the detail row has no current profit either, so there is nothing
-  // to break down: refuse before loading the scenario bases.
+  // no baseline price, or with an unknown current commission percent, the detail row has
+  // no current profit either, so there is nothing to break down: refuse before loading
+  // the scenario bases. The band and custom-price modes never read the current percent.
   const price = input.mode === 'current' ? currentBaselinePrice(item) : input.price;
   if (price === null) {
     throw new ValidationError([{ field: 'scenario', code: 'CURRENT_PRICE_UNKNOWN' }]);
   }
-  const commission: EstimateCommission =
-    input.mode === 'current'
-      ? { kind: 'override', commissionPct: new Decimal(item.currentCommissionPct.toString()) }
-      : { kind: 'band', bandKey: input.bandKey };
+  let commission: EstimateCommission;
+  if (input.mode === 'current') {
+    const currentCommissionPct = decimalOrNull(item.currentCommissionPct);
+    if (currentCommissionPct === null) {
+      throw new ValidationError([{ field: 'scenario', code: 'CURRENT_COMMISSION_UNKNOWN' }]);
+    }
+    commission = { kind: 'override', commissionPct: currentCommissionPct };
+  } else {
+    commission = { kind: 'band', bandKey: input.bandKey };
+  }
 
   const bands = parseStoredTariffBands(item.bands);
 
@@ -127,11 +139,11 @@ export async function estimateItemPrice(
     itemId: item.id,
     price: price.toFixed(2),
     bandKey: computed.bandKey,
-    // Current scenario echoes the item's commission in the detail wire format (4dp)
-    // so the breakdown modal's header matches the row; band/price modes surface the
+    // Current scenario echoes the item's (known) commission in the detail wire format
+    // (4dp) so the breakdown modal's header matches the row; band/price modes surface the
     // applied band's raw percent string (e.g. "15").
     commissionPct:
-      input.mode === 'current' ? item.currentCommissionPct.toFixed(4) : computed.commissionPct,
+      commission.kind === 'override' ? commission.commissionPct.toFixed(4) : computed.commissionPct,
     calculable: computed.calculable,
     reason: computed.reason,
     breakdown: computed.breakdown,

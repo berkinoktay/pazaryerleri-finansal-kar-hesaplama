@@ -15,7 +15,11 @@ export interface PlusBand {
    * estimating or exporting.
    */
   price: string | null;
-  commissionPct: string;
+  /**
+   * The Plus commission offer (a PERCENT string). `null` means the file's offer was unknown
+   * (blank or unreadable): the offer has no profit; a readable 0 stays 0.
+   */
+  commissionPct: string | null;
   netProfit: string | null;
   marginPct: string | null;
 }
@@ -44,7 +48,11 @@ export interface PlusTariffRow {
    * `currentPrice`. `null` when unknown (null-guard it).
    */
   commissionBasePrice: string | null;
-  currentCommissionPct: string;
+  /**
+   * The current commission PERCENT. `null` means the file's cell was unknown (blank or
+   * unreadable): there is no current profit; a readable 0 stays 0.
+   */
+  currentCommissionPct: string | null;
   currentNetProfit: string | null;
   currentMarginPct: string | null;
   /** True when the Plus offer nets more than doing nothing (drives the smart-select best pick). */

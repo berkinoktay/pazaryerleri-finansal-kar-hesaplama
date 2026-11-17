@@ -22,6 +22,7 @@ import {
 } from '@pazarsync/spreadsheet';
 
 import { createApp } from '@/app';
+import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware';
 import { trendyolCommissionTariffLayout } from '@/workbooks/formats/trendyol/commission-tariff.layout';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
@@ -532,5 +533,53 @@ describe('commission-tariff export + variable periods', () => {
     );
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe('STORED_FILE_UNREADABLE');
+  });
+});
+
+describe('commission-tariff export: an unknown current commission', () => {
+  beforeEach(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+    // The block above already sends as many imports as RATE_LIMITS.FILE_IMPORT allows per
+    // minute with the same pooled user; give this block a fresh bucket.
+    _resetRateLimitStoreForTests();
+  });
+
+  it('exports a selected band of an item whose current commission is unknown', async () => {
+    const ctx = await setupStore();
+    const tariffId = await importFixture(ctx, FIXTURE_2P, 'tariff.xlsx');
+
+    // The file's current commission cell was blank or unreadable, so the percent is NULL.
+    // The export writes only the band price and the tariff selection, neither of which
+    // reads the percent, so the selected band is exported as usual.
+    const item = await prisma.commissionTariffItem.findFirst({
+      where: { storeId: ctx.storeId, barcode: MATCHED_BARCODE },
+    });
+    expect(item).not.toBeNull();
+    await prisma.commissionTariffItem.update({
+      where: { id: item?.id },
+      data: { currentCommissionPct: null, selectedBand: 'band2' },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/commission-tariffs/${tariffId}/export`,
+      { method: 'POST', headers: { Authorization: bearer(ctx.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('spreadsheetml');
+
+    const grid = await readWorkbookGrid(Buffer.from(await res.arrayBuffer()));
+    const layout = resolveLayout(trendyolCommissionTariffLayout, grid);
+    expect(layout).not.toBeNull();
+    if (layout === null) return;
+    const patched = grid
+      .slice(1)
+      .find((r) => text(r, column(layout, 'barcode')) === MATCHED_BARCODE);
+    // band2's upper limit (777.09) and its window label, as for an item whose percent is known.
+    expect(Number(text(patched, column(layout, 'newTsf')))).toBe(777.09);
+    expect(text(patched, column(layout, 'tariffSelection'))).toBe('4 Günlük Fiyat');
+
+    const stored = await prisma.commissionTariff.findUnique({ where: { id: tariffId } });
+    expect(stored?.exportedAt).not.toBeNull();
   });
 });

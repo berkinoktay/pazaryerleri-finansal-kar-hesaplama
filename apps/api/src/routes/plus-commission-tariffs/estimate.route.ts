@@ -34,8 +34,11 @@ const estimateRoute = createRoute({
     "price) to price the item's own commission-base price at its current commission - the breakdown " +
     "then matches the detail row's `currentNetProfit` exactly. The current scenario uses the " +
     "item's current price when its commission-base price is unknown; with neither price known it " +
-    'answers 422 (CURRENT_PRICE_UNKNOWN on `scenario`). The price mode needs no stored price, so ' +
-    'it works with an unknown Plus price upper limit too. Read-only (POST only because it ' +
+    'answers 422 (CURRENT_PRICE_UNKNOWN on `scenario`), and with an unknown current commission ' +
+    "percent (the file's cell was blank or unreadable) it answers 422 " +
+    '(CURRENT_COMMISSION_UNKNOWN on `scenario`). The price mode needs no stored price, so ' +
+    'it works with an unknown Plus price upper limit too; with an unknown Plus commission ' +
+    'offer it answers 422 (PLUS_COMMISSION_UNKNOWN on `price`). Read-only (POST only because it ' +
     'carries a body); no state changes. When the item is unmatched or uncostable, calculable is ' +
     'false, reason explains why and breakdown is null. Money fields are GROSS decimal strings.',
   security: [{ bearerAuth: [] }],
@@ -69,8 +72,11 @@ const estimateRoute = createRoute({
       description:
         'Invalid payload — malformed price (INVALID_CUSTOM_PRICE), a missing price in the ' +
         'custom-price mode (PRICE_REQUIRED), price sent with scenario:"current" ' +
-        '(INVALID_ESTIMATE_MODE), or scenario:"current" for an item with neither a ' +
-        'commission-base price nor a current price (CURRENT_PRICE_UNKNOWN on `scenario`)',
+        '(INVALID_ESTIMATE_MODE), scenario:"current" for an item with neither a ' +
+        'commission-base price nor a current price (CURRENT_PRICE_UNKNOWN on `scenario`), ' +
+        'scenario:"current" for an item whose current commission percent is unknown ' +
+        '(CURRENT_COMMISSION_UNKNOWN on `scenario`), or a price for an item whose Plus ' +
+        'commission offer is unknown (PLUS_COMMISSION_UNKNOWN on `price`)',
     },
     429: Common429Response,
   },

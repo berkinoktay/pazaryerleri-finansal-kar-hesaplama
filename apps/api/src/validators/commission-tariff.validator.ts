@@ -120,15 +120,23 @@ export const TariffDetailItemSchema = z
           'Komisyona esas fiyat (müşterinin gördüğü fiyat) — güncel kâr bu fiyattan hesaplanır; kolon öncesi eski içe aktarımlarda null. ' +
           'Null ise güncel kâr güncel fiyattan hesaplanır; ikisi de null ise güncel kâr hesaplanmaz.',
       }),
-    currentCommissionPct: z.string(),
+    currentCommissionPct: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          "The current commission percent. Null when the file's cell was blank or unreadable; " +
+          'a readable 0 stays 0.',
+      }),
     currentNetProfit: z
       .string()
       .nullable()
       .openapi({
         description:
-          'Komisyona esas fiyat (yoksa güncel fiyat) + güncel komisyonla net kâr; senaryo motoru ' +
-          'bu fiyatı güncel komisyon oranıyla değerlendirir ve mağazanın kâr ayarları uygulanır; ' +
-          'hesaplanamıyorsa ya da ne komisyona esas fiyat ne güncel fiyat biliniyorsa null.',
+          'Net profit under the current commission, computed at commissionBasePrice, else at ' +
+          "currentPrice; the scenario engine applies the store's profit settings. Null when " +
+          'neither price is known, the current commission is unknown, or the profit cannot be ' +
+          'computed.',
       }),
     currentMarginPct: z.string().nullable(),
     calculable: z.boolean(),
@@ -190,6 +198,16 @@ export const ImportTariffResponseSchema = z
           'aralıkların kârı hesaplanır. Her ürün satırı, dönem sayısından bağımsız olarak bir kez ' +
           'sayılır.',
       }),
+    unknownCommissionRows: z
+      .number()
+      .int()
+      .openapi({
+        description:
+          'The product rows whose current commission percent is unknown (the cell was blank or ' +
+          'unreadable; a readable 0 is a real 0% and is not counted). Their current profit is ' +
+          'unknown and never computed at 0%; the band profits are still computed. Each product ' +
+          'row counts once, whatever the number of periods.',
+      }),
   })
   .openapi('ImportTariffResponse');
 
@@ -227,7 +245,8 @@ export type TariffSelection = z.infer<typeof TariffSelectionSchema>;
 //      the item's own commission-base price (or its sale price when the column is
 //      absent) + current commission are used, so the breakdown matches the detail
 //      row's `currentNetProfit` badge byte-for-byte. When neither price is known the
-//      service answers 422 on `scenario` (CURRENT_PRICE_UNKNOWN).
+//      service answers 422 on `scenario` (CURRENT_PRICE_UNKNOWN); when the current
+//      commission percent is unknown, 422 on `scenario` (CURRENT_COMMISSION_UNKNOWN).
 // The full profit breakdown is the SAME shape the Ürün Fiyatlandırma quote returns.
 
 export const TariffItemIdPathSchema = TariffIdPathSchema.extend({
@@ -254,10 +273,13 @@ export const EstimateItemPriceBodySchema = z
       .optional()
       .openapi({
         description:
-          'Güncel senaryonun dökümü — item’ın komisyona esas fiyatı (yoksa güncel fiyatı) + ' +
-          'güncel komisyonuyla hesaplanır; price/bandKey verilmez. İkisi de bilinmiyorsa (dosyadaki ' +
-          'hücreler boş, okunamaz ya da 0) hesaplanacak fiyat yoktur: 422, alan `scenario`, kod ' +
-          'CURRENT_PRICE_UNKNOWN.',
+          "Breakdown of the current scenario: priced at the item's commission base price, else " +
+          'at its current price, under its current commission; send no price or bandKey. When ' +
+          "neither price is known (the file's cells were blank, unreadable or 0) there is nothing " +
+          'to price: 422 on `scenario` with code CURRENT_PRICE_UNKNOWN. When the current ' +
+          "commission percent is unknown (the file's cell was blank or unreadable) it is not " +
+          'priced at 0%: 422 on `scenario` with code CURRENT_COMMISSION_UNKNOWN. The price check ' +
+          'comes first.',
       }),
   })
   .superRefine((val, ctx) => {

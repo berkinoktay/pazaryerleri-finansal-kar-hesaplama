@@ -23,6 +23,8 @@ const FILE_NAME = 'upload.xlsx';
 const LIST_NAME = 'July list';
 const PREFILLED_ROWS = 3;
 const UNKNOWN_PRICE_ROWS = 2;
+// A different count from the price one, so a swapped mapping fails.
+const UNKNOWN_COMMISSION_ROWS = 5;
 const PROBLEM_HEADERS = { 'content-type': 'application/problem+json' };
 const MISSING_DISCOUNT_TYPE = 'importFile: discountType is missing';
 
@@ -44,6 +46,11 @@ interface PageRow {
     readonly responseKey: 'unknownCurrentPriceRows' | 'unknownPriceRows';
     readonly rows: number;
   };
+  /**
+   * The unknown commission count the commission, Plus and Flash responses carry under
+   * `unknownCommissionRows`; each maps it to the same key of the result.
+   */
+  readonly unknownCommissionRows?: number;
 }
 
 // Written out here rather than read from the code under test, so a wrong segment, id key or
@@ -56,6 +63,7 @@ const PAGES: readonly PageRow[] = [
     keyRoot: 'commission-tariffs',
     requiredFields: {},
     unknownPrice: { responseKey: 'unknownCurrentPriceRows', rows: UNKNOWN_PRICE_ROWS },
+    unknownCommissionRows: UNKNOWN_COMMISSION_ROWS,
   },
   {
     page: WORKBOOK_PAGES.PLUS_COMMISSION_TARIFF,
@@ -64,6 +72,7 @@ const PAGES: readonly PageRow[] = [
     keyRoot: 'plus-commission-tariffs',
     requiredFields: {},
     unknownPrice: { responseKey: 'unknownPriceRows', rows: UNKNOWN_PRICE_ROWS },
+    unknownCommissionRows: UNKNOWN_COMMISSION_ROWS,
   },
   {
     page: WORKBOOK_PAGES.ADVANTAGE_TARIFF,
@@ -78,6 +87,7 @@ const PAGES: readonly PageRow[] = [
     idKey: 'listId',
     keyRoot: 'flash-products',
     requiredFields: {},
+    unknownCommissionRows: UNKNOWN_COMMISSION_ROWS,
   },
   {
     page: WORKBOOK_PAGES.DISCOUNT_LIST,
@@ -116,15 +126,24 @@ function importResponse(row: PageRow): Record<string, unknown> {
     ...(row.unknownPrice === undefined
       ? {}
       : { [row.unknownPrice.responseKey]: row.unknownPrice.rows }),
+    ...(row.unknownCommissionRows === undefined
+      ? {}
+      : { unknownCommissionRows: row.unknownCommissionRows }),
   };
 }
 
-/** What the hook resolves: the id, the prefilled count, and the tariff pages' unknown price count. */
+/**
+ * What the hook resolves: the id, the prefilled count, the tariff pages' unknown price count,
+ * and the unknown commission count of the commission, Plus and Flash pages.
+ */
 function expectedResult(row: PageRow): Record<string, unknown> {
   return {
     id: NEW_ID,
     prefilledRows: PREFILLED_ROWS,
     ...(row.unknownPrice === undefined ? {} : { unknownPriceRows: row.unknownPrice.rows }),
+    ...(row.unknownCommissionRows === undefined
+      ? {}
+      : { unknownCommissionRows: row.unknownCommissionRows }),
   };
 }
 
@@ -170,8 +189,9 @@ describe('useImportWorkbook', () => {
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
       expect(contentType).toMatch(/^multipart\/form-data/);
       expect(fileName).toBe(FILE_NAME);
-      // Strict: a page other than the two tariff ones must not carry the count, not even as
-      // an undefined key.
+      // Strict: a page whose response has no count must not carry it, not even as an
+      // undefined key (only the two tariff pages map the price count; only the commission,
+      // Plus and Flash pages map the commission count).
       expect(result.current.data).toStrictEqual(expectedResult(row));
     });
 

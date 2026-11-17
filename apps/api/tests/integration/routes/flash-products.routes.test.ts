@@ -21,8 +21,11 @@
 // case — Trendyol anchors a boundary-straddling window to the period containing its END,
 // verified live 2026-07-07). Three more rows exercise each flat-fallback branch. A
 // calculable row needs cost (TRY profile) + shipping (SENDEOMP) + fee definitions;
-// SENDEOMP is ensured by globalSetup.
+// SENDEOMP is ensured by globalSetup. The same fixture with an unknown (NULL) flat rate
+// proves that rate is never priced at 0%: no current profit, no flat-fallback offer profit,
+// while a band-covered offer still computes.
 
+import { z } from '@hono/zod-openapi';
 import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -131,7 +134,11 @@ interface Fixture {
   itemNoWeek: string;
 }
 
-async function setupFixture(): Promise<Fixture> {
+/**
+ * `flatCommission` is the "Mevcut Komisyon" (I) every flash row carries; null is a cell the
+ * file left blank or unreadable (an unknown flat rate).
+ */
+async function setupFixture(flatCommission: string | null = FLAT_COMMISSION): Promise<Fixture> {
   const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
   if (carrier === null) {
     throw new Error('SENDEOMP carrier missing - globalSetup ensureShippingReferenceData must run');
@@ -327,7 +334,7 @@ async function setupFixture(): Promise<Fixture> {
     productTitle: 'Flaş Ürünü',
     currentPrice: '360.00',
     customerPrice: '360.00',
-    currentCommissionPct: FLAT_COMMISSION,
+    currentCommissionPct: flatCommission,
     offer24Price: OFFER_PRICE,
   };
 
@@ -749,6 +756,142 @@ describe('Flash Products — per-item degrade (decision 9)', () => {
       );
     } finally {
       errorSpy.mockRestore();
+    }
+  });
+});
+
+// The detail fields the unknown-flat-rate cases read, parsed rather than cast.
+const UnknownFlatOfferSchema = z.object({
+  price: z.string(),
+  startsAt: z.string().nullable(),
+  // Null when no tariff band covers the offer and the flat rate is unknown.
+  commissionPct: z.string().nullable(),
+  netProfit: z.string().nullable(),
+  marginPct: z.string().nullable(),
+});
+const UnknownFlatItemSchema = z.object({
+  id: z.string(),
+  // Null when the file's "Mevcut Komisyon" cell was blank or unreadable.
+  currentCommissionPct: z.string().nullable(),
+  currentNetProfit: z.string().nullable(),
+  currentMarginPct: z.string().nullable(),
+  calculable: z.boolean(),
+  reason: z.string().nullable(),
+  commissionSource: z.enum(['band', 'current']),
+  commissionBands: z
+    .array(
+      z.object({
+        lowerLimit: z.string().nullable(),
+        upperLimit: z.string().nullable(),
+        commissionPct: z.string(),
+      }),
+    )
+    .nullable(),
+  offer24: UnknownFlatOfferSchema.nullable(),
+});
+const UnknownFlatDetailSchema = z.object({ items: z.array(UnknownFlatItemSchema) });
+type UnknownFlatItem = z.infer<typeof UnknownFlatItemSchema>;
+
+describe('Flash Products - unknown flat commission', () => {
+  // The same resolution matrix as the main fixture, but every row's "Mevcut Komisyon" (I)
+  // cell was blank or unreadable, so the flat rate is stored as NULL. The commission tariff
+  // still covers the band rows, so they are pinned against the known-rate fixture's
+  // hand-derived numbers; the flat-fallback rows have no rate at all and must never be
+  // priced at 0%.
+  let fx: Fixture;
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+    fx = await setupFixture(null);
+  });
+
+  async function fetchItems(): Promise<readonly UnknownFlatItem[]> {
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/flash-products/${fx.listId}`,
+      { headers: { Authorization: bearer(fx.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    return UnknownFlatDetailSchema.parse(await res.json()).items;
+  }
+
+  function itemOf(items: readonly UnknownFlatItem[], id: string): UnknownFlatItem {
+    const item = items.find((i) => i.id === id);
+    if (item === undefined) throw new Error(`detail item ${id} missing`);
+    return item;
+  }
+
+  it('returns a null currentCommissionPct and a null current profit when the flat rate is unknown', async () => {
+    const items = await fetchItems();
+    expect(items).toHaveLength(6);
+    // No made-up 0 anywhere: the unknown rate stays null on the wire, and no row has a
+    // current scenario (it would have to be priced at the unknown rate).
+    for (const item of items) {
+      expect(item.currentCommissionPct).toBeNull();
+      expect(item.currentNetProfit).toBeNull();
+      expect(item.currentMarginPct).toBeNull();
+    }
+  });
+
+  it('returns a flat-fallback offer with commissionPct null and no profit', async () => {
+    // A compute that threw is degraded to the same shape (not calculable, reason null, no
+    // profit) and logged; nothing may be logged here, so the shape is the unknown rate.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let items: readonly UnknownFlatItem[];
+    try {
+      items = await fetchItems();
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+    // (d) no band for the barcode, (c) no tariff flag, (b) no covering week: each falls
+    // back to the flat rate, which is unknown.
+    for (const id of [fx.itemNoBand, fx.itemFlagFalse, fx.itemNoWeek]) {
+      const item = itemOf(items, id);
+      expect(item.commissionSource).toBe('current');
+      expect(item.commissionBands).toBeNull();
+      // The offer keeps its price and window; it has no commission and no profit.
+      expect(item.offer24?.price).toBe(OFFER_PRICE);
+      expect(typeof item.offer24?.startsAt).toBe('string');
+      expect(item.offer24?.commissionPct).toBeNull();
+      expect(item.offer24?.netProfit).toBeNull();
+      expect(item.offer24?.marginPct).toBeNull();
+      // Its only offer was never evaluated, so nothing is calculable and there is no reason
+      // (the variants are matched and costed, as in the main block where they compute).
+      expect(item.calculable).toBe(false);
+      expect(item.reason).toBeNull();
+    }
+  });
+
+  it('still computes an offer covered by a commission tariff band', async () => {
+    const items = await fetchItems();
+    const p1 = itemOf(items, fx.itemPeriod1);
+    const p2 = itemOf(items, fx.itemPeriod2);
+    const straddle = itemOf(items, fx.itemStraddle);
+
+    // A band offer never reads the flat rate: the Period 1 band (11.5) prices it to the
+    // same hand-derived profit as with a known flat rate (see the main block, -107.65).
+    expect(p1.commissionSource).toBe('band');
+    expect(p1.offer24?.commissionPct).toBe('11.5000');
+    expect(p1.offer24?.netProfit).toBe('-107.65');
+    expect(p1.offer24?.marginPct).not.toBeNull();
+    expect(p1.commissionBands).toEqual([
+      { lowerLimit: '300.00', upperLimit: null, commissionPct: '19.0000' },
+      { lowerLimit: '250.00', upperLimit: '299.99', commissionPct: '11.5000' },
+      { lowerLimit: null, upperLimit: '249.99', commissionPct: '8.0000' },
+    ]);
+    // The calculable band offer makes the item calculable, with no current profit.
+    expect(p1.calculable).toBe(true);
+    expect(p1.reason).toBeNull();
+    expect(p1.currentNetProfit).toBeNull();
+
+    // The other sub-period and the straddling window resolve the Period 2 band (9).
+    for (const item of [p2, straddle]) {
+      expect(item.commissionSource).toBe('band');
+      expect(item.offer24?.commissionPct).toBe('9.0000');
+      expect(item.offer24?.netProfit).not.toBeNull();
+      expect(item.calculable).toBe(true);
+      expect(item.reason).toBeNull();
     }
   });
 });

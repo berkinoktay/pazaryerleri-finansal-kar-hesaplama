@@ -9,8 +9,6 @@
 // Every query is scoped by organizationId + storeId (tenant isolation). All money
 // is serialized to GROSS decimal strings; the frontend renders only.
 
-import { Decimal } from 'decimal.js';
-
 import { Prisma, prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 import { bandPrice, parseStoredTariffBands } from '@pazarsync/profit';
@@ -24,7 +22,7 @@ import {
   loadScreenScenarioBases,
   screenScenarioBaseFor,
 } from './scenario-screen-commons';
-import { decimalOrNull, moneyOrNull } from './tariff-compute-commons';
+import { decimalOrNull, moneyOrNull, percentOrNull } from './tariff-compute-commons';
 import type {
   CommissionTariffDetail,
   CommissionTariffListItem,
@@ -119,7 +117,10 @@ export async function listTariffs(
  * display image only. Per decision 9 a store-wide load failure or a per-item engine
  * throw leaves that profit empty (logged once) rather than failing the request. An item
  * whose current price is unknown (null) is served with a null `currentPrice`; how its
- * profits are computed is `computeItemBands`'s rule for an unknown baseline.
+ * profits are computed is `computeItemBands`'s rule for an unknown baseline. The stored
+ * current commission percent is read the same way (`decimalOrNull` / `percentOrNull`): an
+ * unknown percent (the file's cell was blank or unreadable) is sent as a null
+ * `currentCommissionPct` and is never priced, so the item has no current profit.
  */
 export async function getTariffDetail(
   orgId: string,
@@ -230,7 +231,8 @@ export async function getTariffDetail(
         // Null when the file's current price cell was blank, unreadable or 0.
         currentPrice: decimalOrNull(item.currentPrice),
         commissionBasePrice: decimalOrNull(item.commissionBasePrice),
-        currentCommissionPct: new Decimal(item.currentCommissionPct.toString()),
+        // Null when the file's current commission cell was blank or unreadable.
+        currentCommissionPct: decimalOrNull(item.currentCommissionPct),
       };
       let computed: ComputedItemBands;
       try {
@@ -251,7 +253,7 @@ export async function getTariffDetail(
         brand: item.brand,
         currentPrice: moneyOrNull(bandParams.currentPrice),
         commissionBasePrice: moneyOrNull(item.commissionBasePrice),
-        currentCommissionPct: item.currentCommissionPct.toFixed(4),
+        currentCommissionPct: percentOrNull(item.currentCommissionPct),
         currentNetProfit: computed.current.netProfit,
         currentMarginPct: computed.current.marginPct,
         calculable: computed.calculable,

@@ -13,12 +13,15 @@
 // rounded, a negative Plus price ceiling is refused with 422 and nothing is stored. A
 // product joined without a custom price whose Plus price ceiling is unknown (NULL) refuses
 // the export with 409 SELECTION_PRICE_UNKNOWN; a custom price is still written, and an
-// unjoined row with an unknown ceiling is left as the file had it.
+// unjoined row with an unknown ceiling is left as the file had it. A joined product whose
+// Plus commission offer is unknown (NULL) refuses the export with 409
+// SELECTION_COMMISSION_UNKNOWN, with or without a custom price; an unjoined one is left as
+// the file had it, its computed commission cell included.
 
 import { readFileSync } from 'node:fs';
 
 import { z } from '@hono/zod-openapi';
-import { unzipSync } from 'fflate';
+import { strFromU8, unzipSync } from 'fflate';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
@@ -33,7 +36,7 @@ import {
   type ResolvedLayout,
   type SheetData,
 } from '@pazarsync/spreadsheet';
-import { patchFixture } from '@pazarsync/spreadsheet/testing';
+import { columnLetters, patchFixture } from '@pazarsync/spreadsheet/testing';
 
 import { createApp } from '@/app';
 import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware';
@@ -52,6 +55,8 @@ const FIXTURE_MULTI = readFileSync(
   new URL('../../fixtures/trendyol-plus-tariff-3ve4.xlsx', import.meta.url),
 );
 const SHEET_NAME = 'TyPlusÜrünleri';
+// The single sheet's part inside the fixture (and so inside its export).
+const SHEET_PART = 'xl/worksheets/sheet1.xml';
 const XLSX_MIME_FRAGMENT = 'spreadsheetml';
 const ZIP_MIME_FRAGMENT = 'zip';
 
@@ -164,6 +169,24 @@ function rowFor(
 
 function num(row: readonly unknown[] | undefined, col: ColumnIndex): number {
   return Number(cellText(row ?? [], col));
+}
+
+// The raw XML of one cell of the Plus sheet, addressed like the grid (0-based row and
+// column). cellText reads a kept formula's cached 0.0 and a written 0 as the same "0";
+// the XML tells them apart.
+function sheetCellXml(xlsx: Uint8Array, rowIndex: number, col: ColumnIndex): string | undefined {
+  if (col === null) return undefined;
+  const sheet = unzipSync(xlsx)[SHEET_PART];
+  if (sheet === undefined) throw new Error('Plus workbook without its sheet part');
+  const ref = `${columnLetters(col + 1)}${String(rowIndex + 1)}`;
+  const cell = new RegExp(`<(?:x:)?c r="${ref}"[^>]*?(?:/>|>.*?</(?:x:)?c>)`, 's');
+  return cell.exec(strFromU8(sheet))?.[0];
+}
+
+// When the tariff was last exported; null while no file has been built for it.
+async function exportedAt(tariffId: string): Promise<Date | null | undefined> {
+  const stored = await prisma.plusCommissionTariff.findUnique({ where: { id: tariffId } });
+  return stored?.exportedAt;
 }
 
 // Decodes the RFC 5987 `filename*=UTF-8''…` the export route stamps on the download.
@@ -497,7 +520,7 @@ describe('plus-commission-tariff import: a value the export writes back', () => 
     const item = await prisma.plusCommissionTariffItem.findFirst({
       where: { storeId: ctx.storeId, barcode: SINGLE_BARCODE },
     });
-    expect(item?.plusCommissionPct.toString()).toBe('15.4');
+    expect(item?.plusCommissionPct?.toString()).toBe('15.4');
     await prisma.plusCommissionTariffItem.update({
       where: { id: item?.id },
       data: { plusSelected: true },
@@ -564,11 +587,6 @@ describe('plus-commission-tariff export: an unknown Plus price upper limit', () 
         customPrice: data.customPrice,
       },
     });
-  }
-
-  async function exportedAt(tariffId: string): Promise<Date | null | undefined> {
-    const stored = await prisma.plusCommissionTariff.findUnique({ where: { id: tariffId } });
-    return stored?.exportedAt;
   }
 
   it('answers 409 SELECTION_PRICE_UNKNOWN for a joined item with no custom price and an unknown ceiling, and does not mark the tariff exported', async () => {
@@ -644,6 +662,136 @@ describe('plus-commission-tariff export: an unknown Plus price upper limit', () 
     const unknown = rowFor(grid, layout, SINGLE_BARCODE);
     expect(unknown).toBeDefined();
     expect(cellText(unknown ?? [], column(layout, 'plusPriceSelection'))).toBeNull();
+    const optInColumns: readonly PlusColumn[] = [
+      'plusPriceSelection',
+      'tariffSelection',
+      'cancelled',
+    ];
+    for (const key of optInColumns) {
+      expect(cellText(unknown ?? [], column(layout, key))).toBe(
+        cellText(sourceRow, column(source.layout, key)),
+      );
+    }
+    expect(await exportedAt(tariffId)).not.toBeNull();
+  });
+});
+
+describe('plus-commission-tariff export: an unknown Plus commission offer', () => {
+  beforeEach(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+    // The blocks above already send as many imports as RATE_LIMITS.FILE_IMPORT allows per
+    // minute with the same pooled user; give each test a fresh bucket.
+    _resetRateLimitStoreForTests();
+  });
+
+  // Gives the imported SINGLE_BARCODE item an unknown Plus commission offer (NULL: the
+  // file's offer cell was blank or unreadable) and the given opt-in. Its ceiling stays the
+  // file's, so only the percent is unknown.
+  async function withUnknownPlusCommission(
+    ctx: Ctx,
+    data: { readonly plusSelected: boolean; readonly customPrice: string | null },
+  ): Promise<void> {
+    const item = await prisma.plusCommissionTariffItem.findFirst({
+      where: { storeId: ctx.storeId, barcode: SINGLE_BARCODE },
+    });
+    expect(item).not.toBeNull();
+    expect(item?.plusPriceUpperLimit).not.toBeNull();
+    await prisma.plusCommissionTariffItem.update({
+      where: { id: item?.id },
+      data: {
+        plusCommissionPct: null,
+        plusSelected: data.plusSelected,
+        customPrice: data.customPrice,
+      },
+    });
+  }
+
+  it('answers 409 SELECTION_COMMISSION_UNKNOWN for a joined item whose Plus commission is unknown, and does not mark the tariff exported', async () => {
+    const ctx = await setupStore();
+    const tariffId = await importFixture(ctx, FIXTURE_SINGLE, 'trendyol-plus-tariff.xlsx');
+
+    // Joined at its (known) ceiling, but the offer percent is unknown: the export must
+    // refuse instead of writing a made-up 0 into the computed commission cell.
+    await withUnknownPlusCommission(ctx, { plusSelected: true, customPrice: null });
+
+    const res = await exportTariff(ctx, tariffId);
+    expect(res.status).toBe(409);
+    expect(ProblemSchema.parse(await res.json()).code).toBe('SELECTION_COMMISSION_UNKNOWN');
+
+    // No file was built, so the tariff is not marked exported.
+    expect(await exportedAt(tariffId)).toBeNull();
+  });
+
+  it('answers the same 409 when that item carries a custom price', async () => {
+    const ctx = await setupStore();
+    const tariffId = await importFixture(ctx, FIXTURE_SINGLE, 'trendyol-plus-tariff.xlsx');
+
+    // A custom price supplies the price, not the commission: still refused.
+    await withUnknownPlusCommission(ctx, { plusSelected: true, customPrice: '512.34' });
+
+    const res = await exportTariff(ctx, tariffId);
+    expect(res.status).toBe(409);
+    expect(ProblemSchema.parse(await res.json()).code).toBe('SELECTION_COMMISSION_UNKNOWN');
+    expect(await exportedAt(tariffId)).toBeNull();
+  });
+
+  it('exports the other products normally when the item with an unknown Plus commission is not joined', async () => {
+    const ctx = await setupStore();
+    const tariffId = await importFixture(ctx, FIXTURE_SINGLE, 'trendyol-plus-tariff.xlsx');
+
+    // SINGLE_BARCODE has an unknown Plus commission and is not joined; another product,
+    // whose offer the file gives, is joined at its ceiling.
+    await withUnknownPlusCommission(ctx, { plusSelected: false, customPrice: null });
+    const other = await prisma.plusCommissionTariffItem.findFirst({
+      where: { storeId: ctx.storeId, barcode: { not: SINGLE_BARCODE } },
+      orderBy: { sortOrder: 'asc' },
+    });
+    expect(other).not.toBeNull();
+    if (other === null) return;
+    expect(other.plusPriceUpperLimit).not.toBeNull();
+    expect(other.plusCommissionPct).not.toBeNull();
+    if (other.plusPriceUpperLimit === null || other.plusCommissionPct === null) return;
+    await prisma.plusCommissionTariffItem.update({
+      where: { id: other.id },
+      data: { plusSelected: true, customPrice: null },
+    });
+
+    const res = await exportTariff(ctx, tariffId);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain(XLSX_MIME_FRAGMENT);
+
+    const exported = new Uint8Array(await res.arrayBuffer());
+    const { grid, layout } = await readParsed(Buffer.from(exported));
+    const commissionCol = periodsOf(layout)[0]?.computedCommissionCol ?? null;
+    // The joined product carries its ceiling and its own commission offer.
+    const joined = rowFor(grid, layout, other.barcode);
+    expect(joined).toBeDefined();
+    expect(num(joined, column(layout, 'plusPriceSelection'))).toBe(
+      Number(other.plusPriceUpperLimit),
+    );
+    expect(num(joined, commissionCol)).toBe(Number(other.plusCommissionPct));
+    // The product with the unknown commission is left exactly as the source file had it:
+    // its opt-in cells untouched, and its computed commission cell still the source's own
+    // formula with its cached value, byte for byte (a written 0 would replace the formula;
+    // cellText alone cannot tell the two apart).
+    const source = await readParsed(FIXTURE_SINGLE);
+    const sourceRow = rowFor(source.grid, source.layout, SINGLE_BARCODE) ?? [];
+    const unknown = rowFor(grid, layout, SINGLE_BARCODE);
+    expect(unknown).toBeDefined();
+    const sourceCommissionXml = sheetCellXml(
+      new Uint8Array(FIXTURE_SINGLE),
+      source.grid.findIndex((r) => r === sourceRow),
+      periodsOf(source.layout)[0]?.computedCommissionCol ?? null,
+    );
+    expect(sourceCommissionXml).toMatch(/<(?:x:)?f>/);
+    expect(
+      sheetCellXml(
+        exported,
+        grid.findIndex((r) => r === unknown),
+        commissionCol,
+      ),
+    ).toBe(sourceCommissionXml);
     const optInColumns: readonly PlusColumn[] = [
       'plusPriceSelection',
       'tariffSelection',

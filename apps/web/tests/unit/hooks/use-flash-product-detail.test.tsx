@@ -30,7 +30,7 @@ function offer(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-function detailItem() {
+function detailItem(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
     barcode: '8681234567890',
@@ -55,7 +55,30 @@ function detailItem() {
     offer3: offer({ price: '650.00', netProfit: '20.00', validity: 'upcoming' }),
     selectedOffer: 'H24',
     customPrice: null,
+    ...overrides,
   };
+}
+
+const UNKNOWN_ITEM_ID = 'aaaaaaaa-bbbb-cccc-dddd-ffffffffffff';
+
+// No commission tariff band covers the offer and the file's current commission could not
+// be read: the current commission and the offer's percent are null, with no profit.
+function unknownCommissionItem() {
+  return detailItem({
+    id: UNKNOWN_ITEM_ID,
+    barcode: '8681234567891',
+    currentCommissionPct: null,
+    currentNetProfit: null,
+    currentMarginPct: null,
+    calculable: false,
+    reason: null,
+    hasCommissionTariff: false,
+    commissionSource: 'current',
+    commissionBands: null,
+    offer24: offer({ commissionPct: null, netProfit: null, marginPct: null }),
+    offer3: null,
+    selectedOffer: null,
+  });
 }
 
 function detailResponse() {
@@ -63,7 +86,7 @@ function detailResponse() {
     id: LIST_ID,
     name: 'Temmuz Flaş Ürünleri',
     exported: false,
-    items: [detailItem()],
+    items: [detailItem(), unknownCommissionItem()],
   };
 }
 
@@ -77,12 +100,35 @@ describe('useFlashProductDetail', () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data?.id).toBe(LIST_ID);
-    expect(result.current.data?.items).toHaveLength(1);
+    expect(result.current.data?.items).toHaveLength(2);
     const item = result.current.data?.items[0];
     expect(item?.selectedOffer).toBe('H24');
     expect(item?.currentNetProfit).toBe('50.00');
     expect(item?.offer24?.netProfit).toBe('30.00');
     expect(item?.offer3?.validity).toBe('upcoming');
+  });
+
+  it('keeps an unknown current commission and an unknown offer commission null', async () => {
+    server.use(http.get(ENDPOINT, () => HttpResponse.json(detailResponse(), { status: 200 })));
+
+    const { result } = renderHook(() => useFlashProductDetail(ORG_ID, STORE_ID, LIST_ID), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const item = result.current.data?.items.find((i) => i.id === UNKNOWN_ITEM_ID);
+    expect(item).toBeDefined();
+    // Never a made-up 0: the unknown percents stay null, and so do the profits.
+    expect(item?.currentCommissionPct).toBeNull();
+    expect(item?.currentNetProfit).toBeNull();
+    expect(item?.offer24?.commissionPct).toBeNull();
+    expect(item?.offer24?.netProfit).toBeNull();
+    expect(item?.offer24?.marginPct).toBeNull();
+    // The offer keeps its price, so it stays selectable.
+    expect(item?.offer24?.price).toBe('600.00');
+    expect(item?.commissionSource).toBe('current');
+    expect(item?.calculable).toBe(false);
+    expect(item?.reason).toBeNull();
   });
 
   it('does not fetch when listId is null (enabled=false path)', () => {

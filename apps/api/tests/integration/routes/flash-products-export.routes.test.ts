@@ -10,7 +10,9 @@
 //     into "Senin Belirlediğin Flaş Fiyatı" (M);
 //   • an unselected row is byte-for-byte unchanged — including another date row of the
 //     SAME product as a selected row (selections are per-row, not per-barcode).
-// A list with no selections streams back verbatim; a list with no stored source is 409.
+// A list with no selections streams back verbatim; a list with no stored source is 409. A
+// row whose commission is unknown (NULL) is still selected and exported: nothing the export
+// writes reads the commission.
 
 import { readFileSync } from 'node:fs';
 
@@ -216,6 +218,41 @@ describe('flash-products export', () => {
       })
     ).json()) as { data: { id: string; exported: boolean }[] };
     expect(list.data.find((l) => l.id === listId)?.exported).toBe(true);
+  });
+
+  it('exports a chosen offer of a row whose commission is unknown', async () => {
+    const ctx = await setupStore();
+    const listId = await importFile(ctx, FIXTURE);
+
+    // The first row's "Mevcut Komisyon" cell was blank or unreadable, so its flat rate is
+    // NULL. The export writes only the participation label (and a custom price), neither
+    // of which reads the commission, so the row stays selectable and exportable.
+    const first = await prisma.flashProductItem.findFirst({
+      where: { listId },
+      orderBy: { sortOrder: 'asc' },
+    });
+    expect(first).not.toBeNull();
+    if (first === null) return;
+    await prisma.flashProductItem.update({
+      where: { id: first.id },
+      data: { currentCommissionPct: null },
+    });
+
+    await patchSelections(ctx, listId, [{ itemId: first.id, offer: 'H24', customPrice: null }]);
+
+    const res = await app.request(exportRequest(ctx, listId));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain(XLSX_MIME);
+
+    // sortOrder 0 is Excel row 2 (grid index 1): its updated-price column (J) carries the label.
+    const grid = await readWorkbookGrid(Buffer.from(await res.arrayBuffer()), {
+      sheetName: SHEET_NAME,
+    });
+    expect(cellText(grid[1] ?? [], COL_BARCODE)).toBe(first.barcode);
+    expect(cellText(grid[1] ?? [], COL_UPDATED_PRICE)).toBe(LABEL_24H);
+
+    const listed = await prisma.flashProductList.findUnique({ where: { id: listId } });
+    expect(listed?.exportedAt).not.toBeNull();
   });
 
   it('returns 409 when the list has no stored source file', async () => {

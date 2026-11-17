@@ -7,14 +7,17 @@
 // mode prices the item's customer price at its current commission and MUST equal the
 // detail row's current baseline byte-for-byte. An unmatched item degrades to
 // not-calculable; an invalid or mode-contradictory price is a 422; a foreign item id is
-// 404.
+// 404. An unknown (NULL) flat rate is never priced at 0%: its current scenario is a 422
+// CURRENT_COMMISSION_UNKNOWN, and a price no band covers answers not calculable with a
+// null commission.
 //
 // Fixture: one calculable band-matched variant (TRY cost + SENDEOMP shipping + fee defs)
 // with a commission tariff whose active period bands cover the offer window, plus an
 // unmatched item.
 
+import { z } from '@hono/zod-openapi';
 import { Decimal } from 'decimal.js';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
@@ -73,6 +76,21 @@ interface EstimateWire {
   } | null;
 }
 
+// The estimate responses the unknown-flat-rate cases read, parsed rather than cast.
+const ProblemSchema = z.object({
+  code: z.string(),
+  errors: z.array(z.object({ field: z.string(), code: z.string() })).optional(),
+});
+const EstimateResultSchema = z.object({
+  itemId: z.string(),
+  price: z.string(),
+  commissionPct: z.string().nullable(),
+  commissionSource: z.enum(['band', 'current']).nullable(),
+  calculable: z.boolean(),
+  reason: z.string().nullable(),
+  breakdown: z.object({ saleGross: z.string(), netProfit: z.string() }).nullable(),
+});
+
 interface Fixture {
   accessToken: string;
   orgId: string;
@@ -80,6 +98,8 @@ interface Fixture {
   listId: string;
   matchedItemId: string;
   unmatchedItemId: string;
+  /** Matched, no commission tariff flag, flat "Mevcut Komisyon" unknown (NULL). */
+  unknownFlatItemId: string;
 }
 
 async function setupFixture(): Promise<Fixture> {
@@ -239,6 +259,27 @@ async function setupFixture(): Promise<Fixture> {
       sortOrder: 1,
     },
   });
+  // The matched variant, but the file's "Mevcut Komisyon" cell was blank or unreadable
+  // (NULL) and the product has no commission tariff, so no band covers any price: every
+  // price falls back to the unknown flat rate.
+  const unknownFlat = await prisma.flashProductItem.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      listId: list.id,
+      productVariantId: variant.id,
+      barcode: MATCHED_BARCODE,
+      productTitle: 'Komisyonsuz Flas Urunu',
+      currentPrice: '360.00',
+      customerPrice: '360.00',
+      currentCommissionPct: null,
+      hasCommissionTariff: false,
+      offer24Price: OFFER_PRICE,
+      offer24StartsAt: flashInstant(2026, 7, 9, 0),
+      offer24EndsAt: flashInstant(2026, 7, 9, 23, 59),
+      sortOrder: 2,
+    },
+  });
 
   return {
     accessToken: user.accessToken,
@@ -247,6 +288,7 @@ async function setupFixture(): Promise<Fixture> {
     listId: list.id,
     matchedItemId: matched.id,
     unmatchedItemId: unmatched.id,
+    unknownFlatItemId: unknownFlat.id,
   };
 }
 
@@ -378,5 +420,56 @@ describe('Flash Products - item estimate', () => {
     expect(body.code).toBe('VALIDATION_ERROR');
     expect(body.errors[0]?.field).toBe('price');
     expect(body.errors[0]?.code).toBe('INVALID_CUSTOM_PRICE');
+  });
+
+  it('answers 422 CURRENT_COMMISSION_UNKNOWN on field scenario when the flat rate is unknown', async () => {
+    // The customer price is known; the current scenario prices it at the flat rate, which
+    // is unknown, so there is nothing to break down (the detail row has no current profit).
+    const res = await app.request(estimateUrl(fx, fx.unknownFlatItemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario: 'current' }),
+    });
+    expect(res.status).toBe(422);
+    const body = ProblemSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual([{ field: 'scenario', code: 'CURRENT_COMMISSION_UNKNOWN' }]);
+  });
+
+  it('answers 200 not calculable with a null commission for a price with no covering band', async () => {
+    const estimateAt = async (itemId: string): Promise<z.infer<typeof EstimateResultSchema>> => {
+      const res = await app.request(estimateUrl(fx, itemId), {
+        method: 'POST',
+        headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ price: '350.00' }),
+      });
+      expect(res.status).toBe(200);
+      return EstimateResultSchema.parse(await res.json());
+    };
+
+    // No band covers the price, so it falls back to the unknown flat rate: not an invalid
+    // request, but nothing to price either -- never priced at 0%. A compute that threw is
+    // degraded to the same shape and logged; nothing may be logged here.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let body: z.infer<typeof EstimateResultSchema>;
+    try {
+      body = await estimateAt(fx.unknownFlatItemId);
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+    expect(body.itemId).toBe(fx.unknownFlatItemId);
+    expect(body.price).toBe('350.00');
+    expect(body.calculable).toBe(false);
+    expect(body.reason).toBeNull();
+    expect(body.commissionPct).toBeNull();
+    expect(body.commissionSource).toBe('current');
+    expect(body.breakdown).toBeNull();
+
+    // The same variant at the same price is calculable when its commission is known, so
+    // the result above is the unknown rate, not a missing cost or a degraded base.
+    const control = await estimateAt(fx.matchedItemId);
+    expect(control.calculable).toBe(true);
+    expect(control.breakdown).not.toBeNull();
   });
 });

@@ -19,6 +19,7 @@ import { TariffBestRibbon } from './tariff-best-ribbon';
 import { TariffOptionCard } from './tariff-option-card';
 import { TariffProfitBlock } from './tariff-profit-block';
 import { TariffSelectFoot } from './tariff-select-foot';
+import { TariffUnknownPrice } from './tariff-unknown-price';
 
 export interface FlashProductOfferCellProps {
   row: FlashProductRow;
@@ -48,6 +49,13 @@ export interface FlashProductOfferCellProps {
  *
  * Choosing is a TOGGLE owned by the parent: choosing clears any custom price and the other
  * offer (1-of-4 per row); re-clicking clears the offer.
+ *
+ * An offer whose commission percent is unknown (no commission tariff band covers it and
+ * the flat current rate could not be read) reads "commission Unknown" on that line, with
+ * its own caption under it, and has no profit. Nothing the export writes depends on the
+ * percent, so the offer stays selectable. The caller's best pick never lands on it (a null
+ * profit never wins), and the badge click still asks the backend, which answers "not
+ * calculable".
  *
  * A11y: the overlay `<button>` is a SIBLING of the ProfitBadge (which is itself a
  * `<button>` opening the breakdown), never an ancestor — nesting `<button>` in `<button>`
@@ -122,9 +130,18 @@ export function FlashProductOfferCell({
       {/* Flash price (the exact offer price — not a ceiling) then the reduced commission. */}
       <div className="gap-3xs flex min-w-0 flex-col items-start">
         <span className="text-base font-bold tabular-nums">{formatCurrency(band.price)}</span>
-        <span className="text-2xs text-muted-foreground tabular-nums">
-          {t('offerCommission')} {formatPercentDisplay(band.commissionPct)}
-        </span>
+        {band.commissionPct === null ? (
+          // The unknown commission line and, under it, why the offer has no profit.
+          <TariffUnknownPrice
+            size="line"
+            label={`${t('offerCommission')} ${t('commissionUnknown')}`}
+            hint={t('offerCommissionUnknownHint')}
+          />
+        ) : (
+          <span className="text-2xs text-muted-foreground tabular-nums">
+            {t('offerCommission')} {formatPercentDisplay(band.commissionPct)}
+          </span>
+        )}
       </div>
 
       <TariffProfitBlock

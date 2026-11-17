@@ -4,8 +4,11 @@
 // period). The export writes the seller's opt-in back: the Plus price (the custom one,
 // else the ceiling), the window's tariff selection, the offer of every period the file
 // covers into that period's computed commission column, and the no-cancel label. The
-// ceiling and the offers are written values, so one the export could not write is
-// refused at upload. A blank, unreadable or 0 price is unknown and reads as null.
+// ceiling and the offers are written values, so a known one the export could not write
+// is refused at upload. A blank, unreadable or 0 price is unknown and reads as null. A
+// blank or unreadable percent (the current commission, a period offer) is unknown and
+// reads as null too, never as 0%; a readable 0 stays '0'. An unknown offer is never
+// written, so it is never write-checked.
 
 import { Decimal } from 'decimal.js';
 
@@ -29,7 +32,8 @@ import { TARIFF_SELECTION_WRITE, TARIFF_WINDOW_FILE_UNIT } from './tariff-window
 /**
  * One kept product row of the Plus file. Prices and percents are decimal strings as
  * the file holds them. A price is null when it is unknown (a blank, unreadable or 0
- * cell, see `knownPrice`); a blank or unreadable percent reads as '0'.
+ * cell, see `knownPrice`). A percent is null when it is unknown (a blank cell, or one
+ * that does not read as a decimal); a readable 0 is a real 0% and stays '0'.
  */
 export interface PlusCommissionTariffRow {
   readonly barcode: string;
@@ -43,15 +47,22 @@ export interface PlusCommissionTariffRow {
   readonly currentPrice: string | null;
   /** The commission base price, else the current price. */
   readonly commissionBasePrice: string | null;
-  readonly currentCommissionPct: string;
+  /**
+   * The current commission percent, or null when it is unknown: the cell is blank or
+   * does not read as a decimal. An unknown percent is never priced at 0%.
+   */
+  readonly currentCommissionPct: string | null;
   readonly plusPriceUpperLimit: string | null;
   /** The Plus commission base price, else the Plus price ceiling. */
   readonly plusCommissionBasePrice: string | null;
   readonly externalId: string | null;
   readonly tariffGroup: string | null;
   readonly cancelled: boolean;
-  /** The Plus commission offer of each period block, in layout block order. */
-  readonly periodOffers: readonly string[];
+  /**
+   * The Plus commission offer of each period block, in layout block order; null when
+   * the block's offer cell is blank or does not read as a decimal (unknown, never 0%).
+   */
+  readonly periodOffers: readonly (string | null)[];
 }
 
 /** The Plus file's write-back columns. */
@@ -73,12 +84,6 @@ const PLUS_OFFER_SCALE = 4;
 /** The download base name; the window suffix (`-7-gunluk`) is added per file. */
 const PLUS_EXPORT_BASE_NAME = 'plus-komisyon-tarifesi';
 
-/**
- * What a blank or unreadable percent cell (the current commission, a period offer) reads
- * as, as the import always stored it. Prices never read as it: an unknown one is null.
- */
-const BLANK_DECIMAL = '0';
-
 const SUMMARY = TRENDYOL_FORMAT_SUMMARIES.PLUS_COMMISSION_TARIFF;
 
 /** The Plus price column's write rule; every Plus price ceiling is read against it too. */
@@ -89,7 +94,7 @@ const PLUS_PRICE_SELECTION_WRITE: WriteValueSpec = {
 
 /**
  * The computed commission column's write rule: the period's offer percent with every
- * stored digit (`Decimal.toFixed()`). Every period offer is read against it too.
+ * stored digit (`Decimal.toFixed()`). Every known period offer is read against it too.
  */
 const COMPUTED_COMMISSION_WRITE: WriteValueSpec = { kind: 'number' };
 
@@ -110,13 +115,14 @@ function writableCeiling(value: string): string {
 }
 
 /**
- * `value`, a period's offer percent, when the export can write it as the computed
- * commission; the stored offer stays the file's own text.
+ * `value`, a period's known offer percent, when the export can write it as the computed
+ * commission; the stored offer stays the file's own text. An unknown (null) offer is
+ * never written, so it never reaches this check.
  *
  * The export writes the stored offer, which the database rounded to PLUS_OFFER_SCALE, so
  * the check reads the rounded value: an Excel float residue such as 15.400000000000002 is
- * stored and written as 15.4 and passes. Every period block of the row is checked, also
- * one whose label is blank on the first row and so is never stored.
+ * stored and written as 15.4 and passes. Every period block of the row with a known offer
+ * is checked, also one whose label is blank on the first row and so is never stored.
  *
  * Throws SpreadsheetFileError MALFORMED_SHEET (reason UNWRITABLE_VALUE_REASON) for an
  * offer the export could not write: a negative one, or one wider than its probe.
@@ -154,7 +160,7 @@ export const trendyolPlusCommissionTariffFormat = defineFormat({
       currentPrice,
       // The fallbacks skip an unknown price, so a 0 never stands in for a known one.
       commissionBasePrice: knownPrice(reader.decimal('commissionBasePrice')) ?? currentPrice,
-      currentCommissionPct: reader.decimal('currentCommission') ?? BLANK_DECIMAL,
+      currentCommissionPct: reader.decimal('currentCommission'),
       // Only a known ceiling is write-checked: an unknown one is never written.
       plusPriceUpperLimit: ceiling === null ? null : writableCeiling(ceiling),
       plusCommissionBasePrice: knownPrice(reader.decimal('plusCommissionBasePrice')) ?? ceiling,
@@ -162,9 +168,11 @@ export const trendyolPlusCommissionTariffFormat = defineFormat({
       tariffGroup: reader.text('tariffGroup'),
       // A number cell: the number 1 cancels, the text "0" does not.
       cancelled: reader.numericFlag('cancelled'),
-      periodOffers: reader
-        .blocks('periods')
-        .map((period) => writableOffer(period.decimal('offer') ?? BLANK_DECIMAL)),
+      // Only a known offer is write-checked: an unknown one is never written.
+      periodOffers: reader.blocks('periods').map((period) => {
+        const offer = period.decimal('offer');
+        return offer === null ? null : writableOffer(offer);
+      }),
     };
   },
   writeBack: {

@@ -4,7 +4,9 @@
 // band commissions). The export writes the seller's choice back: the chosen price into
 // the new price column and the window's tariff selection. A known current price and
 // every stored band's known price are written values, so one the export could not write
-// is refused at upload; an unknown current price is stored as null, never as 0.
+// is refused at upload; an unknown current price is stored as null, never as 0. An
+// unknown current commission (a blank or unreadable cell) is null too, never 0%; a
+// readable 0 stays '0'.
 
 import { Decimal } from 'decimal.js';
 
@@ -34,7 +36,7 @@ export interface CommissionTariffBrackets {
 
 /**
  * One kept product row of the commission file. Prices and percents are decimal strings
- * as the file holds them; a blank current commission reads as '0'.
+ * as the file holds them.
  */
 export interface CommissionTariffRow {
   readonly barcode: string;
@@ -55,7 +57,13 @@ export interface CommissionTariffRow {
    * current price; the import keeps null.
    */
   readonly commissionBasePrice: string | null;
-  readonly currentCommissionPct: string;
+  /**
+   * The current commission percent, or null when it is unknown: the cell is blank or
+   * does not read as a decimal (a text with a percent sign or a lira suffix, an error, a
+   * date or a boolean). An unknown percent is never priced at 0%; a readable 0 is a real
+   * 0% and stays '0'.
+   */
+  readonly currentCommissionPct: string | null;
   readonly brackets: CommissionTariffBrackets;
   /** Each period block's four band commissions, in layout block order; a blank one is null. */
   readonly periodComms: readonly (readonly (string | null)[])[];
@@ -69,9 +77,6 @@ export const NEW_TSF_SCALE = 2;
 
 /** The download base name; the window suffix (`-3-gunluk`) is added per file. */
 const COMMISSION_EXPORT_BASE_NAME = 'urun-komisyon-tarifesi';
-
-/** What a blank or unreadable current commission reads as, as the import always stored it. */
-const BLANK_DECIMAL = '0';
 
 const SUMMARY = TRENDYOL_FORMAT_SUMMARIES.COMMISSION_TARIFF;
 
@@ -209,7 +214,7 @@ export const trendyolCommissionTariffFormat = defineFormat({
       stock: requireStorableInt(reader.int('stock', 'truncate')),
       currentPrice,
       commissionBasePrice: knownPrice(reader.decimal('commissionBasePrice')),
-      currentCommissionPct: reader.decimal('currentCommission') ?? BLANK_DECIMAL,
+      currentCommissionPct: reader.decimal('currentCommission'),
       brackets,
       periodComms,
     };

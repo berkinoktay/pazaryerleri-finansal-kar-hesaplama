@@ -220,6 +220,7 @@ export const WORKBOOK_CONFLICT_REASONS = [
   'ROW_NOT_FOUND',
   'EXPORT_FILENAME_COLLISION',
   'SELECTION_PRICE_UNKNOWN',
+  'SELECTION_COMMISSION_UNKNOWN',
 ] as const;
 
 export type WorkbookConflictReason = (typeof WORKBOOK_CONFLICT_REASONS)[number];
@@ -237,6 +238,7 @@ export const WORKBOOK_CONFLICT_DETAILS: Readonly<Record<WorkbookConflictReason, 
   ROW_NOT_FOUND: 'A row of the stored file that the export must write is missing',
   EXPORT_FILENAME_COLLISION: 'Two files of the export would get the same name',
   SELECTION_PRICE_UNKNOWN: 'A selected product has no known price to export',
+  SELECTION_COMMISSION_UNKNOWN: 'A selected product has no known commission to export',
 };
 
 /**

@@ -1004,17 +1004,21 @@ describe('Plus Commission Tariffs - per-item degrade (decision 9)', () => {
   });
 });
 
-// The detail fields the unknown-price cases read, parsed rather than cast.
+// The detail fields the unknown-price and unknown-commission cases read, parsed rather
+// than cast.
 const UnknownPriceItemSchema = z.object({
   barcode: z.string(),
   currentPrice: z.string().nullable(),
   commissionBasePrice: z.string().nullable(),
+  // Null when the file's current commission cell was blank or unreadable.
+  currentCommissionPct: z.string().nullable(),
   currentNetProfit: z.string().nullable(),
   currentMarginPct: z.string().nullable(),
   plusPriceUpperLimit: z.string().nullable(),
   plus: z.object({
     price: z.string().nullable(),
-    commissionPct: z.string(),
+    // Null when the file's Plus commission offer cell was blank or unreadable.
+    commissionPct: z.string().nullable(),
     netProfit: z.string().nullable(),
     marginPct: z.string().nullable(),
   }),
@@ -1034,7 +1038,19 @@ interface SeededPrices {
   readonly plusPriceUpperLimit: string | null;
 }
 
-describe('Plus Commission Tariffs - unknown (NULL) prices', () => {
+/** The stored percents of one seeded item; null is a cell the file left blank or unreadable. */
+interface SeededPercents {
+  readonly currentCommissionPct: string | null;
+  readonly plusCommissionPct: string | null;
+}
+
+/** The current commission (19) and Plus offer (15.4) every row carries unless it says otherwise. */
+const KNOWN_PERCENTS: SeededPercents = {
+  currentCommissionPct: '19.0000',
+  plusCommissionPct: '15.4',
+};
+
+describe('Plus Commission Tariffs - unknown (NULL) prices and commissions', () => {
   // Every row points at the SAME calculable variant, current commission (19) and Plus
   // offer (15.4), so the rows differ only in which prices are known. CONTROL is fully
   // priced with the ceiling equal to its baseline, so the lower Plus commission makes Plus
@@ -1042,13 +1058,18 @@ describe('Plus Commission Tariffs - unknown (NULL) prices', () => {
   // work, not the numbers. CONTROL_400 is the same product at another price, to show the
   // fallback baseline is the current price and not just any value. The control rows also
   // prove the base loaded (not degraded), since a degraded base also answers
-  // `calculable: false` with `reason: null`.
+  // `calculable: false` with `reason: null`. The NO_*_PCT rows carry CONTROL's prices and
+  // differ from it only in an unknown (NULL) commission percent, so every null figure on
+  // them is the unknown percent at work, never a profit priced at 0%.
   const CONTROL = 'BC-PUNK-CTRL';
   const CONTROL_400 = 'BC-PUNK-CTRL-400';
   const NO_BASELINE = 'BC-PUNK-NO-BASE';
   const NO_COMMISSION_BASE = 'BC-PUNK-NO-CBP';
   const NO_CEILING = 'BC-PUNK-NO-CEIL';
   const NO_PRICE = 'BC-PUNK-NO-PRICE';
+  const NO_CURRENT_PCT = 'BC-PUNK-NO-CPCT';
+  const NO_PLUS_PCT = 'BC-PUNK-NO-PPCT';
+  const NO_PCT = 'BC-PUNK-NO-PCT';
 
   let accessToken: string;
   let detailUrl: string;
@@ -1143,7 +1164,11 @@ describe('Plus Commission Tariffs - unknown (NULL) prices', () => {
       },
     });
     let sort = 0;
-    const makeItem = async (barcode: string, prices: SeededPrices): Promise<void> => {
+    const makeItem = async (
+      barcode: string,
+      prices: SeededPrices,
+      percents: SeededPercents = KNOWN_PERCENTS,
+    ): Promise<void> => {
       await prisma.plusCommissionTariffItem.create({
         data: {
           organizationId: org.id,
@@ -1154,9 +1179,9 @@ describe('Plus Commission Tariffs - unknown (NULL) prices', () => {
           productTitle: barcode,
           currentPrice: prices.currentPrice,
           commissionBasePrice: prices.commissionBasePrice,
-          currentCommissionPct: '19.0000',
+          currentCommissionPct: percents.currentCommissionPct,
           plusPriceUpperLimit: prices.plusPriceUpperLimit,
-          plusCommissionPct: '15.4',
+          plusCommissionPct: percents.plusCommissionPct,
           // The import's fallback: the Plus commission base is the ceiling when unknown.
           plusCommissionBasePrice: prices.plusPriceUpperLimit,
           sortOrder: sort++,
@@ -1195,6 +1220,21 @@ describe('Plus Commission Tariffs - unknown (NULL) prices', () => {
       commissionBasePrice: null,
       plusPriceUpperLimit: null,
     });
+    // CONTROL's prices; only the named percent (or both) is unknown.
+    const controlPrices: SeededPrices = {
+      currentPrice: '500.00',
+      commissionBasePrice: '500.00',
+      plusPriceUpperLimit: '500.00',
+    };
+    await makeItem(NO_CURRENT_PCT, controlPrices, {
+      currentCommissionPct: null,
+      plusCommissionPct: '15.4',
+    });
+    await makeItem(NO_PLUS_PCT, controlPrices, {
+      currentCommissionPct: '19.0000',
+      plusCommissionPct: null,
+    });
+    await makeItem(NO_PCT, controlPrices, { currentCommissionPct: null, plusCommissionPct: null });
 
     accessToken = user.accessToken;
     detailUrl = `/v1/organizations/${org.id}/stores/${store.id}/plus-commission-tariffs/${tariff.id}`;
@@ -1315,5 +1355,79 @@ describe('Plus Commission Tariffs - unknown (NULL) prices', () => {
     } finally {
       errorSpy.mockRestore();
     }
+  });
+
+  it('returns a null current profit when the current commission is unknown, with the Plus profit computed', async () => {
+    const items = await fetchItems();
+    const control = itemOf(items, CONTROL);
+    const row = itemOf(items, NO_CURRENT_PCT);
+
+    // No made-up 0: the unknown percent stays null on the wire, the prices stay known.
+    expect(row.currentCommissionPct).toBeNull();
+    expect(control.currentCommissionPct).toBe('19.0000');
+    expect(row.currentPrice).toBe('500.00');
+    expect(row.commissionBasePrice).toBe('500.00');
+    // The control prices the same baseline at 19%; this row has no current figures at all.
+    expect(control.currentNetProfit).not.toBeNull();
+    expect(row.currentNetProfit).toBeNull();
+    expect(row.currentMarginPct).toBeNull();
+    // The offer reads only its own percent: priced exactly as the control's.
+    expect(row.plus.price).toBe('500.00');
+    expect(row.plus.commissionPct).toBe('15.4');
+    expect(row.plus.netProfit).not.toBeNull();
+    expect(row.plus.netProfit).toBe(control.plus.netProfit);
+    expect(row.plus.marginPct).toBe(control.plus.marginPct);
+    // The calculable offer decides calculability; with no current profit Plus is never
+    // "better" (the control, with the same numbers, says it is).
+    expect(row.calculable).toBe(true);
+    expect(row.reason).toBeNull();
+    expect(control.plusIsBetter).toBe(true);
+    expect(row.plusIsBetter).toBe(false);
+  });
+
+  it('returns the Plus offer with its price, a null commissionPct and no profit when the Plus commission is unknown, and plusIsBetter false', async () => {
+    const items = await fetchItems();
+    const control = itemOf(items, CONTROL);
+    const row = itemOf(items, NO_PLUS_PCT);
+
+    // The ceiling is known, so the offer echoes its price; its percent is unknown, so it
+    // has no commission and no profit (never priced at 0%).
+    expect(row.plusPriceUpperLimit).toBe('500.00');
+    expect(row.plus.price).toBe('500.00');
+    expect(row.plus.commissionPct).toBeNull();
+    expect(row.plus.netProfit).toBeNull();
+    expect(row.plus.marginPct).toBeNull();
+    expect(control.plus.netProfit).not.toBeNull();
+    // The current figures read only the current percent: computed exactly as the control's.
+    expect(row.currentCommissionPct).toBe('19.0000');
+    expect(row.currentNetProfit).not.toBeNull();
+    expect(row.currentNetProfit).toBe(control.currentNetProfit);
+    expect(row.currentMarginPct).toBe(control.currentMarginPct);
+    expect(row.calculable).toBe(true);
+    expect(row.reason).toBeNull();
+    // The control says Plus is better; an offer with no profit never is.
+    expect(control.plusIsBetter).toBe(true);
+    expect(row.plusIsBetter).toBe(false);
+  });
+
+  it('returns calculable false with reason null when both commissions are unknown', async () => {
+    const items = await fetchItems();
+    const row = itemOf(items, NO_PCT);
+
+    expect(row.calculable).toBe(false);
+    expect(row.reason).toBeNull();
+    expect(row.currentCommissionPct).toBeNull();
+    expect(row.currentNetProfit).toBeNull();
+    expect(row.currentMarginPct).toBeNull();
+    // The prices are known and echoed; neither scenario has a percent, so neither has a profit.
+    expect(row.currentPrice).toBe('500.00');
+    expect(row.plus.price).toBe('500.00');
+    expect(row.plus.commissionPct).toBeNull();
+    expect(row.plus.netProfit).toBeNull();
+    expect(row.plus.marginPct).toBeNull();
+    expect(row.plusIsBetter).toBe(false);
+    // The same variant and prices price the control: this is the unknown percents, not a
+    // degraded base.
+    expect(itemOf(items, CONTROL).calculable).toBe(true);
   });
 });

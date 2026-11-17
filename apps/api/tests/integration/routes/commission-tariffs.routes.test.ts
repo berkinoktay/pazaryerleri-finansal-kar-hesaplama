@@ -47,6 +47,8 @@ interface ItemWire {
   /** Null when the file's current price cell was blank, unreadable or 0. */
   currentPrice: string | null;
   commissionBasePrice: string | null;
+  /** Null when the file's current commission cell was blank or unreadable. */
+  currentCommissionPct: string | null;
   currentNetProfit: string | null;
   currentMarginPct: string | null;
   calculable: boolean;
@@ -1264,19 +1266,22 @@ describe('Commission Tariffs - sub-kurus band limits (Faz 4B closing gate)', () 
   });
 });
 
-describe('Commission Tariffs - unknown current price', () => {
-  // Items whose current_price is NULL (the file's GUNCEL TSF was blank, unreadable or 0).
-  // Every item sits on ONE calculable variant (TRY cost + SENDEOMP shipping + fee defs),
-  // so a null profit here can only come from the unknown price, never from a missing cost
-  // or an unmatched barcode. Each NULL item has a sibling with the same bands and a known
-  // price, so its band profits are pinned against real numbers, not just "not null":
+describe('Commission Tariffs - unknown current price or commission', () => {
+  // Items whose current_price is NULL (the file's GUNCEL TSF was blank, unreadable or 0),
+  // and one whose current_commission_pct is NULL (the file's current commission cell was
+  // blank or unreadable). Every item sits on ONE calculable variant (TRY cost + SENDEOMP
+  // shipping + fee defs), so a null profit here can only come from the unknown value,
+  // never from a missing cost or an unmatched barcode. Each NULL item has a sibling with
+  // the same bands and a known value, so its band profits are pinned against real
+  // numbers, not just "not null":
   //   BC-UNK-BOTH   : current + commission base price unknown, four limited bands
-  //   BC-UNK-REF    : current price 500, the same four limited bands (BOTH's sibling)
+  //   BC-UNK-REF    : current price 500, the same four limited bands (BOTH's and PCT's sibling)
   //   BC-UNK-BASE   : current price unknown, commission base price 400, the same bands
   //   BC-UNK-BASEREF: current price 500, commission base price 400 (BASE's sibling)
   //   BC-UNK-NOLIM  : both unknown; a 0% band with neither limit listed FIRST, then a
   //                   limited band -- priced, the 0% band would be the best one
   //   BC-UNK-ONLY   : both unknown; its only band has neither limit
+  //   BC-UNK-PCT    : current price 500 (as REF), the same bands, current commission unknown
   const LIMITED_BANDS = [
     { key: 'band1', lowerLimit: '450.00', commissionPct: '19' },
     { key: 'band2', lowerLimit: '400.00', upperLimit: '450.00', commissionPct: '15' },
@@ -1389,6 +1394,8 @@ describe('Commission Tariffs - unknown current price', () => {
         upperLimit?: string;
         commissionPct: string;
       }>,
+      // Null is a current commission cell the file left blank or unreadable.
+      currentCommissionPct: string | null = '19.0000',
     ): Promise<void> => {
       await prisma.commissionTariffItem.create({
         data: {
@@ -1401,7 +1408,7 @@ describe('Commission Tariffs - unknown current price', () => {
           sortOrder,
           currentPrice: prices.currentPrice,
           commissionBasePrice: prices.commissionBasePrice,
-          currentCommissionPct: '19.0000',
+          currentCommissionPct,
           bands,
         },
       });
@@ -1437,6 +1444,13 @@ describe('Commission Tariffs - unknown current price', () => {
     await makeItem('BC-UNK-ONLY', 5, { currentPrice: null, commissionBasePrice: null }, [
       { key: 'band1', commissionPct: '19' },
     ]);
+    await makeItem(
+      'BC-UNK-PCT',
+      6,
+      { currentPrice: '500.00', commissionBasePrice: null },
+      LIMITED_BANDS,
+      null,
+    );
 
     accessToken = user.accessToken;
     orgId = org.id;
@@ -1554,10 +1568,56 @@ describe('Commission Tariffs - unknown current price', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       const items = await fetchItems();
-      expect(items).toHaveLength(6);
+      expect(items).toHaveLength(7);
       // The unknown-price rows computed on their own path; none was degraded via the
       // per-item failure log (which would also blank its band profits).
       expect(itemOf(items, 'BC-UNK-BOTH').bands[0]?.netProfit).not.toBeNull();
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('returns a null currentCommissionPct and a null current profit, with the band profits computed', async () => {
+    const items = await fetchItems();
+    const row = itemOf(items, 'BC-UNK-PCT');
+    const ref = itemOf(items, 'BC-UNK-REF');
+
+    // No made-up 0: the unknown percent stays null on the wire; the sibling's is known.
+    expect(row.currentCommissionPct).toBeNull();
+    expect(ref.currentCommissionPct).toBe('19.0000');
+    // The price is known; only the percent is not. With the same price the sibling has a
+    // current profit, so the null here is the unknown percent, never a 0% figure.
+    expect(row.currentPrice).toBe('500.00');
+    expect(row.currentNetProfit).toBeNull();
+    expect(row.currentMarginPct).toBeNull();
+    expect(ref.currentNetProfit).not.toBeNull();
+    expect(ref.currentMarginPct).not.toBeNull();
+
+    // The bands never read the current percent: still calculable, every band priced and
+    // computed exactly as the sibling's, the same best band.
+    expect(row.calculable).toBe(true);
+    expect(row.reason).toBeNull();
+    expect(row.bands.map((b) => b.price)).toEqual(LIMITED_BAND_PRICES);
+    for (const band of row.bands) {
+      expect(band.netProfit).not.toBeNull();
+      expect(band.marginPct).not.toBeNull();
+    }
+    expect(row.bands.map((b) => b.netProfit)).toEqual(ref.bands.map((b) => b.netProfit));
+    expect(row.bands.map((b) => b.marginPct)).toEqual(ref.bands.map((b) => b.marginPct));
+    expect(row.bestBandKey).not.toBeNull();
+    expect(row.bestBandKey).toBe(ref.bestBandKey);
+  });
+
+  it('does not log a profit-read failure for a row with an unknown current commission', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const items = await fetchItems();
+      // The unknown-percent row computed on the no-baseline path; it was not degraded via
+      // the per-item failure log (which would also blank its band profits).
+      const row = itemOf(items, 'BC-UNK-PCT');
+      expect(row.calculable).toBe(true);
+      expect(row.bands[0]?.netProfit).not.toBeNull();
       expect(errorSpy).not.toHaveBeenCalled();
     } finally {
       errorSpy.mockRestore();

@@ -34,6 +34,7 @@ import {
   screenScenarioBaseFor,
   serializeCommissionBandLadder,
 } from './scenario-screen-commons';
+import { decimalOrNull, percentOrNull } from './tariff-compute-commons';
 import type {
   FlashProductDetail,
   FlashProductDetailItem,
@@ -94,7 +95,11 @@ export async function listFlashProducts(
  * computes each item with the scenario engine (the resolved band / flat rate handed in as
  * the commission override). A slim org + store scoped variant query supplies the display
  * image only. Per decision 9 a store-wide load failure or a per-item engine throw leaves
- * that profit empty (logged once) rather than failing the request.
+ * that profit empty (logged once) rather than failing the request. The stored current
+ * commission percent (the flat rate) is read through `decimalOrNull` / `percentOrNull`: an
+ * unknown percent (the file's cell was blank or unreadable) is sent as a null
+ * `currentCommissionPct` and is never priced (`computeFlashItem` decides what it leaves
+ * computable: an offer a tariff band covers keeps its profit).
  */
 export async function getFlashProductDetail(
   orgId: string,
@@ -249,7 +254,8 @@ export async function getFlashProductDetail(
     );
 
     const flashInput = {
-      currentCommissionPct: new Decimal(item.currentCommissionPct.toString()),
+      // Null when the file's current commission cell was blank or unreadable.
+      currentCommissionPct: decimalOrNull(item.currentCommissionPct),
       customerPrice: new Decimal(item.customerPrice.toString()),
       offer24,
       offer3,
@@ -276,7 +282,7 @@ export async function getFlashProductDetail(
       externalId: item.externalId,
       currentPrice: item.currentPrice.toFixed(2),
       customerPrice: item.customerPrice.toFixed(2),
-      currentCommissionPct: new Decimal(item.currentCommissionPct.toString()).toFixed(4),
+      currentCommissionPct: percentOrNull(item.currentCommissionPct),
       currentNetProfit: computed.currentNetProfit,
       currentMarginPct: computed.currentMarginPct,
       calculable: computed.calculable,

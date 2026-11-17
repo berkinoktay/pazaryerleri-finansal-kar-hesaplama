@@ -37,7 +37,12 @@ export interface FlashBand {
   key: FlashOfferKey;
   /** The offer's flash price (the amount the buyer sees during the window). */
   price: string;
-  commissionPct: string;
+  /**
+   * The offer's reduced commission PERCENT (its tariff band, else the flat current rate).
+   * `null` means unknown: no band covers the offer and the flat rate could not be read, so
+   * the offer has no profit.
+   */
+  commissionPct: string | null;
   netProfit: string | null;
   marginPct: string | null;
   /** Window start (ISO date-time); null when the file left it blank. */

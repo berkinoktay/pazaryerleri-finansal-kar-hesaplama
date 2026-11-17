@@ -3,12 +3,16 @@
 // The periods whose label is filled on the first row are stored, each with one item per
 // product row in sheet order, starting without a choice; one Plus tariff per week and
 // store (an upload whose week overlaps a stored one is refused, before the import
-// transaction and again inside it). The export writes each opted-in product's Plus price,
+// transaction and again inside it); its response counts the product rows with an unknown
+// price, and those with an unknown current commission or an unknown Plus commission offer
+// in a stored period. The export writes each opted-in product's Plus price,
 // the window's tariff selection, the reduced commission of every period the file covers
 // and the no-cancel label into every row that carries its barcode, one file per window.
-// An opted-in product without a custom price whose Plus price upper limit is unknown
-// refuses the whole export with SELECTION_PRICE_UNKNOWN; the export never writes a
-// price it does not know.
+// An opted-in product whose Plus commission offer is unknown in a period refuses the
+// whole export with SELECTION_COMMISSION_UNKNOWN, also with a custom price (the price
+// does not supply the commission); an opted-in product without a custom price whose
+// Plus price upper limit is unknown refuses it with SELECTION_PRICE_UNKNOWN. The export
+// never writes a price or a commission it does not know.
 
 import { prisma, type Prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
@@ -57,11 +61,9 @@ export interface PlusCommissionTariffExportItem {
   readonly customPrice: Prisma.Decimal | null;
   /** Null when the file's Plus price upper limit cell was blank, unreadable or 0. */
   readonly plusPriceUpperLimit: Prisma.Decimal | null;
-  readonly plusCommissionPct: Prisma.Decimal;
+  /** Null when the period's Plus commission offer cell was blank or unreadable. */
+  readonly plusCommissionPct: Prisma.Decimal | null;
 }
-
-/** What a blank period offer is stored as, as the import always stored it. */
-const BLANK_OFFER = '0';
 
 const PLUS_COMMISSION_TARIFF_HTTP: WorkbookHttpSpec = {
   segment: 'plus-commission-tariffs',
@@ -80,7 +82,11 @@ const PLUS_COMMISSION_TARIFF_HTTP: WorkbookHttpSpec = {
     'price, commission base price, Plus price upper limit or Plus commission base price is ' +
     'stored as null. The response also carries `unknownPriceRows`, the product rows with ' +
     'neither a commission base price nor a current price, or with no Plus price upper limit ' +
-    '(each row counts once, whatever the number of periods).',
+    '(each row counts once, whatever the number of periods). A blank or unreadable current ' +
+    'commission or Plus commission offer is stored as null; a readable 0 stays 0. ' +
+    '`unknownCommissionRows` counts the product rows with an unknown current commission, or ' +
+    'with an unknown Plus commission offer in a stored period (each row counts once, whatever ' +
+    'the number of periods).',
   importCreated: 'Tariff imported',
   import422: 'File missing, unreadable, or not the expected tariff format',
   exportSummary: 'Export the Plus tariff as a re-uploadable Trendyol Excel',
@@ -93,7 +99,9 @@ const PLUS_COMMISSION_TARIFF_HTTP: WorkbookHttpSpec = {
     '"7 Günlük Fiyat" file for products priced the same in both sub-periods — carrying one price but ' +
     'a commission cell per sub-period — plus "3 Günlük Fiyat" / "4 Günlük Fiyat" files for ' +
     'period-specific prices), only the non-empty ones, bundled into a single .zip. Marks the tariff ' +
-    'exported. Returns 409 if the tariff has no stored source file, and 409 ' +
+    'exported. Returns 409 if the tariff has no stored source file, 409 ' +
+    'SELECTION_COMMISSION_UNKNOWN when a product that opted in to Plus has no known Plus ' +
+    'commission offer (also with a custom price, which does not supply the commission), and 409 ' +
     'SELECTION_PRICE_UNKNOWN when a product that opted in to Plus without a custom price has no ' +
     'known Plus price upper limit; then no file is built and the tariff is not marked exported.',
   exportOk:
@@ -101,8 +109,9 @@ const PLUS_COMMISSION_TARIFF_HTTP: WorkbookHttpSpec = {
     'differently across sub-periods, ready to re-upload to Trendyol',
   export404: 'Tariff or store not found in this organization',
   export409:
-    'Tariff has no stored source file to export, or a product that opted in to Plus has no ' +
-    'known price to export (SELECTION_PRICE_UNKNOWN)',
+    'Tariff has no stored source file to export, a product that opted in to Plus has no known ' +
+    'Plus commission offer to export (SELECTION_COMMISSION_UNKNOWN), or one has no known price ' +
+    'to export (SELECTION_PRICE_UNKNOWN)',
   exportMimes: [XLSX_MIME, ZIP_MIME],
 };
 
@@ -110,16 +119,22 @@ const PLUS_COMMISSION_TARIFF_HTTP: WorkbookHttpSpec = {
  * The Plus price of one item, or null when it carries none: an item the seller opted
  * into Plus writes its custom price, else the Plus price ceiling, with two decimal
  * places. An item that is not opted in carries no price, whatever its custom price or
- * ceiling. An opted-in item without a custom price whose ceiling is unknown never gets
- * a made-up price: it throws WorkbookConflictError SELECTION_PRICE_UNKNOWN (409).
+ * ceiling. An opted-in item whose Plus commission offer is unknown never gets a
+ * made-up commission: it throws WorkbookConflictError SELECTION_COMMISSION_UNKNOWN
+ * (409), also with a custom price, and before any price check. An opted-in item
+ * without a custom price whose ceiling is unknown never gets a made-up price: it
+ * throws WorkbookConflictError SELECTION_PRICE_UNKNOWN (409).
  */
 export function resolvePlusExportPrice(
   item: Pick<
     PlusCommissionTariffExportItem,
-    'plusSelected' | 'customPrice' | 'plusPriceUpperLimit'
+    'plusSelected' | 'customPrice' | 'plusPriceUpperLimit' | 'plusCommissionPct'
   >,
 ): string | null {
   if (!item.plusSelected) return null;
+  if (item.plusCommissionPct === null) {
+    throw new WorkbookConflictError('SELECTION_COMMISSION_UNKNOWN');
+  }
   const price = item.customPrice ?? item.plusPriceUpperLimit;
   if (price === null) throw new WorkbookConflictError('SELECTION_PRICE_UNKNOWN');
   return price.toFixed(PLUS_PRICE_SCALE);
@@ -134,12 +149,20 @@ interface PlusCommissionTariffImportMeta {
    * each row counts once, whatever the number of periods.
    */
   readonly unknownPriceRows: number;
+  /**
+   * The kept product rows the seller sees with an unknown commission percent: an unknown
+   * current commission, or an unknown Plus commission offer in a stored period (a blank
+   * or unreadable cell; a readable 0 is known). The offer of a period block that is not
+   * stored is never read, so it is not counted; each row counts once.
+   */
+  readonly unknownCommissionRows: number;
 }
 
 /**
  * The week of the upload (`inspectUploadWeek`): the period blocks filled on the first
- * data row, checked as the export writes them, then the scoped overlap query; and the
- * count of product rows with no baseline price or no Plus price upper limit.
+ * data row, checked as the export writes them, then the scoped overlap query; the count
+ * of product rows with no baseline price or no Plus price upper limit; and the count of
+ * product rows with an unknown current commission or an unknown offer in a stored period.
  */
 async function inspectTariffWeek({
   scope,
@@ -169,7 +192,14 @@ async function inspectTariffWeek({
   const unknownPriceRows = rows.filter(
     (row) => row.data.commissionBasePrice === null || row.data.plusPriceUpperLimit === null,
   ).length;
-  return { week, unknownPriceRows };
+  // Only the stored periods are read: the row's offers also hold the blocks the first
+  // row leaves without a label.
+  const unknownCommissionRows = rows.filter(
+    (row) =>
+      row.data.currentCommissionPct === null ||
+      week.present.some((period) => (row.data.periodOffers[period.layoutIndex] ?? null) === null),
+  ).length;
+  return { week, unknownPriceRows, unknownCommissionRows };
 }
 
 /**
@@ -225,7 +255,11 @@ async function loadPlusCommissionTariff(
  * The cells of a row whose barcode is opted in (it carries a pick): the Plus price, the
  * window's tariff selection, one computed commission per covered period that has a day
  * count (its stored percent with every digit, never in exponent form), and the
- * no-cancel label. A row without a pick writes nothing.
+ * no-cancel label. A row without a pick writes nothing. An item whose Plus commission
+ * offer is unknown never gets here (`pick` refuses a joined one with
+ * SELECTION_COMMISSION_UNKNOWN, and an unjoined one has no pick, so it never wins a
+ * group); reaching it is an invariant break, so it throws WorkbookInvariantError rather
+ * than a 409 the seller could not act on, and never writes a made-up commission.
  */
 function plusWriteBack(
   ctx: WriteContext<PlusCommissionTariffExportItem, PlusCommissionTariffWriteKey>,
@@ -235,10 +269,13 @@ function plusWriteBack(
     throw new WorkbookInvariantError('A Plus tariff row is written into a period window');
   }
   const commissions = ctx.items.flatMap(
-    ({ tag, item }): CellWrite<PlusCommissionTariffWriteKey>[] =>
-      tag === null
-        ? []
-        : [{ key: 'computedCommission', tag, value: item.plusCommissionPct.toFixed() }],
+    ({ tag, item }): CellWrite<PlusCommissionTariffWriteKey>[] => {
+      if (tag === null) return [];
+      if (item.plusCommissionPct === null) {
+        throw new WorkbookInvariantError('A Plus row writes an unknown Plus commission');
+      }
+      return [{ key: 'computedCommission', tag, value: item.plusCommissionPct.toFixed() }];
+    },
   );
   return [
     { key: 'plusPriceSelection', value: ctx.pick },
@@ -323,7 +360,8 @@ export const plusCommissionTariffAdapter: WorkbookVerticalAdapter<
         commissionBasePrice: row.data.commissionBasePrice,
         currentCommissionPct: row.data.currentCommissionPct,
         plusPriceUpperLimit: row.data.plusPriceUpperLimit,
-        plusCommissionPct: row.data.periodOffers[period.layoutIndex] ?? BLANK_OFFER,
+        // An unknown offer (a blank or unreadable cell) is stored as null, never as 0.
+        plusCommissionPct: row.data.periodOffers[period.layoutIndex] ?? null,
         plusCommissionBasePrice: row.data.plusCommissionBasePrice,
         externalId: row.data.externalId,
         tariffGroup: row.data.tariffGroup,
@@ -349,6 +387,7 @@ export const plusCommissionTariffAdapter: WorkbookVerticalAdapter<
     skippedRows: outcome.skippedRows,
     prefilledRows: outcome.prefilledRows,
     unknownPriceRows: outcome.meta.unknownPriceRows,
+    unknownCommissionRows: outcome.meta.unknownCommissionRows,
   }),
   load: loadPlusCommissionTariff,
   notFoundResource: 'PlusCommissionTariff',

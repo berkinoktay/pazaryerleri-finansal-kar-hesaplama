@@ -219,4 +219,84 @@ describe('PlusCustomPriceCell', () => {
     // 500 is under the 777.09 ceiling; the fourth digit would push it over and is refused.
     expect(input).toHaveValue('500');
   });
+
+  describe('unknown Plus commission', () => {
+    // The file's Plus commission offer could not be read: the backend refuses the
+    // estimate and every join on the row, also with a custom price.
+    const noCommissionOffer: PlusBand = {
+      ...offer,
+      commissionPct: null,
+      netProfit: null,
+      marginPct: null,
+    };
+    const noCommissionRow: PlusTariffRow = {
+      ...row,
+      plusIsBetter: false,
+      bands: [noCommissionOffer],
+    };
+    const UNKNOWN_COMMISSION_HINT = tTable('plusCommissionUnknownHint');
+    const CUSTOM_SELECTED = tTable('customSelected');
+
+    it('keeps the select foot disabled and sends no estimate when the Plus commission is unknown', async () => {
+      let estimateCalls = 0;
+      mockEstimate({
+        onRequest: () => {
+          estimateCalls += 1;
+        },
+      });
+      const onEstimate = vi.fn();
+      const onSelect = vi.fn();
+      // A stored (not joined) custom price puts a positive price in the input, so only the
+      // unknown commission keeps the debounced estimate out.
+      const { user } = renderCell({
+        row: { ...noCommissionRow, customPrice: '500.00' },
+        isSelected: false,
+        onSelect,
+        onDeselect: vi.fn(),
+        onEstimate,
+      });
+
+      const input = screen.getByPlaceholderText(ENTER_PRICE);
+      expect(input).toHaveValue('500');
+      expect(input).toBeDisabled();
+      // The hint line says why, in place of the usual ceiling hint.
+      expect(screen.getByText(UNKNOWN_COMMISSION_HINT)).toBeInTheDocument();
+      expect(screen.queryByText(HINT)).toBeNull();
+
+      await new Promise((resolve) => setTimeout(resolve, PAST_DEBOUNCE_MS));
+      expect(estimateCalls).toBe(0);
+      expect(onEstimate).not.toHaveBeenCalledWith('r1', expect.anything());
+
+      const join = screen.getByRole('button', { name: JOIN_CUSTOM });
+      expect(join).toBeDisabled();
+      await user.click(join);
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it('can still remove a committed custom price', async () => {
+      let estimateCalls = 0;
+      mockEstimate({
+        onRequest: () => {
+          estimateCalls += 1;
+        },
+      });
+      const onDeselect = vi.fn();
+      const { user } = renderCell({
+        row: { ...noCommissionRow, selected: true, customPrice: '500.00' },
+        isSelected: true,
+        onSelect: vi.fn(),
+        onDeselect,
+        committedPrice: '500.00',
+      });
+
+      const foot = screen.getByRole('button', { name: CUSTOM_SELECTED });
+      expect(foot).toBeEnabled();
+      expect(foot).toHaveAttribute('aria-pressed', 'true');
+      await user.click(foot);
+      expect(onDeselect).toHaveBeenCalledTimes(1);
+      // Past the debounce, so a guard that let the committed price estimate would show.
+      await new Promise((resolve) => setTimeout(resolve, PAST_DEBOUNCE_MS));
+      expect(estimateCalls).toBe(0);
+    });
+  });
 });

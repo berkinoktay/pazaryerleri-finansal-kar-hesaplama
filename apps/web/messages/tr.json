@@ -224,7 +224,8 @@
       "ROW_ANCHOR_MISMATCH": "Saklanan dosyadaki bir satırda artık aynı ürün yok. Dosyayı yeniden yükle.",
       "ROW_NOT_FOUND": "Yazılması gereken bir satır saklanan dosyada bulunamadı. Dosyayı yeniden yükle.",
       "EXPORT_FILENAME_COLLISION": "Gün sayısı aynı olan iki dönemde farklı seçimler var; dışa aktarılan iki dosya aynı adı alırdı. Bu seçimleri aynı yapıp tekrar dışa aktar.",
-      "SELECTION_PRICE_UNKNOWN": "Seçtiğin ürünlerden birinin dosyaya yazılacak fiyatı bilinmiyor, bu yüzden dosya oluşturulmadı. Tarifeyi açıp o ürün için başka bir seçenek seç ya da özel fiyat gir, sonra tekrar dışa aktar."
+      "SELECTION_PRICE_UNKNOWN": "Seçtiğin ürünlerden birinin dosyaya yazılacak fiyatı bilinmiyor, bu yüzden dosya oluşturulmadı. Tarifeyi açıp o ürün için başka bir seçenek seç ya da özel fiyat gir, sonra tekrar dışa aktar.",
+      "SELECTION_COMMISSION_UNKNOWN": "Plus'a kattığın ürünlerden birinin Plus komisyon teklifi bilinmiyor, bu yüzden dosya oluşturulmadı. Tarifeyi açıp o ürünü Plus'tan çıkar, sonra tekrar dışa aktar."
     },
     "unmatchedBadge": "Eşleşme bekliyor",
     "vendorMissingBadge": "Trendyol kataloğunda yok",
@@ -815,6 +816,9 @@
     "prefilledWarning": "Dosyanın {count, plural, other {# satırında}} önceden yapılmış bir seçim vardı. Bunlar sizin seçiminiz sayılmadı; o ürünler için seçim yapmazsanız dosyada olduğu gibi kalırlar.",
     "unknownCurrentPriceWarning": "Dosyadaki {count, plural, other {# ürünün}} fiyatı okunamadı. Bu ürünlerde güncel kâr gösterilmeyecek; fiyat aralıklarının kârı yine hesaplanır.",
     "plusUnknownPriceWarning": "Dosyadaki {count, plural, other {# ürünün}} fiyatı okunamadı. Bu fiyatlar bilinmiyor olarak gösterilecek ve onlardan kâr hesaplanmayacak; Plus fiyat üst limiti okunamayan ürün Plus'a yalnız özel fiyatla katılabilir.",
+    "unknownCommissionWarning": "Dosyadaki {count, plural, other {# ürünün}} güncel komisyonu okunamadı. Bu ürünlerde güncel kâr gösterilmeyecek; fiyat aralıklarının kârı yine hesaplanır.",
+    "plusUnknownCommissionWarning": "Dosyadaki {count, plural, other {# ürünün}} komisyon oranı okunamadı. Bilinmeyen orandan kâr hesaplanmayacak; Plus komisyon teklifi okunamayan ürün o dönemde Plus'a katılamaz.",
+    "flashUnknownCommissionWarning": "Dosyadaki {count, plural, other {# ürünün}} güncel komisyonu okunamadı. Bu ürünlerde güncel kâr gösterilmeyecek; bir teklifin kârı yalnız o fiyatı bir komisyon tarifesi kapsıyorsa hesaplanır.",
     "errors": {
       "notReadable": "Dosya okunamadı. Pazaryeri panelinden indirdiğiniz .xlsx dosyasını yapısını değiştirmeden yükleyin.",
       "empty": "Dosyada ürün satırı bulunamadı.",
@@ -949,6 +953,8 @@
     "table": {
       "priceUnknown": "Bilinmiyor",
       "priceUnknownHint": "Excel'deki fiyatlar okunamadı; güncel kâr hesaplanmıyor.",
+      "commissionUnknown": "Bilinmiyor",
+      "commissionUnknownHint": "Excel'deki güncel komisyon okunamadı; güncel kâr hesaplanmıyor.",
       "bandPriceUnknownHint": "Dosyada fiyat sınırı yok ve GÜNCEL TSF okunamadı.",
       "bandNotSelectable": "Seçilemez",
       "product": "Ürün Bilgileri",
@@ -1162,7 +1168,10 @@
     "table": {
       "priceUnknown": "Bilinmiyor",
       "priceUnknownHint": "Excel'deki fiyatlar okunamadı; güncel kâr hesaplanmıyor.",
+      "commissionUnknown": "Bilinmiyor",
+      "commissionUnknownHint": "Excel'deki güncel komisyon okunamadı; güncel kâr hesaplanmıyor.",
       "plusPriceUnknownHint": "Dosyadaki Plus fiyat üst limiti okunamadı. Yalnız özel fiyatla katılabilirsin.",
+      "plusCommissionUnknownHint": "Dosyadaki Plus komisyon teklifi okunamadı; bu ürün bu dönemde Plus'a katılamaz.",
       "notSelectable": "Seçilemez",
       "product": "Ürün Bilgileri",
       "current": "Güncel fiyat",
@@ -1591,7 +1600,11 @@
       "customPriceHint": "Bir fiyat girin, komisyonu görün",
       "customPriceCeilingHint": "Maks. {price} girebilirsin",
       "selectCustom": "Bu fiyatı seç",
-      "customSelected": "Seçildi"
+      "customSelected": "Seçildi",
+      "commissionUnknown": "Bilinmiyor",
+      "commissionUnknownHint": "Excel'deki güncel komisyon okunamadı; güncel kâr hesaplanmıyor.",
+      "offerCommissionUnknownHint": "Bu teklifi kapsayan bir komisyon tarifesi yok ve güncel komisyon okunamadı; kârı hesaplanmıyor.",
+      "customPriceCommissionUnknownHint": "Bu fiyatı kapsayan bir komisyon tarifesi yok ve güncel komisyon okunamadı; kârı hesaplanmıyor."
     },
     "slot": {
       "h24": "24 Saatlik",

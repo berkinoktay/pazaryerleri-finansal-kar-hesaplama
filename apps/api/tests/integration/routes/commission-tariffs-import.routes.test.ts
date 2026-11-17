@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs';
 
 import { z } from '@hono/zod-openapi';
 import { Decimal } from 'decimal.js';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 import { parseStoredTariffBands } from '@pazarsync/profit';
@@ -22,12 +22,15 @@ import {
   readWorkbookGrid,
   resolveLayout,
   type CellPatch,
+  type CellRow,
+  type ResolvedLayout,
 } from '@pazarsync/spreadsheet';
 import { patchFixture } from '@pazarsync/spreadsheet/testing';
 import { syncLog } from '@pazarsync/sync-core';
 import { WORKBOOK_PAGES } from '@pazarsync/utils';
 
 import { createApp } from '@/app';
+import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware';
 import { trendyolCommissionTariffFormat } from '@/workbooks/formats/trendyol/commission-tariff.format';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
@@ -52,6 +55,7 @@ interface ImportWire {
   skippedRows: number;
   prefilledRows: number;
   unknownCurrentPriceRows: number;
+  unknownCommissionRows: number;
 }
 interface BandWire {
   key: string;
@@ -171,6 +175,13 @@ function importRequest(ctx: Ctx, file: Buffer = FIXTURE): Request {
   );
 }
 
+// This file sends as many imports as RATE_LIMITS.FILE_IMPORT allows per minute with the
+// same pooled user; reset the in-memory limiter so each test starts with a fresh bucket
+// and the next added case does not tip it into a 429.
+beforeEach(() => {
+  _resetRateLimitStoreForTests();
+});
+
 describe('POST .../commission-tariffs/import — real Trendyol fixture', () => {
   let ctx: Ctx;
   let imported: ImportWire;
@@ -219,6 +230,16 @@ describe('POST .../commission-tariffs/import — real Trendyol fixture', () => {
     expect(
       await prisma.commissionTariffItem.count({
         where: { organizationId: ctx.orgId, storeId: ctx.storeId, currentPrice: null },
+      }),
+    ).toBe(0);
+  });
+
+  it('answers unknownCommissionRows 0 for a file whose percents all read', async () => {
+    expect(imported.unknownCommissionRows).toBe(0);
+    // Every stored item of the real file carries a current commission.
+    expect(
+      await prisma.commissionTariffItem.count({
+        where: { organizationId: ctx.orgId, storeId: ctx.storeId, currentCommissionPct: null },
       }),
     ).toBe(0);
   });
@@ -471,7 +492,28 @@ const ImportCountsSchema = z.object({
   periodCount: z.number(),
   itemCount: z.number(),
   unknownCurrentPriceRows: z.number(),
+  unknownCommissionRows: z.number(),
 });
+
+/** The patches that fill the blank 3-day block of `firstRow`, so the upload holds two periods. */
+function fillFirstPeriodPatches(
+  layout: ResolvedLayout,
+  firstRow: CellRow,
+): Omit<CellPatch, 'excelRow'>[] {
+  const block = layout.blocks.get('periods')?.[0];
+  const label = block?.columns.get('label');
+  if (block === undefined || label === undefined) throw new Error('no first period block');
+  expect(cellText(firstRow, label)).toBeNull();
+  const patches: Omit<CellPatch, 'excelRow'>[] = [
+    { col: label, value: { kind: 'text', value: FIRST_PERIOD_LABEL } },
+  ];
+  for (const [key, value] of FIRST_PERIOD_COMMS) {
+    const col = block.columns.get(key);
+    if (col === undefined) throw new Error(`no first period column ${key}`);
+    patches.push({ col, value: { kind: 'number', value } });
+  }
+  return patches;
+}
 
 interface FirstRowEdits {
   /** Blank band 1's lower limit too: band 1 has no upper limit, so it has neither. */
@@ -516,16 +558,7 @@ async function withBlankFirstCurrentPrice(
     patches.push({ col: column('commissionBasePrice'), value: { kind: 'clear' } });
   }
   if (edits.fillFirstPeriod === true) {
-    const block = layout.blocks.get('periods')?.[0];
-    const label = block?.columns.get('label');
-    if (block === undefined || label === undefined) throw new Error('no first period block');
-    expect(cellText(firstRow, label)).toBeNull();
-    patches.push({ col: label, value: { kind: 'text', value: FIRST_PERIOD_LABEL } });
-    for (const [key, value] of FIRST_PERIOD_COMMS) {
-      const col = block.columns.get(key);
-      if (col === undefined) throw new Error(`no first period column ${key}`);
-      patches.push({ col, value: { kind: 'number', value } });
-    }
+    patches.push(...fillFirstPeriodPatches(layout, firstRow));
   }
   const file = patchFixture(
     FIXTURE,
@@ -617,5 +650,86 @@ describe('POST .../commission-tariffs/import - an unknown current price', () => 
       { currentPrice: null, commissionBasePrice: null },
     ]);
     expect(body.unknownCurrentPriceRows).toBe(1);
+  });
+});
+
+/**
+ * The fixture with the current commission of its first kept row blanked and its blank
+ * 3-day block filled (two periods), with that row's barcode.
+ */
+async function withBlankFirstCurrentCommission(): Promise<{
+  readonly file: Buffer;
+  readonly barcode: string;
+}> {
+  const format = trendyolCommissionTariffFormat;
+  const grid = await readWorkbookGrid(FIXTURE, { sheet: format.sheet });
+  const layout = resolveLayout(format.layout, grid);
+  if (layout === null) throw new Error('unreadable commission fixture');
+  const firstRow = grid[FIRST_KEPT_ROW - 1] ?? [];
+  const barcode = cellText(firstRow, columnIndex(format.layout, layout, 'barcode'));
+  if (barcode === null) throw new Error('the first kept row has no barcode');
+  const commission = columnIndex(format.layout, layout, 'currentCommission');
+  if (commission === null) throw new Error('the fixture has no current commission column');
+  // The fixture row holds a readable current commission, so blanking it is the change.
+  expect(cellText(firstRow, commission)).not.toBeNull();
+
+  const patches: Omit<CellPatch, 'excelRow'>[] = [
+    { col: commission, value: { kind: 'clear' } },
+    ...fillFirstPeriodPatches(layout, firstRow),
+  ];
+  const file = patchFixture(
+    FIXTURE,
+    patches.map((patch) => ({ ...patch, excelRow: FIRST_KEPT_ROW })),
+    { sheet: format.sheet },
+  );
+  return { file, barcode };
+}
+
+describe('POST .../commission-tariffs/import - an unknown current commission', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  it('stores a row with a blank current commission with current_commission_pct NULL in every period', async () => {
+    await truncateAll();
+    const ctx = await setupStoreWithMatch();
+    const { file, barcode } = await withBlankFirstCurrentCommission();
+
+    const res = await app.request(importRequest(ctx, file));
+
+    expect(res.status).toBe(201);
+    const body = ImportCountsSchema.parse(await res.json());
+    expect(body.periodCount).toBe(2);
+    const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
+    const items = await prisma.commissionTariffItem.findMany({
+      where: { ...scope, barcode },
+      select: { periodId: true, currentCommissionPct: true, currentPrice: true },
+    });
+    // One item per period, each with an unknown current commission, never 0; the row's
+    // current price is still known.
+    expect(new Set(items.map((item) => item.periodId)).size).toBe(2);
+    expect(items.map((item) => item.currentCommissionPct)).toEqual([null, null]);
+    expect(items.every((item) => item.currentPrice !== null)).toBe(true);
+    // Only that row lost its commission: every other row keeps the file's percent.
+    expect(await prisma.commissionTariffItem.count({ where: scope })).toBe(body.productCount * 2);
+    expect(
+      await prisma.commissionTariffItem.count({ where: { ...scope, currentCommissionPct: null } }),
+    ).toBe(2);
+  });
+
+  it('counts a row with a blank current commission once in unknownCommissionRows, whatever the number of periods', async () => {
+    await truncateAll();
+    const ctx = await setupStoreWithMatch();
+    const { file } = await withBlankFirstCurrentCommission();
+
+    const res = await app.request(importRequest(ctx, file));
+
+    expect(res.status).toBe(201);
+    const body = ImportCountsSchema.parse(await res.json());
+    // The row is stored once per period, and counted once; its prices are known, so it
+    // is not counted as a row with no known price.
+    expect(body.periodCount).toBe(2);
+    expect(body.unknownCommissionRows).toBe(1);
+    expect(body.unknownCurrentPriceRows).toBe(0);
   });
 });

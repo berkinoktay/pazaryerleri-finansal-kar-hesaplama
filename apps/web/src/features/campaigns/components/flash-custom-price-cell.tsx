@@ -186,6 +186,16 @@ export function FlashCustomPriceCell({
     lastResult.calculable &&
     lastResult.price === price.toFixed(2);
   const canSelect = hasEstimate;
+  // The typed price fell to the flat rate and that rate (the file's current commission) is
+  // unknown: the backend answers not calculable with no reason and no percent, so the hint
+  // line says why the profit is missing and "Seç" stays off.
+  const commissionUnknown =
+    price !== null &&
+    lastResult !== null &&
+    lastResult.price === price.toFixed(2) &&
+    !lastResult.calculable &&
+    lastResult.reason === null &&
+    lastResult.commissionPct === null;
   // Show the "Hesaplanan kâr" block only once the card carries a price in the input (a typed
   // draft, or a seeded committed / server price) — an empty card shows just the input +
   // ceiling hint + passive foot, never a mute "—" profit chip. Derived from the input state,
@@ -287,6 +297,8 @@ export function FlashCustomPriceCell({
                 </span>
               </>
             )
+          ) : commissionUnknown ? (
+            t('table.customPriceCommissionUnknownHint')
           ) : (
             placeholderHint
           )}

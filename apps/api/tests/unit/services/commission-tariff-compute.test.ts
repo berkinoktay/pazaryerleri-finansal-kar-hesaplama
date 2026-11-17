@@ -330,6 +330,153 @@ describe('computeItemBands -- unknown baseline price', () => {
   });
 });
 
+describe('computeItemBands -- unknown current commission', () => {
+  it('returns a null current profit and margin when the current commission is unknown, with every band still computed', () => {
+    const out = computeItemBands({
+      bands: [BAND_TOP, BAND_MID, BAND_LOW],
+      currentPrice: d(960),
+      commissionBasePrice: null,
+      currentCommissionPct: null,
+      base: readyBase(),
+    });
+
+    expect(out.calculable).toBe(true);
+    expect(out.reason).toBeNull();
+    expect(out.current).toEqual(NULL_CURRENT);
+    expect(out.bands).toEqual([
+      {
+        key: 'band1',
+        lowerLimit: '1200',
+        upperLimit: null,
+        price: '1200.00',
+        commissionPct: '20',
+        netProfit: '589.01',
+        marginPct: '49.08',
+      },
+      {
+        key: 'band2',
+        lowerLimit: '600.01',
+        upperLimit: '960',
+        price: '960.00',
+        commissionPct: '10',
+        netProfit: '511.01',
+        marginPct: '53.23',
+      },
+      {
+        key: 'band3',
+        lowerLimit: null,
+        upperLimit: '600',
+        price: '600.00',
+        commissionPct: '10',
+        netProfit: '244.01',
+        marginPct: '40.67',
+      },
+    ]);
+  });
+
+  it('picks the best band when the current commission is unknown', () => {
+    // band2 (511.01) beats band3 (244.01) although band3 comes first.
+    const out = computeItemBands({
+      bands: [BAND_LOW, BAND_MID],
+      currentPrice: d(960),
+      commissionBasePrice: d(960),
+      currentCommissionPct: null,
+      base: readyBase(),
+    });
+
+    expect(out.calculable).toBe(true);
+    expect(out.bestBandKey).toBe('band2');
+    expect(out.current).toEqual(NULL_CURRENT);
+  });
+
+  it("reports the first band's reason when the current commission is unknown and no band is calculable", () => {
+    const out = computeItemBands({
+      bands: [BAND_TOP, BAND_LOW],
+      currentPrice: d(960),
+      commissionBasePrice: null,
+      currentCommissionPct: null,
+      base: noCostBase(),
+    });
+
+    expect(out.calculable).toBe(false);
+    expect(out.reason).toBe('NO_COST');
+    expect(out.bestBandKey).toBeNull();
+    expect(out.current).toEqual(NULL_CURRENT);
+    expect(out.bands.map((band) => band.price)).toEqual(['1200.00', '600.00']);
+    expect(out.bands.map((band) => band.netProfit)).toEqual([null, null]);
+  });
+
+  it('never evaluates a scenario at 0% for an unknown current commission', () => {
+    const params = {
+      bands: [BAND_OPEN, BAND_TOP, BAND_LOW],
+      currentPrice: d(960),
+      commissionBasePrice: null,
+      base: readyBase(),
+    };
+    const unknown = computeItemBands({ ...params, currentCommissionPct: null });
+    const known = computeItemBands({ ...params, currentCommissionPct: d(10) });
+    const zero = computeItemBands({ ...params, currentCommissionPct: d(0) });
+
+    // Each band is evaluated under its own stored rate, exactly as with the percent known.
+    expect(unknown.bands).toEqual(known.bands);
+    expect(unknown.bestBandKey).toBe(known.bestBandKey);
+    // The 0% current figure (960 at 0%: 800 - 0 - 100 - 90 - 10.99 - 8) is never reported.
+    expect(zero.current.netProfit).toBe('591.01');
+    expect(unknown.current).toEqual(NULL_CURRENT);
+  });
+
+  it('keeps NO_PRODUCT and the degraded null reason when the current commission is unknown', () => {
+    const params = {
+      bands: [BAND_TOP, BAND_LOW],
+      currentPrice: d(960),
+      commissionBasePrice: null,
+      currentCommissionPct: null,
+    };
+    const nullBands = [
+      {
+        key: 'band1',
+        lowerLimit: '1200',
+        upperLimit: null,
+        price: '1200.00',
+        commissionPct: '20',
+        netProfit: null,
+        marginPct: null,
+      },
+      {
+        key: 'band3',
+        lowerLimit: null,
+        upperLimit: '600',
+        price: '600.00',
+        commissionPct: '10',
+        netProfit: null,
+        marginPct: null,
+      },
+    ];
+
+    expect(computeItemBands({ ...params, base: { kind: 'degraded' } })).toEqual({
+      calculable: false,
+      reason: null,
+      bands: nullBands,
+      bestBandKey: null,
+      current: NULL_CURRENT,
+    });
+    expect(computeItemBands({ ...params, base: { kind: 'no-product' } })).toEqual({
+      calculable: false,
+      reason: 'NO_PRODUCT',
+      bands: nullBands,
+      bestBandKey: null,
+      current: NULL_CURRENT,
+    });
+    expect(computeItemBands({ ...params, bands: [], base: readyBase() })).toEqual({
+      calculable: false,
+      reason: 'NO_PRODUCT',
+      bands: [],
+      bestBandKey: null,
+      current: NULL_CURRENT,
+    });
+  });
+});
+
 describe('computeItemBands -- known current price (unchanged)', () => {
   it('prices a band with neither limit at the current price and evaluates it', () => {
     const out = computeItemBands({

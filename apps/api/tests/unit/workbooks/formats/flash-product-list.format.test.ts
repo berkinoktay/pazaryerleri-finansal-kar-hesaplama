@@ -511,9 +511,29 @@ describe('Trendyol flash product format: the row fallbacks', () => {
     expect(mapOne().customerPrice).toBe('350');
   });
 
-  it("falls back to '0' for a blank current commission", () => {
-    expect(mapOne({ [COL.currentCommission]: null }).currentCommissionPct).toBe('0');
+  it('reads a blank current commission as null', () => {
+    expect(mapOne({ [COL.currentCommission]: null }).currentCommissionPct).toBeNull();
+    expect(mapOne({ [COL.currentCommission]: '   ' }).currentCommissionPct).toBeNull();
+  });
+
+  it.each([
+    ['a percent sign before the number', '%19'],
+    ['a lira suffix', '19 TL'],
+  ])('reads an unreadable current commission (%s) as null', (_name, cell) => {
+    expect(mapOne({ [COL.currentCommission]: cell }).currentCommissionPct).toBeNull();
+  });
+
+  // A readable 0 is a real 0% commission, kept as the file's text (never null).
+  it.each([
+    ['the number 0', 0, '0'],
+    ['the text 0', '0', '0'],
+  ])('keeps a literal 0 current commission (%s) as 0', (_name, cell, expected) => {
+    expect(mapOne({ [COL.currentCommission]: cell }).currentCommissionPct).toBe(expected);
+  });
+
+  it("keeps a readable current commission as the file's text", () => {
     expect(mapOne().currentCommissionPct).toBe('19');
+    expect(mapOne({ [COL.currentCommission]: '19,5' }).currentCommissionPct).toBe('19.5');
   });
 
   it.each([
@@ -608,8 +628,19 @@ describe('Trendyol flash product format: the legacy golden digests', () => {
     const grid = derivedGrid(format.layout, format.keep, fixture, FLASH_DERIVED);
     const read = readRows(gridSelection(grid));
     const { real, derived } = goldenEntry(FIXTURE_FILE);
-    const keptCases = FLASH_DERIVED.filter((testCase) => testCase.kept).length;
+    const keptNames = FLASH_DERIVED.filter((testCase) => testCase.kept).map(
+      (testCase) => testCase.name,
+    );
+    const keptCases = keptNames.length;
+    // The kept derived rows follow the fixture's own kept rows, in case order.
+    const derivedRow = (name: string): FlashProductListRow => {
+      const index = keptNames.indexOf(name);
+      expect(index).toBeGreaterThanOrEqual(0);
+      return present(read.rows[real.keptRows + index], name).data;
+    };
 
+    // An unknown current commission reads as null, never as 0.
+    expect(derivedRow('a blank current commission').currentCommissionPct).toBeNull();
     expect(digest(read)).toEqual(derived);
     // Every derived case lands on the side its `kept` flag names.
     expect(read.rows.length).toBe(real.keptRows + keptCases);

@@ -136,6 +136,63 @@ describe('FlashCustomPriceCell — estimate skeleton', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
+  it('says why when the typed price falls to an unknown current commission', async () => {
+    // No commission tariff band covers the price and the file's current commission is
+    // unknown: the backend answers 200, not calculable, with no reason and no percent.
+    server.use(
+      http.post(ESTIMATE_ENDPOINT, () =>
+        HttpResponse.json({
+          itemId: 'r1',
+          price: '500.00',
+          commissionPct: null,
+          commissionSource: 'current',
+          calculable: false,
+          reason: null,
+          breakdown: null,
+        }),
+      ),
+    );
+    renderCell({
+      row: { ...row, currentCommissionPct: null, currentNetProfit: null, customPrice: '500.00' },
+      committedPrice: '500.00',
+      isSelected: false,
+      onSelect: vi.fn(),
+      onDeselect: vi.fn(),
+    });
+    expect(
+      await screen.findByText(
+        'Bu fiyatı kapsayan bir komisyon tarifesi yok ve güncel komisyon okunamadı; kârı hesaplanmıyor.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Bir fiyat girin, komisyonu görün')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Bu fiyatı seç' })).toBeDisabled();
+  });
+
+  it('keeps the usual hint when a not-calculable estimate has a reason', async () => {
+    server.use(
+      http.post(ESTIMATE_ENDPOINT, () =>
+        HttpResponse.json({
+          itemId: 'r1',
+          price: '500.00',
+          commissionPct: null,
+          commissionSource: 'current',
+          calculable: false,
+          reason: 'NO_COST',
+          breakdown: null,
+        }),
+      ),
+    );
+    renderCell({
+      row: { ...row, customPrice: '500.00', calculable: false, reason: 'NO_COST' },
+      committedPrice: '500.00',
+      isSelected: false,
+      onSelect: vi.fn(),
+      onDeselect: vi.fn(),
+    });
+    expect(await screen.findByText(/maliyet girin/i)).toBeInTheDocument();
+    expect(screen.queryByText(/komisyon okunamadı/)).toBeNull();
+  });
+
   it('drops the skeleton to the default "—" badge when the estimate errors', async () => {
     server.use(
       http.post(ESTIMATE_ENDPOINT, () =>

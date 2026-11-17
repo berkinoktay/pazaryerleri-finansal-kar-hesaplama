@@ -227,6 +227,18 @@ export function evaluateScreenScenario(params: {
   return { calculable: true, statement, netProfit };
 }
 
+/**
+ * The item reason a screen reports from one option's evaluation when the options alone
+ * decide its calculability (no current baseline to gate on): the reason of a
+ * not-calculable outcome, else null (calculable, or nothing was evaluated).
+ */
+export function outcomeReason(
+  outcome: ScreenScenarioOutcome | null | undefined,
+): TariffItemReason | null {
+  if (outcome === null || outcome === undefined || outcome.calculable) return null;
+  return outcome.reason;
+}
+
 // --- Serialization (shared with product pricing) ---
 
 /** One commission band serialized for the wire: price limits 2dp, percent 4dp. */

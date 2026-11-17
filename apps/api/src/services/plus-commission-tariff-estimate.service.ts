@@ -14,7 +14,12 @@
 // current scenario of an item with no known baseline price (neither a commission-base
 // price nor a current price) has nothing to price: it answers 422 on `scenario`
 // (CURRENT_PRICE_UNKNOWN) instead of pricing a made-up 0. The price mode needs no stored
-// price, so it works with an unknown Plus price upper limit too.
+// price, so it works with an unknown Plus price upper limit too. A commission percent the
+// file left blank or unreadable is never priced at a made-up 0%: the current scenario of an
+// item with an unknown current percent answers 422 on `scenario`
+// (CURRENT_COMMISSION_UNKNOWN), and the price mode of an item with an unknown Plus
+// commission offer answers 422 on `price` (PLUS_COMMISSION_UNKNOWN). Each mode checks only
+// the percent it applies.
 
 import { Decimal } from 'decimal.js';
 
@@ -28,7 +33,7 @@ import {
 } from './plus-commission-tariff-compute.service';
 import { logProfitReadFailure } from './profit-compute-fallback.service';
 import { loadScreenScenarioBases, screenScenarioBaseFor } from './scenario-screen-commons';
-import { currentBaselinePrice } from './tariff-compute-commons';
+import { currentBaselinePrice, decimalOrNull } from './tariff-compute-commons';
 import type { EstimatePlusPriceResult } from '../validators/plus-commission-tariff.validator';
 
 /**
@@ -48,7 +53,10 @@ export type EstimatePlusPriceInput =
  * is unmatched or uncostable the result carries `calculable: false` + a `reason`
  * and a null breakdown. Throws `ValidationError` (`scenario`, CURRENT_PRICE_UNKNOWN)
  * for the current scenario of an item whose baseline price is unknown
- * (`currentBaselinePrice` is null).
+ * (`currentBaselinePrice` is null), (`scenario`, CURRENT_COMMISSION_UNKNOWN) for the
+ * current scenario of an item whose current commission percent is unknown (the price
+ * check comes first), and (`price`, PLUS_COMMISSION_UNKNOWN) for the price mode of an
+ * item whose Plus commission offer is unknown.
  */
 export async function estimatePlusItemPrice(
   orgId: string,
@@ -83,17 +91,29 @@ export async function estimatePlusItemPrice(
   // Resolve the price + commission per mode. The 'current' scenario mirrors the
   // detail row's baseline EXACTLY: the commission-base price (customer-seen price,
   // or the current sale price when it is unknown) at the item's CURRENT commission,
-  // so the breakdown equals `currentNetProfit`. With no baseline price the detail
-  // row has no current profit either, so there is nothing to break down: refuse
-  // before loading the scenario bases.
+  // so the breakdown equals `currentNetProfit`. With no baseline price, or with an
+  // unknown current commission percent, the detail row has no current profit either,
+  // so there is nothing to break down: refuse before loading the scenario bases. The
+  // price mode applies the Plus commission offer; an unknown offer has no profit in the
+  // detail either, so it is refused the same way.
   const price = input.mode === 'current' ? currentBaselinePrice(item) : input.price;
   if (price === null) {
     throw new ValidationError([{ field: 'scenario', code: 'CURRENT_PRICE_UNKNOWN' }]);
   }
-  const applyCommissionPct =
-    input.mode === 'current'
-      ? new Decimal(item.currentCommissionPct.toString())
-      : new Decimal(item.plusCommissionPct.toString());
+  let applyCommissionPct: Decimal;
+  if (input.mode === 'current') {
+    const currentCommissionPct = decimalOrNull(item.currentCommissionPct);
+    if (currentCommissionPct === null) {
+      throw new ValidationError([{ field: 'scenario', code: 'CURRENT_COMMISSION_UNKNOWN' }]);
+    }
+    applyCommissionPct = currentCommissionPct;
+  } else {
+    const plusCommissionPct = decimalOrNull(item.plusCommissionPct);
+    if (plusCommissionPct === null) {
+      throw new ValidationError([{ field: 'price', code: 'PLUS_COMMISSION_UNKNOWN' }]);
+    }
+    applyCommissionPct = plusCommissionPct;
+  }
 
   // Load the scenario base for the matched variant only (scenario date = now). An
   // unmatched item passes no ids -> no-product; a store-wide load failure -> degraded.
@@ -122,10 +142,11 @@ export async function estimatePlusItemPrice(
   return {
     itemId: item.id,
     price: price.toFixed(2),
-    // Current scenario echoes the item's commission in the detail wire format (4dp)
-    // so the modal header matches the row; the price mode surfaces the Plus percent.
+    // Current scenario echoes the item's (known) current commission in the detail wire
+    // format (4dp) so the modal header matches the row; the price mode surfaces the Plus
+    // percent.
     commissionPct:
-      input.mode === 'current' ? item.currentCommissionPct.toFixed(4) : computed.commissionPct,
+      input.mode === 'current' ? applyCommissionPct.toFixed(4) : computed.commissionPct,
     calculable: computed.calculable,
     reason: computed.reason,
     breakdown: computed.breakdown,

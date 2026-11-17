@@ -87,6 +87,17 @@ export const ImportFlashProductsResponseSchema = z
     unmatched: z.number().int(),
     skippedRows: z.number().int(),
     prefilledRows: z.number().int(),
+    unknownCommissionRows: z
+      .number()
+      .int()
+      .openapi({
+        description:
+          'The distinct products (barcodes) with an unknown current commission on at least one ' +
+          'row (the cell was blank or unreadable; a readable 0 is a real 0% and is not counted). ' +
+          'Their current profit, and the profit of an offer no commission tariff band covers, ' +
+          'show as unknown and are never computed at 0%. A product on several date rows counts ' +
+          'once, like productCount.',
+      }),
   })
   .openapi('ImportFlashProductsResponse');
 
@@ -137,8 +148,20 @@ export const FlashOfferSchema = z
     startsAt: z.string().datetime().nullable(),
     endsAt: z.string().datetime().nullable(),
     validity: FlashValiditySchema.nullable(),
-    /** Reduced commission PERCENT applied at this offer (band, else the flat rate). */
-    commissionPct: z.string(),
+    /**
+     * Reduced commission PERCENT applied at this offer (band, else the flat rate); null when
+     * no band covers the offer and the flat rate is unknown.
+     */
+    commissionPct: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Commission percent applied at this offer: the tariff band the price lands in, else ' +
+          'the current commission. Null when no tariff band covers the offer and the current ' +
+          "commission is unknown (the file's cell was blank or unreadable; a readable 0 stays " +
+          '0). The offer then has no profit.',
+      }),
     netProfit: z.string().nullable(),
     marginPct: z.string().nullable(),
   })
@@ -160,9 +183,23 @@ export const FlashProductDetailItemSchema = z
     externalId: z.string().nullable(),
     currentPrice: z.string(),
     customerPrice: z.string(),
-    /** "Mevcut Komisyon" (I) PERCENT — the flat fallback + the current-scenario rate. */
-    currentCommissionPct: z.string(),
-    /** Current-scenario (customerPrice @ currentCommissionPct) profit; null when not calculable. */
+    /**
+     * "Mevcut Komisyon" (I) PERCENT — the flat fallback + the current-scenario rate; null when
+     * unknown.
+     */
+    currentCommissionPct: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          "The current commission percent: the current scenario's rate and the fallback of an " +
+          "offer no tariff band covers. Null when the file's cell was blank or unreadable; a " +
+          'readable 0 stays 0.',
+      }),
+    /**
+     * Current-scenario (customerPrice @ currentCommissionPct) profit; null when not calculable
+     * or when the current commission is unknown.
+     */
     currentNetProfit: z.string().nullable(),
     currentMarginPct: z.string().nullable(),
     calculable: z.boolean(),
@@ -235,9 +272,12 @@ export type FlashSelection = z.infer<typeof FlashSelectionSchema>;
 // Two modes, both on-demand so the detail payload stays light:
 //   1. Custom-price what-if — pass a `price`; the reduced commission is resolved from
 //      the band that price lands in (of the item's primary window), else the flat rate.
+//      A price that falls back to an unknown flat rate answers 200, not calculable,
+//      with a null commission (not an error: the band lookup depends on the price).
 //   2. Current scenario (`scenario: 'current'`) — pass no price; the item's own
 //      customer price at its current commission is used, so the breakdown matches the
-//      detail row's current baseline byte-for-byte.
+//      detail row's current baseline byte-for-byte. When the current commission is
+//      unknown the service answers 422 on `scenario` (CURRENT_COMMISSION_UNKNOWN).
 
 export const EstimateFlashPriceBodySchema = z
   .object({
@@ -245,14 +285,25 @@ export const EstimateFlashPriceBodySchema = z
       .string()
       .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_CUSTOM_PRICE')
       .optional()
-      .openapi({ description: 'Değerlendirilecek satış fiyatı (GROSS, TL).', example: '199.90' }),
+      .openapi({
+        description:
+          'Gross sale price (TRY) to price. Its commission is the tariff band the price lands ' +
+          'in (of the primary window), else the current commission. When the price lands in no ' +
+          "band and the current commission is unknown (the file's cell was blank or " +
+          'unreadable), the answer is 200 with calculable false, reason null, commissionPct ' +
+          'null, commissionSource "current" and breakdown null (an unmatched item still ' +
+          'answers reason NO_PRODUCT).',
+        example: '199.90',
+      }),
     scenario: z
       .literal('current')
       .optional()
       .openapi({
         description:
-          'Güncel senaryonun dökümü — item’ın müşteri fiyatı (customerPrice) + güncel ' +
-          'komisyonuyla (Mevcut Komisyon) hesaplanır; price verilmez.',
+          "Breakdown of the current scenario: priced at the item's customer price " +
+          '(customerPrice) under its current commission (Mevcut Komisyon); send no price. When ' +
+          "the current commission is unknown (the file's cell was blank or unreadable) it is " +
+          'not priced at 0%: 422 on `scenario` with code CURRENT_COMMISSION_UNKNOWN.',
       }),
   })
   .superRefine((val, ctx) => {

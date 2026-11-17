@@ -637,9 +637,36 @@ describe('Trendyol commission tariff format: the row fallbacks', () => {
     expect(err.meta).toEqual({ reason: UNWRITABLE_VALUE_REASON });
   });
 
-  it('still reads a blank current commission as 0', () => {
-    expect(mapOne({ [COL.currentCommission]: null }).currentCommissionPct).toBe('0');
-    expect(mapOne({ [COL.currentCommission]: '19 %' }).currentCommissionPct).toBe('0');
+  it('reads a blank current commission as null', () => {
+    expect(mapOne({ [COL.currentCommission]: null }).currentCommissionPct).toBeNull();
+    expect(mapOne({ [COL.currentCommission]: '   ' }).currentCommissionPct).toBeNull();
+  });
+
+  // The grid reader turns an error cell into '#ERROR_' and its text.
+  it.each([
+    ['a percent sign before the number', '%19'],
+    ['a percent sign after the number', '19 %'],
+    ['a lira suffix', '19 TL'],
+    ['an error cell', '#ERROR_#REF!'],
+    ['the boolean true', true],
+    ['the boolean false', false],
+  ])('reads an unreadable current commission (%s) as null', (_name, cell) => {
+    expect(mapOne({ [COL.currentCommission]: cell }).currentCommissionPct).toBeNull();
+  });
+
+  // A readable 0 is a real 0% commission, kept as the file's text (never null).
+  it.each([
+    ['the number 0', 0, '0'],
+    ['the text 0', '0', '0'],
+    ['the text 0,00', '0,00', '0.00'],
+  ])('keeps a literal 0 current commission (%s) as 0', (_name, cell, expected) => {
+    expect(mapOne({ [COL.currentCommission]: cell }).currentCommissionPct).toBe(expected);
+  });
+
+  it("keeps a readable current commission as the file's text", () => {
+    expect(mapOne().currentCommissionPct).toBe('19');
+    expect(mapOne({ [COL.currentCommission]: 21.5 }).currentCommissionPct).toBe('21.5');
+    expect(mapOne({ [COL.currentCommission]: '19,5' }).currentCommissionPct).toBe('19.5');
   });
 
   it('reads a literal 0 commission base price as null', () => {
@@ -977,6 +1004,8 @@ describe('Trendyol commission tariff format: the legacy golden digests', () => {
     // An unknown current price reads as null: a blank cell, and a text that does not read.
     expect(derivedRow('a blank current price').currentPrice).toBeNull();
     expect(derivedRow('lira-suffixed prices and commission').currentPrice).toBeNull();
+    // An unknown current commission reads as null, never as 0.
+    expect(derivedRow('a blank current commission').currentCommissionPct).toBeNull();
     expect(digest(read)).toEqual(derived);
     // Every derived case lands on the side its `kept` flag names.
     expect(read.rows.length).toBe(real.keptRows + keptCases);

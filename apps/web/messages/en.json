@@ -224,7 +224,8 @@
       "ROW_ANCHOR_MISMATCH": "A row of the stored file no longer holds the product it held. Upload the file again.",
       "ROW_NOT_FOUND": "A row that must be written is missing from the stored file. Upload the file again.",
       "EXPORT_FILENAME_COLLISION": "Two periods with the same number of days have different choices, so two files of the export would share one name. Make those choices the same and export again.",
-      "SELECTION_PRICE_UNKNOWN": "A product you selected has no known price to write, so the file was not created. Open the tariff, choose another option or enter a custom price for that product, and export again."
+      "SELECTION_PRICE_UNKNOWN": "A product you selected has no known price to write, so the file was not created. Open the tariff, choose another option or enter a custom price for that product, and export again.",
+      "SELECTION_COMMISSION_UNKNOWN": "A product you joined to Plus has no known Plus commission offer, so the file was not created. Open the tariff, remove that product from Plus, and export again."
     },
     "unmatchedBadge": "Awaiting match",
     "vendorMissingBadge": "Not in Trendyol catalog",
@@ -815,6 +816,9 @@
     "prefilledWarning": "{count, plural, one {# row of the file already had a choice filled in} other {# rows of the file already had a choice filled in}}. They were not taken as your choices; they stay in the file as they are unless you make a choice for those products.",
     "unknownCurrentPriceWarning": "{count, plural, one {The price of # product} other {The prices of # products}} could not be read from the file. Their current profit is not shown; the price range profits still are.",
     "plusUnknownPriceWarning": "{count, plural, one {A price of # product} other {Prices of # products}} could not be read from the file. They show as unknown and no profit is calculated from them; a product whose Plus price limit is unknown can join only with a custom price.",
+    "unknownCommissionWarning": "{count, plural, one {The current commission of # product} other {The current commissions of # products}} could not be read from the file. Their current profit is not shown; the price range profits still are.",
+    "plusUnknownCommissionWarning": "{count, plural, one {A commission rate of # product} other {Commission rates of # products}} could not be read from the file. No profit is calculated from an unknown rate, and a product whose Plus commission offer is unknown cannot join Plus.",
+    "flashUnknownCommissionWarning": "{count, plural, one {The current commission of # product} other {The current commissions of # products}} could not be read from the file. Their current profit is not shown; an offer's profit is shown only where a commission tariff covers it.",
     "errors": {
       "notReadable": "The file could not be read. Upload the .xlsx file you downloaded from the marketplace panel without changing its structure.",
       "empty": "No product row was found in the file.",
@@ -949,6 +953,8 @@
     "table": {
       "priceUnknown": "Unknown",
       "priceUnknownHint": "The prices in the Excel file could not be read; the current profit is not calculated.",
+      "commissionUnknown": "Unknown",
+      "commissionUnknownHint": "The current commission in the Excel file could not be read; the current profit is not calculated.",
       "bandPriceUnknownHint": "No price limit in the file and GÜNCEL TSF could not be read.",
       "bandNotSelectable": "Cannot be selected",
       "product": "Product Details",
@@ -1162,7 +1168,10 @@
     "table": {
       "priceUnknown": "Unknown",
       "priceUnknownHint": "The prices in the Excel file could not be read; the current profit is not calculated.",
+      "commissionUnknown": "Unknown",
+      "commissionUnknownHint": "The current commission in the Excel file could not be read; the current profit is not calculated.",
       "plusPriceUnknownHint": "The Plus price upper limit in the file could not be read. You can join only with a custom price.",
+      "plusCommissionUnknownHint": "The Plus commission offer in the file could not be read, so this product cannot join Plus in this period.",
       "notSelectable": "Cannot be selected",
       "product": "Product Info",
       "current": "Current price",
@@ -1591,7 +1600,11 @@
       "customPriceHint": "Enter a price, see the commission",
       "customPriceCeilingHint": "You can enter at most {price}",
       "selectCustom": "Pick this price",
-      "customSelected": "Selected"
+      "customSelected": "Selected",
+      "commissionUnknown": "Unknown",
+      "commissionUnknownHint": "The current commission in the Excel file could not be read; the current profit is not calculated.",
+      "offerCommissionUnknownHint": "No commission tariff covers this offer and the current commission could not be read, so its profit is not calculated.",
+      "customPriceCommissionUnknownHint": "No commission tariff covers this price and the current commission could not be read, so its profit is not calculated."
     },
     "slot": {
       "h24": "24-Hour",

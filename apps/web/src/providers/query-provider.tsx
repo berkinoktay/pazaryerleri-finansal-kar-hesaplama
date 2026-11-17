@@ -62,6 +62,7 @@ type KnownErrorKey =
   | 'ROW_NOT_FOUND'
   | 'EXPORT_FILENAME_COLLISION'
   | 'SELECTION_PRICE_UNKNOWN'
+  | 'SELECTION_COMMISSION_UNKNOWN'
   | 'generic';
 
 const KNOWN_CODES: ReadonlySet<string> = new Set<KnownErrorKey>([
@@ -100,6 +101,7 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<KnownErrorKey>([
   'ROW_NOT_FOUND',
   'EXPORT_FILENAME_COLLISION',
   'SELECTION_PRICE_UNKNOWN',
+  'SELECTION_COMMISSION_UNKNOWN',
 ]);
 
 /**

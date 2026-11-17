@@ -255,3 +255,200 @@ describe('computePlusItem -- unknown prices', () => {
     });
   });
 });
+
+describe('computePlusItem -- unknown commissions', () => {
+  // A null percent is a blank or unreadable file cell: never priced, never at 0%.
+  //   S=1200, r=0: 1000 - 0 - 100 - 90 - 10.99 - 10 = 789.01, margin 65.75
+  //   S=960,  r=0:  800 - 0 - 100 - 90 - 10.99 -  8 = 591.01, margin 61.56
+
+  /** The offer at the ceiling (960) with its percent unknown: price echoed, no profit. */
+  const UNKNOWN_PCT_OFFER = {
+    price: '960.00',
+    commissionPct: null,
+    netProfit: null,
+    marginPct: null,
+  };
+
+  it('returns a null current profit when the current commission is unknown, and still computes the offer', () => {
+    expect(
+      computePlusItem({
+        inputs: { ...KNOWN, currentCommissionPct: null },
+        base: readyBase(),
+      }),
+    ).toEqual({
+      calculable: true,
+      reason: null,
+      current: NULL_CURRENT,
+      plus: { price: '960.00', commissionPct: '10', netProfit: '511.01', marginPct: '53.23' },
+      plusIsBetter: false,
+    });
+  });
+
+  it("reports the offer's reason when the current commission is unknown and the offer is not calculable", () => {
+    expect(
+      computePlusItem({
+        inputs: { ...KNOWN, currentCommissionPct: null },
+        base: noCostBase(),
+      }),
+    ).toEqual({
+      calculable: false,
+      reason: 'NO_COST',
+      current: NULL_CURRENT,
+      plus: { price: '960.00', commissionPct: '10', netProfit: null, marginPct: null },
+      plusIsBetter: false,
+    });
+  });
+
+  it('gives the offer its price, a null commission and no profit when the Plus commission is unknown, and keeps the current profit', () => {
+    expect(
+      computePlusItem({
+        inputs: { ...KNOWN, plusCommissionPct: null },
+        base: readyBase(),
+      }),
+    ).toEqual({
+      calculable: true,
+      reason: null,
+      current: { netProfit: '589.01', marginPct: '49.08' },
+      plus: UNKNOWN_PCT_OFFER,
+      plusIsBetter: false,
+    });
+
+    // A not-calculable baseline still decides, with the offer price echoed and no percent.
+    expect(
+      computePlusItem({
+        inputs: { ...KNOWN, plusCommissionPct: null },
+        base: noCostBase(),
+      }),
+    ).toEqual({
+      calculable: false,
+      reason: 'NO_COST',
+      current: NULL_CURRENT,
+      plus: UNKNOWN_PCT_OFFER,
+      plusIsBetter: false,
+    });
+  });
+
+  it('never says Plus is better when either commission is unknown', () => {
+    // With both commissions known the offer wins (511.01 against 244.01), so a false below
+    // is caused by the unknown commission alone.
+    const winning: PlusItemInputs = {
+      ...KNOWN,
+      currentPrice: d(600),
+      commissionBasePrice: d(600),
+      currentCommissionPct: d(10),
+    };
+    expect(computePlusItem({ inputs: winning, base: readyBase() }).plusIsBetter).toBe(true);
+
+    const unknownCurrent = computePlusItem({
+      inputs: { ...winning, currentCommissionPct: null },
+      base: readyBase(),
+    });
+    expect(unknownCurrent.plus.netProfit).toBe('511.01');
+    expect(unknownCurrent.plusIsBetter).toBe(false);
+
+    const unknownPlus = computePlusItem({
+      inputs: { ...winning, plusCommissionPct: null },
+      base: readyBase(),
+    });
+    expect(unknownPlus.current.netProfit).toBe('244.01');
+    expect(unknownPlus.plusIsBetter).toBe(false);
+  });
+
+  it('is not calculable with a null reason when both commissions are unknown', () => {
+    expect(
+      computePlusItem({
+        inputs: { ...KNOWN, currentCommissionPct: null, plusCommissionPct: null },
+        base: readyBase(),
+      }),
+    ).toEqual({
+      calculable: false,
+      reason: null,
+      current: NULL_CURRENT,
+      plus: UNKNOWN_PCT_OFFER,
+      plusIsBetter: false,
+    });
+
+    // An unknown baseline price with an unknown Plus commission is the same "both unknown".
+    expect(
+      computePlusItem({
+        inputs: {
+          ...KNOWN,
+          currentPrice: null,
+          commissionBasePrice: null,
+          plusCommissionPct: null,
+        },
+        base: readyBase(),
+      }),
+    ).toEqual({
+      calculable: false,
+      reason: null,
+      current: NULL_CURRENT,
+      plus: UNKNOWN_PCT_OFFER,
+      plusIsBetter: false,
+    });
+
+    // So is an unknown current commission with an unknown ceiling: the percent is echoed.
+    expect(
+      computePlusItem({
+        inputs: { ...KNOWN, currentCommissionPct: null, plusPriceUpperLimit: null },
+        base: readyBase(),
+      }),
+    ).toEqual({
+      calculable: false,
+      reason: null,
+      current: NULL_CURRENT,
+      plus: NULL_OFFER,
+      plusIsBetter: false,
+    });
+  });
+
+  it('echoes a null offer commission for a degraded base and for an unmatched item', () => {
+    const inputs: PlusItemInputs = { ...KNOWN, plusCommissionPct: null };
+
+    expect(computePlusItem({ inputs, base: { kind: 'degraded' } })).toEqual({
+      calculable: false,
+      reason: null,
+      current: NULL_CURRENT,
+      plus: UNKNOWN_PCT_OFFER,
+      plusIsBetter: false,
+    });
+    expect(computePlusItem({ inputs, base: { kind: 'no-product' } })).toEqual({
+      calculable: false,
+      reason: 'NO_PRODUCT',
+      current: NULL_CURRENT,
+      plus: UNKNOWN_PCT_OFFER,
+      plusIsBetter: false,
+    });
+  });
+
+  it('treats a known 0 commission as a real 0%', () => {
+    // A 0% offer (591.01) beats the 20% baseline (589.01): a skipped 0 would lose both the
+    // offer profit and the "better" flag.
+    expect(
+      computePlusItem({
+        inputs: { ...KNOWN, plusCommissionPct: d(0) },
+        base: readyBase(),
+      }),
+    ).toEqual({
+      calculable: true,
+      reason: null,
+      current: { netProfit: '589.01', marginPct: '49.08' },
+      plus: { price: '960.00', commissionPct: '0', netProfit: '591.01', marginPct: '61.56' },
+      plusIsBetter: true,
+    });
+
+    // A 0% current commission is priced too, not left unknown.
+    expect(
+      computePlusItem({
+        inputs: { ...KNOWN, currentCommissionPct: d(0) },
+        base: readyBase(),
+      }),
+    ).toEqual({
+      calculable: true,
+      reason: null,
+      current: { netProfit: '789.01', marginPct: '65.75' },
+      plus: { price: '960.00', commissionPct: '10', netProfit: '511.01', marginPct: '53.23' },
+      plusIsBetter: false,
+    });
+  });
+});

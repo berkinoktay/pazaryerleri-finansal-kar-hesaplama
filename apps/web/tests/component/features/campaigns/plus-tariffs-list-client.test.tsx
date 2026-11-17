@@ -44,6 +44,7 @@ const DETAIL_PATH = `/campaigns/plus-commission-tariffs/${NEW_TARIFF_ID}`;
 
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const UNKNOWN_PRICE_ROWS = 3;
+const UNKNOWN_COMMISSION_ROWS = 2;
 
 const LIST = trMessages.plusCommissionTariffsPage.list;
 const UPLOAD = trMessages.plusCommissionTariffsPage.upload;
@@ -72,9 +73,10 @@ function savedTariff(): PlusTariffListItem {
 
 /**
  * The import answer with no prefilled row, so the prefilled warning (also a
- * `toast.warning`) stays quiet and any warning is the unknown price one.
+ * `toast.warning`) stays quiet and any warning is the unknown price or commission one.
+ * Without `unknownCommissionRows` the body is the one an API one deploy behind sends.
  */
-function importBody(unknownPriceRows: number): JsonBodyType {
+function importBody(unknownPriceRows: number, unknownCommissionRows?: number): JsonBodyType {
   return {
     tariffId: NEW_TARIFF_ID,
     productCount: 12,
@@ -85,6 +87,7 @@ function importBody(unknownPriceRows: number): JsonBodyType {
     skippedRows: 0,
     prefilledRows: 0,
     unknownPriceRows,
+    ...(unknownCommissionRows === undefined ? {} : { unknownCommissionRows }),
   };
 }
 
@@ -143,6 +146,35 @@ describe('<PlusTariffsListClient> import', () => {
 
   it('does not warn when the count is 0', async () => {
     serve(importBody(0));
+    const { user } = renderClient();
+
+    await submitUpload(user);
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith(DETAIL_PATH));
+    expect(toastWarning).not.toHaveBeenCalled();
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('warns once after an upload with unknown commissions', async () => {
+    serve(importBody(UNKNOWN_PRICE_ROWS, UNKNOWN_COMMISSION_ROWS));
+    const { user } = renderClient();
+
+    await submitUpload(user);
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith(DETAIL_PATH));
+    // Both counts set: one toast carrying both sentences.
+    expect(toastWarning).toHaveBeenCalledTimes(1);
+    expect(toastWarning).toHaveBeenCalledWith(
+      [
+        tUpload('plusUnknownPriceWarning', { count: UNKNOWN_PRICE_ROWS }),
+        tUpload('plusUnknownCommissionWarning', { count: UNKNOWN_COMMISSION_ROWS }),
+      ].join(' '),
+    );
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('does not warn when both counts are 0', async () => {
+    serve(importBody(0, 0));
     const { user } = renderClient();
 
     await submitUpload(user);

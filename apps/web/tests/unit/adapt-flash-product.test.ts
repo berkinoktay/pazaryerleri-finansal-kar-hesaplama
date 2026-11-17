@@ -177,6 +177,33 @@ describe('toFlashProductView', () => {
     expect(row.bands[0].netProfit).toBeNull();
   });
 
+  it('keeps a null offer commission', () => {
+    const row = toFlashProductView(
+      detail([
+        item({
+          currentCommissionPct: null,
+          currentNetProfit: null,
+          currentMarginPct: null,
+          commissionSource: 'current',
+          offer24: apiOffer({
+            price: '600.00',
+            commissionPct: null,
+            netProfit: null,
+            marginPct: null,
+          }),
+          offer3: null,
+        }),
+      ]),
+    ).rows[0];
+
+    expect(row.currentCommissionPct).toBeNull();
+    expect(row.bands[0].commissionPct).toBeNull();
+    expect(row.bands[0].netProfit).toBeNull();
+    // The offer itself is kept: its price and window still show.
+    expect(row.bands[0].price).toBe('600.00');
+    expect(row.bands[0].startsAt).toBe('2026-07-08T00:00:00Z');
+  });
+
   it('produces a row that feeds the shared winner resolver (current 50 beats both low offers)', () => {
     const row = toFlashProductView(detail([item()])).rows[0];
     // current (50) strictly beats both offers (30 / 20) → keeping the current price wins.

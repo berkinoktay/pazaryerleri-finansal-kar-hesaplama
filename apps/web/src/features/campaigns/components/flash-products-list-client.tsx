@@ -15,6 +15,7 @@ import { useDeleteFlashProducts } from '../hooks/use-delete-flash-products';
 import { useExportWorkbook } from '../hooks/use-export-workbook';
 import { useImportWorkbook } from '../hooks/use-import-workbook';
 import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
+import { useUnknownPriceWarning } from '../hooks/use-unknown-price-warning';
 import { downloadBlob } from '../lib/download-blob';
 import { WORKBOOK_VERTICALS } from '../lib/workbook-verticals';
 import { FlashProductsListView } from './flash-products-list-view';
@@ -44,6 +45,7 @@ export function FlashProductsListClient({
   const deleteList = useDeleteFlashProducts(orgId ?? '', storeId ?? '');
   const exportList = useExportWorkbook(PAGE, orgId ?? '', storeId ?? '');
   const warnPrefilled = usePrefilledWarning();
+  const warnUnknownPrice = useUnknownPriceWarning(PAGE);
   const [uploadOpen, setUploadOpen] = React.useState(false);
 
   const items = React.useMemo(() => list.data ?? [], [list.data]);
@@ -59,11 +61,12 @@ export function FlashProductsListClient({
         onSuccess: (result) => {
           setUploadOpen(false);
           warnPrefilled(result.prefilledRows);
+          warnUnknownPrice(result);
           openDetail(result.id);
         },
       });
     },
-    [importList, openDetail, warnPrefilled],
+    [importList, openDetail, warnPrefilled, warnUnknownPrice],
   );
 
   const handleExport = React.useCallback(
