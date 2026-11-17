@@ -178,6 +178,16 @@ export const ImportTariffResponseSchema = z
     unmatched: z.number().int(),
     skippedRows: z.number().int(),
     prefilledRows: z.number().int(),
+    unknownCurrentPriceRows: z
+      .number()
+      .int()
+      .openapi({
+        description:
+          'Ne güncel fiyatı (GÜNCEL TSF) ne komisyona esas fiyatı bilinen ürün satırı sayısı ' +
+          '(hücre boş, okunamaz ya da 0). Bu satırların güncel kârı hesaplanmaz; sınırı olan ' +
+          'aralıkların kârı hesaplanır. Her ürün satırı, dönem sayısından bağımsız olarak bir kez ' +
+          'sayılır.',
+      }),
   })
   .openapi('ImportTariffResponse');
 
@@ -185,12 +195,20 @@ export type ImportTariffResponse = z.infer<typeof ImportTariffResponseSchema>;
 
 // ─── Selections (band + custom price) ───────────────────────────────────────
 
+// A custom price that is zero at two decimals (`0`, `0.0`, `0.00`, `000`). Zero is not a
+// real price: stored, it would pass the BAND_PRICE_UNKNOWN check of a band with no price
+// and the export would write 0.00. Matched as text, not parsed: Zod still runs the refine
+// after a failed regex, so the predicate must not throw on a malformed string (that one
+// is left to the regex, which already reports it).
+const ZERO_PRICE_PATTERN = /^0+(\.0{1,2})?$/;
+
 export const TariffSelectionSchema = z.object({
   itemId: z.string().uuid(),
   band: TariffBandKeySchema.nullable(),
   customPrice: z
     .string()
     .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_CUSTOM_PRICE')
+    .refine((value) => !ZERO_PRICE_PATTERN.test(value), 'INVALID_CUSTOM_PRICE')
     .nullable(),
 });
 

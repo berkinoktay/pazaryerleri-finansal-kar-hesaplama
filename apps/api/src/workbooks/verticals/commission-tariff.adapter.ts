@@ -5,12 +5,13 @@
 // product row in sheet order carrying that period's bands, starting without a choice;
 // one tariff per week and store (an upload whose week overlaps a stored one is refused,
 // before the import transaction and again inside it); the import queues no profit
-// recompute, since an order's commission never reads a tariff's bands. The export
-// writes each chosen product's price and the window's tariff selection into every row
-// that carries its barcode, one file per window. A chosen product whose price is not
-// known (no custom price, and its band has no limit or is not stored while its current
-// price is unknown) refuses the whole export with SELECTION_PRICE_UNKNOWN; the export
-// never writes a price it does not know.
+// recompute, since an order's commission never reads a tariff's bands; its response
+// counts the product rows with neither a current price nor a commission base price
+// (their current profit is unknown). The export writes each chosen product's price and
+// the window's tariff selection into every row that carries its barcode, one file per
+// window. A chosen product whose price is not known (no custom price, and its band has
+// no limit or is not stored while its current price is unknown) refuses the whole
+// export with SELECTION_PRICE_UNKNOWN; the export never writes a price it does not know.
 
 import { Decimal } from 'decimal.js';
 
@@ -79,8 +80,12 @@ const COMMISSION_TARIFF_HTTP: WorkbookHttpSpec = {
     'sheet is read by position (its commission columns share duplicate headers), each present ' +
     'period (3-day / 4-day) becomes a period, and each product row is joined to a ProductVariant ' +
     'by barcode. Stores one tariff with its periods + product rows; profit is computed later on ' +
-    'read. Returns counts: products, periods, items, matched/unmatched products, skipped rows. ' +
-    'Rejects a file whose header layout does not match the expected export (422 VALIDATION_ERROR).',
+    'read. A blank, unreadable or 0 current price or commission base price is stored as null. ' +
+    'Returns counts: products, periods, items, matched/unmatched products, skipped rows, and ' +
+    '`unknownCurrentPriceRows`, the product rows with neither a current price nor a commission ' +
+    'base price (their current profit is unknown; each row counts once, whatever the number of ' +
+    'periods). Rejects a file whose header layout does not match the expected export (422 ' +
+    'VALIDATION_ERROR).',
   importCreated: 'Tariff imported',
   import422: 'File missing, unreadable, or not the expected tariff format',
   exportSummary: 'Export the tariff as a re-uploadable Trendyol Excel',
@@ -131,20 +136,32 @@ export function resolveCommissionExportPrice(
   return price.toFixed(NEW_TSF_SCALE);
 }
 
+/** What the commission import's `inspect` hands to `persist` and `toResponse`. */
+interface CommissionTariffImportMeta {
+  readonly week: TariffWeek;
+  /**
+   * The kept product rows with neither a current price nor a commission base price, so
+   * their current profit is unknown; each row counts once, whatever the number of periods.
+   */
+  readonly unknownCurrentPriceRows: number;
+}
+
 /**
  * The week of the upload (`inspectUploadWeek`): the period blocks filled on the first
- * data row, checked as the export writes them, then the scoped overlap query.
+ * data row, checked as the export writes them, then the scoped overlap query; and the
+ * count of product rows with neither a current price nor a commission base price.
  */
 async function inspectTariffWeek({
   scope,
   now,
+  rows,
   firstDataRow,
 }: InspectContext<
   typeof trendyolCommissionTariffLayout,
   CommissionTariffRow,
   undefined
->): Promise<TariffWeek> {
-  return inspectUploadWeek({
+>): Promise<CommissionTariffImportMeta> {
+  const week = await inspectUploadWeek({
     table: prisma.commissionTariff,
     scope,
     now,
@@ -157,6 +174,10 @@ async function inspectTariffWeek({
           })),
     write: { spec: TARIFF_SELECTION_WRITE, label: tariffSelectionLabel },
   });
+  const unknownCurrentPriceRows = rows.filter(
+    (row) => row.data.currentPrice === null && row.data.commissionBasePrice === null,
+  ).length;
+  return { week, unknownCurrentPriceRows };
 }
 
 /**
@@ -229,7 +250,7 @@ export const commissionTariffAdapter: WorkbookVerticalAdapter<
   typeof trendyolCommissionTariffLayout,
   CommissionTariffRow,
   undefined,
-  TariffWeek,
+  CommissionTariffImportMeta,
   CommissionTariffExportItem,
   ImportTariffResponse,
   CommissionTariffWriteKey
@@ -248,11 +269,11 @@ export const commissionTariffAdapter: WorkbookVerticalAdapter<
   },
   formats: [trendyolCommissionTariffFormat],
   inspect: inspectTariffWeek,
-  nameFallback: (week) => week.present[0]?.label ?? null,
+  nameFallback: ({ week }) => week.present[0]?.label ?? null,
   // No order is queued for a profit recompute: an order's commission never reads a
   // tariff's bands (resolveTrendyolCommissionRate in @pazarsync/profit), only the
   // campaign screens do, and they compute on read.
-  persist: async (tx, { parent, rows, variantIdByAnchor, meta: week }) => {
+  persist: async (tx, { parent, rows, variantIdByAnchor, meta: { week } }) => {
     const scope: StoreScope = { organizationId: parent.organizationId, storeId: parent.storeId };
     await assertNoOverlappingWeek(tx.commissionTariff, scope, week);
     const tariff = await tx.commissionTariff.create({
@@ -315,12 +336,13 @@ export const commissionTariffAdapter: WorkbookVerticalAdapter<
   toResponse: (outcome) => ({
     tariffId: outcome.parentId,
     productCount: outcome.rowCount,
-    periodCount: outcome.meta.present.length,
+    periodCount: outcome.meta.week.present.length,
     itemCount: outcome.itemCount,
     matched: outcome.matchedRows,
     unmatched: outcome.rowCount - outcome.matchedRows,
     skippedRows: outcome.skippedRows,
     prefilledRows: outcome.prefilledRows,
+    unknownCurrentPriceRows: outcome.meta.unknownCurrentPriceRows,
   }),
   load: loadCommissionTariff,
   notFoundResource: 'CommissionTariff',

@@ -137,9 +137,31 @@ describe('resolveCommissionExportPrice', () => {
     );
   });
 
-  it('falls back to the current price when the row lacks the selected band', () => {
+  it('still falls back to the current price when the row lacks the selected band', () => {
     const narrow = commissionRow('a', 'A', [band('band1')]);
     expect(resolveCommissionExportPrice(narrow, { a: 'band3' }, {})).toBe('150.00');
+  });
+
+  it('is null for a selected band whose price is unknown', () => {
+    // The current price is still known here: the pick must not fall through to it,
+    // because the backend export answers 409 for this selection.
+    const unpriced = commissionRow('a', 'A', [{ ...band('band1'), price: null }]);
+    expect(resolveCommissionExportPrice(unpriced, { a: 'band1' }, {})).toBeNull();
+  });
+
+  it('is null when the row lacks the selected band and the current price is unknown', () => {
+    const narrow: CommissionTariffRow = {
+      ...commissionRow('a', 'A', [band('band1')]),
+      currentPrice: null,
+    };
+    expect(resolveCommissionExportPrice(narrow, { a: 'band3' }, {})).toBeNull();
+  });
+
+  it('picks the custom price on a band with no price', () => {
+    const unpriced = commissionRow('a', 'A', [{ ...band('band1'), price: null }]);
+    expect(resolveCommissionExportPrice(unpriced, { a: 'band1' }, { a: custom('130.00') })).toBe(
+      '130.00',
+    );
   });
 
   it('is null for an unselected row', () => {

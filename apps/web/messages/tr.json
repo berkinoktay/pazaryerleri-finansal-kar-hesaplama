@@ -947,8 +947,8 @@
     },
     "table": {
       "priceUnknown": "Bilinmiyor",
-      "priceUnknownHint": "Excel'deki güncel fiyat (GÜNCEL TSF) ve komisyona esas fiyat okunamadı. Bu yüzden güncel kâr ve güncele göre fark hesaplanmıyor; fiyat aralıklarından birini yine seçebilirsin.",
-      "bandPriceUnknownHint": "Bu aralığın dosyada fiyat sınırı yok ve ürünün güncel fiyatı bilinmiyor. Bu yüzden fiyatı hesaplanamıyor ve seçilemiyor.",
+      "priceUnknownHint": "Excel'deki fiyatlar okunamadı; güncel kâr hesaplanmıyor.",
+      "bandPriceUnknownHint": "Dosyada fiyat sınırı yok ve GÜNCEL TSF okunamadı.",
       "bandNotSelectable": "Seçilemez",
       "product": "Ürün Bilgileri",
       "current": "Güncel fiyat",

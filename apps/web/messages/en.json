@@ -947,8 +947,8 @@
     },
     "table": {
       "priceUnknown": "Unknown",
-      "priceUnknownHint": "The current price (GÜNCEL TSF) and the commission base price in the Excel file could not be read, so the current profit and the difference from it are not calculated. You can still choose a price range.",
-      "bandPriceUnknownHint": "This range has no price limit in the file and the product's current price is unknown, so it has no price and cannot be selected.",
+      "priceUnknownHint": "The prices in the Excel file could not be read; the current profit is not calculated.",
+      "bandPriceUnknownHint": "No price limit in the file and GÜNCEL TSF could not be read.",
       "bandNotSelectable": "Cannot be selected",
       "product": "Product Details",
       "current": "Current price",

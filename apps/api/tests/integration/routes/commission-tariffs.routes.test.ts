@@ -31,7 +31,10 @@ const app = createApp();
 
 interface BandWire {
   key: string;
-  price: string;
+  lowerLimit: string | null;
+  upperLimit: string | null;
+  /** Null for a band with neither limit when the current price is unknown. */
+  price: string | null;
   commissionPct: string;
   netProfit: string | null;
   marginPct: string | null;
@@ -41,6 +44,8 @@ interface ItemWire {
   barcode: string;
   productTitle: string;
   imageUrl: string | null;
+  /** Null when the file's current price cell was blank, unreadable or 0. */
+  currentPrice: string | null;
   commissionBasePrice: string | null;
   currentNetProfit: string | null;
   currentMarginPct: string | null;
@@ -1252,6 +1257,307 @@ describe('Commission Tariffs - sub-kurus band limits (Faz 4B closing gate)', () 
       expect(bandSub?.marginPct).toBe(bandWhole?.marginPct);
 
       // No degrade: the item computed, so no [profit-read] line was written.
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+});
+
+describe('Commission Tariffs - unknown current price', () => {
+  // Items whose current_price is NULL (the file's GUNCEL TSF was blank, unreadable or 0).
+  // Every item sits on ONE calculable variant (TRY cost + SENDEOMP shipping + fee defs),
+  // so a null profit here can only come from the unknown price, never from a missing cost
+  // or an unmatched barcode. Each NULL item has a sibling with the same bands and a known
+  // price, so its band profits are pinned against real numbers, not just "not null":
+  //   BC-UNK-BOTH   : current + commission base price unknown, four limited bands
+  //   BC-UNK-REF    : current price 500, the same four limited bands (BOTH's sibling)
+  //   BC-UNK-BASE   : current price unknown, commission base price 400, the same bands
+  //   BC-UNK-BASEREF: current price 500, commission base price 400 (BASE's sibling)
+  //   BC-UNK-NOLIM  : both unknown; a 0% band with neither limit listed FIRST, then a
+  //                   limited band -- priced, the 0% band would be the best one
+  //   BC-UNK-ONLY   : both unknown; its only band has neither limit
+  const LIMITED_BANDS = [
+    { key: 'band1', lowerLimit: '450.00', commissionPct: '19' },
+    { key: 'band2', lowerLimit: '400.00', upperLimit: '450.00', commissionPct: '15' },
+    { key: 'band3', lowerLimit: '350.00', upperLimit: '400.00', commissionPct: '12' },
+    { key: 'band4', upperLimit: '350.00', commissionPct: '10' },
+  ];
+  // Each limited band's price: its upper limit, else its lower limit (band 1).
+  const LIMITED_BAND_PRICES = ['450.00', '450.00', '400.00', '350.00'];
+
+  let accessToken: string;
+  let orgId: string;
+  let storeId: string;
+  let tariffId: string;
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing - globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Unknown Price Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'tariff-unknown-price-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 9201n,
+        productMainId: 'pm-9201',
+        title: 'Bilinmeyen Fiyat Urunu',
+        categoryId: 597n,
+        categoryName: 'Gomlek',
+        brandId: 2032n,
+        brandName: 'Modline',
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: 92010n,
+        barcode: 'BC-UNK',
+        stockCode: 'STK-UNK',
+        salePrice: new Decimal('500.00'),
+        listPrice: new Decimal('500.00'),
+        vatRate: 20,
+        dimensionalWeightOverride: new Decimal('3.0'),
+      },
+    });
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'COGS Unknown',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Unknown',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+    });
+    await ensureFeeDefinitions();
+
+    const tariff = await prisma.commissionTariff.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Bilinmeyen Fiyat Tarifesi' },
+    });
+    const period = await prisma.commissionTariffPeriod.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: tariff.id,
+        dateRangeLabel: '1 - 7 Temmuz',
+        sortOrder: 0,
+      },
+    });
+    const makeItem = async (
+      barcode: string,
+      sortOrder: number,
+      prices: { currentPrice: string | null; commissionBasePrice: string | null },
+      bands: ReadonlyArray<{
+        key: string;
+        lowerLimit?: string;
+        upperLimit?: string;
+        commissionPct: string;
+      }>,
+    ): Promise<void> => {
+      await prisma.commissionTariffItem.create({
+        data: {
+          organizationId: org.id,
+          storeId: store.id,
+          periodId: period.id,
+          productVariantId: variant.id,
+          barcode,
+          productTitle: barcode,
+          sortOrder,
+          currentPrice: prices.currentPrice,
+          commissionBasePrice: prices.commissionBasePrice,
+          currentCommissionPct: '19.0000',
+          bands,
+        },
+      });
+    };
+    await makeItem(
+      'BC-UNK-BOTH',
+      0,
+      { currentPrice: null, commissionBasePrice: null },
+      LIMITED_BANDS,
+    );
+    await makeItem(
+      'BC-UNK-REF',
+      1,
+      { currentPrice: '500.00', commissionBasePrice: null },
+      LIMITED_BANDS,
+    );
+    await makeItem(
+      'BC-UNK-BASE',
+      2,
+      { currentPrice: null, commissionBasePrice: '400.00' },
+      LIMITED_BANDS,
+    );
+    await makeItem(
+      'BC-UNK-BASEREF',
+      3,
+      { currentPrice: '500.00', commissionBasePrice: '400.00' },
+      LIMITED_BANDS,
+    );
+    await makeItem('BC-UNK-NOLIM', 4, { currentPrice: null, commissionBasePrice: null }, [
+      { key: 'band1', commissionPct: '0' },
+      { key: 'band2', lowerLimit: '400.00', upperLimit: '450.00', commissionPct: '15' },
+    ]);
+    await makeItem('BC-UNK-ONLY', 5, { currentPrice: null, commissionBasePrice: null }, [
+      { key: 'band1', commissionPct: '19' },
+    ]);
+
+    accessToken = user.accessToken;
+    orgId = org.id;
+    storeId = store.id;
+    tariffId = tariff.id;
+  });
+
+  async function fetchItems(): Promise<ItemWire[]> {
+    const res = await app.request(
+      `/v1/organizations/${orgId}/stores/${storeId}/commission-tariffs/${tariffId}`,
+      { headers: { Authorization: bearer(accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    return ((await res.json()) as DetailWire).periods[0]?.items ?? [];
+  }
+
+  function itemOf(items: readonly ItemWire[], barcode: string): ItemWire {
+    const item = items.find((i) => i.barcode === barcode);
+    if (item === undefined) throw new Error(`detail has no item ${barcode}`);
+    return item;
+  }
+
+  it('returns a null currentPrice and null current profit when both prices are unknown, with band profits computed', async () => {
+    const items = await fetchItems();
+    const both = itemOf(items, 'BC-UNK-BOTH');
+    const ref = itemOf(items, 'BC-UNK-REF');
+
+    // No made-up 0: the unknown prices stay null on the wire.
+    expect(both.currentPrice).toBeNull();
+    expect(both.commissionBasePrice).toBeNull();
+    // No baseline, so no current profit -- but the item is still calculable from its bands.
+    expect(both.currentNetProfit).toBeNull();
+    expect(both.currentMarginPct).toBeNull();
+    expect(both.calculable).toBe(true);
+    expect(both.reason).toBeNull();
+
+    // Every limited band is priced at its own limit and computed; the profits equal the
+    // known-price sibling's exactly (a limited band's price never reads the current price).
+    expect(both.bands.map((b) => b.price)).toEqual(LIMITED_BAND_PRICES);
+    expect(ref.bands.map((b) => b.price)).toEqual(LIMITED_BAND_PRICES);
+    for (const band of both.bands) {
+      expect(band.netProfit).not.toBeNull();
+      expect(band.marginPct).not.toBeNull();
+    }
+    expect(both.bands.map((b) => b.netProfit)).toEqual(ref.bands.map((b) => b.netProfit));
+    expect(both.bands.map((b) => b.marginPct)).toEqual(ref.bands.map((b) => b.marginPct));
+    expect(both.bestBandKey).not.toBeNull();
+    expect(both.bestBandKey).toBe(ref.bestBandKey);
+
+    // The sibling with a known price keeps its current profit (unchanged behaviour).
+    expect(ref.currentPrice).toBe('500.00');
+    expect(ref.currentNetProfit).not.toBeNull();
+  });
+
+  it('keeps showing the base-price profit when only the current price is unknown', async () => {
+    const items = await fetchItems();
+    const base = itemOf(items, 'BC-UNK-BASE');
+    const baseRef = itemOf(items, 'BC-UNK-BASEREF');
+
+    expect(base.currentPrice).toBeNull();
+    expect(base.commissionBasePrice).toBe('400.00');
+    expect(base.calculable).toBe(true);
+    expect(base.reason).toBeNull();
+    // The baseline is the commission base price (400) for both items, so the current
+    // profit and margin are shown and match the sibling whose current price is known.
+    expect(base.currentNetProfit).not.toBeNull();
+    expect(base.currentNetProfit).toBe(baseRef.currentNetProfit);
+    expect(base.currentMarginPct).toBe(baseRef.currentMarginPct);
+    expect(base.bands.map((b) => b.netProfit)).toEqual(baseRef.bands.map((b) => b.netProfit));
+    expect(base.bestBandKey).toBe(baseRef.bestBandKey);
+  });
+
+  it('returns a band with neither limit as price null, profit null, and never as bestBandKey', async () => {
+    const items = await fetchItems();
+
+    // The 0% neither-limit band is listed first and would out-earn the 15% band if it had
+    // a price; with no price it is never evaluated, so the limited band is the best one.
+    const noLimit = itemOf(items, 'BC-UNK-NOLIM');
+    const unpriced = noLimit.bands.find((b) => b.key === 'band1');
+    const priced = noLimit.bands.find((b) => b.key === 'band2');
+    expect(unpriced?.lowerLimit).toBeNull();
+    expect(unpriced?.upperLimit).toBeNull();
+    expect(unpriced?.price).toBeNull();
+    expect(unpriced?.netProfit).toBeNull();
+    expect(unpriced?.marginPct).toBeNull();
+    expect(priced?.price).toBe('450.00');
+    expect(priced?.netProfit).not.toBeNull();
+    expect(noLimit.calculable).toBe(true);
+    expect(noLimit.bestBandKey).toBe('band2');
+    expect(noLimit.currentNetProfit).toBeNull();
+
+    // An item whose only band has no price has nothing to compute: not calculable, with a
+    // null reason (not NO_PRODUCT -- the variant is matched), and no best band.
+    const only = itemOf(items, 'BC-UNK-ONLY');
+    expect(only.bands).toHaveLength(1);
+    expect(only.bands[0]?.price).toBeNull();
+    expect(only.bands[0]?.netProfit).toBeNull();
+    expect(only.calculable).toBe(false);
+    expect(only.reason).toBeNull();
+    expect(only.bestBandKey).toBeNull();
+    expect(only.currentNetProfit).toBeNull();
+
+    // No price anywhere in this tariff is a made-up 0: an unknown current price is null,
+    // and a band's price is null or one of its own limits.
+    for (const item of items) {
+      expect(item.currentPrice === null || item.currentPrice === '500.00').toBe(true);
+      for (const band of item.bands) {
+        if (band.price === null) continue;
+        expect([band.lowerLimit, band.upperLimit]).toContain(band.price);
+      }
+    }
+  });
+
+  it('does not log a profit-read failure for a row with an unknown price', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const items = await fetchItems();
+      expect(items).toHaveLength(6);
+      // The unknown-price rows computed on their own path; none was degraded via the
+      // per-item failure log (which would also blank its band profits).
+      expect(itemOf(items, 'BC-UNK-BOTH').bands[0]?.netProfit).not.toBeNull();
       expect(errorSpy).not.toHaveBeenCalled();
     } finally {
       errorSpy.mockRestore();

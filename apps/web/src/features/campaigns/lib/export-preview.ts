@@ -49,19 +49,33 @@ export function computeExportPreview<R extends { readonly barcode: string }>(
 }
 
 /**
- * The price the commission export writes for a row, or null when the row is not
- * selected. Mirrors the export (custom price, else the chosen band's price, else the
- * current price) and the save payload, which treats a key outside the four bands as
- * no selection. It only picks server strings; it does no arithmetic.
+ * The price the commission export writes for a row. Mirrors the backend pick step by
+ * step:
+ *   1. not selected: null (the save payload treats a key outside the four bands as no
+ *      selection, so such a key is not selected either);
+ *   2. a custom price: the custom price;
+ *   3. the row holds the selected band: that band's price, null when it is unknown (a
+ *      band with neither limit while the current price is unknown);
+ *   4. the row lacks the selected band: the row's current price, null when unknown.
+ *
+ * A null result for a SELECTED row means the backend export would refuse it (409
+ * `SELECTION_PRICE_UNKNOWN`); the preview then leaves the row out of every file. The
+ * page cannot reach that state: the seed drops such a stored selection
+ * (`seedCommissionSelection`) and a band with no price cannot be selected. It only
+ * picks server strings; it does no arithmetic.
  */
 export function resolveCommissionExportPrice(
   row: CommissionTariffRow,
   selection: Readonly<SelectionMap>,
   customPrices: Readonly<CustomPriceMap>,
 ): string | null {
-  const band = asBandKey(selection[row.id] ?? null);
-  if (band === undefined) return null;
-  return customPrices[row.id]?.price ?? findBand(row, band)?.price ?? row.currentPrice;
+  const bandKey = asBandKey(selection[row.id] ?? null);
+  if (bandKey === undefined) return null;
+  const custom = customPrices[row.id];
+  if (custom != null) return custom.price;
+  const band = findBand(row, bandKey);
+  if (band !== undefined) return band.price;
+  return row.currentPrice;
 }
 
 /**

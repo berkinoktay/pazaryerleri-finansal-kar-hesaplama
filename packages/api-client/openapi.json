@@ -4692,6 +4692,10 @@
           },
           "prefilledRows": {
             "type": "integer"
+          },
+          "unknownCurrentPriceRows": {
+            "type": "integer",
+            "description": "Ne güncel fiyatı (GÜNCEL TSF) ne komisyona esas fiyatı bilinen ürün satırı sayısı (hücre boş, okunamaz ya da 0). Bu satırların güncel kârı hesaplanmaz; sınırı olan aralıkların kârı hesaplanır. Her ürün satırı, dönem sayısından bağımsız olarak bir kez sayılır."
           }
         },
         "required": [
@@ -4702,7 +4706,8 @@
           "matched",
           "unmatched",
           "skippedRows",
-          "prefilledRows"
+          "prefilledRows",
+          "unknownCurrentPriceRows"
         ]
       },
       "UpdateSelectionsResponse": {
@@ -16191,7 +16196,7 @@
           "CommissionTariffs"
         ],
         "summary": "Import a Trendyol commission-tariff Excel",
-        "description": "Uploads Trendyol's 'Ürün Komisyon Tarifeleri' .xlsx (multipart `file`). The fixed-layout sheet is read by position (its commission columns share duplicate headers), each present period (3-day / 4-day) becomes a period, and each product row is joined to a ProductVariant by barcode. Stores one tariff with its periods + product rows; profit is computed later on read. Returns counts: products, periods, items, matched/unmatched products, skipped rows. Rejects a file whose header layout does not match the expected export (422 VALIDATION_ERROR).",
+        "description": "Uploads Trendyol's 'Ürün Komisyon Tarifeleri' .xlsx (multipart `file`). The fixed-layout sheet is read by position (its commission columns share duplicate headers), each present period (3-day / 4-day) becomes a period, and each product row is joined to a ProductVariant by barcode. Stores one tariff with its periods + product rows; profit is computed later on read. A blank, unreadable or 0 current price or commission base price is stored as null. Returns counts: products, periods, items, matched/unmatched products, skipped rows, and `unknownCurrentPriceRows`, the product rows with neither a current price nor a commission base price (their current profit is unknown; each row counts once, whatever the number of periods). Rejects a file whose header layout does not match the expected export (422 VALIDATION_ERROR).",
         "security": [
           {
             "bearerAuth": []
@@ -16541,7 +16546,7 @@
           "CommissionTariffs"
         ],
         "summary": "Save band selections + custom prices for tariff items",
-        "description": "Persists the seller's chosen band (`band1`..`band4`, or null to clear) and optional custom price per item, in a single bulk update. Items not belonging to this tariff/store are ignored. Selection happens client-side over the backend-computed margins; this only records the result. Returns how many items were updated.",
+        "description": "Persists the seller's chosen band (`band1`..`band4`, or null to clear) and optional custom price per item, in a single bulk update. Items not belonging to this tariff/store are ignored. Selection happens client-side over the backend-computed margins; this only records the result. A band the item does not store (`BAND_NOT_STORED`), or a band with no price (neither limit while the current price is unknown) sent without a custom price (`BAND_PRICE_UNKNOWN`), refuses the whole request with 422 on `selections.<index>.band`; nothing is written. A null band is never checked. Returns how many items were updated.",
         "security": [
           {
             "bearerAuth": []
@@ -16654,7 +16659,7 @@
             }
           },
           "422": {
-            "description": "Invalid selection payload",
+            "description": "Invalid selection payload, or a selection the export could not write (BAND_NOT_STORED, BAND_PRICE_UNKNOWN on selections.<index>.band)",
             "content": {
               "application/json": {
                 "schema": {

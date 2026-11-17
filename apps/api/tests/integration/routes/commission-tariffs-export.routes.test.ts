@@ -401,6 +401,119 @@ describe('commission-tariff export + variable periods', () => {
     expect(Number(text(patched, column(layout, 'newTsf')))).toBe(777.09);
   });
 
+  // Gives the imported matched item an unknown current price (NULL: the file's GUNCEL TSF
+  // was blank, unreadable or 0) and the given selection; `bands` replaces the imported
+  // bands when set.
+  async function selectWithUnknownPrice(
+    ctx: Ctx,
+    data: {
+      selectedBand: string;
+      customPrice?: string;
+      bands?: ReadonlyArray<{
+        key: string;
+        lowerLimit?: string;
+        upperLimit?: string;
+        commissionPct: string;
+      }>;
+    },
+  ): Promise<void> {
+    const item = await prisma.commissionTariffItem.findFirst({
+      where: { storeId: ctx.storeId, barcode: MATCHED_BARCODE },
+    });
+    expect(item).not.toBeNull();
+    await prisma.commissionTariffItem.update({
+      where: { id: item?.id },
+      data: {
+        currentPrice: null,
+        commissionBasePrice: null,
+        selectedBand: data.selectedBand,
+        customPrice: data.customPrice ?? null,
+        ...(data.bands === undefined ? {} : { bands: data.bands }),
+      },
+    });
+  }
+
+  it('answers 409 SELECTION_PRICE_UNKNOWN for a selected band with neither limit and an unknown current price, and does not mark the tariff exported', async () => {
+    const ctx = await setupStore();
+    const tariffId = await importFixture(ctx, FIXTURE_2P, 'tariff.xlsx');
+
+    // The selected band has neither limit, so its price would be the current price -- which
+    // is unknown. The export must refuse instead of writing a made-up 0.00.
+    await selectWithUnknownPrice(ctx, {
+      selectedBand: 'band1',
+      bands: [{ key: 'band1', commissionPct: '19' }],
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/commission-tariffs/${tariffId}/export`,
+      { method: 'POST', headers: { Authorization: bearer(ctx.accessToken) } },
+    );
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe('SELECTION_PRICE_UNKNOWN');
+
+    // No file was built, so the tariff is not marked exported.
+    const stored = await prisma.commissionTariff.findUnique({ where: { id: tariffId } });
+    expect(stored?.exportedAt).toBeNull();
+  });
+
+  it('exports the custom price of an item whose current price is unknown', async () => {
+    const ctx = await setupStore();
+    const tariffId = await importFixture(ctx, FIXTURE_2P, 'tariff.xlsx');
+
+    // The same unpriced band as the 409 case, but the seller typed a custom price: the
+    // custom price wins, so the export knows what to write.
+    await selectWithUnknownPrice(ctx, {
+      selectedBand: 'band1',
+      customPrice: '512.34',
+      bands: [{ key: 'band1', commissionPct: '19' }],
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/commission-tariffs/${tariffId}/export`,
+      { method: 'POST', headers: { Authorization: bearer(ctx.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('spreadsheetml');
+
+    const grid = await readWorkbookGrid(Buffer.from(await res.arrayBuffer()));
+    const layout = resolveLayout(trendyolCommissionTariffLayout, grid);
+    expect(layout).not.toBeNull();
+    if (layout === null) return;
+    const patched = grid
+      .slice(1)
+      .find((r) => text(r, column(layout, 'barcode')) === MATCHED_BARCODE);
+    expect(Number(text(patched, column(layout, 'newTsf')))).toBe(512.34);
+
+    const stored = await prisma.commissionTariff.findUnique({ where: { id: tariffId } });
+    expect(stored?.exportedAt).not.toBeNull();
+  });
+
+  it("exports a limited band's price for an item whose current price is unknown", async () => {
+    const ctx = await setupStore();
+    const tariffId = await importFixture(ctx, FIXTURE_2P, 'tariff.xlsx');
+
+    // The imported bands stay as they are: band2's upper limit (777.09) prices it without
+    // the current price.
+    await selectWithUnknownPrice(ctx, { selectedBand: 'band2' });
+
+    const res = await app.request(
+      `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/commission-tariffs/${tariffId}/export`,
+      { method: 'POST', headers: { Authorization: bearer(ctx.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('spreadsheetml');
+
+    const grid = await readWorkbookGrid(Buffer.from(await res.arrayBuffer()));
+    const layout = resolveLayout(trendyolCommissionTariffLayout, grid);
+    expect(layout).not.toBeNull();
+    if (layout === null) return;
+    const patched = grid
+      .slice(1)
+      .find((r) => text(r, column(layout, 'barcode')) === MATCHED_BARCODE);
+    expect(Number(text(patched, column(layout, 'newTsf')))).toBe(777.09);
+    expect(text(patched, column(layout, 'tariffSelection'))).toBe('4 Günlük Fiyat');
+  });
+
   it('returns 409 when the stored source file is unreadable', async () => {
     const ctx = await setupStore();
     // Seed a tariff directly with stored bytes that are not a workbook at all.

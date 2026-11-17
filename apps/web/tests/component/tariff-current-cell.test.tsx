@@ -58,6 +58,32 @@ describe('TariffCurrentCell', () => {
     expect(container).not.toHaveTextContent(/0,00/);
   });
 
+  it('puts the hint on its own line under the label, above the commission line', () => {
+    renderCell({
+      price: null,
+      unknownPriceLabel: UNKNOWN_LABEL,
+      unknownPriceHint: UNKNOWN_HINT,
+    });
+    const label = screen.getByText(UNKNOWN_LABEL);
+    const hint = screen.getByText(UNKNOWN_HINT);
+    const commission = screen.getByText(new RegExp(`${COMMISSION_LABEL} %19`));
+    // Not inline next to the label: the label sits directly in the hero column (which
+    // also holds the commission line), not in a wrapper shared with the hint.
+    expect(label).not.toContainElement(hint);
+    expect(label.parentElement).toContainElement(commission);
+    expect(label.parentElement).toContainElement(hint);
+    // Order: label, then the hint line, then the commission line.
+    expect(label.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      hint.compareDocumentPosition(commission) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('shows no hint while the price is known', () => {
+    renderCell({ unknownPriceLabel: UNKNOWN_LABEL, unknownPriceHint: UNKNOWN_HINT });
+    expect(screen.queryByText(UNKNOWN_HINT)).toBeNull();
+  });
+
   it('falls back to an em dash when the price is null and no label is given', () => {
     // A known profit keeps the badge from printing its own em dash, so the only
     // one on screen is the hero's.

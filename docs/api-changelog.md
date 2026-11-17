@@ -49,6 +49,32 @@ section "Versioning" for details.
   answers `422 VALIDATION_ERROR` with `errors: [{ field: "scenario", code: "CURRENT_PRICE_UNKNOWN" }]`
   instead of pricing a made-up 0; the detail row of such an item has no current profit either.
   The response schema is unchanged, and the band and custom-price modes are unaffected.
+- **Commission tariff import: unknown prices are kept as null, and a new count
+  `unknownCurrentPriceRows`**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/import`). A product row
+  whose current price (GÜNCEL TSF) or commission base price (KOMİSYONA ESAS FİYAT) is blank,
+  unreadable or 0 is kept and stored with that price null; a band with neither limit no longer
+  refuses the file when the current price is unknown. `ImportTariffResponse` gains the required
+  integer `unknownCurrentPriceRows`: the product rows with neither a current price nor a commission
+  base price, whose current profit is unknown (each row counts once, whatever the number of
+  periods). A row whose commission base price is known is not counted. Additive; the other workbook
+  import responses are unchanged.
+- **Commission tariff selections: new 422 field codes `BAND_NOT_STORED` and `BAND_PRICE_UNKNOWN`**
+  (`PATCH /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/selections`).
+  A selection whose band the item does not store answers `422 VALIDATION_ERROR` with
+  `{ field: "selections.<index>.band", code: "BAND_NOT_STORED" }`, with or without a custom price.
+  A selection of a band with no price (neither limit while the item's current price is unknown)
+  sent without a custom price answers the same with code `BAND_PRICE_UNKNOWN`. The check is
+  all-or-nothing: every refused entry is reported and nothing is written. A `band: null` entry is
+  never checked, and an item id outside the tariff and store is still silently skipped (never
+  reported). The request and response schemas are unchanged.
+- **Commission tariff selections: a custom price of 0 is refused**
+  (`PATCH /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/selections`).
+  A `customPrice` that is zero at two decimals (`0`, `0.0`, `0.00`, `000`) answers
+  `422 VALIDATION_ERROR` with `{ field: "selections.<index>.customPrice", code: "INVALID_CUSTOM_PRICE" }`,
+  the code a malformed price already gets, and nothing is written. Zero is not a real price; it
+  used to let a band with no price pass the `BAND_PRICE_UNKNOWN` check and export 0.00. The estimate
+  endpoint and the other verticals' selection routes are unchanged, and so is the spec.
 - **Commission and Plus commission tariff weeks across New Year**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs}/import`).
   The period labels of a Trendyol tariff file carry no year. Each label used to take the UTC year

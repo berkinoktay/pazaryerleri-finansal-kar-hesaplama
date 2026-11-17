@@ -20,7 +20,11 @@ export interface TariffCurrentCellProps {
   price: string | null;
   /** What the hero shows when `price` is `null`; defaults to an em-dash. The caller owns the wording. */
   unknownPriceLabel?: string;
-  /** Optional explanation rendered after {@link unknownPriceLabel} when `price` is `null` (e.g. an `InfoHint`). */
+  /**
+   * Optional explanation shown when `price` is `null`: a short muted line of its own under
+   * the {@link unknownPriceLabel} hero, visible on every device (no hover needed). Ignored
+   * while the price is known.
+   */
   unknownPriceHint?: React.ReactNode;
   /** The current commission %; `null` drops the commission line entirely. */
   commissionPct: string | null;
@@ -116,13 +120,16 @@ export function TariffCurrentCell({
         {price !== null ? (
           <span className="text-base font-bold tabular-nums">{formatCurrency(price)}</span>
         ) : (
-          // Unknown price: a muted label (plus the caller's hint), never a made-up amount.
-          <span className="gap-2xs inline-flex items-center">
+          // Unknown price: a muted label, never a made-up amount, and the caller's
+          // explanation (if any) as its own line under it.
+          <>
             <span className="text-muted-foreground text-base font-semibold">
               {unknownPriceLabel ?? EM_DASH}
             </span>
-            {unknownPriceHint}
-          </span>
+            {unknownPriceHint != null ? (
+              <span className="text-2xs text-muted-foreground">{unknownPriceHint}</span>
+            ) : null}
+          </>
         )}
         {commissionPct !== null ? (
           <span className="text-2xs text-muted-foreground tabular-nums">

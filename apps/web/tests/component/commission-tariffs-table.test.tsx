@@ -12,6 +12,9 @@ import type { CommissionTariffRow, PriceBand } from '@/features/campaigns/types'
 
 import { render, screen, waitFor, within } from '../helpers/render';
 import { HttpResponse, http, server } from '../helpers/msw';
+import trMessages from '../../messages/tr.json';
+
+const TABLE_MESSAGES = trMessages.commissionTariffsPage.table;
 
 const SCOPE = {
   orgId: '00000000-0000-0000-0000-000000000001',
@@ -432,5 +435,51 @@ describe('CommissionTariffsTable — draft survives a pagination unmount', () =>
 
     // The null draft wins over the persisted 150 — the remount stays empty.
     expect(screen.getByPlaceholderText(/fiyat girin/i)).toHaveValue('');
+  });
+});
+
+// Neither GÜNCEL TSF nor KOMİSYONA ESAS FİYAT could be read: no current profit, and
+// band1 (no limits) has no price, while the limited bands keep their profits.
+const UNKNOWN_PRICE_ROW: CommissionTariffRow = {
+  ...row,
+  id: 'r1',
+  currentPrice: null,
+  commissionBasePrice: null,
+  currentNetProfit: null,
+  currentMarginPct: null,
+  bestBandKey: 'band2',
+  bands: [
+    {
+      key: 'band1',
+      lowerLimit: null,
+      upperLimit: null,
+      price: null,
+      commissionPct: '19',
+      netProfit: null,
+      marginPct: null,
+    },
+    band,
+    { ...band, key: 'band3' },
+    { ...band, key: 'band4' },
+  ],
+};
+
+describe('CommissionTariffsTable — unknown current price', () => {
+  it('renders a row with an unknown price without crashing and shows Bilinmiyor', () => {
+    render(<StatefulTableHarness rows={[UNKNOWN_PRICE_ROW]} />);
+    const rowEl = rowByTitle('Test Ürün');
+    // The current cell and the limitless band1 both read "Bilinmiyor".
+    expect(within(rowEl).getAllByText('Bilinmiyor')).toHaveLength(2);
+    // Never a made-up zero price.
+    expect(within(rowEl).queryByText(/₺0,00/)).toBeNull();
+    // band1 cannot be selected; the three limited bands still can.
+    expect(within(rowEl).getByText('Seçilemez')).toBeInTheDocument();
+    expect(within(rowEl).getAllByRole('button', { name: /bu aralığı seç/i })).toHaveLength(3);
+    // The limited bands keep their own profits.
+    expect(within(rowEl).getAllByText(/10,00/).length).toBeGreaterThan(0);
+    // Both cells explain the unknown price in visible text, not behind a hover hint.
+    expect(within(rowEl).getByText(TABLE_MESSAGES.priceUnknownHint)).toBeInTheDocument();
+    expect(within(rowEl).getByText(TABLE_MESSAGES.bandPriceUnknownHint)).toBeInTheDocument();
+    expect(within(rowEl).queryByRole('button', { name: trMessages.common.infoHint })).toBeNull();
   });
 });

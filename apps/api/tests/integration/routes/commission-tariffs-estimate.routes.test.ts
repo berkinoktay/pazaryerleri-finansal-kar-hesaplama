@@ -6,7 +6,8 @@
 // the band from the price; the current scenario (`scenario: 'current'`) prices the
 // item's own commission-base price at its current commission and MUST equal the
 // detail row's `currentNetProfit` badge; an unmatched item degrades to
-// not-calculable.
+// not-calculable. An item whose prices are unknown (NULL) still estimates a band, and
+// its current scenario answers 422 CURRENT_PRICE_UNKNOWN when no baseline is known.
 //
 // Fixture matches commission-tariffs.routes.test.ts: one calculable variant
 // (TRY cost + SENDEOMP shipping + fee defs) plus an unmatched item.
@@ -27,7 +28,8 @@ const app = createApp();
 
 interface BandWire {
   key: string;
-  price: string;
+  /** Null for a band with neither limit when the current price is unknown. */
+  price: string | null;
   commissionPct: string;
   netProfit: string | null;
   marginPct: string | null;
@@ -35,6 +37,8 @@ interface BandWire {
 interface DetailItemWire {
   id: string;
   barcode: string;
+  /** Null when the file's current price cell was blank, unreadable or 0. */
+  currentPrice: string | null;
   commissionBasePrice: string | null;
   currentNetProfit: string | null;
   bands: BandWire[];
@@ -65,6 +69,10 @@ interface EstimateFixture {
   tariffId: string;
   matchedItemId: string;
   unmatchedItemId: string;
+  /** Matched; current price AND commission base price unknown (NULL). */
+  unknownPricesItemId: string;
+  /** Matched; current price unknown (NULL), commission base price 480 like the matched item. */
+  unknownCurrentItemId: string;
 }
 
 async function setupFixture(): Promise<EstimateFixture> {
@@ -160,6 +168,14 @@ async function setupFixture(): Promise<EstimateFixture> {
       sortOrder: 0,
     },
   });
+  // Touching boundaries (band2.upper = band1.lower = 450): a band-click on
+  // band2 (price 450) must still resolve to band2 — that is what bandKey does.
+  const bands = [
+    { key: 'band1', lowerLimit: '450.00', commissionPct: '19' },
+    { key: 'band2', lowerLimit: '400.00', upperLimit: '450.00', commissionPct: '15' },
+    { key: 'band3', lowerLimit: '350.00', upperLimit: '400.00', commissionPct: '12' },
+    { key: 'band4', upperLimit: '350.00', commissionPct: '10' },
+  ];
   const matched = await prisma.commissionTariffItem.create({
     data: {
       organizationId: org.id,
@@ -174,14 +190,37 @@ async function setupFixture(): Promise<EstimateFixture> {
       // (a discounted product). The current scenario must price on THIS, not 500.
       commissionBasePrice: '480.00',
       currentCommissionPct: '19.0000',
-      // Touching boundaries (band2.upper = band1.lower = 450): a band-click on
-      // band2 (price 450) must still resolve to band2 — that is what bandKey does.
-      bands: [
-        { key: 'band1', lowerLimit: '450.00', commissionPct: '19' },
-        { key: 'band2', lowerLimit: '400.00', upperLimit: '450.00', commissionPct: '15' },
-        { key: 'band3', lowerLimit: '350.00', upperLimit: '400.00', commissionPct: '12' },
-        { key: 'band4', upperLimit: '350.00', commissionPct: '10' },
-      ],
+      bands,
+    },
+  });
+  // The same calculable variant and bands as the matched item, but the file's price
+  // cells were blank, unreadable or 0, so the prices are stored as NULL.
+  const unknownPrices = await prisma.commissionTariffItem.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      periodId: period.id,
+      productVariantId: variant.id,
+      barcode: 'BC-EST-NOPRICE',
+      productTitle: 'Fiyatsiz Urun',
+      currentPrice: null,
+      commissionBasePrice: null,
+      currentCommissionPct: '19.0000',
+      bands,
+    },
+  });
+  const unknownCurrent = await prisma.commissionTariffItem.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      periodId: period.id,
+      productVariantId: variant.id,
+      barcode: 'BC-EST-NOCURRENT',
+      productTitle: 'Guncel Fiyatsiz Urun',
+      currentPrice: null,
+      commissionBasePrice: '480.00',
+      currentCommissionPct: '19.0000',
+      bands,
     },
   });
   const unmatched = await prisma.commissionTariffItem.create({
@@ -204,7 +243,22 @@ async function setupFixture(): Promise<EstimateFixture> {
     tariffId: tariff.id,
     matchedItemId: matched.id,
     unmatchedItemId: unmatched.id,
+    unknownPricesItemId: unknownPrices.id,
+    unknownCurrentItemId: unknownCurrent.id,
   };
+}
+
+async function fetchDetailItem(fx: EstimateFixture, barcode: string): Promise<DetailItemWire> {
+  const res = await app.request(
+    `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/commission-tariffs/${fx.tariffId}`,
+    { headers: { Authorization: bearer(fx.accessToken) } },
+  );
+  expect(res.status).toBe(200);
+  const item = ((await res.json()) as DetailWire).periods[0]?.items.find(
+    (i) => i.barcode === barcode,
+  );
+  if (item === undefined) throw new Error(`detail has no item ${barcode}`);
+  return item;
 }
 
 function estimateUrl(fx: EstimateFixture, itemId: string): string {
@@ -421,6 +475,77 @@ describe('Commission Tariffs — item estimate', () => {
     expect(body.code).toBe('VALIDATION_ERROR');
     expect(body.errors[0]?.field).toBe('price');
     expect(body.errors[0]?.code).toBe('INVALID_CUSTOM_PRICE');
+  });
+
+  it('answers 422 CURRENT_PRICE_UNKNOWN on field scenario when neither price is known', async () => {
+    // The detail row has no current profit for this item, so there is no current scenario
+    // to break down: the estimate refuses instead of pricing a made-up 0.
+    const row = await fetchDetailItem(fx, 'BC-EST-NOPRICE');
+    expect(row.currentPrice).toBeNull();
+    expect(row.commissionBasePrice).toBeNull();
+    expect(row.currentNetProfit).toBeNull();
+
+    const res = await app.request(estimateUrl(fx, fx.unknownPricesItemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario: 'current' }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { code: string; errors: { field: string; code: string }[] };
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual([
+      expect.objectContaining({ field: 'scenario', code: 'CURRENT_PRICE_UNKNOWN' }),
+    ]);
+  });
+
+  it('estimates the current scenario from the base price when only the current price is unknown', async () => {
+    const row = await fetchDetailItem(fx, 'BC-EST-NOCURRENT');
+    expect(row.currentPrice).toBeNull();
+    expect(row.commissionBasePrice).toBe('480.00');
+    expect(row.currentNetProfit).not.toBeNull();
+
+    const res = await app.request(estimateUrl(fx, fx.unknownCurrentItemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario: 'current' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as EstimateWire;
+    expect(body.itemId).toBe(fx.unknownCurrentItemId);
+    expect(body.calculable).toBe(true);
+    expect(body.reason).toBeNull();
+    expect(body.bandKey).toBeNull();
+    // Priced on the commission base price, at the item's current commission.
+    expect(body.price).toBe('480.00');
+    expect(body.breakdown?.saleGross).toBe('480.00');
+    expect(body.commissionPct).toBe('19.0000');
+    // The modal number equals the row's current profit exactly.
+    expect(body.breakdown?.netProfit).toBe(row.currentNetProfit);
+  });
+
+  it('still estimates a band price for an item whose current price is unknown', async () => {
+    const row = await fetchDetailItem(fx, 'BC-EST-NOPRICE');
+    const band2 = row.bands.find((b) => b.key === 'band2');
+    expect(band2?.price).toBe('450.00');
+    expect(band2?.netProfit).not.toBeNull();
+
+    // A band-click on a limited band needs no current price: the band's own limit prices it.
+    const res = await app.request(estimateUrl(fx, fx.unknownPricesItemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ price: band2?.price, bandKey: 'band2' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as EstimateWire;
+    expect(body.itemId).toBe(fx.unknownPricesItemId);
+    expect(body.calculable).toBe(true);
+    expect(body.reason).toBeNull();
+    expect(body.bandKey).toBe('band2');
+    expect(body.commissionPct).toBe('15');
+    expect(body.price).toBe('450.00');
+    expect(body.breakdown?.saleGross).toBe('450.00');
+    // The estimate reproduces the detail band's profit exactly.
+    expect(body.breakdown?.netProfit).toBe(band2?.netProfit);
   });
 });
 

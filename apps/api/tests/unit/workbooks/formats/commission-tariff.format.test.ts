@@ -586,10 +586,87 @@ describe('Trendyol commission tariff format: the row fallbacks', () => {
     expect(mapOne({ [COL.modelCode]: null, [COL.sellerStockCode]: null }).stockCode).toBeNull();
   });
 
-  it('reads a blank current price and current commission as 0', () => {
-    const row = mapOne({ [COL.currentPrice]: null, [COL.currentCommission]: null });
+  it('reads a blank current price as null', () => {
+    expect(mapOne({ [COL.currentPrice]: null }).currentPrice).toBeNull();
+    expect(mapOne({ [COL.currentPrice]: '   ' }).currentPrice).toBeNull();
+  });
 
-    expect([row.currentPrice, row.currentCommissionPct]).toEqual(['0', '0']);
+  it('reads an unreadable current price text as null', () => {
+    expect(mapOne({ [COL.currentPrice]: '249,90 TL' }).currentPrice).toBeNull();
+  });
+
+  // The grid reader turns an error cell into '#ERROR_' and its text; a typed '#REF!'
+  // text reads the same way.
+  it.each(['#REF!', '#ERROR_#REF!'])('reads an error cell (%s) as null', (cell) => {
+    expect(mapOne({ [COL.currentPrice]: cell }).currentPrice).toBeNull();
+  });
+
+  it('reads a date or boolean current price cell as null', () => {
+    expect(mapOne({ [COL.currentPrice]: new Date(Date.UTC(2026, 6, 1)) }).currentPrice).toBeNull();
+    expect(mapOne({ [COL.currentPrice]: true }).currentPrice).toBeNull();
+    expect(mapOne({ [COL.currentPrice]: false }).currentPrice).toBeNull();
+  });
+
+  // 0.004 is zero at the stored scale: it would store as 0.00.
+  it.each([
+    ['the number 0', 0],
+    ['the text 0', '0'],
+    ['the text 0,00', '0,00'],
+    ['the number 0.004', 0.004],
+  ])('reads a literal 0 current price (%s) as null', (_name, cell) => {
+    expect(mapOne({ [COL.currentPrice]: cell }).currentPrice).toBeNull();
+  });
+
+  it("keeps a readable current price as the file's text", () => {
+    expect(mapOne().currentPrice).toBe('540');
+    expect(mapOne({ [COL.currentPrice]: 249.9 }).currentPrice).toBe('249.9');
+    expect(mapOne({ [COL.currentPrice]: '249,90' }).currentPrice).toBe('249.90');
+    // Not zero at the stored scale: it stores as 0.01.
+    expect(mapOne({ [COL.currentPrice]: 0.005 }).currentPrice).toBe('0.005');
+  });
+
+  it.each([
+    ['the number -5', -5],
+    ['the text -0,01', '-0,01'],
+  ])('still refuses a readable negative current price (%s)', (_name, cell) => {
+    const err = captureThrow(() => mapOne({ [COL.currentPrice]: cell }));
+
+    expect(err).toBeInstanceOf(SpreadsheetFileError);
+    if (!(err instanceof SpreadsheetFileError)) return;
+    expect(err.code).toBe('MALFORMED_SHEET');
+    expect(err.meta).toEqual({ reason: UNWRITABLE_VALUE_REASON });
+  });
+
+  it('still reads a blank current commission as 0', () => {
+    expect(mapOne({ [COL.currentCommission]: null }).currentCommissionPct).toBe('0');
+    expect(mapOne({ [COL.currentCommission]: '19 %' }).currentCommissionPct).toBe('0');
+  });
+
+  it('reads a literal 0 commission base price as null', () => {
+    for (const cell of [0, '0', '0,00', 0.004]) {
+      expect(mapOne({ [COL.commissionBasePrice]: cell }).commissionBasePrice).toBeNull();
+    }
+    expect(mapOne({ [COL.commissionBasePrice]: 0.005 }).commissionBasePrice).toBe('0.005');
+  });
+
+  it('does not refuse a row whose band has neither limit when the current price is unknown', () => {
+    // Band 1 has no upper limit; without its lower limit it has no price at all.
+    const row = mapOne({ [COL.currentPrice]: null, [COL.band1Lower]: null });
+
+    expect(row.currentPrice).toBeNull();
+    expect(row.brackets.band1Lower).toBeNull();
+    expect(row.periodComms).toEqual([['19', '15.4', '12.1', '10.6']]);
+  });
+
+  it('still refuses an unwritable limit of another band when the current price is unknown', () => {
+    const err = captureThrow(() =>
+      mapOne({ [COL.currentPrice]: null, [COL.band1Lower]: null, [COL.band2Upper]: -5 }),
+    );
+
+    expect(err).toBeInstanceOf(SpreadsheetFileError);
+    if (!(err instanceof SpreadsheetFileError)) return;
+    expect(err.code).toBe('MALFORMED_SHEET');
+    expect(err.meta).toEqual({ reason: UNWRITABLE_VALUE_REASON });
   });
 
   it('keeps a blank commission base price null, never the current price', () => {
@@ -886,8 +963,20 @@ describe('Trendyol commission tariff format: the legacy golden digests', () => {
     const read = readRows(gridSelection(grid));
     const real = goldenDigest(MULTI_FILE, 'real');
     const derived = goldenDigest(MULTI_FILE, 'derived');
-    const keptCases = COMMISSION_DERIVED.filter((testCase) => testCase.kept).length;
+    const keptNames = COMMISSION_DERIVED.filter((testCase) => testCase.kept).map(
+      (testCase) => testCase.name,
+    );
+    const keptCases = keptNames.length;
+    // The kept derived rows follow the fixture's own kept rows, in case order.
+    const derivedRow = (name: string): CommissionTariffRow => {
+      const index = keptNames.indexOf(name);
+      expect(index).toBeGreaterThanOrEqual(0);
+      return present(read.rows[real.keptRows + index], name).data;
+    };
 
+    // An unknown current price reads as null: a blank cell, and a text that does not read.
+    expect(derivedRow('a blank current price').currentPrice).toBeNull();
+    expect(derivedRow('lira-suffixed prices and commission').currentPrice).toBeNull();
     expect(digest(read)).toEqual(derived);
     // Every derived case lands on the side its `kept` flag names.
     expect(read.rows.length).toBe(real.keptRows + keptCases);
