@@ -19,6 +19,10 @@ interface SeedPeriod {
  * accept it again, because
  * the page sends every row of every period on save and one refused entry fails the
  * whole request:
+ *   - a stored join on an offer whose Plus commission percent is unknown: the route's
+ *     `PLUS_COMMISSION_UNKNOWN` would refuse it (also with a custom price, which does
+ *     not supply the commission), so it seeds as not joined (no entry in either map)
+ *     and the next save sends `selected: false` and clears it;
  *   - a stored custom price: custom-joined, whatever the ceiling (a custom price
  *     never needs the Plus price upper limit);
  *   - else a stored join whose offer has a price: joined at the ceiling (`'plus'`);
@@ -41,6 +45,8 @@ export function seedPlusSelection(periods: readonly SeedPeriod[]): PlusSelection
       // joined (possible through the API, never sent by this page) stays unjoined, and
       // the next save clears it, rather than joining Plus on its own.
       if (!row.selected) continue;
+      // An unknown Plus commission can not be joined at all, not even at a custom price.
+      if (offer?.commissionPct === null) continue;
       if (row.customPrice !== null) {
         customPrices[row.id] = {
           price: row.customPrice,

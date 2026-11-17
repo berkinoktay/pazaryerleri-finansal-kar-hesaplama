@@ -77,6 +77,36 @@ describe('seedPlusSelection', () => {
     });
   });
 
+  it('drops a stored join when the offer commission is unknown', () => {
+    // The ceiling is known, so only the unknown Plus commission drops the join.
+    const noCommission: PlusBand = {
+      ...offer('140.00'),
+      commissionPct: null,
+      netProfit: null,
+      marginPct: null,
+    };
+    expect(seed(row('a', { selected: true, bands: [noCommission] }))).toEqual({
+      selection: {},
+      customPrices: {},
+    });
+  });
+
+  it('drops it also with a custom price', () => {
+    // A custom price does not supply the commission: the route would still refuse it.
+    const noCommission: PlusBand = {
+      ...offer('140.00'),
+      commissionPct: null,
+      netProfit: null,
+      marginPct: null,
+    };
+    expect(
+      seed(row('a', { selected: true, customPrice: '130.00', bands: [noCommission] })),
+    ).toEqual({
+      selection: {},
+      customPrices: {},
+    });
+  });
+
   it('leaves an unjoined row out of both maps', () => {
     expect(seed(row('a'), row('b', { bands: [offer(null)] }))).toEqual({
       selection: {},

@@ -27,8 +27,9 @@ export type PriceBand = TariffBandResult;
  * A tariff product row. Identical to the API's `TariffDetailItem`: it already
  * carries `calculable` / `reason`, the server-authoritative `selectedBand` +
  * `customPrice`, `bestBandKey`, and a variable-length `bands` array. `currentPrice`
- * is null when the file's current price could not be read, so every consumer must
- * null-guard it.
+ * is null when the file's current price could not be read, and `currentCommissionPct`
+ * is null when the file's current commission is unknown (blank or unreadable; a
+ * readable 0 stays 0), so every consumer must null-guard both.
  */
 export type CommissionTariffRow = TariffDetailItem;
 

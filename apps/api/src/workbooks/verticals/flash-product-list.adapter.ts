@@ -1,6 +1,7 @@
 // The flash product page on the generic workbook pipeline. The file lists Trendyol's
 // flash offers, one row per product and date, each with a 24-hour and a 3-hour offer;
-// every offer row is stored as one item, in sheet order, and starts without a choice.
+// every offer row is stored as one item, in sheet order, and starts without a choice;
+// the import's response counts the distinct products with an unknown current commission.
 // The export pairs the list's items with the file's kept rows by position, so a choice
 // lands on its own row even when the product repeats on other dates, and writes the
 // participation label (and, for the seller's own price, that price) into the row.
@@ -46,6 +47,16 @@ export interface FlashProductExportItem {
   readonly customPrice: Prisma.Decimal | null;
 }
 
+/** What the flash import's `inspect` hands to `persist` and `toResponse`. */
+interface FlashProductListImportMeta {
+  /**
+   * The distinct products (barcodes) with an unknown current commission on at least one
+   * kept row (a blank or unreadable cell; a readable 0 is known): the same product spans
+   * several date rows and counts once.
+   */
+  readonly unknownCommissionRows: number;
+}
+
 /** The participation label of each offer window. */
 const FLASH_OFFER_LABELS: Readonly<Record<FlashOfferType, string>> = {
   [FlashOfferType.H24]: FLASH_OFFER_24H_LABEL,
@@ -66,6 +77,9 @@ const FLASH_PRODUCT_HTTP: WorkbookHttpSpec = {
     'Each offer row is joined to a ProductVariant by barcode and stored as one item; the reduced ' +
     "commission is READ from the store's Commission Tariff at compute time. Rows with neither offer " +
     'are skipped. Returns counts: distinct products, items, matched/unmatched products, skipped rows. ' +
+    'A blank or unreadable current commission is stored as null; a readable 0 stays 0. ' +
+    '`unknownCommissionRows` counts the distinct products with an unknown current commission on ' +
+    'at least one row (a product on several date rows counts once). ' +
     'Rejects a file whose header layout does not match the expected Flash export (422 VALIDATION_ERROR).',
   importCreated: 'Flash product list imported',
   import422: 'File missing, unreadable, or not the expected flash format',
@@ -146,7 +160,7 @@ export const flashProductListAdapter: WorkbookVerticalAdapter<
   typeof trendyolFlashProductListLayout,
   FlashProductListRow,
   undefined,
-  undefined,
+  FlashProductListImportMeta,
   FlashProductExportItem,
   ImportFlashProductsResponse,
   FlashProductListWriteKey
@@ -164,7 +178,13 @@ export const flashProductListAdapter: WorkbookVerticalAdapter<
     return { file, name, config: undefined };
   },
   formats: [trendyolFlashProductListFormat],
-  inspect: async () => undefined,
+  // Counted per product, like the response's productCount: the same product spans
+  // several date rows.
+  inspect: async ({ rows }) => ({
+    unknownCommissionRows: new Set(
+      rows.filter((row) => row.data.currentCommissionPct === null).map((row) => row.data.barcode),
+    ).size,
+  }),
   nameFallback: () => null,
   persist: async (tx, { parent, rows, variantIdByAnchor }) => {
     const list = await tx.flashProductList.create({
@@ -220,6 +240,7 @@ export const flashProductListAdapter: WorkbookVerticalAdapter<
     unmatched: outcome.distinctCount - outcome.matchedDistinct,
     skippedRows: outcome.skippedRows,
     prefilledRows: outcome.prefilledRows,
+    unknownCommissionRows: outcome.meta.unknownCommissionRows,
   }),
   load: loadFlashProductList,
   notFoundResource: 'FlashProductList',

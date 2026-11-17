@@ -6,12 +6,13 @@
 // one tariff per week and store (an upload whose week overlaps a stored one is refused,
 // before the import transaction and again inside it); the import queues no profit
 // recompute, since an order's commission never reads a tariff's bands; its response
-// counts the product rows with neither a current price nor a commission base price
-// (their current profit is unknown). The export writes each chosen product's price and
-// the window's tariff selection into every row that carries its barcode, one file per
-// window. A chosen product whose price is not known (no custom price, and its band has
-// no limit or is not stored while its current price is unknown) refuses the whole
-// export with SELECTION_PRICE_UNKNOWN; the export never writes a price it does not know.
+// counts the product rows with neither a current price nor a commission base price, and
+// those with an unknown current commission percent (their current profit is unknown).
+// The export writes each chosen product's price and the window's tariff selection into
+// every row that carries its barcode, one file per window. A chosen product whose price
+// is not known (no custom price, and its band has no limit or is not stored while its
+// current price is unknown) refuses the whole export with SELECTION_PRICE_UNKNOWN; the
+// export never writes a price it does not know.
 
 import { Decimal } from 'decimal.js';
 
@@ -84,6 +85,9 @@ const COMMISSION_TARIFF_HTTP: WorkbookHttpSpec = {
     'Returns counts: products, periods, items, matched/unmatched products, skipped rows, and ' +
     '`unknownCurrentPriceRows`, the product rows with neither a current price nor a commission ' +
     'base price (their current profit is unknown; each row counts once, whatever the number of ' +
+    'periods). A blank or unreadable current commission percent is stored as null; a readable 0 ' +
+    'stays 0. `unknownCommissionRows` counts the product rows whose current commission percent ' +
+    'is unknown (their current profit is unknown; each row counts once, whatever the number of ' +
     'periods). Rejects a file whose header layout does not match the expected export (422 ' +
     'VALIDATION_ERROR).',
   importCreated: 'Tariff imported',
@@ -144,12 +148,19 @@ interface CommissionTariffImportMeta {
    * their current profit is unknown; each row counts once, whatever the number of periods.
    */
   readonly unknownCurrentPriceRows: number;
+  /**
+   * The kept product rows whose current commission percent is unknown (the cell was
+   * blank or unreadable; a readable 0 is known), so their current profit is unknown;
+   * each row counts once, whatever the number of periods.
+   */
+  readonly unknownCommissionRows: number;
 }
 
 /**
  * The week of the upload (`inspectUploadWeek`): the period blocks filled on the first
- * data row, checked as the export writes them, then the scoped overlap query; and the
- * count of product rows with neither a current price nor a commission base price.
+ * data row, checked as the export writes them, then the scoped overlap query; the count
+ * of product rows with neither a current price nor a commission base price; and the
+ * count of product rows with an unknown current commission percent.
  */
 async function inspectTariffWeek({
   scope,
@@ -177,7 +188,8 @@ async function inspectTariffWeek({
   const unknownCurrentPriceRows = rows.filter(
     (row) => row.data.currentPrice === null && row.data.commissionBasePrice === null,
   ).length;
-  return { week, unknownCurrentPriceRows };
+  const unknownCommissionRows = rows.filter((row) => row.data.currentCommissionPct === null).length;
+  return { week, unknownCurrentPriceRows, unknownCommissionRows };
 }
 
 /**
@@ -343,6 +355,7 @@ export const commissionTariffAdapter: WorkbookVerticalAdapter<
     skippedRows: outcome.skippedRows,
     prefilledRows: outcome.prefilledRows,
     unknownCurrentPriceRows: outcome.meta.unknownCurrentPriceRows,
+    unknownCommissionRows: outcome.meta.unknownCommissionRows,
   }),
   load: loadCommissionTariff,
   notFoundResource: 'CommissionTariff',

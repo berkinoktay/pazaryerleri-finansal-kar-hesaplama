@@ -98,8 +98,15 @@ export const PlusScenarioSchema = z
           'Gross sale price (TRY) this scenario is computed at. Null when the Plus price upper ' +
           'limit is unknown; the scenario then has no profit.',
       }),
-    /** Commission PERCENT as stored (e.g. "19", "15.4"). */
-    commissionPct: z.string(),
+    /** Commission PERCENT as stored (e.g. "19", "15.4"); null when unknown. */
+    commissionPct: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          "Commission percent this scenario is computed under. Null when the file's cell was " +
+          'blank or unreadable; a readable 0 stays 0. The scenario then has no profit.',
+      }),
     netProfit: z.string().nullable(),
     marginPct: z.string().nullable(),
   })
@@ -131,7 +138,15 @@ export const PlusTariffDetailItemSchema = z
           'The commission base price (the price the customer sees); the current profit is ' +
           "computed from it. Null when the file's cell was blank, unreadable or 0.",
       }),
-    currentCommissionPct: z.string(),
+    /** The current commission PERCENT; null when unknown. */
+    currentCommissionPct: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          "The current commission percent. Null when the file's cell was blank or unreadable; " +
+          'a readable 0 stays 0.',
+      }),
     currentNetProfit: z
       .string()
       .nullable()
@@ -139,7 +154,8 @@ export const PlusTariffDetailItemSchema = z
         description:
           'Net profit under the current commission, computed at commissionBasePrice, else at ' +
           "currentPrice; the scenario engine applies the store's profit settings. Null when " +
-          'neither price is known or the profit cannot be computed.',
+          'neither price is known, the current commission is unknown, or the profit cannot be ' +
+          'computed.',
       }),
     currentMarginPct: z.string().nullable(),
     /** Plus Fiyat Üst Limiti — the ceiling price to qualify for the Plus commission. */
@@ -214,6 +230,17 @@ export const ImportPlusTariffResponseSchema = z
           'Their unknown prices show as unknown and are never computed from. Each product row ' +
           'counts once, whatever the number of periods.',
       }),
+    unknownCommissionRows: z
+      .number()
+      .int()
+      .openapi({
+        description:
+          'The product rows with an unknown current commission percent, or with an unknown Plus ' +
+          'commission offer in a stored period (the cell was blank or unreadable; a readable 0 is ' +
+          'a real 0% and is not counted). The offer of a period the upload does not store is not ' +
+          'read. A profit that needs an unknown percent shows as unknown and is never computed at ' +
+          '0%. Each product row counts once, whatever the number of periods.',
+      }),
   })
   .openapi('ImportPlusTariffResponse');
 
@@ -245,12 +272,15 @@ export type PlusTariffSelection = z.infer<typeof PlusTariffSelectionSchema>;
 // One endpoint serves TWO frontend needs, both on-demand so the detail payload
 // stays light:
 //   1. Custom-price what-if — pass a `price`; the item's reduced Plus commission
-//      is applied at it.
+//      is applied at it. When that Plus commission offer is unknown the service
+//      answers 422 on `price` (PLUS_COMMISSION_UNKNOWN).
 //   2. Current scenario (`scenario: 'current'`) — pass neither price; the item's
 //      own commission-base price (or its current price when the commission-base
 //      price is unknown) + current commission are used, so the breakdown matches
 //      the detail row's `currentNetProfit` badge byte-for-byte. When neither price
-//      is known the service answers 422 on `scenario` (CURRENT_PRICE_UNKNOWN).
+//      is known the service answers 422 on `scenario` (CURRENT_PRICE_UNKNOWN); when
+//      the current commission percent is unknown, 422 on `scenario`
+//      (CURRENT_COMMISSION_UNKNOWN).
 // The full profit breakdown is the SAME shape the Ürün Fiyatlandırma quote returns.
 
 export const EstimatePlusPriceBodySchema = z
@@ -259,7 +289,13 @@ export const EstimatePlusPriceBodySchema = z
       .string()
       .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_CUSTOM_PRICE')
       .optional()
-      .openapi({ description: 'Değerlendirilecek satış fiyatı (GROSS, TL).', example: '350.00' }),
+      .openapi({
+        description:
+          "Gross sale price (TRY) to price under the item's Plus commission offer. When that " +
+          "offer is unknown (the file's cell was blank or unreadable) it is not priced at 0%: " +
+          '422 on `price` with code PLUS_COMMISSION_UNKNOWN.',
+        example: '350.00',
+      }),
     scenario: z
       .literal('current')
       .optional()
@@ -268,7 +304,10 @@ export const EstimatePlusPriceBodySchema = z
           "Breakdown of the current scenario: priced at the item's commission base price, else " +
           'at its current price, under its current commission; send no price. When neither ' +
           "price is known (the file's cells were blank, unreadable or 0) there is nothing to " +
-          'price: 422 on `scenario` with code CURRENT_PRICE_UNKNOWN.',
+          'price: 422 on `scenario` with code CURRENT_PRICE_UNKNOWN. When the current ' +
+          "commission percent is unknown (the file's cell was blank or unreadable) it is not " +
+          'priced at 0%: 422 on `scenario` with code CURRENT_COMMISSION_UNKNOWN. The price check ' +
+          'comes first.',
       }),
   })
   .superRefine((val, ctx) => {

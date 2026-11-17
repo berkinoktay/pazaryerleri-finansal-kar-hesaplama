@@ -62,7 +62,7 @@ export function CommissionTariffsListClient({
         onSuccess: (result) => {
           setUploadOpen(false);
           warnPrefilled(result.prefilledRows);
-          warnUnknownPrice(result.unknownPriceRows);
+          warnUnknownPrice(result);
           openDetail(result.id);
         },
       });

@@ -7,11 +7,14 @@
 // item's own commission-base price at its current commission and MUST equal the
 // detail row's `currentNetProfit` badge; an unmatched item degrades to
 // not-calculable. An item whose prices are unknown (NULL) still estimates a band, and
-// its current scenario answers 422 CURRENT_PRICE_UNKNOWN when no baseline is known.
+// its current scenario answers 422 CURRENT_PRICE_UNKNOWN when no baseline is known. An
+// item whose current commission is unknown (NULL) still estimates a band, and its current
+// scenario answers 422 CURRENT_COMMISSION_UNKNOWN (never priced at 0%).
 //
 // Fixture matches commission-tariffs.routes.test.ts: one calculable variant
 // (TRY cost + SENDEOMP shipping + fee defs) plus an unmatched item.
 
+import { z } from '@hono/zod-openapi';
 import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -40,6 +43,8 @@ interface DetailItemWire {
   /** Null when the file's current price cell was blank, unreadable or 0. */
   currentPrice: string | null;
   commissionBasePrice: string | null;
+  /** Null when the file's current commission cell was blank or unreadable. */
+  currentCommissionPct: string | null;
   currentNetProfit: string | null;
   bands: BandWire[];
 }
@@ -62,6 +67,21 @@ interface EstimateWire {
   } | null;
 }
 
+// The estimate responses the unknown-commission cases read, parsed rather than cast.
+const ProblemSchema = z.object({
+  code: z.string(),
+  errors: z.array(z.object({ field: z.string(), code: z.string() })).optional(),
+});
+const EstimateResultSchema = z.object({
+  itemId: z.string(),
+  price: z.string(),
+  bandKey: z.string().nullable(),
+  commissionPct: z.string().nullable(),
+  calculable: z.boolean(),
+  reason: z.string().nullable(),
+  breakdown: z.object({ saleGross: z.string(), netProfit: z.string() }).nullable(),
+});
+
 interface EstimateFixture {
   accessToken: string;
   orgId: string;
@@ -73,6 +93,8 @@ interface EstimateFixture {
   unknownPricesItemId: string;
   /** Matched; current price unknown (NULL), commission base price 480 like the matched item. */
   unknownCurrentItemId: string;
+  /** Matched; the matched item's prices and bands, current commission unknown (NULL). */
+  unknownCommissionItemId: string;
 }
 
 async function setupFixture(): Promise<EstimateFixture> {
@@ -223,6 +245,23 @@ async function setupFixture(): Promise<EstimateFixture> {
       bands,
     },
   });
+  // The matched item's prices and bands, but the file's current commission cell was blank
+  // or unreadable, so the percent is stored as NULL. Its baseline price is known, so only
+  // the percent stands between it and a current scenario.
+  const unknownCommission = await prisma.commissionTariffItem.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      periodId: period.id,
+      productVariantId: variant.id,
+      barcode: 'BC-EST-NOPCT',
+      productTitle: 'Komisyonsuz Urun',
+      currentPrice: '500.00',
+      commissionBasePrice: '480.00',
+      currentCommissionPct: null,
+      bands,
+    },
+  });
   const unmatched = await prisma.commissionTariffItem.create({
     data: {
       organizationId: org.id,
@@ -245,6 +284,7 @@ async function setupFixture(): Promise<EstimateFixture> {
     unmatchedItemId: unmatched.id,
     unknownPricesItemId: unknownPrices.id,
     unknownCurrentItemId: unknownCurrent.id,
+    unknownCommissionItemId: unknownCommission.id,
   };
 }
 
@@ -538,6 +578,54 @@ describe('Commission Tariffs — item estimate', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as EstimateWire;
     expect(body.itemId).toBe(fx.unknownPricesItemId);
+    expect(body.calculable).toBe(true);
+    expect(body.reason).toBeNull();
+    expect(body.bandKey).toBe('band2');
+    expect(body.commissionPct).toBe('15');
+    expect(body.price).toBe('450.00');
+    expect(body.breakdown?.saleGross).toBe('450.00');
+    // The estimate reproduces the detail band's profit exactly.
+    expect(body.breakdown?.netProfit).toBe(band2?.netProfit);
+  });
+
+  it('answers 422 CURRENT_COMMISSION_UNKNOWN on field scenario when the current commission is unknown', async () => {
+    // The baseline price is known (480), so the price check passes; the detail row still
+    // has no current profit because its percent is unknown, so there is nothing to break
+    // down: the estimate refuses instead of pricing a made-up 0%.
+    const row = await fetchDetailItem(fx, 'BC-EST-NOPCT');
+    expect(row.commissionBasePrice).toBe('480.00');
+    expect(row.currentCommissionPct).toBeNull();
+    expect(row.currentNetProfit).toBeNull();
+
+    const res = await app.request(estimateUrl(fx, fx.unknownCommissionItemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario: 'current' }),
+    });
+    expect(res.status).toBe(422);
+    const body = ProblemSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual([{ field: 'scenario', code: 'CURRENT_COMMISSION_UNKNOWN' }]);
+  });
+
+  it('still estimates a band price for that item', async () => {
+    const row = await fetchDetailItem(fx, 'BC-EST-NOPCT');
+    const matched = await fetchDetailItem(fx, 'BC-EST');
+    const band2 = row.bands.find((b) => b.key === 'band2');
+    expect(band2?.price).toBe('450.00');
+    expect(band2?.netProfit).not.toBeNull();
+    // Same variant, same bands: the band profit equals the fully known item's.
+    expect(band2?.netProfit).toBe(matched.bands.find((b) => b.key === 'band2')?.netProfit);
+
+    // A band-click applies the band's own percent, never the unknown current one.
+    const res = await app.request(estimateUrl(fx, fx.unknownCommissionItemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ price: band2?.price, bandKey: 'band2' }),
+    });
+    expect(res.status).toBe(200);
+    const body = EstimateResultSchema.parse(await res.json());
+    expect(body.itemId).toBe(fx.unknownCommissionItemId);
     expect(body.calculable).toBe(true);
     expect(body.reason).toBeNull();
     expect(body.bandKey).toBe('band2');

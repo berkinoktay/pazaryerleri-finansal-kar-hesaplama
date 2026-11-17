@@ -44,6 +44,7 @@ const DETAIL_PATH = `/campaigns/product-commission-tariffs/${NEW_TARIFF_ID}`;
 
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const UNKNOWN_PRICE_ROWS = 3;
+const UNKNOWN_COMMISSION_ROWS = 2;
 
 const LIST = trMessages.commissionTariffsPage.list;
 const UPLOAD = trMessages.commissionTariffsPage.upload;
@@ -72,9 +73,10 @@ function savedTariff(): CommissionTariffListItem {
 
 /**
  * The import answer with no prefilled row, so the prefilled warning (also a
- * `toast.warning`) stays quiet and any warning is the unknown price one.
+ * `toast.warning`) stays quiet and any warning is the unknown price or commission one.
+ * Without `unknownCommissionRows` the body is the one an API one deploy behind sends.
  */
-function importBody(unknownCurrentPriceRows: number): JsonBodyType {
+function importBody(unknownCurrentPriceRows: number, unknownCommissionRows?: number): JsonBodyType {
   return {
     tariffId: NEW_TARIFF_ID,
     productCount: 12,
@@ -85,6 +87,7 @@ function importBody(unknownCurrentPriceRows: number): JsonBodyType {
     skippedRows: 0,
     prefilledRows: 0,
     unknownCurrentPriceRows,
+    ...(unknownCommissionRows === undefined ? {} : { unknownCommissionRows }),
   };
 }
 
@@ -143,6 +146,35 @@ describe('<CommissionTariffsListClient> import', () => {
 
   it('opens the new tariff without a warning when every row has a known price', async () => {
     serve(importBody(0));
+    const { user } = renderClient();
+
+    await submitUpload(user);
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith(DETAIL_PATH));
+    expect(toastWarning).not.toHaveBeenCalled();
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('warns once after an upload with unknown commissions', async () => {
+    serve(importBody(UNKNOWN_PRICE_ROWS, UNKNOWN_COMMISSION_ROWS));
+    const { user } = renderClient();
+
+    await submitUpload(user);
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith(DETAIL_PATH));
+    // Both counts set: one toast carrying both sentences.
+    expect(toastWarning).toHaveBeenCalledTimes(1);
+    expect(toastWarning).toHaveBeenCalledWith(
+      [
+        tUpload('unknownCurrentPriceWarning', { count: UNKNOWN_PRICE_ROWS }),
+        tUpload('unknownCommissionWarning', { count: UNKNOWN_COMMISSION_ROWS }),
+      ].join(' '),
+    );
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('does not warn when both counts are 0', async () => {
+    serve(importBody(0, 0));
     const { user } = renderClient();
 
     await submitUpload(user);

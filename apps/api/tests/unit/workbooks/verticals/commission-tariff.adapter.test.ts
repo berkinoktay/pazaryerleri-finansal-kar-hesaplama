@@ -511,11 +511,12 @@ describe('commission tariff adapter: the week of the upload (inspect)', () => {
     return adapter.inspect({ scope: SCOPE, config: undefined, now, rows, firstDataRow });
   }
 
-  /** A kept product row with the given current and commission base prices. */
+  /** A kept product row with the given current and commission base prices and commission. */
   function productRow(
     excelRow: number,
     currentPrice: string | null,
     commissionBasePrice: string | null,
+    currentCommissionPct: string | null = '0',
   ): ImportedRow<CommissionTariffRow> {
     const barcode = `B-${excelRow}`;
     return {
@@ -530,7 +531,7 @@ describe('commission tariff adapter: the week of the upload (inspect)', () => {
         stock: null,
         currentPrice,
         commissionBasePrice,
-        currentCommissionPct: '0',
+        currentCommissionPct,
         brackets: {
           band1Lower: '300',
           band2Lower: '200',
@@ -547,9 +548,12 @@ describe('commission tariff adapter: the week of the upload (inspect)', () => {
   it("returns the week of the first row's periods when no tariff of the store overlaps it", async () => {
     mocks.findTariff.mockResolvedValue(null);
 
-    const { week, unknownCurrentPriceRows } = await inspect(await firstDataRowOf(MULTI));
+    const { week, unknownCurrentPriceRows, unknownCommissionRows } = await inspect(
+      await firstDataRowOf(MULTI),
+    );
 
     expect(unknownCurrentPriceRows).toBe(0);
+    expect(unknownCommissionRows).toBe(0);
     expect(week.weekStartsAt).toEqual(weekStartsAt);
     expect(week.weekEndsAt).toEqual(weekEndsAt);
     expect(week.present.map((period) => [period.dayCount, period.layoutIndex])).toEqual([[4, 1]]);
@@ -588,6 +592,27 @@ describe('commission tariff adapter: the week of the upload (inspect)', () => {
 
     const { unknownCurrentPriceRows } = await inspect(await firstDataRowOf(MULTI), rows);
 
+    expect(unknownCurrentPriceRows).toBe(2);
+  });
+
+  // Only a null current commission is unknown: a readable 0 is a real 0%. The count does
+  // not read the prices, and a row with no known price is not counted for that alone.
+  it('counts a row with an unknown current commission', async () => {
+    mocks.findTariff.mockResolvedValue(null);
+    const rows = [
+      productRow(2, '100', '100', null),
+      productRow(3, '100', '100', '0'),
+      productRow(4, '100', '100', '19'),
+      productRow(5, null, null, null),
+      productRow(6, null, null, '19'),
+    ];
+
+    const { unknownCommissionRows, unknownCurrentPriceRows } = await inspect(
+      await firstDataRowOf(MULTI),
+      rows,
+    );
+
+    expect(unknownCommissionRows).toBe(2);
     expect(unknownCurrentPriceRows).toBe(2);
   });
 
@@ -711,15 +736,12 @@ describe('commission tariff adapter: form, name, response and the week index', (
   });
 
   it("falls back to the first present period's label for the name", () => {
-    expect(adapter.nameFallback({ week, unknownCurrentPriceRows: 0 })).toBe(
-      '26 Haziran 08.00-30 Haziran 07.59',
-    );
-    expect(
-      adapter.nameFallback({ week: { ...week, present: [] }, unknownCurrentPriceRows: 0 }),
-    ).toBeNull();
+    const counts = { unknownCurrentPriceRows: 0, unknownCommissionRows: 0 };
+    expect(adapter.nameFallback({ week, ...counts })).toBe('26 Haziran 08.00-30 Haziran 07.59');
+    expect(adapter.nameFallback({ week: { ...week, present: [] }, ...counts })).toBeNull();
   });
 
-  it('answers the counts of the import, with the number of stored periods and unpriced rows', () => {
+  it('answers the counts of the import, with the number of stored periods, unpriced rows and unknown commissions', () => {
     expect(
       adapter.toResponse({
         parentId: 'tariff-1',
@@ -731,7 +753,7 @@ describe('commission tariff adapter: form, name, response and the week index', (
         matchedDistinct: 1,
         skippedRows: 0,
         prefilledRows: 7,
-        meta: { week, unknownCurrentPriceRows: 3 },
+        meta: { week, unknownCurrentPriceRows: 3, unknownCommissionRows: 2 },
       }),
     ).toEqual({
       tariffId: 'tariff-1',
@@ -743,6 +765,7 @@ describe('commission tariff adapter: form, name, response and the week index', (
       skippedRows: 0,
       prefilledRows: 7,
       unknownCurrentPriceRows: 3,
+      unknownCommissionRows: 2,
     });
   });
 

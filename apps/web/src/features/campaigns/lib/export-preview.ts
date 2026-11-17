@@ -87,7 +87,13 @@ export function resolveCommissionExportPrice(
  * export would refuse it (409 `SELECTION_PRICE_UNKNOWN`); the preview then leaves the
  * row out of every file. The page cannot reach that state: the seed drops such a stored
  * join (`seedPlusSelection`) and an offer with no price cannot be joined without a
- * custom price. It only picks server strings; it does no arithmetic.
+ * custom price.
+ *
+ * A JOINED row (ceiling or custom price) whose Plus commission offer is unknown still
+ * resolves to a price here, but the backend export would refuse it (409
+ * `SELECTION_COMMISSION_UNKNOWN`). The page cannot reach that state either: the seed
+ * drops such a stored join and neither the offer card nor the custom price card can
+ * join it. It only picks server strings; it does no arithmetic.
  */
 export function resolvePlusExportPrice(
   row: PlusTariffRow,

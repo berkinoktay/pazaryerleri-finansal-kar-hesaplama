@@ -105,6 +105,7 @@ const WORKBOOK_CONFLICT_PROBLEMS: { readonly [R in WorkbookConflictReason]: { re
     ROW_NOT_FOUND: { code: 'ROW_NOT_FOUND' },
     EXPORT_FILENAME_COLLISION: { code: 'EXPORT_FILENAME_COLLISION' },
     SELECTION_PRICE_UNKNOWN: { code: 'SELECTION_PRICE_UNKNOWN' },
+    SELECTION_COMMISSION_UNKNOWN: { code: 'SELECTION_COMMISSION_UNKNOWN' },
   };
 
 export function problemDetailsForError(

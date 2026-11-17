@@ -77,8 +77,9 @@ export interface PlusTariffFilterState {
 /**
  * Apply the row's most profitable option to every listed row. It follows the row's
  * 'En karli' marker, as the commission page's bulk select does:
- *   - an uncalculable row, or an offer with no price (unknown ceiling, which cannot be
- *     joined without a custom price), is left untouched;
+ *   - an uncalculable row, an offer with no price (unknown ceiling, which cannot be
+ *     joined without a custom price), or an offer whose Plus commission percent is
+ *     unknown (which cannot be joined at all) is left untouched;
  *   - when the current profit is unknown, the offer is the row's best only when its own
  *     profit is strictly positive: the row joins at the ceiling then, otherwise it is
  *     left untouched;
@@ -96,7 +97,7 @@ export function selectBestForAll(
   for (const row of rows) {
     if (!row.calculable) continue;
     const offer = plusOffer(row);
-    if (offer === undefined || offer.price === null) continue;
+    if (offer === undefined || offer.price === null || offer.commissionPct === null) continue;
     if (row.currentNetProfit === null) {
       if (offer.netProfit === null || !new Decimal(offer.netProfit).greaterThan(0)) continue;
       selection[row.id] = 'plus';
@@ -115,8 +116,8 @@ export function selectBestForAll(
  * price hurts more than the reduced commission helps, so joining every product is a
  * mistake — this joins only the ones that genuinely win, leaving the rest untouched.
  * Custom-priced rows it touches switch to the ceiling. An offer with no price (unknown
- * ceiling) is never joined; `plusIsBetter` is already false there, the price check is
- * defensive.
+ * ceiling) or with an unknown Plus commission percent is never joined and is left
+ * untouched; `plusIsBetter` is already false there, the checks are defensive.
  */
 export function joinProfitable(
   rows: readonly PlusTariffRow[],
@@ -125,8 +126,10 @@ export function joinProfitable(
   const selection = { ...state.selection };
   const customPrices = { ...state.customPrices };
   for (const row of rows) {
-    const offerPrice = plusOffer(row)?.price ?? null;
-    if (row.calculable && row.plusIsBetter && offerPrice !== null) {
+    const offer = plusOffer(row);
+    const offerPrice = offer?.price ?? null;
+    const offerCommissionPct = offer?.commissionPct ?? null;
+    if (row.calculable && row.plusIsBetter && offerPrice !== null && offerCommissionPct !== null) {
       selection[row.id] = 'plus';
       customPrices[row.id] = null;
     }

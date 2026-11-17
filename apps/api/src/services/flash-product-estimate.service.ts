@@ -11,13 +11,20 @@
 // Scoped by organizationId + storeId + list. A cross-tenant or foreign item id is
 // indistinguishable from a missing one (404). A pathological engine input degrades to a
 // logged not-calculable result rather than a 500 (decision 9).
+//
+// A "Mevcut Komisyon" cell the file left blank or unreadable is stored as an unknown (null)
+// flat rate and never priced at a made-up 0%. The current scenario of such an item answers
+// 422 on `scenario` (CURRENT_COMMISSION_UNKNOWN), like the detail row that has no current
+// profit. The price mode does not refuse it: whether the flat rate is needed depends on the
+// typed price (a price that lands in a tariff band uses that band's rate), so a price that
+// falls back to the unknown flat rate answers 200, not calculable, with a null commission.
 
 import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
-import { NotFoundError } from '../lib/errors';
+import { NotFoundError, ValidationError } from '../lib/errors';
 import { buildFlashCommissionResolver } from './flash-product-commission.service';
 import {
   computeFlashEstimate,
@@ -26,6 +33,7 @@ import {
 } from './flash-product-compute.service';
 import { logProfitReadFailure } from './profit-compute-fallback.service';
 import { loadScreenScenarioBases, screenScenarioBaseFor } from './scenario-screen-commons';
+import { decimalOrNull } from './tariff-compute-commons';
 import type { EstimateFlashPriceResult } from '../validators/flash-product.validator';
 
 /**
@@ -43,7 +51,10 @@ export type EstimateFlashPriceInput =
  * Computes the full profit breakdown for one flash item under `input`. Throws
  * `NotFoundError` when the item does not belong to this list/store. In `current` mode
  * the price is the item's customer price and the commission is the flat "Mevcut
- * Komisyon" rate, so the breakdown equals the detail row's current baseline exactly.
+ * Komisyon" rate, so the breakdown equals the detail row's current baseline exactly;
+ * throws `ValidationError` (`scenario`, CURRENT_COMMISSION_UNKNOWN) when that rate is
+ * unknown. In `price` mode an unknown flat rate is not an error: a price that falls back
+ * to it answers not calculable with a null reason, commission and breakdown.
  */
 export async function estimateFlashItemPrice(
   orgId: string,
@@ -96,12 +107,22 @@ export async function estimateFlashItemPrice(
     item.hasCommissionTariff,
   );
 
-  const flatPct = new Decimal(item.currentCommissionPct.toString());
+  // The flat "Mevcut Komisyon" rate; null when the file's cell was blank or unreadable.
+  // The current scenario prices it verbatim, so an unknown rate is refused there (the
+  // detail row has no current profit either) before the scenario base is loaded. The
+  // price mode hands it on unchanged: a price in a tariff band never needs it, and a price
+  // that falls back to it comes back not calculable from `computeFlashEstimate`.
+  const flatPct = decimalOrNull(item.currentCommissionPct);
   const price = input.mode === 'current' ? new Decimal(item.customerPrice.toString()) : input.price;
-  const commission: FlashEstimateCommission =
-    input.mode === 'current'
-      ? { kind: 'override', pct: flatPct }
-      : { kind: 'resolve', bands: primaryBands, flatPct };
+  let commission: FlashEstimateCommission;
+  if (input.mode === 'current') {
+    if (flatPct === null) {
+      throw new ValidationError([{ field: 'scenario', code: 'CURRENT_COMMISSION_UNKNOWN' }]);
+    }
+    commission = { kind: 'override', pct: flatPct };
+  } else {
+    commission = { kind: 'resolve', bands: primaryBands, flatPct };
+  }
 
   // Load the scenario base for the matched variant only (scenario date = now). An
   // unmatched item passes no ids -> no-product; a store-wide load failure -> degraded.

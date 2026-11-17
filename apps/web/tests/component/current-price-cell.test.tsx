@@ -1,3 +1,4 @@
+import { createTranslator } from 'next-intl';
 import * as React from 'react';
 import { describe, expect, it } from 'vitest';
 
@@ -14,6 +15,13 @@ const INFO_HINT_LABEL = trMessages.common.infoHint;
 const PRICE_UNKNOWN = trMessages.commissionTariffsPage.table.priceUnknown;
 const PRICE_UNKNOWN_HINT = trMessages.commissionTariffsPage.table.priceUnknownHint;
 const NOT_CALCULABLE = trMessages.profitBreakdown.notCalculable;
+
+// The unknown-commission strings are built from the catalog, never typed.
+const tTable = createTranslator({
+  locale: 'tr',
+  messages: trMessages,
+  namespace: 'commissionTariffsPage.table',
+});
 
 const SCOPE = {
   orgId: '00000000-0000-0000-0000-000000000001',
@@ -158,6 +166,57 @@ describe('CurrentPriceCell', () => {
         }),
       );
       const { user } = renderCell({ row: unknownRow });
+      await user.click(screen.getByRole('button', { name: OPEN_LABEL }));
+      const dialog = await screen.findByRole('dialog');
+      expect(await within(dialog).findByText(NOT_CALCULABLE)).toBeInTheDocument();
+      expect(requests).toBe(0);
+    });
+  });
+
+  describe('unknown commission', () => {
+    // The file's current commission could not be read: the price is known, but the
+    // backend has no current profit or margin.
+    const unknownCommissionRow: CommissionTariffRow = {
+      ...row,
+      currentCommissionPct: null,
+      currentNetProfit: null,
+      currentMarginPct: null,
+    };
+    const UNKNOWN_COMMISSION = `${tTable('currentCommission')} ${tTable('commissionUnknown')}`;
+    const UNKNOWN_COMMISSION_HINT = tTable('commissionUnknownHint');
+
+    it('shows the unknown commission and its caption, and still shows the price', () => {
+      renderCell({ row: unknownCommissionRow });
+      const label = screen.getByText(UNKNOWN_COMMISSION);
+      // The caption is a visible line under the label (it reads on touch too).
+      const hint = screen.getByText(UNKNOWN_COMMISSION_HINT);
+      expect(label.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.queryByRole('button', { name: INFO_HINT_LABEL })).toBeNull();
+      // The price stays the hero; the unknown-price wording is not used for it.
+      expect(screen.getByText(/780,00/)).toBeInTheDocument();
+      expect(screen.queryByText(tTable('priceUnknown'))).toBeNull();
+      expect(screen.queryByText(tTable('priceUnknownHint'))).toBeNull();
+      // Never a made-up percent.
+      expect(screen.queryByText(/%\d/)).toBeNull();
+    });
+
+    it('opens the not-calculable dialog without an estimate request when the current commission is unknown', async () => {
+      let requests = 0;
+      server.use(
+        http.post(ESTIMATE_URL, () => {
+          requests += 1;
+          return HttpResponse.json({
+            itemId: row.id,
+            price: '780.00',
+            bandKey: null,
+            commissionPct: '0',
+            calculable: false,
+            reason: null,
+            breakdown: null,
+          });
+        }),
+      );
+      const { user } = renderCell({ row: unknownCommissionRow });
       await user.click(screen.getByRole('button', { name: OPEN_LABEL }));
       const dialog = await screen.findByRole('dialog');
       expect(await within(dialog).findByText(NOT_CALCULABLE)).toBeInTheDocument();

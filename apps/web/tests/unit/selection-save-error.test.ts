@@ -33,6 +33,13 @@ describe('selectionSaveErrorToast', () => {
     expect(selectionSaveErrorToast(error)).toBe('selectionRefused');
   });
 
+  it('picks selectionRefused for PLUS_COMMISSION_UNKNOWN', () => {
+    const error = validationApiError([
+      { field: 'selections.0.selected', code: 'PLUS_COMMISSION_UNKNOWN' },
+    ]);
+    expect(selectionSaveErrorToast(error)).toBe('selectionRefused');
+  });
+
   it('returns generic for a VALIDATION_ERROR with no band refusal', () => {
     expect(
       selectionSaveErrorToast(

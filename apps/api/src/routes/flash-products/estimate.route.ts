@@ -33,6 +33,11 @@ const estimateRoute = createRoute({
     "band that price lands in (of the item's primary window), else the flat rate (the custom-price " +
     'what-if); or pass `scenario: "current"` (no price) to price the item’s own customer price at its ' +
     'current commission - the breakdown then matches the detail row’s current baseline exactly. ' +
+    "When the item's current commission is unknown (the file's cell was blank or unreadable), " +
+    'scenario:"current" answers 422 (CURRENT_COMMISSION_UNKNOWN on `scenario`), while a `price` ' +
+    'that lands in no tariff band answers 200 with calculable false, reason null, ' +
+    'commissionPct null, commissionSource "current" and breakdown null (an unmatched item ' +
+    'still answers reason NO_PRODUCT). ' +
     'Read-only (POST only because it carries a body); no state changes. When the item is unmatched or ' +
     'uncostable, calculable is false, reason explains why and breakdown is null. Money fields are GROSS ' +
     'decimal strings.',
@@ -66,8 +71,9 @@ const estimateRoute = createRoute({
       content: { 'application/json': { schema: ProblemDetailsSchema } },
       description:
         'Invalid payload — malformed price (INVALID_CUSTOM_PRICE), a missing price in the ' +
-        'custom-price mode (PRICE_REQUIRED), or a price sent with scenario:"current" ' +
-        '(INVALID_ESTIMATE_MODE)',
+        'custom-price mode (PRICE_REQUIRED), a price sent with scenario:"current" ' +
+        '(INVALID_ESTIMATE_MODE), or scenario:"current" for an item whose current commission ' +
+        'is unknown (CURRENT_COMMISSION_UNKNOWN on `scenario`)',
     },
     429: Common429Response,
   },

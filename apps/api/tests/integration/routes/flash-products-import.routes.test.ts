@@ -46,6 +46,7 @@ const MATCHED_BARCODE = 'ATA100X150R';
 const MATCHED_ROW_COUNT = 4;
 
 // 0-based grid columns (Title-Case header layout).
+const COL_CURRENT_COMMISSION = 8;
 const COL_OFFER_24_PRICE = 10;
 const COL_OFFER_3_PRICE = 11;
 const COL_OFFER_3_START = 15;
@@ -62,6 +63,7 @@ interface ImportWire {
   matched: number;
   unmatched: number;
   skippedRows: number;
+  unknownCommissionRows: number;
 }
 
 interface Ctx {
@@ -121,6 +123,16 @@ describe('POST .../flash-products/import - real Trendyol fixture', () => {
     // The real fixture has a 24h offer on every row, so nothing is skipped.
     expect(imported.skippedRows).toBe(0);
     expect(imported.name).not.toBe('');
+  });
+
+  it('answers unknownCommissionRows 0 for a file whose percents all read', async () => {
+    expect(imported.unknownCommissionRows).toBe(0);
+    // Every stored item of the real file carries a current commission.
+    expect(
+      await prisma.flashProductItem.count({
+        where: { organizationId: ctx.orgId, storeId: ctx.storeId, currentCommissionPct: null },
+      }),
+    ).toBe(0);
   });
 
   it('persists a list (with the raw file) and one item per row', async () => {
@@ -230,5 +242,69 @@ describe('POST .../flash-products/import - derived offer scenarios', () => {
     expect(result.itemCount).toBe(TOTAL_ROWS - 1);
     // The skipped row's product recurs elsewhere, so the distinct-product count holds.
     expect(result.productCount).toBe(DISTINCT_PRODUCTS);
+  });
+});
+
+describe('POST .../flash-products/import - an unknown current commission', () => {
+  beforeEach(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+  });
+
+  it('stores a row with a blank current commission with current_commission_pct NULL', async () => {
+    const ctx = await setupStore(true);
+    // Blank the first data row's current commission (Excel row 2, ATA100X150R).
+    const patched = patchFixture(
+      FIXTURE,
+      rowPatch(2, [[COL_CURRENT_COMMISSION, { kind: 'clear' }]]),
+      { sheet: FIRST_SHEET },
+    );
+    const result = await importFile(ctx, patched);
+    // The row is still kept: an unknown commission does not drop it.
+    expect(result.itemCount).toBe(TOTAL_ROWS);
+    expect(result.skippedRows).toBe(0);
+
+    const items = await prisma.flashProductItem.findMany({
+      where: { organizationId: ctx.orgId, storeId: ctx.storeId, listId: result.listId },
+      orderBy: { sortOrder: 'asc' },
+      select: { barcode: true, currentCommissionPct: true },
+    });
+    const first = items[0];
+    expect(first?.barcode).toBe(MATCHED_BARCODE);
+    // Unknown, never 0.
+    expect(first?.currentCommissionPct).toBeNull();
+    // Only that row lost its commission: the same product's other dates keep the file's
+    // percent, and every other row is known.
+    const others = items.filter((item, index) => index > 0 && item.barcode === MATCHED_BARCODE);
+    expect(others).toHaveLength(MATCHED_ROW_COUNT - 1);
+    expect(others.map((item) => Number(item.currentCommissionPct))).toEqual([19, 19, 19]);
+    expect(items.filter((item) => item.currentCommissionPct === null)).toHaveLength(1);
+  });
+
+  it('counts a product with a blank current commission on two date rows once in unknownCommissionRows', async () => {
+    const ctx = await setupStore(true);
+    // Blank the current commission of two dates of one product (Excel rows 2 and 4).
+    const patched = patchFixture(
+      FIXTURE,
+      [
+        ...rowPatch(2, [[COL_CURRENT_COMMISSION, { kind: 'clear' }]]),
+        ...rowPatch(4, [[COL_CURRENT_COMMISSION, { kind: 'clear' }]]),
+      ],
+      { sheet: FIRST_SHEET },
+    );
+    const result = await importFile(ctx, patched);
+
+    // Both rows are stored with an unknown commission, and both belong to one product.
+    const unknown = await prisma.flashProductItem.findMany({
+      where: {
+        organizationId: ctx.orgId,
+        storeId: ctx.storeId,
+        listId: result.listId,
+        currentCommissionPct: null,
+      },
+      select: { barcode: true },
+    });
+    expect(unknown.map((item) => item.barcode)).toEqual([MATCHED_BARCODE, MATCHED_BARCODE]);
+    expect(result.unknownCommissionRows).toBe(1);
   });
 });

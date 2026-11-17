@@ -2,8 +2,8 @@
 // cases of the old resolver's test and of the Plus block of the layout parity test, the
 // write columns of both real files and the formula columns the export may overwrite,
 // literal rows of the real files, the three fallback chains and the cancel cell, the
-// unknown (null) prices, a Plus price ceiling or period offer the export could not
-// write, the permanent golden digests
+// unknown (null) prices and percents, a Plus price ceiling or period offer the export
+// could not write, the permanent golden digests
 // of tests/fixtures/workbook-golden/legacy-rows.json (written by the legacy import
 // parser before it was deleted), the rows the real files already fill in, and the import
 // rehearsal on both real files. A change to `mapRow` or the keep rule that alters any
@@ -618,7 +618,7 @@ describe('Trendyol Plus commission tariff format: the row fallbacks', () => {
     ).toBeNull();
   });
 
-  it('reads a blank current price or Plus price ceiling as null and a blank current commission as 0', () => {
+  it('reads a blank current price, Plus price ceiling and current commission as null', () => {
     const row = mapOne({
       [COL.currentPrice]: null,
       [COL.currentCommission]: null,
@@ -627,7 +627,7 @@ describe('Trendyol Plus commission tariff format: the row fallbacks', () => {
 
     expect([row.currentPrice, row.currentCommissionPct, row.plusPriceUpperLimit]).toEqual([
       null,
-      '0',
+      null,
       null,
     ]);
   });
@@ -688,17 +688,36 @@ describe('Trendyol Plus commission tariff format: the row fallbacks', () => {
     expect(pricesOf(mapOne(allPrices(0.005)))).toEqual(['0.005', '0.005', '0.005', '0.005']);
   });
 
-  it('still reads a blank current commission and a blank period offer as 0', () => {
+  // An unknown percent is null, never 0%: the screens never price it and the export
+  // never writes it.
+  it('reads a blank current commission and a blank period offer as null', () => {
     const row = mapOne({ [COL.currentCommission]: null, [OFFER_COL]: null });
 
-    expect(row.currentCommissionPct).toBe('0');
-    expect(row.periodOffers).toEqual(['0']);
+    expect(row.currentCommissionPct).toBeNull();
+    expect(row.periodOffers).toEqual([null]);
   });
 
-  it('reads a blank or unreadable period offer as 0', () => {
-    expect(mapOne({ [OFFER_COL]: null }).periodOffers).toEqual(['0']);
-    expect(mapOne({ [OFFER_COL]: '15 TL' }).periodOffers).toEqual(['0']);
+  it('reads an unreadable current commission as null', () => {
+    expect(mapOne({ [COL.currentCommission]: '19 TL' }).currentCommissionPct).toBeNull();
+    expect(mapOne({ [COL.currentCommission]: '#ERROR_#REF!' }).currentCommissionPct).toBeNull();
+  });
+
+  it('reads a blank or unreadable period offer as null', () => {
+    expect(mapOne({ [OFFER_COL]: null }).periodOffers).toEqual([null]);
+    expect(mapOne({ [OFFER_COL]: '15 TL' }).periodOffers).toEqual([null]);
     expect(mapOne({ [OFFER_COL]: '12,5' }).periodOffers).toEqual(['12.5']);
+  });
+
+  // A readable 0 is a real 0% commission, kept as the file's text (never null).
+  it('keeps a zero period offer as 0', () => {
+    expect(mapOne({ [OFFER_COL]: 0 }).periodOffers).toEqual(['0']);
+    expect(mapOne({ [OFFER_COL]: '0' }).periodOffers).toEqual(['0']);
+    expect(mapOne({ [OFFER_COL]: '0,00' }).periodOffers).toEqual(['0.00']);
+  });
+
+  it('keeps a zero current commission as 0', () => {
+    expect(mapOne({ [COL.currentCommission]: 0 }).currentCommissionPct).toBe('0');
+    expect(mapOne({ [COL.currentCommission]: '0,00' }).currentCommissionPct).toBe('0.00');
   });
 
   it('falls back to the barcode for a blank title and reads blank optional columns as null', () => {
@@ -874,6 +893,27 @@ describe('Trendyol Plus commission tariff format: a value the export could not w
     },
   );
 
+  // A known offer is still write-checked: a negative one, and one with eleven integer
+  // digits.
+  it('still refuses a negative or too-wide offer', () => {
+    for (const cell of [-1, 12345678901]) {
+      const err = captureThrow(() => mapOne({ [OFFER_COL]: cell }));
+
+      expect(err).toBeInstanceOf(SpreadsheetFileError);
+      if (!(err instanceof SpreadsheetFileError)) return;
+      expect(err.code).toBe('MALFORMED_SHEET');
+      expect(err.meta).toEqual({ reason: UNWRITABLE_VALUE_REASON });
+    }
+  });
+
+  // An unknown offer is never written, so a cell that would be refused if it read as a
+  // number (a negative one, one with eleven integer digits) reads as null and passes.
+  it('does not write-check an unknown offer', () => {
+    for (const cell of [null, '-1 TL', '12345678901 TL', '#ERROR_#REF!', true]) {
+      expect(mapOne({ [OFFER_COL]: cell }).periodOffers).toEqual([null]);
+    }
+  });
+
   it('refuses a negative period offer with MALFORMED_SHEET unwritable-value', async () => {
     const file = withCell(OFFER_COL, '-1');
     const selection = await realSelection(file);
@@ -1023,6 +1063,12 @@ describe('Trendyol Plus commission tariff format: the legacy golden digests', ()
       null,
       '448.87',
     ]);
+    // An unknown percent reads as null, never as 0: a blank cell, and a text that does
+    // not read. A readable 0 offer stays '0'.
+    expect(derivedRow('a blank current commission').currentCommissionPct).toBeNull();
+    expect(derivedRow('a blank period offer').periodOffers).toEqual([null]);
+    expect(derivedRow('lira-suffixed prices and offer').periodOffers).toEqual([null]);
+    expect(derivedRow('a zero period offer').periodOffers).toEqual(['0']);
     expect(digest(read)).toEqual(derived);
     // Every derived case lands on the side its `kept` flag names.
     expect(read.rows.length).toBe(real.keptRows + keptCases);

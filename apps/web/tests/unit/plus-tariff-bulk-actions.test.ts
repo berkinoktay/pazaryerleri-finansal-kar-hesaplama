@@ -146,6 +146,44 @@ describe('plus bulk-actions', () => {
     expect(next.customPrices.r11).toEqual({ price: '450', netProfit: '30', marginPct: '20' });
   });
 
+  it('selectBestForAll leaves a row with an unknown offer commission untouched', () => {
+    // plusIsBetter is forced true and the offer profit is positive, so only the
+    // commission guard keeps the rows out.
+    const noCommission: PlusBand = { ...offer('30', '20'), commissionPct: null };
+    const known = row('r12', { plusIsBetter: true, bands: [noCommission] });
+    const unknownCurrent = row('r13', {
+      currentNetProfit: null,
+      currentMarginPct: null,
+      plusIsBetter: true,
+      bands: [noCommission],
+    });
+    const state: PlusSelectionState = {
+      selection: { r13: 'plus' },
+      customPrices: { r12: { price: '450', netProfit: '30', marginPct: '20' } },
+    };
+    const next = selectBestForAll([known, unknownCurrent], state);
+    // Both rows keep exactly what they had: no join added, none cleared.
+    expect(next.selection).toEqual({ r13: 'plus' });
+    expect(next.customPrices).toEqual({
+      r12: { price: '450', netProfit: '30', marginPct: '20' },
+    });
+  });
+
+  it('joinProfitable never joins it', () => {
+    // plusIsBetter is forced true so only the commission guard keeps the row out.
+    const noCommission = row('r14', {
+      plusIsBetter: true,
+      bands: [{ ...offer('30', '20'), commissionPct: null }],
+    });
+    const state: PlusSelectionState = {
+      selection: {},
+      customPrices: { r14: { price: '450', netProfit: '30', marginPct: '20' } },
+    };
+    const next = joinProfitable([noCommission], state);
+    expect(next.selection.r14).toBeUndefined();
+    expect(next.customPrices.r14).toEqual({ price: '450', netProfit: '30', marginPct: '20' });
+  });
+
   it('joinProfitable joins only the winning rows, leaving the rest untouched', () => {
     const next = joinProfitable([winner, loser], emptyState());
     expect(next.selection.r1).toBe('plus');

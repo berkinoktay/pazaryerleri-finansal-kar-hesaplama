@@ -14,12 +14,14 @@
 // profit) when that current price is unknown.
 //
 // Strategy: when the item's CURRENT baseline price (`commissionBasePrice ?? currentPrice`)
-// is known, its evaluation at the current rate decides calculability -- when it is not
-// calculable, every band reports null profit (legacy all-or-none). Otherwise each band is
-// evaluated at its own price under its own stored rate. When the baseline price is
-// unknown (the file's GUNCEL TSF and commission-base price were both unreadable), there is
-// no current profit: each band with a price is evaluated on its own, and the band
-// outcomes decide calculability.
+// and its current commission percent are both known, the baseline's evaluation at the
+// current rate decides calculability -- when it is not calculable, every band reports null
+// profit (legacy all-or-none). Otherwise each band is evaluated at its own price under its
+// own stored rate. When the baseline price is unknown (the file's GUNCEL TSF and
+// commission-base price were both unreadable) or the current percent is unknown (the
+// file's current commission cell was blank or unreadable), there is no current profit:
+// each band with a price is evaluated on its own, and the band outcomes decide
+// calculability. An unknown percent is never evaluated as 0%.
 
 import { Decimal } from 'decimal.js';
 
@@ -34,6 +36,7 @@ import {
   evaluateScreenScenario,
   formatMarginPct2,
   formatMoney2,
+  outcomeReason,
   toKurusHalfUp,
   type ScreenScenarioBase,
   type ScreenScenarioOutcome,
@@ -84,8 +87,8 @@ export interface ComputedItemBands {
   /**
    * Profit at the commission-base price (customer-seen price, or the sale price when
    * the column is absent) + current commission — the baseline the band/custom "vs
-   * current" delta compares against. Null when not calculable, or when neither price is
-   * known.
+   * current" delta compares against. Null when not calculable, when neither price is
+   * known, or when the current commission percent is unknown.
    */
   readonly current: ComputedCurrentScenario;
 }
@@ -182,8 +185,8 @@ function evaluateBands(
 }
 
 /**
- * The item-level result when the baseline price is unknown: no current profit, and the
- * band outcomes decide calculability. Any calculable band makes the item calculable. When
+ * The item-level result when the baseline price or the current commission percent is
+ * unknown: no current profit, and the band outcomes decide calculability. Any calculable band makes the item calculable. When
  * bands were evaluated but none is calculable, the item reports the first evaluated band's
  * reason (which may itself be null). When no band has a price, the item is not calculable
  * with a null reason. Nothing here throws on the unknown price itself, so such a row never
@@ -196,7 +199,7 @@ function computeWithoutBaseline(evaluated: EvaluatedBands): ComputedItemBands {
   }
   return {
     calculable: false,
-    reason: firstOutcome === null || firstOutcome.calculable ? null : firstOutcome.reason,
+    reason: outcomeReason(firstOutcome),
     bands: results,
     bestBandKey: null,
     current: NULL_CURRENT,
@@ -214,24 +217,27 @@ function computeWithoutBaseline(evaluated: EvaluatedBands): ComputedItemBands {
  * The current price may be unknown (null: the file's GUNCEL TSF was blank, unreadable or
  * 0). A band with neither limit then has no price: null price, null profit, never best.
  *
- * For a ready base with a KNOWN baseline price (`commissionBasePrice ?? currentPrice`), the
- * CURRENT baseline is evaluated at it under `currentCommissionPct`; it decides the item's
- * calculability all-or-none (so a missing cost drops every band). Then each band is
- * evaluated at its own `bandPrice` under its stored rate (the screen's choice, passed to
- * the engine as an override). A band with no price, or whose own evaluation is not
- * calculable (rare, price-dependent shipping), shows null profit and is skipped for
- * `bestBandKey`, which is the highest net profit (first wins on ties).
+ * For a ready base with a KNOWN baseline price (`commissionBasePrice ?? currentPrice`) and
+ * a KNOWN `currentCommissionPct`, the CURRENT baseline is evaluated at that price under
+ * that percent; it decides the item's calculability all-or-none (so a missing cost drops
+ * every band). Then each band is evaluated at its own `bandPrice` under its stored rate
+ * (the screen's choice, passed to the engine as an override). A band with no price, or
+ * whose own evaluation is not calculable (rare, price-dependent shipping), shows null
+ * profit and is skipped for `bestBandKey`, which is the highest net profit (first wins on
+ * ties).
  *
- * With an UNKNOWN baseline price the current profit and margin are null, each band with a
- * price is evaluated at it, and the band outcomes decide calculability (see
- * `computeWithoutBaseline`). The engine may throw on a pathological input -- that
+ * With an UNKNOWN baseline price, or an UNKNOWN current percent (null: the file's current
+ * commission cell was blank or unreadable), the current profit and margin are null, each
+ * band with a price is evaluated at it under its own stored rate, and the band outcomes
+ * decide calculability (see `computeWithoutBaseline`). An unknown percent is never
+ * evaluated (never as 0%). The engine may throw on a pathological input -- that
  * propagates to the service, which catches it per item.
  */
 export function computeItemBands(params: {
   readonly bands: readonly StoredTariffBand[];
   readonly currentPrice: Decimal | null;
   readonly commissionBasePrice: Decimal | null;
-  readonly currentCommissionPct: Decimal;
+  readonly currentCommissionPct: Decimal | null;
   readonly base: ScreenScenarioBase;
 }): ComputedItemBands {
   const { bands, currentPrice, commissionBasePrice, currentCommissionPct, base } = params;
@@ -262,10 +268,11 @@ export function computeItemBands(params: {
 
   // Baseline ("do nothing"): the current commission at the commission-base price (the
   // customer-seen price commission is actually charged on), falling back to the sale
-  // price for imports predating the column. When neither is known there is no baseline:
-  // the bands are evaluated on their own and decide the item's calculability.
+  // price for imports predating the column. When neither is known, or the current percent
+  // is unknown, there is no baseline: the bands are evaluated on their own and decide the
+  // item's calculability.
   const baselinePrice = commissionBasePrice ?? currentPrice;
-  if (baselinePrice === null) {
+  if (baselinePrice === null || currentCommissionPct === null) {
     return computeWithoutBaseline(evaluateBands(bands, currentPrice, base.base));
   }
 

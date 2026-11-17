@@ -1,3 +1,4 @@
+import { createTranslator } from 'next-intl';
 import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -12,6 +13,14 @@ const UNKNOWN_LABEL = trMessages.commissionTariffsPage.table.priceUnknown;
 const UNKNOWN_HINT = trMessages.commissionTariffsPage.table.priceUnknownHint;
 const COMMISSION_LABEL = trMessages.commissionTariffsPage.table.currentCommission;
 const CALCULATED_LABEL = trMessages.commissionTariffsPage.table.calculatedProfit;
+
+// The unknown-commission strings are built from the catalog, never typed.
+const tTable = createTranslator({
+  locale: 'tr',
+  messages: trMessages,
+  namespace: 'commissionTariffsPage.table',
+});
+const UNKNOWN_COMMISSION_HINT = tTable('commissionUnknownHint');
 
 type CellProps = React.ComponentProps<typeof TariffCurrentCell>;
 
@@ -106,5 +115,41 @@ describe('TariffCurrentCell', () => {
     expect(badge).toHaveTextContent(/50,00/);
     await user.click(badge);
     expect(onOpenBreakdown).toHaveBeenCalledTimes(1);
+  });
+
+  describe('commission line', () => {
+    it('shows the unknown commission label and its caption when the label is given', () => {
+      renderCell({
+        commissionPct: null,
+        unknownCommissionLabel: UNKNOWN_LABEL,
+        unknownCommissionHint: UNKNOWN_COMMISSION_HINT,
+      });
+      const label = screen.getByText(`${COMMISSION_LABEL} ${UNKNOWN_LABEL}`);
+      const hint = screen.getByText(UNKNOWN_COMMISSION_HINT);
+      // Its own line under the label, inside the hero column under the price.
+      expect(label).not.toContainElement(hint);
+      expect(label.parentElement).toContainElement(hint);
+      expect(label.parentElement).toContainElement(screen.getByText(/780,00/));
+      expect(label.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      // Never a made-up commission percent (the badge's margin percent is not one).
+      expect(screen.queryByText(new RegExp(`${COMMISSION_LABEL} %`))).toBeNull();
+    });
+
+    it('drops the commission line for a null percent without the label', () => {
+      // The hint alone is not enough: without the label the line stays dropped.
+      renderCell({ commissionPct: null, unknownCommissionHint: UNKNOWN_COMMISSION_HINT });
+      expect(screen.queryByText(new RegExp(COMMISSION_LABEL))).toBeNull();
+      expect(screen.queryByText(UNKNOWN_COMMISSION_HINT)).toBeNull();
+    });
+
+    it('prints the percent when it is known', () => {
+      renderCell({
+        unknownCommissionLabel: UNKNOWN_LABEL,
+        unknownCommissionHint: UNKNOWN_COMMISSION_HINT,
+      });
+      expect(screen.getByText(new RegExp(`${COMMISSION_LABEL} %19`))).toBeInTheDocument();
+      expect(screen.queryByText(`${COMMISSION_LABEL} ${UNKNOWN_LABEL}`)).toBeNull();
+      expect(screen.queryByText(UNKNOWN_COMMISSION_HINT)).toBeNull();
+    });
   });
 });

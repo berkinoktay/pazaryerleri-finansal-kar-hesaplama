@@ -104,6 +104,30 @@ describe('toPlusTariffView — unknown prices stay null', () => {
     // The ceiling is untouched by an unknown current price.
     expect(row?.bands[0]?.price).toBe('100.00');
   });
+
+  it('keeps a null current commission and a null offer commission', () => {
+    const view = toPlusTariffView(
+      detailWithItem({
+        currentCommissionPct: null,
+        currentNetProfit: null,
+        currentMarginPct: null,
+        plus: { price: '100.00', commissionPct: null, netProfit: null, marginPct: null },
+        plusIsBetter: false,
+        calculable: false,
+        reason: null,
+      }),
+    );
+    const row = view.periods[0]?.rows[0];
+    const offer = row?.bands[0];
+
+    expect(row?.currentCommissionPct).toBeNull();
+    expect(row?.currentNetProfit).toBeNull();
+    expect(offer?.commissionPct).toBeNull();
+    expect(offer?.netProfit).toBeNull();
+    // The prices are kept: only the percents are unknown.
+    expect(row?.commissionBasePrice).toBe('120.00');
+    expect(offer?.price).toBe('100.00');
+  });
 });
 
 describe('toPlusTariffView — offer band price is the ceiling ground truth', () => {

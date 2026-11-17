@@ -26,6 +26,7 @@ import {
 import { patchFixture } from '@pazarsync/spreadsheet/testing';
 
 import { createApp } from '@/app';
+import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware';
 import { trendyolPlusCommissionTariffFormat } from '@/workbooks/formats/trendyol/plus-commission-tariff.format';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
@@ -110,6 +111,12 @@ function importRequest(ctx: Ctx, fixture: Buffer, filename: string): Request {
   );
 }
 
+// This file sends more imports than RATE_LIMITS.FILE_IMPORT allows per minute with the
+// same pooled user; reset the in-memory limiter so each test starts with a fresh bucket.
+beforeEach(() => {
+  _resetRateLimitStoreForTests();
+});
+
 describe('POST .../plus-commission-tariffs/import - real Trendyol fixtures', () => {
   beforeEach(async () => {
     await ensureDbReachable();
@@ -187,8 +194,8 @@ describe('POST .../plus-commission-tariffs/import - real Trendyol fixtures', () 
     const item4 = await prisma.plusCommissionTariffItem.findFirst({
       where: { periodId: period4.id, barcode: MULTI_BARCODE },
     });
-    expect(item3?.plusCommissionPct.toString()).toBe(MULTI_OFFER_3DAY);
-    expect(item4?.plusCommissionPct.toString()).toBe(MULTI_OFFER_4DAY);
+    expect(item3?.plusCommissionPct?.toString()).toBe(MULTI_OFFER_3DAY);
+    expect(item4?.plusCommissionPct?.toString()).toBe(MULTI_OFFER_4DAY);
 
     // The per-period item lists share the identical (barcode, sortOrder) sequence so
     // the detail tabs line the products up row-for-row.
@@ -344,13 +351,16 @@ describe('POST .../plus-commission-tariffs/import - a period of 0 days', () => {
 /** The price columns a test blanks. */
 type PriceColumn = 'currentPrice' | 'commissionBasePrice' | 'plusPriceUpperLimit';
 
+/** The plain columns a test blanks: a price, or the current commission. */
+type BlankColumn = PriceColumn | 'currentCommission';
+
 const ImportedSchema = z.object({ tariffId: z.string() });
 
 /** `fixture` with the `columns` cells of its first kept row (`barcode`'s) cleared. */
 async function withBlankCells(
   fixture: Buffer,
   barcode: string,
-  columns: readonly PriceColumn[],
+  columns: readonly BlankColumn[],
 ): Promise<Buffer> {
   const format = trendyolPlusCommissionTariffFormat;
   const grid = await readWorkbookGrid(fixture, { sheet: format.sheet });
@@ -471,5 +481,150 @@ describe('POST .../plus-commission-tariffs/import - the unknown price count', ()
     // Two periods store two items of the row, and the row still counts once.
     expect(body.periodCount).toBe(2);
     expect(body.unknownPriceRows).toBe(1);
+  });
+});
+
+/**
+ * `fixture` with the offer of its period block `blockIndex` cleared on its first kept
+ * row (`barcode`'s); the block's label stays, so the period is still stored.
+ */
+async function withBlankFirstRowOffer(
+  fixture: Buffer,
+  barcode: string,
+  blockIndex: number,
+): Promise<Buffer> {
+  const format = trendyolPlusCommissionTariffFormat;
+  const grid = await readWorkbookGrid(fixture, { sheet: format.sheet });
+  const layout = resolveLayout(format.layout, grid);
+  if (layout === null) throw new Error('unreadable Plus fixture');
+  const firstRow = grid[FIRST_KEPT_ROW - 1] ?? [];
+  expect(cellText(firstRow, columnIndex(format.layout, layout, 'barcode'))).toBe(barcode);
+  const offer = layout.blocks.get('periods')?.[blockIndex]?.columns.get('offer');
+  if (offer === undefined) throw new Error(`the fixture has no offer in block ${blockIndex}`);
+  // The fixture row holds a readable offer, so blanking it is the change.
+  expect(cellText(firstRow, offer)).not.toBeNull();
+  return patchFixture(
+    fixture,
+    [{ excelRow: FIRST_KEPT_ROW, col: offer, value: { kind: 'clear' } }],
+    { sheet: format.sheet },
+  );
+}
+
+const UnknownPercentImportSchema = z.object({
+  tariffId: z.string(),
+  periodCount: z.number(),
+});
+
+describe('POST .../plus-commission-tariffs/import - an unknown commission percent', () => {
+  beforeEach(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+  });
+
+  it('stores a row with a blank period offer with plus_commission_pct NULL in that period only', async () => {
+    const ctx = await setupStore();
+    const file = await withBlankFirstRowOffer(FIXTURE_MULTI, MULTI_BARCODE, 0);
+
+    const res = await app.request(importRequest(ctx, file, 'trendyol-plus-tariff-3ve4.xlsx'));
+
+    expect(res.status).toBe(201);
+    const body = UnknownPercentImportSchema.parse(await res.json());
+    expect(body.periodCount).toBe(2);
+    const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
+    const items = await prisma.plusCommissionTariffItem.findMany({
+      where: { ...scope, barcode: MULTI_BARCODE, period: { tariffId: body.tariffId } },
+      orderBy: { period: { sortOrder: 'asc' } },
+      select: {
+        currentCommissionPct: true,
+        plusCommissionPct: true,
+        period: { select: { dayCount: true } },
+      },
+    });
+    // The 3-day item stores the unknown offer as null, never 0; the 4-day item keeps
+    // its own offer, and the row's current commission is known in both.
+    expect(
+      items.map((item) => [item.period.dayCount, item.plusCommissionPct?.toString() ?? null]),
+    ).toEqual([
+      [3, null],
+      [4, MULTI_OFFER_4DAY],
+    ]);
+    expect(items.every((item) => item.currentCommissionPct !== null)).toBe(true);
+    // Only that item lost its offer.
+    expect(
+      await prisma.plusCommissionTariffItem.count({
+        where: { ...scope, plusCommissionPct: null },
+      }),
+    ).toBe(1);
+  });
+
+  it('stores a blank current commission as NULL', async () => {
+    const ctx = await setupStore();
+    const file = await withBlankCells(FIXTURE_MULTI, MULTI_BARCODE, ['currentCommission']);
+
+    const res = await app.request(importRequest(ctx, file, 'trendyol-plus-tariff-3ve4.xlsx'));
+
+    expect(res.status).toBe(201);
+    const body = UnknownPercentImportSchema.parse(await res.json());
+    const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
+    const items = await prisma.plusCommissionTariffItem.findMany({
+      where: { ...scope, barcode: MULTI_BARCODE, period: { tariffId: body.tariffId } },
+      orderBy: { period: { sortOrder: 'asc' } },
+      select: { currentCommissionPct: true, plusCommissionPct: true },
+    });
+    // One item per period, each with an unknown current commission, never 0; the row's
+    // offers are still known.
+    expect(items.map((item) => item.currentCommissionPct)).toEqual([null, null]);
+    expect(items.map((item) => item.plusCommissionPct?.toString() ?? null)).toEqual([
+      MULTI_OFFER_3DAY,
+      MULTI_OFFER_4DAY,
+    ]);
+    // Only that row lost its current commission.
+    expect(
+      await prisma.plusCommissionTariffItem.count({
+        where: { ...scope, currentCommissionPct: null },
+      }),
+    ).toBe(2);
+  });
+});
+
+const UnknownCommissionCountSchema = z.object({
+  periodCount: z.number(),
+  unknownCommissionRows: z.number(),
+});
+
+describe('POST .../plus-commission-tariffs/import - the unknown commission count', () => {
+  beforeEach(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+  });
+
+  it.each([
+    [FIXTURE_7DAY, 'trendyol-plus-tariff.xlsx'],
+    [FIXTURE_MULTI, 'trendyol-plus-tariff-3ve4.xlsx'],
+  ])(
+    'answers unknownCommissionRows 0 for a file whose percents all read (%#)',
+    async (fixture, filename) => {
+      const ctx = await setupStore();
+
+      const res = await app.request(importRequest(ctx, fixture, filename));
+
+      expect(res.status).toBe(201);
+      const body = UnknownCommissionCountSchema.parse(await res.json());
+      expect(body.unknownCommissionRows).toBe(0);
+    },
+  );
+
+  it('counts a row with a blank offer in one stored period once', async () => {
+    const ctx = await setupStore();
+    const file = await withBlankFirstRowOffer(FIXTURE_MULTI, MULTI_BARCODE, 0);
+
+    const res = await app.request(importRequest(ctx, file, 'trendyol-plus-tariff-3ve4.xlsx'));
+
+    expect(res.status).toBe(201);
+    const body = UnknownCommissionCountSchema.parse(await res.json());
+    // Two periods store two items of the row, one with the unknown offer; the row
+    // counts once.
+    expect(body.periodCount).toBe(2);
+    expect(body.unknownCommissionRows).toBe(1);
   });
 });

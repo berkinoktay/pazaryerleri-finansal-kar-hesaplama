@@ -27,6 +27,11 @@ export interface FlashCurrentCellProps {
  * shared {@link TariffCurrentCell}; this owns the data, the current-scenario estimate call,
  * and the breakdown modal. No client-side money math — the badge and modal are
  * backend-computed.
+ *
+ * An unknown current commission percent (the file's cell was blank or unreadable) reads
+ * as an unknown commission line with its own caption under it, while the price stays the
+ * hero. The backend has no current profit then, so the badge click opens the
+ * not-calculable dialog without an estimate request.
  */
 export function FlashCurrentCell({
   row,
@@ -38,9 +43,14 @@ export function FlashCurrentCell({
   const scope = useTariffScope();
   const estimate = useEstimateFlashItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
+  // No current commission: the backend has no current scenario (it answers 422 to one),
+  // so there is nothing to estimate.
+  const currentUnknown = row.currentCommissionPct === null;
 
   function openBreakdown(): void {
     setBreakdownOpen(true);
+    // The dialog opens on its not-calculable text without a request.
+    if (currentUnknown) return;
     // `scenario: 'current'` — the backend derives BOTH the customer price and its
     // commission from the item itself, so the breakdown matches this row's
     // `currentNetProfit` badge.
@@ -53,6 +63,9 @@ export function FlashCurrentCell({
       // badge/modal/price stay in sync.
       price={row.customerPrice}
       commissionPct={row.currentCommissionPct}
+      // Shown (with its caption under it) only while the current commission is unknown.
+      unknownCommissionLabel={t('commissionUnknown')}
+      unknownCommissionHint={t('commissionUnknownHint')}
       commissionLabel={t('offerCommission')}
       calculatedLabel={t('calculatedProfit')}
       netProfit={row.currentNetProfit}
@@ -75,8 +88,8 @@ export function FlashCurrentCell({
         imageUrl={row.imageUrl}
         stockCode={row.barcode}
         currentNetProfit={row.currentNetProfit}
-        result={estimate.data ?? null}
-        loading={estimate.isPending}
+        result={currentUnknown ? null : (estimate.data ?? null)}
+        loading={currentUnknown ? false : estimate.isPending}
       />
     </TariffCurrentCell>
   );

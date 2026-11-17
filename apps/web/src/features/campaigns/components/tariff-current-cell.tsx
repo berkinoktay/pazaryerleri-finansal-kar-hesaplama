@@ -28,8 +28,25 @@ export interface TariffCurrentCellProps {
    * while the price is known.
    */
   unknownPriceHint?: React.ReactNode;
-  /** The current commission %; `null` drops the commission line entirely. */
+  /**
+   * The current commission %. `null` drops the commission line entirely, unless
+   * {@link unknownCommissionLabel} is given: then the line says the percent is unknown.
+   */
   commissionPct: string | null;
+  /**
+   * Opt-in wording for an unknown commission percent (e.g. "Unknown"). When `commissionPct`
+   * is `null` and this is given, the commission line reads "{commissionLabel}
+   * {unknownCommissionLabel}" (with {@link unknownCommissionHint} under it) instead of
+   * vanishing. Omitted, a `null` percent still drops the line (the Advantage page relies on
+   * that). The caller owns the wording.
+   */
+  unknownCommissionLabel?: string;
+  /**
+   * Optional explanation shown under the unknown-commission line: a short muted line of its
+   * own, plain text so it wraps at phone width and reads on touch devices (no hover needed).
+   * Ignored while the percent is known or {@link unknownCommissionLabel} is omitted.
+   */
+  unknownCommissionHint?: React.ReactNode;
   /** Label before the commission % ("komisyon" / "Güncel komisyon") — the caller owns the wording. */
   commissionLabel: string;
   /** Label above the profit badge ("Hesaplanan kâr"). */
@@ -88,6 +105,8 @@ export function TariffCurrentCell({
   unknownPriceLabel,
   unknownPriceHint,
   commissionPct,
+  unknownCommissionLabel,
+  unknownCommissionHint,
   commissionLabel,
   calculatedLabel,
   netProfit,
@@ -130,6 +149,14 @@ export function TariffCurrentCell({
           <span className="text-2xs text-muted-foreground tabular-nums">
             {commissionLabel} {formatPercentDisplay(commissionPct)}
           </span>
+        ) : unknownCommissionLabel !== undefined ? (
+          // Unknown commission: the line says so (never a made-up 0%), and the caller's
+          // explanation (if any) sits under it as its own line.
+          <TariffUnknownPrice
+            size="line"
+            label={`${commissionLabel} ${unknownCommissionLabel}`}
+            hint={unknownCommissionHint}
+          />
         ) : null}
       </div>
 

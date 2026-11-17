@@ -35,6 +35,11 @@ export interface CurrentPriceCellProps {
  * when BOTH prices are unknown — the file's commission-base price and its current sale price. The backend then has no
  * baseline, so the badge stays empty and its click opens the not-calculable dialog
  * without an estimate request.
+ *
+ * An unknown current commission percent (the file's cell was blank or unreadable) reads
+ * as an unknown commission line with its own caption under it, while the price stays the
+ * hero. The backend has no current profit then either, so the badge click also opens the
+ * not-calculable dialog without an estimate request.
  */
 export function CurrentPriceCell({
   row,
@@ -52,12 +57,14 @@ export function CurrentPriceCell({
   // backend's current scenario uses the same price, so badge/modal/price stay in sync.
   const price = row.commissionBasePrice ?? row.currentPrice;
   const priceUnknown = price === null;
+  // No baseline price, or no current commission: the backend has no current scenario
+  // (it answers 422 to one), so there is nothing to estimate.
+  const currentUnknown = priceUnknown || row.currentCommissionPct === null;
 
   function openBreakdown(): void {
     setBreakdownOpen(true);
-    // No baseline price: the backend would refuse the current scenario, so the dialog
-    // opens on its not-calculable text without a request.
-    if (priceUnknown) return;
+    // The dialog opens on its not-calculable text without a request.
+    if (currentUnknown) return;
     // `scenario: 'current'` — the backend derives BOTH price and commission from the
     // item itself, so the breakdown matches this row's `currentNetProfit` badge.
     estimate.mutate({ itemId: row.id, body: { scenario: 'current' } });
@@ -70,6 +77,9 @@ export function CurrentPriceCell({
       // Shown under "Bilinmiyor" only while the price is unknown.
       unknownPriceHint={t('table.priceUnknownHint')}
       commissionPct={row.currentCommissionPct}
+      // Shown (with its caption under it) only while the current commission is unknown.
+      unknownCommissionLabel={t('table.commissionUnknown')}
+      unknownCommissionHint={t('table.commissionUnknownHint')}
       commissionLabel={t('table.currentCommission')}
       calculatedLabel={t('table.calculatedProfit')}
       netProfit={row.currentNetProfit}
@@ -94,8 +104,8 @@ export function CurrentPriceCell({
         imageUrl={row.imageUrl}
         stockCode={row.stockCode}
         currentNetProfit={row.currentNetProfit}
-        result={priceUnknown ? null : (estimate.data ?? null)}
-        loading={priceUnknown ? false : estimate.isPending}
+        result={currentUnknown ? null : (estimate.data ?? null)}
+        loading={currentUnknown ? false : estimate.isPending}
       />
     </TariffCurrentCell>
   );

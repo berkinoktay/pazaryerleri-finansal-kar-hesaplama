@@ -23,6 +23,12 @@ export interface WorkbookImportResult {
    * leaves it out.
    */
   readonly unknownPriceRows?: number;
+  /**
+   * Products the seller will see with an unknown commission percent (a blank or unreadable
+   * cell), as the page's response counts them. The commission, Plus and Flash endpoints fill
+   * it; every other page leaves it out.
+   */
+  readonly unknownCommissionRows?: number;
 }
 
 /** The outcome of one import request, before any error is thrown. */
@@ -106,6 +112,7 @@ export const WORKBOOK_ENDPOINTS: Readonly<Record<WorkbookPage, WorkbookEndpoint>
               id: data.tariffId,
               prefilledRows: data.prefilledRows,
               unknownPriceRows: data.unknownCurrentPriceRows,
+              unknownCommissionRows: data.unknownCommissionRows,
             };
       return { result, error, response };
     },
@@ -134,6 +141,7 @@ export const WORKBOOK_ENDPOINTS: Readonly<Record<WorkbookPage, WorkbookEndpoint>
               id: data.tariffId,
               prefilledRows: data.prefilledRows,
               unknownPriceRows: data.unknownPriceRows,
+              unknownCommissionRows: data.unknownCommissionRows,
             };
       return { result, error, response };
     },
@@ -178,7 +186,13 @@ export const WORKBOOK_ENDPOINTS: Readonly<Record<WorkbookPage, WorkbookEndpoint>
         },
       );
       const result =
-        data === undefined ? undefined : { id: data.listId, prefilledRows: data.prefilledRows };
+        data === undefined
+          ? undefined
+          : {
+              id: data.listId,
+              prefilledRows: data.prefilledRows,
+              unknownCommissionRows: data.unknownCommissionRows,
+            };
       return { result, error, response };
     },
     async exportFile(orgId, storeId, id) {

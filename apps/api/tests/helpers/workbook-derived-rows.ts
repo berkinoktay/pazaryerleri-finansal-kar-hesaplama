@@ -56,13 +56,15 @@ const COMMISSION_DERIVED: readonly DerivedRow<typeof trendyolCommissionTariffLay
   // Added after the move, so the derived golden pins every mapping rule of the commission
   // row: the stock code chain (the model code, else the seller stock code, else null),
   // the title fallback, the truncated stock, a blank or unreadable current price read as
-  // null, the '0' of a blank current commission, a blank commission base price kept
-  // null, a blank or unreadable bracket limit, a blank period commission, the first
-  // period block filled, the plain grammar of the decimal cells (decimal comma, dot-only
-  // text, a lira suffix that does not read, a number in exponent form), a number
-  // barcode, a whitespace barcode, and values the export never writes, which the import
-  // does not check. The fixture row's seller stock code and first (3-day) period block
-  // are blank; its prices, limits and commissions are number cells.
+  // null, a blank current commission read as null (never 0), a blank commission base
+  // price kept null, a blank or unreadable bracket limit, a blank period commission, the
+  // first period block filled, the plain grammar of the decimal cells (decimal comma,
+  // dot-only text, a lira suffix that does not read, a number in exponent form), a
+  // number barcode, a whitespace barcode, and values the export never writes, which the
+  // import does not check. The fixture row's seller stock code and first (3-day) period
+  // block are blank; its prices, limits and commissions are number cells. An unreadable
+  // current commission (also read as null) is pinned by the format's unit test only, so
+  // the digest changed for one reason alone when unknown commissions became null.
   { name: 'a whitespace barcode', cells: [['barcode', '   ']], kept: false },
   { name: 'a number barcode', cells: [['barcode', 8690000000001]], kept: true },
   {
@@ -199,13 +201,15 @@ const PLUS_DERIVED: readonly DerivedRow<typeof trendyolPlusCommissionTariffLayou
   // Added after the move, so the derived golden pins every mapping rule of the Plus row:
   // the three fallback chains (stock code, commission base price, Plus commission base
   // price) with their first cell blank and with every cell blank, the null of each blank
-  // price and the '0' of each blank percent, a blank period offer, the title fallback,
-  // the truncated stock, the plain grammar of the decimal cells (decimal comma, dot-only
-  // text, a lira suffix that does not read), the numeric cancel flag, a number barcode, a
+  // price and of each blank percent (never 0), a blank period offer read as null, a zero
+  // period offer kept as '0', the title fallback, the truncated stock, the plain grammar
+  // of the decimal cells (decimal comma, dot-only text, a lira suffix that does not read,
+  // also on the offer, read as null), the numeric cancel flag, a number barcode, a
   // whitespace barcode, and values the export never writes, which the import does not
   // check. The fixture row's prices, limits and offers are number cells. A literal 0
   // price (also read as null) is pinned by the format's unit test only, so the digest
-  // changed for one reason alone when unknown prices became null.
+  // changed for one reason alone when unknown prices became null; likewise the digest
+  // changed for one reason alone when unknown percents became null.
   { name: 'a whitespace barcode', cells: [['barcode', '   ']], kept: false },
   { name: 'a blank model code', cells: [['modelCode', null]], kept: true },
   {
@@ -437,8 +441,10 @@ const FLASH_DERIVED: readonly DerivedRow<typeof trendyolFlashProductListLayout>[
   },
   // Added after the move, so the derived golden pins every mapping rule of the flash
   // row: the offer each price makes and its window (text, date, unreadable), the
-  // customer price and commission fallbacks, the folded tariff flag, the truncated
-  // stock and the title fallback.
+  // customer price fallback, a blank current commission read as null (never 0), the
+  // folded tariff flag, the truncated stock and the title fallback. An unreadable
+  // current commission (also read as null) is pinned by the format's unit test only, so
+  // the digest changed for one reason alone when unknown commissions became null.
   {
     name: 'only a 24-hour offer price',
     cells: [

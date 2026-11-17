@@ -21,12 +21,14 @@ const app = createApp();
 
 /**
  * Seed a minimal Plus tariff (one period, one item) for a store. Returns the tariff id.
- * The item has the given Plus price upper limit; null is an item whose ceiling is unknown.
+ * The item has the given Plus price upper limit and Plus commission offer; null is an
+ * item whose ceiling (or offer) is unknown.
  */
 async function seedTariff(
   organizationId: string,
   storeId: string,
   plusPriceUpperLimit: string | null = '90.00',
+  plusCommissionPct: string | null = '15.4',
 ): Promise<string> {
   const tariff = await prisma.plusCommissionTariff.create({
     data: { organizationId, storeId, name: 'Org Plus Tariff' },
@@ -51,7 +53,7 @@ async function seedTariff(
       commissionBasePrice: '100.00',
       currentCommissionPct: '19',
       plusPriceUpperLimit,
-      plusCommissionPct: '15.4',
+      plusCommissionPct,
       plusCommissionBasePrice: plusPriceUpperLimit,
       sortOrder: 0,
     },
@@ -231,6 +233,56 @@ describe('plus-commission-tariffs: route-layer authorization', () => {
       select: { plusSelected: true },
     });
     expect(untouched).toEqual([{ plusSelected: false }, { plusSelected: false }]);
+  });
+
+  it("does not disclose another store's item with an unknown Plus commission", async () => {
+    const userA = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, userA.id);
+    const storeA = await createStore(orgA.id);
+    const tariffA = await seedTariff(orgA.id, storeA.id);
+
+    // Foreign items: one in another store of the same org, one in another org. Each has a
+    // known Plus price upper limit but an unknown Plus commission offer, so any join on an
+    // own item would be refused (PLUS_COMMISSION_UNKNOWN), with or without a custom price.
+    const storeA2 = await createStore(orgA.id);
+    await seedTariff(orgA.id, storeA2.id, '90.00', null);
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+    await seedTariff(orgB.id, storeB.id, '90.00', null);
+    const foreignItems = await prisma.plusCommissionTariffItem.findMany({
+      where: { storeId: { in: [storeA2.id, storeB.id] } },
+      select: { id: true },
+    });
+    expect(foreignItems).toHaveLength(2);
+
+    // One join without and one with a custom price, so both paths of the check see a
+    // foreign id.
+    const res = await app.request(
+      `/v1/organizations/${orgA.id}/stores/${storeA.id}/plus-commission-tariffs/${tariffA}/selections`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: bearer(userA.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selections: foreignItems.map((item, index) => ({
+            itemId: item.id,
+            selected: true,
+            customPrice: index === 0 ? null : '120.50',
+          })),
+        }),
+      },
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ updated: 0 });
+
+    const untouched = await prisma.plusCommissionTariffItem.findMany({
+      where: { id: { in: foreignItems.map((item) => item.id) } },
+      select: { plusSelected: true, customPrice: true },
+    });
+    expect(untouched).toEqual([
+      { plusSelected: false, customPrice: null },
+      { plusSelected: false, customPrice: null },
+    ]);
   });
 
   it('a non-member saving selections returns 403', async () => {

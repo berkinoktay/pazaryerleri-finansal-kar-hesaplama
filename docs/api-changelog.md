@@ -26,6 +26,105 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Commission tariff detail: the current commission percent can be null**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}`).
+  `TariffDetailItem.currentCommissionPct` is null when the file's current commission cell was
+  blank or unreadable; a readable 0 stays 0. `currentNetProfit` is null also when the current
+  commission is unknown; the bands are still priced, and their outcomes then decide `calculable`
+  and `reason`. The band schema (`TariffBandResult.commissionPct`) is unchanged. Breaking
+  for a client that assumed the field is a string; the web client ships the matching change in the
+  same PR.
+- **Plus tariff detail: the current commission and the Plus commission percent can be null**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/plus-commission-tariffs/{tariffId}`).
+  `PlusTariffDetailItem.currentCommissionPct` and `PlusScenario.commissionPct` (the item's
+  `plus.commissionPct`) are null when the file's cell was blank or unreadable; a readable 0 stays
+  0. A scenario with a null percent has no profit, and `currentNetProfit` is null also when the
+  current commission is unknown. `plusIsBetter` is false when either percent is unknown; with the
+  current commission unknown, `calculable` and `reason` follow the Plus offer, and with both
+  unknown the item answers `calculable: false` with `reason: null`. Breaking
+  for a client that assumed both fields are strings; the web client ships the matching change in
+  the same PR.
+- **Flash products detail: the current commission and an offer's commission percent can be null**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/flash-products/{listId}`).
+  `FlashProductDetailItem.currentCommissionPct` is null when the file's current commission cell was
+  blank or unreadable; a readable 0 stays 0. `FlashOffer.commissionPct` (`offer24` and `offer3`)
+  is null when no commission tariff band covers the offer and the current commission is unknown;
+  such an offer has no profit. `currentNetProfit` is null also when the current commission is
+  unknown; an offer a band covers is still priced at its band, and the item is then `calculable`
+  when any offer is (else `calculable: false` with the first priced offer's `reason`, or `reason: null`
+  when no offer could be priced). The band
+  schema (`FlashCommissionBand.commissionPct`) is unchanged. Breaking for a client that assumed
+  both fields are strings; the web client ships the matching change in the same PR.
+- **Commission tariff estimate: new 422 field code `CURRENT_COMMISSION_UNKNOWN`**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/items/{itemId}/estimate`).
+  `scenario: "current"` for an item whose current commission percent is unknown (the file's cell
+  was blank or unreadable) answers `422 VALIDATION_ERROR` with
+  `errors: [{ field: "scenario", code: "CURRENT_COMMISSION_UNKNOWN" }]` instead of pricing a
+  made-up 0%; the detail row of such an item has no current profit either. `CURRENT_PRICE_UNKNOWN`
+  is checked first. The response schema is unchanged, and the band and custom-price modes are
+  unaffected (they never read the current percent).
+- **Plus tariff estimate: new 422 field codes `CURRENT_COMMISSION_UNKNOWN` and
+  `PLUS_COMMISSION_UNKNOWN`**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/plus-commission-tariffs/{tariffId}/items/{itemId}/estimate`).
+  `scenario: "current"` for an item whose current commission percent is unknown answers
+  `422 VALIDATION_ERROR` with `errors: [{ field: "scenario", code: "CURRENT_COMMISSION_UNKNOWN" }]`
+  (`CURRENT_PRICE_UNKNOWN` is checked first). A `price` for an item whose Plus commission offer is
+  unknown answers `422 VALIDATION_ERROR` with
+  `errors: [{ field: "price", code: "PLUS_COMMISSION_UNKNOWN" }]`. A percent is unknown when the
+  file's cell was blank or unreadable; it is never priced at a made-up 0%. Each mode checks only
+  the percent it applies. The response schema is unchanged.
+- **Flash products estimate: new 422 field code `CURRENT_COMMISSION_UNKNOWN`, and a not
+  calculable answer for a price that needs an unknown commission**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/flash-products/{listId}/items/{itemId}/estimate`).
+  `scenario: "current"` for an item whose current commission (Mevcut Komisyon) is unknown (the
+  file's cell was blank or unreadable) answers `422 VALIDATION_ERROR` with
+  `errors: [{ field: "scenario", code: "CURRENT_COMMISSION_UNKNOWN" }]`. A `price` is not refused:
+  when it lands in a tariff band it is priced at that band's commission as before, and when it
+  lands in no band and so falls back to the unknown current commission the answer is `200` with
+  `calculable: false`, `reason: null`, `commissionPct: null`, `commissionSource: "current"` and
+  `breakdown: null` (an unmatched item still answers `reason: "NO_PRODUCT"`). The response schema
+  is unchanged (`commissionPct` was already nullable).
+- **Plus tariff export: new 409 code `SELECTION_COMMISSION_UNKNOWN`**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/plus-commission-tariffs/{tariffId}/export`).
+  When a product that opted in to Plus has no known Plus commission offer in a period (the file's
+  offer cell was blank or unreadable), the export answers `409` with code
+  `SELECTION_COMMISSION_UNKNOWN` instead of writing a made-up `0` into the computed commission
+  column. The refusal also applies when the product has a custom price (a price does not supply the
+  commission), and it is checked before `SELECTION_PRICE_UNKNOWN`. No file is built and the tariff
+  is not marked exported. The web client localizes the new code under
+  `common.errors.SELECTION_COMMISSION_UNKNOWN` in the same PR.
+- **Plus tariff selections: new 422 field code `PLUS_COMMISSION_UNKNOWN`**
+  (`PATCH /v1/organizations/{orgId}/stores/{storeId}/plus-commission-tariffs/{tariffId}/selections`).
+  A join (`selected: true`) on an item whose Plus commission offer is unknown (the file's offer
+  cell was blank or unreadable) answers `422 VALIDATION_ERROR` with
+  `{ field: "selections.<index>.selected", code: "PLUS_COMMISSION_UNKNOWN" }`: the export writes
+  that offer into the computed commission column and would refuse the tariff with
+  `409 SELECTION_COMMISSION_UNKNOWN`. Unlike `PLUS_PRICE_UNKNOWN`, the check also applies to an
+  entry with a custom price (a price does not supply the commission), so the earlier entry's
+  "an entry with a custom price is never checked" no longer holds for this code. Each refused
+  entry gets one issue: an unknown commission is reported as `PLUS_COMMISSION_UNKNOWN` even when
+  the ceiling is unknown too. The check stays all-or-nothing (every refused entry is reported, with
+  the index of the request array, and nothing is written); a `selected: false` entry is never
+  checked, so an existing join can still be cleared, and an item id outside the tariff and store
+  is still silently skipped (never reported). The request and response schemas are unchanged; the
+  route description and its 422 text name the new code.
+- **Commission, Plus and Flash imports: an unknown commission percent is kept as null, and a new
+  count `unknownCommissionRows`**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/import`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/plus-commission-tariffs/import`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/flash-products/import`). A blank or unreadable
+  current commission percent, and on the Plus page a blank or unreadable Plus commission offer, is
+  stored as null instead of 0; a readable 0 stays 0. `ImportTariffResponse`,
+  `ImportPlusTariffResponse` and `ImportFlashProductsResponse` gain the required integer
+  `unknownCommissionRows`: on the commission page, the product rows with an unknown current
+  commission; on the Plus page, the product rows with an unknown current commission or an unknown
+  Plus commission offer in a stored period (an offer of a period the upload does not store is not
+  read); each such row counts once, whatever the number of periods. On the Flash page it counts the
+  distinct products with an unknown current commission on at least one date row, like
+  `productCount`. No backfill: a tariff or list uploaded before this change keeps its stored 0
+  until it is uploaded again. On the commission and Plus pages an upload whose week overlaps a
+  stored tariff is refused, so the old tariff is deleted first, and its saved selections go with
+  it. Additive; the other workbook import responses are unchanged.
 - **Commission and Plus tariff selections take every item of a tariff**
   (`PATCH /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/selections`,
   `PATCH /v1/organizations/{orgId}/stores/{storeId}/plus-commission-tariffs/{tariffId}/selections`).
