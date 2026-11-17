@@ -66,8 +66,9 @@ const estimateRoute = createRoute({
       content: { 'application/json': { schema: ProblemDetailsSchema } },
       description:
         'Invalid payload — malformed price (INVALID_CUSTOM_PRICE), a missing price in a ' +
-        'non-current mode (PRICE_REQUIRED), or price/bandKey sent with scenario:"current" ' +
-        '(INVALID_ESTIMATE_MODE)',
+        'non-current mode (PRICE_REQUIRED), price/bandKey sent with scenario:"current" ' +
+        '(INVALID_ESTIMATE_MODE), or scenario:"current" for an item with neither a ' +
+        'commission-base price nor a current price (CURRENT_PRICE_UNKNOWN on `scenario`)',
     },
     429: Common429Response,
   },

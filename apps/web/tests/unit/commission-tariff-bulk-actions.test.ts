@@ -7,6 +7,7 @@ import {
   selectByTargetMargin,
   selectProfitableOnly,
   type CommissionSelectionState,
+  type TargetStrategy,
   type TariffFilterState,
 } from '@/features/campaigns/lib/bulk-actions';
 import type { CommissionTariffRow, PriceBand } from '@/features/campaigns/types';
@@ -104,6 +105,43 @@ describe('bulk-actions', () => {
     // target 20%: band2 (price 120) & band3 (price 90) qualify → least-drop = band2 (higher price).
     const next = selectByTargetMargin([r1], emptyState(), 20, 'least-drop');
     expect(next.selection.r1).toBe('band2');
+  });
+
+  it('selectByTargetMargin never picks a band whose price is unknown', () => {
+    // A band with neither limit has no price when the current price is unknown. Give it
+    // a qualifying margin and the top profit so only the price guard keeps it out, in
+    // first and in later position, under both strategies.
+    function unknownPriceBand(key: string): PriceBand {
+      return {
+        key,
+        lowerLimit: null,
+        upperLimit: null,
+        price: null,
+        commissionPct: '10',
+        netProfit: '50',
+        marginPct: '30',
+      };
+    }
+    const unknownFirst = row('u1', null, [
+      unknownPriceBand('band1'),
+      band('band2', '120', '30', '20'),
+    ]);
+    const unknownLater = row('u2', null, [
+      band('band2', '120', '30', '20'),
+      unknownPriceBand('band3'),
+    ]);
+    const unknownOnly = row('u3', null, [unknownPriceBand('band1')]);
+    const strategies: TargetStrategy[] = ['least-drop', 'max-profit'];
+
+    for (const strategy of strategies) {
+      const next = selectByTargetMargin(
+        [unknownFirst, unknownLater, unknownOnly],
+        emptyState(),
+        20,
+        strategy,
+      );
+      expect(next.selection).toEqual({ u1: 'band2', u2: 'band2' });
+    }
   });
 
   it('clearSelections removes the given rows band AND custom price', () => {

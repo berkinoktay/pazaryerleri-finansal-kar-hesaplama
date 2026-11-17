@@ -50,6 +50,24 @@ function detailItem() {
   };
 }
 
+/** A row whose current price could not be read: band1 (no limits) has no price either. */
+function unknownPriceItem() {
+  return {
+    ...detailItem(),
+    id: 'ffffffff-bbbb-cccc-dddd-eeeeeeeeeeee',
+    currentPrice: null,
+    commissionBasePrice: null,
+    currentNetProfit: null,
+    currentMarginPct: null,
+    calculable: true,
+    bestBandKey: 'band2',
+    bands: [
+      band({ lowerLimit: null, upperLimit: null, price: null, netProfit: null, marginPct: null }),
+      band({ key: 'band2', upperLimit: '449.99', price: '449.99' }),
+    ],
+  };
+}
+
 function detailResponse() {
   return {
     id: TARIFF_ID,
@@ -61,7 +79,7 @@ function detailResponse() {
         dateRangeLabel: '30 Haz - 2 Tem',
         dayCount: 3,
         validity: 'active',
-        items: [detailItem()],
+        items: [detailItem(), unknownPriceItem()],
       },
     ],
   };
@@ -79,6 +97,21 @@ describe('useCommissionTariffDetail', () => {
     expect(result.current.data?.id).toBe(TARIFF_ID);
     expect(result.current.data?.periods).toHaveLength(1);
     expect(result.current.data?.periods[0].items[0].bands[0].netProfit).toBe('42.00');
+  });
+
+  it('passes an unknown current price through as null, never a made-up zero', async () => {
+    server.use(http.get(ENDPOINT, () => HttpResponse.json(detailResponse(), { status: 200 })));
+
+    const { result } = renderHook(() => useCommissionTariffDetail(ORG_ID, STORE_ID, TARIFF_ID), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const item = result.current.data?.periods[0].items[1];
+    expect(item?.currentPrice).toBeNull();
+    expect(item?.currentNetProfit).toBeNull();
+    expect(item?.bands[0].price).toBeNull();
+    expect(item?.bands[1].price).toBe('449.99');
   });
 
   it('does not fetch when tariffId is null (enabled=false path)', () => {

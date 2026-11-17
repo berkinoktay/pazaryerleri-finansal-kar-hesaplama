@@ -89,7 +89,7 @@ export interface ProblemDetailsOptions {
 const TYPE_BASE = 'https://api.pazarsync.com/errors';
 
 /**
- * Each workbook conflict's wire code. Written out so the error-code audit sees ten emit
+ * Each workbook conflict's wire code. Written out so the error-code audit sees eleven emit
  * sites; the mapped type makes a missing or misspelt reason a compile error.
  */
 const WORKBOOK_CONFLICT_PROBLEMS: { readonly [R in WorkbookConflictReason]: { readonly code: R } } =
@@ -104,6 +104,7 @@ const WORKBOOK_CONFLICT_PROBLEMS: { readonly [R in WorkbookConflictReason]: { re
     ROW_ANCHOR_MISMATCH: { code: 'ROW_ANCHOR_MISMATCH' },
     ROW_NOT_FOUND: { code: 'ROW_NOT_FOUND' },
     EXPORT_FILENAME_COLLISION: { code: 'EXPORT_FILENAME_COLLISION' },
+    SELECTION_PRICE_UNKNOWN: { code: 'SELECTION_PRICE_UNKNOWN' },
   };
 
 export function problemDetailsForError(

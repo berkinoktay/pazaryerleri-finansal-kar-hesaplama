@@ -19,7 +19,10 @@ export interface TariffSelectFootProps {
    * and the foot is then a purely visual indicator (a `<span>`) below it.
    */
   onToggle?: () => void;
-  /** Only meaningful with `onToggle` — disables the button until a choice is valid. */
+  /**
+   * With `onToggle`, disables the button until a choice is valid. Without it, dims the
+   * visual foot the same way (an option the card does not let the seller choose).
+   */
   disabled?: boolean;
 }
 
@@ -56,7 +59,7 @@ export function TariffSelectFoot({
   // Visual only — the band card's stretched overlay owns the click.
   if (onToggle === undefined) {
     return (
-      <span className={base}>
+      <span className={cn(base, disabled && 'opacity-50')}>
         {indicator}
         {text}
       </span>

@@ -55,14 +55,14 @@ const COMMISSION_DERIVED: readonly DerivedRow<typeof trendyolCommissionTariffLay
   { name: 'a blank barcode', cells: [['barcode', null]], kept: false },
   // Added after the move, so the derived golden pins every mapping rule of the commission
   // row: the stock code chain (the model code, else the seller stock code, else null),
-  // the title fallback, the truncated stock, the '0' of a blank current price and
-  // current commission, a blank commission base price kept null, a blank or unreadable
-  // bracket limit, a blank period commission, the first period block filled, the plain
-  // grammar of the decimal cells (decimal comma, dot-only text, a lira suffix that does
-  // not read, a number in exponent form), a number barcode, a whitespace barcode, and
-  // values the export never writes, which the import does not check. The fixture row's
-  // seller stock code and first (3-day) period block are blank; its prices, limits and
-  // commissions are number cells.
+  // the title fallback, the truncated stock, a blank or unreadable current price read as
+  // null, the '0' of a blank current commission, a blank commission base price kept
+  // null, a blank or unreadable bracket limit, a blank period commission, the first
+  // period block filled, the plain grammar of the decimal cells (decimal comma, dot-only
+  // text, a lira suffix that does not read, a number in exponent form), a number
+  // barcode, a whitespace barcode, and values the export never writes, which the import
+  // does not check. The fixture row's seller stock code and first (3-day) period block
+  // are blank; its prices, limits and commissions are number cells.
   { name: 'a whitespace barcode', cells: [['barcode', '   ']], kept: false },
   { name: 'a number barcode', cells: [['barcode', 8690000000001]], kept: true },
   {

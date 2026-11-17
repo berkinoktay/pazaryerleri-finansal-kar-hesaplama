@@ -61,11 +61,31 @@ export function parseStoredTariffBands(value: Prisma.JsonValue): StoredTariffBan
  * pins the price-update field to exactly this boundary regardless of the current price, and
  * the band's shown profit is computed at it — so selection, profit, and export all use one
  * number. currentPrice is only a defensive fallback for a band with neither limit.
+ *
+ * A limit of 0 is no price (owner decision 2026-11-17, the same rule as the current
+ * price): it is skipped as if it were absent, so a band is never priced, profited,
+ * selected or exported at 0. The stored limits themselves are left as they are.
+ *
+ * The current price may be unknown (null). A band with a limit still has its price;
+ * null means "no usable limit and the current price is unknown" -- the band has no
+ * price. A caller holding a known current price gets a plain Decimal back (first
+ * overload).
  */
-export function bandPrice(band: StoredTariffBand, currentPrice: Decimal): Decimal {
-  if (band.upperLimit !== null) return new Decimal(band.upperLimit);
-  if (band.lowerLimit !== null) return new Decimal(band.lowerLimit);
-  return currentPrice;
+export function bandPrice(band: StoredTariffBand, currentPrice: Decimal): Decimal;
+export function bandPrice(band: StoredTariffBand, currentPrice: Decimal | null): Decimal | null;
+export function bandPrice(band: StoredTariffBand, currentPrice: Decimal | null): Decimal | null {
+  return limitPrice(band.upperLimit) ?? limitPrice(band.lowerLimit) ?? currentPrice;
+}
+
+/**
+ * A stored limit as a price: null when it is absent or 0 (a 0 limit is no price). A
+ * negative limit is kept, so the upload's write check still refuses it instead of the
+ * band quietly falling back to another price.
+ */
+function limitPrice(limit: string | null): Decimal | null {
+  if (limit === null) return null;
+  const value = new Decimal(limit);
+  return value.isZero() ? null : value;
 }
 
 /** One stored tariff band -> a Trendyol commission band; the rate is already a percent. */

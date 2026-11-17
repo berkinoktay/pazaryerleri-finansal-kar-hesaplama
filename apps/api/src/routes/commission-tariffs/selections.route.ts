@@ -24,7 +24,10 @@ const updateSelectionsRoute = createRoute({
     "Persists the seller's chosen band (`band1`..`band4`, or null to clear) and optional custom " +
     'price per item, in a single bulk update. Items not belonging to this tariff/store are ignored. ' +
     'Selection happens client-side over the backend-computed margins; this only records the result. ' +
-    'Returns how many items were updated.',
+    'A band the item does not store (`BAND_NOT_STORED`), or a band with no price (neither limit ' +
+    'while the current price is unknown) sent without a custom price (`BAND_PRICE_UNKNOWN`), ' +
+    'refuses the whole request with 422 on `selections.<index>.band`; nothing is written. ' +
+    'A null band is never checked. Returns how many items were updated.',
   security: [{ bearerAuth: [] }],
   request: {
     params: TariffIdPathSchema,
@@ -53,7 +56,9 @@ const updateSelectionsRoute = createRoute({
     },
     422: {
       content: { 'application/json': { schema: ProblemDetailsSchema } },
-      description: 'Invalid selection payload',
+      description:
+        'Invalid selection payload, or a selection the export could not write ' +
+        '(BAND_NOT_STORED, BAND_PRICE_UNKNOWN on selections.<index>.band)',
     },
     429: Common429Response,
   },

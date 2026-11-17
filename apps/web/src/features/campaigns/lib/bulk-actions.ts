@@ -41,6 +41,13 @@ export type ProfitFilter = 'all' | 'profitable' | 'loss';
 /** Selection-state filter. */
 export type SelectionFilter = 'all' | 'selected' | 'unselected';
 
+/** A band whose price is known. A band with neither limit has none when the current price is unknown. */
+type PricedBand = PriceBand & { price: string };
+
+function hasKnownPrice(band: PriceBand): band is PricedBand {
+  return band.price !== null;
+}
+
 /** A band's net profit as a Decimal, or null when the row is not calculable. */
 function bandProfit(band: PriceBand): Decimal | null {
   return band.netProfit !== null ? new Decimal(band.netProfit) : null;
@@ -103,7 +110,8 @@ export function selectProfitableOnly(
  * Target-margin selection. For each row, among the bands meeting the target
  * margin, pick by strategy: `least-drop` = the highest-price (least price cut)
  * band that still hits the target; `max-profit` = the most profitable among
- * them. Rows with no band meeting the target are left untouched.
+ * them. A band with no price is never picked (it cannot be selected). Rows with no
+ * band meeting the target are left untouched.
  */
 export function selectByTargetMargin(
   rows: readonly CommissionTariffRow[],
@@ -114,8 +122,9 @@ export function selectByTargetMargin(
   const selection = { ...state.selection };
   const customPrices = { ...state.customPrices };
   for (const row of rows) {
-    let chosen: PriceBand | undefined;
+    let chosen: PricedBand | undefined;
     for (const band of row.bands) {
+      if (!hasKnownPrice(band)) continue;
       if (band.marginPct === null || Number(band.marginPct) < targetPct) continue;
       if (chosen === undefined) {
         chosen = band;

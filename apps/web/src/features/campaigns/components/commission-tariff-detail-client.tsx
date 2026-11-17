@@ -4,6 +4,7 @@ import { ArrowLeft01Icon, Delete02Icon, DownloadCircle01Icon } from 'hugeicons-r
 import { useTranslations } from 'next-intl';
 import { parseAsFloat, parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
+import { toast } from 'sonner';
 
 import { WORKBOOK_PAGES } from '@pazarsync/utils';
 
@@ -28,14 +29,14 @@ import {
   selectProfitableOnly,
   type CommissionSelectionState,
   type CustomChoice,
-  type CustomPriceMap,
-  type SelectionMap,
   type TargetStrategy,
   type TariffFilterState,
 } from '../lib/bulk-actions';
 import { toDetailTemplate } from '../lib/adapt-tariff';
-import { findBand, summarizeSelection } from '../lib/commission-tariff-summary';
+import { summarizeSelection } from '../lib/commission-tariff-summary';
 import { downloadBlob } from '../lib/download-blob';
+import { seedCommissionSelection } from '../lib/seed-commission-selection';
+import { selectionSaveErrorToast } from '../lib/selection-save-error';
 import { TariffScopeProvider } from '../lib/tariff-scope';
 import { computeExportPreview, resolveCommissionExportPrice } from '../lib/export-preview';
 import { CommissionTariffStatusBadge, STATUS_TONE } from './commission-tariff-status-badge';
@@ -71,6 +72,7 @@ export function CommissionTariffDetailClient({
 }): React.ReactElement {
   const tPage = useTranslations('commissionTariffsPage');
   const tCommon = useTranslations('common');
+  const tErrors = useTranslations('common.errors');
   const tExport = useTranslations('commissionTariffsPage.exportDialog');
   const router = useRouter();
   const detail = useCommissionTariffDetail(orgId ?? '', storeId, tariffId);
@@ -179,27 +181,10 @@ export function CommissionTariffDetailClient({
   // `selectedBand` the first time this tariff's data arrives. Adjusting state
   // during render (guarded by the tariff id, so it fires once per tariff) is the
   // React-recommended alternative to a setState-in-effect — no cascading renders.
+  // The seed drops a stored selection the selection route would now refuse (see
+  // `seedCommissionSelection`), so the save never sends one.
   if (template !== null && template.id !== seededTariffId) {
-    const seed: SelectionMap = {};
-    const seedCustom: CustomPriceMap = {};
-    for (const period of template.periods) {
-      for (const row of period.rows) {
-        if (row.selectedBand === null) continue;
-        seed[row.id] = row.selectedBand;
-        if (row.customPrice !== null) {
-          // Custom-priced: restore the confirmed amount. Its exact profit isn't in
-          // the detail payload, so approximate the summary with the derived band's
-          // profit until the seller re-confirms (which captures the estimate).
-          const band = findBand(row, row.selectedBand);
-          seedCustom[row.id] = {
-            price: row.customPrice,
-            netProfit: band?.netProfit ?? null,
-            marginPct: band?.marginPct ?? null,
-          };
-        }
-      }
-    }
-    setChoices({ selection: seed, customPrices: seedCustom });
+    setChoices(seedCommissionSelection(template.periods));
     setSeededTariffId(template.id);
   }
 
@@ -370,6 +355,16 @@ export function CommissionTariffDetailClient({
               setExportOpen(false);
             },
           });
+        },
+        // The global pipeline keeps every VALIDATION_ERROR silent, so say it here; the export does
+        // not start. A selection the route cannot export (a band the item does not
+        // hold, or a band with no price and no custom price) gets its own message; any
+        // other validation issue gets the generic one. Every other code is already
+        // toasted globally.
+        onError: (error) => {
+          const toastKind = selectionSaveErrorToast(error);
+          if (toastKind === 'selectionRefused') toast.error(tPage('selectionRefused'));
+          if (toastKind === 'generic') toast.error(tErrors('generic'));
         },
       },
     );

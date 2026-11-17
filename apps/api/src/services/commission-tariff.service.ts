@@ -13,9 +13,9 @@ import { Decimal } from 'decimal.js';
 
 import { Prisma, prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
-import { parseStoredTariffBands } from '@pazarsync/profit';
+import { bandPrice, parseStoredTariffBands } from '@pazarsync/profit';
 
-import { NotFoundError } from '../lib/errors';
+import { NotFoundError, ValidationError, type ValidationIssue } from '../lib/errors';
 import { assertScopedWrite } from '../workbooks/scoped-write';
 import { resolveValidity, tariffBoundInstantOrNull } from '../workbooks/tariff-week';
 import { computeItemBands, type ComputedItemBands } from './commission-tariff-compute.service';
@@ -109,6 +109,11 @@ export async function listTariffs(
 
 // ─── Detail ──────────────────────────────────────────────────────────────────
 
+/** A stored nullable money column as a `decimal.js` value, null kept as null. */
+function decimalOrNull(value: Prisma.Decimal | null): Decimal | null {
+  return value === null ? null : new Decimal(value.toString());
+}
+
 /**
  * Returns one tariff with per-band profit computed on read. Throws
  * `NotFoundError` when the tariff does not belong to this store (non-disclosure).
@@ -116,7 +121,9 @@ export async function listTariffs(
  * then each item's bands are computed by the scenario engine with the band's
  * commission as an override. A slim org + store scoped variant query supplies the
  * display image only. Per decision 9 a store-wide load failure or a per-item engine
- * throw leaves that profit empty (logged once) rather than failing the request.
+ * throw leaves that profit empty (logged once) rather than failing the request. An item
+ * whose current price is unknown (null) is served with a null `currentPrice`; how its
+ * profits are computed is `computeItemBands`'s rule for an unknown baseline.
  */
 export async function getTariffDetail(
   orgId: string,
@@ -224,11 +231,9 @@ export async function getTariffDetail(
       const base = screenScenarioBaseFor(bases, item.productVariantId);
       const bandParams = {
         bands: parseStoredTariffBands(item.bands),
-        currentPrice: new Decimal(item.currentPrice.toString()),
-        commissionBasePrice:
-          item.commissionBasePrice !== null
-            ? new Decimal(item.commissionBasePrice.toString())
-            : null,
+        // Null when the file's current price cell was blank, unreadable or 0.
+        currentPrice: decimalOrNull(item.currentPrice),
+        commissionBasePrice: decimalOrNull(item.commissionBasePrice),
         currentCommissionPct: new Decimal(item.currentCommissionPct.toString()),
       };
       let computed: ComputedItemBands;
@@ -248,7 +253,7 @@ export async function getTariffDetail(
           item.productVariantId !== null ? (imageMap.get(item.productVariantId) ?? null) : null,
         category: item.category,
         brand: item.brand,
-        currentPrice: item.currentPrice.toFixed(2),
+        currentPrice: bandParams.currentPrice === null ? null : bandParams.currentPrice.toFixed(2),
         commissionBasePrice:
           item.commissionBasePrice !== null ? item.commissionBasePrice.toFixed(2) : null,
         currentCommissionPct: item.currentCommissionPct.toFixed(4),
@@ -318,11 +323,75 @@ export async function deleteTariff(
 // ─── Save selections ─────────────────────────────────────────────────────────
 
 /**
+ * Refuses, all-or-nothing, a selection the export could not write. Each entry with a
+ * band (a `band: null` entry is never checked) whose item is in this tariff and store
+ * must name a band the item stores (`BAND_NOT_STORED`, even with a custom price), and
+ * that band must have a price unless a custom price is sent (`BAND_PRICE_UNKNOWN`: a
+ * band with neither limit while the current price is unknown). The band price follows
+ * the export pick (`resolveCommissionExportPrice`): the current price only, never the
+ * commission base price. Every issue is on `selections.<index>.band`, with the index of
+ * the request array, and they come back together in one `ValidationError` (422). An
+ * item id outside the tariff/store scope is not checked, so a foreign item never shows
+ * up in an error (non-disclosure); the UPDATE skips it.
+ */
+async function assertSelectionsWritable(
+  orgId: string,
+  storeId: string,
+  tariffId: string,
+  selections: ReadonlyArray<TariffSelection>,
+): Promise<void> {
+  const ids = selections
+    .filter((selection) => selection.band !== null)
+    .map((selection) => selection.itemId);
+  if (ids.length === 0) return;
+
+  let items;
+  try {
+    items = await prisma.commissionTariffItem.findMany({
+      // `period: { tariffId }` ties each item to THIS tariff, exactly as the UPDATE does.
+      where: { id: { in: ids }, organizationId: orgId, storeId, period: { tariffId } },
+      select: { id: true, bands: true, currentPrice: true },
+    });
+  } catch (err) {
+    mapPrismaError(err);
+  }
+
+  // Postgres compares uuids whatever their letter case and returns them lower case, so
+  // the lookup is keyed lower case: an upper-case item id is checked, not skipped.
+  const itemsById = new Map(items.map((item) => [item.id.toLowerCase(), item]));
+  const issues: ValidationIssue[] = [];
+  for (const [index, selection] of selections.entries()) {
+    if (selection.band === null) continue;
+    const item = itemsById.get(selection.itemId.toLowerCase());
+    if (item === undefined) continue;
+
+    const field = `selections.${index.toString()}.band`;
+    const band = parseStoredTariffBands(item.bands).find((stored) => stored.key === selection.band);
+    if (band === undefined) {
+      issues.push({ field, code: 'BAND_NOT_STORED' });
+      continue;
+    }
+    if (
+      selection.customPrice === null &&
+      bandPrice(band, decimalOrNull(item.currentPrice)) === null
+    ) {
+      issues.push({ field, code: 'BAND_PRICE_UNKNOWN' });
+    }
+  }
+
+  if (issues.length > 0) {
+    throw new ValidationError(issues);
+  }
+}
+
+/**
  * Persists the seller's band selection + custom price for the given items in ONE
  * bulk UPDATE (a VALUES join), so selecting across a large catalog stays a single
  * round-trip rather than N. Throws `NotFoundError` when the tariff is not in this
- * store. Each row is gated on `(organization_id, store_id, period ∈ tariff)`, so
- * an itemId from another tariff/store is silently skipped (not updated) — the
+ * store. Before writing, `assertSelectionsWritable` refuses (422, nothing written) a
+ * band the item does not store, or a band with no price sent without a custom price.
+ * Each row is gated on `(organization_id, store_id, period ∈ tariff)`, so an itemId
+ * from another tariff/store is silently skipped (not updated, not reported) — the
  * returned `updated` count reflects only rows that actually matched.
  */
 export async function updateSelections(
@@ -331,14 +400,21 @@ export async function updateSelections(
   tariffId: string,
   selections: ReadonlyArray<TariffSelection>,
 ): Promise<{ updated: number }> {
-  const tariff = await prisma.commissionTariff.findFirst({
-    where: { id: tariffId, organizationId: orgId, storeId },
-    select: { id: true },
-  });
+  let tariff;
+  try {
+    tariff = await prisma.commissionTariff.findFirst({
+      where: { id: tariffId, organizationId: orgId, storeId },
+      select: { id: true },
+    });
+  } catch (err) {
+    mapPrismaError(err);
+  }
   if (tariff === null) {
     throw new NotFoundError('CommissionTariff', tariffId);
   }
   if (selections.length === 0) return { updated: 0 };
+
+  await assertSelectionsWritable(orgId, storeId, tariffId, selections);
 
   const rows = selections.map(
     (s) => Prisma.sql`(${s.itemId}::uuid, ${s.band}::text, ${s.customPrice}::numeric)`,

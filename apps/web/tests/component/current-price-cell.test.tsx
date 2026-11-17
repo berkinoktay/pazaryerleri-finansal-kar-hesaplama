@@ -5,11 +5,15 @@ import { CurrentPriceCell } from '@/features/campaigns/components/current-price-
 import { TariffScopeProvider } from '@/features/campaigns/lib/tariff-scope';
 import type { CommissionTariffRow } from '@/features/campaigns/types';
 
-import { render, screen, waitFor } from '../helpers/render';
+import { render, screen, waitFor, within } from '../helpers/render';
 import { HttpResponse, http, server } from '../helpers/msw';
 import trMessages from '../../messages/tr.json';
 
 const OPEN_LABEL = trMessages.profitBadge.open;
+const INFO_HINT_LABEL = trMessages.common.infoHint;
+const PRICE_UNKNOWN = trMessages.commissionTariffsPage.table.priceUnknown;
+const PRICE_UNKNOWN_HINT = trMessages.commissionTariffsPage.table.priceUnknownHint;
+const NOT_CALCULABLE = trMessages.profitBreakdown.notCalculable;
 
 const SCOPE = {
   orgId: '00000000-0000-0000-0000-000000000001',
@@ -103,5 +107,61 @@ describe('CurrentPriceCell', () => {
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     // …and the current-scenario body carries neither price nor bandKey.
     await waitFor(() => expect(capturedBody).toEqual({ scenario: 'current' }));
+  });
+
+  describe('unknown price', () => {
+    // Neither GÜNCEL TSF nor KOMİSYONA ESAS FİYAT could be read: the backend has no
+    // baseline, so the current profit and margin are null too.
+    const unknownRow: CommissionTariffRow = {
+      ...row,
+      currentPrice: null,
+      commissionBasePrice: null,
+      currentNetProfit: null,
+      currentMarginPct: null,
+    };
+
+    it('shows Bilinmiyor and the explanation line, and no ₺0,00, when both prices are unknown', () => {
+      renderCell({ row: unknownRow });
+      expect(screen.getByText(PRICE_UNKNOWN)).toBeInTheDocument();
+      // Never a made-up amount in the hero.
+      expect(screen.queryByText(/0,00/)).toBeNull();
+      // The commission line and the (empty) profit badge stay.
+      expect(screen.getByText(/%19/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: OPEN_LABEL })).toBeInTheDocument();
+      // The explanation is visible text (it reads on touch too), not a hover-only hint.
+      expect(screen.getByText(PRICE_UNKNOWN_HINT)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: INFO_HINT_LABEL })).toBeNull();
+    });
+
+    it('shows the base price when only the current price is unknown', () => {
+      renderCell({ row: { ...row, currentPrice: null } });
+      expect(screen.getByText(/780,00/)).toBeInTheDocument();
+      expect(screen.queryByText(PRICE_UNKNOWN)).toBeNull();
+      expect(screen.queryByText(PRICE_UNKNOWN_HINT)).toBeNull();
+      expect(screen.queryByRole('button', { name: INFO_HINT_LABEL })).toBeNull();
+    });
+
+    it('opens the not-calculable dialog without an estimate request when the price is unknown', async () => {
+      let requests = 0;
+      server.use(
+        http.post(ESTIMATE_URL, () => {
+          requests += 1;
+          return HttpResponse.json({
+            itemId: row.id,
+            price: '0.00',
+            bandKey: null,
+            commissionPct: '19',
+            calculable: false,
+            reason: null,
+            breakdown: null,
+          });
+        }),
+      );
+      const { user } = renderCell({ row: unknownRow });
+      await user.click(screen.getByRole('button', { name: OPEN_LABEL }));
+      const dialog = await screen.findByRole('dialog');
+      expect(await within(dialog).findByText(NOT_CALCULABLE)).toBeInTheDocument();
+      expect(requests).toBe(0);
+    });
   });
 });

@@ -3,8 +3,8 @@
 // money cases), what a covered row writes (the price and the window's tariff selection),
 // how the window files and the anchor map pick among periods and repeated barcodes, the
 // week check of the upload (the database mocked; the persist re-check runs against the
-// real database in commission-tariffs-duplicate-week.routes.test.ts), and the form, name
-// and response.
+// real database in commission-tariffs-duplicate-week.routes.test.ts) with its count of
+// rows priced by neither file price, and the form, name and response.
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -24,13 +24,14 @@ import {
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { NotFoundError } from '@/lib/errors';
-import type { ExportGroup, WriteContext } from '@/workbooks/adapter';
+import { NotFoundError, WorkbookConflictError, type WorkbookConflictReason } from '@/lib/errors';
+import type { ExportGroup, ImportedRow, WriteContext } from '@/workbooks/adapter';
 import { planExport } from '@/workbooks/export-plan';
 import {
   bandsForPeriod,
   trendyolCommissionTariffFormat,
   type CommissionTariffBrackets,
+  type CommissionTariffRow,
   type CommissionTariffWriteKey,
 } from '@/workbooks/formats/trendyol/commission-tariff.format';
 import { TARIFF_WINDOW_LABEL_UNIT } from '@/workbooks/formats/trendyol/labels';
@@ -88,15 +89,26 @@ function item(
   selectedBand: string | null,
   customPrice: string | null,
   bands: Prisma.JsonValue = BAND2,
-  currentPrice = '285',
+  currentPrice: string | null = '285',
 ): CommissionTariffExportItem {
   return {
     barcode,
     selectedBand,
     customPrice: customPrice === null ? null : new Prisma.Decimal(customPrice),
-    currentPrice: new Prisma.Decimal(currentPrice),
+    currentPrice: currentPrice === null ? null : new Prisma.Decimal(currentPrice),
     bands,
   };
+}
+
+/** The reason of the WorkbookConflictError `run` throws; null when it returns. */
+function conflictReason(run: () => unknown): WorkbookConflictReason | null {
+  try {
+    run();
+  } catch (err) {
+    if (err instanceof WorkbookConflictError) return err.reason;
+    throw err;
+  }
+  return null;
 }
 
 afterEach(() => {
@@ -183,6 +195,56 @@ describe('commission tariff adapter: the price an item carries (pick)', () => {
     expect(resolveCommissionExportPrice(item('BC-1', 'band1', null, bands, '299.5'))).toBe(
       '299.50',
     );
+  });
+
+  it('refuses a selected band with neither limit when the current price is unknown', () => {
+    const bands: Prisma.JsonValue = [{ key: 'band1', commissionPct: '19' }];
+    const unknown = item('BC-1', 'band1', null, bands, null);
+
+    expect(conflictReason(() => resolveCommissionExportPrice(unknown))).toBe(
+      'SELECTION_PRICE_UNKNOWN',
+    );
+    expect(conflictReason(() => adapter.pick(unknown))).toBe('SELECTION_PRICE_UNKNOWN');
+  });
+
+  it('never writes 0.00 for a selected band whose limits are 0: refused when the current price is unknown', () => {
+    const zeroLimits: Prisma.JsonValue = [
+      { key: 'band1', lowerLimit: '0.00', upperLimit: '0.00', commissionPct: '19' },
+    ];
+
+    expect(
+      conflictReason(() =>
+        resolveCommissionExportPrice(item('BC-1', 'band1', null, zeroLimits, null)),
+      ),
+    ).toBe('SELECTION_PRICE_UNKNOWN');
+  });
+
+  it('refuses a selected band the stored bands do not hold when the current price is unknown', () => {
+    expect(
+      conflictReason(() => resolveCommissionExportPrice(item('BC-1', 'band3', null, BAND2, null))),
+    ).toBe('SELECTION_PRICE_UNKNOWN');
+  });
+
+  it('writes the custom price even when the current price is unknown', () => {
+    const bands: Prisma.JsonValue = [{ key: 'band1', commissionPct: '19' }];
+
+    expect(resolveCommissionExportPrice(item('BC-1', 'band1', '249.9', bands, null))).toBe(
+      '249.90',
+    );
+    expect(resolveCommissionExportPrice(item('BC-1', 'band3', '249.9', BAND2, null))).toBe(
+      '249.90',
+    );
+  });
+
+  it('is null for an unselected item whose current price is unknown', () => {
+    expect(resolveCommissionExportPrice(item('BC-1', null, null, BAND2, null))).toBeNull();
+    expect(resolveCommissionExportPrice(item('BC-1', null, '249.9', BAND2, null))).toBeNull();
+  });
+
+  it("writes a limited band's price when the current price is unknown", () => {
+    // band2 has an upper limit: its price; band1 has only a lower limit: that one.
+    expect(resolveCommissionExportPrice(item('BC-1', 'band2', null, BAND2, null))).toBe('777.09');
+    expect(resolveCommissionExportPrice(item('BC-1', 'band1', null, BAND2, null))).toBe('777.10');
   });
 });
 
@@ -442,15 +504,52 @@ describe('commission tariff adapter: the week of the upload (inspect)', () => {
   const weekStartsAt = new Date('2026-06-26T08:00:00.000Z');
   const weekEndsAt = new Date('2026-06-30T07:59:00.000Z');
 
-  async function inspect(firstDataRow: Awaited<ReturnType<typeof firstDataRowOf>> | null) {
-    return adapter.inspect({ scope: SCOPE, config: undefined, now, rows: [], firstDataRow });
+  async function inspect(
+    firstDataRow: Awaited<ReturnType<typeof firstDataRowOf>> | null,
+    rows: readonly ImportedRow<CommissionTariffRow>[] = [],
+  ) {
+    return adapter.inspect({ scope: SCOPE, config: undefined, now, rows, firstDataRow });
+  }
+
+  /** A kept product row with the given current and commission base prices. */
+  function productRow(
+    excelRow: number,
+    currentPrice: string | null,
+    commissionBasePrice: string | null,
+  ): ImportedRow<CommissionTariffRow> {
+    const barcode = `B-${excelRow}`;
+    return {
+      excelRow,
+      anchor: barcode,
+      data: {
+        barcode,
+        stockCode: null,
+        productTitle: barcode,
+        category: null,
+        brand: null,
+        stock: null,
+        currentPrice,
+        commissionBasePrice,
+        currentCommissionPct: '0',
+        brackets: {
+          band1Lower: '300',
+          band2Lower: '200',
+          band2Upper: '299.99',
+          band3Lower: '100',
+          band3Upper: '199.99',
+          band4Upper: '99.99',
+        },
+        periodComms: [['19', '13.1', '12.1', '10.6']],
+      },
+    };
   }
 
   it("returns the week of the first row's periods when no tariff of the store overlaps it", async () => {
     mocks.findTariff.mockResolvedValue(null);
 
-    const week = await inspect(await firstDataRowOf(MULTI));
+    const { week, unknownCurrentPriceRows } = await inspect(await firstDataRowOf(MULTI));
 
+    expect(unknownCurrentPriceRows).toBe(0);
     expect(week.weekStartsAt).toEqual(weekStartsAt);
     expect(week.weekEndsAt).toEqual(weekEndsAt);
     expect(week.present.map((period) => [period.dayCount, period.layoutIndex])).toEqual([[4, 1]]);
@@ -469,10 +568,27 @@ describe('commission tariff adapter: the week of the upload (inspect)', () => {
   it('accepts the 7 day file: one period of a whole week', async () => {
     mocks.findTariff.mockResolvedValue(null);
 
-    const week = await inspect(await firstDataRowOf(SINGLE));
+    const { week } = await inspect(await firstDataRowOf(SINGLE));
 
     expect(week.present.map((period) => [period.dayCount, period.layoutIndex])).toEqual([[7, 0]]);
     expect(mocks.findTariff).toHaveBeenCalledTimes(1);
+  });
+
+  // Only a row with neither price has no current profit: a known commission base price
+  // prices the current scenario even when the current price is unknown.
+  it('counts the rows with neither a current price nor a commission base price', async () => {
+    mocks.findTariff.mockResolvedValue(null);
+    const rows = [
+      productRow(2, null, null),
+      productRow(3, null, '100'),
+      productRow(4, '100', null),
+      productRow(5, '100', '100'),
+      productRow(6, null, null),
+    ];
+
+    const { unknownCurrentPriceRows } = await inspect(await firstDataRowOf(MULTI), rows);
+
+    expect(unknownCurrentPriceRows).toBe(2);
   });
 
   it('refuses a week that overlaps a tariff of the store with DUPLICATE_WEEK', async () => {
@@ -595,11 +711,15 @@ describe('commission tariff adapter: form, name, response and the week index', (
   });
 
   it("falls back to the first present period's label for the name", () => {
-    expect(adapter.nameFallback(week)).toBe('26 Haziran 08.00-30 Haziran 07.59');
-    expect(adapter.nameFallback({ ...week, present: [] })).toBeNull();
+    expect(adapter.nameFallback({ week, unknownCurrentPriceRows: 0 })).toBe(
+      '26 Haziran 08.00-30 Haziran 07.59',
+    );
+    expect(
+      adapter.nameFallback({ week: { ...week, present: [] }, unknownCurrentPriceRows: 0 }),
+    ).toBeNull();
   });
 
-  it('answers the counts of the import, with the number of stored periods', () => {
+  it('answers the counts of the import, with the number of stored periods and unpriced rows', () => {
     expect(
       adapter.toResponse({
         parentId: 'tariff-1',
@@ -611,7 +731,7 @@ describe('commission tariff adapter: form, name, response and the week index', (
         matchedDistinct: 1,
         skippedRows: 0,
         prefilledRows: 7,
-        meta: week,
+        meta: { week, unknownCurrentPriceRows: 3 },
       }),
     ).toEqual({
       tariffId: 'tariff-1',
@@ -622,6 +742,7 @@ describe('commission tariff adapter: form, name, response and the week index', (
       unmatched: 54,
       skippedRows: 0,
       prefilledRows: 7,
+      unknownCurrentPriceRows: 3,
     });
   });
 

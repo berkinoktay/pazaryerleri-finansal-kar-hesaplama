@@ -15,7 +15,14 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import { cellText, columnIndex, readWorkbookGrid, resolveLayout } from '@pazarsync/spreadsheet';
+import { parseStoredTariffBands } from '@pazarsync/profit';
+import {
+  cellText,
+  columnIndex,
+  readWorkbookGrid,
+  resolveLayout,
+  type CellPatch,
+} from '@pazarsync/spreadsheet';
 import { patchFixture } from '@pazarsync/spreadsheet/testing';
 import { syncLog } from '@pazarsync/sync-core';
 import { WORKBOOK_PAGES } from '@pazarsync/utils';
@@ -44,6 +51,7 @@ interface ImportWire {
   unmatched: number;
   skippedRows: number;
   prefilledRows: number;
+  unknownCurrentPriceRows: number;
 }
 interface BandWire {
   key: string;
@@ -203,6 +211,16 @@ describe('POST .../commission-tariffs/import — real Trendyol fixture', () => {
     expect(imported.matched).toBe(1);
     expect(imported.unmatched).toBe(imported.productCount - 1);
     expect(imported.skippedRows).toBe(0);
+  });
+
+  it('answers unknownCurrentPriceRows 0 for a file whose prices all read', async () => {
+    expect(imported.unknownCurrentPriceRows).toBe(0);
+    // Every stored item of the real file carries a current price.
+    expect(
+      await prisma.commissionTariffItem.count({
+        where: { organizationId: ctx.orgId, storeId: ctx.storeId, currentPrice: null },
+      }),
+    ).toBe(0);
   });
 
   it('assigns a sequential sortOrder reflecting the Excel row order', async () => {
@@ -435,5 +453,169 @@ describe('POST .../commission-tariffs/import - a period of 0 days', () => {
     expect(body.errors).toEqual([{ field: 'file', code: 'MALFORMED_SHEET' }]);
     const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
     expect(await prisma.commissionTariff.count({ where: scope })).toBe(0);
+  });
+});
+
+// The 3-day block before the fixture's 4-day period, which the fixture leaves blank:
+// filled on the first row, the upload holds two periods of one 7-day week.
+const FIRST_PERIOD_LABEL = '23 Haziran 08.00-26 Haziran 07.59';
+const FIRST_PERIOD_COMMS = [
+  ['comm1', '19'],
+  ['comm2', '13.1'],
+  ['comm3', '12.1'],
+  ['comm4', '10.6'],
+] as const;
+
+const ImportCountsSchema = z.object({
+  productCount: z.number(),
+  periodCount: z.number(),
+  itemCount: z.number(),
+  unknownCurrentPriceRows: z.number(),
+});
+
+interface FirstRowEdits {
+  /** Blank band 1's lower limit too: band 1 has no upper limit, so it has neither. */
+  readonly blankBand1Lower?: boolean;
+  /** Blank the commission base price too, so the row has no known price at all. */
+  readonly blankCommissionBasePrice?: boolean;
+  /** Fill the blank 3-day period block, so the upload holds two periods. */
+  readonly fillFirstPeriod?: boolean;
+}
+
+/**
+ * The fixture with the current price of its first kept row blanked, and `edits` written
+ * over the same row, with that row's barcode.
+ */
+async function withBlankFirstCurrentPrice(
+  edits: FirstRowEdits = {},
+): Promise<{ readonly file: Buffer; readonly barcode: string }> {
+  const format = trendyolCommissionTariffFormat;
+  const grid = await readWorkbookGrid(FIXTURE, { sheet: format.sheet });
+  const layout = resolveLayout(format.layout, grid);
+  if (layout === null) throw new Error('unreadable commission fixture');
+  const firstRow = grid[FIRST_KEPT_ROW - 1] ?? [];
+  const barcode = cellText(firstRow, columnIndex(format.layout, layout, 'barcode'));
+  if (barcode === null) throw new Error('the first kept row has no barcode');
+  const column = (key: 'currentPrice' | 'band1Lower' | 'commissionBasePrice'): number => {
+    const col = columnIndex(format.layout, layout, key);
+    if (col === null) throw new Error(`the fixture has no ${key} column`);
+    return col;
+  };
+  // The fixture row holds a readable current price, so blanking it is the change.
+  expect(cellText(firstRow, column('currentPrice'))).not.toBeNull();
+
+  const patches: Omit<CellPatch, 'excelRow'>[] = [
+    { col: column('currentPrice'), value: { kind: 'clear' } },
+  ];
+  if (edits.blankBand1Lower === true) {
+    expect(cellText(firstRow, column('band1Lower'))).not.toBeNull();
+    patches.push({ col: column('band1Lower'), value: { kind: 'clear' } });
+  }
+  if (edits.blankCommissionBasePrice === true) {
+    expect(cellText(firstRow, column('commissionBasePrice'))).not.toBeNull();
+    patches.push({ col: column('commissionBasePrice'), value: { kind: 'clear' } });
+  }
+  if (edits.fillFirstPeriod === true) {
+    const block = layout.blocks.get('periods')?.[0];
+    const label = block?.columns.get('label');
+    if (block === undefined || label === undefined) throw new Error('no first period block');
+    expect(cellText(firstRow, label)).toBeNull();
+    patches.push({ col: label, value: { kind: 'text', value: FIRST_PERIOD_LABEL } });
+    for (const [key, value] of FIRST_PERIOD_COMMS) {
+      const col = block.columns.get(key);
+      if (col === undefined) throw new Error(`no first period column ${key}`);
+      patches.push({ col, value: { kind: 'number', value } });
+    }
+  }
+  const file = patchFixture(
+    FIXTURE,
+    patches.map((patch) => ({ ...patch, excelRow: FIRST_KEPT_ROW })),
+    { sheet: format.sheet },
+  );
+  return { file, barcode };
+}
+
+describe('POST .../commission-tariffs/import - an unknown current price', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  it('stores a row with a blank current price with current_price NULL in every period', async () => {
+    await truncateAll();
+    const ctx = await setupStoreWithMatch();
+    const { file, barcode } = await withBlankFirstCurrentPrice({ fillFirstPeriod: true });
+
+    const res = await app.request(importRequest(ctx, file));
+
+    expect(res.status).toBe(201);
+    const body = ImportCountsSchema.parse(await res.json());
+    expect(body.periodCount).toBe(2);
+    // The row's commission base price is still known and prices its current profit, so
+    // the row is not counted as one with no known price.
+    expect(body.unknownCurrentPriceRows).toBe(0);
+    const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
+    const items = await prisma.commissionTariffItem.findMany({
+      where: { ...scope, barcode },
+      select: { periodId: true, currentPrice: true },
+    });
+    // One item per period, each with an unknown current price, never 0.
+    expect(new Set(items.map((item) => item.periodId)).size).toBe(2);
+    expect(items.map((item) => item.currentPrice)).toEqual([null, null]);
+    // Only that row lost its price: every other row keeps the file's price.
+    expect(await prisma.commissionTariffItem.count({ where: scope })).toBe(body.productCount * 2);
+    expect(
+      await prisma.commissionTariffItem.count({ where: { ...scope, currentPrice: null } }),
+    ).toBe(2);
+  });
+
+  it('imports a file where one row has a blank current price and a band with neither limit', async () => {
+    await truncateAll();
+    const ctx = await setupStoreWithMatch();
+    const { file, barcode } = await withBlankFirstCurrentPrice({ blankBand1Lower: true });
+
+    const res = await app.request(importRequest(ctx, file));
+
+    expect(res.status).toBe(201);
+    const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
+    const item = await prisma.commissionTariffItem.findFirst({
+      where: { ...scope, barcode },
+      select: { currentPrice: true, bands: true },
+    });
+    expect(item?.currentPrice).toBeNull();
+    // Band 1 is stored with neither limit: it has no price until a price is known.
+    const band1 = parseStoredTariffBands(item?.bands ?? null).find((band) => band.key === 'band1');
+    expect(band1).toMatchObject({ lowerLimit: null, upperLimit: null, commissionPct: '19' });
+    const other = await prisma.commissionTariffItem.findFirst({
+      where: { ...scope, NOT: { barcode } },
+      select: { currentPrice: true },
+    });
+    expect(other?.currentPrice).not.toBeNull();
+  });
+
+  it('counts each product row with an unknown current price once, whatever the number of periods', async () => {
+    await truncateAll();
+    const ctx = await setupStoreWithMatch();
+    const { file, barcode } = await withBlankFirstCurrentPrice({
+      blankCommissionBasePrice: true,
+      fillFirstPeriod: true,
+    });
+
+    const res = await app.request(importRequest(ctx, file));
+
+    expect(res.status).toBe(201);
+    const body = ImportCountsSchema.parse(await res.json());
+    expect(body.periodCount).toBe(2);
+    expect(body.itemCount).toBe(body.productCount * 2);
+    // The row with neither a current price nor a commission base price is stored once per
+    // period, and counted once.
+    const items = await prisma.commissionTariffItem.findMany({
+      where: { organizationId: ctx.orgId, storeId: ctx.storeId, barcode },
+      select: { currentPrice: true, commissionBasePrice: true },
+    });
+    expect(items).toEqual([
+      { currentPrice: null, commissionBasePrice: null },
+      { currentPrice: null, commissionBasePrice: null },
+    ]);
+    expect(body.unknownCurrentPriceRows).toBe(1);
   });
 });

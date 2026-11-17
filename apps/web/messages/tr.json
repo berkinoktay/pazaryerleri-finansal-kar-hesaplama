@@ -223,7 +223,8 @@
       "ROW_MISMATCH": "Saklanan dosyanın satırları bu listenin ürünleriyle artık eşleşmiyor. Dosyayı yeniden yükle.",
       "ROW_ANCHOR_MISMATCH": "Saklanan dosyadaki bir satırda artık aynı ürün yok. Dosyayı yeniden yükle.",
       "ROW_NOT_FOUND": "Yazılması gereken bir satır saklanan dosyada bulunamadı. Dosyayı yeniden yükle.",
-      "EXPORT_FILENAME_COLLISION": "Gün sayısı aynı olan iki dönemde farklı seçimler var; dışa aktarılan iki dosya aynı adı alırdı. Bu seçimleri aynı yapıp tekrar dışa aktar."
+      "EXPORT_FILENAME_COLLISION": "Gün sayısı aynı olan iki dönemde farklı seçimler var; dışa aktarılan iki dosya aynı adı alırdı. Bu seçimleri aynı yapıp tekrar dışa aktar.",
+      "SELECTION_PRICE_UNKNOWN": "Seçtiğin fiyat aralıklarından birinin fiyatı bilinmiyor, bu yüzden dosya oluşturulmadı. Tarifeyi açıp o ürün için başka bir aralık seç ya da özel fiyat gir, sonra tekrar dışa aktar."
     },
     "unmatchedBadge": "Eşleşme bekliyor",
     "vendorMissingBadge": "Trendyol kataloğunda yok",
@@ -812,6 +813,7 @@
       "tooLarge": "Dosya {maxMb} MB boyut sınırını aşıyor."
     },
     "prefilledWarning": "Dosyanın {count, plural, other {# satırında}} önceden yapılmış bir seçim vardı. Bunlar sizin seçiminiz sayılmadı; o ürünler için seçim yapmazsanız dosyada olduğu gibi kalırlar.",
+    "unknownCurrentPriceWarning": "Dosyadaki {count, plural, other {# ürünün}} fiyatı okunamadı. Bu ürünlerde güncel kâr gösterilmeyecek; fiyat aralıklarının kârı yine hesaplanır.",
     "errors": {
       "notReadable": "Dosya okunamadı. Pazaryeri panelinden indirdiğiniz .xlsx dosyasını yapısını değiştirmeden yükleyin.",
       "empty": "Dosyada ürün satırı bulunamadı.",
@@ -839,6 +841,7 @@
     }
   },
   "commissionTariffsPage": {
+    "selectionRefused": "Seçimlerin kaydedilemedi: biri artık ürünü için geçerli değil. Sayfayı yenileyip yeniden seç.",
     "search": "Ürün, model veya barkod ara",
     "actions": {
       "upload": "Excel Yükle",
@@ -943,6 +946,10 @@
       "applyBest": "Hepsine uygula"
     },
     "table": {
+      "priceUnknown": "Bilinmiyor",
+      "priceUnknownHint": "Excel'deki fiyatlar okunamadı; güncel kâr hesaplanmıyor.",
+      "bandPriceUnknownHint": "Dosyada fiyat sınırı yok ve GÜNCEL TSF okunamadı.",
+      "bandNotSelectable": "Seçilemez",
       "product": "Ürün Bilgileri",
       "current": "Güncel fiyat",
       "currentCommission": "Güncel komisyon",

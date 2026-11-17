@@ -158,6 +158,30 @@ describe('CustomPriceCell', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
+  it('hides the Güncele göre line when the current profit is null', async () => {
+    mockEstimate('34.00');
+    renderCell({
+      // Neither price is known, so there is no current profit to compare against.
+      row: {
+        ...row,
+        currentPrice: null,
+        commissionBasePrice: null,
+        currentNetProfit: null,
+        currentMarginPct: null,
+        customPrice: '500.00',
+      },
+      isSelected: true,
+      onSelect: vi.fn(),
+      onDeselect: vi.fn(),
+    });
+    // Wait for the estimate so the option has a real profit; only then is the
+    // missing difference line meaningful.
+    expect(await screen.findByRole('button', { name: /kâr detayını gör/i })).toHaveTextContent(
+      /34,00/,
+    );
+    expect(screen.queryByText(/güncele göre/i)).toBeNull();
+  });
+
   it('reveals the calculated-profit block once a price is typed', async () => {
     mockEstimate('34.00');
     const { user } = renderCell({ row, isSelected: false, onSelect: vi.fn(), onDeselect: vi.fn() });
@@ -233,6 +257,41 @@ describe('CustomPriceCell', () => {
     // The cell reports its own rowId alongside the figure so the parent's one stable
     // handler can be passed directly (no per-row inline arrow).
     await waitFor(() => expect(onEstimate).toHaveBeenCalledWith('r1', '34.00'));
+  });
+
+  it('neither estimates nor offers a price that rounds to 0 at two decimals', async () => {
+    let estimateCalls = 0;
+    server.use(
+      http.post(ESTIMATE_ENDPOINT, () => {
+        estimateCalls += 1;
+        return HttpResponse.json({
+          itemId: 'r1',
+          price: '0.00',
+          bandKey: 'band1',
+          commissionPct: '19',
+          calculable: true,
+          reason: null,
+          breakdown: BREAKDOWN,
+        });
+      }),
+    );
+    const onEstimate = vi.fn();
+    const { user } = renderCell({
+      row,
+      isSelected: false,
+      onSelect: vi.fn(),
+      onDeselect: vi.fn(),
+      onEstimate,
+    });
+
+    // 0,004 is above 0 but is sent as 0.00, which the selection route refuses.
+    await user.type(screen.getByPlaceholderText(/fiyat girin/i), '0,004');
+    // Longer than the ~400ms debounce: a positive price would have estimated by now.
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    expect(estimateCalls).toBe(0);
+    expect(onEstimate).not.toHaveBeenCalledWith('r1', expect.anything());
+    expect(screen.getByRole('button', { name: /bu fiyatı seç/i })).toBeDisabled();
   });
 
   it('reports null via onEstimate when the input is cleared', async () => {

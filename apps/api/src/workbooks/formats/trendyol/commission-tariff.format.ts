@@ -2,9 +2,9 @@
 // product with its current price and commission, the four price brackets shared by every
 // period, and one block per period of the week (a date-range label and that period's four
 // band commissions). The export writes the seller's choice back: the chosen price into
-// the new price column and the window's tariff selection. The current price and every
-// stored band's price are written values, so one the export could not write is refused
-// at upload.
+// the new price column and the window's tariff selection. A known current price and
+// every stored band's known price are written values, so one the export could not write
+// is refused at upload; an unknown current price is stored as null, never as 0.
 
 import { Decimal } from 'decimal.js';
 
@@ -33,7 +33,7 @@ export interface CommissionTariffBrackets {
 
 /**
  * One kept product row of the commission file. Prices and percents are decimal strings
- * as the file holds them; a blank current price or current commission reads as '0'.
+ * as the file holds them; a blank current commission reads as '0'.
  */
 export interface CommissionTariffRow {
   readonly barcode: string;
@@ -42,10 +42,16 @@ export interface CommissionTariffRow {
   readonly category: string | null;
   readonly brand: string | null;
   readonly stock: number | null;
-  readonly currentPrice: string;
   /**
-   * The commission base price, or null when the column is absent (older exports) or the
-   * cell is blank. The compute falls back to the current price; the import keeps null.
+   * The current price, or null when it is unknown: the cell is blank, does not read as a
+   * decimal (a text with a lira suffix, an error, a date or a boolean), or is zero at
+   * two decimals. A 0 is never a real price, so it is never stored as one.
+   */
+  readonly currentPrice: string | null;
+  /**
+   * The commission base price, or null when the column is absent (older exports), or the
+   * cell is blank, unreadable or zero at two decimals. The compute falls back to the
+   * current price; the import keeps null.
    */
   readonly commissionBasePrice: string | null;
   readonly currentCommissionPct: string;
@@ -63,8 +69,11 @@ export const NEW_TSF_SCALE = 2;
 /** The download base name; the window suffix (`-3-gunluk`) is added per file. */
 const COMMISSION_EXPORT_BASE_NAME = 'urun-komisyon-tarifesi';
 
-/** What a blank or unreadable decimal cell reads as, as the import always stored it. */
+/** What a blank or unreadable current commission reads as, as the import always stored it. */
 const BLANK_DECIMAL = '0';
+
+/** The scale of the stored price columns (numeric(12,2)). */
+const STORED_PRICE_SCALE = 2;
 
 const SUMMARY = TRENDYOL_FORMAT_SUMMARIES.COMMISSION_TARIFF;
 
@@ -122,9 +131,19 @@ export function bandsForPeriod(
 }
 
 /**
- * `value`, the current price of a row, when the export can write it as the new price
- * (`toFixed(2)`, the pick of a selected band the stored bands do not hold, or of one
- * with neither limit); the stored price stays the file's own text.
+ * A price cell's decimal text, or null when the price is unknown: the cell read as no
+ * decimal (`raw` null), or its value is zero at the stored scale. `0.004` would store
+ * as `0.00`, which is no price either. Any other value is kept as the file's own text.
+ */
+function knownPrice(raw: string | null): string | null {
+  if (raw === null) return null;
+  return new Decimal(raw).toDecimalPlaces(STORED_PRICE_SCALE).isZero() ? null : raw;
+}
+
+/**
+ * `value`, the known current price of a row, when the export can write it as the new
+ * price (`toFixed(2)`, the pick of a selected band the stored bands do not hold, or of
+ * one with neither limit); the stored price stays the file's own text.
  *
  * Throws SpreadsheetFileError MALFORMED_SHEET (reason UNWRITABLE_VALUE_REASON) for a
  * current price the export could not write: a negative one, or one wider than its probe.
@@ -139,7 +158,9 @@ function writableCurrentPrice(value: string): string {
  * as the export reads it back (`parseStoredTariffBands` on the stored JSON) and writes
  * it (`bandPrice(...).toFixed(2)`). A band whose commission is blank in every block is
  * never stored, so its limits are never written and not checked. Every period block is
- * checked, also one whose label is blank on the first row and so is never stored.
+ * checked, also one whose label is blank on the first row and so is never stored. A band
+ * with neither limit has no price when the current price is unknown (null): the export
+ * refuses to pick it rather than write a price, so it is not checked here.
  *
  * Throws SpreadsheetFileError MALFORMED_SHEET (reason UNWRITABLE_VALUE_REASON) for a
  * band price the export could not write.
@@ -147,12 +168,14 @@ function writableCurrentPrice(value: string): string {
 function requireWritableBands(
   brackets: CommissionTariffBrackets,
   periodComms: readonly (readonly (string | null)[])[],
-  currentPrice: string,
+  currentPrice: string | null,
 ): void {
-  const current = new Decimal(currentPrice);
+  const current = currentPrice === null ? null : new Decimal(currentPrice);
   for (const comms of periodComms) {
     for (const band of parseStoredTariffBands(bandsForPeriod(brackets, comms))) {
-      requireWritableValue(NEW_TSF_WRITE, bandPrice(band, current).toFixed(NEW_TSF_SCALE));
+      const price = bandPrice(band, current);
+      if (price === null) continue;
+      requireWritableValue(NEW_TSF_WRITE, price.toFixed(NEW_TSF_SCALE));
     }
   }
 }
@@ -167,7 +190,9 @@ export const trendyolCommissionTariffFormat = defineFormat({
   anchor: 'barcode',
   fingerprint: SUMMARY.fingerprint,
   mapRow: (reader, anchor): CommissionTariffRow => {
-    const currentPrice = writableCurrentPrice(reader.decimal('currentPrice') ?? BLANK_DECIMAL);
+    // An unknown current price stays null; a known one must be writable as the new price.
+    const known = knownPrice(reader.decimal('currentPrice'));
+    const currentPrice = known === null ? null : writableCurrentPrice(known);
     const brackets: CommissionTariffBrackets = {
       band1Lower: reader.decimal('band1Lower'),
       band2Lower: reader.decimal('band2Lower'),
@@ -195,7 +220,7 @@ export const trendyolCommissionTariffFormat = defineFormat({
       brand: reader.text('brand'),
       stock: requireStorableInt(reader.int('stock', 'truncate')),
       currentPrice,
-      commissionBasePrice: reader.decimal('commissionBasePrice'),
+      commissionBasePrice: knownPrice(reader.decimal('commissionBasePrice')),
       currentCommissionPct: reader.decimal('currentCommission') ?? BLANK_DECIMAL,
       brackets,
       periodComms,

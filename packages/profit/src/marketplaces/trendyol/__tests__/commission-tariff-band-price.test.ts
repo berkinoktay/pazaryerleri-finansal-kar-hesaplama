@@ -33,4 +33,45 @@ describe('bandPrice', () => {
   it('falls back to the current price only for a band with neither limit', () => {
     expect(bandPrice(band({ key: 'band1' }), new Decimal('285')).toFixed(2)).toBe('285.00');
   });
+
+  it('is null for a band with neither limit when the current price is unknown', () => {
+    expect(bandPrice(band({ key: 'band1' }), null)).toBeNull();
+  });
+
+  it('skips a 0 upper limit and prices the band at its lower limit', () => {
+    expect(
+      bandPrice(band({ key: 'band2', lowerLimit: '400', upperLimit: '0.00' }), CURRENT).toFixed(2),
+    ).toBe('400.00');
+  });
+
+  it('skips 0 limits and falls back to the current price', () => {
+    expect(
+      bandPrice(band({ key: 'band1', lowerLimit: '0', upperLimit: '0.00' }), CURRENT).toFixed(2),
+    ).toBe('500.00');
+  });
+
+  it('has no price when its limits are 0 and the current price is unknown', () => {
+    expect(bandPrice(band({ key: 'band4', lowerLimit: '0.00', upperLimit: '0' }), null)).toBeNull();
+  });
+
+  it('keeps a negative limit, so the upload write check can refuse it', () => {
+    expect(bandPrice(band({ key: 'band2', upperLimit: '-5.00' }), CURRENT).toFixed(2)).toBe(
+      '-5.00',
+    );
+  });
+
+  it('keeps a 0 lower limit out of the way of a real upper limit', () => {
+    expect(
+      bandPrice(band({ key: 'band4', lowerLimit: '0.00', upperLimit: '350' }), CURRENT).toFixed(2),
+    ).toBe('350.00');
+  });
+
+  it('ignores an unknown current price for a band with a limit', () => {
+    // Upper-limit band: the upper limit is the price, the unknown current price is unused.
+    expect(
+      bandPrice(band({ key: 'band2', lowerLimit: '400', upperLimit: '450' }), null)?.toString(),
+    ).toBe('450');
+    // Lower-only band (open-topped band 1): the lower limit is the price.
+    expect(bandPrice(band({ key: 'band1', lowerLimit: '450' }), null)?.toString()).toBe('450');
+  });
 });

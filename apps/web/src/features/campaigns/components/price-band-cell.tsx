@@ -40,6 +40,10 @@ function useBandLabel(band: PriceBand): { priceText: string; qualifier: string }
   if (band.lowerLimit !== null) {
     return { priceText: formatCurrency(band.lowerLimit), qualifier: t('aboveQualifier') };
   }
+  // Neither limit: the band's price is the current price, null when that is unknown.
+  if (band.price === null) {
+    return { priceText: t('priceUnknown'), qualifier: '' };
+  }
   return { priceText: formatCurrency(band.price), qualifier: '' };
 }
 
@@ -59,6 +63,12 @@ function useBandLabel(band: PriceBand): { priceText: string; qualifier: string }
  * `<button>` is invalid HTML and breaks hydration. The badge (and the ribbon) are
  * raised (`z-10`) so the badge's click still reaches it; the price, commission and
  * foot sit below the overlay and select.
+ *
+ * A band with no price (neither limit, and the row's current price is unknown) shows
+ * "Bilinmiyor" with a short explanation line under it, has no profit and never wears
+ * the "En kârlı" ribbon. The backend refuses to store it as a selection, so while
+ * unselected the card has no select target and its foot reads "Seçilemez". If it is
+ * somehow already selected, the overlay stays so the seller can still deselect it.
  */
 export function PriceBandCell({
   row,
@@ -74,40 +84,57 @@ export function PriceBandCell({
   const estimate = useEstimateItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
   const { priceText, qualifier } = useBandLabel(band);
+  const priceUnknown = band.price === null;
+  // A band with no price can only be deselected, never newly chosen.
+  const selectable = !priceUnknown || selected;
 
   function openBreakdown(): void {
     setBreakdownOpen(true);
+    // A band with no price has nothing to estimate; the dialog opens with no result.
+    if (band.price === null) return;
     estimate.mutate({ itemId: row.id, body: { price: band.price, bandKey: asBandKey(band.key) } });
   }
 
   return (
-    <TariffOptionCard selected={selected} interactive>
+    <TariffOptionCard selected={selected} interactive={selectable}>
       {/* Stretched-overlay select target. Sibling of the ProfitBadge (never an
           ancestor) so the badge's own <button> is not nested inside it. Price,
-          commission and the foot ring sit below the overlay → clicking them selects. */}
-      <button
-        type="button"
-        aria-pressed={selected}
-        aria-label={selected ? t('bandSelected') : t('selectBand')}
-        onClick={() => onSelect(band.key)}
-        // Tailwind v4 strips the native button cursor; the overlay covers the whole
-        // card, so its cursor is what the seller sees hovering the band.
-        className="focus-visible:shadow-focus absolute inset-0 cursor-pointer rounded-md focus-visible:outline-none"
-      />
+          commission and the foot ring sit below the overlay → clicking them selects.
+          Absent on a band that cannot be selected. */}
+      {selectable ? (
+        <button
+          type="button"
+          aria-pressed={selected}
+          aria-label={selected ? t('bandSelected') : t('selectBand')}
+          onClick={() => onSelect(band.key)}
+          // Tailwind v4 strips the native button cursor; the overlay covers the whole
+          // card, so its cursor is what the seller sees hovering the band.
+          className="focus-visible:shadow-focus absolute inset-0 cursor-pointer rounded-md focus-visible:outline-none"
+        />
+      ) : null}
 
       {/* "En kârlı" — a featured ribbon straddling the top border. Absolute, so it
           adds NO height: every card starts at the price, keeping cards short and the
           prices aligned. pointer-events-none → clicking it still selects via the
-          overlay. Only the best band shows it. */}
-      {isBest ? <TariffBestRibbon label={t('best')} /> : null}
+          overlay. Only the best band shows it, and never a band with no price. */}
+      {isBest && !priceUnknown ? <TariffBestRibbon label={t('best')} /> : null}
 
       {/* Price boundary + its "ve altı / ve üzeri" qualifier as one hero unit, then
-          the band's commission. */}
+          the band's commission. An unknown price reads muted, never as an amount. */}
       <div className="gap-3xs flex min-w-0 flex-col items-start">
-        <span className="gap-x-2xs flex min-w-0 flex-wrap items-baseline">
-          <span className="text-base font-bold tabular-nums">{priceText}</span>
-          <span className="text-xs font-normal">{qualifier}</span>
-        </span>
+        {priceUnknown ? (
+          // "Bilinmiyor" and, on its own line under it, why: plain text, so it reads on
+          // touch devices too (no hover needed).
+          <>
+            <span className="text-muted-foreground text-base font-semibold">{priceText}</span>
+            <span className="text-2xs text-muted-foreground">{t('bandPriceUnknownHint')}</span>
+          </>
+        ) : (
+          <span className="gap-x-2xs flex min-w-0 flex-wrap items-baseline">
+            <span className="text-base font-bold tabular-nums">{priceText}</span>
+            <span className="text-xs font-normal">{qualifier}</span>
+          </span>
+        )}
         <span className="text-2xs text-muted-foreground tabular-nums">
           {t('commission')} {formatPercentDisplay(band.commissionPct)}
         </span>
@@ -127,11 +154,13 @@ export function PriceBandCell({
         vsCurrentLabel={t('vsCurrent')}
       />
 
-      {/* Visual foot only — the card overlay owns the click. */}
+      {/* Visual foot only — the card overlay owns the click. A band that cannot be
+          selected says so, dimmed like a disabled foot. */}
       <TariffSelectFoot
         selected={selected}
-        label={t('selectBand')}
+        label={selectable ? t('selectBand') : t('bandNotSelectable')}
         selectedLabel={t('bandSelected')}
+        disabled={!selectable}
       />
 
       <CommissionTariffBreakdown
@@ -141,8 +170,8 @@ export function PriceBandCell({
         imageUrl={row.imageUrl}
         stockCode={row.stockCode}
         currentNetProfit={row.currentNetProfit}
-        result={estimate.data ?? null}
-        loading={estimate.isPending}
+        result={priceUnknown ? null : (estimate.data ?? null)}
+        loading={priceUnknown ? false : estimate.isPending}
       />
     </TariffOptionCard>
   );

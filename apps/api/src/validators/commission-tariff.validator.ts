@@ -25,7 +25,9 @@ export const TariffItemReasonSchema = z
   .openapi('TariffItemReason', {
     description:
       'Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok. reason null + ' +
-      'calculable false ise kâr bu kalem için hesaplanamadı (sunucuda loglandı); satır yine de döner.',
+      'calculable false ise kâr bu kalem için hesaplanamadı (sunucuda loglandı); satır yine de döner. ' +
+      'Komisyon tarifesi satırında reason null + calculable false, fiyatı bilinmeyen satırı da kapsar ' +
+      '(ne güncel fiyat ne komisyona esas fiyat biliniyor ve hiçbir fiyat aralığının fiyatı yok).',
   });
 
 // ─── Path params ────────────────────────────────────────────────────────────
@@ -77,7 +79,15 @@ export const TariffBandResultSchema = z
     key: z.string(),
     lowerLimit: z.string().nullable(),
     upperLimit: z.string().nullable(),
-    price: z.string(),
+    price: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Aralığın fiyatı (üst sınır; üst sınırı olmayan aralıkta alt sınır, hiç sınırı yoksa güncel ' +
+          'fiyat). 0 olan bir sınır yok sayılır. Kullanılabilir sınırı olmayan aralıkta güncel fiyat ' +
+          'bilinmiyorsa null; böyle bir aralığın kârı yoktur ve seçilemez.',
+      }),
     commissionPct: z.string(),
     netProfit: z.string().nullable(),
     marginPct: z.string().nullable(),
@@ -96,11 +106,18 @@ export const TariffDetailItemSchema = z
       .openapi({ description: 'Barkod-eşleşen ürünün birincil görseli; eşleşme yoksa null.' }),
     category: z.string().nullable(),
     brand: z.string().nullable(),
-    currentPrice: z.string(),
-    commissionBasePrice: z.string().nullable().openapi({
+    currentPrice: z.string().nullable().openapi({
       description:
-        'Komisyona esas fiyat (müşterinin gördüğü fiyat) — güncel kâr bu fiyattan hesaplanır; kolon öncesi eski içe aktarımlarda null.',
+        'Güncel satış fiyatı (GÜNCEL TSF). Dosyadaki hücre boş, okunamaz ya da 0 ise null.',
     }),
+    commissionBasePrice: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Komisyona esas fiyat (müşterinin gördüğü fiyat) — güncel kâr bu fiyattan hesaplanır; kolon öncesi eski içe aktarımlarda null. ' +
+          'Null ise güncel kâr güncel fiyattan hesaplanır; ikisi de null ise güncel kâr hesaplanmaz.',
+      }),
     currentCommissionPct: z.string(),
     currentNetProfit: z
       .string()
@@ -109,7 +126,7 @@ export const TariffDetailItemSchema = z
         description:
           'Komisyona esas fiyat (yoksa güncel fiyat) + güncel komisyonla net kâr; senaryo motoru ' +
           'bu fiyatı güncel komisyon oranıyla değerlendirir ve mağazanın kâr ayarları uygulanır; ' +
-          'hesaplanamıyorsa null.',
+          'hesaplanamıyorsa ya da ne komisyona esas fiyat ne güncel fiyat biliniyorsa null.',
       }),
     currentMarginPct: z.string().nullable(),
     calculable: z.boolean(),
@@ -161,6 +178,16 @@ export const ImportTariffResponseSchema = z
     unmatched: z.number().int(),
     skippedRows: z.number().int(),
     prefilledRows: z.number().int(),
+    unknownCurrentPriceRows: z
+      .number()
+      .int()
+      .openapi({
+        description:
+          'Ne güncel fiyatı (GÜNCEL TSF) ne komisyona esas fiyatı bilinen ürün satırı sayısı ' +
+          '(hücre boş, okunamaz ya da 0). Bu satırların güncel kârı hesaplanmaz; sınırı olan ' +
+          'aralıkların kârı hesaplanır. Her ürün satırı, dönem sayısından bağımsız olarak bir kez ' +
+          'sayılır.',
+      }),
   })
   .openapi('ImportTariffResponse');
 
@@ -168,12 +195,20 @@ export type ImportTariffResponse = z.infer<typeof ImportTariffResponseSchema>;
 
 // ─── Selections (band + custom price) ───────────────────────────────────────
 
+// A custom price that is zero at two decimals (`0`, `0.0`, `0.00`, `000`). Zero is not a
+// real price: stored, it would pass the BAND_PRICE_UNKNOWN check of a band with no price
+// and the export would write 0.00. Matched as text, not parsed: Zod still runs the refine
+// after a failed regex, so the predicate must not throw on a malformed string (that one
+// is left to the regex, which already reports it).
+const ZERO_PRICE_PATTERN = /^0+(\.0{1,2})?$/;
+
 export const TariffSelectionSchema = z.object({
   itemId: z.string().uuid(),
   band: TariffBandKeySchema.nullable(),
   customPrice: z
     .string()
     .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_CUSTOM_PRICE')
+    .refine((value) => !ZERO_PRICE_PATTERN.test(value), 'INVALID_CUSTOM_PRICE')
     .nullable(),
 });
 
@@ -200,7 +235,8 @@ export type TariffSelection = z.infer<typeof TariffSelectionSchema>;
 //   3. Current scenario (`scenario: 'current'`) — pass neither price nor bandKey;
 //      the item's own commission-base price (or its sale price when the column is
 //      absent) + current commission are used, so the breakdown matches the detail
-//      row's `currentNetProfit` badge byte-for-byte.
+//      row's `currentNetProfit` badge byte-for-byte. When neither price is known the
+//      service answers 422 on `scenario` (CURRENT_PRICE_UNKNOWN).
 // The full profit breakdown is the SAME shape the Ürün Fiyatlandırma quote returns.
 
 export const TariffItemIdPathSchema = TariffIdPathSchema.extend({
@@ -228,7 +264,9 @@ export const EstimateItemPriceBodySchema = z
       .openapi({
         description:
           'Güncel senaryonun dökümü — item’ın komisyona esas fiyatı (yoksa güncel fiyatı) + ' +
-          'güncel komisyonuyla hesaplanır; price/bandKey verilmez.',
+          'güncel komisyonuyla hesaplanır; price/bandKey verilmez. İkisi de bilinmiyorsa (dosyadaki ' +
+          'hücreler boş, okunamaz ya da 0) hesaplanacak fiyat yoktur: 422, alan `scenario`, kod ' +
+          'CURRENT_PRICE_UNKNOWN.',
       }),
   })
   .superRefine((val, ctx) => {

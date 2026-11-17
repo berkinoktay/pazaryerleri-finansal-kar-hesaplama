@@ -4692,6 +4692,10 @@
           },
           "prefilledRows": {
             "type": "integer"
+          },
+          "unknownCurrentPriceRows": {
+            "type": "integer",
+            "description": "Ne güncel fiyatı (GÜNCEL TSF) ne komisyona esas fiyatı bilinen ürün satırı sayısı (hücre boş, okunamaz ya da 0). Bu satırların güncel kârı hesaplanmaz; sınırı olan aralıkların kârı hesaplanır. Her ürün satırı, dönem sayısından bağımsız olarak bir kez sayılır."
           }
         },
         "required": [
@@ -4702,7 +4706,8 @@
           "matched",
           "unmatched",
           "skippedRows",
-          "prefilledRows"
+          "prefilledRows",
+          "unknownCurrentPriceRows"
         ]
       },
       "UpdateSelectionsResponse": {
@@ -4826,7 +4831,7 @@
           "NO_SHIPPING",
           null
         ],
-        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok. reason null + calculable false ise kâr bu kalem için hesaplanamadı (sunucuda loglandı); satır yine de döner."
+        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok. reason null + calculable false ise kâr bu kalem için hesaplanamadı (sunucuda loglandı); satır yine de döner. Komisyon tarifesi satırında reason null + calculable false, fiyatı bilinmeyen satırı da kapsar (ne güncel fiyat ne komisyona esas fiyat biliniyor ve hiçbir fiyat aralığının fiyatı yok)."
       },
       "EstimateItemPriceBody": {
         "type": "object",
@@ -4852,7 +4857,7 @@
             "enum": [
               "current"
             ],
-            "description": "Güncel senaryonun dökümü — item’ın komisyona esas fiyatı (yoksa güncel fiyatı) + güncel komisyonuyla hesaplanır; price/bandKey verilmez."
+            "description": "Güncel senaryonun dökümü — item’ın komisyona esas fiyatı (yoksa güncel fiyatı) + güncel komisyonuyla hesaplanır; price/bandKey verilmez. İkisi de bilinmiyorsa (dosyadaki hücreler boş, okunamaz ya da 0) hesaplanacak fiyat yoktur: 422, alan `scenario`, kod CURRENT_PRICE_UNKNOWN."
           }
         }
       },
@@ -4956,14 +4961,18 @@
             ]
           },
           "currentPrice": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Güncel satış fiyatı (GÜNCEL TSF). Dosyadaki hücre boş, okunamaz ya da 0 ise null."
           },
           "commissionBasePrice": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Komisyona esas fiyat (müşterinin gördüğü fiyat) — güncel kâr bu fiyattan hesaplanır; kolon öncesi eski içe aktarımlarda null."
+            "description": "Komisyona esas fiyat (müşterinin gördüğü fiyat) — güncel kâr bu fiyattan hesaplanır; kolon öncesi eski içe aktarımlarda null. Null ise güncel kâr güncel fiyattan hesaplanır; ikisi de null ise güncel kâr hesaplanmaz."
           },
           "currentCommissionPct": {
             "type": "string"
@@ -4973,7 +4982,7 @@
               "string",
               "null"
             ],
-            "description": "Komisyona esas fiyat (yoksa güncel fiyat) + güncel komisyonla net kâr; senaryo motoru bu fiyatı güncel komisyon oranıyla değerlendirir ve mağazanın kâr ayarları uygulanır; hesaplanamıyorsa null."
+            "description": "Komisyona esas fiyat (yoksa güncel fiyat) + güncel komisyonla net kâr; senaryo motoru bu fiyatı güncel komisyon oranıyla değerlendirir ve mağazanın kâr ayarları uygulanır; hesaplanamıyorsa ya da ne komisyona esas fiyat ne güncel fiyat biliniyorsa null."
           },
           "currentMarginPct": {
             "type": [
@@ -5052,7 +5061,11 @@
             ]
           },
           "price": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Aralığın fiyatı (üst sınır; üst sınırı olmayan aralıkta alt sınır, hiç sınırı yoksa güncel fiyat). 0 olan bir sınır yok sayılır. Kullanılabilir sınırı olmayan aralıkta güncel fiyat bilinmiyorsa null; böyle bir aralığın kârı yoktur ve seçilemez."
           },
           "commissionPct": {
             "type": "string"
@@ -16183,7 +16196,7 @@
           "CommissionTariffs"
         ],
         "summary": "Import a Trendyol commission-tariff Excel",
-        "description": "Uploads Trendyol's 'Ürün Komisyon Tarifeleri' .xlsx (multipart `file`). The fixed-layout sheet is read by position (its commission columns share duplicate headers), each present period (3-day / 4-day) becomes a period, and each product row is joined to a ProductVariant by barcode. Stores one tariff with its periods + product rows; profit is computed later on read. Returns counts: products, periods, items, matched/unmatched products, skipped rows. Rejects a file whose header layout does not match the expected export (422 VALIDATION_ERROR).",
+        "description": "Uploads Trendyol's 'Ürün Komisyon Tarifeleri' .xlsx (multipart `file`). The fixed-layout sheet is read by position (its commission columns share duplicate headers), each present period (3-day / 4-day) becomes a period, and each product row is joined to a ProductVariant by barcode. Stores one tariff with its periods + product rows; profit is computed later on read. A blank, unreadable or 0 current price or commission base price is stored as null. Returns counts: products, periods, items, matched/unmatched products, skipped rows, and `unknownCurrentPriceRows`, the product rows with neither a current price nor a commission base price (their current profit is unknown; each row counts once, whatever the number of periods). Rejects a file whose header layout does not match the expected export (422 VALIDATION_ERROR).",
         "security": [
           {
             "bearerAuth": []
@@ -16391,7 +16404,7 @@
           "CommissionTariffs"
         ],
         "summary": "Export the tariff as a re-uploadable Trendyol Excel",
-        "description": "Returns Trendyol's ORIGINAL uploaded file with the seller's choices patched in: the chosen band price into \"YENİ TSF (FİYAT GÜNCELLE)\" and \"{N} Günlük Fiyat\" into \"Tarife Seçimi\" for every product that has a selection. Every other cell is byte-for-byte unchanged, so the file can be re-uploaded to Trendyol verbatim. A split week yields up to three window files (a whole-week \"7 Günlük Fiyat\" file for products priced the same in both sub-periods, plus \"3 Günlük Fiyat\" / \"4 Günlük Fiyat\" files for period-specific prices), only the non-empty ones, bundled into a single .zip. Marks the tariff exported. Returns 409 if the tariff has no stored source file.",
+        "description": "Returns Trendyol's ORIGINAL uploaded file with the seller's choices patched in: the chosen band price into \"YENİ TSF (FİYAT GÜNCELLE)\" and \"{N} Günlük Fiyat\" into \"Tarife Seçimi\" for every product that has a selection. Every other cell is byte-for-byte unchanged, so the file can be re-uploaded to Trendyol verbatim. A split week yields up to three window files (a whole-week \"7 Günlük Fiyat\" file for products priced the same in both sub-periods, plus \"3 Günlük Fiyat\" / \"4 Günlük Fiyat\" files for period-specific prices), only the non-empty ones, bundled into a single .zip. Marks the tariff exported. Returns 409 if the tariff has no stored source file, and 409 SELECTION_PRICE_UNKNOWN when a selected product without a custom price has no known price to write (its band has no limit, or the stored bands do not hold it, while its current price is unknown); then no file is built and the tariff is not marked exported.",
         "security": [
           {
             "bearerAuth": []
@@ -16475,7 +16488,7 @@
             }
           },
           "409": {
-            "description": "Tariff has no stored source file to export",
+            "description": "Tariff has no stored source file to export, or a selected product has no known price to export (SELECTION_PRICE_UNKNOWN)",
             "content": {
               "application/json": {
                 "schema": {
@@ -16533,7 +16546,7 @@
           "CommissionTariffs"
         ],
         "summary": "Save band selections + custom prices for tariff items",
-        "description": "Persists the seller's chosen band (`band1`..`band4`, or null to clear) and optional custom price per item, in a single bulk update. Items not belonging to this tariff/store are ignored. Selection happens client-side over the backend-computed margins; this only records the result. Returns how many items were updated.",
+        "description": "Persists the seller's chosen band (`band1`..`band4`, or null to clear) and optional custom price per item, in a single bulk update. Items not belonging to this tariff/store are ignored. Selection happens client-side over the backend-computed margins; this only records the result. A band the item does not store (`BAND_NOT_STORED`), or a band with no price (neither limit while the current price is unknown) sent without a custom price (`BAND_PRICE_UNKNOWN`), refuses the whole request with 422 on `selections.<index>.band`; nothing is written. A null band is never checked. Returns how many items were updated.",
         "security": [
           {
             "bearerAuth": []
@@ -16646,7 +16659,7 @@
             }
           },
           "422": {
-            "description": "Invalid selection payload",
+            "description": "Invalid selection payload, or a selection the export could not write (BAND_NOT_STORED, BAND_PRICE_UNKNOWN on selections.<index>.band)",
             "content": {
               "application/json": {
                 "schema": {
@@ -16806,7 +16819,7 @@
             }
           },
           "422": {
-            "description": "Invalid payload — malformed price (INVALID_CUSTOM_PRICE), a missing price in a non-current mode (PRICE_REQUIRED), or price/bandKey sent with scenario:\"current\" (INVALID_ESTIMATE_MODE)",
+            "description": "Invalid payload — malformed price (INVALID_CUSTOM_PRICE), a missing price in a non-current mode (PRICE_REQUIRED), price/bandKey sent with scenario:\"current\" (INVALID_ESTIMATE_MODE), or scenario:\"current\" for an item with neither a commission-base price nor a current price (CURRENT_PRICE_UNKNOWN on `scenario`)",
             "content": {
               "application/json": {
                 "schema": {

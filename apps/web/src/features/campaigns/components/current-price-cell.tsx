@@ -30,6 +30,11 @@ export interface CurrentPriceCellProps {
  * (`minWidth="current"`). Renders the starred "En kârlı" badge ONLY when keeping the
  * current price is the row's most profitable choice — so the whole-row marker can land
  * here. No client-side money math — the badge and modal are backend-computed.
+ *
+ * "Bilinmiyor" (with a short explanation line under it, visible on touch too) shows only
+ * when BOTH prices are unknown — the file's commission-base price and its current sale price. The backend then has no
+ * baseline, so the badge stays empty and its click opens the not-calculable dialog
+ * without an estimate request.
  */
 export function CurrentPriceCell({
   row,
@@ -42,21 +47,28 @@ export function CurrentPriceCell({
   const estimate = useEstimateItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
 
+  // DISPLAY choice only (not a calculation): show the price the buyer sees, falling
+  // back to the sale price for imports before the commission-base column existed. The
+  // backend's current scenario uses the same price, so badge/modal/price stay in sync.
+  const price = row.commissionBasePrice ?? row.currentPrice;
+  const priceUnknown = price === null;
+
   function openBreakdown(): void {
     setBreakdownOpen(true);
+    // No baseline price: the backend would refuse the current scenario, so the dialog
+    // opens on its not-calculable text without a request.
+    if (priceUnknown) return;
     // `scenario: 'current'` — the backend derives BOTH price and commission from the
     // item itself, so the breakdown matches this row's `currentNetProfit` badge.
     estimate.mutate({ itemId: row.id, body: { scenario: 'current' } });
   }
 
-  // DISPLAY choice only (not a calculation): show the price the buyer sees, falling
-  // back to the sale price for imports before the commission-base column existed. The
-  // backend's current scenario uses the same price, so badge/modal/price stay in sync.
-  const price = row.commissionBasePrice ?? row.currentPrice;
-
   return (
     <TariffCurrentCell
       price={price}
+      unknownPriceLabel={t('table.priceUnknown')}
+      // Shown under "Bilinmiyor" only while the price is unknown.
+      unknownPriceHint={t('table.priceUnknownHint')}
       commissionPct={row.currentCommissionPct}
       commissionLabel={t('table.currentCommission')}
       calculatedLabel={t('table.calculatedProfit')}
@@ -82,8 +94,8 @@ export function CurrentPriceCell({
         imageUrl={row.imageUrl}
         stockCode={row.stockCode}
         currentNetProfit={row.currentNetProfit}
-        result={estimate.data ?? null}
-        loading={estimate.isPending}
+        result={priceUnknown ? null : (estimate.data ?? null)}
+        loading={priceUnknown ? false : estimate.isPending}
       />
     </TariffCurrentCell>
   );

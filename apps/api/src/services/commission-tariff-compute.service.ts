@@ -8,19 +8,27 @@
 // override. No financial math is re-implemented here.
 //
 // Each Trendyol band is a PRICE RANGE [lowerLimit, upperLimit] with its own commission
-// (a PERCENT). Profit for a band is computed at the bracket's upper limit -- the highest
-// price that still earns that commission, i.e. the best profit for the tier (optimistic,
-// like every other estimate in the system). Band 1 has no upper limit, so the seller's
-// current price applies.
+// (a PERCENT). Profit for a band is computed at the band's price (`bandPrice`): the upper
+// limit for a bounded band, the lower limit for the open-topped band 1. Only a band with
+// neither limit falls back to the seller's current price, and it has no price (and no
+// profit) when that current price is unknown.
 //
-// Strategy: the item's CURRENT baseline (the commission-base price at the current rate)
-// decides calculability -- when it is not calculable, every band reports null profit
-// (legacy all-or-none). Otherwise each band is evaluated at its own price under its own
-// stored rate.
+// Strategy: when the item's CURRENT baseline price (`commissionBasePrice ?? currentPrice`)
+// is known, its evaluation at the current rate decides calculability -- when it is not
+// calculable, every band reports null profit (legacy all-or-none). Otherwise each band is
+// evaluated at its own price under its own stored rate. When the baseline price is
+// unknown (the file's GUNCEL TSF and commission-base price were both unreadable), there is
+// no current profit: each band with a price is evaluated on its own, and the band
+// outcomes decide calculability.
 
 import { Decimal } from 'decimal.js';
 
-import { bandPrice, storedTariffBandForPrice, type StoredTariffBand } from '@pazarsync/profit';
+import {
+  bandPrice,
+  storedTariffBandForPrice,
+  type StoredTariffBand,
+  type TrendyolScenarioBase,
+} from '@pazarsync/profit';
 
 import {
   evaluateScreenScenario,
@@ -28,6 +36,7 @@ import {
   formatMoney2,
   toKurusHalfUp,
   type ScreenScenarioBase,
+  type ScreenScenarioOutcome,
 } from './scenario-screen-commons';
 import { quoteBreakdownFromStatement, type QuoteBreakdown } from './product-pricing.service';
 import { type TariffItemReason } from './tariff-compute-commons';
@@ -41,8 +50,12 @@ export interface ComputedBandResult {
   readonly key: string;
   readonly lowerLimit: string | null;
   readonly upperLimit: string | null;
-  /** Band price (GROSS TRY) — the bracket upper limit, or current price for band 1. */
-  readonly price: string;
+  /**
+   * Band price (GROSS TRY) — the bracket upper limit, or current price for band 1. Null
+   * for a band with neither limit when the current price is unknown: such a band has no
+   * profit and cannot be selected.
+   */
+  readonly price: string | null;
   /** Commission PERCENT as stored (e.g. "19", "13.1"). */
   readonly commissionPct: string;
   readonly netProfit: string | null;
@@ -63,31 +76,131 @@ export interface ComputedItemBands {
   readonly calculable: boolean;
   readonly reason: TariffItemReason | null;
   readonly bands: ReadonlyArray<ComputedBandResult>;
-  /** Key of the band with the highest net profit, or null if none calculable. */
+  /**
+   * Key of the band with the highest net profit, or null if none calculable. A band with
+   * no price (null) is never evaluated, so it is never the best band.
+   */
   readonly bestBandKey: string | null;
   /**
    * Profit at the commission-base price (customer-seen price, or the sale price when
    * the column is absent) + current commission — the baseline the band/custom "vs
-   * current" delta compares against. Null when not calculable.
+   * current" delta compares against. Null when not calculable, or when neither price is
+   * known.
    */
   readonly current: ComputedCurrentScenario;
 }
 
 const NULL_CURRENT: ComputedCurrentScenario = { netProfit: null, marginPct: null };
 
+/** A band price on the wire: two decimals, or null when the band has no price. */
+function formatBandPrice(price: Decimal | null): string | null {
+  return price === null ? null : price.toFixed(2);
+}
+
 function nullBandResults(
   bands: ReadonlyArray<StoredTariffBand>,
-  currentPrice: Decimal,
+  currentPrice: Decimal | null,
 ): ComputedBandResult[] {
   return bands.map((band) => ({
     key: band.key,
     lowerLimit: band.lowerLimit,
     upperLimit: band.upperLimit,
-    price: bandPrice(band, currentPrice).toFixed(2),
+    price: formatBandPrice(bandPrice(band, currentPrice)),
     commissionPct: band.commissionPct,
     netProfit: null,
     marginPct: null,
   }));
+}
+
+/** Every band evaluated at its own price, plus what the item-level result needs from them. */
+interface EvaluatedBands {
+  readonly results: ComputedBandResult[];
+  /** Key of the band with the highest net profit (first wins on ties), or null if none calculable. */
+  readonly bestBandKey: string | null;
+  /** The outcome of the first band that had a price (and so was evaluated); null when none had one. */
+  readonly firstOutcome: ScreenScenarioOutcome | null;
+}
+
+/**
+ * Evaluates each band at its own `bandPrice` under its stored rate (the screen's choice,
+ * passed to the engine as an override). A band with no price (neither limit and an unknown
+ * current price) is not evaluated: it shows null profit and is skipped for `bestBandKey`.
+ * A band whose own evaluation is not calculable (rare, price-dependent shipping) shows null
+ * profit and is skipped too. The engine may throw on a pathological input -- that propagates.
+ */
+function evaluateBands(
+  bands: readonly StoredTariffBand[],
+  currentPrice: Decimal | null,
+  base: TrendyolScenarioBase,
+): EvaluatedBands {
+  const results: ComputedBandResult[] = [];
+  let bestBandKey: string | null = null;
+  let bestProfit: Decimal | null = null;
+  let firstOutcome: ScreenScenarioOutcome | null = null;
+
+  for (const band of bands) {
+    const price = bandPrice(band, currentPrice);
+    if (price === null) {
+      results.push({
+        key: band.key,
+        lowerLimit: band.lowerLimit,
+        upperLimit: band.upperLimit,
+        price: null,
+        commissionPct: band.commissionPct,
+        netProfit: null,
+        marginPct: null,
+      });
+      continue;
+    }
+
+    // An imported band limit can carry sub-kurus precision (e.g. "149.999"); the engine
+    // rejects a unit price with more than two decimals, so round it to the kurus half-up
+    // before evaluating -- exactly as the discount/campaign screens do. The wire `price`
+    // below keeps its own `toFixed(2)` (the identical value).
+    const outcome = evaluateScreenScenario({
+      base,
+      unitPrice: toKurusHalfUp(price),
+      commissionPct: new Decimal(band.commissionPct),
+    });
+    firstOutcome ??= outcome;
+    if (outcome.calculable && (bestProfit === null || outcome.netProfit.gt(bestProfit))) {
+      bestProfit = outcome.netProfit;
+      bestBandKey = band.key;
+    }
+    results.push({
+      key: band.key,
+      lowerLimit: band.lowerLimit,
+      upperLimit: band.upperLimit,
+      price: price.toFixed(2),
+      commissionPct: band.commissionPct,
+      netProfit: outcome.calculable ? formatMoney2(outcome.netProfit) : null,
+      marginPct: outcome.calculable ? formatMarginPct2(outcome.statement.saleMarginPct) : null,
+    });
+  }
+
+  return { results, bestBandKey, firstOutcome };
+}
+
+/**
+ * The item-level result when the baseline price is unknown: no current profit, and the
+ * band outcomes decide calculability. Any calculable band makes the item calculable. When
+ * bands were evaluated but none is calculable, the item reports the first evaluated band's
+ * reason (which may itself be null). When no band has a price, the item is not calculable
+ * with a null reason. Nothing here throws on the unknown price itself, so such a row never
+ * reaches the service's per-item failure log.
+ */
+function computeWithoutBaseline(evaluated: EvaluatedBands): ComputedItemBands {
+  const { results, bestBandKey, firstOutcome } = evaluated;
+  if (bestBandKey !== null) {
+    return { calculable: true, reason: null, bands: results, bestBandKey, current: NULL_CURRENT };
+  }
+  return {
+    calculable: false,
+    reason: firstOutcome === null || firstOutcome.calculable ? null : firstOutcome.reason,
+    bands: results,
+    bestBandKey: null,
+    current: NULL_CURRENT,
+  };
 }
 
 /**
@@ -98,18 +211,25 @@ function nullBandResults(
  * barcode (`base` no-product) or an item with no bands is not calculable with reason
  * NO_PRODUCT and every band null (legacy all-or-none).
  *
- * For a ready base the CURRENT baseline is evaluated at `commissionBasePrice ?? currentPrice`
- * under `currentCommissionPct`; it decides the item's calculability all-or-none (so a
- * missing cost drops every band). Then each band is evaluated at its own `bandPrice`
- * under its stored rate (the screen's choice, passed to the engine as an override). A
- * band whose own evaluation is not calculable (rare, price-dependent shipping) shows null
- * profit and is skipped for `bestBandKey`, which is the highest net profit (first wins on
- * ties). The engine may throw on a pathological input -- that propagates to the service,
- * which catches it per item.
+ * The current price may be unknown (null: the file's GUNCEL TSF was blank, unreadable or
+ * 0). A band with neither limit then has no price: null price, null profit, never best.
+ *
+ * For a ready base with a KNOWN baseline price (`commissionBasePrice ?? currentPrice`), the
+ * CURRENT baseline is evaluated at it under `currentCommissionPct`; it decides the item's
+ * calculability all-or-none (so a missing cost drops every band). Then each band is
+ * evaluated at its own `bandPrice` under its stored rate (the screen's choice, passed to
+ * the engine as an override). A band with no price, or whose own evaluation is not
+ * calculable (rare, price-dependent shipping), shows null profit and is skipped for
+ * `bestBandKey`, which is the highest net profit (first wins on ties).
+ *
+ * With an UNKNOWN baseline price the current profit and margin are null, each band with a
+ * price is evaluated at it, and the band outcomes decide calculability (see
+ * `computeWithoutBaseline`). The engine may throw on a pathological input -- that
+ * propagates to the service, which catches it per item.
  */
 export function computeItemBands(params: {
   readonly bands: readonly StoredTariffBand[];
-  readonly currentPrice: Decimal;
+  readonly currentPrice: Decimal | null;
   readonly commissionBasePrice: Decimal | null;
   readonly currentCommissionPct: Decimal;
   readonly base: ScreenScenarioBase;
@@ -142,10 +262,17 @@ export function computeItemBands(params: {
 
   // Baseline ("do nothing"): the current commission at the commission-base price (the
   // customer-seen price commission is actually charged on), falling back to the sale
-  // price for imports predating the column. It decides the item's calculability.
+  // price for imports predating the column. When neither is known there is no baseline:
+  // the bands are evaluated on their own and decide the item's calculability.
+  const baselinePrice = commissionBasePrice ?? currentPrice;
+  if (baselinePrice === null) {
+    return computeWithoutBaseline(evaluateBands(bands, currentPrice, base.base));
+  }
+
+  // A known baseline decides the item's calculability (legacy all-or-none).
   const currentOutcome = evaluateScreenScenario({
     base: base.base,
-    unitPrice: commissionBasePrice ?? currentPrice,
+    unitPrice: baselinePrice,
     commissionPct: currentCommissionPct,
   });
   if (!currentOutcome.calculable) {
@@ -163,35 +290,7 @@ export function computeItemBands(params: {
     marginPct: formatMarginPct2(currentOutcome.statement.saleMarginPct),
   };
 
-  let bestBandKey: string | null = null;
-  let bestProfit: Decimal | null = null;
-
-  const results = bands.map((band): ComputedBandResult => {
-    const price = bandPrice(band, currentPrice);
-    // An imported band limit can carry sub-kurus precision (e.g. "149.999"); the engine
-    // rejects a unit price with more than two decimals, so round it to the kurus half-up
-    // before evaluating -- exactly as the discount/campaign screens do. The wire `price`
-    // below keeps its own `toFixed(2)` (the identical value).
-    const outcome = evaluateScreenScenario({
-      base: base.base,
-      unitPrice: toKurusHalfUp(price),
-      commissionPct: new Decimal(band.commissionPct),
-    });
-    if (outcome.calculable && (bestProfit === null || outcome.netProfit.gt(bestProfit))) {
-      bestProfit = outcome.netProfit;
-      bestBandKey = band.key;
-    }
-    return {
-      key: band.key,
-      lowerLimit: band.lowerLimit,
-      upperLimit: band.upperLimit,
-      price: price.toFixed(2),
-      commissionPct: band.commissionPct,
-      netProfit: outcome.calculable ? formatMoney2(outcome.netProfit) : null,
-      marginPct: outcome.calculable ? formatMarginPct2(outcome.statement.saleMarginPct) : null,
-    };
-  });
-
+  const { results, bestBandKey } = evaluateBands(bands, currentPrice, base.base);
   return { calculable: true, reason: null, bands: results, bestBandKey, current };
 }
 

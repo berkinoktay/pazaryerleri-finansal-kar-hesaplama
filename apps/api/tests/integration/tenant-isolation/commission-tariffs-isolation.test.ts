@@ -177,6 +177,50 @@ describe('commission-tariffs: route-layer authorization', () => {
     expect(((await res.json()) as { code: string }).code).toBe('NOT_FOUND');
   });
 
+  it("does not disclose another store's item through a selection validation error", async () => {
+    const userA = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, userA.id);
+    const storeA = await createStore(orgA.id);
+    const tariffA = await seedTariff(orgA.id, storeA.id);
+
+    // Foreign items: one in another store of the same org, one in another org. Each
+    // stores band1 only, so band3 would be refused (BAND_NOT_STORED) on an own item.
+    const storeA2 = await createStore(orgA.id);
+    await seedTariff(orgA.id, storeA2.id);
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+    await seedTariff(orgB.id, storeB.id);
+    const foreignItems = await prisma.commissionTariffItem.findMany({
+      where: { storeId: { in: [storeA2.id, storeB.id] } },
+      select: { id: true },
+    });
+    expect(foreignItems).toHaveLength(2);
+
+    const res = await app.request(
+      `/v1/organizations/${orgA.id}/stores/${storeA.id}/commission-tariffs/${tariffA}/selections`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: bearer(userA.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selections: foreignItems.map((item) => ({
+            itemId: item.id,
+            band: 'band3',
+            customPrice: null,
+          })),
+        }),
+      },
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ updated: 0 });
+
+    const untouched = await prisma.commissionTariffItem.findMany({
+      where: { id: { in: foreignItems.map((item) => item.id) } },
+      select: { selectedBand: true },
+    });
+    expect(untouched).toEqual([{ selectedBand: null }, { selectedBand: null }]);
+  });
+
   it('a non-member saving selections returns 403', async () => {
     const outsider = await createAuthenticatedTestUser();
     const org = await createOrganization();
