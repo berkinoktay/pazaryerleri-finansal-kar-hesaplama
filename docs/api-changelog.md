@@ -75,6 +75,12 @@ section "Versioning" for details.
   the code a malformed price already gets, and nothing is written. Zero is not a real price; it
   used to let a band with no price pass the `BAND_PRICE_UNKNOWN` check and export 0.00. The estimate
   endpoint and the other verticals' selection routes are unchanged, and so is the spec.
+- **Commission tariff bands: a limit of 0 is no price** (detail, estimate, selections and export
+  of `.../commission-tariffs`). A band's price is its upper limit, else its lower limit, else the
+  item's current price; a limit of 0 is now skipped as if it were absent, so a band is never priced,
+  profited, selected or exported at 0. A band whose limits are all 0 and whose item has no known
+  current price answers `price: null`, like a band with neither limit. The stored limits and the
+  band a price falls into are unchanged; a negative limit is still refused at upload.
 - **Commission and Plus commission tariff weeks across New Year**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs}/import`).
   The period labels of a Trendyol tariff file carry no year. Each label used to take the UTC year

@@ -207,6 +207,18 @@ describe('commission tariff adapter: the price an item carries (pick)', () => {
     expect(conflictReason(() => adapter.pick(unknown))).toBe('SELECTION_PRICE_UNKNOWN');
   });
 
+  it('never writes 0.00 for a selected band whose limits are 0: refused when the current price is unknown', () => {
+    const zeroLimits: Prisma.JsonValue = [
+      { key: 'band1', lowerLimit: '0.00', upperLimit: '0.00', commissionPct: '19' },
+    ];
+
+    expect(
+      conflictReason(() =>
+        resolveCommissionExportPrice(item('BC-1', 'band1', null, zeroLimits, null)),
+      ),
+    ).toBe('SELECTION_PRICE_UNKNOWN');
+  });
+
   it('refuses a selected band the stored bands do not hold when the current price is unknown', () => {
     expect(
       conflictReason(() => resolveCommissionExportPrice(item('BC-1', 'band3', null, BAND2, null))),

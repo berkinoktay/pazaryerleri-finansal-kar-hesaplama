@@ -5065,7 +5065,7 @@
               "string",
               "null"
             ],
-            "description": "Aralığın fiyatı (üst sınır; üst sınırı olmayan aralıkta alt sınır, hiç sınırı yoksa güncel fiyat). Hiç sınırı olmayan aralıkta güncel fiyat bilinmiyorsa null; böyle bir aralığın kârı yoktur ve seçilemez."
+            "description": "Aralığın fiyatı (üst sınır; üst sınırı olmayan aralıkta alt sınır, hiç sınırı yoksa güncel fiyat). 0 olan bir sınır yok sayılır. Kullanılabilir sınırı olmayan aralıkta güncel fiyat bilinmiyorsa null; böyle bir aralığın kârı yoktur ve seçilemez."
           },
           "commissionPct": {
             "type": "string"

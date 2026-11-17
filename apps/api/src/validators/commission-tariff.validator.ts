@@ -85,8 +85,8 @@ export const TariffBandResultSchema = z
       .openapi({
         description:
           'Aralığın fiyatı (üst sınır; üst sınırı olmayan aralıkta alt sınır, hiç sınırı yoksa güncel ' +
-          'fiyat). Hiç sınırı olmayan aralıkta güncel fiyat bilinmiyorsa null; böyle bir aralığın kârı ' +
-          'yoktur ve seçilemez.',
+          'fiyat). 0 olan bir sınır yok sayılır. Kullanılabilir sınırı olmayan aralıkta güncel fiyat ' +
+          'bilinmiyorsa null; böyle bir aralığın kârı yoktur ve seçilemez.',
       }),
     commissionPct: z.string(),
     netProfit: z.string().nullable(),
