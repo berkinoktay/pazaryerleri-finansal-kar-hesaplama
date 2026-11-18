@@ -13,10 +13,15 @@ import type {
   AdvantageSelectionMap,
   AdvantageSelectionState,
 } from '@/features/campaigns/lib/advantage-bulk-actions';
+import { type CampaignAccess, UPLOAD_GATES } from '@/features/campaigns/lib/campaign-access';
+import { CampaignAccessProvider } from '@/features/campaigns/lib/campaign-access-context';
 import { TariffScopeProvider } from '@/features/campaigns/lib/tariff-scope';
 
 import { render, screen, waitFor, within } from '../helpers/render';
 import { HttpResponse, http, server } from '../helpers/msw';
+import trMessages from '../../messages/tr.json';
+
+const TABLE_MESSAGES = trMessages.productLabelsPage.table;
 
 const SCOPE = {
   orgId: '00000000-0000-0000-0000-000000000001',
@@ -197,8 +202,10 @@ function customCardIn(rowEl: HTMLElement): HTMLElement {
  */
 function TableHarness({
   rows = ROWS,
+  selection = EMPTY_SELECTION,
 }: {
   rows?: readonly AdvantageTariffRow[];
+  selection?: AdvantageSelectionMap;
 }): React.ReactElement {
   const [customEstimates, setCustomEstimates] = React.useState<Record<string, string | null>>({});
   const handleCustomEstimate = React.useCallback(
@@ -214,7 +221,7 @@ function TableHarness({
     <TariffScopeProvider scope={SCOPE}>
       <AdvantageTariffsTable
         rows={rows}
-        selection={EMPTY_SELECTION}
+        selection={selection}
         customPrices={EMPTY_CUSTOM_PRICES}
         customEstimates={customEstimates}
         onSelectTier={noop}
@@ -645,5 +652,35 @@ describe('AdvantageTariffsTable — a missing tier renders a mute em-dash', () =
 
     // Only the two present tiers offer a select target — the missing one adds none.
     expect(screen.getAllByRole('button', { name: /bu kademeyi seç/i })).toHaveLength(2);
+  });
+});
+
+const READ_ONLY_ACCESS: CampaignAccess = { canWrite: false, upload: UPLOAD_GATES.HIDDEN };
+// ROW A has tier2 stored as its choice; ROW B has nothing chosen.
+const ROW_A_TIER_CHOSEN: AdvantageSelectionMap = { [ROW_A.id]: 'tier2' };
+
+describe('AdvantageTariffsTable - read-only member', () => {
+  it('offers no select button, disables every custom price input and still shows the chosen tier', () => {
+    render(
+      <CampaignAccessProvider value={READ_ONLY_ACCESS}>
+        <TableHarness rows={TWO_ROWS} selection={ROW_A_TIER_CHOSEN} />
+      </CampaignAccessProvider>,
+    );
+
+    // No select target anywhere: a selected overlay or foot would carry the selected label.
+    expect(screen.queryAllByRole('button', { name: TABLE_MESSAGES.selectTier })).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: TABLE_MESSAGES.tierSelected })).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: TABLE_MESSAGES.selectCustom })).toHaveLength(0);
+    const inputs = screen.getAllByPlaceholderText(TABLE_MESSAGES.enterPrice);
+    expect(inputs).toHaveLength(TWO_ROWS.length);
+    for (const input of inputs) expect(input).toBeDisabled();
+
+    // The stored choice still reads as selected, on its own row only.
+    expect(
+      within(rowByTitle(ROW_A.productTitle)).getByText(TABLE_MESSAGES.tierSelected),
+    ).toBeInTheDocument();
+    expect(
+      within(rowByTitle(ROW_B.productTitle)).queryByText(TABLE_MESSAGES.tierSelected),
+    ).toBeNull();
   });
 });

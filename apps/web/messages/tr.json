@@ -851,6 +851,9 @@
       "MARKETPLACE_CAMPAIGN_LIST": "Kampanyalar"
     }
   },
+  "campaignAccess": {
+    "readOnlyNotice": "Bu sayfaları görüntüleyebilirsin ama değiştiremezsin. Düzenleme yetkisi için organizasyonunun sahibine başvur."
+  },
   "commissionTariffsPage": {
     "selectionRefused": "Seçimlerin kaydedilemedi: biri artık ürünü için geçerli değil. Sayfayı yenileyip yeniden seç.",
     "search": "Ürün, model veya barkod ara",

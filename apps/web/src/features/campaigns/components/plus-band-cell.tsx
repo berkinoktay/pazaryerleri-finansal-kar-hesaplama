@@ -11,6 +11,7 @@ import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { useEstimatePlusItemPrice } from '../hooks/use-estimate-plus-item-price';
 import { usePlusReasonEmptyLabel } from '../hooks/use-plus-reason-label';
 import type { PlusBand, PlusTariffRow } from '../lib/adapt-plus-tariff';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import { useTariffScope } from '../lib/tariff-scope';
 import { PlusTariffBreakdown } from './plus-tariff-breakdown';
 import { TariffBestRibbon } from './tariff-best-ribbon';
@@ -84,6 +85,9 @@ export function PlusBandCell({
   const offerUnknown = priceUnknown || commissionUnknown;
   // An unknown offer can only be un-joined, never newly joined.
   const selectable = !offerUnknown || selected;
+  const { canWrite } = useCampaignAccess();
+  // A member who cannot write reads the offer but gets no join target.
+  const hasSelectTarget = canWrite && selectable;
 
   function openBreakdown(): void {
     setBreakdownOpen(true);
@@ -93,12 +97,12 @@ export function PlusBandCell({
   }
 
   return (
-    <TariffOptionCard selected={selected} interactive={selectable}>
+    <TariffOptionCard selected={selected} interactive={hasSelectTarget}>
       {/* Stretched-overlay select target. Sibling of the ProfitBadge (never an
           ancestor) so the badge's own <button> is not nested inside it. Price,
           commission and the foot ring sit below the overlay, so clicking them joins.
-          Absent on an offer that cannot be joined. */}
-      {selectable ? (
+          Absent on an offer that cannot be joined, and for a member who cannot write. */}
+      {hasSelectTarget ? (
         <button
           type="button"
           aria-pressed={selected}

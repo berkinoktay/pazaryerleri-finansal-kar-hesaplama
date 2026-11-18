@@ -1,6 +1,5 @@
 'use client';
 
-import { CloudUploadIcon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import { parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
@@ -8,7 +7,6 @@ import * as React from 'react';
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { FilterTabs } from '@/components/patterns/filter-tabs';
 import { PageHeader } from '@/components/patterns/page-header';
-import { Button } from '@/components/ui/button';
 
 import type { AdvantageTariffListItem } from '../api/list-advantage-tariffs.api';
 import {
@@ -21,6 +19,8 @@ import {
 
 import { AdvantageTariffListSummary } from './advantage-tariff-list-summary';
 import { AdvantageTariffListTable } from './advantage-tariff-list-table';
+import { CampaignReadOnlyNotice } from './campaign-read-only-notice';
+import { CampaignUploadButton } from './campaign-upload-button';
 import { useAdvantageTariffRowActions } from './use-advantage-tariff-row-actions';
 
 // Advantage files carry no dates, so there is no validity axis — the status tab
@@ -144,9 +144,7 @@ export function AdvantageTariffsListView({
           { value: 'pending', label: tListStatus('pending'), count: statusCounts.pending },
         ]}
       />
-      <Button size="sm" leadingIcon={<CloudUploadIcon aria-hidden />} onClick={onCreate}>
-        {tList('upload')}
-      </Button>
+      <CampaignUploadButton size="sm" label={tList('upload')} onClick={onCreate} />
     </div>
   );
 
@@ -165,6 +163,7 @@ export function AdvantageTariffsListView({
         }
         summary={<AdvantageTariffListSummary stats={stats} loading={loading} />}
       />
+      <CampaignReadOnlyNotice />
 
       <AdvantageTariffListTable
         rows={filtered}

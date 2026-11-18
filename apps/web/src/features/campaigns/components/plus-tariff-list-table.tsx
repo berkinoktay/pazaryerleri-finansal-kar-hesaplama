@@ -1,7 +1,7 @@
 'use client';
 
 import { type ColumnDef } from '@tanstack/react-table';
-import { CloudUploadIcon, Delete02Icon, DocumentValidationIcon } from 'hugeicons-react';
+import { Delete02Icon, DocumentValidationIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -17,13 +17,15 @@ import {
 import { TableNoResultsState } from '@/components/patterns/data-table-states';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
 import { EmptyState } from '@/components/patterns/empty-state';
-import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
 
+import { UPLOAD_GATES } from '../lib/campaign-access';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import type { PlusTariffListRow } from '../lib/plus-tariff-list';
 import type { PlusTariffValidity } from '../types';
 
+import { CampaignUploadButton } from './campaign-upload-button';
 import { PlusTariffExportIndicator } from './plus-tariff-export-indicator';
 import { PlusTariffStatusBadge } from './plus-tariff-status-badge';
 
@@ -84,6 +86,8 @@ export function PlusTariffListTable({
   const tList = useTranslations('plusCommissionTariffsPage.list');
   const tEmpty = useTranslations('plusCommissionTariffsPage.list.empty');
   const tBulk = useTranslations('plusCommissionTariffsPage.list.bulk');
+  // Row selection exists only for bulk delete, so a member who cannot write gets no checkboxes.
+  const { canWrite, upload } = useCampaignAccess();
 
   // Holds the ids to bulk-delete plus a reset bound to the live table instance,
   // so confirming the delete also clears row selection (the raw rowSelection
@@ -92,30 +96,31 @@ export function PlusTariffListTable({
     null,
   );
 
-  const columns = React.useMemo<ColumnDef<PlusTariffListRow>[]>(
-    () => [
-      {
-        id: 'select',
-        enableSorting: false,
-        enableHiding: false,
-        header: ({ table }) => (
-          <Checkbox
-            checked={
-              table.getIsAllPageRowsSelected() ||
-              (table.getIsSomePageRowsSelected() && 'indeterminate')
-            }
-            onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-            aria-label={tList('selectAll')}
-          />
-        ),
-        cell: ({ row }) => (
-          <Checkbox
-            checked={row.getIsSelected()}
-            onCheckedChange={(value) => row.toggleSelected(!!value)}
-            aria-label={tList('selectRow')}
-          />
-        ),
-      },
+  const columns = React.useMemo<ColumnDef<PlusTariffListRow>[]>(() => {
+    const selectColumn: ColumnDef<PlusTariffListRow> = {
+      id: 'select',
+      enableSorting: false,
+      enableHiding: false,
+      header: ({ table }) => (
+        <Checkbox
+          checked={
+            table.getIsAllPageRowsSelected() ||
+            (table.getIsSomePageRowsSelected() && 'indeterminate')
+          }
+          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+          aria-label={tList('selectAll')}
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox
+          checked={row.getIsSelected()}
+          onCheckedChange={(value) => row.toggleSelected(!!value)}
+          aria-label={tList('selectRow')}
+        />
+      ),
+    };
+    return [
+      ...(canWrite ? [selectColumn] : []),
       {
         id: 'tariff',
         header: () => tCols('tariff'),
@@ -164,9 +169,8 @@ export function PlusTariffListTable({
         cell: ({ row }) => <PlusTariffExportIndicator exported={row.original.exported} />,
       },
       createRowActionsColumn<PlusTariffListRow>(actions),
-    ],
-    [tCols, tList, actions],
-  );
+    ];
+  }, [canWrite, tCols, tList, actions]);
 
   return (
     <>
@@ -175,7 +179,7 @@ export function PlusTariffListTable({
         data={rows}
         loading={loading}
         getRowId={(row) => row.id}
-        enableRowSelection
+        enableRowSelection={canWrite}
         onRowClick={(row) => onOpen(row.id)}
         hasActiveFilters={hasActiveFilters}
         onClearFilters={onClearFilters}
@@ -192,29 +196,33 @@ export function PlusTariffListTable({
           />
         )}
         pagination={(table) => <DataTablePagination table={table} />}
-        fab={(table) => {
-          const selected = table.getSelectedRowModel().rows;
-          return (
-            <BulkActionBar
-              selectedCount={selected.length}
-              onClear={() => table.resetRowSelection()}
-              countLabel={(count) => tBulk('selected', { count })}
-              actions={[
-                {
-                  id: 'delete',
-                  label: tBulk('delete'),
-                  icon: <Delete02Icon />,
-                  tone: 'destructive',
-                  onClick: () =>
-                    setBulk({
-                      ids: selected.map((row) => row.original.id),
-                      resetSelection: () => table.resetRowSelection(),
-                    }),
-                },
-              ]}
-            />
-          );
-        }}
+        fab={
+          canWrite
+            ? (table) => {
+                const selected = table.getSelectedRowModel().rows;
+                return (
+                  <BulkActionBar
+                    selectedCount={selected.length}
+                    onClear={() => table.resetRowSelection()}
+                    countLabel={(count) => tBulk('selected', { count })}
+                    actions={[
+                      {
+                        id: 'delete',
+                        label: tBulk('delete'),
+                        icon: <Delete02Icon />,
+                        tone: 'destructive',
+                        onClick: () =>
+                          setBulk({
+                            ids: selected.map((row) => row.original.id),
+                            resetSelection: () => table.resetRowSelection(),
+                          }),
+                      },
+                    ]}
+                  />
+                );
+              }
+            : undefined
+        }
         noResultsState={<TableNoResultsState onClearFilters={onClearFilters} />}
         empty={
           <EmptyState
@@ -222,10 +230,16 @@ export function PlusTariffListTable({
             icon={DocumentValidationIcon}
             title={tEmpty('title')}
             description={tEmpty('description')}
+            // The platform sentence stands once, at the tab row; here the button is only disabled.
             action={
-              <Button leadingIcon={<CloudUploadIcon aria-hidden />} onClick={onUpload}>
-                {tEmpty('cta')}
-              </Button>
+              upload === UPLOAD_GATES.HIDDEN ? undefined : (
+                <CampaignUploadButton
+                  layout="stacked"
+                  withNote={false}
+                  label={tEmpty('cta')}
+                  onClick={onUpload}
+                />
+              )
             }
           />
         }

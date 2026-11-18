@@ -1,7 +1,7 @@
 'use client';
 
 import { type ColumnDef } from '@tanstack/react-table';
-import { CloudUploadIcon, Delete02Icon, DiscountIcon } from 'hugeicons-react';
+import { Delete02Icon, DiscountIcon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -17,13 +17,15 @@ import {
 import { TableNoResultsState } from '@/components/patterns/data-table-states';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
 import { EmptyState } from '@/components/patterns/empty-state';
-import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
 
+import { UPLOAD_GATES } from '../lib/campaign-access';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import { useDescribeDiscountConfig } from '../lib/discount-config';
 import type { DiscountListRow } from '../lib/discount-list';
 
+import { CampaignUploadButton } from './campaign-upload-button';
 import { DiscountListStatusBadge } from './discount-list-status-badge';
 import { DiscountTypeBadge } from './discount-type-badge';
 
@@ -76,6 +78,8 @@ export function DiscountListTable({
   const tBulk = useTranslations('discountsPage.list.bulk');
   const format = useFormatter();
   const describeConfig = useDescribeDiscountConfig();
+  // Row selection exists only for bulk delete, so a member who cannot write gets no checkboxes.
+  const { canWrite, upload } = useCampaignAccess();
 
   // Holds the ids to bulk-delete plus a reset bound to the live table instance, so confirming
   // the delete also clears row selection (the raw rowSelection record isn't auto-pruned when
@@ -84,32 +88,33 @@ export function DiscountListTable({
     null,
   );
 
-  const columns = React.useMemo<ColumnDef<DiscountListRow>[]>(
-    () => [
-      {
-        id: 'select',
-        enableSorting: false,
-        enableHiding: false,
-        header: ({ table }) => (
-          <Checkbox
-            checked={
-              table.getIsAllPageRowsSelected() ||
-              (table.getIsSomePageRowsSelected() && 'indeterminate')
-            }
-            onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-            aria-label={tList('selectAll')}
-            className="cursor-pointer"
-          />
-        ),
-        cell: ({ row }) => (
-          <Checkbox
-            checked={row.getIsSelected()}
-            onCheckedChange={(value) => row.toggleSelected(!!value)}
-            aria-label={tList('selectRow')}
-            className="cursor-pointer"
-          />
-        ),
-      },
+  const columns = React.useMemo<ColumnDef<DiscountListRow>[]>(() => {
+    const selectColumn: ColumnDef<DiscountListRow> = {
+      id: 'select',
+      enableSorting: false,
+      enableHiding: false,
+      header: ({ table }) => (
+        <Checkbox
+          checked={
+            table.getIsAllPageRowsSelected() ||
+            (table.getIsSomePageRowsSelected() && 'indeterminate')
+          }
+          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+          aria-label={tList('selectAll')}
+          className="cursor-pointer"
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox
+          checked={row.getIsSelected()}
+          onCheckedChange={(value) => row.toggleSelected(!!value)}
+          aria-label={tList('selectRow')}
+          className="cursor-pointer"
+        />
+      ),
+    };
+    return [
+      ...(canWrite ? [selectColumn] : []),
       {
         id: 'name',
         header: () => tCols('name'),
@@ -182,9 +187,8 @@ export function DiscountListTable({
         cell: ({ row }) => <DiscountListStatusBadge exported={row.original.exported} />,
       },
       createRowActionsColumn<DiscountListRow>(actions),
-    ],
-    [tCols, tList, format, describeConfig, actions],
-  );
+    ];
+  }, [canWrite, tCols, tList, format, describeConfig, actions]);
 
   return (
     <>
@@ -193,7 +197,7 @@ export function DiscountListTable({
         data={rows}
         loading={loading}
         getRowId={(row) => row.id}
-        enableRowSelection
+        enableRowSelection={canWrite}
         onRowClick={(row) => onOpen(row.id)}
         hasActiveFilters={hasActiveFilters}
         onClearFilters={onClearFilters}
@@ -210,29 +214,33 @@ export function DiscountListTable({
           />
         )}
         pagination={(table) => <DataTablePagination table={table} />}
-        fab={(table) => {
-          const selected = table.getSelectedRowModel().rows;
-          return (
-            <BulkActionBar
-              selectedCount={selected.length}
-              onClear={() => table.resetRowSelection()}
-              countLabel={(count) => tBulk('selected', { count })}
-              actions={[
-                {
-                  id: 'delete',
-                  label: tBulk('delete'),
-                  icon: <Delete02Icon />,
-                  tone: 'destructive',
-                  onClick: () =>
-                    setBulk({
-                      ids: selected.map((row) => row.original.id),
-                      resetSelection: () => table.resetRowSelection(),
-                    }),
-                },
-              ]}
-            />
-          );
-        }}
+        fab={
+          canWrite
+            ? (table) => {
+                const selected = table.getSelectedRowModel().rows;
+                return (
+                  <BulkActionBar
+                    selectedCount={selected.length}
+                    onClear={() => table.resetRowSelection()}
+                    countLabel={(count) => tBulk('selected', { count })}
+                    actions={[
+                      {
+                        id: 'delete',
+                        label: tBulk('delete'),
+                        icon: <Delete02Icon />,
+                        tone: 'destructive',
+                        onClick: () =>
+                          setBulk({
+                            ids: selected.map((row) => row.original.id),
+                            resetSelection: () => table.resetRowSelection(),
+                          }),
+                      },
+                    ]}
+                  />
+                );
+              }
+            : undefined
+        }
         noResultsState={<TableNoResultsState onClearFilters={onClearFilters} />}
         empty={
           <EmptyState
@@ -240,10 +248,16 @@ export function DiscountListTable({
             icon={DiscountIcon}
             title={tEmpty('title')}
             description={tEmpty('description')}
+            // The platform sentence stands once, at the tab row; here the button is only disabled.
             action={
-              <Button leadingIcon={<CloudUploadIcon aria-hidden />} onClick={onUpload}>
-                {tEmpty('cta')}
-              </Button>
+              upload === UPLOAD_GATES.HIDDEN ? undefined : (
+                <CampaignUploadButton
+                  layout="stacked"
+                  withNote={false}
+                  label={tEmpty('cta')}
+                  onClick={onUpload}
+                />
+              )
             }
           />
         }

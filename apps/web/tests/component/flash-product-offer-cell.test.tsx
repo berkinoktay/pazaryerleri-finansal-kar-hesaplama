@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { FlashProductOfferCell } from '@/features/campaigns/components/flash-product-offer-cell';
 import type { FlashBand, FlashProductRow } from '@/features/campaigns/lib/adapt-flash-product';
+import { type CampaignAccess, UPLOAD_GATES } from '@/features/campaigns/lib/campaign-access';
+import { CampaignAccessProvider } from '@/features/campaigns/lib/campaign-access-context';
 import { TariffScopeProvider } from '@/features/campaigns/lib/tariff-scope';
 
 import { render, screen, waitFor, within } from '../helpers/render';
@@ -117,6 +119,19 @@ function renderCell(props: React.ComponentProps<typeof FlashProductOfferCell>) {
   );
 }
 
+const READ_ONLY_ACCESS: CampaignAccess = { canWrite: false, upload: UPLOAD_GATES.HIDDEN };
+
+/** Renders the cell for a member who cannot write. */
+function renderReadOnlyCell(props: React.ComponentProps<typeof FlashProductOfferCell>) {
+  return render(
+    <CampaignAccessProvider value={READ_ONLY_ACCESS}>
+      <TariffScopeProvider scope={SCOPE}>
+        <FlashProductOfferCell {...props} />
+      </TariffScopeProvider>
+    </CampaignAccessProvider>,
+  );
+}
+
 describe('FlashProductOfferCell', () => {
   it('prints the percent when it is known', () => {
     renderCell({ row, band: offer, slotLabel: SLOT_LABEL, selected: false, onSelect: vi.fn() });
@@ -187,6 +202,39 @@ describe('FlashProductOfferCell', () => {
       expect(screen.getByText(tTable('selectOfferShort'))).toBeInTheDocument();
       await user.click(toggle);
       expect(onSelect).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('read-only member', () => {
+    it('offers no select target on an unselected offer but keeps the profit badge', () => {
+      renderReadOnlyCell({
+        row,
+        band: offer,
+        slotLabel: SLOT_LABEL,
+        selected: false,
+        onSelect: vi.fn(),
+      });
+      expect(screen.queryByRole('button', { name: SELECT_OFFER })).toBeNull();
+      // The foot's label only invites a choice, so it is gone too.
+      expect(screen.queryByText(tTable('selectOfferShort'))).toBeNull();
+      // The offer itself still reads in full, and its breakdown stays reachable.
+      expect(screen.getByText(/800,00/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: OPEN_LABEL })).toHaveTextContent(/10,00/);
+    });
+
+    it('shows a stored choice as text, with no button to change it', () => {
+      renderReadOnlyCell({
+        row,
+        band: offer,
+        slotLabel: SLOT_LABEL,
+        selected: true,
+        onSelect: vi.fn(),
+      });
+      expect(screen.getByText(tTable('offerSelected'))).toBeInTheDocument();
+      // A selected overlay would be named by the selected label: neither name may exist.
+      expect(screen.queryByRole('button', { name: tTable('offerSelected') })).toBeNull();
+      expect(screen.queryByRole('button', { name: SELECT_OFFER })).toBeNull();
+      expect(screen.getByRole('button', { name: OPEN_LABEL })).toBeInTheDocument();
     });
   });
 });

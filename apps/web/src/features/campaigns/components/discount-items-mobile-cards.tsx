@@ -11,6 +11,7 @@ import { useMarginColoring } from '@/lib/margin-coloring-context';
 
 import { useDiscountReasonEmptyLabel } from '../hooks/use-discount-reason-label';
 import type { DiscountRow, DiscountScenarioPresentation } from '../lib/adapt-discount-list';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import { DiscountCommissionCell } from './discount-commission-cell';
 import type { DiscountScenarioKey } from './discount-items-table';
 import { ProfitDelta } from './profit-delta';
@@ -55,6 +56,8 @@ export function DiscountItemsMobileCards({
   const tScenario = useTranslations('discountsPage.scenario');
   const reasonEmptyLabel = useDiscountReasonEmptyLabel();
   const scale = useMarginColoring();
+  // A member who cannot write still sees each participation checkbox, but cannot tick it.
+  const { canWrite } = useCampaignAccess();
   // ORDER lists reframe the discounted section to the whole campaign order; UNIT keeps the unit.
   const discountedHeader = presentation === 'ORDER' ? t('campaignOrder') : t('discountedPrice');
 
@@ -74,7 +77,7 @@ export function DiscountItemsMobileCards({
             <div className="gap-sm flex min-w-0 items-start">
               <Checkbox
                 checked={selectedIds.has(row.id)}
-                disabled={selectionsPending}
+                disabled={selectionsPending || !canWrite}
                 aria-label={t('includeRow')}
                 onCheckedChange={(next) => onToggleInclude(row.id, next === true)}
                 className="mt-3xs cursor-pointer"

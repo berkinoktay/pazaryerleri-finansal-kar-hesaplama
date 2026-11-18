@@ -10,6 +10,8 @@ import type {
   PlusSelectionMap,
   PlusSelectionState,
 } from '@/features/campaigns/lib/plus-bulk-actions';
+import { type CampaignAccess, UPLOAD_GATES } from '@/features/campaigns/lib/campaign-access';
+import { CampaignAccessProvider } from '@/features/campaigns/lib/campaign-access-context';
 import { TariffScopeProvider } from '@/features/campaigns/lib/tariff-scope';
 
 import { render, screen, waitFor, within } from '../helpers/render';
@@ -174,7 +176,13 @@ function customCardIn(rowEl: HTMLElement): HTMLElement {
  * Selection + custom prices stay empty (the seller hasn't committed anything — the bug
  * reproduces during LIVE typing, before any commit re-seeds the input).
  */
-function TableHarness({ rows = ROWS }: { rows?: readonly PlusTariffRow[] }): React.ReactElement {
+function TableHarness({
+  rows = ROWS,
+  selection = EMPTY_SELECTION,
+}: {
+  rows?: readonly PlusTariffRow[];
+  selection?: PlusSelectionMap;
+}): React.ReactElement {
   const [customEstimates, setCustomEstimates] = React.useState<Record<string, string | null>>({});
   const handleCustomEstimate = React.useCallback(
     (rowId: string, netProfit: string | null): void => {
@@ -189,7 +197,7 @@ function TableHarness({ rows = ROWS }: { rows?: readonly PlusTariffRow[] }): Rea
     <TariffScopeProvider scope={SCOPE}>
       <PlusTariffsTable
         rows={rows}
-        selection={EMPTY_SELECTION}
+        selection={selection}
         customPrices={EMPTY_CUSTOM_PRICES}
         customEstimates={customEstimates}
         onToggleJoin={noop}
@@ -577,5 +585,33 @@ describe('PlusTariffsTable — the custom-price input ceiling is the true ceilin
     await user.clear(input);
     await user.type(input, '95');
     expect(input).toHaveValue('95');
+  });
+});
+
+const READ_ONLY_ACCESS: CampaignAccess = { canWrite: false, upload: UPLOAD_GATES.HIDDEN };
+// ROW A is joined at the ceiling; ROW B has nothing chosen.
+const ROW_A_JOINED: PlusSelectionMap = { [ROW_A.id]: 'plus' };
+
+describe('PlusTariffsTable - read-only member', () => {
+  it('offers no join button, disables every custom price input and still shows the joined offer', () => {
+    render(
+      <CampaignAccessProvider value={READ_ONLY_ACCESS}>
+        <TableHarness rows={TWO_ROWS} selection={ROW_A_JOINED} />
+      </CampaignAccessProvider>,
+    );
+
+    // No join target anywhere: a joined overlay or foot would carry the joined label.
+    expect(screen.queryAllByRole('button', { name: tPlusTable('join') })).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: tPlusTable('joined') })).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: tPlusTable('selectCustom') })).toHaveLength(0);
+    const inputs = screen.getAllByPlaceholderText(tPlusTable('enterPrice'));
+    expect(inputs).toHaveLength(TWO_ROWS.length);
+    for (const input of inputs) expect(input).toBeDisabled();
+
+    // The stored join still reads as joined, on its own row only.
+    expect(
+      within(rowByTitle(ROW_A.productTitle)).getByText(tPlusTable('joined')),
+    ).toBeInTheDocument();
+    expect(within(rowByTitle(ROW_B.productTitle)).queryByText(tPlusTable('joined'))).toBeNull();
   });
 });

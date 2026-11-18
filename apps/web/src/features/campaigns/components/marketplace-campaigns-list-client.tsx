@@ -15,6 +15,9 @@ import { useExportWorkbook } from '../hooks/use-export-workbook';
 import { useImportWorkbook } from '../hooks/use-import-workbook';
 import { useMarketplaceCampaigns } from '../hooks/use-marketplace-campaigns';
 import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
+import { useResolvedCampaignAccess } from '../hooks/use-resolved-campaign-access';
+import { UPLOAD_GATES } from '../lib/campaign-access';
+import { CampaignAccessProvider } from '../lib/campaign-access-context';
 import { downloadBlob } from '../lib/download-blob';
 import { WORKBOOK_VERTICALS } from '../lib/workbook-verticals';
 import { MarketplaceCampaignsListView } from './marketplace-campaigns-list-view';
@@ -52,6 +55,7 @@ export function MarketplaceCampaignsListClient({
     reset: resetImport,
   } = useImportWorkbook(PAGE, orgId ?? '', storeId ?? '');
   const warnPrefilled = usePrefilledWarning();
+  const access = useResolvedCampaignAccess(PAGE);
   const [uploadOpen, setUploadOpen] = React.useState(false);
 
   const items = React.useMemo(() => list.data ?? [], [list.data]);
@@ -120,7 +124,7 @@ export function MarketplaceCampaignsListClient({
   }
 
   return (
-    <>
+    <CampaignAccessProvider value={access}>
       <MarketplaceCampaignsListView
         items={items}
         loading={list.isLoading}
@@ -129,19 +133,21 @@ export function MarketplaceCampaignsListClient({
         onExport={handleExport}
         onDelete={handleDelete}
       />
-      <WorkbookUploadDialog
-        page={PAGE}
-        open={uploadOpen}
-        onOpenChange={(next) => {
-          if (!next) resetImport();
-          setUploadOpen(next);
-        }}
-        scope={{ orgId, storeId }}
-        onSubmit={handleImport}
-        submitting={importing}
-        submitError={importError}
-        onResetError={resetImport}
-      />
-    </>
+      {access.upload === UPLOAD_GATES.ENABLED ? (
+        <WorkbookUploadDialog
+          page={PAGE}
+          open={uploadOpen}
+          onOpenChange={(next) => {
+            if (!next) resetImport();
+            setUploadOpen(next);
+          }}
+          scope={{ orgId, storeId }}
+          onSubmit={handleImport}
+          submitting={importing}
+          submitError={importError}
+          onResetError={resetImport}
+        />
+      ) : null}
+    </CampaignAccessProvider>
   );
 }

@@ -21,11 +21,13 @@ import type { TargetMarginResult } from '../api/suggest-target-margin.api';
 import { useDeleteMarketplaceCampaign } from '../hooks/use-delete-marketplace-campaign';
 import { useExportWorkbook } from '../hooks/use-export-workbook';
 import { useMarketplaceCampaignDetail } from '../hooks/use-marketplace-campaign-detail';
+import { useResolvedCampaignAccess } from '../hooks/use-resolved-campaign-access';
 import { useUpdateCampaignSelections } from '../hooks/use-update-campaign-selections';
 import {
   adaptMarketplaceCampaignDetail,
   type MarketplaceCampaignRow,
 } from '../lib/adapt-marketplace-campaign';
+import { CampaignAccessProvider } from '../lib/campaign-access-context';
 import { downloadBlob } from '../lib/download-blob';
 import {
   applyCustomPrice,
@@ -46,6 +48,7 @@ import {
   type CampaignTargetMarginMark,
 } from '../lib/marketplace-campaign-selection';
 import { TariffScopeProvider } from '../lib/tariff-scope';
+import { CampaignReadOnlyNotice } from './campaign-read-only-notice';
 import { MarketplaceCampaignConfigCard } from './marketplace-campaign-config-card';
 import { MarketplaceCampaignConfigEditDialog } from './marketplace-campaign-config-edit-dialog';
 import { MarketplaceCampaignItemsMobileCards } from './marketplace-campaign-items-mobile-cards';
@@ -98,6 +101,7 @@ export function MarketplaceCampaignDetailClient({
     storeId ?? '',
   );
   const { mutate: deleteCampaign } = useDeleteMarketplaceCampaign(orgId ?? '', storeId ?? '');
+  const access = useResolvedCampaignAccess(WORKBOOK_PAGES.MARKETPLACE_CAMPAIGN_LIST);
 
   const view = React.useMemo(
     () => (detail.data !== undefined ? adaptMarketplaceCampaignDetail(detail.data) : null),
@@ -367,120 +371,127 @@ export function MarketplaceCampaignDetailClient({
   );
 
   return (
-    <TariffScopeProvider scope={{ orgId, storeId, tariffId: campaignId }}>
-      <div className="gap-lg flex flex-col">
-        <PageHeader
-          leading={
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => router.push(LIST_PATH)}
-              leadingIcon={<ArrowLeft01Icon aria-hidden />}
-            >
-              {tPage('templates.back')}
-            </Button>
-          }
-          title={header.name}
-          intent={tPage('templates.detailIntent')}
-          variant="framed"
-          actions={
-            <div className="gap-sm flex items-center">
-              <ConfirmDialog
-                trigger={
-                  <Button
-                    variant="destructive-ghost"
-                    size="sm"
-                    leadingIcon={<Delete02Icon aria-hidden />}
-                  >
-                    {tPage('templates.delete')}
-                  </Button>
-                }
-                title={tPage('templates.deleteTitle')}
-                description={tPage('templates.deleteDescription')}
-                confirmLabel={tPage('templates.deleteConfirm')}
-                onConfirm={() =>
-                  deleteCampaign(campaignId, { onSuccess: () => router.push(LIST_PATH) })
-                }
-              />
-              {/* Export needs at least one participating product; a disabled button can't emit
+    <CampaignAccessProvider value={access}>
+      <TariffScopeProvider scope={{ orgId, storeId, tariffId: campaignId }}>
+        <div className="gap-lg flex flex-col">
+          <PageHeader
+            leading={
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => router.push(LIST_PATH)}
+                leadingIcon={<ArrowLeft01Icon aria-hidden />}
+              >
+                {tPage('templates.back')}
+              </Button>
+            }
+            title={header.name}
+            intent={tPage('templates.detailIntent')}
+            variant="framed"
+            // A member who cannot write gets neither delete nor save-and-download.
+            actions={
+              access.canWrite ? (
+                <div className="gap-sm flex items-center">
+                  <ConfirmDialog
+                    trigger={
+                      <Button
+                        variant="destructive-ghost"
+                        size="sm"
+                        leadingIcon={<Delete02Icon aria-hidden />}
+                      >
+                        {tPage('templates.delete')}
+                      </Button>
+                    }
+                    title={tPage('templates.deleteTitle')}
+                    description={tPage('templates.deleteDescription')}
+                    confirmLabel={tPage('templates.deleteConfirm')}
+                    onConfirm={() =>
+                      deleteCampaign(campaignId, { onSuccess: () => router.push(LIST_PATH) })
+                    }
+                  />
+                  {/* Export needs at least one participating product; a disabled button can't emit
                   hover, so the tooltip wraps a focusable span that explains why. */}
-              {exportDisabled ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span tabIndex={0}>{exportButton}</span>
-                  </TooltipTrigger>
-                  <TooltipContent>{tPage('actions.exportEmptyHint')}</TooltipContent>
-                </Tooltip>
-              ) : (
-                exportButton
-              )}
-            </div>
-          }
-          summary={
-            <MarketplaceCampaignSummary
-              itemCount={rows.length}
-              maxCount={counts.max}
-              customCount={counts.custom}
+                  {exportDisabled ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span tabIndex={0}>{exportButton}</span>
+                      </TooltipTrigger>
+                      <TooltipContent>{tPage('actions.exportEmptyHint')}</TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    exportButton
+                  )}
+                </div>
+              ) : undefined
+            }
+            summary={
+              <MarketplaceCampaignSummary
+                itemCount={rows.length}
+                maxCount={counts.max}
+                customCount={counts.custom}
+              />
+            }
+          />
+
+          <CampaignReadOnlyNotice />
+
+          <MarketplaceCampaignConfigCard header={header} onEdit={() => setEditOpen(true)} />
+
+          <div className="hidden min-w-0 md:block">
+            <MarketplaceCampaignItemsTable
+              rows={filteredRows}
+              presentation={presentation}
+              selection={choices.selection}
+              customPrices={choices.customPrices}
+              targetMarginMarks={targetMarginMarks}
+              onToggleChoice={handleToggleChoice}
+              onCustomPriceChange={handleCustomPriceChange}
+              toolbar={toolbar}
+              hasActiveFilters={hasFilters}
+              onClearFilters={resetFilters}
             />
-          }
-        />
+          </div>
+          <div className="gap-sm flex flex-col md:hidden">
+            {toolbar}
+            <MarketplaceCampaignItemsMobileCards
+              rows={filteredRows}
+              presentation={presentation}
+              selection={choices.selection}
+              customPrices={choices.customPrices}
+              targetMarginMarks={targetMarginMarks}
+              onToggleChoice={handleToggleChoice}
+              onCustomPriceChange={handleCustomPriceChange}
+              onClearFilters={resetFilters}
+            />
+          </div>
 
-        <MarketplaceCampaignConfigCard header={header} onEdit={() => setEditOpen(true)} />
+          {editOpen ? (
+            <MarketplaceCampaignConfigEditDialog
+              open
+              onOpenChange={(next) => {
+                if (!next) setEditOpen(false);
+              }}
+              orgId={orgId}
+              storeId={storeId}
+              campaignId={campaignId}
+              header={header}
+            />
+          ) : null}
 
-        <div className="hidden min-w-0 md:block">
-          <MarketplaceCampaignItemsTable
-            rows={filteredRows}
-            presentation={presentation}
-            selection={choices.selection}
-            customPrices={choices.customPrices}
-            targetMarginMarks={targetMarginMarks}
-            onToggleChoice={handleToggleChoice}
-            onCustomPriceChange={handleCustomPriceChange}
-            toolbar={toolbar}
-            hasActiveFilters={hasFilters}
-            onClearFilters={resetFilters}
-          />
+          {targetMarginOpen ? (
+            <MarketplaceCampaignTargetMarginDialog
+              open
+              onOpenChange={(next) => {
+                if (!next) setTargetMarginOpen(false);
+              }}
+              orgId={orgId}
+              storeId={storeId}
+              campaignId={campaignId}
+              onApply={onApplySuggestions}
+            />
+          ) : null}
         </div>
-        <div className="gap-sm flex flex-col md:hidden">
-          {toolbar}
-          <MarketplaceCampaignItemsMobileCards
-            rows={filteredRows}
-            presentation={presentation}
-            selection={choices.selection}
-            customPrices={choices.customPrices}
-            targetMarginMarks={targetMarginMarks}
-            onToggleChoice={handleToggleChoice}
-            onCustomPriceChange={handleCustomPriceChange}
-            onClearFilters={resetFilters}
-          />
-        </div>
-
-        {editOpen ? (
-          <MarketplaceCampaignConfigEditDialog
-            open
-            onOpenChange={(next) => {
-              if (!next) setEditOpen(false);
-            }}
-            orgId={orgId}
-            storeId={storeId}
-            campaignId={campaignId}
-            header={header}
-          />
-        ) : null}
-
-        {targetMarginOpen ? (
-          <MarketplaceCampaignTargetMarginDialog
-            open
-            onOpenChange={(next) => {
-              if (!next) setTargetMarginOpen(false);
-            }}
-            orgId={orgId}
-            storeId={storeId}
-            campaignId={campaignId}
-            onApply={onApplySuggestions}
-          />
-        ) : null}
-      </div>
-    </TariffScopeProvider>
+      </TariffScopeProvider>
+    </CampaignAccessProvider>
   );
 }

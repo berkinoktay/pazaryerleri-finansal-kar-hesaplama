@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Separator } from '@/components/ui/separator';
 import { Toggle } from '@/components/ui/toggle';
 
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import type { CampaignFilterState } from '../lib/marketplace-campaign-selection';
 
 type ChipKey = 'profitable' | 'losing' | 'selected' | 'tariffWarning';
@@ -49,6 +50,9 @@ export function MarketplaceCampaignToolbar({
   const tSmart = useTranslations('marketplaceCampaignsPage.smartSelect');
   // Controlled so an action closes the menu — the target-margin dialog must not open over it.
   const [menuOpen, setMenuOpen] = React.useState(false);
+  // Smart select only fills selections (the target-margin dialog included), so a member who
+  // cannot write does not get the menu.
+  const { canWrite } = useCampaignAccess();
 
   // Concrete keys per chip — next-intl's typed `t` takes a literal, not the chip union.
   const chipLabel: Record<ChipKey, string> = {
@@ -89,53 +93,55 @@ export function MarketplaceCampaignToolbar({
         ))}
       </div>
 
-      <Popover open={menuOpen} onOpenChange={setMenuOpen}>
-        <PopoverTrigger asChild>
-          <Button variant="outline" size="sm" loading={pending}>
-            {tSmart('label')}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent align="start" className="gap-sm flex w-72 flex-col">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="justify-start"
-            disabled={pending}
-            onClick={run(onSelectAllMax)}
-          >
-            {tSmart('selectAllMax')}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="justify-start"
-            disabled={pending}
-            onClick={run(onSelectProfitable)}
-          >
-            {tSmart('selectProfitable')}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="justify-start"
-            disabled={pending}
-            onClick={run(onOpenTargetMargin)}
-          >
-            {tSmart('targetMargin')}
-          </Button>
-          <Separator />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="justify-start"
-            disabled={pending}
-            onClick={run(onClearSelections)}
-          >
-            {tSmart('clear')}
-          </Button>
-          <p className="text-2xs text-muted-foreground">{tSmart('scopeHint')}</p>
-        </PopoverContent>
-      </Popover>
+      {canWrite ? (
+        <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="sm" loading={pending}>
+              {tSmart('label')}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="gap-sm flex w-72 flex-col">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="justify-start"
+              disabled={pending}
+              onClick={run(onSelectAllMax)}
+            >
+              {tSmart('selectAllMax')}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="justify-start"
+              disabled={pending}
+              onClick={run(onSelectProfitable)}
+            >
+              {tSmart('selectProfitable')}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="justify-start"
+              disabled={pending}
+              onClick={run(onOpenTargetMargin)}
+            >
+              {tSmart('targetMargin')}
+            </Button>
+            <Separator />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="justify-start"
+              disabled={pending}
+              onClick={run(onClearSelections)}
+            >
+              {tSmart('clear')}
+            </Button>
+            <p className="text-2xs text-muted-foreground">{tSmart('scopeHint')}</p>
+          </PopoverContent>
+        </Popover>
+      ) : null}
     </div>
   );
 }

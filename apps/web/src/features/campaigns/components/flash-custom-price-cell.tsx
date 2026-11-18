@@ -15,6 +15,7 @@ import { useEstimateFlashItemPrice } from '../hooks/use-estimate-flash-item-pric
 import { useFlashReasonEmptyLabel } from '../hooks/use-flash-reason-label';
 import type { FlashProductRow } from '../lib/adapt-flash-product';
 import { flashCustomCeiling, type FlashCustomChoice } from '../lib/flash-bulk-actions';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import { findBandForPrice, formatBandRange } from '../lib/commission-band-range';
 import { useTariffScope } from '../lib/tariff-scope';
 import { CommissionBandsPopover, type CommissionBandsLabels } from './commission-bands-popover';
@@ -126,6 +127,7 @@ export function FlashCustomPriceCell({
   const scope = useTariffScope();
   const estimate = useEstimateFlashItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const estimateMutate = estimate.mutate;
+  const { canWrite } = useCampaignAccess();
   // The custom-price ceiling: the lowest of the row's present offer prices — a custom flash
   // price may never exceed the best offer the seller was given.
   const ceiling = React.useMemo(() => flashCustomCeiling(row), [row]);
@@ -275,6 +277,8 @@ export function FlashCustomPriceCell({
           aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
           placeholder={t('table.enterPrice')}
           className="md:max-w-input-price w-full"
+          // A member who cannot write still reads a stored price, but cannot type one.
+          disabled={!canWrite}
         />
         <span className="text-2xs text-muted-foreground">
           {hasEstimate && lastResult.commissionPct != null ? (

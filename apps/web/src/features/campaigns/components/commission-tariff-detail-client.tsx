@@ -19,6 +19,7 @@ import { ApiError } from '@/lib/api-error';
 import { useCommissionTariffDetail } from '../hooks/use-commission-tariff-detail';
 import { useDeleteTariff } from '../hooks/use-delete-tariff';
 import { useExportWorkbook } from '../hooks/use-export-workbook';
+import { useResolvedCampaignAccess } from '../hooks/use-resolved-campaign-access';
 import { useUpdateSelections } from '../hooks/use-update-selections';
 import { asBandKey } from '../lib/band-key';
 import {
@@ -33,12 +34,14 @@ import {
   type TariffFilterState,
 } from '../lib/bulk-actions';
 import { toDetailTemplate } from '../lib/adapt-tariff';
+import { CampaignAccessProvider } from '../lib/campaign-access-context';
 import { summarizeSelection } from '../lib/commission-tariff-summary';
 import { downloadBlob } from '../lib/download-blob';
 import { seedCommissionSelection } from '../lib/seed-commission-selection';
 import { selectionSaveErrorToast } from '../lib/selection-save-error';
 import { TariffScopeProvider } from '../lib/tariff-scope';
 import { computeExportPreview, resolveCommissionExportPrice } from '../lib/export-preview';
+import { CampaignReadOnlyNotice } from './campaign-read-only-notice';
 import { CommissionTariffStatusBadge, STATUS_TONE } from './commission-tariff-status-badge';
 import { CommissionTariffsMobileCards } from './commission-tariffs-mobile-cards';
 import { CommissionTariffsSummary } from './commission-tariffs-summary';
@@ -83,6 +86,7 @@ export function CommissionTariffDetailClient({
     storeId ?? '',
   );
   const deleteTariff = useDeleteTariff(orgId ?? '', storeId ?? '');
+  const access = useResolvedCampaignAccess(WORKBOOK_PAGES.COMMISSION_TARIFF);
 
   const template = React.useMemo(
     () => (detail.data !== undefined ? toDetailTemplate(detail.data) : null),
@@ -406,114 +410,121 @@ export function CommissionTariffDetailClient({
   );
 
   return (
-    <TariffScopeProvider scope={{ orgId, storeId, tariffId }}>
-      <div className="gap-lg flex flex-col">
-        <PageHeader
-          leading={
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => router.push(LIST_PATH)}
-              leadingIcon={<ArrowLeft01Icon aria-hidden />}
-            >
-              {tPage('templates.back')}
-            </Button>
-          }
-          title={template.name}
-          badge={<CommissionTariffStatusBadge validity={activePeriod.validity} />}
-          intent={activePeriod.dateRangeLabel}
-          variant="framed"
-          actions={
-            <div className="gap-sm flex items-center">
-              <ConfirmDialog
-                trigger={
-                  <Button
-                    variant="destructive-ghost"
-                    size="sm"
-                    leadingIcon={<Delete02Icon aria-hidden />}
-                  >
-                    {tPage('templates.delete')}
-                  </Button>
-                }
-                title={tPage('templates.deleteTitle')}
-                description={tPage('templates.deleteDescription')}
-                confirmLabel={tPage('templates.deleteConfirm')}
-                onConfirm={() =>
-                  deleteTariff.mutate(tariffId, { onSuccess: () => router.push(LIST_PATH) })
-                }
-              />
-              {/* Fixed export button (replaces the floating bar): opens a preview modal
-                  of which window files will download before the seller confirms. */}
+    <CampaignAccessProvider value={access}>
+      <TariffScopeProvider scope={{ orgId, storeId, tariffId }}>
+        <div className="gap-lg flex flex-col">
+          <PageHeader
+            leading={
               <Button
+                variant="outline"
                 size="sm"
-                onClick={() => setExportOpen(true)}
-                disabled={globalSelectedCount === 0}
-                leadingIcon={<DownloadCircle01Icon aria-hidden />}
+                onClick={() => router.push(LIST_PATH)}
+                leadingIcon={<ArrowLeft01Icon aria-hidden />}
               >
-                {tPage('actions.export')}
+                {tPage('templates.back')}
               </Button>
-            </div>
-          }
-          summary={<CommissionTariffsSummary summary={summary} />}
-        />
+            }
+            title={template.name}
+            badge={<CommissionTariffStatusBadge validity={activePeriod.validity} />}
+            intent={activePeriod.dateRangeLabel}
+            variant="framed"
+            // A member who cannot write gets neither delete nor export.
+            actions={
+              access.canWrite ? (
+                <div className="gap-sm flex items-center">
+                  <ConfirmDialog
+                    trigger={
+                      <Button
+                        variant="destructive-ghost"
+                        size="sm"
+                        leadingIcon={<Delete02Icon aria-hidden />}
+                      >
+                        {tPage('templates.delete')}
+                      </Button>
+                    }
+                    title={tPage('templates.deleteTitle')}
+                    description={tPage('templates.deleteDescription')}
+                    confirmLabel={tPage('templates.deleteConfirm')}
+                    onConfirm={() =>
+                      deleteTariff.mutate(tariffId, { onSuccess: () => router.push(LIST_PATH) })
+                    }
+                  />
+                  {/* Fixed export button (replaces the floating bar): opens a preview modal
+                  of which window files will download before the seller confirms. */}
+                  <Button
+                    size="sm"
+                    onClick={() => setExportOpen(true)}
+                    disabled={globalSelectedCount === 0}
+                    leadingIcon={<DownloadCircle01Icon aria-hidden />}
+                  >
+                    {tPage('actions.export')}
+                  </Button>
+                </div>
+              ) : undefined
+            }
+            summary={<CommissionTariffsSummary summary={summary} />}
+          />
 
-        <div className="hidden min-w-0 md:block">
-          <CommissionTariffsTable
-            rows={filteredRows}
-            selection={selection}
-            customPrices={customPrices}
-            customEstimates={customEstimates}
-            onSelectBand={handleSelectBand}
-            onSelectCustom={handleSelectCustom}
-            onDeselectCustom={handleDeselectCustom}
-            onCustomEstimate={handleCustomEstimate}
-            getCustomDraft={getCustomDraft}
-            onCustomDraftChange={handleCustomDraftChange}
-            tabs={periodTabs}
-            toolbar={toolbar}
-            hasActiveFilters={hasActiveFilters}
-            onClearFilters={resetFilters}
+          <CampaignReadOnlyNotice />
+
+          <div className="hidden min-w-0 md:block">
+            <CommissionTariffsTable
+              rows={filteredRows}
+              selection={selection}
+              customPrices={customPrices}
+              customEstimates={customEstimates}
+              onSelectBand={handleSelectBand}
+              onSelectCustom={handleSelectCustom}
+              onDeselectCustom={handleDeselectCustom}
+              onCustomEstimate={handleCustomEstimate}
+              getCustomDraft={getCustomDraft}
+              onCustomDraftChange={handleCustomDraftChange}
+              tabs={periodTabs}
+              toolbar={toolbar}
+              hasActiveFilters={hasActiveFilters}
+              onClearFilters={resetFilters}
+            />
+          </div>
+          <div className="gap-sm flex flex-col md:hidden">
+            {periodTabs}
+            {toolbar}
+            <CommissionTariffsMobileCards
+              rows={filteredRows}
+              selection={selection}
+              customPrices={customPrices}
+              customEstimates={customEstimates}
+              onSelectBand={handleSelectBand}
+              onSelectCustom={handleSelectCustom}
+              onDeselectCustom={handleDeselectCustom}
+              onCustomEstimate={handleCustomEstimate}
+              getCustomDraft={getCustomDraft}
+              onCustomDraftChange={handleCustomDraftChange}
+            />
+          </div>
+
+          <ExportTariffDialog
+            open={exportOpen}
+            onOpenChange={setExportOpen}
+            files={previewFiles}
+            labels={{
+              title: tExport('title'),
+              description: tExport('description'),
+              fileName: (days) => tExport('fileName', { days }),
+              productCount: (count) => tExport('productCount', { count }),
+              zipNote: (count) => tExport('zipNote', { count }),
+              cancel: tExport('cancel'),
+              download: tExport('download'),
+              saving: tExport('saving'),
+              exporting: tExport('exporting'),
+            }}
+            // Two-phase: selections PATCH first, then the file downloads — so the
+            // dialog can say which is happening ("kaydediliyor…" → "indiriliyor…").
+            isSaving={updateSelections.isPending}
+            isDownloading={exportTariff.isPending}
+            onConfirm={onSaveExport}
           />
         </div>
-        <div className="gap-sm flex flex-col md:hidden">
-          {periodTabs}
-          {toolbar}
-          <CommissionTariffsMobileCards
-            rows={filteredRows}
-            selection={selection}
-            customPrices={customPrices}
-            customEstimates={customEstimates}
-            onSelectBand={handleSelectBand}
-            onSelectCustom={handleSelectCustom}
-            onDeselectCustom={handleDeselectCustom}
-            onCustomEstimate={handleCustomEstimate}
-            getCustomDraft={getCustomDraft}
-            onCustomDraftChange={handleCustomDraftChange}
-          />
-        </div>
-
-        <ExportTariffDialog
-          open={exportOpen}
-          onOpenChange={setExportOpen}
-          files={previewFiles}
-          labels={{
-            title: tExport('title'),
-            description: tExport('description'),
-            fileName: (days) => tExport('fileName', { days }),
-            productCount: (count) => tExport('productCount', { count }),
-            zipNote: (count) => tExport('zipNote', { count }),
-            cancel: tExport('cancel'),
-            download: tExport('download'),
-            saving: tExport('saving'),
-            exporting: tExport('exporting'),
-          }}
-          // Two-phase: selections PATCH first, then the file downloads — so the
-          // dialog can say which is happening ("kaydediliyor…" → "indiriliyor…").
-          isSaving={updateSelections.isPending}
-          isDownloading={exportTariff.isPending}
-          onConfirm={onSaveExport}
-        />
-      </div>
-    </TariffScopeProvider>
+      </TariffScopeProvider>
+    </CampaignAccessProvider>
   );
 }

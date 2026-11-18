@@ -18,6 +18,7 @@ import { ApiError } from '@/lib/api-error';
 import { useAdvantageTariffDetail } from '../hooks/use-advantage-tariff-detail';
 import { useDeleteAdvantageTariff } from '../hooks/use-delete-advantage-tariff';
 import { useExportWorkbook } from '../hooks/use-export-workbook';
+import { useResolvedCampaignAccess } from '../hooks/use-resolved-campaign-access';
 import { useUpdateAdvantageSelections } from '../hooks/use-update-advantage-selections';
 import { toAdvantageTariffView, type NonNullStarTierKey } from '../lib/adapt-advantage-tariff';
 import {
@@ -32,6 +33,7 @@ import {
   type AdvantageTariffFilterState,
 } from '../lib/advantage-bulk-actions';
 import { summarizeAdvantageSelection } from '../lib/advantage-tariff-summary';
+import { CampaignAccessProvider } from '../lib/campaign-access-context';
 import { downloadBlob } from '../lib/download-blob';
 import { TariffScopeProvider } from '../lib/tariff-scope';
 import type { ExportPreviewFile } from '../lib/export-preview';
@@ -41,6 +43,7 @@ import { AdvantageTariffsMobileCards } from './advantage-tariffs-mobile-cards';
 import { AdvantageTariffsSummary } from './advantage-tariffs-summary';
 import { AdvantageTariffsTable } from './advantage-tariffs-table';
 import { AdvantageTariffsToolbar } from './advantage-tariffs-toolbar';
+import { CampaignReadOnlyNotice } from './campaign-read-only-notice';
 import { ExportTariffDialog } from './export-tariff-dialog';
 
 const LIST_PATH = '/campaigns/product-labels';
@@ -83,6 +86,7 @@ export function AdvantageTariffDetailClient({
     storeId ?? '',
   );
   const deleteTariff = useDeleteAdvantageTariff(orgId ?? '', storeId ?? '');
+  const access = useResolvedCampaignAccess(WORKBOOK_PAGES.ADVANTAGE_TARIFF);
 
   const view = React.useMemo(
     () => (detail.data !== undefined ? toAdvantageTariffView(detail.data) : null),
@@ -348,127 +352,134 @@ export function AdvantageTariffDetailClient({
   );
 
   return (
-    <TariffScopeProvider scope={{ orgId, storeId, tariffId }}>
-      <div className="gap-lg flex flex-col">
-        <PageHeader
-          leading={
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => router.push(LIST_PATH)}
-              leadingIcon={<ArrowLeft01Icon aria-hidden />}
-            >
-              {tPage('templates.back')}
-            </Button>
-          }
-          title={view.name}
-          intent={tPage('templates.detailIntent')}
-          variant="framed"
-          actions={
-            <div className="gap-sm flex items-center">
-              <ConfirmDialog
-                trigger={
-                  <Button
-                    variant="destructive-ghost"
-                    size="sm"
-                    leadingIcon={<Delete02Icon aria-hidden />}
-                  >
-                    {tPage('templates.delete')}
-                  </Button>
-                }
-                title={tPage('templates.deleteTitle')}
-                description={tPage('templates.deleteDescription')}
-                confirmLabel={tPage('templates.deleteConfirm')}
-                onConfirm={() =>
-                  deleteTariff.mutate(tariffId, { onSuccess: () => router.push(LIST_PATH) })
-                }
-              />
-              {/* Fixed export button (replaces the floating bar): opens a preview modal of the
-                  file that will download before the seller confirms. */}
+    <CampaignAccessProvider value={access}>
+      <TariffScopeProvider scope={{ orgId, storeId, tariffId }}>
+        <div className="gap-lg flex flex-col">
+          <PageHeader
+            leading={
               <Button
+                variant="outline"
                 size="sm"
-                onClick={() => setExportOpen(true)}
-                disabled={summary.joinedCount === 0}
-                leadingIcon={<DownloadCircle01Icon aria-hidden />}
+                onClick={() => router.push(LIST_PATH)}
+                leadingIcon={<ArrowLeft01Icon aria-hidden />}
               >
-                {tPage('actions.export')}
+                {tPage('templates.back')}
               </Button>
-            </div>
-          }
-          summary={<AdvantageTariffsSummary summary={summary} />}
-        />
+            }
+            title={view.name}
+            intent={tPage('templates.detailIntent')}
+            variant="framed"
+            // A member who cannot write gets neither delete nor export.
+            actions={
+              access.canWrite ? (
+                <div className="gap-sm flex items-center">
+                  <ConfirmDialog
+                    trigger={
+                      <Button
+                        variant="destructive-ghost"
+                        size="sm"
+                        leadingIcon={<Delete02Icon aria-hidden />}
+                      >
+                        {tPage('templates.delete')}
+                      </Button>
+                    }
+                    title={tPage('templates.deleteTitle')}
+                    description={tPage('templates.deleteDescription')}
+                    confirmLabel={tPage('templates.deleteConfirm')}
+                    onConfirm={() =>
+                      deleteTariff.mutate(tariffId, { onSuccess: () => router.push(LIST_PATH) })
+                    }
+                  />
+                  {/* Fixed export button (replaces the floating bar): opens a preview modal of the
+                  file that will download before the seller confirms. */}
+                  <Button
+                    size="sm"
+                    onClick={() => setExportOpen(true)}
+                    disabled={summary.joinedCount === 0}
+                    leadingIcon={<DownloadCircle01Icon aria-hidden />}
+                  >
+                    {tPage('actions.export')}
+                  </Button>
+                </div>
+              ) : undefined
+            }
+            summary={<AdvantageTariffsSummary summary={summary} />}
+          />
 
-        <AdvantageCommissionSourceHeader
-          orgId={orgId}
-          storeId={storeId}
-          tariffId={tariffId}
-          commissionSource={view.commissionSource}
-          commissionSourceMode={view.commissionSourceMode}
-        />
+          <CampaignReadOnlyNotice />
 
-        <AdvantageCommissionWarning
-          commissionSourceMode={view.commissionSourceMode}
-          hasUnmatchedCommissionProducts={view.hasUnmatchedCommissionProducts}
-        />
+          <AdvantageCommissionSourceHeader
+            orgId={orgId}
+            storeId={storeId}
+            tariffId={tariffId}
+            commissionSource={view.commissionSource}
+            commissionSourceMode={view.commissionSourceMode}
+          />
 
-        <div className="hidden min-w-0 md:block">
-          <AdvantageTariffsTable
-            rows={filteredRows}
-            selection={selection}
-            customPrices={customPrices}
-            customEstimates={customEstimates}
-            onSelectTier={handleSelectTier}
-            onSelectCustom={handleSelectCustom}
-            onDeselectCustom={handleDeselectCustom}
-            onCustomEstimate={handleCustomEstimate}
-            getCustomDraft={getCustomDraft}
-            onCustomDraftChange={handleCustomDraftChange}
-            toolbar={toolbar}
-            hasActiveFilters={hasActiveFilters}
-            onClearFilters={resetFilters}
+          <AdvantageCommissionWarning
+            commissionSourceMode={view.commissionSourceMode}
+            hasUnmatchedCommissionProducts={view.hasUnmatchedCommissionProducts}
+          />
+
+          <div className="hidden min-w-0 md:block">
+            <AdvantageTariffsTable
+              rows={filteredRows}
+              selection={selection}
+              customPrices={customPrices}
+              customEstimates={customEstimates}
+              onSelectTier={handleSelectTier}
+              onSelectCustom={handleSelectCustom}
+              onDeselectCustom={handleDeselectCustom}
+              onCustomEstimate={handleCustomEstimate}
+              getCustomDraft={getCustomDraft}
+              onCustomDraftChange={handleCustomDraftChange}
+              toolbar={toolbar}
+              hasActiveFilters={hasActiveFilters}
+              onClearFilters={resetFilters}
+            />
+          </div>
+          <div className="gap-sm flex flex-col md:hidden">
+            {toolbar}
+            <AdvantageTariffsMobileCards
+              rows={filteredRows}
+              selection={selection}
+              customPrices={customPrices}
+              customEstimates={customEstimates}
+              onSelectTier={handleSelectTier}
+              onSelectCustom={handleSelectCustom}
+              onDeselectCustom={handleDeselectCustom}
+              onCustomEstimate={handleCustomEstimate}
+              getCustomDraft={getCustomDraft}
+              onCustomDraftChange={handleCustomDraftChange}
+            />
+          </div>
+
+          <ExportTariffDialog
+            open={exportOpen}
+            onOpenChange={setExportOpen}
+            files={previewFiles}
+            labels={{
+              title: tExport('title'),
+              description: tExport('description'),
+              // Advantage exports a single xlsx — the label never uses a day count.
+              fileName: () => tExport('fileName'),
+              productCount: (count) => tExport('productCount', { count }),
+              // Never rendered: advantage always produces exactly one file, so the multi-file
+              // ZIP note never shows (guarded by `files.length > 1`).
+              zipNote: () => '',
+              cancel: tExport('cancel'),
+              download: tExport('download'),
+              saving: tExport('saving'),
+              exporting: tExport('exporting'),
+            }}
+            // Two-phase: selections PATCH first, then the file downloads — so the dialog can say
+            // which is happening ("kaydediliyor…" → "indiriliyor…").
+            isSaving={updateSelections.isPending}
+            isDownloading={exportTariff.isPending}
+            onConfirm={onSaveExport}
           />
         </div>
-        <div className="gap-sm flex flex-col md:hidden">
-          {toolbar}
-          <AdvantageTariffsMobileCards
-            rows={filteredRows}
-            selection={selection}
-            customPrices={customPrices}
-            customEstimates={customEstimates}
-            onSelectTier={handleSelectTier}
-            onSelectCustom={handleSelectCustom}
-            onDeselectCustom={handleDeselectCustom}
-            onCustomEstimate={handleCustomEstimate}
-            getCustomDraft={getCustomDraft}
-            onCustomDraftChange={handleCustomDraftChange}
-          />
-        </div>
-
-        <ExportTariffDialog
-          open={exportOpen}
-          onOpenChange={setExportOpen}
-          files={previewFiles}
-          labels={{
-            title: tExport('title'),
-            description: tExport('description'),
-            // Advantage exports a single xlsx — the label never uses a day count.
-            fileName: () => tExport('fileName'),
-            productCount: (count) => tExport('productCount', { count }),
-            // Never rendered: advantage always produces exactly one file, so the multi-file
-            // ZIP note never shows (guarded by `files.length > 1`).
-            zipNote: () => '',
-            cancel: tExport('cancel'),
-            download: tExport('download'),
-            saving: tExport('saving'),
-            exporting: tExport('exporting'),
-          }}
-          // Two-phase: selections PATCH first, then the file downloads — so the dialog can say
-          // which is happening ("kaydediliyor…" → "indiriliyor…").
-          isSaving={updateSelections.isPending}
-          isDownloading={exportTariff.isPending}
-          onConfirm={onSaveExport}
-        />
-      </div>
-    </TariffScopeProvider>
+      </TariffScopeProvider>
+    </CampaignAccessProvider>
   );
 }

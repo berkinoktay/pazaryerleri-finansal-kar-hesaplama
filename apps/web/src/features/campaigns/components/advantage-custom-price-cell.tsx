@@ -15,6 +15,7 @@ import { useAdvantageReasonEmptyLabel } from '../hooks/use-advantage-reason-labe
 import { useEstimateAdvantageItemPrice } from '../hooks/use-estimate-advantage-item-price';
 import type { AdvantageTariffRow } from '../lib/adapt-advantage-tariff';
 import type { AdvantageCustomChoice } from '../lib/advantage-bulk-actions';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import { findBandForPrice, formatBandRange } from '../lib/commission-band-range';
 import { useTariffScope } from '../lib/tariff-scope';
 import { AdvantageTariffBreakdown } from './advantage-tariff-breakdown';
@@ -110,6 +111,7 @@ export function AdvantageCustomPriceCell({
   const scope = useTariffScope();
   const estimate = useEstimateAdvantageItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const estimateMutate = estimate.mutate;
+  const { canWrite } = useCampaignAccess();
   // Seed the input, highest priority first: a surviving DRAFT from the parent's ref store,
   // then the edit-buffer's committed custom price, then the persisted server value. A
   // `null` draft means the seller deliberately cleared the field — start empty.
@@ -240,6 +242,8 @@ export function AdvantageCustomPriceCell({
           aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
           placeholder={t('table.enterPrice')}
           className="md:max-w-input-price w-full"
+          // A member who cannot write still reads a stored price, but cannot type one.
+          disabled={!canWrite}
         />
         <span className="text-2xs text-muted-foreground">
           {hasEstimate && lastResult.commissionPct != null ? (

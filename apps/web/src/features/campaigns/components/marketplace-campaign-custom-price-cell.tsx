@@ -16,6 +16,7 @@ import type {
   CampaignScenarioPresentation,
   MarketplaceCampaignRow,
 } from '../lib/adapt-marketplace-campaign';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import {
   campaignRowBestOption,
   customOptionFigures,
@@ -77,6 +78,7 @@ export function MarketplaceCampaignCustomPriceCell({
   const scale = useMarginColoring();
   const errorId = React.useId();
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
+  const { canWrite } = useCampaignAccess();
   // An open breakdown prices the input at once — the saved price included.
   const whatIf = useCustomPriceWhatIf(row, price, breakdownOpen);
 
@@ -137,6 +139,8 @@ export function MarketplaceCampaignCustomPriceCell({
           aria-label={t('customPriceAria', { product: row.productTitle })}
           placeholder={t('enterPrice')}
           className="md:max-w-input-price w-full"
+          // A member who cannot write still reads a stored price, but cannot type one.
+          disabled={!canWrite}
         />
         {error !== null ? (
           <span id={errorId} className="text-2xs text-destructive">

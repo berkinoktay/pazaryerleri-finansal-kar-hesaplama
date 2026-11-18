@@ -1,6 +1,5 @@
 'use client';
 
-import { CloudUploadIcon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import { parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
@@ -8,7 +7,6 @@ import * as React from 'react';
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { FilterTabs } from '@/components/patterns/filter-tabs';
 import { PageHeader } from '@/components/patterns/page-header';
-import { Button } from '@/components/ui/button';
 
 import type { DiscountListListItem } from '../api/list-discount-lists.api';
 import {
@@ -19,6 +17,8 @@ import {
   type DiscountListRow,
 } from '../lib/discount-list';
 
+import { CampaignReadOnlyNotice } from './campaign-read-only-notice';
+import { CampaignUploadButton } from './campaign-upload-button';
 import { DiscountListTable } from './discount-list-table';
 import { DiscountListsSummary } from './discount-lists-summary';
 import { useDiscountListRowActions } from './use-discount-list-row-actions';
@@ -137,9 +137,7 @@ export function DiscountListsView({
           { value: 'pending', label: tListStatus('pending'), count: statusCounts.pending },
         ]}
       />
-      <Button size="sm" leadingIcon={<CloudUploadIcon aria-hidden />} onClick={onCreate}>
-        {tList('upload')}
-      </Button>
+      <CampaignUploadButton size="sm" label={tList('upload')} onClick={onCreate} />
     </div>
   );
 
@@ -158,6 +156,7 @@ export function DiscountListsView({
         }
         summary={<DiscountListsSummary stats={stats} loading={loading} />}
       />
+      <CampaignReadOnlyNotice />
 
       <DiscountListTable
         rows={filtered}

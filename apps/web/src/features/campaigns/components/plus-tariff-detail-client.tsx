@@ -19,8 +19,10 @@ import { ApiError } from '@/lib/api-error';
 import { useDeletePlusTariff } from '../hooks/use-delete-plus-tariff';
 import { useExportWorkbook } from '../hooks/use-export-workbook';
 import { usePlusTariffDetail } from '../hooks/use-plus-tariff-detail';
+import { useResolvedCampaignAccess } from '../hooks/use-resolved-campaign-access';
 import { useUpdatePlusSelections } from '../hooks/use-update-plus-selections';
 import { toPlusTariffView } from '../lib/adapt-plus-tariff';
+import { CampaignAccessProvider } from '../lib/campaign-access-context';
 import { downloadBlob } from '../lib/download-blob';
 import {
   clearJoins,
@@ -37,6 +39,7 @@ import { seedPlusSelection } from '../lib/seed-plus-selection';
 import { selectionSaveErrorToast } from '../lib/selection-save-error';
 import { TariffScopeProvider } from '../lib/tariff-scope';
 import { computeExportPreview, resolvePlusExportPrice } from '../lib/export-preview';
+import { CampaignReadOnlyNotice } from './campaign-read-only-notice';
 import { ExportTariffDialog } from './export-tariff-dialog';
 import { PeriodTabs } from './period-tabs';
 import { PlusTariffStatusBadge, STATUS_TONE } from './plus-tariff-status-badge';
@@ -83,6 +86,7 @@ export function PlusTariffDetailClient({
     storeId ?? '',
   );
   const deleteTariff = useDeletePlusTariff(orgId ?? '', storeId ?? '');
+  const access = useResolvedCampaignAccess(WORKBOOK_PAGES.PLUS_COMMISSION_TARIFF);
 
   const view = React.useMemo(
     () => (detail.data !== undefined ? toPlusTariffView(detail.data) : null),
@@ -396,114 +400,121 @@ export function PlusTariffDetailClient({
   );
 
   return (
-    <TariffScopeProvider scope={{ orgId, storeId, tariffId }}>
-      <div className="gap-lg flex flex-col">
-        <PageHeader
-          leading={
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => router.push(LIST_PATH)}
-              leadingIcon={<ArrowLeft01Icon aria-hidden />}
-            >
-              {tPage('templates.back')}
-            </Button>
-          }
-          title={view.name}
-          badge={<PlusTariffStatusBadge validity={activePeriod.validity} />}
-          intent={activePeriod.dateRangeLabel}
-          variant="framed"
-          actions={
-            <div className="gap-sm flex items-center">
-              <ConfirmDialog
-                trigger={
-                  <Button
-                    variant="destructive-ghost"
-                    size="sm"
-                    leadingIcon={<Delete02Icon aria-hidden />}
-                  >
-                    {tPage('templates.delete')}
-                  </Button>
-                }
-                title={tPage('templates.deleteTitle')}
-                description={tPage('templates.deleteDescription')}
-                confirmLabel={tPage('templates.deleteConfirm')}
-                onConfirm={() =>
-                  deleteTariff.mutate(tariffId, { onSuccess: () => router.push(LIST_PATH) })
-                }
-              />
-              {/* Fixed export button (replaces the floating bar): opens a preview modal of
-                  which window files will download before the seller confirms. */}
+    <CampaignAccessProvider value={access}>
+      <TariffScopeProvider scope={{ orgId, storeId, tariffId }}>
+        <div className="gap-lg flex flex-col">
+          <PageHeader
+            leading={
               <Button
+                variant="outline"
                 size="sm"
-                onClick={() => setExportOpen(true)}
-                disabled={globalJoinedCount === 0}
-                leadingIcon={<DownloadCircle01Icon aria-hidden />}
+                onClick={() => router.push(LIST_PATH)}
+                leadingIcon={<ArrowLeft01Icon aria-hidden />}
               >
-                {tPage('actions.export')}
+                {tPage('templates.back')}
               </Button>
-            </div>
-          }
-          summary={<PlusTariffsSummary summary={summary} />}
-        />
+            }
+            title={view.name}
+            badge={<PlusTariffStatusBadge validity={activePeriod.validity} />}
+            intent={activePeriod.dateRangeLabel}
+            variant="framed"
+            // A member who cannot write gets neither delete nor export.
+            actions={
+              access.canWrite ? (
+                <div className="gap-sm flex items-center">
+                  <ConfirmDialog
+                    trigger={
+                      <Button
+                        variant="destructive-ghost"
+                        size="sm"
+                        leadingIcon={<Delete02Icon aria-hidden />}
+                      >
+                        {tPage('templates.delete')}
+                      </Button>
+                    }
+                    title={tPage('templates.deleteTitle')}
+                    description={tPage('templates.deleteDescription')}
+                    confirmLabel={tPage('templates.deleteConfirm')}
+                    onConfirm={() =>
+                      deleteTariff.mutate(tariffId, { onSuccess: () => router.push(LIST_PATH) })
+                    }
+                  />
+                  {/* Fixed export button (replaces the floating bar): opens a preview modal of
+                  which window files will download before the seller confirms. */}
+                  <Button
+                    size="sm"
+                    onClick={() => setExportOpen(true)}
+                    disabled={globalJoinedCount === 0}
+                    leadingIcon={<DownloadCircle01Icon aria-hidden />}
+                  >
+                    {tPage('actions.export')}
+                  </Button>
+                </div>
+              ) : undefined
+            }
+            summary={<PlusTariffsSummary summary={summary} />}
+          />
 
-        <div className="hidden min-w-0 md:block">
-          <PlusTariffsTable
-            rows={filteredRows}
-            selection={selection}
-            customPrices={customPrices}
-            customEstimates={customEstimates}
-            onToggleJoin={handleToggleJoin}
-            onSelectCustom={handleSelectCustom}
-            onDeselectCustom={handleDeselectCustom}
-            onCustomEstimate={handleCustomEstimate}
-            getCustomDraft={getCustomDraft}
-            onCustomDraftChange={handleCustomDraftChange}
-            tabs={periodTabs}
-            toolbar={toolbar}
-            hasActiveFilters={hasActiveFilters}
-            onClearFilters={resetFilters}
+          <CampaignReadOnlyNotice />
+
+          <div className="hidden min-w-0 md:block">
+            <PlusTariffsTable
+              rows={filteredRows}
+              selection={selection}
+              customPrices={customPrices}
+              customEstimates={customEstimates}
+              onToggleJoin={handleToggleJoin}
+              onSelectCustom={handleSelectCustom}
+              onDeselectCustom={handleDeselectCustom}
+              onCustomEstimate={handleCustomEstimate}
+              getCustomDraft={getCustomDraft}
+              onCustomDraftChange={handleCustomDraftChange}
+              tabs={periodTabs}
+              toolbar={toolbar}
+              hasActiveFilters={hasActiveFilters}
+              onClearFilters={resetFilters}
+            />
+          </div>
+          <div className="gap-sm flex flex-col md:hidden">
+            {periodTabs}
+            {toolbar}
+            <PlusTariffsMobileCards
+              rows={filteredRows}
+              selection={selection}
+              customPrices={customPrices}
+              customEstimates={customEstimates}
+              onToggleJoin={handleToggleJoin}
+              onSelectCustom={handleSelectCustom}
+              onDeselectCustom={handleDeselectCustom}
+              onCustomEstimate={handleCustomEstimate}
+              getCustomDraft={getCustomDraft}
+              onCustomDraftChange={handleCustomDraftChange}
+            />
+          </div>
+
+          <ExportTariffDialog
+            open={exportOpen}
+            onOpenChange={setExportOpen}
+            files={previewFiles}
+            labels={{
+              title: tExport('title'),
+              description: tExport('description'),
+              fileName: (days) => tExport('fileName', { days }),
+              productCount: (count) => tExport('productCount', { count }),
+              zipNote: (count) => tExport('zipNote', { count }),
+              cancel: tExport('cancel'),
+              download: tExport('download'),
+              saving: tExport('saving'),
+              exporting: tExport('exporting'),
+            }}
+            // Two-phase: selections PATCH first, then the file downloads — so the dialog
+            // can say which is happening ("kaydediliyor…" → "indiriliyor…").
+            isSaving={updateSelections.isPending}
+            isDownloading={exportTariff.isPending}
+            onConfirm={onSaveExport}
           />
         </div>
-        <div className="gap-sm flex flex-col md:hidden">
-          {periodTabs}
-          {toolbar}
-          <PlusTariffsMobileCards
-            rows={filteredRows}
-            selection={selection}
-            customPrices={customPrices}
-            customEstimates={customEstimates}
-            onToggleJoin={handleToggleJoin}
-            onSelectCustom={handleSelectCustom}
-            onDeselectCustom={handleDeselectCustom}
-            onCustomEstimate={handleCustomEstimate}
-            getCustomDraft={getCustomDraft}
-            onCustomDraftChange={handleCustomDraftChange}
-          />
-        </div>
-
-        <ExportTariffDialog
-          open={exportOpen}
-          onOpenChange={setExportOpen}
-          files={previewFiles}
-          labels={{
-            title: tExport('title'),
-            description: tExport('description'),
-            fileName: (days) => tExport('fileName', { days }),
-            productCount: (count) => tExport('productCount', { count }),
-            zipNote: (count) => tExport('zipNote', { count }),
-            cancel: tExport('cancel'),
-            download: tExport('download'),
-            saving: tExport('saving'),
-            exporting: tExport('exporting'),
-          }}
-          // Two-phase: selections PATCH first, then the file downloads — so the dialog
-          // can say which is happening ("kaydediliyor…" → "indiriliyor…").
-          isSaving={updateSelections.isPending}
-          isDownloading={exportTariff.isPending}
-          onConfirm={onSaveExport}
-        />
-      </div>
-    </TariffScopeProvider>
+      </TariffScopeProvider>
+    </CampaignAccessProvider>
   );
 }

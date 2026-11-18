@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Separator } from '@/components/ui/separator';
 import { Toggle } from '@/components/ui/toggle';
 
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import type { DiscountFilterState } from '../lib/discount-selection';
 
 export interface DiscountItemsToolbarProps {
@@ -50,6 +51,8 @@ export function DiscountItemsToolbar({
   const tFilters = useTranslations('discountsPage.filters');
   const tSmart = useTranslations('discountsPage.smartSelect');
   const tTable = useTranslations('discountsPage.table');
+  // Smart select only fills the participation set, so a member who cannot write does not get it.
+  const { canWrite } = useCampaignAccess();
 
   return (
     <div className="gap-xs flex flex-col">
@@ -80,43 +83,45 @@ export function DiscountItemsToolbar({
           </Toggle>
         </div>
 
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button variant="outline" size="sm" loading={selectionsPending}>
-              {tSmart('label')}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="gap-sm flex w-72 flex-col">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="justify-start"
-              disabled={selectionsPending}
-              onClick={onSelectAll}
-            >
-              {tSmart('selectAll')}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="justify-start"
-              disabled={selectionsPending}
-              onClick={onSelectProfitable}
-            >
-              {tSmart('selectProfitable')}
-            </Button>
-            <Separator />
-            <Button
-              variant="ghost"
-              size="sm"
-              className="justify-start"
-              disabled={selectionsPending}
-              onClick={onClearSelections}
-            >
-              {tSmart('clear')}
-            </Button>
-          </PopoverContent>
-        </Popover>
+        {canWrite ? (
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" loading={selectionsPending}>
+                {tSmart('label')}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="gap-sm flex w-72 flex-col">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="justify-start"
+                disabled={selectionsPending}
+                onClick={onSelectAll}
+              >
+                {tSmart('selectAll')}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="justify-start"
+                disabled={selectionsPending}
+                onClick={onSelectProfitable}
+              >
+                {tSmart('selectProfitable')}
+              </Button>
+              <Separator />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="justify-start"
+                disabled={selectionsPending}
+                onClick={onClearSelections}
+              >
+                {tSmart('clear')}
+              </Button>
+            </PopoverContent>
+          </Popover>
+        ) : null}
       </div>
 
       {selectedCount > TRENDYOL_SELECTION_CAP ? (
