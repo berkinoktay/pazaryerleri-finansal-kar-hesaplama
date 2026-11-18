@@ -62,6 +62,7 @@ import {
   createStore,
 } from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
+import { registeredStoreOperations } from '../../helpers/spec-operations';
 
 const app = createApp();
 
@@ -423,21 +424,9 @@ describe('marketplace-campaigns: route-layer authorization', () => {
     // Structural backstop: a tenth campaign route shipping without an isolation case fails
     // HERE rather than silently going uncovered. The GET-only backstop in
     // org-scoped-route-coverage cannot reach the POST/PATCH/DELETE half of this surface.
-    const spec = JSON.parse(
-      readFileSync(
-        path.resolve(testDir, '../../../../../packages/api-client/openapi.json'),
-        'utf8',
-      ),
-    ) as { paths: Record<string, Record<string, unknown>> };
-
-    const registered = Object.entries(spec.paths)
-      .filter(([routePath]) => routePath.includes('/marketplace-campaigns'))
-      .flatMap(([routePath, ops]) =>
-        Object.keys(ops).map((method) => `${method.toUpperCase()} ${routePath}`),
-      )
-      .sort();
-
-    expect(registered).toEqual(ENDPOINTS.map((endpoint) => endpoint.specKey).sort());
+    expect(registeredStoreOperations('marketplace-campaigns')).toEqual(
+      ENDPOINTS.map((endpoint) => endpoint.specKey).sort(),
+    );
   });
 
   // ─── Gate 2: a storeId belonging to another organization ────────────────────

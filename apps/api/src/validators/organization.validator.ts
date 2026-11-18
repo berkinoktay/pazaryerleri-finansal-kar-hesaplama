@@ -98,6 +98,9 @@ const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   'stores',
 ]);
 
+// At least one letter or digit, in any script.
+const HAS_ALPHANUMERIC_RE = /[\p{L}\p{N}]/u;
+
 export const CreateOrganizationInputSchema = z
   .object({
     name: z
@@ -105,9 +108,11 @@ export const CreateOrganizationInputSchema = z
       .trim()
       .min(2, 'INVALID_NAME_TOO_SHORT')
       .max(80, 'INVALID_NAME_TOO_LONG')
-      .regex(/[\p{L}\p{N}]/u, 'INVALID_NAME_NO_ALPHANUMERIC')
+      .regex(HAS_ALPHANUMERIC_RE, 'INVALID_NAME_NO_ALPHANUMERIC')
       .refine((val) => !RESERVED_SLUGS.has(slugify(val)), 'INVALID_NAME_RESERVED')
-      .openapi({ example: 'Akyıldız Ticaret' }),
+      // The spec's `pattern` is given by hand: the generator writes a flagged regex with
+      // its `/u` suffix, a pattern no value matches.
+      .openapi({ example: 'Akyıldız Ticaret', pattern: HAS_ALPHANUMERIC_RE.source }),
   })
   .openapi('CreateOrganizationInput');
 

@@ -626,6 +626,26 @@ describe('Marketplace Campaigns - list / detail / config PATCH / selections / de
     expect(item?.customPrice?.toFixed(2)).toBe(CUSTOM_PRICE);
   });
 
+  it('rejects a custom price wider than the stored column with 422 INVALID_CUSTOM_PRICE (not a 500)', async () => {
+    const res = await patchSelections({
+      mode: 'set',
+      selections: [{ itemId: fx.matchedItemId, selection: 'CUSTOM', customPrice: '12345678901' }],
+    });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      code: 'VALIDATION_ERROR',
+      errors: [{ field: 'selections.0.customPrice', code: 'INVALID_CUSTOM_PRICE' }],
+    });
+
+    // Nothing was written: the earlier custom price survives untouched.
+    const item = await prisma.marketplaceCampaignItem.findUnique({
+      where: { id: fx.matchedItemId },
+      select: { selection: true, customPrice: true },
+    });
+    expect(item?.selection).toBe('CUSTOM');
+    expect(item?.customPrice?.toFixed(2)).toBe(CUSTOM_PRICE);
+  });
+
   it('rejects a CUSTOM selection with no price with 422 CUSTOM_PRICE_REQUIRED', async () => {
     // The silent twin of CUSTOM_PRICE_ABOVE_MAX: without this gate the row persists as
     // "participating" with an empty price, the exported sheet's price cell comes out blank

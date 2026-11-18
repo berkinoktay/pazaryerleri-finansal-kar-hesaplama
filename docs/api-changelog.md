@@ -26,6 +26,69 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Validation field codes are always machine codes** (every route that answers
+  `422 VALIDATION_ERROR` with field issues). Every `errors[].code` is now a SCREAMING_SNAKE_CASE
+  code: a rule without its own code answers `INVALID_FIELD` where it used to answer the
+  validation library's English sentence (`meta.zodCode` still names the rule). The six workbook
+  import routes
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products|advantage-tariffs|plus-commission-tariffs|commission-tariffs}/import`)
+  answer `errors: [{ field: 'file', code: 'FILE_REQUIRED' }]` for a missing `file` part or one
+  that is not a file. The discount and campaign import routes and their config routes
+  (`PATCH /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}`,
+  `PATCH /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}`) answer
+  `INVALID_DISCOUNT_TYPE` on `discountType` for a missing or unknown value, and
+  `INVALID_VALUE_KIND` on `valueKind` for an unknown value (the field stays optional). Breaking
+  only for a client that matched the old sentences.
+- **Flash selections: a choice the export could not write is refused**
+  (`PATCH /v1/organizations/{orgId}/stores/{storeId}/flash-products/{listId}/selections`).
+  New field issues on `422 VALIDATION_ERROR`: `OFFER_NOT_STORED` on `selections.<index>.offer`
+  when the item stores no price for the chosen offer, `OFFER_NOT_STORED` on
+  `selections.<index>.customPrice` when the item stores no offer at all (there is no ceiling to
+  check against), and `CUSTOM_PRICE_ABOVE_MAX` on `selections.<index>.customPrice` when the
+  custom price is above the item's lowest offer price (equal is allowed). The index is the one of
+  the request array. All-or-nothing: one refused entry writes nothing. An item outside the list
+  and store is still skipped silently and never reported. The web client shows the refusal in the
+  same PR.
+- **Advantage selections: a tier the item does not store is refused**
+  (`PATCH /v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/{tariffId}/selections`).
+  New field issue `TIER_NOT_STORED` on `selections.<index>.tier` (`422 VALIDATION_ERROR`) when
+  the chosen tier is not among the item's stored tiers, even when a custom price is sent; a null
+  tier is never checked. All-or-nothing, and an item outside the tariff and store is still skipped
+  silently. The web client shows the refusal in the same PR.
+- **Flash, Advantage and Campaign selections: a custom price has at most ten integer digits**
+  (`PATCH /v1/organizations/{orgId}/stores/{storeId}/flash-products/{listId}/selections`,
+  `PATCH /v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/{tariffId}/selections`,
+  `PATCH /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/selections`).
+  A `customPrice` with more than ten digits before the decimal point answers
+  `422 VALIDATION_ERROR` with `INVALID_CUSTOM_PRICE` on `selections.<index>.customPrice`, instead
+  of failing in the database with a `500`. The zero-price refusal of the Commission and Plus
+  selections is not added to these three routes. The `pattern` of `customPrice` in the spec
+  changes accordingly.
+- **Workbook exports: a selection the stored file has no row for, a plan too large, a number in
+  a date cell**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/{advantage-tariffs|commission-tariffs|plus-commission-tariffs}/{tariffId}/export`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|flash-products}/{listId}/export`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/export`).
+  An Advantage, Commission or Plus export whose selected product's barcode is on no row of the
+  stored file answers `409 ROW_MISMATCH` where it used to leave that product out of the file
+  without notice. An export whose plan holds more patch cells than one engine call writes answers
+  `409 STORED_FILE_UNREADABLE` before the file is patched, where it used to fail with a `500`;
+  the current limits cannot reach it. A number written into a cell whose style formats a date is
+  written without that style, so the cell shows the number rather than a date. No request or
+  response shape changes.
+- **Discount and campaign config updates write once**
+  (`PATCH /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}`,
+  `PATCH /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}`). The
+  update is one store-scoped database write, where it used to read the record before and after
+  it. Same request, response shape and status codes: a foreign or missing id is still
+  `404 NOT_FOUND`. The response `id` is now the path id as sent; before, it was the stored id read
+  back, which differs only in letter case when the path id holds upper-case letters. Not
+  breaking.
+- **Plus import reads `Evet` in the cancel column**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/plus-commission-tariffs/import`). A row's
+  `cancelled` flag is true when its `İptal` cell reads `Evet` in any letter case, where it used
+  to be true only for a non-zero number; a non-zero number still cancels. No response field
+  changes.
 - **Campaign pages find each item's product by its barcode when they are read**
   (`GET /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs|advantage-tariffs}/{tariffId}`,
   `GET /v1/organizations/{orgId}/stores/{storeId}/{flash-products|discount-lists}/{listId}`,
@@ -2041,6 +2104,9 @@ supplierId, apiKey, apiSecret } }`. Credentials are probed against
 
 ### Fixed
 
+- **Organization name pattern in the spec** (`POST /v1/organizations`).
+  `CreateOrganizationInput.name.pattern` is `[\p{L}\p{N}]`, where it used to carry a literal `/u`
+  suffix that no value matched. The validation itself is unchanged. Documentation only.
 - `POST /v1/organizations` (and every future validated route) now emits
   RFC 7807 `ProblemDetails` with `code: 'VALIDATION_ERROR'` and a
   field-level `errors[]` array for Zod failures. Previously the route

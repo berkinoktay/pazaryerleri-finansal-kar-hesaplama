@@ -28,6 +28,7 @@ import {
   CAMPAIGN_TARIFF_FLAG_YES,
   NO_LABEL,
   TARIFF_FLAG_YES_FOLDED,
+  YES_LABEL,
 } from '@/workbooks/formats/trendyol/labels';
 
 /**
@@ -191,6 +192,14 @@ const PLUS_CANCEL_NUMBER_ONE: DerivedRow<typeof trendyolPlusCommissionTariffLayo
 const PLUS_CANCEL_TEXT_ZERO: DerivedRow<typeof trendyolPlusCommissionTariffLayout> = {
   name: 'the text "0" in the cancel cell',
   cells: [['cancelled', '0']],
+  kept: true,
+};
+
+// Not in PLUS_DERIVED: the frozen derived golden digest predates the yes-label read, so
+// this case is read on its own by the format test.
+const PLUS_CANCEL_YES_LABEL: DerivedRow<typeof trendyolPlusCommissionTariffLayout> = {
+  name: 'the yes label in the cancel cell',
+  cells: [['cancelled', YES_LABEL]],
   kept: true,
 };
 
@@ -600,6 +609,7 @@ export {
   FLASH_DERIVED,
   PLUS_CANCEL_NUMBER_ONE,
   PLUS_CANCEL_TEXT_ZERO,
+  PLUS_CANCEL_YES_LABEL,
   PLUS_DERIVED,
 };
 

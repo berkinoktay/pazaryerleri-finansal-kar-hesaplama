@@ -27,6 +27,12 @@ export function unplacedIssues(
   return validationIssues(error).filter((issue) => !placedFields.includes(issue.field));
 }
 
+/** The import's multipart field carrying the uploaded workbook (every page sends it). */
+export const UPLOAD_FILE_FIELD = 'file';
+
+/** The import's optional list name field (the Discounts and Campaigns uploads send it). */
+export const UPLOAD_NAME_FIELD = 'name';
+
 /** The Advantage import's field naming the commission tariff that supplies the reduced rates. */
 export const COMMISSION_SOURCE_FIELD = 'commissionSourceTariffId';
 

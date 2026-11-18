@@ -55,6 +55,8 @@ const COMMISSION_LIST =
   'http://localhost:3001/v1/organizations/:orgId/stores/:storeId/commission-tariffs';
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const NAME_TOO_LONG = SHARED.errors.nameTooLong.replace('{max}', String(UPLOAD_NAME_MAX_LENGTH));
+// One code point outside the Basic Multilingual Plane: two UTF-16 units, one character.
+const ASTRAL = '\u{1F600}';
 // A sentence with a limit is built from the catalog with the provider's formats, never typed.
 const tUploadErrors = createTranslator({
   locale: 'tr',
@@ -972,13 +974,55 @@ describe.each(CONFIG_ROWS)('<WorkbookUploadDialog page="$page"> config', (row) =
     expect(screen.getByLabelText(FIELDS.value)).toHaveValue('');
   });
 
-  it('limits the name input to the shared name length', () => {
-    render(<Harness page={row.page} />);
+  it('counts the name in code points, as the API does', async () => {
+    const { user } = render(<Harness page={row.page} />);
 
-    expect(screen.getByLabelText(UPLOAD.name)).toHaveAttribute(
-      'maxlength',
-      String(UPLOAD_NAME_MAX_LENGTH),
+    // The limit in astral characters is twice the limit in UTF-16 units, and still fits.
+    await user.click(screen.getByLabelText(UPLOAD.name));
+    await user.paste(ASTRAL.repeat(UPLOAD_NAME_MAX_LENGTH));
+
+    expect(screen.getByLabelText(UPLOAD.name)).toHaveValue(ASTRAL.repeat(UPLOAD_NAME_MAX_LENGTH));
+    expect(within(nameField()).queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('shows the too long sentence for one code point more and does not submit it', async () => {
+    const onSubmit = vi.fn<(input: WorkbookImportInput) => void>();
+    const { user } = render(<Harness page={row.page} onSubmit={onSubmit} />);
+
+    await user.upload(fileInput(), makeXlsxFile());
+    await fillNetConfig(user);
+    const input = screen.getByLabelText(UPLOAD.name);
+    await user.click(input);
+    await user.paste(ASTRAL.repeat(UPLOAD_NAME_MAX_LENGTH + 1));
+
+    expect(within(nameField()).getByRole('alert')).toHaveTextContent(NAME_TOO_LONG);
+    await user.click(screen.getByRole('button', { name: UPLOAD.submit }));
+
+    // One character less is a valid name: the next submit goes out with it, and only it.
+    await user.clear(input);
+    await user.paste(ASTRAL.repeat(UPLOAD_NAME_MAX_LENGTH));
+    expect(within(nameField()).queryByRole('alert')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: UPLOAD.submit }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]?.[0].fields['name']).toBe(ASTRAL.repeat(UPLOAD_NAME_MAX_LENGTH));
+  });
+
+  it('shows a too long name and an empty config field in the same click', async () => {
+    const onSubmit = vi.fn<(input: WorkbookImportInput) => void>();
+    const { user } = render(<Harness page={row.page} onSubmit={onSubmit} />);
+
+    await user.upload(fileInput(), makeXlsxFile());
+    await user.click(screen.getByLabelText(UPLOAD.name));
+    await user.paste(ASTRAL.repeat(UPLOAD_NAME_MAX_LENGTH + 1));
+    await user.click(screen.getByRole('button', { name: UPLOAD.submit }));
+
+    // The config is validated first, so the seller sees both problems at once.
+    await waitFor(() =>
+      expect(screen.getByLabelText(FIELDS.value)).toHaveAttribute('aria-invalid', 'true'),
     );
+    expect(within(nameField()).getByRole('alert')).toHaveTextContent(NAME_TOO_LONG);
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('shows a NAME_TOO_LONG refusal under the name input, not the generic field message', () => {

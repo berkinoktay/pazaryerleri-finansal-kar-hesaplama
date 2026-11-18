@@ -11,7 +11,8 @@
 
 import { z } from '@hono/zod-openapi';
 
-import { NameSchema } from '../workbooks/form';
+import { NameSchema, workbookFileField } from '../workbooks/form';
+import { BoundedCustomPriceSchema } from './custom-price';
 import { QuoteBreakdownSchema } from './product-pricing.validator';
 
 // ─── Shared enums ───────────────────────────────────────────────────────────
@@ -201,11 +202,7 @@ export const AdvantageTariffDetailSchema = z
 // ─── Import (multipart upload) ──────────────────────────────────────────────
 
 export const ImportAdvantageTariffFormSchema = z.object({
-  file: z.instanceof(File).openapi({
-    type: 'string',
-    format: 'binary',
-    description: 'Trendyol Avantajlı Ürün Etiketleri .xlsx',
-  }),
+  file: workbookFileField('Trendyol Avantajlı Ürün Etiketleri .xlsx'),
   name: NameSchema.optional().openapi({ description: 'İsteğe bağlı görünen ad; yoksa dosya adı.' }),
   commissionSourceTariffId: z
     // A malformed id surfaces with the same code the service uses for an unknown source.
@@ -237,10 +234,7 @@ export const AdvantageTariffSelectionSchema = z.object({
   itemId: z.string().uuid(),
   /** The chosen badge tier, or null to clear the selection. */
   tier: StarTierKeySchema.nullable(),
-  customPrice: z
-    .string()
-    .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_CUSTOM_PRICE')
-    .nullable(),
+  customPrice: BoundedCustomPriceSchema.nullable(),
 });
 
 export const UpdateAdvantageSelectionsBodySchema = z

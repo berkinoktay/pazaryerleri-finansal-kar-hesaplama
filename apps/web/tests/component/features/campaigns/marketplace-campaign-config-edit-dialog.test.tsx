@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { UPLOAD_NAME_MAX_LENGTH } from '@pazarsync/utils';
+
 import { MarketplaceCampaignConfigEditDialog } from '@/features/campaigns/components/marketplace-campaign-config-edit-dialog';
 import type { MarketplaceCampaignHeader } from '@/features/campaigns/lib/adapt-marketplace-campaign';
 import type { ApiError } from '@/lib/api-error';
@@ -13,6 +15,9 @@ const UPLOAD = trMessages.marketplaceCampaignsPage.upload;
 const FIELDS = trMessages.discountsPage.upload.fields;
 const SAVE_LABEL = trMessages.common.save;
 const SHARED = trMessages.campaignUpload;
+const NAME_TOO_LONG = SHARED.errors.nameTooLong.replace('{max}', String(UPLOAD_NAME_MAX_LENGTH));
+// One code point outside the Basic Multilingual Plane: two UTF-16 units, one character.
+const ASTRAL = '\u{1F600}';
 
 const ORG_ID = '00000000-0000-0000-0000-000000000099';
 const STORE_ID = '00000000-0000-0000-0000-000000000088';
@@ -169,6 +174,40 @@ describe('<MarketplaceCampaignConfigEditDialog>', () => {
     expect(body['name']).toBe('New name');
   });
 
+  it('shows the too long sentence for a changed name over the limit and sends no PATCH', async () => {
+    const bodies = capturePatch();
+    const { user, onOpenChange } = renderDialog();
+
+    const input = screen.getByLabelText(UPLOAD.name);
+    await user.clear(input);
+    await user.paste(ASTRAL.repeat(UPLOAD_NAME_MAX_LENGTH + 1));
+    expect(within(nameField()).getByRole('alert')).toHaveTextContent(NAME_TOO_LONG);
+    await user.click(screen.getByRole('button', { name: SAVE_LABEL }));
+
+    // A name at the limit saves: the PATCH then carries that name as its one and only body.
+    await user.clear(input);
+    await user.paste(ASTRAL.repeat(UPLOAD_NAME_MAX_LENGTH));
+    expect(within(nameField()).queryByRole('alert')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: SAVE_LABEL }));
+
+    const body = await sentBody(bodies);
+    expect(body['name']).toBe(ASTRAL.repeat(UPLOAD_NAME_MAX_LENGTH));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows no length error for an untouched stored name over the limit, and saves', async () => {
+    // A name stored before the limit: it is never resent unchanged, so it never blocks a save.
+    const LONG_STORED_NAME = ASTRAL.repeat(UPLOAD_NAME_MAX_LENGTH + 1);
+    const bodies = capturePatch();
+    const { user } = renderDialog(makeHeader({ name: LONG_STORED_NAME }));
+
+    expect(within(nameField()).queryByRole('alert')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: SAVE_LABEL }));
+
+    const body = await sentBody(bodies);
+    expect('name' in body).toBe(false);
+  });
+
   it('sends no name when the seller clears it', async () => {
     const bodies = capturePatch();
     const { user } = renderDialog();
@@ -193,6 +232,29 @@ describe('<MarketplaceCampaignConfigEditDialog>', () => {
       await within(nameField()).findByText(SHARED.errors.nameInvalidCharacters),
     ).toBeInTheDocument();
     expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it('shows the too long sentence over an earlier name refusal, and sends nothing', async () => {
+    const bodies = capturePatch(
+      validationApiError([{ field: 'name', code: 'NAME_INVALID_CHARACTERS' }]),
+    );
+    const { user } = renderDialog();
+
+    const input = screen.getByLabelText(UPLOAD.name);
+    await user.clear(input);
+    await user.type(input, 'New name');
+    await user.click(screen.getByRole('button', { name: SAVE_LABEL }));
+    expect(
+      await within(nameField()).findByText(SHARED.errors.nameInvalidCharacters),
+    ).toBeInTheDocument();
+
+    // The refusal is about the name already sent; the new name cannot be sent for its length,
+    // so that is the reason the field shows, and saving sends nothing.
+    await user.clear(input);
+    await user.paste(ASTRAL.repeat(UPLOAD_NAME_MAX_LENGTH + 1));
+    expect(within(nameField()).getByRole('alert')).toHaveTextContent(NAME_TOO_LONG);
+    await user.click(screen.getByRole('button', { name: SAVE_LABEL }));
+    expect(bodies).toHaveLength(1);
   });
 
   it('shows the field sentence once for a 422 on fields the form has no input for', async () => {

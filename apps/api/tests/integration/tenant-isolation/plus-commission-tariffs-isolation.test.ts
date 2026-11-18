@@ -16,6 +16,7 @@ import { createApp } from '@/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization, createStore } from '../../helpers/factories';
+import { registeredStoreOperations } from '../../helpers/spec-operations';
 
 const app = createApp();
 
@@ -61,6 +62,28 @@ async function seedTariff(
   return tariff.id;
 }
 
+const SPEC_BASE = '/v1/organizations/{orgId}/stores/{storeId}/plus-commission-tariffs';
+
+interface CoveredOperation {
+  /** `METHOD <templated path>`, as the OpenAPI spec registers it. */
+  readonly specKey: string;
+  /** Where the operation's cross-tenant case lives. */
+  readonly coveredIn: 'this file' | 'workbook-routes-isolation.test.ts';
+}
+
+const COVERED_OPERATIONS: readonly CoveredOperation[] = [
+  { specKey: `GET ${SPEC_BASE}`, coveredIn: 'this file' },
+  { specKey: `POST ${SPEC_BASE}/import`, coveredIn: 'workbook-routes-isolation.test.ts' },
+  { specKey: `GET ${SPEC_BASE}/{tariffId}`, coveredIn: 'this file' },
+  { specKey: `DELETE ${SPEC_BASE}/{tariffId}`, coveredIn: 'this file' },
+  { specKey: `PATCH ${SPEC_BASE}/{tariffId}/selections`, coveredIn: 'this file' },
+  { specKey: `POST ${SPEC_BASE}/{tariffId}/items/{itemId}/estimate`, coveredIn: 'this file' },
+  {
+    specKey: `POST ${SPEC_BASE}/{tariffId}/export`,
+    coveredIn: 'workbook-routes-isolation.test.ts',
+  },
+];
+
 describe('plus-commission-tariffs: route-layer authorization', () => {
   beforeAll(async () => {
     await ensureDbReachable();
@@ -68,6 +91,14 @@ describe('plus-commission-tariffs: route-layer authorization', () => {
 
   beforeEach(async () => {
     await truncateAll();
+  });
+
+  it('covers every plus-commission-tariffs endpoint registered in the OpenAPI spec', () => {
+    // A new plus-commission-tariffs route without an isolation case fails here: the
+    // structural backstop in org-scoped-route-coverage.test.ts covers GET only.
+    expect(registeredStoreOperations('plus-commission-tariffs')).toEqual(
+      COVERED_OPERATIONS.map((operation) => operation.specKey).sort(),
+    );
   });
 
   it("Org A member listing Org B's storeId returns 404", async () => {

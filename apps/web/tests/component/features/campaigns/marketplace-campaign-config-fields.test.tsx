@@ -12,11 +12,13 @@ import {
 } from '@/features/campaigns/lib/marketplace-campaign-config';
 
 import trMessages from '../../../../messages/tr.json';
+import { validationApiError } from '../../../helpers/api-error';
 import { render, screen, waitFor } from '../../../helpers/render';
 
 const UPLOAD = trMessages.marketplaceCampaignsPage.upload;
 const FIELDS = trMessages.discountsPage.upload.fields;
 const TYPES = trMessages.discountsPage.types;
+const FIELD_ERRORS = trMessages.discountsPage.upload.fieldErrors;
 const SUBMIT_LABEL = 'submit';
 
 /** A saved NET + percent campaign with its window — the SEEDED state an edit dialog mounts. */
@@ -35,9 +37,11 @@ const SEEDED: CampaignConfigFormInput = {
 function Harness({
   defaultValues,
   onValid,
+  submitError = null,
 }: {
   defaultValues: CampaignConfigFormInput;
   onValid: (values: CampaignConfigFormValues) => void;
+  submitError?: Error | null;
 }): React.ReactElement {
   const form = useForm<CampaignConfigFormInput, unknown, CampaignConfigFormValues>({
     resolver: zodResolver(campaignConfigFormSchema),
@@ -47,16 +51,26 @@ function Harness({
   return (
     <Form {...form}>
       <form noValidate onSubmit={form.handleSubmit(onValid)}>
-        <MarketplaceCampaignConfigFields form={form} nameValue={name} onNameChange={setName} />
+        <MarketplaceCampaignConfigFields
+          form={form}
+          nameValue={name}
+          onNameChange={setName}
+          submitError={submitError}
+        />
         <button type="submit">{SUBMIT_LABEL}</button>
       </form>
     </Form>
   );
 }
 
-function renderHarness(defaultValues: CampaignConfigFormInput = SEEDED) {
+function renderHarness(
+  defaultValues: CampaignConfigFormInput = SEEDED,
+  submitError: Error | null = null,
+) {
   const onValid = vi.fn<(values: CampaignConfigFormValues) => void>();
-  const result = render(<Harness defaultValues={defaultValues} onValid={onValid} />);
+  const result = render(
+    <Harness defaultValues={defaultValues} onValid={onValid} submitError={submitError} />,
+  );
   return { ...result, onValid };
 }
 
@@ -161,6 +175,23 @@ describe('<MarketplaceCampaignConfigFields> seeded like the edit dialog', () => 
           trendyolFundingPct: '70',
         }),
         expect.anything(),
+      ),
+    );
+  });
+});
+
+describe('<MarketplaceCampaignConfigFields> server issues', () => {
+  it('shows the generic field sentence under the type picker for INVALID_DISCOUNT_TYPE', async () => {
+    // Server only: the picker offers the campaign kurgu alone, so only a raw API call sends
+    // another type.
+    renderHarness(
+      SEEDED,
+      validationApiError([{ field: 'discountType', code: 'INVALID_DISCOUNT_TYPE' }]),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(UPLOAD.typeLabel)).toHaveAccessibleDescription(
+        FIELD_ERRORS.generic,
       ),
     );
   });

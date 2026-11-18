@@ -59,6 +59,11 @@ export interface DiscountConfigFieldsProps {
   nameValue: string;
   onNameChange: (value: string) => void;
   /**
+   * The name already stored, on an edit form. It is never resent unchanged, so it is never
+   * checked against the length limit (a name stored before the limit stays as it is).
+   */
+  storedName?: string;
+  /**
    * The submit mutation's error. On a `VALIDATION_ERROR` its `problem.errors[]` are walked into
    * inline field messages (config fields via `form.setError`, `name` via an inline line) — since
    * `VALIDATION_ERROR` is globally silenced, this is the ONLY feedback for a config/name 422.
@@ -78,6 +83,7 @@ export function DiscountConfigFields({
   form,
   nameValue,
   onNameChange,
+  storedName,
   submitError,
 }: DiscountConfigFieldsProps): React.ReactElement {
   const t = useTranslations('discountsPage.upload');
@@ -112,6 +118,7 @@ export function DiscountConfigFields({
         value={nameValue}
         onChange={onNameChange}
         serverError={nameServerError}
+        storedName={storedName}
       />
       <ConfigTypeField
         label={t('typeLabel')}

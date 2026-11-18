@@ -854,8 +854,10 @@
   "campaignAccess": {
     "readOnlyNotice": "Bu sayfaları görüntüleyebilirsin ama değiştiremezsin. Düzenleme yetkisi için organizasyonunun sahibine başvur."
   },
+  "campaignSelection": {
+    "selectionRefused": "Seçimlerin kaydedilemedi: biri artık ürünü için geçerli değil. Sayfayı yenileyip yeniden seç."
+  },
   "commissionTariffsPage": {
-    "selectionRefused": "Seçimlerin kaydedilemedi: biri artık ürünü için geçerli değil. Sayfayı yenileyip yeniden seç.",
     "search": "Ürün, model veya barkod ara",
     "actions": {
       "upload": "Excel Yükle",
@@ -1074,7 +1076,6 @@
     }
   },
   "plusCommissionTariffsPage": {
-    "selectionRefused": "Seçimlerin kaydedilemedi: biri artık ürünü için geçerli değil. Sayfayı yenileyip yeniden seç.",
     "search": "Ürün, model veya barkod ara",
     "actions": {
       "upload": "Excel Yükle",

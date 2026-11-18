@@ -96,6 +96,11 @@ export interface SheetReading {
    * of a placed cell and whose `t` is "array" or "dataTable", in document order.
    */
   readonly formulaRangeRefs: readonly string[];
+  /**
+   * Per `cellXfs` entry, whether the style formats a date: the table the reader read
+   * the cells with (empty without a styles part).
+   */
+  readonly xfIsDate: readonly boolean[];
 }
 
 /** Which sheet readGrid reads: strictly by `sheet`, else by `sheetName` (see chooseSheet). */
@@ -563,6 +568,7 @@ function readGridParts(parts: UploadParts, options: GridReadOptions, track: bool
     cellKeys: conversion.cellKeys ?? NOT_TRACKED,
     mergeRefs: conversion.mergeRefs,
     formulaRangeRefs: conversion.formulaRangeRefs ?? NOT_TRACKED,
+    xfIsDate: context.xfIsDate,
   };
 }
 
@@ -594,8 +600,8 @@ export function readGrid(parts: UploadParts, options: GridReadOptions): SheetDat
 
 /**
  * readGrid's reading of the same sheet, with the same errors, plus the part it came
- * from, the key of every cell it placed, its merge refs and its formula range refs
- * (see SheetReading).
+ * from, the key of every cell it placed, its merge refs, its formula range refs and
+ * its date table (see SheetReading).
  */
 export function readSheet(parts: UploadParts, options: GridReadOptions): SheetReading {
   return readParts(parts, options, true);

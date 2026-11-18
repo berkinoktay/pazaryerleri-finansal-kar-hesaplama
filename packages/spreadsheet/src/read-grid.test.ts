@@ -511,6 +511,32 @@ describe('readSheet', () => {
     expect(reading.cellKeys).toEqual([1025, 1027, 2049]);
   });
 
+  it('reports the date table it read the cells with, one entry per cellXfs entry', () => {
+    const file = buildXlsxFixture(
+      [{ name: 'S', xml: worksheet('<row r="1"><c r="A1" s="1"><v>45000</v></c></row>') }],
+      {
+        [RELS_PART]: relsOf(
+          relationship('rId1', 'worksheet', 'worksheets/sheet1.xml'),
+          relationship('rId2', 'styles', 'styles.xml'),
+        ),
+        [STYLES_PART]:
+          `${XML_DECLARATION}<styleSheet xmlns="${SPREADSHEET_NS}"><cellXfs count="3">` +
+          '<xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="2"/></cellXfs></styleSheet>',
+      },
+    );
+
+    const reading = readSheet(openUpload(file, OPTS), { caps: CAPS });
+
+    expect(reading.xfIsDate).toEqual([false, true, false]);
+    expect(reading.grid[0]?.[0]).toBeInstanceOf(Date);
+  });
+
+  it('reports an empty date table for a workbook without a styles part', () => {
+    const file = buildXlsxFixture([{ name: 'S', xml: worksheetXml([['a']]) }]);
+
+    expect(readSheet(openUpload(file, OPTS), { caps: CAPS }).xfIsDate).toEqual([]);
+  });
+
   it('lists the merge refs, and reads the same grid as readGrid', () => {
     const xml = worksheetWith(
       '<row r="2"><c r="B2"><v>1</v></c></row>',

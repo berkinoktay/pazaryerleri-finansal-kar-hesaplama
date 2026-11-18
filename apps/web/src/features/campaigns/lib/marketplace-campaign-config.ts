@@ -31,27 +31,31 @@ export const CAMPAIGN_DISCOUNT_TYPES = [
 const MAX_FUNDING_PCT = 100;
 
 /**
- * The Kampanyalar config form. An empty funding rate — never typed, or cleared — resolves to "0":
- * the seller bears the whole discount, the pessimistic floor the backend defaults to as well — so
- * a valid submit always carries an explicit rate.
+ * The Kampanyalar config fields before the per-type rules: the shared discount fields with the
+ * campaign kurgu set and Trendyol's funding rate. Exported so the upload's contract test can read
+ * the field names the form submits (`.shape`), which the refined schema below no longer exposes.
+ * An empty funding rate — never typed, or cleared — resolves to "0": the seller bears the whole
+ * discount, the pessimistic floor the backend defaults to as well — so a valid submit always
+ * carries an explicit rate.
  */
-export const campaignConfigFormSchema = discountConfigFieldsSchema
-  .extend({
-    discountType: z.enum(CAMPAIGN_DISCOUNT_TYPES),
-    trendyolFundingPct: clearableTextField(DECIMAL_RE, 'INVALID_FUNDING_PCT').transform(
-      (value) => value ?? '0',
-    ),
-  })
-  .superRefine((val, ctx) => {
-    refineDiscountConfigForm(val, ctx);
-    if (Number(val.trendyolFundingPct) > MAX_FUNDING_PCT) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'FUNDING_PCT_OVER_100',
-        path: ['trendyolFundingPct'],
-      });
-    }
-  });
+export const campaignConfigFieldsSchema = discountConfigFieldsSchema.extend({
+  discountType: z.enum(CAMPAIGN_DISCOUNT_TYPES),
+  trendyolFundingPct: clearableTextField(DECIMAL_RE, 'INVALID_FUNDING_PCT').transform(
+    (value) => value ?? '0',
+  ),
+});
+
+/** The Kampanyalar config form: {@link campaignConfigFieldsSchema} with the per-type rules. */
+export const campaignConfigFormSchema = campaignConfigFieldsSchema.superRefine((val, ctx) => {
+  refineDiscountConfigForm(val, ctx);
+  if (Number(val.trendyolFundingPct) > MAX_FUNDING_PCT) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'FUNDING_PCT_OVER_100',
+      path: ['trendyolFundingPct'],
+    });
+  }
+});
 
 /** What the form's fields hold — the funding rate may still be empty. */
 export type CampaignConfigFormInput = z.input<typeof campaignConfigFormSchema>;

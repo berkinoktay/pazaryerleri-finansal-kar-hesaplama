@@ -52,6 +52,8 @@ export const WORKBOOK_ERROR_BUCKETS: Readonly<Record<WorkbookUploadFileCode, Wor
     UNSUPPORTED_PLATFORM_FORMAT: 'unsupportedPlatform',
     PREFILLED_SELECTIONS: 'prefilled',
     NO_WRITEBACK_COLUMN: 'noWriteColumn',
+    // A request with no file part: the UI never sends one, so it has no sentence of its own.
+    FILE_REQUIRED: 'generic',
   };
 
 /** The bucket of a file code; `generic` for a code outside the table (a newer API). */

@@ -5,7 +5,7 @@ import * as React from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 import { DiscountType, DiscountValueKind } from '@pazarsync/db/enums';
-import { STORABLE_YEAR_MAX, STORABLE_YEAR_MIN, UPLOAD_NAME_MAX_LENGTH } from '@pazarsync/utils';
+import { STORABLE_YEAR_MAX, STORABLE_YEAR_MIN } from '@pazarsync/utils';
 
 import { DateInput } from '@/components/patterns/date-input';
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
@@ -30,6 +30,7 @@ import {
   type ConfigFieldKey,
   type DiscountConfigFormValues,
 } from '../lib/discount-config';
+import { isUploadNameTooLong } from '../lib/upload-name';
 
 /*
  * Shared sections of the kurgu config forms. İndirimler and Kampanyalar configure the same kurgu
@@ -137,6 +138,8 @@ export function useConfigFieldErrorMessage(): (code: string) => string {
       case 'BUY_QUANTITY_OUT_OF_RANGE':
       case 'PAY_QUANTITY_TOO_SMALL':
         return t('generic');
+      // INVALID_DISCOUNT_TYPE and INVALID_VALUE_KIND land here too: the kurgu and the value
+      // kind are enum Selects, so only a raw API call meets them; no sentence of their own.
       default:
         return t('generic');
     }
@@ -149,17 +152,38 @@ export interface ConfigNameFieldProps {
   onChange: (value: string) => void;
   /** The backend `VALIDATION_ERROR` code for `name` (local state, outside RHF), shown inline. */
   serverError: string | null;
+  /**
+   * The name already stored, on an edit form. It is never resent unchanged, so it is never
+   * checked against the length limit (a name stored before the limit stays as it is).
+   */
+  storedName?: string;
 }
 
-/** The optional upload name — local state, because the refined config schema can't carry it. */
+/**
+ * The optional upload name — local state, because the refined config schema can't carry it.
+ *
+ * The length is checked here, in code points of the trimmed text as the API counts, instead of
+ * with the input's `maxlength`: the browser counts UTF-16 units, so it would stop an emoji name
+ * at half the API's limit with no message. A name that is too long shows the sentence of the
+ * API's `NAME_TOO_LONG` refusal, and the owning form does not submit it. That sentence wins over
+ * a server refusal on the name: the refusal is about a name already sent, while the length is
+ * why the current one cannot be sent, and the form sends nothing until it is fixed.
+ */
 export function ConfigNameField({
   label,
   value,
   onChange,
   serverError,
+  storedName,
 }: ConfigNameFieldProps): React.ReactElement {
   const nameError = useUploadFieldErrorMessage();
   const id = React.useId();
+  const message =
+    value !== storedName && isUploadNameTooLong(value)
+      ? nameError('NAME_TOO_LONG')
+      : serverError !== null
+        ? nameError(serverError)
+        : null;
 
   return (
     <div className="gap-3xs flex flex-col">
@@ -167,13 +191,12 @@ export function ConfigNameField({
       <Input
         id={id}
         value={value}
-        maxLength={UPLOAD_NAME_MAX_LENGTH}
-        invalid={serverError !== null}
+        invalid={message !== null}
         onChange={(event) => onChange(event.target.value)}
       />
-      {serverError !== null ? (
+      {message !== null ? (
         <p className="text-2xs text-destructive font-medium" role="alert">
-          {nameError(serverError)}
+          {message}
         </p>
       ) : null}
     </div>

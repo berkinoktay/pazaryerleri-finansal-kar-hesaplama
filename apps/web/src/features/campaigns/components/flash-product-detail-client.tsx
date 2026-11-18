@@ -20,9 +20,9 @@ import { useDeleteFlashProducts } from '../hooks/use-delete-flash-products';
 import { useExportWorkbook } from '../hooks/use-export-workbook';
 import { useResolvedCampaignAccess } from '../hooks/use-resolved-campaign-access';
 import { useUpdateFlashSelections } from '../hooks/use-update-flash-selections';
+import { useSelectionSaveErrorToast } from '../hooks/use-selection-save-error-toast';
 import {
   OFFER_KEY_TO_ENUM,
-  offerKeyFromEnum,
   toFlashProductView,
   type FlashOfferKey,
 } from '../lib/adapt-flash-product';
@@ -32,14 +32,13 @@ import {
   selectBestForAll,
   selectProfitable,
   type FlashCustomChoice,
-  type FlashCustomPriceMap,
   type FlashProductFilterState,
-  type FlashSelectionMap,
   type FlashSelectionState,
 } from '../lib/flash-bulk-actions';
 import { summarizeFlashSelection } from '../lib/flash-product-summary';
 import { CampaignAccessProvider } from '../lib/campaign-access-context';
 import { downloadBlob } from '../lib/download-blob';
+import { seedFlashSelection } from '../lib/seed-flash-selection';
 import { TariffScopeProvider } from '../lib/tariff-scope';
 import type { ExportPreviewFile } from '../lib/export-preview';
 import { CampaignReadOnlyNotice } from './campaign-read-only-notice';
@@ -78,6 +77,7 @@ export function FlashProductDetailClient({
 }): React.ReactElement {
   const tPage = useTranslations('flashProductsPage');
   const tCommon = useTranslations('common');
+  const showSelectionSaveError = useSelectionSaveErrorToast();
   const tExport = useTranslations('flashProductsPage.exportDialog');
   const router = useRouter();
   const detail = useFlashProductDetail(orgId ?? '', storeId, listId);
@@ -175,23 +175,11 @@ export function FlashProductDetailClient({
   // Seed the editable selection buffer from the server-authoritative `selectedOffer` /
   // `customPrice` the first time this list's data arrives. Adjusting state during render
   // (guarded by the list id, so it fires once per list) is the React-recommended
-  // alternative to a setState-in-effect — no cascading renders.
+  // alternative to a setState-in-effect — no cascading renders. The seed drops a stored
+  // choice the selection route would now refuse (see `seedFlashSelection`), so the save
+  // never sends one.
   if (view !== null && view.id !== seededListId) {
-    const seedSelection: FlashSelectionMap = {};
-    const seedCustom: FlashCustomPriceMap = {};
-    for (const row of view.rows) {
-      if (row.customPrice !== null) {
-        // Custom-joined: restore the confirmed price. Its exact profit isn't in the detail
-        // payload (there is no single scenario for an arbitrary custom price), so seed the
-        // summary figure as null — the live estimate on the visible card fills it in, and
-        // re-confirming captures it.
-        seedCustom[row.id] = { price: row.customPrice, netProfit: null, marginPct: null };
-      } else {
-        const offerKey = offerKeyFromEnum(row.selectedOffer);
-        if (offerKey !== null) seedSelection[row.id] = offerKey;
-      }
-    }
-    setChoices({ selection: seedSelection, customPrices: seedCustom });
+    setChoices(seedFlashSelection(view.rows));
     setSeededListId(view.id);
   }
 
@@ -341,6 +329,7 @@ export function FlashProductDetailClient({
             },
           });
         },
+        onError: showSelectionSaveError,
       },
     );
   };

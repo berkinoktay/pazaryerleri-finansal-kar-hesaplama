@@ -187,7 +187,11 @@ export function FlashCustomPriceCell({
     lastResult !== null &&
     lastResult.calculable &&
     lastResult.price === price.toFixed(2);
-  const canSelect = hasEstimate;
+  // The price must also sit within the ceiling: the estimate does not check it, but the
+  // selection route refuses a price above it, and any custom price on an item with no offer
+  // (no ceiling). `max` only blocks keystrokes, so a stale stored price above the ceiling
+  // can still seed the input and must stay unselectable.
+  const canSelect = hasEstimate && ceiling !== null && !price.greaterThan(ceiling);
   // The typed price fell to the flat rate and that rate (the file's current commission) is
   // unknown: the backend answers not calculable with no reason and no percent, so the hint
   // line says why the profit is missing and "Seç" stays off.

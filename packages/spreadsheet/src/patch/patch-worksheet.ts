@@ -18,9 +18,12 @@ import {
   ATTRIBUTE_NAME_END,
   ATTRIBUTE_NAME_START,
   ATTRIBUTE_VALUE_END,
+  ATTRIBUTE_VALUE_START,
   attributeField,
   bytesEqualAscii,
   createMarkup,
+  DIGIT_NINE,
+  DIGIT_ZERO,
   localNameIs,
   NAME_DECODER,
   nextMarkup,
@@ -34,7 +37,9 @@ import {
 // The cell patcher of the export path: writes one output's cell patches into a
 // worksheet part through its index (sheet-index.ts), as byte edits. Untouched bytes
 // are copied, never decoded and re-encoded; a rebuilt cell keeps the source bytes of
-// the attributes it keeps (all but its type and its value and cell metadata).
+// the attributes it keeps (all but its type and its value and cell metadata, and,
+// under a number, a style index that names a date format: Excel would show the
+// number as a date, and the reader would read it back as one).
 //
 // One pass merges the patch list with the index. Rows of both go up, and inside a row
 // so do cells and patches, so no patch searches for its row or its cell. The same pass
@@ -49,6 +54,11 @@ export interface WorksheetPatchOptions {
   readonly overwriteFormulaColumns: ReadonlySet<number>;
   /** Cap on the patched part, in bytes. */
   readonly maxBytes: number;
+  /**
+   * Per `cellXfs` entry, whether it formats a date; a number written into such a cell
+   * drops the cell's style.
+   */
+  readonly dateStyles: readonly boolean[];
 }
 
 export interface WorksheetPatchResult {
@@ -82,6 +92,9 @@ const DROPPED_CELL_ATTRIBUTES: ReadonlySet<string> = new Set([
   VALUE_METADATA_ATTRIBUTE,
   CELL_METADATA_ATTRIBUTE,
 ]);
+// The style index: a rebuilt cell drops it under a number when it names a date format.
+const STYLE_ATTRIBUTE = 's';
+const DECIMAL_BASE = 10;
 const INLINE_STRING_TYPE = ' t="inlineStr"';
 const SPACE_PRESERVE = ' xml:space="preserve"';
 const PREFIX_SEPARATOR = ':';
@@ -431,9 +444,41 @@ class CellPatcher {
   }
 
   /**
+   * Whether attribute `attribute` of the last scanned tag is named exactly `s` and its
+   * raw value, ASCII digits only, indexes an entry of `dateStyles` that formats a date.
+   * Any other value (empty, a character reference, an index past the table) is not.
+   */
+  private isDateStyleAttribute(attribute: number): boolean {
+    const bytes = this.bytes;
+    const attributes = this.attributes;
+    const isStyle = bytesEqualAscii(
+      bytes,
+      attributeField(attributes, attribute, ATTRIBUTE_NAME_START),
+      attributeField(attributes, attribute, ATTRIBUTE_NAME_END),
+      STYLE_ATTRIBUTE,
+    );
+    if (!isStyle) return false;
+    const valueStart = attributeField(attributes, attribute, ATTRIBUTE_VALUE_START);
+    const valueEnd = attributeField(attributes, attribute, ATTRIBUTE_VALUE_END);
+    if (valueStart === valueEnd) return false;
+    const dateStyles = this.options.dateStyles;
+    let style = 0;
+    for (let at = valueStart; at < valueEnd; at += 1) {
+      const byte = valueAt(bytes, at);
+      if (byte < DIGIT_ZERO || byte > DIGIT_NINE) return false;
+      style = style * DECIMAL_BASE + (byte - DIGIT_ZERO);
+      // Past the table: no entry, so no date; also bounds the number.
+      if (style >= dateStyles.length) return false;
+    }
+    return dateStyles[style] === true;
+  }
+
+  /**
    * The cell at `start` rebuilt: '<' and its qualified name; every attribute not
-   * named exactly `t`, `vm` or `cm`, each one space and its source bytes from the name
-   * through the closing quote; then the value's type, content and close.
+   * named exactly `t`, `vm` or `cm`, nor, under a number, named exactly `s` with a
+   * date style (isDateStyleAttribute), each one space and its source bytes from the
+   * name through the closing quote; then the value's type, content and close. A text
+   * or a clear keeps the style.
    */
   private rebuiltCell(start: number, value: CellPatchValue): Uint8Array {
     const bytes = this.bytes;
@@ -442,10 +487,12 @@ class CellPatcher {
     scanMarkup(bytes, start, markup, this.attributes);
     const { nameStart, nameEnd, attributeCount } = markup;
     const tail = rebuiltCellTail(NAME_DECODER.decode(bytes.subarray(nameStart, nameEnd)), value);
+    const writesNumber = value.kind === 'number';
     let size = 1 + (nameEnd - nameStart) + utf8Length(tail);
     kept.length = 0;
     for (let attribute = 0; attribute < attributeCount; attribute += 1) {
       if (this.isDroppedAttribute(attribute)) continue;
+      if (writesNumber && this.isDateStyleAttribute(attribute)) continue;
       kept.push(attribute);
       const attributeStart = attributeField(this.attributes, attribute, ATTRIBUTE_NAME_START);
       size += 1 + this.attributeEnd(attribute) - attributeStart;

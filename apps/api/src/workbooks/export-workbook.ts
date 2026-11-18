@@ -3,8 +3,9 @@
 //   1. load the record with the store's scope;
 //   2. find the stored file's format and read its sheet (`resolveStoredWorkbook`);
 //   3. plan the patches (`planExport`);
-//   4. name the files: two equal names, or more files than MAX_PATCH_OUTPUTS, refuse
-//      the export before the engine patches anything;
+//   4. name the files: two equal names, more files than MAX_PATCH_OUTPUTS, or more
+//      patch cells than MAX_PATCH_CELLS, refuse the export before the engine patches
+//      anything;
 //   5. patch the stored bytes, every planned file in one engine call;
 //   6. bundle the download;
 //   7. mark the record exported, with the same scope.
@@ -14,6 +15,7 @@
 
 import type { Platform } from '@pazarsync/db/enums';
 import {
+  MAX_PATCH_CELLS,
   MAX_PATCH_OUTPUTS,
   patchWorkbook,
   readWorkbookGrid,
@@ -46,6 +48,9 @@ import {
 /** `reason` of the stored-file refusal of a plan with more files than one engine call patches. */
 export const TOO_MANY_FILES_REASON = 'too-many-files';
 
+/** `reason` of the stored-file refusal of a plan with more cells than one engine call patches. */
+export const TOO_MANY_CELLS_REASON = 'too-many-cells';
+
 /** The page and record an export's refusals are logged with. */
 export interface ExportContext {
   readonly page: WorkbookPage;
@@ -55,9 +60,10 @@ export interface ExportContext {
 /**
  * The download names of `plan`, checked before the engine patches anything: two
  * planned files with one name answer EXPORT_FILENAME_COLLISION (a zip would keep one
- * of them), and a plan of more than MAX_PATCH_OUTPUTS files is a stored file one
- * engine call cannot write (logged, 409 STORED_FILE_UNREADABLE). The stored-workbook
- * audit runs the same check.
+ * of them), and a plan of more than MAX_PATCH_OUTPUTS files, or of more than
+ * MAX_PATCH_CELLS patch cells over all its files, is a stored file one engine call
+ * cannot write (logged, 409 STORED_FILE_UNREADABLE). Checked in that order. The
+ * stored-workbook audit runs the same checks.
  */
 export function plannedDownloadNames(
   format: { readonly filename: FilenamePolicy; readonly defaultName: string },
@@ -72,6 +78,9 @@ export function plannedDownloadNames(
   );
   assertDistinctFilenames(names);
   if (plan.files.length > MAX_PATCH_OUTPUTS) rejectStoredFile(context, TOO_MANY_FILES_REASON);
+  let cells = 0;
+  for (const planned of plan.files) cells += planned.patches.length;
+  if (cells > MAX_PATCH_CELLS) rejectStoredFile(context, TOO_MANY_CELLS_REASON);
   return names;
 }
 
@@ -183,8 +192,9 @@ async function patchPlannedFiles(
  * record is not in the scope (or is gone before the `exportedAt` touch), and
  * WorkbookConflictError when it has no stored file or the stored file cannot be
  * exported: among them EXPORT_FILENAME_COLLISION when two planned files share a name,
- * and STORED_FILE_UNREADABLE when the plan holds more than MAX_PATCH_OUTPUTS files or a
- * stored value its write rule refuses, each before the engine patches anything.
+ * and STORED_FILE_UNREADABLE when the plan holds more than MAX_PATCH_OUTPUTS files, more
+ * patch cells than one engine call patches (MAX_PATCH_CELLS), or a stored value its
+ * write rule refuses, each before the engine patches anything.
  */
 export async function exportWorkbook<S extends LayoutSpec, TRow, TItem, TWrite extends string>(
   adapter: WorkbookExportAdapter<S, TRow, TItem, TWrite>,
@@ -208,7 +218,8 @@ export async function exportWorkbook<S extends LayoutSpec, TRow, TItem, TWrite e
   });
   const plan = planStoredExport({ ...stored, groups: source.groups, adapter }, context);
 
-  // The names and the file count before the engine runs: either can refuse the export.
+  // The names, the file count and the cell count before the engine runs: each can refuse
+  // the export.
   const names = plannedDownloadNames(stored.format, source, plan, context);
 
   const outputs = await patchPlannedFiles(file, stored.format.sheet, plan, context);

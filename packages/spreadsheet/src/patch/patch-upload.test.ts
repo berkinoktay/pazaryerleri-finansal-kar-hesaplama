@@ -75,7 +75,7 @@ const UNSIGNED_DESCRIPTOR_64_LENGTH = 20;
 const ONE_CELL = '<row r="1"><c r="A1"><v>7</v></c></row>';
 const TWO_ROWS = '<row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="A2"><v>2</v></c></row>';
 const INERT_FORMULA_TEXT = "=cmd|' /C calc'!A0";
-// A date serial the kept date style turns into a Date.
+// A date serial a date style turns into a Date.
 const DATE_SERIAL = '45000';
 // fflate's level for a stored (not deflated) entry.
 const STORED_LEVEL = 0;
@@ -934,14 +934,17 @@ describe('patchUpload: written values', () => {
     expect(readBack(out)).toEqual([[INERT_FORMULA_TEXT]]);
   });
 
-  it('keeps a date style, so a number reads back as a Date', () => {
-    // The engine keeps `s` as it is; whether a format may write a number into a
-    // date-styled cell is PR 3's rule.
+  it('drops a date style under a number, so it reads back as the number; keeps a 0.00 style', () => {
+    // cellXfs: 0 General, 1 a date (numFmt 14), 2 '0.00' (numFmt 2).
     const styles =
-      `${XML_DECLARATION}<styleSheet xmlns="${MAIN_NAMESPACE}"><cellXfs count="2">` +
-      '<xf numFmtId="0"/><xf numFmtId="14" applyNumberFormat="1"/></cellXfs></styleSheet>';
+      `${XML_DECLARATION}<styleSheet xmlns="${MAIN_NAMESPACE}"><cellXfs count="3">` +
+      '<xf numFmtId="0"/><xf numFmtId="14" applyNumberFormat="1"/>' +
+      '<xf numFmtId="2" applyNumberFormat="1"/></cellXfs></styleSheet>';
     const file = bookOf(
-      worksheet('<row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="A2" s="1"/></row>'),
+      worksheet(
+        '<row r="1"><c r="A1"><v>1</v></c></row>' +
+          `<row r="2"><c r="A2" s="1"><v>${DATE_SERIAL}</v></c><c r="B2" s="2"/></row>`,
+      ),
       {
         [RELS_PART]: relsOf(
           relationship('rId1', 'worksheet', 'worksheets/sheet1.xml'),
@@ -950,10 +953,13 @@ describe('patchUpload: written values', () => {
         [STYLES_PART]: styles,
       },
     );
+    expect(readBack(file)[1]?.[0]).toBeInstanceOf(Date);
 
-    const out = patchFixture(file, [num(2, 0, DATE_SERIAL)]);
+    const out = patchFixture(file, [num(2, 0, '149.90'), num(2, 1, '12.50')]);
 
-    expect(entryText(out, SHEET_PART)).toContain(`<c r="A2" s="1"><v>${DATE_SERIAL}</v></c>`);
-    expect(readBack(out)[1]?.[0]).toBeInstanceOf(Date);
+    expect(entryText(out, SHEET_PART)).toContain(
+      '<c r="A2"><v>149.90</v></c><c r="B2" s="2"><v>12.50</v></c>',
+    );
+    expect(readBack(out)[1]).toEqual([149.9, 12.5]);
   });
 });

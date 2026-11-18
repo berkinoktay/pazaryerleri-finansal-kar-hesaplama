@@ -4,6 +4,15 @@ import type { Env } from 'hono';
 import { ValidationError, type ValidationIssue } from './errors';
 
 /**
+ * Field issue code of a Zod rule that sets no code of its own: Zod's default message is an
+ * English sentence, never a machine code, so the hook puts this code on the wire instead.
+ */
+export const INVALID_FIELD = 'INVALID_FIELD';
+
+// A SCREAMING_SNAKE_CASE issue message, the only kind the hook passes through unchanged.
+const FIELD_CODE_PATTERN = /^[A-Z][A-Z0-9_]*$/;
+
+/**
  * Shared validation hook wired on every OpenAPIHono instance in this codebase.
  *
  * When `@hono/zod-openapi` runs its `zValidator` middleware and Zod reports
@@ -13,7 +22,10 @@ import { ValidationError, type ValidationIssue } from './errors';
  *
  * Contract for validator files: set `issue.message` to the SCREAMING_SNAKE_CASE
  * error code (e.g. `"INVALID_NAME_TOO_SHORT"`) — the hook surfaces that as the
- * `code` field in `errors[]`.
+ * `code` field in `errors[]`. A rule without a code (a message that is not
+ * SCREAMING_SNAKE_CASE, for example Zod's own sentence for a bare `.uuid()` or
+ * `z.enum([...])`) answers `INVALID_FIELD`, so a library sentence never reaches
+ * `errors[].code`; `meta.zodCode` still tells such rules apart.
  *
  * A cross-field refinement that needs to name WHICH element of an array failed
  * (so the frontend can highlight that row) passes `params` on the issue:
@@ -33,7 +45,7 @@ function validationDefaultHook(result: { success: boolean; error?: { issues: unk
       };
       return {
         field: issue.path.length === 0 ? '(root)' : issue.path.join('.'),
-        code: issue.message,
+        code: FIELD_CODE_PATTERN.test(issue.message) ? issue.message : INVALID_FIELD,
         meta: { zodCode: issue.code, ...(issue.params ?? {}) },
       };
     });

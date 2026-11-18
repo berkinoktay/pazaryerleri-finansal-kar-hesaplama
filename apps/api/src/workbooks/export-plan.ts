@@ -145,7 +145,11 @@ function cursorZipRows<S extends LayoutSpec, TRow, TItem, TWrite extends string>
   });
 }
 
-/** Anchor to the last item, in query order, that carries a pick; an item without one never enters. */
+/**
+ * Anchor to the last item, in query order, that carries a pick; an item without one
+ * never enters, so an unpicked item whose anchor the stored file lacks stays silent.
+ * Every anchor the map holds must be on a data row (`assertPickedAnchorsPresent`).
+ */
 function anchorMap<S extends LayoutSpec, TRow, TItem, TWrite extends string>(
   group: ExportGroup<TItem>,
   adapter: PlanAdapter<S, TRow, TItem, TWrite>,
@@ -158,7 +162,30 @@ function anchorMap<S extends LayoutSpec, TRow, TItem, TWrite extends string>(
   return map;
 }
 
-/** anchor-map, one file: every data row whose anchor the first group's map holds. */
+/**
+ * Every picked anchor of `maps` is the anchor of at least one of `rows` (every data row,
+ * kept or not, the rows the plan walks). A picked anchor on no row would be a choice the
+ * download silently drops, so it is ROW_MISMATCH, as a cursor-zip mismatch is.
+ */
+function assertPickedAnchorsPresent(
+  maps: readonly ReadonlyMap<string, unknown>[],
+  rows: readonly DataRow[],
+): void {
+  const present = new Set<string>();
+  for (const row of rows) {
+    if (row.anchor !== null) present.add(row.anchor);
+  }
+  for (const map of maps) {
+    for (const anchor of map.keys()) {
+      if (!present.has(anchor)) throw new WorkbookConflictError('ROW_MISMATCH');
+    }
+  }
+}
+
+/**
+ * anchor-map, one file: every data row whose anchor the first group's map holds. A
+ * picked anchor on no data row is ROW_MISMATCH.
+ */
 function anchorMapRows<S extends LayoutSpec, TRow, TItem, TWrite extends string>(
   input: PlanExportInput<S, TRow, TItem, TWrite>,
   rows: readonly DataRow[],
@@ -166,6 +193,7 @@ function anchorMapRows<S extends LayoutSpec, TRow, TItem, TWrite extends string>
   const group = input.groups[0];
   if (group === undefined) return [];
   const map = anchorMap(group, input.adapter);
+  assertPickedAnchorsPresent([map], rows);
   const writes: RowWrite<TItem>[] = [];
   for (const row of rows) {
     if (row.anchor === null) continue;
@@ -199,7 +227,8 @@ function picksOf<TItem>(map: ReadonlyMap<string, AnchorEntry<TItem>>): Map<strin
  * anchor-map, one file per planned window: the groups' picks bucketed by
  * `planWindowFiles`; each file writes every data row whose anchor it picks, with the
  * window, the pick and the winning item of each group it covers (a group without one
- * adds nothing). No planned file gives one file with nothing to write.
+ * adds nothing). No planned file gives one file with nothing to write. A group's picked
+ * anchor on no data row is ROW_MISMATCH, checked before the windows are planned.
  */
 function periodWindowFiles<S extends LayoutSpec, TRow, TItem, TWrite extends string>(
   input: PlanExportInput<S, TRow, TItem, TWrite>,
@@ -210,6 +239,10 @@ function periodWindowFiles<S extends LayoutSpec, TRow, TItem, TWrite extends str
     tag: group.tag,
     map: anchorMap(group, input.adapter),
   }));
+  assertPickedAnchorsPresent(
+    groups.map((group) => group.map),
+    rows,
+  );
   const planned = planWindowFiles(
     groups.map((group) => ({ dayCount: group.tag, picks: picksOf(group.map) })),
   );
@@ -381,7 +414,8 @@ function assertPatchTextBudget(
  *
  * Throws WorkbookConflictError NO_WRITEBACK_COLUMN when an `exportRequires` group has
  * no resolved column, ROW_MISMATCH when a cursor-zip file's kept rows and items
- * disagree, STORED_FILE_UNREADABLE when the stored anchors exceed the patcher's text
+ * disagree or an anchor-map item's picked anchor is on no data row of the stored file,
+ * STORED_FILE_UNREADABLE when the stored anchors exceed the patcher's text
  * limits; UnwritableStoredValueError when the adapter writes a value its column may not
  * receive (the record's stored value; `exportWorkbook` answers it with 409).
  */

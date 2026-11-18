@@ -20,8 +20,10 @@ import {
 import {
   COMMISSION_SOURCE_FIELD,
   INVALID_COMMISSION_SOURCE,
+  UPLOAD_NAME_FIELD,
   validationIssues,
 } from '../lib/upload-error';
+import { isUploadNameTooLong } from '../lib/upload-name';
 import { WORKBOOK_VERTICALS, type WorkbookUploadExtras } from '../lib/workbook-verticals';
 import {
   CATEGORY_COMMISSION_SOURCE,
@@ -73,9 +75,9 @@ function frameProps({
 }
 
 /** The list name of an upload: trimmed, and left out when empty. */
-function nameField(name: string): { name?: string } {
+function nameField(name: string): Partial<Record<typeof UPLOAD_NAME_FIELD, string>> {
   const trimmedName = name.trim();
-  return trimmedName === '' ? {} : { name: trimmedName };
+  return trimmedName === '' ? {} : { [UPLOAD_NAME_FIELD]: trimmedName };
 }
 
 /** The file is the only field of these pages. */
@@ -217,9 +219,12 @@ function DiscountConfigUploadForm(props: WorkbookUploadDialogProps): React.React
       placedFields={['file', ...placedDiscountFields(discountType)]}
       extrasReady
       onSubmitFile={(file) => {
-        void form.handleSubmit((values) =>
-          onSubmit({ file, fields: { ...nameField(name), ...values } }),
-        )();
+        // Validate the config first, so its errors show in the same click as the name's.
+        void form.handleSubmit((values) => {
+          // The name field already shows why; a name the API would refuse is never sent.
+          if (isUploadNameTooLong(name)) return;
+          onSubmit({ file, fields: { ...nameField(name), ...values } });
+        })();
       }}
       onClosed={() => {
         form.reset({ discountType: DiscountType.NET });
@@ -258,9 +263,12 @@ function CampaignConfigUploadForm(props: WorkbookUploadDialogProps): React.React
       placedFields={['file', ...placedCampaignFields(discountType)]}
       extrasReady
       onSubmitFile={(file) => {
-        void form.handleSubmit((values) =>
-          onSubmit({ file, fields: { ...nameField(name), ...values } }),
-        )();
+        // Validate the config first, so its errors show in the same click as the name's.
+        void form.handleSubmit((values) => {
+          // The name field already shows why; a name the API would refuse is never sent.
+          if (isUploadNameTooLong(name)) return;
+          onSubmit({ file, fields: { ...nameField(name), ...values } });
+        })();
       }}
       onClosed={() => {
         form.reset({ discountType: DiscountType.NET });

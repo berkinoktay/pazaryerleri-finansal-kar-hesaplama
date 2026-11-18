@@ -4,9 +4,11 @@ import {
   isWorkbookUploadFileCode,
   WORKBOOK_ENGINE_FILE_CODES,
   WORKBOOK_FILE_CODES,
+  WORKBOOK_FORM_FILE_CODES,
 } from '../workbook-codes';
 
-// The file codes an upload's `file` issue can carry: the pipeline's own and the engine's.
+// The file codes an upload's `file` issue can carry: the pipeline's own, the engine's and the
+// import form's.
 // The web maps every one of them to a message, so the guard must know them all and nothing
 // else (ENGINE_BUSY is a 503, never a file issue).
 
@@ -19,15 +21,28 @@ describe('isWorkbookUploadFileCode', () => {
     expect(isWorkbookUploadFileCode(code)).toBe(true);
   });
 
+  it.each([...WORKBOOK_FORM_FILE_CODES])('knows the form code %s', (code) => {
+    expect(isWorkbookUploadFileCode(code)).toBe(true);
+  });
+
   it.each([['ENGINE_BUSY'], ['CONFLICT'], [null], [42]])('refuses %s', (value) => {
     expect(isWorkbookUploadFileCode(value)).toBe(false);
   });
 });
 
-describe('the two code lists', () => {
+describe('the three code lists', () => {
   it('share only SHEET_NOT_FOUND', () => {
-    const union = new Set<string>([...WORKBOOK_FILE_CODES, ...WORKBOOK_ENGINE_FILE_CODES]);
+    const union = new Set<string>([
+      ...WORKBOOK_FILE_CODES,
+      ...WORKBOOK_ENGINE_FILE_CODES,
+      ...WORKBOOK_FORM_FILE_CODES,
+    ]);
 
-    expect(union.size).toBe(WORKBOOK_FILE_CODES.length + WORKBOOK_ENGINE_FILE_CODES.length - 1);
+    expect(union.size).toBe(
+      WORKBOOK_FILE_CODES.length +
+        WORKBOOK_ENGINE_FILE_CODES.length +
+        WORKBOOK_FORM_FILE_CODES.length -
+        1,
+    );
   });
 });

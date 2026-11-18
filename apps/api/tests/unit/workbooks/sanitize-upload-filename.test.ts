@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { UPLOAD_NAME_MAX_LENGTH } from '@pazarsync/utils';
+
 import { cleanDisplayName, NameSchema, truncateCodePoints } from '@/workbooks/form';
 import { contentDisposition, sanitizeUploadFilename } from '@/workbooks/sanitize-upload-filename';
 
@@ -121,6 +123,23 @@ describe('truncateCodePoints', () => {
 describe('NameSchema', () => {
   it('refuses 121 characters with NAME_TOO_LONG', () => {
     const result = NameSchema.safeParse('a'.repeat(121));
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.message).toBe('NAME_TOO_LONG');
+  });
+
+  // The web form counts code points (upload-name.ts), so the API must count the same unit:
+  // a name of astral characters is twice as long in UTF-16 units as in code points.
+  it('accepts UPLOAD_NAME_MAX_LENGTH astral characters, counting code points', () => {
+    const name = ASTRAL.repeat(UPLOAD_NAME_MAX_LENGTH);
+    expect(name.length).toBe(UPLOAD_NAME_MAX_LENGTH * 2);
+
+    const result = NameSchema.safeParse(name);
+    expect(result.success).toBe(true);
+    expect(result.data).toBe(name);
+  });
+
+  it('refuses one astral character more with NAME_TOO_LONG', () => {
+    const result = NameSchema.safeParse(ASTRAL.repeat(UPLOAD_NAME_MAX_LENGTH + 1));
     expect(result.success).toBe(false);
     expect(result.error?.issues[0]?.message).toBe('NAME_TOO_LONG');
   });

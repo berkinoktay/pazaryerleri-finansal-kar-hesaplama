@@ -358,7 +358,9 @@ export async function getMarketplaceCampaignDetail(
  * one config write path), and the frontend edit dialog must therefore always submit the whole
  * config. An integration test pins the behaviour.
  *
- * `findFirst` first so a foreign campaign id is a 404 indistinguishable from a missing one.
+ * ONE `updateMany` scoped by `(id, organization_id, store_id)`: a foreign or missing campaign
+ * id matches no row, and the write's own count makes it a 404 (`assertScopedWrite`), so it is
+ * indistinguishable from a missing one. The returned id is the path id.
  */
 export async function updateMarketplaceCampaign(
   orgId: string,
@@ -366,17 +368,10 @@ export async function updateMarketplaceCampaign(
   campaignId: string,
   patch: UpdateMarketplaceCampaignBody,
 ): Promise<{ id: string }> {
-  const existing = await prisma.marketplaceCampaignList.findFirst({
-    where: { id: campaignId, organizationId: orgId, storeId },
-    select: { id: true },
-  });
-  if (existing === null) {
-    throw new NotFoundError('MarketplaceCampaign', campaignId);
-  }
-
-  try {
-    const updated = await prisma.$transaction(async (tx) => {
-      const data = {
+  await assertScopedWrite(
+    prisma.marketplaceCampaignList.updateMany({
+      where: { id: campaignId, organizationId: orgId, storeId },
+      data: {
         discountType: patch.discountType,
         valueKind: patch.valueKind ?? null,
         value: patch.value ?? null,
@@ -390,27 +385,12 @@ export async function updateMarketplaceCampaign(
         startsAt: patch.startsAt ?? null,
         endsAt: patch.endsAt ?? null,
         ...(patch.name !== undefined ? { name: patch.name } : {}),
-      };
-      await assertScopedWrite(
-        tx.marketplaceCampaignList.updateMany({
-          where: { id: campaignId, organizationId: orgId, storeId },
-          data,
-        }),
-        'MarketplaceCampaign',
-        campaignId,
-      );
-      // updateMany returns no row: the stored id is read back in the same transaction.
-      const row = await tx.marketplaceCampaignList.findFirst({
-        where: { id: campaignId, organizationId: orgId, storeId },
-        select: { id: true },
-      });
-      if (row === null) throw new NotFoundError('MarketplaceCampaign', campaignId);
-      return row;
-    });
-    return { id: updated.id };
-  } catch (err) {
-    mapPrismaError(err);
-  }
+      },
+    }),
+    'MarketplaceCampaign',
+    campaignId,
+  );
+  return { id: campaignId };
 }
 
 // --- Update selections ---

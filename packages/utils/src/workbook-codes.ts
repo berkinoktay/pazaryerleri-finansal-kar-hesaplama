@@ -1,8 +1,8 @@
 /**
- * The codes a refused workbook upload answers on its `file` field. Two lists, one wire: the
- * API answers both through `toUploadError`, and the web maps every code of both to a message
- * (its bucket table is keyed by `WorkbookUploadFileCode`, so a code without a message is a
- * compile error there).
+ * The codes a refused workbook upload answers on its `file` field. Three lists, one wire: the
+ * API answers the pipeline's and the engine's through `toUploadError` and the form's through
+ * request validation, and the web maps every code of all three to a message (its bucket table
+ * is keyed by `WorkbookUploadFileCode`, so a code without a message is a compile error there).
  */
 
 /** Why an uploaded workbook is refused, beyond what the engine itself refuses. */
@@ -56,12 +56,24 @@ export const WORKBOOK_ENGINE_FILE_CODES = [
   'ROW_ANCHOR_MISMATCH',
 ] as const;
 
+/**
+ * The import forms' own refusals of the `file` part, answered by request validation before
+ * the pipeline reads anything: no `file` part, or one that is not a file.
+ */
+export const WORKBOOK_FORM_FILE_CODES = ['FILE_REQUIRED'] as const;
+
+export type WorkbookFormFileCode = (typeof WORKBOOK_FORM_FILE_CODES)[number];
+
 /** Every code an upload's `file` issue can carry. */
-export type WorkbookUploadFileCode = WorkbookFileCode | (typeof WORKBOOK_ENGINE_FILE_CODES)[number];
+export type WorkbookUploadFileCode =
+  | WorkbookFileCode
+  | (typeof WORKBOOK_ENGINE_FILE_CODES)[number]
+  | WorkbookFormFileCode;
 
 const UPLOAD_FILE_CODES: ReadonlySet<string> = new Set<string>([
   ...WORKBOOK_FILE_CODES,
   ...WORKBOOK_ENGINE_FILE_CODES,
+  ...WORKBOOK_FORM_FILE_CODES,
 ]);
 
 /** True for a code an upload's `file` issue can carry; false for anything else. */

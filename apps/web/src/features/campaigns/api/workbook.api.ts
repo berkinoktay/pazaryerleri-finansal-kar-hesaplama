@@ -2,6 +2,7 @@ import type { WorkbookPage } from '@pazarsync/utils';
 
 import { throwApiError } from '@/lib/api-error';
 
+import { UPLOAD_FILE_FIELD } from '../lib/upload-error';
 import { filenameFromDisposition, type WorkbookExportFile } from './binary-download';
 import {
   WORKBOOK_ENDPOINTS,
@@ -16,7 +17,7 @@ import {
  */
 function toFormData(input: WorkbookImportInput): FormData {
   const formData = new FormData();
-  formData.append('file', input.file);
+  formData.append(UPLOAD_FILE_FIELD, input.file);
   for (const [key, value] of Object.entries(input.fields)) {
     if (value !== undefined && value !== '') formData.append(key, value);
   }
