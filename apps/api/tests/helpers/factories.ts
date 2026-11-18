@@ -410,6 +410,49 @@ export async function createProductVariant(
   });
 }
 
+/**
+ * A second catalog variant carrying `barcode`, with the same economics as the source:
+ * same organization, store and product, every scalar of the source copied (prices, VAT,
+ * desi, isDigital, synced commission rate, listing status, ...) except its id, barcode,
+ * platformVariantId (random, as `createProductVariant` does) and timestamps; stockCode is
+ * the new barcode. Every cost-profile link of the source is copied to the clone. Gives a
+ * campaign item's own barcode a catalog variant priced exactly like an existing fixture
+ * variant (campaign reads resolve the variant from the item's barcode).
+ */
+export async function cloneVariantWithBarcode(variantId: string, barcode: string) {
+  const source = await prisma.productVariant.findUniqueOrThrow({
+    where: { id: variantId },
+    include: { costProfileLinks: { select: { organizationId: true, profileId: true } } },
+  });
+  const {
+    id: _id,
+    barcode: _barcode,
+    platformVariantId: _platformVariantId,
+    createdAt: _createdAt,
+    updatedAt: _updatedAt,
+    costProfileLinks,
+    attributes,
+    ...scalars
+  } = source;
+  return prisma.productVariant.create({
+    data: {
+      ...scalars,
+      // A create cannot take a bare null for this NOT NULL column: a JSON null read back
+      // falls to the column's '[]' default.
+      attributes: attributes ?? [],
+      barcode,
+      stockCode: barcode,
+      platformVariantId: BigInt(Math.floor(Math.random() * 1e12)),
+      costProfileLinks: {
+        create: costProfileLinks.map((link) => ({
+          organizationId: link.organizationId,
+          profileId: link.profileId,
+        })),
+      },
+    },
+  });
+}
+
 export async function createPriceChangeLog(
   organizationId: string,
   storeId: string,

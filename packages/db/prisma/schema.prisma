@@ -1267,9 +1267,10 @@ model CommissionTariffItem {
   organizationId String  @map("organization_id") @db.Uuid
   storeId        String  @map("store_id") @db.Uuid
   periodId       String  @map("period_id") @db.Uuid
-  // Matched seller variant (by barcode/stockCode at import); null = no catalog
-  // match → profit shown as "no cost". No FK: a deleted variant must not drop the
-  // tariff row (the seller still wants the tariff line).
+  // The variant the barcode matched AT IMPORT: an import-time snapshot (null = no
+  // catalog match then). No read uses it; every campaign read resolves the variant
+  // from `barcode` at read time (resolveVariantIdsByBarcode). No FK: a deleted
+  // variant must not drop the row.
   productVariantId String?  @map("product_variant_id") @db.Uuid
   barcode          String
   stockCode        String?  @map("stock_code")
@@ -1383,9 +1384,10 @@ model PlusCommissionTariffItem {
   organizationId String @map("organization_id") @db.Uuid
   storeId        String @map("store_id") @db.Uuid
   periodId       String @map("period_id") @db.Uuid
-  // Matched seller variant (by barcode/stockCode at import); null = no catalog
-  // match → profit shown as "no cost". No FK: a deleted variant must not drop
-  // the tariff row.
+  // The variant the barcode matched AT IMPORT: an import-time snapshot (null = no
+  // catalog match then). No read uses it; every campaign read resolves the variant
+  // from `barcode` at read time (resolveVariantIdsByBarcode). No FK: a deleted
+  // variant must not drop the row.
   productVariantId String? @map("product_variant_id") @db.Uuid
   barcode          String
   stockCode        String? @map("stock_code")
@@ -1484,8 +1486,10 @@ model AdvantageTariffItem {
   organizationId String @map("organization_id") @db.Uuid
   storeId        String @map("store_id") @db.Uuid
   tariffId       String @map("tariff_id") @db.Uuid
-  // Matched seller variant (by barcode at import); null = no catalog match →
-  // profit shown as "no product". No FK: a deleted variant must not drop the row.
+  // The variant the barcode matched AT IMPORT: an import-time snapshot (null = no
+  // catalog match then). No read uses it; every campaign read resolves the variant
+  // from `barcode` at read time (resolveVariantIdsByBarcode). No FK: a deleted
+  // variant must not drop the row.
   productVariantId String? @map("product_variant_id") @db.Uuid
   barcode          String
   stockCode        String? @map("stock_code")
@@ -1570,8 +1574,10 @@ model FlashProductItem {
   organizationId String @map("organization_id") @db.Uuid
   storeId        String @map("store_id") @db.Uuid
   listId         String @map("list_id") @db.Uuid
-  // Matched seller variant (by barcode at import); null = no catalog match →
-  // profit shown as "no product". No FK: a deleted variant must not drop the row.
+  // The variant the barcode matched AT IMPORT: an import-time snapshot (null = no
+  // catalog match then). No read uses it; every campaign read resolves the variant
+  // from `barcode` at read time (resolveVariantIdsByBarcode). No FK: a deleted
+  // variant must not drop the row.
   productVariantId String? @map("product_variant_id") @db.Uuid
   modelCode        String? @map("model_code")
   barcode          String
@@ -1666,8 +1672,10 @@ model DiscountListItem {
   organizationId String @map("organization_id") @db.Uuid
   storeId        String @map("store_id") @db.Uuid
   listId         String @map("list_id") @db.Uuid
-  // Matched seller variant (by barcode at import); null = no catalog match →
-  // profit shown as "no product". No FK: a deleted variant must not drop the row.
+  // The variant the barcode matched AT IMPORT: an import-time snapshot (null = no
+  // catalog match then). No read uses it; every campaign read resolves the variant
+  // from `barcode` at read time (resolveVariantIdsByBarcode). No FK: a deleted
+  // variant must not drop the row.
   productVariantId String? @map("product_variant_id") @db.Uuid
   // Passthrough "Trendyol Ürün ID" kept for export fidelity / display.
   externalId   String? @map("external_id")
@@ -1757,8 +1765,10 @@ model MarketplaceCampaignItem {
   storeId        String @map("store_id") @db.Uuid
   listId         String @map("list_id") @db.Uuid
 
-  // Barkodla eşleşen satıcı varyantı; null = katalog eşleşmesi yok → kâr "ürün yok"
-  // gerekçesiyle boş. FK YOK: varyant silinirse satır düşmesin.
+  // The variant the barcode matched AT IMPORT: an import-time snapshot (null = no
+  // catalog match then). No read uses it; every campaign read resolves the variant
+  // from `barcode` at read time (resolveVariantIdsByBarcode). No FK: a deleted
+  // variant must not drop the row.
   productVariantId String? @map("product_variant_id") @db.Uuid
 
   barcode      String

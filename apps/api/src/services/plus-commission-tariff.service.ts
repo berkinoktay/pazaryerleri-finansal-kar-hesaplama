@@ -24,6 +24,7 @@ import {
 import {
   createRequestFailureLog,
   loadScreenScenarioBases,
+  resolveScreenVariantIds,
   screenScenarioBaseFor,
 } from './scenario-screen-commons';
 import { decimalOrNull, moneyOrNull, percentOrNull } from './tariff-compute-commons';
@@ -123,11 +124,14 @@ export async function listPlusTariffs(
  * Throws `NotFoundError` when the tariff does not belong to this store. Periods are
  * ordered by `sortOrder`; within each, items follow the Excel row order
  * (`sortOrder`, barcode tie-break) so every sub-period tab lists products
- * identically. The scenario bases of every matched variant are loaded ONCE for the
+ * identically. Each item's variant is resolved from its barcode as the store's catalog
+ * is now (one query for the whole tariff, `resolveScreenVariantIds`), not from the link
+ * stored at import. The scenario bases of every resolved variant are loaded ONCE for the
  * whole tariff, then each item is computed by the scenario engine with the chosen
  * commission as an override; a slim org + store scoped query supplies the display
- * image only. Per decision 9 a store-wide load failure or a per-item engine throw
- * leaves that profit empty (logged once) rather than failing the request.
+ * image only. Per decision 9 a failed barcode lookup, a store-wide load failure or a
+ * per-item engine throw leaves that profit empty (logged once) rather than failing the
+ * request.
  *
  * Every stored price is read through `decimalOrNull`: a price the file's cell left
  * blank, unreadable or 0 is null, is sent as null on the wire and is never priced
@@ -167,7 +171,6 @@ export async function getPlusTariffDetail(
               orderBy: [{ sortOrder: 'asc' }, { barcode: 'asc' }, { id: 'asc' }],
               select: {
                 id: true,
-                productVariantId: true,
                 barcode: true,
                 stockCode: true,
                 productTitle: true,
@@ -194,15 +197,19 @@ export async function getPlusTariffDetail(
     throw new NotFoundError('PlusCommissionTariff', tariffId);
   }
 
-  // ─── Collect matched variant ids across every period ──────────────────────
-  const variantIds: string[] = [];
-  for (const period of tariff.periods) {
-    for (const item of period.items) {
-      if (item.productVariantId !== null) variantIds.push(item.productVariantId);
-    }
-  }
+  // ─── Resolve every item barcode to its catalog variant, once ───────────────
+  // The variant comes from the item's barcode as the catalog is now (one org + store
+  // scoped query for every period), never from the link stored at import. A failed lookup
+  // is logged and degrades every item (no ids, so the variant reads below are skipped).
+  const { variantIdByBarcode, degraded } = await resolveScreenVariantIds({
+    organizationId: orgId,
+    storeId,
+    barcodes: tariff.periods.flatMap((period) => period.items.map((item) => item.barcode)),
+    surface: 'plus-commission-tariff',
+  });
+  const variantIds = [...new Set(variantIdByBarcode.values())];
 
-  // ─── Display image per matched variant (org + store scoped) ───────────────
+  // ─── Display image per resolved variant (org + store scoped) ──────────────
   // The only variant read the detail still needs; the profit inputs come from the
   // scenario loader below. First catalog image, null when none attached.
   const imageMap = new Map<string, string | null>();
@@ -239,7 +246,8 @@ export async function getPlusTariffDetail(
 
   const periods = tariff.periods.map((period): PlusTariffPeriod => {
     const items = period.items.map((item): PlusTariffDetailItem => {
-      const base = screenScenarioBaseFor(bases, item.productVariantId);
+      const variantId = variantIdByBarcode.get(item.barcode) ?? null;
+      const base = screenScenarioBaseFor(bases, variantId, degraded);
 
       // The committed custom price is intentionally NOT passed to the compute: the
       // Plus offer scenario is always the ceiling (see plus-commission-tariff-compute
@@ -265,8 +273,7 @@ export async function getPlusTariffDetail(
         barcode: item.barcode,
         stockCode: item.stockCode,
         productTitle: item.productTitle,
-        imageUrl:
-          item.productVariantId !== null ? (imageMap.get(item.productVariantId) ?? null) : null,
+        imageUrl: variantId !== null ? (imageMap.get(variantId) ?? null) : null,
         category: item.category,
         brand: item.brand,
         currentPrice: moneyOrNull(item.currentPrice),

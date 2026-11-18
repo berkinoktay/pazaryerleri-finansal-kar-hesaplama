@@ -31,6 +31,7 @@ import {
   type TrendyolScenarioBase,
 } from '@pazarsync/profit';
 
+import { resolveVariantIdsByBarcode } from '../lib/variant-barcode-lookup';
 import { logProfitReadFailure, type ProfitReadSurface } from './profit-compute-fallback.service';
 import { type TariffItemReason } from './tariff-compute-commons';
 
@@ -98,8 +99,80 @@ export async function resolveCategoryRate(params: {
 /** How one tariff/campaign item reaches the engine. */
 export type ScreenScenarioBase =
   | { readonly kind: 'ready'; readonly base: TrendyolScenarioBase }
-  | { readonly kind: 'no-product' } // unmatched barcode, or the loader's VARIANT_NOT_FOUND
-  | { readonly kind: 'degraded' }; // the store-wide load failed (already logged)
+  // The item's barcode resolved to no catalog variant at read time
+  // (`resolveScreenVariantIds`), or the loader's VARIANT_NOT_FOUND.
+  | { readonly kind: 'no-product' }
+  // The barcode lookup or the store-wide scenario-base load failed (already logged).
+  | { readonly kind: 'degraded' };
+
+/** The outcome of one read's barcode lookup (`resolveScreenVariantIds`). */
+export interface ScreenVariantResolution {
+  /** Each item barcode's catalog variant id; a barcode with no variant is absent. */
+  readonly variantIdByBarcode: ReadonlyMap<string, string>;
+  /**
+   * True when the lookup failed (already logged): the map is then empty, and every item
+   * of the read is `degraded`, never `no-product` -- the products may well exist.
+   */
+  readonly degraded: boolean;
+}
+
+/**
+ * The catalog variant id of each item barcode of one read, as the catalog is NOW, in one
+ * query (`resolveVariantIdsByBarcode`: exact barcode, scoped to the organization and the
+ * store; among variants sharing a barcode one still in the feed beats a delisted one,
+ * then the oldest wins). A barcode with no variant is absent from the map. Every campaign
+ * screen resolves its items through this instead of the item's stored
+ * product_variant_id, which is only an import-time snapshot, so an item uploaded before
+ * its product was synced, or whose variant was recreated, is priced without a re-upload.
+ *
+ * Decision 9 (the page always opens): a failed lookup never throws out of here. It logs
+ * once (`[profit-read]`, the given surface, no order id) and returns an empty map marked
+ * `degraded`; the caller then skips its per-variant reads and gives every item the
+ * `degraded` base, as for a failed `loadScreenScenarioBases`.
+ */
+export async function resolveScreenVariantIds(params: {
+  readonly organizationId: string;
+  readonly storeId: string;
+  readonly barcodes: Iterable<string>;
+  readonly surface: ProfitReadSurface;
+}): Promise<ScreenVariantResolution> {
+  try {
+    const variantIdByBarcode = await resolveVariantIdsByBarcode(
+      prisma,
+      { organizationId: params.organizationId, storeId: params.storeId },
+      params.barcodes,
+    );
+    return { variantIdByBarcode, degraded: false };
+  } catch (err) {
+    logProfitReadFailure({
+      surface: params.surface,
+      organizationId: params.organizationId,
+      orderId: null,
+      err,
+    });
+    return { variantIdByBarcode: new Map<string, string>(), degraded: true };
+  }
+}
+
+/**
+ * The single-item form of `resolveScreenVariantIds`, for the estimate services: the
+ * catalog variant id of one item barcode (null when no variant carries it), and whether
+ * the lookup failed (logged once; `variantId` is then null and the item is `degraded`).
+ */
+export async function resolveScreenVariantId(params: {
+  readonly organizationId: string;
+  readonly storeId: string;
+  readonly barcode: string;
+  readonly surface: ProfitReadSurface;
+}): Promise<{ readonly variantId: string | null; readonly degraded: boolean }> {
+  const { variantIdByBarcode, degraded } = await resolveScreenVariantIds({
+    organizationId: params.organizationId,
+    storeId: params.storeId,
+    barcodes: [params.barcode],
+    surface: params.surface,
+  });
+  return { variantId: variantIdByBarcode.get(params.barcode) ?? null, degraded };
+}
 
 /**
  * Loads the scenario base of every given variant for one store in a single pass. These
@@ -146,15 +219,25 @@ export async function loadScreenScenarioBases(params: {
 }
 
 /**
- * The `ScreenScenarioBase` for one item: `no-product` when the item carries no variant
- * id or the loader marked it unavailable (VARIANT_NOT_FOUND); `degraded` when the
- * store-wide load failed (`bases` is null, already logged); otherwise `ready` with the
- * loaded base.
+ * The `ScreenScenarioBase` for one item. `variantId` is the id its barcode resolved to at
+ * read time (`resolveScreenVariantIds`), null when the barcode matched no catalog
+ * variant. `no-product` when that id is null or the loader marked it unavailable
+ * (VARIANT_NOT_FOUND); `degraded` when the read's barcode lookup failed
+ * (`lookupDegraded`, from `resolveScreenVariantIds` / `resolveScreenVariantId`, already
+ * logged; checked first, since such a read has no ids) or the store-wide load failed
+ * (`bases` is null, already logged); otherwise `ready` with the loaded base. Every campaign
+ * screen goes through here, so one unit test covers the degraded rule for all of them.
  */
 export function screenScenarioBaseFor(
   bases: ReadonlyMap<string, ScenarioLoadResult> | null,
   variantId: string | null,
+  lookupDegraded: boolean,
 ): ScreenScenarioBase {
+  // A failed barcode lookup (already logged) leaves every item without an id; it must read
+  // as degraded, never as no-product, so it is checked before the id.
+  if (lookupDegraded) {
+    return { kind: 'degraded' };
+  }
   if (variantId === null) {
     return { kind: 'no-product' };
   }

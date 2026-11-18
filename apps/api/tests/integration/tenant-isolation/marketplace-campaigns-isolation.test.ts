@@ -38,6 +38,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { z } from '@hono/zod-openapi';
 import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -1006,5 +1007,275 @@ describe('marketplace-campaigns: route-layer authorization', () => {
     );
     expect(res.status).toBe(404);
     expect(((await res.json()) as ProblemWire).code).toBe('NOT_FOUND');
+  });
+});
+
+// --- Item -> variant resolution never crosses a tenant or store boundary ---
+//
+// The detail, the estimate and the target-margin suggestion resolve an item's variant from
+// its barcode at read time, scoped to the request's organization and store. A variant with
+// the item's barcode in another organization, or in another store of the same organization,
+// must never price the item -- not even when the item's stored product_variant_id points
+// straight at it.
+
+const RELINK_BARCODE = 'CAMP-ISO-RELINK-X';
+const RELINK_IMAGE_URL = 'https://cdn.example/campaign-iso-foreign.jpg';
+
+const RelinkScenarioSchema = z.object({
+  commissionPct: z.string().nullable(),
+  commissionSource: z.string().nullable(),
+  netProfit: z.string().nullable(),
+});
+const RelinkDetailSchema = z.object({
+  items: z.array(
+    z.object({
+      id: z.string(),
+      imageUrl: z.string().nullable(),
+      calculable: z.boolean(),
+      reason: z.string().nullable(),
+      current: RelinkScenarioSchema,
+      maxScenario: RelinkScenarioSchema,
+    }),
+  ),
+});
+const RelinkEstimateSchema = z.object({
+  calculable: z.boolean(),
+  reason: z.string().nullable(),
+  commissionSource: z.string().nullable(),
+  breakdown: z.object({ netProfit: z.string() }).nullable(),
+});
+const RelinkTargetMarginSchema = z.object({
+  suggestions: z.array(
+    z.object({ itemId: z.string(), price: z.string().nullable(), reason: z.string().nullable() }),
+  ),
+});
+type RelinkDetailItem = z.infer<typeof RelinkDetailSchema>['items'][number];
+
+/** A store with the shipping setup the scenario engine needs (SENDEOMP contract). */
+async function createShippableStore(organizationId: string): Promise<string> {
+  const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+  if (carrier === null) throw new Error('SENDEOMP carrier missing - globalSetup must run');
+  const store = await createStore(organizationId);
+  await prisma.store.update({
+    where: { id: store.id },
+    data: { shippingTariffSource: 'TRENDYOL_CONTRACT', defaultShippingCarrierId: carrier.id },
+  });
+  return store.id;
+}
+
+/** A calculable variant: price, VAT, desi, an image, a synced rate and a versioned COGS. */
+async function seedCalculableVariant(
+  organizationId: string,
+  storeId: string,
+  barcode: string,
+): Promise<string> {
+  const product = await prisma.product.create({
+    data: {
+      organizationId,
+      storeId,
+      platformContentId: BigInt(Math.floor(Math.random() * 1e12)),
+      productMainId: `pm-${randomUUID().slice(0, 8)}`,
+      title: 'Foreign Campaign Product',
+      categoryId: 597n,
+      imageUrls: [RELINK_IMAGE_URL],
+    },
+  });
+  const variant = await prisma.productVariant.create({
+    data: {
+      organizationId,
+      storeId,
+      productId: product.id,
+      platformVariantId: BigInt(Math.floor(Math.random() * 1e12)),
+      barcode,
+      stockCode: barcode,
+      salePrice: new Decimal('500.00'),
+      listPrice: new Decimal('500.00'),
+      vatRate: 20,
+      dimensionalWeightOverride: new Decimal('3.0'),
+      syncedCommissionRate: new Decimal(SYNCED_COMMISSION_PCT),
+    },
+  });
+  const profile = await prisma.costProfile.create({
+    data: {
+      organizationId,
+      storeId,
+      name: `COGS ${randomUUID().slice(0, 8)}`,
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      vatRate: 20,
+    },
+  });
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId,
+      version: 1,
+      name: profile.name,
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      vatRate: 20,
+      changedFields: [],
+      effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+    },
+  });
+  await prisma.productVariantCostProfile.create({
+    data: { organizationId, profileId: profile.id, productVariantId: variant.id },
+  });
+  return variant.id;
+}
+
+/** A Net %10 campaign with one item carrying `barcode` and the given stored link. */
+async function seedRelinkCampaign(
+  organizationId: string,
+  storeId: string,
+  barcode: string,
+  storedVariantId: string | null,
+): Promise<SeededCampaign> {
+  const list = await prisma.marketplaceCampaignList.create({
+    data: {
+      organizationId,
+      storeId,
+      name: 'Relink Campaign',
+      discountType: 'NET',
+      valueKind: 'PERCENT',
+      value: new Decimal('10'),
+      trendyolFundingPct: new Decimal('0'),
+      startsAt: new Date(CAMPAIGN_WINDOW.startsAt),
+      endsAt: new Date(CAMPAIGN_WINDOW.endsAt),
+    },
+  });
+  const item = await prisma.marketplaceCampaignItem.create({
+    data: {
+      organizationId,
+      storeId,
+      listId: list.id,
+      productVariantId: storedVariantId,
+      barcode,
+      productTitle: barcode,
+      currentPrice: new Decimal('500.00'),
+      maxPrice: new Decimal('450.00'),
+      sortOrder: 0,
+    },
+  });
+  return { campaignId: list.id, itemId: item.id };
+}
+
+function campaignUrl(orgId: string, storeId: string, campaignId: string): string {
+  return `/v1/organizations/${orgId}/stores/${storeId}/marketplace-campaigns/${campaignId}`;
+}
+
+async function fetchRelinkItem(
+  accessToken: string,
+  orgId: string,
+  storeId: string,
+  seeded: SeededCampaign,
+): Promise<RelinkDetailItem> {
+  const res = await app.request(campaignUrl(orgId, storeId, seeded.campaignId), {
+    headers: { Authorization: bearer(accessToken) },
+  });
+  expect(res.status).toBe(200);
+  const item = RelinkDetailSchema.parse(await res.json()).items.find((i) => i.id === seeded.itemId);
+  if (item === undefined) throw new Error('detail has no item');
+  return item;
+}
+
+/** The detail, the estimate and the target margin all answer "no product" for the item. */
+async function expectNeverPriced(
+  accessToken: string,
+  orgId: string,
+  storeId: string,
+  seeded: SeededCampaign,
+): Promise<void> {
+  const item = await fetchRelinkItem(accessToken, orgId, storeId, seeded);
+  expect(item.calculable).toBe(false);
+  expect(item.reason).toBe('NO_PRODUCT');
+  expect(item.imageUrl).toBeNull();
+  expect(item.current.netProfit).toBeNull();
+  expect(item.maxScenario.netProfit).toBeNull();
+  // The foreign variant's synced rate never reaches the chain either.
+  expect(item.current.commissionSource).toBeNull();
+  expect(item.maxScenario.commissionSource).toBeNull();
+
+  const url = campaignUrl(orgId, storeId, seeded.campaignId);
+  const estimateRes = await sendJson(
+    'POST',
+    `${url}/items/${seeded.itemId}/estimate`,
+    accessToken,
+    ESTIMATE_BODY,
+  );
+  expect(estimateRes.status).toBe(200);
+  const estimate = RelinkEstimateSchema.parse(await estimateRes.json());
+  expect(estimate.calculable).toBe(false);
+  expect(estimate.reason).toBe('NO_PRODUCT');
+  expect(estimate.breakdown).toBeNull();
+  expect(estimate.commissionSource).toBeNull();
+
+  const marginRes = await sendJson('POST', `${url}/target-margin`, accessToken, TARGET_MARGIN_BODY);
+  expect(marginRes.status).toBe(200);
+  const suggestion = RelinkTargetMarginSchema.parse(await marginRes.json()).suggestions.find(
+    (s) => s.itemId === seeded.itemId,
+  );
+  expect(suggestion?.price).toBeNull();
+  expect(suggestion?.reason).toBe('NOT_CALCULABLE');
+}
+
+/** Control: in its own store the variant prices an item with its barcode (not vacuous). */
+async function expectPricedByOwner(
+  accessToken: string,
+  orgId: string,
+  storeId: string,
+  seeded: SeededCampaign,
+): Promise<void> {
+  const item = await fetchRelinkItem(accessToken, orgId, storeId, seeded);
+  expect(item.calculable).toBe(true);
+  expect(item.current.netProfit).not.toBeNull();
+  expect(item.current.commissionSource).toBe('product');
+  expect(item.imageUrl).toBe(RELINK_IMAGE_URL);
+}
+
+describe('marketplace-campaigns: item variant resolution stays inside the org and store', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    await ensureFeeDefinitions();
+  });
+
+  it("never prices Org A's item from Org B's variant with the same barcode, even through the stored link", async () => {
+    const userA = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, userA.id);
+    const storeA = await createShippableStore(orgA.id);
+
+    const userB = await createAuthenticatedTestUser();
+    const orgB = await createOrganization();
+    await createMembership(orgB.id, userB.id);
+    const storeB = await createShippableStore(orgB.id);
+    const variantB = await seedCalculableVariant(orgB.id, storeB, RELINK_BARCODE);
+
+    const own = await seedRelinkCampaign(orgB.id, storeB, RELINK_BARCODE, null);
+    await expectPricedByOwner(userB.accessToken, orgB.id, storeB, own);
+
+    // Org A's item carries the same barcode and its stored link points at Org B's variant.
+    const foreign = await seedRelinkCampaign(orgA.id, storeA, RELINK_BARCODE, variantB);
+    await expectNeverPriced(userA.accessToken, orgA.id, storeA, foreign);
+  });
+
+  it("never prices a store's item from another store's variant of the same organization", async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const storeOne = await createShippableStore(org.id);
+    const storeTwo = await createShippableStore(org.id);
+    const variantTwo = await seedCalculableVariant(org.id, storeTwo, RELINK_BARCODE);
+
+    const own = await seedRelinkCampaign(org.id, storeTwo, RELINK_BARCODE, null);
+    await expectPricedByOwner(user.accessToken, org.id, storeTwo, own);
+
+    // Store one's item carries the same barcode and its stored link points at store two's.
+    const other = await seedRelinkCampaign(org.id, storeOne, RELINK_BARCODE, variantTwo);
+    await expectNeverPriced(user.accessToken, org.id, storeOne, other);
   });
 });

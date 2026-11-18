@@ -49,6 +49,10 @@ export interface InspectContext<S extends LayoutSpec, TRow, TConfig> {
 export interface PersistContext<TRow, TConfig, TMeta> {
   readonly parent: ParentFields;
   readonly rows: readonly ImportedRow<TRow>[];
+  /**
+   * The import-time barcode match (row anchor -> variant id) that persist stores as the item's
+   * snapshot column; reads do not use it, they resolve the variant from the barcode at read time.
+   */
   readonly variantIdByAnchor: ReadonlyMap<string, string>;
   readonly config: TConfig;
   readonly meta: TMeta;

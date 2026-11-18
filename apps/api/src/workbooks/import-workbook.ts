@@ -27,6 +27,7 @@ import { isPrismaKnownRequestError, syncLog } from '@pazarsync/sync-core';
 
 import { IMPORT_TX_OPTIONS } from '../config/workbook-limits';
 import { mapTransactionError } from '../lib/map-transaction-error';
+import { resolveVariantIdsByBarcode } from '../lib/variant-barcode-lookup';
 import type { ImportedRow, ParentFields, StoreScope, WorkbookImportAdapter } from './adapter';
 import { VALUE_NOT_STORABLE_REASON, VALUE_OUT_OF_RANGE_REASON } from './column-range';
 import { FORMAT_SUMMARIES } from './formats/registry';
@@ -256,15 +257,7 @@ export async function importWorkbook<
   const { selected, rows, meta } = checked;
 
   const distinctAnchors = [...new Set(rows.map((row) => row.anchor))];
-  const variants = await prisma.productVariant.findMany({
-    where: {
-      organizationId: scope.organizationId,
-      storeId: scope.storeId,
-      barcode: { in: distinctAnchors },
-    },
-    select: { id: true, barcode: true },
-  });
-  const variantIdByAnchor = new Map(variants.map((variant) => [variant.barcode, variant.id]));
+  const variantIdByAnchor = await resolveVariantIdsByBarcode(prisma, scope, distinctAnchors);
 
   const sourceFilename = sanitizeUploadFilename(input.filename);
   const name = deriveName({

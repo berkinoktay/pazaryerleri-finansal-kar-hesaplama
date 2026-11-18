@@ -23,7 +23,12 @@ import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization, createStore } from '../../helpers/factories';
+import {
+  cloneVariantWithBarcode,
+  createMembership,
+  createOrganization,
+  createStore,
+} from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
@@ -500,6 +505,9 @@ describe('Plus Commission Tariffs - list / detail / delete', () => {
       currentPrice: string,
       commissionBasePrice: string,
     ): Promise<void> => {
+      // The detail resolves an item's variant by its own barcode: give each barcode a
+      // copy of the calculable variant.
+      await cloneVariantWithBarcode(variant.id, barcode);
       await prisma.plusCommissionTariffItem.create({
         data: {
           organizationId: org.id,
@@ -641,6 +649,9 @@ describe('Plus Commission Tariffs - list / detail / delete', () => {
     // Both point at the SAME variant + the SAME ceiling/commission; only customPrice differs.
     let sort = 0;
     const makeItem = async (barcode: string, customPrice: string | null): Promise<void> => {
+      // The detail resolves an item's variant by its own barcode: give each barcode a
+      // copy of the calculable variant.
+      await cloneVariantWithBarcode(variant.id, barcode);
       await prisma.plusCommissionTariffItem.create({
         data: {
           organizationId: org.id,
@@ -908,6 +919,11 @@ describe('Plus Commission Tariffs - per-item degrade (decision 9)', () => {
         sortOrder: 0,
       },
     });
+    // The detail resolves an item's variant by its own barcode: give each item barcode a
+    // copy of the calculable variant.
+    for (const barcode of ['BC-OK', 'BC-FAIL', 'BC-FAIL-2']) {
+      await cloneVariantWithBarcode(variant.id, barcode);
+    }
     // Healthy item: a positive commission-base price -> computes.
     await prisma.plusCommissionTariffItem.create({
       data: {
@@ -1169,6 +1185,9 @@ describe('Plus Commission Tariffs - unknown (NULL) prices and commissions', () =
       prices: SeededPrices,
       percents: SeededPercents = KNOWN_PERCENTS,
     ): Promise<void> => {
+      // The detail resolves an item's variant by its own barcode: give each barcode a
+      // copy of the calculable variant.
+      await cloneVariantWithBarcode(variant.id, barcode);
       await prisma.plusCommissionTariffItem.create({
         data: {
           organizationId: org.id,
@@ -1429,5 +1448,173 @@ describe('Plus Commission Tariffs - unknown (NULL) prices and commissions', () =
     // The same variant and prices price the control: this is the unknown percents, not a
     // degraded base.
     expect(itemOf(items, CONTROL).calculable).toBe(true);
+  });
+});
+
+// The detail fields the late-variant case reads, parsed rather than cast.
+const LateVariantItemSchema = z.object({
+  id: z.string(),
+  imageUrl: z.string().nullable(),
+  currentNetProfit: z.string().nullable(),
+  plus: z.object({ netProfit: z.string().nullable() }),
+  calculable: z.boolean(),
+  reason: z.string().nullable(),
+});
+const LateVariantDetailSchema = z.object({
+  periods: z.array(z.object({ items: z.array(LateVariantItemSchema) })),
+});
+type LateVariantItem = z.infer<typeof LateVariantItemSchema>;
+
+describe('Plus Commission Tariffs - the item variant is resolved from the barcode at read time', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+  });
+
+  it('an item imported before its variant existed is priced once the variant exists', async () => {
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing - globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Plus Late Variant Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'plus-late-variant-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'COGS Late Variant',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Late Variant',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+    // Earlier blocks truncate, and the detail resolves fee definitions unconditionally.
+    await ensureFeeDefinitions();
+
+    const tariff = await prisma.plusCommissionTariff.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Gec Eslesme Tarifesi' },
+    });
+    const period = await prisma.plusCommissionTariffPeriod.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: tariff.id,
+        dateRangeLabel: '1 - 7 Temmuz',
+        sortOrder: 0,
+      },
+    });
+    // Uploaded before the product sync: no catalog variant carried the barcode, so the
+    // import stored no variant link. Every price and percent is known.
+    const item = await prisma.plusCommissionTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        periodId: period.id,
+        productVariantId: null,
+        barcode: 'BC-PLATE',
+        productTitle: 'Gec Eslesen Urun',
+        currentPrice: '500.00',
+        commissionBasePrice: '500.00',
+        currentCommissionPct: '19.0000',
+        plusPriceUpperLimit: '450.00',
+        plusCommissionPct: '15.4',
+        plusCommissionBasePrice: '450.00',
+        sortOrder: 0,
+      },
+    });
+
+    const detailUrl = `/v1/organizations/${org.id}/stores/${store.id}/plus-commission-tariffs/${tariff.id}`;
+    const fetchItem = async (): Promise<LateVariantItem> => {
+      const res = await app.request(detailUrl, {
+        headers: { Authorization: bearer(user.accessToken) },
+      });
+      expect(res.status).toBe(200);
+      const detail = LateVariantDetailSchema.parse(await res.json());
+      const row = detail.periods[0]?.items.find((i) => i.id === item.id);
+      if (row === undefined) throw new Error('detail item BC-PLATE missing');
+      return row;
+    };
+
+    // No catalog variant carries the barcode yet.
+    const before = await fetchItem();
+    expect(before.calculable).toBe(false);
+    expect(before.reason).toBe('NO_PRODUCT');
+    expect(before.imageUrl).toBeNull();
+    expect(before.currentNetProfit).toBeNull();
+    expect(before.plus.netProfit).toBeNull();
+
+    // The product sync lands the product and its variant (with a cost) after the upload.
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 9001n,
+        productMainId: 'pm-9001',
+        title: 'Gec Eslesen Urun',
+        categoryId: 597n,
+        categoryName: 'Gomlek',
+        brandId: 2032n,
+        brandName: 'Modline',
+        // Two images: the detail must surface the first one.
+        imageUrls: ['https://cdn.example/plus-late-0.jpg', 'https://cdn.example/plus-late-1.jpg'],
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: 90010n,
+        barcode: 'BC-PLATE',
+        stockCode: 'STK-PLATE',
+        salePrice: new Decimal('500.00'),
+        listPrice: new Decimal('500.00'),
+        vatRate: 20,
+        dimensionalWeightOverride: new Decimal('3.0'),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+    });
+
+    // The same GET, with no re-upload, now prices the item and shows its image.
+    const after = await fetchItem();
+    expect(after.calculable).toBe(true);
+    expect(after.reason).toBeNull();
+    expect(after.currentNetProfit).not.toBeNull();
+    expect(after.plus.netProfit).not.toBeNull();
+    expect(after.imageUrl).toBe('https://cdn.example/plus-late-0.jpg');
+
+    // The reads resolved the variant without writing the stored link back.
+    const stored = await prisma.plusCommissionTariffItem.findUniqueOrThrow({
+      where: { id: item.id },
+      select: { productVariantId: true },
+    });
+    expect(stored.productVariantId).toBeNull();
   });
 });

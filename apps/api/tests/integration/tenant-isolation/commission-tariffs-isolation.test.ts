@@ -7,6 +7,8 @@
 // returns 404 (not 403), so an attacker cannot probe another tenant's ids. A
 // non-member of the org gets 403; no token gets 401.
 
+import { z } from '@hono/zod-openapi';
+import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
@@ -16,6 +18,7 @@ import { createApp } from '@/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization, createStore } from '../../helpers/factories';
+import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
 
@@ -299,5 +302,241 @@ describe('commission-tariffs: route-layer authorization', () => {
       },
     );
     expect(res.status).toBe(401);
+  });
+});
+
+// --- Item -> variant resolution never crosses a tenant or store boundary ---
+//
+// The detail and the estimate resolve an item's variant from its barcode at read time,
+// scoped to the request's organization and store. A variant with the item's barcode in
+// another organization, or in another store of the same organization, must never price
+// the item -- not even when the item's stored product_variant_id points straight at it.
+
+const RelinkItemSchema = z.object({
+  barcode: z.string(),
+  imageUrl: z.string().nullable(),
+  currentNetProfit: z.string().nullable(),
+  calculable: z.boolean(),
+  reason: z.string().nullable(),
+  bands: z.array(z.object({ netProfit: z.string().nullable() })),
+});
+const RelinkDetailSchema = z.object({
+  periods: z.array(z.object({ items: z.array(RelinkItemSchema) })),
+});
+const RelinkEstimateSchema = z.object({
+  calculable: z.boolean(),
+  reason: z.string().nullable(),
+  breakdown: z.object({ netProfit: z.string() }).nullable(),
+});
+type RelinkItem = z.infer<typeof RelinkItemSchema>;
+
+/** A store with the shipping setup the scenario engine needs (SENDEOMP contract). */
+async function createShippableStore(organizationId: string): Promise<string> {
+  const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+  if (carrier === null) throw new Error('SENDEOMP carrier missing - globalSetup must run');
+  const store = await createStore(organizationId);
+  await prisma.store.update({
+    where: { id: store.id },
+    data: { shippingTariffSource: 'TRENDYOL_CONTRACT', defaultShippingCarrierId: carrier.id },
+  });
+  return store.id;
+}
+
+/** A calculable variant (price, VAT, desi, an image and a versioned COGS cost). */
+async function seedCalculableVariant(
+  organizationId: string,
+  storeId: string,
+  barcode: string,
+): Promise<string> {
+  const product = await prisma.product.create({
+    data: {
+      organizationId,
+      storeId,
+      platformContentId: BigInt(Math.floor(Math.random() * 1e9)),
+      productMainId: `pm-${crypto.randomUUID().slice(0, 8)}`,
+      title: 'Foreign Product',
+      imageUrls: ['https://cdn.example/foreign-0.jpg'],
+    },
+  });
+  const variant = await prisma.productVariant.create({
+    data: {
+      organizationId,
+      storeId,
+      productId: product.id,
+      platformVariantId: BigInt(Math.floor(Math.random() * 1e12)),
+      barcode,
+      stockCode: barcode,
+      salePrice: new Decimal('500.00'),
+      listPrice: new Decimal('500.00'),
+      vatRate: 20,
+      dimensionalWeightOverride: new Decimal('3.0'),
+    },
+  });
+  const profile = await prisma.costProfile.create({
+    data: {
+      organizationId,
+      storeId,
+      name: `COGS ${crypto.randomUUID().slice(0, 8)}`,
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      vatRate: 20,
+    },
+  });
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: profile.id,
+      organizationId,
+      version: 1,
+      name: profile.name,
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      vatRate: 20,
+      changedFields: [],
+      effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+    },
+  });
+  await prisma.productVariantCostProfile.create({
+    data: { organizationId, profileId: profile.id, productVariantId: variant.id },
+  });
+  return variant.id;
+}
+
+/** A tariff with one fully priced item (known prices, commission and a limited band). */
+async function seedPricedTariff(
+  organizationId: string,
+  storeId: string,
+  barcode: string,
+  storedVariantId: string | null,
+): Promise<{ tariffId: string; itemId: string }> {
+  const tariff = await prisma.commissionTariff.create({
+    data: { organizationId, storeId, name: 'Relink Tariff' },
+  });
+  const period = await prisma.commissionTariffPeriod.create({
+    data: { organizationId, storeId, tariffId: tariff.id, dateRangeLabel: 'Week', sortOrder: 0 },
+  });
+  const item = await prisma.commissionTariffItem.create({
+    data: {
+      organizationId,
+      storeId,
+      periodId: period.id,
+      productVariantId: storedVariantId,
+      barcode,
+      productTitle: barcode,
+      currentPrice: '500.00',
+      commissionBasePrice: '480.00',
+      currentCommissionPct: '19.0000',
+      bands: [{ key: 'band1', upperLimit: '600.00', commissionPct: '19' }],
+    },
+  });
+  return { tariffId: tariff.id, itemId: item.id };
+}
+
+async function fetchOnlyItem(
+  accessToken: string,
+  orgId: string,
+  storeId: string,
+  tariffId: string,
+): Promise<RelinkItem> {
+  const res = await app.request(
+    `/v1/organizations/${orgId}/stores/${storeId}/commission-tariffs/${tariffId}`,
+    { headers: { Authorization: bearer(accessToken) } },
+  );
+  expect(res.status).toBe(200);
+  const item = RelinkDetailSchema.parse(await res.json()).periods[0]?.items[0];
+  if (item === undefined) throw new Error('detail has no item');
+  return item;
+}
+
+async function expectEstimateNoProduct(
+  accessToken: string,
+  orgId: string,
+  storeId: string,
+  tariffId: string,
+  itemId: string,
+): Promise<void> {
+  const res = await app.request(
+    `/v1/organizations/${orgId}/stores/${storeId}/commission-tariffs/${tariffId}/items/${itemId}/estimate`,
+    {
+      method: 'POST',
+      headers: { Authorization: bearer(accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario: 'current' }),
+    },
+  );
+  expect(res.status).toBe(200);
+  const estimate = RelinkEstimateSchema.parse(await res.json());
+  expect(estimate.calculable).toBe(false);
+  expect(estimate.reason).toBe('NO_PRODUCT');
+  expect(estimate.breakdown).toBeNull();
+}
+
+function expectNoProduct(item: RelinkItem): void {
+  expect(item.calculable).toBe(false);
+  expect(item.reason).toBe('NO_PRODUCT');
+  expect(item.imageUrl).toBeNull();
+  expect(item.currentNetProfit).toBeNull();
+  for (const band of item.bands) {
+    expect(band.netProfit).toBeNull();
+  }
+}
+
+describe('commission-tariffs: item variant resolution stays inside the org and store', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    await ensureFeeDefinitions();
+  });
+
+  it("never prices Org A's item from Org B's variant with the same barcode, even through the stored link", async () => {
+    const userA = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, userA.id);
+    const storeA = await createShippableStore(orgA.id);
+
+    const userB = await createAuthenticatedTestUser();
+    const orgB = await createOrganization();
+    await createMembership(orgB.id, userB.id);
+    const storeB = await createShippableStore(orgB.id);
+    const variantB = await seedCalculableVariant(orgB.id, storeB, 'BC-X');
+
+    // Control: in its own store the variant prices an item with that barcode.
+    const own = await seedPricedTariff(orgB.id, storeB, 'BC-X', null);
+    const ownItem = await fetchOnlyItem(userB.accessToken, orgB.id, storeB, own.tariffId);
+    expect(ownItem.calculable).toBe(true);
+    expect(ownItem.currentNetProfit).not.toBeNull();
+    expect(ownItem.imageUrl).toBe('https://cdn.example/foreign-0.jpg');
+
+    // Org A's item carries the same barcode and its stored link points at Org B's variant.
+    const foreign = await seedPricedTariff(orgA.id, storeA, 'BC-X', variantB);
+    expectNoProduct(await fetchOnlyItem(userA.accessToken, orgA.id, storeA, foreign.tariffId));
+    await expectEstimateNoProduct(
+      userA.accessToken,
+      orgA.id,
+      storeA,
+      foreign.tariffId,
+      foreign.itemId,
+    );
+  });
+
+  it("never prices a store's item from another store's variant of the same organization", async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const storeOne = await createShippableStore(org.id);
+    const storeTwo = await createShippableStore(org.id);
+    const variantTwo = await seedCalculableVariant(org.id, storeTwo, 'BC-X');
+
+    // Control: in store two the variant prices an item with that barcode.
+    const own = await seedPricedTariff(org.id, storeTwo, 'BC-X', null);
+    const ownItem = await fetchOnlyItem(user.accessToken, org.id, storeTwo, own.tariffId);
+    expect(ownItem.calculable).toBe(true);
+    expect(ownItem.currentNetProfit).not.toBeNull();
+
+    // Store one's item carries the same barcode and its stored link points at store two's.
+    const other = await seedPricedTariff(org.id, storeOne, 'BC-X', variantTwo);
+    expectNoProduct(await fetchOnlyItem(user.accessToken, org.id, storeOne, other.tariffId));
+    await expectEstimateNoProduct(user.accessToken, org.id, storeOne, other.tariffId, other.itemId);
   });
 });

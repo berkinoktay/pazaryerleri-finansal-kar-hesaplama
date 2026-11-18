@@ -1014,3 +1014,139 @@ describe('Advantage Product Labels - sub-kurus tier limits (Faz 4B closing gate)
     }
   });
 });
+
+describe('Advantage Product Labels - the item variant is resolved from the barcode at read time', () => {
+  let fx: TariffFixture;
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+    fx = await setupTariffFixture();
+  });
+
+  it('an item imported before its variant existed is priced once the variant exists', async () => {
+    const LATE_BARCODE = 'ADV-LATE';
+    // The pinned commission tariff carries bands for the late barcode too, so the
+    // commission resolves the moment the item reaches the engine.
+    const period = await prisma.commissionTariffPeriod.findFirstOrThrow({
+      where: { organizationId: fx.orgId, storeId: fx.storeId, tariffId: fx.commissionTariffId },
+    });
+    await prisma.commissionTariffItem.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: fx.storeId,
+        periodId: period.id,
+        barcode: LATE_BARCODE,
+        productTitle: 'Gec Eslesen Urun',
+        currentPrice: '360.00',
+        currentCommissionPct: '0.1900',
+        bands: MATCHED_BANDS,
+      },
+    });
+    const tariff = await prisma.advantageTariff.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: fx.storeId,
+        name: 'Gec Eslesme Avantaj',
+        commissionSourceTariffId: fx.commissionTariffId,
+      },
+    });
+    // Uploaded before the product sync: no catalog variant carried the barcode, so the
+    // import stored no variant link.
+    const item = await prisma.advantageTariffItem.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: fx.storeId,
+        tariffId: tariff.id,
+        productVariantId: null,
+        barcode: LATE_BARCODE,
+        productTitle: 'Gec Eslesen Urun',
+        currentPrice: '360.00',
+        customerPrice: '360.00',
+        hasCommissionTariff: true,
+        starTiers: MATCHED_STAR_TIERS,
+        applyUntilEnd: false,
+        sortOrder: 0,
+      },
+    });
+
+    const fetchItem = async (): Promise<ItemWire> => {
+      const res = await app.request(
+        `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/advantage-tariffs/${tariff.id}`,
+        { headers: { Authorization: bearer(fx.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body: DetailWire = await res.json();
+      const row = body.items.find((i) => i.id === item.id);
+      if (row === undefined) throw new Error('detail item ADV-LATE missing');
+      return row;
+    };
+
+    // No catalog variant carries the barcode yet.
+    const before = await fetchItem();
+    expect(before.calculable).toBe(false);
+    expect(before.reason).toBe('NO_PRODUCT');
+    expect(before.imageUrl).toBeNull();
+    expect(before.current.netProfit).toBeNull();
+    expect(before.tiers.every((t) => t.netProfit === null)).toBe(true);
+
+    // The product sync lands the product and its variant (with a cost) after the upload.
+    const product = await prisma.product.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: fx.storeId,
+        platformContentId: 8509n,
+        productMainId: 'pm-8509',
+        title: 'Gec Eslesen Urun',
+        categoryId: 597n,
+        categoryName: 'Bayrak',
+        brandId: 2032n,
+        brandName: 'Alpaka',
+        // Two images: the detail must surface the first one.
+        imageUrls: ['https://cdn.example/adv-late-0.jpg', 'https://cdn.example/adv-late-1.jpg'],
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: fx.storeId,
+        productId: product.id,
+        platformVariantId: 85090n,
+        barcode: LATE_BARCODE,
+        stockCode: 'STK-ADV-LATE',
+        salePrice: new Decimal('360.00'),
+        listPrice: new Decimal('360.00'),
+        vatRate: 20,
+        dimensionalWeightOverride: new Decimal('3.0'),
+      },
+    });
+    // The fixture's COGS profile (cost 200, version 1) costs the new variant too.
+    const profile = await prisma.costProfile.findFirstOrThrow({
+      where: { organizationId: fx.orgId, storeId: fx.storeId, type: 'COGS' },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: fx.orgId, profileId: profile.id, productVariantId: variant.id },
+    });
+
+    // The same GET, with no re-upload, now prices every tier and shows the image.
+    const after = await fetchItem();
+    expect(after.calculable).toBe(true);
+    expect(after.reason).toBeNull();
+    expect(after.imageUrl).toBe('https://cdn.example/adv-late-0.jpg');
+    expect(after.current.netProfit).not.toBeNull();
+    expect(after.tiers).toHaveLength(3);
+    for (const tier of after.tiers) {
+      expect(tier.commissionSource).toBe('band');
+      expect(tier.netProfit).not.toBeNull();
+    }
+    // Same economics as the shared fixture's matched item: the hand-derived tier2 golden.
+    expect(after.tiers[1]?.netProfit).toBe('-95.01');
+
+    // The reads resolved the variant without writing the stored link back.
+    const stored = await prisma.advantageTariffItem.findUniqueOrThrow({
+      where: { id: item.id },
+      select: { productVariantId: true },
+    });
+    expect(stored.productVariantId).toBeNull();
+  });
+});

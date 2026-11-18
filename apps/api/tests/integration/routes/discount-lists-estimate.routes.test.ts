@@ -21,7 +21,11 @@ import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization } from '../../helpers/factories';
+import {
+  cloneVariantWithBarcode,
+  createMembership,
+  createOrganization,
+} from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
@@ -568,5 +572,81 @@ describe('Discount Lists - item estimate', () => {
     });
     expect(res.status).toBe(404);
     expect(((await res.json()) as { code: string }).code).toBe('NOT_FOUND');
+  });
+});
+
+describe('Discount Lists - the estimate resolves the item variant from the barcode at read time', () => {
+  let fx: Fixture;
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+    fx = await setupFixture();
+  });
+
+  it('an item imported before its variant existed is estimated once the variant exists', async () => {
+    const LATE_BARCODE = 'DISC-EST-LATE';
+    // Uploaded before the product sync: no catalog variant carried the barcode, so the
+    // import stored no variant link. The barcode is not in the covering commission tariff,
+    // so once matched its commission comes from the variant's synced rate.
+    const late = await prisma.discountListItem.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: fx.storeId,
+        listId: fx.listId,
+        productVariantId: null,
+        barcode: LATE_BARCODE,
+        productTitle: 'Gec Eslesen Urun',
+        currentPrice: new Decimal(CURRENT_PRICE),
+        included: true,
+        sortOrder: 50,
+      },
+    });
+
+    // No catalog variant carries the barcode yet.
+    const before = await estimate(fx, late.id, 'discounted');
+    expect(before.status).toBe(200);
+    expect(before.body.itemId).toBe(late.id);
+    expect(before.body.calculable).toBe(false);
+    expect(before.body.reason).toBe('NO_PRODUCT');
+    expect(before.body.breakdown).toBeNull();
+
+    // The product sync lands a variant with that barcode after the upload: the same
+    // economics as the synced-rate fixture variant (synced rate, category, cost link).
+    const productVariant = await prisma.productVariant.findFirstOrThrow({
+      where: { organizationId: fx.orgId, storeId: fx.storeId, barcode: PROD_BARCODE },
+      select: { id: true },
+    });
+    await cloneVariantWithBarcode(productVariant.id, LATE_BARCODE);
+
+    // The same estimate, with no re-upload, now prices the item with a full breakdown.
+    const after = await estimate(fx, late.id, 'discounted');
+    expect(after.status).toBe(200);
+    expect(after.body.calculable).toBe(true);
+    expect(after.body.reason).toBeNull();
+    expect(after.body.price).toBe(DISCOUNTED_PRICE);
+    expect(after.body.commissionSource).toBe('product');
+    expect(Number(after.body.commissionPct)).toBe(PRODUCT_PCT);
+    expect(after.body.breakdown).not.toBeNull();
+    expect(after.body.breakdown?.saleGross).toBe(DISCOUNTED_PRICE);
+
+    // The modal number equals the detail row's discounted profit exactly.
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,
+      { headers: { Authorization: bearer(fx.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const detail: DetailWire = await res.json();
+    const row = detail.items.find((i) => i.id === late.id);
+    expect(row?.calculable).toBe(true);
+    expect(row?.discounted.commissionSource).toBe('product');
+    expect(row?.discounted.netProfit).toBe(after.body.breakdown?.netProfit);
+
+    // The reads resolved the variant without writing the stored link back.
+    const stored = await prisma.discountListItem.findUniqueOrThrow({
+      where: { id: late.id },
+      select: { productVariantId: true },
+    });
+    expect(stored.productVariantId).toBeNull();
   });
 });

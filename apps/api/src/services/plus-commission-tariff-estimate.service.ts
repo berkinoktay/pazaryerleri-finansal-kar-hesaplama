@@ -32,7 +32,11 @@ import {
   type ComputedPlusEstimate,
 } from './plus-commission-tariff-compute.service';
 import { logProfitReadFailure } from './profit-compute-fallback.service';
-import { loadScreenScenarioBases, screenScenarioBaseFor } from './scenario-screen-commons';
+import {
+  loadScreenScenarioBases,
+  resolveScreenVariantId,
+  screenScenarioBaseFor,
+} from './scenario-screen-commons';
 import { currentBaselinePrice, decimalOrNull } from './tariff-compute-commons';
 import type { EstimatePlusPriceResult } from '../validators/plus-commission-tariff.validator';
 
@@ -49,9 +53,9 @@ export type EstimatePlusPriceInput =
 
 /**
  * Computes the full profit breakdown for one Plus item under `input`. Throws
- * `NotFoundError` when the item does not belong to this tariff/store. When the item
- * is unmatched or uncostable the result carries `calculable: false` + a `reason`
- * and a null breakdown. Throws `ValidationError` (`scenario`, CURRENT_PRICE_UNKNOWN)
+ * `NotFoundError` when the item does not belong to this tariff/store. When the item's
+ * barcode has no catalog variant now, or the variant is uncostable, the result carries
+ * `calculable: false` + a `reason` and a null breakdown. Throws `ValidationError` (`scenario`, CURRENT_PRICE_UNKNOWN)
  * for the current scenario of an item whose baseline price is unknown
  * (`currentBaselinePrice` is null), (`scenario`, CURRENT_COMMISSION_UNKNOWN) for the
  * current scenario of an item whose current commission percent is unknown (the price
@@ -73,7 +77,7 @@ export async function estimatePlusItemPrice(
       where: { id: itemId, organizationId: orgId, storeId, period: { tariffId } },
       select: {
         id: true,
-        productVariantId: true,
+        barcode: true,
         currentPrice: true,
         commissionBasePrice: true,
         currentCommissionPct: true,
@@ -115,16 +119,24 @@ export async function estimatePlusItemPrice(
     applyCommissionPct = plusCommissionPct;
   }
 
-  // Load the scenario base for the matched variant only (scenario date = now). An
-  // unmatched item passes no ids -> no-product; a store-wide load failure -> degraded.
+  // Resolve the item's variant from its barcode as the catalog is now (the same lookup
+  // the detail uses, never the link stored at import), then load the scenario base for
+  // that variant only (scenario date = now). A barcode with no catalog variant passes no
+  // ids -> no-product; a failed lookup (logged) or a store-wide load failure -> degraded.
+  const { variantId, degraded } = await resolveScreenVariantId({
+    organizationId: orgId,
+    storeId,
+    barcode: item.barcode,
+    surface: 'plus-commission-tariff',
+  });
   const bases = await loadScreenScenarioBases({
     organizationId: orgId,
     storeId,
     scenarioDate: new Date(),
-    variantIds: item.productVariantId !== null ? [item.productVariantId] : [],
+    variantIds: variantId !== null ? [variantId] : [],
     surface: 'plus-commission-tariff',
   });
-  const base = screenScenarioBaseFor(bases, item.productVariantId);
+  const base = screenScenarioBaseFor(bases, variantId, degraded);
 
   let computed: ComputedPlusEstimate;
   try {

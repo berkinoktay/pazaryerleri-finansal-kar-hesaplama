@@ -200,7 +200,6 @@ export async function getMarketplaceCampaignDetail(
           orderBy: { sortOrder: 'asc' },
           select: {
             id: true,
-            productVariantId: true,
             barcode: true,
             productCode: true,
             externalId: true,

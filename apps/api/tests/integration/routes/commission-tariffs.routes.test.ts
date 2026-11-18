@@ -20,6 +20,7 @@ import { createApp } from '@/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import {
+  cloneVariantWithBarcode,
   createMembership,
   createOrder,
   createOrganization,
@@ -469,6 +470,9 @@ describe('Commission Tariffs — list / detail / delete', () => {
       currentPrice: string,
       commissionBasePrice: string | null,
     ): Promise<void> => {
+      // The detail resolves an item's variant by its own barcode: give each barcode a
+      // copy of the calculable variant.
+      await cloneVariantWithBarcode(variant.id, barcode);
       await prisma.commissionTariffItem.create({
         data: {
           organizationId: org.id,
@@ -809,6 +813,11 @@ describe('Commission Tariffs — per-item degrade (decision 9)', () => {
       },
     });
     const bands = [{ key: 'band1', upperLimit: '600.00', commissionPct: '19' }];
+    // The detail resolves an item's variant by its own barcode: give each item barcode a
+    // copy of the calculable variant.
+    for (const barcode of ['BC-OK', 'BC-FAIL', 'BC-FAIL-2']) {
+      await cloneVariantWithBarcode(variant.id, barcode);
+    }
     // Healthy item: a positive commission-base price -> computes.
     await prisma.commissionTariffItem.create({
       data: {
@@ -1020,6 +1029,11 @@ describe('Commission Tariffs - store-wide degrade (decision 9)', () => {
       },
     });
     const bands = [{ key: 'band1', upperLimit: '600.00', commissionPct: '19' }];
+    // The detail resolves an item's variant by its own barcode: give each item barcode a
+    // copy of the calculable variant.
+    for (const barcode of ['BC-SDEG-1', 'BC-SDEG-2', 'BC-SDEG-NB']) {
+      await cloneVariantWithBarcode(variant.id, barcode);
+    }
     // Two matched items (same calculable variant) - both must degrade to reason null when
     // the store-wide load fails, proving the degrade wins over a per-item NO_PRODUCT.
     await prisma.commissionTariffItem.create({
@@ -1397,6 +1411,9 @@ describe('Commission Tariffs - unknown current price or commission', () => {
       // Null is a current commission cell the file left blank or unreadable.
       currentCommissionPct: string | null = '19.0000',
     ): Promise<void> => {
+      // The detail resolves an item's variant by its own barcode: give each barcode a
+      // copy of the calculable variant.
+      await cloneVariantWithBarcode(variant.id, barcode);
       await prisma.commissionTariffItem.create({
         data: {
           organizationId: org.id,

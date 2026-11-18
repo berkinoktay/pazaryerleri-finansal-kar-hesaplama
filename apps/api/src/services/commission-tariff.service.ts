@@ -20,6 +20,7 @@ import { computeItemBands, type ComputedItemBands } from './commission-tariff-co
 import {
   createRequestFailureLog,
   loadScreenScenarioBases,
+  resolveScreenVariantIds,
   screenScenarioBaseFor,
 } from './scenario-screen-commons';
 import { decimalOrNull, moneyOrNull, percentOrNull } from './tariff-compute-commons';
@@ -111,16 +112,19 @@ export async function listTariffs(
 /**
  * Returns one tariff with per-band profit computed on read. Throws
  * `NotFoundError` when the tariff does not belong to this store (non-disclosure).
- * The scenario bases of every matched variant are loaded once for the whole tariff,
- * then each item's bands are computed by the scenario engine with the band's
+ * Each item's variant is resolved from its barcode as the store's catalog is now (one
+ * query for the whole tariff, `resolveScreenVariantIds`), not from the link stored at
+ * import. The scenario bases of every resolved variant are loaded once for the whole
+ * tariff, then each item's bands are computed by the scenario engine with the band's
  * commission as an override. A slim org + store scoped variant query supplies the
- * display image only. Per decision 9 a store-wide load failure or a per-item engine
- * throw leaves that profit empty (logged once) rather than failing the request. An item
- * whose current price is unknown (null) is served with a null `currentPrice`; how its
- * profits are computed is `computeItemBands`'s rule for an unknown baseline. The stored
- * current commission percent is read the same way (`decimalOrNull` / `percentOrNull`): an
- * unknown percent (the file's cell was blank or unreadable) is sent as a null
- * `currentCommissionPct` and is never priced, so the item has no current profit.
+ * display image only. Per decision 9 a failed barcode lookup, a store-wide load failure
+ * or a per-item engine throw leaves that profit empty (logged once) rather than failing
+ * the request. An item whose current price is unknown (null) is served with a null
+ * `currentPrice`; how its profits are computed is `computeItemBands`'s rule for an
+ * unknown baseline. The stored current commission percent is read the same way
+ * (`decimalOrNull` / `percentOrNull`): an unknown percent (the file's cell was blank or
+ * unreadable) is sent as a null `currentCommissionPct` and is never priced, so the item
+ * has no current profit.
  */
 export async function getTariffDetail(
   orgId: string,
@@ -153,7 +157,6 @@ export async function getTariffDetail(
               orderBy: [{ sortOrder: 'asc' }, { barcode: 'asc' }, { id: 'asc' }],
               select: {
                 id: true,
-                productVariantId: true,
                 barcode: true,
                 stockCode: true,
                 productTitle: true,
@@ -179,15 +182,19 @@ export async function getTariffDetail(
     throw new NotFoundError('CommissionTariff', tariffId);
   }
 
-  // ─── Collect matched variant ids across every period ──────────────────────
-  const variantIds: string[] = [];
-  for (const period of tariff.periods) {
-    for (const item of period.items) {
-      if (item.productVariantId !== null) variantIds.push(item.productVariantId);
-    }
-  }
+  // ─── Resolve every item barcode to its catalog variant, once ───────────────
+  // The variant comes from the item's barcode as the catalog is now (one org + store
+  // scoped query for every period), never from the link stored at import. A failed lookup
+  // is logged and degrades every item (no ids, so the variant reads below are skipped).
+  const { variantIdByBarcode, degraded } = await resolveScreenVariantIds({
+    organizationId: orgId,
+    storeId,
+    barcodes: tariff.periods.flatMap((period) => period.items.map((item) => item.barcode)),
+    surface: 'commission-tariff',
+  });
+  const variantIds = [...new Set(variantIdByBarcode.values())];
 
-  // ─── Display image per matched variant (org + store scoped) ───────────────
+  // ─── Display image per resolved variant (org + store scoped) ──────────────
   // First catalog image (barcode-matched, from our own catalog); the Trendyol tariff
   // file carries no images. Null when none attached. This is the only variant read the
   // detail still needs -- the profit inputs come from the scenario loader below.
@@ -225,7 +232,8 @@ export async function getTariffDetail(
 
   const periods = tariff.periods.map((period): TariffPeriod => {
     const items = period.items.map((item): TariffDetailItem => {
-      const base = screenScenarioBaseFor(bases, item.productVariantId);
+      const variantId = variantIdByBarcode.get(item.barcode) ?? null;
+      const base = screenScenarioBaseFor(bases, variantId, degraded);
       const bandParams = {
         bands: parseStoredTariffBands(item.bands),
         // Null when the file's current price cell was blank, unreadable or 0.
@@ -247,8 +255,7 @@ export async function getTariffDetail(
         barcode: item.barcode,
         stockCode: item.stockCode,
         productTitle: item.productTitle,
-        imageUrl:
-          item.productVariantId !== null ? (imageMap.get(item.productVariantId) ?? null) : null,
+        imageUrl: variantId !== null ? (imageMap.get(variantId) ?? null) : null,
         category: item.category,
         brand: item.brand,
         currentPrice: moneyOrNull(bandParams.currentPrice),
