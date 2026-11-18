@@ -26,7 +26,11 @@ import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization } from '../../helpers/factories';
+import {
+  cloneVariantWithBarcode,
+  createMembership,
+  createOrganization,
+} from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
@@ -471,5 +475,90 @@ describe('Flash Products - item estimate', () => {
     const control = await estimateAt(fx.matchedItemId);
     expect(control.calculable).toBe(true);
     expect(control.breakdown).not.toBeNull();
+  });
+});
+
+describe('Flash Products - the estimate resolves the item variant from the barcode at read time', () => {
+  let fx: Fixture;
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+    fx = await setupFixture();
+  });
+
+  it('an item imported before its variant existed is estimated once the variant exists', async () => {
+    const LATE_BARCODE = 'FLASH-EST-LATE';
+    // Uploaded before the product sync: no catalog variant carried the barcode, so the
+    // import stored no variant link. Known flat rate, no commission tariff.
+    const late = await prisma.flashProductItem.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: fx.storeId,
+        listId: fx.listId,
+        productVariantId: null,
+        barcode: LATE_BARCODE,
+        productTitle: 'Gec Eslesen Flas Urunu',
+        currentPrice: '360.00',
+        customerPrice: '360.00',
+        currentCommissionPct: '19',
+        hasCommissionTariff: false,
+        offer24Price: OFFER_PRICE,
+        offer24StartsAt: flashInstant(2026, 7, 9, 0),
+        offer24EndsAt: flashInstant(2026, 7, 9, 23, 59),
+        sortOrder: 3,
+      },
+    });
+    const estimateCurrent = async (): Promise<z.infer<typeof EstimateResultSchema>> => {
+      const res = await app.request(estimateUrl(fx, late.id), {
+        method: 'POST',
+        headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scenario: 'current' }),
+      });
+      expect(res.status).toBe(200);
+      return EstimateResultSchema.parse(await res.json());
+    };
+
+    // No catalog variant carries the barcode yet.
+    const before = await estimateCurrent();
+    expect(before.itemId).toBe(late.id);
+    expect(before.calculable).toBe(false);
+    expect(before.reason).toBe('NO_PRODUCT');
+    expect(before.breakdown).toBeNull();
+
+    // The product sync lands a variant with that barcode (same product and cost as the
+    // fixture's matched variant) after the upload.
+    const matchedVariant = await prisma.productVariant.findFirstOrThrow({
+      where: { organizationId: fx.orgId, storeId: fx.storeId, barcode: MATCHED_BARCODE },
+    });
+    await cloneVariantWithBarcode(matchedVariant.id, LATE_BARCODE);
+
+    // The same estimate, with no re-upload, now prices the item with a full breakdown.
+    const after = await estimateCurrent();
+    expect(after.calculable).toBe(true);
+    expect(after.reason).toBeNull();
+    expect(after.price).toBe('360.00');
+    expect(after.commissionSource).toBe('current');
+    expect(after.breakdown).not.toBeNull();
+    expect(after.breakdown?.saleGross).toBe('360.00');
+
+    // The modal number equals the detail row's current profit exactly.
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/flash-products/${fx.listId}`,
+      { headers: { Authorization: bearer(fx.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const detail: DetailWire = await res.json();
+    const detailRow = detail.items.find((i) => i.id === late.id);
+    expect(detailRow?.calculable).toBe(true);
+    expect(detailRow?.currentNetProfit).not.toBeNull();
+    expect(after.breakdown?.netProfit).toBe(detailRow?.currentNetProfit);
+
+    // The reads resolved the variant without writing the stored link back.
+    const stored = await prisma.flashProductItem.findUniqueOrThrow({
+      where: { id: late.id },
+      select: { productVariantId: true },
+    });
+    expect(stored.productVariantId).toBeNull();
   });
 });

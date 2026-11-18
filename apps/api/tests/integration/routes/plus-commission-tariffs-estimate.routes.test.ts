@@ -27,7 +27,11 @@ import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization } from '../../helpers/factories';
+import {
+  cloneVariantWithBarcode,
+  createMembership,
+  createOrganization,
+} from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
@@ -74,6 +78,10 @@ interface EstimateFixture {
   orgId: string;
   storeId: string;
   tariffId: string;
+  /** The tariff's only period. */
+  periodId: string;
+  /** The calculable catalog variant (barcode BC-EST, with a cost). */
+  variantId: string;
   matchedItemId: string;
   unmatchedItemId: string;
   /** Matched; current price, commission base price and Plus ceiling unknown (NULL). */
@@ -263,6 +271,9 @@ async function setupFixture(): Promise<EstimateFixture> {
     prices: SeededPrices,
     percents: SeededPercents = KNOWN_PERCENTS,
   ): Promise<string> => {
+    // The detail and the estimate resolve an item's variant by its own barcode: give each
+    // barcode a copy of the calculable variant.
+    await cloneVariantWithBarcode(variant.id, barcode);
     const item = await prisma.plusCommissionTariffItem.create({
       data: {
         organizationId: org.id,
@@ -309,6 +320,8 @@ async function setupFixture(): Promise<EstimateFixture> {
     orgId: org.id,
     storeId: store.id,
     tariffId: tariff.id,
+    periodId: period.id,
+    variantId: variant.id,
     matchedItemId: matched.id,
     unmatchedItemId: unmatched.id,
     unknownPricesItemId,
@@ -613,5 +626,75 @@ describe('Plus Commission Tariffs - item estimate', () => {
     expect(currentBody.calculable).toBe(true);
     expect(currentBody.commissionPct).toBe('19.0000');
     expect(currentBody.breakdown?.netProfit).toBe(row.currentNetProfit);
+  });
+});
+
+describe('Plus Commission Tariffs - the estimate resolves the item variant from the barcode at read time', () => {
+  let fx: EstimateFixture;
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+    fx = await setupFixture();
+  });
+
+  it('an item imported before its variant existed is estimated once the variant exists', async () => {
+    // Uploaded before the product sync: no catalog variant carried the barcode, so the
+    // import stored no variant link. Every price and percent is known, so the estimate
+    // passes its checks and reaches the variant lookup.
+    const late = await prisma.plusCommissionTariffItem.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: fx.storeId,
+        periodId: fx.periodId,
+        productVariantId: null,
+        barcode: 'BC-EST-LATE',
+        productTitle: 'Gec Eslesen Urun',
+        currentPrice: MATCHED_PRICES.currentPrice,
+        commissionBasePrice: MATCHED_PRICES.commissionBasePrice,
+        currentCommissionPct: KNOWN_PERCENTS.currentCommissionPct,
+        plusPriceUpperLimit: MATCHED_PRICES.plusPriceUpperLimit,
+        plusCommissionPct: KNOWN_PERCENTS.plusCommissionPct,
+        plusCommissionBasePrice: MATCHED_PRICES.plusPriceUpperLimit,
+        sortOrder: 6,
+      },
+    });
+    const estimateCurrent = async (): Promise<z.infer<typeof EstimateResultSchema>> => {
+      const res = await app.request(estimateUrl(fx, late.id), {
+        method: 'POST',
+        headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scenario: 'current' }),
+      });
+      expect(res.status).toBe(200);
+      return EstimateResultSchema.parse(await res.json());
+    };
+
+    // No catalog variant carries the barcode yet.
+    const before = await estimateCurrent();
+    expect(before.itemId).toBe(late.id);
+    expect(before.calculable).toBe(false);
+    expect(before.reason).toBe('NO_PRODUCT');
+    expect(before.breakdown).toBeNull();
+
+    // The product sync lands a variant with that barcode (with a cost) after the upload.
+    await cloneVariantWithBarcode(fx.variantId, 'BC-EST-LATE');
+
+    // The same estimate, with no re-upload, now prices the item.
+    const after = await estimateCurrent();
+    expect(after.calculable).toBe(true);
+    expect(after.reason).toBeNull();
+    expect(after.price).toBe('480.00');
+    expect(after.breakdown).not.toBeNull();
+    // The modal number equals the detail row's current profit exactly.
+    const row = await fetchDetailItem(fx, 'BC-EST-LATE');
+    expect(row.currentNetProfit).not.toBeNull();
+    expect(after.breakdown?.netProfit).toBe(row.currentNetProfit);
+
+    // The reads resolved the variant without writing the stored link back.
+    const stored = await prisma.plusCommissionTariffItem.findUniqueOrThrow({
+      where: { id: late.id },
+      select: { productVariantId: true },
+    });
+    expect(stored.productVariantId).toBeNull();
   });
 });

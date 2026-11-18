@@ -26,6 +26,28 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Campaign pages find each item's product by its barcode when they are read**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs|advantage-tariffs}/{tariffId}`,
+  `GET /v1/organizations/{orgId}/stores/{storeId}/{flash-products|discount-lists}/{listId}`,
+  `GET /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/{commission-tariffs|plus-commission-tariffs|advantage-tariffs}/{tariffId}/items/{itemId}/estimate`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/{flash-products|discount-lists}/{listId}/items/{itemId}/estimate`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/items/{itemId}/estimate`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/target-margin`).
+  The detail, estimate and (marketplace campaigns) target-margin responses of the six campaign
+  pages now resolve each item's product from its barcode in the store's catalog at request time,
+  instead of the link stored at upload. An item uploaded before its product was synced, or whose
+  catalog variant was recreated, gets its profit, image and product-based commission without a
+  re-upload. `reason: NO_PRODUCT` now means the barcode has no product in the catalog right now.
+  When several variants share a barcode, one still in the product feed is preferred, and among
+  those the oldest is used. The other direction changes too: a variant whose barcode is changed
+  in place (same variant, new barcode) no longer prices campaign rows that carry its old barcode,
+  which the stored link used to do; those rows answer `NO_PRODUCT` until a file with the new
+  barcode is uploaded. If the barcode lookup itself fails, the read still answers `200`: every
+  item reads as not calculable with `reason: null` (the degraded profit read, logged as
+  `[profit-read]`), never `NO_PRODUCT` and never a `5xx`. No request or response shape
+  changes; the import response's `matched` / `unmatched` counts still describe the moment of
+  upload.
 - **Workbook imports refuse a file with no column to write selections into**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/plus-commission-tariffs/import`,
   `POST /v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/import`,

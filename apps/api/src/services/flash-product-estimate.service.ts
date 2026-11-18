@@ -3,8 +3,9 @@
 // Backs two frontend surfaces without bloating the detail payload: the custom-price
 // what-if and the current-scenario breakdown. It resolves the SAME inputs the detail
 // resolves -- the scenario base (cost, shipping, fee + commission reference) and the
-// item's PRIMARY window commission bands -- but for ONE item, then runs the scenario
-// engine via `computeFlashEstimate`. No financial math lives here; the current-scenario
+// item's PRIMARY window commission bands -- but for ONE item (its variant resolved from
+// its barcode at read time, as the detail does), then runs the scenario engine via
+// `computeFlashEstimate`. No financial math lives here; the current-scenario
 // breakdown matches the detail row's current baseline byte-for-byte (same price =
 // customer price, same commission = the flat "Mevcut Komisyon" rate).
 //
@@ -32,7 +33,11 @@ import {
   type FlashEstimateCommission,
 } from './flash-product-compute.service';
 import { logProfitReadFailure } from './profit-compute-fallback.service';
-import { loadScreenScenarioBases, screenScenarioBaseFor } from './scenario-screen-commons';
+import {
+  loadScreenScenarioBases,
+  resolveScreenVariantId,
+  screenScenarioBaseFor,
+} from './scenario-screen-commons';
 import { decimalOrNull } from './tariff-compute-commons';
 import type { EstimateFlashPriceResult } from '../validators/flash-product.validator';
 
@@ -69,7 +74,6 @@ export async function estimateFlashItemPrice(
       where: { id: itemId, organizationId: orgId, storeId, listId },
       select: {
         id: true,
-        productVariantId: true,
         barcode: true,
         customerPrice: true,
         currentCommissionPct: true,
@@ -124,16 +128,24 @@ export async function estimateFlashItemPrice(
     commission = { kind: 'resolve', bands: primaryBands, flatPct };
   }
 
-  // Load the scenario base for the matched variant only (scenario date = now). An
-  // unmatched item passes no ids -> no-product; a store-wide load failure -> degraded.
+  // Resolve the item's variant from its barcode as the catalog is now (the same lookup
+  // the detail uses, never the link stored at import), then load the scenario base for
+  // that variant only (scenario date = now). A barcode with no catalog variant passes no
+  // ids -> no-product; a failed lookup (logged) or a store-wide load failure -> degraded.
+  const { variantId, degraded } = await resolveScreenVariantId({
+    organizationId: orgId,
+    storeId,
+    barcode: item.barcode,
+    surface: 'flash-product',
+  });
   const bases = await loadScreenScenarioBases({
     organizationId: orgId,
     storeId,
     scenarioDate: new Date(),
-    variantIds: item.productVariantId !== null ? [item.productVariantId] : [],
+    variantIds: variantId !== null ? [variantId] : [],
     surface: 'flash-product',
   });
-  const base = screenScenarioBaseFor(bases, item.productVariantId);
+  const base = screenScenarioBaseFor(bases, variantId, degraded);
 
   let computed: ComputedFlashEstimate;
   try {

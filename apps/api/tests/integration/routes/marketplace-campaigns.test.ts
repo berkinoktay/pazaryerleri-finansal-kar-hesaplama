@@ -18,6 +18,7 @@
 //   · the config PATCH is a FULL REPLACE — omitting trendyolFundingPct resets it to 0;
 //   · a custom price above the item's maximum is refused instead of persisted.
 
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import { z } from '@hono/zod-openapi';
@@ -1070,5 +1071,273 @@ describe('Marketplace Campaigns — per-item degrade (decision 9)', () => {
     } finally {
       errorSpy.mockRestore();
     }
+  });
+});
+
+// --- The item variant is resolved from the barcode at read time ---
+
+const RelinkScenarioSchema = z.object({
+  commissionPct: z.string().nullable(),
+  commissionSource: z.string().nullable(),
+  netProfit: z.string().nullable(),
+});
+const RelinkItemSchema = z.object({
+  id: z.string(),
+  barcode: z.string(),
+  imageUrl: z.string().nullable(),
+  calculable: z.boolean(),
+  reason: z.string().nullable(),
+  current: RelinkScenarioSchema,
+  maxScenario: RelinkScenarioSchema,
+});
+const RelinkDetailSchema = z.object({ items: z.array(RelinkItemSchema) });
+type RelinkItem = z.infer<typeof RelinkItemSchema>;
+
+describe('Marketplace Campaigns - the item variant is resolved from the barcode at read time', () => {
+  // The detail resolves each item's variant from its barcode as the store's catalog is now,
+  // never from the product_variant_id stored at import (an import-time snapshot). Same
+  // calculable-variant shape as the CRUD fixture: a costed variant on the synced 18% rate.
+  interface RelinkContext {
+    accessToken: string;
+    userId: string;
+    orgId: string;
+    storeId: string;
+    profileId: string;
+  }
+  let ctx: RelinkContext;
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing - globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Campaign Relink Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'marketplace-campaign-relink-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    await ensureFeeDefinitions();
+
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'COGS Relink',
+        type: 'COGS',
+        amountGross: new Decimal('60.00'),
+        vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Relink',
+        type: 'COGS',
+        amountGross: new Decimal('60.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+
+    ctx = {
+      accessToken: user.accessToken,
+      userId: user.id,
+      orgId: org.id,
+      storeId: store.id,
+      profileId: profile.id,
+    };
+  });
+
+  async function createImagedProduct(imageUrl: string): Promise<{ id: string }> {
+    return prisma.product.create({
+      data: {
+        organizationId: ctx.orgId,
+        storeId: ctx.storeId,
+        platformContentId: BigInt(Math.floor(Math.random() * 1e12)),
+        productMainId: `pm-${randomUUID().slice(0, 8)}`,
+        title: 'Relink Product',
+        categoryId: 597n,
+        categoryName: 'Bayrak',
+        imageUrls: [imageUrl],
+      },
+      select: { id: true },
+    });
+  }
+
+  /** A calculable variant: price, VAT, desi, the synced 18% rate and the versioned cost. */
+  async function createCostedVariant(productId: string, barcode: string): Promise<{ id: string }> {
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: ctx.orgId,
+        storeId: ctx.storeId,
+        productId,
+        platformVariantId: BigInt(Math.floor(Math.random() * 1e12)),
+        barcode,
+        stockCode: barcode,
+        salePrice: new Decimal(CURRENT_PRICE),
+        listPrice: new Decimal(CURRENT_PRICE),
+        vatRate: 20,
+        dimensionalWeightOverride: new Decimal('3.0'),
+        syncedCommissionRate: new Decimal(PRODUCT_COMMISSION_PCT),
+      },
+      select: { id: true },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: ctx.orgId, profileId: ctx.profileId, productVariantId: variant.id },
+    });
+    return variant;
+  }
+
+  /** A 2 al 1 ode campaign with one item per entry, each with the given stored link. */
+  async function seedCampaign(
+    entries: ReadonlyArray<{ barcode: string; storedVariantId: string | null }>,
+  ): Promise<{ campaignId: string; itemIdOf: (barcode: string) => string }> {
+    const list = await prisma.marketplaceCampaignList.create({
+      data: {
+        organizationId: ctx.orgId,
+        storeId: ctx.storeId,
+        name: `Relink ${randomUUID().slice(0, 8)}`,
+        discountType: 'BUY_X_PAY_Y',
+        buyQuantity: 2,
+        payQuantity: 1,
+        trendyolFundingPct: new Decimal(FUNDING_PCT),
+        startsAt: new Date(CAMPAIGN_WINDOW.startsAt),
+        endsAt: new Date(CAMPAIGN_WINDOW.endsAt),
+        createdBy: ctx.userId,
+      },
+    });
+    const ids = new Map<string, string>();
+    for (const [position, entry] of entries.entries()) {
+      const item = await prisma.marketplaceCampaignItem.create({
+        data: {
+          organizationId: ctx.orgId,
+          storeId: ctx.storeId,
+          listId: list.id,
+          productVariantId: entry.storedVariantId,
+          barcode: entry.barcode,
+          productTitle: entry.barcode,
+          currentPrice: new Decimal(CURRENT_PRICE),
+          maxPrice: new Decimal(MAX_PRICE),
+          selection: 'NONE',
+          sortOrder: position,
+        },
+      });
+      ids.set(entry.barcode, item.id);
+    }
+    return {
+      campaignId: list.id,
+      itemIdOf: (barcode) => {
+        const id = ids.get(barcode);
+        if (id === undefined) throw new Error(`no seeded item for ${barcode}`);
+        return id;
+      },
+    };
+  }
+
+  async function fetchItem(campaignId: string, barcode: string): Promise<RelinkItem> {
+    const res = await app.request(
+      `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/marketplace-campaigns/${campaignId}`,
+      { headers: { Authorization: bearer(ctx.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const item = RelinkDetailSchema.parse(await res.json()).items.find(
+      (i) => i.barcode === barcode,
+    );
+    if (item === undefined) throw new Error(`detail has no item ${barcode}`);
+    return item;
+  }
+
+  function expectNoProduct(item: RelinkItem): void {
+    expect(item.calculable).toBe(false);
+    expect(item.reason).toBe('NO_PRODUCT');
+    expect(item.imageUrl).toBeNull();
+    expect(item.current.netProfit).toBeNull();
+    expect(item.maxScenario.netProfit).toBeNull();
+    // No variant, no bands: no tier of the chain resolves a rate.
+    expect(item.current.commissionSource).toBeNull();
+    expect(item.current.commissionPct).toBeNull();
+  }
+
+  function expectPriced(item: RelinkItem): void {
+    expect(item.calculable).toBe(true);
+    expect(item.reason).toBeNull();
+    expect(item.current.netProfit).not.toBeNull();
+    expect(item.maxScenario.netProfit).not.toBeNull();
+    // No tariff bands for the store: the chain lands on the variant's synced rate.
+    expect(item.current.commissionSource).toBe('product');
+    expect(item.current.commissionPct).toBe('18.0000');
+  }
+
+  it('prices an item imported before its variant existed once the variant exists, with no re-upload', async () => {
+    const { campaignId, itemIdOf } = await seedCampaign([
+      { barcode: 'CAMP-LATE', storedVariantId: null },
+    ]);
+
+    // No catalog variant carries the barcode yet.
+    expectNoProduct(await fetchItem(campaignId, 'CAMP-LATE'));
+
+    // The product sync lands the variant (with a cost and a synced rate) after the upload.
+    const product = await createImagedProduct('https://cdn.example/camp-late.jpg');
+    await createCostedVariant(product.id, 'CAMP-LATE');
+
+    const after = await fetchItem(campaignId, 'CAMP-LATE');
+    expectPriced(after);
+    expect(after.imageUrl).toBe('https://cdn.example/camp-late.jpg');
+
+    // The read resolved the variant without writing the stored link back.
+    const stored = await prisma.marketplaceCampaignItem.findUniqueOrThrow({
+      where: { id: itemIdOf('CAMP-LATE') },
+      select: { productVariantId: true },
+    });
+    expect(stored.productVariantId).toBeNull();
+  });
+
+  it('prices an item whose stored variant was deleted from the new variant with that barcode', async () => {
+    const firstProduct = await createImagedProduct('https://cdn.example/camp-relink-v1.jpg');
+    const first = await createCostedVariant(firstProduct.id, 'CAMP-RELINK');
+    const { campaignId } = await seedCampaign([
+      { barcode: 'CAMP-RELINK', storedVariantId: first.id },
+    ]);
+    expect((await fetchItem(campaignId, 'CAMP-RELINK')).imageUrl).toBe(
+      'https://cdn.example/camp-relink-v1.jpg',
+    );
+
+    await prisma.productVariant.delete({ where: { id: first.id } });
+    const secondProduct = await createImagedProduct('https://cdn.example/camp-relink-v2.jpg');
+    await createCostedVariant(secondProduct.id, 'CAMP-RELINK');
+
+    const after = await fetchItem(campaignId, 'CAMP-RELINK');
+    expectPriced(after);
+    expect(after.imageUrl).toBe('https://cdn.example/camp-relink-v2.jpg');
+  });
+
+  it('does not read a stored id whose variant carries another barcode', async () => {
+    const product = await createImagedProduct('https://cdn.example/camp-other.jpg');
+    const other = await createCostedVariant(product.id, 'CAMP-OTHER');
+    const { campaignId } = await seedCampaign([
+      // The stored link points at a calculable variant, but no variant has this barcode.
+      { barcode: 'CAMP-STALE', storedVariantId: other.id },
+      // Control: the same variant prices an item that carries its own barcode.
+      { barcode: 'CAMP-OTHER', storedVariantId: null },
+    ]);
+
+    expectNoProduct(await fetchItem(campaignId, 'CAMP-STALE'));
+    const control = await fetchItem(campaignId, 'CAMP-OTHER');
+    expectPriced(control);
+    expect(control.imageUrl).toBe('https://cdn.example/camp-other.jpg');
   });
 });

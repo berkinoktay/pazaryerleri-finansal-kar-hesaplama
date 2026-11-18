@@ -30,6 +30,7 @@ import { scenarioPresentation, type DiscountCommissionInputs } from './discount-
 import {
   createRequestFailureLog,
   loadScreenScenarioBases,
+  resolveScreenVariantIds,
   screenScenarioBaseFor,
   serializeCommissionBandLadder,
   resolveCategoryRatesByKey,
@@ -136,12 +137,15 @@ interface DiscountVariantRow {
 /**
  * Returns one discount list with its items, each carrying the current + discounted price
  * SCENARIOS computed on read. Throws `NotFoundError` when it does not belong to this
- * store. Resolves the store's latest commission tariff bands, batch-loads the matched
+ * store. Each item's variant is resolved from its barcode as the store's catalog is now
+ * (one query for the whole list, `resolveScreenVariantIds`), not from the link stored at
+ * import. Resolves the store's latest commission tariff bands, batch-loads the resolved
  * variants + their synced commission + cost + shipping + a category-rate fallback, then
  * runs the three-tier commission chain per item. Selection is EPHEMERAL client state, so
  * the detail returns no summary card — each item's `included` reflects the last SAVED
  * (downloaded) selection that the export path reads. Money math is Decimal, serialized at
- * the DTO edge (the frontend never computes).
+ * the DTO edge (the frontend never computes). Per decision 9 a failed barcode lookup
+ * leaves every item's profit empty (logged once) rather than failing the request.
  */
 export async function getDiscountListDetail(
   orgId: string,
@@ -171,7 +175,6 @@ export async function getDiscountListDetail(
           orderBy: { sortOrder: 'asc' },
           select: {
             id: true,
-            productVariantId: true,
             barcode: true,
             modelCode: true,
             externalId: true,
@@ -195,13 +198,21 @@ export async function getDiscountListDetail(
   const config = discountConfigFromListRow(list);
   const now = new Date();
 
-  // --- Matched variants: slim query for the chain + display, org + store scoped ---
+  // --- Resolve every item barcode to its catalog variant, once ---
+  // The variant comes from the item's barcode as the catalog is now (one org + store
+  // scoped query for the whole list), never from the link stored at import. A failed
+  // lookup is logged and degrades every item (no ids, so the variant reads are skipped).
+  const { variantIdByBarcode, degraded } = await resolveScreenVariantIds({
+    organizationId: orgId,
+    storeId,
+    barcodes: list.items.map((item) => item.barcode),
+    surface: 'discount-list',
+  });
+  const variantIds = [...new Set(variantIdByBarcode.values())];
+
+  // --- Resolved variants: slim query for the chain + display, org + store scoped ---
   // syncedCommissionRate (2nd tier), category/brand (3rd-tier fallback), and the first
   // catalog image. The profit inputs come from the scenario loader below, not from here.
-  const variantIds = list.items
-    .map((i) => i.productVariantId)
-    .filter((id): id is string => id !== null);
-
   const variantMap = new Map<string, DiscountVariantRow>();
   const imageMap = new Map<string, string | null>();
 
@@ -253,9 +264,9 @@ export async function getDiscountListDetail(
   });
 
   const items = list.items.map((item): DiscountListDetailItem => {
-    const base = screenScenarioBaseFor(bases, item.productVariantId);
-    const variantRow =
-      item.productVariantId !== null ? variantMap.get(item.productVariantId) : undefined;
+    const variantId = variantIdByBarcode.get(item.barcode) ?? null;
+    const base = screenScenarioBaseFor(bases, variantId, degraded);
+    const variantRow = variantId !== null ? variantMap.get(variantId) : undefined;
 
     // Three-tier chain inputs: tariff bands (by barcode) → synced product rate → category.
     const bands = source?.bandsByBarcode.get(item.barcode) ?? null;
@@ -301,8 +312,7 @@ export async function getDiscountListDetail(
       productTitle: item.productTitle,
       brand: item.brand,
       color: item.color,
-      imageUrl:
-        item.productVariantId !== null ? (imageMap.get(item.productVariantId) ?? null) : null,
+      imageUrl: variantId !== null ? (imageMap.get(variantId) ?? null) : null,
       included: item.included,
       calculable: computed.calculable,
       reason: computed.reason,

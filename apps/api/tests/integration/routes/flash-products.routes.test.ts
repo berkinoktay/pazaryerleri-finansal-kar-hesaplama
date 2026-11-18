@@ -36,7 +36,11 @@ import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization } from '../../helpers/factories';
+import {
+  cloneVariantWithBarcode,
+  createMembership,
+  createOrganization,
+} from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
@@ -893,5 +897,93 @@ describe('Flash Products - unknown flat commission', () => {
       expect(item.calculable).toBe(true);
       expect(item.reason).toBeNull();
     }
+  });
+});
+
+describe('Flash Products - the item variant is resolved from the barcode at read time', () => {
+  let fx: Fixture;
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+    fx = await setupFixture();
+  });
+
+  it('an item imported before its variant existed is priced once the variant exists', async () => {
+    const LATE_BARCODE = 'FLASH-LATE';
+    // Uploaded before the product sync: no catalog variant carried the barcode, so the
+    // import stored no variant link. Same prices, window and flat rate as the fixture's
+    // flag-false row, so once matched it prices exactly like that row.
+    const late = await prisma.flashProductItem.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: fx.storeId,
+        listId: fx.listId,
+        productVariantId: null,
+        barcode: LATE_BARCODE,
+        productTitle: 'Gec Eslesen Flas Urunu',
+        currentPrice: '360.00',
+        customerPrice: '360.00',
+        currentCommissionPct: FLAT_COMMISSION,
+        hasCommissionTariff: false,
+        offer24Price: OFFER_PRICE,
+        offer24StartsAt: flashInstant(2026, 7, 9, 0),
+        offer24EndsAt: flashInstant(2026, 7, 9, 23, 59),
+        sortOrder: 6,
+      },
+    });
+
+    const fetchItems = async (): Promise<ItemWire[]> => {
+      const res = await app.request(
+        `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/flash-products/${fx.listId}`,
+        { headers: { Authorization: bearer(fx.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body: DetailWire = await res.json();
+      return body.items;
+    };
+    const itemOf = (items: ItemWire[], id: string): ItemWire => {
+      const row = items.find((i) => i.id === id);
+      if (row === undefined) throw new Error(`detail item ${id} missing`);
+      return row;
+    };
+
+    // No catalog variant carries the barcode yet.
+    const before = itemOf(await fetchItems(), late.id);
+    expect(before.calculable).toBe(false);
+    expect(before.reason).toBe('NO_PRODUCT');
+    expect(before.imageUrl).toBeNull();
+    expect(before.currentNetProfit).toBeNull();
+    expect(before.offer24?.price).toBe(OFFER_PRICE);
+    expect(before.offer24?.netProfit).toBeNull();
+
+    // The product sync lands a variant with that barcode after the upload: the same
+    // product (with its image) and cost as the fixture's FLASH-1 variant.
+    const matchedVariant = await prisma.productVariant.findFirstOrThrow({
+      where: { organizationId: fx.orgId, storeId: fx.storeId, barcode: MATCHED_BARCODE },
+    });
+    await cloneVariantWithBarcode(matchedVariant.id, LATE_BARCODE);
+
+    // The same GET, with no re-upload, now prices the item and shows the image.
+    const items = await fetchItems();
+    const after = itemOf(items, late.id);
+    expect(after.calculable).toBe(true);
+    expect(after.reason).toBeNull();
+    expect(after.imageUrl).toBe('https://cdn.example/flash-1.jpg');
+    expect(after.currentNetProfit).not.toBeNull();
+    expect(after.commissionSource).toBe('current');
+    expect(after.offer24?.commissionPct).toBe('19.0000');
+    expect(after.offer24?.netProfit).not.toBeNull();
+    // Same economics as the flag-false row of the same response.
+    const flagFalse = itemOf(items, fx.itemFlagFalse);
+    expect(after.currentNetProfit).toBe(flagFalse.currentNetProfit);
+    expect(after.offer24?.netProfit).toBe(flagFalse.offer24?.netProfit);
+
+    // The reads resolved the variant without writing the stored link back.
+    const stored = await prisma.flashProductItem.findUniqueOrThrow({
+      where: { id: late.id },
+      select: { productVariantId: true },
+    });
+    expect(stored.productVariantId).toBeNull();
   });
 });

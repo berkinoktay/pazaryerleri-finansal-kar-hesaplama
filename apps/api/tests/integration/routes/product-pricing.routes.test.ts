@@ -21,13 +21,14 @@
 import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { prisma, type Prisma } from '@pazarsync/db';
+import { prisma } from '@pazarsync/db';
 import { ProductVariantStatus } from '@pazarsync/db/enums';
 
 import { createApp } from '@/app';
 import { listProductPricing } from '@/services/product-pricing.service';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
+import { countingTransactionClient } from '../../helpers/counting-transaction-client';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization } from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
@@ -1274,43 +1275,6 @@ describe('GET .../product-pricing -- scenario engine (digital / ignored tariff /
 // a constant number of queries (the scenario loader batches all reference reads) and
 // finish well under any transaction/timeout ceiling. Two stores (5 and 5 000 variants)
 // in one org; the query count for the large store must equal the small store's.
-
-/**
- * Wraps a transaction client so every model-delegate method call bumps a counter -- the
- * count is the number of DB round-trips, the exact N+1 metric. `new Proxy` preserves
- * the target's type, so the wrapped client is still a `Prisma.TransactionClient`.
- */
-function countingTransactionClient(
-  tx: Prisma.TransactionClient,
-  bump: () => void,
-): Prisma.TransactionClient {
-  return new Proxy(tx, {
-    get(target, prop, receiver) {
-      const value: unknown = Reflect.get(target, prop, receiver);
-      const isModelDelegate =
-        typeof prop === 'string' &&
-        !prop.startsWith('$') &&
-        !prop.startsWith('_') &&
-        typeof value === 'object' &&
-        value !== null;
-      if (!isModelDelegate) {
-        return value;
-      }
-      return new Proxy(value, {
-        get(delegate, methodName, delegateReceiver) {
-          const method: unknown = Reflect.get(delegate, methodName, delegateReceiver);
-          if (typeof method !== 'function') {
-            return method;
-          }
-          return (...args: unknown[]): unknown => {
-            bump();
-            return Reflect.apply(method, delegate, args);
-          };
-        },
-      });
-    },
-  });
-}
 
 interface LargeCatalogCtx {
   orgId: string;

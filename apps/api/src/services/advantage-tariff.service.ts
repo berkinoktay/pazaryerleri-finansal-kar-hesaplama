@@ -32,6 +32,7 @@ import {
 import {
   createRequestFailureLog,
   loadScreenScenarioBases,
+  resolveScreenVariantIds,
   screenScenarioBaseFor,
   serializeCommissionBandLadder,
   resolveCategoryRatesByKey,
@@ -207,13 +208,16 @@ export async function listAdvantageTariffs(
 
 /**
  * Returns one advantage tariff with per-item, per-tier profit computed on read.
- * Throws `NotFoundError` when it does not belong to this store. Resolves the
- * commission source + a per-category fallback rate once, loads every matched variant's
+ * Throws `NotFoundError` when it does not belong to this store. Each item's variant is
+ * resolved from its barcode as the store's catalog is now (one query for the whole tariff,
+ * `resolveScreenVariantIds`), not from the link stored at import. Resolves the
+ * commission source + a per-category fallback rate once, loads every resolved variant's
  * scenario base in one pass, then computes each item's tiers with the scenario engine
  * (the resolved band / category rate handed in as the commission override). A slim org +
  * store scoped variant query supplies the category/brand (for the fallback rate) and the
- * display image only. Per decision 9 a store-wide load failure or a per-item engine throw
- * leaves that profit empty (logged once) rather than failing the request.
+ * display image only. Per decision 9 a failed barcode lookup, a store-wide load failure or
+ * a per-item engine throw leaves that profit empty (logged once) rather than failing the
+ * request.
  */
 export async function getAdvantageTariffDetail(
   orgId: string,
@@ -234,7 +238,6 @@ export async function getAdvantageTariffDetail(
           orderBy: { sortOrder: 'asc' },
           select: {
             id: true,
-            productVariantId: true,
             barcode: true,
             stockCode: true,
             productTitle: true,
@@ -262,13 +265,22 @@ export async function getAdvantageTariffDetail(
 
   const now = new Date();
 
-  // --- Matched variant category/brand + image (slim, org + store scoped) ---
+  // --- Resolve every item barcode to its catalog variant, once ---
+  // The variant comes from the item's barcode as the catalog is now (one org + store
+  // scoped query for the whole tariff), never from the link stored at import. A failed
+  // lookup is logged and degrades every item (no ids, so the variant reads are skipped).
+  const { variantIdByBarcode, degraded } = await resolveScreenVariantIds({
+    organizationId: orgId,
+    storeId,
+    barcodes: tariff.items.map((item) => item.barcode),
+    surface: 'advantage-tariff',
+  });
+  const variantIds = [...new Set(variantIdByBarcode.values())];
+
+  // --- Resolved variant category/brand + image (slim, org + store scoped) ---
   // Category/brand feed the per-category fallback rate; the first catalog image is the
   // only other field the detail needs -- the profit inputs come from the scenario loader
   // below, not from this query.
-  const variantIds = tariff.items
-    .map((i) => i.productVariantId)
-    .filter((id): id is string => id !== null);
 
   const variantMap = new Map<string, { categoryId: bigint | null; brandId: bigint | null }>();
   const imageMap = new Map<string, string | null>();
@@ -304,7 +316,7 @@ export async function getAdvantageTariffDetail(
   );
 
   // Resolve the category rate once per distinct (categoryId, brandId) among the
-  // matched variants -- the fallback commission for products with no tariff band.
+  // resolved variants -- the fallback commission for products with no tariff band.
   const categoryRateByKey = await resolveCategoryRatesByKey({
     platform: store.platform,
     refs: variantMap.values(),
@@ -328,8 +340,9 @@ export async function getAdvantageTariffDetail(
   let hasUnmatchedCommissionProducts = false;
 
   const items = tariff.items.map((item): AdvantageTariffDetailItem => {
-    const base = screenScenarioBaseFor(bases, item.productVariantId);
-    const ref = item.productVariantId !== null ? variantMap.get(item.productVariantId) : undefined;
+    const variantId = variantIdByBarcode.get(item.barcode) ?? null;
+    const base = screenScenarioBaseFor(bases, variantId, degraded);
+    const ref = variantId !== null ? variantMap.get(variantId) : undefined;
 
     const bands = source?.bandsByBarcode.get(item.barcode) ?? null;
     if (item.hasCommissionTariff && bands === null) hasUnmatchedCommissionProducts = true;
@@ -371,8 +384,7 @@ export async function getAdvantageTariffDetail(
       barcode: item.barcode,
       stockCode: item.stockCode,
       productTitle: item.productTitle,
-      imageUrl:
-        item.productVariantId !== null ? (imageMap.get(item.productVariantId) ?? null) : null,
+      imageUrl: variantId !== null ? (imageMap.get(variantId) ?? null) : null,
       category: item.category,
       brand: item.brand,
       size: item.size,

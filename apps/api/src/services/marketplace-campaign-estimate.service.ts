@@ -137,7 +137,6 @@ export async function estimateCampaignItem(
       where: { id: itemId, organizationId: orgId, storeId, listId: campaignId },
       select: {
         id: true,
-        productVariantId: true,
         barcode: true,
         currentPrice: true,
         maxPrice: true,
@@ -296,7 +295,7 @@ export async function suggestCampaignTargetMargin(
         ...CAMPAIGN_CONFIG_SELECT,
         items: {
           orderBy: { sortOrder: 'asc' },
-          select: { id: true, productVariantId: true, barcode: true, maxPrice: true },
+          select: { id: true, barcode: true, maxPrice: true },
         },
       },
     });

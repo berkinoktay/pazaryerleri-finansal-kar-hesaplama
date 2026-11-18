@@ -24,6 +24,7 @@ import { resolveDiscountCommissionSource } from './discount-commission-source';
 import type { DiscountCommissionInputs } from './discount-math-commons';
 import {
   loadScreenScenarioBases,
+  resolveScreenVariantIds,
   screenScenarioBaseFor,
   resolveCategoryRatesByKey,
   categoryRateKey,
@@ -50,10 +51,13 @@ export interface CampaignEconomics {
   readonly tariffOutdated: boolean;
 }
 
-/** The only per-item fields the resolution needs: identity, variant link and barcode. */
+/**
+ * The only per-item fields the resolution needs: identity and barcode. The barcode both
+ * resolves the item's catalog variant (as the catalog is now, never the link stored at
+ * import) and keys the tariff band lookup.
+ */
 export interface CampaignEconomicsRow {
   readonly id: string;
-  readonly productVariantId: string | null;
   readonly barcode: string;
 }
 
@@ -71,10 +75,14 @@ interface CampaignVariantRow {
 /**
  * Resolves the pricing inputs of the given items in ONE batch pass.
  *
- * In order: the matched variants (synced commission rate + category/brand + first image) in a
- * slim query, the per-variant scenario bases from the shared engine loader at `scenarioDate`,
+ * In order: each item's variant resolved from its barcode as the store's catalog is now (one
+ * org + store scoped query, `resolveScreenVariantIds`; the item's stored product_variant_id
+ * is an import-time snapshot and is never read), the variants the items' barcodes resolve to
+ * now (synced commission rate + category/brand + first image) in a slim query, the
+ * per-variant scenario bases from the shared engine loader at `scenarioDate`,
  * the commission tariff bands anchored to `anchor` (the campaign start, or null for "now"),
- * and one category-rate fallback per distinct (category, brand) pair.
+ * and one category-rate fallback per distinct (category, brand) pair. A failed barcode
+ * lookup is logged once and gives every item the `degraded` base (decision 9).
  *
  * Bands come ONLY from a tariff week that COVERS the anchor instant -- no covering week means
  * no bands and the chain falls to the product/category rate. The resolver is SHARED with
@@ -92,7 +100,16 @@ export async function resolveCampaignEconomics(
   scenarioDate: Date,
   items: ReadonlyArray<CampaignEconomicsRow>,
 ): Promise<CampaignEconomics> {
-  const variantIds = items.map((i) => i.productVariantId).filter((id): id is string => id !== null);
+  // Every item barcode to its catalog variant, once for the whole request. A barcode with
+  // no catalog variant is absent, so its item resolves to no product. A failed lookup is
+  // logged and degrades every item (no ids, so the variant reads below are skipped).
+  const { variantIdByBarcode, degraded } = await resolveScreenVariantIds({
+    organizationId: orgId,
+    storeId,
+    barcodes: items.map((i) => i.barcode),
+    surface: 'marketplace-campaign',
+  });
+  const variantIds = [...new Set(variantIdByBarcode.values())];
 
   const variantMap = new Map<string, CampaignVariantRow>();
   if (variantIds.length > 0) {
@@ -139,8 +156,8 @@ export async function resolveCampaignEconomics(
 
   const byItemId = new Map<string, CampaignItemEconomics>();
   for (const item of items) {
-    const variantRow =
-      item.productVariantId !== null ? variantMap.get(item.productVariantId) : undefined;
+    const variantId = variantIdByBarcode.get(item.barcode) ?? null;
+    const variantRow = variantId !== null ? variantMap.get(variantId) : undefined;
     const categoryRate =
       variantRow !== undefined && variantRow.product.categoryId !== null
         ? (categoryRateByKey.get(
@@ -149,7 +166,7 @@ export async function resolveCampaignEconomics(
         : null;
 
     byItemId.set(item.id, {
-      base: screenScenarioBaseFor(bases, item.productVariantId),
+      base: screenScenarioBaseFor(bases, variantId, degraded),
       imageUrl: variantRow?.product.imageUrls[0] ?? null,
       commission: {
         // The item's own `hasCommissionTariff` flag is Trendyol's claim ABOUT the file, not

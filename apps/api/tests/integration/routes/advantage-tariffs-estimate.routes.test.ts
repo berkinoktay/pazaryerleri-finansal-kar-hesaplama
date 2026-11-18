@@ -25,7 +25,12 @@ import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization, createStore } from '../../helpers/factories';
+import {
+  cloneVariantWithBarcode,
+  createMembership,
+  createOrganization,
+  createStore,
+} from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
@@ -86,6 +91,8 @@ interface EstimateFixture {
   tariffId: string;
   matchedItemId: string;
   catFallbackItemId: string;
+  /** The category-fallback catalog variant (barcode ADV-CAT-EST, category 598, with a cost). */
+  catVariantId: string;
   unmatchedItemId: string;
 }
 
@@ -330,6 +337,7 @@ async function setupFixture(): Promise<EstimateFixture> {
     tariffId: tariff.id,
     matchedItemId: matched.id,
     catFallbackItemId: catFallback.id,
+    catVariantId: catVariant.id,
     unmatchedItemId: unmatched.id,
   };
 }
@@ -715,5 +723,81 @@ describe('Advantage Product Labels - item estimate', () => {
     expect(body.calculable).toBe(false);
     expect(body.reason).toBeNull();
     expect(body.breakdown).toBeNull();
+  });
+});
+
+describe('Advantage Product Labels - the estimate resolves the item variant from the barcode at read time', () => {
+  let fx: EstimateFixture;
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+    fx = await setupFixture();
+  });
+
+  it('an item imported before its variant existed is estimated once the variant exists', async () => {
+    const LATE_BARCODE = 'ADV-EST-LATE';
+    // Uploaded before the product sync: no catalog variant carried the barcode, so the
+    // import stored no variant link. The barcode is not in the pinned commission tariff,
+    // so once matched its commission comes from the category rate.
+    const late = await prisma.advantageTariffItem.create({
+      data: {
+        organizationId: fx.orgId,
+        storeId: fx.storeId,
+        tariffId: fx.tariffId,
+        productVariantId: null,
+        barcode: LATE_BARCODE,
+        productTitle: 'Gec Eslesen Urun',
+        currentPrice: '360.00',
+        customerPrice: CAT_CUSTOMER_PRICE,
+        hasCommissionTariff: false,
+        starTiers: [
+          { key: 'tier1', upperLimit: '292.91', lowerLimit: '274.43' },
+          { key: 'tier2', upperLimit: '274.42', lowerLimit: '223.79' },
+          { key: 'tier3', upperLimit: '223.78' },
+        ],
+        applyUntilEnd: false,
+        sortOrder: 5,
+      },
+    });
+    const estimateCurrent = async (): Promise<EstimateWire> => {
+      const res = await app.request(estimateUrl(fx, late.id), {
+        method: 'POST',
+        headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scenario: 'current' }),
+      });
+      expect(res.status).toBe(200);
+      const body: EstimateWire = await res.json();
+      return body;
+    };
+
+    // No catalog variant carries the barcode yet.
+    const before = await estimateCurrent();
+    expect(before.itemId).toBe(late.id);
+    expect(before.calculable).toBe(false);
+    expect(before.reason).toBe('NO_PRODUCT');
+    expect(before.breakdown).toBeNull();
+
+    // The product sync lands a variant with that barcode (category 598, with a cost)
+    // after the upload.
+    await cloneVariantWithBarcode(fx.catVariantId, LATE_BARCODE);
+
+    // The same estimate, with no re-upload, now prices the item with a full breakdown.
+    const after = await estimateCurrent();
+    expect(after.calculable).toBe(true);
+    expect(after.reason).toBeNull();
+    expect(after.price).toBe(CAT_CUSTOMER_PRICE);
+    expect(after.commissionSource).toBe('category');
+    expect(after.breakdown).not.toBeNull();
+    expect(after.breakdown?.saleGross).toBe(CAT_CUSTOMER_PRICE);
+    // The modal number equals the detail row's current profit exactly.
+    await assertCurrentParity(fx, late.id, LATE_BARCODE, 'category');
+
+    // The reads resolved the variant without writing the stored link back.
+    const stored = await prisma.advantageTariffItem.findUniqueOrThrow({
+      where: { id: late.id },
+      select: { productVariantId: true },
+    });
+    expect(stored.productVariantId).toBeNull();
   });
 });

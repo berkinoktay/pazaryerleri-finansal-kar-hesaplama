@@ -31,6 +31,7 @@ import {
 import {
   createRequestFailureLog,
   loadScreenScenarioBases,
+  resolveScreenVariantIds,
   screenScenarioBaseFor,
   serializeCommissionBandLadder,
 } from './scenario-screen-commons';
@@ -90,16 +91,19 @@ export async function listFlashProducts(
 
 /**
  * Returns one flash list with per-item, per-scenario profit computed on read. Throws
- * `NotFoundError` when it does not belong to this store. Loads every matched variant's
- * scenario base in one pass and every offer window's commission source once, then
+ * `NotFoundError` when it does not belong to this store. Each item's variant is resolved
+ * from its barcode as the store's catalog is now (one query for the whole list,
+ * `resolveScreenVariantIds`), not from the link stored at import. Loads every resolved
+ * variant's scenario base in one pass and every offer window's commission source once, then
  * computes each item with the scenario engine (the resolved band / flat rate handed in as
  * the commission override). A slim org + store scoped variant query supplies the display
- * image only. Per decision 9 a store-wide load failure or a per-item engine throw leaves
- * that profit empty (logged once) rather than failing the request. The stored current
- * commission percent (the flat rate) is read through `decimalOrNull` / `percentOrNull`: an
- * unknown percent (the file's cell was blank or unreadable) is sent as a null
- * `currentCommissionPct` and is never priced (`computeFlashItem` decides what it leaves
- * computable: an offer a tariff band covers keeps its profit).
+ * image only. Per decision 9 a failed barcode lookup, a store-wide load failure or a
+ * per-item engine throw leaves that profit empty (logged once) rather than failing the
+ * request. The stored current commission percent (the flat rate) is read through
+ * `decimalOrNull` / `percentOrNull`: an unknown percent (the file's cell was blank or
+ * unreadable) is sent as a null `currentCommissionPct` and is never priced
+ * (`computeFlashItem` decides what it leaves computable: an offer a tariff band covers
+ * keeps its profit).
  */
 export async function getFlashProductDetail(
   orgId: string,
@@ -118,7 +122,6 @@ export async function getFlashProductDetail(
           orderBy: { sortOrder: 'asc' },
           select: {
             id: true,
-            productVariantId: true,
             modelCode: true,
             barcode: true,
             productTitle: true,
@@ -152,13 +155,22 @@ export async function getFlashProductDetail(
 
   const now = new Date();
 
-  // --- Matched variant image (slim, org + store scoped) ---
+  // --- Resolve every item barcode to its catalog variant, once ---
+  // The variant comes from the item's barcode as the catalog is now (one org + store
+  // scoped query; a list holds several offer rows per product and the lookup dedups
+  // them), never from the link stored at import. A failed lookup is logged and degrades
+  // every item (no ids, so the variant reads below are skipped).
+  const { variantIdByBarcode, degraded } = await resolveScreenVariantIds({
+    organizationId: orgId,
+    storeId,
+    barcodes: list.items.map((i) => i.barcode),
+    surface: 'flash-product',
+  });
+  const variantIds = [...new Set(variantIdByBarcode.values())];
+
+  // --- Resolved variant image (slim, org + store scoped) ---
   // The first catalog image is the only field the detail needs from the variant -- the
   // profit inputs come from the scenario loader below, not from this query.
-  const variantIds = list.items
-    .map((i) => i.productVariantId)
-    .filter((id): id is string => id !== null);
-
   const imageMap = new Map<string, string | null>();
 
   if (variantIds.length > 0) {
@@ -210,7 +222,8 @@ export async function getFlashProductDetail(
   const failureLog = createRequestFailureLog({ surface: 'flash-product', organizationId: orgId });
 
   const items = list.items.map((item): FlashProductDetailItem => {
-    const base = screenScenarioBaseFor(bases, item.productVariantId);
+    const variantId = variantIdByBarcode.get(item.barcode) ?? null;
+    const base = screenScenarioBaseFor(bases, variantId, degraded);
 
     const offer24: FlashOfferInput | null =
       item.offer24Price !== null
@@ -274,8 +287,7 @@ export async function getFlashProductDetail(
       barcode: item.barcode,
       modelCode: item.modelCode,
       productTitle: item.productTitle,
-      imageUrl:
-        item.productVariantId !== null ? (imageMap.get(item.productVariantId) ?? null) : null,
+      imageUrl: variantId !== null ? (imageMap.get(variantId) ?? null) : null,
       category: item.category,
       brand: item.brand,
       stock: item.stock,

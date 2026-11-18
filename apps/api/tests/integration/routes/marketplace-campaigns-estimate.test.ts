@@ -17,6 +17,9 @@
 //   · target-margin COMPUTES ONLY — selection and customPrice are byte-identical afterwards;
 //   · a cross-org campaign/item id is a 404, not a 403.
 
+import { randomUUID } from 'node:crypto';
+
+import { z } from '@hono/zod-openapi';
 import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -602,5 +605,334 @@ describe('Marketplace Campaigns - estimate + target-margin', () => {
     expect(body.customerPaidUnitPrice).toBe('640.00');
     expect(body.trendyolFundedUnitAmount).toBe('0.00');
     expect(body.price).toBe('640.00');
+  });
+});
+
+// --- The item variant is resolved from the barcode at read time ---
+
+const RelinkEstimateSchema = z.object({
+  calculable: z.boolean(),
+  reason: z.string().nullable(),
+  commissionPct: z.string().nullable(),
+  commissionSource: z.string().nullable(),
+  breakdown: z.object({ netProfit: z.string() }).nullable(),
+});
+const RelinkTargetMarginSchema = z.object({
+  suggestions: z.array(
+    z.object({ itemId: z.string(), price: z.string().nullable(), reason: z.string().nullable() }),
+  ),
+});
+const RelinkDetailItemSchema = z.object({
+  id: z.string(),
+  imageUrl: z.string().nullable(),
+  calculable: z.boolean(),
+  current: z.object({ netProfit: z.string().nullable() }),
+  maxScenario: z.object({ marginPct: z.string().nullable() }),
+});
+const RelinkDetailSchema = z.object({ items: z.array(RelinkDetailItemSchema) });
+type RelinkEstimate = z.infer<typeof RelinkEstimateSchema>;
+type RelinkSuggestion = z.infer<typeof RelinkTargetMarginSchema>['suggestions'][number];
+type RelinkDetailItem = z.infer<typeof RelinkDetailItemSchema>;
+
+describe('Marketplace Campaigns - estimate + target-margin resolve the variant from the barcode', () => {
+  // The estimate and the target-margin suggestion resolve each item's variant from its
+  // barcode as the store's catalog is now, never from the product_variant_id stored at
+  // import (an import-time snapshot). Same economics as the fixture above: 2 al 1 ode at
+  // 60% funding, 900 / 800, a costed variant on the synced 18% rate.
+  interface RelinkContext {
+    accessToken: string;
+    userId: string;
+    orgId: string;
+    storeId: string;
+    profileId: string;
+  }
+  let ctx: RelinkContext;
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing - globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Campaign Estimate Relink Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'marketplace-campaign-estimate-relink-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    await ensureFeeDefinitions();
+
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'COGS Relink',
+        type: 'COGS',
+        amountGross: new Decimal('20.00'),
+        vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Relink',
+        type: 'COGS',
+        amountGross: new Decimal('20.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+
+    ctx = {
+      accessToken: user.accessToken,
+      userId: user.id,
+      orgId: org.id,
+      storeId: store.id,
+      profileId: profile.id,
+    };
+  });
+
+  async function createImagedProduct(imageUrl: string): Promise<{ id: string }> {
+    return prisma.product.create({
+      data: {
+        organizationId: ctx.orgId,
+        storeId: ctx.storeId,
+        platformContentId: BigInt(Math.floor(Math.random() * 1e12)),
+        productMainId: `pm-${randomUUID().slice(0, 8)}`,
+        title: 'Relink Product',
+        categoryId: 597n,
+        categoryName: 'Bayrak',
+        imageUrls: [imageUrl],
+      },
+      select: { id: true },
+    });
+  }
+
+  /** A calculable variant: price, VAT, desi, the synced 18% rate and the versioned cost. */
+  async function createCostedVariant(productId: string, barcode: string): Promise<{ id: string }> {
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: ctx.orgId,
+        storeId: ctx.storeId,
+        productId,
+        platformVariantId: BigInt(Math.floor(Math.random() * 1e12)),
+        barcode,
+        stockCode: barcode,
+        salePrice: new Decimal(CURRENT_PRICE),
+        listPrice: new Decimal(CURRENT_PRICE),
+        vatRate: 20,
+        dimensionalWeightOverride: new Decimal('1.0'),
+        syncedCommissionRate: new Decimal(PRODUCT_COMMISSION_PCT),
+      },
+      select: { id: true },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: ctx.orgId, profileId: ctx.profileId, productVariantId: variant.id },
+    });
+    return variant;
+  }
+
+  /** A 2 al 1 ode campaign with one item per entry, each with the given stored link. */
+  async function seedCampaign(
+    entries: ReadonlyArray<{ barcode: string; storedVariantId: string | null }>,
+  ): Promise<{ campaignId: string; itemIdOf: (barcode: string) => string }> {
+    const list = await prisma.marketplaceCampaignList.create({
+      data: {
+        organizationId: ctx.orgId,
+        storeId: ctx.storeId,
+        name: `Relink ${randomUUID().slice(0, 8)}`,
+        discountType: 'BUY_X_PAY_Y',
+        buyQuantity: 2,
+        payQuantity: 1,
+        trendyolFundingPct: new Decimal(FUNDING_PCT),
+        startsAt: new Date('2026-07-21T05:00:00.000Z'),
+        endsAt: new Date('2026-07-28T04:59:00.000Z'),
+        createdBy: ctx.userId,
+      },
+    });
+    const ids = new Map<string, string>();
+    for (const [position, entry] of entries.entries()) {
+      const item = await prisma.marketplaceCampaignItem.create({
+        data: {
+          organizationId: ctx.orgId,
+          storeId: ctx.storeId,
+          listId: list.id,
+          productVariantId: entry.storedVariantId,
+          barcode: entry.barcode,
+          productTitle: entry.barcode,
+          currentPrice: new Decimal(CURRENT_PRICE),
+          maxPrice: new Decimal(MAX_PRICE),
+          selection: 'NONE',
+          sortOrder: position,
+        },
+      });
+      ids.set(entry.barcode, item.id);
+    }
+    return {
+      campaignId: list.id,
+      itemIdOf: (barcode) => {
+        const id = ids.get(barcode);
+        if (id === undefined) throw new Error(`no seeded item for ${barcode}`);
+        return id;
+      },
+    };
+  }
+
+  function campaignPath(campaignId: string): string {
+    return `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/marketplace-campaigns/${campaignId}`;
+  }
+
+  async function postJson(path: string, body: unknown): Promise<unknown> {
+    const res = await app.request(path, {
+      method: 'POST',
+      headers: { Authorization: bearer(ctx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    expect(res.status).toBe(200);
+    return res.json();
+  }
+
+  async function estimateItem(
+    campaignId: string,
+    itemId: string,
+    scenario: 'current' | 'max',
+  ): Promise<RelinkEstimate> {
+    return RelinkEstimateSchema.parse(
+      await postJson(`${campaignPath(campaignId)}/items/${itemId}/estimate`, { scenario }),
+    );
+  }
+
+  async function suggestionFor(
+    campaignId: string,
+    itemId: string,
+    targetMarginPct: string,
+  ): Promise<RelinkSuggestion> {
+    const body = RelinkTargetMarginSchema.parse(
+      await postJson(`${campaignPath(campaignId)}/target-margin`, { targetMarginPct }),
+    );
+    const suggestion = body.suggestions.find((s) => s.itemId === itemId);
+    if (suggestion === undefined) throw new Error(`no suggestion for item ${itemId}`);
+    return suggestion;
+  }
+
+  async function detailRow(campaignId: string, itemId: string): Promise<RelinkDetailItem> {
+    const res = await app.request(campaignPath(campaignId), {
+      headers: { Authorization: bearer(ctx.accessToken) },
+    });
+    expect(res.status).toBe(200);
+    const row = RelinkDetailSchema.parse(await res.json()).items.find((i) => i.id === itemId);
+    if (row === undefined) throw new Error(`detail has no item ${itemId}`);
+    return row;
+  }
+
+  /** Estimate and target margin both see no product (and no commission tier) for the item. */
+  async function expectNotPriced(campaignId: string, itemId: string): Promise<void> {
+    const estimate = await estimateItem(campaignId, itemId, 'max');
+    expect(estimate.calculable).toBe(false);
+    expect(estimate.reason).toBe('NO_PRODUCT');
+    expect(estimate.breakdown).toBeNull();
+    expect(estimate.commissionSource).toBeNull();
+    expect(estimate.commissionPct).toBeNull();
+
+    const suggestion = await suggestionFor(campaignId, itemId, '10');
+    expect(suggestion.price).toBeNull();
+    expect(suggestion.reason).toBe('NOT_CALCULABLE');
+  }
+
+  /**
+   * Estimate and target margin both price the item: a breakdown on the synced product rate,
+   * the modal's current profit equal to the row's, and a real suggestion for a target just
+   * below the margin at the ceiling (calibrated off the row, as the fixture tests do).
+   */
+  async function expectPriced(campaignId: string, itemId: string): Promise<RelinkDetailItem> {
+    const row = await detailRow(campaignId, itemId);
+    expect(row.calculable).toBe(true);
+
+    const max = await estimateItem(campaignId, itemId, 'max');
+    expect(max.calculable).toBe(true);
+    expect(max.reason).toBeNull();
+    expect(max.breakdown).not.toBeNull();
+    expect(max.commissionSource).toBe('product');
+    expect(max.commissionPct).toBe('18.0000');
+
+    const current = await estimateItem(campaignId, itemId, 'current');
+    expect(current.breakdown?.netProfit).toBe(row.current.netProfit);
+
+    if (row.maxScenario.marginPct === null) throw new Error('the priced row has no margin');
+    const marginAtCeiling = new Decimal(row.maxScenario.marginPct);
+    expect(marginAtCeiling.gt(1)).toBe(true);
+    const target = marginAtCeiling.minus(1).toDecimalPlaces(2, Decimal.ROUND_DOWN).toString();
+    const suggestion = await suggestionFor(campaignId, itemId, target);
+    expect(suggestion.reason).toBeNull();
+    if (suggestion.price === null) throw new Error('the priced item got no suggestion');
+    expect(new Decimal(suggestion.price).gt(0)).toBe(true);
+    expect(new Decimal(suggestion.price).lte(MAX_PRICE)).toBe(true);
+    return row;
+  }
+
+  it('prices an item imported before its variant existed once the variant exists, with no re-upload', async () => {
+    const { campaignId, itemIdOf } = await seedCampaign([
+      { barcode: 'CAMP-EST-LATE', storedVariantId: null },
+    ]);
+    const itemId = itemIdOf('CAMP-EST-LATE');
+
+    // No catalog variant carries the barcode yet.
+    await expectNotPriced(campaignId, itemId);
+
+    // The product sync lands the variant (with a cost and a synced rate) after the upload.
+    const product = await createImagedProduct('https://cdn.example/camp-est-late.jpg');
+    await createCostedVariant(product.id, 'CAMP-EST-LATE');
+
+    const row = await expectPriced(campaignId, itemId);
+    expect(row.imageUrl).toBe('https://cdn.example/camp-est-late.jpg');
+
+    // None of the reads wrote the resolved variant back to the stored link.
+    const stored = await prisma.marketplaceCampaignItem.findUniqueOrThrow({
+      where: { id: itemId },
+      select: { productVariantId: true },
+    });
+    expect(stored.productVariantId).toBeNull();
+  });
+
+  it('prices an item whose stored variant was deleted from the new variant with that barcode', async () => {
+    const firstProduct = await createImagedProduct('https://cdn.example/camp-est-v1.jpg');
+    const first = await createCostedVariant(firstProduct.id, 'CAMP-EST-RELINK');
+    const { campaignId, itemIdOf } = await seedCampaign([
+      { barcode: 'CAMP-EST-RELINK', storedVariantId: first.id },
+    ]);
+    const itemId = itemIdOf('CAMP-EST-RELINK');
+
+    await prisma.productVariant.delete({ where: { id: first.id } });
+    const secondProduct = await createImagedProduct('https://cdn.example/camp-est-v2.jpg');
+    await createCostedVariant(secondProduct.id, 'CAMP-EST-RELINK');
+
+    const row = await expectPriced(campaignId, itemId);
+    expect(row.imageUrl).toBe('https://cdn.example/camp-est-v2.jpg');
+  });
+
+  it('does not read a stored id whose variant carries another barcode', async () => {
+    const product = await createImagedProduct('https://cdn.example/camp-est-other.jpg');
+    const other = await createCostedVariant(product.id, 'CAMP-EST-OTHER');
+    const { campaignId, itemIdOf } = await seedCampaign([
+      // The stored link points at a calculable variant, but no variant has this barcode.
+      { barcode: 'CAMP-EST-STALE', storedVariantId: other.id },
+      // Control: the same variant prices an item that carries its own barcode.
+      { barcode: 'CAMP-EST-OTHER', storedVariantId: null },
+    ]);
+
+    await expectNotPriced(campaignId, itemIdOf('CAMP-EST-STALE'));
+    await expectPriced(campaignId, itemIdOf('CAMP-EST-OTHER'));
   });
 });

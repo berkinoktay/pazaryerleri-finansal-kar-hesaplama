@@ -24,7 +24,11 @@ import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization } from '../../helpers/factories';
+import {
+  cloneVariantWithBarcode,
+  createMembership,
+  createOrganization,
+} from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
@@ -215,6 +219,11 @@ async function setupFixture(): Promise<EstimateFixture> {
       bands,
     },
   });
+  // The detail and the estimate resolve an item's variant by its own barcode: give each
+  // of the items below a copy of the calculable variant under its barcode.
+  for (const barcode of ['BC-EST-NOPRICE', 'BC-EST-NOCURRENT', 'BC-EST-NOPCT']) {
+    await cloneVariantWithBarcode(variant.id, barcode);
+  }
   // The same calculable variant and bands as the matched item, but the file's price
   // cells were blank, unreadable or 0, so the prices are stored as NULL.
   const unknownPrices = await prisma.commissionTariffItem.create({

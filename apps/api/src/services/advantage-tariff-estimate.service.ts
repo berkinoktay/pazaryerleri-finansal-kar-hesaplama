@@ -31,6 +31,7 @@ import { resolveCommissionSource } from './advantage-tariff.service';
 import { logProfitReadFailure } from './profit-compute-fallback.service';
 import {
   loadScreenScenarioBases,
+  resolveScreenVariantId,
   screenScenarioBaseFor,
   resolveCategoryRate,
 } from './scenario-screen-commons';
@@ -68,7 +69,6 @@ export async function estimateAdvantageItemPrice(
       where: { id: itemId, organizationId: orgId, storeId, tariffId },
       select: {
         id: true,
-        productVariantId: true,
         barcode: true,
         customerPrice: true,
         tariff: { select: { commissionSourceTariffId: true } },
@@ -82,14 +82,24 @@ export async function estimateAdvantageItemPrice(
     throw new NotFoundError('AdvantageTariffItem', itemId);
   }
 
-  // Slim category/brand read for the matched variant (feeds the category fallback rate).
+  // Resolve the item's variant from its barcode as the catalog is now (the same lookup
+  // the detail uses, never the link stored at import). A barcode with no catalog variant
+  // resolves to null; so does a failed lookup (logged), which degrades the item.
+  const { variantId, degraded } = await resolveScreenVariantId({
+    organizationId: orgId,
+    storeId,
+    barcode: item.barcode,
+    surface: 'advantage-tariff',
+  });
+
+  // Slim category/brand read for the resolved variant (feeds the category fallback rate).
   // The profit inputs come from the scenario loader below, not from this query.
   let category: { categoryId: bigint | null; brandId: bigint | null } | null = null;
-  if (item.productVariantId !== null) {
+  if (variantId !== null) {
     let variantRow;
     try {
       variantRow = await prisma.productVariant.findFirst({
-        where: { id: item.productVariantId, organizationId: orgId, storeId },
+        where: { id: variantId, organizationId: orgId, storeId },
         select: { product: { select: { categoryId: true, brandId: true } } },
       });
     } catch (err) {
@@ -122,16 +132,17 @@ export async function estimateAdvantageItemPrice(
       ? { kind: 'override', resolved: resolveCommission(commissionInputs, price) }
       : { kind: 'resolve', inputs: commissionInputs };
 
-  // Load the scenario base for the matched variant only (scenario date = now). An
-  // unmatched item passes no ids -> no-product; a store-wide load failure -> degraded.
+  // Load the scenario base for the resolved variant only (scenario date = now). A barcode
+  // with no catalog variant passes no ids -> no-product; a failed lookup or a store-wide
+  // load failure -> degraded.
   const bases = await loadScreenScenarioBases({
     organizationId: orgId,
     storeId,
     scenarioDate: new Date(),
-    variantIds: item.productVariantId !== null ? [item.productVariantId] : [],
+    variantIds: variantId !== null ? [variantId] : [],
     surface: 'advantage-tariff',
   });
-  const base = screenScenarioBaseFor(bases, item.productVariantId);
+  const base = screenScenarioBaseFor(bases, variantId, degraded);
 
   let computed: ComputedAdvantageEstimate;
   try {

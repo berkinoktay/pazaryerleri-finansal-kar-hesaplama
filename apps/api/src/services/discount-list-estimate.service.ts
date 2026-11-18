@@ -33,6 +33,7 @@ import { priceScenario, scenarioBreakdown, toEstimate } from './discount-scenari
 import { logProfitReadFailure } from './profit-compute-fallback.service';
 import {
   loadScreenScenarioBases,
+  resolveScreenVariantId,
   screenScenarioBaseFor,
   toKurusHalfUp,
   type ScreenScenarioBase,
@@ -67,7 +68,6 @@ export async function estimateDiscountItem(
       where: { id: itemId, organizationId: orgId, storeId, listId },
       select: {
         id: true,
-        productVariantId: true,
         barcode: true,
         currentPrice: true,
         list: {
@@ -103,19 +103,29 @@ export async function estimateDiscountItem(
 
   const now = new Date();
 
-  // Resolve the matched variant's chain inputs + its scenario base once (only when the item
-  // matched a catalog variant). The slim query keeps what the chain + the category fallback
-  // need: the synced rate (2nd tier) and the category/brand (3rd tier). The econ (cost,
-  // shipping, fees, VAT, desi) comes from the scenario base, not from here.
+  // Resolve the item's variant from its barcode as the catalog is now (the same lookup the
+  // detail uses, never the link stored at import). A barcode with no catalog variant
+  // resolves to null; so does a failed lookup (logged), which degrades the item.
+  const { variantId, degraded } = await resolveScreenVariantId({
+    organizationId: orgId,
+    storeId,
+    barcode: item.barcode,
+    surface: 'discount-list',
+  });
+
+  // Resolve the variant's chain inputs + its scenario base once (only when the barcode
+  // resolved to a catalog variant). The slim query keeps what the chain + the category
+  // fallback need: the synced rate (2nd tier) and the category/brand (3rd tier). The econ
+  // (cost, shipping, fees, VAT, desi) comes from the scenario base, not from here.
   let productRate: Decimal | null = null;
   let categoryRate: Decimal | null = null;
-  const variantIds = item.productVariantId !== null ? [item.productVariantId] : [];
+  const variantIds = variantId !== null ? [variantId] : [];
 
-  if (item.productVariantId !== null) {
+  if (variantId !== null) {
     let variantRow;
     try {
       variantRow = await prisma.productVariant.findFirst({
-        where: { id: item.productVariantId, organizationId: orgId, storeId },
+        where: { id: variantId, organizationId: orgId, storeId },
         select: {
           id: true,
           syncedCommissionRate: true,
@@ -141,7 +151,7 @@ export async function estimateDiscountItem(
     variantIds,
     surface: 'discount-list',
   });
-  const base: ScreenScenarioBase = screenScenarioBaseFor(bases, item.productVariantId);
+  const base = screenScenarioBaseFor(bases, variantId, degraded);
 
   // Bands come from the store's commission tariff ONLY when a tariff week covers the anchor
   // instant -- matched by barcode. The SAME source the detail view uses

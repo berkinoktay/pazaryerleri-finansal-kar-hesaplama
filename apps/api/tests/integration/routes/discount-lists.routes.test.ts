@@ -698,3 +698,164 @@ describe('Discount Lists — per-item degrade (decision 9)', () => {
     }
   });
 });
+
+describe('Discount Lists - the item variant is resolved from the barcode at read time', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  it('an item imported before its variant existed is priced once the variant exists', async () => {
+    await truncateAll();
+    const LATE_BARCODE = 'DISC-LATE';
+    const LATE_IMAGE_URL = 'https://cdn.example/disc-late-0.jpg';
+    const PRODUCT_PCT = 18;
+
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing - globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Discount Late Link Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'discount-late-link-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'COGS Disc Late',
+        type: 'COGS',
+        amountGross: new Decimal('100.00'),
+        vatRate: 20,
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: 'COGS Disc Late',
+        type: 'COGS',
+        amountGross: new Decimal('100.00'),
+        vatRate: 20,
+        changedFields: [],
+        effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+      },
+    });
+    await ensureFeeDefinitions();
+
+    const list = await prisma.discountList.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: 'Gec Eslesme Indirim',
+        discountType: 'NET',
+        valueKind: 'PERCENT',
+        value: new Decimal('15.00'),
+        createdBy: user.id,
+      },
+    });
+    // Uploaded before the product sync: no catalog variant carried the barcode, so the
+    // import stored no variant link.
+    const item = await prisma.discountListItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        listId: list.id,
+        productVariantId: null,
+        barcode: LATE_BARCODE,
+        productTitle: 'Gec Eslesen Urun',
+        currentPrice: new Decimal('250.00'),
+        included: true,
+        sortOrder: 0,
+      },
+    });
+
+    const fetchItem = async (): Promise<ItemWire> => {
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/discount-lists/${list.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body: DetailWire = await res.json();
+      const row = body.items.find((i) => i.id === item.id);
+      if (row === undefined) throw new Error('detail item DISC-LATE missing');
+      return row;
+    };
+
+    // No catalog variant carries the barcode yet.
+    const before = await fetchItem();
+    expect(before.calculable).toBe(false);
+    expect(before.reason).toBe('NO_PRODUCT');
+    expect(before.imageUrl).toBeNull();
+    expect(before.current.commissionSource).toBeNull();
+    expect(before.current.netProfit).toBeNull();
+    expect(before.discounted.netProfit).toBeNull();
+
+    // The product sync lands the product and its variant (with a synced commission rate and
+    // a cost) after the upload.
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 7401n,
+        productMainId: 'pm-7401',
+        title: 'Gec Eslesen Urun',
+        categoryId: 602n,
+        categoryName: 'Kategori',
+        brandId: null,
+        brandName: null,
+        // Two images: the detail must surface the first one.
+        imageUrls: [LATE_IMAGE_URL, 'https://cdn.example/disc-late-1.jpg'],
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: 74010n,
+        barcode: LATE_BARCODE,
+        stockCode: 'STK-DISC-LATE',
+        salePrice: new Decimal('250.00'),
+        listPrice: new Decimal('250.00'),
+        vatRate: 20,
+        dimensionalWeightOverride: new Decimal('3.0'),
+        syncedCommissionRate: new Decimal(PRODUCT_PCT),
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+    });
+
+    // The same GET, with no re-upload, now prices both scenarios from the synced product
+    // rate (no commission tariff exists) and shows the image.
+    const after = await fetchItem();
+    expect(after.calculable).toBe(true);
+    expect(after.reason).toBeNull();
+    expect(after.imageUrl).toBe(LATE_IMAGE_URL);
+    expect(after.current.price).toBe('250.00');
+    expect(after.discounted.price).toBe('212.50');
+    for (const scenario of [after.current, after.discounted]) {
+      expect(scenario.commissionSource).toBe('product');
+      expect(Number(scenario.commissionPct)).toBe(PRODUCT_PCT);
+      expect(scenario.netProfit).not.toBeNull();
+    }
+
+    // The reads resolved the variant without writing the stored link back.
+    const stored = await prisma.discountListItem.findUniqueOrThrow({
+      where: { id: item.id },
+      select: { productVariantId: true },
+    });
+    expect(stored.productVariantId).toBeNull();
+  });
+});
