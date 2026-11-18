@@ -12,6 +12,7 @@ import { prisma, type Prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { ValidationError, type ValidationIssue } from '../../lib/errors';
+import { isForeignKeyViolationOn } from '../../lib/map-transaction-error';
 import { parseStarTiers } from '../../services/advantage-tariff.types';
 import {
   AdvantageTariffIdPathSchema,
@@ -58,6 +59,12 @@ const INVALID_COMMISSION_SOURCE_ISSUE: Readonly<ValidationIssue> = {
   field: 'commissionSourceTariffId',
   code: 'INVALID_COMMISSION_SOURCE',
 };
+
+/** The foreign key of `advantage_tariffs.commission_source_tariff_id`. */
+const COMMISSION_SOURCE_FOREIGN_KEY = {
+  constraint: 'advantage_tariffs_commission_source_tariff_id_fkey',
+  column: 'commission_source_tariff_id',
+} as const;
 
 const ADVANTAGE_TARIFF_HTTP: WorkbookHttpSpec = {
   segment: 'advantage-tariffs',
@@ -214,19 +221,30 @@ export const advantageTariffAdapter: WorkbookVerticalAdapter<
   inspect: inspectCommissionSource,
   nameFallback: () => null,
   persist: async (tx, { parent, rows, variantIdByAnchor, config }) => {
-    const tariff = await tx.advantageTariff.create({
-      data: {
-        organizationId: parent.organizationId,
-        storeId: parent.storeId,
-        name: parent.name,
-        sourceFilename: parent.sourceFilename,
-        sourceFile: parent.sourceFile,
-        sourceFormatId: parent.sourceFormatId,
-        commissionSourceTariffId: config.commissionSourceTariffId,
-        createdBy: parent.createdBy,
-      },
-      select: { id: true },
-    });
+    let tariff;
+    try {
+      tariff = await tx.advantageTariff.create({
+        data: {
+          organizationId: parent.organizationId,
+          storeId: parent.storeId,
+          name: parent.name,
+          sourceFilename: parent.sourceFilename,
+          sourceFile: parent.sourceFile,
+          sourceFormatId: parent.sourceFormatId,
+          commissionSourceTariffId: config.commissionSourceTariffId,
+          createdBy: parent.createdBy,
+        },
+        select: { id: true },
+      });
+    } catch (err) {
+      // `inspect` checked the source before the transaction; a delete in between fails
+      // this insert, and the seller gets the same field error as when the source was
+      // already gone. The transaction rolls back, nothing is stored.
+      if (isForeignKeyViolationOn(err, COMMISSION_SOURCE_FOREIGN_KEY)) {
+        throw new ValidationError([{ ...INVALID_COMMISSION_SOURCE_ISSUE }]);
+      }
+      throw err;
+    }
     // One item per product row, in sheet order; no choice is read from the file.
     const items = rows.map((row, index) => ({
       organizationId: parent.organizationId,

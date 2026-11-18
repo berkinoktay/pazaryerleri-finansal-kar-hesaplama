@@ -11,16 +11,29 @@
 //     buffered anything;
 //   - an owner's oversized body is refused with 413 whether the size is declared in
 //     Content-Length or only discovered while streaming a chunked body.
+// Past the guard, a file within the byte limit that crosses a row, column or content
+// limit of the engine is a 422 on `file` carrying that limit, and nothing is stored.
 
+import { readFileSync } from 'node:fs';
+
+import { z } from '@hono/zod-openapi';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { buildXlsxFixture, worksheetXml } from '@pazarsync/spreadsheet/testing';
-import { WORKBOOK_UPLOAD_MAX_BYTES } from '@pazarsync/utils';
+import { prisma } from '@pazarsync/db';
+import {
+  DEFAULT_COL_CAP,
+  DEFAULT_ROW_CAP,
+  readWorkbookGrid,
+  type CellValue,
+} from '@pazarsync/spreadsheet';
+import { buildXlsxFixture, columnLetters, worksheetXml } from '@pazarsync/spreadsheet/testing';
+import { WORKBOOK_FILE_LIMITS, WORKBOOK_UPLOAD_MAX_BYTES } from '@pazarsync/utils';
 
 import { createApp } from '@/app';
 import { RATE_LIMITS } from '@/config/rate-limits';
 import { MULTIPART_OVERHEAD_BYTES } from '@/config/workbook-limits';
 import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware';
+import { TRENDYOL_SHEET_NAMES } from '@/workbooks/formats/trendyol/labels';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -55,6 +68,22 @@ const STREAM_CHUNK_BYTES = 64 * 1024;
 // was a process crash, not a slow answer.
 const DIMENSION_FILE_BUDGET_MS = 4_000;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+const DISCOUNT_FIXTURE = readFileSync(
+  new URL('../../fixtures/trendyol-discount-products.xlsx', import.meta.url),
+);
+// The page's own sheet of the limit cases: the real header row and its first data row.
+const PAGE_SHEET_ROWS = 2;
+// A second sheet of the limit cases, beside the page's own sheet.
+const HELPER_SHEET_NAME = 'Notes';
+const FIRST_ROW = 1;
+const FIRST_COLUMN = 1;
+// The content case builds the engine's own 5 001 x 64 shape; the file and its refusal
+// take seconds, well past the default test timeout.
+const CONTENT_CASE_TIMEOUT_MS = 60_000;
+
+// The whole body of a 422, field issues as sent (meta included), for a strict pin.
+const RawValidationSchema = z.object({ code: z.string(), errors: z.array(z.unknown()) });
 
 /**
  * A well-formed multipart body of exactly OVERSIZE_BODY_BYTES: one `file` part whose
@@ -190,11 +219,66 @@ async function setupOwnerStore(): Promise<Ctx> {
   return { accessToken: user.accessToken, orgId: org.id, storeId: store.id };
 }
 
+/** A discount import of `file` with a valid discount configuration. */
+function discountImportRequest(ctx: Ctx, file: Buffer, filename: string): Request {
+  const now = Date.now();
+  const config = {
+    discountType: 'NET',
+    valueKind: 'AMOUNT',
+    value: '50',
+    startsAt: new Date(now + MS_PER_DAY).toISOString(),
+    endsAt: new Date(now + 2 * MS_PER_DAY).toISOString(),
+  };
+  const form = new FormData();
+  form.append('file', new Blob([new Uint8Array(file)]), filename);
+  for (const [key, value] of Object.entries(config)) form.append(key, value);
+  return new Request(importUrl(ctx.orgId, ctx.storeId, 'discount-lists'), {
+    method: 'POST',
+    headers: { Authorization: bearer(ctx.accessToken) },
+    body: form,
+  });
+}
+
+/** A fixture cell as `worksheetXml` writes it; the discount fixture holds no other kind. */
+function fixtureCell(value: CellValue): string | number | null {
+  if (value === null || typeof value === 'string' || typeof value === 'number') return value;
+  throw new Error('the discount fixture holds a cell worksheetXml cannot write');
+}
+
+/** A worksheet with exactly one cell, at `column` (1-based) of `row`. */
+function singleCellSheetXml(column: number, row: number): string {
+  const ref = `${columnLetters(column)}${row}`;
+  return (
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    `<sheetData><row r="${row}"><c r="${ref}"><v>1</v></c></row></sheetData></worksheet>`
+  );
+}
+
+/** `rows` x `columns` distinct numbers, the shape the engine's DOM weight tests build. */
+function numberRows(rows: number, columns: number): number[][] {
+  return Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: columns }, (_, c) => r * columns + c),
+  );
+}
+
+async function storedDiscountLists(ctx: Ctx): Promise<number> {
+  return prisma.discountList.count({
+    where: { organizationId: ctx.orgId, storeId: ctx.storeId },
+  });
+}
+
 describe('workbook upload guard on the import routes', () => {
   let ctx: Ctx;
+  // The discount page's own sheet, valid: the real header and its first data row.
+  let pageSheetXml: string;
 
   beforeAll(async () => {
     await ensureDbReachable();
+    const grid = await readWorkbookGrid(DISCOUNT_FIXTURE, { sheet: { by: 'index', index: 0 } });
+    pageSheetXml = worksheetXml(
+      grid.slice(0, PAGE_SHEET_ROWS).map((cells) => cells.map(fixtureCell)),
+    );
   });
 
   beforeEach(async () => {
@@ -339,6 +423,73 @@ describe('workbook upload guard on the import routes', () => {
     expect(await problemCode(res)).toBe('VALIDATION_ERROR');
     expect(elapsedMs).toBeLessThan(DIMENSION_FILE_BUDGET_MS);
   });
+
+  // The caps apply to every sheet of the file: a helper sheet beside a valid page sheet
+  // is refused by one cell past a cap, and the refusal names that cap.
+  it('discount-lists: a helper sheet with a cell past the row cap -> 422 with maxRows', async () => {
+    const file = buildXlsxFixture([
+      { name: TRENDYOL_SHEET_NAMES.DISCOUNT_LIST, xml: pageSheetXml },
+      { name: HELPER_SHEET_NAME, xml: singleCellSheetXml(FIRST_COLUMN, DEFAULT_ROW_CAP + 2) },
+    ]);
+
+    const res = await app.request(discountImportRequest(ctx, file, 'row-cap.xlsx'));
+
+    expect(res.status).toBe(422);
+    const body = RawValidationSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toStrictEqual([
+      { field: 'file', code: 'ROW_CAP_EXCEEDED', meta: { maxRows: DEFAULT_ROW_CAP } },
+    ]);
+    expect(await storedDiscountLists(ctx)).toBe(0);
+  });
+
+  it('discount-lists: a helper sheet with a cell past the column cap -> 422 with maxCols', async () => {
+    const file = buildXlsxFixture([
+      { name: TRENDYOL_SHEET_NAMES.DISCOUNT_LIST, xml: pageSheetXml },
+      { name: HELPER_SHEET_NAME, xml: singleCellSheetXml(DEFAULT_COL_CAP + 1, FIRST_ROW) },
+    ]);
+
+    const res = await app.request(discountImportRequest(ctx, file, 'col-cap.xlsx'));
+
+    expect(res.status).toBe(422);
+    const body = RawValidationSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toStrictEqual([
+      { field: 'file', code: 'COL_CAP_EXCEEDED', meta: { maxCols: DEFAULT_COL_CAP } },
+    ]);
+    expect(await storedDiscountLists(ctx)).toBe(0);
+  });
+
+  // Within the byte limit and the row cap, a sheet this full crosses the DOM weight
+  // limit: the refusal is about filled rows, not bytes, and names the row cap.
+  it(
+    'discount-lists: a full sheet within the byte limit -> 422 content limit with maxRows',
+    { timeout: CONTENT_CASE_TIMEOUT_MS },
+    async () => {
+      const file = buildXlsxFixture([
+        {
+          name: TRENDYOL_SHEET_NAMES.DISCOUNT_LIST,
+          xml: worksheetXml(numberRows(DEFAULT_ROW_CAP + 1, DEFAULT_COL_CAP)),
+        },
+      ]);
+      // Over the byte limit the body guard answers 413 before the engine reads the file.
+      expect(file.byteLength).toBeLessThan(WORKBOOK_UPLOAD_MAX_BYTES);
+
+      const res = await app.request(discountImportRequest(ctx, file, 'content.xlsx'));
+
+      expect(res.status).toBe(422);
+      const body = RawValidationSchema.parse(await res.json());
+      expect(body.code).toBe('VALIDATION_ERROR');
+      expect(body.errors).toStrictEqual([
+        {
+          field: 'file',
+          code: 'PAYLOAD_TOO_LARGE',
+          meta: { limit: WORKBOOK_FILE_LIMITS.ROWS, maxRows: DEFAULT_ROW_CAP },
+        },
+      ]);
+      expect(await storedDiscountLists(ctx)).toBe(0);
+    },
+  );
 });
 
 describe('rate limit on the export routes', () => {

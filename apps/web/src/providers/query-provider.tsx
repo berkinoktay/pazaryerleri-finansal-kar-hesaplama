@@ -14,11 +14,13 @@ const DEFAULT_STALE_TIME_MS = 30_000;
  *   - UNAUTHENTICATED → SessionExpiredHandler (sign-out + redirect)
  *   - VALIDATION_ERROR → forms render field-level errors inline
  *   - PAYLOAD_TOO_LARGE → the file upload dialog shows the size error inline
+ *   - UPLOAD_QUOTA_EXCEEDED → the upload dialog shows the limit inline (lists or bytes)
  */
 const SILENT_CODES: ReadonlySet<string> = new Set([
   'UNAUTHENTICATED',
   'VALIDATION_ERROR',
   'PAYLOAD_TOO_LARGE',
+  'UPLOAD_QUOTA_EXCEEDED',
 ]);
 
 /**
@@ -52,7 +54,6 @@ type KnownErrorKey =
   | 'UNSUPPORTED_MEDIA_TYPE'
   | 'IMPORT_BUSY'
   | 'IMPORT_IN_PROGRESS'
-  | 'UPLOAD_QUOTA_EXCEEDED'
   | 'STORED_FILE_MISSING'
   | 'STORED_FILE_UNREADABLE'
   | 'STORED_FILE_UNRECOGNIZED'
@@ -91,7 +92,6 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<KnownErrorKey>([
   'UNSUPPORTED_MEDIA_TYPE',
   'IMPORT_BUSY',
   'IMPORT_IN_PROGRESS',
-  'UPLOAD_QUOTA_EXCEEDED',
   'STORED_FILE_MISSING',
   'STORED_FILE_UNREADABLE',
   'STORED_FILE_UNRECOGNIZED',

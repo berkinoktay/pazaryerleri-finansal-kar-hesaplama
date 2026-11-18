@@ -57,8 +57,10 @@ export const XML_TEXT_NODE_WEIGHT = 3;
 // about 5 000 rows x 35-40 columns: a real Trendyol export of 5 001 rows x 35 columns
 // (about 4.9 million) passes, while 5 001 x 35 of distinct shared strings (about 5.9
 // million) and every 5 001 x 64 sheet whose cells hold values (at least 22 per cell,
-// about 7 million) are rejected. Real Trendyol files have at most 35 columns. The
-// lasting fix is parsing in a memory-capped worker thread (the follow-up PR 2).
+// about 7 million) are rejected. The fixtures seen so far have at most 35 columns; each
+// extra commission period adds 6, so a real file can be wider and reach this limit
+// below 5 000 rows. The lasting fix is parsing in a memory-capped worker thread (the
+// follow-up PR 2).
 export const MAX_XML_DOM_WEIGHT = 5_000_000;
 // Occurrences of the bytes 'xmlns' per reader part. Sibling declarations parse in
 // linear time; nested ones are quadratic in depth: 256 nested declarations take about

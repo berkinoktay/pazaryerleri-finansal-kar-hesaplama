@@ -3,6 +3,8 @@ import { NextIntlClientProvider } from 'next-intl';
 import { renderHook, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+import { UPLOAD_QUOTA_LIMITS } from '@pazarsync/utils';
+
 import { QueryProvider } from '@/providers/query-provider';
 import { ApiError } from '@/lib/api-error';
 
@@ -11,10 +13,12 @@ import { problemApiError } from '../../helpers/api-error';
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
 
-/** The workbook conflicts the API answers as a 409, each under its own code. */
+/**
+ * The workbook conflicts the API answers as a 409, each under its own code, that the global
+ * toast owns. `UPLOAD_QUOTA_EXCEEDED` is not here: the upload dialog shows it inline.
+ */
 const WORKBOOK_CONFLICT_CODES = [
   'IMPORT_IN_PROGRESS',
-  'UPLOAD_QUOTA_EXCEEDED',
   'STORED_FILE_MISSING',
   'STORED_FILE_UNREADABLE',
   'STORED_FILE_UNRECOGNIZED',
@@ -101,6 +105,27 @@ describe('QueryProvider', () => {
       { wrapper },
     );
 
+    await new Promise((r) => setTimeout(r, 20));
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('does NOT toast UPLOAD_QUOTA_EXCEEDED (the upload dialog shows it inline)', async () => {
+    const { result } = renderHook(
+      () =>
+        useMutation({
+          mutationFn: () =>
+            Promise.reject(
+              problemApiError(CONFLICT_STATUS, 'UPLOAD_QUOTA_EXCEEDED', {
+                limit: UPLOAD_QUOTA_LIMITS.LISTS,
+                maxLists: 50,
+              }),
+            ),
+        }),
+      { wrapper },
+    );
+    result.current.mutate();
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
     await new Promise((r) => setTimeout(r, 20));
     expect(toastError).not.toHaveBeenCalled();
   });

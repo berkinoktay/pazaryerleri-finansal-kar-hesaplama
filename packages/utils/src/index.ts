@@ -28,6 +28,7 @@ export {
   tariffBoundToInstant,
 } from './tariff-period';
 export {
+  BYTES_PER_MB,
   STORABLE_YEAR_MAX,
   STORABLE_YEAR_MIN,
   UPLOAD_NAME_MAX_LENGTH,
@@ -36,8 +37,11 @@ export {
 } from './workbook';
 export {
   isWorkbookUploadFileCode,
+  UPLOAD_QUOTA_LIMITS,
   WORKBOOK_ENGINE_FILE_CODES,
   WORKBOOK_FILE_CODES,
+  WORKBOOK_FILE_LIMITS,
+  type UploadQuotaLimit,
   type WorkbookFileCode,
   type WorkbookUploadFileCode,
 } from './workbook-codes';

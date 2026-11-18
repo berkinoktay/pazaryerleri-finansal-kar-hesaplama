@@ -222,7 +222,8 @@ function classify(err: unknown): ProblemDetailsResult {
   }
   // A workbook conflict is a ConflictError subclass: checked first so it answers its
   // reason as its own code. The detail comes from the fixed table, never from the
-  // error message.
+  // error message. Its server-chosen meta rides along only when it has a key, so a
+  // conflict without meta keeps a body with no `meta` key.
   if (err instanceof WorkbookConflictError) {
     return {
       status: 409,
@@ -232,6 +233,7 @@ function classify(err: unknown): ProblemDetailsResult {
         status: 409,
         code: WORKBOOK_CONFLICT_PROBLEMS[err.reason].code,
         detail: WORKBOOK_CONFLICT_DETAILS[err.reason],
+        ...(Object.keys(err.meta).length > 0 ? { meta: { ...err.meta } } : {}),
       },
     };
   }

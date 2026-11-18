@@ -4,7 +4,11 @@ import { syncLog } from '@pazarsync/sync-core';
 
 import { IMPORT_BUSY_RETRY_AFTER_SECONDS } from '@/config/workbook-limits';
 import { ConflictError, ImportBusyError } from '@/lib/errors';
-import { isUniqueViolationOn, mapTransactionError } from '@/lib/map-transaction-error';
+import {
+  isForeignKeyViolationOn,
+  isUniqueViolationOn,
+  mapTransactionError,
+} from '@/lib/map-transaction-error';
 
 function fakePrismaError(code: string, meta?: Record<string, unknown>): Error {
   const err = Object.assign(new Error(`Prisma ${code}`), {
@@ -116,5 +120,67 @@ describe('isUniqueViolationOn', () => {
 
   it('is false for a non-Prisma error', () => {
     expect(isUniqueViolationOn(new Error('boom'), 'week_starts_at')).toBe(false);
+  });
+});
+
+describe('isForeignKeyViolationOn', () => {
+  const TARGET = {
+    constraint: 'advantage_tariffs_commission_source_tariff_id_fkey',
+    column: 'commission_source_tariff_id',
+  };
+
+  function foreignKeyViolation(code: string, constraint: unknown): Error {
+    return fakePrismaError(code, {
+      modelName: 'AdvantageTariff',
+      driverAdapterError: { cause: { constraint } },
+    });
+  }
+
+  it('is true for a P2003 that names the constraint (the shape a real insert produces)', () => {
+    const err = foreignKeyViolation('P2003', { index: TARGET.constraint });
+    expect(isForeignKeyViolationOn(err, TARGET)).toBe(true);
+  });
+
+  it('is true for a P2003 that names the column instead', () => {
+    const err = foreignKeyViolation('P2003', { fields: ['store_id', TARGET.column] });
+    expect(isForeignKeyViolationOn(err, TARGET)).toBe(true);
+  });
+
+  it('is false for a P2003 on another key', () => {
+    expect(
+      isForeignKeyViolationOn(foreignKeyViolation('P2003', { index: 'other_fkey' }), TARGET),
+    ).toBe(false);
+    expect(
+      isForeignKeyViolationOn(foreignKeyViolation('P2003', { fields: ['store_id'] }), TARGET),
+    ).toBe(false);
+  });
+
+  it('does not match the column against the constraint name, or the reverse', () => {
+    expect(
+      isForeignKeyViolationOn(foreignKeyViolation('P2003', { index: TARGET.column }), TARGET),
+    ).toBe(false);
+    expect(
+      isForeignKeyViolationOn(
+        foreignKeyViolation('P2003', { fields: [TARGET.constraint] }),
+        TARGET,
+      ),
+    ).toBe(false);
+  });
+
+  it('is false for another Prisma code carrying the same key', () => {
+    expect(
+      isForeignKeyViolationOn(foreignKeyViolation('P2002', { index: TARGET.constraint }), TARGET),
+    ).toBe(false);
+    expect(
+      isForeignKeyViolationOn(foreignKeyViolation('P2002', { fields: [TARGET.column] }), TARGET),
+    ).toBe(false);
+  });
+
+  it('is false when the cause names no key', () => {
+    expect(isForeignKeyViolationOn(foreignKeyViolation('P2003', undefined), TARGET)).toBe(false);
+  });
+
+  it('is false for a non-Prisma error', () => {
+    expect(isForeignKeyViolationOn(new Error('boom'), TARGET)).toBe(false);
   });
 });

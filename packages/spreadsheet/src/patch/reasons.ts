@@ -31,13 +31,16 @@ export const PATCH_LIMIT_REASONS = {
 } as const;
 
 /**
- * Reasons of PAYLOAD_TOO_LARGE raised by the upload gate. Its byte, entry and DOM weight
- * caps carry none; a reason names a cap that bounds the gate's own work instead.
+ * Reasons of PAYLOAD_TOO_LARGE raised by the upload gate. Its byte and entry caps carry
+ * none; a reason names a cap a caller may want to tell apart from them (the formula scan
+ * budget, the DOM weight).
  */
 export const UPLOAD_LIMIT_REASONS = {
   // The formula fields of all parts together, raw and in NFKC form, exceed what the gate
   // reads of one upload (MAX_FORMULA_SCAN_UNITS).
   FORMULA_SCAN_BUDGET: 'formula-scan-budget',
+  // The reader parts together exceed MAX_XML_DOM_WEIGHT.
+  DOM_WEIGHT: 'dom-weight',
 } as const;
 
 /** Reasons of CORRUPT_FILE raised by the zip and package checks of the gate and the patch path. */

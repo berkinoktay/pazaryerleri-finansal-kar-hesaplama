@@ -1,12 +1,21 @@
 // The workbook pipeline's own errors and the two catch-side mappers every import and
 // export use: one for a file the seller just uploaded, one for a stored file an export
 // reads back. The engine's `meta` never reaches a response: it can name zip entries or
-// quote library messages about the file. What it says is logged instead, without file
+// quote library messages about the file. The one exception is an upload refused for its
+// rows, its columns or its content: `toUploadError` rebuilds that limit from a whitelist
+// (the row or column number and the one limit name), so an entry name or library text
+// still never reaches a response. What the meta says is logged instead, without file
 // names or cell content.
 
-import { SpreadsheetFileError, workerLimitReason } from '@pazarsync/spreadsheet';
+import {
+  DEFAULT_COL_CAP,
+  DEFAULT_ROW_CAP,
+  SpreadsheetFileError,
+  UPLOAD_LIMIT_REASONS,
+  workerLimitReason,
+} from '@pazarsync/spreadsheet';
 import { syncLog } from '@pazarsync/sync-core';
-import type { WorkbookFileCode, WorkbookPage } from '@pazarsync/utils';
+import { WORKBOOK_FILE_LIMITS, type WorkbookFileCode, type WorkbookPage } from '@pazarsync/utils';
 
 import { IMPORT_BUSY_RETRY_AFTER_SECONDS } from '../config/workbook-limits';
 import { ImportBusyError, ValidationError, WorkbookConflictError } from '../lib/errors';
@@ -47,12 +56,45 @@ function logWorkerLimit(err: SpreadsheetFileError): void {
   if (reason !== null) syncLog.warn('spreadsheet.worker-limit', { reason, code: err.code });
 }
 
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0;
+}
+
+/** An engine cap from its meta when it is a positive integer, else the cap the import reads with. */
+function engineCap(value: unknown, fallback: number): number {
+  return isPositiveInteger(value) ? value : fallback;
+}
+
+/**
+ * The limit a seller can act on, for an upload refused for its rows, its columns or its
+ * content (the DOM weight: too many filled rows), built from a whitelist: never the
+ * engine meta itself. The DOM weight names the row cap because the import reads with the
+ * default caps. Every other refusal carries no meta.
+ */
+function uploadLimitMeta(
+  err: SpreadsheetFileError,
+): Readonly<Record<string, string | number>> | null {
+  if (err.code === 'ROW_CAP_EXCEEDED') {
+    return { maxRows: engineCap(err.meta['rowCap'], DEFAULT_ROW_CAP) };
+  }
+  if (err.code === 'COL_CAP_EXCEEDED') {
+    return { maxCols: engineCap(err.meta['colCap'], DEFAULT_COL_CAP) };
+  }
+  if (err.code === 'PAYLOAD_TOO_LARGE' && engineReason(err) === UPLOAD_LIMIT_REASONS.DOM_WEIGHT) {
+    return { limit: WORKBOOK_FILE_LIMITS.ROWS, maxRows: DEFAULT_ROW_CAP };
+  }
+  return null;
+}
+
 /**
  * For everything an import throws before its transaction. A `WorkbookFileRejection`
  * becomes a 422 on `file` with its own code and its meta. An engine `ENGINE_BUSY` is the
  * 503 `ImportBusyError`; any other engine code, a worker kill included, is a 422 on
- * `file` carrying the engine code and logged as `workbook.upload-rejected`. Anything else
- * is rethrown untouched.
+ * `file` carrying the engine code and logged as `workbook.upload-rejected`. The engine
+ * meta stays out of that 422, except for a row, column or content refusal, whose issue
+ * carries the limit `uploadLimitMeta` builds (`maxRows`, `maxCols`, or `limit` with
+ * `maxRows`); an entry name or library text never does. Anything else is rethrown
+ * untouched.
  */
 export function toUploadError(err: unknown, context: { readonly page: WorkbookPage }): never {
   if (err instanceof WorkbookFileRejection) {
@@ -70,7 +112,12 @@ export function toUploadError(err: unknown, context: { readonly page: WorkbookPa
     code: err.code,
     reason: engineReason(err),
   });
-  throw new ValidationError([{ field: 'file', code: err.code }]);
+  const limitMeta = uploadLimitMeta(err);
+  throw new ValidationError([
+    limitMeta === null
+      ? { field: 'file', code: err.code }
+      : { field: 'file', code: err.code, meta: { ...limitMeta } },
+  ]);
 }
 
 /**

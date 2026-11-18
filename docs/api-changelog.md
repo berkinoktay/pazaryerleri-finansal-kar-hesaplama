@@ -26,6 +26,42 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Workbook imports refuse a file with no column to write selections into**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/plus-commission-tariffs/import`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/import`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/flash-products/import`). An upload whose sheet
+  has no column the export could write the seller's selections into answers `422 VALIDATION_ERROR`
+  with `errors: [{ field: 'file', code: 'NO_WRITEBACK_COLUMN' }]` where it used to answer `201` and
+  fail only at the first export; nothing is stored. The export's `409 NO_WRITEBACK_COLUMN` stays
+  for files stored earlier. On the commission, discount and marketplace campaign pages that column
+  is already required to recognise the file, so those routes are unchanged. Breaking for a client
+  that uploaded such files; the web client ships the matching sentence in the same PR.
+- **Row, column and content limits carry their maximum**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products|advantage-tariffs|plus-commission-tariffs|commission-tariffs}/import`).
+  On all six workbook import routes the `file` issue `ROW_CAP_EXCEEDED` carries `meta.maxRows` and
+  `COL_CAP_EXCEEDED` carries `meta.maxCols`: the most rows and columns a sheet may hold, a limit
+  that applies to every sheet of the file. A `PAYLOAD_TOO_LARGE` raised by the row-content limit
+  (a file with too many filled rows, which can be refused below the row cap) rather than by bytes
+  carries `meta: { limit: 'rows', maxRows }`. Every other `PAYLOAD_TOO_LARGE` issue on `file`
+  keeps its size meaning and carries no meta (the 413 of an oversized request body keeps its
+  top-level `meta.maxBytes`), and no other engine detail reaches the response. Codes unchanged;
+  additive.
+- **Upload quota: which limit, and checked before the file is read**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products|advantage-tariffs|plus-commission-tariffs|commission-tariffs}/import`).
+  `409 UPLOAD_QUOTA_EXCEEDED` on the six import routes carries `meta.limit`: `lists` with
+  `meta.maxLists` (the per-page list limit, the lists of this page in this store) or `bytes` with
+  `meta.maxBytes` (the store-wide limit on stored source files, counted over all six workbook
+  pages, the incoming file included). The quota is now checked before the file is parsed, and
+  again inside the import transaction, so when the quota is already reached a file with other
+  problems gets the `409` first instead of a `422`. Code unchanged; additive.
+- **Advantage import: a commission tariff deleted during the import**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/import`). When the chosen
+  commission source tariff is deleted after the import checked it and before the list is stored,
+  the route answers `422 VALIDATION_ERROR` with
+  `errors: [{ field: 'commissionSourceTariffId', code: 'INVALID_COMMISSION_SOURCE' }]`, the same
+  answer as for a source already gone when the upload arrived, instead of `422 INVALID_REFERENCE`.
+  Nothing is stored. The web client shows the matching sentence under the commission source picker
+  in the same PR.
 - **Commission tariff detail: the current commission percent can be null**
   (`GET /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}`).
   `TariffDetailItem.currentCommissionPct` is null when the file's current commission cell was

@@ -3,7 +3,7 @@
 //   - a write-back column a seller made unwritable (a shared formula, an array formula,
 //     a merged range) is refused at upload with 422 MALFORMED_SHEET, not at the first
 //     export, and nothing is stored;
-//   - the store's list quota counts this store only;
+//   - the store's list quota counts this store only, and refuses before the file is read;
 //   - one import of a store and page at a time, whatever the letter case of the ids in
 //     the path (the lock key is the stored store id);
 //   - a Hepsiburada store has no discount format;
@@ -56,6 +56,11 @@ const FIXTURE = readFileSync(
 );
 const DISCOUNT_FORMAT_ID = 'TRENDYOL:DISCOUNT_LIST:v1';
 
+// Another page's real file, for the quota pre-check.
+const FLASH_FIXTURE = readFileSync(
+  new URL('../../fixtures/trendyol-flash-products.xlsx', import.meta.url),
+);
+
 const NET_CONFIG = {
   discountType: 'NET',
   valueKind: 'AMOUNT',
@@ -77,6 +82,7 @@ const RLO = String.fromCodePoint(0x202e);
 const ProblemSchema = z.object({
   code: z.string(),
   errors: z.array(z.object({ field: z.string(), code: z.string() })).optional(),
+  meta: z.record(z.string(), z.unknown()).optional(),
 });
 
 // The whole body of a 422, field issues as sent (meta included), for a strict pin.
@@ -436,11 +442,33 @@ describe('generic workbook import on the discount route', () => {
     expect(res.status).toBe(409);
     const body = await problem(res);
     expect(body.code).toBe('UPLOAD_QUOTA_EXCEEDED');
+    expect(body.meta).toMatchObject({ limit: 'lists', maxLists: MAX_LISTS_PER_STORE_PAGE });
     expect(
       await prisma.discountList.count({
         where: { organizationId: ctx.orgId, storeId: ctx.storeId },
       }),
     ).toBe(MAX_LISTS_PER_STORE_PAGE);
+  });
+
+  it('refuses on the list limit before it reads the file', async () => {
+    const ctx = await setupStore();
+    await prisma.discountList.createMany({
+      data: Array.from({ length: MAX_LISTS_PER_STORE_PAGE }, (_, i) => ({
+        organizationId: ctx.orgId,
+        storeId: ctx.storeId,
+        name: `Seeded list ${i + 1}`,
+        discountType: 'NET',
+      })),
+    });
+
+    // Another page's real file: parsed, the discount page would answer 422
+    // WRONG_FILE_FOR_PAGE, so a 409 proves the quota answered before the parse.
+    const res = await app.request(importRequest(ctx, FLASH_FIXTURE));
+
+    expect(res.status).toBe(409);
+    const body = await problem(res);
+    expect(body.code).toBe('UPLOAD_QUOTA_EXCEEDED');
+    expect(body.meta).toMatchObject({ limit: 'lists', maxLists: MAX_LISTS_PER_STORE_PAGE });
   });
 
   it("does not count another organization's or a sibling store's lists", async () => {

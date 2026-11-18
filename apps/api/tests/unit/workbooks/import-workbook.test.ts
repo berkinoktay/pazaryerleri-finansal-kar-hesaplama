@@ -1,10 +1,12 @@
 // The generic import's catch side, with the database and the engine mocked and a fake
 // adapter: what `persist` throws inside the transaction leaves as a file rejection, a
-// conflict or a mapped transaction error, never as a raw rejection or a 500.
+// conflict or a mapped transaction error, never as a raw rejection or a 500; and the
+// quota pre-check, which refuses a store at its quota before the file is read.
 
 import { z } from '@hono/zod-openapi';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { prisma } from '@pazarsync/db';
 import { Platform } from '@pazarsync/db/enums';
 import { defineLayout, has, header, type SheetData } from '@pazarsync/spreadsheet';
 import { syncLog } from '@pazarsync/sync-core';
@@ -15,6 +17,7 @@ import type { WorkbookImportAdapter } from '@/workbooks/adapter';
 import { VALUE_NOT_STORABLE_REASON } from '@/workbooks/column-range';
 import { defineFormat } from '@/workbooks/format';
 import { importWorkbook, type ImportWorkbookInput } from '@/workbooks/import-workbook';
+import { assertUploadQuota } from '@/workbooks/upload-quota';
 import { WorkbookFileRejection } from '@/workbooks/workbook-errors';
 
 const mocks = vi.hoisted(() => ({
@@ -316,18 +319,23 @@ describe('importWorkbook: what persist throws', () => {
 });
 
 describe('importWorkbook: a file without a write-back column', () => {
-  it('still imports, and logs no-writeback-column once with the page only', async () => {
+  it('refuses it with NO_WRITEBACK_COLUMN on file, logs once with the page only, writes nothing', async () => {
     mocks.readWorkbookGrid.mockResolvedValue(WITHOUT_SELECTION);
     const warn = vi.spyOn(syncLog, 'warn').mockImplementation(() => undefined);
-    const adapter = fakeAdapter(async () => ({ parentId: 'list-1', itemCount: 1 }));
+    vi.spyOn(syncLog, 'info').mockImplementation(() => undefined);
+    const persist = vi.fn(async () => ({ parentId: 'list-1', itemCount: 1 }));
+    const adapter = fakeAdapter(persist);
 
-    await expect(importWorkbook(adapter, INPUT)).resolves.toEqual({ parentId: 'list-1' });
+    const err = await rejection(importWorkbook(adapter, INPUT));
 
+    expect(fileIssues(err)).toEqual([{ field: 'file', code: 'NO_WRITEBACK_COLUMN' }]);
     const lines = warn.mock.calls.filter(
       ([event]) => event === 'workbook.import.no-writeback-column',
     );
     expect(lines).toEqual([['workbook.import.no-writeback-column', { page: PAGE }]]);
-    // No write column resolved: nothing to rehearse.
+    // Refused before the rehearsal and the transaction.
+    expect(persist).not.toHaveBeenCalled();
+    expect(mocks.transaction).not.toHaveBeenCalled();
     expect(mocks.patchWorkbook).not.toHaveBeenCalled();
   });
 
@@ -341,5 +349,41 @@ describe('importWorkbook: a file without a write-back column', () => {
       'workbook.import.no-writeback-column',
     );
     expect(mocks.patchWorkbook).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('importWorkbook: the quota pre-check', () => {
+  it('refuses a store at its quota before it reads the file', async () => {
+    const conflict = new WorkbookConflictError('UPLOAD_QUOTA_EXCEEDED', {
+      limit: 'lists',
+      maxLists: 50,
+    });
+    vi.mocked(assertUploadQuota).mockRejectedValueOnce(conflict);
+    const adapter = fakeAdapter(async () => ({ parentId: 'list-1', itemCount: 1 }));
+
+    expect(await rejection(importWorkbook(adapter, INPUT))).toBe(conflict);
+    expect(mocks.readWorkbookGrid).not.toHaveBeenCalled();
+    expect(mocks.patchWorkbook).not.toHaveBeenCalled();
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
+  it('checks the quota before the parse, then again inside the transaction', async () => {
+    const tx = {};
+    mocks.transaction.mockImplementation(async (run: (client: object) => Promise<unknown>) =>
+      run(tx),
+    );
+    const adapter = fakeAdapter(async () => ({ parentId: 'list-1', itemCount: 1 }));
+
+    await importWorkbook(adapter, INPUT);
+
+    const quota = vi.mocked(assertUploadQuota).mock;
+    expect(quota.calls).toHaveLength(2);
+    const [preCheckOrder] = quota.invocationCallOrder;
+    const [firstReadOrder] = mocks.readWorkbookGrid.mock.invocationCallOrder;
+    expect(preCheckOrder).toBeDefined();
+    expect(firstReadOrder).toBeDefined();
+    expect(preCheckOrder ?? Infinity).toBeLessThan(firstReadOrder ?? -Infinity);
+    expect(quota.calls[0]?.[0]).toBe(prisma);
+    expect(quota.calls[1]?.[0]).toBe(tx);
   });
 });

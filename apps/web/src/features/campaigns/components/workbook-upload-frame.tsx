@@ -193,11 +193,13 @@ export function WorkbookUploadFrame({
     // A close request (Escape, the overlay, the close control) waits for the import: closing
     // resets the mutation, which drops the success callback that routes to the new record.
     if (!next && submitting) return;
-    // Reset the whole form when the dialog closes, so reopening starts clean.
+    // Reset the whole form when the dialog closes, so reopening starts clean. The error reset
+    // runs first, so whatever a form records while its error goes away is then cleared by
+    // `onClosed` and never outlives the close.
     if (!next) {
       setFile(null);
-      onClosed();
       onResetError?.();
+      onClosed();
     }
     onOpenChange(next);
   };

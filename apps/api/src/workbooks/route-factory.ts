@@ -96,7 +96,7 @@ export function createWorkbookImportRoute<
       409: {
         content: { 'application/json': { schema: ProblemDetailsSchema } },
         description:
-          "Another import of this page is running, or the store's upload quota is reached",
+          'Another import of this page is running (IMPORT_IN_PROGRESS), or the store\'s upload quota is reached (UPLOAD_QUOTA_EXCEEDED; meta.limit is "lists" with meta.maxLists, the per-page list limit, or "bytes" with meta.maxBytes, the store-wide stored file limit)',
       },
       422: {
         content: { 'application/json': { schema: ProblemDetailsSchema } },

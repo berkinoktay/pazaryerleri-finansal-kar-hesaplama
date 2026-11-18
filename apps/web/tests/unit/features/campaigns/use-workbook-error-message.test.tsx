@@ -1,10 +1,17 @@
 import { renderHook } from '@testing-library/react';
+import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 
-import { WORKBOOK_PAGES, type WorkbookPage } from '@pazarsync/utils';
+import {
+  UPLOAD_QUOTA_LIMITS,
+  WORKBOOK_FILE_LIMITS,
+  WORKBOOK_PAGES,
+  type WorkbookPage,
+} from '@pazarsync/utils';
 
 import { useWorkbookErrorMessage } from '@/features/campaigns/hooks/use-workbook-error-message';
 import { WORKBOOK_ERROR_BUCKETS } from '@/features/campaigns/lib/workbook-error-bucket';
+import { FORMATS } from '@/i18n/formats';
 
 import trMessages from '../../../../messages/tr.json';
 import { problemApiError, validationApiError } from '../../../helpers/api-error';
@@ -12,6 +19,33 @@ import { AllProviders } from '../../../helpers/render';
 
 const SHARED = trMessages.campaignUpload.errors;
 const PAGE_NAMES = trMessages.campaignUpload.pages;
+
+// A sentence with a limit is built from the catalog with the provider's formats, never typed.
+const tErrors = createTranslator({
+  locale: 'tr',
+  messages: trMessages,
+  namespace: 'campaignUpload.errors',
+  formats: FORMATS,
+});
+
+// A page's own sentence lives outside `campaignUpload.errors`, so it is built from the root.
+const tRoot = createTranslator({ locale: 'tr', messages: trMessages, formats: FORMATS });
+
+/** The row and content sentences of the pages that keep one tariff per week. */
+type TariffRowSentenceKey =
+  | 'commissionTariffsPage.upload.errors.tooManyRows'
+  | 'commissionTariffsPage.upload.errors.tooMuchContent'
+  | 'plusCommissionTariffsPage.upload.errors.tooManyRows'
+  | 'plusCommissionTariffsPage.upload.errors.tooMuchContent';
+
+type RowLimitBucket = 'tooManyRows' | 'tooMuchContent';
+
+const MAX_ROWS = 5000;
+const MAX_COLS = 64;
+const MAX_LISTS = 50;
+const QUOTA_MB = 200;
+// Written out rather than built from BYTES_PER_MB, so the hook's conversion is checked.
+const QUOTA_BYTES = 200 * 1024 * 1024;
 
 /** The message function the hook returns for one page, under the real Turkish messages. */
 function messageFor(page: WorkbookPage): (error: unknown) => string | null {
@@ -102,6 +136,111 @@ describe('useWorkbookErrorMessage', () => {
     expect(
       messageFor(WORKBOOK_PAGES.DISCOUNT_LIST)(problemApiError(413, 'PAYLOAD_TOO_LARGE')),
     ).toBe(SHARED.tooLarge);
+  });
+
+  it('names the row limit of a row cap refusal', () => {
+    expect(
+      messageFor(WORKBOOK_PAGES.DISCOUNT_LIST)(
+        fileIssue('ROW_CAP_EXCEEDED', { maxRows: MAX_ROWS }),
+      ),
+    ).toBe(tErrors('tooManyRows', { maxRows: MAX_ROWS }));
+  });
+
+  it('names the column limit of a column cap refusal', () => {
+    expect(
+      messageFor(WORKBOOK_PAGES.COMMISSION_TARIFF)(
+        fileIssue('COL_CAP_EXCEEDED', { maxCols: MAX_COLS }),
+      ),
+    ).toBe(tErrors('tooManyColumns', { maxCols: MAX_COLS }));
+  });
+
+  it('names the row limit of a content refusal about filled rows', () => {
+    expect(
+      messageFor(WORKBOOK_PAGES.DISCOUNT_LIST)(
+        fileIssue('PAYLOAD_TOO_LARGE', { limit: WORKBOOK_FILE_LIMITS.ROWS, maxRows: MAX_ROWS }),
+      ),
+    ).toBe(tErrors('tooMuchContent', { maxRows: MAX_ROWS }));
+  });
+
+  // A tariff page keeps one file per week (DUPLICATE_WEEK), so the shared advice to split the
+  // file would leave the seller with half a tariff: these pages answer their own sentence.
+  it.each<[WorkbookPage, string, Record<string, unknown>, TariffRowSentenceKey, RowLimitBucket]>([
+    [
+      WORKBOOK_PAGES.COMMISSION_TARIFF,
+      'ROW_CAP_EXCEEDED',
+      { maxRows: MAX_ROWS },
+      'commissionTariffsPage.upload.errors.tooManyRows',
+      'tooManyRows',
+    ],
+    [
+      WORKBOOK_PAGES.COMMISSION_TARIFF,
+      'PAYLOAD_TOO_LARGE',
+      { limit: WORKBOOK_FILE_LIMITS.ROWS, maxRows: MAX_ROWS },
+      'commissionTariffsPage.upload.errors.tooMuchContent',
+      'tooMuchContent',
+    ],
+    [
+      WORKBOOK_PAGES.PLUS_COMMISSION_TARIFF,
+      'ROW_CAP_EXCEEDED',
+      { maxRows: MAX_ROWS },
+      'plusCommissionTariffsPage.upload.errors.tooManyRows',
+      'tooManyRows',
+    ],
+    [
+      WORKBOOK_PAGES.PLUS_COMMISSION_TARIFF,
+      'PAYLOAD_TOO_LARGE',
+      { limit: WORKBOOK_FILE_LIMITS.ROWS, maxRows: MAX_ROWS },
+      'plusCommissionTariffsPage.upload.errors.tooMuchContent',
+      'tooMuchContent',
+    ],
+  ])(
+    "%s answers the page's own sentence for %s, without the shared advice to split the file",
+    (page, code, meta, pageKey, sharedKey) => {
+      const message = messageFor(page)(fileIssue(code, meta));
+
+      expect(message).toBe(tRoot(pageKey, { maxRows: MAX_ROWS }));
+      expect(message).not.toBe(tErrors(sharedKey, { maxRows: MAX_ROWS }));
+    },
+  );
+
+  it('answers the too-large sentence for a size refusal on the file', () => {
+    expect(messageFor(WORKBOOK_PAGES.COMMISSION_TARIFF)(fileIssue('PAYLOAD_TOO_LARGE'))).toBe(
+      SHARED.tooLarge,
+    );
+  });
+
+  it('answers the too-large sentence for a row cap refusal without its limit', () => {
+    expect(messageFor(WORKBOOK_PAGES.COMMISSION_TARIFF)(fileIssue('ROW_CAP_EXCEEDED'))).toBe(
+      SHARED.tooLarge,
+    );
+  });
+
+  it('names the per-page list limit of a quota refusal', () => {
+    expect(
+      messageFor(WORKBOOK_PAGES.DISCOUNT_LIST)(
+        problemApiError(409, 'UPLOAD_QUOTA_EXCEEDED', {
+          limit: UPLOAD_QUOTA_LIMITS.LISTS,
+          maxLists: MAX_LISTS,
+        }),
+      ),
+    ).toBe(tErrors('quotaLists', { maxLists: MAX_LISTS }));
+  });
+
+  it('names the stored file limit of a quota refusal in MB', () => {
+    expect(
+      messageFor(WORKBOOK_PAGES.DISCOUNT_LIST)(
+        problemApiError(409, 'UPLOAD_QUOTA_EXCEEDED', {
+          limit: UPLOAD_QUOTA_LIMITS.BYTES,
+          maxBytes: QUOTA_BYTES,
+        }),
+      ),
+    ).toBe(tErrors('quotaBytes', { maxMb: QUOTA_MB }));
+  });
+
+  it('answers the general quota sentence for a quota refusal without a limit', () => {
+    expect(
+      messageFor(WORKBOOK_PAGES.DISCOUNT_LIST)(problemApiError(409, 'UPLOAD_QUOTA_EXCEEDED')),
+    ).toBe(trMessages.common.errors.UPLOAD_QUOTA_EXCEEDED);
   });
 
   it('answers nothing for no error, a 409 and a 422 without a file issue', () => {

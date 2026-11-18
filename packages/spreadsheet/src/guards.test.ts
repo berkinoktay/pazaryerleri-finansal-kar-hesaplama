@@ -445,6 +445,13 @@ describe('upload gate', () => {
     expect(err?.code).toBe('PAYLOAD_TOO_LARGE');
   });
 
+  // Only a cap a caller tells apart names its rule; the byte cap stays without one.
+  it('refuses an oversize buffer without a reason in its meta', () => {
+    const err = catchGuard(Buffer.alloc(opts.maxBytes + 1, 0x50), opts);
+    expect(err?.code).toBe('PAYLOAD_TOO_LARGE');
+    expect(err?.meta).not.toHaveProperty('reason');
+  });
+
   it('accepts a well-formed xlsx without throwing', () => {
     const buf = productsFile([PRODUCT_ROW_1]);
     expect(catchGuard(buf, opts)).toBeNull();
@@ -583,6 +590,17 @@ describe('upload gate', () => {
     ]);
     const err = catchGuard(file, { ...opts, maxDomWeight: 2 * MAX_XML_DOM_WEIGHT });
     expect(err?.code).toBe('PAYLOAD_TOO_LARGE');
+  });
+
+  // The weight refusal names its rule, so a caller can tell it from a size cap.
+  it('names the DOM weight rule when a file weighs one unit over the budget', () => {
+    const file = withSharedStrings(`<sst>${'<x/>'.repeat(WEIGHT_UNITS)}</sst>`);
+    const budget = domWeight(entriesText(file, SHARED_STRINGS_READER_PARTS)) - 1;
+
+    const err = catchGuard(file, { ...opts, maxDomWeight: budget });
+    expect(err?.code).toBe('PAYLOAD_TOO_LARGE');
+    expect(err?.meta).toMatchObject({ reason: UPLOAD_LIMIT_REASONS.DOM_WEIGHT, cap: budget });
+    expect(err?.meta).toHaveProperty('entry');
   });
 
   // Each part stays under the budget on its own; together they do not.

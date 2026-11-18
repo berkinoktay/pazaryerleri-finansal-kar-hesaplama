@@ -97,3 +97,44 @@ export function isUniqueViolationOn(err: unknown, column: string): boolean {
   const fields = readPath(err, UNIQUE_VIOLATION_FIELDS_PATH);
   return Array.isArray(fields) && fields.some((field) => field === column);
 }
+
+/** Where Prisma 7 + `@prisma/adapter-pg` put the violated key of a P2003. */
+const FOREIGN_KEY_VIOLATION_CONSTRAINT_PATH = [
+  'meta',
+  'driverAdapterError',
+  'cause',
+  'constraint',
+] as const;
+
+/**
+ * True when `err` is a foreign-key violation (P2003) on the key `target` names.
+ *
+ * Shape measured against Postgres with Prisma 7.8 + `@prisma/adapter-pg` 7.8, for an
+ * insert inside an interactive transaction, and pinned by
+ * `tests/integration/services/advantage-commission-source-fk.test.ts`:
+ *
+ *   err.code === 'P2003'
+ *   err.meta.modelName === 'AdvantageTariff'
+ *   err.meta.driverAdapterError.cause === {
+ *     originalCode: '23503',
+ *     originalMessage: 'insert or update on table "advantage_tariffs" violates foreign key constraint "<constraint name>"',
+ *     kind: 'ForeignKeyConstraintViolation',
+ *     constraint: { index: '<constraint name>' },
+ *   }
+ *
+ * There is no `meta.field_name`. The constraint name is matched against
+ * `target.constraint`. The adapter's conversion code can also report the key as
+ * `constraint: { fields: [<column>] }` (matched against the snake_case
+ * `target.column`); that form was not produced by this insert. When the cause names
+ * neither, this returns false, leaving the caller on its generic mapping.
+ */
+export function isForeignKeyViolationOn(
+  err: unknown,
+  target: { readonly constraint: string; readonly column: string },
+): boolean {
+  if (!isPrismaKnownRequestError(err) || err.code !== 'P2003') return false;
+  const constraint = readPath(err, FOREIGN_KEY_VIOLATION_CONSTRAINT_PATH);
+  if (readPath(constraint, ['index']) === target.constraint) return true;
+  const fields = readPath(constraint, ['fields']);
+  return Array.isArray(fields) && fields.some((field) => field === target.column);
+}

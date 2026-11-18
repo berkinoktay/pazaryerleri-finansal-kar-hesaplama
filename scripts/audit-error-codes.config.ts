@@ -24,6 +24,10 @@
  * - `PAYLOAD_TOO_LARGE`: only the workbook upload routes return it, and the
  *   upload dialog renders the size error inline next to the file picker.
  *   A toast would duplicate that message.
+ * - `UPLOAD_QUOTA_EXCEEDED`: only the workbook import routes return it, and the
+ *   upload dialog renders it inline with its limit (the per-page list limit or
+ *   the store-wide stored file limit). A toast cannot carry the limit and would
+ *   vanish while the dialog stays open.
  *
  * The audit accepts these as legitimately absent from `KNOWN_CODES`.
  */
@@ -31,6 +35,7 @@ export const SILENT_CODES: ReadonlySet<string> = new Set([
   'UNAUTHENTICATED',
   'VALIDATION_ERROR',
   'PAYLOAD_TOO_LARGE',
+  'UPLOAD_QUOTA_EXCEEDED',
 ]);
 
 /**

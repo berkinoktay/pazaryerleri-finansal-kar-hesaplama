@@ -65,17 +65,27 @@ function pickDefaultCommissionSource(
 /**
  * The commission source in effect: the seller's explicit choice (a tariff id or
  * {@link CATEGORY_COMMISSION_SOURCE}), else the default derived from the store's commission
- * tariff list once it has loaded. Nothing is seeded into state, so there is neither a
- * render-phase set (which loops for an empty list) nor a setState-in-effect; the default
- * re-derives against the latest list whenever the explicit choice is cleared.
+ * tariff list once it has loaded. A tariff choice that is no longer in the loaded list, or that
+ * the server refused (`rejectedIds`, every tariff of an `INVALID_COMMISSION_SOURCE` refusal
+ * while the dialog is open; empty when none), never comes back as the choice, and after any
+ * refusal there is no default at all: the seller picks the next source. Nothing is
+ * seeded into state, so there is neither a render-phase set (which loops for an empty list) nor
+ * a setState-in-effect; the default re-derives against the latest list whenever the explicit
+ * choice is cleared or dropped.
  */
 export function resolveCommissionSource(
   choice: string | undefined,
   tariffs: readonly CommissionTariffListItem[] | undefined,
   loading: boolean,
+  rejectedIds: ReadonlySet<string>,
 ): string | undefined {
-  if (choice !== undefined) return choice;
-  if (loading) return undefined;
+  if (choice === CATEGORY_COMMISSION_SOURCE) return choice;
+  // A tariff choice is kept while the list has not loaded yet, or while the loaded list holds it.
+  const choiceListed = tariffs === undefined || tariffs.some((tariff) => tariff.id === choice);
+  if (choice !== undefined && !rejectedIds.has(choice) && choiceListed) return choice;
+  // After a refusal the seller picks the next source themselves: a default that moved on its
+  // own would price the list on a week they never chose.
+  if (loading || rejectedIds.size > 0) return undefined;
   return pickDefaultCommissionSource(tariffs ?? []);
 }
 
@@ -90,6 +100,11 @@ export interface CommissionSourcePickerProps {
   onChange: (next: string) => void;
   /** The code of the import's `commissionSourceTariffId` issue, shown under the picker. */
   serverError: string | null;
+  /**
+   * Tariffs the server refused as the source (deleted since the list was loaded); left out of
+   * the options while the refreshed list is on its way, so they cannot be picked again.
+   */
+  refusedIds?: ReadonlySet<string>;
 }
 
 /**
@@ -104,6 +119,7 @@ export function CommissionSourcePicker({
   value,
   onChange,
   serverError,
+  refusedIds,
 }: CommissionSourcePickerProps): React.ReactElement {
   const tSource = useTranslations('productLabelsPage.upload.commissionSource');
   const tCommon = useTranslations('common');
@@ -113,7 +129,9 @@ export function CommissionSourcePicker({
   const titleId = React.useId();
 
   const listLoading = commissionList.isLoading;
-  const tariffs = commissionList.data ?? [];
+  const tariffs = (commissionList.data ?? []).filter(
+    (tariff) => refusedIds?.has(tariff.id) !== true,
+  );
   const showEmptySource = !listLoading && tariffs.length === 0;
   // A tariff id is pinned (path 1) vs. the category sentinel (path 2) vs. nothing
   // chosen yet: drives the two cards' active highlight and the Select's value.
@@ -218,13 +236,13 @@ export function CommissionSourcePicker({
         </span>
       </button>
 
-      {value === undefined ? (
-        <p className="text-2xs text-muted-foreground">{tSource('required')}</p>
-      ) : null}
       {serverError !== null ? (
+        // The refusal already says what to do, so it replaces the "pick a method" hint.
         <p role="alert" className="text-2xs text-destructive font-medium">
           {fieldErrorMessage(serverError)}
         </p>
+      ) : value === undefined ? (
+        <p className="text-2xs text-muted-foreground">{tSource('required')}</p>
       ) : null}
     </div>
   );

@@ -1,11 +1,14 @@
 // The two guards an import takes inside its transaction, before it writes anything:
 // one import per store and page at a time (a transaction-level advisory lock), and the
-// store's upload quota (lists of the page, and stored source bytes across every page,
-// the incoming file included). No SQL here takes an identifier from a variable: the
-// six table names are written out in one static query.
+// store's upload quota: a list limit per page (the lists of this page in this store),
+// and a byte limit per store (the stored source bytes over every workbook page, the
+// incoming file included). The import also runs the quota once before the file is
+// parsed, outside the lock, so a full store is refused before the costly work; the
+// check inside the transaction stays the authority. No SQL here takes an identifier
+// from a variable: the six table names are written out in one static query.
 
 import { Prisma } from '@pazarsync/db';
-import type { WorkbookPage } from '@pazarsync/utils';
+import { UPLOAD_QUOTA_LIMITS, type WorkbookPage } from '@pazarsync/utils';
 
 import { MAX_LISTS_PER_STORE_PAGE, STORE_UPLOAD_QUOTA_BYTES } from '../config/workbook-limits';
 import { WorkbookConflictError } from '../lib/errors';
@@ -123,9 +126,11 @@ export async function storedUploadBytes(
 
 /**
  * Throws `WorkbookConflictError('UPLOAD_QUOTA_EXCEEDED')` unless the page holds fewer
- * than `limits.maxLists` lists in this store and the store's stored bytes plus the
- * incoming file stay within `limits.maxBytes`: the file that would cross the limit is
- * the one refused.
+ * than `limits.maxLists` lists in this store (a per-page limit) and the store's stored
+ * bytes over every workbook page plus the incoming file stay within `limits.maxBytes`
+ * (a store-wide limit): the file that would cross the limit is the one refused. The
+ * error's meta names the limit that was hit and its maximum: `{ limit: 'lists',
+ * maxLists }` or `{ limit: 'bytes', maxBytes }`.
  */
 export async function assertUploadQuota(
   tx: Prisma.TransactionClient,
@@ -134,10 +139,16 @@ export async function assertUploadQuota(
   limits: UploadLimits = DEFAULT_UPLOAD_LIMITS,
 ): Promise<void> {
   if (input.listCount >= limits.maxLists) {
-    throw new WorkbookConflictError('UPLOAD_QUOTA_EXCEEDED');
+    throw new WorkbookConflictError('UPLOAD_QUOTA_EXCEEDED', {
+      limit: UPLOAD_QUOTA_LIMITS.LISTS,
+      maxLists: limits.maxLists,
+    });
   }
   const storedBytes = await storedUploadBytes(tx, scope);
   if (storedBytes + input.incomingBytes > limits.maxBytes) {
-    throw new WorkbookConflictError('UPLOAD_QUOTA_EXCEEDED');
+    throw new WorkbookConflictError('UPLOAD_QUOTA_EXCEEDED', {
+      limit: UPLOAD_QUOTA_LIMITS.BYTES,
+      maxBytes: limits.maxBytes,
+    });
   }
 }

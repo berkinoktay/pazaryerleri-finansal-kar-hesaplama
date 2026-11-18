@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 import {
+  DEFAULT_COL_CAP,
+  DEFAULT_ROW_CAP,
   SPREADSHEET_FILE_ERROR_CODES,
   SpreadsheetFileError,
+  UPLOAD_LIMIT_REASONS,
   WORKER_LIMIT_REASONS,
 } from '@pazarsync/spreadsheet';
 import { syncLog } from '@pazarsync/sync-core';
@@ -172,6 +175,104 @@ describe('toUploadError', () => {
     const { status, body } = problemDetailsForError(thrown);
     expect(status).toBe(422);
     expect(JSON.stringify(body)).not.toContain('sheet1.xml');
+  });
+
+  it('sends the row limit of a ROW_CAP_EXCEEDED, and never the entry', () => {
+    spyInfo();
+    const err = new SpreadsheetFileError('ROW_CAP_EXCEEDED', 'Row 5002 exceeds the row cap', {
+      entry: 'xl/worksheets/sheet2.xml',
+      row: 5002,
+      rowCap: 5000,
+    });
+    const issues = uploadIssues(err);
+    expect(issues).toEqual([{ field: 'file', code: 'ROW_CAP_EXCEEDED', meta: { maxRows: 5000 } }]);
+    expect(JSON.stringify(issues)).not.toContain('entry');
+    expect(JSON.stringify(issues)).not.toContain('sheet2');
+  });
+
+  it('sends the column limit of a COL_CAP_EXCEEDED, and never the entry', () => {
+    spyInfo();
+    const err = new SpreadsheetFileError('COL_CAP_EXCEEDED', 'Column 65 exceeds the column cap', {
+      entry: 'xl/worksheets/sheet2.xml',
+      col: 65,
+      colCap: 64,
+    });
+    const issues = uploadIssues(err);
+    expect(issues).toEqual([{ field: 'file', code: 'COL_CAP_EXCEEDED', meta: { maxCols: 64 } }]);
+    expect(JSON.stringify(issues)).not.toContain('entry');
+    expect(JSON.stringify(issues)).not.toContain('sheet2');
+  });
+
+  it('sends the cap the engine reports, not the default, for a row or column refusal', () => {
+    spyInfo();
+    const rowCap = DEFAULT_ROW_CAP - 1;
+    const colCap = DEFAULT_COL_CAP - 1;
+    expect(
+      uploadIssues(
+        new SpreadsheetFileError('ROW_CAP_EXCEEDED', 'Row over the cap', {
+          row: rowCap + 2,
+          rowCap,
+        }),
+      ),
+    ).toEqual([{ field: 'file', code: 'ROW_CAP_EXCEEDED', meta: { maxRows: rowCap } }]);
+    expect(
+      uploadIssues(
+        new SpreadsheetFileError('COL_CAP_EXCEEDED', 'Column over the cap', {
+          col: colCap + 1,
+          colCap,
+        }),
+      ),
+    ).toEqual([{ field: 'file', code: 'COL_CAP_EXCEEDED', meta: { maxCols: colCap } }]);
+  });
+
+  it('falls back to the default caps when the engine meta has no positive integer cap', () => {
+    spyInfo();
+    expect(
+      uploadIssues(
+        new SpreadsheetFileError('ROW_CAP_EXCEEDED', 'Row over the cap', {
+          entry: 'xl/worksheets/sheet2.xml',
+          rowCap: '5000',
+        }),
+      ),
+    ).toEqual([{ field: 'file', code: 'ROW_CAP_EXCEEDED', meta: { maxRows: DEFAULT_ROW_CAP } }]);
+    expect(
+      uploadIssues(
+        new SpreadsheetFileError('COL_CAP_EXCEEDED', 'Column over the cap', { colCap: 0 }),
+      ),
+    ).toEqual([{ field: 'file', code: 'COL_CAP_EXCEEDED', meta: { maxCols: DEFAULT_COL_CAP } }]);
+    expect(
+      uploadIssues(
+        new SpreadsheetFileError('ROW_CAP_EXCEEDED', 'Row over the cap', { rowCap: 4999.5 }),
+      ),
+    ).toEqual([{ field: 'file', code: 'ROW_CAP_EXCEEDED', meta: { maxRows: DEFAULT_ROW_CAP } }]);
+  });
+
+  it('sends the row limit of a DOM weight refusal, and never its entry or cap', () => {
+    spyInfo();
+    const err = new SpreadsheetFileError('PAYLOAD_TOO_LARGE', 'Workbook XML is too heavy', {
+      reason: UPLOAD_LIMIT_REASONS.DOM_WEIGHT,
+      entry: 'xl/worksheets/sheet2.xml',
+      cap: 1024,
+    });
+    const issues = uploadIssues(err);
+    expect(issues).toEqual([
+      {
+        field: 'file',
+        code: 'PAYLOAD_TOO_LARGE',
+        meta: { limit: 'rows', maxRows: DEFAULT_ROW_CAP },
+      },
+    ]);
+    expect(JSON.stringify(issues)).not.toContain('entry');
+    expect(JSON.stringify(issues)).not.toContain('sheet2');
+    expect(JSON.stringify(issues)).not.toContain('"cap"');
+  });
+
+  it('sends no meta for a formula scan budget refusal', () => {
+    spyInfo();
+    const err = new SpreadsheetFileError('PAYLOAD_TOO_LARGE', 'Formula scan budget exceeded', {
+      reason: UPLOAD_LIMIT_REASONS.FORMULA_SCAN_BUDGET,
+    });
+    expect(uploadIssues(err)).toEqual([{ field: 'file', code: 'PAYLOAD_TOO_LARGE' }]);
   });
 
   it('logs an engine rejection with page, code and reason and nothing else', () => {

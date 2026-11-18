@@ -246,13 +246,21 @@ export const WORKBOOK_CONFLICT_DETAILS: Readonly<Record<WorkbookConflictReason, 
  * `ConflictError`, so every `instanceof ConflictError` guard still matches it and
  * `err.code` stays `CONFLICT`; problem-details.ts checks it first and answers its
  * `reason` as the wire code, from its literal table.
+ *
+ * `meta` holds fixed, server-chosen values only (a limit name, a maximum), never file
+ * or engine content. The problem body carries it when it has at least one key.
  */
 export class WorkbookConflictError extends ConflictError {
   readonly reason: WorkbookConflictReason;
+  readonly meta: Readonly<Record<string, string | number>>;
 
-  constructor(reason: WorkbookConflictReason) {
+  constructor(
+    reason: WorkbookConflictReason,
+    meta: Readonly<Record<string, string | number>> = {},
+  ) {
     super(WORKBOOK_CONFLICT_DETAILS[reason]);
     this.name = 'WorkbookConflictError';
     this.reason = reason;
+    this.meta = meta;
   }
 }

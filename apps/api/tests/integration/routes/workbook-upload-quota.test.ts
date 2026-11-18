@@ -96,6 +96,20 @@ async function quotaReason(
   }
 }
 
+/** The meta of the quota refusal, or null when the quota passes. */
+async function quotaMeta(
+  scope: StoreScope,
+  input: { listCount: number; incomingBytes: number },
+): Promise<Readonly<Record<string, string | number>> | null> {
+  try {
+    await prisma.$transaction((tx) => assertUploadQuota(tx, scope, input, LIMITS));
+    return null;
+  } catch (err) {
+    if (err instanceof WorkbookConflictError) return err.meta;
+    throw err;
+  }
+}
+
 describe('storedUploadBytes', () => {
   beforeAll(async () => {
     await ensureDbReachable();
@@ -160,6 +174,10 @@ describe('assertUploadQuota', () => {
     expect(await quotaReason(scope, { listCount: 1, incomingBytes: 101 })).toBe(
       'UPLOAD_QUOTA_EXCEEDED',
     );
+    expect(await quotaMeta(scope, { listCount: 1, incomingBytes: 101 })).toEqual({
+      limit: 'bytes',
+      maxBytes: LIMITS.maxBytes,
+    });
   });
 
   it('refuses a list once the page holds the maximum number of lists', async () => {
@@ -168,6 +186,10 @@ describe('assertUploadQuota', () => {
     expect(await quotaReason(scope, { listCount: LIMITS.maxLists, incomingBytes: 1 })).toBe(
       'UPLOAD_QUOTA_EXCEEDED',
     );
+    expect(await quotaMeta(scope, { listCount: LIMITS.maxLists, incomingBytes: 1 })).toEqual({
+      limit: 'lists',
+      maxLists: LIMITS.maxLists,
+    });
     expect(
       await quotaReason(scope, { listCount: LIMITS.maxLists - 1, incomingBytes: 1 }),
     ).toBeNull();

@@ -1,3 +1,4 @@
+import { createTranslator } from 'next-intl';
 import * as React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -12,6 +13,7 @@ vi.mock('@/i18n/navigation', () => ({
 
 import {
   UPLOAD_NAME_MAX_LENGTH,
+  UPLOAD_QUOTA_LIMITS,
   WORKBOOK_PAGES,
   WORKBOOK_UPLOAD_MAX_BYTES,
   WORKBOOK_UPLOAD_MAX_MB,
@@ -21,6 +23,7 @@ import {
 import type { WorkbookImportInput } from '@/features/campaigns/api/workbook-endpoints';
 import { WorkbookUploadDialog } from '@/features/campaigns/components/workbook-upload-dialog';
 import { useWorkbookErrorMessage } from '@/features/campaigns/hooks/use-workbook-error-message';
+import { FORMATS } from '@/i18n/formats';
 
 import trMessages from '../../../../messages/tr.json';
 import { problemApiError, validationApiError } from '../../../helpers/api-error';
@@ -52,6 +55,14 @@ const COMMISSION_LIST =
   'http://localhost:3001/v1/organizations/:orgId/stores/:storeId/commission-tariffs';
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const NAME_TOO_LONG = SHARED.errors.nameTooLong.replace('{max}', String(UPLOAD_NAME_MAX_LENGTH));
+// A sentence with a limit is built from the catalog with the provider's formats, never typed.
+const tUploadErrors = createTranslator({
+  locale: 'tr',
+  messages: trMessages,
+  namespace: 'campaignUpload.errors',
+  formats: FORMATS,
+});
+const QUOTA_MAX_LISTS = 50;
 // Mid-month days: neither is ever an outside day of the calendar.
 const EARLY_DAY = '10';
 const LATE_DAY = '20';
@@ -201,6 +212,8 @@ const UPCOMING_TARIFF = tariff(
   'upcoming',
 );
 
+const LATER_TARIFF = tariff('t-later', '2026-07-15T05:00:00Z', '2026-07-22T04:59:00Z', 'upcoming');
+
 /** Serves the store's commission tariff list (the commission source picker's data). */
 function serveCommissionList(data: readonly unknown[]): void {
   server.use(http.get(COMMISSION_LIST, () => HttpResponse.json({ data })));
@@ -219,6 +232,12 @@ interface HarnessProps {
   submitting?: boolean;
   submitError?: Error | null;
   onResetError?: () => void;
+  /**
+   * Stands in for the server: answers each submit with an import error, or null to accept it.
+   * Like the real mutation, a new submit or a reset drops the previous answer's error (`mutate`
+   * and `reset` both clear it).
+   */
+  answer?: (input: WorkbookImportInput) => Error | null;
 }
 
 /** Stateful harness, so a close by the cancel button and a reopen exercise the reset path. */
@@ -229,8 +248,10 @@ function Harness({
   submitting = false,
   submitError = null,
   onResetError,
+  answer,
 }: HarnessProps): React.ReactElement {
   const [open, setOpen] = React.useState(true);
+  const [refused, setRefused] = React.useState<Error | null>(null);
   return (
     <>
       <button type="button" onClick={() => setOpen(true)}>
@@ -244,10 +265,16 @@ function Harness({
           setOpen(next);
         }}
         scope={SCOPE}
-        onSubmit={onSubmit}
+        onSubmit={(input) => {
+          setRefused(answer?.(input) ?? null);
+          onSubmit(input);
+        }}
         submitting={submitting}
-        submitError={submitError}
-        onResetError={onResetError}
+        submitError={refused ?? submitError}
+        onResetError={() => {
+          setRefused(null);
+          onResetError?.();
+        }}
       />
     </>
   );
@@ -381,6 +408,22 @@ describe.each(PAGE_ROWS)('<WorkbookUploadDialog page="$page">', (row) => {
     expect(screen.getAllByText(SHARED.errors.field)).toHaveLength(1);
   });
 
+  it('shows the list limit of a quota refusal on the dropzone', () => {
+    render(
+      <Harness
+        page={row.page}
+        submitError={problemApiError(409, 'UPLOAD_QUOTA_EXCEEDED', {
+          limit: UPLOAD_QUOTA_LIMITS.LISTS,
+          maxLists: QUOTA_MAX_LISTS,
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByText(tUploadErrors('quotaLists', { maxLists: QUOTA_MAX_LISTS })),
+    ).toBeInTheDocument();
+  });
+
   it('renders no alert and no dropzone error for a 409, which the global toast owns', () => {
     render(<Harness page={row.page} submitError={problemApiError(409, 'IMPORT_IN_PROGRESS')} />);
 
@@ -501,6 +544,20 @@ describe.each(PAGE_ROWS)('<WorkbookUploadDialog page="$page"> while importing', 
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(onResetError).toHaveBeenCalled();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+
+describe('<WorkbookUploadDialog page="ADVANTAGE_TARIFF"> while importing', () => {
+  it('asks no reset when the seller picks another commission source', async () => {
+    serveCommissionList([ACTIVE_TARIFF, UPCOMING_TARIFF]);
+    const onResetError = vi.fn();
+    const { user } = render(
+      <Harness page={WORKBOOK_PAGES.ADVANTAGE_TARIFF} submitting onResetError={onResetError} />,
+    );
+
+    await user.click(await screen.findByText(SOURCE.categoryOption));
+
+    expect(onResetError).not.toHaveBeenCalled();
   });
 });
 
@@ -634,6 +691,160 @@ describe('<WorkbookUploadDialog page="ADVANTAGE_TARIFF">', () => {
         'true',
       ),
     );
+  });
+
+  describe('a deleted commission source', () => {
+    const INVALID_SOURCE_ERROR = validationApiError([
+      { field: 'commissionSourceTariffId', code: 'INVALID_COMMISSION_SOURCE' },
+    ]);
+    const DELETED_ID = 't-next';
+
+    /** The server stand-in: the week `t-next` was deleted, every other source is accepted. */
+    function refuseDeletedWeek(input: WorkbookImportInput): Error | null {
+      return input.fields['commissionSourceTariffId'] === DELETED_ID ? INVALID_SOURCE_ERROR : null;
+    }
+
+    /** The commission source each submit carried, in order (undefined for the category). */
+    function emittedSources(
+      onSubmit: ReturnType<typeof vi.fn<(input: WorkbookImportInput) => void>>,
+    ): (string | undefined)[] {
+      return onSubmit.mock.calls.map(([input]) => input.fields['commissionSourceTariffId']);
+    }
+
+    async function submitWhenEnabled(user: User): Promise<void> {
+      const submit = screen.getByRole('button', { name: SUBMIT });
+      await waitFor(() => expect(submit).toBeEnabled());
+      await user.click(submit);
+    }
+
+    it('shows its own sentence under the picker, once, instead of the field sentence', async () => {
+      render(<Harness page={PAGE} submitError={INVALID_SOURCE_ERROR} />);
+
+      const picker = screen.getByRole('group', { name: SOURCE.title });
+      expect(within(picker).getByRole('alert')).toHaveTextContent(SOURCE.invalid);
+      expect(screen.getAllByText(SOURCE.invalid)).toHaveLength(1);
+      expect(screen.queryByText(SHARED.errors.field)).not.toBeInTheDocument();
+      // Let the tariff list settle so the picker's update lands inside the test.
+      await waitFor(() =>
+        expect(within(picker).getByLabelText(SOURCE.tariffOption)).not.toHaveAttribute(
+          'aria-busy',
+          'true',
+        ),
+      );
+    });
+
+    it('asks to clear the error when the seller picks another source', async () => {
+      const onResetError = vi.fn();
+      const { user } = render(
+        <Harness page={PAGE} submitError={INVALID_SOURCE_ERROR} onResetError={onResetError} />,
+      );
+
+      await user.click(await screen.findByText(SOURCE.categoryOption));
+
+      expect(onResetError).toHaveBeenCalled();
+    });
+
+    /** Opens the tariff Select and returns the offered weeks, in list order. */
+    async function openTariffOptions(user: User): Promise<HTMLElement[]> {
+      const picker = screen.getByRole('group', { name: SOURCE.title });
+      await user.click(within(picker).getByLabelText(SOURCE.tariffOption));
+      return screen.findAllByRole('option');
+    }
+
+    it('waits for the seller to pick the next source, and no longer offers the refused week', async () => {
+      serveCommissionList([ACTIVE_TARIFF, UPCOMING_TARIFF]);
+      const onSubmit = vi.fn<(input: WorkbookImportInput) => void>();
+      const { user } = render(
+        <Harness page={PAGE} onSubmit={onSubmit} answer={refuseDeletedWeek} />,
+      );
+
+      await user.upload(fileInput(), makeXlsxFile());
+      await submitWhenEnabled(user);
+      const picker = screen.getByRole('group', { name: SOURCE.title });
+      expect(within(picker).getByRole('alert')).toHaveTextContent(SOURCE.invalid);
+      // No week moves in on its own: a silent move would price the list on a week the seller
+      // never chose, so submit waits for their pick.
+      expect(screen.getByRole('button', { name: SUBMIT })).toBeDisabled();
+
+      // The refused week is still in the cached list, but it is not offered.
+      const options = await openTariffOptions(user);
+      expect(options).toHaveLength(1);
+      await user.click(options[0]);
+      await submitWhenEnabled(user);
+
+      expect(emittedSources(onSubmit)).toEqual([DELETED_ID, 't-active']);
+    });
+
+    it('never offers an earlier refused week after a second refusal', async () => {
+      // Two weeks were deleted, and the cached list still holds both until the refetch lands.
+      serveCommissionList([ACTIVE_TARIFF, UPCOMING_TARIFF, LATER_TARIFF]);
+      const onSubmit = vi.fn<(input: WorkbookImportInput) => void>();
+      const refuseBothWeeks = (input: WorkbookImportInput): Error | null => {
+        const source = input.fields['commissionSourceTariffId'];
+        return source === DELETED_ID || source === LATER_TARIFF.id ? INVALID_SOURCE_ERROR : null;
+      };
+      const { user } = render(<Harness page={PAGE} onSubmit={onSubmit} answer={refuseBothWeeks} />);
+
+      await user.upload(fileInput(), makeXlsxFile());
+      await submitWhenEnabled(user);
+      // t-next refused: t-active and t-later are offered, in list order.
+      const afterFirst = await openTariffOptions(user);
+      expect(afterFirst).toHaveLength(2);
+      await user.click(afterFirst[1]);
+      await submitWhenEnabled(user);
+      // t-later refused too: only t-active is left, never t-next again.
+      const afterSecond = await openTariffOptions(user);
+      expect(afterSecond).toHaveLength(1);
+      await user.click(afterSecond[0]);
+      await submitWhenEnabled(user);
+
+      expect(emittedSources(onSubmit)).toEqual([DELETED_ID, LATER_TARIFF.id, 't-active']);
+    });
+
+    it('keeps submit disabled when the refused week was the only one, until the category is picked', async () => {
+      serveCommissionList([UPCOMING_TARIFF]);
+      const onSubmit = vi.fn<(input: WorkbookImportInput) => void>();
+      const { user } = render(
+        <Harness page={PAGE} onSubmit={onSubmit} answer={refuseDeletedWeek} />,
+      );
+
+      await user.upload(fileInput(), makeXlsxFile());
+      await submitWhenEnabled(user);
+
+      const submit = screen.getByRole('button', { name: SUBMIT });
+      expect(submit).toBeDisabled();
+
+      await user.click(screen.getByText(SOURCE.categoryOption));
+      expect(submit).toBeEnabled();
+      await user.click(submit);
+
+      expect(emittedSources(onSubmit)).toEqual([DELETED_ID, undefined]);
+    });
+
+    it('keeps the refusal after another file clears the error', async () => {
+      serveCommissionList([ACTIVE_TARIFF, UPCOMING_TARIFF]);
+      const onSubmit = vi.fn<(input: WorkbookImportInput) => void>();
+      const { user } = render(
+        <Harness page={PAGE} onSubmit={onSubmit} answer={refuseDeletedWeek} />,
+      );
+
+      await user.upload(fileInput(), makeXlsxFile());
+      await submitWhenEnabled(user);
+      expect(screen.getByText(SOURCE.invalid)).toBeInTheDocument();
+
+      // Another file: remove the picked one (which clears the error) and pick a new one.
+      await user.click(screen.getByRole('button', { name: SHARED.removeFile }));
+      expect(screen.queryByText(SOURCE.invalid)).not.toBeInTheDocument();
+      await user.upload(fileInput(), makeXlsxFile('second.xlsx'));
+      // The refusal still holds: the refused week neither comes back nor is replaced on its own.
+      expect(screen.getByRole('button', { name: SUBMIT })).toBeDisabled();
+      const options = await openTariffOptions(user);
+      expect(options).toHaveLength(1);
+      await user.click(options[0]);
+      await submitWhenEnabled(user);
+
+      expect(emittedSources(onSubmit)).toEqual([DELETED_ID, 't-active']);
+    });
   });
 });
 

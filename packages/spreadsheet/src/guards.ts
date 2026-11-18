@@ -17,7 +17,7 @@ import {
 } from './content-scan';
 import { cutRootChildren, literalAttributeText, type ChildSelector } from './patch/calc-chain';
 import { entryNameByteLength, readZipLayout, type ZipLayout } from './patch/raw-zip';
-import { ZIP_REJECT_REASONS } from './patch/reasons';
+import { UPLOAD_LIMIT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
 import { foldAsciiCase, metaEntryName, viewMismatch } from './patch/shared';
 import { localNameIs, NAMESPACE_DECLARATION, type XmlMarkup } from './patch/xml-lexer';
 import { assertSameViews } from './patch/zip-views';
@@ -463,7 +463,7 @@ function addDomWeight(name: string, weight: XmlDomWeight, amount: number): void 
     throw new SpreadsheetFileError(
       'PAYLOAD_TOO_LARGE',
       `Workbook parts exceed a DOM weight of ${weight.limit}`,
-      { entry: name, cap: weight.limit },
+      { reason: UPLOAD_LIMIT_REASONS.DOM_WEIGHT, entry: name, cap: weight.limit },
     );
   }
 }
