@@ -137,7 +137,8 @@ export function MarketplaceCampaignCustomPriceCell({
           aria-invalid={error !== null}
           aria-describedby={error !== null ? errorId : undefined}
           aria-label={t('customPriceAria', { product: row.productTitle })}
-          placeholder={t('enterPrice')}
+          // A member who cannot write is not invited to type a price.
+          placeholder={canWrite ? t('enterPrice') : undefined}
           className="md:max-w-input-price w-full"
           // A member who cannot write still reads a stored price, but cannot type one.
           disabled={!canWrite}
@@ -152,11 +153,11 @@ export function MarketplaceCampaignCustomPriceCell({
             commissionPct={commissionPct}
             commissionBands={row.commissionBands}
           />
-        ) : (
+        ) : canWrite ? (
           <span className="text-2xs text-muted-foreground">
             {t('customPriceCeilingHint', { price: ceiling })}
           </span>
-        )}
+        ) : null}
         {targetMarginMark !== null ? (
           <span className="gap-3xs text-2xs text-warning flex items-start">
             <Alert02Icon className="size-icon-xs mt-3xs shrink-0" aria-hidden />

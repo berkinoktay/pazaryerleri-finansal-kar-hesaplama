@@ -114,8 +114,16 @@ describe('CommissionTariffsListView access', () => {
         ...screen.getAllByRole('button', { name: LIST.empty.cta }),
       ];
       expect(new Set(uploadButtons).size).toBe(2);
-      for (const button of uploadButtons) expect(button).toBeDisabled();
-      expect(screen.getAllByText(UNSUPPORTED)).toHaveLength(1);
+      for (const button of uploadButtons) {
+        expect(button).toBeDisabled();
+        // Both buttons tell a screen reader why.
+        expect(button).toHaveAccessibleDescription(UNSUPPORTED);
+      }
+      // Seen once: the empty-state copy is for screen readers only.
+      const visible = screen
+        .getAllByText(UNSUPPORTED)
+        .filter((element) => !element.classList.contains('sr-only'));
+      expect(visible).toHaveLength(1);
     });
   });
 

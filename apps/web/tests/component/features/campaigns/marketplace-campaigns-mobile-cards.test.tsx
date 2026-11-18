@@ -131,10 +131,13 @@ describe('MarketplaceCampaignsMobileCards', () => {
     expect(screen.queryByRole('button', { name: emptyCta })).not.toBeInTheDocument();
   });
 
-  // The platform sentence stands once, next to the tab-row button, so this one is only disabled.
+  // The platform sentence is seen once, next to the tab-row button; this one is disabled and
+  // keeps the sentence for screen readers only.
   it('disables the first-run upload on a platform with no workbook format', () => {
     renderEmptyWithAccess(UNSUPPORTED_PLATFORM);
-    expect(screen.getByRole('button', { name: emptyCta })).toBeDisabled();
-    expect(screen.queryByText(unsupportedPlatform)).not.toBeInTheDocument();
+    const button = screen.getByRole('button', { name: emptyCta });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAccessibleDescription(unsupportedPlatform);
+    expect(screen.getByText(unsupportedPlatform)).toHaveClass('sr-only');
   });
 });

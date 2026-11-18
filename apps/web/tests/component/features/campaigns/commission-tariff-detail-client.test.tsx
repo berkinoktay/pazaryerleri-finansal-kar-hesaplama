@@ -149,10 +149,15 @@ describe('CommissionTariffDetailClient - access', () => {
     // The stored band still reads as selected, as plain text.
     expect(screen.getAllByText(TABLE.bandSelected).length).toBeGreaterThan(0);
 
-    // Every custom price input (desktop table + mobile cards) is disabled.
-    const inputs = screen.getAllByPlaceholderText(TABLE.enterPrice);
+    // Every custom price input (desktop table + mobile cards) is disabled and invites nothing.
+    const inputs = screen.getAllByLabelText(new RegExp(`^${TABLE.customPrice} — `));
     expect(inputs.length).toBeGreaterThan(0);
-    for (const input of inputs) expect(input).toBeDisabled();
+    for (const input of inputs) {
+      expect(input).toBeDisabled();
+      expect(input).not.toHaveAttribute('placeholder');
+    }
+    expect(screen.queryByText(TABLE.enterPrice)).toBeNull();
+    expect(screen.queryAllByText(TABLE.customPriceHint)).toHaveLength(0);
   });
 
   it('offers the lowest writing role export, delete and band selection, with no notice', async () => {

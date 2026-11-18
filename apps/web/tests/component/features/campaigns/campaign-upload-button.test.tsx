@@ -21,13 +21,9 @@ const UNSUPPORTED_PLATFORM: CampaignAccess = {
   upload: UPLOAD_GATES.UNSUPPORTED_PLATFORM,
 };
 
-type Layout = 'inline' | 'stacked';
-
-const LAYOUTS: readonly Layout[] = ['inline', 'stacked'];
-
 function renderButton(
   access: CampaignAccess,
-  props: { withNote?: boolean; layout?: Layout } = {},
+  props: { withNote?: boolean } = {},
 ): { onClick: Mock<() => void>; user: ReturnType<typeof render>['user'] } {
   const onClick = vi.fn<() => void>();
   const { user } = render(
@@ -57,27 +53,24 @@ describe('CampaignUploadButton', () => {
     expect(screen.queryByText(UNSUPPORTED)).toBeNull();
   });
 
-  it.each(LAYOUTS)(
-    'disables the button and explains why on an unsupported platform (%s)',
-    async (layout) => {
-      const { onClick, user } = renderButton(UNSUPPORTED_PLATFORM, { layout });
+  it('disables the button and explains why on an unsupported platform', async () => {
+    const { onClick, user } = renderButton(UNSUPPORTED_PLATFORM);
 
-      const button = screen.getByRole('button', { name: LABEL });
-      expect(button).toBeDisabled();
-      expect(screen.getByText(UNSUPPORTED)).toBeInTheDocument();
-      expect(button).toHaveAccessibleDescription(UNSUPPORTED);
+    const button = screen.getByRole('button', { name: LABEL });
+    expect(button).toBeDisabled();
+    expect(screen.getByText(UNSUPPORTED)).toBeInTheDocument();
+    expect(button).toHaveAccessibleDescription(UNSUPPORTED);
 
-      await user.click(button);
-      expect(onClick).not.toHaveBeenCalled();
-    },
-  );
+    await user.click(button);
+    expect(onClick).not.toHaveBeenCalled();
+  });
 
-  it('renders the disabled button alone when the note is turned off', () => {
+  it('keeps the reason for screen readers only when the visible note is turned off', () => {
     renderButton(UNSUPPORTED_PLATFORM, { withNote: false });
 
     const button = screen.getByRole('button', { name: LABEL });
     expect(button).toBeDisabled();
-    expect(button).not.toHaveAttribute('aria-describedby');
-    expect(screen.queryByText(UNSUPPORTED)).toBeNull();
+    expect(button).toHaveAccessibleDescription(UNSUPPORTED);
+    expect(screen.getByText(UNSUPPORTED)).toHaveClass('sr-only');
   });
 });

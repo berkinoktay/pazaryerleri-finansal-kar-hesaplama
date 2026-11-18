@@ -275,7 +275,8 @@ export function FlashCustomPriceCell({
           nonNegative
           max={ceiling ?? undefined}
           aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
-          placeholder={t('table.enterPrice')}
+          // A member who cannot write is not invited to type a price.
+          placeholder={canWrite ? t('table.enterPrice') : undefined}
           className="md:max-w-input-price w-full"
           // A member who cannot write still reads a stored price, but cannot type one.
           disabled={!canWrite}
@@ -303,9 +304,9 @@ export function FlashCustomPriceCell({
             )
           ) : commissionUnknown ? (
             t('table.customPriceCommissionUnknownHint')
-          ) : (
+          ) : canWrite ? (
             placeholderHint
-          )}
+          ) : null}
         </span>
       </div>
 

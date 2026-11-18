@@ -260,9 +260,18 @@ describe('FlashCustomPriceCell — estimate skeleton', () => {
 });
 
 describe('FlashCustomPriceCell - read-only member', () => {
+  /** The price input, found by its label: a read-only member's input has no placeholder. */
+  function priceInput(): HTMLElement {
+    return screen.getByLabelText(new RegExp(`^${TABLE.customPrice} — `));
+  }
+
   it('disables the price input and offers no select button on an empty card', () => {
     renderReadOnlyCell({ row, isSelected: false, onSelect: vi.fn(), onDeselect: vi.fn() });
-    expect(screen.getByPlaceholderText(TABLE.enterPrice)).toBeDisabled();
+    const input = priceInput();
+    expect(input).toBeDisabled();
+    // Nothing invites the member to type a price they cannot use.
+    expect(input).not.toHaveAttribute('placeholder');
+    expect(screen.queryByText(TABLE.customPriceHint)).toBeNull();
     expect(screen.queryByRole('button', { name: TABLE.selectCustom })).toBeNull();
     // The foot's label only invites a choice, so it is gone too.
     expect(screen.queryByText(TABLE.selectCustom)).toBeNull();
@@ -277,7 +286,7 @@ describe('FlashCustomPriceCell - read-only member', () => {
       onSelect: vi.fn(),
       onDeselect: vi.fn(),
     });
-    const input = screen.getByPlaceholderText(TABLE.enterPrice);
+    const input = priceInput();
     expect(input).toBeDisabled();
     expect(input).toHaveValue('500');
     expect(screen.getByText(TABLE.customSelected)).toBeInTheDocument();

@@ -248,7 +248,8 @@ export function PlusCustomPriceCell({
           nonNegative
           max={ceiling ?? MAX_WHAT_IF_PRICE}
           aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
-          placeholder={t('table.enterPrice')}
+          // A member who cannot write is not invited to type a price.
+          placeholder={canWrite ? t('table.enterPrice') : undefined}
           className="md:max-w-input-price w-full"
           // No price can be estimated or joined while the Plus commission is unknown. A
           // member who cannot write still reads a stored price, but cannot type one.
@@ -265,7 +266,7 @@ export function PlusCustomPriceCell({
                 {formatPercentDisplay(lastResult.commissionPct)}
               </span>
             </>
-          ) : ceiling === null ? (
+          ) : !canWrite ? null : ceiling === null ? (
             // No known ceiling: the usual hint talks about it, so ask for the price plainly.
             t('table.customPriceHintNoCeiling')
           ) : (

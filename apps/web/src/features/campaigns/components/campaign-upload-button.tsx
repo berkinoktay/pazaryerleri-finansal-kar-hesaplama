@@ -5,32 +5,21 @@ import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { Button, type ButtonProps } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 
 import { UPLOAD_GATES } from '../lib/campaign-access';
 import { useCampaignAccess } from '../lib/campaign-access-context';
-
-type CampaignUploadButtonLayout = 'inline' | 'stacked';
 
 interface CampaignUploadButtonProps {
   label: string;
   onClick: () => void;
   size?: ButtonProps['size'];
-  /** `inline`: sentence then button in a wrapping row (tab row). `stacked`: button above a centered sentence. */
-  layout?: CampaignUploadButtonLayout;
-  /** Whether the unsupported-platform sentence is rendered next to the disabled button. */
+  /**
+   * Whether the unsupported-platform sentence is rendered before the disabled button, in one
+   * wrapping row (the tab row). Off for a second button on the same screen (the empty state),
+   * so the sentence is seen once; that button keeps it for screen readers only.
+   */
   withNote?: boolean;
 }
-
-const WRAPPER_CLASS: Record<CampaignUploadButtonLayout, string> = {
-  inline: 'gap-xs flex min-w-0 flex-wrap items-center justify-end',
-  stacked: 'gap-xs flex flex-col items-center',
-};
-
-const NOTE_CLASS: Record<CampaignUploadButtonLayout, string> = {
-  inline: 'text-right',
-  stacked: 'max-w-prose-max text-center',
-};
 
 /**
  * The workbook upload button of a campaign page, gated by the member's access: hidden for a
@@ -43,7 +32,6 @@ export function CampaignUploadButton({
   label,
   onClick,
   size,
-  layout = 'inline',
   withNote = true,
 }: CampaignUploadButtonProps): React.ReactElement | null {
   const { upload } = useCampaignAccess();
@@ -66,30 +54,29 @@ export function CampaignUploadButton({
           leadingIcon={<CloudUploadIcon aria-hidden />}
           onClick={onClick}
           disabled
-          aria-describedby={withNote ? noteId : undefined}
+          aria-describedby={noteId}
         >
           {label}
         </Button>
       );
-      if (!withNote) return button;
-      const note = (
-        <p id={noteId} className={cn('text-muted-foreground text-2xs', NOTE_CLASS[layout])}>
-          {tErrors('unsupportedPlatform')}
-        </p>
-      );
+      // Shown once per screen: a second button (the empty state) keeps the reason for screen
+      // readers only, so a keyboard or screen reader user reaching it still hears why.
+      if (!withNote) {
+        return (
+          <>
+            {button}
+            <span id={noteId} className="sr-only">
+              {tErrors('unsupportedPlatform')}
+            </span>
+          </>
+        );
+      }
       return (
-        <div className={WRAPPER_CLASS[layout]}>
-          {layout === 'inline' ? (
-            <>
-              {note}
-              {button}
-            </>
-          ) : (
-            <>
-              {button}
-              {note}
-            </>
-          )}
+        <div className="gap-xs flex min-w-0 flex-wrap items-center justify-end">
+          <p id={noteId} className="text-muted-foreground text-2xs text-right">
+            {tErrors('unsupportedPlatform')}
+          </p>
+          {button}
         </div>
       );
     }

@@ -233,12 +233,7 @@ export function PlusTariffListTable({
             // The platform sentence stands once, at the tab row; here the button is only disabled.
             action={
               upload === UPLOAD_GATES.HIDDEN ? undefined : (
-                <CampaignUploadButton
-                  layout="stacked"
-                  withNote={false}
-                  label={tEmpty('cta')}
-                  onClick={onUpload}
-                />
+                <CampaignUploadButton withNote={false} label={tEmpty('cta')} onClick={onUpload} />
               )
             }
           />
