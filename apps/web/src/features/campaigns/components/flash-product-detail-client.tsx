@@ -18,6 +18,7 @@ import { ApiError } from '@/lib/api-error';
 import { useFlashProductDetail } from '../hooks/use-flash-product-detail';
 import { useDeleteFlashProducts } from '../hooks/use-delete-flash-products';
 import { useExportWorkbook } from '../hooks/use-export-workbook';
+import { useResolvedCampaignAccess } from '../hooks/use-resolved-campaign-access';
 import { useUpdateFlashSelections } from '../hooks/use-update-flash-selections';
 import {
   OFFER_KEY_TO_ENUM,
@@ -37,9 +38,11 @@ import {
   type FlashSelectionState,
 } from '../lib/flash-bulk-actions';
 import { summarizeFlashSelection } from '../lib/flash-product-summary';
+import { CampaignAccessProvider } from '../lib/campaign-access-context';
 import { downloadBlob } from '../lib/download-blob';
 import { TariffScopeProvider } from '../lib/tariff-scope';
 import type { ExportPreviewFile } from '../lib/export-preview';
+import { CampaignReadOnlyNotice } from './campaign-read-only-notice';
 import { ExportTariffDialog } from './export-tariff-dialog';
 import { FlashProductsMobileCards } from './flash-products-mobile-cards';
 import { FlashProductsSummary } from './flash-products-summary';
@@ -85,6 +88,7 @@ export function FlashProductDetailClient({
     storeId ?? '',
   );
   const deleteList = useDeleteFlashProducts(orgId ?? '', storeId ?? '');
+  const access = useResolvedCampaignAccess(WORKBOOK_PAGES.FLASH_PRODUCT_LIST);
 
   const view = React.useMemo(
     () => (detail.data !== undefined ? toFlashProductView(detail.data) : null),
@@ -357,116 +361,123 @@ export function FlashProductDetailClient({
   );
 
   return (
-    <TariffScopeProvider scope={{ orgId, storeId, tariffId: listId }}>
-      <div className="gap-lg flex flex-col">
-        <PageHeader
-          leading={
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => router.push(LIST_PATH)}
-              leadingIcon={<ArrowLeft01Icon aria-hidden />}
-            >
-              {tPage('templates.back')}
-            </Button>
-          }
-          title={view.name}
-          intent={tPage('templates.detailIntent')}
-          variant="framed"
-          actions={
-            <div className="gap-sm flex items-center">
-              <ConfirmDialog
-                trigger={
-                  <Button
-                    variant="destructive-ghost"
-                    size="sm"
-                    leadingIcon={<Delete02Icon aria-hidden />}
-                  >
-                    {tPage('templates.delete')}
-                  </Button>
-                }
-                title={tPage('templates.deleteTitle')}
-                description={tPage('templates.deleteDescription')}
-                confirmLabel={tPage('templates.deleteConfirm')}
-                onConfirm={() =>
-                  deleteList.mutate(listId, { onSuccess: () => router.push(LIST_PATH) })
-                }
-              />
-              {/* Fixed export button (replaces the floating bar): opens a preview modal of
-                  the file that will download before the seller confirms. */}
+    <CampaignAccessProvider value={access}>
+      <TariffScopeProvider scope={{ orgId, storeId, tariffId: listId }}>
+        <div className="gap-lg flex flex-col">
+          <PageHeader
+            leading={
               <Button
+                variant="outline"
                 size="sm"
-                onClick={() => setExportOpen(true)}
-                disabled={summary.joinedCount === 0}
-                leadingIcon={<DownloadCircle01Icon aria-hidden />}
+                onClick={() => router.push(LIST_PATH)}
+                leadingIcon={<ArrowLeft01Icon aria-hidden />}
               >
-                {tPage('actions.export')}
+                {tPage('templates.back')}
               </Button>
-            </div>
-          }
-          summary={<FlashProductsSummary summary={summary} />}
-        />
+            }
+            title={view.name}
+            intent={tPage('templates.detailIntent')}
+            variant="framed"
+            // A member who cannot write gets neither delete nor export.
+            actions={
+              access.canWrite ? (
+                <div className="gap-sm flex items-center">
+                  <ConfirmDialog
+                    trigger={
+                      <Button
+                        variant="destructive-ghost"
+                        size="sm"
+                        leadingIcon={<Delete02Icon aria-hidden />}
+                      >
+                        {tPage('templates.delete')}
+                      </Button>
+                    }
+                    title={tPage('templates.deleteTitle')}
+                    description={tPage('templates.deleteDescription')}
+                    confirmLabel={tPage('templates.deleteConfirm')}
+                    onConfirm={() =>
+                      deleteList.mutate(listId, { onSuccess: () => router.push(LIST_PATH) })
+                    }
+                  />
+                  {/* Fixed export button (replaces the floating bar): opens a preview modal of
+                  the file that will download before the seller confirms. */}
+                  <Button
+                    size="sm"
+                    onClick={() => setExportOpen(true)}
+                    disabled={summary.joinedCount === 0}
+                    leadingIcon={<DownloadCircle01Icon aria-hidden />}
+                  >
+                    {tPage('actions.export')}
+                  </Button>
+                </div>
+              ) : undefined
+            }
+            summary={<FlashProductsSummary summary={summary} />}
+          />
 
-        <div className="hidden min-w-0 md:block">
-          <FlashProductsTable
-            rows={filteredRows}
-            selection={selection}
-            customPrices={customPrices}
-            customEstimates={customEstimates}
-            showOffer24={showOffer24}
-            showOffer3={showOffer3}
-            onSelectOffer={handleSelectOffer}
-            onSelectCustom={handleSelectCustom}
-            onDeselectCustom={handleDeselectCustom}
-            onCustomEstimate={handleCustomEstimate}
-            getCustomDraft={getCustomDraft}
-            onCustomDraftChange={handleCustomDraftChange}
-            toolbar={toolbar}
-            hasActiveFilters={hasActiveFilters}
-            onClearFilters={resetFilters}
+          <CampaignReadOnlyNotice />
+
+          <div className="hidden min-w-0 md:block">
+            <FlashProductsTable
+              rows={filteredRows}
+              selection={selection}
+              customPrices={customPrices}
+              customEstimates={customEstimates}
+              showOffer24={showOffer24}
+              showOffer3={showOffer3}
+              onSelectOffer={handleSelectOffer}
+              onSelectCustom={handleSelectCustom}
+              onDeselectCustom={handleDeselectCustom}
+              onCustomEstimate={handleCustomEstimate}
+              getCustomDraft={getCustomDraft}
+              onCustomDraftChange={handleCustomDraftChange}
+              toolbar={toolbar}
+              hasActiveFilters={hasActiveFilters}
+              onClearFilters={resetFilters}
+            />
+          </div>
+          <div className="gap-sm flex flex-col md:hidden">
+            {toolbar}
+            <FlashProductsMobileCards
+              rows={filteredRows}
+              selection={selection}
+              customPrices={customPrices}
+              customEstimates={customEstimates}
+              onSelectOffer={handleSelectOffer}
+              onSelectCustom={handleSelectCustom}
+              onDeselectCustom={handleDeselectCustom}
+              onCustomEstimate={handleCustomEstimate}
+              getCustomDraft={getCustomDraft}
+              onCustomDraftChange={handleCustomDraftChange}
+            />
+          </div>
+
+          <ExportTariffDialog
+            open={exportOpen}
+            onOpenChange={setExportOpen}
+            files={previewFiles}
+            labels={{
+              title: tExport('title'),
+              description: tExport('description'),
+              // Flash exports a single xlsx — the label never uses a day count.
+              fileName: () => tExport('fileName'),
+              productCount: (count) => tExport('productCount', { count }),
+              // Never rendered: flash always produces exactly one file, so the multi-file ZIP
+              // note never shows (guarded by `files.length > 1`).
+              zipNote: () => '',
+              cancel: tExport('cancel'),
+              download: tExport('download'),
+              saving: tExport('saving'),
+              exporting: tExport('exporting'),
+            }}
+            // Two-phase: selections PATCH first, then the file downloads — so the dialog can
+            // say which is happening ("kaydediliyor…" → "indiriliyor…").
+            isSaving={updateSelections.isPending}
+            isDownloading={exportList.isPending}
+            onConfirm={onSaveExport}
           />
         </div>
-        <div className="gap-sm flex flex-col md:hidden">
-          {toolbar}
-          <FlashProductsMobileCards
-            rows={filteredRows}
-            selection={selection}
-            customPrices={customPrices}
-            customEstimates={customEstimates}
-            onSelectOffer={handleSelectOffer}
-            onSelectCustom={handleSelectCustom}
-            onDeselectCustom={handleDeselectCustom}
-            onCustomEstimate={handleCustomEstimate}
-            getCustomDraft={getCustomDraft}
-            onCustomDraftChange={handleCustomDraftChange}
-          />
-        </div>
-
-        <ExportTariffDialog
-          open={exportOpen}
-          onOpenChange={setExportOpen}
-          files={previewFiles}
-          labels={{
-            title: tExport('title'),
-            description: tExport('description'),
-            // Flash exports a single xlsx — the label never uses a day count.
-            fileName: () => tExport('fileName'),
-            productCount: (count) => tExport('productCount', { count }),
-            // Never rendered: flash always produces exactly one file, so the multi-file ZIP
-            // note never shows (guarded by `files.length > 1`).
-            zipNote: () => '',
-            cancel: tExport('cancel'),
-            download: tExport('download'),
-            saving: tExport('saving'),
-            exporting: tExport('exporting'),
-          }}
-          // Two-phase: selections PATCH first, then the file downloads — so the dialog can
-          // say which is happening ("kaydediliyor…" → "indiriliyor…").
-          isSaving={updateSelections.isPending}
-          isDownloading={exportList.isPending}
-          onConfirm={onSaveExport}
-        />
-      </div>
-    </TariffScopeProvider>
+      </TariffScopeProvider>
+    </CampaignAccessProvider>
   );
 }

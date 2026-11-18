@@ -13,6 +13,7 @@ import { useEstimateItemPrice } from '../hooks/use-estimate-item-price';
 import { useReasonEmptyLabel } from '../hooks/use-reason-label';
 import { asBandKey } from '../lib/band-key';
 import type { CustomChoice } from '../lib/bulk-actions';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import { isPositiveAtCents } from '../lib/positive-at-cents';
 import { useTariffScope } from '../lib/tariff-scope';
 import { MAX_WHAT_IF_PRICE } from '../lib/what-if-price';
@@ -121,6 +122,7 @@ export function CustomPriceCell({
   const scope = useTariffScope();
   const estimate = useEstimateItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const estimateMutate = estimate.mutate;
+  const { canWrite } = useCampaignAccess();
   // Seed the input, highest priority first: a surviving DRAFT from the parent's ref store
   // (so a price typed but not committed comes back after a pagination / filter / tab
   // unmount), then the edit-buffer's committed custom price (the same amount picked in
@@ -253,8 +255,11 @@ export function CustomPriceCell({
           nonNegative
           max={MAX_WHAT_IF_PRICE}
           aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
-          placeholder={t('table.enterPrice')}
+          // A member who cannot write is not invited to type a price.
+          placeholder={canWrite ? t('table.enterPrice') : undefined}
           className="md:max-w-input-price w-full"
+          // A member who cannot write still reads a stored price, but cannot type one.
+          disabled={!canWrite}
         />
         <span className="text-2xs text-muted-foreground">
           {hasEstimate ? (
@@ -265,9 +270,9 @@ export function CustomPriceCell({
               </span>{' '}
               · {t('table.commission')} {formatPercentDisplay(lastResult.commissionPct)}
             </>
-          ) : (
+          ) : canWrite ? (
             t('table.customPriceHint')
-          )}
+          ) : null}
         </span>
       </div>
 

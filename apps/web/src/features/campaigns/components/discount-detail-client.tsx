@@ -20,8 +20,10 @@ import { useDeleteDiscountList } from '../hooks/use-delete-discount-list';
 import { useDiscountListDetail } from '../hooks/use-discount-list-detail';
 import { useEstimateDiscountItem } from '../hooks/use-estimate-discount-item';
 import { useExportWorkbook } from '../hooks/use-export-workbook';
+import { useResolvedCampaignAccess } from '../hooks/use-resolved-campaign-access';
 import { useUpdateDiscountSelections } from '../hooks/use-update-discount-selections';
 import { toDiscountListView, type DiscountRow } from '../lib/adapt-discount-list';
+import { CampaignAccessProvider } from '../lib/campaign-access-context';
 import {
   filterDiscountRows,
   hasActiveDiscountFilters,
@@ -29,6 +31,7 @@ import {
   type DiscountFilterState,
 } from '../lib/discount-selection';
 import { downloadBlob } from '../lib/download-blob';
+import { CampaignReadOnlyNotice } from './campaign-read-only-notice';
 import { DiscountBreakdown } from './discount-breakdown';
 import { DiscountConfigCard } from './discount-config-card';
 import { DiscountConfigEditDialog } from './discount-config-edit-dialog';
@@ -74,6 +77,7 @@ export function DiscountDetailClient({
   const exportList = useExportWorkbook(WORKBOOK_PAGES.DISCOUNT_LIST, orgId ?? '', storeId ?? '');
   const deleteList = useDeleteDiscountList(orgId ?? '', storeId ?? '');
   const estimate = useEstimateDiscountItem(orgId ?? '', storeId ?? '', listId);
+  const access = useResolvedCampaignAccess(WORKBOOK_PAGES.DISCOUNT_LIST);
 
   const { mutate: mutateSelections, isPending: selectionsPending } = updateSelections;
   const { mutate: estimateMutate, data: estimateData, isPending: estimatePending } = estimate;
@@ -298,116 +302,123 @@ export function DiscountDetailClient({
   );
 
   return (
-    <div className="gap-lg flex flex-col">
-      <PageHeader
-        leading={
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => router.push(LIST_PATH)}
-            leadingIcon={<ArrowLeft01Icon aria-hidden />}
-          >
-            {tPage('templates.back')}
-          </Button>
-        }
-        title={view.name}
-        intent={tPage('templates.detailIntent')}
-        variant="framed"
-        actions={
-          <div className="gap-sm flex items-center">
-            <ConfirmDialog
-              trigger={
-                <Button
-                  variant="destructive-ghost"
-                  size="sm"
-                  leadingIcon={<Delete02Icon aria-hidden />}
-                >
-                  {tPage('templates.delete')}
-                </Button>
-              }
-              title={tPage('templates.deleteTitle')}
-              description={tPage('templates.deleteDescription')}
-              confirmLabel={tPage('templates.deleteConfirm')}
-              onConfirm={() =>
-                deleteList.mutate(listId, { onSuccess: () => router.push(LIST_PATH) })
-              }
-            />
-            {/* Export needs at least one included product; a disabled button can't emit hover, so
+    <CampaignAccessProvider value={access}>
+      <div className="gap-lg flex flex-col">
+        <PageHeader
+          leading={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => router.push(LIST_PATH)}
+              leadingIcon={<ArrowLeft01Icon aria-hidden />}
+            >
+              {tPage('templates.back')}
+            </Button>
+          }
+          title={view.name}
+          intent={tPage('templates.detailIntent')}
+          variant="framed"
+          // A member who cannot write gets neither delete nor save-and-download.
+          actions={
+            access.canWrite ? (
+              <div className="gap-sm flex items-center">
+                <ConfirmDialog
+                  trigger={
+                    <Button
+                      variant="destructive-ghost"
+                      size="sm"
+                      leadingIcon={<Delete02Icon aria-hidden />}
+                    >
+                      {tPage('templates.delete')}
+                    </Button>
+                  }
+                  title={tPage('templates.deleteTitle')}
+                  description={tPage('templates.deleteDescription')}
+                  confirmLabel={tPage('templates.deleteConfirm')}
+                  onConfirm={() =>
+                    deleteList.mutate(listId, { onSuccess: () => router.push(LIST_PATH) })
+                  }
+                />
+                {/* Export needs at least one included product; a disabled button can't emit hover, so
                 the tooltip wraps a focusable span that explains why. */}
-            {exportDisabled ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span tabIndex={0}>{exportButton}</span>
-                </TooltipTrigger>
-                <TooltipContent>{tActions('exportEmptyHint')}</TooltipContent>
-              </Tooltip>
-            ) : (
-              exportButton
-            )}
-          </div>
-        }
-        summary={<DiscountItemsSummary itemCount={itemCount} selectedCount={selectedCount} />}
-      />
-
-      <DiscountConfigCard list={list} onEdit={() => setEditOpen(true)} />
-
-      <div className="hidden min-w-0 md:block">
-        <DiscountItemsTable
-          rows={filteredRows}
-          presentation={view.scenarioPresentation}
-          selectedIds={selectedIds}
-          commissionTariffName={view.commissionTariffName}
-          commissionPeriodLabel={view.commissionPeriodLabel}
-          selectionsPending={savePending}
-          onToggleInclude={onToggleInclude}
-          onOpenBreakdown={openBreakdown}
-          toolbar={toolbar}
-          hasActiveFilters={hasFilters}
-          onClearFilters={resetFilters}
+                {exportDisabled ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span tabIndex={0}>{exportButton}</span>
+                    </TooltipTrigger>
+                    <TooltipContent>{tActions('exportEmptyHint')}</TooltipContent>
+                  </Tooltip>
+                ) : (
+                  exportButton
+                )}
+              </div>
+            ) : undefined
+          }
+          summary={<DiscountItemsSummary itemCount={itemCount} selectedCount={selectedCount} />}
         />
-      </div>
-      <div className="gap-sm flex flex-col md:hidden">
-        {toolbar}
-        <DiscountItemsMobileCards
-          rows={filteredRows}
-          presentation={view.scenarioPresentation}
-          selectedIds={selectedIds}
-          commissionTariffName={view.commissionTariffName}
-          commissionPeriodLabel={view.commissionPeriodLabel}
-          selectionsPending={savePending}
-          onToggleInclude={onToggleInclude}
-          onOpenBreakdown={openBreakdown}
-        />
-      </div>
 
-      <DiscountBreakdown
-        open={breakdown !== null}
-        onOpenChange={(next) => {
-          if (!next) setBreakdown(null);
-        }}
-        productTitle={breakdown?.row.productTitle ?? ''}
-        imageUrl={breakdown?.row.imageUrl}
-        stockCode={breakdown?.row.barcode}
-        result={estimateData ?? null}
-        loading={estimatePending}
-        currentNetProfit={breakdown?.row.current.netProfit ?? null}
-        // The settlement scenario is an order-level view of the DISCOUNTED price only; the current
-        // scenario (do-nothing baseline) carries no basket assumption, so pass null there.
-        scenario={breakdown?.scenario === 'discounted' ? breakdown.row.scenario : null}
-      />
+        <CampaignReadOnlyNotice />
 
-      {editOpen ? (
-        <DiscountConfigEditDialog
-          open
+        <DiscountConfigCard list={list} onEdit={() => setEditOpen(true)} />
+
+        <div className="hidden min-w-0 md:block">
+          <DiscountItemsTable
+            rows={filteredRows}
+            presentation={view.scenarioPresentation}
+            selectedIds={selectedIds}
+            commissionTariffName={view.commissionTariffName}
+            commissionPeriodLabel={view.commissionPeriodLabel}
+            selectionsPending={savePending}
+            onToggleInclude={onToggleInclude}
+            onOpenBreakdown={openBreakdown}
+            toolbar={toolbar}
+            hasActiveFilters={hasFilters}
+            onClearFilters={resetFilters}
+          />
+        </div>
+        <div className="gap-sm flex flex-col md:hidden">
+          {toolbar}
+          <DiscountItemsMobileCards
+            rows={filteredRows}
+            presentation={view.scenarioPresentation}
+            selectedIds={selectedIds}
+            commissionTariffName={view.commissionTariffName}
+            commissionPeriodLabel={view.commissionPeriodLabel}
+            selectionsPending={savePending}
+            onToggleInclude={onToggleInclude}
+            onOpenBreakdown={openBreakdown}
+          />
+        </div>
+
+        <DiscountBreakdown
+          open={breakdown !== null}
           onOpenChange={(next) => {
-            if (!next) setEditOpen(false);
+            if (!next) setBreakdown(null);
           }}
-          orgId={orgId}
-          storeId={storeId}
-          listId={listId}
-          list={list}
+          productTitle={breakdown?.row.productTitle ?? ''}
+          imageUrl={breakdown?.row.imageUrl}
+          stockCode={breakdown?.row.barcode}
+          result={estimateData ?? null}
+          loading={estimatePending}
+          currentNetProfit={breakdown?.row.current.netProfit ?? null}
+          // The settlement scenario is an order-level view of the DISCOUNTED price only; the current
+          // scenario (do-nothing baseline) carries no basket assumption, so pass null there.
+          scenario={breakdown?.scenario === 'discounted' ? breakdown.row.scenario : null}
         />
-      ) : null}
-    </div>
+
+        {editOpen ? (
+          <DiscountConfigEditDialog
+            open
+            onOpenChange={(next) => {
+              if (!next) setEditOpen(false);
+            }}
+            orgId={orgId}
+            storeId={storeId}
+            listId={listId}
+            list={list}
+          />
+        ) : null}
+      </div>
+    </CampaignAccessProvider>
   );
 }

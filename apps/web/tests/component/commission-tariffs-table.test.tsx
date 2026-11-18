@@ -7,6 +7,8 @@ import type {
   CustomPriceMap,
   SelectionMap,
 } from '@/features/campaigns/lib/bulk-actions';
+import { type CampaignAccess, UPLOAD_GATES } from '@/features/campaigns/lib/campaign-access';
+import { CampaignAccessProvider } from '@/features/campaigns/lib/campaign-access-context';
 import { TariffScopeProvider } from '@/features/campaigns/lib/tariff-scope';
 import type { CommissionTariffRow, PriceBand } from '@/features/campaigns/types';
 
@@ -115,7 +117,13 @@ function useCustomDraftStore(): {
  * Selection + custom prices stay empty (the seller hasn't committed anything — the
  * bug reproduces during LIVE typing, before any commit re-seeds the input).
  */
-function TableHarness(): React.ReactElement {
+function TableHarness({
+  rows = ROWS,
+  selection = EMPTY_SELECTION,
+}: {
+  rows?: readonly CommissionTariffRow[];
+  selection?: SelectionMap;
+}): React.ReactElement {
   const [customEstimates, setCustomEstimates] = React.useState<Record<string, string | null>>({});
   const handleCustomEstimate = React.useCallback(
     (rowId: string, netProfit: string | null): void => {
@@ -129,8 +137,8 @@ function TableHarness(): React.ReactElement {
   return (
     <TariffScopeProvider scope={SCOPE}>
       <CommissionTariffsTable
-        rows={ROWS}
-        selection={EMPTY_SELECTION}
+        rows={rows}
+        selection={selection}
         customPrices={EMPTY_CUSTOM_PRICES}
         customEstimates={customEstimates}
         onSelectBand={noop}
@@ -481,5 +489,39 @@ describe('CommissionTariffsTable — unknown current price', () => {
     expect(within(rowEl).getByText(TABLE_MESSAGES.priceUnknownHint)).toBeInTheDocument();
     expect(within(rowEl).getByText(TABLE_MESSAGES.bandPriceUnknownHint)).toBeInTheDocument();
     expect(within(rowEl).queryByRole('button', { name: trMessages.common.infoHint })).toBeNull();
+  });
+});
+
+const READ_ONLY_ACCESS: CampaignAccess = { canWrite: false, upload: UPLOAD_GATES.HIDDEN };
+// ROW A has band2 stored as a plain band choice; ROW B has nothing chosen.
+const ROW_A_BAND_CHOSEN: SelectionMap = { [ROW_A.id]: 'band2' };
+
+describe('CommissionTariffsTable - read-only member', () => {
+  it('offers no select button, disables every custom price input and still shows the chosen band', () => {
+    render(
+      <CampaignAccessProvider value={READ_ONLY_ACCESS}>
+        <TableHarness rows={TWO_ROWS} selection={ROW_A_BAND_CHOSEN} />
+      </CampaignAccessProvider>,
+    );
+
+    // No select target anywhere: a selected overlay or foot would carry the selected label.
+    expect(screen.queryAllByRole('button', { name: TABLE_MESSAGES.selectBand })).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: TABLE_MESSAGES.bandSelected })).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: TABLE_MESSAGES.selectCustom })).toHaveLength(0);
+    // Found by label: a read-only member's input invites nothing, so it has no placeholder.
+    const inputs = screen.getAllByLabelText(new RegExp(`^${TABLE_MESSAGES.customPrice} — `));
+    expect(inputs).toHaveLength(TWO_ROWS.length);
+    for (const input of inputs) {
+      expect(input).toBeDisabled();
+      expect(input).not.toHaveAttribute('placeholder');
+    }
+
+    // The stored choice still reads as selected, on its own row only.
+    expect(
+      within(rowByTitle(ROW_A.productTitle)).getByText(TABLE_MESSAGES.bandSelected),
+    ).toBeInTheDocument();
+    expect(
+      within(rowByTitle(ROW_B.productTitle)).queryByText(TABLE_MESSAGES.bandSelected),
+    ).toBeNull();
   });
 });

@@ -15,7 +15,10 @@ import { useDeleteFlashProducts } from '../hooks/use-delete-flash-products';
 import { useExportWorkbook } from '../hooks/use-export-workbook';
 import { useImportWorkbook } from '../hooks/use-import-workbook';
 import { usePrefilledWarning } from '../hooks/use-prefilled-warning';
+import { useResolvedCampaignAccess } from '../hooks/use-resolved-campaign-access';
 import { useUnknownPriceWarning } from '../hooks/use-unknown-price-warning';
+import { UPLOAD_GATES } from '../lib/campaign-access';
+import { CampaignAccessProvider } from '../lib/campaign-access-context';
 import { downloadBlob } from '../lib/download-blob';
 import { WORKBOOK_VERTICALS } from '../lib/workbook-verticals';
 import { FlashProductsListView } from './flash-products-list-view';
@@ -46,6 +49,7 @@ export function FlashProductsListClient({
   const exportList = useExportWorkbook(PAGE, orgId ?? '', storeId ?? '');
   const warnPrefilled = usePrefilledWarning();
   const warnUnknownPrice = useUnknownPriceWarning(PAGE);
+  const access = useResolvedCampaignAccess(PAGE);
   const [uploadOpen, setUploadOpen] = React.useState(false);
 
   const items = React.useMemo(() => list.data ?? [], [list.data]);
@@ -115,7 +119,7 @@ export function FlashProductsListClient({
   }
 
   return (
-    <>
+    <CampaignAccessProvider value={access}>
       {/* While the list query is in flight the REAL chrome renders with skeleton data
           (summary cells, tab counts, table rows) instead of a generic gray-bar page —
           PageHeader title/intent are static i18n. */}
@@ -127,19 +131,21 @@ export function FlashProductsListClient({
         onExport={handleExport}
         onDelete={handleDelete}
       />
-      <WorkbookUploadDialog
-        page={PAGE}
-        open={uploadOpen}
-        onOpenChange={(next) => {
-          if (!next) importList.reset();
-          setUploadOpen(next);
-        }}
-        scope={{ orgId, storeId }}
-        onSubmit={handleImport}
-        submitting={importList.isPending}
-        submitError={importList.error}
-        onResetError={() => importList.reset()}
-      />
-    </>
+      {access.upload === UPLOAD_GATES.ENABLED ? (
+        <WorkbookUploadDialog
+          page={PAGE}
+          open={uploadOpen}
+          onOpenChange={(next) => {
+            if (!next) importList.reset();
+            setUploadOpen(next);
+          }}
+          scope={{ orgId, storeId }}
+          onSubmit={handleImport}
+          submitting={importList.isPending}
+          submitError={importList.error}
+          onResetError={() => importList.reset()}
+        />
+      ) : null}
+    </CampaignAccessProvider>
   );
 }

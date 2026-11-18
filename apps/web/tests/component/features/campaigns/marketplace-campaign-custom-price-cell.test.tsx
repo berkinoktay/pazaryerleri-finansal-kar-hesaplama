@@ -9,6 +9,8 @@ import type {
   CampaignScenarioPresentation,
   MarketplaceCampaignRow,
 } from '@/features/campaigns/lib/adapt-marketplace-campaign';
+import { type CampaignAccess, UPLOAD_GATES } from '@/features/campaigns/lib/campaign-access';
+import { CampaignAccessProvider } from '@/features/campaigns/lib/campaign-access-context';
 import {
   applyCustomPrice,
   seedCampaignChoices,
@@ -145,6 +147,17 @@ function renderCell(
   return render(<Harness row={row} presentation={presentation} />);
 }
 
+const READ_ONLY_ACCESS: CampaignAccess = { canWrite: false, upload: UPLOAD_GATES.HIDDEN };
+
+/** Renders the cell for a member who cannot write. */
+function renderReadOnlyCell(row: MarketplaceCampaignRow = makeRow()) {
+  return render(
+    <CampaignAccessProvider value={READ_ONLY_ACCESS}>
+      <Harness row={row} presentation="UNIT" />
+    </CampaignAccessProvider>,
+  );
+}
+
 const priceInput = (row: MarketplaceCampaignRow = makeRow()): HTMLElement =>
   screen.getByRole('textbox', {
     name: TABLE.customPriceAria.replace('{product}', row.productTitle),
@@ -256,5 +269,38 @@ describe('MarketplaceCampaignCustomPriceCell', () => {
     ).toBeInTheDocument();
     expect(screen.getByText(TABLE.orderProfit)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: PROFIT_BADGE_LABEL })).toHaveTextContent('28,00');
+  });
+
+  describe('read-only member', () => {
+    it('disables the price input and offers no select button on an empty card', () => {
+      renderReadOnlyCell();
+      expect(priceInput()).toBeDisabled();
+      expect(screen.queryByRole('button', { name: TABLE.selectPrice })).toBeNull();
+      // The foot's label only invites a choice, so it is gone too.
+      expect(screen.queryByText(TABLE.selectPrice)).toBeNull();
+    });
+
+    it('shows a joined custom price with its profit and the selected label as text', async () => {
+      const estimates = trackEstimates();
+      const row = makeRow({
+        selection: 'CUSTOM',
+        customPrice: '150.00',
+        customScenario: scenario('150.00', '12.00'),
+      });
+      renderReadOnlyCell(row);
+
+      expect(priceInput(row)).toBeDisabled();
+      expect(priceInput(row)).toHaveValue('150');
+      expect(screen.getByText(TABLE.selected)).toBeInTheDocument();
+      // A selected foot button would be named by the selected label: neither name may exist.
+      expect(screen.queryByRole('button', { name: TABLE.selected })).toBeNull();
+      expect(screen.queryByRole('button', { name: TABLE.selectPrice })).toBeNull();
+      // The saved price carries its figures on the row: the badge reads without a request.
+      expect(screen.getByRole('button', { name: trMessages.profitBadge.open })).toHaveTextContent(
+        '12,00',
+      );
+      await wait(PAST_DEBOUNCE_MS);
+      expect(estimates).toHaveLength(0);
+    });
   });
 });

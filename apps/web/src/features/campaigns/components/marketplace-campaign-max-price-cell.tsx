@@ -14,6 +14,7 @@ import type {
   CampaignScenarioPresentation,
   MarketplaceCampaignRow,
 } from '../lib/adapt-marketplace-campaign';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import {
   campaignOptionFigures,
   campaignRowBestOption,
@@ -63,6 +64,7 @@ export function MarketplaceCampaignMaxPriceCell({
   const scope = useTariffScope();
   const estimate = useEstimateCampaignItem(scope.orgId, scope.storeId, scope.tariffId);
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
+  const { canWrite } = useCampaignAccess();
 
   const figures = campaignOptionFigures(presentation, row.maxScenario, row.maxBasket, row.current);
   const orderFramed = figures.order !== null;
@@ -85,15 +87,18 @@ export function MarketplaceCampaignMaxPriceCell({
   }
 
   return (
-    <TariffOptionCard selected={selected} interactive>
-      <button
-        type="button"
-        aria-pressed={selected}
-        aria-label={t('selectMaxAria', { product: row.productTitle })}
-        onClick={onToggle}
-        // Tailwind v4 strips the native button cursor; the overlay covers the whole card.
-        className="focus-visible:shadow-focus absolute inset-0 cursor-pointer rounded-md focus-visible:outline-none"
-      />
+    <TariffOptionCard selected={selected} interactive={canWrite}>
+      {/* Absent for a member who cannot write: the card is then read-only. */}
+      {canWrite ? (
+        <button
+          type="button"
+          aria-pressed={selected}
+          aria-label={t('selectMaxAria', { product: row.productTitle })}
+          onClick={onToggle}
+          // Tailwind v4 strips the native button cursor; the overlay covers the whole card.
+          className="focus-visible:shadow-focus absolute inset-0 cursor-pointer rounded-md focus-visible:outline-none"
+        />
+      ) : null}
 
       {isBest ? <TariffBestRibbon label={t('bestOption')} /> : null}
 

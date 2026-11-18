@@ -11,6 +11,7 @@ import { useMarginColoring } from '@/lib/margin-coloring-context';
 import type { AdvantageBand, AdvantageTariffRow } from '../lib/adapt-advantage-tariff';
 import { useAdvantageReasonEmptyLabel } from '../hooks/use-advantage-reason-label';
 import { useEstimateAdvantageItemPrice } from '../hooks/use-estimate-advantage-item-price';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import { useTariffScope } from '../lib/tariff-scope';
 import { AdvantageTariffBreakdown } from './advantage-tariff-breakdown';
 import { TariffBestRibbon } from './tariff-best-ribbon';
@@ -61,6 +62,7 @@ export function AdvantageTierCell({
   const scope = useTariffScope();
   const estimate = useEstimateAdvantageItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
+  const { canWrite } = useCampaignAccess();
 
   function openBreakdown(): void {
     setBreakdownOpen(true);
@@ -68,19 +70,22 @@ export function AdvantageTierCell({
   }
 
   return (
-    <TariffOptionCard selected={selected} interactive>
+    <TariffOptionCard selected={selected} interactive={canWrite}>
       {/* Stretched-overlay select target. Sibling of the ProfitBadge (never an ancestor)
           so the badge's own <button> is not nested inside it. Price, commission and the
-          foot ring sit below the overlay → clicking them chooses this tier. */}
-      <button
-        type="button"
-        aria-pressed={selected}
-        aria-label={selected ? t('tierSelected') : t('selectTier')}
-        onClick={onSelect}
-        // Tailwind v4 strips the native button cursor; the overlay covers the whole card,
-        // so its cursor is what the seller sees hovering the tier.
-        className="focus-visible:shadow-focus absolute inset-0 cursor-pointer rounded-md focus-visible:outline-none"
-      />
+          foot ring sit below the overlay → clicking them chooses this tier. Absent for a
+          member who cannot write. */}
+      {canWrite ? (
+        <button
+          type="button"
+          aria-pressed={selected}
+          aria-label={selected ? t('tierSelected') : t('selectTier')}
+          onClick={onSelect}
+          // Tailwind v4 strips the native button cursor; the overlay covers the whole card,
+          // so its cursor is what the seller sees hovering the tier.
+          className="focus-visible:shadow-focus absolute inset-0 cursor-pointer rounded-md focus-visible:outline-none"
+        />
+      ) : null}
 
       {/* "En kârlı" — a featured ribbon straddling the top border. Absolute, so it adds NO
           height. pointer-events-none → clicking it still chooses via the overlay. Only

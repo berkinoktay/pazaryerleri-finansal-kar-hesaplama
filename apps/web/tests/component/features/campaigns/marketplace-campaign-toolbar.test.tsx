@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { MarketplaceCampaignToolbar } from '@/features/campaigns/components/marketplace-campaign-toolbar';
+import { type CampaignAccess, UPLOAD_GATES } from '@/features/campaigns/lib/campaign-access';
+import { CampaignAccessProvider } from '@/features/campaigns/lib/campaign-access-context';
 import type { CampaignFilterState } from '@/features/campaigns/lib/marketplace-campaign-selection';
 
 import trMessages from '../../../../messages/tr.json';
@@ -68,5 +70,34 @@ describe('MarketplaceCampaignToolbar', () => {
       expect(screen.queryByRole('button', { name: PAGE.smartSelect.targetMargin })).toBeNull(),
     );
     expect(props.onSelectAllMax).not.toHaveBeenCalled();
+  });
+
+  it('keeps search and filter chips but offers no smart select to a member who cannot write', () => {
+    const readOnly: CampaignAccess = { canWrite: false, upload: UPLOAD_GATES.HIDDEN };
+    render(
+      <CampaignAccessProvider value={readOnly}>
+        <MarketplaceCampaignToolbar
+          filters={NO_FILTERS}
+          onFiltersChange={vi.fn()}
+          showTariffWarningFilter
+          onSelectAllMax={vi.fn()}
+          onSelectProfitable={vi.fn()}
+          onOpenTargetMargin={vi.fn()}
+          onClearSelections={vi.fn()}
+          pending={false}
+        />
+      </CampaignAccessProvider>,
+    );
+
+    expect(screen.queryByRole('button', { name: PAGE.smartSelect.label })).toBeNull();
+    expect(screen.getByPlaceholderText(PAGE.search)).toBeInTheDocument();
+    for (const chip of [
+      PAGE.filters.profitable,
+      PAGE.filters.losing,
+      PAGE.filters.selected,
+      PAGE.filters.tariffWarning,
+    ]) {
+      expect(screen.getByRole('button', { name: chip })).toBeInTheDocument();
+    }
   });
 });

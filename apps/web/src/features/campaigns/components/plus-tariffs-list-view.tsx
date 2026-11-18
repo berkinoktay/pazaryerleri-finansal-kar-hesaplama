@@ -1,6 +1,5 @@
 'use client';
 
-import { CloudUploadIcon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import { parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
@@ -8,7 +7,6 @@ import * as React from 'react';
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { FilterTabs } from '@/components/patterns/filter-tabs';
 import { PageHeader } from '@/components/patterns/page-header';
-import { Button } from '@/components/ui/button';
 
 import type { PlusTariffListItem } from '../api/list-plus-tariffs.api';
 import {
@@ -18,6 +16,8 @@ import {
   type PlusTariffListRow,
 } from '../lib/plus-tariff-list';
 
+import { CampaignReadOnlyNotice } from './campaign-read-only-notice';
+import { CampaignUploadButton } from './campaign-upload-button';
 import { PlusTariffListSummary } from './plus-tariff-list-summary';
 import { PlusTariffListTable } from './plus-tariff-list-table';
 import { usePlusTariffRowActions } from './use-plus-tariff-row-actions';
@@ -137,9 +137,7 @@ export function PlusTariffsListView({
           { value: 'past', label: tStatus('past'), count: statusCounts.past },
         ]}
       />
-      <Button size="sm" leadingIcon={<CloudUploadIcon aria-hidden />} onClick={onCreate}>
-        {tList('upload')}
-      </Button>
+      <CampaignUploadButton size="sm" label={tList('upload')} onClick={onCreate} />
     </div>
   );
 
@@ -158,6 +156,7 @@ export function PlusTariffsListView({
         }
         summary={<PlusTariffListSummary stats={stats} loading={loading} />}
       />
+      <CampaignReadOnlyNotice />
 
       <PlusTariffListTable
         rows={filtered}

@@ -7,6 +7,7 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 
 import type { MarketplaceCampaignHeader } from '../lib/adapt-marketplace-campaign';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import { useDescribeDiscountConfig } from '../lib/discount-config';
 import { DiscountTypeBadge } from './discount-type-badge';
 import { MarketplaceCampaignFundingBadge } from './marketplace-campaign-funding-badge';
@@ -32,6 +33,8 @@ export function MarketplaceCampaignConfigCard({
   const t = useTranslations('marketplaceCampaignsPage.configCard');
   const describe = useDescribeDiscountConfig();
   const formatter = useFormatter();
+  // Editing the config is a write: a member who cannot write reads the card without the button.
+  const { canWrite } = useCampaignAccess();
 
   // Deterministic parse of the server ISO strings (no `Date.now()`), so server and client render
   // byte-identical; the window shows only when both ends are present.
@@ -57,15 +60,17 @@ export function MarketplaceCampaignConfigCard({
           ) : null}
         </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onEdit}
-          leadingIcon={<Edit02Icon aria-hidden />}
-          className="shrink-0"
-        >
-          {t('edit')}
-        </Button>
+        {canWrite ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onEdit}
+            leadingIcon={<Edit02Icon aria-hidden />}
+            className="shrink-0"
+          >
+            {t('edit')}
+          </Button>
+        ) : null}
       </div>
 
       {header.discountType !== 'NET' ? (

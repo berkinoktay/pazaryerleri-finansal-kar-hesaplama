@@ -6,7 +6,12 @@ import { resolve } from 'node:path';
 
 import { Platform } from '@pazarsync/db/enums';
 import { readWorkbookGrid, type SheetSelector } from '@pazarsync/spreadsheet';
-import { UPLOAD_NAME_MAX_LENGTH, WORKBOOK_PAGES, type WorkbookPage } from '@pazarsync/utils';
+import {
+  UPLOAD_NAME_MAX_LENGTH,
+  WORKBOOK_PAGE_PLATFORMS,
+  WORKBOOK_PAGES,
+  type WorkbookPage,
+} from '@pazarsync/utils';
 import { describe, expect, it, vi } from 'vitest';
 
 import { trendyolAdvantageTariffFormat } from '@/workbooks/formats/trendyol/advantage-tariff.format';
@@ -224,6 +229,34 @@ describe('composition root', () => {
     for (const table of tables) {
       expect(WORKBOOK_PARENT_TABLES).toContain(table);
     }
+  });
+});
+
+describe('WORKBOOK_PAGE_PLATFORMS', () => {
+  it('lists, for every page, exactly the platforms the registry has a format for', () => {
+    // @pazarsync/utils cannot import the registry, so its copy is pinned here (same
+    // pattern as the WORKBOOK_ENGINE_FILE_CODES pin in workbook-errors.test.ts).
+    // Every page starts from an empty list, so a page with no format shows up as [].
+    const fromRegistry = Object.fromEntries(
+      Object.values(WORKBOOK_PAGES).map((page) => [
+        page,
+        [
+          ...new Set(
+            FORMAT_SUMMARIES.filter((summary) => summary.page === page).map(
+              (summary) => summary.platform,
+            ),
+          ),
+        ].sort(),
+      ]),
+    );
+    const fromTable = Object.fromEntries(
+      Object.entries(WORKBOOK_PAGE_PLATFORMS).map(([page, platforms]) => [
+        page,
+        [...platforms].sort(),
+      ]),
+    );
+
+    expect(fromTable).toEqual(fromRegistry);
   });
 });
 

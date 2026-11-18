@@ -13,6 +13,7 @@ import { useEstimatePlusItemPrice } from '../hooks/use-estimate-plus-item-price'
 import { usePlusReasonEmptyLabel } from '../hooks/use-plus-reason-label';
 import { plusOffer, type PlusCustomChoice } from '../lib/plus-bulk-actions';
 import type { PlusTariffRow } from '../lib/adapt-plus-tariff';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import { isPositiveAtCents } from '../lib/positive-at-cents';
 import { useTariffScope } from '../lib/tariff-scope';
 import { MAX_WHAT_IF_PRICE } from '../lib/what-if-price';
@@ -114,6 +115,7 @@ export function PlusCustomPriceCell({
   const scope = useTariffScope();
   const estimate = useEstimatePlusItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const estimateMutate = estimate.mutate;
+  const { canWrite } = useCampaignAccess();
   // The Plus offer's ceiling: the seller may try any price up to (and including) it,
   // never above — that is the whole point of the ceiling. An unknown ceiling (no offer,
   // or a null offer price) caps the input at MAX_WHAT_IF_PRICE instead.
@@ -246,10 +248,12 @@ export function PlusCustomPriceCell({
           nonNegative
           max={ceiling ?? MAX_WHAT_IF_PRICE}
           aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
-          placeholder={t('table.enterPrice')}
+          // A member who cannot write is not invited to type a price.
+          placeholder={canWrite ? t('table.enterPrice') : undefined}
           className="md:max-w-input-price w-full"
-          // No price can be estimated or joined while the Plus commission is unknown.
-          disabled={commissionUnknown}
+          // No price can be estimated or joined while the Plus commission is unknown. A
+          // member who cannot write still reads a stored price, but cannot type one.
+          disabled={commissionUnknown || !canWrite}
         />
         <span className="text-2xs text-muted-foreground">
           {commissionUnknown ? (
@@ -262,7 +266,7 @@ export function PlusCustomPriceCell({
                 {formatPercentDisplay(lastResult.commissionPct)}
               </span>
             </>
-          ) : ceiling === null ? (
+          ) : !canWrite ? null : ceiling === null ? (
             // No known ceiling: the usual hint talks about it, so ask for the price plainly.
             t('table.customPriceHintNoCeiling')
           ) : (

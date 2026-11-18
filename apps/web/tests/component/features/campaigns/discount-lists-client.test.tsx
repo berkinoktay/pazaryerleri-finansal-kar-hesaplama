@@ -27,12 +27,18 @@ vi.mock('sonner', () => ({
   toast: { error: toastError, success: toastSuccess, warning: toastWarning },
 }));
 
+// `CurrentScopeProvider` (mounted through `TestScope`) imports the router and two server actions.
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock('@/lib/active-store-actions', () => ({ setActiveStoreIdAction: vi.fn() }));
+vi.mock('@/lib/active-org-actions', () => ({ setActiveOrgIdAction: vi.fn() }));
+
 import type { DiscountListListItem } from '@/features/campaigns/api/list-discount-lists.api';
 import { DiscountsListClient } from '@/features/campaigns/components/discount-lists-client';
 import { QueryProvider } from '@/providers/query-provider';
 
 import trMessages from '../../../../messages/tr.json';
 import { validationApiError } from '../../../helpers/api-error';
+import { TestScope } from '../../../helpers/current-scope';
 import { HttpResponse, http, server } from '../../../helpers/msw';
 import { NuqsTestHarness } from '../../../helpers/nuqs';
 import { render, screen, waitFor, within } from '../../../helpers/render';
@@ -108,7 +114,9 @@ function renderClient(): ReturnType<typeof render> {
   return render(
     <NuqsTestHarness>
       <QueryProvider>
-        <DiscountsListClient orgId={ORG_ID} storeId={STORE_ID} />
+        <TestScope orgId={ORG_ID} storeId={STORE_ID}>
+          <DiscountsListClient orgId={ORG_ID} storeId={STORE_ID} />
+        </TestScope>
       </QueryProvider>
     </NuqsTestHarness>,
   );

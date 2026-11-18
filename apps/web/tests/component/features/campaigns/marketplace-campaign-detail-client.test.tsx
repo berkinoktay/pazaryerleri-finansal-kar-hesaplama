@@ -10,11 +10,18 @@ vi.mock('@/i18n/navigation', () => ({
   ),
 }));
 
+// `CurrentScopeProvider` (mounted through `TestScope`) imports the router and two server actions.
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock('@/lib/active-store-actions', () => ({ setActiveStoreIdAction: vi.fn() }));
+vi.mock('@/lib/active-org-actions', () => ({ setActiveOrgIdAction: vi.fn() }));
+
+import { MemberRole } from '@pazarsync/db/enums';
 import { formatCurrency } from '@pazarsync/utils';
 
 import { MarketplaceCampaignDetailClient } from '@/features/campaigns/components/marketplace-campaign-detail-client';
 
 import trMessages from '../../../../messages/tr.json';
+import { TestScope, type TestScopeProps } from '../../../helpers/current-scope';
 import { HttpResponse, http, server } from '../../../helpers/msw';
 import { NuqsTestHarness } from '../../../helpers/nuqs';
 import { render, screen, waitFor } from '../../../helpers/render';
@@ -112,10 +119,19 @@ function detailResponse(selection: 'NONE' | 'MAX' = 'MAX') {
   };
 }
 
-function renderClient() {
+/** The member's role; defaults to an owner on Trendyol. */
+type ScopeOptions = Pick<TestScopeProps, 'role'>;
+
+function renderClient(scope: ScopeOptions = {}) {
   return render(
     <NuqsTestHarness>
-      <MarketplaceCampaignDetailClient orgId={ORG_ID} storeId={STORE_ID} campaignId={CAMPAIGN_ID} />
+      <TestScope orgId={ORG_ID} storeId={STORE_ID} {...scope}>
+        <MarketplaceCampaignDetailClient
+          orgId={ORG_ID}
+          storeId={STORE_ID}
+          campaignId={CAMPAIGN_ID}
+        />
+      </TestScope>
     </NuqsTestHarness>,
   );
 }
@@ -490,4 +506,48 @@ describe('MarketplaceCampaignDetailClient — toolbar', () => {
     },
     LONG_FLOW_TIMEOUT_MS,
   );
+});
+
+// ─── Access: a member who cannot write ───────────────────────────────────────
+
+describe('MarketplaceCampaignDetailClient — access', () => {
+  const NOTICE = trMessages.campaignAccess.readOnlyNotice;
+  const SELECT_MAX = TABLE.selectMaxAria.replace('{product}', PRODUCT);
+  const CUSTOM_PRICE = TABLE.customPriceAria.replace('{product}', PRODUCT);
+
+  it('shows a read-only member the notice and the saved choice, with no write control', async () => {
+    // The fixture row is saved on MAX.
+    server.use(http.get(BASE, () => HttpResponse.json(detailResponse('MAX'))));
+    const { user } = renderClient({ role: MemberRole.VIEWER });
+    await waitForLoaded();
+
+    expect(screen.getByText(NOTICE)).toBeInTheDocument();
+    expect(screen.queryAllByRole('button', { name: SAVE_AND_DOWNLOAD })).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: PAGE.templates.delete })).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: PAGE.configCard.edit })).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: PAGE.smartSelect.label })).toHaveLength(0);
+    // The maximum-price card has no select target (the writer cases click exactly this button).
+    expect(screen.queryAllByRole('button', { name: SELECT_MAX })).toHaveLength(0);
+
+    const inputs = screen.getAllByRole('textbox', { name: CUSTOM_PRICE });
+    expect(inputs.length).toBeGreaterThan(0);
+    for (const input of inputs) expect(input).toBeDisabled();
+
+    // The saved MAX choice still shows, and a click on the card's price changes nothing.
+    expect(screen.getAllByText(TABLE.selected).length).toBeGreaterThan(0);
+    const [priceText] = screen.getAllByText(formatCurrency('200.00'));
+    if (priceText === undefined) throw new Error('maximum price not rendered');
+    await user.click(priceText);
+    expect(screen.getAllByText(TABLE.selected).length).toBeGreaterThan(0);
+  });
+
+  it('offers the lowest writing role save and delete, with no notice', async () => {
+    server.use(http.get(BASE, () => HttpResponse.json(detailResponse('MAX'))));
+    renderClient({ role: MemberRole.MEMBER });
+    await waitForLoaded();
+
+    expect(screen.getByRole('button', { name: SAVE_AND_DOWNLOAD })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: PAGE.templates.delete })).toBeInTheDocument();
+    expect(screen.queryByText(NOTICE)).toBeNull();
+  });
 });

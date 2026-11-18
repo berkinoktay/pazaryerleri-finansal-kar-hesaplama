@@ -18,6 +18,7 @@ import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
 import { useDiscountReasonEmptyLabel } from '../hooks/use-discount-reason-label';
 import type { DiscountRow, DiscountScenarioPresentation } from '../lib/adapt-discount-list';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import { DiscountCommissionCell } from './discount-commission-cell';
 import { ProfitDelta } from './profit-delta';
 
@@ -55,10 +56,13 @@ function IncludeCellSlot({
   onToggle: (itemId: string, included: boolean) => void;
 }): React.ReactElement {
   const { selectionsPending, selectedIds } = React.useContext(DiscountRowStateContext);
+  // Read here, not through the `columns` closure, so `columns` stays identity-stable. A member
+  // who cannot write still sees the checkbox, but cannot tick it.
+  const { canWrite } = useCampaignAccess();
   return (
     <Checkbox
       checked={selectedIds.has(row.id)}
-      disabled={selectionsPending}
+      disabled={selectionsPending || !canWrite}
       aria-label={label}
       onCheckedChange={(next) => onToggle(row.id, next === true)}
       className="cursor-pointer"

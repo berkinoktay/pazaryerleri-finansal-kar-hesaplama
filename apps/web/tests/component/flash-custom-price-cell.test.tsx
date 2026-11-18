@@ -7,10 +7,17 @@ import type {
   FlashOfferKey,
   FlashProductRow,
 } from '@/features/campaigns/lib/adapt-flash-product';
+import { type CampaignAccess, UPLOAD_GATES } from '@/features/campaigns/lib/campaign-access';
+import { CampaignAccessProvider } from '@/features/campaigns/lib/campaign-access-context';
 import { TariffScopeProvider } from '@/features/campaigns/lib/tariff-scope';
 
 import { render, screen } from '../helpers/render';
 import { HttpResponse, http, server } from '../helpers/msw';
+import trMessages from '../../messages/tr.json';
+
+const TABLE = trMessages.flashProductsPage.table;
+const PROFIT_BADGE_OPEN = trMessages.profitBadge.open;
+const READ_ONLY_ACCESS: CampaignAccess = { canWrite: false, upload: UPLOAD_GATES.HIDDEN };
 
 const SCOPE = {
   orgId: '00000000-0000-0000-0000-000000000001',
@@ -83,6 +90,17 @@ function renderCell(props: React.ComponentProps<typeof FlashCustomPriceCell>) {
     <TariffScopeProvider scope={SCOPE}>
       <FlashCustomPriceCell {...props} />
     </TariffScopeProvider>,
+  );
+}
+
+/** Renders the cell for a member who cannot write. */
+function renderReadOnlyCell(props: React.ComponentProps<typeof FlashCustomPriceCell>) {
+  return render(
+    <CampaignAccessProvider value={READ_ONLY_ACCESS}>
+      <TariffScopeProvider scope={SCOPE}>
+        <FlashCustomPriceCell {...props} />
+      </TariffScopeProvider>
+    </CampaignAccessProvider>,
   );
 }
 
@@ -238,5 +256,44 @@ describe('FlashCustomPriceCell — estimate skeleton', () => {
     renderCell({ row, isSelected: false, onSelect: vi.fn(), onDeselect: vi.fn() });
     expect(screen.queryByText(/hesaplanan kâr/i)).toBeNull();
     expect(screen.queryByRole('status')).toBeNull();
+  });
+});
+
+describe('FlashCustomPriceCell - read-only member', () => {
+  /** The price input, found by its label: a read-only member's input has no placeholder. */
+  function priceInput(): HTMLElement {
+    return screen.getByLabelText(new RegExp(`^${TABLE.customPrice} — `));
+  }
+
+  it('disables the price input and offers no select button on an empty card', () => {
+    renderReadOnlyCell({ row, isSelected: false, onSelect: vi.fn(), onDeselect: vi.fn() });
+    const input = priceInput();
+    expect(input).toBeDisabled();
+    // Nothing invites the member to type a price they cannot use.
+    expect(input).not.toHaveAttribute('placeholder');
+    expect(screen.queryByText(TABLE.customPriceHint)).toBeNull();
+    expect(screen.queryByRole('button', { name: TABLE.selectCustom })).toBeNull();
+    // The foot's label only invites a choice, so it is gone too.
+    expect(screen.queryByText(TABLE.selectCustom)).toBeNull();
+  });
+
+  it('shows a stored custom price and its estimate, with the selected label as text', async () => {
+    mockEstimate('180.00');
+    renderReadOnlyCell({
+      row: { ...row, customPrice: '500.00' },
+      committedPrice: '500.00',
+      isSelected: true,
+      onSelect: vi.fn(),
+      onDeselect: vi.fn(),
+    });
+    const input = priceInput();
+    expect(input).toBeDisabled();
+    expect(input).toHaveValue('500');
+    expect(screen.getByText(TABLE.customSelected)).toBeInTheDocument();
+    // A selected foot button would be named by the selected label: neither name may exist.
+    expect(screen.queryByRole('button', { name: TABLE.customSelected })).toBeNull();
+    expect(screen.queryByRole('button', { name: TABLE.selectCustom })).toBeNull();
+    // The estimate is a read, so the stored price still gets its profit badge.
+    expect(await screen.findByRole('button', { name: PROFIT_BADGE_OPEN })).toBeInTheDocument();
   });
 });

@@ -5,6 +5,8 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+import { useCampaignAccess } from '../lib/campaign-access-context';
+
 export interface TariffSelectFootProps {
   /** Whether this option is the seller's current choice. */
   selected: boolean;
@@ -32,6 +34,11 @@ export interface TariffSelectFootProps {
  * in the brand tone. Pinned to the bottom (`mt-auto`) so the controls line up across
  * a row of equal-height cards. Renders as a `<button>` when interactive, else a
  * decorative `<span>` (the band overlay handles that click).
+ *
+ * Read-only (the member cannot write, from {@link useCampaignAccess}): the foot is never a
+ * `<button>`, whatever `onToggle` is. A selected option keeps the decorative `<span>` with
+ * its tick and selected label, so the stored choice still shows; an unselected option
+ * renders nothing, since its label only invites a choice the member cannot make.
  */
 export function TariffSelectFoot({
   selected,
@@ -39,7 +46,10 @@ export function TariffSelectFoot({
   selectedLabel,
   onToggle,
   disabled = false,
-}: TariffSelectFootProps): React.ReactElement {
+}: TariffSelectFootProps): React.ReactElement | null {
+  const { canWrite } = useCampaignAccess();
+  if (!canWrite && !selected) return null;
+
   const indicator = selected ? (
     <span
       aria-hidden
@@ -56,8 +66,9 @@ export function TariffSelectFoot({
     selected ? 'text-primary-soft-foreground' : 'text-muted-foreground',
   );
 
-  // Visual only — the band card's stretched overlay owns the click.
-  if (onToggle === undefined) {
+  // Visual only — the band card's stretched overlay owns the click, or the member cannot
+  // write (then only a selected option reaches here).
+  if (onToggle === undefined || !canWrite) {
     return (
       <span className={cn(base, disabled && 'opacity-50')}>
         {indicator}

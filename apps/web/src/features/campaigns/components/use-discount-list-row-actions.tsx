@@ -6,6 +6,7 @@ import * as React from 'react';
 
 import { type RowAction } from '@/components/patterns/data-table-row-actions';
 
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import type { DiscountListRow } from '../lib/discount-list';
 
 export interface DiscountListRowActionHandlers {
@@ -25,10 +26,18 @@ export function useDiscountListRowActions({
   onRequestDelete,
 }: DiscountListRowActionHandlers): RowAction<DiscountListRow>[] {
   const t = useTranslations('discountsPage.list.actions');
+  const { canWrite } = useCampaignAccess();
 
-  return React.useMemo(
-    () => [
-      { label: t('open'), icon: <ArrowRight01Icon />, onSelect: (row) => onOpen(row.id) },
+  return React.useMemo(() => {
+    const open: RowAction<DiscountListRow> = {
+      label: t('open'),
+      icon: <ArrowRight01Icon />,
+      onSelect: (row) => onOpen(row.id),
+    };
+    // Export and delete are writes: a member who cannot write only opens the row.
+    if (!canWrite) return [open];
+    return [
+      open,
       { label: t('export'), icon: <Download04Icon />, onSelect: (row) => onExport(row.id) },
       {
         label: t('delete'),
@@ -37,7 +46,6 @@ export function useDiscountListRowActions({
         tone: 'destructive',
         separatorBefore: true,
       },
-    ],
-    [t, onOpen, onExport, onRequestDelete],
-  );
+    ];
+  }, [canWrite, t, onOpen, onExport, onRequestDelete]);
 }

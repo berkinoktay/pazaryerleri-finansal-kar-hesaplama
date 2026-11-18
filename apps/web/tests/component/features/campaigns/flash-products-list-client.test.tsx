@@ -25,11 +25,17 @@ vi.mock('sonner', () => ({
   toast: { error: toastError, success: toastSuccess, warning: toastWarning },
 }));
 
+// `CurrentScopeProvider` (mounted through `TestScope`) imports the router and two server actions.
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock('@/lib/active-store-actions', () => ({ setActiveStoreIdAction: vi.fn() }));
+vi.mock('@/lib/active-org-actions', () => ({ setActiveOrgIdAction: vi.fn() }));
+
 import type { FlashProductListItem } from '@/features/campaigns/api/list-flash-products.api';
 import { FlashProductsListClient } from '@/features/campaigns/components/flash-products-list-client';
 import { QueryProvider } from '@/providers/query-provider';
 
 import trMessages from '../../../../messages/tr.json';
+import { TestScope } from '../../../helpers/current-scope';
 import { HttpResponse, http, server } from '../../../helpers/msw';
 import { NuqsTestHarness } from '../../../helpers/nuqs';
 import { render, screen, waitFor, within } from '../../../helpers/render';
@@ -99,7 +105,9 @@ function renderClient(): ReturnType<typeof render> {
   return render(
     <NuqsTestHarness>
       <QueryProvider>
-        <FlashProductsListClient orgId={ORG_ID} storeId={STORE_ID} />
+        <TestScope orgId={ORG_ID} storeId={STORE_ID}>
+          <FlashProductsListClient orgId={ORG_ID} storeId={STORE_ID} />
+        </TestScope>
       </QueryProvider>
     </NuqsTestHarness>,
   );

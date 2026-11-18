@@ -14,6 +14,7 @@ import { Separator } from '@/components/ui/separator';
 
 import { useAdvantageTariffFilterFields } from '../hooks/use-advantage-tariff-filter-fields';
 import type { AdvantageTariffFilterState } from '../lib/advantage-bulk-actions';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import { tariffFilterStateFromRows, tariffRowsFromFilterState } from '../lib/tariff-filter-fields';
 
 export interface AdvantageTariffsToolbarProps {
@@ -48,6 +49,8 @@ export function AdvantageTariffsToolbar({
   onClearSelections,
 }: AdvantageTariffsToolbarProps): React.ReactElement {
   const t = useTranslations('productLabelsPage');
+  // Smart select only writes selections, so a member who cannot write does not get it.
+  const { canWrite } = useCampaignAccess();
 
   const filterFields = useAdvantageTariffFilterFields(categories, brands);
   const filterRows = tariffRowsFromFilterState(filters);
@@ -72,31 +75,38 @@ export function AdvantageTariffsToolbar({
         />
 
         {/* Smart select */}
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button variant="outline" size="sm">
-              {t('smartSelect.label')}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="gap-sm flex w-72 flex-col">
-            <Button variant="ghost" size="sm" className="justify-start" onClick={onSelectBest}>
-              {t('smartSelect.selectBest')}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="justify-start"
-              onClick={onSelectProfitable}
-            >
-              {t('smartSelect.selectProfitable')}
-            </Button>
-            <Separator />
-            <Button variant="ghost" size="sm" className="justify-start" onClick={onClearSelections}>
-              {t('smartSelect.clear')}
-            </Button>
-            <p className="text-2xs text-muted-foreground">{t('smartSelect.scopeHint')}</p>
-          </PopoverContent>
-        </Popover>
+        {canWrite ? (
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm">
+                {t('smartSelect.label')}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="gap-sm flex w-72 flex-col">
+              <Button variant="ghost" size="sm" className="justify-start" onClick={onSelectBest}>
+                {t('smartSelect.selectBest')}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="justify-start"
+                onClick={onSelectProfitable}
+              >
+                {t('smartSelect.selectProfitable')}
+              </Button>
+              <Separator />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="justify-start"
+                onClick={onClearSelections}
+              >
+                {t('smartSelect.clear')}
+              </Button>
+              <p className="text-2xs text-muted-foreground">{t('smartSelect.scopeHint')}</p>
+            </PopoverContent>
+          </Popover>
+        ) : null}
       </div>
 
       {/* Chip-row clear follows the epic-wide convention: CHIPS only — the search box

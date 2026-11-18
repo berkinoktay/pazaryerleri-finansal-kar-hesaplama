@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { type RowAction } from '@/components/patterns/data-table-row-actions';
 import { MarketplaceCampaignsMobileCards } from '@/features/campaigns/components/marketplace-campaigns-mobile-cards';
+import { type CampaignAccess, UPLOAD_GATES } from '@/features/campaigns/lib/campaign-access';
+import { CampaignAccessProvider } from '@/features/campaigns/lib/campaign-access-context';
 import type { MarketplaceCampaignListRow } from '@/features/campaigns/lib/marketplace-campaign-list';
 
 import trMessages from '../../../../messages/tr.json';
@@ -10,6 +12,13 @@ import { render, screen, within } from '../../../helpers/render';
 const noResults = trMessages.common.dataTable.noResults;
 const emptyTitle = trMessages.marketplaceCampaignsPage.list.empty.title;
 const emptyCta = trMessages.marketplaceCampaignsPage.list.empty.cta;
+const unsupportedPlatform = trMessages.campaignUpload.errors.unsupportedPlatform;
+
+const READ_ONLY: CampaignAccess = { canWrite: false, upload: UPLOAD_GATES.HIDDEN };
+const UNSUPPORTED_PLATFORM: CampaignAccess = {
+  canWrite: true,
+  upload: UPLOAD_GATES.UNSUPPORTED_PLATFORM,
+};
 
 function makeRow(overrides: Partial<MarketplaceCampaignListRow> = {}): MarketplaceCampaignListRow {
   return {
@@ -58,6 +67,22 @@ function renderCards(
   return { ...result, onOpen, onUpload, onDelete, onClearFilters };
 }
 
+/** The first-run empty state (no rows, no filter) under the given campaign access. */
+function renderEmptyWithAccess(access: CampaignAccess): ReturnType<typeof render> {
+  return render(
+    <CampaignAccessProvider value={access}>
+      <MarketplaceCampaignsMobileCards
+        rows={[]}
+        actions={[]}
+        onOpen={vi.fn()}
+        onUpload={vi.fn()}
+        hasActiveFilters={false}
+        onClearFilters={vi.fn()}
+      />
+    </CampaignAccessProvider>,
+  );
+}
+
 describe('MarketplaceCampaignsMobileCards', () => {
   it('opens the campaign from its card', async () => {
     const { user, onOpen } = renderCards();
@@ -98,5 +123,21 @@ describe('MarketplaceCampaignsMobileCards', () => {
       'true',
     );
     expect(screen.queryByText(emptyTitle)).not.toBeInTheDocument();
+  });
+
+  it('shows the first-run empty state without the upload for a member who cannot write', () => {
+    renderEmptyWithAccess(READ_ONLY);
+    expect(screen.getByText(emptyTitle)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: emptyCta })).not.toBeInTheDocument();
+  });
+
+  // The platform sentence is seen once, next to the tab-row button; this one is disabled and
+  // keeps the sentence for screen readers only.
+  it('disables the first-run upload on a platform with no workbook format', () => {
+    renderEmptyWithAccess(UNSUPPORTED_PLATFORM);
+    const button = screen.getByRole('button', { name: emptyCta });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAccessibleDescription(unsupportedPlatform);
+    expect(screen.getByText(unsupportedPlatform)).toHaveClass('sr-only');
   });
 });

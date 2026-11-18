@@ -11,6 +11,7 @@ import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { useEstimateItemPrice } from '../hooks/use-estimate-item-price';
 import { useReasonEmptyLabel } from '../hooks/use-reason-label';
 import { asBandKey } from '../lib/band-key';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import { useTariffScope } from '../lib/tariff-scope';
 import type { CommissionTariffRow, PriceBand } from '../types';
 import { CommissionTariffBreakdown } from './commission-tariff-breakdown';
@@ -88,6 +89,9 @@ export function PriceBandCell({
   const priceUnknown = band.price === null;
   // A band with no price can only be deselected, never newly chosen.
   const selectable = !priceUnknown || selected;
+  const { canWrite } = useCampaignAccess();
+  // A member who cannot write reads the band but gets no select target.
+  const hasSelectTarget = canWrite && selectable;
 
   function openBreakdown(): void {
     setBreakdownOpen(true);
@@ -97,12 +101,12 @@ export function PriceBandCell({
   }
 
   return (
-    <TariffOptionCard selected={selected} interactive={selectable}>
+    <TariffOptionCard selected={selected} interactive={hasSelectTarget}>
       {/* Stretched-overlay select target. Sibling of the ProfitBadge (never an
           ancestor) so the badge's own <button> is not nested inside it. Price,
           commission and the foot ring sit below the overlay → clicking them selects.
-          Absent on a band that cannot be selected. */}
-      {selectable ? (
+          Absent on a band that cannot be selected, and for a member who cannot write. */}
+      {hasSelectTarget ? (
         <button
           type="button"
           aria-pressed={selected}

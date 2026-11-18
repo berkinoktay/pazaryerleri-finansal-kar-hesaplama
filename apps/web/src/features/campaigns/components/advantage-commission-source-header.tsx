@@ -19,6 +19,7 @@ import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
 import { useCommissionTariffLabel } from '../hooks/use-commission-tariff-label';
 import { useCommissionTariffList } from '../hooks/use-commission-tariff-list';
 import { useUpdateAdvantageCommissionSource } from '../hooks/use-update-advantage-commission-source';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import type { AdvantageCommissionSource, CommissionSourceMode } from '../types';
 
 /** Sentinel radio value for the "Kategori komisyonu" choice — clears the pin. */
@@ -55,6 +56,8 @@ export function AdvantageCommissionSourceHeader({
   const commissionList = useCommissionTariffList(orgId, storeId);
   const updateSource = useUpdateAdvantageCommissionSource(orgId, storeId, tariffId);
   const commissionTariffLabel = useCommissionTariffLabel();
+  // Changing the source is a write: a member who cannot write keeps the source label and hint only.
+  const { canWrite } = useCampaignAccess();
 
   const tariffs = React.useMemo(() => commissionList.data ?? [], [commissionList.data]);
 
@@ -93,26 +96,28 @@ export function AdvantageCommissionSourceHeader({
         </div>
       </div>
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" loading={updateSource.isPending}>
-            {t('change')}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="max-w-input">
-          <DropdownMenuLabel>{t('menuTitle')}</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuRadioGroup value={radioValue} onValueChange={handleChange}>
-            <DropdownMenuRadioItem value={CATEGORY_VALUE}>{t('category')}</DropdownMenuRadioItem>
-            {tariffs.length > 0 ? <DropdownMenuSeparator /> : null}
-            {tariffs.map((tariff) => (
-              <DropdownMenuRadioItem key={tariff.id} value={tariff.id}>
-                {commissionTariffLabel(tariff)}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {canWrite ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" loading={updateSource.isPending}>
+              {t('change')}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="max-w-input">
+            <DropdownMenuLabel>{t('menuTitle')}</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuRadioGroup value={radioValue} onValueChange={handleChange}>
+              <DropdownMenuRadioItem value={CATEGORY_VALUE}>{t('category')}</DropdownMenuRadioItem>
+              {tariffs.length > 0 ? <DropdownMenuSeparator /> : null}
+              {tariffs.map((tariff) => (
+                <DropdownMenuRadioItem key={tariff.id} value={tariff.id}>
+                  {commissionTariffLabel(tariff)}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
     </div>
   );
 }

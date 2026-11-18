@@ -1,7 +1,7 @@
 'use client';
 
 import { type ColumnDef } from '@tanstack/react-table';
-import { CloudUploadIcon, Delete02Icon, DocumentValidationIcon } from 'hugeicons-react';
+import { Delete02Icon, DocumentValidationIcon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -17,13 +17,15 @@ import {
 import { TableNoResultsState } from '@/components/patterns/data-table-states';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
 import { EmptyState } from '@/components/patterns/empty-state';
-import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
 
+import { UPLOAD_GATES } from '../lib/campaign-access';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import type { TariffListRow } from '../lib/commission-tariff-list';
 import type { TariffValidity } from '../types';
 
+import { CampaignUploadButton } from './campaign-upload-button';
 import { CommissionTariffExportIndicator } from './commission-tariff-export-indicator';
 import { CommissionTariffStatusBadge } from './commission-tariff-status-badge';
 
@@ -87,6 +89,8 @@ export function CommissionTariffListTable({
   const tEmpty = useTranslations('commissionTariffsPage.list.empty');
   const tBulk = useTranslations('commissionTariffsPage.list.bulk');
   const format = useFormatter();
+  // Row selection exists only for bulk delete, so a member who cannot write gets no checkboxes.
+  const { canWrite, upload } = useCampaignAccess();
 
   // The tariff's WEEK WINDOW, in a compact numeric form (`23.06.2026 –
   // 30.06.2026`) so the range fits a table cell — the picker/detail/summary
@@ -109,30 +113,31 @@ export function CommissionTariffListTable({
     null,
   );
 
-  const columns = React.useMemo<ColumnDef<TariffListRow>[]>(
-    () => [
-      {
-        id: 'select',
-        enableSorting: false,
-        enableHiding: false,
-        header: ({ table }) => (
-          <Checkbox
-            checked={
-              table.getIsAllPageRowsSelected() ||
-              (table.getIsSomePageRowsSelected() && 'indeterminate')
-            }
-            onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-            aria-label={tList('selectAll')}
-          />
-        ),
-        cell: ({ row }) => (
-          <Checkbox
-            checked={row.getIsSelected()}
-            onCheckedChange={(value) => row.toggleSelected(!!value)}
-            aria-label={tList('selectRow')}
-          />
-        ),
-      },
+  const columns = React.useMemo<ColumnDef<TariffListRow>[]>(() => {
+    const selectColumn: ColumnDef<TariffListRow> = {
+      id: 'select',
+      enableSorting: false,
+      enableHiding: false,
+      header: ({ table }) => (
+        <Checkbox
+          checked={
+            table.getIsAllPageRowsSelected() ||
+            (table.getIsSomePageRowsSelected() && 'indeterminate')
+          }
+          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+          aria-label={tList('selectAll')}
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox
+          checked={row.getIsSelected()}
+          onCheckedChange={(value) => row.toggleSelected(!!value)}
+          aria-label={tList('selectRow')}
+        />
+      ),
+    };
+    return [
+      ...(canWrite ? [selectColumn] : []),
       {
         id: 'tariff',
         header: () => tCols('tariff'),
@@ -195,9 +200,8 @@ export function CommissionTariffListTable({
         cell: ({ row }) => <CommissionTariffExportIndicator exported={row.original.exported} />,
       },
       createRowActionsColumn<TariffListRow>(actions),
-    ],
-    [tCols, tList, actions, formatWeekRange],
-  );
+    ];
+  }, [canWrite, tCols, tList, actions, formatWeekRange]);
 
   return (
     <>
@@ -206,7 +210,7 @@ export function CommissionTariffListTable({
         data={rows}
         loading={loading}
         getRowId={(row) => row.id}
-        enableRowSelection
+        enableRowSelection={canWrite}
         onRowClick={(row) => onOpen(row.id)}
         hasActiveFilters={hasActiveFilters}
         onClearFilters={onClearFilters}
@@ -223,29 +227,33 @@ export function CommissionTariffListTable({
           />
         )}
         pagination={(table) => <DataTablePagination table={table} />}
-        fab={(table) => {
-          const selected = table.getSelectedRowModel().rows;
-          return (
-            <BulkActionBar
-              selectedCount={selected.length}
-              onClear={() => table.resetRowSelection()}
-              countLabel={(count) => tBulk('selected', { count })}
-              actions={[
-                {
-                  id: 'delete',
-                  label: tBulk('delete'),
-                  icon: <Delete02Icon />,
-                  tone: 'destructive',
-                  onClick: () =>
-                    setBulk({
-                      ids: selected.map((row) => row.original.id),
-                      resetSelection: () => table.resetRowSelection(),
-                    }),
-                },
-              ]}
-            />
-          );
-        }}
+        fab={
+          canWrite
+            ? (table) => {
+                const selected = table.getSelectedRowModel().rows;
+                return (
+                  <BulkActionBar
+                    selectedCount={selected.length}
+                    onClear={() => table.resetRowSelection()}
+                    countLabel={(count) => tBulk('selected', { count })}
+                    actions={[
+                      {
+                        id: 'delete',
+                        label: tBulk('delete'),
+                        icon: <Delete02Icon />,
+                        tone: 'destructive',
+                        onClick: () =>
+                          setBulk({
+                            ids: selected.map((row) => row.original.id),
+                            resetSelection: () => table.resetRowSelection(),
+                          }),
+                      },
+                    ]}
+                  />
+                );
+              }
+            : undefined
+        }
         noResultsState={<TableNoResultsState onClearFilters={onClearFilters} />}
         empty={
           <EmptyState
@@ -253,10 +261,11 @@ export function CommissionTariffListTable({
             icon={DocumentValidationIcon}
             title={tEmpty('title')}
             description={tEmpty('description')}
+            // The platform sentence stands once, at the tab row; here the button is only disabled.
             action={
-              <Button leadingIcon={<CloudUploadIcon aria-hidden />} onClick={onUpload}>
-                {tEmpty('cta')}
-              </Button>
+              upload === UPLOAD_GATES.HIDDEN ? undefined : (
+                <CampaignUploadButton withNote={false} label={tEmpty('cta')} onClick={onUpload} />
+              )
             }
           />
         }

@@ -1,6 +1,6 @@
 'use client';
 
-import { CloudUploadIcon, Megaphone01Icon } from 'hugeicons-react';
+import { Megaphone01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -8,13 +8,15 @@ import { DataTableRowActions, type RowAction } from '@/components/patterns/data-
 import { TableNoResultsState } from '@/components/patterns/data-table-states';
 import { DefinitionList } from '@/components/patterns/definition-list';
 import { EmptyState } from '@/components/patterns/empty-state';
-import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
 
+import { UPLOAD_GATES } from '../lib/campaign-access';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import { useDescribeDiscountConfig } from '../lib/discount-config';
 import { statusForRow, type MarketplaceCampaignListRow } from '../lib/marketplace-campaign-list';
 
+import { CampaignUploadButton } from './campaign-upload-button';
 import { DiscountTypeBadge } from './discount-type-badge';
 import { MarketplaceCampaignFundingBadge } from './marketplace-campaign-funding-badge';
 import { MarketplaceCampaignPeriod } from './marketplace-campaign-period';
@@ -58,6 +60,7 @@ export function MarketplaceCampaignsMobileCards({
   const tEmpty = useTranslations('marketplaceCampaignsPage.list.empty');
   const tCommon = useTranslations('common');
   const describeConfig = useDescribeDiscountConfig();
+  const { upload } = useCampaignAccess();
 
   if (loading) {
     return (
@@ -77,10 +80,11 @@ export function MarketplaceCampaignsMobileCards({
         icon={Megaphone01Icon}
         title={tEmpty('title')}
         description={tEmpty('description')}
+        // The platform sentence stands once, at the tab row; here the button is only disabled.
         action={
-          <Button leadingIcon={<CloudUploadIcon aria-hidden />} onClick={onUpload}>
-            {tEmpty('cta')}
-          </Button>
+          upload === UPLOAD_GATES.HIDDEN ? undefined : (
+            <CampaignUploadButton withNote={false} label={tEmpty('cta')} onClick={onUpload} />
+          )
         }
       />
     );

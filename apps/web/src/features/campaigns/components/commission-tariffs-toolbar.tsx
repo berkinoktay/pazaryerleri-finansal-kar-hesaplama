@@ -23,6 +23,7 @@ import {
 
 import { useTariffFilterFields } from '../hooks/use-tariff-filter-fields';
 import type { TargetStrategy, TariffFilterState } from '../lib/bulk-actions';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import { tariffFilterStateFromRows, tariffRowsFromFilterState } from '../lib/tariff-filter-fields';
 
 export interface CommissionTariffsToolbarProps {
@@ -64,6 +65,8 @@ export function CommissionTariffsToolbar({
   const t = useTranslations('commissionTariffsPage');
   const [target, setTarget] = React.useState('10');
   const [strategy, setStrategy] = React.useState<TargetStrategy>('least-drop');
+  // Smart select only writes selections, so a member who cannot write does not get it.
+  const { canWrite } = useCampaignAccess();
 
   const filterFields = useTariffFilterFields(categories, brands);
   const filterRows = tariffRowsFromFilterState(filters);
@@ -88,58 +91,74 @@ export function CommissionTariffsToolbar({
         />
 
         {/* Smart select */}
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button variant="outline" size="sm">
-              {t('smartSelect.label')}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="gap-sm flex w-72 flex-col">
-            <Button variant="ghost" size="sm" className="justify-start" onClick={onBestAll}>
-              {t('smartSelect.bestAll')}
-            </Button>
-            <Button variant="ghost" size="sm" className="justify-start" onClick={onProfitableOnly}>
-              {t('smartSelect.profitableOnly')}
-            </Button>
-            <Separator />
-            <div className="gap-xs flex flex-col">
-              <Label className="text-xs font-medium">{t('smartSelect.byTargetTitle')}</Label>
-              <div className="gap-xs flex items-end">
-                <div className="gap-3xs flex flex-1 flex-col">
-                  <Label htmlFor="target-margin" className="text-2xs text-muted-foreground">
-                    {t('smartSelect.targetLabel')}
-                  </Label>
-                  <Input
-                    id="target-margin"
-                    inputMode="decimal"
-                    value={target}
-                    onChange={(event) => setTarget(event.target.value)}
-                  />
-                </div>
-                <Select
-                  value={strategy}
-                  onValueChange={(value: TargetStrategy) => setStrategy(value)}
-                >
-                  <SelectTrigger className="flex-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="least-drop">{t('smartSelect.strategyLeastDrop')}</SelectItem>
-                    <SelectItem value="max-profit">{t('smartSelect.strategyMaxProfit')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button size="sm" onClick={() => onTargetMargin(Number(target) || 0, strategy)}>
-                {t('smartSelect.apply')}
+        {canWrite ? (
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm">
+                {t('smartSelect.label')}
               </Button>
-            </div>
-            <Separator />
-            <Button variant="ghost" size="sm" className="justify-start" onClick={onClearSelections}>
-              {t('smartSelect.clear')}
-            </Button>
-            <p className="text-2xs text-muted-foreground">{t('smartSelect.scopeHint')}</p>
-          </PopoverContent>
-        </Popover>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="gap-sm flex w-72 flex-col">
+              <Button variant="ghost" size="sm" className="justify-start" onClick={onBestAll}>
+                {t('smartSelect.bestAll')}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="justify-start"
+                onClick={onProfitableOnly}
+              >
+                {t('smartSelect.profitableOnly')}
+              </Button>
+              <Separator />
+              <div className="gap-xs flex flex-col">
+                <Label className="text-xs font-medium">{t('smartSelect.byTargetTitle')}</Label>
+                <div className="gap-xs flex items-end">
+                  <div className="gap-3xs flex flex-1 flex-col">
+                    <Label htmlFor="target-margin" className="text-2xs text-muted-foreground">
+                      {t('smartSelect.targetLabel')}
+                    </Label>
+                    <Input
+                      id="target-margin"
+                      inputMode="decimal"
+                      value={target}
+                      onChange={(event) => setTarget(event.target.value)}
+                    />
+                  </div>
+                  <Select
+                    value={strategy}
+                    onValueChange={(value: TargetStrategy) => setStrategy(value)}
+                  >
+                    <SelectTrigger className="flex-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="least-drop">
+                        {t('smartSelect.strategyLeastDrop')}
+                      </SelectItem>
+                      <SelectItem value="max-profit">
+                        {t('smartSelect.strategyMaxProfit')}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button size="sm" onClick={() => onTargetMargin(Number(target) || 0, strategy)}>
+                  {t('smartSelect.apply')}
+                </Button>
+              </div>
+              <Separator />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="justify-start"
+                onClick={onClearSelections}
+              >
+                {t('smartSelect.clear')}
+              </Button>
+              <p className="text-2xs text-muted-foreground">{t('smartSelect.scopeHint')}</p>
+            </PopoverContent>
+          </Popover>
+        ) : null}
       </div>
 
       {/* Chip-row clear follows the epic-wide convention: CHIPS only — the

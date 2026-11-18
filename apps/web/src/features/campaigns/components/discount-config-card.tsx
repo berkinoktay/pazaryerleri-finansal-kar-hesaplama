@@ -7,6 +7,7 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 
 import type { DiscountListDetail } from '../api/get-discount-list-detail.api';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import { useDescribeDiscountConfig } from '../lib/discount-config';
 import { DiscountTypeBadge } from './discount-type-badge';
 
@@ -28,6 +29,8 @@ export function DiscountConfigCard({ list, onEdit }: DiscountConfigCardProps): R
   const t = useTranslations('discountsPage.configCard');
   const describe = useDescribeDiscountConfig();
   const formatter = useFormatter();
+  // Editing the config is a write: a member who cannot write reads the card without the button.
+  const { canWrite } = useCampaignAccess();
 
   // Deterministic parse of the server ISO strings (no `Date.now()`), so server + client render
   // byte-identical — the window shows only when both ends are present (the condition narrows both
@@ -55,15 +58,17 @@ export function DiscountConfigCard({ list, onEdit }: DiscountConfigCardProps): R
           ) : null}
         </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onEdit}
-          leadingIcon={<Edit02Icon aria-hidden />}
-          className="shrink-0"
-        >
-          {t('edit')}
-        </Button>
+        {canWrite ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onEdit}
+            leadingIcon={<Edit02Icon aria-hidden />}
+            className="shrink-0"
+          >
+            {t('edit')}
+          </Button>
+        ) : null}
       </div>
 
       <div className="gap-2xs text-2xs text-muted-foreground flex items-start">

@@ -25,11 +25,19 @@ vi.mock('sonner', () => ({
   toast: { error: toastError, success: toastSuccess, warning: toastWarning },
 }));
 
+// `CurrentScopeProvider` (mounted through `TestScope`) imports the router and two server actions.
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock('@/lib/active-store-actions', () => ({ setActiveStoreIdAction: vi.fn() }));
+vi.mock('@/lib/active-org-actions', () => ({ setActiveOrgIdAction: vi.fn() }));
+
+import { MemberRole, Platform } from '@pazarsync/db/enums';
+
 import type { CommissionTariffListItem } from '@/features/campaigns/api/list-tariffs.api';
 import { CommissionTariffsListClient } from '@/features/campaigns/components/commission-tariffs-list-client';
 import { QueryProvider } from '@/providers/query-provider';
 
 import trMessages from '../../../../messages/tr.json';
+import { TestScope, type TestScopeProps } from '../../../helpers/current-scope';
 import { HttpResponse, http, server } from '../../../helpers/msw';
 import { NuqsTestHarness } from '../../../helpers/nuqs';
 import { render, screen, waitFor, within } from '../../../helpers/render';
@@ -48,6 +56,8 @@ const UNKNOWN_COMMISSION_ROWS = 2;
 
 const LIST = trMessages.commissionTariffsPage.list;
 const UPLOAD = trMessages.commissionTariffsPage.upload;
+const NOTICE = trMessages.campaignAccess.readOnlyNotice;
+const UNSUPPORTED = trMessages.campaignUpload.errors.unsupportedPlatform;
 
 // Expected texts are built from the catalog, never typed.
 const tUpload = createTranslator({
@@ -99,14 +109,31 @@ function serve(body: JsonBodyType): void {
   );
 }
 
-function renderClient(): ReturnType<typeof render> {
+/** The member's role and the store's platform; defaults to an owner on Trendyol. */
+type ScopeOptions = Pick<TestScopeProps, 'role' | 'platform'>;
+
+function renderClient(scope: ScopeOptions = {}): ReturnType<typeof render> {
   // The real global error pipeline, so "no error toast" is a real check.
   return render(
     <NuqsTestHarness>
       <QueryProvider>
-        <CommissionTariffsListClient orgId={ORG_ID} storeId={STORE_ID} />
+        <TestScope orgId={ORG_ID} storeId={STORE_ID} {...scope}>
+          <CommissionTariffsListClient orgId={ORG_ID} storeId={STORE_ID} />
+        </TestScope>
       </QueryProvider>
     </NuqsTestHarness>,
+  );
+}
+
+/** Serves the list read only: the access cases never upload. */
+function serveList(): void {
+  server.use(http.get(BASE, () => HttpResponse.json({ data: [savedTariff()] })));
+}
+
+/** Waits until the saved tariff is listed in the table, so absence checks run on a loaded page. */
+async function waitForSavedRow(): Promise<void> {
+  await waitFor(() =>
+    expect(within(screen.getByRole('table')).getByText(savedTariff().name)).toBeInTheDocument(),
   );
 }
 
@@ -182,5 +209,48 @@ describe('<CommissionTariffsListClient> import', () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith(DETAIL_PATH));
     expect(toastWarning).not.toHaveBeenCalled();
     expect(toastError).not.toHaveBeenCalled();
+  });
+});
+
+describe('<CommissionTariffsListClient> access', () => {
+  it('shows a read-only member the notice and the saved tariff, with no upload', async () => {
+    serveList();
+    renderClient({ role: MemberRole.VIEWER });
+
+    await waitForSavedRow();
+    expect(screen.getByText(NOTICE)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: LIST.upload })).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('disables the upload with the platform sentence for a writer on an unsupported store', async () => {
+    serveList();
+    renderClient({ role: MemberRole.OWNER, platform: Platform.HEPSIBURADA });
+
+    await waitForSavedRow();
+    expect(screen.getByRole('button', { name: LIST.upload })).toBeDisabled();
+    expect(screen.getByText(UNSUPPORTED)).toBeInTheDocument();
+    expect(screen.queryByText(NOTICE)).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('shows a read-only member on an unsupported store the notice only', async () => {
+    serveList();
+    renderClient({ role: MemberRole.VIEWER, platform: Platform.HEPSIBURADA });
+
+    await waitForSavedRow();
+    expect(screen.getByText(NOTICE)).toBeInTheDocument();
+    expect(screen.queryByText(UNSUPPORTED)).toBeNull();
+    expect(screen.queryByRole('button', { name: LIST.upload })).toBeNull();
+  });
+
+  it('offers the lowest writing role an enabled upload and no notice', async () => {
+    serveList();
+    renderClient({ role: MemberRole.MEMBER });
+
+    await waitForSavedRow();
+    expect(screen.getByRole('button', { name: LIST.upload })).toBeEnabled();
+    expect(screen.queryByText(NOTICE)).toBeNull();
+    expect(screen.queryByText(UNSUPPORTED)).toBeNull();
   });
 });

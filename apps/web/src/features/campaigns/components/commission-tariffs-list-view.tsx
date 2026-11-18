@@ -1,6 +1,5 @@
 'use client';
 
-import { CloudUploadIcon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import { parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
@@ -8,7 +7,6 @@ import * as React from 'react';
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { FilterTabs } from '@/components/patterns/filter-tabs';
 import { PageHeader } from '@/components/patterns/page-header';
-import { Button } from '@/components/ui/button';
 
 import type { CommissionTariffListItem } from '../api/list-tariffs.api';
 import {
@@ -19,6 +17,8 @@ import {
 } from '../lib/commission-tariff-list';
 import type { TariffValidity } from '../types';
 
+import { CampaignReadOnlyNotice } from './campaign-read-only-notice';
+import { CampaignUploadButton } from './campaign-upload-button';
 import { CommissionTariffListSummary } from './commission-tariff-list-summary';
 import { CommissionTariffListTable } from './commission-tariff-list-table';
 import { useTariffRowActions } from './use-tariff-row-actions';
@@ -144,9 +144,7 @@ export function CommissionTariffsListView({
           { value: 'draft', label: tStatus('draft'), count: statusCounts.draft },
         ]}
       />
-      <Button size="sm" leadingIcon={<CloudUploadIcon aria-hidden />} onClick={onCreate}>
-        {tList('upload')}
-      </Button>
+      <CampaignUploadButton size="sm" label={tList('upload')} onClick={onCreate} />
     </div>
   );
 
@@ -165,6 +163,7 @@ export function CommissionTariffsListView({
         }
         summary={<CommissionTariffListSummary stats={stats} loading={loading} />}
       />
+      <CampaignReadOnlyNotice />
 
       <CommissionTariffListTable
         rows={filtered}

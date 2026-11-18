@@ -1,7 +1,7 @@
 'use client';
 
 import { type ColumnDef } from '@tanstack/react-table';
-import { CloudUploadIcon, Delete02Icon, Megaphone01Icon } from 'hugeicons-react';
+import { Delete02Icon, Megaphone01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -17,13 +17,15 @@ import {
 import { TableNoResultsState } from '@/components/patterns/data-table-states';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
 import { EmptyState } from '@/components/patterns/empty-state';
-import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
 
+import { UPLOAD_GATES } from '../lib/campaign-access';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import { useDescribeDiscountConfig } from '../lib/discount-config';
 import { statusForRow, type MarketplaceCampaignListRow } from '../lib/marketplace-campaign-list';
 
+import { CampaignUploadButton } from './campaign-upload-button';
 import { DiscountTypeBadge } from './discount-type-badge';
 import { MarketplaceCampaignFundingBadge } from './marketplace-campaign-funding-badge';
 import { MarketplaceCampaignPeriod } from './marketplace-campaign-period';
@@ -78,6 +80,8 @@ export function MarketplaceCampaignsTable({
   const tEmpty = useTranslations('marketplaceCampaignsPage.list.empty');
   const tBulk = useTranslations('marketplaceCampaignsPage.list.bulk');
   const describeConfig = useDescribeDiscountConfig();
+  // Row selection exists only for bulk delete, so a member who cannot write gets no checkboxes.
+  const { canWrite, upload } = useCampaignAccess();
 
   // Holds the ids to bulk-delete plus a reset bound to the live table instance, so confirming
   // the delete also clears row selection (the raw rowSelection record isn't auto-pruned when the
@@ -86,32 +90,33 @@ export function MarketplaceCampaignsTable({
     null,
   );
 
-  const columns = React.useMemo<ColumnDef<MarketplaceCampaignListRow>[]>(
-    () => [
-      {
-        id: 'select',
-        enableSorting: false,
-        enableHiding: false,
-        header: ({ table }) => (
-          <Checkbox
-            checked={
-              table.getIsAllPageRowsSelected() ||
-              (table.getIsSomePageRowsSelected() && 'indeterminate')
-            }
-            onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-            aria-label={tList('selectAll')}
-            className="cursor-pointer"
-          />
-        ),
-        cell: ({ row }) => (
-          <Checkbox
-            checked={row.getIsSelected()}
-            onCheckedChange={(value) => row.toggleSelected(!!value)}
-            aria-label={tList('selectRow')}
-            className="cursor-pointer"
-          />
-        ),
-      },
+  const columns = React.useMemo<ColumnDef<MarketplaceCampaignListRow>[]>(() => {
+    const selectColumn: ColumnDef<MarketplaceCampaignListRow> = {
+      id: 'select',
+      enableSorting: false,
+      enableHiding: false,
+      header: ({ table }) => (
+        <Checkbox
+          checked={
+            table.getIsAllPageRowsSelected() ||
+            (table.getIsSomePageRowsSelected() && 'indeterminate')
+          }
+          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+          aria-label={tList('selectAll')}
+          className="cursor-pointer"
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox
+          checked={row.getIsSelected()}
+          onCheckedChange={(value) => row.toggleSelected(!!value)}
+          aria-label={tList('selectRow')}
+          className="cursor-pointer"
+        />
+      ),
+    };
+    return [
+      ...(canWrite ? [selectColumn] : []),
       {
         id: 'name',
         header: () => tCols('name'),
@@ -195,9 +200,8 @@ export function MarketplaceCampaignsTable({
         cell: ({ row }) => <MarketplaceCampaignStatusBadge status={statusForRow(row.original)} />,
       },
       createRowActionsColumn<MarketplaceCampaignListRow>(actions),
-    ],
-    [tCols, tList, describeConfig, actions],
-  );
+    ];
+  }, [canWrite, tCols, tList, describeConfig, actions]);
 
   return (
     <>
@@ -206,7 +210,7 @@ export function MarketplaceCampaignsTable({
         data={rows}
         loading={loading}
         getRowId={(row) => row.id}
-        enableRowSelection
+        enableRowSelection={canWrite}
         onRowClick={(row) => onOpen(row.id)}
         hasActiveFilters={hasActiveFilters}
         onClearFilters={onClearFilters}
@@ -223,29 +227,33 @@ export function MarketplaceCampaignsTable({
           />
         )}
         pagination={(table) => <DataTablePagination table={table} />}
-        fab={(table) => {
-          const selected = table.getSelectedRowModel().rows;
-          return (
-            <BulkActionBar
-              selectedCount={selected.length}
-              onClear={() => table.resetRowSelection()}
-              countLabel={(count) => tBulk('selected', { count })}
-              actions={[
-                {
-                  id: 'delete',
-                  label: tBulk('delete'),
-                  icon: <Delete02Icon />,
-                  tone: 'destructive',
-                  onClick: () =>
-                    setBulk({
-                      ids: selected.map((row) => row.original.id),
-                      resetSelection: () => table.resetRowSelection(),
-                    }),
-                },
-              ]}
-            />
-          );
-        }}
+        fab={
+          canWrite
+            ? (table) => {
+                const selected = table.getSelectedRowModel().rows;
+                return (
+                  <BulkActionBar
+                    selectedCount={selected.length}
+                    onClear={() => table.resetRowSelection()}
+                    countLabel={(count) => tBulk('selected', { count })}
+                    actions={[
+                      {
+                        id: 'delete',
+                        label: tBulk('delete'),
+                        icon: <Delete02Icon />,
+                        tone: 'destructive',
+                        onClick: () =>
+                          setBulk({
+                            ids: selected.map((row) => row.original.id),
+                            resetSelection: () => table.resetRowSelection(),
+                          }),
+                      },
+                    ]}
+                  />
+                );
+              }
+            : undefined
+        }
         noResultsState={<TableNoResultsState onClearFilters={onClearFilters} />}
         empty={
           <EmptyState
@@ -253,10 +261,11 @@ export function MarketplaceCampaignsTable({
             icon={Megaphone01Icon}
             title={tEmpty('title')}
             description={tEmpty('description')}
+            // The platform sentence stands once, at the tab row; here the button is only disabled.
             action={
-              <Button leadingIcon={<CloudUploadIcon aria-hidden />} onClick={onUpload}>
-                {tEmpty('cta')}
-              </Button>
+              upload === UPLOAD_GATES.HIDDEN ? undefined : (
+                <CampaignUploadButton withNote={false} label={tEmpty('cta')} onClick={onUpload} />
+              )
             }
           />
         }

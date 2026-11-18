@@ -1,6 +1,5 @@
 'use client';
 
-import { CloudUploadIcon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import { parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
@@ -9,7 +8,6 @@ import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { FilterTabs } from '@/components/patterns/filter-tabs';
 import { PageHeader } from '@/components/patterns/page-header';
 import { SearchInput } from '@/components/patterns/search-input';
-import { Button } from '@/components/ui/button';
 
 import type { MarketplaceCampaignListItem } from '../api/list-marketplace-campaigns.api';
 import {
@@ -20,6 +18,8 @@ import {
   type MarketplaceCampaignListRow,
 } from '../lib/marketplace-campaign-list';
 
+import { CampaignReadOnlyNotice } from './campaign-read-only-notice';
+import { CampaignUploadButton } from './campaign-upload-button';
 import { MarketplaceCampaignsMobileCards } from './marketplace-campaigns-mobile-cards';
 import { MarketplaceCampaignsSummary } from './marketplace-campaigns-summary';
 import { MarketplaceCampaignsTable } from './marketplace-campaigns-table';
@@ -143,9 +143,7 @@ export function MarketplaceCampaignsListView({
           { value: 'pending', label: tListStatus('pending'), count: statusCounts.pending },
         ]}
       />
-      <Button size="sm" leadingIcon={<CloudUploadIcon aria-hidden />} onClick={onCreate}>
-        {tList('upload')}
-      </Button>
+      <CampaignUploadButton size="sm" label={tList('upload')} onClick={onCreate} />
     </div>
   );
 
@@ -164,6 +162,7 @@ export function MarketplaceCampaignsListView({
         }
         summary={<MarketplaceCampaignsSummary stats={stats} loading={loading} />}
       />
+      <CampaignReadOnlyNotice />
 
       <div className="hidden min-w-0 md:block">
         <MarketplaceCampaignsTable

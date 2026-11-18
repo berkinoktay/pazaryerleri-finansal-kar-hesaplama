@@ -16,6 +16,7 @@ import type {
   CampaignScenarioPresentation,
   MarketplaceCampaignRow,
 } from '../lib/adapt-marketplace-campaign';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import {
   campaignRowBestOption,
   customOptionFigures,
@@ -77,6 +78,7 @@ export function MarketplaceCampaignCustomPriceCell({
   const scale = useMarginColoring();
   const errorId = React.useId();
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
+  const { canWrite } = useCampaignAccess();
   // An open breakdown prices the input at once — the saved price included.
   const whatIf = useCustomPriceWhatIf(row, price, breakdownOpen);
 
@@ -135,8 +137,11 @@ export function MarketplaceCampaignCustomPriceCell({
           aria-invalid={error !== null}
           aria-describedby={error !== null ? errorId : undefined}
           aria-label={t('customPriceAria', { product: row.productTitle })}
-          placeholder={t('enterPrice')}
+          // A member who cannot write is not invited to type a price.
+          placeholder={canWrite ? t('enterPrice') : undefined}
           className="md:max-w-input-price w-full"
+          // A member who cannot write still reads a stored price, but cannot type one.
+          disabled={!canWrite}
         />
         {error !== null ? (
           <span id={errorId} className="text-2xs text-destructive">
@@ -148,11 +153,11 @@ export function MarketplaceCampaignCustomPriceCell({
             commissionPct={commissionPct}
             commissionBands={row.commissionBands}
           />
-        ) : (
+        ) : canWrite ? (
           <span className="text-2xs text-muted-foreground">
             {t('customPriceCeilingHint', { price: ceiling })}
           </span>
-        )}
+        ) : null}
         {targetMarginMark !== null ? (
           <span className="gap-3xs text-2xs text-warning flex items-start">
             <Alert02Icon className="size-icon-xs mt-3xs shrink-0" aria-hidden />

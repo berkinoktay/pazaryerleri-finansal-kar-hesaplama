@@ -1,6 +1,5 @@
 'use client';
 
-import { CloudUploadIcon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import { parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
@@ -8,7 +7,6 @@ import * as React from 'react';
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { FilterTabs } from '@/components/patterns/filter-tabs';
 import { PageHeader } from '@/components/patterns/page-header';
-import { Button } from '@/components/ui/button';
 
 import type { FlashProductListItem } from '../api/list-flash-products.api';
 import {
@@ -19,6 +17,8 @@ import {
   type FlashProductListRow,
 } from '../lib/flash-product-list';
 
+import { CampaignReadOnlyNotice } from './campaign-read-only-notice';
+import { CampaignUploadButton } from './campaign-upload-button';
 import { FlashProductListSummary } from './flash-product-list-summary';
 import { FlashProductListTable } from './flash-product-list-table';
 import { useFlashProductRowActions } from './use-flash-product-row-actions';
@@ -140,9 +140,7 @@ export function FlashProductsListView({
           { value: 'pending', label: tListStatus('pending'), count: statusCounts.pending },
         ]}
       />
-      <Button size="sm" leadingIcon={<CloudUploadIcon aria-hidden />} onClick={onCreate}>
-        {tList('upload')}
-      </Button>
+      <CampaignUploadButton size="sm" label={tList('upload')} onClick={onCreate} />
     </div>
   );
 
@@ -161,6 +159,7 @@ export function FlashProductsListView({
         }
         summary={<FlashProductListSummary stats={stats} loading={loading} />}
       />
+      <CampaignReadOnlyNotice />
 
       <FlashProductListTable
         rows={filtered}

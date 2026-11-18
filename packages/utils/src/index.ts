@@ -46,6 +46,7 @@ export {
   type WorkbookUploadFileCode,
 } from './workbook-codes';
 export { WORKBOOK_PAGES, type WorkbookPage } from './workbook-pages';
+export { hasWorkbookFormat, WORKBOOK_PAGE_PLATFORMS } from './workbook-platforms';
 export {
   planWindowFiles,
   TARIFF_WEEK_DAYS,

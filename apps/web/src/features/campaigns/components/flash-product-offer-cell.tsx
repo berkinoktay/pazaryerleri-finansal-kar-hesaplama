@@ -13,6 +13,7 @@ import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { useEstimateFlashItemPrice } from '../hooks/use-estimate-flash-item-price';
 import { useFlashReasonEmptyLabel } from '../hooks/use-flash-reason-label';
 import { type FlashBand, type FlashProductRow } from '../lib/adapt-flash-product';
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import { useTariffScope } from '../lib/tariff-scope';
 import { FlashProductBreakdown } from './flash-product-breakdown';
 import { TariffBestRibbon } from './tariff-best-ribbon';
@@ -76,6 +77,7 @@ export function FlashProductOfferCell({
   const scope = useTariffScope();
   const estimate = useEstimateFlashItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
+  const { canWrite } = useCampaignAccess();
 
   function openBreakdown(): void {
     setBreakdownOpen(true);
@@ -95,18 +97,21 @@ export function FlashProductOfferCell({
       : null;
 
   return (
-    <TariffOptionCard selected={selected} interactive>
+    <TariffOptionCard selected={selected} interactive={canWrite}>
       {/* Stretched-overlay select target. Sibling of the ProfitBadge (never an ancestor)
-          so the badge's own <button> is not nested inside it. */}
-      <button
-        type="button"
-        aria-pressed={selected}
-        aria-label={selected ? t('offerSelected') : t('selectOffer', { slot: slotLabel })}
-        onClick={onSelect}
-        // Tailwind v4 strips the native button cursor; the overlay covers the whole card,
-        // so its cursor is what the seller sees hovering the offer.
-        className="focus-visible:shadow-focus absolute inset-0 cursor-pointer rounded-md focus-visible:outline-none"
-      />
+          so the badge's own <button> is not nested inside it. Absent for a member who
+          cannot write. */}
+      {canWrite ? (
+        <button
+          type="button"
+          aria-pressed={selected}
+          aria-label={selected ? t('offerSelected') : t('selectOffer', { slot: slotLabel })}
+          onClick={onSelect}
+          // Tailwind v4 strips the native button cursor; the overlay covers the whole card,
+          // so its cursor is what the seller sees hovering the offer.
+          className="focus-visible:shadow-focus absolute inset-0 cursor-pointer rounded-md focus-visible:outline-none"
+        />
+      ) : null}
 
       {/* "En kârlı" — a featured ribbon straddling the top border. Absolute, so it adds NO
           height. pointer-events-none → clicking it still chooses via the overlay. */}

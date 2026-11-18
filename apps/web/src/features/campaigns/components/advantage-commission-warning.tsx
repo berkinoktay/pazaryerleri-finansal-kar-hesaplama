@@ -7,6 +7,7 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Link } from '@/i18n/navigation';
 
+import { useCampaignAccess } from '../lib/campaign-access-context';
 import type { CommissionSourceMode } from '../types';
 
 const COMMISSION_TARIFFS_PATH = '/campaigns/product-commission-tariffs';
@@ -34,9 +35,17 @@ export function AdvantageCommissionWarning({
   hasUnmatchedCommissionProducts,
 }: AdvantageCommissionWarningProps): React.ReactElement | null {
   const t = useTranslations('productLabelsPage.commissionWarning');
+  // A member who cannot write cannot upload the Commission Excel the banner asks for, so it is
+  // not shown to them (the read-only notice already says why nothing can change here).
+  const { canWrite } = useCampaignAccess();
   const [dismissed, setDismissed] = React.useState(false);
 
-  if (commissionSourceMode !== 'category' || !hasUnmatchedCommissionProducts || dismissed) {
+  if (
+    !canWrite ||
+    commissionSourceMode !== 'category' ||
+    !hasUnmatchedCommissionProducts ||
+    dismissed
+  ) {
     return null;
   }
 

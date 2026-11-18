@@ -10,9 +10,17 @@ vi.mock('@/i18n/navigation', () => ({
   ),
 }));
 
+// `CurrentScopeProvider` (mounted through `TestScope`) imports the router and two server actions.
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock('@/lib/active-store-actions', () => ({ setActiveStoreIdAction: vi.fn() }));
+vi.mock('@/lib/active-org-actions', () => ({ setActiveOrgIdAction: vi.fn() }));
+
+import { MemberRole } from '@pazarsync/db/enums';
+
 import { DiscountDetailClient } from '@/features/campaigns/components/discount-detail-client';
 
 import trMessages from '../../../../messages/tr.json';
+import { TestScope, type TestScopeProps } from '../../../helpers/current-scope';
 import { NuqsTestHarness } from '../../../helpers/nuqs';
 import { HttpResponse, http, server } from '../../../helpers/msw';
 import { render, screen, waitFor, within } from '../../../helpers/render';
@@ -207,10 +215,15 @@ function findProfitBadge(amountText: string): HTMLElement {
   return badge;
 }
 
-function renderClient() {
+/** The member's role; defaults to an owner on Trendyol. */
+type ScopeOptions = Pick<TestScopeProps, 'role'>;
+
+function renderClient(scope: ScopeOptions = {}) {
   return render(
     <NuqsTestHarness>
-      <DiscountDetailClient orgId={ORG_ID} storeId={STORE_ID} listId={LIST_ID} />
+      <TestScope orgId={ORG_ID} storeId={STORE_ID} {...scope}>
+        <DiscountDetailClient orgId={ORG_ID} storeId={STORE_ID} listId={LIST_ID} />
+      </TestScope>
     </NuqsTestHarness>,
   );
 }
@@ -407,5 +420,44 @@ describe('DiscountDetailClient — settlement scenario in the breakdown footer',
     // ...but the order-level profit row AND its single-parcel note are omitted (orderNetProfit null).
     expect(modal.queryByText(withQty(SCENARIO_LABELS.orderProfit, 2))).toBeNull();
     expect(modal.queryByText(withQty(SCENARIO_LABELS.singleParcelNote, 2))).toBeNull();
+  });
+});
+
+describe('DiscountDetailClient — access', () => {
+  const PAGE = trMessages.discountsPage;
+  const NOTICE = trMessages.campaignAccess.readOnlyNotice;
+
+  it('shows a read-only member the notice and the rows, with no write control', async () => {
+    server.use(
+      http.get(DETAIL_URL, () => HttpResponse.json(detailResponse())),
+      http.post(ESTIMATE_URL, () => HttpResponse.json(estimateResult('current'))),
+    );
+    const { user } = renderClient({ role: MemberRole.VIEWER });
+    await waitForLoaded();
+
+    expect(screen.getByText(NOTICE)).toBeInTheDocument();
+    expect(screen.queryAllByRole('button', { name: PAGE.actions.saveAndDownload })).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: PAGE.templates.delete })).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: PAGE.configCard.edit })).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: PAGE.smartSelect.label })).toHaveLength(0);
+
+    // The participation checkbox (desktop + mobile) stays visible but cannot be changed.
+    const boxes = screen.getAllByRole('checkbox', { name: PAGE.table.includeRow });
+    expect(boxes.length).toBeGreaterThan(0);
+    for (const box of boxes) expect(box).toBeDisabled();
+
+    // Reads keep working: the profit badge still opens the breakdown.
+    await user.click(findProfitBadge('25,00'));
+    expect(await screen.findByText(BREAKDOWN_TITLE)).toBeInTheDocument();
+  });
+
+  it('offers the lowest writing role save and delete, with no notice', async () => {
+    server.use(http.get(DETAIL_URL, () => HttpResponse.json(detailResponse())));
+    renderClient({ role: MemberRole.MEMBER });
+    await waitForLoaded();
+
+    expect(screen.getByRole('button', { name: PAGE.actions.saveAndDownload })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: PAGE.templates.delete })).toBeInTheDocument();
+    expect(screen.queryByText(NOTICE)).toBeNull();
   });
 });

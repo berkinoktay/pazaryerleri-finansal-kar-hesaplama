@@ -851,6 +851,9 @@
       "MARKETPLACE_CAMPAIGN_LIST": "Campaigns"
     }
   },
+  "campaignAccess": {
+    "readOnlyNotice": "You can view these pages but cannot change them. Ask the owner of your organization for edit access."
+  },
   "commissionTariffsPage": {
     "selectionRefused": "Your choices could not be saved because one of them is no longer valid for its product. Reload the page and choose again.",
     "search": "Search product, model or barcode",
