@@ -21,6 +21,7 @@ import {
   SpreadsheetFileError,
   type CellValue,
   type ColumnKey,
+  type ResolvedBlock,
   type ResolvedLayout,
   type SheetData,
 } from '@pazarsync/spreadsheet';
@@ -51,6 +52,7 @@ import {
 } from '@/workbooks/write-columns';
 
 import { canonicalJson, sha256Hex } from '../../../helpers/canonical-json';
+import { blockColumn, blockLookup, blocksOf } from '../../../helpers/layout-blocks';
 import {
   derivedGrid,
   PLUS_CANCEL_NUMBER_ONE,
@@ -274,6 +276,11 @@ function column(layout: ResolvedLayout, key: PlusColumn): number | null {
   return columnIndex(format.layout, layout, key);
 }
 
+/** The first period block of a layout; throws when the layout holds none. */
+function firstPeriod(layout: ResolvedLayout): ResolvedBlock {
+  return present(blocksOf(format.layout, layout, 'periods')[0], 'first period block');
+}
+
 interface GoldenDigest {
   readonly keptRows: number;
   readonly skippedRows: number;
@@ -353,24 +360,24 @@ describe('Trendyol Plus commission tariff format: headers', () => {
     }
     // One 7-day period: its offer sits right after its label, and its computed
     // commission column is found by "Hesaplanan Komisyon (7 Gun)".
-    const blocks = layout.blocks.get('periods') ?? [];
-    expect(blocks.map((block) => block.tag)).toEqual([7]);
-    expect(blocks[0]?.columns.get('label')).toBe(LABEL_COL);
-    expect(blocks[0]?.columns.get('offer')).toBe(OFFER_COL);
-    expect(blocks[0]?.lookups.get('computedCommission')).toBe(COMPUTED_COL);
+    expect(blocksOf(format.layout, layout, 'periods').map((block) => block.tag)).toEqual([7]);
+    const period = firstPeriod(layout);
+    expect(blockColumn(format.layout, 'periods', period, 'label')).toBe(LABEL_COL);
+    expect(blockColumn(format.layout, 'periods', period, 'offer')).toBe(OFFER_COL);
+    expect(blockLookup(format.layout, 'periods', period, 'computedCommission')).toBe(COMPUTED_COL);
   });
 
   it('resolves both periods of the two-period header, offer and computed commission per period', () => {
     const layout = present(headerLayout(PLUS_HEADER_MULTI), 'layout');
 
     // Two periods in sheet order; the trailing decoys open none.
-    const blocks = layout.blocks.get('periods') ?? [];
+    const blocks = blocksOf(format.layout, layout, 'periods');
     expect(
       blocks.map((block) => [
         block.tag,
-        block.columns.get('label'),
-        block.columns.get('offer'),
-        block.lookups.get('computedCommission'),
+        blockColumn(format.layout, 'periods', block, 'label'),
+        blockColumn(format.layout, 'periods', block, 'offer'),
+        blockLookup(format.layout, 'periods', block, 'computedCommission'),
       ]),
     ).toEqual([
       [3, 13, 14, 21],
@@ -391,7 +398,9 @@ describe('Trendyol Plus commission tariff format: headers', () => {
       'layout',
     );
 
-    expect(layout.blocks.get('periods')?.[0]?.lookups.get('computedCommission')).toBeNull();
+    expect(
+      blockLookup(format.layout, 'periods', firstPeriod(layout), 'computedCommission'),
+    ).toBeNull();
   });
 
   it('resolves the lower-case spelling of the period header', () => {
@@ -401,7 +410,7 @@ describe('Trendyol Plus commission tariff format: headers', () => {
       'layout',
     );
 
-    expect(layout.blocks.get('periods')?.map((block) => block.tag)).toEqual([7]);
+    expect(blocksOf(format.layout, layout, 'periods').map((block) => block.tag)).toEqual([7]);
   });
 
   it('does not resolve when the column after a period label is not the offer column', () => {
@@ -937,7 +946,9 @@ describe('Trendyol Plus commission tariff format: a value the export could not w
   it('refuses a negative period offer with MALFORMED_SHEET unwritable-value', async () => {
     const file = withCell(OFFER_COL, '-1');
     const selection = await realSelection(file);
-    expect(selection.layout.blocks.get('periods')?.[0]?.columns.get('offer')).toBe(OFFER_COL);
+    expect(blockColumn(format.layout, 'periods', firstPeriod(selection.layout), 'offer')).toBe(
+      OFFER_COL,
+    );
 
     await expectUnwritable(file, '-1');
   });

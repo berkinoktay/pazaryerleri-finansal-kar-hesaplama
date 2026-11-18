@@ -36,6 +36,7 @@ import { trendyolCommissionTariffFormat } from '@/workbooks/formats/trendyol/com
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrder, createOrganization } from '../../helpers/factories';
+import { blockColumn, blocksOf } from '../../helpers/layout-blocks';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
@@ -428,8 +429,8 @@ async function withPresentPeriodDays(days: number): Promise<Buffer> {
   if (layout === null) throw new Error('unreadable commission fixture');
   const headerRow = grid[layout.headerRowIndex] ?? [];
   const firstRow = grid[layout.headerRowIndex + 1] ?? [];
-  const present = (layout.blocks.get('periods') ?? []).find(
-    (block) => cellText(firstRow, block.columns.get('label') ?? null) !== null,
+  const present = blocksOf(format.layout, layout, 'periods').find(
+    (block) => cellText(firstRow, blockColumn(format.layout, 'periods', block, 'label')) !== null,
   );
   if (present === undefined) throw new Error('the fixture has no present period');
   const headerText = cellText(headerRow, present.anchor);
@@ -452,7 +453,8 @@ async function withPresentPeriodDays(days: number): Promise<Buffer> {
     format.layout,
     await readWorkbookGrid(file, { sheet: format.sheet }),
   );
-  expect((reread?.blocks.get('periods') ?? []).map((block) => block.tag)).toContain(days);
+  if (reread === null) throw new Error('the rewritten commission fixture does not resolve');
+  expect(blocksOf(format.layout, reread, 'periods').map((block) => block.tag)).toContain(days);
   return file;
 }
 
@@ -500,17 +502,19 @@ function fillFirstPeriodPatches(
   layout: ResolvedLayout,
   firstRow: CellRow,
 ): Omit<CellPatch, 'excelRow'>[] {
-  const block = layout.blocks.get('periods')?.[0];
-  const label = block?.columns.get('label');
-  if (block === undefined || label === undefined) throw new Error('no first period block');
+  const spec = trendyolCommissionTariffFormat.layout;
+  const block = blocksOf(spec, layout, 'periods')[0];
+  if (block === undefined) throw new Error('no first period block');
+  const label = blockColumn(spec, 'periods', block, 'label');
   expect(cellText(firstRow, label)).toBeNull();
   const patches: Omit<CellPatch, 'excelRow'>[] = [
     { col: label, value: { kind: 'text', value: FIRST_PERIOD_LABEL } },
   ];
   for (const [key, value] of FIRST_PERIOD_COMMS) {
-    const col = block.columns.get(key);
-    if (col === undefined) throw new Error(`no first period column ${key}`);
-    patches.push({ col, value: { kind: 'number', value } });
+    patches.push({
+      col: blockColumn(spec, 'periods', block, key),
+      value: { kind: 'number', value },
+    });
   }
   return patches;
 }

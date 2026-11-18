@@ -15,9 +15,10 @@ import {
   type EntryContentKind,
   type FormulaScanBudget,
 } from './content-scan';
+import type { PackageCensusCollector } from './package-census';
 import { cutRootChildren, literalAttributeText, type ChildSelector } from './patch/calc-chain';
 import { entryNameByteLength, readZipLayout, type ZipLayout } from './patch/raw-zip';
-import { UPLOAD_LIMIT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
+import { UNSAFE_CONTENT_DETAILS, UPLOAD_LIMIT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
 import { foldAsciiCase, metaEntryName, viewMismatch } from './patch/shared';
 import { localNameIs, NAMESPACE_DECLARATION, type XmlMarkup } from './patch/xml-lexer';
 import { assertSameViews } from './patch/zip-views';
@@ -569,7 +570,11 @@ function chargeXmlPart(name: string, bytes: Uint8Array, weight: XmlDomWeight): v
         throw new SpreadsheetFileError(
           'UNSAFE_CONTENT',
           `Workbook part '${name}' has an element name longer than ${MAX_XML_NAME_LENGTH}B`,
-          { entry: name, cap: MAX_XML_NAME_LENGTH },
+          {
+            detail: UNSAFE_CONTENT_DETAILS.ELEMENT_NAME_LENGTH,
+            entry: name,
+            cap: MAX_XML_NAME_LENGTH,
+          },
         );
       }
       continue;
@@ -693,16 +698,19 @@ function namesWorkbookPart(
  * (an external one included), and for a Type that is an officeDocument type only once
  * trimmed and ASCII-folded (a loose reader would follow it). The TargetMode is read once
  * (relationshipTargetMode: any value but `Internal` or `External` is refused, named
- * `root-rels` by the caller).
+ * `root-rels` by the caller). Records the Type it reads in `census`, when given: the
+ * package walk of unsafe-parts.ts does not read this part.
  */
 function isWorkbookRelationship(
   bytes: Uint8Array,
   markup: XmlMarkup,
   attributes: readonly number[],
+  census: PackageCensusCollector | undefined,
 ): boolean {
   assertRelationshipElementSpelling(bytes, markup, ROOT_RELS_PART);
   if (!localNameIs(bytes, markup, RELATIONSHIP)) return false;
   const type = literalAttributeText(bytes, markup, attributes, TYPE_ATTRIBUTE, ROOT_RELS_PART);
+  census?.addRelationshipType(type);
   if (type === null) {
     const mode = relationshipTargetMode(bytes, markup, attributes, ROOT_RELS_PART);
     assertSafeTarget(bytes, markup, attributes, type, mode, ROOT_RELS_PART, ROOT_RELS_SOURCE);
@@ -730,12 +738,16 @@ function isWorkbookRelationship(
 /**
  * The officeDocument relationships of the root relationships part, every one checked;
  * its root and every child named a relationships element only in another ASCII case
- * refused (assertRelationshipElementSpelling).
+ * refused (assertRelationshipElementSpelling). Every Type it reads is recorded in
+ * `census`, when given.
  */
-function workbookRelationshipCount(bytes: Uint8Array): number {
+function workbookRelationshipCount(
+  bytes: Uint8Array,
+  census: PackageCensusCollector | undefined,
+): number {
   let count = 0;
   const countWorkbookRelationship: ChildSelector = (markup, attributes) => {
-    if (isWorkbookRelationship(bytes, markup, attributes)) count += 1;
+    if (isWorkbookRelationship(bytes, markup, attributes, census)) count += 1;
     return false;
   };
   cutRootChildren(
@@ -764,12 +776,14 @@ function workbookRelationshipCount(bytes: Uint8Array): number {
  * named in another ASCII case), markup outside the lexer's subset or a value it cannot
  * compare included: CORRUPT_FILE `root-rels`.
  * So is an entry whose name is `_rels/.rels` only once ASCII-folded (OPC folds part
- * names): the gate must not ignore a part another reader may follow.
+ * names): the gate must not ignore a part another reader may follow. Every Relationship
+ * Type of the walk is recorded in `census`, when given.
  */
 function assertRootRelationships(
   names: ReadonlySet<string>,
   rootRels: Uint8Array | null,
   budget: FormulaScanBudget,
+  census: PackageCensusCollector | undefined,
 ): void {
   for (const name of names) {
     if (name === ROOT_RELS_PART || foldAsciiCase(name) !== ROOT_RELS_PART) continue;
@@ -779,7 +793,7 @@ function assertRootRelationships(
   // The UTF-8 text rule of every kept XML part, then the content scan, then the walk.
   readingRootRels(() => assertUtf8Text(ROOT_RELS_PART, rootRels));
   assertSafeXmlPart(ROOT_RELS_PART, rootRels, NO_HYPERLINK_IDS, budget);
-  const count = readingRootRels(() => workbookRelationshipCount(rootRels));
+  const count = readingRootRels(() => workbookRelationshipCount(rootRels, census));
   if (count === 0) {
     throw rootRelsError(ROOT_RELS_PART, 'Root relationships part names no office document');
   }
@@ -859,9 +873,9 @@ export function openUpload(file: Uint8Array, opts: GuardOpts): UploadParts {
  *      only when the hyperlink's relationship id is one of the external hyperlink ids
  *      of step 10, and no other element naming one of them. Linear in bytes the stream
  *      already capped; no DOM is built. The formula fields the content scans of steps
- *      10, 11 and 14 read, raw and in NFKC form, are charged to one budget per upload,
- *      MAX_FORMULA_SCAN_UNITS or the caller's lower `maxFormulaScanUnits`
- *      (PAYLOAD_TOO_LARGE `formula-scan-budget` beyond it).
+ *      10, 11 and 14 read, raw plus the NFKC form when it differs, are charged to one
+ *      budget per upload, MAX_FORMULA_SCAN_UNITS or the caller's lower
+ *      `maxFormulaScanUnits` (PAYLOAD_TOO_LARGE `formula-scan-budget` beyond it).
  *  12. selectReaderParts: the parts the reader opens (the workbook rels, the
  *      workbook, and the styles, shared strings and worksheet parts the rels name),
  *      each checked on its raw bytes before any DOM is built: the DOM weight of all
@@ -875,10 +889,19 @@ export function openUpload(file: Uint8Array, opts: GuardOpts): UploadParts {
  *  14. assertRootRelationships: the root relationships part is UTF-8 text, passes the
  *      content scan (its one scan) and names xl/workbook.xml (CORRUPT_FILE `root-rels`).
  *
+ * With `census` (the package census, package-census.ts), steps 10 and 14 record every
+ * ContentType and every Relationship Type they read (the content types part, every walked
+ * relationships part and the root relationships part), in the pass they already make.
+ * Without it nothing changes for a read or a patch.
+ *
  * Throws SpreadsheetFileError on any violation. INTERNAL: not part of the public
  * package surface.
  */
-export function openUploadWithLayout(file: Uint8Array, opts: GuardOpts): OpenedUpload {
+export function openUploadWithLayout(
+  file: Uint8Array,
+  opts: GuardOpts,
+  census?: PackageCensusCollector,
+): OpenedUpload {
   // 1. Compressed size cap
   if (file.length > opts.maxBytes) {
     throw new SpreadsheetFileError(
@@ -938,6 +961,7 @@ export function openUploadWithLayout(file: Uint8Array, opts: GuardOpts): OpenedU
     streamed.contents,
     scanPlan,
     formulaBudget,
+    census,
   );
 
   // 11. Every kept XML part, the reader's or not: UTF-8 text, then the content scan of
@@ -952,6 +976,6 @@ export function openUploadWithLayout(file: Uint8Array, opts: GuardOpts): OpenedU
   assertSameViews(file, layout, keptXmlParts(streamed));
 
   // 14. The root relationships name the workbook the reader opens.
-  assertRootRelationships(streamed.names, streamed.rootRels, formulaBudget);
+  assertRootRelationships(streamed.names, streamed.rootRels, formulaBudget, census);
   return { parts, layout };
 }

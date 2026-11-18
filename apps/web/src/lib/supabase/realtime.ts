@@ -126,9 +126,7 @@ export interface SyncLogRealtimeShape {
 type SyncLogResponseDto = components['schemas']['SyncLogResponse'];
 type ExactShape<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 // This binding exists only to evaluate the assertion above — it's never read at
-// runtime. apps/web's ESLint (next's config, not the shared base) doesn't honor
-// the `_` unused-var convention, so disable the rule explicitly here.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+// runtime. The `_` prefix exempts it from @typescript-eslint/no-unused-vars.
 const _syncLogShapeMatchesApiDto: ExactShape<SyncLogRealtimeShape, SyncLogResponseDto> = true;
 
 export interface SyncLogRealtimeEvent {

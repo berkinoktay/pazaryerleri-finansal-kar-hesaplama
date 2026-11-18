@@ -1,17 +1,27 @@
-// The two guards an import takes inside its transaction, before it writes anything:
-// one import per store and page at a time (a transaction-level advisory lock), and the
-// store's upload quota: a list limit per page (the lists of this page in this store),
-// and a byte limit per store (the stored source bytes over every workbook page, the
-// incoming file included). The import also runs the quota once before the file is
-// parsed, outside the lock, so a full store is refused before the costly work; the
-// check inside the transaction stays the authority. No SQL here takes an identifier
-// from a variable: the six table names are written out in one static query.
+// The guards an import takes inside its transaction, before it writes anything, in
+// this order: one import per store and page at a time (a transaction-level advisory
+// TRY-lock that refuses), then the store's quota lock (a blocking transaction-level
+// advisory lock over the whole store, so imports to different pages of one store check
+// the byte quota one after the other), then the store's upload quota: a list limit per
+// page (the lists of this page in this store), and a byte limit per store (the stored
+// source bytes over every workbook page, the incoming file included). The import also
+// runs the quota once before the file is parsed, outside both locks, so a full store is
+// refused before the costly work; the check inside the transaction stays the authority.
+// No SQL here takes an identifier from a variable: the six table names are written out
+// in one static query, and the lock queries bind only their key and seed.
 
 import { Prisma } from '@pazarsync/db';
+import { syncLog } from '@pazarsync/sync-core';
 import { UPLOAD_QUOTA_LIMITS, type WorkbookPage } from '@pazarsync/utils';
 
-import { MAX_LISTS_PER_STORE_PAGE, STORE_UPLOAD_QUOTA_BYTES } from '../config/workbook-limits';
-import { WorkbookConflictError } from '../lib/errors';
+import {
+  IMPORT_BUSY_RETRY_AFTER_SECONDS,
+  MAX_LISTS_PER_STORE_PAGE,
+  STORE_QUOTA_LOCK_TIMEOUT_MS,
+  STORE_UPLOAD_QUOTA_BYTES,
+} from '../config/workbook-limits';
+import { ImportBusyError, WorkbookConflictError } from '../lib/errors';
+import { postgresSqlState } from '../lib/postgres-sql-state';
 import type { StoreScope } from './adapter';
 
 /** The parent tables that store an uploaded source file (the list `rls-policies.sql` holds). */
@@ -71,6 +81,65 @@ export async function acquireImportLock(
   const rows = await tx.$queryRaw<unknown[]>(query);
   const row = rows[0];
   if (!isLockRow(row) || !row.locked) throw new WorkbookConflictError('IMPORT_IN_PROGRESS');
+}
+
+/**
+ * Seed of the store quota lock's `hashtextextended`. A different seed is a different
+ * hash function, so its key space never meets the import lock's
+ * (`WORKBOOK_IMPORT_LOCK_SEED`) or the profit recompute lock's, which hashes with seed 0.
+ */
+export const WORKBOOK_QUOTA_LOCK_SEED = 4_202_612;
+
+/** The quota lock key of one store: the stored, lower-case store id. */
+export function quotaLockKey(scope: StoreScope): string {
+  return scope.storeId;
+}
+
+/** Postgres' SQLSTATE for a lock wait that passed `lock_timeout` (lock_not_available). */
+const LOCK_NOT_AVAILABLE_SQLSTATE = '55P03';
+
+/**
+ * Takes the transaction-level advisory lock of the whole store and WAITS for it;
+ * Postgres releases it when the transaction ends. Blocking on purpose: under READ
+ * COMMITTED the next statement takes a fresh snapshot, so the byte sum that follows
+ * (`assertUploadQuota`) sees a peer import that committed while this one waited, and
+ * imports to different pages of one store cannot overshoot the byte quota together.
+ *
+ * No deadlock: the only lock an import takes before this one is the page TRY-lock
+ * (`acquireImportLock`), which never waits. A waiter holds one pooled connection, and
+ * at most one import per page per store can wait (the page lock comes first), so at
+ * most six per store.
+ *
+ * The wait is bounded on the server: `lock_timeout` is `lockTimeoutMs` for the lock
+ * statement only (`set_config(..., true)`, local to the transaction), then back to its
+ * default, so the writes that follow keep their own lock waits. Prisma's transaction
+ * timeout could not bound it: it cancels no statement already running, so a waiter
+ * would hold its connection until the holder ended. A wait past the bound answers the
+ * existing retryable 503 `IMPORT_BUSY`; no new wire code exists.
+ *
+ * `$executeRaw`, not `$queryRaw`: pg_advisory_xact_lock and set_config return values
+ * the caller has no use for.
+ */
+export async function acquireStoreQuotaLock(
+  tx: Prisma.TransactionClient,
+  scope: StoreScope,
+  lockTimeoutMs: number = STORE_QUOTA_LOCK_TIMEOUT_MS,
+): Promise<void> {
+  const key = quotaLockKey(scope);
+  // A unitless lock_timeout is milliseconds.
+  await tx.$executeRaw(
+    Prisma.sql`SELECT set_config('lock_timeout', ${String(lockTimeoutMs)}, true)`,
+  );
+  try {
+    await tx.$executeRaw(
+      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, ${WORKBOOK_QUOTA_LOCK_SEED}::int8))`,
+    );
+  } catch (err) {
+    if (postgresSqlState(err) !== LOCK_NOT_AVAILABLE_SQLSTATE) throw err;
+    syncLog.warn('workbook.import.store-lock-timeout', { lockTimeoutMs });
+    throw new ImportBusyError(IMPORT_BUSY_RETRY_AFTER_SECONDS);
+  }
+  await tx.$executeRaw(Prisma.sql`SET LOCAL lock_timeout TO DEFAULT`);
 }
 
 /**

@@ -45,6 +45,7 @@ import { trendyolPlusCommissionTariffLayout } from '@/workbooks/formats/trendyol
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization, createStore } from '../../helpers/factories';
+import { blockColumn, blocksOf, requiredBlockLookup } from '../../helpers/layout-blocks';
 
 const app = createApp();
 
@@ -127,11 +128,12 @@ async function optIn(
 type PlusColumn = ColumnKey<typeof trendyolPlusCommissionTariffLayout>;
 
 // One period block of the resolved layout: its day count (the block tag), its date-range
-// label column and its computed commission column (null when that header is absent).
+// label column and its computed commission column (periodsOf throws when that header is
+// absent, so a lost column can never pass for an empty cell).
 interface PeriodColumns {
   readonly dayCount: number;
   readonly labelCol: number;
-  readonly computedCommissionCol: ColumnIndex;
+  readonly computedCommissionCol: number;
 }
 
 async function readParsed(buf: Buffer): Promise<{ grid: SheetData; layout: ResolvedLayout }> {
@@ -148,15 +150,19 @@ function column(layout: ResolvedLayout, key: PlusColumn): ColumnIndex {
 
 // The period blocks of the Plus layout, in column order.
 function periodsOf(layout: ResolvedLayout): readonly PeriodColumns[] {
-  return (layout.blocks.get('periods') ?? []).map((period) => {
-    const labelCol = period.columns.get('label');
-    if (labelCol === undefined) throw new Error('Plus period block without a label column');
-    return {
-      dayCount: period.tag,
-      labelCol,
-      computedCommissionCol: period.lookups.get('computedCommission') ?? null,
-    };
-  });
+  const spec = trendyolPlusCommissionTariffLayout;
+  return blocksOf(spec, layout, 'periods').map((period) => ({
+    dayCount: period.tag,
+    labelCol: blockColumn(spec, 'periods', period, 'label'),
+    computedCommissionCol: requiredBlockLookup(spec, 'periods', period, 'computedCommission'),
+  }));
+}
+
+// The period block at `index`; throws when the layout holds fewer blocks.
+function periodAt(periods: readonly PeriodColumns[], index: number): PeriodColumns {
+  const period = periods[index];
+  if (period === undefined) throw new Error(`Plus layout without period block ${index}`);
+  return period;
 }
 
 function rowFor(
@@ -232,7 +238,7 @@ describe('plus-commission-tariff export', () => {
     // Four cells: Plus price = ceiling, marker, the single-period commission, "Hayır".
     expect(num(row, column(layout, 'plusPriceSelection'))).toBe(Number(item?.plusPriceUpperLimit));
     expect(cellText(row ?? [], column(layout, 'tariffSelection'))).toBe('7 Günlük Fiyat');
-    expect(num(row, periodsOf(layout)[0]?.computedCommissionCol ?? null)).toBe(
+    expect(num(row, periodAt(periodsOf(layout), 0).computedCommissionCol)).toBe(
       Number(item?.plusCommissionPct),
     );
     expect(cellText(row ?? [], column(layout, 'cancelled'))).toBe('Hayır');
@@ -270,10 +276,11 @@ describe('plus-commission-tariff export', () => {
     const r3 = rowFor(three.grid, three.layout, MULTI_BARCODE);
     expect(num(r3, column(three.layout, 'plusPriceSelection'))).toBe(700);
     expect(cellText(r3 ?? [], column(three.layout, 'tariffSelection'))).toBe('3 Günlük Fiyat');
-    expect(num(r3, periodsOf(three.layout)[0]?.computedCommissionCol ?? null)).toBe(
-      MULTI_OFFER_3DAY,
-    );
-    expect(num(r3, periodsOf(three.layout)[1]?.computedCommissionCol ?? null)).toBe(0);
+    // Both period blocks are in the file, so the 0 below is a read cell, not a lost column.
+    const threePeriods = periodsOf(three.layout);
+    expect(threePeriods).toHaveLength(2);
+    expect(num(r3, periodAt(threePeriods, 0).computedCommissionCol)).toBe(MULTI_OFFER_3DAY);
+    expect(num(r3, periodAt(threePeriods, 1).computedCommissionCol)).toBe(0);
 
     // 4-gunluk file: price 650, "4 Günlük Fiyat", ONLY the 4-Gün commission (13.1).
     const four = await readParsed(
@@ -282,10 +289,10 @@ describe('plus-commission-tariff export', () => {
     const r4 = rowFor(four.grid, four.layout, MULTI_BARCODE);
     expect(num(r4, column(four.layout, 'plusPriceSelection'))).toBe(650);
     expect(cellText(r4 ?? [], column(four.layout, 'tariffSelection'))).toBe('4 Günlük Fiyat');
-    expect(num(r4, periodsOf(four.layout)[1]?.computedCommissionCol ?? null)).toBe(
-      MULTI_OFFER_4DAY,
-    );
-    expect(num(r4, periodsOf(four.layout)[0]?.computedCommissionCol ?? null)).toBe(0);
+    const fourPeriods = periodsOf(four.layout);
+    expect(fourPeriods).toHaveLength(2);
+    expect(num(r4, periodAt(fourPeriods, 1).computedCommissionCol)).toBe(MULTI_OFFER_4DAY);
+    expect(num(r4, periodAt(fourPeriods, 0).computedCommissionCol)).toBe(0);
   });
 
   it("collapses a same-price product into one 7-gunluk file carrying BOTH periods' commission cells", async () => {
@@ -307,8 +314,10 @@ describe('plus-commission-tariff export', () => {
     expect(num(row, column(layout, 'plusPriceSelection'))).toBe(MULTI_CEILING);
     expect(cellText(row ?? [], column(layout, 'tariffSelection'))).toBe('7 Günlük Fiyat');
     // One price, but a commission cell per sub-period, each at its OWN percent.
-    expect(num(row, periodsOf(layout)[0]?.computedCommissionCol ?? null)).toBe(MULTI_OFFER_3DAY);
-    expect(num(row, periodsOf(layout)[1]?.computedCommissionCol ?? null)).toBe(MULTI_OFFER_4DAY);
+    const periods = periodsOf(layout);
+    expect(periods).toHaveLength(2);
+    expect(num(row, periodAt(periods, 0).computedCommissionCol)).toBe(MULTI_OFFER_3DAY);
+    expect(num(row, periodAt(periods, 1).computedCommissionCol)).toBe(MULTI_OFFER_4DAY);
     expect(cellText(row ?? [], column(layout, 'cancelled'))).toBe('Hayır');
 
     // A product NOT opted in keeps its opt-in cells at the fixture defaults (untouched).
@@ -328,11 +337,10 @@ describe('plus-commission-tariff export', () => {
     // the raw layout's two periods: a positional layout lookup would land the commission
     // in the 3-Gün column, whereas the dayCount match must put it in the 4-Gün column.
     const { grid: fixtureGrid, layout: fixtureLayout } = await readParsed(FIXTURE_MULTI);
-    const firstPeriod = periodsOf(fixtureLayout)[0];
-    const secondPeriod = periodsOf(fixtureLayout)[1];
-    expect(firstPeriod).toBeDefined();
-    expect(secondPeriod).toBeDefined();
-    if (firstPeriod === undefined || secondPeriod === undefined) return;
+    const fixturePeriods = periodsOf(fixtureLayout);
+    expect(fixturePeriods).toHaveLength(2);
+    const firstPeriod = periodAt(fixturePeriods, 0);
+    const secondPeriod = periodAt(fixturePeriods, 1);
 
     // The 3-Gün commission column's value in the untouched source, to prove export never
     // overwrites it (the fixture default here is a literal 0, not an empty cell).
@@ -508,8 +516,11 @@ describe('plus-commission-tariff import: a value the export writes back', () => 
     );
   }
 
-  function offerColumn(layout: ResolvedLayout): ColumnIndex {
-    return layout.blocks.get('periods')?.[0]?.columns.get('offer') ?? null;
+  function offerColumn(layout: ResolvedLayout): number {
+    const spec = trendyolPlusCommissionTariffLayout;
+    const period = blocksOf(spec, layout, 'periods')[0];
+    if (period === undefined) throw new Error('Plus layout without a period block');
+    return blockColumn(spec, 'periods', period, 'offer');
   }
 
   it('stores an Excel float residue offer rounded to four decimals and exports the rounded value', async () => {
@@ -530,7 +541,7 @@ describe('plus-commission-tariff import: a value the export writes back', () => 
     expect(res.status).toBe(200);
     const { grid, layout } = await readParsed(Buffer.from(await res.arrayBuffer()));
     const row = rowFor(grid, layout, SINGLE_BARCODE);
-    expect(cellText(row ?? [], periodsOf(layout)[0]?.computedCommissionCol ?? null)).toBe('15.4');
+    expect(cellText(row ?? [], periodAt(periodsOf(layout), 0).computedCommissionCol)).toBe('15.4');
   });
 
   it('refuses a negative Plus price ceiling with 422 MALFORMED_SHEET and stores nothing', async () => {
@@ -763,7 +774,7 @@ describe('plus-commission-tariff export: an unknown Plus commission offer', () =
 
     const exported = new Uint8Array(await res.arrayBuffer());
     const { grid, layout } = await readParsed(Buffer.from(exported));
-    const commissionCol = periodsOf(layout)[0]?.computedCommissionCol ?? null;
+    const commissionCol = periodAt(periodsOf(layout), 0).computedCommissionCol;
     // The joined product carries its ceiling and its own commission offer.
     const joined = rowFor(grid, layout, other.barcode);
     expect(joined).toBeDefined();
@@ -782,7 +793,7 @@ describe('plus-commission-tariff export: an unknown Plus commission offer', () =
     const sourceCommissionXml = sheetCellXml(
       new Uint8Array(FIXTURE_SINGLE),
       source.grid.findIndex((r) => r === sourceRow),
-      periodsOf(source.layout)[0]?.computedCommissionCol ?? null,
+      periodAt(periodsOf(source.layout), 0).computedCommissionCol,
     );
     expect(sourceCommissionXml).toMatch(/<(?:x:)?f>/);
     expect(

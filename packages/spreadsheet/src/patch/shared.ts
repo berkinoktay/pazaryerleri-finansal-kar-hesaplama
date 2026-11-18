@@ -1,6 +1,6 @@
 import { MAX_ERROR_CAUSE_LENGTH } from '../constants';
 import { SpreadsheetFileError } from '../errors';
-import { ZIP_REJECT_REASONS, type UnsafeContentReason } from './reasons';
+import { ZIP_REJECT_REASONS, type UnsafeContentDetail, type UnsafeContentReason } from './reasons';
 
 // Small helpers several files of the export patch path share. The byte constants of
 // the markup grammar live in xml-lexer.ts.
@@ -47,14 +47,19 @@ export function viewMismatch(entryName: string, message: string): SpreadsheetFil
   });
 }
 
-/** UNSAFE_CONTENT `{ reason, entry }`: part `entry` of the upload holds or declares active content. */
+/**
+ * UNSAFE_CONTENT `{ reason, detail, entry }`: part `entry` of the upload holds or declares
+ * active content; `detail` names the check that refused it.
+ */
 export function unsafeContentError(
   reason: UnsafeContentReason,
+  detail: UnsafeContentDetail,
   entry: string,
   message: string,
 ): SpreadsheetFileError {
   return new SpreadsheetFileError('UNSAFE_CONTENT', message, {
     reason,
+    detail,
     entry: metaEntryName(entry),
   });
 }

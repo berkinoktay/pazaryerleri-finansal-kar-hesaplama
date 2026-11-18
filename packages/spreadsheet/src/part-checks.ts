@@ -2,6 +2,7 @@ import type { Element } from '@xmldom/xmldom';
 
 import { MAX_FORMAT_CODE_LENGTH, MAX_TOTAL_CELLS } from './constants';
 import { SpreadsheetFileError } from './errors';
+import { UNSAFE_CONTENT_DETAILS } from './patch/reasons';
 import { colRefToNumber } from './sheet-meta';
 import { childElements, corruptPart, localName } from './xml-dom';
 
@@ -142,7 +143,7 @@ function assertFormatCodesWithinCap(entry: string, rootChildren: readonly Elemen
       throw new SpreadsheetFileError(
         'UNSAFE_CONTENT',
         `Workbook part '${entry}' has a number format longer than ${MAX_FORMAT_CODE_LENGTH} characters`,
-        { entry, cap: MAX_FORMAT_CODE_LENGTH },
+        { detail: UNSAFE_CONTENT_DETAILS.NUMBER_FORMAT_LENGTH, entry, cap: MAX_FORMAT_CODE_LENGTH },
       );
     }
   }

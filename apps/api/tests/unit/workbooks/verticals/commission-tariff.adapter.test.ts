@@ -45,6 +45,8 @@ import {
 import { WorkbookFileRejection, WorkbookInvariantError } from '@/workbooks/workbook-errors';
 import { resolveWriteColumns } from '@/workbooks/write-columns';
 
+import { blockColumn, blocksOf } from '../../../helpers/layout-blocks';
+
 const mocks = vi.hoisted(() => ({ findTariff: vi.fn(), findStore: vi.fn() }));
 
 // Only the week overlap query of `inspect` and the store lookup of `importTariff` reach
@@ -488,10 +490,14 @@ async function firstDataRowWithDays(
       ? cell.replace(`(${from} `, `(${to} `)
       : cell,
   );
-  const headerLayout = resolveLayout(format.layout, [rewritten]);
-  const labelCol = headerLayout?.blocks.get('periods')?.[0]?.columns.get('label');
   const first = [...(rows[0] ?? [])];
-  if (firstLabel !== null && labelCol !== undefined) first[labelCol] = firstLabel;
+  if (firstLabel !== null) {
+    const headerLayout = resolveLayout(format.layout, [rewritten]);
+    if (headerLayout === null) throw new Error('the rewritten header does not resolve');
+    const firstPeriod = blocksOf(format.layout, headerLayout, 'periods')[0];
+    if (firstPeriod === undefined) throw new Error('the rewritten header has no period block');
+    first[blockColumn(format.layout, 'periods', firstPeriod, 'label')] = firstLabel;
+  }
   const grid: SheetData = [rewritten, first, ...rows.slice(1)];
   const layout = resolveLayout(format.layout, grid);
   if (layout === null) throw new Error('the rewritten header does not resolve');

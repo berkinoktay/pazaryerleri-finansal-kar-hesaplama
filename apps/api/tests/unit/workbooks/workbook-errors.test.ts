@@ -5,6 +5,8 @@ import {
   DEFAULT_ROW_CAP,
   SPREADSHEET_FILE_ERROR_CODES,
   SpreadsheetFileError,
+  UNSAFE_CONTENT_DETAILS,
+  UNSAFE_CONTENT_REASONS,
   UPLOAD_LIMIT_REASONS,
   WORKER_LIMIT_REASONS,
 } from '@pazarsync/spreadsheet';
@@ -69,6 +71,19 @@ function workerMemoryKill(): SpreadsheetFileError {
 /** A file over the engine's size cap: PAYLOAD_TOO_LARGE with no worker reason. */
 function sizeCapRefusal(): SpreadsheetFileError {
   return new SpreadsheetFileError('PAYLOAD_TOO_LARGE', 'Workbook is too large', { cap: 1024 });
+}
+
+/** An UNSAFE_CONTENT the content scan raises, its meta's `detail` set to `detail`. */
+function unsafeContent(detail: unknown): SpreadsheetFileError {
+  return new SpreadsheetFileError(
+    'UNSAFE_CONTENT',
+    'Workbook part holds CSS that loads a resource',
+    {
+      reason: UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      detail,
+      entry: 'xl/x.xml',
+    },
+  );
 }
 
 function uploadIssues(err: unknown): unknown {
@@ -275,7 +290,7 @@ describe('toUploadError', () => {
     expect(uploadIssues(err)).toEqual([{ field: 'file', code: 'PAYLOAD_TOO_LARGE' }]);
   });
 
-  it('logs an engine rejection with page, code and reason and nothing else', () => {
+  it('logs an engine rejection with page, code, reason and a null detail, and nothing else', () => {
     const infoSpy = spyInfo();
     const err = new SpreadsheetFileError('MALFORMED_SHEET', 'Merged range over a target', {
       reason: 'merged-target',
@@ -288,6 +303,7 @@ describe('toUploadError', () => {
       page: PAGE,
       code: 'MALFORMED_SHEET',
       reason: 'merged-target',
+      detail: null,
     });
   });
 
@@ -300,6 +316,45 @@ describe('toUploadError', () => {
       page: PAGE,
       code: 'NOT_XLSX',
       reason: null,
+      detail: null,
+    });
+  });
+
+  // The detail tells the CSS false positive from a real macro in the log; the 422 stays
+  // the bare engine code.
+  it('logs the detail of an UNSAFE_CONTENT and keeps it out of the 422', () => {
+    const infoSpy = spyInfo();
+
+    const issues = uploadIssues(unsafeContent(UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE));
+
+    expect(issues).toEqual([{ field: 'file', code: 'UNSAFE_CONTENT' }]);
+    expect(infoSpy.mock.calls).toEqual([
+      [
+        'workbook.upload-rejected',
+        {
+          page: PAGE,
+          code: 'UNSAFE_CONTENT',
+          reason: 'unsafe-part',
+          detail: 'css-load-attribute',
+        },
+      ],
+    ]);
+  });
+
+  it.each([
+    ['a string outside the vocabulary', '<script>'],
+    ['a number', 7],
+  ])('logs a null detail for %s', (_label, detail) => {
+    const infoSpy = spyInfo();
+
+    expect(uploadIssues(unsafeContent(detail))).toEqual([
+      { field: 'file', code: 'UNSAFE_CONTENT' },
+    ]);
+    expect(infoSpy).toHaveBeenCalledWith('workbook.upload-rejected', {
+      page: PAGE,
+      code: 'UNSAFE_CONTENT',
+      reason: 'unsafe-part',
+      detail: null,
     });
   });
 
@@ -348,6 +403,7 @@ describe('toStoredFileError', () => {
       recordId: RECORD_ID,
       code: 'PAYLOAD_TOO_LARGE',
       reason: 'worker-timeout',
+      detail: null,
     });
   });
 
@@ -364,6 +420,7 @@ describe('toStoredFileError', () => {
       recordId: RECORD_ID,
       code: 'PAYLOAD_TOO_LARGE',
       reason: 'worker-memory',
+      detail: null,
     });
   });
 
@@ -376,6 +433,7 @@ describe('toStoredFileError', () => {
       recordId: RECORD_ID,
       code: 'PAYLOAD_TOO_LARGE',
       reason: null,
+      detail: null,
     });
   });
 
@@ -392,10 +450,53 @@ describe('toStoredFileError', () => {
       recordId: RECORD_ID,
       code: 'NOT_XLSX',
       reason: null,
+      detail: null,
     });
     const { status, body } = problemDetailsForError(thrown);
     expect(status).toBe(409);
     expect(JSON.stringify(body)).not.toContain('NOT_XLSX');
+  });
+
+  it('logs the detail of an UNSAFE_CONTENT and answers only STORED_FILE_UNREADABLE', () => {
+    const warnSpy = spyWarn();
+
+    const thrown = captureThrow(() =>
+      toStoredFileError(unsafeContent(UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE), STORED),
+    );
+
+    expect(thrown instanceof WorkbookConflictError ? thrown.reason : null).toBe(
+      'STORED_FILE_UNREADABLE',
+    );
+    expect(warnSpy.mock.calls).toEqual([
+      [
+        'workbook.stored-file-rejected',
+        {
+          page: PAGE,
+          recordId: RECORD_ID,
+          code: 'UNSAFE_CONTENT',
+          reason: 'unsafe-part',
+          detail: 'css-load-attribute',
+        },
+      ],
+    ]);
+    const { body } = problemDetailsForError(thrown);
+    expect(JSON.stringify(body)).not.toContain('css-load-attribute');
+  });
+
+  it.each([
+    ['a string outside the vocabulary', '<script>'],
+    ['a number', 7],
+  ])('logs a null detail for %s', (_label, detail) => {
+    const warnSpy = spyWarn();
+
+    expect(storedReason(unsafeContent(detail))).toBe('STORED_FILE_UNREADABLE');
+    expect(warnSpy).toHaveBeenCalledWith('workbook.stored-file-rejected', {
+      page: PAGE,
+      recordId: RECORD_ID,
+      code: 'UNSAFE_CONTENT',
+      reason: 'unsafe-part',
+      detail: null,
+    });
   });
 
   it('maps a format selection rejection to STORED_FILE_UNRECOGNIZED', () => {
@@ -411,7 +512,7 @@ describe('toStoredFileError', () => {
 });
 
 describe('rejectStoredFile', () => {
-  it('logs the record with a null engine code and its reason, and answers 409 STORED_FILE_UNREADABLE', () => {
+  it('logs the record with a null engine code and detail and its reason, and answers 409 STORED_FILE_UNREADABLE', () => {
     const warn = spyWarn();
 
     const thrown = captureThrow(() => rejectStoredFile(STORED, 'too-many-files'));
@@ -424,7 +525,7 @@ describe('rejectStoredFile', () => {
     expect(warn.mock.calls).toEqual([
       [
         'workbook.stored-file-rejected',
-        { page: PAGE, recordId: RECORD_ID, code: null, reason: 'too-many-files' },
+        { page: PAGE, recordId: RECORD_ID, code: null, reason: 'too-many-files', detail: null },
       ],
     ]);
   });

@@ -2,7 +2,7 @@ import { parentPort } from 'node:worker_threads';
 
 import { SpreadsheetFileError } from '../errors';
 import { patchUpload } from '../patch/patch-upload';
-import { readUploadGrid } from '../read-grid';
+import { readUploadCensus, readUploadGrid } from '../read-grid';
 import { isGridWorkerRequest, type GridWorkerRequest, type GridWorkerResponse } from './protocol';
 
 // The grid worker's body, loaded by grid-worker-entry.mjs once tsx is registered. It
@@ -24,6 +24,15 @@ function succeed(request: GridWorkerRequest): Answer {
           id,
           kind: 'grid',
           grid: readUploadGrid(new Uint8Array(request.bytes), request.options),
+        },
+        transfer: [],
+      };
+    case 'census':
+      return {
+        response: {
+          id,
+          kind: 'census',
+          census: readUploadCensus(new Uint8Array(request.bytes), request.options),
         },
         transfer: [],
       };

@@ -1,5 +1,6 @@
 import { isSpreadsheetFileErrorCode, type SpreadsheetFileErrorCode } from '../errors';
 import { isSheetData, type SheetData } from '../grid-types';
+import { isPackageCensus, type PackageCensus } from '../package-census';
 import { isResolvedPatchRequest, type ResolvedPatchRequest } from '../patch/patch-request';
 import { isResolvedReadOptions, type ResolvedReadOptions } from '../read-options';
 import { isRecord } from '../wire-guards';
@@ -10,12 +11,18 @@ import { isRecord } from '../wire-guards';
 
 /**
  * One job: the upload's bytes (a copy, transferred) and either the resolved read
- * options of a grid read or the resolved request of a patch.
+ * options of a grid read or of a package census, or the resolved request of a patch.
  */
 export type GridWorkerRequest =
   | {
       readonly id: number;
       readonly kind: 'grid';
+      readonly bytes: ArrayBuffer;
+      readonly options: ResolvedReadOptions;
+    }
+  | {
+      readonly id: number;
+      readonly kind: 'census';
       readonly bytes: ArrayBuffer;
       readonly options: ResolvedReadOptions;
     }
@@ -29,10 +36,12 @@ export type GridWorkerRequest =
 /**
  * The answer to the request with the same `id`. `patched` holds one item per output
  * of the request, in order: the new archive (transferred; a fixed-length buffer that
- * no other item repeats), or null when the output changes nothing.
+ * no other item repeats), or null when the output changes nothing. `census` holds only
+ * the values the census keeps (isPackageCensus).
  */
 export type GridWorkerResponse =
   | { readonly id: number; readonly kind: 'grid'; readonly grid: SheetData }
+  | { readonly id: number; readonly kind: 'census'; readonly census: PackageCensus }
   | {
       readonly id: number;
       readonly kind: 'patched';
@@ -59,6 +68,7 @@ export function isGridWorkerRequest(value: unknown): value is GridWorkerRequest 
   }
   switch (value.kind) {
     case 'grid':
+    case 'census':
       return isResolvedReadOptions(value.options);
     case 'patch':
       return isResolvedPatchRequest(value.request);
@@ -100,6 +110,8 @@ export function isGridWorkerResponse(value: unknown): value is GridWorkerRespons
   switch (value.kind) {
     case 'grid':
       return isSheetData(value.grid);
+    case 'census':
+      return isPackageCensus(value.census);
     case 'patched':
       return isPatchedFiles(value.files);
     case 'file-error':

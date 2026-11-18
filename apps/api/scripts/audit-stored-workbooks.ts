@@ -24,6 +24,23 @@
 // again as "legacy passed, strict selector refused", grouped by their strict refusal
 // key.
 //
+// Gate mode also takes the package census of each stored file (inspectWorkbookPackage,
+// one more job in the parse worker after the two reads): the relationship types and
+// content types its package declares, as the upload gate reads them, the data a future
+// allow list of package part types is designed from. One tally covers all six tables.
+// After the last table, before the name and quota outputs, it prints under
+// `package census (gate mode)` the number of files censused and of files the gate
+// refused (their refusal is what the two reads report). The census runs the byte-level
+// gate only, not the reader, so a file the two reads refuse for a reader rule (a row
+// cap, a missing sheet) is still censused: "files censused" is not the reads' pass
+// count. Then it prints per relationship type and per content type the number of files
+// that carry it (a relationship type whose last segment is not one of the eight the real
+// Trendyol files carry is marked), and the number of files with a value the census drops
+// or with more values than it keeps. Only
+// sanitised schema URIs, content types and counts are printed (the engine keeps a value
+// only of a fixed URI-safe ASCII shape), never a part name, a target, a file name or a
+// cell. The census never changes the exit code.
+//
 // It reads every tenant's rows on purpose: it is an operator tool, not a request
 // path, so no organization scope applies. It cannot write: every session of the pool
 // it queries through starts with `default_transaction_read_only=on`, and it stops
@@ -110,6 +127,7 @@
 import type { PrismaClient } from '@pazarsync/db';
 import { Platform } from '@pazarsync/db/enums';
 import {
+  inspectWorkbookPackage,
   MALFORMED_SHEET_REASONS,
   PATCH_LIMIT_REASONS,
   patchWorkbook,
@@ -120,6 +138,7 @@ import {
   UNSUPPORTED_ENCODING_REASONS,
   UPLOAD_LIMIT_REASONS,
   WORKER_LIMIT_REASONS,
+  workerLimitReason,
   ZIP_REJECT_REASONS,
   type LayoutSpec,
   type ReadGridOptions,
@@ -129,12 +148,21 @@ import { UPLOAD_NAME_MAX_LENGTH, WORKBOOK_PAGES, type WorkbookPage } from '@paza
 
 // The value imports from src/: the limits module imports nothing, the form rules
 // (form.ts) import zod, @pazarsync/utils and, through column-range.ts,
-// @pazarsync/spreadsheet, and the shared Trendyol labels (labels.ts) have only type
-// imports. Neither package loads @pazarsync/db at runtime, so loading them cannot build
-// the @pazarsync/db pool before main() makes DATABASE_URL read-only.
+// @pazarsync/spreadsheet, and the shared Trendyol labels (labels.ts) and the census
+// tally (package-census.ts) have only type imports. Neither package loads
+// @pazarsync/db at runtime, so loading them cannot build the @pazarsync/db pool before
+// main() makes DATABASE_URL read-only.
 import { MAX_LISTS_PER_STORE_PAGE, STORE_UPLOAD_QUOTA_BYTES } from '../src/config/workbook-limits';
 import { NAME_INVALID_CHARACTERS, NameSchema } from '../src/workbooks/form';
 import { TRENDYOL_SHEET_NAMES } from '../src/workbooks/formats/trendyol/labels';
+import {
+  addCensus,
+  addNotCensused,
+  addRefused,
+  censusLines,
+  createCensusTally,
+  type CensusTally,
+} from '../src/workbooks/package-census';
 // Types only, for the same reason: each of these modules loads @pazarsync/db (directly,
 // or through @pazarsync/sync-core), so main() imports them only after DATABASE_URL is
 // read-only (loadFullMode).
@@ -174,6 +202,7 @@ const READ_ONLY_SETTING_ON = 'on';
 const SOURCE_FORMAT_VERSION = 'v1';
 const NULL_FORMAT_LABEL = 'NULL';
 const NO_ROWS_LABEL = '(no rows)';
+const CENSUS_HEADING = 'package census (gate mode)';
 const FIRST_SHEET_INDEX = 0;
 /** The six parent tables gain `source_format_id` in one migration. */
 const PARENT_TABLE_COUNT = 6;
@@ -656,9 +685,26 @@ function keyById(groups: IdGroups): Map<string, string> {
   return byId;
 }
 
+/**
+ * Adds the package census of `file` to `tally`. A busy queue (ENGINE_BUSY) or a worker
+ * memory or time limit stopped the job before the gate could answer: the file counts as
+ * not censused. Any other SpreadsheetFileError is the gate's refusal (the two reads
+ * already report why). Anything else is rethrown.
+ */
+async function censusInto(tally: CensusTally, file: Buffer): Promise<void> {
+  try {
+    addCensus(tally, await inspectWorkbookPackage(file));
+  } catch (err) {
+    if (!(err instanceof SpreadsheetFileError)) throw err;
+    if (err.code === 'ENGINE_BUSY' || workerLimitReason(err) !== null) addNotCensused(tally);
+    else addRefused(tally);
+  }
+}
+
 async function auditTable(
   table: StoredWorkbookTable,
   withFormatColumn: boolean,
+  census: CensusTally,
 ): Promise<GateResult> {
   const expected = sourceFormatId(table.page);
   console.log(`${table.table} (expected ${expected})`);
@@ -681,7 +727,7 @@ async function auditTable(
   // Keyed by the strict refusal key.
   const legacyPassedStrictRefused: IdGroups = new Map();
   let gone = 0;
-  // One file at a time: each holds the single parse worker for two reads.
+  // One file at a time: each holds the single parse worker for two reads and a census.
   for (const { id } of records) {
     const stored = await table.storedFile(id);
     if (stored === null) {
@@ -691,6 +737,7 @@ async function auditTable(
     const file = Buffer.from(stored);
     const legacyRefusal = await readInto(legacy, id, file, table.legacyRead);
     const strictRefusal = await readInto(strict, id, file, table.strictRead);
+    await censusInto(census, file);
     // Any strict refusal of a file the legacy read passed (through its fallback to the
     // first sheet, for a missing or unreadable named sheet): the export refuses it now.
     if (legacyRefusal === null && strictRefusal !== null) {
@@ -1269,8 +1316,10 @@ async function main(): Promise<void> {
     const withFormatColumn = await hasSourceFormatColumn(prisma);
     let failed = false;
     const gates = new Map<string, GateResult>();
+    // One census tally over every table's stored files; it never sets the exit code.
+    const census = createCensusTally();
     for (const table of storedWorkbookTables(prisma)) {
-      const gate = await auditTable(table, withFormatColumn);
+      const gate = await auditTable(table, withFormatColumn, census);
       gates.set(table.table, gate);
       const { outcome } = gate;
       if (
@@ -1281,6 +1330,8 @@ async function main(): Promise<void> {
         failed = true;
       }
     }
+    console.log(CENSUS_HEADING);
+    for (const line of censusLines(census)) console.log(`  ${line}`);
 
     // Every run, before full mode: SQL only, over the tables gate mode audited.
     if ((await auditNamesAndQuota(prisma, [...gates.keys()])) > 0) failed = true;

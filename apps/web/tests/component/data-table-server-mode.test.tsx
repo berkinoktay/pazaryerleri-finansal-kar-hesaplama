@@ -2,7 +2,6 @@ import {
   type ColumnDef,
   type ColumnFiltersState,
   type PaginationState,
-  type SortingState,
 } from '@tanstack/react-table';
 import { NextIntlClientProvider } from 'next-intl';
 import * as React from 'react';

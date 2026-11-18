@@ -45,6 +45,8 @@ import {
 import { WorkbookFileRejection, WorkbookInvariantError } from '@/workbooks/workbook-errors';
 import { resolveWriteColumns } from '@/workbooks/write-columns';
 
+import { blockColumn, blocksOf } from '../../../helpers/layout-blocks';
+
 const mocks = vi.hoisted(() => ({
   findPlusTariff: vi.fn(),
   createPlusTariff: vi.fn(),
@@ -503,8 +505,9 @@ async function firstDataRowWithoutPeriod(file: Buffer, blockIndex: number) {
   const grid = await readWorkbookGrid(file, { sheet: format.sheet });
   const layout = resolveLayout(format.layout, grid);
   if (layout === null) throw new Error('the fixture does not resolve');
-  const label = layout.blocks.get('periods')?.[blockIndex]?.columns.get('label');
-  if (label === undefined) throw new Error(`the fixture has no label in block ${blockIndex}`);
+  const period = blocksOf(format.layout, layout, 'periods')[blockIndex];
+  if (period === undefined) throw new Error(`the fixture has no period block ${blockIndex}`);
+  const label = blockColumn(format.layout, 'periods', period, 'label');
   const firstRow: CellValue[] = [...(grid[1] ?? [])];
   firstRow[label] = null;
   return createRowReader(format.layout, layout, firstRow, READER_OPTIONS);

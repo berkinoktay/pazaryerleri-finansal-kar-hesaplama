@@ -1,6 +1,7 @@
 // `meta.reason` vocabularies of the errors the export patch path and the upload gate
-// throw. A reason names the rule that refused the file; the meta never carries cell
-// text.
+// throw, and the `meta.detail` vocabulary of UNSAFE_CONTENT. A reason names the rule
+// that refused the file, a detail the one check of that rule that fired; the meta never
+// carries cell text.
 
 /** Reasons of MALFORMED_SHEET. */
 export const MALFORMED_SHEET_REASONS = {
@@ -36,8 +37,8 @@ export const PATCH_LIMIT_REASONS = {
  * budget, the DOM weight).
  */
 export const UPLOAD_LIMIT_REASONS = {
-  // The formula fields of all parts together, raw and in NFKC form, exceed what the gate
-  // reads of one upload (MAX_FORMULA_SCAN_UNITS).
+  // The formula fields of all parts together, raw plus the NFKC form of each field NFKC
+  // changes, exceed what the gate reads of one upload (MAX_FORMULA_SCAN_UNITS).
   FORMULA_SCAN_BUDGET: 'formula-scan-budget',
   // The reader parts together exceed MAX_XML_DOM_WEIGHT.
   DOM_WEIGHT: 'dom-weight',
@@ -72,3 +73,91 @@ export const UNSAFE_CONTENT_REASONS = {
 /** One of UNSAFE_CONTENT_REASONS. */
 export type UnsafeContentReason =
   (typeof UNSAFE_CONTENT_REASONS)[keyof typeof UNSAFE_CONTENT_REASONS];
+
+/**
+ * Details (`meta.detail`) of UNSAFE_CONTENT: the one check that refused the file. Every
+ * UNSAFE_CONTENT the gate raises carries one, beside its `reason` when it has one, so a
+ * log can tell a real macro from a false positive of a broad rule. A detail is a fixed
+ * rule name: it never holds file text, a part name or a URL.
+ */
+export const UNSAFE_CONTENT_DETAILS = {
+  // Package checks (unsafe-parts.ts).
+  // A relationship type of a digital signature (origin, signature or certificate).
+  DIGITAL_SIGNATURE: 'digital-signature',
+  // A relationship type that names an active part (a macro project, an embedded object...).
+  ACTIVE_RELATIONSHIP: 'active-relationship',
+  // An external relationship other than a worksheet web hyperlink.
+  EXTERNAL_TARGET: 'external-target',
+  // An internal relationship whose target is an absolute URL.
+  ABSOLUTE_TARGET: 'absolute-target',
+  // An entry named like a macro, embedded or external link part.
+  ACTIVE_PART_NAME: 'active-part-name',
+  // A content type of an active part in the content types part.
+  ACTIVE_CONTENT_TYPE: 'active-content-type',
+  // Content scan (content-scan.ts).
+  // A formula field the formula scan refuses, or one with something other than text.
+  FORMULA: 'formula',
+  // A script element with content.
+  SCRIPT: 'script',
+  // A macro assignment: a macro attribute, or a macro element with content.
+  MACRO: 'macro',
+  // A URL attribute that leaves the package.
+  EXTERNAL_URL: 'external-url',
+  // A style attribute or a style element whose CSS loads a resource.
+  CSS_LOAD: 'css-load',
+  // Any other attribute value holding a CSS load call: the broad rule, false positives
+  // included (a word ending in url, src or image glued to '(').
+  CSS_LOAD_ATTRIBUTE: 'css-load-attribute',
+  // Style element text the scan cannot decode.
+  CSS_UNDECODABLE: 'css-undecodable',
+  // A processing instruction that loads a stylesheet.
+  STYLESHEET_INSTRUCTION: 'stylesheet-instruction',
+  // An element other than a hyperlink naming an external hyperlink relationship.
+  HYPERLINK_REUSE: 'hyperlink-reuse',
+  // An SVG animation element in web content.
+  SVG_ANIMATION: 'svg-animation',
+  // An event handler attribute in web content.
+  EVENT_HANDLER: 'event-handler',
+  // An attribute of web content that names a web resource.
+  WEB_RESOURCE: 'web-resource',
+  // An embedded object, a control, a frame, a script or a web publishing item.
+  ACTIVE_ELEMENT: 'active-element',
+  // Past markup the strict lexer refuses: an active element.
+  LOOSE_ACTIVE_ELEMENT: 'loose-active-element',
+  // Past markup the strict lexer refuses: a field, macro or script element, or a
+  // formula or macro attribute name.
+  LOOSE_FORMULA: 'loose-formula',
+  // Past markup the strict lexer refuses: a character reference.
+  LOOSE_REFERENCE: 'loose-reference',
+  // Past markup the strict lexer refuses: a CSS load call.
+  LOOSE_CSS: 'loose-css',
+  // Past markup the strict lexer refuses: a name that could be a link, a style, an
+  // event handler or a relationship id.
+  LOOSE_LINK: 'loose-link',
+  // Inside a style element: markup the strict lexer refuses.
+  LOOSE_STYLE: 'loose-style',
+  // A DOCTYPE or ENTITY declaration.
+  DOCTYPE: 'doctype',
+  // A reference to an entity other than the predefined ones.
+  UNKNOWN_ENTITY: 'unknown-entity',
+  // More than MAX_XMLNS_DECLARATIONS_PER_PART namespace declarations in scope.
+  NAMESPACE_DECLARATIONS: 'namespace-declarations',
+  // Reader parts (guards.ts, part-checks.ts).
+  // An element name longer than MAX_XML_NAME_LENGTH.
+  ELEMENT_NAME_LENGTH: 'element-name-length',
+  // A number format longer than MAX_FORMAT_CODE_LENGTH.
+  NUMBER_FORMAT_LENGTH: 'number-format-length',
+} as const;
+
+/** One of UNSAFE_CONTENT_DETAILS. */
+export type UnsafeContentDetail =
+  (typeof UNSAFE_CONTENT_DETAILS)[keyof typeof UNSAFE_CONTENT_DETAILS];
+
+const UNSAFE_CONTENT_DETAIL_SET: ReadonlySet<string> = new Set(
+  Object.values(UNSAFE_CONTENT_DETAILS),
+);
+
+/** Whether `value` is one of UNSAFE_CONTENT_DETAILS: a reader of `meta.detail` trusts nothing else. */
+export function isUnsafeContentDetail(value: unknown): value is UnsafeContentDetail {
+  return typeof value === 'string' && UNSAFE_CONTENT_DETAIL_SET.has(value);
+}

@@ -23,9 +23,10 @@ export const LINEAR_BUDGET_MS = 20_000;
 
 /**
  * Bound for the gate reading formula fields up to MAX_FORMULA_SCAN_UNITS in the costliest
- * shape measured: about 2 s alone on the owner's machine, where one upload of fields
- * whose NFKC form was not capped held the parse worker for 13 s, and 26 s when a part was
- * scanned twice. Tighter than LINEAR_BUDGET_MS, which would let those through.
+ * shapes measured: about 2.5 s alone on the owner's machine for the one NFKC keeps and
+ * about 1.1 s for the one NFKC changes, where one upload of fields whose NFKC form was
+ * not capped held the parse worker for 13 s, and 26 s when a part was scanned twice.
+ * Tighter than LINEAR_BUDGET_MS, which would let those through.
  */
 export const FORMULA_SCAN_BUDGET_MS = 10_000;
 

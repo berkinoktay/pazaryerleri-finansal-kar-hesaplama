@@ -6,6 +6,7 @@
 //   - the store's list quota counts this store only, and refuses before the file is read;
 //   - one import of a store and page at a time, whatever the letter case of the ids in
 //     the path (the lock key is the stored store id);
+//   - an import waits while another transaction holds the store quota lock, then imports;
 //   - a Hepsiburada store has no discount format;
 //   - a text cell holding U+0000, which Postgres cannot store, is refused at upload
 //     with 422 MALFORMED_SHEET, never a 500, and nothing is stored;
@@ -25,6 +26,7 @@ import {
   columnIndex,
   readWorkbookGrid,
   resolveLayout,
+  UNSAFE_CONTENT_DETAILS,
   UNSAFE_CONTENT_REASONS,
   type CellValue,
   type SheetData,
@@ -38,7 +40,12 @@ import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware
 import { trendyolDiscountListFormat } from '@/workbooks/formats/trendyol/discount-list.format';
 import { TRENDYOL_DEFAULT_NAMES, TRENDYOL_SHEET_NAMES } from '@/workbooks/formats/trendyol/labels';
 import { NUL_CHARACTER_REASON } from '@/workbooks/import-rows';
-import { importLockKey, WORKBOOK_IMPORT_LOCK_SEED } from '@/workbooks/upload-quota';
+import {
+  importLockKey,
+  quotaLockKey,
+  WORKBOOK_IMPORT_LOCK_SEED,
+  WORKBOOK_QUOTA_LOCK_SEED,
+} from '@/workbooks/upload-quota';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -77,6 +84,12 @@ const COLUMN_LETTERS = 'ABCDEFGHI';
 // could release the lock while the request is still running.
 const LOCK_HOLDER_TIMEOUT_MS = 60_000;
 
+// How often, and how many times, a test polls pg_locks for the request waiting on the
+// store quota lock. The bound covers the parse and rehearsal that run before the import
+// transaction starts, and stays under the test timeout.
+const LOCK_WAIT_POLL_INTERVAL_MS = 25;
+const LOCK_WAIT_MAX_POLLS = 320;
+
 const RLO = String.fromCodePoint(0x202e);
 
 const ProblemSchema = z.object({
@@ -91,6 +104,8 @@ const RawValidationSchema = z.object({ code: z.string(), errors: z.array(z.unkno
 const ImportSchema = z.object({ listId: z.string(), name: z.string(), itemCount: z.number() });
 
 const GrantedSchema = z.array(z.object({ granted: z.number() }));
+
+const WaitingSchema = z.array(z.object({ waiting: z.number() }));
 
 interface Ctx {
   accessToken: string;
@@ -254,6 +269,86 @@ async function withImportLockHeld<T>(key: string, during: () => T | Promise<T>):
     release();
     await holder;
   }
+}
+
+// The store quota lock, held by another transaction.
+
+/** The transactions waiting for the store quota lock of `key` in this database. */
+async function quotaLockWaiters(key: string): Promise<number> {
+  const rows = WaitingSchema.parse(
+    await prisma.$queryRaw`
+      WITH "h" AS (SELECT hashtextextended(${key}, ${WORKBOOK_QUOTA_LOCK_SEED}::int8) AS "v")
+      SELECT count(*)::int AS "waiting"
+      FROM pg_locks, "h"
+      WHERE locktype = 'advisory'
+        AND NOT granted
+        AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+        AND classid::bigint = (("h"."v" >> 32) & 4294967295)
+        AND objid::bigint = ("h"."v" & 4294967295)
+        AND objsubid = 1`,
+  );
+  return rows[0]?.waiting ?? 0;
+}
+
+/**
+ * Polls pg_locks until one transaction waits for the store quota lock of `key`, and
+ * fails after LOCK_WAIT_MAX_POLLS polls. The pause between polls is not the proof; the
+ * lock row that is not granted is.
+ */
+async function expectQuotaLockWaiter(key: string): Promise<void> {
+  for (let poll = 0; poll < LOCK_WAIT_MAX_POLLS; poll += 1) {
+    const waiting = await quotaLockWaiters(key);
+    if (waiting > 0) {
+      expect(waiting).toBe(1);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_INTERVAL_MS));
+  }
+  throw new Error(`No transaction waited for the store quota lock in ${LOCK_WAIT_MAX_POLLS} polls`);
+}
+
+/**
+ * Starts `start` while another transaction holds the store quota lock of `key`, polls
+ * until a transaction waits for that lock, then releases it and returns what `start`
+ * resolved to. Unlike the import lock, this lock blocks, so `start` is not awaited before
+ * the release. The holder is released and `start` settled on every path.
+ */
+async function withStoreQuotaLockWaiting<T>(key: string, start: () => Promise<T>): Promise<T> {
+  let signalLocked: () => void = () => undefined;
+  const locked = new Promise<void>((resolve) => {
+    signalLocked = resolve;
+  });
+  let release: () => void = () => undefined;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const holder = prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, ${WORKBOOK_QUOTA_LOCK_SEED}::int8))`;
+      signalLocked();
+      await released;
+    },
+    { timeout: LOCK_HOLDER_TIMEOUT_MS },
+  );
+  // A holder that failed before it took the lock has already ended: nothing to release.
+  await Promise.race([
+    locked,
+    holder.then(() => {
+      throw new Error('The lock holder ended before it took the lock');
+    }),
+  ]);
+  const pending = start();
+  // Handled at once, so a rejection that lands before the final await is not an unhandled one.
+  pending.catch(() => undefined);
+  try {
+    await expectQuotaLockWaiter(key);
+  } finally {
+    release();
+    await holder;
+    // Settled before the next test truncates, on every path.
+    await pending.catch(() => undefined);
+  }
+  return pending;
 }
 
 beforeEach(() => {
@@ -535,6 +630,22 @@ describe('generic workbook import on the discount route', () => {
     expect(list).toEqual({ organizationId: ctx.orgId, storeId: ctx.storeId });
   });
 
+  it('waits while another transaction holds the store quota lock, then imports', async () => {
+    const ctx = await setupStore();
+    const key = quotaLockKey({ organizationId: ctx.orgId, storeId: ctx.storeId });
+
+    const res = await withStoreQuotaLockWaiting(key, async () =>
+      app.request(importRequest(ctx, FIXTURE)),
+    );
+
+    expect(res.status).toBe(201);
+    const { listId } = ImportSchema.parse(await res.json());
+    const lists = await prisma.discountList.findMany({
+      select: { id: true, organizationId: true, storeId: true },
+    });
+    expect(lists).toEqual([{ id: listId, organizationId: ctx.orgId, storeId: ctx.storeId }]);
+  });
+
   describe('refuses a text cell holding U+0000 before anything stores or queries it', () => {
     afterEach(() => {
       vi.restoreAllMocks();
@@ -567,6 +678,7 @@ describe('generic workbook import on the discount route', () => {
         page: WORKBOOK_PAGES.DISCOUNT_LIST,
         code: 'MALFORMED_SHEET',
         reason: NUL_CHARACTER_REASON,
+        detail: null,
       });
       expect(warn).not.toHaveBeenCalledWith(
         'workbook.import.value-not-storable',
@@ -585,30 +697,36 @@ describe('generic workbook import on the discount route', () => {
         'a macro project part',
         (source: Buffer) => macroFixture(source),
         UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+        UNSAFE_CONTENT_DETAILS.ACTIVE_PART_NAME,
       ],
       [
         'a WEBSERVICE formula',
         (source: Buffer) => unsafeFormulaFixture(source, DISCOUNT_SHEET_PART),
         UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+        UNSAFE_CONTENT_DETAILS.FORMULA,
       ],
-    ] as const)('%s: 422 UNSAFE_CONTENT, and nothing is stored', async (_name, build, reason) => {
-      const ctx = await setupStore();
-      const info = vi.spyOn(syncLog, 'info');
+    ] as const)(
+      '%s: 422 UNSAFE_CONTENT, and nothing is stored',
+      async (_name, build, reason, detail) => {
+        const ctx = await setupStore();
+        const info = vi.spyOn(syncLog, 'info');
 
-      const res = await app.request(importRequest(ctx, build(FIXTURE)));
+        const res = await app.request(importRequest(ctx, build(FIXTURE)));
 
-      expect(res.status).toBe(422);
-      const body = RawValidationSchema.parse(await res.json());
-      expect(body.code).toBe('VALIDATION_ERROR');
-      expect(body.errors).toStrictEqual([{ field: 'file', code: 'UNSAFE_CONTENT' }]);
-      expect(await prisma.discountList.count()).toBe(0);
-      expect(await prisma.discountListItem.count()).toBe(0);
-      expect(info).toHaveBeenCalledWith('workbook.upload-rejected', {
-        page: WORKBOOK_PAGES.DISCOUNT_LIST,
-        code: 'UNSAFE_CONTENT',
-        reason,
-      });
-    });
+        expect(res.status).toBe(422);
+        const body = RawValidationSchema.parse(await res.json());
+        expect(body.code).toBe('VALIDATION_ERROR');
+        expect(body.errors).toStrictEqual([{ field: 'file', code: 'UNSAFE_CONTENT' }]);
+        expect(await prisma.discountList.count()).toBe(0);
+        expect(await prisma.discountListItem.count()).toBe(0);
+        expect(info).toHaveBeenCalledWith('workbook.upload-rejected', {
+          page: WORKBOOK_PAGES.DISCOUNT_LIST,
+          code: 'UNSAFE_CONTENT',
+          reason,
+          detail,
+        });
+      },
+    );
 
     it('imports the fixture rebuilt by the same helper without the addition (control)', async () => {
       const ctx = await setupStore();

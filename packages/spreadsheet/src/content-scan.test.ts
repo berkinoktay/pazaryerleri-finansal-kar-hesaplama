@@ -23,7 +23,14 @@ import {
 import { SpreadsheetFileError } from './errors';
 import { SAFE_FORMULA_FUNCTIONS } from './formula-scan';
 import { openUpload } from './guards';
-import { UNSAFE_CONTENT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
+import {
+  isUnsafeContentDetail,
+  UNSAFE_CONTENT_DETAILS,
+  UNSAFE_CONTENT_REASONS,
+  ZIP_REJECT_REASONS,
+  type UnsafeContentDetail,
+  type UnsafeContentReason,
+} from './patch/reasons';
 import { readUploadGrid } from './read-grid';
 import { resolveReadOptions } from './read-options';
 import { buildXlsxFixture, type XlsxFixtureSheet } from './testing/build-xlsx';
@@ -147,7 +154,7 @@ describe('assertSafeXmlContent', () => {
       entriesOf({ [SHEET_PART]: worksheetWithText('x', '<!DOCTYPE worksheet>') }),
     );
     expect(upper?.code).toBe('UNSAFE_CONTENT');
-    expect(upper?.meta).toEqual({ entry: SHEET_PART });
+    expect(upper?.meta).toEqual({ detail: UNSAFE_CONTENT_DETAILS.DOCTYPE, entry: SHEET_PART });
 
     const lower = scanError(
       entriesOf({ [SHEET_PART]: worksheetWithText('x', '<!doctype worksheet>') }),
@@ -162,13 +169,16 @@ describe('assertSafeXmlContent', () => {
       }),
     );
     expect(err?.code).toBe('UNSAFE_CONTENT');
-    expect(err?.meta).toEqual({ entry: WORKBOOK_RELS_PART });
+    expect(err?.meta).toEqual({
+      detail: UNSAFE_CONTENT_DETAILS.DOCTYPE,
+      entry: WORKBOOK_RELS_PART,
+    });
   });
 
   it('rejects an unknown entity reference (&xxe;)', () => {
     const err = scanError(entriesOf({ [SHEET_PART]: worksheetWithText('&xxe;') }));
     expect(err?.code).toBe('UNSAFE_CONTENT');
-    expect(err?.meta).toEqual({ entry: SHEET_PART });
+    expect(err?.meta).toEqual({ detail: UNSAFE_CONTENT_DETAILS.UNKNOWN_ENTITY, entry: SHEET_PART });
   });
 
   it('accepts the five predefined and numeric references', () => {
@@ -208,14 +218,35 @@ function formulaError(text: string): SpreadsheetFileError | null {
   return scanError(entriesOf({ [SHEET_PART]: worksheetWithFormula(`<f>${xmlText(text)}</f>`) }));
 }
 
-function expectUnsafeFormula(error: SpreadsheetFileError | null, entry = SHEET_PART): void {
+/**
+ * `error` is UNSAFE_CONTENT `{ reason, detail, entry }`: its detail exactly `detail` when
+ * given, else any one of UNSAFE_CONTENT_DETAILS.
+ */
+function expectUnsafeContent(
+  error: SpreadsheetFileError | null,
+  reason: UnsafeContentReason,
+  entry: string,
+  detail: UnsafeContentDetail | undefined,
+): void {
   expect(error?.code).toBe('UNSAFE_CONTENT');
-  expect(error?.meta).toEqual({ reason: UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA, entry });
+  expect(error?.meta).toEqual({ reason, detail: detail ?? expect.any(String), entry });
+  expect(isUnsafeContentDetail(error?.meta['detail'])).toBe(true);
 }
 
-function expectUnsafePart(error: SpreadsheetFileError | null, entry = SHEET_PART): void {
-  expect(error?.code).toBe('UNSAFE_CONTENT');
-  expect(error?.meta).toEqual({ reason: UNSAFE_CONTENT_REASONS.UNSAFE_PART, entry });
+function expectUnsafeFormula(
+  error: SpreadsheetFileError | null,
+  entry = SHEET_PART,
+  detail?: UnsafeContentDetail,
+): void {
+  expectUnsafeContent(error, UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA, entry, detail);
+}
+
+function expectUnsafePart(
+  error: SpreadsheetFileError | null,
+  entry = SHEET_PART,
+  detail?: UnsafeContentDetail,
+): void {
+  expectUnsafeContent(error, UNSAFE_CONTENT_REASONS.UNSAFE_PART, entry, detail);
 }
 
 describe('assertSafeXmlContent: formula fields', () => {
@@ -385,42 +416,62 @@ describe('assertSafeXmlContent: formula fields', () => {
       'a later defined name',
       '<definedName name="x">1</definedName>',
       UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+      UNSAFE_CONTENT_DETAILS.LOOSE_FORMULA,
     ],
-    ['a later macro attribute', '<sp macro="[0]!m"/>', UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA],
+    [
+      'a later macro attribute',
+      '<sp macro="[0]!m"/>',
+      UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+      UNSAFE_CONTENT_DETAILS.LOOSE_FORMULA,
+    ],
     [
       'a later textlink attribute in another case',
       '<sp TextLink="$A$1"/>',
       UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+      UNSAFE_CONTENT_DETAILS.LOOSE_FORMULA,
     ],
-    ['a later oleObject', '<oleObject progId="Package"/>', UNSAFE_CONTENT_REASONS.UNSAFE_PART],
+    [
+      'a later oleObject',
+      '<oleObject progId="Package"/>',
+      UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      UNSAFE_CONTENT_DETAILS.LOOSE_ACTIVE_ELEMENT,
+    ],
     [
       'a later conditional format value object',
       '<cfvo type="num" val="1"/>',
       UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+      UNSAFE_CONTENT_DETAILS.LOOSE_FORMULA,
     ],
     [
       'a later hyperlink',
       '<x:hyperlink ref="A1" location="A1"/>',
       UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+      UNSAFE_CONTENT_DETAILS.LOOSE_FORMULA,
     ],
     [
       'a later camera tool in another case',
       '<CameraTool cellRange="A1"/>',
       UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+      UNSAFE_CONTENT_DETAILS.LOOSE_FORMULA,
     ],
-    ['a later script', '<x:ScriptText/>', UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA],
+    [
+      'a later script',
+      '<x:ScriptText/>',
+      UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+      UNSAFE_CONTENT_DETAILS.LOOSE_FORMULA,
+    ],
     [
       'a later src attribute, even a relative one',
       '<z src="x.png"/>',
       UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      UNSAFE_CONTENT_DETAILS.LOOSE_LINK,
     ],
-  ])('refuses %s after markup the strict lexer cannot read', (_label, later, reason) => {
+  ])('refuses %s after markup the strict lexer cannot read', (_label, later, reason, detail) => {
     const xml = worksheetWithCell('<v>1</v>').replace('<c r="A1">', `<c r="A1"t="n">${later}`);
 
     const error = scanError(entriesOf({ [SHEET_PART]: xml }));
 
-    expect(error?.code).toBe('UNSAFE_CONTENT');
-    expect(error?.meta).toEqual({ reason, entry: SHEET_PART });
+    expectUnsafeContent(error, reason, SHEET_PART, detail);
   });
 
   it('accepts markup the strict lexer cannot read when no field follows it', () => {
@@ -2209,7 +2260,11 @@ function expectTooManyNamespaceDeclarations(
   entry = NAMESPACE_PART,
 ): void {
   expect(error?.code).toBe('UNSAFE_CONTENT');
-  expect(error?.meta).toEqual({ entry, cap: MAX_XMLNS_DECLARATIONS_PER_PART });
+  expect(error?.meta).toEqual({
+    detail: UNSAFE_CONTENT_DETAILS.NAMESPACE_DECLARATIONS,
+    entry,
+    cap: MAX_XMLNS_DECLARATIONS_PER_PART,
+  });
   expect(error?.message).toBe(
     `Workbook part '${entry}' has more than ${MAX_XMLNS_DECLARATIONS_PER_PART} namespace declarations`,
   );
@@ -2820,5 +2875,172 @@ describe('isXmlPart', () => {
     ['xl/worksheets/sheet1.XML', false],
   ])('%s -> %s', (name, expected) => {
     expect(isXmlPart(name)).toBe(expected);
+  });
+});
+
+// Every UNSAFE_CONTENT names the check that refused the part (`meta.detail`), so a log
+// tells the broad CSS rule (every non-style attribute value, its false positives
+// included) apart from a style that loads a resource or a macro.
+describe('assertSafeXmlContent: the detail of a refusal', () => {
+  it.each([
+    [
+      'an autofilter value with a word ending in url glued to a parenthesis',
+      '<autoFilter ref="A1:A2"><filterColumn colId="0"><filters><filter val="Curl(25mm)"/></filters></filterColumn></autoFilter>',
+    ],
+    [
+      'a data validation prompt holding image(s)',
+      '<dataValidations count="1"><dataValidation type="list" sqref="A1" showInputMessage="1" prompt="Upload image(s) here"><formula1>"a,b"</formula1></dataValidation></dataValidations>',
+    ],
+  ])('names %s css-load-attribute, the broad rule', (_label, after) => {
+    const error = scanError(entriesOf({ [SHEET_PART]: worksheetWithAfter(after) }));
+
+    expectUnsafePart(error, SHEET_PART, UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE);
+  });
+
+  it('names an SVG fill that loads a resource css-load-attribute too: the key is not only false positives', () => {
+    const error = scanError(
+      entriesOf({
+        [SVG_PART]: svgWith('<rect width="1" height="1" fill="url(http://evil/p.svg#g)"/>'),
+      }),
+    );
+
+    expectUnsafePart(error, SVG_PART, UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE);
+  });
+
+  it('names a style attribute that loads a resource css-load, apart from the broad rule', () => {
+    const vml = `<xml ${VML_NAMESPACES}><v:shape id="b" style="background:url(http://x)"/></xml>`;
+
+    const error = scanError(entriesOf({ [VML_PART]: vml }));
+
+    expectUnsafePart(error, VML_PART, UNSAFE_CONTENT_DETAILS.CSS_LOAD);
+  });
+
+  it('names a word starting with on after an unquoted attribute loose-link', () => {
+    const part = 'xl/custom/a.xml';
+
+    const error = scanError(entriesOf({ [part]: '<r><e a=1/>onay</r>' }));
+
+    expectUnsafePart(error, part, UNSAFE_CONTENT_DETAILS.LOOSE_LINK);
+  });
+
+  it('names a WEBSERVICE formula formula', () => {
+    expectUnsafeFormula(
+      formulaError('WEBSERVICE("http://x")'),
+      SHEET_PART,
+      UNSAFE_CONTENT_DETAILS.FORMULA,
+    );
+  });
+
+  it.each<
+    [
+      detail: UnsafeContentDetail,
+      reason: UnsafeContentReason,
+      entry: string,
+      xml: string,
+      hyperlinks: ExternalHyperlinkIds,
+    ]
+  >([
+    [
+      UNSAFE_CONTENT_DETAILS.SCRIPT,
+      UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+      VML_PART,
+      vmlWith('<x:ScriptText>window.open(&quot;http://evil.example/&quot;)</x:ScriptText>'),
+      new Map(),
+    ],
+    [
+      UNSAFE_CONTENT_DETAILS.MACRO,
+      UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+      DRAWING_PART,
+      drawingWith('<xdr:sp macro="[0]!m" textlink=""/>'),
+      new Map(),
+    ],
+    [
+      UNSAFE_CONTENT_DETAILS.MACRO,
+      UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+      VML_PART,
+      vmlWith(`<x:FmlaMacro>${EVIL_CALL}</x:FmlaMacro>`),
+      new Map(),
+    ],
+    [
+      UNSAFE_CONTENT_DETAILS.EXTERNAL_URL,
+      UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      VML_PART,
+      vmlShapes('<v:imagedata src="http://evil.example/x.png"/>'),
+      new Map(),
+    ],
+    [
+      UNSAFE_CONTENT_DETAILS.CSS_UNDECODABLE,
+      UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      SVG_PART,
+      svgWith(`<style>rect{fill:red}${UNDECODABLE_REFERENCE}</style>`),
+      new Map(),
+    ],
+    [
+      UNSAFE_CONTENT_DETAILS.STYLESHEET_INSTRUCTION,
+      UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      SVG_PART,
+      `<?xml-stylesheet href="http://evil/a.css"?>${svgWith('')}`,
+      new Map(),
+    ],
+    [
+      UNSAFE_CONTENT_DETAILS.HYPERLINK_REUSE,
+      UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      SHEET_PART,
+      worksheetWithAfter('<picture r:id="rId1"/>'),
+      hyperlinkIdsOf(SHEET_PART, ['rId1']),
+    ],
+    [
+      UNSAFE_CONTENT_DETAILS.SVG_ANIMATION,
+      UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      SVG_PART,
+      svgWith('<animateMotion dur="1s"/>'),
+      new Map(),
+    ],
+    [
+      UNSAFE_CONTENT_DETAILS.EVENT_HANDLER,
+      UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      SVG_PART,
+      svgWith('<rect width="1" height="1" onclick="location=1"/>'),
+      new Map(),
+    ],
+    [
+      UNSAFE_CONTENT_DETAILS.WEB_RESOURCE,
+      UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      SVG_PART,
+      svgWith('<rect width="1" height="1" data="x"/>'),
+      new Map(),
+    ],
+    [
+      UNSAFE_CONTENT_DETAILS.ACTIVE_ELEMENT,
+      UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      SHEET_PART,
+      worksheetWithAfter('<oleObjects><oleObject progId="Package" shapeId="1025"/></oleObjects>'),
+      new Map(),
+    ],
+    [
+      UNSAFE_CONTENT_DETAILS.LOOSE_REFERENCE,
+      UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      SVG_PART,
+      svgWith(`<${LONG_S}/><rect width="1" height="1" fill="&#35;a"/>`),
+      new Map(),
+    ],
+    [
+      UNSAFE_CONTENT_DETAILS.LOOSE_CSS,
+      UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      SVG_PART,
+      svgWith(`<${LONG_S}/><rect width="1" height="1" fill="image(x.png)"/>`),
+      new Map(),
+    ],
+    [
+      UNSAFE_CONTENT_DETAILS.LOOSE_STYLE,
+      UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      SVG_PART,
+      svgWith(`<style><${LONG_S}/>rect{fill:red}</style>`),
+      new Map(),
+    ],
+  ])('names the check %s exactly', (detail, reason, entry, xml, hyperlinks) => {
+    const error = scanError(entriesOf({ [entry]: xml }), hyperlinks);
+
+    expectUnsafeContent(error, reason, entry, detail);
   });
 });

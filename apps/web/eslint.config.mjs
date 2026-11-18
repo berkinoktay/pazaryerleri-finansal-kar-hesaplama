@@ -42,6 +42,18 @@ const COLLIDING_MAXW_MESSAGE =
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  // Unused bindings are an error, not Next's 'warn' (`eslint .` runs without
+  // --max-warnings, so a warning never fails CI). The options mirror
+  // packages/eslint-config/base.js; base.js is deliberately not spread over
+  // Next's config. No `files`: Next's own block that sets 'warn' has none.
+  {
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
+      ],
+    },
+  },
   {
     files: ['src/**/*.{ts,tsx}'],
     ignores: ['src/components/ui/**', 'src/app/(showcase)/**'],

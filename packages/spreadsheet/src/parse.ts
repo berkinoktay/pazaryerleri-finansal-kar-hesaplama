@@ -6,14 +6,15 @@ import {
   PARSE_QUEUE_MAX_WAIT_MS,
 } from './constants';
 import type { SheetData } from './grid-types';
+import type { PackageCensus } from './package-census';
 import { createParseQueue } from './parse-queue';
 import { resolveReadOptions, type ReadGridOptions } from './read-options';
 import { createGridWorkerHost, type GridWorkerHost } from './worker/grid-worker-host';
 
 // One job at a time per process, at most MAX_QUEUED_PARSES in flight, none waiting
-// longer than PARSE_QUEUE_MAX_WAIT_MS (see parse-queue.ts). Reads and patches share
-// this one queue and the one host below, so the limits bound them together. The queue
-// stays on the main thread; each job runs in the worker host's single worker.
+// longer than PARSE_QUEUE_MAX_WAIT_MS (see parse-queue.ts). Reads, censuses and patches
+// share this one queue and the one host below, so the limits bound them together. The
+// queue stays on the main thread; each job runs in the worker host's single worker.
 const runParse = createParseQueue({
   maxInFlight: MAX_QUEUED_PARSES,
   maxWaitMs: PARSE_QUEUE_MAX_WAIT_MS,
@@ -78,4 +79,31 @@ export async function readWorkbookGrid(
 ): Promise<SheetData> {
   const resolved = resolveReadOptions(options);
   return runOnGridWorker(async (host) => host.run(file, resolved));
+}
+
+// No per-upload log of the census. The gate can collect the types in the pass it
+// already makes, but the worker answers a read with the grid alone (SheetData, the type
+// every reader names): getting the types to the API log would mean widening the
+// worker's grid answer, `host.run` and readWorkbookGrid for every reader. Every accepted
+// upload is stored, so the census of the stored files (the stored-workbook audit's gate
+// mode) measures the same population at no request-path cost.
+
+/**
+ * The package census of `file` (package-census.ts): the distinct relationship types and
+ * content types its package declares, as the upload gate reads them. Only values of a
+ * fixed URI-safe ASCII shape are kept (a relationship Type that is an http(s) URI on an
+ * OOXML schema host, a plain `type/subtype` content type, each at most
+ * MAX_CENSUS_VALUE_LENGTH characters, at most MAX_CENSUS_VALUES of each kind); any
+ * other value only sets a flag and is never returned, so the result holds no part name,
+ * target, file name or cell text. Runs in the parse worker, with its heap and time
+ * limits, in the queue readWorkbookGrid and patchWorkbook share, with the default read
+ * options (resolveReadOptions). The byte-level gate runs whole first (readUploadCensus),
+ * so a file it refuses is not censused. Throws SpreadsheetFileError: the gate's codes,
+ * `PAYLOAD_TOO_LARGE` with `meta.reason` when a worker limit kills the job
+ * (workerLimitReason), or `ENGINE_BUSY` when the queue is full or the call waited longer
+ * than PARSE_QUEUE_MAX_WAIT_MS for its turn.
+ */
+export async function inspectWorkbookPackage(file: Buffer): Promise<PackageCensus> {
+  const resolved = resolveReadOptions({});
+  return runOnGridWorker(async (host) => host.census(file, resolved));
 }

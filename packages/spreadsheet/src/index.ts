@@ -54,7 +54,8 @@ export type {
   ResolvedLayout,
   RowPredicate,
 } from './layout/types';
-export { readWorkbookGrid } from './parse';
+export { inspectWorkbookPackage, readWorkbookGrid } from './parse';
+export type { PackageCensus } from './package-census';
 export type {
   CellPatch,
   CellPatchValue,
@@ -63,13 +64,16 @@ export type {
 } from './patch/patch-request';
 export { patchWorkbook } from './patch/patch-workbook';
 export {
+  isUnsafeContentDetail,
   MALFORMED_SHEET_REASONS,
   PATCH_LIMIT_REASONS,
+  UNSAFE_CONTENT_DETAILS,
   UNSAFE_CONTENT_REASONS,
   UNSUPPORTED_ENCODING_REASONS,
   UPLOAD_LIMIT_REASONS,
   ZIP_REJECT_REASONS,
 } from './patch/reasons';
+export type { UnsafeContentDetail } from './patch/reasons';
 export { READER_RULES } from './cell-value';
 export type { ReaderRule } from './cell-value';
 export type { ReadGridOptions, SheetSelector } from './read-options';

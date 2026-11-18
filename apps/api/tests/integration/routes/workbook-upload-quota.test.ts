@@ -1,18 +1,24 @@
 // The upload quota's queries against the real tables, inside a transaction as the
 // import runs them: the stored bytes of a store over all six workbook parent tables,
-// never another organization's or a sibling store's, and the two limits.
+// never another organization's or a sibling store's, and the two limits. And the store
+// quota lock: a quota check waits while another transaction holds the store's lock, then
+// counts the bytes that transaction committed; another store's lock never makes it wait.
 
+import { z } from '@hono/zod-openapi';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { prisma } from '@pazarsync/db';
+import { prisma, type Prisma } from '@pazarsync/db';
 
-import { WorkbookConflictError } from '@/lib/errors';
+import { ImportBusyError, WorkbookConflictError } from '@/lib/errors';
 import type { StoreScope } from '@/workbooks/adapter';
 import {
+  acquireStoreQuotaLock,
   assertUploadQuota,
+  quotaLockKey,
   storedUploadBytes,
   storedUploadBytesSql,
   WORKBOOK_PARENT_TABLES,
+  WORKBOOK_QUOTA_LOCK_SEED,
 } from '@/workbooks/upload-quota';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -30,6 +36,37 @@ const BYTES_PER_TABLE = {
 const TOTAL_BYTES = Object.values(BYTES_PER_TABLE).reduce((sum, n) => sum + n, 0);
 
 const LIMITS = { maxLists: 3, maxBytes: 1000 } as const;
+
+// The lock tests: a peer import's file and an incoming file that each fit the byte limit
+// alone and cross it together.
+const PEER_BYTES = 600;
+const INCOMING_BYTES = 500;
+
+// The holder transaction outlives the waiter's poll; Prisma's default 5 s could end it
+// while the test still needs the lock held.
+const LOCK_HOLDER_TIMEOUT_MS = 60_000;
+// A waiter that never gets the lock fails at this bound, short of the test timeout.
+const LOCK_WAITER_TIMEOUT_MS = 10_000;
+// How often, and how many times, the test polls pg_locks for a waiting transaction.
+const LOCK_WAIT_POLL_INTERVAL_MS = 25;
+const LOCK_WAIT_MAX_POLLS = 200;
+// A lock wait bound short enough that the waiter gives up while the holder still holds
+// the lock.
+const SHORT_LOCK_TIMEOUT_MS = 300;
+
+const LockTimeoutSchema = z.array(z.object({ lockTimeout: z.string() }));
+
+/** The transaction's current lock_timeout, as Postgres prints it. */
+async function lockTimeoutOf(tx: Prisma.TransactionClient): Promise<string> {
+  const rows = LockTimeoutSchema.parse(
+    await tx.$queryRaw`SELECT current_setting('lock_timeout') AS "lockTimeout"`,
+  );
+  const row = rows[0];
+  if (row === undefined) throw new Error('current_setting returned no row');
+  return row.lockTimeout;
+}
+
+const LockCountSchema = z.array(z.object({ locks: z.number() }));
 
 function bytes(length: number): Uint8Array<ArrayBuffer> {
   return new Uint8Array(length).fill(1);
@@ -108,6 +145,154 @@ async function quotaMeta(
     if (err instanceof WorkbookConflictError) return err.meta;
     throw err;
   }
+}
+
+// The store quota lock, held by another transaction.
+
+/** How a quota check under the store quota lock ended; it never rejects. */
+type LockedQuotaOutcome =
+  | { readonly kind: 'passed' }
+  | {
+      readonly kind: 'refused';
+      readonly reason: string;
+      readonly meta: Readonly<Record<string, string | number>>;
+    }
+  | { readonly kind: 'failed'; readonly error: unknown };
+
+/**
+ * One transaction as the import runs it: the store quota lock, then the quota with no
+ * list yet on the page. Settles to its outcome instead of rejecting, so it can be
+ * started without an await and never leaves an unhandled rejection.
+ */
+async function quotaUnderLock(
+  scope: StoreScope,
+  incomingBytes: number,
+): Promise<LockedQuotaOutcome> {
+  try {
+    await prisma.$transaction(
+      async (tx) => {
+        await acquireStoreQuotaLock(tx, scope);
+        await assertUploadQuota(tx, scope, { listCount: 0, incomingBytes }, LIMITS);
+      },
+      { timeout: LOCK_WAITER_TIMEOUT_MS },
+    );
+    return { kind: 'passed' };
+  } catch (err) {
+    if (err instanceof WorkbookConflictError) {
+      return { kind: 'refused', reason: err.reason, meta: err.meta };
+    }
+    return { kind: 'failed', error: err };
+  }
+}
+
+/** The advisory locks on the store quota key of `scope` in this database, granted or waiting. */
+async function quotaLockCount(scope: StoreScope, granted: boolean): Promise<number> {
+  const key = quotaLockKey(scope);
+  const rows = LockCountSchema.parse(
+    await prisma.$queryRaw`
+      WITH "h" AS (SELECT hashtextextended(${key}, ${WORKBOOK_QUOTA_LOCK_SEED}::int8) AS "v")
+      SELECT count(*)::int AS "locks"
+      FROM pg_locks, "h"
+      WHERE locktype = 'advisory'
+        AND granted = ${granted}
+        AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+        AND classid::bigint = (("h"."v" >> 32) & 4294967295)
+        AND objid::bigint = ("h"."v" & 4294967295)
+        AND objsubid = 1`,
+  );
+  return rows[0]?.locks ?? 0;
+}
+
+/**
+ * Polls pg_locks until one transaction waits for the store quota lock of `scope`, and
+ * fails after LOCK_WAIT_MAX_POLLS polls. The pause between polls is not the proof; the
+ * lock row that is not granted is.
+ */
+async function expectQuotaLockWaiter(scope: StoreScope): Promise<void> {
+  for (let poll = 0; poll < LOCK_WAIT_MAX_POLLS; poll += 1) {
+    const waiting = await quotaLockCount(scope, false);
+    if (waiting > 0) {
+      expect(waiting).toBe(1);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_INTERVAL_MS));
+  }
+  throw new Error(`No transaction waited for the store quota lock in ${LOCK_WAIT_MAX_POLLS} polls`);
+}
+
+interface HeldQuotaLock {
+  /** Commits the holder transaction, which releases the lock. */
+  readonly release: () => Promise<void>;
+}
+
+/**
+ * Takes ONLY the store quota lock of `scope` in another transaction (the same SQL and
+ * seed as the import), runs `inside` there uncommitted, and resolves once both are done.
+ * The transaction stays open until `release`.
+ */
+async function holdQuotaLock(
+  scope: StoreScope,
+  inside: (tx: Prisma.TransactionClient) => Promise<void> = async () => undefined,
+): Promise<HeldQuotaLock> {
+  const key = quotaLockKey(scope);
+  let signalLocked: () => void = () => undefined;
+  const locked = new Promise<void>((resolve) => {
+    signalLocked = resolve;
+  });
+  let release: () => void = () => undefined;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const holder = prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, ${WORKBOOK_QUOTA_LOCK_SEED}::int8))`;
+      await inside(tx);
+      signalLocked();
+      await released;
+    },
+    { timeout: LOCK_HOLDER_TIMEOUT_MS },
+  );
+  try {
+    await Promise.race([
+      locked,
+      holder.then(() => {
+        throw new Error('The lock holder ended before it took the lock');
+      }),
+    ]);
+    expect(await quotaLockCount(scope, true)).toBe(1);
+  } catch (err) {
+    // Ends the holder before the next test truncates; the first failure is the one reported.
+    release();
+    await holder.catch(() => undefined);
+    throw err;
+  }
+  return {
+    release: async () => {
+      release();
+      await holder;
+    },
+  };
+}
+
+/**
+ * Starts the quota under the store quota lock while `holder` holds it, polls until that
+ * transaction waits for the lock, then releases the holder and returns the outcome. The
+ * holder is released and the waiter settled on every path, so no transaction outlives
+ * the test.
+ */
+async function quotaAfterRelease(
+  holder: HeldQuotaLock,
+  scope: StoreScope,
+  incomingBytes: number,
+): Promise<LockedQuotaOutcome> {
+  const waiter = quotaUnderLock(scope, incomingBytes);
+  try {
+    await expectQuotaLockWaiter(scope);
+  } finally {
+    await holder.release();
+    await waiter;
+  }
+  return waiter;
 }
 
 describe('storedUploadBytes', () => {
@@ -202,5 +387,93 @@ describe('assertUploadQuota', () => {
     await seedDiscountBytes(await newScope(), 5000);
 
     expect(await quotaReason(scope, { listCount: 1, incomingBytes: 100 })).toBeNull();
+  });
+});
+
+describe('acquireStoreQuotaLock', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("waits for a peer import's lock, then counts the bytes the peer committed", async () => {
+    const scope = await newScope();
+    // A peer import of another page: its list is written but not committed yet.
+    const holder = await holdQuotaLock(scope, async (tx) => {
+      await tx.discountList.create({
+        data: { ...scope, name: 'Peer', discountType: 'NET', sourceFile: bytes(PEER_BYTES) },
+      });
+    });
+
+    const outcome = await quotaAfterRelease(holder, scope, INCOMING_BYTES);
+
+    expect(outcome).toEqual({
+      kind: 'refused',
+      reason: 'UPLOAD_QUOTA_EXCEEDED',
+      meta: { limit: 'bytes', maxBytes: LIMITS.maxBytes },
+    });
+  });
+
+  it('passes the same file with no holder and no peer (control)', async () => {
+    const scope = await newScope();
+
+    expect(await quotaUnderLock(scope, INCOMING_BYTES)).toEqual({ kind: 'passed' });
+  });
+
+  // Prisma's transaction timeout cancels no running statement, so the wait is bounded on
+  // the server: past lock_timeout the waiter answers the retryable IMPORT_BUSY at once,
+  // while the holder still holds the lock, and leaves the lock queue.
+  it('answers IMPORT_BUSY past its lock wait bound while the holder still holds the lock', async () => {
+    const scope = await newScope();
+    const holder = await holdQuotaLock(scope);
+
+    try {
+      const error = await prisma
+        .$transaction(
+          async (tx) => {
+            await acquireStoreQuotaLock(tx, scope, SHORT_LOCK_TIMEOUT_MS);
+          },
+          { timeout: LOCK_WAITER_TIMEOUT_MS },
+        )
+        .then(
+          (): unknown => null,
+          (err: unknown) => err,
+        );
+
+      expect(error).toBeInstanceOf(ImportBusyError);
+      expect(await quotaLockCount(scope, true)).toBe(1);
+      expect(await quotaLockCount(scope, false)).toBe(0);
+    } finally {
+      await holder.release();
+    }
+  });
+
+  it('gives the rest of the transaction its default lock_timeout back', async () => {
+    const scope = await newScope();
+
+    const [before, after] = await prisma.$transaction(async (tx) => {
+      const defaultTimeout = await lockTimeoutOf(tx);
+      await acquireStoreQuotaLock(tx, scope, SHORT_LOCK_TIMEOUT_MS);
+      return [defaultTimeout, await lockTimeoutOf(tx)];
+    });
+
+    expect(after).toBe(before);
+  });
+
+  it("never waits for another store's lock", async () => {
+    const held = await newScope();
+    const sibling = await newScope(held.organizationId);
+    const holder = await holdQuotaLock(held);
+
+    try {
+      // Awaited while the holder still holds the first store's lock.
+      expect(await quotaUnderLock(sibling, INCOMING_BYTES)).toEqual({ kind: 'passed' });
+      expect(await quotaLockCount(held, true)).toBe(1);
+    } finally {
+      await holder.release();
+    }
   });
 });

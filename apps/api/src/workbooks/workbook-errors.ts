@@ -5,14 +5,17 @@
 // rows, its columns or its content: `toUploadError` rebuilds that limit from a whitelist
 // (the row or column number and the one limit name), so an entry name or library text
 // still never reaches a response. What the meta says is logged instead, without file
-// names or cell content.
+// names or cell content: the engine code, its `reason`, and for UNSAFE_CONTENT its
+// `detail` (the one check that refused the file, a fixed rule name).
 
 import {
   DEFAULT_COL_CAP,
   DEFAULT_ROW_CAP,
+  isUnsafeContentDetail,
   SpreadsheetFileError,
   UPLOAD_LIMIT_REASONS,
   workerLimitReason,
+  type UnsafeContentDetail,
 } from '@pazarsync/spreadsheet';
 import { syncLog } from '@pazarsync/sync-core';
 import { WORKBOOK_FILE_LIMITS, type WorkbookFileCode, type WorkbookPage } from '@pazarsync/utils';
@@ -48,6 +51,15 @@ export class WorkbookInvariantError extends Error {
 function engineReason(err: SpreadsheetFileError): string | null {
   const reason = err.meta['reason'];
   return typeof reason === 'string' ? reason : null;
+}
+
+/**
+ * The engine meta's `detail` (the check behind an UNSAFE_CONTENT), when it is one of the
+ * engine's fixed rule names; null otherwise, so no text the API does not know is logged.
+ */
+function engineDetail(err: SpreadsheetFileError): UnsafeContentDetail | null {
+  const detail = err.meta['detail'];
+  return isUnsafeContentDetail(detail) ? detail : null;
 }
 
 /** Logs the worker limit (memory or time) that killed a parse: the API's one place for that log. */
@@ -90,7 +102,8 @@ function uploadLimitMeta(
  * For everything an import throws before its transaction. A `WorkbookFileRejection`
  * becomes a 422 on `file` with its own code and its meta. An engine `ENGINE_BUSY` is the
  * 503 `ImportBusyError`; any other engine code, a worker kill included, is a 422 on
- * `file` carrying the engine code and logged as `workbook.upload-rejected`. The engine
+ * `file` carrying the engine code and logged as `workbook.upload-rejected` with its
+ * reason and detail (engineReason, engineDetail; null when absent). The engine
  * meta stays out of that 422, except for a row, column or content refusal, whose issue
  * carries the limit `uploadLimitMeta` builds (`maxRows`, `maxCols`, or `limit` with
  * `maxRows`); an entry name or library text never does. Anything else is rethrown
@@ -111,6 +124,7 @@ export function toUploadError(err: unknown, context: { readonly page: WorkbookPa
     page: context.page,
     code: err.code,
     reason: engineReason(err),
+    detail: engineDetail(err),
   });
   const limitMeta = uploadLimitMeta(err);
   throw new ValidationError([
@@ -123,8 +137,8 @@ export function toUploadError(err: unknown, context: { readonly page: WorkbookPa
 /**
  * Refuses a stored file for a rule of the pipeline's own, not an engine refusal: logs
  * `workbook.stored-file-rejected` with the fields `toStoredFileError` logs (the engine
- * `code` null, `reason` the given fixed rule name, never a value of the file) and
- * throws WorkbookConflictError STORED_FILE_UNREADABLE, a 409.
+ * `code` and `detail` null, `reason` the given fixed rule name, never a value of the
+ * file) and throws WorkbookConflictError STORED_FILE_UNREADABLE, a 409.
  */
 export function rejectStoredFile(
   context: { readonly page: WorkbookPage; readonly recordId: string },
@@ -135,6 +149,7 @@ export function rejectStoredFile(
     recordId: context.recordId,
     code: null,
     reason,
+    detail: null,
   });
   throw new WorkbookConflictError('STORED_FILE_UNREADABLE');
 }
@@ -145,8 +160,8 @@ export function rejectStoredFile(
  * conflict with the stored state, never a 500: a row the patch cannot find or match
  * keeps its own reason, a sheet or format that is gone is STORED_FILE_UNRECOGNIZED,
  * and every other engine code, a worker kill included, is STORED_FILE_UNREADABLE,
- * logged with its code and reason. Only `ENGINE_BUSY` is the 503 `ImportBusyError`.
- * Anything else is rethrown untouched.
+ * logged with its code, reason and detail. Only `ENGINE_BUSY` is the 503
+ * `ImportBusyError`. Anything else is rethrown untouched.
  */
 export function toStoredFileError(
   err: unknown,
@@ -179,6 +194,7 @@ export function toStoredFileError(
         recordId: context.recordId,
         code: err.code,
         reason: engineReason(err),
+        detail: engineDetail(err),
       });
       throw new WorkbookConflictError('STORED_FILE_UNREADABLE');
     default: {
