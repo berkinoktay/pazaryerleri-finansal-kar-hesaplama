@@ -604,9 +604,13 @@ describe('PlusTariffsTable - read-only member', () => {
     expect(screen.queryAllByRole('button', { name: tPlusTable('join') })).toHaveLength(0);
     expect(screen.queryAllByRole('button', { name: tPlusTable('joined') })).toHaveLength(0);
     expect(screen.queryAllByRole('button', { name: tPlusTable('selectCustom') })).toHaveLength(0);
-    const inputs = screen.getAllByPlaceholderText(tPlusTable('enterPrice'));
+    // Found by label: a read-only member's input invites nothing, so it has no placeholder.
+    const inputs = screen.getAllByLabelText(new RegExp(`^${tPlusTable('customPrice')} — `));
     expect(inputs).toHaveLength(TWO_ROWS.length);
-    for (const input of inputs) expect(input).toBeDisabled();
+    for (const input of inputs) {
+      expect(input).toBeDisabled();
+      expect(input).not.toHaveAttribute('placeholder');
+    }
 
     // The stored join still reads as joined, on its own row only.
     expect(

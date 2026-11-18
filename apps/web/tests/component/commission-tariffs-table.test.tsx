@@ -508,9 +508,13 @@ describe('CommissionTariffsTable - read-only member', () => {
     expect(screen.queryAllByRole('button', { name: TABLE_MESSAGES.selectBand })).toHaveLength(0);
     expect(screen.queryAllByRole('button', { name: TABLE_MESSAGES.bandSelected })).toHaveLength(0);
     expect(screen.queryAllByRole('button', { name: TABLE_MESSAGES.selectCustom })).toHaveLength(0);
-    const inputs = screen.getAllByPlaceholderText(TABLE_MESSAGES.enterPrice);
+    // Found by label: a read-only member's input invites nothing, so it has no placeholder.
+    const inputs = screen.getAllByLabelText(new RegExp(`^${TABLE_MESSAGES.customPrice} — `));
     expect(inputs).toHaveLength(TWO_ROWS.length);
-    for (const input of inputs) expect(input).toBeDisabled();
+    for (const input of inputs) {
+      expect(input).toBeDisabled();
+      expect(input).not.toHaveAttribute('placeholder');
+    }
 
     // The stored choice still reads as selected, on its own row only.
     expect(
