@@ -28,6 +28,7 @@ import { patchFixture } from '@pazarsync/spreadsheet/testing';
 import { createApp } from '@/app';
 import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware';
 import { trendyolPlusCommissionTariffFormat } from '@/workbooks/formats/trendyol/plus-commission-tariff.format';
+import { missingExportRequirement, resolveWriteColumns } from '@/workbooks/write-columns';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -626,5 +627,85 @@ describe('POST .../plus-commission-tariffs/import - the unknown commission count
     // counts once.
     expect(body.periodCount).toBe(2);
     expect(body.unknownCommissionRows).toBe(1);
+  });
+});
+
+// The header written over a write column: a text the layout does not know.
+const REMOVED_HEADER = 'Removed column';
+
+const PLUS_FIXTURES: [Buffer, string][] = [
+  [FIXTURE_7DAY, 'trendyol-plus-tariff.xlsx'],
+  [FIXTURE_MULTI, 'trendyol-plus-tariff-3ve4.xlsx'],
+];
+
+/**
+ * Patches that overwrite the header of every write column the Plus export requires in
+ * `fixture` (the Plus price and the tariff selection: either one carries the opt-in).
+ * The columns are found through the format's write keys, so no header text is typed.
+ */
+async function requiredWriteHeaderPatches(fixture: Buffer): Promise<CellPatch[]> {
+  const format = trendyolPlusCommissionTariffFormat;
+  const grid = await readWorkbookGrid(fixture, { sheet: format.sheet });
+  const layout = resolveLayout(format.layout, grid);
+  if (layout === null) throw new Error('unreadable Plus fixture');
+  const required = format.exportRequires.flat();
+  const patches = resolveWriteColumns(format, layout)
+    .filter((entry) => required.includes(entry.key))
+    .map(
+      (entry): CellPatch => ({
+        excelRow: layout.headerRowIndex + 1,
+        col: entry.col,
+        value: { kind: 'text', value: REMOVED_HEADER },
+      }),
+    );
+  // An empty list would hand back the fixture untouched, and the import would answer 201.
+  expect(patches.length).toBeGreaterThan(0);
+  return patches;
+}
+
+/** True when `file` still reads as a Plus file but has no column its export requires. */
+async function missesExportColumn(file: Buffer): Promise<boolean> {
+  const format = trendyolPlusCommissionTariffFormat;
+  const grid = await readWorkbookGrid(file, { sheet: format.sheet });
+  const layout = resolveLayout(format.layout, grid);
+  if (layout === null) throw new Error('the patched Plus fixture no longer resolves');
+  return missingExportRequirement(format, resolveWriteColumns(format, layout));
+}
+
+describe('POST .../plus-commission-tariffs/import - a file with no column to write selections into', () => {
+  beforeEach(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+  });
+
+  it.each(PLUS_FIXTURES)(
+    'answers 422 NO_WRITEBACK_COLUMN on file and stores nothing (%#)',
+    async (fixture, filename) => {
+      const ctx = await setupStore();
+      const file = patchFixture(fixture, await requiredWriteHeaderPatches(fixture), {
+        sheet: trendyolPlusCommissionTariffFormat.sheet,
+      });
+      // The file still reads as a Plus file: only its write columns are gone.
+      expect(await missesExportColumn(file)).toBe(true);
+
+      const res = await app.request(importRequest(ctx, file, filename));
+
+      expect(res.status).toBe(422);
+      const body = ProblemSchema.parse(await res.json());
+      expect(body.code).toBe('VALIDATION_ERROR');
+      expect(body.errors).toEqual([{ field: 'file', code: 'NO_WRITEBACK_COLUMN' }]);
+      const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
+      expect(await prisma.plusCommissionTariff.count({ where: scope })).toBe(0);
+    },
+  );
+
+  it.each(PLUS_FIXTURES)('imports the untouched fixture (%#)', async (fixture, filename) => {
+    const ctx = await setupStore();
+    const file = patchFixture(fixture, [], { sheet: trendyolPlusCommissionTariffFormat.sheet });
+    expect(await missesExportColumn(file)).toBe(false);
+
+    const res = await app.request(importRequest(ctx, file, filename));
+
+    expect(res.status).toBe(201);
   });
 });

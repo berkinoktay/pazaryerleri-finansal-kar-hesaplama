@@ -96,6 +96,29 @@ describe('problemDetailsForError — extended error classes', () => {
     expect('meta' in body).toBe(false);
   });
 
+  it('carries the meta of a WorkbookConflictError that has one', () => {
+    const meta = { limit: 'lists', maxLists: 50 };
+    const { body, status } = problemDetailsForError(
+      new WorkbookConflictError('UPLOAD_QUOTA_EXCEEDED', meta),
+    );
+    expect(status).toBe(409);
+    expect(body.code).toBe('UPLOAD_QUOTA_EXCEEDED');
+    expect(body.meta).toEqual({ limit: 'lists', maxLists: 50 });
+  });
+
+  it('merges the request id into the meta of a WorkbookConflictError', () => {
+    const { body } = problemDetailsForError(
+      new WorkbookConflictError('UPLOAD_QUOTA_EXCEEDED', { limit: 'lists', maxLists: 50 }),
+      { requestId: 'req-quota' },
+    );
+    expect(body.meta).toEqual({ limit: 'lists', maxLists: 50, requestId: 'req-quota' });
+  });
+
+  it('sends no meta key for a WorkbookConflictError without meta', () => {
+    const { body } = problemDetailsForError(new WorkbookConflictError('IMPORT_IN_PROGRESS'));
+    expect('meta' in body).toBe(false);
+  });
+
   it('maps SyncInProgressError to 409 SYNC_IN_PROGRESS with syncType + storeId meta', () => {
     const { body, status } = problemDetailsForError(
       new SyncInProgressError({ syncType: 'PRODUCTS', storeId: 'store-123' }),

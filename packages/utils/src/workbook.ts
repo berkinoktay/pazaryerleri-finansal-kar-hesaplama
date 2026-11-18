@@ -9,7 +9,7 @@
  */
 export const WORKBOOK_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 
-const BYTES_PER_MB = 1024 * 1024;
+export const BYTES_PER_MB = 1024 * 1024;
 
 /**
  * The same limit in whole megabytes, for the upload dialogs' hint text. Derived

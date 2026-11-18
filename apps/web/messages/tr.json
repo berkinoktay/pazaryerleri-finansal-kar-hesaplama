@@ -834,7 +834,13 @@
       "nameTooLong": "Ad en fazla {max} karakter olabilir.",
       "nameInvalidCharacters": "Adda görünmeyen ya da kontrol karakteri var. Adı silip yeniden yazın.",
       "nameRequired": "Ad boş olamaz.",
-      "field": "Gönderilen bilgilerin bir kısmı kabul edilmedi. Formu kontrol edip tekrar deneyin."
+      "field": "Gönderilen bilgilerin bir kısmı kabul edilmedi. Formu kontrol edip tekrar deneyin.",
+      "tooManyRows": "Dosyadaki sayfalardan birinde {maxRows, number} satırdan fazlası var. Bu sınır dosyanın her sayfası için geçerli; fazladan bir yardımcı sayfa ya da çok aşağıya kadar uygulanmış biçimlendirme de buna yol açabilir. Dosyayı daha küçük dosyalara bölün ya da fazladan sayfayı veya boş biçimlendirilmiş satırları silip tekrar yükleyin.",
+      "tooManyColumns": "Dosyadaki sayfalardan birinde {maxCols, number} sütundan fazlası var. Bu sınır dosyanın her sayfası için geçerli; fazladan bir yardımcı sayfa da buna yol açabilir. Fazladan sütunları ya da sayfayı silip tekrar yükleyin.",
+      "tooMuchContent": "Dosyanın içeriği işlenebilecek sınırı aşıyor: satır sayısı ya da satırlardaki dolu sütun sayısı çok fazla. Bir sayfada en fazla {maxRows, number} satır olabilir; çok geniş ya da çok dolu satırları olan bir dosya bu sayıya ulaşmadan reddedilir. Dosyanın her sayfası hesaba katılır, fazladan bir yardımcı sayfa da buna yol açabilir. Dosyayı iki küçük dosyaya bölün ya da fazladan sayfayı veya sütunları silip tekrar yükleyin.",
+      "noWriteColumn": "Dosyada seçimlerinizin yazılacağı sütun yok. Dosyayı pazaryeri panelinden yeniden indirip değiştirmeden yükleyin.",
+      "quotaLists": "Bu sayfada zaten {maxLists, number} liste var; bir mağaza için bir sayfada en fazla bu kadar liste tutulabilir. Bu sayfada artık kullanmadığınız bir listeyi silip tekrar yükleyin.",
+      "quotaBytes": "Bu mağaza için saklanan dosyalar {maxMb, number} MB sınırına ulaştı; sınır bütün kampanya sayfalarında birlikte sayılır. Bu sayfada ya da başka bir kampanya sayfasında artık kullanmadığınız bir listeyi silip tekrar yükleyin."
     },
     "pages": {
       "COMMISSION_TARIFF": "Ürün Komisyon Tarifeleri",
@@ -997,6 +1003,8 @@
       "step3": "Her ürün için hangi fiyat aralığında ne kazanacağınızı görün",
       "submit": "Tarifeyi oluştur",
       "errors": {
+        "tooManyRows": "Dosyadaki sayfalardan birinde {maxRows, number} satırdan fazlası var. Bu sınır dosyanın her sayfası için geçerli; fazladan bir yardımcı sayfa ya da çok aşağıya kadar uygulanmış biçimlendirme de buna yol açabilir. Bu sayfa her hafta için tek komisyon tarifesi tutar, bu yüzden dosya bölünüp parça parça yüklenemez. Fazladan sayfayı ya da boş biçimlendirilmiş satırları silip tekrar yükleyin. Ürün satırlarının kendisi sınırı aşıyorsa bu haftanın tarifesi bu sayfaya yüklenemez.",
+        "tooMuchContent": "Dosyanın içeriği işlenebilecek sınırı aşıyor: satır sayısı ya da satırlardaki dolu sütun sayısı çok fazla. Bir sayfada en fazla {maxRows, number} satır olabilir; çok geniş ya da çok dolu satırları olan bir dosya bu sayıya ulaşmadan reddedilir. Dosyanın her sayfası hesaba katılır, fazladan bir yardımcı sayfa da buna yol açabilir. Bu sayfa her hafta için tek komisyon tarifesi tutar, bu yüzden dosya bölünüp parça parça yüklenemez. Fazladan sayfayı, sütunları ya da boş biçimlendirilmiş satırları silip tekrar yükleyin. Ürün verisinin kendisi sınırı aşıyorsa bu haftanın tarifesi bu sayfaya yüklenemez.",
         "wrongFormat": "Bu bir Trendyol komisyon tarifesi dosyası değil ya da biçimi tanınmadı.",
         "duplicateWeek": "Bu tarih aralığı için zaten bir komisyon tarifesi var."
       }
@@ -1208,6 +1216,8 @@
       "step3": "Her ürün için Plus'a katılmanın kârlı olup olmadığını görün",
       "submit": "Tarifeyi oluştur",
       "errors": {
+        "tooManyRows": "Dosyadaki sayfalardan birinde {maxRows, number} satırdan fazlası var. Bu sınır dosyanın her sayfası için geçerli; fazladan bir yardımcı sayfa ya da çok aşağıya kadar uygulanmış biçimlendirme de buna yol açabilir. Bu sayfa her hafta için tek Plus komisyon tarifesi tutar, bu yüzden dosya bölünüp parça parça yüklenemez. Fazladan sayfayı ya da boş biçimlendirilmiş satırları silip tekrar yükleyin. Ürün satırlarının kendisi sınırı aşıyorsa bu haftanın tarifesi bu sayfaya yüklenemez.",
+        "tooMuchContent": "Dosyanın içeriği işlenebilecek sınırı aşıyor: satır sayısı ya da satırlardaki dolu sütun sayısı çok fazla. Bir sayfada en fazla {maxRows, number} satır olabilir; çok geniş ya da çok dolu satırları olan bir dosya bu sayıya ulaşmadan reddedilir. Dosyanın her sayfası hesaba katılır, fazladan bir yardımcı sayfa da buna yol açabilir. Bu sayfa her hafta için tek Plus komisyon tarifesi tutar, bu yüzden dosya bölünüp parça parça yüklenemez. Fazladan sayfayı, sütunları ya da boş biçimlendirilmiş satırları silip tekrar yükleyin. Ürün verisinin kendisi sınırı aşıyorsa bu haftanın tarifesi bu sayfaya yüklenemez.",
         "wrongFormat": "Bu bir Trendyol Plus komisyon dosyası değil ya da biçimi tanınmadı.",
         "duplicateWeek": "Bu tarih aralığı için zaten bir Plus komisyon tarifesi var."
       }
@@ -1444,7 +1454,8 @@
         "required": "Devam etmek için bir yöntem seç.",
         "label": "Bu avantajlı hangi komisyon tarifesine (haftaya) ait?",
         "hint": "Kademe komisyonları, seçtiğin haftanın komisyon tarifesinden okunur.",
-        "category": "Kategori komisyonu"
+        "category": "Kategori komisyonu",
+        "invalid": "Seçtiğin komisyon tarifesi artık yok. Başka bir hafta seç ya da kategori komisyonuyla devam et."
       }
     },
     "breakdown": {

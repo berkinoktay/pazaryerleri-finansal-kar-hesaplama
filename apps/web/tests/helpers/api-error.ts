@@ -21,13 +21,25 @@ export function validationApiError(issues: ValidationIssueInput[]): ApiError {
   });
 }
 
-/** A problem with the given status and code and no field issues (a 409, the 413, a 500, ...). */
-export function problemApiError(status: number, code: string): ApiError {
+/** The request id a built problem's `meta` carries when a test hands it extra meta keys. */
+const TEST_REQUEST_ID = 'test-request-id';
+
+/**
+ * A problem with the given status and code and no field issues (a 409, the 413, a 500, ...).
+ * `meta`, when given, is merged into the problem's `meta` next to a request id (the shape the
+ * API stamps); without it the problem has no `meta` at all.
+ */
+export function problemApiError(
+  status: number,
+  code: string,
+  meta?: Readonly<Record<string, unknown>>,
+): ApiError {
   return new ApiError(status, code, 'detail', {
     type: 'about:blank',
     title: 'title',
     status,
     code,
     detail: 'detail',
+    ...(meta === undefined ? {} : { meta: { requestId: TEST_REQUEST_ID, ...meta } }),
   });
 }

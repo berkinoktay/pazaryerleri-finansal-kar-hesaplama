@@ -834,7 +834,13 @@
       "nameTooLong": "The name can be at most {max} characters.",
       "nameInvalidCharacters": "The name holds an invisible or control character. Delete it and type the name again.",
       "nameRequired": "The name cannot be empty.",
-      "field": "Part of what was sent was not accepted. Check the form and try again."
+      "field": "Part of what was sent was not accepted. Check the form and try again.",
+      "tooManyRows": "A sheet in the file has more than {maxRows, number} rows. The limit applies to every sheet of the file, so an extra helper sheet, or formatting applied far down a sheet, can cause it. Split the file into smaller files, or delete the extra sheet or the empty formatted rows, then upload again.",
+      "tooManyColumns": "A sheet in the file has more than {maxCols, number} columns. The limit applies to every sheet of the file, so an extra helper sheet can cause it. Delete the extra columns or the extra sheet, then upload again.",
+      "tooMuchContent": "The file holds more content than can be processed: too many rows, or rows with very many filled columns. A sheet can hold at most {maxRows, number} rows, and a file with very wide or very full rows is refused before it reaches that number. Every sheet of the file counts, so an extra helper sheet can cause it. Split the file into two smaller files, or delete the extra sheet or the extra columns, then upload again.",
+      "noWriteColumn": "The file has no column your choices can be written into. Download the file again from the marketplace panel and upload it unchanged.",
+      "quotaLists": "This page already holds {maxLists, number} lists, the most one page can keep for a store. Delete a list you no longer need on this page, then upload again.",
+      "quotaBytes": "The files stored for this store have reached the {maxMb, number} MB limit, counted over all campaign pages. Delete a list you no longer need, on this page or on another campaign page, then upload again."
     },
     "pages": {
       "COMMISSION_TARIFF": "Product Commission Tariffs",
@@ -997,6 +1003,8 @@
       "step3": "See what you'll earn at each price band for every product",
       "submit": "Create tariff",
       "errors": {
+        "tooManyRows": "A sheet in the file has more than {maxRows, number} rows. The limit applies to every sheet of the file, so an extra helper sheet, or formatting applied far down a sheet, can cause it. This page keeps one commission tariff per week, so the file cannot be split and uploaded in parts. Delete the extra sheet or the empty formatted rows, then upload again. If the product rows themselves are over the limit, this week's tariff cannot be uploaded on this page.",
+        "tooMuchContent": "The file holds more content than can be processed: too many rows, or rows with very many filled columns. A sheet can hold at most {maxRows, number} rows, and a file with very wide or very full rows is refused before it reaches that number. Every sheet of the file counts, so an extra helper sheet can cause it. This page keeps one commission tariff per week, so the file cannot be split and uploaded in parts. Delete the extra sheet, the extra columns or the empty formatted rows, then upload again. If the product data itself is over the limit, this week's tariff cannot be uploaded on this page.",
         "wrongFormat": "This isn't a Trendyol commission tariff file, or its format wasn't recognized.",
         "duplicateWeek": "A commission tariff already exists for this date range."
       }
@@ -1208,6 +1216,8 @@
       "step3": "See whether joining Plus is profitable for each product",
       "submit": "Create tariff",
       "errors": {
+        "tooManyRows": "A sheet in the file has more than {maxRows, number} rows. The limit applies to every sheet of the file, so an extra helper sheet, or formatting applied far down a sheet, can cause it. This page keeps one Plus commission tariff per week, so the file cannot be split and uploaded in parts. Delete the extra sheet or the empty formatted rows, then upload again. If the product rows themselves are over the limit, this week's tariff cannot be uploaded on this page.",
+        "tooMuchContent": "The file holds more content than can be processed: too many rows, or rows with very many filled columns. A sheet can hold at most {maxRows, number} rows, and a file with very wide or very full rows is refused before it reaches that number. Every sheet of the file counts, so an extra helper sheet can cause it. This page keeps one Plus commission tariff per week, so the file cannot be split and uploaded in parts. Delete the extra sheet, the extra columns or the empty formatted rows, then upload again. If the product data itself is over the limit, this week's tariff cannot be uploaded on this page.",
         "wrongFormat": "This is not a Trendyol Plus commission file, or the format is unrecognized.",
         "duplicateWeek": "A Plus commission tariff already exists for this date range."
       }
@@ -1444,7 +1454,8 @@
         "required": "Choose a method to continue.",
         "label": "Which commission tariff (week) is this advantage for?",
         "hint": "Tier commissions are read from the commission tariff of the week you pick.",
-        "category": "Category commission"
+        "category": "Category commission",
+        "invalid": "The commission tariff you chose no longer exists. Pick another week, or continue with the category commission."
       }
     },
     "breakdown": {

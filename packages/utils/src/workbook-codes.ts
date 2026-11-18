@@ -14,9 +14,27 @@ export const WORKBOOK_FILE_CODES = [
   'NO_PERIOD',
   'DUPLICATE_WEEK',
   'PREFILLED_SELECTIONS',
+  // An upload whose sheet has no column the export could write the seller's selections into.
+  'NO_WRITEBACK_COLUMN',
 ] as const;
 
 export type WorkbookFileCode = (typeof WORKBOOK_FILE_CODES)[number];
+
+/**
+ * The `meta.limit` of a `PAYLOAD_TOO_LARGE` file issue that is about filled rows, not bytes
+ * (the content weight of the sheets). A `PAYLOAD_TOO_LARGE` without it is a size refusal.
+ */
+export const WORKBOOK_FILE_LIMITS = {
+  ROWS: 'rows',
+} as const;
+
+/** The `meta.limit` of a `409 UPLOAD_QUOTA_EXCEEDED`: which of the two upload quotas was hit. */
+export const UPLOAD_QUOTA_LIMITS = {
+  LISTS: 'lists',
+  BYTES: 'bytes',
+} as const;
+
+export type UploadQuotaLimit = (typeof UPLOAD_QUOTA_LIMITS)[keyof typeof UPLOAD_QUOTA_LIMITS];
 
 /**
  * The spreadsheet engine's refusals a `file` issue can carry: every code of

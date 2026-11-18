@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
+import { UPLOAD_QUOTA_LIMITS } from '@pazarsync/utils';
+
 import {
   extractFileIssue,
+  extractQuotaIssue,
+  hasInvalidCommissionSource,
+  isPositiveLimit,
   unplacedIssues,
   validationIssues,
 } from '@/features/campaigns/lib/upload-error';
@@ -108,4 +113,92 @@ describe('extractFileIssue', () => {
     expect(extractFileIssue(problemApiError(409, 'IMPORT_IN_PROGRESS'))).toBeNull();
     expect(extractFileIssue(undefined)).toBeNull();
   });
+});
+
+describe('extractQuotaIssue', () => {
+  const QUOTA = 'UPLOAD_QUOTA_EXCEEDED';
+  const MAX_LISTS = 50;
+  const MAX_BYTES = 200 * 1024 * 1024;
+
+  it('reads the per-page list limit', () => {
+    const error = problemApiError(409, QUOTA, {
+      limit: UPLOAD_QUOTA_LIMITS.LISTS,
+      maxLists: MAX_LISTS,
+    });
+    expect(extractQuotaIssue(error)).toEqual({
+      limit: UPLOAD_QUOTA_LIMITS.LISTS,
+      maxLists: MAX_LISTS,
+    });
+  });
+
+  it('reads the store-wide stored file limit', () => {
+    const error = problemApiError(409, QUOTA, {
+      limit: UPLOAD_QUOTA_LIMITS.BYTES,
+      maxBytes: MAX_BYTES,
+    });
+    expect(extractQuotaIssue(error)).toEqual({
+      limit: UPLOAD_QUOTA_LIMITS.BYTES,
+      maxBytes: MAX_BYTES,
+    });
+  });
+
+  it('names no limit for a quota refusal without meta', () => {
+    expect(extractQuotaIssue(problemApiError(409, QUOTA))).toEqual({ limit: null });
+  });
+
+  it('names no limit when the maximum is not a number', () => {
+    const error = problemApiError(409, QUOTA, {
+      limit: UPLOAD_QUOTA_LIMITS.LISTS,
+      maxLists: '50',
+    });
+    expect(extractQuotaIssue(error)).toEqual({ limit: null });
+  });
+
+  it('is null for any other error', () => {
+    expect(extractQuotaIssue(problemApiError(409, 'IMPORT_IN_PROGRESS'))).toBeNull();
+    expect(extractQuotaIssue(validationApiError(FIELD_ISSUES))).toBeNull();
+    expect(extractQuotaIssue(new Error('boom'))).toBeNull();
+  });
+});
+
+describe('hasInvalidCommissionSource', () => {
+  it('is true for the commission source field refused as deleted', () => {
+    const error = validationApiError([
+      { field: 'file', code: 'WRONG_FILE_FOR_PAGE' },
+      { field: 'commissionSourceTariffId', code: 'INVALID_COMMISSION_SOURCE' },
+    ]);
+    expect(hasInvalidCommissionSource(error)).toBe(true);
+  });
+
+  it('is false for another code on the same field, or the same code on another field', () => {
+    expect(
+      hasInvalidCommissionSource(
+        validationApiError([{ field: 'commissionSourceTariffId', code: 'REQUIRED' }]),
+      ),
+    ).toBe(false);
+    expect(
+      hasInvalidCommissionSource(
+        validationApiError([{ field: 'file', code: 'INVALID_COMMISSION_SOURCE' }]),
+      ),
+    ).toBe(false);
+  });
+
+  it('is false for an error that is not a validation error', () => {
+    expect(hasInvalidCommissionSource(problemApiError(409, 'CONFLICT'))).toBe(false);
+    expect(hasInvalidCommissionSource(new Error('boom'))).toBe(false);
+  });
+});
+
+describe('isPositiveLimit', () => {
+  it('accepts a positive finite number', () => {
+    expect(isPositiveLimit(5000)).toBe(true);
+    expect(isPositiveLimit(0.5)).toBe(true);
+  });
+
+  it.each([0, -1, Number.POSITIVE_INFINITY, Number.NaN, '5000', null, undefined])(
+    'refuses %s',
+    (value) => {
+      expect(isPositiveLimit(value)).toBe(false);
+    },
+  );
 });

@@ -3,6 +3,7 @@ import { readWorkbookGrid, setGridWorkerHostForTests } from './parse';
 import { SpreadsheetFileError } from './errors';
 import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
 import { GRID_WORKER_TIMEOUT_MS, MAX_QUEUED_PARSES } from './constants';
+import { UPLOAD_LIMIT_REASONS } from './patch/reasons';
 import {
   createGridWorkerHost,
   workerLimitReason,
@@ -101,6 +102,27 @@ describe('readWorkbookGrid: worker kills', () => {
     },
     MEMORY_KILL_TEST_TIMEOUT_MS,
   );
+});
+
+// The upload gate runs in the worker; the rule a refusal names must reach the caller,
+// who tells the DOM weight refusal from a size cap by it.
+describe('readWorkbookGrid: refusal meta crosses the worker', () => {
+  const FULL_ROWS = 5_001;
+  const WIDE_COLUMNS = 64;
+
+  it('rejects a 5 001 x 64 sheet of numbers with the DOM weight reason', async () => {
+    const file = buildXlsxFixture([
+      { name: 'Sheet1', xml: worksheetXml(numberRows(FULL_ROWS, WIDE_COLUMNS)) },
+    ]);
+
+    const refusal = readWorkbookGrid(file);
+
+    await expect(refusal).rejects.toBeInstanceOf(SpreadsheetFileError);
+    await expect(refusal).rejects.toMatchObject({
+      code: 'PAYLOAD_TOO_LARGE',
+      meta: { reason: UPLOAD_LIMIT_REASONS.DOM_WEIGHT },
+    });
+  });
 });
 
 // CI only: the grown workbook builds about 460 MB of DOM in the worker, which freezes

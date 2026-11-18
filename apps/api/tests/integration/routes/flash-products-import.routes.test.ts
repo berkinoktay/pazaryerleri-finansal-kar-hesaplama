@@ -11,14 +11,23 @@
 
 import { readFileSync } from 'node:fs';
 
+import { z } from '@hono/zod-openapi';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import { type CellPatch, type CellPatchValue, type SheetSelector } from '@pazarsync/spreadsheet';
+import {
+  readWorkbookGrid,
+  resolveLayout,
+  type CellPatch,
+  type CellPatchValue,
+  type SheetSelector,
+} from '@pazarsync/spreadsheet';
 import { patchFixture } from '@pazarsync/spreadsheet/testing';
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
 
 import { createApp } from '@/app';
+import { trendyolFlashProductListFormat } from '@/workbooks/formats/trendyol/flash-product-list.format';
+import { missingExportRequirement, resolveWriteColumns } from '@/workbooks/write-columns';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -306,5 +315,82 @@ describe('POST .../flash-products/import - an unknown current commission', () =>
     });
     expect(unknown.map((item) => item.barcode)).toEqual([MATCHED_BARCODE, MATCHED_BARCODE]);
     expect(result.unknownCommissionRows).toBe(1);
+  });
+});
+
+// The header written over a write column: a text the layout does not know.
+const REMOVED_HEADER = 'Removed column';
+
+// Strict issues: a `meta` on the file issue would fail the parse.
+const ProblemSchema = z.object({
+  status: z.number(),
+  code: z.string(),
+  errors: z.array(z.strictObject({ field: z.string(), code: z.string() })),
+});
+
+/**
+ * Patches that overwrite the header of every write column the Flash export requires (the
+ * updated price label). The columns are found through the format's write keys, so no
+ * header text is typed.
+ */
+async function requiredWriteHeaderPatches(): Promise<CellPatch[]> {
+  const format = trendyolFlashProductListFormat;
+  const grid = await readWorkbookGrid(FIXTURE, { sheet: format.sheet });
+  const layout = resolveLayout(format.layout, grid);
+  if (layout === null) throw new Error('unreadable Flash fixture');
+  const required = format.exportRequires.flat();
+  const patches = resolveWriteColumns(format, layout)
+    .filter((entry) => required.includes(entry.key))
+    .map(
+      (entry): CellPatch => ({
+        excelRow: layout.headerRowIndex + 1,
+        col: entry.col,
+        value: { kind: 'text', value: REMOVED_HEADER },
+      }),
+    );
+  // An empty list would hand back the fixture untouched, and the import would answer 201.
+  expect(patches.length).toBeGreaterThan(0);
+  return patches;
+}
+
+/** True when `file` still reads as a Flash file but has no column its export requires. */
+async function missesExportColumn(file: Buffer): Promise<boolean> {
+  const format = trendyolFlashProductListFormat;
+  const grid = await readWorkbookGrid(file, { sheet: format.sheet });
+  const layout = resolveLayout(format.layout, grid);
+  if (layout === null) throw new Error('the patched Flash fixture no longer resolves');
+  return missingExportRequirement(format, resolveWriteColumns(format, layout));
+}
+
+describe('POST .../flash-products/import - a file with no column to write selections into', () => {
+  beforeEach(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+  });
+
+  it('answers 422 NO_WRITEBACK_COLUMN on file and stores nothing', async () => {
+    const ctx = await setupStore(false);
+    const file = patchFixture(FIXTURE, await requiredWriteHeaderPatches(), { sheet: FIRST_SHEET });
+    // The file still reads as a Flash file: only its write column is gone.
+    expect(await missesExportColumn(file)).toBe(true);
+
+    const res = await app.request(importRequest(ctx, file));
+
+    expect(res.status).toBe(422);
+    const body = ProblemSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toEqual([{ field: 'file', code: 'NO_WRITEBACK_COLUMN' }]);
+    const scope = { organizationId: ctx.orgId, storeId: ctx.storeId };
+    expect(await prisma.flashProductList.count({ where: scope })).toBe(0);
+  });
+
+  it('imports the untouched fixture', async () => {
+    const ctx = await setupStore(false);
+    const file = patchFixture(FIXTURE, [], { sheet: FIRST_SHEET });
+    expect(await missesExportColumn(file)).toBe(false);
+
+    const res = await app.request(importRequest(ctx, file));
+
+    expect(res.status).toBe(201);
   });
 });

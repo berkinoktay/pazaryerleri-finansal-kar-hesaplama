@@ -1,3 +1,5 @@
+import { UPLOAD_QUOTA_LIMITS } from '@pazarsync/utils';
+
 import { ApiError, type ProblemDetails } from '@/lib/api-error';
 
 /** One field issue of a backend `422 VALIDATION_ERROR`. */
@@ -25,8 +27,33 @@ export function unplacedIssues(
   return validationIssues(error).filter((issue) => !placedFields.includes(issue.field));
 }
 
-/** Code of the `413` the API answers when an upload body exceeds its size limit. */
-const PAYLOAD_TOO_LARGE = 'PAYLOAD_TOO_LARGE';
+/** The Advantage import's field naming the commission tariff that supplies the reduced rates. */
+export const COMMISSION_SOURCE_FIELD = 'commissionSourceTariffId';
+
+/** Code of the `commissionSourceTariffId` issue when the pinned commission tariff no longer exists. */
+export const INVALID_COMMISSION_SOURCE = 'INVALID_COMMISSION_SOURCE';
+
+/**
+ * Whether an import error refused the pinned commission source because that commission tariff
+ * no longer exists: a `422 VALIDATION_ERROR` with `{ field: 'commissionSourceTariffId', code:
+ * 'INVALID_COMMISSION_SOURCE' }`. False for any other error.
+ */
+export function hasInvalidCommissionSource(error: unknown): boolean {
+  return validationIssues(error).some(
+    (issue) => issue.field === COMMISSION_SOURCE_FIELD && issue.code === INVALID_COMMISSION_SOURCE,
+  );
+}
+
+/**
+ * Code of the `413` the API answers when an upload body exceeds its size limit, and of the
+ * engine's size refusal on `file`.
+ */
+export const PAYLOAD_TOO_LARGE = 'PAYLOAD_TOO_LARGE';
+
+/** A limit the API sent in an error's meta: a positive finite number. */
+export function isPositiveLimit(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
 
 /** The file rejection of an import: its code and the meta the API sent with it. */
 export interface UploadFileIssue {
@@ -54,4 +81,49 @@ export function extractFileIssue(error: unknown): UploadFileIssue | null {
   const issue = validationIssues(error).find((candidate) => candidate.field === 'file');
   if (issue === undefined) return null;
   return { code: issue.code, meta: issue.meta ?? {} };
+}
+
+/** A key of an error's meta that its declared type does not name, read as unknown. */
+function metaValue(meta: object, key: string): unknown {
+  return Object.getOwnPropertyDescriptor(meta, key)?.value;
+}
+
+/** Code of the `409` the API answers when the store's upload quota is reached. */
+const UPLOAD_QUOTA_EXCEEDED = 'UPLOAD_QUOTA_EXCEEDED';
+
+/**
+ * Which upload quota a `409 UPLOAD_QUOTA_EXCEEDED` names, with its maximum: the per-page list
+ * limit, or the store-wide stored file limit (bytes over every campaign page). `limit: null`
+ * when the conflict carries no recognised limit (an older API).
+ */
+export type UploadQuotaIssue =
+  | { readonly limit: typeof UPLOAD_QUOTA_LIMITS.LISTS; readonly maxLists: number }
+  | { readonly limit: typeof UPLOAD_QUOTA_LIMITS.BYTES; readonly maxBytes: number }
+  | { readonly limit: null };
+
+/**
+ * Pulls the quota refusal out of an import mutation error. The API answers a full quota with
+ * `409 UPLOAD_QUOTA_EXCEEDED` and `meta: { limit: 'lists', maxLists }` or
+ * `meta: { limit: 'bytes', maxBytes }`; the global toast pipeline silences it, so the upload
+ * dialog shows it inline with its limit.
+ *
+ * Returns null for any other error. A quota refusal whose meta names no known limit with a
+ * positive finite maximum answers `{ limit: null }`.
+ */
+export function extractQuotaIssue(error: unknown): UploadQuotaIssue | null {
+  if (!(error instanceof ApiError) || error.code !== UPLOAD_QUOTA_EXCEEDED) return null;
+  const meta = error.problem.meta;
+  if (meta === undefined) return { limit: null };
+
+  // The quota keys ride next to `requestId` in the problem's meta; read them as unknown.
+  const limit = metaValue(meta, 'limit');
+  const maxLists = metaValue(meta, 'maxLists');
+  if (limit === UPLOAD_QUOTA_LIMITS.LISTS && isPositiveLimit(maxLists)) {
+    return { limit: UPLOAD_QUOTA_LIMITS.LISTS, maxLists };
+  }
+  const maxBytes = metaValue(meta, 'maxBytes');
+  if (limit === UPLOAD_QUOTA_LIMITS.BYTES && isPositiveLimit(maxBytes)) {
+    return { limit: UPLOAD_QUOTA_LIMITS.BYTES, maxBytes };
+  }
+  return { limit: null };
 }

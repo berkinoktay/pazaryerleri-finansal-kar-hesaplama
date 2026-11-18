@@ -39,7 +39,10 @@ export type WorkbookUploadLayout = 'stack' | 'split';
 export interface WorkbookVertical {
   /**
    * The page's own sentence for a bucket, where the shared `campaignUpload.errors` sentence
-   * would say less (the page's file by name, its own empty or duplicate-week wording).
+   * would say less (the page's file by name, its own empty or duplicate-week wording) or
+   * would advise what the page refuses (splitting a file, on a page that keeps one tariff per
+   * week). A `tooManyRows` or `tooMuchContent` sentence takes `maxRows`, a `tooManyColumns`
+   * sentence `maxCols`; no other bucket's sentence takes an argument.
    */
   readonly errorOverrides: Readonly<Partial<Record<WorkbookErrorBucket, AppMessageKey>>>;
   /** The route of the page's detail screen; a record's id is appended to it. */
@@ -57,6 +60,9 @@ export const WORKBOOK_VERTICALS: Readonly<Record<WorkbookPage, WorkbookVertical>
     errorOverrides: {
       wrongFormat: 'commissionTariffsPage.upload.errors.wrongFormat',
       duplicateWeek: 'commissionTariffsPage.upload.errors.duplicateWeek',
+      // One tariff per week (DUPLICATE_WEEK): the second half of a split file is refused.
+      tooManyRows: 'commissionTariffsPage.upload.errors.tooManyRows',
+      tooMuchContent: 'commissionTariffsPage.upload.errors.tooMuchContent',
     },
     detailBase: '/campaigns/product-commission-tariffs',
     keys: commissionTariffKeys,
@@ -68,6 +74,9 @@ export const WORKBOOK_VERTICALS: Readonly<Record<WorkbookPage, WorkbookVertical>
     errorOverrides: {
       wrongFormat: 'plusCommissionTariffsPage.upload.errors.wrongFormat',
       duplicateWeek: 'plusCommissionTariffsPage.upload.errors.duplicateWeek',
+      // One tariff per week (DUPLICATE_WEEK): the second half of a split file is refused.
+      tooManyRows: 'plusCommissionTariffsPage.upload.errors.tooManyRows',
+      tooMuchContent: 'plusCommissionTariffsPage.upload.errors.tooMuchContent',
     },
     detailBase: '/campaigns/plus-commission-tariffs',
     keys: plusCommissionTariffKeys,

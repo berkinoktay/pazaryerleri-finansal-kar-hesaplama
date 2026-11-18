@@ -337,17 +337,18 @@ Every campaign page that imports a marketplace `.xlsx` and exports it back with 
 - **Registry and selection** (`formats/registry.ts`, `select-format.ts`): `FORMAT_SUMMARIES` lists every registered format (id, platform, page, fingerprint) as static data. `selectFormat` takes the first of the page's formats for the store's platform whose sheet exists, has a data row and resolves the format's layout. When none does, `diagnoseWorkbook` looks for another page whose fingerprint the header row carries (`WRONG_FILE_FOR_PAGE` on every page, with `meta.detectedPage`); the other outcomes and their order are in the `selectFormat` doc comment.
 - **Route factory** (`route-factory.ts`): `createWorkbookImportRoute(adapter)` and `createWorkbookExportRoute(adapter)` build a page's two routes behind `WORKBOOK_IMPORT_MIDDLEWARE` and `WORKBOOK_EXPORT_MIDDLEWARE`, and run the pipeline with the ids and platform of the store record `requireStoreAccessContext` returns. `routes/<segment>/index.ts` mounts each where the page's old route was, so the OpenAPI path order is stable.
 - **Generic import** (`importWorkbook`, `import-workbook.ts`), in order:
-  1. pick the format (`selectFormat`);
-  2. read the rows (`readRows`: keep rule, anchor, `mapRow`) and resolve the write columns (`resolveWriteColumns`);
-  3. count the rows a seller already filled in (`countPrefilled`);
-  4. `adapter.inspect`;
-  5. rehearse the export on the upload (`buildRehearsal` and `patchWorkbook`, output dropped);
-  6. match the anchors to the store's product variants;
-  7. derive the stored name (`deriveName`);
-  8. one transaction: `acquireImportLock`, `assertUploadQuota`, `adapter.persist`;
-  9. `adapter.toResponse`.
+  1. refuse early when the store's upload quota is already reached (`assertUploadQuota` before the file is parsed; 409 `UPLOAD_QUOTA_EXCEEDED` with `meta.limit`), still re-checked in step 9;
+  2. pick the format (`selectFormat`);
+  3. read the rows (`readRows`: keep rule, anchor, `mapRow`) and resolve the write columns (`resolveWriteColumns`); a file with no column the export requires is refused (`NO_WRITEBACK_COLUMN` on `file`);
+  4. count the rows a seller already filled in (`countPrefilled`);
+  5. `adapter.inspect`;
+  6. rehearse the export on the upload (`buildRehearsal` and `patchWorkbook`, output dropped);
+  7. match the anchors to the store's product variants;
+  8. derive the stored name (`deriveName`);
+  9. one transaction: `acquireImportLock`, `assertUploadQuota`, `adapter.persist`;
+  10. `adapter.toResponse`.
 
-  Steps 1 to 5 map every file problem to a 422 on `file` (`toUploadError`).
+  Steps 2 to 6 map every file problem to a 422 on `file` (`toUploadError`).
 
 - **Generic export** (`exportWorkbook`, `export-workbook.ts`), in order:
   1. `adapter.load` with the store's scope;

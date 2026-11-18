@@ -287,6 +287,49 @@ describe('useImportWorkbook', () => {
     });
   });
 
+  describe('a refused commission source', () => {
+    const page = WORKBOOK_PAGES.ADVANTAGE_TARIFF;
+    // Written out, like the page table: the store's commission tariff list.
+    const COMMISSION_TARIFF_LIST_KEY = ['commission-tariffs', 'list', ORG_ID, STORE_ID];
+
+    function serveRefusal(issues: { field: string; code: string }[]): void {
+      const row = PAGES.find((candidate) => candidate.page === page);
+      if (row === undefined) throw new Error('page missing from the table');
+      server.use(
+        http.post(importUrl(row), () =>
+          HttpResponse.json(validationApiError(issues).problem, {
+            status: 422,
+            headers: PROBLEM_HEADERS,
+          }),
+        ),
+      );
+    }
+
+    it('invalidates the store commission tariff list on INVALID_COMMISSION_SOURCE', async () => {
+      serveRefusal([{ field: 'commissionSourceTariffId', code: 'INVALID_COMMISSION_SOURCE' }]);
+      const client = createTestQueryClient();
+      const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
+
+      const { result } = renderImport(page, client);
+      result.current.mutate({ file: xlsxFile(), fields: { commissionSourceTariffId: NEW_ID } });
+
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: COMMISSION_TARIFF_LIST_KEY });
+    });
+
+    it('invalidates nothing for a 422 with only a file issue', async () => {
+      serveRefusal([{ field: 'file', code: 'EMPTY_FILE' }]);
+      const client = createTestQueryClient();
+      const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
+
+      const { result } = renderImport(page, client);
+      result.current.mutate({ file: xlsxFile(), fields: {} });
+
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(invalidateSpy).not.toHaveBeenCalled();
+    });
+  });
+
   describe.each([WORKBOOK_PAGES.DISCOUNT_LIST, WORKBOOK_PAGES.MARKETPLACE_CAMPAIGN_LIST])(
     '%s without a discount type',
     (page) => {

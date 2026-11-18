@@ -1,16 +1,19 @@
 // The generic workbook import. It knows no page: the adapter and its formats say what
 // the file looks like, what to check before writing and how to write. In order:
-//   1. pick the format among the page's formats for the store's platform;
-//   2. read the rows (keep rule, anchor, mapRow) and resolve the write columns;
-//   3. count the rows a seller already filled in;
-//   4. the adapter's own checks (`inspect`), before the costlier rehearsal;
-//   5. rehearse the export on the uploaded bytes, so a file the export would refuse is
+//   1. refuse early when the store's upload quota is already reached, before the file is
+//      parsed; checked again in step 9's transaction;
+//   2. pick the format among the page's formats for the store's platform;
+//   3. read the rows (keep rule, anchor, mapRow) and resolve the write columns; refuse a
+//      file with no column the export requires;
+//   4. count the rows a seller already filled in;
+//   5. the adapter's own checks (`inspect`), before the costlier rehearsal;
+//   6. rehearse the export on the uploaded bytes, so a file the export would refuse is
 //      refused now;
-//   6. match the anchors to the store's product variants;
-//   7. derive the stored name;
-//   8. in one transaction: the import lock, the upload quota, `persist`;
-//   9. the page's response.
-// Steps 1 to 5 map every file problem to a 422 on `file` (toUploadError).
+//   7. match the anchors to the store's product variants;
+//   8. derive the stored name;
+//   9. in one transaction: the import lock, the upload quota, `persist`;
+//  10. the page's response.
+// Steps 2 to 6 map every file problem to a 422 on `file` (toUploadError).
 
 import { prisma } from '@pazarsync/db';
 import type { Platform } from '@pazarsync/db/enums';
@@ -99,7 +102,7 @@ function postgresSqlState(err: unknown): string | null {
   return isDriverAdapterFailure(driverAdapterError) ? driverAdapterError.cause.originalCode : null;
 }
 
-/** What steps 1 to 5 found in the upload. */
+/** What steps 2 to 6 found in the upload. */
 interface CheckedUpload<S extends LayoutSpec, TRow, TMeta, TWrite extends string> {
   readonly selected: SelectedFormat<S, TRow, TWrite>;
   readonly rows: readonly ImportedRow<TRow>[];
@@ -108,7 +111,7 @@ interface CheckedUpload<S extends LayoutSpec, TRow, TMeta, TWrite extends string
   readonly meta: TMeta;
 }
 
-/** Steps 1 to 5. Throws what `toUploadError` maps; anything else is a bug or the adapter's own error. */
+/** Steps 2 to 6. Throws what `toUploadError` maps; anything else is a bug or the adapter's own error. */
 async function checkUpload<
   S extends LayoutSpec,
   TRow,
@@ -130,9 +133,11 @@ async function checkUpload<
   const read = readRows(selected);
   const resolved = resolveWriteColumns(selected.format, selected.layout);
   if (missingExportRequirement(selected.format, resolved)) {
-    // The import still succeeds (the export answers NO_WRITEBACK_COLUMN), but a
-    // marketplace template change shows at the first upload, not the first export.
+    // The export could never write this file, so the upload is refused now instead of
+    // after the seller made their choices. The warn line stays: it is the signal that a
+    // marketplace changed its template.
     syncLog.warn('workbook.import.no-writeback-column', { page: adapter.page });
+    throw new WorkbookFileRejection('NO_WRITEBACK_COLUMN');
   }
 
   const prefilledRows = countPrefilled(selected, read.rows, resolved);
@@ -229,6 +234,18 @@ export async function importWorkbook<
   input: ImportWorkbookInput<TConfig>,
 ): Promise<TResponse> {
   const scope: StoreScope = { organizationId: input.organizationId, storeId: input.storeId };
+
+  // Step 1: a store at its quota is refused before the costlier parse and rehearsal, with
+  // the same scoped count and byte sum the transaction uses. It is not under the import
+  // lock, so two concurrent uploads can both pass it: the check inside the transaction
+  // (step 9) stays the authority. `mapTransactionError` answers a pool wait as the same
+  // retryable 503 and lets the quota's WorkbookConflictError through untouched.
+  try {
+    const listCount = await adapter.countLists(prisma, scope);
+    await assertUploadQuota(prisma, scope, { listCount, incomingBytes: input.file.length });
+  } catch (err) {
+    mapTransactionError(err);
+  }
 
   let checked: CheckedUpload<S, TRow, TMeta, TWrite>;
   try {

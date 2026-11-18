@@ -352,7 +352,7 @@ Frontend mirrors the backend's RFC 7807 contract end-to-end. Three concrete prim
 - **Silences** `NETWORK_ERROR` when `navigator.onLine === false` (handled by `NetworkStatusBanner` — persistent top banner + auto-invalidate on reconnect)
 - **Retry policy** bails immediately on 4xx; one retry for 5xx / network
 
-**Campaign workbook uploads** render their refusals inline, not as toasts: `WorkbookUploadDialog` shows a 422 on `file` and the 413 through `useWorkbookErrorMessage`, and any other field issue without an input of its own through `UploadUnplacedIssues`. Each workbook file code maps to one message bucket in `features/campaigns/lib/workbook-error-bucket.ts` (a complete `Record`, so a new code is a compile error until it has a bucket); a page overrides a bucket only with a typed full message key in `WORKBOOK_VERTICALS`. A workbook 409 (each conflict under its own code) toasts through `KNOWN_CODES`.
+**Campaign workbook uploads** render their refusals inline, not as toasts: `WorkbookUploadDialog` shows a 422 on `file`, the 413 and the 409 `UPLOAD_QUOTA_EXCEEDED` (with the limit from its `meta`; silenced in the global toast) through `useWorkbookErrorMessage`, and any other field issue without an input of its own through `UploadUnplacedIssues`. Each workbook file code maps to one message bucket in `features/campaigns/lib/workbook-error-bucket.ts` (a complete `Record`, so a new code is a compile error until it has a bucket); a page overrides a bucket only with a typed full message key in `WORKBOOK_VERTICALS`. Every other workbook 409 (each conflict under its own code) toasts through `KNOWN_CODES`.
 
 ```tsx
 // ❌ Bad — hand-rolls a generic toast inside every hook

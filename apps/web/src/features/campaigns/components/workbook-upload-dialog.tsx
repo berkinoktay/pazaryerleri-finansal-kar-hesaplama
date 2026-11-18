@@ -17,7 +17,11 @@ import {
   type CampaignConfigFormInput,
   type CampaignConfigFormValues,
 } from '../lib/marketplace-campaign-config';
-import { validationIssues } from '../lib/upload-error';
+import {
+  COMMISSION_SOURCE_FIELD,
+  INVALID_COMMISSION_SOURCE,
+  validationIssues,
+} from '../lib/upload-error';
 import { WORKBOOK_VERTICALS, type WorkbookUploadExtras } from '../lib/workbook-verticals';
 import {
   CATEGORY_COMMISSION_SOURCE,
@@ -78,7 +82,14 @@ function nameField(name: string): { name?: string } {
 const FILE_ONLY_FIELDS: readonly string[] = ['file'];
 
 /** The picker owns the message slot of the commission source. */
-const COMMISSION_SOURCE_FIELDS: readonly string[] = ['file', 'commissionSourceTariffId'];
+const COMMISSION_SOURCE_FIELDS: readonly string[] = ['file', COMMISSION_SOURCE_FIELD];
+
+const NO_REJECTED_SOURCES: ReadonlySet<string> = new Set();
+
+/** The set with `id` added; the same set when it already holds it. */
+function withId(ids: ReadonlySet<string>, id: string): ReadonlySet<string> {
+  return ids.has(id) ? ids : new Set([...ids, id]);
+}
 
 /** A page that asks for the file only. */
 function FileOnlyUploadForm(props: WorkbookUploadDialogProps): React.ReactElement {
@@ -102,35 +113,85 @@ function FileOnlyUploadForm(props: WorkbookUploadDialogProps): React.ReactElemen
 function CommissionSourceUploadForm(props: WorkbookUploadDialogProps): React.ReactElement {
   const { scope, onSubmit, submitError } = props;
   const commissionList = useCommissionTariffList(scope.orgId, scope.storeId);
-  // The seller's EXPLICIT choice; undefined until they pick, and again after a close, so the
-  // default re-derives against the latest list on reopen.
+  // The seller's EXPLICIT choice (a tariff id or the category sentinel); undefined until they
+  // pick, and again after a close, so the default re-derives against the latest list on reopen.
+  // A choice the server refused, or one no longer in the loaded list, is dropped by
+  // `resolveCommissionSource` rather than cleared here.
   const [choice, setChoice] = React.useState<string | undefined>(undefined);
-  const value = resolveCommissionSource(choice, commissionList.data, commissionList.isLoading);
+  // The tariff id of the last submit; undefined for the category choice or before any submit.
+  const [submittedSource, setSubmittedSource] = React.useState<string | undefined>(undefined);
+  // Every tariff id the server refused as a commission source, kept until the dialog closes so
+  // a refusal outlives the error being cleared (a new file, a new source, a new submit) even
+  // while the invalidated tariff list is still refetching. A set, so two refused weeks never
+  // take turns as the default.
+  const [rejectedSources, setRejectedSources] =
+    React.useState<ReadonlySet<string>>(NO_REJECTED_SOURCES);
   const sourceError =
-    validationIssues(submitError).find((issue) => issue.field === 'commissionSourceTariffId')
-      ?.code ?? null;
+    validationIssues(submitError).find((issue) => issue.field === COMMISSION_SOURCE_FIELD)?.code ??
+    null;
+  // The refusal on screen counts before it is recorded.
+  const refusedNow =
+    sourceError === INVALID_COMMISSION_SOURCE && submittedSource !== undefined
+      ? submittedSource
+      : undefined;
+  const rejectedIds =
+    refusedNow === undefined ? rejectedSources : withId(rejectedSources, refusedNow);
+  const value = resolveCommissionSource(
+    choice,
+    commissionList.data,
+    commissionList.isLoading,
+    rejectedIds,
+  );
+
+  // Records the refused source before the import error goes away. Runs in event handlers only.
+  const rememberRejection = (): void => {
+    if (refusedNow === undefined) return;
+    setRejectedSources((previous) => withId(previous, refusedNow));
+  };
+  const resetError = (): void => {
+    // A reset while the import is in flight detaches the mutation and drops the success callback
+    // that closes the dialog and routes to the new record. The frame locks its own reset paths;
+    // this covers the picker, which stays usable while importing.
+    if (props.submitting === true) return;
+    rememberRejection();
+    props.onResetError?.();
+  };
 
   return (
     <WorkbookUploadFrame
       {...frameProps(props)}
+      onResetError={resetError}
       placedFields={COMMISSION_SOURCE_FIELDS}
       extrasReady={value !== undefined}
       onSubmitFile={(file) => {
         if (value === undefined) return;
+        // A new submit clears the import error without a reset, so the refusal is kept here too.
+        rememberRejection();
         // The category choice pins no tariff, so the field is left out.
+        const tariffId = value === CATEGORY_COMMISSION_SOURCE ? undefined : value;
+        setSubmittedSource(tariffId);
         onSubmit({
           file,
-          fields: value === CATEGORY_COMMISSION_SOURCE ? {} : { commissionSourceTariffId: value },
+          fields: tariffId === undefined ? {} : { [COMMISSION_SOURCE_FIELD]: tariffId },
         });
       }}
-      onClosed={() => setChoice(undefined)}
+      onClosed={() => {
+        setChoice(undefined);
+        setSubmittedSource(undefined);
+        setRejectedSources(NO_REJECTED_SOURCES);
+      }}
     >
       <CommissionSourcePicker
         orgId={scope.orgId}
         storeId={scope.storeId}
         value={value}
-        onChange={setChoice}
+        onChange={(next) => {
+          setChoice(next);
+          // A source change clears the server error.
+          resetError();
+        }}
         serverError={sourceError}
+        refusedIds={rejectedIds}
       />
     </WorkbookUploadFrame>
   );
