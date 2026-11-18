@@ -41,6 +41,7 @@ export function clear(excelRow: number, col: number): CellPatch {
 
 /**
  * Index `xml` and apply `patches` with `patchedPartCap`; returns the part's bytes.
+ * `dateStyles` is the patcher's date table (default: no entry formats a date).
  * It skips the reader's well-formedness check (the index has no name stack, so it
  * accepts an end tag whose name does not match its start tag), which the pipeline
  * always runs first.
@@ -49,10 +50,12 @@ export function patchWorksheetXml(
   xml: Uint8Array,
   patches: readonly CellPatch[],
   overwriteFormulaColumns: readonly number[] = [],
+  dateStyles: readonly boolean[] = [],
 ): Uint8Array {
   const result = applyCellPatches(indexWorksheet(xml), patches, {
     overwriteFormulaColumns: new Set(overwriteFormulaColumns),
     maxBytes: patchedPartCap(xml.length),
+    dateStyles,
   });
   return result.bytes;
 }

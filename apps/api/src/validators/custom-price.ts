@@ -1,5 +1,8 @@
-// The custom price a tariff selection may carry, shared by the tariff selection bodies so
-// every page reads and refuses a custom price the same way.
+// The custom price a stored selection may carry, shared by the selection bodies so every
+// page reads and refuses a custom price the same way. Every stored custom price takes the
+// digit limit (BoundedCustomPriceSchema). The tariff pages (Commission, Plus) also refuse a
+// zero price (SelectionCustomPriceSchema); the Flash, Advantage and Campaign selections take
+// the digit limit only.
 
 import { z } from '@hono/zod-openapi';
 
@@ -19,8 +22,13 @@ const CUSTOM_PRICE_PATTERN = new RegExp(
   `^\\d{1,${PROBE_INTEGER_DIGITS.toString()}}(\\.\\d{1,2})?$`,
 );
 
-/** A positive decimal price with at most two decimals; a zero price is refused. */
-export const SelectionCustomPriceSchema = z
+/** A decimal price with at most two decimals that fits the stored column; zero passes. */
+export const BoundedCustomPriceSchema = z
   .string()
-  .regex(CUSTOM_PRICE_PATTERN, 'INVALID_CUSTOM_PRICE')
-  .refine((value) => !ZERO_PRICE_PATTERN.test(value), 'INVALID_CUSTOM_PRICE');
+  .regex(CUSTOM_PRICE_PATTERN, 'INVALID_CUSTOM_PRICE');
+
+/** A positive decimal price with at most two decimals; a zero price is refused. */
+export const SelectionCustomPriceSchema = BoundedCustomPriceSchema.refine(
+  (value) => !ZERO_PRICE_PATTERN.test(value),
+  'INVALID_CUSTOM_PRICE',
+);

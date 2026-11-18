@@ -59,7 +59,10 @@ export const TRENDYOL_FINGERPRINTS: Readonly<Record<WorkbookPage, Fingerprint>> 
 
 // Values an export writes into a cell.
 
-/** Discount list `included` column: the product joins the campaign. */
+/**
+ * Discount list `included` column: the product joins the campaign. Also the yes the
+ * Plus import reads in its `cancelled` column (compared exactly): the row is cancelled.
+ */
 export const YES_LABEL = 'Evet';
 /** Discount list `included` column, and the Plus `cancelled` column. */
 export const NO_LABEL = 'Hayır';

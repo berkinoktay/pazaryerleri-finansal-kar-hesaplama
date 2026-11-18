@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { WORKBOOK_ENGINE_FILE_CODES, WORKBOOK_FILE_CODES } from '@pazarsync/utils';
+import {
+  WORKBOOK_ENGINE_FILE_CODES,
+  WORKBOOK_FILE_CODES,
+  WORKBOOK_FORM_FILE_CODES,
+} from '@pazarsync/utils';
 
 import {
   bucketOf,
@@ -27,6 +31,8 @@ describe('bucketOf', () => {
     ['PREFILLED_SELECTIONS', 'prefilled'],
     ['UNSAFE_CONTENT', 'unsafe'],
     ['NO_WRITEBACK_COLUMN', 'noWriteColumn'],
+    // A request with no file part: the UI never sends one, so it gets no sentence of its own.
+    ['FILE_REQUIRED', 'generic'],
     ['SOME_FUTURE_CODE', 'generic'],
   ])('puts %s in the %s bucket', (code, bucket) => {
     expect(bucketOf(code)).toBe(bucket);
@@ -83,9 +89,15 @@ describe('refusalOf', () => {
 });
 
 describe('WORKBOOK_ERROR_BUCKETS', () => {
-  it('has one entry for every file code of the pipeline and of the engine, and no other', () => {
+  it('has one entry for every file code of the pipeline, the engine and the form, and no other', () => {
     expect(Object.keys(WORKBOOK_ERROR_BUCKETS).sort()).toEqual(
-      [...new Set<string>([...WORKBOOK_FILE_CODES, ...WORKBOOK_ENGINE_FILE_CODES])].sort(),
+      [
+        ...new Set<string>([
+          ...WORKBOOK_FILE_CODES,
+          ...WORKBOOK_ENGINE_FILE_CODES,
+          ...WORKBOOK_FORM_FILE_CODES,
+        ]),
+      ].sort(),
     );
   });
 });

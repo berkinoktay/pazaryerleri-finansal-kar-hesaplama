@@ -27,10 +27,19 @@ const SHEET_DATA_CLOSE = '</sheetData>';
 // Binds the prefix `x` to the main namespace next to the default namespace.
 const PREFIXED_ROOT = `xmlns="${MAIN_NAMESPACE}" xmlns:x="${MAIN_NAMESPACE}"`;
 const NO_FORMULA_COLUMNS: ReadonlySet<number> = new Set();
+const NO_DATE_STYLES: readonly boolean[] = [];
 const UNBOUNDED: WorksheetPatchOptions = {
   overwriteFormulaColumns: NO_FORMULA_COLUMNS,
   maxBytes: Number.MAX_SAFE_INTEGER,
+  dateStyles: NO_DATE_STYLES,
 };
+// A cellXfs date table: entry 7 formats a date, entry 3 (a '0.00' style) does not.
+const DATE_STYLE = 7;
+const NUMBER_STYLE = 3;
+const DATE_STYLES: readonly boolean[] = Array.from(
+  { length: DATE_STYLE + 1 },
+  (_, style) => style === DATE_STYLE,
+);
 
 const PRECONDITION_COLUMNS = 6;
 const MISSING_ROW_COUNT = 12;
@@ -75,12 +84,15 @@ function patched(
   patches: readonly CellPatch[],
   flagged?: readonly number[],
   rootAttributes?: string,
+  dateStyles?: readonly boolean[],
 ): string {
-  return sheetDataOf(wellFormed(patchWorksheetXml(sheet(body, rootAttributes), patches, flagged)));
+  return sheetDataOf(
+    wellFormed(patchWorksheetXml(sheet(body, rootAttributes), patches, flagged, dateStyles)),
+  );
 }
 
-function capped(maxBytes: number): WorksheetPatchOptions {
-  return { overwriteFormulaColumns: NO_FORMULA_COLUMNS, maxBytes };
+function capped(maxBytes: number, dateStyles = NO_DATE_STYLES): WorksheetPatchOptions {
+  return { overwriteFormulaColumns: NO_FORMULA_COLUMNS, maxBytes, dateStyles };
 }
 
 function expectFileError(
@@ -295,6 +307,95 @@ describe('applyCellPatches: existing cells', () => {
   });
 });
 
+describe('applyCellPatches: date styles', () => {
+  const DATE_CELL = `<row r="2"><c r="B2" s="${DATE_STYLE}"><v>45000</v></c></row>`;
+
+  /** `patched` with the date table DATE_STYLES. */
+  function dated(body: string, patches: readonly CellPatch[], flagged?: readonly number[]): string {
+    return patched(body, patches, flagged, undefined, DATE_STYLES);
+  }
+
+  it('drops a date style under a number', () => {
+    expect(dated(DATE_CELL, [num(2, 1, '12.50')])).toBe(
+      '<row r="2"><c r="B2"><v>12.50</v></c></row>',
+    );
+  });
+
+  it('keeps a style that does not format a date under a number', () => {
+    expect(
+      dated(`<row r="2"><c r="B2" s="${NUMBER_STYLE}"><v>1</v></c></row>`, [num(2, 1, '12.50')]),
+    ).toBe(`<row r="2"><c r="B2" s="${NUMBER_STYLE}"><v>12.50</v></c></row>`);
+  });
+
+  it('drops s and t, keeps every other attribute in order, whatever the quoting', () => {
+    expect(
+      dated(`<row r="2"><c r="B2" foo="a&amp;b" s = '7' t="n" bar="z"><v>3</v></c></row>`, [
+        num(2, 1, '4'),
+      ]),
+    ).toBe('<row r="2"><c r="B2" foo="a&amp;b" bar="z"><v>4</v></c></row>');
+  });
+
+  it('keeps a date style under text and under a clear', () => {
+    expect(dated(DATE_CELL, [text(2, 1, 'x')])).toBe(
+      `<row r="2"><c r="B2" s="${DATE_STYLE}" t="inlineStr"><is><t>x</t></is></c></row>`,
+    );
+    expect(dated(DATE_CELL, [clear(2, 1)])).toBe(`<row r="2"><c r="B2" s="${DATE_STYLE}"/></row>`);
+  });
+
+  it('keeps a prefixed s', () => {
+    expect(
+      dated('<row r="2"><c r="B2" xmlns:x="urn:x" x:s="7"><v>1</v></c></row>', [num(2, 1, '4')]),
+    ).toBe('<row r="2"><c r="B2" xmlns:x="urn:x" x:s="7"><v>4</v></c></row>');
+  });
+
+  it('keeps a style written with a character reference, or empty', () => {
+    expect(
+      dated('<row r="2"><c r="B2" s="&#55;"><v>1</v></c><c r="C2" s=""><v>1</v></c></row>', [
+        num(2, 1, '4'),
+        num(2, 2, '5'),
+      ]),
+    ).toBe('<row r="2"><c r="B2" s="&#55;"><v>4</v></c><c r="C2" s=""><v>5</v></c></row>');
+  });
+
+  it("keeps a style index beyond the table's length", () => {
+    expect(
+      dated('<row r="2"><c r="B2" s="8"><v>1</v></c><c r="C2" s="70"><v>1</v></c></row>', [
+        num(2, 1, '4'),
+        num(2, 2, '5'),
+      ]),
+    ).toBe('<row r="2"><c r="B2" s="8"><v>4</v></c><c r="C2" s="70"><v>5</v></c></row>');
+  });
+
+  it('drops a date style from a formula cell it overwrites in a flagged column', () => {
+    expect(
+      dated(
+        '<row r="2"><c r="R2" s="7"><f>A1</f><v>45000</v></c></row>',
+        [num(2, 17, '15.4')],
+        [17],
+      ),
+    ).toBe('<row r="2"><c r="R2"><v>15.4</v></c></row>');
+  });
+
+  it('sizes the part without the dropped style, to the byte', () => {
+    const before = `${DATE_CELL}<row r="3"><c r="A3" s="${DATE_STYLE}"/></row>`;
+    const after =
+      '<row r="2"><c r="B2"><v>12.50</v></c></row><row r="3"><c r="A3"><v>1</v></c></row>';
+    const part = sheet(before);
+    const patches = [num(2, 1, '12.50'), num(3, 0, '1')];
+    const expected = part.length - before.length + after.length;
+
+    const fits = applyCellPatches(indexWorksheet(part), patches, capped(expected, DATE_STYLES));
+
+    expect(fits.bytes).toHaveLength(expected);
+    expect(sheetDataOf(wellFormed(fits.bytes))).toBe(after);
+    expectFileError(
+      () => applyCellPatches(indexWorksheet(part), patches, capped(expected - 1, DATE_STYLES)),
+      'PAYLOAD_TOO_LARGE',
+      { reason: PATCH_LIMIT_REASONS.GROWTH, cap: expected - 1 },
+    );
+  });
+});
+
 describe('applyCellPatches: formulas', () => {
   const formulaCell = '<row r="2"><c r="R2" s="40" t="n"><f>=1+1</f><v>0.0</v></c></row>';
 
@@ -303,6 +404,7 @@ describe('applyCellPatches: formulas', () => {
     const result = applyCellPatches(indexWorksheet(part), [num(2, 17, '15.4')], {
       overwriteFormulaColumns: new Set([17]),
       maxBytes: patchedPartCap(part.length),
+      dateStyles: NO_DATE_STYLES,
     });
     expect(sheetDataOf(wellFormed(result.bytes))).toBe(
       '<row r="2"><c r="R2" s="40"><v>15.4</v></c></row>',

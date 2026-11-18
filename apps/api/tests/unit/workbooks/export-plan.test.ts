@@ -358,6 +358,39 @@ describe('planExport, anchor-map', () => {
     expect(result.anchors).toEqual([]);
     expect(contexts).toEqual([]);
   });
+
+  it('refuses a picked item whose barcode is on no row of the file with ROW_MISMATCH', () => {
+    const { adapter } = adapterOf('anchor-map', 'single', writePickAmount);
+
+    expect(
+      conflictReason(() =>
+        plan(REPEATED, single([item('i2', 'B-2', '12.50'), item('gone', 'B-9', '9.00')]), adapter),
+      ),
+    ).toBe('ROW_MISMATCH');
+  });
+
+  it('plans a present pick normally next to an unpicked item whose barcode is gone', () => {
+    const { adapter, contexts } = adapterOf('anchor-map', 'single', writePickAmount);
+
+    const result = plan(
+      REPEATED,
+      single([item('i3', 'B-3', '30.50'), item('gone', 'B-9', null)]),
+      adapter,
+    );
+
+    expect(result.files).toEqual([
+      {
+        dayCount: null,
+        patches: [
+          { excelRow: 4, col: AMOUNT_COL, value: { kind: 'number', value: '30.50', scale: 2 } },
+        ],
+      },
+    ]);
+    expect(result.anchors).toEqual([{ excelRow: 4, col: 0, expected: 'B-3' }]);
+    expect(contexts.map((ctx) => ctx.items)).toEqual([
+      [{ tag: null, item: item('i3', 'B-3', '30.50') }],
+    ]);
+  });
 });
 
 describe('planExport, period-windows', () => {
@@ -457,6 +490,16 @@ describe('planExport, period-windows', () => {
 
     expect(result.files).toEqual([{ dayCount: null, patches: [] }]);
     expect(result.anchors).toEqual([]);
+  });
+
+  it('refuses a barcode picked in one group and absent from the file with ROW_MISMATCH', () => {
+    const { adapter } = adapterOf('anchor-map', 'period-windows', writePickAmount);
+
+    expect(
+      conflictReason(() =>
+        plan(GRID, groups([item('a3', 'B-1', '10.00')], [item('gone', 'B-9', '11.00')]), adapter),
+      ),
+    ).toBe('ROW_MISMATCH');
   });
 });
 

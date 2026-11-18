@@ -41,7 +41,8 @@ import { entriesByName } from './zip-views';
 //   7. no target inside a merged range (its top-left corner excepted), nor anywhere in
 //      the range of an array or data table formula (only its top-left cell holds the
 //      `f`, so the patcher alone would write the others);
-//   8. each output's patches, applied to the index;
+//   8. each output's patches, applied to the index; a number written into a cell whose
+//      style formats a date (the reader's own date table) drops that style;
 //   9. a changed output is the archive with the converted part replaced and, when a
 //      formula was overwritten, the calcChain cut. rewriteZip refuses an output whose
 //      directory region would hold a local-header signature (the gate's stream would
@@ -206,6 +207,7 @@ export function patchUpload(
   const options: WorksheetPatchOptions = {
     overwriteFormulaColumns: new Set(request.overwriteFormulaColumns),
     maxBytes: patchedPartCap(source.length),
+    dateStyles: reading.xfIsDate,
   };
   const entries = entriesByName(layout);
   let calcChain: ReadonlyMap<string, ZipChange> | undefined;

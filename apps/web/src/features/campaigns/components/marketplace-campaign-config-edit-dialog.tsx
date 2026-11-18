@@ -24,6 +24,7 @@ import {
   type CampaignConfigFormInput,
   type CampaignConfigFormValues,
 } from '../lib/marketplace-campaign-config';
+import { isUploadNameTooLong } from '../lib/upload-name';
 import {
   MarketplaceCampaignConfigFields,
   placedConfigFields,
@@ -100,6 +101,9 @@ export function MarketplaceCampaignConfigEditDialog({
     // rule would compare as changed, be resent, and the API would refuse every save of it.
     const trimmedName = name.trim();
     const nameChanged = name !== header.name && trimmedName !== '';
+    // The name field already shows why; a changed name the API would refuse is never sent. An
+    // unchanged stored name is never resent, so it never blocks a save.
+    if (nameChanged && isUploadNameTooLong(name)) return;
     update.mutate(
       { ...values, ...(nameChanged ? { name: trimmedName } : {}) },
       { onSuccess: () => onOpenChange(false) },
@@ -126,6 +130,7 @@ export function MarketplaceCampaignConfigEditDialog({
                   form={form}
                   nameValue={name}
                   onNameChange={setName}
+                  storedName={header.name}
                   submitError={update.error}
                 />
                 <UploadUnplacedIssues

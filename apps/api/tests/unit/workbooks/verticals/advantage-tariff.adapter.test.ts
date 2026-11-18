@@ -19,7 +19,7 @@ import {
 } from '@pazarsync/spreadsheet';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ValidationError } from '@/lib/errors';
+import { ValidationError, WorkbookConflictError } from '@/lib/errors';
 import type { WriteContext } from '@/workbooks/adapter';
 import { planExport } from '@/workbooks/export-plan';
 import {
@@ -253,11 +253,23 @@ describe('advantage tariff adapter: the anchor map', () => {
     expect(result.files[0]?.patches).toEqual([priceAt(2, '150.00'), priceAt(5, '150.00')]);
   });
 
-  it('writes nothing for items without a price, or whose barcode is not in the file', async () => {
-    const result = await plan([item('A-001', null, null), item('X-999', null, '120')]);
+  it('writes nothing for items without a price, one whose barcode is not in the file included', async () => {
+    const result = await plan([item('A-001', null, null), item('X-999', null, null)]);
 
     expect(result.files).toEqual([{ dayCount: null, patches: [] }]);
     expect(result.anchors).toEqual([]);
+  });
+
+  it('refuses a priced item whose barcode is not in the file with ROW_MISMATCH', async () => {
+    let thrown: unknown = null;
+    try {
+      await plan([item('A-001', null, '120'), item('X-999', null, '120')]);
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(WorkbookConflictError);
+    expect(thrown instanceof WorkbookConflictError ? thrown.reason : null).toBe('ROW_MISMATCH');
   });
 });
 

@@ -24,6 +24,7 @@ import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization, createStore } from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
+import { registeredStoreOperations } from '../../helpers/spec-operations';
 
 const app = createApp();
 
@@ -54,6 +55,25 @@ async function seedList(organizationId: string, storeId: string): Promise<string
   return list.id;
 }
 
+const SPEC_BASE = '/v1/organizations/{orgId}/stores/{storeId}/flash-products';
+
+interface CoveredOperation {
+  /** `METHOD <templated path>`, as the OpenAPI spec registers it. */
+  readonly specKey: string;
+  /** Where the operation's cross-tenant case lives. */
+  readonly coveredIn: 'this file' | 'workbook-routes-isolation.test.ts';
+}
+
+const COVERED_OPERATIONS: readonly CoveredOperation[] = [
+  { specKey: `GET ${SPEC_BASE}`, coveredIn: 'this file' },
+  { specKey: `POST ${SPEC_BASE}/import`, coveredIn: 'this file' },
+  { specKey: `GET ${SPEC_BASE}/{listId}`, coveredIn: 'this file' },
+  { specKey: `DELETE ${SPEC_BASE}/{listId}`, coveredIn: 'this file' },
+  { specKey: `PATCH ${SPEC_BASE}/{listId}/selections`, coveredIn: 'this file' },
+  { specKey: `POST ${SPEC_BASE}/{listId}/items/{itemId}/estimate`, coveredIn: 'this file' },
+  { specKey: `POST ${SPEC_BASE}/{listId}/export`, coveredIn: 'workbook-routes-isolation.test.ts' },
+];
+
 describe('flash-products: route-layer authorization', () => {
   beforeAll(async () => {
     await ensureDbReachable();
@@ -61,6 +81,14 @@ describe('flash-products: route-layer authorization', () => {
 
   beforeEach(async () => {
     await truncateAll();
+  });
+
+  it('covers every flash-products endpoint registered in the OpenAPI spec', () => {
+    // A new flash-products route without an isolation case fails here: the structural
+    // backstop in org-scoped-route-coverage.test.ts covers GET only.
+    expect(registeredStoreOperations('flash-products')).toEqual(
+      COVERED_OPERATIONS.map((operation) => operation.specKey).sort(),
+    );
   });
 
   it("Org A member listing Org B's storeId returns 404", async () => {
@@ -177,6 +205,53 @@ describe('flash-products: route-layer authorization', () => {
     );
     expect(res.status).toBe(404);
     expect(((await res.json()) as { code: string }).code).toBe('NOT_FOUND');
+  });
+
+  it("does not disclose another store's item through a selection validation error", async () => {
+    const userA = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, userA.id);
+    const storeA = await createStore(orgA.id);
+    const listA = await seedList(orgA.id, storeA.id);
+
+    // Foreign items: one in another store of the same org, one in another org. Each
+    // stores a 24-hour offer only, so H3 would be refused (OFFER_NOT_STORED) on an own item.
+    const storeA2 = await createStore(orgA.id);
+    await seedList(orgA.id, storeA2.id);
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+    await seedList(orgB.id, storeB.id);
+    const foreignItems = await prisma.flashProductItem.findMany({
+      where: { storeId: { in: [storeA2.id, storeB.id] } },
+      select: { id: true },
+    });
+    expect(foreignItems).toHaveLength(2);
+
+    const res = await app.request(
+      `/v1/organizations/${orgA.id}/stores/${storeA.id}/flash-products/${listA}/selections`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: bearer(userA.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selections: foreignItems.map((item) => ({
+            itemId: item.id,
+            offer: 'H3',
+            customPrice: null,
+          })),
+        }),
+      },
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ updated: 0 });
+
+    const untouched = await prisma.flashProductItem.findMany({
+      where: { id: { in: foreignItems.map((item) => item.id) } },
+      select: { selectedOffer: true, customPrice: true },
+    });
+    expect(untouched).toEqual([
+      { selectedOffer: null, customPrice: null },
+      { selectedOffer: null, customPrice: null },
+    ]);
   });
 
   it('a non-member saving selections returns 403', async () => {

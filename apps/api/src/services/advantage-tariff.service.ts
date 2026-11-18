@@ -21,7 +21,7 @@ import type { Store as PrismaStore } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 import { isInstantWithinTariffPeriod, tariffBoundToInstant } from '@pazarsync/utils';
 
-import { NotFoundError } from '../lib/errors';
+import { NotFoundError, ValidationError, type ValidationIssue } from '../lib/errors';
 import { assertScopedWrite } from '../workbooks/scoped-write';
 import { parseStoredTariffBands, type StoredTariffBand } from '@pazarsync/profit';
 import {
@@ -457,9 +457,62 @@ export async function deleteAdvantageTariff(
 // --- Save selections ---
 
 /**
+ * Refuses, all-or-nothing, a selection the export could not write. Each entry with a
+ * tier (a `tier: null` entry is never checked) whose item is in this tariff and store
+ * must name a tier the item stores (`TIER_NOT_STORED`, even with a custom price): the
+ * export resolves no pick for a tier the row lacks and would silently write nothing for
+ * it. Every issue is on `selections.<index>.tier`, with the index of the request array,
+ * and they come back together in one `ValidationError` (422). An item id outside the
+ * tariff/store scope is not checked, so a foreign item never shows up in an error
+ * (non-disclosure); the UPDATE skips it.
+ */
+async function assertAdvantageSelectionsWritable(
+  orgId: string,
+  storeId: string,
+  tariffId: string,
+  selections: ReadonlyArray<AdvantageTariffSelection>,
+): Promise<void> {
+  const ids = selections
+    .filter((selection) => selection.tier !== null)
+    .map((selection) => selection.itemId);
+  if (ids.length === 0) return;
+
+  let items;
+  try {
+    items = await prisma.advantageTariffItem.findMany({
+      // `tariffId` ties each item to THIS tariff, exactly as the UPDATE does.
+      where: { id: { in: ids }, organizationId: orgId, storeId, tariffId },
+      select: { id: true, starTiers: true },
+    });
+  } catch (err) {
+    mapPrismaError(err);
+  }
+
+  // Postgres compares uuids whatever their letter case and returns them lower case, so
+  // the lookup is keyed lower case: an upper-case item id is checked, not skipped.
+  const itemsById = new Map(items.map((item) => [item.id.toLowerCase(), item]));
+  const issues: ValidationIssue[] = [];
+  for (const [index, selection] of selections.entries()) {
+    if (selection.tier === null) continue;
+    const item = itemsById.get(selection.itemId.toLowerCase());
+    if (item === undefined) continue;
+
+    if (!parseStarTiers(item.starTiers).some((stored) => stored.key === selection.tier)) {
+      issues.push({ field: `selections.${index.toString()}.tier`, code: 'TIER_NOT_STORED' });
+    }
+  }
+
+  if (issues.length > 0) {
+    throw new ValidationError(issues);
+  }
+}
+
+/**
  * Persists the seller's tier choice + optional custom price in ONE bulk UPDATE.
- * 404 when the tariff is not in this store. Each row is gated on
- * `(organization_id, store_id, tariff)`, so a foreign itemId is silently skipped.
+ * 404 when the tariff is not in this store. Before writing,
+ * `assertAdvantageSelectionsWritable` refuses (422, nothing written) a tier the item does
+ * not store. Each row is gated on `(organization_id, store_id, tariff)`, so a foreign
+ * itemId is silently skipped (not updated, not reported).
  */
 export async function updateAdvantageSelections(
   orgId: string,
@@ -475,6 +528,8 @@ export async function updateAdvantageSelections(
     throw new NotFoundError('AdvantageTariff', tariffId);
   }
   if (selections.length === 0) return { updated: 0 };
+
+  await assertAdvantageSelectionsWritable(orgId, storeId, tariffId, selections);
 
   const rows = selections.map(
     (s) => Prisma.sql`(${s.itemId}::uuid, ${s.tier}::text, ${s.customPrice}::numeric)`,

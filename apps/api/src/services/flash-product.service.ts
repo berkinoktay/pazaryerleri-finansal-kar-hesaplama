@@ -15,9 +15,10 @@
 import { Decimal } from 'decimal.js';
 
 import { Prisma, prisma } from '@pazarsync/db';
+import type { FlashOfferType } from '@pazarsync/db/enums';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
-import { NotFoundError } from '../lib/errors';
+import { NotFoundError, ValidationError, type ValidationIssue } from '../lib/errors';
 import { assertScopedWrite } from '../workbooks/scoped-write';
 import {
   buildFlashCommissionResolver,
@@ -350,10 +351,95 @@ export async function deleteFlashProductList(
 
 // --- Save selections ---
 
+interface FlashOfferPrices {
+  readonly offer24Price: Prisma.Decimal | null;
+  readonly offer3Price: Prisma.Decimal | null;
+}
+
+/** The stored price column of each flash offer; a null price means the row lacks the offer. */
+const OFFER_PRICE_COLUMN: Record<FlashOfferType, keyof FlashOfferPrices> = {
+  H24: 'offer24Price',
+  H3: 'offer3Price',
+};
+
+/** The lowest offer price the item stores (the custom price ceiling), or null with none. */
+function lowestOfferPrice(item: FlashOfferPrices): Decimal | null {
+  let lowest: Decimal | null = null;
+  for (const column of Object.values(OFFER_PRICE_COLUMN)) {
+    const price = decimalOrNull(item[column]);
+    if (price !== null && (lowest === null || price.lt(lowest))) lowest = price;
+  }
+  return lowest;
+}
+
+/**
+ * Refuses, all-or-nothing, a selection the export could not write. Each entry with an
+ * offer or a custom price (an entry with both null is never checked) whose item is in this
+ * list and store must name an offer the item stores (`OFFER_NOT_STORED` on
+ * `selections.<index>.offer`). A custom price needs an item that stores at least one offer
+ * (`OFFER_NOT_STORED` on `selections.<index>.customPrice`: there is no ceiling to check
+ * against) and may not exceed the item's lowest offer price (`CUSTOM_PRICE_ABOVE_MAX` on
+ * `selections.<index>.customPrice`; a price equal to it is allowed). The index is the one
+ * of the request array, and the issues come back together in one `ValidationError` (422).
+ * An item id outside the list/store scope is not checked, so a foreign item never shows up
+ * in an error (non-disclosure); the UPDATE skips it.
+ */
+async function assertFlashSelectionsWritable(
+  orgId: string,
+  storeId: string,
+  listId: string,
+  selections: ReadonlyArray<FlashSelection>,
+): Promise<void> {
+  const ids = selections
+    .filter((selection) => selection.offer !== null || selection.customPrice !== null)
+    .map((selection) => selection.itemId);
+  if (ids.length === 0) return;
+
+  let items;
+  try {
+    items = await prisma.flashProductItem.findMany({
+      // `listId` ties each item to THIS list, exactly as the UPDATE does.
+      where: { id: { in: ids }, organizationId: orgId, storeId, listId },
+      select: { id: true, offer24Price: true, offer3Price: true },
+    });
+  } catch (err) {
+    mapPrismaError(err);
+  }
+
+  // Postgres compares uuids whatever their letter case and returns them lower case, so
+  // the lookup is keyed lower case: an upper-case item id is checked, not skipped.
+  const itemsById = new Map(items.map((item) => [item.id.toLowerCase(), item]));
+  const issues: ValidationIssue[] = [];
+  for (const [index, selection] of selections.entries()) {
+    const item = itemsById.get(selection.itemId.toLowerCase());
+    if (item === undefined) continue;
+
+    const prefix = `selections.${index.toString()}`;
+    if (selection.offer !== null && item[OFFER_PRICE_COLUMN[selection.offer]] === null) {
+      issues.push({ field: `${prefix}.offer`, code: 'OFFER_NOT_STORED' });
+    }
+    if (selection.customPrice === null) continue;
+
+    const ceiling = lowestOfferPrice(item);
+    if (ceiling === null) {
+      issues.push({ field: `${prefix}.customPrice`, code: 'OFFER_NOT_STORED' });
+    } else if (new Decimal(selection.customPrice).gt(ceiling)) {
+      issues.push({ field: `${prefix}.customPrice`, code: 'CUSTOM_PRICE_ABOVE_MAX' });
+    }
+  }
+
+  if (issues.length > 0) {
+    throw new ValidationError(issues);
+  }
+}
+
 /**
  * Persists the seller's offer choice (H24 / H3) XOR custom price in ONE bulk UPDATE.
- * 404 when the list is not in this store. Each row is gated on
- * `(organization_id, store_id, list_id)`, so a foreign itemId is silently skipped.
+ * 404 when the list is not in this store. Before writing, `assertFlashSelectionsWritable`
+ * refuses (422, nothing written) an offer the item does not store, a custom price on an
+ * item with no offer, or a custom price above the item's lowest offer price. Each row is
+ * gated on `(organization_id, store_id, list_id)`, so a foreign itemId is silently skipped
+ * (not updated, not reported).
  */
 export async function updateFlashSelections(
   orgId: string,
@@ -369,6 +455,8 @@ export async function updateFlashSelections(
     throw new NotFoundError('FlashProductList', listId);
   }
   if (selections.length === 0) return { updated: 0 };
+
+  await assertFlashSelectionsWritable(orgId, storeId, listId, selections);
 
   const rows = selections.map(
     (s) => Prisma.sql`(${s.itemId}::uuid, ${s.offer}::"FlashOfferType", ${s.customPrice}::numeric)`,

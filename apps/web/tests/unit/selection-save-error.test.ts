@@ -40,6 +40,15 @@ describe('selectionSaveErrorToast', () => {
     expect(selectionSaveErrorToast(error)).toBe('selectionRefused');
   });
 
+  it.each([
+    ['OFFER_NOT_STORED', 'selections.2.offer'],
+    ['CUSTOM_PRICE_ABOVE_MAX', 'selections.2.customPrice'],
+    ['TIER_NOT_STORED', 'selections.2.tier'],
+  ])('picks selectionRefused for %s (Flash and Advantage)', (code, field) => {
+    const error = validationApiError([{ field, code }]);
+    expect(selectionSaveErrorToast(error)).toBe('selectionRefused');
+  });
+
   it('returns generic for a VALIDATION_ERROR with no band refusal', () => {
     expect(
       selectionSaveErrorToast(

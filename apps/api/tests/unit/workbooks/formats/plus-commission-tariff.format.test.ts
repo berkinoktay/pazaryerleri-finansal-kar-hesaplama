@@ -34,6 +34,7 @@ import {
   NO_LABEL,
   TARIFF_WINDOW_LABEL_UNIT,
   TRENDYOL_FINGERPRINTS,
+  YES_LABEL,
 } from '@/workbooks/formats/trendyol/labels';
 import {
   trendyolPlusCommissionTariffFormat,
@@ -54,6 +55,7 @@ import {
   derivedGrid,
   PLUS_CANCEL_NUMBER_ONE,
   PLUS_CANCEL_TEXT_ZERO,
+  PLUS_CANCEL_YES_LABEL,
   PLUS_DERIVED,
 } from '../../../helpers/workbook-derived-rows';
 
@@ -840,6 +842,17 @@ describe('Trendyol Plus commission tariff format: the keep rule and the cancel c
     ).toEqual([true, false]);
   });
 
+  // The template's dropdown offers the yes and the no label: the yes label cancels.
+  it('reads the yes label in the cancel cell as cancelled, which the number read alone does not', async () => {
+    const fixture = (await realSelection(SINGLE)).grid;
+    const grid = derivedGrid(format.layout, format.keep, fixture, [PLUS_CANCEL_YES_LABEL]);
+    const layout = present(resolveLayout(format.layout, grid), 'layout');
+    const reader = createRowReader(format.layout, layout, grid.at(-1) ?? [], READER_OPTIONS);
+
+    expect(reader.numericFlag('cancelled')).toBe(false);
+    expect(readRows(gridSelection(grid)).rows.at(-1)?.data.cancelled).toBe(true);
+  });
+
   it.each([
     ['the number 1', true, 1],
     ['the text 1', true, '1'],
@@ -848,6 +861,13 @@ describe('Trendyol Plus commission tariff format: the keep rule and the cancel c
     ['the fraction 0.5', false, 0.5],
     ['the no label', false, NO_LABEL],
     ['a blank cell', false, null],
+    ['the yes label', true, YES_LABEL],
+    // Compared without letter case (Turkish rules), as the Advantage and Flash yes-flags are:
+    // a pasted 'EVET' or 'evet' still cancels.
+    ['the lower-case yes label', true, YES_LABEL.toLocaleLowerCase('tr')],
+    ['the upper-case yes label', true, YES_LABEL.toLocaleUpperCase('tr')],
+    // The text is trimmed before it is compared.
+    ['the yes label with surrounding spaces', true, `  ${YES_LABEL}  `],
   ])('reads a cancel cell of %s as %s', (_name, expected, cell) => {
     expect(mapOne({ [COL.cancelled]: cell }).cancelled).toBe(expected);
   });

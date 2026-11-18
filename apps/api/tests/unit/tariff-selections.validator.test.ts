@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { UpdateSelectionsBodySchema } from '@/validators/commission-tariff.validator';
+import { BoundedCustomPriceSchema, SelectionCustomPriceSchema } from '@/validators/custom-price';
 import { UpdatePlusSelectionsBodySchema } from '@/validators/plus-commission-tariff.validator';
 import { MAX_TARIFF_ITEMS } from '@/workbooks/tariff-week';
 
@@ -67,6 +68,29 @@ describe('tariff selection body cap', () => {
       expect(accepts('9999999999.99')).toBe(true);
       expect(accepts('12345678901')).toBe(false);
       expect(accepts('12345678901.50')).toBe(false);
+    }
+  });
+});
+
+describe('stored custom price schemas', () => {
+  const bounded = (value: string): boolean => BoundedCustomPriceSchema.safeParse(value).success;
+  const selection = (value: string): boolean => SelectionCustomPriceSchema.safeParse(value).success;
+
+  it('take ten integer digits and refuse eleven, with the INVALID_CUSTOM_PRICE code', () => {
+    for (const accepts of [bounded, selection]) {
+      expect(accepts('9999999999')).toBe(true);
+      expect(accepts('9999999999.99')).toBe(true);
+      expect(accepts('12345678901')).toBe(false);
+      expect(accepts('12345678901.50')).toBe(false);
+    }
+    const over = BoundedCustomPriceSchema.safeParse('12345678901');
+    expect(over.error?.issues.map((issue) => issue.message)).toEqual(['INVALID_CUSTOM_PRICE']);
+  });
+
+  it('let a zero price through the bounded schema only; the tariff selection refuses it', () => {
+    for (const zero of ['0', '0.00', '000']) {
+      expect(bounded(zero)).toBe(true);
+      expect(selection(zero)).toBe(false);
     }
   });
 });

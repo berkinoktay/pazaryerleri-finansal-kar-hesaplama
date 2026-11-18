@@ -20,6 +20,7 @@ import { useDeleteAdvantageTariff } from '../hooks/use-delete-advantage-tariff';
 import { useExportWorkbook } from '../hooks/use-export-workbook';
 import { useResolvedCampaignAccess } from '../hooks/use-resolved-campaign-access';
 import { useUpdateAdvantageSelections } from '../hooks/use-update-advantage-selections';
+import { useSelectionSaveErrorToast } from '../hooks/use-selection-save-error-toast';
 import { toAdvantageTariffView, type NonNullStarTierKey } from '../lib/adapt-advantage-tariff';
 import {
   clearSelections,
@@ -27,14 +28,13 @@ import {
   selectBestForAll,
   selectProfitable,
   type AdvantageCustomChoice,
-  type AdvantageCustomPriceMap,
-  type AdvantageSelectionMap,
   type AdvantageSelectionState,
   type AdvantageTariffFilterState,
 } from '../lib/advantage-bulk-actions';
 import { summarizeAdvantageSelection } from '../lib/advantage-tariff-summary';
 import { CampaignAccessProvider } from '../lib/campaign-access-context';
 import { downloadBlob } from '../lib/download-blob';
+import { seedAdvantageSelection } from '../lib/seed-advantage-selection';
 import { TariffScopeProvider } from '../lib/tariff-scope';
 import type { ExportPreviewFile } from '../lib/export-preview';
 import { AdvantageCommissionSourceHeader } from './advantage-commission-source-header';
@@ -76,6 +76,7 @@ export function AdvantageTariffDetailClient({
 }): React.ReactElement {
   const tPage = useTranslations('productLabelsPage');
   const tCommon = useTranslations('common');
+  const showSelectionSaveError = useSelectionSaveErrorToast();
   const tExport = useTranslations('productLabelsPage.exportDialog');
   const router = useRouter();
   const detail = useAdvantageTariffDetail(orgId ?? '', storeId, tariffId);
@@ -174,22 +175,11 @@ export function AdvantageTariffDetailClient({
   // Seed the editable selection buffer from the server-authoritative `selectedTier` /
   // `customPrice` the first time this tariff's data arrives. Adjusting state during render
   // (guarded by the tariff id, so it fires once per tariff) is the React-recommended
-  // alternative to a setState-in-effect — no cascading renders.
+  // alternative to a setState-in-effect — no cascading renders. The seed drops a stored
+  // tier the selection route would now refuse (see `seedAdvantageSelection`), so the save
+  // never sends one.
   if (view !== null && view.id !== seededTariffId) {
-    const seedSelection: AdvantageSelectionMap = {};
-    const seedCustom: AdvantageCustomPriceMap = {};
-    for (const row of view.rows) {
-      if (row.customPrice !== null) {
-        // Custom-joined: restore the confirmed price. Its exact profit isn't in the detail
-        // payload (there is no single scenario for an arbitrary custom price on this
-        // vertical), so seed the summary figure as null — the live estimate on the visible
-        // card fills it in, and re-confirming captures it.
-        seedCustom[row.id] = { price: row.customPrice, netProfit: null, marginPct: null };
-      } else if (row.selectedTier !== null) {
-        seedSelection[row.id] = row.selectedTier;
-      }
-    }
-    setChoices({ selection: seedSelection, customPrices: seedCustom });
+    setChoices(seedAdvantageSelection(view.rows));
     setSeededTariffId(view.id);
   }
 
@@ -332,6 +322,7 @@ export function AdvantageTariffDetailClient({
             },
           });
         },
+        onError: showSelectionSaveError,
       },
     );
   };

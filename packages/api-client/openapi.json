@@ -411,7 +411,7 @@
             "type": "string",
             "minLength": 2,
             "maxLength": 80,
-            "pattern": "[\\p{L}\\p{N}]/u",
+            "pattern": "[\\p{L}\\p{N}]",
             "example": "Akyıldız Ticaret"
           }
         },
@@ -5691,7 +5691,7 @@
                     "string",
                     "null"
                   ],
-                  "pattern": "^\\d+(\\.\\d{1,2})?$"
+                  "pattern": "^\\d{1,10}(\\.\\d{1,2})?$"
                 }
               },
               "required": [
@@ -6286,7 +6286,7 @@
                     "string",
                     "null"
                   ],
-                  "pattern": "^\\d+(\\.\\d{1,2})?$"
+                  "pattern": "^\\d{1,10}(\\.\\d{1,2})?$"
                 }
               },
               "required": [
@@ -7644,7 +7644,7 @@
                     "string",
                     "null"
                   ],
-                  "pattern": "^\\d+(\\.\\d{1,2})?$"
+                  "pattern": "^\\d{1,10}(\\.\\d{1,2})?$"
                 }
               },
               "required": [
@@ -18630,7 +18630,7 @@
           "AdvantageTariffs"
         ],
         "summary": "Save star-tier choice + custom prices for tariff items",
-        "description": "Persists the seller's chosen star tier (or null to clear) and optional custom price per item, in a single bulk update. Items not belonging to this tariff/store are ignored. Selection happens client-side over the backend-computed margins; this only records the result. Returns how many items were updated.",
+        "description": "Persists the seller's chosen star tier (or null to clear) and optional custom price per item, in a single bulk update. Items not belonging to this tariff/store are ignored. Selection happens client-side over the backend-computed margins; this only records the result. A tier the item does not store (`TIER_NOT_STORED`, even with a custom price) refuses the whole request with 422 on `selections.<index>.tier`; nothing is written. A null tier is never checked. Returns how many items were updated.",
         "security": [
           {
             "bearerAuth": []
@@ -18743,7 +18743,7 @@
             }
           },
           "422": {
-            "description": "Invalid selection payload",
+            "description": "Invalid selection payload, or a selection the export could not write (TIER_NOT_STORED on selections.<index>.tier)",
             "content": {
               "application/json": {
                 "schema": {
@@ -19649,7 +19649,7 @@
           "FlashProducts"
         ],
         "summary": "Save flash offer choice + custom prices for list items",
-        "description": "Persists the seller's chosen flash offer (H24 / H3, or null to clear) and optional custom price per item, in a single bulk update. An offer and a custom price are mutually exclusive (the client enforces the XOR). Items not belonging to this list/store are ignored. Selection happens client-side over the backend-computed margins; this only records the result. Returns how many items were updated.",
+        "description": "Persists the seller's chosen flash offer (H24 / H3, or null to clear) and optional custom price per item, in a single bulk update. An offer and a custom price are mutually exclusive (the client enforces the XOR). Items not belonging to this list/store are ignored. Selection happens client-side over the backend-computed margins; this only records the result. An offer the item does not store (`OFFER_NOT_STORED` on `selections.<index>.offer`), a custom price on an item that stores no offer (`OFFER_NOT_STORED` on `selections.<index>.customPrice`), or a custom price above the item's lowest offer price (`CUSTOM_PRICE_ABOVE_MAX` on `selections.<index>.customPrice`; equal is allowed) refuses the whole request with 422; nothing is written. A null offer and a null custom price are never checked. Returns how many items were updated.",
         "security": [
           {
             "bearerAuth": []
@@ -19762,7 +19762,7 @@
             }
           },
           "422": {
-            "description": "Invalid selection payload",
+            "description": "Invalid selection payload, or a selection the export could not write (OFFER_NOT_STORED on selections.<index>.offer or selections.<index>.customPrice, CUSTOM_PRICE_ABOVE_MAX on selections.<index>.customPrice)",
             "content": {
               "application/json": {
                 "schema": {

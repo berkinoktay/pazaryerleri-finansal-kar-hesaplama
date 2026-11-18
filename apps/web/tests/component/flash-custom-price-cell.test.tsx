@@ -259,6 +259,69 @@ describe('FlashCustomPriceCell — estimate skeleton', () => {
   });
 });
 
+describe('FlashCustomPriceCell - custom price above the ceiling', () => {
+  it('keeps the select button off for a stored price above the lowest offer, even once estimated', async () => {
+    // A stale stored custom price (written through the API before the ceiling check) sits
+    // above the lowest offer: the seed drops it from the selection, so no committed price
+    // arrives and the input falls back to the server value. The estimate endpoint does not
+    // check the ceiling, so it answers calculable.
+    mockEstimate('120.00');
+    renderCell({
+      row: {
+        ...row,
+        bands: [
+          { ...offer('h24'), price: '600.00' },
+          { ...offer('h3'), price: '550.00' },
+        ],
+        customPrice: '560.00',
+      },
+      isSelected: false,
+      onSelect: vi.fn(),
+      onDeselect: vi.fn(),
+    });
+    expect(
+      screen.getByRole('textbox', { name: new RegExp(`^${TABLE.customPrice} — `) }),
+    ).toHaveValue('560');
+    // Wait for the estimate to land, so the button is judged on a current, calculable result.
+    expect(await screen.findByRole('button', { name: PROFIT_BADGE_OPEN })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: TABLE.selectCustom })).toBeDisabled();
+  });
+
+  it('opens the select button for a stored price equal to the lowest offer', async () => {
+    mockEstimate('120.00');
+    renderCell({
+      row: {
+        ...row,
+        bands: [
+          { ...offer('h24'), price: '600.00' },
+          { ...offer('h3'), price: '550.00' },
+        ],
+        customPrice: '550.00',
+      },
+      committedPrice: '550.00',
+      isSelected: false,
+      onSelect: vi.fn(),
+      onDeselect: vi.fn(),
+    });
+    expect(await screen.findByRole('button', { name: PROFIT_BADGE_OPEN })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: TABLE.selectCustom })).toBeEnabled();
+  });
+
+  it('keeps the select button off on an item with no offer, which has no ceiling', async () => {
+    // The selection route refuses any custom price on such an item (OFFER_NOT_STORED).
+    mockEstimate('120.00');
+    renderCell({
+      row: { ...row, bands: [], customPrice: '500.00' },
+      committedPrice: '500.00',
+      isSelected: false,
+      onSelect: vi.fn(),
+      onDeselect: vi.fn(),
+    });
+    expect(await screen.findByRole('button', { name: PROFIT_BADGE_OPEN })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: TABLE.selectCustom })).toBeDisabled();
+  });
+});
+
 describe('FlashCustomPriceCell - read-only member', () => {
   /** The price input, found by its label: a read-only member's input has no placeholder. */
   function priceInput(): HTMLElement {

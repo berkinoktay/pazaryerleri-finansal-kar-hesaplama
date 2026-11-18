@@ -1,27 +1,34 @@
 import { ApiError } from '@/lib/api-error';
 
 /**
- * The field codes the tariff selection routes answer when a selection can not be
- * exported:
+ * The field codes the selection routes answer when a selection can not be exported:
  *   - commission tariff: a band the item does not hold (`BAND_NOT_STORED`), or a band
  *     with no price and no custom price (`BAND_PRICE_UNKNOWN`);
  *   - Plus commission tariff: a join with no custom price on an offer whose Plus price
  *     upper limit is unknown (`PLUS_PRICE_UNKNOWN`), or any join (also with a custom
  *     price) on an offer whose Plus commission percent is unknown
- *     (`PLUS_COMMISSION_UNKNOWN`).
+ *     (`PLUS_COMMISSION_UNKNOWN`);
+ *   - Flash products: an offer the item does not carry, or a custom price on an item that
+ *     carries no offer (`OFFER_NOT_STORED`), or a custom price above the item's lowest
+ *     offer price (`CUSTOM_PRICE_ABOVE_MAX`);
+ *   - Advantage tariff: a tier the item does not store (`TIER_NOT_STORED`).
  */
 const REFUSED_SELECTION_CODES: ReadonlySet<string> = new Set([
   'BAND_NOT_STORED',
   'BAND_PRICE_UNKNOWN',
   'PLUS_PRICE_UNKNOWN',
   'PLUS_COMMISSION_UNKNOWN',
+  'OFFER_NOT_STORED',
+  'CUSTOM_PRICE_ABOVE_MAX',
+  'TIER_NOT_STORED',
 ]);
 
 /** Which toast a failed selection save shows, if any. */
 export type SelectionSaveErrorToast = 'selectionRefused' | 'generic';
 
 /**
- * Picks the toast for a failed tariff selection save (commission and Plus pages).
+ * Picks the toast for a failed selection save (the commission, Plus, Flash and Advantage
+ * pages).
  *
  * The global error pipeline keeps `VALIDATION_ERROR` silent (forms show it inline), and
  * the detail pages have no form for the selections, so the page has to say something:

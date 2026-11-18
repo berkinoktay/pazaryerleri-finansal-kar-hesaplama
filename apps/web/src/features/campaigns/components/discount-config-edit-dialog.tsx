@@ -21,6 +21,7 @@ import type { DiscountListDetail } from '../api/get-discount-list-detail.api';
 import type { UpdateDiscountListBody } from '../api/update-discount-list.api';
 import { useUpdateDiscountList } from '../hooks/use-update-discount-list';
 import { discountConfigFormSchema, type DiscountConfigFormValues } from '../lib/discount-config';
+import { isUploadNameTooLong } from '../lib/upload-name';
 import { DiscountConfigFields, placedConfigFields } from './discount-config-fields';
 import { UploadUnplacedIssues } from './upload-unplaced-issues';
 
@@ -89,6 +90,9 @@ export function DiscountConfigEditDialog({
     // rule would compare as changed, be resent, and the API would refuse every save of the list.
     const trimmedName = name.trim();
     const nameChanged = name !== list.name && trimmedName !== '';
+    // The name field already shows why; a changed name the API would refuse is never sent. An
+    // unchanged stored name is never resent, so it never blocks a save.
+    if (nameChanged && isUploadNameTooLong(name)) return;
     const body: UpdateDiscountListBody = {
       ...values,
       ...(nameChanged ? { name: trimmedName } : {}),
@@ -116,6 +120,7 @@ export function DiscountConfigEditDialog({
                   form={form}
                   nameValue={name}
                   onNameChange={setName}
+                  storedName={list.name}
                   submitError={update.error}
                 />
                 <UploadUnplacedIssues

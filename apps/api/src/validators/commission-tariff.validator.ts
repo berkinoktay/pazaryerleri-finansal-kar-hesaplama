@@ -6,7 +6,7 @@
 
 import { z } from '@hono/zod-openapi';
 
-import { NameSchema } from '../workbooks/form';
+import { NameSchema, workbookFileField } from '../workbooks/form';
 import { MAX_TARIFF_ITEMS } from '../workbooks/tariff-week';
 import { SelectionCustomPriceSchema } from './custom-price';
 import { QuoteBreakdownSchema } from './product-pricing.validator';
@@ -172,9 +172,7 @@ export const CommissionTariffDetailSchema = z
 // ─── Import (multipart upload) ──────────────────────────────────────────────
 
 export const ImportTariffFormSchema = z.object({
-  file: z
-    .instanceof(File)
-    .openapi({ type: 'string', format: 'binary', description: 'Trendyol komisyon-tarifesi .xlsx' }),
+  file: workbookFileField('Trendyol komisyon-tarifesi .xlsx'),
   name: NameSchema.optional().openapi({ description: 'İsteğe bağlı görünen ad; yoksa dosya adı.' }),
 });
 

@@ -373,8 +373,10 @@ function serializeScenario(
 // --- Update config ---
 
 /**
- * Full-replaces the discount configuration on the list row (name only when provided).
- * `findFirst` first so a foreign list id is a 404 indistinguishable from a missing one.
+ * Full-replaces the discount configuration on the list row (name only when provided) in
+ * ONE `updateMany` scoped by `(id, organization_id, store_id)`. A foreign or missing list
+ * id matches no row, and the write's own count makes it a 404 (`assertScopedWrite`), so
+ * it is indistinguishable from a missing one. The returned id is the path id.
  */
 export async function updateDiscountList(
   orgId: string,
@@ -382,48 +384,27 @@ export async function updateDiscountList(
   listId: string,
   patch: UpdateDiscountListBody,
 ): Promise<{ id: string }> {
-  const existing = await prisma.discountList.findFirst({
-    where: { id: listId, organizationId: orgId, storeId },
-    select: { id: true },
-  });
-  if (existing === null) {
-    throw new NotFoundError('DiscountList', listId);
-  }
-
-  try {
-    const updated = await prisma.$transaction(async (tx) => {
-      await assertScopedWrite(
-        tx.discountList.updateMany({
-          where: { id: listId, organizationId: orgId, storeId },
-          data: {
-            discountType: patch.discountType,
-            valueKind: patch.valueKind ?? null,
-            value: patch.value ?? null,
-            minBasketAmount: patch.minBasketAmount ?? null,
-            minQuantity: intOrNull(patch.minQuantity),
-            buyQuantity: intOrNull(patch.buyQuantity),
-            payQuantity: intOrNull(patch.payQuantity),
-            nthIndex: intOrNull(patch.nthIndex),
-            startsAt: patch.startsAt ?? null,
-            endsAt: patch.endsAt ?? null,
-            ...(patch.name !== undefined ? { name: patch.name } : {}),
-          },
-        }),
-        'DiscountList',
-        listId,
-      );
-      // updateMany returns no row: the stored id is read back in the same transaction.
-      const row = await tx.discountList.findFirst({
-        where: { id: listId, organizationId: orgId, storeId },
-        select: { id: true },
-      });
-      if (row === null) throw new NotFoundError('DiscountList', listId);
-      return row;
-    });
-    return { id: updated.id };
-  } catch (err) {
-    mapPrismaError(err);
-  }
+  await assertScopedWrite(
+    prisma.discountList.updateMany({
+      where: { id: listId, organizationId: orgId, storeId },
+      data: {
+        discountType: patch.discountType,
+        valueKind: patch.valueKind ?? null,
+        value: patch.value ?? null,
+        minBasketAmount: patch.minBasketAmount ?? null,
+        minQuantity: intOrNull(patch.minQuantity),
+        buyQuantity: intOrNull(patch.buyQuantity),
+        payQuantity: intOrNull(patch.payQuantity),
+        nthIndex: intOrNull(patch.nthIndex),
+        startsAt: patch.startsAt ?? null,
+        endsAt: patch.endsAt ?? null,
+        ...(patch.name !== undefined ? { name: patch.name } : {}),
+      },
+    }),
+    'DiscountList',
+    listId,
+  );
+  return { id: listId };
 }
 
 // --- Update selections ---

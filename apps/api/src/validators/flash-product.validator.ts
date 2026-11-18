@@ -11,7 +11,8 @@
 
 import { z } from '@hono/zod-openapi';
 
-import { NameSchema } from '../workbooks/form';
+import { NameSchema, workbookFileField } from '../workbooks/form';
+import { BoundedCustomPriceSchema } from './custom-price';
 import { QuoteBreakdownSchema } from './product-pricing.validator';
 
 // ─── Shared enums ───────────────────────────────────────────────────────────
@@ -69,11 +70,7 @@ export const FlashProductItemPathSchema = FlashProductListPathSchema.extend({
 // ─── Import (multipart upload) ──────────────────────────────────────────────
 
 export const ImportFlashProductsFormSchema = z.object({
-  file: z.instanceof(File).openapi({
-    type: 'string',
-    format: 'binary',
-    description: 'Trendyol Flaş Ürünler .xlsx',
-  }),
+  file: workbookFileField('Trendyol Flaş Ürünler .xlsx'),
   name: NameSchema.optional().openapi({ description: 'İsteğe bağlı görünen ad; yoksa dosya adı.' }),
 });
 
@@ -241,10 +238,7 @@ export const FlashSelectionSchema = z
     itemId: z.string().uuid(),
     /** The chosen flash window, or null to clear / when a custom price is set instead. */
     offer: FlashOfferTypeSchema.nullable(),
-    customPrice: z
-      .string()
-      .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_CUSTOM_PRICE')
-      .nullable(),
+    customPrice: BoundedCustomPriceSchema.nullable(),
   })
   .superRefine((val, ctx) => {
     // An offer choice and a custom price are mutually exclusive — a row is EITHER a

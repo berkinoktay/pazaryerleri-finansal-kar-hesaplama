@@ -1,15 +1,22 @@
-// The rules for what a seller types into a workbook form. The one rule for a stored list
-// name, typed by the seller or read from a file: no control or format character (a bidi
-// override can make a name read as something else), no surrounding whitespace, at most
-// UPLOAD_NAME_MAX_LENGTH long. And the rule for a campaign window instant: an ISO date
-// time whose UTC year the database can store. Each rule's message is a field issue code.
+// The rules for what a seller sends in a workbook form. The uploaded file of every import
+// form: a `file` part that is a file. The one rule for a stored list name, typed by the
+// seller or read from a file: no control or format character (a bidi override can make a
+// name read as something else), no surrounding whitespace, at most UPLOAD_NAME_MAX_LENGTH
+// long. And the rule for a campaign window instant: an ISO date time whose UTC year the
+// database can store. Each rule's message is a field issue code.
 
 import { z } from '@hono/zod-openapi';
 
-import { UPLOAD_NAME_MAX_LENGTH } from '@pazarsync/utils';
+import { UPLOAD_NAME_MAX_LENGTH, type WorkbookFormFileCode } from '@pazarsync/utils';
 
 import { isStorableYear } from './column-range';
 
+/**
+ * Field issue code of an import without a `file` part, or with a `file` part that is not
+ * a file (a plain text field). One of the shared `WORKBOOK_FORM_FILE_CODES`, which the web
+ * maps to a message.
+ */
+export const FILE_REQUIRED = 'FILE_REQUIRED' satisfies WorkbookFormFileCode;
 /** Field issue code of a name above UPLOAD_NAME_MAX_LENGTH. */
 export const NAME_TOO_LONG = 'NAME_TOO_LONG';
 /** Field issue code of a name holding a control or format character. */
@@ -23,6 +30,17 @@ export const DATE_OUT_OF_RANGE = 'DATE_OUT_OF_RANGE';
 
 const CONTROL_OR_FORMAT_RE = /[\p{Cc}\p{Cf}]/gu;
 const NO_CONTROL_OR_FORMAT_RE = /^[^\p{Cc}\p{Cf}]*$/u;
+
+/**
+ * The `file` field of a workbook import form: the uploaded `.xlsx`, a binary string in the
+ * spec. A missing part or a part that is not a file answers FILE_REQUIRED. Each import form
+ * passes its own spec description.
+ */
+export function workbookFileField(description: string): z.ZodInstanceOf<File> {
+  return z
+    .instanceof(File, { error: FILE_REQUIRED })
+    .openapi({ type: 'string', format: 'binary', description });
+}
 
 /**
  * A typed list name on the wire; each rule's message is its field issue code. The

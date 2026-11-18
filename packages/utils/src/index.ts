@@ -41,8 +41,10 @@ export {
   WORKBOOK_ENGINE_FILE_CODES,
   WORKBOOK_FILE_CODES,
   WORKBOOK_FILE_LIMITS,
+  WORKBOOK_FORM_FILE_CODES,
   type UploadQuotaLimit,
   type WorkbookFileCode,
+  type WorkbookFormFileCode,
   type WorkbookUploadFileCode,
 } from './workbook-codes';
 export { WORKBOOK_PAGES, type WorkbookPage } from './workbook-pages';

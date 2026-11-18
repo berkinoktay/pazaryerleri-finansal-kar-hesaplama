@@ -24,8 +24,13 @@ const updateFlashSelectionsRoute = createRoute({
     "Persists the seller's chosen flash offer (H24 / H3, or null to clear) and optional custom price " +
     'per item, in a single bulk update. An offer and a custom price are mutually exclusive (the client ' +
     'enforces the XOR). Items not belonging to this list/store are ignored. Selection happens ' +
-    'client-side over the backend-computed margins; this only records the result. Returns how many ' +
-    'items were updated.',
+    'client-side over the backend-computed margins; this only records the result. ' +
+    'An offer the item does not store (`OFFER_NOT_STORED` on `selections.<index>.offer`), a ' +
+    'custom price on an item that stores no offer (`OFFER_NOT_STORED` on ' +
+    "`selections.<index>.customPrice`), or a custom price above the item's lowest offer price " +
+    '(`CUSTOM_PRICE_ABOVE_MAX` on `selections.<index>.customPrice`; equal is allowed) refuses the ' +
+    'whole request with 422; nothing is written. A null offer and a null custom price are never ' +
+    'checked. Returns how many items were updated.',
   security: [{ bearerAuth: [] }],
   request: {
     params: FlashProductListPathSchema,
@@ -54,7 +59,10 @@ const updateFlashSelectionsRoute = createRoute({
     },
     422: {
       content: { 'application/json': { schema: ProblemDetailsSchema } },
-      description: 'Invalid selection payload',
+      description:
+        'Invalid selection payload, or a selection the export could not write ' +
+        '(OFFER_NOT_STORED on selections.<index>.offer or selections.<index>.customPrice, ' +
+        'CUSTOM_PRICE_ABOVE_MAX on selections.<index>.customPrice)',
     },
     429: Common429Response,
   },

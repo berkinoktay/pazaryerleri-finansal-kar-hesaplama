@@ -12,7 +12,9 @@
 //   - an owner's oversized body is refused with 413 whether the size is declared in
 //     Content-Length or only discovered while streaming a chunked body.
 // Past the guard, a file within the byte limit that crosses a row, column or content
-// limit of the engine is a 422 on `file` carrying that limit, and nothing is stored.
+// limit of the engine is a 422 on `file` carrying that limit, and nothing is stored. A
+// multipart body without a `file` part reaches the form validator and is a 422 on `file`
+// with its machine code.
 
 import { readFileSync } from 'node:fs';
 
@@ -33,6 +35,7 @@ import { createApp } from '@/app';
 import { RATE_LIMITS } from '@/config/rate-limits';
 import { MULTIPART_OVERHEAD_BYTES } from '@/config/workbook-limits';
 import { _resetRateLimitStoreForTests } from '@/middleware/rate-limit.middleware';
+import { FILE_REQUIRED } from '@/workbooks/form';
 import { TRENDYOL_SHEET_NAMES } from '@/workbooks/formats/trendyol/labels';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
@@ -371,6 +374,26 @@ describe('workbook upload guard on the import routes', () => {
 
     expect(res.status).toBe(422);
     expect(await problemCode(res)).toBe('VALIDATION_ERROR');
+  });
+
+  it('commission-tariffs: a multipart body without a file part -> 422 FILE_REQUIRED', async () => {
+    // One other form field keeps the body multipart, so it passes the content-type check.
+    const form = new FormData();
+    form.append('name', 'No file');
+    const request = new Request(importUrl(ctx.orgId, ctx.storeId, 'commission-tariffs'), {
+      method: 'POST',
+      headers: { Authorization: bearer(ctx.accessToken) },
+      body: form,
+    });
+
+    const res = await app.request(request);
+
+    expect(res.status).toBe(422);
+    const body = RawValidationSchema.parse(await res.json());
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toStrictEqual([
+      { field: 'file', code: FILE_REQUIRED, meta: { zodCode: 'custom' } },
+    ]);
   });
 
   it.each(IMPORT_RESOURCES)(

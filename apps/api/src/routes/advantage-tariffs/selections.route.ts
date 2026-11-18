@@ -23,8 +23,10 @@ const updateAdvantageSelectionsRoute = createRoute({
   description:
     "Persists the seller's chosen star tier (or null to clear) and optional custom price per item, in " +
     'a single bulk update. Items not belonging to this tariff/store are ignored. Selection happens ' +
-    'client-side over the backend-computed margins; this only records the result. Returns how many ' +
-    'items were updated.',
+    'client-side over the backend-computed margins; this only records the result. ' +
+    'A tier the item does not store (`TIER_NOT_STORED`, even with a custom price) refuses the ' +
+    'whole request with 422 on `selections.<index>.tier`; nothing is written. A null tier is ' +
+    'never checked. Returns how many items were updated.',
   security: [{ bearerAuth: [] }],
   request: {
     params: AdvantageTariffIdPathSchema,
@@ -53,7 +55,9 @@ const updateAdvantageSelectionsRoute = createRoute({
     },
     422: {
       content: { 'application/json': { schema: ProblemDetailsSchema } },
-      description: 'Invalid selection payload',
+      description:
+        'Invalid selection payload, or a selection the export could not write ' +
+        '(TIER_NOT_STORED on selections.<index>.tier)',
     },
     429: Common429Response,
   },

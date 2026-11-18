@@ -4,7 +4,6 @@ import { ArrowLeft01Icon, Delete02Icon, DownloadCircle01Icon } from 'hugeicons-r
 import { useTranslations } from 'next-intl';
 import { parseAsFloat, parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
-import { toast } from 'sonner';
 
 import { WORKBOOK_PAGES } from '@pazarsync/utils';
 
@@ -21,6 +20,7 @@ import { useExportWorkbook } from '../hooks/use-export-workbook';
 import { usePlusTariffDetail } from '../hooks/use-plus-tariff-detail';
 import { useResolvedCampaignAccess } from '../hooks/use-resolved-campaign-access';
 import { useUpdatePlusSelections } from '../hooks/use-update-plus-selections';
+import { useSelectionSaveErrorToast } from '../hooks/use-selection-save-error-toast';
 import { toPlusTariffView } from '../lib/adapt-plus-tariff';
 import { CampaignAccessProvider } from '../lib/campaign-access-context';
 import { downloadBlob } from '../lib/download-blob';
@@ -36,7 +36,6 @@ import {
 } from '../lib/plus-bulk-actions';
 import { summarizePlusSelection } from '../lib/plus-tariff-summary';
 import { seedPlusSelection } from '../lib/seed-plus-selection';
-import { selectionSaveErrorToast } from '../lib/selection-save-error';
 import { TariffScopeProvider } from '../lib/tariff-scope';
 import { computeExportPreview, resolvePlusExportPrice } from '../lib/export-preview';
 import { CampaignReadOnlyNotice } from './campaign-read-only-notice';
@@ -75,7 +74,7 @@ export function PlusTariffDetailClient({
 }): React.ReactElement {
   const tPage = useTranslations('plusCommissionTariffsPage');
   const tCommon = useTranslations('common');
-  const tErrors = useTranslations('common.errors');
+  const showSelectionSaveError = useSelectionSaveErrorToast();
   const tExport = useTranslations('plusCommissionTariffsPage.exportDialog');
   const router = useRouter();
   const detail = usePlusTariffDetail(orgId ?? '', storeId, tariffId);
@@ -352,15 +351,7 @@ export function PlusTariffDetailClient({
             },
           });
         },
-        // The global pipeline keeps every VALIDATION_ERROR silent, so say it here; the
-        // export does not start. A join the route cannot export (no custom price on an
-        // offer whose ceiling is unknown) gets its own message; any other validation
-        // issue gets the generic one. Every other code is already toasted globally.
-        onError: (error) => {
-          const toastKind = selectionSaveErrorToast(error);
-          if (toastKind === 'selectionRefused') toast.error(tPage('selectionRefused'));
-          if (toastKind === 'generic') toast.error(tErrors('generic'));
-        },
+        onError: showSelectionSaveError,
       },
     );
   };

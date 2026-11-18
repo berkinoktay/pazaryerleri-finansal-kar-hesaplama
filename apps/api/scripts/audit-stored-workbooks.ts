@@ -4,7 +4,10 @@
 // `source_file`, one at a time, and reads each file twice through the engine: with
 // the selector the page's legacy export service passes today (what the stricter gate
 // now refuses) and with the page's strict selector (named sheet, or the first sheet
-// by index). Per table it prints the `source_format_id` groups, the count of stored
+// by index). The sheet names come from the shared Trendyol labels
+// (`TRENDYOL_SHEET_NAMES` in src/workbooks/formats/trendyol/labels.ts), the names the
+// formats read, so they cannot drift from the runtime and this file stays ASCII.
+// Per table it prints the `source_format_id` groups, the count of stored
 // files without a format id, the table's total row count next to the number of stored
 // files (a run against an empty or wrong database shows its zeros there) and, per
 // selector, the files that passed and the refused ones grouped by engine code and
@@ -57,18 +60,26 @@
 // `source_format_id` or by selection, the strict sheet read, the layout, the write
 // columns), then `readRows` and the import rehearsal (`buildRehearsal` and
 // `patchWorkbook`, its output dropped), and `planExport` over the record's items with
-// the names and file count the export checks before it patches
+// the names, file count and cell count the export checks before it patches
 // (`plannedDownloadNames`: EXPORT_FILENAME_COLLISION, or STORED_FILE_UNREADABLE with
-// its `too-many-files` line). It never calls `exportWorkbook` or `touchExported`: those write. Per table it prints
+// its `too-many-files` or `too-many-cells` line). It never calls `exportWorkbook` or `touchExported`: those write. Per table it prints
 // the total, the files that passed and, per refusal reason, the count and the record
 // ids; a STORED_FILE_UNREADABLE carries the engine code and reason gate mode's strict
 // read found for that record. A stored value the export's write rule refuses
 // (`planExport`'s UnwritableStoredValueError) is keyed as the export answers it,
 // `STORED_FILE_UNREADABLE unwritable-value`. Any full-mode refusal sets exit code 1.
-// The production path also logs its own `workbook.stored-file-rejected` lines into the
-// same output (page, record id, engine code and engine reason; never a file name or
-// cell content). A record can carry two reasons (the rehearsal's and the plan's), so
-// the reason counts can add up to more than the refused count.
+// One finding is a warning instead: a `rows MALFORMED_SHEET` caused only by a U+0000
+// character in a data row (`readRows`'s NUL_CHARACTER_REASON). The import refuses such
+// a file, but the export does not read rows, so this finding alone does not stop the
+// list from exporting. Its rows cannot be read, so the rehearsal stops there for that
+// file; the plan still runs and can still refuse it. Warnings are printed under their
+// own label with their record ids,
+// the summary line counts the warned records beside the passed and refused ones (a
+// record with a warning and no refusal has passed), and a warning does not set exit
+// code 1. The production path also logs its own `workbook.stored-file-rejected` lines
+// into the same output (page, record id, engine code and engine reason; never a file
+// name or cell content). A record can carry two reasons (the rehearsal's and the
+// plan's), so the reason counts can add up to more than the refused count.
 //
 // The name and quota outputs run on every run, after gate mode and before full mode, in
 // SQL only (no stored file is read), and work before and after the migration that limits
@@ -116,12 +127,14 @@ import {
 } from '@pazarsync/spreadsheet';
 import { UPLOAD_NAME_MAX_LENGTH, WORKBOOK_PAGES, type WorkbookPage } from '@pazarsync/utils';
 
-// The value imports from src/: the limits module imports nothing, and the form rules
+// The value imports from src/: the limits module imports nothing, the form rules
 // (form.ts) import zod, @pazarsync/utils and, through column-range.ts,
-// @pazarsync/spreadsheet. Neither package loads @pazarsync/db at runtime, so loading
-// them cannot build the @pazarsync/db pool before main() makes DATABASE_URL read-only.
+// @pazarsync/spreadsheet, and the shared Trendyol labels (labels.ts) have only type
+// imports. Neither package loads @pazarsync/db at runtime, so loading them cannot build
+// the @pazarsync/db pool before main() makes DATABASE_URL read-only.
 import { MAX_LISTS_PER_STORE_PAGE, STORE_UPLOAD_QUOTA_BYTES } from '../src/config/workbook-limits';
 import { NAME_INVALID_CHARACTERS, NameSchema } from '../src/workbooks/form';
+import { TRENDYOL_SHEET_NAMES } from '../src/workbooks/formats/trendyol/labels';
 // Types only, for the same reason: each of these modules loads @pazarsync/db (directly,
 // or through @pazarsync/sync-core), so main() imports them only after DATABASE_URL is
 // read-only (loadFullMode).
@@ -166,16 +179,8 @@ const FIRST_SHEET_INDEX = 0;
 const PARENT_TABLE_COUNT = 6;
 
 const CORRUPT_FILE_CODE: SpreadsheetFileErrorCode = 'CORRUPT_FILE';
+const MALFORMED_SHEET_CODE: SpreadsheetFileErrorCode = 'MALFORMED_SHEET';
 const READER_RULE_PREFIX = 'rule:';
-
-// The sheet names the legacy import and export services read (their private SHEET_NAME
-// constants; for the pages whose services are gone, the sheet their formats name),
-// written with escapes so this file stays ASCII.
-const COMMISSION_TARIFF_SHEET = 'KomisyonTarifeleri\u00dcr\u00fcnleri';
-const PLUS_COMMISSION_TARIFF_SHEET = 'TyPlus\u00dcr\u00fcnleri';
-const ADVANTAGE_TARIFF_SHEET = 'Y\u0131ld\u0131zl\u0131\u00dcr\u00fcnEtiketleri';
-const FLASH_PRODUCT_LIST_SHEET = 'Teklif\u00dcr\u00fcnleri';
-const DISCOUNT_LIST_SHEET = '\u00dcr\u00fcnler';
 
 /** Engine reasons that name a rule; any other `meta` value is never printed. */
 const KNOWN_REASONS: ReadonlySet<string> = new Set([
@@ -396,8 +401,8 @@ function storedWorkbookTables(db: PrismaClient): readonly StoredWorkbookTable[] 
     {
       table: 'commission_tariffs',
       page: WORKBOOK_PAGES.COMMISSION_TARIFF,
-      legacyRead: { sheetName: COMMISSION_TARIFF_SHEET },
-      strictRead: { sheet: { by: 'name', name: COMMISSION_TARIFF_SHEET } },
+      legacyRead: { sheetName: TRENDYOL_SHEET_NAMES.COMMISSION_TARIFF },
+      strictRead: { sheet: { by: 'name', name: TRENDYOL_SHEET_NAMES.COMMISSION_TARIFF } },
       rowCount: async () => db.commissionTariff.count(),
       storedRecords: async () =>
         recordsOf(
@@ -423,8 +428,8 @@ function storedWorkbookTables(db: PrismaClient): readonly StoredWorkbookTable[] 
     {
       table: 'plus_commission_tariffs',
       page: WORKBOOK_PAGES.PLUS_COMMISSION_TARIFF,
-      legacyRead: { sheetName: PLUS_COMMISSION_TARIFF_SHEET },
-      strictRead: { sheet: { by: 'name', name: PLUS_COMMISSION_TARIFF_SHEET } },
+      legacyRead: { sheetName: TRENDYOL_SHEET_NAMES.PLUS_COMMISSION_TARIFF },
+      strictRead: { sheet: { by: 'name', name: TRENDYOL_SHEET_NAMES.PLUS_COMMISSION_TARIFF } },
       rowCount: async () => db.plusCommissionTariff.count(),
       storedRecords: async () =>
         recordsOf(
@@ -450,8 +455,8 @@ function storedWorkbookTables(db: PrismaClient): readonly StoredWorkbookTable[] 
     {
       table: 'advantage_tariffs',
       page: WORKBOOK_PAGES.ADVANTAGE_TARIFF,
-      legacyRead: { sheetName: ADVANTAGE_TARIFF_SHEET },
-      strictRead: { sheet: { by: 'name', name: ADVANTAGE_TARIFF_SHEET } },
+      legacyRead: { sheetName: TRENDYOL_SHEET_NAMES.ADVANTAGE_TARIFF },
+      strictRead: { sheet: { by: 'name', name: TRENDYOL_SHEET_NAMES.ADVANTAGE_TARIFF } },
       rowCount: async () => db.advantageTariff.count(),
       storedRecords: async () =>
         recordsOf(
@@ -477,8 +482,8 @@ function storedWorkbookTables(db: PrismaClient): readonly StoredWorkbookTable[] 
     {
       table: 'flash_product_lists',
       page: WORKBOOK_PAGES.FLASH_PRODUCT_LIST,
-      legacyRead: { sheetName: FLASH_PRODUCT_LIST_SHEET },
-      strictRead: { sheet: { by: 'name', name: FLASH_PRODUCT_LIST_SHEET } },
+      legacyRead: { sheetName: TRENDYOL_SHEET_NAMES.FLASH_PRODUCT_LIST },
+      strictRead: { sheet: { by: 'name', name: TRENDYOL_SHEET_NAMES.FLASH_PRODUCT_LIST } },
       rowCount: async () => db.flashProductList.count(),
       storedRecords: async () =>
         recordsOf(
@@ -504,8 +509,8 @@ function storedWorkbookTables(db: PrismaClient): readonly StoredWorkbookTable[] 
     {
       table: 'discount_lists',
       page: WORKBOOK_PAGES.DISCOUNT_LIST,
-      legacyRead: { sheetName: DISCOUNT_LIST_SHEET },
-      strictRead: { sheet: { by: 'name', name: DISCOUNT_LIST_SHEET } },
+      legacyRead: { sheetName: TRENDYOL_SHEET_NAMES.DISCOUNT_LIST },
+      strictRead: { sheet: { by: 'name', name: TRENDYOL_SHEET_NAMES.DISCOUNT_LIST } },
       rowCount: async () => db.discountList.count(),
       storedRecords: async () =>
         recordsOf(
@@ -967,21 +972,34 @@ interface FullModeEngine {
   readonly fileRejectionCode: (err: unknown) => string | null;
   /** The `reason` of an UnwritableStoredValueError (planExport's write-value check), else null. */
   readonly unwritableValueReason: (err: unknown) => string | null;
+  /** The `meta.reason` of the MALFORMED_SHEET `readRows` raises for a U+0000 in a text cell. */
+  readonly nulCharacterReason: string;
 }
 
-/** Full mode for one page's table: the refusal keys of one stored record, or null when it is gone. */
+/** The outcome of one stored record in full mode: the keys that refuse it, and the keys that only warn. */
+interface RecordAudit {
+  readonly refusals: readonly string[];
+  readonly warnings: readonly string[];
+}
+
+/** Full mode for one page's table: the audit of one stored record, or null when it is gone. */
 interface RecordAuditor {
   readonly table: string;
-  readonly audit: (
-    record: StoredRecord,
-    strictKey: string | null,
-  ) => Promise<readonly string[] | null>;
+  readonly audit: (record: StoredRecord, strictKey: string | null) => Promise<RecordAudit | null>;
+}
+
+/** A rehearsal finding: its report key, and whether it only warns (never sets the exit code). */
+interface RehearsalFinding {
+  readonly key: string;
+  readonly warning: boolean;
 }
 
 const STORED_FILE_UNREADABLE_REASON = 'STORED_FILE_UNREADABLE';
 const STRICT_READ_PASSED = 'passed';
 const ROWS_STAGE = 'rows';
 const REHEARSAL_STAGE = 'rehearsal';
+/** The label of full mode's warning groups: findings that never set the exit code. */
+const WARNINGS_LABEL = 'warnings (a U+0000 character in a data row; the export does not read rows)';
 
 /**
  * The report key of an error of the generic path: its conflict reason, file code or
@@ -1007,13 +1025,33 @@ function storedFileKey(engine: FullModeEngine, err: unknown, strictKey: string |
   return `${key} (strict read: ${strictKey ?? STRICT_READ_PASSED})`;
 }
 
-/** The import rehearsal on the stored file: `readRows`, `buildRehearsal`, `patchWorkbook` (dropped). */
+/**
+ * True for the MALFORMED_SHEET `readRows` raises for a U+0000 in a text cell. The import
+ * refuses such a file, but the export never calls `readRows` (it plans from the grid), so
+ * this finding alone does not stop the export: full mode reports it as a warning, not a
+ * refusal.
+ */
+function isNulCharacterRefusal(engine: FullModeEngine, err: unknown): boolean {
+  return (
+    err instanceof SpreadsheetFileError &&
+    err.code === MALFORMED_SHEET_CODE &&
+    err.meta['reason'] === engine.nulCharacterReason
+  );
+}
+
+/**
+ * The import rehearsal on the stored file: `readRows`, `buildRehearsal`, `patchWorkbook`
+ * (dropped). Returns null when it passes. A rows-stage U+0000 refusal is a warning: the
+ * rows cannot be read, so `buildRehearsal` and `patchWorkbook` do not run for that file,
+ * and a later row problem (a too-long anchor, a value the export could not write) or a
+ * rehearsal refusal stays unseen. Every other finding is a refusal.
+ */
 async function rehearsalRefusal<S extends LayoutSpec, TRow, TWrite extends string>(
   engine: FullModeEngine,
   align: 'anchor-map' | 'cursor-zip',
   stored: StoredWorkbook<S, TRow, TWrite>,
   file: Buffer,
-): Promise<string | null> {
+): Promise<RehearsalFinding | null> {
   let rehearsal;
   try {
     const read = engine.readRows(stored);
@@ -1023,7 +1061,10 @@ async function rehearsalRefusal<S extends LayoutSpec, TRow, TWrite extends strin
       stored.resolved,
     );
   } catch (err) {
-    return `${ROWS_STAGE} ${pipelineKey(engine, err)}`;
+    return {
+      key: `${ROWS_STAGE} ${pipelineKey(engine, err)}`,
+      warning: isNulCharacterRefusal(engine, err),
+    };
   }
   if (rehearsal.patches.length === 0) return null;
   try {
@@ -1035,15 +1076,18 @@ async function rehearsalRefusal<S extends LayoutSpec, TRow, TWrite extends strin
     });
     return null;
   } catch (err) {
-    return `${REHEARSAL_STAGE} ${refusalOf(err).key}`;
+    return { key: `${REHEARSAL_STAGE} ${refusalOf(err).key}`, warning: false };
   }
 }
 
 /**
  * Full mode for one adapter. Per record: `load` with the record's own scope, then
  * `resolveStoredWorkbook`; when that passes, the rehearsal and the plan (`planExport`,
- * then `plannedDownloadNames`: the names and the file count the export checks before it
- * patches) each add their refusal. Nothing here writes.
+ * then `plannedDownloadNames`: the names, the file count and the cell count the export
+ * checks before it patches) each add their refusal. A U+0000 rows finding of the
+ * rehearsal goes into the warnings instead (the rehearsal's own patch step did not run
+ * for that file, see `rehearsalRefusal`); the plan still runs for that record and can
+ * still refuse it. Nothing here writes.
  */
 function recordAuditor<
   S extends LayoutSpec,
@@ -1076,12 +1120,14 @@ function recordAuditor<
           recordId: record.id,
         });
       } catch (err) {
-        return [storedFileKey(engine, err, strictKey)];
+        return { refusals: [storedFileKey(engine, err, strictKey)], warnings: [] };
       }
 
       const refusals: string[] = [];
+      const warnings: string[] = [];
       const rehearsal = await rehearsalRefusal(engine, adapter.align, stored, file);
-      if (rehearsal !== null) refusals.push(rehearsal);
+      if (rehearsal?.warning === true) warnings.push(rehearsal.key);
+      else if (rehearsal !== null) refusals.push(rehearsal.key);
       try {
         const plan = engine.planExport({ ...stored, groups: source.groups, adapter });
         engine.plannedDownloadNames(stored.format, source, plan, {
@@ -1091,7 +1137,7 @@ function recordAuditor<
       } catch (err) {
         refusals.push(pipelineKey(engine, err));
       }
-      return refusals;
+      return { refusals, warnings };
     },
   };
 }
@@ -1145,6 +1191,7 @@ async function loadFullMode(): Promise<readonly RecordAuditor[]> {
       err instanceof workbookErrors.WorkbookFileRejection ? err.code : null,
     unwritableValueReason: (err) =>
       err instanceof writeColumns.UnwritableStoredValueError ? err.reason : null,
+    nulCharacterReason: importRows.NUL_CHARACTER_REASON,
   };
   // FULL_MODE_ADAPTERS: each vertical appends its adapter as it moves.
   return [
@@ -1157,30 +1204,45 @@ async function loadFullMode(): Promise<readonly RecordAuditor[]> {
   ];
 }
 
-/** Full mode over one table's stored records, one file at a time; returns the refused count. */
+/**
+ * Full mode over one table's stored records, one file at a time; returns the refused
+ * count. A record without a refusal passes even when it carries a warning; the warned
+ * count is a side count (a warned record is also counted as passed or refused), so the
+ * total stays passed + refused + gone, and a warning never sets the exit code.
+ */
 async function auditTableFullMode(auditor: RecordAuditor, gate: GateResult): Promise<number> {
   const refusals: IdGroups = new Map();
+  const warnings: IdGroups = new Map();
   let passed = 0;
   let refused = 0;
+  let warned = 0;
   let gone = 0;
   for (const record of gate.records) {
-    const keys = await auditor.audit(record, gate.strictKeyById.get(record.id) ?? null);
-    if (keys === null) {
+    const audit = await auditor.audit(record, gate.strictKeyById.get(record.id) ?? null);
+    if (audit === null) {
       gone += 1;
       continue;
     }
-    if (keys.length === 0) {
+    if (audit.warnings.length > 0) {
+      warned += 1;
+      for (const key of audit.warnings) addId(warnings, key, record.id);
+    }
+    if (audit.refusals.length === 0) {
       passed += 1;
       continue;
     }
     refused += 1;
-    for (const key of keys) addId(refusals, key, record.id);
+    for (const key of audit.refusals) addId(refusals, key, record.id);
   }
   console.log(
     `${auditor.table} full mode: total ${gate.records.length}, passed ${passed}, ` +
-      `refused ${refused}, gone during the run ${gone}`,
+      `refused ${refused}, gone during the run ${gone}, warned ${warned} (of passed and refused)`,
   );
   printGroups(refusals);
+  if (warned > 0) {
+    console.log(`  ${WARNINGS_LABEL}:`);
+    printGroups(warnings);
+  }
   return refused;
 }
 

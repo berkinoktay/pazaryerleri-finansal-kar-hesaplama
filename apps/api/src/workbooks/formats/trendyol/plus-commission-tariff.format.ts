@@ -22,6 +22,7 @@ import {
   TARIFF_WINDOW_LABEL_UNIT,
   TRENDYOL_DEFAULT_NAMES,
   TRENDYOL_SHEET_NAMES,
+  YES_LABEL,
 } from './labels';
 import {
   trendyolPlusCommissionTariffKeep,
@@ -166,8 +167,12 @@ export const trendyolPlusCommissionTariffFormat = defineFormat({
       plusCommissionBasePrice: knownPrice(reader.decimal('plusCommissionBasePrice')) ?? ceiling,
       externalId: reader.text('externalId'),
       tariffGroup: reader.text('tariffGroup'),
-      // A number cell: the number 1 cancels, the text "0" does not.
-      cancelled: reader.numericFlag('cancelled'),
+      // The template's dropdown offers YES_LABEL / NO_LABEL; YES_LABEL cancels, compared
+      // without letter case as the other pages' yes-flags are (a pasted upper-case value). A number cell still cancels when it is not zero (files stored before this
+      // read): the number 1 cancels, the text "0" does not.
+      cancelled:
+        reader.flag('cancelled', { yes: YES_LABEL, compare: 'casefold-tr' }) ||
+        reader.numericFlag('cancelled'),
       // Only a known offer is write-checked: an unknown one is never written.
       periodOffers: reader.blocks('periods').map((period) => {
         const offer = period.decimal('offer');

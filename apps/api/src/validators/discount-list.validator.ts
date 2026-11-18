@@ -15,19 +15,33 @@ import type { Prisma } from '@pazarsync/db';
 import { DiscountType, DiscountValueKind } from '@pazarsync/db/enums';
 
 import type { DiscountConfig } from '../services/discount-math-commons';
-import { NameSchema, RequiredNameSchema, WindowInstantSchema } from '../workbooks/form';
+import {
+  NameSchema,
+  RequiredNameSchema,
+  WindowInstantSchema,
+  workbookFileField,
+} from '../workbooks/form';
 import { QuoteBreakdownSchema } from './product-pricing.validator';
 
 // ─── Shared enums ───────────────────────────────────────────────────────────
 
-export const DiscountTypeSchema = z.enum(DiscountType).openapi('DiscountType', {
-  description:
-    'İndirim kurgusu: NET / CONDITIONAL_BASKET (min sepet) / CONDITIONAL_QUANTITY (N adet) / ' +
-    'BUY_X_PAY_Y / NTH_PRODUCT (X. ürüne) / CODE (indirim kodu).',
-});
-export const DiscountValueKindSchema = z.enum(DiscountValueKind).openapi('DiscountValueKind', {
-  description: 'Değer türü: AMOUNT (TL) / PERCENT (%) / FIXED_PRICE (yalnız NTH_PRODUCT).',
-});
+/** Field issue code of a missing or unknown `discountType` (discount and campaign configs). */
+export const INVALID_DISCOUNT_TYPE = 'INVALID_DISCOUNT_TYPE';
+/** Field issue code of an unknown `valueKind` (discount and campaign configs). */
+export const INVALID_VALUE_KIND = 'INVALID_VALUE_KIND';
+
+export const DiscountTypeSchema = z
+  .enum(DiscountType, { error: INVALID_DISCOUNT_TYPE })
+  .openapi('DiscountType', {
+    description:
+      'İndirim kurgusu: NET / CONDITIONAL_BASKET (min sepet) / CONDITIONAL_QUANTITY (N adet) / ' +
+      'BUY_X_PAY_Y / NTH_PRODUCT (X. ürüne) / CODE (indirim kodu).',
+  });
+export const DiscountValueKindSchema = z
+  .enum(DiscountValueKind, { error: INVALID_VALUE_KIND })
+  .openapi('DiscountValueKind', {
+    description: 'Değer türü: AMOUNT (TL) / PERCENT (%) / FIXED_PRICE (yalnız NTH_PRODUCT).',
+  });
 
 const DECIMAL_RE = /^\d+(\.\d{1,2})?$/;
 const INT_RE = /^\d+$/;
@@ -179,11 +193,7 @@ export const DiscountListItemPathSchema = DiscountListPathSchema.extend({
 // ─── Import (multipart upload) ──────────────────────────────────────────────
 
 export const ImportDiscountListFormSchema = DiscountConfigFieldsSchema.extend({
-  file: z.instanceof(File).openapi({
-    type: 'string',
-    format: 'binary',
-    description: 'Trendyol İndirimler .xlsx (ürün seçim dosyası)',
-  }),
+  file: workbookFileField('Trendyol İndirimler .xlsx (ürün seçim dosyası)'),
   name: NameSchema.optional().openapi({ description: 'İsteğe bağlı görünen ad; yoksa dosya adı.' }),
 }).superRefine(refineDiscountConfig);
 

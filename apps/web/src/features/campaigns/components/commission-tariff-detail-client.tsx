@@ -4,7 +4,6 @@ import { ArrowLeft01Icon, Delete02Icon, DownloadCircle01Icon } from 'hugeicons-r
 import { useTranslations } from 'next-intl';
 import { parseAsFloat, parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
-import { toast } from 'sonner';
 
 import { WORKBOOK_PAGES } from '@pazarsync/utils';
 
@@ -21,6 +20,7 @@ import { useDeleteTariff } from '../hooks/use-delete-tariff';
 import { useExportWorkbook } from '../hooks/use-export-workbook';
 import { useResolvedCampaignAccess } from '../hooks/use-resolved-campaign-access';
 import { useUpdateSelections } from '../hooks/use-update-selections';
+import { useSelectionSaveErrorToast } from '../hooks/use-selection-save-error-toast';
 import { asBandKey } from '../lib/band-key';
 import {
   clearSelections,
@@ -38,7 +38,6 @@ import { CampaignAccessProvider } from '../lib/campaign-access-context';
 import { summarizeSelection } from '../lib/commission-tariff-summary';
 import { downloadBlob } from '../lib/download-blob';
 import { seedCommissionSelection } from '../lib/seed-commission-selection';
-import { selectionSaveErrorToast } from '../lib/selection-save-error';
 import { TariffScopeProvider } from '../lib/tariff-scope';
 import { computeExportPreview, resolveCommissionExportPrice } from '../lib/export-preview';
 import { CampaignReadOnlyNotice } from './campaign-read-only-notice';
@@ -75,7 +74,7 @@ export function CommissionTariffDetailClient({
 }): React.ReactElement {
   const tPage = useTranslations('commissionTariffsPage');
   const tCommon = useTranslations('common');
-  const tErrors = useTranslations('common.errors');
+  const showSelectionSaveError = useSelectionSaveErrorToast();
   const tExport = useTranslations('commissionTariffsPage.exportDialog');
   const router = useRouter();
   const detail = useCommissionTariffDetail(orgId ?? '', storeId, tariffId);
@@ -360,16 +359,7 @@ export function CommissionTariffDetailClient({
             },
           });
         },
-        // The global pipeline keeps every VALIDATION_ERROR silent, so say it here; the export does
-        // not start. A selection the route cannot export (a band the item does not
-        // hold, or a band with no price and no custom price) gets its own message; any
-        // other validation issue gets the generic one. Every other code is already
-        // toasted globally.
-        onError: (error) => {
-          const toastKind = selectionSaveErrorToast(error);
-          if (toastKind === 'selectionRefused') toast.error(tPage('selectionRefused'));
-          if (toastKind === 'generic') toast.error(tErrors('generic'));
-        },
+        onError: showSelectionSaveError,
       },
     );
   };

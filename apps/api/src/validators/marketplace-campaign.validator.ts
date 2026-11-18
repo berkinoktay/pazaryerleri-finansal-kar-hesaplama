@@ -15,8 +15,18 @@ import type { Prisma } from '@pazarsync/db';
 import { CampaignPriceSelection, DiscountType, DiscountValueKind } from '@pazarsync/db/enums';
 
 import type { DiscountConfig } from '../services/discount-math-commons';
-import { NameSchema, RequiredNameSchema, WindowInstantSchema } from '../workbooks/form';
-import { refineDiscountConfig } from './discount-list.validator';
+import {
+  NameSchema,
+  RequiredNameSchema,
+  WindowInstantSchema,
+  workbookFileField,
+} from '../workbooks/form';
+import { BoundedCustomPriceSchema } from './custom-price';
+import {
+  INVALID_DISCOUNT_TYPE,
+  INVALID_VALUE_KIND,
+  refineDiscountConfig,
+} from './discount-list.validator';
 import { QuoteBreakdownSchema } from './product-pricing.validator';
 
 const DECIMAL_RE = /^\d+(\.\d{1,2})?$/;
@@ -39,16 +49,18 @@ export const CAMPAIGN_DISCOUNT_TYPES = [
 ] as const satisfies ReadonlyArray<(typeof DiscountType)[keyof typeof DiscountType]>;
 
 export const CampaignDiscountTypeSchema = z
-  .enum(CAMPAIGN_DISCOUNT_TYPES)
+  .enum(CAMPAIGN_DISCOUNT_TYPES, { error: INVALID_DISCOUNT_TYPE })
   .openapi('CampaignDiscountType', {
     description:
       'Kampanya kurgusu: NET / CONDITIONAL_BASKET (min sepet) / CONDITIONAL_QUANTITY (N adet) / ' +
       'BUY_X_PAY_Y / NTH_PRODUCT (X. ürüne). Kupon ayrı bir tür değildir.',
   });
 
-export const CampaignValueKindSchema = z.enum(DiscountValueKind).openapi('CampaignValueKind', {
-  description: 'Değer türü: AMOUNT (TL) / PERCENT (%) / FIXED_PRICE (yalnız NTH_PRODUCT).',
-});
+export const CampaignValueKindSchema = z
+  .enum(DiscountValueKind, { error: INVALID_VALUE_KIND })
+  .openapi('CampaignValueKind', {
+    description: 'Değer türü: AMOUNT (TL) / PERCENT (%) / FIXED_PRICE (yalnız NTH_PRODUCT).',
+  });
 
 export const MarketplaceCampaignConfigFieldsSchema = z
   .object({
@@ -223,11 +235,7 @@ export const MarketplaceCampaignItemPathSchema = MarketplaceCampaignPathSchema.e
 // pattern) — so this form still inherits BOTH refineDiscountConfig's per-type rules AND the
 // funding>100 check from MarketplaceCampaignConfigFieldsSchema without re-declaring them.
 export const ImportMarketplaceCampaignFormSchema = MarketplaceCampaignConfigFieldsSchema.extend({
-  file: z.instanceof(File).openapi({
-    type: 'string',
-    format: 'binary',
-    description: 'Trendyol Kampanyalar ürün seçim dosyası (.xlsx)',
-  }),
+  file: workbookFileField('Trendyol Kampanyalar ürün seçim dosyası (.xlsx)'),
   name: NameSchema.optional().openapi({ description: 'İsteğe bağlı görünen ad; yoksa dosya adı.' }),
 });
 
@@ -517,7 +525,7 @@ export const UpdateCampaignSelectionsBodySchema = z
         z.object({
           itemId: z.string().uuid(),
           selection: CampaignPriceSelectionSchema,
-          customPrice: z.string().regex(DECIMAL_RE, 'INVALID_CUSTOM_PRICE').nullable(),
+          customPrice: BoundedCustomPriceSchema.nullable(),
         }),
       )
       .max(5000)
