@@ -6,6 +6,7 @@
 
 import {
   cellDecimal,
+  cellDisplayText,
   cellFlag,
   cellInstant,
   cellInt,
@@ -40,6 +41,12 @@ export interface BlockReader<S extends LayoutSpec, B extends BlockKey<S>> {
 /** Reads one data row by layout key. */
 export interface RowReader<S extends LayoutSpec> {
   text(col: ColumnKey<S>): string | null;
+  /**
+   * Text a format stores only to show, with Excel's `_xHHHH_` escapes decoded
+   * (`cellDisplayText`). Never for an anchor or a value compared with the stored file:
+   * those read raw through `text`.
+   */
+  displayText(col: ColumnKey<S>): string | null;
   /** The grammar comes from the column's locator (default `plain`). */
   decimal(col: ColumnKey<S>): string | null;
   int(col: ColumnKey<S>, mode: IntMode): number | null;
@@ -97,6 +104,7 @@ export function createRowReader<S extends LayoutSpec>(
   const at = (col: ColumnKey<S>): number | null => columnIndex(spec, layout, col);
   return {
     text: (col) => cellText(row, at(col)),
+    displayText: (col) => cellDisplayText(row, at(col)),
     decimal: (col) => cellDecimal(row, at(col), columnGrammar(spec, col)),
     int: (col, mode) => cellInt(row, at(col), mode),
     flag: (col, rule) => cellFlag(row, at(col), rule),

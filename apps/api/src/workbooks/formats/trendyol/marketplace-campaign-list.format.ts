@@ -67,13 +67,13 @@ export const trendyolMarketplaceCampaignListFormat = defineFormat({
   mapRow: (reader, anchor): MarketplaceCampaignListRow => ({
     barcode: anchor,
     // A row keeps a readable title even when its barcode matches no product.
-    productTitle: reader.text('productTitle') ?? anchor,
-    productCode: reader.text('productCode'),
-    category: reader.text('category'),
-    brand: reader.text('brand'),
-    color: reader.text('color'),
-    size: reader.text('size'),
-    stockCode: reader.text('stockCode'),
+    productTitle: reader.displayText('productTitle') ?? anchor,
+    productCode: reader.displayText('productCode'),
+    category: reader.displayText('category'),
+    brand: reader.displayText('brand'),
+    color: reader.displayText('color'),
+    size: reader.displayText('size'),
+    stockCode: reader.displayText('stockCode'),
     stock: requireStorableInt(reader.int('stock', 'strict')),
     currentPrice: requiredPrice(reader.decimal('currentPrice'), 'current price'),
     maxPrice: requireWritableValue(

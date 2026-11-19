@@ -17,7 +17,9 @@ const SURROGATE_MAX = 0xdfff;
 const NON_CHARACTER_FFFE = 0xfffe;
 const NON_CHARACTER_FFFF = 0xffff;
 // Excel's escape of a character in cell text: it decodes `_x0041_` into 'A' when it
-// opens the file, while neither the reader nor the writer escapes or decodes it.
+// opens the file. The writer neither escapes nor decodes it, so a text holding one is
+// refused; the reader decodes it only in display text (`decodeExcelEscapes`), never in
+// a value that is written back or compared with the file.
 const EXCEL_CHARACTER_ESCAPE_RE = /_x[0-9A-Fa-f]{4}_/;
 
 /**

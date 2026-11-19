@@ -4,6 +4,7 @@
 // the wall-clock -> instant conversion).
 
 import { normalizeDecimalString } from './coerce';
+import { decodeExcelEscapes } from './excel-escape';
 
 /** One grid row. Callers pass rows they have not narrowed, so the cells stay unknown. */
 export type CellRow = readonly unknown[];
@@ -74,6 +75,19 @@ export function cellText(row: CellRow, idx: ColumnIndex): string | null {
   }
   if (typeof value === 'number') return String(value);
   return null;
+}
+
+/**
+ * `cellText` with Excel's `_xHHHH_` escapes decoded (`decodeExcelEscapes`), then trimmed
+ * again: null when the decoded text is empty or whitespace only. For text a format
+ * stores only to show; an anchor or a value compared with the stored file reads raw
+ * through `cellText`.
+ */
+export function cellDisplayText(row: CellRow, idx: ColumnIndex): string | null {
+  const text = cellText(row, idx);
+  if (text === null) return null;
+  const decoded = decodeExcelEscapes(text).trim();
+  return decoded === '' ? null : decoded;
 }
 
 /**

@@ -242,6 +242,10 @@ export const PRODUCT_LIST_SORTS = [
 ] as const;
 export type ProductListSort = (typeof PRODUCT_LIST_SORTS)[number];
 
+// The spec `pattern` of a bigint query id, given by hand: the generator's own bigint
+// pattern loses its backslash (`^d+$`).
+const BIGINT_QUERY_PATTERN = '^\\d+$';
+
 export const ListProductsQuerySchema = TablePaginationQuerySchema.extend({
   q: z
     .string()
@@ -274,10 +278,12 @@ export const ListProductsQuerySchema = TablePaginationQuerySchema.extend({
   brandId: z.coerce.bigint().optional().openapi({
     description: 'Trendyol brand id (BigInt) — exact match against Product.brandId.',
     example: '2032',
+    pattern: BIGINT_QUERY_PATTERN,
   }),
   categoryId: z.coerce.bigint().optional().openapi({
     description: 'Trendyol category id (BigInt) — exact match against Product.categoryId.',
     example: '2122',
+    pattern: BIGINT_QUERY_PATTERN,
   }),
   overrideMissing: z
     .enum(PRODUCT_OVERRIDE_MISSING)

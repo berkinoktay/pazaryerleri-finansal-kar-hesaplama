@@ -1,6 +1,10 @@
 import { SPREADSHEET_MAIN_NAMESPACES } from '../../src/patch/limits';
 import type { CellPatch } from '../../src/patch/patch-request';
-import { applyCellPatches, patchedPartCap } from '../../src/patch/patch-worksheet';
+import {
+  applyCellPatches,
+  patchedPartCap,
+  type WorksheetPatchOptions,
+} from '../../src/patch/patch-worksheet';
 import { indexWorksheet } from '../../src/patch/sheet-index';
 
 // Builders shared by the export patch path's tests: the worksheet index, the cell
@@ -15,6 +19,12 @@ if (TRANSITIONAL_MAIN_NAMESPACE === undefined) {
 export const MAIN_NAMESPACE: string = TRANSITIONAL_MAIN_NAMESPACE;
 
 const encoder = new TextEncoder();
+const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>';
+
+/** A styles part: the declaration, then a `styleSheet` root holding `children`. */
+export function stylesXml(children: string, rootAttributes = `xmlns="${MAIN_NAMESPACE}"`): string {
+  return `${XML_DECLARATION}<styleSheet ${rootAttributes}>${children}</styleSheet>`;
+}
 
 /** The bytes of a worksheet part whose `sheetData` holds `body`. */
 export function sheet(body: string, rootAttributes = `xmlns="${MAIN_NAMESPACE}"`): Uint8Array {
@@ -41,7 +51,8 @@ export function clear(excelRow: number, col: number): CellPatch {
 
 /**
  * Index `xml` and apply `patches` with `patchedPartCap`; returns the part's bytes.
- * `dateStyles` is the patcher's date table (default: no entry formats a date).
+ * `dateStyles` is the patcher's date table (default: no entry formats a date), and
+ * `generalStyleOf` its General clone callback (default: none, a date style is dropped).
  * It skips the reader's well-formedness check (the index has no name stack, so it
  * accepts an end tag whose name does not match its start tag), which the pipeline
  * always runs first.
@@ -51,11 +62,13 @@ export function patchWorksheetXml(
   patches: readonly CellPatch[],
   overwriteFormulaColumns: readonly number[] = [],
   dateStyles: readonly boolean[] = [],
+  generalStyleOf?: (style: number) => number | null,
 ): Uint8Array {
-  const result = applyCellPatches(indexWorksheet(xml), patches, {
+  const options: WorksheetPatchOptions = {
     overwriteFormulaColumns: new Set(overwriteFormulaColumns),
     maxBytes: patchedPartCap(xml.length),
     dateStyles,
-  });
-  return result.bytes;
+  };
+  const withClones = generalStyleOf === undefined ? options : { ...options, generalStyleOf };
+  return applyCellPatches(indexWorksheet(xml), patches, withClones).bytes;
 }

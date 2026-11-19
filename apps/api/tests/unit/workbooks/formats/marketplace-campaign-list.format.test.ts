@@ -348,6 +348,50 @@ describe('Trendyol marketplace campaign format: the keep rule and row order', ()
   });
 });
 
+describe('Trendyol marketplace campaign format: Excel escapes in display text', () => {
+  function mapOne(cells: Readonly<Record<number, CellValue>>) {
+    const base = {
+      0: 'BC_x0041_1',
+      1: 'Product',
+      8: 1,
+      9: 100,
+      10: 90,
+      12: 'Yok',
+      13: 'ID_x0041_',
+    };
+    const read = readRows(gridSelection([[...FULL_HEADER], dataRow({ ...base, ...cells })]));
+    return present(read.rows[0], 'kept row').data;
+  }
+
+  it('decodes the display text and keeps the anchor and the listing id raw', () => {
+    const row = mapOne({
+      1: 'Tisort_x000a_Pamuk',
+      2: 'AB_x005F_x0041_',
+      3: 'Cat_x0041_',
+      4: 'AB_x005F_x0041_',
+      5: 'Red_x0020_',
+      6: 'M_x0041_',
+      7: 'AB_x005F_x0041_',
+    });
+
+    expect(row).toMatchObject({
+      barcode: 'BC_x0041_1',
+      productTitle: 'Tisort\nPamuk',
+      productCode: 'AB_x0041_',
+      category: 'CatA',
+      brand: 'AB_x0041_',
+      color: 'Red',
+      size: 'MA',
+      stockCode: 'AB_x0041_',
+      externalId: 'ID_x0041_',
+    });
+  });
+
+  it('titles a row by its raw barcode when its title decodes to nothing', () => {
+    expect(mapOne({ 1: '_x0020_' }).productTitle).toBe('BC_x0041_1');
+  });
+});
+
 describe('Trendyol marketplace campaign format: a stock its column cannot hold', () => {
   // A row the keep rule keeps: a barcode, a current price and a maximum price.
   function stockRow(stock: CellValue): CellValue[] {

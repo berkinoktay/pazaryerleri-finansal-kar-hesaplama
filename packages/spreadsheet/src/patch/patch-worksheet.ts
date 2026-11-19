@@ -37,9 +37,12 @@ import {
 // The cell patcher of the export path: writes one output's cell patches into a
 // worksheet part through its index (sheet-index.ts), as byte edits. Untouched bytes
 // are copied, never decoded and re-encoded; a rebuilt cell keeps the source bytes of
-// the attributes it keeps (all but its type and its value and cell metadata, and,
-// under a number, a style index that names a date format: Excel would show the
-// number as a date, and the reader would read it back as one).
+// the attributes it keeps (all but its type and its value and cell metadata). Under a
+// number, a style index that names a date format is not kept as it is: Excel would
+// show the number as a date, and the reader would read it back as one. When the
+// caller's callback answers the index of a General clone of that style
+// (style-clones.ts), the cell points at the clone instead, in the same attribute
+// position; otherwise the style is dropped.
 //
 // One pass merges the patch list with the index. Rows of both go up, and inside a row
 // so do cells and patches, so no patch searches for its row or its cell. The same pass
@@ -56,9 +59,14 @@ export interface WorksheetPatchOptions {
   readonly maxBytes: number;
   /**
    * Per `cellXfs` entry, whether it formats a date; a number written into such a cell
-   * drops the cell's style.
+   * points it at the style's General clone (generalStyleOf), or drops its style.
    */
   readonly dateStyles: readonly boolean[];
+  /**
+   * For a date style index, the index of its General clone, or null to drop the style;
+   * absent drops it.
+   */
+  readonly generalStyleOf?: (style: number) => number | null;
 }
 
 export interface WorksheetPatchResult {
@@ -92,9 +100,14 @@ const DROPPED_CELL_ATTRIBUTES: ReadonlySet<string> = new Set([
   VALUE_METADATA_ATTRIBUTE,
   CELL_METADATA_ATTRIBUTE,
 ]);
-// The style index: a rebuilt cell drops it under a number when it names a date format.
+// The style index: under a number, a rebuilt cell points it at a General clone, or
+// drops it, when it names a date format.
 const STYLE_ATTRIBUTE = 's';
 const DECIMAL_BASE = 10;
+// What dateStyleOf answers for an attribute that is not a date style index.
+const NOT_A_DATE_STYLE = -1;
+// A kept attribute written from its source bytes, not as a General clone's index.
+const COPY_SOURCE = -1;
 const INLINE_STRING_TYPE = ' t="inlineStr"';
 const SPACE_PRESERVE = ' xml:space="preserve"';
 const PREFIX_SEPARATOR = ':';
@@ -115,6 +128,11 @@ function growthError(cap: number): SpreadsheetFileError {
     `Patched worksheet part would exceed ${cap}B`,
     { reason: PATCH_LIMIT_REASONS.GROWTH, cap },
   );
+}
+
+/** The style attribute of a General clone, without its leading space: `s="<index>"`. */
+function cloneStyleAttribute(style: number): string {
+  return `${STYLE_ATTRIBUTE}="${style}"`;
 }
 
 /** UTF-8 length of a well-formed string (no lone surrogate: the values were checked). */
@@ -183,8 +201,10 @@ class CellPatcher {
   private readonly options: WorksheetPatchOptions;
   private readonly markup: XmlMarkup = createMarkup();
   private readonly attributes: number[] = [];
-  // The attributes of the cell being rebuilt that it keeps, by their index.
+  // The attributes of the cell being rebuilt that it keeps, by their index, and per
+  // kept attribute the General clone index written in its place, or COPY_SOURCE.
   private readonly keptAttributes: number[] = [];
+  private readonly keptStyles: number[] = [];
 
   private previousRow = NO_PREVIOUS_ROW;
   private previousColumn = NO_PREVIOUS_COLUMN;
@@ -444,11 +464,12 @@ class CellPatcher {
   }
 
   /**
-   * Whether attribute `attribute` of the last scanned tag is named exactly `s` and its
-   * raw value, ASCII digits only, indexes an entry of `dateStyles` that formats a date.
-   * Any other value (empty, a character reference, an index past the table) is not.
+   * The style index of attribute `attribute` of the last scanned tag when it is named
+   * exactly `s` and its raw value, ASCII digits only, indexes an entry of `dateStyles`
+   * that formats a date; NOT_A_DATE_STYLE otherwise. Any other value (empty, a
+   * character reference, an index past the table) is not a date style.
    */
-  private isDateStyleAttribute(attribute: number): boolean {
+  private dateStyleOf(attribute: number): number {
     const bytes = this.bytes;
     const attributes = this.attributes;
     const isStyle = bytesEqualAscii(
@@ -457,59 +478,93 @@ class CellPatcher {
       attributeField(attributes, attribute, ATTRIBUTE_NAME_END),
       STYLE_ATTRIBUTE,
     );
-    if (!isStyle) return false;
+    if (!isStyle) return NOT_A_DATE_STYLE;
     const valueStart = attributeField(attributes, attribute, ATTRIBUTE_VALUE_START);
     const valueEnd = attributeField(attributes, attribute, ATTRIBUTE_VALUE_END);
-    if (valueStart === valueEnd) return false;
+    if (valueStart === valueEnd) return NOT_A_DATE_STYLE;
     const dateStyles = this.options.dateStyles;
     let style = 0;
     for (let at = valueStart; at < valueEnd; at += 1) {
       const byte = valueAt(bytes, at);
-      if (byte < DIGIT_ZERO || byte > DIGIT_NINE) return false;
+      if (byte < DIGIT_ZERO || byte > DIGIT_NINE) return NOT_A_DATE_STYLE;
       style = style * DECIMAL_BASE + (byte - DIGIT_ZERO);
       // Past the table: no entry, so no date; also bounds the number.
-      if (style >= dateStyles.length) return false;
+      if (style >= dateStyles.length) return NOT_A_DATE_STYLE;
     }
-    return dateStyles[style] === true;
+    return dateStyles[style] === true ? style : NOT_A_DATE_STYLE;
+  }
+
+  /**
+   * How a rebuilt cell under a number keeps attribute `attribute` of the last scanned
+   * tag: COPY_SOURCE for anything but a date style (dateStyleOf); for a date style, the
+   * index of its General clone when `generalStyleOf` answers one, else null (dropped).
+   */
+  private numberStyleOf(attribute: number): number | null {
+    const dateStyle = this.dateStyleOf(attribute);
+    if (dateStyle === NOT_A_DATE_STYLE) return COPY_SOURCE;
+    const generalStyleOf = this.options.generalStyleOf;
+    if (generalStyleOf === undefined) return null;
+    const general = generalStyleOf(dateStyle);
+    if (general === null) return null;
+    if (!Number.isSafeInteger(general) || general < 0) {
+      throw new Error(`General clone style ${String(general)} is not a style index`);
+    }
+    return general;
   }
 
   /**
    * The cell at `start` rebuilt: '<' and its qualified name; every attribute not
-   * named exactly `t`, `vm` or `cm`, nor, under a number, named exactly `s` with a
-   * date style (isDateStyleAttribute), each one space and its source bytes from the
-   * name through the closing quote; then the value's type, content and close. A text
-   * or a clear keeps the style.
+   * named exactly `t`, `vm` or `cm`, each one space and its source bytes from the name
+   * through the closing quote, except under a number an attribute named exactly `s`
+   * with a date style (numberStyleOf): written in its place as `s="<index>"` when it
+   * has a General clone, else dropped; then the value's type, content and close. A
+   * text or a clear keeps the style.
    */
   private rebuiltCell(start: number, value: CellPatchValue): Uint8Array {
     const bytes = this.bytes;
     const markup = this.markup;
     const kept = this.keptAttributes;
+    const keptStyles = this.keptStyles;
     scanMarkup(bytes, start, markup, this.attributes);
     const { nameStart, nameEnd, attributeCount } = markup;
     const tail = rebuiltCellTail(NAME_DECODER.decode(bytes.subarray(nameStart, nameEnd)), value);
     const writesNumber = value.kind === 'number';
     let size = 1 + (nameEnd - nameStart) + utf8Length(tail);
     kept.length = 0;
+    keptStyles.length = 0;
     for (let attribute = 0; attribute < attributeCount; attribute += 1) {
       if (this.isDroppedAttribute(attribute)) continue;
-      if (writesNumber && this.isDateStyleAttribute(attribute)) continue;
+      const style = writesNumber ? this.numberStyleOf(attribute) : COPY_SOURCE;
+      if (style === null) continue;
       kept.push(attribute);
-      const attributeStart = attributeField(this.attributes, attribute, ATTRIBUTE_NAME_START);
-      size += 1 + this.attributeEnd(attribute) - attributeStart;
+      keptStyles.push(style);
+      size += 1 + this.keptLength(attribute, style);
     }
     const piece = new Uint8Array(size);
     piece[0] = TAG_OPEN;
     piece.set(bytes.subarray(nameStart, nameEnd), 1);
     let at = 1 + nameEnd - nameStart;
-    for (const attribute of kept) {
-      const attributeStart = attributeField(this.attributes, attribute, ATTRIBUTE_NAME_START);
-      const attributeEnd = this.attributeEnd(attribute);
+    for (let position = 0; position < kept.length; position += 1) {
+      const attribute = valueAt(kept, position);
+      const style = valueAt(keptStyles, position);
       piece[at] = SPACE;
-      piece.set(bytes.subarray(attributeStart, attributeEnd), at + 1);
-      at += 1 + attributeEnd - attributeStart;
+      if (style === COPY_SOURCE) {
+        const attributeStart = attributeField(this.attributes, attribute, ATTRIBUTE_NAME_START);
+        piece.set(bytes.subarray(attributeStart, this.attributeEnd(attribute)), at + 1);
+      } else {
+        encoder.encodeInto(cloneStyleAttribute(style), piece.subarray(at + 1));
+      }
+      at += 1 + this.keptLength(attribute, style);
     }
     encoder.encodeInto(tail, piece.subarray(at));
     return piece;
+  }
+
+  /** The bytes a kept attribute writes after its space: its source bytes, or `s="<style>"`. */
+  private keptLength(attribute: number, style: number): number {
+    if (style !== COPY_SOURCE) return utf8Length(cloneStyleAttribute(style));
+    const attributeStart = attributeField(this.attributes, attribute, ATTRIBUTE_NAME_START);
+    return this.attributeEnd(attribute) - attributeStart;
   }
 
   /** Just past the closing quote of attribute `attribute`. */

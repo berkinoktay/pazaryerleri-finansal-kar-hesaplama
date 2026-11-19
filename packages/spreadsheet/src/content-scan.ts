@@ -232,12 +232,17 @@ const NO_BYTE = -1;
 // (ASCII case ignored) at any depth and in any namespace (so every element of an svg
 // part), that element included, at the first element read once the walk cannot follow
 // the nesting, or at a comment, CDATA section or processing instruction that holds
-// SVG_TAG_OPEN `<svg` (ASCII case ignored), which an HTML reader, ending it at its first
-// '>', may read as an `svg` start tag; no element from there to the end of the part is
-// exempt. The broad
-// rule still reads every other attribute value: a prefixed attribute (`s:fill`), and any
-// attribute of an element in another namespace (SVG, XHTML, XML Events, VML, Office
-// VML), of one with no namespace or an unknown one, of one inside a style element
+// SVG_TAG_OPEN `<svg` (ASCII case ignored); no element from there to the end of the part
+// is exempt. An HTML reader reads a CDATA section (outside foreign content) and a
+// processing instruction as a bogus comment, which ends at the first '>', so it may read
+// a `<svg` past that '>' as a start tag. An HTML comment ends only at `-->` or `--!>`, or
+// abruptly right after its opening when it starts with '>' or '->' (`<!-->`, `<!--->`),
+// so an HTML reader reads a `<svg` inside a comment as a start tag only when the comment
+// opens with '>' or '->'. For every other comment that holds `<svg` the rule simply fails
+// closed: the scan does not tell the cases apart and ends the exemption for all of them.
+// The broad rule still reads every other attribute value: a prefixed attribute (`s:fill`),
+// and any attribute of an element in another namespace (SVG, XHTML, XML Events, VML,
+// Office VML), of one with no namespace or an unknown one, of one inside a style element
 // (whatever its namespace) and of the one child element of a formula field (whose own
 // declarations the walk does not follow, so that child starts no web content either:
 // there the scan trusts a namespace-aware reading, as the event-handler rule does, and
@@ -357,8 +362,10 @@ const EVENT_HANDLER_NAMESPACES: readonly string[] = [
 ];
 // The local name of a top-level element that makes every element of its part web content.
 const SVG_ROOT_NAME = 'svg';
-// What an HTML reader, which ends a comment, CDATA section or processing instruction at
-// its first '>', may read past that as an `svg` start tag (ASCII case ignored).
+// What an HTML reader may read as an `svg` start tag (ASCII case ignored) past the first
+// '>' of a CDATA section or processing instruction, or inside a comment that opens with
+// '>' or '->'; in any other comment it ends the exemption all the same (the rule fails
+// closed, see the header).
 const SVG_TAG_OPEN = `<${SVG_ROOT_NAME}`;
 // SVG animation elements (see the header).
 const SVG_ANIMATION_ELEMENT_NAMES: readonly string[] = [
@@ -2155,8 +2162,9 @@ function assertNoFieldAfter(
 
 /**
  * Whether the opaque markup scanned into `markup` (a comment, CDATA section or processing
- * instruction) holds SVG_TAG_OPEN, ASCII case ignored: web content to an HTML reader (see
- * the header).
+ * instruction) holds SVG_TAG_OPEN, ASCII case ignored: taken for web content (see the
+ * header: an HTML reader may read an `svg` start tag there, and a comment where it cannot
+ * fails closed).
  */
 function opaqueHoldsSvgTag(bytes: Uint8Array, markup: XmlMarkup): boolean {
   const last = markup.end - SVG_TAG_OPEN.length;

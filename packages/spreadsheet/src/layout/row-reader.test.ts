@@ -100,6 +100,13 @@ describe('createRowReader: columns', () => {
     expect(reader.text('barcode')).toBe('8690000000001');
   });
 
+  it('decodes Excel escapes in display text while text of the same cell stays raw', () => {
+    const escaped = createRowReader(SPEC, LAYOUT, ['Tisort_x000a_Pamuk'], { toInstant });
+    expect(escaped.displayText('barcode')).toBe('Tisort\nPamuk');
+    expect(escaped.text('barcode')).toBe('Tisort_x000a_Pamuk');
+    expect(reader.displayText('barcode')).toBe('8690000000001');
+  });
+
   it('reads decimals with the grammar of the locator', () => {
     expect(reader.decimal('price')).toBe('250');
     expect(reader.decimal('plainPrice')).toBeNull();
@@ -139,6 +146,7 @@ describe('createRowReader: columns', () => {
     const absent = createRowReader(SPEC, LAYOUT, ROW, { toInstant: convert });
     expect(LAYOUT.columns.get('brand')).toBeNull();
     expect(absent.text('brand')).toBeNull();
+    expect(absent.displayText('brand')).toBeNull();
     expect(absent.decimal('brand')).toBeNull();
     expect(absent.int('brand', 'truncate')).toBeNull();
     expect(absent.int('brand', 'strict')).toBeNull();
@@ -151,6 +159,7 @@ describe('createRowReader: columns', () => {
   it('gives null or false on a row shorter than the column', () => {
     const short = createRowReader(SPEC, LAYOUT, ['8690000000001'], { toInstant });
     expect(short.text('price')).toBeNull();
+    expect(short.displayText('price')).toBeNull();
     expect(short.decimal('price')).toBeNull();
     expect(short.int('stock', 'strict')).toBeNull();
     expect(short.flag('active', { yes: 'var', compare: 'casefold-tr' })).toBe(false);

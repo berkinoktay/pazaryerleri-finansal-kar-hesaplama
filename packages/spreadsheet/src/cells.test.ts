@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   cellDecimal,
+  cellDisplayText,
   cellFlag,
   cellInstant,
   cellInt,
@@ -100,6 +101,39 @@ describe('string grammar quirks kept from the old readers', () => {
     expect(cellText(['  abc  '], 0)).toBe('abc');
     expect(cellText([true], 0)).toBeNull();
     expect(cellText([new Date(0)], 0)).toBeNull();
+  });
+});
+
+describe('cellDisplayText', () => {
+  it('decodes Excel escapes where cellText keeps them raw', () => {
+    expect(cellDisplayText(['Tisort_x000a_Pamuk'], 0)).toBe('Tisort\nPamuk');
+    expect(cellText(['Tisort_x000a_Pamuk'], 0)).toBe('Tisort_x000a_Pamuk');
+    expect(cellDisplayText(['AB_x005F_x0041_'], 0)).toBe('AB_x0041_');
+  });
+
+  it('trims again after decoding', () => {
+    expect(cellDisplayText(['Title_x000a_'], 0)).toBe('Title');
+    expect(cellDisplayText(['  _x0009_Title_x0020_  '], 0)).toBe('Title');
+  });
+
+  it('reads a cell that decodes to whitespace only as null', () => {
+    expect(cellDisplayText(['_x0020_'], 0)).toBeNull();
+    expect(cellDisplayText([' _x000a__x000D_ '], 0)).toBeNull();
+    expect(cellText(['_x0020_'], 0)).toBe('_x0020_');
+  });
+
+  it('keeps an escape of a character XML cannot carry as written', () => {
+    expect(cellDisplayText(['A_x0000_B'], 0)).toBe('A_x0000_B');
+  });
+
+  it('reads numbers, blanks and other cells as cellText does', () => {
+    expect(cellDisplayText([1e21], 0)).toBe('1e+21');
+    expect(cellDisplayText([12.5], 0)).toBe('12.5');
+    expect(cellDisplayText(['  abc  '], 0)).toBe('abc');
+    expect(cellDisplayText(['   '], 0)).toBeNull();
+    expect(cellDisplayText([true], 0)).toBeNull();
+    expect(cellDisplayText([new Date(0)], 0)).toBeNull();
+    expect(cellDisplayText([null], 0)).toBeNull();
   });
 });
 
@@ -253,6 +287,7 @@ describe.each<[string, ColumnIndex]>([
 
   it('reads null or false in every reader', () => {
     expect(cellText(readable, idx)).toBeNull();
+    expect(cellDisplayText(readable, idx)).toBeNull();
     expect(cellDecimal(readable, idx, 'plain')).toBeNull();
     expect(cellDecimal(readable, idx, 'currency')).toBeNull();
     expect(cellInt(readable, idx, 'truncate')).toBeNull();

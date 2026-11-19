@@ -747,6 +747,36 @@ describe('Trendyol commission tariff format: the row fallbacks', () => {
     ).toMatchObject({ productTitle: 'BC-1', category: null, brand: null, stock: null });
   });
 
+  it('decodes Excel escapes in display text and keeps the anchor raw', () => {
+    const row = mapOne({
+      [COL.barcode]: 'BC_x0041_1',
+      [COL.productTitle]: 'Tisort_x000a_Pamuk',
+      [COL.category]: 'Cat_x0041_',
+      [COL.brand]: 'AB_x005F_x0041_',
+      [COL.modelCode]: 'AB_x005F_x0041_',
+    });
+
+    expect(row).toMatchObject({
+      barcode: 'BC_x0041_1',
+      productTitle: 'Tisort\nPamuk',
+      category: 'CatA',
+      brand: 'AB_x0041_',
+      stockCode: 'AB_x0041_',
+    });
+  });
+
+  it('takes the decoded seller stock code when the model code decodes to nothing', () => {
+    const row = mapOne({ [COL.modelCode]: '_x0020_', [COL.sellerStockCode]: 'S_x0041_' });
+
+    expect(row.stockCode).toBe('SA');
+  });
+
+  it('titles a row by its raw barcode when its title decodes to nothing', () => {
+    const row = mapOne({ [COL.barcode]: 'BC_x0041_1', [COL.productTitle]: '_x0020_' });
+
+    expect(row.productTitle).toBe('BC_x0041_1');
+  });
+
   it.each([
     ['the number 12.7', 12, 12.7],
     ['the text 12.7', 12, '12.7'],

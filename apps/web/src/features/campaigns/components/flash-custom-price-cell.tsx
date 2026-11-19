@@ -128,6 +128,7 @@ export function FlashCustomPriceCell({
   const estimate = useEstimateFlashItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const estimateMutate = estimate.mutate;
   const { canWrite } = useCampaignAccess();
+  const reasonId = React.useId();
   // The custom-price ceiling: the lowest of the row's present offer prices — a custom flash
   // price may never exceed the best offer the seller was given.
   const ceiling = React.useMemo(() => flashCustomCeiling(row), [row]);
@@ -192,6 +193,17 @@ export function FlashCustomPriceCell({
   // (no ceiling). `max` only blocks keystrokes, so a stale stored price above the ceiling
   // can still seed the input and must stay unselectable.
   const canSelect = hasEstimate && ceiling !== null && !price.greaterThan(ceiling);
+  // Say WHY such a price cannot be selected. Above the ceiling the price itself is wrong
+  // (only a stale stored price gets there, since `max` blocks the keystrokes): the field is
+  // invalid and the reason takes the commission line's place. On a row with no offer at all
+  // any price still has a what-if estimate but none can be selected: the commission line
+  // stays and a note under it says why. Both show to a read-only member too, since they
+  // explain why a stored price is not marked selected. Pure decimal ordering, no money math.
+  const priceError =
+    price !== null && ceiling !== null && price.greaterThan(ceiling)
+      ? t('table.customPriceAboveCeiling', { price: formatCurrency(ceiling.toFixed(2)) })
+      : null;
+  const noOfferNote = price !== null && ceiling === null ? t('table.customPriceNoOffer') : null;
   // The typed price fell to the flat rate and that rate (the file's current commission) is
   // unknown: the backend answers not calculable with no reason and no percent, so the hint
   // line says why the profit is missing and "Seç" stays off.
@@ -277,41 +289,62 @@ export function FlashCustomPriceCell({
           value={price}
           onChange={handleChange}
           nonNegative
-          max={ceiling ?? undefined}
+          // `max` refuses every keystroke that leaves the value above it: while a stored
+          // price already sits above the ceiling it is lifted, so the seller can delete
+          // digits down to an allowed price instead of retyping the whole field.
+          max={ceiling !== null && priceError === null ? ceiling : undefined}
+          invalid={priceError !== null}
+          aria-invalid={priceError !== null}
+          // The error and the no-offer note never show together (one needs a ceiling, the
+          // other its absence), so they share one id.
+          aria-describedby={priceError !== null || noOfferNote !== null ? reasonId : undefined}
           aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
           // A member who cannot write is not invited to type a price.
           placeholder={canWrite ? t('table.enterPrice') : undefined}
-          className="md:max-w-input-price w-full"
+          // The only error here comes from a stored price, not a keystroke: the field shows
+          // it with its border alone, so a page of such rows does not shake as it renders.
+          className="md:max-w-input-price w-full data-[invalid=true]:animate-none"
           // A member who cannot write still reads a stored price, but cannot type one.
           disabled={!canWrite}
         />
-        <span className="text-2xs text-muted-foreground">
-          {hasEstimate && lastResult.commissionPct != null ? (
-            rangeLabel !== null ? (
-              <>
-                ≈ <span className="text-foreground font-semibold">{rangeLabel}</span> ·{' '}
-                {t('table.offerCommission')} {formatPercentDisplay(lastResult.commissionPct)}{' '}
-                {/* The ⓘ rides at the END of the derived range line so the price window and
-                    the ladder that produced it read as one unit. Band-sourced estimates
-                    only — a flat-rate item has no ladder (rangeLabel is null). */}
-                {commissionBands !== null ? (
-                  <CommissionBandsPopover bands={commissionBands} labels={bandLabels} />
-                ) : null}
-              </>
-            ) : (
-              <>
-                {t('table.offerCommission')}{' '}
-                <span className="text-foreground font-semibold">
-                  {formatPercentDisplay(lastResult.commissionPct)}
-                </span>
-              </>
-            )
-          ) : commissionUnknown ? (
-            t('table.customPriceCommissionUnknownHint')
-          ) : canWrite ? (
-            placeholderHint
-          ) : null}
-        </span>
+        {priceError !== null ? (
+          <span id={reasonId} className="text-2xs text-destructive">
+            {priceError}
+          </span>
+        ) : (
+          <span className="text-2xs text-muted-foreground">
+            {hasEstimate && lastResult.commissionPct != null ? (
+              rangeLabel !== null ? (
+                <>
+                  ≈ <span className="text-foreground font-semibold">{rangeLabel}</span> ·{' '}
+                  {t('table.offerCommission')} {formatPercentDisplay(lastResult.commissionPct)}{' '}
+                  {/* The ⓘ rides at the END of the derived range line so the price window and
+                      the ladder that produced it read as one unit. Band-sourced estimates
+                      only — a flat-rate item has no ladder (rangeLabel is null). */}
+                  {commissionBands !== null ? (
+                    <CommissionBandsPopover bands={commissionBands} labels={bandLabels} />
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  {t('table.offerCommission')}{' '}
+                  <span className="text-foreground font-semibold">
+                    {formatPercentDisplay(lastResult.commissionPct)}
+                  </span>
+                </>
+              )
+            ) : commissionUnknown ? (
+              t('table.customPriceCommissionUnknownHint')
+            ) : canWrite ? (
+              placeholderHint
+            ) : null}
+          </span>
+        )}
+        {noOfferNote !== null ? (
+          <span id={reasonId} className="text-2xs text-muted-foreground">
+            {noOfferNote}
+          </span>
+        ) : null}
       </div>
 
       {/* The calculated-profit block appears only once a price is in the input; an empty
