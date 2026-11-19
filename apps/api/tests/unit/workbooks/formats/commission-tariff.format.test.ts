@@ -47,6 +47,7 @@ import {
 } from '@/workbooks/write-columns';
 
 import { canonicalJson, sha256Hex } from '../../../helpers/canonical-json';
+import { blockColumn, blocksOf } from '../../../helpers/layout-blocks';
 import { COMMISSION_DERIVED, derivedGrid } from '../../../helpers/workbook-derived-rows';
 
 // The fixtures are read through the parse worker, whose cold start can pass vitest's 5 s
@@ -332,15 +333,15 @@ describe('Trendyol commission tariff format: headers', () => {
   it('resolves the two-period (35-column) header: both periods and the shifted tail', () => {
     const layout = present(headerLayout(MULTI_HEADER), 'layout');
 
-    const blocks = layout.blocks.get('periods') ?? [];
+    const blocks = blocksOf(format.layout, layout, 'periods');
     expect(
       blocks.map((block) => [
         block.tag,
-        block.columns.get('label'),
-        block.columns.get('comm1'),
-        block.columns.get('comm2'),
-        block.columns.get('comm3'),
-        block.columns.get('comm4'),
+        blockColumn(format.layout, 'periods', block, 'label'),
+        blockColumn(format.layout, 'periods', block, 'comm1'),
+        blockColumn(format.layout, 'periods', block, 'comm2'),
+        blockColumn(format.layout, 'periods', block, 'comm3'),
+        blockColumn(format.layout, 'periods', block, 'comm4'),
       ]),
     ).toEqual([
       [3, 14, 15, 16, 17, 18],
@@ -357,7 +358,7 @@ describe('Trendyol commission tariff format: headers', () => {
   it('resolves the one-period (27-column) header with shifted tail columns', () => {
     const layout = present(headerLayout(SINGLE_HEADER), 'layout');
 
-    expect(layout.blocks.get('periods')?.map((block) => block.tag)).toEqual([7]);
+    expect(blocksOf(format.layout, layout, 'periods').map((block) => block.tag)).toEqual([7]);
     const keys = Object.keys(COL).filter((key): key is keyof typeof COL => Object.hasOwn(COL, key));
     for (const key of keys) {
       expect([key, column(layout, key)]).toEqual([key, COL[key]]);
@@ -369,7 +370,7 @@ describe('Trendyol commission tariff format: headers', () => {
   it('resolves both blocks of the 3+4 day fixture, the empty 3-day block included', async () => {
     const { layout } = await realSelection(MULTI);
 
-    expect(layout.blocks.get('periods')?.map((block) => block.tag)).toEqual([3, 4]);
+    expect(blocksOf(format.layout, layout, 'periods').map((block) => block.tag)).toEqual([3, 4]);
   });
 
   it('resolves without the commission base price column (it is optional)', () => {

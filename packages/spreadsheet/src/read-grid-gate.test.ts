@@ -9,7 +9,7 @@ import { checkUploadParts, readUploadGrid } from './read-grid';
 import { resolveReadOptions, type ReadGridOptions } from './read-options';
 import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
 import { localName } from './xml-dom';
-import { ZIP_REJECT_REASONS } from './patch/reasons';
+import { UNSAFE_CONTENT_DETAILS, ZIP_REJECT_REASONS } from './patch/reasons';
 import { fileErrorOf } from '../tests/helpers/errors';
 import { expectWithinBudget, LINEAR_BUDGET_MS } from '../tests/helpers/timing';
 
@@ -648,6 +648,21 @@ describe('grid gate: number formats', () => {
   it('rejects a format code longer than Excel allows as UNSAFE_CONTENT', async () => {
     const file = styledWorkbook(['0'.repeat(MAX_FORMAT_CODE_LENGTH + 1)]);
     expect(await readOutcome(file)).toEqual(rejected('UNSAFE_CONTENT'));
+  });
+
+  // The worker posts the meta as plain data: the detail reaches the caller unchanged.
+  it('names the number format check in the refusal the worker hands back', async () => {
+    const file = styledWorkbook(['0'.repeat(MAX_FORMAT_CODE_LENGTH + 1)]);
+    const error = await readWorkbookGrid(file).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(SpreadsheetFileError);
+    if (!(error instanceof SpreadsheetFileError)) return;
+    expect(error.meta).toMatchObject({
+      detail: UNSAFE_CONTENT_DETAILS.NUMBER_FORMAT_LENGTH,
+      cap: MAX_FORMAT_CODE_LENGTH,
+    });
   });
 
   it('accepts a format code at the Excel limit', async () => {

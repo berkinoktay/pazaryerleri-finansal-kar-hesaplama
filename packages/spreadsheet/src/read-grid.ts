@@ -6,7 +6,8 @@ import { cellValue, ReaderRuleError, type CellContext } from './cell-value';
 import { MAX_ERROR_CAUSE_LENGTH, MAX_GRID_TEXT_LENGTH } from './constants';
 import { SpreadsheetFileError } from './errors';
 import type { CellValue, SheetData } from './grid-types';
-import { openUpload, type UploadParts } from './guards';
+import { openUpload, openUploadWithLayout, type UploadParts } from './guards';
+import { createPackageCensusCollector, type PackageCensus } from './package-census';
 import { checkPart, type CellVisitor, type GridCaps } from './part-checks';
 import type { ResolvedReadOptions, SheetSelector } from './read-options';
 import { cellKey } from './sheet-meta';
@@ -651,4 +652,20 @@ export function readUploadGrid(file: Uint8Array, options: ResolvedReadOptions): 
   });
   assertGridTextWithinCap(grid);
   return grid;
+}
+
+/**
+ * The package census of an upload (package-census.ts): the byte-level gate
+ * (openUploadWithLayout: size, magic bytes, streaming caps, structure, central directory,
+ * part budgets and content scan) runs whole with a census collector, which records the
+ * content types and relationship types the gate reads; no reader part is parsed into a
+ * DOM, so checkPart and the reader's rules do not run. `rowCap`, `colCap` and `maxBytes`
+ * come from `options` (resolveReadOptions); the sheet selector is not used. A file the
+ * gate refuses throws its SpreadsheetFileError and yields no census.
+ */
+export function readUploadCensus(file: Uint8Array, options: ResolvedReadOptions): PackageCensus {
+  const { rowCap, colCap, maxBytes } = options;
+  const census = createPackageCensusCollector();
+  openUploadWithLayout(file, { rowCap, colCap, maxBytes }, census);
+  return census.result();
 }

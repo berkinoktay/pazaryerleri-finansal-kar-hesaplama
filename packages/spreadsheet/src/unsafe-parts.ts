@@ -11,6 +11,7 @@ import {
   type WorksheetHyperlinkIds,
 } from './content-scan';
 import type { SpreadsheetFileError } from './errors';
+import type { PackageCensusCollector } from './package-census';
 import {
   attributeValueBytes,
   cutRootChildren,
@@ -20,7 +21,11 @@ import {
   type RootCheck,
 } from './patch/calc-chain';
 import { SPREADSHEET_MAIN_NAMESPACES } from './patch/limits';
-import { UNSAFE_CONTENT_REASONS } from './patch/reasons';
+import {
+  UNSAFE_CONTENT_DETAILS,
+  UNSAFE_CONTENT_REASONS,
+  type UnsafeContentDetail,
+} from './patch/reasons';
 import { bytesEqualAt, foldAsciiCase, unsafeContentError } from './patch/shared';
 import {
   ATTRIBUTE_NAME_END,
@@ -179,8 +184,12 @@ const DEFAULT = 'Default';
 const OVERRIDE = 'Override';
 const CONTENT_TYPE_ATTRIBUTE = 'ContentType';
 
-function unsafePartError(entry: string, message: string): SpreadsheetFileError {
-  return unsafeContentError(UNSAFE_CONTENT_REASONS.UNSAFE_PART, entry, message);
+function unsafePartError(
+  detail: UnsafeContentDetail,
+  entry: string,
+  message: string,
+): SpreadsheetFileError {
+  return unsafeContentError(UNSAFE_CONTENT_REASONS.UNSAFE_PART, detail, entry, message);
 }
 
 /** `type` from just past its last '/', ASCII-folded. */
@@ -198,19 +207,27 @@ export function isRelationshipsPartName(name: string): boolean {
 }
 
 /**
- * Throws SpreadsheetFileError UNSAFE_CONTENT `{ reason: 'unsafe-part', entry }` when
- * relationship Type text names an active part: its last '/' segment, trimmed and
+ * Throws SpreadsheetFileError UNSAFE_CONTENT `{ reason: 'unsafe-part', detail, entry }`
+ * when relationship Type text names an active part: its last '/' segment, trimmed and
  * ASCII-folded, equals one of UNSAFE_RELATIONSHIP_TYPE_ENDINGS (`packageOther` does not
- * end in `package`), or, ASCII-folded, it holds `/digital-signature/` (a signature
- * origin, signature or certificate: see the header). `entry` is the relationships part
- * the Type was read from.
+ * end in `package`; detail `active-relationship`), or, ASCII-folded, it holds
+ * `/digital-signature/` (a signature origin, signature or certificate: see the header;
+ * detail `digital-signature`). `entry` is the relationships part the Type was read from.
  */
 export function assertSafeRelationshipType(type: string, entry: string): void {
   if (foldAsciiCase(type).includes(DIGITAL_SIGNATURE_TYPE_SEGMENT)) {
-    throw unsafePartError(entry, 'Workbook declares a digital signature');
+    throw unsafePartError(
+      UNSAFE_CONTENT_DETAILS.DIGITAL_SIGNATURE,
+      entry,
+      'Workbook declares a digital signature',
+    );
   }
   if (!UNSAFE_ENDINGS.has(foldedLastSegment(type.trim()))) return;
-  throw unsafePartError(entry, 'Workbook declares a relationship to an active part');
+  throw unsafePartError(
+    UNSAFE_CONTENT_DETAILS.ACTIVE_RELATIONSHIP,
+    entry,
+    'Workbook declares a relationship to an active part',
+  );
 }
 
 /**
@@ -439,16 +456,18 @@ export function relationshipTargetMode(
 }
 
 /**
- * Throws SpreadsheetFileError UNSAFE_CONTENT `{ reason: 'unsafe-part', entry }` when the
- * Relationship scanned into `markup`, of `type` (null without one) and TargetMode `mode`
- * (relationshipTargetMode) and read from relationships part `entry`, which belongs to a
- * part of `source` kind (worksheetSource), reaches outside the package:
+ * Throws SpreadsheetFileError UNSAFE_CONTENT `{ reason: 'unsafe-part', detail, entry }`
+ * when the Relationship scanned into `markup`, of `type` (null without one) and
+ * TargetMode `mode` (relationshipTargetMode) and read from relationships part `entry`,
+ * which belongs to a part of `source` kind (worksheetSource), reaches outside the
+ * package:
  *   - it is external, unless its type's last '/' segment, ASCII-folded, is exactly
  *     `hyperlink`, `source` is `worksheet` and its Target, ASCII-folded, starts with
- *     `http://`, `https://` or `mailto:`;
+ *     `http://`, `https://` or `mailto:` (detail `external-target`);
  *   - or it is internal and its decoded Target names something outside the package
  *     (isAbsoluteUrl of url-target.ts: a URI scheme, a drive letter, `//` or a
- *     backslash, read past the controls, spaces, tab and line breaks a URL parser drops).
+ *     backslash, read past the controls, spaces, tab and line breaks a URL parser drops;
+ *     detail `absolute-target`).
  * CORRUPT_FILE `package-part` when the Target repeats or holds a reference the walk
  * cannot decode.
  */
@@ -465,10 +484,15 @@ export function assertSafeTarget(
   switch (mode) {
     case 'external':
       if (isWorksheetWebHyperlink(type, source, target)) return;
-      throw unsafePartError(entry, 'Workbook declares a relationship to external content');
+      throw unsafePartError(
+        UNSAFE_CONTENT_DETAILS.EXTERNAL_TARGET,
+        entry,
+        'Workbook declares a relationship to external content',
+      );
     case 'internal':
       if (target === null || !isAbsoluteUrl(target)) return;
       throw unsafePartError(
+        UNSAFE_CONTENT_DETAILS.ABSOLUTE_TARGET,
         entry,
         'Workbook declares an internal relationship that leaves the package',
       );
@@ -485,9 +509,10 @@ function isUnsafeContentType(contentType: string): boolean {
 }
 
 /**
- * Throws SpreadsheetFileError UNSAFE_CONTENT `{ reason: 'unsafe-part', entry }` for an
- * entry whose ASCII-folded name is one of UNSAFE_PART_NAMES or starts with one of
- * UNSAFE_PART_PREFIXES. Reads names only; nothing is inflated.
+ * Throws SpreadsheetFileError UNSAFE_CONTENT `{ reason: 'unsafe-part', detail, entry }`
+ * (detail `active-part-name`) for an entry whose ASCII-folded name is one of
+ * UNSAFE_PART_NAMES or starts with one of UNSAFE_PART_PREFIXES. Reads names only;
+ * nothing is inflated.
  */
 export function assertNoUnsafePartNames(names: Iterable<string>): void {
   for (const name of names) {
@@ -496,7 +521,11 @@ export function assertNoUnsafePartNames(names: Iterable<string>): void {
       UNSAFE_PART_NAMES.includes(folded) ||
       UNSAFE_PART_PREFIXES.some((prefix) => folded.startsWith(prefix));
     if (unsafe) {
-      throw unsafePartError(name, 'Workbook holds a macro, embedded or external link part');
+      throw unsafePartError(
+        UNSAFE_CONTENT_DETAILS.ACTIVE_PART_NAME,
+        name,
+        'Workbook holds a macro, embedded or external link part',
+      );
     }
   }
 }
@@ -518,8 +547,14 @@ function assertWalkedSpelling(name: string): void {
   }
 }
 
-/** Refuses a Default or Override whose ContentType holds an unsafe marker. */
-function contentTypeSelector(bytes: Uint8Array): ChildSelector {
+/**
+ * Refuses a Default or Override whose ContentType holds an unsafe marker. Records every
+ * ContentType it reads in `census`, when given.
+ */
+function contentTypeSelector(
+  bytes: Uint8Array,
+  census: PackageCensusCollector | undefined,
+): ChildSelector {
   return (markup, attributes) => {
     if (!localNameIs(bytes, markup, DEFAULT) && !localNameIs(bytes, markup, OVERRIDE)) return false;
     const contentType = literalAttributeText(
@@ -529,8 +564,11 @@ function contentTypeSelector(bytes: Uint8Array): ChildSelector {
       CONTENT_TYPE_ATTRIBUTE,
       CONTENT_TYPES_PART,
     );
-    if (contentType !== null && isUnsafeContentType(contentType)) {
+    census?.addContentType(contentType);
+    if (contentType === null) return false;
+    if (isUnsafeContentType(contentType)) {
       throw unsafePartError(
+        UNSAFE_CONTENT_DETAILS.ACTIVE_CONTENT_TYPE,
         CONTENT_TYPES_PART,
         'Workbook declares the content type of an active part',
       );
@@ -576,17 +614,20 @@ interface HyperlinkRecord {
  * Refuses a Relationship whose Type names an active part, or whose target reaches outside
  * the package. With `hyperlinks` (a worksheet's relationships part), records for each Id
  * whether every Relationship of that Id is an external hyperlink, and whether one is.
+ * Records every Type it reads in `census`, when given.
  */
 function relationshipSelector(
   bytes: Uint8Array,
   entry: string,
   source: RelationshipsSourceKind,
   hyperlinks: HyperlinkRecord | null,
+  census: PackageCensusCollector | undefined,
 ): ChildSelector {
   return (markup, attributes) => {
     assertRelationshipElementSpelling(bytes, markup, entry);
     if (!localNameIs(bytes, markup, RELATIONSHIP)) return false;
     const type = literalAttributeText(bytes, markup, attributes, TYPE_ATTRIBUTE, entry);
+    census?.addRelationshipType(type);
     if (type !== null) assertSafeRelationshipType(type, entry);
     const mode = relationshipTargetMode(bytes, markup, attributes, entry);
     assertSafeTarget(bytes, markup, attributes, type, mode, entry, source);
@@ -676,8 +717,9 @@ function relationshipsWalks(
  * it gives one and nothing else (ExternalHyperlinkIds, for the content scan's hyperlink
  * rules).
  *
- * Throws SpreadsheetFileError: UNSAFE_CONTENT `{ reason: 'unsafe-part', entry }` for an
- * unsafe declaration; UNSAFE_CONTENT when the content scan refuses a part it walks;
+ * Throws SpreadsheetFileError: UNSAFE_CONTENT `{ reason: 'unsafe-part', detail, entry }`
+ * for an unsafe declaration (an active content type: detail `active-content-type`);
+ * UNSAFE_CONTENT when the content scan refuses a part it walks;
  * PAYLOAD_TOO_LARGE `formula-scan-budget` past the formula scan budget; CORRUPT_FILE
  * `{ reason: 'package-part', entry }` for a misspelled entry, a part the
  * walk cannot read whole (not UTF-8, a declaration of another encoding, no root element,
@@ -689,12 +731,17 @@ function relationshipsWalks(
  * (it could not be compared byte for byte), a TargetMode other than `Internal` or
  * `External` (relationshipTargetMode), a Target the walk cannot decode, or, in a
  * worksheet's relationships part, an Id that holds a reference or a line break.
+ *
+ * With `census` (the package census, package-census.ts), it records every ContentType of
+ * the content types part and every Relationship Type of every part it walks, where it
+ * reads them; the root relationships part is not walked here (guards.ts records it).
  */
 export function assertNoUnsafePackageParts(
   names: Iterable<string>,
   contents: ReadonlyMap<string, Uint8Array>,
   plan: ContentScanPlan = contentScanPlan(contents),
   budget: FormulaScanBudget = createFormulaScanBudget(),
+  census?: PackageCensusCollector,
 ): ExternalHyperlinkIds {
   const foldedNameCounts = new Map<string, number>();
   for (const name of names) {
@@ -705,7 +752,7 @@ export function assertNoUnsafePackageParts(
   const contentTypes = contents.get(CONTENT_TYPES_PART);
   if (contentTypes !== undefined) {
     assertSafeXmlPart(CONTENT_TYPES_PART, contentTypes, NO_HYPERLINK_IDS, budget);
-    cutRootChildren(contentTypes, CONTENT_TYPES_PART, contentTypeSelector(contentTypes));
+    cutRootChildren(contentTypes, CONTENT_TYPES_PART, contentTypeSelector(contentTypes, census));
   }
   const externalHyperlinks = new Map<string, WorksheetHyperlinkIds>();
   for (const { name, bytes, worksheet } of relationshipsWalks(contents, plan, foldedNameCounts)) {
@@ -715,14 +762,19 @@ export function assertNoUnsafePackageParts(
     }
     const checkRoot = relationshipsRootCheck(bytes, name);
     if (worksheet === null) {
-      cutRootChildren(bytes, name, relationshipSelector(bytes, name, 'other', null), checkRoot);
+      cutRootChildren(
+        bytes,
+        name,
+        relationshipSelector(bytes, name, 'other', null, census),
+        checkRoot,
+      );
       continue;
     }
     const hyperlinks: HyperlinkRecord = { onlyExternal: new Map(), external: new Set() };
     cutRootChildren(
       bytes,
       name,
-      relationshipSelector(bytes, name, 'worksheet', hyperlinks),
+      relationshipSelector(bytes, name, 'worksheet', hyperlinks, census),
       checkRoot,
     );
     externalHyperlinks.set(worksheet, worksheetHyperlinkIds(hyperlinks));

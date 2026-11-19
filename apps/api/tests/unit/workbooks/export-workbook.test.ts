@@ -79,6 +79,7 @@ describe('plannedDownloadNames, patch cell count', () => {
       recordId: CONTEXT.recordId,
       code: null,
       reason: 'too-many-cells',
+      detail: null,
     });
   });
 
@@ -102,6 +103,7 @@ describe('plannedDownloadNames, patch cell count', () => {
       recordId: CONTEXT.recordId,
       code: null,
       reason: 'too-many-cells',
+      detail: null,
     });
   });
 

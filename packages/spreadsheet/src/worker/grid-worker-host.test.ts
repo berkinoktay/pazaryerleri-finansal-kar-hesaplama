@@ -7,10 +7,11 @@ import {
   MAX_GRID_TEXT_LENGTH,
 } from '../constants';
 import { SpreadsheetFileError } from '../errors';
+import type { PackageCensus } from '../package-census';
 import { resolvePatchRequest, type ResolvedPatchRequest } from '../patch/patch-request';
 import { patchUpload } from '../patch/patch-upload';
 import { MALFORMED_SHEET_REASONS } from '../patch/reasons';
-import { assertGridTextWithinCap, readUploadGrid } from '../read-grid';
+import { assertGridTextWithinCap, readUploadCensus, readUploadGrid } from '../read-grid';
 import { resolveReadOptions } from '../read-options';
 import { buildXlsxFixture, worksheetXml } from '../testing/build-xlsx';
 import { pinOf, readFixture } from '../../tests/helpers/fixture-pins';
@@ -26,8 +27,8 @@ import {
 } from './grid-worker-host';
 import { isGridWorkerRequest, isGridWorkerResponse, type GridWorkerResponse } from './protocol';
 
-// The worker host runs readUploadGrid in a worker thread with a heap limit and a time
-// limit. Each test opens its own host and closes it afterwards.
+// The worker host runs readUploadGrid, readUploadCensus and patchUpload in a worker
+// thread with a heap limit and a time limit. Each test opens its own host and closes it afterwards.
 
 const PRODUCTION_LIMITS: GridWorkerLimits = {
   maxOldGenerationSizeMb: GRID_WORKER_MAX_OLD_GENERATION_MB,
@@ -55,6 +56,16 @@ const COLUMN_AE = 30;
 const options = resolveReadOptions({});
 // Changes the second row of twoRowFile.
 const TWO_ROW_PATCH = resolvePatchRequest({ outputs: [[text(2, 0, 'B2')]] });
+// A census answer of the shape the census keeps.
+const CENSUS: PackageCensus = {
+  relationshipTypes: [
+    'http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument',
+  ],
+  contentTypes: ['application/xml'],
+  otherRelationshipTypes: false,
+  otherContentTypes: false,
+  overflow: false,
+};
 
 const hosts: GridWorkerHost[] = [];
 
@@ -296,6 +307,49 @@ describe('createGridWorkerHost', () => {
     expect(patched[0]).toBeInstanceOf(Uint8Array);
   });
 
+  it('takes the package census in the worker exactly as in-process', async () => {
+    const host = openHost(PRODUCTION_LIMITS);
+    const file = twoRowFile();
+    const before = Buffer.from(file);
+
+    const census = await host.census(file, options);
+
+    expect(census).toEqual(readUploadCensus(file, options));
+    expect(census.relationshipTypes).toHaveLength(2);
+    // The worker gets a copy: the caller's buffer is neither detached nor changed.
+    expect(file.equals(before)).toBe(true);
+    // The same host reads the grid next: a census does not leave a job in flight.
+    await expect(host.run(file, options)).resolves.toEqual(TWO_ROWS);
+  });
+
+  it('rebuilds a census refusal with its code and meta', async () => {
+    const host = openHost(PRODUCTION_LIMITS);
+
+    const err = fileErrorOf(await rejectionOf(host.census(NOT_A_ZIP, options)));
+    const local = fileErrorOf(thrownBy(() => readUploadCensus(NOT_A_ZIP, options)));
+
+    expect(err.code).toBe('NOT_XLSX');
+    expect({ code: err.code, meta: err.meta }).toEqual({ code: local.code, meta: local.meta });
+  });
+
+  it('refuses a census while a read is in flight', async () => {
+    const host = openHost(PRODUCTION_LIMITS);
+    const file = twoRowFile();
+
+    const read = host.run(file, options);
+    await expect(host.census(file, options)).rejects.toThrow(ONE_JOB_AT_A_TIME);
+    await expect(read).resolves.toEqual(TWO_ROWS);
+  });
+
+  it('turns a timeout during a census into PAYLOAD_TOO_LARGE', async () => {
+    const host = openHost({ ...PRODUCTION_LIMITS, timeoutMs: 1 });
+
+    const err = fileErrorOf(await rejectionOf(host.census(twoRowFile(), options)));
+
+    expect(err.code).toBe('PAYLOAD_TOO_LARGE');
+    expect(workerLimitReason(err)).toBe('worker-timeout');
+  });
+
   it('caps the grid text', () => {
     const half = MAX_GRID_TEXT_LENGTH / 2;
 
@@ -369,6 +423,16 @@ describe('isGridWorkerRequest', () => {
     ).toBe(false);
   });
 
+  it('accepts a census request with read options, and refuses one with a patch body', () => {
+    expect(isGridWorkerRequest({ id: 1, kind: 'census', bytes, options })).toBe(true);
+    expect(
+      isGridWorkerRequest({ id: 1, kind: 'census', bytes, options: { ...options, rowCap: 0 } }),
+    ).toBe(false);
+    expect(isGridWorkerRequest({ id: 1, kind: 'census', bytes, request: TWO_ROW_PATCH })).toBe(
+      false,
+    );
+  });
+
   it('refuses a message without kind', () => {
     expect(isGridWorkerRequest({ id: 1, bytes, options })).toBe(false);
     expect(isGridWorkerRequest({ id: 1, bytes, request: TWO_ROW_PATCH })).toBe(false);
@@ -424,6 +488,21 @@ describe('isGridWorkerResponse', () => {
     );
   });
 
+  it('accepts a census only of the shape the census keeps', () => {
+    expect(isGridWorkerResponse({ id: 1, kind: 'census', census: CENSUS })).toBe(true);
+    expect(
+      isGridWorkerResponse({
+        id: 1,
+        kind: 'census',
+        census: { ...CENSUS, relationshipTypes: ['private seller note'] },
+      }),
+    ).toBe(false);
+    expect(isGridWorkerResponse({ id: 1, kind: 'census', census: null })).toBe(false);
+    // A census body under the grid kind, and a grid body under the census kind.
+    expect(isGridWorkerResponse({ id: 1, kind: 'grid', census: CENSUS })).toBe(false);
+    expect(isGridWorkerResponse({ id: 1, kind: 'census', grid: [] })).toBe(false);
+  });
+
   it('refuses a patched file that is a resizable buffer', () => {
     const resizable = new ResizableArrayBuffer(1, { maxByteLength: 2 });
     const resizableFlag: unknown = Reflect.get(resizable, 'resizable');
@@ -435,7 +514,9 @@ describe('isGridWorkerResponse', () => {
 describe('answersJob', () => {
   const PATCH_JOB: ExpectedAnswer = { kind: 'patched', outputs: 2 };
   const GRID_JOB: ExpectedAnswer = { kind: 'grid' };
+  const CENSUS_JOB: ExpectedAnswer = { kind: 'census' };
   const grid: GridWorkerResponse = { id: 1, kind: 'grid', grid: [] };
+  const census: GridWorkerResponse = { id: 1, kind: 'census', census: CENSUS };
   const fileError: GridWorkerResponse = {
     id: 1,
     kind: 'file-error',
@@ -461,8 +542,18 @@ describe('answersJob', () => {
   it('settles a grid job only with a grid, or with an error answer', () => {
     expect(answersJob(GRID_JOB, grid)).toBe(true);
     expect(answersJob(GRID_JOB, patched(2))).toBe(false);
+    expect(answersJob(GRID_JOB, census)).toBe(false);
     expect(answersJob(GRID_JOB, fileError)).toBe(true);
     expect(answersJob(GRID_JOB, failure)).toBe(true);
+  });
+
+  it('settles a census job only with a census, or with an error answer', () => {
+    expect(answersJob(CENSUS_JOB, census)).toBe(true);
+    expect(answersJob(CENSUS_JOB, grid)).toBe(false);
+    expect(answersJob(CENSUS_JOB, patched(2))).toBe(false);
+    expect(answersJob(CENSUS_JOB, fileError)).toBe(true);
+    expect(answersJob(CENSUS_JOB, failure)).toBe(true);
+    expect(answersJob(PATCH_JOB, census)).toBe(false);
   });
 });
 

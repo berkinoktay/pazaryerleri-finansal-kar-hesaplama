@@ -1,7 +1,8 @@
 // The generic import's catch side, with the database and the engine mocked and a fake
 // adapter: what `persist` throws inside the transaction leaves as a file rejection, a
-// conflict or a mapped transaction error, never as a raw rejection or a 500; and the
-// quota pre-check, which refuses a store at its quota before the file is read.
+// conflict or a mapped transaction error, never as a raw rejection or a 500; the quota
+// pre-check, which refuses a store at its quota before the file is read; and the order
+// of the page lock, the store quota lock and the quota inside the transaction.
 
 import { z } from '@hono/zod-openapi';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,7 +18,11 @@ import type { WorkbookImportAdapter } from '@/workbooks/adapter';
 import { VALUE_NOT_STORABLE_REASON } from '@/workbooks/column-range';
 import { defineFormat } from '@/workbooks/format';
 import { importWorkbook, type ImportWorkbookInput } from '@/workbooks/import-workbook';
-import { assertUploadQuota } from '@/workbooks/upload-quota';
+import {
+  acquireImportLock,
+  acquireStoreQuotaLock,
+  assertUploadQuota,
+} from '@/workbooks/upload-quota';
 import { WorkbookFileRejection } from '@/workbooks/workbook-errors';
 
 const mocks = vi.hoisted(() => ({
@@ -38,9 +43,10 @@ vi.mock('@pazarsync/spreadsheet', async (importOriginal) => ({
   patchWorkbook: mocks.patchWorkbook,
 }));
 
-// The lock and the quota are pinned by their own integration file.
+// The locks and the quota are pinned by their own integration file.
 vi.mock('@/workbooks/upload-quota', () => ({
   acquireImportLock: vi.fn(async () => undefined),
+  acquireStoreQuotaLock: vi.fn(async () => undefined),
   assertUploadQuota: vi.fn(async () => undefined),
 }));
 
@@ -286,7 +292,12 @@ describe('importWorkbook: what persist throws', () => {
         expect(info.mock.calls).toEqual([
           [
             'workbook.upload-rejected',
-            { page: PAGE, code: 'MALFORMED_SHEET', reason: VALUE_NOT_STORABLE_REASON },
+            {
+              page: PAGE,
+              code: 'MALFORMED_SHEET',
+              reason: VALUE_NOT_STORABLE_REASON,
+              detail: null,
+            },
           ],
         ]);
         expect(VALUE_NOT_STORABLE_REASON).toBe('value-not-storable');
@@ -385,5 +396,40 @@ describe('importWorkbook: the quota pre-check', () => {
     expect(preCheckOrder ?? Infinity).toBeLessThan(firstReadOrder ?? -Infinity);
     expect(quota.calls[0]?.[0]).toBe(prisma);
     expect(quota.calls[1]?.[0]).toBe(tx);
+  });
+});
+
+describe('importWorkbook: the locks inside the transaction', () => {
+  it('takes the page lock, then the store quota lock, then checks the quota, then persists, all on the transaction client', async () => {
+    const tx = {};
+    mocks.transaction.mockImplementation(async (run: (client: object) => Promise<unknown>) =>
+      run(tx),
+    );
+    const persist = vi.fn(async () => ({ parentId: 'list-1', itemCount: 1 }));
+    const adapter = fakeAdapter(persist);
+    const scope = { organizationId: INPUT.organizationId, storeId: INPUT.storeId };
+
+    await importWorkbook(adapter, INPUT);
+
+    const pageLock = vi.mocked(acquireImportLock).mock;
+    const storeLock = vi.mocked(acquireStoreQuotaLock).mock;
+    const quota = vi.mocked(assertUploadQuota).mock;
+    expect(pageLock.calls).toHaveLength(1);
+    expect(pageLock.calls[0]?.[0]).toBe(tx);
+    expect(storeLock.calls).toHaveLength(1);
+    expect(storeLock.calls[0]?.[0]).toBe(tx);
+    expect(storeLock.calls[0]?.[1]).toEqual(scope);
+    // Index 0 is the pre-check before the parse; index 1 is the check inside the transaction.
+    expect(quota.calls).toHaveLength(2);
+    expect(quota.calls[1]?.[0]).toBe(tx);
+    expect(persist).toHaveBeenCalledTimes(1);
+
+    const [pageLockOrder] = pageLock.invocationCallOrder;
+    const [storeLockOrder] = storeLock.invocationCallOrder;
+    const inTxQuotaOrder = quota.invocationCallOrder[1];
+    const [persistOrder] = persist.mock.invocationCallOrder;
+    expect(pageLockOrder ?? Infinity).toBeLessThan(storeLockOrder ?? -Infinity);
+    expect(storeLockOrder ?? Infinity).toBeLessThan(inTxQuotaOrder ?? -Infinity);
+    expect(inTxQuotaOrder ?? Infinity).toBeLessThan(persistOrder ?? -Infinity);
   });
 });

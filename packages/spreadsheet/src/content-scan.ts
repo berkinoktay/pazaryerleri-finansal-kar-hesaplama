@@ -10,7 +10,13 @@ import {
   type QuotedSection,
 } from './formula-scan';
 import { packagePartError } from './patch/calc-chain';
-import { UNSAFE_CONTENT_REASONS, UPLOAD_LIMIT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
+import {
+  UNSAFE_CONTENT_DETAILS,
+  UNSAFE_CONTENT_REASONS,
+  UPLOAD_LIMIT_REASONS,
+  ZIP_REJECT_REASONS,
+  type UnsafeContentDetail,
+} from './patch/reasons';
 import { bytesEqualAt, foldAsciiCase, metaEntryName, unsafeContentError } from './patch/shared';
 import {
   ATTRIBUTE_NAME_END,
@@ -114,8 +120,8 @@ const NO_BYTE = -1;
 // formula-scan.ts; in the `formula` attribute of a PIVOT_FORMULA_ELEMENT_NAMES element
 // (a pivot calculated field or item) a quoted section is a field name, not a sheet name.
 // What the formula scan reads of one upload is bounded (FormulaScanBudget): the code
-// units of every field it scans, raw and in NFKC form, in every part together, at most
-// MAX_FORMULA_SCAN_UNITS, beyond which the upload is PAYLOAD_TOO_LARGE
+// units of every field it scans, raw plus its NFKC form when that differs, in every part
+// together, at most MAX_FORMULA_SCAN_UNITS, beyond which the upload is PAYLOAD_TOO_LARGE
 // `formula-scan-budget`.
 // An element field must hold text only, up to its own end tag: a comment, CDATA section,
 // processing instruction or child element could split a name or hide it from a text
@@ -207,7 +213,9 @@ const NO_BYTE = -1;
 // identifier run its last code units spell, how much of `@import` they spell, where the
 // last `url(` target stands and how the text past its last quote starts. A
 // STYLESHEET_INSTRUCTION_NAMES processing instruction (`xml-stylesheet`) is refused
-// wherever it stands. Each refusal is UNSAFE_CONTENT `unsafe-part`.
+// wherever it stands. Each refusal is UNSAFE_CONTENT `unsafe-part`; its detail tells a
+// style that loads (`css-load`) from any other attribute value that does
+// (`css-load-attribute`, the rule with known false positives).
 // An attribute value that holds a reference the scan cannot decode (a character
 // reference past U+10FFFF) is CORRUPT_FILE `package-part`, the error the relationships
 // walk gives a Target it cannot decode.
@@ -598,8 +606,8 @@ const ATTRIBUTE_VALUE_SPACE = ' ';
 
 /**
  * What the formula scan of one upload has read and may read, in UTF-16 code units: every
- * formula field it scans, raw and in NFKC form, in every part together (see the formula
- * field header). Create with createFormulaScanBudget.
+ * formula field it scans, raw plus its NFKC form when that differs, in every part together
+ * (see the formula field header). Create with createFormulaScanBudget.
  */
 export interface FormulaScanBudget {
   /** MAX_FORMULA_SCAN_UNITS, or lower. */
@@ -702,12 +710,20 @@ function isNameIn(bytes: Uint8Array, start: number, end: number, names: NameSet)
   return false;
 }
 
-function unsafeFormula(entry: string, message: string): SpreadsheetFileError {
-  return unsafeContentError(UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA, entry, message);
+function unsafeFormula(
+  detail: UnsafeContentDetail,
+  entry: string,
+  message: string,
+): SpreadsheetFileError {
+  return unsafeContentError(UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA, detail, entry, message);
 }
 
-function unsafePart(entry: string, message: string): SpreadsheetFileError {
-  return unsafeContentError(UNSAFE_CONTENT_REASONS.UNSAFE_PART, entry, message);
+function unsafePart(
+  detail: UnsafeContentDetail,
+  entry: string,
+  message: string,
+): SpreadsheetFileError {
+  return unsafeContentError(UNSAFE_CONTENT_REASONS.UNSAFE_PART, detail, entry, message);
 }
 
 /** CORRUPT_FILE `package-part` for part `entry`: an attribute value holds a reference the scan cannot decode (see the header). */
@@ -716,15 +732,19 @@ function undecodableAttribute(entry: string): SpreadsheetFileError {
 }
 
 /**
- * UNSAFE_CONTENT `{ entry, cap }`: part `entry` holds more than
- * MAX_XMLNS_DECLARATIONS_PER_PART namespace declarations. The one error both the
+ * UNSAFE_CONTENT `{ detail: 'namespace-declarations', entry, cap }`: part `entry` holds
+ * more than MAX_XMLNS_DECLARATIONS_PER_PART namespace declarations. The one error both the
  * content scan of every kept XML part and the budget of the reader parts raise.
  */
 export function tooManyNamespaceDeclarations(entry: string): SpreadsheetFileError {
   return new SpreadsheetFileError(
     'UNSAFE_CONTENT',
     `Workbook part '${entry}' has more than ${MAX_XMLNS_DECLARATIONS_PER_PART} namespace declarations`,
-    { entry, cap: MAX_XMLNS_DECLARATIONS_PER_PART },
+    {
+      detail: UNSAFE_CONTENT_DETAILS.NAMESPACE_DECLARATIONS,
+      entry,
+      cap: MAX_XMLNS_DECLARATIONS_PER_PART,
+    },
   );
 }
 
@@ -920,8 +940,9 @@ export function createFormulaScanBudget(limit = MAX_FORMULA_SCAN_UNITS): Formula
 }
 
 /**
- * Adds the code units of formula field `readings`, raw and in NFKC form, to `budget`
- * before they are read: PAYLOAD_TOO_LARGE `{ reason: 'formula-scan-budget', entry, cap }`
+ * Adds the code units of formula field `readings` to `budget` before they are read: its
+ * raw text, plus its NFKC form only when that differs (formulaReadingsRefusal reads the
+ * NFKC form only then). PAYLOAD_TOO_LARGE `{ reason: 'formula-scan-budget', entry, cap }`
  * when the upload's fields together go past its limit.
  */
 function chargeFormulaScan(
@@ -929,7 +950,8 @@ function chargeFormulaScan(
   budget: FormulaScanBudget,
   readings: FormulaReadings,
 ): void {
-  budget.used += readings.text.length + readings.normal.length;
+  budget.used +=
+    readings.text.length + (readings.normal === readings.text ? 0 : readings.normal.length);
   if (budget.used <= budget.limit) return;
   throw new SpreadsheetFileError(
     'PAYLOAD_TOO_LARGE',
@@ -957,19 +979,25 @@ function assertSafeFormulaField(
   const text = decodeXmlText(raw);
   if (text === null) {
     throw unsafeFormula(
+      UNSAFE_CONTENT_DETAILS.FORMULA,
       entry,
       'Workbook part holds a formula with a reference the scan cannot decode',
     );
   }
   const readings = formulaReadings(text);
-  if (typeof readings === 'string') throw unsafeFormula(entry, readings);
+  if (typeof readings === 'string')
+    throw unsafeFormula(UNSAFE_CONTENT_DETAILS.FORMULA, entry, readings);
   chargeFormulaScan(entry, budget, readings);
   const refusal = formulaReadingsRefusal(readings, quoted);
-  if (refusal !== null) throw unsafeFormula(entry, refusal);
+  if (refusal !== null) throw unsafeFormula(UNSAFE_CONTENT_DETAILS.FORMULA, entry, refusal);
 }
 
 function notTextOnly(entry: string): SpreadsheetFileError {
-  return unsafeFormula(entry, 'Workbook part holds a formula field with something other than text');
+  return unsafeFormula(
+    UNSAFE_CONTENT_DETAILS.FORMULA,
+    entry,
+    'Workbook part holds a formula field with something other than text',
+  );
 }
 
 /** Whether the end tag scanned into `markup` closes the element named by bytes [nameStart, nameEnd). */
@@ -1070,7 +1098,8 @@ function assertNoScript(entry: string, bytes: Uint8Array, markup: XmlMarkup): vo
     isXmlSpaceOnly(bytes, contentStart, close) &&
     lexes(bytes, close, markup) &&
     closesElement(bytes, markup, nameStart, nameEnd);
-  if (!empty) throw unsafeFormula(entry, 'Workbook part holds a script');
+  if (!empty)
+    throw unsafeFormula(UNSAFE_CONTENT_DETAILS.SCRIPT, entry, 'Workbook part holds a script');
 }
 
 /**
@@ -1098,7 +1127,11 @@ function assertRelativeUrl(entry: string, raw: Uint8Array, dataImage: boolean): 
   if (text === null) throw undecodableAttribute(entry);
   if (dataImage && isRasterDataImage(text)) return;
   if (isAbsoluteUrl(text)) {
-    throw unsafePart(entry, 'Workbook part links to a resource outside the package');
+    throw unsafePart(
+      UNSAFE_CONTENT_DETAILS.EXTERNAL_URL,
+      entry,
+      'Workbook part links to a resource outside the package',
+    );
   }
 }
 
@@ -1363,7 +1396,11 @@ function assertSafeStyleAttribute(entry: string, raw: Uint8Array): void {
   const text = decodeXmlText(raw);
   if (text === null) throw undecodableAttribute(entry);
   if (loadsCssResource(text, true)) {
-    throw unsafePart(entry, 'Workbook part holds a style that loads a resource');
+    throw unsafePart(
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD,
+      entry,
+      'Workbook part holds a style that loads a resource',
+    );
   }
 }
 
@@ -1378,7 +1415,11 @@ function assertNoCssUrl(entry: string, raw: Uint8Array): void {
   const text = decodeXmlText(raw);
   if (text === null) throw undecodableAttribute(entry);
   if (loadsCssResource(text, false)) {
-    throw unsafePart(entry, 'Workbook part holds CSS that loads a resource');
+    throw unsafePart(
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+      entry,
+      'Workbook part holds CSS that loads a resource',
+    );
   }
 }
 
@@ -1430,7 +1471,7 @@ function assertSafeAttribute(
   if (valueStart === valueEnd || isNamespaceDeclaration(bytes, nameStart, nameEnd)) return;
   const localStart = localPartStart(bytes, nameStart, nameEnd);
   if (isNameIn(bytes, localStart, nameEnd, MACRO_ATTRIBUTES)) {
-    throw unsafeFormula(entry, 'Workbook part assigns a macro');
+    throw unsafeFormula(UNSAFE_CONTENT_DETAILS.MACRO, entry, 'Workbook part assigns a macro');
   }
   const raw = bytes.subarray(valueStart, valueEnd);
   if (isNameIn(bytes, localStart, nameEnd, STYLES)) {
@@ -1494,7 +1535,11 @@ function assertNoExternalHyperlinkId(
     );
     if (id === null) throw undecodableAttribute(entry);
     if (externalIds.has(id)) {
-      throw unsafePart(entry, 'Workbook part names an external hyperlink from another element');
+      throw unsafePart(
+        UNSAFE_CONTENT_DETAILS.HYPERLINK_REUSE,
+        entry,
+        'Workbook part names an external hyperlink from another element',
+      );
     }
   }
 }
@@ -1513,7 +1558,11 @@ function assertNoWebContent(
   attributes: readonly number[],
 ): void {
   if (isNameIn(bytes, localNameStart(bytes, markup), markup.nameEnd, SVG_ANIMATION_ELEMENTS)) {
-    throw unsafePart(entry, 'Workbook part holds an SVG animation');
+    throw unsafePart(
+      UNSAFE_CONTENT_DETAILS.SVG_ANIMATION,
+      entry,
+      'Workbook part holds an SVG animation',
+    );
   }
   for (let attribute = 0; attribute < markup.attributeCount; attribute += 1) {
     const nameStart = attributeField(attributes, attribute, ATTRIBUTE_NAME_START);
@@ -1521,10 +1570,18 @@ function assertNoWebContent(
     if (isNamespaceDeclaration(bytes, nameStart, nameEnd)) continue;
     const localStart = localPartStart(bytes, nameStart, nameEnd);
     if (startsWithFolded(bytes, localStart, nameEnd, EVENT_HANDLER_PREFIX)) {
-      throw unsafePart(entry, 'Workbook part holds an event handler');
+      throw unsafePart(
+        UNSAFE_CONTENT_DETAILS.EVENT_HANDLER,
+        entry,
+        'Workbook part holds an event handler',
+      );
     }
     if (isNameIn(bytes, localStart, nameEnd, WEB_RESOURCE_ATTRIBUTES)) {
-      throw unsafePart(entry, 'Workbook part holds an attribute that names a web resource');
+      throw unsafePart(
+        UNSAFE_CONTENT_DETAILS.WEB_RESOURCE,
+        entry,
+        'Workbook part holds an attribute that names a web resource',
+      );
     }
   }
 }
@@ -1557,6 +1614,7 @@ function assertSafeElement(
   const localEnd = markup.nameEnd;
   if (isNameIn(bytes, localStart, localEnd, ACTIVE_ELEMENTS)) {
     throw unsafePart(
+      UNSAFE_CONTENT_DETAILS.ACTIVE_ELEMENT,
       entry,
       'Workbook part holds an embedded object, a control, a frame, a script or a web publishing item',
     );
@@ -1589,7 +1647,7 @@ function assertSafeElement(
   const contentStart = markup.end;
   if (isNameIn(bytes, localStart, localEnd, MACRO_ELEMENTS)) {
     if (textOnlyContentEnd(entry, bytes, markup) !== contentStart) {
-      throw unsafeFormula(entry, 'Workbook part assigns a macro');
+      throw unsafeFormula(UNSAFE_CONTENT_DETAILS.MACRO, entry, 'Workbook part assigns a macro');
     }
     return;
   }
@@ -1904,7 +1962,11 @@ function assertNoFieldAfter(
       isNameIn(bytes, localStart, headEnd, ACTIVE_ELEMENTS) ||
       isNameIn(bytes, localStart, headEnd, SVG_ANIMATION_ELEMENTS)
     ) {
-      throw unsafePart(entry, 'Workbook part holds an active element the strict lexer cannot read');
+      throw unsafePart(
+        UNSAFE_CONTENT_DETAILS.LOOSE_ACTIVE_ELEMENT,
+        entry,
+        'Workbook part holds an active element the strict lexer cannot read',
+      );
     }
     if (
       isNameIn(bytes, localStart, headEnd, FORMULA_ELEMENTS) ||
@@ -1912,7 +1974,11 @@ function assertNoFieldAfter(
       isNameIn(bytes, localStart, headEnd, MACRO_ELEMENTS) ||
       isNameIn(bytes, localStart, headEnd, SCRIPT_ELEMENTS)
     ) {
-      throw unsafeFormula(entry, 'Workbook part holds a formula the strict lexer cannot read');
+      throw unsafeFormula(
+        UNSAFE_CONTENT_DETAILS.LOOSE_FORMULA,
+        entry,
+        'Workbook part holds a formula the strict lexer cannot read',
+      );
     }
   }
   const cssName = createCssNameRun();
@@ -1922,10 +1988,18 @@ function assertNoFieldAfter(
     if (byte === undefined) break;
     if (!isNameByte(byte)) {
       if (byte === AMPERSAND && bytes[at + 1] === HASH) {
-        throw unsafePart(entry, 'Workbook part holds a reference the strict lexer cannot read');
+        throw unsafePart(
+          UNSAFE_CONTENT_DETAILS.LOOSE_REFERENCE,
+          entry,
+          'Workbook part holds a reference the strict lexer cannot read',
+        );
       }
       if (readCssName(cssName, byte) !== 'none') {
-        throw unsafePart(entry, 'Workbook part holds a CSS call the strict lexer cannot read');
+        throw unsafePart(
+          UNSAFE_CONTENT_DETAILS.LOOSE_CSS,
+          entry,
+          'Workbook part holds a CSS call the strict lexer cannot read',
+        );
       }
       at += 1;
       continue;
@@ -1937,7 +2011,11 @@ function assertNoFieldAfter(
       isNameIn(bytes, at, end, FORMULA_ATTRIBUTES) ||
       isNameIn(bytes, at, end, MACRO_ATTRIBUTES)
     ) {
-      throw unsafeFormula(entry, 'Workbook part holds a formula the strict lexer cannot read');
+      throw unsafeFormula(
+        UNSAFE_CONTENT_DETAILS.LOOSE_FORMULA,
+        entry,
+        'Workbook part holds a formula the strict lexer cannot read',
+      );
     }
     const link =
       isUrlAttributeName(bytes, at, end) ||
@@ -1950,7 +2028,11 @@ function assertNoFieldAfter(
         bytes[at - 1] === COLON &&
         isNameIn(bytes, at, end, RELATIONSHIP_IDS));
     if (link) {
-      throw unsafePart(entry, 'Workbook part holds a link the strict lexer cannot read');
+      throw unsafePart(
+        UNSAFE_CONTENT_DETAILS.LOOSE_LINK,
+        entry,
+        'Workbook part holds a link the strict lexer cannot read',
+      );
     }
     at = end;
   }
@@ -1969,7 +2051,11 @@ function addStyleText(entry: string, style: StyleText, raw: Uint8Array): void {
   if (raw.length === 0) return;
   const text = decodeXmlText(raw);
   if (text === null) {
-    throw unsafePart(entry, 'Workbook part holds a style the scan cannot decode');
+    throw unsafePart(
+      UNSAFE_CONTENT_DETAILS.CSS_UNDECODABLE,
+      entry,
+      'Workbook part holds a style the scan cannot decode',
+    );
   }
   feedCss(style.css, text);
 }
@@ -1993,21 +2079,26 @@ function addStyleCdata(bytes: Uint8Array, markup: XmlMarkup, style: StyleText): 
 function endStyle(entry: string, style: StyleText): void {
   finishCss(style.css);
   if (style.css.loads) {
-    throw unsafePart(entry, 'Workbook part holds a style that loads a resource');
+    throw unsafePart(
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD,
+      entry,
+      'Workbook part holds a style that loads a resource',
+    );
   }
   style.level = OUTSIDE_STYLE;
   style.css = createCssScan(true);
 }
 
 /**
- * Throws SpreadsheetFileError UNSAFE_CONTENT `{ reason, entry }` when XML part `entry`
- * holds a formula field that fails the scan, a macro assignment or a script
+ * Throws SpreadsheetFileError UNSAFE_CONTENT `{ reason, detail, entry }` when XML part
+ * `entry` holds a formula field that fails the scan, a macro assignment or a script
  * (`unsafe-formula`), an active element, an event handler or other web content, a URL
  * outside the package, CSS that loads a resource or a stylesheet instruction
  * (`unsafe-part`), or, past markup
  * the strict lexer refuses, anything that could be one (see the formula field header);
- * UNSAFE_CONTENT `{ entry, cap }` when it holds more than MAX_XMLNS_DECLARATIONS_PER_PART
- * namespace declarations in scope at once; CORRUPT_FILE `package-part` for an attribute
+ * UNSAFE_CONTENT `{ detail, entry, cap }` when it holds more than
+ * MAX_XMLNS_DECLARATIONS_PER_PART namespace declarations in scope at once;
+ * CORRUPT_FILE `package-part` for an attribute
  * value it cannot decode. A hyperlink's `location` is a URL fragment
  * only with relationship ids that `hyperlinkIds` gives only an external hyperlink, and
  * no other element may name one it gives one. Every markup of the part is read, the
@@ -2032,7 +2123,11 @@ function assertSafeFields(
     if (inStyle) addStyleText(entry, style, bytes.subarray(textStart, at));
     if (!lexes(bytes, at, markup, attributes)) {
       if (inStyle) {
-        throw unsafePart(entry, 'Workbook part holds a style the strict lexer cannot read');
+        throw unsafePart(
+          UNSAFE_CONTENT_DETAILS.LOOSE_STYLE,
+          entry,
+          'Workbook part holds a style the strict lexer cannot read',
+        );
       }
       assertNoFieldAfter(entry, bytes, at, hyperlinkIds.external);
       return;
@@ -2069,7 +2164,11 @@ function assertSafeFields(
         break;
       case 'opaque':
         if (isStylesheetInstruction(bytes, markup)) {
-          throw unsafePart(entry, 'Workbook part holds a stylesheet instruction');
+          throw unsafePart(
+            UNSAFE_CONTENT_DETAILS.STYLESHEET_INSTRUCTION,
+            entry,
+            'Workbook part holds a stylesheet instruction',
+          );
         }
         if (inStyle) addStyleCdata(bytes, markup, style);
         break;
@@ -2098,8 +2197,9 @@ function assertSafeFields(
  * only an external hyperlink, and no other element may name one it gives an external
  * hyperlink (those of this part, ExternalHyperlinkIds; none by default). Every formula
  * field is charged to `budget`, the upload's (a fresh one by default).
- * Throws SpreadsheetFileError('UNSAFE_CONTENT') naming `name`; a field refusal also
- * carries its reason (`unsafe-formula` or `unsafe-part`), the namespace refusal the cap.
+ * Throws SpreadsheetFileError('UNSAFE_CONTENT') naming `name` and the check that refused
+ * it (`detail`, one of UNSAFE_CONTENT_DETAILS); a field refusal also carries its reason
+ * (`unsafe-formula` or `unsafe-part`), the namespace refusal the cap.
  * An attribute value the scan cannot decode is CORRUPT_FILE `package-part`; formula
  * fields past the budget PAYLOAD_TOO_LARGE `formula-scan-budget`.
  */
@@ -2113,11 +2213,13 @@ export function assertSafeXmlPart(
 
   if (DTD_DECLARATION.test(xml)) {
     throw new SpreadsheetFileError('UNSAFE_CONTENT', 'Workbook part declares a DOCTYPE or ENTITY', {
+      detail: UNSAFE_CONTENT_DETAILS.DOCTYPE,
       entry: name,
     });
   }
   if (UNKNOWN_ENTITY_REFERENCE.test(xml)) {
     throw new SpreadsheetFileError('UNSAFE_CONTENT', 'Workbook part references an unknown entity', {
+      detail: UNSAFE_CONTENT_DETAILS.UNKNOWN_ENTITY,
       entry: name,
     });
   }

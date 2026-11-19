@@ -55,7 +55,7 @@ apps/api/
 
 > **Marketplace adapters do NOT live in this app.** Trendyol/Hepsiburada HTTP clients, mappers, the `MarketplaceAdapter` interface, and the `getAdapter` registry are in **`@pazarsync/marketplace`** (`packages/marketplace`), shared with `apps/sync-worker`. The api imports from there: `import { getAdapter } from '@pazarsync/marketplace'`.
 
-> **Campaign workbooks live in `src/workbooks/`**: the adapter contract, one format file per marketplace file, the generic import and export, and the route factory that mounts each page's two workbook routes into its `routes/<segment>/index.ts`. Their read-only deploy audit is `scripts/audit-stored-workbooks.ts` (`pnpm --filter @pazarsync/api audit:stored-workbooks`). See [Campaign workbooks](#campaign-workbooks-appsapisrcworkbooks) below.
+> **Campaign workbooks live in `src/workbooks/`**: the adapter contract, one format file per marketplace file, the generic import and export, and the route factory that mounts each page's two workbook routes into its `routes/<segment>/index.ts`. Their read-only deploy audit is `scripts/audit-stored-workbooks.ts` (`pnpm --filter @pazarsync/api audit:stored-workbooks`); its gate mode also prints a package census of the relationship types and content types the accepted files carry (schema URIs and counts only, the tally in `src/workbooks/package-census.ts`), the data for a future allow list, and never changes the exit code. See [Campaign workbooks](#campaign-workbooks-appsapisrcworkbooks) below.
 
 ```typescript
 // ❌ Bad — business logic in route handler
@@ -345,7 +345,7 @@ Every campaign page that imports a marketplace `.xlsx` and exports it back with 
   6. rehearse the export on the upload (`buildRehearsal` and `patchWorkbook`, output dropped);
   7. match the anchors to the store's product variants;
   8. derive the stored name (`deriveName`);
-  9. one transaction: `acquireImportLock`, `assertUploadQuota`, `adapter.persist`;
+  9. one transaction: `acquireImportLock` (the page try-lock), `acquireStoreQuotaLock` (a blocking store-wide lock, so the byte sum sees a peer import to another page that committed meanwhile; keep it before the sum; its wait is bounded by `lock_timeout`, past which it answers 503 `IMPORT_BUSY`), `adapter.countLists`, `assertUploadQuota`, `adapter.persist`;
   10. `adapter.toResponse`.
 
   Steps 2 to 6 map every file problem to a 422 on `file` (`toUploadError`).
@@ -362,7 +362,7 @@ Every campaign page that imports a marketplace `.xlsx` and exports it back with 
 
 - **A new marketplace file for a page** is a format file, its summary in `formats/registry.ts`, the format in its adapter's `formats`, and a real fixture under `tests/fixtures/`. The registry test (`tests/unit/workbooks/registry.test.ts`) fails until its `FIXTURE_PAGES` classifies the fixture. The limit: an adapter's formats share one layout type, row type and write keys (`S`, `TRow`, `TWrite` in `adapter.ts`), so a format whose layout type the contract does not yet express needs contract work first. `TRENDYOL_FORMAT_SUMMARIES` holds one summary per page, so a second Trendyol version of one page changes the registry's shape too.
 - **Turkish text**: format files and the registry are ASCII. Every Turkish value they use (sheet names, default names, written labels, yes-flags, fingerprints) comes from `formats/trendyol/labels.ts`; column headers live in each page's `*.layout.ts`.
-- **Test-only engine entry**: `@pazarsync/spreadsheet/testing` (`patchFixture`, the fixture builders) patches in-process, without the parse worker. The `no-restricted-imports` rule in `packages/eslint-config/base.js` refuses it under `src/**`; test files may import it.
+- **Test-only engine entry**: `@pazarsync/spreadsheet/testing` (`patchFixture`, the fixture builders) patches in-process, without the parse worker. The last block of `packages/eslint-config/base.js` refuses it under `src/**` and `scripts/**`, as a static import, a re-export or a dynamic `import()` with a literal specifier, and refuses relative paths into the engine's `src/testing` folder from other packages; `packages/spreadsheet/eslint.config.mjs` refuses them from inside the engine (`./testing`, `../testing`); test files (`*.test.ts`, `tests/**`) may import it.
 
 ## Prisma 7 Conventions
 

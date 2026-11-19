@@ -11,7 +11,8 @@
 //      refused now;
 //   7. match the anchors to the store's product variants;
 //   8. derive the stored name;
-//   9. in one transaction: the import lock, the upload quota, `persist`;
+//   9. in one transaction: the import lock, the store quota lock, the upload quota,
+//      `persist`;
 //  10. the page's response.
 // Steps 2 to 6 map every file problem to a 422 on `file` (toUploadError).
 
@@ -27,6 +28,7 @@ import { isPrismaKnownRequestError, syncLog } from '@pazarsync/sync-core';
 
 import { IMPORT_TX_OPTIONS } from '../config/workbook-limits';
 import { mapTransactionError } from '../lib/map-transaction-error';
+import { postgresSqlState } from '../lib/postgres-sql-state';
 import { resolveVariantIdsByBarcode } from '../lib/variant-barcode-lookup';
 import type { ImportedRow, ParentFields, StoreScope, WorkbookImportAdapter } from './adapter';
 import { VALUE_NOT_STORABLE_REASON, VALUE_OUT_OF_RANGE_REASON } from './column-range';
@@ -35,7 +37,7 @@ import { countPrefilled, deriveName, readRows } from './import-rows';
 import { buildRehearsal, rehearsalTargets } from './rehearsal';
 import { sanitizeUploadFilename } from './sanitize-upload-filename';
 import { selectFormat, type SelectedFormat } from './select-format';
-import { acquireImportLock, assertUploadQuota } from './upload-quota';
+import { acquireImportLock, acquireStoreQuotaLock, assertUploadQuota } from './upload-quota';
 import { toUploadError, WorkbookFileRejection } from './workbook-errors';
 import { missingExportRequirement, resolveWriteColumns } from './write-columns';
 
@@ -67,41 +69,6 @@ const PRISMA_VALUE_OUT_OF_RANGE = 'P2020';
  * 22021 for U+0000 in a text column or 22007 for a date the driver cannot format).
  */
 const DATA_EXCEPTION_SQLSTATE_RE = /^22[0-9A-Z]{3}$/;
-
-/** The `cause` of a driver adapter error: Postgres' SQLSTATE in `originalCode`. */
-interface DriverAdapterCause {
-  readonly originalCode: string;
-}
-
-/** True when `value` carries a driver adapter `cause` whose `originalCode` is a string. */
-function isDriverAdapterFailure(value: unknown): value is { readonly cause: DriverAdapterCause } {
-  if (typeof value !== 'object' || value === null || !('cause' in value)) return false;
-  const { cause } = value;
-  return (
-    typeof cause === 'object' &&
-    cause !== null &&
-    'originalCode' in cause &&
-    typeof cause.originalCode === 'string'
-  );
-}
-
-/**
- * The SQLSTATE of a database error raised through Prisma 7 and @prisma/adapter-pg, or
- * null. Measured against Postgres: a typed write whose failure Prisma maps to no code of
- * its own (22021, 22007, 22009) rejects with the adapter's DriverAdapterError itself,
- * which has no `code` and carries `cause: { originalCode, code, kind: 'postgres', ... }`;
- * a failure Prisma maps to a P code (22001 as P2000, 23505 as P2002) rejects with a
- * PrismaClientKnownRequestError holding that same DriverAdapterError under
- * `meta.driverAdapterError`. Both carry the SQLSTATE in `cause.originalCode`.
- */
-function postgresSqlState(err: unknown): string | null {
-  if (isDriverAdapterFailure(err)) return err.cause.originalCode;
-  if (typeof err !== 'object' || err === null || !('meta' in err)) return null;
-  const { meta } = err;
-  if (typeof meta !== 'object' || meta === null || !('driverAdapterError' in meta)) return null;
-  const { driverAdapterError } = meta;
-  return isDriverAdapterFailure(driverAdapterError) ? driverAdapterError.cause.originalCode : null;
-}
 
 /** What steps 2 to 6 found in the upload. */
 interface CheckedUpload<S extends LayoutSpec, TRow, TMeta, TWrite extends string> {
@@ -237,9 +204,10 @@ export async function importWorkbook<
   const scope: StoreScope = { organizationId: input.organizationId, storeId: input.storeId };
 
   // Step 1: a store at its quota is refused before the costlier parse and rehearsal, with
-  // the same scoped count and byte sum the transaction uses. It is not under the import
-  // lock, so two concurrent uploads can both pass it: the check inside the transaction
-  // (step 9) stays the authority. `mapTransactionError` answers a pool wait as the same
+  // the same scoped count and byte sum the transaction uses. It takes neither the import
+  // lock nor the store quota lock, so two concurrent uploads can both pass it: the check
+  // inside the transaction (step 9), under both locks, stays the authority. It is an
+  // early refusal only. `mapTransactionError` answers a pool wait as the same
   // retryable 503 and lets the quota's WorkbookConflictError through untouched.
   try {
     const listCount = await adapter.countLists(prisma, scope);
@@ -280,6 +248,7 @@ export async function importWorkbook<
   try {
     persisted = await prisma.$transaction(async (tx) => {
       await acquireImportLock(tx, scope, adapter.page);
+      await acquireStoreQuotaLock(tx, scope);
       const listCount = await adapter.countLists(tx, scope);
       await assertUploadQuota(tx, scope, { listCount, incomingBytes: input.file.length });
       return adapter.persist(tx, {

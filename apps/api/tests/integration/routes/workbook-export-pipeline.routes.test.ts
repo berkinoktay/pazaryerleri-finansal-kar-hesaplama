@@ -31,6 +31,7 @@ import {
   patchWorkbook,
   readWorkbookGrid,
   SpreadsheetFileError,
+  UNSAFE_CONTENT_DETAILS,
   UNSAFE_CONTENT_REASONS,
 } from '@pazarsync/spreadsheet';
 import { syncLog } from '@pazarsync/sync-core';
@@ -409,15 +410,17 @@ describe('generic workbook export on the discount route', () => {
       'a macro project',
       (source: Buffer) => macroFixture(source),
       UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      UNSAFE_CONTENT_DETAILS.ACTIVE_PART_NAME,
     ],
     [
       'a WEBSERVICE formula',
       (source: Buffer) => unsafeFormulaFixture(source, DISCOUNT_SHEET_PART),
       UNSAFE_CONTENT_REASONS.UNSAFE_FORMULA,
+      UNSAFE_CONTENT_DETAILS.FORMULA,
     ],
   ] as const)(
     'answers a stored file with %s with 409 STORED_FILE_UNREADABLE and hands out no byte of it',
-    async (_name, build, reason) => {
+    async (_name, build, reason, detail) => {
       const ctx = await setupStore();
       const listId = await importFile(ctx);
       await updateList(ctx, listId, { sourceFile: new Uint8Array(build(FIXTURE)) });
@@ -435,6 +438,7 @@ describe('generic workbook export on the discount route', () => {
             recordId: listId,
             code: 'UNSAFE_CONTENT',
             reason,
+            detail,
           },
         ],
       ]);
@@ -559,6 +563,7 @@ describe('generic workbook export of a legacy commission tariff', () => {
           recordId: tariffId,
           code: null,
           reason: 'too-many-files',
+          detail: null,
         },
       ],
     ]);
@@ -647,6 +652,7 @@ describe('generic workbook export of a legacy marketplace campaign list', () => 
           recordId: campaignId,
           code: null,
           reason: 'unwritable-value',
+          detail: null,
         },
       ],
     ]);

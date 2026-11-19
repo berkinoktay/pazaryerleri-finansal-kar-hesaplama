@@ -8,6 +8,7 @@ import {
   contentTypesXml,
   PACKAGE_PART_CASES,
   SAFE_PART_CASES,
+  type PackagePartCase,
   SHEET_PART,
   UNSAFE_PART_CASES,
   WORKBOOK_RELS_PART,
@@ -15,7 +16,12 @@ import {
   WORKSHEET_XML,
 } from '../tests/helpers/package-parts';
 import { entryContentKind, type ExternalHyperlinkIds } from './content-scan';
-import { UNSAFE_CONTENT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
+import {
+  isUnsafeContentDetail,
+  UNSAFE_CONTENT_DETAILS,
+  UNSAFE_CONTENT_REASONS,
+  ZIP_REJECT_REASONS,
+} from './patch/reasons';
 import {
   assertNoUnsafePackageParts,
   assertNoUnsafePartNames,
@@ -28,6 +34,8 @@ import {
 const RELATIONSHIPS_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
 const OFFICE_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const SHEET_RELS_PART = 'xl/worksheets/_rels/sheet1.xml.rels';
+const DRAWING_RELS_PART = 'xl/drawings/_rels/drawing1.xml.rels';
+const ROOT_RELS_PART = '_rels/.rels';
 
 /** Whether the gate's stream keeps the content of an entry: it holds XML, whatever its name. */
 function isKept(content: Uint8Array): boolean {
@@ -54,11 +62,53 @@ function checkEntries(entries: Readonly<Record<string, string>>): ExternalHyperl
   return assertNoUnsafePackageParts(Object.keys(all), contents);
 }
 
+/** The case of UNSAFE_PART_CASES labelled `label`. */
+function unsafePartCase(label: string): PackagePartCase {
+  const found = UNSAFE_PART_CASES.find((testCase) => testCase.label === label);
+  if (found === undefined) throw new Error(`No unsafe part case is labelled ${label}`);
+  return found;
+}
+
 describe('assertNoUnsafePackageParts', () => {
   it.each(UNSAFE_PART_CASES)('refuses $label as UNSAFE_CONTENT', ({ entries }) => {
     const error = fileErrorOf(() => checkEntries(entries));
     expect(error.code).toBe('UNSAFE_CONTENT');
     expect(error.meta).toMatchObject({ reason: UNSAFE_CONTENT_REASONS.UNSAFE_PART });
+    expect(isUnsafeContentDetail(error.meta['detail'])).toBe(true);
+  });
+
+  // Each package check names itself (`meta.detail`), so a log tells a macro or an
+  // external link from a false positive of the content scan's CSS rule.
+  it.each([
+    [
+      'a workbook relationship of the Microsoft vbaProject type',
+      UNSAFE_CONTENT_DETAILS.ACTIVE_RELATIONSHIP,
+      WORKBOOK_RELS_PART,
+    ],
+    [
+      'a macro-enabled workbook Override',
+      UNSAFE_CONTENT_DETAILS.ACTIVE_CONTENT_TYPE,
+      CONTENT_TYPES_PART,
+    ],
+    [
+      'a drawing image relationship to a file share with TargetMode="External"',
+      UNSAFE_CONTENT_DETAILS.EXTERNAL_TARGET,
+      DRAWING_RELS_PART,
+    ],
+    [
+      'an image relationship with TargetMode="Internal" to a web address',
+      UNSAFE_CONTENT_DETAILS.ABSOLUTE_TARGET,
+      DRAWING_RELS_PART,
+    ],
+    [
+      'a digital signature origin named by the root relationships',
+      UNSAFE_CONTENT_DETAILS.DIGITAL_SIGNATURE,
+      ROOT_RELS_PART,
+    ],
+  ])('names %s %s', (label, detail, entry) => {
+    const error = fileErrorOf(() => checkEntries(unsafePartCase(label).entries));
+    expect(error.code).toBe('UNSAFE_CONTENT');
+    expect(error.meta).toEqual({ reason: UNSAFE_CONTENT_REASONS.UNSAFE_PART, detail, entry });
   });
 
   it.each(PACKAGE_PART_CASES)('refuses $label as CORRUPT_FILE', ({ entries }) => {
@@ -218,7 +268,11 @@ describe('assertNoUnsafePartNames', () => {
   ])('refuses %s as UNSAFE_CONTENT', (name) => {
     const error = fileErrorOf(() => assertNoUnsafePartNames(['xl/workbook.xml', name]));
     expect(error.code).toBe('UNSAFE_CONTENT');
-    expect(error.meta).toEqual({ reason: UNSAFE_CONTENT_REASONS.UNSAFE_PART, entry: name });
+    expect(error.meta).toEqual({
+      reason: UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      detail: UNSAFE_CONTENT_DETAILS.ACTIVE_PART_NAME,
+      entry: name,
+    });
   });
 
   it.each(['xl/media/image1.png', 'xl/x/a.xml', 'xl/externalLinksIndex.xml', 'xl/embeddings.xml'])(

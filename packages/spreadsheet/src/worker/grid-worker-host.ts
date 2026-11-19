@@ -2,13 +2,14 @@ import { Worker } from 'node:worker_threads';
 
 import { SpreadsheetFileError } from '../errors';
 import type { SheetData } from '../grid-types';
+import type { PackageCensus } from '../package-census';
 import type { ResolvedPatchRequest } from '../patch/patch-request';
 import type { ResolvedReadOptions } from '../read-options';
 import { isGridWorkerResponse, type GridWorkerRequest, type GridWorkerResponse } from './protocol';
 
-// Runs readUploadGrid (`run`) and patchUpload (`patch`) in one long-lived worker
-// thread with a heap limit and a time limit, so a job that exhausts either kills only
-// the worker, not the API:
+// Runs readUploadGrid (`run`), readUploadCensus (`census`) and patchUpload (`patch`) in
+// one long-lived worker thread with a heap limit and a time limit, so a job that
+// exhausts either kills only the worker, not the API:
 //   - the worker is spawned on the first run, through grid-worker-entry.mjs (which
 //     registers tsx), with an empty execArgv so tests and production load it alike;
 //   - it is ref()ed while a job is in flight and unref()ed when idle, so it never
@@ -42,6 +43,12 @@ export interface GridWorkerHost {
    */
   run(file: Uint8Array, options: ResolvedReadOptions): Promise<SheetData>;
   /**
+   * The package census of `file` (readUploadCensus), taken in the worker: the byte-level
+   * gate runs whole, so it rejects with the SpreadsheetFileError the gate throws. Same
+   * limits, kills and one-job rule as `run`.
+   */
+  census(file: Uint8Array, options: ResolvedReadOptions): Promise<PackageCensus>;
+  /**
    * Patches `file` in the worker; null marks an output that changes nothing. Same
    * limits, kills and one-job rule as `run`.
    */
@@ -71,9 +78,10 @@ export function workerLimitReason(error: SpreadsheetFileError): WorkerLimitReaso
   return null;
 }
 
-/** The success answer a job waits for: a grid, or one file per output it sent. */
+/** The success answer a job waits for: a grid, a census, or one file per output it sent. */
 export type ExpectedAnswer =
   | { readonly kind: 'grid' }
+  | { readonly kind: 'census' }
   | { readonly kind: 'patched'; readonly outputs: number };
 
 /**
@@ -87,6 +95,8 @@ export function answersJob(expected: ExpectedAnswer, response: GridWorkerRespons
       return true;
     case 'grid':
       return expected.kind === 'grid';
+    case 'census':
+      return expected.kind === 'census';
     case 'patched':
       return expected.kind === 'patched' && response.files.length === expected.outputs;
     default: {
@@ -96,7 +106,7 @@ export function answersJob(expected: ExpectedAnswer, response: GridWorkerRespons
   }
 }
 
-type SuccessAnswer = Extract<GridWorkerResponse, { readonly kind: 'grid' | 'patched' }>;
+type SuccessAnswer = Extract<GridWorkerResponse, { readonly kind: 'grid' | 'census' | 'patched' }>;
 
 interface Job {
   readonly id: number;
@@ -116,23 +126,40 @@ function isOutOfMemory(error: Error): boolean {
 }
 
 // The job only settles with an answer answersJob accepted, so the kind always matches
-// in the two functions below; the throw is not reached.
+// in the three functions below; the throw is not reached.
 
 function gridOf(answer: SuccessAnswer): SheetData {
   if (answer.kind === 'grid') return answer.grid;
-  throw new Error('A grid job settled with patched files');
+  throw new Error('A grid job settled with another answer');
+}
+
+function censusOf(answer: SuccessAnswer): PackageCensus {
+  if (answer.kind === 'census') return answer.census;
+  throw new Error('A census job settled with another answer');
 }
 
 function filesOf(answer: SuccessAnswer): (Uint8Array<ArrayBuffer> | null)[] {
   if (answer.kind === 'patched') {
     return answer.files.map((file) => (file === null ? null : new Uint8Array(file)));
   }
-  throw new Error('A patch job settled with a grid');
+  throw new Error('A patch job settled with another answer');
+}
+
+/** The read options a grid or census request posts: their fields only, in a plain object. */
+function postedReadOptions(options: ResolvedReadOptions): ResolvedReadOptions {
+  return {
+    sheetName: options.sheetName,
+    sheet: options.sheet,
+    rowCap: options.rowCap,
+    colCap: options.colCap,
+    maxBytes: options.maxBytes,
+  };
 }
 
 function settleWithResponse(job: Job, response: GridWorkerResponse): void {
   switch (response.kind) {
     case 'grid':
+    case 'census':
     case 'patched':
       job.resolve(response);
       return;
@@ -302,15 +329,19 @@ export function createGridWorkerHost(limits: GridWorkerLimits): GridWorkerHost {
         id,
         kind: 'grid',
         bytes,
-        options: {
-          sheetName: options.sheetName,
-          sheet: options.sheet,
-          rowCap: options.rowCap,
-          colCap: options.colCap,
-          maxBytes: options.maxBytes,
-        },
+        options: postedReadOptions(options),
       }));
       return gridOf(answer);
+    },
+
+    async census(file: Uint8Array, options: ResolvedReadOptions): Promise<PackageCensus> {
+      const answer = await start(file, { kind: 'census' }, (id, bytes) => ({
+        id,
+        kind: 'census',
+        bytes,
+        options: postedReadOptions(options),
+      }));
+      return censusOf(answer);
     },
 
     async patch(

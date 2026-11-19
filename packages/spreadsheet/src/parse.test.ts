@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect } from 'vitest';
-import { readWorkbookGrid, setGridWorkerHostForTests } from './parse';
+import { inspectWorkbookPackage, readWorkbookGrid, setGridWorkerHostForTests } from './parse';
 import { SpreadsheetFileError } from './errors';
 import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
 import { GRID_WORKER_TIMEOUT_MS, MAX_QUEUED_PARSES } from './constants';
@@ -54,6 +54,24 @@ describe('readWorkbookGrid: queue limit', () => {
 
     const again = Array.from({ length: MAX_QUEUED_PARSES }, () => readWorkbookGrid(queueFile));
     await expect(Promise.all(again)).resolves.toHaveLength(MAX_QUEUED_PARSES);
+  });
+});
+
+// The census runs in the worker through the same queue; the gate refuses first.
+describe('inspectWorkbookPackage', () => {
+  it('returns the census of an accepted file and the gate refusal of another', async () => {
+    const file = buildXlsxFixture([{ name: 'Sheet1', xml: worksheetXml(QUEUE_ROWS) }]);
+
+    const census = await inspectWorkbookPackage(file);
+
+    expect(census.relationshipTypes).toEqual([
+      'http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument',
+      'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet',
+    ]);
+    expect(census.otherRelationshipTypes).toBe(false);
+    expect(await inspectWorkbookPackage(Buffer.from('not a zip')).then(() => null, codeOf)).toBe(
+      'NOT_XLSX',
+    );
   });
 });
 

@@ -33,6 +33,7 @@ import { missingExportRequirement, resolveWriteColumns } from '@/workbooks/write
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization, createStore } from '../../helpers/factories';
+import { blockColumn, blocksOf } from '../../helpers/layout-blocks';
 
 const app = createApp();
 
@@ -254,8 +255,9 @@ async function withFirstOffer(value: string): Promise<Buffer> {
   if (layout === null) throw new Error('unreadable Plus fixture');
   const barcode = columnIndex(format.layout, layout, 'barcode');
   expect(cellText(grid[FIRST_KEPT_ROW - 1] ?? [], barcode)).toBe(MATCHED_BARCODE);
-  const offer = layout.blocks.get('periods')?.[0]?.columns.get('offer') ?? null;
-  if (offer === null) throw new Error('the fixture has no offer column');
+  const period = blocksOf(format.layout, layout, 'periods')[0];
+  if (period === undefined) throw new Error('the fixture has no period block');
+  const offer = blockColumn(format.layout, 'periods', period, 'offer');
   return patchFixture(
     FIXTURE_7DAY,
     [{ excelRow: FIRST_KEPT_ROW, col: offer, value: { kind: 'number', value } }],
@@ -300,7 +302,7 @@ async function withPeriodDays(days: number): Promise<Buffer> {
   const grid = await readWorkbookGrid(FIXTURE_7DAY, { sheet: format.sheet });
   const layout = resolveLayout(format.layout, grid);
   if (layout === null) throw new Error('unreadable Plus fixture');
-  const blocks = layout.blocks.get('periods') ?? [];
+  const blocks = blocksOf(format.layout, layout, 'periods');
   expect(blocks).toHaveLength(1);
   const period = blocks[0];
   if (period === undefined) throw new Error('the fixture has no period block');
@@ -324,7 +326,8 @@ async function withPeriodDays(days: number): Promise<Buffer> {
     format.layout,
     await readWorkbookGrid(file, { sheet: format.sheet }),
   );
-  expect((reread?.blocks.get('periods') ?? []).map((block) => block.tag)).toEqual([days]);
+  if (reread === null) throw new Error('the rewritten Plus fixture does not resolve');
+  expect(blocksOf(format.layout, reread, 'periods').map((block) => block.tag)).toEqual([days]);
   return file;
 }
 
@@ -500,8 +503,9 @@ async function withBlankFirstRowOffer(
   if (layout === null) throw new Error('unreadable Plus fixture');
   const firstRow = grid[FIRST_KEPT_ROW - 1] ?? [];
   expect(cellText(firstRow, columnIndex(format.layout, layout, 'barcode'))).toBe(barcode);
-  const offer = layout.blocks.get('periods')?.[blockIndex]?.columns.get('offer');
-  if (offer === undefined) throw new Error(`the fixture has no offer in block ${blockIndex}`);
+  const period = blocksOf(format.layout, layout, 'periods')[blockIndex];
+  if (period === undefined) throw new Error(`the fixture has no period block ${blockIndex}`);
+  const offer = blockColumn(format.layout, 'periods', period, 'offer');
   // The fixture row holds a readable offer, so blanking it is the change.
   expect(cellText(firstRow, offer)).not.toBeNull();
   return patchFixture(

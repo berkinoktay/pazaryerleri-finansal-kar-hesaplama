@@ -29,6 +29,16 @@ export const MULTIPART_OVERHEAD_BYTES = 64 * 1024;
 export const IMPORT_TX_OPTIONS = { maxWait: 5_000, timeout: 30_000 } as const;
 
 /**
+ * How long an import waits for the store quota lock (`acquireStoreQuotaLock`) before it
+ * answers 503 IMPORT_BUSY, in milliseconds. Postgres enforces it (`lock_timeout`), because
+ * Prisma's transaction `timeout` cancels no statement already running on the server: a
+ * peer stuck while it holds the lock would otherwise keep every waiter, and its pooled
+ * connection, waiting. Half of `IMPORT_TX_OPTIONS.timeout`, so a waiter that gets the lock
+ * late still has half its transaction for its own writes.
+ */
+export const STORE_QUOTA_LOCK_TIMEOUT_MS = 15_000;
+
+/**
  * `Retry-After` value (seconds) sent with 503 IMPORT_BUSY. Matches the order
  * of magnitude of `IMPORT_TX_OPTIONS.maxWait`: by then a pool slot has
  * usually freed up.

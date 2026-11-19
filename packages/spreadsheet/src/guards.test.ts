@@ -18,7 +18,14 @@ import {
 import { openUpload, streamArchive, type GuardOpts } from './guards';
 import { readWorkbookGrid } from './parse';
 import { readZipLayout } from './patch/raw-zip';
-import { UNSAFE_CONTENT_REASONS, UPLOAD_LIMIT_REASONS, ZIP_REJECT_REASONS } from './patch/reasons';
+import {
+  isUnsafeContentDetail,
+  UNSAFE_CONTENT_DETAILS,
+  UNSAFE_CONTENT_REASONS,
+  UPLOAD_LIMIT_REASONS,
+  ZIP_REJECT_REASONS,
+  type UnsafeContentDetail,
+} from './patch/reasons';
 import { checkUploadParts } from './read-grid';
 import { columnLetters } from './sheet-meta';
 import { buildXlsxFixture, worksheetXml } from './testing/build-xlsx';
@@ -787,7 +794,13 @@ describe('upload gate', () => {
 
   it('rejects a 33-character element name as UNSAFE_CONTENT', () => {
     const file = withSharedStrings(`<sst><${'a'.repeat(33)}/></sst>`);
-    expect(catchGuard(file, opts)?.code).toBe('UNSAFE_CONTENT');
+    const err = catchGuard(file, opts);
+    expect(err?.code).toBe('UNSAFE_CONTENT');
+    expect(err?.meta).toEqual({
+      detail: UNSAFE_CONTENT_DETAILS.ELEMENT_NAME_LENGTH,
+      entry: SHARED_STRINGS_PART,
+      cap: MAX_XML_NAME_LENGTH,
+    });
   });
 
   // Element names are measured on raw bytes in every part the reader opens,
@@ -979,7 +992,11 @@ describe('upload gate: the parts the reader opens', () => {
     });
     const err = catchGuard(file, opts);
     expect(err?.code).toBe('UNSAFE_CONTENT');
-    expect(err?.meta).toEqual({ entry, cap: MAX_XMLNS_DECLARATIONS_PER_PART });
+    expect(err?.meta).toEqual({
+      detail: UNSAFE_CONTENT_DETAILS.NAMESPACE_DECLARATIONS,
+      entry,
+      cap: MAX_XMLNS_DECLARATIONS_PER_PART,
+    });
     expect(err?.message).toBe(
       `Workbook part '${entry}' has more than ${MAX_XMLNS_DECLARATIONS_PER_PART} namespace declarations`,
     );
@@ -994,7 +1011,10 @@ describe('upload gate: the parts the reader opens', () => {
     });
     const err = catchGuard(file, opts);
     expect(err?.code).toBe('UNSAFE_CONTENT');
-    expect(err?.meta).toEqual({ entry: 'docProps/app.xml' });
+    expect(err?.meta).toEqual({
+      detail: UNSAFE_CONTENT_DETAILS.UNKNOWN_ENTITY,
+      entry: 'docProps/app.xml',
+    });
   });
 
   // Every entry is inflated and counted, the reader's or not: the export unzips the
@@ -1348,11 +1368,13 @@ describe('upload gate: unsafe parts by name', () => {
     'XL/VBAPROJECT.BIN',
     'xl/externalLinks/externalLink1.xml',
     'xl/embeddings/oleObject1.bin',
-  ])('refuses an entry named %s as UNSAFE_CONTENT', (name) => {
-    expectGateReason(
+  ])('refuses an entry named %s as UNSAFE_CONTENT active-part-name', (name) => {
+    expectGateEntry(
       buildXlsxFixture([BASIC_SHEET], { [name]: '<x/>' }),
       'UNSAFE_CONTENT',
       UNSAFE_CONTENT_REASONS.UNSAFE_PART,
+      name,
+      UNSAFE_CONTENT_DETAILS.ACTIVE_PART_NAME,
     );
   });
 
@@ -1460,16 +1482,26 @@ function utf16WithMark(text: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(Buffer.from(`${BYTE_ORDER_MARK}${text}`, 'utf16le'));
 }
 
-/** The gate's error for `file` has `code`, `meta.reason` and `meta.entry`. */
+/**
+ * The gate's error for `file` has `code`, `meta.reason` and `meta.entry`, and, for
+ * UNSAFE_CONTENT, `meta.detail`: exactly `detail` when given, else any one of
+ * UNSAFE_CONTENT_DETAILS.
+ */
 function expectGateEntry(
   file: Buffer,
   code: SpreadsheetFileErrorCode,
   reason: string,
   entry: string,
+  detail?: UnsafeContentDetail,
 ): void {
   const err = catchGuard(file, opts);
   expect(err?.code).toBe(code);
-  expect(err?.meta).toEqual({ reason, entry });
+  if (code !== 'UNSAFE_CONTENT') {
+    expect(err?.meta).toEqual({ reason, entry });
+    return;
+  }
+  expect(err?.meta).toEqual({ reason, detail: detail ?? expect.any(String), entry });
+  expect(isUnsafeContentDetail(err?.meta['detail'])).toBe(true);
 }
 
 const EVIL_SHEET_XML = sheetWithFormula(EVIL_CALL);
@@ -2147,20 +2179,30 @@ describe('upload gate: relationships elements in another ASCII case', () => {
   });
 });
 
-// One budget per upload bounds the formula text the content scans read: every field, raw
-// and in NFKC form, in every part (MAX_FORMULA_SCAN_UNITS, or a lower maxFormulaScanUnits).
+// One budget per upload bounds the formula text the content scans read: every field raw,
+// plus its NFKC form when that differs, in every part (MAX_FORMULA_SCAN_UNITS, or a lower
+// maxFormulaScanUnits).
 const FORMULA_PART = 'xl/x/a.xml';
-// The code units the gate charges for this field: eight raw, eight in NFKC form.
+// The code units the gate charges for this field: eight, its NFKC form being the same text.
 const BUDGET_FIELD = 'SUM(1,2)';
-// The costliest field shape measured for its charge: U+FDFB, whose NFKC form is eight
-// code units, and an ideographic space, which NFKC turns into a space.
+// The costliest field shape measured among those NFKC changes (charged raw and in NFKC
+// form): U+FDFB, whose NFKC form is eight code units, and an ideographic space, which
+// NFKC turns into a space.
 const COSTLY_FIELD_PAIR = '\ufdfb\u3000';
+// The costliest field shape measured among those NFKC keeps (charged raw only, though
+// every field is still normalised): a name of one combining mark (U+0345), which the
+// scan normalises and upper-cases again, then a line separator (U+2028).
+const COSTLY_SAME_FORM_PAIR = '\u0345\u2028';
 // How many fields the closing review's upload held.
 const NFKC_PROBE_FIELDS = 330;
 
-/** What the gate charges for a formula field of decoded text `text`: its code units, raw and in NFKC form. */
+/**
+ * What the gate charges for a formula field of decoded text `text`: its code units, plus
+ * those of its NFKC form when that differs.
+ */
 function formulaScanUnits(text: string): number {
-  return text.length + text.normalize('NFKC').length;
+  const normal = text.normalize('NFKC');
+  return text.length + (normal === text ? 0 : normal.length);
 }
 
 /** A part whose root holds `count` formula fields of text `text`. */
@@ -2179,6 +2221,28 @@ describe('upload gate: the formula scan budget', () => {
 
   it('charges nothing for a workbook without formulas', () => {
     expect(catchGuard(buildXlsxFixture([BASIC_SHEET]), withFormulaBudget(0))).toBeNull();
+  });
+
+  // The scan reads the NFKC form of a field only when it differs from the raw text, so
+  // only then is it charged too.
+  it.each<[label: string, text: string, sameForm: boolean, charge: number]>([
+    ['its raw text alone when NFKC keeps it', BUDGET_FIELD, true, BUDGET_FIELD.length],
+    [
+      'its raw text and its NFKC form when NFKC changes it',
+      COSTLY_FIELD_PAIR,
+      false,
+      COSTLY_FIELD_PAIR.length + COSTLY_FIELD_PAIR.normalize('NFKC').length,
+    ],
+  ])('charges a field %s', (_label, text, sameForm, charge) => {
+    const file = buildXlsxFixture([BASIC_SHEET], { [FORMULA_PART]: formulaFieldsPart(text, 1) });
+
+    expect(text.normalize('NFKC') === text).toBe(sameForm);
+    expect(catchGuard(file, withFormulaBudget(charge))).toBeNull();
+    expect(catchGuard(file, withFormulaBudget(charge - 1))?.meta).toEqual({
+      reason: UPLOAD_LIMIT_REASONS.FORMULA_SCAN_BUDGET,
+      entry: FORMULA_PART,
+      cap: charge - 1,
+    });
   });
 
   // The upload that held the parse worker for 13 s (26 s from a relationships part, which
@@ -2302,22 +2366,30 @@ describe('upload gate: the formula scan budget', () => {
     expectGateEntry(file, 'UNSAFE_CONTENT', UNSAFE_CONTENT_REASONS.UNSAFE_PART, sheetPart);
   });
 
-  // The wall-clock bound is enforced in CI only (expectWithinBudget); locally the file is
-  // still read and accepted.
-  it('reads formula fields of the costliest shape measured up to the budget', () => {
-    const fieldText = COSTLY_FIELD_PAIR.repeat(
-      Math.floor(MAX_FORMULA_TEXT_LENGTH / COSTLY_FIELD_PAIR.normalize('NFKC').length),
-    );
-    const fieldUnits = formulaScanUnits(fieldText);
-    const count = Math.floor(MAX_FORMULA_SCAN_UNITS / fieldUnits);
-    const file = buildXlsxFixture([BASIC_SHEET], {
-      [FORMULA_PART]: formulaFieldsPart(fieldText, count),
-    });
+  // A field NFKC keeps is charged half of what one NFKC changes may be, yet is still
+  // normalised, so both kinds are filled to the budget. The wall-clock bound is enforced
+  // in CI only (expectWithinBudget); locally the file is still read and accepted.
+  it.each<[label: string, pair: string, sameForm: boolean]>([
+    ['NFKC changes', COSTLY_FIELD_PAIR, false],
+    ['NFKC keeps', COSTLY_SAME_FORM_PAIR, true],
+  ])(
+    'reads formula fields of the costliest shape measured that %s up to the budget',
+    (_label, pair, sameForm) => {
+      const fieldText = pair.repeat(
+        Math.floor(MAX_FORMULA_TEXT_LENGTH / pair.normalize('NFKC').length),
+      );
+      const fieldUnits = formulaScanUnits(fieldText);
+      const count = Math.floor(MAX_FORMULA_SCAN_UNITS / fieldUnits);
+      const file = buildXlsxFixture([BASIC_SHEET], {
+        [FORMULA_PART]: formulaFieldsPart(fieldText, count),
+      });
 
-    expect(fieldText.normalize('NFKC').length).toBeLessThanOrEqual(MAX_FORMULA_TEXT_LENGTH);
-    expect(count * fieldUnits).toBeGreaterThan(MAX_FORMULA_SCAN_UNITS - fieldUnits);
-    const started = performance.now();
-    expect(catchGuard(file, opts)).toBeNull();
-    expectWithinBudget(performance.now() - started, FORMULA_SCAN_BUDGET_MS);
-  });
+      expect(fieldText.normalize('NFKC') === fieldText).toBe(sameForm);
+      expect(fieldText.normalize('NFKC').length).toBeLessThanOrEqual(MAX_FORMULA_TEXT_LENGTH);
+      expect(count * fieldUnits).toBeGreaterThan(MAX_FORMULA_SCAN_UNITS - fieldUnits);
+      const started = performance.now();
+      expect(catchGuard(file, opts)).toBeNull();
+      expectWithinBudget(performance.now() - started, FORMULA_SCAN_BUDGET_MS);
+    },
+  );
 });

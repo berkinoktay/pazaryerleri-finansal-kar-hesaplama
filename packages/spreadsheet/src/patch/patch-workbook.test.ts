@@ -7,6 +7,7 @@ import { cellText } from '../cells';
 import { GRID_WORKER_TIMEOUT_MS, MAX_PATCH_OUTPUTS, MAX_QUEUED_PARSES } from '../constants';
 import { SpreadsheetFileError } from '../errors';
 import type { CellValue, SheetData } from '../grid-types';
+import type { PackageCensus } from '../package-census';
 import { readWorkbookGrid, setGridWorkerHostForTests } from '../parse';
 import type { SheetSelector } from '../read-options';
 import { cellKey } from '../sheet-meta';
@@ -63,6 +64,10 @@ function throwingHost(): RecordingHost {
       jobs.push('run');
       throw new Error('No read may run on this host');
     },
+    census(): Promise<PackageCensus> {
+      jobs.push('census');
+      throw new Error('No census may run on this host');
+    },
     patch(): Promise<(Uint8Array<ArrayBuffer> | null)[]> {
       jobs.push('patch');
       throw new Error('No patch may run on this host');
@@ -79,6 +84,9 @@ function miscountingHost(extra: number): GridWorkerHost {
   return {
     run(): Promise<SheetData> {
       throw new Error('No read may run on this host');
+    },
+    census(): Promise<PackageCensus> {
+      throw new Error('No census may run on this host');
     },
     patch(_file, request): Promise<(Uint8Array<ArrayBuffer> | null)[]> {
       return Promise.resolve(Array.from({ length: request.outputs.length + extra }, () => null));
@@ -101,6 +109,9 @@ function inProcessHost(): InProcessHost {
   const host: GridWorkerHost = {
     run(): Promise<SheetData> {
       throw new Error('No read may run on this host');
+    },
+    census(): Promise<PackageCensus> {
+      throw new Error('No census may run on this host');
     },
     patch(file, request): Promise<(Uint8Array<ArrayBuffer> | null)[]> {
       requests.push(request);

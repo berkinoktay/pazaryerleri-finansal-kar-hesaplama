@@ -628,10 +628,15 @@ section "Versioning" for details.
   form (one character such as U+FDFA expands to eighteen), or anything but text (a comment,
   CDATA, a processing instruction or an element; the one child element Excel 2010+ writes in a
   cross-sheet data validation or conditional format, `<xm:f>`, is read as the formula). The
-  formula fields of all scanned parts of one upload together may hold at most 24 000 000 UTF-16
-  code units, each field counting its stored text plus its NFKC form (a real Trendyol export
-  holds at most about 70 000); beyond that the upload answers `422` with
-  `{ field: 'file', code: 'PAYLOAD_TOO_LARGE' }`. A macro
+  formula fields of all scanned parts of one upload together may hold at most 12 000 000 UTF-16
+  code units, each field counting its stored text, plus its NFKC form only when that form differs
+  from the text (a real Trendyol export holds at most about 35 000, and none of its formula fields
+  changes under NFKC); beyond that the upload answers `422` with
+  `{ field: 'file', code: 'PAYLOAD_TOO_LARGE' }`. _(Changed within this Unreleased: the limit was
+  24 000 000 code units with both forms of every field counted. For formula text that NFKC
+  changes the limit is now in effect half as large, so such a file between the two limits,
+  accepted before, is now refused: an upload with `422` `PAYLOAD_TOO_LARGE`, a stored file on
+  export with `409` `STORED_FILE_UNREADABLE`.)_ A macro
   assignment (a non-empty `macro` or `fmlaMacro` attribute, a non-empty `FmlaMacro` element), a
   VML control script (a `ScriptText` element holding anything but white space), an SVG or HTML
   `script`, `foreignObject`, `iframe`, `object` or `embed` element, an XML Events `handler` or
