@@ -2879,25 +2879,12 @@ describe('isXmlPart', () => {
 });
 
 // Every UNSAFE_CONTENT names the check that refused the part (`meta.detail`), so a log
-// tells the broad CSS rule (every non-style attribute value, its false positives
-// included) apart from a style that loads a resource or a macro.
+// tells a non-style attribute value that loads a resource (the broad CSS rule, on an
+// element outside the Office data namespaces or in web content) apart from a style that
+// loads one or a macro. Excel data attributes the broad rule skips (an autofilter value
+// Curl(25mm), a validation prompt image(s)) are in "data attributes of Office namespaces".
 describe('assertSafeXmlContent: the detail of a refusal', () => {
-  it.each([
-    [
-      'an autofilter value with a word ending in url glued to a parenthesis',
-      '<autoFilter ref="A1:A2"><filterColumn colId="0"><filters><filter val="Curl(25mm)"/></filters></filterColumn></autoFilter>',
-    ],
-    [
-      'a data validation prompt holding image(s)',
-      '<dataValidations count="1"><dataValidation type="list" sqref="A1" showInputMessage="1" prompt="Upload image(s) here"><formula1>"a,b"</formula1></dataValidation></dataValidations>',
-    ],
-  ])('names %s css-load-attribute, the broad rule', (_label, after) => {
-    const error = scanError(entriesOf({ [SHEET_PART]: worksheetWithAfter(after) }));
-
-    expectUnsafePart(error, SHEET_PART, UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE);
-  });
-
-  it('names an SVG fill that loads a resource css-load-attribute too: the key is not only false positives', () => {
+  it('names an SVG fill that loads a resource css-load-attribute', () => {
     const error = scanError(
       entriesOf({
         [SVG_PART]: svgWith('<rect width="1" height="1" fill="url(http://evil/p.svg#g)"/>'),
@@ -3042,5 +3029,425 @@ describe('assertSafeXmlContent: the detail of a refusal', () => {
     const error = scanError(entriesOf({ [entry]: xml }), hyperlinks);
 
     expectUnsafeContent(error, reason, entry, detail);
+  });
+});
+
+// The Office data namespaces as Excel writes them, strict and add-on ones (the list is
+// OFFICE_DATA_NAMESPACES in content-scan.ts), and the namespaces around them.
+const STRICT_SPREADSHEET_NS = 'http://purl.oclc.org/ooxml/spreadsheetml/main';
+const STRICT_DRAWING_NS = 'http://purl.oclc.org/ooxml/drawingml/spreadsheetDrawing';
+const STRICT_DRAWING_MAIN_NS = 'http://purl.oclc.org/ooxml/drawingml/main';
+const STRICT_CHART_NS = 'http://purl.oclc.org/ooxml/drawingml/chart';
+const STRICT_RELATIONSHIPS_NS = 'http://purl.oclc.org/ooxml/officeDocument/relationships';
+const X14_NS = 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main';
+const X15AC_NS = 'http://schemas.microsoft.com/office/spreadsheetml/2010/11/ac';
+const XM_NS = 'http://schemas.microsoft.com/office/excel/2006/main';
+const MAC_VML_NS = 'urn:schemas-microsoft-com:mac:vml';
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const TABLE_PART = 'xl/tables/table1.xml';
+const CUSTOM_PART = 'xl/custom/a.xml';
+
+/** An autofilter on one column whose filters are `filters`. */
+function autoFilterWith(filters: string): string {
+  return `<autoFilter ref="A1:A2"><filterColumn colId="0">${filters}</filterColumn></autoFilter>`;
+}
+
+// An autofilter value with a word ending in url glued to a parenthesis.
+const AUTOFILTER_CURL = autoFilterWith('<filters><filter val="Curl(25mm)"/></filters>');
+
+// A data validation whose prompt and error texts hold image(s), Curl(25mm) and URL(leri).
+const DATA_VALIDATION_IMAGES =
+  '<dataValidations count="1"><dataValidation type="list" sqref="A1" showInputMessage="1" ' +
+  'promptTitle="Image(s)" prompt="Upload image(s) here" errorTitle="Curl(25mm)" ' +
+  'error="Gorsel URL(leri) giriniz"><formula1>"a,b"</formula1></dataValidation></dataValidations>';
+
+// The x14 data validation Excel 2010+ writes, its prompt holding image(s).
+const X14_DATA_VALIDATION_IMAGES =
+  `<extLst><ext xmlns:x14="${X14_NS}" uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}">` +
+  `<x14:dataValidations xmlns:xm="${XM_NS}" count="1">` +
+  '<x14:dataValidation type="list" showInputMessage="1" promptTitle="Image(s)" ' +
+  'prompt="Upload image(s) here" error="URL(leri)">' +
+  '<x14:formula1><xm:f>Sheet1!$A$1:$A$3</xm:f></x14:formula1><xm:sqref>A2:A10</xm:sqref>' +
+  '</x14:dataValidation></x14:dataValidations></ext></extLst>';
+
+// A pivot cache field whose one shared item is a product name holding Curl(25mm).
+const PIVOT_ITEM_CURL =
+  '<cacheField name="Ad" numFmtId="0"><sharedItems count="1"><s v="Sac Masasi Curl(25mm)"/></sharedItems></cacheField>';
+
+// A picture description holding the path of an image file named image(1).png.
+const PICTURE_PATH_DESCRIPTION = 'descr="C:\\x\\image(1).png"';
+
+/** A drawing picture whose non-visual properties carry `attributes` and hold `content`. */
+function pictureWith(attributes: string, content = ''): string {
+  return (
+    `<xdr:pic macro=""><xdr:nvPicPr><xdr:cNvPr id="2" name="Picture 1" ${attributes}>` +
+    `${content}</xdr:cNvPr></xdr:nvPicPr></xdr:pic>`
+  );
+}
+
+/** A picture hyperlink whose tooltip holds image(s), its `a` prefix bound to `namespace`. */
+function hyperlinkTooltipIn(namespace: string): string {
+  return pictureWith(
+    '',
+    `<a:hlinkClick xmlns:a="${namespace}" r:id="rId1" tooltip="Upload image(s)"/>`,
+  );
+}
+
+/** A worksheet whose root, in the default namespace `namespace`, holds `after` after its sheet data. */
+function worksheetInNamespace(namespace: string, after: string): string {
+  return `${UTF8_DECLARATION}<worksheet xmlns="${namespace}"><sheetData/>${after}</worksheet>`;
+}
+
+/** A pivot cache definition in the default namespace `namespace` whose cache fields are `fields`. */
+function pivotCacheInNamespace(namespace: string, fields: string): string {
+  return (
+    `${UTF8_DECLARATION}<pivotCacheDefinition xmlns="${namespace}" refreshOnLoad="0">` +
+    `<cacheFields count="1">${fields}</cacheFields></pivotCacheDefinition>`
+  );
+}
+
+/** A table in the default namespace `namespace` whose one column is named Curl(25mm). */
+function tableInNamespace(namespace: string): string {
+  return (
+    `${UTF8_DECLARATION}<table xmlns="${namespace}" id="1" name="T" displayName="T" ref="A1:A2">` +
+    '<tableColumns count="1"><tableColumn id="1" name="Curl(25mm)"/></tableColumns></table>'
+  );
+}
+
+/** A workbook in the default namespace `namespace` whose one sheet is named Curl(2). */
+function workbookInNamespace(namespace: string, relationships: string): string {
+  return (
+    `${UTF8_DECLARATION}<workbook xmlns="${namespace}" xmlns:r="${relationships}">` +
+    '<sheets><sheet name="Curl(2)" sheetId="1" r:id="rId1"/></sheets></workbook>'
+  );
+}
+
+/** A drawing whose `xdr` prefix is bound to `namespace` and whose one anchor holds `shape`. */
+function drawingInNamespace(namespace: string, relationships: string, shape: string): string {
+  return (
+    `${UTF8_DECLARATION}<xdr:wsDr xmlns:xdr="${namespace}" xmlns:r="${relationships}">` +
+    `<xdr:twoCellAnchor>${shape}</xdr:twoCellAnchor></xdr:wsDr>`
+  );
+}
+
+/** A chart whose `c` prefix is bound to `namespace`, holding a value Curl(25mm). */
+function chartInNamespace(namespace: string): string {
+  return `${UTF8_DECLARATION}<c:chartSpace xmlns:c="${namespace}"><c:chart><c:x val="Curl(25mm)"/></c:chart></c:chartSpace>`;
+}
+
+// An attribute value that loads a resource to a CSS reader.
+const LOADING_VALUE = 'url(http://evil/x)';
+// An autofilter value that loads a resource to a CSS reader.
+const LOADING_FILTER = `<filter val="${LOADING_VALUE}"/>`;
+
+// An Excel data attribute (an unprefixed attribute of an element in an Office data
+// namespace, read before the part's first web content and outside a style element) is
+// exempt from the broad CSS rule: no renderer reads CSS there. Every other attribute keeps
+// it, and so does everything the exemption does not name.
+describe('assertSafeXmlContent: data attributes of Office namespaces', () => {
+  it.each<[label: string, entry: string, xml: string]>([
+    ['an autofilter value Curl(25mm)', SHEET_PART, worksheetWithAfter(AUTOFILTER_CURL)],
+    [
+      'an autofilter value Resim-src(2)',
+      SHEET_PART,
+      worksheetWithAfter(autoFilterWith('<filters><filter val="Resim-src(2)"/></filters>')),
+    ],
+    [
+      'a custom autofilter value',
+      SHEET_PART,
+      worksheetWithAfter(
+        autoFilterWith(
+          '<customFilters><customFilter operator="equal" val="Sac Masasi Curl(25mm)"/></customFilters>',
+        ),
+      ),
+    ],
+    [
+      'a data validation prompt and error holding image(s) and URL(leri)',
+      SHEET_PART,
+      worksheetWithAfter(DATA_VALIDATION_IMAGES),
+    ],
+    [
+      'the x14 data validation Excel writes, its prompt holding image(s)',
+      SHEET_PART,
+      worksheetWithAfter(X14_DATA_VALIDATION_IMAGES),
+    ],
+    ['a pivot cache item', PIVOT_CACHE_PART, pivotCacheWith(PIVOT_ITEM_CURL)],
+    [
+      'a picture description holding a path to image(1).png',
+      DRAWING_PART,
+      drawingWith(pictureWith(PICTURE_PATH_DESCRIPTION)),
+    ],
+    ['a picture title', DRAWING_PART, drawingWith(pictureWith('title="Curl(25mm)"'))],
+    ['a picture hyperlink tooltip', DRAWING_PART, drawingWith(hyperlinkTooltipIn(DRAWING_MAIN_NS))],
+    [
+      'the absolute path Excel writes for a folder named urun-image(1)',
+      WORKBOOK_PART,
+      workbookWith(
+        `<mc:AlternateContent xmlns:mc="${MARKUP_COMPATIBILITY_NS}"><mc:Choice Requires="x15">` +
+          `<x15ac:absPath xmlns:x15ac="${X15AC_NS}" url="C:\\Users\\u\\urun-image(1)\\"/>` +
+          '</mc:Choice></mc:AlternateContent>',
+      ),
+    ],
+    ['a sheet name', WORKBOOK_PART, workbookInNamespace(SPREADSHEET_NS, OFFICE_RELATIONSHIPS_NS)],
+    ['a table column name', TABLE_PART, tableInNamespace(SPREADSHEET_NS)],
+    ['a chart value', CHART_PART, chartInNamespace(CHART_NS)],
+    // The same in the strict namespaces.
+    [
+      'an autofilter value in a strict worksheet',
+      SHEET_PART,
+      worksheetInNamespace(STRICT_SPREADSHEET_NS, AUTOFILTER_CURL),
+    ],
+    [
+      'a pivot cache item in a strict pivot cache',
+      PIVOT_CACHE_PART,
+      pivotCacheInNamespace(STRICT_SPREADSHEET_NS, PIVOT_ITEM_CURL),
+    ],
+    ['a table column name in a strict table', TABLE_PART, tableInNamespace(STRICT_SPREADSHEET_NS)],
+    [
+      'a sheet name in a strict workbook',
+      WORKBOOK_PART,
+      workbookInNamespace(STRICT_SPREADSHEET_NS, STRICT_RELATIONSHIPS_NS),
+    ],
+    [
+      'a picture description in a strict drawing',
+      DRAWING_PART,
+      drawingInNamespace(
+        STRICT_DRAWING_NS,
+        STRICT_RELATIONSHIPS_NS,
+        pictureWith(PICTURE_PATH_DESCRIPTION),
+      ),
+    ],
+    [
+      'a picture hyperlink tooltip in a strict drawing',
+      DRAWING_PART,
+      drawingInNamespace(
+        STRICT_DRAWING_NS,
+        STRICT_RELATIONSHIPS_NS,
+        hyperlinkTooltipIn(STRICT_DRAWING_MAIN_NS),
+      ),
+    ],
+    ['a chart value in a strict chart', CHART_PART, chartInNamespace(STRICT_CHART_NS)],
+    [
+      'an autofilter value in a worksheet whose prefix is x',
+      SHEET_PART,
+      `${UTF8_DECLARATION}<x:worksheet xmlns:x="${SPREADSHEET_NS}"><x:sheetData/>` +
+        '<x:autoFilter ref="A1:A2"><x:filterColumn colId="0"><x:filters><x:filter val="Curl(25mm)"/>' +
+        '</x:filters></x:filterColumn></x:autoFilter></x:worksheet>',
+    ],
+    [
+      'an autofilter value after a comment that names svg but holds no svg tag',
+      SHEET_PART,
+      worksheetWithAfter(`<!-- an svg chart, svg> -->${AUTOFILTER_CURL}`),
+    ],
+    [
+      'a prefix declared twice with the same listed namespace',
+      SHEET_PART,
+      worksheetWithAfter(
+        `<s:filter xmlns:s="${SPREADSHEET_NS}" xmlns:s="${SPREADSHEET_NS}" val="Curl(25mm)"/>`,
+      ),
+    ],
+  ])('accepts %s', (_label, entry, xml) => {
+    expect(scanError(entriesOf({ [entry]: xml }))).toBeNull();
+  });
+
+  it('accepts an upload whose worksheet autofilter value is Curl(25mm), end to end', () => {
+    const file = buildXlsxFixture([{ name: 'Sheet1', xml: worksheetWithAfter(AUTOFILTER_CURL) }]);
+
+    expect(gateError(file)).toBeNull();
+  });
+
+  it.each<[label: string, entry: string, xml: string, detail: UnsafeContentDetail]>([
+    [
+      'an SVG element in a worksheet',
+      SHEET_PART,
+      worksheetWithAfter(`<s:rect xmlns:s="${SVG_NS}" fill="url(http://evil/p.svg#g)"/>`),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    [
+      'an SVG element in a drawing',
+      DRAWING_PART,
+      drawingWith(`<s:rect xmlns:s="${SVG_NS}" fill="url(http://evil/p.svg#g)"/>`),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    [
+      'a default namespace redeclared to SVG on a child of a SpreadsheetML element',
+      SHEET_PART,
+      worksheetWithAfter(`<g xmlns="${SVG_NS}"><rect fill="${LOADING_VALUE}"/></g>`),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    [
+      'a prefix the SpreadsheetML worksheet root binds to SVG',
+      SHEET_PART,
+      `${UTF8_DECLARATION}<worksheet xmlns="${SPREADSHEET_NS}" xmlns:s="${SVG_NS}"><sheetData/>` +
+        `<s:rect fill="${LOADING_VALUE}"/></worksheet>`,
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    [
+      'a SpreadsheetML part whose root is svg',
+      SVG_PART,
+      `<svg xmlns="${SPREADSHEET_NS}">${LOADING_FILTER}</svg>`,
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    [
+      'a data element nested in an SVG element',
+      SHEET_PART,
+      worksheetWithAfter(`<s:g xmlns:s="${SVG_NS}">${LOADING_FILTER}</s:g>`),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    [
+      'a data element following an SVG element',
+      SHEET_PART,
+      worksheetWithAfter(`<s:g xmlns:s="${SVG_NS}"></s:g>${LOADING_FILTER}`),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    [
+      'an element named svg in the SpreadsheetML namespace',
+      SHEET_PART,
+      worksheetWithAfter(`<svg><rect fill="${LOADING_VALUE}"/></svg>`),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    // An HTML reader ends a comment, CDATA section or processing instruction at its
+    // first '>' and may read an `svg` start tag past it.
+    ...['<!-- x><svg> -->', '<![CDATA[ x><SVG> ]]>', '<?note x><Svg?>'].map(
+      (markup): [string, string, string, UnsafeContentDetail] => [
+        `a data element following ${markup}`,
+        SHEET_PART,
+        worksheetWithAfter(`${markup}${LOADING_FILTER}`),
+        UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+      ],
+    ),
+    // A style element is CSS in any namespace: a reader that takes its text raw reads
+    // the attributes of the elements inside it as CSS.
+    [
+      'a data element inside a style element of the SpreadsheetML namespace',
+      SHEET_PART,
+      worksheetWithAfter(`<style>${LOADING_FILTER}</style>`),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    // VML and the Office VML namespaces.
+    [
+      'a VML shape',
+      VML_PART,
+      vmlShapes(`<v:shape id="s" title="${LOADING_VALUE}"/>`),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    [
+      'an Office VML element',
+      VML_PART,
+      vmlShapes(`<o:lock v:ext="edit" title="${LOADING_VALUE}"/>`),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    [
+      'an Office Excel VML element',
+      VML_PART,
+      vmlShapes(`<x:ClientData ObjectType="${LOADING_VALUE}"/>`),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    // No namespace.
+    [
+      'an element of no namespace in a custom part',
+      CUSTOM_PART,
+      `<z a="${LOADING_VALUE}"/>`,
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    [
+      'a worksheet root with no default namespace',
+      SHEET_PART,
+      `${UTF8_DECLARATION}<worksheet><sheetData/>${LOADING_FILTER}</worksheet>`,
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    [
+      'a child of a worksheet that undeclares the default namespace',
+      SHEET_PART,
+      worksheetWithAfter(`<filter xmlns="" val="${LOADING_VALUE}"/>`),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    [
+      'an undeclared prefix',
+      SHEET_PART,
+      worksheetWithAfter(`<q:filter val="${LOADING_VALUE}"/>`),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    // Other namespaces.
+    ...['urn:custom', MARKUP_COMPATIBILITY_NS, OFFICE_RELATIONSHIPS_NS, MAC_VML_NS].map(
+      (namespace): [string, string, string, UnsafeContentDetail] => [
+        `an element of the namespace ${namespace}`,
+        SHEET_PART,
+        worksheetWithAfter(`<u:filter xmlns:u="${namespace}" val="${LOADING_VALUE}"/>`),
+        UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+      ],
+    ),
+    // Near misses of a listed namespace as the default namespace of the part.
+    ...[
+      `${SPREADSHEET_NS} `,
+      SPREADSHEET_NS.toUpperCase(),
+      SPREADSHEET_NS.replace('http:', 'https:'),
+      'http://purl.oclc.org/ooxml/spreadsheetml/2006/main',
+      'http://schemas.openxmlformats.org/spreadsheetml/main',
+      SPREADSHEET_NS.replace(/main$/, 'm&#97;in'),
+    ].map((namespace): [string, string, string, UnsafeContentDetail] => [
+      `a worksheet of the near-miss namespace "${namespace}"`,
+      SHEET_PART,
+      worksheetInNamespace(namespace, LOADING_FILTER),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ]),
+    // A prefix declared twice on one element names a data namespace only when both do.
+    [
+      'a prefix declared twice, for SpreadsheetML and urn:x',
+      SHEET_PART,
+      worksheetWithAfter(
+        `<s:filter xmlns:s="${SPREADSHEET_NS}" xmlns:s="urn:x" val="${LOADING_VALUE}"/>`,
+      ),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    [
+      'a prefix declared twice, for SpreadsheetML and SVG',
+      SHEET_PART,
+      worksheetWithAfter(
+        `<s:filter xmlns:s="${SPREADSHEET_NS}" xmlns:s="${SVG_NS}" val="${LOADING_VALUE}"/>`,
+      ),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    [
+      'a prefixed attribute on a data element',
+      SHEET_PART,
+      worksheetWithAfter(`<filter xmlns:s="${SVG_NS}" s:fill="${LOADING_VALUE}"/>`),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    [
+      'the f inside a defined name, whose own declarations the walk does not follow',
+      WORKBOOK_PART,
+      workbookWith(
+        `<definedNames><definedName name="x"><f xmlns="${SVG_NS}" fill="${LOADING_VALUE}">A1</f></definedName></definedNames>`,
+      ),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    [
+      'a data element after an end tag that names another element',
+      SHEET_PART,
+      worksheetWithAfter(`<a></worksheet>${LOADING_FILTER}</a>`),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
+    ],
+    // The checks the exemption does not name run on a data element as before.
+    [
+      'a style attribute on a data element',
+      SHEET_PART,
+      worksheetWithAfter(`<filter style="fill:${LOADING_VALUE}"/>`),
+      UNSAFE_CONTENT_DETAILS.CSS_LOAD,
+    ],
+    [
+      'a data attribute after markup the strict lexer refuses',
+      SHEET_PART,
+      worksheetWithAfter('<e a=1/><filter val="Curl(25mm)"/>'),
+      UNSAFE_CONTENT_DETAILS.LOOSE_CSS,
+    ],
+    [
+      'a URL attribute on a data element',
+      SHEET_PART,
+      worksheetWithAfter('<filter src="http://evil/x"/>'),
+      UNSAFE_CONTENT_DETAILS.EXTERNAL_URL,
+    ],
+  ])('refuses %s', (_label, entry, xml, detail) => {
+    expectUnsafePart(scanError(entriesOf({ [entry]: xml })), entry, detail);
   });
 });
