@@ -123,15 +123,15 @@ export const trendyolAdvantageTariffFormat = defineFormat({
       throw new WorkbookInvariantError('A kept advantage tariff row has no current price');
     }
     // The file has no stock code column: the model code is stored as both, as it always was.
-    const modelCode = reader.text('modelCode');
+    const modelCode = reader.displayText('modelCode');
     return {
       barcode: anchor,
       stockCode: modelCode,
       // A row keeps a readable title even when its barcode matches no product.
-      productTitle: reader.text('productTitle') ?? anchor,
-      category: reader.text('category'),
-      brand: reader.text('brand'),
-      size: reader.text('size'),
+      productTitle: reader.displayText('productTitle') ?? anchor,
+      category: reader.displayText('category'),
+      brand: reader.displayText('brand'),
+      size: reader.displayText('size'),
       modelCode,
       stock: requireStorableInt(reader.int('stock', 'truncate')),
       currentPrice,

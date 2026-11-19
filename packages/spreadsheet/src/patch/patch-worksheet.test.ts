@@ -40,6 +40,9 @@ const DATE_STYLES: readonly boolean[] = Array.from(
   { length: DATE_STYLE + 1 },
   (_, style) => style === DATE_STYLE,
 );
+// What a General clone callback answers: an index of one digit, and a longer one.
+const CLONE_STYLE = 9;
+const LONG_CLONE_STYLE = 1234;
 
 const PRECONDITION_COLUMNS = 6;
 const MISSING_ROW_COUNT = 12;
@@ -393,6 +396,113 @@ describe('applyCellPatches: date styles', () => {
       'PAYLOAD_TOO_LARGE',
       { reason: PATCH_LIMIT_REASONS.GROWTH, cap: expected - 1 },
     );
+  });
+
+  describe('with a General clone callback', () => {
+    /** A callback answering `answer`, and the style of every call it got. */
+    function recorder(answer: number | null): {
+      readonly calls: number[];
+      readonly generalStyleOf: (style: number) => number | null;
+    } {
+      const calls: number[] = [];
+      return {
+        calls,
+        generalStyleOf: (style) => {
+          calls.push(style);
+          return answer;
+        },
+      };
+    }
+
+    /** `dated`, with `generalStyleOf` as the patcher's callback. */
+    function cloned(
+      body: string,
+      patches: readonly CellPatch[],
+      generalStyleOf: (style: number) => number | null,
+      flagged: readonly number[] = [],
+    ): string {
+      return sheetDataOf(
+        wellFormed(patchWorksheetXml(sheet(body), patches, flagged, DATE_STYLES, generalStyleOf)),
+      );
+    }
+
+    it('points a date style at its General clone under a number', () => {
+      const { calls, generalStyleOf } = recorder(CLONE_STYLE);
+
+      expect(cloned(DATE_CELL, [num(2, 1, '12.50')], generalStyleOf)).toBe(
+        `<row r="2"><c r="B2" s="${CLONE_STYLE}"><v>12.50</v></c></row>`,
+      );
+      expect(calls).toEqual([DATE_STYLE]);
+    });
+
+    it("writes the clone in the style's position, keeps every other kept attribute in order", () => {
+      const { generalStyleOf } = recorder(CLONE_STYLE);
+
+      expect(
+        cloned(
+          `<row r="2"><c r="B2" foo="a&amp;b" s = '7' t="n" bar="z"><v>3</v></c></row>`,
+          [num(2, 1, '4')],
+          generalStyleOf,
+        ),
+      ).toBe(`<row r="2"><c r="B2" foo="a&amp;b" s="${CLONE_STYLE}" bar="z"><v>4</v></c></row>`);
+    });
+
+    it('drops the date style when the callback answers null', () => {
+      const { calls, generalStyleOf } = recorder(null);
+
+      expect(cloned(DATE_CELL, [num(2, 1, '12.50')], generalStyleOf)).toBe(
+        '<row r="2"><c r="B2"><v>12.50</v></c></row>',
+      );
+      expect(calls).toEqual([DATE_STYLE]);
+    });
+
+    it('is not asked for text, a clear, a non-date, prefixed, empty or referenced style, or an insert', () => {
+      const body =
+        '<row r="2"><c r="A2" s="7"><v>1</v></c><c r="B2" s="7"><v>1</v></c>' +
+        `<c r="C2" s="${NUMBER_STYLE}"><v>1</v></c><c r="D2" xmlns:x="urn:x" x:s="7"><v>1</v></c>` +
+        '<c r="E2" s=""><v>1</v></c><c r="F2" s="&#55;"><v>1</v></c></row>';
+      const patches = [
+        text(2, 0, 'x'),
+        clear(2, 1),
+        num(2, 2, '4'),
+        num(2, 3, '4'),
+        num(2, 4, '4'),
+        num(2, 5, '4'),
+        num(2, 6, '4'),
+      ];
+      const { calls, generalStyleOf } = recorder(CLONE_STYLE);
+
+      expect(cloned(body, patches, generalStyleOf)).toBe(dated(body, patches));
+      expect(calls).toEqual([]);
+    });
+
+    it('sizes the part with the longer clone style, to the byte', () => {
+      const before = `${DATE_CELL}<row r="3"><c r="A3" s="${DATE_STYLE}"/></row>`;
+      const after =
+        `<row r="2"><c r="B2" s="${LONG_CLONE_STYLE}"><v>12.50</v></c></row>` +
+        `<row r="3"><c r="A3" s="${LONG_CLONE_STYLE}"><v>1</v></c></row>`;
+      const part = sheet(before);
+      const patches = [num(2, 1, '12.50'), num(3, 0, '1')];
+      const expected = part.length - before.length + after.length;
+      const { generalStyleOf } = recorder(LONG_CLONE_STYLE);
+
+      const fits = applyCellPatches(indexWorksheet(part), patches, {
+        ...capped(expected, DATE_STYLES),
+        generalStyleOf,
+      });
+
+      expect(fits.bytes).toHaveLength(expected);
+      expect(sheetDataOf(wellFormed(fits.bytes))).toBe(after);
+      expectFileError(
+        () =>
+          applyCellPatches(indexWorksheet(part), patches, {
+            ...capped(expected - 1, DATE_STYLES),
+            generalStyleOf,
+          }),
+        'PAYLOAD_TOO_LARGE',
+        { reason: PATCH_LIMIT_REASONS.GROWTH, cap: expected - 1 },
+      );
+    });
   });
 });
 

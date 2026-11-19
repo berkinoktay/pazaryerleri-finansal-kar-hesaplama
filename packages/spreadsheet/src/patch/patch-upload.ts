@@ -6,9 +6,15 @@ import { readSheet, type SheetReading } from '../read-grid';
 import { CONTENT_TYPES_PART, WORKBOOK_RELS_PART } from '../workbook-parts';
 import { assertAnchorsMatch } from './anchors';
 import { planCalcChainRemoval } from './calc-chain';
+import { MAX_CLONED_STYLES_PART_BYTES } from './limits';
 import { assertTargetsOutsideFormulaRanges, assertTargetsOutsideMerges } from './merged-ranges';
-import { assertPatchTargets, type ResolvedPatchRequest } from './patch-request';
-import { applyCellPatches, patchedPartCap, type WorksheetPatchOptions } from './patch-worksheet';
+import { assertPatchTargets, type CellPatch, type ResolvedPatchRequest } from './patch-request';
+import {
+  applyCellPatches,
+  patchedPartCap,
+  type WorksheetPatchOptions,
+  type WorksheetPatchResult,
+} from './patch-worksheet';
 import {
   entryContent,
   rewriteZip,
@@ -18,7 +24,8 @@ import {
 } from './raw-zip';
 import { MALFORMED_SHEET_REASONS, PATCH_LIMIT_REASONS, ZIP_REJECT_REASONS } from './reasons';
 import { foldAsciiCase, metaEntryName } from './shared';
-import { cellKeysOf, indexWorksheet } from './sheet-index';
+import { cellKeysOf, indexWorksheet, type SheetIndex } from './sheet-index';
+import { StyleClones } from './style-clones';
 import { entriesByName } from './zip-views';
 
 // The export patch path, sync and in-process: one stored upload in, one archive per
@@ -42,23 +49,36 @@ import { entriesByName } from './zip-views';
 //      the range of an array or data table formula (only its top-left cell holds the
 //      `f`, so the patcher alone would write the others);
 //   8. each output's patches, applied to the index; a number written into a cell whose
-//      style formats a date (the reader's own date table) drops that style;
-//   9. a changed output is the archive with the converted part replaced and, when a
-//      formula was overwritten, the calcChain cut. rewriteZip refuses an output whose
-//      directory region would hold a local-header signature (the gate's stream would
-//      read it); the bytes of all outputs together are capped.
-// The patched part is built from the bytes the reader parsed, never from the
+//      style formats a date (the reader's own date table) points the cell at a General
+//      clone of that style, appended to the output's own copy of the styles part
+//      (style-clones.ts). Cloning is off, and the style dropped as before, when the
+//      styles part is also another part the reader reads or the rewrite may replace,
+//      is not a gate part or a zip entry, is larger than MAX_CLONED_STYLES_PART_BYTES
+//      (each distinct set of clones parses it once more), or is one the clone walk
+//      refuses; when the built styles part fails its checks, only the clone takes the
+//      worksheet part past its growth cap, or rewriteZip refuses the archive that
+//      carries the clones (step 9), cloning goes off for the rest of the job and the
+//      output is written again with the style dropped. An output that needs no clone
+//      keeps the stored styles entry as raw bytes;
+//   9. a changed output is the archive with the converted part replaced, the styles
+//      part when it has clones and, when a formula was overwritten, the calcChain cut.
+//      rewriteZip refuses an output whose directory region would hold a local-header
+//      signature (the gate's stream would read it); the bytes of all outputs together
+//      are capped.
+// The patched parts are built from the bytes the reader parsed, never from the
 // directory's copy.
 //
 // An output is not bound by the import caps (read.maxBytes, the DOM weight): it goes
 // to the marketplace, not back through our import gate, and those caps bound what our
-// own parse may cost. Its size is bounded by the patch growth cap of its part
-// (patchedPartCap) and by MAX_PATCH_OUTPUT_TOTAL_BYTES for the whole job.
+// own parse may cost. Its size is bounded by the patch growth cap of each part it
+// rewrites (patchedPartCap) and by MAX_PATCH_OUTPUT_TOTAL_BYTES for the whole job.
 
 // Every relationships part ends with this, the package's root relationships included;
 // a calcChain path never drops one.
 const RELATIONSHIPS_PART_SUFFIX = '.rels';
 const DROP: ZipChange = { kind: 'drop' };
+// The entry name of a job without a styles part: its clones are off, so none is written.
+const NO_STYLES_PATH = '';
 
 /**
  * Throws SpreadsheetFileError MALFORMED_SHEET `{ reason: 'reader-mismatch',
@@ -164,6 +184,72 @@ function calcChainChanges(
   return changes;
 }
 
+/** One output's patched worksheet part, and its styles part when it has General clones (else null). */
+interface PatchedOutput {
+  readonly result: WorksheetPatchResult;
+  readonly styles: Uint8Array | null;
+}
+
+/**
+ * The job's General clones of date styles (step 8): off when the reading has no
+ * styles part, or its styles part is also another part the reader reads or the
+ * content types, or is not a gate part, or the zip directory has no entry of that name,
+ * or it is larger than MAX_CLONED_STYLES_PART_BYTES.
+ */
+function styleClonesOf(
+  reading: SheetReading,
+  parts: UploadParts,
+  entries: ReadonlyMap<string, ZipEntry>,
+): StyleClones {
+  const { stylesPath, xfIsDate } = reading;
+  if (stylesPath === null) return new StyleClones(null, NO_STYLES_PATH, xfIsDate);
+  const usable =
+    !reading.stylesPartIsShared && stylesPath !== CONTENT_TYPES_PART && entries.has(stylesPath);
+  const styles = usable && Object.hasOwn(parts, stylesPath) ? parts[stylesPath] : undefined;
+  const small = styles !== undefined && styles.length <= MAX_CLONED_STYLES_PART_BYTES;
+  return new StyleClones(small ? styles : null, stylesPath, xfIsDate);
+}
+
+/** Whether `error` is the patcher's PAYLOAD_TOO_LARGE for a part past its growth cap. */
+function isGrowthError(error: unknown): boolean {
+  return (
+    error instanceof SpreadsheetFileError &&
+    error.code === 'PAYLOAD_TOO_LARGE' &&
+    error.meta.reason === PATCH_LIMIT_REASONS.GROWTH
+  );
+}
+
+/**
+ * One output's `patches` applied with `withClones` (`options` plus the clones'
+ * callback): the patched part and, when a cell points at a General clone, the output's
+ * styles part. When that styles part cannot be built, or the run with clones throws
+ * the growth error after a clone was asked for, cloning goes off for the rest of the
+ * job and the output is patched again with `options`, its date styles dropped (that
+ * run may throw on its own). Every other error of the first run passes through.
+ */
+function patchOutput(
+  index: SheetIndex,
+  patches: readonly CellPatch[],
+  options: WorksheetPatchOptions,
+  withClones: WorksheetPatchOptions,
+  clones: StyleClones,
+): PatchedOutput {
+  clones.begin();
+  let result: WorksheetPatchResult;
+  try {
+    result = applyCellPatches(index, patches, withClones);
+  } catch (error) {
+    if (clones.requested === 0 || !isGrowthError(error)) throw error;
+    clones.disable();
+    return { result: applyCellPatches(index, patches, options), styles: null };
+  }
+  if (clones.requested === 0) return { result, styles: null };
+  const styles = clones.build();
+  if (styles !== null) return { result, styles };
+  clones.disable();
+  return { result: applyCellPatches(index, patches, options), styles: null };
+}
+
 /**
  * One entry per output of `request`: the new archive, or null when the output changes
  * nothing (the stored file itself). See the top of this file for the order of the
@@ -176,7 +262,8 @@ function calcChainChanges(
  * ROW_NOT_FOUND;
  * PAYLOAD_TOO_LARGE for a patched part beyond its growth cap, or outputs beyond
  * MAX_PATCH_OUTPUT_TOTAL_BYTES together. An output may be larger than the import caps
- * allow (see the top of this file).
+ * allow (see the top of this file). The General clones of date styles never fail a
+ * job: whatever stops them, the output drops those styles instead (step 8).
  */
 export function patchUpload(
   file: Uint8Array,
@@ -210,28 +297,57 @@ export function patchUpload(
     dateStyles: reading.xfIsDate,
   };
   const entries = entriesByName(layout);
+  const clones = styleClonesOf(reading, parts, entries);
+  const withClones: WorksheetPatchOptions = {
+    ...options,
+    generalStyleOf: (style) => clones.generalStyleOf(style),
+  };
   let calcChain: ReadonlyMap<string, ZipChange> | undefined;
-  // The calcChain replacements are the same content objects in every output, so each
-  // is deflated and checksummed once per job.
+  // The calcChain replacements, and a styles part outputs with the same clones share,
+  // are the same content objects in every output, so each is deflated and checksummed
+  // once per job.
   const deflated = new Map<Uint8Array, DeflatedContent>();
   let totalBytes = 0;
   const outputs: (Uint8Array<ArrayBuffer> | null)[] = [];
-  for (const patches of request.outputs) {
-    const result = applyCellPatches(index, patches, options);
-    if (!result.changed) {
-      outputs.push(null);
-      continue;
-    }
+  /** The archive of one changed output (step 9). */
+  function archiveOf(
+    result: WorksheetPatchResult,
+    styles: Uint8Array | null,
+  ): Uint8Array<ArrayBuffer> {
     const changes = new Map<string, ZipChange>();
     if (result.formulasRemoved > 0) {
       calcChain ??= calcChainChanges(file, entries, parts, partPath);
       for (const [name, change] of calcChain) changes.set(name, change);
     }
     changes.set(partPath, { kind: 'replace', content: result.bytes });
-    const archive = rewriteZip(file, layout, changes, deflated);
-    // The patched part is this output's own: keeping it would hold every output's
-    // part in memory until the job ends.
-    deflated.delete(result.bytes);
+    if (styles !== null) changes.set(clones.entry, { kind: 'replace', content: styles });
+    try {
+      return rewriteZip(file, layout, changes, deflated);
+    } finally {
+      // The patched part is this output's own: keeping it would hold every output's
+      // part in memory until the job ends.
+      deflated.delete(result.bytes);
+    }
+  }
+  for (const patches of request.outputs) {
+    const patched = patchOutput(index, patches, options, withClones, clones);
+    if (!patched.result.changed) {
+      outputs.push(null);
+      continue;
+    }
+    let archive: Uint8Array<ArrayBuffer>;
+    try {
+      archive = archiveOf(patched.result, patched.styles);
+    } catch (error) {
+      // rewriteZip refuses an output whose new directory spells a local header
+      // signature, and the new crc and sizes of the styles part can spell one by
+      // chance. Like every other stop of the clones (step 8), that drops the date
+      // styles instead of failing the job; an error the run without clones throws is
+      // its own.
+      if (patched.styles === null || !(error instanceof SpreadsheetFileError)) throw error;
+      clones.disable();
+      archive = archiveOf(applyCellPatches(index, patches, options), null);
+    }
     totalBytes += archive.length;
     assertOutputBudget(totalBytes);
     outputs.push(archive);

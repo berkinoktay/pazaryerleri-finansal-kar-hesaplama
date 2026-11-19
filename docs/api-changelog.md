@@ -26,6 +26,26 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Workbook exports keep the look of a date-styled cell that gets a number**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/{advantage-tariffs|commission-tariffs|plus-commission-tariffs}/{tariffId}/export`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|flash-products}/{listId}/export`,
+  `POST /v1/organizations/{orgId}/stores/{storeId}/marketplace-campaigns/{campaignId}/export`).
+  A number written into a cell whose style formats a date now keeps the cell's font, fill, border
+  and alignment: the export adds a General copy of that style to the workbook's styles and points
+  the cell at it, so the cell shows the number rather than a date. It used to lose its whole
+  style. When the workbook's styles cannot be extended safely, the cell loses its style as before.
+  A file without such a cell is exported byte for byte as before. No schema or response shape
+  change; not breaking.
+- **Workbook imports decode Excel's character escape in display text**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products|advantage-tariffs|plus-commission-tariffs|commission-tariffs}/import`).
+  Excel's `_xHHHH_` character escape (`_x000A_` for a line break, for one) is decoded in the
+  display text of newly uploaded rows: the product title, brand, category, color, size and the
+  model, stock and product codes. `_x005F_` stands for a literal underscore, so `_x005F_x0041_`
+  reads `_x0041_`, and a character outside the Basic Multilingual Plane escaped as two halves
+  (`_xD83D__xDE00_`) reads as that one character. An escape of a character XML cannot hold
+  (`_x0000_`, or an unpaired half, for one) stays as written. Barcodes and every value compared
+  with the stored file are read as before, and rows
+  stored before are not rewritten. No schema or response shape change; not breaking.
 - **Workbook uploads: Excel data that only reads like a CSS call is no longer refused**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products|advantage-tariffs|plus-commission-tariffs|commission-tariffs}/import`).
   A file whose Excel data attributes hold a word ending in `url`, `src` or `image` glued to `(`
@@ -83,7 +103,10 @@ section "Versioning" for details.
   without notice. An export whose plan holds more patch cells than one engine call writes answers
   `409 STORED_FILE_UNREADABLE` before the file is patched, where it used to fail with a `500`;
   the current limits cannot reach it. A number written into a cell whose style formats a date is
-  written without that style, so the cell shows the number rather than a date. No request or
+  written without that style, so the cell shows the number rather than a date. _(Superseded
+  within this Unreleased: the cell now keeps its font, fill, border and alignment under a General
+  copy of that style, and loses its style only when the styles cannot be extended safely; see
+  "Workbook exports keep the look of a date-styled cell that gets a number".)_ No request or
   response shape changes.
 - **Discount and campaign config updates write once**
   (`PATCH /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}`,
@@ -2119,6 +2142,10 @@ supplierId, apiKey, apiSecret } }`. Credentials are probed against
 
 ### Fixed
 
+- **Products list `brandId` and `categoryId` pattern in the spec**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/products`). The `pattern` of the `brandId` and
+  `categoryId` query parameters is `^\d+$`, where it used to read `^d+$`, which their own examples
+  did not match. Spec only; runtime parsing is unchanged.
 - **Organization name pattern in the spec** (`POST /v1/organizations`).
   `CreateOrganizationInput.name.pattern` is `[\p{L}\p{N}]`, where it used to carry a literal `/u`
   suffix that no value matched. The validation itself is unchanged. Documentation only.

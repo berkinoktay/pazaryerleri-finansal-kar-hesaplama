@@ -2,6 +2,7 @@ export * from './constants';
 export * from './errors';
 export {
   cellDecimal,
+  cellDisplayText,
   cellFlag,
   cellInstant,
   cellInt,
@@ -20,6 +21,7 @@ export type {
   IntMode,
   WallClockPattern,
 } from './cells';
+export { decodeExcelEscapes } from './excel-escape';
 export type { CellValue, SheetData } from './grid-types';
 export {
   all,

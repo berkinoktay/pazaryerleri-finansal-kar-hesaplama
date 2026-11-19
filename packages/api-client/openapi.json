@@ -12622,7 +12622,7 @@
           {
             "schema": {
               "type": "string",
-              "pattern": "^d+$",
+              "pattern": "^\\d+$",
               "description": "Trendyol brand id (BigInt) — exact match against Product.brandId.",
               "example": "2032"
             },
@@ -12634,7 +12634,7 @@
           {
             "schema": {
               "type": "string",
-              "pattern": "^d+$",
+              "pattern": "^\\d+$",
               "description": "Trendyol category id (BigInt) — exact match against Product.categoryId.",
               "example": "2122"
             },

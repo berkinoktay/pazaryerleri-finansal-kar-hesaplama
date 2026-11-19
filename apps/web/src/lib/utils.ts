@@ -15,11 +15,16 @@ import { extendTailwindMerge } from 'tailwind-merge';
  * dedupe correctly. KEEP THIS LIST IN SYNC with the `--spacing-*` block in
  * `app/globals.css`. (Radius already uses Tailwind's default key names, and the
  * color group's permissive validator already dedupes custom colors, so neither
- * needs registering.)
+ * needs registering.) The custom animations (`--animate-<name>` in `app/globals.css`
+ * that holds a whole animation) are registered the same way, so a consumer's
+ * `animate-none` can override a primitive's `animate-field-shake`. Never list the
+ * `--animate-duration-*` timing tokens there: they set another property, and grouping
+ * them with the animations would drop one of two classes that both apply.
  */
 const twMerge = extendTailwindMerge({
   extend: {
     theme: {
+      animate: ['field-shake'],
       spacing: [
         // core 4pt scale
         '3xs',

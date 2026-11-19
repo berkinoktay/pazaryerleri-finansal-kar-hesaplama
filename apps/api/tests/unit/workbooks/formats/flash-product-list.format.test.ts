@@ -584,6 +584,34 @@ describe('Trendyol flash product format: the row fallbacks', () => {
       externalId: null,
     });
   });
+
+  it('decodes Excel escapes in display text and keeps the anchor and identifiers raw', () => {
+    const row = mapOne({
+      [COL.barcode]: 'BC_x0041_1',
+      [COL.productTitle]: 'Tisort_x000a_Pamuk',
+      [COL.category]: 'Cat_x0041_',
+      [COL.brand]: 'AB_x005F_x0041_',
+      [COL.modelCode]: 'AB_x005F_x0041_',
+      [COL.campaignedProduct]: 'C_x0041_',
+      [COL.externalId]: 'ID_x0041_',
+    });
+
+    expect(row).toMatchObject({
+      barcode: 'BC_x0041_1',
+      productTitle: 'Tisort\nPamuk',
+      category: 'CatA',
+      brand: 'AB_x0041_',
+      modelCode: 'AB_x0041_',
+      campaignedProduct: 'C_x0041_',
+      externalId: 'ID_x0041_',
+    });
+  });
+
+  it('titles a row by its raw barcode when its title decodes to nothing', () => {
+    const row = mapOne({ [COL.barcode]: 'BC_x0041_1', [COL.productTitle]: '_x0020_' });
+
+    expect(row.productTitle).toBe('BC_x0041_1');
+  });
 });
 
 describe('Trendyol flash product format: the import rehearsal on the real file', () => {

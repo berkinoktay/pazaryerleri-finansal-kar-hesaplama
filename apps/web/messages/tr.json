@@ -1614,6 +1614,8 @@
       "enterPrice": "Fiyat girin",
       "customPriceHint": "Bir fiyat girin, komisyonu görün",
       "customPriceCeilingHint": "Maks. {price} girebilirsin",
+      "customPriceAboveCeiling": "Bu fiyat {price} olan Flaş tavanının üstünde, bu yüzden seçilemez.",
+      "customPriceNoOffer": "Dosyada bu ürün için Flaş teklifi yok, bu yüzden özel fiyat seçilemez.",
       "selectCustom": "Bu fiyatı seç",
       "customSelected": "Seçildi",
       "commissionUnknown": "Bilinmiyor",

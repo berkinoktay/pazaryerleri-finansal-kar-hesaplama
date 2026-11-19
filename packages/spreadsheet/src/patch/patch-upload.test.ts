@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import { strFromU8, unzipSync, zipSync } from 'fflate';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { fileErrorOf } from '../../tests/helpers/errors';
 import { pinOf, readFixture } from '../../tests/helpers/fixture-pins';
-import { clear, MAIN_NAMESPACE, num, text } from '../../tests/helpers/patch-helpers';
+import { clear, MAIN_NAMESPACE, num, stylesXml, text } from '../../tests/helpers/patch-helpers';
 import { BOUNDED_INFLATE_BUDGET_MS, expectWithinBudget } from '../../tests/helpers/timing';
 import {
   hiddenEntryArchive,
@@ -23,7 +23,7 @@ import {
   MAX_PATCH_OUTPUTS,
   MAX_PATCH_TEXT_LENGTH,
 } from '../constants';
-import type { SpreadsheetFileErrorCode } from '../errors';
+import { SpreadsheetFileError, type SpreadsheetFileErrorCode } from '../errors';
 import type { SheetData } from '../grid-types';
 import { openUpload } from '../guards';
 import { readSheet, readUploadGrid } from '../read-grid';
@@ -32,8 +32,16 @@ import { buildXlsxFixture, worksheetXml } from '../testing/build-xlsx';
 import { patchFixture, type PatchFixtureOptions } from '../testing/patch-fixture';
 import { resolvePatchRequest, type CellPatch, type ResolvedPatchRequest } from './patch-request';
 import { assertOutputBudget, assertSameCells, patchUpload } from './patch-upload';
-import { readZipLayout } from './raw-zip';
+import { patchedPartCap } from './patch-worksheet';
+import { MAX_CLONED_STYLES_PART_BYTES } from './limits';
+import { readZipLayout, rewriteZip } from './raw-zip';
 import { MALFORMED_SHEET_REASONS, PATCH_LIMIT_REASONS, ZIP_REJECT_REASONS } from './reasons';
+
+// rewriteZip runs as written; a test may stand in for one call that refuses.
+vi.mock('./raw-zip', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./raw-zip')>();
+  return { ...actual, rewriteZip: vi.fn(actual.rewriteZip) };
+});
 
 const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>';
 const PACKAGE_RELATIONSHIPS_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
@@ -934,32 +942,258 @@ describe('patchUpload: written values', () => {
     expect(readBack(out)).toEqual([[INERT_FORMULA_TEXT]]);
   });
 
-  it('drops a date style under a number, so it reads back as the number; keeps a 0.00 style', () => {
+  describe('a number written into a date-styled cell', () => {
     // cellXfs: 0 General, 1 a date (numFmt 14), 2 '0.00' (numFmt 2).
-    const styles =
-      `${XML_DECLARATION}<styleSheet xmlns="${MAIN_NAMESPACE}"><cellXfs count="3">` +
-      '<xf numFmtId="0"/><xf numFmtId="14" applyNumberFormat="1"/>' +
-      '<xf numFmtId="2" applyNumberFormat="1"/></cellXfs></styleSheet>';
-    const file = bookOf(
-      worksheet(
-        '<row r="1"><c r="A1"><v>1</v></c></row>' +
-          `<row r="2"><c r="A2" s="1"><v>${DATE_SERIAL}</v></c><c r="B2" s="2"/></row>`,
-      ),
-      {
+    const CELL_XFS =
+      '<cellXfs count="3"><xf numFmtId="0"/><xf numFmtId="14" applyNumberFormat="1"/>' +
+      '<xf numFmtId="2" applyNumberFormat="1"/></cellXfs>';
+    const GENERAL_CLONE = '<xf numFmtId="0" applyNumberFormat="1"/>';
+    const DATED_ROWS =
+      '<row r="1"><c r="A1"><v>1</v></c></row>' +
+      `<row r="2"><c r="A2" s="1"><v>${DATE_SERIAL}</v></c><c r="B2" s="2"/></row>`;
+    const DROPPED_DATE_CELL = '<c r="A2"><v>149.90</v></c>';
+
+    /** A one-sheet workbook whose sheetData holds `body`, with the styles part `styles`. */
+    function datedBook(body: string, styles = stylesXml(CELL_XFS)): Buffer {
+      return bookOf(worksheet(body), {
         [RELS_PART]: relsOf(
           relationship('rId1', 'worksheet', 'worksheets/sheet1.xml'),
           relationship('rId2', 'styles', 'styles.xml'),
         ),
         [STYLES_PART]: styles,
-      },
-    );
-    expect(readBack(file)[1]?.[0]).toBeInstanceOf(Date);
+      });
+    }
 
-    const out = patchFixture(file, [num(2, 0, '149.90'), num(2, 1, '12.50')]);
+    /** How many times `part` occurs in `text`. */
+    function occurrences(text: string, part: string): number {
+      return text.split(part).length - 1;
+    }
 
-    expect(entryText(out, SHEET_PART)).toContain(
-      '<c r="A2"><v>149.90</v></c><c r="B2" s="2"><v>12.50</v></c>',
-    );
-    expect(readBack(out)[1]).toEqual([149.9, 12.5]);
+    it('points it at a General clone of the style, so it reads back as the number; keeps a 0.00 style', () => {
+      const file = datedBook(DATED_ROWS);
+      expect(readBack(file)[1]?.[0]).toBeInstanceOf(Date);
+
+      const out = patchFixture(file, [num(2, 0, '149.90'), num(2, 1, '12.50')]);
+
+      expect(entryText(out, SHEET_PART)).toContain(
+        '<c r="A2" s="3"><v>149.90</v></c><c r="B2" s="2"><v>12.50</v></c>',
+      );
+      const styles = entryText(out, STYLES_PART);
+      expect(styles).toContain('<cellXfs count="4">');
+      expect(styles).toContain(
+        `<xf numFmtId="2" applyNumberFormat="1"/>${GENERAL_CLONE}</cellXfs>`,
+      );
+      expect(readBack(out)[1]).toEqual([149.9, 12.5]);
+      const reading = readSheet(openUpload(out, GUARD_OPTS), {
+        caps: { rowCap: DEFAULT_READ.rowCap, colCap: DEFAULT_READ.colCap },
+      });
+      expect(reading.xfIsDate).toEqual([false, true, false, false]);
+    });
+
+    it('adds one clone for two cells that share a date style', () => {
+      const file = datedBook(
+        '<row r="1"><c r="A1"><v>1</v></c></row>' +
+          `<row r="2"><c r="A2" s="1"><v>${DATE_SERIAL}</v></c><c r="B2" s="1"><v>${DATE_SERIAL}</v></c></row>`,
+      );
+
+      const out = patchFixture(file, [num(2, 0, '1'), num(2, 1, '2')]);
+
+      expect(entryText(out, SHEET_PART)).toContain(
+        '<c r="A2" s="3"><v>1</v></c><c r="B2" s="3"><v>2</v></c>',
+      );
+      const styles = entryText(out, STYLES_PART);
+      expect(styles).toContain('<cellXfs count="4">');
+      expect(occurrences(styles, GENERAL_CLONE)).toBe(1);
+      expect(readBack(out)[1]).toEqual([1, 2]);
+    });
+
+    it('keeps the raw styles entry when no number goes into a date-styled cell', () => {
+      const file = datedBook(DATED_ROWS);
+
+      const out = patchFixture(file, [num(2, 1, '12.50')]);
+
+      expect(entryText(out, SHEET_PART)).toContain('<c r="B2" s="2"><v>12.50</v></c>');
+      expect(sameSegment(out, file, STYLES_PART)).toBe(true);
+    });
+
+    it('keeps the date style under text and leaves the styles entry untouched', () => {
+      const file = datedBook(DATED_ROWS);
+
+      const out = patchFixture(file, [text(2, 0, 'x')]);
+
+      expect(entryText(out, SHEET_PART)).toContain(
+        '<c r="A2" s="1" t="inlineStr"><is><t>x</t></is></c>',
+      );
+      expect(sameSegment(out, file, STYLES_PART)).toBe(true);
+    });
+
+    it.each([
+      [
+        'the walk refuses (a second cellXfs)',
+        stylesXml(`${CELL_XFS}<cellXfs count="0"></cellXfs>`),
+      ],
+      [
+        'the clone would read as a date (a custom numFmt redefines id 0)',
+        stylesXml(
+          '<numFmts count="1"><numFmt numFmtId="0" formatCode="dd/mm/yyyy"/></numFmts>' + CELL_XFS,
+        ),
+      ],
+    ])('drops the date style when %s, and reads back the number', (_, styles) => {
+      const file = datedBook(DATED_ROWS, styles);
+
+      const out = patchFixture(file, [num(2, 0, '149.90'), num(2, 1, '12.50')]);
+
+      expect(entryText(out, SHEET_PART)).toContain(
+        `${DROPPED_DATE_CELL}<c r="B2" s="2"><v>12.50</v></c>`,
+      );
+      expect(sameSegment(out, file, STYLES_PART)).toBe(true);
+      expect(readBack(out)[1]).toEqual([149.9, 12.5]);
+    });
+
+    it('drops the date style when the styles part is also the shared strings part', () => {
+      // The reader reads that part twice; a rebuilt styles part would change what it
+      // reads as shared strings, so the clones stay off.
+      const file = bookOf(worksheet(DATED_ROWS), {
+        [RELS_PART]: relsOf(
+          relationship('rId1', 'worksheet', 'worksheets/sheet1.xml'),
+          relationship('rId2', 'sharedStrings', 'styles.xml'),
+          relationship('rId3', 'styles', 'styles.xml'),
+        ),
+        [STYLES_PART]: stylesXml(CELL_XFS),
+      });
+      expect(readBack(file)[1]?.[0]).toBeInstanceOf(Date);
+
+      const out = patchFixture(file, [num(2, 0, '149.90'), num(2, 1, '12.50')]);
+
+      expect(entryText(out, SHEET_PART)).toContain(
+        `${DROPPED_DATE_CELL}<c r="B2" s="2"><v>12.50</v></c>`,
+      );
+      expect(sameSegment(out, file, STYLES_PART)).toBe(true);
+      expect(readBack(out)[1]).toEqual([149.9, 12.5]);
+    });
+
+    it('drops the date style when the styles part is larger than the clones take', () => {
+      // White space before cellXfs: a part any reader accepts, one byte above the limit.
+      const file = datedBook(
+        DATED_ROWS,
+        stylesXml(`${' '.repeat(MAX_CLONED_STYLES_PART_BYTES)}${CELL_XFS}`),
+      );
+
+      const out = patchFixture(file, [num(2, 0, '149.90'), num(2, 1, '12.50')]);
+
+      expect(entryText(out, SHEET_PART)).toContain(
+        `${DROPPED_DATE_CELL}<c r="B2" s="2"><v>12.50</v></c>`,
+      );
+      expect(sameSegment(out, file, STYLES_PART)).toBe(true);
+    });
+
+    it('drops the date style when the archive that carries its clone cannot be written', () => {
+      // rewriteZip refuses an output whose new directory spells a local header signature,
+      // which the styles part's new crc and sizes can do by chance: stand in for it once.
+      const file = datedBook(DATED_ROWS);
+      vi.mocked(rewriteZip).mockImplementationOnce(() => {
+        throw new SpreadsheetFileError('CORRUPT_FILE', 'stand-in for a stray signature', {
+          reason: ZIP_REJECT_REASONS.LAYOUT,
+        });
+      });
+
+      const out = patchFixture(file, [num(2, 0, '149.90'), num(2, 1, '12.50')]);
+
+      expect(entryText(out, SHEET_PART)).toContain(
+        `${DROPPED_DATE_CELL}<c r="B2" s="2"><v>12.50</v></c>`,
+      );
+      expect(sameSegment(out, file, STYLES_PART)).toBe(true);
+      expect(readBack(out)[1]).toEqual([149.9, 12.5]);
+    });
+
+    it('lets a refusal of an archive with no clone through', () => {
+      const file = datedBook(DATED_ROWS);
+      const refusal = new SpreadsheetFileError('CORRUPT_FILE', 'stand-in for a stray signature', {
+        reason: ZIP_REJECT_REASONS.LAYOUT,
+      });
+      vi.mocked(rewriteZip).mockImplementationOnce(() => {
+        throw refusal;
+      });
+
+      expect(() => patchFixture(file, [num(2, 1, '12.50')])).toThrow(refusal);
+    });
+
+    it('drops the date style when only its clone would pass the growth cap', () => {
+      const sheetXml = worksheet(DATED_ROWS);
+      const file = bookOf(sheetXml, {
+        [RELS_PART]: relsOf(
+          relationship('rId1', 'worksheet', 'worksheets/sheet1.xml'),
+          relationship('rId2', 'styles', 'styles.xml'),
+        ),
+        [STYLES_PART]: stylesXml(CELL_XFS),
+      });
+      const cap = patchedPartCap(sheetXml.length);
+      const dateCell = `<c r="A2" s="1"><v>${DATE_SERIAL}</v></c>`;
+      const textCell = (ref: string, length: number): string =>
+        `<c r="${ref}" t="inlineStr"><is><t>${'x'.repeat(length)}</t></is></c>`;
+      // Two new text cells fill the part to the cap exactly when the date style is
+      // dropped; the clone's `s="3"` makes it longer than the cap.
+      const fill =
+        cap -
+        sheetXml.length -
+        (DROPPED_DATE_CELL.length - dateCell.length) -
+        textCell('B1', 0).length -
+        textCell('C1', 0).length;
+      const first = Math.min(fill, MAX_PATCH_TEXT_LENGTH);
+      const second = fill - first;
+      expect(second).toBeGreaterThan(0);
+      expect(second).toBeLessThanOrEqual(MAX_PATCH_TEXT_LENGTH);
+
+      const out = patchFixture(file, [
+        text(1, 1, 'x'.repeat(first)),
+        text(1, 2, 'x'.repeat(second)),
+        num(2, 0, '149.90'),
+      ]);
+
+      const sheetBytes = unzipSync(out)[SHEET_PART];
+      expect(sheetBytes).toHaveLength(cap);
+      expect(entryText(out, SHEET_PART)).toContain(DROPPED_DATE_CELL);
+      expect(sameSegment(out, file, STYLES_PART)).toBe(true);
+    });
+
+    it('gives each output a styles part with its own clones', () => {
+      // cellXfs: 0 General, 1 a date (numFmt 14), 2 '0.00', 3 another date (numFmt 22).
+      const fourXfs =
+        '<cellXfs count="4"><xf numFmtId="0"/><xf numFmtId="14" applyNumberFormat="1"/>' +
+        '<xf numFmtId="2" applyNumberFormat="1"/><xf numFmtId="22" borderId="0"/></cellXfs>';
+      const cloneOfThree = '<xf numFmtId="0" applyNumberFormat="1" borderId="0"/>';
+      const file = datedBook(
+        '<row r="1"><c r="A1"><v>1</v></c></row>' +
+          `<row r="2"><c r="A2" s="1"><v>${DATE_SERIAL}</v></c><c r="B2" s="3"><v>${DATE_SERIAL}</v></c></row>`,
+        stylesXml(fourXfs),
+      );
+
+      const [only, both] = patchUpload(
+        file,
+        resolvePatchRequest({
+          outputs: [[num(2, 1, '7')], [num(2, 0, '149.90'), num(2, 1, '12.50')]],
+        }),
+      );
+      if (only === undefined || only === null || both === undefined || both === null) {
+        throw new Error('expected two changed outputs');
+      }
+
+      expect(entryText(only, SHEET_PART)).toContain('<c r="B2" s="4"><v>7</v></c>');
+      const onlyStyles = entryText(only, STYLES_PART);
+      expect(onlyStyles).toContain('<cellXfs count="5">');
+      expect(onlyStyles).toContain(`<xf numFmtId="22" borderId="0"/>${cloneOfThree}</cellXfs>`);
+      expect(readBack(only)[1]?.[0]).toBeInstanceOf(Date);
+      expect(readBack(only)[1]?.[1]).toBe(7);
+
+      expect(entryText(both, SHEET_PART)).toContain(
+        '<c r="A2" s="4"><v>149.90</v></c><c r="B2" s="5"><v>12.50</v></c>',
+      );
+      const bothStyles = entryText(both, STYLES_PART);
+      expect(bothStyles).toContain('<cellXfs count="6">');
+      expect(bothStyles).toContain(
+        `<xf numFmtId="22" borderId="0"/>${GENERAL_CLONE}${cloneOfThree}</cellXfs>`,
+      );
+      expect(readBack(both)[1]).toEqual([149.9, 12.5]);
+    });
   });
 });

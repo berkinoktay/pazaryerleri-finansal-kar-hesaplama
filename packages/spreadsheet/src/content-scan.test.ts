@@ -3306,8 +3306,10 @@ describe('assertSafeXmlContent: data attributes of Office namespaces', () => {
       worksheetWithAfter(`<svg><rect fill="${LOADING_VALUE}"/></svg>`),
       UNSAFE_CONTENT_DETAILS.CSS_LOAD_ATTRIBUTE,
     ],
-    // An HTML reader ends a comment, CDATA section or processing instruction at its
-    // first '>' and may read an `svg` start tag past it.
+    // The CDATA section and the processing instruction are the cases an HTML reader really
+    // ends at their first '>' (it reads both as a bogus comment), so it may read the `<svg`
+    // past it as a start tag. It ends `<!-- x><svg> -->` only at `-->`: that is the
+    // comment case where the rule simply fails closed.
     ...['<!-- x><svg> -->', '<![CDATA[ x><SVG> ]]>', '<?note x><Svg?>'].map(
       (markup): [string, string, string, UnsafeContentDetail] => [
         `a data element following ${markup}`,

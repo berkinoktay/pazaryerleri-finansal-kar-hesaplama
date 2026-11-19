@@ -206,11 +206,11 @@ export const trendyolCommissionTariffFormat = defineFormat({
     return {
       barcode: anchor,
       // The model code first, then the seller stock code, as the product import reads them.
-      stockCode: reader.text('modelCode') ?? reader.text('sellerStockCode'),
+      stockCode: reader.displayText('modelCode') ?? reader.displayText('sellerStockCode'),
       // A row keeps a readable title even when its barcode matches no product.
-      productTitle: reader.text('productTitle') ?? anchor,
-      category: reader.text('category'),
-      brand: reader.text('brand'),
+      productTitle: reader.displayText('productTitle') ?? anchor,
+      category: reader.displayText('category'),
+      brand: reader.displayText('brand'),
       stock: requireStorableInt(reader.int('stock', 'truncate')),
       currentPrice,
       commissionBasePrice: knownPrice(reader.decimal('commissionBasePrice')),

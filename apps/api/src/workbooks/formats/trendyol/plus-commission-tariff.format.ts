@@ -144,18 +144,18 @@ export const trendyolPlusCommissionTariffFormat = defineFormat({
   anchor: 'barcode',
   fingerprint: SUMMARY.fingerprint,
   mapRow: (reader, anchor): PlusCommissionTariffRow => {
-    const modelCode = reader.text('modelCode');
+    const modelCode = reader.displayText('modelCode');
     const currentPrice = knownPrice(reader.decimal('currentPrice'));
     const ceiling = knownPrice(reader.decimal('plusPriceUpperLimit'));
     return {
       barcode: anchor,
       // The model code first, then the seller stock code, as the product import reads them.
-      stockCode: modelCode ?? reader.text('sellerStockCode'),
+      stockCode: modelCode ?? reader.displayText('sellerStockCode'),
       // A row keeps a readable title even when its barcode matches no product.
-      productTitle: reader.text('productTitle') ?? anchor,
-      category: reader.text('category'),
-      brand: reader.text('brand'),
-      size: reader.text('size'),
+      productTitle: reader.displayText('productTitle') ?? anchor,
+      category: reader.displayText('category'),
+      brand: reader.displayText('brand'),
+      size: reader.displayText('size'),
       modelCode,
       stock: requireStorableInt(reader.int('stock', 'truncate')),
       currentPrice,

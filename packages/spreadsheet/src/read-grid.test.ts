@@ -537,6 +537,39 @@ describe('readSheet', () => {
     expect(readSheet(openUpload(file, OPTS), { caps: CAPS }).xfIsDate).toEqual([]);
   });
 
+  it('reports the styles part it read, and whether another part the reader reads shares it', () => {
+    const styles =
+      `${XML_DECLARATION}<styleSheet xmlns="${SPREADSHEET_NS}"><cellXfs count="1">` +
+      '<xf numFmtId="0"/></cellXfs></styleSheet>';
+    const own = buildXlsxFixture([{ name: 'S', xml: worksheetXml([['a']]) }], {
+      [RELS_PART]: relsOf(
+        relationship('rId1', 'worksheet', 'worksheets/sheet1.xml'),
+        relationship('rId2', 'styles', 'styles.xml'),
+      ),
+      [STYLES_PART]: styles,
+    });
+    const sharedWithStrings = buildXlsxFixture([{ name: 'S', xml: worksheetXml([['a']]) }], {
+      [RELS_PART]: relsOf(
+        relationship('rId1', 'worksheet', 'worksheets/sheet1.xml'),
+        relationship('rId2', 'sharedStrings', 'styles.xml'),
+        relationship('rId3', 'styles', 'styles.xml'),
+      ),
+      [STYLES_PART]: styles,
+    });
+    const none = buildXlsxFixture([{ name: 'S', xml: worksheetXml([['a']]) }]);
+
+    const ownReading = readSheet(openUpload(own, OPTS), { caps: CAPS });
+    const sharedReading = readSheet(openUpload(sharedWithStrings, OPTS), { caps: CAPS });
+    const noneReading = readSheet(openUpload(none, OPTS), { caps: CAPS });
+
+    expect(ownReading.stylesPath).toBe(STYLES_PART);
+    expect(ownReading.stylesPartIsShared).toBe(false);
+    expect(sharedReading.stylesPath).toBe(STYLES_PART);
+    expect(sharedReading.stylesPartIsShared).toBe(true);
+    expect(noneReading.stylesPath).toBeNull();
+    expect(noneReading.stylesPartIsShared).toBe(false);
+  });
+
   it('lists the merge refs, and reads the same grid as readGrid', () => {
     const xml = worksheetWith(
       '<row r="2"><c r="B2"><v>1</v></c></row>',
@@ -662,6 +695,8 @@ describe('readSheet', () => {
     expect(reading.grid).toEqual([['a']]);
     expect(reading.partPath).toBe(STYLES_PART);
     expect(reading.partIsBookPart).toBe(true);
+    expect(reading.stylesPath).toBe(STYLES_PART);
+    expect(reading.stylesPartIsShared).toBe(true);
   });
 
   it('reports an exception nothing anticipated as CORRUPT_FILE, as readGrid does', () => {

@@ -1614,6 +1614,8 @@
       "enterPrice": "Enter a price",
       "customPriceHint": "Enter a price, see the commission",
       "customPriceCeilingHint": "You can enter at most {price}",
+      "customPriceAboveCeiling": "Above the Flash ceiling of {price}, so it cannot be selected.",
+      "customPriceNoOffer": "The file holds no Flash offer for this product, so a custom price cannot be selected.",
       "selectCustom": "Pick this price",
       "customSelected": "Selected",
       "commissionUnknown": "Unknown",

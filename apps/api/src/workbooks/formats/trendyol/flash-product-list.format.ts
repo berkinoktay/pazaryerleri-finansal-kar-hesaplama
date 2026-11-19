@@ -113,11 +113,11 @@ export const trendyolFlashProductListFormat = defineFormat({
     }
     return {
       barcode: anchor,
-      modelCode: reader.text('modelCode'),
+      modelCode: reader.displayText('modelCode'),
       // A row keeps a readable title even when its barcode matches no product.
-      productTitle: reader.text('productTitle') ?? anchor,
-      category: reader.text('category'),
-      brand: reader.text('brand'),
+      productTitle: reader.displayText('productTitle') ?? anchor,
+      category: reader.displayText('category'),
+      brand: reader.displayText('brand'),
       stock: requireStorableInt(reader.int('stock', 'truncate')),
       currentPrice,
       customerPrice: reader.decimal('customerPrice') ?? currentPrice,

@@ -1,6 +1,8 @@
 import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { formatCurrency } from '@pazarsync/utils';
+
 import { FlashCustomPriceCell } from '@/features/campaigns/components/flash-custom-price-cell';
 import type {
   FlashBand,
@@ -260,44 +262,85 @@ describe('FlashCustomPriceCell — estimate skeleton', () => {
 });
 
 describe('FlashCustomPriceCell - custom price above the ceiling', () => {
-  it('keeps the select button off for a stored price above the lowest offer, even once estimated', async () => {
+  /** Offers at 600 and 550, so the custom-price ceiling is 550. */
+  const CEILING_550_BANDS: FlashBand[] = [
+    { ...offer('h24'), price: '600.00' },
+    { ...offer('h3'), price: '550.00' },
+  ];
+  // Every expected sentence comes from the message file, never a hard-coded copy.
+  const ABOVE_CEILING_TEXT = TABLE.customPriceAboveCeiling.replace(
+    '{price}',
+    formatCurrency('550.00'),
+  );
+  // The same sentence with ANY amount, wherever the translation places it.
+  const ABOVE_CEILING_ANY_PRICE = new RegExp(
+    TABLE.customPriceAboveCeiling
+      .split('{price}')
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('.+'),
+  );
+
+  function priceTextbox(): HTMLElement {
+    return screen.getByRole('textbox', { name: new RegExp(`^${TABLE.customPrice} — `) });
+  }
+
+  it('says why and keeps the select button off for a stored price above the lowest offer, even once estimated', async () => {
     // A stale stored custom price (written through the API before the ceiling check) sits
     // above the lowest offer: the seed drops it from the selection, so no committed price
     // arrives and the input falls back to the server value. The estimate endpoint does not
     // check the ceiling, so it answers calculable.
     mockEstimate('120.00');
     renderCell({
-      row: {
-        ...row,
-        bands: [
-          { ...offer('h24'), price: '600.00' },
-          { ...offer('h3'), price: '550.00' },
-        ],
-        customPrice: '560.00',
-      },
+      row: { ...row, bands: CEILING_550_BANDS, customPrice: '560.00' },
       isSelected: false,
       onSelect: vi.fn(),
       onDeselect: vi.fn(),
     });
-    expect(
-      screen.getByRole('textbox', { name: new RegExp(`^${TABLE.customPrice} — `) }),
-    ).toHaveValue('560');
+    const input = priceTextbox();
+    expect(input).toHaveValue('560');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByText(ABOVE_CEILING_TEXT)).toBeInTheDocument();
     // Wait for the estimate to land, so the button is judged on a current, calculable result.
     expect(await screen.findByRole('button', { name: PROFIT_BADGE_OPEN })).toBeInTheDocument();
+    // The landed estimate does not replace the reason with the commission line.
+    expect(screen.getByText(ABOVE_CEILING_TEXT)).toBeInTheDocument();
+    expect(priceTextbox()).toHaveAttribute('aria-invalid', 'true');
     expect(screen.getByRole('button', { name: TABLE.selectCustom })).toBeDisabled();
+  });
+
+  it('lets the seller delete digits of a stored price above the ceiling, and drops the reason once it fits', async () => {
+    mockEstimate('120.00');
+    const { user } = renderCell({
+      row: { ...row, bands: CEILING_550_BANDS, customPrice: '560.50' },
+      isSelected: false,
+      onSelect: vi.fn(),
+      onDeselect: vi.fn(),
+    });
+    const input = priceTextbox();
+    if (!(input instanceof HTMLInputElement)) throw new Error('price field is not an input');
+    const stored = input.value;
+    // The stored price is data, not a keystroke: the field is marked without a shake.
+    expect(input.closest('[data-invalid="true"]')?.className).not.toContain('animate-field-shake');
+
+    // Still above the ceiling after one digit: `max` would have refused this keystroke.
+    await user.type(input, '{Backspace}');
+    expect(priceTextbox()).toHaveValue(stored.slice(0, -1));
+    expect(screen.getByText(ABOVE_CEILING_TEXT)).toBeInTheDocument();
+
+    await user.clear(priceTextbox());
+    await user.type(priceTextbox(), '540');
+    expect(priceTextbox()).toHaveValue('540');
+    expect(screen.queryByText(ABOVE_CEILING_ANY_PRICE)).toBeNull();
+    expect(priceTextbox()).not.toHaveAttribute('aria-invalid', 'true');
+    // Back under the ceiling, `max` holds again: a keystroke past it is refused.
+    await user.type(priceTextbox(), '0');
+    expect(priceTextbox()).toHaveValue('540');
   });
 
   it('opens the select button for a stored price equal to the lowest offer', async () => {
     mockEstimate('120.00');
     renderCell({
-      row: {
-        ...row,
-        bands: [
-          { ...offer('h24'), price: '600.00' },
-          { ...offer('h3'), price: '550.00' },
-        ],
-        customPrice: '550.00',
-      },
+      row: { ...row, bands: CEILING_550_BANDS, customPrice: '550.00' },
       committedPrice: '550.00',
       isSelected: false,
       onSelect: vi.fn(),
@@ -305,9 +348,11 @@ describe('FlashCustomPriceCell - custom price above the ceiling', () => {
     });
     expect(await screen.findByRole('button', { name: PROFIT_BADGE_OPEN })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: TABLE.selectCustom })).toBeEnabled();
+    expect(screen.queryByText(ABOVE_CEILING_TEXT)).toBeNull();
+    expect(priceTextbox()).not.toHaveAttribute('aria-invalid', 'true');
   });
 
-  it('keeps the select button off on an item with no offer, which has no ceiling', async () => {
+  it('says why and keeps the select button off on an item with no offer, which has no ceiling', async () => {
     // The selection route refuses any custom price on such an item (OFFER_NOT_STORED).
     mockEstimate('120.00');
     renderCell({
@@ -317,8 +362,53 @@ describe('FlashCustomPriceCell - custom price above the ceiling', () => {
       onSelect: vi.fn(),
       onDeselect: vi.fn(),
     });
+    expect(screen.getByText(TABLE.customPriceNoOffer)).toBeInTheDocument();
+    // The price itself is not wrong, only unselectable: the field is not marked invalid.
+    expect(priceTextbox()).not.toHaveAttribute('aria-invalid', 'true');
     expect(await screen.findByRole('button', { name: PROFIT_BADGE_OPEN })).toBeInTheDocument();
+    // The landed estimate keeps its commission line, and the note stays under it.
+    expect(screen.getByText(/%13,1/)).toBeInTheDocument();
+    expect(screen.getByText(TABLE.customPriceNoOffer)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: TABLE.selectCustom })).toBeDisabled();
+  });
+
+  it('keeps the commission of a price typed on an item with no offer and says why it cannot be selected', async () => {
+    mockEstimate('120.00');
+    const { user } = renderCell({
+      row: { ...row, bands: [] },
+      isSelected: false,
+      onSelect: vi.fn(),
+      onDeselect: vi.fn(),
+    });
+    await user.type(priceTextbox(), '500');
+    expect(await screen.findByText(/%13,1/)).toBeInTheDocument();
+    expect(screen.getByText(TABLE.customPriceNoOffer)).toBeInTheDocument();
+    expect(priceTextbox()).not.toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('button', { name: TABLE.selectCustom })).toBeDisabled();
+  });
+
+  it('shows neither reason on an empty card of an item with no offer', () => {
+    renderCell({
+      row: { ...row, bands: [] },
+      isSelected: false,
+      onSelect: vi.fn(),
+      onDeselect: vi.fn(),
+    });
+    expect(screen.queryByText(TABLE.customPriceNoOffer)).toBeNull();
+    expect(screen.queryByText(ABOVE_CEILING_ANY_PRICE)).toBeNull();
+    expect(priceTextbox()).not.toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('tells a read-only member why a stale stored price is not selected', () => {
+    // The estimate is a read, so it still fires for the stored price.
+    mockEstimate('120.00');
+    renderReadOnlyCell({
+      row: { ...row, bands: CEILING_550_BANDS, customPrice: '560.00' },
+      isSelected: false,
+      onSelect: vi.fn(),
+      onDeselect: vi.fn(),
+    });
+    expect(screen.getByText(ABOVE_CEILING_TEXT)).toBeInTheDocument();
   });
 });
 

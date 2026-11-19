@@ -205,6 +205,17 @@ describe('readRows', () => {
     expect(readRows(selected(grid)).rows[0]?.anchor).toBe(anchor);
   });
 
+  it('keeps an Excel escape in the anchor raw: the export compares it with the stored file', () => {
+    const grid: SheetData = [[...HEADER], row('86_x0041_90', 10)];
+    const read = readRows(selected(grid));
+
+    expect(read.rows[0]).toMatchObject({
+      anchor: '86_x0041_90',
+      data: { barcode: '86_x0041_90' },
+    });
+    expect(read.anchoredRows).toEqual([{ excelRow: 2, anchor: '86_x0041_90' }]);
+  });
+
   it('lists every row whose anchor has text, kept or not, as an anchored row', () => {
     const format = syntheticFormat(false);
     // Sheet row 3 has a barcode but no price: dropped by the keep rule, still anchored.

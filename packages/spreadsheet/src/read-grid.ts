@@ -102,6 +102,13 @@ export interface SheetReading {
    * the cells with (empty without a styles part).
    */
   readonly xfIsDate: readonly boolean[];
+  /** The styles part the date table came from (the last styles relationship's), or null. */
+  readonly stylesPath: string | null;
+  /**
+   * That part is also the rels, the workbook, the shared strings or the converted
+   * worksheet part (crafted rels); false without a styles part.
+   */
+  readonly stylesPartIsShared: boolean;
 }
 
 /** Which sheet readGrid reads: strictly by `sheet`, else by `sheetName` (see chooseSheet). */
@@ -303,6 +310,18 @@ function isBookPath(relationships: WorkbookRelationships, path: string): boolean
     path === WORKBOOK_PART ||
     path === relationships.sharedStringsPath ||
     path === relationships.stylesPath
+  );
+}
+
+/** Whether the styles part is also another part the reader reads: the rels, the workbook, the shared strings or `partPath`. */
+function isSharedStylesPart(relationships: WorkbookRelationships, partPath: string): boolean {
+  const { stylesPath } = relationships;
+  if (stylesPath === null) return false;
+  return (
+    stylesPath === WORKBOOK_RELS_PART ||
+    stylesPath === WORKBOOK_PART ||
+    stylesPath === relationships.sharedStringsPath ||
+    stylesPath === partPath
   );
 }
 
@@ -570,6 +589,8 @@ function readGridParts(parts: UploadParts, options: GridReadOptions, track: bool
     mergeRefs: conversion.mergeRefs,
     formulaRangeRefs: conversion.formulaRangeRefs ?? NOT_TRACKED,
     xfIsDate: context.xfIsDate,
+    stylesPath: relationships.stylesPath,
+    stylesPartIsShared: isSharedStylesPart(relationships, conversion.partPath),
   };
 }
 
@@ -601,8 +622,8 @@ export function readGrid(parts: UploadParts, options: GridReadOptions): SheetDat
 
 /**
  * readGrid's reading of the same sheet, with the same errors, plus the part it came
- * from, the key of every cell it placed, its merge refs, its formula range refs and
- * its date table (see SheetReading).
+ * from, the key of every cell it placed, its merge refs, its formula range refs, its
+ * date table and the styles part it came from (see SheetReading).
  */
 export function readSheet(parts: UploadParts, options: GridReadOptions): SheetReading {
   return readParts(parts, options, true);

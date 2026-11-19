@@ -45,10 +45,10 @@ export const trendyolDiscountListFormat = defineFormat({
       barcode: anchor,
       externalId: reader.text('externalId'),
       // A row keeps a readable title even when its barcode matches no product.
-      productTitle: reader.text('productTitle') ?? anchor,
-      brand: reader.text('brand'),
-      color: reader.text('color'),
-      modelCode: reader.text('modelCode'),
+      productTitle: reader.displayText('productTitle') ?? anchor,
+      brand: reader.displayText('brand'),
+      color: reader.displayText('color'),
+      modelCode: reader.displayText('modelCode'),
       currentPrice,
       included: reader.flag('included', { yes: YES_LABEL, compare: 'exact' }),
     };

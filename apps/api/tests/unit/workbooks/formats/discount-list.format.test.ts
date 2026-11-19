@@ -260,6 +260,55 @@ describe('Trendyol discount format: fallbacks', () => {
       },
     ]);
   });
+
+  it('decodes Excel escapes in display text and keeps the anchor and the product id raw', () => {
+    const grid: SheetData = [
+      [...FULL_HEADER],
+      [
+        'ID_x0041_',
+        'Tisort_x000a_Pamuk',
+        'AB_x005F_x0041_',
+        'Red_x0020_',
+        'BC_x0041_1',
+        'AB_x005F_x0041_',
+        99.5,
+        'Buybox X',
+        NO_LABEL,
+      ],
+    ];
+
+    expect(readGrid(grid).rows.map((row) => row.data)).toStrictEqual([
+      {
+        barcode: 'BC_x0041_1',
+        externalId: 'ID_x0041_',
+        productTitle: 'Tisort\nPamuk',
+        brand: 'AB_x0041_',
+        color: 'Red',
+        modelCode: 'AB_x0041_',
+        currentPrice: '99.5',
+        included: false,
+      },
+    ]);
+  });
+
+  it('titles a row by its raw barcode when its title decodes to nothing', () => {
+    const grid: SheetData = [
+      [...FULL_HEADER],
+      [
+        '100000009',
+        '_x0020_',
+        'Marka X',
+        'Renk X',
+        'BC_x0041_1',
+        'MDL-X',
+        99.5,
+        'Buybox X',
+        NO_LABEL,
+      ],
+    ];
+
+    expect(readGrid(grid).rows[0]?.data.productTitle).toBe('BC_x0041_1');
+  });
 });
 
 describe('Trendyol discount format: the legacy golden digests', () => {
