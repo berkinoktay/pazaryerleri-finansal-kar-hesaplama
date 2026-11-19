@@ -105,8 +105,8 @@ export const UNSAFE_CONTENT_DETAILS = {
   EXTERNAL_URL: 'external-url',
   // A style attribute or a style element whose CSS loads a resource.
   CSS_LOAD: 'css-load',
-  // Any other attribute value holding a CSS load call: the broad rule, false positives
-  // included (a word ending in url, src or image glued to '(').
+  // A non-style attribute value holding a CSS load call, on an element outside the Office
+  // data namespaces, in web content or inside a style element.
   CSS_LOAD_ATTRIBUTE: 'css-load-attribute',
   // Style element text the scan cannot decode.
   CSS_UNDECODABLE: 'css-undecodable',

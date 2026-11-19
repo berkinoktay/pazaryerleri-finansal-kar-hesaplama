@@ -141,9 +141,10 @@ const NO_BYTE = -1;
 // innermost open element, byte for byte. An end tag that names another element (a
 // lenient reader may close an ancestor there), an end tag with no element open, or an
 // element opened past that depth leaves the walk unable to follow the nesting: from
-// there on to the end of the part no binding counts, so every `f` is a field and every
-// hyperlink `location` a formula. A part that has more than
-// MAX_XMLNS_DECLARATIONS_PER_PART declarations in scope at once (those of the open
+// there on to the end of the part no binding counts, so every `f` is a field, every
+// hyperlink `location` a formula and no attribute an Excel data attribute (see "CSS").
+// A part that has more than MAX_XMLNS_DECLARATIONS_PER_PART declarations in scope at
+// once (those of the open
 // elements and of the element being read; once the walk cannot follow the nesting,
 // every declaration read from there on stays counted) is refused with the error the
 // reader parts get for more declarations in all (tooManyNamespaceDeclarations); the
@@ -189,12 +190,14 @@ const NO_BYTE = -1;
 // cannot follow the nesting there, its descendants' included but for the formula, macro
 // and script fields scanned on their own) and any other attribute value, whatever its
 // name (CSS to an SVG renderer: `fill`, `filter`, `clip-path`, `mask`, `cursor`,
-// `marker-*`), must load nothing. Neither may hold a `url(` whose target, past CSS white
-// space, an optional quote and CSS white space again, does not start with '#': only a
-// fragment of the document (`url(#grad1)`) passes, a relative, absolute, `data:` or
-// empty target (or a CSS text that ends inside the target) loads; nor a call of a
-// CSS_LOADING_FUNCTIONS function (`image-set`, `image`, `src`, `cross-fade`), wherever
-// it stands. A call is read the way a CSS tokenizer reads a function name (CssNameRun):
+// `marker-*`), but for an Excel data attribute (below), must load nothing; the rule over
+// those other attribute values is the broad rule. Neither may hold a `url(` whose
+// target, past CSS white space, an optional quote and CSS white space again, does not
+// start with '#': only a fragment of the document (`url(#grad1)`) passes, a relative,
+// absolute, `data:` or empty target (or a CSS text that ends inside the target) loads;
+// nor a call of a CSS_LOADING_FUNCTIONS function (`image-set`, `image`, `src`,
+// `cross-fade`), wherever it stands. A call is read the way a CSS tokenizer reads a
+// function name (CssNameRun):
 // the run of identifier code points (ASCII letters, digits, '-', '_', any non-ASCII code
 // point, and escapes) right before a '(' is decoded (a backslash and one to
 // MAX_CSS_HEX_DIGITS hexadecimal digits, then one optional CSS white space, stand for
@@ -206,16 +209,46 @@ const NO_BYTE = -1;
 // A style may also hold no `@import`, no backslash (a CSS escape can spell any name) and
 // no quoted string whose content starts a URL that is absolute by the rule of
 // url-target.ts (read past every quote, so a quote inside a comment cannot hide the
-// string that follows). Any other attribute value may hold no backslash from its first
-// `url(` on; a backslash that spells no call (a VML title `C:\logo`, a picture
-// description `C:\x\Trendyol(1).png`) passes. The text of a style element is read
-// piece by piece (CssScan), in constant memory: nothing of it is kept but the end of the
-// identifier run its last code units spell, how much of `@import` they spell, where the
-// last `url(` target stands and how the text past its last quote starts. A
-// STYLESHEET_INSTRUCTION_NAMES processing instruction (`xml-stylesheet`) is refused
-// wherever it stands. Each refusal is UNSAFE_CONTENT `unsafe-part`; its detail tells a
-// style that loads (`css-load`) from any other attribute value that does
-// (`css-load-attribute`, the rule with known false positives).
+// string that follows). Any other attribute value the broad rule reads may hold no
+// backslash from its first `url(` on; a backslash that spells no call (a VML title
+// `C:\logo`) passes. The text of a style element is read piece by piece (CssScan), in
+// constant memory: nothing of it is kept but the end of the identifier run its last code
+// units spell, how much of `@import` they spell, where the last `url(` target stands and
+// how the text past its last quote starts. A STYLESHEET_INSTRUCTION_NAMES processing
+// instruction (`xml-stylesheet`) is refused wherever it stands.
+// Excel data attributes. The broad rule would refuse clean Excel data that only reads
+// like a call, a word ending in `url`, `src` or `image` glued to '(' (an autofilter value
+// `Curl(25mm)`, a validation prompt `image(s)`, a picture description
+// `C:\x\image(1).png`, a pivot item, a table column or sheet name, the folder a workbook
+// was saved in), and no renderer reads CSS there. So the broad rule skips an unprefixed
+// attribute (OOXML data attributes are unqualified) of an element whose namespace, by
+// the bindings in scope, is one of OFFICE_DATA_NAMESPACES (SpreadsheetML, spreadsheet
+// drawing, DrawingML and chart, each transitional and strict, and the Microsoft
+// SpreadsheetML extension namespaces), its declaration matched byte for byte (one
+// written with a reference names another namespace; one the scan cannot decode is taken
+// for an EVENT_HANDLER_NAMESPACES one), when the element stands outside a style element
+// and before the part's first web content. Web content starts at the first element in
+// an EVENT_HANDLER_NAMESPACES namespace or whose local name is SVG_ROOT_NAME `svg`
+// (ASCII case ignored) at any depth and in any namespace (so every element of an svg
+// part), that element included, at the first element read once the walk cannot follow
+// the nesting, or at a comment, CDATA section or processing instruction that holds
+// SVG_TAG_OPEN `<svg` (ASCII case ignored), which an HTML reader, ending it at its first
+// '>', may read as an `svg` start tag; no element from there to the end of the part is
+// exempt. The broad
+// rule still reads every other attribute value: a prefixed attribute (`s:fill`), and any
+// attribute of an element in another namespace (SVG, XHTML, XML Events, VML, Office
+// VML), of one with no namespace or an unknown one, of one inside a style element
+// (whatever its namespace) and of the one child element of a formula field (whose own
+// declarations the walk does not follow, so that child starts no web content either:
+// there the scan trusts a namespace-aware reading, as the event-handler rule does, and
+// an element read after it may still be exempt). A skipped value still passes every other check
+// its name calls for (a macro is empty, a URL or base relative, a formula field safe),
+// and one that holds a reference the scan cannot decode is still CORRUPT_FILE
+// `package-part` (below). Every style is checked as before, and so is the loose path
+// past markup the strict lexer refuses, which never looks at namespaces (below).
+// Each refusal is UNSAFE_CONTENT `unsafe-part`; its detail tells a style that loads
+// (`css-load`) from any other attribute value the broad rule reads that does
+// (`css-load-attribute`).
 // An attribute value that holds a reference the scan cannot decode (a character
 // reference past U+10FFFF) is CORRUPT_FILE `package-part`, the error the relationships
 // walk gives a Target it cannot decode.
@@ -228,7 +261,8 @@ const NO_BYTE = -1;
 // stylesheet instruction, or when it holds a call of `url(` or a CSS_LOADING_FUNCTIONS
 // function (its bytes read by CssNameRun, escapes decoded) or a character reference
 // (which could spell one), or, in a part with external hyperlinks, a prefixed `id`
-// name; inside a style element the part is refused at once.
+// name; inside a style element the part is refused at once. This path never looks at
+// namespaces, so no Excel data attribute is exempt on it.
 // Every pass is linear in the part; the formula fields are read without a regular
 // expression (formula-scan.ts).
 const FORMULA_ELEMENT_NAMES: readonly string[] = [
@@ -323,6 +357,9 @@ const EVENT_HANDLER_NAMESPACES: readonly string[] = [
 ];
 // The local name of a top-level element that makes every element of its part web content.
 const SVG_ROOT_NAME = 'svg';
+// What an HTML reader, which ends a comment, CDATA section or processing instruction at
+// its first '>', may read past that as an `svg` start tag (ASCII case ignored).
+const SVG_TAG_OPEN = `<${SVG_ROOT_NAME}`;
 // SVG animation elements (see the header).
 const SVG_ANIMATION_ELEMENT_NAMES: readonly string[] = [
   'set',
@@ -353,6 +390,51 @@ const OMML_NAMESPACE = 'http://schemas.openxmlformats.org/officeDocument/2006/ma
 // The namespace of a relationship id (see the header).
 const RELATIONSHIPS_NAMESPACE =
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+// The Office data namespaces (OFFICE_DATA_NAMESPACES): an unprefixed attribute of an
+// element in one of them, read before the part's first web content and outside a style
+// element, is Excel data that no renderer reads as CSS, so the broad CSS rule skips it
+// (see the header). Each is matched byte for byte.
+// SpreadsheetML (`x` or the default namespace): autofilter values, validation prompts
+// and errors, pivot items, table column and sheet names.
+const SPREADSHEETML_NAMESPACE = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+// SpreadsheetML in the strict form (ECMA-376 Part 1 Strict): the same seller text.
+const STRICT_SPREADSHEETML_NAMESPACE = 'http://purl.oclc.org/ooxml/spreadsheetml/main';
+// SpreadsheetML drawing (`xdr`): picture and shape names, titles and descriptions.
+const SPREADSHEET_DRAWING_NAMESPACE =
+  'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing';
+// SpreadsheetML drawing in the strict form: the same seller text.
+const STRICT_SPREADSHEET_DRAWING_NAMESPACE =
+  'http://purl.oclc.org/ooxml/drawingml/spreadsheetDrawing';
+// DrawingML (`a`): hyperlink tooltips, font names, text box properties.
+const DRAWINGML_NAMESPACE = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+// DrawingML in the strict form: the same seller text.
+const STRICT_DRAWINGML_NAMESPACE = 'http://purl.oclc.org/ooxml/drawingml/main';
+// DrawingML chart (`c`): chart values, series names and number formats.
+const CHART_NAMESPACE = 'http://schemas.openxmlformats.org/drawingml/2006/chart';
+// DrawingML chart in the strict form: the same seller text.
+const STRICT_CHART_NAMESPACE = 'http://purl.oclc.org/ooxml/drawingml/chart';
+// Excel 2010 (`x14`): data validation prompts and errors, slicer and sparkline names.
+const X14_NAMESPACE = 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main';
+// Excel 2013 (`x15`): data model table and connection names, pivot item unique names.
+const X15_NAMESPACE = 'http://schemas.microsoft.com/office/spreadsheetml/2010/11/main';
+// Excel 2013 absolute path (`x15ac`): the folder the workbook was saved in (`absPath url`).
+const X15AC_NAMESPACE = 'http://schemas.microsoft.com/office/spreadsheetml/2010/11/ac';
+// Excel revisions (`xr`): the revision pointer Excel writes into a workbook (`revisionPtr`).
+const XR_NAMESPACE = 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision';
+const OFFICE_DATA_NAMESPACES: readonly string[] = [
+  SPREADSHEETML_NAMESPACE,
+  STRICT_SPREADSHEETML_NAMESPACE,
+  SPREADSHEET_DRAWING_NAMESPACE,
+  STRICT_SPREADSHEET_DRAWING_NAMESPACE,
+  DRAWINGML_NAMESPACE,
+  STRICT_DRAWINGML_NAMESPACE,
+  CHART_NAMESPACE,
+  STRICT_CHART_NAMESPACE,
+  X14_NAMESPACE,
+  X15_NAMESPACE,
+  X15AC_NAMESPACE,
+  XR_NAMESPACE,
+];
 // The key of the default namespace among the prefixes of NamespaceScopes.
 const DEFAULT_NAMESPACE_KEY = '';
 /** The most open elements the walk follows the nesting of (see the header). */
@@ -394,12 +476,17 @@ const SCAN_EVERY_PART: ContentScanPlan = new Map();
 /** Lower-case ASCII names, by length. */
 type NameSet = ReadonlyMap<number, readonly string[]>;
 
-/** The namespaces the walk tells apart ('scripted': one of EVENT_HANDLER_NAMESPACES); every other one is 'other'. */
-type KnownNamespace = 'omml' | 'relationships' | 'scripted' | 'other';
+/**
+ * The namespaces the walk tells apart ('data': one of OFFICE_DATA_NAMESPACES; 'scripted':
+ * one of EVENT_HANDLER_NAMESPACES); every other one is 'other'.
+ */
+type KnownNamespace = 'omml' | 'relationships' | 'data' | 'scripted' | 'other';
 
+// The namespaces a declaration names when it holds one of these URIs byte for byte.
 const KNOWN_NAMESPACES: readonly (readonly [uri: string, namespace: KnownNamespace])[] = [
   [OMML_NAMESPACE, 'omml'],
   [RELATIONSHIPS_NAMESPACE, 'relationships'],
+  ...OFFICE_DATA_NAMESPACES.map((uri): readonly [string, KnownNamespace] => [uri, 'data']),
 ];
 
 /** One namespace binding: the level of the element that declared it and the namespace it names. */
@@ -421,11 +508,12 @@ interface DeclaringElement {
 /**
  * The namespace declarations in scope while one part is walked, in memory bounded by
  * MAX_TRACKED_ELEMENT_DEPTH and MAX_XMLNS_DECLARATIONS_PER_PART (see the header). A
- * declaration is compared byte for byte with the OMML and relationships namespaces: one
- * written with a reference names another namespace. It names an EVENT_HANDLER_NAMESPACES
- * namespace ('scripted') when its decoded value is one, or cannot be decoded. A prefix
- * declared twice on one element names the OMML or relationships namespace only when
- * both declarations name it, and an event handler namespace when either does.
+ * declaration is compared byte for byte with the OMML and relationships namespaces and
+ * the OFFICE_DATA_NAMESPACES: one written with a reference names another namespace. It
+ * names an EVENT_HANDLER_NAMESPACES namespace ('scripted') when its decoded value is one,
+ * or cannot be decoded. A prefix declared twice on one element names the OMML or
+ * relationships namespace only when both declarations name it, an Office data namespace
+ * ('data') only when both name one, and an event handler namespace when either does.
  */
 interface NamespaceScopes {
   /** Per prefix (DEFAULT_NAMESPACE_KEY for the default namespace), its bindings, innermost last. */
@@ -1067,8 +1155,19 @@ function assertSafeFieldContent(
     isXmlSpaceOnly(bytes, contentStart, next);
   if (!innerChild) throw notTextOnly(entry);
   assertNoWebContent(entry, bytes, markup, attributes);
+  // The walk does not follow the child's own declarations: it is never a data element.
   for (let attribute = 0; attribute < markup.attributeCount; attribute += 1) {
-    assertSafeAttribute(entry, bytes, attributes, attribute, null, 'sheet-name', false, budget);
+    assertSafeAttribute(
+      entry,
+      bytes,
+      attributes,
+      attribute,
+      null,
+      'sheet-name',
+      false,
+      false,
+      budget,
+    );
   }
   const innerStart = markup.end;
   const innerClose = textOnlyContentEnd(entry, bytes, markup);
@@ -1405,10 +1504,11 @@ function assertSafeStyleAttribute(entry: string, raw: Uint8Array): void {
 }
 
 /**
- * The value bytes `raw` of an attribute that is no style hold no CSS that loads a
- * resource (loadsCssResource), or UNSAFE_CONTENT `unsafe-part`; CORRUPT_FILE
- * `package-part` when they cannot be decoded. Only a value with a '(' or a reference
- * can hold a call once decoded, so no other is decoded.
+ * The broad rule (see the header): the value bytes `raw` of an attribute that is no
+ * style and no Excel data attribute (assertSafeAttribute) hold no CSS that loads a
+ * resource (loadsCssResource), or UNSAFE_CONTENT `unsafe-part` `css-load-attribute`;
+ * CORRUPT_FILE `package-part` when they cannot be decoded. Only a value with a '(' or a
+ * reference can hold a call once decoded, so no other is decoded.
  */
 function assertNoCssUrl(entry: string, raw: Uint8Array): void {
   if (!raw.includes(PARENTHESIS_OPEN) && !raw.includes(AMPERSAND)) return;
@@ -1421,6 +1521,16 @@ function assertNoCssUrl(entry: string, raw: Uint8Array): void {
       'Workbook part holds CSS that loads a resource',
     );
   }
+}
+
+/**
+ * The value bytes `raw` of an attribute the broad CSS rule skips (an Excel data
+ * attribute, see assertSafeAttribute) can be decoded, or CORRUPT_FILE `package-part`.
+ * Only a value with a reference can fail to decode, so no other is decoded.
+ */
+function assertDecodableAttribute(entry: string, raw: Uint8Array): void {
+  if (!raw.includes(AMPERSAND)) return;
+  if (decodeXmlText(raw) === null) throw undecodableAttribute(entry);
 }
 
 /** Whether the attribute whose local name is bytes [start, end) names a URL: `src`, or any name that ends with `href` (ASCII case ignored). */
@@ -1450,9 +1560,12 @@ function localPartStart(bytes: Uint8Array, start: number, end: number): number {
  * Checks attribute `attribute` of the scanned tag: a formula field (a FORMULA_ATTRIBUTES
  * attribute, or the `elementField` attribute of this element) passes the scan, its
  * `formula` attribute read with quoted sections as `formulaQuotes`; a macro is empty; a
- * style loads nothing; any other value holds no CSS that loads a resource, and a URL
- * attribute is relative, or a raster image data URI on an `imageElement` (an
- * IMAGE_ELEMENT_NAMES element), a base URL relative. A field is charged to `budget`.
+ * style loads nothing; any other value holds no CSS that loads a resource, but for an
+ * unprefixed attribute of a `dataElement` (an element of an OFFICE_DATA_NAMESPACES
+ * namespace read before the part's first web content and outside a style element),
+ * which must only decode; and a URL attribute is relative, or a raster image data URI
+ * on an `imageElement` (an IMAGE_ELEMENT_NAMES element), a base URL relative. A field
+ * is charged to `budget`.
  */
 function assertSafeAttribute(
   entry: string,
@@ -1462,6 +1575,7 @@ function assertSafeAttribute(
   elementField: NameSet | null,
   formulaQuotes: QuotedSection,
   imageElement: boolean,
+  dataElement: boolean,
   budget: FormulaScanBudget,
 ): void {
   const nameStart = attributeField(attributes, attribute, ATTRIBUTE_NAME_START);
@@ -1478,7 +1592,12 @@ function assertSafeAttribute(
     assertSafeStyleAttribute(entry, raw);
     return;
   }
-  assertNoCssUrl(entry, raw);
+  // Excel data attributes are unqualified: a prefixed one keeps the broad rule.
+  if (dataElement && localStart === nameStart) {
+    assertDecodableAttribute(entry, raw);
+  } else {
+    assertNoCssUrl(entry, raw);
+  }
   if (isUrlAttributeName(bytes, localStart, nameEnd)) {
     assertRelativeUrl(entry, raw, imageElement);
     return;
@@ -1596,10 +1715,11 @@ function isImageElement(bytes: Uint8Array, start: number, end: number): boolean 
  * formula field header): no active element, no element but a hyperlink that names an
  * external hyperlink of this part (`hyperlinkIds`), every field attribute safe (a
  * hyperlink's `location` unless its relationship ids by `scopes` are only external
- * hyperlinks of this part), and, for a start tag of a field element outside the OMML
- * namespace (`scopes`), its content up to its own end tag (left in `markup`;
- * assertSafeFieldContent), empty for a macro element, white space only for a script
- * element. Every formula field is charged to `budget`.
+ * hyperlinks of this part), every attribute safe (assertSafeAttribute; an unprefixed
+ * attribute of a `dataElement` skips the broad CSS rule), and, for a start tag of a
+ * field element outside the OMML namespace (`scopes`), its content up to its own end
+ * tag (left in `markup`; assertSafeFieldContent), empty for a macro element, white space
+ * only for a script element. Every formula field is charged to `budget`.
  */
 function assertSafeElement(
   entry: string,
@@ -1608,6 +1728,7 @@ function assertSafeElement(
   attributes: number[],
   scopes: NamespaceScopes,
   hyperlinkIds: WorksheetHyperlinkIds,
+  dataElement: boolean,
   budget: FormulaScanBudget,
 ): void {
   const localStart = localNameStart(bytes, markup);
@@ -1640,6 +1761,7 @@ function assertSafeElement(
       elementField,
       formulaQuotes,
       imageElement,
+      dataElement,
       budget,
     );
   }
@@ -1673,8 +1795,9 @@ function createNamespaceScopes(): NamespaceScopes {
 
 /**
  * The namespace the declaration value bytes [start, end) name (see NamespaceScopes):
- * OMML or relationships compared byte for byte, 'scripted' when the decoded value is
- * one of EVENT_HANDLER_NAMESPACES or cannot be decoded.
+ * OMML, relationships or an OFFICE_DATA_NAMESPACES namespace ('data') compared byte for
+ * byte, 'scripted' when the decoded value is one of EVENT_HANDLER_NAMESPACES or cannot be
+ * decoded.
  */
 function knownNamespace(bytes: Uint8Array, start: number, end: number): KnownNamespace {
   for (const [uri, namespace] of KNOWN_NAMESPACES) {
@@ -1686,7 +1809,8 @@ function knownNamespace(bytes: Uint8Array, start: number, end: number): KnownNam
 
 /**
  * The namespace a prefix declared twice on one element names, by its `first` and
- * `second` declarations (see NamespaceScopes).
+ * `second` declarations (see NamespaceScopes): the one both name (two Office data
+ * namespaces name 'data'), 'scripted' when either does, else 'other'.
  */
 function mergedNamespace(first: KnownNamespace, second: KnownNamespace): KnownNamespace {
   if (first === second) return first;
@@ -1842,15 +1966,6 @@ function elementNamespace(
       ? DEFAULT_NAMESPACE_KEY
       : NAME_DECODER.decode(bytes.subarray(markup.nameStart, localStart - 1));
   return boundNamespace(scopes, key);
-}
-
-/**
- * Whether a web renderer reads the element scanned into `markup` by `scopes` (see the
- * header): it is in an EVENT_HANDLER_NAMESPACES namespace, or the walk lost the nesting
- * and no binding counts.
- */
-function isWebElement(scopes: NamespaceScopes, bytes: Uint8Array, markup: XmlMarkup): boolean {
-  return scopes.broken || elementNamespace(scopes, bytes, markup) === 'scripted';
 }
 
 /**
@@ -2038,6 +2153,19 @@ function assertNoFieldAfter(
   }
 }
 
+/**
+ * Whether the opaque markup scanned into `markup` (a comment, CDATA section or processing
+ * instruction) holds SVG_TAG_OPEN, ASCII case ignored: web content to an HTML reader (see
+ * the header).
+ */
+function opaqueHoldsSvgTag(bytes: Uint8Array, markup: XmlMarkup): boolean {
+  const last = markup.end - SVG_TAG_OPEN.length;
+  for (let at = markup.start + 1; at <= last; at += 1) {
+    if (spellsFolded(bytes, at, SVG_TAG_OPEN)) return true;
+  }
+  return false;
+}
+
 /** Whether the opaque markup scanned into `markup` is a processing instruction that loads a resource. */
 function isStylesheetInstruction(bytes: Uint8Array, markup: XmlMarkup): boolean {
   return (
@@ -2093,8 +2221,10 @@ function endStyle(entry: string, style: StyleText): void {
  * Throws SpreadsheetFileError UNSAFE_CONTENT `{ reason, detail, entry }` when XML part
  * `entry` holds a formula field that fails the scan, a macro assignment or a script
  * (`unsafe-formula`), an active element, an event handler or other web content, a URL
- * outside the package, CSS that loads a resource or a stylesheet instruction
- * (`unsafe-part`), or, past markup
+ * outside the package, CSS that loads a resource (a style, or any other attribute value
+ * but an Excel data attribute: an unprefixed attribute of an element of an
+ * OFFICE_DATA_NAMESPACES namespace read before the part's first web content and outside
+ * a style element) or a stylesheet instruction (`unsafe-part`), or, past markup
  * the strict lexer refuses, anything that could be one (see the formula field header);
  * UNSAFE_CONTENT `{ detail, entry, cap }` when it holds more than
  * MAX_XMLNS_DECLARATIONS_PER_PART namespace declarations in scope at once;
@@ -2117,6 +2247,12 @@ function assertSafeFields(
   const style: StyleText = { level: OUTSIDE_STYLE, css: createCssScan(true) };
   // A top-level element of the part is `svg`: every element in it is web content.
   let svgPart = false;
+  // The walk has read web content, an element named `svg` at any depth or opaque markup
+  // that holds SVG_TAG_OPEN: no element from there on is a data element (see
+  // assertSafeAttribute). Nor is an element inside
+  // a style element of any namespace: a reader that takes the style's text raw reads
+  // the element's attributes as CSS.
+  let webSeen = false;
   let textStart = 0;
   for (let at = nextMarkup(bytes, 0); at !== -1; at = nextMarkup(bytes, markup.end)) {
     const inStyle = style.level !== OUTSIDE_STYLE;
@@ -2145,10 +2281,25 @@ function assertSafeFields(
         const inScopeBefore = scopes.declarationsInScope;
         const prefixes = declareNamespaces(entry, scopes, bytes, markup, attributes);
         const declarations = scopes.declarationsInScope - inScopeBefore;
-        if (svgPart || isWebElement(scopes, bytes, markup)) {
+        // Null when the walk lost the nesting or no binding names the element's prefix.
+        const namespace = elementNamespace(scopes, bytes, markup);
+        // A web renderer reads the element (see the header).
+        const web = svgPart || scopes.broken || namespace === 'scripted';
+        webSeen ||= web || isNameIn(bytes, localStart, nameEnd, SVG_ROOT);
+        const dataElement = !webSeen && !inStyle && namespace === 'data';
+        if (web) {
           assertNoWebContent(entry, bytes, markup, attributes);
         }
-        assertSafeElement(entry, bytes, markup, attributes, scopes, hyperlinkIds, budget);
+        assertSafeElement(
+          entry,
+          bytes,
+          markup,
+          attributes,
+          scopes,
+          hyperlinkIds,
+          dataElement,
+          budget,
+        );
         // A field, macro or script element was read through its end tag, now in `markup`.
         if (markup.kind !== 'start') {
           endUnopenedElement(scopes, prefixes, declarations);
@@ -2170,6 +2321,7 @@ function assertSafeFields(
             'Workbook part holds a stylesheet instruction',
           );
         }
+        webSeen ||= opaqueHoldsSvgTag(bytes, markup);
         if (inStyle) addStyleCdata(bytes, markup, style);
         break;
       default: {

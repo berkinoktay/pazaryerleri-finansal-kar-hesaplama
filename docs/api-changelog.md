@@ -26,6 +26,15 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Workbook uploads: Excel data that only reads like a CSS call is no longer refused**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products|advantage-tariffs|plus-commission-tariffs|commission-tariffs}/import`).
+  A file whose Excel data attributes hold a word ending in `url`, `src` or `image` glued to `(`
+  (an autofilter value such as `Curl(25mm)`, a validation prompt such as `image(s)`, a pivot
+  item, a picture description, a saved-folder path, a table column or sheet name) used to answer
+  `422 VALIDATION_ERROR` with `{ field: 'file', code: 'UNSAFE_CONTENT' }`; it is now imported.
+  SVG, XHTML and VML content and every `style` are checked as before, and an attribute outside
+  the Excel data namespaces (a relationships `Target`, for one) keeps the old rule. No schema or
+  response shape change; not breaking.
 - **Validation field codes are always machine codes** (every route that answers
   `422 VALIDATION_ERROR` with field issues). Every `errors[].code` is now a SCREAMING_SNAKE_CASE
   code: a rule without its own code answers `INVALID_FIELD` where it used to answer the
@@ -661,7 +670,8 @@ section "Versioning" for details.
   anything but a `#fragment` of the document (a relative, absolute, `data:` or empty target;
   `url(#id)` passes) or that calls `image-set()`, `-webkit-image-set()`, `image()`, `src()` or
   `cross-fade()` (in every attribute value, so a data validation prompt such as `image(s)` is
-  refused too), each function name read the way a CSS tokenizer reads it: CSS escapes are decoded
+  refused too; _superseded within this Unreleased: an Excel data attribute is now exempt, see
+  "Workbook uploads: Excel data that only reads like a CSS call is no longer refused"_), each function name read the way a CSS tokenizer reads it: CSS escapes are decoded
   (`\75rl(`, `u\72l(` and `image\2dset(` spell `url(` and `image-set(`), a name that only ends
   with one of these (`xurl(`, `-webkit-image-set(`) counts too, and a backslash that spells no
   such call passes (a VML title `C:\logo`, the folder path Excel writes into a workbook such as
