@@ -69,11 +69,12 @@ export const XML_TEXT_NODE_WEIGHT = 3;
 // (about 10.6 million). What it costs, measured 2026-11-19 on a developer
 // laptop in the real parse worker: files crafted to weigh just under this cap needed at
 // most about 783 MB of old generation to read (a 64-column number grid, and rich-text
-// shared strings) and at most about 798 MB to patch (the import's rehearsal, two writes
-// per row; the number grid with its worksheet source padded to about 31 MB). The
-// heaviest commission file it admits (three periods, all four cells filled, 4 920
-// product rows) needed about 722 MB to patch. The same crafted shapes at the earlier
-// 5 000 000 needed at most about 584 MB to read.
+// shared strings), at most about 798 MB to patch once (the import's rehearsal, two
+// writes per row; the number grid with its worksheet source padded to about 31 MB) and
+// about 828 MB to patch the same grid into eight outputs (MAX_PATCH_OUTPUTS, the most an
+// export writes). The heaviest commission file it admits (three periods, all four cells
+// filled, 4 920 product rows) needed about 722 MB to patch, into one output or eight.
+// The same crafted shapes at the earlier 5 000 000 needed at most about 584 MB to read.
 export const MAX_XML_DOM_WEIGHT = 7_000_000;
 // Occurrences of the bytes 'xmlns' per reader part. Sibling declarations parse in
 // linear time; nested ones are quadratic in depth: 256 nested declarations take about
@@ -105,12 +106,13 @@ export const PARSE_QUEUE_MAX_WAIT_MS = 20_000;
 // headroom below. Measured 2026-11-19 on a developer laptop (reads and patches of files
 // crafted to weigh just under MAX_XML_DOM_WEIGHT; the old-generation limit found by
 // binary search in 16 MB steps): the costliest shapes needed about 783 MB of old
-// generation to read and about 798 MB to patch, about 225 MB under the 1 024 MB;
-// filling the worksheet source to about 31 MB with non-Latin1 text, or referencing one
-// 9-million-character shared string, did not raise the read. The slowest job took about
-// 11 s at its minimum heap and at most about 8.5 s at 1 024 MB, under the 30 s time
-// limit; slower or busier hardware has less margin. A read and a patch of the full three-period commission file as
-// exported also run under these limits in the CI-only test of
+// generation to read, about 798 MB to patch once and about 828 MB to patch into eight
+// outputs, about 195 MB under the 1 024 MB; filling the worksheet source to about 31 MB
+// with non-Latin1 text, or referencing one 9-million-character shared string, did not
+// raise the read. The slowest job (a patch into eight outputs) took about 13 s at its
+// minimum heap and at most about 10 s at 1 024 MB, under the 30 s time limit; slower or
+// busier hardware has less margin. A read and a patch of the full three-period
+// commission file as exported also run under these limits in the CI-only test of
 // worker/grid-worker-host.test.ts. A raise of MAX_XML_DOM_WEIGHT needs this measured
 // again.
 export const GRID_WORKER_MAX_OLD_GENERATION_MB = 1024;
