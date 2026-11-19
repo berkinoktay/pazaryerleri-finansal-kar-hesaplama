@@ -1,32 +1,18 @@
 {
-  "enabledPlugins": {
-    "superpowers@claude-plugins-official": true,
-    "code-simplifier@claude-plugins-official": true,
-    "learning-output-style@claude-plugins-official": false,
-    "postman@claude-plugins-official": false
-  },
   "env": {
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5-5"
   },
   "permissions": {
     "ask": [
-      "Bash(git stash)",
-      "Bash(git stash -*)",
       "Bash(git stash push *)",
       "Bash(git stash save *)",
       "Bash(git stash pop *)",
-      "Bash(git stash apply *)",
       "Bash(git stash drop *)",
       "Bash(git stash clear *)",
       "Bash(git stash store *)",
-      "Bash(git stash branch *)",
-      "Bash(git checkout *)",
-      "Bash(git switch *)",
       "Bash(git reset *)",
       "Bash(git restore *)",
-      "Bash(git clean *)",
-      "Bash(git rebase *)",
-      "Bash(git merge *)"
+      "Bash(git clean *)"
     ]
   },
   "skillOverrides": {
@@ -65,5 +51,11 @@
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true,
+    "code-simplifier@claude-plugins-official": true,
+    "learning-output-style@claude-plugins-official": false,
+    "postman@claude-plugins-official": false
   }
 }
