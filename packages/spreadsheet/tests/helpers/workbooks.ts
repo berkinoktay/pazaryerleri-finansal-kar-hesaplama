@@ -1,7 +1,13 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { crc32, deflateRawSync } from 'node:zlib';
 
+import {
+  XML_ATTRIBUTE_WEIGHT,
+  XML_ELEMENT_WEIGHT,
+  XML_TEXT_NODE_WEIGHT,
+} from '../../src/constants';
 import type { ZipEntry, ZipLayout } from '../../src/patch/raw-zip';
+import { colRefToNumber, columnLetters } from '../../src/sheet-meta';
 import { buildXlsxFixture, worksheetXml } from '../../src/testing/build-xlsx';
 import { readFixture } from './fixture-pins';
 import { MAIN_NAMESPACE, sheet } from './patch-helpers';
@@ -16,9 +22,24 @@ const SHARED_STRINGS_PART = 'xl/sharedStrings.xml';
 const STYLES_PART = 'xl/styles.xml';
 const SHEET_DATA_OPEN = '<sheetData>';
 const SHEET_DATA_CLOSE = '</sheetData>';
+// A worksheet row with the whitespace after it.
+const SHEET_ROW = /<row\b[\s\S]*?<\/row>\s*/g;
 // The start tag of a row or a cell, and the row number of the `r` reference inside it.
 const ROW_OR_CELL_START_TAG = /<(?:row|c)\b[^>]*>/g;
 const REFERENCE_ROW_NUMBER = /(\sr="[A-Z]*)\d+"/;
+
+// The DOM weight of `text`, counted with regexes independently of the gate's byte
+// loop: element start tags, '=' bytes, and text-like nodes (every '>' followed by a
+// character other than '<', plus every comment, CDATA section or processing
+// instruction, i.e. every '<!' or '<?').
+export function domWeight(text: string): number {
+  const count = (pattern: RegExp): number => (text.match(pattern) ?? []).length;
+  return (
+    XML_ELEMENT_WEIGHT * count(/<(?![/!?])/g) +
+    XML_ATTRIBUTE_WEIGHT * count(/=/g) +
+    XML_TEXT_NODE_WEIGHT * (count(/>(?=[^<])/g) + count(/<[!?]/g))
+  );
+}
 
 /** `rows` rows of `columns` numbers each, header row included. */
 export function numberRows(rows: number, columns: number): number[][] {
@@ -52,7 +73,7 @@ interface GrownSheet {
 function growSheet(sheet: string, rows: number): GrownSheet {
   const start = sheet.indexOf(SHEET_DATA_OPEN) + SHEET_DATA_OPEN.length;
   const end = sheet.indexOf(SHEET_DATA_CLOSE);
-  const fixtureRows = sheet.slice(start, end).match(/<row\b[\s\S]*?<\/row>\s*/g) ?? [];
+  const fixtureRows = sheet.slice(start, end).match(SHEET_ROW) ?? [];
   const grown = Array.from({ length: rows }, (_, i) => fixtureRows[i % fixtureRows.length] ?? '');
   return { head: sheet.slice(0, start), rows: grown, tail: sheet.slice(end) };
 }
@@ -92,6 +113,222 @@ export function grownFixtureWorkbook(file: string, rows: number): Buffer {
   const sheet = growSheet(strFromU8(sheetBytes), rows);
   const renumbered = sheet.rows.map((row, i) => renumberRow(row, i + 1));
   entries[SHEET_PART] = strToU8(sheet.head + renumbered.join('') + sheet.tail);
+  return Buffer.from(zipSync(entries));
+}
+
+// The worst real commission tariff file, built from the committed Trendyol export.
+const COMMISSION_FIXTURE = 'trendyol-commission-tariff.xlsx';
+// The header row the build keeps as it is (reshaped, never copied or filled): the export
+// writes one, and its product rows start on the second row.
+const COMMISSION_HEADER_ROWS = 1;
+// The cells of every fixture row: columns A..AI.
+const COMMISSION_FIXTURE_COLUMNS = 35;
+// 0-based fixture column indexes the reshape reorders.
+// A..N: product, stock and price band columns, kept in place (indexes 0..13).
+const COMMISSION_LEADING_COLUMNS = 14;
+// T..X: the filled 4-day period block, repeated once per period (the first copy replaces
+// the empty 3-day block O..S).
+const COMMISSION_PERIOD_BLOCK: readonly number[] = [19, 20, 21, 22, 23];
+// Y..AB: base price, current commission, current price, new price (the seller's input).
+const COMMISSION_PRICE_COLUMNS: readonly number[] = [24, 25, 26, 27];
+// AC: the first period's commission formula; AD: the next period's, once per further period.
+const COMMISSION_FIRST_FORMULA = 28;
+const COMMISSION_NEXT_FORMULA = 29;
+// AE..AI: tariff choice, external ids and tariff group.
+const COMMISSION_TRAILING_COLUMNS: readonly number[] = [30, 31, 32, 33, 34];
+// A cell of a fixture row, its leading `r` reference, and a cell with no content at all
+// (the export writes an empty cell as `<c r="D6" s="78"></c>`).
+const SHEET_CELL = /<c r="[A-Z]+\d+"[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g;
+const CELL_REFERENCE = /^<c r="[A-Z]+\d+"/;
+const EMPTY_CELL = /^(<c [^>]*)><\/c>$/;
+// What an empty cell gets after its start tag's attributes when the build fills it.
+const FILLED_CELL_END = ' t="inlineStr"><is><t>x</t></is></c>';
+const ROW_REFERENCE = /^<row r="\d+"/;
+const DIMENSION = /<dimension ref="[^"]*"\/>/;
+// The sheet's data validations, after </sheetData>. The export writes one rule for a whole
+// column (the new price, `AB2:AB1048576`) and one list rule per row (the tariff choice,
+// `AE2` .. `AE56`, one for every row from the second to the last), so the block grows with
+// the rows: each per-row rule weighs 31.
+const DATA_VALIDATIONS = /<dataValidations\b[^>]*>[\s\S]*?<\/dataValidations>/;
+const DATA_VALIDATIONS_START_TAG = /^<dataValidations\b[^>]*>/;
+const DATA_VALIDATIONS_COUNT = /\bcount="\d+"/;
+const DATA_VALIDATIONS_CLOSE = '</dataValidations>';
+const DATA_VALIDATION = /<dataValidation\b[\s\S]*?<\/dataValidation>/g;
+// The cells a rule covers: one cell, or a range of two (groups: column, row, and the
+// range end's column and row).
+const SQREF = /sqref="([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?"/;
+
+export interface WorstCommissionShape {
+  /** 2: both of the fixture's period blocks filled (35 columns); 3: a third period (41). */
+  readonly periods: 2 | 3;
+  /** Sheet rows, the header row included. */
+  readonly rows: number;
+  /** Fill every empty cell of every data row with an inline string. */
+  readonly filled?: boolean;
+}
+
+/** 0-based fixture column indexes of a reshaped row, in their new order. */
+function commissionColumnOrder(periods: 2 | 3): number[] {
+  return [
+    ...Array.from({ length: COMMISSION_LEADING_COLUMNS }, (_, index) => index),
+    ...Array.from({ length: periods }, () => COMMISSION_PERIOD_BLOCK).flat(),
+    ...COMMISSION_PRICE_COLUMNS,
+    COMMISSION_FIRST_FORMULA,
+    ...Array.from({ length: periods - 1 }, () => COMMISSION_NEXT_FORMULA),
+    ...COMMISSION_TRAILING_COLUMNS,
+  ];
+}
+
+/**
+ * `row` with `periods` commission periods, renumbered to `rowNumber` and its cells
+ * re-lettered to their new columns; with `filled`, every empty cell holds an inline
+ * string. The text before the first cell and after the last one is kept verbatim.
+ */
+function reshapeCommissionRow(
+  row: string,
+  rowNumber: number,
+  periods: 2 | 3,
+  filled: boolean,
+): string {
+  const cells = row.match(SHEET_CELL) ?? [];
+  const first = cells[0];
+  const last = cells[cells.length - 1];
+  if (cells.length !== COMMISSION_FIXTURE_COLUMNS || first === undefined || last === undefined) {
+    throw new Error(`commission row has ${cells.length} cells, not ${COMMISSION_FIXTURE_COLUMNS}`);
+  }
+  const reshaped = commissionColumnOrder(periods).map((index, position) => {
+    const cell = (cells[index] ?? '').replace(
+      CELL_REFERENCE,
+      `<c r="${columnLetters(position + 1)}${rowNumber}"`,
+    );
+    return filled ? cell.replace(EMPTY_CELL, `$1${FILLED_CELL_END}`) : cell;
+  });
+  const before = row.slice(0, row.indexOf(first)).replace(ROW_REFERENCE, `<row r="${rowNumber}"`);
+  const after = row.slice(row.lastIndexOf(last) + last.length);
+  return before + reshaped.join('') + after;
+}
+
+/** The letters of fixture column `letters` once a row is reshaped to `periods` periods. */
+function reshapedColumnLetters(letters: string, periods: 2 | 3): string {
+  const position = commissionColumnOrder(periods).indexOf(colRefToNumber(letters) - 1);
+  if (position < 0) throw new Error(`fixture column ${letters} is dropped by the reshape`);
+  return columnLetters(position + 1);
+}
+
+/** The cells data validation `rule` covers. */
+function sqrefOf(rule: string): {
+  column: string;
+  row: number;
+  end: { column: string; row: number } | null;
+} {
+  const match = SQREF.exec(rule);
+  const [, column, row, endColumn, endRow] = match ?? [];
+  if (column === undefined || row === undefined) {
+    throw new Error(`data validation without a cell reference: ${rule.slice(0, 80)}`);
+  }
+  const end =
+    endColumn === undefined || endRow === undefined
+      ? null
+      : { column: endColumn, row: Number(endRow) };
+  return { column, row: Number(row), end };
+}
+
+/** `rule` covering `sqref` instead. */
+function withSqref(rule: string, sqref: string): string {
+  return rule.replace(SQREF, `sqref="${sqref}"`);
+}
+
+/**
+ * The fixture's `<dataValidations>` block (of a sheet of `fixtureRows` rows) for a sheet of
+ * `rows` rows reshaped to `periods` periods: every whole-column rule once, the per-row rule
+ * once for every row from the first the fixture validates to `rows`, each re-lettered to
+ * its new column, and `count` updated. The rules' own content is copied from the fixture,
+ * never retyped.
+ */
+function growDataValidations(
+  block: string,
+  fixtureRows: number,
+  rows: number,
+  periods: 2 | 3,
+): string {
+  const rules = block.match(DATA_VALIDATION) ?? [];
+  const startTag = DATA_VALIDATIONS_START_TAG.exec(block)?.[0];
+  if (startTag === undefined || startTag + rules.join('') + DATA_VALIDATIONS_CLOSE !== block) {
+    throw new Error('the fixture data validations are not a plain list of rules');
+  }
+  const columnRules = rules.filter((rule) => sqrefOf(rule).end !== null);
+  const rowRules = rules.filter((rule) => sqrefOf(rule).end === null);
+  const template = rowRules[0];
+  if (template === undefined) throw new Error('the fixture has no per-row data validation');
+  const first = sqrefOf(template);
+  const oneRulePerRow =
+    first.row + rowRules.length - 1 === fixtureRows &&
+    rowRules.every((rule, i) => {
+      const ref = sqrefOf(rule);
+      return (
+        ref.column === first.column &&
+        ref.row === first.row + i &&
+        withSqref(rule, '') === withSqref(template, '')
+      );
+    });
+  if (!oneRulePerRow) {
+    throw new Error('the fixture per-row data validations are not one identical rule per row');
+  }
+  const grownColumnRules = columnRules.map((rule) => {
+    const { column, row, end } = sqrefOf(rule);
+    if (end === null) throw new Error('a whole-column data validation lost its range');
+    const from = `${reshapedColumnLetters(column, periods)}${row}`;
+    const to = `${reshapedColumnLetters(end.column, periods)}${end.row}`;
+    return withSqref(rule, `${from}:${to}`);
+  });
+  const rowColumn = reshapedColumnLetters(first.column, periods);
+  const grownRowRules = Array.from({ length: Math.max(rows - first.row + 1, 0) }, (_, i) =>
+    withSqref(template, `${rowColumn}${first.row + i}`),
+  );
+  const grown = [...grownColumnRules, ...grownRowRules];
+  return (
+    startTag.replace(DATA_VALIDATIONS_COUNT, `count="${grown.length}"`) +
+    grown.join('') +
+    DATA_VALIDATIONS_CLOSE
+  );
+}
+
+/**
+ * The real commission tariff export reshaped to `periods` commission periods and grown to
+ * `rows` sheet rows: the fixture's own header row, every other row a copy of
+ * the fixture's heaviest data row once reshaped, and the data validations grown with them
+ * (one per-row rule for every row, as the export writes them). Re-zipped with every other
+ * entry unchanged.
+ */
+export function worstCommissionWorkbook(shape: WorstCommissionShape): Buffer {
+  const { periods } = shape;
+  const filled = shape.filled ?? false;
+  const entries = unzipSync(new Uint8Array(readFixture(COMMISSION_FIXTURE)));
+  const sheetBytes = entries[SHEET_PART];
+  if (sheetBytes === undefined) throw new Error(`entry missing: ${SHEET_PART}`);
+  const sheet = strFromU8(sheetBytes);
+  const start = sheet.indexOf(SHEET_DATA_OPEN) + SHEET_DATA_OPEN.length;
+  const end = sheet.indexOf(SHEET_DATA_CLOSE);
+  const fixtureRows = sheet.slice(start, end).match(SHEET_ROW) ?? [];
+  const dataRows = fixtureRows.slice(COMMISSION_HEADER_ROWS);
+  const weights = dataRows.map((row) =>
+    domWeight(reshapeCommissionRow(row, COMMISSION_HEADER_ROWS + 1, periods, false)),
+  );
+  const heaviest = dataRows[weights.indexOf(Math.max(...weights))];
+  if (heaviest === undefined) throw new Error(`no data rows in ${COMMISSION_FIXTURE}`);
+  const rows = Array.from({ length: shape.rows }, (_, i) => {
+    const header = i < COMMISSION_HEADER_ROWS ? fixtureRows[i] : undefined;
+    return header === undefined
+      ? reshapeCommissionRow(heaviest, i + 1, periods, filled)
+      : reshapeCommissionRow(header, i + 1, periods, false);
+  });
+  const head = sheet.slice(0, start).replace(DIMENSION, '');
+  const tail = sheet.slice(end);
+  if (!DATA_VALIDATIONS.test(tail)) throw new Error(`no data validations in ${COMMISSION_FIXTURE}`);
+  const grownTail = tail.replace(DATA_VALIDATIONS, (block) =>
+    growDataValidations(block, fixtureRows.length, shape.rows, periods),
+  );
+  entries[SHEET_PART] = strToU8(head + rows.join('') + grownTail);
   return Buffer.from(zipSync(entries));
 }
 
