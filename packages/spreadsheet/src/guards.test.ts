@@ -40,10 +40,12 @@ import {
 import { fileErrorOf } from '../tests/helpers/errors';
 import { expectWithinBudget, FORMULA_SCAN_BUDGET_MS } from '../tests/helpers/timing';
 import {
+  domWeight,
   entriesText,
   grownFixtureText,
   numberRows,
   rawDeflateArchive,
+  worstCommissionWorkbook,
 } from '../tests/helpers/workbooks';
 
 const opts = { rowCap: 5000, colCap: 64, maxBytes: 10 * 1024 * 1024 };
@@ -83,8 +85,23 @@ const TAG_BOMB_STRINGS = 20_000;
 // Product-limit shapes: the default row cap plus the header row.
 const FULL_ROWS = 5001;
 const WIDE_COLUMNS = 64;
-const TRENDYOL_COLUMNS = 35;
 const WIDEST_TRENDYOL_FIXTURE = 'trendyol-commission-tariff.xlsx';
+// The worst commission workbook's sheet: a few rows for the helper's own test, its column
+// count with two and with three periods, and (0-based) the price input column of a
+// three-period row (AB of the fixture).
+const COMMISSION_SAMPLE_ROWS = 6;
+const TWO_PERIOD_COLUMNS = 35;
+const THREE_PERIOD_COLUMNS = 41;
+const THREE_PERIOD_PRICE_INPUT_COLUMN = 32;
+// The cells its data validations cover: the price input column once (AB2:AB1048576 of the
+// fixture), then the tariff choice (AE of the fixture) of every row from the second.
+const VALIDATION_SQREF = /<dataValidation\b[^>]*?\bsqref="([^"]*)"/g;
+const THREE_PERIOD_PRICE_INPUT_RANGE = 'AG2:AG1048576';
+const THREE_PERIOD_TARIFF_CHOICE_COLUMN = 'AK';
+const FIRST_VALIDATED_ROW = 2;
+// The grid index of a copied (and, when asked, filled) data row of that sheet.
+const COMMISSION_DATA_ROW = 2;
+const FILLED_CELL_TEXT = 'x';
 const BASIC_ROWS = [['Barkod'], ['B1']];
 const BASIC_SHEET = { name: 'Sheet1', xml: worksheetXml(BASIC_ROWS) };
 // A six-column product sheet: string keys and titles, numeric money columns.
@@ -266,19 +283,6 @@ function withDeclaredSize(file: Buffer, entryName: string, size: number): Buffer
   return out;
 }
 
-// The DOM weight of `text`, counted with regexes independently of the gate's byte
-// loop: element start tags, '=' bytes, and text-like nodes (every '>' followed by a
-// character other than '<', plus every comment, CDATA section or processing
-// instruction, i.e. every '<!' or '<?').
-function domWeight(text: string): number {
-  const count = (pattern: RegExp): number => (text.match(pattern) ?? []).length;
-  return (
-    XML_ELEMENT_WEIGHT * count(/<(?![/!?])/g) +
-    XML_ATTRIBUTE_WEIGHT * count(/=/g) +
-    XML_TEXT_NODE_WEIGHT * (count(/>(?=[^<])/g) + count(/<[!?]/g))
-  );
-}
-
 // A sheet whose odd columns hold distinct shared strings and even columns numbers,
 // plus its shared strings part.
 function sharedStringSheet(rows: number, columns: number): { sheet: string; strings: string } {
@@ -354,6 +358,15 @@ const SHARED_STRINGS_READER_PARTS: readonly string[] = [
   WORKBOOK_PART,
   SHEET_PART,
   SHARED_STRINGS_PART,
+];
+
+// The reader parts of a real export, its styles part included.
+const FIXTURE_READER_PARTS: readonly string[] = [
+  WORKBOOK_RELS_PART,
+  WORKBOOK_PART,
+  STYLES_PART,
+  SHARED_STRINGS_PART,
+  SHEET_PART,
 ];
 
 // Names of the reader parts the gate returns for `file`, sorted.
@@ -730,34 +743,103 @@ describe('upload gate', () => {
     expect(MAX_XMLNS_DECLARATIONS_PER_PART).toBe(256);
   });
 
-  it('weighs an element 8, an attribute 3 and a text-like node 3, up to 5 000 000', () => {
+  it('weighs an element 8, an attribute 3 and a text-like node 3, up to 7 000 000', () => {
     expect([XML_ELEMENT_WEIGHT, XML_ATTRIBUTE_WEIGHT, XML_TEXT_NODE_WEIGHT]).toEqual([8, 3, 3]);
-    expect(MAX_XML_DOM_WEIGHT).toBe(5_000_000);
+    expect(MAX_XML_DOM_WEIGHT).toBe(7_000_000);
   });
 
-  // The product limit the weight budget sets: a real Trendyol export of 5 000 rows by
-  // 35 columns fits; a sheet that wide of distinct shared strings, or 64 columns of
-  // values, does not.
+  // A committed Trendyol export, its rows repeated to the row cap.
   it('fits a real Trendyol workbook grown to 5 001 rows within the weight budget', () => {
     expect(domWeight(grownFixtureText(WIDEST_TRENDYOL_FIXTURE, FULL_ROWS))).toBeLessThan(
       MAX_XML_DOM_WEIGHT,
     );
   });
 
+  // The product limit the weight budget sets: the worst real commission tariff file as
+  // exported (5 000 product rows of the heaviest real row, each with the export's per-row
+  // data validation; two periods or three, 35 or 41 columns) fits. The same three-period
+  // file with every empty cell filled does not: it is refused from about 4 920 product
+  // rows on. Nor does a sheet as wide as the column cap (64 columns) of distinct shared
+  // strings, or of numbers.
+  it.each([
+    ['two periods', { periods: 2 }],
+    ['three periods', { periods: 3 }],
+  ] as const)(
+    'fits the worst real commission workbook of 5 001 rows under the weight cap (%s)',
+    (_label, shape) => {
+      const file = worstCommissionWorkbook({ ...shape, rows: FULL_ROWS });
+      // The gate alone: the weight rule lives there, and a full read of this file builds a
+      // DOM of hundreds of MB in the test process (the CI-only worker test reads it).
+      expect(() => openUpload(file, opts)).not.toThrow();
+    },
+  );
+
+  it('rejects that three-period workbook of 5 001 rows with every empty cell filled as PAYLOAD_TOO_LARGE', () => {
+    const file = worstCommissionWorkbook({ periods: 3, rows: FULL_ROWS, filled: true });
+    const err = catchGuard(file, opts);
+    expect(err?.code).toBe('PAYLOAD_TOO_LARGE');
+    expect(err?.meta).toMatchObject({ reason: UPLOAD_LIMIT_REASONS.DOM_WEIGHT });
+  });
+
+  it('builds the three-period commission workbook as 41 columns with a validation per row, and fills its empty cells', async () => {
+    const twoPeriods = worstCommissionWorkbook({ periods: 2, rows: COMMISSION_SAMPLE_ROWS });
+    const threePeriods = worstCommissionWorkbook({ periods: 3, rows: COMMISSION_SAMPLE_ROWS });
+    const filled = worstCommissionWorkbook({
+      periods: 3,
+      rows: COMMISSION_SAMPLE_ROWS,
+      filled: true,
+    });
+    const twoPeriodGrid = await readWorkbookGrid(twoPeriods);
+    const threePeriodGrid = await readWorkbookGrid(threePeriods);
+    const filledGrid = await readWorkbookGrid(filled);
+
+    expect(threePeriodGrid).toHaveLength(COMMISSION_SAMPLE_ROWS);
+    expect(threePeriodGrid.map((row) => row.length)).toEqual(
+      Array.from({ length: COMMISSION_SAMPLE_ROWS }, () => THREE_PERIOD_COLUMNS),
+    );
+    expect(twoPeriodGrid.map((row) => row.length)).toEqual(
+      Array.from({ length: COMMISSION_SAMPLE_ROWS }, () => TWO_PERIOD_COLUMNS),
+    );
+    expect(threePeriodGrid[COMMISSION_DATA_ROW]?.[THREE_PERIOD_PRICE_INPUT_COLUMN]).toBeNull();
+    expect(filledGrid[COMMISSION_DATA_ROW]?.[THREE_PERIOD_PRICE_INPUT_COLUMN]).toBe(
+      FILLED_CELL_TEXT,
+    );
+    expect(domWeight(entriesText(filled, FIXTURE_READER_PARTS))).toBeGreaterThan(
+      domWeight(entriesText(threePeriods, FIXTURE_READER_PARTS)),
+    );
+    const sheetText = entriesText(threePeriods, [SHEET_PART]);
+    const validatedCells = [...sheetText.matchAll(VALIDATION_SQREF)].map((match) => match[1]);
+    expect(validatedCells).toEqual([
+      THREE_PERIOD_PRICE_INPUT_RANGE,
+      ...Array.from(
+        { length: COMMISSION_SAMPLE_ROWS - FIRST_VALIDATED_ROW + 1 },
+        (_, i) => `${THREE_PERIOD_TARIFF_CHOICE_COLUMN}${FIRST_VALIDATED_ROW + i}`,
+      ),
+    ]);
+    expect(sheetText).toContain(`<dataValidations count="${validatedCells.length}">`);
+  });
+
+  // Its margin over the cap is about 1%: any raise of MAX_XML_DOM_WEIGHT must re-check this
+  // test, the same shape in parse.test.ts and in the API's
+  // workbook-upload-guards.routes.test.ts.
   it('rejects a 5 001 x 64 sheet of numbers as PAYLOAD_TOO_LARGE', () => {
     const file = buildXlsxFixture([
       { name: 'Sheet1', xml: worksheetXml(numberRows(FULL_ROWS, WIDE_COLUMNS)) },
     ]);
-    expect(catchGuard(file, opts)?.code).toBe('PAYLOAD_TOO_LARGE');
+    const err = catchGuard(file, opts);
+    expect(err?.code).toBe('PAYLOAD_TOO_LARGE');
+    expect(err?.meta).toMatchObject({ reason: UPLOAD_LIMIT_REASONS.DOM_WEIGHT });
   });
 
-  it('rejects a 5 001 x 35 sheet of distinct shared strings as PAYLOAD_TOO_LARGE', () => {
-    const { sheet, strings } = sharedStringSheet(FULL_ROWS, TRENDYOL_COLUMNS);
+  it('rejects a 5 001 x 64 sheet of distinct shared strings as PAYLOAD_TOO_LARGE', () => {
+    const { sheet, strings } = sharedStringSheet(FULL_ROWS, WIDE_COLUMNS);
     const file = buildXlsxFixture([{ name: 'Sheet1', xml: sheet }], {
       [WORKBOOK_RELS_PART]: relsXml([SHEET_RELATIONSHIP, SHARED_STRINGS_RELATIONSHIP]),
       [SHARED_STRINGS_PART]: strings,
     });
-    expect(catchGuard(file, opts)?.code).toBe('PAYLOAD_TOO_LARGE');
+    const err = catchGuard(file, opts);
+    expect(err?.code).toBe('PAYLOAD_TOO_LARGE');
+    expect(err?.meta).toMatchObject({ reason: UPLOAD_LIMIT_REASONS.DOM_WEIGHT });
   });
 
   // Excel repeats xmlns:xm on every x14:conditionalFormatting of a worksheet.

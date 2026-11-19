@@ -1,7 +1,8 @@
 import { SpreadsheetFileError } from './errors';
 
-// One workbook parse at a time per process. A parse builds an xmldom DOM of up to
-// about 570 MB (MAX_XML_DOM_WEIGHT); run one after another, the process peak stays at
+// One workbook parse at a time per process. A parse builds an xmldom DOM that can need
+// about 800 MB of worker heap at MAX_XML_DOM_WEIGHT (measured 2026-11-19, see
+// constants.ts); run one after another, the process peak stays at
 // about one parse whatever the number of uploads in flight. Two limits bound the
 // wait instead of the memory, so one tenant's burst of large uploads cannot keep every
 // other tenant's import or export waiting for minutes:

@@ -52,16 +52,29 @@ export const XML_ELEMENT_WEIGHT = 8;
 export const XML_ATTRIBUTE_WEIGHT = 3;
 // Text nodes, comments, CDATA sections and processing instructions.
 export const XML_TEXT_NODE_WEIGHT = 3;
-// Total DOM weight of the reader parts together; beyond it PAYLOAD_TOO_LARGE. Worst
-// case about 570 MB of DOM (5 000 000 x 114 B). In practice the largest upload is
-// about 5 000 rows x 35-40 columns: a real Trendyol export of 5 001 rows x 35 columns
-// (about 4.9 million) passes, while 5 001 x 35 of distinct shared strings (about 5.9
-// million) and every 5 001 x 64 sheet whose cells hold values (at least 22 per cell,
-// about 7 million) are rejected. The fixtures seen so far have at most 35 columns; each
-// extra commission period adds 6, so a real file can be wider and reach this limit
-// below 5 000 rows. The lasting fix is parsing in a memory-capped worker thread (the
-// follow-up PR 2).
-export const MAX_XML_DOM_WEIGHT = 5_000_000;
+// Total DOM weight of the reader parts together; beyond it PAYLOAD_TOO_LARGE (reason
+// `dom-weight`). Sized for a full commission tariff file as exported: 1 header row and
+// 5 000 product rows (the row cap admits row numbers up to rowCap + 1),
+// every row as heavy as the heaviest row of the committed export and carrying the
+// per-row data validation the export writes. As exported it weighs about 5.63 million
+// with two periods (35 columns) and about 6.67 million with three (41 columns), which
+// leaves about 65 units per row to spare: room for two of the row's four empty cells
+// (size, new price, two external ids) filled with inline text (22 each), not three. Not
+// every such file passes: the three-period file with all four filled weighs about 7.11
+// million and is refused from about 4 920 product rows on, and each further period adds
+// 6 columns, so a wider real file reaches this limit below 5 000 rows. It still rejects
+// every 5 001 x 64 sheet whose cells carry their reference and hold values (at least 22
+// per cell, about 7.1 million: only about 1% over, so re-check this on any raise; the
+// reader refuses a cell without a reference) and 5 001 x 64 of distinct shared strings
+// (about 10.6 million). What it costs, measured 2026-11-19 on a developer
+// laptop in the real parse worker: files crafted to weigh just under this cap needed at
+// most about 783 MB of old generation to read (a 64-column number grid, and rich-text
+// shared strings) and at most about 798 MB to patch (the import's rehearsal, two writes
+// per row; the number grid with its worksheet source padded to about 31 MB). The
+// heaviest commission file it admits (three periods, all four cells filled, 4 920
+// product rows) needed about 722 MB to patch. The same crafted shapes at the earlier
+// 5 000 000 needed at most about 584 MB to read.
+export const MAX_XML_DOM_WEIGHT = 7_000_000;
 // Occurrences of the bytes 'xmlns' per reader part. Sibling declarations parse in
 // linear time; nested ones are quadratic in depth: 256 nested declarations take about
 // 4 ms to parse and 1 ms to serialize. xmldom's serializer copies the declarations in
@@ -85,9 +98,21 @@ export const PARSE_QUEUE_MAX_WAIT_MS = 20_000;
 // limit kills only the worker. The limits are a backstop, not the defence: one
 // allocation larger than the remaining heap headroom plus about 16 MB still aborts the
 // whole process, and memory outside the V8 heap (upload bytes, decoded text) is not
-// counted, so every cap above stays. In budget, a parse peaks at about 760 MB (about
-// 570 MB of DOM, up to 64 MB of worksheet source and of shared-string source, and up to
-// about 60 MB of grid text), hence 1 024 MB of old generation.
+// counted, so every cap above stays. In budget that abort is out of reach: the caps
+// bound every single allocation of a job, and the largest are the text of one XML part
+// (the parts hold at most MAX_XML_TOTAL_BYTES, 32 MiB, together; twice that as a
+// two-byte string) and the strings of a grid (MAX_GRID_TEXT_LENGTH), both far under the
+// headroom below. Measured 2026-11-19 on a developer laptop (reads and patches of files
+// crafted to weigh just under MAX_XML_DOM_WEIGHT; the old-generation limit found by
+// binary search in 16 MB steps): the costliest shapes needed about 783 MB of old
+// generation to read and about 798 MB to patch, about 225 MB under the 1 024 MB;
+// filling the worksheet source to about 31 MB with non-Latin1 text, or referencing one
+// 9-million-character shared string, did not raise the read. The slowest job took about
+// 11 s at its minimum heap and at most about 8.5 s at 1 024 MB, under the 30 s time
+// limit; slower or busier hardware has less margin. A read and a patch of the full three-period commission file as
+// exported also run under these limits in the CI-only test of
+// worker/grid-worker-host.test.ts. A raise of MAX_XML_DOM_WEIGHT needs this measured
+// again.
 export const GRID_WORKER_MAX_OLD_GENERATION_MB = 1024;
 export const GRID_WORKER_MAX_YOUNG_GENERATION_MB = 64;
 export const GRID_WORKER_TIMEOUT_MS = 30_000;

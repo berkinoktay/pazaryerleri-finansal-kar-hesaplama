@@ -26,6 +26,19 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Workbook uploads: a full commission tariff file as exported now fits the upload gate**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products|advantage-tariffs|plus-commission-tariffs|commission-tariffs}/import`).
+  A commission tariff file with three periods used to answer `422 VALIDATION_ERROR` with
+  `{ field: 'file', code: 'PAYLOAD_TOO_LARGE' }` (the gate's `dom-weight` rule; on the wire
+  `meta: { limit: 'rows', maxRows: 5000 }`) well before 5,000 product rows: a file of the
+  heaviest real rows from about 3,500 to 3,750 product rows on, depending on how full its rows
+  were (with two periods from about 4,440). Such a file with 5,000 product rows as exported
+  (DOM weight about 6.67 million; about 5.63 million with two periods) now passes the gate,
+  also with up to two of each row's empty cells filled; one whose rows have all four filled
+  (about 7.11 million) is still refused from about 4,920 product rows on. The gate's DOM weight
+  budget is 7,000,000 (was 5,000,000); the parse worker's memory limit is unchanged. Uploads
+  refused before may now pass; nothing accepted before is refused. No schema or response shape
+  change; not breaking.
 - **Workbook exports keep the look of a date-styled cell that gets a number**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/{advantage-tariffs|commission-tariffs|plus-commission-tariffs}/{tariffId}/export`,
   `POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|flash-products}/{listId}/export`,

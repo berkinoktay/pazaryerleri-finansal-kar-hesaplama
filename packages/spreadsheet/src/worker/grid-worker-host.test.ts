@@ -16,7 +16,7 @@ import { resolveReadOptions } from '../read-options';
 import { buildXlsxFixture, worksheetXml } from '../testing/build-xlsx';
 import { pinOf, readFixture } from '../../tests/helpers/fixture-pins';
 import { clear, MAIN_NAMESPACE, num, text } from '../../tests/helpers/patch-helpers';
-import { numberRows } from '../../tests/helpers/workbooks';
+import { numberRows, worstCommissionWorkbook } from '../../tests/helpers/workbooks';
 import {
   answersJob,
   createGridWorkerHost,
@@ -53,6 +53,24 @@ const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>';
 // The commission fixture's columns AB and AE (0-based).
 const COLUMN_AB = 27;
 const COLUMN_AE = 30;
+// The worst real commission workbook: the default row cap plus the header row.
+const FULL_ROWS = 5_001;
+const THREE_PERIOD_COLUMNS = 41;
+const HEADER_ROWS = 1;
+// Sheet rows of the filled three-period workbook just under the weight cap (it is refused
+// from about 4 920 product rows on), and of a sample read for its barcode.
+const ADMITTED_FILLED_ROWS = 4_901;
+const COMMISSION_SAMPLE_ROWS = 3;
+// 0-based columns of a three-period row: the barcode (the import's anchor), the empty
+// price input cell (the fixture's AB moved five columns right by the third period block)
+// and the tariff choice (the fixture's AE), the two columns the export writes.
+const COMMISSION_BARCODE_COLUMN = 1;
+const THREE_PERIOD_PRICE_COLUMN = 32;
+const THREE_PERIOD_TARIFF_CHOICE_COLUMN = 36;
+// What the rehearsal writes: the widest new price (ten integer digits, two decimals) and a
+// tariff choice text.
+const PROBE_PRICE = '9999999999.99';
+const PROBE_TARIFF_CHOICE = 'Probe tariff choice';
 const options = resolveReadOptions({});
 // Changes the second row of twoRowFile.
 const TWO_ROW_PATCH = resolvePatchRequest({ outputs: [[text(2, 0, 'B2')]] });
@@ -393,6 +411,68 @@ describe.runIf(process.env.CI === 'true')(
       },
       MEMORY_KILL_TEST_TIMEOUT_MS,
     );
+  },
+);
+
+// CI only, like the block above: these files need hundreds of MB of worker heap (the
+// heaviest commission file the gate admits needed about 722 MB to patch, measured
+// 2026-11-19), which freezes the owner's machine next to other work. The full
+// three-period commission tariff file as exported must read inside the production worker
+// limits, and the heaviest one the gate admits (every empty cell filled, just under the
+// cap) must patch inside them the way every import rehearses the export on the upload:
+// an anchor on every product row's barcode, the new price and the tariff choice written
+// on every product row.
+describe.runIf(process.env.CI === 'true')(
+  'createGridWorkerHost: the worst real commission workbook',
+  () => {
+    it('reads the three-period 5 001-row commission workbook under the production limits', async () => {
+      const host = openHost(PRODUCTION_LIMITS);
+
+      const grid = await host.run(
+        worstCommissionWorkbook({ periods: 3, rows: FULL_ROWS }),
+        options,
+      );
+
+      expect(grid).toHaveLength(FULL_ROWS);
+      expect(grid.every((row) => row.length === THREE_PERIOD_COLUMNS)).toBe(true);
+    });
+
+    it('patches the heaviest commission workbook the gate admits as the import rehearses it', async () => {
+      const host = openHost(PRODUCTION_LIMITS);
+      const sample = await host.run(
+        worstCommissionWorkbook({ periods: 3, rows: COMMISSION_SAMPLE_ROWS, filled: true }),
+        options,
+      );
+      const barcode = sample[HEADER_ROWS]?.[COMMISSION_BARCODE_COLUMN];
+      if (typeof barcode !== 'string') throw new Error(`sample barcode is ${String(barcode)}`);
+      const productRows = Array.from(
+        { length: ADMITTED_FILLED_ROWS - HEADER_ROWS },
+        (_, i) => HEADER_ROWS + 1 + i,
+      );
+      const request = resolvePatchRequest({
+        sheetName: pinOf(COMMISSION_FIXTURE).sheetName,
+        anchors: productRows.map((excelRow) => ({
+          excelRow,
+          col: COMMISSION_BARCODE_COLUMN,
+          expected: barcode,
+        })),
+        outputs: [
+          productRows.flatMap((excelRow) => [
+            num(excelRow, THREE_PERIOD_PRICE_COLUMN, PROBE_PRICE),
+            text(excelRow, THREE_PERIOD_TARIFF_CHOICE_COLUMN, PROBE_TARIFF_CHOICE),
+          ]),
+        ],
+        overwriteFormulaColumns: [THREE_PERIOD_PRICE_COLUMN, THREE_PERIOD_TARIFF_CHOICE_COLUMN],
+      });
+
+      const patched = await host.patch(
+        worstCommissionWorkbook({ periods: 3, rows: ADMITTED_FILLED_ROWS, filled: true }),
+        request,
+      );
+
+      expect(patched).toHaveLength(1);
+      expect(patched[0]).toBeInstanceOf(Uint8Array);
+    });
   },
 );
 
