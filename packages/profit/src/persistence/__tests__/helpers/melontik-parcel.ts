@@ -99,9 +99,44 @@ export async function truncateAll(): Promise<void> {
 }
 
 /**
- * Upserts the dedicated melontik carrier (code 'TEST_MELONTIK') and its desi
- * tariff rows '1' and '2' at 81.95 net, no Barem. Idempotent: the shipping tables
- * survive truncation and globalSetup may prune strays, so every run re-ensures it.
+ * Start of the single tariff version a test carrier gets, matching the migrated
+ * catalogue: open towards the past so every order date finds a tariff.
+ */
+const TEST_TARIFF_VERSION_START = new Date('2000-01-01T00:00:00.000Z');
+
+/**
+ * Upserts the carrier's tariff version starting TEST_TARIFF_VERSION_START with the
+ * carrier row's Barem attributes, and returns the version id. The carrier keeps its
+ * own Barem columns too, because some readers still take them from the carrier.
+ */
+async function upsertTestTariffVersion(carrier: {
+  readonly id: string;
+  readonly supportsBaremDestek: boolean;
+  readonly maxBaremDesi: number;
+  readonly maxBaremEligibleDeliveryDuration: number;
+}): Promise<string> {
+  const barem = {
+    supportsBaremDestek: carrier.supportsBaremDestek,
+    maxBaremDesi: carrier.maxBaremDesi,
+    maxBaremEligibleDeliveryDuration: carrier.maxBaremEligibleDeliveryDuration,
+  };
+  const version = await prisma.shippingTariffVersion.upsert({
+    where: {
+      carrierId_effectiveFrom: { carrierId: carrier.id, effectiveFrom: TEST_TARIFF_VERSION_START },
+    },
+    create: { carrierId: carrier.id, effectiveFrom: TEST_TARIFF_VERSION_START, ...barem },
+    update: barem,
+    select: { id: true },
+  });
+  return version.id;
+}
+
+/**
+ * Upserts the dedicated melontik carrier (code 'TEST_MELONTIK'), its one tariff
+ * version starting 2000-01-01 (same Barem attributes as the carrier) and that
+ * version's desi rows '1' and '2' at 81.95 net, no Barem. Idempotent: the shipping
+ * tables survive truncation and globalSetup may prune strays, so every run
+ * re-ensures it. Returns the carrier id.
  */
 export async function upsertMelontikCarrier(): Promise<string> {
   const carrier = await prisma.shippingCarrier.upsert({
@@ -116,12 +151,14 @@ export async function upsertMelontikCarrier(): Promise<string> {
     },
     update: { supportsBaremDestek: false, maxBaremDesi: 10 },
   });
+  const versionId = await upsertTestTariffVersion(carrier);
 
   for (const desi of [1, 2]) {
     await prisma.shippingDesiTariff.upsert({
-      where: { carrierId_desi: { carrierId: carrier.id, desi } },
+      where: { versionId_desi: { versionId, desi } },
       create: {
         carrierId: carrier.id,
+        versionId,
         desi,
         priceNet: MELONTIK.desiNet,
         effectiveFrom: new Date('2024-01-01T00:00:00Z'),
@@ -591,10 +628,12 @@ export interface CarrierTariffSpec {
 
 /**
  * Upserts a dedicated carrier (its code should be TEST-prefixed so globalSetup
- * prunes it) with the given desi and Barem tariff rows at explicit effective-from
- * dates. Idempotent: the shipping reference tables survive truncation, so every
- * run re-ensures the carrier and its rows. Lets a test exercise the tariff read
- * without mutating the shared melontik carrier.
+ * prunes it), its one tariff version starting 2000-01-01 (same Barem attributes as
+ * the carrier) and the given desi and Barem rows in that version, each row keeping
+ * its explicit effective-from date. Idempotent: the shipping reference tables
+ * survive truncation, so every run re-ensures the carrier, its version and its
+ * rows. Lets a test exercise the tariff read without mutating the shared melontik
+ * carrier. Returns the carrier id.
  */
 export async function upsertCarrierWithTariffs(spec: CarrierTariffSpec): Promise<string> {
   const orderCargoNames = spec.orderCargoNames === undefined ? [] : [...spec.orderCargoNames];
@@ -616,11 +655,13 @@ export async function upsertCarrierWithTariffs(spec: CarrierTariffSpec): Promise
       maxBaremDesi: spec.maxBaremDesi ?? 10,
     },
   });
+  const versionId = await upsertTestTariffVersion(carrier);
   for (const row of spec.desiRows) {
     await prisma.shippingDesiTariff.upsert({
-      where: { carrierId_desi: { carrierId: carrier.id, desi: row.desi } },
+      where: { versionId_desi: { versionId, desi: row.desi } },
       create: {
         carrierId: carrier.id,
+        versionId,
         desi: row.desi,
         priceNet: row.priceNet,
         effectiveFrom: row.effectiveFrom,
@@ -631,14 +672,15 @@ export async function upsertCarrierWithTariffs(spec: CarrierTariffSpec): Promise
   for (const row of spec.baremRows) {
     await prisma.shippingBaremTariff.upsert({
       where: {
-        carrierId_minOrderAmount_maxOrderAmount: {
-          carrierId: carrier.id,
+        versionId_minOrderAmount_maxOrderAmount: {
+          versionId,
           minOrderAmount: row.minOrderAmount,
           maxOrderAmount: row.maxOrderAmount,
         },
       },
       create: {
         carrierId: carrier.id,
+        versionId,
         minOrderAmount: row.minOrderAmount,
         maxOrderAmount: row.maxOrderAmount,
         priceNet: row.priceNet,

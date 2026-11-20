@@ -37,6 +37,10 @@ const GLOBAL_TABLES = [
   // referans RLS kontratı (authenticated read açık, anon + authenticated-write kapalı).
   // globalSetup (ensureMicroExportReturnTiers) seed'ler; truncateAll dokunmaz.
   'micro_export_return_fee_tiers',
+  // Dated sets the tariff rows and the micro-export tiers belong to; same global
+  // reference contract. globalSetup creates them alongside the rows they group.
+  'shipping_tariff_versions',
+  'micro_export_return_fee_tier_versions',
 ] as const;
 
 describe('RLS — shipping global reference tables', () => {

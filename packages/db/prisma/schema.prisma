@@ -1129,9 +1129,10 @@ model ShippingCarrier {
   createdAt                        DateTime @default(now()) @map("created_at")
   updatedAt                        DateTime @updatedAt @map("updated_at")
 
-  desiTariffs  ShippingDesiTariff[]
-  baremTariffs ShippingBaremTariff[]
-  stores       Store[]
+  desiTariffs    ShippingDesiTariff[]
+  baremTariffs   ShippingBaremTariff[]
+  tariffVersions ShippingTariffVersion[]
+  stores         Store[]
 
   @@unique([platform, externalId])
   @@unique([platform, code])
@@ -1142,15 +1143,18 @@ model ShippingCarrier {
 model ShippingDesiTariff {
   id            String   @id @default(uuid()) @db.Uuid
   carrierId     String   @map("carrier_id") @db.Uuid
+  // The dated tariff set this row belongs to (ShippingTariffVersion).
+  versionId     String?  @map("version_id") @db.Uuid
   desi          Int
   priceNet      Decimal  @map("price_net") @db.Decimal(10, 2)
   effectiveFrom DateTime @default(now()) @map("effective_from") @db.Date
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  carrier ShippingCarrier @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  carrier ShippingCarrier        @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  version ShippingTariffVersion? @relation(fields: [versionId], references: [id], onDelete: Cascade)
 
-  @@unique([carrierId, desi])
+  @@unique([versionId, desi])
   @@index([carrierId, desi])
   @@map("shipping_desi_tariffs")
 }
@@ -1158,6 +1162,8 @@ model ShippingDesiTariff {
 model ShippingBaremTariff {
   id             String   @id @default(uuid()) @db.Uuid
   carrierId      String   @map("carrier_id") @db.Uuid
+  // The dated tariff set this row belongs to (ShippingTariffVersion).
+  versionId      String?  @map("version_id") @db.Uuid
   minOrderAmount Decimal  @map("min_order_amount") @db.Decimal(12, 2)
   maxOrderAmount Decimal  @map("max_order_amount") @db.Decimal(12, 2)
   priceNet       Decimal  @map("price_net") @db.Decimal(10, 2)
@@ -1165,9 +1171,10 @@ model ShippingBaremTariff {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  carrier ShippingCarrier @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  carrier ShippingCarrier        @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  version ShippingTariffVersion? @relation(fields: [versionId], references: [id], onDelete: Cascade)
 
-  @@unique([carrierId, minOrderAmount, maxOrderAmount])
+  @@unique([versionId, minOrderAmount, maxOrderAmount])
   @@index([carrierId])
   @@map("shipping_barem_tariffs")
 }
@@ -1859,10 +1866,14 @@ model MicroExportReturnFeeTier {
   maxSaleGross Decimal @map("max_sale_gross") @db.Decimal(12, 2)
   // Hakediş (satış − komisyon) üzerine uygulanan oran (kesir: 0.3500 = %35).
   rate         Decimal @db.Decimal(7, 4)
+  // The dated tier set this band belongs to (MicroExportReturnFeeTierVersion).
+  versionId    String? @map("version_id") @db.Uuid
 
   effectiveFrom DateTime @default(now()) @map("effective_from") @db.Date
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
+
+  version MicroExportReturnFeeTierVersion? @relation(fields: [versionId], references: [id], onDelete: Cascade)
 
   @@unique([minSaleGross, maxSaleGross, effectiveFrom])
   @@index([minSaleGross, maxSaleGross])
@@ -2326,4 +2337,46 @@ model PriceChangeLog {
   @@index([storeId, createdAt(sort: Desc)])
   @@index([variantId, createdAt(sort: Desc)])
   @@map("price_change_logs")
+}
+
+// A carrier's dated tariff set: every desi price, Barem band and Barem attribute
+// that applies from effectiveFrom (an instant, not a day) until the carrier's next
+// version starts. Only the start is stored; the (carrierId, effectiveFrom) unique
+// key makes two overlapping versions impossible. Global reference data: RLS
+// authenticated SELECT open (USING true), writes only through the postgres role.
+model ShippingTariffVersion {
+  id                               String   @id @default(uuid()) @db.Uuid
+  carrierId                        String   @map("carrier_id") @db.Uuid
+  effectiveFrom                    DateTime @map("effective_from")
+  supportsBaremDestek              Boolean  @map("supports_barem_destek")
+  maxBaremDesi                     Int      @map("max_barem_desi")
+  maxBaremEligibleDeliveryDuration Int      @map("max_barem_eligible_delivery_duration")
+  // The admin who entered the version (auth.users id). Reference only, no FK.
+  createdBy                        String?  @map("created_by") @db.Uuid
+  createdAt                        DateTime @default(now()) @map("created_at")
+  updatedAt                        DateTime @updatedAt @map("updated_at")
+
+  carrier      ShippingCarrier       @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  desiTariffs  ShippingDesiTariff[]
+  baremTariffs ShippingBaremTariff[]
+
+  @@unique([carrierId, effectiveFrom])
+  @@map("shipping_tariff_versions")
+}
+
+// A dated set of micro-export "Yurt Disi Iade Operasyon Bedeli" tiers. A version
+// applies from effectiveFrom (an instant) until the next version starts, so a band
+// dropped from a later set no longer applies after that set starts. Global
+// reference data with the same RLS contract as ShippingTariffVersion.
+model MicroExportReturnFeeTierVersion {
+  id            String   @id @default(uuid()) @db.Uuid
+  effectiveFrom DateTime @unique @map("effective_from")
+  // The admin who entered the version (auth.users id). Reference only, no FK.
+  createdBy     String?  @map("created_by") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tiers MicroExportReturnFeeTier[]
+
+  @@map("micro_export_return_fee_tier_versions")
 }
