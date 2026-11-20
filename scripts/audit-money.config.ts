@@ -42,11 +42,11 @@ export interface AllowedCoercion {
 export const ALLOWED: readonly AllowedCoercion[] = [
   {
     file: 'packages/profit/src/shipping/resolve-tariff.ts',
-    line: 69,
+    line: 78,
     reason:
       'desi is a dimensional-weight quantity, NOT money. Math.ceil(desi.toNumber()) yields the ' +
-      'integer desi tier for the (own_/shipping_)desi_tariffs Int key lookup. Prisma needs a JS ' +
-      'number for that Int column, so the coercion is unavoidable and non-money. Exactly the ' +
+      "integer desi tier for the own_shipping_tariffs Int key lookup and the tariff version's " +
+      'Int desi rows. Both hold a JS number, so the coercion is unavoidable and non-money. Exactly the ' +
       'desi-tier false positive this gate anticipates; the resolver moved into ROOTS with PR shipping.',
   },
 ] as const;

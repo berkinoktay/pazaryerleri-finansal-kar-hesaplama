@@ -25,7 +25,13 @@ import type { z } from '@hono/zod-openapi';
 
 import { mapPrismaError } from '@pazarsync/sync-core';
 
-import type { Platform, Prisma, ShippingCarrier, Store } from '@pazarsync/db';
+import type {
+  Platform,
+  Prisma,
+  ShippingCarrier,
+  ShippingTariffVersion,
+  Store,
+} from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import { enqueueProfitRecomputeForStore } from '@pazarsync/profit';
 
@@ -36,20 +42,48 @@ import type {
 } from '../validators/shipping-config.validator';
 
 /**
- * Maps a Prisma `ShippingCarrier` row to the wire shape exposed by the API.
+ * A carrier row read with `tariffVersionInForceInclude`: `tariffVersions` holds the
+ * tariff version in force at the read instant, or is empty when none is in force.
+ */
+export type ShippingCarrierWithVersion = ShippingCarrier & {
+  tariffVersions: ShippingTariffVersion[];
+};
+
+/**
+ * Carrier include that loads only the tariff version in force at `now`: the
+ * latest effectiveFrom <= now. Every carrier read in this service uses it so the
+ * Barem attributes in the response come from the version, not the carrier row.
+ */
+function tariffVersionInForceInclude(now: Date) {
+  return {
+    tariffVersions: {
+      where: { effectiveFrom: { lte: now } },
+      orderBy: { effectiveFrom: 'desc' },
+      take: 1,
+    },
+  } satisfies Prisma.ShippingCarrierInclude;
+}
+
+/**
+ * Maps a carrier row to the wire shape exposed by the API.
  * Centralised so all four shipping routes serialize identically — drift here
  * (e.g. a field added on the schema but not in one of the route handlers)
- * would silently produce inconsistent payloads across endpoints.
+ * would silently produce inconsistent payloads across endpoints. The Barem
+ * attributes come from the tariff version in force; a carrier with no version
+ * in force reports no Barem support (false / 0).
  */
-export function toCarrierResponse(c: ShippingCarrier): z.infer<typeof ShippingCarrierSchema> {
+export function toCarrierResponse(
+  c: ShippingCarrierWithVersion,
+): z.infer<typeof ShippingCarrierSchema> {
+  const version = c.tariffVersions.at(0);
   return {
     id: c.id,
     platform: c.platform,
     externalId: c.externalId,
     code: c.code,
     displayName: c.displayName,
-    supportsBaremDestek: c.supportsBaremDestek,
-    maxBaremDesi: c.maxBaremDesi,
+    supportsBaremDestek: version?.supportsBaremDestek ?? false,
+    maxBaremDesi: version?.maxBaremDesi ?? 0,
     sortOrder: c.sortOrder,
   };
 }
@@ -60,11 +94,12 @@ export async function getShippingConfig(
   tx: Prisma.TransactionClient,
 ): Promise<{
   shippingTariffSource: Store['shippingTariffSource'];
-  defaultShippingCarrier: ShippingCarrier | null;
+  defaultShippingCarrier: ShippingCarrierWithVersion | null;
 }> {
+  const now = new Date();
   const store = await tx.store.findFirst({
     where: { id: storeId, organizationId: orgId },
-    include: { defaultShippingCarrier: true },
+    include: { defaultShippingCarrier: { include: tariffVersionInForceInclude(now) } },
   });
   if (!store) throw new NotFoundError('Store', storeId);
   return {
@@ -78,7 +113,8 @@ export async function updateShippingConfig(
   storeId: string,
   input: UpdateShippingConfigInput,
   tx: Prisma.TransactionClient,
-): Promise<Store & { defaultShippingCarrier: ShippingCarrier | null }> {
+): Promise<Store & { defaultShippingCarrier: ShippingCarrierWithVersion | null }> {
+  const now = new Date();
   const store = await tx.store.findFirst({ where: { id: storeId, organizationId: orgId } });
   if (!store) throw new NotFoundError('Store', storeId);
 
@@ -105,7 +141,7 @@ export async function updateShippingConfig(
         shippingTariffSource: input.shippingTariffSource,
         defaultShippingCarrierId: input.defaultShippingCarrierId,
       },
-      include: { defaultShippingCarrier: true },
+      include: { defaultShippingCarrier: { include: tariffVersionInForceInclude(now) } },
     });
     // The tariff source / default carrier drives every shipping estimate for the
     // store, so every order with a not-yet-settled shipping estimate must be
@@ -124,10 +160,12 @@ export async function updateShippingConfig(
 export async function listShippingCarriers(
   filters: { platform?: Platform },
   tx: Prisma.TransactionClient,
-): Promise<ShippingCarrier[]> {
+): Promise<ShippingCarrierWithVersion[]> {
+  const now = new Date();
   return tx.shippingCarrier.findMany({
     where: { active: true, ...(filters.platform ? { platform: filters.platform } : {}) },
     orderBy: { sortOrder: 'asc' },
+    include: tariffVersionInForceInclude(now),
   });
 }
 
@@ -145,11 +183,12 @@ export async function listOwnShippingTariff(
 }
 
 /**
- * Returns the desi-bazlı (NORMAL lane) tariff rows plus the Barem
- * desteği tier table for a single carrier. The tariff data itself is
- * platform-wide reference (not tenant-scoped), but membership is
- * still required to keep the endpoint behind the same authz boundary
- * as the rest of `/v1/organizations/{orgId}/...`.
+ * Returns the desi-based (NORMAL lane) tariff rows plus the Barem
+ * destek tier table for a single carrier, from its tariff version in
+ * force now (both lists empty when no version is in force). The tariff
+ * data itself is platform-wide reference (not tenant-scoped), but
+ * membership is still required to keep the endpoint behind the same
+ * authz boundary as the rest of `/v1/organizations/{orgId}/...`.
  *
  * Hides inactive carriers symmetrically with `listShippingCarriers` so
  * a deactivated id cannot be peeked at via this endpoint. Returns 404
@@ -160,7 +199,7 @@ export async function getCarrierTariffs(
   carrierId: string,
   tx: Prisma.TransactionClient,
 ): Promise<{
-  carrier: ShippingCarrier;
+  carrier: ShippingCarrierWithVersion;
   desiTariffs: Array<{ desi: number; priceNet: Prisma.Decimal }>;
   baremTariffs: Array<{
     minOrderAmount: Prisma.Decimal;
@@ -168,19 +207,24 @@ export async function getCarrierTariffs(
     priceNet: Prisma.Decimal;
   }>;
 }> {
+  const now = new Date();
   const carrier = await tx.shippingCarrier.findFirst({
     where: { id: carrierId, active: true },
+    include: tariffVersionInForceInclude(now),
   });
   if (!carrier) throw new NotFoundError('ShippingCarrier', carrierId);
 
+  const version = carrier.tariffVersions.at(0);
+  if (version === undefined) return { carrier, desiTariffs: [], baremTariffs: [] };
+
   const [desiTariffs, baremTariffs] = await Promise.all([
     tx.shippingDesiTariff.findMany({
-      where: { carrierId },
+      where: { versionId: version.id },
       orderBy: { desi: 'asc' },
       select: { desi: true, priceNet: true },
     }),
     tx.shippingBaremTariff.findMany({
-      where: { carrierId },
+      where: { versionId: version.id },
       orderBy: { minOrderAmount: 'asc' },
       select: { minOrderAmount: true, maxOrderAmount: true, priceNet: true },
     }),

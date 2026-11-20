@@ -12,7 +12,8 @@
  */
 
 import { prisma } from '@pazarsync/db';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { Platform } from '@pazarsync/db/enums';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { estimateShippingCostForVariant } from '@/services/shipping-estimator.service';
 
@@ -320,5 +321,84 @@ describe('estimateShippingCostForVariant', () => {
     expect(outcome.estimate.tariffApplied).toBe('NORMAL');
     expect(outcome.estimate.carrierCode).toBe('SENDEOMP');
     expect(outcome.estimate.amount.toString()).toBe('91.99');
+  });
+});
+
+// --- Dated tariff versions -------------------------------------------------------
+// The estimator reads the tariff version of the store's default carrier that is in
+// force now. This suite owns a TEST_ carrier whose only version starts in 2099, so no
+// version is in force today. Its desi-1 row still carries the legacy carrierId, so an
+// estimator that read rows by carrier instead of by the version in force would price
+// the variant. The shipping reference tables are never truncated: the carrier is
+// created here and deleted afterwards (its versions and rows cascade).
+
+const FUTURE_ONLY_CARRIER_CODE = 'TEST_SVC_FUTURE_ONLY';
+const FUTURE_ONLY_CARRIER_EXTERNAL_ID = 990_301;
+const FUTURE_VERSION_START = new Date('2099-01-01T00:00:00.000Z');
+
+async function deleteFutureOnlyCarrier(): Promise<void> {
+  await prisma.shippingCarrier.deleteMany({
+    where: { platform: Platform.TRENDYOL, code: FUTURE_ONLY_CARRIER_CODE },
+  });
+}
+
+describe('estimateShippingCostForVariant - dated tariff versions', () => {
+  let futureOnlyCarrierId = '';
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    await deleteFutureOnlyCarrier();
+
+    // Legacy carrier Barem columns are still required until they move to the
+    // version only; the estimator must not read them.
+    const carrier = await prisma.shippingCarrier.create({
+      data: {
+        platform: Platform.TRENDYOL,
+        externalId: FUTURE_ONLY_CARRIER_EXTERNAL_ID,
+        code: FUTURE_ONLY_CARRIER_CODE,
+        displayName: 'Test Future Only',
+        supportsBaremDestek: false,
+        maxBaremDesi: 10,
+        maxBaremEligibleDeliveryDuration: 1,
+      },
+    });
+    futureOnlyCarrierId = carrier.id;
+
+    await prisma.shippingTariffVersion.create({
+      data: {
+        carrierId: carrier.id,
+        effectiveFrom: FUTURE_VERSION_START,
+        supportsBaremDestek: false,
+        maxBaremDesi: 10,
+        maxBaremEligibleDeliveryDuration: 1,
+        desiTariffs: {
+          create: [
+            {
+              carrierId: carrier.id,
+              desi: 1,
+              priceNet: '999.00',
+              effectiveFrom: FUTURE_VERSION_START,
+            },
+          ],
+        },
+      },
+    });
+  });
+
+  afterAll(deleteFutureOnlyCarrier);
+
+  beforeEach(truncateAll);
+
+  it('a carrier with no version in force is DESI_OVERFLOW', async () => {
+    const { variant } = await createVariantFixture({
+      defaultShippingCarrierId: futureOnlyCarrierId,
+      salePrice: '150.00',
+      dimensionalWeightOverride: '1.0',
+    });
+
+    const outcome = await prisma.$transaction((tx) =>
+      estimateShippingCostForVariant(variant.id, tx),
+    );
+    expect(outcome).toEqual({ ok: false, reason: 'DESI_OVERFLOW' });
   });
 });
