@@ -18,6 +18,10 @@ export {
   type ResolveTariffInput,
   type ShippingEstimate,
 } from './shipping/resolve-tariff';
+export {
+  loadShippingTariffVersion,
+  type ShippingTariffVersionRows,
+} from './shipping/tariff-version';
 export { grossToVat } from './money';
 
 // Profit line core (rebuild, phase 1) -- docs/plans/2026-10-29-profit-engine-design.md

@@ -9,7 +9,7 @@
 
 import { Decimal } from 'decimal.js';
 import { prisma, type Prisma } from '@pazarsync/db';
-import { ProfitIssueCode, ProfitLineSource, ProfitLineType } from '@pazarsync/db/enums';
+import { Platform, ProfitIssueCode, ProfitLineSource, ProfitLineType } from '@pazarsync/db/enums';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -665,5 +665,112 @@ describe('loadTrendyolScenarioBases', () => {
     }
     expect(caught.feeType).toBe('PLATFORM_SERVICE');
     expect(caught.field).toBe('fixedAmountNet');
+  });
+
+  it('scenario Barem eligibility follows the duration of the version in force', async () => {
+    // A dedicated carrier with two Barem versions: v1 allows a 1-day delivery window,
+    // v2 (from 1 December 2026, 00:00 Istanbul) a 3-day one. The carrier row's legacy
+    // window stays at 1, so reading the carrier instead of the version would never
+    // make the 2-day variant eligible.
+    const carrierCode = 'TEST_SCENARIO_BAREM_WINDOW';
+    const v1Start = new Date('2000-01-01T00:00:00.000Z');
+    const v2Start = new Date('2026-11-30T21:00:00.000Z');
+    const v2LegacyRowDate = new Date('2026-12-01T00:00:00.000Z');
+    const deleteCarrier = async (): Promise<void> => {
+      // Versions, desi and Barem rows cascade; the store's default carrier is set null.
+      await prisma.shippingCarrier.deleteMany({
+        where: { platform: Platform.TRENDYOL, code: carrierCode },
+      });
+    };
+    await deleteCarrier();
+
+    try {
+      const carrier = await prisma.shippingCarrier.create({
+        data: {
+          platform: Platform.TRENDYOL,
+          externalId: 990_102,
+          code: carrierCode,
+          displayName: 'Test Scenario Barem Window',
+          supportsBaremDestek: true,
+          maxBaremDesi: 10,
+          maxBaremEligibleDeliveryDuration: 1,
+        },
+      });
+      const versions = [
+        {
+          effectiveFrom: v1Start,
+          window: 1,
+          desiNet: '80.00',
+          baremNet: '40.00',
+          rowDate: v1Start,
+        },
+        {
+          effectiveFrom: v2Start,
+          window: 3,
+          desiNet: '90.00',
+          baremNet: '45.00',
+          rowDate: v2LegacyRowDate,
+        },
+      ];
+      for (const version of versions) {
+        await prisma.shippingTariffVersion.create({
+          data: {
+            carrierId: carrier.id,
+            effectiveFrom: version.effectiveFrom,
+            supportsBaremDestek: true,
+            maxBaremDesi: 10,
+            maxBaremEligibleDeliveryDuration: version.window,
+            desiTariffs: {
+              create: [
+                {
+                  carrierId: carrier.id,
+                  desi: 1,
+                  priceNet: version.desiNet,
+                  effectiveFrom: version.rowDate,
+                },
+              ],
+            },
+            baremTariffs: {
+              create: [
+                {
+                  carrierId: carrier.id,
+                  minOrderAmount: '0.00',
+                  maxOrderAmount: '199.99',
+                  priceNet: version.baremNet,
+                  effectiveFrom: version.rowDate,
+                },
+              ],
+            },
+          },
+        });
+      }
+
+      await seedMelontikFeeDefinitions();
+      const { organizationId, storeId } = await createTrendyolOrg({ carrierId: carrier.id });
+      const variantId = await createPricedVariant(organizationId, storeId, 0);
+      await prisma.productVariant.update({
+        where: { id: variantId },
+        data: { deliveryDuration: 2 },
+      });
+
+      async function fastDeliveryAt(scenarioDate: Date): Promise<boolean> {
+        const bases = await loadTrendyolScenarioBases(prisma, {
+          organizationId,
+          storeId,
+          scenarioDate,
+          variants: [{ variantId }],
+        });
+        const result = bases.get(variantId);
+        if (result?.kind !== 'ready') {
+          throw new Error('expected the scenario base to be ready');
+        }
+        return result.base.fastDelivery;
+      }
+
+      expect(await fastDeliveryAt(new Date('2026-11-30T20:59:59.999Z'))).toBe(false);
+      expect(await fastDeliveryAt(new Date('2026-11-30T21:00:00.000Z'))).toBe(true);
+    } finally {
+      await deleteCarrier();
+    }
   });
 });

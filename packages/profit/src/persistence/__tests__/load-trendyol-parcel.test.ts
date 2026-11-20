@@ -616,10 +616,11 @@ describe('loadTrendyolParcel', () => {
     ).rejects.toBeInstanceOf(UnsupportedPlatformError);
   });
 
-  it('loads shipping tariff rows dated after the order date (no effective-from filter)', async () => {
-    // A dedicated carrier whose only desi + Barem rows are dated 2027, after the
-    // 2026-10-28 order date. Before fix 1 the effectiveFrom <= orderDate filter
-    // dropped them; now the loader reads by carrier only, like resolve-tariff.ts.
+  it("loads a version's tariff rows whatever their legacy row effective date", async () => {
+    // A dedicated carrier whose only desi + Barem rows carry a legacy effective_from of
+    // 2027, after the 2026-10-28 order date. Their version starts 2000-01-01, and the
+    // version's start -- not the row's legacy effective_from column -- decides whether a
+    // row applies, so both rows load. Revisit when Gorev 4 drops that column.
     await upsertCarrierWithTariffs({
       code: 'TEST_SHIP_FUTURE',
       externalId: 990002,
