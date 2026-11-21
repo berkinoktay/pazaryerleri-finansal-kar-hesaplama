@@ -33,7 +33,10 @@ section "Versioning" for details.
   commission rates, cost profile versions, recognised carrier, tariff source). Changing the
   shipping config, overriding a variant's desi or a catalog change of a synced rate or desi
   therefore no longer queues a profit recompute of stored orders; they affect new orders and
-  the catalog estimates only. Request and response shapes are unchanged.
+  the catalog estimates only. Profit settings (stopaj / negative net VAT) of stored orders that
+  still followed the store setting are frozen to the store setting at their first recompute
+  under engine version 10 (`PATCH .../profit-settings` then reaches only orders that were never
+  computed). Request and response shapes are unchanged.
 - **Shipping tariffs are read from the dated version in force**
   (`GET /v1/organizations/{orgId}/shipping-carriers`,
   `GET /v1/organizations/{orgId}/shipping-carriers/{carrierId}/tariffs`,

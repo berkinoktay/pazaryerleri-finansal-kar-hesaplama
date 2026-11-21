@@ -22,7 +22,11 @@
 
 import { prisma } from '@pazarsync/db';
 
-import { drainProfitRecomputeQueue, type DrainResult } from '../src/persistence/recompute-queue';
+import {
+  PROFIT_RECOMPUTE_BATCH_SIZE,
+  drainProfitRecomputeQueue,
+  type DrainResult,
+} from '../src/persistence/recompute-queue';
 
 const USAGE =
   'Usage: drain-profit-recompute.ts --confirm-worker-stopped [--max-rounds <positive integer>]';
@@ -33,9 +37,6 @@ const WORKER_NOT_CONFIRMED_MESSAGE =
 
 const CONFIRM_FLAG = '--confirm-worker-stopped';
 const MAX_ROUNDS_FLAG = '--max-rounds';
-
-/** Mirrors the sync-worker's PROFIT_RECOMPUTE_BATCH_SIZE (a package cannot import an app). */
-const DRAIN_BATCH_SIZE = 50;
 
 /** The round cap when --max-rounds is not given. */
 const DEFAULT_MAX_ROUNDS = 1000;
@@ -139,7 +140,9 @@ async function main(): Promise<void> {
   let rounds = 0;
   let ranDry = false;
   while (rounds < parsed.maxRounds) {
-    const round = await drainProfitRecomputeQueue(prisma, { batchSize: DRAIN_BATCH_SIZE });
+    const round = await drainProfitRecomputeQueue(prisma, {
+      batchSize: PROFIT_RECOMPUTE_BATCH_SIZE,
+    });
     rounds += 1;
     console.log(`Round ${rounds.toString()}: ${formatCounts(round)}.`);
     total = addRound(total, round);

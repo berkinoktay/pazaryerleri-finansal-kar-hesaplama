@@ -22,6 +22,13 @@ import { PROFIT_ENGINE_PLATFORMS, recomputeParcelProfit } from './recompute-parc
  * throughout so a later statement in a long transaction still gets a fresh instant.
  */
 
+/**
+ * How many marks one drain pass claims. Each claimed mark is recomputed in its own
+ * short transaction, so this bounds the work (and the lock window) per pass. The
+ * sync-worker tick and the operator drain script both use it.
+ */
+export const PROFIT_RECOMPUTE_BATCH_SIZE = 50;
+
 /** How long a claimed request is leased before another worker may re-claim it. */
 export const PROFIT_RECOMPUTE_LEASE_MS = 120_000;
 

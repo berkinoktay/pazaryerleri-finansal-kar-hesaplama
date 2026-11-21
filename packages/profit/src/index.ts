@@ -266,6 +266,7 @@ export { visibleProfitIssues } from './read/visible-profit-issues';
 
 // Profit recompute queue (rebuild, phase 3B) -- docs/plans/2026-10-30-profit-engine-faz-3b-plan.md
 export {
+  PROFIT_RECOMPUTE_BATCH_SIZE,
   enqueueProfitRecompute,
   enqueueProfitRecomputeForVariants,
   enqueueProfitRecomputeForStore,

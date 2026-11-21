@@ -1,50 +1,33 @@
-// upsertCatalogBatch never-queues unit tests.
+// upsertCatalogBatch unit tests.
 //
-// The DB (@pazarsync/db), the profit queue (@pazarsync/profit), the aggregate
-// refresh and the logger are mocked at the module boundary. A synced commission
-// rate or desi change no longer reprices stored orders (their inputs are frozen
-// at intake), so each scenario describes a variant's prior and new synced
-// values and asserts that enqueueProfitRecomputeForVariants is never reached.
-// The profit mock stays so a reintroduced call would be caught. No real DB.
+// The DB (@pazarsync/db), the aggregate refresh and the logger are mocked at the
+// module boundary. No real DB. There are no profit recompute queueing tests: the
+// package no longer depends on @pazarsync/profit, so the catalog write path cannot
+// queue a stored order for a recompute (their inputs are frozen at intake).
 
 import { Decimal } from 'decimal.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Store } from '@pazarsync/db';
-import { ProductVariantStatus, ProfitRecomputeReason } from '@pazarsync/db/enums';
+import { ProductVariantStatus } from '@pazarsync/db/enums';
 import type { MappedProduct, MappedProductVariant } from '@pazarsync/marketplace';
 
 import { upsertCatalogBatch } from '../upsert-catalog-batch';
 
 // ─── Mocks (module boundary) ─────────────────────────────────────────────
 
-interface SyncedState {
+interface VariantRow {
+  id: string;
   syncedCommissionRate: Decimal | null;
   syncedDimensionalWeight: Decimal;
 }
-type PriorRow = SyncedState & { platformVariantId: bigint };
-type VariantRow = SyncedState & { id: string };
 interface VariantWhereArg {
   where: { storeId_platformVariantId: { platformVariantId: bigint } };
 }
-interface VariantFindManyArg {
-  where: { storeId: string; platformVariantId: { in: bigint[] } };
-}
 
 const productUpsert = vi.fn<() => Promise<{ id: string }>>();
-const variantFindMany = vi.fn<(args: VariantFindManyArg) => Promise<PriorRow[]>>();
 const variantUpsert = vi.fn<(args: VariantWhereArg) => Promise<VariantRow>>();
 const refreshAggregates = vi.fn<() => Promise<void>>();
-const enqueueForVariants = vi.fn<
-  (
-    tx: unknown,
-    params: {
-      organizationId: string;
-      variantIds: readonly string[];
-      reason: ProfitRecomputeReason;
-    },
-  ) => Promise<number>
->();
 
 vi.mock('@pazarsync/db', () => ({
   prisma: {
@@ -52,22 +35,10 @@ vi.mock('@pazarsync/db', () => ({
       cb({
         product: { upsert: () => productUpsert() },
         productVariant: {
-          findMany: (args: VariantFindManyArg) => variantFindMany(args),
           upsert: (args: VariantWhereArg) => variantUpsert(args),
         },
       }),
   },
-}));
-
-vi.mock('@pazarsync/profit', () => ({
-  enqueueProfitRecomputeForVariants: (
-    tx: unknown,
-    params: {
-      organizationId: string;
-      variantIds: readonly string[];
-      reason: ProfitRecomputeReason;
-    },
-  ) => enqueueForVariants(tx, params),
 }));
 
 vi.mock('@pazarsync/sync-core', () => ({
@@ -121,20 +92,10 @@ function content(...platformVariantIds: bigint[]): MappedProduct {
   };
 }
 
-/** Programs the per-variant AFTER (upsert) state the mocked DB returns, keyed by platformVariantId; BEFORE only describes the scenario (served through findMany, which the write path no longer reads). */
-function program(states: Map<bigint, { before: SyncedState | null; after: VariantRow }>): void {
-  variantFindMany.mockImplementation((args) => {
-    const requested = new Set(args.where.platformVariantId.in);
-    const rows: PriorRow[] = [];
-    for (const [platformVariantId, state] of states) {
-      if (state.before !== null && requested.has(platformVariantId)) {
-        rows.push({ platformVariantId, ...state.before });
-      }
-    }
-    return Promise.resolve(rows);
-  });
+/** Programs the per-variant row the mocked variant upsert returns, keyed by platformVariantId. */
+function program(rows: Map<bigint, VariantRow>): void {
   variantUpsert.mockImplementation((args) => {
-    const row = states.get(args.where.storeId_platformVariantId.platformVariantId)?.after;
+    const row = rows.get(args.where.storeId_platformVariantId.platformVariantId);
     if (row === undefined) throw new Error('unprogrammed variant upsert');
     return Promise.resolve(row);
   });
@@ -144,112 +105,56 @@ beforeEach(() => {
   vi.clearAllMocks();
   productUpsert.mockResolvedValue({ id: 'product-1' });
   refreshAggregates.mockResolvedValue(undefined);
-  enqueueForVariants.mockResolvedValue(0);
 });
 
-describe('upsertCatalogBatch — profit recompute queueing', () => {
-  it('does not queue stored orders when a synced rate or desi changes in a catalog batch', async () => {
-    const states = new Map<bigint, { before: SyncedState | null; after: VariantRow }>([
-      // rate 20 -> 25: changed
+describe('upsertCatalogBatch', () => {
+  it('upserts every variant of a catalog batch once', async () => {
+    const rows = new Map<bigint, VariantRow>([
       [
         101n,
         {
-          before: {
-            syncedCommissionRate: new Decimal('20'),
-            syncedDimensionalWeight: new Decimal('3'),
-          },
-          after: {
-            id: 'v101',
-            syncedCommissionRate: new Decimal('25'),
-            syncedDimensionalWeight: new Decimal('3'),
-          },
+          id: 'v101',
+          syncedCommissionRate: new Decimal('25'),
+          syncedDimensionalWeight: new Decimal('3'),
         },
       ],
-      // unchanged
       [
         102n,
         {
-          before: {
-            syncedCommissionRate: new Decimal('15'),
-            syncedDimensionalWeight: new Decimal('2'),
-          },
-          after: {
-            id: 'v102',
-            syncedCommissionRate: new Decimal('15'),
-            syncedDimensionalWeight: new Decimal('2'),
-          },
+          id: 'v102',
+          syncedCommissionRate: new Decimal('15'),
+          syncedDimensionalWeight: new Decimal('2'),
         },
       ],
-      // new variant (no prior row): has orders nowhere yet -> never queued
       [
         103n,
         {
-          before: null,
-          after: {
-            id: 'v103',
-            syncedCommissionRate: new Decimal('30'),
-            syncedDimensionalWeight: new Decimal('5'),
-          },
+          id: 'v103',
+          syncedCommissionRate: new Decimal('30'),
+          syncedDimensionalWeight: new Decimal('5'),
         },
       ],
-      // desi 1 -> 4: changed
       [
         104n,
         {
-          before: {
-            syncedCommissionRate: new Decimal('10'),
-            syncedDimensionalWeight: new Decimal('1'),
-          },
-          after: {
-            id: 'v104',
-            syncedCommissionRate: new Decimal('10'),
-            syncedDimensionalWeight: new Decimal('4'),
-          },
+          id: 'v104',
+          syncedCommissionRate: new Decimal('10'),
+          syncedDimensionalWeight: new Decimal('4'),
         },
       ],
-      // rate null -> 21: changed (null transition)
       [
         105n,
         {
-          before: { syncedCommissionRate: null, syncedDimensionalWeight: new Decimal('2') },
-          after: {
-            id: 'v105',
-            syncedCommissionRate: new Decimal('21'),
-            syncedDimensionalWeight: new Decimal('2'),
-          },
+          id: 'v105',
+          syncedCommissionRate: new Decimal('21'),
+          syncedDimensionalWeight: new Decimal('2'),
         },
       ],
     ]);
-    program(states);
+    program(rows);
 
     await upsertCatalogBatch(STORE, [content(101n, 102n, 103n, 104n, 105n)], null);
 
     expect(variantUpsert).toHaveBeenCalledTimes(5);
-    expect(enqueueForVariants).not.toHaveBeenCalled();
-  });
-
-  it('does not queue when no synced value changed, including equal decimal representations', async () => {
-    const states = new Map<bigint, { before: SyncedState | null; after: VariantRow }>([
-      // 21.00 vs 21 and 3.0 vs 3 are numerically equal -> unchanged
-      [
-        201n,
-        {
-          before: {
-            syncedCommissionRate: new Decimal('21.00'),
-            syncedDimensionalWeight: new Decimal('3.0'),
-          },
-          after: {
-            id: 'v201',
-            syncedCommissionRate: new Decimal('21'),
-            syncedDimensionalWeight: new Decimal('3'),
-          },
-        },
-      ],
-    ]);
-    program(states);
-
-    await upsertCatalogBatch(STORE, [content(201n)], null);
-
-    expect(enqueueForVariants).not.toHaveBeenCalled();
   });
 });

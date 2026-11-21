@@ -10,6 +10,13 @@
 // recompute tick then rewrites its statements as EXCLUDED. The core logic lives in
 // `stampCostWindowExclusions` (packages/order-sync/src/cost-window.ts).
 //
+// WARNING (order profit snapshot, PR-2): orders are now priced from the cost list
+// frozen in their snapshot, but this script still decides whether the cost was
+// entered in time from the live cost links (`attached_at`). An order whose link
+// was changed later but whose snapshot does carry a cost can therefore be wrongly,
+// and irreversibly, excluded from profit. Adapt it to read the snapshot before
+// running it again.
+//
 // Run from inside the package (connects with DATABASE_URL from the workspace-root .env):
 //   cd packages/order-sync && pnpm exec tsx --env-file=../../.env scripts/backfill-cost-window-exclusions.ts --store <id> --dry-run
 //   cd packages/order-sync && pnpm exec tsx --env-file=../../.env scripts/backfill-cost-window-exclusions.ts --store <id>
