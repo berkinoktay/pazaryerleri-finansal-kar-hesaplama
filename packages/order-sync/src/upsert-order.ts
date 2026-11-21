@@ -18,6 +18,8 @@
  *   - Order UPSERT on (storeId, platformOrderId)
  *   - OrderItem INSERT skip-if-exists, platformLineId-first (legacy fallback:
  *     (orderId, productVariantId) for lines/rows without a platform line id)
+ *   - captureOrderProfitSnapshot on create only: the order's product and seller
+ *     inputs are frozen at intake, in the same transaction.
  *   - enqueueProfitRecompute on every write (create + update): one mark per order.
  *     The sync-worker tick drains it and computes the statement in its own short
  *     transaction; a compute failure there never rolls back this order write.
@@ -30,7 +32,7 @@ import { prisma } from '@pazarsync/db';
 import type { Prisma, ProfitExclusionReason } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
-import { enqueueProfitRecompute } from '@pazarsync/profit';
+import { captureOrderProfitSnapshot, enqueueProfitRecompute } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 import { resolveProfitSettings } from '@pazarsync/utils';
 
@@ -456,7 +458,16 @@ export async function upsertOrderWithSnapshot(
     // when nothing was decremented (all lines re-syncs or unmatched variants).
     await refreshProductAggregates(tx, storeId, [...affectedProductIds]);
 
-    // 3. Enqueue a profit recompute for this order. The sync-worker tick drains the queue
+    // 3. Order profit snapshot (plan PR-2, decision 4): on a genuine create only, after
+    //    the items are written and in this same transaction, capture the order's product
+    //    and seller inputs, so the order is priced with the values of its intake moment.
+    //    An update never captures here: the recompute it enqueues below fills whatever
+    //    is still missing (an uncaptured order, a later-matched item, an empty cost list).
+    if (existingOrder === null) {
+      await captureOrderProfitSnapshot(tx, { organizationId, orderId: upserted.id });
+    }
+
+    // 4. Enqueue a profit recompute for this order. The sync-worker tick drains the queue
     //    and computes the statement in its own short transaction; a compute failure there
     //    never rolls back this write. Tenant-scoped: enqueueProfitRecompute re-filters by
     //    organization and store, so only this order (upserted.id) is marked.

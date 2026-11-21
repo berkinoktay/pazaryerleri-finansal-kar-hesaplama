@@ -76,8 +76,10 @@ export function resolveTrendyolCommissionRate(params: {
   if (item.categoryId === null) {
     return null;
   }
+  // A captured item reads the category rule rates of its capture moment, not the
+  // parcel-level maps (which hold the live rules of the uncaptured items).
   return resolveTrendyolCategoryRate({
-    rules,
+    rules: item.capturedCategoryRules ?? rules,
     categoryId: item.categoryId,
     brandId: item.brandId,
   });

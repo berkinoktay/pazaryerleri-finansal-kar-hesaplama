@@ -173,6 +173,38 @@ export async function loadIdentifiedCostProfilesByVariant(
   return loadCostProfiles(tx, params, toIdentifiedCostVersion);
 }
 
+/**
+ * The cost profile versions a captured order item was pinned to (order profit
+ * snapshot), by version id, org-filtered, in a single query. Each becomes a
+ * one-version profile carrying its profile's type, so the cost module prices the
+ * item with exactly that version, whatever its links or newer versions are today.
+ * An id that is not this organization's is absent from the map.
+ */
+export async function loadPinnedCostProfilesByVersionId(
+  tx: Prisma.TransactionClient,
+  params: { readonly organizationId: string; readonly versionIds: readonly string[] },
+): Promise<Map<string, ItemCostProfileInput>> {
+  const { organizationId } = params;
+  const versionIds = [...new Set(params.versionIds)];
+  const profilesByVersionId = new Map<string, ItemCostProfileInput>();
+  if (versionIds.length === 0) {
+    return profilesByVersionId;
+  }
+
+  const versions = await tx.costProfileVersion.findMany({
+    where: { id: { in: versionIds }, organizationId },
+    include: { profile: { select: { type: true } } },
+  });
+  for (const version of versions) {
+    profilesByVersionId.set(version.id, {
+      profileId: version.profileId,
+      profileType: version.profile.type,
+      versions: [toCostVersion(version)],
+    });
+  }
+  return profilesByVersionId;
+}
+
 // --- Commission rules --------------------------------------------------------
 
 /**

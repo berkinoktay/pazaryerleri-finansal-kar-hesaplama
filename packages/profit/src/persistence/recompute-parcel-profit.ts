@@ -17,6 +17,7 @@ import { type ProfitStatement } from '../core/profit-statement';
 import { roundPercent } from '../money';
 import { computeParcelProfit, PARCEL_PROFIT_COMPUTERS } from './compute-parcel-profit';
 import { type ContentHashAllocation, profitContentHash } from './content-hash';
+import { captureOrderProfitSnapshot } from './order-profit-snapshot';
 
 /** Seed for the parcel advisory-lock hash; a fixed namespace shared by every parcel lock. */
 const ADVISORY_LOCK_SEED = 0;
@@ -39,8 +40,10 @@ export const PROFIT_ENGINE_PLATFORMS: readonly Platform[] = Object.values(Platfo
 /**
  * Recomputes one parcel's profit and writes it in the caller's transaction. Takes a
  * parcel-scoped advisory lock first, so concurrent recomputes of the same order run
- * one at a time; the lock releases at commit or rollback. Then computes the parcel
- * read-only via `computeParcelProfit` (the single per-platform registry), hashes the
+ * one at a time; the lock releases at commit or rollback. Then captures the order's
+ * product and seller inputs (`captureOrderProfitSnapshot`, which fills only missing
+ * parts) and computes the parcel from them via `computeParcelProfit` (the single
+ * per-platform registry), hashes the
  * result, and writes the lines, allocations and both statements only when the stored
  * content hash does not already match. No platform-specific code lives here: a second
  * marketplace registers one computer in PARCEL_PROFIT_COMPUTERS and the writer and the
@@ -64,6 +67,11 @@ export async function recomputeParcelProfit(
 
   // Serialize concurrent recomputes of the same parcel; released at commit/rollback.
   await acquireParcelProfitLock(tx, orderId);
+
+  // Order profit snapshot (plan PR-2, decision 4): capture the order's product and
+  // seller inputs if it has none yet, or fill only the missing parts, in this same
+  // transaction and under the lock, so the computation below reads the capture.
+  await captureOrderProfitSnapshot(tx, { organizationId, orderId });
 
   const computed = await computeParcelProfit(tx, params);
   const statements = [computed.estimate, computed.bestKnown];

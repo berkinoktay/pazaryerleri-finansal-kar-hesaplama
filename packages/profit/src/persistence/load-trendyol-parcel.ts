@@ -11,7 +11,10 @@ import {
 import { compareText } from '../core/compare-text';
 import { type AcceptedReturn, type ParcelItemSnapshot } from '../core/parcel-snapshot';
 import { type ProfitIssue } from '../core/profit-issue';
-import { type ItemCostInput } from '../core/seller-costs/build-seller-cost-lines';
+import {
+  type ItemCostInput,
+  type ItemCostProfileInput,
+} from '../core/seller-costs/build-seller-cost-lines';
 import { type TrendyolEstimateInput } from '../marketplaces/trendyol/estimate-parcel';
 import {
   isTrendyolTransactionType,
@@ -21,6 +24,7 @@ import {
   type TrendyolSettlementRecord,
 } from '../marketplaces/trendyol/settlement-records';
 import {
+  trendyolCategoryBrandKey,
   type TrendyolCommissionRules,
   type TrendyolItemAttributes,
   type TrendyolOrderCarrierOutcome,
@@ -33,6 +37,7 @@ import {
   loadCommissionRulesForCategories,
   loadCostProfilesByVariant,
   loadFeeParams,
+  loadPinnedCostProfilesByVersionId,
   loadShippingTariff,
 } from './trendyol-reference-loaders';
 
@@ -141,11 +146,36 @@ export function resolveOrderCarrier(
 }
 
 /**
+ * The active Trendyol carriers an order's cargo name is matched against
+ * (`resolveOrderCarrier`), in a stable order. The single read behind both the live
+ * parcel load and the order profit snapshot. Active Trendyol carriers are a small
+ * platform-global reference table shared across every organization, so this read
+ * carries no tenant filter by design -- like the commission-rate and fee reference
+ * reads (Gorev 1, engine v6).
+ */
+export async function loadActiveTrendyolCarriers(
+  tx: Prisma.TransactionClient,
+): Promise<CarrierRow[]> {
+  return tx.shippingCarrier.findMany({
+    where: { platform: Platform.TRENDYOL, active: true },
+    orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
+    select: { id: true, code: true, displayName: true, orderCargoNames: true },
+  });
+}
+
+/**
  * Loads one Trendyol order (parcel) from the database into the pure inputs of the
  * Phase 2A Trendyol module. Reads only; filters every store-scoped table by the
  * order's store and every org-scoped table by the order's organization. Throws
  * `ParcelNotFoundError` when the order is not this organization's, and
  * `UnsupportedPlatformError` when the store is not a Trendyol store.
+ *
+ * Order profit snapshot (plan PR-2, decision 5): a captured order reads its carrier
+ * and shipping tariff source from its capture, and a captured item reads its desi,
+ * digital flag, category, brand, synced rate, category rule rates and pinned cost
+ * versions from its capture, whatever its variant is today. An uncaptured order or
+ * item reads the live values. Writes nothing: an uncaptured order stays live here
+ * until a recompute captures it. The query count does not depend on the item count.
  */
 export async function loadTrendyolParcel(
   tx: Prisma.TransactionClient,
@@ -178,9 +208,13 @@ export async function loadTrendyolParcel(
   const orderDate = order.orderDate;
   const businessDate = getBusinessDate(orderDate);
 
+  // Captured items read their capture; uncaptured ones read the live variant.
+  const capturedItems = order.items.filter((item) => item.profitSnapshotAt !== null);
+  const uncapturedItems = order.items.filter((item) => item.profitSnapshotAt === null);
+  const itemsWithInputs = order.items.map((item) => ({ item, inputs: itemProductInputs(item) }));
+
   // --- Snapshot items (decision 7: no item carries a cancellation flag) ---
-  const items: ParcelItemSnapshot[] = order.items.map((item) => {
-    const variant = item.productVariant;
+  const items: ParcelItemSnapshot[] = itemsWithInputs.map(({ item, inputs }) => {
     const listGross = dec(item.lineListGross);
     const sellerDiscountGross = dec(item.lineSellerDiscountGross);
     return {
@@ -194,19 +228,14 @@ export async function loadTrendyolParcel(
       sellerDiscountGross,
       saleGross: listGross.sub(sellerDiscountGross),
       saleVatRatePct: dec(item.saleVatRate),
-      unitDesi:
-        variant === null
-          ? null
-          : dec(variant.dimensionalWeightOverride ?? variant.syncedDimensionalWeight),
-      isDigital: variant?.isDigital ?? false,
+      unitDesi: inputs.unitDesi,
+      isDigital: inputs.isDigital,
       isCancelled: false,
     };
   });
 
   // --- Per-item commission attributes ---
-  const itemAttributes: TrendyolItemAttributes[] = order.items.map((item) => {
-    const variant = item.productVariant;
-    const product = variant?.product ?? null;
+  const itemAttributes: TrendyolItemAttributes[] = itemsWithInputs.map(({ item, inputs }) => {
     // The rate the order line itself carried, read from the raw column. The legacy
     // commissionRate column can hold a category fallback, so it is never read here.
     // The module treats null or zero as "not sent", so a zero column becomes null.
@@ -220,9 +249,12 @@ export async function loadTrendyolParcel(
         orderCommissionRatePct !== null && orderCommissionRatePct.gt(ZERO)
           ? orderCommissionRatePct
           : null,
-      syncedCommissionRatePct: decOrNull(variant?.syncedCommissionRate ?? null),
-      categoryId: product?.categoryId?.toString() ?? null,
-      brandId: product?.brandId?.toString() ?? null,
+      syncedCommissionRatePct: inputs.syncedCommissionRatePct,
+      categoryId: inputs.categoryId,
+      brandId: inputs.brandId,
+      ...(inputs.capturedCategoryRules !== null && {
+        capturedCategoryRules: inputs.capturedCategoryRules,
+      }),
     };
   });
 
@@ -242,30 +274,29 @@ export async function loadTrendyolParcel(
   });
   // The order's own carrier (the one Trendyol assigned, named by cargoProviderName)
   // drives the shipping estimate; the store default is never used on an order. When the
-  // name is not recognized the carrier is null and the estimate records why. Active
-  // Trendyol carriers are a small platform-global reference table shared across every
-  // organization, so this read carries no tenant filter by design -- like the
-  // commission-rate and fee reference reads (Gorev 1, engine v6).
-  const activeCarriers = await tx.shippingCarrier.findMany({
-    where: { platform: Platform.TRENDYOL, active: true },
-    orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
-  });
-  const orderCarrier = resolveOrderCarrier(order.cargoProviderName, activeCarriers);
+  // name is not recognized the carrier is null and the estimate records why. A captured
+  // order uses the carrier recognized at its capture.
+  const orderCarrier = await loadOrderCarrier(tx, order);
   const orderCarrierOutcome: TrendyolOrderCarrierOutcome =
     orderCarrier === null
       ? { kind: 'not-recognized', providerName: reportedProviderName(order.cargoProviderName) }
       : { kind: 'matched' };
   const shipping = await loadShippingTariff(tx, {
     storeId,
-    source: store.shippingTariffSource,
-    carrier: orderCarrier === null ? null : { id: orderCarrier.id, code: orderCarrier.code },
+    // A captured order keeps the store's tariff source of its capture moment.
+    source: order.snapshotShippingTariffSource ?? store.shippingTariffSource,
+    carrier: orderCarrier,
     at: orderDate,
     orderCarrierOutcome,
   });
-  const commission = await loadCommissionRules(tx, order.items);
+  // Live rules only for the uncaptured items; a captured item carries its own rates.
+  const commission = await loadCommissionRules(tx, uncapturedItems);
 
   // --- Costs ---
-  const costs = await loadItemCosts(tx, { organizationId, orderItems: order.items });
+  const costs = [
+    ...(await loadItemCosts(tx, { organizationId, orderItems: uncapturedItems })),
+    ...(await loadCapturedItemCosts(tx, { organizationId, orderItems: capturedItems })),
+  ];
 
   // --- Accepted returns (one unit per accepted claim item, capped at quantity) ---
   const acceptedReturns = buildAcceptedReturns(order.claims, order.items);
@@ -326,6 +357,169 @@ export async function loadTrendyolParcel(
     isExcluded: order.profitExcludedAt !== null,
     loadIssues,
   };
+}
+
+/**
+ * The product inputs of one item the engine prices with: its unit desi, digital
+ * flag, commission chain attributes and, for a captured item, the category rule
+ * rates of its capture moment (null for an uncaptured item, which resolves from the
+ * parcel-level live rules).
+ */
+interface ItemProductInputs {
+  readonly unitDesi: Decimal | null;
+  readonly isDigital: boolean;
+  readonly syncedCommissionRatePct: Decimal | null;
+  readonly categoryId: string | null;
+  readonly brandId: string | null;
+  readonly capturedCategoryRules: TrendyolCommissionRules | null;
+}
+
+/** The order item columns `itemProductInputs` reads: the snapshot columns and the live variant. */
+interface ItemProductRow {
+  readonly profitSnapshotAt: Date | null;
+  readonly snapshotUnitDesi: Prisma.Decimal | null;
+  readonly snapshotIsDigital: boolean | null;
+  readonly snapshotSyncedCommissionRatePct: Prisma.Decimal | null;
+  readonly snapshotCategoryId: bigint | null;
+  readonly snapshotBrandId: bigint | null;
+  readonly snapshotCategoryRatePct: Prisma.Decimal | null;
+  readonly snapshotCategoryBrandRatePct: Prisma.Decimal | null;
+  readonly productVariant: {
+    readonly dimensionalWeightOverride: Prisma.Decimal | null;
+    readonly syncedDimensionalWeight: Prisma.Decimal;
+    readonly isDigital: boolean;
+    readonly syncedCommissionRate: Prisma.Decimal | null;
+    readonly product: { readonly categoryId: bigint | null; readonly brandId: bigint | null };
+  } | null;
+}
+
+/**
+ * An item's product inputs. A captured item reads its capture, independent of its
+ * variant today (the variant may since have been corrected, re-linked or deleted);
+ * an uncaptured item reads its live variant and product.
+ */
+function itemProductInputs(item: ItemProductRow): ItemProductInputs {
+  if (item.profitSnapshotAt !== null) {
+    return {
+      unitDesi: decOrNull(item.snapshotUnitDesi),
+      isDigital: item.snapshotIsDigital ?? false,
+      syncedCommissionRatePct: decOrNull(item.snapshotSyncedCommissionRatePct),
+      categoryId: item.snapshotCategoryId?.toString() ?? null,
+      brandId: item.snapshotBrandId?.toString() ?? null,
+      capturedCategoryRules: capturedCategoryRules(item),
+    };
+  }
+
+  const variant = item.productVariant;
+  const product = variant?.product ?? null;
+  return {
+    unitDesi:
+      variant === null
+        ? null
+        : dec(variant.dimensionalWeightOverride ?? variant.syncedDimensionalWeight),
+    isDigital: variant?.isDigital ?? false,
+    syncedCommissionRatePct: decOrNull(variant?.syncedCommissionRate ?? null),
+    categoryId: product?.categoryId?.toString() ?? null,
+    brandId: product?.brandId?.toString() ?? null,
+    capturedCategoryRules: null,
+  };
+}
+
+/**
+ * The one-item commission rules of a captured item, built from its two captured
+ * rates. A null rate stays out of its map, so the item never falls back to a live
+ * rule: with both rates null its category rung finds nothing.
+ */
+function capturedCategoryRules(item: ItemProductRow): TrendyolCommissionRules {
+  const categoryRatePct = new Map<string, Decimal>();
+  const categoryBrandRatePct = new Map<string, Decimal>();
+  if (item.snapshotCategoryId === null) {
+    return { categoryRatePct, categoryBrandRatePct };
+  }
+  const categoryId = item.snapshotCategoryId.toString();
+  if (item.snapshotCategoryRatePct !== null) {
+    categoryRatePct.set(categoryId, dec(item.snapshotCategoryRatePct));
+  }
+  if (item.snapshotBrandId !== null && item.snapshotCategoryBrandRatePct !== null) {
+    categoryBrandRatePct.set(
+      trendyolCategoryBrandKey(categoryId, item.snapshotBrandId.toString()),
+      dec(item.snapshotCategoryBrandRatePct),
+    );
+  }
+  return { categoryRatePct, categoryBrandRatePct };
+}
+
+/**
+ * The carrier whose tariff prices the order, or null when it is not recognized. A
+ * captured order reads the carrier recognized at its capture by id -- with no
+ * active filter, since the carrier may have been deactivated since; a carrier that
+ * was never recognized (or no longer exists) is not recognized. An uncaptured order
+ * matches its cargo name against the active carriers.
+ */
+async function loadOrderCarrier(
+  tx: Prisma.TransactionClient,
+  order: {
+    readonly profitSnapshotAt: Date | null;
+    readonly snapshotCarrierId: string | null;
+    readonly cargoProviderName: string | null;
+  },
+): Promise<{ readonly id: string; readonly code: string } | null> {
+  if (order.profitSnapshotAt !== null) {
+    if (order.snapshotCarrierId === null) {
+      return null;
+    }
+    return tx.shippingCarrier.findUnique({
+      where: { id: order.snapshotCarrierId },
+      select: { id: true, code: true },
+    });
+  }
+  const carrier = resolveOrderCarrier(
+    order.cargoProviderName,
+    await loadActiveTrendyolCarriers(tx),
+  );
+  return carrier === null ? null : { id: carrier.id, code: carrier.code };
+}
+
+/** The cost versions a captured item was pinned to; a null column (nullable in the database) is an empty list. */
+function capturedCostVersionIds(ids: readonly string[] | null): readonly string[] {
+  return ids ?? [];
+}
+
+/**
+ * The seller cost inputs of the captured items: per item, the cost profile versions
+ * pinned in its capture, each as a one-version profile, in the stored order. Read in
+ * one org-filtered query for every item. An item with no pinned version is omitted;
+ * the cost module raises MISSING_COST itself, as for an uncaptured item without cost.
+ */
+async function loadCapturedItemCosts(
+  tx: Prisma.TransactionClient,
+  params: {
+    readonly organizationId: string;
+    readonly orderItems: readonly {
+      readonly id: string;
+      readonly snapshotCostProfileVersionIds: readonly string[] | null;
+    }[];
+  },
+): Promise<ItemCostInput[]> {
+  const { organizationId, orderItems } = params;
+  const pinned = orderItems.map((item) => ({
+    orderItemId: item.id,
+    versionIds: capturedCostVersionIds(item.snapshotCostProfileVersionIds),
+  }));
+  const profilesByVersionId = await loadPinnedCostProfilesByVersionId(tx, {
+    organizationId,
+    versionIds: pinned.flatMap((entry) => entry.versionIds),
+  });
+
+  const costs: ItemCostInput[] = [];
+  for (const { orderItemId, versionIds } of pinned) {
+    const profiles = versionIds
+      .map((versionId) => profilesByVersionId.get(versionId))
+      .filter((profile): profile is ItemCostProfileInput => profile !== undefined);
+    if (profiles.length === 0) continue;
+    costs.push({ orderItemId, profiles });
+  }
+  return costs;
 }
 
 /** The category and category+brand commission rules for the items' categories. */

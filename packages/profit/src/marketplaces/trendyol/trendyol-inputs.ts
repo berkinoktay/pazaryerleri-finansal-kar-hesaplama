@@ -22,6 +22,13 @@ export interface TrendyolItemAttributes {
   readonly syncedCommissionRatePct: Decimal | null; // product API rate, not tariff-aware; null or 0 = unknown
   readonly categoryId: string | null;
   readonly brandId: string | null;
+  /**
+   * The category rule rates of a captured order item, as they were at its capture
+   * moment (order profit snapshot). When set, this item's category rung reads these
+   * maps instead of the parcel-level ones: two items of the same category may have
+   * been captured at different moments, so the rate is resolved per item.
+   */
+  readonly capturedCategoryRules?: TrendyolCommissionRules;
 }
 
 /** Trendyol-specific attributes of a parcel. */

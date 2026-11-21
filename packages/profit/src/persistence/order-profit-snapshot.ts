@@ -23,7 +23,11 @@ import {
   trendyolCategoryBrandKey,
   type TrendyolCommissionRules,
 } from '../marketplaces/trendyol/trendyol-inputs';
-import { reportedProviderName, resolveOrderCarrier } from './load-trendyol-parcel';
+import {
+  loadActiveTrendyolCarriers,
+  reportedProviderName,
+  resolveOrderCarrier,
+} from './load-trendyol-parcel';
 import {
   loadCommissionRulesForCategories,
   loadIdentifiedCostProfilesByVariant,
@@ -100,10 +104,9 @@ export async function captureOrderProfitSnapshot(
 
 /**
  * The carrier recognised from the order's own cargo name, or null. The same read
- * as `loadTrendyolParcel`: active Trendyol carriers are a small platform-global
- * reference table shared across every organization, so this read carries no
- * tenant filter by design. A null or blank name is never recognised, so it skips
- * the read.
+ * as `loadTrendyolParcel` (`loadActiveTrendyolCarriers`, platform-global reference
+ * data, no tenant filter by design). A null or blank name is never recognised, so
+ * it skips the read.
  */
 async function recogniseCarrierId(
   tx: Prisma.TransactionClient,
@@ -112,11 +115,7 @@ async function recogniseCarrierId(
   if (reportedProviderName(cargoProviderName) === null) {
     return null;
   }
-  const activeCarriers = await tx.shippingCarrier.findMany({
-    where: { platform: Platform.TRENDYOL, active: true },
-    orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
-    select: { id: true, code: true, displayName: true, orderCargoNames: true },
-  });
+  const activeCarriers = await loadActiveTrendyolCarriers(tx);
   return resolveOrderCarrier(cargoProviderName, activeCarriers)?.id ?? null;
 }
 

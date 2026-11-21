@@ -20,6 +20,7 @@ import {
   CommissionRuleKind,
   CostProfileType,
   Platform,
+  ProfitExclusionReason,
   ShippingTariffSource,
   SnapshotDesiSource,
 } from '@pazarsync/db/enums';
@@ -584,6 +585,53 @@ describe('captureOrderProfitSnapshot', () => {
       snapshotCostProfileVersionIds: itemAAfter.snapshotCostProfileVersionIds,
     });
     expect(await readItemSnapshot(parcel.itemB)).toEqual(itemBBefore);
+  });
+
+  it('fills an empty cost list on an order excluded from profit, which stays excluded', async () => {
+    const parcel = await seedSnapshotParcel();
+    // Neither variant has a cost at intake, and the order is excluded from profit.
+    await prisma.productVariantCostProfile.deleteMany({
+      where: { organizationId: parcel.organizationId },
+    });
+    await prisma.order.update({
+      where: { id: parcel.orderId, organizationId: parcel.organizationId },
+      data: {
+        profitExcludedAt: new Date(),
+        profitExclusionReason: ProfitExclusionReason.COST_DEADLINE_MISSED,
+      },
+    });
+
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: true, itemsWritten: 2 });
+    expect((await readItemSnapshot(parcel.itemA)).snapshotCostProfileVersionIds).toEqual([]);
+    expect((await readItemSnapshot(parcel.itemB)).snapshotCostProfileVersionIds).toEqual([]);
+
+    // A cost in force at the order date is linked to both variants later.
+    for (const productVariantId of [parcel.variantA, parcel.variantB]) {
+      await attachCostProfile({
+        organizationId: parcel.organizationId,
+        storeId: parcel.storeId,
+        productVariantId,
+        amountGross: '12.00',
+        vatRate: '20',
+      });
+    }
+
+    // The gap fill runs as on any order: both empty lists take the late cost (the
+    // order detail shows it as the unit cost), while the exclusion stays.
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 2 });
+    expect(sorted((await readItemSnapshot(parcel.itemA)).snapshotCostProfileVersionIds)).toEqual(
+      await linkedCostVersionIds(parcel.organizationId, parcel.variantA),
+    );
+    expect(sorted((await readItemSnapshot(parcel.itemB)).snapshotCostProfileVersionIds)).toEqual(
+      await linkedCostVersionIds(parcel.organizationId, parcel.variantB),
+    );
+    expect((await readItemSnapshot(parcel.itemA)).snapshotCostProfileVersionIds).toHaveLength(1);
+    const order = await prisma.order.findFirstOrThrow({
+      where: { id: parcel.orderId, organizationId: parcel.organizationId },
+      select: { profitExcludedAt: true, profitExclusionReason: true },
+    });
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe(ProfitExclusionReason.COST_DEADLINE_MISSED);
   });
 
   it('pins the cost version in force at the order date, not the latest', async () => {

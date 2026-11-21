@@ -16,5 +16,7 @@
  * 9: an order whose carrier is not recognized records a non-blocking CARRIER_NOT_RECOGNIZED
  *    issue, and a seller-cargo-agreement order on a Trendyol-contract store keeps its
  *    shipping as an estimate with a SELLER_CARGO_AGREEMENT_ESTIMATE issue.
+ * 10: a stored order reads the product and seller inputs captured when it was first
+ *     computed (order profit snapshot) instead of their live values.
  */
-export const PROFIT_ENGINE_VERSION = 9;
+export const PROFIT_ENGINE_VERSION = 10;
