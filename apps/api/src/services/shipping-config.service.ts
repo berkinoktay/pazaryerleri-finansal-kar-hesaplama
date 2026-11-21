@@ -32,8 +32,7 @@ import type {
   ShippingTariffVersion,
   Store,
 } from '@pazarsync/db';
-import { ProfitRecomputeReason } from '@pazarsync/db/enums';
-import { enqueueProfitRecomputeForStore, loadShippingTariffVersion } from '@pazarsync/profit';
+import { loadShippingTariffVersion } from '@pazarsync/profit';
 
 import { NotFoundError, ShippingCarrierPlatformMismatchError } from '../lib/errors';
 import type {
@@ -143,14 +142,8 @@ export async function updateShippingConfig(
       },
       include: { defaultShippingCarrier: { include: tariffVersionInForceInclude(now) } },
     });
-    // The tariff source / default carrier drives every shipping estimate for the
-    // store, so every order with a not-yet-settled shipping estimate must be
-    // recomputed. Organization- and store-filtered, so no other tenant is touched.
-    await enqueueProfitRecomputeForStore(tx, {
-      organizationId: orgId,
-      storeId,
-      reason: ProfitRecomputeReason.REFERENCE_CHANGED,
-    });
+    // A stored order keeps the tariff source captured at intake, so the change
+    // reaches only new orders and the catalog estimate; no stored order is queued.
     return updated;
   } catch (err) {
     mapPrismaError(err);

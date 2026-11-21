@@ -18,8 +18,6 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 
-import { ProfitRecomputeReason } from '@pazarsync/db/enums';
-
 import { createApp } from '@/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -239,22 +237,20 @@ describe('PATCH .../variants/:variantId/dimensional-weight', () => {
     expect(res.status).toBe(404);
   });
 
-  it('queues the orders of a variant whose desi is overridden', async () => {
+  it("does not queue stored orders when a variant's desi is overridden", async () => {
     const ctx = await setup({ syncedDimensionalWeight: '1.20' });
 
-    // Carries the variant → must be queued; another order without it stays out.
+    // A stored order carrying the variant: its desi is frozen at intake, so the
+    // override only reaches new orders and the catalog estimate.
     const order = await createOrder(ctx.orgId, ctx.storeId);
     await createOrderItem(order.id, ctx.orgId, { productVariantId: ctx.variantId });
-    const unrelated = await createOrder(ctx.orgId, ctx.storeId);
-    await createOrderItem(unrelated.id, ctx.orgId, { productVariantId: null });
 
     const res = await patchDesi(ctx, { dimensionalWeight: '4.50' });
     expect(res.status).toBe(200);
 
-    const queued = await prisma.profitRecomputeRequest.findUnique({ where: { orderId: order.id } });
-    expect(queued?.reason).toBe(ProfitRecomputeReason.REFERENCE_CHANGED);
     expect(
-      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: unrelated.id } }),
+      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: order.id } }),
     ).toBeNull();
+    expect(await prisma.profitRecomputeRequest.count()).toBe(0);
   });
 });

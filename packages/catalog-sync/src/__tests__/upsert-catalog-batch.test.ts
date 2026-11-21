@@ -1,11 +1,11 @@
-// upsertCatalogBatch profit-recompute queueing unit tests (Phase 3B, Task 8).
+// upsertCatalogBatch never-queues unit tests.
 //
 // The DB (@pazarsync/db), the profit queue (@pazarsync/profit), the aggregate
-// refresh and the logger are mocked at the module boundary. Each scenario
-// drives the per-content BEFORE (findMany) and per-variant AFTER (upsert)
-// states and asserts which variant ids reach enqueueProfitRecomputeForVariants
-// — no real DB. The change detection itself (decimal.js compare, null
-// transitions, new variants) is the unit under test.
+// refresh and the logger are mocked at the module boundary. A synced commission
+// rate or desi change no longer reprices stored orders (their inputs are frozen
+// at intake), so each scenario describes a variant's prior and new synced
+// values and asserts that enqueueProfitRecomputeForVariants is never reached.
+// The profit mock stays so a reintroduced call would be caught. No real DB.
 
 import { Decimal } from 'decimal.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -32,7 +32,6 @@ interface VariantFindManyArg {
 }
 
 const productUpsert = vi.fn<() => Promise<{ id: string }>>();
-const variantFindUnique = vi.fn<(args: VariantWhereArg) => Promise<SyncedState | null>>();
 const variantFindMany = vi.fn<(args: VariantFindManyArg) => Promise<PriorRow[]>>();
 const variantUpsert = vi.fn<(args: VariantWhereArg) => Promise<VariantRow>>();
 const refreshAggregates = vi.fn<() => Promise<void>>();
@@ -53,7 +52,6 @@ vi.mock('@pazarsync/db', () => ({
       cb({
         product: { upsert: () => productUpsert() },
         productVariant: {
-          findUnique: (args: VariantWhereArg) => variantFindUnique(args),
           findMany: (args: VariantFindManyArg) => variantFindMany(args),
           upsert: (args: VariantWhereArg) => variantUpsert(args),
         },
@@ -123,7 +121,7 @@ function content(...platformVariantIds: bigint[]): MappedProduct {
   };
 }
 
-/** Programs the per-content BEFORE (findMany) and per-variant AFTER (upsert) state the mocked DB returns, keyed by platformVariantId. */
+/** Programs the per-variant AFTER (upsert) state the mocked DB returns, keyed by platformVariantId; BEFORE only describes the scenario (served through findMany, which the write path no longer reads). */
 function program(states: Map<bigint, { before: SyncedState | null; after: VariantRow }>): void {
   variantFindMany.mockImplementation((args) => {
     const requested = new Set(args.where.platformVariantId.in);
@@ -150,7 +148,7 @@ beforeEach(() => {
 });
 
 describe('upsertCatalogBatch — profit recompute queueing', () => {
-  it('queues only the variants whose synced rate or desi changed in a catalog batch', async () => {
+  it('does not queue stored orders when a synced rate or desi changes in a catalog batch', async () => {
     const states = new Map<bigint, { before: SyncedState | null; after: VariantRow }>([
       // rate 20 -> 25: changed
       [
@@ -226,12 +224,8 @@ describe('upsertCatalogBatch — profit recompute queueing', () => {
 
     await upsertCatalogBatch(STORE, [content(101n, 102n, 103n, 104n, 105n)], null);
 
-    expect(enqueueForVariants).toHaveBeenCalledTimes(1);
-    expect(enqueueForVariants).toHaveBeenCalledWith(expect.anything(), {
-      organizationId: 'org-1',
-      variantIds: ['v101', 'v104', 'v105'],
-      reason: ProfitRecomputeReason.REFERENCE_CHANGED,
-    });
+    expect(variantUpsert).toHaveBeenCalledTimes(5);
+    expect(enqueueForVariants).not.toHaveBeenCalled();
   });
 
   it('does not queue when no synced value changed, including equal decimal representations', async () => {
@@ -257,59 +251,5 @@ describe('upsertCatalogBatch — profit recompute queueing', () => {
     await upsertCatalogBatch(STORE, [content(201n)], null);
 
     expect(enqueueForVariants).not.toHaveBeenCalled();
-  });
-
-  it('reads prior synced values with a single findMany and no findUnique per content', async () => {
-    const states = new Map<bigint, { before: SyncedState | null; after: VariantRow }>([
-      [
-        301n,
-        {
-          before: {
-            syncedCommissionRate: new Decimal('10'),
-            syncedDimensionalWeight: new Decimal('1'),
-          },
-          after: {
-            id: 'v301',
-            syncedCommissionRate: new Decimal('10'),
-            syncedDimensionalWeight: new Decimal('1'),
-          },
-        },
-      ],
-      [
-        302n,
-        {
-          before: {
-            syncedCommissionRate: new Decimal('12'),
-            syncedDimensionalWeight: new Decimal('2'),
-          },
-          after: {
-            id: 'v302',
-            syncedCommissionRate: new Decimal('12'),
-            syncedDimensionalWeight: new Decimal('2'),
-          },
-        },
-      ],
-      [
-        303n,
-        {
-          before: {
-            syncedCommissionRate: new Decimal('14'),
-            syncedDimensionalWeight: new Decimal('3'),
-          },
-          after: {
-            id: 'v303',
-            syncedCommissionRate: new Decimal('14'),
-            syncedDimensionalWeight: new Decimal('3'),
-          },
-        },
-      ],
-    ]);
-    program(states);
-
-    await upsertCatalogBatch(STORE, [content(301n, 302n, 303n)], null);
-
-    expect(variantFindMany).toHaveBeenCalledTimes(1);
-    expect(variantFindUnique).not.toHaveBeenCalled();
-    expect(variantUpsert).toHaveBeenCalledTimes(3);
   });
 });

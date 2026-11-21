@@ -116,8 +116,8 @@ export function enqueueProfitRecomputeForStore(
  *
  * The outer SELECT is ordered by `o.id` so the INSERT inserts (and so locks the
  * conflicting queue rows) in a single global order. Producers upsert overlapping
- * orders inside longer transactions -- settlement ingest batches, store-wide
- * shipping config, the variant scope, catalog contents -- and without one
+ * orders inside longer transactions -- settlement ingest batches, the cost
+ * profile variant scope, the operator's store-wide recompute -- and without one
  * global order two of them can lock the same rows in opposite orders and deadlock
  * (40P01). Order id is that global order: every producer takes the shared rows the
  * same way, so they queue instead of deadlocking.

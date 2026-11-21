@@ -26,6 +26,14 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Product and store edits no longer reprice stored orders**
+  (`PATCH /v1/organizations/{orgId}/stores/{storeId}/shipping-config`, the variant desi
+  override routes, and the catalog sync). A stored order now keeps the product and seller
+  inputs captured when it was first computed (desi, digital flag, category, brand,
+  commission rates, cost profile versions, recognised carrier, tariff source). Changing the
+  shipping config, overriding a variant's desi or a catalog change of a synced rate or desi
+  therefore no longer queues a profit recompute of stored orders; they affect new orders and
+  the catalog estimates only. Request and response shapes are unchanged.
 - **Shipping tariffs are read from the dated version in force**
   (`GET /v1/organizations/{orgId}/shipping-carriers`,
   `GET /v1/organizations/{orgId}/shipping-carriers/{carrierId}/tariffs`,
