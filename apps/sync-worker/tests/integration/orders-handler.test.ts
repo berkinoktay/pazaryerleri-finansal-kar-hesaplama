@@ -1205,6 +1205,50 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     expect(stored.actualShipDate?.toISOString()).toBe(correctedShippedAt.toISOString());
   });
 
+  it('enqueues and stores a moved ship-by deadline that arrives with the same lastModifiedDate', async () => {
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-DEADLINE-MOVED']);
+    const firstDeadline = new Date(Date.now() - 4 * MS_HOUR);
+    const mapped: MappedOrder = {
+      ...buildDirectMapped({
+        platformOrderId: 'deadline-moved',
+        barcode: 'EAN13-DEADLINE-MOVED',
+        lastModifiedDate: new Date(Date.now() - 2 * MS_HOUR),
+      }),
+      agreedDeliveryDate: firstDeadline,
+    };
+
+    await upsertOrderWithSnapshot(store.id, org.id, mapped);
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: 'deadline-moved' },
+    });
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(0);
+
+    // The ship-by deadline decides the Barem table together with the ship date, so a
+    // moved deadline is stored and recomputed even when lastModifiedDate did not move.
+    const movedDeadline = new Date(firstDeadline.getTime() + 24 * MS_HOUR);
+    await upsertOrderWithSnapshot(store.id, org.id, {
+      ...mapped,
+      agreedDeliveryDate: movedDeadline,
+    });
+
+    const queued = await prisma.profitRecomputeRequest.findUnique({ where: { orderId: order.id } });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+    const stored = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(stored.agreedDeliveryDate?.toISOString()).toBe(movedDeadline.toISOString());
+
+    // The same deadline again, or none at all, is not a change and keeps the stored one.
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    await upsertOrderWithSnapshot(store.id, org.id, {
+      ...mapped,
+      agreedDeliveryDate: new Date(movedDeadline.getTime()),
+    });
+    await upsertOrderWithSnapshot(store.id, org.id, { ...mapped, agreedDeliveryDate: null });
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(0);
+    const kept = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(kept.agreedDeliveryDate?.toISOString()).toBe(movedDeadline.toISOString());
+  });
+
   it('keeps the stored ship date and does not enqueue when a same-lastModifiedDate update carries none', async () => {
     const { org, store } = await setupStoreAndSyncLog(['EAN13-SHIP-NULL']);
     const shippedAt = new Date(Date.now() - 3 * MS_HOUR);
