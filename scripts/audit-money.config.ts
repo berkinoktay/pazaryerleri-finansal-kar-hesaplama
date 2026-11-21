@@ -42,7 +42,7 @@ export interface AllowedCoercion {
 export const ALLOWED: readonly AllowedCoercion[] = [
   {
     file: 'packages/profit/src/shipping/resolve-tariff.ts',
-    line: 78,
+    line: 82,
     reason:
       'desi is a dimensional-weight quantity, NOT money. Math.ceil(desi.toNumber()) yields the ' +
       "integer desi tier for the own_shipping_tariffs Int key lookup and the tariff version's " +

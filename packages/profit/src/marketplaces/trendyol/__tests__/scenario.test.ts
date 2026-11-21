@@ -1,5 +1,6 @@
 import { Decimal } from 'decimal.js';
 import {
+  BaremTier,
   CostProfileType,
   ProfitLineType,
   ProfitStatus,
@@ -123,6 +124,37 @@ function requireLine(lines: readonly ProfitLine[], type: ProfitLineType): Profit
 
 function breakpointsToFixed(breakpoints: readonly Decimal[]): string[] {
   return breakpoints.map((value) => value.toFixed(2));
+}
+
+/**
+ * The audit reference on a two-tier tariff version (10 August 2026 onward). Table 1
+ * keeps the audit bands ([0, 199.99] 42.91, [200, 349.99] 73.74); table 2 has its own
+ * bounds ([0, 149.99] 60.00, [150, 299.99] 80.00), so a breakpoint or a price read
+ * from the wrong table shows.
+ */
+function twoTierScenarioReference(): TrendyolReferenceData {
+  const reference = arasmpScenarioReference();
+  return {
+    ...reference,
+    shipping: {
+      ...reference.shipping,
+      baremBands: [
+        ...reference.shipping.baremBands,
+        {
+          tier: BaremTier.TABLE_2,
+          minOrderAmount: new Decimal('0'),
+          maxOrderAmount: new Decimal('149.99'),
+          priceNet: new Decimal('60.00'),
+        },
+        {
+          tier: BaremTier.TABLE_2,
+          minOrderAmount: new Decimal('150'),
+          maxOrderAmount: new Decimal('299.99'),
+          priceNet: new Decimal('80.00'),
+        },
+      ],
+    },
+  };
 }
 
 describe('buildTrendyolScenarioParcel', () => {
@@ -297,6 +329,72 @@ describe('trendyolScenarioBreakpoints', () => {
     expect(trendyolScenarioBreakpoints(scenarioBase({ reference: ownContractReference }))).toEqual(
       [],
     );
+  });
+});
+
+describe('Barem table of a scenario', () => {
+  it('prices a fast-delivery scenario at table 1 and breaks at the table 1 bounds on a two-tier version', () => {
+    const reference = twoTierScenarioReference();
+
+    const low = evaluateTrendyolScenario(scenarioInput('170.00', { reference }));
+    const lowShipping = requireLine(low.estimate.lines, ProfitLineType.SHIPPING);
+    // Table 1 [0, 199.99] 42.91 net -> 51.49 gross.
+    expect(lowShipping.amount.gross.toFixed(2)).toBe('51.49');
+    expect(lowShipping.inputs).toMatchObject({ tariffKind: 'BAREM', baremTier: BaremTier.TABLE_1 });
+
+    const high = evaluateTrendyolScenario(scenarioInput('320.00', { reference }));
+    const highShipping = requireLine(high.estimate.lines, ProfitLineType.SHIPPING);
+    // Table 1 [200, 349.99] 73.74 net -> 88.49 gross.
+    expect(highShipping.amount.gross.toFixed(2)).toBe('88.49');
+    expect(highShipping.inputs).toMatchObject({
+      tariffKind: 'BAREM',
+      baremTier: BaremTier.TABLE_1,
+    });
+
+    expect(breakpointsToFixed(trendyolScenarioBreakpoints(scenarioBase({ reference })))).toEqual([
+      '200.00',
+      '350.00',
+    ]);
+  });
+
+  it('prices a scenario without fast delivery at table 2 and breaks at the table 2 bounds on a two-tier version', () => {
+    const reference = twoTierScenarioReference();
+
+    const inBand = evaluateTrendyolScenario(
+      scenarioInput('170.00', { reference, fastDelivery: false }),
+    );
+    const inBandShipping = requireLine(inBand.estimate.lines, ProfitLineType.SHIPPING);
+    // Table 2 [150, 299.99] 80.00 net -> 96.00 gross (table 1 would be 51.49).
+    expect(inBandShipping.amount.gross.toFixed(2)).toBe('96.00');
+    expect(inBandShipping.inputs).toMatchObject({
+      tariffKind: 'BAREM',
+      baremTier: BaremTier.TABLE_2,
+    });
+
+    // 320 is inside a table 1 band but above every table 2 band: the desi tariff.
+    const aboveBands = evaluateTrendyolScenario(
+      scenarioInput('320.00', { reference, fastDelivery: false }),
+    );
+    const aboveShipping = requireLine(aboveBands.estimate.lines, ProfitLineType.SHIPPING);
+    // Desi '2' 83.93 net -> 100.72 gross.
+    expect(aboveShipping.amount.gross.toFixed(2)).toBe('100.72');
+    expect(aboveShipping.inputs).toMatchObject({ tariffKind: 'DESI' });
+
+    expect(
+      breakpointsToFixed(
+        trendyolScenarioBreakpoints(scenarioBase({ reference, fastDelivery: false })),
+      ),
+    ).toEqual(['150.00', '300.00']);
+  });
+
+  it('prices a scenario without fast delivery at the desi tariff with no breakpoint on a single-tier version', () => {
+    const result = evaluateTrendyolScenario(scenarioInput('170.00', { fastDelivery: false }));
+    const shipping = requireLine(result.estimate.lines, ProfitLineType.SHIPPING);
+    // Desi '2' 83.93 net -> 100.72 gross; the single-tier table 1 band is not read.
+    expect(shipping.amount.gross.toFixed(2)).toBe('100.72');
+    expect(shipping.inputs).toMatchObject({ tariffKind: 'DESI' });
+
+    expect(trendyolScenarioBreakpoints(scenarioBase({ fastDelivery: false }))).toEqual([]);
   });
 });
 

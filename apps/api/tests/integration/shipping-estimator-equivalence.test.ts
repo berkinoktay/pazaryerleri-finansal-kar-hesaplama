@@ -25,6 +25,11 @@
  *                           instant the next version starts (Istanbul midnight);
  *                           a carrier with no version in force is DESI_OVERFLOW
  *                           on both paths
+ *   - Barem tables        - on a two-tier version a fast-delivery variant gets
+ *                           its table 1 band and any other variant its table 2
+ *                           band (desi above every table 2 band); on a
+ *                           single-tier version a variant without fast delivery
+ *                           gets the desi tariff
  *
  * Each test creates its own org+store+product+variant inline. `truncateAll`
  * between tests wipes tenant data but preserves the global shipping reference
@@ -33,7 +38,7 @@
  */
 
 import { prisma } from '@pazarsync/db';
-import { Platform } from '@pazarsync/db/enums';
+import { BaremTier, Platform } from '@pazarsync/db/enums';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { estimateShippingCostForVariant } from '../../src/services/shipping-estimator.service';
@@ -496,5 +501,203 @@ describe('Equivalence: dated tariff versions', () => {
     expect(row.shipping_estimate_status).toBe('DESI_OVERFLOW');
     expect(row.estimated_shipping_net).toBeNull();
     expect(row.shipping_tariff_applied).toBeNull();
+  });
+});
+
+// --- Barem table 1 and table 2 ----------------------------------------------------
+// A fast-delivery variant (deliveryDuration within the version's window, 1 day here)
+// is looked up in Barem table 1, any other variant in table 2; a variant whose table
+// has no band holding its price gets the desi tariff. The suite owns two TEST_
+// carriers (never the seeded ones) and deletes them afterwards.
+//   TEST_EQ_TWO_TIER:    table 1 [0, 199.99] 40.00 and [200, 349.99] 60.00,
+//                        table 2 [0, 199.99] 75.00 only, desi-1 100.00, desi-11
+//                        180.00 (above the Barem desi limit of 10).
+//   TEST_EQ_SINGLE_TIER: the same table 1 bands and desi row, no table 2 band
+//                        (a version before 10 August 2026).
+
+const TWO_TIER_CARRIER_CODE = 'TEST_EQ_TWO_TIER';
+const TWO_TIER_CARRIER_EXTERNAL_ID = 990_309;
+const SINGLE_TIER_CARRIER_CODE = 'TEST_EQ_SINGLE_TIER';
+const SINGLE_TIER_CARRIER_EXTERNAL_ID = 990_310;
+
+const TABLE_1_BAREM_ROWS: TestCarrierTariffVersionSpec['baremRows'] = [
+  { tier: BaremTier.TABLE_1, minOrderAmount: '0.00', maxOrderAmount: '199.99', priceNet: '40.00' },
+  {
+    tier: BaremTier.TABLE_1,
+    minOrderAmount: '200.00',
+    maxOrderAmount: '349.99',
+    priceNet: '60.00',
+  },
+];
+
+function baremVersion(
+  baremRows: TestCarrierTariffVersionSpec['baremRows'],
+): TestCarrierTariffVersionSpec {
+  return {
+    effectiveFrom: IN_FORCE_START,
+    supportsBaremDestek: true,
+    maxBaremDesi: 10,
+    maxBaremEligibleDeliveryDuration: 1,
+    desiRows: [
+      { desi: 1, priceNet: '100.00' },
+      { desi: 11, priceNet: '180.00' },
+    ],
+    baremRows,
+  };
+}
+
+/** Runs both paths and asserts they agree on one OK estimate of the given kind and amount. */
+async function expectBothPathsPrice(
+  fixture: VariantFixture,
+  expected: { readonly tariffApplied: 'BAREM' | 'NORMAL'; readonly amount: string },
+): Promise<void> {
+  const { fnResult, row } = await runBothPaths(fixture);
+
+  expect(fnResult.ok).toBe(true);
+  if (!fnResult.ok) throw new Error('unreachable: fnResult.ok asserted true above');
+  expect(fnResult.estimate.tariffApplied).toBe(expected.tariffApplied);
+  expect(fnResult.estimate.amount.toFixed(2)).toBe(expected.amount);
+  expect(row.shipping_estimate_status).toBe('OK');
+  expect(row.shipping_tariff_applied).toBe(expected.tariffApplied);
+  expect(row.estimated_shipping_net).toBe(expected.amount);
+}
+
+describe('Equivalence: Barem table 1 and table 2', () => {
+  let twoTierCarrierId = '';
+  let singleTierCarrierId = '';
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    await deleteCarrierByCode(TWO_TIER_CARRIER_CODE);
+    twoTierCarrierId = await createTestCarrierWithVersions({
+      code: TWO_TIER_CARRIER_CODE,
+      externalId: TWO_TIER_CARRIER_EXTERNAL_ID,
+      versions: [
+        baremVersion([
+          ...TABLE_1_BAREM_ROWS,
+          {
+            tier: BaremTier.TABLE_2,
+            minOrderAmount: '0.00',
+            maxOrderAmount: '199.99',
+            priceNet: '75.00',
+          },
+        ]),
+      ],
+    });
+    await deleteCarrierByCode(SINGLE_TIER_CARRIER_CODE);
+    singleTierCarrierId = await createTestCarrierWithVersions({
+      code: SINGLE_TIER_CARRIER_CODE,
+      externalId: SINGLE_TIER_CARRIER_EXTERNAL_ID,
+      versions: [baremVersion(TABLE_1_BAREM_ROWS)],
+    });
+  });
+
+  afterAll(async () => {
+    await deleteCarrierByCode(TWO_TIER_CARRIER_CODE);
+    await deleteCarrierByCode(SINGLE_TIER_CARRIER_CODE);
+  });
+
+  beforeEach(truncateAll);
+
+  it('two-tier: a fast-delivery variant gets the same table 1 band on both paths', async () => {
+    const low = await createVariantFixture({
+      barcode: 'eq-t1-low',
+      defaultShippingCarrierId: twoTierCarrierId,
+      salePrice: '150.00',
+      dimensionalWeightOverride: '1.0',
+      deliveryDuration: 1,
+    });
+    await expectBothPathsPrice(low, { tariffApplied: 'BAREM', amount: '40.00' });
+
+    const high = await createVariantFixture({
+      barcode: 'eq-t1-high',
+      defaultShippingCarrierId: twoTierCarrierId,
+      salePrice: '250.00',
+      dimensionalWeightOverride: '1.0',
+      deliveryDuration: 0,
+    });
+    await expectBothPathsPrice(high, { tariffApplied: 'BAREM', amount: '60.00' });
+  });
+
+  it('two-tier: a variant without a delivery duration gets the same table 2 band on both paths', async () => {
+    const fixture = await createVariantFixture({
+      barcode: 'eq-t2-null',
+      defaultShippingCarrierId: twoTierCarrierId,
+      salePrice: '150.00',
+      dimensionalWeightOverride: '1.0',
+      deliveryDuration: null,
+    });
+
+    await expectBothPathsPrice(fixture, { tariffApplied: 'BAREM', amount: '75.00' });
+  });
+
+  it('two-tier: a variant above the delivery window gets the same table 2 band on both paths', async () => {
+    const fixture = await createVariantFixture({
+      barcode: 'eq-t2-slow',
+      defaultShippingCarrierId: twoTierCarrierId,
+      salePrice: '150.00',
+      dimensionalWeightOverride: '1.0',
+      deliveryDuration: 2,
+    });
+
+    await expectBothPathsPrice(fixture, { tariffApplied: 'BAREM', amount: '75.00' });
+  });
+
+  it('two-tier: a variant outside every table 2 band gets the desi tariff on both paths, not table 1', async () => {
+    // 250 sits in the table 1 band [200, 349.99] but in no table 2 band.
+    const fixture = await createVariantFixture({
+      barcode: 'eq-t2-above',
+      defaultShippingCarrierId: twoTierCarrierId,
+      salePrice: '250.00',
+      dimensionalWeightOverride: '1.0',
+      deliveryDuration: null,
+    });
+
+    await expectBothPathsPrice(fixture, { tariffApplied: 'NORMAL', amount: '100.00' });
+  });
+
+  it('two-tier: a variant above the Barem desi limit gets the desi tariff on both paths, whatever its table', async () => {
+    // 150 sits in a band of both tables, but desi 11 is above the version's limit of 10.
+    const slow = await createVariantFixture({
+      barcode: 'eq-t2-heavy',
+      defaultShippingCarrierId: twoTierCarrierId,
+      salePrice: '150.00',
+      dimensionalWeightOverride: '11.0',
+      deliveryDuration: null,
+    });
+    await expectBothPathsPrice(slow, { tariffApplied: 'NORMAL', amount: '180.00' });
+
+    const fast = await createVariantFixture({
+      barcode: 'eq-t1-heavy',
+      defaultShippingCarrierId: twoTierCarrierId,
+      salePrice: '150.00',
+      dimensionalWeightOverride: '11.0',
+      deliveryDuration: 1,
+    });
+    await expectBothPathsPrice(fast, { tariffApplied: 'NORMAL', amount: '180.00' });
+  });
+
+  it('single-tier: a variant without fast delivery gets the desi tariff on both paths', async () => {
+    const fixture = await createVariantFixture({
+      barcode: 'eq-single-slow',
+      defaultShippingCarrierId: singleTierCarrierId,
+      salePrice: '150.00',
+      dimensionalWeightOverride: '1.0',
+      deliveryDuration: null,
+    });
+
+    await expectBothPathsPrice(fixture, { tariffApplied: 'NORMAL', amount: '100.00' });
+  });
+
+  it('single-tier: a fast-delivery variant gets the table 1 band on both paths', async () => {
+    const fixture = await createVariantFixture({
+      barcode: 'eq-single-fast',
+      defaultShippingCarrierId: singleTierCarrierId,
+      salePrice: '150.00',
+      dimensionalWeightOverride: '1.0',
+      deliveryDuration: 1,
+    });
+
+    await expectBothPathsPrice(fixture, { tariffApplied: 'BAREM', amount: '40.00' });
   });
 });

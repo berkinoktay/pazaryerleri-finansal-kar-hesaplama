@@ -1,5 +1,6 @@
 import { Decimal } from 'decimal.js';
 import {
+  BaremTier,
   ProfitIssueCode,
   ProfitLineCertainty,
   ProfitLineLevel,
@@ -13,6 +14,7 @@ import { makeItem, makeParcel } from '../../../__tests__/fixtures/parcel-builder
 import {
   makeTrendyolAttributes,
   trendyolReference,
+  twoTierBaremBands,
 } from '../../../__tests__/fixtures/trendyol-reference';
 import {
   CARRIER_NOT_RECOGNIZED_REASON,
@@ -47,6 +49,8 @@ describe('estimateShippingLine', () => {
       basketGross: '500.00',
       tariffKind: 'DESI',
       carrierCode: 'TEXMP',
+      baremTier: null,
+      shipTiming: 'NOT_PROMISED',
     });
   });
 
@@ -463,7 +467,12 @@ describe('estimateShippingLine', () => {
       attributes: makeTrendyolAttributes({ fastDelivery: true }),
       reference: trendyolReference({
         shipping: {
-          carrier: { code: 'TEXMP', supportsBarem: true, maxBaremDesi: new Decimal('2.5') },
+          carrier: {
+            code: 'TEXMP',
+            supportsBarem: true,
+            maxBaremDesi: new Decimal('2.5'),
+            baremAppliesToReturns: false,
+          },
         },
       }),
     });
@@ -485,7 +494,12 @@ describe('estimateShippingLine', () => {
       attributes: makeTrendyolAttributes({ fastDelivery: true }),
       reference: trendyolReference({
         shipping: {
-          carrier: { code: 'TEXMP', supportsBarem: true, maxBaremDesi: new Decimal('2') },
+          carrier: {
+            code: 'TEXMP',
+            supportsBarem: true,
+            maxBaremDesi: new Decimal('2'),
+            baremAppliesToReturns: false,
+          },
         },
       }),
     });
@@ -562,6 +576,242 @@ describe('estimateShippingLine', () => {
   });
 });
 
+describe('estimateShippingLine Barem tables', () => {
+  // Trendyol's ship-by deadline: Istanbul 23:59 of the promised day (20:59 UTC).
+  const AGREED = new Date('2026-09-10T20:59:00.000Z');
+  const SHIPPED_ON_TIME = new Date('2026-09-10T09:15:00.000Z');
+  const SHIPPED_LATE = new Date('2026-09-11T08:00:00.000Z');
+
+  function twoTierReference(maxBaremDesi = '10') {
+    return trendyolReference({
+      shipping: {
+        carrier: {
+          code: 'TEXMP',
+          supportsBarem: true,
+          maxBaremDesi: new Decimal(maxBaremDesi),
+          baremAppliesToReturns: true,
+        },
+        baremBands: twoTierBaremBands(),
+      },
+    });
+  }
+
+  it('prices an on-time fast-delivery order at table 1 on a two-tier version', () => {
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '2' })],
+    });
+
+    const { line, issues, outboundBaremTier } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({
+        fastDelivery: true,
+        agreedDeliveryDate: AGREED,
+        actualShipDate: SHIPPED_ON_TIME,
+      }),
+      reference: twoTierReference(),
+    });
+
+    expect(issues).toEqual([]);
+    // Table 1 band [0, 199.99] -> 38.74 net -> 46.49 gross.
+    expect(line?.amount.gross.toFixed(2)).toBe('46.49');
+    expect(line?.inputs).toMatchObject({
+      tariffKind: 'BAREM',
+      baremTier: BaremTier.TABLE_1,
+      shipTiming: 'ON_TIME',
+    });
+    expect(outboundBaremTier).toBe(BaremTier.TABLE_1);
+  });
+
+  it('prices a late fast-delivery order at table 2 on a two-tier version', () => {
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '250.00', unitDesi: '2' })],
+    });
+
+    const { line, outboundBaremTier } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({
+        fastDelivery: true,
+        agreedDeliveryDate: AGREED,
+        actualShipDate: SHIPPED_LATE,
+      }),
+      reference: twoTierReference(),
+    });
+
+    // Table 2 band [200, 349.99] -> 78.74 net -> 94.49 gross (the late TEX invoices).
+    expect(line?.amount.gross.toFixed(2)).toBe('94.49');
+    expect(line?.inputs).toMatchObject({
+      tariffKind: 'BAREM',
+      baremTier: BaremTier.TABLE_2,
+      shipTiming: 'LATE',
+    });
+    expect(outboundBaremTier).toBe(BaremTier.TABLE_2);
+  });
+
+  it('prices an order without a fast-delivery promise at table 2 on a two-tier version', () => {
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '2' })],
+    });
+
+    const { line } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({ fastDelivery: false }),
+      reference: twoTierReference(),
+    });
+
+    // Table 2 band [0, 199.99] -> 73.33 net -> 88.00 gross.
+    expect(line?.amount.gross.toFixed(2)).toBe('88.00');
+    expect(line?.inputs).toMatchObject({
+      tariffKind: 'BAREM',
+      baremTier: BaremTier.TABLE_2,
+      shipTiming: 'NOT_PROMISED',
+    });
+  });
+
+  it('prices a promised order not yet shipped at table 1 on a two-tier version', () => {
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '250.00', unitDesi: '2' })],
+    });
+
+    const { line } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({
+        fastDelivery: true,
+        agreedDeliveryDate: AGREED,
+        actualShipDate: null,
+      }),
+      reference: twoTierReference(),
+    });
+
+    // Table 1 band [200, 349.99] -> 70.41 net -> 84.49 gross.
+    expect(line?.amount.gross.toFixed(2)).toBe('84.49');
+    expect(line?.inputs).toMatchObject({ baremTier: BaremTier.TABLE_1, shipTiming: 'NOT_SHIPPED' });
+  });
+
+  it('falls back to the desi tariff when the basket is in no band of table 2', () => {
+    // A two-tier version whose table 2 covers only [0, 199.99]: a late order with a 250
+    // basket finds no table 2 band, so it pays the desi tariff, not table 1.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '250.00', unitDesi: '2' })],
+    });
+    const baremBands = twoTierBaremBands().filter(
+      (band) => band.tier === BaremTier.TABLE_1 || band.minOrderAmount.isZero(),
+    );
+
+    const { line, outboundBaremTier } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({
+        fastDelivery: true,
+        agreedDeliveryDate: AGREED,
+        actualShipDate: SHIPPED_LATE,
+      }),
+      reference: trendyolReference({ shipping: { baremBands } }),
+    });
+
+    // Desi tariff key '2' -> 77.54 net -> 93.05 gross.
+    expect(line?.amount.gross.toFixed(2)).toBe('93.05');
+    expect(line?.inputs).toMatchObject({ tariffKind: 'DESI', baremTier: null, shipTiming: 'LATE' });
+    expect(outboundBaremTier).toBeNull();
+  });
+
+  it('keeps table 1 for a late fast-delivery order on a single-tier version', () => {
+    // A version before 10 August 2026 has no table 2: the old rule (the promise alone)
+    // keeps the order's figure unchanged; the late ship timing is still recorded.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '2' })],
+    });
+
+    const { line, outboundBaremTier } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({
+        fastDelivery: true,
+        agreedDeliveryDate: AGREED,
+        actualShipDate: SHIPPED_LATE,
+      }),
+      reference: trendyolReference(),
+    });
+
+    // Single-tier band [0, 199.99] -> 34.16 net -> 40.99 gross.
+    expect(line?.amount.gross.toFixed(2)).toBe('40.99');
+    expect(line?.inputs).toMatchObject({
+      tariffKind: 'BAREM',
+      baremTier: BaremTier.TABLE_1,
+      shipTiming: 'LATE',
+    });
+    expect(outboundBaremTier).toBe(BaremTier.TABLE_1);
+  });
+
+  it('uses the desi tariff for an order without a promise on a single-tier version', () => {
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '2' })],
+    });
+
+    const { line, outboundBaremTier } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({ fastDelivery: false }),
+      reference: trendyolReference(),
+    });
+
+    // Desi tariff key '2' -> 77.54 net -> 93.05 gross, as before the two-table rule.
+    expect(line?.amount.gross.toFixed(2)).toBe('93.05');
+    expect(line?.inputs).toMatchObject({
+      tariffKind: 'DESI',
+      baremTier: null,
+      shipTiming: 'NOT_PROMISED',
+    });
+    expect(outboundBaremTier).toBeNull();
+  });
+
+  it('uses the desi tariff above the Barem desi limit on a two-tier version', () => {
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '3' })],
+    });
+
+    const { line, outboundBaremTier } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({
+        fastDelivery: true,
+        agreedDeliveryDate: AGREED,
+        actualShipDate: SHIPPED_ON_TIME,
+      }),
+      reference: twoTierReference('2'),
+    });
+
+    // desi 3 > maxBaremDesi 2 -> desi tariff key '3' -> 93.63 net -> 112.36 gross.
+    expect(line?.amount.gross.toFixed(2)).toBe('112.36');
+    expect(line?.inputs).toMatchObject({
+      tariffKind: 'DESI',
+      baremTier: null,
+      shipTiming: 'ON_TIME',
+    });
+    expect(outboundBaremTier).toBeNull();
+  });
+
+  it('prices the standalone amounts at the parcel table', () => {
+    const snapshot = makeParcel({
+      items: [
+        makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '1' }),
+        makeItem({ orderItemId: 'b', listGross: '80.00', unitDesi: '1' }),
+      ],
+    });
+
+    const { line, standaloneByItem } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({
+        fastDelivery: true,
+        agreedDeliveryDate: AGREED,
+        actualShipDate: SHIPPED_LATE,
+      }),
+      reference: twoTierReference(),
+    });
+
+    // Parcel basket 230 -> table 2 band [200, 349.99] -> 94.49 gross.
+    expect(line?.amount.gross.toFixed(2)).toBe('94.49');
+    // Each item alone is in table 2 band [0, 199.99] -> 73.33 net -> 88.00 gross.
+    expect(standaloneByItem.get('a')?.toFixed(2)).toBe('88.00');
+    expect(standaloneByItem.get('b')?.toFixed(2)).toBe('88.00');
+  });
+});
+
 describe('resolveTrendyolShippingGross', () => {
   it('resolves a gross amount from the net tariff', () => {
     const tariff = trendyolReference().shipping;
@@ -569,7 +819,7 @@ describe('resolveTrendyolShippingGross', () => {
     const resolved = resolveTrendyolShippingGross({
       desi: new Decimal('3'),
       basketGross: new Decimal('500.00'),
-      eligibleForBarem: false,
+      baremTier: null,
       tariff,
       vatRatePct: new Decimal('20'),
     });
@@ -579,7 +829,7 @@ describe('resolveTrendyolShippingGross', () => {
     const overflow = resolveTrendyolShippingGross({
       desi: new Decimal('11'),
       basketGross: new Decimal('500.00'),
-      eligibleForBarem: false,
+      baremTier: null,
       tariff,
       vatRatePct: new Decimal('20'),
     });

@@ -9,6 +9,7 @@
  */
 
 import type { Prisma } from '@pazarsync/db';
+import type { BaremTier } from '@pazarsync/db/enums';
 
 export interface ShippingTariffVersionRows {
   readonly versionId: string;
@@ -16,6 +17,9 @@ export interface ShippingTariffVersionRows {
   readonly supportsBaremDestek: boolean;
   readonly maxBaremDesi: number;
   readonly maxBaremEligibleDeliveryDuration: number;
+  // When true, the return of an order that went out at Barem table 1 is priced at
+  // table 1; otherwise at the desi tariff. Off on every version today.
+  readonly baremAppliesToReturns: boolean;
   readonly desiRows: ReadonlyArray<{
     readonly id: string;
     readonly desi: number;
@@ -23,6 +27,7 @@ export interface ShippingTariffVersionRows {
   }>;
   readonly baremRows: ReadonlyArray<{
     readonly id: string;
+    readonly tier: BaremTier;
     readonly minOrderAmount: Prisma.Decimal;
     readonly maxOrderAmount: Prisma.Decimal;
     readonly priceNet: Prisma.Decimal;
@@ -52,6 +57,7 @@ export async function loadShippingTariffVersion(
     supportsBaremDestek: version.supportsBaremDestek,
     maxBaremDesi: version.maxBaremDesi,
     maxBaremEligibleDeliveryDuration: version.maxBaremEligibleDeliveryDuration,
+    baremAppliesToReturns: version.baremAppliesToReturns,
     desiRows: version.desiTariffs.map((row) => ({
       id: row.id,
       desi: row.desi,
@@ -59,6 +65,7 @@ export async function loadShippingTariffVersion(
     })),
     baremRows: version.baremTariffs.map((row) => ({
       id: row.id,
+      tier: row.tier,
       minOrderAmount: row.minOrderAmount,
       maxOrderAmount: row.maxOrderAmount,
       priceNet: row.priceNet,

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { prisma, type Prisma } from '@pazarsync/db';
-import { type OrderStatus } from '@pazarsync/db/enums';
+import { type BaremTier, type OrderStatus } from '@pazarsync/db/enums';
 
 import { TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE } from '../../../marketplaces/trendyol/settlement-records';
 
@@ -109,6 +109,8 @@ interface TestBaremAttributes {
   readonly supportsBaremDestek: boolean;
   readonly maxBaremDesi: number;
   readonly maxBaremEligibleDeliveryDuration: number;
+  /** Prices the return of a table 1 order at table 1; omitted = the column default (false). */
+  readonly baremAppliesToReturns?: boolean;
 }
 
 /**
@@ -617,6 +619,8 @@ export interface CarrierTariffSpec {
   readonly maxBaremDesi?: number;
   readonly desiRows: readonly { desi: number; priceNet: string }[];
   readonly baremRows: readonly {
+    /** The Barem price table of the band; defaults to table 1. */
+    tier?: BaremTier;
     minOrderAmount: string;
     maxOrderAmount: string;
     priceNet: string;
@@ -649,6 +653,9 @@ async function upsertTestCarrier(spec: TestCarrierIdentity): Promise<string> {
   return carrier.id;
 }
 
+/** The Barem price table a test Barem row is written to unless it names its own. */
+const TEST_BAREM_TIER: BaremTier = 'TABLE_1';
+
 /** Upserts the given desi and Barem rows into the version `versionId`. */
 async function upsertTestVersionRows(
   versionId: string,
@@ -663,16 +670,19 @@ async function upsertTestVersionRows(
     });
   }
   for (const row of baremRows) {
+    const tier = row.tier ?? TEST_BAREM_TIER;
     await prisma.shippingBaremTariff.upsert({
       where: {
-        versionId_minOrderAmount_maxOrderAmount: {
+        versionId_tier_minOrderAmount_maxOrderAmount: {
           versionId,
+          tier,
           minOrderAmount: row.minOrderAmount,
           maxOrderAmount: row.maxOrderAmount,
         },
       },
       create: {
         versionId,
+        tier,
         minOrderAmount: row.minOrderAmount,
         maxOrderAmount: row.maxOrderAmount,
         priceNet: row.priceNet,
@@ -708,6 +718,8 @@ export interface TestTariffVersionSpec {
   readonly maxBaremDesi: number;
   /** The Barem delivery window in days; defaults to 1. */
   readonly maxBaremEligibleDeliveryDuration?: number;
+  /** Prices the return of a table 1 order at table 1; defaults to false. */
+  readonly baremAppliesToReturns?: boolean;
   readonly desiRows: CarrierTariffSpec['desiRows'];
   readonly baremRows: CarrierTariffSpec['baremRows'];
 }
@@ -733,6 +745,7 @@ export async function upsertCarrierWithTariffVersions(
         supportsBaremDestek: version.supportsBaremDestek,
         maxBaremDesi: version.maxBaremDesi,
         maxBaremEligibleDeliveryDuration: version.maxBaremEligibleDeliveryDuration ?? 1,
+        baremAppliesToReturns: version.baremAppliesToReturns ?? false,
       },
       version.effectiveFrom,
     );

@@ -62,7 +62,12 @@ function reference(): TrendyolReferenceData {
     shipping: {
       // fastDelivery is false below, so Barem never applies and the desi tariff is used.
       source: ShippingTariffSource.TRENDYOL_CONTRACT,
-      carrier: { code: 'TESTMP', supportsBarem: false, maxBaremDesi: new Decimal('0') },
+      carrier: {
+        code: 'TESTMP',
+        supportsBarem: false,
+        maxBaremDesi: new Decimal('0'),
+        baremAppliesToReturns: false,
+      },
       desiTariffNet: flatDesiTariff(),
       baremBands: [],
       ownTariffNet: new Map(),

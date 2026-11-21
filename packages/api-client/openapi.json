@@ -3132,7 +3132,7 @@
               "OWN_CONTRACT",
               null
             ],
-            "description": "Which tariff lane produced the estimate. NORMAL = desi-bazlı tariff (the carrier row indexed by CEIL(desi)). BAREM = Trendyol's Barem destek tier for fast-delivery variants priced inside a tier. OWN_CONTRACT = tenant-private tariff. Null when no estimate could be produced (see shippingEstimateStatus for the reason).",
+            "description": "Which tariff lane produced the estimate. NORMAL = desi-bazlı tariff (the carrier row indexed by CEIL(desi)). BAREM = Trendyol's Barem destek band: table 1 for a fast-delivery variant, table 2 for any other, when the price sits inside a band of that table and the desi is within the Barem limit. OWN_CONTRACT = tenant-private tariff. Null when no estimate could be produced (see shippingEstimateStatus for the reason).",
             "example": "BAREM"
           },
           "shippingEstimateStatus": {
@@ -22993,7 +22993,7 @@
           "Shipping"
         ],
         "summary": "Get a carrier's tariff tables",
-        "description": "Returns the desi-bazlı (NORMAL lane) tariff rows plus the Barem desteği tier table for a single shipping carrier. Tariff data is platform-wide reference (not tenant-scoped), but membership in the path org is still required. Returns 404 when the carrier id is unknown or has been deactivated — existence non-disclosure for inactive rows is consistent with `listShippingCarriers`.",
+        "description": "Returns the desi-bazlı (NORMAL lane) tariff rows plus the Barem desteği table 1 rows for a single shipping carrier. Tariff data is platform-wide reference (not tenant-scoped), but membership in the path org is still required. Returns 404 when the carrier id is unknown or has been deactivated — existence non-disclosure for inactive rows is consistent with `listShippingCarriers`.",
         "security": [
           {
             "bearerAuth": []

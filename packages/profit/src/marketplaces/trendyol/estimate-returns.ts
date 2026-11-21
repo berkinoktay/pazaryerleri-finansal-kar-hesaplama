@@ -23,8 +23,10 @@ import { roundMoney } from '../../money';
 import { saleVatRatePct } from '../../tax/tr/sale-vat';
 import { buildStoppageRefundLines } from '../../tax/tr/stoppage-lines';
 import { vatFromGross } from '../../tax/tr/vat';
+import { selectTrendyolReturnBaremTier, type TrendyolBaremTier } from './barem-tier';
 import {
   CARRIER_NOT_RECOGNIZED_REASON,
+  pricedTrendyolBaremTier,
   resolveTrendyolShippingGross,
   trendyolCarrierCodeForKind,
 } from './estimate-shipping';
@@ -54,7 +56,9 @@ interface AcceptedEntry {
  * overseas return operation fee instead (the sale stays with the seller and the
  * commission is not refunded). The returned-item set drives the allocation of the
  * return legs. All amounts are in Turkish lira; the module never writes a
- * zero-amount line.
+ * zero-amount line. `outboundBaremTier` is the Barem table the forward leg was priced
+ * at (`estimateShippingLine`); it decides whether the domestic return shipping may be
+ * priced at Barem table 1.
  */
 export function estimateReturnLines(params: {
   readonly snapshot: ParcelSnapshot;
@@ -62,12 +66,13 @@ export function estimateReturnLines(params: {
   readonly commissionLines: readonly ProfitLine[];
   readonly costLines: readonly ProfitLine[];
   readonly reference: TrendyolReferenceData;
+  readonly outboundBaremTier: TrendyolBaremTier | null;
 }): {
   readonly lines: ProfitLine[];
   readonly issues: ProfitIssue[];
   readonly returnedItems: AllocationItem[];
 } {
-  const { snapshot, accepted, commissionLines, costLines, reference } = params;
+  const { snapshot, accepted, commissionLines, costLines, reference, outboundBaremTier } = params;
   assertAcceptedReturns(snapshot, accepted);
 
   if (accepted.length === 0) {
@@ -98,27 +103,33 @@ export function estimateReturnLines(params: {
   if (snapshot.isExportSale) {
     return estimateExportReturns({ acceptedEntries, commissionByItem, reference });
   }
+  const carrier = reference.shipping.carrier;
   return estimateDomesticReturns({
     acceptedEntries,
     commissionByItem,
     costLines,
     reference,
+    returnBaremTier: selectTrendyolReturnBaremTier({
+      appliesToReturns: carrier !== null && carrier.baremAppliesToReturns,
+      outboundBaremTier,
+    }),
   });
 }
 
 /**
  * The standalone (as-if-returned-alone) return shipping gross for one returned item,
  * used as an allocation weight. The desi is `unitDesi x acceptedQuantity`, the basket
- * is the item's own returned sale, and the return never uses Barem. Returns `null`
- * when the desi is unknown or the tariff cannot be resolved.
+ * is the item's own returned sale, and the Barem table is the parcel return's.
+ * Returns `null` when the desi is unknown or the tariff cannot be resolved.
  */
 function standaloneReturnShippingGross(params: {
   readonly item: ParcelItemSnapshot;
   readonly acceptedQuantity: number;
   readonly saleReturnGross: Decimal;
   readonly reference: TrendyolReferenceData;
+  readonly returnBaremTier: TrendyolBaremTier | null;
 }): Decimal | null {
-  const { item, acceptedQuantity, saleReturnGross, reference } = params;
+  const { item, acceptedQuantity, saleReturnGross, reference, returnBaremTier } = params;
   if (item.unitDesi === null) {
     return null;
   }
@@ -126,7 +137,7 @@ function standaloneReturnShippingGross(params: {
   const resolved = resolveTrendyolShippingGross({
     desi: item.unitDesi.mul(acceptedQuantity),
     basketGross: saleReturnGross,
-    eligibleForBarem: false,
+    baremTier: returnBaremTier,
     tariff: reference.shipping,
     vatRatePct: reference.fees.returnShippingVatRatePct,
   });
@@ -139,15 +150,18 @@ function standaloneReturnShippingGross(params: {
 /**
  * Return legs for a domestic parcel, per accepted item then the parcel return
  * shipping. Digital items do not ship (plan decision 11b): they never add to the
- * return desi and an all-digital return writes no return shipping line.
+ * return desi and an all-digital return writes no return shipping line. The return
+ * shipping and its standalone amounts share `returnBaremTier`
+ * (`selectTrendyolReturnBaremTier`; null = the desi tariff).
  */
 function estimateDomesticReturns(params: {
   readonly acceptedEntries: readonly AcceptedEntry[];
   readonly commissionByItem: ReadonlyMap<string, ProfitLine>;
   readonly costLines: readonly ProfitLine[];
   readonly reference: TrendyolReferenceData;
+  readonly returnBaremTier: TrendyolBaremTier | null;
 }): ReturnEstimate {
-  const { acceptedEntries, commissionByItem, costLines, reference } = params;
+  const { acceptedEntries, commissionByItem, costLines, reference, returnBaremTier } = params;
 
   const saleReturnLines: ProfitLine[] = [];
   const commissionRefundLines: ProfitLine[] = [];
@@ -232,6 +246,7 @@ function estimateDomesticReturns(params: {
             acceptedQuantity,
             saleReturnGross,
             reference,
+            returnBaremTier,
           }),
     });
   }
@@ -260,6 +275,7 @@ function estimateDomesticReturns(params: {
       desi: returnDesi,
       basketGross: returnBasketGross,
       reference,
+      returnBaremTier,
     });
     if (returnShipping.line !== null) {
       lines.push(returnShipping.line);
@@ -276,14 +292,18 @@ function estimateDomesticReturns(params: {
  * The single parcel-level RETURN_SHIPPING line. An unknown desi on any accepted item
  * or an unresolvable tariff yields a blocking SHIPPING_ESTIMATE_UNAVAILABLE issue
  * (reason in `detail`, prefixed `RETURN_`) and no line; a zero gross yields neither.
+ * Barem is looked up only in `returnBaremTier` (null = the desi tariff), and only
+ * when the return desi is within the carrier's Barem limit and the returned sale falls
+ * in a band of that table.
  */
 function buildReturnShippingLine(params: {
   readonly anyDesiUnknown: boolean;
   readonly desi: Decimal;
   readonly basketGross: Decimal;
   readonly reference: TrendyolReferenceData;
+  readonly returnBaremTier: TrendyolBaremTier | null;
 }): { readonly line: ProfitLine | null; readonly issue: ProfitIssue | null } {
-  const { anyDesiUnknown, desi, basketGross, reference } = params;
+  const { anyDesiUnknown, desi, basketGross, reference, returnBaremTier } = params;
 
   // A not-recognized carrier on a Trendyol-contract order cannot be priced, so the
   // return-shipping estimate is a zero line recording why -- consistent with the forward
@@ -326,7 +346,7 @@ function buildReturnShippingLine(params: {
   const resolved = resolveTrendyolShippingGross({
     desi,
     basketGross,
-    eligibleForBarem: false,
+    baremTier: returnBaremTier,
     tariff: reference.shipping,
     vatRatePct: reference.fees.returnShippingVatRatePct,
   });
@@ -362,6 +382,7 @@ function buildReturnShippingLine(params: {
       desi: desi.toString(),
       tariffKind: resolved.kind,
       carrierCode: trendyolCarrierCodeForKind(resolved.kind, reference.shipping),
+      baremTier: pricedTrendyolBaremTier(resolved.kind, returnBaremTier),
     },
     externalRecord: null,
   });

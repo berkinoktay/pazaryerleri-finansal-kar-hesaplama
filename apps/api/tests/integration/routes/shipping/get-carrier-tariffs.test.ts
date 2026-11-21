@@ -11,14 +11,16 @@
  * `shipping_desi_tariffs` / `shipping_barem_tariffs` (platform reference, not
  * tenant data), so the test reads the seeded data directly without per-test setup.
  *
- * Four cases:
+ * Five cases:
  *   1. Dated versions - a TEST_ carrier with 2000, 2020 and 2099 versions
  *      returns only the in-force (2020) version's rows and Barem attributes.
  *   2. No version in force - a TEST_ carrier with only a 2099 version returns
  *      empty tariff lists and no Barem support.
- *   3. Happy path — SENDEOMP (a Barem-eligible carrier) returns desiTariffs
+ *   3. Two Barem tables - a TEST_ carrier whose version in force has table 1
+ *      and table 2 bands returns only the table 1 bands.
+ *   4. Happy path — SENDEOMP (a Barem-eligible carrier) returns desiTariffs
  *      + baremTariffs, both as stringified Decimals (KDV hariç).
- *   4. 404 on unknown carrier id — uuid that does not exist returns
+ *   5. 404 on unknown carrier id — uuid that does not exist returns
  *      NOT_FOUND without leaking the difference between "never existed"
  *      and "deactivated".
  */
@@ -26,7 +28,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import { Platform } from '@pazarsync/db/enums';
+import { BaremTier, Platform } from '@pazarsync/db/enums';
 
 import { createApp } from '@/app';
 import { CarrierTariffsSchema } from '@/validators/shipping-config.validator';
@@ -69,11 +71,14 @@ interface ProblemDetailsWire {
 // in force today) and 2099 (no Barem). The in-force version is neither the oldest
 // nor the newest, so reading the versions in the wrong order fails the test.
 // TEST_TARIFFS_NO_VERSION only has a 2099 version (Barem-supported, with rows), so
-// no version is in force today.
+// no version is in force today. TEST_TARIFFS_TWO_TIER's version in force carries
+// Barem table 1 and table 2 bands.
 const VERSIONED_CARRIER_CODE = 'TEST_TARIFFS_ROUTE';
 const VERSIONED_CARRIER_EXTERNAL_ID = 990_304;
 const NO_VERSION_CARRIER_CODE = 'TEST_TARIFFS_NO_VERSION';
 const NO_VERSION_CARRIER_EXTERNAL_ID = 990_307;
+const TWO_TIER_CARRIER_CODE = 'TEST_TARIFFS_TWO_TIER';
+const TWO_TIER_CARRIER_EXTERNAL_ID = 990_308;
 
 const VERSIONED_CARRIER: CreateTestCarrierWithVersionsSpec = {
   code: VERSIONED_CARRIER_CODE,
@@ -119,6 +124,46 @@ const NO_VERSION_CARRIER: CreateTestCarrierWithVersionsSpec = {
   ],
 };
 
+const TWO_TIER_CARRIER: CreateTestCarrierWithVersionsSpec = {
+  code: TWO_TIER_CARRIER_CODE,
+  externalId: TWO_TIER_CARRIER_EXTERNAL_ID,
+  displayName: 'Test Tariffs Two Tier',
+  versions: [
+    {
+      effectiveFrom: new Date('2000-01-01T00:00:00.000Z'),
+      supportsBaremDestek: true,
+      maxBaremDesi: 10,
+      desiRows: [{ desi: 1, priceNet: '100.00' }],
+      baremRows: [
+        {
+          tier: BaremTier.TABLE_1,
+          minOrderAmount: '0.00',
+          maxOrderAmount: '199.99',
+          priceNet: '50.00',
+        },
+        {
+          tier: BaremTier.TABLE_1,
+          minOrderAmount: '200.00',
+          maxOrderAmount: '349.99',
+          priceNet: '70.00',
+        },
+        {
+          tier: BaremTier.TABLE_2,
+          minOrderAmount: '0.00',
+          maxOrderAmount: '199.99',
+          priceNet: '75.00',
+        },
+        {
+          tier: BaremTier.TABLE_2,
+          minOrderAmount: '200.00',
+          maxOrderAmount: '349.99',
+          priceNet: '85.00',
+        },
+      ],
+    },
+  ],
+};
+
 async function deleteTestCarrier(code: string): Promise<void> {
   await prisma.shippingCarrier.deleteMany({ where: { platform: Platform.TRENDYOL, code } });
 }
@@ -127,18 +172,22 @@ describe('GET /v1/organizations/:orgId/shipping-carriers/:carrierId/tariffs', ()
   const app = createApp();
   let versionedCarrierId = '';
   let noVersionCarrierId = '';
+  let twoTierCarrierId = '';
 
   beforeAll(async () => {
     await ensureDbReachable();
     await deleteTestCarrier(VERSIONED_CARRIER_CODE);
     await deleteTestCarrier(NO_VERSION_CARRIER_CODE);
+    await deleteTestCarrier(TWO_TIER_CARRIER_CODE);
     versionedCarrierId = await createTestCarrierWithVersions(VERSIONED_CARRIER);
     noVersionCarrierId = await createTestCarrierWithVersions(NO_VERSION_CARRIER);
+    twoTierCarrierId = await createTestCarrierWithVersions(TWO_TIER_CARRIER);
   });
 
   afterAll(async () => {
     await deleteTestCarrier(VERSIONED_CARRIER_CODE);
     await deleteTestCarrier(NO_VERSION_CARRIER_CODE);
+    await deleteTestCarrier(TWO_TIER_CARRIER_CODE);
   });
 
   beforeEach(async () => {
@@ -185,6 +234,26 @@ describe('GET /v1/organizations/:orgId/shipping-carriers/:carrierId/tariffs', ()
     expect(body.baremTariffs).toEqual([]);
     expect(body.carrier.supportsBaremDestek).toBe(false);
     expect(body.carrier.maxBaremDesi).toBe(0);
+  });
+
+  it('returns only the Barem table 1 bands when the version has two tables', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/shipping-carriers/${twoTierCarrierId}/tariffs`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body = CarrierTariffsSchema.parse(await res.json());
+    // The table 2 bands (75.00 and 85.00) must not appear; Prisma.Decimal toString()
+    // drops trailing zeros on the wire.
+    expect(body.baremTariffs).toEqual([
+      { minOrderAmount: '0', maxOrderAmount: '199.99', priceNet: '50' },
+      { minOrderAmount: '200', maxOrderAmount: '349.99', priceNet: '70' },
+    ]);
   });
 
   it('returns desi + Barem tariff tables for SENDEOMP', async () => {

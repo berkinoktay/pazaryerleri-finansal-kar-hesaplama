@@ -16,7 +16,13 @@
 import { randomUUID } from 'node:crypto';
 
 import { Prisma, prisma } from '@pazarsync/db';
-import { FeeCalculationKind, FeeScope, OrderFeeType, Platform } from '@pazarsync/db/enums';
+import {
+  BaremTier,
+  FeeCalculationKind,
+  FeeScope,
+  OrderFeeType,
+  Platform,
+} from '@pazarsync/db/enums';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { loadShippingTariffVersion } from '../../shipping/tariff-version';
@@ -32,6 +38,10 @@ const CARRIER_EXTERNAL_ID = 990_101;
 const CARRIER_DISPLAY_NAME = 'Test Versioning';
 const CARRIER_ORDER_CARGO_NAME = 'Test Versioning Kargo';
 
+/** A carrier whose single version carries both Barem tables and prices Barem returns. */
+const TWO_TIER_CARRIER_CODE = 'TEST_TWO_TIER_READ';
+const TWO_TIER_CARRIER_EXTERNAL_ID = 990_103;
+
 /** v1 is open towards the past, like the migrated catalogue. */
 const V1_START = new Date('2000-01-01T00:00:00.000Z');
 /** v2 starts on 1 December 2026 at 00:00 in Istanbul (UTC+3). */
@@ -41,13 +51,14 @@ const V2_START = new Date('2026-11-30T21:00:00.000Z');
 const MICRO_2099_START = new Date('2099-01-01T00:00:00.000Z');
 
 let carrierId = '';
+let twoTierCarrierId = '';
 let v1Id = '';
 let v2Id = '';
 
-/** Removes this suite's carrier (versions and rows cascade) and its 2099 micro-export version. */
+/** Removes this suite's carriers (versions and rows cascade) and its 2099 micro-export version. */
 async function deleteSuiteReferenceRows(): Promise<void> {
   await prisma.shippingCarrier.deleteMany({
-    where: { platform: Platform.TRENDYOL, code: CARRIER_CODE },
+    where: { platform: Platform.TRENDYOL, code: { in: [CARRIER_CODE, TWO_TIER_CARRIER_CODE] } },
   });
   await prisma.microExportReturnFeeTierVersion.deleteMany({
     where: { effectiveFrom: MICRO_2099_START },
@@ -117,6 +128,46 @@ describe('dated shipping tariff and micro-export tier reads', () => {
     };
     v1Id = await versionIdAt(V1_START);
     v2Id = await versionIdAt(V2_START);
+
+    twoTierCarrierId = await upsertCarrierWithTariffVersions({
+      code: TWO_TIER_CARRIER_CODE,
+      externalId: TWO_TIER_CARRIER_EXTERNAL_ID,
+      versions: [
+        {
+          effectiveFrom: V1_START,
+          supportsBaremDestek: true,
+          maxBaremDesi: 10,
+          baremAppliesToReturns: true,
+          desiRows: [{ desi: 1, priceNet: '100.00' }],
+          baremRows: [
+            {
+              tier: BaremTier.TABLE_1,
+              minOrderAmount: '0.00',
+              maxOrderAmount: '199.99',
+              priceNet: '38.74',
+            },
+            {
+              tier: BaremTier.TABLE_1,
+              minOrderAmount: '200.00',
+              maxOrderAmount: '349.99',
+              priceNet: '70.41',
+            },
+            {
+              tier: BaremTier.TABLE_2,
+              minOrderAmount: '0.00',
+              maxOrderAmount: '199.99',
+              priceNet: '73.33',
+            },
+            {
+              tier: BaremTier.TABLE_2,
+              minOrderAmount: '200.00',
+              maxOrderAmount: '349.99',
+              priceNet: '78.74',
+            },
+          ],
+        },
+      ],
+    });
 
     await prisma.microExportReturnFeeTierVersion.create({
       data: {
@@ -205,6 +256,37 @@ describe('dated shipping tariff and micro-export tier reads', () => {
     });
     expect(inV2.desiTariffNet.get('1')?.toString()).toBe('120');
     expect(inV2.carrier?.supportsBarem).toBe(false);
+  });
+
+  it('loadShippingTariff reads the Barem table of every band and the returns flag', async () => {
+    const tariff = await loadShippingTariff(prisma, {
+      storeId: randomUUID(),
+      source: 'TRENDYOL_CONTRACT',
+      carrier: { id: twoTierCarrierId, code: TWO_TIER_CARRIER_CODE },
+      at: new Date('2026-09-01T00:00:00Z'),
+    });
+
+    expect(tariff.carrier?.baremAppliesToReturns).toBe(true);
+    // Bands sharing a start come back in no fixed table order, so compare sorted.
+    const bands = tariff.baremBands
+      .map((band) => `${band.tier} ${band.minOrderAmount.toFixed(2)} ${band.priceNet.toFixed(2)}`)
+      .sort();
+    expect(bands).toEqual([
+      'TABLE_1 0.00 38.74',
+      'TABLE_1 200.00 70.41',
+      'TABLE_2 0.00 73.33',
+      'TABLE_2 200.00 78.74',
+    ]);
+
+    // A version written without the flag keeps the column default.
+    const singleTier = await loadShippingTariff(prisma, {
+      storeId: randomUUID(),
+      source: 'TRENDYOL_CONTRACT',
+      carrier: { id: carrierId, code: CARRIER_CODE },
+      at: new Date('2026-06-01T00:00:00Z'),
+    });
+    expect(singleTier.carrier?.baremAppliesToReturns).toBe(false);
+    expect(singleTier.baremBands.map((band) => band.tier)).toEqual([BaremTier.TABLE_1]);
   });
 
   it('loadShippingTariff with no version in force yields empty tariffs', async () => {

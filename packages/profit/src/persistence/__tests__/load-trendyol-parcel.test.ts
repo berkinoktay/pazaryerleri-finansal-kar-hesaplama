@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { Decimal } from 'decimal.js';
 import { prisma } from '@pazarsync/db';
 import {
+  BaremTier,
   Platform,
   ProfitIssueCode,
   ProfitLineCertainty,
@@ -19,7 +20,7 @@ import {
   ProfitStatus,
   ReconciliationStatus,
 } from '@pazarsync/db/enums';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { estimateTrendyolParcel } from '../../marketplaces/trendyol/estimate-parcel';
 import { CARRIER_NOT_RECOGNIZED_REASON } from '../../marketplaces/trendyol/estimate-shipping';
@@ -690,6 +691,185 @@ describe('loadTrendyolParcel', () => {
     } finally {
       await deleteCarrier();
     }
+  });
+
+  it('passes the order agreed ship-by date to the estimate attributes', async () => {
+    const parcel = await seedMelontikParcel();
+    const load = async (): Promise<Date | null> => {
+      const loaded = await loadTrendyolParcel(prisma, {
+        organizationId: parcel.organizationId,
+        orderId: parcel.orderId,
+      });
+      return loaded.estimateInput.attributes.agreedDeliveryDate;
+    };
+
+    expect(await load()).toBeNull();
+
+    // Trendyol's ship-by deadline: Istanbul 23:59 of the order day.
+    const agreedDeliveryDate = new Date('2026-10-28T20:59:00.000Z');
+    await prisma.order.update({ where: { id: parcel.orderId }, data: { agreedDeliveryDate } });
+    expect(await load()).toEqual(agreedDeliveryDate);
+  });
+
+  describe('Barem table 1 / table 2 end to end', () => {
+    // A dedicated carrier whose single version carries both Barem tables (one band each,
+    // wide enough for the melontik basket 871.75 and its returned item A 491.28) and
+    // prices Barem returns at table 1. Desi prices differ from both tables, so every
+    // assertion tells Barem table 1, table 2 and the desi tariff apart.
+    const carrierCode = 'TEST_TWO_TIER_E2E';
+    const cargoProviderName = 'Test Two Tier Kargo Marketplace';
+    // The melontik order's ship-by deadline: Istanbul 23:59 of its order day.
+    const AGREED = new Date('2026-10-28T20:59:00.000Z');
+    const SHIPPED_ON_TIME = new Date('2026-10-28T15:00:00.000Z');
+    const SHIPPED_LATE = new Date('2026-10-29T08:00:00.000Z');
+
+    async function deleteCarrier(): Promise<void> {
+      // Versions, desi and Barem rows cascade.
+      await prisma.shippingCarrier.deleteMany({
+        where: { platform: Platform.TRENDYOL, code: carrierCode },
+      });
+    }
+
+    beforeAll(async () => {
+      await deleteCarrier();
+      await upsertCarrierWithTariffVersions({
+        code: carrierCode,
+        externalId: 990_017,
+        displayName: 'Test Two Tier Kargo',
+        orderCargoNames: [cargoProviderName],
+        versions: [
+          {
+            effectiveFrom: new Date('2000-01-01T00:00:00.000Z'),
+            supportsBaremDestek: true,
+            maxBaremDesi: 10,
+            baremAppliesToReturns: true,
+            desiRows: [
+              { desi: 1, priceNet: '60.00' },
+              { desi: 2, priceNet: '80.00' },
+            ],
+            baremRows: [
+              {
+                tier: BaremTier.TABLE_1,
+                minOrderAmount: '0.00',
+                maxOrderAmount: '5000.00',
+                priceNet: '40.00',
+              },
+              {
+                tier: BaremTier.TABLE_2,
+                minOrderAmount: '0.00',
+                maxOrderAmount: '5000.00',
+                priceNet: '70.00',
+              },
+            ],
+          },
+        ],
+      });
+    });
+
+    afterAll(async () => {
+      await deleteCarrier();
+    });
+
+    /** A fast-delivery melontik order on the two-tier carrier, shipped at `actualShipDate`. */
+    async function seedTwoTierOrder(actualShipDate: Date): Promise<MelontikParcel> {
+      const parcel = await seedMelontikParcel({ fastDelivery: true });
+      await prisma.order.update({
+        where: { id: parcel.orderId },
+        data: { cargoProviderName, agreedDeliveryDate: AGREED, actualShipDate },
+      });
+      return parcel;
+    }
+
+    /** Records an accepted return of item A (the melontik parcel's desi-1 item). */
+    async function acceptReturnOfItemA(parcel: MelontikParcel): Promise<void> {
+      const claim = await prisma.orderClaim.create({
+        data: {
+          organizationId: parcel.organizationId,
+          storeId: parcel.storeId,
+          orderId: parcel.orderId,
+          marketplaceClaimId: `claim-${randomUUID().slice(0, 8)}`,
+          claimDate: new Date(),
+          resolved: false,
+        },
+      });
+      await prisma.orderClaimItem.create({
+        data: {
+          claimId: claim.id,
+          orderItemId: parcel.itemA,
+          marketplaceClaimItemId: `acc-${randomUUID()}`,
+          reasonCode: 'DAMAGEDITEM',
+          reasonName: 'reason',
+          status: 'Accepted',
+          acceptedBySeller: true,
+          resolved: true,
+        },
+      });
+    }
+
+    async function computedLines(parcel: MelontikParcel): Promise<readonly ProfitLine[]> {
+      const computed = await computeParcelProfit(prisma, {
+        organizationId: parcel.organizationId,
+        orderId: parcel.orderId,
+      });
+      return computed.lines;
+    }
+
+    it('prices an order shipped by its ship-by date at table 1', async () => {
+      const parcel = await seedTwoTierOrder(SHIPPED_ON_TIME);
+
+      const shipping = requireLine(await computedLines(parcel), ProfitLineType.SHIPPING, null);
+      // Table 1: 40.00 net x 1.20 = 48.00 gross.
+      expect(shipping.amount.gross.toFixed(2)).toBe('48.00');
+      expect(shipping.inputs).toMatchObject({
+        tariffKind: 'BAREM',
+        baremTier: BaremTier.TABLE_1,
+        shipTiming: 'ON_TIME',
+      });
+    });
+
+    it('prices an order shipped after its ship-by date at table 2', async () => {
+      const parcel = await seedTwoTierOrder(SHIPPED_LATE);
+
+      const shipping = requireLine(await computedLines(parcel), ProfitLineType.SHIPPING, null);
+      // Table 2: 70.00 net x 1.20 = 84.00 gross.
+      expect(shipping.amount.gross.toFixed(2)).toBe('84.00');
+      expect(shipping.inputs).toMatchObject({
+        tariffKind: 'BAREM',
+        baremTier: BaremTier.TABLE_2,
+        shipTiming: 'LATE',
+      });
+    });
+
+    it('prices the return of an order that went out at table 1 at table 1', async () => {
+      const parcel = await seedTwoTierOrder(SHIPPED_ON_TIME);
+      await acceptReturnOfItemA(parcel);
+
+      const returnShipping = requireLine(
+        await computedLines(parcel),
+        ProfitLineType.RETURN_SHIPPING,
+        null,
+      );
+      // Returned sale 491.28 in the table 1 band: 40.00 net x 1.20 = 48.00 gross.
+      expect(returnShipping.amount.gross.toFixed(2)).toBe('48.00');
+      expect(returnShipping.inputs).toMatchObject({
+        tariffKind: 'BAREM',
+        baremTier: BaremTier.TABLE_1,
+      });
+    });
+
+    it('prices the return of an order that went out at table 2 at the desi tariff', async () => {
+      const parcel = await seedTwoTierOrder(SHIPPED_LATE);
+      await acceptReturnOfItemA(parcel);
+
+      const returnShipping = requireLine(
+        await computedLines(parcel),
+        ProfitLineType.RETURN_SHIPPING,
+        null,
+      );
+      // Return desi 1: 60.00 net x 1.20 = 72.00 gross.
+      expect(returnShipping.amount.gross.toFixed(2)).toBe('72.00');
+      expect(returnShipping.inputs).toMatchObject({ tariffKind: 'DESI', baremTier: null });
+    });
   });
 
   it('resolves the micro-export fees and overseas return tiers for an export order', async () => {

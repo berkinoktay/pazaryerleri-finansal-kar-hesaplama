@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type {
+  BaremTier,
   BufferEntryStatus,
   CostProfileType,
   FeeCalculationKind,
@@ -645,6 +646,9 @@ const TEST_CARRIER_CODE_PREFIX = 'TEST_';
 /** Barem delivery window a test tariff version gets when the spec leaves it out. */
 const DEFAULT_TEST_BAREM_DELIVERY_DURATION = 1;
 
+/** Barem price table a test Barem row gets when the spec leaves it out. */
+const DEFAULT_TEST_BAREM_TIER: BaremTier = 'TABLE_1';
+
 /** One dated tariff version of a test carrier: its start, Barem attributes and rows. */
 export interface TestCarrierTariffVersionSpec {
   effectiveFrom: Date;
@@ -652,8 +656,16 @@ export interface TestCarrierTariffVersionSpec {
   maxBaremDesi: number;
   /** Defaults to 1 day. */
   maxBaremEligibleDeliveryDuration?: number;
+  /** Whether a Barem table 1 order's return is priced at table 1; defaults to false. */
+  baremAppliesToReturns?: boolean;
   desiRows: readonly { desi: number; priceNet: string }[];
-  baremRows: readonly { minOrderAmount: string; maxOrderAmount: string; priceNet: string }[];
+  baremRows: readonly {
+    /** Defaults to TABLE_1. */
+    tier?: BaremTier;
+    minOrderAmount: string;
+    maxOrderAmount: string;
+    priceNet: string;
+  }[];
 }
 
 export interface CreateTestCarrierWithVersionsSpec {
@@ -694,11 +706,13 @@ export async function createTestCarrierWithVersions(
           maxBaremDesi: version.maxBaremDesi,
           maxBaremEligibleDeliveryDuration:
             version.maxBaremEligibleDeliveryDuration ?? DEFAULT_TEST_BAREM_DELIVERY_DURATION,
+          baremAppliesToReturns: version.baremAppliesToReturns ?? false,
           desiTariffs: {
             create: version.desiRows.map((row) => ({ desi: row.desi, priceNet: row.priceNet })),
           },
           baremTariffs: {
             create: version.baremRows.map((row) => ({
+              tier: row.tier ?? DEFAULT_TEST_BAREM_TIER,
               minOrderAmount: row.minOrderAmount,
               maxOrderAmount: row.maxOrderAmount,
               priceNet: row.priceNet,

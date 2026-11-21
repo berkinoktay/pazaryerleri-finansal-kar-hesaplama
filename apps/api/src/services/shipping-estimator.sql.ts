@@ -6,7 +6,8 @@
  * `current_cost_try` in `products-list.service.ts`). The equivalence test
  * `apps/api/tests/integration/shipping-estimator-equivalence.test.ts` asserts
  * the two implementations agree on every documented outcome state and on the
- * Barem eligibility rule (deliveryDuration only, see `hasFastDeliverySetup`).
+ * Barem table rule (deliveryDuration only, see `hasFastDeliverySetup`: table 1
+ * within the window, table 2 otherwise).
  *
  * Parameters: $1 = organizationId, $2 = storeId, $3 = at (an ISO-8601 instant,
  * `at.toISOString()`; the store's default carrier is priced with its tariff
@@ -26,13 +27,14 @@
  * four LATERAL lookups: the tariff version in force (unique index
  * (carrier_id, effective_from), read backwards with LIMIT 1), then the own,
  * Barem and desi rows (unique indexes (store_id, desi) /
- * (version_id, min_order_amount, max_order_amount) / (version_id, desi)).
+ * (version_id, tier, min_order_amount, max_order_amount) / (version_id, desi)).
  * The version table is global reference data and carries no tenant column;
  * the tenant scope stays on $1 / $2. A carrier with no version in force has a
  * NULL version_id, so neither Barem nor desi resolves and the status falls
  * through to DESI_OVERFLOW; NO_CARRIER is only a missing default carrier.
- * Barem parity: when several bands of the version contain the price, the Barem
- * lookup takes the one with the lowest min_order_amount, as the service does.
+ * Barem parity: the lookup reads only the variant's Barem table (table 1 or 2);
+ * when several bands of that table contain the price it takes the one with the
+ * lowest min_order_amount, as the service does.
  *
  * CASE branch ordering for `shipping_estimate_status` mirrors the service:
  *   1. NO_CARRIER  (TRENDYOL_CONTRACT + null carrier) — service line 124
@@ -120,13 +122,21 @@ estimates AS (
      WHERE sbt.version_id = vwc.version_id
        AND vwc.supports_barem_destek = true
        AND vwc.eff_desi <= vwc.max_barem_desi
-       -- Fast-delivery eligibility mirrors hasFastDeliverySetup: deliveryDuration only.
-       AND vwc.delivery_duration IS NOT NULL
-       AND vwc.delivery_duration <= vwc.max_barem_eligible_delivery_duration
+       -- The Barem table mirrors hasFastDeliverySetup + resolveTrendyolCatalogBaremTier:
+       -- a known deliveryDuration within the window is table 1, anything else (a NULL
+       -- duration or window included) table 2. A version with no table 2 band finds
+       -- no row here, so the variant falls back to the desi tariff.
+       AND sbt.tier = CASE
+             WHEN vwc.delivery_duration IS NOT NULL
+                  AND vwc.delivery_duration <= vwc.max_barem_eligible_delivery_duration
+               THEN 'TABLE_1'::"BaremTier"
+             ELSE 'TABLE_2'::"BaremTier"
+           END
        AND vwc.sale_price >= sbt.min_order_amount
        AND vwc.sale_price <= sbt.max_order_amount
-     -- Lowest lower bound first, like the service (the version's Barem rows come
-     -- ordered by min_order_amount), so both paths pick the same band if bands overlap.
+     -- Lowest lower bound of the table first, like the service (the version's Barem
+     -- rows come ordered by min_order_amount and it keeps the first of the table), so
+     -- both paths pick the same band if bands of one table overlap.
      ORDER BY sbt.min_order_amount ASC
      LIMIT 1
   ) barem ON vwc.shipping_tariff_source = 'TRENDYOL_CONTRACT'

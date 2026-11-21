@@ -14,11 +14,13 @@
 //   8. Window contract — 14-day per-call cap (vendor enforced)
 
 import { Decimal } from 'decimal.js';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 import {
+  BaremTier,
   ProductVariantStatus,
+  ProfitLineType,
   ProfitRecomputeReason,
   ProfitStatementView,
   ProfitStatus,
@@ -44,6 +46,7 @@ import {
   createCostProfile,
   createMembership,
   createOrganization,
+  createTestCarrierWithVersions,
   createUserProfile,
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
@@ -71,6 +74,7 @@ const DELIVERED_DATE_MS = Date.UTC(2026, 4, 20, 12);
 const LAST_MODIFIED_MS = Date.UTC(2026, 4, 20, 13);
 
 const MS_HOUR = 60 * 60 * 1000;
+const MS_MINUTE = 60 * 1000;
 
 /**
  * A "today" orderDate as Trendyol sends it: GMT+3 (Istanbul wall-clock-as-UTC),
@@ -1113,6 +1117,192 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(0);
   });
 
+  it('enqueues when the ship date arrives with the same lastModifiedDate', async () => {
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-SHIP-NEW']);
+    const mapped = buildDirectMapped({
+      platformOrderId: 'ship-new',
+      barcode: 'EAN13-SHIP-NEW',
+      lastModifiedDate: new Date(Date.now() - 2 * MS_HOUR),
+    });
+
+    await upsertOrderWithSnapshot(store.id, org.id, mapped);
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: 'ship-new' },
+    });
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(0);
+
+    // The first Shipped entry can arrive without moving lastModifiedDate. The Barem
+    // table depends on that instant, so the order must still be recomputed.
+    const shippedAt = new Date(Date.now() - MS_HOUR);
+    await upsertOrderWithSnapshot(store.id, org.id, { ...mapped, actualShipDate: shippedAt });
+
+    const queued = await prisma.profitRecomputeRequest.findUnique({ where: { orderId: order.id } });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+    const stored = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(stored.actualShipDate?.toISOString()).toBe(shippedAt.toISOString());
+  });
+
+  it('does not enqueue when the same ship date is re-delivered with the same lastModifiedDate', async () => {
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-SHIP-SAME']);
+    const shippedAt = new Date(Date.now() - 3 * MS_HOUR);
+    const mapped: MappedOrder = {
+      ...buildDirectMapped({
+        platformOrderId: 'ship-same',
+        barcode: 'EAN13-SHIP-SAME',
+        status: 'SHIPPED',
+        lastModifiedDate: new Date(Date.now() - 2 * MS_HOUR),
+      }),
+      actualShipDate: shippedAt,
+    };
+
+    await upsertOrderWithSnapshot(store.id, org.id, mapped);
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: 'ship-same' },
+    });
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(0);
+
+    // A fresh Date with the same instant: equality is by milliseconds, not identity.
+    await upsertOrderWithSnapshot(store.id, org.id, {
+      ...mapped,
+      actualShipDate: new Date(shippedAt.getTime()),
+    });
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(0);
+  });
+
+  it('enqueues when a different ship date arrives with the same lastModifiedDate', async () => {
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-SHIP-MOVED']);
+    const firstShippedAt = new Date(Date.now() - 3 * MS_HOUR);
+    const mapped: MappedOrder = {
+      ...buildDirectMapped({
+        platformOrderId: 'ship-moved',
+        barcode: 'EAN13-SHIP-MOVED',
+        status: 'SHIPPED',
+        lastModifiedDate: new Date(Date.now() - 2 * MS_HOUR),
+      }),
+      actualShipDate: firstShippedAt,
+    };
+
+    await upsertOrderWithSnapshot(store.id, org.id, mapped);
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: 'ship-moved' },
+    });
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(0);
+
+    // A corrected Shipped instant can decide the Barem table the other way, so a changed
+    // instant is recomputed even when lastModifiedDate did not move.
+    const correctedShippedAt = new Date(firstShippedAt.getTime() + 30 * 60 * 1000);
+    await upsertOrderWithSnapshot(store.id, org.id, {
+      ...mapped,
+      actualShipDate: correctedShippedAt,
+    });
+
+    const queued = await prisma.profitRecomputeRequest.findUnique({ where: { orderId: order.id } });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+    const stored = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(stored.actualShipDate?.toISOString()).toBe(correctedShippedAt.toISOString());
+  });
+
+  it('enqueues and stores a moved ship-by deadline that arrives with the same lastModifiedDate', async () => {
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-DEADLINE-MOVED']);
+    const firstDeadline = new Date(Date.now() - 4 * MS_HOUR);
+    const mapped: MappedOrder = {
+      ...buildDirectMapped({
+        platformOrderId: 'deadline-moved',
+        barcode: 'EAN13-DEADLINE-MOVED',
+        lastModifiedDate: new Date(Date.now() - 2 * MS_HOUR),
+      }),
+      agreedDeliveryDate: firstDeadline,
+    };
+
+    await upsertOrderWithSnapshot(store.id, org.id, mapped);
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: 'deadline-moved' },
+    });
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(0);
+
+    // The ship-by deadline decides the Barem table together with the ship date, so a
+    // moved deadline is stored and recomputed even when lastModifiedDate did not move.
+    const movedDeadline = new Date(firstDeadline.getTime() + 24 * MS_HOUR);
+    await upsertOrderWithSnapshot(store.id, org.id, {
+      ...mapped,
+      agreedDeliveryDate: movedDeadline,
+    });
+
+    const queued = await prisma.profitRecomputeRequest.findUnique({ where: { orderId: order.id } });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+    const stored = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(stored.agreedDeliveryDate?.toISOString()).toBe(movedDeadline.toISOString());
+
+    // The same deadline again, or none at all, is not a change and keeps the stored one.
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    await upsertOrderWithSnapshot(store.id, org.id, {
+      ...mapped,
+      agreedDeliveryDate: new Date(movedDeadline.getTime()),
+    });
+    await upsertOrderWithSnapshot(store.id, org.id, { ...mapped, agreedDeliveryDate: null });
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(0);
+    const kept = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(kept.agreedDeliveryDate?.toISOString()).toBe(movedDeadline.toISOString());
+  });
+
+  it('keeps the stored ship date and does not enqueue when a same-lastModifiedDate update carries none', async () => {
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-SHIP-NULL']);
+    const shippedAt = new Date(Date.now() - 3 * MS_HOUR);
+    const mapped: MappedOrder = {
+      ...buildDirectMapped({
+        platformOrderId: 'ship-null',
+        barcode: 'EAN13-SHIP-NULL',
+        status: 'SHIPPED',
+        lastModifiedDate: new Date(Date.now() - 2 * MS_HOUR),
+      }),
+      actualShipDate: shippedAt,
+    };
+
+    await upsertOrderWithSnapshot(store.id, org.id, mapped);
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: 'ship-null' },
+    });
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(0);
+
+    await upsertOrderWithSnapshot(store.id, org.id, { ...mapped, actualShipDate: null });
+
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(0);
+    const stored = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(stored.actualShipDate?.toISOString()).toBe(shippedAt.toISOString());
+  });
+
+  it('ignores an invalid ship date on create and on a same-lastModifiedDate update', async () => {
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-SHIP-BAD']);
+    const mapped: MappedOrder = {
+      ...buildDirectMapped({
+        platformOrderId: 'ship-bad',
+        barcode: 'EAN13-SHIP-BAD',
+        lastModifiedDate: new Date(Date.now() - 2 * MS_HOUR),
+      }),
+      actualShipDate: new Date(Number.NaN),
+    };
+
+    // An Invalid Date (a corrupt replayed snapshot) is stored as no ship date instead of
+    // aborting the order write.
+    await upsertOrderWithSnapshot(store.id, org.id, mapped);
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: 'ship-bad' },
+    });
+    expect(order.actualShipDate).toBeNull();
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+
+    // The same corrupt value again neither writes nor counts as a ship date change.
+    await upsertOrderWithSnapshot(store.id, org.id, mapped);
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(0);
+    const stored = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(stored.actualShipDate).toBeNull();
+  });
+
   it('does not enqueue when the freshness guard skips a stale event', async () => {
     const { org, store } = await setupStoreAndSyncLog(['EAN13-STALE']);
     const T1 = new Date('2026-05-19T10:00:00Z');
@@ -1471,6 +1661,222 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     expect(order.originShipmentDate?.toISOString()).toBe('2026-05-19T09:00:00.000Z');
     // actualShipDate ilk sync'te null'dı; ikinci sync'te (Shipped event) yazıldı.
     expect(order.actualShipDate?.toISOString()).toBe('2026-05-19T13:00:00.000Z');
+  });
+});
+
+describe('upsertOrderWithSnapshot: a ship date arriving later decides the Barem table', () => {
+  // A dedicated carrier whose single version carries both Barem tables (one wide band
+  // each). Desi prices differ from both tables, so every assertion tells Barem table 1,
+  // table 2 and the desi tariff apart. Shipping reference tables are never truncated, so
+  // the carrier is created once and deleted after the block.
+  const carrierCode = 'TEST_LATE_SHIP_BAREM';
+  const cargoProviderName = 'Test Late Ship Barem Kargo Marketplace';
+
+  async function deleteCarrier(): Promise<void> {
+    // Versions, desi and Barem rows cascade.
+    await prisma.shippingCarrier.deleteMany({
+      where: { platform: 'TRENDYOL', code: carrierCode },
+    });
+  }
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    await deleteCarrier();
+    await createTestCarrierWithVersions({
+      code: carrierCode,
+      externalId: 990_401,
+      orderCargoNames: [cargoProviderName],
+      versions: [
+        {
+          // In force well before every order date below.
+          effectiveFrom: new Date(Date.now() - 365 * MS_PER_DAY),
+          supportsBaremDestek: true,
+          maxBaremDesi: 10,
+          desiRows: [
+            { desi: 1, priceNet: '60.00' },
+            { desi: 2, priceNet: '80.00' },
+          ],
+          baremRows: [
+            {
+              tier: BaremTier.TABLE_1,
+              minOrderAmount: '0.00',
+              maxOrderAmount: '5000.00',
+              priceNet: '40.00',
+            },
+            {
+              tier: BaremTier.TABLE_2,
+              minOrderAmount: '0.00',
+              maxOrderAmount: '5000.00',
+              priceNet: '70.00',
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  afterAll(async () => {
+    await deleteCarrier();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    await ensureFeeDefinitions();
+  });
+
+  /**
+   * A fully costed fast-delivery order on the two-tier carrier, inside the Barem limits
+   * (desi 1, basket 120), not yet handed to the carrier. The order day is three business
+   * days back; its ship-by deadline is 23:59 Istanbul of that day. Everything the intake
+   * captures (variant desi, cost version, carrier) is in place before the first write.
+   */
+  async function seedPromisedOrder(
+    platformOrderId: string,
+    barcode: string,
+  ): Promise<{ org: { id: string }; store: { id: string }; mapped: MappedOrder; agreed: Date }> {
+    const { org, store } = await setupStoreAndSyncLog([barcode]);
+    const variant = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode },
+    });
+    await prisma.productVariant.update({
+      where: { id: variant.id },
+      data: { syncedDimensionalWeight: '1' },
+    });
+    const profile = await prisma.costProfile.findFirstOrThrow({
+      where: { organizationId: org.id },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 1,
+        name: profile.name,
+        type: profile.type,
+        amountGross: profile.amountGross,
+        vatRate: profile.vatRate,
+        changedFields: [],
+        changedAt: new Date(Date.now() - 365 * MS_PER_DAY),
+      },
+    });
+
+    const orderDay = getBusinessDayRange(new Date(Date.now() - 3 * MS_PER_DAY));
+    const orderDate = new Date(orderDay.start.getTime() + 12 * MS_HOUR);
+    const agreed = new Date(orderDay.end.getTime() - MS_MINUTE);
+    const mapped: MappedOrder = {
+      ...buildDirectMapped({
+        platformOrderId,
+        barcode,
+        lastModifiedDate: new Date(orderDate.getTime() + MS_HOUR),
+      }),
+      orderDate,
+      agreedDeliveryDate: agreed,
+      fastDelivery: true,
+      fastDeliveryType: 'FastDelivery',
+      cargoProviderName,
+    };
+    return { org, store, mapped, agreed };
+  }
+
+  async function shippingLine(orderId: string): Promise<{ amountGross: string; inputs: unknown }> {
+    const lines = await prisma.profitLine.findMany({
+      where: { orderId, type: ProfitLineType.SHIPPING, orderItemId: null },
+    });
+    expect(lines).toHaveLength(1);
+    const line = lines[0];
+    if (line === undefined) {
+      throw new Error(`No shipping line for order ${orderId}`);
+    }
+    return {
+      amountGross: new Decimal(line.amountGross.toString()).toString(),
+      inputs: line.inputs,
+    };
+  }
+
+  async function bestKnownNetProfit(orderId: string): Promise<Decimal> {
+    const statement = await prisma.orderProfitStatement.findUniqueOrThrow({
+      where: { orderId_view: { orderId, view: ProfitStatementView.BEST_KNOWN } },
+    });
+    expect(statement.status).toBe(ProfitStatus.ESTIMATED);
+    if (statement.netProfit === null) {
+      throw new Error(`No net profit for order ${orderId}`);
+    }
+    return new Decimal(statement.netProfit.toString());
+  }
+
+  /** Writes the order, drains its recompute and returns its stored id. */
+  async function createAndCompute(seeded: {
+    org: { id: string };
+    store: { id: string };
+    mapped: MappedOrder;
+  }): Promise<string> {
+    await upsertOrderWithSnapshot(seeded.store.id, seeded.org.id, seeded.mapped);
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: seeded.store.id, platformOrderId: seeded.mapped.platformOrderId },
+    });
+    const drained = await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(drained.failedOrderIds).toEqual([]);
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(0);
+    return order.id;
+  }
+
+  /** Re-delivers the order with only its ship date set (same lastModifiedDate), then drains. */
+  async function shipAndRecompute(
+    seeded: { org: { id: string }; store: { id: string }; mapped: MappedOrder },
+    orderId: string,
+    actualShipDate: Date,
+  ): Promise<void> {
+    await upsertOrderWithSnapshot(seeded.store.id, seeded.org.id, {
+      ...seeded.mapped,
+      actualShipDate,
+    });
+    const queued = await prisma.profitRecomputeRequest.findUnique({ where: { orderId } });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+    const drained = await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(drained.failedOrderIds).toEqual([]);
+  }
+
+  it('moves a promised order from table 1 to table 2 when it ships after its ship-by deadline', async () => {
+    const seeded = await seedPromisedOrder('late-ship', 'EAN13-LATE-SHIP');
+    const orderId = await createAndCompute(seeded);
+
+    // Not yet handed over: optimistically table 1, 40.00 net x 1.20 = 48.00 gross.
+    const before = await shippingLine(orderId);
+    expect(before.amountGross).toBe('48');
+    expect(before.inputs).toMatchObject({
+      tariffKind: 'BAREM',
+      baremTier: BaremTier.TABLE_1,
+      shipTiming: 'NOT_SHIPPED',
+    });
+    const netProfitBefore = await bestKnownNetProfit(orderId);
+
+    await shipAndRecompute(seeded, orderId, new Date(seeded.agreed.getTime() + MS_HOUR));
+
+    // Handed over an hour late: table 2, 70.00 net x 1.20 = 84.00 gross.
+    const after = await shippingLine(orderId);
+    expect(after.amountGross).toBe('84');
+    expect(after.inputs).toMatchObject({
+      tariffKind: 'BAREM',
+      baremTier: BaremTier.TABLE_2,
+      shipTiming: 'LATE',
+    });
+    expect((await bestKnownNetProfit(orderId)).lt(netProfitBefore)).toBe(true);
+  });
+
+  it('keeps a promised order at table 1 when it ships before its ship-by deadline', async () => {
+    const seeded = await seedPromisedOrder('on-time-ship', 'EAN13-ON-TIME-SHIP');
+    const orderId = await createAndCompute(seeded);
+    const netProfitBefore = await bestKnownNetProfit(orderId);
+
+    await shipAndRecompute(seeded, orderId, new Date(seeded.agreed.getTime() - MS_HOUR));
+
+    const after = await shippingLine(orderId);
+    expect(after.amountGross).toBe('48');
+    expect(after.inputs).toMatchObject({
+      tariffKind: 'BAREM',
+      baremTier: BaremTier.TABLE_1,
+      shipTiming: 'ON_TIME',
+    });
+    expect((await bestKnownNetProfit(orderId)).eq(netProfitBefore)).toBe(true);
   });
 });
 

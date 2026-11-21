@@ -16,6 +16,7 @@ import {
 import { type ProfitIssue } from '../../core/profit-issue';
 import { createProfitLine, type LineMoney, type ProfitLine } from '../../core/profit-line';
 import { grossFromNet, vatFromGross } from '../../tax/tr/vat';
+import { selectTrendyolBaremTier, type TrendyolBaremTier } from './barem-tier';
 import {
   type TrendyolParcelAttributes,
   type TrendyolReferenceData,
@@ -83,18 +84,20 @@ export function parcelDesi(
 
 /**
  * Resolves the VAT-exclusive (net) shipping tariff for a desi and basket. The desi
- * lookup key is `ceil(desi)` as an integer string. The Barem limit uses the
- * unrounded desi on purpose; only the tariff-table key is rounded up. The engine's pure
- * counterpart of `resolveTariffForDesi` (which only the products list's variant
- * estimator uses), without the database.
+ * lookup key is `ceil(desi)` as an integer string. Barem is looked up only in the
+ * `baremTier` table (null = no Barem) and only when the carrier supports Barem and the
+ * desi is within its Barem limit; a basket in no band of that table falls back to the
+ * desi tariff. The Barem limit uses the unrounded desi on purpose; only the tariff-table
+ * key is rounded up. The engine's pure counterpart of `resolveTariffForDesi` (which only
+ * the products list's variant estimator uses), without the database.
  */
 export function resolveTrendyolShippingNet(params: {
   readonly desi: Decimal;
   readonly basketGross: Decimal;
-  readonly eligibleForBarem: boolean;
+  readonly baremTier: TrendyolBaremTier | null;
   readonly tariff: TrendyolShippingTariff;
 }): ShippingNetResult {
-  const { desi, basketGross, eligibleForBarem, tariff } = params;
+  const { desi, basketGross, baremTier, tariff } = params;
   const key = desi.ceil().toFixed(0);
 
   switch (tariff.source) {
@@ -111,10 +114,12 @@ export function resolveTrendyolShippingNet(params: {
         return { ok: false, reason: 'NO_CARRIER' };
       }
 
-      if (eligibleForBarem && carrier.supportsBarem && desi.lte(carrier.maxBaremDesi)) {
+      if (baremTier !== null && carrier.supportsBarem && desi.lte(carrier.maxBaremDesi)) {
         const band = tariff.baremBands.find(
           (candidate) =>
-            candidate.minOrderAmount.lte(basketGross) && basketGross.lte(candidate.maxOrderAmount),
+            candidate.tier === baremTier &&
+            candidate.minOrderAmount.lte(basketGross) &&
+            basketGross.lte(candidate.maxOrderAmount),
         );
         if (band !== undefined) {
           return { ok: true, net: band.priceNet, kind: 'BAREM' };
@@ -142,20 +147,32 @@ export function resolveTrendyolShippingNet(params: {
 export function resolveTrendyolShippingGross(params: {
   readonly desi: Decimal;
   readonly basketGross: Decimal;
-  readonly eligibleForBarem: boolean;
+  readonly baremTier: TrendyolBaremTier | null;
   readonly tariff: TrendyolShippingTariff;
   readonly vatRatePct: Decimal;
 }): ShippingGrossResult {
   const resolved = resolveTrendyolShippingNet({
     desi: params.desi,
     basketGross: params.basketGross,
-    eligibleForBarem: params.eligibleForBarem,
+    baremTier: params.baremTier,
     tariff: params.tariff,
   });
   if (!resolved.ok) {
     return { ok: false, reason: resolved.reason };
   }
   return { ok: true, gross: grossFromNet(resolved.net, params.vatRatePct), kind: resolved.kind };
+}
+
+/**
+ * The Barem table a resolved shipping amount was priced at: the looked-up table for a
+ * BAREM result, null for a desi or own-contract price (also when the looked-up table
+ * had no band for the basket).
+ */
+export function pricedTrendyolBaremTier(
+  kind: ShippingTariffKind,
+  baremTier: TrendyolBaremTier | null,
+): TrendyolBaremTier | null {
+  return kind === 'BAREM' ? baremTier : null;
 }
 
 /** The carrier code recorded on the line: the carrier for Trendyol kinds, null for OWN. */
@@ -172,16 +189,16 @@ export function trendyolCarrierCodeForKind(
 /**
  * The standalone (as-if-shipped-alone) shipping gross for one item, used as an
  * allocation weight. The item desi is `unitDesi x quantity`, the basket is the
- * item's own sale, and the Barem eligibility is the parcel's. Returns `null` when
+ * item's own sale, and the Barem table is the parcel's. Returns `null` when
  * the desi is unknown or the tariff cannot be resolved.
  */
 function standaloneShippingGross(params: {
   readonly item: ParcelItemSnapshot;
-  readonly eligibleForBarem: boolean;
+  readonly baremTier: TrendyolBaremTier | null;
   readonly tariff: TrendyolShippingTariff;
   readonly shippingVatRatePct: Decimal;
 }): Decimal | null {
-  const { item, eligibleForBarem, tariff, shippingVatRatePct } = params;
+  const { item, baremTier, tariff, shippingVatRatePct } = params;
   if (item.unitDesi === null) {
     return null;
   }
@@ -189,7 +206,7 @@ function standaloneShippingGross(params: {
   const resolved = resolveTrendyolShippingGross({
     desi: item.unitDesi.mul(item.quantity),
     basketGross: item.saleGross,
-    eligibleForBarem,
+    baremTier,
     tariff,
     vatRatePct: shippingVatRatePct,
   });
@@ -212,6 +229,12 @@ function standaloneShippingGross(params: {
  * carries no shipping (no line, no issue) and every digital item's standalone amount
  * is zero.
  * The standalone amounts are always computed, even when the parcel line itself fails.
+ * The Barem table comes from `selectTrendyolBaremTier` (the order's promise and ship
+ * timing on a two-tier version, the old fast-delivery rule on a single-tier one); the
+ * parcel line and the standalone amounts share it. `outboundBaremTier` is the table the
+ * parcel line was priced at (null when it was not priced at Barem, and always null for a
+ * seller-cargo-agreement order, which does not go out under Trendyol's Barem); the return
+ * leg reads it.
  */
 export function estimateShippingLine(params: {
   readonly snapshot: ParcelSnapshot;
@@ -221,16 +244,17 @@ export function estimateShippingLine(params: {
   readonly line: ProfitLine | null;
   readonly issues: readonly ProfitIssue[];
   readonly standaloneByItem: ReadonlyMap<string, Decimal | null>;
+  readonly outboundBaremTier: TrendyolBaremTier | null;
 } {
   const { snapshot, attributes, reference } = params;
   const items = activeItems(snapshot);
 
   if (items.length === 0) {
-    return { line: null, issues: [], standaloneByItem: new Map() };
+    return { line: null, issues: [], standaloneByItem: new Map(), outboundBaremTier: null };
   }
 
-  const eligibleForBarem = attributes.fastDelivery;
   const tariff = reference.shipping;
+  const barem = selectTrendyolBaremTier({ attributes, baremBands: tariff.baremBands });
   const shippingVatRatePct = reference.fees.shippingVatRatePct;
 
   const standaloneByItem = new Map<string, Decimal | null>();
@@ -239,14 +263,14 @@ export function estimateShippingLine(params: {
       item.orderItemId,
       item.isDigital
         ? ZERO
-        : standaloneShippingGross({ item, eligibleForBarem, tariff, shippingVatRatePct }),
+        : standaloneShippingGross({ item, baremTier: barem.tier, tariff, shippingVatRatePct }),
     );
   }
 
   // Digital items do not ship (plan decision 11b): an all-digital parcel carries no
   // shipping, exactly like the service-fee exemption.
   if (items.every((item) => item.isDigital)) {
-    return { line: null, issues: [], standaloneByItem };
+    return { line: null, issues: [], standaloneByItem, outboundBaremTier: null };
   }
 
   // A seller-cargo-agreement order on a Trendyol-contract store ships under the seller's
@@ -305,6 +329,7 @@ export function estimateShippingLine(params: {
         ...sellerCargoIssues,
       ],
       standaloneByItem,
+      outboundBaremTier: null,
     };
   }
 
@@ -321,6 +346,7 @@ export function estimateShippingLine(params: {
         ...sellerCargoIssues,
       ],
       standaloneByItem,
+      outboundBaremTier: null,
     };
   }
 
@@ -328,7 +354,7 @@ export function estimateShippingLine(params: {
   const resolved = resolveTrendyolShippingGross({
     desi: desi.desi,
     basketGross,
-    eligibleForBarem,
+    baremTier: barem.tier,
     tariff,
     vatRatePct: shippingVatRatePct,
   });
@@ -344,12 +370,18 @@ export function estimateShippingLine(params: {
         ...sellerCargoIssues,
       ],
       standaloneByItem,
+      outboundBaremTier: null,
     };
   }
 
+  const pricedBaremTier = pricedTrendyolBaremTier(resolved.kind, barem.tier);
+  // A seller-cargo-agreement order goes out under the seller's own carrier contract, not
+  // Trendyol's Barem, so its return is never priced at Barem: the return reads no outbound
+  // table. The forward estimate itself (and its recorded table) is unchanged.
+  const outboundBaremTier = attributes.usesSellerCargoAgreement ? null : pricedBaremTier;
   const gross = resolved.gross;
   if (gross.equals(ZERO)) {
-    return { line: null, issues: sellerCargoIssues, standaloneByItem };
+    return { line: null, issues: sellerCargoIssues, standaloneByItem, outboundBaremTier };
   }
 
   const amount: LineMoney = {
@@ -370,9 +402,11 @@ export function estimateShippingLine(params: {
       basketGross: basketGross.toFixed(2),
       tariffKind: resolved.kind,
       carrierCode: trendyolCarrierCodeForKind(resolved.kind, tariff),
+      baremTier: pricedBaremTier,
+      shipTiming: barem.shipTiming,
     },
     externalRecord: null,
   });
 
-  return { line, issues: sellerCargoIssues, standaloneByItem };
+  return { line, issues: sellerCargoIssues, standaloneByItem, outboundBaremTier };
 }

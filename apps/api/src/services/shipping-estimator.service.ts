@@ -2,8 +2,9 @@
  * Variant-level shipping cost estimator (products-list display).
  *
  * Prepares the variant's inputs - desi = `dimensionalWeightOverride ?? syncedDimensionalWeight`
- * (synced is non-null, >= 0), Barem range = `variant.salePrice`, fast-eligibility via
- * `hasFastDeliverySetup` - and delegates the Barem-vs-desi tariff resolution to
+ * (synced is non-null, >= 0), Barem range = `variant.salePrice`, Barem table from
+ * `hasFastDeliverySetup` (table 1 when it holds, table 2 otherwise, through
+ * `resolveTrendyolCatalogBaremTier`) - and delegates the Barem-vs-desi tariff resolution to
  * `resolveTariffForDesi` (in `@pazarsync/profit`). This variant estimator is that
  * resolver's only caller; the profit engine's pure counterpart is `resolveTrendyolShippingNet`.
  *
@@ -29,6 +30,7 @@ import {
   isTrendyolBaremEligible,
   loadShippingTariffVersion,
   resolveTariffForDesi,
+  resolveTrendyolCatalogBaremTier,
 } from '@pazarsync/profit';
 import type {
   EstimateOutcome,
@@ -41,14 +43,14 @@ export type { EstimateOutcome, EstimateUnavailableReason, ShippingEstimate };
 // --- Helper -------------------------------------------------------------------
 
 /**
- * A variant has "fast delivery setup" (and is therefore eligible for the
- * Barem destek tier on a Barem-supporting carrier) when its `deliveryDuration`
- * is set and within the `maxBaremEligibleDeliveryDuration` window of the carrier's
- * tariff version in force (Trendyol: 0 = ships today, 1 = ships by tomorrow). With
- * no version in force (`null`) the variant is not eligible. `deliveryDuration` is the
- * only signal: Trendyol retired the rush-delivery flag and the fast-delivery
- * option list in August 2026. The Barem predicate in `SHIPPING_ESTIMATE_CTE_SQL`
- * mirrors this rule (pinned by the equivalence test).
+ * A variant has "fast delivery setup" (and is therefore priced at Barem table 1,
+ * any other variant at table 2, on a Barem-supporting carrier) when its
+ * `deliveryDuration` is set and within the `maxBaremEligibleDeliveryDuration` window
+ * of the carrier's tariff version in force (Trendyol: 0 = ships today, 1 = ships by
+ * tomorrow). With no version in force (`null`) the variant does not have it.
+ * `deliveryDuration` is the only signal: Trendyol retired the rush-delivery flag and
+ * the fast-delivery option list in August 2026. The Barem table CASE in
+ * `SHIPPING_ESTIMATE_CTE_SQL` mirrors this rule (pinned by the equivalence test).
  *
  * Pure function - no I/O. Exported for direct unit testing. Delegates to the
  * single Barem rule `isTrendyolBaremEligible` in `@pazarsync/profit` so the
@@ -99,6 +101,8 @@ export async function estimateShippingCostForVariant(
     carrier: carrier === null ? null : { code: carrier.code, version },
     desi,
     grossTotalForBarem: new Decimal(variant.salePrice.toString()),
-    fastEligible: hasFastDeliverySetup(variant, version),
+    baremTier: resolveTrendyolCatalogBaremTier({
+      baremEligible: hasFastDeliverySetup(variant, version),
+    }),
   });
 }

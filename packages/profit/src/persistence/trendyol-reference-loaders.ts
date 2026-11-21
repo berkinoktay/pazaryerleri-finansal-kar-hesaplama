@@ -431,12 +431,14 @@ export async function buildShippingTariff(
       code: carrier.code,
       supportsBarem: version !== null && version.supportsBaremDestek,
       maxBaremDesi: new Decimal(version === null ? 0 : version.maxBaremDesi),
+      baremAppliesToReturns: version !== null && version.baremAppliesToReturns,
     };
     if (version !== null) {
       for (const row of version.desiRows) {
         desiTariffNet.set(row.desi.toString(), dec(row.priceNet));
       }
       baremBands = version.baremRows.map((row) => ({
+        tier: row.tier,
         minOrderAmount: dec(row.minOrderAmount),
         maxOrderAmount: dec(row.maxOrderAmount),
         priceNet: dec(row.priceNet),

@@ -78,6 +78,22 @@ export interface UpsertOrderOpts {
   promotedFromBuffer?: boolean;
 }
 
+/**
+ * A mapped date field as a Date, or null when it is absent or invalid. The buffer
+ * JSONB replay can carry these fields as ISO strings or leave them undefined, and an
+ * Invalid Date must neither be written nor count as a change.
+ */
+function toValidDate(value: Date | string | null | undefined): Date | null {
+  if (value == null) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/** True when a valid incoming instant differs from the stored one (a stored null counts). */
+function isNewInstant(stored: Date | null, incoming: Date | null): boolean {
+  return incoming !== null && (stored === null || stored.getTime() !== incoming.getTime());
+}
+
 export async function upsertOrderWithSnapshot(
   storeId: string,
   organizationId: string,
@@ -113,7 +129,10 @@ export async function upsertOrderWithSnapshot(
       where: {
         storeId_platformOrderId: { storeId, platformOrderId: order.platformOrderId },
       },
-      select: { platformLastModifiedAt: true },
+      // actualShipDate / agreedDeliveryDate: read so a ship date or ship-by deadline
+      // that arrives with an unchanged lastModifiedDate still enqueues a recompute
+      // (see step 4 below).
+      select: { platformLastModifiedAt: true, actualShipDate: true, agreedDeliveryDate: true },
     });
     // Normalize a corrupt lastModifiedDate (e.g. a malformed string from a
     // replayed JSONB snapshot) to null: an Invalid Date must neither drive the
@@ -121,6 +140,10 @@ export async function upsertOrderWithSnapshot(
     // abort the whole order persist at the Prisma layer.
     const parsedLmd = order.lastModifiedDate != null ? new Date(order.lastModifiedDate) : null;
     const incomingLmd = parsedLmd !== null && Number.isNaN(parsedLmd.getTime()) ? null : parsedLmd;
+    // The ship date (the first Shipped history entry) and the ship-by deadline decide the
+    // Barem table, so both are normalized once (toValidDate) and compared below.
+    const incomingShipDate = toValidDate(order.actualShipDate);
+    const incomingDeadline = toValidDate(order.agreedDeliveryDate);
     if (
       existingOrder !== null &&
       existingOrder.platformLastModifiedAt !== null &&
@@ -207,14 +230,14 @@ export async function upsertOrderWithSnapshot(
                 amountGross: p.amountGross,
               }))
             : undefined,
-        agreedDeliveryDate: order.agreedDeliveryDate,
+        agreedDeliveryDate: incomingDeadline,
         actualDeliveryDate: order.actualDeliveryDate,
         // Türetilmiş zamanında-teslim. Buffer JSONB'sinden gelen eski kayıtlarda
         // UNDEFINED olabilir → ?? null (diğer yeni alanlarla aynı koruma).
         deliveredOnTime: order.deliveredOnTime ?? null,
         // actualShipDate: Shipped event'i (taşıma durumuna geçiş). Buffer JSONB'sinden
-        // string/undefined gelebilir → != null + new Date() ile sarılır.
-        actualShipDate: order.actualShipDate != null ? new Date(order.actualShipDate) : null,
+        // string/undefined gelebilir; geçersiz tarih null sayılır (yukarıdaki incomingShipDate).
+        actualShipDate: incomingShipDate,
         // Tahmini teslim penceresi (PROD'da dolu). Buffer JSONB'sinden string
         // gelebilir → new Date() ile sarılır (originShipmentDate ile aynı koruma).
         estimatedDeliveryStartDate:
@@ -271,7 +294,10 @@ export async function upsertOrderWithSnapshot(
           deliveredOnTime: order.deliveredOnTime ?? null,
         }),
         // actualShipDate: Shipped event'i sonraki sync'te gelir → null→non-null tazele.
-        ...(order.actualShipDate != null && { actualShipDate: new Date(order.actualShipDate) }),
+        ...(incomingShipDate !== null && { actualShipDate: incomingShipDate }),
+        // agreedDeliveryDate: Trendyol's ship-by deadline. Refreshed when present so a
+        // moved deadline re-decides the Barem table; null never clears a stored one.
+        ...(incomingDeadline !== null && { agreedDeliveryDate: incomingDeadline }),
         // Kargo alanları null-koruma ile tazelenir: cargoDeci kargo ölçümünden
         // SONRA dolar, tracking no nadiren rotasyonla değişir — dolu gelen değer
         // yazılır, null/undefined gelen mevcut dolu değeri EZMEZ (eski/webhook
@@ -487,12 +513,25 @@ export async function upsertOrderWithSnapshot(
     //    record -- the recompute it triggers reads the already-stored record. Do NOT remove
     //    it or gate the create path on the order's content changing; the create always
     //    enqueues (sameLastModified is false when existingOrder is null).
+    //
+    //    Exception to the skip (plan PR-2b, decision 9): an UPDATE whose ship date is new
+    //    (stored null) or a different instant still enqueues, even with an equal
+    //    lastModifiedDate. The Barem table depends on the moment the parcel was handed to
+    //    the carrier, and Trendyol can add that first Shipped entry without moving
+    //    lastModifiedDate -- without this, a promised order shipped late would keep its
+    //    optimistic table 1 figure. The same holds for a moved ship-by deadline
+    //    (agreedDeliveryDate). An incoming null or invalid date is never a change: the
+    //    update branch above does not write it either.
     const sameLastModified =
       existingOrder !== null &&
       existingOrder.platformLastModifiedAt !== null &&
       incomingLmd !== null &&
       incomingLmd.getTime() === existingOrder.platformLastModifiedAt.getTime();
-    if (!sameLastModified) {
+    const baremTimingChanged =
+      existingOrder !== null &&
+      (isNewInstant(existingOrder.actualShipDate, incomingShipDate) ||
+        isNewInstant(existingOrder.agreedDeliveryDate, incomingDeadline));
+    if (!sameLastModified || baremTimingChanged) {
       await enqueueProfitRecompute(tx, {
         organizationId,
         storeId,

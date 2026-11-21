@@ -117,7 +117,8 @@ ON CONFLICT (version_id, desi) DO NOTHING;
 -- min_order_amount and max_order_amount are both INCLUSIVE, matching Trendyol's
 -- documented "0 - 199,99 TL" / "200 - 349,99 TL" tier wording. The service and the
 -- SQL estimate compare with a closed interval, so 199.99 falls in tier 1 and 200.00
--- in tier 2: no overlap, no gap.
+-- in tier 2: no overlap, no gap. Every band here is Barem table 1 (BaremTier
+-- TABLE_1); the 2000-01-01 versions predate the 10 August 2026 table 2.
 WITH barem_data (carrier_code, min_amount, max_amount, price_net) AS (
   VALUES
     ('TEXMP',     0.00, 199.99, 34.16), ('PTTMP',     0.00, 199.99, 34.16),
@@ -129,9 +130,9 @@ WITH barem_data (carrier_code, min_amount, max_amount, price_net) AS (
     ('SENDEOMP',  200.00, 349.99, 82.08), ('DHLECOMMP', 200.00, 349.99, 82.91),
     ('YKMP',      200.00, 349.99, 104.58)
 )
-INSERT INTO "shipping_barem_tariffs" (id, version_id, min_order_amount, max_order_amount, price_net, created_at, updated_at)
-SELECT gen_random_uuid(), v.id, bd.min_amount, bd.max_amount, bd.price_net, now(), now()
+INSERT INTO "shipping_barem_tariffs" (id, version_id, tier, min_order_amount, max_order_amount, price_net, created_at, updated_at)
+SELECT gen_random_uuid(), v.id, 'TABLE_1', bd.min_amount, bd.max_amount, bd.price_net, now(), now()
 FROM barem_data bd
 JOIN "shipping_carriers" c ON c.platform = 'TRENDYOL' AND c.code = bd.carrier_code
 JOIN "shipping_tariff_versions" v ON v.carrier_id = c.id AND v.effective_from = TIMESTAMP '2000-01-01 00:00:00'
-ON CONFLICT (version_id, min_order_amount, max_order_amount) DO NOTHING;
+ON CONFLICT (version_id, tier, min_order_amount, max_order_amount) DO NOTHING;

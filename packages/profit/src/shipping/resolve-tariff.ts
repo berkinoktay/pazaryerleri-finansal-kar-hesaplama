@@ -3,9 +3,8 @@
  * estimator (apps/api shipping-estimator.service) uses it; the profit engine's
  * pure counterpart is `resolveTrendyolShippingNet`.
  *
- * For a given (carrier tariff version, desi, gross amount, fast-delivery
- * eligibility, tariffSource) it returns one `ShippingEstimate` or an
- * unavailability reason.
+ * For a given (carrier tariff version, desi, gross amount, Barem table,
+ * tariffSource) it returns one `ShippingEstimate` or an unavailability reason.
  *
  * Read-only. The TRENDYOL_CONTRACT branch picks its desi and Barem rows from the
  * carrier's tariff version the caller loaded (`loadShippingTariffVersion`) and
@@ -16,6 +15,7 @@
 import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
+import type { BaremTier } from '@pazarsync/db/enums';
 
 import type { ShippingTariffVersionRows } from './tariff-version';
 
@@ -59,22 +59,26 @@ export interface ResolveTariffInput {
   desi: Decimal;
   /** Barem aralığı için brüt tutar = effectiveSale (liste − satıcı indirimi); Trendyol indirimi hariç. */
   grossTotalForBarem: Decimal;
-  /** Barem destek uygunluğu (variant veya order seviyesi hızlı-teslim). */
-  fastEligible: boolean;
+  /**
+   * The Barem table to look the gross amount up in (`resolveTrendyolCatalogBaremTier`:
+   * table 1 for a fast-delivery product, table 2 otherwise).
+   */
+  baremTier: BaremTier;
 }
 
 /**
  * Barem-vs-desi tariff resolution. OWN_CONTRACT reads the store's own tariff.
  * Otherwise (TRENDYOL_CONTRACT): no carrier is NO_CARRIER; no version in force is
- * DESI_OVERFLOW; Barem-eligible (the version supports Barem, desi <= its
- * maxBaremDesi, fast delivery, gross amount inside a band) is BAREM; otherwise, or
- * above every band, the desi-based row; no row for the desi is DESI_OVERFLOW.
+ * DESI_OVERFLOW; inside the Barem limits (the version supports Barem, desi <= its
+ * maxBaremDesi) a band of the `baremTier` table holding the gross amount is BAREM;
+ * otherwise (no band of that table holds it, e.g. a single-tier version has no
+ * table 2 band) the desi-based row; no row for the desi is DESI_OVERFLOW.
  */
 export async function resolveTariffForDesi(
   tx: Prisma.TransactionClient,
   input: ResolveTariffInput,
 ): Promise<EstimateOutcome> {
-  const { storeId, tariffSource, carrier, desi, grossTotalForBarem, fastEligible } = input;
+  const { storeId, tariffSource, carrier, desi, grossTotalForBarem, baremTier } = input;
   const desiCeil = Math.ceil(desi.toNumber());
 
   if (tariffSource === 'OWN_CONTRACT') {
@@ -101,9 +105,12 @@ export async function resolveTariffForDesi(
   const { version } = carrier;
   if (version === null) return { ok: false, reason: 'DESI_OVERFLOW' };
 
-  if (version.supportsBaremDestek && desi.lte(version.maxBaremDesi) && fastEligible) {
+  if (version.supportsBaremDestek && desi.lte(version.maxBaremDesi)) {
+    // The version's Barem rows come ordered by min_order_amount, so the lowest band of
+    // the table holding the amount wins, as in the SQL mirror.
     const barem = version.baremRows.find(
       (row) =>
+        row.tier === baremTier &&
         grossTotalForBarem.gte(row.minOrderAmount.toString()) &&
         grossTotalForBarem.lte(row.maxOrderAmount.toString()),
     );
@@ -119,7 +126,7 @@ export async function resolveTariffForDesi(
         },
       };
     }
-    // Brüt tutar tüm Barem aralıklarının üstünde → desi-bazlıya düş.
+    // No band of the table holds the amount: fall back to the desi row.
   }
 
   const desiRow = version.desiRows.find((row) => row.desi === desiCeil);

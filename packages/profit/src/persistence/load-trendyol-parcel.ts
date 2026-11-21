@@ -261,6 +261,9 @@ export async function loadTrendyolParcel(
   const attributes: TrendyolParcelAttributes = {
     fastDelivery: order.fastDelivery,
     fastDeliveryType: order.fastDeliveryType,
+    // The order's own Trendyol data (never captured): with actualShipDate it decides the
+    // Barem table (barem-tier.ts).
+    agreedDeliveryDate: order.agreedDeliveryDate,
     actualShipDate: order.actualShipDate,
     usesSellerCargoAgreement: order.usesSellerCargoAgreement,
     items: itemAttributes,
