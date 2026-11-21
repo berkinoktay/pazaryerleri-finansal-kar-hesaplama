@@ -73,18 +73,17 @@ function compareFinanceRows(
 }
 
 /**
- * The subset of a shipping carrier the parcel loader needs: its identity, the Barem
- * eligibility fields `loadShippingTariff` reads, and the two name sources the order's
- * cargo name is matched against -- the display name and `orderCargoNames` (the exact
- * cargoProviderName values Trendyol writes on orders for this carrier).
+ * The subset of a shipping carrier the parcel loader needs: its identity and the two
+ * name sources the order's cargo name is matched against -- the display name and
+ * `orderCargoNames` (the exact cargoProviderName values Trendyol writes on orders for
+ * this carrier). Barem attributes are not part of it: the estimate reads them from the
+ * tariff version in force at the order date (`loadShippingTariff`).
  */
 export interface CarrierRow {
   readonly id: string;
   readonly code: string;
   readonly displayName: string;
   readonly orderCargoNames: readonly string[];
-  readonly supportsBaremDestek: boolean;
-  readonly maxBaremDesi: number;
 }
 
 /**
@@ -265,7 +264,8 @@ export async function loadTrendyolParcel(
   const shipping = await loadShippingTariff(tx, {
     storeId,
     source: store.shippingTariffSource,
-    carrier: orderCarrier,
+    carrier: orderCarrier === null ? null : { id: orderCarrier.id, code: orderCarrier.code },
+    at: orderDate,
     orderCarrierOutcome,
   });
   const commission = await loadCommissionRules(tx, order.items);

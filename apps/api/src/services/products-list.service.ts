@@ -269,10 +269,13 @@ async function fetchShippingEstimates(
   organizationId: string,
   storeId: string,
 ): Promise<Map<string, VariantShippingEstimate>> {
+  // $3: price with the default carrier's tariff version in force now, the same
+  // instant the canonical service function reads.
   const rows = await prisma.$queryRawUnsafe<ShippingEstimateRow[]>(
     SHIPPING_ESTIMATE_CTE_SQL,
     organizationId,
     storeId,
+    new Date().toISOString(),
   );
 
   const result = new Map<string, VariantShippingEstimate>();

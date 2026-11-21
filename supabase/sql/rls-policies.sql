@@ -354,6 +354,17 @@ CREATE POLICY shipping_barem_tariffs_authenticated_read ON shipping_barem_tariff
   FOR SELECT TO authenticated
   USING (true);
 
+-- ─── shipping_tariff_versions — global ─────────────────────────────────
+-- A carrier's dated tariff set (start instant + Barem attributes); the desi
+-- and Barem rows above point at it. Same shape as shipping_desi_tariffs:
+-- global reference data, every authenticated user reads identical rows;
+-- writes are API-only.
+ALTER TABLE shipping_tariff_versions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS shipping_tariff_versions_authenticated_read ON shipping_tariff_versions;
+CREATE POLICY shipping_tariff_versions_authenticated_read ON shipping_tariff_versions
+  FOR SELECT TO authenticated
+  USING (true);
+
 -- ─── own_shipping_tariffs — store-scoped, org-private ──────────────────
 -- A seller's negotiated carrier rates for a specific store. Commercial cost
 -- intelligence — gated on store access via store_id, same as stores / orders.
@@ -527,6 +538,16 @@ CREATE POLICY fee_definitions_authenticated_read ON fee_definitions
 ALTER TABLE micro_export_return_fee_tiers ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS micro_export_return_fee_tiers_authenticated_read ON micro_export_return_fee_tiers;
 CREATE POLICY micro_export_return_fee_tiers_authenticated_read ON micro_export_return_fee_tiers
+  FOR SELECT TO authenticated
+  USING (true);
+
+-- ─── micro_export_return_fee_tier_versions — global reference, public read ─
+-- The dated set the micro-export tiers above belong to (start instant only).
+-- Same pattern as shipping_desi_tariffs: every authenticated user reads the
+-- same rows; no INSERT/UPDATE/DELETE policy for authenticated → default-deny.
+ALTER TABLE micro_export_return_fee_tier_versions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS micro_export_return_fee_tier_versions_authenticated_read ON micro_export_return_fee_tier_versions;
+CREATE POLICY micro_export_return_fee_tier_versions_authenticated_read ON micro_export_return_fee_tier_versions
   FOR SELECT TO authenticated
   USING (true);
 

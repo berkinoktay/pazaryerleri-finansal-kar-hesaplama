@@ -20,6 +20,11 @@
  *   - Barem eligibility   - deliveryDuration 0 (ships today) is eligible; a null
  *                           deliveryDuration and one above the carrier window
  *                           are not
+ *   - Dated versions      - both paths read the version in force now, not a
+ *                           future one; the SQL switches version exactly at the
+ *                           instant the next version starts (Istanbul midnight);
+ *                           a carrier with no version in force is DESI_OVERFLOW
+ *                           on both paths
  *
  * Each test creates its own org+store+product+variant inline. `truncateAll`
  * between tests wipes tenant data but preserves the global shipping reference
@@ -28,7 +33,8 @@
  */
 
 import { prisma } from '@pazarsync/db';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { Platform } from '@pazarsync/db/enums';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { estimateShippingCostForVariant } from '../../src/services/shipping-estimator.service';
 import {
@@ -36,6 +42,10 @@ import {
   type ShippingEstimateRow,
 } from '../../src/services/shipping-estimator.sql';
 import { ensureDbReachable, truncateAll } from '../helpers/db';
+import {
+  createTestCarrierWithVersions,
+  type TestCarrierTariffVersionSpec,
+} from '../helpers/factories';
 
 // ─── Fixture builder ─────────────────────────────────────────────────────────
 
@@ -118,16 +128,42 @@ async function runBothPaths(fixture: VariantFixture) {
   const fnResult = await prisma.$transaction((tx) =>
     estimateShippingCostForVariant(fixture.variantId, tx),
   );
+  const row = await runSqlAt(fixture, new Date().toISOString());
+  return { fnResult, row };
+}
+
+/** Runs the SQL mirror for the fixture's store with the tariff version in force at `at`. */
+async function runSqlAt(fixture: VariantFixture, at: string): Promise<ShippingEstimateRow> {
   const sqlRows = await prisma.$queryRawUnsafe<ShippingEstimateRow[]>(
     SHIPPING_ESTIMATE_CTE_SQL,
     fixture.orgId,
     fixture.storeId,
+    at,
   );
   const row = sqlRows.find((r) => r.id === fixture.variantId);
   if (!row) {
     throw new Error(`SQL CTE returned no row for variant ${fixture.variantId}`);
   }
-  return { fnResult, row };
+  return row;
+}
+
+/** A tariff version with a single desi-1 row, no Barem bands and a 10-desi Barem cap. */
+function desiOneVersion(
+  effectiveFrom: Date,
+  supportsBaremDestek: boolean,
+  desi1PriceNet: string,
+): TestCarrierTariffVersionSpec {
+  return {
+    effectiveFrom,
+    supportsBaremDestek,
+    maxBaremDesi: 10,
+    desiRows: [{ desi: 1, priceNet: desi1PriceNet }],
+    baremRows: [],
+  };
+}
+
+async function deleteCarrierByCode(code: string): Promise<void> {
+  await prisma.shippingCarrier.deleteMany({ where: { platform: Platform.TRENDYOL, code } });
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -343,5 +379,122 @@ describe('Equivalence: service fn vs raw SQL CTE', () => {
     expect(row.shipping_tariff_applied).toBe(fnResult.estimate.tariffApplied);
     expect(row.estimated_shipping_net).toBe(fnResult.estimate.amount.toFixed(2));
     expect(row.estimated_shipping_net).toBe('91.99');
+  });
+});
+
+// --- Dated tariff versions -------------------------------------------------------
+// Both paths read the tariff version of the store's default carrier that is in force
+// at the estimate instant. The suite owns three TEST_ carriers (never the seeded
+// ones) and deletes them afterwards; their versions and rows cascade.
+
+const FUTURE_CARRIER_CODE = 'TEST_EQ_FUTURE';
+const FUTURE_CARRIER_EXTERNAL_ID = 990_302;
+const MIDNIGHT_CARRIER_CODE = 'TEST_EQ_MIDNIGHT';
+const MIDNIGHT_CARRIER_EXTERNAL_ID = 990_303;
+/** Only a 2099 version: no version is in force today. */
+const NO_VERSION_CARRIER_CODE = 'TEST_EQ_NO_VERSION';
+const NO_VERSION_CARRIER_EXTERNAL_ID = 990_306;
+
+/** The version in force today: open towards the past, like the migrated catalogue. */
+const IN_FORCE_START = new Date('2000-01-01T00:00:00.000Z');
+const FUTURE_START = new Date('2099-01-01T00:00:00.000Z');
+/** 1 December 2026 at 00:00 in Istanbul (UTC+3). */
+const ISTANBUL_MIDNIGHT_START = new Date('2026-11-30T21:00:00.000Z');
+
+describe('Equivalence: dated tariff versions', () => {
+  let futureCarrierId = '';
+  let midnightCarrierId = '';
+  let noVersionCarrierId = '';
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    // Each carrier's display name is its code. A leftover carrier with the same code
+    // is deleted first.
+    await deleteCarrierByCode(FUTURE_CARRIER_CODE);
+    futureCarrierId = await createTestCarrierWithVersions({
+      code: FUTURE_CARRIER_CODE,
+      externalId: FUTURE_CARRIER_EXTERNAL_ID,
+      versions: [
+        desiOneVersion(IN_FORCE_START, true, '100.00'),
+        desiOneVersion(FUTURE_START, false, '999.00'),
+      ],
+    });
+    await deleteCarrierByCode(MIDNIGHT_CARRIER_CODE);
+    midnightCarrierId = await createTestCarrierWithVersions({
+      code: MIDNIGHT_CARRIER_CODE,
+      externalId: MIDNIGHT_CARRIER_EXTERNAL_ID,
+      versions: [
+        desiOneVersion(IN_FORCE_START, true, '100.00'),
+        desiOneVersion(ISTANBUL_MIDNIGHT_START, true, '120.00'),
+      ],
+    });
+    await deleteCarrierByCode(NO_VERSION_CARRIER_CODE);
+    noVersionCarrierId = await createTestCarrierWithVersions({
+      code: NO_VERSION_CARRIER_CODE,
+      externalId: NO_VERSION_CARRIER_EXTERNAL_ID,
+      versions: [desiOneVersion(FUTURE_START, false, '999.00')],
+    });
+  });
+
+  afterAll(async () => {
+    await deleteCarrierByCode(FUTURE_CARRIER_CODE);
+    await deleteCarrierByCode(MIDNIGHT_CARRIER_CODE);
+    await deleteCarrierByCode(NO_VERSION_CARRIER_CODE);
+  });
+
+  beforeEach(truncateAll);
+
+  it('SQL and TypeScript agree when a future version exists', async () => {
+    const fixture = await createVariantFixture({
+      barcode: 'eq-future',
+      defaultShippingCarrierId: futureCarrierId,
+      dimensionalWeightOverride: '1.0',
+    });
+
+    const { fnResult, row } = await runBothPaths(fixture);
+
+    expect(row.shipping_estimate_status).toBe('OK');
+    expect(fnResult.ok).toBe(true);
+    if (!fnResult.ok) throw new Error('unreachable: fnResult.ok asserted true above');
+    expect(row.shipping_tariff_applied).toBe('NORMAL');
+    expect(row.shipping_tariff_applied).toBe(fnResult.estimate.tariffApplied);
+    expect(row.shipping_carrier_code).toBe(FUTURE_CARRIER_CODE);
+    expect(row.shipping_carrier_code).toBe(fnResult.estimate.carrierCode);
+    expect(row.estimated_shipping_net).toBe(fnResult.estimate.amount.toFixed(2));
+    expect(row.estimated_shipping_net).toBe('100.00');
+  });
+
+  it('the SQL estimate switches version exactly at Istanbul midnight', async () => {
+    const fixture = await createVariantFixture({
+      barcode: 'eq-midnight',
+      defaultShippingCarrierId: midnightCarrierId,
+      dimensionalWeightOverride: '1.0',
+    });
+
+    const before = await runSqlAt(fixture, '2026-11-30T20:59:59.999Z');
+    const atMidnight = await runSqlAt(fixture, '2026-11-30T21:00:00.000Z');
+
+    expect(before.shipping_estimate_status).toBe('OK');
+    expect(before.estimated_shipping_net).toBe('100.00');
+    expect(atMidnight.shipping_estimate_status).toBe('OK');
+    expect(atMidnight.estimated_shipping_net).toBe('120.00');
+  });
+
+  // The carrier exists but none of its versions is in force: the SQL's version
+  // LATERAL finds nothing, so version_id is NULL and neither the desi nor the Barem
+  // lookup resolves. The 2099 version's desi-1 row must not price the variant.
+  it('SQL and TypeScript both report DESI_OVERFLOW when no version is in force', async () => {
+    const fixture = await createVariantFixture({
+      barcode: 'eq-no-version',
+      defaultShippingCarrierId: noVersionCarrierId,
+      dimensionalWeightOverride: '1.0',
+    });
+
+    const { fnResult, row } = await runBothPaths(fixture);
+
+    expect(fnResult).toEqual({ ok: false, reason: 'DESI_OVERFLOW' });
+    expect(row.shipping_estimate_status).toBe('DESI_OVERFLOW');
+    expect(row.estimated_shipping_net).toBeNull();
+    expect(row.shipping_tariff_applied).toBeNull();
   });
 });

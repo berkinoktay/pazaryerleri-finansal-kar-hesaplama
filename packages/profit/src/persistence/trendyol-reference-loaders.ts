@@ -32,6 +32,10 @@ import {
   resolveFeeDefinition,
   type FeeDefinitionAmountField,
 } from '../resolve-fee-definition';
+import {
+  loadShippingTariffVersion,
+  type ShippingTariffVersionRows,
+} from '../shipping/tariff-version';
 
 const ZERO = new Decimal(0);
 const PERCENT = new Decimal(100);
@@ -248,51 +252,84 @@ export async function loadFeeParams(
   };
 }
 
-/** The micro-export return-fee tiers effective on the order date, rate scaled to a percent. */
+/**
+ * The micro-export return-fee tiers in force on the order date, rate scaled to a
+ * percent: the bands of the latest tier version starting on or before the date. A
+ * band dropped from a later version no longer applies once that version starts. No
+ * version yet means no tiers.
+ */
 async function loadOverseasReturnTiers(
   tx: Prisma.TransactionClient,
   orderDate: Date,
 ): Promise<OverseasReturnTier[]> {
-  const rows = await tx.microExportReturnFeeTier.findMany({
+  const version = await tx.microExportReturnFeeTierVersion.findFirst({
     where: { effectiveFrom: { lte: orderDate } },
     orderBy: { effectiveFrom: 'desc' },
+    include: { tiers: { orderBy: { minSaleGross: 'asc' } } },
   });
-  // Mirror resolve-overseas-return-rate: for each band keep the row with the latest
-  // effectiveFrom on or before the order date.
-  const byBand = new Map<string, OverseasReturnTier>();
-  for (const row of rows) {
-    const key = `${row.minSaleGross.toString()}:${row.maxSaleGross.toString()}`;
-    if (!byBand.has(key)) {
-      byBand.set(key, {
-        minUnitSaleGross: dec(row.minSaleGross),
-        maxUnitSaleGross: dec(row.maxSaleGross),
-        ratePct: dec(row.rate).mul(PERCENT),
-      });
-    }
+  if (version === null) {
+    return [];
   }
-  return [...byBand.values()];
+  return version.tiers.map((row) => ({
+    minUnitSaleGross: dec(row.minSaleGross),
+    maxUnitSaleGross: dec(row.maxSaleGross),
+    ratePct: dec(row.rate).mul(PERCENT),
+  }));
 }
 
 // --- Shipping ----------------------------------------------------------------
 
-/** The shipping tariff mirror of resolve-tariff.ts: carrier, desi, barem and own rows. */
+/**
+ * The shipping tariff mirror of resolve-tariff.ts: the carrier's tariff version in
+ * force at `at` (desi prices, Barem bands, Barem attributes) and the store's own rows.
+ * Loads the version, then builds the tariff from it (`buildShippingTariff`).
+ */
 export async function loadShippingTariff(
   tx: Prisma.TransactionClient,
   params: {
     readonly storeId: string;
     readonly source: TrendyolShippingTariff['source'];
-    readonly carrier: {
-      readonly id: string;
-      readonly code: string;
-      readonly supportsBaremDestek: boolean;
-      readonly maxBaremDesi: number;
-    } | null;
+    readonly carrier: { readonly id: string; readonly code: string } | null;
+    // The instant whose tariff version applies: the order date, or the scenario date.
+    readonly at: Date;
     // How the order's carrier resolved; omitted (null) for the scenario / store-default
     // context, where the carrier field alone decides.
     readonly orderCarrierOutcome?: TrendyolOrderCarrierOutcome | null;
   },
 ): Promise<TrendyolShippingTariff> {
-  const { storeId, source, carrier } = params;
+  const { storeId, source, carrier, at } = params;
+  const version =
+    carrier === null ? null : await loadShippingTariffVersion(tx, { carrierId: carrier.id, at });
+  return buildShippingTariff(tx, {
+    storeId,
+    source,
+    carrier,
+    version,
+    orderCarrierOutcome: params.orderCarrierOutcome,
+  });
+}
+
+/**
+ * Builds the shipping tariff from an already loaded carrier tariff version and the
+ * store's own rows (read here). A caller that also needs the version's Barem window
+ * loads the version once and passes the same object to both, so the prices and the
+ * window always come from one version.
+ */
+export async function buildShippingTariff(
+  tx: Prisma.TransactionClient,
+  params: {
+    readonly storeId: string;
+    readonly source: TrendyolShippingTariff['source'];
+    readonly carrier: { readonly code: string } | null;
+    // The carrier's version in force at the relevant instant; null when there is no
+    // carrier or no version in force.
+    readonly version: ShippingTariffVersionRows | null;
+    // How the order's carrier resolved; omitted (null) for the scenario / store-default
+    // context, where the carrier field alone decides.
+    readonly orderCarrierOutcome?: TrendyolOrderCarrierOutcome | null;
+  },
+): Promise<TrendyolShippingTariff> {
+  const { storeId, source, carrier, version } = params;
   const orderCarrierOutcome = params.orderCarrierOutcome ?? null;
 
   let carrierInput: TrendyolShippingCarrier | null = null;
@@ -300,33 +337,25 @@ export async function loadShippingTariff(
   let baremBands: TrendyolBaremBand[] = [];
 
   if (carrier !== null) {
+    // With no version in force (no tariff entered yet, or a date before its first
+    // version) the carrier offers no Barem and its tariffs stay empty, so a
+    // Trendyol-contract estimate is unavailable (DESI_OVERFLOW) instead of a silent
+    // 0 TL.
     carrierInput = {
       code: carrier.code,
-      supportsBarem: carrier.supportsBaremDestek,
-      maxBaremDesi: new Decimal(carrier.maxBaremDesi),
+      supportsBarem: version !== null && version.supportsBaremDestek,
+      maxBaremDesi: new Decimal(version === null ? 0 : version.maxBaremDesi),
     };
-    // One row per band, no version history: ShippingDesiTariff is unique on
-    // (carrierId, desi) and ShippingBaremTariff on (carrierId, minOrderAmount,
-    // maxOrderAmount). Read by carrierId only, exactly as resolve-tariff.ts does.
-    // An effectiveFrom <= orderDate filter cannot pick a version here; it would
-    // only drop the tariff for an order older than the seeded effective_from. A
-    // historic order is estimated with today's tariff and its cargo invoice later
-    // replaces the estimate. Versioned tariffs are a future shipping feature.
-    const desiRows = await tx.shippingDesiTariff.findMany({
-      where: { carrierId: carrier.id },
-    });
-    for (const row of desiRows) {
-      desiTariffNet.set(row.desi.toString(), dec(row.priceNet));
+    if (version !== null) {
+      for (const row of version.desiRows) {
+        desiTariffNet.set(row.desi.toString(), dec(row.priceNet));
+      }
+      baremBands = version.baremRows.map((row) => ({
+        minOrderAmount: dec(row.minOrderAmount),
+        maxOrderAmount: dec(row.maxOrderAmount),
+        priceNet: dec(row.priceNet),
+      }));
     }
-    const baremRows = await tx.shippingBaremTariff.findMany({
-      where: { carrierId: carrier.id },
-      orderBy: { minOrderAmount: 'asc' },
-    });
-    baremBands = baremRows.map((row) => ({
-      minOrderAmount: dec(row.minOrderAmount),
-      maxOrderAmount: dec(row.maxOrderAmount),
-      priceNet: dec(row.priceNet),
-    }));
   }
 
   const ownRows = await tx.ownShippingTariff.findMany({ where: { storeId } });

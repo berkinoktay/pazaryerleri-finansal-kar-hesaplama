@@ -39,12 +39,16 @@ const EXCLUDED_DIRS = new Set(['node_modules', 'dist', 'generated', '.turbo']);
  * them in one suite empties it for every later suite under the shared CI Postgres.
  * micro_export_return_fee_tiers is the micro-export "Yurt Dışı İade Operasyon Bedeli"
  * tier catalogue — same read-only-fixture contract as the shipping tables.
+ * shipping_tariff_versions and micro_export_return_fee_tier_versions hold the dated
+ * sets those rows belong to; truncating them cascades into the rows above.
  */
 const FORBIDDEN_TABLES = [
   'shipping_carriers',
   'shipping_desi_tariffs',
   'shipping_barem_tariffs',
+  'shipping_tariff_versions',
   'micro_export_return_fee_tiers',
+  'micro_export_return_fee_tier_versions',
 ];
 
 // Capture each `TRUNCATE TABLE ...` statement body up to its first terminator

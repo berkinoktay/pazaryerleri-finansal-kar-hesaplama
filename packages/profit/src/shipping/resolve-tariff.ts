@@ -1,17 +1,23 @@
 /**
- * Barem-vs-desi shipping tariff resolver backed by the tariff tables. Only the
- * products list's variant estimator (apps/api shipping-estimator.service) uses it;
- * the profit engine's pure counterpart is `resolveTrendyolShippingNet`.
+ * Barem-vs-desi shipping tariff resolver. Only the products list's variant
+ * estimator (apps/api shipping-estimator.service) uses it; the profit engine's
+ * pure counterpart is `resolveTrendyolShippingNet`.
  *
- * For a given (carrier, desi, gross amount, fast-delivery eligibility, tariffSource)
- * it returns one `ShippingEstimate` or an unavailability reason.
+ * For a given (carrier tariff version, desi, gross amount, fast-delivery
+ * eligibility, tariffSource) it returns one `ShippingEstimate` or an
+ * unavailability reason.
  *
- * Read-only: it reads the tariff tables through `tx` and never writes. decimal.js.
+ * Read-only. The TRENDYOL_CONTRACT branch picks its desi and Barem rows from the
+ * carrier's tariff version the caller loaded (`loadShippingTariffVersion`) and
+ * never queries; only the OWN_CONTRACT branch reads the store's own tariff through
+ * `tx`. Never writes. decimal.js.
  */
 
 import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
+
+import type { ShippingTariffVersionRows } from './tariff-version';
 
 export interface ShippingEstimate {
   amount: Decimal;
@@ -40,12 +46,14 @@ export type EstimateOutcome =
 export interface ResolveTariffInput {
   storeId: string;
   tariffSource: 'TRENDYOL_CONTRACT' | 'OWN_CONTRACT';
-  /** null → NO_CARRIER (TRENDYOL_CONTRACT dalında). */
+  /**
+   * The store's default carrier with its tariff version in force at the estimate
+   * instant. On the TRENDYOL_CONTRACT branch a null carrier is NO_CARRIER and a
+   * null version (no version in force) is DESI_OVERFLOW.
+   */
   carrier: {
-    id: string;
-    code: string;
-    supportsBaremDestek: boolean;
-    maxBaremDesi: Decimal;
+    readonly code: string;
+    readonly version: ShippingTariffVersionRows | null;
   } | null;
   /** Effective desi (≥ 0); lookup `ceil(desi)` ile yapılır. */
   desi: Decimal;
@@ -56,10 +64,11 @@ export interface ResolveTariffInput {
 }
 
 /**
- * Barem-vs-desi tarife çözümü. OWN_CONTRACT → own tarifesi; aksi TRENDYOL_CONTRACT:
- * carrier yoksa NO_CARRIER; Barem-uygun (destek + desi ≤ maxBaremDesi + hızlı +
- * brüt tutar aralıkta) → Barem; aksi/aralık-dışı → desi-bazlı; desi kademesi
- * yoksa DESI_OVERFLOW.
+ * Barem-vs-desi tariff resolution. OWN_CONTRACT reads the store's own tariff.
+ * Otherwise (TRENDYOL_CONTRACT): no carrier is NO_CARRIER; no version in force is
+ * DESI_OVERFLOW; Barem-eligible (the version supports Barem, desi <= its
+ * maxBaremDesi, fast delivery, gross amount inside a band) is BAREM; otherwise, or
+ * above every band, the desi-based row; no row for the desi is DESI_OVERFLOW.
  */
 export async function resolveTariffForDesi(
   tx: Prisma.TransactionClient,
@@ -87,15 +96,18 @@ export async function resolveTariffForDesi(
 
   if (carrier === null) return { ok: false, reason: 'NO_CARRIER' };
 
-  if (carrier.supportsBaremDestek && desi.lte(carrier.maxBaremDesi) && fastEligible) {
-    const barem = await tx.shippingBaremTariff.findFirst({
-      where: {
-        carrierId: carrier.id,
-        minOrderAmount: { lte: grossTotalForBarem.toString() },
-        maxOrderAmount: { gte: grossTotalForBarem.toString() },
-      },
-    });
-    if (barem !== null) {
+  // No version in force at the estimate instant: there is no desi row to price
+  // from, the same outcome as a desi the version does not cover.
+  const { version } = carrier;
+  if (version === null) return { ok: false, reason: 'DESI_OVERFLOW' };
+
+  if (version.supportsBaremDestek && desi.lte(version.maxBaremDesi) && fastEligible) {
+    const barem = version.baremRows.find(
+      (row) =>
+        grossTotalForBarem.gte(row.minOrderAmount.toString()) &&
+        grossTotalForBarem.lte(row.maxOrderAmount.toString()),
+    );
+    if (barem !== undefined) {
       return {
         ok: true,
         estimate: {
@@ -110,10 +122,8 @@ export async function resolveTariffForDesi(
     // Brüt tutar tüm Barem aralıklarının üstünde → desi-bazlıya düş.
   }
 
-  const desiRow = await tx.shippingDesiTariff.findFirst({
-    where: { carrierId: carrier.id, desi: desiCeil },
-  });
-  if (desiRow === null) return { ok: false, reason: 'DESI_OVERFLOW' };
+  const desiRow = version.desiRows.find((row) => row.desi === desiCeil);
+  if (desiRow === undefined) return { ok: false, reason: 'DESI_OVERFLOW' };
   return {
     ok: true,
     estimate: {

@@ -9,7 +9,7 @@
 
 import { Decimal } from 'decimal.js';
 import { prisma, type Prisma } from '@pazarsync/db';
-import { ProfitIssueCode, ProfitLineSource, ProfitLineType } from '@pazarsync/db/enums';
+import { Platform, ProfitIssueCode, ProfitLineSource, ProfitLineType } from '@pazarsync/db/enums';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -31,6 +31,7 @@ import {
   seedMelontikFeeDefinitions,
   seedMelontikParcel,
   truncateAll,
+  upsertCarrierWithTariffVersions,
   upsertMelontikCarrier,
 } from './helpers/melontik-parcel';
 
@@ -665,5 +666,74 @@ describe('loadTrendyolScenarioBases', () => {
     }
     expect(caught.feeType).toBe('PLATFORM_SERVICE');
     expect(caught.field).toBe('fixedAmountNet');
+  });
+
+  it('scenario Barem eligibility follows the duration of the version in force', async () => {
+    // A dedicated carrier with two Barem versions: v1 allows a 1-day delivery window,
+    // v2 (from 1 December 2026, 00:00 Istanbul) a 3-day one, so the 2-day variant is
+    // eligible only from v2's start.
+    const carrierCode = 'TEST_SCENARIO_BAREM_WINDOW';
+    const v1Start = new Date('2000-01-01T00:00:00.000Z');
+    const v2Start = new Date('2026-11-30T21:00:00.000Z');
+    const deleteCarrier = async (): Promise<void> => {
+      // Versions, desi and Barem rows cascade; the store's default carrier is set null.
+      await prisma.shippingCarrier.deleteMany({
+        where: { platform: Platform.TRENDYOL, code: carrierCode },
+      });
+    };
+    await deleteCarrier();
+
+    try {
+      const carrierId = await upsertCarrierWithTariffVersions({
+        code: carrierCode,
+        externalId: 990_102,
+        displayName: 'Test Scenario Barem Window',
+        versions: [
+          {
+            effectiveFrom: v1Start,
+            supportsBaremDestek: true,
+            maxBaremDesi: 10,
+            maxBaremEligibleDeliveryDuration: 1,
+            desiRows: [{ desi: 1, priceNet: '80.00' }],
+            baremRows: [{ minOrderAmount: '0.00', maxOrderAmount: '199.99', priceNet: '40.00' }],
+          },
+          {
+            effectiveFrom: v2Start,
+            supportsBaremDestek: true,
+            maxBaremDesi: 10,
+            maxBaremEligibleDeliveryDuration: 3,
+            desiRows: [{ desi: 1, priceNet: '90.00' }],
+            baremRows: [{ minOrderAmount: '0.00', maxOrderAmount: '199.99', priceNet: '45.00' }],
+          },
+        ],
+      });
+
+      await seedMelontikFeeDefinitions();
+      const { organizationId, storeId } = await createTrendyolOrg({ carrierId });
+      const variantId = await createPricedVariant(organizationId, storeId, 0);
+      await prisma.productVariant.update({
+        where: { id: variantId },
+        data: { deliveryDuration: 2 },
+      });
+
+      async function fastDeliveryAt(scenarioDate: Date): Promise<boolean> {
+        const bases = await loadTrendyolScenarioBases(prisma, {
+          organizationId,
+          storeId,
+          scenarioDate,
+          variants: [{ variantId }],
+        });
+        const result = bases.get(variantId);
+        if (result?.kind !== 'ready') {
+          throw new Error('expected the scenario base to be ready');
+        }
+        return result.base.fastDelivery;
+      }
+
+      expect(await fastDeliveryAt(new Date('2026-11-30T20:59:59.999Z'))).toBe(false);
+      expect(await fastDeliveryAt(new Date('2026-11-30T21:00:00.000Z'))).toBe(true);
+    } finally {
+      await deleteCarrier();
+    }
   });
 });

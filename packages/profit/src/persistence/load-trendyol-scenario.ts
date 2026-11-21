@@ -7,14 +7,15 @@ import { type ItemCostProfileInput } from '../core/seller-costs/build-seller-cos
 import { isTrendyolBaremEligible } from '../marketplaces/trendyol/barem-eligibility';
 import { type TrendyolScenarioBase } from '../marketplaces/trendyol/scenario';
 import { type TrendyolReferenceData } from '../marketplaces/trendyol/trendyol-inputs';
+import { loadShippingTariffVersion } from '../shipping/tariff-version';
 import { UnsupportedPlatformError } from './errors';
 import {
+  buildShippingTariff,
   dec,
   decOrNull,
   loadCommissionRulesForCategories,
   loadCostProfilesByVariant,
   loadFeeParams,
-  loadShippingTariff,
 } from './trendyol-reference-loaders';
 
 /**
@@ -58,27 +59,19 @@ interface StoreForScenario {
   readonly platform: Platform;
   readonly shippingTariffSource: TrendyolReferenceData['shipping']['source'];
   readonly profitSettings: Prisma.JsonValue;
-  readonly defaultShippingCarrier: {
-    readonly id: string;
-    readonly code: string;
-    readonly supportsBaremDestek: boolean;
-    readonly maxBaremDesi: number;
-    readonly maxBaremEligibleDeliveryDuration: number;
-  } | null;
+  readonly defaultShippingCarrier: { readonly id: string; readonly code: string } | null;
 }
 
 /** Builds one variant's scenario base from the pre-loaded, store-wide reference data. */
 function buildScenarioBase(params: {
   readonly variant: VariantForScenario;
   readonly scenarioDate: Date;
-  readonly store: StoreForScenario;
+  readonly carrierMaxBaremDurationDays: number | null;
   readonly reference: TrendyolReferenceData;
   readonly settings: ResolvedProfitSettings;
   readonly costs: readonly ItemCostProfileInput[];
 }): TrendyolScenarioBase {
-  const { variant, scenarioDate, store, reference, settings, costs } = params;
-
-  const carrier = store.defaultShippingCarrier;
+  const { variant, scenarioDate, carrierMaxBaremDurationDays, reference, settings, costs } = params;
 
   return {
     product: {
@@ -97,7 +90,7 @@ function buildScenarioBase(params: {
     scenarioDate,
     fastDelivery: isTrendyolBaremEligible({
       deliveryDurationDays: variant.deliveryDuration,
-      carrierMaxBaremDurationDays: carrier?.maxBaremEligibleDeliveryDuration ?? null,
+      carrierMaxBaremDurationDays,
     }),
     isExportSale: false,
     reference,
@@ -183,11 +176,22 @@ export async function loadTrendyolScenarioBases(
     isExport: false,
     fastDeliveryType: null,
   });
-  const shipping = await loadShippingTariff(tx, {
+  // The default carrier's tariff version in force on the scenario date, read once:
+  // the desi/Barem prices and the Barem delivery window both come from this one
+  // version, so they can never mix two versions. No carrier or no version in force
+  // -> no Barem window, which makes no variant Barem-eligible.
+  const carrier: StoreForScenario['defaultShippingCarrier'] = store.defaultShippingCarrier;
+  const version =
+    carrier === null
+      ? null
+      : await loadShippingTariffVersion(tx, { carrierId: carrier.id, at: scenarioDate });
+  const shipping = await buildShippingTariff(tx, {
     storeId,
     source: store.shippingTariffSource,
-    carrier: store.defaultShippingCarrier,
+    carrier,
+    version,
   });
+  const carrierMaxBaremDurationDays = version?.maxBaremEligibleDeliveryDuration ?? null;
   const commission = await loadCommissionRulesForCategories(tx, {
     categoryIds: foundVariants
       .map((variant) => variant.product.categoryId)
@@ -210,7 +214,7 @@ export async function loadTrendyolScenarioBases(
     const base = buildScenarioBase({
       variant,
       scenarioDate,
-      store,
+      carrierMaxBaremDurationDays,
       reference,
       settings,
       costs: costProfilesByVariant.get(variant.id) ?? [],

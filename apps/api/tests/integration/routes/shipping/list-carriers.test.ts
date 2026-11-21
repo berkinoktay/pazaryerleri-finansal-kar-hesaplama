@@ -3,13 +3,15 @@
  *
  * Per spec §6.2 / plan Task 3.8. The carrier catalogue is global, read-only
  * reference data — every authenticated org member sees the same 10
- * TRENDYOL rows seeded by the `20260517085409_shipping_tariffs` migration.
+ * TRENDYOL rows seeded by the `20261121090000_shipping_tariff_versions` reference seed.
  *
  * The test asserts:
  *   1. Happy path — `platform=TRENDYOL` returns exactly 10 carriers and the
  *      list includes SENDEOMP (a representative entry from the seed).
  *   2. Auth boundary — missing Authorization header returns 401 before the
  *      handler is reached.
+ *   3. Dated versions - a TEST_ carrier (created and deleted inside the test)
+ *      reports its Barem attributes from the tariff version in force.
  *
  * No DB seeding is needed here: `truncateAll` does NOT wipe
  * `shipping_carriers` (it is not in the truncate list because it is
@@ -17,13 +19,22 @@
  * persist across test runs the way `auth.users` does.
  */
 
+import { z } from '@hono/zod-openapi';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { prisma } from '@pazarsync/db';
+import { Platform } from '@pazarsync/db/enums';
+
 import { createApp } from '@/app';
+import { ShippingCarrierSchema } from '@/validators/shipping-config.validator';
 
 import { bearer, createAuthenticatedTestUser } from '../../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../../helpers/db';
-import { createMembership, createOrganization } from '../../../helpers/factories';
+import {
+  createMembership,
+  createOrganization,
+  createTestCarrierWithVersions,
+} from '../../../helpers/factories';
 
 interface CarrierWire {
   id: string;
@@ -39,6 +50,9 @@ interface CarrierWire {
 interface ListCarriersResponse {
   data: CarrierWire[];
 }
+
+/** The route's 200 body schema (declared inline in list-carriers.route.ts). */
+const ListCarriersResponseSchema = z.object({ data: z.array(ShippingCarrierSchema) });
 
 describe('GET /v1/organizations/:orgId/shipping-carriers', () => {
   const app = createApp();
@@ -67,6 +81,65 @@ describe('GET /v1/organizations/:orgId/shipping-carriers', () => {
     const sendeo = body.data.find((c) => c.code === 'SENDEOMP');
     expect(sendeo).toBeDefined();
     expect(sendeo?.platform).toBe('TRENDYOL');
+  });
+
+  // The test carrier lives only inside this test (created here, deleted in finally),
+  // because the test above expects exactly the 10 seeded TRENDYOL carriers. Its 2000
+  // and 2099 versions do not support Barem and must not be reported.
+  it('reports Barem support from the version in force', async () => {
+    const code = 'TEST_LIST_CARRIERS';
+    await prisma.shippingCarrier.deleteMany({ where: { platform: Platform.TRENDYOL, code } });
+    // 2000 (no Barem, max desi 5), 2020 (Barem, max desi 10: the version in force)
+    // and 2099 (no Barem). The in-force version is neither the oldest nor the
+    // newest, so reading the versions in the wrong order fails the test.
+    const carrierId = await createTestCarrierWithVersions({
+      code,
+      externalId: 990_305,
+      displayName: 'Test List Carriers',
+      versions: [
+        {
+          effectiveFrom: new Date('2000-01-01T00:00:00.000Z'),
+          supportsBaremDestek: false,
+          maxBaremDesi: 5,
+          desiRows: [{ desi: 1, priceNet: '80.00' }],
+          baremRows: [],
+        },
+        {
+          effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
+          supportsBaremDestek: true,
+          maxBaremDesi: 10,
+          desiRows: [{ desi: 1, priceNet: '100.00' }],
+          baremRows: [{ minOrderAmount: '0.00', maxOrderAmount: '199.99', priceNet: '50.00' }],
+        },
+        {
+          effectiveFrom: new Date('2099-01-01T00:00:00.000Z'),
+          supportsBaremDestek: false,
+          maxBaremDesi: 10,
+          desiRows: [{ desi: 1, priceNet: '999.00' }],
+          baremRows: [],
+        },
+      ],
+    });
+
+    try {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/shipping-carriers?platform=TRENDYOL`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+
+      expect(res.status).toBe(200);
+      const body = ListCarriersResponseSchema.parse(await res.json());
+      const testCarrier = body.data.find((c) => c.code === code);
+      expect(testCarrier).toBeDefined();
+      expect(testCarrier?.supportsBaremDestek).toBe(true);
+      expect(testCarrier?.maxBaremDesi).toBe(10);
+    } finally {
+      await prisma.shippingCarrier.delete({ where: { id: carrierId } });
+    }
   });
 
   it('returns 401 without auth header', async () => {

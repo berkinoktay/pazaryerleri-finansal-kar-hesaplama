@@ -9,8 +9,10 @@
  *
  * Outcomes: STORE_NOT_FOUND / NO_CARRIER / OWN_CONTRACT_EMPTY / DESI_OVERFLOW, or a
  * `ShippingEstimate` (NORMAL / BAREM / OWN_CONTRACT). All money via `decimal.js`;
- * carrier thresholds live on `ShippingCarrier` rows (SQL-tunable). Called from the
- * products-list endpoint via a Prisma transaction client.
+ * the desi and Barem rows and the Barem thresholds come from the default carrier's
+ * tariff version in force now (`loadShippingTariffVersion`); a carrier with no
+ * version in force is DESI_OVERFLOW. Called from the products-list endpoint via a
+ * Prisma transaction client.
  */
 
 import { Decimal } from 'decimal.js';
@@ -23,7 +25,11 @@ import type { Prisma } from '@pazarsync/db';
 // resolver's only caller (the engine's pure counterpart is resolveTrendyolShippingNet).
 // The types are re-exported here so the existing apps/api consumers (products-list,
 // the SQL CTE, the validator) keep their import paths.
-import { isTrendyolBaremEligible, resolveTariffForDesi } from '@pazarsync/profit';
+import {
+  isTrendyolBaremEligible,
+  loadShippingTariffVersion,
+  resolveTariffForDesi,
+} from '@pazarsync/profit';
 import type {
   EstimateOutcome,
   EstimateUnavailableReason,
@@ -37,25 +43,25 @@ export type { EstimateOutcome, EstimateUnavailableReason, ShippingEstimate };
 /**
  * A variant has "fast delivery setup" (and is therefore eligible for the
  * Barem destek tier on a Barem-supporting carrier) when its `deliveryDuration`
- * is set and within the carrier's `maxBaremEligibleDeliveryDuration` window
- * (Trendyol: 0 = ships today, 1 = ships by tomorrow). `deliveryDuration` is the
+ * is set and within the `maxBaremEligibleDeliveryDuration` window of the carrier's
+ * tariff version in force (Trendyol: 0 = ships today, 1 = ships by tomorrow). With
+ * no version in force (`null`) the variant is not eligible. `deliveryDuration` is the
  * only signal: Trendyol retired the rush-delivery flag and the fast-delivery
  * option list in August 2026. The Barem predicate in `SHIPPING_ESTIMATE_CTE_SQL`
  * mirrors this rule (pinned by the equivalence test).
  *
  * Pure function - no I/O. Exported for direct unit testing. Delegates to the
  * single Barem rule `isTrendyolBaremEligible` in `@pazarsync/profit` so the
- * variant estimator and the scenario loader never drift; the carrier is always
- * present here, so the shared rule's null-window branch is unreachable from this
- * call site and the semantics are unchanged.
+ * variant estimator and the scenario loader never drift; a missing version maps to
+ * the shared rule's null window (not eligible).
  */
 export function hasFastDeliverySetup(
   variant: { deliveryDuration: number | null },
-  carrier: { maxBaremEligibleDeliveryDuration: number },
+  version: { maxBaremEligibleDeliveryDuration: number } | null,
 ): boolean {
   return isTrendyolBaremEligible({
     deliveryDurationDays: variant.deliveryDuration,
-    carrierMaxBaremDurationDays: carrier.maxBaremEligibleDeliveryDuration,
+    carrierMaxBaremDurationDays: version === null ? null : version.maxBaremEligibleDeliveryDuration,
   });
 }
 
@@ -77,6 +83,12 @@ export async function estimateShippingCostForVariant(
     (variant.dimensionalWeightOverride ?? variant.syncedDimensionalWeight).toString(),
   );
   const carrier = variant.store.defaultShippingCarrier;
+  // The display estimate prices with the tariff version in force now; the SQL
+  // mirror reads the same version through its $3 instant.
+  const version =
+    carrier === null
+      ? null
+      : await loadShippingTariffVersion(tx, { carrierId: carrier.id, at: new Date() });
 
   // Barem-vs-desi resolution lives in @pazarsync/profit (resolveTariffForDesi; this
   // estimator is its only caller). grossTotalForBarem = the variant salePrice
@@ -84,17 +96,9 @@ export async function estimateShippingCostForVariant(
   return resolveTariffForDesi(tx, {
     storeId: variant.store.id,
     tariffSource: variant.store.shippingTariffSource,
-    carrier:
-      carrier !== null
-        ? {
-            id: carrier.id,
-            code: carrier.code,
-            supportsBaremDestek: carrier.supportsBaremDestek,
-            maxBaremDesi: new Decimal(carrier.maxBaremDesi.toString()),
-          }
-        : null,
+    carrier: carrier === null ? null : { code: carrier.code, version },
     desi,
     grossTotalForBarem: new Decimal(variant.salePrice.toString()),
-    fastEligible: carrier !== null && hasFastDeliverySetup(variant, carrier),
+    fastEligible: hasFastDeliverySetup(variant, version),
   });
 }

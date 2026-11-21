@@ -2,16 +2,19 @@
  * Shared test-support: global reference-data fixture seeding (shipping catalogue +
  * micro-export return-fee tiers).
  *
- * The shipping reference tables (`shipping_carriers` + `shipping_desi_tariffs`
- * + `shipping_barem_tariffs`) are a READ-ONLY global fixture, not tenant data:
- * the same rows service every seller and the live app reads them on every
- * ORDERS/cargo sync. They are seeded by migration
- * `20260517085409_shipping_tariffs`, but CI runs `prisma db push`, which does
- * NOT execute migration SQL — so the seed INSERTs never land and the catalogue
- * is empty. This helper reads the migration's seed section at test time and
- * applies it (single source of truth: the migration file).
+ * The shipping reference tables (`shipping_carriers`, `shipping_tariff_versions`,
+ * `shipping_desi_tariffs`, `shipping_barem_tariffs`) are a READ-ONLY global
+ * fixture, not tenant data: the same rows service every seller and the live app
+ * reads them on every ORDERS/cargo sync. The test DB is built with
+ * `prisma db push`, which creates empty tables, so this helper runs the marked
+ * seed section of the reference-seed files at test time:
+ * `20261121090000_shipping_tariff_versions.sql` (carriers, one dated version per
+ * carrier, that version's desi and Barem rows) and
+ * `20261121090100_micro_export_return_fee_tier_versions.sql` (the micro-export
+ * tier version and its tiers). The same files feed `pnpm db:seed-reference`, so
+ * the test DB and the dev DB share one source.
  *
- * It lives in `@pazarsync/db` (next to the migration it reads) so every
+ * It lives in `@pazarsync/db` (next to the seed files it reads) so every
  * integration package — apps/api, apps/sync-worker, packages/profit — imports
  * it the same way (`@pazarsync/db/test-support`) and runs it in `globalSetup`,
  * starting from the same baseline regardless of cross-package run order.
@@ -31,31 +34,34 @@ import { prisma } from './index';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const MIGRATION_SQL_PATH = resolve(
+const SHIPPING_SEED_SQL_PATH = resolve(
   __dirname,
-  '../prisma/reference-seed/20260517085409_shipping_tariffs.sql',
+  '../prisma/reference-seed/20261121090000_shipping_tariff_versions.sql',
 );
 
-const MICRO_RETURN_TIER_MIGRATION_SQL_PATH = resolve(
+const MICRO_RETURN_TIER_SEED_SQL_PATH = resolve(
   __dirname,
-  '../prisma/reference-seed/20260625120000_micro_export_return_fee_tiers.sql',
+  '../prisma/reference-seed/20261121090100_micro_export_return_fee_tier_versions.sql',
 );
 
 const EXPECTED_CARRIER_COUNT = 10;
-const SEED_SECTION_MARKER = '-- ─── Seed: shipping_carriers';
-const MICRO_RETURN_TIER_SEED_MARKER = '-- ─── Seed: micro_export_return_fee_tiers';
+// The start instant the micro-export seed gives its tier version (the SQL's
+// TIMESTAMP '2024-07-15 21:00:00', stored in UTC).
+const CANONICAL_MICRO_RETURN_TIER_VERSION_START = new Date('2024-07-15T21:00:00Z');
+const SEED_SECTION_MARKER = '-- ─── Seed: shipping_tariff_versions';
+const MICRO_RETURN_TIER_SEED_MARKER = '-- ─── Seed: micro_export_return_fee_tier_versions';
 
 let cachedSeedSql: string | null = null;
 let cachedMicroReturnTierSeedSql: string | null = null;
 
 function loadSeedSql(): string {
   if (cachedSeedSql !== null) return cachedSeedSql;
-  const full = readFileSync(MIGRATION_SQL_PATH, 'utf-8');
+  const full = readFileSync(SHIPPING_SEED_SQL_PATH, 'utf-8');
   const seedStart = full.indexOf(SEED_SECTION_MARKER);
   if (seedStart === -1) {
     throw new Error(
-      `Could not find shipping seed section ("${SEED_SECTION_MARKER}") in ${MIGRATION_SQL_PATH}. ` +
-        'If the migration was renamed or restructured, update MIGRATION_SQL_PATH / SEED_SECTION_MARKER here.',
+      `Could not find shipping seed section ("${SEED_SECTION_MARKER}") in ${SHIPPING_SEED_SQL_PATH}. ` +
+        'If the seed file was renamed or restructured, update SHIPPING_SEED_SQL_PATH / SEED_SECTION_MARKER here.',
     );
   }
   cachedSeedSql = full.substring(seedStart);
@@ -64,12 +70,12 @@ function loadSeedSql(): string {
 
 function loadMicroReturnTierSeedSql(): string {
   if (cachedMicroReturnTierSeedSql !== null) return cachedMicroReturnTierSeedSql;
-  const full = readFileSync(MICRO_RETURN_TIER_MIGRATION_SQL_PATH, 'utf-8');
+  const full = readFileSync(MICRO_RETURN_TIER_SEED_SQL_PATH, 'utf-8');
   const seedStart = full.indexOf(MICRO_RETURN_TIER_SEED_MARKER);
   if (seedStart === -1) {
     throw new Error(
       `Could not find micro-export return tier seed section ("${MICRO_RETURN_TIER_SEED_MARKER}") ` +
-        `in ${MICRO_RETURN_TIER_MIGRATION_SQL_PATH}.`,
+        `in ${MICRO_RETURN_TIER_SEED_SQL_PATH}.`,
     );
   }
   cachedMicroReturnTierSeedSql = full.substring(seedStart);
@@ -77,54 +83,89 @@ function loadMicroReturnTierSeedSql(): string {
 }
 
 /**
- * Seeds the micro-export "Yurt Dışı İade Operasyon Bedeli" tier rows from the
- * migration's seed section (single source of truth). Global reference fixture
- * (not tenant data); truncateAll() never touches it. Idempotent (ON CONFLICT
- * DO NOTHING in the SQL); seeds only when the table is empty.
+ * Seeds the micro-export "Yurt Disi Iade Operasyon Bedeli" tier version and its
+ * tiers from the seed file's marked section (single source of truth). Global
+ * reference fixture (not tenant data); truncateAll() never touches it.
+ *   - the canonical version (CANONICAL_MICRO_RETURN_TIER_VERSION_START) exists →
+ *     no-op;
+ *   - the version table is empty → run the seed;
+ *   - otherwise only stray (test-created) versions exist → throw, naming their
+ *     start instants: the seed writes nothing while any version exists, so the
+ *     canonical set could never come back and the baseline would be silently wrong.
  */
 export async function ensureMicroExportReturnTiers(): Promise<void> {
-  const count = await prisma.microExportReturnFeeTier.count();
-  if (count > 0) return;
-  await prisma.$executeRawUnsafe(loadMicroReturnTierSeedSql());
+  const canonical = await prisma.microExportReturnFeeTierVersion.findUnique({
+    where: { effectiveFrom: CANONICAL_MICRO_RETURN_TIER_VERSION_START },
+    select: { id: true },
+  });
+  if (canonical !== null) return;
+
+  const strays = await prisma.microExportReturnFeeTierVersion.findMany({
+    select: { effectiveFrom: true },
+    orderBy: { effectiveFrom: 'asc' },
+  });
+  if (strays.length === 0) {
+    await prisma.$executeRawUnsafe(loadMicroReturnTierSeedSql());
+    return;
+  }
+
+  const starts = strays.map((row) => row.effectiveFrom.toISOString()).join(', ');
+  throw new Error(
+    'micro_export_return_fee_tier_versions has no canonical version starting ' +
+      `${CANONICAL_MICRO_RETURN_TIER_VERSION_START.toISOString()}, only stray versions ` +
+      `starting ${starts}. The reference seed writes nothing while any version exists; ` +
+      'delete the stray versions (their tiers cascade) and re-run.',
+  );
 }
 
 /**
- * Brings the shipping reference catalogue to the EXACT migration baseline:
- *   - clean (exactly 10 carriers, none test-created) → fast no-op;
- *   - dirty (a stray `TEST%` carrier left by another suite, or an empty
- *     catalogue) → prune the strays, then seed the canonical rows if missing.
+ * Brings the shipping reference catalogue to the EXACT seed baseline:
+ *   - clean (exactly 10 carriers, none test-created, every one with a tariff
+ *     version) → fast no-op;
+ *   - dirty (a stray `TEST%` carrier left by another suite, an empty catalogue,
+ *     or a canonical carrier with no version) → prune the strays, then run the
+ *     seed for whatever is missing.
  *
  * This is the structural guard behind `list-carriers`' "exactly 10" assertion:
  * leakage from any source can no longer poison the count. Idempotent.
  */
 export async function ensureShippingReferenceData(): Promise<void> {
-  const [total, strays] = await Promise.all([
+  const [total, strays, versionless] = await Promise.all([
     prisma.shippingCarrier.count(),
     prisma.shippingCarrier.count({ where: { code: { startsWith: 'TEST' } } }),
+    countVersionlessCanonicalCarriers(),
   ]);
 
-  // Clean baseline (exactly the seeded carriers, no test strays) → no-op.
-  if (total === EXPECTED_CARRIER_COUNT && strays === 0) return;
+  // Clean baseline (exactly the seeded carriers, no test strays, each with a
+  // version) → nothing to do.
+  if (total === EXPECTED_CARRIER_COUNT && strays === 0 && versionless === 0) return;
 
-  // Prune test-created strays. Their desi/Barem tariffs cascade (FK
-  // onDelete: Cascade) and any store pointing at one resolves via
-  // ON DELETE SET NULL, so DELETE (not TRUNCATE) never cascade-wipes
-  // tenant rows. Only the canonical carriers survive.
+  // Prune test-created strays. Their tariff versions, and through them the
+  // versions' desi/Barem rows, cascade (FK onDelete: Cascade), and any store
+  // pointing at one resolves via ON DELETE SET NULL, so DELETE (not TRUNCATE)
+  // never cascade-wipes tenant rows. Only the canonical carriers survive.
   if (strays > 0) {
     await prisma.$executeRawUnsafe(`DELETE FROM shipping_carriers WHERE code LIKE 'TEST%'`);
   }
 
-  // Seed the canonical catalogue if it is missing. The migration's seed
-  // section contains three statements (carriers, desi tariffs via WITH+JOIN,
-  // Barem tariffs via WITH+JOIN). pg accepts semicolon-separated
-  // multi-statement input through executeRawUnsafe; statements run in order so
-  // the desi/Barem JOINs see the just-inserted carrier rows. Canonical
-  // carriers are never deleted individually, so the count here is either 0
-  // (seed) or already EXPECTED_CARRIER_COUNT (skip) — never partial.
+  // Seed whatever is missing: a carrier, or a canonical carrier's version. The
+  // seed section contains four statements (carriers, one version per carrier
+  // that has none, desi rows and Barem rows, the last three joined to the rows
+  // before them). pg accepts semicolon-separated multi-statement input through
+  // executeRawUnsafe; statements run in order so each JOIN sees the rows just
+  // inserted. Every statement skips what already exists, so a partial catalogue
+  // is completed and a complete one is left untouched.
   const canonical = await prisma.shippingCarrier.count();
-  if (canonical < EXPECTED_CARRIER_COUNT) {
+  if (canonical < EXPECTED_CARRIER_COUNT || versionless > 0) {
     await prisma.$executeRawUnsafe(loadSeedSql());
   }
+}
+
+/** Canonical (non-`TEST%`) carriers with no tariff version at all. */
+function countVersionlessCanonicalCarriers(): Promise<number> {
+  return prisma.shippingCarrier.count({
+    where: { NOT: { code: { startsWith: 'TEST' } }, tariffVersions: { none: {} } },
+  });
 }
 
 /**

@@ -8,7 +8,9 @@
  * the two implementations agree on every documented outcome state and on the
  * Barem eligibility rule (deliveryDuration only, see `hasFastDeliverySetup`).
  *
- * Parameters: $1 = organizationId, $2 = storeId
+ * Parameters: $1 = organizationId, $2 = storeId, $3 = at (an ISO-8601 instant,
+ * `at.toISOString()`; the store's default carrier is priced with its tariff
+ * version in force at this instant, the latest effective_from <= $3)
  *
  * Returned row shape:
  *   { id, estimated_shipping_net, shipping_tariff_applied,
@@ -21,8 +23,16 @@
  * the products list endpoint is always store-scoped, so constraining at
  * the CTE level avoids scanning every variant in the org. The query plan
  * is dominated by the `(organization_id, store_id)` filter (indexed) plus
- * three LATERAL lookups against shipping_*_tariffs tables (all indexed by
- * (carrier_id, desi) / (carrier_id, min_order_amount, max_order_amount)).
+ * four LATERAL lookups: the tariff version in force (unique index
+ * (carrier_id, effective_from), read backwards with LIMIT 1), then the own,
+ * Barem and desi rows (unique indexes (store_id, desi) /
+ * (version_id, min_order_amount, max_order_amount) / (version_id, desi)).
+ * The version table is global reference data and carries no tenant column;
+ * the tenant scope stays on $1 / $2. A carrier with no version in force has a
+ * NULL version_id, so neither Barem nor desi resolves and the status falls
+ * through to DESI_OVERFLOW; NO_CARRIER is only a missing default carrier.
+ * Barem parity: when several bands of the version contain the price, the Barem
+ * lookup takes the one with the lowest min_order_amount, as the service does.
  *
  * CASE branch ordering for `shipping_estimate_status` mirrors the service:
  *   1. NO_CARRIER  (TRENDYOL_CONTRACT + null carrier) — service line 124
@@ -43,12 +53,24 @@ WITH variant_with_carrier AS (
   SELECT pv.id, pv.store_id, pv.sale_price, pv.delivery_duration,
          pv.dimensional_weight_override, pv.synced_dimensional_weight,
          s.shipping_tariff_source, s.default_shipping_carrier_id,
-         sc.code AS carrier_code, sc.supports_barem_destek, sc.max_barem_desi,
-         sc.max_barem_eligible_delivery_duration,
+         sc.code AS carrier_code,
+         stv.id AS version_id, stv.supports_barem_destek, stv.max_barem_desi,
+         stv.max_barem_eligible_delivery_duration,
          COALESCE(pv.dimensional_weight_override, pv.synced_dimensional_weight) AS eff_desi
   FROM product_variants pv
   JOIN stores s ON s.id = pv.store_id
   LEFT JOIN shipping_carriers sc ON sc.id = s.default_shipping_carrier_id
+  -- The default carrier's tariff version in force at $3. effective_from is a
+  -- timestamp without time zone that holds a UTC instant, so AT TIME ZONE 'UTC'
+  -- only normalises $3 to that form; it is not a business-day computation.
+  LEFT JOIN LATERAL (
+    SELECT id, supports_barem_destek, max_barem_desi, max_barem_eligible_delivery_duration
+      FROM shipping_tariff_versions
+     WHERE carrier_id = s.default_shipping_carrier_id
+       AND effective_from <= ($3::timestamptz AT TIME ZONE 'UTC')
+     ORDER BY effective_from DESC
+     LIMIT 1
+  ) stv ON true
   WHERE pv.organization_id = $1::uuid
     AND pv.store_id = $2::uuid
 ),
@@ -95,7 +117,7 @@ estimates AS (
   ) own_tariff ON vwc.shipping_tariff_source = 'OWN_CONTRACT'
   LEFT JOIN LATERAL (
     SELECT sbt.price_net FROM shipping_barem_tariffs sbt
-     WHERE sbt.carrier_id = vwc.default_shipping_carrier_id
+     WHERE sbt.version_id = vwc.version_id
        AND vwc.supports_barem_destek = true
        AND vwc.eff_desi <= vwc.max_barem_desi
        -- Fast-delivery eligibility mirrors hasFastDeliverySetup: deliveryDuration only.
@@ -103,11 +125,14 @@ estimates AS (
        AND vwc.delivery_duration <= vwc.max_barem_eligible_delivery_duration
        AND vwc.sale_price >= sbt.min_order_amount
        AND vwc.sale_price <= sbt.max_order_amount
+     -- Lowest lower bound first, like the service (the version's Barem rows come
+     -- ordered by min_order_amount), so both paths pick the same band if bands overlap.
+     ORDER BY sbt.min_order_amount ASC
      LIMIT 1
   ) barem ON vwc.shipping_tariff_source = 'TRENDYOL_CONTRACT'
   LEFT JOIN LATERAL (
     SELECT price_net FROM shipping_desi_tariffs
-     WHERE carrier_id = vwc.default_shipping_carrier_id AND desi = CEIL(vwc.eff_desi)::int
+     WHERE version_id = vwc.version_id AND desi = CEIL(vwc.eff_desi)::int
      LIMIT 1
   ) desi_tariff ON vwc.shipping_tariff_source = 'TRENDYOL_CONTRACT'
 )

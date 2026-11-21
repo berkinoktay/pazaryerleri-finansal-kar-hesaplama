@@ -22,12 +22,14 @@
 // `prisma/seed.ts` header for why we don't commit ~38 MB of panel BFF
 // captures). Refresh the snapshots, then re-run this script.
 //
-// Today this script loads:
+// Today this script loads, in order:
+//   - fee definitions
+//   - micro-export return fee tiers (one dated tier set)
+//   - shipping tariffs (carriers, one dated version per carrier, desi and Barem prices)
 //   - TRENDYOL commission rates (CATEGORY + CATEGORY_BRAND)
 //
-// Future buckets that fit here (FeeDefinition, ShippingTariff baremleri)
-// can register additional loaders below and stay behind the same entry
-// point.
+// Future buckets can register additional loaders below and stay behind the
+// same entry point.
 
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -301,32 +303,71 @@ async function seedFeeDefinitions(): Promise<void> {
   console.log(`✓ fee definitions: ${count.toString()} rows ensured`);
 }
 
-// Mikro ihracat "Yurt Dışı İade Operasyon Bedeli" kademe oranları. Aynı pattern:
-// migration'ın marked seed section'ı idempotent (ON CONFLICT DO NOTHING) replay edilir.
-const MICRO_RETURN_TIER_SEED_MIGRATION = path.resolve(
+// Micro-export "Yurt Disi Iade Operasyon Bedeli" tiers: one dated tier set and its
+// bands. Same pattern: the seed file's marked section is replayed idempotently
+// (ON CONFLICT DO NOTHING).
+const MICRO_RETURN_TIER_SEED_FILE = path.resolve(
   __dirname,
-  '../prisma/reference-seed/20260625120000_micro_export_return_fee_tiers.sql',
+  '../prisma/reference-seed/20261121090100_micro_export_return_fee_tier_versions.sql',
 );
-const MICRO_RETURN_TIER_SEED_MARKER = '-- ─── Seed: micro_export_return_fee_tiers';
+const MICRO_RETURN_TIER_SEED_MARKER = '-- ─── Seed: micro_export_return_fee_tier_versions';
 
 async function seedMicroExportReturnTiers(): Promise<void> {
-  const full = readFileSync(MICRO_RETURN_TIER_SEED_MIGRATION, 'utf-8');
+  const full = readFileSync(MICRO_RETURN_TIER_SEED_FILE, 'utf-8');
   const start = full.indexOf(MICRO_RETURN_TIER_SEED_MARKER);
   if (start === -1) {
     throw new Error(
       `Micro-export return tier seed section ("${MICRO_RETURN_TIER_SEED_MARKER}") not found in ` +
-        MICRO_RETURN_TIER_SEED_MIGRATION,
+        MICRO_RETURN_TIER_SEED_FILE,
     );
   }
   await prisma.$executeRawUnsafe(full.substring(start));
-  const count = await prisma.microExportReturnFeeTier.count();
-  console.log(`✓ micro-export return fee tiers: ${count.toString()} rows ensured`);
+  const [versions, tiers] = await Promise.all([
+    prisma.microExportReturnFeeTierVersion.count(),
+    prisma.microExportReturnFeeTier.count(),
+  ]);
+  console.log(
+    `✓ micro-export return fee tiers: ${versions.toString()} versions, ${tiers.toString()} tiers ensured`,
+  );
+}
+
+// Trendyol shipping catalogue: the carriers, one dated tariff version per carrier
+// and that version's desi and Barem prices. `db:push` never runs migration SQL, so
+// a fresh or reset DB has an empty catalogue; the seed file's marked section is
+// replayed idempotently (ON CONFLICT DO NOTHING) and adds nothing to a seeded DB.
+const SHIPPING_TARIFF_SEED_FILE = path.resolve(
+  __dirname,
+  '../prisma/reference-seed/20261121090000_shipping_tariff_versions.sql',
+);
+const SHIPPING_TARIFF_SEED_MARKER = '-- ─── Seed: shipping_tariff_versions';
+
+async function seedShippingTariffs(): Promise<void> {
+  const full = readFileSync(SHIPPING_TARIFF_SEED_FILE, 'utf-8');
+  const start = full.indexOf(SHIPPING_TARIFF_SEED_MARKER);
+  if (start === -1) {
+    throw new Error(
+      `Shipping tariff seed section ("${SHIPPING_TARIFF_SEED_MARKER}") not found in ` +
+        SHIPPING_TARIFF_SEED_FILE,
+    );
+  }
+  await prisma.$executeRawUnsafe(full.substring(start));
+  const [carriers, versions, desiRows, baremRows] = await Promise.all([
+    prisma.shippingCarrier.count(),
+    prisma.shippingTariffVersion.count(),
+    prisma.shippingDesiTariff.count(),
+    prisma.shippingBaremTariff.count(),
+  ]);
+  console.log(
+    `✓ shipping tariffs: ${carriers.toString()} carriers, ${versions.toString()} versions, ` +
+      `${desiRows.toString()} desi rows, ${baremRows.toString()} Barem rows ensured`,
+  );
 }
 
 async function main(): Promise<void> {
   console.log('Loading reference data — safe to re-run on a populated DB.\n');
   await seedFeeDefinitions();
   await seedMicroExportReturnTiers();
+  await seedShippingTariffs();
   await seedTrendyolCommissionRates();
   console.log('\n✓ Reference seed complete.');
 }

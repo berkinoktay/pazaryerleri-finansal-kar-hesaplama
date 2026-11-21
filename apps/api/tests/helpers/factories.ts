@@ -638,3 +638,76 @@ export async function createProfitLine(
     },
   });
 }
+
+/** Code prefix of a test-created carrier; `ensureShippingReferenceData` prunes `TEST%` strays. */
+const TEST_CARRIER_CODE_PREFIX = 'TEST_';
+
+/** Barem delivery window a test tariff version gets when the spec leaves it out. */
+const DEFAULT_TEST_BAREM_DELIVERY_DURATION = 1;
+
+/** One dated tariff version of a test carrier: its start, Barem attributes and rows. */
+export interface TestCarrierTariffVersionSpec {
+  effectiveFrom: Date;
+  supportsBaremDestek: boolean;
+  maxBaremDesi: number;
+  /** Defaults to 1 day. */
+  maxBaremEligibleDeliveryDuration?: number;
+  desiRows: readonly { desi: number; priceNet: string }[];
+  baremRows: readonly { minOrderAmount: string; maxOrderAmount: string; priceNet: string }[];
+}
+
+export interface CreateTestCarrierWithVersionsSpec {
+  /** Must start with `TEST_`, so the carrier never collides with a seeded one. */
+  code: string;
+  externalId: number;
+  /** Defaults to the code. */
+  displayName?: string;
+  orderCargoNames?: readonly string[];
+  versions: readonly TestCarrierTariffVersionSpec[];
+}
+
+/**
+ * Creates a TRENDYOL test carrier with one dated tariff version per spec entry,
+ * each with its own desi and Barem rows, in a single nested write. Returns the
+ * carrier id. The shipping reference tables are never truncated, so the caller
+ * deletes the carrier when done (its versions and rows cascade).
+ */
+export async function createTestCarrierWithVersions(
+  spec: CreateTestCarrierWithVersionsSpec,
+): Promise<string> {
+  if (!spec.code.startsWith(TEST_CARRIER_CODE_PREFIX)) {
+    throw new Error(
+      `Test carrier code must start with ${TEST_CARRIER_CODE_PREFIX}, got ${spec.code}`,
+    );
+  }
+  const carrier = await prisma.shippingCarrier.create({
+    data: {
+      platform: 'TRENDYOL',
+      externalId: spec.externalId,
+      code: spec.code,
+      displayName: spec.displayName ?? spec.code,
+      orderCargoNames: [...(spec.orderCargoNames ?? [])],
+      tariffVersions: {
+        create: spec.versions.map((version) => ({
+          effectiveFrom: version.effectiveFrom,
+          supportsBaremDestek: version.supportsBaremDestek,
+          maxBaremDesi: version.maxBaremDesi,
+          maxBaremEligibleDeliveryDuration:
+            version.maxBaremEligibleDeliveryDuration ?? DEFAULT_TEST_BAREM_DELIVERY_DURATION,
+          desiTariffs: {
+            create: version.desiRows.map((row) => ({ desi: row.desi, priceNet: row.priceNet })),
+          },
+          baremTariffs: {
+            create: version.baremRows.map((row) => ({
+              minOrderAmount: row.minOrderAmount,
+              maxOrderAmount: row.maxOrderAmount,
+              priceNet: row.priceNet,
+            })),
+          },
+        })),
+      },
+    },
+    select: { id: true },
+  });
+  return carrier.id;
+}
