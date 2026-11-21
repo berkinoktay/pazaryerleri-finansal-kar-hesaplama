@@ -1844,8 +1844,8 @@ model FeeDefinition {
 // İadeye dönen mikro ihracat ürününde hakediş (KDV-dahil satış − komisyon) üzerinden
 // kademeli oran kesilir: ürünün KDV-dahil satış fiyatı ≤2000₺ → %35, >2000₺ → %30
 // (Trendyol 16.07.2024 duyurusu). Oran/eşik DB'de (Trendyol değişirse SQL UPDATE).
-// ShippingBaremTariff deseni (min/max tutar aralığı; başlangıç tarihi sürümde:
-// MicroExportReturnFeeTierVersion). Global referans:
+// Follows the ShippingBaremTariff pattern (min/max amount band; the start date is on
+// the version, MicroExportReturnFeeTierVersion). Global reference:
 // her satıcı aynı satırları okur; RLS authenticated SELECT açık (USING true), yazım
 // postgres rolünde. truncateAll() dokunmaz (tenant tablosu değil).
 model MicroExportReturnFeeTier {

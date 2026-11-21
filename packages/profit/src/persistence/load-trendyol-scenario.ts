@@ -10,12 +10,12 @@ import { type TrendyolReferenceData } from '../marketplaces/trendyol/trendyol-in
 import { loadShippingTariffVersion } from '../shipping/tariff-version';
 import { UnsupportedPlatformError } from './errors';
 import {
+  buildShippingTariff,
   dec,
   decOrNull,
   loadCommissionRulesForCategories,
   loadCostProfilesByVariant,
   loadFeeParams,
-  loadShippingTariff,
 } from './trendyol-reference-loaders';
 
 /**
@@ -60,24 +60,6 @@ interface StoreForScenario {
   readonly shippingTariffSource: TrendyolReferenceData['shipping']['source'];
   readonly profitSettings: Prisma.JsonValue;
   readonly defaultShippingCarrier: { readonly id: string; readonly code: string } | null;
-}
-
-/**
- * The Barem delivery window (days) of the store's default carrier on the scenario
- * date, taken from the carrier's tariff version in force then. Read once per store,
- * so the query count stays independent of the variant count. No carrier or no
- * version in force -> null, which makes no variant Barem-eligible.
- */
-async function loadCarrierMaxBaremDurationDays(
-  tx: Prisma.TransactionClient,
-  carrier: StoreForScenario['defaultShippingCarrier'],
-  scenarioDate: Date,
-): Promise<number | null> {
-  if (carrier === null) {
-    return null;
-  }
-  const version = await loadShippingTariffVersion(tx, { carrierId: carrier.id, at: scenarioDate });
-  return version?.maxBaremEligibleDeliveryDuration ?? null;
 }
 
 /** Builds one variant's scenario base from the pre-loaded, store-wide reference data. */
@@ -194,17 +176,22 @@ export async function loadTrendyolScenarioBases(
     isExport: false,
     fastDeliveryType: null,
   });
-  const shipping = await loadShippingTariff(tx, {
+  // The default carrier's tariff version in force on the scenario date, read once:
+  // the desi/Barem prices and the Barem delivery window both come from this one
+  // version, so they can never mix two versions. No carrier or no version in force
+  // -> no Barem window, which makes no variant Barem-eligible.
+  const carrier: StoreForScenario['defaultShippingCarrier'] = store.defaultShippingCarrier;
+  const version =
+    carrier === null
+      ? null
+      : await loadShippingTariffVersion(tx, { carrierId: carrier.id, at: scenarioDate });
+  const shipping = await buildShippingTariff(tx, {
     storeId,
     source: store.shippingTariffSource,
-    carrier: store.defaultShippingCarrier,
-    at: scenarioDate,
+    carrier,
+    version,
   });
-  const carrierMaxBaremDurationDays = await loadCarrierMaxBaremDurationDays(
-    tx,
-    store.defaultShippingCarrier,
-    scenarioDate,
-  );
+  const carrierMaxBaremDurationDays = version?.maxBaremEligibleDeliveryDuration ?? null;
   const commission = await loadCommissionRulesForCategories(tx, {
     categoryIds: foundVariants
       .map((variant) => variant.product.categoryId)

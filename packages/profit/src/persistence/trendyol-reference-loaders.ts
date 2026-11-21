@@ -32,7 +32,10 @@ import {
   resolveFeeDefinition,
   type FeeDefinitionAmountField,
 } from '../resolve-fee-definition';
-import { loadShippingTariffVersion } from '../shipping/tariff-version';
+import {
+  loadShippingTariffVersion,
+  type ShippingTariffVersionRows,
+} from '../shipping/tariff-version';
 
 const ZERO = new Decimal(0);
 const PERCENT = new Decimal(100);
@@ -279,6 +282,7 @@ async function loadOverseasReturnTiers(
 /**
  * The shipping tariff mirror of resolve-tariff.ts: the carrier's tariff version in
  * force at `at` (desi prices, Barem bands, Barem attributes) and the store's own rows.
+ * Loads the version, then builds the tariff from it (`buildShippingTariff`).
  */
 export async function loadShippingTariff(
   tx: Prisma.TransactionClient,
@@ -294,6 +298,38 @@ export async function loadShippingTariff(
   },
 ): Promise<TrendyolShippingTariff> {
   const { storeId, source, carrier, at } = params;
+  const version =
+    carrier === null ? null : await loadShippingTariffVersion(tx, { carrierId: carrier.id, at });
+  return buildShippingTariff(tx, {
+    storeId,
+    source,
+    carrier,
+    version,
+    orderCarrierOutcome: params.orderCarrierOutcome,
+  });
+}
+
+/**
+ * Builds the shipping tariff from an already loaded carrier tariff version and the
+ * store's own rows (read here). A caller that also needs the version's Barem window
+ * loads the version once and passes the same object to both, so the prices and the
+ * window always come from one version.
+ */
+export async function buildShippingTariff(
+  tx: Prisma.TransactionClient,
+  params: {
+    readonly storeId: string;
+    readonly source: TrendyolShippingTariff['source'];
+    readonly carrier: { readonly code: string } | null;
+    // The carrier's version in force at the relevant instant; null when there is no
+    // carrier or no version in force.
+    readonly version: ShippingTariffVersionRows | null;
+    // How the order's carrier resolved; omitted (null) for the scenario / store-default
+    // context, where the carrier field alone decides.
+    readonly orderCarrierOutcome?: TrendyolOrderCarrierOutcome | null;
+  },
+): Promise<TrendyolShippingTariff> {
+  const { storeId, source, carrier, version } = params;
   const orderCarrierOutcome = params.orderCarrierOutcome ?? null;
 
   let carrierInput: TrendyolShippingCarrier | null = null;
@@ -301,11 +337,10 @@ export async function loadShippingTariff(
   let baremBands: TrendyolBaremBand[] = [];
 
   if (carrier !== null) {
-    // The carrier's version in force at `at`. With none (no tariff entered yet, or a
-    // date before its first version) the carrier offers no Barem and its tariffs stay
-    // empty, so a Trendyol-contract estimate is unavailable (DESI_OVERFLOW) instead of
-    // a silent 0 TL.
-    const version = await loadShippingTariffVersion(tx, { carrierId: carrier.id, at });
+    // With no version in force (no tariff entered yet, or a date before its first
+    // version) the carrier offers no Barem and its tariffs stay empty, so a
+    // Trendyol-contract estimate is unavailable (DESI_OVERFLOW) instead of a silent
+    // 0 TL.
     carrierInput = {
       code: carrier.code,
       supportsBarem: version !== null && version.supportsBaremDestek,

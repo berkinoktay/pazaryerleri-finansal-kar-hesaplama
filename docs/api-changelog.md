@@ -26,6 +26,18 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Shipping tariffs are read from the dated version in force**
+  (`GET /v1/organizations/{orgId}/shipping-carriers`,
+  `GET /v1/organizations/{orgId}/shipping-carriers/{carrierId}/tariffs`,
+  `GET`/`PATCH /v1/organizations/{orgId}/stores/{storeId}/shipping-config`, and the per-variant
+  shipping estimate on the products list). A carrier's desi prices, Barem bands and Barem
+  attributes now live in dated tariff versions; each version applies from its start until the
+  next one starts. These routes answer with the version in force at request time: a
+  future-dated version stays invisible until it starts. `supportsBaremDestek` and `maxBaremDesi`
+  come from that version, and are `false` and `0` when the carrier has no version in force; the
+  tariffs route then returns empty `desiTariffs` and `baremTariffs`, and the products-list estimate
+  reports `DESI_OVERFLOW`. The wire shape is unchanged. Order profit uses the version in force at
+  the order date instead (no route change).
 - **Workbook uploads: a full commission tariff file as exported now fits the upload gate**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products|advantage-tariffs|plus-commission-tariffs|commission-tariffs}/import`).
   A commission tariff file with three periods used to answer `422 VALIDATION_ERROR` with

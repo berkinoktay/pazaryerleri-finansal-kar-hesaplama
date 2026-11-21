@@ -52,8 +52,9 @@ describe('RLS — shipping global reference tables', () => {
   });
 
   beforeEach(async () => {
-    // Tenant tables only. The three global tables are NOT truncated; their
-    // migration-seeded rows (e.g. SENDEOMP carrier) must remain visible.
+    // Tenant tables only. The shipping reference tables are NOT truncated; their
+    // rows, written by the reference seed files (e.g. the SENDEOMP carrier), must
+    // remain visible.
     await truncateAll();
   });
 
@@ -72,7 +73,7 @@ describe('RLS — shipping global reference tables', () => {
 
       expect(error).toBeNull();
       expect(data).not.toBeNull();
-      // Migration seeded at least one row in every global table.
+      // The reference seed wrote at least one row in every global table.
       expect(data?.length ?? 0).toBeGreaterThan(0);
     });
   }

@@ -6,14 +6,18 @@
 -- file from the marker line below to the end. The tables come from the Prisma
 -- schema (migrations, or db push on the test DB); this file only writes rows.
 -- Every statement is idempotent (ON CONFLICT DO NOTHING), so a re-run on a seeded
--- database adds nothing.
+-- database adds nothing. A carrier's 2000-01-01 version is written only while the
+-- carrier has no version at all, so a re-run never brings back a version an admin
+-- replaced or removed; the desi/Barem rows join to that version, so none are
+-- written where it no longer exists.
 --
 -- Replaces 20260517085409_shipping_tariffs.sql, the pre-versioning layout. The
 -- carrier list, the Barem attributes and the desi/Barem prices are copied from it
 -- unchanged; order_cargo_names comes from migration
 -- 20261105094822_shipping_carrier_order_cargo_names. Each carrier's first version
 -- starts 2000-01-01 00:00 UTC, open towards the past so historic orders keep a
--- tariff. Turkish letters are written as U&'...' escapes so the file stays ASCII.
+-- tariff. Turkish letters are written as U&'...' escapes so the file stays ASCII
+-- apart from the marker line below.
 
 -- ─── Seed: shipping_tariff_versions
 -- Carriers: the Trendyol getProviders list. order_cargo_names holds the exact
@@ -34,7 +38,8 @@ ON CONFLICT (platform, code) DO NOTHING;
 
 -- Versions: one per carrier, starting 2000-01-01 00:00 UTC, carrying the carrier's
 -- Barem attributes (Barem Destek support, the largest Barem desi, the longest
--- delivery duration in days that still qualifies for Barem).
+-- delivery duration in days that still qualifies for Barem). Written only for a
+-- carrier with no version yet (NOT EXISTS), so an admin's versions are kept.
 INSERT INTO "shipping_tariff_versions" (id, carrier_id, effective_from, supports_barem_destek, max_barem_desi, max_barem_eligible_delivery_duration, created_at, updated_at)
 SELECT gen_random_uuid(), c.id, TIMESTAMP '2000-01-01 00:00:00', vd.supports_barem_destek, vd.max_barem_desi, vd.max_barem_eligible_delivery_duration, now(), now()
 FROM (
@@ -51,6 +56,7 @@ FROM (
     ('CEVATEDARIK', false, 10, 1)
 ) AS vd (carrier_code, supports_barem_destek, max_barem_desi, max_barem_eligible_delivery_duration)
 JOIN "shipping_carriers" c ON c.platform = 'TRENDYOL' AND c.code = vd.carrier_code
+WHERE NOT EXISTS (SELECT 1 FROM "shipping_tariff_versions" v WHERE v.carrier_id = c.id)
 ON CONFLICT (carrier_id, effective_from) DO NOTHING;
 
 -- Desi prices: Trendyol contracted cargo prices (15 April 2026, TRY, VAT excluded).

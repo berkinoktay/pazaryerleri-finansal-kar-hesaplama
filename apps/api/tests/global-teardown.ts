@@ -43,8 +43,8 @@ async function restoreReferenceData(): Promise<void> {
  *   20261121090000_shipping_tariff_versions have to be applied here. Tests
  *   that depend on the global tariff catalog (every
  *   shipping integration test) would otherwise fail with "expected
- *   length 10 but got 0" in CI. The helper is idempotent — local devs
- *   who already ran `prisma migrate dev` see a fast no-op.
+ *   length 10 but got 0" in CI. The helper is idempotent — a test DB that
+ *   already holds the seeded catalogue is a fast no-op.
  *
  * TEARDOWN half (clean-by-default):
  *   The main integration suite is remapped at the ISOLATED test DB (see

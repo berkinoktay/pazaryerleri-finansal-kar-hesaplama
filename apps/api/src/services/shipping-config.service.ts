@@ -33,7 +33,7 @@ import type {
   Store,
 } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
-import { enqueueProfitRecomputeForStore } from '@pazarsync/profit';
+import { enqueueProfitRecomputeForStore, loadShippingTariffVersion } from '@pazarsync/profit';
 
 import { NotFoundError, ShippingCarrierPlatformMismatchError } from '../lib/errors';
 import type {
@@ -214,21 +214,19 @@ export async function getCarrierTariffs(
   });
   if (!carrier) throw new NotFoundError('ShippingCarrier', carrierId);
 
-  const version = carrier.tariffVersions.at(0);
-  if (version === undefined) return { carrier, desiTariffs: [], baremTariffs: [] };
+  // The rows come from the engine's own "version in force" read (desi ascending,
+  // Barem lower bound ascending), at the instant the carrier read above used.
+  // Sequential with that read: this runs on a transaction client.
+  const version = await loadShippingTariffVersion(tx, { carrierId, at: now });
+  if (version === null) return { carrier, desiTariffs: [], baremTariffs: [] };
 
-  const [desiTariffs, baremTariffs] = await Promise.all([
-    tx.shippingDesiTariff.findMany({
-      where: { versionId: version.id },
-      orderBy: { desi: 'asc' },
-      select: { desi: true, priceNet: true },
-    }),
-    tx.shippingBaremTariff.findMany({
-      where: { versionId: version.id },
-      orderBy: { minOrderAmount: 'asc' },
-      select: { minOrderAmount: true, maxOrderAmount: true, priceNet: true },
-    }),
-  ]);
-
-  return { carrier, desiTariffs, baremTariffs };
+  return {
+    carrier,
+    desiTariffs: version.desiRows.map((row) => ({ desi: row.desi, priceNet: row.priceNet })),
+    baremTariffs: version.baremRows.map((row) => ({
+      minOrderAmount: row.minOrderAmount,
+      maxOrderAmount: row.maxOrderAmount,
+      priceNet: row.priceNet,
+    })),
+  };
 }
