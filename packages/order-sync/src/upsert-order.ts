@@ -113,7 +113,9 @@ export async function upsertOrderWithSnapshot(
       where: {
         storeId_platformOrderId: { storeId, platformOrderId: order.platformOrderId },
       },
-      select: { platformLastModifiedAt: true },
+      // actualShipDate: read so a ship date that arrives with an unchanged
+      // lastModifiedDate still enqueues a recompute (see step 4 below).
+      select: { platformLastModifiedAt: true, actualShipDate: true },
     });
     // Normalize a corrupt lastModifiedDate (e.g. a malformed string from a
     // replayed JSONB snapshot) to null: an Invalid Date must neither drive the
@@ -121,6 +123,12 @@ export async function upsertOrderWithSnapshot(
     // abort the whole order persist at the Prisma layer.
     const parsedLmd = order.lastModifiedDate != null ? new Date(order.lastModifiedDate) : null;
     const incomingLmd = parsedLmd !== null && Number.isNaN(parsedLmd.getTime()) ? null : parsedLmd;
+    // The same normalization for the ship date (the first Shipped history entry): the
+    // buffer JSONB replay can carry it as a string or leave it undefined, and an
+    // Invalid Date must neither be written nor count as a ship date change below.
+    const parsedShipDate = order.actualShipDate != null ? new Date(order.actualShipDate) : null;
+    const incomingShipDate =
+      parsedShipDate !== null && Number.isNaN(parsedShipDate.getTime()) ? null : parsedShipDate;
     if (
       existingOrder !== null &&
       existingOrder.platformLastModifiedAt !== null &&
@@ -213,8 +221,8 @@ export async function upsertOrderWithSnapshot(
         // UNDEFINED olabilir → ?? null (diğer yeni alanlarla aynı koruma).
         deliveredOnTime: order.deliveredOnTime ?? null,
         // actualShipDate: Shipped event'i (taşıma durumuna geçiş). Buffer JSONB'sinden
-        // string/undefined gelebilir → != null + new Date() ile sarılır.
-        actualShipDate: order.actualShipDate != null ? new Date(order.actualShipDate) : null,
+        // string/undefined gelebilir; geçersiz tarih null sayılır (yukarıdaki incomingShipDate).
+        actualShipDate: incomingShipDate,
         // Tahmini teslim penceresi (PROD'da dolu). Buffer JSONB'sinden string
         // gelebilir → new Date() ile sarılır (originShipmentDate ile aynı koruma).
         estimatedDeliveryStartDate:
@@ -271,7 +279,7 @@ export async function upsertOrderWithSnapshot(
           deliveredOnTime: order.deliveredOnTime ?? null,
         }),
         // actualShipDate: Shipped event'i sonraki sync'te gelir → null→non-null tazele.
-        ...(order.actualShipDate != null && { actualShipDate: new Date(order.actualShipDate) }),
+        ...(incomingShipDate !== null && { actualShipDate: incomingShipDate }),
         // Kargo alanları null-koruma ile tazelenir: cargoDeci kargo ölçümünden
         // SONRA dolar, tracking no nadiren rotasyonla değişir — dolu gelen değer
         // yazılır, null/undefined gelen mevcut dolu değeri EZMEZ (eski/webhook
@@ -487,12 +495,25 @@ export async function upsertOrderWithSnapshot(
     //    record -- the recompute it triggers reads the already-stored record. Do NOT remove
     //    it or gate the create path on the order's content changing; the create always
     //    enqueues (sameLastModified is false when existingOrder is null).
+    //
+    //    Exception to the skip (plan PR-2b, decision 9): an UPDATE whose ship date is new
+    //    (stored null) or a different instant still enqueues, even with an equal
+    //    lastModifiedDate. The Barem table depends on the moment the parcel was handed to
+    //    the carrier, and Trendyol can add that first Shipped entry without moving
+    //    lastModifiedDate -- without this, a promised order shipped late would keep its
+    //    optimistic table 1 figure. An incoming null or invalid ship date is never a
+    //    change: the update branch above does not write it either.
     const sameLastModified =
       existingOrder !== null &&
       existingOrder.platformLastModifiedAt !== null &&
       incomingLmd !== null &&
       incomingLmd.getTime() === existingOrder.platformLastModifiedAt.getTime();
-    if (!sameLastModified) {
+    const shipDateChanged =
+      existingOrder !== null &&
+      incomingShipDate !== null &&
+      (existingOrder.actualShipDate === null ||
+        existingOrder.actualShipDate.getTime() !== incomingShipDate.getTime());
+    if (!sameLastModified || shipDateChanged) {
       await enqueueProfitRecompute(tx, {
         organizationId,
         storeId,
