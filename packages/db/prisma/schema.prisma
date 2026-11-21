@@ -757,7 +757,8 @@ model Order {
   // is still null and the name is now recognised (gap fill). The tariff source never
   // changes once written. Dated shared values (tariff versions, fee definitions,
   // micro-export tiers) are not copied; they keep being read by the order date.
-  // profitSnapshotAt marks the capture; null = not captured yet.
+  // profitSnapshotAt marks the first capture; null = not captured yet. It never
+  // changes afterwards: a carrier re-recognition or gap fill does not move it.
   snapshotCarrierId            String?               @map("snapshot_carrier_id") @db.Uuid
   snapshotCargoProviderName    String?               @map("snapshot_cargo_provider_name")
   snapshotShippingTariffSource ShippingTariffSource? @map("snapshot_shipping_tariff_source")
@@ -899,10 +900,11 @@ model OrderItem {
   // columns (product_variants.synced_dimensional_weight, products.category_id and
   // brand_id, product_variants.synced_commission_rate, marketplace_commission_rate
   // .base_rate).
-  // The only event that changes them: the item's productVariantId differs from
-  // snapshotProductVariantId (e.g. the barcode was matched to a variant later); the
-  // whole item is captured again. An item without a variant is captured with these
-  // inputs empty.
+  // The only event that changes them: the item's productVariantId is set and differs
+  // from snapshotProductVariantId (e.g. the barcode was matched to a variant later);
+  // the whole item is captured again. A variant that drops to null (deleted from the
+  // catalogue) leaves the captured values as they are. An item without a variant is
+  // captured with these inputs empty.
   snapshotProductVariantId        String?             @map("snapshot_product_variant_id") @db.Uuid
   snapshotUnitDesi                Decimal?            @map("snapshot_unit_desi") @db.Decimal(6, 2)
   snapshotDesiSource              SnapshotDesiSource? @map("snapshot_desi_source")
@@ -916,8 +918,11 @@ model OrderItem {
   // No FK (an array column); cost profile versions are never deleted. Besides the
   // variant change above, an empty list is filled from a cost linked later (gap
   // fill); a filled list never changes. The cost deadline rule still applies.
+  // Stored in ascending id order.
   snapshotCostProfileVersionIds   String[]            @default([]) @map("snapshot_cost_profile_version_ids") @db.Uuid
-  // Marks the capture; null = not captured yet. Never changes once written.
+  // Marks the item's latest full capture; null = not captured yet. It moves only
+  // when the item is captured again after a variant change; a cost list gap fill
+  // does not move it.
   profitSnapshotAt                DateTime?           @map("profit_snapshot_at")
 
   claimItems             OrderClaimItem[]

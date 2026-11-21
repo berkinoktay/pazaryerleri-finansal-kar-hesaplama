@@ -44,6 +44,7 @@ export default defineConfig({
       'src/persistence/__tests__/finance-records.test.ts',
       'src/persistence/__tests__/trendyol-reference-loaders.test.ts',
       'src/persistence/__tests__/tariff-version.test.ts',
+      'src/persistence/__tests__/order-profit-snapshot.test.ts',
     ],
   },
 });

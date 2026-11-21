@@ -8,6 +8,7 @@ import {
   ShippingTariffSource,
 } from '@pazarsync/db/enums';
 
+import { compareText } from '../../core/compare-text';
 import {
   activeItems,
   type ParcelItemSnapshot,
@@ -67,17 +68,6 @@ interface ItemRecordAccumulator {
 interface RecordReference {
   readonly recordIds: string; // every contributing id, sorted as text, joined by ','
   readonly externalRecord: ExternalRecordRef; // the first id + its transaction type
-}
-
-/** Lexicographic comparison; the single text order used for ids and cargo keys. */
-function compareText(a: string, b: string): number {
-  if (a < b) {
-    return -1;
-  }
-  if (a > b) {
-    return 1;
-  }
-  return 0;
 }
 
 function sumDecimals(values: readonly Decimal[]): Decimal {

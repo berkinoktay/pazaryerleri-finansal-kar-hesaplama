@@ -8,6 +8,7 @@ import {
   type ResolvedProfitSettings,
 } from '@pazarsync/utils';
 
+import { compareText } from '../core/compare-text';
 import { type AcceptedReturn, type ParcelItemSnapshot } from '../core/parcel-snapshot';
 import { type ProfitIssue } from '../core/profit-issue';
 import { type ItemCostInput } from '../core/seller-costs/build-seller-cost-lines';
@@ -52,13 +53,6 @@ export interface LoadedTrendyolParcel {
   readonly settings: ResolvedProfitSettings;
   readonly isExcluded: boolean;
   readonly loadIssues: readonly ProfitIssue[];
-}
-
-/** Lexicographic comparison, the single text order used for record ids. */
-function compareText(a: string, b: string): number {
-  if (a < b) return -1;
-  if (a > b) return 1;
-  return 0;
 }
 
 /** Orders finance rows by (transactionDate, recordId); null dates sort last. */
