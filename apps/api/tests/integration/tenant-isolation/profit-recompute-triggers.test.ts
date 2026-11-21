@@ -1,12 +1,14 @@
 /**
  * Multi-tenancy isolation for the profit-input triggers (Phase 3B, Task 8).
  *
- * Every input change (cost, settings, shipping, desi, catalog) enqueues a profit
- * recompute for the AFFECTED orders only. The enqueue helpers select orders through
- * an organization (and, where given, store) filter, so a change in one tenant can
- * never pull another tenant's order — or a sibling store's order — into the queue,
- * even when a barcode is shared. Two tests pin that boundary for the two broadest
- * fan-outs: a cost change (by variant) and a shipping-config change (by store).
+ * A cost or settings change enqueues a profit recompute for the AFFECTED orders
+ * only. The enqueue helpers select orders through an organization (and, where
+ * given, store) filter, so a change in one tenant can never pull another tenant's
+ * order into the queue, even when a barcode is shared. One test pins that boundary
+ * for the broadest fan-out: a cost change (by variant).
+ *
+ * A shipping-config change is no longer an order trigger: a stored order keeps the
+ * tariff source captured at intake, so the change queues no order of any store.
  *
  * A commission tariff is not an order input: an order's commission never reads a
  * tariff's bands, so its import and delete queue no order at all, not even one of
@@ -119,7 +121,7 @@ describe('Tenant isolation — profit recompute triggers', () => {
     expect(queuedB).toBeNull();
   });
 
-  it('never queues a sibling store order on a shipping config change', async () => {
+  it('queues no order of any store on a shipping config change', async () => {
     const org = await createOrganization();
     const storeA = await createStore(org.id);
     const storeB = await createStore(org.id);
@@ -139,7 +141,7 @@ describe('Tenant isolation — profit recompute triggers', () => {
     const queuedA = await prisma.profitRecomputeRequest.findUnique({
       where: { orderId: orderA.id },
     });
-    expect(queuedA?.reason).toBe(ProfitRecomputeReason.REFERENCE_CHANGED);
+    expect(queuedA).toBeNull();
 
     const queuedSibling = await prisma.profitRecomputeRequest.findUnique({
       where: { orderId: siblingOrder.id },

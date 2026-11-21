@@ -10,7 +10,7 @@
 
 import { Decimal } from 'decimal.js';
 import type { OrderFeeType, Prisma } from '@pazarsync/db';
-import { CommissionRuleKind, Platform } from '@pazarsync/db/enums';
+import { CommissionRuleKind, type CostProfileType, Platform } from '@pazarsync/db/enums';
 
 import {
   type CostProfileVersionInput,
@@ -62,14 +62,18 @@ function requireFeeField(
   return dec(value);
 }
 
-/** One cost profile version row -> the pure cost version input (decision 6: the version's effective date). */
-function toCostVersion(version: {
+/** The cost profile version columns the cost loaders read. */
+interface CostProfileVersionRow {
+  readonly id: string;
   readonly effectiveFrom: Date;
   readonly version: number;
   readonly amountGross: Prisma.Decimal;
   readonly vatRate: Prisma.Decimal;
   readonly archivedAt: Date | null;
-}): CostProfileVersionInput {
+}
+
+/** One cost profile version row -> the pure cost version input (decision 6: the version's effective date). */
+function toCostVersion(version: CostProfileVersionRow): CostProfileVersionInput {
   return {
     effectiveFrom: version.effectiveFrom,
     versionNumber: version.version,
@@ -79,22 +83,45 @@ function toCostVersion(version: {
   };
 }
 
+/** A cost version input that also carries its row id, so the order snapshot can pin it. */
+export interface IdentifiedCostProfileVersionInput extends CostProfileVersionInput {
+  readonly id: string;
+}
+
+/** A linked cost profile with its version history, each version shaped as `V`. */
+interface LoadedCostProfile<V> {
+  readonly profileId: string;
+  readonly profileType: CostProfileType;
+  readonly versions: readonly V[];
+}
+
+/** A cost profile whose versions carry their row ids (the order snapshot's view). */
+export type IdentifiedItemCostProfileInput = LoadedCostProfile<IdentifiedCostProfileVersionInput>;
+
+/** One cost profile version row -> the cost version input plus its row id. */
+function toIdentifiedCostVersion(
+  version: CostProfileVersionRow,
+): IdentifiedCostProfileVersionInput {
+  return { id: version.id, ...toCostVersion(version) };
+}
+
 // --- Cost profiles -----------------------------------------------------------
 
 /**
- * The seller cost profiles of every given variant, org-filtered, each with its
- * full version history in (effectiveFrom, version) order. A profile with no
- * version is dropped: the cost module throws on a versionless profile, so it
- * could never be costed anyway. The result maps only variants that have at least
- * one usable profile; a variant with none is simply absent from the map.
+ * The cost profiles linked to the given variants, org-filtered, each with its
+ * full version history in (effectiveFrom, version) order, each version mapped by
+ * `toVersion`. A profile with no version is dropped: the cost module throws on a
+ * versionless profile, so it could never be costed anyway. The result maps only
+ * variants that have at least one usable profile.
  */
-export async function loadCostProfilesByVariant(
+async function loadCostProfiles<V>(
   tx: Prisma.TransactionClient,
   params: { readonly organizationId: string; readonly variantIds: readonly string[] },
-): Promise<Map<string, ItemCostProfileInput[]>> {
+  toVersion: (version: CostProfileVersionRow) => V,
+): Promise<Map<string, LoadedCostProfile<V>[]>> {
   const { organizationId } = params;
   const variantIds = [...new Set(params.variantIds)];
-  const profilesByVariant = new Map<string, ItemCostProfileInput[]>();
+  const profilesByVariant = new Map<string, LoadedCostProfile<V>[]>();
   if (variantIds.length === 0) {
     return profilesByVariant;
   }
@@ -109,7 +136,7 @@ export async function loadCostProfilesByVariant(
   });
 
   for (const link of links) {
-    const versions = link.profile.versions.map(toCostVersion);
+    const versions = link.profile.versions.map(toVersion);
     if (versions.length === 0) {
       continue; // a profile with no versions cannot be costed and would break indexing
     }
@@ -118,6 +145,65 @@ export async function loadCostProfilesByVariant(
     profilesByVariant.set(link.productVariantId, list);
   }
   return profilesByVariant;
+}
+
+/**
+ * The seller cost profiles of every given variant, org-filtered, each with its
+ * full version history in (effectiveFrom, version) order. A profile with no
+ * version is dropped: the cost module throws on a versionless profile, so it
+ * could never be costed anyway. The result maps only variants that have at least
+ * one usable profile; a variant with none is simply absent from the map.
+ */
+export async function loadCostProfilesByVariant(
+  tx: Prisma.TransactionClient,
+  params: { readonly organizationId: string; readonly variantIds: readonly string[] },
+): Promise<Map<string, ItemCostProfileInput[]>> {
+  return loadCostProfiles(tx, params, toCostVersion);
+}
+
+/**
+ * The same cost profiles as `loadCostProfilesByVariant` (one query, same filter and
+ * order), with each version also carrying its row id. Used by the order profit
+ * snapshot to pin the version in force at the order date.
+ */
+export async function loadIdentifiedCostProfilesByVariant(
+  tx: Prisma.TransactionClient,
+  params: { readonly organizationId: string; readonly variantIds: readonly string[] },
+): Promise<Map<string, IdentifiedItemCostProfileInput[]>> {
+  return loadCostProfiles(tx, params, toIdentifiedCostVersion);
+}
+
+/**
+ * The cost profile versions a captured order item was pinned to (order profit
+ * snapshot), by version id, org-filtered, in a single query. Each becomes a
+ * one-version profile carrying the type stored on that version row (the profile's
+ * type when the version was written), not the profile's type today, so the cost
+ * module prices the item with exactly that version, whatever its links, newer
+ * versions or later type change are. An id that is not this organization's is absent
+ * from the map.
+ */
+export async function loadPinnedCostProfilesByVersionId(
+  tx: Prisma.TransactionClient,
+  params: { readonly organizationId: string; readonly versionIds: readonly string[] },
+): Promise<Map<string, ItemCostProfileInput>> {
+  const { organizationId } = params;
+  const versionIds = [...new Set(params.versionIds)];
+  const profilesByVersionId = new Map<string, ItemCostProfileInput>();
+  if (versionIds.length === 0) {
+    return profilesByVersionId;
+  }
+
+  const versions = await tx.costProfileVersion.findMany({
+    where: { id: { in: versionIds }, organizationId },
+  });
+  for (const version of versions) {
+    profilesByVersionId.set(version.id, {
+      profileId: version.profileId,
+      profileType: version.type,
+      versions: [toCostVersion(version)],
+    });
+  }
+  return profilesByVersionId;
 }
 
 // --- Commission rules --------------------------------------------------------

@@ -120,6 +120,15 @@ enum ShippingTariffSource {
   OWN_CONTRACT
 }
 
+// Where an order item's frozen desi (order_items.snapshot_unit_desi) came from.
+// OVERRIDE = the seller's desi correction (product_variants.dimensional_weight_override);
+// SYNCED = the value synced from the marketplace (product_variants.synced_dimensional_weight).
+// PR-3 adds a value for the system's default 0 desi.
+enum SnapshotDesiSource {
+  OVERRIDE
+  SYNCED
+}
+
 // Marketplace komisyon tarifesi kuralı türü. CATEGORY yalnız kategori bazlı;
 // CATEGORY_BRAND ek olarak marka kırılımı içerir. Trendyol'un "matching rules
 // → en düşüğü uygulanır" mantığı için iki türü tek tabloda toplayıp app-layer'da
@@ -737,6 +746,24 @@ model Order {
   snapshotIncludeStopaj         Boolean?            @map("snapshot_include_stopaj")
   snapshotIncludeNegativeNetVat Boolean?            @map("snapshot_include_negative_net_vat")
 
+  // ─── Order profit snapshot (inputs frozen at intake) ─────────────────
+  // Written when the order first enters the profit computation
+  // (captureOrderProfitSnapshot, packages/profit): the carrier recognised from the
+  // order's cargo name, the cargo name used for that match and the store's shipping
+  // tariff source. Afterwards the order is priced with these values, not the live
+  // ones, so later carrier-mapping or store-setting edits only reach new orders.
+  // The only event that changes them: the order's own cargoProviderName differs
+  // from snapshotCargoProviderName (the carrier is recognised again), or the carrier
+  // is still null and the name is now recognised (gap fill). The tariff source never
+  // changes once written. Dated shared values (tariff versions, fee definitions,
+  // micro-export tiers) are not copied; they keep being read by the order date.
+  // profitSnapshotAt marks the first capture; null = not captured yet. It never
+  // changes afterwards: a carrier re-recognition or gap fill does not move it.
+  snapshotCarrierId            String?               @map("snapshot_carrier_id") @db.Uuid
+  snapshotCargoProviderName    String?               @map("snapshot_cargo_provider_name")
+  snapshotShippingTariffSource ShippingTariffSource? @map("snapshot_shipping_tariff_source")
+  profitSnapshotAt             DateTime?             @map("profit_snapshot_at")
+
   // ─── Profit exclusion (design 2026-10-29 profit-engine §8.3) ─────────
   // Stamped automatically when an order's cost misses its business day (owner
   // decision 2026-11-03): COST_DEADLINE_MISSED at the day-end buffer graduation,
@@ -801,6 +828,8 @@ model Order {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   store                  Store                   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  // Deleting a carrier clears the snapshot pointer; the order itself stays.
+  snapshotCarrier        ShippingCarrier?        @relation(fields: [snapshotCarrierId], references: [id], onDelete: SetNull)
   items                  OrderItem[]
   claims                 OrderClaim[]
   profitLines            ProfitLine[]
@@ -820,6 +849,9 @@ model Order {
   @@index([platformOrderNumber])
   // Kargo faturası eşleştirmesi: parcelUniqueId == cargoTrackingNumber lookup.
   @@index([storeId, cargoTrackingNumber])
+  // snapshot_carrier_id is a FK (onDelete: SetNull); the index keeps a carrier
+  // delete from scanning every order.
+  @@index([snapshotCarrierId])
   @@map("orders")
 }
 
@@ -858,6 +890,40 @@ model OrderItem {
   // line carried none. The category fallback is never written here, so the
   // profit loader can read a raw rate and resolve the chain itself.
   orderCommissionRatePct Decimal? @map("order_commission_rate_pct") @db.Decimal(5, 2)
+
+  // ─── Order item profit snapshot (inputs frozen at intake) ────────────
+  // Written when the item first enters the profit computation
+  // (captureOrderProfitSnapshot, packages/profit), from the product variant, product
+  // and commission rules of that moment. Afterwards the item is priced with these
+  // values, not the live ones, so a later desi correction, synced commission rate,
+  // category rule or cost link edit only reaches new orders. Types match the source
+  // columns (product_variants.synced_dimensional_weight, products.category_id and
+  // brand_id, product_variants.synced_commission_rate, marketplace_commission_rate
+  // .base_rate).
+  // The only event that changes them: the item's productVariantId is set and differs
+  // from snapshotProductVariantId (e.g. the barcode was matched to a variant later);
+  // the whole item is captured again. A variant that drops to null (deleted from the
+  // catalogue) leaves the captured values as they are. An item without a variant is
+  // captured with these inputs empty.
+  snapshotProductVariantId        String?             @map("snapshot_product_variant_id") @db.Uuid
+  snapshotUnitDesi                Decimal?            @map("snapshot_unit_desi") @db.Decimal(6, 2)
+  snapshotDesiSource              SnapshotDesiSource? @map("snapshot_desi_source")
+  snapshotIsDigital               Boolean?            @map("snapshot_is_digital")
+  snapshotCategoryId              BigInt?             @map("snapshot_category_id")
+  snapshotBrandId                 BigInt?             @map("snapshot_brand_id")
+  snapshotSyncedCommissionRatePct Decimal?            @map("snapshot_synced_commission_rate_pct") @db.Decimal(5, 2)
+  snapshotCategoryRatePct         Decimal?            @map("snapshot_category_rate_pct") @db.Decimal(5, 2)
+  snapshotCategoryBrandRatePct    Decimal?            @map("snapshot_category_brand_rate_pct") @db.Decimal(5, 2)
+  // The cost profile versions linked to the variant and in force at the order date.
+  // No FK (an array column); cost profile versions are never deleted. Besides the
+  // variant change above, an empty list is filled from a cost linked later (gap
+  // fill); a filled list never changes. The cost deadline rule still applies.
+  // Stored in ascending id order.
+  snapshotCostProfileVersionIds   String[]            @default([]) @map("snapshot_cost_profile_version_ids") @db.Uuid
+  // Marks the item's latest full capture; null = not captured yet. It moves only
+  // when the item is captured again after a variant change; a cost list gap fill
+  // does not move it.
+  profitSnapshotAt                DateTime?           @map("profit_snapshot_at")
 
   claimItems             OrderClaimItem[]
   profitLines            ProfitLine[]
@@ -1129,6 +1195,8 @@ model ShippingCarrier {
   // Barem attributes and the desi/Barem prices live on the dated versions.
   tariffVersions ShippingTariffVersion[]
   stores         Store[]
+  // Orders whose profit snapshot recognised this carrier (orders.snapshot_carrier_id).
+  snapshotOrders Order[]
 
   @@unique([platform, externalId])
   @@unique([platform, code])

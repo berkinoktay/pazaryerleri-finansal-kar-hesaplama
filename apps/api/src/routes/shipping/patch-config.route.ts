@@ -35,7 +35,7 @@ const patchShippingConfigRoute = createRoute({
     'Validation enforces a carrier is provided whenever `shippingTariffSource` is ' +
     'TRENDYOL_CONTRACT (422 SHIPPING_CARRIER_REQUIRED_FOR_TRENDYOL_CONTRACT). The carrier ' +
     'must belong to the same platform as the store (422 SHIPPING_CARRIER_PLATFORM_MISMATCH). ' +
-    'Gated to OWNER/ADMIN because it changes how every product/order cost is estimated.',
+    'Gated to OWNER/ADMIN because it changes how product and new-order shipping costs are estimated; stored orders keep the tariff source captured when they were first computed.',
   security: [{ bearerAuth: [] }],
   request: {
     params: pathParams,

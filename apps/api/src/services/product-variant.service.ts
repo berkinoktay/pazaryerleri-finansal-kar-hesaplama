@@ -1,7 +1,5 @@
 import { prisma } from '@pazarsync/db';
 import type { ProductVariant } from '@pazarsync/db';
-import { ProfitRecomputeReason } from '@pazarsync/db/enums';
-import { enqueueProfitRecomputeForVariants } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
 
@@ -30,9 +28,8 @@ export async function setDimensionalWeight(opts: {
 }): Promise<Pick<ProductVariant, 'id' | 'dimensionalWeightOverride' | 'syncedDimensionalWeight'>> {
   const { organizationId, storeId, variantId, value } = opts;
 
-  // One transaction: write the override + queue a profit recompute for every
-  // order carrying this variant (REFERENCE_CHANGED). The desi drives the
-  // shipping estimate, so a change here is a backdated profit input.
+  // A stored order keeps the desi captured at intake, so the override reaches
+  // only new orders and the catalog estimate; no stored order is queued.
   return prisma.$transaction(async (tx) => {
     const result = await tx.productVariant.updateMany({
       where: { id: variantId, organizationId, storeId },
@@ -42,12 +39,6 @@ export async function setDimensionalWeight(opts: {
     if (result.count === 0) {
       throw new NotFoundError('ProductVariant', variantId);
     }
-
-    await enqueueProfitRecomputeForVariants(tx, {
-      organizationId,
-      variantIds: [variantId],
-      reason: ProfitRecomputeReason.REFERENCE_CHANGED,
-    });
 
     // updateMany doesn't return rows; fetch the canonical state to
     // serialize back to the client. The where-clause is the same tenant
@@ -82,19 +73,12 @@ export async function bulkSetDimensionalWeight(opts: {
 
   if (variantIds.length === 0) return { updated: 0 };
 
-  // One transaction: write the overrides + queue a profit recompute for every
-  // order carrying any of these variants (REFERENCE_CHANGED). The enqueue is
-  // organization-filtered, so cross-tenant ids in the array pull no orders.
+  // A stored order keeps the desi captured at intake, so the overrides reach
+  // only new orders and the catalog estimate; no stored order is queued.
   return prisma.$transaction(async (tx) => {
     const result = await tx.productVariant.updateMany({
       where: { id: { in: variantIds }, organizationId, storeId },
       data: { dimensionalWeightOverride: value },
-    });
-
-    await enqueueProfitRecomputeForVariants(tx, {
-      organizationId,
-      variantIds,
-      reason: ProfitRecomputeReason.REFERENCE_CHANGED,
     });
 
     return { updated: result.count };

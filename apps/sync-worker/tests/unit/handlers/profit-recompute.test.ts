@@ -19,10 +19,16 @@ import {
   PROFIT_STALE_SWEEP_INTERVAL_MS,
 } from '../../../src/handlers/profit-recompute';
 
-vi.mock('@pazarsync/profit', () => ({
-  drainProfitRecomputeQueue: vi.fn(),
-  enqueueStaleProfitStatements: vi.fn(),
-}));
+// The default batch size comes from the real package, so the tick's fallback is
+// exercised against the one shared value; only the drain and the sweep are mocked.
+vi.mock('@pazarsync/profit', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@pazarsync/profit')>();
+  return {
+    PROFIT_RECOMPUTE_BATCH_SIZE: actual.PROFIT_RECOMPUTE_BATCH_SIZE,
+    drainProfitRecomputeQueue: vi.fn(),
+    enqueueStaleProfitStatements: vi.fn(),
+  };
+});
 
 vi.mock('@pazarsync/sync-core', () => ({
   syncLog: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },

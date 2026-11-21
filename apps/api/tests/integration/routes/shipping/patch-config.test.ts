@@ -17,7 +17,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 
 import { createApp } from '@/app';
 
@@ -114,7 +113,7 @@ describe('PATCH /v1/organizations/:orgId/stores/:storeId/shipping-config', () =>
     expect(body.errors?.[0]?.code).toBe('SHIPPING_CARRIER_REQUIRED_FOR_TRENDYOL_CONTRACT');
   });
 
-  it('queues every order of the store when the shipping config changes', async () => {
+  it('does not queue stored orders when the shipping config changes', async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
@@ -122,12 +121,10 @@ describe('PATCH /v1/organizations/:orgId/stores/:storeId/shipping-config', () =>
     const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
     expect(carrier).not.toBeNull();
 
-    // Two orders of the store (no item needed — a shipping change reprices the
-    // whole store) and a sibling store whose orders must stay untouched.
+    // Stored orders keep the tariff source captured at intake, so the change
+    // only reaches new orders and the catalog estimate.
     const orderA = await createOrder(org.id, store.id);
     const orderB = await createOrder(org.id, store.id);
-    const sibling = await createStore(org.id, { platform: 'TRENDYOL' });
-    const siblingOrder = await createOrder(org.id, sibling.id);
 
     const res = await app.request(
       `/v1/organizations/${org.id}/stores/${store.id}/shipping-config`,
@@ -143,11 +140,8 @@ describe('PATCH /v1/organizations/:orgId/stores/:storeId/shipping-config', () =>
     expect(res.status).toBe(200);
 
     for (const orderId of [orderA.id, orderB.id]) {
-      const queued = await prisma.profitRecomputeRequest.findUnique({ where: { orderId } });
-      expect(queued?.reason).toBe(ProfitRecomputeReason.REFERENCE_CHANGED);
+      expect(await prisma.profitRecomputeRequest.findUnique({ where: { orderId } })).toBeNull();
     }
-    expect(
-      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: siblingOrder.id } }),
-    ).toBeNull();
+    expect(await prisma.profitRecomputeRequest.count()).toBe(0);
   });
 });

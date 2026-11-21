@@ -1181,6 +1181,38 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     expect(updated.snapshotIncludeNegativeNetVat).toBe(true);
   });
 
+  it('a new order is captured at intake', async () => {
+    // Order profit snapshot (plan PR-2, Gorev 3): the create path captures the order's
+    // product and seller inputs in its own transaction, before any recompute runs.
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-CAPTURE']);
+    const variant = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: 'EAN13-CAPTURE' },
+    });
+
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildDirectMapped({
+        platformOrderId: 'capture-1',
+        barcode: 'EAN13-CAPTURE',
+        lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
+      }),
+    );
+
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: 'capture-1' },
+    });
+    expect(order.profitSnapshotAt).not.toBeNull();
+    expect(order.snapshotShippingTariffSource).not.toBeNull();
+    // Captured before the drain: the recompute request is still queued.
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId: order.id } })).toBe(1);
+
+    const items = await prisma.orderItem.findMany({ where: { orderId: order.id } });
+    expect(items).toHaveLength(1);
+    expect(items[0]?.profitSnapshotAt).not.toBeNull();
+    expect(items[0]?.snapshotProductVariantId).toBe(variant.id);
+  });
+
   it('enqueues on create and drains a fully-costed order to an ESTIMATED statement', async () => {
     const { org, store } = await setupStoreAndSyncLog(['EAN13-EST']);
     // Full computability for the loader: the factory cost profile carries no version

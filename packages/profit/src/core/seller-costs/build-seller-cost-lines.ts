@@ -49,15 +49,18 @@ function versionPrecedes(a: CostProfileVersionInput, b: CostProfileVersionInput)
  * versionNumber) among those whose `effectiveFrom` is on or before the order date.
  * When none qualifies the version with the smallest (effectiveFrom, versionNumber)
  * is used (the first-version rule, design section 6.6). The version number breaks
- * an effective-date tie.
+ * an effective-date tie. Throws `RangeError` on an empty list.
+ *
+ * Generic so the order profit snapshot can pin the chosen version by its id with
+ * the same rule the engine prices by; the chosen element is returned as passed in.
  */
-function chooseCostVersion(
-  versions: readonly CostProfileVersionInput[],
+export function chooseCostVersion<T extends CostProfileVersionInput>(
+  versions: readonly T[],
   orderDate: Date,
-): CostProfileVersionInput {
+): T {
   const orderTime = orderDate.getTime();
-  let latestApplicable: CostProfileVersionInput | null = null;
-  let earliest: CostProfileVersionInput | null = null;
+  let latestApplicable: T | null = null;
+  let earliest: T | null = null;
   for (const version of versions) {
     if (earliest === null || versionPrecedes(version, earliest)) {
       earliest = version;

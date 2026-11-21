@@ -69,7 +69,10 @@ export async function updateProfitSettings(
   // forward-only for already-snapshotted orders. The one exception is an order
   // that was written before it carried a snapshot (either toggle still NULL):
   // those read the live setting, so they are queued to recompute with the new
-  // value. Store- and organization-filtered, so no other tenant is touched.
+  // value. The order snapshot (engine version 10) fills an empty stopaj or
+  // negative-net-VAT toggle with the store's setting of that moment at the order's
+  // first recompute, so this queueing only reaches orders never computed yet (no
+  // snapshot). Store- and organization-filtered, so no other tenant is touched.
   const orders = await tx.order.findMany({
     where: {
       organizationId: orgId,

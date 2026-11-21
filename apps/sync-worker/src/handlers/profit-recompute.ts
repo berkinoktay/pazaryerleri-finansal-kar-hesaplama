@@ -19,6 +19,7 @@
 
 import { prisma, type PrismaClient } from '@pazarsync/db';
 import {
+  PROFIT_RECOMPUTE_BATCH_SIZE,
   drainProfitRecomputeQueue,
   enqueueStaleProfitStatements,
   type DrainResult,
@@ -31,10 +32,6 @@ import { syncLog } from '@pazarsync/sync-core';
 // on how long a fresh mark waits before an idle worker picks it up. 5 s keeps the
 // seller's profit numbers near-real-time after a webhook, cost edit or settlement.
 export const PROFIT_RECOMPUTE_INTERVAL_MS = 5_000;
-
-// How many marks one drain pass claims. Each claimed mark is recomputed in its own
-// short transaction, so this bounds the work (and the lock window) per pass.
-export const PROFIT_RECOMPUTE_BATCH_SIZE = 50;
 
 // How long one tick keeps starting new drain passes. The budget is checked between
 // passes, so a tick can overrun it by one pass; it stays below the interval so a

@@ -219,6 +219,11 @@ export {
   type ComputedParcelProfit,
 } from './persistence/compute-parcel-profit';
 export { loadTrendyolParcel, type LoadedTrendyolParcel } from './persistence/load-trendyol-parcel';
+// Order profit snapshot (inputs frozen at intake) -- docs/superpowers/plans/2026-11-20-pazaryeri-parametreleri-surumleme.md (PR-2)
+export {
+  captureOrderProfitSnapshot,
+  type OrderProfitSnapshotOutcome,
+} from './persistence/order-profit-snapshot';
 // Batch scenario input loader (rebuild, phase 4B) -- docs/plans/2026-11-04-profit-engine-faz-4b-plan.md
 export {
   loadTrendyolScenarioBases,
@@ -261,6 +266,7 @@ export { visibleProfitIssues } from './read/visible-profit-issues';
 
 // Profit recompute queue (rebuild, phase 3B) -- docs/plans/2026-10-30-profit-engine-faz-3b-plan.md
 export {
+  PROFIT_RECOMPUTE_BATCH_SIZE,
   enqueueProfitRecompute,
   enqueueProfitRecomputeForVariants,
   enqueueProfitRecomputeForStore,

@@ -200,28 +200,53 @@ describe('recomputeParcelProfit', () => {
       })
     ).map((line) => line.id);
 
-    // Bump item A's COGS version amount; the loader reads the version amountGross.
-    await prisma.costProfileVersion.updateMany({
-      where: { amountGross: MELONTIK.items.a.costGross },
-      data: { amountGross: '250.00' },
+    const statementsBefore = await prisma.orderProfitStatement.findMany({
+      where: { orderId: parcel.orderId },
+      orderBy: { view: 'asc' },
+      select: { view: true, contentHash: true, netProfit: true },
+    });
+    expect(statementsBefore).toHaveLength(2);
+
+    // The order's own data changes: a later webhook event brings item A's own
+    // commission rate (two-phase webhook), 19 -> 25. The order profit snapshot never
+    // freezes the order line's rate, so the recompute picks it up.
+    await prisma.orderItem.update({
+      where: { id: parcel.itemA, organizationId: parcel.organizationId },
+      data: { orderCommissionRatePct: '25' },
     });
 
     const second = await recompute(parcel.organizationId, parcel.orderId);
     expect(second.changed).toBe(true);
 
-    const cogsA = await prisma.profitLine.findFirst({
+    // 529.00 x 25% - 37.72 x 25% = 132.25 - 9.43 (was 100.51 - 7.17 = 93.34 at 19%).
+    const commissionA = await prisma.profitLine.findFirst({
       where: {
         orderId: parcel.orderId,
-        type: ProfitLineType.COST_COGS,
+        type: ProfitLineType.COMMISSION,
         orderItemId: parcel.itemA,
       },
     });
-    expect(cogsA?.amountGross.toFixed(2)).toBe('250.00');
+    expect(commissionA?.amountGross.toString()).toBe('122.82');
+    expect(commissionA?.inputs).toMatchObject({ ratePct: '25', rateSource: 'ORDER' });
 
     const survivors = await prisma.profitLine.findMany({
       where: { orderId: parcel.orderId, id: { in: oldIds } },
     });
     expect(survivors).toHaveLength(0);
+
+    // Both statement views were rewritten with the new content.
+    const statementsAfter = await prisma.orderProfitStatement.findMany({
+      where: { orderId: parcel.orderId },
+      orderBy: { view: 'asc' },
+      select: { view: true, contentHash: true, netProfit: true },
+    });
+    expect(statementsAfter).toHaveLength(2);
+    for (const [index, after] of statementsAfter.entries()) {
+      const before = statementsBefore[index];
+      expect(after.view).toBe(before?.view);
+      expect(after.contentHash).not.toBe(before?.contentHash);
+      expect(after.netProfit?.toString()).not.toBe(before?.netProfit?.toString());
+    }
   });
 
   it('moves to PARTIALLY_SETTLED with raw sale, discount and payment records, then SETTLED with the cargo invoice', async () => {

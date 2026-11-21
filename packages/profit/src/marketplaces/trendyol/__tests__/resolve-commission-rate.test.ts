@@ -121,6 +121,61 @@ describe('resolveTrendyolCommissionRate', () => {
     );
     expect(result).toBeNull();
   });
+
+  it('a captured item resolves its category rung from its own captured rules', () => {
+    // The parcel-level maps carry 20 (category 369) and 16.5 (369 + brand 977855). A
+    // captured item carries the rates of its capture moment instead; those win.
+    const uncaptured = makeTrendyolItemAttributes({
+      orderItemId: 'a',
+      orderCommissionRatePct: null,
+      categoryId: '369',
+      brandId: '977855',
+    });
+    const captured: TrendyolItemAttributes = {
+      ...uncaptured,
+      capturedCategoryRules: {
+        categoryRatePct: new Map([['369', new Decimal('22')]]),
+        categoryBrandRatePct: new Map([
+          [trendyolCategoryBrandKey('369', '977855'), new Decimal('21')],
+        ]),
+      },
+    };
+    const capturedResult = resolve(captured);
+    expect(capturedResult?.ratePct.toString()).toBe('21');
+    expect(capturedResult?.source).toBe('CATEGORY_BRAND');
+
+    // A captured item without a captured brand rule never falls back to the parcel's
+    // brand rule (16.5): only its own captured category rate applies.
+    const capturedCategoryOnly = resolve({
+      ...uncaptured,
+      capturedCategoryRules: {
+        categoryRatePct: new Map([['369', new Decimal('22')]]),
+        categoryBrandRatePct: new Map(),
+      },
+    });
+    expect(capturedCategoryOnly?.ratePct.toString()).toBe('22');
+    expect(capturedCategoryOnly?.source).toBe('CATEGORY');
+
+    // Captured with no rule at all: nothing applies, the parcel maps are not consulted.
+    const capturedNoRule = resolve({
+      ...uncaptured,
+      capturedCategoryRules: { categoryRatePct: new Map(), categoryBrandRatePct: new Map() },
+    });
+    expect(capturedNoRule).toBeNull();
+
+    // Without the field the item resolves from the parcel maps, as before.
+    const uncapturedResult = resolve(uncaptured);
+    expect(uncapturedResult?.ratePct.toString()).toBe('16.5');
+    expect(uncapturedResult?.source).toBe('CATEGORY_BRAND');
+
+    // The earlier rungs still come first for a captured item.
+    const capturedWithSyncedRate = resolve({
+      ...captured,
+      syncedCommissionRatePct: new Decimal('15'),
+    });
+    expect(capturedWithSyncedRate?.ratePct.toString()).toBe('15');
+    expect(capturedWithSyncedRate?.source).toBe('PRODUCT_SYNC');
+  });
 });
 
 describe('resolveTrendyolCategoryRate', () => {
