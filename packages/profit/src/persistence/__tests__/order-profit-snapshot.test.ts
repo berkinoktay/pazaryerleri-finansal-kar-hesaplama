@@ -1,9 +1,11 @@
 /**
  * Integration tests for captureOrderProfitSnapshot (plan PR-2, Gorev 2): the order's
  * undated product and seller inputs are copied once, afterwards only missing parts
- * are filled, and a filled value is never overwritten with a live one. The only
- * events that change a filled value are the order's own cargo name changing and an
- * item's variant changing.
+ * are filled (a desi of synced 0, commission inputs none of which gives a rate, an
+ * empty cost list), and a known value is never overwritten with a live one. The
+ * events that change a filled value are the order's own cargo name changing, an
+ * item's variant changing, and the cost-window rule: the cost list follows the cost
+ * links until the order's business day ends.
  *
  * The suite never truncates: shared reference tables (carriers, commission rules) are
  * touched only through this suite's own TEST_-prefixed carriers and its own category
@@ -253,6 +255,25 @@ async function attachCostProfileVersions(
 /** A random version id that sorts before any random one (steers the sort-order assertion). */
 function lowSortingId(): string {
   return `00000000-${randomUUID().slice(9)}`;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Moves the parcel's order to another order date (time-relative tests pass "now"-based dates). */
+async function setOrderDate(parcel: MelontikParcel, orderDate: Date): Promise<void> {
+  await prisma.order.update({
+    where: { id: parcel.orderId, organizationId: parcel.organizationId },
+    data: { orderDate },
+  });
+}
+
+/** The product a variant belongs to. */
+async function productIdOf(productVariantId: string): Promise<string> {
+  const variant = await prisma.productVariant.findUniqueOrThrow({
+    where: { id: productVariantId },
+    select: { productId: true },
+  });
+  return variant.productId;
 }
 
 describe('captureOrderProfitSnapshot', () => {
@@ -632,6 +653,275 @@ describe('captureOrderProfitSnapshot', () => {
     });
     expect(order.profitExcludedAt).not.toBeNull();
     expect(order.profitExclusionReason).toBe(ProfitExclusionReason.COST_DEADLINE_MISSED);
+  });
+
+  it("follows cost links added or replaced during the order's business day", async () => {
+    const parcel = await seedSnapshotParcel();
+    // An order placed now: its business day is still open, so the seller may still
+    // enter or change its cost (cost-window rule).
+    await setOrderDate(parcel, new Date());
+    await capture(parcel);
+    const itemABefore = await readItemSnapshot(parcel.itemA);
+    const itemBBefore = await readItemSnapshot(parcel.itemB);
+    expect(itemABefore.snapshotCostProfileVersionIds).toEqual(
+      await linkedCostVersionIds(parcel.organizationId, parcel.variantA),
+    );
+    expect(itemABefore.snapshotCostProfileVersionIds).toHaveLength(1);
+
+    // Added: a second profile is linked to item A's variant.
+    await attachCostProfile({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      productVariantId: parcel.variantA,
+      amountGross: '12.00',
+      vatRate: '20',
+    });
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+    const added = await readItemSnapshot(parcel.itemA);
+    expect(added.snapshotCostProfileVersionIds).toHaveLength(2);
+    expect(added.snapshotCostProfileVersionIds).toEqual(
+      await linkedCostVersionIds(parcel.organizationId, parcel.variantA),
+    );
+    // Only the cost list moves; the item's capture time stays.
+    expect(added).toEqual({
+      ...itemABefore,
+      snapshotCostProfileVersionIds: added.snapshotCostProfileVersionIds,
+    });
+
+    // Replaced: every link of the variant is removed and another profile linked.
+    await prisma.productVariantCostProfile.deleteMany({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
+    });
+    await attachCostProfile({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      productVariantId: parcel.variantA,
+      amountGross: '40.00',
+      vatRate: '20',
+    });
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+    const replaced = await readItemSnapshot(parcel.itemA);
+    expect(replaced.snapshotCostProfileVersionIds).toHaveLength(1);
+    expect(replaced.snapshotCostProfileVersionIds).toEqual(
+      await linkedCostVersionIds(parcel.organizationId, parcel.variantA),
+    );
+    expect(replaced.snapshotCostProfileVersionIds).not.toContain(
+      added.snapshotCostProfileVersionIds[0],
+    );
+    expect(replaced.snapshotCostProfileVersionIds).not.toContain(
+      added.snapshotCostProfileVersionIds[1],
+    );
+
+    // Removed: no cost is left, so the list empties.
+    await prisma.productVariantCostProfile.deleteMany({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
+    });
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+    const removed = await readItemSnapshot(parcel.itemA);
+    expect(removed.snapshotCostProfileVersionIds).toEqual([]);
+    expect(removed.profitSnapshotAt).toEqual(itemABefore.profitSnapshotAt);
+
+    // Nothing changed for item B, so it was never written.
+    expect(await readItemSnapshot(parcel.itemB)).toEqual(itemBBefore);
+  });
+
+  it("freezes a filled cost list once the order's business day has ended", async () => {
+    const parcel = await seedSnapshotParcel();
+    // An order from two days ago: its business day has ended.
+    await setOrderDate(parcel, new Date(Date.now() - 2 * DAY_MS));
+    await capture(parcel);
+    const itemABefore = await readItemSnapshot(parcel.itemA);
+    expect(itemABefore.snapshotCostProfileVersionIds).toHaveLength(1);
+
+    // Added: a second profile linked after the day end does not reach the order.
+    await attachCostProfile({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      productVariantId: parcel.variantA,
+      amountGross: '12.00',
+      vatRate: '20',
+    });
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+    expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
+
+    // Replaced: neither does a replacement of every link.
+    await prisma.productVariantCostProfile.deleteMany({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
+    });
+    await attachCostProfile({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      productVariantId: parcel.variantA,
+      amountGross: '40.00',
+      vatRate: '20',
+    });
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+    expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
+  });
+
+  it('fills a missing desi (synced 0) once the seller or Trendyol provides one, but never changes a known desi', async () => {
+    const parcel = await seedSnapshotParcel();
+    // Trendyol sent no desi for either variant and the seller corrected neither.
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { dimensionalWeightOverride: null, syncedDimensionalWeight: '0' },
+    });
+    await prisma.productVariant.update({
+      where: { id: parcel.variantB },
+      data: { syncedDimensionalWeight: '0' },
+    });
+    await capture(parcel);
+    const itemABefore = await readItemSnapshot(parcel.itemA);
+    const itemBBefore = await readItemSnapshot(parcel.itemB);
+    for (const item of [itemABefore, itemBBefore]) {
+      expect(item.snapshotUnitDesi?.toString()).toBe('0');
+      expect(item.snapshotDesiSource).toBe(SnapshotDesiSource.SYNCED);
+    }
+
+    // Still no desi anywhere: nothing to fill.
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+
+    // The seller corrects item A's desi; Trendyol now sends item B's.
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { dimensionalWeightOverride: '2.50' },
+    });
+    await prisma.productVariant.update({
+      where: { id: parcel.variantB },
+      data: { syncedDimensionalWeight: '4.00' },
+    });
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 2 });
+    const itemAFilled = await readItemSnapshot(parcel.itemA);
+    const itemBFilled = await readItemSnapshot(parcel.itemB);
+    expect(itemAFilled).toEqual({
+      ...itemABefore,
+      snapshotUnitDesi: itemAFilled.snapshotUnitDesi,
+      snapshotDesiSource: SnapshotDesiSource.OVERRIDE,
+    });
+    expect(itemAFilled.snapshotUnitDesi?.toString()).toBe('2.5');
+    expect(itemBFilled).toEqual({
+      ...itemBBefore,
+      snapshotUnitDesi: itemBFilled.snapshotUnitDesi,
+      snapshotDesiSource: SnapshotDesiSource.SYNCED,
+    });
+    expect(itemBFilled.snapshotUnitDesi?.toString()).toBe('4');
+
+    // A known desi is never changed: neither a new correction nor a new synced value.
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { dimensionalWeightOverride: '9.00', syncedDimensionalWeight: '7.00' },
+    });
+    await prisma.productVariant.update({
+      where: { id: parcel.variantB },
+      data: { dimensionalWeightOverride: '5.00', syncedDimensionalWeight: '6.00' },
+    });
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+    expect(await readItemSnapshot(parcel.itemA)).toEqual(itemAFilled);
+    expect(await readItemSnapshot(parcel.itemB)).toEqual(itemBFilled);
+  });
+
+  it('fills commission inputs that were all missing once a rule or synced rate appears, but never changes captured rates', async () => {
+    const parcel = await seedSnapshotParcel();
+    const productA = await productIdOf(parcel.variantA);
+    const productB = await productIdOf(parcel.variantB);
+    // Item A: a zero synced rate (Trendyol's "not sent") and a product without a
+    // category or brand. Item B: no synced rate, and a category and brand no rule
+    // covers yet.
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { syncedCommissionRate: '0.00' },
+    });
+    await prisma.product.update({
+      where: { id: productA },
+      data: { categoryId: null, brandId: null },
+    });
+    await prisma.product.update({
+      where: { id: productB },
+      data: { categoryId: TEST_OTHER_CATEGORY_ID, brandId: TEST_OTHER_BRAND_ID },
+    });
+    await capture(parcel);
+    const itemABefore = await readItemSnapshot(parcel.itemA);
+    const itemBBefore = await readItemSnapshot(parcel.itemB);
+    expect(itemABefore.snapshotSyncedCommissionRatePct?.toString()).toBe('0');
+    expect(itemABefore.snapshotCategoryId).toBeNull();
+    expect(itemABefore.snapshotCategoryRatePct).toBeNull();
+    expect(itemABefore.snapshotCategoryBrandRatePct).toBeNull();
+    expect(itemBBefore.snapshotSyncedCommissionRatePct).toBeNull();
+    expect(itemBBefore.snapshotCategoryId).toBe(TEST_OTHER_CATEGORY_ID);
+    expect(itemBBefore.snapshotCategoryRatePct).toBeNull();
+    expect(itemBBefore.snapshotCategoryBrandRatePct).toBeNull();
+
+    // Nothing gives a rate yet: nothing to fill.
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+
+    // Item A: Trendyol sends a synced rate and the product gets this suite's category
+    // and brand (both rules exist). Item B: a rule for its captured category appears.
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { syncedCommissionRate: '12.00' },
+    });
+    await prisma.product.update({
+      where: { id: productA },
+      data: { categoryId: TEST_CATEGORY_ID, brandId: TEST_BRAND_ID },
+    });
+    await prisma.marketplaceCommissionRate.create({
+      data: {
+        platform: Platform.TRENDYOL,
+        ruleKind: CommissionRuleKind.CATEGORY,
+        categoryId: TEST_OTHER_CATEGORY_ID,
+        brandId: null,
+        categoryName: 'Snapshot test other category',
+        parentCategoryName: null,
+        brandName: null,
+        baseRate: '21.00',
+        paymentTermDays: 60,
+        segmentOverrides: {},
+        fetchedAt: new Date(),
+        sourceScreen: 'CategoryCommissionPaymentTerms',
+      },
+    });
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 2 });
+    const itemAFilled = await readItemSnapshot(parcel.itemA);
+    const itemBFilled = await readItemSnapshot(parcel.itemB);
+    // A gap fill is not a new capture: everything else, the capture time included, stays.
+    expect(itemAFilled).toEqual({
+      ...itemABefore,
+      snapshotSyncedCommissionRatePct: itemAFilled.snapshotSyncedCommissionRatePct,
+      snapshotCategoryId: TEST_CATEGORY_ID,
+      snapshotBrandId: TEST_BRAND_ID,
+      snapshotCategoryRatePct: itemAFilled.snapshotCategoryRatePct,
+      snapshotCategoryBrandRatePct: itemAFilled.snapshotCategoryBrandRatePct,
+    });
+    expect(itemAFilled.snapshotSyncedCommissionRatePct?.toString()).toBe('12');
+    expect(itemAFilled.snapshotCategoryRatePct?.toString()).toBe('18');
+    expect(itemAFilled.snapshotCategoryBrandRatePct?.toString()).toBe('16.5');
+    // Item B keeps its captured category and brand; only the new rule's rate is written.
+    expect(itemBFilled).toEqual({
+      ...itemBBefore,
+      snapshotCategoryRatePct: itemBFilled.snapshotCategoryRatePct,
+    });
+    expect(itemBFilled.snapshotCategoryRatePct?.toString()).toBe('21');
+
+    // Captured rates are never changed: new rules, a new synced rate, a new category.
+    await prisma.marketplaceCommissionRate.updateMany({
+      where: { platform: Platform.TRENDYOL, categoryId: { in: SUITE_CATEGORY_IDS } },
+      data: { baseRate: '40.00' },
+    });
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { syncedCommissionRate: '30.00' },
+    });
+    await prisma.productVariant.update({
+      where: { id: parcel.variantB },
+      data: { syncedCommissionRate: '25.00' },
+    });
+    await prisma.product.update({
+      where: { id: productB },
+      data: { categoryId: TEST_CATEGORY_ID, brandId: TEST_BRAND_ID },
+    });
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+    expect(await readItemSnapshot(parcel.itemA)).toEqual(itemAFilled);
+    expect(await readItemSnapshot(parcel.itemB)).toEqual(itemBFilled);
   });
 
   it('pins the cost version in force at the order date, not the latest', async () => {

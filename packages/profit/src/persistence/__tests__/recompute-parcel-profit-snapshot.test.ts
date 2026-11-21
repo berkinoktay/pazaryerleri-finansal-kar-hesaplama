@@ -2,9 +2,9 @@
  * Integration tests for the engine reading the order profit snapshot (plan PR-2,
  * Gorev 3): `recomputeParcelProfit` captures the order's product and seller inputs
  * before it computes, and a captured order is priced with those inputs, not the live
- * ones. A later desi correction, synced rate, category rule, cost link or amount,
- * store shipping setting or carrier mapping edit therefore leaves its stored profit
- * as it is.
+ * ones. A later desi correction, synced rate, category rule, cost link, amount or
+ * profile type, digital flag, product category or brand, store shipping setting or
+ * carrier mapping edit therefore leaves its stored profit as it is.
  *
  * Every live value the suite changes is one the melontik parcel would otherwise
  * price with: the order rates are cleared (so item A resolves its commission from
@@ -48,9 +48,12 @@ import {
   upsertCarrierWithTariffs,
 } from './helpers/melontik-parcel';
 
-/** This suite's own category and brand; no seeded commission rule uses them. */
+/** This suite's own categories and brands; no seeded commission rule uses them. */
 const TEST_CATEGORY_ID = 9_990_801n;
 const TEST_BRAND_ID = 9_990_802n;
+const TEST_OTHER_CATEGORY_ID = 9_990_803n;
+const TEST_OTHER_BRAND_ID = 9_990_804n;
+const SUITE_CATEGORY_IDS = [TEST_CATEGORY_ID, TEST_OTHER_CATEGORY_ID];
 
 /** This suite's own carrier (TEST_-prefixed code, unused external id). */
 const SNAPSHOT_CARRIER = {
@@ -83,7 +86,7 @@ async function deleteSuiteReferenceRows(): Promise<void> {
     where: { platform: Platform.TRENDYOL, code: SNAPSHOT_CARRIER.code },
   });
   await prisma.marketplaceCommissionRate.deleteMany({
-    where: { platform: Platform.TRENDYOL, categoryId: TEST_CATEGORY_ID },
+    where: { platform: Platform.TRENDYOL, categoryId: { in: SUITE_CATEGORY_IDS } },
   });
 }
 
@@ -345,6 +348,19 @@ const LIVE_INPUT_CHANGES = {
       data: { baseRate: '28.00' },
     });
   },
+  // Seller cost: item A's profile becomes a packaging cost. Only the profile row
+  // changes; the pinned version keeps the type it was written with. Listed before
+  // costLink, so that the combined change still hits the pinned profile.
+  costProfileType: async (parcel) => {
+    const linkA = await prisma.productVariantCostProfile.findFirstOrThrow({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
+      select: { profileId: true },
+    });
+    await prisma.costProfile.update({
+      where: { id: linkA.profileId, organizationId: parcel.organizationId },
+      data: { type: CostProfileType.PACKAGING },
+    });
+  },
   // Seller cost: item A's link is replaced by another profile.
   costLink: async (parcel) => {
     await prisma.productVariantCostProfile.deleteMany({
@@ -382,6 +398,45 @@ const LIVE_INPUT_CHANGES = {
         changedFields: ['amountGross'],
         effectiveFrom: BEFORE_ORDER_DATE,
       },
+    });
+  },
+  // Product card: item A becomes digital, so it leaves the parcel desi (2 -> 1).
+  digitalFlag: async (parcel) => {
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { isDigital: true },
+    });
+  },
+  // Product card: the products move to another category with its own rule, so item B
+  // resolves 22 from that rule instead of 16.5.
+  productCategory: async (parcel) => {
+    await prisma.marketplaceCommissionRate.create({
+      data: {
+        platform: Platform.TRENDYOL,
+        ruleKind: CommissionRuleKind.CATEGORY,
+        categoryId: TEST_OTHER_CATEGORY_ID,
+        brandId: null,
+        categoryName: 'Recompute snapshot other category',
+        parentCategoryName: null,
+        brandName: null,
+        baseRate: '22.00',
+        paymentTermDays: 60,
+        segmentOverrides: {},
+        fetchedAt: new Date(),
+        sourceScreen: 'CategoryCommissionPaymentTerms',
+      },
+    });
+    await prisma.product.updateMany({
+      where: { organizationId: parcel.organizationId, storeId: parcel.storeId },
+      data: { categoryId: TEST_OTHER_CATEGORY_ID },
+    });
+  },
+  // Product card: the products move to another brand, so item B falls from the
+  // category+brand rule (16.5) to the category rule (18).
+  productBrand: async (parcel) => {
+    await prisma.product.updateMany({
+      where: { organizationId: parcel.organizationId, storeId: parcel.storeId },
+      data: { brandId: TEST_OTHER_BRAND_ID },
     });
   },
   // Seller setting: the store moves to its own shipping contract.

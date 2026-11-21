@@ -176,9 +176,11 @@ export async function loadIdentifiedCostProfilesByVariant(
 /**
  * The cost profile versions a captured order item was pinned to (order profit
  * snapshot), by version id, org-filtered, in a single query. Each becomes a
- * one-version profile carrying its profile's type, so the cost module prices the
- * item with exactly that version, whatever its links or newer versions are today.
- * An id that is not this organization's is absent from the map.
+ * one-version profile carrying the type stored on that version row (the profile's
+ * type when the version was written), not the profile's type today, so the cost
+ * module prices the item with exactly that version, whatever its links, newer
+ * versions or later type change are. An id that is not this organization's is absent
+ * from the map.
  */
 export async function loadPinnedCostProfilesByVersionId(
   tx: Prisma.TransactionClient,
@@ -193,12 +195,11 @@ export async function loadPinnedCostProfilesByVersionId(
 
   const versions = await tx.costProfileVersion.findMany({
     where: { id: { in: versionIds }, organizationId },
-    include: { profile: { select: { type: true } } },
   });
   for (const version of versions) {
     profilesByVersionId.set(version.id, {
       profileId: version.profileId,
-      profileType: version.profile.type,
+      profileType: version.type,
       versions: [toCostVersion(version)],
     });
   }
