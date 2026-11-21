@@ -8,6 +8,7 @@
   "include": [
     "src/**/*",
     "scripts/enqueue-profit-recompute.ts",
+    "scripts/drain-profit-recompute.ts",
     "vitest.config.ts",
     "vitest.unit.config.ts"
   ]
