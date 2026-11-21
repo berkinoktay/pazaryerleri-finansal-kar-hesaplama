@@ -726,6 +726,71 @@ describe('loadTrendyolParcel', () => {
     expect(tierByMin.get('2000.01')?.ratePct.toFixed(0)).toBe('30');
   });
 
+  it('uses the micro-export tier version in force at its order date', async () => {
+    // A micro-export tier version starting on 1 December 2026 at 00:00 in Istanbul
+    // with a single band (rate 0.2500) retires the two seeded bands. The same export
+    // order is loaded with its order date one millisecond before that start and
+    // exactly at it, so the loaded tiers must follow the order date -- never the
+    // moment the order is loaded.
+    const microVersionStart = new Date('2026-11-30T21:00:00.000Z');
+    const deleteMicroVersion = async (): Promise<void> => {
+      // Its tiers cascade.
+      await prisma.microExportReturnFeeTierVersion.deleteMany({
+        where: { effectiveFrom: microVersionStart },
+      });
+    };
+    await deleteMicroVersion();
+
+    try {
+      await prisma.microExportReturnFeeTierVersion.create({
+        data: {
+          effectiveFrom: microVersionStart,
+          tiers: {
+            create: [{ minSaleGross: '0.00', maxSaleGross: '99999999.99', rate: '0.2500' }],
+          },
+        },
+      });
+      const parcel = await seedMelontikParcel({ isExportSale: true });
+      // The international-service fee definition the export path resolves.
+      await prisma.feeDefinition.create({
+        data: {
+          platform: 'TRENDYOL',
+          feeType: 'INTERNATIONAL_SERVICE',
+          displayName: 'Uluslararasi Hizmet Bedeli',
+          calculationKind: 'RATE_OF_SALE',
+          rateOfSale: '0.0600',
+          defaultVatRate: '20.00',
+          effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+        },
+      });
+
+      /** The overseas return tier rates loaded for the parcel's order dated `orderDate`. */
+      async function overseasReturnRatesAt(orderDate: Date): Promise<string[]> {
+        await prisma.order.update({
+          where: { id: parcel.orderId },
+          data: { orderDate },
+        });
+        const loaded = await loadTrendyolParcel(prisma, {
+          organizationId: parcel.organizationId,
+          orderId: parcel.orderId,
+        });
+        return loaded.estimateInput.reference.fees.overseasReturnTiers.map((tier) =>
+          tier.ratePct.toString(),
+        );
+      }
+
+      // Seeded tiers: rate 0.3500 -> 35, 0.3000 -> 30 (rate x 100).
+      expect(await overseasReturnRatesAt(new Date('2026-11-30T20:59:59.999Z'))).toEqual([
+        '35',
+        '30',
+      ]);
+      // The new version's single band: rate 0.2500 -> 25.
+      expect(await overseasReturnRatesAt(new Date('2026-11-30T21:00:00.000Z'))).toEqual(['25']);
+    } finally {
+      await deleteMicroVersion();
+    }
+  });
+
   it('loads a return settlement record and return cargo item matched through a claim', async () => {
     const returnTracking = BigInt('7330000001');
     const returnPackageId = 'return-pkg-1';

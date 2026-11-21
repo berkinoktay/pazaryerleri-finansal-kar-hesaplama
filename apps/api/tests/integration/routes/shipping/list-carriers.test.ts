@@ -19,16 +19,22 @@
  * persist across test runs the way `auth.users` does.
  */
 
+import { z } from '@hono/zod-openapi';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 import { Platform } from '@pazarsync/db/enums';
 
 import { createApp } from '@/app';
+import { ShippingCarrierSchema } from '@/validators/shipping-config.validator';
 
 import { bearer, createAuthenticatedTestUser } from '../../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../../helpers/db';
-import { createMembership, createOrganization } from '../../../helpers/factories';
+import {
+  createMembership,
+  createOrganization,
+  createTestCarrierWithVersions,
+} from '../../../helpers/factories';
 
 interface CarrierWire {
   id: string;
@@ -44,6 +50,9 @@ interface CarrierWire {
 interface ListCarriersResponse {
   data: CarrierWire[];
 }
+
+/** The route's 200 body schema (declared inline in list-carriers.route.ts). */
+const ListCarriersResponseSchema = z.object({ data: z.array(ShippingCarrierSchema) });
 
 describe('GET /v1/organizations/:orgId/shipping-carriers', () => {
   const app = createApp();
@@ -80,64 +89,39 @@ describe('GET /v1/organizations/:orgId/shipping-carriers', () => {
   it('reports Barem support from the version in force', async () => {
     const code = 'TEST_LIST_CARRIERS';
     await prisma.shippingCarrier.deleteMany({ where: { platform: Platform.TRENDYOL, code } });
-    const carrier = await prisma.shippingCarrier.create({
-      data: {
-        platform: Platform.TRENDYOL,
-        externalId: 990_305,
-        code,
-        displayName: 'Test List Carriers',
-      },
+    // 2000 (no Barem, max desi 5), 2020 (Barem, max desi 10: the version in force)
+    // and 2099 (no Barem). The in-force version is neither the oldest nor the
+    // newest, so reading the versions in the wrong order fails the test.
+    const carrierId = await createTestCarrierWithVersions({
+      code,
+      externalId: 990_305,
+      displayName: 'Test List Carriers',
+      versions: [
+        {
+          effectiveFrom: new Date('2000-01-01T00:00:00.000Z'),
+          supportsBaremDestek: false,
+          maxBaremDesi: 5,
+          desiRows: [{ desi: 1, priceNet: '80.00' }],
+          baremRows: [],
+        },
+        {
+          effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
+          supportsBaremDestek: true,
+          maxBaremDesi: 10,
+          desiRows: [{ desi: 1, priceNet: '100.00' }],
+          baremRows: [{ minOrderAmount: '0.00', maxOrderAmount: '199.99', priceNet: '50.00' }],
+        },
+        {
+          effectiveFrom: new Date('2099-01-01T00:00:00.000Z'),
+          supportsBaremDestek: false,
+          maxBaremDesi: 10,
+          desiRows: [{ desi: 1, priceNet: '999.00' }],
+          baremRows: [],
+        },
+      ],
     });
 
     try {
-      // 2000 (no Barem, max desi 5), 2020 (Barem, max desi 10: the version in force)
-      // and 2099 (no Barem). The in-force version is neither the oldest nor the
-      // newest, so reading the versions in the wrong order fails the test.
-      const versions = [
-        {
-          start: new Date('2000-01-01T00:00:00.000Z'),
-          supportsBaremDestek: false,
-          maxBaremDesi: 5,
-          desi1PriceNet: '80.00',
-          baremBands: [],
-        },
-        {
-          start: new Date('2020-01-01T00:00:00.000Z'),
-          supportsBaremDestek: true,
-          maxBaremDesi: 10,
-          desi1PriceNet: '100.00',
-          baremBands: [{ minOrderAmount: '0.00', maxOrderAmount: '199.99', priceNet: '50.00' }],
-        },
-        {
-          start: new Date('2099-01-01T00:00:00.000Z'),
-          supportsBaremDestek: false,
-          maxBaremDesi: 10,
-          desi1PriceNet: '999.00',
-          baremBands: [],
-        },
-      ];
-      for (const version of versions) {
-        await prisma.shippingTariffVersion.create({
-          data: {
-            carrierId: carrier.id,
-            effectiveFrom: version.start,
-            supportsBaremDestek: version.supportsBaremDestek,
-            maxBaremDesi: version.maxBaremDesi,
-            maxBaremEligibleDeliveryDuration: 1,
-            desiTariffs: {
-              create: [{ desi: 1, priceNet: version.desi1PriceNet }],
-            },
-            baremTariffs: {
-              create: version.baremBands.map((band) => ({
-                minOrderAmount: band.minOrderAmount,
-                maxOrderAmount: band.maxOrderAmount,
-                priceNet: band.priceNet,
-              })),
-            },
-          },
-        });
-      }
-
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
@@ -148,13 +132,13 @@ describe('GET /v1/organizations/:orgId/shipping-carriers', () => {
       );
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as ListCarriersResponse;
+      const body = ListCarriersResponseSchema.parse(await res.json());
       const testCarrier = body.data.find((c) => c.code === code);
       expect(testCarrier).toBeDefined();
       expect(testCarrier?.supportsBaremDestek).toBe(true);
       expect(testCarrier?.maxBaremDesi).toBe(10);
     } finally {
-      await prisma.shippingCarrier.delete({ where: { id: carrier.id } });
+      await prisma.shippingCarrier.delete({ where: { id: carrierId } });
     }
   });
 

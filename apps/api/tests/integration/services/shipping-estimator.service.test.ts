@@ -18,6 +18,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { estimateShippingCostForVariant } from '@/services/shipping-estimator.service';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
+import { createTestCarrierWithVersions } from '../../helpers/factories';
 
 // ─── Test-data builders ──────────────────────────────────────────────────────
 
@@ -349,27 +350,19 @@ describe('estimateShippingCostForVariant - dated tariff versions', () => {
     await ensureDbReachable();
     await deleteFutureOnlyCarrier();
 
-    const carrier = await prisma.shippingCarrier.create({
-      data: {
-        platform: Platform.TRENDYOL,
-        externalId: FUTURE_ONLY_CARRIER_EXTERNAL_ID,
-        code: FUTURE_ONLY_CARRIER_CODE,
-        displayName: 'Test Future Only',
-      },
-    });
-    futureOnlyCarrierId = carrier.id;
-
-    await prisma.shippingTariffVersion.create({
-      data: {
-        carrierId: carrier.id,
-        effectiveFrom: FUTURE_VERSION_START,
-        supportsBaremDestek: false,
-        maxBaremDesi: 10,
-        maxBaremEligibleDeliveryDuration: 1,
-        desiTariffs: {
-          create: [{ desi: 1, priceNet: '999.00' }],
+    futureOnlyCarrierId = await createTestCarrierWithVersions({
+      code: FUTURE_ONLY_CARRIER_CODE,
+      externalId: FUTURE_ONLY_CARRIER_EXTERNAL_ID,
+      displayName: 'Test Future Only',
+      versions: [
+        {
+          effectiveFrom: FUTURE_VERSION_START,
+          supportsBaremDestek: false,
+          maxBaremDesi: 10,
+          desiRows: [{ desi: 1, priceNet: '999.00' }],
+          baremRows: [],
         },
-      },
+      ],
     });
   });
 

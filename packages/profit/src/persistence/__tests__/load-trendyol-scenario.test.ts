@@ -31,6 +31,7 @@ import {
   seedMelontikFeeDefinitions,
   seedMelontikParcel,
   truncateAll,
+  upsertCarrierWithTariffVersions,
   upsertMelontikCarrier,
 } from './helpers/melontik-parcel';
 
@@ -683,40 +684,32 @@ describe('loadTrendyolScenarioBases', () => {
     await deleteCarrier();
 
     try {
-      const carrier = await prisma.shippingCarrier.create({
-        data: {
-          platform: Platform.TRENDYOL,
-          externalId: 990_102,
-          code: carrierCode,
-          displayName: 'Test Scenario Barem Window',
-        },
-      });
-      const versions = [
-        { effectiveFrom: v1Start, window: 1, desiNet: '80.00', baremNet: '40.00' },
-        { effectiveFrom: v2Start, window: 3, desiNet: '90.00', baremNet: '45.00' },
-      ];
-      for (const version of versions) {
-        await prisma.shippingTariffVersion.create({
-          data: {
-            carrierId: carrier.id,
-            effectiveFrom: version.effectiveFrom,
+      const carrierId = await upsertCarrierWithTariffVersions({
+        code: carrierCode,
+        externalId: 990_102,
+        displayName: 'Test Scenario Barem Window',
+        versions: [
+          {
+            effectiveFrom: v1Start,
             supportsBaremDestek: true,
             maxBaremDesi: 10,
-            maxBaremEligibleDeliveryDuration: version.window,
-            desiTariffs: {
-              create: [{ desi: 1, priceNet: version.desiNet }],
-            },
-            baremTariffs: {
-              create: [
-                { minOrderAmount: '0.00', maxOrderAmount: '199.99', priceNet: version.baremNet },
-              ],
-            },
+            maxBaremEligibleDeliveryDuration: 1,
+            desiRows: [{ desi: 1, priceNet: '80.00' }],
+            baremRows: [{ minOrderAmount: '0.00', maxOrderAmount: '199.99', priceNet: '40.00' }],
           },
-        });
-      }
+          {
+            effectiveFrom: v2Start,
+            supportsBaremDestek: true,
+            maxBaremDesi: 10,
+            maxBaremEligibleDeliveryDuration: 3,
+            desiRows: [{ desi: 1, priceNet: '90.00' }],
+            baremRows: [{ minOrderAmount: '0.00', maxOrderAmount: '199.99', priceNet: '45.00' }],
+          },
+        ],
+      });
 
       await seedMelontikFeeDefinitions();
-      const { organizationId, storeId } = await createTrendyolOrg({ carrierId: carrier.id });
+      const { organizationId, storeId } = await createTrendyolOrg({ carrierId });
       const variantId = await createPricedVariant(organizationId, storeId, 0);
       await prisma.productVariant.update({
         where: { id: variantId },

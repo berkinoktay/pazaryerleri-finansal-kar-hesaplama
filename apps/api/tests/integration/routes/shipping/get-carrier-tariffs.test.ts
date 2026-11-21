@@ -29,10 +29,16 @@ import { prisma } from '@pazarsync/db';
 import { Platform } from '@pazarsync/db/enums';
 
 import { createApp } from '@/app';
+import { CarrierTariffsSchema } from '@/validators/shipping-config.validator';
 
 import { bearer, createAuthenticatedTestUser } from '../../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../../helpers/db';
-import { createMembership, createOrganization } from '../../../helpers/factories';
+import {
+  createMembership,
+  createOrganization,
+  createTestCarrierWithVersions,
+  type CreateTestCarrierWithVersionsSpec,
+} from '../../../helpers/factories';
 
 interface CarrierTariffsResponse {
   carrier: {
@@ -69,107 +75,52 @@ const VERSIONED_CARRIER_EXTERNAL_ID = 990_304;
 const NO_VERSION_CARRIER_CODE = 'TEST_TARIFFS_NO_VERSION';
 const NO_VERSION_CARRIER_EXTERNAL_ID = 990_307;
 
-interface TestBaremBand {
-  minOrderAmount: string;
-  maxOrderAmount: string;
-  priceNet: string;
-}
-
-interface TestTariffVersion {
-  start: Date;
-  supportsBaremDestek: boolean;
-  maxBaremDesi: number;
-  desi1PriceNet: string;
-  baremBands: readonly TestBaremBand[];
-}
-
-interface TestCarrierSpec {
-  code: string;
-  externalId: number;
-  displayName: string;
-  versions: readonly TestTariffVersion[];
-}
-
-const VERSIONED_CARRIER: TestCarrierSpec = {
+const VERSIONED_CARRIER: CreateTestCarrierWithVersionsSpec = {
   code: VERSIONED_CARRIER_CODE,
   externalId: VERSIONED_CARRIER_EXTERNAL_ID,
   displayName: 'Test Tariffs Route',
   versions: [
     {
-      start: new Date('2000-01-01T00:00:00.000Z'),
+      effectiveFrom: new Date('2000-01-01T00:00:00.000Z'),
       supportsBaremDestek: false,
       maxBaremDesi: 5,
-      desi1PriceNet: '80.00',
-      baremBands: [],
+      desiRows: [{ desi: 1, priceNet: '80.00' }],
+      baremRows: [],
     },
     {
-      start: new Date('2020-01-01T00:00:00.000Z'),
+      effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
       supportsBaremDestek: true,
       maxBaremDesi: 10,
-      desi1PriceNet: '100.00',
-      baremBands: [{ minOrderAmount: '0.00', maxOrderAmount: '199.99', priceNet: '50.00' }],
+      desiRows: [{ desi: 1, priceNet: '100.00' }],
+      baremRows: [{ minOrderAmount: '0.00', maxOrderAmount: '199.99', priceNet: '50.00' }],
     },
     {
-      start: new Date('2099-01-01T00:00:00.000Z'),
+      effectiveFrom: new Date('2099-01-01T00:00:00.000Z'),
       supportsBaremDestek: false,
       maxBaremDesi: 10,
-      desi1PriceNet: '999.00',
-      baremBands: [],
+      desiRows: [{ desi: 1, priceNet: '999.00' }],
+      baremRows: [],
     },
   ],
 };
 
-const NO_VERSION_CARRIER: TestCarrierSpec = {
+const NO_VERSION_CARRIER: CreateTestCarrierWithVersionsSpec = {
   code: NO_VERSION_CARRIER_CODE,
   externalId: NO_VERSION_CARRIER_EXTERNAL_ID,
   displayName: 'Test Tariffs No Version',
   versions: [
     {
-      start: new Date('2099-01-01T00:00:00.000Z'),
+      effectiveFrom: new Date('2099-01-01T00:00:00.000Z'),
       supportsBaremDestek: true,
       maxBaremDesi: 10,
-      desi1PriceNet: '999.00',
-      baremBands: [{ minOrderAmount: '0.00', maxOrderAmount: '199.99', priceNet: '40.00' }],
+      desiRows: [{ desi: 1, priceNet: '999.00' }],
+      baremRows: [{ minOrderAmount: '0.00', maxOrderAmount: '199.99', priceNet: '40.00' }],
     },
   ],
 };
 
 async function deleteTestCarrier(code: string): Promise<void> {
   await prisma.shippingCarrier.deleteMany({ where: { platform: Platform.TRENDYOL, code } });
-}
-
-/** Creates the carrier and its versions with their rows; returns its id. */
-async function createTestCarrier(spec: TestCarrierSpec): Promise<string> {
-  const carrier = await prisma.shippingCarrier.create({
-    data: {
-      platform: Platform.TRENDYOL,
-      externalId: spec.externalId,
-      code: spec.code,
-      displayName: spec.displayName,
-    },
-  });
-  for (const version of spec.versions) {
-    await prisma.shippingTariffVersion.create({
-      data: {
-        carrierId: carrier.id,
-        effectiveFrom: version.start,
-        supportsBaremDestek: version.supportsBaremDestek,
-        maxBaremDesi: version.maxBaremDesi,
-        maxBaremEligibleDeliveryDuration: 1,
-        desiTariffs: {
-          create: [{ desi: 1, priceNet: version.desi1PriceNet }],
-        },
-        baremTariffs: {
-          create: version.baremBands.map((band) => ({
-            minOrderAmount: band.minOrderAmount,
-            maxOrderAmount: band.maxOrderAmount,
-            priceNet: band.priceNet,
-          })),
-        },
-      },
-    });
-  }
-  return carrier.id;
 }
 
 describe('GET /v1/organizations/:orgId/shipping-carriers/:carrierId/tariffs', () => {
@@ -181,8 +132,8 @@ describe('GET /v1/organizations/:orgId/shipping-carriers/:carrierId/tariffs', ()
     await ensureDbReachable();
     await deleteTestCarrier(VERSIONED_CARRIER_CODE);
     await deleteTestCarrier(NO_VERSION_CARRIER_CODE);
-    versionedCarrierId = await createTestCarrier(VERSIONED_CARRIER);
-    noVersionCarrierId = await createTestCarrier(NO_VERSION_CARRIER);
+    versionedCarrierId = await createTestCarrierWithVersions(VERSIONED_CARRIER);
+    noVersionCarrierId = await createTestCarrierWithVersions(NO_VERSION_CARRIER);
   });
 
   afterAll(async () => {
@@ -205,7 +156,7 @@ describe('GET /v1/organizations/:orgId/shipping-carriers/:carrierId/tariffs', ()
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as CarrierTariffsResponse;
+    const body = CarrierTariffsSchema.parse(await res.json());
     // Everything comes from the 2020 version. The route serialises Prisma.Decimal
     // with toString(), which drops trailing zeros: 100.00 is "100" on the wire. The
     // 2000 row (80.00) and the 2099 row (999.00) must not appear at all.
@@ -228,7 +179,7 @@ describe('GET /v1/organizations/:orgId/shipping-carriers/:carrierId/tariffs', ()
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as CarrierTariffsResponse;
+    const body = CarrierTariffsSchema.parse(await res.json());
     // The 2099 version's rows and Barem flag must not leak into the response.
     expect(body.desiTariffs).toEqual([]);
     expect(body.baremTariffs).toEqual([]);

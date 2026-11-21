@@ -42,6 +42,10 @@ import {
   type ShippingEstimateRow,
 } from '../../src/services/shipping-estimator.sql';
 import { ensureDbReachable, truncateAll } from '../helpers/db';
+import {
+  createTestCarrierWithVersions,
+  type TestCarrierTariffVersionSpec,
+} from '../helpers/factories';
 
 // ─── Fixture builder ─────────────────────────────────────────────────────────
 
@@ -143,45 +147,19 @@ async function runSqlAt(fixture: VariantFixture, at: string): Promise<ShippingEs
   return row;
 }
 
-interface TariffVersionFixture {
-  start: Date;
-  supportsBaremDestek: boolean;
-  desi1PriceNet: string;
-}
-
-/**
- * Creates a TEST_ carrier with one tariff version per entry, each with a single
- * desi-1 row and no Barem bands. Deletes a leftover carrier with the same code first.
- */
-async function createVersionedCarrier(
-  code: string,
-  externalId: number,
-  versions: readonly TariffVersionFixture[],
-): Promise<string> {
-  await deleteCarrierByCode(code);
-  const carrier = await prisma.shippingCarrier.create({
-    data: {
-      platform: Platform.TRENDYOL,
-      externalId,
-      code,
-      displayName: code,
-    },
-  });
-  for (const version of versions) {
-    await prisma.shippingTariffVersion.create({
-      data: {
-        carrierId: carrier.id,
-        effectiveFrom: version.start,
-        supportsBaremDestek: version.supportsBaremDestek,
-        maxBaremDesi: 10,
-        maxBaremEligibleDeliveryDuration: 1,
-        desiTariffs: {
-          create: [{ desi: 1, priceNet: version.desi1PriceNet }],
-        },
-      },
-    });
-  }
-  return carrier.id;
+/** A tariff version with a single desi-1 row, no Barem bands and a 10-desi Barem cap. */
+function desiOneVersion(
+  effectiveFrom: Date,
+  supportsBaremDestek: boolean,
+  desi1PriceNet: string,
+): TestCarrierTariffVersionSpec {
+  return {
+    effectiveFrom,
+    supportsBaremDestek,
+    maxBaremDesi: 10,
+    desiRows: [{ desi: 1, priceNet: desi1PriceNet }],
+    baremRows: [],
+  };
 }
 
 async function deleteCarrierByCode(code: string): Promise<void> {
@@ -430,27 +408,32 @@ describe('Equivalence: dated tariff versions', () => {
 
   beforeAll(async () => {
     await ensureDbReachable();
-    futureCarrierId = await createVersionedCarrier(
-      FUTURE_CARRIER_CODE,
-      FUTURE_CARRIER_EXTERNAL_ID,
-      [
-        { start: IN_FORCE_START, supportsBaremDestek: true, desi1PriceNet: '100.00' },
-        { start: FUTURE_START, supportsBaremDestek: false, desi1PriceNet: '999.00' },
+    // Each carrier's display name is its code. A leftover carrier with the same code
+    // is deleted first.
+    await deleteCarrierByCode(FUTURE_CARRIER_CODE);
+    futureCarrierId = await createTestCarrierWithVersions({
+      code: FUTURE_CARRIER_CODE,
+      externalId: FUTURE_CARRIER_EXTERNAL_ID,
+      versions: [
+        desiOneVersion(IN_FORCE_START, true, '100.00'),
+        desiOneVersion(FUTURE_START, false, '999.00'),
       ],
-    );
-    midnightCarrierId = await createVersionedCarrier(
-      MIDNIGHT_CARRIER_CODE,
-      MIDNIGHT_CARRIER_EXTERNAL_ID,
-      [
-        { start: IN_FORCE_START, supportsBaremDestek: true, desi1PriceNet: '100.00' },
-        { start: ISTANBUL_MIDNIGHT_START, supportsBaremDestek: true, desi1PriceNet: '120.00' },
+    });
+    await deleteCarrierByCode(MIDNIGHT_CARRIER_CODE);
+    midnightCarrierId = await createTestCarrierWithVersions({
+      code: MIDNIGHT_CARRIER_CODE,
+      externalId: MIDNIGHT_CARRIER_EXTERNAL_ID,
+      versions: [
+        desiOneVersion(IN_FORCE_START, true, '100.00'),
+        desiOneVersion(ISTANBUL_MIDNIGHT_START, true, '120.00'),
       ],
-    );
-    noVersionCarrierId = await createVersionedCarrier(
-      NO_VERSION_CARRIER_CODE,
-      NO_VERSION_CARRIER_EXTERNAL_ID,
-      [{ start: FUTURE_START, supportsBaremDestek: false, desi1PriceNet: '999.00' }],
-    );
+    });
+    await deleteCarrierByCode(NO_VERSION_CARRIER_CODE);
+    noVersionCarrierId = await createTestCarrierWithVersions({
+      code: NO_VERSION_CARRIER_CODE,
+      externalId: NO_VERSION_CARRIER_EXTERNAL_ID,
+      versions: [desiOneVersion(FUTURE_START, false, '999.00')],
+    });
   });
 
   afterAll(async () => {

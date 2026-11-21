@@ -706,6 +706,8 @@ export interface TestTariffVersionSpec {
   readonly effectiveFrom: Date;
   readonly supportsBaremDestek: boolean;
   readonly maxBaremDesi: number;
+  /** The Barem delivery window in days; defaults to 1. */
+  readonly maxBaremEligibleDeliveryDuration?: number;
   readonly desiRows: CarrierTariffSpec['desiRows'];
   readonly baremRows: CarrierTariffSpec['baremRows'];
 }
@@ -730,7 +732,7 @@ export async function upsertCarrierWithTariffVersions(
       {
         supportsBaremDestek: version.supportsBaremDestek,
         maxBaremDesi: version.maxBaremDesi,
-        maxBaremEligibleDeliveryDuration: 1,
+        maxBaremEligibleDeliveryDuration: version.maxBaremEligibleDeliveryDuration ?? 1,
       },
       version.effectiveFrom,
     );

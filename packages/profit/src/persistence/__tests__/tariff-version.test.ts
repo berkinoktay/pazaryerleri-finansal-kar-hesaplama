@@ -21,7 +21,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { loadShippingTariffVersion } from '../../shipping/tariff-version';
 import { loadFeeParams, loadShippingTariff } from '../trendyol-reference-loaders';
-import { ensureDbReachable, seedMelontikFeeDefinitions } from './helpers/melontik-parcel';
+import {
+  ensureDbReachable,
+  seedMelontikFeeDefinitions,
+  upsertCarrierWithTariffVersions,
+} from './helpers/melontik-parcel';
 
 const CARRIER_CODE = 'TEST_VERSIONING';
 const CARRIER_EXTERNAL_ID = 990_101;
@@ -80,47 +84,39 @@ describe('dated shipping tariff and micro-export tier reads', () => {
     await ensureDbReachable();
     await deleteSuiteReferenceRows();
 
-    const carrier = await prisma.shippingCarrier.create({
-      data: {
-        platform: Platform.TRENDYOL,
-        externalId: CARRIER_EXTERNAL_ID,
-        code: CARRIER_CODE,
-        displayName: CARRIER_DISPLAY_NAME,
-        orderCargoNames: [CARRIER_ORDER_CARGO_NAME],
-      },
+    carrierId = await upsertCarrierWithTariffVersions({
+      code: CARRIER_CODE,
+      externalId: CARRIER_EXTERNAL_ID,
+      displayName: CARRIER_DISPLAY_NAME,
+      orderCargoNames: [CARRIER_ORDER_CARGO_NAME],
+      versions: [
+        {
+          effectiveFrom: V1_START,
+          supportsBaremDestek: true,
+          maxBaremDesi: 10,
+          desiRows: [{ desi: 1, priceNet: '100.00' }],
+          baremRows: [{ minOrderAmount: '0.00', maxOrderAmount: '199.99', priceNet: '50.00' }],
+        },
+        {
+          effectiveFrom: V2_START,
+          supportsBaremDestek: false,
+          maxBaremDesi: 10,
+          desiRows: [{ desi: 1, priceNet: '120.00' }],
+          baremRows: [],
+        },
+      ],
     });
-    carrierId = carrier.id;
 
-    const v1 = await prisma.shippingTariffVersion.create({
-      data: {
-        carrierId,
-        effectiveFrom: V1_START,
-        supportsBaremDestek: true,
-        maxBaremDesi: 10,
-        maxBaremEligibleDeliveryDuration: 1,
-        desiTariffs: {
-          create: [{ desi: 1, priceNet: '100.00' }],
-        },
-        baremTariffs: {
-          create: [{ minOrderAmount: '0.00', maxOrderAmount: '199.99', priceNet: '50.00' }],
-        },
-      },
-    });
-    v1Id = v1.id;
-
-    const v2 = await prisma.shippingTariffVersion.create({
-      data: {
-        carrierId,
-        effectiveFrom: V2_START,
-        supportsBaremDestek: false,
-        maxBaremDesi: 10,
-        maxBaremEligibleDeliveryDuration: 1,
-        desiTariffs: {
-          create: [{ desi: 1, priceNet: '120.00' }],
-        },
-      },
-    });
-    v2Id = v2.id;
+    // The helper returns only the carrier id; read the two version ids back by start.
+    const versionIdAt = async (effectiveFrom: Date): Promise<string> => {
+      const version = await prisma.shippingTariffVersion.findUniqueOrThrow({
+        where: { carrierId_effectiveFrom: { carrierId, effectiveFrom } },
+        select: { id: true },
+      });
+      return version.id;
+    };
+    v1Id = await versionIdAt(V1_START);
+    v2Id = await versionIdAt(V2_START);
 
     await prisma.microExportReturnFeeTierVersion.create({
       data: {

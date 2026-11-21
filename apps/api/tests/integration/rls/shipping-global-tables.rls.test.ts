@@ -1,17 +1,18 @@
-// RLS contract for the three shipping reference tables.
+// RLS contract for the shipping and micro-export reference tables.
 //
-// `shipping_carriers`, `shipping_desi_tariffs`, and `shipping_barem_tariffs`
-// are platform-scoped reference data (NOT tenant-private). Every authenticated
-// seller reads the same global rows — Trendyol publishes a single carrier
-// list and a single tariff table that applies identically to all stores.
+// The tables listed in GLOBAL_TABLES below (the carriers, their dated tariff
+// versions with the desi and Barem rows, and the dated micro-export return fee
+// tiers) are platform-scoped reference data (NOT tenant-private). Every
+// authenticated seller reads the same global rows — Trendyol publishes a single
+// carrier list and a single tariff table that applies identically to all stores.
 //
 // The RLS contract therefore mirrors `marketplace_commission_rate`:
 //   1. Any authenticated user can SELECT.
 //   2. Anonymous (no JWT) cannot SELECT (returns empty or an auth error).
 //   3. Authenticated client-initiated INSERT is denied — there is no INSERT
 //      policy for `authenticated`, so PostgREST refuses. Writes happen
-//      only via the postgres role (migration seeds + future admin tooling),
-//      which bypasses RLS.
+//      only via the postgres role (the reference seed files + future admin
+//      tooling), which bypasses RLS.
 //
 // Seed rows for the shipping tables live in
 // `packages/db/prisma/reference-seed/20261121090000_shipping_tariff_versions.sql`
@@ -36,15 +37,20 @@ const GLOBAL_TABLES = [
   'shipping_carriers',
   'shipping_desi_tariffs',
   'shipping_barem_tariffs',
-  // Mikro ihracat "Yurt Dışı İade Operasyon Bedeli" kademe oranları — aynı global
-  // referans RLS kontratı (authenticated read açık, anon + authenticated-write kapalı).
-  // globalSetup (ensureMicroExportReturnTiers) seed'ler; truncateAll dokunmaz.
+  // Micro-export return fee tiers: same global reference contract (authenticated
+  // read open, anon and authenticated writes closed). The test setup loads them
+  // from the reference seed (ensureMicroExportReturnTiers); truncateAll never touches them.
   'micro_export_return_fee_tiers',
   // Dated sets the tariff rows and the micro-export tiers belong to; same global
-  // reference contract. globalSetup creates them alongside the rows they group.
+  // reference contract. The reference seed writes them together with their rows.
   'shipping_tariff_versions',
   'micro_export_return_fee_tier_versions',
 ] as const;
+
+// Start of the versions the INSERT denial tests try to write. No seeded version
+// starts here, and it differs from the 2099-01-01 starts other suites create, so
+// with RLS off the insert would succeed and the read-back would catch it.
+const SNEAKY_VERSION_START = new Date('2099-06-01T00:00:00.000Z');
 
 describe('RLS — shipping global reference tables', () => {
   beforeAll(async () => {
@@ -80,9 +86,9 @@ describe('RLS — shipping global reference tables', () => {
 
   // ─── Case 1b: a specific seeded carrier (SENDEOMP) is visible ─────────────
   //
-  // Pins the "authenticated read works" assertion to a known row from the
-  // migration's INSERT list, so a regression that drops the seed entirely
-  // surfaces in this test instead of a downstream feature test.
+  // Pins the "authenticated read works" assertion to a known row written by
+  // the shipping reference seed file, so a regression that drops the seed
+  // entirely surfaces in this test instead of a downstream feature test.
 
   it('authenticated user sees the seeded SENDEOMP carrier row', async () => {
     const { user, client } = await createRlsScopedClient();
@@ -123,7 +129,7 @@ describe('RLS — shipping global reference tables', () => {
   //
   // No INSERT policy exists for `authenticated`, so PostgREST refuses any
   // client-initiated write. Tariff content is owned by the postgres role
-  // (migrations / future admin tooling) which bypasses RLS.
+  // (the reference seed files / future admin tooling) which bypasses RLS.
 
   it('authenticated user CANNOT INSERT into shipping_carriers via the Supabase client', async () => {
     const { user, client } = await createRlsScopedClient();
@@ -188,6 +194,70 @@ describe('RLS — shipping global reference tables', () => {
     }
     // As above: read back through the RLS-bypassing Prisma client.
     const persisted = await prisma.shippingDesiTariff.count({ where: { versionId, desi: 99 } });
+    expect(persisted).toBe(0);
+  });
+
+  it('authenticated user CANNOT INSERT into shipping_tariff_versions via the Supabase client', async () => {
+    const { user, client } = await createRlsScopedClient();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id, 'OWNER');
+
+    // Look up the seeded SENDEOMP carrier id so the would-be row passes FK
+    // validation — proving the REJECTION is from RLS, not from a 23503
+    // foreign-key failure.
+    const { data: carriers } = await client
+      .from('shipping_carriers')
+      .select('id')
+      .eq('platform', 'TRENDYOL')
+      .eq('code', 'SENDEOMP');
+    const carrierId: unknown = carriers?.[0]?.id;
+    expect(carrierId).toBeTruthy();
+    if (typeof carrierId !== 'string') {
+      throw new Error('Expected the seeded SENDEOMP carrier id');
+    }
+
+    const { data, error } = await client.from('shipping_tariff_versions').insert({
+      id: randomUUID(),
+      carrier_id: carrierId,
+      effective_from: SNEAKY_VERSION_START.toISOString(),
+      supports_barem_destek: false,
+      max_barem_desi: 10,
+      max_barem_eligible_delivery_duration: 1,
+      updated_at: new Date().toISOString(),
+    });
+
+    if (error === null) {
+      expect(data).toBeNull();
+    } else {
+      expect(error).not.toBeNull();
+    }
+    // As above: read back through the RLS-bypassing Prisma client.
+    const persisted = await prisma.shippingTariffVersion.count({
+      where: { carrierId, effectiveFrom: SNEAKY_VERSION_START },
+    });
+    expect(persisted).toBe(0);
+  });
+
+  it('authenticated user CANNOT INSERT into micro_export_return_fee_tier_versions via the Supabase client', async () => {
+    const { user, client } = await createRlsScopedClient();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id, 'OWNER');
+
+    const { data, error } = await client.from('micro_export_return_fee_tier_versions').insert({
+      id: randomUUID(),
+      effective_from: SNEAKY_VERSION_START.toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    if (error === null) {
+      expect(data).toBeNull();
+    } else {
+      expect(error).not.toBeNull();
+    }
+    // As above: read back through the RLS-bypassing Prisma client.
+    const persisted = await prisma.microExportReturnFeeTierVersion.count({
+      where: { effectiveFrom: SNEAKY_VERSION_START },
+    });
     expect(persisted).toBe(0);
   });
 });
