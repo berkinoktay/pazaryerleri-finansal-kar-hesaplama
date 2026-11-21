@@ -26,6 +26,15 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Barem table 1 / table 2** (order profit, the products list shipping estimate, the single
+  shipping estimate and the pricing scenario routes). From Trendyol's 10 Aug 2026 rule a shipment
+  inside the Barem limits is priced at table 1 when it carries a fast-delivery promise and shipped
+  by the agreed ship-by date, and at table 2 otherwise; a return of a table 1 shipment is priced at
+  table 1 when the tariff version says so. Catalog estimates and scenarios use table 1 for a
+  variant with a fast-delivery duration within the carrier's window and table 2 otherwise. Tariff
+  versions without table 2 rows keep the previous result. Response shapes are unchanged.
+- **Carrier tariffs** (`GET /v1/organizations/{orgId}/shipping-carriers/{carrierId}/tariffs`).
+  `baremTariffs` lists the Barem table 1 rows only. Shape unchanged.
 - **Product and store edits no longer reprice stored orders**
   (`PATCH /v1/organizations/{orgId}/stores/{storeId}/shipping-config`, the variant desi
   override routes, and the catalog sync). A stored order now keeps the product and seller

@@ -416,8 +416,10 @@ const ShippingTariffAppliedSchema = z
   .openapi({
     description:
       'Which tariff lane produced the estimate. NORMAL = desi-bazlı tariff (the carrier ' +
-      "row indexed by CEIL(desi)). BAREM = Trendyol's Barem destek tier for fast-delivery " +
-      'variants priced inside a tier. OWN_CONTRACT = tenant-private tariff. Null when no ' +
+      "row indexed by CEIL(desi)). BAREM = Trendyol's Barem destek band: table 1 for a " +
+      'fast-delivery variant, table 2 for any other, when the price sits inside a band of ' +
+      'that table and the desi is within the Barem limit. OWN_CONTRACT = tenant-private ' +
+      'tariff. Null when no ' +
       'estimate could be produced (see shippingEstimateStatus for the reason).',
     example: 'BAREM',
   });

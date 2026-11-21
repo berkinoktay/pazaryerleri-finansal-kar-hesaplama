@@ -32,6 +32,7 @@ import type {
   ShippingTariffVersion,
   Store,
 } from '@pazarsync/db';
+import { BaremTier } from '@pazarsync/db/enums';
 import { loadShippingTariffVersion } from '@pazarsync/profit';
 
 import { NotFoundError, ShippingCarrierPlatformMismatchError } from '../lib/errors';
@@ -177,8 +178,9 @@ export async function listOwnShippingTariff(
 
 /**
  * Returns the desi-based (NORMAL lane) tariff rows plus the Barem
- * destek tier table for a single carrier, from its tariff version in
- * force now (both lists empty when no version is in force). The tariff
+ * destek table 1 bands for a single carrier, from its tariff version in
+ * force now (both lists empty when no version is in force). Table 2 bands
+ * are not returned: the store settings screen shows table 1 only. The tariff
  * data itself is platform-wide reference (not tenant-scoped), but
  * membership is still required to keep the endpoint behind the same
  * authz boundary as the rest of `/v1/organizations/{orgId}/...`.
@@ -216,10 +218,12 @@ export async function getCarrierTariffs(
   return {
     carrier,
     desiTariffs: version.desiRows.map((row) => ({ desi: row.desi, priceNet: row.priceNet })),
-    baremTariffs: version.baremRows.map((row) => ({
-      minOrderAmount: row.minOrderAmount,
-      maxOrderAmount: row.maxOrderAmount,
-      priceNet: row.priceNet,
-    })),
+    baremTariffs: version.baremRows
+      .filter((row) => row.tier === BaremTier.TABLE_1)
+      .map((row) => ({
+        minOrderAmount: row.minOrderAmount,
+        maxOrderAmount: row.maxOrderAmount,
+        priceNet: row.priceNet,
+      })),
   };
 }

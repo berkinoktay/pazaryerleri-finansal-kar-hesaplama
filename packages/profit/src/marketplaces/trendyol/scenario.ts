@@ -11,6 +11,11 @@ import {
 import { type ItemCostProfileInput } from '../../core/seller-costs/build-seller-cost-lines';
 import { ceilToKurus, floorToKurus, KURUS_DECIMALS, ONE_KURUS } from '../../money';
 import {
+  selectTrendyolBaremTier,
+  type TrendyolBaremTier,
+  type TrendyolBaremTierFacts,
+} from './barem-tier';
+import {
   estimateTrendyolParcel,
   type EstimateResult,
   type TrendyolEstimateInput,
@@ -47,7 +52,7 @@ export interface TrendyolScenarioInput {
   readonly quantity: number; // integer >= 1; basket scenarios pass n
   readonly commissionRatePctOverride: Decimal | null; // a screen that prices a given band or plus rate
   readonly scenarioDate: Date; // cost version and reference date
-  readonly fastDelivery: boolean; // Barem eligibility, computed by the loader
+  readonly fastDelivery: boolean; // fast-delivery label, computed by the loader; picks the Barem table
   readonly isExportSale: boolean;
   readonly reference: TrendyolReferenceData;
   readonly costs: readonly ItemCostProfileInput[];
@@ -102,6 +107,15 @@ function scenarioItemAttributes(input: TrendyolScenarioInput): TrendyolItemAttri
 }
 
 /**
+ * The Barem facts of a scenario: a scenario has no ship-by date and has not shipped,
+ * so a fast-delivery scenario is table 1 and any other table 2 (on a two-tier
+ * version). The scenario parcel and its breakpoints read these same facts.
+ */
+function scenarioBaremFacts(fastDelivery: boolean): TrendyolBaremTierFacts {
+  return { fastDelivery, agreedDeliveryDate: null, actualShipDate: null };
+}
+
+/**
  * Builds the hypothetical one-item parcel the Phase 2A module estimates. The sale is
  * `unitPrice x quantity` with no seller discount; the product's VAT rate, desi and
  * digital flag ride on the item, and its commission chain (the override, the synced
@@ -139,12 +153,8 @@ export function buildTrendyolScenarioParcel(input: TrendyolScenarioInput): Trend
       ],
     },
     attributes: {
-      fastDelivery: input.fastDelivery,
+      ...scenarioBaremFacts(input.fastDelivery),
       fastDeliveryType: null,
-      // A scenario has no ship-by date and has not shipped: a fast-delivery scenario
-      // is table 1, any other table 2 (on a two-tier version).
-      agreedDeliveryDate: null,
-      actualShipDate: null,
       usesSellerCargoAgreement: false,
       items: [scenarioItemAttributes(input)],
     },
@@ -190,13 +200,14 @@ export function evaluateTrendyolScenario(input: TrendyolScenarioInput): Trendyol
 }
 
 /**
- * Whether the scenario's shipping can switch across Barem bands on the price axis:
- * a physical item on a fast delivery, under a Trendyol-contract carrier that supports
- * Barem, with a known desi that stays within the carrier's Barem desi limit.
+ * Whether the scenario's shipping is inside the Barem limits on the whole price axis:
+ * a physical item under a Trendyol-contract carrier that supports Barem, with a known
+ * desi that stays within the carrier's Barem desi limit. Which table's bands it can
+ * switch across is `scenarioBaremTier`.
  */
 function isBaremBreakpointEligible(base: TrendyolScenarioBase): boolean {
   const { product } = base;
-  if (product.isDigital || !base.fastDelivery) {
+  if (product.isDigital) {
     return false;
   }
 
@@ -211,6 +222,18 @@ function isBaremBreakpointEligible(base: TrendyolScenarioBase): boolean {
   }
 
   return product.unitDesi.mul(base.quantity).lte(carrier.maxBaremDesi);
+}
+
+/**
+ * The Barem table the scenario is priced at, the one the estimate picks from the same
+ * facts: table 1 with fast delivery, table 2 without it on a two-tier version, and null
+ * (not looked up in Barem) without it on a single-tier version.
+ */
+function scenarioBaremTier(base: TrendyolScenarioBase): TrendyolBaremTier | null {
+  return selectTrendyolBaremTier({
+    attributes: scenarioBaremFacts(base.fastDelivery),
+    baremBands: base.reference.shipping.baremBands,
+  }).tier;
 }
 
 /** Positive, ascending, value-unique copy of the breakpoint candidates. */
@@ -231,7 +254,8 @@ function sortedUniquePositive(values: readonly Decimal[]): Decimal[] {
 /**
  * The unit prices where the Trendyol regime changes on the price axis, for the price
  * solver to split the axis at. Only Barem breakpoints apply (and only when the scenario
- * is Barem eligible): each basket band `[min, max]` maps onto the unit price by the
+ * is inside the Barem limits and priced at a Barem table): each basket band
+ * `[min, max]` of that table maps onto the unit price by the
  * quantity, `ceilToKurus(min / quantity)` starting a band and
  * `floorToKurus(max / quantity) + 0.01` leaving it, so every evaluated price lands on a
  * kurus. Commission does not change on the price axis -- an order never uses tariff
@@ -242,8 +266,12 @@ export function trendyolScenarioBreakpoints(base: TrendyolScenarioBase): readonl
   const quantity = new Decimal(base.quantity);
   const candidates: Decimal[] = [];
 
-  if (isBaremBreakpointEligible(base)) {
+  const baremTier = scenarioBaremTier(base);
+  if (baremTier !== null && isBaremBreakpointEligible(base)) {
     for (const band of base.reference.shipping.baremBands) {
+      if (band.tier !== baremTier) {
+        continue;
+      }
       candidates.push(ceilToKurus(band.minOrderAmount.div(quantity)));
       candidates.push(floorToKurus(band.maxOrderAmount.div(quantity)).add(ONE_KURUS));
     }

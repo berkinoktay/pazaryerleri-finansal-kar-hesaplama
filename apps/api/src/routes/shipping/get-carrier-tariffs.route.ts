@@ -28,7 +28,7 @@ const getCarrierTariffsRoute = createRoute({
   summary: "Get a carrier's tariff tables",
   description:
     'Returns the desi-bazlı (NORMAL lane) tariff rows plus the Barem desteği ' +
-    'tier table for a single shipping carrier. Tariff data is platform-wide ' +
+    'table 1 rows for a single shipping carrier. Tariff data is platform-wide ' +
     'reference (not tenant-scoped), but membership in the path org is still ' +
     'required. Returns 404 when the carrier id is unknown or has been ' +
     'deactivated — existence non-disclosure for inactive rows is consistent ' +
