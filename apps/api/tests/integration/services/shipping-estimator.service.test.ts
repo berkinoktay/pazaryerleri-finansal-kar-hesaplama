@@ -327,10 +327,10 @@ describe('estimateShippingCostForVariant', () => {
 // --- Dated tariff versions -------------------------------------------------------
 // The estimator reads the tariff version of the store's default carrier that is in
 // force now. This suite owns a TEST_ carrier whose only version starts in 2099, so no
-// version is in force today. Its desi-1 row still carries the legacy carrierId, so an
-// estimator that read rows by carrier instead of by the version in force would price
-// the variant. The shipping reference tables are never truncated: the carrier is
-// created here and deleted afterwards (its versions and rows cascade).
+// version is in force today. Its 2099 version still has a desi-1 row, so an estimator
+// that ignored the version start would price the variant. The shipping reference
+// tables are never truncated: the carrier is created here and deleted afterwards (its
+// versions and rows cascade).
 
 const FUTURE_ONLY_CARRIER_CODE = 'TEST_SVC_FUTURE_ONLY';
 const FUTURE_ONLY_CARRIER_EXTERNAL_ID = 990_301;
@@ -349,17 +349,12 @@ describe('estimateShippingCostForVariant - dated tariff versions', () => {
     await ensureDbReachable();
     await deleteFutureOnlyCarrier();
 
-    // Legacy carrier Barem columns are still required until they move to the
-    // version only; the estimator must not read them.
     const carrier = await prisma.shippingCarrier.create({
       data: {
         platform: Platform.TRENDYOL,
         externalId: FUTURE_ONLY_CARRIER_EXTERNAL_ID,
         code: FUTURE_ONLY_CARRIER_CODE,
         displayName: 'Test Future Only',
-        supportsBaremDestek: false,
-        maxBaremDesi: 10,
-        maxBaremEligibleDeliveryDuration: 1,
       },
     });
     futureOnlyCarrierId = carrier.id;
@@ -372,14 +367,7 @@ describe('estimateShippingCostForVariant - dated tariff versions', () => {
         maxBaremDesi: 10,
         maxBaremEligibleDeliveryDuration: 1,
         desiTariffs: {
-          create: [
-            {
-              carrierId: carrier.id,
-              desi: 1,
-              priceNet: '999.00',
-              effectiveFrom: FUTURE_VERSION_START,
-            },
-          ],
+          create: [{ desi: 1, priceNet: '999.00' }],
         },
       },
     });

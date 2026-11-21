@@ -3,7 +3,7 @@
  *
  * Per spec §6.2 / plan Task 3.8. The carrier catalogue is global, read-only
  * reference data — every authenticated org member sees the same 10
- * TRENDYOL rows seeded by the `20260517085409_shipping_tariffs` migration.
+ * TRENDYOL rows seeded by the `20261121090000_shipping_tariff_versions` reference seed.
  *
  * The test asserts:
  *   1. Happy path — `platform=TRENDYOL` returns exactly 10 carriers and the
@@ -75,10 +75,8 @@ describe('GET /v1/organizations/:orgId/shipping-carriers', () => {
   });
 
   // The test carrier lives only inside this test (created here, deleted in finally),
-  // because the test above expects exactly the 10 seeded TRENDYOL carriers. The legacy
-  // carrier Barem columns (still required until they are dropped) deliberately
-  // disagree with the version in force, so a response read off the carrier row would
-  // show. Its 2000 and 2099 versions do not support Barem and must not be reported.
+  // because the test above expects exactly the 10 seeded TRENDYOL carriers. Its 2000
+  // and 2099 versions do not support Barem and must not be reported.
   it('reports Barem support from the version in force', async () => {
     const code = 'TEST_LIST_CARRIERS';
     await prisma.shippingCarrier.deleteMany({ where: { platform: Platform.TRENDYOL, code } });
@@ -88,9 +86,6 @@ describe('GET /v1/organizations/:orgId/shipping-carriers', () => {
         externalId: 990_305,
         code,
         displayName: 'Test List Carriers',
-        supportsBaremDestek: false,
-        maxBaremDesi: 0,
-        maxBaremEligibleDeliveryDuration: 0,
       },
     });
 
@@ -130,22 +125,13 @@ describe('GET /v1/organizations/:orgId/shipping-carriers', () => {
             maxBaremDesi: version.maxBaremDesi,
             maxBaremEligibleDeliveryDuration: 1,
             desiTariffs: {
-              create: [
-                {
-                  carrierId: carrier.id,
-                  desi: 1,
-                  priceNet: version.desi1PriceNet,
-                  effectiveFrom: version.start,
-                },
-              ],
+              create: [{ desi: 1, priceNet: version.desi1PriceNet }],
             },
             baremTariffs: {
               create: version.baremBands.map((band) => ({
-                carrierId: carrier.id,
                 minOrderAmount: band.minOrderAmount,
                 maxOrderAmount: band.maxOrderAmount,
                 priceNet: band.priceNet,
-                effectiveFrom: version.start,
               })),
             },
           },

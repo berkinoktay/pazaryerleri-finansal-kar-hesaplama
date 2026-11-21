@@ -12,20 +12,28 @@ import { fileURLToPath } from 'node:url';
 const PACKAGE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPO_ROOT = path.resolve(PACKAGE_DIR, '../..');
 const SQL_DIR = path.join(REPO_ROOT, 'supabase/sql');
+// The reference-seed SQL the seeders replay into the template.
+const REFERENCE_SEED_DIR = path.join(PACKAGE_DIR, 'prisma/reference-seed');
 const HASH_LENGTH = 16;
 
 export const TEMPLATE_COMMENT_PREFIX = 'pazarsync-test-template:';
 
-function templateInputFiles(): string[] {
-  const sqlFiles = readdirSync(SQL_DIR)
+/** Every `.sql` file directly inside `dir`, sorted by name, as absolute paths. */
+function sortedSqlFiles(dir: string): string[] {
+  return readdirSync(dir)
     .filter((file) => file.endsWith('.sql'))
     .sort()
-    .map((file) => path.join(SQL_DIR, file));
+    .map((file) => path.join(dir, file));
+}
+
+function templateInputFiles(): string[] {
   return [
     path.join(PACKAGE_DIR, 'prisma/schema.prisma'),
     path.join(PACKAGE_DIR, 'src/test-support.ts'),
     path.join(PACKAGE_DIR, 'scripts/seed-reference.ts'),
-    ...sqlFiles,
+    path.join(PACKAGE_DIR, 'scripts/seed-test-fixtures.ts'),
+    ...sortedSqlFiles(REFERENCE_SEED_DIR),
+    ...sortedSqlFiles(SQL_DIR),
   ];
 }
 

@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { Decimal } from 'decimal.js';
 import { prisma } from '@pazarsync/db';
 import {
+  Platform,
   ProfitIssueCode,
   ProfitLineCertainty,
   ProfitLineType,
@@ -27,7 +28,10 @@ import {
   TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
   TRENDYOL_CARGO_RETURN_ITEM_TYPE,
 } from '../../marketplaces/trendyol/settlement-records';
-import { TRENDYOL_SAME_DAY_SHIPPING_TYPE } from '../../marketplaces/trendyol/trendyol-inputs';
+import {
+  TRENDYOL_SAME_DAY_SHIPPING_TYPE,
+  type TrendyolShippingTariff,
+} from '../../marketplaces/trendyol/trendyol-inputs';
 import { type ProfitLine } from '../../core/profit-line';
 import { FeeDefinitionNotFoundError } from '../../resolve-fee-definition';
 import { computeParcelProfit } from '../compute-parcel-profit';
@@ -42,6 +46,7 @@ import {
   seedMelontikParcel,
   truncateAll,
   upsertCarrierWithTariffs,
+  upsertCarrierWithTariffVersions,
 } from './helpers/melontik-parcel';
 
 /** Seeds one commission tariff whose single period covers the melontik order date, with
@@ -616,44 +621,75 @@ describe('loadTrendyolParcel', () => {
     ).rejects.toBeInstanceOf(UnsupportedPlatformError);
   });
 
-  it("loads a version's tariff rows whatever their legacy row effective date", async () => {
-    // A dedicated carrier whose only desi + Barem rows carry a legacy effective_from of
-    // 2027, after the 2026-10-28 order date. Their version starts 2000-01-01, and the
-    // version's start -- not the row's legacy effective_from column -- decides whether a
-    // row applies, so both rows load. Revisit when Gorev 4 drops that column.
-    await upsertCarrierWithTariffs({
-      code: 'TEST_SHIP_FUTURE',
-      externalId: 990002,
-      supportsBaremDestek: true,
-      maxBaremDesi: 10,
-      desiRows: [{ desi: 1, priceNet: '55.00', effectiveFrom: new Date('2027-01-01T00:00:00Z') }],
-      baremRows: [
-        {
-          minOrderAmount: '0.00',
-          maxOrderAmount: '5000.00',
-          priceNet: '44.00',
-          effectiveFrom: new Date('2027-01-01T00:00:00Z'),
-        },
-      ],
-    });
-    const parcel = await seedMelontikParcel();
-    // The order names this carrier (its display name defaults to the code), so it drives
-    // the estimate -- the store default is not used on an order.
-    await prisma.order.update({
-      where: { id: parcel.orderId },
-      data: { cargoProviderName: 'TEST_SHIP_FUTURE' },
-    });
+  it('prices the order with the tariff version in force at its order date', async () => {
+    // A dedicated carrier with two dated versions: v1 is open towards the past (Barem
+    // supported, one band, desi 1 = 55.00) and v2 starts on 1 December 2026 at 00:00
+    // in Istanbul (no Barem, desi 1 = 99.00). The same order is loaded with its order
+    // date one millisecond before v2 starts and exactly at v2's start, so the loaded
+    // tariff must follow the order date -- never the moment the order is loaded.
+    const carrierCode = 'TEST_ORDER_DATE_VERSION';
+    const cargoProviderName = 'Test Order Date Kargo Marketplace';
+    const deleteCarrier = async (): Promise<void> => {
+      // Versions, desi and Barem rows cascade.
+      await prisma.shippingCarrier.deleteMany({
+        where: { platform: Platform.TRENDYOL, code: carrierCode },
+      });
+    };
+    await deleteCarrier();
 
-    const loaded = await loadTrendyolParcel(prisma, {
-      organizationId: parcel.organizationId,
-      orderId: parcel.orderId,
-    });
+    try {
+      await upsertCarrierWithTariffVersions({
+        code: carrierCode,
+        externalId: 990_016,
+        displayName: 'Test Order Date Kargo',
+        orderCargoNames: [cargoProviderName],
+        versions: [
+          {
+            effectiveFrom: new Date('2000-01-01T00:00:00.000Z'),
+            supportsBaremDestek: true,
+            maxBaremDesi: 10,
+            desiRows: [{ desi: 1, priceNet: '55.00' }],
+            baremRows: [{ minOrderAmount: '0.00', maxOrderAmount: '5000.00', priceNet: '44.00' }],
+          },
+          {
+            effectiveFrom: new Date('2026-11-30T21:00:00.000Z'),
+            supportsBaremDestek: false,
+            maxBaremDesi: 10,
+            desiRows: [{ desi: 1, priceNet: '99.00' }],
+            baremRows: [],
+          },
+        ],
+      });
+      const parcel = await seedMelontikParcel();
 
-    const shipping = loaded.estimateInput.reference.shipping;
-    expect(shipping.carrier?.code).toBe('TEST_SHIP_FUTURE');
-    expect(shipping.desiTariffNet.get('1')?.toFixed(2)).toBe('55.00');
-    expect(shipping.baremBands).toHaveLength(1);
-    expect(shipping.baremBands[0]?.priceNet.toFixed(2)).toBe('44.00');
+      /** The shipping tariff loaded for the parcel's order dated `orderDate`. */
+      async function shippingTariffAt(orderDate: Date): Promise<TrendyolShippingTariff> {
+        await prisma.order.update({
+          where: { id: parcel.orderId },
+          data: { orderDate, cargoProviderName },
+        });
+        const loaded = await loadTrendyolParcel(prisma, {
+          organizationId: parcel.organizationId,
+          orderId: parcel.orderId,
+        });
+        return loaded.estimateInput.reference.shipping;
+      }
+
+      const beforeV2 = await shippingTariffAt(new Date('2026-11-30T20:59:59.999Z'));
+      expect(beforeV2.carrier?.code).toBe(carrierCode);
+      expect(beforeV2.carrier?.supportsBarem).toBe(true);
+      expect(beforeV2.desiTariffNet.get('1')?.toFixed(2)).toBe('55.00');
+      expect(beforeV2.baremBands).toHaveLength(1);
+      expect(beforeV2.baremBands[0]?.priceNet.toFixed(2)).toBe('44.00');
+
+      const atV2 = await shippingTariffAt(new Date('2026-11-30T21:00:00.000Z'));
+      expect(atV2.carrier?.code).toBe(carrierCode);
+      expect(atV2.carrier?.supportsBarem).toBe(false);
+      expect(atV2.desiTariffNet.get('1')?.toFixed(2)).toBe('99.00');
+      expect(atV2.baremBands).toHaveLength(0);
+    } finally {
+      await deleteCarrier();
+    }
   });
 
   it('resolves the micro-export fees and overseas return tiers for an export order', async () => {
@@ -1200,7 +1236,6 @@ describe('loadTrendyolParcel', () => {
     // keeps the match unambiguous against the 10 seeded carriers, which now carry their
     // own getProviders names.
     const parcel = await seedMelontikParcel();
-    const effectiveFrom = new Date('2024-01-01T00:00:00Z');
     await upsertCarrierWithTariffs({
       code: 'TEST_ORDER_CARRIER',
       displayName: 'Test Kolay Kargo',
@@ -1209,8 +1244,8 @@ describe('loadTrendyolParcel', () => {
       supportsBaremDestek: false,
       maxBaremDesi: 10,
       desiRows: [
-        { desi: 1, priceNet: '50.00', effectiveFrom },
-        { desi: 2, priceNet: '50.00', effectiveFrom },
+        { desi: 1, priceNet: '50.00' },
+        { desi: 2, priceNet: '50.00' },
       ],
       baremRows: [],
     });
@@ -1238,7 +1273,6 @@ describe('loadTrendyolParcel', () => {
     // fast-delivery and its basket sits inside the carrier's band, the estimate must use
     // the carrier's desi tariff, never a Barem band -- because it is outside the program.
     const parcel = await seedMelontikParcel({ fastDelivery: true });
-    const effectiveFrom = new Date('2024-01-01T00:00:00Z');
 
     await upsertCarrierWithTariffs({
       code: 'TEST_ORDER_NOBAREM',
@@ -1248,14 +1282,12 @@ describe('loadTrendyolParcel', () => {
       supportsBaremDestek: false,
       maxBaremDesi: 10,
       desiRows: [
-        { desi: 1, priceNet: '70.00', effectiveFrom },
-        { desi: 2, priceNet: '70.00', effectiveFrom },
+        { desi: 1, priceNet: '70.00' },
+        { desi: 2, priceNet: '70.00' },
       ],
       // A band is present on purpose: it must still be skipped because the carrier is
       // outside the Barem program.
-      baremRows: [
-        { minOrderAmount: '0.00', maxOrderAmount: '5000.00', priceNet: '20.00', effectiveFrom },
-      ],
+      baremRows: [{ minOrderAmount: '0.00', maxOrderAmount: '5000.00', priceNet: '20.00' }],
     });
     await prisma.order.update({
       where: { id: parcel.orderId },
@@ -1365,7 +1397,6 @@ describe('loadTrendyolParcel', () => {
     // Two distinct active carriers both claim the order's cargo name: the match is
     // ambiguous, so the carrier is not recognized and the estimate is a zero line.
     const parcel = await seedMelontikParcel();
-    const effectiveFrom = new Date('2024-01-01T00:00:00Z');
     for (const code of ['TEST_AMBIG_A', 'TEST_AMBIG_B']) {
       await upsertCarrierWithTariffs({
         code,
@@ -1374,7 +1405,7 @@ describe('loadTrendyolParcel', () => {
         externalId: code === 'TEST_AMBIG_A' ? 990014 : 990015,
         supportsBaremDestek: false,
         maxBaremDesi: 10,
-        desiRows: [{ desi: 2, priceNet: '50.00', effectiveFrom }],
+        desiRows: [{ desi: 2, priceNet: '50.00' }],
         baremRows: [],
       });
     }
@@ -1400,7 +1431,6 @@ describe('loadTrendyolParcel', () => {
     // by the active-only query, so the order's carrier is not recognized -- a zero estimate,
     // not the inactive namesake's cheap 50.00 -> 60.00 tariff.
     const parcel = await seedMelontikParcel();
-    const effectiveFrom = new Date('2024-01-01T00:00:00Z');
     await upsertCarrierWithTariffs({
       code: 'TEST_INACTIVE_NAMESAKE',
       displayName: 'Test Inactive Kargo',
@@ -1409,8 +1439,8 @@ describe('loadTrendyolParcel', () => {
       supportsBaremDestek: false,
       maxBaremDesi: 10,
       desiRows: [
-        { desi: 1, priceNet: '50.00', effectiveFrom },
-        { desi: 2, priceNet: '50.00', effectiveFrom },
+        { desi: 1, priceNet: '50.00' },
+        { desi: 2, priceNet: '50.00' },
       ],
       baremRows: [],
     });

@@ -13,8 +13,8 @@
 //      only via the postgres role (migration seeds + future admin tooling),
 //      which bypasses RLS.
 //
-// Seed rows for all three tables live in
-// `packages/db/prisma/migrations/20260517085409_shipping_tariffs/migration.sql`
+// Seed rows for the shipping tables live in
+// `packages/db/prisma/reference-seed/20261121090000_shipping_tariff_versions.sql`
 // and survive `truncateAll()` (which only touches tenant tables).
 //
 // Required by spec §9.4 — "Verify global tables are READable by
@@ -24,6 +24,9 @@
 import { randomUUID } from 'node:crypto';
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { prisma } from '@pazarsync/db';
+import { Platform } from '@pazarsync/db/enums';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization } from '../../helpers/factories';
@@ -133,9 +136,6 @@ describe('RLS — shipping global reference tables', () => {
       code: 'SNEAKY',
       display_name: 'Sneaky Carrier',
       tax_number: '0000000000',
-      supports_barem_destek: true,
-      max_barem_desi: 10,
-      max_barem_eligible_delivery_duration: 1,
       sort_order: 999,
       active: true,
       updated_at: new Date().toISOString(),
@@ -149,6 +149,12 @@ describe('RLS — shipping global reference tables', () => {
     } else {
       expect(error).not.toBeNull();
     }
+    // The branches above also pass with RLS off, so read the table back through
+    // the RLS-bypassing Prisma client: the row must not exist.
+    const persisted = await prisma.shippingCarrier.count({
+      where: { platform: Platform.TRENDYOL, code: 'SNEAKY' },
+    });
+    expect(persisted).toBe(0);
   });
 
   it('authenticated user CANNOT INSERT into shipping_desi_tariffs via the Supabase client', async () => {
@@ -156,19 +162,21 @@ describe('RLS — shipping global reference tables', () => {
     const org = await createOrganization();
     await createMembership(org.id, user.id, 'OWNER');
 
-    // Look up a real seeded carrier id so the would-be row at least passes
-    // FK validation — proving the REJECTION is from RLS, not from a
+    // Look up a real seeded tariff version id so the would-be row at least
+    // passes FK validation — proving the REJECTION is from RLS, not from a
     // 23503 foreign-key failure.
-    const { data: carriers } = await client.from('shipping_carriers').select('id').limit(1);
-    const carrierId = carriers?.[0]?.id;
-    expect(carrierId).toBeTruthy();
+    const { data: versions } = await client.from('shipping_tariff_versions').select('id').limit(1);
+    const versionId: unknown = versions?.[0]?.id;
+    expect(versionId).toBeTruthy();
+    if (typeof versionId !== 'string') {
+      throw new Error('Expected a seeded shipping tariff version id');
+    }
 
     const { data, error } = await client.from('shipping_desi_tariffs').insert({
       id: randomUUID(),
-      carrier_id: carrierId,
+      version_id: versionId,
       desi: 99,
       price_net: '0.01',
-      effective_from: '2026-01-01',
       updated_at: new Date().toISOString(),
     });
 
@@ -177,5 +185,8 @@ describe('RLS — shipping global reference tables', () => {
     } else {
       expect(error).not.toBeNull();
     }
+    // As above: read back through the RLS-bypassing Prisma client.
+    const persisted = await prisma.shippingDesiTariff.count({ where: { versionId, desi: 99 } });
+    expect(persisted).toBe(0);
   });
 });

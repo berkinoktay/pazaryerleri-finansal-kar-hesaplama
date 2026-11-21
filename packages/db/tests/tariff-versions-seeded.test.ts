@@ -1,10 +1,11 @@
-// Seed-level assertion for the dated tariff versions (tariff versioning, PR-1 task 1).
+// Seed-level assertion for the dated tariff versions (tariff versioning, PR-1).
 //
-// Migration 20261120215534_shipping_tariff_versions gives every carrier one version
-// starting 2000-01-01 (open towards the past), links every desi and Barem row to it,
+// The reference seed (reference-seed/20261121090000_shipping_tariff_versions.sql and
+// 20261121090100_micro_export_return_fee_tier_versions.sql) gives every carrier one
+// version starting 2000-01-01 (open towards the past) holding its desi and Barem rows,
 // and starts the micro-export tier set at Istanbul midnight of its 2024-07-16 date.
-// The test DB template is built with `prisma db push`, which never runs migration
-// SQL, so test-support recreates those rows; this pins that it does.
+// The test DB template is built with `prisma db push` plus that seed, loaded through
+// test-support; this pins that the loaded rows match.
 //
 // Read-only: the shared reference tables are never truncated or written here.
 
@@ -18,6 +19,23 @@ const FIRST_SHIPPING_VERSION_START = '2000-01-01T00:00:00.000Z';
 // 2024-07-16 00:00 in Istanbul (UTC+3) as a UTC instant.
 const FIRST_MICRO_EXPORT_VERSION_START = '2024-07-15T21:00:00.000Z';
 const EXPECTED_MICRO_EXPORT_TIER_COUNT = 2;
+// Every carrier's version prices desi 0 through 12.
+const EXPECTED_DESI_ROWS_PER_CARRIER = 13;
+// Carriers inside the Barem program carry two bands (0-199.99 and 200-349.99).
+const BAREM_CARRIER_CODES = [
+  'YKMP',
+  'ARASMP',
+  'SURATMP',
+  'DHLECOMMP',
+  'TEXMP',
+  'PTTMP',
+  'SENDEOMP',
+];
+const EXPECTED_BAREM_BANDS_PER_BAREM_CARRIER = 2;
+// Carriers outside the Barem program carry no band.
+const NON_BAREM_CARRIER_CODES = ['HOROZMP', 'CEVAMP', 'CEVATEDARIK'];
+const EXPECTED_DESI_TOTAL = 130;
+const EXPECTED_BAREM_TOTAL = 14;
 
 describe('reference seed carries the dated tariff versions', () => {
   beforeAll(async () => {
@@ -49,28 +67,59 @@ describe('reference seed carries the dated tariff versions', () => {
   });
 
   it("every seeded desi and Barem row belongs to its carrier's version", async () => {
-    const [desiRows, baremRows] = await Promise.all([
-      prisma.shippingDesiTariff.findMany({
-        select: { id: true, carrierId: true, version: { select: { carrierId: true } } },
-      }),
-      prisma.shippingBaremTariff.findMany({
-        select: { id: true, carrierId: true, version: { select: { carrierId: true } } },
-      }),
+    // A row reaches its carrier only through its (required) version, so a row of the
+    // wrong carrier would surface as a wrong price below, not as a dangling link.
+    const [desiCount, baremCount] = await Promise.all([
+      prisma.shippingDesiTariff.count(),
+      prisma.shippingBaremTariff.count(),
     ]);
-    expect(desiRows.length).toBeGreaterThan(0);
-    expect(baremRows.length).toBeGreaterThan(0);
+    expect(desiCount).toBeGreaterThan(0);
+    expect(baremCount).toBeGreaterThan(0);
 
-    // A row with no version, or a version of another carrier, is a mismatch.
-    const mismatched = [...desiRows, ...baremRows].filter(
-      (row) => row.version?.carrierId !== row.carrierId,
-    );
-    expect(mismatched).toEqual([]);
+    const sendeoBaremFirstBand = await prisma.shippingBaremTariff.findFirst({
+      where: {
+        minOrderAmount: 0,
+        version: { carrier: { platform: 'TRENDYOL', code: 'SENDEOMP' } },
+      },
+      select: { maxOrderAmount: true, priceNet: true },
+    });
+    expect(sendeoBaremFirstBand?.maxOrderAmount.toString()).toBe('199.99');
+    expect(sendeoBaremFirstBand?.priceNet.toString()).toBe('51.24');
 
     const sendeoDesiZero = await prisma.shippingDesiTariff.findFirst({
       where: { desi: 0, version: { carrier: { platform: 'TRENDYOL', code: 'SENDEOMP' } } },
       select: { priceNet: true },
     });
     expect(sendeoDesiZero?.priceNet.toString()).toBe('91.99');
+  });
+
+  it("every carrier's version holds its seeded desi and Barem rows", async () => {
+    const [carriers, desiTotal, baremTotal] = await Promise.all([
+      prisma.shippingCarrier.findMany({
+        select: {
+          code: true,
+          tariffVersions: {
+            select: { _count: { select: { desiTariffs: true, baremTariffs: true } } },
+          },
+        },
+      }),
+      prisma.shippingDesiTariff.count(),
+      prisma.shippingBaremTariff.count(),
+    ]);
+
+    expect(carriers.map((carrier) => carrier.code).sort()).toEqual(
+      [...BAREM_CARRIER_CODES, ...NON_BAREM_CARRIER_CODES].sort(),
+    );
+    for (const carrier of carriers) {
+      const rowCounts = carrier.tariffVersions[0]?._count;
+      const expectedBaremBands = BAREM_CARRIER_CODES.includes(carrier.code)
+        ? EXPECTED_BAREM_BANDS_PER_BAREM_CARRIER
+        : 0;
+      expect(rowCounts?.desiTariffs, carrier.code).toBe(EXPECTED_DESI_ROWS_PER_CARRIER);
+      expect(rowCounts?.baremTariffs, carrier.code).toBe(expectedBaremBands);
+    }
+    expect(desiTotal).toBe(EXPECTED_DESI_TOTAL);
+    expect(baremTotal).toBe(EXPECTED_BAREM_TOTAL);
   });
 
   it('micro-export tiers belong to one version starting at Istanbul midnight of 2024-07-16', async () => {

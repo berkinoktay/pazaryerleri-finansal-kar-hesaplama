@@ -151,10 +151,7 @@ interface TariffVersionFixture {
 
 /**
  * Creates a TEST_ carrier with one tariff version per entry, each with a single
- * desi-1 row and no Barem bands. The legacy carrier Barem columns and the legacy
- * row columns (carrierId, effectiveFrom) are still required until they are dropped;
- * the carrier's Barem flag deliberately disagrees with the versions so a read of the
- * carrier row would show. Deletes a leftover carrier with the same code first.
+ * desi-1 row and no Barem bands. Deletes a leftover carrier with the same code first.
  */
 async function createVersionedCarrier(
   code: string,
@@ -168,9 +165,6 @@ async function createVersionedCarrier(
       externalId,
       code,
       displayName: code,
-      supportsBaremDestek: false,
-      maxBaremDesi: 0,
-      maxBaremEligibleDeliveryDuration: 0,
     },
   });
   for (const version of versions) {
@@ -182,14 +176,7 @@ async function createVersionedCarrier(
         maxBaremDesi: 10,
         maxBaremEligibleDeliveryDuration: 1,
         desiTariffs: {
-          create: [
-            {
-              carrierId: carrier.id,
-              desi: 1,
-              priceNet: version.desi1PriceNet,
-              effectiveFrom: version.start,
-            },
-          ],
+          create: [{ desi: 1, priceNet: version.desi1PriceNet }],
         },
       },
     });

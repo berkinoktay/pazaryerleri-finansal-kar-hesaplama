@@ -669,13 +669,11 @@ describe('loadTrendyolScenarioBases', () => {
 
   it('scenario Barem eligibility follows the duration of the version in force', async () => {
     // A dedicated carrier with two Barem versions: v1 allows a 1-day delivery window,
-    // v2 (from 1 December 2026, 00:00 Istanbul) a 3-day one. The carrier row's legacy
-    // window stays at 1, so reading the carrier instead of the version would never
-    // make the 2-day variant eligible.
+    // v2 (from 1 December 2026, 00:00 Istanbul) a 3-day one, so the 2-day variant is
+    // eligible only from v2's start.
     const carrierCode = 'TEST_SCENARIO_BAREM_WINDOW';
     const v1Start = new Date('2000-01-01T00:00:00.000Z');
     const v2Start = new Date('2026-11-30T21:00:00.000Z');
-    const v2LegacyRowDate = new Date('2026-12-01T00:00:00.000Z');
     const deleteCarrier = async (): Promise<void> => {
       // Versions, desi and Barem rows cascade; the store's default carrier is set null.
       await prisma.shippingCarrier.deleteMany({
@@ -691,26 +689,11 @@ describe('loadTrendyolScenarioBases', () => {
           externalId: 990_102,
           code: carrierCode,
           displayName: 'Test Scenario Barem Window',
-          supportsBaremDestek: true,
-          maxBaremDesi: 10,
-          maxBaremEligibleDeliveryDuration: 1,
         },
       });
       const versions = [
-        {
-          effectiveFrom: v1Start,
-          window: 1,
-          desiNet: '80.00',
-          baremNet: '40.00',
-          rowDate: v1Start,
-        },
-        {
-          effectiveFrom: v2Start,
-          window: 3,
-          desiNet: '90.00',
-          baremNet: '45.00',
-          rowDate: v2LegacyRowDate,
-        },
+        { effectiveFrom: v1Start, window: 1, desiNet: '80.00', baremNet: '40.00' },
+        { effectiveFrom: v2Start, window: 3, desiNet: '90.00', baremNet: '45.00' },
       ];
       for (const version of versions) {
         await prisma.shippingTariffVersion.create({
@@ -721,24 +704,11 @@ describe('loadTrendyolScenarioBases', () => {
             maxBaremDesi: 10,
             maxBaremEligibleDeliveryDuration: version.window,
             desiTariffs: {
-              create: [
-                {
-                  carrierId: carrier.id,
-                  desi: 1,
-                  priceNet: version.desiNet,
-                  effectiveFrom: version.rowDate,
-                },
-              ],
+              create: [{ desi: 1, priceNet: version.desiNet }],
             },
             baremTariffs: {
               create: [
-                {
-                  carrierId: carrier.id,
-                  minOrderAmount: '0.00',
-                  maxOrderAmount: '199.99',
-                  priceNet: version.baremNet,
-                  effectiveFrom: version.rowDate,
-                },
+                { minOrderAmount: '0.00', maxOrderAmount: '199.99', priceNet: version.baremNet },
               ],
             },
           },

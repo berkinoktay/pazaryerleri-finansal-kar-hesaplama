@@ -32,8 +32,6 @@ const CARRIER_ORDER_CARGO_NAME = 'Test Versioning Kargo';
 const V1_START = new Date('2000-01-01T00:00:00.000Z');
 /** v2 starts on 1 December 2026 at 00:00 in Istanbul (UTC+3). */
 const V2_START = new Date('2026-11-30T21:00:00.000Z');
-/** The legacy DATE column the v2 rows still carry until the old columns are dropped. */
-const V2_LEGACY_ROW_DATE = new Date('2026-12-01T00:00:00.000Z');
 
 /** A micro-export tier set far in the future with a single band that retires both seeded bands. */
 const MICRO_2099_START = new Date('2099-01-01T00:00:00.000Z');
@@ -82,8 +80,6 @@ describe('dated shipping tariff and micro-export tier reads', () => {
     await ensureDbReachable();
     await deleteSuiteReferenceRows();
 
-    // The carrier still carries the legacy Barem columns (mirroring v1) until they move
-    // to the version only; the loaders under test must read them from the version.
     const carrier = await prisma.shippingCarrier.create({
       data: {
         platform: Platform.TRENDYOL,
@@ -91,9 +87,6 @@ describe('dated shipping tariff and micro-export tier reads', () => {
         code: CARRIER_CODE,
         displayName: CARRIER_DISPLAY_NAME,
         orderCargoNames: [CARRIER_ORDER_CARGO_NAME],
-        supportsBaremDestek: true,
-        maxBaremDesi: 10,
-        maxBaremEligibleDeliveryDuration: 1,
       },
     });
     carrierId = carrier.id;
@@ -106,18 +99,10 @@ describe('dated shipping tariff and micro-export tier reads', () => {
         maxBaremDesi: 10,
         maxBaremEligibleDeliveryDuration: 1,
         desiTariffs: {
-          create: [{ carrierId, desi: 1, priceNet: '100.00', effectiveFrom: V1_START }],
+          create: [{ desi: 1, priceNet: '100.00' }],
         },
         baremTariffs: {
-          create: [
-            {
-              carrierId,
-              minOrderAmount: '0.00',
-              maxOrderAmount: '199.99',
-              priceNet: '50.00',
-              effectiveFrom: V1_START,
-            },
-          ],
+          create: [{ minOrderAmount: '0.00', maxOrderAmount: '199.99', priceNet: '50.00' }],
         },
       },
     });
@@ -131,7 +116,7 @@ describe('dated shipping tariff and micro-export tier reads', () => {
         maxBaremDesi: 10,
         maxBaremEligibleDeliveryDuration: 1,
         desiTariffs: {
-          create: [{ carrierId, desi: 1, priceNet: '120.00', effectiveFrom: V2_LEGACY_ROW_DATE }],
+          create: [{ desi: 1, priceNet: '120.00' }],
         },
       },
     });
@@ -141,14 +126,7 @@ describe('dated shipping tariff and micro-export tier reads', () => {
       data: {
         effectiveFrom: MICRO_2099_START,
         tiers: {
-          create: [
-            {
-              minSaleGross: '0.00',
-              maxSaleGross: '99999999.99',
-              rate: '0.2500',
-              effectiveFrom: MICRO_2099_START,
-            },
-          ],
+          create: [{ minSaleGross: '0.00', maxSaleGross: '99999999.99', rate: '0.2500' }],
         },
       },
     });

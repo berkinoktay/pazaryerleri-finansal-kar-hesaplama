@@ -23,16 +23,12 @@ const PTT: CarrierRow = {
   code: 'PTTMP',
   displayName: 'PTT Kargo',
   orderCargoNames: ['PTT Kargo Marketplace'],
-  supportsBaremDestek: true,
-  maxBaremDesi: 10,
 };
 const TEX: CarrierRow = {
   id: 'carrier-tex',
   code: 'TEXMP',
   displayName: 'Trendyol Express',
   orderCargoNames: ['Trendyol Express Marketplace'],
-  supportsBaremDestek: true,
-  maxBaremDesi: 10,
 };
 
 describe('resolveOrderCarrier', () => {
@@ -65,16 +61,12 @@ describe('resolveOrderCarrier', () => {
       code: 'DUPAMP',
       displayName: 'Dup A',
       orderCargoNames: ['Shared Kargo Marketplace'],
-      supportsBaremDestek: true,
-      maxBaremDesi: 10,
     };
     const dupB: CarrierRow = {
       id: 'carrier-dup-b',
       code: 'DUPBMP',
       displayName: 'Dup B',
       orderCargoNames: ['Shared Kargo Marketplace'],
-      supportsBaremDestek: true,
-      maxBaremDesi: 10,
     };
     expect(resolveOrderCarrier('Shared Kargo Marketplace', [dupA, dupB])).toBeNull();
   });

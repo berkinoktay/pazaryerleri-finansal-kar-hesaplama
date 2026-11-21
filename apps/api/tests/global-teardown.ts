@@ -37,10 +37,11 @@ async function restoreReferenceData(): Promise<void> {
  * once after.
  *
  * SETUP half:
- *   Ensure shipping reference data (carriers + tariffs + Barem tiers)
- *   exists. CI runs `prisma db push` which does NOT execute migration
- *   SQL, so the seed INSERTs in migration 20260517085409_shipping_tariffs
- *   never land. Tests that depend on the global tariff catalog (every
+ *   Ensure shipping reference data (carriers + tariff versions + desi and
+ *   Barem tiers) exists. CI runs `prisma db push`, which creates empty
+ *   tables, so the INSERTs in the reference seed
+ *   20261121090000_shipping_tariff_versions have to be applied here. Tests
+ *   that depend on the global tariff catalog (every
  *   shipping integration test) would otherwise fail with "expected
  *   length 10 but got 0" in CI. The helper is idempotent — local devs
  *   who already ran `prisma migrate dev` see a fast no-op.

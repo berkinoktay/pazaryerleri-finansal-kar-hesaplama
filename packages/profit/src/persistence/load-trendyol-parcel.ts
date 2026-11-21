@@ -76,17 +76,14 @@ function compareFinanceRows(
  * The subset of a shipping carrier the parcel loader needs: its identity and the two
  * name sources the order's cargo name is matched against -- the display name and
  * `orderCargoNames` (the exact cargoProviderName values Trendyol writes on orders for
- * this carrier). The Barem fields are the carrier row's legacy columns; the estimate
- * reads its Barem attributes from the tariff version in force at the order date
- * (`loadShippingTariff`), not from here.
+ * this carrier). Barem attributes are not part of it: the estimate reads them from the
+ * tariff version in force at the order date (`loadShippingTariff`).
  */
 export interface CarrierRow {
   readonly id: string;
   readonly code: string;
   readonly displayName: string;
   readonly orderCargoNames: readonly string[];
-  readonly supportsBaremDestek: boolean;
-  readonly maxBaremDesi: number;
 }
 
 /**

@@ -1113,24 +1113,20 @@ model MarketplaceCommissionRate {
 }
 
 model ShippingCarrier {
-  id                               String   @id @default(uuid()) @db.Uuid
-  platform                         Platform
-  externalId                       Int      @map("external_id")
-  code                             String
-  displayName                      String   @map("display_name")
+  id              String   @id @default(uuid()) @db.Uuid
+  platform        Platform
+  externalId      Int      @map("external_id")
+  code            String
+  displayName     String   @map("display_name")
   // The exact cargoProviderName values Trendyol writes on orders and packages for this carrier; the order profit path matches against these and the display name.
-  orderCargoNames                  String[] @default([]) @map("order_cargo_names")
-  taxNumber                        String?  @map("tax_number")
-  supportsBaremDestek              Boolean  @default(true) @map("supports_barem_destek")
-  maxBaremDesi                     Int      @default(10) @map("max_barem_desi")
-  maxBaremEligibleDeliveryDuration Int      @default(1) @map("max_barem_eligible_delivery_duration")
-  sortOrder                        Int      @default(0) @map("sort_order")
-  active                           Boolean  @default(true)
-  createdAt                        DateTime @default(now()) @map("created_at")
-  updatedAt                        DateTime @updatedAt @map("updated_at")
+  orderCargoNames String[] @default([]) @map("order_cargo_names")
+  taxNumber       String?  @map("tax_number")
+  sortOrder       Int      @default(0) @map("sort_order")
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
-  desiTariffs    ShippingDesiTariff[]
-  baremTariffs   ShippingBaremTariff[]
+  // Barem attributes and the desi/Barem prices live on the dated versions.
   tariffVersions ShippingTariffVersion[]
   stores         Store[]
 
@@ -1141,41 +1137,33 @@ model ShippingCarrier {
 }
 
 model ShippingDesiTariff {
-  id            String   @id @default(uuid()) @db.Uuid
-  carrierId     String   @map("carrier_id") @db.Uuid
+  id        String   @id @default(uuid()) @db.Uuid
   // The dated tariff set this row belongs to (ShippingTariffVersion).
-  versionId     String?  @map("version_id") @db.Uuid
-  desi          Int
-  priceNet      Decimal  @map("price_net") @db.Decimal(10, 2)
-  effectiveFrom DateTime @default(now()) @map("effective_from") @db.Date
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  versionId String   @map("version_id") @db.Uuid
+  desi      Int
+  priceNet  Decimal  @map("price_net") @db.Decimal(10, 2)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  carrier ShippingCarrier        @relation(fields: [carrierId], references: [id], onDelete: Cascade)
-  version ShippingTariffVersion? @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  version ShippingTariffVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
 
   @@unique([versionId, desi])
-  @@index([carrierId, desi])
   @@map("shipping_desi_tariffs")
 }
 
 model ShippingBaremTariff {
   id             String   @id @default(uuid()) @db.Uuid
-  carrierId      String   @map("carrier_id") @db.Uuid
   // The dated tariff set this row belongs to (ShippingTariffVersion).
-  versionId      String?  @map("version_id") @db.Uuid
+  versionId      String   @map("version_id") @db.Uuid
   minOrderAmount Decimal  @map("min_order_amount") @db.Decimal(12, 2)
   maxOrderAmount Decimal  @map("max_order_amount") @db.Decimal(12, 2)
   priceNet       Decimal  @map("price_net") @db.Decimal(10, 2)
-  effectiveFrom  DateTime @default(now()) @map("effective_from") @db.Date
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  carrier ShippingCarrier        @relation(fields: [carrierId], references: [id], onDelete: Cascade)
-  version ShippingTariffVersion? @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  version ShippingTariffVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
 
   @@unique([versionId, minOrderAmount, maxOrderAmount])
-  @@index([carrierId])
   @@map("shipping_barem_tariffs")
 }
 
@@ -1856,27 +1844,25 @@ model FeeDefinition {
 // İadeye dönen mikro ihracat ürününde hakediş (KDV-dahil satış − komisyon) üzerinden
 // kademeli oran kesilir: ürünün KDV-dahil satış fiyatı ≤2000₺ → %35, >2000₺ → %30
 // (Trendyol 16.07.2024 duyurusu). Oran/eşik DB'de (Trendyol değişirse SQL UPDATE).
-// ShippingBaremTariff deseni (min/max tutar aralığı + effectiveFrom). Global referans:
+// ShippingBaremTariff deseni (min/max tutar aralığı; başlangıç tarihi sürümde:
+// MicroExportReturnFeeTierVersion). Global referans:
 // her satıcı aynı satırları okur; RLS authenticated SELECT açık (USING true), yazım
 // postgres rolünde. truncateAll() dokunmaz (tenant tablosu değil).
 model MicroExportReturnFeeTier {
-  id           String  @id @default(uuid()) @db.Uuid
+  id           String   @id @default(uuid()) @db.Uuid
   // Ürünün KDV-dahil satış fiyatı bandı (kademe eşikleri). min ≤ saleGross ≤ max.
-  minSaleGross Decimal @map("min_sale_gross") @db.Decimal(12, 2)
-  maxSaleGross Decimal @map("max_sale_gross") @db.Decimal(12, 2)
+  minSaleGross Decimal  @map("min_sale_gross") @db.Decimal(12, 2)
+  maxSaleGross Decimal  @map("max_sale_gross") @db.Decimal(12, 2)
   // Hakediş (satış − komisyon) üzerine uygulanan oran (kesir: 0.3500 = %35).
-  rate         Decimal @db.Decimal(7, 4)
+  rate         Decimal  @db.Decimal(7, 4)
   // The dated tier set this band belongs to (MicroExportReturnFeeTierVersion).
-  versionId    String? @map("version_id") @db.Uuid
+  versionId    String   @map("version_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
-  effectiveFrom DateTime @default(now()) @map("effective_from") @db.Date
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  version MicroExportReturnFeeTierVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
 
-  version MicroExportReturnFeeTierVersion? @relation(fields: [versionId], references: [id], onDelete: Cascade)
-
-  @@unique([minSaleGross, maxSaleGross, effectiveFrom])
-  @@index([minSaleGross, maxSaleGross])
+  @@unique([versionId, minSaleGross, maxSaleGross])
   @@map("micro_export_return_fee_tiers")
 }
 

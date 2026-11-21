@@ -5,11 +5,11 @@
  * table and (when applicable) the Barem desteği tier table for a single
  * carrier so the store settings UI can render the current values inline.
  *
- * The 10 TRENDYOL carriers + their tariff rows are seeded by the
- * `20260517085409_shipping_tariffs` migration — `truncateAll` deliberately
- * does NOT wipe `shipping_carriers` / `shipping_desi_tariffs` /
- * `shipping_barem_tariffs` (platform reference, not tenant data), so the
- * test reads the seeded data directly without per-test setup.
+ * The 10 TRENDYOL carriers + their tariff versions and rows are seeded by the
+ * `20261121090000_shipping_tariff_versions` reference seed — `truncateAll`
+ * deliberately does NOT wipe `shipping_carriers` / `shipping_tariff_versions` /
+ * `shipping_desi_tariffs` / `shipping_barem_tariffs` (platform reference, not
+ * tenant data), so the test reads the seeded data directly without per-test setup.
  *
  * Four cases:
  *   1. Dated versions - a TEST_ carrier with 2000, 2020 and 2099 versions
@@ -57,8 +57,7 @@ interface ProblemDetailsWire {
 
 // Two TEST_ carriers. The shipping reference tables are never truncated: the
 // carriers are created in beforeAll and deleted in afterAll (their versions and rows
-// cascade). The legacy carrier Barem columns are still required until they are
-// dropped; their values are chosen so a response read off the carrier row would show.
+// cascade).
 //
 // TEST_TARIFFS_ROUTE has three versions: 2000 (no Barem), 2020 (Barem, the version
 // in force today) and 2099 (no Barem). The in-force version is neither the oldest
@@ -88,8 +87,6 @@ interface TestCarrierSpec {
   code: string;
   externalId: number;
   displayName: string;
-  legacySupportsBaremDestek: boolean;
-  legacyMaxBaremDesi: number;
   versions: readonly TestTariffVersion[];
 }
 
@@ -97,8 +94,6 @@ const VERSIONED_CARRIER: TestCarrierSpec = {
   code: VERSIONED_CARRIER_CODE,
   externalId: VERSIONED_CARRIER_EXTERNAL_ID,
   displayName: 'Test Tariffs Route',
-  legacySupportsBaremDestek: false,
-  legacyMaxBaremDesi: 0,
   versions: [
     {
       start: new Date('2000-01-01T00:00:00.000Z'),
@@ -128,8 +123,6 @@ const NO_VERSION_CARRIER: TestCarrierSpec = {
   code: NO_VERSION_CARRIER_CODE,
   externalId: NO_VERSION_CARRIER_EXTERNAL_ID,
   displayName: 'Test Tariffs No Version',
-  legacySupportsBaremDestek: true,
-  legacyMaxBaremDesi: 10,
   versions: [
     {
       start: new Date('2099-01-01T00:00:00.000Z'),
@@ -145,7 +138,7 @@ async function deleteTestCarrier(code: string): Promise<void> {
   await prisma.shippingCarrier.deleteMany({ where: { platform: Platform.TRENDYOL, code } });
 }
 
-/** Creates the carrier and its versions (legacy row columns filled too); returns its id. */
+/** Creates the carrier and its versions with their rows; returns its id. */
 async function createTestCarrier(spec: TestCarrierSpec): Promise<string> {
   const carrier = await prisma.shippingCarrier.create({
     data: {
@@ -153,9 +146,6 @@ async function createTestCarrier(spec: TestCarrierSpec): Promise<string> {
       externalId: spec.externalId,
       code: spec.code,
       displayName: spec.displayName,
-      supportsBaremDestek: spec.legacySupportsBaremDestek,
-      maxBaremDesi: spec.legacyMaxBaremDesi,
-      maxBaremEligibleDeliveryDuration: 1,
     },
   });
   for (const version of spec.versions) {
@@ -167,22 +157,13 @@ async function createTestCarrier(spec: TestCarrierSpec): Promise<string> {
         maxBaremDesi: version.maxBaremDesi,
         maxBaremEligibleDeliveryDuration: 1,
         desiTariffs: {
-          create: [
-            {
-              carrierId: carrier.id,
-              desi: 1,
-              priceNet: version.desi1PriceNet,
-              effectiveFrom: version.start,
-            },
-          ],
+          create: [{ desi: 1, priceNet: version.desi1PriceNet }],
         },
         baremTariffs: {
           create: version.baremBands.map((band) => ({
-            carrierId: carrier.id,
             minOrderAmount: band.minOrderAmount,
             maxOrderAmount: band.maxOrderAmount,
             priceNet: band.priceNet,
-            effectiveFrom: version.start,
           })),
         },
       },
@@ -248,8 +229,7 @@ describe('GET /v1/organizations/:orgId/shipping-carriers/:carrierId/tariffs', ()
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as CarrierTariffsResponse;
-    // Neither the 2099 version's rows and Barem flag nor the legacy carrier columns
-    // (true / 10) may leak into the response.
+    // The 2099 version's rows and Barem flag must not leak into the response.
     expect(body.desiTariffs).toEqual([]);
     expect(body.baremTariffs).toEqual([]);
     expect(body.carrier.supportsBaremDestek).toBe(false);
