@@ -2415,8 +2415,9 @@ model ShippingTariffVersion {
   supportsBaremDestek              Boolean  @map("supports_barem_destek")
   maxBaremDesi                     Int      @map("max_barem_desi")
   maxBaremEligibleDeliveryDuration Int      @map("max_barem_eligible_delivery_duration")
-  // The return shipment of an order that went out at Barem table 1 is also priced
-  // at table 1. Off for versions before 10 August 2026.
+  // When true, the return shipment of an order that went out at Barem table 1 is also
+  // priced at table 1. Off on every version: Trendyol's cargo invoices price such
+  // returns at the desi tariff (checked November 2026); a switch for a future version.
   baremAppliesToReturns            Boolean  @default(false) @map("barem_applies_to_returns")
   // The admin who entered the version (auth.users id). Reference only, no FK.
   createdBy                        String?  @map("created_by") @db.Uuid

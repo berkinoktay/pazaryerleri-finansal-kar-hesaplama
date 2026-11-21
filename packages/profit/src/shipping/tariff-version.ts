@@ -17,7 +17,8 @@ export interface ShippingTariffVersionRows {
   readonly supportsBaremDestek: boolean;
   readonly maxBaremDesi: number;
   readonly maxBaremEligibleDeliveryDuration: number;
-  // The return of an order that went out at Barem table 1 is priced at table 1.
+  // When true, the return of an order that went out at Barem table 1 is priced at
+  // table 1; otherwise at the desi tariff. Off on every version today.
   readonly baremAppliesToReturns: boolean;
   readonly desiRows: ReadonlyArray<{
     readonly id: string;

@@ -70,7 +70,8 @@ export interface TrendyolShippingCarrier {
   readonly code: string;
   readonly supportsBarem: boolean;
   readonly maxBaremDesi: Decimal;
-  // The return shipment of an order that went out at Barem table 1 is priced at table 1.
+  // When true, the return shipment of an order that went out at Barem table 1 is priced
+  // at table 1; otherwise at the desi tariff. Off on every version today.
   readonly baremAppliesToReturns: boolean;
 }
 

@@ -30,7 +30,8 @@ section "Versioning" for details.
   shipping estimate and the pricing scenario routes). From Trendyol's 10 Aug 2026 rule a shipment
   inside the Barem limits is priced at table 1 when it carries a fast-delivery promise and shipped
   by the agreed ship-by date, and at table 2 otherwise; a return of a table 1 shipment is priced at
-  table 1 when the tariff version says so. Catalog estimates and scenarios use table 1 for a
+  table 1 only when the tariff version enables it (no version does today: Trendyol bills those
+  returns at the desi tariff). Catalog estimates and scenarios use table 1 for a
   variant with a fast-delivery duration within the carrier's window and table 2 otherwise. Tariff
   versions without table 2 rows keep the previous result. Response shapes are unchanged.
 - **Carrier tariffs** (`GET /v1/organizations/{orgId}/shipping-carriers/{carrierId}/tariffs`).
