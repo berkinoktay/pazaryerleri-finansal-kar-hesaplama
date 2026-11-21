@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { prisma, type Prisma } from '@pazarsync/db';
-import { type OrderStatus } from '@pazarsync/db/enums';
+import { type BaremTier, type OrderStatus } from '@pazarsync/db/enums';
 
 import { TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE } from '../../../marketplaces/trendyol/settlement-records';
 
@@ -649,6 +649,9 @@ async function upsertTestCarrier(spec: TestCarrierIdentity): Promise<string> {
   return carrier.id;
 }
 
+/** The Barem price table every test Barem row is written to. */
+const TEST_BAREM_TIER: BaremTier = 'TABLE_1';
+
 /** Upserts the given desi and Barem rows into the version `versionId`. */
 async function upsertTestVersionRows(
   versionId: string,
@@ -665,14 +668,16 @@ async function upsertTestVersionRows(
   for (const row of baremRows) {
     await prisma.shippingBaremTariff.upsert({
       where: {
-        versionId_minOrderAmount_maxOrderAmount: {
+        versionId_tier_minOrderAmount_maxOrderAmount: {
           versionId,
+          tier: TEST_BAREM_TIER,
           minOrderAmount: row.minOrderAmount,
           maxOrderAmount: row.maxOrderAmount,
         },
       },
       create: {
         versionId,
+        tier: TEST_BAREM_TIER,
         minOrderAmount: row.minOrderAmount,
         maxOrderAmount: row.maxOrderAmount,
         priceNet: row.priceNet,

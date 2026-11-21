@@ -122,6 +122,23 @@ describe('reference seed carries the dated tariff versions', () => {
     expect(baremTotal).toBe(EXPECTED_BAREM_TOTAL);
   });
 
+  it('every seeded Barem row is table 1 and no seeded version prices returns at Barem', async () => {
+    // The seed predates the 10 August 2026 two-table rule: its bands are table 1
+    // and its versions keep the returns flag off. Totals are pinned so an empty
+    // table cannot pass the "every row" checks.
+    const [baremTotal, tableOneTotal, versionTotal, returnsOffTotal] = await Promise.all([
+      prisma.shippingBaremTariff.count(),
+      prisma.shippingBaremTariff.count({ where: { tier: 'TABLE_1' } }),
+      prisma.shippingTariffVersion.count(),
+      prisma.shippingTariffVersion.count({ where: { baremAppliesToReturns: false } }),
+    ]);
+
+    expect(baremTotal).toBe(EXPECTED_BAREM_TOTAL);
+    expect(tableOneTotal).toBe(EXPECTED_BAREM_TOTAL);
+    expect(versionTotal).toBe(EXPECTED_CARRIER_COUNT);
+    expect(returnsOffTotal).toBe(EXPECTED_CARRIER_COUNT);
+  });
+
   it('micro-export tiers belong to one version starting at Istanbul midnight of 2024-07-16', async () => {
     const [versions, tierCount] = await Promise.all([
       prisma.microExportReturnFeeTierVersion.findMany({

@@ -120,6 +120,14 @@ enum ShippingTariffSource {
   OWN_CONTRACT
 }
 
+// Which Barem price table a band belongs to (Trendyol's 10 August 2026 rule).
+// TABLE_1 = the order carried a fast-delivery promise and was handed to the carrier
+// on time; TABLE_2 = the order carried no promise or was handed over late.
+enum BaremTier {
+  TABLE_1
+  TABLE_2
+}
+
 // Where an order item's frozen desi (order_items.snapshot_unit_desi) came from.
 // OVERRIDE = the seller's desi correction (product_variants.dimensional_weight_override);
 // SYNCED = the value synced from the marketplace (product_variants.synced_dimensional_weight).
@@ -1220,18 +1228,20 @@ model ShippingDesiTariff {
 }
 
 model ShippingBaremTariff {
-  id             String   @id @default(uuid()) @db.Uuid
+  id             String    @id @default(uuid()) @db.Uuid
   // The dated tariff set this row belongs to (ShippingTariffVersion).
-  versionId      String   @map("version_id") @db.Uuid
-  minOrderAmount Decimal  @map("min_order_amount") @db.Decimal(12, 2)
-  maxOrderAmount Decimal  @map("max_order_amount") @db.Decimal(12, 2)
-  priceNet       Decimal  @map("price_net") @db.Decimal(10, 2)
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  versionId      String    @map("version_id") @db.Uuid
+  // The Barem price table this band belongs to (BaremTier).
+  tier           BaremTier @default(TABLE_1) @map("tier")
+  minOrderAmount Decimal   @map("min_order_amount") @db.Decimal(12, 2)
+  maxOrderAmount Decimal   @map("max_order_amount") @db.Decimal(12, 2)
+  priceNet       Decimal   @map("price_net") @db.Decimal(10, 2)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
   version ShippingTariffVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
 
-  @@unique([versionId, minOrderAmount, maxOrderAmount])
+  @@unique([versionId, tier, minOrderAmount, maxOrderAmount])
   @@map("shipping_barem_tariffs")
 }
 
@@ -2405,6 +2415,9 @@ model ShippingTariffVersion {
   supportsBaremDestek              Boolean  @map("supports_barem_destek")
   maxBaremDesi                     Int      @map("max_barem_desi")
   maxBaremEligibleDeliveryDuration Int      @map("max_barem_eligible_delivery_duration")
+  // The return shipment of an order that went out at Barem table 1 is also priced
+  // at table 1. Off for versions before 10 August 2026.
+  baremAppliesToReturns            Boolean  @default(false) @map("barem_applies_to_returns")
   // The admin who entered the version (auth.users id). Reference only, no FK.
   createdBy                        String?  @map("created_by") @db.Uuid
   createdAt                        DateTime @default(now()) @map("created_at")
