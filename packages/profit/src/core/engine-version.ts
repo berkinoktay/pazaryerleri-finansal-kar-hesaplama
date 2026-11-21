@@ -18,5 +18,8 @@
  *    shipping as an estimate with a SELLER_CARGO_AGREEMENT_ESTIMATE issue.
  * 10: a stored order reads the product and seller inputs captured when it was first
  *     computed (order profit snapshot) instead of their live values.
+ * 11: Barem picks table 1 or table 2 by the order's fast-delivery promise and whether it
+ *     shipped by Trendyol's agreed ship-by date (two-tier versions only); a return of an
+ *     order that went out at table 1 is priced at table 1 when the version says so.
  */
-export const PROFIT_ENGINE_VERSION = 10;
+export const PROFIT_ENGINE_VERSION = 11;

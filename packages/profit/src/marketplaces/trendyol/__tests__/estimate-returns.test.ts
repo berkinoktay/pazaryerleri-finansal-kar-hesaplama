@@ -1,4 +1,6 @@
+import { Decimal } from 'decimal.js';
 import {
+  BaremTier,
   ProfitIssueCode,
   ProfitLineCertainty,
   ProfitLineLevel,
@@ -10,7 +12,10 @@ import { describe, expect, it } from 'vitest';
 import { InvalidParcelSnapshotError } from '../../../core/parcel-snapshot';
 import { type ProfitLine } from '../../../core/profit-line';
 import { makeItem, makeParcel } from '../../../__tests__/fixtures/parcel-builders';
-import { trendyolReference } from '../../../__tests__/fixtures/trendyol-reference';
+import {
+  trendyolReference,
+  twoTierBaremBands,
+} from '../../../__tests__/fixtures/trendyol-reference';
 import { makeLine } from '../../../__tests__/helpers/make-profit-line';
 import { CARRIER_NOT_RECOGNIZED_REASON } from '../estimate-shipping';
 import { estimateReturnLines } from '../estimate-returns';
@@ -28,6 +33,7 @@ describe('estimateReturnLines', () => {
     });
 
     const { lines, issues, returnedItems } = estimateReturnLines({
+      outboundBaremTier: null,
       snapshot,
       accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
       commissionLines: [
@@ -89,6 +95,7 @@ describe('estimateReturnLines', () => {
       desi: '1',
       tariffKind: 'DESI',
       carrierCode: 'TEXMP',
+      baremTier: null,
     });
 
     expect(returnedItems).toHaveLength(1);
@@ -103,6 +110,7 @@ describe('estimateReturnLines', () => {
     });
 
     const { lines } = estimateReturnLines({
+      outboundBaremTier: null,
       snapshot,
       accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
       commissionLines: [],
@@ -125,6 +133,7 @@ describe('estimateReturnLines', () => {
     });
 
     const { lines, issues } = estimateReturnLines({
+      outboundBaremTier: null,
       snapshot,
       accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
       commissionLines: [],
@@ -154,6 +163,7 @@ describe('estimateReturnLines', () => {
     });
 
     const { lines } = estimateReturnLines({
+      outboundBaremTier: null,
       snapshot,
       accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
       commissionLines: [],
@@ -171,6 +181,7 @@ describe('estimateReturnLines', () => {
     });
 
     const { lines } = estimateReturnLines({
+      outboundBaremTier: null,
       snapshot,
       accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
       commissionLines: [
@@ -199,6 +210,7 @@ describe('estimateReturnLines', () => {
     });
 
     const { lines, returnedItems } = estimateReturnLines({
+      outboundBaremTier: null,
       snapshot,
       accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
       commissionLines: [],
@@ -226,6 +238,7 @@ describe('estimateReturnLines', () => {
     });
 
     const { lines, returnedItems } = estimateReturnLines({
+      outboundBaremTier: null,
       snapshot,
       accepted: [
         { orderItemId: 'a', acceptedQuantity: 1 },
@@ -275,6 +288,7 @@ describe('estimateReturnLines', () => {
     });
 
     const { lines } = estimateReturnLines({
+      outboundBaremTier: null,
       snapshot,
       accepted: [{ orderItemId: 'a', acceptedQuantity: 2 }],
       commissionLines: [],
@@ -300,6 +314,7 @@ describe('estimateReturnLines', () => {
     });
 
     const { lines } = estimateReturnLines({
+      outboundBaremTier: null,
       snapshot,
       accepted: [
         { orderItemId: 'a', acceptedQuantity: 1 },
@@ -324,6 +339,7 @@ describe('estimateReturnLines', () => {
     // A fractional base rounds each item to the kurus on its own:
     // roundMoney((100.01 - 10.00) * 35%) = roundMoney(90.01 * 0.35) = roundMoney(31.5035) = 31.50.
     const fractional = estimateReturnLines({
+      outboundBaremTier: null,
       snapshot: makeParcel({
         isExportSale: true,
         items: [makeItem({ orderItemId: 'a', listGross: '100.01', saleVatRatePct: '20' })],
@@ -346,6 +362,7 @@ describe('estimateReturnLines', () => {
     });
 
     const { lines, issues, returnedItems } = estimateReturnLines({
+      outboundBaremTier: null,
       snapshot,
       accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
       commissionLines: [],
@@ -376,6 +393,7 @@ describe('estimateReturnLines', () => {
     });
 
     const { lines, issues, returnedItems } = estimateReturnLines({
+      outboundBaremTier: null,
       snapshot,
       accepted: [
         { orderItemId: 'a', acceptedQuantity: 1 },
@@ -403,6 +421,7 @@ describe('estimateReturnLines', () => {
     });
 
     const { lines, issues, returnedItems } = estimateReturnLines({
+      outboundBaremTier: null,
       snapshot,
       accepted: [
         { orderItemId: 'a', acceptedQuantity: 1 },
@@ -431,6 +450,7 @@ describe('estimateReturnLines', () => {
     });
 
     const result = estimateReturnLines({
+      outboundBaremTier: null,
       snapshot,
       accepted: [],
       commissionLines: [],
@@ -448,6 +468,7 @@ describe('estimateReturnLines', () => {
 
     expect(() =>
       estimateReturnLines({
+        outboundBaremTier: null,
         snapshot,
         accepted: [{ orderItemId: 'a', acceptedQuantity: 2 }],
         commissionLines: [],
@@ -455,5 +476,154 @@ describe('estimateReturnLines', () => {
         reference: trendyolReference(),
       }),
     ).toThrow(InvalidParcelSnapshotError);
+  });
+});
+
+describe('estimateReturnLines Barem returns', () => {
+  function twoTierReference(params: {
+    readonly baremAppliesToReturns: boolean;
+    readonly maxBaremDesi?: string;
+  }) {
+    return trendyolReference({
+      shipping: {
+        carrier: {
+          code: 'TEXMP',
+          supportsBarem: true,
+          maxBaremDesi: new Decimal(params.maxBaremDesi ?? '10'),
+          baremAppliesToReturns: params.baremAppliesToReturns,
+        },
+        baremBands: twoTierBaremBands(),
+      },
+    });
+  }
+
+  function returnShippingOf(params: {
+    readonly listGross: string;
+    readonly unitDesi: string;
+    readonly quantity?: number;
+    readonly acceptedQuantity?: number;
+    readonly outboundBaremTier: BaremTier | null;
+    readonly baremAppliesToReturns: boolean;
+    readonly maxBaremDesi?: string;
+  }) {
+    const snapshot = makeParcel({
+      items: [
+        makeItem({
+          orderItemId: 'a',
+          listGross: params.listGross,
+          unitDesi: params.unitDesi,
+          quantity: params.quantity ?? 1,
+        }),
+      ],
+    });
+    const { lines, returnedItems } = estimateReturnLines({
+      snapshot,
+      accepted: [{ orderItemId: 'a', acceptedQuantity: params.acceptedQuantity ?? 1 }],
+      commissionLines: [],
+      costLines: [],
+      reference: twoTierReference({
+        baremAppliesToReturns: params.baremAppliesToReturns,
+        ...(params.maxBaremDesi !== undefined && { maxBaremDesi: params.maxBaremDesi }),
+      }),
+      outboundBaremTier: params.outboundBaremTier,
+    });
+    return {
+      line: lineOfType(lines, ProfitLineType.RETURN_SHIPPING),
+      standalone: returnedItems[0]?.standaloneAmount ?? null,
+    };
+  }
+
+  it('prices the return at table 1 when the version says so and the order went out at table 1', () => {
+    const { line, standalone } = returnShippingOf({
+      listGross: '150.00',
+      unitDesi: '2',
+      outboundBaremTier: BaremTier.TABLE_1,
+      baremAppliesToReturns: true,
+    });
+
+    // Table 1 band [0, 199.99] -> 38.74 net -> 46.49 gross.
+    expect(line?.amount.gross.toFixed(2)).toBe('46.49');
+    expect(line?.inputs).toMatchObject({ tariffKind: 'BAREM', baremTier: BaremTier.TABLE_1 });
+    expect(standalone?.toFixed(2)).toBe('46.49');
+  });
+
+  it('picks the return band by the returned sale on a partial return', () => {
+    // Two units of 150 went out in band [200, 349.99]; one unit comes back, so the
+    // returned sale 150 falls in band [0, 199.99].
+    const { line } = returnShippingOf({
+      listGross: '300.00',
+      unitDesi: '1',
+      quantity: 2,
+      acceptedQuantity: 1,
+      outboundBaremTier: BaremTier.TABLE_1,
+      baremAppliesToReturns: true,
+    });
+
+    expect(line?.amount.gross.toFixed(2)).toBe('46.49');
+    expect(line?.inputs).toMatchObject({ tariffKind: 'BAREM', baremTier: BaremTier.TABLE_1 });
+  });
+
+  it('uses the desi tariff for a return whose order went out at table 2', () => {
+    const { line, standalone } = returnShippingOf({
+      listGross: '150.00',
+      unitDesi: '2',
+      outboundBaremTier: BaremTier.TABLE_2,
+      baremAppliesToReturns: true,
+    });
+
+    // Desi tariff key '2' -> 77.54 net -> 93.05 gross.
+    expect(line?.amount.gross.toFixed(2)).toBe('93.05');
+    expect(line?.inputs).toMatchObject({ tariffKind: 'DESI', baremTier: null });
+    expect(standalone?.toFixed(2)).toBe('93.05');
+  });
+
+  it('uses the desi tariff for a return whose order was not priced at Barem', () => {
+    const { line } = returnShippingOf({
+      listGross: '150.00',
+      unitDesi: '2',
+      outboundBaremTier: null,
+      baremAppliesToReturns: true,
+    });
+
+    expect(line?.amount.gross.toFixed(2)).toBe('93.05');
+    expect(line?.inputs).toMatchObject({ tariffKind: 'DESI', baremTier: null });
+  });
+
+  it('uses the desi tariff when the version does not price Barem returns', () => {
+    const { line } = returnShippingOf({
+      listGross: '150.00',
+      unitDesi: '2',
+      outboundBaremTier: BaremTier.TABLE_1,
+      baremAppliesToReturns: false,
+    });
+
+    expect(line?.amount.gross.toFixed(2)).toBe('93.05');
+    expect(line?.inputs).toMatchObject({ tariffKind: 'DESI', baremTier: null });
+  });
+
+  it('uses the desi tariff when the return desi exceeds the Barem limit', () => {
+    const { line } = returnShippingOf({
+      listGross: '150.00',
+      unitDesi: '3',
+      outboundBaremTier: BaremTier.TABLE_1,
+      baremAppliesToReturns: true,
+      maxBaremDesi: '2',
+    });
+
+    // desi 3 > maxBaremDesi 2 -> desi tariff key '3' -> 93.63 net -> 112.36 gross.
+    expect(line?.amount.gross.toFixed(2)).toBe('112.36');
+    expect(line?.inputs).toMatchObject({ tariffKind: 'DESI', baremTier: null });
+  });
+
+  it('uses the desi tariff when the returned sale is in no band of table 1', () => {
+    const { line } = returnShippingOf({
+      listGross: '400.00',
+      unitDesi: '2',
+      outboundBaremTier: BaremTier.TABLE_1,
+      baremAppliesToReturns: true,
+    });
+
+    expect(line?.amount.gross.toFixed(2)).toBe('93.05');
+    expect(line?.inputs).toMatchObject({ tariffKind: 'DESI', baremTier: null });
   });
 });

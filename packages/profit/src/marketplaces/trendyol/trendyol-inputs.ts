@@ -1,6 +1,8 @@
 import { type Decimal } from 'decimal.js';
 import { type ShippingTariffSource } from '@pazarsync/db/enums';
 
+import { type TrendyolBaremTier } from './barem-tier';
+
 /** The `fastDeliveryType` value that marks a same-day shipment. */
 export const TRENDYOL_SAME_DAY_SHIPPING_TYPE = 'SameDayShipping';
 
@@ -35,6 +37,8 @@ export interface TrendyolItemAttributes {
 export interface TrendyolParcelAttributes {
   readonly fastDelivery: boolean;
   readonly fastDeliveryType: string | null;
+  // Trendyol's agreed ship-by instant (true UTC); null when Trendyol sent none.
+  readonly agreedDeliveryDate: Date | null;
   readonly actualShipDate: Date | null;
   readonly usesSellerCargoAgreement: boolean;
   readonly items: readonly TrendyolItemAttributes[];
@@ -66,10 +70,13 @@ export interface TrendyolShippingCarrier {
   readonly code: string;
   readonly supportsBarem: boolean;
   readonly maxBaremDesi: Decimal;
+  // The return shipment of an order that went out at Barem table 1 is priced at table 1.
+  readonly baremAppliesToReturns: boolean;
 }
 
 /** One inclusive basket-amount band of the barem shipping price. */
 export interface TrendyolBaremBand {
+  readonly tier: TrendyolBaremTier;
   readonly minOrderAmount: Decimal;
   readonly maxOrderAmount: Decimal;
   readonly priceNet: Decimal;

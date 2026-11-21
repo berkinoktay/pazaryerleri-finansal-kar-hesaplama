@@ -1,5 +1,5 @@
 import { Decimal } from 'decimal.js';
-import { CostProfileType, ProfitIssueCode, ProfitLineType } from '@pazarsync/db/enums';
+import { BaremTier, CostProfileType, ProfitIssueCode, ProfitLineType } from '@pazarsync/db/enums';
 import { describe, expect, it } from 'vitest';
 
 import { makeItem, makeParcel } from '../../../__tests__/fixtures/parcel-builders';
@@ -7,11 +7,27 @@ import {
   makeTrendyolAttributes,
   makeTrendyolItemAttributes,
   trendyolReference,
+  twoTierBaremBands,
 } from '../../../__tests__/fixtures/trendyol-reference';
 import { computeProfitStatement } from '../../../core/profit-statement';
 import { selectLines } from '../../../core/select-lines';
 import { type ItemCostInput } from '../../../core/seller-costs/build-seller-cost-lines';
 import { estimateTrendyolParcel } from '../estimate-parcel';
+
+/** A two-tier Barem version that prices the return of a table 1 order at table 1. */
+function baremReturnsReference(): ReturnType<typeof trendyolReference> {
+  return trendyolReference({
+    shipping: {
+      carrier: {
+        code: 'TEXMP',
+        supportsBarem: true,
+        maxBaremDesi: new Decimal('10'),
+        baremAppliesToReturns: true,
+      },
+      baremBands: twoTierBaremBands(),
+    },
+  });
+}
 
 /** A single COGS profile for one item, effective well before any order date. */
 function tryCogs(orderItemId: string, amountGross: string): ItemCostInput {
@@ -157,6 +173,93 @@ describe('estimateTrendyolParcel', () => {
     expect(returned.map((item) => item.orderItemId)).toEqual(['a']);
     expect(returned[0]?.saleGross.toFixed(2)).toBe('100.00'); // half of 200.00
     expect(returned[0]?.standaloneAmount?.toFixed(2)).toBe('93.05'); // desi 1 x accepted 1 -> key '1'
+  });
+
+  it('prices the return at Barem table 1 when the order went out at table 1', () => {
+    const result = estimateTrendyolParcel({
+      snapshot: makeParcel({
+        items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '2' })],
+      }),
+      attributes: makeTrendyolAttributes({
+        fastDelivery: true,
+        agreedDeliveryDate: new Date('2026-09-10T20:59:00.000Z'),
+        actualShipDate: new Date('2026-09-10T09:15:00.000Z'),
+        items: [makeTrendyolItemAttributes({ orderItemId: 'a' })],
+      }),
+      reference: baremReturnsReference(),
+      costs: [tryCogs('a', '40.00')],
+      acceptedReturns: [{ orderItemId: 'a', acceptedQuantity: 1 }],
+    });
+
+    const shipping = result.lines.find((line) => line.type === ProfitLineType.SHIPPING);
+    const returnShipping = result.lines.find(
+      (line) => line.type === ProfitLineType.RETURN_SHIPPING,
+    );
+    // Both legs: table 1 band [0, 199.99] -> 38.74 net -> 46.49 gross.
+    expect(shipping?.amount.gross.toFixed(2)).toBe('46.49');
+    expect(shipping?.inputs.baremTier).toBe(BaremTier.TABLE_1);
+    expect(returnShipping?.amount.gross.toFixed(2)).toBe('46.49');
+    expect(returnShipping?.inputs.baremTier).toBe(BaremTier.TABLE_1);
+  });
+
+  it('prices the return at the desi tariff when the order went out late at table 2', () => {
+    const result = estimateTrendyolParcel({
+      snapshot: makeParcel({
+        items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '2' })],
+      }),
+      attributes: makeTrendyolAttributes({
+        fastDelivery: true,
+        agreedDeliveryDate: new Date('2026-09-10T20:59:00.000Z'),
+        actualShipDate: new Date('2026-09-11T08:00:00.000Z'),
+        items: [makeTrendyolItemAttributes({ orderItemId: 'a' })],
+      }),
+      reference: baremReturnsReference(),
+      costs: [tryCogs('a', '40.00')],
+      acceptedReturns: [{ orderItemId: 'a', acceptedQuantity: 1 }],
+    });
+
+    const shipping = result.lines.find((line) => line.type === ProfitLineType.SHIPPING);
+    const returnShipping = result.lines.find(
+      (line) => line.type === ProfitLineType.RETURN_SHIPPING,
+    );
+    // Forward: table 2 band [0, 199.99] -> 73.33 net -> 88.00 gross.
+    expect(shipping?.amount.gross.toFixed(2)).toBe('88.00');
+    expect(shipping?.inputs.baremTier).toBe(BaremTier.TABLE_2);
+    // Return: desi tariff key '2' -> 77.54 net -> 93.05 gross.
+    expect(returnShipping?.amount.gross.toFixed(2)).toBe('93.05');
+    expect(returnShipping?.inputs.baremTier).toBeNull();
+  });
+
+  it('prices the return of a seller-cargo-agreement order at the desi tariff', () => {
+    // The order went out under the seller's own carrier contract, not Trendyol's Barem,
+    // so its return is never priced at Barem; the forward estimate itself is unchanged.
+    const result = estimateTrendyolParcel({
+      snapshot: makeParcel({
+        items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '2' })],
+      }),
+      attributes: makeTrendyolAttributes({
+        fastDelivery: true,
+        agreedDeliveryDate: new Date('2026-09-10T20:59:00.000Z'),
+        actualShipDate: new Date('2026-09-10T09:15:00.000Z'),
+        usesSellerCargoAgreement: true,
+        items: [makeTrendyolItemAttributes({ orderItemId: 'a' })],
+      }),
+      reference: baremReturnsReference(),
+      costs: [tryCogs('a', '40.00')],
+      acceptedReturns: [{ orderItemId: 'a', acceptedQuantity: 1 }],
+    });
+
+    const shipping = result.lines.find((line) => line.type === ProfitLineType.SHIPPING);
+    const returnShipping = result.lines.find(
+      (line) => line.type === ProfitLineType.RETURN_SHIPPING,
+    );
+    // Forward: unchanged, table 1 band [0, 199.99] -> 38.74 net -> 46.49 gross.
+    expect(shipping?.amount.gross.toFixed(2)).toBe('46.49');
+    expect(shipping?.inputs.baremTier).toBe(BaremTier.TABLE_1);
+    // Return: desi tariff key '2' -> 77.54 net -> 93.05 gross.
+    expect(returnShipping?.amount.gross.toFixed(2)).toBe('93.05');
+    expect(returnShipping?.inputs.tariffKind).toBe('DESI');
+    expect(returnShipping?.inputs.baremTier).toBeNull();
   });
 
   it('passes the selection rule without a level conflict', () => {

@@ -128,6 +128,8 @@ export function estimateTrendyolParcel(input: TrendyolEstimateInput): EstimateRe
       commissionLines: commission.lines,
       costLines: sellerCost.lines,
       reference,
+      // The forward leg's Barem table decides whether the return may be priced at table 1.
+      outboundBaremTier: shipping.outboundBaremTier,
     });
     lines.push(...returns.lines);
     returnIssues = returns.issues;

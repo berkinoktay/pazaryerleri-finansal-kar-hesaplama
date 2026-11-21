@@ -1,8 +1,9 @@
 import { Decimal } from 'decimal.js';
-import { ShippingTariffSource } from '@pazarsync/db/enums';
+import { BaremTier, ShippingTariffSource } from '@pazarsync/db/enums';
 
 import {
   trendyolCategoryBrandKey,
+  type TrendyolBaremBand,
   type TrendyolCommissionRules,
   type TrendyolFeeParams,
   type TrendyolItemAttributes,
@@ -46,7 +47,12 @@ function defaultFees(): TrendyolFeeParams {
 function defaultShipping(): TrendyolShippingTariff {
   return {
     source: ShippingTariffSource.TRENDYOL_CONTRACT,
-    carrier: { code: 'TEXMP', supportsBarem: true, maxBaremDesi: new Decimal('10') },
+    carrier: {
+      code: 'TEXMP',
+      supportsBarem: true,
+      maxBaremDesi: new Decimal('10'),
+      baremAppliesToReturns: false,
+    },
     desiTariffNet: new Map([
       ['0', new Decimal('77.54')],
       ['1', new Decimal('77.54')],
@@ -56,13 +62,16 @@ function defaultShipping(): TrendyolShippingTariff {
       ['5', new Decimal('108.90')],
       ['6', new Decimal('116.60')],
     ]),
+    // Single-tier (a version before 10 August 2026): the old fast-delivery rule applies.
     baremBands: [
       {
+        tier: BaremTier.TABLE_1,
         minOrderAmount: new Decimal('0'),
         maxOrderAmount: new Decimal('199.99'),
         priceNet: new Decimal('34.16'),
       },
       {
+        tier: BaremTier.TABLE_1,
         minOrderAmount: new Decimal('200'),
         maxOrderAmount: new Decimal('349.99'),
         priceNet: new Decimal('65.83'),
@@ -81,6 +90,40 @@ function defaultCommission(): TrendyolCommissionRules {
       [trendyolCategoryBrandKey('369', '977855'), new Decimal('16.5')],
     ]),
   };
+}
+
+/**
+ * The Barem bands of a two-tier tariff version (10 August 2026 onward). Test data with
+ * the TEXMP figures of the announcement: table 1 is 38.74 ([0, 199.99]) and 70.41
+ * ([200, 349.99]), table 2 is 73.33 and 78.74 (net).
+ */
+export function twoTierBaremBands(): TrendyolBaremBand[] {
+  return [
+    {
+      tier: BaremTier.TABLE_1,
+      minOrderAmount: new Decimal('0'),
+      maxOrderAmount: new Decimal('199.99'),
+      priceNet: new Decimal('38.74'),
+    },
+    {
+      tier: BaremTier.TABLE_1,
+      minOrderAmount: new Decimal('200'),
+      maxOrderAmount: new Decimal('349.99'),
+      priceNet: new Decimal('70.41'),
+    },
+    {
+      tier: BaremTier.TABLE_2,
+      minOrderAmount: new Decimal('0'),
+      maxOrderAmount: new Decimal('199.99'),
+      priceNet: new Decimal('73.33'),
+    },
+    {
+      tier: BaremTier.TABLE_2,
+      minOrderAmount: new Decimal('200'),
+      maxOrderAmount: new Decimal('349.99'),
+      priceNet: new Decimal('78.74'),
+    },
+  ];
 }
 
 /** Per-section shallow overrides of the reference data. */
@@ -115,15 +158,22 @@ export function arasmpScenarioReference(): TrendyolReferenceData {
   return trendyolReference({
     shipping: {
       source: ShippingTariffSource.TRENDYOL_CONTRACT,
-      carrier: { code: 'ARASMP', supportsBarem: true, maxBaremDesi: new Decimal('10') },
+      carrier: {
+        code: 'ARASMP',
+        supportsBarem: true,
+        maxBaremDesi: new Decimal('10'),
+        baremAppliesToReturns: false,
+      },
       desiTariffNet: new Map([['2', new Decimal('83.93')]]),
       baremBands: [
         {
+          tier: BaremTier.TABLE_1,
           minOrderAmount: new Decimal('0'),
           maxOrderAmount: new Decimal('199.99'),
           priceNet: new Decimal('42.91'),
         },
         {
+          tier: BaremTier.TABLE_1,
           minOrderAmount: new Decimal('200'),
           maxOrderAmount: new Decimal('349.99'),
           priceNet: new Decimal('73.74'),
@@ -175,6 +225,7 @@ export function makeTrendyolItemAttributes(
 export interface MakeTrendyolAttributesParams {
   readonly fastDelivery?: boolean;
   readonly fastDeliveryType?: string | null;
+  readonly agreedDeliveryDate?: Date | null;
   readonly actualShipDate?: Date | null;
   readonly usesSellerCargoAgreement?: boolean;
   readonly items?: readonly TrendyolItemAttributes[];
@@ -186,6 +237,7 @@ export function makeTrendyolAttributes(
   return {
     fastDelivery: params.fastDelivery ?? false,
     fastDeliveryType: params.fastDeliveryType === undefined ? null : params.fastDeliveryType,
+    agreedDeliveryDate: params.agreedDeliveryDate === undefined ? null : params.agreedDeliveryDate,
     actualShipDate: params.actualShipDate === undefined ? null : params.actualShipDate,
     usesSellerCargoAgreement: params.usesSellerCargoAgreement ?? false,
     items: params.items ?? [],

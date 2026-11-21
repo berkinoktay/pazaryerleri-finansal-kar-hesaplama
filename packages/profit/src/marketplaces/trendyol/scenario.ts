@@ -141,6 +141,9 @@ export function buildTrendyolScenarioParcel(input: TrendyolScenarioInput): Trend
     attributes: {
       fastDelivery: input.fastDelivery,
       fastDeliveryType: null,
+      // A scenario has no ship-by date and has not shipped: a fast-delivery scenario
+      // is table 1, any other table 2 (on a two-tier version).
+      agreedDeliveryDate: null,
       actualShipDate: null,
       usesSellerCargoAgreement: false,
       items: [scenarioItemAttributes(input)],

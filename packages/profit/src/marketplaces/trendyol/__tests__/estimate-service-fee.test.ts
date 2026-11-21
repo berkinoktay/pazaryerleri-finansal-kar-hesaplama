@@ -22,6 +22,7 @@ describe('estimateServiceFeeLine', () => {
       attributes: {
         fastDelivery: false,
         fastDeliveryType: null,
+        agreedDeliveryDate: null,
         actualShipDate: null,
         usesSellerCargoAgreement: false,
         items: [],
@@ -49,6 +50,7 @@ describe('estimateServiceFeeLine', () => {
       attributes: {
         fastDelivery: true,
         fastDeliveryType: TRENDYOL_SAME_DAY_SHIPPING_TYPE,
+        agreedDeliveryDate: null,
         actualShipDate: null,
         usesSellerCargoAgreement: false,
         items: [],
@@ -72,6 +74,7 @@ describe('estimateServiceFeeLine', () => {
       attributes: {
         fastDelivery: true,
         fastDeliveryType: TRENDYOL_SAME_DAY_SHIPPING_TYPE,
+        agreedDeliveryDate: null,
         actualShipDate: new Date('2026-10-28T15:00:00Z'),
         usesSellerCargoAgreement: false,
         items: [],
@@ -87,6 +90,7 @@ describe('estimateServiceFeeLine', () => {
       attributes: {
         fastDelivery: true,
         fastDeliveryType: TRENDYOL_SAME_DAY_SHIPPING_TYPE,
+        agreedDeliveryDate: null,
         actualShipDate: new Date('2026-10-28T22:30:00Z'),
         usesSellerCargoAgreement: false,
         items: [],
@@ -106,6 +110,7 @@ describe('estimateServiceFeeLine', () => {
       attributes: {
         fastDelivery: true,
         fastDeliveryType: TRENDYOL_SAME_DAY_SHIPPING_TYPE,
+        agreedDeliveryDate: null,
         actualShipDate: new Date('2026-10-29T10:00:00Z'),
         usesSellerCargoAgreement: false,
         items: [],
@@ -126,6 +131,7 @@ describe('estimateServiceFeeLine', () => {
       attributes: {
         fastDelivery: true,
         fastDeliveryType: 'FastDelivery',
+        agreedDeliveryDate: null,
         actualShipDate: null,
         usesSellerCargoAgreement: false,
         items: [],
@@ -151,6 +157,7 @@ describe('estimateServiceFeeLine', () => {
       attributes: {
         fastDelivery: false,
         fastDeliveryType: null,
+        agreedDeliveryDate: null,
         actualShipDate: null,
         usesSellerCargoAgreement: false,
         items: [],
@@ -167,6 +174,7 @@ describe('estimateServiceFeeLine', () => {
     const baseAttributes = {
       fastDelivery: false,
       fastDeliveryType: null,
+      agreedDeliveryDate: null,
       actualShipDate: null,
       usesSellerCargoAgreement: false,
       items: [],
