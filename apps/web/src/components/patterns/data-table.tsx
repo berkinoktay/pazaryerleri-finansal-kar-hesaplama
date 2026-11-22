@@ -654,7 +654,11 @@ export function DataTable<TData, TValue>({
         <div role="status" aria-live="polite" className="sr-only">
           {loading ? t('loading') : ''}
         </div>
-        {tabs ? <div className="border-border px-md pt-sm pb-2xs border-b">{tabs}</div> : null}
+        {/* overflow-x-auto: a tab strip wider than the card (three tabs on a phone)
+            scrolls sideways instead of being clipped by the shell. */}
+        {tabs ? (
+          <div className="border-border px-md pt-sm pb-2xs overflow-x-auto border-b">{tabs}</div>
+        ) : null}
         {showToolbar ? (
           <div className="border-border px-md py-sm border-b">{toolbar?.(table)}</div>
         ) : null}
