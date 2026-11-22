@@ -3831,7 +3831,8 @@
       "searchPlaceholder": "Ürün adında ara",
       "tabs": {
         "all": "Tümü",
-        "missing": "Maliyet bekleyen"
+        "missing": "Maliyet bekleyen",
+        "missingDesi": "Desi bekleyen"
       },
       "columns": {
         "rank": "Sıra",
@@ -3839,12 +3840,14 @@
         "orderCount": "Sipariş",
         "unitsSold": "Satış Adedi",
         "revenue": "Ciro",
-        "cost": "Maliyet"
+        "cost": "Maliyet",
+        "desi": "Desi"
       },
       "rankLabel": "{rank}. sıra",
       "stockCodeLabel": "Stok Kodu",
       "barcodeLabel": "Barkod",
       "addCostButton": "Maliyet Ekle",
+      "addDesiButton": "Desi Gir",
       "emptyTitle": "Bugün henüz sipariş yok",
       "noResultsTitle": "Sonuç bulunamadı",
       "noResultsDescription": "Arama veya filtreyle eşleşen ürün yok.",
@@ -3880,6 +3883,8 @@
           "lineSaleGross": "Satır tutarı (KDV dahil)"
         },
         "addCost": "Maliyet ekle",
+        "addDesi": "Desi gir",
+        "lineReady": "Hazır",
         "loadError": "Sipariş ayrıntısı yüklenemedi."
       }
     },

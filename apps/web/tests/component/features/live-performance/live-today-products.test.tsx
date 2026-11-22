@@ -3,13 +3,22 @@ import { describe, expect, it } from 'vitest';
 
 import { LiveTodayProducts } from '@/features/live-performance/components/live-today-products';
 
+import trMessages from '../../../../messages/tr.json';
 import { render, screen, waitFor, within } from '../../../helpers/render';
 import { server, http, HttpResponse } from '../../../helpers/msw';
 
 const ORG_ID = '00000000-0000-0000-0000-000000000001';
 const STORE_ID = '00000000-0000-0000-0000-000000000002';
 const URL = `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/live-performance/today-products`;
+const MISSING_DESI_PATCH_URL = `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/products/variants/v-mid/dimensional-weight`;
 
+const desiPopover = trMessages.products.desiCell.popover;
+
+// Desi fixtures (the backend owns the missing flag; the web never derives it):
+//   v-top  -> marketplace desi 2.5 (shown as "2,5")
+//   v-mid  -> missing desi ("Desi Gir" action)
+//   v-low1 -> digital product without desi (not missing, shown as a dash)
+//   v-low2 -> seller desi of 0 (a real desi, shown as "0")
 const response = {
   data: [
     {
@@ -24,6 +33,10 @@ const response = {
       costStatus: 'costed',
       unitCost: '42.00',
       unresolved: false,
+      dimensionalWeight: '2.5',
+      syncedDimensionalWeight: '2.5',
+      isDimensionalWeightOverridden: false,
+      isDimensionalWeightMissing: false,
     },
     {
       variantId: 'v-mid',
@@ -37,6 +50,10 @@ const response = {
       costStatus: 'missing',
       unitCost: null,
       unresolved: false,
+      dimensionalWeight: null,
+      syncedDimensionalWeight: null,
+      isDimensionalWeightOverridden: false,
+      isDimensionalWeightMissing: true,
     },
     {
       variantId: 'v-low1',
@@ -50,6 +67,10 @@ const response = {
       costStatus: 'missing',
       unitCost: null,
       unresolved: false,
+      dimensionalWeight: null,
+      syncedDimensionalWeight: null,
+      isDimensionalWeightOverridden: false,
+      isDimensionalWeightMissing: false,
     },
     {
       variantId: 'v-low2',
@@ -63,9 +84,39 @@ const response = {
       costStatus: 'costed',
       unitCost: '12.00',
       unresolved: false,
+      dimensionalWeight: '0',
+      syncedDimensionalWeight: null,
+      isDimensionalWeightOverridden: true,
+      isDimensionalWeightMissing: false,
     },
   ],
 };
+
+function renderTable() {
+  return render(
+    <NuqsTestHarness>
+      <LiveTodayProducts orgId={ORG_ID} storeId={STORE_ID} />
+    </NuqsTestHarness>,
+  );
+}
+
+async function findRow(text: string): Promise<HTMLElement> {
+  const row = (await screen.findAllByText(text))[0]?.closest('tr');
+  if (!(row instanceof HTMLElement)) throw new Error(`row "${text}" not found`);
+  return row;
+}
+
+// The body cell of `row` under the column whose (non-sortable) header reads `header`.
+function cellUnder(row: HTMLElement, header: string): HTMLElement {
+  const index = screen
+    .getAllByRole('columnheader')
+    .findIndex((th) => th.textContent?.trim() === header);
+  const cell = within(row).getAllByRole('cell')[index];
+  if (index === -1 || !(cell instanceof HTMLElement)) {
+    throw new Error(`no "${header}" cell in the row`);
+  }
+  return cell;
+}
 
 describe('LiveTodayProducts', () => {
   it('renders one row per product with a podium medal on the top seller, copyable identifiers, costed unit cost and a cost-missing CTA', async () => {
@@ -112,6 +163,10 @@ describe('LiveTodayProducts', () => {
           costStatus: 'missing',
           unitCost: null,
           unresolved: true,
+          dimensionalWeight: null,
+          syncedDimensionalWeight: null,
+          isDimensionalWeightOverridden: false,
+          isDimensionalWeightMissing: false,
         },
       ],
     };
@@ -131,7 +186,116 @@ describe('LiveTodayProducts', () => {
     if (!(ghostRow instanceof HTMLElement)) throw new Error('unresolved row not found');
     // Variant yok → maliyet bağlanamaz: CTA yerine nötr çizgi.
     expect(within(ghostRow).queryByRole('button', { name: /Maliyet Ekle/ })).toBeNull();
-    expect(within(ghostRow).getByText('—')).toBeInTheDocument();
+    expect(within(cellUnder(ghostRow, 'Maliyet')).getByText('—')).toBeInTheDocument();
+  });
+
+  it('shows the desi value, a Desi Gir action for a missing desi and a dash for an unresolved row', async () => {
+    server.use(
+      http.get(URL, () =>
+        HttpResponse.json({
+          data: [
+            ...response.data,
+            {
+              variantId: null,
+              barcode: 'GHOST-1',
+              stockCode: null,
+              productName: null,
+              thumbUrl: null,
+              orderCount: 1,
+              unitsSold: 1,
+              revenue: '45.00',
+              costStatus: 'missing',
+              unitCost: null,
+              unresolved: true,
+              vendorMissing: false,
+              dimensionalWeight: null,
+              syncedDimensionalWeight: null,
+              isDimensionalWeightOverridden: false,
+              isDimensionalWeightMissing: false,
+            },
+          ],
+        }),
+      ),
+    );
+
+    renderTable();
+
+    const topRow = await findRow('En Çok Satan');
+    expect(within(cellUnder(topRow, 'Desi')).getByText('2,5')).toBeInTheDocument();
+
+    const midRow = await findRow('Orta Ürün');
+    expect(
+      within(cellUnder(midRow, 'Desi')).getByRole('button', { name: 'Desi Gir' }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Desi Gir' })).toHaveLength(1);
+
+    // Digital product without desi: not missing, so a dash and no action.
+    const digitalRow = await findRow('Düşük Ürün');
+    expect(within(cellUnder(digitalRow, 'Desi')).getByText('—')).toBeInTheDocument();
+
+    // Unresolved barcode: no variant to edit, so a dash in both columns, no action.
+    const ghostRow = await findRow('GHOST-1');
+    expect(within(cellUnder(ghostRow, 'Desi')).getByText('—')).toBeInTheDocument();
+    expect(within(cellUnder(ghostRow, 'Maliyet')).getByText('—')).toBeInTheDocument();
+    expect(within(ghostRow).queryByRole('button', { name: 'Desi Gir' })).toBeNull();
+  });
+
+  it('shows a seller desi of 0 as 0, not as an action', async () => {
+    server.use(http.get(URL, () => HttpResponse.json(response)));
+
+    renderTable();
+
+    const zeroRow = await findRow('En Düşük Ürün');
+    const desiCell = cellUnder(zeroRow, 'Desi');
+    expect(within(desiCell).getByText('0')).toBeInTheDocument();
+    expect(within(desiCell).queryByRole('button')).toBeNull();
+  });
+
+  it('filters to missing-desi products on the Desi bekleyen tab', async () => {
+    server.use(http.get(URL, () => HttpResponse.json(response)));
+
+    const { user } = renderTable();
+
+    await findRow('En Çok Satan');
+    const desiTab = screen.getByRole('tab', { name: /Desi bekleyen/ });
+    // Only v-mid is flagged missing: the digital row and the 0-desi row are not.
+    expect(within(desiTab).getByText('1')).toBeInTheDocument();
+
+    await user.click(desiTab);
+
+    await waitFor(() => expect(screen.queryByText('En Çok Satan')).toBeNull());
+    expect(screen.getByText('Orta Ürün')).toBeInTheDocument();
+    expect(screen.queryByText('Düşük Ürün')).toBeNull();
+    expect(screen.queryByText('En Düşük Ürün')).toBeNull();
+  });
+
+  it('refreshes the live data after a desi save', async () => {
+    let getCalls = 0;
+    server.use(
+      http.get(URL, () => {
+        getCalls += 1;
+        return HttpResponse.json(response);
+      }),
+      http.patch(MISSING_DESI_PATCH_URL, () =>
+        HttpResponse.json({
+          id: 'v-mid',
+          dimensionalWeight: '1.5',
+          syncedDimensionalWeight: null,
+          isDimensionalWeightOverridden: true,
+          isDimensionalWeightMissing: false,
+        }),
+      ),
+    );
+
+    const { user } = renderTable();
+
+    const midRow = await findRow('Orta Ürün');
+    expect(getCalls).toBe(1);
+    await user.click(within(midRow).getByRole('button', { name: 'Desi Gir' }));
+    await user.type(screen.getByLabelText(desiPopover.title), '1,5');
+    await user.click(screen.getByRole('button', { name: desiPopover.save }));
+
+    await waitFor(() => expect(getCalls).toBe(2));
   });
 
   it('filters to cost-missing products when the "Maliyet bekleyen" tab is selected', async () => {

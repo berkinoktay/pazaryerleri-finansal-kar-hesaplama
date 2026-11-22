@@ -1,5 +1,7 @@
 'use client';
 
+import { useQueryClient } from '@tanstack/react-query';
+import { Tick02Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -18,8 +20,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { CostCellPopover } from '@/features/costs/components/cost-cell-popover';
+import { DesiCellPopover } from '@/features/products/components/desi-cell-popover';
 
 import { useBufferDetail } from '../hooks/use-buffer-detail';
+import { liveKeys } from '../query-keys';
 
 interface BufferOrderDetailProps {
   orgId: string;
@@ -27,6 +31,14 @@ interface BufferOrderDetailProps {
   bufferId: string;
 }
 
+/**
+ * Lines of a pending (buffer) order. Each resolved line shows only what it is
+ * still missing (cost, desi, or both; flags come from the backend), else a
+ * quiet "ready" mark; an unresolved line shows only the unmatched badge. A
+ * cost or desi saved here refreshes the live queries directly: while the
+ * order still waits on another input its buffer row does not change, so no
+ * realtime event arrives.
+ */
 export function BufferOrderDetail({
   orgId,
   storeId,
@@ -35,6 +47,11 @@ export function BufferOrderDetail({
   const t = useTranslations('livePerformance.orderDetail.buffer');
   const tCommon = useTranslations('common');
   const query = useBufferDetail(orgId, storeId, bufferId);
+  const queryClient = useQueryClient();
+  const refreshLive = React.useCallback(
+    () => void queryClient.invalidateQueries({ queryKey: liveKeys.all }),
+    [queryClient],
+  );
 
   if (query.isLoading) {
     // Mirrors the loaded layout: a single-line Alert bar, then a table stub
@@ -76,7 +93,6 @@ export function BufferOrderDetail({
               <TableHead>{t('columns.product')}</TableHead>
               <TableHead className="text-right">{t('columns.quantity')}</TableHead>
               <TableHead className="text-right">{t('columns.lineSaleGross')}</TableHead>
-              <TableHead className="text-right" aria-label={t('addCost')} />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -85,7 +101,47 @@ export function BufferOrderDetail({
                 <TableCell>
                   <div className="gap-3xs flex flex-col">
                     <span className="font-medium">{line.productName}</span>
-                    {line.variantId === null ? <UnmatchedVariantBadge className="w-fit" /> : null}
+                    {line.variantId === null ? (
+                      <UnmatchedVariantBadge className="w-fit" />
+                    ) : (
+                      <div className="gap-xs flex flex-wrap items-center">
+                        {line.isCostMissing ? (
+                          <CostCellPopover
+                            orgId={orgId}
+                            storeId={storeId}
+                            variantId={line.variantId}
+                            onChanged={refreshLive}
+                          >
+                            <Button variant="outline" size="sm" data-row-action>
+                              {t('addCost')}
+                            </Button>
+                          </CostCellPopover>
+                        ) : null}
+                        {line.isDimensionalWeightMissing ? (
+                          <DesiCellPopover
+                            orgId={orgId}
+                            storeId={storeId}
+                            variant={{
+                              id: line.variantId,
+                              dimensionalWeight: line.dimensionalWeight,
+                              syncedDimensionalWeight: line.syncedDimensionalWeight,
+                              isDimensionalWeightOverridden: line.isDimensionalWeightOverridden,
+                            }}
+                            onSaved={refreshLive}
+                          >
+                            <Button variant="outline" size="sm" data-row-action>
+                              {t('addDesi')}
+                            </Button>
+                          </DesiCellPopover>
+                        ) : null}
+                        {!line.isCostMissing && !line.isDimensionalWeightMissing ? (
+                          <span className="text-muted-foreground gap-3xs inline-flex items-center text-xs">
+                            <Tick02Icon aria-hidden className="size-icon-xs text-success" />
+                            {t('lineReady')}
+                          </span>
+                        ) : null}
+                      </div>
+                    )}
                     <span className="text-2xs text-muted-foreground tabular-nums">
                       {line.barcode}
                     </span>
@@ -94,15 +150,6 @@ export function BufferOrderDetail({
                 <TableCell className="text-right tabular-nums">{line.quantity}</TableCell>
                 <TableCell className="text-right">
                   <Currency value={line.lineSaleGross} />
-                </TableCell>
-                <TableCell className="text-right">
-                  {line.variantId !== null ? (
-                    <CostCellPopover orgId={orgId} storeId={storeId} variantId={line.variantId}>
-                      <Button variant="outline" size="sm" data-row-action>
-                        {t('addCost')}
-                      </Button>
-                    </CostCellPopover>
-                  ) : null}
                 </TableCell>
               </TableRow>
             ))}
