@@ -36,12 +36,13 @@ describe('PROFIT_ISSUE_CATALOG', () => {
       }),
     ).toBe(true);
   });
-  it('missing reference data blocks the profit without a settlement gap', () => {
-    // A missing fee definition or export return tier is not a settlement-required slot,
-    // so no marketplace record can close it; only the reference data itself can.
+  it('missing reference data blocks the profit and is a settlement gap', () => {
+    // A missing fee definition can leave a settlement-required slot (commission, shipping)
+    // without any line, estimate or actual; the gap keeps reconciliation from reading
+    // FULLY_SETTLED once the sale records land.
     expect(PROFIT_ISSUE_CATALOG[ProfitIssueCode.REFERENCE_DATA_MISSING]).toEqual({
       blocking: true,
-      settlementGap: false,
+      settlementGap: true,
     });
   });
   it('maps every issue code', () => {

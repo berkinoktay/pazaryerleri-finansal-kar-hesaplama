@@ -25,10 +25,12 @@ import {
 import {
   TRENDYOL_SAME_DAY_SHIPPING_TYPE,
   trendyolCategoryBrandKey,
+  type CompleteTrendyolFeeParams,
   type OverseasReturnTier,
   type TrendyolBaremBand,
   type TrendyolCommissionRules,
   type TrendyolFeeParams,
+  type TrendyolFeeParamsOf,
   type TrendyolOrderCarrierOutcome,
   type TrendyolShippingCarrier,
   type TrendyolShippingTariff,
@@ -252,74 +254,78 @@ interface FeeParamsRequest {
 type MissingFeeError = FeeDefinitionNotFoundError | IncompleteFeeDefinitionError;
 
 /**
- * What the fee loader does with a missing or incomplete fee definition: the scenario
- * path throws it, the order path records it as an issue and carries on without that fee.
+ * What the fee loader does with a missing or incomplete fee definition, and what it puts
+ * in that fee's place: the scenario path throws it (`never`, so its result has every value
+ * set), the order path records it as an issue and carries on with `null`.
  */
-type MissingFeeHandler = (error: MissingFeeError) => void;
+type MissingFeeHandler<TMissing extends null> = (error: MissingFeeError) => TMissing;
 
 /** The detail of the REFERENCE_DATA_MISSING issue for a fee definition: `FEE:<FeeType>`. */
 function missingFeeDetail(feeType: OrderFeeType): string {
   return `FEE:${feeType}`;
 }
 
-/** The Trendyol fee definition in force at `at`; null (after `onMissing`) when none. */
-async function findTrendyolFee(
+/** The Trendyol fee definition in force at `at`; `onMissing`'s result when none. */
+async function findTrendyolFee<TMissing extends null>(
   tx: Prisma.TransactionClient,
   feeType: OrderFeeType,
   at: Date,
-  onMissing: MissingFeeHandler,
-): Promise<FeeDefinition | null> {
+  onMissing: MissingFeeHandler<TMissing>,
+): Promise<FeeDefinition | TMissing> {
   const def = await findFeeDefinition(tx, { platform: Platform.TRENDYOL, feeType, at });
   if (def === null) {
-    onMissing(new FeeDefinitionNotFoundError(Platform.TRENDYOL, feeType));
+    return onMissing(new FeeDefinitionNotFoundError(Platform.TRENDYOL, feeType));
   }
   return def;
 }
 
 /**
- * The amount column a used fee needs, as a decimal; null (after `onMissing`) when the
- * definition is missing (`def` null, already reported) or lacks that column.
+ * The amount column a used fee needs, as a decimal; the missing value when the
+ * definition is missing (`def` is already that value, reported by `findTrendyolFee`) or
+ * `onMissing`'s result when it lacks that column.
  */
-function feeAmount(
-  def: FeeDefinition | null,
+function feeAmount<TMissing extends null>(
+  def: FeeDefinition | TMissing,
   feeType: OrderFeeType,
   field: FeeDefinitionAmountField,
-  onMissing: MissingFeeHandler,
-): Decimal | null {
+  onMissing: MissingFeeHandler<TMissing>,
+): Decimal | TMissing {
   if (def === null) {
-    return null;
+    return def;
   }
   const value = def[field];
   if (value === null) {
-    onMissing(new IncompleteFeeDefinitionError(feeType, field));
-    return null;
+    return onMissing(new IncompleteFeeDefinitionError(feeType, field));
   }
   return dec(value);
 }
 
-/** A definition's default VAT rate as a decimal; null when the definition is missing. */
-function feeVatRate(def: FeeDefinition | null): Decimal | null {
-  return def === null ? null : dec(def.defaultVatRate);
+/** A definition's default VAT rate as a decimal; the missing value when it is missing. */
+function feeVatRate<TMissing extends null>(def: FeeDefinition | TMissing): Decimal | TMissing {
+  return def === null ? def : dec(def.defaultVatRate);
 }
 
-/** Scales a fraction (0.01) to a percent (1); null stays null. */
-function toPercent(value: Decimal | null): Decimal | null {
-  return value === null ? null : value.mul(PERCENT);
+/** Scales a fraction (0.01) to a percent (1); the missing value stays as it is. */
+function toPercent<TMissing extends null>(value: Decimal | TMissing): Decimal | TMissing {
+  return value === null ? value : value.mul(PERCENT);
 }
 
 /**
  * The fee parameters effective on `orderDate`, reporting every missing or incomplete
- * definition a parcel uses to `onMissing` and leaving that fee's values null. Every
- * used definition is resolved even after a miss, so each one is reported. The
- * international-service fee and the overseas-return tiers are resolved only for an
- * export (micro) parcel; for a domestic parcel they are unused, so a missing definition
- * must not break it and both rates are left at zero.
+ * definition the parcel's kind can use to `onMissing` and putting its result in that
+ * fee's place. Every such definition is resolved even after a miss, so each one is
+ * reported. The same-day platform service tier is resolved only for a same-day parcel,
+ * and the international-service fee and the overseas-return tiers only for an export
+ * (micro) parcel; for any other parcel they are unused, so a missing definition must not
+ * break it (the same-day net falls back to the standard net, both international rates are
+ * zero). Everything else -- platform service, stoppage, commission invoice and shipping --
+ * is resolved for every parcel, whether or not this parcel ends up needing it.
  */
-async function resolveFeeParams(
+async function resolveFeeParams<TMissing extends null>(
   tx: Prisma.TransactionClient,
   params: FeeParamsRequest,
-  onMissing: MissingFeeHandler,
-): Promise<TrendyolFeeParams> {
+  onMissing: MissingFeeHandler<TMissing>,
+): Promise<TrendyolFeeParamsOf<TMissing>> {
   const { orderDate, isExport, fastDeliveryType } = params;
 
   const psf = await findTrendyolFee(tx, 'PLATFORM_SERVICE', orderDate, onMissing);
@@ -343,8 +349,8 @@ async function resolveFeeParams(
   // path does; there is no separate return-shipping rate to resolve here.
   const shippingVatRatePct = feeVatRate(shippingDef);
 
-  let internationalServiceRatePct: Decimal | null = ZERO;
-  let internationalServiceVatRatePct: Decimal | null = ZERO;
+  let internationalServiceRatePct: Decimal | TMissing = ZERO;
+  let internationalServiceVatRatePct: Decimal | TMissing = ZERO;
   let overseasReturnTiers: readonly OverseasReturnTier[] = [];
   if (isExport) {
     const intl = await findTrendyolFee(tx, 'INTERNATIONAL_SERVICE', orderDate, onMissing);
@@ -378,30 +384,39 @@ function throwMissingFee(error: MissingFeeError): never {
  * The fee parameters effective on `orderDate` for a scenario (no stored order). A fee
  * definition the scenario uses that is missing throws `FeeDefinitionNotFoundError`, one
  * lacking its amount `IncompleteFeeDefinitionError`; the caller degrades the screen
- * (see `loadTrendyolScenarioBases`). Every value is therefore set.
+ * (see `loadTrendyolScenarioBases`). Every value is therefore set, and the type says so:
+ * the handler returns `never`, so a handler that stopped throwing would no longer
+ * compile against `CompleteTrendyolFeeParams`.
  */
 export async function loadFeeParams(
   tx: Prisma.TransactionClient,
   params: FeeParamsRequest,
-): Promise<TrendyolFeeParams> {
+): Promise<CompleteTrendyolFeeParams> {
   return resolveFeeParams(tx, params, throwMissingFee);
 }
 
 /**
  * The fee parameters effective on a stored order's date. Unlike `loadFeeParams` it never
- * throws on reference data: each missing or incomplete definition the parcel uses adds
- * one blocking REFERENCE_DATA_MISSING issue (`detail` `FEE:<FeeType>`) to `issues` and
- * leaves that fee's values null, so the engine writes no line that needs it and the
- * order's statement is still written (not computable).
+ * throws on reference data: each missing or incomplete definition it resolves adds one
+ * blocking REFERENCE_DATA_MISSING issue (`detail` `FEE:<FeeType>`) to `issues` and leaves
+ * that fee's values null, so the engine writes no line that needs it and the order's
+ * statement is still written (not computable).
+ *
+ * The definitions resolved are those the parcel's kind can use (see `resolveFeeParams`),
+ * not only those this parcel ends up needing: platform service, stoppage, commission
+ * invoice and shipping are resolved for every parcel. This is a deliberate limit: a
+ * missing definition for a fee the parcel would not use still makes the order not
+ * computable (an export parcel carries no platform service fee or stoppage, an
+ * all-digital parcel does not ship, yet both block on those definitions).
  */
 export async function loadOrderFeeParams(
   tx: Prisma.TransactionClient,
   params: FeeParamsRequest & { readonly issues: ProfitIssue[] },
 ): Promise<TrendyolFeeParams> {
   const reported = new Set<OrderFeeType>();
-  return resolveFeeParams(tx, params, (error) => {
+  return resolveFeeParams(tx, params, (error): null => {
     if (reported.has(error.feeType)) {
-      return;
+      return null;
     }
     reported.add(error.feeType);
     params.issues.push({
@@ -409,6 +424,7 @@ export async function loadOrderFeeParams(
       orderItemId: null,
       detail: missingFeeDetail(error.feeType),
     });
+    return null;
   });
 }
 

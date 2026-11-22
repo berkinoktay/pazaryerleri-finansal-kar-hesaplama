@@ -1535,6 +1535,34 @@ describe('loadTrendyolParcel', () => {
     }
   });
 
+  it('does not read fully settled when missing fee definitions leave required slots empty', async () => {
+    // Every fee VAT is missing, so the commission, shipping and service fee slots carry no
+    // line at all, estimate or actual. The sale records land and no cargo invoice does:
+    // without a settlement gap nothing would be pending and reconciliation would read
+    // FULLY_SETTLED although the commission and cargo were never reconciled.
+    const parcel = await seedMelontikParcel();
+    await prisma.feeDefinition.deleteMany({});
+    for (const record of melontikSaleCycleRecordInputs(parcel)) {
+      await insertFinanceRecord(record);
+    }
+
+    const computed = await computeParcelProfit(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const types = computed.bestKnown.selectedLines.map((line) => line.type);
+    for (const empty of [
+      ProfitLineType.COMMISSION,
+      ProfitLineType.SHIPPING,
+      ProfitLineType.SERVICE_FEE,
+    ]) {
+      expect(types).not.toContain(empty);
+    }
+    expect(computed.bestKnown.reconciliationStatus).toBe(ReconciliationStatus.PARTIALLY_SETTLED);
+    expect(computed.bestKnown.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+  });
+
   it('picks the version in effect by effective_from, not by changed_at', async () => {
     const parcel = await seedMelontikParcel();
 

@@ -12,6 +12,13 @@ export interface ProfitIssue {
 }
 
 /**
+ * The `detail` prefix of a SHIPPING_ESTIMATE_UNAVAILABLE issue raised by the return
+ * shipping leg (`RETURN_UNKNOWN_DESI`, `RETURN_DESI_OVERFLOW`, ...). A detail without it
+ * belongs to the outbound leg.
+ */
+export const RETURN_SHIPPING_ISSUE_DETAIL_PREFIX = 'RETURN_';
+
+/**
  * Per-code flags for each profit issue.
  *
  * `blocking` makes the order NOT_COMPUTABLE (see `deriveProfitStatus`); a non-blocking
@@ -28,14 +35,19 @@ export interface ProfitIssue {
  * fee definition or a micro-export return tier absent on the order date) is blocking as
  * well: the fee it would have priced is left out, so the total is not trustworthy.
  *
- * `settlementGap` marks a settlement-required slot the engine left without any line,
- * because it could neither estimate it nor read an actual for it (it could not estimate
- * shipping, recognize the order's carrier or resolve a commission rate). With no line in
+ * `settlementGap` marks a settlement-required slot the engine may have left without any
+ * line, because it could neither estimate it nor read an actual for it (it could not
+ * estimate shipping, recognize the order's carrier, resolve a commission rate, or read the
+ * fee definition that gives the commission or shipping its VAT rate). With no line in
  * that slot nothing is "pending", so without this flag reconciliation would read
  * FULLY_SETTLED even though the real record never arrived; it instead holds
  * reconciliation at PARTIALLY_SETTLED (see `deriveReconciliationStatus`). Every
- * settlement-gap code is also blocking. Missing reference data is not a settlement gap:
- * no marketplace record fills it, only the reference data itself.
+ * settlement-gap code is also blocking. Missing reference data is a gap whichever fee it
+ * names: no marketplace record fills it, only the reference data itself, so it holds
+ * reconciliation until the data is added.
+ *
+ * Which issues a statement view keeps is decided per view (see `issuesForView`): in the
+ * best-known view a cargo invoice lifts the shipping causes of its own leg.
  */
 export const PROFIT_ISSUE_CATALOG = {
   MISSING_COST: { blocking: true, settlementGap: false },
@@ -45,7 +57,7 @@ export const PROFIT_ISSUE_CATALOG = {
   AMBIGUOUS_RECORD_MATCH: { blocking: false, settlementGap: false },
   CARRIER_NOT_RECOGNIZED: { blocking: true, settlementGap: true },
   SELLER_CARGO_AGREEMENT_ESTIMATE: { blocking: false, settlementGap: false },
-  REFERENCE_DATA_MISSING: { blocking: true, settlementGap: false },
+  REFERENCE_DATA_MISSING: { blocking: true, settlementGap: true },
 } as const satisfies Record<
   ProfitIssueCode,
   { readonly blocking: boolean; readonly settlementGap: boolean }

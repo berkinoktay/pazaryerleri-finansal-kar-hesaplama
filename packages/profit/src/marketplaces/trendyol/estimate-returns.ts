@@ -16,7 +16,7 @@ import {
   type ParcelItemSnapshot,
   type ParcelSnapshot,
 } from '../../core/parcel-snapshot';
-import { type ProfitIssue } from '../../core/profit-issue';
+import { type ProfitIssue, RETURN_SHIPPING_ISSUE_DETAIL_PREFIX } from '../../core/profit-issue';
 import { createProfitLine, type LineMoney, type ProfitLine } from '../../core/profit-line';
 import { buildCostReturnLines } from '../../core/seller-costs/build-cost-return-lines';
 import { roundMoney } from '../../money';
@@ -363,7 +363,7 @@ function buildReturnShippingLine(params: {
       issue: {
         code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
         orderItemId: null,
-        detail: 'RETURN_UNKNOWN_DESI',
+        detail: `${RETURN_SHIPPING_ISSUE_DETAIL_PREFIX}UNKNOWN_DESI`,
       },
     };
   }
@@ -381,7 +381,7 @@ function buildReturnShippingLine(params: {
       issue: {
         code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
         orderItemId: null,
-        detail: `RETURN_${resolved.reason}`,
+        detail: `${RETURN_SHIPPING_ISSUE_DETAIL_PREFIX}${resolved.reason}`,
       },
     };
   }
@@ -439,7 +439,9 @@ function findOverseasReturnTier(
  * zero. A fee that rounds to zero writes no line. An item whose unit sale no tier in
  * force covers (no tier version yet, or a gap) writes no line and records a blocking
  * REFERENCE_DATA_MISSING issue for that item instead of failing the parcel; it still
- * joins the returned-item set.
+ * joins the returned-item set. While the commission VAT is unknown (a missing
+ * COMMISSION_INVOICE definition, already recorded by the loader) no item gets a line
+ * either, and no issue of its own.
  */
 function estimateExportReturns(params: {
   readonly acceptedEntries: readonly AcceptedEntry[];
@@ -471,6 +473,12 @@ function estimateExportReturns(params: {
       continue;
     }
 
+    // A missing COMMISSION_INVOICE definition (the loader recorded REFERENCE_DATA_MISSING)
+    // left the item without a commission line, so the fee base is unknown: no line, rather
+    // than one that reads the absent commission as zero.
+    if (reference.fees.commissionVatRatePct === null) {
+      continue;
+    }
     const commissionLine = commissionByItem.get(item.orderItemId);
     const commissionGross = commissionLine === undefined ? ZERO : commissionLine.amount.gross;
     const acceptedSale = item.saleGross.mul(ratio);

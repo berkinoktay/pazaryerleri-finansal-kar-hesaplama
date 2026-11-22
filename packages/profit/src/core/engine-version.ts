@@ -25,6 +25,9 @@
  *     shipping line; a seller-cargo-agreement order is exempt); a carrier with no tariff
  *     version in force reports NO_TARIFF_VERSION; a missing fee definition or micro-export
  *     return tier records REFERENCE_DATA_MISSING and leaves that fee out instead of
- *     throwing, so every order gets a statement.
+ *     throwing, so every order gets a statement; that issue holds reconciliation like a
+ *     settlement gap, and an export return fee is not written while the commission VAT is
+ *     unknown. Each statement view keeps its own issues: in the best-known view a cargo
+ *     invoice lifts the carrier and shipping-estimate causes of the leg it bills.
  */
 export const PROFIT_ENGINE_VERSION = 12;

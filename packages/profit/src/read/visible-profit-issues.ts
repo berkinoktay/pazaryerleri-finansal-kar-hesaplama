@@ -12,21 +12,22 @@ const SELLER_CARGO_SHIPPING_TYPES: ReadonlySet<ProfitLineType> = new Set([
 /**
  * The statement issues a reader should still show, given the lines its view selected.
  *
- * Issues are stored with the statement, independent of the view: the engine records
- * what it saw while estimating, and a later actual can make a warning moot without the
- * issue itself going away. Whether a warning is still meaningful is therefore derived
- * here, on read, from the selected lines:
+ * Each statement view stores its own issues: the engine already leaves out of the
+ * best-known list a shipping cause whose leg a cargo invoice billed (see `issuesForView`),
+ * so the status and the stored list agree. What is left here is a display rule over the
+ * selected lines:
  *
- * - CARRIER_NOT_RECOGNIZED is dropped once an ACTUAL SHIPPING line is selected -- the
- *   cargo invoice replaced the zero estimate the warning was about. It is also dropped
- *   while a SELLER_CARGO_AGREEMENT_ESTIMATE warning is shown: on such an order no cargo
- *   invoice is coming, so the two notices would contradict each other, and the step the
- *   seller-cargo notice asks for (entering the store's own tariff) resolves both.
  * - SELLER_CARGO_AGREEMENT_ESTIMATE is dropped once a cargo invoice replaced every
  *   shipping estimate: at least one selected SHIPPING or RETURN_SHIPPING line is ACTUAL
- *   and none is an ESTIMATE. While a shipping leg is still an estimate the warning
- *   stays, and so does it when the statement carries no shipping line at all (the desi
- *   is unknown, say): nothing replaced the estimate, the seller still has to act.
+ *   and none is an ESTIMATE. While a shipping leg is still an estimate the notice stays,
+ *   and so does it when the statement carries no shipping line at all (the desi is
+ *   unknown, say): nothing replaced the estimate, the seller still has to act.
+ * - CARRIER_NOT_RECOGNIZED is dropped once an ACTUAL SHIPPING line is selected, and while
+ *   a SELLER_CARGO_AGREEMENT_ESTIMATE notice is shown. The current engine never stores it
+ *   in either case (the invoice lifts it in the best-known view, and a seller-cargo order
+ *   never records it), so this only matters for a statement an engine before version 12
+ *   wrote, where the issue sat beside a zero shipping estimate; the stale sweep rewrites
+ *   such statements, and until it does, this keeps their notices consistent.
  * - Every other code is returned as it is.
  */
 export function visibleProfitIssues(

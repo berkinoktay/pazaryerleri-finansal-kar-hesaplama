@@ -1662,8 +1662,11 @@ describe('Order routes', () => {
       const store = await createStore(org.id);
 
       // Cancelled, no statement: the sale is 0 even though the order column holds 240
-      // (rule B5). No fee reference data, so the in-request computation fails and logs;
-      // the page still opens. Silence the expected log so it does not look like a break.
+      // (rule B5). There is no fee reference data, but the in-request computation no
+      // longer fails on that: each missing definition is a REFERENCE_DATA_MISSING issue and
+      // the cancelled order still computes, so nothing is logged. (The failure path, where
+      // the page opens with an empty profit section, is pinned above by "opens the detail
+      // without profit when the in-request computation fails": an invalid seller discount.)
       const cancelled = await createOrder(org.id, store.id, {
         status: 'CANCELLED',
         saleGross: '240.00',
@@ -1677,6 +1680,7 @@ describe('Order routes', () => {
         expect(res.status).toBe(200);
         const body = (await res.json()) as { saleGross: string | null };
         expect(body.saleGross).toBe('0');
+        expect(errorSpy).not.toHaveBeenCalled();
       } finally {
         errorSpy.mockRestore();
       }

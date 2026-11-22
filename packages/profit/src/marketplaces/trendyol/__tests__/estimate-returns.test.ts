@@ -360,6 +360,35 @@ describe('estimateReturnLines', () => {
     expect(returnedItems.map((item) => item.orderItemId)).toEqual(['a', 'b']);
   });
 
+  it('writes no overseas return fee while the commission VAT is unknown', () => {
+    // A missing COMMISSION_INVOICE definition (the loader recorded REFERENCE_DATA_MISSING)
+    // leaves the order without a commission line, so the fee base (sale minus commission)
+    // cannot be known; reading the absent commission as zero would overstate the fee.
+    const snapshot = makeParcel({
+      isExportSale: true,
+      items: [
+        makeItem({ orderItemId: 'a', listGross: '1000.00', saleVatRatePct: '20' }),
+        makeItem({ orderItemId: 'b', listGross: '2500.00', saleVatRatePct: '20' }),
+      ],
+    });
+
+    const { lines, issues, returnedItems } = estimateReturnLines({
+      outboundBaremTier: null,
+      snapshot,
+      accepted: [
+        { orderItemId: 'a', acceptedQuantity: 1 },
+        { orderItemId: 'b', acceptedQuantity: 1 },
+      ],
+      commissionLines: [],
+      costLines: [],
+      reference: trendyolReference({ fees: { commissionVatRatePct: null } }),
+    });
+
+    expect(lines).toEqual([]);
+    expect(issues).toEqual([]);
+    expect(returnedItems.map((item) => item.orderItemId)).toEqual(['a', 'b']);
+  });
+
   it('rounds the unit sale before the tier lookup', () => {
     const snapshot = makeParcel({
       isExportSale: true,
