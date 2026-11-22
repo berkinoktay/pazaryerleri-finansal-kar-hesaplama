@@ -181,6 +181,29 @@ describe('BufferOrderDetail', () => {
     expect(screen.queryByText(buffer.readyNotice)).toBeNull();
   });
 
+  it('keeps the pending notice when a line is unmatched even if no gap is flagged', async () => {
+    serveDetail([
+      makeLine({ barcode: 'BC-1', productName: 'Complete', variantId: 'v-1' }),
+      // A race between the API's two queries can deliver an unmatched line with
+      // no cost or desi gap flagged; an unmatched line still holds the order.
+      makeLine({
+        barcode: 'GHOST-1',
+        productName: 'Ghost',
+        variantId: null,
+        isCostMissing: false,
+        dimensionalWeight: null,
+        syncedDimensionalWeight: null,
+        isDimensionalWeightOverridden: false,
+        isDimensionalWeightMissing: false,
+      }),
+    ]);
+
+    renderDetail();
+
+    expect(await screen.findByText(buffer.pendingNotice)).toBeInTheDocument();
+    expect(screen.queryByText(buffer.readyNotice)).toBeNull();
+  });
+
   it('shows a neutral notice instead of an error when the entry is gone', async () => {
     // The worker promoted the order and deleted the buffer entry.
     server.use(

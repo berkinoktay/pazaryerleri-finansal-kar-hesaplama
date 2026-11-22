@@ -90,10 +90,14 @@ export function BufferOrderDetail({
   }
 
   const detail = query.data;
-  // Every line has its cost and desi: the order is about to be promoted.
+  // Every line is matched to a variant and has its cost and desi: the order is
+  // about to be promoted. An unmatched line is never ready, even when the API
+  // (two separate queries, so a race is possible) flags no gap on it.
   const isReady =
     detail.lines.length > 0 &&
-    detail.lines.every((l) => !l.isCostMissing && !l.isDimensionalWeightMissing);
+    detail.lines.every(
+      (l) => l.variantId !== null && !l.isCostMissing && !l.isDimensionalWeightMissing,
+    );
 
   return (
     <div className="gap-md flex flex-col">

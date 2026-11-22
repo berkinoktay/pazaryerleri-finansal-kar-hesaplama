@@ -170,12 +170,16 @@ function buildMappedOrder(args: {
   };
 }
 
-/** Catalog variant for (storeId, barcode); optionally with an active cost profile. */
+/**
+ * Catalog variant for (storeId, barcode); optionally with an active cost profile
+ * and a fixed variant id / platformVariantId.
+ */
 async function seedCatalogVariant(
   orgId: string,
   storeId: string,
   barcode: string,
   withCost: boolean,
+  opts: { id?: string; platformVariantId?: bigint } = {},
 ): Promise<void> {
   const product = await prisma.product.create({
     data: {
@@ -198,10 +202,12 @@ async function seedCatalogVariant(
     : {};
   await prisma.productVariant.create({
     data: {
+      ...(opts.id !== undefined ? { id: opts.id } : {}),
       organizationId: orgId,
       storeId,
       productId: product.id,
-      platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000_000)),
+      platformVariantId:
+        opts.platformVariantId ?? BigInt(Math.floor(Math.random() * 1_000_000_000)),
       barcode,
       stockCode: `sk-${barcode}`,
       salePrice: '100',
@@ -273,6 +279,33 @@ describe('processVariantResolution', () => {
       where: { orderId: ctx.orderId },
     });
     expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+  });
+
+  it('links a shared barcode to the lowest variant id', async () => {
+    const ctx = await buildUnresolvedScenario('BC-SHARED-1');
+    const lowVariantId = '00000000-0000-4000-8000-000000000001';
+    const highVariantId = 'ffffffff-ffff-4fff-bfff-ffffffffffff';
+    // The HIGHER id is inserted first and carries the lower platformVariantId,
+    // so an unordered lookup returns it by heap order and by the
+    // (storeId, platformVariantId) index alike; only an explicit id order picks
+    // the lower id (the variant the calculability gate in buildCalcCheckLines checks).
+    await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-SHARED-1', true, {
+      id: highVariantId,
+      platformVariantId: 7_000n,
+    });
+    await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-SHARED-1', true, {
+      id: lowVariantId,
+      platformVariantId: 7_001n,
+    });
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
+      throw new Error('vendor must NOT be called when the local catalog already matches');
+    });
+
+    await processVariantResolution();
+
+    const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: ctx.itemId } });
+    expect(item.productVariantId).toBe(lowVariantId);
   });
 
   it('fetches a missing barcode from the vendor, upserts the catalog row, and links', async () => {

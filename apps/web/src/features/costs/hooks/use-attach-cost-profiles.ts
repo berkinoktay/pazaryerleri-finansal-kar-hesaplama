@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
 
 import {
   attachCostProfiles,
@@ -46,7 +46,9 @@ interface MutationContext {
  * options, so it fires even if the calling component unmounts before the
  * request settles (a per-call `mutate(vars, { onSuccess })` would not).
  */
-export function useAttachCostProfiles(options?: { onSuccess?: () => void }) {
+export function useAttachCostProfiles(options?: {
+  onSuccess?: () => void;
+}): UseMutationResult<AttachResponse, Error, UseAttachCostProfilesVariables, MutationContext> {
   const queryClient = useQueryClient();
 
   return useMutation<AttachResponse, Error, UseAttachCostProfilesVariables, MutationContext>({

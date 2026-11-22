@@ -387,6 +387,9 @@ async function linkAgainstLocalCatalog(storeId: string, items: DueItem[]): Promi
         }
         const variant = await tx.productVariant.findFirst({
           where: { storeId, barcode: item.barcode },
+          // Lowest variant id for a barcode shared by two variants: the same choice
+          // as buildCalcCheckLines, so the gate and the stored order item name one variant.
+          orderBy: { id: 'asc' },
           select: { id: true },
         });
         if (variant === null) {
