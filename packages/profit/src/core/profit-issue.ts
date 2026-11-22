@@ -18,16 +18,24 @@ export interface ProfitIssue {
  * one stays a visible warning. An unmapped marketplace record is deliberately
  * non-blocking so a new record type does not turn every order "not computable" at once.
  * An ambiguous record match is a warning for the same reason: like an unmapped record,
- * it leaves the order's own estimate intact. A not-recognized carrier and a
- * seller-cargo-agreement estimate are warnings too: the order still carries a shipping
- * line (a zero or a tariff-based estimate), so the profit stays computable.
+ * it leaves the order's own estimate intact. A seller-cargo-agreement estimate is a
+ * warning too: the order still carries a tariff-based (or zero) shipping line, so the
+ * profit stays computable.
+ *
+ * A not-recognized carrier on a Trendyol-contract order is blocking: the order gets no
+ * shipping line at all (the engine cannot price a carrier it does not know). A
+ * seller-cargo-agreement order never records it (design 6.13). Missing reference data (a
+ * fee definition or a micro-export return tier absent on the order date) is blocking as
+ * well: the fee it would have priced is left out, so the total is not trustworthy.
  *
  * `settlementGap` marks a settlement-required slot the engine left without any line,
  * because it could neither estimate it nor read an actual for it (it could not estimate
- * shipping or resolve a commission rate). With no line in that slot nothing is "pending",
- * so without this flag reconciliation would read FULLY_SETTLED even though the real
- * record never arrived; it instead holds reconciliation at PARTIALLY_SETTLED (see
- * `deriveReconciliationStatus`). Every settlement-gap code is also blocking.
+ * shipping, recognize the order's carrier or resolve a commission rate). With no line in
+ * that slot nothing is "pending", so without this flag reconciliation would read
+ * FULLY_SETTLED even though the real record never arrived; it instead holds
+ * reconciliation at PARTIALLY_SETTLED (see `deriveReconciliationStatus`). Every
+ * settlement-gap code is also blocking. Missing reference data is not a settlement gap:
+ * no marketplace record fills it, only the reference data itself.
  */
 export const PROFIT_ISSUE_CATALOG = {
   MISSING_COST: { blocking: true, settlementGap: false },
@@ -35,8 +43,9 @@ export const PROFIT_ISSUE_CATALOG = {
   UNMAPPED_MARKETPLACE_RECORD: { blocking: false, settlementGap: false },
   MISSING_COMMISSION_RATE: { blocking: true, settlementGap: true },
   AMBIGUOUS_RECORD_MATCH: { blocking: false, settlementGap: false },
-  CARRIER_NOT_RECOGNIZED: { blocking: false, settlementGap: false },
+  CARRIER_NOT_RECOGNIZED: { blocking: true, settlementGap: true },
   SELLER_CARGO_AGREEMENT_ESTIMATE: { blocking: false, settlementGap: false },
+  REFERENCE_DATA_MISSING: { blocking: true, settlementGap: false },
 } as const satisfies Record<
   ProfitIssueCode,
   { readonly blocking: boolean; readonly settlementGap: boolean }

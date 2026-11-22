@@ -26,6 +26,17 @@ section "Versioning" for details.
 
 ### Changed
 
+- **New profit issue code and a blocking not-recognized carrier**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}`, `profitIssues[].code`). The
+  `ProfitIssue.code` enum gains `REFERENCE_DATA_MISSING` (blocking): a fee definition (`detail`
+  `FEE:<fee type>`) or a micro-export return tier (`detail` `EXPORT_RETURN_TIER`) was missing on the
+  order date, so that fee is left out and the profit is not computable. `CARRIER_NOT_RECOGNIZED` is
+  now blocking: an order shipped under Trendyol's agreement whose carrier is not recognized gets no
+  shipping estimate instead of a zero one; a seller-cargo-agreement order no longer records it.
+  `SHIPPING_ESTIMATE_UNAVAILABLE` has a new `detail`, `NO_TARIFF_VERSION` (`RETURN_NO_TARIFF_VERSION`
+  on the return leg), for a carrier with no tariff version in force on the order date; it was
+  reported as `DESI_OVERFLOW` before. The product pricing routes still report that case as
+  `DESI_OVERFLOW`. Clients must accept the new enum value.
 - **Entering a desi moves today's waiting orders into profit**
   (`PATCH /v1/organizations/{orgId}/stores/{storeId}/products/variants/{variantId}/dimensional-weight`,
   `PATCH .../products/variants/dimensional-weight`). Setting a desi (any value, 0 included) now

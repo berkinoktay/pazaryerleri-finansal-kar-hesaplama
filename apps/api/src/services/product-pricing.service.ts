@@ -685,11 +685,14 @@ type RowDisplayFields = Omit<
  * Maps a SHIPPING_ESTIMATE_UNAVAILABLE issue's `detail` (a ShippingUnavailableReason)
  * to the wire ShippingEstimateStatus. A Record keyed by the reason union, so a new
  * reason is a compile error here until it is placed. UNKNOWN_DESI (the variant has no
- * desi: no seller desi and none from Trendyol) surfaces as NO_DESI.
+ * desi: no seller desi and none from Trendyol) surfaces as NO_DESI. NO_TARIFF_VERSION
+ * (the default carrier has no tariff version in force) surfaces as DESI_OVERFLOW, the
+ * status this case read before the engine named it; the wire enum is unchanged.
  */
 const SHIPPING_DETAIL_TO_STATUS: Record<ShippingUnavailableReason, ShippingEstimateStatus> = {
   UNKNOWN_DESI: 'NO_DESI',
   NO_CARRIER: 'NO_CARRIER',
+  NO_TARIFF_VERSION: 'DESI_OVERFLOW',
   DESI_OVERFLOW: 'DESI_OVERFLOW',
   OWN_CONTRACT_EMPTY: 'OWN_CONTRACT_EMPTY',
 };
@@ -745,11 +748,16 @@ function statusesFromIssues(issues: readonly ProfitIssue[]): ScenarioStatuses {
       case ProfitIssueCode.UNMAPPED_MARKETPLACE_RECORD:
       case ProfitIssueCode.AMBIGUOUS_RECORD_MATCH:
         break;
-      // Order-carrier warnings: they come from an order's own carrier (a scenario has no
-      // order carrier) and are non-blocking -- the shipping line still exists -- so they
-      // leave the three statuses unchanged.
+      // Order-carrier codes: they come from an order's own carrier and seller cargo
+      // agreement (a scenario has neither), so they leave the three statuses unchanged.
       case ProfitIssueCode.CARRIER_NOT_RECOGNIZED:
       case ProfitIssueCode.SELLER_CARGO_AGREEMENT_ESTIMATE:
+        break;
+      // Missing reference data (a fee definition or an export return tier) is recorded
+      // only on the order path; the scenario loader still throws on a missing fee
+      // definition and a scenario is never an export sale. It maps onto none of the three
+      // inputs, so like the other out-of-scope codes it leaves them unchanged.
+      case ProfitIssueCode.REFERENCE_DATA_MISSING:
         break;
       default: {
         const _exhaustive: never = issue.code;

@@ -1518,9 +1518,11 @@ describe('Order routes', () => {
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
 
-      // A bare Trendyol order with no stored statement and no fee reference data (every
-      // test truncates it): the in-request computation throws when it resolves the
-      // platform fees, so the detail must still open with an empty profit section.
+      // A bare Trendyol order with no stored statement whose seller discount exceeds its
+      // list price: the computed sale goes negative, so the snapshot check rejects the
+      // parcel and the in-request computation throws. (A missing fee definition no longer
+      // throws -- it is a REFERENCE_DATA_MISSING issue -- so it cannot drive this path.)
+      // The detail must still open with an empty profit section.
       const order = await createOrder(org.id, store.id, {
         status: 'DELIVERED',
         saleGross: '240.00',
@@ -1533,6 +1535,8 @@ describe('Order routes', () => {
           barcode: 'BC-NOFEES-1',
           platformLineId: 7301n,
           quantity: 1,
+          lineListGross: '100.00',
+          lineSellerDiscountGross: '600.00',
         },
       });
 

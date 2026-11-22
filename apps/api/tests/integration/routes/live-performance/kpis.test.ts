@@ -339,17 +339,26 @@ describe('GET /v1/.../live-performance/kpis', () => {
 
     // Two statement-less orders (writer has not caught up yet): the request tries to
     // compute each, both computations fail here and are logged together in ONE line, so
-    // the orders stay volume + pending only and the KPIs still answer 200.
+    // the orders stay volume + pending only and the KPIs still answer 200. Each item's
+    // seller discount exceeds its list price, so the computed sale goes negative and the
+    // snapshot check throws (a missing fee definition no longer throws: it is recorded as
+    // REFERENCE_DATA_MISSING, so it cannot drive this failure path).
     const statementless = await createOrder(org.id, store.id, {
       orderDate: todayAt(11),
       saleGross: '30.00',
     });
-    await createOrderItem(statementless.id, org.id, { quantity: 1 });
+    const statementlessItem = await createOrderItem(statementless.id, org.id, { quantity: 1 });
     const secondStatementless = await createOrder(org.id, store.id, {
       orderDate: todayAt(13),
       saleGross: '20.00',
     });
-    await createOrderItem(secondStatementless.id, org.id, { quantity: 1 });
+    const secondStatementlessItem = await createOrderItem(secondStatementless.id, org.id, {
+      quantity: 1,
+    });
+    await prisma.orderItem.updateMany({
+      where: { id: { in: [statementlessItem.id, secondStatementlessItem.id] } },
+      data: { lineListGross: '10.00', lineSellerDiscountGross: '600.00' },
+    });
 
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {

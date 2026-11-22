@@ -21,5 +21,10 @@
  * 11: Barem picks table 1 or table 2 by the order's fast-delivery promise and whether it
  *     shipped by Trendyol's agreed ship-by date (two-tier versions only); a return of an
  *     order that went out at table 1 is priced at table 1 when the version says so.
+ * 12: a not-recognized carrier on a Trendyol-agreement order blocks the profit (no zero
+ *     shipping line; a seller-cargo-agreement order is exempt); a carrier with no tariff
+ *     version in force reports NO_TARIFF_VERSION; a missing fee definition or micro-export
+ *     return tier records REFERENCE_DATA_MISSING and leaves that fee out instead of
+ *     throwing, so every order gets a statement.
  */
-export const PROFIT_ENGINE_VERSION = 11;
+export const PROFIT_ENGINE_VERSION = 12;

@@ -14,6 +14,8 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '@pazarsync/db';
 import {
   Platform,
+  ProfitExclusionReason,
+  ProfitIssueCode,
   ProfitRecomputeReason,
   ProfitStatementView,
   ProfitStatus,
@@ -21,6 +23,7 @@ import {
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { PROFIT_ENGINE_VERSION } from '../../core/engine-version';
+import { parseStoredIssues } from '../../read/stored-issues';
 import {
   type ClaimedRecompute,
   claimProfitRecomputeRequests,
@@ -612,6 +615,66 @@ describe('profit recompute queue', () => {
     // The mark is dropped (no backoff) and no statement was written for the order.
     expect(await prisma.profitRecomputeRequest.count()).toBe(0);
     expect(await prisma.orderProfitStatement.count({ where: { orderId: parcel.orderId } })).toBe(0);
+  });
+
+  it('writes statements and drops the marks when a fee definition is missing on the order date', async () => {
+    // Formerly FeeDefinitionNotFoundError: no statement at all (not even an excluded or a
+    // cancelled one) and a mark retried forever. Now the missing definition is a blocking
+    // REFERENCE_DATA_MISSING issue: every order gets its statement and its mark is deleted.
+    // Exclusion and cancellation still win over the blocking issue.
+    const open = await seedMelontikParcel();
+    const excluded = await seedMelontikParcel();
+    const cancelled = await seedMelontikParcel({ status: 'CANCELLED' });
+    await prisma.order.update({
+      where: { id: excluded.orderId },
+      data: {
+        profitExcludedAt: new Date(),
+        profitExclusionReason: ProfitExclusionReason.COST_DEADLINE_MISSED,
+      },
+    });
+    await prisma.feeDefinition.deleteMany({
+      where: { platform: 'TRENDYOL', feeType: 'PLATFORM_SERVICE' },
+    });
+    for (const parcel of [open, excluded, cancelled]) {
+      await enqueueProfitRecompute(prisma, {
+        organizationId: parcel.organizationId,
+        storeId: parcel.storeId,
+        reason: ProfitRecomputeReason.ORDER_CHANGED,
+        orderIds: [parcel.orderId],
+      });
+    }
+
+    const result = await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(result.claimed).toBe(3);
+    expect(result.changed).toBe(3);
+    expect(result.failed).toBe(0);
+    expect(await prisma.profitRecomputeRequest.count()).toBe(0);
+
+    const expectedStatus = new Map([
+      [open.orderId, ProfitStatus.NOT_COMPUTABLE],
+      [excluded.orderId, ProfitStatus.EXCLUDED],
+      [cancelled.orderId, ProfitStatus.CANCELLED],
+    ]);
+    for (const [orderId, status] of expectedStatus) {
+      const statements = await prisma.orderProfitStatement.findMany({ where: { orderId } });
+      expect(statements.map((statement) => statement.view).sort()).toEqual([
+        ProfitStatementView.BEST_KNOWN,
+        ProfitStatementView.ESTIMATE,
+      ]);
+      for (const statement of statements) {
+        expect(statement.status).toBe(status);
+      }
+    }
+
+    const openBestKnown = await prisma.orderProfitStatement.findFirst({
+      where: { orderId: open.orderId, view: ProfitStatementView.BEST_KNOWN },
+    });
+    expect(openBestKnown?.netProfit).toBeNull();
+    expect(parseStoredIssues(openBestKnown?.issues ?? null)).toContainEqual({
+      code: ProfitIssueCode.REFERENCE_DATA_MISSING,
+      orderItemId: null,
+      detail: 'FEE:PLATFORM_SERVICE',
+    });
   });
 
   it('does not sweep orders of a platform the engine cannot compute', async () => {

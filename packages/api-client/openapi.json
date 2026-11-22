@@ -1170,7 +1170,7 @@
             "items": {
               "$ref": "#/components/schemas/ProfitIssue"
             },
-            "description": "The best-known profit statement's issues that still apply to its selected lines; a warning a later actual made moot is left out (CARRIER_NOT_RECOGNIZED once an actual shipping line is selected; SELLER_CARGO_AGREEMENT_ESTIMATE once a cargo invoice replaced every shipping estimate). CARRIER_NOT_RECOGNIZED is also left out while SELLER_CARGO_AGREEMENT_ESTIMATE is returned, since no cargo invoice is coming on such an order. Empty when there are none, and when the profit part is empty (a platform the engine cannot compute, or a profit read that failed)."
+            "description": "The best-known profit statement's issues that still apply to its selected lines; an issue a later actual made moot is left out (CARRIER_NOT_RECOGNIZED once an actual shipping line is selected; SELLER_CARGO_AGREEMENT_ESTIMATE once a cargo invoice replaced every shipping estimate). CARRIER_NOT_RECOGNIZED is also left out while SELLER_CARGO_AGREEMENT_ESTIMATE is returned, since no cargo invoice is coming on such an order. Empty when there are none, and when the profit part is empty (a platform the engine cannot compute, or a profit read that failed)."
           },
           "promotionDisplays": {
             "type": [
@@ -1465,7 +1465,8 @@
               "MISSING_COMMISSION_RATE",
               "AMBIGUOUS_RECORD_MATCH",
               "CARRIER_NOT_RECOGNIZED",
-              "SELLER_CARGO_AGREEMENT_ESTIMATE"
+              "SELLER_CARGO_AGREEMENT_ESTIMATE",
+              "REFERENCE_DATA_MISSING"
             ],
             "description": "Machine-readable issue code. Blocking codes make the profit not computable; the others are warnings shown next to a computed profit.",
             "example": "CARRIER_NOT_RECOGNIZED"
@@ -1484,7 +1485,7 @@
               "string",
               "null"
             ],
-            "description": "Optional English context for the issue. For CARRIER_NOT_RECOGNIZED it is the carrier name as Trendyol reported it (null when blank) and the frontend shows it inside its localized copy; for every other code it is not user-facing.",
+            "description": "Optional English context for the issue. For CARRIER_NOT_RECOGNIZED it is the carrier name as Trendyol reported it (null when blank) and the frontend shows it inside its localized copy. For SHIPPING_ESTIMATE_UNAVAILABLE it is the reason (UNKNOWN_DESI, NO_CARRIER, NO_TARIFF_VERSION, DESI_OVERFLOW, OWN_CONTRACT_EMPTY; prefixed RETURN_ for the return leg). For REFERENCE_DATA_MISSING it is FEE:<fee type> for a fee definition missing on the order date, or EXPORT_RETURN_TIER. It is never shown verbatim for any other code.",
             "example": "Alternative Delivery"
           }
         },

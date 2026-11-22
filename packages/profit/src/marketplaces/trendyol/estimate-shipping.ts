@@ -32,6 +32,7 @@ export const CARRIER_NOT_RECOGNIZED_REASON = 'CARRIER_NOT_RECOGNIZED';
 export type ShippingUnavailableReason =
   | 'UNKNOWN_DESI'
   | 'NO_CARRIER'
+  | 'NO_TARIFF_VERSION'
   | 'DESI_OVERFLOW'
   | 'OWN_CONTRACT_EMPTY';
 
@@ -113,6 +114,11 @@ export function resolveTrendyolShippingNet(params: {
       if (carrier === null) {
         return { ok: false, reason: 'NO_CARRIER' };
       }
+      // A carrier with no tariff version in force has empty tariffs; say so instead of
+      // reporting every desi as an overflow.
+      if (tariff.tariffVersionMissing) {
+        return { ok: false, reason: 'NO_TARIFF_VERSION' };
+      }
 
       if (baremTier !== null && carrier.supportsBarem && desi.lte(carrier.maxBaremDesi)) {
         const band = tariff.baremBands.find(
@@ -190,16 +196,17 @@ export function trendyolCarrierCodeForKind(
  * The standalone (as-if-shipped-alone) shipping gross for one item, used as an
  * allocation weight. The item desi is `unitDesi x quantity`, the basket is the
  * item's own sale, and the Barem table is the parcel's. Returns `null` when
- * the desi is unknown or the tariff cannot be resolved.
+ * the desi is unknown, the tariff cannot be resolved or the shipping VAT rate is
+ * unknown (a missing SHIPPING definition).
  */
 function standaloneShippingGross(params: {
   readonly item: ParcelItemSnapshot;
   readonly baremTier: TrendyolBaremTier | null;
   readonly tariff: TrendyolShippingTariff;
-  readonly shippingVatRatePct: Decimal;
+  readonly shippingVatRatePct: Decimal | null;
 }): Decimal | null {
   const { item, baremTier, tariff, shippingVatRatePct } = params;
-  if (item.unitDesi === null) {
+  if (item.unitDesi === null || shippingVatRatePct === null) {
     return null;
   }
 
@@ -221,13 +228,16 @@ function standaloneShippingGross(params: {
  * that weight the allocation. The line is ESTIMATE / RULE at PARCEL level. An
  * unknown desi or an unresolvable tariff yields a blocking
  * SHIPPING_ESTIMATE_UNAVAILABLE issue (reason in `detail`) and no line; a zero gross
- * yields neither. A not-recognized carrier on a Trendyol-contract order yields a zero
- * line plus a non-blocking CARRIER_NOT_RECOGNIZED issue (provider name in `detail`).
+ * yields neither. A not-recognized carrier on a Trendyol-contract order yields no line
+ * and a blocking CARRIER_NOT_RECOGNIZED issue (provider name in `detail`), unless the
+ * order uses a seller cargo agreement: that order is exempt (design 6.13) and keeps a
+ * zero line with no carrier issue.
  * A seller-cargo-agreement order on a Trendyol-contract store adds a non-blocking
  * SELLER_CARGO_AGREEMENT_ESTIMATE issue to whichever outcome it gets; its line is
  * unchanged. Digital items do not ship (plan decision 11b): an all-digital parcel
  * carries no shipping (no line, no issue) and every digital item's standalone amount
- * is zero.
+ * is zero. A missing SHIPPING definition (a null shipping VAT rate; the loader recorded
+ * REFERENCE_DATA_MISSING) writes no line and leaves every standalone amount null.
  * The standalone amounts are always computed, even when the parcel line itself fails.
  * The Barem table comes from `selectTrendyolBaremTier` (the order's promise and ship
  * timing on a two-tier version, the old fast-delivery rule on a single-tier one); the
@@ -292,18 +302,41 @@ export function estimateShippingLine(params: {
       : [];
 
   // A not-recognized carrier on a Trendyol-contract order cannot be priced from any
-  // tariff, so the estimate is a zero SHIPPING line recording why -- never an unavailable
-  // issue (a cargo invoice later replaces it with the real amount). A non-blocking
-  // CARRIER_NOT_RECOGNIZED issue makes the zero visible on the statement; the return leg
-  // adds none, so a parcel carries it once. This is distinct from a scenario with no
-  // carrier, which stays NO_CARRIER / unavailable (its outcome is null); an own-contract
-  // store is unaffected and falls through to its own tariff below.
+  // tariff. This is distinct from a scenario with no carrier, which stays NO_CARRIER /
+  // unavailable (its outcome is null); an own-contract store is unaffected and falls
+  // through to its own tariff below.
   const carrierOutcome = tariff.orderCarrierOutcome;
   if (
     tariff.source === ShippingTariffSource.TRENDYOL_CONTRACT &&
     carrierOutcome !== null &&
     carrierOutcome.kind === 'not-recognized'
   ) {
+    // An order shipped under Trendyol's agreement gets no SHIPPING line and a blocking
+    // CARRIER_NOT_RECOGNIZED issue (provider name in `detail`): the order is not computable
+    // until the carrier is recognized or a cargo invoice arrives. The return leg adds no
+    // issue, so a parcel carries it once.
+    if (!attributes.usesSellerCargoAgreement) {
+      return {
+        line: null,
+        issues: [
+          {
+            code: ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
+            orderItemId: null,
+            detail: carrierOutcome.providerName,
+          },
+        ],
+        standaloneByItem,
+        outboundBaremTier: null,
+      };
+    }
+    // A seller-cargo-agreement order is exempt from the not-recognized carrier rule
+    // (design 6.13; its carrier is not consulted): until the seller's own tariff prices it
+    // (PR-6) it keeps a zero SHIPPING line recording why, with only the non-blocking
+    // seller-cargo warning and never CARRIER_NOT_RECOGNIZED. With the shipping VAT unknown
+    // (see below) even the zero line is left out.
+    if (shippingVatRatePct === null) {
+      return { line: null, issues: sellerCargoIssues, standaloneByItem, outboundBaremTier: null };
+    }
     const line = createProfitLine({
       type: ProfitLineType.SHIPPING,
       level: ProfitLineLevel.PARCEL,
@@ -318,19 +351,13 @@ export function estimateShippingLine(params: {
       },
       externalRecord: null,
     });
-    return {
-      line,
-      issues: [
-        {
-          code: ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
-          orderItemId: null,
-          detail: carrierOutcome.providerName,
-        },
-        ...sellerCargoIssues,
-      ],
-      standaloneByItem,
-      outboundBaremTier: null,
-    };
+    return { line, issues: sellerCargoIssues, standaloneByItem, outboundBaremTier: null };
+  }
+
+  // A missing SHIPPING definition leaves the shipping VAT unknown (the loader recorded a
+  // blocking REFERENCE_DATA_MISSING): the leg cannot be priced, so it writes no line.
+  if (shippingVatRatePct === null) {
+    return { line: null, issues: sellerCargoIssues, standaloneByItem, outboundBaremTier: null };
   }
 
   const desi = parcelDesi(snapshot);

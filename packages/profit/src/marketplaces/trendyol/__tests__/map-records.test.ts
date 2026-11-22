@@ -327,6 +327,56 @@ describe('mapTrendyolRecords', () => {
     ]);
   });
 
+  it('writes no actual commission or cargo line whose VAT definition is missing', () => {
+    // A fee definition missing on the order date (the loader recorded
+    // REFERENCE_DATA_MISSING): the commission VAT (COMMISSION_INVOICE) and the shipping VAT
+    // (SHIPPING) are unknown, so no line needing them is written; the sale still is.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '529.00', barcode: 'bc-a' })],
+    });
+    const records = [
+      makeRecord({
+        recordId: 'rec-1',
+        transactionType: 'Sale',
+        barcode: 'bc-a',
+        credit: '529.00',
+        commissionAmount: '100.51',
+      }),
+    ];
+    const cargoItems = [
+      makeCargoItem({
+        invoiceSerial: 'INV1',
+        parcelUniqueId: 'P1',
+        itemType: TRENDYOL_CARGO_OUTBOUND_ITEM_TYPE,
+        amountGross: '98.34',
+      }),
+      makeCargoItem({
+        invoiceSerial: 'INV1',
+        parcelUniqueId: 'P1',
+        itemType: TRENDYOL_CARGO_RETURN_ITEM_TYPE,
+        amountGross: '93.05',
+      }),
+    ];
+
+    const result = mapTrendyolRecords({
+      snapshot,
+      attributes: makeTrendyolAttributes(),
+      fees: {
+        ...FEES,
+        commissionVatRatePct: null,
+        shippingVatRatePct: null,
+        returnShippingVatRatePct: null,
+      },
+      shippingTariffSource: ShippingTariffSource.TRENDYOL_CONTRACT,
+      records,
+      cargoItems,
+      estimateLines: [],
+    });
+
+    expect(result.issues).toEqual([]);
+    expect(result.lines.map((line) => line.type)).toEqual([ProfitLineType.SALE]);
+  });
+
   it('sums several outbound cargo items into one shipping line', () => {
     const snapshot = makeParcel({ items: [makeItem({ orderItemId: 'a', listGross: '100.00' })] });
     const cargoItems = [

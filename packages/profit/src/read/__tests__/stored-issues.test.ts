@@ -21,6 +21,25 @@ describe('parseStoredIssues', () => {
     ]);
   });
 
+  it('parses every known issue code, the reference-data one included', () => {
+    for (const code of Object.values(ProfitIssueCode)) {
+      expect(parseStoredIssues([{ code, orderItemId: null, detail: 'x' }])).toEqual([
+        { code, orderItemId: null, detail: 'x' },
+      ]);
+    }
+    expect(
+      parseStoredIssues([
+        { code: 'REFERENCE_DATA_MISSING', orderItemId: null, detail: 'FEE:PLATFORM_SERVICE' },
+      ]),
+    ).toEqual([
+      {
+        code: ProfitIssueCode.REFERENCE_DATA_MISSING,
+        orderItemId: null,
+        detail: 'FEE:PLATFORM_SERVICE',
+      },
+    ]);
+  });
+
   it('rejects an unknown issue code', () => {
     expect(() =>
       parseStoredIssues([{ code: 'NOT_A_REAL_CODE', orderItemId: null, detail: null }]),

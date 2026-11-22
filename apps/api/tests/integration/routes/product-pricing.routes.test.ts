@@ -363,6 +363,44 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/product-pricing — simpl
     expect(ids).toEqual([locked.id, onSale.id].sort());
     expect(body.pagination.total).toBe(2);
   });
+
+  it('still reports DESI_OVERFLOW when the default carrier has no tariff version in force', async () => {
+    // The engine now names this case NO_TARIFF_VERSION; the pricing screen keeps showing it
+    // as before (DESI_OVERFLOW), and the wire enum is unchanged. The carrier is this test's
+    // own TEST_ row with no tariff version at all; it is removed at the end.
+    const ctx = await setupFullyConfiguredStore();
+    const carrier = await prisma.shippingCarrier.create({
+      data: {
+        platform: 'TRENDYOL',
+        externalId: 990301,
+        code: 'TEST_PRICING_NO_VERSION',
+        displayName: 'Test Pricing No Version',
+      },
+    });
+    try {
+      await prisma.store.update({
+        where: { id: ctx.storeId },
+        data: { defaultShippingCarrierId: carrier.id },
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/product-pricing`,
+        { headers: { Authorization: bearer(ctx.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body: ListResponseWire = await res.json();
+
+      const row = body.data.find((r) => r.variantId === ctx.calculableVariantId);
+      expect(row?.shippingEstimateStatus).toBe('DESI_OVERFLOW');
+      expect(row?.calculable).toBe(false);
+    } finally {
+      await prisma.store.update({
+        where: { id: ctx.storeId },
+        data: { defaultShippingCarrierId: null },
+      });
+      await prisma.shippingCarrier.delete({ where: { id: carrier.id } });
+    }
+  });
 });
 
 // ── Tests that share the fully-configured-store fixture ───────────────────────

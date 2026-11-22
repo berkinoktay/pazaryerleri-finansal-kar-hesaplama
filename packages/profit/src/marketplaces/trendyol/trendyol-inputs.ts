@@ -51,17 +51,25 @@ export interface OverseasReturnTier {
   readonly ratePct: Decimal;
 }
 
-/** Fee parameters effective on the order date. Every rate is a percentage. */
+/**
+ * Fee parameters effective on the order date. Every rate is a percentage.
+ *
+ * A null value means the fee definition behind it was missing on the order date (or
+ * lacked the amount it needs). Only the order loader produces a null, after recording a
+ * blocking REFERENCE_DATA_MISSING issue for that fee; the scenario loader throws instead.
+ * The engine writes no line that needs a null value (estimate or actual) and never
+ * throws on one.
+ */
 export interface TrendyolFeeParams {
-  readonly psfStandardNet: Decimal;
-  readonly psfSameDayNet: Decimal;
-  readonly psfVatRatePct: Decimal;
-  readonly stoppageRatePct: Decimal;
-  readonly commissionVatRatePct: Decimal;
-  readonly shippingVatRatePct: Decimal;
-  readonly returnShippingVatRatePct: Decimal;
-  readonly internationalServiceRatePct: Decimal; // applied to the VAT-inclusive sale; result is gross
-  readonly internationalServiceVatRatePct: Decimal;
+  readonly psfStandardNet: Decimal | null;
+  readonly psfSameDayNet: Decimal | null;
+  readonly psfVatRatePct: Decimal | null;
+  readonly stoppageRatePct: Decimal | null;
+  readonly commissionVatRatePct: Decimal | null;
+  readonly shippingVatRatePct: Decimal | null;
+  readonly returnShippingVatRatePct: Decimal | null;
+  readonly internationalServiceRatePct: Decimal | null; // applied to the VAT-inclusive sale; result is gross
+  readonly internationalServiceVatRatePct: Decimal | null;
   readonly overseasReturnTiers: readonly OverseasReturnTier[];
 }
 
@@ -107,6 +115,11 @@ export interface TrendyolShippingTariff {
   readonly ownTariffNet: ReadonlyMap<string, Decimal>;
   // How the order's carrier resolved (null = non-order context: scenario / store default).
   readonly orderCarrierOutcome: TrendyolOrderCarrierOutcome | null;
+  // True when a carrier is set but none of its tariff versions is in force at the instant
+  // (no tariff entered yet, or a date before its first version): its desi and Barem
+  // tariffs are empty and a Trendyol-contract estimate reports NO_TARIFF_VERSION. False
+  // when there is no carrier or a version was found.
+  readonly tariffVersionMissing: boolean;
 }
 
 /** Category and category+brand commission rules. */

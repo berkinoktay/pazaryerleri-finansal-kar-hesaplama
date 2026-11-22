@@ -37,7 +37,7 @@ import {
   decOrNull,
   loadCommissionRulesForCategories,
   loadCostProfilesByVariant,
-  loadFeeParams,
+  loadOrderFeeParams,
   loadPinnedCostProfilesByVersionId,
   loadShippingTariff,
 } from './trendyol-reference-loaders';
@@ -47,8 +47,10 @@ const ZERO = new Decimal(0);
 /**
  * Everything a parcel needs to be driven through the Phase 2A Trendyol module and
  * then written: the pure estimate input, the raw settlement + cargo records for the
- * mapper, the resolved profit settings, the exclusion flag, and the raw rows the
- * loader could not hand to the mapper (non-blocking issues the writer merges in).
+ * mapper, the resolved profit settings, the exclusion flag, and the issues the loader
+ * raised itself (the writer merges them in): a blocking REFERENCE_DATA_MISSING per fee
+ * definition missing on the order date, and a non-blocking one per raw row it could not
+ * hand to the mapper.
  */
 export interface LoadedTrendyolParcel {
   readonly organizationId: string;
@@ -271,11 +273,18 @@ export async function loadTrendyolParcel(
     items: itemAttributes,
   };
 
+  // Issues the loader raises itself: missing reference data (below) and the raw finance
+  // rows it cannot hand to the mapper (further down).
+  const loadIssues: ProfitIssue[] = [];
+
   // --- Reference: fees, shipping, commission rules ---
-  const fees = await loadFeeParams(tx, {
+  // A fee definition missing on the order date never throws here: it becomes a blocking
+  // REFERENCE_DATA_MISSING issue and the fee is left out, so the statement is still written.
+  const fees = await loadOrderFeeParams(tx, {
     orderDate,
     isExport: order.isExportSale,
     fastDeliveryType: order.fastDeliveryType,
+    issues: loadIssues,
   });
   // The order's own carrier (the one Trendyol assigned, named by cargoProviderName)
   // drives the shipping estimate; the store default is never used on an order. When the
@@ -316,7 +325,6 @@ export async function loadTrendyolParcel(
         .filter((barcode): barcode is string => barcode !== null),
     ),
   ];
-  const loadIssues: ProfitIssue[] = [];
   const { records, cargoItems } = await loadFinanceRecords(tx, {
     storeId,
     orderId: order.id,

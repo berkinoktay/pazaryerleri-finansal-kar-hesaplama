@@ -80,6 +80,8 @@ function defaultShipping(): TrendyolShippingTariff {
     ownTariffNet: new Map(),
     // Non-order context by default; carrier-outcome tests set this explicitly.
     orderCarrierOutcome: null,
+    // A version is in force by default; the missing-version tests set this explicitly.
+    tariffVersionMissing: false,
   };
 }
 

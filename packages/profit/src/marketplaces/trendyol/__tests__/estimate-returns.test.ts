@@ -156,6 +156,42 @@ describe('estimateReturnLines', () => {
     });
   });
 
+  it('reports RETURN_NO_TARIFF_VERSION when the carrier has no version in force', () => {
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '2' })],
+    });
+
+    const { lines, issues } = estimateReturnLines({
+      outboundBaremTier: null,
+      snapshot,
+      accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
+      commissionLines: [],
+      costLines: [],
+      reference: trendyolReference({
+        shipping: {
+          carrier: {
+            code: 'TEXMP',
+            supportsBarem: false,
+            maxBaremDesi: new Decimal('0'),
+            baremAppliesToReturns: false,
+          },
+          desiTariffNet: new Map(),
+          baremBands: [],
+          tariffVersionMissing: true,
+        },
+      }),
+    });
+
+    expect(lineOfType(lines, ProfitLineType.RETURN_SHIPPING)).toBeUndefined();
+    expect(issues).toEqual([
+      {
+        code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+        orderItemId: null,
+        detail: 'RETURN_NO_TARIFF_VERSION',
+      },
+    ]);
+  });
+
   it('prorates a partial return', () => {
     // Review focus 4: the return legs scale by the accepted quantity ratio.
     const snapshot = makeParcel({
@@ -277,6 +313,51 @@ describe('estimateReturnLines', () => {
     expect(returnedItems[0]?.standaloneAmount).toBeNull();
     expect(returnedItems[1]?.saleGross.toFixed(2)).toBe('2500.00');
     expect(returnedItems[1]?.standaloneAmount).toBeNull();
+  });
+
+  it('records missing reference data instead of throwing when no overseas return tier matches', () => {
+    // Only item 'b' falls outside every tier: it gets no operation fee line and a blocking
+    // REFERENCE_DATA_MISSING issue, while item 'a' is still priced and both stay in the
+    // returned-item set for allocation.
+    const snapshot = makeParcel({
+      isExportSale: true,
+      items: [
+        makeItem({ orderItemId: 'a', listGross: '1000.00', saleVatRatePct: '20' }),
+        makeItem({ orderItemId: 'b', listGross: '2500.00', saleVatRatePct: '20' }),
+      ],
+    });
+
+    const { lines, issues, returnedItems } = estimateReturnLines({
+      outboundBaremTier: null,
+      snapshot,
+      accepted: [
+        { orderItemId: 'a', acceptedQuantity: 1 },
+        { orderItemId: 'b', acceptedQuantity: 1 },
+      ],
+      commissionLines: [],
+      costLines: [],
+      reference: trendyolReference({
+        fees: {
+          overseasReturnTiers: [
+            {
+              minUnitSaleGross: new Decimal('0.00'),
+              maxUnitSaleGross: new Decimal('2000.00'),
+              ratePct: new Decimal('35'),
+            },
+          ],
+        },
+      }),
+    });
+
+    expect(lines.map((line) => line.orderItemId)).toEqual(['a']);
+    expect(issues).toEqual([
+      {
+        code: ProfitIssueCode.REFERENCE_DATA_MISSING,
+        orderItemId: 'b',
+        detail: 'EXPORT_RETURN_TIER',
+      },
+    ]);
+    expect(returnedItems.map((item) => item.orderItemId)).toEqual(['a', 'b']);
   });
 
   it('rounds the unit sale before the tier lookup', () => {

@@ -27,6 +27,7 @@ import {
   CommissionRuleKind,
   CostProfileType,
   Platform,
+  ProfitIssueCode,
   ProfitLineType,
   ProfitStatementView,
   ProfitStatus,
@@ -36,7 +37,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { PROFIT_ENGINE_VERSION } from '../../core/engine-version';
 import { type ProfitLine } from '../../core/profit-line';
-import { CARRIER_NOT_RECOGNIZED_REASON } from '../../marketplaces/trendyol/estimate-shipping';
 import { computeParcelProfit, type ComputedParcelProfit } from '../compute-parcel-profit';
 import { profitContentHash } from '../content-hash';
 import { recomputeParcelProfit, type RecomputeParcelResult } from '../recompute-parcel-profit';
@@ -642,10 +642,12 @@ describe('recomputeParcelProfit with the order profit snapshot', () => {
     const second = await recompute(parcel);
     expect(second.changed).toBe(false);
 
-    // Control: an uncaptured order no longer recognizes the inactive carrier.
+    // Control: an uncaptured order no longer recognizes the inactive carrier, so it gets
+    // no shipping line and a blocking CARRIER_NOT_RECOGNIZED issue.
     const twin = await computeReadOnly(parcel.organizationId, twinOrderId);
-    expect(findLine(twin, ProfitLineType.SHIPPING)?.inputs).toMatchObject({
-      reason: CARRIER_NOT_RECOGNIZED_REASON,
-    });
+    expect(findLine(twin, ProfitLineType.SHIPPING)).toBeUndefined();
+    expect(twin.bestKnown.issues.map((issue) => issue.code)).toContain(
+      ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
+    );
   });
 });
