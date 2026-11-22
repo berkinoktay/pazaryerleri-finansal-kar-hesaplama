@@ -37,7 +37,8 @@ export interface ProfitBadgeProps {
    * specific, actionable cause the seller should see instead of a mute dash.
    * When provided, the empty chip switches to a warning-soft treatment
    * (`bg-warning-surface text-warning`) so the cause draws the eye — the
-   * default em-dash (no `emptyLabel`) stays a mute neutral chip.
+   * default em-dash (no `emptyLabel`) stays a mute neutral chip. A string label
+   * also leads the button's accessible name, ahead of the open hint.
    */
   emptyLabel?: React.ReactNode;
   /**
@@ -79,6 +80,11 @@ export function ProfitBadge({
   // reason draws the eye; a bare null (default "—") stays a mute neutral chip so
   // non-tariff surfaces (orders, live sheet) are unchanged.
   const isCausedEmpty = value === null && emptyLabel !== undefined;
+  // The aria-label replaces the visible text, so a shown cause leads it ("<cause>, <open
+  // hint>") and a screen reader hears why the amount is missing. Only a string cause can
+  // join the label; every other chip keeps the plain open hint.
+  const ariaLabel =
+    isCausedEmpty && typeof emptyLabel === 'string' ? `${emptyLabel}, ${t('open')}` : t('open');
 
   return (
     <Tooltip>
@@ -86,7 +92,7 @@ export function ProfitBadge({
         <button
           type="button"
           onClick={onOpen}
-          aria-label={t('open')}
+          aria-label={ariaLabel}
           className={cn(
             'group focus-visible:shadow-focus rounded-md focus-visible:outline-none',
             // Dokunmatikte tıklama alanını büyüt — negatif marj layout'u kaydırmaz.

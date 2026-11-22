@@ -11,6 +11,8 @@ vi.mock('next/navigation', () => ({ useRouter: vi.fn(() => ({ push: vi.fn() })) 
 
 const OPEN_LABEL = trMessages.profitBadge.open;
 const BADGE_LABEL = trMessages.profitBlockers.badge;
+// The not-computable chip announces its status before the open hint.
+const BLOCKED_NAME = `${BADGE_LABEL}, ${OPEN_LABEL}`;
 // Reason sentences rendered from the catalog (no Turkish literals in source).
 const tBlockers = createTranslator({
   locale: 'tr',
@@ -103,7 +105,7 @@ describe('OrdersTable — Tahmini kâr profit badge', () => {
 
     it('shows the warning badge instead of the em-dash and names every reason on hover', async () => {
       renderTable({ rows: [BLOCKED_ROW] });
-      const badge = screen.getByRole('button', { name: OPEN_LABEL });
+      const badge = screen.getByRole('button', { name: BLOCKED_NAME });
       expect(badge).toHaveTextContent(BADGE_LABEL);
       expect(badge).not.toHaveTextContent('—');
 
@@ -117,8 +119,14 @@ describe('OrdersTable — Tahmini kâr profit badge', () => {
 
     it('still opens the profit detail when the badge is clicked (the touch path)', async () => {
       const { onRowOpen, user } = renderTable({ rows: [BLOCKED_ROW] });
-      await user.click(screen.getByRole('button', { name: OPEN_LABEL }));
+      await user.click(screen.getByRole('button', { name: BLOCKED_NAME }));
       expect(onRowOpen).toHaveBeenCalledWith('o1');
+    });
+
+    it('lets a screen reader hear the not-computable status, not only the open hint', () => {
+      renderTable({ rows: [BLOCKED_ROW] });
+      const badge = screen.getByRole('button', { name: new RegExp(BADGE_LABEL) });
+      expect(badge).toHaveAccessibleName(BLOCKED_NAME);
     });
 
     it('keeps the neutral em-dash badge for a null profit without blockers', () => {

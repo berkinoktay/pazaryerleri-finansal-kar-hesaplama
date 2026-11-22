@@ -211,8 +211,10 @@ export function OrderDetailClient({
           talepleri ve teslimat bilinçli olarak kaldırıldı — sheet yalnız kâr
           hikâyesine odaklanır. */}
       {/* A not-computable profit has no breakdown; the blocker alert already explains
-          it, so the hero and summary placeholders (the generic "not calculated"
-          text) are left out. A breakdown is never hidden. */}
+          it, so the hero placeholder and the summary's generic "not calculated" text
+          are left out. For a micro-export order the summary header still renders on
+          its own: it carries the micro-export badge, and a missing export return tier
+          blocks exactly those orders. A breakdown is never hidden. */}
       {notComputable ? null : (
         <OrderProfitHero
           breakdown={order.profitBreakdown}
@@ -222,11 +224,12 @@ export function OrderDetailClient({
 
       <OrderItemsList items={order.items} profitExcluded={order.profitExcludedAt !== null} />
 
-      {notComputable ? null : (
+      {notComputable && !order.isExportSale ? null : (
         <OrderProfitSummary
           breakdown={order.profitBreakdown}
           promotionDisplays={order.promotionDisplays}
           isExportSale={order.isExportSale}
+          hideUnavailableText={notComputable}
         />
       )}
     </div>

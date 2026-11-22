@@ -3782,7 +3782,6 @@
       "description": "{count, plural, other {# iade talebi}} işlendi; kâr dökümündeki tutarlar iade sonrası net gösterilir."
     },
     "profitIssues": {
-      "unknownCarrier": "bilinmeyen taşıyıcı",
       "SELLER_CARGO_AGREEMENT_ESTIMATE": {
         "title": "Kargo tutarı tahmin olarak kalacak",
         "description": "Bu sipariş kendi kargo anlaşmanla gönderildi; Trendyol bunun için kargo faturası kesmez. Gerçek tutarı görmek için kargo ayarlarından kendi tarifeni gir."

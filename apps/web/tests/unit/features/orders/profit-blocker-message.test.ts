@@ -32,6 +32,21 @@ function resolve(code: ProfitBlocker['code'], detail: string | null = null): Pro
   return message;
 }
 
+// Every detail the engine writes today plus a null and an unknown one, so each
+// branch of every code is exercised.
+const DETAILS = [
+  null,
+  'NO_TARIFF_VERSION',
+  'DESI_OVERFLOW',
+  'UNKNOWN_DESI',
+  'NO_CARRIER',
+  'OWN_CONTRACT_EMPTY',
+  'RETURN_UNKNOWN_DESI',
+  'EXPORT_RETURN_TIER',
+  'FEE:PLATFORM_SERVICE',
+  'SOMETHING_NEW',
+];
+
 // Walk a dotted key through a message tree without a type assertion; a missing
 // segment yields undefined instead of a compile-time pass.
 function readPath(tree: unknown, dottedKey: string): unknown {
@@ -130,22 +145,25 @@ describe('profitBlockerMessage', () => {
     expect(profitBlockerMessage(blocker(code, 'x'), UNKNOWN_CARRIER)).toBeNull();
   });
 
-  describe('i18n coverage', () => {
-    // Every detail the engine writes today plus a null and an unknown one, so each
-    // branch of every code is exercised against both catalogs.
-    const DETAILS = [
-      null,
-      'NO_TARIFF_VERSION',
-      'DESI_OVERFLOW',
-      'UNKNOWN_DESI',
-      'NO_CARRIER',
-      'OWN_CONTRACT_EMPTY',
-      'RETURN_UNKNOWN_DESI',
-      'EXPORT_RETURN_TIER',
-      'FEE:PLATFORM_SERVICE',
-      'SOMETHING_NEW',
-    ];
+  it('returns null for exactly the three non-blocking warning codes and no other code', () => {
+    // Counted over the runtime enum, so a new blocker code that slips into the null
+    // group (no sentence, a silent blocker) fails here instead of in the UI.
+    const nullCodes = Object.values(ProfitIssueCode).filter((code) =>
+      DETAILS.some(
+        (detail) => profitBlockerMessage(blocker(code, detail), UNKNOWN_CARRIER) === null,
+      ),
+    );
 
+    expect(new Set(nullCodes)).toEqual(
+      new Set([
+        'UNMAPPED_MARKETPLACE_RECORD',
+        'AMBIGUOUS_RECORD_MATCH',
+        'SELLER_CARGO_AGREEMENT_ESTIMATE',
+      ]),
+    );
+  });
+
+  describe('i18n coverage', () => {
     it.each([
       { locale: 'tr', messages: tr.profitBlockers },
       { locale: 'en', messages: en.profitBlockers },

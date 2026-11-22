@@ -17,6 +17,11 @@ const API = 'http://localhost:3001';
 // Turkish copy referenced through the catalog so this source file stays ASCII.
 const BLOCKERS_TITLE = trMessages.profitBlockers.title;
 const UNAVAILABLE = trMessages.profitBreakdown.unavailable;
+const BREAKDOWN_TITLE = trMessages.profitBreakdown.title;
+const MICRO_EXPORT = trMessages.profitBreakdown.microExport;
+// Rendered only by the profit hero (the summary card never prints it).
+const HERO_LABEL = trMessages.profitBreakdown.estimatedProfit;
+const COST_GROUP = trMessages.profitBreakdown.groups.cost;
 const tBlockers = createTranslator({
   locale: 'tr',
   messages: trMessages,
@@ -59,6 +64,38 @@ const BLOCKED_ORDER: OrderDetail = {
   claims: [],
 };
 
+// A consistent backend-served breakdown (the four groups close to saleGross).
+const BREAKDOWN: NonNullable<OrderDetail['profitBreakdown']> = {
+  listGross: '1159.70',
+  sellerDiscountGross: '150.00',
+  saleGross: '1009.70',
+  saleVat: '168.28',
+  costGross: '407.00',
+  costVat: '67.83',
+  commissionGross: '201.23',
+  commissionVat: '33.54',
+  shippingGross: '54.99',
+  shippingVat: '9.16',
+  outboundShippingGross: '54.99',
+  outboundShippingVat: '9.16',
+  returnShippingGross: '0.00',
+  returnShippingVat: '0.00',
+  platformServiceGross: '10.19',
+  platformServiceVat: '1.70',
+  internationalServiceGross: '0.00',
+  internationalServiceVat: '0.00',
+  overseasReturnOperationGross: '0.00',
+  overseasReturnOperationVat: '0.00',
+  stoppage: '8.41',
+  netVat: '56.05',
+  netProfit: '271.83',
+  saleMarginPct: '26.92',
+  costMarkupPct: '66.79',
+  marketplaceFeesGross: '266.41',
+  taxesGross: '64.46',
+  totalDeductionsGross: '737.87',
+};
+
 function serveOrder(order: OrderDetail): void {
   server.use(
     http.get(`${API}/v1/organizations/${ORG}/stores/${STORE}/orders/ord-1`, () =>
@@ -86,6 +123,8 @@ describe('OrderDetailClient - not-computable profit', () => {
       tBlockers('reasons.CARRIER_NOT_RECOGNIZED', { providerName: 'Alternative Delivery' }),
     );
     expect(screen.queryByText(UNAVAILABLE)).toBeNull();
+    // Not an export order: no empty, header-only breakdown card is left behind.
+    expect(screen.queryByText(BREAKDOWN_TITLE)).toBeNull();
   });
 
   it('shows no blocker alert and keeps the unavailable text when there are no blockers', async () => {
@@ -94,5 +133,40 @@ describe('OrderDetailClient - not-computable profit', () => {
 
     expect((await screen.findAllByText(UNAVAILABLE)).length).toBeGreaterThan(0);
     expect(screen.queryByText(BLOCKERS_TITLE)).toBeNull();
+  });
+
+  it('keeps the breakdown card header with the micro-export badge for a blocked export order', async () => {
+    // A missing export return tier blocks exactly the micro-export orders, so the
+    // badge must survive the not-computable state; only the generic text goes.
+    serveOrder({
+      ...BLOCKED_ORDER,
+      isExportSale: true,
+      profitBlockers: [{ code: 'REFERENCE_DATA_MISSING', detail: 'EXPORT_RETURN_TIER' }],
+    });
+    renderDetail();
+
+    const title = await screen.findByText(BLOCKERS_TITLE);
+    expect(title.closest('[role="alert"]')).toHaveTextContent(
+      tBlockers('reasons.REFERENCE_DATA_MISSING.EXPORT_RETURN_TIER'),
+    );
+    expect(screen.getByText(BREAKDOWN_TITLE)).toBeInTheDocument();
+    expect(screen.getByText(MICRO_EXPORT)).toBeInTheDocument();
+    expect(screen.queryByText(UNAVAILABLE)).toBeNull();
+  });
+
+  it('never hides the profit cards when a breakdown arrives alongside blockers', async () => {
+    // Defensive: the API should not send both, but a breakdown is always shown.
+    serveOrder({
+      ...BLOCKED_ORDER,
+      estimatedNetProfit: BREAKDOWN.netProfit,
+      profitBreakdown: BREAKDOWN,
+    });
+    renderDetail();
+
+    expect(await screen.findByText(BLOCKERS_TITLE)).toBeInTheDocument();
+    expect(screen.getByText(HERO_LABEL)).toBeInTheDocument();
+    expect(screen.getByText(BREAKDOWN_TITLE)).toBeInTheDocument();
+    expect(screen.getByText(COST_GROUP)).toBeInTheDocument();
+    expect(screen.queryByText(UNAVAILABLE)).toBeNull();
   });
 });
