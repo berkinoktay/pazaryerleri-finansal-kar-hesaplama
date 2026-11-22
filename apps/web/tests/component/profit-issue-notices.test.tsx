@@ -16,26 +16,20 @@ function issue(code: ProfitIssueWire['code'], detail: string | null = null): Pro
 }
 
 describe('ProfitIssueNotices', () => {
-  it('names the unrecognized carrier reported by the marketplace', () => {
-    render(
-      <ProfitIssueNotices issues={[issue('CARRIER_NOT_RECOGNIZED', 'Alternative Delivery')]} />,
-    );
-
-    const alert = screen.getByRole('alert');
-    expect(alert).toHaveTextContent(copy.CARRIER_NOT_RECOGNIZED.title);
-    expect(alert).toHaveTextContent('Alternative Delivery');
-  });
-
-  it('falls back to the unknown carrier label when the issue carries no detail', () => {
-    render(<ProfitIssueNotices issues={[issue('CARRIER_NOT_RECOGNIZED')]} />);
-
-    expect(screen.getByRole('alert')).toHaveTextContent(copy.unknownCarrier);
-  });
-
   it('shows the seller cargo agreement notice', () => {
     render(<ProfitIssueNotices issues={[issue('SELLER_CARGO_AGREEMENT_ESTIMATE')]} />);
 
-    expect(screen.getByRole('alert')).toHaveTextContent(copy.SELLER_CARGO_AGREEMENT_ESTIMATE.title);
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent(copy.SELLER_CARGO_AGREEMENT_ESTIMATE.title);
+    expect(alert).toHaveTextContent(copy.SELLER_CARGO_AGREEMENT_ESTIMATE.description);
+  });
+
+  it('renders nothing for an unrecognized carrier: it blocks the profit and the blocker alert names it', () => {
+    const { container } = render(
+      <ProfitIssueNotices issues={[issue('CARRIER_NOT_RECOGNIZED', 'Alternative Delivery')]} />,
+    );
+
+    expect(container).toBeEmptyDOMElement();
   });
 
   it('renders nothing for issue codes that are not notices', () => {

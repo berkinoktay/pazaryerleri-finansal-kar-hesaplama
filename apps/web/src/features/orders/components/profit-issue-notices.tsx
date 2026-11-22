@@ -9,8 +9,12 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 export type ProfitIssueWire = components['schemas']['ProfitIssue'];
 
-/** The non-blocking profit issue codes the order detail surfaces as notices. */
-const NOTICE_CODES = ['CARRIER_NOT_RECOGNIZED', 'SELLER_CARGO_AGREEMENT_ESTIMATE'] as const;
+/**
+ * The non-blocking profit issue codes the order detail surfaces as notices. An
+ * unrecognized carrier blocks the profit, so it is named by the blocker alert
+ * (`ProfitBlockersAlert`), not here.
+ */
+const NOTICE_CODES = ['SELLER_CARGO_AGREEMENT_ESTIMATE'] as const;
 
 type NoticeCode = (typeof NOTICE_CODES)[number];
 

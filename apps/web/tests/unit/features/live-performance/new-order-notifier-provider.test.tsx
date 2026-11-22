@@ -4,6 +4,8 @@ import { createTranslator, NextIntlClientProvider } from 'next-intl';
 import { type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { formatCurrency } from '@pazarsync/utils';
+
 import type { LivePerformanceOrders } from '@/features/live-performance/api/get-live-orders.api';
 import type { NotificationSummaryLike } from '@/features/live-performance/lib/new-order-notification-core';
 import { LIVE_POLL_INTERVAL_MS, liveKeys } from '@/features/live-performance/query-keys';
@@ -330,6 +332,66 @@ describe('NewOrderNotifierProvider', () => {
     });
 
     expect(toastMock).not.toHaveBeenCalled();
+  });
+
+  // The single toast's first line: the profit when known; otherwise the reason it is
+  // missing depends on where the order sits. A buffer entry waits on a cost or desi;
+  // an order without a profit is not computable, and its detail names why.
+  describe('single toast profit line', () => {
+    async function toastDescriptionFor(
+      table: 'orders' | 'buffer',
+      summary: NotificationSummaryLike,
+    ): Promise<unknown> {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-08T12:00:00Z'));
+      getNotificationSummaryMock.mockResolvedValue(summary);
+
+      renderHook(() => useNewOrderNotifier(), { wrapper });
+      act(() => {
+        capturedOnNewOrder({ table, id: 'today-1', orderDate: '2026-07-08T13:00:00' });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);
+      });
+
+      expect(toastMock).toHaveBeenCalledTimes(1);
+      const options: unknown = toastMock.mock.calls[0]?.[1];
+      if (typeof options !== 'object' || options === null || !('description' in options)) {
+        throw new Error('The single toast carries no description');
+      }
+      return options.description;
+    }
+
+    it('names the net profit when the order is costed', async () => {
+      const description = await toastDescriptionFor('orders', SUMMARY_B);
+      expect(description).toEqual(
+        expect.stringContaining(tRealtime('profitLine', { profit: formatCurrency('25.00') })),
+      );
+    });
+
+    it('points to the order detail when an order has no profit', async () => {
+      const description = await toastDescriptionFor('orders', {
+        ...SUMMARY_B,
+        profit: null,
+        costStatus: 'pending',
+      });
+      expect(description).toEqual(expect.stringContaining(tRealtime('notComputableLine')));
+      expect(description).not.toEqual(expect.stringContaining(tRealtime('costMissingLine')));
+    });
+
+    it('keeps the cost-missing line for a buffer entry', async () => {
+      const description = await toastDescriptionFor('buffer', {
+        ...SUMMARY_B,
+        source: 'buffer',
+        orderId: null,
+        bufferId: 'buf-1',
+        status: null,
+        profit: null,
+        costStatus: 'pending',
+      });
+      expect(description).toEqual(expect.stringContaining(tRealtime('costMissingLine')));
+      expect(description).not.toEqual(expect.stringContaining(tRealtime('notComputableLine')));
+    });
   });
 
   // Poll gate: the fallback must run whenever the channel is NOT delivering, i.e.

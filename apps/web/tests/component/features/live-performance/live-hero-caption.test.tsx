@@ -1,3 +1,4 @@
+import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 
 import type { LivePerformanceKpis } from '@/features/live-performance/api/get-live-kpis.api';
@@ -10,6 +11,11 @@ import { render, screen } from '../../../helpers/render';
 // so this source file stays ASCII; numeric/format assertions are ASCII already.
 const yesterdayLabel = trMessages.livePerformance.chart.yesterdayLabel;
 const netProfitLabel = trMessages.livePerformance.kpis.netProfit;
+const tKpis = createTranslator({
+  locale: 'tr',
+  messages: trMessages,
+  namespace: 'livePerformance.kpis',
+});
 // The em-dash shown for a missing figure, built from its code point to keep this file ASCII.
 const EM_DASH = String.fromCodePoint(0x2014);
 
@@ -59,13 +65,13 @@ describe('LiveHeroCaption', () => {
   it('omits the pending-cost sub-label when no orders await cost', () => {
     render(<LiveHeroCaption kpis={{ ...BASE, pendingOrderCountToday: 0 }} />);
 
-    expect(screen.queryByText(/maliyet ya da desi bekliyor/)).toBeNull();
+    expect(screen.queryByText(tKpis('pendingHint', { count: 0 }))).toBeNull();
   });
 
   it('shows the pending-cost sub-label with the pending order count when orders await cost', () => {
     render(<LiveHeroCaption kpis={{ ...BASE, pendingOrderCountToday: 3 }} />);
 
-    const pending = screen.getByText(/maliyet ya da desi bekliyor/);
+    const pending = screen.getByText(tKpis('pendingHint', { count: 3 }));
     expect(pending).toHaveTextContent('3');
   });
 

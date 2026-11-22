@@ -1,9 +1,19 @@
+import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 
 import { LiveKpiRow } from '@/features/live-performance/components/live-kpi-row';
 
+import trMessages from '../../../../messages/tr.json';
 import { render, screen, waitFor } from '../../../helpers/render';
 import { server, http, HttpResponse } from '../../../helpers/msw';
+
+// The pending sub-label copy read from the catalog, so a copy change cannot turn
+// the absence check below into a silent pass.
+const tKpis = createTranslator({
+  locale: 'tr',
+  messages: trMessages,
+  namespace: 'livePerformance.kpis',
+});
 
 const ORG_ID = '00000000-0000-0000-0000-000000000001';
 const STORE_ID = '00000000-0000-0000-0000-000000000002';
@@ -76,7 +86,7 @@ describe('LiveKpiRow', () => {
     render(<LiveKpiRow orgId={ORG_ID} storeId={STORE_ID} />);
 
     await waitFor(() => expect(screen.getByText('Kâr Marjı')).toBeInTheDocument());
-    expect(screen.queryByText(/maliyet ya da desi bekliyor/)).toBeNull();
+    expect(screen.queryByText(tKpis('pendingHint', { count: 1 }))).toBeNull();
   });
 
   it('shows a dash for margin and profit/cost ratio when today has no costed order', async () => {

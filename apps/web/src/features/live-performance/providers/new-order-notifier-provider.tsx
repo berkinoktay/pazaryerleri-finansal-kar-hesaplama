@@ -59,15 +59,35 @@ function detailHref(summary: NotificationSummaryLike): string {
   return '/live-performance';
 }
 
+/**
+ * The toast's first line. Without a profit, a buffer entry still waits on a cost
+ * or desi; an order's profit is not computable, and its detail names why.
+ */
+function profitLineOf(summary: NotificationSummaryLike, t: RealtimeTranslator): string {
+  if (summary.costStatus === 'costed' && summary.profit !== null) {
+    return t('profitLine', { profit: formatCurrency(summary.profit) });
+  }
+  switch (summary.source) {
+    case 'buffer':
+      return t('costMissingLine');
+    case 'orders':
+      return t('notComputableLine');
+    default: {
+      // A new source breaks the build here; at runtime it must not break the toast,
+      // so it keeps the line every profit-less toast showed before.
+      const _exhaustive: never = summary.source;
+      void _exhaustive;
+      return t('costMissingLine');
+    }
+  }
+}
+
 function emitSingleToast(
   summary: NotificationSummaryLike,
   t: RealtimeTranslator,
   router: PushRouter,
 ): void {
-  const base =
-    summary.costStatus === 'costed' && summary.profit !== null
-      ? t('profitLine', { profit: formatCurrency(summary.profit) })
-      : t('costMissingLine');
+  const base = profitLineOf(summary, t);
   const description =
     summary.platformOrderNumber !== null
       ? `${base} ${t('orderNumberLabel', { number: summary.platformOrderNumber })}`

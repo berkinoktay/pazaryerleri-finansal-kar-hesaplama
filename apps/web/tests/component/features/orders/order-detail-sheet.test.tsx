@@ -81,6 +81,7 @@ const ORDER = {
   settledNetProfit: null,
   profitBreakdown: BREAKDOWN,
   profitIssues: [],
+  profitBlockers: [],
   promotionDisplays: null,
   profitExcludedAt: null,
   profitExclusionReason: null,

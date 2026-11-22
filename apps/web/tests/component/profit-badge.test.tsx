@@ -89,6 +89,25 @@ describe('ProfitBadge', () => {
     expect(chip.className).toContain('text-warning');
   });
 
+  it('shows a custom tooltip instead of the default click hint when one is given', async () => {
+    // A surface with a specific cause (the not-computable reasons) explains it on hover;
+    // without the prop every other surface keeps the default click hint.
+    render(
+      <ProfitBadge
+        value={null}
+        marginPct={null}
+        scale={null}
+        onOpen={vi.fn()}
+        emptyLabel="cause"
+        tooltip="cause-detail"
+      />,
+    );
+    screen.getByRole('button', { name: OPEN_LABEL }).focus();
+    const tip = await screen.findByRole('tooltip');
+    expect(tip).toHaveTextContent('cause-detail');
+    expect(tip).not.toHaveTextContent(trMessages.profitBadge.tooltip);
+  });
+
   it('keeps the default em-dash empty state a mute neutral chip (no warning tone)', () => {
     // Non-tariff surfaces (orders, live sheet) pass no emptyLabel — the null badge stays
     // neutral, never adopting the warning tint reserved for a specific cause.

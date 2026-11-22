@@ -40,6 +40,13 @@ export interface ProfitBadgeProps {
    * default em-dash (no `emptyLabel`) stays a mute neutral chip.
    */
   emptyLabel?: React.ReactNode;
+  /**
+   * Hover/focus tooltip content. Defaults to the generic click hint; pass a
+   * translated node where the chip has a specific cause to explain (e.g. why the
+   * profit could not be calculated). Touch has no hover, so the click still opens
+   * the detail surface, which must carry the same explanation.
+   */
+  tooltip?: React.ReactNode;
   className?: string;
 }
 
@@ -62,6 +69,7 @@ export function ProfitBadge({
   onOpen,
   showMarginPct = false,
   emptyLabel,
+  tooltip,
   className,
 }: ProfitBadgeProps): React.ReactElement {
   const t = useTranslations('profitBadge');
@@ -118,7 +126,8 @@ export function ProfitBadge({
           </Badge>
         </button>
       </TooltipTrigger>
-      <TooltipContent>{t('tooltip')}</TooltipContent>
+      {/* max-w-tooltip wraps a long custom explanation; the short default hint never reaches it. */}
+      <TooltipContent className="max-w-tooltip">{tooltip ?? t('tooltip')}</TooltipContent>
     </Tooltip>
   );
 }

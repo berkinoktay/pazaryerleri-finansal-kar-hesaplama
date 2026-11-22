@@ -3722,10 +3722,6 @@
     },
     "profitIssues": {
       "unknownCarrier": "unknown carrier",
-      "CARRIER_NOT_RECOGNIZED": {
-        "title": "Shipping estimate is 0 TL",
-        "description": "The carrier reported by Trendyol ({providerName}) is not recognized, so shipping could not be estimated. The actual amount is applied to this order once the cargo invoice arrives."
-      },
       "SELLER_CARGO_AGREEMENT_ESTIMATE": {
         "title": "Shipping amount will stay an estimate",
         "description": "This order was shipped under your own cargo agreement; Trendyol does not issue a cargo invoice for it. Enter your own tariff in the shipping settings to see the actual amount."
@@ -3755,7 +3751,7 @@
       "margin": "Profit Margin",
       "profitCostRatio": "Profit/Cost Ratio",
       "estimateHint": "Estimated — finalized after settlement reconciliation.",
-      "pendingHint": "{count} order(s) awaiting cost or desi — not in profit yet"
+      "pendingHint": "{count} orders waiting — not in profit yet"
     },
     "chart": {
       "title": "Hourly Cumulative",
@@ -3837,7 +3833,31 @@
       "detail": "View detail",
       "burstTitle": "{count} new orders arrived",
       "catchupTitle": "{count} new orders arrived while you were away",
-      "tabBadge": "🛍️ {count, plural, one {New order arrived!} other {# new orders arrived!}}"
+      "tabBadge": "🛍️ {count, plural, one {New order arrived!} other {# new orders arrived!}}",
+      "notComputableLine": "Profit could not be calculated yet; see the order detail for why"
+    }
+  },
+  "profitBlockers": {
+    "badge": "Not calculated",
+    "title": "Profit could not be calculated",
+    "unknownCarrier": "unknown carrier",
+    "reasons": {
+      "CARRIER_NOT_RECOGNIZED": "The carrier was not recognised ({providerName}). Profit is calculated once the cargo invoice arrives or the carrier is defined.",
+      "SHIPPING_ESTIMATE_UNAVAILABLE": {
+        "NO_TARIFF_VERSION": "The carrier had no tariff in force on the order date. Profit is calculated once the cargo invoice arrives.",
+        "DESI_OVERFLOW": "The product's desi is above the carrier tariff's limit. Profit is calculated once the cargo invoice arrives.",
+        "UNKNOWN_DESI": "The product's desi is unknown. Profit is calculated once the cargo invoice arrives.",
+        "NO_CARRIER": "The order's carrier could not be determined. Profit is calculated once the cargo invoice arrives.",
+        "OWN_CONTRACT_EMPTY": "Your own cargo tariff has no price for this desi.",
+        "RETURN": "The return shipping cost could not be estimated. Profit is calculated once the return cargo invoice arrives.",
+        "other": "The shipping cost could not be estimated. Profit is calculated once the cargo invoice arrives."
+      },
+      "REFERENCE_DATA_MISSING": {
+        "EXPORT_RETURN_TIER": "No micro-export return fee tier was in force. Profit is calculated once it is added.",
+        "other": "No marketplace fee definition was in force on the order date. Profit is calculated once it is added."
+      },
+      "MISSING_COMMISSION_RATE": "The order's commission rate could not be found.",
+      "MISSING_COST": "A product in the order has no cost."
     }
   }
 }
