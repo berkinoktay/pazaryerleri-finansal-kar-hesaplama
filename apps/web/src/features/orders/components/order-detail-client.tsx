@@ -106,12 +106,12 @@ export function OrderDetailClient({
 
   const headerTitle = order.platformOrderNumber ?? order.platformOrderId;
 
-  // Kâr-dışı banner açıklaması sebebe özel + sade (kâr-dışı liste hücresiyle aynı
-  // `exclusionReasons` kaynağı, tek cümle, jargonsuz). Her sebep açıkça karşılanır;
-  // yeni bir sebep `never` koruması yüzünden derlemeyi kırar; çalışma anında bilinmeyen
-  // bir sebep (API web'den önce yayına çıkarsa) ve reason null (CHECK gereği olmamalı)
-  // generic metne düşer, sayfa hata ekranına düşmez. profitExcludedAt null ise banner
-  // çizilmez.
+  // The exclusion banner text is reason-specific and plain (the same `exclusionReasons`
+  // source as the excluded-list cell, one sentence, no jargon). Every reason is handled
+  // explicitly, so a new one breaks the build through the `never` guard; at runtime an
+  // unknown reason (the API shipping before the web) and a null reason (the CHECK should
+  // prevent it) fall back to the generic text instead of the error screen. No banner when
+  // profitExcludedAt is null.
   const exclusionDescription =
     order.profitExcludedAt === null
       ? null

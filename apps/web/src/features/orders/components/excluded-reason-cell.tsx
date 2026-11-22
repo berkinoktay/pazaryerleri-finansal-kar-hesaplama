@@ -19,8 +19,8 @@ import type { BadgeProps } from '@/components/ui/badge';
  * sade tutulur (teknik ayrıntı yok).
  */
 
-// Maliyet ve desi sebepleri satıcının zamanında girmediği bir bilgiyi anlatır → warning tonu.
-// Eski sipariş nötr (tarihsel, satıcının yapacağı bir şey yok).
+// The cost and desi reasons describe an input the seller did not enter in time: warning tone.
+// An old order is neutral (historical, nothing for the seller to do).
 const REASON_TONE = {
   COST_DEADLINE_MISSED: 'warning',
   LATE_UNCOSTED_ARRIVAL: 'warning',
@@ -36,8 +36,8 @@ export interface ExcludedReasonCellProps {
 export function ExcludedReasonCell({ reason }: ExcludedReasonCellProps): React.ReactElement {
   const t = useTranslations('exclusionReasons');
 
-  // Literal-anahtarlı haritalar: next-intl tipli `t` dinamik anahtarı reddeder,
-  // bu yüzden hepsini kurup enum değeriyle indeksliyoruz (ucuz, exhaustive).
+  // Literal-keyed maps: next-intl's typed `t` rejects a dynamic key, so every label is
+  // built here and indexed by the enum value (cheap and exhaustive).
   const labelMap = {
     COST_DEADLINE_MISSED: t('COST_DEADLINE_MISSED.label'),
     LATE_UNCOSTED_ARRIVAL: t('LATE_UNCOSTED_ARRIVAL.label'),

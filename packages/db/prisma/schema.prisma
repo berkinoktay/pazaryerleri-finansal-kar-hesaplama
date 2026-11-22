@@ -613,12 +613,12 @@ model ProductVariant {
   // V1: kullanıcı UI'dan işaretler (variant settings toggle). V2: Trendyol kategori
   // lookup ile otomatik tahmin.
   isDigital               Boolean  @default(false) @map("is_digital")
-  // Trendyol'un onaylı-ürün v2 cevabındaki varyant komisyon YÜZDESİ (7.83 = %7,83).
-  // 0/yok → null ("bilinmiyor"); 0 da bilinmiyor demektir (desi de Trendyol'un 0'ını
-  // boş sayar). null anlamlıdır çünkü indirimler dikeyinin komisyon zinciri
-  // (bant → ürün → kategori) "senkronlandı" ile "bilinmiyor"u ayırt etmek zorunda.
-  // Delta senkron bu kolona hiç dokunmaz (delta yalnız quantity/salePrice/listPrice
-  // yazar) — değer tam senkronlarda tazelenir.
+  // The variant commission PERCENT from Trendyol's approved-product v2 response
+  // (7.83 = 7.83%). Absent or 0 -> null ("unknown"; the desi mapping reads a Trendyol 0
+  // the same way). Null matters: the discounts vertical's commission chain
+  // (band -> product -> category) must tell "synced" from "unknown". The delta sync
+  // never touches this column (it writes only quantity/salePrice/listPrice); full
+  // syncs refresh it.
   syncedCommissionRate    Decimal? @map("synced_commission_rate") @db.Decimal(5, 2)
   // Two-column sync-protection pair (see docs/plans/archive/... for rationale):
   // syncedDimensionalWeight is the marketplace's value, refreshed every sync.
