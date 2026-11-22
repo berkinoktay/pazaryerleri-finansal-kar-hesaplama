@@ -44,6 +44,12 @@ export interface CostCellPopoverProps {
    * row) without constructing a full variant object.
    */
   variantId: string;
+  /**
+   * Called after an attach, a detach or a create-and-attach succeeds; never on
+   * error. Lets an outside caller (e.g. live performance) refresh its own
+   * queries. Fires even if the popover unmounts before the request settles.
+   */
+  onChanged?: () => void;
   children: React.ReactNode;
 }
 
@@ -71,6 +77,7 @@ export function CostCellPopover({
   orgId,
   storeId,
   variantId,
+  onChanged,
   children,
 }: CostCellPopoverProps): React.ReactElement {
   const t = useTranslations('products.costCell.popover');
@@ -83,8 +90,8 @@ export function CostCellPopover({
     open ? { orgId, storeId, filters: { archived: 'false' } } : null,
   );
 
-  const attachMutation = useAttachCostProfiles();
-  const detachMutation = useDetachCostProfiles();
+  const attachMutation = useAttachCostProfiles({ onSuccess: onChanged });
+  const detachMutation = useDetachCostProfiles({ onSuccess: onChanged });
 
   const attachedProfiles = attachedQuery.data?.data ?? [];
   const attachedIds = React.useMemo(
@@ -233,6 +240,7 @@ export function CostCellPopover({
         variantId={variantId}
         open={createOpen}
         onOpenChange={setCreateOpen}
+        onChanged={onChanged}
       />
     </>
   );

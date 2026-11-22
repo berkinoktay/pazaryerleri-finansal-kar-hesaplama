@@ -1,9 +1,12 @@
 import type { QueryClient } from '@tanstack/react-query';
 import * as React from 'react';
 import { renderToString } from 'react-dom/server';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { LivePerformanceOrders } from '@/features/live-performance/api/get-live-orders.api';
+import type {
+  LiveOrderRow,
+  LivePerformanceOrders,
+} from '@/features/live-performance/api/get-live-orders.api';
 import { LivePerformancePageClient } from '@/features/live-performance/components/live-performance-page-client';
 import { liveKeys } from '@/features/live-performance/query-keys';
 
@@ -27,19 +30,63 @@ vi.mock('@/features/live-performance/providers/new-order-notifier-provider', () 
 // happy-dom. Replace the loader with an inert component.
 vi.mock('next/dynamic', () => ({ default: () => () => null }));
 
+// A pending (buffer) order and the orders row it becomes once promoted: the
+// worker keeps `platformOrderId` and drops the buffer entry. Hoisted so the
+// table stub below can hand the buffer row to the page.
+const ROWS = vi.hoisted((): { buffer: LiveOrderRow; promoted: LiveOrderRow } => {
+  const shared = {
+    platformOrderId: 'p-1',
+    platformOrderNumber: 'TY-1',
+    orderDate: '2026-06-05T08:00:00.000Z',
+    status: 'PENDING',
+    revenue: '100.00',
+    profit: null,
+    margin: null,
+    promotionDisplays: null,
+  };
+  return {
+    buffer: {
+      ...shared,
+      source: 'buffer',
+      orderId: null,
+      bufferId: '00000000-0000-0000-0000-0000000000b1',
+    },
+    promoted: {
+      ...shared,
+      source: 'orders',
+      orderId: '00000000-0000-0000-0000-0000000000a1',
+      bufferId: null,
+    },
+  };
+});
+
 // Every section owns its own query and has its own component test. Stub them so
-// this test stays pinned to the page header's refresh control.
+// this test stays pinned to the page client itself: the header's refresh control
+// and the row the page hands the detail Sheet.
 vi.mock('@/features/live-performance/components/live-kpi-row', () => ({
   LiveKpiRow: () => null,
 }));
 vi.mock('@/features/live-performance/components/live-today-products', () => ({
   LiveTodayProducts: () => null,
 }));
+// The table stub stands in for a click on the pending order's row.
 vi.mock('@/features/live-performance/components/live-orders-table', () => ({
-  LiveOrdersTable: () => null,
+  LiveOrdersTable: ({ onRowClick }: { onRowClick: (row: LiveOrderRow) => void }) => (
+    <button type="button" onClick={() => onRowClick(ROWS.buffer)}>
+      select-buffer-row
+    </button>
+  ),
 }));
+// The Sheet stub shows which row the page hands it (nothing while closed).
 vi.mock('@/features/live-performance/components/live-order-detail-sheet', () => ({
-  LiveOrderDetailSheet: () => null,
+  LiveOrderDetailSheet: ({ selected }: { selected: LiveOrderRow | null }) =>
+    selected === null ? null : (
+      <section aria-label="order-detail-sheet">
+        {selected.source === 'buffer'
+          ? `buffer:${selected.bufferId ?? ''}`
+          : `orders:${selected.orderId ?? ''}`}
+      </section>
+    ),
 }));
 
 const ORG_ID = '00000000-0000-0000-0000-000000000001';
@@ -73,11 +120,11 @@ const ORDERS: LivePerformanceOrders = {
  * One provider shape for both passes (server string + client hydrate) so the
  * trees line up and only the component under test can cause a mismatch.
  */
-function makeWrapper(queryClient: QueryClient) {
+function makeWrapper(queryClient: QueryClient, initialSearchParams = '') {
   return function Wrapper({ children }: { children: React.ReactNode }): React.ReactElement {
     return (
       <AllProviders queryClient={queryClient}>
-        <NuqsTestHarness>{children}</NuqsTestHarness>
+        <NuqsTestHarness initialSearchParams={initialSearchParams}>{children}</NuqsTestHarness>
       </AllProviders>
     );
   };
@@ -167,5 +214,69 @@ describe('LivePerformancePageClient — refresh control hydration', () => {
       await inFlight.catch(() => undefined);
       await waitFor(() => expect(clientQueryClient.isFetching()).toBe(0)).catch(() => undefined);
     }
+  });
+});
+
+describe('LivePerformancePageClient — detail sheet across a promotion', () => {
+  // Today's orders feed as the page reads it; a test swaps it to promote the order.
+  let feedRows: LiveOrderRow[] = [];
+
+  beforeEach(() => {
+    feedRows = [ROWS.buffer];
+    server.use(
+      http.get(`${BASE_URL}/kpis`, () => HttpResponse.json(KPIS)),
+      http.get(`${BASE_URL}/orders`, () =>
+        HttpResponse.json({
+          data: feedRows,
+          total: feedRows.length,
+          counts: { all: feedRows.length, calculated: 0, pending: feedRows.length },
+        } satisfies LivePerformanceOrders),
+      ),
+    );
+  });
+
+  /**
+   * The worker promotes the pending order: the buffer row leaves the feed and the
+   * orders row with the same platformOrderId arrives. The page's refresh control
+   * refetches every live query, so the feed reloads like a realtime update.
+   */
+  async function promoteAndRefetch(user: ReturnType<typeof render>['user']): Promise<void> {
+    feedRows = [ROWS.promoted];
+    const refresh = screen.getByRole('button', { name: 'Yenile' });
+    await waitFor(() => expect(refresh).toBeEnabled());
+    await user.click(refresh);
+  }
+
+  it('follows a selected buffer order to its orders row when it is promoted', async () => {
+    const { user } = render(page, { wrapper: makeWrapper(createTestQueryClient()) });
+
+    await user.click(screen.getByRole('button', { name: 'select-buffer-row' }));
+    const sheet = await screen.findByRole('region', { name: 'order-detail-sheet' });
+    expect(sheet).toHaveTextContent(`buffer:${ROWS.buffer.bufferId ?? ''}`);
+
+    await promoteAndRefetch(user);
+
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: 'order-detail-sheet' })).toHaveTextContent(
+        `orders:${ROWS.promoted.orderId ?? ''}`,
+      ),
+    );
+  });
+
+  it('keeps a deep-linked buffer order open across its promotion', async () => {
+    const { user } = render(page, {
+      wrapper: makeWrapper(createTestQueryClient(), `?buffer=${ROWS.buffer.bufferId ?? ''}`),
+    });
+
+    const sheet = await screen.findByRole('region', { name: 'order-detail-sheet' });
+    expect(sheet).toHaveTextContent(`buffer:${ROWS.buffer.bufferId ?? ''}`);
+
+    await promoteAndRefetch(user);
+
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: 'order-detail-sheet' })).toHaveTextContent(
+        `orders:${ROWS.promoted.orderId ?? ''}`,
+      ),
+    );
   });
 });

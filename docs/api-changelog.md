@@ -1234,6 +1234,19 @@ section "Versioning" for details.
 
 ### Added
 
+- **Desi on live performance rows, and each waiting line's cost gap**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/live-performance/today-products`,
+  `GET .../live-performance/buffer/{bufferId}`). Each today products row and each buffer detail
+  line gains `dimensionalWeight`, `syncedDimensionalWeight`, `isDimensionalWeightOverridden` and
+  `isDimensionalWeightMissing`, with the same values and rule as the products list
+  (`VariantSummary`): a desi of 0 is a real desi and a digital variant never misses one. A row or
+  line whose barcode resolves to no variant carries `null`, `null`, `false`, `false`. Each buffer
+  detail line also gains `isCostMissing`: the line's gap in the calculability gate that holds the
+  order in the buffer (no cost profile linked, or the barcode resolves to no variant, which is
+  `true`). The `LivePerformanceTodayProducts` and `BufferDetail` component schemas gain the
+  properties. Additive. When two variants of a store share a barcode, a buffer line (and a today
+  products row that comes only from the buffer) now describes the first match by variant id, on
+  both surfaces and in the gate, so its name, desi and cost gap name one variant.
 - **Two desi profit exclusion reasons** (`GET /v1/organizations/{orgId}/stores/{storeId}/orders`,
   `GET .../orders/{orderId}`). `profitExclusionReason` gains `DESI_DEADLINE_MISSED` (the order
   waited in the live-performance buffer and a product still had no desi when its day ended) and

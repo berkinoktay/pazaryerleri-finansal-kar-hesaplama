@@ -34,8 +34,14 @@ interface MutationContext {
  *
  * No custom onError toast: the global QueryProvider pipeline handles toasts
  * via ApiError.code translation.
+ *
+ * `options.onSaved` runs after a successful save, from the mutation's own
+ * options, so it fires even if the calling component unmounts before the
+ * request settles (a per-call `mutate(vars, { onSuccess })` would not).
  */
-export function useUpdateVariantDimensionalWeight(): UseMutationResult<
+export function useUpdateVariantDimensionalWeight(options?: {
+  onSaved?: () => void;
+}): UseMutationResult<
   VariantDimensionalWeightResponse,
   Error,
   UpdateVariantDimensionalWeightArgs,
@@ -61,6 +67,7 @@ export function useUpdateVariantDimensionalWeight(): UseMutationResult<
       patchCachedListVariants(queryClient, orgId, storeId, (v) =>
         v.id === data.id ? applyVariantDesiResponse(v, data) : v,
       );
+      options?.onSaved?.();
     },
     onError: (_err, _variables, context) => {
       if (context === undefined) return;

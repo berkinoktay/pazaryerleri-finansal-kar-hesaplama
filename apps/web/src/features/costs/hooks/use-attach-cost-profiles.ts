@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
 
 import {
   attachCostProfiles,
@@ -41,8 +41,14 @@ interface MutationContext {
  *     so badges/aggregate values reconcile with server state.
  *
  * No custom onError toast — the global QueryProvider pipeline handles toasting.
+ *
+ * `options.onSuccess` runs after a successful attach, from the mutation's own
+ * options, so it fires even if the calling component unmounts before the
+ * request settles (a per-call `mutate(vars, { onSuccess })` would not).
  */
-export function useAttachCostProfiles() {
+export function useAttachCostProfiles(options?: {
+  onSuccess?: () => void;
+}): UseMutationResult<AttachResponse, Error, UseAttachCostProfilesVariables, MutationContext> {
   const queryClient = useQueryClient();
 
   return useMutation<AttachResponse, Error, UseAttachCostProfilesVariables, MutationContext>({
@@ -68,6 +74,7 @@ export function useAttachCostProfiles() {
       }
       return { snapshots };
     },
+    onSuccess: () => options?.onSuccess?.(),
     onError: (_err, _variables, context) => {
       if (context === undefined) return;
       for (const [key, value] of context.snapshots) {

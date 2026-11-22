@@ -1,5 +1,6 @@
 'use client';
 
+import { useQueryClient } from '@tanstack/react-query';
 import { type ColumnDef, type Table as TanstackTable } from '@tanstack/react-table';
 import {
   Alert02Icon,
@@ -22,11 +23,14 @@ import { FilterTabs } from '@/components/patterns/filter-tabs';
 import { ImageCell } from '@/components/patterns/image-cell';
 import { Button } from '@/components/ui/button';
 import { CostCellPopover } from '@/features/costs/components/cost-cell-popover';
+import { DesiCellPopover } from '@/features/products/components/desi-cell-popover';
+import { formatTrDecimal } from '@/lib/parse-tr-decimal';
 
 import type { TodayProductRow } from '../api/get-live-today-products.api';
 import { useLiveTodayProducts } from '../hooks/use-live-today-products';
+import { liveKeys } from '../query-keys';
 
-type ProductsTab = 'all' | 'missing';
+type ProductsTab = 'all' | 'missing' | 'missingDesi';
 
 interface LiveTodayProductsProps {
   orgId: string;
@@ -50,17 +54,29 @@ function medalForRank(rank: number): React.ComponentType<{ className?: string }>
 /**
  * "Bugün Sipariş Alan Ürünler" — one row per product variant that sold today,
  * merged over orders ∪ buffer. A single DataTable: client-side sort (default
- * units desc), a Tümü / Maliyet bekleyen tab, product-name search, and
- * pagination — the dataset is bounded to today's distinct products so it loads
- * fully. The Sıra column awards a neutral podium medal to the current-sort
- * top-3; the Maliyet column shows the quiet unit cost when costed, else an
- * inline "Maliyet Ekle" action (the existing variant-level CostCellPopover).
- * No per-product profit. Realtime invalidation (liveKeys.all) refetches on
- * order / buffer / cost changes.
+ * units desc), Tümü / Maliyet bekleyen / Desi bekleyen tabs, product-name
+ * search, and pagination — the dataset is bounded to today's distinct products
+ * so it loads fully. The Sıra column awards a neutral podium medal to the
+ * current-sort top-3; the Maliyet column shows the quiet unit cost when costed,
+ * else an inline "Maliyet Ekle" action (the existing variant-level
+ * CostCellPopover). The Desi column shows the effective desi, else an inline
+ * "Desi Gir" action (the products feature's DesiCellPopover) when the backend
+ * flags it missing. No per-product profit. Realtime invalidation
+ * (liveKeys.all) refetches on order / buffer / cost changes; a cost or desi
+ * saved here also refreshes the live queries directly, because an order that
+ * still waits on the other input keeps its buffer row unchanged and so emits
+ * no realtime event.
  */
 export function LiveTodayProducts({ orgId, storeId }: LiveTodayProductsProps): React.ReactElement {
   const t = useTranslations('livePerformance.todayProducts');
   const query = useLiveTodayProducts(orgId, storeId);
+  const queryClient = useQueryClient();
+  // Stable identity: it is a `columns` dependency, and a fresh function per
+  // render would rebuild the cells (closing an open popover mid-save).
+  const refreshLive = React.useCallback(
+    () => void queryClient.invalidateQueries({ queryKey: liveKeys.all }),
+    [queryClient],
+  );
   // Stable reference (`?? []` makes a fresh array each render) so the derived
   // memos below don't recompute on every render.
   const queryRows = query.data?.data;
@@ -70,7 +86,9 @@ export function LiveTodayProducts({ orgId, storeId }: LiveTodayProductsProps): R
   // products-prefixed because the orders table on the same page owns
   // `ordersFilter`.
   const [{ productsTab: tab, productsQ: search }, setUrlState] = useQueryStates({
-    productsTab: parseAsStringEnum<ProductsTab>(['all', 'missing']).withDefault('all'),
+    productsTab: parseAsStringEnum<ProductsTab>(['all', 'missing', 'missingDesi']).withDefault(
+      'all',
+    ),
     productsQ: parseAsString.withDefault(''),
   });
   const setTab = (next: ProductsTab): void => void setUrlState({ productsTab: next });
@@ -81,12 +99,20 @@ export function LiveTodayProducts({ orgId, storeId }: LiveTodayProductsProps): R
     [allRows],
   );
 
+  // The backend owns the missing-desi rule (a 0 desi or a digital product is
+  // not missing); the web only reads the flag.
+  const missingDesiCount = React.useMemo(
+    () => allRows.filter((row) => row.isDimensionalWeightMissing).length,
+    [allRows],
+  );
+
   // Tab + search filter the data array client-side (the table then sorts /
   // paginates the result). hasActiveFilters drives the empty-vs-no-results split.
   const rows = React.useMemo(() => {
     const term = search.trim().toLocaleLowerCase('tr');
     return allRows.filter((row) => {
       if (tab === 'missing' && row.costStatus !== 'missing') return false;
+      if (tab === 'missingDesi' && !row.isDimensionalWeightMissing) return false;
       // Çözülemeyen satırın aranabilir kimliği barkoddur (ürün adı yok).
       const haystack = row.productName ?? row.barcode;
       if (term !== '' && !haystack.toLocaleLowerCase('tr').includes(term)) return false;
@@ -214,7 +240,12 @@ export function LiveTodayProducts({ orgId, storeId }: LiveTodayProductsProps): R
             return <span className="text-muted-foreground">—</span>;
           }
           return (
-            <CostCellPopover orgId={orgId} storeId={storeId} variantId={product.variantId}>
+            <CostCellPopover
+              orgId={orgId}
+              storeId={storeId}
+              variantId={product.variantId}
+              onChanged={refreshLive}
+            >
               <Button type="button" size="sm" variant="outline" className="gap-2xs shrink-0">
                 <Alert02Icon className="size-icon-sm text-warning" />
                 {t('addCostButton')}
@@ -223,8 +254,50 @@ export function LiveTodayProducts({ orgId, storeId }: LiveTodayProductsProps): R
           );
         },
       },
+      {
+        id: 'desi',
+        header: () => t('columns.desi'),
+        enableSorting: false,
+        meta: { label: t('columns.desi') },
+        cell: ({ row }) => {
+          const product = row.original;
+          // An unresolved row has no variant to edit: a neutral dash.
+          if (product.variantId === null) {
+            return <span className="text-muted-foreground">—</span>;
+          }
+          if (product.isDimensionalWeightMissing) {
+            return (
+              <DesiCellPopover
+                orgId={orgId}
+                storeId={storeId}
+                variant={{
+                  id: product.variantId,
+                  dimensionalWeight: product.dimensionalWeight,
+                  syncedDimensionalWeight: product.syncedDimensionalWeight,
+                  isDimensionalWeightOverridden: product.isDimensionalWeightOverridden,
+                }}
+                onSaved={refreshLive}
+              >
+                <Button type="button" size="sm" variant="outline" className="gap-2xs shrink-0">
+                  <Alert02Icon className="size-icon-sm text-warning" />
+                  {t('addDesiButton')}
+                </Button>
+              </DesiCellPopover>
+            );
+          }
+          // A digital product without desi is not missing: no action, a neutral dash.
+          if (product.dimensionalWeight === null) {
+            return <span className="text-muted-foreground">—</span>;
+          }
+          return (
+            <span className="text-muted-foreground tabular-nums">
+              {formatTrDecimal(product.dimensionalWeight)}
+            </span>
+          );
+        },
+      },
     ],
-    [t, orgId],
+    [t, orgId, storeId, refreshLive],
   );
 
   const toolbar = React.useCallback(
@@ -247,6 +320,7 @@ export function LiveTodayProducts({ orgId, storeId }: LiveTodayProductsProps): R
       options={[
         { value: 'all', label: t('tabs.all'), count: allRows.length },
         { value: 'missing', label: t('tabs.missing'), count: missingCount },
+        { value: 'missingDesi', label: t('tabs.missingDesi'), count: missingDesiCount },
       ]}
     />
   );

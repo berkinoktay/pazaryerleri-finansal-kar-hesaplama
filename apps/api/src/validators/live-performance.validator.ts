@@ -94,6 +94,43 @@ export const LivePerformanceChartSchema = z
   })
   .openapi('LivePerformanceChart');
 
+// The variant desi fields of a live-performance row, defined once for the today
+// products row and the buffer detail line. Same meaning as VariantSummary's fields
+// (product.validator.ts), produced by the same toVariantDesiFields rule.
+const LIVE_DESI_FIELDS = {
+  dimensionalWeight: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        'Effective desi (decimal string): the seller override, else the marketplace desi. ' +
+        'Null when the variant has neither, and on a row whose barcode resolves to no variant. ' +
+        '"0" is a real desi.',
+      example: '1.5',
+    }),
+  syncedDimensionalWeight: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        'The marketplace desi (decimal string). Null when the marketplace sent none, and on a ' +
+        'row whose barcode resolves to no variant.',
+      example: '1.2',
+    }),
+  isDimensionalWeightOverridden: z.boolean().openapi({
+    description:
+      'True when the seller entered a desi. False on a row whose barcode resolves to no variant.',
+    example: false,
+  }),
+  isDimensionalWeightMissing: z.boolean().openapi({
+    description:
+      'True when a non-digital variant has no seller desi and no marketplace desi (same rule ' +
+      'as VariantSummary.isDimensionalWeightMissing). A desi of 0 is not missing; a digital ' +
+      'variant needs none. False on a row whose barcode resolves to no variant.',
+    example: false,
+  }),
+};
+
 const TodayProductRowSchema = z.object({
   variantId: z.string().uuid().nullable().openapi({
     description: 'Catalog variant id; null on an unresolved (barcode-fallback) row.',
@@ -146,6 +183,7 @@ const TodayProductRowSchema = z.object({
       'instead of "eşleşme bekliyor". Only meaningful when unresolved; always false otherwise.',
     example: false,
   }),
+  ...LIVE_DESI_FIELDS,
 });
 
 export const LivePerformanceTodayProductsSchema = z
@@ -244,6 +282,13 @@ const BufferDetailLineSchema = z.object({
   quantity: z.number().int().nonnegative(),
   // GROSS konvansiyon (2026-06-16): lineSaleGross satır toplamı (KDV-dahil, × quantity).
   lineSaleGross: z.string().openapi({ description: 'Line sale total incl. VAT (decimal string)' }),
+  isCostMissing: z.boolean().openapi({
+    description:
+      "The line's gap in the calculability gate that holds the order: no cost profile linked, " +
+      'or the barcode resolves to no variant.',
+    example: false,
+  }),
+  ...LIVE_DESI_FIELDS,
 });
 
 export const BufferDetailSchema = z

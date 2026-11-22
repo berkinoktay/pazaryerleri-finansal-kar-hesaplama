@@ -2218,6 +2218,32 @@
                   "type": "boolean",
                   "description": "Unresolved barcode confirmed absent from the Trendyol approved catalog (CatalogBarcodeMiss.vendorMissing). Drives the \"Trendyol kataloğunda yok\" badge instead of \"eşleşme bekliyor\". Only meaningful when unresolved; always false otherwise.",
                   "example": false
+                },
+                "dimensionalWeight": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Effective desi (decimal string): the seller override, else the marketplace desi. Null when the variant has neither, and on a row whose barcode resolves to no variant. \"0\" is a real desi.",
+                  "example": "1.5"
+                },
+                "syncedDimensionalWeight": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The marketplace desi (decimal string). Null when the marketplace sent none, and on a row whose barcode resolves to no variant.",
+                  "example": "1.2"
+                },
+                "isDimensionalWeightOverridden": {
+                  "type": "boolean",
+                  "description": "True when the seller entered a desi. False on a row whose barcode resolves to no variant.",
+                  "example": false
+                },
+                "isDimensionalWeightMissing": {
+                  "type": "boolean",
+                  "description": "True when a non-digital variant has no seller desi and no marketplace desi (same rule as VariantSummary.isDimensionalWeightMissing). A desi of 0 is not missing; a digital variant needs none. False on a row whose barcode resolves to no variant.",
+                  "example": false
                 }
               },
               "required": [
@@ -2232,7 +2258,11 @@
                 "costStatus",
                 "unitCost",
                 "unresolved",
-                "vendorMissing"
+                "vendorMissing",
+                "dimensionalWeight",
+                "syncedDimensionalWeight",
+                "isDimensionalWeightOverridden",
+                "isDimensionalWeightMissing"
               ]
             }
           }
@@ -2441,6 +2471,37 @@
                 "lineSaleGross": {
                   "type": "string",
                   "description": "Line sale total incl. VAT (decimal string)"
+                },
+                "isCostMissing": {
+                  "type": "boolean",
+                  "description": "The line's gap in the calculability gate that holds the order: no cost profile linked, or the barcode resolves to no variant.",
+                  "example": false
+                },
+                "dimensionalWeight": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Effective desi (decimal string): the seller override, else the marketplace desi. Null when the variant has neither, and on a row whose barcode resolves to no variant. \"0\" is a real desi.",
+                  "example": "1.5"
+                },
+                "syncedDimensionalWeight": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The marketplace desi (decimal string). Null when the marketplace sent none, and on a row whose barcode resolves to no variant.",
+                  "example": "1.2"
+                },
+                "isDimensionalWeightOverridden": {
+                  "type": "boolean",
+                  "description": "True when the seller entered a desi. False on a row whose barcode resolves to no variant.",
+                  "example": false
+                },
+                "isDimensionalWeightMissing": {
+                  "type": "boolean",
+                  "description": "True when a non-digital variant has no seller desi and no marketplace desi (same rule as VariantSummary.isDimensionalWeightMissing). A desi of 0 is not missing; a digital variant needs none. False on a row whose barcode resolves to no variant.",
+                  "example": false
                 }
               },
               "required": [
@@ -2450,7 +2511,12 @@
                 "variantId",
                 "stockCode",
                 "quantity",
-                "lineSaleGross"
+                "lineSaleGross",
+                "isCostMissing",
+                "dimensionalWeight",
+                "syncedDimensionalWeight",
+                "isDimensionalWeightOverridden",
+                "isDimensionalWeightMissing"
               ]
             }
           }

@@ -1023,6 +1023,55 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     expect(order.items[0]?.saleVatRate.toString()).toBe('0');
   });
 
+  it('links a shared barcode to the lowest variant id', async () => {
+    const { org, store } = await setupStoreAndSyncLog();
+    const lowVariantId = '00000000-0000-4000-8000-000000000001';
+    const highVariantId = 'ffffffff-ffff-4fff-bfff-ffffffffffff';
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: BigInt(Math.floor(Math.random() * 1_000_000)),
+        productMainId: 'pm-shared',
+        title: 'Shared barcode product',
+      },
+    });
+    // The HIGHER id is inserted first and carries the lower platformVariantId,
+    // so an unordered lookup returns it by heap order and by the
+    // (storeId, platformVariantId) index alike; only an explicit id order picks
+    // the lower id (the variant the calculability gate in buildCalcCheckLines checks).
+    for (const [index, id] of [highVariantId, lowVariantId].entries()) {
+      await prisma.productVariant.create({
+        data: {
+          id,
+          organizationId: org.id,
+          storeId: store.id,
+          productId: product.id,
+          platformVariantId: BigInt(7_000 + index),
+          barcode: 'EAN13-SHARED',
+          stockCode: `sk-shared-${index}`,
+          salePrice: '100',
+          listPrice: '120',
+        },
+      });
+    }
+
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildDirectMapped({
+        platformOrderId: 'shared-1',
+        barcode: 'EAN13-SHARED',
+        lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
+      }),
+    );
+
+    const item = await prisma.orderItem.findFirstOrThrow({
+      where: { order: { storeId: store.id, platformOrderId: 'shared-1' } },
+    });
+    expect(item.productVariantId).toBe(lowVariantId);
+  });
+
   it('fills the raw commission rate when a later event brings the commission', async () => {
     const { org, store } = await setupStoreAndSyncLog(['EAN13-TWOPHASE']);
 

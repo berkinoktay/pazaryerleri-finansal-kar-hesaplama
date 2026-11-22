@@ -234,6 +234,9 @@ export async function intakeOrder(args: {
           for (const line of parseBufferResolvableLines(row.mappedOrder)) {
             const variant = await tx.productVariant.findFirst({
               where: { storeId, barcode: line.barcode },
+              // Lowest variant id for a barcode shared by two variants: the same choice
+              // as buildCalcCheckLines, so the gate and the stored order item name one variant.
+              orderBy: { id: 'asc' },
               select: { id: true, productId: true },
             });
             if (variant === null) continue;
@@ -454,6 +457,9 @@ async function decrementBufferedOrderStock(
   for (const line of lines) {
     const variant = await tx.productVariant.findFirst({
       where: { storeId, barcode: line.barcode },
+      // Lowest variant id for a barcode shared by two variants: the same choice
+      // as buildCalcCheckLines, so the gate and the stored order item name one variant.
+      orderBy: { id: 'asc' },
       select: { id: true, productId: true },
     });
     if (variant === null) continue;

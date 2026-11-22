@@ -3770,7 +3770,8 @@
       "searchPlaceholder": "Search by product name",
       "tabs": {
         "all": "All",
-        "missing": "Awaiting cost"
+        "missing": "Awaiting cost",
+        "missingDesi": "Awaiting desi"
       },
       "columns": {
         "rank": "Rank",
@@ -3778,12 +3779,14 @@
         "orderCount": "Orders",
         "unitsSold": "Units Sold",
         "revenue": "Revenue",
-        "cost": "Cost"
+        "cost": "Cost",
+        "desi": "Desi"
       },
       "rankLabel": "Rank {rank}",
       "stockCodeLabel": "Stock Code",
       "barcodeLabel": "Barcode",
       "addCostButton": "Add Cost",
+      "addDesiButton": "Add Desi",
       "emptyTitle": "No orders yet today",
       "noResultsTitle": "No results",
       "noResultsDescription": "No product matches the search or filter.",
@@ -3819,6 +3822,10 @@
           "lineSaleGross": "Line total (incl. VAT)"
         },
         "addCost": "Add cost",
+        "addDesi": "Add desi",
+        "lineReady": "Ready",
+        "readyNotice": "Nothing is missing anymore; the order will be added to profit shortly.",
+        "noLongerWaiting": "This order is no longer waiting; see its current state in today's orders list.",
         "loadError": "Could not load the order detail."
       }
     },

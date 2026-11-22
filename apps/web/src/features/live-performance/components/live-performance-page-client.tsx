@@ -22,6 +22,7 @@ import { useQueryState } from 'nuqs';
 import type { LiveOrderRow } from '../api/get-live-orders.api';
 import { useLiveKpis } from '../hooks/use-live-kpis';
 import { useLiveOrders } from '../hooks/use-live-orders';
+import { followPromotedRow } from '../lib/follow-promoted-row';
 import { resolveDeepLinkRow } from '../lib/resolve-deep-link-row';
 import { liveKeys } from '../query-keys';
 import { useNewOrderNotifier } from '../providers/new-order-notifier-provider';
@@ -105,8 +106,31 @@ export function LivePerformancePageClient({
   const deepLinkOrders = useLiveOrders(orgId, storeId, 'all');
   const deepLinkRow = resolveDeepLinkRow(deepLinkOrders.data?.data, orderParam, bufferParam);
 
+  // A deep-linked buffer row leaves the feed once the order is promoted, so
+  // `resolveDeepLinkRow` turns null even though the Sheet should stay on the
+  // sale. Keep the last row the link resolved to (React's "store information
+  // from previous renders" pattern: a guarded setState during render, no effect)
+  // for as long as the link itself is unchanged. Closing the Sheet clears both
+  // params, which changes the key and drops the kept row.
+  const deepLinkKey = `${orderParam ?? ''}|${bufferParam ?? ''}`;
+  const [stickyDeepLink, setStickyDeepLink] = React.useState<{
+    key: string;
+    row: LiveOrderRow;
+  } | null>(null);
+  if (
+    deepLinkRow !== null &&
+    (stickyDeepLink?.key !== deepLinkKey || stickyDeepLink.row !== deepLinkRow)
+  ) {
+    setStickyDeepLink({ key: deepLinkKey, row: deepLinkRow });
+  }
+  const resolvedDeepLinkRow =
+    deepLinkRow ?? (stickyDeepLink?.key === deepLinkKey ? stickyDeepLink.row : null);
+
   // A row click takes precedence; otherwise the deep-linked row drives the Sheet.
-  const activeRow = selected ?? deepLinkRow;
+  // A pending (buffer) order that gets promoted, whether selected by a click or
+  // opened from a link, is followed to its orders row in the same feed, so the
+  // Sheet stays on the sale instead of showing a vanished buffer entry.
+  const activeRow = followPromotedRow(deepLinkOrders.data?.data, selected ?? resolvedDeepLinkRow);
 
   if (orgId === null || storeId === null) {
     return (
