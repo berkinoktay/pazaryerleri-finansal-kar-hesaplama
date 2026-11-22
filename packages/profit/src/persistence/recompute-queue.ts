@@ -5,7 +5,6 @@ import {
   ProfitIssueCode,
   ProfitRecomputeReason,
   ProfitStatementView,
-  ProfitStatus,
   ShippingTariffSource,
 } from '@pazarsync/db/enums';
 
@@ -82,6 +81,7 @@ export function enqueueProfitRecompute(
     Prisma.sql`o.id = ANY(${ids}::uuid[])
       AND o.organization_id = ${organizationId}::uuid
       AND o.store_id = ${storeId}::uuid`,
+    'REFRESH',
   );
 }
 
@@ -107,6 +107,7 @@ export function enqueueProfitRecomputeForVariants(
         SELECT 1 FROM order_items i
         WHERE i.order_id = o.id AND i.product_variant_id = ANY(${ids}::uuid[])
       )`,
+    'REFRESH',
   );
 }
 
@@ -120,15 +121,41 @@ export function enqueueProfitRecomputeForStore(
     tx,
     reason,
     Prisma.sql`o.organization_id = ${organizationId}::uuid AND o.store_id = ${storeId}::uuid`,
+    'REFRESH',
   );
 }
 
 /**
+ * What an enqueue does to an order that already has a queue row. `REFRESH` re-requests
+ * it (a producer whose input changed); `KEEP` leaves the row exactly as it is (a sweep
+ * that only fills a gap, so it never resets another producer's retry state).
+ */
+type EnqueueConflict = 'REFRESH' | 'KEEP';
+
+/** The ON CONFLICT clause of each conflict policy. */
+const ON_ORDER_CONFLICT: Readonly<Record<EnqueueConflict, Prisma.Sql>> = {
+  REFRESH: Prisma.sql`ON CONFLICT (order_id) DO UPDATE SET
+      reason = EXCLUDED.reason,
+      requested_at = clock_timestamp(),
+      -- A re-request of an order that is being computed resets next_attempt_at to now,
+      -- so the mark is claimable again before its lease ends: a second worker may pick
+      -- it up while the first is still computing. Correctness is kept by the per-order
+      -- advisory lock in recomputeParcelProfit -- the second waits, then sees an
+      -- unchanged content hash. The only cost is one redundant load.
+      next_attempt_at = clock_timestamp(),
+      attempts = 0,
+      last_error = NULL,
+      updated_at = clock_timestamp()`,
+  KEEP: Prisma.sql`ON CONFLICT (order_id) DO NOTHING`,
+};
+
+/**
  * The single enqueue statement shared by every scope: one `INSERT ... SELECT ...
- * ON CONFLICT (order_id) DO UPDATE`. The DISTINCT subquery means a scope that
- * fans out over items (variants) cannot touch the same conflict row twice, which
- * Postgres rejects. On conflict the mark is refreshed: new reason, fresh request
- * and next-attempt times, attempts back to 0 and last_error cleared.
+ * ON CONFLICT (order_id)`. The DISTINCT subquery means a scope that fans out over
+ * items (variants) cannot touch the same conflict row twice, which Postgres rejects.
+ * On conflict `onConflict` decides: `REFRESH` refreshes the mark (new reason, fresh
+ * request and next-attempt times, attempts back to 0 and last_error cleared), `KEEP`
+ * leaves it untouched.
  *
  * The outer SELECT is ordered by `o.id` so the INSERT inserts (and so locks the
  * conflicting queue rows) in a single global order. Producers upsert overlapping
@@ -142,6 +169,7 @@ function enqueueFromOrders(
   tx: Prisma.TransactionClient,
   reason: ProfitRecomputeReason,
   orderFilter: Prisma.Sql,
+  onConflict: EnqueueConflict,
 ): Promise<number> {
   return tx.$executeRaw`
     INSERT INTO profit_recompute_queue (
@@ -158,19 +186,25 @@ function enqueueFromOrders(
       WHERE ${orderFilter}
     ) o
     ORDER BY o.id
-    ON CONFLICT (order_id) DO UPDATE SET
-      reason = EXCLUDED.reason,
-      requested_at = clock_timestamp(),
-      -- A re-request of an order that is being computed resets next_attempt_at to now,
-      -- so the mark is claimable again before its lease ends: a second worker may pick
-      -- it up while the first is still computing. Correctness is kept by the per-order
-      -- advisory lock in recomputeParcelProfit -- the second waits, then sees an
-      -- unchanged content hash. The only cost is one redundant load.
-      next_attempt_at = clock_timestamp(),
-      attempts = 0,
-      last_error = NULL,
-      updated_at = clock_timestamp()
+    ${ON_ORDER_CONFLICT[onConflict]}
   `;
+}
+
+/**
+ * The insert step of the two gap-fill sweeps (`enqueueCarrierGapRecomputes`,
+ * `enqueueReferenceDataGapRecomputes`): enqueues the orders `orderFilter` (alias `o`)
+ * selects as REFERENCE_CHANGED and leaves an order that already has a queue row
+ * untouched. The sweeps skip an already-queued order with a NOT EXISTS read, but that
+ * read is a snapshot: a producer can queue the order after it, and refreshing its row
+ * here would reset that row's backoff. Returns the number of rows inserted.
+ *
+ * Exported for its test only; it is not part of the package surface.
+ */
+export function enqueueGapFillOrders(
+  db: Prisma.TransactionClient,
+  orderFilter: Prisma.Sql,
+): Promise<number> {
+  return enqueueFromOrders(db, ProfitRecomputeReason.REFERENCE_CHANGED, orderFilter, 'KEEP');
 }
 
 /**
@@ -237,7 +271,8 @@ export function enqueueStaleProfitStatements(
  * cargo agreement (that order is exempt from the carrier rule), not excluded from profit
  * and not cancelled. Only Trendyol stores: the carriers are Trendyol's and only a
  * Trendyol order is captured. An order that already has a queue row is left to that
- * row: re-enqueuing it would reset a failing request's backoff on every sweep.
+ * row: re-enqueuing it would reset a failing request's backoff on every sweep (and an
+ * order queued after this read is kept by `enqueueGapFillOrders`).
  */
 const CARRIER_GAP_ORDER = Prisma.sql`c.profit_snapshot_at IS NOT NULL
   AND c.snapshot_shipping_tariff_source = ${ShippingTariffSource.TRENDYOL_CONTRACT}::"ShippingTariffSource"
@@ -269,7 +304,7 @@ const CARRIER_GAP_ORDER = Prisma.sql`c.profit_snapshot_at IS NOT NULL
  * Global across tenants by design: the carriers and their cargo names are platform-wide
  * reference data shared by every organization, so a new mapping concerns every tenant's
  * orders at once. No caller id reaches the query -- the candidates are selected by their
- * own columns only -- and `enqueueFromOrders` writes each row with its own order's
+ * own columns only -- and `enqueueGapFillOrders` writes each row with its own order's
  * organization and store, so no row can cross a tenant.
  */
 export async function enqueueCarrierGapRecomputes(
@@ -293,9 +328,8 @@ export async function enqueueCarrierGapRecomputes(
   if (recognised.length === 0) {
     return 0;
   }
-  return enqueueFromOrders(
+  return enqueueGapFillOrders(
     db,
-    ProfitRecomputeReason.REFERENCE_CHANGED,
     Prisma.sql`o.id IN (
       SELECT c.id
       FROM orders c
@@ -313,11 +347,13 @@ const REFERENCE_DATA_MISSING_ISSUES_JSON = JSON.stringify([
 ]);
 
 /**
- * A best-known statement that is not computable because some dated reference data (a fee
- * definition or a micro-export return tier) was missing on the order date (alias `s`).
+ * A best-known statement written while some dated reference data (a fee definition or a
+ * micro-export return tier) was missing on the order date (alias `s`), whatever its
+ * status. A not-computable order waits on the data for its profit, but an excluded or
+ * cancelled one can miss a real cost line too (a cargo invoice of a cancelled parcel is
+ * not written while the shipping VAT rate is unknown), so every status is a candidate.
  */
 const REFERENCE_GAP_STATEMENT = Prisma.sql`s.view = ${ProfitStatementView.BEST_KNOWN}::"ProfitStatementView"
-  AND s.status = ${ProfitStatus.NOT_COMPUTABLE}::"ProfitStatus"
   AND s.issues @> ${REFERENCE_DATA_MISSING_ISSUES_JSON}::jsonb`;
 
 /**
@@ -346,30 +382,31 @@ const NEWEST_GAP_REFERENCE_CHANGE_AT = Prisma.sql`(
 
 /**
  * The reference data gap sweep (plan PR-3a, Gorev 4): enqueues the orders whose best-known
- * statement is not computable for missing reference data (REFERENCE_DATA_MISSING) and was
- * last written before the newest change to the fee definitions or the micro-export tiers
+ * statement records missing reference data (REFERENCE_DATA_MISSING), whatever its status
+ * (`REFERENCE_GAP_STATEMENT`: excluded and cancelled orders included), and was last
+ * written before the newest change to the fee definitions or the micro-export tiers
  * (`NEWEST_GAP_REFERENCE_CHANGE_AT`: a new row or one fixed in place). So once a
  * definition is added or fixed, every such order is recomputed once; an order the change
  * does not fill is not taken again until a newer change arrives (the drain stamps its
- * statement as re-checked, `markReferenceGapRechecked`). Newest order first, up to
- * `limit`; returns the number of orders enqueued.
+ * statement as re-checked, `markReferenceGapRechecked`, through the same statement
+ * filter). Newest order first, up to `limit`; returns the number of orders enqueued.
  *
  * Only orders of a platform the engine can compute (as the stale sweep), and none that
  * already has a queue row (as the carrier gap sweep).
  *
  * Global across tenants by design: fee definitions and tier versions are platform-wide
  * reference data shared by every organization, so a new definition concerns every
- * tenant's orders at once. No caller id reaches the query, and `enqueueFromOrders` writes
- * each row with its own order's organization and store, so no row can cross a tenant.
+ * tenant's orders at once. No caller id reaches the query, and `enqueueGapFillOrders`
+ * writes each row with its own order's organization and store, so no row can cross a
+ * tenant.
  */
 export function enqueueReferenceDataGapRecomputes(
   db: PrismaClient,
   params: { readonly limit: number },
 ): Promise<number> {
   const { limit } = params;
-  return enqueueFromOrders(
+  return enqueueGapFillOrders(
     db,
-    ProfitRecomputeReason.REFERENCE_CHANGED,
     Prisma.sql`o.id IN (
       SELECT c.id
       FROM orders c

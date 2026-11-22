@@ -1249,14 +1249,18 @@ section "Versioning" for details.
   `GET .../orders/{orderId}`). Each orders list row and the order detail gain `profitBlockers`, an
   array of the new `ProfitBlocker` component schema (`code`, a `ProfitIssueCode`; `detail`, the
   same optional English context as `ProfitIssue.detail`, e.g. the carrier name for
-  `CARRIER_NOT_RECOGNIZED`). It is filled only while the best-known profit statement's status is
-  `NOT_COMPUTABLE`: its blocking issues, one entry per distinct code + detail, ordered by the code in
-  the `ProfitIssueCode` enum order (not alphabetical), then by detail (null first). It is empty for a
-  computed, excluded, cancelled or statement-less order;
-  the detail computes the statement in the request when none is stored, as for its other profit
-  fields. Which codes block is decided here, not by the client. A stored issues value the reader
-  rejects leaves that list row's `profitBlockers` empty and is logged (`[profit-read]`, surface
-  `order-list`) instead of failing the page. `profitIssues` on the detail is unchanged. Additive.
+  `CARRIER_NOT_RECOGNIZED`). Each surface reads the profit statement view whose figure it shows:
+  the list row reads the estimate view (the one `estimatedNetProfit` comes from), the detail reads
+  the best-known view (the one `profitBreakdown` shows). So after a cargo invoice lifts a shipping
+  cause in the best-known view, the list row can still list it while the detail is empty. It is
+  filled only while that view's status is `NOT_COMPUTABLE`: its blocking issues, one entry per
+  distinct code + detail, ordered by the code in the `ProfitIssueCode` enum order (not
+  alphabetical), then by detail (null first). It is empty for a computed, excluded, cancelled or
+  statement-less order; the detail computes the statement in the request when none is stored, as
+  for its other profit fields. Which codes block is decided here, not by the client. A stored
+  issues value the reader rejects leaves that list row's `profitBlockers` empty and is logged
+  (`[profit-read]`, surface `order-list`) instead of failing the page. `profitIssues` on the detail
+  is unchanged. Additive.
 - **Desi on live performance rows, and each waiting line's cost gap**
   (`GET /v1/organizations/{orgId}/stores/{storeId}/live-performance/today-products`,
   `GET .../live-performance/buffer/{bufferId}`). Each today products row and each buffer detail

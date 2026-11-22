@@ -3845,7 +3845,7 @@
       "SHIPPING_ESTIMATE_UNAVAILABLE": {
         "NO_TARIFF_VERSION": "The carrier had no tariff in force on the order date. Profit is calculated once the cargo invoice arrives.",
         "DESI_OVERFLOW": "The product's desi is above the carrier tariff's limit. Profit is calculated once the cargo invoice arrives.",
-        "UNKNOWN_DESI": "The product's desi is unknown. Profit is calculated once the cargo invoice arrives.",
+        "UNKNOWN_DESI": "The desi of a product in the order is unknown.",
         "NO_CARRIER": "The order's carrier could not be determined. Profit is calculated once the cargo invoice arrives.",
         "OWN_CONTRACT_EMPTY": "Your own cargo tariff has no price for this desi.",
         "RETURN": "The return shipping cost could not be estimated. Profit is calculated once the return cargo invoice arrives.",

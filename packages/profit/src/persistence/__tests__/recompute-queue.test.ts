@@ -11,12 +11,14 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { prisma, type Prisma } from '@pazarsync/db';
+import { prisma, Prisma } from '@pazarsync/db';
 import {
   type OrderStatus,
   Platform,
   ProfitExclusionReason,
   ProfitIssueCode,
+  ProfitLineSource,
+  ProfitLineType,
   ProfitRecomputeReason,
   ProfitStatementView,
   ProfitStatus,
@@ -32,6 +34,7 @@ import {
   claimProfitRecomputeRequests,
   drainProfitRecomputeQueue,
   enqueueCarrierGapRecomputes,
+  enqueueGapFillOrders,
   enqueueProfitRecompute,
   enqueueProfitRecomputeForStore,
   enqueueProfitRecomputeForVariants,
@@ -43,8 +46,10 @@ import { deferred, delay } from './helpers/concurrency';
 import {
   createAdditionalStore,
   ensureDbReachable,
+  insertFinanceRecord,
   MELONTIK,
   type MelontikParcel,
+  melontikCargoInvoiceInput,
   seedBareOrder,
   seedMelontikParcel,
   truncateAll,
@@ -834,6 +839,9 @@ function expectedGapRow(parcel: MelontikParcel): QueueRow {
 /** The Trendyol platform service fee definitions (the gap tests null, delete or fill them). */
 const PLATFORM_SERVICE_FEE = { platform: 'TRENDYOL', feeType: 'PLATFORM_SERVICE' } as const;
 
+/** The Trendyol shipping definitions, whose VAT rate prices every cargo line. */
+const SHIPPING_FEE = { platform: 'TRENDYOL', feeType: 'SHIPPING' } as const;
+
 /**
  * Backdates every fee definition (created and updated) so it predates every statement,
  * whatever the clocks say. Prisma moves `updatedAt` on every write, so it is set too.
@@ -973,6 +981,20 @@ async function createPlatformServiceFee(params: {
   });
 }
 
+/** Creates the Trendyol shipping definition (in force on every test order date). */
+async function createShippingFee(params: { readonly createdAt: Date }): Promise<void> {
+  await prisma.feeDefinition.create({
+    data: {
+      ...SHIPPING_FEE,
+      displayName: 'Kargo Bedeli',
+      calculationKind: 'FORMULA',
+      defaultVatRate: '20.00',
+      effectiveFrom: new Date('2024-01-01T00:00:00.000Z'),
+      createdAt: params.createdAt,
+    },
+  });
+}
+
 describe('gap-fill sweeps', () => {
   beforeAll(async () => {
     await ensureDbReachable();
@@ -1082,9 +1104,11 @@ describe('gap-fill sweeps', () => {
     );
   });
 
-  it('re-enqueues an order missing reference data once per newer definition, until it is filled', async () => {
+  it('re-enqueues every order missing reference data once per newer definition, until it is filled', async () => {
     // Every parcel is seeded before the definition is deleted: a later seed would put
-    // it back.
+    // it back. An excluded and a cancelled order are taken too: a missing definition can
+    // drop a real cost line of theirs (e.g. a cargo invoice of a cancelled parcel), which
+    // must come back once the definition is added.
     const open = await seedMelontikParcel();
     const excluded = await seedMelontikParcel();
     const cancelled = await seedMelontikParcel({ status: 'CANCELLED' });
@@ -1097,44 +1121,102 @@ describe('gap-fill sweeps', () => {
     });
     await prisma.feeDefinition.deleteMany({ where: PLATFORM_SERVICE_FEE });
     await backdateFeeDefinitions();
-    await computeParcels([open, excluded, cancelled]);
+    const parcels = [open, excluded, cancelled];
+    await computeParcels(parcels);
 
-    expect(await bestKnownIssueCodes(open.orderId)).toContain(
-      ProfitIssueCode.REFERENCE_DATA_MISSING,
-    );
-    const written = await readStatement(open.orderId, ProfitStatementView.BEST_KNOWN);
-    expect(written.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    const expectedStatus = [
+      [open, ProfitStatus.NOT_COMPUTABLE],
+      [excluded, ProfitStatus.EXCLUDED],
+      [cancelled, ProfitStatus.CANCELLED],
+    ] as const;
+    for (const [parcel, status] of expectedStatus) {
+      const written = await readStatement(parcel.orderId, ProfitStatementView.BEST_KNOWN);
+      expect(written.status).toBe(status);
+      expect(await bestKnownIssueCodes(parcel.orderId)).toContain(
+        ProfitIssueCode.REFERENCE_DATA_MISSING,
+      );
+    }
+    const allGapRows = parcels.map(expectedGapRow).sort(byOrderId);
 
-    // No definition newer than the statement: nothing to fill.
+    // No definition newer than the statements: nothing to fill.
     expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(0);
 
-    // A definition that does not cover the order date (it starts later): the order is
+    // A definition that does not cover the order date (it starts later): each order is
     // taken once, recomputed without change, and not taken again.
     await createPlatformServiceFee({
       effectiveFrom: new Date('2027-01-01T00:00:00.000Z'),
-      createdAt: new Date(written.updatedAt.getTime() + 1000),
+      createdAt: after(await latestBestKnownUpdate(parcels)),
     });
-    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(1);
-    expect(await queueRows()).toEqual([expectedGapRow(open)]);
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(3);
+    expect(await queueRows()).toEqual(allGapRows);
     const unchanged = await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
-    expect(unchanged).toMatchObject({ claimed: 1, unchanged: 1, failed: 0 });
+    expect(unchanged).toMatchObject({ claimed: 3, unchanged: 3, failed: 0 });
     expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(0);
 
-    // A definition that covers the order date: taken once, the order becomes computable,
-    // and it is not taken again.
-    const rechecked = await readStatement(open.orderId, ProfitStatementView.BEST_KNOWN);
-    expect(rechecked.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    // A definition that covers the order date: each order is taken once, the open order
+    // becomes computable, none misses the definition any more, and none is taken again.
     await createPlatformServiceFee({
       effectiveFrom: new Date('2024-01-01T00:00:00.000Z'),
-      createdAt: new Date(rechecked.updatedAt.getTime() + 1000),
+      createdAt: after(await latestBestKnownUpdate(parcels)),
     });
-    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(1);
-    expect(await queueRows()).toEqual([expectedGapRow(open)]);
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(3);
+    expect(await queueRows()).toEqual(allGapRows);
     const filled = await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
-    expect(filled).toMatchObject({ claimed: 1, changed: 1, failed: 0 });
+    expect(filled).toMatchObject({ claimed: 3, failed: 0 });
     const bestKnown = await readStatement(open.orderId, ProfitStatementView.BEST_KNOWN);
     expect(bestKnown.status).not.toBe(ProfitStatus.NOT_COMPUTABLE);
-    expect(await bestKnownIssueCodes(open.orderId)).not.toContain(
+    for (const parcel of parcels) {
+      expect(await bestKnownIssueCodes(parcel.orderId)).not.toContain(
+        ProfitIssueCode.REFERENCE_DATA_MISSING,
+      );
+    }
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(0);
+  });
+
+  it('writes the cargo invoice of a cancelled order once its missing shipping definition is added', async () => {
+    // A parcel cancelled after shipment, with its outbound cargo invoice, but no SHIPPING
+    // definition on the order date: the invoice line cannot be written (its VAT rate is
+    // unknown), so the cancelled statement is missing a real cost. Adding the definition
+    // must bring the line back through the reference gap sweep, once.
+    const tracking = BigInt('7335558888');
+    const cancelled = await seedMelontikParcel({
+      status: 'CANCELLED',
+      cargoTrackingNumber: tracking,
+    });
+    await prisma.feeDefinition.deleteMany({ where: SHIPPING_FEE });
+    await backdateFeeDefinitions();
+    await insertFinanceRecord(melontikCargoInvoiceInput(cancelled, tracking.toString()));
+    await computeParcels([cancelled]);
+
+    const shippingLines = (): Promise<
+      { source: ProfitLineSource; amountGross: Prisma.Decimal }[]
+    > =>
+      prisma.profitLine.findMany({
+        where: { orderId: cancelled.orderId, type: ProfitLineType.SHIPPING },
+        select: { source: true, amountGross: true },
+      });
+    const written = await readStatement(cancelled.orderId, ProfitStatementView.BEST_KNOWN);
+    expect(written.status).toBe(ProfitStatus.CANCELLED);
+    expect(parseStoredIssues(written.issues)).toContainEqual({
+      code: ProfitIssueCode.REFERENCE_DATA_MISSING,
+      orderItemId: null,
+      detail: 'FEE:SHIPPING',
+    });
+    expect(await shippingLines()).toEqual([]);
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(0);
+
+    await createShippingFee({ createdAt: after(written.updatedAt) });
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(1);
+    expect(await queueRows()).toEqual([expectedGapRow(cancelled)]);
+
+    const filled = await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(filled).toMatchObject({ claimed: 1, changed: 1, failed: 0 });
+    const lines = await shippingLines();
+    expect(lines.map((line) => line.source)).toEqual([ProfitLineSource.CARGO_INVOICE]);
+    expect(lines[0]?.amountGross.toString()).toBe('98.34');
+    const rewritten = await readStatement(cancelled.orderId, ProfitStatementView.BEST_KNOWN);
+    expect(rewritten.status).toBe(ProfitStatus.CANCELLED);
+    expect(await bestKnownIssueCodes(cancelled.orderId)).not.toContain(
       ProfitIssueCode.REFERENCE_DATA_MISSING,
     );
     expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(0);
@@ -1331,5 +1413,18 @@ describe('gap-fill sweeps', () => {
     expect((await queueRows()).map((row) => row.orderId).sort()).toEqual(
       [queued.orderId, fresh.orderId].sort(),
     );
+  });
+
+  it('keeps the backoff of an order queued after the gap sweep read it', async () => {
+    // The sweeps skip an already-queued order with a NOT EXISTS read, but that read is a
+    // snapshot: a producer can queue the order between the read and the insert. The
+    // insert step is handed such an order directly, as the race would; it must leave the
+    // producer's row exactly as it is.
+    const parcel = await seedMelontikParcel();
+    const backedOff = await queueBackedOffRequest(parcel);
+
+    const inserted = await enqueueGapFillOrders(prisma, Prisma.sql`o.id = ${parcel.orderId}::uuid`);
+    expect(inserted).toBe(0);
+    expect(await readQueuedRequest(parcel.orderId)).toEqual(backedOff);
   });
 });

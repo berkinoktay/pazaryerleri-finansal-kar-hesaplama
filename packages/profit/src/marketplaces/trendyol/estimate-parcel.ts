@@ -135,6 +135,7 @@ export function estimateTrendyolParcel(input: TrendyolEstimateInput): EstimateRe
       reference,
       // The forward leg's Barem table decides whether the return may be priced at table 1.
       outboundBaremTier: shipping.outboundBaremTier,
+      usesSellerCargoAgreement: attributes.usesSellerCargoAgreement,
     });
     lines.push(...returns.lines);
     returnIssues = returns.issues;

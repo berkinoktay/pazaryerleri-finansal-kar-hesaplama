@@ -892,7 +892,7 @@
             "items": {
               "$ref": "#/components/schemas/ProfitBlocker"
             },
-            "description": "Why the order's profit is not computable. Filled only while the best-known profit statement's status is NOT_COMPUTABLE: its blocking issues, one entry per distinct code + detail (a cause named on several items is listed once), ordered by the code in the ProfitIssueCode enum order (not alphabetical), then by detail (null first). Empty for every other order: computed, excluded from profit, cancelled, or with no profit to read. The list reads stored statements only, so an order with no statement yet has none there; the detail computes the statement in the request when none is stored, as for its other profit fields, and is empty when that profit cannot be read."
+            "description": "Why the row's estimatedNetProfit is not computable, read from the estimate profit statement (the view estimatedNetProfit comes from). Filled only while that view's status is NOT_COMPUTABLE: its blocking issues, one entry per distinct code + detail (a cause named on several items is listed once), ordered by the code in the ProfitIssueCode enum order (not alphabetical), then by detail (null first). Empty for every other order: computed, excluded from profit, cancelled, or with no profit to read. The list reads stored statements only, so an order with no statement yet has none. A cargo invoice does not empty it: the estimate view is the order-time estimate."
           },
           "promotionDisplays": {
             "type": [
@@ -1019,7 +1019,7 @@
           "code",
           "detail"
         ],
-        "description": "A reason the order's profit is not computable: a blocking issue of its best-known profit statement, reduced to its code and detail."
+        "description": "A reason the order's profit is not computable: a blocking issue of one of its profit statement views, reduced to its code and detail. The field that carries the list names the view."
       },
       "TableMeta": {
         "type": "object",
@@ -1218,7 +1218,7 @@
             "items": {
               "$ref": "#/components/schemas/ProfitBlocker"
             },
-            "description": "Why the order's profit is not computable. Filled only while the best-known profit statement's status is NOT_COMPUTABLE: its blocking issues, one entry per distinct code + detail (a cause named on several items is listed once), ordered by the code in the ProfitIssueCode enum order (not alphabetical), then by detail (null first). Empty for every other order: computed, excluded from profit, cancelled, or with no profit to read. The list reads stored statements only, so an order with no statement yet has none there; the detail computes the statement in the request when none is stored, as for its other profit fields, and is empty when that profit cannot be read."
+            "description": "Why the order's best-known profit is not computable, read from the best-known profit statement (the view profitBreakdown shows). Filled only while that view's status is NOT_COMPUTABLE: its blocking issues, one entry per distinct code + detail (a cause named on several items is listed once), ordered by the code in the ProfitIssueCode enum order (not alphabetical), then by detail (null first). Empty for every other order: computed, excluded from profit, cancelled, or with no profit to read. The detail computes the statement in the request when none is stored, as for its other profit fields, and is empty when that profit cannot be read. A cargo invoice lifts the shipping cause of the leg it bills, so this can be empty while the list row's profitBlockers is not."
           },
           "promotionDisplays": {
             "type": [

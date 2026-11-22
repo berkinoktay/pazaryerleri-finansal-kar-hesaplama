@@ -6,6 +6,7 @@ import {
   ProfitLineLevel,
   ProfitLineSource,
   ProfitLineType,
+  ShippingTariffSource,
 } from '@pazarsync/db/enums';
 import { describe, expect, it } from 'vitest';
 
@@ -34,6 +35,7 @@ describe('estimateReturnLines', () => {
 
     const { lines, issues, returnedItems } = estimateReturnLines({
       outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
       snapshot,
       accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
       commissionLines: [
@@ -111,6 +113,7 @@ describe('estimateReturnLines', () => {
 
     const { lines } = estimateReturnLines({
       outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
       snapshot,
       accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
       commissionLines: [],
@@ -124,16 +127,51 @@ describe('estimateReturnLines', () => {
     expect(returnShipping?.inputs.tariffKind).toBe('DESI');
   });
 
-  it('writes a zero return-shipping estimate for a not-recognized order carrier', () => {
-    // Consistent with the forward leg: a not-recognized Trendyol-contract carrier cannot
-    // be priced, so the return shipping is a zero line recording the reason -- never an
-    // unavailable issue.
+  it('writes no return shipping and a blocking return issue for a not-recognized Trendyol-agreement carrier', () => {
+    // Consistent with the forward leg: a not-recognized carrier on an order shipped under
+    // Trendyol's agreement cannot be priced, so the return leg writes no line (never a zero
+    // that reads as a known cost) and records why, under the return prefix so a return
+    // cargo invoice lifts it in the best-known view.
     const snapshot = makeParcel({
       items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '2' })],
     });
 
     const { lines, issues } = estimateReturnLines({
       outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
+      snapshot,
+      accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
+      commissionLines: [],
+      costLines: [],
+      reference: trendyolReference({
+        shipping: {
+          carrier: null,
+          orderCarrierOutcome: { kind: 'not-recognized', providerName: 'Yeni Kargo' },
+        },
+      }),
+    });
+
+    expect(lineOfType(lines, ProfitLineType.RETURN_SHIPPING)).toBeUndefined();
+    expect(issues).toEqual([
+      {
+        code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+        orderItemId: null,
+        detail: 'RETURN_CARRIER_NOT_RECOGNIZED',
+      },
+    ]);
+  });
+
+  it('keeps the zero return-shipping estimate of a seller-cargo-agreement order with a not-recognized carrier', () => {
+    // Design 6.13: a seller-cargo-agreement order is exempt from the not-recognized carrier
+    // rule, so until its own tariff prices it (PR-6) the return keeps a zero line recording
+    // why, and no issue.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '2' })],
+    });
+
+    const { lines, issues } = estimateReturnLines({
+      outboundBaremTier: null,
+      usesSellerCargoAgreement: true,
       snapshot,
       accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
       commissionLines: [],
@@ -156,6 +194,36 @@ describe('estimateReturnLines', () => {
     });
   });
 
+  it('prices the return of a not-recognized carrier on an own-contract store from its own tariff', () => {
+    // An own-contract store never consults the carrier: the return is priced from the
+    // seller's own desi tariff, with no issue.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '2' })],
+    });
+
+    const { lines, issues } = estimateReturnLines({
+      outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
+      snapshot,
+      accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
+      commissionLines: [],
+      costLines: [],
+      reference: trendyolReference({
+        shipping: {
+          source: ShippingTariffSource.OWN_CONTRACT,
+          carrier: null,
+          ownTariffNet: new Map([['2', new Decimal('50.00')]]),
+          orderCarrierOutcome: { kind: 'not-recognized', providerName: 'Yeni Kargo' },
+        },
+      }),
+    });
+
+    expect(issues).toEqual([]);
+    const returnShipping = lineOfType(lines, ProfitLineType.RETURN_SHIPPING);
+    expect(returnShipping?.amount.gross.toFixed(2)).toBe('60.00');
+    expect(returnShipping?.inputs.tariffKind).toBe('OWN');
+  });
+
   it('reports RETURN_NO_TARIFF_VERSION when the carrier has no version in force', () => {
     const snapshot = makeParcel({
       items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '2' })],
@@ -163,6 +231,7 @@ describe('estimateReturnLines', () => {
 
     const { lines, issues } = estimateReturnLines({
       outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
       snapshot,
       accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
       commissionLines: [],
@@ -200,6 +269,7 @@ describe('estimateReturnLines', () => {
 
     const { lines } = estimateReturnLines({
       outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
       snapshot,
       accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
       commissionLines: [],
@@ -218,6 +288,7 @@ describe('estimateReturnLines', () => {
 
     const { lines } = estimateReturnLines({
       outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
       snapshot,
       accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
       commissionLines: [
@@ -247,6 +318,7 @@ describe('estimateReturnLines', () => {
 
     const { lines, returnedItems } = estimateReturnLines({
       outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
       snapshot,
       accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
       commissionLines: [],
@@ -275,6 +347,7 @@ describe('estimateReturnLines', () => {
 
     const { lines, returnedItems } = estimateReturnLines({
       outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
       snapshot,
       accepted: [
         { orderItemId: 'a', acceptedQuantity: 1 },
@@ -329,6 +402,7 @@ describe('estimateReturnLines', () => {
 
     const { lines, issues, returnedItems } = estimateReturnLines({
       outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
       snapshot,
       accepted: [
         { orderItemId: 'a', acceptedQuantity: 1 },
@@ -374,6 +448,7 @@ describe('estimateReturnLines', () => {
 
     const { lines, issues, returnedItems } = estimateReturnLines({
       outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
       snapshot,
       accepted: [
         { orderItemId: 'a', acceptedQuantity: 1 },
@@ -399,6 +474,7 @@ describe('estimateReturnLines', () => {
 
     const { lines } = estimateReturnLines({
       outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
       snapshot,
       accepted: [{ orderItemId: 'a', acceptedQuantity: 2 }],
       commissionLines: [],
@@ -425,6 +501,7 @@ describe('estimateReturnLines', () => {
 
     const { lines } = estimateReturnLines({
       outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
       snapshot,
       accepted: [
         { orderItemId: 'a', acceptedQuantity: 1 },
@@ -450,6 +527,7 @@ describe('estimateReturnLines', () => {
     // roundMoney((100.01 - 10.00) * 35%) = roundMoney(90.01 * 0.35) = roundMoney(31.5035) = 31.50.
     const fractional = estimateReturnLines({
       outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
       snapshot: makeParcel({
         isExportSale: true,
         items: [makeItem({ orderItemId: 'a', listGross: '100.01', saleVatRatePct: '20' })],
@@ -473,6 +551,7 @@ describe('estimateReturnLines', () => {
 
     const { lines, issues, returnedItems } = estimateReturnLines({
       outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
       snapshot,
       accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
       commissionLines: [],
@@ -504,6 +583,7 @@ describe('estimateReturnLines', () => {
 
     const { lines, issues, returnedItems } = estimateReturnLines({
       outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
       snapshot,
       accepted: [
         { orderItemId: 'a', acceptedQuantity: 1 },
@@ -532,6 +612,7 @@ describe('estimateReturnLines', () => {
 
     const { lines, issues, returnedItems } = estimateReturnLines({
       outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
       snapshot,
       accepted: [
         { orderItemId: 'a', acceptedQuantity: 1 },
@@ -561,6 +642,7 @@ describe('estimateReturnLines', () => {
 
     const result = estimateReturnLines({
       outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
       snapshot,
       accepted: [],
       commissionLines: [],
@@ -579,6 +661,7 @@ describe('estimateReturnLines', () => {
     expect(() =>
       estimateReturnLines({
         outboundBaremTier: null,
+        usesSellerCargoAgreement: false,
         snapshot,
         accepted: [{ orderItemId: 'a', acceptedQuantity: 2 }],
         commissionLines: [],
@@ -636,6 +719,7 @@ describe('estimateReturnLines Barem returns', () => {
         ...(params.maxBaremDesi !== undefined && { maxBaremDesi: params.maxBaremDesi }),
       }),
       outboundBaremTier: params.outboundBaremTier,
+      usesSellerCargoAgreement: false,
     });
     return {
       line: lineOfType(lines, ProfitLineType.RETURN_SHIPPING),

@@ -989,7 +989,7 @@ describe('Order routes', () => {
       expect(res.status).toBe(422);
     });
 
-    it('returns the blocking causes of a not-computable best-known statement as profitBlockers', async () => {
+    it('returns the blocking causes of a not-computable estimate statement as profitBlockers', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
@@ -1000,6 +1000,7 @@ describe('Order routes', () => {
         detail: 'Alternative Delivery',
       };
 
+      // The list row reads its estimate view, the one its estimated net profit comes from.
       // Blocked: a Trendyol-contract order with a cost whose carrier name is not
       // recognized, so the carrier is the only blocking cause. A warning stored beside it
       // does not block and stays out of profitBlockers.
@@ -1013,22 +1014,22 @@ describe('Order routes', () => {
         status: 'NOT_COMPUTABLE',
         saleGross: '240.00',
         netProfit: null,
-        issues: [carrierIssue],
+        issues: [
+          carrierIssue,
+          { code: 'AMBIGUOUS_RECORD_MATCH', orderItemId: null, detail: 'rec-1' },
+        ],
       });
       await createProfitStatement(blocked.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         status: 'NOT_COMPUTABLE',
         saleGross: '240.00',
         netProfit: null,
-        issues: [
-          carrierIssue,
-          { code: 'AMBIGUOUS_RECORD_MATCH', orderItemId: null, detail: 'rec-1' },
-        ],
+        issues: [carrierIssue],
       });
       // Computed with a warning only: a seller-cargo-agreement estimate does not block.
       const computed = await createOrder(org.id, store.id, { status: 'DELIVERED' });
       await createProfitStatement(computed.id, org.id, store.id, {
-        view: 'BEST_KNOWN',
+        view: 'ESTIMATE',
         status: 'ESTIMATED',
         saleGross: '240.00',
         netProfit: '60.00',
@@ -1038,7 +1039,7 @@ describe('Order routes', () => {
       // blocking code (an engine before version 12 wrote such rows) has no blockers.
       const staleWarned = await createOrder(org.id, store.id, { status: 'DELIVERED' });
       await createProfitStatement(staleWarned.id, org.id, store.id, {
-        view: 'BEST_KNOWN',
+        view: 'ESTIMATE',
         status: 'ESTIMATED',
         saleGross: '240.00',
         netProfit: '60.00',
@@ -1051,19 +1052,21 @@ describe('Order routes', () => {
         data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
       });
       await createProfitStatement(excluded.id, org.id, store.id, {
-        view: 'BEST_KNOWN',
+        view: 'ESTIMATE',
         status: 'EXCLUDED',
         saleGross: '240.00',
         netProfit: null,
         issues: [{ code: 'MISSING_COST', orderItemId: null, detail: null }],
       });
-      // Cancelled, and an order with no statement yet: no blockers either.
+      // Cancelled (even one still missing reference data), and an order with no statement
+      // yet: no blockers either.
       const cancelled = await createOrder(org.id, store.id, { status: 'CANCELLED' });
       await createProfitStatement(cancelled.id, org.id, store.id, {
-        view: 'BEST_KNOWN',
+        view: 'ESTIMATE',
         status: 'CANCELLED',
         saleGross: '0',
         netProfit: '0',
+        issues: [{ code: 'REFERENCE_DATA_MISSING', orderItemId: null, detail: 'FEE:SHIPPING' }],
       });
       const fresh = await createOrder(org.id, store.id, { status: 'DELIVERED' });
 
@@ -1085,17 +1088,86 @@ describe('Order routes', () => {
       expect(blockersOf(fresh.id)).toEqual([]);
     });
 
+    it('explains each profit figure from its own view: the list row from the estimate, the detail from the best-known view', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const carrierIssue = {
+        code: 'CARRIER_NOT_RECOGNIZED',
+        orderItemId: null,
+        detail: 'Yeni Kargo Marketplace',
+      };
+
+      // A Trendyol-agreement order whose carrier name is not recognized, after its cargo
+      // invoice landed: the estimate view (the list row's estimated net profit) is still
+      // blocked on the carrier, while the best-known view (the detail's breakdown) is
+      // computed from the invoice.
+      const order = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { cargoProviderName: 'Yeni Kargo Marketplace' },
+      });
+      await createProfitLine(order.id, org.id, store.id, {
+        orderItemId: null,
+        type: 'SHIPPING',
+        level: 'PARCEL',
+        certainty: 'ACTUAL',
+        source: 'CARGO_INVOICE',
+        amountGross: '98.34',
+        amountVat: '16.39',
+        vatRatePct: '20',
+      });
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'ESTIMATE',
+        status: 'NOT_COMPUTABLE',
+        saleGross: '240.00',
+        netProfit: null,
+        issues: [carrierIssue],
+      });
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'PARTIALLY_SETTLED',
+        reconciliationStatus: 'PARTIALLY_SETTLED',
+        saleGross: '240.00',
+        netProfit: '60.00',
+      });
+
+      const listRes = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
+        headers: { Authorization: bearer(user.accessToken) },
+      });
+      expect(listRes.status).toBe(200);
+      const list: {
+        data: { id: string; estimatedNetProfit: string | null; profitBlockers: unknown }[];
+      } = await listRes.json();
+      const row = list.data.find((item) => item.id === order.id);
+      expect(row?.estimatedNetProfit).toBeNull();
+      expect(row?.profitBlockers).toEqual([
+        { code: 'CARRIER_NOT_RECOGNIZED', detail: 'Yeni Kargo Marketplace' },
+      ]);
+
+      const detailRes = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/${order.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(detailRes.status).toBe(200);
+      const detail: { profitBlockers: unknown; profitBreakdown: unknown } = await detailRes.json();
+      expect(detail.profitBlockers).toEqual([]);
+      expect(detail.profitBreakdown).not.toBeNull();
+    });
+
     it('keeps the list up when stored issues are corrupt: those rows read no blockers', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
 
-      // Two not-computable statements whose stored issues the reader rejects (an unknown
-      // code, and a value that is not an array), beside a healthy blocked order.
+      // Two not-computable estimate statements (the view the list row reads) whose stored
+      // issues the reader rejects (an unknown code, and a value that is not an array),
+      // beside a healthy blocked order.
       const unknownCode = await createOrder(org.id, store.id, { status: 'DELIVERED' });
       await createProfitStatement(unknownCode.id, org.id, store.id, {
-        view: 'BEST_KNOWN',
+        view: 'ESTIMATE',
         status: 'NOT_COMPUTABLE',
         saleGross: '240.00',
         netProfit: null,
@@ -1103,7 +1175,7 @@ describe('Order routes', () => {
       });
       const notArray = await createOrder(org.id, store.id, { status: 'DELIVERED' });
       await createProfitStatement(notArray.id, org.id, store.id, {
-        view: 'BEST_KNOWN',
+        view: 'ESTIMATE',
         status: 'NOT_COMPUTABLE',
         saleGross: '240.00',
         netProfit: null,
@@ -1111,7 +1183,7 @@ describe('Order routes', () => {
       });
       const healthy = await createOrder(org.id, store.id, { status: 'DELIVERED' });
       await createProfitStatement(healthy.id, org.id, store.id, {
-        view: 'BEST_KNOWN',
+        view: 'ESTIMATE',
         status: 'NOT_COMPUTABLE',
         saleGross: '240.00',
         netProfit: null,

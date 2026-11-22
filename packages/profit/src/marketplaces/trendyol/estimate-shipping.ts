@@ -313,8 +313,9 @@ export function estimateShippingLine(params: {
   ) {
     // An order shipped under Trendyol's agreement gets no SHIPPING line and a blocking
     // CARRIER_NOT_RECOGNIZED issue (provider name in `detail`): the order is not computable
-    // until the carrier is recognized or a cargo invoice arrives. The return leg adds no
-    // issue, so a parcel carries it once.
+    // until the carrier is recognized or a cargo invoice arrives. A return leg records its
+    // own cause (SHIPPING_ESTIMATE_UNAVAILABLE, `RETURN_CARRIER_NOT_RECOGNIZED`), which only
+    // a return cargo invoice lifts.
     if (!attributes.usesSellerCargoAgreement) {
       return {
         line: null,

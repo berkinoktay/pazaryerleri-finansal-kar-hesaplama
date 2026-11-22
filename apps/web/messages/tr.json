@@ -3906,7 +3906,7 @@
       "SHIPPING_ESTIMATE_UNAVAILABLE": {
         "NO_TARIFF_VERSION": "Kargo firmasının sipariş tarihinde geçerli tarifesi yok. Kargo faturası gelince kâr hesaplanır.",
         "DESI_OVERFLOW": "Ürünün desisi kargo tarifesinin üst sınırını aşıyor. Kargo faturası gelince kâr hesaplanır.",
-        "UNKNOWN_DESI": "Ürünün desisi bilinmiyor. Kargo faturası gelince kâr hesaplanır.",
+        "UNKNOWN_DESI": "Siparişteki ürünün desisi bilinmiyor.",
         "NO_CARRIER": "Siparişin kargo firması belirlenemedi. Kargo faturası gelince kâr hesaplanır.",
         "OWN_CONTRACT_EMPTY": "Kendi kargo tarifende bu desinin fiyatı yok.",
         "RETURN": "İade kargosunun tutarı tahmin edilemedi. İade kargo faturası gelince kâr hesaplanır.",

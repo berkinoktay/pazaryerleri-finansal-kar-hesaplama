@@ -3,17 +3,19 @@ import { ProfitIssueCode, ProfitStatus } from '@pazarsync/db/enums';
 import { isBlockingIssue, parseStoredIssues, type ProfitIssue } from '@pazarsync/profit';
 
 /**
- * One reason an order's profit is not computable: a blocking issue of its best-known
- * statement, reduced to what the seller is shown (the code the frontend localizes, and the
+ * One reason an order's profit is not computable: a blocking issue of a profit statement
+ * view, reduced to what the seller is shown (the code the frontend localizes, and the
  * detail its copy may name, e.g. the carrier name). The wire shape is `ProfitBlocker`, on
- * the orders list row and the order detail.
+ * the orders list row and the order detail. Each surface reads the view whose figure it
+ * shows: the list row its estimate view (the estimated net profit), the detail its
+ * best-known view (the breakdown).
  */
 export interface ProfitBlocker {
   readonly code: ProfitIssueCode;
   readonly detail: string | null;
 }
 
-/** The view a blocker list reads: a best-known statement's status and its issues. */
+/** The view a blocker list reads: a statement view's status and its issues. */
 export interface ProfitBlockerSource {
   readonly status: ProfitStatus;
   readonly issues: readonly ProfitIssue[];
@@ -33,7 +35,7 @@ function compareBlockers(a: ProfitBlocker, b: ProfitBlocker): number {
 }
 
 /**
- * The blockers of a best-known view. Only a NOT_COMPUTABLE view has any: its blocking
+ * The blockers of one statement view. Only a NOT_COMPUTABLE view has any: its blocking
  * issues (`isBlockingIssue`) as `{ code, detail }`, one entry per distinct code + detail
  * (the same cause named on several items is one blocker), in a stable order. Every other
  * status (computed, excluded, cancelled) has none, whatever codes it stores. This is the
@@ -55,10 +57,10 @@ export function profitBlockers(view: ProfitBlockerSource): ProfitBlocker[] {
 }
 
 /**
- * `profitBlockers` over a stored best-known statement row, whose issues are raw JSON. The
- * issues are parsed only for a NOT_COMPUTABLE row (every other status has no blockers), so
- * a corrupt value on any other row is never read. A corrupt value on a NOT_COMPUTABLE row
- * throws `InvalidStoredProfitDataError`; the caller decides how its surface degrades.
+ * `profitBlockers` over a stored statement row, whose issues are raw JSON. The issues are
+ * parsed only for a NOT_COMPUTABLE row (every other status has no blockers), so a corrupt
+ * value on any other row is never read. A corrupt value on a NOT_COMPUTABLE row throws
+ * `InvalidStoredProfitDataError`; the caller decides how its surface degrades.
  */
 export function storedProfitBlockers(row: {
   readonly status: ProfitStatus;

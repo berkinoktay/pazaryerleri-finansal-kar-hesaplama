@@ -64,7 +64,9 @@ interface AcceptedEntry {
  * return legs. All amounts are in Turkish lira; the module never writes a
  * zero-amount line. `outboundBaremTier` is the Barem table the forward leg was priced
  * at (`estimateShippingLine`); it decides whether the domestic return shipping may be
- * priced at Barem table 1.
+ * priced at Barem table 1. `usesSellerCargoAgreement` is the order's own flag
+ * (`TrendyolParcelAttributes`): such an order is exempt from the not-recognized carrier
+ * rule on the return leg too.
  */
 export function estimateReturnLines(params: {
   readonly snapshot: ParcelSnapshot;
@@ -73,12 +75,21 @@ export function estimateReturnLines(params: {
   readonly costLines: readonly ProfitLine[];
   readonly reference: TrendyolReferenceData;
   readonly outboundBaremTier: TrendyolBaremTier | null;
+  readonly usesSellerCargoAgreement: boolean;
 }): {
   readonly lines: ProfitLine[];
   readonly issues: ProfitIssue[];
   readonly returnedItems: AllocationItem[];
 } {
-  const { snapshot, accepted, commissionLines, costLines, reference, outboundBaremTier } = params;
+  const {
+    snapshot,
+    accepted,
+    commissionLines,
+    costLines,
+    reference,
+    outboundBaremTier,
+    usesSellerCargoAgreement,
+  } = params;
   assertAcceptedReturns(snapshot, accepted);
 
   if (accepted.length === 0) {
@@ -119,6 +130,7 @@ export function estimateReturnLines(params: {
       appliesToReturns: carrier !== null && carrier.baremAppliesToReturns,
       outboundBaremTier,
     }),
+    usesSellerCargoAgreement,
   });
 }
 
@@ -168,8 +180,16 @@ function estimateDomesticReturns(params: {
   readonly costLines: readonly ProfitLine[];
   readonly reference: TrendyolReferenceData;
   readonly returnBaremTier: TrendyolBaremTier | null;
+  readonly usesSellerCargoAgreement: boolean;
 }): ReturnEstimate {
-  const { acceptedEntries, commissionByItem, costLines, reference, returnBaremTier } = params;
+  const {
+    acceptedEntries,
+    commissionByItem,
+    costLines,
+    reference,
+    returnBaremTier,
+    usesSellerCargoAgreement,
+  } = params;
 
   const saleReturnLines: ProfitLine[] = [];
   const commissionRefundLines: ProfitLine[] = [];
@@ -292,6 +312,7 @@ function estimateDomesticReturns(params: {
       basketGross: returnBasketGross,
       reference,
       returnBaremTier,
+      usesSellerCargoAgreement,
     });
     if (returnShipping.line !== null) {
       lines.push(returnShipping.line);
@@ -305,11 +326,14 @@ function estimateDomesticReturns(params: {
 }
 
 /**
- * The single parcel-level RETURN_SHIPPING line. An unknown desi on any accepted item
- * or an unresolvable tariff yields a blocking SHIPPING_ESTIMATE_UNAVAILABLE issue
- * (reason in `detail`, prefixed `RETURN_`) and no line; a zero gross yields neither,
- * and neither does an unknown return shipping VAT rate (a missing SHIPPING definition,
- * already recorded by the loader).
+ * The single parcel-level RETURN_SHIPPING line. A not-recognized carrier on a
+ * Trendyol-contract order yields no line and a blocking SHIPPING_ESTIMATE_UNAVAILABLE
+ * issue whose detail is `RETURN_CARRIER_NOT_RECOGNIZED`, unless the order uses a seller
+ * cargo agreement: that order is exempt (design 6.13) and keeps a zero line recording why,
+ * with no issue. An unknown desi on any accepted item or an unresolvable tariff yields a
+ * blocking SHIPPING_ESTIMATE_UNAVAILABLE issue (reason in `detail`, prefixed `RETURN_`)
+ * and no line; a zero gross yields neither, and neither does an unknown return shipping
+ * VAT rate (a missing SHIPPING definition, already recorded by the loader).
  * Barem is looked up only in `returnBaremTier` (null = the desi tariff), and only
  * when the return desi is within the carrier's Barem limit and the returned sale falls
  * in a band of that table.
@@ -320,26 +344,47 @@ function buildReturnShippingLine(params: {
   readonly basketGross: Decimal;
   readonly reference: TrendyolReferenceData;
   readonly returnBaremTier: TrendyolBaremTier | null;
+  readonly usesSellerCargoAgreement: boolean;
 }): { readonly line: ProfitLine | null; readonly issue: ProfitIssue | null } {
-  const { anyDesiUnknown, desi, basketGross, reference, returnBaremTier } = params;
-
-  // A missing SHIPPING definition leaves the return shipping VAT unknown (the loader
-  // recorded a blocking REFERENCE_DATA_MISSING): no line, and no issue of its own.
+  const {
+    anyDesiUnknown,
+    desi,
+    basketGross,
+    reference,
+    returnBaremTier,
+    usesSellerCargoAgreement,
+  } = params;
   const vatRatePct = reference.fees.returnShippingVatRatePct;
-  if (vatRatePct === null) {
-    return { line: null, issue: null };
-  }
 
-  // A not-recognized carrier on a Trendyol-contract order cannot be priced, so the
-  // return-shipping estimate is a zero line recording why, never an unavailable issue (a
-  // cargo invoice later replaces it); the forward leg records the parcel's carrier issue.
-  // An own-contract store is unaffected and falls through to its own tariff below.
+  // A not-recognized carrier on a Trendyol-contract order cannot be priced from any tariff.
+  // This mirrors the forward leg; an own-contract store is unaffected and falls through to
+  // its own tariff below.
   const carrierOutcome = reference.shipping.orderCarrierOutcome;
   if (
     reference.shipping.source === ShippingTariffSource.TRENDYOL_CONTRACT &&
     carrierOutcome !== null &&
     carrierOutcome.kind === 'not-recognized'
   ) {
+    // An order shipped under Trendyol's agreement gets no return line and a blocking
+    // return-leg issue: a zero line would read as a known cost once the forward cargo
+    // invoice lifts the forward cause in the best-known view. A return cargo invoice lifts
+    // this one in turn (`issuesForView`).
+    if (!usesSellerCargoAgreement) {
+      return {
+        line: null,
+        issue: {
+          code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+          orderItemId: null,
+          detail: `${RETURN_SHIPPING_ISSUE_DETAIL_PREFIX}${CARRIER_NOT_RECOGNIZED_REASON}`,
+        },
+      };
+    }
+    // A seller-cargo-agreement order is exempt (design 6.13): until the seller's own tariff
+    // prices it (PR-6) it keeps a zero line recording why, and no issue. With the return
+    // shipping VAT unknown (see below) even the zero line is left out.
+    if (vatRatePct === null) {
+      return { line: null, issue: null };
+    }
     const line = createProfitLine({
       type: ProfitLineType.RETURN_SHIPPING,
       level: ProfitLineLevel.PARCEL,
@@ -355,6 +400,12 @@ function buildReturnShippingLine(params: {
       externalRecord: null,
     });
     return { line, issue: null };
+  }
+
+  // A missing SHIPPING definition leaves the return shipping VAT unknown (the loader
+  // recorded a blocking REFERENCE_DATA_MISSING): no line, and no issue of its own.
+  if (vatRatePct === null) {
+    return { line: null, issue: null };
   }
 
   if (anyDesiUnknown) {

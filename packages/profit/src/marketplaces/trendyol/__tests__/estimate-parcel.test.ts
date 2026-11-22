@@ -393,10 +393,10 @@ describe('estimateTrendyolParcel', () => {
     );
   });
 
-  it('makes a not-recognized carrier not computable, recorded once even with an accepted return', () => {
+  it('makes a not-recognized carrier not computable on both shipping legs with an accepted return', () => {
     // The outbound leg writes no line and the blocking CARRIER_NOT_RECOGNIZED issue; the
-    // return leg keeps its zero line and records nothing, so the parcel carries the issue
-    // exactly once.
+    // return leg writes no line either and records its own cause under the return prefix,
+    // so each leg's cargo invoice can lift its own cause in the best-known view.
     const result = estimateTrendyolParcel({
       snapshot: makeParcel({
         items: [makeItem({ orderItemId: 'a', listGross: '200.00', unitDesi: '1' })],
@@ -420,13 +420,17 @@ describe('estimateTrendyolParcel', () => {
         orderItemId: null,
         detail: 'Alternative Delivery',
       },
+      {
+        code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+        orderItemId: null,
+        detail: 'RETURN_CARRIER_NOT_RECOGNIZED',
+      },
     ]);
     const shippingLegs = result.lines.filter(
       (line) =>
         line.type === ProfitLineType.SHIPPING || line.type === ProfitLineType.RETURN_SHIPPING,
     );
-    expect(shippingLegs.map((line) => line.type)).toEqual([ProfitLineType.RETURN_SHIPPING]);
-    expect(shippingLegs.map((line) => line.amount.gross.toFixed(2))).toEqual(['0.00']);
+    expect(shippingLegs).toEqual([]);
 
     const statement = computeProfitStatement({
       lines: result.lines,
