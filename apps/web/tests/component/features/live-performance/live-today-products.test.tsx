@@ -170,6 +170,20 @@ describe('LiveTodayProducts', () => {
     expect(within(rank4Row).queryByText('4. sıra')).toBeNull();
   });
 
+  it('shows no stock code copy button when the stock code is an empty string', async () => {
+    // Trendyol sync stores a variant without a stock code as '' (not null).
+    const [top, ...rest] = response.data;
+    if (top === undefined) throw new Error('fixture has no top seller');
+    server.use(
+      http.get(URL, () => HttpResponse.json({ data: [{ ...top, stockCode: '' }, ...rest] })),
+    );
+    renderTable();
+
+    const topRow = await findRow('En Çok Satan');
+    expect(within(topRow).queryByRole('button', { name: 'Stok Kodu kopyala' })).toBeNull();
+    expect(within(topRow).getByRole('button', { name: 'Barkod kopyala' })).toBeInTheDocument();
+  });
+
   it('çözülemeyen satır barkod kimliği + rozetle görünür; attach CTA yerine nötr çizgi', async () => {
     const unresolvedResponse = {
       data: [

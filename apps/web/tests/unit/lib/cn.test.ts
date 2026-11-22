@@ -17,6 +17,13 @@ describe('cn', () => {
     );
   });
 
+  it('lets the wide detail sheet width replace the base sheet widths at every breakpoint', () => {
+    // The Sheet primitive's right-side base widths, then the order detail sheet's override.
+    expect(cn('max-w-sheet sm:max-w-sheet-wide', 'max-w-sheet-detail sm:max-w-sheet-detail')).toBe(
+      'max-w-sheet-detail sm:max-w-sheet-detail',
+    );
+  });
+
   it('keeps an animation timing class beside the animation it times', () => {
     expect(cn('animate-field-shake', 'animate-duration-fast')).toBe(
       'animate-field-shake animate-duration-fast',

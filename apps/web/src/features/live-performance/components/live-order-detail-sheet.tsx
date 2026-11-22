@@ -3,7 +3,6 @@
 import { useFormatter } from 'next-intl';
 import * as React from 'react';
 
-import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Sheet,
   SheetContent,
@@ -34,8 +33,9 @@ interface LiveOrderDetailSheetProps {
  *   the midnight deadline notice, and variant-level cost-profile attach via
  *   CostCellPopover (attach → flip → promote chain).
  *
- * Layout: SheetContent as flex column (fixed header + flex-1 ScrollArea) with
+ * Layout: SheetContent as flex column (fixed header + flex-1 scroll body) with
  * no arbitrary height values -- token-free flex layout fills remaining height.
+ * On a phone the sheet spans the screen between the floating insets.
  */
 export function LiveOrderDetailSheet({
   orgId,
@@ -72,11 +72,13 @@ export function LiveOrderDetailSheet({
     >
       {/* flex column: fixed header + flex-1 scroll body -- no magic-number height.
           gap-0 p-0 override SheetContent's base gap-md/p-lg (cn extends twMerge with
-          the custom spacing scale, so the overrides win -- feedback_cn_twmerge_custom_spacing). */}
+          the custom spacing scale, so the overrides win -- feedback_cn_twmerge_custom_spacing).
+          Phone: left-xs + w-auto stretch the floating sheet between both insets; ml-auto
+          keeps it on the right edge once max-w caps it. sm+: back to three quarters. */}
       <SheetContent
         side="right"
         variant="floating"
-        className="max-w-sheet-wide flex w-3/4 flex-col gap-0 p-0"
+        className="max-w-sheet-wide left-xs ml-auto flex w-auto flex-col gap-0 p-0 sm:left-auto sm:w-3/4"
       >
         <SheetHeader className="px-lg pt-lg pb-md">
           <SheetTitle>{title}</SheetTitle>
@@ -84,9 +86,13 @@ export function LiveOrderDetailSheet({
             {formatter.dateTime(new Date(selected.orderDate), 'long')}
           </SheetDescription>
         </SheetHeader>
-        <ScrollArea className="min-h-0 flex-1">
+        {/* A plain overflow body, not ScrollArea: Radix wraps ScrollArea content in a
+            display:table box that grows to the content's min-content width, so one
+            unbreakable line widened the whole body past a phone-width sheet and clipped
+            its right edge. A block body is never wider than the sheet. */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="px-lg pb-lg">{body}</div>
-        </ScrollArea>
+        </div>
       </SheetContent>
     </Sheet>
   );

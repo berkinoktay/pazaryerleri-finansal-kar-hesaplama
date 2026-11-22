@@ -179,7 +179,8 @@ export function LiveTodayProducts({ orgId, storeId }: LiveTodayProductsProps): R
                       vendorMissing={product.vendorMissing}
                     />
                   ) : null}
-                  {product.stockCode !== null ? (
+                  {/* Trendyol sync stores a missing stock code as '' rather than null. */}
+                  {product.stockCode !== null && product.stockCode !== '' ? (
                     <CopyableValue value={product.stockCode} label={t('stockCodeLabel')}>
                       <span className="text-muted-foreground font-mono text-xs">
                         {product.stockCode}

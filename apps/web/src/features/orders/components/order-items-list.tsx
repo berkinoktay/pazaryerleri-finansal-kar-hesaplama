@@ -64,8 +64,11 @@ export function OrderItemsList({
                     size="lg"
                   />
                   <div className="gap-2xs flex min-w-0 flex-1 flex-col">
+                    {/* min-w-0 + break-words: the name takes the room the price leaves and
+                        breaks an over-long word, so it never pushes the card wider than a
+                        phone-width sheet; the price stays on the right. */}
                     <div className="gap-sm flex items-start justify-between">
-                      <span className="text-sm font-medium">
+                      <span className="min-w-0 flex-1 text-sm font-medium break-words">
                         {item.variant?.productName ?? t('unknownVariant')}
                       </span>
                       <Currency
@@ -77,9 +80,11 @@ export function OrderItemsList({
                       <UnmatchedVariantBadge className="w-fit" vendorMissing={item.vendorMissing} />
                     ) : null}
                     {displayBarcode !== null ? (
-                      <span className="text-2xs gap-xs flex items-baseline">
+                      <span className="text-2xs gap-x-xs flex flex-wrap items-baseline">
                         <span className="text-muted-foreground">{t('barcode')}</span>
-                        <span className="text-foreground tabular-nums">{displayBarcode}</span>
+                        <span className="text-foreground break-all tabular-nums">
+                          {displayBarcode}
+                        </span>
                       </span>
                     ) : null}
                     <div className="border-border-muted gap-x-md gap-y-sm mt-xs pt-sm grid grid-cols-2 border-t">

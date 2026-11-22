@@ -67,6 +67,7 @@ const twMerge = extendTailwindMerge({
         'form',
         'sheet',
         'sheet-wide',
+        'sheet-detail',
         'modal',
         'dropdown-popover',
         'switcher-panel',
