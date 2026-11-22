@@ -31,6 +31,7 @@ import {
   type TrendyolParcelAttributes,
 } from '../marketplaces/trendyol/trendyol-inputs';
 import { ParcelNotFoundError, UnsupportedPlatformError } from './errors';
+import { normalizeCargoProviderName } from './normalize-cargo-provider-name';
 import {
   dec,
   decOrNull,
@@ -104,15 +105,16 @@ export function reportedProviderName(cargoProviderName: string | null): string |
  * getProviders "Name" ("PTT Kargo Marketplace", ...), which seeds the carrier's
  * `orderCargoNames` -- NOT its short `display_name` ("PTT Kargo"). So a carrier is
  * matched when the order's name equals either its display name OR one of its
- * `orderCargoNames`. Both sides are compared after `trim()` + `toLowerCase()` (a
- * deterministic, non-locale compare).
+ * `orderCargoNames`. Both sides are compared by `normalizeCargoProviderName` (NFC,
+ * Turkish I folding, lowercase, spacing and punctuation collapsed -- a deterministic,
+ * non-locale compare).
  *
  * When exactly one carrier matches it wins. Otherwise the carrier is NOT recognized and
- * the result is null (the store default is never used on an order): a null or blank name,
- * an "Alternative Delivery" / "***" or any other unknown name, AND the ambiguous case
- * where two or more distinct carriers claim the same name (never a silent pick among
- * equals). Inactive carriers are never passed in (the query filters `active = true`), so
- * an inactive namesake is not recognized either.
+ * the result is null (the store default is never used on an order): a null name or one
+ * that normalises to nothing (blank, "***"), an "Alternative Delivery" or any other
+ * unknown name, AND the ambiguous case where two or more distinct carriers claim the same
+ * normalised name (never a silent pick among equals). Inactive carriers are never passed
+ * in (the query filters `active = true`), so an inactive namesake is not recognized either.
  *
  * For an own-contract store the matched carrier still drives Barem eligibility, while
  * the own desi tariff stays store-level -- intended (plan decision 3): the carrier
@@ -126,14 +128,14 @@ export function resolveOrderCarrier(
   if (cargoProviderName === null) {
     return null;
   }
-  const normalized = cargoProviderName.trim().toLowerCase();
+  const normalized = normalizeCargoProviderName(cargoProviderName);
   if (normalized === '') {
     return null;
   }
   const matches = carriers.filter(
     (carrier) =>
-      carrier.displayName.trim().toLowerCase() === normalized ||
-      carrier.orderCargoNames.some((name) => name.trim().toLowerCase() === normalized),
+      normalizeCargoProviderName(carrier.displayName) === normalized ||
+      carrier.orderCargoNames.some((name) => normalizeCargoProviderName(name) === normalized),
   );
   // Collapse to distinct carriers: one carrier matching on both its display name and an
   // orderCargoNames entry is still a single match. Zero or 2+ distinct -> not recognized.

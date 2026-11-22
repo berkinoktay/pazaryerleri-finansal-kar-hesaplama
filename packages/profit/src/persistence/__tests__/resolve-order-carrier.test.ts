@@ -17,6 +17,12 @@ import {
   resolveOrderCarrier,
   type CarrierRow,
 } from '../load-trendyol-parcel';
+import {
+  CARGO_NAME_VARIANTS,
+  OBSERVED_ORDER_CARGO_NAMES,
+  TRENDYOL_CARRIER_NAMES,
+  UNRECOGNISED_CARGO_NAMES,
+} from './fixtures/trendyol-carrier-names';
 
 const PTT: CarrierRow = {
   id: 'carrier-ptt',
@@ -36,7 +42,7 @@ describe('resolveOrderCarrier', () => {
     const carriers = [PTT, TEX];
     // The real pair: display name "PTT Kargo", order name "PTT Kargo Marketplace".
     expect(resolveOrderCarrier('PTT Kargo Marketplace', carriers)).toBe(PTT);
-    // Case and surrounding spaces do not matter (trim + toLowerCase on both sides).
+    // Case and surrounding spaces do not matter (both sides normalised the same way).
     expect(resolveOrderCarrier('  ptt kargo marketplace  ', carriers)).toBe(PTT);
   });
 
@@ -71,6 +77,24 @@ describe('resolveOrderCarrier', () => {
     expect(resolveOrderCarrier('Shared Kargo Marketplace', [dupA, dupB])).toBeNull();
   });
 
+  it('returns null when two carriers claim names that normalise to the same key', () => {
+    // The names differ only in case and punctuation, so after normalisation both
+    // carriers claim the order's name: still ambiguous, still not recognized.
+    const dupA: CarrierRow = {
+      id: 'carrier-dup-a',
+      code: 'DUPAMP',
+      displayName: 'Dup A',
+      orderCargoNames: ['Shared Kargo Marketplace'],
+    };
+    const dupB: CarrierRow = {
+      id: 'carrier-dup-b',
+      code: 'DUPBMP',
+      displayName: 'Dup B',
+      orderCargoNames: ['SHARED-KARGO MARKETPLACE'],
+    };
+    expect(resolveOrderCarrier('Shared Kargo Marketplace', [dupA, dupB])).toBeNull();
+  });
+
   it("returns null when the order's cargo name is unknown or blank", () => {
     const carriers = [PTT, TEX];
     // A null name, a blank name, an "Alternative Delivery", a masked "***" and any other
@@ -88,6 +112,46 @@ describe('resolveOrderCarrier', () => {
     // recognized rather than resolved to the dropped inactive row.
     const activeCarriers = [PTT];
     expect(resolveOrderCarrier('Trendyol Express Marketplace', activeCarriers)).toBeNull();
+  });
+});
+
+// The real active Trendyol carriers of the dev database, keyed by code (the id does not
+// matter to the matcher beyond telling carriers apart).
+const REAL_CARRIERS: readonly CarrierRow[] = TRENDYOL_CARRIER_NAMES.map((carrier) => ({
+  id: carrier.code,
+  code: carrier.code,
+  displayName: carrier.displayName,
+  orderCargoNames: carrier.orderCargoNames,
+}));
+
+describe('resolveOrderCarrier with the real Trendyol carrier names', () => {
+  it('recognises every real carrier name', () => {
+    expect(OBSERVED_ORDER_CARGO_NAMES.length).toBeGreaterThan(0);
+    for (const { name, code } of OBSERVED_ORDER_CARGO_NAMES) {
+      expect(resolveOrderCarrier(name, REAL_CARRIERS)?.code, name).toBe(code);
+    }
+    // Every carrier's own display name and order cargo names resolve to that carrier.
+    for (const carrier of TRENDYOL_CARRIER_NAMES) {
+      for (const name of [carrier.displayName, ...carrier.orderCargoNames]) {
+        expect(resolveOrderCarrier(name, REAL_CARRIERS)?.code, name).toBe(carrier.code);
+      }
+    }
+  });
+
+  it('recognises spelling variants', () => {
+    // Turkish capitals, an ASCII I for the dotted capital, extra spaces and punctuation.
+    expect(CARGO_NAME_VARIANTS.length).toBeGreaterThan(0);
+    for (const { name, code } of CARGO_NAME_VARIANTS) {
+      expect(resolveOrderCarrier(name, REAL_CARRIERS)?.code, name).toBe(code);
+    }
+  });
+
+  it('keeps unknown names unrecognised', () => {
+    expect(UNRECOGNISED_CARGO_NAMES.length).toBeGreaterThan(0);
+    for (const name of UNRECOGNISED_CARGO_NAMES) {
+      expect(resolveOrderCarrier(name, REAL_CARRIERS), name).toBeNull();
+    }
+    expect(resolveOrderCarrier(null, REAL_CARRIERS)).toBeNull();
   });
 });
 
