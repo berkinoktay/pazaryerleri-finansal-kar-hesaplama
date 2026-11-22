@@ -610,7 +610,7 @@ model ProductVariant {
   // lookup ile otomatik tahmin.
   isDigital               Boolean  @default(false) @map("is_digital")
   // Trendyol'un onaylı-ürün v2 cevabındaki varyant komisyon YÜZDESİ (7.83 = %7,83).
-  // 0/yok → null ("bilinmiyor"); desi'nin 0-tabanının aksine null anlamlıdır çünkü
+  // 0/yok → null ("bilinmiyor"); desinin aksine 0 da bilinmiyor demektir. null anlamlıdır çünkü
   // indirimler dikeyinin komisyon zinciri (bant → ürün → kategori) "senkronlandı" ile
   // "bilinmiyor"u ayırt etmek zorunda. Delta senkron bu kolona hiç dokunmaz (delta
   // yalnız quantity/salePrice/listPrice yazar) — değer tam senkronlarda tazelenir.
@@ -618,29 +618,30 @@ model ProductVariant {
   // Two-column sync-protection pair (see docs/plans/archive/... for rationale):
   // syncedDimensionalWeight is the marketplace's value, refreshed every sync.
   // dimensionalWeightOverride is the user's manual override; null = no
-  // override, fall back to synced at read time (effective desi = override ??
-  // synced). The sync worker writes ONLY to the synced column, never to
+  // override. The sync worker writes ONLY to the synced column, never to
   // dimensionalWeightOverride, so the "user value is sacred" invariant is
   // structural, not just enforced in code.
   //
-  // Desi floor = 0: the synced column is NON-NULL with default 0. Trendyol
-  // omits desi on most products; the mapper stores 0 (not null), so the data
-  // has no nulls. Desi 0 is a VALID tariff tier: the cargo fee is matched from
-  // the tariff table (carrier + ceil(desi)), which covers desi 0 onward, so a
-  // 0-desi variant still gets a real cargo cost. The override stays nullable
-  // (null = "no override").
+  // Null vs 0 on the synced column: null = the marketplace sent no desi (the
+  // field was absent, null, not a number or negative). 0 is a REAL desi, the
+  // lowest tariff tier: the cargo fee is matched from the tariff table
+  // (carrier + ceil(desi)), which covers desi 0 onward, so a 0-desi variant
+  // gets a real cargo cost. 0 never means "missing" on either column.
   //
-  // Missing desi: a variant in the listing scope with dimensionalWeightOverride
-  // IS NULL AND syncedDimensionalWeight = 0 means Trendyol sent no desi and the
-  // seller has not entered one. The products page counts it as missing desi
-  // and offers "Desi gir"; the shipping estimate still prices it at desi 0. An
-  // explicit override of 0 is the seller's choice and is NOT missing.
+  // Effective desi = dimensionalWeightOverride ?? syncedDimensionalWeight.
+  // Both null = the variant has no desi: the shipping estimate is NO_DESI (no
+  // price), the products page counts it as missing desi, and an order holding
+  // it waits at the desi gate, like a missing cost, until the seller enters one.
   //
-  // A CHECK constraint forbids any value below 0 on either column
+  // The column default 0 is kept on purpose: the production writer (the mapper
+  // through upsertCatalogBatch) always writes the value explicitly, so the
+  // default only serves test and seed writers.
+  //
+  // A CHECK constraint forbids any value below 0 on either column; null passes
   // (product_variants_dimensional_weight_override_nonneg_check in
   // supabase/sql/check-constraints.sql, also added by the migration
   // rename_dimensional_weight_override).
-  syncedDimensionalWeight Decimal  @default(0) @map("synced_dimensional_weight") @db.Decimal(6, 2)
+  syncedDimensionalWeight Decimal? @default(0) @map("synced_dimensional_weight") @db.Decimal(6, 2)
   dimensionalWeightOverride Decimal? @map("dimensional_weight_override") @db.Decimal(6, 2)
   quantity                Int      @default(0)
   deliveryDuration        Int?     @map("delivery_duration")

@@ -2,14 +2,14 @@
 // seller inputs an order is priced with, copied onto the order and its items the
 // first time the order enters the profit computation. Afterwards only missing parts
 // are filled: an uncaptured order or item, an item whose variant was matched later,
-// a carrier that was not recognised, an empty cost list, a desi Trendyol never sent
-// (synced 0, no seller correction), commission inputs none of which gives a rate. A
-// known value is never overwritten with a live one. The events that change a filled
-// value are the order's own cargo name changing (the carrier is recognised again),
-// an item getting a variant that differs from the captured one (the item is captured
-// again), and the cost-window rule: while the order's business day is open the
-// seller may still enter or change its cost, so the cost list follows the variant's
-// cost links until that day ends. A variant that drops to null (deleted from the
+// a carrier that was not recognised, an empty cost list, commission inputs none of
+// which gives a rate. The desi is not filled: a captured desi (0 included) is known,
+// and an item captured without one stays so. A known value is never overwritten with
+// a live one. The events that change a filled value are the order's own cargo name
+// changing (the carrier is recognised again), an item getting a variant that differs
+// from the captured one (the item is captured again), and the cost-window rule:
+// while the order's business day is open the seller may still enter or change its
+// cost, so the cost list follows the variant's cost links until that day ends. A variant that drops to null (deleted from the
 // catalogue) changes nothing. The order's capture time never moves after the first
 // capture; an item's moves only with a fresh capture, never with a gap fill or a
 // cost list update.
@@ -298,8 +298,10 @@ async function captureItems(
 /**
  * The missing parts of a captured item, filled from its live variant and product, as
  * one update, or null when nothing changes: the cost list (see
- * `needsCostListRefresh`), a desi Trendyol never sent, and commission inputs none of
- * which gives a rate. Its capture time stays.
+ * `needsCostListRefresh`) and commission inputs none of which gives a rate. Its
+ * capture time stays. The desi is never filled: a captured desi (0 included) is a
+ * known value, and an item captured without one belongs to an order the desi gate
+ * keeps out of profit.
  */
 function itemFillData(
   item: SnapshotOrderItem,
@@ -316,7 +318,6 @@ function itemFillData(
   }
   const data: Prisma.OrderItemUncheckedUpdateInput = {
     ...costListFillData(item, variant.id, reference),
-    ...desiFillData(item, variant),
     ...commissionFillData(item, variant, reference.rules),
   };
   return Object.keys(data).length === 0 ? null : data;
@@ -343,33 +344,6 @@ function costListFillData(
   const unchanged =
     stored.length === current.length && stored.every((id, index) => id === current[index]);
   return unchanged ? {} : { snapshotCostProfileVersionIds: current };
-}
-
-/**
- * The item's desi, when the capture has none (synced 0: Trendyol sent no desi and the
- * seller had no correction) and the variant has one now: the seller's correction wins
- * over the synced value, as in the engine. A desi above 0 is never changed.
- */
-function desiFillData(
-  item: SnapshotOrderItem,
-  variant: LiveVariant,
-): Prisma.OrderItemUncheckedUpdateInput {
-  const missing =
-    item.snapshotDesiSource === SnapshotDesiSource.SYNCED &&
-    item.snapshotUnitDesi !== null &&
-    dec(item.snapshotUnitDesi).isZero();
-  if (!missing) {
-    return {};
-  }
-  const override = variant.dimensionalWeightOverride;
-  const liveDesi = override ?? variant.syncedDimensionalWeight;
-  if (!dec(liveDesi).gt(0)) {
-    return {};
-  }
-  return {
-    snapshotUnitDesi: liveDesi,
-    snapshotDesiSource: override === null ? SnapshotDesiSource.SYNCED : SnapshotDesiSource.OVERRIDE,
-  };
 }
 
 /**
@@ -425,6 +399,25 @@ function ruleRates(
 }
 
 /**
+ * The item's desi and where it came from, as in the engine: the seller's correction
+ * wins over the synced value. With neither (Trendyol sent no desi and the seller
+ * entered none) both columns stay empty. A desi of 0 is a real desi.
+ */
+function desiCaptureData(
+  variant: LiveVariant,
+): Pick<Prisma.OrderItemUncheckedUpdateInput, 'snapshotUnitDesi' | 'snapshotDesiSource'> {
+  const override = variant.dimensionalWeightOverride;
+  if (override !== null) {
+    return { snapshotUnitDesi: override, snapshotDesiSource: SnapshotDesiSource.OVERRIDE };
+  }
+  const synced = variant.syncedDimensionalWeight;
+  if (synced !== null) {
+    return { snapshotUnitDesi: synced, snapshotDesiSource: SnapshotDesiSource.SYNCED };
+  }
+  return { snapshotUnitDesi: null, snapshotDesiSource: null };
+}
+
+/**
  * Every item snapshot column, taken from the item's current variant, product,
  * commission rules and cost links. An item without a variant is captured with these
  * inputs empty and an empty cost list.
@@ -457,13 +450,10 @@ function itemCaptureData(
   }
 
   const { categoryId, brandId } = variant.product;
-  const override = variant.dimensionalWeightOverride;
   const rates = ruleRates(rules, categoryId, brandId);
   return {
     snapshotProductVariantId: item.productVariantId,
-    // The seller's desi correction wins over the synced value, as in the engine.
-    snapshotUnitDesi: override ?? variant.syncedDimensionalWeight,
-    snapshotDesiSource: override === null ? SnapshotDesiSource.SYNCED : SnapshotDesiSource.OVERRIDE,
+    ...desiCaptureData(variant),
     snapshotIsDigital: variant.isDigital,
     snapshotCategoryId: categoryId,
     snapshotBrandId: brandId,

@@ -351,8 +351,46 @@ describe('mapTrendyolContent', () => {
     expect(padded.variants[0]?.syncedCommissionRate).toBe('7.80');
   });
 
+  it('maps no desi from Trendyol (absent, null, not a number, negative) to null', () => {
+    const variant = STAGING_SAMPLE_DFSF.variants?.[0];
+    if (variant === undefined) throw new Error('fixture variant missing');
+    const { dimensionalWeight: _droppedDesi, ...variantWithoutDesi } = {
+      ...variant,
+      dimensionalWeight: 1,
+    };
+    void _droppedDesi;
+    const wireValues = [null, Number.NaN, Number.POSITIVE_INFINITY, -1];
+    const outs = [
+      mapTrendyolContent({ ...STAGING_SAMPLE_DFSF, variants: [variantWithoutDesi] }),
+      ...wireValues.map((dimensionalWeight) =>
+        mapTrendyolContent({
+          ...STAGING_SAMPLE_DFSF,
+          variants: [{ ...variant, dimensionalWeight }],
+        }),
+      ),
+    ];
+    for (const out of outs) {
+      expect(out.variants[0]?.syncedDimensionalWeight).toBeNull();
+    }
+  });
+
+  it('keeps a desi of 0 from Trendyol as a real desi and pads every desi to 2 decimals', () => {
+    const variant = STAGING_SAMPLE_DFSF.variants?.[0];
+    if (variant === undefined) throw new Error('fixture variant missing');
+    const zero = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      variants: [{ ...variant, dimensionalWeight: 0 }],
+    });
+    const decimal = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      variants: [{ ...variant, dimensionalWeight: 1.5 }],
+    });
+    expect(zero.variants[0]?.syncedDimensionalWeight).toBe('0.00');
+    expect(decimal.variants[0]?.syncedDimensionalWeight).toBe('1.50');
+  });
+
   it('collapses absent and zero commission to null', () => {
-    // Unlike desi there is no zero-floor: a real %0 commission does not exist
+    // Unlike desi, where 0 is a real value, a real %0 commission does not exist
     // on the wire, so both an omitted value and a literal 0 mean "unknown".
     const variant = STAGING_SAMPLE_DFSF.variants?.[0];
     if (variant === undefined) throw new Error('fixture variant missing');

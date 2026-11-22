@@ -691,17 +691,20 @@ export interface VariantShippingEstimate {
 }
 
 export interface VariantDesiFields {
-  dimensionalWeight: string;
-  syncedDimensionalWeight: string;
+  dimensionalWeight: string | null;
+  syncedDimensionalWeight: string | null;
   isDimensionalWeightOverridden: boolean;
   isDimensionalWeightMissing: boolean;
 }
 
 /**
  * The desi fields of every variant response (the products list and the PATCH
- * desi endpoint), so each rule exists once. Effective desi = override ?? synced
- * (synced is NOT NULL, default 0). Missing desi = no override AND synced 0, the
- * per-variant twin of MISSING_DESI_VARIANT_WHERE in products-list.service.ts.
+ * desi endpoint), so each rule exists once. Effective desi = override ?? synced;
+ * null when both are null (the marketplace sent no desi and the seller entered
+ * none). Missing desi = no override AND a synced desi that is null or 0. It is
+ * the per-variant twin of MISSING_DESI_VARIANT_WHERE in products-list.service.ts;
+ * plan PR-2c task 2 moves both to the final rule together: missing = effective
+ * desi null (0 is a real desi).
  */
 export function toVariantDesiFields(
   variant: Pick<VariantRow, 'dimensionalWeightOverride' | 'syncedDimensionalWeight'>,
@@ -709,10 +712,10 @@ export function toVariantDesiFields(
   const override = variant.dimensionalWeightOverride;
   const synced = variant.syncedDimensionalWeight;
   return {
-    dimensionalWeight: (override ?? synced).toString(),
-    syncedDimensionalWeight: synced.toString(),
+    dimensionalWeight: (override ?? synced)?.toString() ?? null,
+    syncedDimensionalWeight: synced?.toString() ?? null,
     isDimensionalWeightOverridden: override !== null,
-    isDimensionalWeightMissing: override === null && synced.isZero(),
+    isDimensionalWeightMissing: override === null && (synced === null || synced.isZero()),
   };
 }
 
@@ -896,7 +899,8 @@ function normalizeSkippedPages(raw: SyncLog['skippedPages']): SkippedPageWire[] 
 // real (lowest-tier) shipping cost. Below 0 is impossible — the format regex
 // (`^\d+...`) admits no minus sign, and a DB CHECK constraint mirrors the
 // floor. Null is permitted and clears the override (the read path then falls
-// back to syncedDimensionalWeight, now always ≥ 0).
+// back to syncedDimensionalWeight, which is null when the marketplace sent no
+// desi: the variant then has no desi).
 
 const DIMENSIONAL_WEIGHT_MIN_INCLUSIVE = 0;
 const DIMENSIONAL_WEIGHT_MAX_INCLUSIVE = 999.99;

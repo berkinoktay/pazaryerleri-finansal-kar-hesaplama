@@ -759,9 +759,35 @@ describe('captureOrderProfitSnapshot', () => {
     expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
   });
 
-  it('fills a missing desi (synced 0) once the seller or Trendyol provides one, but never changes a known desi', async () => {
+  it('captures a variant without any desi (no correction, no Trendyol desi) as an empty desi with no source', async () => {
     const parcel = await seedSnapshotParcel();
     // Trendyol sent no desi for either variant and the seller corrected neither.
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { dimensionalWeightOverride: null, syncedDimensionalWeight: null },
+    });
+    await prisma.productVariant.update({
+      where: { id: parcel.variantB },
+      data: { syncedDimensionalWeight: null },
+    });
+
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: true, itemsWritten: 2 });
+    for (const itemId of [parcel.itemA, parcel.itemB]) {
+      const item = await readItemSnapshot(itemId);
+      expect(item.snapshotUnitDesi).toBeNull();
+      expect(item.snapshotDesiSource).toBeNull();
+      // The rest of the item is captured as usual.
+      expect(item.profitSnapshotAt).toEqual(expect.any(Date));
+      expect(item.snapshotCategoryId).toBe(TEST_CATEGORY_ID);
+    }
+
+    // Still no desi anywhere: nothing to write.
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+  });
+
+  it('keeps a Trendyol desi of 0 as a known desi: captured as 0 from the synced value and never filled later', async () => {
+    const parcel = await seedSnapshotParcel();
+    // Trendyol sent a real desi of 0 for both variants; the seller corrected neither.
     await prisma.productVariant.update({
       where: { id: parcel.variantA },
       data: { dimensionalWeightOverride: null, syncedDimensionalWeight: '0' },
@@ -778,10 +804,8 @@ describe('captureOrderProfitSnapshot', () => {
       expect(item.snapshotDesiSource).toBe(SnapshotDesiSource.SYNCED);
     }
 
-    // Still no desi anywhere: nothing to fill.
-    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
-
-    // The seller corrects item A's desi; Trendyol now sends item B's.
+    // A later seller correction and a later Trendyol desi do not reach the capture:
+    // 0 is a known desi, not a gap to fill.
     await prisma.productVariant.update({
       where: { id: parcel.variantA },
       data: { dimensionalWeightOverride: '2.50' },
@@ -790,34 +814,9 @@ describe('captureOrderProfitSnapshot', () => {
       where: { id: parcel.variantB },
       data: { syncedDimensionalWeight: '4.00' },
     });
-    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 2 });
-    const itemAFilled = await readItemSnapshot(parcel.itemA);
-    const itemBFilled = await readItemSnapshot(parcel.itemB);
-    expect(itemAFilled).toEqual({
-      ...itemABefore,
-      snapshotUnitDesi: itemAFilled.snapshotUnitDesi,
-      snapshotDesiSource: SnapshotDesiSource.OVERRIDE,
-    });
-    expect(itemAFilled.snapshotUnitDesi?.toString()).toBe('2.5');
-    expect(itemBFilled).toEqual({
-      ...itemBBefore,
-      snapshotUnitDesi: itemBFilled.snapshotUnitDesi,
-      snapshotDesiSource: SnapshotDesiSource.SYNCED,
-    });
-    expect(itemBFilled.snapshotUnitDesi?.toString()).toBe('4');
-
-    // A known desi is never changed: neither a new correction nor a new synced value.
-    await prisma.productVariant.update({
-      where: { id: parcel.variantA },
-      data: { dimensionalWeightOverride: '9.00', syncedDimensionalWeight: '7.00' },
-    });
-    await prisma.productVariant.update({
-      where: { id: parcel.variantB },
-      data: { dimensionalWeightOverride: '5.00', syncedDimensionalWeight: '6.00' },
-    });
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
-    expect(await readItemSnapshot(parcel.itemA)).toEqual(itemAFilled);
-    expect(await readItemSnapshot(parcel.itemB)).toEqual(itemBFilled);
+    expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
+    expect(await readItemSnapshot(parcel.itemB)).toEqual(itemBBefore);
   });
 
   it('fills commission inputs that were all missing once a rule or synced rate appears, but never changes captured rates', async () => {

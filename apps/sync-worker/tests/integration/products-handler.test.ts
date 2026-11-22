@@ -34,7 +34,7 @@ interface VariantSpec {
   size?: string;
   salePrice?: number;
   quantity?: number;
-  dimensionalWeight?: number;
+  dimensionalWeight?: number | null;
   // Wire status flags; omitted ones keep the on-sale defaults in buildContent.
   onSale?: boolean;
   locked?: boolean;
@@ -750,7 +750,7 @@ describe('processProductsChunk', () => {
     expect(variant.syncedDimensionalWeight?.toString()).toBe('2');
   });
 
-  it('stores omitted or zero dimensionalWeight from Trendyol as 0 (desi floor is 0, never null)', async () => {
+  it('stores an omitted or null dimensionalWeight from Trendyol as null and a 0 as a real 0', async () => {
     const user = await createUserProfile();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
@@ -770,15 +770,22 @@ describe('processProductsChunk', () => {
             title: 'Desi Missing Product',
             variants: [
               // Omitted (real Trendyol responses often skip this field
-              // until their pricing pipeline computes it) → stored as 0.
+              // until their pricing pipeline computes it) -> stored as null.
               { variantId: 800_103, barcode: 'desi-bc-3a', stockCode: 'desi-sk-3a' },
-              // Explicit 0 → also stored as 0. Desi 0 is the floor and a valid
-              // tariff tier (the tariff table covers desi 0 onward).
+              // Explicit 0 -> stored as 0: a real desi and a valid tariff tier
+              // (the tariff table covers desi 0 onward), not a missing desi.
               {
                 variantId: 800_104,
                 barcode: 'desi-bc-3b',
                 stockCode: 'desi-sk-3b',
                 dimensionalWeight: 0,
+              },
+              // Explicit null -> stored as null, like an omitted field.
+              {
+                variantId: 800_105,
+                barcode: 'desi-bc-3c',
+                stockCode: 'desi-sk-3c',
+                dimensionalWeight: null,
               },
             ],
           }),
@@ -807,11 +814,16 @@ describe('processProductsChunk', () => {
     const zero = await prisma.productVariant.findFirstOrThrow({
       where: { storeId, platformVariantId: BigInt(800_104) },
     });
-    expect(missing.syncedDimensionalWeight.toString()).toBe('0');
-    expect(zero.syncedDimensionalWeight.toString()).toBe('0');
-    // No seller override either: exactly the state the products page's
-    // missing-desi rule (override null AND synced 0) matches after a sync.
+    const sentNull = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId, platformVariantId: BigInt(800_105) },
+    });
+    expect(missing.syncedDimensionalWeight).toBeNull();
+    expect(sentNull.syncedDimensionalWeight).toBeNull();
+    expect(zero.syncedDimensionalWeight?.toString()).toBe('0');
+    // No seller override either: the omitted and null variants have no desi at
+    // all (override null AND synced null); the 0 variant has a real desi of 0.
     expect(missing.dimensionalWeightOverride).toBeNull();
+    expect(sentNull.dimensionalWeightOverride).toBeNull();
     expect(zero.dimensionalWeightOverride).toBeNull();
   });
 

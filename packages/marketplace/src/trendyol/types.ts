@@ -97,8 +97,9 @@ export interface TrendyolVariant {
   // Volumetric weight ("desi" in TR parcel shipping). Not present in the
   // documented `/products/approved` example response, but real payloads
   // and the `variant-bulk-update` endpoint both speak this field. Treated
-  // as optional so a missing value never breaks the sync.
-  dimensionalWeight?: number;
+  // as optional and nullable so a missing value never breaks the sync; the
+  // mapper turns a missing value into a null synced desi.
+  dimensionalWeight?: number | null;
 }
 
 export interface TrendyolBrand {
@@ -185,15 +186,16 @@ export interface MappedProductVariant {
   productUrl: string | null;
   size: string | null;
   attributes: TrendyolAttribute[];
-  // Desi. Trendyol omits it on most products (or sends an uncomputed 0); both
-  // collapse to '0' (the mapper applies `?? '0'`) so the value is never null.
-  // '0' is the "Trendyol sent no desi" sentinel: with no seller override the
-  // products page counts the variant as missing desi. Always lands in the
-  // syncedDimensionalWeight column, never in dimensionalWeightOverride, which
-  // is exclusively the user's override (see ProductVariant schema comment).
-  syncedDimensionalWeight: string;
-  // Commission PERCENT synced from Trendyol (7.83 = %7.83). Unlike desi there is no
-  // zero-floor: 0/absent both mean "unknown" and collapse to null — a real %0
+  // Desi as a 2-decimal string, or null when Trendyol sent none (the field is
+  // absent, null, not a number or negative). Trendyol omits it on most
+  // products. '0.00' is a real desi of 0 (the lowest tariff tier), never a
+  // "missing" sentinel. Always written, so a null clears a desi Trendyol no
+  // longer sends. Lands in the syncedDimensionalWeight column only, never in
+  // dimensionalWeightOverride, which is exclusively the user's override (see
+  // ProductVariant schema comment).
+  syncedDimensionalWeight: string | null;
+  // Commission PERCENT synced from Trendyol (7.83 = %7.83). Unlike desi, a 0 is
+  // not a real value: 0/absent both mean "unknown" and collapse to null — a real %0
   // commission does not exist on the wire, and downstream fallback chains must be
   // able to tell "synced" from "unknown". Lands in syncedCommissionRate only; there
   // is no user-override twin column (yet).
