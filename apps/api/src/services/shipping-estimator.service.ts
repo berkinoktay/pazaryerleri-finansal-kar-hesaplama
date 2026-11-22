@@ -2,13 +2,13 @@
  * Variant-level shipping cost estimator (products-list display).
  *
  * Prepares the variant's inputs - desi = `dimensionalWeightOverride ?? syncedDimensionalWeight`
- * (synced is non-null, >= 0), Barem range = `variant.salePrice`, Barem table from
+ * (>= 0, 0 is a real desi; both null = no desi), Barem range = `variant.salePrice`, Barem table from
  * `hasFastDeliverySetup` (table 1 when it holds, table 2 otherwise, through
  * `resolveTrendyolCatalogBaremTier`) - and delegates the Barem-vs-desi tariff resolution to
  * `resolveTariffForDesi` (in `@pazarsync/profit`). This variant estimator is that
  * resolver's only caller; the profit engine's pure counterpart is `resolveTrendyolShippingNet`.
  *
- * Outcomes: STORE_NOT_FOUND / NO_CARRIER / OWN_CONTRACT_EMPTY / DESI_OVERFLOW, or a
+ * Outcomes: STORE_NOT_FOUND / NO_CARRIER / NO_DESI / OWN_CONTRACT_EMPTY / DESI_OVERFLOW, or a
  * `ShippingEstimate` (NORMAL / BAREM / OWN_CONTRACT). All money via `decimal.js`;
  * the desi and Barem rows and the Barem thresholds come from the default carrier's
  * tariff version in force now (`loadShippingTariffVersion`); a carrier with no
@@ -79,11 +79,10 @@ export async function estimateShippingCostForVariant(
   });
   if (!variant?.store) return { ok: false, reason: 'STORE_NOT_FOUND' };
 
-  // Desi: the synced column is non-null (>= 0), so there is always a value; the
-  // user override wins when set.
-  const desi = new Decimal(
-    (variant.dimensionalWeightOverride ?? variant.syncedDimensionalWeight).toString(),
-  );
+  // Desi: the user override wins when set, else the marketplace's synced value;
+  // both null = no desi (NO_DESI from the resolver). 0 is a real desi.
+  const effectiveDesi = variant.dimensionalWeightOverride ?? variant.syncedDimensionalWeight;
+  const desi = effectiveDesi === null ? null : new Decimal(effectiveDesi.toString());
   const carrier = variant.store.defaultShippingCarrier;
   // The display estimate prices with the tariff version in force now; the SQL
   // mirror reads the same version through its $3 instant.

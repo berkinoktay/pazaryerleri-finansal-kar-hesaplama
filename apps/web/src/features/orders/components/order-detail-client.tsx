@@ -106,22 +106,35 @@ export function OrderDetailClient({
 
   const headerTitle = order.platformOrderNumber ?? order.platformOrderId;
 
-  // Kâr-dışı banner açıklaması sebebe özel + sade (kâr-dışı liste hücresiyle aynı
-  // `exclusionReasons` kaynağı, tek cümle, jargonsuz). reason null (CHECK gereği
-  // olmamalı) → generic metne düşer. profitExcludedAt null ise banner çizilmez.
+  // The exclusion banner text is reason-specific and plain (the same `exclusionReasons`
+  // source as the excluded-list cell, one sentence, no jargon). Every reason is handled
+  // explicitly, so a new one breaks the build through the `never` guard; at runtime an
+  // unknown reason (the API shipping before the web) and a null reason (the CHECK should
+  // prevent it) fall back to the generic text instead of the error screen. No banner when
+  // profitExcludedAt is null.
   const exclusionDescription =
     order.profitExcludedAt === null
       ? null
       : ((): string => {
-          switch (order.profitExclusionReason) {
+          const reason = order.profitExclusionReason;
+          switch (reason) {
+            case null:
+              return t('exclusion.description');
             case 'COST_DEADLINE_MISSED':
               return tReason('COST_DEADLINE_MISSED.detail');
             case 'LATE_UNCOSTED_ARRIVAL':
               return tReason('LATE_UNCOSTED_ARRIVAL.detail');
             case 'LEGACY_BACKFILL':
               return tReason('LEGACY_BACKFILL.detail');
-            default:
+            case 'DESI_DEADLINE_MISSED':
+              return tReason('DESI_DEADLINE_MISSED.detail');
+            case 'LATE_DESILESS_ARRIVAL':
+              return tReason('LATE_DESILESS_ARRIVAL.detail');
+            default: {
+              const _exhaustive: never = reason;
+              void _exhaustive;
               return t('exclusion.description');
+            }
           }
         })();
 

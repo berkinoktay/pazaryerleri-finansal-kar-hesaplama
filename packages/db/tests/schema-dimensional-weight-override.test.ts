@@ -70,12 +70,12 @@ describe('product_variants desi columns after the override rename', () => {
     });
   });
 
-  it('keeps synced_dimensional_weight as NOT NULL numeric(6,2) with default 0', async () => {
+  it('keeps synced_dimensional_weight as a nullable numeric(6,2) with default 0 (null = no desi sent)', async () => {
     expect(await columnShape(SYNCED_COLUMN)).toEqual({
       data_type: 'numeric',
       numeric_precision: 6,
       numeric_scale: 2,
-      is_nullable: 'NO',
+      is_nullable: 'YES',
       column_default: '0',
     });
   });

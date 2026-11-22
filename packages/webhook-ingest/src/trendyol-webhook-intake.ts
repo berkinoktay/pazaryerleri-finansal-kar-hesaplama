@@ -103,10 +103,10 @@ export async function processTrendyolWebhookEvent(
 
   // ─── Intake routing (Slice 0 shared helper) ────────────────────────────
   // a package without a package id yet (Awaiting) → skipped; calculable → orders;
-  // cost-missing today → buffer; cost-missing past-day → orders (persisted but
-  // PERMANENTLY profit-excluded, LATE_UNCOSTED_ARRIVAL since Faz 3E). Unmatched
-  // variant lines fold into cost_missing — the order is ALWAYS written. Identical
-  // to the sync-worker.
+  // cost- or desi-missing today → buffer; cost- or desi-missing past-day → orders
+  // (persisted but PERMANENTLY profit-excluded, LATE_UNCOSTED_ARRIVAL since Faz 3E,
+  // LATE_DESILESS_ARRIVAL since PR-2c; the cost reason wins). Unmatched variant lines
+  // fold into cost_missing — the order is ALWAYS written. Identical to the sync-worker.
   const outcome = await intakeOrder({
     storeId: store.id,
     organizationId: store.organizationId,

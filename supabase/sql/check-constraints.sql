@@ -139,11 +139,14 @@ ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_profit_exclusion_pair_check;
 ALTER TABLE orders ADD CONSTRAINT orders_profit_exclusion_pair_check
   CHECK ((profit_excluded_at IS NULL) = (profit_exclusion_reason IS NULL));
 
--- ─── 2026-06-13 desi sıfır-taban ───────────────────────────────────────
--- synced_dimensional_weight is NON-NULL with default 0; no desi may go below 0
--- (a negative desi is impossible). The seller override
--- (dimensional_weight_override) stays nullable. The constraint was renamed
--- together with the column; the legacy name is dropped too, because Postgres
+-- ─── desi nonneg (2026-06-13; NULL = no desi since 2026-11-22) ──────────
+-- No desi may go below 0 (a negative desi is impossible). Both columns are
+-- nullable and NULL passes the check: a NULL synced_dimensional_weight means the
+-- marketplace sent no desi, a NULL dimensional_weight_override means no seller
+-- override, and both NULL means the variant has no desi; 0 is a real desi. The
+-- synced column keeps its default 0 (migration nullable_synced_desi). The
+-- constraint was renamed together with the column; the legacy name is dropped
+-- too, because Postgres
 -- keeps a constraint's name on RENAME COLUMN, so a DB that got only the column
 -- rename would otherwise keep a duplicate under the old name.
 -- Mirror: prisma/migrations/20261028163120_rename_dimensional_weight_override.

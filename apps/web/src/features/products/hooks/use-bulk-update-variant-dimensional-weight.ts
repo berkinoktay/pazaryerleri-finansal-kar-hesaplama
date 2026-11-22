@@ -32,7 +32,8 @@ export type BulkDesiMutation = ReturnType<typeof useBulkUpdateVariantDimensional
  * variants at once. Mirrors useUpdateVariantDimensionalWeight's optimistic
  * pattern: every cached products-list page is patched in place for the listed
  * variant IDs (including the missing-desi flag, since clearing an override
- * over a synced 0 makes a variant miss desi again). The bulk response carries
+ * over no Trendyol desi makes a variant miss desi again; over a Trendyol desi
+ * it falls back to that value). The bulk response carries
  * only a count, so the settle-time invalidation of the list and facets caches
  * is what reconciles with the server.
  */

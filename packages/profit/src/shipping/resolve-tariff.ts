@@ -27,15 +27,15 @@ export interface ShippingEstimate {
   baseDesiAtEstimate: Decimal;
 }
 
-// NO_DESI emekli: desi'nin sıfır-tabanı (@default(0)) olduğundan "desi yok" durumu
-// üretilemez — desi-bazlı tek başarısızlık DESI_OVERFLOW. Ürünler listesinin
-// `ShippingEstimateStatus.NO_DESI`'si AYRI (SQL CTE'den gelir, canlı) — ona dokunulmadı.
-// The products page's "missing desi" (override null AND synced 0) is a listing
-// and call-to-action concept, not an estimate outcome: the estimate still
-// resolves such a variant at desi 0, so it must not bring NO_DESI back.
+// NO_DESI: the variant has no effective desi (no seller override and no desi
+// from the marketplace), so there is no tariff row to price from. A desi of 0 is
+// a real desi and is priced. The products list's SQL mirror
+// (`SHIPPING_ESTIMATE_CTE_SQL`) emits the same status in the same precedence:
+// NO_CARRIER (TRENDYOL_CONTRACT only) > NO_DESI > OWN_CONTRACT_EMPTY / DESI_OVERFLOW.
 export type EstimateUnavailableReason =
   | 'STORE_NOT_FOUND'
   | 'NO_CARRIER'
+  | 'NO_DESI'
   | 'DESI_OVERFLOW'
   | 'OWN_CONTRACT_EMPTY';
 
@@ -55,8 +55,11 @@ export interface ResolveTariffInput {
     readonly code: string;
     readonly version: ShippingTariffVersionRows | null;
   } | null;
-  /** Effective desi (≥ 0); lookup `ceil(desi)` ile yapılır. */
-  desi: Decimal;
+  /**
+   * Effective desi (>= 0, 0 is a real desi), looked up as `ceil(desi)`; null when
+   * the variant has none (NO_DESI).
+   */
+  desi: Decimal | null;
   /** Barem aralığı için brüt tutar = effectiveSale (liste − satıcı indirimi); Trendyol indirimi hariç. */
   grossTotalForBarem: Decimal;
   /**
@@ -67,23 +70,32 @@ export interface ResolveTariffInput {
 }
 
 /**
- * Barem-vs-desi tariff resolution. OWN_CONTRACT reads the store's own tariff.
- * Otherwise (TRENDYOL_CONTRACT): no carrier is NO_CARRIER; no version in force is
- * DESI_OVERFLOW; inside the Barem limits (the version supports Barem, desi <= its
- * maxBaremDesi) a band of the `baremTier` table holding the gross amount is BAREM;
- * otherwise (no band of that table holds it, e.g. a single-tier version has no
- * table 2 band) the desi-based row; no row for the desi is DESI_OVERFLOW.
+ * The integer desi tier the tariff tables are keyed by: `ceil(desi)`. Desi is a
+ * dimensional-weight quantity, not money (audited exemption in audit-money.config.ts).
+ */
+function desiTier(desi: Decimal): number {
+  return Math.ceil(desi.toNumber());
+}
+
+/**
+ * Barem-vs-desi tariff resolution. OWN_CONTRACT: no desi is NO_DESI, otherwise the
+ * store's own tariff. Otherwise (TRENDYOL_CONTRACT): no carrier is NO_CARRIER; no
+ * desi is NO_DESI; no version in force is DESI_OVERFLOW; inside the Barem limits
+ * (the version supports Barem, desi <= its maxBaremDesi) a band of the `baremTier`
+ * table holding the gross amount is BAREM; otherwise (no band of that table holds
+ * it, e.g. a single-tier version has no table 2 band) the desi-based row; no row for
+ * the desi is DESI_OVERFLOW.
  */
 export async function resolveTariffForDesi(
   tx: Prisma.TransactionClient,
   input: ResolveTariffInput,
 ): Promise<EstimateOutcome> {
   const { storeId, tariffSource, carrier, desi, grossTotalForBarem, baremTier } = input;
-  const desiCeil = Math.ceil(desi.toNumber());
 
   if (tariffSource === 'OWN_CONTRACT') {
+    if (desi === null) return { ok: false, reason: 'NO_DESI' };
     const row = await tx.ownShippingTariff.findUnique({
-      where: { storeId_desi: { storeId, desi: desiCeil } },
+      where: { storeId_desi: { storeId, desi: desiTier(desi) } },
     });
     if (row === null) return { ok: false, reason: 'OWN_CONTRACT_EMPTY' };
     return {
@@ -99,6 +111,7 @@ export async function resolveTariffForDesi(
   }
 
   if (carrier === null) return { ok: false, reason: 'NO_CARRIER' };
+  if (desi === null) return { ok: false, reason: 'NO_DESI' };
 
   // No version in force at the estimate instant: there is no desi row to price
   // from, the same outcome as a desi the version does not cover.
@@ -129,6 +142,7 @@ export async function resolveTariffForDesi(
     // No band of the table holds the amount: fall back to the desi row.
   }
 
+  const desiCeil = desiTier(desi);
   const desiRow = version.desiRows.find((row) => row.desi === desiCeil);
   if (desiRow === undefined) return { ok: false, reason: 'DESI_OVERFLOW' };
   return {

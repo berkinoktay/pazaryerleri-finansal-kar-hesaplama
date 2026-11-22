@@ -254,6 +254,60 @@ describe('loadTrendyolScenarioBases', () => {
     });
   });
 
+  it('loads a variant without any desi as a null unit desi and surfaces UNKNOWN_DESI', async () => {
+    const parcel = await seedMelontikParcel();
+    // Trendyol sent no desi and the seller entered none: the effective desi is empty.
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { dimensionalWeightOverride: null, syncedDimensionalWeight: null },
+    });
+
+    const bases = await loadTrendyolScenarioBases(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      scenarioDate: MELONTIK.orderDate,
+      variants: [{ variantId: parcel.variantA }],
+    });
+    const result = bases.get(parcel.variantA);
+    if (result?.kind !== 'ready') {
+      throw new Error('expected variant A scenario base to be ready');
+    }
+    // No desi-0 fallback: the empty desi reaches the engine as is.
+    expect(result.base.product.unitDesi).toBeNull();
+
+    const evaluated = evaluateTrendyolScenario({ ...result.base, unitPrice: new Decimal('100') });
+    expect(evaluated.estimate.issues).toContainEqual({
+      code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+      orderItemId: null,
+      detail: 'UNKNOWN_DESI',
+    });
+  });
+
+  it('loads a stored synced desi of 0 as a real unit desi of 0', async () => {
+    const parcel = await seedMelontikParcel();
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { dimensionalWeightOverride: null, syncedDimensionalWeight: '0' },
+    });
+
+    const bases = await loadTrendyolScenarioBases(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      scenarioDate: MELONTIK.orderDate,
+      variants: [{ variantId: parcel.variantA }],
+    });
+    const result = bases.get(parcel.variantA);
+    if (result?.kind !== 'ready') {
+      throw new Error('expected variant A scenario base to be ready');
+    }
+    expect(result.base.product.unitDesi?.toString()).toBe('0');
+
+    const evaluated = evaluateTrendyolScenario({ ...result.base, unitPrice: new Decimal('100') });
+    expect(evaluated.estimate.issues).not.toContainEqual(
+      expect.objectContaining({ detail: 'UNKNOWN_DESI' }),
+    );
+  });
+
   it("ignores another organization's cost profiles", async () => {
     const parcel = await seedMelontikParcel();
 

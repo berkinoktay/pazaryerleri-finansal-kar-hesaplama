@@ -27,7 +27,7 @@ interface VariantFixtureOptions {
   defaultShippingCarrierId?: string | null;
   salePrice?: string;
   dimensionalWeightOverride?: string | null;
-  syncedDimensionalWeight?: string;
+  syncedDimensionalWeight?: string | null;
   deliveryDuration?: number | null;
 }
 
@@ -73,9 +73,10 @@ async function createVariantFixture(opts: VariantFixtureOptions = {}) {
       salePrice: opts.salePrice ?? '100.00',
       listPrice: opts.salePrice ?? '100.00',
       dimensionalWeightOverride: opts.dimensionalWeightOverride ?? null,
-      // Synced desi is NON-NULL with floor 0 (the marketplace omits it on most
-      // products → stored 0, never null). Desi 0 is a valid tariff tier.
-      syncedDimensionalWeight: opts.syncedDimensionalWeight ?? '0',
+      // Default 0, a real desi and a valid tariff tier; null = the marketplace
+      // sent no desi (with no override the variant has no desi at all).
+      syncedDimensionalWeight:
+        opts.syncedDimensionalWeight === undefined ? '0' : opts.syncedDimensionalWeight,
       deliveryDuration: opts.deliveryDuration ?? null,
       attributes: [],
     },
@@ -129,10 +130,9 @@ describe('estimateShippingCostForVariant', () => {
   });
 
   it('matches the desi-0 tariff when there is no override and synced desi is 0 (the default)', async () => {
-    // Desi 0 is a VALID tariff tier — the marketplace omits desi on most
-    // products (stored 0, not null), and a 0-desi parcel still resolves the
-    // lowest tier (SENDEOMP desi-0 = 91.99). "No desi → no estimate" no longer
-    // exists.
+    // Desi 0 is a real desi and a VALID tariff tier: a 0-desi parcel resolves
+    // the lowest tier (SENDEOMP desi-0 = 91.99). Only a missing desi (null) has
+    // no estimate (NO_DESI, below).
     const carrier = await getSendeomp();
     const { variant } = await createVariantFixture({
       defaultShippingCarrierId: carrier.id,
@@ -149,6 +149,48 @@ describe('estimateShippingCostForVariant', () => {
     expect(outcome.estimate.carrierCode).toBe('SENDEOMP');
     expect(outcome.estimate.amount.toString()).toBe('91.99');
     expect(outcome.estimate.baseDesiAtEstimate.toString()).toBe('0');
+  });
+
+  it('returns NO_DESI when the variant has neither an override nor a synced desi', async () => {
+    const carrier = await getSendeomp();
+    const { variant } = await createVariantFixture({
+      defaultShippingCarrierId: carrier.id,
+      dimensionalWeightOverride: null,
+      syncedDimensionalWeight: null,
+    });
+
+    const outcome = await prisma.$transaction((tx) =>
+      estimateShippingCostForVariant(variant.id, tx),
+    );
+    expect(outcome).toEqual({ ok: false, reason: 'NO_DESI' });
+  });
+
+  it('returns NO_CARRIER over NO_DESI when TRENDYOL_CONTRACT has no carrier and the variant has no desi', async () => {
+    // Same precedence as the SQL mirror's status CASE: the missing carrier wins.
+    const { variant } = await createVariantFixture({
+      shippingTariffSource: 'TRENDYOL_CONTRACT',
+      defaultShippingCarrierId: null,
+      dimensionalWeightOverride: null,
+      syncedDimensionalWeight: null,
+    });
+
+    const outcome = await prisma.$transaction((tx) =>
+      estimateShippingCostForVariant(variant.id, tx),
+    );
+    expect(outcome).toEqual({ ok: false, reason: 'NO_CARRIER' });
+  });
+
+  it('returns NO_DESI over OWN_CONTRACT_EMPTY for an OWN_CONTRACT store whose variant has no desi', async () => {
+    const { variant } = await createVariantFixture({
+      shippingTariffSource: 'OWN_CONTRACT',
+      dimensionalWeightOverride: null,
+      syncedDimensionalWeight: null,
+    });
+
+    const outcome = await prisma.$transaction((tx) =>
+      estimateShippingCostForVariant(variant.id, tx),
+    );
+    expect(outcome).toEqual({ ok: false, reason: 'NO_DESI' });
   });
 
   it('returns a NORMAL tariff when salePrice is above every Barem range (fall-through path)', async () => {

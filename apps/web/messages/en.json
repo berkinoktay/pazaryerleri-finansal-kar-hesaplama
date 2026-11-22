@@ -2189,7 +2189,7 @@
         "saleMarginPct": "Margin %",
         "itemCount": "Items",
         "revenue": "Revenue",
-        "costStatus": "Cost status",
+        "costStatus": "Reason",
         "costMarkupPct": "ROI %"
       },
       "badges": {
@@ -2249,12 +2249,20 @@
       "detail": "The cost wasn't entered by the end of the day, so this order isn't included in profit."
     },
     "LATE_UNCOSTED_ARRIVAL": {
-      "label": "Late order",
+      "label": "Late order without cost",
       "detail": "The order arrived late without a cost, so it isn't included in profit."
     },
     "LEGACY_BACKFILL": {
       "label": "Old order",
       "detail": "This is an old order with no cost, so it isn't included in profit."
+    },
+    "DESI_DEADLINE_MISSED": {
+      "label": "Desi not entered",
+      "detail": "The product's desi wasn't entered by the end of the day, so this order isn't included in profit."
+    },
+    "LATE_DESILESS_ARRIVAL": {
+      "label": "Late order without desi",
+      "detail": "The order arrived late without a product desi, so it isn't included in profit."
     }
   },
   "productsPage": {
@@ -3747,7 +3755,7 @@
       "margin": "Profit Margin",
       "profitCostRatio": "Profit/Cost Ratio",
       "estimateHint": "Estimated — finalized after settlement reconciliation.",
-      "pendingHint": "{count} order(s) awaiting cost — not in profit yet"
+      "pendingHint": "{count} order(s) awaiting cost or desi — not in profit yet"
     },
     "chart": {
       "title": "Hourly Cumulative",
@@ -3804,7 +3812,7 @@
       "sheetTitle": "Order detail",
       "close": "Close",
       "buffer": {
-        "pendingNotice": "Add the cost before midnight or this order is permanently excluded from profit.",
+        "pendingNotice": "Add both the cost and the desi before midnight; if either is missing, this order is permanently excluded from profit.",
         "columns": {
           "product": "Product",
           "quantity": "Qty",
@@ -3817,7 +3825,7 @@
     "realtime": {
       "newOrderTitle": "New order · {amount}",
       "profitLine": "{profit} net profit",
-      "costMissingLine": "Some items are missing a cost, profit can't be determined yet",
+      "costMissingLine": "Some items are missing a cost or desi, profit can't be determined yet",
       "orderNumberLabel": "· Order no {number}",
       "detail": "View detail",
       "burstTitle": "{count} new orders arrived",

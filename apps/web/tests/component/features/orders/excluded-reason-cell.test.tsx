@@ -34,6 +34,8 @@ describe('ExcludedReasonCell', () => {
       ['COST_DEADLINE_MISSED', messages.exclusionReasons.COST_DEADLINE_MISSED.label],
       ['LATE_UNCOSTED_ARRIVAL', messages.exclusionReasons.LATE_UNCOSTED_ARRIVAL.label],
       ['LEGACY_BACKFILL', messages.exclusionReasons.LEGACY_BACKFILL.label],
+      ['DESI_DEADLINE_MISSED', messages.exclusionReasons.DESI_DEADLINE_MISSED.label],
+      ['LATE_DESILESS_ARRIVAL', messages.exclusionReasons.LATE_DESILESS_ARRIVAL.label],
     ];
     for (const [reason, label] of cases) {
       const { unmount } = renderCell(reason);
@@ -53,6 +55,18 @@ describe('ExcludedReasonCell', () => {
 
     // Tek cümlelik sade açıklama tooltip içinde görünür (jargon/tarih yok).
     const detail = await screen.findAllByText(/kâr hesabına dahil edilmedi/);
+    expect(detail.length).toBeGreaterThan(0);
+  });
+
+  it('reveals the desi reason detail in the tooltip on hover', async () => {
+    const user = userEvent.setup();
+    renderCell('DESI_DEADLINE_MISSED');
+
+    await user.hover(screen.getByRole('button'));
+
+    const detail = await screen.findAllByText(
+      messages.exclusionReasons.DESI_DEADLINE_MISSED.detail,
+    );
     expect(detail.length).toBeGreaterThan(0);
   });
 });

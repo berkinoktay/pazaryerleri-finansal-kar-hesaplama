@@ -6,8 +6,9 @@
  * the legacy profit columns); this phase re-introduces a narrower guard:
  *
  *   - reject_automatic_exclusion_change (trigger): once an AUTOMATIC exclusion
- *     reason (COST_DEADLINE_MISSED / LATE_UNCOSTED_ARRIVAL / LEGACY_BACKFILL)
- *     is stamped, it can never be cleared or re-pointed at another reason.
+ *     reason (COST_DEADLINE_MISSED / LATE_UNCOSTED_ARRIVAL / LEGACY_BACKFILL, and
+ *     the desi counterparts DESI_DEADLINE_MISSED / LATE_DESILESS_ARRIVAL of plan
+ *     PR-2c) is stamped, it can never be cleared or re-pointed at another reason.
  *     Stamping an exclusion on an order that has none stays allowed -- the two
  *     writers and the backfill script do exactly that. A future, reversible
  *     user exclusion will carry its own reason and is not covered here.
@@ -115,6 +116,50 @@ describe('profit exclusion guards', () => {
       prisma.order.update({
         where: { id: order.id },
         data: { profitExcludedAt: null, profitExclusionReason: null },
+      }),
+    ).rejects.toThrow(/automatic profit exclusion is permanent/);
+  });
+
+  // The desi counterparts of the two cost reasons (plan PR-2c) are automatic and
+  // permanent too: neither clearing nor re-pointing them is allowed.
+  it.each(['DESI_DEADLINE_MISSED', 'LATE_DESILESS_ARRIVAL'] as const)(
+    'rejects clearing a %s exclusion',
+    async (reason) => {
+      const org = await createOrganization();
+      const store = await createStore(org.id);
+      const order = await createOrder(org.id, store.id);
+
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { profitExcludedAt: new Date(), profitExclusionReason: reason },
+      });
+
+      await expect(
+        prisma.order.update({
+          where: { id: order.id },
+          data: { profitExcludedAt: null, profitExclusionReason: null },
+        }),
+      ).rejects.toThrow(/automatic profit exclusion is permanent/);
+    },
+  );
+
+  it.each([
+    ['DESI_DEADLINE_MISSED', 'COST_DEADLINE_MISSED'],
+    ['LATE_DESILESS_ARRIVAL', 'LATE_UNCOSTED_ARRIVAL'],
+  ] as const)('rejects re-pointing a %s exclusion at %s', async (reason, nextReason) => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const order = await createOrder(org.id, store.id);
+
+    await prisma.order.update({
+      where: { id: order.id },
+      data: { profitExcludedAt: new Date(), profitExclusionReason: reason },
+    });
+
+    await expect(
+      prisma.order.update({
+        where: { id: order.id },
+        data: { profitExclusionReason: nextReason },
       }),
     ).rejects.toThrow(/automatic profit exclusion is permanent/);
   });

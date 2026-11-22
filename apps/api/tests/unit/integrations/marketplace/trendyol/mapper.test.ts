@@ -351,9 +351,56 @@ describe('mapTrendyolContent', () => {
     expect(padded.variants[0]?.syncedCommissionRate).toBe('7.80');
   });
 
+  it('maps no desi from Trendyol (absent, null, 0, rounds to 0, not a number, negative) to null', () => {
+    const variant = STAGING_SAMPLE_DFSF.variants?.[0];
+    if (variant === undefined) throw new Error('fixture variant missing');
+    const { dimensionalWeight: _droppedDesi, ...variantWithoutDesi } = {
+      ...variant,
+      dimensionalWeight: 1,
+    };
+    void _droppedDesi;
+    // 0 is in the list: Trendyol sends 0 for a product whose desi was never entered.
+    // So is a positive desi that rounds to 0 at 2 decimals (0.004 -> 0.00): a
+    // Trendyol 0 is never written, whichever way it arrives.
+    const wireValues = [null, 0, 0.004, Number.NaN, Number.POSITIVE_INFINITY, -1];
+    const outs = [
+      mapTrendyolContent({ ...STAGING_SAMPLE_DFSF, variants: [variantWithoutDesi] }),
+      ...wireValues.map((dimensionalWeight) =>
+        mapTrendyolContent({
+          ...STAGING_SAMPLE_DFSF,
+          variants: [{ ...variant, dimensionalWeight }],
+        }),
+      ),
+    ];
+    for (const out of outs) {
+      expect(out.variants[0]?.syncedDimensionalWeight).toBeNull();
+    }
+  });
+
+  it('pads a positive desi from Trendyol to 2 decimals', () => {
+    const variant = STAGING_SAMPLE_DFSF.variants?.[0];
+    if (variant === undefined) throw new Error('fixture variant missing');
+    const small = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      variants: [{ ...variant, dimensionalWeight: 0.5 }],
+    });
+    const decimal = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      variants: [{ ...variant, dimensionalWeight: 1.5 }],
+    });
+    // The smallest desi that does not round to 0 keeps its rounded value.
+    const roundsUp = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      variants: [{ ...variant, dimensionalWeight: 0.005 }],
+    });
+    expect(small.variants[0]?.syncedDimensionalWeight).toBe('0.50');
+    expect(decimal.variants[0]?.syncedDimensionalWeight).toBe('1.50');
+    expect(roundsUp.variants[0]?.syncedDimensionalWeight).toBe('0.01');
+  });
+
   it('collapses absent and zero commission to null', () => {
-    // Unlike desi there is no zero-floor: a real %0 commission does not exist
-    // on the wire, so both an omitted value and a literal 0 mean "unknown".
+    // A real %0 commission does not exist on the wire, so both an omitted value and
+    // a literal 0 mean "unknown" (the desi mapping reads a wire 0 the same way).
     const variant = STAGING_SAMPLE_DFSF.variants?.[0];
     if (variant === undefined) throw new Error('fixture variant missing');
     const { commission: _droppedCommission, ...variantWithoutCommission } = {

@@ -389,7 +389,7 @@ interface ItemProductRow {
   readonly snapshotCategoryBrandRatePct: Prisma.Decimal | null;
   readonly productVariant: {
     readonly dimensionalWeightOverride: Prisma.Decimal | null;
-    readonly syncedDimensionalWeight: Prisma.Decimal;
+    readonly syncedDimensionalWeight: Prisma.Decimal | null;
     readonly isDigital: boolean;
     readonly syncedCommissionRate: Prisma.Decimal | null;
     readonly product: { readonly categoryId: bigint | null; readonly brandId: bigint | null };
@@ -416,10 +416,11 @@ function itemProductInputs(item: ItemProductRow): ItemProductInputs {
   const variant = item.productVariant;
   const product = variant?.product ?? null;
   return {
-    unitDesi:
-      variant === null
-        ? null
-        : dec(variant.dimensionalWeightOverride ?? variant.syncedDimensionalWeight),
+    // The user override wins when set, else the synced desi; both null = no desi
+    // (the engine reports UNKNOWN_DESI). 0 is a real desi.
+    unitDesi: decOrNull(
+      variant?.dimensionalWeightOverride ?? variant?.syncedDimensionalWeight ?? null,
+    ),
     isDigital: variant?.isDigital ?? false,
     syncedCommissionRatePct: decOrNull(variant?.syncedCommissionRate ?? null),
     categoryId: product?.categoryId?.toString() ?? null,

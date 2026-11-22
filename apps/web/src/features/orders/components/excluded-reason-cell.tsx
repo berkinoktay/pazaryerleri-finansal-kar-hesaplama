@@ -19,12 +19,14 @@ import type { BadgeProps } from '@/components/ui/badge';
  * sade tutulur (teknik ayrıntı yok).
  */
 
-// İlk iki sebep kullanıcı için aynı: "maliyet zamanında girilmedi" → warning tonu.
-// Eski sipariş nötr (tarihsel, satıcının yapacağı bir şey yok).
+// The cost and desi reasons describe an input the seller did not enter in time: warning tone.
+// An old order is neutral (historical, nothing for the seller to do).
 const REASON_TONE = {
   COST_DEADLINE_MISSED: 'warning',
   LATE_UNCOSTED_ARRIVAL: 'warning',
   LEGACY_BACKFILL: 'neutral',
+  DESI_DEADLINE_MISSED: 'warning',
+  LATE_DESILESS_ARRIVAL: 'warning',
 } as const satisfies Record<ProfitExclusionReason, NonNullable<BadgeProps['tone']>>;
 
 export interface ExcludedReasonCellProps {
@@ -34,17 +36,21 @@ export interface ExcludedReasonCellProps {
 export function ExcludedReasonCell({ reason }: ExcludedReasonCellProps): React.ReactElement {
   const t = useTranslations('exclusionReasons');
 
-  // Literal-anahtarlı haritalar: next-intl tipli `t` dinamik anahtarı reddeder,
-  // bu yüzden üçünü de kurup enum değeriyle indeksliyoruz (ucuz, exhaustive).
+  // Literal-keyed maps: next-intl's typed `t` rejects a dynamic key, so every label is
+  // built here and indexed by the enum value (cheap and exhaustive).
   const labelMap = {
     COST_DEADLINE_MISSED: t('COST_DEADLINE_MISSED.label'),
     LATE_UNCOSTED_ARRIVAL: t('LATE_UNCOSTED_ARRIVAL.label'),
     LEGACY_BACKFILL: t('LEGACY_BACKFILL.label'),
+    DESI_DEADLINE_MISSED: t('DESI_DEADLINE_MISSED.label'),
+    LATE_DESILESS_ARRIVAL: t('LATE_DESILESS_ARRIVAL.label'),
   } satisfies Record<ProfitExclusionReason, string>;
   const detailMap = {
     COST_DEADLINE_MISSED: t('COST_DEADLINE_MISSED.detail'),
     LATE_UNCOSTED_ARRIVAL: t('LATE_UNCOSTED_ARRIVAL.detail'),
     LEGACY_BACKFILL: t('LEGACY_BACKFILL.detail'),
+    DESI_DEADLINE_MISSED: t('DESI_DEADLINE_MISSED.detail'),
+    LATE_DESILESS_ARRIVAL: t('LATE_DESILESS_ARRIVAL.detail'),
   } satisfies Record<ProfitExclusionReason, string>;
 
   return (

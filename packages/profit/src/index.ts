@@ -6,6 +6,7 @@ export {
   type FeeDefinitionAmountField,
 } from './resolve-fee-definition';
 export {
+  hasMissingDesi,
   resolveOrderCalculability,
   type CalcResult,
   type OrderLineForCalcCheck,

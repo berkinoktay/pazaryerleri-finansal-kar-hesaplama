@@ -26,6 +26,24 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Entering a desi moves today's waiting orders into profit**
+  (`PATCH /v1/organizations/{orgId}/stores/{storeId}/products/variants/{variantId}/dimensional-weight`,
+  `PATCH .../products/variants/dimensional-weight`). Setting a desi (any value, 0 included) now
+  re-checks the variant's orders of today that wait in the Live Performance buffer, in the same
+  transaction: an order whose every line has a cost and a desi moves on into profit, like a cost
+  attach already does. Only this store's variants that the write updated are checked; ids of
+  another store or organization trigger nothing. Clearing the desi (`null`) checks nothing, and
+  stored orders keep the desi captured at intake. Request and response shapes unchanged.
+- **Empty desi is missing, a seller's 0 is a real desi** (`GET /v1/organizations/{orgId}/stores/{storeId}/products`,
+  `GET .../products/facets`, `PATCH .../products/variants/{variantId}/dimensional-weight`, the
+  product pricing routes). A variant Trendyol sends no desi for, or a desi of 0 (Trendyol's value
+  for a desi that was never entered), now has `syncedDimensionalWeight` `null` (and
+  `dimensionalWeight` `null` when the seller entered none) instead of `"0"`; a seller-entered `"0"`
+  is a real desi. `overrideMissing=desi`, `overrideCounts.missingDesi` and
+  `isDimensionalWeightMissing` count only a non-digital variant with no desi at all (no seller
+  desi, no Trendyol desi); a desi of 0 and a digital variant are not missing. The shipping estimate
+  of a variant with no desi is `NO_DESI` with no amount (a desi of 0 is priced at the desi-0 row).
+  Shapes unchanged.
 - **Barem table 1 / table 2** (order profit, the products list shipping estimate, the single
   shipping estimate and the pricing scenario routes). From Trendyol's 10 Aug 2026 rule a shipment
   inside the Barem limits is priced at table 1 when it carries a fast-delivery promise and shipped
@@ -1216,6 +1234,15 @@ section "Versioning" for details.
 
 ### Added
 
+- **Two desi profit exclusion reasons** (`GET /v1/organizations/{orgId}/stores/{storeId}/orders`,
+  `GET .../orders/{orderId}`). `profitExclusionReason` gains `DESI_DEADLINE_MISSED` (the order
+  waited in the live-performance buffer and a product still had no desi when its day ended) and
+  `LATE_DESILESS_ARRIVAL` (the order arrived from a past day while a product had no desi). An
+  order now enters profit only when every non-digital item has both a cost and a product desi (a
+  desi of 0 counts), so an order can now also be permanently excluded for a missing desi. When
+  both the cost and the desi are missing, the cost reason is written. Like the cost reasons, the
+  new ones are permanent. The `costStatus=excluded` filter includes them. Additive (a client
+  that switches over the enum needs the two new values).
 - **The six workbook import responses carry `prefilledRows`**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products|advantage-tariffs|plus-commission-tariffs|commission-tariffs}/import`).
   `prefilledRows` (integer, required) is the number of kept rows that already held a choice in

@@ -7,6 +7,8 @@
  *   2. Null body clears the override; effective value falls back to synced.
  *   3. Invalid bodies (bad format, out-of-range) → 422 VALIDATION_ERROR.
  *   4. 404 when the variant doesn't exist.
+ *   5. Entering a desi promotes today's PENDING Live Performance buffer entries of
+ *      the variant once their order is fully calculable (cost + desi).
  *
  * Cross-org isolation lives in tests/integration/tenant-isolation/.
  */
@@ -17,11 +19,14 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { getBusinessDateAnchor } from '@pazarsync/utils';
 
 import { createApp } from '@/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import {
+  createBufferEntry,
+  createCostProfile,
   createMembership,
   createOrder,
   createOrderItem,
@@ -36,9 +41,14 @@ interface Ctx {
   orgId: string;
   storeId: string;
   variantId: string;
+  barcode: string;
 }
 
-async function setup(opts: { syncedDimensionalWeight?: string } = {}): Promise<Ctx> {
+// Omitted `syncedDimensionalWeight` keeps the column default 0 (a real desi);
+// null is a variant Trendyol sent no desi for.
+async function setup(
+  opts: { syncedDimensionalWeight?: string | null; isDigital?: boolean } = {},
+): Promise<Ctx> {
   const user = await createAuthenticatedTestUser();
   const org = await createOrganization();
   await createMembership(org.id, user.id);
@@ -66,6 +76,7 @@ async function setup(opts: { syncedDimensionalWeight?: string } = {}): Promise<C
       ...(opts.syncedDimensionalWeight !== undefined
         ? { syncedDimensionalWeight: opts.syncedDimensionalWeight }
         : {}),
+      isDigital: opts.isDigital ?? false,
     },
   });
 
@@ -74,7 +85,23 @@ async function setup(opts: { syncedDimensionalWeight?: string } = {}): Promise<C
     orgId: org.id,
     storeId: store.id,
     variantId: variant.id,
+    barcode: variant.barcode,
   };
+}
+
+/** Links a cost profile to the variant directly (the attach service runs its own flip). */
+async function linkCost(orgId: string, storeId: string, variantId: string): Promise<void> {
+  const profile = await createCostProfile(orgId, { storeId, amountGross: '50.00' });
+  await prisma.productVariantCostProfile.create({
+    data: { productVariantId: variantId, profileId: profile.id, organizationId: orgId },
+  });
+}
+
+async function bufferStatus(platformOrderId: string): Promise<string> {
+  const entry = await prisma.livePerformanceBuffer.findFirstOrThrow({
+    where: { platformOrderId },
+  });
+  return entry.status;
 }
 
 function patchUrl(ctx: Ctx): string {
@@ -150,28 +177,61 @@ describe('PATCH .../variants/:variantId/dimensional-weight', () => {
     expect(row.syncedDimensionalWeight?.toString()).toBe('1.2');
   });
 
-  it('isDimensionalWeightMissing follows the missing-desi rule on a variant with synced desi 0', async () => {
-    // No synced value: the column default 0 means Trendyol sent no desi.
-    const ctx = await setup();
+  it('isDimensionalWeightMissing follows the missing-desi rule on a variant Trendyol sent no desi for', async () => {
+    const ctx = await setup({ syncedDimensionalWeight: null });
 
     // An explicit override of 0 is the seller's choice, so it is not missing.
     const setZero = await patchDesi(ctx, { dimensionalWeight: '0' });
     expect(setZero.status).toBe(200);
     expect(await setZero.json()).toMatchObject({
       dimensionalWeight: '0',
-      syncedDimensionalWeight: '0',
+      syncedDimensionalWeight: null,
       isDimensionalWeightOverridden: true,
       isDimensionalWeightMissing: false,
     });
 
-    // Clearing the override puts the variant back into the missing-desi state.
+    // Clearing the override leaves no desi at all: back to the missing-desi state.
+    const cleared = await patchDesi(ctx, { dimensionalWeight: null });
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toMatchObject({
+      dimensionalWeight: null,
+      syncedDimensionalWeight: null,
+      isDimensionalWeightOverridden: false,
+      isDimensionalWeightMissing: true,
+    });
+  });
+
+  it('a synced desi of 0 is a real desi: clearing the override over it is not missing', async () => {
+    const ctx = await setup({ syncedDimensionalWeight: '0' });
+    await prisma.productVariant.update({
+      where: { id: ctx.variantId },
+      data: { dimensionalWeightOverride: '3.00' },
+    });
+
     const cleared = await patchDesi(ctx, { dimensionalWeight: null });
     expect(cleared.status).toBe(200);
     expect(await cleared.json()).toMatchObject({
       dimensionalWeight: '0',
       syncedDimensionalWeight: '0',
       isDimensionalWeightOverridden: false,
-      isDimensionalWeightMissing: true,
+      isDimensionalWeightMissing: false,
+    });
+  });
+
+  it('a digital variant needs no desi: clearing its override is not missing', async () => {
+    const ctx = await setup({ syncedDimensionalWeight: null, isDigital: true });
+    await prisma.productVariant.update({
+      where: { id: ctx.variantId },
+      data: { dimensionalWeightOverride: '3.00' },
+    });
+
+    const cleared = await patchDesi(ctx, { dimensionalWeight: null });
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toMatchObject({
+      dimensionalWeight: null,
+      syncedDimensionalWeight: null,
+      isDimensionalWeightOverridden: false,
+      isDimensionalWeightMissing: false,
     });
   });
 
@@ -252,5 +312,104 @@ describe('PATCH .../variants/:variantId/dimensional-weight', () => {
       await prisma.profitRecomputeRequest.findUnique({ where: { orderId: order.id } }),
     ).toBeNull();
     expect(await prisma.profitRecomputeRequest.count()).toBe(0);
+  });
+});
+
+describe('PATCH .../variants/:variantId/dimensional-weight: Live Performance buffer', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("promotes today's pending entry of a costed variant once its missing desi is entered", async () => {
+    const ctx = await setup({ syncedDimensionalWeight: null });
+    await linkCost(ctx.orgId, ctx.storeId, ctx.variantId);
+    await createBufferEntry(ctx.orgId, ctx.storeId, {
+      platformOrderId: 'pkg-today',
+      orderDate: getBusinessDateAnchor(),
+      mappedOrder: { lines: [{ barcode: ctx.barcode }] },
+    });
+
+    const res = await patchDesi(ctx, { dimensionalWeight: '2.00' });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      id: ctx.variantId,
+      dimensionalWeight: '2',
+      syncedDimensionalWeight: null,
+      isDimensionalWeightOverridden: true,
+      isDimensionalWeightMissing: false,
+    });
+    expect(await bufferStatus('pkg-today')).toBe('PROMOTING');
+  });
+
+  it('a desi of 0 is a real desi and promotes the entry too', async () => {
+    const ctx = await setup({ syncedDimensionalWeight: null });
+    await linkCost(ctx.orgId, ctx.storeId, ctx.variantId);
+    await createBufferEntry(ctx.orgId, ctx.storeId, {
+      platformOrderId: 'pkg-zero',
+      mappedOrder: { lines: [{ barcode: ctx.barcode }] },
+    });
+
+    const res = await patchDesi(ctx, { dimensionalWeight: '0' });
+
+    expect(res.status).toBe(200);
+    expect(await bufferStatus('pkg-zero')).toBe('PROMOTING');
+  });
+
+  it('keeps the entry pending while the variant still has no cost', async () => {
+    const ctx = await setup({ syncedDimensionalWeight: null });
+    await createBufferEntry(ctx.orgId, ctx.storeId, {
+      platformOrderId: 'pkg-no-cost',
+      mappedOrder: { lines: [{ barcode: ctx.barcode }] },
+    });
+
+    const first = await patchDesi(ctx, { dimensionalWeight: '2.00' });
+    expect(first.status).toBe(200);
+    expect(await bufferStatus('pkg-no-cost')).toBe('PENDING');
+
+    // Positive control: once the cost is in place, the next desi entry promotes it.
+    await linkCost(ctx.orgId, ctx.storeId, ctx.variantId);
+    const second = await patchDesi(ctx, { dimensionalWeight: '2.00' });
+    expect(second.status).toBe(200);
+    expect(await bufferStatus('pkg-no-cost')).toBe('PROMOTING');
+  });
+
+  it('does not promote a past-day entry; the day-end flush owns it', async () => {
+    const ctx = await setup({ syncedDimensionalWeight: null });
+    await linkCost(ctx.orgId, ctx.storeId, ctx.variantId);
+    await createBufferEntry(ctx.orgId, ctx.storeId, {
+      platformOrderId: 'pkg-today',
+      orderDate: getBusinessDateAnchor(),
+      mappedOrder: { lines: [{ barcode: ctx.barcode }] },
+    });
+    await createBufferEntry(ctx.orgId, ctx.storeId, {
+      platformOrderId: 'pkg-pastday',
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - 24 * 60 * 60 * 1000)),
+      mappedOrder: { lines: [{ barcode: ctx.barcode }] },
+    });
+
+    const res = await patchDesi(ctx, { dimensionalWeight: '2.00' });
+
+    expect(res.status).toBe(200);
+    expect(await bufferStatus('pkg-today')).toBe('PROMOTING');
+    expect(await bufferStatus('pkg-pastday')).toBe('PENDING');
+  });
+
+  it('clearing the desi does not re-check the buffer', async () => {
+    const ctx = await setup({ syncedDimensionalWeight: '1.00' });
+    await linkCost(ctx.orgId, ctx.storeId, ctx.variantId);
+    await createBufferEntry(ctx.orgId, ctx.storeId, {
+      platformOrderId: 'pkg-clear',
+      mappedOrder: { lines: [{ barcode: ctx.barcode }] },
+    });
+
+    const res = await patchDesi(ctx, { dimensionalWeight: null });
+
+    expect(res.status).toBe(200);
+    expect(await bufferStatus('pkg-clear')).toBe('PENDING');
   });
 });

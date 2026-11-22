@@ -26,19 +26,40 @@ interface VariantSpec {
   status?: ProductVariantStatus;
   delisted?: boolean;
   cost?: 'active' | 'archived';
-  // Omitted: synced 0 and no override, the "missing desi" state.
-  desi?: 'synced' | 'override' | 'override-zero';
+  // Omitted: 'none', the "missing desi" state.
+  desi?: 'none' | 'synced' | 'synced-zero' | 'override' | 'override-zero' | 'digital-none';
 }
 
-// Desi columns written for each VariantSpec.desi value. An explicit override
-// of 0 is the seller's choice, so it is not missing.
+// Desi columns written for each VariantSpec.desi value. 'none' is a fresh sync
+// of a product Trendyol sent no desi for (no override, no synced desi), the
+// only missing state. A desi of 0 is a real desi in either column, and a
+// digital variant needs no desi, so neither is missing.
 const DESI_COLUMNS: Record<
   NonNullable<VariantSpec['desi']>,
-  { syncedDimensionalWeight: string; dimensionalWeightOverride: string | null }
+  {
+    syncedDimensionalWeight: string | null;
+    dimensionalWeightOverride: string | null;
+    isDigital: boolean;
+  }
 > = {
-  synced: { syncedDimensionalWeight: '2', dimensionalWeightOverride: null },
-  override: { syncedDimensionalWeight: '0', dimensionalWeightOverride: '1.5' },
-  'override-zero': { syncedDimensionalWeight: '0', dimensionalWeightOverride: '0' },
+  none: { syncedDimensionalWeight: null, dimensionalWeightOverride: null, isDigital: false },
+  synced: { syncedDimensionalWeight: '2', dimensionalWeightOverride: null, isDigital: false },
+  'synced-zero': {
+    syncedDimensionalWeight: '0',
+    dimensionalWeightOverride: null,
+    isDigital: false,
+  },
+  override: { syncedDimensionalWeight: null, dimensionalWeightOverride: '1.5', isDigital: false },
+  'override-zero': {
+    syncedDimensionalWeight: null,
+    dimensionalWeightOverride: '0',
+    isDigital: false,
+  },
+  'digital-none': {
+    syncedDimensionalWeight: null,
+    dimensionalWeightOverride: null,
+    isDigital: true,
+  },
 };
 
 interface ProductSpec {
@@ -69,12 +90,20 @@ const GHOST_CATEGORY = { id: 9002n, name: 'Ghost Category' };
 // missingCost counts P1, P3 (its only profile is archived) and P4 (its
 // NOT_ON_SALE variant is in scope and cost-less). P5 and P6 have no in-scope
 // variant at all, and P7's only cost-less variant is ARCHIVED.
-// missingDesi counts P1 and P4 (its NOT_ON_SALE variant has no desi). P2 and
-// P7 carry a synced desi, P3 an override and P4's first variant an override
-// of 0; the desi-less variants of P5, P6 and P7 are out of scope.
+// missingDesi counts P1 and P4 (its NOT_ON_SALE variant has no desi). P2
+// carries a synced desi of 0 and a digital variant without desi, P7 a synced
+// desi, P3 an override and P4's first variant an override of 0; the desi-less
+// variants of P5, P6 and P7 are out of scope.
 const CATALOG: ProductSpec[] = [
   { key: 'P1-NO-COST', brand: LIVE_BRAND, category: LIVE_CATEGORY, variants: [{}] },
-  { key: 'P2-COSTED', brand: LIVE_BRAND, variants: [{ cost: 'active', desi: 'synced' }] },
+  {
+    key: 'P2-COSTED',
+    brand: LIVE_BRAND,
+    variants: [
+      { cost: 'active', desi: 'synced-zero' },
+      { cost: 'active', desi: 'digital-none' },
+    ],
+  },
   { key: 'P3-ARCHIVED-PROFILE', variants: [{ cost: 'archived', desi: 'override' }] },
   {
     key: 'P4-CLOSED-NO-COST',
@@ -147,7 +176,7 @@ async function seedCatalog(ctx: Ctx, products: ProductSpec[]): Promise<void> {
           listPrice: '10.00',
           status: variantSpec.status ?? 'ON_SALE',
           delistedAt: variantSpec.delisted === true ? new Date() : null,
-          ...(variantSpec.desi !== undefined ? DESI_COLUMNS[variantSpec.desi] : {}),
+          ...DESI_COLUMNS[variantSpec.desi ?? 'none'],
         },
       });
       if (variantSpec.cost !== undefined) {
@@ -235,14 +264,14 @@ describe('GET /v1/.../products/facets: default listing scope', () => {
     };
     const storeRow = stats.byStore.find((row) => row.storeId === ctx.storeId);
 
-    // In scope: P1, P2, P3, both P4 variants and P7's costed variant (6).
-    // Missing cost: P1, P3 (archived profile) and P4's NOT_ON_SALE variant (3),
-    // one per product.
+    // In scope: P1, both P2 variants, P3, both P4 variants and P7's costed
+    // variant (7). Missing cost: P1, P3 (archived profile) and P4's NOT_ON_SALE
+    // variant (3), one per product.
     expect(storeRow).toEqual({
       storeId: ctx.storeId,
       missingCount: 3,
       missingProductCount: 3,
-      totalVariants: 6,
+      totalVariants: 7,
     });
     expect(facetsBody.overrideCounts.missingCost).toBe(storeRow?.missingProductCount);
     expect(await getListTotal(ctx, '?overrideMissing=cost')).toBe(storeRow?.missingProductCount);

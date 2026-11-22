@@ -1,8 +1,10 @@
 /**
  * Integration tests for captureOrderProfitSnapshot (plan PR-2, Gorev 2): the order's
  * undated product and seller inputs are copied once, afterwards only missing parts
- * are filled (a desi of synced 0, commission inputs none of which gives a rate, an
- * empty cost list), and a known value is never overwritten with a live one. The
+ * are filled (commission inputs none of which gives a rate, an empty cost list), and
+ * a known value is never overwritten with a live one. The desi is never filled: a
+ * captured desi (0 included) is known, and an item captured without one stays empty
+ * (plan PR-2c decision 9). The
  * events that change a filled value are the order's own cargo name changing, an
  * item's variant changing, and the cost-window rule: the cost list follows the cost
  * links until the order's business day ends.
@@ -759,9 +761,54 @@ describe('captureOrderProfitSnapshot', () => {
     expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
   });
 
-  it('fills a missing desi (synced 0) once the seller or Trendyol provides one, but never changes a known desi', async () => {
+  it('captures a variant without any desi (no correction, no Trendyol desi) as an empty desi with no source', async () => {
     const parcel = await seedSnapshotParcel();
     // Trendyol sent no desi for either variant and the seller corrected neither.
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { dimensionalWeightOverride: null, syncedDimensionalWeight: null },
+    });
+    await prisma.productVariant.update({
+      where: { id: parcel.variantB },
+      data: { syncedDimensionalWeight: null },
+    });
+
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: true, itemsWritten: 2 });
+    for (const itemId of [parcel.itemA, parcel.itemB]) {
+      const item = await readItemSnapshot(itemId);
+      expect(item.snapshotUnitDesi).toBeNull();
+      expect(item.snapshotDesiSource).toBeNull();
+      // The rest of the item is captured as usual.
+      expect(item.profitSnapshotAt).toEqual(expect.any(Date));
+      expect(item.snapshotCategoryId).toBe(TEST_CATEGORY_ID);
+    }
+
+    // Still no desi anywhere: nothing to write.
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+
+    // A desi entered later (a seller correction, a Trendyol desi from a later sync) does
+    // not reach the capture: the item captured without a desi stays empty.
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { dimensionalWeightOverride: '2.50' },
+    });
+    await prisma.productVariant.update({
+      where: { id: parcel.variantB },
+      data: { syncedDimensionalWeight: '4.00' },
+    });
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+    for (const itemId of [parcel.itemA, parcel.itemB]) {
+      const item = await readItemSnapshot(itemId);
+      expect(item.snapshotUnitDesi).toBeNull();
+      expect(item.snapshotDesiSource).toBeNull();
+    }
+  });
+
+  it('keeps a stored synced desi of 0 as a known desi: captured as 0 from the synced value and never filled later', async () => {
+    const parcel = await seedSnapshotParcel();
+    // Both variants carry a stored synced desi of 0, a real desi (the mapper stores
+    // a Trendyol 0 as null, but a stored 0 is a real desi); the seller corrected
+    // neither.
     await prisma.productVariant.update({
       where: { id: parcel.variantA },
       data: { dimensionalWeightOverride: null, syncedDimensionalWeight: '0' },
@@ -778,10 +825,8 @@ describe('captureOrderProfitSnapshot', () => {
       expect(item.snapshotDesiSource).toBe(SnapshotDesiSource.SYNCED);
     }
 
-    // Still no desi anywhere: nothing to fill.
-    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
-
-    // The seller corrects item A's desi; Trendyol now sends item B's.
+    // A later seller correction and a later Trendyol desi do not reach the capture:
+    // 0 is a known desi, not a gap to fill.
     await prisma.productVariant.update({
       where: { id: parcel.variantA },
       data: { dimensionalWeightOverride: '2.50' },
@@ -790,34 +835,9 @@ describe('captureOrderProfitSnapshot', () => {
       where: { id: parcel.variantB },
       data: { syncedDimensionalWeight: '4.00' },
     });
-    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 2 });
-    const itemAFilled = await readItemSnapshot(parcel.itemA);
-    const itemBFilled = await readItemSnapshot(parcel.itemB);
-    expect(itemAFilled).toEqual({
-      ...itemABefore,
-      snapshotUnitDesi: itemAFilled.snapshotUnitDesi,
-      snapshotDesiSource: SnapshotDesiSource.OVERRIDE,
-    });
-    expect(itemAFilled.snapshotUnitDesi?.toString()).toBe('2.5');
-    expect(itemBFilled).toEqual({
-      ...itemBBefore,
-      snapshotUnitDesi: itemBFilled.snapshotUnitDesi,
-      snapshotDesiSource: SnapshotDesiSource.SYNCED,
-    });
-    expect(itemBFilled.snapshotUnitDesi?.toString()).toBe('4');
-
-    // A known desi is never changed: neither a new correction nor a new synced value.
-    await prisma.productVariant.update({
-      where: { id: parcel.variantA },
-      data: { dimensionalWeightOverride: '9.00', syncedDimensionalWeight: '7.00' },
-    });
-    await prisma.productVariant.update({
-      where: { id: parcel.variantB },
-      data: { dimensionalWeightOverride: '5.00', syncedDimensionalWeight: '6.00' },
-    });
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
-    expect(await readItemSnapshot(parcel.itemA)).toEqual(itemAFilled);
-    expect(await readItemSnapshot(parcel.itemB)).toEqual(itemBFilled);
+    expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
+    expect(await readItemSnapshot(parcel.itemB)).toEqual(itemBBefore);
   });
 
   it('fills commission inputs that were all missing once a rule or synced rate appears, but never changes captured rates', async () => {

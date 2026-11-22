@@ -937,7 +937,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "Set when the order is permanently outside the profit universe (cost window missed). Irreversible — enforced by a DB trigger (spec 2026-06-12).",
+            "description": "Set when the order is permanently outside the profit universe (cost or desi window missed). Irreversible — enforced by a DB trigger (spec 2026-06-12).",
             "example": null
           },
           "profitExclusionReason": {
@@ -949,9 +949,11 @@
               "COST_DEADLINE_MISSED",
               "LATE_UNCOSTED_ARRIVAL",
               "LEGACY_BACKFILL",
+              "DESI_DEADLINE_MISSED",
+              "LATE_DESILESS_ARRIVAL",
               null
             ],
-            "description": "Why the order left the profit universe. Paired with profitExcludedAt.",
+            "description": "Why the order left the profit universe: the cost (COST_DEADLINE_MISSED, LATE_UNCOSTED_ARRIVAL) or the product desi (DESI_DEADLINE_MISSED, LATE_DESILESS_ARRIVAL) missed the order day; the cost reason wins when both are missing. Paired with profitExcludedAt.",
             "example": null
           }
         },
@@ -1200,7 +1202,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "Set when the order is permanently outside the profit universe (cost window missed). Irreversible — enforced by a DB trigger (spec 2026-06-12).",
+            "description": "Set when the order is permanently outside the profit universe (cost or desi window missed). Irreversible — enforced by a DB trigger (spec 2026-06-12).",
             "example": null
           },
           "profitExclusionReason": {
@@ -1212,9 +1214,11 @@
               "COST_DEADLINE_MISSED",
               "LATE_UNCOSTED_ARRIVAL",
               "LEGACY_BACKFILL",
+              "DESI_DEADLINE_MISSED",
+              "LATE_DESILESS_ARRIVAL",
               null
             ],
-            "description": "Why the order left the profit universe. Paired with profitExcludedAt.",
+            "description": "Why the order left the profit universe: the cost (COST_DEADLINE_MISSED, LATE_UNCOSTED_ARRIVAL) or the product desi (DESI_DEADLINE_MISSED, LATE_DESILESS_ARRIVAL) missed the order day; the cost reason wins when both are missing. Paired with profitExcludedAt.",
             "example": null
           },
           "reconciliationStatus": {
@@ -3015,7 +3019,7 @@
               "string",
               "null"
             ],
-            "description": "Effective dimensional weight (TR: \"desi\"). Decimal string. The user override takes precedence; falls back to the marketplace-synced value when no override is set. Never null in practice: the synced value is stored as 0 when the marketplace sends none.",
+            "description": "Effective dimensional weight (TR: \"desi\"). Decimal string. The user override takes precedence; falls back to the marketplace-synced value when no override is set. Null when the variant has no desi: the marketplace sent none and the user entered none. \"0\" is a real desi.",
             "example": "1.50"
           },
           "syncedDimensionalWeight": {
@@ -3023,7 +3027,7 @@
               "string",
               "null"
             ],
-            "description": "The marketplace's latest dimensional weight for this variant. Refreshed every sync. Independent of any user override. Used by the UI to show the seller what the marketplace currently reports. \"0\" when the marketplace sent no desi.",
+            "description": "The marketplace's latest dimensional weight for this variant. Refreshed every sync. Independent of any user override. Used by the UI to show the seller what the marketplace currently reports. Null when the marketplace sent no desi; a Trendyol desi of 0 (its value for a desi that was never entered) is stored as null too.",
             "example": "1.20"
           },
           "isDimensionalWeightOverridden": {
@@ -3032,7 +3036,7 @@
           },
           "isDimensionalWeightMissing": {
             "type": "boolean",
-            "description": "True when the variant misses desi: no user override and a synced (marketplace) dimensional weight of 0. The same rule as the overrideMissing=desi filter and the facets overrideCounts.missingDesi count. An explicit override of 0 is not missing. The shipping estimate still prices a missing-desi variant at desi 0.",
+            "description": "True when the variant misses desi: a non-digital variant with no user override and no synced (marketplace) dimensional weight. The same rule as the overrideMissing=desi filter and the facets overrideCounts.missingDesi count. A desi of 0 (synced or override) is a real desi and is not missing; a digital variant needs no desi. The shipping estimate of a missing-desi variant is NO_DESI.",
             "example": false
           },
           "quantity": {
@@ -3144,7 +3148,7 @@
               "OWN_CONTRACT_EMPTY",
               "DESI_OVERFLOW"
             ],
-            "description": "Outcome of the shipping estimate. OK = estimate available. NO_CARRIER = TRENDYOL_CONTRACT store with no defaultShippingCarrierId. NO_DESI = no estimate could be produced for the variant (a defensive fallback): desi has a 0 floor, so a variant Trendyol sent no desi for is priced at desi 0 and flagged by isDimensionalWeightMissing instead. OWN_CONTRACT_EMPTY = OWN_CONTRACT store with no own_shipping_tariffs row for this desi (V1 always). DESI_OVERFLOW = variant desi exceeds the carrier tariff coverage.",
+            "description": "Outcome of the shipping estimate. OK = estimate available. NO_CARRIER = TRENDYOL_CONTRACT store with no defaultShippingCarrierId. NO_DESI = the variant has no desi (no seller override and no desi from the marketplace), so there is no tariff row to price from; a desi of 0 is a real desi and is priced. OWN_CONTRACT_EMPTY = OWN_CONTRACT store with no own_shipping_tariffs row for this desi (V1 always). DESI_OVERFLOW = variant desi exceeds the carrier tariff coverage.",
             "example": "OK"
           }
         },
@@ -3244,7 +3248,7 @@
               "missingDesi": {
                 "type": "integer",
                 "minimum": 0,
-                "description": "Products with at least one in-scope variant that has no desi override and a synced desi of 0. Equals pagination.total of the overrideMissing=desi list."
+                "description": "Products with at least one in-scope variant that misses desi (non-digital, no desi override and no synced desi). Equals pagination.total of the overrideMissing=desi list."
               },
               "total": {
                 "type": "integer",
@@ -3294,7 +3298,7 @@
           },
           "isDimensionalWeightMissing": {
             "type": "boolean",
-            "description": "Missing-desi state after the update: no user override and a synced desi of 0 (same rule as VariantSummary.isDimensionalWeightMissing). Clearing the override of a variant the marketplace has no desi for makes it true again.",
+            "description": "Missing-desi state after the update: a non-digital variant with no user override and no synced desi (same rule as VariantSummary.isDimensionalWeightMissing). Clearing the override of a variant the marketplace sent no desi for makes it true again; a seller desi of 0 is a real desi and keeps it false (a Trendyol 0 is stored as no desi).",
             "example": false
           }
         },
@@ -3494,7 +3498,7 @@
               "OWN_CONTRACT_EMPTY",
               "DESI_OVERFLOW"
             ],
-            "description": "Shipping availability from the engine shipping estimate at the variant own sale price (the Barem / carrier tariff band is chosen at that price). A digital variant has no shipping and reads OK. OK = estimate computed. NO_CARRIER = no carrier configured on this store. NO_DESI = defensive fallback, not returned in practice: desi has a 0 floor, so a variant with no Trendyol desi is priced at desi 0. OWN_CONTRACT_EMPTY = own-contract store with no tariff row for this desi. DESI_OVERFLOW = variant desi exceeds carrier tariff coverage.",
+            "description": "Shipping availability from the engine shipping estimate at the variant own sale price (the Barem / carrier tariff band is chosen at that price). A digital variant has no shipping and reads OK. OK = estimate computed. NO_CARRIER = no carrier configured on this store. NO_DESI = the variant has no desi (no seller desi and none from Trendyol), so no shipping can be priced; a desi of 0 is a real desi and is priced. OWN_CONTRACT_EMPTY = own-contract store with no tariff row for this desi. DESI_OVERFLOW = variant desi exceeds carrier tariff coverage.",
             "example": "OK"
           },
           "commissionStatus": {
@@ -10451,11 +10455,11 @@
                 "calculated",
                 "excluded"
               ],
-              "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost window missed - permanent). Omit for all.",
+              "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost or desi window missed - permanent). Omit for all.",
               "example": "excluded"
             },
             "required": false,
-            "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost window missed - permanent). Omit for all.",
+            "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost or desi window missed - permanent). Omit for all.",
             "name": "costStatus",
             "in": "query"
           },
@@ -10708,11 +10712,11 @@
                 "calculated",
                 "excluded"
               ],
-              "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost window missed - permanent). Omit for all.",
+              "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost or desi window missed - permanent). Omit for all.",
               "example": "excluded"
             },
             "required": false,
-            "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost window missed - permanent). Omit for all.",
+            "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost or desi window missed - permanent). Omit for all.",
             "name": "costStatus",
             "in": "query"
           },
@@ -12650,11 +12654,11 @@
                 "cost",
                 "desi"
               ],
-              "description": "Variant-level filter: \"cost\" matches variants with no active (non-archived) cost profile attached; \"desi\" matches variants with no seller desi override and a synced (Trendyol) desi of 0 (an explicit override of 0 is not missing). Either value composes via AND with the status filter, or with the default listing scope when status is omitted. Parent included if at least one variant matches; response variants[] is filtered to matching variants (consistent with status semantics).",
+              "description": "Variant-level filter: \"cost\" matches variants with no active (non-archived) cost profile attached; \"desi\" matches non-digital variants with no desi at all: no seller desi override and no synced (Trendyol) desi. A desi of 0 is a real desi and is not missing; a digital variant needs no desi. Either value composes via AND with the status filter, or with the default listing scope when status is omitted. Parent included if at least one variant matches; response variants[] is filtered to matching variants (consistent with status semantics).",
               "example": "cost"
             },
             "required": false,
-            "description": "Variant-level filter: \"cost\" matches variants with no active (non-archived) cost profile attached; \"desi\" matches variants with no seller desi override and a synced (Trendyol) desi of 0 (an explicit override of 0 is not missing). Either value composes via AND with the status filter, or with the default listing scope when status is omitted. Parent included if at least one variant matches; response variants[] is filtered to matching variants (consistent with status semantics).",
+            "description": "Variant-level filter: \"cost\" matches variants with no active (non-archived) cost profile attached; \"desi\" matches non-digital variants with no desi at all: no seller desi override and no synced (Trendyol) desi. A desi of 0 is a real desi and is not missing; a digital variant needs no desi. Either value composes via AND with the status filter, or with the default listing scope when status is omitted. Parent included if at least one variant matches; response variants[] is filtered to matching variants (consistent with status semantics).",
             "name": "overrideMissing",
             "in": "query"
           },
@@ -13010,7 +13014,7 @@
           "Products"
         ],
         "summary": "Set or clear the user override for a variant's dimensional weight (desi)",
-        "description": "Writes exclusively to ProductVariant.dimensional_weight_override (the user-override column). Trendyol's value lives in a sister column that this endpoint never touches — so the override survives every subsequent sync. Pass `dimensionalWeight: null` to clear the override and revert the read path to the marketplace-synced value.",
+        "description": "Writes exclusively to ProductVariant.dimensional_weight_override (the user-override column). Trendyol's value lives in a sister column that this endpoint never touches — so the override survives every subsequent sync. Pass `dimensionalWeight: null` to clear the override and revert the read path to the marketplace-synced value. Entering a desi re-checks the variant's orders of today that wait in the Live Performance buffer: an order whose every line now has a cost and a desi moves on into profit. Stored orders keep the desi captured at intake.",
         "security": [
           {
             "bearerAuth": []
@@ -13160,7 +13164,7 @@
           "Products"
         ],
         "summary": "Apply one dimensional-weight value (or clear) across many variants",
-        "description": "Same single-column write rule as the per-variant endpoint: only ProductVariant.dimensional_weight_override is touched. Variant IDs that don't belong to the org+store are silently filtered out (not surfaced as an error — the UX is \"apply to what you can\"). Returns the actual updated count so the UI can warn when the selection went stale between click and submit.",
+        "description": "Same single-column write rule as the per-variant endpoint: only ProductVariant.dimensional_weight_override is touched. Variant IDs that don't belong to the org+store are silently filtered out (not surfaced as an error — the UX is \"apply to what you can\"). Returns the actual updated count so the UI can warn when the selection went stale between click and submit. Entering a desi re-checks the updated variants' orders of today that wait in the Live Performance buffer, like the per-variant endpoint; filtered-out ids trigger nothing.",
         "security": [
           {
             "bearerAuth": []

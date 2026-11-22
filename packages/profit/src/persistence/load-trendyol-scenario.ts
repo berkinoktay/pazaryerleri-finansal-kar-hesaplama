@@ -11,7 +11,6 @@ import { loadShippingTariffVersion } from '../shipping/tariff-version';
 import { UnsupportedPlatformError } from './errors';
 import {
   buildShippingTariff,
-  dec,
   decOrNull,
   loadCommissionRulesForCategories,
   loadCostProfilesByVariant,
@@ -48,7 +47,7 @@ interface VariantForScenario {
   readonly vatRate: number | null;
   readonly isDigital: boolean;
   readonly syncedCommissionRate: Prisma.Decimal | null;
-  readonly syncedDimensionalWeight: Prisma.Decimal;
+  readonly syncedDimensionalWeight: Prisma.Decimal | null;
   readonly dimensionalWeightOverride: Prisma.Decimal | null;
   readonly deliveryDuration: number | null;
   readonly product: { readonly categoryId: bigint | null; readonly brandId: bigint | null };
@@ -78,8 +77,9 @@ function buildScenarioBase(params: {
       variantId: variant.id,
       barcode: variant.barcode,
       saleVatRatePct: new Decimal(variant.vatRate ?? DEFAULT_SALE_VAT_RATE_PCT),
-      // Desi floor is 0: the synced column is non-null, the user override wins when set.
-      unitDesi: dec(variant.dimensionalWeightOverride ?? variant.syncedDimensionalWeight),
+      // The user override wins when set, else the synced desi; both null = no desi
+      // (the engine reports UNKNOWN_DESI). 0 is a real desi.
+      unitDesi: decOrNull(variant.dimensionalWeightOverride ?? variant.syncedDimensionalWeight),
       isDigital: variant.isDigital,
       categoryId: variant.product.categoryId?.toString() ?? null,
       brandId: variant.product.brandId?.toString() ?? null,

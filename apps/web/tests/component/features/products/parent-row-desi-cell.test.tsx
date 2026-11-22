@@ -9,7 +9,11 @@ import { productKeys } from '@/features/products/query-keys';
 
 import trMessages from '../../../../messages/tr.json';
 import { http, HttpResponse, server } from '../../../helpers/msw';
-import { makeProductWithVariants, makeVariantSummary } from '../../../helpers/product-fixtures';
+import {
+  MISSING_DESI_FIELDS,
+  makeProductWithVariants,
+  makeVariantSummary,
+} from '../../../helpers/product-fixtures';
 import { render, screen, waitFor } from '../../../helpers/render';
 
 const toastSuccess = vi.hoisted(() => vi.fn());
@@ -30,14 +34,8 @@ const BULK_URL = `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STOR
 const PRODUCT = makeProductWithVariants({
   id: '00000000-0000-0000-0000-0000000000p1',
   variants: [
-    makeVariantSummary({
-      id: '00000000-0000-0000-0000-0000000000a1',
-      isDimensionalWeightMissing: true,
-    }),
-    makeVariantSummary({
-      id: '00000000-0000-0000-0000-0000000000a2',
-      isDimensionalWeightMissing: true,
-    }),
+    makeVariantSummary({ id: '00000000-0000-0000-0000-0000000000a1', ...MISSING_DESI_FIELDS }),
+    makeVariantSummary({ id: '00000000-0000-0000-0000-0000000000a2', ...MISSING_DESI_FIELDS }),
   ],
 });
 const VARIANT_IDS = PRODUCT.variants.map((variant) => variant.id);
@@ -130,7 +128,7 @@ describe('ParentRowDesiCell', () => {
           variants: [
             makeVariantSummary({ id: 'v-1', dimensionalWeight: '1.50' }),
             makeVariantSummary({ id: 'v-2', dimensionalWeight: '3' }),
-            makeVariantSummary({ id: 'v-3', isDimensionalWeightMissing: true }),
+            makeVariantSummary({ id: 'v-3', ...MISSING_DESI_FIELDS }),
           ],
         })}
       />,

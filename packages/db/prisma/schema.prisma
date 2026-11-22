@@ -162,6 +162,10 @@ enum ProfitExclusionReason {
   COST_DEADLINE_MISSED // gece-yarısı flush'ı — pencere kaçtı
   LATE_UNCOSTED_ARRIVAL // geçmiş-gün gelen maliyetsiz sipariş (karar K3)
   LEGACY_BACKFILL // spec öncesi null-kârla yazılmış mevcut satırlar (migration)
+  // Desi counterparts of the two cost reasons (PR-2c, Berkin 2026-11-22). When both
+  // the cost and the desi are missing, the cost reason is written.
+  DESI_DEADLINE_MISSED // day-end buffer graduation: the product desi was not entered by the end of the order day
+  LATE_DESILESS_ARRIVAL // a past-day order arrived while a product had no desi
 }
 
 // Fee type catalog of fee_definitions (reference data): the system fee definitions
@@ -609,38 +613,41 @@ model ProductVariant {
   // V1: kullanıcı UI'dan işaretler (variant settings toggle). V2: Trendyol kategori
   // lookup ile otomatik tahmin.
   isDigital               Boolean  @default(false) @map("is_digital")
-  // Trendyol'un onaylı-ürün v2 cevabındaki varyant komisyon YÜZDESİ (7.83 = %7,83).
-  // 0/yok → null ("bilinmiyor"); desi'nin 0-tabanının aksine null anlamlıdır çünkü
-  // indirimler dikeyinin komisyon zinciri (bant → ürün → kategori) "senkronlandı" ile
-  // "bilinmiyor"u ayırt etmek zorunda. Delta senkron bu kolona hiç dokunmaz (delta
-  // yalnız quantity/salePrice/listPrice yazar) — değer tam senkronlarda tazelenir.
+  // The variant commission PERCENT from Trendyol's approved-product v2 response
+  // (7.83 = 7.83%). Absent or 0 -> null ("unknown"; the desi mapping reads a Trendyol 0
+  // the same way). Null matters: the discounts vertical's commission chain
+  // (band -> product -> category) must tell "synced" from "unknown". The delta sync
+  // never touches this column (it writes only quantity/salePrice/listPrice); full
+  // syncs refresh it.
   syncedCommissionRate    Decimal? @map("synced_commission_rate") @db.Decimal(5, 2)
   // Two-column sync-protection pair (see docs/plans/archive/... for rationale):
   // syncedDimensionalWeight is the marketplace's value, refreshed every sync.
   // dimensionalWeightOverride is the user's manual override; null = no
-  // override, fall back to synced at read time (effective desi = override ??
-  // synced). The sync worker writes ONLY to the synced column, never to
+  // override. The sync worker writes ONLY to the synced column, never to
   // dimensionalWeightOverride, so the "user value is sacred" invariant is
   // structural, not just enforced in code.
   //
-  // Desi floor = 0: the synced column is NON-NULL with default 0. Trendyol
-  // omits desi on most products; the mapper stores 0 (not null), so the data
-  // has no nulls. Desi 0 is a VALID tariff tier: the cargo fee is matched from
-  // the tariff table (carrier + ceil(desi)), which covers desi 0 onward, so a
-  // 0-desi variant still gets a real cargo cost. The override stays nullable
-  // (null = "no override").
+  // Null vs 0: null on the synced column = the marketplace sent no usable desi
+  // (the field was absent, null, not a number, 0 or negative). Trendyol sends 0
+  // for a product whose desi was never entered, so the mapper stores its 0 as
+  // null (Berkin 2026-11-22). A stored 0 (a seller override) is a REAL desi, the
+  // lowest tariff tier: the tariff table covers desi 0 onward, so a 0-desi variant
+  // gets a real cargo cost. A stored 0 never means "missing".
   //
-  // Missing desi: a variant in the listing scope with dimensionalWeightOverride
-  // IS NULL AND syncedDimensionalWeight = 0 means Trendyol sent no desi and the
-  // seller has not entered one. The products page counts it as missing desi
-  // and offers "Desi gir"; the shipping estimate still prices it at desi 0. An
-  // explicit override of 0 is the seller's choice and is NOT missing.
+  // Effective desi = dimensionalWeightOverride ?? syncedDimensionalWeight.
+  // Both null = the variant has no desi: the shipping estimate is NO_DESI (no
+  // price), the products page counts it as missing desi, and an order holding
+  // it waits at the desi gate, like a missing cost, until the seller enters one.
   //
-  // A CHECK constraint forbids any value below 0 on either column
+  // The column default 0 is kept on purpose: the production writer (the mapper
+  // through upsertCatalogBatch) always writes the value explicitly, so the
+  // default only serves test and seed writers.
+  //
+  // A CHECK constraint forbids any value below 0 on either column; null passes
   // (product_variants_dimensional_weight_override_nonneg_check in
   // supabase/sql/check-constraints.sql, also added by the migration
   // rename_dimensional_weight_override).
-  syncedDimensionalWeight Decimal  @default(0) @map("synced_dimensional_weight") @db.Decimal(6, 2)
+  syncedDimensionalWeight Decimal? @default(0) @map("synced_dimensional_weight") @db.Decimal(6, 2)
   dimensionalWeightOverride Decimal? @map("dimensional_weight_override") @db.Decimal(6, 2)
   quantity                Int      @default(0)
   deliveryDuration        Int?     @map("delivery_duration")
@@ -776,9 +783,15 @@ model Order {
   // Stamped automatically when an order's cost misses its business day (owner
   // decision 2026-11-03): COST_DEADLINE_MISSED at the day-end buffer graduation,
   // LATE_UNCOSTED_ARRIVAL when a past-day order arrives without a timely cost.
-  // LEGACY_BACKFILL (the old 2026-06-12 profit-freeze backfill; no writer stamps
-  // it today) is an automatic reason too, so "automatic exclusions" covers all
-  // three.
+  // The desi is required like the cost (Berkin 2026-11-22, PR-2c): every
+  // non-digital item needs an effective desi (override ?? synced). Its two
+  // counterparts are DESI_DEADLINE_MISSED (the day-end buffer graduation of an
+  // order still waiting on a desi) and LATE_DESILESS_ARRIVAL (a past-day order
+  // that arrived while a product had no desi). The desi is checked when the order
+  // is written (no entry time is recorded for it). When both the cost and the desi
+  // are missing, the cost reason is written. LEGACY_BACKFILL (the old 2026-06-12
+  // profit-freeze backfill; no writer stamps it today) is an automatic reason too,
+  // so "automatic exclusions" covers all five.
   // Automatic exclusions are PERMANENT -- trg_reject_automatic_exclusion_change in
   // supabase/sql/triggers.sql rejects clearing or re-pointing them; a future
   // user-chosen exclusion will carry its own reversible reason. While stamped the

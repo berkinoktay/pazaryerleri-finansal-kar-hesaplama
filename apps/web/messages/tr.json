@@ -2189,7 +2189,7 @@
         "saleMarginPct": "Marj %",
         "itemCount": "Kalem",
         "revenue": "Ciro",
-        "costStatus": "Maliyet durumu",
+        "costStatus": "Neden",
         "costMarkupPct": "ROI %"
       },
       "badges": {
@@ -2249,12 +2249,20 @@
       "detail": "Gün sonuna kadar maliyet girilmediği için bu sipariş kâr hesabına dahil edilmedi."
     },
     "LATE_UNCOSTED_ARRIVAL": {
-      "label": "Geç gelen sipariş",
+      "label": "Maliyetsiz gelen sipariş",
       "detail": "Sipariş geç ulaştığı ve maliyeti girilmediği için kâr hesabına dahil edilmedi."
     },
     "LEGACY_BACKFILL": {
       "label": "Eski sipariş",
       "detail": "Eski bir sipariş olduğu ve maliyeti bilinmediği için kâr hesabına dahil edilmedi."
+    },
+    "DESI_DEADLINE_MISSED": {
+      "label": "Desi girilmedi",
+      "detail": "Gün sonuna kadar ürünün desisi girilmediği için bu sipariş kâr hesabına dahil edilmedi."
+    },
+    "LATE_DESILESS_ARRIVAL": {
+      "label": "Desisiz gelen sipariş",
+      "detail": "Sipariş geç ulaştığı ve ürünün desisi girilmediği için kâr hesabına dahil edilmedi."
     }
   },
   "productsPage": {
@@ -3808,7 +3816,7 @@
       "margin": "Kâr Marjı",
       "profitCostRatio": "Kâr/Maliyet Oranı",
       "estimateHint": "Tahmini değer — kesin tutar mutabakat (settlement) sonrasında netleşir.",
-      "pendingHint": "{count} sipariş maliyet bekliyor — kâra henüz dahil değil"
+      "pendingHint": "{count} sipariş maliyet ya da desi bekliyor — kâra henüz dahil değil"
     },
     "chart": {
       "title": "Saatlik Kümülatif",
@@ -3865,7 +3873,7 @@
       "sheetTitle": "Sipariş ayrıntısı",
       "close": "Kapat",
       "buffer": {
-        "pendingNotice": "Maliyet bugün 00:00'a kadar girilmezse bu sipariş kâr hesabına alınmaz.",
+        "pendingNotice": "Maliyet ve desi gün bitmeden girilmeli; biri eksik kalırsa bu sipariş kâr hesabına alınmaz.",
         "columns": {
           "product": "Ürün",
           "quantity": "Adet",
@@ -3878,7 +3886,7 @@
     "realtime": {
       "newOrderTitle": "Yeni sipariş · {amount}",
       "profitLine": "{profit} net kâr",
-      "costMissingLine": "Maliyeti eksik ürünler var, kâr henüz belirlenemiyor",
+      "costMissingLine": "Maliyeti ya da desisi eksik ürünler var, kâr henüz belirlenemiyor",
       "orderNumberLabel": "· Sipariş no {number}",
       "detail": "Detayı gör",
       "burstTitle": "{count} yeni sipariş geldi",

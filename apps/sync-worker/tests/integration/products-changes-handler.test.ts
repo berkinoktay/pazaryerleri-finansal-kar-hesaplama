@@ -1074,7 +1074,7 @@ describe('processProductsChangesChunk', () => {
       const locked = await variantOf(storeId, 50011);
       expect(locked.status).toBe(ProductVariantStatus.LOCKED);
       expect(locked.statusReason).toBe(LOCK_REASON);
-      expect(locked.syncedDimensionalWeight.toString()).toBe('2.5');
+      expect(locked.syncedDimensionalWeight?.toString()).toBe('2.5');
       expect(locked.dimensionalWeightOverride).toBeNull();
       expect(locked.quantity).toBe(4);
       expect(locked.delistedAt).toBeNull();

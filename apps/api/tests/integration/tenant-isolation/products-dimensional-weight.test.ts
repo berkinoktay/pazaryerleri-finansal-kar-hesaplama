@@ -14,9 +14,23 @@ import { prisma } from '@pazarsync/db';
 import { createApp } from '@/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization, createStore } from '../../helpers/factories';
+import {
+  createBufferEntry,
+  createCostProfile,
+  createMembership,
+  createOrganization,
+  createStore,
+} from '../../helpers/factories';
 
 const app = createApp();
+
+async function desiRequest(url: string, accessToken: string, body: unknown): Promise<Response> {
+  return app.request(url, {
+    method: 'PATCH',
+    headers: { Authorization: bearer(accessToken), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
 
 describe('Tenant isolation: PATCH variant dimensional-weight', () => {
   beforeAll(async () => {
@@ -96,5 +110,82 @@ describe('Tenant isolation: PATCH variant dimensional-weight', () => {
     const after = await prisma.productVariant.findFirstOrThrow({ where: { id: variantA.id } });
     expect(after.dimensionalWeightOverride).toBeNull(); // override never landed
     expect(after.syncedDimensionalWeight?.toString()).toBe('1');
+  });
+
+  it("Org B's desi writes on Org A's variant never promote Org A's Live Performance buffer entry", async () => {
+    // Org A: a fully calculable variant (cost + desi) with a PENDING entry of today,
+    // so any re-check of that entry would promote it.
+    const userA = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, userA.id);
+    const storeA = await createStore(orgA.id);
+    const productA = await prisma.product.create({
+      data: {
+        organizationId: orgA.id,
+        storeId: storeA.id,
+        platformContentId: BigInt(7002),
+        productMainId: `pm-${randomUUID().slice(0, 8)}`,
+        title: 'Org A Buffered Product',
+      },
+    });
+    const variantA = await prisma.productVariant.create({
+      data: {
+        organizationId: orgA.id,
+        storeId: storeA.id,
+        productId: productA.id,
+        platformVariantId: BigInt(7102),
+        barcode: 'BA-TI-BUF',
+        stockCode: 'SA-TI-BUF',
+        salePrice: new Decimal('100.00'),
+        listPrice: new Decimal('100.00'),
+        syncedDimensionalWeight: '1.00',
+      },
+    });
+    const profileA = await createCostProfile(orgA.id, { storeId: storeA.id });
+    await prisma.productVariantCostProfile.create({
+      data: { productVariantId: variantA.id, profileId: profileA.id, organizationId: orgA.id },
+    });
+    await createBufferEntry(orgA.id, storeA.id, {
+      platformOrderId: 'pkg-org-a',
+      mappedOrder: { lines: [{ barcode: 'BA-TI-BUF' }] },
+    });
+
+    // Org B: its own user and store.
+    const userB = await createAuthenticatedTestUser();
+    const orgB = await createOrganization();
+    await createMembership(orgB.id, userB.id);
+    const storeB = await createStore(orgB.id);
+
+    const single = await desiRequest(
+      `/v1/organizations/${orgB.id}/stores/${storeB.id}/products/variants/${variantA.id}/dimensional-weight`,
+      userB.accessToken,
+      { dimensionalWeight: '3.00' },
+    );
+    expect(single.status).toBe(404);
+
+    const bulk = await desiRequest(
+      `/v1/organizations/${orgB.id}/stores/${storeB.id}/products/variants/dimensional-weight`,
+      userB.accessToken,
+      { variantIds: [variantA.id], dimensionalWeight: '3.00' },
+    );
+    expect(bulk.status).toBe(200);
+    expect(await bulk.json()).toEqual({ updated: 0 });
+
+    const entry = await prisma.livePerformanceBuffer.findFirstOrThrow({
+      where: { platformOrderId: 'pkg-org-a' },
+    });
+    expect(entry.status).toBe('PENDING');
+
+    // Positive control: Org A's own desi write re-checks and promotes the entry.
+    const own = await desiRequest(
+      `/v1/organizations/${orgA.id}/stores/${storeA.id}/products/variants/${variantA.id}/dimensional-weight`,
+      userA.accessToken,
+      { dimensionalWeight: '3.00' },
+    );
+    expect(own.status).toBe(200);
+    const promoted = await prisma.livePerformanceBuffer.findFirstOrThrow({
+      where: { platformOrderId: 'pkg-org-a' },
+    });
+    expect(promoted.status).toBe('PROMOTING');
   });
 });

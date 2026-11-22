@@ -362,7 +362,10 @@ const setVariantDimensionalWeightRoute = createRoute({
     'column). ' +
     "Trendyol's value lives in a sister column that this endpoint never touches — so the " +
     'override survives every subsequent sync. Pass `dimensionalWeight: null` to clear the ' +
-    'override and revert the read path to the marketplace-synced value.',
+    'override and revert the read path to the marketplace-synced value. Entering a desi ' +
+    "re-checks the variant's orders of today that wait in the Live Performance buffer: an " +
+    'order whose every line now has a cost and a desi moves on into profit. Stored orders ' +
+    'keep the desi captured at intake.',
   security: [{ bearerAuth: [] }],
   request: {
     params: variantIdParams,
@@ -427,7 +430,9 @@ const bulkSetVariantDimensionalWeightRoute = createRoute({
     "ProductVariant.dimensional_weight_override is touched. Variant IDs that don't belong to " +
     'the org+store are silently filtered out (not surfaced as an error — the UX is ' +
     '"apply to what you can"). Returns the actual updated count so the UI can warn ' +
-    'when the selection went stale between click and submit.',
+    'when the selection went stale between click and submit. Entering a desi re-checks ' +
+    "the updated variants' orders of today that wait in the Live Performance buffer, like " +
+    'the per-variant endpoint; filtered-out ids trigger nothing.',
   security: [{ bearerAuth: [] }],
   request: {
     params: storeIdParams,

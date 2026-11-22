@@ -277,9 +277,10 @@ async function seedStoresProductsOrders(orgs: {
     });
     // Each seed product gets one default variant carrying the barcode; the
     // seed cost doubles as its sale and list price. Costs are attached through
-    // cost profiles, and no desi is set (synced desi defaults to 0, the
-    // override stays null), so these variants start under both the
-    // missing-cost and the missing-desi tabs.
+    // cost profiles, and no desi is set (no synced desi, as when Trendyol sends
+    // none, and no override), so these variants start under both the
+    // missing-cost and the missing-desi tabs. The synced column defaults to 0,
+    // a real desi, so the empty desi is written explicitly.
     // Multi-variant fixtures live in test factories, not the seed.
     await prisma.productVariant.create({
       data: {
@@ -291,6 +292,7 @@ async function seedStoresProductsOrders(orgs: {
         stockCode: `seed-sku-${(i + 1).toString()}`,
         salePrice: p.cost,
         listPrice: p.cost,
+        syncedDimensionalWeight: null,
       },
     });
   }

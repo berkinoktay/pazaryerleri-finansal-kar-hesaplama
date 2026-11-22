@@ -2,6 +2,7 @@ import { prisma } from '@pazarsync/db';
 import type { ProductVariant } from '@pazarsync/db';
 
 import { NotFoundError } from '../lib/errors';
+import { flipBufferForVariants } from './live-performance-buffer-flip.service';
 
 // ─── setDimensionalWeight ──────────────────────────────────────────────
 // User-override mutation. Writes ONLY to the `dimensionalWeightOverride`
@@ -19,17 +20,26 @@ import { NotFoundError } from '../lib/errors';
 // if they guess a valid UUID. A zero-affected-rows result becomes a
 // NotFoundError to avoid disclosing whether the variant exists in
 // another org.
+//
+// Live Performance buffer (plan PR-2c, decision 7): entering a desi (any
+// non-null value; 0 is a real desi) re-checks the variant's PENDING buffer
+// entries of today in the same transaction, store-scoped, and flips those
+// whose order is now fully calculable (cost + desi) to PROMOTING. Clearing
+// the override (null) cannot make an order calculable, so it skips the check.
 
 export async function setDimensionalWeight(opts: {
   organizationId: string;
   storeId: string;
   variantId: string;
   value: string | null;
-}): Promise<Pick<ProductVariant, 'id' | 'dimensionalWeightOverride' | 'syncedDimensionalWeight'>> {
+}): Promise<
+  Pick<ProductVariant, 'id' | 'dimensionalWeightOverride' | 'syncedDimensionalWeight' | 'isDigital'>
+> {
   const { organizationId, storeId, variantId, value } = opts;
 
   // A stored order keeps the desi captured at intake, so the override reaches
-  // only new orders and the catalog estimate; no stored order is queued.
+  // only new orders, buffered orders not yet in `orders`, and the catalog
+  // estimate; no stored order is queued.
   return prisma.$transaction(async (tx) => {
     const result = await tx.productVariant.updateMany({
       where: { id: variantId, organizationId, storeId },
@@ -40,12 +50,22 @@ export async function setDimensionalWeight(opts: {
       throw new NotFoundError('ProductVariant', variantId);
     }
 
+    if (value !== null) {
+      await flipBufferForVariants(tx, { organizationId, storeId, variantIds: [variantId] });
+    }
+
     // updateMany doesn't return rows; fetch the canonical state to
     // serialize back to the client. The where-clause is the same tenant
     // filter, so a successful update guarantees this read returns a row.
+    // isDigital feeds the missing-desi flag (a digital variant needs no desi).
     return tx.productVariant.findFirstOrThrow({
       where: { id: variantId, organizationId, storeId },
-      select: { id: true, dimensionalWeightOverride: true, syncedDimensionalWeight: true },
+      select: {
+        id: true,
+        dimensionalWeightOverride: true,
+        syncedDimensionalWeight: true,
+        isDigital: true,
+      },
     });
   });
 }
@@ -62,6 +82,10 @@ export async function setDimensionalWeight(opts: {
 // many in their selection actually applied; a mismatch hints at stale
 // state (variants deleted or moved stores between selection and submit)
 // but is not surfaced as an error — the UX is "apply what we can."
+//
+// Live Performance buffer: the setDimensionalWeight re-check, run only for
+// the ids the write actually touched (this store's variants), so a filtered-out
+// id of another store or org never triggers a flip.
 
 export async function bulkSetDimensionalWeight(opts: {
   organizationId: string;
@@ -74,13 +98,23 @@ export async function bulkSetDimensionalWeight(opts: {
   if (variantIds.length === 0) return { updated: 0 };
 
   // A stored order keeps the desi captured at intake, so the overrides reach
-  // only new orders and the catalog estimate; no stored order is queued.
+  // only new orders, buffered orders not yet in `orders`, and the catalog
+  // estimate; no stored order is queued.
   return prisma.$transaction(async (tx) => {
-    const result = await tx.productVariant.updateMany({
+    const written = await tx.productVariant.updateManyAndReturn({
       where: { id: { in: variantIds }, organizationId, storeId },
       data: { dimensionalWeightOverride: value },
+      select: { id: true },
     });
 
-    return { updated: result.count };
+    if (value !== null && written.length > 0) {
+      await flipBufferForVariants(tx, {
+        organizationId,
+        storeId,
+        variantIds: written.map((variant) => variant.id),
+      });
+    }
+
+    return { updated: written.length };
   });
 }

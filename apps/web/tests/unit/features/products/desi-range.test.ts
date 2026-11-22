@@ -2,19 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import { desiRange } from '@/features/products/lib/format-product';
 
-import { makeVariantSummary } from '../../../helpers/product-fixtures';
+import { MISSING_DESI_FIELDS, makeVariantSummary } from '../../../helpers/product-fixtures';
 
-// desiRange feeds the multi-variant parent row's desi column. It reads the
-// backend's missing flag (it never re-derives the rule), skips missing
-// variants, and formats the bounds the Turkish way.
+// desiRange feeds the multi-variant parent row's desi column. It skips variants
+// with no desi (the backend flags them missing), counts a desi of 0 as a real
+// desi, and formats the bounds the Turkish way.
 
-const missing = (id: string) =>
-  makeVariantSummary({
-    id,
-    dimensionalWeight: '0',
-    syncedDimensionalWeight: '0',
-    isDimensionalWeightMissing: true,
-  });
+const missing = (id: string) => makeVariantSummary({ id, ...MISSING_DESI_FIELDS });
 
 const withDesi = (id: string, value: string, overridden = false) =>
   makeVariantSummary({
@@ -58,6 +52,15 @@ describe('desiRange', () => {
       max: '2,5',
       isSingle: false,
       anyOverridden: true,
+    });
+  });
+
+  it('counts a stored desi of 0 as a real desi', () => {
+    expect(desiRange([missing('a'), withDesi('b', '0'), withDesi('c', '2')])).toEqual({
+      min: '0',
+      max: '2',
+      isSingle: false,
+      anyOverridden: false,
     });
   });
 
