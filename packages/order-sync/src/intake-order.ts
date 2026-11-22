@@ -273,7 +273,11 @@ export async function intakeOrder(args: {
     return { kind: 'persisted', reason: 'cancelled_audit' };
   }
 
-  const calcLines = await buildCalcCheckLines(prisma, { storeId, lines: mapped.lines });
+  const calcLines = await buildCalcCheckLines(prisma, {
+    organizationId,
+    storeId,
+    lines: mapped.lines,
+  });
   const calc = resolveOrderCalculability(calcLines);
 
   // Past-day cost-window + desi gate (Berkin 2026-11-03, 2026-11-22). A past-day order's

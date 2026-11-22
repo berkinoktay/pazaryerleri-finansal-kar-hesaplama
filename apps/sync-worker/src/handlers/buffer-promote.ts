@@ -160,6 +160,7 @@ async function promoteOne(id: string, now: Date): Promise<void> {
         // or desi is still missing is demoted to PENDING so the day's window can still
         // catch it; every other entry graduates into orders below.
         const calcLines = await buildCalcCheckLines(tx, {
+          organizationId: entry.organizationId,
           storeId: entry.storeId,
           lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
         });
@@ -403,6 +404,7 @@ async function flushOne(id: string, now: Date): Promise<string | null> {
       // tx -> order write + buffer delete commit atomically. profitExclusion is stamped
       // CREATE-only inside upsertOrderWithSnapshot.
       const calcLines = await buildCalcCheckLines(tx, {
+        organizationId: entry.organizationId,
         storeId: entry.storeId,
         lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
       });

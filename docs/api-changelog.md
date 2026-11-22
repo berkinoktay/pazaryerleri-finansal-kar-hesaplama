@@ -26,6 +26,14 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Entering a desi moves today's waiting orders into profit**
+  (`PATCH /v1/organizations/{orgId}/stores/{storeId}/products/variants/{variantId}/dimensional-weight`,
+  `PATCH .../products/variants/dimensional-weight`). Setting a desi (any value, 0 included) now
+  re-checks the variant's orders of today that wait in the Live Performance buffer, in the same
+  transaction: an order whose every line has a cost and a desi moves on into profit, like a cost
+  attach already does. Only this store's variants that the write updated are checked; ids of
+  another store or organization trigger nothing. Clearing the desi (`null`) checks nothing, and
+  stored orders keep the desi captured at intake. Request and response shapes unchanged.
 - **Empty desi is missing, 0 is a real desi** (`GET /v1/organizations/{orgId}/stores/{storeId}/products`,
   `GET .../products/facets`, `PATCH .../products/variants/{variantId}/dimensional-weight`, the
   product pricing routes). A variant Trendyol sends no desi for now has `syncedDimensionalWeight`

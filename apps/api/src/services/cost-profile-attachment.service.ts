@@ -1,19 +1,14 @@
 import { prisma } from '@pazarsync/db';
-import type { CostProfile, Prisma } from '@pazarsync/db';
+import type { CostProfile } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
-import type { MappedOrder } from '@pazarsync/marketplace';
-import {
-  buildCalcCheckLines,
-  enqueueProfitRecomputeForVariants,
-  resolveOrderCalculability,
-} from '@pazarsync/profit';
-import { getBusinessDateAnchor } from '@pazarsync/utils';
+import { enqueueProfitRecomputeForVariants } from '@pazarsync/profit';
 
 import {
   CostProfileArchivedCannotAttachError,
   CostProfileNotFoundError,
   CostProfileVariantOrgMismatchError,
 } from '../lib/errors';
+import { flipBufferForVariants } from './live-performance-buffer-flip.service';
 
 // ─── Cross-org guard helpers ─────────────────────────────────────────────────
 
@@ -108,12 +103,15 @@ async function guardVariants(
  * collapses to one store. Guards against attaching store A's profile onto store
  * B's variant even within one org. (guardProfiles/guardVariants run first, so by
  * here every id is a real in-org profile/variant.)
+ *
+ * Returns the variants' single store id (null only when no variant resolved), so
+ * the Live Performance buffer flip runs store-scoped on exactly that store.
  */
 async function assertSameStore(
   orgId: string,
   profileIds: string[],
   variantIds: string[],
-): Promise<void> {
+): Promise<string | null> {
   const [profiles, variants] = await Promise.all([
     prisma.costProfile.findMany({
       where: { id: { in: profileIds }, organizationId: orgId },
@@ -130,102 +128,7 @@ async function assertSameStore(
   if (stores.size > 1) {
     throw new CostProfileVariantOrgMismatchError('(cross-store)', '(cross-store)');
   }
-}
-
-/**
- * Live Performance side-effect: flip PENDING buffer entries to PROMOTING when a
- * cost attach makes their order FULLY calculable. Runs inside the attach/replace
- * transaction so the flip commits atomically with the cost-link write.
- *
- * Only an entry whose EVERY line barcode now resolves to a cost-attached variant
- * is flipped (resolveOrderCalculability — the same gate the webhook receiver
- * uses). A multi-line order with one still-cost-missing line stays PENDING, so a
- * partially-costed order is never promoted into `orders` (cost-driven storage
- * discipline). Forward-only — never reverts PROMOTING → PENDING. The PR-C promote
- * worker then writes the PROMOTING entries to `orders` on its next tick.
- *
- * Cost-window scope (Berkin 2026-11-03): only a buffer row whose order day has NOT
- * ended yet (same-day or later) is flipped. A past-day row's cost window is already
- * closed, so the day-end flush -- not a late cost attach -- graduates it under the
- * cost-window rule (excluded unless its cost was timely). This is defense in depth
- * for the promote-tick exclusion check: a late cost must never promote a past-day
- * entry here.
- *
- * Returns the number of entries flipped (surfaced to the UI as
- * `bufferEntriesPromoted` for the "X sipariş kâr hesabına eklendi" toast).
- */
-async function flipBufferForVariants(
-  tx: Prisma.TransactionClient,
-  orgId: string,
-  variantIds: string[],
-): Promise<number> {
-  // Business-day anchor for the same-day guard on the flip update below. order_date
-  // is a DATE anchor, so this reuses the exact DATE comparison the day-end flush uses
-  // (orderDate < todayAnchor == past day) rather than a raw-SQL date cast.
-  const todayAnchor = getBusinessDateAnchor(new Date());
-
-  const variants = await tx.productVariant.findMany({
-    where: { id: { in: variantIds }, organizationId: orgId },
-    select: { barcode: true, storeId: true },
-  });
-  if (variants.length === 0) return 0;
-
-  const barcodesByStore = new Map<string, string[]>();
-  for (const v of variants) {
-    const list = barcodesByStore.get(v.storeId) ?? [];
-    list.push(v.barcode);
-    barcodesByStore.set(v.storeId, list);
-  }
-
-  let promoted = 0;
-  for (const [storeId, barcodes] of barcodesByStore.entries()) {
-    // Narrow to PENDING entries in this store whose mapped_order has a line with
-    // one of the just-attached barcodes — the only orders that could have just
-    // become calculable.
-    const candidates = await tx.$queryRaw<Array<{ id: string; mapped_order: unknown }>>`
-      SELECT id, mapped_order
-      FROM live_performance_buffer
-      WHERE store_id = ${storeId}::uuid
-        AND organization_id = ${orgId}::uuid
-        AND status = 'PENDING'::buffer_entry_status
-        AND EXISTS (
-          SELECT 1 FROM jsonb_array_elements(mapped_order->'lines') AS line
-          WHERE line->>'barcode' = ANY(${barcodes}::text[])
-        )
-    `;
-
-    const promotableIds: string[] = [];
-    for (const row of candidates) {
-      const mapped = row.mapped_order as unknown as MappedOrder;
-      const calcLines = await buildCalcCheckLines(tx, {
-        storeId,
-        lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
-      });
-      if (resolveOrderCalculability(calcLines).kind === 'calculable') {
-        promotableIds.push(row.id);
-      }
-    }
-
-    if (promotableIds.length > 0) {
-      const result = await tx.livePerformanceBuffer.updateMany({
-        // Same-day guard (cost-window rule): flip only rows whose order day has not
-        // ended. A past-day row stays PENDING for the day-end flush to graduate (and
-        // exclude unless its cost was timely); a late cost attach must not promote it.
-        // organizationId is defense in depth: the candidate ids already come from a
-        // tenant-filtered query, but every buffer write pins the org (CLAUDE.md).
-        where: {
-          id: { in: promotableIds },
-          organizationId: orgId,
-          status: 'PENDING',
-          orderDate: { gte: todayAnchor },
-        },
-        data: { status: 'PROMOTING' },
-      });
-      promoted += result.count;
-    }
-  }
-
-  return promoted;
+  return variants[0]?.storeId ?? null;
 }
 
 // ─── Service functions ───────────────────────────────────────────────────────
@@ -249,7 +152,7 @@ export async function attachCostProfiles(
 ): Promise<{ attached: number; bufferEntriesPromoted: number }> {
   await guardProfiles(orgId, profileIds, accessibleStoreIds);
   await guardVariants(orgId, variantIds, accessibleStoreIds);
-  await assertSameStore(orgId, profileIds, variantIds);
+  const storeId = await assertSameStore(orgId, profileIds, variantIds);
 
   // Build Cartesian product of (profileId, variantId) pairs
   const data = profileIds.flatMap((profileId) =>
@@ -268,7 +171,10 @@ export async function attachCostProfiles(
       data,
       skipDuplicates: true,
     });
-    const bufferEntriesPromoted = await flipBufferForVariants(tx, orgId, variantIds);
+    const bufferEntriesPromoted =
+      storeId === null
+        ? 0
+        : await flipBufferForVariants(tx, { organizationId: orgId, storeId, variantIds });
     await enqueueProfitRecomputeForVariants(tx, {
       organizationId: orgId,
       variantIds,
@@ -348,7 +254,7 @@ export async function replaceCostProfilesForVariants(
     await guardProfiles(orgId, profileIds, accessibleStoreIds);
   }
   await guardVariants(orgId, variantIds, accessibleStoreIds);
-  await assertSameStore(orgId, profileIds, variantIds);
+  const storeId = await assertSameStore(orgId, profileIds, variantIds);
 
   const bufferEntriesPromoted = await prisma.$transaction(async (tx) => {
     // Delete all existing links for these variants within the org
@@ -374,7 +280,10 @@ export async function replaceCostProfilesForVariants(
 
     // Re-evaluate buffer calculability after the final link state is set. A
     // clear (empty profileIds) leaves variants cost-missing → flip is a no-op.
-    const promoted = await flipBufferForVariants(tx, orgId, variantIds);
+    const promoted =
+      storeId === null
+        ? 0
+        : await flipBufferForVariants(tx, { organizationId: orgId, storeId, variantIds });
     await enqueueProfitRecomputeForVariants(tx, {
       organizationId: orgId,
       variantIds,

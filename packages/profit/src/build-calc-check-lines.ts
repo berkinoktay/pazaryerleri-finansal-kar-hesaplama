@@ -12,6 +12,9 @@ interface InputLine {
  * digital flag, all from the ONE variant query below (no N+1). Returns the shape
  * the calculability gate (`resolveOrderCalculability`) consumes.
  *
+ * Tenant scope: the variant query filters on BOTH `organizationId` and `storeId`
+ * (SECURITY.md), so a store id or barcode of another organization never resolves.
+ *
  * Effective desi (plan PR-2c): the seller's override, else the Trendyol desi;
  * null when neither exists. `??` (never `||`) so a desi of 0, a real desi, is kept.
  *
@@ -26,11 +29,15 @@ interface InputLine {
  */
 export async function buildCalcCheckLines(
   db: Prisma.TransactionClient,
-  args: { storeId: string; lines: InputLine[] },
+  args: { organizationId: string; storeId: string; lines: InputLine[] },
 ): Promise<OrderLineForCalcCheck[]> {
   const barcodes = args.lines.map((line) => line.barcode);
   const variants = await db.productVariant.findMany({
-    where: { storeId: args.storeId, barcode: { in: barcodes } },
+    where: {
+      organizationId: args.organizationId,
+      storeId: args.storeId,
+      barcode: { in: barcodes },
+    },
     select: {
       id: true,
       barcode: true,

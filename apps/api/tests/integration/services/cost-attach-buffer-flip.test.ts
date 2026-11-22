@@ -22,11 +22,15 @@ function buildMappedOrder(barcodes: string[]): Prisma.InputJsonValue {
   return { lines: barcodes.map((barcode) => ({ barcode })) } as unknown as Prisma.InputJsonValue;
 }
 
-/** A cost-MISSING variant (resolves by barcode, no cost profile attached yet). */
+/**
+ * A cost-MISSING variant (resolves by barcode, no cost profile attached yet). An
+ * omitted desi keeps the column default 0 (a real desi); null is a variant with no desi.
+ */
 async function seedVariant(
   organizationId: string,
   storeId: string,
   barcode: string,
+  syncedDimensionalWeight?: string | null,
 ): Promise<{ id: string }> {
   const product = await prisma.product.create({
     data: {
@@ -47,6 +51,7 @@ async function seedVariant(
       stockCode: `sk-${barcode}`,
       salePrice: '100',
       listPrice: '120',
+      ...(syncedDimensionalWeight !== undefined ? { syncedDimensionalWeight } : {}),
     },
     select: { id: true },
   });
@@ -80,6 +85,40 @@ describe('cost attach — Live Performance buffer flip (full-calculability)', ()
     expect(result.bufferEntriesPromoted).toBe(3);
     const entries = await prisma.livePerformanceBuffer.findMany({ where: { storeId: store.id } });
     expect(entries.every((e) => e.status === 'PROMOTING')).toBe(true);
+  });
+
+  it('skips a malformed buffer entry instead of failing the cost attach', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const variant = await seedVariant(org.id, store.id, 'BC-1');
+    const profile = await createCostProfile(org.id, { storeId: store.id, amountGross: '50.00' });
+
+    const good = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-good',
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder(['BC-1']),
+    });
+    // One line carries the barcode, another has none: it can never become calculable.
+    const missingBarcode = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-no-barcode',
+      status: 'PENDING',
+      mappedOrder: { lines: [{ barcode: 'BC-1', quantity: 1 }, { quantity: 1 }] },
+    });
+    // Lines stored as an object instead of an array must not raise in the scan.
+    const linesNotArray = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-lines-object',
+      status: 'PENDING',
+      mappedOrder: { lines: { barcode: 'BC-1', quantity: 1 } },
+    });
+
+    const result = await attachCostProfiles(org.id, [profile.id], [variant.id], randomUUID(), null);
+
+    expect(result.bufferEntriesPromoted).toBe(1);
+    const statusOf = async (id: string): Promise<string | undefined> =>
+      (await prisma.livePerformanceBuffer.findUnique({ where: { id } }))?.status;
+    expect(await statusOf(good.id)).toBe('PROMOTING');
+    expect(await statusOf(missingBarcode.id)).toBe('PENDING');
+    expect(await statusOf(linesNotArray.id)).toBe('PENDING');
   });
 
   it('does NOT flip a multi-line order until EVERY line is cost-attached', async () => {
@@ -221,5 +260,69 @@ describe('cost attach — Live Performance buffer flip (full-calculability)', ()
       where: { platformOrderId: 'pkg-pastday' },
     });
     expect(pastday.status).toBe('PENDING');
+  });
+
+  it('a cost attach leaves an entry whose product has no desi PENDING and promotes the one with a desi', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const noDesi = await seedVariant(org.id, store.id, 'BC-NO-DESI', null);
+    const withDesi = await seedVariant(org.id, store.id, 'BC-DESI', '1.50');
+    const profile = await createCostProfile(org.id, { storeId: store.id, amountGross: '50.00' });
+
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-no-desi',
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder(['BC-NO-DESI']),
+    });
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-desi',
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder(['BC-DESI']),
+    });
+
+    const result = await attachCostProfiles(
+      org.id,
+      [profile.id],
+      [noDesi.id, withDesi.id],
+      randomUUID(),
+      null,
+    );
+
+    expect(result.bufferEntriesPromoted).toBe(1);
+    const desiless = await prisma.livePerformanceBuffer.findFirstOrThrow({
+      where: { platformOrderId: 'pkg-no-desi' },
+    });
+    expect(desiless.status).toBe('PENDING');
+    const desiPresent = await prisma.livePerformanceBuffer.findFirstOrThrow({
+      where: { platformOrderId: 'pkg-desi' },
+    });
+    expect(desiPresent.status).toBe('PROMOTING');
+  });
+
+  it('replaceCostProfilesForVariants also leaves a desiless entry PENDING', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const noDesi = await seedVariant(org.id, store.id, 'BC-R-NO-DESI', null);
+    const profile = await createCostProfile(org.id, { storeId: store.id, amountGross: '50.00' });
+
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-r-no-desi',
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder(['BC-R-NO-DESI']),
+    });
+
+    const result = await replaceCostProfilesForVariants(
+      org.id,
+      [noDesi.id],
+      [profile.id],
+      randomUUID(),
+      null,
+    );
+
+    expect(result.bufferEntriesPromoted).toBe(0);
+    expect(
+      (await prisma.livePerformanceBuffer.findFirstOrThrow({ where: { storeId: store.id } }))
+        .status,
+    ).toBe('PENDING');
   });
 });

@@ -115,6 +115,7 @@ describe('buildCalcCheckLines', () => {
     });
 
     const lines = await buildCalcCheckLines(prisma, {
+      organizationId,
       storeId,
       lines: [
         { barcode: 'OVR' },
@@ -176,6 +177,7 @@ describe('buildCalcCheckLines', () => {
     });
 
     const [lineResult] = await buildCalcCheckLines(prisma, {
+      organizationId,
       storeId,
       lines: [{ barcode: 'DIG' }],
     });
@@ -202,6 +204,7 @@ describe('buildCalcCheckLines', () => {
     });
 
     const lines = await buildCalcCheckLines(prisma, {
+      organizationId,
       storeId,
       lines: [{ barcode: 'UNKNOWN' }, { barcode: 'OTHER-STORE' }],
     });
@@ -222,5 +225,51 @@ describe('buildCalcCheckLines', () => {
         isDigital: false,
       },
     ]);
+  });
+
+  it("does not resolve another organization's variant, even with that store id and barcode", async () => {
+    const ownOrganizationId = await createOrg();
+    const otherOrganizationId = await createOrg();
+    const otherStoreId = await createAdditionalStore({
+      organizationId: otherOrganizationId,
+      name: 'Other Org Store',
+    });
+    const otherVariantId = await createVariant({
+      organizationId: otherOrganizationId,
+      storeId: otherStoreId,
+      barcode: 'OTHER-ORG',
+      syncedDimensionalWeight: '2',
+    });
+    await attachCostProfile({
+      organizationId: otherOrganizationId,
+      storeId: otherStoreId,
+      productVariantId: otherVariantId,
+      amountGross: '40.00',
+      vatRate: '20',
+    });
+
+    const lines = await buildCalcCheckLines(prisma, {
+      organizationId: ownOrganizationId,
+      storeId: otherStoreId,
+      lines: [{ barcode: 'OTHER-ORG' }],
+    });
+
+    expect(lines).toEqual([
+      {
+        barcode: 'OTHER-ORG',
+        variantId: null,
+        unitCostSnapshotNet: null,
+        unitDesi: null,
+        isDigital: false,
+      },
+    ]);
+
+    // Positive control: the owning organization resolves the same line.
+    const [ownedLine] = await buildCalcCheckLines(prisma, {
+      organizationId: otherOrganizationId,
+      storeId: otherStoreId,
+      lines: [{ barcode: 'OTHER-ORG' }],
+    });
+    expect(ownedLine?.variantId).toBe(otherVariantId);
   });
 });

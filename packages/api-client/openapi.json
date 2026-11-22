@@ -13014,7 +13014,7 @@
           "Products"
         ],
         "summary": "Set or clear the user override for a variant's dimensional weight (desi)",
-        "description": "Writes exclusively to ProductVariant.dimensional_weight_override (the user-override column). Trendyol's value lives in a sister column that this endpoint never touches — so the override survives every subsequent sync. Pass `dimensionalWeight: null` to clear the override and revert the read path to the marketplace-synced value.",
+        "description": "Writes exclusively to ProductVariant.dimensional_weight_override (the user-override column). Trendyol's value lives in a sister column that this endpoint never touches — so the override survives every subsequent sync. Pass `dimensionalWeight: null` to clear the override and revert the read path to the marketplace-synced value. Entering a desi re-checks the variant's orders of today that wait in the Live Performance buffer: an order whose every line now has a cost and a desi moves on into profit. Stored orders keep the desi captured at intake.",
         "security": [
           {
             "bearerAuth": []
@@ -13164,7 +13164,7 @@
           "Products"
         ],
         "summary": "Apply one dimensional-weight value (or clear) across many variants",
-        "description": "Same single-column write rule as the per-variant endpoint: only ProductVariant.dimensional_weight_override is touched. Variant IDs that don't belong to the org+store are silently filtered out (not surfaced as an error — the UX is \"apply to what you can\"). Returns the actual updated count so the UI can warn when the selection went stale between click and submit.",
+        "description": "Same single-column write rule as the per-variant endpoint: only ProductVariant.dimensional_weight_override is touched. Variant IDs that don't belong to the org+store are silently filtered out (not surfaced as an error — the UX is \"apply to what you can\"). Returns the actual updated count so the UI can warn when the selection went stale between click and submit. Entering a desi re-checks the updated variants' orders of today that wait in the Live Performance buffer, like the per-variant endpoint; filtered-out ids trigger nothing.",
         "security": [
           {
             "bearerAuth": []

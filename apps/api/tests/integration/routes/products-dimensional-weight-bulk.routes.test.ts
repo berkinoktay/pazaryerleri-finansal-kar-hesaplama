@@ -6,6 +6,8 @@
  *   2. Cross-tenant IDs are silently filtered out (never mutated).
  *   3. Null body clears overrides across all listed variants.
  *   4. Empty / oversized / malformed input → 422.
+ *   5. Entering a desi promotes today's PENDING Live Performance buffer entries of
+ *      the written variants only (never another store's entries).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -18,7 +20,13 @@ import { prisma } from '@pazarsync/db';
 import { createApp } from '@/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization, createStore } from '../../helpers/factories';
+import {
+  createBufferEntry,
+  createCostProfile,
+  createMembership,
+  createOrganization,
+  createStore,
+} from '../../helpers/factories';
 
 const app = createApp();
 
@@ -38,7 +46,11 @@ async function setupCtx(): Promise<Ctx> {
 
 async function seedVariant(
   ctx: Ctx,
-  opts: { syncedDimensionalWeight?: string; dimensionalWeightOverride?: string | null } = {},
+  opts: {
+    syncedDimensionalWeight?: string | null;
+    dimensionalWeightOverride?: string | null;
+    barcode?: string;
+  } = {},
 ): Promise<string> {
   const product = await prisma.product.create({
     data: {
@@ -55,7 +67,7 @@ async function seedVariant(
       storeId: ctx.storeId,
       productId: product.id,
       platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000_000)),
-      barcode: `BC-${randomUUID().slice(0, 8)}`,
+      barcode: opts.barcode ?? `BC-${randomUUID().slice(0, 8)}`,
       stockCode: `STK-${randomUUID().slice(0, 8)}`,
       salePrice: new Decimal('100.00'),
       listPrice: new Decimal('100.00'),
@@ -68,6 +80,21 @@ async function seedVariant(
     },
   });
   return variant.id;
+}
+
+/** Links a cost profile to the variant directly (the attach service runs its own flip). */
+async function linkCost(orgId: string, storeId: string, variantId: string): Promise<void> {
+  const profile = await createCostProfile(orgId, { storeId, amountGross: '50.00' });
+  await prisma.productVariantCostProfile.create({
+    data: { productVariantId: variantId, profileId: profile.id, organizationId: orgId },
+  });
+}
+
+async function bufferStatus(platformOrderId: string): Promise<string> {
+  const entry = await prisma.livePerformanceBuffer.findFirstOrThrow({
+    where: { platformOrderId },
+  });
+  return entry.status;
 }
 
 function bulkUrl(ctx: Ctx): string {
@@ -192,5 +219,99 @@ describe('PATCH .../products/variants/dimensional-weight (bulk)', () => {
     // 0 is the floor — accepted.
     const zero = await bulkPatch(ctx, { variantIds: [v], dimensionalWeight: '0' });
     expect(zero.status).toBe(200);
+  });
+});
+
+describe('PATCH .../products/variants/dimensional-weight (bulk): Live Performance buffer', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("promotes today's pending entries of every written variant that has a cost", async () => {
+    const ctx = await setupCtx();
+    const v1 = await seedVariant(ctx, { syncedDimensionalWeight: null, barcode: 'BC-1' });
+    const v2 = await seedVariant(ctx, { syncedDimensionalWeight: null, barcode: 'BC-2' });
+    const v3 = await seedVariant(ctx, { syncedDimensionalWeight: null, barcode: 'BC-3' });
+    await linkCost(ctx.orgId, ctx.storeId, v1);
+    await linkCost(ctx.orgId, ctx.storeId, v2);
+    // v3 has no cost: its order stays pending after the desi is entered.
+    await createBufferEntry(ctx.orgId, ctx.storeId, {
+      platformOrderId: 'pkg-1',
+      mappedOrder: { lines: [{ barcode: 'BC-1' }] },
+    });
+    await createBufferEntry(ctx.orgId, ctx.storeId, {
+      platformOrderId: 'pkg-2',
+      mappedOrder: { lines: [{ barcode: 'BC-2' }] },
+    });
+    await createBufferEntry(ctx.orgId, ctx.storeId, {
+      platformOrderId: 'pkg-3',
+      mappedOrder: { lines: [{ barcode: 'BC-3' }] },
+    });
+
+    const res = await bulkPatch(ctx, { variantIds: [v1, v2, v3], dimensionalWeight: '1.50' });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ updated: 3 });
+    expect(await bufferStatus('pkg-1')).toBe('PROMOTING');
+    expect(await bufferStatus('pkg-2')).toBe('PROMOTING');
+    expect(await bufferStatus('pkg-3')).toBe('PENDING');
+  });
+
+  it("a variant id of another store never promotes that store's buffer entry", async () => {
+    const ctx = await setupCtx();
+    const otherStore = await createStore(ctx.orgId, { name: 'Other Store' });
+    const ownVariant = await seedVariant(ctx, {
+      syncedDimensionalWeight: null,
+      barcode: 'BC-OWN',
+    });
+    await linkCost(ctx.orgId, ctx.storeId, ownVariant);
+    // The other store's variant is fully calculable (cost + desi), so any re-check
+    // of its buffer entry would promote it.
+    const foreignVariant = await seedVariant(
+      { ...ctx, storeId: otherStore.id },
+      { syncedDimensionalWeight: '1.00', barcode: 'BC-FOREIGN' },
+    );
+    await linkCost(ctx.orgId, otherStore.id, foreignVariant);
+    await createBufferEntry(ctx.orgId, ctx.storeId, {
+      platformOrderId: 'pkg-own',
+      mappedOrder: { lines: [{ barcode: 'BC-OWN' }] },
+    });
+    await createBufferEntry(ctx.orgId, otherStore.id, {
+      platformOrderId: 'pkg-foreign',
+      mappedOrder: { lines: [{ barcode: 'BC-FOREIGN' }] },
+    });
+
+    const res = await bulkPatch(ctx, {
+      variantIds: [ownVariant, foreignVariant],
+      dimensionalWeight: '2.00',
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ updated: 1 });
+    expect(await bufferStatus('pkg-own')).toBe('PROMOTING');
+    expect(await bufferStatus('pkg-foreign')).toBe('PENDING');
+    const foreignRow = await prisma.productVariant.findFirstOrThrow({
+      where: { id: foreignVariant },
+    });
+    expect(foreignRow.dimensionalWeightOverride).toBeNull();
+  });
+
+  it('clearing the desi does not re-check the buffer', async () => {
+    const ctx = await setupCtx();
+    const v = await seedVariant(ctx, { syncedDimensionalWeight: '1.00', barcode: 'BC-CLEAR' });
+    await linkCost(ctx.orgId, ctx.storeId, v);
+    await createBufferEntry(ctx.orgId, ctx.storeId, {
+      platformOrderId: 'pkg-clear',
+      mappedOrder: { lines: [{ barcode: 'BC-CLEAR' }] },
+    });
+
+    const res = await bulkPatch(ctx, { variantIds: [v], dimensionalWeight: null });
+
+    expect(res.status).toBe(200);
+    expect(await bufferStatus('pkg-clear')).toBe('PENDING');
   });
 });
