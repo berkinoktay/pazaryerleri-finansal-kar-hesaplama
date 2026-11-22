@@ -19,10 +19,26 @@ import {
 } from '../lib/dimensional-weight-errors';
 import { parseDesiInput } from '../lib/dimensional-weight-input';
 
+/**
+ * The only variant fields the popover reads. A full VariantSummary satisfies
+ * it (products table); callers outside the products feature (live
+ * performance) pass just these four wire fields.
+ */
+export type DesiEditableVariant = Pick<
+  VariantSummary,
+  'id' | 'dimensionalWeight' | 'syncedDimensionalWeight' | 'isDimensionalWeightOverridden'
+>;
+
 export interface DesiCellPopoverProps {
   orgId: string;
   storeId: string;
-  variant: VariantSummary;
+  variant: DesiEditableVariant;
+  /**
+   * Called after a save or reset succeeds, once the popover has closed; never
+   * on error. Lets an outside caller (e.g. live performance) refresh its own
+   * queries.
+   */
+  onSaved?: () => void;
   children: React.ReactNode;
 }
 
@@ -33,13 +49,13 @@ export interface DesiCellPopoverProps {
  * formatter, never next-intl's: the field's convention is Turkish whatever the
  * UI locale.
  */
-function initialInputValue(variant: VariantSummary): string {
+function initialInputValue(variant: DesiEditableVariant): string {
   if (variant.dimensionalWeight === null) return '';
   return formatTrDecimal(variant.dimensionalWeight);
 }
 
 /** Trendyol's desi; null when Trendyol sent none (its 0 is stored as null too). */
-function syncedDesi(variant: VariantSummary): Decimal | null {
+function syncedDesi(variant: DesiEditableVariant): Decimal | null {
   if (variant.syncedDimensionalWeight === null) return null;
   return new Decimal(variant.syncedDimensionalWeight);
 }
@@ -63,6 +79,7 @@ export function DesiCellPopover({
   orgId,
   storeId,
   variant,
+  onSaved,
   children,
 }: DesiCellPopoverProps): React.ReactElement {
   const t = useTranslations('products.desiCell.popover');
@@ -89,7 +106,10 @@ export function DesiCellPopover({
     mutation.mutate(
       { orgId, storeId, variantId: variant.id, dimensionalWeight: nextValue },
       {
-        onSuccess: () => setOpen(false),
+        onSuccess: () => {
+          setOpen(false);
+          onSaved?.();
+        },
         onError: (err) => {
           const code = pickDimensionalWeightErrorCode(err);
           if (code !== null) setErrorCode(code);

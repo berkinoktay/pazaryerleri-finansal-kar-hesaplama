@@ -102,6 +102,21 @@ export function evaluateCrossFeatureImport(imp: CrossFeatureImport): ViolationDe
     };
   }
 
+  // `live-performance` reuses ONLY the products feature's desi popover
+  // (DesiCellPopover) so the seller can enter a missing desi in place.
+  // PAIR-SPECIFIC, audited exception: ONLY live-performance may import from
+  // products - every other source still errors. If a THIRD feature needs the
+  // desi popover, do NOT widen this rule; promote the popover (and its hooks,
+  // lib and api dependencies) to the shared layer instead.
+  // See docs/superpowers/specs/2026-11-22-canli-performans-desi-gostergesi-design.md.
+  if (imp.targetFeature === 'products' && imp.sourceFeature === 'live-performance') {
+    return {
+      severity: 'allow',
+      message:
+        'live performance reuses the products desi popover (live-performance -> products, audited)',
+    };
+  }
+
   if (imp.isTypeOnly) {
     return {
       severity: 'warn',

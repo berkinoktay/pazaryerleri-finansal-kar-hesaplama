@@ -13,6 +13,11 @@ export interface CostCellCreateBridgeProps {
   variantId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * Called after the new profile is attached to the variant; never on error.
+   * Lets an outside caller (e.g. live performance) refresh its own queries.
+   */
+  onChanged?: () => void;
 }
 
 /**
@@ -37,15 +42,19 @@ export function CostCellCreateBridge({
   variantId,
   open,
   onOpenChange,
+  onChanged,
 }: CostCellCreateBridgeProps): React.ReactElement {
   const attachMutation = useAttachCostProfiles();
 
   function handleSuccess(profile: CostProfile) {
-    attachMutation.mutate({
-      orgId,
-      profileIds: [profile.id],
-      variantIds: [variantId],
-    });
+    attachMutation.mutate(
+      {
+        orgId,
+        profileIds: [profile.id],
+        variantIds: [variantId],
+      },
+      { onSuccess: () => onChanged?.() },
+    );
   }
 
   return (

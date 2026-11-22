@@ -1,9 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { CostCellPopover } from '@/features/costs/components/cost-cell-popover';
 
+import trMessages from '../../../../messages/tr.json';
 import { render, screen, waitFor } from '../../../helpers/render';
 import { server, http, HttpResponse } from '../../../helpers/msw';
+
+// Turkish copy comes from the catalog so the new tests stay ASCII.
+const removeLabel = (name: string): string =>
+  trMessages.products.costCell.popover.removeLabel.replace('{name}', name);
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -209,5 +214,81 @@ describe('CostCellPopover', () => {
     await waitFor(() => {
       expect(detachCalled).toBe(true);
     });
+  });
+
+  it('calls onChanged after attaching a profile', async () => {
+    let attachCalls = 0;
+    server.use(
+      http.get(
+        `${TEST_API_BASE}/v1/organizations/${ORG_ID}/variants/${VARIANT_ID}/cost-profiles`,
+        () => HttpResponse.json(attachedProfilesResponse),
+      ),
+      http.get(`${TEST_API_BASE}/v1/organizations/${ORG_ID}/cost-profiles`, () =>
+        HttpResponse.json(allProfilesResponse),
+      ),
+      http.post(
+        `${TEST_API_BASE}/v1/organizations/${ORG_ID}/cost-profile-attachments/attach`,
+        () => {
+          attachCalls += 1;
+          return HttpResponse.json({ attached: 1 });
+        },
+      ),
+    );
+    const onChanged = vi.fn();
+
+    const { user } = render(
+      <CostCellPopover
+        orgId={ORG_ID}
+        variantId={VARIANT_ID}
+        storeId={STORE_ID}
+        onChanged={onChanged}
+      >
+        <button type="button">Open</button>
+      </CostCellPopover>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open' }));
+    await user.click(await screen.findByRole('option', { name: /Paketleme/ }));
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    expect(attachCalls).toBe(1);
+  });
+
+  it('calls onChanged after detaching a profile', async () => {
+    let detachCalls = 0;
+    server.use(
+      http.get(
+        `${TEST_API_BASE}/v1/organizations/${ORG_ID}/variants/${VARIANT_ID}/cost-profiles`,
+        () => HttpResponse.json(attachedProfilesResponse),
+      ),
+      http.get(`${TEST_API_BASE}/v1/organizations/${ORG_ID}/cost-profiles`, () =>
+        HttpResponse.json(allProfilesResponse),
+      ),
+      http.post(
+        `${TEST_API_BASE}/v1/organizations/${ORG_ID}/cost-profile-attachments/detach`,
+        () => {
+          detachCalls += 1;
+          return HttpResponse.json({ detached: 1 });
+        },
+      ),
+    );
+    const onChanged = vi.fn();
+
+    const { user } = render(
+      <CostCellPopover
+        orgId={ORG_ID}
+        variantId={VARIANT_ID}
+        storeId={STORE_ID}
+        onChanged={onChanged}
+      >
+        <button type="button">Open</button>
+      </CostCellPopover>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open' }));
+    await user.click(await screen.findByRole('button', { name: removeLabel('COGS Profil') }));
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    expect(detachCalls).toBe(1);
   });
 });

@@ -44,6 +44,12 @@ export interface CostCellPopoverProps {
    * row) without constructing a full variant object.
    */
   variantId: string;
+  /**
+   * Called after an attach, a detach or a create-and-attach succeeds; never on
+   * error. Lets an outside caller (e.g. live performance) refresh its own
+   * queries.
+   */
+  onChanged?: () => void;
   children: React.ReactNode;
 }
 
@@ -71,6 +77,7 @@ export function CostCellPopover({
   orgId,
   storeId,
   variantId,
+  onChanged,
   children,
 }: CostCellPopoverProps): React.ReactElement {
   const t = useTranslations('products.costCell.popover');
@@ -99,20 +106,26 @@ export function CostCellPopover({
 
   function handleAttach(profileId: string) {
     const profile = allProfilesQuery.data?.data.find((p) => p.id === profileId);
-    attachMutation.mutate({
-      orgId,
-      profileIds: [profileId],
-      variantIds: [variantId],
-      ...(profile !== undefined ? { optimisticProfiles: [profile] } : {}),
-    });
+    attachMutation.mutate(
+      {
+        orgId,
+        profileIds: [profileId],
+        variantIds: [variantId],
+        ...(profile !== undefined ? { optimisticProfiles: [profile] } : {}),
+      },
+      { onSuccess: () => onChanged?.() },
+    );
   }
 
   function handleDetach(profile: CostProfile) {
-    detachMutation.mutate({
-      orgId,
-      profileIds: [profile.id],
-      variantIds: [variantId],
-    });
+    detachMutation.mutate(
+      {
+        orgId,
+        profileIds: [profile.id],
+        variantIds: [variantId],
+      },
+      { onSuccess: () => onChanged?.() },
+    );
   }
 
   const isInitialLoading = attachedQuery.isLoading;
@@ -233,6 +246,7 @@ export function CostCellPopover({
         variantId={variantId}
         open={createOpen}
         onOpenChange={setCreateOpen}
+        onChanged={onChanged}
       />
     </>
   );
