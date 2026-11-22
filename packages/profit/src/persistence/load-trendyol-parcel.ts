@@ -118,10 +118,10 @@ export function reportedProviderName(cargoProviderName: string | null): string |
  * normalised name (never a silent pick among equals). Inactive carriers are never passed
  * in (the query filters `active = true`), so an inactive namesake is not recognized either.
  *
- * For an own-contract store the matched carrier still drives Barem eligibility, while
- * the own desi tariff stays store-level -- intended (plan decision 3): the carrier
- * identity decides whether Barem applies, the store's own prices decide the amount. A
- * not-recognized carrier there only means no Barem, never a zero estimate.
+ * An own-contract order does not consult the carrier at all: its outbound and return legs
+ * are priced from the store's own desi tariff, never from the carrier's desi rows or Barem
+ * (`resolveTrendyolShippingNet`), so a not-recognized carrier there raises no carrier
+ * issue and changes no amount. Only a Trendyol-contract order is priced from the carrier.
  */
 export function resolveOrderCarrier(
   cargoProviderName: string | null,

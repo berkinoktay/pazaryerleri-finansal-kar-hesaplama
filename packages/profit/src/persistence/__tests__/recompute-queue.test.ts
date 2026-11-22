@@ -20,10 +20,12 @@ import {
   ProfitRecomputeReason,
   ProfitStatementView,
   ProfitStatus,
+  ShippingTariffSource,
 } from '@pazarsync/db/enums';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { PROFIT_ENGINE_VERSION } from '../../core/engine-version';
+import { MISSING_EXPORT_RETURN_TIER_DETAIL } from '../../marketplaces/trendyol/estimate-returns';
 import { parseStoredIssues } from '../../read/stored-issues';
 import {
   type ClaimedRecompute,
@@ -829,6 +831,129 @@ function expectedGapRow(parcel: MelontikParcel): QueueRow {
   };
 }
 
+/** The Trendyol platform service fee definitions (the gap tests null, delete or fill them). */
+const PLATFORM_SERVICE_FEE = { platform: 'TRENDYOL', feeType: 'PLATFORM_SERVICE' } as const;
+
+/**
+ * Backdates every fee definition (created and updated) so it predates every statement,
+ * whatever the clocks say. Prisma moves `updatedAt` on every write, so it is set too.
+ */
+async function backdateFeeDefinitions(): Promise<void> {
+  await prisma.feeDefinition.updateMany({ data: { createdAt: LONG_AGO, updatedAt: LONG_AGO } });
+}
+
+/** One instant after `at`: a reference change the sweep must see as newer than `at`. */
+function after(at: Date): Date {
+  return new Date(at.getTime() + 1000);
+}
+
+/** Creates the Trendyol international service fee definition an export parcel resolves. */
+async function createInternationalServiceFee(): Promise<void> {
+  await prisma.feeDefinition.create({
+    data: {
+      platform: 'TRENDYOL',
+      feeType: 'INTERNATIONAL_SERVICE',
+      displayName: 'Uluslararasi Hizmet Bedeli',
+      calculationKind: 'RATE_OF_SALE',
+      rateOfSale: '0.0600',
+      defaultVatRate: '20.00',
+      effectiveFrom: new Date('2024-01-01T00:00:00Z'),
+    },
+  });
+}
+
+/** Records an accepted return of one order item (a claim with one accepted claim item). */
+async function acceptReturn(parcel: MelontikParcel, orderItemId: string): Promise<void> {
+  const claim = await prisma.orderClaim.create({
+    data: {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      orderId: parcel.orderId,
+      marketplaceClaimId: `claim-${randomUUID().slice(0, 8)}`,
+      claimDate: new Date(),
+      resolved: false,
+    },
+  });
+  await prisma.orderClaimItem.create({
+    data: {
+      claimId: claim.id,
+      orderItemId,
+      marketplaceClaimItemId: `acc-${randomUUID()}`,
+      reasonCode: 'DAMAGEDITEM',
+      reasonName: 'reason',
+      status: 'Accepted',
+      acceptedBySeller: true,
+      resolved: true,
+    },
+  });
+}
+
+/** A queue row's retry state: what a sweep must leave untouched on an already queued order. */
+interface QueuedRequestState {
+  readonly reason: ProfitRecomputeReason;
+  readonly requestedAt: Date;
+  readonly nextAttemptAt: Date;
+  readonly attempts: number;
+  readonly lastError: string | null;
+  readonly updatedAt: Date;
+}
+
+/** The retry state of the order's queue row; throws when the order has none. */
+function readQueuedRequest(orderId: string): Promise<QueuedRequestState> {
+  return prisma.profitRecomputeRequest.findUniqueOrThrow({
+    where: { orderId },
+    select: {
+      reason: true,
+      requestedAt: true,
+      nextAttemptAt: true,
+      attempts: true,
+      lastError: true,
+      updatedAt: true,
+    },
+  });
+}
+
+/**
+ * Queues the order as a request that already failed three times and waits out its
+ * backoff (next attempt an hour away), and returns that state.
+ */
+async function queueBackedOffRequest(parcel: MelontikParcel): Promise<QueuedRequestState> {
+  await enqueueProfitRecompute(prisma, {
+    organizationId: parcel.organizationId,
+    storeId: parcel.storeId,
+    reason: ProfitRecomputeReason.ORDER_CHANGED,
+    orderIds: [parcel.orderId],
+  });
+  await prisma.profitRecomputeRequest.update({
+    where: { orderId: parcel.orderId },
+    data: {
+      attempts: 3,
+      lastError: 'test failure',
+      nextAttemptAt: new Date(Date.now() + 3_600_000),
+    },
+  });
+  return readQueuedRequest(parcel.orderId);
+}
+
+/** The latest `updatedAt` of the given orders' best-known statements. */
+async function latestBestKnownUpdate(parcels: readonly MelontikParcel[]): Promise<Date> {
+  let latest = LONG_AGO;
+  for (const parcel of parcels) {
+    const statement = await readStatement(parcel.orderId, ProfitStatementView.BEST_KNOWN);
+    if (statement.updatedAt > latest) {
+      latest = statement.updatedAt;
+    }
+  }
+  return latest;
+}
+
+/**
+ * The start of the micro-export tier version the export gap test adds: before the
+ * melontik order date and after the seeded version, so it is the one in force. Tier
+ * versions survive `truncateAll`, so the test deletes it afterwards.
+ */
+const EXPORT_GAP_TIER_VERSION_START = new Date('2026-10-01T00:00:00.000Z');
+
 /** Creates a Trendyol platform service fee definition with an explicit creation instant. */
 async function createPlatformServiceFee(params: {
   readonly effectiveFrom: Date;
@@ -860,6 +985,10 @@ describe('gap-fill sweeps', () => {
   afterEach(async () => {
     await prisma.shippingCarrier.deleteMany({
       where: { platform: Platform.TRENDYOL, code: GAP_FILL_CARRIER.code },
+    });
+    // Its tiers cascade.
+    await prisma.microExportReturnFeeTierVersion.deleteMany({
+      where: { effectiveFrom: EXPORT_GAP_TIER_VERSION_START },
     });
   });
 
@@ -966,11 +1095,8 @@ describe('gap-fill sweeps', () => {
         profitExclusionReason: ProfitExclusionReason.COST_DEADLINE_MISSED,
       },
     });
-    await prisma.feeDefinition.deleteMany({
-      where: { platform: 'TRENDYOL', feeType: 'PLATFORM_SERVICE' },
-    });
-    // The remaining definitions predate every statement, whatever the clocks say.
-    await prisma.feeDefinition.updateMany({ data: { createdAt: LONG_AGO } });
+    await prisma.feeDefinition.deleteMany({ where: PLATFORM_SERVICE_FEE });
+    await backdateFeeDefinitions();
     await computeParcels([open, excluded, cancelled]);
 
     expect(await bestKnownIssueCodes(open.orderId)).toContain(
@@ -1012,5 +1138,198 @@ describe('gap-fill sweeps', () => {
       ProfitIssueCode.REFERENCE_DATA_MISSING,
     );
     expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(0);
+  });
+
+  it('takes an order missing reference data once its definition is filled in place', async () => {
+    // A platform service definition is in force on the order date but has no amount.
+    const open = await seedMelontikParcel();
+    await prisma.feeDefinition.updateMany({
+      where: PLATFORM_SERVICE_FEE,
+      data: { fixedAmountNet: null },
+    });
+    await backdateFeeDefinitions();
+    await computeParcels([open]);
+
+    const written = await readStatement(open.orderId, ProfitStatementView.BEST_KNOWN);
+    expect(written.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(parseStoredIssues(written.issues)).toContainEqual({
+      code: ProfitIssueCode.REFERENCE_DATA_MISSING,
+      orderItemId: null,
+      detail: 'FEE:PLATFORM_SERVICE',
+    });
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(0);
+
+    // The row is fixed in place: its creation instant stays, only updated_at moves.
+    await prisma.feeDefinition.updateMany({
+      where: PLATFORM_SERVICE_FEE,
+      data: { fixedAmountNet: '10.99', updatedAt: after(written.updatedAt) },
+    });
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(1);
+    expect(await queueRows()).toEqual([expectedGapRow(open)]);
+
+    const filled = await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(filled).toMatchObject({ claimed: 1, changed: 1, failed: 0 });
+    const bestKnown = await readStatement(open.orderId, ProfitStatementView.BEST_KNOWN);
+    expect(bestKnown.status).not.toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(await bestKnownIssueCodes(open.orderId)).not.toContain(
+      ProfitIssueCode.REFERENCE_DATA_MISSING,
+    );
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(0);
+  });
+
+  it('takes an export order missing a return tier once a tier row is added to the version in force', async () => {
+    // The version in force on the order date has no band holding item A's unit sale.
+    const version = await prisma.microExportReturnFeeTierVersion.create({
+      data: {
+        effectiveFrom: EXPORT_GAP_TIER_VERSION_START,
+        createdAt: LONG_AGO,
+        updatedAt: LONG_AGO,
+        tiers: {
+          create: [
+            {
+              minSaleGross: '2000.01',
+              maxSaleGross: '99999999.99',
+              rate: '0.3000',
+              createdAt: LONG_AGO,
+              updatedAt: LONG_AGO,
+            },
+          ],
+        },
+      },
+      select: { id: true },
+    });
+    const parcel = await seedMelontikParcel({ isExportSale: true });
+    await createInternationalServiceFee();
+    await backdateFeeDefinitions();
+    await acceptReturn(parcel, parcel.itemA);
+    await computeParcels([parcel]);
+
+    const written = await readStatement(parcel.orderId, ProfitStatementView.BEST_KNOWN);
+    expect(written.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    const missing = parseStoredIssues(written.issues).filter(
+      (issue) => issue.code === ProfitIssueCode.REFERENCE_DATA_MISSING,
+    );
+    expect(missing).toEqual([
+      {
+        code: ProfitIssueCode.REFERENCE_DATA_MISSING,
+        orderItemId: parcel.itemA,
+        detail: MISSING_EXPORT_RETURN_TIER_DETAIL,
+      },
+    ]);
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(0);
+
+    // A band that still misses item A: taken once, recomputed without change, and not
+    // taken again -- the re-check stamp reaches the new row's instant.
+    await prisma.microExportReturnFeeTier.create({
+      data: {
+        versionId: version.id,
+        minSaleGross: '1000.00',
+        maxSaleGross: '2000.00',
+        rate: '0.3500',
+        createdAt: after(written.updatedAt),
+      },
+    });
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(1);
+    expect(await queueRows()).toEqual([expectedGapRow(parcel)]);
+    const unchanged = await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(unchanged).toMatchObject({ claimed: 1, unchanged: 1, failed: 0 });
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(0);
+
+    // A band that holds item A: taken once, the order becomes computable, not taken again.
+    const rechecked = await readStatement(parcel.orderId, ProfitStatementView.BEST_KNOWN);
+    await prisma.microExportReturnFeeTier.create({
+      data: {
+        versionId: version.id,
+        minSaleGross: '0.00',
+        maxSaleGross: '999.99',
+        rate: '0.3500',
+        createdAt: after(rechecked.updatedAt),
+      },
+    });
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(1);
+    const filled = await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(filled).toMatchObject({ claimed: 1, changed: 1, failed: 0 });
+    const bestKnown = await readStatement(parcel.orderId, ProfitStatementView.BEST_KNOWN);
+    expect(bestKnown.status).not.toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(await bestKnownIssueCodes(parcel.orderId)).not.toContain(
+      ProfitIssueCode.REFERENCE_DATA_MISSING,
+    );
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(0);
+  });
+
+  it('does not take an own-contract capture whose cargo name a carrier now claims', async () => {
+    const trendyolContract = await seedParcelWithCargoName({ cargoProviderName: NEW_CARGO_NAME });
+    const ownContract = await seedParcelWithCargoName({ cargoProviderName: NEW_CARGO_NAME });
+    await prisma.store.update({
+      where: { id: ownContract.storeId },
+      data: { shippingTariffSource: ShippingTariffSource.OWN_CONTRACT },
+    });
+    await computeParcels([trendyolContract, ownContract]);
+
+    const captured = await prisma.order.findUniqueOrThrow({
+      where: { id: ownContract.orderId },
+      select: { snapshotShippingTariffSource: true, snapshotCarrierId: true },
+    });
+    expect(captured).toEqual({
+      snapshotShippingTariffSource: ShippingTariffSource.OWN_CONTRACT,
+      snapshotCarrierId: null,
+    });
+
+    // Only the Trendyol-contract capture is taken: an own-contract order is priced from
+    // the store's own tariff and never consults the carrier.
+    await upsertGapFillCarrier([NEW_CARGO_NAME]);
+    expect(await enqueueCarrierGapRecomputes(prisma, { limit: 10 })).toBe(1);
+    expect(await queueRows()).toEqual([expectedGapRow(trendyolContract)]);
+  });
+
+  it('does not take a waiting order of a store whose platform is not Trendyol', async () => {
+    const trendyol = await seedParcelWithCargoName({ cargoProviderName: NEW_CARGO_NAME });
+    const other = await seedParcelWithCargoName({ cargoProviderName: NEW_CARGO_NAME });
+    // Only a Trendyol order is captured, so the store moves to another platform after
+    // its capture.
+    await computeParcels([trendyol, other]);
+    await prisma.store.update({
+      where: { id: other.storeId },
+      data: { platform: Platform.HEPSIBURADA },
+    });
+
+    await upsertGapFillCarrier([NEW_CARGO_NAME]);
+    expect(await enqueueCarrierGapRecomputes(prisma, { limit: 10 })).toBe(1);
+    expect(await queueRows()).toEqual([expectedGapRow(trendyol)]);
+  });
+
+  it('leaves a waiting order that already has a queue row to that row in the carrier gap sweep', async () => {
+    const queued = await seedParcelWithCargoName({ cargoProviderName: NEW_CARGO_NAME });
+    const fresh = await seedParcelWithCargoName({ cargoProviderName: NEW_CARGO_NAME });
+    await computeParcels([queued, fresh]);
+    const backedOff = await queueBackedOffRequest(queued);
+
+    await upsertGapFillCarrier([NEW_CARGO_NAME]);
+    expect(await enqueueCarrierGapRecomputes(prisma, { limit: 10 })).toBe(1);
+    // The backoff is kept: no reset of attempts, error or next attempt time.
+    expect(await readQueuedRequest(queued.orderId)).toEqual(backedOff);
+    expect((await queueRows()).map((row) => row.orderId).sort()).toEqual(
+      [queued.orderId, fresh.orderId].sort(),
+    );
+  });
+
+  it('leaves an order missing reference data that already has a queue row to that row in the reference gap sweep', async () => {
+    const queued = await seedMelontikParcel();
+    const fresh = await seedMelontikParcel();
+    await prisma.feeDefinition.deleteMany({ where: PLATFORM_SERVICE_FEE });
+    await backdateFeeDefinitions();
+    await computeParcels([queued, fresh]);
+    const backedOff = await queueBackedOffRequest(queued);
+
+    await createPlatformServiceFee({
+      effectiveFrom: new Date('2024-01-01T00:00:00.000Z'),
+      createdAt: after(await latestBestKnownUpdate([queued, fresh])),
+    });
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(1);
+    // The backoff is kept: no reset of attempts, error or next attempt time.
+    expect(await readQueuedRequest(queued.orderId)).toEqual(backedOff);
+    expect((await queueRows()).map((row) => row.orderId).sort()).toEqual(
+      [queued.orderId, fresh.orderId].sort(),
+    );
   });
 });

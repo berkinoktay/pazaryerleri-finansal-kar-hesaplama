@@ -6,6 +6,7 @@ import {
   ProfitRecomputeReason,
   ProfitStatementView,
   ProfitStatus,
+  ShippingTariffSource,
 } from '@pazarsync/db/enums';
 
 import { PROFIT_ENGINE_VERSION } from '../core/engine-version';
@@ -230,14 +231,16 @@ export function enqueueStaleProfitStatements(
 
 /**
  * An order whose capture holds a cargo name no carrier was recognised from, and whose
- * profit still depends on that carrier (alias `c`): captured, no carrier, shipped under
- * Trendyol's agreement (an order on the seller's own agreement never looks at the
- * carrier), not excluded from profit and not cancelled. Only Trendyol stores: the
- * carriers are Trendyol's and only a Trendyol order is captured. An order that already
- * has a queue row is left to that row: re-enqueuing it would reset a failing request's
- * backoff on every sweep.
+ * shipping is priced from that carrier (alias `c`): captured on the Trendyol-contract
+ * tariff source (an own-contract capture is priced from the store's own desi tariff and
+ * never consults the carrier or Barem), no carrier, not shipped under the seller's own
+ * cargo agreement (that order is exempt from the carrier rule), not excluded from profit
+ * and not cancelled. Only Trendyol stores: the carriers are Trendyol's and only a
+ * Trendyol order is captured. An order that already has a queue row is left to that
+ * row: re-enqueuing it would reset a failing request's backoff on every sweep.
  */
 const CARRIER_GAP_ORDER = Prisma.sql`c.profit_snapshot_at IS NOT NULL
+  AND c.snapshot_shipping_tariff_source = ${ShippingTariffSource.TRENDYOL_CONTRACT}::"ShippingTariffSource"
   AND c.snapshot_carrier_id IS NULL
   AND c.uses_seller_cargo_agreement = false
   AND c.profit_excluded_at IS NULL
@@ -318,25 +321,37 @@ const REFERENCE_GAP_STATEMENT = Prisma.sql`s.view = ${ProfitStatementView.BEST_K
   AND s.issues @> ${REFERENCE_DATA_MISSING_ISSUES_JSON}::jsonb`;
 
 /**
- * The newest creation instant across the reference data a REFERENCE_DATA_MISSING gap can
- * be filled from: fee definitions and micro-export return tier versions. NULL when both
- * tables are empty.
+ * The newest change instant across the reference data a REFERENCE_DATA_MISSING gap can be
+ * filled from: fee definitions, micro-export return tier versions and their tier rows.
+ * A row's change instant is the later of its `created_at` and `updated_at`, so a fix made
+ * in place counts as well as a new row, provided the write moves `updated_at` (below): an
+ * amount column filled, `effective_to` extended, `effective_from` moved back, an
+ * `ON CONFLICT DO UPDATE` that sets `updated_at`, or a tier row added to an existing
+ * version. NULL when all three tables are empty.
+ *
+ * `updated_at` on these tables is a Prisma `@updatedAt` column with no database default
+ * or trigger: Prisma Client sets it on every write, but a raw SQL INSERT or UPDATE must set
+ * `updated_at` itself (to `now()`), or the sweep never sees that fix. A DELETE leaves no
+ * instant behind, so a fix that only deletes a row is not seen either.
  */
-const NEWEST_GAP_REFERENCE_CREATED_AT = Prisma.sql`(
-  SELECT MAX(r.created_at) FROM (
-    SELECT created_at FROM fee_definitions
+const NEWEST_GAP_REFERENCE_CHANGE_AT = Prisma.sql`(
+  SELECT MAX(r.changed_at) FROM (
+    SELECT GREATEST(created_at, updated_at) AS changed_at FROM fee_definitions
     UNION ALL
-    SELECT created_at FROM micro_export_return_fee_tier_versions
+    SELECT GREATEST(created_at, updated_at) FROM micro_export_return_fee_tier_versions
+    UNION ALL
+    SELECT GREATEST(created_at, updated_at) FROM micro_export_return_fee_tiers
   ) r
 )`;
 
 /**
  * The reference data gap sweep (plan PR-3a, Gorev 4): enqueues the orders whose best-known
  * statement is not computable for missing reference data (REFERENCE_DATA_MISSING) and was
- * last written before the newest fee definition or micro-export tier version was created.
- * So once a definition is added, every such order is recomputed once; an order the new
- * definition does not fill is not taken again until a newer one arrives (the drain stamps
- * its statement as re-checked, `markReferenceGapRechecked`). Newest order first, up to
+ * last written before the newest change to the fee definitions or the micro-export tiers
+ * (`NEWEST_GAP_REFERENCE_CHANGE_AT`: a new row or one fixed in place). So once a
+ * definition is added or fixed, every such order is recomputed once; an order the change
+ * does not fill is not taken again until a newer change arrives (the drain stamps its
+ * statement as re-checked, `markReferenceGapRechecked`). Newest order first, up to
  * `limit`; returns the number of orders enqueued.
  *
  * Only orders of a platform the engine can compute (as the stale sweep), and none that
@@ -360,7 +375,7 @@ export function enqueueReferenceDataGapRecomputes(
       FROM orders c
       JOIN order_profit_statements s ON s.order_id = c.id
       WHERE ${REFERENCE_GAP_STATEMENT}
-        AND s.updated_at < ${NEWEST_GAP_REFERENCE_CREATED_AT}
+        AND s.updated_at < ${NEWEST_GAP_REFERENCE_CHANGE_AT}
         AND EXISTS (
           SELECT 1 FROM stores st
           WHERE st.id = c.store_id
@@ -495,12 +510,13 @@ export async function processClaimedRecompute(
  * Stamps the order's best-known statement as re-checked against the reference data while
  * it still misses some (REFERENCE_DATA_MISSING); matches no other statement. A recompute
  * whose content hash did not change writes nothing, so without this stamp the statement
- * would stay older than the newest fee definition or tier version, and the reference gap
- * sweep would take the order again on every sweep. The stamp is at least the newest
- * reference creation instant, so the order leaves the sweep's candidates even when the
- * clock that created the definition runs ahead of the database's, until a newer
- * definition arrives. Only `updated_at` moves: `computed_at` stays the time the content
- * was computed. Scoped by the claimed order's organization.
+ * would stay older than the newest reference change, and the reference gap sweep would
+ * take the order again on every sweep. The stamp is at least the newest reference change
+ * instant (`NEWEST_GAP_REFERENCE_CHANGE_AT`, the same one the sweep compares against), so
+ * the order leaves the sweep's candidates even when the clock that wrote the change runs
+ * ahead of the database's, until a newer change arrives. Only `updated_at` moves:
+ * `computed_at` stays the time the content was computed. Scoped by the claimed order's
+ * organization.
  */
 function markReferenceGapRechecked(
   tx: Prisma.TransactionClient,
@@ -508,7 +524,7 @@ function markReferenceGapRechecked(
 ): Promise<number> {
   return tx.$executeRaw`
     UPDATE order_profit_statements s
-    SET updated_at = GREATEST(clock_timestamp()::timestamp(3), ${NEWEST_GAP_REFERENCE_CREATED_AT})
+    SET updated_at = GREATEST(clock_timestamp()::timestamp(3), ${NEWEST_GAP_REFERENCE_CHANGE_AT})
     WHERE s.order_id = ${claimed.orderId}::uuid
       AND s.organization_id = ${claimed.organizationId}::uuid
       AND ${REFERENCE_GAP_STATEMENT}

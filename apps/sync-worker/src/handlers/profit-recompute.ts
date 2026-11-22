@@ -10,16 +10,20 @@
 // new engine version and the phase 3D backfill migrate themselves. At the same time
 // it runs the two gap-fill sweeps (plan PR-3a, Gorev 4): orders waiting on a cargo
 // name no carrier claimed, once one does, and orders missing a fee definition or a
-// micro-export tier, once a newer one is added. Whoever adds the mapping or the
-// definition, a waiting order is computed within one sweep interval.
+// micro-export tier, once one is added or fixed in place. Whoever adds the mapping or
+// the definition, a waiting order is computed within one sweep interval.
 //
 // The sweeps scan `orders`, so they are throttled (queue-review finding): they run
 // at most once every PROFIT_STALE_SWEEP_INTERVAL_MS, but immediately on the next
-// tick while any of them is still finding work (catch-up). A single-process "running"
-// flag skips an overlapping tick -- the 5 s interval (or a boot run) can fire again
-// while a long drain is still going. The flag and the sweep bookkeeping live in the
-// closure createProfitRecomputeTick builds, so each test gets a fresh tick with no
-// shared state; the default instance below is the one index.ts drives.
+// tick while any of them is still finding work (catch-up). A sweep that throws is
+// logged on its own (profit-recompute.sweep-error) and does not stop the other
+// sweeps or fail the tick; the throttle still advances, so a failing sweep is retried
+// after the interval (or the next catch-up), never on every 5 s tick. A
+// single-process "running" flag skips an overlapping tick -- the 5 s interval (or a
+// boot run) can fire again while a long drain is still going. The flag and the sweep
+// bookkeeping live in the closure createProfitRecomputeTick builds, so each test gets
+// a fresh tick with no shared state; the default instance below is the one index.ts
+// drives.
 
 import { prisma, type PrismaClient } from '@pazarsync/db';
 import {
@@ -66,7 +70,8 @@ export const PROFIT_GAP_SWEEP_LIMIT = 500;
 // What one tick did: skipped (a previous tick was still running), or the drain
 // totals summed over every pass of the tick plus the number of orders each sweep
 // enqueued -- stale, carrier gap, reference data gap (each null when the tick did
-// not sweep).
+// not sweep, or when that sweep threw; its error is logged as
+// profit-recompute.sweep-error).
 export interface ProfitRecomputeTickResult {
   readonly skipped: boolean;
   readonly drain: DrainResult | null;
@@ -75,24 +80,49 @@ export interface ProfitRecomputeTickResult {
   readonly referenceGapSwept: number | null;
 }
 
-// The orders each sweep of one tick enqueued.
+// The orders each sweep of one tick enqueued; null for a sweep that threw.
 interface SweepCounts {
-  readonly stale: number;
-  readonly carrierGap: number;
-  readonly referenceGap: number;
+  readonly stale: number | null;
+  readonly carrierGap: number | null;
+  readonly referenceGap: number | null;
+}
+
+// The name a sweep carries on its error log line.
+type SweepName = keyof SweepCounts;
+
+/**
+ * Runs one sweep and returns how many orders it enqueued, or null when it threw. The
+ * error is logged here (profit-recompute.sweep-error) and not rethrown, so one failing
+ * sweep neither stops the other sweeps nor fails the tick.
+ */
+async function runSweep(name: SweepName, sweep: () => Promise<number>): Promise<number | null> {
+  try {
+    return await sweep();
+  } catch (error) {
+    syncLog.error('profit-recompute.sweep-error', {
+      sweep: name,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 /**
  * Runs the stale sweep and the two gap-fill sweeps one after another and returns how
- * many orders each enqueued. Each sweep commits its own enqueue, so a later sweep that
- * throws loses nothing an earlier one wrote.
+ * many orders each enqueued. Each sweep commits its own enqueue and catches its own
+ * error, so a sweep that throws loses nothing another one wrote and the later sweeps
+ * still run.
  */
 async function runSweeps(db: PrismaClient): Promise<SweepCounts> {
-  const stale = await enqueueStaleProfitStatements(db, { limit: PROFIT_STALE_SWEEP_LIMIT });
-  const carrierGap = await enqueueCarrierGapRecomputes(db, { limit: PROFIT_GAP_SWEEP_LIMIT });
-  const referenceGap = await enqueueReferenceDataGapRecomputes(db, {
-    limit: PROFIT_GAP_SWEEP_LIMIT,
-  });
+  const stale = await runSweep('stale', () =>
+    enqueueStaleProfitStatements(db, { limit: PROFIT_STALE_SWEEP_LIMIT }),
+  );
+  const carrierGap = await runSweep('carrierGap', () =>
+    enqueueCarrierGapRecomputes(db, { limit: PROFIT_GAP_SWEEP_LIMIT }),
+  );
+  const referenceGap = await runSweep('referenceGap', () =>
+    enqueueReferenceDataGapRecomputes(db, { limit: PROFIT_GAP_SWEEP_LIMIT }),
+  );
   return { stale, carrierGap, referenceGap };
 }
 
@@ -144,9 +174,11 @@ function logTick(drain: DrainResult, sweep: SweepCounts | null, interrupted: boo
   }
 }
 
-/** True when any sweep of the tick enqueued at least one order. */
+/** True when any sweep of the tick that succeeded enqueued at least one order. */
 function sweptAny(sweep: SweepCounts): boolean {
-  return sweep.stale > 0 || sweep.carrierGap > 0 || sweep.referenceGap > 0;
+  return [sweep.stale, sweep.carrierGap, sweep.referenceGap].some(
+    (count) => count !== null && count > 0,
+  );
 }
 
 /**
@@ -158,7 +190,9 @@ function sweptAny(sweep: SweepCounts): boolean {
  * PROFIT_RECOMPUTE_BATCH_SIZE and PROFIT_RECOMPUTE_TICK_BUDGET_MS and are injectable
  * for the multi-pass tests. A pass that throws ends the tick: the totals of the
  * passes completed before it are logged as interrupted, the sweep is skipped, and
- * the error is rethrown unchanged for the caller to log.
+ * the error is rethrown unchanged for the caller to log. A sweep that throws does not
+ * end the tick (`runSweep` logs it and the other sweeps run): the sweep time still
+ * advances, and only the sweeps that succeeded decide the catch-up.
  */
 export function createProfitRecomputeTick(deps: {
   db: PrismaClient;
@@ -216,6 +250,8 @@ export function createProfitRecomputeTick(deps: {
         const sweepDue =
           lastSweepFoundWork || now() - lastSweepAt >= PROFIT_STALE_SWEEP_INTERVAL_MS;
         if (sweepDue) {
+          // runSweeps never throws: a failing sweep still moves the sweep time, so it
+          // is retried after the interval rather than on every tick.
           sweep = await runSweeps(db);
           lastSweepAt = now();
           lastSweepFoundWork = sweptAny(sweep);

@@ -52,6 +52,7 @@ const carrierGapMock = vi.mocked(enqueueCarrierGapRecomputes);
 const referenceGapMock = vi.mocked(enqueueReferenceDataGapRecomputes);
 const infoMock = vi.mocked(syncLog.info);
 const warnMock = vi.mocked(syncLog.warn);
+const errorMock = vi.mocked(syncLog.error);
 
 /** An empty drain: nothing claimed, so the tick considers the sweep. */
 function emptyDrain(): DrainResult {
@@ -373,5 +374,68 @@ describe('createProfitRecomputeTick', () => {
     drainMock.mockResolvedValueOnce(emptyDrain());
     const next = await tick();
     expect(next.skipped).toBe(false);
+  });
+
+  it('runs the other sweeps when one throws, logs it, and waits the interval before sweeping again', async () => {
+    drainMock.mockResolvedValue(emptyDrain());
+    sweepMock.mockResolvedValue(0);
+    carrierGapMock.mockRejectedValueOnce(new Error('carrier gap sweep failed'));
+
+    let clock = PROFIT_STALE_SWEEP_INTERVAL_MS;
+    const tick = createProfitRecomputeTick({ db, now: () => clock });
+
+    // The failing sweep does not fail the tick: the stale and reference sweeps still
+    // run, the failed one reports no count, and its error is logged on its own line.
+    const result = await tick();
+    expect(result).toEqual({
+      skipped: false,
+      drain: emptyDrain(),
+      swept: 0,
+      carrierGapSwept: null,
+      referenceGapSwept: 0,
+    });
+    expect(sweepMock).toHaveBeenCalledTimes(1);
+    expect(carrierGapMock).toHaveBeenCalledTimes(1);
+    expect(referenceGapMock).toHaveBeenCalledTimes(1);
+    expect(errorMock).toHaveBeenCalledTimes(1);
+    expect(errorMock).toHaveBeenCalledWith('profit-recompute.sweep-error', {
+      sweep: 'carrierGap',
+      errorMessage: 'carrier gap sweep failed',
+    });
+
+    // The sweep time still advanced and no sweep found work: the next tick does not
+    // sweep again before the interval, so a failing sweep is not retried every tick.
+    clock += 1;
+    const next = await tick();
+    expect(next).toMatchObject({ swept: null, carrierGapSwept: null, referenceGapSwept: null });
+    expect(sweepMock).toHaveBeenCalledTimes(1);
+    expect(carrierGapMock).toHaveBeenCalledTimes(1);
+    expect(referenceGapMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the counts of the sweeps that succeeded and catches up on their work', async () => {
+    drainMock.mockResolvedValue(emptyDrain());
+    sweepMock.mockResolvedValue(0);
+    sweepMock.mockResolvedValueOnce(7);
+    carrierGapMock.mockRejectedValueOnce(new Error('carrier gap sweep failed'));
+    referenceGapMock.mockResolvedValueOnce(2);
+
+    let clock = PROFIT_STALE_SWEEP_INTERVAL_MS;
+    const tick = createProfitRecomputeTick({ db, now: () => clock });
+
+    const result = await tick();
+    expect(result).toMatchObject({ swept: 7, carrierGapSwept: null, referenceGapSwept: 2 });
+    expect(infoMock).toHaveBeenCalledWith(
+      'profit-recompute.tick',
+      expect.objectContaining({ swept: 7, carrierGapSwept: 0, referenceGapSwept: 2 }),
+    );
+
+    // The successful sweeps found work, so the next tick catches up immediately.
+    clock += 1;
+    const catchUp = await tick();
+    expect(catchUp).toMatchObject({ swept: 0, carrierGapSwept: 0, referenceGapSwept: 0 });
+    expect(sweepMock).toHaveBeenCalledTimes(2);
+    expect(carrierGapMock).toHaveBeenCalledTimes(2);
+    expect(referenceGapMock).toHaveBeenCalledTimes(2);
   });
 });
