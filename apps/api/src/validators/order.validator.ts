@@ -132,38 +132,23 @@ const ProfitBlockerSchema = z
   })
   .openapi('ProfitBlocker', {
     description:
-      "A reason the order's profit is not computable: a blocking issue of one of its profit " +
-      'statement views, reduced to its code and detail. The field that carries the list ' +
-      'names the view.',
+      "A reason the order's profit is not computable: a blocking issue of its best-known " +
+      'profit statement, reduced to its code and detail.',
   });
 
-// The rule both surfaces share; each surface names the view it reads (the one whose figure
-// it shows), so the two arrays differ only in their descriptions.
-const PROFIT_BLOCKERS_RULE =
-  "Filled only while that view's status is NOT_COMPUTABLE: its blocking issues, one entry " +
-  'per distinct code + detail (a cause named on several items is listed once), ordered by ' +
-  'the code in the ProfitIssueCode enum order (not alphabetical), then by detail (null ' +
-  'first). Empty for every other order: computed, excluded from profit, cancelled, or with ' +
-  'no profit to read.';
-
-const ListProfitBlockersSchema = z.array(ProfitBlockerSchema).openapi({
+// The list row and the detail read the same view, so they share one schema.
+const ProfitBlockersSchema = z.array(ProfitBlockerSchema).openapi({
   description:
-    "Why the row's estimatedNetProfit is not computable, read from the estimate profit " +
-    'statement (the view estimatedNetProfit comes from). ' +
-    PROFIT_BLOCKERS_RULE +
-    ' The list reads stored statements only, so an order with no statement yet has none. ' +
-    'A cargo invoice does not empty it: the estimate view is the order-time estimate.',
-});
-
-const DetailProfitBlockersSchema = z.array(ProfitBlockerSchema).openapi({
-  description:
-    "Why the order's best-known profit is not computable, read from the best-known profit " +
-    'statement (the view profitBreakdown shows). ' +
-    PROFIT_BLOCKERS_RULE +
-    ' The detail computes the statement in the request when none is stored, as for its ' +
-    'other profit fields, and is empty when that profit cannot be read. A cargo invoice ' +
-    'lifts the shipping cause of the leg it bills, so this can be empty while the list ' +
-    "row's profitBlockers is not.",
+    "Why the order's profit is not computable. Filled only while the best-known profit " +
+    "statement's status is NOT_COMPUTABLE: its blocking issues, one entry per distinct " +
+    'code + detail (a cause named on several items is listed once), ordered by the code in ' +
+    'the ProfitIssueCode enum order (not alphabetical), then by detail (null first). Empty ' +
+    'for every other order: computed, excluded from profit, cancelled, or with no profit ' +
+    'to read. A cargo invoice that makes the best-known profit computable empties it, even ' +
+    "while the list row's estimatedNetProfit (the order-time estimate) stays null. The " +
+    'list reads stored statements only, so an order with no statement yet has none there; ' +
+    'the detail computes the statement in the request when none is stored, as for its ' +
+    'other profit fields, and is empty when that profit cannot be read.',
 });
 
 // ─── List item ─────────────────────────────────────────────────────────────
@@ -251,7 +236,7 @@ export const OrderListItemSchema = z
           'total cost gross * 100. Null until a statement exists or when total cost is 0.',
         example: '38.40',
       }),
-    profitBlockers: ListProfitBlockersSchema,
+    profitBlockers: ProfitBlockersSchema,
     // Promosyon gösterimi (spec ekleme #3): mapper'ın yakaladığı satıcı-indirimi
     // promosyon isimleri + brüt tutarları. İndirim/promosyon yoksa null. Liste
     // satırında indirimli siparişin promosyon adı küçük bir rozet/tooltip ile
@@ -654,7 +639,10 @@ const ProfitIssueSchema = z
           'carrier name as Trendyol reported it (null when blank) and the frontend shows it ' +
           'inside its localized copy. For SHIPPING_ESTIMATE_UNAVAILABLE it is the reason ' +
           '(UNKNOWN_DESI, NO_CARRIER, NO_TARIFF_VERSION, DESI_OVERFLOW, OWN_CONTRACT_EMPTY; ' +
-          'prefixed RETURN_ for the return leg). For REFERENCE_DATA_MISSING it is FEE:<fee type> ' +
+          'prefixed RETURN_ for the return leg), or RETURN_CARRIER_NOT_RECOGNIZED, return leg ' +
+          'only: the carrier of an order shipped under Trendyol agreement is not recognized ' +
+          '(the outbound leg reports it with the CARRIER_NOT_RECOGNIZED code instead). For ' +
+          'REFERENCE_DATA_MISSING it is FEE:<fee type> ' +
           'for a fee definition missing on the order date, or EXPORT_RETURN_TIER. It is never ' +
           'shown verbatim for any other code.',
         example: 'Alternative Delivery',
@@ -722,7 +710,7 @@ export const OrderDetailSchema = z
         'order. Empty when there are none, and when the profit part is empty (a platform the ' +
         'engine cannot compute, or a profit read that failed).',
     }),
-    profitBlockers: DetailProfitBlockersSchema,
+    profitBlockers: ProfitBlockersSchema,
 
     // Promosyon gösterimi (spec ekleme #3): mapper'ın yakaladığı satıcı-indirimi
     // promosyon isimleri + brüt tutarları. İndirim/promosyon yoksa null. Frontend

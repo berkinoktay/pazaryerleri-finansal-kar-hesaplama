@@ -3,12 +3,11 @@ import { ProfitIssueCode, ProfitStatus } from '@pazarsync/db/enums';
 import { isBlockingIssue, parseStoredIssues, type ProfitIssue } from '@pazarsync/profit';
 
 /**
- * One reason an order's profit is not computable: a blocking issue of a profit statement
- * view, reduced to what the seller is shown (the code the frontend localizes, and the
+ * One reason an order's profit is not computable: a blocking issue of its best-known
+ * statement, reduced to what the seller is shown (the code the frontend localizes, and the
  * detail its copy may name, e.g. the carrier name). The wire shape is `ProfitBlocker`, on
- * the orders list row and the order detail. Each surface reads the view whose figure it
- * shows: the list row its estimate view (the estimated net profit), the detail its
- * best-known view (the breakdown).
+ * the orders list row and the order detail; both read the best-known view, so a blocker
+ * shows only while the order's profit is really not computable.
  */
 export interface ProfitBlocker {
   readonly code: ProfitIssueCode;

@@ -224,20 +224,22 @@ type OrderListRow = Prisma.OrderGetPayload<{
 }>;
 
 /**
- * A list row's profit blockers, read from its stored estimate statement: the view the
- * row's estimated net profit comes from, so the blockers explain exactly the figure the
- * row shows (or leaves empty). A corrupt stored issues value must not fail the page
- * (owner decision 2026-11-04): the row reads no blockers and the failure is recorded, to
- * be logged once for the request.
+ * A list row's profit blockers, read from its stored best-known statement, the same view
+ * as the order detail: the row lists a blocker only while the order's profit is really
+ * not computable. An order whose cargo invoice made the best-known view computable has
+ * none, even while its order-time estimate (the row's estimated net profit) stays not
+ * computable. A corrupt stored issues value must not fail the page (owner decision
+ * 2026-11-04): the row reads no blockers and the failure is recorded, to be logged once
+ * for the request.
  */
 function listRowProfitBlockers(
   orderId: string,
-  estimate: StatementListRow | null,
+  bestKnown: StatementListRow | null,
   failures: RequestFailureLog,
 ): ProfitBlocker[] {
-  if (estimate === null) return [];
+  if (bestKnown === null) return [];
   try {
-    return storedProfitBlockers(estimate);
+    return storedProfitBlockers(bestKnown);
   } catch (err) {
     failures.record(err, orderId);
     return [];
@@ -267,7 +269,7 @@ function toOrderListItem(row: OrderListRow, failures: RequestFailureLog): OrderL
     settledNetProfit: fields.settledNetProfit,
     saleMarginPct: fields.saleMarginPct,
     costMarkupPct: fields.costMarkupPct,
-    profitBlockers: listRowProfitBlockers(row.id, pair.estimate, failures),
+    profitBlockers: listRowProfitBlockers(row.id, pair.bestKnown, failures),
     // Promosyon adları (spec ekleme #3): detaydakiyle aynı runtime-doğrulamalı
     // dönüşüm — liste satırı indirimin hangi promosyondan geldiğini gösterir.
     promotionDisplays: toPromotionDisplays(row.promotionDisplays),
@@ -564,9 +566,8 @@ interface OrderProfitLineContext {
  * stored path cannot rebuild, or a failed in-request computation. Every item then takes
  * the all-null EMPTY_ITEM_PROFIT_VALUES, commission amounts included.
  *
- * profitBlockers come from the best-known view's status and its raw issues, the view the
- * detail's breakdown shows (the orders list row applies the same rule to its estimate
- * view, the one its estimated net profit comes from); empty with the profit part.
+ * profitBlockers come from the best-known view's status and its raw issues (the same rule
+ * the orders list row applies to its stored statement); empty with the profit part.
  */
 interface OrderProfitDetail {
   readonly fields: OrderProfitFields;

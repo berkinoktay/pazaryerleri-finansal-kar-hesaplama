@@ -18,6 +18,12 @@ type ShippingDetail = keyof typeof SHIPPING_DETAIL_KEYS;
 /** The engine prefixes a return-leg shipping detail with this (`RETURN_UNKNOWN_DESI`, ...). */
 const RETURN_DETAIL_PREFIX = 'RETURN_';
 
+/**
+ * The return-leg detail for a carrier that is not recognized. It carries its own
+ * sentence, so it is matched before the generic return prefix.
+ */
+const RETURN_CARRIER_NOT_RECOGNIZED_DETAIL = 'RETURN_CARRIER_NOT_RECOGNIZED';
+
 /** The REFERENCE_DATA_MISSING detail for a missing micro-export return tier. */
 const EXPORT_RETURN_TIER_DETAIL = 'EXPORT_RETURN_TIER';
 
@@ -25,6 +31,7 @@ const EXPORT_RETURN_TIER_DETAIL = 'EXPORT_RETURN_TIER';
 export type ProfitBlockerReasonKey =
   | 'reasons.CARRIER_NOT_RECOGNIZED'
   | (typeof SHIPPING_DETAIL_KEYS)[ShippingDetail]
+  | 'reasons.SHIPPING_ESTIMATE_UNAVAILABLE.RETURN_CARRIER_NOT_RECOGNIZED'
   | 'reasons.SHIPPING_ESTIMATE_UNAVAILABLE.RETURN'
   | 'reasons.SHIPPING_ESTIMATE_UNAVAILABLE.other'
   | 'reasons.REFERENCE_DATA_MISSING.EXPORT_RETURN_TIER'
@@ -44,6 +51,8 @@ function isShippingDetail(detail: string): detail is ShippingDetail {
 
 function shippingReasonKey(detail: string | null): ProfitBlockerReasonKey {
   if (detail === null) return 'reasons.SHIPPING_ESTIMATE_UNAVAILABLE.other';
+  if (detail === RETURN_CARRIER_NOT_RECOGNIZED_DETAIL)
+    return 'reasons.SHIPPING_ESTIMATE_UNAVAILABLE.RETURN_CARRIER_NOT_RECOGNIZED';
   if (detail.startsWith(RETURN_DETAIL_PREFIX))
     return 'reasons.SHIPPING_ESTIMATE_UNAVAILABLE.RETURN';
   if (isShippingDetail(detail)) return SHIPPING_DETAIL_KEYS[detail];

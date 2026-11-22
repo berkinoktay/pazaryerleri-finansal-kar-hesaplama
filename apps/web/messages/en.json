@@ -3848,6 +3848,7 @@
         "UNKNOWN_DESI": "The desi of a product in the order is unknown.",
         "NO_CARRIER": "The order's carrier could not be determined. Profit is calculated once the cargo invoice arrives.",
         "OWN_CONTRACT_EMPTY": "Your own cargo tariff has no price for this desi.",
+        "RETURN_CARRIER_NOT_RECOGNIZED": "The return shipping could not be estimated: the carrier was not recognised. Profit is calculated once the return cargo invoice arrives or the carrier is defined.",
         "RETURN": "The return shipping cost could not be estimated. Profit is calculated once the return cargo invoice arrives.",
         "other": "The shipping cost could not be estimated. Profit is calculated once the cargo invoice arrives."
       },

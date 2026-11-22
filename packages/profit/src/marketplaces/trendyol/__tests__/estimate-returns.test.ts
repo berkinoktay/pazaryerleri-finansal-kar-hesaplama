@@ -194,6 +194,66 @@ describe('estimateReturnLines', () => {
     });
   });
 
+  it('still blocks on a not-recognized Trendyol-agreement carrier while the return shipping VAT is unknown', () => {
+    // The carrier check runs before the unknown-VAT check: a missing SHIPPING definition
+    // (recorded by the loader) must not hide the return leg's own blocking cause.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '2' })],
+    });
+
+    const { lines, issues } = estimateReturnLines({
+      outboundBaremTier: null,
+      usesSellerCargoAgreement: false,
+      snapshot,
+      accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
+      commissionLines: [],
+      costLines: [],
+      reference: trendyolReference({
+        fees: { returnShippingVatRatePct: null },
+        shipping: {
+          carrier: null,
+          orderCarrierOutcome: { kind: 'not-recognized', providerName: 'Yeni Kargo' },
+        },
+      }),
+    });
+
+    expect(lineOfType(lines, ProfitLineType.RETURN_SHIPPING)).toBeUndefined();
+    expect(issues).toEqual([
+      {
+        code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+        orderItemId: null,
+        detail: 'RETURN_CARRIER_NOT_RECOGNIZED',
+      },
+    ]);
+  });
+
+  it('writes neither a line nor an issue for a seller-cargo-agreement order with a not-recognized carrier while the return shipping VAT is unknown', () => {
+    // The exempt order keeps no zero line without a VAT rate to write it with, and gets no
+    // issue of its own: the loader already recorded the missing SHIPPING definition.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '150.00', unitDesi: '2' })],
+    });
+
+    const { lines, issues } = estimateReturnLines({
+      outboundBaremTier: null,
+      usesSellerCargoAgreement: true,
+      snapshot,
+      accepted: [{ orderItemId: 'a', acceptedQuantity: 1 }],
+      commissionLines: [],
+      costLines: [],
+      reference: trendyolReference({
+        fees: { returnShippingVatRatePct: null },
+        shipping: {
+          carrier: null,
+          orderCarrierOutcome: { kind: 'not-recognized', providerName: 'Alternative Delivery' },
+        },
+      }),
+    });
+
+    expect(lineOfType(lines, ProfitLineType.RETURN_SHIPPING)).toBeUndefined();
+    expect(issues).toEqual([]);
+  });
+
   it('prices the return of a not-recognized carrier on an own-contract store from its own tariff', () => {
     // An own-contract store never consults the carrier: the return is priced from the
     // seller's own desi tariff, with no issue.

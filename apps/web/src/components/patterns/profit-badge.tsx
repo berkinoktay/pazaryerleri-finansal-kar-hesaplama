@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils';
 const EMPTY_VALUE = '—';
 
 export interface ProfitBadgeProps {
-  /** Estimated profit amount. `null` renders a neutral — but still clickable — em-dash badge. */
+  /** Estimated profit amount. `null` renders a still-clickable empty chip: the em-dash, or `emptyLabel`. */
   value: Decimal | string | number | null;
   /** Row margin % (percent units, e.g. `'19.35'`) that drives the red→green fill. `null` → neutral. */
   marginPct: string | null;
@@ -32,9 +32,11 @@ export interface ProfitBadgeProps {
   showMarginPct?: boolean;
   /**
    * What to render when `value` is `null`. Defaults to a bare em-dash
-   * ("—") so existing surfaces (orders, live sheet) are unchanged. Pass a
-   * translated node (e.g. "Maliyet girin") where an empty value has a
-   * specific, actionable cause the seller should see instead of a mute dash.
+   * ("—"). Pass a translated node where an empty value has a specific,
+   * actionable cause the seller should see instead of a mute dash: e.g.
+   * "Maliyet girin" on the commission-tariff cards, or the not-computable label
+   * on an orders row, passed only while the order's profit is not computable
+   * (its detail carries the same cause).
    * When provided, the empty chip switches to a warning-soft treatment
    * (`bg-warning-surface text-warning`) so the cause draws the eye — the
    * default em-dash (no `emptyLabel`) stays a mute neutral chip. A string label
@@ -58,8 +60,8 @@ export interface ProfitBadgeProps {
  * profit detail. It is a real `<button>` (keyboard-accessible) carrying the
  * Badge visual; the info icon, hover/focus affordances, and an on-hover tooltip
  * (which spells out what the click does) signal it opens a detail view. A `null`
- * amount still renders a neutral, clickable badge so no row is left without a
- * way to open its detail.
+ * amount still renders a clickable badge (neutral, or warning with an `emptyLabel`)
+ * so no row is left without a way to open its detail.
  *
  * @useWhen showing an estimated-profit amount in a table cell that should open the order's profit detail
  */
@@ -77,8 +79,8 @@ export function ProfitBadge({
   // runtime-dynamic: margin-driven tinted fill/text/border (or undefined → neutral chip)
   const style = value === null ? undefined : marginBadgeStyle(marginPct, scale);
   // A null amount with a specific cause (emptyLabel) reads as a warning-soft chip so the
-  // reason draws the eye; a bare null (default "—") stays a mute neutral chip so
-  // non-tariff surfaces (orders, live sheet) are unchanged.
+  // reason draws the eye; a bare null (default "—") stays a mute neutral chip, e.g. an
+  // orders row whose profit is computable but whose estimate is empty, or the live sheet.
   const isCausedEmpty = value === null && emptyLabel !== undefined;
   // The aria-label replaces the visible text, so a shown cause leads it ("<cause>, <open
   // hint>") and a screen reader hears why the amount is missing. Only a string cause can

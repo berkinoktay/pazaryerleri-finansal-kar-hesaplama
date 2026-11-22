@@ -892,7 +892,7 @@
             "items": {
               "$ref": "#/components/schemas/ProfitBlocker"
             },
-            "description": "Why the row's estimatedNetProfit is not computable, read from the estimate profit statement (the view estimatedNetProfit comes from). Filled only while that view's status is NOT_COMPUTABLE: its blocking issues, one entry per distinct code + detail (a cause named on several items is listed once), ordered by the code in the ProfitIssueCode enum order (not alphabetical), then by detail (null first). Empty for every other order: computed, excluded from profit, cancelled, or with no profit to read. The list reads stored statements only, so an order with no statement yet has none. A cargo invoice does not empty it: the estimate view is the order-time estimate."
+            "description": "Why the order's profit is not computable. Filled only while the best-known profit statement's status is NOT_COMPUTABLE: its blocking issues, one entry per distinct code + detail (a cause named on several items is listed once), ordered by the code in the ProfitIssueCode enum order (not alphabetical), then by detail (null first). Empty for every other order: computed, excluded from profit, cancelled, or with no profit to read. A cargo invoice that makes the best-known profit computable empties it, even while the list row's estimatedNetProfit (the order-time estimate) stays null. The list reads stored statements only, so an order with no statement yet has none there; the detail computes the statement in the request when none is stored, as for its other profit fields, and is empty when that profit cannot be read."
           },
           "promotionDisplays": {
             "type": [
@@ -1019,7 +1019,7 @@
           "code",
           "detail"
         ],
-        "description": "A reason the order's profit is not computable: a blocking issue of one of its profit statement views, reduced to its code and detail. The field that carries the list names the view."
+        "description": "A reason the order's profit is not computable: a blocking issue of its best-known profit statement, reduced to its code and detail."
       },
       "TableMeta": {
         "type": "object",
@@ -1218,7 +1218,7 @@
             "items": {
               "$ref": "#/components/schemas/ProfitBlocker"
             },
-            "description": "Why the order's best-known profit is not computable, read from the best-known profit statement (the view profitBreakdown shows). Filled only while that view's status is NOT_COMPUTABLE: its blocking issues, one entry per distinct code + detail (a cause named on several items is listed once), ordered by the code in the ProfitIssueCode enum order (not alphabetical), then by detail (null first). Empty for every other order: computed, excluded from profit, cancelled, or with no profit to read. The detail computes the statement in the request when none is stored, as for its other profit fields, and is empty when that profit cannot be read. A cargo invoice lifts the shipping cause of the leg it bills, so this can be empty while the list row's profitBlockers is not."
+            "description": "Why the order's profit is not computable. Filled only while the best-known profit statement's status is NOT_COMPUTABLE: its blocking issues, one entry per distinct code + detail (a cause named on several items is listed once), ordered by the code in the ProfitIssueCode enum order (not alphabetical), then by detail (null first). Empty for every other order: computed, excluded from profit, cancelled, or with no profit to read. A cargo invoice that makes the best-known profit computable empties it, even while the list row's estimatedNetProfit (the order-time estimate) stays null. The list reads stored statements only, so an order with no statement yet has none there; the detail computes the statement in the request when none is stored, as for its other profit fields, and is empty when that profit cannot be read."
           },
           "promotionDisplays": {
             "type": [
@@ -1534,7 +1534,7 @@
               "string",
               "null"
             ],
-            "description": "Optional English context for the issue. For CARRIER_NOT_RECOGNIZED it is the carrier name as Trendyol reported it (null when blank) and the frontend shows it inside its localized copy. For SHIPPING_ESTIMATE_UNAVAILABLE it is the reason (UNKNOWN_DESI, NO_CARRIER, NO_TARIFF_VERSION, DESI_OVERFLOW, OWN_CONTRACT_EMPTY; prefixed RETURN_ for the return leg). For REFERENCE_DATA_MISSING it is FEE:<fee type> for a fee definition missing on the order date, or EXPORT_RETURN_TIER. It is never shown verbatim for any other code.",
+            "description": "Optional English context for the issue. For CARRIER_NOT_RECOGNIZED it is the carrier name as Trendyol reported it (null when blank) and the frontend shows it inside its localized copy. For SHIPPING_ESTIMATE_UNAVAILABLE it is the reason (UNKNOWN_DESI, NO_CARRIER, NO_TARIFF_VERSION, DESI_OVERFLOW, OWN_CONTRACT_EMPTY; prefixed RETURN_ for the return leg), or RETURN_CARRIER_NOT_RECOGNIZED, return leg only: the carrier of an order shipped under Trendyol agreement is not recognized (the outbound leg reports it with the CARRIER_NOT_RECOGNIZED code instead). For REFERENCE_DATA_MISSING it is FEE:<fee type> for a fee definition missing on the order date, or EXPORT_RETURN_TIER. It is never shown verbatim for any other code.",
             "example": "Alternative Delivery"
           }
         },

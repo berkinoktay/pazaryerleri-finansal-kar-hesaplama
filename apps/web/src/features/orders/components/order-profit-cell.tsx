@@ -20,12 +20,14 @@ export interface OrderProfitCellProps {
 }
 
 /**
- * The orders table's estimated-profit cell. A computed profit renders the usual
- * margin-colored badge. A profit the API reports as not computable (null amount
- * with `profitBlockers`) renders a warning `profitBlockers.badge` chip whose tooltip
- * names the reasons; on touch (no hover) the click opens the detail sheet, whose
- * alert carries the same reasons. A null profit without blockers stays the
- * neutral em-dash.
+ * The orders table's estimated-profit cell. A computed estimate renders the usual
+ * margin-colored badge. `profitBlockers` is filled only while the order's profit is
+ * not computable: the API reads it from the order's best-known profit, the same view
+ * and the same reasons as the detail sheet's alert. A null estimate with blockers
+ * renders a warning `profitBlockers.badge` chip whose tooltip names the reasons; on
+ * touch (no hover) the click opens the detail sheet. A null estimate without blockers
+ * stays the neutral em-dash, e.g. an order whose cargo invoice made its profit
+ * computable while the order-time estimate stayed blocked.
  */
 export function OrderProfitCell({
   order,

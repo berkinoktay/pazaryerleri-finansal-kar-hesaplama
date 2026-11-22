@@ -42,6 +42,7 @@ const DETAILS = [
   'NO_CARRIER',
   'OWN_CONTRACT_EMPTY',
   'RETURN_UNKNOWN_DESI',
+  'RETURN_CARRIER_NOT_RECOGNIZED',
   'EXPORT_RETURN_TIER',
   'FEE:PLATFORM_SERVICE',
   'SOMETHING_NEW',
@@ -102,6 +103,14 @@ describe('profitBlockerMessage', () => {
         });
       },
     );
+
+    it('uses its own sentence for a not-recognized carrier on the return leg', () => {
+      // Checked before the generic RETURN_ prefix: the carrier, not the desi or tariff,
+      // is why the return shipping could not be estimated.
+      expect(resolve('SHIPPING_ESTIMATE_UNAVAILABLE', 'RETURN_CARRIER_NOT_RECOGNIZED')).toEqual({
+        key: 'reasons.SHIPPING_ESTIMATE_UNAVAILABLE.RETURN_CARRIER_NOT_RECOGNIZED',
+      });
+    });
 
     it.each([null, 'SOMETHING_NEW'])('falls back to the generic sentence for %s', (detail) => {
       expect(resolve('SHIPPING_ESTIMATE_UNAVAILABLE', detail)).toEqual({

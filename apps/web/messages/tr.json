@@ -3909,6 +3909,7 @@
         "UNKNOWN_DESI": "Siparişteki ürünün desisi bilinmiyor.",
         "NO_CARRIER": "Siparişin kargo firması belirlenemedi. Kargo faturası gelince kâr hesaplanır.",
         "OWN_CONTRACT_EMPTY": "Kendi kargo tarifende bu desinin fiyatı yok.",
+        "RETURN_CARRIER_NOT_RECOGNIZED": "İade kargosu tahmin edilemedi: kargo firması tanınmadı. İade kargo faturası gelince ya da firma tanımlanınca kâr hesaplanır.",
         "RETURN": "İade kargosunun tutarı tahmin edilemedi. İade kargo faturası gelince kâr hesaplanır.",
         "other": "Kargo gideri tahmin edilemedi. Kargo faturası gelince kâr hesaplanır."
       },
