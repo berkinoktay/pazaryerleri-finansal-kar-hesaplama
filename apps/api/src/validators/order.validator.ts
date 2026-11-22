@@ -106,6 +106,49 @@ export type ListOrdersQuery = z.infer<typeof listOrdersQuerySchema>;
 // Summary (KPI) shares the list filters but not pagination/sort.
 export type OrderSummaryQuery = Omit<ListOrdersQuery, 'page' | 'perPage' | 'sort'>;
 
+// ─── Profit blockers ───────────────────────────────────────────────────────
+
+// One reason the order's profit is not computable, shared by the list row and the detail.
+// The backend alone decides which issue code blocks (apps/api/src/lib/profit-blockers.ts);
+// the frontend renders the codes it receives and never derives them.
+const ProfitBlockerSchema = z
+  .object({
+    code: z.enum(ProfitIssueCode).openapi({
+      description:
+        'A blocking profit issue code; the frontend localizes from it. Only codes that make ' +
+        'the profit not computable appear here: this field is how a client learns which ' +
+        'codes block.',
+      example: 'CARRIER_NOT_RECOGNIZED',
+    }),
+    detail: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          "The issue's optional English context, with the same meaning as ProfitIssue.detail " +
+          '(for CARRIER_NOT_RECOGNIZED, the carrier name as Trendyol reported it).',
+        example: 'Alternative Delivery',
+      }),
+  })
+  .openapi('ProfitBlocker', {
+    description:
+      "A reason the order's profit is not computable: a blocking issue of its best-known " +
+      'profit statement, reduced to its code and detail.',
+  });
+
+const ProfitBlockersSchema = z.array(ProfitBlockerSchema).openapi({
+  description:
+    "Why the order's profit is not computable. Filled only while the best-known profit " +
+    "statement's status is NOT_COMPUTABLE: its blocking issues, one entry per distinct " +
+    'code + detail (a cause named on several items is listed once), ordered by the code in ' +
+    'the ProfitIssueCode enum order (not alphabetical), then by detail (null first). Empty ' +
+    'for every other order: computed, excluded from profit, ' +
+    'cancelled, or with no profit to read. The list reads stored statements only, so an ' +
+    'order with no statement yet has none there; the detail computes the statement in the ' +
+    'request when none is stored, as for its other profit fields, and is empty when that ' +
+    'profit cannot be read.',
+});
+
 // ─── List item ─────────────────────────────────────────────────────────────
 
 /**
@@ -191,6 +234,7 @@ export const OrderListItemSchema = z
           'total cost gross * 100. Null until a statement exists or when total cost is 0.',
         example: '38.40',
       }),
+    profitBlockers: ProfitBlockersSchema,
     // Promosyon gösterimi (spec ekleme #3): mapper'ın yakaladığı satıcı-indirimi
     // promosyon isimleri + brüt tutarları. İndirim/promosyon yoksa null. Liste
     // satırında indirimli siparişin promosyon adı küçük bir rozet/tooltip ile
@@ -661,6 +705,7 @@ export const OrderDetailSchema = z
         'order. Empty when there are none, and when the profit part is empty (a platform the ' +
         'engine cannot compute, or a profit read that failed).',
     }),
+    profitBlockers: ProfitBlockersSchema,
 
     // Promosyon gösterimi (spec ekleme #3): mapper'ın yakaladığı satıcı-indirimi
     // promosyon isimleri + brüt tutarları. İndirim/promosyon yoksa null. Frontend

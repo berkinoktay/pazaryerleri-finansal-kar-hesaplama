@@ -33,6 +33,7 @@ const baseRow = {
   itemCount: 2,
   profitExcludedAt: null,
   profitExclusionReason: null,
+  profitBlockers: [],
 };
 
 function renderTable(

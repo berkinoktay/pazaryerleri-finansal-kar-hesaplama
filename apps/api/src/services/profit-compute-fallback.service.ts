@@ -10,7 +10,8 @@ import type { RequestFailureLog } from './scenario-screen-commons';
 /**
  * A read surface that must keep its page up when a parcel's profit cannot be derived for
  * display. The order detail, the new-order notification and live performance (today's
- * KPIs, chart and order feed) compute in-request when no statement is stored; today's
+ * KPIs, chart and order feed) compute in-request when no statement is stored; the orders
+ * list reads its rows' stored best-known issues for the profit blockers; today's
  * products reads the stored profit lines; product pricing, the commission tariff, the
  * Plus commission tariff, the advantage tariff, the flash product, the discount list and
  * the marketplace campaign screens each evaluate a scenario per variant. Each names
@@ -18,6 +19,7 @@ import type { RequestFailureLog } from './scenario-screen-commons';
  */
 export type ProfitReadSurface =
   | 'order-detail'
+  | 'order-list'
   | 'order-notification'
   | 'live-performance'
   | 'today-products'

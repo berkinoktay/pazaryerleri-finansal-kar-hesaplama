@@ -34,6 +34,7 @@ import {
   type OrderProfitFields,
   type StatementListRow,
 } from '../lib/order-profit-fields';
+import { profitBlockers, storedProfitBlockers, type ProfitBlocker } from '../lib/profit-blockers';
 import { toPromotionDisplays } from '../lib/promotion-displays';
 import type {
   ListOrdersQuery,
@@ -46,6 +47,7 @@ import {
   computeParcelProfitForRead,
   logProfitReadFailure,
 } from './profit-compute-fallback.service';
+import { createRequestFailureLog, type RequestFailureLog } from './scenario-screen-commons';
 
 interface OrderListResult {
   data: OrderListItemResponse[];
@@ -221,9 +223,29 @@ type OrderListRow = Prisma.OrderGetPayload<{
   };
 }>;
 
-function toOrderListItem(row: OrderListRow): OrderListItemResponse {
+/**
+ * A list row's profit blockers, read from its stored best-known statement. A corrupt
+ * stored issues value must not fail the page (owner decision 2026-11-04): the row reads
+ * no blockers and the failure is recorded, to be logged once for the request.
+ */
+function listRowProfitBlockers(
+  orderId: string,
+  bestKnown: StatementListRow | null,
+  failures: RequestFailureLog,
+): ProfitBlocker[] {
+  if (bestKnown === null) return [];
+  try {
+    return storedProfitBlockers(bestKnown);
+  } catch (err) {
+    failures.record(err, orderId);
+    return [];
+  }
+}
+
+function toOrderListItem(row: OrderListRow, failures: RequestFailureLog): OrderListItemResponse {
+  const pair = toStatementPair(row.profitStatements);
   const fields = orderProfitFields({
-    pair: toStatementPair(row.profitStatements),
+    pair,
     orderStatus: row.status,
     orderSaleGross: row.saleGross,
     orderSaleVat: row.saleVat,
@@ -243,6 +265,7 @@ function toOrderListItem(row: OrderListRow): OrderListItemResponse {
     settledNetProfit: fields.settledNetProfit,
     saleMarginPct: fields.saleMarginPct,
     costMarkupPct: fields.costMarkupPct,
+    profitBlockers: listRowProfitBlockers(row.id, pair.bestKnown, failures),
     // Promosyon adları (spec ekleme #3): detaydakiyle aynı runtime-doğrulamalı
     // dönüşüm — liste satırı indirimin hangi promosyondan geldiğini gösterir.
     promotionDisplays: toPromotionDisplays(row.promotionDisplays),
@@ -398,7 +421,11 @@ export async function listOrders(
     prisma.order.count({ where: { ...baseWhere, profitExcludedAt: { not: null } } }),
   ]);
 
-  const data: OrderListItemResponse[] = rows.map((row) => toOrderListItem(row));
+  // A row whose stored issues cannot be read keeps the page up; the request logs its
+  // failures once ([profit-read], with the failed count).
+  const failures = createRequestFailureLog({ surface: 'order-list', organizationId: orgId });
+  const data: OrderListItemResponse[] = rows.map((row) => toOrderListItem(row, failures));
+  failures.flush();
 
   return { data, total, counts: { calculated: calculatedCount, excluded: excludedCount } };
 }
@@ -534,11 +561,15 @@ interface OrderProfitLineContext {
  * platform the engine cannot compute, a corrupt stored line (or statement) that the
  * stored path cannot rebuild, or a failed in-request computation. Every item then takes
  * the all-null EMPTY_ITEM_PROFIT_VALUES, commission amounts included.
+ *
+ * profitBlockers come from the best-known view's status and its raw issues (the same rule
+ * the orders list row applies to its stored statement); empty with the profit part.
  */
 interface OrderProfitDetail {
   readonly fields: OrderProfitFields;
   readonly profitBreakdown: StatementBreakdown | null;
   readonly lineContext: OrderProfitLineContext | null;
+  readonly profitBlockers: ProfitBlocker[];
 }
 
 /** The all-null item values for an order whose profit part is empty (no line context). */
@@ -568,6 +599,12 @@ function statementListRowFromStatement(statement: ProfitStatement): StatementLis
     saleMarginPct: statement.saleMarginPct === null ? null : roundPercent(statement.saleMarginPct),
     costMarkupPct: statement.costMarkupPct === null ? null : roundPercent(statement.costMarkupPct),
     reconciliationStatus: statement.reconciliationStatus,
+    // The issues in their stored JSON shape, as the writer would persist them.
+    issues: statement.issues.map(({ code, orderItemId, detail }) => ({
+      code,
+      orderItemId,
+      detail,
+    })),
   };
 }
 
@@ -588,6 +625,7 @@ function emptyOrderProfitDetail(order: {
     }),
     profitBreakdown: null,
     lineContext: null,
+    profitBlockers: [],
   };
 }
 
@@ -654,7 +692,15 @@ async function loadOrderProfitDetail(
         totals: statementTotalsFromRow(bestKnownRow),
         selectedLines: lineContext.bestKnownLines,
       });
-      return { fields, profitBreakdown, lineContext };
+      return {
+        fields,
+        profitBreakdown,
+        lineContext,
+        profitBlockers: profitBlockers({
+          status: bestKnownRow.status,
+          issues: lineContext.issues,
+        }),
+      };
     } catch (err) {
       logProfitReadFailure({
         surface: 'order-detail',
@@ -712,6 +758,7 @@ async function loadOrderProfitDetail(
       estimateLines: computed.estimate.selectedLines,
       issues: computed.bestKnown.issues,
     },
+    profitBlockers: profitBlockers(computed.bestKnown),
   };
 }
 
@@ -816,6 +863,9 @@ export async function getOrderById(
         : visibleProfitIssues(profit.lineContext.issues, profit.lineContext.bestKnownLines).map(
             ({ code, orderItemId, detail }) => ({ code, orderItemId, detail }),
           ),
+    // Why the profit is not computable: the best-known view's blocking issues while its
+    // status is NOT_COMPUTABLE, else none (the same rule as the orders list row).
+    profitBlockers: profit.profitBlockers,
     promotionDisplays: toPromotionDisplays(row.promotionDisplays),
 
     profitExcludedAt: row.profitExcludedAt?.toISOString() ?? null,
