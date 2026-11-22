@@ -851,8 +851,8 @@ describe('processProductsChunk', () => {
               // Omitted (real Trendyol responses often skip this field
               // until their pricing pipeline computes it) -> stored as null.
               { variantId: 800_103, barcode: 'desi-bc-3a', stockCode: 'desi-sk-3a' },
-              // Explicit 0 -> stored as 0: a real desi and a valid tariff tier
-              // (the tariff table covers desi 0 onward), not a missing desi.
+              // Explicit 0 -> stored as null: Trendyol sends 0 for a product whose
+              // desi was never entered, so it is a missing desi (Berkin 2026-11-22).
               {
                 variantId: 800_104,
                 barcode: 'desi-bc-3b',
@@ -898,9 +898,9 @@ describe('processProductsChunk', () => {
     });
     expect(missing.syncedDimensionalWeight).toBeNull();
     expect(sentNull.syncedDimensionalWeight).toBeNull();
-    expect(zero.syncedDimensionalWeight?.toString()).toBe('0');
+    expect(zero.syncedDimensionalWeight).toBeNull();
     // No seller override either: the omitted and null variants have no desi at
-    // all (override null AND synced null); the 0 variant has a real desi of 0.
+    // all (override null AND synced null), and neither has the 0 variant.
     expect(missing.dimensionalWeightOverride).toBeNull();
     expect(sentNull.dimensionalWeightOverride).toBeNull();
     expect(zero.dimensionalWeightOverride).toBeNull();

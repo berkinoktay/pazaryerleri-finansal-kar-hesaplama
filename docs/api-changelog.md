@@ -34,11 +34,12 @@ section "Versioning" for details.
   attach already does. Only this store's variants that the write updated are checked; ids of
   another store or organization trigger nothing. Clearing the desi (`null`) checks nothing, and
   stored orders keep the desi captured at intake. Request and response shapes unchanged.
-- **Empty desi is missing, 0 is a real desi** (`GET /v1/organizations/{orgId}/stores/{storeId}/products`,
+- **Empty desi is missing, a seller's 0 is a real desi** (`GET /v1/organizations/{orgId}/stores/{storeId}/products`,
   `GET .../products/facets`, `PATCH .../products/variants/{variantId}/dimensional-weight`, the
-  product pricing routes). A variant Trendyol sends no desi for now has `syncedDimensionalWeight`
-  `null` (and `dimensionalWeight` `null` when the seller entered none) instead of `"0"`; a `"0"` is
-  a real desi Trendyol sent. `overrideMissing=desi`, `overrideCounts.missingDesi` and
+  product pricing routes). A variant Trendyol sends no desi for, or a desi of 0 (Trendyol's value
+  for a desi that was never entered), now has `syncedDimensionalWeight` `null` (and
+  `dimensionalWeight` `null` when the seller entered none) instead of `"0"`; a seller-entered `"0"`
+  is a real desi. `overrideMissing=desi`, `overrideCounts.missingDesi` and
   `isDimensionalWeightMissing` count only a non-digital variant with no desi at all (no seller
   desi, no Trendyol desi); a desi of 0 and a digital variant are not missing. The shipping estimate
   of a variant with no desi is `NO_DESI` with no amount (a desi of 0 is priced at the desi-0 row).

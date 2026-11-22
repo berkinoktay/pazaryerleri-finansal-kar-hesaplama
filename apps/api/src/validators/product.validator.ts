@@ -972,7 +972,8 @@ export const VariantDimensionalWeightResponseSchema = z
         'Missing-desi state after the update: a non-digital variant with no user override ' +
         'and no synced desi (same rule as VariantSummary.isDimensionalWeightMissing). ' +
         'Clearing the override of a variant the marketplace sent no desi for makes it true ' +
-        'again; a synced desi of 0 is a real desi and keeps it false.',
+        'again; a seller desi of 0 is a real desi and keeps it false (a Trendyol 0 is ' +
+        'stored as no desi).',
       example: false,
     }),
   })

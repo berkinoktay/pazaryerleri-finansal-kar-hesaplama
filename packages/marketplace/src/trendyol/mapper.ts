@@ -43,13 +43,15 @@ function nullableDecimalString(value: number | null | undefined): string | null 
   return value.toFixed(2);
 }
 
-// Maps the wire desi to a 2-decimal string, or null when Trendyol sent no
-// usable desi: absent, null, not a finite number, or negative (a negative desi
-// is impossible). 0 is a real desi (the lowest tariff tier) and maps to '0.00',
-// unlike the commission rate where 0 means "unknown". Desi is a measure, not
-// money; toFixed(2) matches the Decimal(6,2) column like priceToDecimalString.
+// Maps the wire desi to a 2-decimal string, or null when Trendyol sent no usable
+// desi: absent, null, not a finite number, 0 or negative. Trendyol sends 0 for a
+// product whose desi was never entered (seen on the live store: a 50-pack of flags
+// at desi 0), so a wire 0 means "no desi" (Berkin 2026-11-22). A product that
+// really is desi 0 gets it from the seller's override, where 0 is a real value.
+// Desi is a measure, not money; toFixed(2) matches the Decimal(6,2) column like
+// priceToDecimalString.
 function desiDecimalString(value: number | null | undefined): string | null {
-  if (value === null || value === undefined || !Number.isFinite(value) || value < 0) return null;
+  if (value === null || value === undefined || !Number.isFinite(value) || value <= 0) return null;
   return value.toFixed(2);
 }
 
@@ -153,12 +155,11 @@ function mapVariant(variant: TrendyolVariant): MappedProductVariant {
     productUrl: variant.productUrl ?? null,
     size: extractVariantLabel(variantAttrs),
     attributes: variantAttrs,
-    // Desi: Trendyol omits this field on most products. No desi is stored as
-    // null; with no seller override the variant then has no desi at all (the
-    // shipping estimate gives no price and an order holding it waits for the
-    // seller's desi). A 0 is a real desi and a VALID tariff tier (the cargo fee
-    // is matched from the DB tariff table by carrier + ceil(desi), and the
-    // table covers desi 0 onward), so it is stored as '0.00' and priced.
+    // Desi: Trendyol omits this field on some products and sends 0 on others whose
+    // desi was never entered; both are stored as null. With no seller override the
+    // variant then has no desi at all (the shipping estimate gives no price and an
+    // order holding it waits for the seller's desi). A seller-entered 0 is a real
+    // desi and a VALID tariff tier (the table covers desi 0 onward).
     syncedDimensionalWeight: desiDecimalString(variant.dimensionalWeight),
     syncedCommissionRate: nullableDecimalString(variant.commission),
     status,

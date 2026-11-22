@@ -38,7 +38,7 @@ function initialInputValue(variant: VariantSummary): string {
   return formatTrDecimal(variant.dimensionalWeight);
 }
 
-/** Trendyol's desi (0 is a real one); null when Trendyol sent none. */
+/** Trendyol's desi; null when Trendyol sent none (its 0 is stored as null too). */
 function syncedDesi(variant: VariantSummary): Decimal | null {
   if (variant.syncedDimensionalWeight === null) return null;
   return new Decimal(variant.syncedDimensionalWeight);
