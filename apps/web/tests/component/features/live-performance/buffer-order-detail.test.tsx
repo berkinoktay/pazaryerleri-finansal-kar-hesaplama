@@ -5,16 +5,35 @@ import { BufferOrderDetail } from '@/features/live-performance/components/buffer
 
 import trMessages from '../../../../messages/tr.json';
 import { http, HttpResponse, server } from '../../../helpers/msw';
-import { render, screen, within } from '../../../helpers/render';
+import { render, screen, waitFor, within } from '../../../helpers/render';
 
 // Turkish copy comes from the catalog so this file stays ASCII.
 const buffer = trMessages.livePerformance.orderDetail.buffer;
 const unmatchedBadge = trMessages.common.unmatchedBadge;
+const desiPopover = trMessages.products.desiCell.popover;
 
 const ORG_ID = '00000000-0000-0000-0000-000000000001';
 const STORE_ID = '00000000-0000-0000-0000-000000000002';
 const BUFFER_ID = '00000000-0000-0000-0000-0000000000b1';
-const URL = `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/live-performance/buffer/${BUFFER_ID}`;
+const API = 'http://localhost:3001/v1';
+const URL = `${API}/organizations/${ORG_ID}/stores/${STORE_ID}/live-performance/buffer/${BUFFER_ID}`;
+
+// One store profile the cost popover can attach (mirrors cost-cell-popover.test.tsx).
+const PACKAGING_PROFILE = {
+  id: 'profile-uuid-002',
+  organizationId: ORG_ID,
+  storeId: STORE_ID,
+  name: 'Paketleme',
+  type: 'PACKAGING',
+  amountGross: '10.00',
+  vatRate: 18,
+  note: null,
+  archivedAt: null,
+  createdBy: null,
+  updatedBy: null,
+  createdAt: '2026-05-01T00:00:00Z',
+  updatedAt: '2026-05-01T00:00:00Z',
+};
 
 // A resolved line with a cost profile and a desi: nothing missing.
 function makeLine(overrides: Partial<BufferDetailLine>): BufferDetailLine {
@@ -42,18 +61,22 @@ const MISSING_DESI = {
   isDimensionalWeightMissing: true,
 } satisfies Partial<BufferDetailLine>;
 
-function serveDetail(lines: BufferDetailLine[]): void {
+// Serves the buffer detail and counts the GETs, so a refresh is observable.
+function serveDetail(lines: BufferDetailLine[]): { gets: () => number } {
+  let gets = 0;
   server.use(
-    http.get(URL, () =>
-      HttpResponse.json({
+    http.get(URL, () => {
+      gets += 1;
+      return HttpResponse.json({
         platformOrderNumber: 'TY-1',
         orderDate: '2026-06-05T08:00:00.000Z',
         status: 'PENDING',
         saleGross: '400.00',
         lines,
-      }),
-    ),
+      });
+    }),
   );
+  return { gets: () => gets };
 }
 
 async function findRow(productName: string): Promise<HTMLElement> {
@@ -129,5 +152,199 @@ describe('BufferOrderDetail', () => {
     expect(within(ghost).getByText(unmatchedBadge)).toBeInTheDocument();
     expect(within(ghost).queryAllByRole('button')).toHaveLength(0);
     expect(within(ghost).queryByText(buffer.lineReady)).toBeNull();
+    // An unresolved line still holds the order, so the pending notice stays.
+    expect(screen.getByText(buffer.pendingNotice)).toBeInTheDocument();
+    expect(screen.queryByText(buffer.readyNotice)).toBeNull();
+  });
+
+  it('shows the ready notice when no line is missing', async () => {
+    serveDetail([
+      makeLine({ barcode: 'BC-1', productName: 'First', variantId: 'v-1' }),
+      makeLine({ barcode: 'BC-2', productName: 'Second', variantId: 'v-2' }),
+    ]);
+
+    renderDetail();
+
+    expect(await screen.findByText(buffer.readyNotice)).toBeInTheDocument();
+    expect(screen.queryByText(buffer.pendingNotice)).toBeNull();
+  });
+
+  it('keeps the pending notice while any line is missing', async () => {
+    serveDetail([
+      makeLine({ barcode: 'BC-1', productName: 'First', variantId: 'v-1' }),
+      makeLine({ barcode: 'BC-2', productName: 'Second', variantId: 'v-2', ...MISSING_DESI }),
+    ]);
+
+    renderDetail();
+
+    expect(await screen.findByText(buffer.pendingNotice)).toBeInTheDocument();
+    expect(screen.queryByText(buffer.readyNotice)).toBeNull();
+  });
+
+  it('shows a neutral notice instead of an error when the entry is gone', async () => {
+    // The worker promoted the order and deleted the buffer entry.
+    server.use(
+      http.get(URL, () =>
+        HttpResponse.json(
+          {
+            type: 'about:blank',
+            title: 'Not Found',
+            status: 404,
+            code: 'NOT_FOUND',
+            detail: 'BufferEntry not found',
+          },
+          { status: 404, headers: { 'content-type': 'application/problem+json' } },
+        ),
+      ),
+    );
+
+    renderDetail();
+
+    expect(await screen.findByText(buffer.noLongerWaiting)).toBeInTheDocument();
+    expect(screen.queryByText(buffer.loadError)).toBeNull();
+  });
+
+  it('shows the neutral notice when the entry is promoted away after the last input', async () => {
+    // First load: only the desi is missing. After the save the worker promotes the
+    // order and deletes the entry, so the refetch answers 404 over the stale data.
+    let gets = 0;
+    server.use(
+      http.get(URL, () => {
+        gets += 1;
+        if (gets > 1) {
+          return HttpResponse.json(
+            {
+              type: 'about:blank',
+              title: 'Not Found',
+              status: 404,
+              code: 'NOT_FOUND',
+              detail: 'BufferEntry not found',
+            },
+            { status: 404, headers: { 'content-type': 'application/problem+json' } },
+          );
+        }
+        return HttpResponse.json({
+          platformOrderNumber: 'TY-1',
+          orderDate: '2026-06-05T08:00:00.000Z',
+          status: 'PENDING',
+          saleGross: '100.00',
+          lines: [makeLine({ barcode: 'BC-1', productName: 'Desi Only', ...MISSING_DESI })],
+        });
+      }),
+      http.patch(
+        `${API}/organizations/${ORG_ID}/stores/${STORE_ID}/products/variants/v-0/dimensional-weight`,
+        () =>
+          HttpResponse.json({
+            id: 'v-0',
+            dimensionalWeight: '1.5',
+            syncedDimensionalWeight: null,
+            isDimensionalWeightOverridden: true,
+            isDimensionalWeightMissing: false,
+          }),
+      ),
+    );
+
+    const { user } = renderDetail();
+
+    const row = await findRow('Desi Only');
+    await user.click(within(row).getByRole('button', { name: buffer.addDesi }));
+    await user.type(screen.getByLabelText(desiPopover.title), '1,5');
+    await user.click(screen.getByRole('button', { name: desiPopover.save }));
+
+    expect(await screen.findByText(buffer.noLongerWaiting)).toBeInTheDocument();
+    expect(screen.queryByText(buffer.loadError)).toBeNull();
+  });
+
+  it('shows the load error for any other failure', async () => {
+    server.use(
+      http.get(URL, () =>
+        HttpResponse.json(
+          {
+            type: 'about:blank',
+            title: 'Internal Server Error',
+            status: 500,
+            code: 'INTERNAL_ERROR',
+            detail: 'boom',
+          },
+          { status: 500, headers: { 'content-type': 'application/problem+json' } },
+        ),
+      ),
+    );
+
+    renderDetail();
+
+    expect(await screen.findByText(buffer.loadError)).toBeInTheDocument();
+    expect(screen.queryByText(buffer.noLongerWaiting)).toBeNull();
+  });
+
+  it('refreshes the buffer detail after a desi save', async () => {
+    // The order still waits on its cost, so no realtime event would refresh it.
+    const detail = serveDetail([
+      makeLine({
+        barcode: 'BC-1',
+        productName: 'Both Missing',
+        variantId: 'v-1',
+        isCostMissing: true,
+        ...MISSING_DESI,
+      }),
+    ]);
+    server.use(
+      http.patch(
+        `${API}/organizations/${ORG_ID}/stores/${STORE_ID}/products/variants/v-1/dimensional-weight`,
+        () =>
+          HttpResponse.json({
+            id: 'v-1',
+            dimensionalWeight: '1.5',
+            syncedDimensionalWeight: null,
+            isDimensionalWeightOverridden: true,
+            isDimensionalWeightMissing: false,
+          }),
+      ),
+    );
+
+    const { user } = renderDetail();
+
+    const row = await findRow('Both Missing');
+    expect(detail.gets()).toBe(1);
+    await user.click(within(row).getByRole('button', { name: buffer.addDesi }));
+    await user.type(screen.getByLabelText(desiPopover.title), '1,5');
+    await user.click(screen.getByRole('button', { name: desiPopover.save }));
+
+    await waitFor(() => expect(detail.gets()).toBe(2));
+  });
+
+  it('refreshes the buffer detail after attaching a cost', async () => {
+    const detail = serveDetail([
+      makeLine({
+        barcode: 'BC-1',
+        productName: 'Both Missing',
+        variantId: 'v-1',
+        isCostMissing: true,
+        ...MISSING_DESI,
+      }),
+    ]);
+    server.use(
+      http.get(`${API}/organizations/${ORG_ID}/variants/v-1/cost-profiles`, () =>
+        HttpResponse.json({ data: [] }),
+      ),
+      http.get(`${API}/organizations/${ORG_ID}/cost-profiles`, () =>
+        HttpResponse.json({
+          data: [PACKAGING_PROFILE],
+          meta: { nextCursor: null, hasMore: false },
+        }),
+      ),
+      http.post(`${API}/organizations/${ORG_ID}/cost-profile-attachments/attach`, () =>
+        HttpResponse.json({ attached: 1 }),
+      ),
+    );
+
+    const { user } = renderDetail();
+
+    const row = await findRow('Both Missing');
+    expect(detail.gets()).toBe(1);
+    await user.click(within(row).getByRole('button', { name: buffer.addCost }));
+    await user.click(await screen.findByRole('option', { name: /Paketleme/ }));
+
+    await waitFor(() => expect(detail.gets()).toBe(2));
   });
 });

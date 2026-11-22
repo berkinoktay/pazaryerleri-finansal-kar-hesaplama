@@ -47,7 +47,7 @@ export interface CostCellPopoverProps {
   /**
    * Called after an attach, a detach or a create-and-attach succeeds; never on
    * error. Lets an outside caller (e.g. live performance) refresh its own
-   * queries.
+   * queries. Fires even if the popover unmounts before the request settles.
    */
   onChanged?: () => void;
   children: React.ReactNode;
@@ -90,8 +90,8 @@ export function CostCellPopover({
     open ? { orgId, storeId, filters: { archived: 'false' } } : null,
   );
 
-  const attachMutation = useAttachCostProfiles();
-  const detachMutation = useDetachCostProfiles();
+  const attachMutation = useAttachCostProfiles({ onSuccess: onChanged });
+  const detachMutation = useDetachCostProfiles({ onSuccess: onChanged });
 
   const attachedProfiles = attachedQuery.data?.data ?? [];
   const attachedIds = React.useMemo(
@@ -106,26 +106,20 @@ export function CostCellPopover({
 
   function handleAttach(profileId: string) {
     const profile = allProfilesQuery.data?.data.find((p) => p.id === profileId);
-    attachMutation.mutate(
-      {
-        orgId,
-        profileIds: [profileId],
-        variantIds: [variantId],
-        ...(profile !== undefined ? { optimisticProfiles: [profile] } : {}),
-      },
-      { onSuccess: () => onChanged?.() },
-    );
+    attachMutation.mutate({
+      orgId,
+      profileIds: [profileId],
+      variantIds: [variantId],
+      ...(profile !== undefined ? { optimisticProfiles: [profile] } : {}),
+    });
   }
 
   function handleDetach(profile: CostProfile) {
-    detachMutation.mutate(
-      {
-        orgId,
-        profileIds: [profile.id],
-        variantIds: [variantId],
-      },
-      { onSuccess: () => onChanged?.() },
-    );
+    detachMutation.mutate({
+      orgId,
+      profileIds: [profile.id],
+      variantIds: [variantId],
+    });
   }
 
   const isInitialLoading = attachedQuery.isLoading;

@@ -20,5 +20,8 @@ export function useBufferDetail(
       return getBufferDetail({ orgId, storeId, bufferId });
     },
     enabled,
+    // BufferOrderDetail renders its own error state (a neutral notice once the
+    // entry is promoted away, else an inline alert), so no global toast.
+    meta: { silent: true },
   });
 }

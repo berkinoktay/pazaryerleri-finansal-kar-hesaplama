@@ -34,9 +34,9 @@ export interface DesiCellPopoverProps {
   storeId: string;
   variant: DesiEditableVariant;
   /**
-   * Called after a save or reset succeeds, once the popover has closed; never
-   * on error. Lets an outside caller (e.g. live performance) refresh its own
-   * queries.
+   * Called after a save or reset succeeds; never on error. Lets an outside
+   * caller (e.g. live performance) refresh its own queries. Fires even if the
+   * popover unmounts before the request settles.
    */
   onSaved?: () => void;
   children: React.ReactNode;
@@ -87,7 +87,7 @@ export function DesiCellPopover({
   const [value, setValue] = React.useState<string>(() => initialInputValue(variant));
   const [errorCode, setErrorCode] = React.useState<DimensionalWeightErrorCode | null>(null);
 
-  const mutation = useUpdateVariantDimensionalWeight();
+  const mutation = useUpdateVariantDimensionalWeight({ onSaved });
 
   // Resync local state with the canonical value on every open transition.
   // Doing it in onOpenChange (instead of a useEffect-on-open) avoids the
@@ -106,10 +106,7 @@ export function DesiCellPopover({
     mutation.mutate(
       { orgId, storeId, variantId: variant.id, dimensionalWeight: nextValue },
       {
-        onSuccess: () => {
-          setOpen(false);
-          onSaved?.();
-        },
+        onSuccess: () => setOpen(false),
         onError: (err) => {
           const code = pickDimensionalWeightErrorCode(err);
           if (code !== null) setErrorCode(code);

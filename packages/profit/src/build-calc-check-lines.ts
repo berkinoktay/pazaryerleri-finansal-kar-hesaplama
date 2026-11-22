@@ -24,8 +24,7 @@ interface InputLine {
  *
  * Accepts the Prisma client OR an interactive-transaction client. `(storeId,
  * barcode)` is non-unique by design, so a barcode may match multiple
- * variants; we take the first match per line, mirroring how the order-item
- * upsert resolves variants by barcode.
+ * variants; we take the first match per line in variant-id order.
  */
 export async function buildCalcCheckLines(
   db: Prisma.TransactionClient,
@@ -38,6 +37,9 @@ export async function buildCalcCheckLines(
       storeId: args.storeId,
       barcode: { in: barcodes },
     },
+    // Deterministic first match per barcode (lowest variant id), mirrored by the
+    // live-performance today-products table so both name the same variant.
+    orderBy: { id: 'asc' },
     select: {
       id: true,
       barcode: true,

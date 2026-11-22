@@ -30,8 +30,12 @@ interface MutationContext {
  * the products list are invalidated to reconcile.
  *
  * No custom onError toast — the global QueryProvider pipeline handles toasting.
+ *
+ * `options.onSuccess` runs after a successful detach, from the mutation's own
+ * options, so it fires even if the calling component unmounts before the
+ * request settles (a per-call `mutate(vars, { onSuccess })` would not).
  */
-export function useDetachCostProfiles() {
+export function useDetachCostProfiles(options?: { onSuccess?: () => void }) {
   const queryClient = useQueryClient();
 
   return useMutation<DetachResponse, Error, DetachCostProfilesArgs, MutationContext>({
@@ -51,6 +55,7 @@ export function useDetachCostProfiles() {
       }
       return { snapshots };
     },
+    onSuccess: () => options?.onSuccess?.(),
     onError: (_err, _variables, context) => {
       if (context === undefined) return;
       for (const [key, value] of context.snapshots) {

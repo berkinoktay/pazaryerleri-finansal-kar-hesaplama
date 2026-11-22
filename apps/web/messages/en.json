@@ -3824,6 +3824,8 @@
         "addCost": "Add cost",
         "addDesi": "Add desi",
         "lineReady": "Ready",
+        "readyNotice": "Nothing is missing anymore; the order will be added to profit shortly.",
+        "noLongerWaiting": "This order is no longer waiting; see its current state in today's orders list.",
         "loadError": "Could not load the order detail."
       }
     },

@@ -254,6 +254,59 @@ describe('CostCellPopover', () => {
     expect(attachCalls).toBe(1);
   });
 
+  it('does not call onChanged when attaching fails', async () => {
+    let attachCalls = 0;
+    let attachmentGets = 0;
+    server.use(
+      http.get(
+        `${TEST_API_BASE}/v1/organizations/${ORG_ID}/variants/${VARIANT_ID}/cost-profiles`,
+        () => {
+          attachmentGets += 1;
+          return HttpResponse.json(attachedProfilesResponse);
+        },
+      ),
+      http.get(`${TEST_API_BASE}/v1/organizations/${ORG_ID}/cost-profiles`, () =>
+        HttpResponse.json(allProfilesResponse),
+      ),
+      http.post(
+        `${TEST_API_BASE}/v1/organizations/${ORG_ID}/cost-profile-attachments/attach`,
+        () => {
+          attachCalls += 1;
+          return HttpResponse.json(
+            {
+              type: 'about:blank',
+              title: 'Internal Server Error',
+              status: 500,
+              code: 'INTERNAL_ERROR',
+              detail: 'boom',
+            },
+            { status: 500, headers: { 'content-type': 'application/problem+json' } },
+          );
+        },
+      ),
+    );
+    const onChanged = vi.fn();
+
+    const { user } = render(
+      <CostCellPopover
+        orgId={ORG_ID}
+        variantId={VARIANT_ID}
+        storeId={STORE_ID}
+        onChanged={onChanged}
+      >
+        <button type="button">Open</button>
+      </CostCellPopover>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open' }));
+    await user.click(await screen.findByRole('option', { name: /Paketleme/ }));
+
+    // The hook's onSettled refetches the variant's attachments: the attach has settled.
+    await waitFor(() => expect(attachmentGets).toBe(2));
+    expect(attachCalls).toBe(1);
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
   it('calls onChanged after detaching a profile', async () => {
     let detachCalls = 0;
     server.use(

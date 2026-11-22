@@ -803,6 +803,9 @@ export async function getTodayProducts(args: {
             organizationId: args.orgId,
             barcode: { in: bufferBarcodes },
           },
+          // Deterministic first match per barcode (lowest variant id), mirrored by
+          // the calculability gate (buildCalcCheckLines).
+          orderBy: { id: 'asc' },
           select: {
             id: true,
             barcode: true,

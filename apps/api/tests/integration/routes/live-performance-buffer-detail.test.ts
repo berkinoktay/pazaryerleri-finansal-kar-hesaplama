@@ -23,6 +23,8 @@ async function seedVariant(
     syncedDimensionalWeight?: string | null;
     dimensionalWeightOverride?: string | null;
     isDigital?: boolean;
+    // Fixed variant id, for tests that depend on id order.
+    id?: string;
   },
 ): Promise<string> {
   const product = await prisma.product.create({
@@ -36,6 +38,7 @@ async function seedVariant(
   });
   const variant = await prisma.productVariant.create({
     data: {
+      id: opts.id,
       organizationId: orgId,
       storeId,
       productId: product.id,
@@ -272,11 +275,14 @@ describe('GET live-performance/buffer/{bufferId}', () => {
     const org = await createOrganization();
     await createMembership(org.id, user.id, 'OWNER');
     const store = await createStore(org.id);
+    // The higher id is inserted first, so only an explicit id order (not the
+    // insertion order) picks the lower one.
     const costedId = await seedVariant(org.id, store.id, {
       title: 'Shared Costed',
       barcode: 'BC-SHARED',
       seq: 40,
       syncedDimensionalWeight: '2.00',
+      id: 'ffffffff-ffff-4fff-bfff-ffffffffffff',
     });
     const bareId = await seedVariant(org.id, store.id, {
       title: 'Shared Bare',
@@ -284,7 +290,10 @@ describe('GET live-performance/buffer/{bufferId}', () => {
       seq: 41,
       syncedDimensionalWeight: null,
       dimensionalWeightOverride: null,
+      id: '00000000-0000-4000-8000-000000000001',
     });
+    // Postgres orders uuid by bytes, the same as comparing the lowercase strings.
+    expect(bareId < costedId).toBe(true);
     const profile = await createCostProfile(org.id, { storeId: store.id });
     await prisma.productVariantCostProfile.create({
       data: {
@@ -309,15 +318,68 @@ describe('GET live-performance/buffer/{bufferId}', () => {
     );
     expect(res.status).toBe(200);
     const body = await res.json();
-    const line = body.lines[0];
-    expect([costedId, bareId]).toContain(line.variantId);
-    // The gate picks one of the two; the name, the desi and the cost flag must all
-    // describe that same variant.
-    const isCosted = line.variantId === costedId;
-    expect(line).toMatchObject({
-      productName: isCosted ? 'Shared Costed' : 'Shared Bare',
-      isCostMissing: !isCosted,
-      isDimensionalWeightMissing: !isCosted,
+    // The gate takes the first match by variant id; the name, the desi and the
+    // cost flag all describe that same variant.
+    expect(body.lines[0]).toMatchObject({
+      variantId: bareId,
+      productName: 'Shared Bare',
+      isCostMissing: true,
+      dimensionalWeight: null,
+      isDimensionalWeightMissing: true,
+    });
+  });
+
+  it('reports a seller desi of 0 and a digital line as not missing', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id, 'OWNER');
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, {
+      title: 'Zero Desi Line',
+      barcode: 'BC-ZERO',
+      seq: 50,
+      syncedDimensionalWeight: null,
+      dimensionalWeightOverride: '0',
+    });
+    await seedVariant(org.id, store.id, {
+      title: 'Digital Line',
+      barcode: 'BC-DIGITAL',
+      seq: 51,
+      syncedDimensionalWeight: null,
+      dimensionalWeightOverride: null,
+      isDigital: true,
+    });
+    const bufferEntry = await createBufferEntry(org.id, store.id, {
+      mappedOrder: {
+        orderDate: '2026-06-05T08:00:00.000Z',
+        status: 'PENDING',
+        saleGross: '200.00',
+        lines: [
+          { barcode: 'BC-ZERO', quantity: 1, lineSaleGross: '100.00' },
+          { barcode: 'BC-DIGITAL', quantity: 1, lineSaleGross: '100.00' },
+        ],
+      },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/buffer/${bufferEntry.id}`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.lines).toHaveLength(2);
+    // A seller desi of 0 is a real desi.
+    expect(body.lines[0]).toMatchObject({
+      barcode: 'BC-ZERO',
+      dimensionalWeight: '0',
+      isDimensionalWeightOverridden: true,
+      isDimensionalWeightMissing: false,
+    });
+    // A digital product needs no desi.
+    expect(body.lines[1]).toMatchObject({
+      barcode: 'BC-DIGITAL',
+      dimensionalWeight: null,
+      isDimensionalWeightMissing: false,
     });
   });
 

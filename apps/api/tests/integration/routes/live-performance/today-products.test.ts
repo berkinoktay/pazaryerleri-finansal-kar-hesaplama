@@ -54,6 +54,8 @@ async function createVariant(
     syncedDimensionalWeight?: string | null;
     dimensionalWeightOverride?: string | null;
     isDigital?: boolean;
+    // Fixed variant id, for tests that depend on id order.
+    id?: string;
   },
 ): Promise<string> {
   const product = await prisma.product.create({
@@ -67,6 +69,7 @@ async function createVariant(
   });
   const variant = await prisma.productVariant.create({
     data: {
+      id: opts.id,
       organizationId: orgId,
       storeId,
       productId: product.id,
@@ -164,6 +167,96 @@ describe('GET /v1/.../live-performance/today-products', () => {
     expect(row?.costStatus).toBe('missing');
     expect(row?.unitCost).toBeNull();
     expect(row?.unresolved).toBe(false);
+  });
+
+  it('keeps one desi state when a product sells in both orders and the buffer', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // A physical variant with no seller desi and no marketplace desi.
+    const variantId = await createVariant(org.id, store.id, {
+      title: 'Merged No Desi',
+      barcode: 'BC-MERGE-DESI',
+      seq: 2,
+      syncedDimensionalWeight: null,
+      dimensionalWeightOverride: null,
+      isDigital: false,
+    });
+    await sellInOrders(org.id, store.id, variantId, { count: 1, lineSaleGross: '40.00' });
+    await createBufferEntry(org.id, store.id, {
+      orderDate: getBusinessDateAnchor(),
+      mappedOrder: {
+        saleGross: '50.00',
+        orderDate: todayAt(11).toISOString(),
+        lines: [{ barcode: 'BC-MERGE-DESI', quantity: 1, lineSaleGross: '50.00' }],
+      },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body: TodayProductsBody = await res.json();
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]).toMatchObject({
+      variantId,
+      orderCount: 2, // 1 order + 1 buffer entry
+      dimensionalWeight: null,
+      syncedDimensionalWeight: null,
+      isDimensionalWeightOverridden: false,
+      isDimensionalWeightMissing: true,
+    });
+  });
+
+  it('shows the lower-id variant when two variants share a buffered barcode', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // The higher id is inserted first, so only an explicit id order (not the
+    // insertion order) picks the lower one, as the calculability gate does.
+    await createVariant(org.id, store.id, {
+      title: 'Shared High',
+      barcode: 'BC-SHARED',
+      seq: 3,
+      syncedDimensionalWeight: '2.00',
+      id: 'ffffffff-ffff-4fff-bfff-ffffffffffff',
+    });
+    const lowId = await createVariant(org.id, store.id, {
+      title: 'Shared Low',
+      barcode: 'BC-SHARED',
+      seq: 4,
+      syncedDimensionalWeight: null,
+      dimensionalWeightOverride: null,
+      id: '00000000-0000-4000-8000-000000000001',
+    });
+    await createBufferEntry(org.id, store.id, {
+      orderDate: getBusinessDateAnchor(),
+      mappedOrder: {
+        saleGross: '50.00',
+        orderDate: todayAt(11).toISOString(),
+        lines: [{ barcode: 'BC-SHARED', quantity: 1, lineSaleGross: '50.00' }],
+      },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body: TodayProductsBody = await res.json();
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]).toMatchObject({
+      variantId: lowId,
+      productName: 'Shared Low',
+      isDimensionalWeightMissing: true,
+    });
   });
 
   it('çözülemeyen barkodlu buffer satırı listede BARKOD kimliğiyle görünür (düşürülmez)', async () => {

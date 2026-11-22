@@ -225,7 +225,48 @@ describe('DesiCellPopover', () => {
 
     await waitFor(() => expect(bodies).toEqual([{ dimensionalWeight: '1.5' }]));
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
-    expect(screen.queryByLabelText(popover.title)).toBeNull();
+    // onSaved runs from the hook's options, just before the per-call close.
+    await waitFor(() => expect(screen.queryByLabelText(popover.title)).toBeNull());
+  });
+
+  it('calls onSaved even when the popover unmounts before the save settles', async () => {
+    // Holds the PATCH response until the test releases it; `reached` resolves
+    // once the request is in the handler, so the unmount lands mid-flight.
+    const gate: { reach: () => void; release: () => void } = {
+      reach: () => {},
+      release: () => {},
+    };
+    const reached = new Promise<void>((resolve) => {
+      gate.reach = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      gate.release = resolve;
+    });
+    server.use(
+      http.patch(PATCH_URL, async () => {
+        gate.reach();
+        await released;
+        return HttpResponse.json({
+          id: VARIANT_ID,
+          dimensionalWeight: '1.5',
+          syncedDimensionalWeight: null,
+          isDimensionalWeightOverridden: true,
+          isDimensionalWeightMissing: false,
+        });
+      }),
+    );
+    const onSaved = vi.fn();
+    const { user, unmount } = renderPopover(MISSING_VARIANT, onSaved);
+    await user.click(screen.getByRole('button', { name: desiCell.addDesi }));
+    await user.type(screen.getByLabelText(popover.title), '1,5');
+    await user.click(screen.getByRole('button', { name: popover.save }));
+
+    await reached;
+    // E.g. the live performance Sheet closes while the save is in flight.
+    unmount();
+    gate.release();
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
   });
 
   it('does not call onSaved when the save fails', async () => {

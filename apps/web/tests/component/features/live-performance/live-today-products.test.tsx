@@ -1,6 +1,7 @@
 import { NuqsTestHarness } from '../../../helpers/nuqs';
 import { describe, expect, it } from 'vitest';
 
+import type { TodayProductRow } from '@/features/live-performance/api/get-live-today-products.api';
 import { LiveTodayProducts } from '@/features/live-performance/components/live-today-products';
 
 import trMessages from '../../../../messages/tr.json';
@@ -9,8 +10,26 @@ import { server, http, HttpResponse } from '../../../helpers/msw';
 
 const ORG_ID = '00000000-0000-0000-0000-000000000001';
 const STORE_ID = '00000000-0000-0000-0000-000000000002';
-const URL = `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/live-performance/today-products`;
-const MISSING_DESI_PATCH_URL = `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/products/variants/v-mid/dimensional-weight`;
+const API = 'http://localhost:3001/v1';
+const URL = `${API}/organizations/${ORG_ID}/stores/${STORE_ID}/live-performance/today-products`;
+const MISSING_DESI_PATCH_URL = `${API}/organizations/${ORG_ID}/stores/${STORE_ID}/products/variants/v-mid/dimensional-weight`;
+
+// One store profile the cost popover can attach (mirrors cost-cell-popover.test.tsx).
+const PACKAGING_PROFILE = {
+  id: 'profile-uuid-002',
+  organizationId: ORG_ID,
+  storeId: STORE_ID,
+  name: 'Paketleme',
+  type: 'PACKAGING',
+  amountGross: '10.00',
+  vatRate: 18,
+  note: null,
+  archivedAt: null,
+  createdBy: null,
+  updatedBy: null,
+  createdAt: '2026-05-01T00:00:00Z',
+  updatedAt: '2026-05-01T00:00:00Z',
+};
 
 const desiPopover = trMessages.products.desiCell.popover;
 
@@ -33,6 +52,7 @@ const response = {
       costStatus: 'costed',
       unitCost: '42.00',
       unresolved: false,
+      vendorMissing: false,
       dimensionalWeight: '2.5',
       syncedDimensionalWeight: '2.5',
       isDimensionalWeightOverridden: false,
@@ -50,6 +70,7 @@ const response = {
       costStatus: 'missing',
       unitCost: null,
       unresolved: false,
+      vendorMissing: false,
       dimensionalWeight: null,
       syncedDimensionalWeight: null,
       isDimensionalWeightOverridden: false,
@@ -67,6 +88,7 @@ const response = {
       costStatus: 'missing',
       unitCost: null,
       unresolved: false,
+      vendorMissing: false,
       dimensionalWeight: null,
       syncedDimensionalWeight: null,
       isDimensionalWeightOverridden: false,
@@ -84,12 +106,13 @@ const response = {
       costStatus: 'costed',
       unitCost: '12.00',
       unresolved: false,
+      vendorMissing: false,
       dimensionalWeight: '0',
       syncedDimensionalWeight: null,
       isDimensionalWeightOverridden: true,
       isDimensionalWeightMissing: false,
     },
-  ],
+  ] satisfies TodayProductRow[],
 };
 
 function renderTable() {
@@ -163,11 +186,12 @@ describe('LiveTodayProducts', () => {
           costStatus: 'missing',
           unitCost: null,
           unresolved: true,
+          vendorMissing: false,
           dimensionalWeight: null,
           syncedDimensionalWeight: null,
           isDimensionalWeightOverridden: false,
           isDimensionalWeightMissing: false,
-        },
+        } satisfies TodayProductRow,
       ],
     };
     server.use(http.get(URL, () => HttpResponse.json(unresolvedResponse)));
@@ -212,7 +236,7 @@ describe('LiveTodayProducts', () => {
               syncedDimensionalWeight: null,
               isDimensionalWeightOverridden: false,
               isDimensionalWeightMissing: false,
-            },
+            } satisfies TodayProductRow,
           ],
         }),
       ),
@@ -294,6 +318,38 @@ describe('LiveTodayProducts', () => {
     await user.click(within(midRow).getByRole('button', { name: 'Desi Gir' }));
     await user.type(screen.getByLabelText(desiPopover.title), '1,5');
     await user.click(screen.getByRole('button', { name: desiPopover.save }));
+
+    await waitFor(() => expect(getCalls).toBe(2));
+  });
+
+  it('refreshes the live data after a cost attach', async () => {
+    let getCalls = 0;
+    server.use(
+      http.get(URL, () => {
+        getCalls += 1;
+        return HttpResponse.json(response);
+      }),
+      http.get(`${API}/organizations/${ORG_ID}/variants/v-mid/cost-profiles`, () =>
+        HttpResponse.json({ data: [] }),
+      ),
+      http.get(`${API}/organizations/${ORG_ID}/cost-profiles`, () =>
+        HttpResponse.json({
+          data: [PACKAGING_PROFILE],
+          meta: { nextCursor: null, hasMore: false },
+        }),
+      ),
+      http.post(`${API}/organizations/${ORG_ID}/cost-profile-attachments/attach`, () =>
+        HttpResponse.json({ attached: 1 }),
+      ),
+    );
+
+    const { user } = renderTable();
+
+    // v-mid is cost-missing; its barcode keeps the lookup ASCII.
+    const midRow = await findRow('8690000000002');
+    expect(getCalls).toBe(1);
+    await user.click(within(midRow).getByRole('button', { name: /Maliyet Ekle/ }));
+    await user.click(await screen.findByRole('option', { name: /Paketleme/ }));
 
     await waitFor(() => expect(getCalls).toBe(2));
   });

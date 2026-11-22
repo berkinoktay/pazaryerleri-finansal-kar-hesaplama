@@ -22,6 +22,7 @@ import { useQueryState } from 'nuqs';
 import type { LiveOrderRow } from '../api/get-live-orders.api';
 import { useLiveKpis } from '../hooks/use-live-kpis';
 import { useLiveOrders } from '../hooks/use-live-orders';
+import { followPromotedRow } from '../lib/follow-promoted-row';
 import { resolveDeepLinkRow } from '../lib/resolve-deep-link-row';
 import { liveKeys } from '../query-keys';
 import { useNewOrderNotifier } from '../providers/new-order-notifier-provider';
@@ -106,7 +107,10 @@ export function LivePerformancePageClient({
   const deepLinkRow = resolveDeepLinkRow(deepLinkOrders.data?.data, orderParam, bufferParam);
 
   // A row click takes precedence; otherwise the deep-linked row drives the Sheet.
-  const activeRow = selected ?? deepLinkRow;
+  // A selected pending (buffer) order that gets promoted is followed to its
+  // orders row in the same feed, so the Sheet stays on the sale instead of
+  // showing a vanished buffer entry.
+  const activeRow = followPromotedRow(deepLinkOrders.data?.data, selected ?? deepLinkRow);
 
   if (orgId === null || storeId === null) {
     return (

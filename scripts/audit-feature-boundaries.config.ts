@@ -109,7 +109,11 @@ export function evaluateCrossFeatureImport(imp: CrossFeatureImport): ViolationDe
   // desi popover, do NOT widen this rule; promote the popover (and its hooks,
   // lib and api dependencies) to the shared layer instead.
   // See docs/superpowers/specs/2026-11-22-canli-performans-desi-gostergesi-design.md.
-  if (imp.targetFeature === 'products' && imp.sourceFeature === 'live-performance') {
+  if (
+    imp.targetFeature === 'products' &&
+    imp.sourceFeature === 'live-performance' &&
+    imp.importPath === '@/features/products/components/desi-cell-popover'
+  ) {
     return {
       severity: 'allow',
       message:

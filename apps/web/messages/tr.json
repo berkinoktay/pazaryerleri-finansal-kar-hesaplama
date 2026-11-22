@@ -3885,6 +3885,8 @@
         "addCost": "Maliyet ekle",
         "addDesi": "Desi gir",
         "lineReady": "Hazır",
+        "readyNotice": "Eksik bilgi kalmadı; sipariş birazdan kâr hesabına alınacak.",
+        "noLongerWaiting": "Bu sipariş artık beklemiyor; güncel hâlini bugünün siparişleri listesinde görebilirsin.",
         "loadError": "Sipariş ayrıntısı yüklenemedi."
       }
     },

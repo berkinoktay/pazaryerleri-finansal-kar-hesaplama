@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/table';
 import { CostCellPopover } from '@/features/costs/components/cost-cell-popover';
 import { DesiCellPopover } from '@/features/products/components/desi-cell-popover';
+import { ApiError } from '@/lib/api-error';
 
 import { useBufferDetail } from '../hooks/use-buffer-detail';
 import { liveKeys } from '../query-keys';
@@ -69,6 +70,17 @@ export function BufferOrderDetail({
     );
   }
 
+  // A 404 means the worker promoted the order and deleted its buffer entry
+  // (typically right after the last missing input was entered here); the page
+  // then follows the Sheet to the order's new row. Not a failure, so no error.
+  if (query.error instanceof ApiError && query.error.code === 'NOT_FOUND') {
+    return (
+      <Alert tone="info" size="md">
+        <AlertDescription>{t('noLongerWaiting')}</AlertDescription>
+      </Alert>
+    );
+  }
+
   if (query.error !== null || query.data === undefined) {
     return (
       <Alert tone="destructive" size="md">
@@ -78,12 +90,22 @@ export function BufferOrderDetail({
   }
 
   const detail = query.data;
+  // Every line has its cost and desi: the order is about to be promoted.
+  const isReady =
+    detail.lines.length > 0 &&
+    detail.lines.every((l) => !l.isCostMissing && !l.isDimensionalWeightMissing);
 
   return (
     <div className="gap-md flex flex-col">
-      <Alert tone="warning" size="md">
-        <AlertDescription>{t('pendingNotice')}</AlertDescription>
-      </Alert>
+      {isReady ? (
+        <Alert tone="info" size="md">
+          <AlertDescription>{t('readyNotice')}</AlertDescription>
+        </Alert>
+      ) : (
+        <Alert tone="warning" size="md">
+          <AlertDescription>{t('pendingNotice')}</AlertDescription>
+        </Alert>
+      )}
       {detail.lines.length === 0 ? (
         <EmptyState title={t('columns.product')} embedded />
       ) : (
